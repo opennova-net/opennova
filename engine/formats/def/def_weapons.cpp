@@ -294,7 +294,25 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 consume_value_str(trimmed, tlen, 15, cw.launch_user_point, sizeof(cw.launch_user_point));
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "crosshair", 9)) {
-                consume_value_str(trimmed, tlen, 9, cw.crosshair, sizeof(cw.crosshair));
+				Token tok[2];
+				int n = tokenize(trimmed + 9, tlen - 9, tok, 2);
+				if (n > 0)
+					safe_copy(cw.crosshair, sizeof(cw.crosshair), tok[0].s, tok[0].len);
+				if (n > 1)
+					safe_copy(cw.crosshair_secondary, sizeof(cw.crosshair_secondary), tok[1].s,
+							tok[1].len);
+				parsed = 1;
+			} else if (lower_match_key(lower, ll, "commandersx", 11)) {
+				consume_value_str(trimmed, tlen, 11, cw.commanders_x, sizeof(cw.commanders_x));
+				parsed = 1;
+			} else if (lower_match_key(lower, ll, "hud_loadout_select", 18)) {
+				consume_value_str(
+						trimmed, tlen, 18, cw.hud_loadout_select, sizeof(cw.hud_loadout_select));
+				parsed = 1;
+			} else if (lower_match_key(lower, ll, "splash", 6)) {
+				size_t vl;
+				const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+				cw.splash = parse_int_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "hudicon", 7)) {
                 consume_value_str(trimmed, tlen, 7, cw.hudicon, sizeof(cw.hudicon));
@@ -472,6 +490,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 int hn = split_values(v, vl, hv, MAX_TOKENS);
                 if (hn >= 1) safe_copy(cw.heat_effect, sizeof(cw.heat_effect), hv[0].s, hv[0].len);
                 if (hn >= 2) cw.heat_glow_threshold = parse_fixed16_digits_n(hv[1].s, hv[1].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "emplacedstance", 14)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.emplacedstance = parse_int_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "special_hold", 12)) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->

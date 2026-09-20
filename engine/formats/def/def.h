@@ -301,6 +301,11 @@ typedef struct DefWeaponDef {
     char gfx1b[128];
     char gfx3[128];
     char crosshair[128];
+	// [orig: crosshair second texture @0x544993; commandersX @0x5449FB]
+	char crosshair_secondary[128];
+	int splash; /* Designation radius, engine units [orig: AdmDef+0x454 @0x4DEBBD]. */
+	char commanders_x[128];
+	char hud_loadout_select[128];
     char hudicon[128];
     char hudclipgfx_texture[128];
     int hudclipgfx_offset[2];
@@ -482,6 +487,9 @@ typedef struct DefWeaponDef {
         @ 0x4dbe29..0x4dbe57, Player_MountWeaponSlot @ 0x4dfad3..0x4dfb16] */
     int scope_max_mag_arg2;    /* +0x94, the slot's initial zoom; 0 = absent */
     int scope_min_mag;         /* +0x98, the zoom floor; default 2 */
+    /* Mounted HUD stance selector; zero uses the carrier/default icon.
+       [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
+    int emplacedstance;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
@@ -645,6 +653,19 @@ typedef struct DefItemDef {
     char move_function[16];
     char render_function[16];
     char disk_function[16];
+    /* 'input_function <class>': the input class row -- null / troop / tank. Its
+       first callback is the key handler, its second the mounted first-person
+       camera the carrier leg calls. [orig: ItemDef_ParseProperty @0x49F650 ->
+       def+0x168; rows @0x829DA8, resolved by Entity_LookupPhysicsCallbacks
+       @0x497910 into def+0x170 / def+0x174] */
+    char input_function[16];
+    /* 'virtualdisplay <model> <userpoint>': the cockpit model the `tank` render
+       class draws INSTEAD of the hull for the local first-person driver, and the
+       camera userpoint inside it. Stock data: `tankdrvr camera` (M1A1),
+       `t80_drvr camera` (T80). [orig: ItemDef_ParseProperty @0x49F4E0 -- model ->
+       def+0xD0 @0x49F506, userpoint -> def+0xE0 @0x49F521] */
+    char virtual_display[16];
+    char virtual_display_userpoint[16];
     unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
     unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
     /* Vehicle physics-property block, scaled AT PARSE exactly like the original loader
@@ -725,6 +746,7 @@ typedef struct DefItemDef {
                            @0x40e136; AI_FindBestTargetB cap read @0x467277] */
     int heat_sig;       /* +0x17A u16 raw ("heatsig") — entity+420, the secondary-FOV cap
                            [orig: @0x40e144; cap read @0x46723e] */
+	char hud_image[128]; // [orig: ItemDef hud_image @0x4A0FB0, sprite +0x94C]
     int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
                            (5..8 helo, 3/4 boat, 12 special, else ground)
                            [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */

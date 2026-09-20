@@ -338,6 +338,7 @@ void JoinerRole::tick_local_weapon() {
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
+	lp.hud_map_control.weapon_command(io.map_command);
 	std::vector<world::LocalWeaponFiredWire> fires;
 	if (io.fired.valid)
 		fires.push_back(io.fired);
@@ -402,7 +403,7 @@ void JoinerRole::tick_local_weapon() {
 		fire.shooter_handle = self_wire_handle();
 		fire.fire_flags = fired.round.mode_flags;
 		fire.adm_index = fired.adm_index;
-		fire.target_handle = 0xFFFF;
+		fire.target_handle = fired.target_handle;
 		// hit_part is NOT a bare sequence: it is
 		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
 		// raw word straight into the GLOBAL word_B7C670 on the network arm
@@ -602,6 +603,7 @@ void JoinerRole::pump() {
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
     world.rules.session_open = true;
+	world.rules.mpattrib = rt.view().mp_attributes();
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
     world.rules.no_friendly_fire =
@@ -703,7 +705,9 @@ void JoinerRole::wire_frame_providers() {
     world.round_sim.guided_inputs_provider = [this](const world::LiveRound &round, world::GuidedInputs &in) {
         const auto *owner = runtime->state().find(round.shooter_handle);
         in.owner = in.owner || owner != nullptr;
-        if (owner) {
+        // Local fire has current input; a delayed replica must not replace
+        // its lock when the predicted missile launches.
+        if (owner && round.owner != kernel_->world.cached.local_player) {
             in.owner_ai = true;
             in.owner_target = owner->fire_target_handle;
             if (const auto *aim = runtime->state().find(in.owner_target)) {

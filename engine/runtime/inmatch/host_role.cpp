@@ -70,6 +70,8 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
 	// [orig: `test g_rules_flags,10000h` @0x4dbd15; g_rules_flags @0x24D1E34 is
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
+	kernel.world.rules.mpattrib = config.mp_attributes;
+	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
 			(config.mp_attributes & GameConfig::kMpAttribAutoScopeZero) != 0;
 	kernel.world.rules.no_friendly_fire =
@@ -163,7 +165,18 @@ void HostRole::drain_host_client_gameplay_requests() {
 	replication::Datagram dg;
 	std::vector<replication::Datagram> deferred;
 	while (state.host_loop.host_recv(dg)) {
-		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST) {
+		// Every gameplay request the host's own player produces rides this
+		// local client queue: the reload, the action-6 mounted-slot select and
+		// the medic call all go through CNapiNetwork_QueueReliableMessage with
+		// no is_authority exclusion. Dispatch them before the later
+		// ENTITY_UPLINK-only drain consumes this FIFO.
+		// [orig: Input_HandleActionBinding_0 @ 0x4E0420 (action 6 @ 0x4E0492,
+		//  push 16h @ 0x4E04E4) -> NapiNPServerMsg_HandleWeaponToggle @ 0x511A70;
+		//  Input_HandleActionBinding action 217 @ 0x49B4B4..0x49B50C (push 2Eh
+		//  @ 0x49B500)]
+		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
+				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
+				dg.tag != c2s::MEDIC_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

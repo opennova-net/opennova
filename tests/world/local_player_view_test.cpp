@@ -6,7 +6,9 @@
 //  @0x4b4d00]: the gates in front of the primitives and the order the tick
 //  runs them in, pinned where they used to live in the Godot binding.
 #include <cstdint>
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <base/io/rotating_prng.h>
 #include <cstdio>
 #include <vector>
@@ -70,6 +72,149 @@ LocalPlayerWeapon scoped_weapon(uint32_t flags, uint32_t flags2 = 0) {
 void settle_ease(PlayerViewState &v) {
     const float eye[3] = {0.0f, 0.0f, 0.0f};
     for (int i = 0; i < kScopeEaseSteps + 1; ++i) player_view_tick(v, eye);
+}
+
+// --- the mounted first-person camera ---------------------------------------
+// A seated rider's mode-0 view belongs to the carrier: the `tank` input
+// class's virtual-display camera callback, or the gun's posed CAMERA
+// userpoint. [orig: Camera_ComputeThirdPersonView @0x437DAC..0x437EAD; the
+//  tank callback @0x44A190; Entity_GetBoneWorldPosition @0x545E60]
+struct CameraPoses : IPoseProvider {
+    EntityHandle queried;
+    int userpoint = 0;
+    bool resolve_userpoint_transform(World &, EntityHandle h, int index, int32_t out[6]) override {
+        queried = h;
+        userpoint = index;
+        const int32_t pose[6] = {40 * 65536, 50 * 65536, 6 * 65536,
+                0x10000000, 0x02000000, 0x00800000};
+        std::copy_n(pose, 6, out);
+        return true;
+    }
+};
+
+void test_mounted_first_person_camera_belongs_to_the_carrier() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity *body = lw.ai.for_handle(lw.local);
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    Entity &rider = lw.entity();
+    rider.has_item_def = true;
+    rider.item_type = 3;
+    int32_t out[6];
+    CHECK(!local_player_mounted_camera(lw.w, rider, out)); // on foot
+
+    // The stock M1A1: `Virtualdisplay tankdrvr camera` + `input_function tank`,
+    // the TankDrvr "Camera" record (1.8267, -0.0968, 0.2702).
+    Entity hull;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.position = {100.0f, 200.0f, 10.0f};
+    hull.veh.yaw_seeded = true;
+    hull.input_class = 2;
+    hull.virtual_display_camera = true;
+    hull.virtual_display_camera_q16[0] = 119716;
+    hull.virtual_display_camera_q16[1] = -6344;
+    hull.virtual_display_camera_q16[2] = 17708;
+    const EntityHandle hull_handle = lw.w.registry.spawn(0, hull);
+    rider.mounted = true;
+    rider.mount_target = hull_handle;
+    rider.mount_type = SeatType::Controller;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    // Carrier matrix x record, then 0x3000 back along the rider's view (+X).
+    CHECK(out[0] == 100 * 65536 + 119716 - 0x3000);
+    CHECK(out[1] == 200 * 65536 - 6344 && out[2] == 10 * 65536 + 17708);
+    CHECK(out[3] == 0 && out[4] == 0);
+    // The pull-back follows the RIDER's rotation triple, not the hull's.
+    body->heading = 0x40000000;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(std::abs(out[0] - (100 * 65536 + 119716)) <= 2);
+    CHECK(std::abs(out[1] - (200 * 65536 - 6344 - 0x3000)) <= 2);
+    CHECK(out[3] == 0x40000000);
+    body->heading = 0;
+    // The `tank` render class draws the virtual display instead of the hull
+    // for the local CLAIMANT in mode 0 only. [orig: 0x449EF0 @0x449F12..0x449F27]
+    {
+        Entity &vehicle = *lw.w.registry.get(hull_handle);
+        vehicle.item_id = 100164;
+        vehicle.virtual_display_model = "tankdrvr";
+        VehicleTraits traits;
+        traits.render_family = VehicleRenderFamily::Tank;
+        lw.w.vehicles.traits.set(vehicle.item_id, traits);
+        PlayerViewState mode;
+        CHECK(!local_view_draws_virtual_display(lw.w, mode, vehicle)); // a passenger's hull draws
+        vehicle.primary_occupant = lw.local;
+        CHECK(local_view_draws_virtual_display(lw.w, mode, vehicle));
+        LocalPlayerWeapon none;
+        LocalPlayerViewTracker tracker;
+        LocalPlayerViewFrame drawn;
+        local_player_view_frame(&lw.w, none, mode, tracker, drawn);
+        CHECK(drawn.virtual_display_active && drawn.virtual_display_carrier == hull_handle);
+        CHECK(drawn.virtual_display_model == "tankdrvr");
+        mode.camera_mode = 1;
+        mode.third_person = true;
+        CHECK(!local_view_draws_virtual_display(lw.w, mode, vehicle)); // the chase draws the hull
+        mode = PlayerViewState();
+        traits.render_family = VehicleRenderFamily::Ground;
+        lw.w.vehicles.traits.set(vehicle.item_id, traits);
+        CHECK(!local_view_draws_virtual_display(lw.w, mode, vehicle)); // `cveh` never swaps
+        vehicle.primary_occupant = EntityHandle();
+    }
+    // A troop / null row takes the carrier's Position + CameraOffset and ITS
+    // rotation triple. [orig: @0x4DC710]
+    Entity &live_hull = *lw.w.registry.get(hull_handle);
+    live_hull.input_class = 1;
+    live_hull.eye_offset_z = 2 * 65536;
+    live_hull.veh.yaw_bam = 0x20000000;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(out[0] == 100 * 65536 && out[2] == 12 * 65536 && out[3] == 0x20000000);
+    // No virtual display on a plain vehicle: the person legs keep the view.
+    live_hull.virtual_display_camera = false;
+    CHECK(!local_player_mounted_camera(lw.w, rider, out));
+
+    // An EWEAP poses its own CAMERA userpoint: position AND rotation.
+    Entity gun;
+    gun.has_item_def = true;
+    gun.item_type = 6;
+    gun.item_attrib = kItemAttribEweap;
+    gun.position = {30.0f, 40.0f, 5.0f};
+    gun.camera_userpoint_byte = 3;
+    const EntityHandle gun_handle = lw.w.registry.spawn(0, gun);
+    CollisionWorld collision;
+    lw.w.collision = &collision;
+    collision.assign_entity(gun_handle, collision.add_model(CollisionModel{}),
+            lw.w.registry.get(gun_handle)->registry_spawn_id);
+    CameraPoses poses;
+    lw.w.pose_provider = &poses;
+    rider.mount_target = gun_handle;
+    rider.mount_type = SeatType::Gunner;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(poses.queried == gun_handle && poses.userpoint == 3);
+    CHECK(out[0] == 40 * 65536 && out[2] == 6 * 65536);
+    CHECK(out[3] == 0x10000000 && out[4] == 0x02000000 && out[5] == 0x00800000);
+    // The frame hands that pose to the camera in first person only.
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.camera_pose_valid && frame.mounted_camera);
+    CHECK(frame.camera.eye[0] == 40.0f && frame.camera.eye[1] == 50.0f && frame.camera.eye[2] == 6.0f);
+    CHECK(std::fabs(frame.camera.pitch_deg - 2.8125f) < 1e-4f);
+    view.third_person = true;
+    view.camera_mode = 1;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(!frame.mounted_camera);
+    // Without the userpoint the view is the gun's raw pose; a PlayerControl
+    // EWEAP never takes the seat-bone leg.
+    lw.w.registry.get(gun_handle)->camera_userpoint_byte = 0;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(out[0] == 30 * 65536 && out[1] == 40 * 65536 && out[2] == 5 * 65536);
+    lw.w.registry.get(gun_handle)->item_attrib |= kItemAttribPlayerControl;
+    CHECK(!local_player_mounted_camera(lw.w, rider, out));
+    lw.w.pose_provider = nullptr;
+    lw.w.collision = nullptr;
 }
 
 // --- the scope toggle's refusal ladder ------------------------------------
@@ -1682,7 +1827,102 @@ void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
     }
 }
 
+// Real parsed weapon -> installed slot -> local HUD facts, across seat changes.
+// Animation stance remains an infantry value; the HUD selects its mounted frame.
+// [orig: HUD_BuildEntityInfo @0x4B8539..0x4B8786; Inset query @0x4DCCB0]
+void test_hud_context_tracks_mount_weapon_and_dismount() {
+    static const char source[] =
+        "weapon \"WPN_HUD_GUN\"\ncategory 10\nclipsize 1\nEmplacedStance 2\nend\n"
+        "weapon \"WPN_HUD_FOOT\"\ncategory 4\nclipsize 1\nend\n";
+    DefWeaponsFile defs{};
+    CHECK(def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(source),
+            sizeof(source) - 1, &defs) == 0);
+    CHECK(defs.count == 2);
+    if (defs.count != 2) { def_free_weapons(&defs); return; }
+    CHECK(defs.entries[0].emplacedstance == 2);
+    CHECK(defs.entries[1].emplacedstance == 0);
+    LocalWorld lw;
+    Entity mount;
+    mount.has_item_def = true;
+    mount.item_type = 3;
+    const auto gun = lw.w.registry.spawn(0, mount);
+    Entity carrier;
+    carrier.has_item_def = true;
+    carrier.item_type = 1;
+    const auto hull = lw.w.registry.spawn(0, carrier);
+    lw.ai.attach(lw.local);
+    auto *body = lw.ai.for_handle(lw.local);
+    body->inf.stance = InfantryState::Stance::kCrouch;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    const auto read = [&]() {
+        local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    };
+    const auto install = [&](int row) {
+        local_weapon_install(lw.w, weapon, weapon_install_data_from_def(defs.entries[row]),
+                false, false, nullptr, view);
+    };
+    install(0);
+    read();
+    CHECK(frame.hud_stance == 1 && frame.hud_mount_slot == 0);
+    CHECK(frame.hud_weapon_category == 10);
+    CHECK(!frame.hud_keep_crosshair_while_aimed);
+    // Inset keeps the spread reticle even on foot; occupying a vehicle alone
+    // must not make a non-Inset optic keep it up.
+    weapon.def.flags2 |= DEF_WEAPON_FLAG2_INSET;
+    read();
+    CHECK(frame.hud_keep_crosshair_while_aimed);
+    weapon.def.flags2 &= ~DEF_WEAPON_FLAG2_INSET;
+    lw.entity().mounted = true;
+    lw.entity().mount_target = gun;
+    for (const auto seat : {SeatType::Passenger, SeatType::Controller, SeatType::Driver}) {
+        lw.entity().mount_type = seat;
+        read();
+        CHECK(frame.hud_stance == 3 && frame.hud_mount_slot == int(seat));
+        CHECK(!frame.hud_keep_crosshair_while_aimed);
+        CHECK(body->inf.stance == InfantryState::Stance::kCrouch);
+    }
+    lw.entity().mount_type = SeatType::Gunner;
+    read();
+    CHECK(frame.hud_stance == 1); // authored 2 is one-based
+    install(1);
+    read();
+    CHECK(frame.hud_stance == 4 && frame.hud_weapon_category == 4);
+    // Retail's carrier-is-a-vehicle leg reads hudInfo+0x234 straight after the
+    // frame builder zeroed it, so a vehicle-carried gun still reads Emplaced.
+    // [orig: memset @0x5A80B1; stale read @0x4B84D1]
+    lw.w.registry.get(gun)->emplacement_parent = hull;
+    read();
+    CHECK(frame.hud_stance == 4);
+    install(0);
+    read();
+    CHECK(frame.hud_stance == 1); // authored stance overrides the carrier default
+    lw.entity().flags |= kEntityFlagMounted;
+    read();
+    CHECK(frame.hud_stance == 3); // organic mounted flag wins last
+    lw.entity().flags |= kEntityFlagParachute;
+    read();
+    CHECK(frame.hud_stance == 5);
+    lw.entity().flags &= ~(kEntityFlagMounted | kEntityFlagParachute);
+    lw.entity().mounted = false;
+    lw.entity().mount_target = EntityHandle{};
+    lw.entity().mount_type = SeatType::None;
+    body->inf.stance = InfantryState::Stance::kProne;
+    read();
+    CHECK(frame.hud_stance == 2 && frame.hud_mount_slot == 0);
+    weapon.active = false;
+    weapon.def.flags2 |= DEF_WEAPON_FLAG2_INSET;
+    read();
+    CHECK(frame.hud_weapon_category == 0 && !frame.hud_keep_crosshair_while_aimed);
+    local_player_view_frame(nullptr, weapon, view, tracker, frame);
+    CHECK(frame.hud_stance == 0 && frame.hud_mount_slot == 0);
+    def_free_weapons(&defs);
+}
+
 int main() {
+    test_hud_context_tracks_mount_weapon_and_dismount();
     test_rendered_scope_applies_elevation_and_parallax();
     test_scoped_aim_follows_local_view_clamps_and_leg_chase();
     test_scoped_aim_original_sequences();
@@ -1707,6 +1947,7 @@ int main() {
     test_scope_zero_install_seeds_the_yaw_term();
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();
+    test_mounted_first_person_camera_belongs_to_the_carrier();
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
     test_inset_scope_refused_under_nvg();

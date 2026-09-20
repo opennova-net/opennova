@@ -73,6 +73,9 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "session", FrameStats::WORLD_RUNTIME, &GameWorld::leg_session, kStopsFrame },
 	// Place the local-player camera/viewmodel from the state the session tick
 	// just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
+	// It also hands the entity presenter the frame's virtual-display verdict
+	// (the driven tank's cockpit), which copies the carrier hull's transform:
+	// that must stay AFTER the session row, whose entity walks stamp the hull.
 	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kLegNone },
 	// Retail re-applies fog/ambient per scene pass. Classify the adjusted
 	// render eye after camera placement and publish that pass payload before

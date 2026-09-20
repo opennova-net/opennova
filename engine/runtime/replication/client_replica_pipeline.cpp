@@ -1734,6 +1734,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
+	// flags1 bit 2 is the hit-feedback pulse: a set bit reloads the countdown to
+	// 10, a clear bit drains one per received frame. It runs ahead of the
+	// authority early-out, so the listen host folds its own.
+	// [orig: NapiNPClientMsg_0x00A @0x42FF5C..0x42FF74 — dword_A8235C]
+	if (fu.flags1 & 4u)
+		state_.hud_hit_feedback_frames = 10;
+	else if (state_.hud_hit_feedback_frames)
+		--state_.hud_hit_feedback_frames;
 	// The deploy-map overlay follows the host every frame — set AND cleared
 	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
 	// g_deploy_screen_active = (flags1 >> 1) & 1].
@@ -1760,6 +1768,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Retain it between phase cycles, exactly like the client global.
 		// [orig: NapiNPClientMsg_0x00A @0x430064]
 		state_.preround_delay_seconds = fu.weapon.preround_timer;
+		state_.vehicle_reload_seconds = fu.weapon.reload_seconds;
+		state_.owned_zone_mask = uint32_t(fu.weapon.uniform_team_mask);
 		// The DEATH screen's three slot timers ride the same sub-block
 		// [orig: @0x430084 / @0x43009f / @0x4300c3].
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;

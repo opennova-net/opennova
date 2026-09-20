@@ -67,6 +67,7 @@ struct Connection {
 	// `phase & 3` selects the header sub-block (0 weapon / 1 server-status / 2 env / 3 gametype),
 	// while `phase & 0xF == 8` gates the mounted-weapon ammo block. emit_connection_s2c advances it.
 	uint8_t s2c_phase = 0;
+	uint32_t hud_hit_feedback_serial = 0;
     // One-frame NAK backoff; silence keeps reducing each frame until receive.
     // [orig: sub_4C62A0 @0x4c62a0; Server_SendEntityStateToPlayer @0x517c58]
     bool nak_backoff_pending = false;

@@ -4,6 +4,10 @@
 // @0x5BEC10; update_map_overlay_timers @0x5BFCE0]
 
 #include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session.h>
+#include <runtime/world/local_player_view.h>
 #include <net/npwire/ingame_message_id.h>
 
 #include <cstdio>
@@ -173,6 +177,31 @@ int main() {
 		linked_active |= link.active && link.handle == entity.handle &&
 				link.remaining_ticks == 2u * 62u;
 	CHECK(linked_active, "0x6B link lifetime is wire seconds x62");
+	const auto &point = view.state().minimap.linked[0];
+	CHECK(point.type == 1 && point.x == 100 * 65536 && point.y == -50 * 65536 &&
+					point.radius_q16 == 40 * 65536,
+			"designation query retains link geometry independently");
+	{
+		opennova::replication::LoopbackChannel channel;
+		opennova::inmatch::ClientRuntime runtime(channel);
+		runtime.state().upsert(0x2001).team = 1;
+		auto receive = [&](uint8_t type, uint16_t seconds) {
+			channel.host_send(opennova::s2c::MINIMAP_OVERLAY,
+					linked_record(0x2001, 100, -50, 7, seconds, type, 40), false);
+			runtime.Client_ProcessNetworkFrame(0);
+			return opennova::inmatch::Role::view_session_inputs_for(&runtime, false, false);
+		};
+		const auto active = receive(1, 2);
+		CHECK(active.hud_designations.size() == 1, "a live type-1 point reaches the HUD feed");
+		if (!active.hud_designations.empty()) {
+			const auto &p = active.hud_designations[0];
+			CHECK(p.team == 1 && p.x == 100 * 65536 && p.y == -50 * 65536 &&
+							p.radius_q16 == 40 * 65536,
+					"the HUD retains received team/point/radius");
+		}
+		CHECK(receive(3, 2).hud_designations.empty(), "a person marker is not a designation");
+		CHECK(receive(1, 0).hud_designations.empty(), "an expired designation leaves the HUD feed");
+	}
 	entity.x = 30 << 16;
 	view.tick_minimap_overlays();
 	slot = find_slot(view.state().minimap, entity.handle);

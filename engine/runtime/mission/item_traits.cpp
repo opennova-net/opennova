@@ -284,6 +284,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // stricmp walk of g_EntityClassEventCallbackTable @0x813000
         // (Entity_LookupRenderCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
         // @0x4a5aa9, "Null" for an empty tag)]
+		e->hud_image = def != nullptr ? def->hud_image : "";
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
         if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {

@@ -478,7 +478,7 @@ This is what a reimplemented server must **handle**.
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
 | 0x13 | 0x514330 | `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action byte + nearest-sector resolve; action 6 arms a 30-tick timer); NOT a death message — only S2C 0x13 is the death notify (§5.60) |
 | 0x14 | 0x501E00 | |
-| 0x16 | 0x511A70 | designated-G mounted-weapon route selector — exact 2-byte bool-as-i16; zero selects the child's embedded `MountSlot`, nonzero selects the validated `groundEntity` parent EWeap slot. The action-6 producer sends it; authority resolves the target from the sender's owned mount. |
+| 0x16 | 0x511A70 | designated-G mounted-weapon route selector — exact 2-byte bool-as-i16; zero selects the child's embedded `MountSlot`, nonzero selects the validated `groundEntity` parent EWeap slot. The action-6 producer sends it; authority resolves the target from the sender's owned mount. The listen host dispatches its own queued selector before the movement-only drain (2026-09-19 training fix; `host_role` regression, [installed validation](../world/special-weapons-parity.md#tank-training-right-click-follow-up)). |
 | 0x17 | 0x514850 | |
 | 0x18 | 0x51A020 | |
 | 0x19 | 0x514250 | |
@@ -5566,10 +5566,19 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   `GameHudPresenter.poll_view_action_edges` (which also owns the bit-0 write), and the
   on-foot chase is the debug menu's "Third person on foot" check — the onhook affordance,
   non-stock by design. Residuals: the death/spectator modes 3/4 and the 0x40 force-FP rule.
-- **FP mounted refinements** (mode 0): seat-bone eye (`Entity_GetBoneWorldPosition @ 0x545e60`)
-  when the parent def sets +84 bit 0x20 (and not 0x40); a per-model camera callback (vtable +372)
-  for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
-  pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
+- **FP mounted refinements** (mode 0, the carrier block `@ 0x437dac..0x437ead`): a carrier
+  whose def authors `virtualdisplay <model> <userpoint>` (byte def+0x1C0) calls its INPUT
+  class's camera callback at def+0x174 (rows `@ 0x829da8`: `tank` -> `0x44a190` = carrier
+  matrix x the virtual-display userpoint, then 0x3000 back along the rider's view; null /
+  troop -> `0x4dc710` = the carrier's Position + CameraOffset and rotation); otherwise the
+  seat-bone pose (`Entity_GetBoneWorldPosition @ 0x545e60`, the posed `CAMERA` userpoint byte
+  parent+0x318 — position AND rotation) when the parent def sets +84 bit 0x20 (and not
+  0x40); itemDef type-3 entities add `CameraOffset` to the eye with pitch += 2·pitchBlend
+  and roll = torsoRoll + lean/4 (the FP lean tilt). **PORTED 2026-09-19**:
+  `world::local_player_mounted_camera` / `local_player_seat_bone_pose`
+  (`engine/runtime/world/local_player_view.cpp`), with the `tank` render class's hull ->
+  virtual-display swap (`0x449ef0`) as `local_view_draws_virtual_display`; witness map in
+  [special-weapons-parity.md](../world/special-weapons-parity.md).
 
 **Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `godot/src/player/local_player_presenter.cpp` uses
 the IN-PLAY chase state — distance **1.0**, orbit yaw/pitch **0**, the round-start reset

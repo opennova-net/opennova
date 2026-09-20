@@ -88,6 +88,7 @@ void HudFrameCompiler::update_layout(const HudLayout &layout) {
 void HudFrameCompiler::reset_overlay_buffers() {
     stance_.stamp = 0;
     flash_stamp_ = 0;
+	silhouette_stamp_ = 0;
     draw_list_ = HudDrawList{};
 }
 
@@ -95,6 +96,9 @@ void HudFrameCompiler::reset_runtime_state() {
 	stance_ = StanceFade{};
 	flash_prev_rounds_ = -1;
 	flash_stamp_ = 0;
+	silhouette_stamp_ = 0;
+	silhouette_vehicle_ = 0;
+	silhouette_weapon_.clear();
 	feed_lines_.clear();
 	chat_lines_.clear();
 	draw_list_ = HudDrawList{};
@@ -309,6 +313,20 @@ void HudFrameCompiler::emit_text(const char *text, float design_x,
 			run.underlines.begin(), run.underlines.end());
 }
 
+// Seat-specific WPNGRP dispatch, independent of the crosshair's XHAIRS gate.
+// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D55]
+bool hud_weapon_group_visible(const HudFrameState &state) {
+    if (state.mount_slot == 2 || state.mount_slot == 5)
+        return state.weapon_category > 9;
+    return (state.mount_slot == 0 || state.mount_slot == 1 || state.mount_slot == 3) &&
+        state.declutter_visible[kDeclutterWpnGrp];
+}
+bool hud_stance_group_visible(const HudFrameState &state) {
+    if (state.mount_slot == 1 || state.mount_slot == 2 || state.mount_slot == 5) return true;
+    return (state.mount_slot == 0 || state.mount_slot == 3) &&
+        state.declutter_visible[kDeclutterWpnGrp];
+}
+
 const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		float surface_w, float surface_h) {
 	draw_list_.quads.clear();
@@ -336,6 +354,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// Render_ProcessMainSceneFrame, not this pass [orig: @ 0x5cac50 ->
 	// HUD_BuildMapOverlayView @ 0x5a7e10] — element_spinmap's own gates
 	// suppress the corner map at this level.
+	element_service_prompt(state, surface_w, surface_h);
+	element_inset_cues(state, surface_w, surface_h);
 	if (state.hud_detail_level >= 3) {
 		element_spinmap(state, surface_w, surface_h);
 		element_kill_announcement(state, surface_w, surface_h);
@@ -345,7 +365,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The stance cross-fade restamp [orig: @ 0x599f8a; it lives inside the
 	// stance drawer, so a blanked level-3 pass never restamps — matched by
 	// placing it under the early-out].
-	if (state.stance != stance_.cur) {
+	if (hud_stance_group_visible(state) && state.stance != stance_.cur) {
 		stance_.prev = stance_.cur;
 		stance_.cur = state.stance;
 		stance_.stamp = state.ticks;
@@ -353,6 +373,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 
 	element_frame(state, surface_w, surface_h);
 	element_health(state, surface_w, surface_h);
+	element_instruments(state, surface_w, surface_h);
+	element_optical_cues(state, surface_w, surface_h);
 	element_stance(state, surface_w, surface_h);
 	element_weapon_cluster(state, surface_w, surface_h);
 	element_heat(state, surface_w, surface_h);
@@ -379,7 +401,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round.
-	element_vehicle_panel(state, surface_w, surface_h);
+    if (hud_stance_group_visible(state) || state.mount_slot == 0)
+        element_vehicle_panel(state, surface_w, surface_h);
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_feed(state, surface_w, surface_h);
@@ -468,6 +491,20 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	// capacity — a fresh local re-allocated it every frame.
 	HudMinimapInput &input = minimap_input_;
 	input = state.minimap;
+	if (state.combat.impact_map && !state.combat.dead) {
+		HudMinimapMarker marker;
+		marker.bank = uint8_t(HudMinimapBank::kSpecial);
+		marker.icon = 254;
+		marker.x = state.combat.impact_x_q16;
+		marker.y = state.combat.impact_y_q16;
+		marker.z = state.combat.impact_radius_q16;
+		marker.color = 0xFF208020u;
+		marker.flags = 208;
+		// Each live preview refreshes the original special-slot lifetime.
+		// [orig: MapOverlay_InitSlot @0x5BEA19]
+		marker.remaining_ticks = 1984;
+		input.markers.push_back(marker);
+	}
 	input.footprints = &state.map_footprints;
 	input.rect_x1 = layout_.spinmap_rect.x;
 	input.rect_y1 = layout_.spinmap_rect.y;
@@ -620,6 +657,7 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 
 void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 		float h) {
+    if (!hud_stance_group_visible(state)) return;
 	// [orig: HUD_DrawStanceIndicator @ 0x599f10 — ramp+texture gates, the
 	// shared frame-0 scale, the cross-fade pair]
 	if (layout_.stance_pos.x == 0 && layout_.stance_pos.y == 0) {
@@ -682,7 +720,7 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 	// the clip indicator [orig: the slot-8 cmps @ 0x5A7CC8 / @ 0x5A7D04 /
 	// @ 0x5A7D42]; the crosshair rides its OWN XHAIRS slot inside
 	// element_crosshair.
-	const bool wpngrp_visible = state.declutter_visible[kDeclutterWpnGrp];
+	const bool wpngrp_visible = hud_weapon_group_visible(state);
 	const uint32_t wc = half_bright_argb(layout_.weapon_text);
 	char ammo[64];
 	const std::string ammo_text = format_ammo(state.weapon.clip,
@@ -713,6 +751,7 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 	if (wpngrp_visible) {
 		element_clip_indicator(state, w, h);
 	}
+	element_targeting(state, w, h);
 	element_crosshair(state, w, h);
 	++draw_list_.elements_drawn;
 }
@@ -733,7 +772,10 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 	}
 	// The restamp key at the reimpl's single-pool altitude (D-HUD-5): the
 	// (round_type, reserve) pair; the compiler keys on the folded count.
-	const int folded = folded_reserve(wep.clip, wep.reserve, wep.capacity);
+    // HUD_BuildEntityInfo has already folded capacity-one ammo. Reloading
+    // cannot change this flash key while the displayed total stays constant.
+    // [orig: @0x4B85EF; draw_hud_ammo_indicator @0x599A30]
+    const int folded = wep.reserve;
 	if (folded != flash_prev_rounds_) {
 		flash_prev_rounds_ = folded;
 		flash_stamp_ = state.ticks;
@@ -782,14 +824,15 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	if (!state.declutter_visible[kDeclutterXhairs]) {
 		return;
 	}
-	if (state.binoculars_view_active) {
+	if (state.binoculars_view_active || state.combat.dead || state.combat.custom_aim) {
 		return;
 	}
 	if (!crosshair_should_draw(state.aimed_shot_available,
 				state.keep_crosshair_while_aimed)) {
 		return;
 	}
-	if (!layout_.crosshair_texture_valid) {
+	if (!(state.combat.driver_crosshair ? layout_.combat.driver_crosshair.valid
+										: layout_.crosshair_texture_valid)) {
 		return;
 	}
 	// The projected aim point in design units; 1P pins the exact center
@@ -803,13 +846,23 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	// Spread off zeroes the offset and still draws all five arms
 	// [orig: the g_cfgCrossHairSpread arm @ 0x592b82; the disabled fldz
 	// @ 0x592bcc].
-	const float spread = layout_.crosshair_spread_enabled
+	const float spread = layout_.crosshair_spread_enabled && !state.combat.driver_crosshair
 			? static_cast<float>(crosshair_spread_px_fp16(
 					state.hud_spread_fp16, state.fov_deg, w))
 			: 0.0f;
 
-	const float half_w = static_cast<float>(layout_.crosshair_tex_w) * 0.5f;
-	const float half_h = static_cast<float>(layout_.crosshair_tex_h) * 0.5f;
+    const int half_w = (state.combat.driver_crosshair ? layout_.combat.driver_crosshair.width
+													  : layout_.crosshair_tex_w) /
+			2;
+	const int half_h = (state.combat.driver_crosshair ? layout_.combat.driver_crosshair.height
+													  : layout_.crosshair_tex_h) /
+			2;
+	constexpr float uv[5][5][2] = { { { 0, 0 }, { .45f, .45f }, { .5f, 0 }, { .55f, .45f },
+											{ 1, 0 } },
+		{ { 0, 1 }, { .45f, .55f }, { .5f, 1 }, { .55f, .55f }, { 1, 1 } },
+		{ { 0, 0 }, { .45f, .45f }, { 0, .5f }, { .45f, .55f }, { 0, 1 } },
+		{ { 1, 0 }, { .55f, .45f }, { 1, .5f }, { .55f, .55f }, { 1, 1 } },
+		{ { .55f, .45f }, { .45f, .45f }, { .55f, .55f }, { .45f, .55f }, { 0, 0 } } };
 	const float offsets[5][2] = {
 		{0.0f, -spread}, {0.0f, spread}, {-spread, 0.0f}, {spread, 0.0f},
 		{0.0f, 0.0f},
@@ -817,14 +870,14 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	for (int corner = 0; corner < 5; ++corner) {
 		const float ox = cx + offsets[corner][0];
 		const float oy = cy + offsets[corner][1];
-		const float l = ox - half_w;
-		const float t = oy - half_h;
-		const float r = ox + half_w;
-		const float b = oy + half_h;
-		const float mx = (l + r) * 0.5f;
-		const float my = (t + b) * 0.5f;
-		const float tx = static_cast<float>(kCrosshairTaper) * half_w;
-		const float ty = static_cast<float>(kCrosshairTaper) * half_h;
+		// Snap the outer corners first; the original integer midpoints and
+		// half-extents then produce fractional tapered vertices.
+		// [orig: @0x590FCC..0x591067]
+		const float l = sx(float(int(ox) - half_w), w), r = sx(float(int(ox) + half_w), w);
+		const float t = sy(float(int(oy) - half_h), h), b = sy(float(int(oy) + half_h), h);
+		const float mx = float((int(l) + int(r)) >> 1), my = float((int(t) + int(b)) >> 1);
+		const float tx = kCrosshairTaper * float((int(r) - int(l)) >> 1);
+		const float ty = kCrosshairTaper * float((int(b) - int(t)) >> 1);
 		float strip[5][2];
 		int verts = 5;
 		switch (corner) {
@@ -874,17 +927,19 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 			HudTriVertex *out[3] = {&tri.a, &tri.b, &tri.c};
 			const int idx[3] = {i, i + 1, i + 2};
 			for (int k = 0; k < 3; ++k) {
-				out[k]->x = sx(strip[idx[k]][0], w);
-				out[k]->y = sy(strip[idx[k]][1], h);
-				out[k]->u = (strip[idx[k]][0] - l) / qw;
-				out[k]->v = (strip[idx[k]][1] - t) / qh;
+				out[k]->x = strip[idx[k]][0];
+				out[k]->y = strip[idx[k]][1];
+				out[k]->u = uv[corner][idx[k]][0];
+				out[k]->v = uv[corner][idx[k]][1];
 			}
-			// The user colour [orig: dword_25510E0 into the corner-quad
-			// params]; retail routes it via the specular channel — the
-			// blend-stage witness stays open as D-HUD-8, vertex modulation
-			// is the port's stand-in.
-			tri.color = layout_.crosshair_color;
-			tri.texture = kHudTexCrosshair;
+			// FVF 0x2C4: XYZRHW, diffuse at +16, specular at +20, two UVs.
+			// The decompiler mislabeled RHW as diffuse and diffuse as specular.
+			// Color is diffuse; specular is zero. [orig: @0x5914CC..0x591500;
+			// GDynamicVB_DrawPrimitive SetFVF @0x678962 / @0x678A3E]
+			tri.color = state.combat.driver_crosshair ? 0xFF007F00u
+					: state.combat.hit_feedback		  ? 0xFFFF5050u
+													  : layout_.crosshair_color;
+			tri.texture = state.combat.driver_crosshair ? kHudTexDriverCrosshair : kHudTexCrosshair;
 			draw_list_.tris.push_back(tri);
 		}
 	}

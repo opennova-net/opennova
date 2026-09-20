@@ -51,6 +51,11 @@ master switch" reading), corrected the map-pointer blink and 253/254
 ring glosses, and applied the previously parked IDB renames (logged at the
 end).
 
+The 2026-09-19 [weapon and vehicle HUD validation](weapon-vehicle-hud-validation.md)
+corrected seat-dependent group dispatch, mounted stance, the Inset reticle
+predicate, and capacity-one reload flashing (D-HUD-28). It also records the
+completed launcher targeting, Inset scene, mortar impact HUD, and pilot instruments.
+
 ## Verdict table
 
 | Component | Verdict | Evidence |
@@ -63,13 +68,13 @@ end).
 | HUD text + half-bright | ported (`engine/runtime/hud/game_font` — the CGameFont text engine) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
 | Ammo count + weapon name text | **ported** (`HudFrameCompiler::element_weapon_cluster` + `hud_math::format_ammo`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
-| Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
+| Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / friendly brackets ported 2026-09-19) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `simulation_test.gd` + `hud_overlay_test.gd` + ctest `weapon_fsm` |
 | Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: draw_minimap_crosshair_and_grid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; render_hud_overlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_CanFireWeapon @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
-| Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
+| Armory/vehicle-bay/FARP bottom prompts | draw/feed ported; remaining menu/system integration in D-HUD-14 | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | Mission triggered text (WAC/BMS `text`) | **ported** (`HudFrameCompiler::push_message` → the system ring drawn by `element_feed`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216]` — the SAME ring as the 0x1E lines; `hud_helpers_test.gd` expiry |
 | Message feed — the SYSTEM ring (kills / objectives / medic) | **ported** (`HudFrameCompiler::element_feed` + `hud::feed_format` + the `netsim` 0x1E fold, D-HUD-23) | `[orig: HUD_DrawConsoleMessages @ 0x59ad30]` (second loop) fed by `[orig: NetPacket_HandleGameEvent @ 0x426270 -> HUD_FormatKillEventMessage @ 0x422DA0 -> Chat_FormatMessage @ 0x422C60]` |
 | `hudpos.def` parser token map + 4-field positions | ported (`engine/formats/def`) | `[orig: HUD_ParseHudposToken @0x59f370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
@@ -467,11 +472,15 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   ({…, handle, w, h}). The weapon-def `crosshair` field feeds a different
   (scope/lock) surface. The crosshair color is the user config
   `dword_25510E0`, overridden to `0xFFFF5050` in one mode (`dword_A8235C`)
-  `[orig: @0x592bd5]`; defaults unwitnessed (D-HUD-8 / follow-up).
+  `[orig: @0x592bd5]`; default white witnessed at Config_SetDefaults @0x54D461; D-HUD-8 corrected below.
 - **Visibility**: the cluster gates on `dword_2723CB4` and the weapon-def ptr;
   the spread crosshair draws when the player **cannot** take an aimed shot —
-  `!Player_CanFireWeapon() || vehicle auto-aim || (dword_A8235C && gunner
-  scoped)` `[orig: @0x592adc..0x592b01]`. `Player_CanFireWeapon @0x5cf780`
+  `!Player_CanFireWeapon() || equipped Inset || (dword_A8235C && promoted
+  Sighted)` `[orig: @0x592adc..0x592b01]`. Rechecked 2026-09-19:
+  `Player_IsVehicleHasAutoAim @0x4dccb0` actually reads equipped `flags2 & 0x200`,
+  and `Player_IsVehicleGunnerScoped @0x4dcd30` is the promoted Sighted selector;
+  neither name implies that a vehicle seat is required.
+  `Player_CanFireWeapon @0x5cf780`
   requires either the **settled Scoped** view (`Player_IsEquippedWeaponScoped
   @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) or the separate
   settled **Sighted** predicate (`@0x4dcd30` = `Flags & 2`, promoted active,
@@ -505,11 +514,10 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   / 1 crouch (`&0x200`) / 2 stand, forced 2 when swimming/under water
   (`entity+36 & 0x108020` or below `Env_WaterHeightFixed`), forced 1 when
   mounted `[orig: @0x592b35..0x592b87]`. Because the draw gate and the row
-  select share the CanFire predicate, **on foot every drawn crosshair reads
-  the hip rows 0..2**; the scoped rows 3..5 are reachable only through the
-  vehicle auto-aim / gunner-scoped cases (witness comment left at
-  `@0x592b87`; a train-side fix that keyed +3 on the port's `scope_engaged`
-  contradicts this — re-adjudicate when the ADS-ease plumbing lands). Then
+  select share the CanFire predicate, the ordinary un-aimed crosshair reads
+  hip rows 0..2. Inset and the Sighted hit-feedback exception can draw aimed
+  rows 3..5 **on foot as well as mounted**. The earlier vehicle-only gloss
+  relied on misleading function names (corrected 2026-09-19). Then
   `spread = C·(ERROR[row] + (player+0x380 >> 7) + (player+0x384 >> 7))` with
   `C = flt_7D76D0 = 11930464.0 = 2^31/180`, and
   `pixel = int(spread · screen_w / fov_scale) >> 16` where
@@ -580,20 +588,19 @@ the HUD selector: `verticalSpread ? 3 : category`, whereas the HUD uses
 `stance + 3*Player_CanFireWeapon()`. Keeping those two consumers separate is
 required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
 `[orig: HUD_DrawCrosshair @ 0x592640]`
-- **Unported sub-elements of the same function** (witnessed 2026-07-11,
-  explicitly out of the SP weapon-cluster port):
+- **Targeting sub-elements** (witnessed 2026-07-11; ported 2026-09-19):
   - the **target-tracking cursor** — with a tracked entity (`ptr @0x27234F0`)
     and the cursor art loaded, a quad draws at the projected
     `Entity_ComputeWeaponFireOrigin` of the target, color/texture switching on
     same-team (`dword_2723900` vs `dword_27238F0` records) with an MP team
-    gate and a tick-blink `[orig: @0x592790..0x592875]`;
+    gate; bracket admission uses mpattrib bits, not a tick-blink `[orig: @0x592790..0x592875]`;
   - the **aim-point quad for flagged weapons** — `weapondef+12 & 0x80` swaps
     the spread reticle for the weapon's own crosshair record (`weapon+376`)
     drawn at a raycast-projected aim point
     (`Entity_ComputeUserpointTransform` → `physics_raycast_entity_pools…` →
     project) `[orig: @0x592973..0x592ac8]`;
-  - the **lock brackets** — four clipped 2D lines blinking around the tracked
-    target when its mount state reads 3, team- and blink-gated
+  - the **friendly brackets** — four clipped 2D lines around the main aim
+    anchor when the target item-definition type reads 3, team- and mpattrib-gated
     `[orig: @0x592ce2..0x592dd7]`.
   - a mode flag `dword_24C1930 & 0x10000` replaces triggered/gametext strings
     with the literal `"&"` `[orig: @0x51f1c8 / @0x51ebe3]` — writer
@@ -602,11 +609,12 @@ required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
   quad rect is the texture's size centered on the (offset) point, corners
   scaled to screen; the arms are 5-vertex triangle strips and the center a
   4-vertex strip, with the **inner vertices at the quad midpoint pulled back by
-  0.1 × half-extent**, and **every vertex's UV = its normalized position within
-  the quad rect** — which lands the inner vertices exactly on the witnessed
-  0.45 / 0.5 / 0.55 atlas bands (center band 0.45..0.55, arms the outer bands).
-  Vertex format: `rhw = 0.9`, `diffuse = 1.0`, `specular = color`; emitted via
-  `[orig: GDynamicVB_DrawPrimitive @0x6788e0]` (D-HUD-8 on the color stage).
+  0.1 × half-extent**, and **literal UVs at the witnessed
+  0.45 / 0.5 / 0.55 atlas bands**; integer corner/midpoint rounding can make
+  geometry-derived UVs differ (center band 0.45..0.55, arms the outer bands).
+  Vertex format (corrected 2026-09-19): `z = 0.9`, `rhw = 1.0`,
+  `diffuse = color`, `specular = 0`; FVF `0x2C4` via
+  `[orig: GDynamicVB_DrawPrimitive @0x6788e0; SetFVF @0x678962/@0x678A3E]`.
 
 Port: `HudFrameCompiler::element_crosshair` (spread_px / error_row / the 5
 UV'd strips, visibility + row select — `engine/runtime/hud/hud_frame.cpp`),
@@ -1382,8 +1390,9 @@ master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
   `STROVER_FARP_RELOADING` "Reloading" (`!dword_A85B74`)
   `[orig: @0x5bdff8..0x5be10e]`.
 
-All three legs ride systems we haven't ported (MP preround state, vehicle.mnu,
-FARP rearm) — recorded as D-HUD-14 and deferred with them.
+The received-state feed and all three draw legs are ported (2026-09-19).
+D-HUD-14 retains active-menu suppression and the vehicle-bay/FARP service
+integration; drawing the timer does not implement the rearm service.
 
 ## `hudpos.def` parser token → global map — `HUD_ParseHudposToken @0x59f370`
 
@@ -2232,7 +2241,7 @@ authored 200 m elevation and the unchanged aimed ERROR row 3, 524 Q16 units
 visible and the magnification label is intentionally absent. A second prone
 probe increments the zero from 200 m to 250 m and verifies the live readout.
 This is not a claim of measured bullet-group parity. The separate flag-8 vehicle target
-reticle and D-HUD-26 terrain-ring renderer remain outside this textual port.
+reticle and D-HUD-26 Inset renderer landed in the 2026-09-19 HUD follow-up.
 
 ### Binocular sway render latch (2026-09-16 review)
 
@@ -2269,13 +2278,13 @@ were made for this review.
 | D-HUD-5 | `hud_clip_indicator.gd` restamps its flash on (`round_type`, reserve) change | restamp keys are (`weapondef+220` ammo class, reserve, `weapondef+216` pool id) `[orig: @0x599ab2]` | Our weapon model runs a single ammo pool (net-re D-WPN-2), so the ammo-class/pool ids aren't distinct state yet; the proxy fires on the same reload/switch transitions. Revisit with per-class pools. |
 | D-HUD-6 | **NARROWED 2026-09-11: the centre announcement banner is now ported.** The SYSTEM ring (D-HUD-23) and now the player-CHAT ring are ported: the S2C 0x14 fold → `HudFrameCompiler::push_chat_line` (the display-slot sink with the witnessed wrap), the `Chat_DispatchToChannel` channel → sink/colour table, the HUDCHATTEXT first loop of `element_feed`, and the J-key Recent Messages window over both display rings | the chat writer `[orig: Chat_AddMessageChannel1 @0x4985d0]` (raw ring 40×128 B, the display buffer 41×128 B with the newest message's last line in slot 1 and two-space continuation lines at timer 0, only slot 1's timer = `max(930, slot2 + 186)`); the dispatcher `[orig: Chat_DispatchToChannel @0x42b910]` — no local-team colour term; the geometry table `g_hudChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`) rows 1/2 = HUDCHATTEXT x1/x2 read through `HUD_GetChatBoxCoord @0x5bbe90` — its writer has no xref in the image; the involved-line copy `[orig: strncpy @0x427B8B]` feeding `HUD_DrawKillAnnounceBanner @0x59dc90` | The centre banner now uses the large white font at virtual (512,30), signed age <=186, and retained text after expiry (see the follow-up section below). Residuals: channel 13's `HUD_SetTrackedEntityTarget` (a world leg); `HUD_DrawOverlayPanels (ex sub_5C0060) @0x5c0060`, a third reader of the J toggle (unwitnessed). The geometry table's writer sits outside the image, so the authored HUDCHATTEXT/HUDSYSTEXT rows are the faithful source (`HudLayout::chat_box_x1/x2`). |
 | D-HUD-7 | **CLOSED 2026-07-31.** The HUD consumes the exact ERROR integer plus the sim's signed `pitchBlend(+0x380)>>7` and movement/weapon-weight `(+0x384)>>7`; the same live `pitchBlend` feeds the first-person camera and local/decoded-player aim overlays | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` `[orig: HUD_DrawCrosshair @ 0x592640]`; the write/decay side is `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]` | **FIXED.** Exact integer carriers now run ammo/weapon parse → runtime tables → round/body sim → local HUD/camera/overlay; decoded rows stamp and decay recoil, while their movement term remains the retail zero of a local-only producer. The projectile's intentionally different `R>>8` stays separate. The water-height category's position-only `CameraOffset.Z` projection remains D-INF-18, not D-HUD-7. Pinned by `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd`. |
-| D-HUD-8 | crosshair color multiplies the texture (vertex modulation, `HudLayout::crosshair_color` into the reticle tris); the XHAIR_COLOR option is live — persisted as the RGB value, the spinlist row selected BY VALUE like retail `[orig: SpinList_SelectItemByValue(…, dword_25510E0) @0x554cec]`, default white `[orig: Config_SetDefaults @0x54d461 = 0xFFFFFF]` | the strip writes the color to the **specular** channel with `diffuse = 1.0` `[orig: @0x5914d7]`; the blend-stage setup lives in the HUD shader pass (`GfxShader_ApplyPassChecked @0x677020`, unwitnessed); color source = user config `dword_25510E0` | Identical for the default white; for non-white picks vertex modulation stands in until the texture-stage state is witnessed (the remaining open half of this row). The scoped-gunner `0xFFFF5050` override `[orig: @0x592bd5]` rides the unported vehicle-scope leg. |
+| D-HUD-8 | **FIXED / premise corrected 2026-09-19.** User color and hit feedback modulate the texture through vertex diffuse | FVF `0x2C4`, diffuse +16 and zero specular +20 `[orig: @0x5914CC..0x591500; @0x678962/@0x678A3E]` | The decompiler mislabeled the vertex fields. Literal UVs and integer corner/midpoint snapping are ported; native and GPU checks cover the reticle. The XHAIR_COLOR option stays live: persisted as the RGB value, the spinlist row selected by value `[orig: SpinList_SelectItemByValue(…, dword_25510E0) @0x554cec]`, default white `[orig: Config_SetDefaults @0x54d461 = 0xFFFFFF]`; the strip's colour store is `[orig: @0x5914d7]` and the draw `[orig: GDynamicVB_DrawPrimitive @0x6788e0]`. Not witnessed: the texture-stage setup inside `GfxShader_ApplyPassChecked @0x677020`; MODULATE is inferred from the colour riding the diffuse channel. |
 | D-HUD-9 | **CLOSED 2026-07-31.** The crosshair previously hid from generic settled ADS | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose promoted predicates are Scoped (`Flags & 1`) or Sighted (`Flags & 2`, except SWITCHFROM); movement/water reject only the ordinary Scoped leg, while reload-card-switch, camera, dead/airborne, ForceScoped, and seat gates complete the verdict | **FIXED.** The sim now stamps that bounded retail verdict once and feeds both visibility and ERROR row selection. The reticle remains through ADS ease and follows the witnessed Scoped/Sighted failure/override gates rather than raw `scope_engaged`. |
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `GameHudPresenter` feeds it to both shells. |
 | D-HUD-11 | **CLOSED 2026-08-16.** `Simulation::get_attach_labels` now consumes the same complete `LocalPlayer::local_player_can_fire` verdict used to stamp the body/HUD aimed row: alive/equipped, passenger-or-borrowed-UseGun seat, reload-card-switch, promoted Scoped/Sighted/SWITCHFROM, movement, air, eye/water, ForceScoped, binocular, and camera gates | `Player_CanFireWeapon @0x5cf780`; the label branch is `!Player_CanFireWeapon() || entity == nearest_entity @0x5a32df..0x5a3354` | **FIXED.** The promoted scope bit is the body mirror committed for the current sim tick, while camera/binocular state is queried live so a presentation-time third-person toggle cannot lag. `simulation_test.gd::test_attach_labels_share_complete_can_fire_verdict` pins unraised ADS, settled ADS, immediate third person, and underwater behavior across two candidate entities. |
 | D-HUD-12 | **FIXED 2026-08-11.** Attach labels lay out through the ported CGameFont engine with the witnessed BOLD Arial label font at the slot scale (`HudFrameCompiler::element_attach_labels` + `configure_label_fonts`) | `HUD_MeasureTextWH @0x580ab0` measures through the bold slot's (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph walk, same font file, same scale; box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` ported verbatim. Pinned by ctest `hud_frame_compiler` (label-font faces/scale). |
 | D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_hudActiveColor @0x24c1868`; table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) and is the observed/default source | **The reimpl base is exact for the shipped observable path** and the dim transform stays ported (`HudAttachLabels.dim`). The scheme port (see "The hud_color_index scheme") is restored 2026-08-13 with the byte-witnessed producer: the `hudcolor` action row (code 10, default F6, retail-shadowed by `huddetail`) — neither of the earlier H mappings survives the catalog walk. |
-| D-HUD-14 | no bottom prompts | `HUD_DrawGameplayOverlays @0x5bde60`: the preround armory prompt (`STROVER_ARMORY_INFO`, S2C-0x0A-fed `dword_A85B64`; SP never draws it), the vehicle-bay prompt (`Flags & 0x800` + team-gated groundEntity), the FARP wait/reload overlays (`attrib2 & 0x2000` + unlock mask) | Witnessed, deferred: each rides an unported system (MP preround state / vehicle.mnu / FARP rearm). The `STROVER_ARMORY_WAIT` leg is dead code in retail (the impossible `@0x5bdef8` recheck). NARROWED 2026-09-12: the USE key's vehicle-loadout arm itself is ported (`world::local_player_in_vehicle_loadout_zone` + `local_player_vehicle_zone_team_matches` `[orig: Input_HandleActionBinding_0 @0x4e0a91..0x4e0aeb]` through `Simulation` into `main_game.gd`): a press inside a type-11 volume consumes the hold and never latches the mount toggle or the USE+digit chord; only the VEHICLE screen (vehicle.mnu) and this bay prompt stay unported. |
+| D-HUD-14 | **NARROWED 2026-09-19.** Localized armory, vehicle-bay and FARP wait/reload draw commands and retained phase-0 timer/zone inputs are ported | `HUD_DrawGameplayOverlays @0x5BDE60`; `STROVER_ARMORY_WAIT` remains unreachable | Active-menu suppression and integration with the vehicle-bay menu/host FARP rearm service remain. Native tests cover team/zone/timer gates and retained received state. The USE key's vehicle-loadout arm stays ported `[orig: Input_HandleActionBinding_0 @0x4e0a91..0x4e0aeb]`; the floating armory-delay label variant remains with this row. |
 | D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
@@ -2287,8 +2296,9 @@ were made for this review.
 | D-HUD-23 | The kill/objective/medic message feed: S2C 0x1E folds to typed client events (`replication::ClientGameEvent`), each line is the game's own "Canned Msg" template with the witnessed substitution, and the line posts to the SYSTEM ring (see "The message feeds") with the per-case color table; the verbose gate is held at the verbose-on session default | `[orig: Chat_FormatMessage @0x422C60 -> String_ReplaceAllCaseInsensitive @0x422970]` (sequential case-insensitive `$A` then `$B`), the `STRCND48` bonus re-compose when aux is the local player `[orig: @0x422CA2]`, `STRCLI01` "Unknown" for a null actor `[orig: @0x422DDA]`; the `@0x426270` color switch (own white `-1` / other grey `0xFFAFAFAF`; friendly-fire 7/8/9 and 16-18/27-31/35-37 white; bonus 32/33/34 yellow `-256`; medic trio 38/39/45 + SSKB 46/47 `0xFF008CEE`; PSP/LFP blue `0xFF00AFFF` / red `0xFFFF0000`; 40 red, 48 orange `-32768`; camp 59/60 by team byte with the `WPNames[level+1]` `%s` compose `[orig: @0x4272EC/@0x427327]`); the suppression set (50-53 format-and-return `@0x42702E-@0x42716D`; 58 tip-only `@0x427202`); the verbose gate on uninvolved kill lines `[orig: g_MpVerbose2 @0x24D2154, 13 tests @0x426472..@0x4267C6]` | **OPEN (partial).** The 0x1E fold, the SYSTEM ring and the witnessed line/color policy are ported. Runtime team/gametype keys (19/20/21/46/47), signed SSKB counts, and flag-event immediate/delayed sounds are ported (2026-09-11; details below). Residuals: join/leave lines + the host-exclusion filter have their roster (D-HUD-24 folds S2C 0x46 into `ClientState`) and only need wiring; player-slot names with `<ch>clan<co>` tags `[orig: @0x422E1D]` (roster names serve today); the verbose keybind toggle `[orig: @0x49B78F]`; the other PSP/LFP/camp team sounds, tips and effect spawns beside the lines. |
 | D-HUD-24 | The Tab scoreboard. DATA lane: S2C 0x16 folds to `ClientScoreboard` (flags, rows in wire order, the team table, the in-game/spectator trailer) and S2C 0x46 to a connection-slot roster, both in `ClientState`; joiners receive all three lanes on the reducer stream, the host's own view binds via the loopback self-0x46 (D-NET-114 form). PANEL (drawn 2026-08-19): `HudFrameCompiler::element_scoreboard` + `hud::hud_scoreboard` carry the witnessed layout in raw design-space constants through the shared scaler, every string on `g_hudLabelFontBold`; a press-TOGGLE on the playerlist action; the stdbox geometry (pieces, fill insets, the title notch, the screen-anchored wrap-tiled fill) pinned by ctest `hud_frame_compiler`; the monogram watermark deliberately not drawn (pure additive over a measured all-black sheet) | data: `[orig: NapiNPClientMsg_PlayerList @0x42FAE0; NapiNPClientMsg_PlayerSync @0x431370; Server_BuildAndBroadcastScoreboard @0x50D960 every 311 ticks]` — every well-formed 0x16 applies unconditionally (an empty update EMPTIES the board `@0x42fb46`), roster-unknown rows drop `@0x42fc05`, name/clan join at apply time `@0x42fd4c..0x42fd8f`, a 0x46 removal deactivates + wipes the slot `@0x434730/@0x4346c0`; the second row u16 is a STATUS BITFIELD not a ping `@0x42fdb4`, the fourth is accumulated points/EXP `@0x52C8E0`, the team-row bytes are kothHold/ctfFlag `@0x50dc62/@0x50dd30`. panel: `HUD_DrawKillList @0x423A30` + the header block `@0x423060` — stdbox (20,78)-(1004,550) `HUD_DrawLabelBox @0x423a90`, header rungs 105..185 stepping 0x14 `@0x42315c..0x42322a`, rows from base + 18 `@0x423d30` while y < 490 `@0x424168`, non-team modes (types 0/1/8) alternate x190/x690 with a SIGNED score, team modes column by team and draw only live-entity rows `@0x423d1b`, spectators at x440 with no score/rank `@0x423e04`, one GLOBAL rank counter `@0x42424f`, the neticon2.tga band `NetIcon_DrawConnectionQualityBand @0x4c2ee0`, the status-glyph append order `@0x423f29-0x4240e5`; the toggle `Scoreboard_TogglePlayerList @0x4244c0` from `@0x49bb68`, the drawer gate `HUD_DrawKillListIfVisible @0x424300`; the stdbox scale `s = surface_w / 1600` `@0x51f02e`, the fill cell extraction `@0x56adbd-0x56ae44` -> `stdbox_draw_fill_wrap_tiled @0x56b5d0` | **OPEN (partial).** One capability gap, not a missing witness: the eight border pieces bind border x boxtile as ONE combined material with a screen-anchored second stage `[orig: CGfxTexture_Create @0x56af3c, applied @0x56b902; draw_textured_quad_0 @0x56b3e0]`, so retail's pieces read camo where ours read plain stencil (needs a second texture stage the HUD quad stream does not carry). PORTED 2026-08-29: the C2S 0x22 unknown-row retry (reducer-queued slot ids, one reliable `{slot, 0x1CF7}` per dropped row framed by the joiner runtime `@0x42fc05..0x42fc3a`) and the 4-team page (`g_num_teams_config > 2 && dword_A87060 & 0x80` flips the team board to teams 3/4 with 0xFFFFFF00/0xFFFF027F every 128 HUD frames `@0x423cd0-0x423cf1`; the joiner's side count is the 0x16 team-table byte `@0x42fdda`). Unported tails: the per-mode team-score header block `@0x4232bf-0x423a12`; the per-recipient SU status gate `@0x423ef8`; host-side sessionvar strings; the host-side 0x16 serializer's `CPlayerStats` sources (`encode_player_list` emits zero status/score words, so an opennova-HOSTED board shows zero scores; retail-server joins are unaffected); the slot+0x20 label `@0x434870`; the same-team class suffix `@0x423d8a`; the KOTH countdown row `@0x423e7d`; the PgUp/PgDn page fold `@0x423c1c`. Full row text: the ledger's D-HUD-24 entry. |
 | D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`npruntime/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_round_time_remaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `draw_endround_stats_overlay @0x5b7cd0`; `populate_stat_results_list @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_showEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
-| D-HUD-26 | No terrain-ring scope overlay: every scoped weapon takes the standard scope/sights treatment, and the per-frame camera shake samples twice (quantum + frame) | `Render_ProcessMainSceneFrame` draws `Render_RadarCompassOverlay @0x5c9740` when the equipped weapon can fire, `Player_IsEquippedWeaponScoped` holds, the def flags word carries `0x200`, and the binocular view is down (gate `@0x5ca949`, outdoors flag forwarded): two GDynamicVB ring primitives (inner filled, outer outline) clip a full 3D terrain scene (`Render_TerrainScene`) re-rendered from a THIRD `Camera_ComputeThirdPersonView` call that frame (`@0x5c9841` — advancing the mode-0 shake IIRs once more, its shaken pose rendering), with the equipped slot's elevation counters applied (`pitch -= counter[1]`, `yaw += counter[2]` `@0x5c98fc..0x5c9903`) and a near-Z swap to 0.2 (`@0x5c992d`) | The mortar-class scope view is a whole unported overlay (ledger D-HUD-26, OPEN). Porting it is a render+HUD slice: ring mask, the offset camera, a second terrain scene pass. Until then the third IIR advance is deliberately absent (`local_player_view_frame` carries the pointer) — the shake trajectory differs only while this overlay would draw, with identical per-axis distribution. |
-| D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The separate flag-8 vehicle target reticle and D-HUD-26 terrain-ring overlay are not included. |
+| D-HUD-26 | **FIXED 2026-09-19.** Scoped + FLAGS2 Inset uses a separate scene viewport, aperture/ring/cross, friendly label, slot offsets and third shake sample | Definition `+0x0C & 0x200` `[orig: @0x5CA2B1..0x5CA2B4]`, scene `@0x5C9740..0x5CA0E1` | This is not the mortar view. Native geometry and live viewport lifecycle/declutter tests cover the port; mortar impact prediction/designator/map callbacks are separate. |
+| D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The flag-8 vehicle target reticle and D-HUD-26 Inset scene were added in the 2026-09-19 follow-up. |
+| D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CBE..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8440` (seat switch `@0x4B863D..0x4B8767`, EmplacedStance override `@0x4B8539..0x4B8549`; the carrier-is-a-vehicle leg `@0x4B84D1..0x4B8507` is DEAD because `HUD_RenderAllOverlays` zeroes the struct `@0x5A80A5..0x5A80B1` first, so a gunner always reads Emplaced); Inset `@0x4DCCB0` (called `@0x592AE5`); centred cues slide on-screen and recolour `draw_textured_quad_centered @0x5909E0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
 
 ## Follow-ups (not yet witnessed / deferred)
 
@@ -2490,15 +2500,15 @@ banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
   (`@0x5b9df2/@0x5b9e1f`, not to the text rows) and `HUD_DrawClassRosterOverlay
   @0x5b9f8e` reads; every other `hud.def` key is parsed and never consumed by
   the JO HUD.
-- **Crosshair color config** — only the HUD shader pass texture-stage state
-  remains (D-HUD-8); the `dword_25510E0` default is witnessed
+- **Crosshair color config** — D-HUD-8 is closed after correcting the
+  vertex field interpretation; the `dword_25510E0` default is witnessed
   (`[orig: Config_SetDefaults @0x54d461]` = 0xFFFFFF) and the style write is
   `sprintf("cross%02d.tga", selected_value + 1)`
   `[orig: ingame_options_dialog_event_handler @0x5551f4]`.
-- **Crosshair sub-elements** — the target-tracking cursor
+- **Crosshair sub-elements (ported 2026-09-19)** — the target-tracking cursor
   (`@0x592790..0x592875`), the `weapondef+12 & 0x80` aim-point quad
   (`@0x592973..0x592ac8`), and the lock brackets (`@0x592ce2..0x592dd7`);
-  witnessed 2026-07-11, unported (MP/vehicle/lock phases).
+  witnessed 2026-07-11 and implemented in the 2026-09-19 follow-up.
 - **`dword_24C1930` flag 0x10000** — replaces triggered/gametext strings with
   `"&"` (`@0x51f1c8`/`@0x51ebe3`); the writer is unwitnessed.
 - **Scope overlay** — the scope view's reticle/mask (`scopexh.tga @0x59e133`,
@@ -2511,20 +2521,21 @@ banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
   offset is the pool-3 (item) use of the byte.
 - **CGameFont glyph layout** `[orig: CGameFont_DrawText @0x6752c0]` — per-glyph
   D3D vertex build / spacing, to confirm `FntResource` layout parity.
-- **Timer/score, altitude/power bar, weapon slot bar** — enable flags
-  witnessed; draws (`HUD_DrawWeaponSlotBar @0x599cd0` located) unwitnessed.
-  (The ex-"reload bar" is the PowerThrow charge bar — witnessed + ported,
-  world-wac-ai-re §27.3.)
+- **Weapon slot bar** — `HUD_DrawWeaponSlotBar @0x599CD0` is witnessed;
+  the optional authored slot-selection strip remains separate from this
+  weapon/vehicle HUD pass. The aircraft AGL ladder/readout is now ported
+  (`@0x59F050`); its other input fields gate admission rather than drawing
+  separate power/velocity instruments. The ex-"reload bar" is the ported
+  PowerThrow charge bar (world-wac-ai-re §27.3).
 - **MP objective status + stance team tile** — witnessed
   (`HUD_DrawTeamIdLine @0x59aa30`, `@0x59a0cb`); port with the MP HUD.
-- **Parachute/armor icons** — witnessed
+- **Parachute/armor icons** — ported 2026-09-19; witnessed
   (`HUD_DrawParachuteAndArmorIcons @0x5925c0`): entity+44 `&0x10` parachute /
   `&0x8` armor (through the info struct's entity pointer; the +44 writer is
   unwalked — the earlier "+36" note was a recon guess, corrected 2026-07-18).
-- **Armory-delay label leg** — the `g_hudLabelFmtArmoryDelay % dword_A85B6C`
-  variant of the floating armory label and the bottom-prompt cluster
-  (D-HUD-14) key off the S2C 0x0A header armory/preround state; wire when the
-  net views surface it.
+- **Armory/FARP prompts** — the S2C 0x0A preround, reload timer and zone
+  mask now feed the bottom-prompt cluster. D-HUD-14 retains menu/gameplay
+  service integration and the floating armory-delay label variant.
 
 ### The Recent Messages window — `HUD_DrawMessageLog @0x5b9d70` (witnessed + ported 2026-08-21)
 

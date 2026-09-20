@@ -2226,8 +2226,143 @@ void test_scope_details(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
 }
 
+// HUD info already includes the chambered round for a capacity-one launcher.
+// Reload transfers reserve into the chamber without changing that displayed total.
+// [orig: HUD_BuildEntityInfo @0x4B85EF; ammo flash @0x599A30]
+void test_launcher_reload_keeps_ammo_flash(const fnt_font_t *font) {
+    using namespace opennova::hud;
+    HudLayout layout;
+    layout.clip_pos = {32, 700, 0, 0, true};
+    layout.alpha_fade_seconds = 1.0f;
+    layout.alpha_fade_base = 25.0f;
+    layout.alpha_fade_max = 100.0f;
+    HudFrameCompiler compiler;
+    compiler.configure(layout, font);
+    HudFrameState state;
+    state.weapon.active = true;
+    state.weapon.capacity = 1;
+    state.weapon.clip = 0;
+    state.weapon.reserve = 5; // the HUD total, before/after reload
+    state.weapon.round_texture_valid = true;
+    state.weapon.round_tex_w = 8;
+    state.weapon.round_tex_h = 16;
+    state.weapon.rndgfx_step_x = 10;
+    compiler.compile(state, 1024, 768);
+    state.ticks = 100;
+    const auto before = compiler.compile(state, 1024, 768).quads;
+    state.ticks = 101;
+    state.weapon.clip = 1;
+    compiler.compile(state, 1024, 768); // elapsed-zero has the retail underflow delay
+    state.ticks = 102;
+    const auto after = compiler.compile(state, 1024, 768).quads;
+    CHECK(before.size() == 5 && after.size() == 5, "a single-shot reload keeps five round icons");
+    CHECK(!before.empty() && !after.empty() && before.front().color == after.front().color,
+        "a single-shot reload does not restart the ammo-change flash");
+}
+
+// The on-foot stance is part of WPNGRP, alongside ammo/name.
+// [orig: HUD_RenderOverlays @0x5A7D42..0x5A7D55]
+void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
+    using namespace opennova::hud;
+    HudLayout layout;
+    layout.stance_pos = {32, 700, 0, 0, true};
+    layout.stance_texture_valid.fill(true);
+    layout.stance_frame0_w = layout.stance_frame0_h = 64;
+    layout.alpha_fade_seconds = 1.0f;
+    layout.alpha_fade_base = 100.0f;
+    HudFrameCompiler compiler;
+    compiler.configure(layout, font);
+    HudFrameState state;
+    state.ticks = 100;
+    CHECK(!compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance draws when WPNGRP is visible");
+    state.declutter_visible[kDeclutterWpnGrp] = false;
+    CHECK(compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance hides with WPNGRP");
+}
+
+// The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
+// pilots/drivers use category > 9, passengers retain their stance/panel, and
+// gunners follow WPNGRP. XHAIRS remains a separate gate in every seat.
+// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D55]
+void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudLayout layout;
+	layout.ammo_count = {40, 600, 0, 0, true};
+	layout.weapon_name = {40, 630, 0, 0, true};
+	layout.clip_pos = {40, 650, 0, 0, true};
+	layout.stance_pos = {20, 700, 0, 0, true};
+	layout.stance_texture_valid.fill(true);
+	layout.stance_frame0_w = 32;
+	layout.stance_frame0_h = 32;
+	layout.alpha_fade_seconds = 1.0f;
+	layout.alpha_fade_base = layout.alpha_fade_max = 100.0f;
+	layout.crosshair_texture_valid = true;
+	layout.crosshair_tex_w = layout.crosshair_tex_h = 32;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.weapon.active = true;
+	state.weapon.display_name = "Launcher";
+	state.weapon.capacity = state.weapon.clip = 1;
+	state.weapon.reserve = 5; // already folded by the HUD info feed
+	state.weapon.round_texture_valid = true;
+	state.weapon.round_tex_w = 8;
+	state.weapon.round_tex_h = 16;
+	state.weapon.rndgfx_step_x = 10;
+	state.vehicle_panel.silhouette_valid = true;
+	state.vehicle_panel.silhouette_w = 64;
+	state.vehicle_panel.silhouette_h = 32;
+	state.vehicle_panel.hull_health = state.vehicle_panel.hull_max_health = 100;
+	struct Case { int slot, category; bool wpngrp, ammo, stance, panel; };
+	const Case cases[] = {
+		{0, 9, true,  true,  true,  false}, // on foot
+		{0, 9, false, false, false, false},
+		{1, 9, false, false, true,  true},  // passenger
+		{1, 9, true,  true,  true,  true},
+		{2, 9, true,  false, true,  true},  // pilot without vehicle weapon
+		{2,10, true,  true,  true,  true},
+		{2,10, false, true,  true,  true},  // armed pilot ignores WPNGRP
+		{3,10, false, false, false, false}, // gunner
+		{3,10, true,  true,  true,  true},
+		{5, 9, true,  false, true,  true},  // driver
+		{5,10, false, true,  true,  true},
+		{4,10, true,  false, false, false}, // no mounted HUD branch for slot 4
+		{0, 9, true,  true,  true,  false}, // dismount restores infantry cluster
+	};
+	for (const Case &c : cases) {
+		state.ticks += 100;
+		state.mount_slot = c.slot;
+		state.weapon_category = c.category;
+		state.stance = c.slot == 0 ? 1 : 3;
+		state.vehicle_panel.shown = c.slot != 0;
+		state.declutter_visible[kDeclutterWpnGrp] = c.wpngrp;
+		const auto &list = compiler.compile(state, 1024, 768);
+		int rounds = 0, stances = 0, panels = 0;
+		for (const auto &q : list.quads) {
+			if (q.texture == kHudTexRoundGfx) ++rounds;
+			if (q.texture == kHudTexStance0 + state.stance) ++stances;
+			if (q.texture == kHudTexVehiclePanel) ++panels;
+		}
+		CHECK(!list.glyphs.empty() == c.ammo, "seat rules select ammo/name text");
+		CHECK(rounds == (c.ammo ? 5 : 0), "seat rules select the same ammo icon group");
+		CHECK(stances == int(c.stance), "seat rules select the stance icon");
+		CHECK(panels == int(c.panel), "seat rules select the hull/seat panel");
+		CHECK(!list.tris.empty(), "WPNGRP never suppresses XHAIRS");
+	}
+	state.mount_slot = 2;
+	state.weapon_category = 10;
+	state.vehicle_panel.shown = true;
+	state.declutter_visible[kDeclutterWpnGrp] = false;
+	state.hud_detail_level = 3;
+	const auto &hidden = compiler.compile(state, 1024, 768);
+	CHECK(hidden.quads.empty() && hidden.glyphs.empty() && hidden.tris.empty(),
+			"whole-HUD hide suppresses the seat-specific display too");
+}
+
 int main() {
 	fnt_font_t font = make_font();
+	test_seat_weapon_and_stance_transitions(&font);
+	test_launcher_reload_keeps_ammo_flash(&font);
+	test_stance_obeys_weapon_group_declutter(&font);
 	test_scope_details(&font);
 	test_kill_announcement(&font);
 	test_measure_advance_and_trailing_pad(&font);

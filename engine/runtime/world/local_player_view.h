@@ -14,10 +14,13 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/hud_combat_feed.h>
 
 namespace opennova::world {
 
@@ -28,6 +31,12 @@ struct World;
 // and its per-tick movement delta, and the local-dead edge the death stamp
 // reads.
 struct LocalPlayerViewTracker {
+	uint8_t hud_hit_feedback_frames = 0;
+	hud::HudServiceState hud_service;
+	std::vector<hud::HudDesignationPoint> hud_designations;
+	// A failed impact preview resets its point, but retains the last range.
+	// [orig: Player_UpdatePerFrame @0x4DE9F2, miss @0x4DEADE..0x4DEB43]
+	int32_t hud_impact_distance_q16 = 0;
     // The binocular ACTIVATION seeds one fixed-radius random aim displacement.
     // It survives movement/death/third-person suppression and is re-seeded on
     // the next activation, not on the raw toggle: retail runs the seed from the
@@ -64,6 +73,9 @@ struct LocalPlayerViewTracker {
 // globals). [orig: Render_ProcessMainSceneFrame @0x5ca1f4..0x5ca24b;
 //  NapiNPClientMsg_0x00A @0x42ff88..0x43002b]
 struct LocalViewSessionInputs {
+	uint8_t hud_hit_feedback_frames = 0;
+	hud::HudServiceState hud_service;
+	std::vector<hud::HudDesignationPoint> hud_designations;
     bool in_session = false;
     bool joiner = false;
     bool death_screen_active = false;
@@ -275,6 +287,13 @@ inline Vec3 player_eye_position(const Entity &entity) {
 //  @0x5ca299..0x5ca304; Camera_ComputeThirdPersonView @0x437d10 — the
 //  MOUNTED local eye leg @0x4b6908 re-anchored to the live position]
 struct LocalPlayerViewFrame {
+	HudCombatView hud_combat;
+	// Separate scene camera: Inset consumes another shake sample and
+	// its own slot-zero offsets after the main scene has sampled its camera.
+	// [orig: Render_RadarCompassOverlay @0x5C9841..0x5C9903]
+	bool inset_scope_active = false;
+	PlayerCameraPose inset_camera;
+	float inset_fov_over_zoom = 0;
     bool scope_camera_zero_active = false;
     bool scope_details_active = false;
     bool scope_details_scoped = false;
@@ -286,6 +305,9 @@ struct LocalPlayerViewFrame {
     int32_t scope_zero_step = 0;
     int32_t scope_zero_default = 0;
     int32_t aim_range_q16 = 0;
+    // HUD_BuildEntityInfo @0x4B8440 and HUD_RenderOverlays @0x5A7BB0.
+    int hud_stance = 0, hud_mount_slot = 0, hud_weapon_category = 0;
+    bool hud_keep_crosshair_while_aimed = false;
     bool scope_engaged = false; // the TARGET (g_scopeEngaged)
     bool scope_settled = false; // the PROMOTED byte (g_weaponScopeActive)
     bool binoculars_requested = false;
@@ -344,10 +366,56 @@ struct LocalPlayerViewFrame {
     float fp_pitch_recoil_deg = 0.0f;
     float fp_roll_deg = 0.0f;
     PlayerCameraPose camera;
+    // The carrier owns this frame's first-person view (see
+    // local_player_mounted_camera).
+    bool mounted_camera = false;
+    // local_view_draws_virtual_display holds for the local player's vehicle:
+    // its hull row is local-view suppressed and the shell draws this graphic
+    // key at the hull's transform instead (empty = the def authors none, so
+    // nothing draws).
+    bool virtual_display_active = false;
+    EntityHandle virtual_display_carrier;
+    std::string virtual_display_model;
 };
-void local_player_view_frame(World *world, LocalPlayerWeapon &w,
-                             const PlayerViewState &v, const LocalPlayerViewTracker &t,
+void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
+		LocalPlayerViewTracker &t,
                              LocalPlayerViewFrame &out);
+
+// THE MOUNTED FIRST-PERSON CAMERA. Mode 0 hands a seated rider's view to its
+// carrier before any person leg runs:
+//  - a carrier whose def authors `virtualdisplay <model> <userpoint>` calls
+//    its input class's camera callback. `tank` places the eye at the carrier
+//    matrix x that userpoint and pulls it 0.1875u back along the rider's view
+//    rotation; null / troop take the carrier's own Position + CameraOffset and
+//    rotation triple. A non-vehicle parent defers to its ground entity while
+//    that entity's weapon slot is parent-routed;
+//  - else an EWEAP that is not PlayerControl poses its own "CAMERA" userpoint:
+//    the view POSITION AND ROTATION both come from the posed gun part, so a
+//    turret gunner's view follows the lagging gun. Without the userpoint the
+//    view is the gun's raw pose.
+// out = position (Q16) + yaw / pitch / roll (BAM). False leaves the person
+// legs to run (no carrier, or a carrier neither leg admits).
+// [orig: Camera_ComputeThirdPersonView @0x437D10 -- callback leg
+//  @0x437DAC..0x437E77, EWEAP leg @0x437E7C..0x437EAD; the tank callback
+//  @0x44A190 (row @0x829DC8), the null/troop callback @0x4DC710;
+//  Entity_GetBoneWorldPosition @0x545E60 (CAMERA byte +0x318 @0x545F5B)]
+bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[6]);
+
+// THE `tank` RENDER CLASS'S FIRST-PERSON SWAP. While this machine's player is
+// the vehicle's claimant (the +0x170 primary occupant) and the camera is in
+// mode 0, the class draws the def's virtual-display model INSTEAD of the hull
+// -- and nothing at all when the def authors no virtual display. Every other
+// render class, seat and camera mode draws the hull as usual.
+// [orig: render class row `tank` @0x82CFF0 -> 0x449EF0 -- claimant / mode gate
+//  @0x449F12..0x449F27, the def+0x12C swap @0x449F29..0x449F45]
+bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,
+		const Entity &vehicle);
+
+// The seat-bone pose alone: the carrier's posed CAMERA userpoint for an EWEAP
+// with a model, the gun's raw pose without the userpoint, else the rider's own
+// Position + CameraOffset. The mounted camera's EWEAP leg and a gunner's
+// aim-ray START both read it. [orig: Entity_GetBoneWorldPosition @0x545E60]
+bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[6]);
 
 // The authored pose interpolation's additive rotation bias. The same airborne
 // and reload gate as the position leg selects zero while interpolation keeps

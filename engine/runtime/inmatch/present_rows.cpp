@@ -366,6 +366,15 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					local_view_suppresses_mount(kernel, h, mount_row->primary_weapon_slot_adm))
 				r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
 		}
+		// The `tank` render class swaps the hull for its virtual display while
+		// this machine's player drives it in first person.
+		// [orig: 0x449EF0 gate @0x449F12..0x449F27]
+		if (local_player != nullptr && local_player->mount_target == h) {
+			const Entity *vehicle_row = kernel.world.registry.get(h);
+			if (vehicle_row != nullptr &&
+					local_view_draws_virtual_display(kernel.world, kernel.local.view, *vehicle_row))
+				r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+		}
 		// Two retail callbacks write this three-register family. The sector
 		// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that
 		// reaches its model callback. The generic-world callback publishes the
@@ -693,6 +702,12 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// docs/world/world-wac-ai-re.md].
 	if (first_person_usegun && local_player->mount_target == h &&
 			local_view_suppresses_mount(kernel, h, e.primary_weapon_slot_adm))
+		r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+	// The `tank` render class swaps the hull for its virtual display while
+	// this machine's player drives it in first person.
+	// [orig: 0x449EF0 gate @0x449F12..0x449F27]
+	if (local_player != nullptr && local_player->mount_target == h &&
+			local_view_draws_virtual_display(w, kernel.local.view, e))
 		r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
 	// Two retail callbacks write this three-register family. The sector
 	// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that

@@ -4917,7 +4917,11 @@ userpoint names (16-byte strings at def+0x61B..0x6CB) + the weapon def's own nam
 - infantry: `Entity_InitInfantryBoneData @ 0x490160` → entity+0x4D8..0x4E4 (def
   order shuffled 3,4,5,0,1,2,9,10,11,6,7,8 + the weapon-def name);
 - vehicles/seats: `Entity_InitBoneReferences @ 0x441470` → +0x318 "CAMERA",
-  +0x31A "USEGUN", +0x327..0x333 (same def names + weapon-def name).
+  +0x31A "USEGUN", +0x327..0x333 (same def names + weapon-def name). The CAMERA
+  byte's consumer is `Entity_GetBoneWorldPosition @ 0x545e60` — a gunner's
+  first-person view (`Camera_ComputeThirdPersonView @ 0x437ea8`) and aim-ray
+  start (`Entity_UpdateInfantryPlayerBody @ 0x4b4f35`); ported as
+  `Entity::camera_userpoint_byte` + `world::local_player_seat_bone_pose`.
 
 The §17.4 FIRE point bytes entity+0x365..0x367 form a third cluster,
 written explicitly by `Entity_InitOrganicAI @ 0x4BFE8F..0x4BFF82` from

@@ -47,6 +47,7 @@ var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) l
 var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
+var _inset_scope: HudInsetScope = null
 var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
@@ -189,6 +190,7 @@ func teardown() -> void:
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
+	_inset_scope = null
 	_sights_card = null
 	_scope_circle_mask = null
 	_view_effects = null
@@ -282,6 +284,13 @@ func ensure_game_hud() -> void:
 	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_view_effects.set_environment(
 			_world.get_environment_node() if _world != null else null)
+	_inset_scope = HudInsetScope.new()
+	_inset_scope.name = "InsetScope"
+	_inset_scope.show_behind_parent = true
+	_inset_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inset_scope.visible = false
+	_game_hud.add_child(_inset_scope)
+	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
@@ -408,10 +417,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_hud_draw_timing_armed = stats_on
 	var max_h: int = sim.get_local_player_max_health()
 	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# The stance icon from the sim's authoritative body state (0=stand,
-	# 1=crouch, 2=prone). [orig: HUD_BuildEntityInfo @0x4b860c — entity+300
-	# flags 0x200=crouch->1, 0x100=prone->2]
-	var stance: int = sim.get_local_player_stance()
+	# The view frame supplies the HUD stance, including seat/weapon overrides.
+	# [orig: HUD_BuildEntityInfo @0x4b860c..0x4b8786]
+	var stance := 0
 
 	# The equipped weapon's HUD slice: re-resolve on weapon change only. The
 	# overlay takes the record's fields typed; the card takes the authored
@@ -459,6 +467,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var nvg_visible := false
 	var nvg_gain := 0
 	var vehicle_attack_context := false
+	var keep_crosshair_while_aimed := false
 	# The three fullscreen damage-feedback quads plus the HUD-overlay early
 	# return that rides the white one. The engine reduces the raw words to these
 	# draw values (engine/runtime/world/player_view.h carries the witnesses).
@@ -477,6 +486,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
 		vehicle_attack_context = lv.vehicle_attack_context
+		stance = lv.hud_stance
+		keep_crosshair_while_aimed = lv.hud_keep_crosshair_while_aimed
 		flash_white = lv.screen_flash_white_alpha
 		flash_red = lv.screen_flash_red_alpha
 		flash_revive = lv.screen_flash_revive
@@ -493,6 +504,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# rebuilding its 576-byte HUD info struct each frame.
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
 	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
+	_game_hud.set_player_context(lv)
 	var player_pos: Vector3 = sim.get_local_player_position()
 	_game_hud.set_minimap_state(Vector2(player_pos.x, -player_pos.z),
 			player_pos.y, sim.get_local_player_heading_bam(),
@@ -559,8 +571,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# accumulators — the simulation owns the stance/aimed-shot row (body-state
 	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
 	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
-	# @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780], with the modeled
-	# vehicle attack context as the witnessed gunner/vehicle keep-up proxy; and
+	# @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780], with the equipped
+	# weapon's Inset keep-up predicate from the native view frame; and
 	# the PowerThrow windup driving the charge bar [orig: g_fireChargeStartTick
 	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
 	var live := wv != null and wv.active
@@ -568,13 +580,21 @@ func tick(gameplay_input_active: bool = false) -> void:
 			wv.heat if live else 0,
 			wv.hud_spread_fp16 if live else 0,
 			wv.aimed_shot_available if live else false,
-			vehicle_attack_context,
+			keep_crosshair_while_aimed,
 			live and wv.windup_active,
 			wv.windup_held_ticks if live else 0)
 	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
 	_game_hud.set_scope_state(lv, Strings.get_table(Strings.TABLE_GAMETEXT))
+	var combat_camera := _game_hud.get_viewport().get_camera_3d()
+	if _inset_scope != null:
+		_inset_scope.update_view(lv, combat_camera, _aspect_mode)
+	_game_hud.set_combat_state(lv,
+			combat_camera.global_transform if combat_camera != null else Transform3D.IDENTITY,
+			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
+			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("useitem"))
 	_game_hud.set_view_state(binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)

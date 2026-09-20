@@ -372,6 +372,95 @@ static int test_item_def_allocator_defaults(void) {
     def_free_items(&items);
     return bad;
 }
+/* `virtualdisplay <model> <userpoint>` and `input_function <class>`: the
+   first-person cockpit model + its camera userpoint, and the input class row
+   whose second callback is the mounted camera. The key is matched case-
+   insensitively (stock data writes `Virtualdisplay`) and the two tokens may be
+   separated by any run of blanks. [orig: ItemDef_ParseProperty @0x49F4E0 ->
+   def+0xD0 / def+0xE0; @0x49F650 -> def+0x168] */
+static int test_virtual_display_and_input_function(void) {
+    static const char snippet[] =
+        "begin \"Drivable M1A1 Tank\"\n"
+        "  id 100164\n"
+        "  type vehicle\n"
+        "  graphic Dm1a1\n"
+        "\n"
+        "  Virtualdisplay tankdrvr  camera\n"
+        "  input_function tank\t\t\n"
+        "  render_function tank\n"
+        "end\n"
+        "begin \"Plain\"\n"
+        "  id 100001\n"
+        "  type vehicle\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1, &items) != 0 ||
+        items.count != 2) {
+        fprintf(stderr, "FAIL: virtualdisplay snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int bad = 0;
+    const DefItemDef *tank = &items.entries[0];
+    if (strcmp(tank->virtual_display, "tankdrvr") != 0 ||
+        strcmp(tank->virtual_display_userpoint, "camera") != 0) {
+        fprintf(stderr, "FAIL: virtualdisplay '%s' '%s'\n", tank->virtual_display,
+                tank->virtual_display_userpoint);
+        bad = 1;
+    }
+    if (strcmp(tank->input_function, "tank") != 0 || strcmp(tank->render_function, "tank") != 0) {
+        fprintf(stderr, "FAIL: input/render function '%s' '%s'\n", tank->input_function,
+                tank->render_function);
+        bad = 1;
+    }
+    const DefItemDef *plain = &items.entries[1];
+    if (plain->virtual_display[0] != '\0' || plain->virtual_display_userpoint[0] != '\0' ||
+        plain->input_function[0] != '\0') {
+        fprintf(stderr, "FAIL: a def without the keys must carry empty fields\n");
+        bad = 1;
+    }
+    def_free_items(&items);
+    return bad;
+}
+/* The stock tanks are the only items that author a virtual display (SKIP-LEG
+   without OPENNOVA_JO_ASSETS). */
+static int test_retail_tank_virtual_displays(void) {
+    const std::string path = retail::asset_file("items.def");
+    if (path.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS carrying items.def");
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items(path.c_str(), &items) != 0) {
+        fprintf(stderr, "FAIL: retail items.def did not parse: %s\n", path.c_str());
+        return 1;
+    }
+    int rc = 0;
+    size_t displays = 0;
+    for (size_t i = 0; i < items.count; ++i) {
+        const DefItemDef &def = items.entries[i];
+        if (def.virtual_display[0] == '\0') continue;
+        ++displays;
+        if (strcmp(def.virtual_display_userpoint, "camera") != 0 ||
+            strcmp(def.input_function, "tank") != 0) {
+            fprintf(stderr, "FAIL: item %d virtualdisplay '%s' '%s' input '%s'\n", def.id,
+                    def.virtual_display, def.virtual_display_userpoint, def.input_function);
+            rc = 1;
+        }
+        const char *want = def.id == 100164 ? "tankdrvr" : def.id == 100165 ? "t80_drvr" : NULL;
+        if (want != NULL && strcmp(def.virtual_display, want) != 0) {
+            fprintf(stderr, "FAIL: item %d virtualdisplay '%s' != '%s'\n", def.id,
+                    def.virtual_display, want);
+            rc = 1;
+        }
+    }
+    printf("retail items.def: %zu items author a virtual display\n", displays);
+    if (displays == 0) {
+        fprintf(stderr, "FAIL: no retail item authors virtualdisplay\n");
+        rc = 1;
+    }
+    def_free_items(&items);
+    return rc;
+}
 /* The per-item particle-effect slots on the retail items.def (SKIP-LEG without
    OPENNOVA_JO_ASSETS): the shipped table authors particlefx rows, and DBuggy1
    (101291) anchors Effect_whiteExhaust at the model's FX00 user point — the row
@@ -481,6 +570,12 @@ int main(void) {
         return 1;
     }
     if (test_weathervane_minai_default_aip() != 0) {
+        return 1;
+    }
+    if (test_virtual_display_and_input_function() != 0) {
+        return 1;
+    }
+    if (test_retail_tank_virtual_displays() != 0) {
         return 1;
     }
     const char *repo_root = test_paths_repo_root(__FILE__);

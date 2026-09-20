@@ -183,7 +183,22 @@ void LocalPlayer::look(float dx_px, float dy_px) {
 	look_accum_x_ -= static_cast<float>(dx);
 	look_accum_y_ -= static_cast<float>(dy);
 	if (dx == 0 && dy == 0) return;
-	w::player_look_apply(input.look_heading, input.look_pitch, look_settings, dx, dy, scoped_zoom, prone);
+    if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+                DEF_WEAPON_FLAG_ABSORBPITCH)) {
+        // The mouse-Y binding (action 164) SUBTRACTS its scaled value from
+        // dword_B79008 where the ordinary arm adds the same value to Pitch,
+        // then clamps the offset to 0..(max - min). Body pitch is left alone.
+        // [orig: Input_HandleActionBinding_0 case 164 -- seat-flag query
+        //  @0x4E0F9D, `sub dword_B79008, ecx` @0x4E0FE2, clamp
+        //  @0x4E0F1A..0x4E0F3A; the ordinary arm `add [eax+14h], edx` @0x4E0D39]
+        const auto delta = player_look_delta(look_settings, dx, dy, scoped_zoom);
+        input.look_heading = io::bam_add(input.look_heading, delta.yaw);
+        weapon.pitch_offset_bam = std::max(0, std::min(
+            io::bam_sub(weapon.pitch_offset_bam, delta.pitch),
+            io::bam_sub(weapon.pitch_max_bam, weapon.pitch_min_bam)));
+    } else {
+        w::player_look_apply(input.look_heading, input.look_pitch, look_settings, dx, dy, scoped_zoom, prone);
+    }
 }
 
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
@@ -447,9 +462,18 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	w::local_player_view_refresh(&world, view);
     // [orig: Entity_ApplyFreeLookRotation @0x4ae090, called by the local
     // body before aim/camera updates]. Both pitch limits follow body slope.
-    if ((world.logic_tick & 1u) != 0)
-        player_look_keys(input.look_heading, input.look_pitch, input.turn_left,
-        input.turn_right, input.look_up, input.look_down, input.prone, p->body_pitch);
+    if ((world.logic_tick & 1u) != 0) {
+        // Look-up/down key bindings are refused while the AbsorbPitch seat
+        // flag answers (an OnlyScoped weapon only once promoted).
+        // [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
+        const bool absorb = w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+                DEF_WEAPON_FLAG_ABSORBPITCH);
+        int32_t pitch = input.look_pitch;
+        player_look_keys(input.look_heading, pitch, input.turn_left,
+            input.turn_right, input.look_up && !absorb, input.look_down && !absorb,
+            input.prone, p->body_pitch);
+        if (!absorb) input.look_pitch = pitch;
+    }
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
 	// Input precedes the pool-1 vehicle callbacks. Publish current look and
 	// MoveOrder now, before the later pool-0 body pose; otherwise a driver's
@@ -499,6 +523,7 @@ void LocalPlayer::run_local_player_post_tick() {
 	io.inventory = inventory_valid ? &inventory : nullptr;
 	io.is_authority = true;
 	w::local_weapon_pump_tick(world, weapon, io);
+	hud_map_control.weapon_command(io.map_command);
 	// The wire-facing outcomes for the embedder's relay legs (the local reload
 	// producer the listen drain consumes; a joiner's fired-round uplink).
 	last_fired = io.fired;

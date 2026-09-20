@@ -1850,6 +1850,23 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                                              : collision.bone_index))
             : static_cast<int16_t>(-1);
 
+        // The PERSON impact handler arms the shooter's hit-feedback latch at
+        // its head, before any damage and even when armor absorbs it all, for
+        // a victim not already flagged dead. The entity handler and the squib
+        // rays never set it. The per-recipient frame consumes it once,
+        // including the listen host's own.
+        // [orig: Projectile_HandleTerrainImpact_0 @0x4E98F0 (the person
+        //  handler) -- dead gate @0x4E9920, owner @0x4E9958, `or [eax+2Ch],
+        //  1000h` @0x4E9962; consumed by NetPacket_WritePlayerState @0x4FF7C5]
+        if (person_collision && r.consequence_mode == RoundConsequenceMode::Authoritative &&
+                (!world.rules.mp_session || world.rules.projectile_authority)) {
+            const Entity *victim = world.registry.get(collision.geometry_entity);
+            if (victim != nullptr &&
+                    ((victim->flags | victim->engine_flags) & kEntityFlagDead) == 0)
+                if (Entity *shooter = world.registry.get(r.owner))
+                    ++shooter->hud_hit_feedback_serial;
+        }
+
         if (!not_armed) process_damage_hit(world, r, collision, velocity_q16);
 
         RoundImpact imp;

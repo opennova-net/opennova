@@ -431,6 +431,7 @@ void handler_switchto(const WeaponFsmDef &, const WeaponFsmAction &desc,
 void handler_switchfrom(const WeaponFsmDef &, const WeaponFsmAction &desc,
                         WeaponSlotState &slot, const WeaponFsmInputs &in,
                         WeaponFsmEvents &out) {
+	out.map_command = desc.map_command; // map wrapper runs before holstering [orig: @0x5434E0]
     begin_active(desc, slot, in, out); // [orig: ExecuteActionTick @ 0x5433c6]
     if (slot.counter == 0 && slot.phase != weapon_phase::kDone &&
         slot.phase != weapon_phase::kHeld) {
@@ -475,13 +476,15 @@ void handler_switchrank(const WeaponFsmDef &, const WeaponFsmAction &desc,
 }
 
 // [orig: WeaponAction_ScopeUp @ 0x543290 / ..ScopeDown @ 0x543320] Timed one-shots —
-// the ADS easing states. JOX/REVX ship no scopeup/scopedown ACTION rows, so both bake
-// to zero-length pass-throughs; the camera easing lives embedder-side (§5.41 interp).
+// the ADS easing states. Missing ACTION rows bake to zero-length pass-throughs;
+// installed mortar rows also select the witnessed _map wrappers below. The
+// separate camera interpolation is advanced by the local-player view cluster.
 void handler_scope(const WeaponFsmDef &, const WeaponFsmAction &desc,
                    WeaponSlotState &slot, const WeaponFsmInputs &in,
                    WeaponFsmEvents &out) {
     begin_active(desc, slot, in, out); // [orig: ExecuteActionTick @ 0x5432a3/@ 0x543333]
     if (slot.counter == 0 && slot.phase != weapon_phase::kDone) {
+		out.map_command = desc.map_command; // [orig: @0x54330C/@0x54339C]
         slot.counter = desc.delay_end; // [orig: @ 0x5432c0/@ 0x543350]
         slot.phase = weapon_phase::kDone;
     }
@@ -563,6 +566,7 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
     for (int i = 0; i < weapon_action::kCount; ++i) {
         WeaponFsmAction &a = out.actions[i];
         a.id = i;
+		a.map_command = 0;
         // Absent rows are generated defaults: zeroed fields, unresolved anim.
         // [orig: ActionDef_InitDefaults @ 0x4022b0 memsets the record]
         int32_t ds = 0;
@@ -570,6 +574,11 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
         const char *anim = nullptr;
         for (size_t r = 0; r < row_count; ++r) {
             if (!name_equals_ci(rows[r].name, kWeaponActionSuffixes[i])) continue;
+			a.map_command = name_equals_ci(rows[r].function, "wpn_std_scopeup_map") ? 1
+					: (name_equals_ci(rows[r].function, "wpn_std_scopedown_map") ||
+							  name_equals_ci(rows[r].function, "wpn_std_switchfrom_map"))
+					? -1
+					: 0;
 			a.action_value = rows[r].action_value;
 			ds = rows[r].delaystart;
 			de = rows[r].delayend;

@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/world/local_player_view.h>
@@ -48,6 +49,8 @@ public:
 	int get_camera_mode() const { return value_.camera_mode; }
 	bool get_camera_mounted() const { return value_.camera_mounted; }
 	bool get_vehicle_attack_context() const { return value_.vehicle_attack_context; }
+    int get_hud_stance() const { return value_.hud_stance; }
+    bool get_hud_keep_crosshair_while_aimed() const { return value_.hud_keep_crosshair_while_aimed; }
 	// 0 = hip .. 1 = sighted, over the toggle's ease steps.
 	float get_scope_fraction() const { return value_.scope_fraction; }
 	// The NoCardSwitch reload rule: the FP view bias is dropped for the frame.
@@ -93,6 +96,13 @@ public:
 	float get_camera_yaw_deg() const;
 	float get_camera_pitch_deg() const;
 	float get_camera_roll_deg() const;
+	// The local player's vehicle draws its virtual display this frame in place
+	// of the hull: the carrier's packed pool/slot handle and the lowercased
+	// graphic key (empty = the def authors none, so nothing draws). The
+	// carrier reads as the invalid handle while the swap does not hold.
+	bool get_virtual_display_active() const { return value_.virtual_display_active; }
+	int get_virtual_display_carrier() const;
+	String get_virtual_display_model() const;
 };
 
 } // namespace godot

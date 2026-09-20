@@ -143,7 +143,11 @@ HudOverlay::FriendlyTagMode HudOverlay::next_friendly_tag_mode(FriendlyTagMode p
 float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUnits; }
 
 void HudOverlay::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_combat_state", "view", "camera", "projection", "has_camera",
+								 "gametext", "use_key"),
+			&HudOverlay::set_combat_state);
 	ClassDB::bind_method(D_METHOD("set_scope_state", "view", "gametext"), &HudOverlay::set_scope_state);
+    ClassDB::bind_method(D_METHOD("set_player_context", "view"), &HudOverlay::set_player_context);
 	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_OFF);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_FAR_BRIEF);
@@ -483,6 +487,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	root_ = p_root;
 	layout_ = HudLayout{};
 	textures_ = {};
+	combat_texture_names_ = {};
 	clear_font_();
 	// The freed label pair must leave the compiler too; the first draw's
 	// ensure_label_fonts_ reloads it for the fresh root.
@@ -526,6 +531,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.clip_pos = pos_record2(p_hudpos->get_clip_pos());
 	layout_.stance_pos = pos_record2(p_hudpos->get_stance_pos());
 	const auto &hud = p_hudpos->native_file().hud;
+	configure_combat_(p_hudpos);
 	layout_.scope_range = pos_record2(Vector2i(hud.scope_range[0], hud.scope_range[1]));
 	layout_.scope_zero = pos_record2(Vector2i(hud.scope_zero[0], hud.scope_zero[1]));
 	layout_.scope_mag = pos_record2(Vector2i(hud.scope_mag[0], hud.scope_mag[1]));
@@ -858,6 +864,12 @@ void HudOverlay::set_weapon_state(bool p_active, int p_clip, int p_reserve, int 
 	state_.windup_active = p_windup_active;
 	state_.windup_held_ticks = p_windup_held_ticks;
 	queue_redraw();
+}
+
+void HudOverlay::set_player_context(const Ref<PlayerLocalView> &p_view) {
+    state_.mount_slot = p_view.is_valid() ? p_view->native_frame().hud_mount_slot : 0;
+    state_.weapon_category = p_view.is_valid() ? p_view->native_frame().hud_weapon_category : 0;
+    queue_redraw();
 }
 
 void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext) {
@@ -1862,7 +1874,9 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		uvs.set(1, Vector2(tri.b.u, tri.b.v));
 		uvs.set(2, Vector2(tri.c.u, tri.c.v));
 		PackedColorArray colors;
-		colors.push_back(opennova::color_from_argb(tri.color));
+		for (const auto *vertex : { &tri.a, &tri.b, &tri.c })
+			colors.push_back(opennova::color_from_argb(tri.color) *
+					opennova::color_from_argb(vertex->color));
 		draw_polygon(points, colors, uvs, tex);
 	}
 	for (const opennova::hud::HudLine &line : p_list.lines) {

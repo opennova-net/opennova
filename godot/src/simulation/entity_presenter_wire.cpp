@@ -251,6 +251,7 @@ void EntityPresenter::free_held_weapon(int p_handle) {
 
 void EntityPresenter::reset_wire_runtime_state() {
     reset_minefields();
+	reset_virtual_display();
 	Vector<int32_t> handles;
 	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
 		handles.push_back(kv.key);

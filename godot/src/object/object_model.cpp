@@ -1880,6 +1880,8 @@ void ObjectModel::apply_point_light_selection(int p_count,
 void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entity_light_owner", "owner"),
 			&ObjectModel::set_entity_light_owner);
+	ClassDB::bind_method(D_METHOD("get_entity_light_owner"),
+			&ObjectModel::get_entity_light_owner);
 	ClassDB::bind_method(D_METHOD("set_focal_sway", "active", "basis", "world_offset"),
 			&ObjectModel::set_focal_sway);
 	ClassDB::bind_static_method("ObjectModel",
@@ -1964,6 +1966,11 @@ void ObjectModel::_bind_methods() {
 			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
 					"interior_daylight"),
 			&ObjectModel::set_entity_lighting_context);
+	ClassDB::bind_method(D_METHOD("get_lighting_effect_scale"),
+			&ObjectModel::get_lighting_effect_scale);
+	ClassDB::bind_method(D_METHOD("is_interior_lerp"), &ObjectModel::is_interior_lerp);
+	ClassDB::bind_method(D_METHOD("get_interior_daylight"),
+			&ObjectModel::get_interior_daylight);
 	ClassDB::bind_method(D_METHOD("set_interior_section_light_transfer", "daylight"),
 			&ObjectModel::set_interior_section_light_transfer);
 	ClassDB::bind_method(D_METHOD("get_model_bounds"), &ObjectModel::get_model_bounds);

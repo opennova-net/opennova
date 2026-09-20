@@ -67,6 +67,22 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)
 	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
+	s.hud_hit_feedback_frames = runtime != nullptr ? runtime->state().hud_hit_feedback_frames : 0;
+	if (runtime) {
+		s.hud_service.preround_seconds = runtime->state().preround_delay_seconds;
+		s.hud_service.reload_seconds = runtime->state().vehicle_reload_seconds;
+		s.hud_service.owned_zone_mask = runtime->state().owned_zone_mask;
+		// Keep link order: an equal-distance designation retains the first.
+		// [orig: SpawnPoint_FindNearestByTypeAndTeam @0x5BBF42..0x5BBFC3]
+		const auto &state = runtime->state();
+		for (const auto &link : state.minimap.linked) {
+			if (!link.active || !link.remaining_ticks || link.type != 1)
+				continue;
+			const auto *owner = state.find(link.handle);
+			s.hud_designations.push_back(
+					{ link.x, link.y, link.radius_q16, uint8_t(owner ? owner->team : 0) });
+		}
+	}
 	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
 	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
 	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;

@@ -109,6 +109,8 @@ struct WeaponFsmActionRow {
 // begin leg ActionSlot_ExecuteActionWithEffect @ 0x541860 / ActionSlot_SpawnEffect
 // @ 0x401f20 — carried here as the authored names; the host seams resolve them]
 struct WeaponFsmAction {
+	int8_t map_command =
+			0; // +1 open if closed, -1 close mode 2 [orig: @0x5432D0/@0x543360/@0x5434E0]
     int32_t id = -1;         // the action slot id (weapon_action::*), stamped by the bake
     int32_t delay_start = 0;
     int32_t delay_end = 0;
@@ -314,6 +316,7 @@ struct WeaponFsmInputs {
 // Per-tick outputs for the host. anim events carry the .adm clip key to start on the
 // viewmodel parts (arms + gun share the animadm channel).
 struct WeaponFsmEvents {
+	int8_t map_command = 0;
     bool play_anim = false;
     // One gated step of FP channel time this tick. Retail advances the viewmodel's
     // animadm channel ONLY from the handlers' tick shim, and only while the slot

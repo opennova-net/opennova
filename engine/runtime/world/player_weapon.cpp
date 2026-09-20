@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/local_player_view.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
@@ -29,8 +30,6 @@ namespace opennova::world {
 
 namespace {
 
-constexpr double kFixed16 = 65536.0;
-
 Vec3 local_player_mission_position(const World &world) {
 	const Entity *e = world.registry.get(world.cached.local_player);
 	return e != nullptr ? e->position : Vec3{};
@@ -47,6 +46,16 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
 		}
 	}
 	return &w.slot;
+}
+
+// The local player's Pitch store: the body, its look mirror and the
+// input-owned look word move together.
+void local_player_level_pitch(World &world) {
+	if (AiEntity *body = world.ai.for_handle(world.cached.local_player)) {
+		body->pitch = 0;
+		body->inf.look_pitch = 0;
+	}
+	if (world.local_player_state) world.local_player_state->input.look_pitch = 0;
 }
 
 const WeaponSlotState *active_local_weapon_slot(const World &world,
@@ -499,6 +508,18 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def.heat_decay_per_tick = data.heat_decay_per_tick;
 	w.def.heat_glow_threshold = data.heat_glow_threshold;
 	w.scope_max_mag = data.scope_max_mag;
+    w.hud_category = data.hud_category;
+    w.emplaced_stance = data.emplaced_stance;
+    w.pitch_min_bam = data.pitch_min_bam;
+    w.pitch_max_bam = data.pitch_max_bam;
+    if (!same_weapon_rebake) {
+        const bool absorb = (flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0;
+        w.pitch_offset_bam = absorb ? io::bam_sub(w.pitch_max_bam, w.pitch_min_bam) : 0;
+        // The mount stamp reads the RAW def flag, not the seat-flag query.
+        // [orig: Player_MountWeaponSlot @0x4DFA86; Pitch = 0 / offset = max - min
+        //  @0x4DFAB7, else 0 @0x4DFABE]
+        if (absorb) local_player_level_pitch(world);
+    }
     view.weapon_hip_pose = data.view_hip_pose;
     view.weapon_ads_pose = data.view_ads_pose;
     w.def.scope_zero = data.scope_zero;
@@ -807,6 +828,7 @@ void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
 
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
+	io.map_command = 0;
 	io.fired = LocalWeaponFiredWire{};
 	io.reload = LocalWeaponReloadWire{};
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
@@ -928,6 +950,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	io.map_command = ev.map_command;
 	if (player != nullptr) weapon_sound_publish(world, *player, w.def, ev);
 	// A release whose fire request the FSM refused must not leave the charge
 	// latched for a later unrelated shot — the charge byte is consumed by the
@@ -1041,8 +1064,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const uint8_t adm_index = shooter->equipped_adm_index;
 			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
-				const Vec3 origin = player_eye_position(*shooter);
-				const FixedVec3 fire_origin{to_fixed(origin.x), to_fixed(origin.y), to_fixed(origin.z)};
+                int32_t pose[6];
+                local_weapon_fire_pose(world, w, ev.fired_clip_before_consume,
+                        player_view_scope_settled(view), pose);
+                const Vec3 origin{float(pose[0])/65536.0f, float(pose[1])/65536.0f, float(pose[2])/65536.0f};
+                const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
 				const bool accepted = !io.is_authority ||
 						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
 						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0);
@@ -1056,13 +1082,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// diagonal (impacts landed 90 deg off the aim ray - the
 				// fp_impact_probe pin; the same mistake D-NET-153 records for the
 				// wire leg).
-				const int32_t dir_yaw = p->heading;
+				const int32_t dir_yaw = pose[3];
 				// Fire position/direction sees the undoubled recoil accumulator;
 				// the camera is the separate 2*R consumer. Spread below still
 				// samples R>>8 before this shot adds its own impulse.
 				// [orig: Entity_CalcWeaponFirePosition @0x4DC847]
-				const int32_t dir_pitch =
-						opennova::io::bam_add(p->pitch, p->inf.recoil_pitch);
+				const int32_t dir_pitch = pose[4];
+                const EntityHandle fire_target{p->slot.f[3] != 0
+                    ? uint16_t(p->slot.f[3] - 1) : EntityHandle::kInvalid};
+                shooter->last_fire_target = fire_target;
 				w.round_sequence = static_cast<uint16_t>(w.round_sequence + 1u);
 				const uint16_t shot_seq = w.round_sequence;
 				world.vehicles.weapon_recoil(*shooter,
@@ -1072,12 +1100,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round_event.shooter_handle = !io.is_authority
 						? io.self_wire_handle
 						: world.cached.local_player.packed;
-				round_event.origin_x = static_cast<int32_t>(
-						std::lround(double(origin.x) * kFixed16));
-				round_event.origin_y = static_cast<int32_t>(
-						std::lround(double(origin.y) * kFixed16));
-				round_event.origin_z = static_cast<int32_t>(
-						std::lround(double(origin.z) * kFixed16));
+				round_event.origin_x = pose[0];
+				round_event.origin_y = pose[1];
+				round_event.origin_z = pose[2];
 				round_event.dir_yaw = dir_yaw;
 				round_event.dir_pitch = dir_pitch;
 				round_event.shot_seq = shot_seq;
@@ -1157,6 +1182,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					io.fired.adm_index = adm_index;
 					io.fired.ammo_index = adm->ammo_index;
 					io.fired.charge = w.pending_throw_charge;
+                    io.fired.target_handle = fire_target.packed;
 					io.fired.shooter_pose[0] = p->pos[0];
 					io.fired.shooter_pose[1] = p->pos[1];
 					io.fired.shooter_pose[2] = p->pos[2];
@@ -1307,6 +1333,12 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 	data.heat_decay_per_tick = row.heat_decay_per_tick;
 	data.heat_glow_threshold = row.heat_glow_threshold;
 	data.scope_max_mag = row.scope_max_mag;
+    data.hud_category = row.category;
+    data.emplaced_stance = row.emplacedstance;
+    // The parser negates the minimum and uses truncated BAM/degree.
+    // [orig: WeaponDefs_ParseLineCallback @0x5443D1..0x544440]
+    data.pitch_min_bam = int32_t(0u - uint32_t(row.targetpitchmin) * 11930464u);
+    data.pitch_max_bam = int32_t(uint32_t(row.targetpitchmax) * 11930464u);
     for (int i = 0; i < 3; ++i) {
         // The parser's float position is authored units * 256; rotation is
         // Q16 degrees * 0x0B60B60, rounded by add/adc 0x8000 before SHRD.

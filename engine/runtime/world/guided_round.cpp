@@ -7,10 +7,27 @@
 namespace opennova::world {
 EntityHandle guided_heat_target(World &, const Entity &, const AiEntity &, const AmmoTableEntry &);
 namespace {
+// The RAW Position copies: the Javelin launch seed, the owner's class
+// get-target callback and the flare decoy.
+// [orig: jvln launch @0x445E40..0x445E97; sub_4B0DD0 @0x4B0DF5..0x4B0E12;
+//  flare decoy @0x446232..0x44626B]
+void target_position(const Entity &target, int32_t out[3]) {
+    out[0] = to_fixed(target.position.x);
+    out[1] = to_fixed(target.position.y);
+    out[2] = to_fixed(target.position.z);
+}
+// Every IN-FLIGHT refresh samples the target's aim origin instead: a person's
+// phased CameraOffset point, a model's TARGET userpoint, else its bbox centre.
+// [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0 -- stng @0x4463A3, hlfr
+//  @0x446772, jvln @0x446C2D / @0x446D82 / @0x446DF6 / @0x446E8E / @0x446F74]
+void target_sample(World &world, const Entity &target, bool launch, int32_t out[3]) {
+    if (launch) target_position(target, out);
+    else world.ai.weapon_aim_origin(world, target, out);
+}
 GuidedAmmo parameters(const AmmoTableEntry &ammo) {
     return {ammo.velocity, ammo.turnrate_maxpit, ammo.turnrate_maxyaw, ammo.boresight_maxang};
 }
-GuidedInputs inputs(World &world, const LiveRound &r, bool authority) {
+GuidedInputs inputs(World &world, const LiveRound &r, bool authority, bool launch) {
     GuidedInputs in;
     in.authority = authority; in.session = world.rules.mp_session;
     const Entity *owner = world.registry.get(r.owner);
@@ -24,13 +41,13 @@ GuidedInputs inputs(World &world, const LiveRound &r, bool authority) {
         }
         if (const Entity *aim = world.registry.get(EntityHandle{in.owner_target})) {
             in.owner_aim = true;
-            world.ai.weapon_fire_origin(world, *aim, in.aim);
+            target_position(*aim, in.aim);
         }
     }
     const uint16_t target_id = r.guided.target == 0xFFFF && r.guided.phase == 0 ? in.owner_target : r.guided.target;
     if (const Entity *target = world.registry.get(EntityHandle{target_id})) {
         in.target_present = true; in.target_alive = target->health > 0;
-        world.ai.weapon_fire_origin(world, *target, in.target_origin);
+        target_sample(world, *target, launch, in.target_origin);
     }
     return in;
 }
@@ -61,7 +78,7 @@ void RoundSim::init_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
     }
     r.spin_yaw = r.spin_pitch = r.spin_roll = 0;
     copy_pose(r, r.guided);
-    auto in = inputs(world, r, r.consequence_mode == RoundConsequenceMode::Authoritative);
+    auto in = inputs(world, r, r.consequence_mode == RoundConsequenceMode::Authoritative, true);
     if (r.guided_family == GuidedFamily::Stinger && in.owner_ai) {
         if (Entity *owner = world.registry.get(r.owner)) {
             if (AiEntity *body = world.ai.for_handle(r.owner)) {
@@ -84,7 +101,7 @@ void RoundSim::init_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
 void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &ammo, bool authority) {
     auto &s = r.guided;
     copy_pose(r, s); s.age = r.age_ticks - 1;
-    auto in = inputs(world, r, authority);
+    auto in = inputs(world, r, authority, false);
     if (authority && r.guided_family == GuidedFamily::Stinger &&
         ((s.timer >= 0 && s.timer <= 1) || ((s.flags & 2) && (!in.target_present || !in.target_alive)))) {
         in.acquisition_ran = true;
@@ -98,8 +115,8 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
             in.acquired_target = chosen.packed;
             if (const Entity *target = world.registry.get(chosen)) {
                 in.acquired = true; in.target_present = true; in.target_alive = target->health > 0;
-                world.ai.weapon_fire_origin(world, *target, in.target_origin);
-                std::copy_n(in.target_origin, 3, in.acquired_origin);
+                target_sample(world, *target, false, in.target_origin);
+                target_position(*target, in.acquired_origin);
             }
         }
     }

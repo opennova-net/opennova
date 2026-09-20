@@ -5,8 +5,8 @@
 // player, the HostClient replica fold), N listen frames over a null socket
 // (the logic clock advances once per frame, the 0x0A fan folds into the local
 // ClientState, the viewport seam reaches the ctx), the local C2S gameplay
-// drain (a reload request is consumed by the server dispatcher while every
-// other datagram stays queued for Server_TickUpdate), and the dedicated
+// drain (reload and mounted-slot requests reach the server dispatcher while
+// movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -23,6 +23,7 @@
 
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -178,11 +179,10 @@ int main() {
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
 
-		// The local C2S gameplay drain: only the witnessed local reload
-		// producer reaches the per-message server dispatcher here; every
-		// other datagram is preserved in order for Server_TickUpdate's drain.
+		// The local gameplay drain consumes reloads while preserving movement
+		// for Server_TickUpdate's dedicated uplink decoder.
 		const size_t s2c_before = host.host_loop.s2c_pending();
-		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
+		host.host_loop.client_send(c2s::ENTITY_UPLINK, std::vector<uint8_t>{0});
 		WeaponReload reload;
 		reload.entity_handle = kernel.local.player()->handle.packed;
 		reload.reload_param = 0;
@@ -192,15 +192,22 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 1);
 		replication::Datagram preserved;
 		CHECK(host.host_loop.host_recv(preserved));
-		CHECK(preserved.tag == c2s::MOUNTED_WEAPON_SLOT_SELECT);
+		CHECK(preserved.tag == c2s::ENTITY_UPLINK);
 		CHECK(!host.host_loop.host_recv(preserved));
 		std::printf("host_role: the reload drain staged %zu S2C reply datagram(s)\n",
 				host.host_loop.s2c_pending() - s2c_before);
 		// A drain with nothing queued is a no-op.
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
+		// The host's own medic call (action 217 -> C2S 0x2E) rides the same
+		// queue and must reach the dispatcher, not the movement-only drain.
+		// [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
+		CHECK(role.send_medic_request());
+		CHECK(host.host_loop.c2s_pending() == 1);
+		role.drain_host_client_gameplay_requests();
+		CHECK(host.host_loop.c2s_pending() == 0);
 		// The next frame's Server_TickUpdate drains what the local drain left.
-		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
+		host.host_loop.client_send(c2s::ENTITY_UPLINK, std::vector<uint8_t>{0});
 		role.run_tick(tick_input(0));
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// Recreate the local replica and repeat an equal point award. Both the
@@ -218,6 +225,88 @@ int main() {
 			CHECK(role.reset_to_baseline(reset_error));
 			CHECK(kernel.world.match.player(scorer)->stats[w::MatchStats::kPoints] == 0);
 			CHECK(host.client_runtime->state().score_feedback.updates == 0);
+		}
+	}
+
+	// Action 6 from the host's own player must traverse the same dispatcher
+	// as a remote C2S 0x16, before the movement-only drain can discard it.
+	// [orig: Input_HandleActionBinding_0 @ 0x4E0420 (action 6 @ 0x4E0492);
+	// NapiNPServerMsg_HandleWeaponToggle @ 0x511A70]
+	{
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		auto &role = *role_storage;
+		role.bind(kernel);
+		kernel.open_document(synthetic_mission(), "tank_slots", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		for (int i = 0; i < 8; ++i) role.run_tick(tick_input(0));
+
+		auto &world = kernel.world;
+		const auto add_weapon = [&](const char *name, int clip, int rounds) {
+			w::WeaponTableEntry def;
+			def.name = name;
+			def.valid = true;
+			def.category = 11;
+			def.clipsize = clip;
+			def.startrounds = rounds;
+			world.tables.weapons.entries.push_back(def);
+		};
+		add_weapon("WPN_TANK_CANNON", 1, 40);
+		add_weapon("WPN_TANK_COAX", 200, 600);
+		w::Entity hull;
+		hull.kind = w::EntityKind::Item;
+		hull.has_item_def = true;
+		hull.item_type = 1;
+		hull.item_attrib = w::kItemAttribEweap;
+		hull.primary_weapon = "WPN_TANK_COAX";
+		const auto hull_handle = world.registry.spawn(1, hull);
+		CHECK(hull_handle.valid());
+		if (!hull_handle.valid()) return 1;
+		w::Entity gun;
+		gun.kind = w::EntityKind::Item;
+		gun.has_item_def = true;
+		gun.item_type = 6;
+		gun.item_attrib = w::kItemAttribEweap;
+		gun.primary_weapon = "WPN_TANK_CANNON";
+		gun.emplacement_attachment_flags = 2;
+		gun.emplacement_parent = hull_handle;
+		gun.emplacement_parent_spawn_id = world.registry.get(hull_handle)->registry_spawn_id;
+		gun.ground_target = hull_handle;
+		w::Seat seat;
+		seat.type = w::SeatType::Gunner;
+		seat.bone_index = 1;
+		seat.retail_slot = 9;
+		gun.seats.push_back(seat);
+		const auto gun_handle = world.registry.spawn(1, gun);
+		CHECK(gun_handle.valid());
+		if (!gun_handle.valid()) return 1;
+		CHECK(world.vehicles.process_attach(world.cached.local_player, gun_handle, 1));
+		auto &live_gun = *world.registry.get(gun_handle);
+		auto &live_hull = *world.registry.get(hull_handle);
+		CHECK(world.vehicles.prepare_weapon_slot(live_hull));
+		live_gun.primary_weapon_slot.clip = 0;
+		live_gun.primary_weapon_slot.reserve = 37;
+		live_hull.primary_weapon_slot.clip = 123;
+		live_hull.primary_weapon_slot.reserve = 321;
+		for (bool parent : {true, false, true, false}) {
+			MountedWeaponSlotSelection request;
+			request.use_parent_slot = parent;
+			role.state.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+					encode_mounted_weapon_slot_selection(request));
+			role.drain_host_client_gameplay_requests();
+			CHECK(role.state.host_loop.c2s_pending() == 0);
+			CHECK(live_gun.primary_weapon_slot.redirect_to_parent_slot == parent);
+			const auto *selected = world.vehicles.resolve_mounted_ammo_slot(live_gun);
+			CHECK(selected == (parent ? &live_hull.primary_weapon_slot : &live_gun.primary_weapon_slot));
+			CHECK(kernel.local.player()->equipped_adm_index ==
+					(parent ? live_hull.primary_weapon_slot_adm : live_gun.primary_weapon_slot_adm));
+			CHECK(live_gun.primary_weapon_slot.clip == 0 && live_gun.primary_weapon_slot.reserve == 37);
+			CHECK(live_hull.primary_weapon_slot.clip == 123 && live_hull.primary_weapon_slot.reserve == 321);
 		}
 	}
 
