@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [master]
+  # Every pull request, whatever its base: a PR stacked on another PR's
+  # branch gets the same checks as one targeting master.
   pull_request:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
