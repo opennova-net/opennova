@@ -16,6 +16,10 @@
   group-qualified (`<runtime/terrain_query/coords.h>`, not
   `<terrain_query/coords.h>`); decision 5's seam headers and the
   `<domain/...>` paths named below read with their group prefix now.
+  [ADR 0046](0046-opennova-editor.md) (2026-09-20) adds a sixth STATIC group
+  target, `opennova_editor` (`engine/editor/`, the OpenNova Editor's portable
+  core), PUBLIC-linking `opennova_runtime`; no other engine target links it, and
+  only the editor-enabled GDExtension variant, `apps/project` and the tests do.
 - **Supersedes/updates**: ADR 0024 decision 1's per-format-CMake-target clause
   and decisions 2–4 (the family link groups) — its one-directory-per-format
   layout, the decision-5 renderer reversal, and the decision-6 Model A/B

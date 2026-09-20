@@ -6,6 +6,10 @@
 >
 > **Updated by [ADR 0045](0045-cli-game-data-runtime-only.md).** ONED is removed, so one
 > Godot product remains (the runtime game); the serve-mode rule stands.
+>
+> **Updated by [ADR 0046](0046-opennova-editor.md).** Two Godot products again: the game
+> (`opennova.exe`, plus its Play export used by the editor) and the OpenNova Editor
+> (`opennova-editor.exe`, feature `opennova_editor`); the serve-mode rule stands.
 
 OpenNova's shared Godot project exports exactly two applications per platform:
 

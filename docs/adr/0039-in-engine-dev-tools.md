@@ -1,6 +1,12 @@
 # ADR 0039: The tool UI lives in the engine, drawn with Dear ImGui
 
 > ONED, bundled data, and picker provisions are superseded by [ADR 0045](0045-cli-game-data-runtime-only.md). Runtime ImGui and retail format findings remain applicable.
+>
+> **Updated by [ADR 0046](0046-opennova-editor.md) (2026-09-20).** The OpenNova Editor
+> composes its own window set (`engine/editor/ui`) on the same `ImGuiPass` through a
+> restored shared `ImGuiPassNode`; the 2026-09-19 "the game is the pass's only consumer"
+> amendment and decision 7 ("Not an editor") now scope the GAME's dev tools only, and
+> Dear ImGui compiles when either `OPENNOVA_DEVTOOLS` or `OPENNOVA_EDITOR` is on.
 
 - **Status**: accepted (2026-08-27; hard cut)
 - **Owners**: engine runtime, the game shell

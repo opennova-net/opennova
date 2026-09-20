@@ -159,6 +159,13 @@ Each domain's next step is named in its own record, not centrally:
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
 | Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md); schema, runtime state restoration and slot lifecycle, D-SAVE-1 |
 
+The one non-parity program in flight is the OpenNova Editor
+([ADR 0046](adr/0046-opennova-editor.md), opened 2026-09-20): a project-based data
+editor returning as a second Godot product, landing slice by slice in the order its
+decision 12 names (project core and CLI, blank factories, build and Play, the shell and
+packaging, the item/weapon/ammo catalog, strings and menus, the asset graph, imports);
+the ADR is that program's only tracked plan.
+
 Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans: `plan/`

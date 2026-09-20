@@ -16,6 +16,11 @@ bindings in a hard cut. The authoring-language statement above and corresponding
 historical body text no longer describe the product; `refs` in the inventory below
 records the tree at decision time.
 
+[ADR 0046](0046-opennova-editor.md) (2026-09-20) adds a fifth engine group,
+`engine/editor/` (the OpenNova Editor's portable core, STATIC `opennova_editor`,
+above `runtime`); the four-group statements below describe the tree at decision
+time, and nothing under the four groups may include or link the fifth.
+
 ## Context
 
 ADR 0016 fixed the layering in words: the portable, Godot-free C++ core "is the

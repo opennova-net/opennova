@@ -25,10 +25,13 @@ The project does not ship a Python, Qt, Blender, or standalone asset-importer
 toolchain. Runtime asset loading is native and the supported object input is
 3DI.
 
-A future editor will use GLB/GLTF as its scene interchange: GLB/GLTF to 3DI
-for runtime assets and 3DI to GLB for editing. That converter is not part of
-the current repository. Its scene contract is documented without depending on
-importer metadata or DCC custom properties.
+The OpenNova Editor (experimental, being brought back slice by slice under ADR
+0046) is a separately exported application: a project directory of loose game files,
+a requirements checklist for everything the engine expects by name, and Play/Export
+steps that pack the archives. Its model importer will use GLB/GLTF as its scene
+interchange (GLB/GLTF to 3DI for runtime assets and 3DI to GLB for editing); that
+converter is not part of the current repository, and its scene contract is documented
+without depending on importer metadata or DCC custom properties.
 
 ## Build and test
 
