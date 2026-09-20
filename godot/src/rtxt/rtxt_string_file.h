@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <formats/rtxt/rtxt.h>
+#include <runtime/hud/game_text_lookup.h> // the engine's ONE game-text seam
 
 namespace godot {
 
@@ -116,5 +117,16 @@ public:
 	// Native access for the loader/saver.
 	const opennova::rtxt::File &get_native() const { return file_; }
 };
+
+// The engine's game-text seam (hud/game_text_lookup.h) bound over a string
+// table: a present key answers its value, an absent key (or no table) the
+// fallback. The one factory every engine text argument comes from.
+inline opennova::hud::GameTextLookup game_text_lookup(const Ref<RtxtStringFile> &table) {
+	return [table](const char *section, const char *key, const char *fallback) {
+		if (table.is_valid() && table->has_string_in_section(section, key))
+			return std::string(table->get_string_in_section(section, key).utf8().get_data());
+		return std::string(fallback);
+	};
+}
 
 } // namespace godot

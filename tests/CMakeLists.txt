@@ -1070,6 +1070,20 @@ target_include_directories(score_fanfare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(score_fanfare_test PRIVATE cxx_std_17)
 add_test(NAME score_fanfare COMMAND score_fanfare_test)
 
+# The HUD's game-text compositions (hud/hud_game_text.h) and the feed row's gametext
+# resolve (hud/feed_format.h feed_row_line).
+add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
+target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
+add_test(NAME hud_game_text COMMAND hud_game_text_test)
+
+# The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
+# the corner rects, the positioned records, the packed colours, the stance slots and
+# the last-authored static frame; the retail leg reads the shipped hudpos.def.
+add_executable(hud_layout_test hud/hud_layout_test.cpp)
+target_link_libraries(hud_layout_test PRIVATE opennova_runtime)
+target_include_directories(hud_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_layout COMMAND hud_layout_test)
+
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

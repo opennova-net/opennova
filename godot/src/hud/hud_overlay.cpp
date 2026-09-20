@@ -37,6 +37,7 @@
 using namespace godot;
 
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
@@ -89,34 +90,6 @@ void fragment() {
 	COLOR = map_color;
 }
 )";
-
-HudPosRecord pos_record4(const Vector4i &v) {
-	HudPosRecord r;
-	r.x = v.x;
-	r.y = v.y;
-	r.hidden = v.z;
-	r.align = v.w;
-	r.present = true;
-	return r;
-}
-
-HudPosRecord pos_record2(const Vector2i &v) {
-	HudPosRecord r;
-	r.x = v.x;
-	r.y = v.y;
-	r.present = true;
-	return r;
-}
-
-HudRectRecord rect_record(const Rect2i &rect) {
-	HudRectRecord r;
-	r.x = static_cast<float>(rect.position.x);
-	r.y = static_cast<float>(rect.position.y);
-	r.w = static_cast<float>(rect.size.x);
-	r.h = static_cast<float>(rect.size.y);
-	r.present = true;
-	return r;
-}
 
 } // namespace
 
@@ -497,48 +470,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		return;
 	}
 
-	layout_.ammo_count = pos_record4(p_hudpos->get_ammo_count_pos());
-	layout_.weapon_name = pos_record4(p_hudpos->get_weapon_name_pos());
-	layout_.game_info = pos_record4(p_hudpos->get_game_info_pos());
-	layout_.wpd_info = pos_record4(p_hudpos->get_wpd_info_pos());
-	layout_.chat_text = pos_record2(p_hudpos->get_chat_text_pos());
-	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
-	// are NOT the HUDCHATTEXT anchor: retail's g_hudChatBoxCoords are written
-	// by a separate hud.def `chat_message x1 y1 x2 y2` / `sys_message` parser
-	// [orig: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
-	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841],
-	// and JO:CA ships no hud.def — the rows stay 0, the width is 4, and the
-	// wrapper returns 1 at the first character, so a retail chat line never
-	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
-	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
-	layout_.sys_text = pos_record2(p_hudpos->get_sys_text_pos());
-	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_hudZonePanelX/Y).
-	{
-		const Vector2i lfp = p_hudpos->get_lfp_flags();
-		layout_.lfp_anchor_x = lfp.x;
-		layout_.lfp_anchor_y = lfp.y;
-		layout_.lfp_anchor_present = true;
-	}
-	// HUDVEHSTANCEPOS — the vehicle panel's base before the stance offset.
-	veh_stance_pos_ = p_hudpos->get_veh_stance_pos();
-	layout_.clip_pos = pos_record2(p_hudpos->get_clip_pos());
-	layout_.stance_pos = pos_record2(p_hudpos->get_stance_pos());
-	const auto &hud = p_hudpos->native_file().hud;
-	configure_combat_(p_hudpos);
-	layout_.scope_range = pos_record2(Vector2i(hud.scope_range[0], hud.scope_range[1]));
-	layout_.scope_zero = pos_record2(Vector2i(hud.scope_zero[0], hud.scope_zero[1]));
-	layout_.scope_mag = pos_record2(Vector2i(hud.scope_mag[0], hud.scope_mag[1]));
-	layout_.health_rect = rect_record(p_hudpos->get_health_rect());
-	layout_.heat_rect = rect_record(p_hudpos->get_heat_rect());
-	layout_.power_rect = rect_record(p_hudpos->get_powerbar_rect());
-	const Rect2i spinmap = p_hudpos->get_spinmap_bounds();
-	layout_.spinmap_rect = rect_record(spinmap);
-	layout_.spinmap_rect.present = spinmap.size.x > 0 && spinmap.size.y > 0;
-	layout_.spinmap_wp_dist_off = p_hudpos->get_spinmap_wp_dist_off();
-	const Vector3i map_coords = p_hudpos->get_map_coords();
-	layout_.map_coords_x = static_cast<float>(map_coords.x);
-	layout_.map_coords_y = static_cast<float>(map_coords.y);
-	layout_.map_coords_off = map_coords.z;
+	// The layout globals the parse authors are the engine's fill; this leg
+	// resolves the names it hands back and stamps the texture-derived fields.
+	opennova::hud::HudLayoutAssets assets;
+	opennova::hud::hud_layout_from_hudpos(p_hudpos->native_file(), layout_, assets);
+	configure_combat_(assets);
 
 	// The HUDDECLUT mask table from the parsed rows: the engine's
 	// declutter_from_hudpos (see docs/interface/hud-re.md); a file with no
@@ -553,47 +489,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		apply_declutter_();
 	}
 
-	const Dictionary colors = p_hudpos->get_colors();
-	const auto color_of = [&colors](const char *key, uint32_t fallback) {
-		if (!colors.has(key)) {
-			return fallback;
-		}
-		return opennova::argb_from_color(colors[key]);
-	};
-	layout_.health_border = color_of("health_border", layout_.health_border);
-	layout_.tag_good = color_of("tagcolor_good", layout_.tag_good);
-	layout_.tag_middle = color_of("tagcolor_middle", layout_.tag_middle);
-	layout_.tag_bad = color_of("tagcolor_bad", layout_.tag_bad);
-	layout_.hud_text = color_of("hud_textcolor", layout_.hud_text);
-	layout_.weapon_text = color_of("weapon_textcolor", layout_.weapon_text);
-	layout_.stance_tint = color_of("stanceicon_color", layout_.stance_tint);
-	layout_.heat_border = color_of("heat_border", layout_.heat_border);
-	// The whole stance colour triple: the vehicle panel bands its seats with the
-	// same three the stance bar reads [orig: the good/middle/bad arms of the
-	// seat loop in HUD_DrawVehicleHealthBars @0x5a4fd0, see docs/interface/hud-re.md].
-	layout_.stance_good = color_of("stancecolor_good", layout_.stance_good);
-	layout_.stance_middle = color_of("stancecolor_middle", layout_.stance_middle);
-	layout_.stance_bad = color_of("stancecolor_bad", layout_.stance_bad);
-
-	const Vector3 fade = p_hudpos->get_alpha_fade();
-	layout_.alpha_fade_base = fade.x;
-	layout_.alpha_fade_max = fade.y;
-	layout_.alpha_fade_seconds = fade.z;
-	const int chline = p_hudpos->get_hud_chline();
-	layout_.chat_lines = chline > 0 ? chline : 8;
-
-	// Static HUD frame background. Retail keeps ONE static frame and the LAST
-	// authored line wins, so the index comes from the engine-side policy rather
-	// than being assumed here [orig: HUD_ParseHudposToken @0x59F370, see
-	// engine/runtime/hud/hud_frame.h].
-	const Array frames = p_hudpos->get_static_frames();
-	const int frame_index =
-			opennova::hud::hud_static_frame_index(static_cast<int>(frames.size()));
-	if (frame_index >= 0) {
-		const Dictionary frame = frames[frame_index];
-		const Vector2i pos = frame.get("pos", Vector2i());
-		layout_.frame_pos = pos_record2(pos);
-		const Ref<Texture2D> tex = load_hud_texture_(frame.get("texture", String()));
+	// The static HUD frame background the engine picked (the last authored
+	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
+	if (layout_.frame_pos.present) {
+		const Ref<Texture2D> tex = load_hud_texture_(String::utf8(assets.static_frame.c_str()));
 		textures_[opennova::hud::kHudTexFrame] = tex;
 		layout_.frame_texture_valid = tex.is_valid();
 		layout_.frame_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -645,23 +544,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
 	}
 
-	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is
-	// irrelevant and a later record for the same id replaces the earlier one.
-	String stance_names[6];
-	const Array stances = p_hudpos->get_stances();
-	for (int64_t i = 0; i < stances.size(); ++i) {
-		const Dictionary stance = stances[i];
-		const int id = stance.get("id", -1);
-		if (id < 0 || id >= 6) {
-			continue;
-		}
-		stance_names[id] = String(stance.get("texture", String()));
-		const Vector2i offset = stance.get("offset", Vector2i());
-		layout_.stance_offset_x[static_cast<size_t>(id)] = offset.x;
-		layout_.stance_offset_y[static_cast<size_t>(id)] = offset.y;
-	}
+	// The six stance frames' textures by slot (the engine resolved the
+	// HUDSTANCE ids and offsets).
 	for (int i = 0; i < 6; ++i) {
-		const Ref<Texture2D> tex = load_hud_texture_(stance_names[i]);
+		const Ref<Texture2D> tex =
+				load_hud_texture_(String::utf8(assets.stance_textures[static_cast<size_t>(i)].c_str()));
 		textures_[opennova::hud::kHudTexStance0 + i] = tex;
 		layout_.stance_texture_valid[static_cast<size_t>(i)] = tex.is_valid();
 	}
@@ -701,13 +588,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
 			load_hud_texture_("WPIndctr.tga");
 
-	// The HUD font named by hudpos (hi first, lo fallback), parsed by the
+	// The HUD font hudpos names (the engine's hi-first pick), parsed by the
 	// engine fnt lib; page bitmaps become one texture each for glyph quads.
-	String font_name = p_hudpos->get_font_hi();
-	if (font_name.is_empty()) {
-		font_name = p_hudpos->get_font_lo();
-	}
-	font_valid_ = load_fnt_(font_name, font_, opennova::hud::kHudFontSlotHud);
+	font_valid_ = load_fnt_(String::utf8(assets.font.c_str()), font_,
+			opennova::hud::kHudFontSlotHud);
 
 	configured_ = true;
 	compiler_.configure(layout_, font_valid_ ? &font_ : nullptr);
@@ -995,8 +879,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 	// The base is the HUDVEHSTANCEPOS anchor plus the rider's HUDSTANCE
 	// offset — the panel rides the stance icon.
 	const int stance = CLAMP(p_stance, 0, 5);
-	vp.anchor_x = veh_stance_pos_.x;
-	vp.anchor_y = veh_stance_pos_.y;
+	vp.anchor_x = layout_.veh_stance_pos.x;
+	vp.anchor_y = layout_.veh_stance_pos.y;
 	vp.stance_offset_x = layout_.stance_offset_x[static_cast<size_t>(stance)];
 	vp.stance_offset_y = layout_.stance_offset_y[static_cast<size_t>(stance)];
 	// Hull band + seat rows straight from the sim's feed, no script round-trip

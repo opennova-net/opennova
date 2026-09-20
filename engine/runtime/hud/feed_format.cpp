@@ -177,6 +177,19 @@ std::string feed_format_row(const FeedRow &row, const std::string &tmpl,
 			row.extra, bonus_tmpl);
 }
 
+std::string feed_row_line(const FeedRow &row, const GameTextLookup &gametext) {
+	const std::string tmpl = gametext("Canned Msg", row.key.c_str(), "");
+	if (tmpl.empty()) return std::string();
+	const std::string wpname = row.camp ? gametext("WPNames", row.wpname_key.c_str(), "")
+										: std::string();
+	const std::string bonus_tmpl = row.extra.empty() ? std::string()
+													  : gametext("Canned Msg", "STRCND48", "");
+	// A missing actor formats as the Client fallback string
+	// [orig: @0x422DDA/@0x422E91 -> GameText_GetString("Client", "STRCLI01")].
+	const std::string unknown = gametext("Client", "STRCLI01", "");
+	return feed_format_row(row, tmpl, unknown, bonus_tmpl, wpname);
+}
+
 void KillAnnouncement::record(const std::string &line, uint32_t now) {
 	text = line.substr(0, 255);
 	tick = now;

@@ -677,20 +677,11 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	return entry
 
 
-# The waypoint display name. Our SP runtime is the co-op session shape (gametype
-# 0x30020), whose `& 0x20000` branch keys STRWPNAME by the RAW authored id — the
-# +1 remap belongs to the non-co-op MP gametypes, unported with them. The
-# armory/target/flag specials key off MP POI entity types, not SP route markers.
-# [orig: get_waypoint_name @0x594630 — index remap @0x594678; mission-table
-#  fallback @0x59473d ("STRWPNAME%03i" in WPNames); empty or "null" ->
-#  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
+# The waypoint display name (the engine's get_waypoint_name rule with its
+# STRWPNAMEDEFAULT fallback; hud_game_text.h) over the mission and gametext tables.
 func _resolve_waypoint_name(name_id: int) -> String:
-	var key := "STRWPNAME%03d" % name_id
-	var name := Strings.lookup_or(Strings.TABLE_MISSION, Strings.SECTION_WPNAMES, key, "")
-	if name.is_empty() or name.nocasecmp_to("null") == 0:
-		return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
-				"STRWPNAMEDEFAULT", "")
-	return name
+	return HudPos.waypoint_display_name(Strings.get_table(Strings.TABLE_MISSION),
+			Strings.get_table(Strings.TABLE_GAMETEXT), name_id)
 
 
 # The projection the HUD projects world points through (the attach labels, the
@@ -755,13 +746,10 @@ func _apply_friendly_tags() -> void:
 	_game_hud.set_radio_request_icon_viewer(sim.local_player_radio_request_icon_viewer())
 
 
-# The weapon's HUD display name: the raw weapon id resolved in the gametext table's
-# Strings.SECTION_WEPDES section; a miss is the empty string (the element then draws nothing).
-# [orig: GameText_GetString(Strings.SECTION_WEPDES, weapondef+20) @0x593b7f; miss "" @0x51ec00]
+# The weapon's HUD display name (the engine's WepDes rule with its miss;
+# hud_game_text.h).
 func _resolve_weapon_display_name(weapon_name: String) -> String:
-	if weapon_name.is_empty():
-		return ""
-	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WEPDES, weapon_name, "")
+	return HudPos.weapon_display_name(Strings.get_table(Strings.TABLE_GAMETEXT), weapon_name)
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
@@ -804,20 +792,16 @@ func apply_mission_effects(effects: Array) -> void:
 		elif kind == "subgoal_won" or kind == "subgoal_lost":
 			# A subgoal resolved: the mission-text announcement rides the chat
 			# feed (b = the header text id, c = the round-still-running gate);
-			# a LOST subgoal also stamps the persistent banner. [orig: case 14
-			# @0x454543 STRWINMSG chat; case 15 @0x454612 STRLOSEMSG chat +
-			# GameMsg_SetBannerText @0x454647]
+			# a LOST subgoal also stamps the persistent banner. The section and
+			# the key are the engine's (hud_game_text.h subgoal_message).
 			if e.c != 0:
 				var lost := kind == "subgoal_lost"
-				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") % e.b
-				var section := "LoseConditions" if lost else "WinConditions"
-				var t: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
-				if t != null and t.has_string_in_section(section, msg_key):
-					var line := t.get_string_in_section(section, msg_key)
-					if not line.is_empty():
-						if lost:
-							_endround_banner = line
-						_queue_hud_message(line, 0)
+				var line := HudPos.subgoal_message(
+						Strings.get_table(Strings.TABLE_MISSION), lost, e.b)
+				if not line.is_empty():
+					if lost:
+						_endround_banner = line
+					_queue_hud_message(line, 0)
 
 
 func hud_objective_line() -> String:
@@ -1120,13 +1104,10 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 
 
 ## The message feed: this frame's folded S2C 0x1E game events, each resolved
-## into the game's own canned sentence and posted to the SYSTEM ring.
-## The sim hands over the actor names, the Strings.SECTION_CANNED_MSG key and the witnessed
-## line color; here we look the keys up in gametext and run the witnessed
-## substitution through the engine formatter, so the sentence is always the
-## game's own text and never one we compose.
-## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
-##  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0]
+## into the game's own canned sentence and posted to the SYSTEM ring. The sim
+## hands over the rows; the gametext resolve and the witnessed substitution
+## are the engine's (FeedRow.resolve_line over hud::feed_row_line), so the
+## sentence is always the game's own text and never one we compose.
 func _flush_feed_events() -> void:
 	if _game_hud == null or _world == null:
 		return
@@ -1139,23 +1120,8 @@ func _flush_feed_events() -> void:
 	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table == null:
 		return
-	# A missing actor formats as the Client fallback string
-	# [orig: HUD_FormatKillEventMessage null-entity paths @0x422DDA/@0x422E91
-	#  -> GameText_GetString("Client", "STRCLI01") = "Unknown"].
-	var unknown := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CLIENT, "STRCLI01", "")
 	for row: FeedRow in rows:
-		var tmpl := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG, row.get_key(), "")
-		if tmpl.is_empty():
-			continue
-		var wpname := ""
-		if row.is_camp():
-			wpname = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
-					row.get_wpname_key(), "")
-		var bonus_tmpl := ""
-		if not row.get_extra().is_empty():
-			bonus_tmpl = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG,
-					"STRCND48", "")
-		var line := row.format_line(tmpl, unknown, bonus_tmpl, wpname)
+		var line := row.resolve_line(table)
 		if line.is_empty():
 			continue
 		_game_hud.push_feed_line(line, row.get_color())
@@ -1174,15 +1140,14 @@ func _flush_pending_hud_messages() -> void:
 	_pending_hud_messages.clear()
 
 
-# [orig: HUD_DisplayTriggeredText @0x51f190 — the mission table's "Triggered Text"
-# section, key ID%03i, read directly (no override-table consult); a miss shows nothing]
+# The mission's "Triggered Text" line (the engine's key rule; hud_game_text.h
+# triggered_text): a miss shows nothing.
 func _show_triggered_text(text_id: int) -> void:
 	if _game_hud == null:
 		return
-	var key := "ID%03d" % text_id
-	var text: String = Strings.lookup_or(Strings.TABLE_MISSION, "Triggered Text", key, "")
+	var text := HudPos.triggered_text(Strings.get_table(Strings.TABLE_MISSION), text_id)
 	if text.is_empty():
-		push_warning("GameHud: mission text %s not found in the mission string table." % key)
+		push_warning("GameHud: mission text ID%03d not found in the mission string table." % text_id)
 		return
 	_hud_objective = text
 	_game_hud.push_message(text)

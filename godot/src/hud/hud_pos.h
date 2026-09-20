@@ -4,36 +4,31 @@
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
-#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
-#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
-#include <godot_cpp/variant/vector3.hpp>
-#include <godot_cpp/variant/vector3i.hpp>
-#include <godot_cpp/variant/vector4i.hpp>
 
 #include <formats/def/def.h>
 
 namespace godot {
 
 class ResourceRoot;
+class RtxtStringFile;
 class VehicleHudBlock;
 
 // Thin GDExtension wrapper over engine/formats/def hudpos.def parsing (def_parse_hudpos).
 //
-// Read-only: it surfaces the original HUD layout — element positions in the
-// 1024x768 virtual design space, colors, stance/graphic frames and the HUD fonts
-// for the runtime HUD overlay. There is no writer; hudpos.def authoring is out
-// of scope.
+// Read-only: it holds the retained parse the HUD overlay applies through the
+// engine's hud_layout_from_hudpos, hands out one VEHICLE_HUD block by sid, and
+// carries the HUD view-helper statics. There is no writer; hudpos.def authoring
+// is out of scope.
 //
 // Layout shape and field meanings are the witnessed originals; see
 // docs/interface/hud-re.md. [orig: HUD_ParseHudposToken @0x59f370 hudpos.def parser, registered by
@@ -136,6 +131,18 @@ public:
 	// unknown) plus the non-integer layout values the LoadingScreen shell
 	// draws with.
 	static String loading_gametype_text_key(int p_game_type);
+	// The HUD's game-text compositions (hud/hud_game_text.h carries the
+	// witnesses) over the mission / gametext tables: the waypoint label's name
+	// with its "null" fallback, a resolved subgoal's WinConditions /
+	// LoseConditions announcement ("" = nothing posts), the mission's
+	// "Triggered Text" line ("" on a miss) and the WepDes weapon name.
+	static String waypoint_display_name(const Ref<RtxtStringFile> &p_mission,
+			const Ref<RtxtStringFile> &p_gametext, int p_name_id);
+	static String subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
+			int p_header_id);
+	static String triggered_text(const Ref<RtxtStringFile> &p_mission, int p_text_id);
+	static String weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
+			const String &p_weapon_id);
 	// The loading screen's wrapped text block painted into a CanvasItem: the
 	// engine breaks and places the lines (hud/loading_screen.h) against this
 	// font's measure, this leg only draws them. `align` is a HorizontalAlignment
@@ -212,56 +219,11 @@ public:
 	String get_source_path() const;
 	String get_last_error() const;
 
-	// Headline accessors used by the runtime hot path and the common preview.
-	String get_font_hi() const;
-	String get_font_lo() const;
-	Rect2i get_health_rect() const;
-	Rect2i get_heat_rect() const;
-	// HUDPOWERBAR is authored x,y,w,h (not corners) — see rect_from_xywh below.
-	Rect2i get_powerbar_rect() const;
-	Vector2i get_stance_pos() const;
-	Vector2i get_veh_stance_pos() const;
-	// LFP_FLAGS — the AAS zone status panel's anchor pair (the group's right
-	// edge and its row base; retail g_hudZonePanelX/Y, written by the hudpos
-	// parse @0x5a0563/@0x5a057b).
-	Vector2i get_lfp_flags() const;
-	// The 4-field positioned-text records (x, y, hidden, align) — the parse
-	// and hidden-gate witnesses live at the pos4 helper in the .cpp.
-	Vector4i get_ammo_count_pos() const;
-	Vector4i get_weapon_name_pos() const;
-	Vector4i get_game_info_pos() const;
-	Vector4i get_wpd_info_pos() const;
-	Vector2i get_chat_text_pos() const;
-	Vector2i get_sys_text_pos() const;   // HUDSYSTEXT — the SYSTEM feed anchor
-	Vector2i get_clip_pos() const;
-	// ALPHAFADE raw file fields (base %, max %, seconds); the parse witness is
-	// on the to_dictionary misc block.
-	Vector3 get_alpha_fade() const;
-	int get_hud_chline() const;
-	// [{ id:int, offset:Vector2i, texture:String, name:String }] — the HUDSTANCE frames.
-	Array get_stances() const;
-	// [{ texture:String, pos:Vector2i }]
-	Array get_static_frames() const;
 	// One VEHICLE_HUD block by items.def sid (hud/vehicle_hud_block.h); null when unknown.
 	Ref<VehicleHudBlock> get_vehicle_hud(const String &p_sid) const;
-	Rect2i get_spinmap_bounds() const;
-	int get_spinmap_wp_dist_off() const;
-	// MAPCOORDS x, y, suppressor. The suppressor is 0 when unauthored (the
-	// retail global is BSS-zero) = the grid label draws; an authored NONZERO
-	// third token suppresses it.
-	Vector3i get_map_coords() const;
-	// Four visibility bytes for one HUDDECLUT_* row. Empty means absent.
-	PackedByteArray get_declutter_flags(const String &p_name) const;
 	// The retained parse, for the engine folds that take the rows directly
-	// (hud_declutter.h declutter_from_hudpos).
+	// (hud_layout_from_hudpos.h, hud_declutter.h declutter_from_hudpos).
 	const opennova::def::DefHudPosFile &native_file() const { return file_; }
-	// Named HUD colors (Godot Color, RGBA normalized): health_border, hud_textcolor,
-	// stancecolor_good/middle/bad, tagcolor_*, etc.
-	Dictionary get_colors() const;
-
-	// The complete parsed layout as a nested Godot-native Dictionary. Keys mirror
-	// DefHudPosDef field names.
-	Dictionary to_dictionary() const;
 };
 
 } // namespace godot
