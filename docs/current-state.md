@@ -97,11 +97,15 @@ presenter and viewmodel frame math, the light-director constants, the loading
 screen, the character registry). The remainder is queued in
 [ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, which is that
 queue's only home: the Godot-only witnessed half of Train B (the present
-rows, the sun feed, the scar gate, the joiner pump — on-touch after a grill;
-A3 and the rig-twinned half landed with ADR 0042), the Train C tail including
-the `mission_audio.cpp` reverb, and Train D in full. The counters
-(read them from the baseline, not here) are not yet at a seam-contract floor;
-the campaign is finished when both hold only documented seam contracts.
+rows, the sun feed, the scar gate, the joiner pump; A3 and the rig-twinned half
+landed with ADR 0042), the Train C tail, Train D, and the E-rows added by the
+2026-09-20 push-down census (a Claude three-agent census reconciled with a
+Codex read-only review: the `Simulation` builders, the record bindings only
+GUT reads, the loading-screen layout, the HUD latches, the kit model, the
+compiled-menu interaction runtime, the remote-body machine, the terrain and
+audio lifecycles, the joiner-side client facts, the presentation clocks). The
+counter (read it from the baseline, not here) is not yet at a seam-contract
+floor; the campaign is finished when it holds only documented seam contracts.
 [ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28)
 closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
 CLOSED), and its campaign LANDED (PR #587): the mission kernel
