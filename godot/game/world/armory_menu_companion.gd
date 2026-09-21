@@ -314,49 +314,12 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 				break
 
 
-# weapon.mnu has no parent GRENADE weapon combo: its three authored controls are
-# count selectors for the class/team/selectable grenade definitions in table
-# order. Availability is applied only after a definition owns its control, so a
-# banned grenade retains that position with a zero-only row. Their
-# registered callback args 0/1/2 address the same three positions
-# [orig: WeaponDef_RegisterUICallbacks @0x567020 -> WeaponDef_UISlotSelectCallback].
 func _populate_grenades(team_mask: int) -> void:
-	# Unlike the three parent lists, availability does not remove a grenade def:
-	# retail assigns class/team/selectable category-3 defs to controls first, then
-	# an unavailable def stops after its zero row [orig: @0x5647a4..0x5648a6].
-	var defs := _weapons.get_slot_weapons(
-			WeaponDatabase.SLOT_GRENADE, _class_mask(), team_mask)
-	_grenade_rows = []
-	for i in mini(defs.size(), GRENADE_CONTROLS.size()):
-		_grenade_rows.append(defs[i])
-	for i in GRENADE_CONTROLS.size():
-		var combo := _id(GRENADE_CONTROLS[i])
-		if combo < 0:
-			continue
-		var w: WeaponDef = _grenade_rows[i] if i < _grenade_rows.size() else null
-		var allowed := w != null
-		if allowed and _availability_lookup.is_valid():
-			allowed = int(_availability_lookup.call(w.name)) != 0
-		var maxclips := w.maxclips if allowed else 0
-		var rows := PackedStringArray()
-		for clips in range(0, maxclips + 1):
-			rows.append(_weapons.ammo_row_label(w.index if w != null else -1, clips,
-					Strings.get_table(Strings.TABLE_GAMETEXT)))
-		_set_combo_items(combo, rows)
-		if w != null:
-			_driver.select_row(combo, _current_grenade_clips(w.name, maxclips), false)
+	_populating = true
+	_grenade_rows = _driver.fill_armory_grenades(_weapons, _class_mask(), team_mask,
+			_current_grenades, _availability_lookup, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 	_update_weight()
-
-
-func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
-	for value in _current_grenades:
-		var row := value as Dictionary
-		if String(row.get("name", "")).nocasecmp_to(weapon_name) != 0:
-			continue
-		# The engine's zero-row default-select (player_loadout.h
-		# player_info_default_grenade_row).
-		return WeaponDatabase.default_grenade_row(int(row.get("ammo_primary", -1)), maxclips)
-	return 0
 
 
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
@@ -379,33 +342,20 @@ func _on_slot_selected(control: String) -> void:
 	_update_weight()
 
 
-# Clip-count rows for the slot's ammo combo. Retail row 0 means one clip, shows
-# clipsize rounds, and serializes as 1; row maxclips-1 is the full load (the
-# row label is the engine's, loadout_labels.h ammo_row_label).
 func _populate_ammo(control: String) -> void:
-	var combo := _id(control + "_AMMO1")
-	if combo < 0:
+	if _id(control + "_AMMO1") < 0:
 		return
 	var w := selected_weapon(control)
-	var rows := PackedStringArray()
-	var maxclips := w.maxclips if w != null else 0
-	var gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
-	for clips in range(1, maxclips + 1):
-		rows.append(_weapons.ammo_row_label(w.index, clips, gametext))
-	_set_combo_items(combo, rows)
-	if not rows.is_empty():
-		var clips := int(_current_parent_clips.get(control, -1))
-		var current_name := ""
-		match control:
-			"PRIMARY": current_name = _current_primary
-			"SECONDARY": current_name = _current_secondary
-			"ACCESSORY": current_name = _current_accessory
-		if current_name.is_empty() or w.name.nocasecmp_to(current_name) != 0:
-			clips = WeaponDatabase.CLIP_COUNT_DEF_DEFAULT
-		# The shared default-select rule: a saved count picks its row, the -1
-		# sentinel picks the full maxclips row [orig: the fill @0x565cd0].
-		_driver.select_row(combo,
-				WeaponDatabase.default_clip_row(clips, maxclips) - 1, false)
+	var current_name := ""
+	match control:
+		"PRIMARY": current_name = _current_primary
+		"SECONDARY": current_name = _current_secondary
+		"ACCESSORY": current_name = _current_accessory
+	_populating = true
+	_driver.fill_armory_ammo(_weapons, control, w.index if w != null else -1,
+			current_name, int(_current_parent_clips.get(control, -1)),
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 	_update_weight()
 
 
@@ -439,38 +389,14 @@ func _selected_grenade_loadout() -> Array[Dictionary]:
 
 # --- Weight ----------------------------------------------------------------------
 
-# Total loadout weight = weaponweight + clips * clipweight per selected slot (the
-# WEAPON screen weighs the selected ammo TYPE's own def — deferred with the type
-# combos) [orig: calculate_equipped_weapons_weight @0x565490 — adm[85]/65536 +
-# (row+1) * ammoDef[84]/65536]. The readout into STATIC_TOTAL_WEIGHT — the
-# format, the encumbrance bands and their menu tokens — is the engine's
-# (loadout_labels.h loadout_weight_line), as is the parent-slot sum shared with
-# PLAYER_INFO (WeaponDatabase.loadout_weight — [orig: calculate_loadout_weight
-# @0x55f1f0 sibling]; ctest def_loadout_weight pins the formula and the exact
-# thresholds).
-
 func _update_weight() -> void:
 	if _weapons == null:
 		_update_icons()
-		return  # weapon.def absent: the screen degrades with empty slot lists
-	var indices := PackedInt32Array()
-	var counts := PackedInt32Array()
+		return
+	var parents: Array[WeaponDef] = []
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var w := selected_weapon(slot_name)
-		if w == null:
-			continue
-		indices.append(w.index)
-		counts.append(selected_clips(slot_name))  # -1 = the def default (maxclips)
-	var total := _weapons.loadout_weight(indices, counts)
-	for i in _grenade_rows.size():
-		var combo := _id(GRENADE_CONTROLS[i])
-		var clips := _driver.selected_row(combo) if combo >= 0 else 0
-		if clips <= 0:
-			continue
-		# The category-3 controls are extra-ammo legs, not parent weapon slots:
-		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c —
-		# the def_extra_ammo_weight term].
-		total += _weapons.extra_ammo_weight(_grenade_rows[i].index, clips)
+		parents.append(selected_weapon(slot_name))
+	var total := _driver.armory_loadout_weight(_weapons, parents, _grenade_rows)
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		_driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(total,

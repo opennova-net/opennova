@@ -1212,6 +1212,10 @@ target_link_libraries(loadout_labels_test PRIVATE opennova_runtime)
 target_compile_features(loadout_labels_test PRIVATE cxx_std_17)
 add_test(NAME loadout_labels COMMAND loadout_labels_test)
 
+add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
+target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
+add_test(NAME loadout_screen COMMAND loadout_screen_test)
+
 add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
 target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
 target_compile_features(player_info_kit_test PRIVATE cxx_std_17)

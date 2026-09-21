@@ -106,6 +106,7 @@ public:
 	String get_source_path() const;
 	String get_last_error() const;
 	int get_count() const;
+	const opennova::def::DefWeaponsFile &native_file() const { return weapons_file_; }
 
 	// The weapons that belong in `slot` for the given class + team masks, in table order.
 	// The filter is the engine's world::weapon_slot_indices
@@ -117,37 +118,12 @@ public:
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
 	// case-insensitive like every def lookup), or -1 when absent.
 	int find_weapon(const String &name) const;
-
-	// Total loadout weight over the indexed weapons: per entry weaponweight +
-	// (count <= 0 ? maxclips : count) * clipweight — the engine/formats/def port of the
-	// parent-slot terms (engine: formats/def/def.cpp). Invalid
-	// indices contribute nothing; a short counts array reads as -1 (default).
-	double loadout_weight(const PackedInt32Array &weapon_indices,
-			const PackedInt32Array &ammo_counts) const;
-	// One extra-ammo (category-3) term for the indexed weapon: count *
-	// clipweight only, CLIP_COUNT_DEF_DEFAULT -> the maxclips default, a
-	// chosen zero row weighs nothing (engine/formats/def def_extra_ammo_weight
-	// (engine: formats/def/def.cpp)).
-	double extra_ammo_weight(int p_index, int p_count) const;
-	// The sub-weapon behind a parent slot's *_AMMO2: the absolute index of the
-	// first differing-round_type entry in the parent's loadout_subclasses
-	// window, or -1 (engine/formats/def def_subclass_weapon_index
-	// (engine: formats/def/def.cpp)).
-	int subclass_weapon_index(int p_parent_index) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// (engine: formats/def/def.cpp).
 	int encumbrance_class(double weight) const;
-	// The PLAYER_INFO screen policies (one impl in engine/runtime/world
-	// player_loadout.h (engine: runtime/world/player_loadout.cpp)): the team mask (team 0 -> 2, else
-	// 1), the class mask (5..9 -> its bit, else nothing), and the ammo combo's
-	// default-select clip count (saved > 0 clamped into 1..maxclips, the
-	// CLIP_COUNT_DEF_DEFAULT sentinel -> the full maxclips row).
+	// The PLAYER_INFO team and class masks (native world/player_loadout.h).
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
-	static int default_clip_row(int p_saved, int p_maxclips);
-	// The GRENADE_AMMO* combos' default-select row (rows run 0..maxclips, so
-	// the row is the clip count; -1 -> the full row, a saved 0 stays 0).
-	static int default_grenade_row(int p_saved, int p_maxclips);
 	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
 	// player_info_kit.h): the PLAYERVOICE list values for a head's sex byte
 	// (DEFAULT_VOICE first), the persisted-override reset, and the weapon.sav
@@ -165,13 +141,11 @@ public:
 			const PackedInt32Array &p_grenade_ammo_secondary) const;
 	// The loadout screens' shared text compositions (one impl in
 	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
-	// raw-id fallback, the "<rounds> - <round label>" ammo row (an index no row
-	// carries takes the null-def "<clips> - " form), the WEAPON screen's
+	// raw-id fallback, the WEAPON screen's
 	// case-insensitive row order over display labels, and the weight readout
 	// with its encumbrance band token (the Menu-section fold: menutxt first,
 	// then gameui, then the fallback).
 	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
-	String ammo_row_label(int p_index, int p_clips, const Ref<RtxtStringFile> &p_gametext) const;
 	static PackedInt32Array armory_slot_order(const PackedStringArray &p_labels);
 	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 			const Ref<RtxtStringFile> &p_gameui);

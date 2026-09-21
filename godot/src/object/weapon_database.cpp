@@ -50,12 +50,6 @@ void WeaponDatabase::_bind_methods() {
 			&WeaponDatabase::get_slot_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapon", "index"), &WeaponDatabase::get_weapon);
 	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &WeaponDatabase::find_weapon);
-	ClassDB::bind_method(D_METHOD("loadout_weight", "weapon_indices", "ammo_counts"),
-			&WeaponDatabase::loadout_weight);
-	ClassDB::bind_method(D_METHOD("extra_ammo_weight", "index", "count"),
-			&WeaponDatabase::extra_ammo_weight);
-	ClassDB::bind_method(D_METHOD("subclass_weapon_index", "parent_index"),
-			&WeaponDatabase::subclass_weapon_index);
 	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
 			&WeaponDatabase::encumbrance_class);
 	ClassDB::bind_static_method("WeaponDatabase",
@@ -64,12 +58,6 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_class_mask", "playerclass_value"),
 			&WeaponDatabase::player_info_class_mask);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("default_clip_row", "saved", "maxclips"),
-			&WeaponDatabase::default_clip_row);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("default_grenade_row", "saved", "maxclips"),
-			&WeaponDatabase::default_grenade_row);
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_voice_values", "sex"),
 			&WeaponDatabase::player_info_voice_values);
@@ -82,8 +70,6 @@ void WeaponDatabase::_bind_methods() {
 			&WeaponDatabase::player_info_kit_entries);
 	ClassDB::bind_method(D_METHOD("weapon_label", "index", "gametext"),
 			&WeaponDatabase::weapon_label);
-	ClassDB::bind_method(D_METHOD("ammo_row_label", "index", "clips", "gametext"),
-			&WeaponDatabase::ammo_row_label);
 	ClassDB::bind_static_method("WeaponDatabase", D_METHOD("armory_slot_order", "labels"),
 			&WeaponDatabase::armory_slot_order);
 	ClassDB::bind_static_method("WeaponDatabase",
@@ -213,47 +199,6 @@ Ref<WeaponDef> WeaponDatabase::get_weapon(int index) const {
 	return def;
 }
 
-double WeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices,
-		const PackedInt32Array &ammo_counts) const {
-	// def_loadout_weight walks one contiguous row array; the selected rows are
-	// gathered by value (a struct copy, the parse stays the owner of its arrays).
-	std::vector<DefWeaponDef> defs;
-	std::vector<int> counts;
-	defs.reserve(weapon_indices.size());
-	counts.reserve(weapon_indices.size());
-	for (int i = 0; i < weapon_indices.size(); ++i) {
-		const DefWeaponDef *w = row(weapon_indices[i]);
-		if (w == nullptr) {
-			continue;
-		}
-		defs.push_back(*w);
-		counts.push_back(i < ammo_counts.size() ? ammo_counts[i] : -1);
-	}
-	return def_loadout_weight(defs.data(), counts.data(), defs.size());
-}
-
-double WeaponDatabase::extra_ammo_weight(int p_index, int p_count) const {
-	const DefWeaponDef *w = row(p_index);
-	if (w == nullptr) {
-		return 0.0;
-	}
-	return def_extra_ammo_weight(w, p_count);
-}
-
-int WeaponDatabase::subclass_weapon_index(int p_parent_index) const {
-	// The parent's loadout_subclasses window is contiguous in the retained
-	// table, so the engine walks the rows in place.
-	const DefWeaponDef *parent = row(p_parent_index);
-	if (parent == nullptr) {
-		return -1;
-	}
-	const size_t start = static_cast<size_t>(p_parent_index);
-	const int subclasses = std::max(parent->loadout_subclasses, 0);
-	const size_t end = std::min(weapons_file_.count, start + static_cast<size_t>(subclasses) + 1);
-	const int found = def_subclass_weapon_index(weapons_file_.entries + start, end - start, 0);
-	return found < 0 ? -1 : p_parent_index + found;
-}
-
 int WeaponDatabase::player_info_team_mask(int p_team) {
 	return opennova::world::player_info_team_mask(p_team);
 }
@@ -262,24 +207,10 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 	return opennova::world::player_info_class_mask(p_playerclass_value);
 }
 
-int WeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
-	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
-}
-
-int WeaponDatabase::default_grenade_row(int p_saved, int p_maxclips) {
-	return opennova::world::player_info_default_grenade_row(p_saved, p_maxclips);
-}
-
 String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
 	const opennova::def::DefWeaponDef *w = row(p_index);
 	if (w == nullptr) return String();
 	return String::utf8(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)).c_str());
-}
-
-String WeaponDatabase::ammo_row_label(int p_index, int p_clips,
-		const Ref<RtxtStringFile> &p_gametext) const {
-	return String::utf8(opennova::menu::ammo_row_label(row(p_index), p_clips,
-			game_text_lookup(p_gametext)).c_str());
 }
 
 PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {

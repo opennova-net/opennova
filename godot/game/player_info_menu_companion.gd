@@ -371,106 +371,23 @@ func _on_class_selected(_row: int, _value: String) -> void:
 
 # --- Loadout ammo combos (D-PLAYERINFO-11) --------------------------------------
 
-# Clip-count rows for one parent slot's AMMO1/TYPE/AMMO2 combos
-# [orig: populate_ammo_combo_boxes @ 0x55def0; the ACCESSORY leg is the same logic
-#  inlined in populate_weapon_accessory_ammo_ui @ 0x55e8b0].
+# Populate through the native menu runtime; this shell carries the saved picks.
 func _populate_slot_ammo(control: String) -> void:
 	var w := _selected_weapon(control)
 	var index := w.index if w != null else -1
-	var has_ammo := w != null and w.clipsize > 0
-	var ammo1 := _id(control + "_AMMO1")
-	var type_combo := _id(control + "_AMMO1_TYPE")
-	var ammo2 := _id(control + "_AMMO2")
-	if ammo1 >= 0:
-		_driver.set_widget_shown(ammo1, has_ammo)
-		if has_ammo:
-			var maxclips := w.maxclips
-			var rows := PackedStringArray()
-			# Rows 1..maxclips: the engine's "<rounds> - <round label>" row; row
-			# value = the clip count (retail keys rows by the def index; ours by
-			# position).
-			for clips in range(1, maxclips + 1):
-				rows.append(_weapons.ammo_row_label(w.index, clips,
-						Strings.get_table(Strings.TABLE_GAMETEXT)))
-			_set_combo_items(ammo1, rows)
-			# Saved count selects its row; -1/absent = the maxclips row (full
-			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
-			# select in both fills — native default_clip_row].
-			var saved := int(_ammo_pri.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			_driver.select_row(ammo1,
-					WeaponDatabase.default_clip_row(saved, maxclips) - 1, false)
-	if type_combo >= 0:
-		# The TYPE combo keeps its authored FMJ/AP/SP statics; shown with AMMO1,
-		# selection = the saved per-team type byte (-1 -> 0). flags2 NOAMMOTYPES
-		# locks it non-interactive and resets the saved type
-		# [orig: @ 0x55def0 — the +188 & 0x40 gate -> UIWidget_SetInteractiveRecursive].
-		_driver.set_widget_shown(type_combo, has_ammo)
-		if has_ammo:
-			var locked := (w.flags2 & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
-			_driver.set_widget_disabled(type_combo, locked)
-			if locked:
-				_slot_type_store(control)[_team] = 0
-			# Select by the row's authored VALUE (0/1/2), not its position — the
-			# saved byte is the value [orig: the @ 0x55def0 row select].
-			var saved_type := str(int(_slot_type_store(control).get(_team, 0)))
-			for row in _driver.item_count(type_combo):
-				if _driver.item_value(type_combo, row) == saved_type:
-					_driver.select_row(type_combo, row, false)
-					break
-	if ammo2 >= 0:
-		var sub := _subclass_weapon(w)
-		var sub_ok := has_ammo and sub != null and sub.clipsize > 0
-		_driver.set_widget_shown(ammo2, sub_ok)
-		if sub_ok:
-			var sub_max := sub.maxclips
-			var rows2 := PackedStringArray()
-			for clips in range(1, sub_max + 1):
-				rows2.append(_weapons.ammo_row_label(sub.index, clips,
-						Strings.get_table(Strings.TABLE_GAMETEXT)))
-			_set_combo_items(ammo2, rows2)
-			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			_driver.select_row(ammo2,
-					WeaponDatabase.default_clip_row(saved2, sub_max) - 1, false)
+	var types := _slot_type_store(control)
+	_populating = true
+	types[_team] = _driver.fill_player_info_ammo(_weapons, control, index,
+			int(_ammo_pri.get(index, -1)), int(_ammo_sec.get(index, -1)),
+			int(types.get(_team, 0)), Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 
 
-# The sub-weapon behind *_AMMO2 — the native def-table walk
-# (engine/formats/def def_subclass_weapon_index
-# [orig: the stricmp walk over entry+192.. in @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
-func _subclass_weapon(parent: WeaponDef) -> WeaponDef:
-	if parent == null or _weapons == null:
-		return null
-	var index := int(_weapons.subclass_weapon_index(parent.index))
-	return _weapons.get_weapon(index) if index >= 0 else null
-
-
-# The first three selectable class-3 defs passing the class+team masks own
-# GRENADE_AMMO1..3 in table order; leftover widgets hide. Rows 0..maxclips
-# INCLUDING the zero row [orig: the >= 3 leg of populate_ammo_combo_boxes
-# @ 0x55def0 — filter, table order, hidden leftovers, zero row].
 func _populate_grenades(class_mask: int, team_mask: int) -> void:
-	_grenade_rows = []
-	if _weapons != null:
-		var defs := _weapons.get_slot_weapons(
-				WeaponDatabase.SLOT_GRENADE, class_mask, team_mask)
-		for i in mini(defs.size(), GRENADE_CONTROLS.size()):
-			_grenade_rows.append(defs[i])
-	for i in GRENADE_CONTROLS.size():
-		var combo := _id(GRENADE_CONTROLS[i])
-		if combo < 0:
-			continue
-		if i >= _grenade_rows.size():
-			_driver.set_widget_shown(combo, false)
-			continue
-		_driver.set_widget_shown(combo, true)
-		var w := _grenade_rows[i]
-		var maxclips := w.maxclips
-		var rows := PackedStringArray()
-		for clips in range(0, maxclips + 1):
-			rows.append(_weapons.ammo_row_label(w.index, clips,
-					Strings.get_table(Strings.TABLE_GAMETEXT)))
-		_set_combo_items(combo, rows)
-		_driver.select_row(combo, WeaponDatabase.default_grenade_row(
-				int(_ammo_pri.get(w.index, -1)), maxclips), false)
+	_populating = true
+	_grenade_rows = _driver.fill_player_info_grenades(_weapons, class_mask, team_mask,
+			_ammo_pri, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 
 
 func _slot_type_store(control: String) -> Dictionary:
@@ -552,39 +469,14 @@ func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 
 # --- Weight readout + weapon icons (D-PLAYERINFO-11) ----------------------------
 
-# Weight = parent slots through the native ported math, plus the witnessed
-# clip-only terms for sub-weapons and grenades
-# [orig: calculate_loadout_weight @ 0x55f1f0 — parents weaponweight +
-#  (saved<=0?maxclips:saved)*clipweight; sub-weapons and grenades clip term ONLY,
-#  grenades -1 -> maxclips with a saved 0 staying 0].
 func _update_weight() -> void:
 	if _weapons == null:
 		return
-	var indices := PackedInt32Array()
-	var counts := PackedInt32Array()
-	var total := 0.0
+	var parents: Array[WeaponDef] = []
 	for control in PARENT_SLOTS:
-		var w := _selected_weapon(control)
-		if w == null:
-			continue
-		var index := w.index
-		indices.append(index)
-		counts.append(int(_ammo_pri.get(index, -1)))
-		# The witnessed sub-weapon term is gated on the *_AMMO2 control existing.
-		var sub := _subclass_weapon(w)
-		if _id(control + "_AMMO2") >= 0 and sub != null and sub.clipsize > 0:
-			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			total += _weapons.extra_ammo_weight(sub.index,
-					WeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
-	total += _weapons.loadout_weight(indices, counts)
-	for i in _grenade_rows.size():
-		# The witnessed grenade term is gated on the control existing AND shown.
-		var combo := _id(GRENADE_CONTROLS[i]) if i < GRENADE_CONTROLS.size() else -1
-		if combo < 0 or not _driver.is_widget_shown(combo):
-			continue
-		var g := _grenade_rows[i]
-		var saved := int(_ammo_pri.get(g.index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-		total += _weapons.extra_ammo_weight(g.index, saved)
+		parents.append(_selected_weapon(control))
+	var total := _driver.player_info_loadout_weight(
+			_weapons, parents, _grenade_rows, _ammo_pri, _ammo_sec)
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		# The readout's format, bands and menu tokens are the engine's
