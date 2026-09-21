@@ -389,13 +389,8 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 		if (file.is_null()) {
 			continue;
 		}
-		const TypedArray<ParticleEffect> effects = file->get_effects();
-		for (int64_t j = 0; j < effects.size(); ++j) {
-			const Ref<ParticleEffect> effect = effects[j];
-			if (effect.is_null()) {
-				continue;
-			}
-			const String effect_id = effect->get_id();
+		for (const auto &effect : file->native_file().effects) {
+			const String effect_id(effect.id.c_str());
 			if (effect_id.is_empty() || seen.has(effect_id)) {
 				continue;
 			}
@@ -418,9 +413,9 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 	return spawned;
 }
 
-int64_t EffectWorld::render_now() {
+int64_t EffectWorld::render_now(int64_t p_time_ms) {
 	ParticleRenderer *renderer = _ensure_renderer();
-	renderer->render_now();
+	renderer->render_now(p_time_ms);
 	return renderer->get_draw_command_count();
 }
 
@@ -663,9 +658,9 @@ bool EffectWorld::trigger_group_children(int64_t p_group_id, const Vector3 &p_po
 			scene_->trigger_group_children(p_group_id, p_position, p_forward, p_force_zone);
 }
 
-void EffectWorld::render_frame() {
+void EffectWorld::render_frame(int64_t p_time_ms) {
 	_sync_owner_poses(true);
-	_ensure_renderer()->render_now();
+	_ensure_renderer()->render_now(p_time_ms);
 }
 
 TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include_hidden) {
@@ -776,7 +771,7 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_effect_request", "name", "transform", "options"),
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
-	ClassDB::bind_method(D_METHOD("render_now"), &EffectWorld::render_now);
+	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
 			&EffectWorld::get_debug_draw_list_report);
 	ClassDB::bind_method(D_METHOD("spawn_effect_transient", "name", "position", "orientation",
@@ -811,7 +806,7 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick", "delta"), &EffectWorld::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("set_mission_wind", "wind_speed", "wind_direction_degrees"),
 			&EffectWorld::set_mission_wind);
-	ClassDB::bind_method(D_METHOD("render_frame"), &EffectWorld::render_frame);
+	ClassDB::bind_method(D_METHOD("render_frame", "time_ms"), &EffectWorld::render_frame);
 	ClassDB::bind_method(D_METHOD("get_debug_group_report", "include_hidden"),
 			&EffectWorld::get_debug_group_report, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"),

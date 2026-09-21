@@ -257,6 +257,9 @@ struct HudLayout {
 	bool lfp_tile_other_texture_valid = false;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
+	// HUDVEHSTANCEPOS — the vehicle panel's base before the rider's stance
+	// offset (hud_vehicle_panel.h reads it as the panel anchor).
+	HudPosRecord veh_stance_pos;
 	HudPosRecord frame_pos;
 	HudRectRecord health_rect;
 	HudRectRecord heat_rect;

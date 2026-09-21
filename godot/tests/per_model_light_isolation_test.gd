@@ -94,7 +94,7 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 			"an unstamped model falls back to its instance id")
 
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	# One world light between the models (an unowned authored record), one
 	# light owned by entity 77 (the muzzle-glow shape).
 	var world_record := ModelLight.new()
@@ -106,7 +106,7 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(2.0, 1.0, 6.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 
 	var owner_surface := _surface_instance(owner_model)
 	var bystander_surface := _surface_instance(bystander)
@@ -180,12 +180,12 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 	assert_eq(tagged_zero, LightScene.owner_id_for_wire(0))
 
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_muzzle_fire(0, Vector3(0.0, 1.0, 0.0))
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(1.0, 1.0, 5.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var owner_surface := _surface_instance(owner_model)
 	var bystander_surface := _surface_instance(bystander)
 	if owner_surface == null or bystander_surface == null:
@@ -227,19 +227,17 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	assert_eq(lit.get_light_count(), 1)
 	assert_eq(lit.get_light_info(0).subobject, 2,
 			"the fixture attaches the record to subobject 2")
-	var lit_source := StaticEffectSource.new()
-	lit_source.object_data = lit
-	lit_source.world_transform = Transform3D(Basis.IDENTITY, Vector3(1.5, 0.0, 0.0))
+	var placer := StaticSourceFixture.place(self, world, [lit], [Vector3(1.5, 0.0, 0.0)],
+			PackedInt32Array([2]))
 	var director := EffectLightDirector.new()
-	director.setup(world, func() -> Array:
-		return [lit_source], Callable())
+	director.setup(world, placer)
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"the static source spawns its subobject-attached record")
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(1.5, 1.0, 6.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var surface_a := _surface_instance(model_a)
 	var surface_b := _surface_instance(model_b)
 	if surface_a == null or surface_b == null:
@@ -257,7 +255,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SHED_3DI)), OK)
 	assert_eq(lit.get_light_info(0).subobject, 0)
 	director.reattach()
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(float(surface_a.get_instance_shader_parameter(
 			"u_point_light_count")), 1.0,
 			"a subobject-0 static record lights every nearby draw")
@@ -278,26 +276,26 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 			.attached(2, owner_model.get_instance_id())), 0)
 	var models: Array[Node3D] = [owner_model]
 	var owners := PackedInt64Array([owner_model.get_instance_id()])
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_3D
+	mesh.use_colors = true
 	# No occlusion verdict yet (mask -1): the owner is not in the table and
 	# the corona passes like retail's non-building owners.
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 3,
-			"an owner without an occlusion verdict passes the gate")
+			owners, null, mesh)
+	assert_eq(count, 3, "an owner without an occlusion verdict passes the gate")
 	# The occlusion pass hides section 2: the owned corona disappears.
 	owner_model.set_section_visibility_mask(~(1 << 2))
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 0,
-			"a hidden owner section suppresses the owned corona")
+			owners, null, mesh)
+	assert_eq(count, 0, "a hidden owner section suppresses the owned corona")
 	owner_model.set_section_visibility_mask(1 << 2)
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 3,
-			"a visible owner section admits the owned corona")
+			owners, null, mesh)
+	assert_eq(count, 3, "a visible owner section admits the owned corona")
 
 
 func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
@@ -597,34 +595,21 @@ func test_ordinary_model_uses_initialized_radius_instead_of_geometry_bounds() ->
 
 
 func test_static_director_rows_share_entity_cube_and_keep_section_filters() -> void:
-	var source := StaticEffectSource.new()
-	source.kind = MissionData.KIND_BUILDING
-	source.source_index = 0
-	source.object_data = _fixture_object_data("house.3di")
-	source.world_transform = Transform3D(Basis.IDENTITY, Vector3(101.0, 3.0, -205.0))
-	source.entity_bound_radius_q16 = (16 << 16) + 0x1000
-	var rows: Array[StaticLightDrawSource] = []
-	for section in [2, 4]:
-		var row := StaticLightDrawSource.new()
-		row.atlas_row = rows.size()
-		row.source_index = 0
-		row.kind = MissionData.KIND_BUILDING
-		row.robj_index = section
-		row.world_bounds = AABB(source.world_transform.origin +
-				Vector3(-40.0 if section == 2 else 40.0, 0.0, 0.0), Vector3.ONE)
-		rows.append(row)
+	var origin := Vector3(101.0, 3.0, -205.0)
+	var placer := StaticSourceFixture.place(self, self, [_fixture_object_data("crate.3di")],
+			[origin], PackedInt32Array([2, 4]), 16.0,
+			[Vector3(-40, 0, 0), Vector3(40, 0, 0)])
 	var director := EffectLightDirector.new()
-	director.setup(null, func() -> Array: return [source], func() -> Array: return rows)
+	director.setup(null, placer)
 	director.reattach()
 	var scene := director.scene()
-	var origin := source.world_transform.origin
 	for distance in [6.0, 1.0, 4.0, 2.0]:
 		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
 				origin + Vector3(distance, 0.0, 0.0), 0.25)), 0)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.position = origin + Vector3(0.0, 0.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var atlas := _static_light_atlas(scene)
 	if atlas == null:
 		return
@@ -639,13 +624,13 @@ func test_static_director_rows_share_entity_cube_and_keep_section_filters() -> v
 			origin + Vector3(2.5, 0.0, 0.0), 0.25).attached(2, owner)), 0)
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
 			origin + Vector3(3.0, 0.0, 0.0), 0.25).attached(4, owner)), 0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	atlas = _static_light_atlas(scene)
 	assert_almost_eq(atlas.get_pixel(5, 0).r, origin.x + 2.5, 0.001)
 	assert_almost_eq(atlas.get_pixel(5, 1).r, origin.x + 3.0, 0.001,
 			"a rejected section-2 candidate does not consume section 4's third slot")
 	var selected_bytes := atlas.get_data()
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(_static_light_atlas(scene).get_data(), selected_bytes,
 			"cached handle reselect preserves both per-section selections")
 
@@ -666,7 +651,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 	held.set_entity_light_owner(body)
 	assert_eq(EffectLightDirector.owner_id_for_node(held), LightScene.owner_id_for_wire(77))
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	var light_pos := body.global_position + Vector3(3, 0, 0)
 	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_pos, 0.1)
 			.attached(0, LightScene.owner_id_for_wire(77))), 0)
@@ -675,7 +660,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(20, 0, 8)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	for model: ObjectModel in [body, head, held]:
 		var surface := _surface_instance(model)
 		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0)
@@ -683,7 +668,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 		assert_almost_eq(posr.x, light_pos.x, 0.001,
 				"the same entity cube and owner filter reach every model of the entity")
 	body.position.x += 100.0
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	for model: ObjectModel in [body, head, held]:
 		assert_eq(float(_surface_instance(model).get_instance_shader_parameter(
 				"u_point_light_count")), 0.0,

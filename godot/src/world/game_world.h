@@ -350,6 +350,10 @@ public:
 	Ref<MissionFrameOutcome> advance_frame(const Vector3 &p_camera_pos,
 			const Transform3D &p_camera_xform, double p_delta,
 			const Ref<MissionFrameInput> &p_input);
+	// Main-thread display clock, shared by every world and menu. The first
+	// reader samples once per Engine process frame, including menu-only frames.
+	static int64_t current_frame_clock_ms();
+	int64_t get_frame_clock_ms() const { return current_frame_clock_ms(); }
 	// The leg table as literal names, in order (the frame-order pin).
 	static PackedStringArray frame_leg_names();
 	static PackedStringArray frozen_pose_leg_names();
@@ -508,10 +512,11 @@ private:
 	// --- the StaticSourceProvider the two directors read (the placer's static
 	//     sources, resolved lazily: a placer exists only once a mission is
 	//     placed) ---
-	TypedArray<StaticEffectSource> static_item_effect_sources() override;
-	TypedArray<StaticLightDrawSource> static_light_draw_sources() override;
+	std::vector<opennova::mission::StaticEffectSource> static_item_effect_sources() override;
+	std::vector<opennova::mission::StaticLightDrawSource> static_light_draw_sources() override;
 	uint64_t static_light_draw_source_revision() override;
 	Ref<ItemDatabase> static_source_item_db() override;
+	Ref<ObjectData> static_source_object_data(uint64_t asset_id) const override;
 
 	// --- the frame (game_world_frame.cpp) ---
 	static const FrameLeg kFrameLegs[];

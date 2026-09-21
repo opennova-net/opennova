@@ -1,6 +1,7 @@
 #include "client_replica_body_arbitration.h"
 
 #include <runtime/world/infantry.h>
+#include <runtime/anim/remote_body_state.h>
 
 namespace opennova::replication {
 
@@ -34,14 +35,11 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		direct_commit();
 		return;
 	}
-	if (static_cast<int16_t>(decoded) == es.net_anim_current) {
-		// Same as current: a PURE no-op — an armed pending SURVIVES
-		// [orig: @0x4c115f / @0x4c0606].
-		return;
-	}
-	if (world::remote_body_state_defers(
-			world::infantry_anim_flags(static_cast<int>(es.net_anim_current)),
-			world::infantry_anim_flags(static_cast<int>(decoded)))) {
+	const auto arrival = anim::body_arrival(es.net_anim_current, decoded,
+			world::infantry_anim_flags(es.net_anim_current),
+			world::infantry_anim_flags(decoded));
+	if (arrival == anim::BodyArrival::keep) return;
+	if (arrival == anim::BodyArrival::queue) {
 		// The queue classes: the current state plays out; the arrival defers
 		// until the channel's completion boundary [orig: @0x4c1169..0x4c1190 /
 		// @0x4c060a..0x4c0633]. A REPLACED pending keeps the already-armed

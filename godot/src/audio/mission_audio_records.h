@@ -19,6 +19,8 @@
 
 #include "audio/ambient_layer.h"
 
+#include <runtime/audio/ambient_channel_pool.h> // kAmbientMixChannels
+
 // The typed records of the mission audio orchestrator (audio/mission_audio,
 // the former mission_audio.gd inner classes, ADR 0017): the placed marker,
 // the physical channel, the candidate binding and ranked row, the dynamic
@@ -27,10 +29,8 @@
 
 namespace godot {
 
-// The ambient emitter mix budget: the engine sorts every in-range emitter voice
-// by computed volume each frame and keeps the loudest 8 on real channels
-// [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, channel table @ 0x24D6688].
-inline constexpr int kMissionAudioMixChannels = 8;
+// The ambient emitter mix budget (the engine's channel pool carries the witness).
+inline constexpr int kMissionAudioMixChannels = opennova::audio::kAmbientMixChannels;
 
 // One placed ambient marker ("snd:" item): data, not a scene node. The four
 // time-of-day slot set names ("" = silent in that region) and, per distinct
@@ -111,40 +111,6 @@ public:
 	void set_descriptor(const Ref<AmbientLayer> &p_value) { descriptor_ = p_value; }
 	StringName get_bus() const { return bus_; }
 	void set_bus(const StringName &p_value) { bus_ = p_value; }
-};
-
-// One ranked mix row the native mixer returned this frame, joined to its
-// binding; `resolved_stream` is filled for an entrant that reaches the top
-// eight.
-class MissionAudioCandidate : public RefCounted {
-	GDCLASS(MissionAudioCandidate, RefCounted)
-
-	int candidate_id_ = 0;
-	Ref<AmbientLayer> descriptor_;
-	StringName bus_;
-	Vector3 pos_;
-	int vol_ = 0;
-	int pitch_q16_ = 0;
-	Ref<AudioStreamWAV> resolved_stream_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	int get_candidate_id() const { return candidate_id_; }
-	void set_candidate_id(int p_value) { candidate_id_ = p_value; }
-	Ref<AmbientLayer> get_descriptor() const { return descriptor_; }
-	void set_descriptor(const Ref<AmbientLayer> &p_value) { descriptor_ = p_value; }
-	StringName get_bus() const { return bus_; }
-	void set_bus(const StringName &p_value) { bus_ = p_value; }
-	Vector3 get_pos() const { return pos_; }
-	void set_pos(const Vector3 &p_value) { pos_ = p_value; }
-	int get_vol() const { return vol_; }
-	void set_vol(int p_value) { vol_ = p_value; }
-	int get_pitch_q16() const { return pitch_q16_; }
-	void set_pitch_q16(int p_value) { pitch_q16_ = p_value; }
-	Ref<AudioStreamWAV> get_resolved_stream() const { return resolved_stream_; }
-	void set_resolved_stream(const Ref<AudioStreamWAV> &p_value) { resolved_stream_ = p_value; }
 };
 
 // One dynamic emitter lane's live registration ((source lifetime, lane) key):

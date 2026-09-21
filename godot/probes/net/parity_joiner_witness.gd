@@ -16,7 +16,6 @@ extends RefCounted
 ## runs (a sent deployment pick, a completed motion exercise), so a later
 ## snapshot reports them without the runner asserting them.
 
-const DEPLOY_HOLD_ADMISSION_STAGE := "awaiting the player's deployment pick"
 const MOTION_PRE_ROLL_MS := 250
 const MOTION_INTER_PHASE_GAP_MS := 250
 const LOOK_SAMPLES_PER_PHASE := 20
@@ -54,7 +53,10 @@ static func next_heartbeat() -> int:
 static var exercise: Dictionary = {}
 
 
-## The raw joiner state through the live seams ({} without a simulation).
+## The raw joiner state through the live seams ({} without a simulation). The
+## readiness facts (hold_ready, match_ready, match_ready_auto) are the
+## engine's typed verdicts over the runtime (inmatch/role_feeds.h); the DEATH
+## screen's presented state is the shell's and is ANDed here.
 static func read_state(ctx: ProbeContext) -> Dictionary:
 	var sim := ctx.sim()
 	if sim == null:
@@ -70,6 +72,9 @@ static func read_state(ctx: ProbeContext) -> Dictionary:
 		"session_lost": bool(sim.is_session_lost()),
 		"joiner_phase": int(sim.get_joiner_phase()),
 		"join_admission_stage": String(sim.get_join_admission_stage()),
+		"hold_ready": bool(sim.is_join_deploy_hold_ready()),
+		"match_ready": bool(sim.is_join_in_match_ready(false)),
+		"match_ready_auto": bool(sim.is_join_in_match_ready(true)),
 	}
 
 
@@ -84,21 +89,20 @@ static func empty_state() -> Dictionary:
 		"session_lost": false,
 		"joiner_phase": -1,
 		"join_admission_stage": "",
+		"hold_ready": false,
+		"match_ready": false,
+		"match_ready_auto": false,
 	}
 
 
 static func deploy_hold_ready(state: Dictionary, readiness_mode: String) -> bool:
 	return readiness_mode == "deploy_hold" \
-			and bool(state.pick_pending) and int(state.self_handle) > 0 \
-			and bool(state.deploy_presented) \
-			and String(state.join_admission_stage) == DEPLOY_HOLD_ADMISSION_STAGE \
-			and String(state.join_error).is_empty() and not bool(state.session_lost)
+			and bool(state.hold_ready) and bool(state.deploy_presented)
 
 
 static func in_match_ready(state: Dictionary, readiness_mode: String, auto_deploy: bool) -> bool:
 	return readiness_mode == "in_match" \
-			and bool(state.local_player) and bool(state.in_match) \
-			and (not auto_deploy or not bool(state.pick_pending))
+			and bool(state.match_ready_auto if auto_deploy else state.match_ready)
 
 
 ## The witness for one heartbeat: the raw state plus the run's configuration

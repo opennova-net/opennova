@@ -8,6 +8,8 @@
 
 namespace opennova {
 
+struct GateResponse;
+
 // The plaintext host-status heartbeat a hosting retail client posts to the
 // gate's POSTIPADDRESS:POSTIPPORT every ~30 s (1860 sim ticks)
 // [orig: Lobby_UpdateServerInfo @0x4fe8c0, the UDP leg @0x4ff448..0x4ff62c;
@@ -39,6 +41,11 @@ std::string lobby_sanitize_value(std::string_view value);
 
 // Build the blob text exactly as the retail host sends it.
 std::string lobby_update_build(const LobbyStatusBlob &blob);
+
+// Build the POST heartbeat with its NAPI CRC envelope, without NWU/session
+// framing. Empty when the gate has no usable POST endpoint.
+std::vector<uint8_t> lobby_update_build_datagram(const GateResponse &gate,
+                                                 const LobbyStatusBlob &blob);
 
 // Parse a received blob. Returns false unless the text carries the
 // "HostKey =" preamble. Values come back as sent (still sanitized).

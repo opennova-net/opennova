@@ -58,12 +58,13 @@ inline int32_t wfield_i(const float *p, int base, int field) {
 // over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
 // is class-private); the static_assert in present_one_wire_row pins the
 // mirror.
-constexpr int kCtrlLegFieldCount = 41;
+constexpr int kCtrlLegFieldCount = 42;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
 	Simulation::PF_EWEAP_GUNYAW,
 	Simulation::PF_EWEAP_GUNPITCH,
+	Simulation::PF_WEAP_SPIN,
 	Simulation::PF_VEHICLE_MOTION_VALID,
 	Simulation::PF_VEHICLE_CTRL_MASK,
 	Simulation::PF_VEHICLE_TRACK_LEFT,

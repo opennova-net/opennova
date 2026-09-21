@@ -122,7 +122,6 @@ public:
 	bool has_player() const;
 	// Decoded at the Simulation transport edge (ADR 0017); null when absent/invalid.
 	Ref<PlayerAimOverlay> local_player_aim_overlay() const;
-	int local_player_team() const;
 
 	// GameWorld hands the shared FrameStats here (game shell -> GameWorld ->
 	// each root it creates). The sim folds its native phase spans onto the

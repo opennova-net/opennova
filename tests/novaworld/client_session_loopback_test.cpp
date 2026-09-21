@@ -862,6 +862,9 @@ int main() {
 	expect(client.sess_id_string() == "deadbeefcafef00d1122334455667788",
 	       "client captured SessIdString from ServerVerifyResult");
 
+	expect(client.build_player_enter_request(42, 0x0100007fu, 32768, "ticket").empty(),
+	       "a verified non-host cannot announce a player entry");
+
 	// 7) Heartbeat is a well-formed (header-only) 0x43 the server accepts.
 	auto hb = client.build_heartbeat();
 	expect(!hb.empty(), "heartbeat datagram non-empty");
@@ -958,6 +961,29 @@ int main() {
 		expect(server.lobby.player_count == before, "the service counted the removed player");
 	}
 
+	// Entry requests use the same Established gate as roster changes.
+	{
+		const auto entry = client.build_player_enter_request(42, 0x0100007fu, 32768, "ticket");
+		std::vector<NapiMessage> containers;
+		if (expect(decode_client_containers(entry, server.client_scrk, containers) &&
+		               containers.size() == 1 && containers[0].name == "ClientPlayerEnterRequest",
+		           "an established host emits the player entry request")) {
+			std::string ticket;
+			for (const auto &field : containers[0].fields) {
+				if (field.name == "JoinTicket") ticket.assign(field.data.begin(), field.data.end());
+			}
+			expect(ticket == "ticket", "the framed entry request preserves the join ticket");
+		}
+		const auto reply = server.respond(entry);
+		std::vector<std::vector<uint8_t>> entry_out;
+		expect(!reply.empty() && client.handle_datagram(reply.data(), reply.size(), entry_out),
+		       "the host handles the service's player entry result");
+		const auto notices = client.take_notices();
+		expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::PlayerEnterResult &&
+		               notices[0].player_enter.connection_id == 42 && notices[0].player_enter.success == 1,
+		       "the player entry result identifies and admits the requested connection");
+	}
+
 	// 12) A datagram the envelope rejects is tossed (counted, logged) and the
 	// session is untouched. [orig: NapiNPManager_PumpReceive @0x623010 @0x623206]
 	{
@@ -1043,6 +1069,8 @@ int main() {
 		expect(client.build_host_player_added(HostPlayerSlot{}).empty(),
 		       "no roster notifications once hosting stopped");
 		expect(client.build_stop_hosting().empty(), "ClientStopHosting builds only from states 5/6");
+		expect(client.build_player_enter_request(42, 0x0100007fu, 32768, "").empty(),
+		       "player entry requests stop when hosting stops");
 	}
 
 	// 16) The play leg: ClientPlayRequest (state 4 -> 7) with the PlaySetup vars,

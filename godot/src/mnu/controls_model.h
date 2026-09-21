@@ -26,6 +26,9 @@ protected:
 	static void _bind_methods();
 
 public:
+	opennova::controls::BindingSet &native_bindings() { return bindings_; }
+	const opennova::controls::BindingSet &native_bindings() const { return bindings_; }
+
 	enum Device {
 		DEVICE_KEYBOARD = 0,
 		DEVICE_MOUSE = 1,
@@ -81,9 +84,6 @@ public:
 
 	// VK <-> Godot Key translation (0 when unmappable).
 	static int vk_from_godot_key(int p_godot_key);
-	// The manual weapon-switch rows' config tokens in category order (the
-	// engine catalog rows 28..36 — engine/runtime/controls/controls.h).
-	static PackedStringArray weapon_category_tokens();
 	static int godot_key_from_vk(int p_vk);
 
 	// Persistence blob: token -> [primary, secondary, primary_mod,

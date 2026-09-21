@@ -233,7 +233,7 @@ private:
 	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);
 	Ref<AudioStreamWAV> _validate_candidate_stream(int p_candidate_id,
 			const Ref<AmbientLayer> &p_descriptor);
-	Ref<MissionAudioChannel> _free_or_new_channel();
+	Ref<MissionAudioChannel> _new_channel();
 	void _stop_all_ambient_channels();
 	void _reset_mission_playback_state();
 	void _feed_mixer();
@@ -242,7 +242,7 @@ private:
 	int _allocate_dynamic_candidate_id();
 	void _prune_dynamic_emitter_states();
 	void _release_retired_candidate_ids();
-	static double _candidate_pitch_scale(const Ref<MissionAudioCandidate> &p_candidate);
+	static double _pitch_scale(const Ref<AmbientLayer> &p_descriptor, int p_pitch_q16);
 	static double _hhmm_to_hours(double p_hhmm);
 	void _load_bank(const String &p_lwf_name);
 	void _apply_reverb(int p_reverb_id);
@@ -281,11 +281,13 @@ private:
 	// (editor-idle owners -- the weather world-driven/autonomous split).
 	bool world_driven_ticks_ = false;
 	int64_t world_driven_tick_offset_ = 0;
-	Vector<Ref<MissionAudioChannel>> channels_; // at most MIX_CHANNELS
+	Vector<Ref<MissionAudioChannel>> channels_; // at most MIX_CHANNELS, one per pool channel
+	// The engine's channel pool: which candidate rides which channel, the
+	// dropouts and entrants per frame, the unresolvable candidates cached out.
+	opennova::audio::AmbientChannelPool channel_pool_{ MIX_CHANNELS };
 	int next_candidate_id_ = 1;
 	Vector<int> free_candidate_ids_;
 	Vector<int> retired_candidate_ids_;
-	HashSet<int> failed_candidate_ids_;
 	HashSet<int> validated_candidate_ids_;
 	bool warned_ambient_decode_failure_ = false;
 	// The "ambience disabled" arm (the dialog-vs-ambient probe): banks and the

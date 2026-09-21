@@ -385,15 +385,14 @@ uint32_t weapon_trace_samples_since(const LocalPlayerWeapon &w, uint32_t after_t
                                     bool take_all, std::vector<WeaponTraceSample> &out);
 
 
-// The local player's equipped-weapon FSM view for one tick, as one value the
-// embedder fills (Simulation::get_local_player_weapon_state carries the
-// field witnesses): the action ladder position, the FP clip channel, the last
-// action's audio/effect legs, the event serials, the magazine, heat and
-// recoil, the HUD crosshair spread in retail's integer domains, the
-// PowerThrow windup, the emplaced-gun controls, the round-ring diagnostics
-// and the 3P body weapon channel. `active` false = no weapon FSM installed
-// (every other field reads its default). Its Godot record wraps it by value
-// (ADR 0043 d10).
+// The local player's equipped-weapon FSM view for one tick, as one value
+// (the fill below carries the field witnesses): the action ladder position,
+// the FP clip channel, the last action's audio/effect legs, the event
+// serials, the magazine, heat and recoil, the HUD crosshair spread in
+// retail's integer domains, the PowerThrow windup, the emplaced-gun
+// controls, the round-ring diagnostics and the 3P body weapon channel.
+// `active` false = no weapon FSM installed (every other field reads its
+// default). Its Godot record wraps it by value (ADR 0043 d10).
 struct LocalPlayerWeaponView {
     bool active = false;
     int32_t current_action = 0;
@@ -439,6 +438,7 @@ struct LocalPlayerWeaponView {
     bool emplaced_controls_valid = false;
     int32_t emplaced_gun_yaw = 0;
     int32_t emplaced_gun_pitch = 0;
+    int32_t emplaced_spin_phase = 0;
     int32_t round_ring_count = 0;
     int32_t last_round_flags = 0;
     int32_t last_round_subtype = 0;
@@ -452,5 +452,10 @@ struct LocalPlayerWeaponView {
     int32_t body_anim_variant = 0;
     int32_t body_anim_prev_variant = 0;
 };
+
+// The fill (player_weapon_view.cpp), from the live world, the local weapon
+// aggregate and the inventory's staged combo slot.
+LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPlayerWeapon &w,
+                                               const WeaponInventory &inventory);
 
 } // namespace opennova::world

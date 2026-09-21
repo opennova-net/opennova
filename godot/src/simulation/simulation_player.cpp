@@ -167,6 +167,10 @@ int Simulation::request_hud_map_cycle() {
 	return kernel_->local.hud_map_control.cycle();
 }
 
+void Simulation::request_hud_map_close() {
+	kernel_->local.hud_map_control.on_respawn_init();
+}
+
 int Simulation::get_hud_map_mode() const {
 	return kernel_->local.hud_map_control.mode;
 }
@@ -267,16 +271,11 @@ float Simulation::get_local_player_anim_blend_weight() const {
 // (health ratio at +92 = currentHealth/maxHealth, team byte at +374). We surface the raw values
 // and let the HUD compute the ratio. [orig: HUD_BuildEntityInfo @0x4b8440]
 int Simulation::get_local_player_health() const {
-	if (!kernel_->world.cached.local_player.valid()) return 0;
-	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	return e ? e->health : 0;
+	return opennova::world::local_player_health(kernel_->world);
 }
 
 int Simulation::get_local_player_max_health() const {
-	if (!kernel_->world.cached.local_player.valid()) return 100;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	if (!p || p->inf.max_health <= 0) return 100;
-	return p->inf.max_health;
+	return opennova::world::local_player_max_health(kernel_->world);
 }
 
 double Simulation::player_eye_min_above_position() {
@@ -292,9 +291,8 @@ double Simulation::player_aim_project_range() {
 	return opennova::world::kAimProjectRange;
 }
 
-int Simulation::get_local_player_health_percent() const {
-	return opennova::world::music_health_percent(get_local_player_health(),
-			get_local_player_max_health());
+std::array<opennova::world::MusicVarWrite, 2> Simulation::game_music_var_writes() const {
+	return opennova::world::game_music_var_writes(kernel_->world);
 }
 
 int Simulation::get_local_player_team() const {

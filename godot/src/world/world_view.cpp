@@ -8,6 +8,10 @@ using namespace godot;
 
 // --- WorldView ---------------------------------------------------------------
 
+int64_t WorldView::get_frame_clock_ms() const {
+	return GameWorld::current_frame_clock_ms();
+}
+
 Ref<Simulation> WorldView::sim() {
 	Ref<Simulation> out;
 	if (GDVIRTUAL_CALL(_sim, out)) {
@@ -25,6 +29,8 @@ Ref<ResourceRoot> WorldView::resource_root() {
 }
 
 void WorldView::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_frame_clock_ms"), &WorldView::get_frame_clock_ms);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_clock_ms"), "", "get_frame_clock_ms");
 	GDVIRTUAL_BIND(_sim);
 	GDVIRTUAL_BIND(_resource_root);
 	ClassDB::bind_method(D_METHOD("sim"), &WorldView::sim);

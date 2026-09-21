@@ -24,7 +24,7 @@
 #include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
-#include "lights/effect_light_report.h" // CoronaRow (the corona inspection seam)
+#include "lights/effect_light_report.h" // EffectLightReport (get_report)
 #include "lights/light_spawn.h"
 
 namespace godot {
@@ -147,32 +147,23 @@ public:
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
-	// The corona billboard rows for this frame [orig:
+	// The corona billboard walk for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads]: one CoronaRow per
-	// additive camera-facing quad (Godot-world position, half_size in world
-	// units, the premultiplied additive color including the segment fade and
-	// the fog-to-black fold). models/owner_entities are the SAME parallel
-	// arrays the per-model light pass walks — models carrying an occlusion
+	// opennova::renderer::LightScene::collect_corona_quads] landed as ONE
+	// MultiMesh buffer write: the collect_corona_quads rows packed as
+	// interleaved TRANSFORM_3D + color instance floats (scale-only basis =
+	// half_size, origin = the Godot-world segment center, color = the
+	// premultiplied additive fold including the segment fade and the
+	// fog-to-black fold). models/owner_entities are the SAME parallel arrays
+	// the per-model light pass walks — models carrying an occlusion
 	// section-mask verdict gate their owned coronas on the visible-section
 	// bit; fog is the environment's EnvLightValues (null = no fog; the
 	// primary device fog with the color forced black [orig:
-	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The headless
-	// inspection seam of fill_corona_multimesh; marshalling only.
-	TypedArray<CoronaRow> collect_corona_rows(const Vector3 &p_camera_pos,
-			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
-			int p_time_ms, int p_frame_index, Weather *p_weather,
-			const TypedArray<Node3D> &p_models,
-			const PackedInt64Array &p_owner_entities,
-			const Ref<EnvLightValues> &p_fog);
-	// The same corona walk landed as ONE MultiMesh buffer write: the identical
-	// collect_corona_quads rows packed as interleaved TRANSFORM_3D + color
-	// instance floats (scale-only basis = half_size, origin = segment center,
-	// color = the premultiplied additive fold). The mesh grows to the row
-	// high-water only; rows beyond this frame's count are hidden through
-	// visible_instance_count, never re-uploaded. Returns the row count. The
-	// hot presenter calls this; collect_corona_rows stays the inspection seam
-	// (the GUT equivalence test compares the two).
+	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The mesh grows to
+	// the row high-water only; rows beyond this frame's count are hidden
+	// through visible_instance_count, never re-uploaded. Returns the row
+	// count; get_last_corona_buffer is the headless pin of the packing (the
+	// walk's semantics are the renderer_light_scene ctest's).
 	int fill_corona_multimesh(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,

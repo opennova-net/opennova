@@ -30,6 +30,7 @@ struct WeatherOscillator;
 #include <formats/threedi/threedi_panm.h>
 
 #include <runtime/renderer/material_eval.h>
+#include <runtime/renderer/model_panm_cache.h>
 
 #include "resource_index/resource_root.h"
 
@@ -69,40 +70,7 @@ private:
 	mutable std::unordered_map<uint64_t, Array> submesh_cache;
 	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame);
 
-	// Per-frame PANM evaluation cache behind apply_panm_to_nodes: one data
-	// instance is SHARED across every placed model of the same graphic (the
-	// placer's per-graphic cache). Deterministic tracks at the same clock/bus
-	// reuse an evaluation; noise tracks deliberately re-evaluate per instance
-	// because retail consumes one CRT sample per submitted model. `changed`
-	// marks parts whose transform moved since
-	// the PREVIOUS evaluation; `revision` bumps when any did, letting a caller
-	// that already applied this revision skip every node write. One cache per
-	// authored RLOD (PANM is written per RLOD), so instances of one graphic
-	// drawn at mixed levels never evict each other's evaluation. Invalidated by
-	// _notify_object_changed()/_clear() like the submesh cache. Main-thread
-	// only.
-	struct PanmEvalCache {
-		int lod = -1;
-		int64_t time_ms = -1;
-		uint64_t ctrl_hash = 0;
-		bool valid = false;
-		bool has_noise = false;
-		uint64_t revision = 0;
-		std::vector<opennova::threedi::ThreediPartAnimation> anims;         // effective set for `lod`
-		std::vector<opennova::threedi::ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
-		std::vector<opennova::threedi::ThreediVec3> pivots;
-		std::vector<opennova::threedi::ThreediMatrix4x4> node_matrices;     // scratch, per anim node
-		std::vector<int> part_to_node;
-		std::vector<Transform3D> part_transforms;        // per part, godot frame
-		std::vector<uint64_t> part_revision;             // revision at last change
-	};
-	mutable std::vector<PanmEvalCache> panm_caches_; // indexed by LOD
-	// Diagnostic serial: increments whenever node matrices are actually
-	// evaluated for any level, even if a random sample happens to reproduce
-	// the prior transform and therefore does not mint a changed-pose revision.
-	mutable uint64_t panm_evaluation_serial_ = 0;
-	void _invalidate_panm_cache() { panm_caches_.clear(); }
-	PanmEvalCache *_panm_cache_prepare(int p_lod_index) const;
+	mutable opennova::renderer::ModelPanmCache panm_cache_;
 	// Material generator fixups depend only on the loaded document's local CTRL
 	// table. Cache their native names once instead of rebuilding a
 	// vector<string> for every material of every model on every render frame.
@@ -117,8 +85,6 @@ private:
 	void _clear();
 	void _notify_object_changed();
 	Error _open_3di(const String &p_path);
-	bool _effective_panm_for_lod(int p_lod_index,
-			std::vector<opennova::threedi::ThreediPartAnimation> &r_nodes) const;
 
 protected:
 	static void _bind_methods();
@@ -193,7 +159,6 @@ public:
 	// The loaded document's LOD count (0 when empty).
 	int get_lod_count() const;
 
-	Array get_lod_surfaces(int p_lod_index) const;
 	bool is_skinned(int p_lod_index) const;
 	// One MTRL row (object/material_info.h, C++-only); false out of range.
 	bool get_material_info(int p_index, MaterialInfo &r_info) const;
@@ -223,13 +188,6 @@ public:
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 	int get_user_point_bone_mask(const String &p_name) const;
-	// PLAYPARTANIM's engine math (one impl in engine/runtime/world ai.h): the
-	// witnessed rate from ANIMTIME seconds
-	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. The sweep step is
-	// world::part_anim_step, which the model's part-anim channels call
-	// directly; the authoritative AI path integrates in AiSystem and presents
-	// through set_part_phase.
-	static int part_anim_rate_for_seconds(double p_seconds);
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked
@@ -308,16 +266,7 @@ public:
 	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 			const Array &p_nodes, int64_t p_applied_revision) const;
-	// The dict conversion split for retained callers: the dict-only half
-	// caches per change; FLICKER/SWING ride the live weather globals at use
-	// time unless the dict pins them (the same override order the one-shot
-	// runtime_control_values applies).
-	static opennova::renderer::ControlRegisterValues
-	runtime_control_values_dict_only(const Dictionary &p_ctrl_values,
-			bool &r_has_flicker, bool &r_has_swing);
-	static void stamp_weather_ctrl_registers(
-			opennova::renderer::ControlRegisterValues &r_values,
-			bool p_dict_has_flicker, bool p_dict_has_swing);
+	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 };

@@ -48,6 +48,19 @@ const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
 	return host_role_ != nullptr ? &host_role_->state.host_owner.ctx : nullptr;
 }
 
+// What the role feeds (inmatch/role_feeds.h) read of the running role: the
+// kernel, the role's replica runtime, the authority's session context, the
+// joiner bit and the staged host option word.
+opennova::inmatch::RoleView Simulation::role_view() const {
+	opennova::inmatch::RoleView view;
+	view.kernel = kernel_.get();
+	view.runtime = runtime_;
+	view.host = host_ctx();
+	view.joiner = is_joiner();
+	view.staged_mp_attributes = net_.host_session_config.mp_attributes;
+	return view;
+}
+
 // The ONE writer of the kind-derived world rules: a joiner is never the
 // projectile authority; a LAN host or a joiner is an mp session (the SP
 // listen server keeps the SinglePlayer kind and stays offline). Runs on the

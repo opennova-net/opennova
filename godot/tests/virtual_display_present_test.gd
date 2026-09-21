@@ -66,7 +66,7 @@ func _placed_pass(hull: ObjectModel, placer: MissionObjectPlacer) -> EntityPrese
 	hull.entity_ref = EntityRef.make(1, HULL_BMS_ID, HULL_BMS_ID)
 	var models: Array[ObjectModel] = [hull]
 	var index := EntityIndex.new()
-	index.build(models, [])
+	index.build(models, null)
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(null, index, placer)
@@ -362,7 +362,7 @@ func _board_installed_m1a1() -> Installed:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(art, TRAINING_MISSION), OK)
 	var tank_bms_id := -1
-	for record: MissionEntityRecord in mission.get_all_entities():
+	for record: EntityRef in mission.get_all_entity_refs():
 		if record.item_id == M1A1_ITEM:
 			tank_bms_id = record.bms_id
 			break

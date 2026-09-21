@@ -34,15 +34,10 @@ namespace {
 int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
                                           Entity &occupant, Entity &vehicle,
                                           const Seat &seat) {
-    world.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
-    // Capture the resolved seat orientation before an independent LOOK mirror
-    // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
-    // the generic degree helper rounds differently at non-cardinal headings.
-    const int16_t seat_yaw = occupant.yaw;
-    const int16_t seat_pitch = occupant.pitch;
-    const int16_t seat_roll = occupant.roll;
-    const int32_t resolved_heading = static_cast<int32_t>(
-            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+    const MountedPose pose = world.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
+    // Capture the full body frame before independent LOOK restores registry yaw.
+    // [orig: Entity_AttachToBoneAndUpdateTransform @0x546620..0x546664]
+    const int32_t resolved_heading = pose.heading;
     if (e.inf.active) {
         // Mirror both the direct seat-frame writes and the carried-infantry leg
         // chase snap so render and per-section collision consume one coherent
@@ -53,8 +48,8 @@ int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
         e.inf.leg_yaw[1] = resolved_heading;
         e.inf.leg_target[0] = resolved_heading;
         e.inf.leg_target[1] = resolved_heading;
-        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
-        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+        e.body_pitch = pose.pitch;
+        e.roll = pose.roll;
     }
     // Organics present from AiEntity.pos, not Entity.position.
     e.pos[0] = to_fixed(occupant.position.x);
@@ -635,6 +630,9 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);
+    world.registry.for_each_in_pool(1, [&](const Entity &entity) {
+        tick_emplaced_weapon_animation(world, *world.registry.get(entity.handle));
+    });
     // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
     // motor delta, then resolve contacts against that same pose.
     // [orig: Entity_UpdateAllEntities @0x4C2158..0x4C21F1 before the
@@ -747,8 +745,12 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             fire[3] = mount->veh.yaw_seeded
                     ? mount->veh.yaw_bam
                     : bam_heading_from_mission_yaw_deg(static_cast<double>(mount->yaw));
-            fire[4] = bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
-            fire[5] = bam_from_degrees_wrapped(static_cast<double>(mount->roll));
+            fire[4] = mount->veh.yaw_seeded
+                    ? mount->veh.air_pitch_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
+            fire[5] = mount->veh.yaw_seeded
+                    ? mount->veh.air_roll_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(mount->roll));
         }
 		world.vehicles.weapon_recoil(*owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, fire[3], fire[4]);

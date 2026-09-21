@@ -28,18 +28,13 @@
 #include "mission/mission_object_placer.h"
 #include "mission/mission_placement_stats.h"
 #include "mission/static_population_instance.h"
-#include "mission/static_source_records.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
 #include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
-#include "particle/particle_curve_ref.h"
 #include "particle/particle_effect.h"
-#include "particle/particle_table.h"
-#include "particle/particle_graphic_layer.h"
-#include "particle/particle_def.h"
 #include "particle/particle_file.h"
 #include "lights/effect_light_director.h"
 #include "lights/effect_light_report.h"
@@ -74,7 +69,6 @@
 #include "object/weapon_database.h"
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
-#include "object/item_records.h"
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 #include "object/avatar_records.h"
@@ -105,6 +99,8 @@
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
+#include "hud/hud_toggles.h"
+#include "hud/end_round_transition.h"
 #include "hud/hud_inset_scope.h"
 #include "devtools/dev_tools.h"
 #include "devtools/debug_arg_spec.h"
@@ -116,7 +112,6 @@
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
-#include "mission/mission_records.h"
 #include "mission/mission_perf_counters.h"
 #include "mission/mission_root.h"
 #include "mission/mission_setup_options.h"
@@ -162,13 +157,13 @@
 #include "audio/music_script.h"
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
-#include "pff/pff_document.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mnu_rows.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/menu_draw_list_stats.h"
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
+#include "mnu/menu_driver.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -222,9 +217,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
 	GDREGISTER_CLASS(StaticPopulationInstance);
-	GDREGISTER_CLASS(StaticEffectSource);
-	GDREGISTER_CLASS(StaticLightDrawSource);
-	GDREGISTER_CLASS(StaticTerrainShadowSourceRow);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
@@ -245,10 +237,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectShaderCache);
 	GDREGISTER_CLASS(ModelLight);
 	GDREGISTER_CLASS(ModelUserPoint);
-	GDREGISTER_CLASS(ItemEmplacementAttachment);
-	GDREGISTER_CLASS(EnvsMarkerRow);
-	GDREGISTER_CLASS(ItemSeatAttachmentRow);
-	GDREGISTER_CLASS(ItemSeatCard);
 	GDREGISTER_CLASS(ItemDatabase);
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);
@@ -309,25 +297,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(HudToggles);
+	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
 	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
-	GDREGISTER_CLASS(MissionEntityRecord);
-	GDREGISTER_CLASS(MissionWaypointSummary);
-	GDREGISTER_CLASS(MissionWaypointPath);
-	GDREGISTER_CLASS(MissionWaypointMarker);
-	GDREGISTER_CLASS(MissionAreaTrigger);
-	GDREGISTER_CLASS(MissionWeaponLoadoutEntry);
-	GDREGISTER_CLASS(MissionGroup);
-	GDREGISTER_CLASS(MissionEvent);
-	GDREGISTER_CLASS(MissionEventTrigger);
-	GDREGISTER_CLASS(MissionEventAction);
-	GDREGISTER_CLASS(MissionLogicReference);
-	GDREGISTER_CLASS(MissionLogicDiagnostic);
-	GDREGISTER_CLASS(MissionEventChain);
-	GDREGISTER_CLASS(MissionLogicSummary);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);
 	// The present passes EntityPresenter owns (ADR 0043 d9): two are
@@ -365,7 +341,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionAudioMarker);
 	GDREGISTER_CLASS(MissionAudioChannel);
 	GDREGISTER_CLASS(MissionAudioCandidateBinding);
-	GDREGISTER_CLASS(MissionAudioCandidate);
 	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
@@ -380,11 +355,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(Paths);
-	GDREGISTER_CLASS(ParticleCurveRef);
 	GDREGISTER_CLASS(ParticleEffect);
-	GDREGISTER_CLASS(ParticleTable);
-	GDREGISTER_CLASS(ParticleGraphicLayer);
-	GDREGISTER_CLASS(ParticleDef);
 	GDREGISTER_CLASS(ParticleFile);
 	GDREGISTER_CLASS(EffectLoadReport);
 	GDREGISTER_CLASS(EffectSpawnRequest);
@@ -393,7 +364,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(EffectEmitterReport);
 	GDREGISTER_CLASS(EffectGroupReport);
-	GDREGISTER_CLASS(CoronaRow);
 	GDREGISTER_CLASS(EffectLightRow);
 	GDREGISTER_CLASS(EffectLightReport);
 	GDREGISTER_CLASS(LightScene);
@@ -432,7 +402,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MusicScript);
 	GDREGISTER_CLASS(MusicPairNames);
 	GDREGISTER_CLASS(MusicDirector);
-	GDREGISTER_CLASS(PffDocument);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnuSoundRow);
 	GDREGISTER_CLASS(MnuActionRow);
@@ -440,6 +409,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuDrawListStats);
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
+	GDREGISTER_CLASS(MenuScrollRange);
+	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	GDREGISTER_CLASS(ControlsModel);
 	// The local player's presentation (ADR 0043 slice G8): the presenter node,

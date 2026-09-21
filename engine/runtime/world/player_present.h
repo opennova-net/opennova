@@ -12,6 +12,8 @@
 // stays in the binding (godot/src/player).
 #pragma once
 
+#include <runtime/world/present_drains.h> // FirePresentationRow (the fire drain's row)
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -88,6 +90,26 @@ LocalPlayerLightingContext local_player_lighting_context(int interior_item_id,
 bool local_fire_effect_admitted(int action_started, int fire_action, bool has_particle,
                                 bool scope_settled, bool third_person,
                                 bool vehicle_attack_context);
+
+// The remote fire's effect admission for one drained fire row: which legs run
+// and where they anchor. The MF_Light glow re-arms for EVERY shooter, the
+// local player's included; the effect leg never runs for the local player
+// (its own fire rides the action-slot legs above). The adm arm spawns the
+// ADDRESSED def's FIRE-row effect at the rendered gun's userpoint and never
+// falls back to the ammo effect; the ammo arm spawns the ammo effect at the
+// row's origin. The embedder resolves `userpoint` against the node it
+// renders (an unresolvable anchor keeps the origin) and spawns.
+// [orig: arms @0x42f521 / @0x42f6ce; WeaponSlot_FireAndSpawnEffects
+//  @0x53f597 / ActionSlot_SpawnEffect @0x402080 for the glow]
+struct FireEffectPlan {
+    bool glow = false;            // the MF_Light muzzle glow
+    bool glow_at_muzzle = false;  // ... anchored on the gun's userpoint (the adm arm)
+    bool spawn = false;           // the effect leg (never the local player; needs an effect)
+    bool spawn_at_muzzle = false; // ... anchored on the gun's userpoint (the adm arm)
+    std::string effect;           // the adm arm's action effect, else the ammo effect
+    std::string userpoint;        // the row's action userpoint
+};
+FireEffectPlan fire_effect_plan(const FirePresentationRow &row);
 
 // Retail keeps two resolved indices for one authored userpoint name --
 // ActionDef+56 against gfx1 and +57 against gfx3 -- and picks by the

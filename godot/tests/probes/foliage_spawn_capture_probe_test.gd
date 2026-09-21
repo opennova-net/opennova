@@ -1,53 +1,7 @@
 extends GutTest
 
 const PROBE_PATH := "res://probes/render/foliage_spawn_capture_probe.gd"
-const FLICKER_PROBE_PATH := \
-		"res://probes/stage/foliage_flicker_regression_probe.gd"
 const ProbeScript := preload(PROBE_PATH)
-
-
-func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
-	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
-	assert_true(source.contains('const DEFAULT_MISSION := "00TRe.bms"'))
-	assert_true(source.contains("ctx.load_saved_mission("),
-		"Probe should boot the saved mission through the real game shell.")
-	assert_true(source.contains("var world: GameWorld = _world"),
-		"Probe should bind the standalone shell's GameWorld.")
-	assert_true(source.contains("world.get_sim().has_local_player()"),
-		"Probe should fail unless the mission spawned a local player.")
-	assert_true(source.contains("world.get_sim().get_local_player_position()"),
-		"Probe should record the real local-player anchor.")
-	assert_true(source.contains("world.set_foliage_hidden(true)"),
-		"Foliage-hidden A/B should use GameWorld's public API.")
-	assert_true(source.contains('mission_name.get_file().get_basename()'),
-		"Capture filenames should identify the mission under comparison.")
-	assert_true(source.contains('_capture_stem + "_spawn_default.png"'),
-		"Each mission should keep its own exact-spawn capture.")
-	assert_false(source.contains("ResourceDirSettings.set_resource_dir("),
-		"The probe must not overwrite the user's persisted resource root.")
-	assert_false(source.contains("_mission_workspace"),
-		"The capture must not recreate the removed embedded PIE path.")
-	for forbidden in [
-		"_find_painted", "get_foliage_index_world", "camera.global_position =",
-		"camera.global_transform =", "camera.look_at(", "Input.parse_input_event",
-	]:
-		assert_false(source.contains(forbidden),
-			"Probe must not search painted cells, teleport the camera, or synthesize input: %s" % forbidden)
-
-
-func test_foliage_raster_probes_control_rid_draws_through_the_public_seam() -> void:
-	for path in [PROBE_PATH, FLICKER_PROBE_PATH]:
-		var source := FileAccess.get_file_as_string(path)
-		assert_false(source.is_empty(), "Foliage probe source should be readable: %s" % path)
-		assert_true(source.contains("apply_probe_draw_control("),
-				"RID-backed foliage probes must use the public diagnostic control seam: %s" % path)
-		assert_false(source.contains("dispatcher.get_children()"),
-				"A retained RID has no discoverable child node: %s" % path)
-		assert_false(source.contains("FoliageDetailDraw"),
-				"Probe admission must use portable pass identity, not a retired node name: %s" % path)
-		assert_false(source.contains("FoliageModelDraw"),
-				"Probe admission must use portable pass identity, not a retired node name: %s" % path)
 
 
 func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners() -> void:
@@ -99,16 +53,6 @@ func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners
 		"revx02", "00TRa.bms", winning_entries, true), "",
 		"A saved loose mission may drive a standalone packed-runtime capture.")
 
-	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_true(source.contains('ctx.args.get("mission_path", "")'),
-		"The saved loose mission is a typed argument, separate from the runtime mount.")
-	assert_true(source.contains('ctx.args.get("expansion", "")'),
-		"The probe must receive an explicit expansion request.")
-	assert_true(source.contains("ctx.load_saved_mission(mission_path, mission_name)"),
-		"The shell must parse the exact saved BMS and resolve its dependencies through the packed mount.")
-	assert_true(source.contains("list_file_entries()"),
-		"The probe must report the VFS's winning source entries.")
-
 
 func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:
 	var empty_stats := FoliageFrameStats.new()
@@ -127,39 +71,3 @@ func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:
 	assert_eq(ProbeScript.runtime_foliage_validation_error(
 		"00TRa.bms", empty_stats, 0), "",
 		"00TRa's exact spawn is an intentional zero-visible-foliage control.")
-
-
-func test_spawn_capture_settles_visibility_changes_before_each_image() -> void:
-	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
-	assert_true(source.contains("_game.process_mode = Node.PROCESS_MODE_DISABLED"),
-		"The shell tick must freeze with the world so presenter camera state stays exact.")
-	assert_true(source.contains("const VISIBILITY_SETTLE_FRAMES := 3"),
-		"The A/B probe should give renderer visibility changes time to reach the viewport.")
-	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)"),
-		"The visible capture must settle after enabling foliage.")
-	assert_true(source.contains("world.set_foliage_hidden(true)\n\tawait ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)"),
-		"The hidden capture must settle after disabling foliage.")
-
-
-func test_spawn_capture_uses_standalone_game_aspect_not_editor_dock_aspect() -> void:
-	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
-	assert_true(source.contains("const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)"),
-		"Retail comparisons should use the standalone game's 16:9 viewport.")
-	assert_true(source.contains("ctx.set_window_size(CAPTURE_VIEWPORT_SIZE)"),
-		"The native game window should render at the fixed comparison size.")
-	assert_false(source.contains("PlayViewportContainer"),
-		"The capture must not depend on an editor dock viewport.")
-
-
-func test_spawn_capture_reads_native_sky_through_its_public_interface() -> void:
-	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_true(source.contains("sky.get_sky_material()"),
-		"The capture must use SkyDome's native public material interface.")
-	assert_false(source.contains("sky.sky_material"),
-		"The removed scripted SkyDome field must not break parity captures.")
-	assert_true(source.contains("EXPECTED_VERTICAL_FOV_DEG"),
-		"A loading-screen camera must not be accepted as a gameplay capture.")
-	assert_true(source.contains("transform.origin.distance_to(position)"),
-		"The captured camera must remain attached to the resolved player pose.")

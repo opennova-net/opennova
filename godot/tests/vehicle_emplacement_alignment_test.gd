@@ -60,8 +60,8 @@ func _retail_attachment_basis(direction: Vector3) -> Basis:
 
 func _blackhawk_carriers(mission: MissionData) -> Array:
 	var carriers: Array = []
-	for raw in mission.get_all_entities():
-		var entity: MissionEntityRecord = raw
+	for raw in mission.get_all_entity_refs():
+		var entity: EntityRef = raw
 		if entity.item_id == CARRIER_ITEM_ID:
 			carriers.append(entity)
 	return carriers
@@ -79,14 +79,14 @@ func _blackhawk_anchors(data: ObjectData) -> Array:
 
 
 func _authored_attachment_anchors(
-		item_db: ItemDatabase, item_id: int, data: ObjectData) -> Array:
+		root: ResourceRoot, item_id: int, data: ObjectData) -> Array:
 	# Oracle-side rebuild of the authored addeweap anchors: the items.def row
 	# names the child item + userpoint, the .3di USRP row supplies the raw
 	# retail frame. Whole-name case-insensitive resolve, first match — the same
 	# rule the runtime applies, so the expected frames pair with produced rows.
 	var rows: Array = []
-	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(item_id):
-		var wanted := authored.userpoint.strip_edges()
+	for authored: Dictionary in AuthoredItemFixture.read_rows(root)[item_id]["attachments"]:
+		var wanted := String(authored["userpoint"]).strip_edges()
 		var row := {
 			"item_id": authored.item_id,
 			"source_name": wanted,
@@ -187,7 +187,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	for carrier in carriers:
 		var carrier_xform := MissionObjectPlacer.entity_transform(
 				carrier.position,
-				carrier.rotation_deg)
+				mission.get_entity_rotation(carrier.kind, carrier.index))
 		for anchor: ModelUserPoint in anchors:
 			var direction := anchor.rotation
 			assert_gt(direction.length_squared(), 0.99,
@@ -201,8 +201,6 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 						* Vector3.BACK).normalized(),
 			})
 
-	var carrier_card := item_db.extract_seat_specs_for_item(root, CARRIER_ITEM_ID)
-	assert_eq(carrier_card.get_emplacement_attachments().size(), 2)
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
 	var sim := Simulation.new()
@@ -256,15 +254,12 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
-	var carrier_card := item_db.extract_seat_specs_for_item(root, MRK5_ITEM_ID)
-	assert_eq(carrier_card.get_emplacement_attachments().size(), 4,
-			"the shipped MRK5 has four attachment anchors")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, MRK5_GRAPHIC + ".3di")
 	assert_eq(open_err, OK)
 	if open_err != OK:
 		return
-	var attachments := _authored_attachment_anchors(item_db, MRK5_ITEM_ID, data)
+	var attachments := _authored_attachment_anchors(root, MRK5_ITEM_ID, data)
 	assert_eq(attachments.size(), 4)
 	var child_types := {}
 	for raw in attachments:
@@ -459,16 +454,13 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
-	var carrier_card := item_db.extract_seat_specs_for_item(root, DBUGGY_ITEM_ID)
-	assert_gt(carrier_card.get_emplacement_attachments().size(), 0,
-			"the shipped DBuggy authors at least one child emplacement")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, DBUGGY_GRAPHIC + ".3di")
 	assert_eq(open_err, OK)
 	if open_err != OK:
 		return
-	var attachments := _authored_attachment_anchors(item_db, DBUGGY_ITEM_ID, data)
-	assert_eq(attachments.size(), carrier_card.get_emplacement_attachments().size(),
+	var attachments := _authored_attachment_anchors(root, DBUGGY_ITEM_ID, data)
+	assert_eq(attachments.size(), 1,
 			"the native extraction carries every authored DBuggy attachment")
 	var child_types := {}
 	var attachment_by_type := {}
@@ -676,7 +668,7 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	var child_types := {}
-	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(DBUGGY_ITEM_ID):
+	for authored: Dictionary in AuthoredItemFixture.read_rows(root)[DBUGGY_ITEM_ID]["attachments"]:
 		child_types[authored.item_id - 100000] = true
 	assert_gt(child_types.size(), 0, "the shipped DBuggy authors a child emplacement")
 

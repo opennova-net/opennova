@@ -61,7 +61,7 @@ ObjectData::~ObjectData() {
 void ObjectData::_clear() {
 	source_model_.reset();
 	submesh_cache.clear();
-	_invalidate_panm_cache();
+	panm_cache_.clear();
 	_invalidate_runtime_control_names();
 	source_path = String();
 	source_dir = String();
@@ -76,7 +76,7 @@ void ObjectData::_notify_object_changed() {
 	// Loading replaces the entire immutable content snapshot, so every derived
 	// view is invalidated together. There are no block-level edit masks.
 	submesh_cache.clear();
-	_invalidate_panm_cache();
+	panm_cache_.clear();
 	_invalidate_runtime_control_names();
 	++change_revision_;
 	if (change_revision_ == 0) ++change_revision_;

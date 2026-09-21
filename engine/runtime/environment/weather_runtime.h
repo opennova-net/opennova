@@ -22,9 +22,11 @@
 
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather_core.h>
+#include <formats/mission/bms.h>
 #include <runtime/world/weather_state.h>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace opennova::env {
@@ -87,6 +89,13 @@ public:
 	// mission's settle runs in the kernel (MissionKernel::
 	// complete_mission_start) through the render hook.
 	void prewarm_mission_start(EnvironmentState *env);
+	// Seed -> attach the embedder's render hook -> publish T0 -> complete the
+	// kernel boundary (eager WAC and the 255-tick settle). Without a mission
+	// state, retain the standalone prewarm path; neither callback runs.
+	void run_mission_start_boundary(EnvironmentState *env,
+			world::WeatherState *mission_state, const bms::Header &header,
+			const std::function<void()> &bind_render,
+			const std::function<void()> &complete_mission_start);
 
 	// --- the ticks -----------------------------------------------------------
 	// The render legs for the tick the sim just ran (the hook target): the

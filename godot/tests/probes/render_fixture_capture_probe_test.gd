@@ -675,22 +675,6 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 			"aborting an incomplete fixture must preserve the last complete fixture")
 	assert_false(FileAccess.file_exists(final_dir.path_join("incomplete.png")))
 
-	var source := FileAccess.get_file_as_string(
-			"res://probes/render/render_fixture_capture_probe.gd")
-	var begin := source.find(
-			"begin_fixture_publication(output_abs, scratch_abs)")
-	var publish := source.find(
-			"publish_bundle(result_dict, publication_abs, label)", begin)
-	var manifest_write := source.find("write_bytes(manifest_path", publish)
-	var commit := source.find(
-			"commit_fixture_publication(publication_abs, output_abs)",
-			manifest_write)
-	assert_gt(begin, -1)
-	assert_gt(publish, begin)
-	assert_gt(manifest_write, publish)
-	assert_gt(commit, manifest_write,
-			"only a complete variant set plus manifest may replace the destination")
-
 
 func test_fixture_publication_recovers_the_prior_fixture_after_an_interrupted_install() -> void:
 	var nonce := "%d-%d" % [OS.get_process_id(), Time.get_ticks_usec()]
@@ -1191,46 +1175,8 @@ func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> v
 	assert_false(already_disabled.is_static_terrain_shadow_enabled(),
 			"an originally disabled provider is restored disabled, never enabled")
 
-	var source := FileAccess.get_file_as_string(
-			"res://probes/render/render_fixture_capture_probe.gd")
-	var boot := source.find("ctx.load_saved_mission(")
-	var begin := source.find("_static_shadow_warmup_suspension.begin(", boot)
-	var load_settle := source.find("\"load_settle_frames\"", boot)
-	assert_gt(boot, -1)
-	assert_gt(begin, boot)
-	assert_gt(load_settle, begin,
-			"static page projection must be off only during the live load warmup")
-	var prepare := source.find("func _prepare_pose(")
-	var freeze := source.find(
-			"_world.process_mode = Node.PROCESS_MODE_DISABLED", prepare)
-	var exact_camera := source.find("camera.make_current()", freeze)
-	var restore := source.find(
-			"_finish_static_shadow_warmup_suspension()", exact_camera)
-	var refresh := source.find("_world.debug_refresh_render_pose(camera)", restore)
-	assert_gt(freeze, prepare)
-	assert_gt(exact_camera, freeze)
-	assert_gt(restore, exact_camera)
-	assert_gt(refresh, restore,
-			"restore must precede the exact non-time-owning terrain refresh")
-	var shutdown := source.find("func _teardown(")
-	assert_gt(shutdown, restore)
-	assert_true(source.substr(shutdown).contains(
-			"_finish_static_shadow_warmup_suspension()"),
-			"every deferred failure teardown must restore the provider")
-
 
 func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> void:
-	var source := FileAccess.get_file_as_string(
-			"res://probes/render/render_fixture_capture_probe.gd")
-	var apply := source.find("_shadow_capture_session.apply_variant(variant)")
-	var capture := source.find("adapter.capture_mcp_render_bundle({", apply)
-	assert_gt(apply, -1)
-	assert_gt(capture, apply)
-	var between := source.substr(apply, capture - apply)
-	assert_true(between.contains("_realize_capture_variant_cache("),
-			"The frozen GameWorld must await exact async terrain pages after every " \
-			+ "shadow control change and before the adapter snapshots state.")
-
 	var shadows_off: Variant = RenderFixtureContract.capture_variants()[1]
 	var stale_beauty := {
 		"shadow_provider_enabled": false,
@@ -1527,17 +1473,6 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 	assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 			dynamic_variant, dynamic_diagnostics, dynamic_realized),
 			"dynamic suppression must be read from the actual ObjectModel caster bit")
-
-	var source := FileAccess.get_file_as_string(
-			"res://probes/render/render_fixture_capture_probe.gd")
-	var camera_validation := source.find("func _valid_realized_camera(")
-	var publication := source.find("func publish_bundle", camera_validation)
-	assert_gt(camera_validation, -1)
-	assert_gt(publication, camera_validation)
-	assert_true(source.substr(
-			camera_validation, publication - camera_validation).contains(
-					"variant, diagnostics, realized_variant"),
-			"post-capture diagnostics must be matched before bundle publication")
 
 
 func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:

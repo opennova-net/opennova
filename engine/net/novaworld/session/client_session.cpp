@@ -767,6 +767,7 @@ std::vector<uint8_t> ClientSession::build_player_enter_request(uint32_t connecti
                                                                uint32_t ip_address,
                                                                uint32_t port_number,
                                                                const std::string &join_ticket) {
+	if (host_state_ != HostState::Established) return {};
 	return build_lobby_message(
 			make_client_player_enter_request(connection_id, ip_address, port_number, join_ticket));
 }

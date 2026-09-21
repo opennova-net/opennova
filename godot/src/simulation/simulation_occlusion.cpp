@@ -3,6 +3,7 @@
 // the entity_pick probe), the debug round spawn, and the ray/contact capture
 // seams the engine's F3 Rays and Physics windows drive natively.
 #include "simulation/simulation_internal.h"
+#include <runtime/mission/debug_oracles.h> // the hitbox view and the entity pick
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 
@@ -234,220 +235,32 @@ float Simulation::sun_quality_factor(int p_quality) const {
 	return opennova::renderer::sun_visibility_factor(4 - p_quality);
 }
 
-// The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes
-// the factor inside the sector render walk for every entity it draws and
-// pushes it onto the render-state stack around that entity's submits
-// [orig: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
-// @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md];
-// contained entities take the interior light group instead and the factor
-// stays 1.0. The blocked-ray count and eligibility gate are engine-side
-// (world::CollisionWorld); this walk mirrors both drawn identity domains and
-// diffs quality per BMS id or wire handle so a steady frame emits nothing.
+// The per-drawn-entity sun-visibility factor feed (D-RLIT-3): the walk, the
+// two identity domains and the per-identity diff are the engine's
+// (inmatch/role_feeds.h SunQualityFeed); this leg maps the light direction
+// into mission fixed, hands over the occlusion pass's culled identities and
+// packs the changes as (id-or-handle, kind, quality) triples.
 PackedInt64Array Simulation::get_draw_lighting_changes(
 		const Vector3 &p_light_dir) {
 	PackedInt64Array out;
 	if (!kernel_) return out;
-
 	// Sun step in mission fixed: light_dir * 200 u, the same tuple mapping the
-	// iris march uses [orig: end = start + 200 * lightdir @0x5c6858..0x5c6876].
+	// iris march uses.
 	const int32_t sun[3] = {
 		opennova::world::to_fixed(p_light_dir.x * 200.0f),
 		opennova::world::to_fixed(-p_light_dir.z * 200.0f),
 		opennova::world::to_fixed(p_light_dir.y * 200.0f)};
-
-	std::unordered_set<int32_t> culled(present_.occlusion_culled_bms.begin(),
-	                                   present_.occlusion_culled_bms.end());
-	if (present_.sun_quality_layout_revision != present_.layout_revision) {
-		present_.sun_quality_last_by_wire.clear();
-		present_.sun_quality_layout_revision = present_.layout_revision;
-	}
-
-	const auto entity_quality = [&](const opennova::world::Entity &e) {
-		// Contained entities route through the interior light group; the
-		// outdoor factor stays 1.0 [orig: the blink-ref branch @0x5c74b7].
-		// The +0x1C0 slice gate [orig: @0x5c6808] lives inside the ray walk:
-		// an entity with no proximity-candidate slice blocks nothing and holds
-		// quality 4 — statics never ray, and only slice candidates (structures
-		// overlapping the entity's inflated bubble) can shade it.
-		if (e.blink_hits[0] != 0) return static_cast<uint8_t>(4);
-		const int blocked =
-				kernel_->collision.sun_visibility_blocked_rays(kernel_->world, e, sun);
-		return static_cast<uint8_t>(4 - blocked);
-	};
-
-	// The local player is a spawned entity (bms_id 0, outside the placed-node
-	// walk); its quality feeds the presenter seam only — the FP parts keep the
-	// witnessed effectScale=1 exemption while the third-person body dims.
-	const opennova::world::Entity *local =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	present_.local_sun_quality = local != nullptr ? entity_quality(*local) : 4;
-
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind == opennova::world::EntityKind::Building ||
-		    e.kind == opennova::world::EntityKind::Marker)
-			return;
-		// Only authored placements have a MissionPresentPass node addressed by
-		// BMS id. Runtime-spawned rows can also carry a nonzero bms_id (players
-		// use their net id), but the EntityPresenter wire walk owns their rendering.
-		if (e.bms_id == 0 ||
-				e.spawn_origin == opennova::world::kSpawnOriginNone)
-			return;
-		if (e.handle == kernel_->world.cached.local_player) return;
-		// Retail only rays a drawn entity; a culled one keeps its last factor
-		// until it renders again (the stack slot is simply never pushed).
-		if (culled.count(e.bms_id) != 0) return;
-		const uint8_t quality = entity_quality(e);
-		const auto it = present_.sun_quality_last_by_bms.find(e.bms_id);
-		const uint8_t last =
-				it != present_.sun_quality_last_by_bms.end() ? it->second : 4;
-		if (quality == last) return;
-		present_.sun_quality_last_by_bms[e.bms_id] = quality;
-		out.push_back(-1);
-		out.push_back(e.bms_id);
-		out.push_back(quality);
-	});
-
-	// Every rendered role consumes ClientState. Placed rows above continue to
-	// address MissionPresentPass by BMS id; only rows without authored identity
-	// reach the EntityPresenter wire walk and therefore need a wire-handle lighting update.
-	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
-	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
-	// check below. Host/SP rows use their authoritative exact-handle entity.
-	// Cadence: like the registry walk above, the three casts run per display
-	// frame. Retail casts inside the sector render walk for every drawn entity
-	// every frame; only the candidate SLICE the walker iterates refreshes on
-	// the 17-tick arena edge, which CollisionWorld::build_tick_tables already
-	// mirrors for wire rows [orig: Terrain_RenderSectorEntities @0x5c7bf1 /
-	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
-	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
-	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
-	// Entity_BuildProximityListsFromPools @0x4c2418, see
-	// docs/render/render-lighting-re.md]. Throttling the casts themselves to
-	// that cadence would hold a moving vehicle's sun factor stale for up to
-	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
-	if (!is_joiner()) {
-		// The host presents its own pools (D-NET-140 closed): the wire-rendered
-		// rows are the runtime-spawned pool-0 organics and pool-1 dynamics with
-		// no authored identity; placed rows went through the walk above.
-		for (int pool = 0; pool <= 1; ++pool) {
-			kernel_->world.registry.for_each_in_pool(pool, [&](const opennova::world::Entity &e) {
-				const uint16_t handle = e.handle.packed;
-				if (e.item_id == 0 || e.handle == kernel_->world.cached.local_player ||
-						e.spawn_origin != opennova::world::kSpawnOriginNone) {
-					present_.sun_quality_last_by_wire.erase(handle);
-					return;
-				}
-				// A hidden row is not drawn, so retail does not push a new stack
-				// value; preserve the last emitted quality (see the wire loop).
-				if ((e.flags & 0x01u) != 0) return;
-				const opennova::EntityClass cls = opennova::replication::entity_class_of(e);
-				const bool person_source = pool == 0 &&
-						(cls == opennova::EntityClass::Player ||
-						 cls == opennova::EntityClass::Infantry);
-				const bool dynamic_source = pool == 1 &&
-						kernel_->wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
-								.pool1_candidate_source_eligible;
-				if (!person_source && !dynamic_source) {
-					present_.sun_quality_last_by_wire.erase(handle);
-					return;
-				}
-				const uint8_t quality = entity_quality(e);
-				const auto it = present_.sun_quality_last_by_wire.find(handle);
-				const uint8_t last =
-						it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
-				if (quality == last) return;
-				present_.sun_quality_last_by_wire[handle] = quality;
-				out.push_back(handle);
-				out.push_back(0);
-				out.push_back(quality);
-			});
-		}
-	} else if (runtime_) {
-		const std::unordered_set<int32_t> wire_culled(
-				present_.occlusion_culled_wire.begin(), present_.occlusion_culled_wire.end());
-		for (const opennova::replication::ClientEntityState &es :
-				runtime_->state().entities) {
-			const uint16_t handle = es.handle;
-			if (handle == opennova::world::EntityHandle::kInvalid ||
-					es.type_id == 0 ||
-					(runtime_->has_self_handle() &&
-					 handle == runtime_->self_handle())) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-			// Retail only rays a drawn entity; a culled one keeps its last
-			// factor until it renders again (see the registry walk above).
-			if (wire_culled.count(static_cast<int32_t>(handle)) != 0) continue;
-			// A hidden row is not drawn, so retail does not push a new stack
-			// value. Preserve the last emitted quality: if it moves while hidden,
-			// the first visible frame must compare against that retained material
-			// state and emit the restoration instead of assuming default quality 4.
-			if (es.state_flags_known && (es.state_flags & 0x01u) != 0)
-				continue;
-
-			const opennova::world::EntityHandle h{handle};
-			const opennova::world::Entity *native = nullptr;
-			const opennova::world::Entity *joiner_twin = nullptr;
-			if (!is_joiner()) {
-				const opennova::world::Entity *candidate =
-						kernel_->world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					native = candidate;
-			} else if (h.pool() != 0) {
-				const opennova::world::Entity *candidate =
-						kernel_->world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					joiner_twin = candidate;
-			}
-			// The EntityPresenter wire walk defers authored rows to their placed node (or
-			// static batch). Do not repeat the same native ray query and cache an
-			// update for a wire node that deliberately does not exist.
-			const opennova::world::Entity *placed =
-					native != nullptr ? native : joiner_twin;
-			if (h == kernel_->world.cached.local_player ||
-					(placed != nullptr && placed->spawn_origin !=
-							opennova::world::kSpawnOriginNone)) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-
-			const bool person_source = h.pool() == 0 &&
-					(es.cls == opennova::EntityClass::Player ||
-					 es.cls == opennova::EntityClass::Infantry);
-			const opennova::world::ResolvedCollisionShape shape =
-					kernel_->wire_collision_shape_for_type(es.type_id);
-			const bool dynamic_source = h.pool() == 1 &&
-					shape.pool1_candidate_source_eligible;
-			if (!person_source && !dynamic_source) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-
-			uint8_t quality = 4;
-			if (native != nullptr) {
-				quality = entity_quality(*native);
-			} else if ((es.rm_entity_flags &
-					opennova::world::kEntityFlagIndoors) == 0 &&
-					(joiner_twin == nullptr ||
-					 joiner_twin->blink_hits[0] == 0)) {
-				const int blocked = kernel_->collision.wire_sun_visibility_blocked_rays(
-						kernel_->world, handle,
-						opennova::world::FixedVec3{es.x, es.y, es.z},
-						shape.bbox_center_q16, sun);
-				quality = static_cast<uint8_t>(4 - blocked);
-			}
-
-			const auto it = present_.sun_quality_last_by_wire.find(handle);
-			const uint8_t last =
-					it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
-			if (quality == last) continue;
-			present_.sun_quality_last_by_wire[handle] = quality;
-			out.push_back(handle);
-			out.push_back(0);
-			out.push_back(quality);
-		}
+	const std::unordered_set<int32_t> culled(present_.occlusion_culled_bms.begin(),
+			present_.occlusion_culled_bms.end());
+	const std::unordered_set<int32_t> wire_culled(present_.occlusion_culled_wire.begin(),
+			present_.occlusion_culled_wire.end());
+	std::vector<opennova::inmatch::SunQualityChange> changes;
+	present_.sun_quality.collect(role_view(), sun, culled, wire_culled,
+			static_cast<int64_t>(present_.layout_revision), changes);
+	for (const opennova::inmatch::SunQualityChange &c : changes) {
+		out.push_back(c.wire ? static_cast<int64_t>(c.handle) : -1);
+		out.push_back(c.wire ? 0 : c.bms_id);
+		out.push_back(c.quality);
 	}
 	return out;
 }
@@ -471,10 +284,7 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.occl_apply_building_last.clear();
 	present_.occl_apply_culled_last.clear();
 	present_.occl_apply_culled_wire_last.clear();
-	present_.sun_quality_last_by_bms.clear();
-	present_.sun_quality_last_by_wire.clear();
-	present_.sun_quality_layout_revision = -1;
-	present_.local_sun_quality = 4;
+	present_.sun_quality = opennova::inmatch::SunQualityFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
 	present_.iris_interior_group_section = 0;
 }
@@ -611,24 +421,10 @@ int Simulation::sound_source_bms_id(uint16_t p_handle) const {
 }
 
 opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const {
-	if (!kernel_ || p_bms_id <= 0) return opennova::world::EntityHandle{};
-	const uint64_t serial = kernel_->world.registry.spawn_serial();
-	if (present_.bms_handle_index_world != &kernel_->world || present_.bms_handle_index_serial != serial) {
-		present_.bms_handle_index.clear();
-		kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-			if (e.bms_id > 0 && present_.bms_handle_index.find(e.bms_id) == present_.bms_handle_index.end())
-				present_.bms_handle_index[e.bms_id] = e.handle;
-		});
-		present_.bms_handle_index_world = &kernel_->world;
-		present_.bms_handle_index_serial = serial;
-	}
-	const auto found = present_.bms_handle_index.find(p_bms_id);
-	if (found == present_.bms_handle_index.end()) return opennova::world::EntityHandle{};
-	// A despawned row's slot may have been reused; confirm the occupant still
-	// carries the id before handing the handle out.
-	const opennova::world::Entity *e = kernel_->world.registry.get(found->second);
-	return e != nullptr && e->bms_id == p_bms_id ? found->second
-	                                              : opennova::world::EntityHandle{};
+	// The authored id -> handle index (world/bms_handle_index.h), rebuilt on
+	// the registry's spawn serial.
+	if (!kernel_) return opennova::world::EntityHandle{};
+	return present_.bms_handles.resolve(kernel_->world, p_bms_id);
 }
 
 PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
@@ -667,29 +463,14 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 }
 
 Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
-	constexpr int32_t kEntityCap = 96;
+	// The hitbox view is the engine's (mission/debug_oracles.h); this marshals
+	// its rows into Godot space.
 	Ref<HitboxDebugReport> out;
 	out.instantiate();
 	if (!kernel_) return out;
-
-	// Anchor on the local player. All hitbox payloads use
-	// the same 80-unit debug budget; a preview with no player sweeps to the caps.
-	int32_t anchor[3] = {0, 0, 0};
-	int32_t debug_range = -1;
-	const opennova::world::EntityHandle local_player =
-	    kernel_->world.cached.local_player;
-	const opennova::world::Entity *lp =
-	    local_player.valid() ? kernel_->world.registry.get(local_player) : nullptr;
-	if (lp != nullptr) {
-		anchor[0] = opennova::world::to_fixed(lp->position.x);
-		anchor[1] = opennova::world::to_fixed(lp->position.y);
-		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		debug_range = 80 << 16; // the organic-fallback scan below shares the budget
-	}
-	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
-	    kernel_->hitboxes(lp != nullptr ? lp->position : opennova::world::Vec3{},
-	                      lp != nullptr ? 80.0f : -1.0f, kEntityCap, 24000);
-	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
+	opennova::mission::DebugHitboxReport report;
+	opennova::mission::collect_debug_hitboxes(*kernel_, report);
+	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : report.entities) {
 		Ref<HitboxDebugEntity> d;
 		d.instantiate();
 		d->set_entity_handle(static_cast<int>(ent.handle.packed));
@@ -718,56 +499,10 @@ Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
 		d->set_flags(flags);
 		out->add_entity(d);
 	}
-
-	// Posed pool-0 COBJ spheres from the exact person narrow phase. They share
-	// the nearby 80-unit/96-actor debug budget. Preserve F3's late-spawn demand
-	// bridge even though the local avatar is presentation-hidden; one spare query
-	// slot then prevents its authored rows from consuming the target budget.
-	// Entities whose graphic cannot supply usable authored sections are appended
-	// below with the bounded compatibility fallback used by RoundSim.
-	if (local_player.valid()) kernel_->ensure_collision_instance(kernel_->world, local_player);
-	std::unordered_map<uint16_t, bool> posed_handles;
-	const std::vector<opennova::world::CollisionWorld::DebugPersonSection> people =
-	    kernel_->collision.debug_person_sections(
-	        kernel_->world, anchor, debug_range, kEntityCap + 1);
-	for (const opennova::world::CollisionWorld::DebugPersonSection &person : people) {
-		if (person.handle == local_player) continue;
-		const bool new_handle =
-		    posed_handles.find(person.handle.packed) == posed_handles.end();
-		if (new_handle && posed_handles.size() >= static_cast<size_t>(kEntityCap)) break;
-		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(person.handle.packed),
-		    person.section, godot_from_fixed3(person.center),
-		    static_cast<float>(person.radius / kFixed16),
-		    static_cast<float>(person.authored_radius / kFixed16), person.masked, false));
-		posed_handles[person.handle.packed] = true;
-	}
-	const size_t pool0 = kernel_->world.registry.pool_capacity(0);
-	int fallback_entity_count = static_cast<int>(posed_handles.size());
-	for (size_t s = 0; s < pool0; ++s) {
-		if (fallback_entity_count >= kEntityCap) break;
-		const opennova::world::Entity *e =
-		    kernel_->world.registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(s)});
-		if (e == nullptr || e->handle == local_player ||
-		    (e->engine_flags & 0x02000001u) != 0 ||
-		    posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
-			continue;
-		if (debug_range >= 0) {
-			const int32_t ep[3] = {
-			    opennova::world::to_fixed(e->position.x),
-			    opennova::world::to_fixed(e->position.y),
-			    opennova::world::to_fixed(e->position.z)};
-			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > debug_range ||
-			    std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > debug_range ||
-			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > debug_range)
-				continue;
-		}
-		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(s), 1,
-		    Vector3(e->position.x,
-		            e->position.z + opennova::world::kOrganicStandInCenterZ,
-		            -e->position.y),
-		    opennova::world::kOrganicStandInRadius, opennova::world::kOrganicStandInRadius,
-		    false, true));
-		++fallback_entity_count;
+	for (const opennova::mission::DebugHitboxOrganic &o : report.organics) {
+		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(o.handle.packed), o.section,
+				godot_from_fixed3(o.center), static_cast<float>(o.radius_q16 / kFixed16),
+				static_cast<float>(o.authored_radius_q16 / kFixed16), o.masked, o.fallback));
 	}
 	return out;
 }
@@ -803,102 +538,50 @@ int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_
 Ref<DebugPickCard> Simulation::debug_pick_entity(const Vector3 &p_from_godot,
                                              const Vector3 &p_dir_godot,
                                              float p_max_range_units) {
-	// Every field carries its typed default (the stable-card convention).
+	// Every field carries its typed default (the stable-card convention); the
+	// pick itself is the engine's (mission/debug_oracles.h).
 	Ref<DebugPickCard> out;
 	out.instantiate();
 	if (!kernel_) return out;
-	out->set_tick(static_cast<int64_t>(kernel_->world.logic_tick));
-
 	// Godot world (x, up, z) -> mission (x, -z, up) — the debug_spawn_round
-	// conversion; the direction is normalized in doubles.
-	const double dx = p_dir_godot.x;
-	const double dy = -static_cast<double>(p_dir_godot.z);
-	const double dz = p_dir_godot.y;
-	const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
-	if (len <= 0.0) return out;
-	double range = static_cast<double>(p_max_range_units);
-	if (range < 1.0) range = 1.0;
-	if (range > 2000.0) range = 2000.0;
-	const double fx = p_from_godot.x;
-	const double fy = -static_cast<double>(p_from_godot.z);
-	const double fz = p_from_godot.y;
-
-	opennova::world::ProjectileTrace trace;
-	trace.start = opennova::world::FixedVec3{
-	    opennova::world::to_fixed(static_cast<float>(fx)),
-	    opennova::world::to_fixed(static_cast<float>(fy)),
-	    opennova::world::to_fixed(static_cast<float>(fz))};
-	trace.end = opennova::world::FixedVec3{
-	    opennova::world::to_fixed(static_cast<float>(fx + dx / len * range)),
-	    opennova::world::to_fixed(static_cast<float>(fy + dy / len * range)),
-	    opennova::world::to_fixed(static_cast<float>(fz + dz / len * range))};
-	// A plain geometric ray, exactly what a bullet would test: ammo_flags
-	// stays 0 (0x80 would bypass terrain, 0x4000000 would skip material-17
-	// faces), persons are walked, wire proxies excluded. The local player is
-	// the owner, so an eye ray never picks the picker — or the vehicle they
-	// are mounted in (the ray[18] mount exclusion).
-	trace.owner = kernel_->world.cached.local_player;
-	trace.radius_q16 = 0;
-	trace.ammo_flags = 0;
-	const opennova::world::CollisionWorld::RayDebugScope ray_scope(
-	    kernel_->collision,
-	    opennova::world::CollisionWorld::RayDebugCategory::kPick);
-	const opennova::world::ProjectileHit hit =
-	    kernel_->collision.trace_projectile(kernel_->world, trace);
-	if (!hit.hit()) return out;
-
-	const int32_t hp[3] = {hit.position_q16.x, hit.position_q16.y, hit.position_q16.z};
-	const int32_t hn[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
-	out->set_hit_position_godot(godot_from_fixed3(hp));
-	out->set_hit_normal_godot(godot_from_fixed3(hn));
-	out->set_distance_units(static_cast<float>(range * (static_cast<double>(hit.t_q16) / 65536.0)));
-	out->set_section(hit.section_index);
-	out->set_face(hit.face_index);
-	out->set_bone(hit.bone_index);
-	out->set_hit_zone(hit.hit_zone);
-	out->set_surface_type(hit.surface_type);
-	out->set_material_flags(static_cast<int64_t>(hit.material_flags));
-
-	switch (hit.hit_class) {
-		case opennova::world::ProjectileHitClass::Terrain:
-			out->set_blocked("terrain");
-			return out;
-		case opennova::world::ProjectileHitClass::Water:
-			out->set_blocked("water");
-			return out;
-		default:
-			break;
+	// conversion.
+	const double from[3] = { p_from_godot.x, -static_cast<double>(p_from_godot.z), p_from_godot.y };
+	const double dir[3] = { p_dir_godot.x, -static_cast<double>(p_dir_godot.z), p_dir_godot.y };
+	opennova::mission::DebugPick pick;
+	opennova::mission::debug_pick_entity(*kernel_, from, dir, p_max_range_units, pick);
+	out->set_tick(static_cast<int64_t>(pick.tick));
+	out->set_hit_position_godot(godot_from_fixed3(pick.hit_position_q16));
+	out->set_hit_normal_godot(godot_from_fixed3(pick.hit_normal_q16));
+	out->set_distance_units(pick.distance_units);
+	out->set_section(pick.section);
+	out->set_face(pick.face);
+	out->set_bone(pick.bone);
+	out->set_hit_zone(pick.hit_zone);
+	out->set_surface_type(pick.surface_type);
+	out->set_material_flags(static_cast<int64_t>(pick.material_flags));
+	switch (pick.blocked) {
+		case opennova::mission::DebugPick::Blocked::Terrain: out->set_blocked("terrain"); break;
+		case opennova::mission::DebugPick::Blocked::Water: out->set_blocked("water"); break;
+		case opennova::mission::DebugPick::Blocked::Proxy: out->set_blocked("proxy"); break;
+		case opennova::mission::DebugPick::Blocked::None: break;
 	}
-	const opennova::world::Entity *ent = kernel_->world.registry.get(hit.geometry_entity);
-	if (ent == nullptr) {
-		// A decoded wire proxy or an already-freed slot: the geometry hit but
-		// carries no pickable identity (joined visual-only clients).
-		out->set_blocked("proxy");
-		return out;
-	}
+	if (!pick.hit) return out;
 	out->set_hit(true);
-	switch (hit.hit_class) {
-		case opennova::world::ProjectileHitClass::StaticEntity:
-			out->set_hit_class("static");
-			break;
-		case opennova::world::ProjectileHitClass::DynamicEntity:
-			out->set_hit_class("dynamic");
-			break;
-		default:
-			out->set_hit_class("person");
-			break;
+	switch (pick.hit_class) {
+		case opennova::mission::DebugPick::HitClass::Static: out->set_hit_class("static"); break;
+		case opennova::mission::DebugPick::HitClass::Dynamic: out->set_hit_class("dynamic"); break;
+		default: out->set_hit_class("person"); break;
 	}
-	out->set_entity_handle(static_cast<int>(hit.geometry_entity.packed));
-	out->set_pool(hit.geometry_entity.pool());
-	out->set_kind(opennova::world::spawn_origin_kind(ent->spawn_origin));
-	out->set_index(static_cast<int>(
-			opennova::world::spawn_origin_index(ent->spawn_origin)));
-	out->set_bms_id(ent->bms_id);
-	out->set_net_id(static_cast<int>(ent->net_id));
-	out->set_item_id(ent->item_id);
-	out->set_name(String(ent->name.c_str()));
-	out->set_position_godot(mission_to_godot(ent->position));
-	out->set_bound_radius(ent->bound_radius);
+	out->set_entity_handle(static_cast<int>(pick.entity.packed));
+	out->set_pool(pick.entity.pool());
+	out->set_kind(pick.kind);
+	out->set_index(pick.index);
+	out->set_bms_id(pick.bms_id);
+	out->set_net_id(pick.net_id);
+	out->set_item_id(pick.item_id);
+	out->set_name(String(pick.name.c_str()));
+	out->set_position_godot(mission_to_godot(pick.position));
+	out->set_bound_radius(pick.bound_radius);
 	return out;
 }
 

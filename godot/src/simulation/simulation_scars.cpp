@@ -15,14 +15,6 @@ using namespace sim_internal;
 
 namespace {
 
-// The owner visibility gate Scar_RenderCache applies [orig: @0x5CD830 — a
-// building owner draws while `g_BuildingSectionVisMask[idx] & 0xFFFFFFF` is
-// nonzero; any other owner while one of its four containing blink boxes
-// (+464..+476) has its section bit set in that building's mask, or outright
-// when it sits in none; see docs/world/world-wac-ai-re.md §24.9]. Our twins:
-// OcclusionWorld::section_mask over the same COBJ-section domain and
-// Entity::blink_hits — the packed `((section & 0x1F) | (pool_index << 8)) << 12`
-// quads the collision pass stamps.
 bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
 	const Simulation *sim = static_cast<const Simulation *>(p_user);
 	return sim->scar_owner_visible(p_owner_packed);
@@ -31,41 +23,14 @@ bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
 } // namespace
 
 bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
-	if (!kernel_) {
-		return false;
-	}
+	if (!kernel_) return false;
 	opennova::world::EntityHandle handle;
 	handle.packed = p_owner_packed;
-	const opennova::world::Entity *owner = kernel_->world.registry.get(handle);
-	if (owner == nullptr) {
-		return false;
-	}
-	if (owner->kind == opennova::world::EntityKind::Building) {
-		// No occlusion instance = no verdict: the building draws (the same
-		// all-visible fold get_building_visibility_changes applies).
-		if (!kernel_->occlusion.has_instance(handle)) {
-			return true;
-		}
-		return (kernel_->occlusion.section_mask(handle) & 0x0FFFFFFFu) != 0u;
-	}
-	bool any_hit = false;
-	for (const uint32_t hit : owner->blink_hits) {
-		if (hit == 0u) {
-			continue;
-		}
-		any_hit = true;
-		const int section = static_cast<int>((hit >> 12) & 0x1Fu);
-		const int building_slot = static_cast<int>(hit >> 20);
-		const opennova::world::EntityHandle building =
-				opennova::world::EntityHandle::make(2, building_slot);
-		if (!kernel_->occlusion.has_instance(building)) {
-			return true;
-		}
-		if ((kernel_->occlusion.section_mask(building) & (1u << section)) != 0u) {
-			return true;
-		}
-	}
-	return !any_hit;
+	return opennova::renderer::scar_owner_visible(kernel_->world.registry.get(handle),
+			[this](opennova::world::EntityHandle building) -> std::optional<uint32_t> {
+				if (!kernel_->occlusion.has_instance(building)) return std::nullopt;
+				return kernel_->occlusion.section_mask(building);
+			});
 }
 
 Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,

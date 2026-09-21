@@ -10,6 +10,7 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/session.h>
+#include <runtime/mission/mission_text.h>
 
 #include <cstdint>
 #include <functional>
@@ -32,16 +33,22 @@ struct ListenHostState {
 };
 
 // What a shell hands the general bring-up beyond the host config: the S2C
-// 0x45 terrain-tile source, the mission text state the initial-state burst
-// streams, and the location-name table.
+// 0x45 terrain-tile source and the mission text the initial-state burst
+// streams (the briefing pages and the location-name table).
 struct HostBringup {
 	inmatch::HostConfig host_cfg;
 	std::vector<uint8_t> terrain_til_data;
-	bool mission_text_loaded = false;
-	std::string mission_briefing3;
-	std::string mission_briefing2;
-	std::unordered_map<int32_t, std::string> mission_location_texts;
+	mission::MissionText mission_text;
 };
+
+// The SP listen server's session config: SINGLEPLAYERGAME, the literal
+// attribute word and one player, the mission's own game type. The SP launcher
+// stores the attribute word LITERALLY after Game_SaveConfig (not the cfg
+// default 0x3A02) and one player, then copies both into the game settings
+// [orig: SinglePlayer_StartMission — `multiplayerAttributeFlags_34C = 14854`
+//  @0x561bb7 -> game_settings.mp_attributes @0x561cdb; maxPlayers_3F4 = 1
+//  @0x561c1d -> game_settings.max_players = 1 @0x561cec].
+GameConfig singleplayer_game_config(uint32_t game_type);
 
 class HostRole final : public Role {
 public:

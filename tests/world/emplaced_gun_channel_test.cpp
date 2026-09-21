@@ -427,9 +427,72 @@ void test_attached_turret_slews_once_per_world_tick() {
     }
 }
 
+// The barrel keeps its word when idle, wraps at 16 bits, and takes a full
+// coast-down after its shared MountSlot kick byte reaches zero.
+void test_barrel_spin_tail_and_class_gate() {
+    Rig r(true, true);
+    r.w.tables.weapons.entries.resize(1);
+    r.w.tables.weapons.entries[0].valid = true;
+    r.gun().primary_weapon_slot_adm = 0;
+    r.gun().primary_weapon_slot.kick = 2;
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().primary_weapon_slot.kick == 2); // a different class
+    r.gun().emplaced_update = true;
+    r.gun().primary_weapon_slot_adm = 0xFF;
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_ticks == 0); // missing weapon definition
+    CHECK(r.gun().primary_weapon_slot.kick == 2);
+    r.gun().primary_weapon_slot_adm = 0;
+    r.gun().emplaced_spin_phase = 65000;
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_ticks == 59);
+    CHECK(r.gun().emplaced_spin_phase == 1352);
+    CHECK(r.gun().primary_weapon_slot.kick == 1);
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_phase == 3240);
+    CHECK(r.gun().primary_weapon_slot.kick == 0);
+    r.w.vehicles.detach(r.gunner_h);
+    r.w.rules.last_tick_of_batch = false;
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_ticks == 58);
+    CHECK(r.gun().emplaced_spin_phase == 5096); // no occupant/audio gate
+    for (int tick = 0; tick < 58; ++tick)
+        tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_ticks == 0);
+    CHECK(r.gun().emplaced_spin_phase == 57992);
+    tick_emplaced_weapon_animation(r.w, r.gun());
+    CHECK(r.gun().emplaced_spin_phase == 57992); // holds final angle
+}
+
+// The class tail consumes kick before the global weapon pump decays it again.
+// A reversed order loses this spin step; a second entity update doubles it.
+void test_barrel_spin_once_before_weapon_pump() {
+    Rig r(true, true);
+    r.w.tables.weapons.entries.resize(1);
+    auto &weapon = r.w.tables.weapons.entries[0];
+    weapon.valid = true;
+    weapon.ammo_index = 0;
+    r.gun().emplaced_update = true;
+    r.gun().primary_weapon_slot_adm = 0;
+    r.gun().primary_weapon_slot.kick = 2;
+    r.w.add_system(&r.w.ai);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().primary_weapon_slot.kick == 0);
+    CHECK(r.gun().emplaced_spin_ticks == 59);
+    CHECK(r.gun().emplaced_spin_phase == 1888);
+    EmplacedWeaponControls controls;
+    CHECK(emplaced_weapon_controls_for(r.w, r.gun(), controls));
+    CHECK(controls.spin == 1888);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().emplaced_spin_ticks == 58);
+    CHECK(r.gun().emplaced_spin_phase == 3744);
+}
+
 } // namespace
 
 int main() {
+    test_barrel_spin_once_before_weapon_pump();
+    test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();
     test_window_clamp_writes_occupant_look();

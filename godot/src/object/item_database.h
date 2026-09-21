@@ -16,10 +16,6 @@
 
 namespace godot {
 
-class EnvsMarkerRow;
-class ItemEmplacementAttachment;
-struct ItemParticleFx;
-class ItemSeatCard;
 class ResourceRoot;
 
 // Thin GDExtension wrapper over engine/formats/def items.def parsing (def_parse_items).
@@ -77,9 +73,6 @@ public:
 		TYPE_POWERUP = 6,
 		TYPE_OBJECT = 6,
 		TYPE_EFFECT = 8,
-		EMPLACEMENT_ADDEWEAP = 0,
-		EMPLACEMENT_ADDEWEAP_G = 1,
-		EMPLACEMENT_ADDEWEAP_C = 2,
 	};
 
 	// ItemDefAttrib bits GDScript composes against get_attrib()/get_attrib2()
@@ -144,42 +137,15 @@ public:
 	// world::VehicleTraits table (resolve_item_traits). (engine: formats/def/def.h)
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
-	// The native seat-spec extraction for ONE item as an inspection card
-	// (item_records.h ItemSeatCard). Static data only — no seat is occupied;
-	// seats/armory need the model, authored attachment rows survive without
-	// anchors, exactly like the production boot install.
-	Ref<ItemSeatCard> extract_seat_specs_for_item(
-			const Ref<class ResourceRoot> &p_root, int p_item_id);
 	String get_launchups_closeattack(int id) const;
-	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC (the
-	// key variant, source userpoint, child item id, optional limits, the
-	// designated G/C marks); empty for an unknown id.
-	TypedArray<ItemEmplacementAttachment> get_emplacement_attachments(int id) const;
-	// Last stored G/C attachment slot, 1-based; zero means absent.
-	int get_emplacement_g_slot(int id) const;
-	int get_emplacement_c_slot(int id) const;
-	// The target definition's phrase_set +0x86C (the mounted skeletal selector):
-	// presence is separate so an authored zero stays distinct from absent.
-	// (engine: formats/def/def.h)
-	bool has_mount_config(int id) const;
-	int get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
 	// (engine: runtime/mission/collision_resolve.cpp)
 	String get_husk(int id) const;
 	String get_huskfinal(int id) const;
-	// S13 (ADR 0028): the envs-class ambient marker resolution over the
-	// retained items.def + the mission's native document (audio/envs_markers.h).
-	TypedArray<EnvsMarkerRow> resolve_envs_markers(
-			const Ref<class MissionData> &p_mission) const;
-	// The item's slot-A particle effect ("particlefx", the always-on attached
-	// emitter the runtime effect-attach pass consumes); null = unknown id, empty
-	// effect = key absent. Watercraft W3/W4 are copied engine-side into vehicle
-	// traits; particlefxs/W1/W2 and the death/fire/other family remain available
-	// from the retained parse for their separate runtime paths.
-	// Slot A ("particlefx") as authored, the row the runtime effect-attach
-	// pass consumes natively; `valid` false for an unknown item.
-	ItemParticleFx get_particle_fx(int id) const;
+	// Native slot-A definition for the effect director; unknown ids return
+	// an empty slot. No ClassDB record or Godot string copy along this path.
+	opennova::def::DefItemParticleFx get_particle_fx(int id) const;
 
 	// Every item id in a stable display order (natural, case-insensitive
 	// display_name, then id) — sorted_ids_, computed at load.

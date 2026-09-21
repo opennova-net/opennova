@@ -1,6 +1,6 @@
-// Device leg only: Godot Image/Texture2DArray marshalling, the async worker
-// drain, and upload counters. Page identity, LRU, and invalidation — the
-// witnessed cache semantics — live in engine/runtime/terrain/
+// Device leg only: Godot Image/Texture2DArray marshalling, the completion
+// drain under the upload budget, and upload counters. Page identity, LRU,
+// and invalidation — the witnessed cache semantics — live in engine/runtime/terrain/
 // terrain_tile_composition_cache.{h,cpp}, held here as a member (see the
 // class header's witness block and docs/terrain/terrain-re.md; retail's
 // device-side twin is the D3D tile-texture pool the record maps).
@@ -20,13 +20,8 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstring>
-#include <deque>
-#include <mutex>
-#include <thread>
 #include <unordered_map>
 
 namespace godot {
@@ -78,366 +73,8 @@ uint64_t page_output_hash(
 
 } // namespace
 
-struct TerrainTileCacheDevice::AsyncState {
-	static constexpr std::size_t kWorkerCount = 2;
-	static constexpr std::size_t kMaximumQueuedJobs =
-			opennova::TerrainTileCompositionCache::kCapacity * 2;
-	static constexpr std::size_t kUploadBudgetPerFrame = 2;
-
-	struct SourceSnapshot {
-		opennova::terrain::Rgba8Image colormap;
-		opennova::terrain::Rgba8Image heightfield_normal;
-		opennova::terrain::Rgba8Image tilestrip;
-		opennova::TilFile tile_info;
-		bool tile_overlay_ready = false;
-		std::array<opennova::terrain::TerrainScorchTexture,
-				opennova::terrain::kTerrainScorchTextureSlots>
-				scorch_textures;
-
-		opennova::terrain::TerrainTilePageSourceView view(
-				const std::array<float, 3> &tint,
-				const opennova::terrain::TerrainTileLightEpoch &light,
-				const opennova::terrain::TerrainScorchPagePlan *scorch) const {
-			opennova::terrain::TerrainTilePageSourceView result;
-			result.colormap = &colormap;
-			result.heightfield_normal = &heightfield_normal;
-			if (tile_overlay_ready) {
-				result.tile_info = &tile_info;
-				result.tilestrip = &tilestrip;
-			}
-			result.tile_overlay_tint = tint;
-			result.light_bytes = light;
-			result.scorch_plan = scorch;
-			result.scorch_textures = &scorch_textures;
-			return result;
-		}
-	};
-
-	struct WorkItem {
-		uint64_t epoch = 0;
-		uint64_t demand_frame = 0;
-		uint64_t demand_sequence = 0;
-		opennova::TerrainTileCompositionJob job;
-		std::shared_ptr<const SourceSnapshot> sources;
-		std::array<float, 3> tint{};
-		opennova::terrain::TerrainTileLightEpoch light{};
-		opennova::terrain::TerrainScorchPagePlan scorch;
-		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> shadow;
-		// The requesting frame's Render_ShaderTickMs: the shared snapshot
-		// never carries time, the job does.
-		uint32_t shadow_material_time_ms = 0;
-		bool capture_diagnostics = false;
-	};
-
-	struct Completion {
-		uint64_t epoch = 0;
-		uint64_t demand_frame = 0;
-		uint64_t demand_sequence = 0;
-		opennova::TerrainTileCompositionJob job;
-		opennova::terrain::Rgba8Image pixels;
-		uint64_t compose_us = 0;
-		bool success = false;
-		bool shadow_attempted = false;
-		uint64_t shadow_alpha_changed_bytes = 0;
-		uint64_t shadow_rgb_changed_bytes = 0;
-		uint64_t shadow_base_nonzero_alpha_bytes = 0;
-		opennova::terrain::TerrainStaticShadowPlannerDiagnostics
-				shadow_diagnostics;
-	};
-
-	AsyncState() {
-		for (std::size_t index = 0; index < kWorkerCount; ++index) {
-			workers[index] = std::thread([this]() { worker_loop(); });
-		}
-	}
-
-	~AsyncState() {
-		{
-			std::lock_guard<std::mutex> lock(mutex);
-			stopping = true;
-			work.clear();
-			demand_queue.clear();
-			completions.clear();
-			completion_queue.clear();
-			current_sources.reset();
-		}
-		wake.notify_all();
-		for (std::thread &worker : workers) {
-			if (worker.joinable()) worker.join();
-		}
-	}
-
-	void install_sources(std::shared_ptr<const SourceSnapshot> sources) {
-		std::lock_guard<std::mutex> lock(mutex);
-		current_sources = std::move(sources);
-	}
-
-	std::shared_ptr<const SourceSnapshot> sources() const {
-		std::lock_guard<std::mutex> lock(mutex);
-		return current_sources;
-	}
-
-	void cancel(bool clear_sources) {
-		std::lock_guard<std::mutex> lock(mutex);
-		++epoch;
-		work.clear();
-		demand_queue.clear();
-		completions.clear();
-		completion_queue.clear();
-		if (clear_sources) current_sources.reset();
-	}
-
-	bool enqueue(const opennova::TerrainTileCompositionJob &job,
-			const std::shared_ptr<const SourceSnapshot> &sources,
-			const std::array<float, 3> &tint,
-			const opennova::terrain::TerrainTileLightEpoch &light,
-			opennova::terrain::TerrainScorchPagePlan scorch,
-			uint64_t demand_frame,
-			const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
-					&shadow,
-			uint32_t shadow_material_time_ms,
-			bool capture_diagnostics) {
-		if (sources == nullptr) return false;
-		{
-			std::lock_guard<std::mutex> lock(mutex);
-			if (stopping) return false;
-			const uint64_t sequence = next_demand_sequence++;
-			const std::vector<uint64_t> removed_completions =
-					completion_queue.remove_older_generations(
-							job.target.layer, job.target.generation);
-			for (const uint64_t removed : removed_completions) {
-				const auto payload = std::find_if(completions.begin(),
-						completions.end(), [&](const Completion &queued) {
-							return queued.demand_sequence == removed;
-						});
-				if (payload != completions.end()) completions.erase(payload);
-			}
-			const std::size_t nonqueued = completions.size() + active_jobs;
-			const std::size_t maximum_work =
-					nonqueued < kMaximumQueuedJobs
-					? kMaximumQueuedJobs - nonqueued
-					: 0;
-			const auto scheduled = demand_queue.enqueue(
-					{job.target.layer, job.target.generation,
-							demand_frame, sequence}, maximum_work);
-			for (const uint64_t removed : scheduled.removed_sequences) {
-				const auto payload = std::find_if(work.begin(), work.end(),
-						[&](const WorkItem &queued) {
-							return queued.demand_sequence == removed;
-						});
-				if (payload != work.end()) work.erase(payload);
-			}
-			if (!scheduled.accepted) return false;
-			work.push_back(WorkItem{epoch, demand_frame, sequence, job, sources,
-					tint, light, std::move(scorch),
-					shadow, shadow_material_time_ms, capture_diagnostics});
-		}
-		wake.notify_one();
-		return true;
-	}
-
-	std::optional<Completion> take_completion() {
-		return take_completion_if(
-				[](const Completion &) noexcept { return true; });
-	}
-
-	// take_completion, but a completion the predicate rejects stays queued
-	// (with its policy ordering) for a later frame's budget instead of being
-	// consumed. Rejected layers do not block allowed ones behind them.
-	template <typename Allow>
-	std::optional<Completion> take_completion_if(Allow &&allow) {
-		std::lock_guard<std::mutex> lock(mutex);
-		std::vector<opennova::TerrainTileCompositionDemand> deferred;
-		std::optional<Completion> result;
-		while (!completion_queue.empty()) {
-			const auto demand = completion_queue.take_next();
-			if (!demand.has_value()) break;
-			const auto payload = std::find_if(completions.begin(),
-					completions.end(), [&](const Completion &queued) {
-						return queued.demand_sequence == demand->sequence;
-					});
-			if (payload == completions.end()) continue;
-			if (!allow(*payload)) {
-				deferred.push_back(*demand);
-				continue;
-			}
-			result = std::move(*payload);
-			completions.erase(payload);
-			break;
-		}
-		for (const opennova::TerrainTileCompositionDemand &demand : deferred) {
-			completion_queue.enqueue(demand, kMaximumQueuedJobs);
-		}
-		return result;
-	}
-
-	std::size_t pending_jobs() const {
-		std::lock_guard<std::mutex> lock(mutex);
-		const auto active = active_jobs_by_epoch.find(epoch);
-		return work.size() + completions.size() +
-				(active == active_jobs_by_epoch.end() ? 0 : active->second);
-	}
-
-	std::size_t current_epoch_active_jobs() const {
-		std::lock_guard<std::mutex> lock(mutex);
-		const auto active = active_jobs_by_epoch.find(epoch);
-		return active == active_jobs_by_epoch.end() ? 0 : active->second;
-	}
-
-private:
-	void worker_loop() {
-		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
-				active_shadow;
-		opennova::terrain::TerrainStaticShadowPlanner shadow_planner;
-		for (;;) {
-			WorkItem item;
-			{
-				std::unique_lock<std::mutex> lock(mutex);
-				wake.wait(lock,
-						[this]() { return stopping || !demand_queue.empty(); });
-				if (stopping && demand_queue.empty()) return;
-				const auto demand = demand_queue.take_next();
-				if (!demand.has_value()) continue;
-				const auto payload = std::find_if(work.begin(), work.end(),
-						[&](const WorkItem &queued) {
-							return queued.demand_sequence == demand->sequence;
-						});
-				if (payload == work.end()) continue;
-				item = std::move(*payload);
-				work.erase(payload);
-				++active_jobs;
-				++active_jobs_by_epoch[item.epoch];
-			}
-
-			Completion completion;
-			completion.epoch = item.epoch;
-			completion.demand_frame = item.demand_frame;
-			completion.demand_sequence = item.demand_sequence;
-			completion.job = item.job;
-			const auto started = std::chrono::steady_clock::now();
-			try {
-				// A page the registry cannot route carries no overlay: the
-				// base page still composes (the composer fails closed only on
-				// a DECLARED plan it cannot draw).
-				const opennova::terrain::TerrainTilePageSourceView view =
-						item.sources->view(item.tint, item.light,
-								item.scorch.valid ? &item.scorch : nullptr);
-				completion.pixels = opennova::terrain::compose_terrain_tile_page(
-						item.job, view);
-				completion.success = completion.pixels.is_valid();
-				if (completion.success && item.shadow != nullptr) {
-					completion.shadow_attempted = true;
-					if (active_shadow != item.shadow) {
-						// Cheap: the planner shares its immutable caster set
-						// by pointer and copies only the per-page memo caches.
-						shadow_planner = item.shadow->planner;
-						active_shadow = item.shadow;
-					}
-					// Material animation samples the requesting frame's tick,
-					// as retail's tile render does for each model it submits.
-					shadow_planner.set_material_time(
-							item.shadow_material_time_ms);
-					shadow_planner.reset_frame_diagnostics();
-					const opennova::terrain::TerrainStaticShadowPagePlanResult
-							shadow_plan = shadow_planner.plan(
-									item.job.target.page);
-					std::vector<uint8_t> composed_before_shadow;
-					if (item.capture_diagnostics) {
-						composed_before_shadow = completion.pixels.pixels;
-					}
-					if (!shadow_plan.valid || !shadow_plan.raster_required) {
-						completion.success = false;
-					} else {
-						opennova::terrain::TerrainStaticShadowAlphaPage shadow_page =
-								opennova::terrain::
-										begin_terrain_static_shadow_alpha_page(
-												item.job, completion.pixels,
-												shadow_plan.content);
-						completion.success = shadow_page.is_valid() &&
-								shadow_planner.rasterize(
-										item.job.target.page, shadow_page) &&
-								opennova::terrain::
-										apply_terrain_static_shadow_alpha_page(
-												item.job, shadow_page,
-												completion.pixels);
-					}
-					completion.shadow_diagnostics =
-							shadow_planner.diagnostics();
-					if (completion.success && item.capture_diagnostics) {
-						for (std::size_t byte = 0;
-								byte < completion.pixels.pixels.size(); ++byte) {
-							if ((byte & 3u) == 3u) {
-								if (composed_before_shadow[byte] != 0) {
-									++completion.shadow_base_nonzero_alpha_bytes;
-								}
-								if (completion.pixels.pixels[byte] !=
-										composed_before_shadow[byte]) {
-									++completion.shadow_alpha_changed_bytes;
-								}
-							} else if (completion.pixels.pixels[byte] !=
-									composed_before_shadow[byte]) {
-								++completion.shadow_rgb_changed_bytes;
-							}
-						}
-					}
-				}
-			} catch (...) {
-				completion.success = false;
-			}
-			const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-					std::chrono::steady_clock::now() - started).count();
-			completion.compose_us = static_cast<uint64_t>(
-					std::max<int64_t>(elapsed, 1));
-
-			{
-				std::lock_guard<std::mutex> lock(mutex);
-				--active_jobs;
-				auto active = active_jobs_by_epoch.find(item.epoch);
-				if (active != active_jobs_by_epoch.end() && --active->second == 0) {
-					active_jobs_by_epoch.erase(active);
-				}
-				if (!stopping && item.epoch == epoch) {
-					const auto scheduled = completion_queue.enqueue(
-							{item.job.target.layer,
-									item.job.target.generation,
-									item.demand_frame,
-									item.demand_sequence},
-							kMaximumQueuedJobs);
-					for (const uint64_t removed : scheduled.removed_sequences) {
-						const auto payload = std::find_if(completions.begin(),
-								completions.end(),
-								[&](const Completion &queued) {
-									return queued.demand_sequence == removed;
-								});
-						if (payload != completions.end()) {
-							completions.erase(payload);
-						}
-					}
-					if (scheduled.accepted) {
-						completions.push_back(std::move(completion));
-					}
-				}
-			}
-		}
-	}
-
-	mutable std::mutex mutex;
-	std::condition_variable wake;
-	std::deque<WorkItem> work;
-	TerrainTileCompositionDemandQueue demand_queue;
-	std::deque<Completion> completions;
-	TerrainTileCompositionDemandQueue completion_queue;
-	std::array<std::thread, kWorkerCount> workers;
-	std::shared_ptr<const SourceSnapshot> current_sources;
-	std::size_t active_jobs = 0;
-	std::unordered_map<uint64_t, std::size_t> active_jobs_by_epoch;
-	uint64_t next_demand_sequence = 1;
-	uint64_t epoch = 1;
-	bool stopping = false;
-};
-
 TerrainTileCacheDevice::TerrainTileCacheDevice() :
-		async_(std::make_unique<AsyncState>()) {}
+		async_(std::make_unique<opennova::terrain::TerrainTileCompositionWorker>()) {}
 
 TerrainTileCacheDevice::~TerrainTileCacheDevice() = default;
 
@@ -458,7 +95,7 @@ bool TerrainTileCacheDevice::_refresh_shadow_snapshot() {
 		shadow_snapshot_.reset();
 		return true;
 	}
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> snapshot =
+	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot> snapshot =
 			static_shadow_rasterizer_->compilation_snapshot();
 	if (snapshot == nullptr) {
 		async_->cancel(false);
@@ -486,7 +123,7 @@ bool TerrainTileCacheDevice::rebuild(
 	if (p_data.is_null() || p_surface_inputs.is_null()) {
 		return false;
 	}
-	auto snapshot = std::make_shared<AsyncState::SourceSnapshot>();
+	auto snapshot = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>();
 
 	const Ref<Image> live_colormap = p_data->get_colormap_image();
 	const bool have_colormap = live_colormap.is_valid() && !live_colormap->is_empty()
@@ -770,13 +407,13 @@ void TerrainTileCacheDevice::_drain_completed() {
 	// they drain unbounded and first-fill/teleport completes in a few frames.
 	std::size_t refresh_uploads = 0;
 	while (true) {
-		std::optional<AsyncState::Completion> ready = async_->take_completion_if(
-				[&](const AsyncState::Completion &candidate) {
+		std::optional<opennova::terrain::TerrainTileCompositionWorker::Completion> ready = async_->take_completion_if(
+				[&](const opennova::terrain::TerrainTileCompositionWorker::Completion &candidate) {
 					return ready_generations_[candidate.job.target.layer] == 0 ||
-							refresh_uploads < AsyncState::kUploadBudgetPerFrame;
+							refresh_uploads < opennova::terrain::TerrainTileCompositionWorker::kUploadBudgetPerFrame;
 				});
 		if (!ready.has_value()) break;
-		AsyncState::Completion &completion = *ready;
+		opennova::terrain::TerrainTileCompositionWorker::Completion &completion = *ready;
 		const bool refresh_upload =
 				ready_generations_[completion.job.target.layer] != 0;
 		frame_compose_us_ += completion.compose_us;
@@ -915,7 +552,7 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 		return unavailable;
 	}
 
-	const std::shared_ptr<const AsyncState::SourceSnapshot> source_snapshot =
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> source_snapshot =
 			async_->sources();
 	if (source_snapshot == nullptr) return unavailable;
 	opennova::terrain::TerrainTilePageSourceView sources =
@@ -927,7 +564,7 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 			request.page.page_lod_level) == 0) {
 		return unavailable;
 	}
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 			shadow_snapshot = shadow_snapshot_;
 	if (static_shadow_rasterizer_ != nullptr) {
 		if (shadow_snapshot == nullptr && !_refresh_shadow_snapshot()) {
@@ -1131,9 +768,9 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	diagnostics["active_jobs"] = static_cast<int64_t>(
 			async_->current_epoch_active_jobs());
 	diagnostics["worker_count"] = static_cast<int64_t>(
-			AsyncState::kWorkerCount);
+			opennova::terrain::TerrainTileCompositionWorker::kWorkerCount);
 	diagnostics["upload_budget"] = static_cast<int64_t>(
-			AsyncState::kUploadBudgetPerFrame);
+			opennova::terrain::TerrainTileCompositionWorker::kUploadBudgetPerFrame);
 	diagnostics["frame_capacity_fallbacks"] =
 			static_cast<int64_t>(frame_capacity_fallbacks_);
 	diagnostics["frame_shadow_alpha_changed_bytes"] =

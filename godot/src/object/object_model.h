@@ -1,5 +1,8 @@
 #pragma once
 
+#include <runtime/anim/remote_body_state.h>
+#include <runtime/renderer/model_controls.h>
+
 // ObjectModel — the retained visual for one NovaLogic object graphic,
 // NATIVE (the 2026-08-09 de-scripting of the former GDScript implementation).
 // One Node3D owns the
@@ -148,7 +151,6 @@ protected:
 	static void _bind_methods();
 
 public:
-	bool sample_frame();
 	bool sample(int64_t p_value_ms, int64_t p_frame);
 	int64_t get_time_ms() const { return time_ms_; }
 	void set_time_ms_for_test(int64_t p_value_ms);
@@ -242,11 +244,6 @@ private:
 	};
 	static void advance_awake_frame_impl(double p_delta,
 			AwakeFrameProfile *p_profile);
-	struct PartAnimChannel {
-		int dir = 0;
-		int rate = 0;
-		int64_t value = 0;
-	};
 	struct AlphaStripDraw {
 		MeshInstance3D *instance = nullptr;
 		Ref<ShaderMaterial> material;
@@ -327,19 +324,8 @@ private:
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
 	HashMap<int64_t, Array> anim_frames_by_mat_;
-	// This retained model stores the latest CTRL snapshot applied to it
-	// (Dictionary: ObjectData's PANM/material evaluators consume it).
-	Dictionary ctrl_values_;
-	HashMap<String, String> ctrl_value_owners_;
-	// ctrl_values_ converted to the renderer table once per change (the
-	// PANM/material evaluators consume it per frame); the weather FLICKER/
-	// SWING globals are stamped at use because they advance per weather tick,
-	// not per dict change. Every dict mutation path invalidates
-	// (finish_ctrl_change plus the two direct-writer loops).
-	opennova::renderer::ControlRegisterValues ctrl_native_cache_{};
-	bool ctrl_native_cache_valid_ = false;
-	bool ctrl_native_has_flicker_ = false;
-	bool ctrl_native_has_swing_ = false;
+	// Native CTRL values, writer ownership and local part-channel playback.
+	opennova::renderer::ModelControls controls_;
 	opennova::renderer::ControlRegisterValues runtime_ctrl_values();
 	// Optional visual parts (a player body's selected head) driven by this
 	// model's presentation calls: every animation/body/part call and every CTRL
@@ -355,8 +341,6 @@ private:
 	Vector<PresentationLink> presentation_links_;
 	int ctrl_batch_depth_ = 0;
 	bool ctrl_batch_dirty_ = false;
-	HashMap<String, PartAnimChannel> part_anims_;
-	double part_anim_tick_accum_s_ = 0.0;
 	int64_t anim_time_ms_ = 0;
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
@@ -478,21 +462,10 @@ private:
 	double anim_time_ = 0.0;
 	bool anim_playing_ = false;
 	bool anim_external_phase_ = false;
-	// Retail remote-body request channel (current/pending ownership).
-	int remote_state_ = -1;
-	int remote_flags_ = 0;
-	int remote_pending_state_ = -1;
+	// Native arbitration/playback numbers; Godot retains only clip resources.
+	opennova::anim::RemoteBodyState remote_body_;
 	String remote_pending_key_;
-	int remote_pending_flags_ = 0;
-	double remote_pending_end_time_ = 0.0;
-	bool remote_pending_end_valid_ = false; // false == the GDScript INF sentinel
-	bool remote_blend_active_ = false;
 	String remote_blend_source_key_;
-	int remote_blend_source_phase_ticks_ = 0;
-	double remote_blend_source_time_ = 0.0;
-	int remote_blend_target_phase_ticks_ = 0;
-	float remote_blend_weight_ = 1.0f;
-	float remote_blend_step_ = 0.0f;
 	bool body_pose_dirty_ = true;
 	bool bounds_dirty_ = true;
 	bool body_phase_stamp_valid_ = false;
@@ -552,7 +525,6 @@ private:
 	// The per-entry lighting factors (effectScale, interior flag, daylight t)
 	// as instance state on every surface instance.
 	void stamp_entity_lighting_instances();
-	static int64_t ctrl_dword(int64_t p_value);
 	void finish_ctrl_change(bool p_apply_now);
 	Node3D *get_or_create_robj_node(int p_robj_index);
 	void apply_runtime_state(double p_delta, bool p_renderable = true,
@@ -593,10 +565,9 @@ private:
 	// --- body/part animation (object_model_anim.cpp) ---
 	void resolve_muzzle_userpoint();
 	bool select_body_clip_seeded(const String &p_key, int p_phase_ticks);
-	void accept_remote_body_state(int p_state_id, const String &p_key,
-			int p_flags, int p_phase_ticks);
-	void queue_remote_body_state(int p_state_id, const String &p_key, int p_flags);
-	void clear_remote_body_pending();
+	void accept_remote_body_clip(const String &p_key,
+			int p_flags, int p_phase_ticks, bool p_had_current);
+	void queue_remote_body_clip(const String &p_key);
 	void clear_remote_body_blend();
 	int body_phase_ticks(const String &p_key, double p_seconds) const;
 	void start_remote_body_blend(const String &p_target_key, int p_target_flags,

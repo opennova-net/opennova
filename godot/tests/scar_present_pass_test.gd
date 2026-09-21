@@ -331,7 +331,7 @@ func test_authored_owners_resolve_through_the_entity_index() -> void:
 		return
 	var index := EntityIndex.new()
 	model.entity_ref = EntityRef.make(-1, -1, 41)
-	index.build([model], [])
+	index.build([model], null)
 	var entities := _make_presenter(index)
 	var section := int(model.get_render_part_nodes().keys()[0])
 	var draw := _draw_list()

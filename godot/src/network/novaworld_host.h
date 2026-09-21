@@ -161,7 +161,7 @@ public:
 	// ConnectionId (dcb), its game endpoint (the inet_addr dword + port) and the
 	// JOINTICKET its join carried (empty when the KV had none). The service answers
 	// with ServerPlayerEnterResult (the player_enter_result signal). Only while
-	// hosting is established. [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0]
+	// hosting is established (enforced by ClientSession).
 	void request_player_enter(int64_t connection_id, int64_t ip_address, int port,
 	                          const String &join_ticket);
 	// The retail error tag (NWECnn) of the last failure, or empty.

@@ -127,6 +127,109 @@ in `main()`. The only other `_controlfp` sites in OED are local save/restore
 wrappers (D3DX shader preprocessor and a few math helpers) that do not change the
 process-wide state.
 
+### Retail PANM animation frames (2026-09-21)
+
+This bounded re-grill uses retail **Jointops.exe**, imagebase `0x400000`,
+IDB `Jointops.exe.kong.i64`. The implementing paths are
+`engine/formats/threedi/threedi_panm_matrices.cpp`, the model pose evaluator,
+and `engine/runtime/renderer/model_panm_cache.cpp`.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Authored animation-frame selection and composition | MATCHING (behavioral proof) | `threedi_panm_pose`, `renderer_model_panm_cache`, and the real 03TR truck camera in `mounted_view_test.gd`; D-3DI-3 |
+
+The render loader copies **disk PANM byte +6** into runtime PANM dword +8
+**sign-extended** (`movsx` @ 0x5B5698). The similarly named disk dword +8
+is not that selector. Each render LOD receives the model's MTRX table. A
+positive selector chooses one matrix; zero AND every negative byte
+(0x80..0xFF; 386 PANM nodes of the shipped corpus carry 0xFF) bypass the
+table, the runtime gate being `selector <= 0` @ 0x58E3FE..0x58E415.
+[orig: GPM_LoadRenderModel @ 0x5B5000 (store @ 0x5B569C);
+ThreediGp_LoadFromFile @ 0x5B5780 (table @ 0x5B5F8C)]
+
+For an Euler or spinner node, retail multiplies the pivot/scale matrix by
+that authored frame, evaluates the rotations, multiplies by the frame's
+full affine inverse, and then applies the input orientation and pivot.
+The inverse includes translation and scale; transposing its rotation alone
+is insufficient. [orig: Model_TransformBoneMatrices @ 0x58E390 (selection
+@ 0x58E3FE..0x58E44F, Euler @ 0x58E8AA / @ 0x58EAA7, spinner @ 0x58E648 /
+@ 0x58E764); Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]
+
+`H50cal.3di` demonstrates the omission: its barrel selects MTRX row 1,
+`diag(-1, 1, -1, 1)`, and authors pitch from 360 to 0. Ignoring that frame
+reverses both the visible barrel and its CAMERA userpoint. The shared
+native evaluator now accepts the MTRX table from both model-level callers;
+mouse input, stored gun words, and camera conversion retain their original
+signs. The 03TR test drives mouse-up through `LocalPlayerPresenter`, the
+real world tick, and the mounted camera. It failed with camera pitch
+-8.789 degrees for +8.789 degrees of aim before the fix.
+
+This verdict covers the recovered animation-frame branch, not every
+PANM mode or whole-process floating-point identity. No IDA names changed.
+
+### Retail emplaced barrel spin (2026-09-21)
+
+This bounded re-grill uses retail **Jointops.exe**, imagebase `0x400000`,
+IDB `Jointops.exe.kong.i64`. The implementation is
+`engine/runtime/world/mount_controls.h::tick_emplaced_weapon_animation`,
+with shared pose/control publication through `runtime/inmatch` and the
+native Godot presenters. D-3DI-4 records the missing producer and publication.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Emplaced spin timer, phase word, and weapon-pump order | MATCHING (behavioral proof) | `emplaced_gun_channel`: class/definition gates, shared kick decay, once-per-tick order, 16-bit wrap, unoccupied coast-down, held final angle |
+| Mounted spin publication | MATCHING (behavioral proof) in the existing UseGun scope | `inmatch_joiner_role`, `mission_present_pass_test.gd`, `wire_present_pass_test.gd`, and the installed 03TR minigun in `mounted_view_test.gd` |
+| Retained node/cache plumbing | host code / not grillable | Named control ownership, spin-only wire cache invalidation, and the real barrel transform are exercised by the GUT cases above |
+
+The physics callback table's **`ewep`** row selects
+`Entity_UpdateTransformAndTurret`; the earlier description of that row as
+`weap` was incorrect. Its tail requires the inline weapon definition at
+entity `+0x2D4`, but does not require an occupant.
+[orig: g_EntityClassPhysicsTable row @ 0x82ABE0;
+Entity_UpdateTransformAndTurret @ 0x440CA0, definition gate @ 0x4411C9]
+
+The tail reads the same kick byte at entity `+0x30F` that the weapon FSM
+owns. A nonzero kick resets byte `+0x31B` to **60**, then decrements the kick
+and plays the authored trailoff when it reaches zero. A nonzero countdown
+is decremented; if still nonzero, its signed-byte value times **32** is
+added to the wrapping 16-bit angle at `+0x320`. Once the countdown is zero,
+the angle holds. The fire-loop registration has a last-tick-of-batch gate;
+the spin tail lies outside that gate.
+[orig: Entity_UpdateTransformAndTurret @ 0x44139D..0x441447]
+
+Entity updates precede the global weapon-action pump, which later decays
+that **same** kick byte again. OpenNova preserves both decays in that order
+and advances the class tail once before organic attachment poses.
+[orig: Game_ProcessMainFrame @ 0x52674B..0x526786;
+WeaponAction_ProcessFrame @ 0x541262..0x54129B]
+
+`HUD_CacheWeaponSlotInfo` zero-extends `+0x320` into the value dword at
+`0x83FEB0`, global ordinal **57 (`WEAP_SPIN`)**. Its attachment caller
+caches the parent immediately before evaluating the parent's PANM.
+[orig: HUD_CacheWeaponSlotInfo @ 0x440955;
+Entity_AttachToBoneAndUpdateTransform @ 0x546518..0x54652B]
+
+The phase now travels beside the existing emplaced yaw/pitch words through
+simulation and collision poses, mounted attachments, placed/wire model
+presentation, and the mounted first-person view. The joiner reads its
+materialized world's locally advanced phase; no protocol field is added.
+The existing validated UseGun publication scope remains bounded: this fix
+does not close the process-global unwritten-register inheritance gap in
+D-3DI-2.
+
+The regression drives the installed 03TR objective minigun through real
+input and world ticks. Before the fix it fired 11 rounds over 96 ticks but
+had no `WEAP_SPIN` control; the spin-only barrel angle stayed below 0.001
+radians. The assertion removes live yaw/pitch from the comparison so recoil
+and helicopter motion cannot satisfy it. It also checks continued spin
+on trigger release and a held final phase after coast-down. With the fix,
+the spin-only barrel turn reaches 3.120534 radians and all three 03TR
+mounted-view regressions pass.
+
+IDB changes made during this session: appended anchored witness comments at
+`0x440955` (publisher) and `0x4413FE` (class tail), then saved the IDB. No
+names or types changed.
+
 ### Retail PANM control-register sampling (Jointops.exe)
 
 This subsection is the live runtime complement to the OED format findings
@@ -287,8 +390,8 @@ The producer census partitions all 96 ordinals without an unclassified tail:
 
 | Producer status | Count | Ordinals |
 |---|---:|---|
-| exact value/state projection hosted in its bounded semantic scope | 13 | **8, 54–56, 61–62, 71–72, 91–95** |
-| dedicated retail writer exists; exact original publisher remains open | 65 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90** |
+| exact value/state projection hosted in its bounded semantic scope | 14 | **8, 54–57, 61–62, 71–72, 91–95** |
+| dedicated retail writer exists; exact original publisher remains open | 64 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 58–60, 63–70, 73–90** |
 | no dedicated writer found; only the generic path can reach nonzero members | 18 | **0–2, 11–13, 37–40, 42–45, 48–51** |
 
 This is a producer-status partition, not a format-support partition: every one
@@ -335,6 +438,9 @@ The currently hosted writer-value families are:
   "publisher open" partition above. TALK waits on the D-INF-11 mixer tap.
 - `EWEAP_GUNYAW`/`EWEAP_GUNPITCH` (55/56) retain the witnessed emplaced-weapon
   angular stores in world and first-person presentation scopes.
+- `WEAP_SPIN` (57) publishes the emplaced class's unsigned phase word; the
+  class tail and UseGun scope are witnessed in the barrel-spin subsection
+  above (D-3DI-4).
 - `VEHICLE_STEERING` (61) zero-extends the high word of the live cveh steering
   state. `VEHICLE_SPEED` (62) reproduces the `CDQ`/`XOR`/`SUB` absolute value
   and unsigned `0x10000` cap, including the `INT_MIN → 0x10000` edge. They are
@@ -356,10 +462,10 @@ OpenNova now has the exact catalog, lookup/loader alias, global-reference
 ordinals, signed value layout, and audited per-call consumer math. The retained
 runtime still lacks retail's process-global persistent bus lifetime and
 cross-model last-writer ordering. This is therefore **catalog and consumer-math
-fidelity**, not full bus/producer fidelity. The 10 value/state projections
-listed above are landed in bounded semantic scopes, while exact frustum
+fidelity**, not full bus/producer fidelity. The 14 value/state projections
+in the census above are landed in bounded semantic scopes, while exact frustum
 submission timing remains part of the global-bus gap. The generic ACTION
-animator, the other 68 dedicated-writer ordinals, unavailable compact-joiner
+animator, the other 64 dedicated-writer ordinals, unavailable compact-joiner
 source fields, and the separate overheat particle emitter are bounded by
 D-3DI-2/D-WPN-28 in the divergence ledger.
 
@@ -728,6 +834,8 @@ ledger's permanent register carries D-3DI-1.
 
 | ID | Divergence | Disposition |
 |---|---|---|
+| D-3DI-4 | The emplaced kick byte had no barrel-spin accumulator or `WEAP_SPIN` publication, so the 03TR minigun fired without rotating. | **FIXED 2026-09-21 in PR #663** - port the witnessed ewep class tail and publish its unsigned phase through the shared mounted pose and presentation paths; see the barrel-spin witness above. |
+| D-3DI-3 | PANM ignored the authored MTRX animation frame, reversing the H50cal barrel and mounted camera pitch. | **FIXED 2026-09-21 in PR #663** - select disk byte +6 and compose frame/rotation/inverse in the shared simulation and retained-render evaluator; see the animation-frame witness above. |
 | D-3DI-1 | Byte-exact `MTRX` output requires OED's x87 `_PC_24` (24-bit single) precision (§1 "Derived chunks" MTRX derivation + §1 "OED x87 control word"); a 64-bit SSE2 build diverges in low FP bits. A parity sub-build restores byte-exactness via `_controlfp(_PC_24, _MCW_PC)` early in `main()`. | **PERMANENT** — an x87 FP-precision constraint, not a math error; the parity sub-build is the documented path when byte-exactness is needed. [orig: ComputeMTRX @ 0x452990 / WriteMTRX @ 0x452FA0 / _setdefaultprecision @ 0x52A27C] |
 
 The §2.14 "Open items" are unresearched questions (no witnessed behavior gap yet)

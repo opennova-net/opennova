@@ -1,6 +1,7 @@
 #include <formats/threedi/threedi_panm_runtime.h>
 
 #include <math.h>
+#include <cmath>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -118,12 +119,47 @@ static void build_static_copy(ThreediMatrix4x4 *out,
     *out = tmp;
 }
 
+// docs/threedi/3di-gp-format-re.md (D-3DI-3).
+// The authored PANM frame need not be orthogonal (MTRX is an affine table).
+// Preserve the full inverse around animation, including translated pivots.
+// [orig: Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]
+static bool invert_animation_frame(const ThreediMatrix4x4 &frame,
+                                   ThreediMatrix4x4 &out) {
+    const float *m = frame.m;
+    const double c00 = double(m[5]) * m[10] - double(m[9]) * m[6];
+    const double c10 = double(m[4]) * m[10] - double(m[8]) * m[6];
+    const double c20 = double(m[9]) * m[4] - double(m[8]) * m[5];
+    const double det = c00 * m[0] - c10 * m[1] + c20 * m[2];
+    if (!std::isfinite(det) || det == 0.0) return false;
+    const double inv_det = 1.0 / det;
+    const double i00 = c00 * inv_det;
+    const double i01 = -(double(m[1]) * m[10] - double(m[9]) * m[2]) * inv_det;
+    const double i02 = (double(m[1]) * m[6] - double(m[2]) * m[5]) * inv_det;
+    const double i22 = (double(m[5]) * m[0] - double(m[4]) * m[1]) * inv_det;
+    threedi_mat4_identity(&out);
+    out.m[0] = float(i00);
+    out.m[1] = float(i01);
+    out.m[2] = float(i02);
+    out.m[4] = float(-c10 * inv_det);
+    out.m[5] = float((double(m[0]) * m[10] - double(m[8]) * m[2]) * inv_det);
+    out.m[6] = float(-(double(m[0]) * m[6] - double(m[4]) * m[2]) * inv_det);
+    out.m[8] = float(c20 * inv_det);
+    out.m[9] = float(-(double(m[9]) * m[0] - double(m[8]) * m[1]) * inv_det);
+    out.m[10] = float(i22);
+    out.m[12] = float(-(i00 * m[12] + double(m[14]) * out.m[8] + double(m[13]) * out.m[4]));
+    out.m[13] = float(-(i01 * m[12] + double(m[14]) * out.m[9] + double(m[13]) * out.m[5]));
+    out.m[14] = float(-(i22 * m[14] + i02 * m[12] + double(m[13]) * out.m[6]));
+    return true;
+}
+
 /* Main animated Euler rotation path (rot_type==2). */
 static void build_euler(ThreediMatrix4x4 *out,
                         const ThreediMatrix4x4 *in_sub,
                         const ThreediVec3 *pivot,
                         const ThreediMatrix4x4 *parent_or_null,
                         float sx, float sy, float sz,
+                        const ThreediMatrix4x4 *frame,
+                        const ThreediMatrix4x4 *frame_inverse,
                         bool zyx_order,
                         const ThreediPartAnimation *n,
                         uint32_t time_ms,
@@ -138,7 +174,10 @@ static void build_euler(ThreediMatrix4x4 *out,
     tmp.m[5]  = sy;
     tmp.m[10] = sz;
 
-    // NOTE: axis mapping here intentionally matches your original implementation:
+    // [orig: Model_TransformBoneMatrices @ 0x58E8AA / @ 0x58EAA7]
+    if (frame) threedi_mat4_mul_affine(&tmp, &tmp, frame);
+
+    // Retail maps the packed rotation tracks onto these render axes:
     //   rotation_x track -> rotate around Y
     //   rotation_y track -> rotate around X
     //   rotation_z track -> rotate around Z
@@ -176,6 +215,8 @@ static void build_euler(ThreediMatrix4x4 *out,
         }
     }
 
+    if (frame_inverse) threedi_mat4_mul_affine(&tmp, &tmp, frame_inverse);
+
     // Multiply by bind orientation only (translation stripped)
     bind_rot = *in_sub;
     threedi_mat4_zero_translation(&bind_rot);
@@ -193,6 +234,8 @@ static bool build_spinner(ThreediMatrix4x4 *out,
                           const ThreediVec3 *pivot,
                           const ThreediMatrix4x4 *parent_or_null,
                           float sx, float sy, float sz,
+                          const ThreediMatrix4x4 *frame,
+                          const ThreediMatrix4x4 *frame_inverse,
                           const ThreediPartAnimation *n,
                           float time_radians) {
     ThreediMatrix4x4 tmp, rot, bind_rot;
@@ -206,7 +249,10 @@ static bool build_spinner(ThreediMatrix4x4 *out,
     tmp.m[5]  = sy;
     tmp.m[10] = sz;
 
-    // Raw float reinterpretation (matches your original code)
+    // [orig: Model_TransformBoneMatrices @ 0x58E648 / @ 0x58E764]
+    if (frame) threedi_mat4_mul_affine(&tmp, &tmp, frame);
+
+    // Raw float reinterpretation (matches the packed spinner coefficients)
     float rot_y_f = bits_to_float(&n->rotation_y.control);
     if (rot_y_f != 0.0f) {
         threedi_mat4_make_rot_z(&rot, time_radians * rot_y_f);
@@ -225,6 +271,7 @@ static bool build_spinner(ThreediMatrix4x4 *out,
         threedi_mat4_mul_affine(&tmp, &tmp, &rot);
     }
 
+    if (frame_inverse) threedi_mat4_mul_affine(&tmp, &tmp, frame_inverse);
     threedi_mat4_mul_affine(&tmp, &tmp, &bind_rot);
 
     add_pivot_in_parent_space(&tmp, pivot, parent_or_null);
@@ -314,6 +361,7 @@ static void build_scaled_bind(ThreediMatrix4x4 *out,
 int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      size_t node_count,
                                      const ThreediVec3 *pivots,
+                                     const ThreediMatrixTable *animation_frames,
                                      const ThreediMatrix4x4 *view_inverse,
                                      const ThreediMatrix4x4 *in_matrices,
                                      const ThreediMatrix4x4 *mul_override,
@@ -372,13 +420,32 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         float sx, sy, sz;
         sample_scale(&sx, &sy, &sz, n, scale_type, time_ms, ctrl_values);
 
+        // File byte +6 becomes runtime PANM +8 SIGN-EXTENDED (movsx); the
+        // disk dword +8 is not the selector. Only a positive selector reads
+        // the table: zero bypasses MTRX even if row 0 exists, and a byte of
+        // 0x80..0xFF (386 nodes of the shipped corpus carry 0xFF) is negative
+        // and bypasses it too rather than indexing row 128+.
+        // [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx) / @ 0x5B569C (store);
+        // frame gate `<= 0` and inverse Model_TransformBoneMatrices
+        // @ 0x58E3FE..0x58E44F]
+        const ThreediMatrix4x4 *frame = nullptr;
+        ThreediMatrix4x4 frame_inverse;
+        const int frame_selector = static_cast<int8_t>(n->matrix_index);
+        if ((rot_type == 1 || rot_type == 2) && frame_selector > 0) {
+            if (!animation_frames || !animation_frames->matrices ||
+                    frame_selector >= animation_frames->count)
+                return -1;
+            frame = &animation_frames->matrices[frame_selector];
+            if (!invert_animation_frame(*frame, frame_inverse)) return -1;
+        }
+
         ThreediMatrix4x4 built;
         bool spinner_break = false;
 
         if (rot_type == 1) {
-            spinner_break = build_spinner(&built, in_sub, pivot_sub, parent, sx, sy, sz, n, time_radians);
+            spinner_break = build_spinner(&built, in_sub, pivot_sub, parent, sx, sy, sz, frame, frame ? &frame_inverse : nullptr, n, time_radians);
         } else if (rot_type == 2) {
-            build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, rot_rev, n, time_ms, ctrl_values);
+            build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, frame, frame ? &frame_inverse : nullptr, rot_rev, n, time_ms, ctrl_values);
         } else if (rot_type == 3) {
             const ThreediVec3 *pivot_i = &pivots[i];
             build_viewaligned(&built, view_inv, basis_input, pivot_i, sx, sy, sz);

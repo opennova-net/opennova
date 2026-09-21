@@ -68,7 +68,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	for capture_tick in CAPTURE_TICKS:
 		while elapsed_ticks < capture_tick:
 			_fx.advance_fixed_tick(TICK_DT)
-			_fx.render_frame()
+			_fx.render_frame(GameWorld.current_frame_clock_ms())
 			elapsed_ticks += 1
 			await ctx.tree.process_frame
 		var candidate := await _stage.capture_after_render(_ctx.tree, _fx)

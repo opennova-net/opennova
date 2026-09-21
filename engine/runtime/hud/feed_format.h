@@ -1,5 +1,7 @@
 #pragma once
 
+#include <runtime/hud/game_text_lookup.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -224,6 +226,13 @@ void feed_event_rows(const FeedEventInput *events, std::size_t count,
 // [orig: HUD_FormatKillEventMessage @ 0x422DA0; sub_422D00 @ 0x422D00]
 std::string feed_format_row(const FeedRow &, const std::string &tmpl,
         const std::string &unknown, const std::string &bonus_tmpl, const std::string &wpname);
+
+// One row resolved against gametext and formatted: the "Canned Msg" template
+// for the row's key ("" -> nothing posts), a camp row's WPNames string, the
+// STRCND48 bonus template when the local player earned the bonus, and the
+// missing-actor fallback [orig: HUD_FormatKillEventMessage null-entity paths
+// @0x422DDA/@0x422E91 -> GameText_GetString("Client", "STRCLI01") = "Unknown"].
+std::string feed_row_line(const FeedRow &, const GameTextLookup &gametext);
 
 // Retained involved-event line; expiry clears its clock but preserves the death-screen text.
 // [orig: NetPacket_HandleGameEvent @ 0x427B8B; HUD_DrawKillAnnounceBanner @ 0x59DC90]

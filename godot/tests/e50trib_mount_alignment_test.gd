@@ -16,9 +16,9 @@ func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
 	# rows without runtime metadata itself.
 	var seen := {}
 	var type_ids := PackedInt32Array()
-	for raw in mission.get_all_entities():
-		var entity: MissionEntityRecord = raw
-		var type_id := entity.type_id
+	for raw in mission.get_all_entity_refs():
+		var entity: EntityRef = raw
+		var type_id := entity.runtime_type_id
 		if type_id > 0 and not seen.has(type_id):
 			seen[type_id] = true
 			type_ids.append(type_id)
@@ -38,9 +38,9 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 
-	var gun: MissionEntityRecord = null
-	for raw in mission.get_all_entities():
-		var entity: MissionEntityRecord = raw
+	var gun: EntityRef = null
+	for raw in mission.get_all_entity_refs():
+		var entity: EntityRef = raw
 		if entity.bms_id == GUN_BMS_ID:
 			gun = entity
 			break
@@ -65,13 +65,6 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var part_index := userpoint.subobject
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
-	var card := item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
-	var seats := card.get_seats()
-	assert_eq(seats.size(), 1)
-	var seat: EntityCardSeat = seats[0]
-	assert_eq(seat.get_source_name().to_lower(), "usegun")
-	assert_eq(seat.get_bone_index() - 1, userpoint_index,
-			"the runtime selected the exact retail Usegun row")
 
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
@@ -82,6 +75,14 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_gt(sim.get_mounted_graphic_source_count(), 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
+	var card := sim.entity_card_by_net_id(gun.bms_id)
+	var seats := card.get_seats()
+	assert_eq(seats.size(), 1)
+	var seat: EntityCardSeat = seats[0]
+	assert_eq(seat.get_source_name().to_lower(), "usegun")
+	assert_eq(seat.get_bone_index() - 1, userpoint_index,
+			"the runtime selected the exact retail Usegun row")
+
 	assert_eq(sim.spawn_local_player_at_start(), 1)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -116,7 +117,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 			* authored_model_position
 	var live_usegun_model := (live_parts[part_index] as Transform3D) * point_in_part
 	var gun_world := MissionObjectPlacer.entity_transform(
-			gun.position, gun.rotation_deg)
+			gun.position, mission.get_entity_rotation(gun.kind, gun.index))
 	var live_usegun_world := gun_world * live_usegun_model
 	var avatar_root_world := sim.get_local_player_position()
 	var drift := avatar_root_world.distance_to(live_usegun_world)

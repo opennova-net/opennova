@@ -1,0 +1,129 @@
+#include "model_mesh_prepare.h"
+
+#include <formats/threedi/threedi_strip_decode.h>
+
+#include <algorithm>
+#include <utility>
+
+namespace opennova::renderer {
+namespace {
+
+using namespace threedi;
+
+bool vertex_has_tangents(const ThreediVertex &v) {
+    if ((v.flags & THREEDI_VERTEX_FLAG_TANGENTS) != 0) return true;
+    const float tangent_len = v.tangent[0] * v.tangent[0] +
+            v.tangent[1] * v.tangent[1] + v.tangent[2] * v.tangent[2];
+    const float bitangent_len = v.bitangent[0] * v.bitangent[0] +
+            v.bitangent[1] * v.bitangent[1] + v.bitangent[2] * v.bitangent[2];
+    return tangent_len > 0.000001f && bitangent_len > 0.000001f;
+}
+
+void append_vertex(PreparedMeshSurface &out, const ThreediVertex &v,
+                   const ThreediTriangleStrip &strip, bool tangents) {
+    const std::array<float, 3> normal{-v.normal[0], v.normal[1], v.normal[2]};
+    out.vertices.push_back({-v.position[0], v.position[1], v.position[2]});
+    out.normals.push_back(normal);
+    out.uvs.push_back({v.uv0[0], v.uv0[1]});
+    out.uvs2.push_back({v.uv1[0], v.uv1[1]});
+    if (tangents) {
+        const std::array<float, 3> tangent{-v.tangent[0], v.tangent[1], v.tangent[2]};
+        const std::array<float, 3> bitangent{-v.bitangent[0], v.bitangent[1], v.bitangent[2]};
+        const std::array<float, 3> cross{
+            normal[1] * tangent[2] - normal[2] * tangent[1],
+            normal[2] * tangent[0] - normal[0] * tangent[2],
+            normal[0] * tangent[1] - normal[1] * tangent[0]};
+        const float dot = cross[0] * bitangent[0] + cross[1] * bitangent[1] + cross[2] * bitangent[2];
+        out.tangents.push_back({tangent[0], tangent[1], tangent[2], dot < 0.0f ? -1.0f : 1.0f});
+    }
+    // [orig: the runtime skins via the .bad skeleton; bone_table is the
+    // per-strip local-to-skeleton remap, skinned strip walk @0x474B60.]
+    if (strip.bone_table_length > 0) {
+        std::array<int32_t, 4> bones{};
+        for (size_t k = 0; k < bones.size(); ++k) {
+            const int local = static_cast<int>(v.bone_indices[k]);
+            bones[k] = local < strip.bone_table_length ? strip.bone_table[local] : 0;
+        }
+        out.bones.push_back(bones);
+        float w0 = v.bone_weights[0], w1 = v.bone_weights[1], w2 = v.bone_weights[2], w3 = 0.0f;
+        float sum = w0 + w1 + w2 + w3;
+        if (sum <= 1e-6f) {
+            w0 = 1.0f;
+            w1 = w2 = w3 = 0.0f;
+            sum = 1.0f;
+        }
+        out.weights.push_back({w0 / sum, w1 / sum, w2 / sum, w3 / sum});
+    }
+    out.indices.push_back(static_cast<int32_t>(out.vertices.size() - 1));
+}
+
+void finish_surface(PreparedMeshSurface &surface, MeshPreparationOptions options) {
+    if (options.native_frame) {
+        for (auto &v : surface.vertices) v[0] = -v[0];
+        for (auto &n : surface.normals) n[0] = -n[0];
+        for (auto &t : surface.tangents) {
+            t[0] = -t[0];
+            t[3] = -t[3];
+        }
+        for (size_t i = 0; i + 2 < surface.indices.size(); i += 3)
+            std::swap(surface.indices[i + 1], surface.indices[i + 2]);
+    }
+    // [orig: rigid weapon parts ride a bone via fake skinning.]
+    if (surface.bones.empty() && options.skeletal) {
+        const int bone = options.bone_count > 0
+                ? std::clamp(surface.part_index, 0, options.bone_count - 1)
+                : std::max(surface.part_index, 0);
+        surface.bones.assign(surface.vertices.size(), {bone, 0, 0, 0});
+        surface.weights.assign(surface.vertices.size(), {1.0f, 0.0f, 0.0f, 0.0f});
+    }
+}
+
+} // namespace
+
+// Strips are sequential per render object: opaque first, then alpha.
+// [orig: the RMDL/ROBJ walk every renderer pass performs; STRP runtime
+// decode, basic loop @0x474CAF / skinned @0x474B60.]
+std::vector<PreparedMeshSurface> prepare_model_mesh(
+        const threedi::Threedi3di3 &model, int lod_index, MeshPreparationOptions options) {
+    std::vector<PreparedMeshSurface> result;
+    if (model.lods == nullptr || lod_index < 0 || static_cast<size_t>(lod_index) >= model.lod_count)
+        return result;
+    const auto &lod = model.lods[lod_index];
+    if (lod.vertices.items == nullptr || lod.indices.indices == nullptr ||
+            lod.strips == nullptr || lod.render_objects == nullptr) return result;
+
+    size_t cursor = 0;
+    for (size_t part_index = 0; part_index < lod.render_object_count; ++part_index) {
+        const auto &part = lod.render_objects[part_index];
+        const size_t count = static_cast<size_t>(part.num_strips + part.num_alpha_strips);
+        for (size_t s = 0; s < count && cursor < lod.strip_count; ++s, ++cursor) {
+            const auto &strip = lod.strips[cursor];
+            std::vector<uint16_t> decoded;
+            if (!threedi::threedi_decode_strip_indices(lod, strip, decoded)) continue;
+            PreparedMeshSurface surface;
+            surface.primitive_index = cursor;
+            surface.material_index = strip.material_index;
+            surface.material_array_index = threedi::threedi_material_array_index_for_id(model, strip.material_index);
+            surface.part_index = static_cast<int>(part_index);
+            surface.parent_index = part.parent_index;
+            surface.abs = {-part.abs[0], part.abs[1], part.abs[2]};
+            surface.is_alpha = s >= static_cast<size_t>(part.num_strips);
+            surface.vertex_offset = static_cast<uint32_t>(strip.start_vertex);
+            bool tangents = true;
+            for (int i = 0; i < strip.num_vertices; ++i) {
+                if (!vertex_has_tangents(lod.vertices.items[surface.vertex_offset + i])) {
+                    tangents = false;
+                    break;
+                }
+            }
+            for (const auto index : decoded)
+                append_vertex(surface, lod.vertices.items[surface.vertex_offset + index], strip, tangents);
+            if (surface.vertices.empty()) continue;
+            finish_surface(surface, options);
+            result.push_back(std::move(surface));
+        }
+    }
+    return result;
+}
+
+} // namespace opennova::renderer

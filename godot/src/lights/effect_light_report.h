@@ -21,28 +21,6 @@
 
 namespace godot {
 
-// One corona billboard quad (LightScene::collect_corona_rows, the headless
-// inspection seam of the MultiMesh fill): the Godot-space segment center, the
-// half-size in world units and the premultiplied additive color including
-// the segment fade and the fog-to-black fold.
-#define CORONA_ROW_FIELDS(X)              \
-	X(Vector3, position, Vector3())       \
-	X(float, half_size, 0.0f)             \
-	X(Color, color, Color(1, 1, 1, 1))
-
-class CoronaRow : public RefCounted {
-	GDCLASS(CoronaRow, RefCounted)
-
-public:
-	CORONA_ROW_FIELDS(EFFECT_LIGHT_ACCESSORS)
-
-protected:
-	static void _bind_methods();
-
-private:
-	CORONA_ROW_FIELDS(EFFECT_LIGHT_MEMBER)
-};
-
 // One selected light: Godot-space position, the color, range = atten_end *
 // 1.25 and the quadratic attenuation term, the opaque lease handle gameplay
 // holds and the retail slot word it wraps.

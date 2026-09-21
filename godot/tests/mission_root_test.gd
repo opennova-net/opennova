@@ -32,7 +32,7 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
-		MissionWeaponLoadoutEntry.make("WPN_KNIFE", "3", "0", "2")]))
+		PackedStringArray(["WPN_KNIFE", "3", "0", "2"])]))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
 	var root := ResourceRoot.new()
@@ -54,32 +54,6 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 # selection (world/vehicle_attach.h) by tests/world/seat_prediction_test.cpp.
 
 
-func test_production_seat_specs_extract_target_phrase_set_config() -> void:
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	var root := ResourceRoot.new()
-	root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/synth"))
-	var spec := item_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(spec.error, "")
-	var seats := spec.get_seats()
-	assert_eq(seats.size(), 1,
-			"the witnessed mount target contributes exactly its Usegun seat")
-	if seats.size() == 1:
-		var seat: EntityCardSeat = seats[0]
-		assert_eq(seat.get_source_name(), "Usegun")
-		assert_eq(seat.get_bone_index(), 6,
-				"the wire byte is the 1-based USRP table row, not a seat ordinal")
-		assert_eq(seat.get_type(), 3)
-		assert_eq(seat.get_retail_slot(), 9,
-				"UseGun occupies fixed retail mountHandles slot 9")
-		assert_false(seat.is_occupied(), "a def-level seat row is static data")
-	assert_true(spec.is_mount_config_valid(),
-			"authored phrase_set marks target config valid")
-	assert_eq(spec.mount_config, 4,
-			"target itemDef+0x86c phrase_set reaches the production seat spec")
-
 
 func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	var item_db := ItemDatabase.new()
@@ -99,16 +73,15 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 			"the joiner prewarm installs from streamed wire type ids")
 	assert_eq(sim.get_mounted_graphic_source_count(), 1,
 			"duplicate/zero type ids collapse to the one resolved model source")
-	# The metadata the install extracted, via the tooling card over the same
-	# native extractor (ItemDatabase.extract_seat_specs_for_item).
-	var spec := item_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(spec.item_id, 101419,
-			"the wire type maps back into the items.def id space")
-	assert_eq(spec.type_id, 1419)
-	assert_eq(spec.get_seats().size(), 1,
-			"the late join path resolves the model's UseGun seat")
-	assert_true(spec.is_mount_config_valid())
-	assert_eq(spec.mount_config, 4)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var placed := mission.add_entity(MissionData.KIND_ITEM, 101419, Vector3.ZERO, Vector3.ZERO)
+	assert_true(sim.load_from_mission_data(mission))
+	var card := sim.entity_card_by_net_id(placed.bms_id)
+	assert_not_null(card)
+	assert_eq(card.get_item_id(), 1419, "the wire type reaches the live entity")
+	assert_eq(card.get_seats().size(), 1, "late install supplies the live UseGun seat")
+
 
 
 # The flashbang's effects_table tag-1 "move" effect (retail ammo.def grenadefb):
@@ -121,26 +94,8 @@ const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
 # interns and spawns it without a resource root and the round-bound group
 # stays live until the throwable pass stops it.
 func _catalog_file() -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = "toss dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var effect := ParticleEffect.new()
-	effect.id = FLASHBANG_MOVE_EFFECT
-	effect.pdefs = PackedStringArray(["toss dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("toss dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [FLASHBANG_MOVE_EFFECT])
 
 
 # The round-bound move group in the effect world's public report: by id once
@@ -209,7 +164,7 @@ func test_setup_promotes_and_counts() -> void:
 func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	var ref: MissionEntityRecord = mission.add_entity(MissionData.KIND_BUILDING, 102001,
+	var ref: EntityRef = mission.add_entity(MissionData.KIND_BUILDING, 102001,
 			Vector3(10, 20, 3), Vector3(0, 25, 0))
 	assert_not_null(ref)
 	if ref == null:
@@ -233,11 +188,9 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	assert_true(runtime.tick())
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"production MissionRoot passes its placer into the EntityPresenter")
-	var rows := placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform,
-				"production presentation and the shadow registry share one pose")
+	assert_eq(placer.hide_static_instance(bms_id), model.transform,
+			"production presentation and the carve share one pose")
+	assert_true(placer.show_static_instance(bms_id))
 
 
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
@@ -477,8 +430,8 @@ func test_effects_drained_signal_fires() -> void:
 	# unconditional OutputText event and confirm the signal carries it.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 42)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 6, 0, 42))
 	var container := Node3D.new()
 	add_child_autofree(container)
 
@@ -699,8 +652,8 @@ func test_session_frame_drains_effects_per_tick() -> void:
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 42)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 6, 0, 42))
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var rt := MissionRoot.new()

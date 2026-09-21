@@ -9,31 +9,11 @@ extends MenuCompanion
 # controls unique to this screen, riding the shell's MenuDriver over the compiled
 # MenuFrame surface (widgets addressed by document id via _id/widget_id).
 #
-# Faithful to the witnessed original (docs/playerinfo/avatars-re.md, "Screen
-# orchestration", D-PLAYERINFO-5/7):
-#   - team 0 = blue/good, 1 = red/evil; a nationality is shown only when
-#     (alignment != 0) == (team != 0)
-#     [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0]
-#   - selecting a nationality resets the division and refills division + combo;
-#     selecting a division refills the combo list
-#     [orig: PlayerInfo_HandleNationalitySelect @ 0x560600,
-#            PlayerInfo_HandleDivisionSelect @ 0x560690]
-#   - the COMBO_LIST label is "<head display> - <body display>" resolved through the
-#     "Avatars" RTXT section
-#     [orig: populate_avatar_combo_list @ 0x560210]
-# The in-world avatar appearance (D-PLAYERINFO-1) and full profile persistence are
-# later phases; snapshot() exposes the current selection for the ACCEPT seam.
-
-# The "Avatars" RTXT section the nationality/division/combo display keys resolve
-# against [orig: TextResource_GetStringWithFallback(resource, "Avatars", nameKey)].
+# Avatar cascade, voice rows and preview-trigger selection live in the native
+# MenuDriver controller. This companion supplies resources and persisted picks,
+# then applies the requested preview update to its mounted Godot nodes.
 const ATBL_SECTION := "Avatars"
-
-# TESTPLAYERVOICE is a semantic screen command, not the button's generic click sound.
-# Retail resolves the trigger from the current avatar and plays it from the dedicated
-# menu bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
 const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
-const VOICE_PREVIEW_BANK := "menu.lwf"
-const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 
 # The 3D character preview (compatible head/body .3di composited). Mounted over
 # the PLAYER_PREVIEW widget rect and fed the
@@ -55,32 +35,9 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # retail: the category_names[] array built at 0x55e4bc-0x55e4cc.
 const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
-# The voice definition table: one row per selectable character voice,
-# {enabled, CHARVOICE id, avatar SEX the row belongs to} (sex 0 = male,
-# 1 = female -- the head part's `sex` keyword).
-# retail: the 11 12-byte rows based at 0x83C7A8; the walk starts at the id word
-# 0x83C7AC, strides 12 and stops at ammoDef @ 0x83C830, testing
-# `*(ptr - 1) != 0 && avatar_sex == ptr[1]`. Row id 9 is the one DISABLED row.
-const VOICE_TABLE := [
-	[1, 1, 0], [1, 2, 0], [1, 3, 0], [1, 4, 0], [1, 5, 0], [1, 6, 0],
-	[1, 7, 1], [1, 8, 1], [0, 9, 0], [1, 10, 0], [1, 11, 1],
-]
-# The DEFAULT_VOICE row's value, and the value a rejected persisted override
-# falls back to. retail: UIList_AddRow(list, DEFAULT_VOICE, 0, 0, -1) @ 0x55dd76
-# and `if (!found) profile[team + 1532] = 0` @ 0x55de21.
-const DEFAULT_VOICE_VALUE := 0
-
-# The kit page's filler value: retail writes the literal string "-1" (@ 0x7C3328)
-# for every count/flags slot it has no number for, and the reader decodes a
-# missing value as -1 all the same.
-const KIT_FILLER := -1
-# The knife every page leads with, per side, then the medic's medpack.
-# retail: "WPN_KNIFE" @ 0x7C3584 / "WPN_KNIFE2" @ 0x55e4ec / "WPN_MEDPACK" @ 0x7D5CA8.
-const KIT_KNIFE_BLUE := "WPN_KNIFE"
-const KIT_KNIFE_RED := "WPN_KNIFE2"
-const KIT_MEDPACK := "WPN_MEDPACK"
-# The PLAYERCLASS value that earns the medpack entry (retail tests == 5).
-const MEDIC_PLAYER_CLASS := 5
+# The voice table, the DEFAULT_VOICE value and the kit page's fillers,
+# knives, medpack and medic class are the engine's (WeaponDatabase over
+# runtime/menu/player_info_kit.h).
 
 var _db: AvatarDatabase
 var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
@@ -96,18 +53,11 @@ var _ammo_sec: Dictionary = {}
 # [orig: g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
 var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
 var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
-var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
-var _sel_nat := -1
-var _sel_div := -1
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
-# PLAYERVOICE row -> the row's VALUE (0 for DEFAULT_VOICE, else the CHARVOICE id);
-# the list is filled at runtime, so the values live here the way _nat_db_index
-# carries the nationality list's.
-var _voice_values: Array[int] = []
 # The persisted voice override per side, 0 = DEFAULT_VOICE.
 # retail: the profile bytes g_curPlayerProfile[teamIndex + 1532] @ 0x25510FC.
 var _voice_override: Dictionary = {}
@@ -121,7 +71,7 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	# our saved profile carries a single "voice", so both sides start from it
 	# and then diverge per side exactly as retail's pair does. The per-side
 	# persistence of the pair is the remaining D-PLAYERINFO-9 residual.
-	var voice := int(profile.get("voice", DEFAULT_VOICE_VALUE))
+	var voice := int(profile.get("voice", WeaponDatabase.DEFAULT_VOICE_VALUE))
 	_voice_override = {0: voice, 1: voice}
 
 
@@ -221,28 +171,25 @@ func _restore_character_selection(side: int) -> void:
 	if saved == null:
 		return
 	var nat_index := saved.nationality
-	var visible_nat_row := _nat_db_index.find(nat_index)
+	var visible_nat_row := nationality_rows().find(nat_index)
 	var nat_combo := _id("NATIONALITY")
 	if visible_nat_row < 0 or nat_combo < 0:
 		return
 	_driver.select_row(nat_combo, visible_nat_row, false)
-	_sel_nat = nat_index
-	_populate_divisions()
+	_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
 	var div_index := saved.division
 	var div_combo := _id("DIVISION")
 	if div_index < 0 or div_index >= _db.get_division_count(nat_index) or div_combo < 0:
 		return
 	_driver.select_row(div_combo, div_index, false)
-	_sel_div = div_index
-	_populate_combos()
+	_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
 	var combo_index := saved.combo
 	var combo := _id("COMBO_LIST")
 	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index) \
 			or combo < 0:
 		return
 	_driver.select_row(combo, combo_index, false)
-	_populate_voices()
-	_refresh_preview()
+	_update_avatars(MenuDriver.AVATAR_COMBO, 0)
 
 
 func _restore_player_class() -> void:
@@ -262,16 +209,6 @@ func _restore_player_class() -> void:
 			return
 
 
-# Resolve a nationality/division/combo display key against the gametext table's "Avatars"
-# section -- the table the original consults for these names
-# [orig: GameText_GetStringWithFallback @ 0x51eb90 / g_TextGameText @ 0xB4C2AC; "Avatars"
-# section, docs/playerinfo/avatars-re.md]. The shell registers gametext (Game.bin) into the
-# shared Strings registry at boot. A miss falls back to the raw key (the witnessed
-# fallback; not the "??section:key??" debug marker Strings.lookup would return).
-func _display_name(key: String) -> String:
-	return Strings.lookup_or(Strings.TABLE_GAMEUI, ATBL_SECTION, key, key)
-
-
 # --- Loadout (weapon slot lists) ----------------------------------------------
 
 ## Inject a weapon database for tests or another shell-owned resource mount. Keeping
@@ -285,7 +222,10 @@ func set_database(db: AvatarDatabase) -> void:
 
 ## The NATIONALITY list's visible rows as nationality DB indices, in row order.
 func nationality_rows() -> Array[int]:
-	return _nat_db_index.duplicate()
+	var rows: Array[int] = []
+	if _driver != null:
+		rows.assign(_driver.player_info_nationality_rows())
+	return rows
 
 
 ## The selected team: 0 = blue/good, 1 = red/evil.
@@ -337,7 +277,7 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
 	defs.append(null)
 	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
-		rows.append(LoadoutLabels.weapon_label(w))
+		rows.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
 		defs.append(w)
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
@@ -394,103 +334,23 @@ func _on_class_selected(_row: int, _value: String) -> void:
 
 # --- Loadout ammo combos (D-PLAYERINFO-11) --------------------------------------
 
-# Clip-count rows for one parent slot's AMMO1/TYPE/AMMO2 combos
-# [orig: populate_ammo_combo_boxes @ 0x55def0; the ACCESSORY leg is the same logic
-#  inlined in populate_weapon_accessory_ammo_ui @ 0x55e8b0].
+# Populate through the native menu runtime; this shell carries the saved picks.
 func _populate_slot_ammo(control: String) -> void:
 	var w := _selected_weapon(control)
 	var index := w.index if w != null else -1
-	var has_ammo := w != null and w.clipsize > 0
-	var ammo1 := _id(control + "_AMMO1")
-	var type_combo := _id(control + "_AMMO1_TYPE")
-	var ammo2 := _id(control + "_AMMO2")
-	if ammo1 >= 0:
-		_driver.set_widget_shown(ammo1, has_ammo)
-		if has_ammo:
-			var maxclips := w.maxclips
-			var rows := PackedStringArray()
-			# Rows 1..maxclips: "%d - %s" = rounds + round label; row value = the
-			# clip count (retail keys rows by the def index; ours by position).
-			for clips in range(1, maxclips + 1):
-				rows.append(LoadoutLabels.ammo_row_label(w, clips))
-			_set_combo_items(ammo1, rows)
-			# Saved count selects its row; -1/absent = the maxclips row (full
-			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
-			# select in both fills — native default_clip_row].
-			var saved := int(_ammo_pri.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			_driver.select_row(ammo1,
-					WeaponDatabase.default_clip_row(saved, maxclips) - 1, false)
-	if type_combo >= 0:
-		# The TYPE combo keeps its authored FMJ/AP/SP statics; shown with AMMO1,
-		# selection = the saved per-team type byte (-1 -> 0). flags2 NOAMMOTYPES
-		# locks it non-interactive and resets the saved type
-		# [orig: @ 0x55def0 — the +188 & 0x40 gate -> UIWidget_SetInteractiveRecursive].
-		_driver.set_widget_shown(type_combo, has_ammo)
-		if has_ammo:
-			var locked := (w.flags2 & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
-			_driver.set_widget_disabled(type_combo, locked)
-			if locked:
-				_slot_type_store(control)[_team] = 0
-			# Select by the row's authored VALUE (0/1/2), not its position — the
-			# saved byte is the value [orig: the @ 0x55def0 row select].
-			var saved_type := str(int(_slot_type_store(control).get(_team, 0)))
-			for row in _driver.item_count(type_combo):
-				if _driver.item_value(type_combo, row) == saved_type:
-					_driver.select_row(type_combo, row, false)
-					break
-	if ammo2 >= 0:
-		var sub := _subclass_weapon(w)
-		var sub_ok := has_ammo and sub != null and sub.clipsize > 0
-		_driver.set_widget_shown(ammo2, sub_ok)
-		if sub_ok:
-			var sub_max := sub.maxclips
-			var rows2 := PackedStringArray()
-			for clips in range(1, sub_max + 1):
-				rows2.append(LoadoutLabels.ammo_row_label(sub, clips))
-			_set_combo_items(ammo2, rows2)
-			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			_driver.select_row(ammo2,
-					WeaponDatabase.default_clip_row(saved2, sub_max) - 1, false)
+	var types := _slot_type_store(control)
+	_populating = true
+	types[_team] = _driver.fill_player_info_ammo(_weapons, control, index,
+			int(_ammo_pri.get(index, -1)), int(_ammo_sec.get(index, -1)),
+			int(types.get(_team, 0)), Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 
 
-# The sub-weapon behind *_AMMO2 — the native def-table walk
-# (engine/formats/def def_subclass_weapon_index
-# [orig: the stricmp walk over entry+192.. in @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
-func _subclass_weapon(parent: WeaponDef) -> WeaponDef:
-	if parent == null or _weapons == null:
-		return null
-	var index := int(_weapons.subclass_weapon_index(parent.index))
-	return _weapons.get_weapon(index) if index >= 0 else null
-
-
-# The first three selectable class-3 defs passing the class+team masks own
-# GRENADE_AMMO1..3 in table order; leftover widgets hide. Rows 0..maxclips
-# INCLUDING the zero row [orig: the >= 3 leg of populate_ammo_combo_boxes
-# @ 0x55def0 — filter, table order, hidden leftovers, zero row].
 func _populate_grenades(class_mask: int, team_mask: int) -> void:
-	_grenade_rows = []
-	if _weapons != null:
-		var defs := _weapons.get_slot_weapons(
-				WeaponDatabase.SLOT_GRENADE, class_mask, team_mask)
-		for i in mini(defs.size(), GRENADE_CONTROLS.size()):
-			_grenade_rows.append(defs[i])
-	for i in GRENADE_CONTROLS.size():
-		var combo := _id(GRENADE_CONTROLS[i])
-		if combo < 0:
-			continue
-		if i >= _grenade_rows.size():
-			_driver.set_widget_shown(combo, false)
-			continue
-		_driver.set_widget_shown(combo, true)
-		var w := _grenade_rows[i]
-		var maxclips := w.maxclips
-		var rows := PackedStringArray()
-		for clips in range(0, maxclips + 1):
-			rows.append(LoadoutLabels.ammo_row_label(w, clips))
-		_set_combo_items(combo, rows)
-		var saved := int(_ammo_pri.get(w.index, -1))
-		_driver.select_row(combo,
-				maxclips if saved < 0 else clampi(saved, 0, maxclips), false)
+	_populating = true
+	_grenade_rows = _driver.fill_player_info_grenades(_weapons, class_mask, team_mask,
+			_ammo_pri, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 
 
 func _slot_type_store(control: String) -> Dictionary:
@@ -572,52 +432,20 @@ func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 
 # --- Weight readout + weapon icons (D-PLAYERINFO-11) ----------------------------
 
-# Weight = parent slots through the native ported math, plus the witnessed
-# clip-only terms for sub-weapons and grenades
-# [orig: calculate_loadout_weight @ 0x55f1f0 — parents weaponweight +
-#  (saved<=0?maxclips:saved)*clipweight; sub-weapons and grenades clip term ONLY,
-#  grenades -1 -> maxclips with a saved 0 staying 0].
 func _update_weight() -> void:
 	if _weapons == null:
 		return
-	var indices := PackedInt32Array()
-	var counts := PackedInt32Array()
-	var total := 0.0
+	var parents: Array[WeaponDef] = []
 	for control in PARENT_SLOTS:
-		var w := _selected_weapon(control)
-		if w == null:
-			continue
-		var index := w.index
-		indices.append(index)
-		counts.append(int(_ammo_pri.get(index, -1)))
-		# The witnessed sub-weapon term is gated on the *_AMMO2 control existing.
-		var sub := _subclass_weapon(w)
-		if _id(control + "_AMMO2") >= 0 and sub != null and sub.clipsize > 0:
-			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			total += _weapons.extra_ammo_weight(sub.index,
-					WeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
-	total += _weapons.loadout_weight(indices, counts)
-	for i in _grenade_rows.size():
-		# The witnessed grenade term is gated on the control existing AND shown.
-		var combo := _id(GRENADE_CONTROLS[i]) if i < GRENADE_CONTROLS.size() else -1
-		if combo < 0 or not _driver.is_widget_shown(combo):
-			continue
-		var g := _grenade_rows[i]
-		var saved := int(_ammo_pri.get(g.index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-		total += _weapons.extra_ammo_weight(g.index, saved)
-	var band := _weapons.encumbrance_class(total)
-	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
-	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
+		parents.append(_selected_weapon(control))
+	var total := _driver.player_info_loadout_weight(
+			_weapons, parents, _grenade_rows, _ammo_pri, _ammo_sec)
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
-		# [orig: update_player_info_weight_and_weapon_icons @ 0x55f480 —
-		#  sprintf "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE]
-		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			Strings.menu_text("LBS", "lbs"), encumbrance])
+		# The readout's format, bands and menu tokens are the engine's
+		# (loadout_labels.h loadout_weight_line).
+		_driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(total,
+				Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI)))
 
 
 # Texture the PRIMARY/SECONDARY/ACCESSORY_ICON windows from the selected def's
@@ -632,155 +460,34 @@ func _update_icons() -> void:
 
 # --- Population (the cascade) -------------------------------------------------
 
-# Fill NATIONALITY, filtered by team alignment, then cascade into division/combo/voice.
-# [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; team filter D-PLAYERINFO-5]
 func _populate_nationalities() -> void:
-	var combo := _id("NATIONALITY")
-	if combo < 0:
-		return
-	_nat_db_index.clear()
-	var rows := PackedStringArray()
-	if _db != null:
-		for i in _db.get_nationality_count():
-			var nat := _db.get_nationality(i)
-			var align := nat.alignment
-			# show only when (alignment != 0) == (team != 0): good->blue(0), evil->red(1)
-			if (align != 0) != (_team != 0):
-				continue
-			_nat_db_index.append(i)
-			rows.append(_display_name(nat.name_key))
-	_set_combo_items(combo, rows)
-	_sel_nat = _nat_db_index[0] if not _nat_db_index.is_empty() else -1
-	_populate_divisions()
+	_update_avatars(MenuDriver.AVATAR_TEAM, 0)
 
 
-# [orig: PlayerInfo_PopulateDivisionList @ 0x55da50]
-func _populate_divisions() -> void:
-	var combo := _id("DIVISION")
-	if combo < 0:
-		return
-	var rows := PackedStringArray()
-	if _db != null and _sel_nat >= 0:
-		for i in _db.get_division_count(_sel_nat):
-			var div := _db.get_division(_sel_nat, i)
-			rows.append(_display_name(div.name_key))
-	_set_combo_items(combo, rows)
-	_sel_div = 0 if rows.size() > 0 else -1
-	_populate_combos()
-
-
-# Each row is "<head display> - <body display>" (last - first).
-# [orig: populate_avatar_combo_list @ 0x560210]
-func _populate_combos() -> void:
-	var combo := _id("COMBO_LIST")
-	if combo < 0:
-		return
-	var rows := PackedStringArray()
-	if _db != null and _sel_nat >= 0 and _sel_div >= 0:
-		for i in _db.get_combo_count(_sel_nat, _sel_div):
-			var c := _db.get_combo(_sel_nat, _sel_div, i)
-			var last := _display_name(c.get_head().display_name)
-			var first := _display_name(c.get_body().display_name)
-			rows.append("%s - %s" % [last, first])
-	_set_combo_items(combo, rows)
-	_populate_voices()
-	_refresh_preview()
-
-
-# The voice list is avatar-derived: DEFAULT_VOICE (value 0) plus every ENABLED
-# voice-table row whose sex matches the selected head's `sex` byte, each row
-# valued with its CHARVOICE id. A persisted override that is not one of those
-# rows is reset to DEFAULT_VOICE, and the list then selects BY VALUE.
-# retail: populate_player_voice_combo @ 0x55dce0 -- clear the list, resolve the
-# selected avatar's SEX through the combo record (sub_57AE90 @ 0x57ae90 returns
-# combo+280, which CAvatarDefs_ParseConfigLine stores from the head part's
-# sex field @ 0x57aad2; a combo the registry cannot resolve yields 0 = male),
-# add DEFAULT_VOICE, walk the table, then
-# `if (!found) profile[team + 1532] = 0` and
-# UIList_SelectByValue(list, profile[team + 1532], 1).
-func _populate_voices() -> void:
-	var combo := _id("PLAYERVOICE")
-	if combo < 0:
-		return
-	var sex := _selected_combo_head_sex()
-	var saved := selected_voice()
-	var rows := PackedStringArray()
-	_voice_values.clear()
-	_voice_values.append(DEFAULT_VOICE_VALUE)
-	rows.append(_menu_text("DEFAULT_VOICE", "Default"))
-	var found := false
-	for row in VOICE_TABLE:
-		if int(row[0]) == 0 or int(row[2]) != sex:
-			continue
-		var voice := int(row[1])
-		rows.append(_menu_text("CHARVOICE_%d" % voice, "Voice %d" % voice))
-		_voice_values.append(voice)
-		if voice == saved:
-			found = true
-	if not found:
-		_voice_override[_team] = DEFAULT_VOICE_VALUE
-	_set_combo_items(combo, rows)
-	var target := _voice_values.find(selected_voice())
-	_driver.select_row(combo, maxi(target, 0), false)
+func _update_avatars(change: int, value: int) -> void:
+	_populating = true
+	_voice_override[_team] = _driver.update_player_info_avatars(_db, change, value,
+			_team, selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
+			Strings.get_table(Strings.TABLE_MENUTXT))
+	_populating = false
+	if _driver.player_info_avatar_preview_changed():
+		_refresh_preview()
 
 
 ## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
 ## the CHARVOICE id the PLAYERVOICE list carries as that row's value.
 func selected_voice() -> int:
-	return int(_voice_override.get(_team, DEFAULT_VOICE_VALUE))
+	return int(_voice_override.get(_team, WeaponDatabase.DEFAULT_VOICE_VALUE))
 
 
-# The selected combo head's SEX byte, the voice list's filter key. An
-# unresolvable selection yields 0 (male) the way retail's failed registry
-# lookup does. retail: sub_57AE90 @ 0x57ae90 -> MinimapSlot_FindByPackedId
-# @ 0x57a270, `return 0` on a miss @ 0x57aeb5.
-func _selected_combo_head_sex() -> int:
-	var head := _selected_combo_head()
-	return head.sex if head != null else 0
-
-
-# The selected combo head's own `voice` byte, the voice PREVIEW fallback.
-# retail: Avatars_ResolveSelectionIndex @ 0x57ae60 reads combo+284, stored from
-# the head part's voice field @ 0x57aae3.
-func _selected_combo_head_voice() -> int:
-	var head := _selected_combo_head()
-	return head.voice if head != null else -1
-
-
-func _selected_combo_head() -> AvatarPartRow:
-	if _db == null or _sel_nat < 0 or _sel_div < 0:
-		return null
-	var combo := _id("COMBO_LIST")
-	var idx := _driver.selected_row(combo) if combo >= 0 else 0
-	if idx < 0:
-		idx = 0
-	if idx >= _db.get_combo_count(_sel_nat, _sel_div):
-		return null
-	return _db.get_combo(_sel_nat, _sel_div, idx).get_head()
-
-
-# PLAYERVOICE selection: store the picked ROW VALUE as this side's override.
-# Retail does NOT repopulate the list here.
-# retail: sub_560030 @ 0x560030 -- `g_curPlayerProfile[teamIndex + 1532] =
-# *(BYTE *)(eventData + 16)`, the selection notification's value byte.
 func _on_voice_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_voice_override[_team] = (_voice_values[row]
-			if row >= 0 and row < _voice_values.size() else DEFAULT_VOICE_VALUE)
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_VOICE, row)
 
 
 func _preview_voice() -> void:
-	if _driver == null:
-		return
-	# retail: PlayerInfo_PreviewVoice @ 0x55ff70 -- the persisted override when
-	# NON-ZERO, else the selected combo head's own voice byte.
-	var voice := selected_voice()
-	if voice == DEFAULT_VOICE_VALUE:
-		voice = _selected_combo_head_voice()
-	if voice < 0:
-		return
-	_driver.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
+	if _driver != null:
+		_driver.preview_player_info_voice(_db, selected_voice())
 
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
@@ -822,14 +529,13 @@ func _on_widget_hover_changed(id: int, hovered: bool) -> void:
 
 
 func _refresh_preview() -> void:
-	if _preview == null or _db == null or _sel_nat < 0 or _sel_div < 0:
+	if _preview == null:
 		return
-	var idx := _selected_combo_index()
-	if idx < 0 or idx >= _db.get_combo_count(_sel_nat, _sel_div):
-		return
-	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the
-	# portrait stops at the resolved part .3di geometry.]
-	_preview.load_combo(_db.get_combo(_sel_nat, _sel_div, idx))
+	var combo := _driver.player_info_avatar_combo(_db)
+	if combo != null:
+		# The portrait stops at the resolved part geometry; D-PLAYERINFO-1
+		# tracks the separate spawned-player model seam.
+		_preview.load_combo(combo)
 
 
 func _selected_combo_index() -> int:
@@ -871,27 +577,18 @@ func _on_screen_changed(_screen_name: String) -> void:
 # --- Selection handlers (cascade edges) ---------------------------------------
 
 func _on_nat_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_sel_nat = _nat_db_index[row] if row >= 0 and row < _nat_db_index.size() else -1
-	_populate_divisions()  # resets the division selection and refills division + combo
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_NATIONALITY, row)
 
 
 func _on_div_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_sel_div = row
-	_populate_combos()
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_DIVISION, row)
 
 
-# retail: PlayerInfo_HandleVoiceSelect @ 0x55fe00 -- the COMBO_LIST handler
-# despite its name (registered against "COMBO_LIST" @ 0x5615a6): it stores the
-# picked avatar and rebuilds PLAYERVOICE for the new head.
 func _on_combo_selected(_row: int, _value: String) -> void:
-	if _populating:
-		return
-	_populate_voices()  # the voice list is avatar-derived; refresh on a combo change
-	_refresh_preview()
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_COMBO, 0)
 
 
 # --- Team radios (SIDE_BLUE / SIDE_RED) ---------------------------------------
@@ -911,8 +608,7 @@ func _on_side_red() -> void:
 	_set_team(1)
 
 
-# A team change re-filters the nationality list and resets the cascade
-# [orig: PlayerInfo_SaveAndRepopulate @ 0x5608f0 re-runs PopulateAllControls(team)].
+# Apply the native team cascade, then restore the shell's saved side picks.
 func _set_team(team: int) -> void:
 	if team == _team:
 		return
@@ -933,7 +629,8 @@ func _set_team(team: int) -> void:
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------
 
 func _current_character_selection() -> PlayerCharacterSelectionState.Selection:
-	return _character_state.make_selection(_team, _sel_nat, _sel_div,
+	return _character_state.make_selection(_team,
+			_driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_selected_combo_index(), _selected_player_class())
 
 
@@ -954,7 +651,7 @@ func snapshot() -> Dictionary:
 	# stores the notification's value byte into the profile and re-selects the
 	# list by that value on the next populate.
 	var profile := _character_state.snapshot(
-			_team, _sel_nat, _sel_div,
+			_team, _driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_driver.selected_row(combo) if combo >= 0 else -1,
 			player_class, _edit_text("PLAYERNAME"), selected_voice())
 	# Missing weapon.def means there was no loadout choice to commit. Keep that
@@ -997,48 +694,33 @@ func kit_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if _weapons == null or not _weapons.is_loaded():
 		return out
-	# The knife leads every page: the BLUE mask (2) -- and the defensive
-	# mask-zero leg -- take WPN_KNIFE, the RED mask (1) takes WPN_KNIFE2.
-	var team_mask := WeaponDatabase.player_info_team_mask(_team)
-	out.append(_kit_filler_entry(KIT_KNIFE_BLUE
-			if (team_mask & 2) != 0 or team_mask == 0 else KIT_KNIFE_RED))
-	if _selected_player_class() == MEDIC_PLAYER_CLASS:
-		out.append(_kit_filler_entry(KIT_MEDPACK))
+	# The order, the per-side knife, the medic's medpack and the fixed grenade
+	# slots are the engine's page builder; this companion supplies its picks:
+	# the three category selections with their recorded count pairs (-1 =
+	# untouched) and the team's ammo-type byte for PRIMARY/SECONDARY, then the
+	# three grenade positions (entry 0 when the class/team filter left one empty).
+	var indices := PackedInt32Array()
+	var pri := PackedInt32Array()
+	var sec := PackedInt32Array()
+	var flags := PackedInt32Array()
 	for control in KIT_SLOT_ORDER:
-		# PRIMARY and SECONDARY carry their team's ammo-type byte as the entry's
-		# fourth value; ACCESSORY always writes the filler.
-		out.append(_kit_slot_entry(_slot_weapon_index(control),
-				selected_ammo_type(control) if control in TYPE_SLOTS else KIT_FILLER))
+		var index := _slot_weapon_index(control)
+		indices.append(index)
+		pri.append(int(_ammo_pri.get(index, -1)))
+		sec.append(int(_ammo_sec.get(index, -1)))
+		flags.append(selected_ammo_type(control) if control in TYPE_SLOTS else -1)
+	var grenade_indices := PackedInt32Array()
+	var grenade_pri := PackedInt32Array()
+	var grenade_sec := PackedInt32Array()
 	for i in GRENADE_CONTROLS.size():
-		# The three grenade slots are a FIXED array that the ammo fill zeroes
-		# before refilling, so a slot the class/team filter left empty
-		# serializes weapon-table entry 0
-		# retail: the zero store @ 0x55e8d0-0x55e8da in
-		# populate_weapon_accessory_ammo_ui @ 0x55e8b0.
-		out.append(_kit_slot_entry(
-				_grenade_rows[i].index if i < _grenade_rows.size() else 0, KIT_FILLER))
+		var index := _grenade_rows[i].index if i < _grenade_rows.size() else 0
+		grenade_indices.append(index)
+		grenade_pri.append(int(_ammo_pri.get(index, -1)))
+		grenade_sec.append(int(_ammo_sec.get(index, -1)))
+	for row in _weapons.player_info_kit_entries(_team, _selected_player_class(), indices,
+			pri, sec, flags, grenade_indices, grenade_pri, grenade_sec):
+		out.append(row)
 	return out
-
-
-# An entry retail writes with the "-1" filler in all three value slots.
-func _kit_filler_entry(name: String) -> Dictionary:
-	return {
-		"name": name,
-		"ammo_primary": KIT_FILLER,
-		"ammo_secondary": KIT_FILLER,
-		"flags": KIT_FILLER,
-	}
-
-
-# One weapon-table entry with its recorded interleaved count pair.
-func _kit_slot_entry(index: int, flags: int) -> Dictionary:
-	var w := _weapons.get_weapon(index)
-	return {
-		"name": w.name if w != null else "",
-		"ammo_primary": int(_ammo_pri.get(index, KIT_FILLER)),
-		"ammo_secondary": int(_ammo_sec.get(index, KIT_FILLER)),
-		"flags": flags,
-	}
 
 
 # The weapon-table index a loadout list would report as its selected VALUE.

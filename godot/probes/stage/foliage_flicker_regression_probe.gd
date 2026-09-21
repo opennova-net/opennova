@@ -108,15 +108,15 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# Retail fills detail cache misses after the current draw. First call fills;
 	# second call creates visible draw meshes. Shader compilation gets four more
 	# frames before bytes become part of the verdict.
-	dispatcher.render_preview(camera.global_transform)
-	dispatcher.render_preview(camera.global_transform)
+	dispatcher.render_preview(camera.global_transform, GameWorld.current_frame_clock_ms())
+	dispatcher.render_preview(camera.global_transform, GameWorld.current_frame_clock_ms())
 	_pin_wind(dispatcher)
 	await ctx.wait_frames(4)
 
 	var images: Array[Image] = []
 	var stats_series: Array[FoliageFrameStats] = []
 	for frame_index in range(CAPTURE_COUNT):
-		dispatcher.render_preview(camera.global_transform)
+		dispatcher.render_preview(camera.global_transform, GameWorld.current_frame_clock_ms())
 		_pin_wind(dispatcher)
 		await ctx.wait_frames(2)
 		var image := stage.get_texture().get_image()
@@ -177,14 +177,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var silhouette_anchor := Vector3(8.0, _sample_height(8.0, -12.0), -12.0)
 	camera.look_at(silhouette_anchor + Vector3(0.0, 2.0, 0.0), Vector3.UP)
 	dispatcher.silhouette_anchors = PackedVector3Array([silhouette_anchor])
-	dispatcher.render_frame(camera.global_transform)
+	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 	_pin_wind(dispatcher)
 	await ctx.wait_frames(4)
 
 	var silhouette_images: Array[Image] = []
 	var silhouette_stats_series: Array[FoliageFrameStats] = []
 	for frame_index in range(CAPTURE_COUNT):
-		dispatcher.render_frame(camera.global_transform)
+		dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 		_pin_wind(dispatcher)
 		await ctx.wait_frames(2)
 		var image := stage.get_texture().get_image()

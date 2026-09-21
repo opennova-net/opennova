@@ -41,7 +41,7 @@ public:
 	void begin_frame(const Vector3 &p_environment_light_tuple,
 			uint32_t p_material_time_ms);
 
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const override;
 	uint32_t material_time_ms() const noexcept override;
 	opennova::terrain::TerrainStaticShadowPagePlanResult plan_page(

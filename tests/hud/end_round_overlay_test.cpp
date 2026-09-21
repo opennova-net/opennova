@@ -297,9 +297,51 @@ void test_resolve() {
 	CHECK(kEndRoundOverlayTop == 0 && kEndRoundOverlayBottom == 768);
 }
 
+// The STAT transition latch [orig: UI_ProcessEndRoundScreenTransition
+// @0x5b8600]: the header edge, the PRE-STAT passes, the board + 6000 ms gate
+// opening stat.mnu once, the locret afterwards, the reset when the
+// announcement goes away and at the mission (re)start.
+void test_transition() {
+	EndRoundTransition t;
+	// No announcement: inert, no reset reported.
+	EndRoundTransitionStep s = t.step(false, false, 1000);
+	CHECK(!s.announced && !s.reset && !s.pre_stat && !s.open_stat);
+	// The header edge: the first pass announces and is a PRE-STAT pass.
+	s = t.step(true, false, 1000);
+	CHECK(s.announced && s.pre_stat && !s.open_stat && t.header_seen);
+	// Later passes before the gate: PRE-STAT, no announcement.
+	s = t.step(true, false, 4000);
+	CHECK(!s.announced && s.pre_stat && !s.open_stat);
+	// The wall clock alone does not open STAT: the board must be known.
+	s = t.step(true, false, 8000);
+	CHECK(s.pre_stat && !s.open_stat && !t.stat_opened);
+	// The board alone does not either before 6000 ms.
+	s = t.step(true, true, 6999);
+	CHECK(s.pre_stat && !s.open_stat);
+	// Both: STAT opens once, on a PRE-STAT pass.
+	s = t.step(true, true, 7000);
+	CHECK(s.pre_stat && s.open_stat && t.stat_opened);
+	// The locret: nothing afterwards.
+	s = t.step(true, true, 9000);
+	CHECK(!s.announced && !s.pre_stat && !s.open_stat);
+	// The announcement goes away: the latches clear and the reset is reported once.
+	s = t.step(false, false, 9500);
+	CHECK(s.reset && !t.header_seen && !t.stat_opened);
+	s = t.step(false, false, 9600);
+	CHECK(!s.reset);
+	// A new announcement starts the machine over; the mission (re)start clears it.
+	s = t.step(true, true, 10000);
+	CHECK(s.announced && s.pre_stat && !s.open_stat);
+	t.reset();
+	CHECK(!t.header_seen && !t.stat_opened && t.header_edge_ms == 0);
+	// The gate is exactly the 6000 ms constant.
+	CHECK(kEndRoundStatScreenDelayMsec == 6000);
+}
+
 } // namespace
 
 int main() {
+	test_transition();
 	test_resolve();
 	test_team_mode_ladder();
 	test_statistics_panel();

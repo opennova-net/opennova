@@ -198,7 +198,7 @@ public:
     // rotate(seat.seat_local, -vehicle.yaw), with Gunner yaw at vehicle.yaw-yaw_offset
     // and other seats at vehicle.yaw+yaw_offset. Shared by every attach path and the AI
     // tick's per-frame seat follow. [orig: the UseGun attach Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
-    void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
+    MountedPose pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
     // The controlling occupant of a PlayerControl vehicle: the first live, internally
     // consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
     // +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in

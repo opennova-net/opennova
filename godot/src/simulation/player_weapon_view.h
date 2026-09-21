@@ -13,8 +13,9 @@ namespace godot {
 
 // The local player's equipped-weapon FSM view for one tick (world/weapon_fsm.h,
 // world/player_weapon.h), a value wrapper over the engine's
-// LocalPlayerWeaponView the sim fills (Simulation.get_local_player_weapon_state
-// carries the field witnesses; ADR 0043 d10). `active` false = no weapon FSM
+// LocalPlayerWeaponView the sim fills (world::local_player_weapon_view in
+// engine/runtime/world/player_weapon_view.cpp carries the field witnesses;
+// ADR 0043 d10). `active` false = no weapon FSM
 // installed (every other field reads its default). The one static make()
 // exists for the comparison-probe fixture's sim double.
 class PlayerWeaponView : public RefCounted {
@@ -86,6 +87,7 @@ public:
 	X(bool, emplaced_controls_valid, BOOL)                                  \
 	X(int, emplaced_gun_yaw, INT)                                           \
 	X(int, emplaced_gun_pitch, INT)                                         \
+	X(int, emplaced_spin_phase, INT)                                        \
 	/* the FIRE -> RoundData_AddRound seam diagnostics */                   \
 	X(int, round_ring_count, INT)                                           \
 	X(int, last_round_flags, INT)                                           \

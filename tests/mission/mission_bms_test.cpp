@@ -1105,5 +1105,89 @@ int main() {
 				oversized_header.data(), oversized_header.size(), short_header, wire_error));
 	}
 
+	// E1 record-wrapper retirement: inspect and edit the native document
+	// directly, then verify the authored values through a serialized reload.
+	{
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
+		TEST_EXPECT(groups(doc).size() == 64);
+		const auto neighbor = doc.group_records[4];
+		TEST_EXPECT(set_group(doc, 3, 3, 5678, 10, error));
+		TEST_EXPECT(doc.group_records[4].flags == neighbor.flags &&
+				doc.group_records[4].value == neighbor.value);
+		GroupFields fields;
+		TEST_EXPECT(group(doc, 3, fields));
+		TEST_EXPECT(fields.index == 3 && fields.field0 == 3 &&
+				fields.field8 == 5678 && fields.field12 == 10);
+		TEST_EXPECT(!group(doc, 999, fields));
+		TEST_EXPECT(!set_group(doc, 999, 1, 2, 3, error));
+		TEST_EXPECT(!set_group(doc, 3, 4, 2, 10, error));
+		TEST_EXPECT(!set_group(doc, 3, 3, 2, 11, error));
+
+		const auto original_zones = doc.area_triggers.size();
+		AreaTriggerRecord zone;
+		zone.wp_number = 3;
+		zone.min_x = -10; zone.min_y = -20; zone.min_z = -8;
+		zone.max_x = 10; zone.max_y = 20; zone.max_z = 8;
+		zone.active = true;
+		zone.constrain_z = true;
+		zone.reserved = 0x40; // unknown bits survive the typed view and edit
+		const auto zone_index = add_area_trigger(doc, zone);
+		TEST_EXPECT(zone_index == original_zones);
+		TEST_EXPECT(area_triggers(doc).size() == original_zones + 1);
+		TEST_EXPECT(area_trigger(doc, zone_index, zone));
+		TEST_EXPECT(zone.index == zone_index && zone.wp_number == 3);
+		TEST_EXPECT(zone.active && zone.constrain_z);
+		zone.max_x = 30;
+		zone.constrain_z = false;
+		TEST_EXPECT(set_area_trigger(doc, zone_index, zone, error));
+		TEST_EXPECT(!set_area_trigger(doc, 999999, zone, error));
+
+		auto kit = weapon_loadout(doc);
+		TEST_EXPECT(kit.size() == 4);
+		TEST_EXPECT(kit[0].name == "WPN_M4AUTO" && kit[0].ammo_primary == "6");
+		TEST_EXPECT(kit[0].flags == "-1");
+		kit[0].ammo_primary = "5";
+		kit[0].flags = "1";
+		kit.push_back({"WPN_TEST", "1", "2", "2"});
+		TEST_EXPECT(set_weapon_loadout(doc, kit, error));
+
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(write_document(doc, bytes));
+		opennova::bms::File reloaded;
+		TEST_EXPECT(load_document(bytes, reloaded));
+		TEST_EXPECT(group(reloaded, 3, fields) && fields.field8 == 5678);
+		TEST_EXPECT(area_trigger(reloaded, zone_index, zone));
+		TEST_EXPECT(zone.max_x == 30 && zone.active && !zone.constrain_z);
+		TEST_EXPECT((zone.reserved & 0x40) != 0);
+		const auto reloaded_kit = weapon_loadout(reloaded);
+		TEST_EXPECT(reloaded_kit.size() == 5);
+		TEST_EXPECT(reloaded_kit[0].ammo_primary == "5" && reloaded_kit[0].flags == "1");
+		TEST_EXPECT(reloaded_kit[4].name == "WPN_TEST" && reloaded_kit[4].flags == "2");
+		TEST_EXPECT(remove_area_trigger(reloaded, zone_index, error));
+		TEST_EXPECT(reloaded.area_triggers.size() == original_zones);
+		TEST_EXPECT(!area_trigger(reloaded, zone_index, zone));
+		TEST_EXPECT(!remove_area_trigger(reloaded, 999999, error));
+	}
+
+	// E1: entity-property inspection is portable. A group-only edit must
+	// preserve the complete serialized document for every entity kind.
+	for (const auto kind : {EntityKind::Marker, EntityKind::Item,
+			EntityKind::Building, EntityKind::Organic}) {
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
+		const auto *rows = entities(doc, kind);
+		TEST_EXPECT(rows != nullptr && !rows->empty());
+		auto expected = doc;
+		auto *expected_rows = entities(expected, kind);
+		const int new_group = rows->front().group_id + 1;
+		expected_rows->front().group_id = new_group;
+		TEST_EXPECT(set_entity_property_int(doc, kind, 0, "group", new_group, error));
+		std::vector<uint8_t> actual_bytes, expected_bytes;
+		TEST_EXPECT(write_document(doc, actual_bytes));
+		TEST_EXPECT(write_document(expected, expected_bytes));
+		TEST_EXPECT(actual_bytes == expected_bytes);
+	}
+
 	return 0;
 }

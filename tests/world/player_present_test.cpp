@@ -233,9 +233,47 @@ void test_spawn_loadout_projection() {
 	CHECK(!cleared.set_player_class && cleared.player_class == 0);
 }
 
+// The remote fire's effect admission [orig: arms @0x42f521 / @0x42f6ce;
+// WeaponSlot_FireAndSpawnEffects @0x53f597 / ActionSlot_SpawnEffect
+// @0x402080 for the glow].
+void test_fire_effect_plan() {
+	w::FirePresentationRow row;
+	row.effect = "muzzle_rifle";
+	row.action_effect = "flash_m4";
+	row.action_userpoint = "muzzle";
+	row.mf_light = 1;
+	// The ammo arm: the ammo effect at the origin, the glow at the origin.
+	w::FireEffectPlan plan = w::fire_effect_plan(row);
+	CHECK(plan.glow && !plan.glow_at_muzzle);
+	CHECK(plan.spawn && !plan.spawn_at_muzzle);
+	CHECK(plan.effect == "muzzle_rifle");
+	CHECK(plan.userpoint == "muzzle");
+	// The adm arm: the addressed def's FIRE-row effect, anchored on the gun.
+	row.adm_arm = true;
+	plan = w::fire_effect_plan(row);
+	CHECK(plan.glow && plan.glow_at_muzzle);
+	CHECK(plan.spawn && plan.spawn_at_muzzle);
+	CHECK(plan.effect == "flash_m4");
+	// The adm arm never falls back to the ammo effect.
+	row.action_effect.clear();
+	plan = w::fire_effect_plan(row);
+	CHECK(!plan.spawn && plan.effect.empty());
+	CHECK(plan.glow_at_muzzle);
+	// No MF_Light, no glow; the local player's own fire spawns no effect here
+	// but its glow still re-arms.
+	row.action_effect = "flash_m4";
+	row.mf_light = 0;
+	CHECK(!w::fire_effect_plan(row).glow);
+	row.mf_light = 1;
+	row.is_local_player = true;
+	plan = w::fire_effect_plan(row);
+	CHECK(plan.glow && !plan.spawn && plan.effect.empty());
+}
+
 } // namespace
 
 int main() {
+	test_fire_effect_plan();
 	test_camera_mode_split();
 	test_fp_submit_is_the_and_of_its_gates();
 	test_lighting_context_splits_body_and_fp();

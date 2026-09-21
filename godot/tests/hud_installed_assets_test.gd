@@ -178,7 +178,17 @@ func test_installed_tank_and_pilot_hud_entry_exit() -> void:
 	var layout := HudPos.new()
 	assert_eq(layout.load_from_resource_root(art, "hudpos.def"), OK)
 	for item_id: int in [100164, 100165, 102010]:
-		var seat_card := items.extract_seat_specs_for_item(art, item_id)
+		var mission := MissionData.new()
+		assert_eq(mission.create_default(), OK)
+		var vehicle_position := Vector3(0, 0, 30)
+		var placed := mission.add_entity(MissionData.KIND_ITEM, item_id, vehicle_position, Vector3.ZERO)
+		assert_not_null(placed)
+		var sim := Simulation.new()
+		sim.enable_listen_server(true)
+		sim.set_asset_root(art)
+		assert_true(sim.install_seat_specs_for_type_ids(items, PackedInt32Array([item_id - 100000])))
+		assert_true(sim.load_from_mission_data(mission))
+		var seat_card := sim.entity_card_by_net_id(placed.bms_id)
 		var control_seat: EntityCardSeat = null
 		for seat: EntityCardSeat in seat_card.get_seats():
 			if seat.get_type() == 2 or seat.get_type() == 5:
@@ -187,15 +197,6 @@ func test_installed_tank_and_pilot_hud_entry_exit() -> void:
 		assert_not_null(control_seat, "%d has an authored controller/driver seat" % item_id)
 		if control_seat == null:
 			continue
-		var mission := MissionData.new()
-		assert_eq(mission.create_default(), OK)
-		var vehicle_position := Vector3(0, 0, 30)
-		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, item_id, vehicle_position, Vector3.ZERO))
-		var sim := Simulation.new()
-		sim.enable_listen_server(true)
-		sim.set_asset_root(art)
-		assert_true(sim.install_seat_specs_for_type_ids(items, PackedInt32Array([item_id - 100000])))
-		assert_true(sim.load_from_mission_data(mission))
 		sim.resolve_item_traits(items)
 		assert_eq(sim.load_weapon_table(art, "weapon.def"), OK)
 		assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))

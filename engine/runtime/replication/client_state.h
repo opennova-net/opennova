@@ -333,6 +333,7 @@ struct ClientEntityState {
 	// Client-owned +0x322/+0x324 gun channel, advanced by the joiner tick.
 	int16_t emplaced_gun_yaw_word = 0;
 	int16_t emplaced_gun_pitch_word = 0;
+	uint16_t emplaced_spin_phase = 0; // local ewep class update; not a wire field
 	bool emplaced_controls_valid = false;
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
 	// ClientReplicaPipeline captures this row's rigid carrier-local pose after the

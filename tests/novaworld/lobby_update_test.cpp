@@ -4,6 +4,8 @@
 // entries, the player suffix and its absence.
 
 #include <net/novaworld/lobby_update.h>
+#include <net/novaworld/gate_response.h>
+#include <net/napi/envelope.h>
 
 #include <cstdio>
 #include <string>
@@ -126,6 +128,36 @@ bool check_player_suffix() {
 	return true;
 }
 
+bool check_post_datagram() {
+	opennova::LobbyStatusBlob blob;
+	blob.lobby_name = "jop_2_consumer";
+	blob.host_key = "K";
+	blob.host_vars = {{"ServerName", "Test Host"}};
+	blob.player_names = {"A B"};
+	opennova::GateResponse gate;
+	gate.post_port = 7597;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "no POST address suppresses the heartbeat")) return false;
+	gate.post_ip = {0, 0, 0, 1};
+	gate.post_port = 0;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "no POST port suppresses the heartbeat")) return false;
+	gate.post_port = 65536;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "an out-of-range POST port suppresses the heartbeat")) return false;
+	gate.post_port = 65535;
+	const auto packet = opennova::lobby_update_build_datagram(gate, blob);
+	if (!expect(!packet.empty(), "any nonzero address and a valid port emit a heartbeat")) return false;
+	std::vector<uint8_t> decoded(packet.size());
+	size_t decoded_size = 0;
+	if (!expect(opennova::napi_envelope_decode(packet.data(), packet.size(), decoded.data(),
+	                                          decoded.size(), &decoded_size) == 0,
+	            "POST heartbeat has a valid NAPI CRC envelope")) return false;
+	const std::string text(decoded.begin(), decoded.begin() + decoded_size);
+	return expect(text == "jop_2_consumer  HostKey = K ServerName = Test+Host p=A+B",
+	              "CRC payload is the sanitized plaintext, without NWU or session framing");
+}
+
 bool check_parse_roundtrip() {
 	const auto blob = make_sample_blob();
 	const std::string text = opennova::lobby_update_build(blob);
@@ -162,6 +194,7 @@ int main() {
 	if (!check_update_blob()) return 1;
 	if (!check_player_suffix()) return 1;
 	if (!check_parse_roundtrip()) return 1;
+	if (!check_post_datagram()) return 1;
 	std::printf("OK: lobby_update text KV blob matches the retail host status heartbeat\n");
 	return 0;
 }

@@ -1,14 +1,15 @@
 extends RefCounted
 
 ## The Recent Messages (J-key) window lane of GameHudPresenter, plus the
-## player-chat drain that feeds the CHAT ring it lists. The OldMessages action
-## is an EDGE that TOGGLES the window flag — retail keeps it up until the next
-## press, and the respawn init clears it [orig: `xor g_showMessageLog, 1`
-## @0x49b55a in Input_HandleActionBinding (jumptable case 29); the clear in
-## Game_InitRespawnState @0x49939a; the drawer HUD_DrawMessageLog @0x5b9d70
-## called from Server_DrawStatusScreen @0x50b21f when the flag is set]. The
-## binding ships in the controls catalog as "OldMessages" (row 56, vk 0x4A =
-## 'J'), so nothing new is bound.
+## player-chat drain that feeds the CHAT ring it lists. The OldMessages edge
+## and the toggled window flag are the engine's (hud/hud_toggles.h, through
+## the presenter's HudToggles: retail keeps the window up until the next
+## press, the respawn init clears it, and the ShowScore flip closes it
+## [orig: `xor g_showMessageLog, 1` @0x49b55a in Input_HandleActionBinding
+## (jumptable case 29); the clear in Game_InitRespawnState @0x49939a; the
+## drawer HUD_DrawMessageLog @0x5b9d70 called from Server_DrawStatusScreen
+## @0x50b21f when the flag is set]). This lane shows or hides the window for
+## that flag and drains the chat lines.
 ##
 ## The chat lines arrive already routed by the engine's channel table
 ## (Simulation.drain_chat_lines: sink 1 = the CHAT ring, 0 = the SYSTEM ring,
@@ -18,45 +19,22 @@ extends RefCounted
 const SINK_SYSTEM := 0
 const SINK_CHAT := 1
 
-var _open := false      # the toggled window flag [orig: g_showMessageLog @0x24C18C0]
-var _was_down := false  # the toggle's down-edge latch
 var _pushed := false    # so the window clears exactly once on close
 
 
-## The flag clears with the mission, as retail's respawn init clears its
-## global [orig: @0x49939a].
 func reset() -> void:
-	_open = false
-	_was_down = false
 	_pushed = false
 
 
-func is_open() -> bool:
-	return _open
-
-
-## The ShowScore toggle's respawn-init wrapper closes this window too
-## [orig: Game_InitRespawnStateKeepingToggle @0x4993c0 -> Game_InitRespawnState @0x49939a].
-func close(hud: HudOverlay) -> void:
-	_open = false
-	if _pushed and hud != null:
-		hud.set_message_log_shown(false)
-	_pushed = false
-
-
-func update(hud: HudOverlay, sim: Simulation, down: bool, chorded: bool,
-		active: bool) -> void:
+func update(hud: HudOverlay, sim: Simulation, open: bool) -> void:
 	if hud == null:
 		return
-	if down and not _was_down and active and not chorded:
-		_open = not _open
-	_was_down = down
 	flush_chat_lines(hud, sim)
-	if _open and not _pushed:
+	if open and not _pushed:
 		hud.set_message_log_title(_title())
 		hud.set_message_log_shown(true)
 		_pushed = true
-	elif not _open and _pushed:
+	elif not open and _pushed:
 		hud.set_message_log_shown(false)
 		_pushed = false
 

@@ -19,6 +19,23 @@ func test_clock_samples_once_per_frame_and_wraps_as_a_dword() -> void:
 	assert_eq(clock.time_ms, 0, "retail GetTickCount storage wraps at 32 bits")
 
 
+func test_world_and_presenters_share_one_wall_clock_sample_per_process_frame() -> void:
+	var world: GameWorld = autofree(GameWorld.new())
+	var second: GameWorld = autofree(GameWorld.new())
+	var view := WorldView.new()
+	var sampled := world.frame_clock_ms
+	OS.delay_msec(2)
+	assert_eq(second.frame_clock_ms, sampled, "another world shares the display frame")
+	assert_eq(view.frame_clock_ms, sampled, "screen presenters use the same value")
+	assert_eq(GameWorld.current_frame_clock_ms(), sampled, "menu-only readers share it too")
+	var panm := PanmClock.new()
+	assert_true(panm.sample(world.frame_clock_ms, Engine.get_process_frames()))
+	assert_eq(panm.time_ms, sampled & 0xffffffff, "PANM keeps the retail DWORD clock")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_gt(world.frame_clock_ms, sampled, "the next display frame samples wall time again")
+
+
 func test_panm_evaluator_accepts_the_full_unsigned_clock_domain() -> void:
 	var data := _open_pmp()
 	var at_zero: Dictionary = data.evaluate_panm(0, 0, {})

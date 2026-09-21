@@ -20,7 +20,6 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include "audio/music_director.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 
@@ -197,6 +196,20 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 };
 const int GameWorld::kFrozenPoseRefreshCount =
 		sizeof(GameWorld::kFrozenPoseRefresh) / sizeof(GameWorld::kFrozenPoseRefresh[0]);
+
+int64_t GameWorld::current_frame_clock_ms() {
+	struct FrameClock {
+		int64_t frame = -1;
+		int64_t milliseconds = 0;
+	};
+	static FrameClock clock;
+	const int64_t frame = static_cast<int64_t>(Engine::get_singleton()->get_process_frames());
+	if (clock.frame != frame) {
+		clock.frame = frame;
+		clock.milliseconds = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	}
+	return clock.milliseconds;
+}
 
 PackedStringArray GameWorld::frame_leg_names() {
 	PackedStringArray names;
@@ -498,7 +511,8 @@ void GameWorld::begin_device_frame() {
 }
 
 void GameWorld::sample_panm_clock() {
-	panm_clock_->sample_frame();
+	panm_clock_->sample(get_frame_clock_ms(),
+			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
 	MissionRoot *runtime = get_runtime();
 	if (runtime != nullptr) {
 		runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
@@ -553,7 +567,7 @@ void GameWorld::render_foliage_frame() {
 			}
 		}
 		dispatcher_->set_silhouette_anchors(silhouette_anchors);
-		dispatcher_->render_frame(render_camera_xform());
+		dispatcher_->render_frame(render_camera_xform(), get_frame_clock_ms());
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }
@@ -863,7 +877,7 @@ void GameWorld::render_material_frame() {
 void GameWorld::render_particle_frame() {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world != nullptr) {
-		effect_world->render_frame();
+		effect_world->render_frame(get_frame_clock_ms());
 	}
 }
 
@@ -888,7 +902,7 @@ void GameWorld::render_light_frame() {
 		viewmodel_owner = sim->get_local_player_wire_handle();
 	}
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
-			viewmodel_parts, viewmodel_owner, frame_stats_on_);
+			get_frame_clock_ms(), viewmodel_parts, viewmodel_owner, frame_stats_on_);
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
 	render_terrain_light_leg();
@@ -898,7 +912,7 @@ void GameWorld::render_light_frame() {
 	if (slot_shadow_ != nullptr) {
 		slot_shadow_->set_light_scene(light_director_->scene());
 		slot_shadow_->set_light_context(light_director_->light_gain(),
-				static_cast<int>(Time::get_singleton()->get_ticks_msec()), weather_);
+				static_cast<int>(get_frame_clock_ms()), weather_);
 		if (resource_root_.is_valid()) {
 			slot_shadow_->set_resource_root(resource_root_);
 		}
@@ -939,7 +953,7 @@ void GameWorld::render_terrain_light_leg() {
 		return;
 	}
 	Ref<LightScene> scene = light_director_.is_valid() ? light_director_->scene() : Ref<LightScene>();
-	terrain_->set_light_context(scene, static_cast<int>(Time::get_singleton()->get_ticks_msec()));
+	terrain_->set_light_context(scene, static_cast<int>(get_frame_clock_ms()));
 }
 
 void GameWorld::update_clear_frame() {
@@ -1129,19 +1143,10 @@ void GameWorld::update_frame_clear_color() {
 	environment->set_bg_color(env_->frame_clear_color_for(false, above).linear_to_srgb());
 }
 
-// Re-drive the gamemus vars from the local player each frame, the way the
-// original does from the local player's body update [orig:
-// Entity_UpdateInfantryPlayerBody @ 0x4b40e0, gate entity ==
-// g_local_player_entity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
-// music driving]. Pumped here: Var7 = health % (cur*100/max, 100 when max <=
-// cur [orig: @ 0x4b6315-0x4b6324]) and Var10 = team [orig: @ 0x4b62fc].
-// Witnessed-but-unpumped seams (the shipped gamemus reads none of them --
-// docs/audio/mus-sbf-re.md (D-MUS-VARPUMP)): Var2 view pitch (the original
-// writes raw engine angle units, unwitnessed conversion), Var5/Var6 threat
-// distance / threat-targets-me (Entity_FindNearestThreat @ 0x4b0990
-// unported), Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode
-// ids not yet mapped to our sessions). The var writes cross to the shell's
-// MusicService through the music_var_changed signal.
+// Re-drive the gamemus vars from the local player each frame: the engine names
+// the writes (world/music_vars.h game_music_var_writes, the var map of the
+// local player's body update), and they cross to the shell's MusicService
+// through the music_var_changed signal.
 void GameWorld::music_var_pump() {
 	MissionRoot *runtime = get_runtime();
 	if (runtime == nullptr || !runtime->has_player()) {
@@ -1151,10 +1156,9 @@ void GameWorld::music_var_pump() {
 	if (pump_sim.is_null()) {
 		return;
 	}
-	emit_signal("music_var_changed", static_cast<int>(MusicDirector::GAME_VAR_HEALTH_PCT),
-			pump_sim->get_local_player_health_percent());
-	emit_signal("music_var_changed", static_cast<int>(MusicDirector::GAME_VAR_TEAM),
-			runtime->local_player_team());
+	for (const opennova::world::MusicVarWrite &write : pump_sim->game_music_var_writes()) {
+		emit_signal("music_var_changed", write.slot, write.value);
+	}
 }
 
 // --- the perf counters --------------------------------------------------------------

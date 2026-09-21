@@ -9,29 +9,8 @@ const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
 
 func _catalog_file() -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = "wake dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 30.0
-	def.emit_rate_adj = 30.0
-	def.emit_burst = 1
-	def.y_offset = 2.0
-	def.z_offset = 4.0
-	def.age = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	for effect_name in [W3_EFFECT, W4_EFFECT]:
-		var effect := ParticleEffect.new()
-		effect.id = effect_name
-		effect.pdefs = PackedStringArray([def.id])
-		effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("wake dots",
+			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", [W3_EFFECT, W4_EFFECT])
 
 
 func _make_presenter(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter:

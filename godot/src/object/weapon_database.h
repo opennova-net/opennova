@@ -4,6 +4,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -16,6 +18,7 @@
 namespace godot {
 
 class ResourceRoot;
+class RtxtStringFile;
 
 // Thin GDExtension wrapper over engine/formats/def weapon.def parsing (def_parse_weapons), surfacing
 // the PLAYER_INFO loadout slice: per-slot weapon lists filtered by the selected class + team,
@@ -79,6 +82,11 @@ public:
 	enum {
 		CLIP_COUNT_DEF_DEFAULT = -1,
 	};
+	// The PLAYERVOICE list's DEFAULT_VOICE row value (engine:
+	// runtime/menu/player_info_kit.h kDefaultVoiceValue).
+	enum {
+		DEFAULT_VOICE_VALUE = 0,
+	};
 
 	// The armory class-allow / class-filter mask domains — mirrors
 	// engine/runtime/world player_loadout.h (static_asserts in the .cpp pin
@@ -98,6 +106,7 @@ public:
 	String get_source_path() const;
 	String get_last_error() const;
 	int get_count() const;
+	const opennova::def::DefWeaponsFile &native_file() const { return weapons_file_; }
 
 	// The weapons that belong in `slot` for the given class + team masks, in table order.
 	// The filter is the engine's world::weapon_slot_indices
@@ -109,34 +118,33 @@ public:
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
 	// case-insensitive like every def lookup), or -1 when absent.
 	int find_weapon(const String &name) const;
-
-	// Total loadout weight over the indexed weapons: per entry weaponweight +
-	// (count <= 0 ? maxclips : count) * clipweight — the engine/formats/def port of the
-	// parent-slot terms (engine: formats/def/def.cpp). Invalid
-	// indices contribute nothing; a short counts array reads as -1 (default).
-	double loadout_weight(const PackedInt32Array &weapon_indices,
-			const PackedInt32Array &ammo_counts) const;
-	// One extra-ammo (category-3) term for the indexed weapon: count *
-	// clipweight only, CLIP_COUNT_DEF_DEFAULT -> the maxclips default, a
-	// chosen zero row weighs nothing (engine/formats/def def_extra_ammo_weight
-	// (engine: formats/def/def.cpp)).
-	double extra_ammo_weight(int p_index, int p_count) const;
-	// The sub-weapon behind a parent slot's *_AMMO2: the absolute index of the
-	// first differing-round_type entry in the parent's loadout_subclasses
-	// window, or -1 (engine/formats/def def_subclass_weapon_index
-	// (engine: formats/def/def.cpp)).
-	int subclass_weapon_index(int p_parent_index) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// (engine: formats/def/def.cpp).
 	int encumbrance_class(double weight) const;
-	// The PLAYER_INFO screen policies (one impl in engine/runtime/world
-	// player_loadout.h (engine: runtime/world/player_loadout.cpp)): the team mask (team 0 -> 2, else
-	// 1), the class mask (5..9 -> its bit, else nothing), and the ammo combo's
-	// default-select clip count (saved > 0 clamped into 1..maxclips, the
-	// CLIP_COUNT_DEF_DEFAULT sentinel -> the full maxclips row).
+	// The PLAYER_INFO team and class masks (native world/player_loadout.h).
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
-	static int default_clip_row(int p_saved, int p_maxclips);
+	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
+	// player_info_kit.h): the weapon.sav kit page in retail's order. The page takes the three category picks and
+	// the three fixed grenade picks as parallel arrays (weapon-table index,
+	// primary count, secondary count, flags) and returns one Dictionary per
+	// KitEntry (name, ammo_primary, ammo_secondary, flags).
+	Array player_info_kit_entries(int p_team, int p_player_class,
+			const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
+			const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
+			const PackedInt32Array &p_grenade_indices,
+			const PackedInt32Array &p_grenade_ammo_primary,
+			const PackedInt32Array &p_grenade_ammo_secondary) const;
+	// The loadout screens' shared text compositions (one impl in
+	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
+	// raw-id fallback, the WEAPON screen's
+	// case-insensitive row order over display labels, and the weight readout
+	// with its encumbrance band token (the Menu-section fold: menutxt first,
+	// then gameui, then the fallback).
+	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
+	static PackedInt32Array armory_slot_order(const PackedStringArray &p_labels);
+	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
+			const Ref<RtxtStringFile> &p_gameui);
 	// The armory screen's open-time class policy (one impl in
 	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
 	// else scan up through 9, else gunner (7); and the class filter bit

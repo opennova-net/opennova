@@ -43,27 +43,8 @@ func before_all() -> void:
 # one effect per name, so the real EffectWorld interns and spawns them without
 # a resource root and an owned group stays live until its owner is retired.
 func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = 'wreck dots'
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	for effect_name in effect_names:
-		var effect := ParticleEffect.new()
-		effect.id = effect_name
-		effect.pdefs = PackedStringArray(['wreck dots'])
-		effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("wreck dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", effect_names)
 
 
 # Every unowned (transient) group report row.
@@ -129,7 +110,7 @@ func _husk_models(root: Node) -> Array:
 # construction-time entry channel (the one production path — never a scan).
 func _index_of(entries: Array) -> EntityIndex:
 	var index := EntityIndex.new()
-	index.build(entries, [])
+	index.build(entries, null)
 	return index
 
 
@@ -375,7 +356,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	intact.set_object_data(intact_data)
 	intact.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 41, 0, 73)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_wire_node_spawned(intact, MissionData.KIND_ITEM, BUGGY_ITEM_ID)
 	assert_eq(director.get_report().live, 1,
 			"the intact graphic contributes its one authored LGHT")
@@ -897,30 +878,27 @@ end
 	root.name = "MissionRoot"
 	world.add_child(root)
 	assert_eq(placer.place(mission, root).batched, 1)
-	var source: StaticEffectSource = placer.get_static_item_effect_sources()[0]
-	assert_eq(source.entity_bound_radius_q16, 84361,
-			"the intact crate's initialized entity radius is retained before carving")
+	var bms_id: int = mission.get_entity_ref(MissionData.KIND_ITEM, 0).bms_id
 	var director := EffectLightDirector.new()
-	director.setup(world, placer.get_static_item_effect_sources,
-			placer.get_static_light_draw_sources, placer.get_static_light_draw_source_revision)
+	director.setup(world, placer)
 	director.reattach()
-	var owner := LightScene.owner_id_for_static_source(source.source_index)
+	var owner := LightScene.owner_id_for_static_source(0)
 	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(Vector3(1, 0, 0), 0.01)
 			.attached(0, owner)), 0)
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(0, 0, 8)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
 			1.0, 0.001, "the intact static row admits its owned light inside the entity cube")
 	var container := root.get_node("MissionObjects") as Node3D
 	var presenter := _make_presenter(null, container, _index_of([]), placer,
 			db, ItemEffectDirector.new(), null)
 	presenter.present_destruction_drained(DestructionDrain.make([
-			HuskSwapEvent.make(source.bms_id, 5004)]), [])
+			HuskSwapEvent.make(bms_id, 5004)]), [])
 	var graft: ObjectModel = _husk_models(world)[0]
-	assert_eq(graft.entity_ref.bms_id, source.bms_id)
-	director.render_frame(camera)
+	assert_eq(graft.entity_ref.bms_id, bms_id)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var surfaces: Array[Node] = graft.find_children("*", "GeometryInstance3D", true, false)
 	assert_gt(surfaces.size(), 0)
 	for node in surfaces:
@@ -929,7 +907,7 @@ end
 				"the live husk keeps the intact entity radius AND static owner identity")
 	presenter.reset_wire_runtime_state()
 	await get_tree().process_frame
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
 			1.0, 0.001, "restoration keeps the original static row and light lease")
 	presenter.teardown()

@@ -146,22 +146,26 @@ void GameWorld::_notification(int p_what) {
 
 // --- the StaticSourceProvider the two directors read -----------------------
 
-TypedArray<StaticEffectSource> GameWorld::static_item_effect_sources() {
-	return placer_.is_valid() ? placer_->get_static_item_effect_sources()
-							  : TypedArray<StaticEffectSource>();
+std::vector<opennova::mission::StaticEffectSource> GameWorld::static_item_effect_sources() {
+	return placer_.is_valid() ? placer_->static_item_effect_sources()
+							  : std::vector<opennova::mission::StaticEffectSource>();
 }
 
-TypedArray<StaticLightDrawSource> GameWorld::static_light_draw_sources() {
-	return placer_.is_valid() ? placer_->get_static_light_draw_sources()
-							  : TypedArray<StaticLightDrawSource>();
+std::vector<opennova::mission::StaticLightDrawSource> GameWorld::static_light_draw_sources() {
+	return placer_.is_valid() ? placer_->static_light_draw_sources()
+							  : std::vector<opennova::mission::StaticLightDrawSource>();
 }
 
 uint64_t GameWorld::static_light_draw_source_revision() {
-	return placer_.is_valid() ? placer_->get_static_light_draw_source_revision() : 0;
+	return placer_.is_valid() ? placer_->static_light_draw_source_revision() : 0;
 }
 
 Ref<ItemDatabase> GameWorld::static_source_item_db() {
 	return placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>();
+}
+
+Ref<ObjectData> GameWorld::static_source_object_data(uint64_t asset_id) const {
+	return placer_.is_valid() ? placer_->static_source_object_data(asset_id) : Ref<ObjectData>();
 }
 
 // --- the injection seams ---------------------------------------------------
@@ -691,6 +695,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_effect_light_report"), &GameWorld::get_effect_light_report);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "camera_xform", "delta", "frame_input"),
 			&GameWorld::tick, DEFVAL(Transform3D()), DEFVAL(-1.0), DEFVAL(Variant()));
+	ClassDB::bind_static_method("GameWorld", D_METHOD("current_frame_clock_ms"),
+			&GameWorld::current_frame_clock_ms);
+	ClassDB::bind_method(D_METHOD("get_frame_clock_ms"), &GameWorld::get_frame_clock_ms);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_clock_ms"), "", "get_frame_clock_ms");
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_names"), &GameWorld::frame_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frozen_pose_leg_names"),
 			&GameWorld::frozen_pose_leg_names);

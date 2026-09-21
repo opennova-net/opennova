@@ -172,46 +172,8 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 	# that atlas row zero arrives as INSTANCE_CUSTOM.x == 1.0.
 	assert_true(mmi.is_inside_tree(), "the batch instance is in the runtime container")
 
-	# The batch has no per-entity Node3D, but mission-start item effects still
-	# receive one immutable value descriptor for the successfully rendered entity.
-	var effect_sources: Array = placer.get_static_item_effect_sources()
-	assert_eq(effect_sources.size(), 1)
-	var source: StaticEffectSource = effect_sources[0]
-	assert_eq(source.kind, MissionData.KIND_ITEM)
-	assert_eq(source.item_id, 105004)
-	assert_eq(source.graphic, "StaticCrate1")
-	assert_eq(source.object_data, object_data)
-	assert_eq(source.entity_bound_radius_q16, 0,
-			"a source without a CDTA block retains zero entity radius")
-	var expected_transform := MissionObjectPlacer.entity_transform(Vector3(3, 4, 5), Vector3.ZERO)
-	var actual_transform: Transform3D = source.world_transform
-	assert_true(actual_transform.is_equal_approx(expected_transform),
-			"the descriptor carries the BASE entity transform, not a submesh offset")
-	var light_draws: Array = placer.get_static_light_draw_sources()
-	assert_eq(light_draws.size(), 1,
-			"one retained ROBJ owns one point-light selection row")
-	var light_draw: StaticLightDrawSource = light_draws[0]
-	assert_eq(light_draw.atlas_row, 0)
-	assert_eq(light_draw.source_index, 0,
-			"the draw row points at its exact static effect source")
-	assert_eq(light_draw.kind, MissionData.KIND_ITEM)
-	assert_eq(light_draw.entity_index, index)
-	assert_eq(light_draw.bms_id, record.bms_id)
-	assert_eq(light_draw.item_id, 105004)
-	assert_eq(light_draw.robj_index, 0)
-	assert_true(light_draw.active)
-	var expected_bounds: AABB = (expected_transform * offset) * mesh.get_aabb()
-	var actual_bounds := light_draw.world_bounds
-	assert_true(actual_bounds.position.is_equal_approx(expected_bounds.position))
-	assert_true(actual_bounds.size.is_equal_approx(expected_bounds.size),
-			"the diagnostic row retains exact transformed ROBJ geometry bounds")
-	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
-	source.item_id = 0
-	assert_eq((placer.get_static_item_effect_sources()[0] as StaticEffectSource).item_id,
-			105004)
-	light_draw.atlas_row = 99
-	assert_eq((placer.get_static_light_draw_sources()[0] as StaticLightDrawSource).atlas_row,
-			0)
+	# Native source identities, order and detached snapshots are covered by
+	# mission_static_sources; effect/light GUT tests exercise this placer's consumers.
 
 
 func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> void:
@@ -425,7 +387,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 				"the visible batch supplies the static silhouette")
 		var expected_bms_ids: Array = []
 		for index in range(2):
-			expected_bms_ids.append(mission.get_entity(
+			expected_bms_ids.append(mission.get_entity_ref(
 					MissionData.KIND_BUILDING, index).bms_id)
 		assert_eq(Array(visible_batch.slot_bms_ids),
 				expected_bms_ids,
@@ -433,11 +395,6 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 		assert_eq(Array(visible_batch.slot_casts_shadow), [1, 1])
 	assert_null(container.get_node_or_null("StaticPopulations/StaticShadow_StaticCrate1_0"),
 			"an all-eligible batch needs no shadow-only duplicate")
-	var shadow_sources := placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(shadow_sources.size(), 2)
-	assert_eq((shadow_sources[0] as StaticTerrainShadowSourceRow).team, 1,
-			"the typed caster snapshot retains TEX_TEAM input for frame selection")
-	assert_eq((shadow_sources[1] as StaticTerrainShadowSourceRow).team, 2)
 
 
 func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
@@ -568,182 +525,19 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	assert_false(item_batch_key.is_empty())
 	assert_ne(building_batch_key, item_batch_key,
 			"destruction routing retains the reflection-population split")
-	var static_light_draws: Array = placer.get_static_light_draw_sources()
-	assert_eq(static_light_draws.size(), 2,
-			"each placed entity/ROBJ keeps an independent atlas row")
-	var building_light_row := -1
-	var item_light_row := -1
-	for row_index in static_light_draws.size():
-		var row: StaticLightDrawSource = static_light_draws[row_index]
-		if row.bms_id == building_bms_id:
-			building_light_row = row_index
-		elif row.bms_id == item_bms_id:
-			item_light_row = row_index
-	assert_gte(building_light_row, 0)
-	assert_gte(item_light_row, 0)
-	assert_ne(building_light_row, item_light_row)
 	assert_false(placer.hide_static_instance(building_bms_id) == null)
 	assert_true(placer.is_static_instance_hidden(building_bms_id))
 	assert_false(placer.is_static_instance_hidden(item_bms_id),
 			"carving the building population leaves its same-graphic item live")
-	static_light_draws = placer.get_static_light_draw_sources()
-	assert_false((static_light_draws[building_light_row] as StaticLightDrawSource).active,
-			"the carved building no longer participates in atlas selection")
-	assert_true((static_light_draws[item_light_row] as StaticLightDrawSource).active,
-			"carving one population cannot darken its same-graphic peer")
 	assert_true(placer.show_static_instance(building_bms_id))
 	assert_false(placer.hide_static_instance(item_bms_id) == null)
 	assert_true(placer.is_static_instance_hidden(item_bms_id))
 	assert_false(placer.is_static_instance_hidden(building_bms_id),
 			"carving the item population leaves its same-graphic building live")
-	static_light_draws = placer.get_static_light_draw_sources()
-	assert_true((static_light_draws[building_light_row] as StaticLightDrawSource).active)
-	assert_false((static_light_draws[item_light_row] as StaticLightDrawSource).active)
 	assert_true(placer.show_static_instance(item_bms_id))
-	static_light_draws = placer.get_static_light_draw_sources()
-	assert_true((static_light_draws[building_light_row] as StaticLightDrawSource).active)
-	assert_true((static_light_draws[item_light_row] as StaticLightDrawSource).active,
-			"restoring the batch re-admits its original stable atlas row")
 	assert_true(placer.static_instance_is_mirror_reflected(building_bms_id),
 			"destruction bookkeeping carries the authored reflection policy")
 	assert_false(placer.static_instance_is_mirror_reflected(item_bms_id))
-
-
-func test_manual_static_instance_publishes_typed_terrain_shadow_source() -> void:
-	var placer := MissionObjectPlacer.create(null, null)
-	var data := ObjectData.new()
-	assert_true(placer.register_object_data("house", data))
-	var source_revision := placer.get_static_terrain_shadow_source_revision()
-	var xform := Transform3D(Basis.from_euler(Vector3(0.1, 0.2, 0.3)),
-			Vector3(12, 34, -56))
-	placer.register_static_instance(100, "house", 0, xform, true)
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-
-	var rows: Array = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(rows.size(), 1,
-			"the deterministic registration seam feeds the page-shadow provider")
-	if rows.is_empty():
-		return
-	var row: StaticTerrainShadowSourceRow = rows[0]
-	assert_eq(row.bms_id, 100)
-	assert_eq(row.graphic, "house")
-	assert_eq(row.entity_kind, MissionData.KIND_BUILDING,
-			"manual admitted casters use the collector's building policy")
-	assert_eq(row.world_transform, xform)
-	assert_same(row.object_data, data,
-			"geometry resolution retains the injected ObjectData identity")
-	assert_true(row.active)
-	var moved := Transform3D(Basis(), Vector3(-4, 8, 16))
-	assert_true(placer.update_static_terrain_shadow_source_transform(
-			MissionData.KIND_BUILDING, 0, moved))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	assert_true(placer.update_static_terrain_shadow_source_transform(
-			MissionData.KIND_BUILDING, 0, moved),
-			"an admitted source remains addressable when its pose is unchanged")
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"re-presenting an identical transform must not invalidate terrain pages")
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, moved,
-			"editor/settling writes advance the typed source transform")
-
-	assert_false(placer.hide_static_instance(100) == null)
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_false((rows[0] as StaticTerrainShadowSourceRow).active,
-			"a carved static stops contributing to subsequently composed pages")
-	assert_true(placer.show_static_instance(100))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_true((rows[0] as StaticTerrainShadowSourceRow).active,
-			"restoring the static re-admits its page projection")
-
-	var husk_data := ObjectData.new()
-	assert_true(placer.register_object_data("HouseHusk", husk_data))
-	var alternate_husk_data := ObjectData.new()
-	assert_true(placer.register_object_data("HouseHuskDamaged", alternate_husk_data))
-	var husk_xform := Transform3D(Basis(), Vector3(7, 9, 11))
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHusk", husk_xform, true))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	row = rows[0]
-	assert_eq(row.graphic, "HouseHusk")
-	assert_same(row.object_data, husk_data,
-			"destruction swaps the provider to current husk geometry")
-	assert_eq(row.world_transform, husk_xform)
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHusk", husk_xform, true))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"the per-present husk publication is idempotent")
-	var settled_husk := Transform3D(Basis(), Vector3(8, 9, 11))
-	assert_true(placer.update_static_terrain_shadow_source_transform(
-			MissionData.KIND_BUILDING, 0, settled_husk))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"a real settling transform advances the replacement source")
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, settled_husk,
-			"live registry transforms override the original husk-placement snapshot")
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHuskDamaged", settled_husk, true))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"a genuine replacement graphic/identity change invalidates pages")
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHuskDamaged", settled_husk, false))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"a genuine caster-admission change invalidates pages")
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHuskDamaged", settled_husk, false))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"repeating the inactive replacement state is idempotent too")
-	var inactive_move := Transform3D(Basis(), Vector3(8, 10, 11))
-	assert_true(placer.update_static_terrain_shadow_source_transform(
-			MissionData.KIND_BUILDING, 0, inactive_move))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"an inactive replacement tracks pose without invalidating pages")
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, inactive_move)
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHuskDamaged", inactive_move, true))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
-			"re-admitting the current husk pose invalidates pages")
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			100, "HouseHuskDamaged", inactive_move, false))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	source_revision = placer.get_static_terrain_shadow_source_revision()
-	assert_true(placer.clear_static_terrain_shadow_replacement(100))
-	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).graphic, "house")
-
-
-func test_rejected_static_source_updates_do_not_advance_the_page_revision() -> void:
-	var placer := MissionObjectPlacer.new()
-	assert_true(placer.register_object_data("NoShadow", ObjectData.new()))
-	assert_true(placer.register_object_data("NoShadowHusk", ObjectData.new()))
-	placer.register_static_instance(200, "NoShadow", 3,
-			Transform3D.IDENTITY, false)
-	var revision := placer.get_static_terrain_shadow_source_revision()
-	var moved := Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
-	assert_true(placer.update_static_terrain_shadow_source_transform(
-			MissionData.KIND_BUILDING, 3, moved))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
-			"a rejected source may track pose without dirtying terrain pages")
-	assert_true(placer.set_static_terrain_shadow_replacement(
-			200, "NoShadowHusk", moved, true))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
-			"a replacement cannot admit a source vetoed by base policy")
-	assert_true(placer.clear_static_terrain_shadow_replacement(200))
-	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
-			"clearing an unobservable replacement is revision-stable")
 
 
 func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
@@ -1577,12 +1371,19 @@ func test_static_and_live_placement_share_initialized_entity_light_radius() -> v
 		parent.add_child(branch)
 		var stats := placer.place(mission, branch)
 		assert_eq(stats.batched, 1)
-		var sources := placer.get_static_item_effect_sources()
-		assert_eq(sources.size(), 1)
-		if sources.is_empty():
-			continue
-		assert_eq(sources[0].entity_bound_radius_q16, definition[2],
-				"static metadata uses authored scaling and the 0x1000 entity pad")
+		var director := EffectLightDirector.new()
+		director.setup(null, placer)
+		director.reattach()
+		var static_scene := director.scene()
+		var static_radius := float(definition[2]) / 65536.0
+		for offset in [-0.01, 0.01]:
+			assert_gt(static_scene.spawn_model_light(ModelLightSpawn.make(
+					Vector3(static_radius + offset, 0.0, 0.0), 0.001)), 0)
+		var camera := Camera3D.new()
+		branch.add_child(camera)
+		director.render_frame(camera, GameWorld.current_frame_clock_ms())
+		assert_almost_eq(static_scene.get_static_light_rows_image().get_pixel(0, 0).r,
+				1.0, 0.001, "static selection uses the authored scale and entity pad")
 		var live_placer := MissionObjectPlacer.create(root, db)
 		live_placer.register_object_data(definition[1], data)
 		live_placer.register_occlusion_verdict(definition[0], true)

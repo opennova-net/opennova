@@ -43,6 +43,7 @@ namespace {
 struct CtrlNames {
 	String eweap_gunyaw = String("EWEAP_GUNYAW");
 	String eweap_gunpitch = String("EWEAP_GUNPITCH");
+	String weap_spin = String("WEAP_SPIN");
 	String vehicle_steering = String("VEHICLE_STEERING");
 	String vehicle_speed = String("VEHICLE_SPEED");
 	// The part-animation registers the same cveh callback publishes (catalog
@@ -694,9 +695,11 @@ int emplaced_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
 				field_i(p, base, Simulation::PF_EWEAP_GUNYAW));
 		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch,
 				field_i(p, base, Simulation::PF_EWEAP_GUNPITCH));
-		return 2;
+		set_owned_ctrl(model, n.owner_emplaced, n.weap_spin,
+				field_i(p, base, Simulation::PF_WEAP_SPIN));
+		return 3;
 	}
-	// Nodes persist across dismount/death: remove only the two controls this
+	// Nodes persist across dismount/death: remove only the three controls this
 	// presenter owns — a bulk CTRL clear would also erase live WAC channels.
 	if (clear_when_invalid) {
 		emplaced_clear_typed(model);
@@ -708,6 +711,7 @@ void emplaced_clear_typed(ObjectModel *model) {
 	const CtrlNames &n = names();
 	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw);
 	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch);
+	clear_owned_ctrl(model, n.owner_emplaced, n.weap_spin);
 }
 
 void focal_sway_apply_typed(ObjectModel *model, const float *p, int base) {
@@ -1327,7 +1331,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 			// ObjectModel uses fixed VEHICLE_SPECIAL1/2 and cannot alias it.
 			if (emplaced_work && controls_valid == 0) {
 				emplaced_clear_typed(model);
-				stat_control_dispatches_ += 2;
+				stat_control_dispatches_ += 3;
 			}
 			// PANM phases are integrated by the engine [orig:
 			// Entity_ApplyCommand @ 0x43ab60 case 0x22]. ACTIVE is the

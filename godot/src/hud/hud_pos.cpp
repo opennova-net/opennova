@@ -1,11 +1,16 @@
 #include "hud/hud_pos.h"
 #include "util/color_convert.h"
+#include "util/string_convert.h"
 #include "hud/vehicle_hud_block.h"
 
+#include <godot_cpp/classes/canvas_item.hpp>
+
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 #include "util/data_format.h"
 
 #include <formats/def/def.h>
+#include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/scope_circle_mask.h>
 #include <runtime/hud/sight_overlay.h>
@@ -62,52 +67,6 @@ using namespace godot;
 
 namespace {
 
-// hudpos.def [4] rects are stored as corners (x1,y1,x2,y2); the witnessed draws
-// read them that way. [orig: HUD_DrawHealthBar @0x5a2e50 reads dword_27237C8/CC/D0/D4, see docs/interface/hud-re.md]
-Rect2i rect_from_corners(const int v[4]) {
-	return Rect2i(v[0], v[1], v[2] - v[0], v[3] - v[1]);
-}
-
-// HUDPOWERBAR alone is authored x,y,w,h — its witnessed consumer adds the third
-// and fourth dwords to the anchor (JOX authors "20,720,72,11": as corners the
-// height would be negative). [orig: HUD_DrawPowerThrowChargeBar @0x599830 draws
-// (x, y)-(x+w, y+h) from dword_27237EC..F8, see docs/interface/hud-re.md]
-Rect2i rect_from_xywh(const int v[4]) {
-	return Rect2i(v[0], v[1], v[2], v[3]);
-}
-
-// Positioned text tokens keep the original's 4-dword layout: x, y, hidden
-// (0 = draw), alignment (0=left 1=right 2=center). [orig: AMMOCOUNTPOS parse
-// @0x59fc3d; the draws gate on the hidden dword @0x5939f3]
-Vector4i pos4(const int v[4]) {
-	return Vector4i(v[0], v[1], v[2], v[3]);
-}
-
-Vector2i pos2(const int v[2]) {
-	return Vector2i(v[0], v[1]);
-}
-
-// DefHudColor is 0..255 ARGB-ish ints; expose a Godot-normalized Color.
-Color to_color(const DefHudColor &c) {
-	return Color(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f);
-}
-
-Dictionary stance_to_dict(const DefHudStance &s) {
-	Dictionary d;
-	d["id"] = s.id;
-	d["offset"] = Vector2i(s.offset_x, s.offset_y);
-	d["texture"] = String(s.texture);
-	d["name"] = String(s.name);
-	return d;
-}
-
-Dictionary graphic_to_dict(const DefHudGraphic &g) {
-	Dictionary d;
-	d["texture"] = String(g.texture);
-	d["pos"] = Vector2i(g.x, g.y);
-	return d;
-}
-
 } // namespace
 
 void HudPos::_bind_methods() {
@@ -134,6 +93,10 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &HudPos::crosshair_error_row);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_should_draw", "aimed", "keep_while_aimed"), &HudPos::crosshair_should_draw);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_display_name", "mission", "gametext", "name_id"), &HudPos::waypoint_display_name);
+	ClassDB::bind_static_method("HudPos", D_METHOD("subgoal_message", "mission", "lost", "header_id"), &HudPos::subgoal_message);
+	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
+	ClassDB::bind_static_method("HudPos", D_METHOD("weapon_display_name", "gametext", "weapon_id"), &HudPos::weapon_display_name);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_fallback_image"), &HudPos::loading_fallback_image);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
@@ -155,6 +118,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_color", "phase_on"), &HudPos::loading_splash_continue_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("draw_wrapped_text", "item", "font", "font_size", "text", "x", "y", "width", "bottom", "align", "color", "skip_lines"), &HudPos::draw_wrapped_text, DEFVAL(0));
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
@@ -172,18 +136,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &HudPos::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &HudPos::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &HudPos::get_last_error);
-	ClassDB::bind_method(D_METHOD("get_health_rect"), &HudPos::get_health_rect);
-	ClassDB::bind_method(D_METHOD("get_veh_stance_pos"), &HudPos::get_veh_stance_pos);
-	ClassDB::bind_method(D_METHOD("get_lfp_flags"), &HudPos::get_lfp_flags);
-	ClassDB::bind_method(D_METHOD("get_stances"), &HudPos::get_stances);
 	ClassDB::bind_method(D_METHOD("get_vehicle_hud", "sid"), &HudPos::get_vehicle_hud);
-	ClassDB::bind_method(D_METHOD("get_spinmap_bounds"), &HudPos::get_spinmap_bounds);
-	ClassDB::bind_method(D_METHOD("get_spinmap_wp_dist_off"),
-			&HudPos::get_spinmap_wp_dist_off);
-	ClassDB::bind_method(D_METHOD("get_declutter_flags", "name"),
-			&HudPos::get_declutter_flags);
-	ClassDB::bind_method(D_METHOD("get_colors"), &HudPos::get_colors);
-	ClassDB::bind_method(D_METHOD("to_dictionary"), &HudPos::to_dictionary);
 
 	BIND_CONSTANT(DESIGN_WIDTH);
 	BIND_CONSTANT(DESIGN_HEIGHT);
@@ -286,98 +239,6 @@ String HudPos::get_last_error() const {
 	return last_error_;
 }
 
-String HudPos::get_font_hi() const {
-	return loaded_ ? String(file_.hud.font_hi) : String();
-}
-
-String HudPos::get_font_lo() const {
-	return loaded_ ? String(file_.hud.font_lo) : String();
-}
-
-Rect2i HudPos::get_health_rect() const {
-	return loaded_ ? rect_from_corners(file_.hud.health) : Rect2i();
-}
-
-Rect2i HudPos::get_heat_rect() const {
-	return loaded_ ? rect_from_corners(file_.hud.heat) : Rect2i();
-}
-
-Rect2i HudPos::get_powerbar_rect() const {
-	return loaded_ ? rect_from_xywh(file_.hud.powerbar) : Rect2i();
-}
-
-Vector4i HudPos::get_ammo_count_pos() const {
-	return loaded_ ? pos4(file_.hud.ammo_count_pos) : Vector4i();
-}
-
-Vector4i HudPos::get_weapon_name_pos() const {
-	return loaded_ ? pos4(file_.hud.weapon_name_pos) : Vector4i();
-}
-
-Vector4i HudPos::get_game_info_pos() const {
-	return loaded_ ? pos4(file_.hud.game_info) : Vector4i();
-}
-
-Vector4i HudPos::get_wpd_info_pos() const {
-	return loaded_ ? pos4(file_.hud.wpd_info) : Vector4i();
-}
-
-Vector2i HudPos::get_sys_text_pos() const {
-	return loaded_ ? pos2(file_.hud.sys_text) : Vector2i();
-}
-
-Vector2i HudPos::get_chat_text_pos() const {
-	return loaded_ ? pos2(file_.hud.chat_text) : Vector2i();
-}
-
-Vector2i HudPos::get_clip_pos() const {
-	return loaded_ ? pos2(file_.hud.clip_pos) : Vector2i();
-}
-
-Vector3 HudPos::get_alpha_fade() const {
-	return loaded_ ? Vector3(file_.hud.alpha_fade[0], file_.hud.alpha_fade[1],
-							 file_.hud.alpha_fade[2])
-				   : Vector3();
-}
-
-int HudPos::get_hud_chline() const {
-	return loaded_ ? file_.hud.hud_chline : 0;
-}
-
-Vector2i HudPos::get_stance_pos() const {
-	return loaded_ ? pos2(file_.hud.stance_pos) : Vector2i();
-}
-
-Vector2i HudPos::get_veh_stance_pos() const {
-	return loaded_ ? pos2(file_.hud.veh_stance_pos) : Vector2i();
-}
-
-Vector2i HudPos::get_lfp_flags() const {
-	return loaded_ ? pos2(file_.hud.lfp_flags) : Vector2i();
-}
-
-Array HudPos::get_stances() const {
-	Array out;
-	if (!loaded_) {
-		return out;
-	}
-	for (size_t i = 0; i < file_.hud.stances_count; ++i) {
-		out.push_back(stance_to_dict(file_.hud.stances[i]));
-	}
-	return out;
-}
-
-Array HudPos::get_static_frames() const {
-	Array out;
-	if (!loaded_) {
-		return out;
-	}
-	for (size_t i = 0; i < file_.hud.static_frames_count; ++i) {
-		out.push_back(graphic_to_dict(file_.hud.static_frames[i]));
-	}
-	return out;
-}
-
 // One VEHICLE_HUD block by items.def sid, case-insensitively -- matching the
 // _stricmp the original commits the block with. The witness for the block and
 // its grammar lives with the parse, in engine/formats/def/def.h; this only
@@ -399,156 +260,6 @@ Ref<VehicleHudBlock> HudPos::get_vehicle_hud(const String &p_sid) const {
 	return Ref<VehicleHudBlock>();
 }
 
-Rect2i HudPos::get_spinmap_bounds() const {
-	if (!loaded_) {
-		return Rect2i();
-	}
-	const DefHudPosDef &h = file_.hud;
-	return Rect2i(h.spinmap_x1, h.spinmap_y1, h.spinmap_x2 - h.spinmap_x1, h.spinmap_y2 - h.spinmap_y1);
-}
-
-int HudPos::get_spinmap_wp_dist_off() const {
-	// 0 = live (the retail BSS-zero default); authored nonzero suppresses.
-	return loaded_ ? file_.hud.spinmap_wp_dist_off : 0;
-}
-
-Vector3i HudPos::get_map_coords() const {
-	// x, y, suppressor (0 = live, the retail BSS-zero default).
-	if (!loaded_) {
-		return Vector3i(0, 0, 0);
-	}
-	const DefHudPosDef &h = file_.hud;
-	return Vector3i(h.map_coords[0], h.map_coords[1], h.map_coords[2]);
-}
-
-PackedByteArray HudPos::get_declutter_flags(const String &p_name) const {
-	PackedByteArray out;
-	if (!loaded_ || p_name.is_empty()) return out;
-	const String wanted = p_name.to_upper();
-	for (size_t i = 0; i < file_.hud.declutter_count; ++i) {
-		if (String(file_.hud.declutter[i].name).to_upper() != wanted) continue;
-		out.resize(4);
-		for (int f = 0; f < 4; ++f)
-			out.set(f, static_cast<uint8_t>(file_.hud.declutter[i].flags[f] != 0));
-		break;
-	}
-	return out;
-}
-
-Dictionary HudPos::get_colors() const {
-	Dictionary out;
-	if (!loaded_) {
-		return out;
-	}
-	const DefHudPosDef &h = file_.hud;
-	out["health_border"] = to_color(h.health_border);
-	out["heat_border"] = to_color(h.heat_border);
-	out["hud_textcolor"] = to_color(h.hud_textcolor);
-	out["weapon_textcolor"] = to_color(h.weapon_textcolor);
-	out["tagcolor_blueteam"] = to_color(h.tagcolor_blueteam);
-	out["tagcolor_redteam"] = to_color(h.tagcolor_redteam);
-	out["tagcolor_good"] = to_color(h.tagcolor_good);
-	out["tagcolor_middle"] = to_color(h.tagcolor_middle);
-	out["tagcolor_bad"] = to_color(h.tagcolor_bad);
-	out["stanceicon_color"] = to_color(h.stanceicon_color);
-	out["stancecolor_good"] = to_color(h.stancecolor_good);
-	out["stancecolor_middle"] = to_color(h.stancecolor_middle);
-	out["stancecolor_bad"] = to_color(h.stancecolor_bad);
-	out["dest_agl_color"] = to_color(h.dest_agl_color);
-	out["agl_color"] = to_color(h.agl_color);
-	return out;
-}
-
-Dictionary HudPos::to_dictionary() const {
-	Dictionary out;
-	if (!loaded_) {
-		return out;
-	}
-	const DefHudPosDef &h = file_.hud;
-
-	Dictionary fonts;
-	fonts["hi"] = String(h.font_hi);
-	fonts["lo"] = String(h.font_lo);
-	out["fonts"] = fonts;
-
-	Dictionary rects;
-	rects["health"] = rect_from_corners(h.health);
-	rects["heat"] = rect_from_corners(h.heat);
-	rects["powerbar"] = rect_from_xywh(h.powerbar);
-	rects["starttimer"] = rect_from_corners(h.starttimer);
-	rects["mrclippy_normal"] = rect_from_corners(h.mrclippy_normal);
-	rects["mrclippy_alternate"] = rect_from_corners(h.mrclippy_alternate);
-	out["rects"] = rects;
-
-	// [4] = (x, y, hidden, alignment); [2] = (x, y).
-	Dictionary positions;
-	positions["flag_carrier"] = pos4(h.flag_carrier);
-	positions["game_info"] = pos4(h.game_info);
-	positions["wpd_info"] = pos4(h.wpd_info);
-	positions["zone_info"] = pos4(h.zone_info);
-	positions["exp_points"] = pos4(h.exp_points);
-	positions["connect_status"] = pos4(h.connect_status);
-	positions["team_xy"] = pos4(h.team_xy);
-	positions["player_count"] = pos4(h.player_count);
-	positions["ammo_count"] = pos4(h.ammo_count_pos);
-	positions["weapon_name"] = pos4(h.weapon_name_pos);
-	positions["map_coords"] = pos4(h.map_coords);
-	positions["time_clock"] = pos4(h.time_clock);
-	positions["breath_time"] = pos4(h.breath_time);
-	positions["orders"] = pos2(h.orders);
-	positions["spec_mode_label"] = pos2(h.spec_mode_label);
-	positions["cargo"] = pos2(h.cargo_pos);
-	positions["stance"] = pos2(h.stance_pos);
-	positions["veh_stance"] = pos2(h.veh_stance_pos);
-	positions["gear_text"] = pos2(h.gear_text);
-	positions["wpn_icon"] = pos2(h.wpn_icon);
-	positions["clip"] = pos2(h.clip_pos);
-	positions["scope_range"] = pos2(h.scope_range);
-	positions["scope_zero"] = pos2(h.scope_zero);
-	positions["scope_mag"] = pos2(h.scope_mag);
-	positions["impact_dist"] = pos2(h.impact_dist_pos);
-	positions["chat_text"] = pos2(h.chat_text);
-	positions["sys_text"] = pos2(h.sys_text);
-	positions["title"] = Vector2i(h.title_x, h.title_y);
-	positions["ping"] = Vector2i(h.ping_x, h.ping_y);
-	out["positions"] = positions;
-
-	out["spinmap"] = get_spinmap_bounds();
-	out["colors"] = get_colors();
-	out["stances"] = get_stances();
-	out["static_frames"] = get_static_frames();
-	out["parachute_icon"] = loaded_ ? graphic_to_dict(h.parachute_icon) : Dictionary();
-	out["armor_icon"] = loaded_ ? graphic_to_dict(h.armor_icon) : Dictionary();
-
-	Array declutter;
-	for (size_t i = 0; i < h.declutter_count; ++i) {
-		Dictionary d;
-		d["name"] = String(h.declutter[i].name);
-		Array flags;
-		for (int f = 0; f < 4; ++f) {
-			flags.push_back(h.declutter[i].flags[f]);
-		}
-		d["flags"] = flags;
-		declutter.push_back(d);
-	}
-	out["declutter"] = declutter;
-
-	Dictionary misc;
-	misc["hud_chline"] = h.hud_chline;
-	misc["agl_radius"] = h.agl_radius;
-	misc["roc_len"] = h.roc_len;
-	misc["ping_right"] = h.ping_right;
-	// ALPHAFADE raw file fields: base%, max%, seconds — floats, because the
-	// original reads them via atof and the fraction survives into the stored
-	// base*2.55 / max*2.55 (0..255 alpha) and seconds*62 (ticks) converts;
-	// consumers do that conversion. [orig: alphafade parse @0x5a0882..0x5a08c2
-	// -> 0x2723614/18/1C, see docs/interface/hud-re.md]
-	misc["alpha_fade"] = Vector3(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
-	misc["spinmap_wp_dist_off"] = h.spinmap_wp_dist_off;
-	out["misc"] = misc;
-
-	return out;
-}
 Vector2 HudPos::scale_point(const Vector2 &p_design, const Vector2 &p_surface) {
 	return Vector2(
 			static_cast<float>(opennova::hud::scale_axis(
@@ -703,6 +414,30 @@ bool HudPos::crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed) {
 	return opennova::hud::crosshair_should_draw(p_aimed, p_keep_while_aimed);
 }
 
+// --- game text (hud/hud_game_text.h carries the witnesses) ------------------
+
+String HudPos::waypoint_display_name(const Ref<RtxtStringFile> &p_mission,
+		const Ref<RtxtStringFile> &p_gametext, int p_name_id) {
+	return opennova::to_gd(opennova::hud::waypoint_display_name(p_name_id,
+			game_text_lookup(p_mission), game_text_lookup(p_gametext)));
+}
+
+String HudPos::subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
+		int p_header_id) {
+	return opennova::to_gd(opennova::hud::subgoal_message(p_lost, p_header_id,
+			game_text_lookup(p_mission)));
+}
+
+String HudPos::triggered_text(const Ref<RtxtStringFile> &p_mission, int p_text_id) {
+	return opennova::to_gd(opennova::hud::triggered_text(p_text_id, game_text_lookup(p_mission)));
+}
+
+String HudPos::weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
+		const String &p_weapon_id) {
+	return opennova::to_gd(opennova::hud::weapon_display_name(opennova::to_std(p_weapon_id),
+			game_text_lookup(p_gametext)));
+}
+
 // --- loading screen (hud/loading_screen.h carries the values/witnesses) -----
 
 String HudPos::loading_gametype_text_key(int p_game_type) {
@@ -763,6 +498,31 @@ String HudPos::loading_splash_continue_key() {
 
 String HudPos::loading_splash_continue_font() {
 	return String(opennova::hud::kSplashContinueFont);
+}
+
+int HudPos::draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p_font_size,
+		const String &p_text, int p_x, int p_y, int p_width, int p_bottom, int p_align,
+		const Color &p_color, int p_skip_lines) {
+	if (p_item == nullptr || p_font.is_null()) return 0;
+	// The measure is the FontFile view of the .fnt (D-LOADSCR-2 carries the
+	// CGameFont metric residual); the rules are the engine's.
+	const opennova::hud::TextExtent extent = [&p_font, p_font_size](const std::string &s) {
+		return static_cast<float>(
+				p_font->get_string_size(opennova::to_gd(s), HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size).x);
+	};
+	opennova::hud::TextBlockAlign align = opennova::hud::TextBlockAlign::kLeft;
+	if (p_align == HORIZONTAL_ALIGNMENT_CENTER) align = opennova::hud::TextBlockAlign::kCenter;
+	else if (p_align == HORIZONTAL_ALIGNMENT_RIGHT) align = opennova::hud::TextBlockAlign::kRight;
+	const opennova::hud::TextBlock block = opennova::hud::layout_text_block(extent,
+			static_cast<int>(p_font->get_height(p_font_size)), opennova::to_std(p_text), p_x, p_y,
+			p_x + p_width, p_bottom, align, p_skip_lines);
+	// `y` is the line TOP, so each baseline adds the ascent.
+	const float ascent = p_font->get_ascent(p_font_size);
+	for (const opennova::hud::TextBlockLine &row : block.lines) {
+		p_item->draw_string(p_font, Vector2(row.x, row.y + ascent), opennova::to_gd(row.text),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size, p_color);
+	}
+	return block.stopped_at;
 }
 
 Color HudPos::loading_splash_continue_color(bool p_phase_on) {

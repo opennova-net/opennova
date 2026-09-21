@@ -78,10 +78,10 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 func _capture(file_name: String, wait_s: float) -> Dictionary:
 	var t := 0.0
 	while t < wait_s and not _ctx.cancelled:
-		_fx.render_frame()
+		_fx.render_frame(GameWorld.current_frame_clock_ms())
 		t += _ctx.tree.root.get_process_delta_time()
 		await _ctx.tree.process_frame
-	_fx.render_frame()
+	_fx.render_frame(GameWorld.current_frame_clock_ms())
 	var img := await _stage.capture_image(_ctx.tree)
 	if img == null:
 		return {}

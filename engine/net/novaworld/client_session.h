@@ -269,7 +269,12 @@ public:
 	// empty otherwise. [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
 	std::vector<uint8_t> build_host_player_added(const HostPlayerSlot &player);
 	std::vector<uint8_t> build_host_player_removed(int player_number);
-	// ClientPlayerEnterRequest for a joiner entering the hosted game.
+	// ClientPlayerEnterRequest for a joiner entering the hosted game
+	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0 — itself ungated;
+	// retail's only gate is its caller's NovaWorld arm, `byte_B60100 & 0x40`
+	// @0x4c8b88 in CNapiNetwork_CheckPlayerTimeouts @0x4c8ad0]. Empty unless
+	// hosting is established: our shell-side policy (the join tickets are armed
+	// only once registered), not a witness.
 	std::vector<uint8_t> build_player_enter_request(uint32_t connection_id, uint32_t ip_address,
 	                                                uint32_t port_number,
 	                                                const std::string &join_ticket);

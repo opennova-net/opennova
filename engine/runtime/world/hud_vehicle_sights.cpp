@@ -17,10 +17,14 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 		return;
 	const int32_t root[3] = { to_fixed(mount->position.x), to_fixed(mount->position.y),
 		to_fixed(mount->position.z) };
+	// The live BAM frame when seeded (the same one emplaced_gun_frame_pitch
+	// produces the compared word from), else the placer's degree mirrors.
 	const int32_t yaw = mount->veh.yaw_seeded ? mount->veh.yaw_bam
 											  : bam_heading_from_mission_yaw_deg(mount->yaw);
-	const int32_t pitch = bam_from_degrees_wrapped(mount->pitch),
-				  roll = bam_from_degrees_wrapped(mount->roll);
+	const int32_t pitch = mount->veh.yaw_seeded ? mount->veh.air_pitch_bam
+												: bam_from_degrees_wrapped(mount->pitch),
+				  roll = mount->veh.yaw_seeded ? mount->veh.air_roll_bam
+											   : bam_from_degrees_wrapped(mount->roll);
 	if ((mount->item_attrib & kItemAttribEweap) && player->mount_type == SeatType::Controller &&
 			view.camera_mode == 0) {
 		const double angle = double(mount->veh.view_tilt_bam) * io::kRadiansPerBam;

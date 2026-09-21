@@ -80,22 +80,23 @@ func _installed_g_carriers() -> Array[Carrier]:
 		var items := ItemDatabase.new()
 		assert_eq(items.load_from_resource_root(art, "items.def"), OK,
 				"items.def loads from mount '%s'" % expansion)
+		var authored := AuthoredItemFixture.read_rows(art)
 		for item_id: int in CARRIER_CANDIDATES:
 			if claimed.has(item_id):
 				continue
-			for attachment: ItemEmplacementAttachment in items.get_emplacement_attachments(item_id):
-				if not attachment.is_designated_g():
+			if not authored.has(item_id):
+				continue
+			for attachment: Dictionary in authored[item_id]["attachments"]:
+				if attachment["kind"] != "addeweapg":
 					continue
 				var carrier := Carrier.new()
 				carrier.root = art
 				carrier.expansion = expansion
 				carrier.item_id = item_id
 				carrier.display_name = items.get_display_name(item_id)
-				carrier.child_item_id = attachment.get_item_id()
-				carrier.child_weapon = items.extract_seat_specs_for_item(
-						art, carrier.child_item_id).get_primary_weapon()
-				carrier.parent_weapon = items.extract_seat_specs_for_item(
-						art, item_id).get_primary_weapon()
+				carrier.child_item_id = attachment["item_id"]
+				carrier.child_weapon = authored[carrier.child_item_id]["weapon"]
+				carrier.parent_weapon = authored[item_id]["weapon"]
 				found.append(carrier)
 				claimed.append(item_id)
 				break
@@ -141,14 +142,14 @@ func _check_carrier(carrier: Carrier) -> bool:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(art, TRAINING_MISSION), OK, who)
 	var carrier_bms_id := -1
-	for record: MissionEntityRecord in mission.get_all_entities():
+	for record: EntityRef in mission.get_all_entity_refs():
 		if record.item_id != AUTHORED_TANK:
 			continue
 		# The original T80 targets have enemy crews and the authored M1A1 is
 		# the mission's; add an unoccupied carrier on the training ground
 		# through the mission API, retaining its installed rig/defs.
 		var added := mission.add_entity(MissionData.KIND_ITEM, carrier.item_id,
-				record.position + CARRIER_OFFSET, record.rotation_deg)
+				record.position + CARRIER_OFFSET, mission.get_entity_rotation(record.kind, record.index))
 		assert_not_null(added, "%s: placed beside the authored tank" % who)
 		if added == null:
 			return false

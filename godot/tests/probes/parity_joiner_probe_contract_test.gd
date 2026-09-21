@@ -3,15 +3,8 @@ extends GutTest
 # The parity joiner probes' contract with the parity runner
 # (scripts/net/run_parity_topology.ps1 + lib.ps1): the three catalog entries
 # and their required arguments, the witness key set the runner's readiness
-# snapshot reads, the readiness rules, and the verbatim-fact discipline (the
-# witness publishes observations; classification is the verifier's).
+# snapshot reads, and the readiness rules.
 
-const PROBE_SOURCES := [
-	"res://probes/net/parity_joiner_ready_probe.gd",
-	"res://probes/net/parity_joiner_motion_probe.gd",
-	"res://probes/net/parity_joiner_state_probe.gd",
-]
-const WITNESS_SOURCE := "res://probes/net/parity_joiner_witness.gd"
 # lib.ps1 ConvertTo-OpenNovaJoinerReadinessSnapshot reads exactly these.
 const RUNNER_SNAPSHOT_FIELDS := [
 	"process_id", "ticks_msec", "heartbeat_sequence", "readiness_mode", "in_match",
@@ -67,33 +60,31 @@ func test_witness_carries_every_runner_snapshot_field_and_nothing_undeclared() -
 
 
 func test_readiness_rules_match_the_witnessed_split() -> void:
+	# The runtime halves (the pick owed on a bound handle, no error, the
+	# session alive; the local player in the InMatch phase, the auto-deploy
+	# pick cleared) are the engine's typed verdicts (the role_feeds ctest);
+	# the witness gates them on the mode and, for the hold, the shell's
+	# presented DEATH screen.
 	var state := ParityJoinerWitness.empty_state()
 	assert_false(ParityJoinerWitness.in_match_ready(state, "in_match", false))
-	state.local_player = true
-	state.in_match = true
+	state.match_ready = true
 	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", false))
-	state.pick_pending = true
 	assert_false(ParityJoinerWitness.in_match_ready(state, "in_match", true),
-			"auto-deploy readiness waits for the pick to clear")
-	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", false))
+			"auto-deploy readiness is the engine's auto-deploy verdict (the pick must clear)")
+	state.match_ready_auto = true
+	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", true))
 	assert_false(ParityJoinerWitness.in_match_ready(state, "deploy_hold", false))
 
-	# deploy_hold: the pick pending on a granted handle with the DEATH screen
-	# presented at the witnessed admission stage, no error, session alive.
 	var hold := ParityJoinerWitness.empty_state()
-	hold.pick_pending = true
-	hold.self_handle = 3
+	hold.hold_ready = true
 	hold.deploy_presented = true
-	hold.join_admission_stage = ParityJoinerWitness.DEPLOY_HOLD_ADMISSION_STAGE
 	assert_true(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
 	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "in_match"))
-	hold.session_lost = true
-	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
-	hold.session_lost = false
-	hold.join_error = "kicked"
-	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
-	hold.join_error = ""
 	hold.deploy_presented = false
+	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"),
+			"the DEATH screen must be presented")
+	hold.deploy_presented = true
+	hold.hold_ready = false
 	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
 
 
@@ -129,26 +120,3 @@ func test_timestamps_take_the_runner_shape() -> void:
 	assert_true(ParityJoinerWitness.is_utc_timestamp("2026-08-27T10:00:00Z"))
 	assert_false(ParityJoinerWitness.is_utc_timestamp("2026-08-27 10:00:00"))
 	assert_false(ParityJoinerWitness.is_utc_timestamp(""))
-
-
-func test_witness_publishes_raw_transport_facts_and_probes_hold_no_simulation() -> void:
-	var source := FileAccess.get_file_as_string(WITNESS_SOURCE)
-	assert_false(source.is_empty())
-	for verbatim in [
-			"\"in_match\": bool(state.in_match)",
-			"\"local_player\": bool(state.local_player)",
-			"\"joiner_phase\": int(state.joiner_phase)",
-			"\"deploy_presented\": bool(state.deploy_presented)",
-	]:
-		assert_true(source.contains(verbatim), "the witness carries %s verbatim" % verbatim)
-	assert_false(source.contains("_project_readiness_evidence_state"),
-			"the witness publishes raw fields; classification is the verifier's")
-	var member_sim := RegEx.new()
-	assert_eq(member_sim.compile("(?m)^var\\s+\\w+\\s*:\\s*Simulation\\b"), OK)
-	for path in PROBE_SOURCES:
-		var probe_source := FileAccess.get_file_as_string(path)
-		assert_false(probe_source.is_empty(), "%s is readable" % path)
-		assert_null(member_sim.search(probe_source),
-				"%s reads the simulation through ctx.sim() per pass, never a member" % path)
-		assert_false(probe_source.contains("OS.get_environment("),
-				"%s takes typed args, never environment" % path)

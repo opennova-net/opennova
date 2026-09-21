@@ -216,7 +216,7 @@ func _process(_delta: float) -> void:
 		return
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
-	_driver.tick(Time.get_ticks_msec())
+	_driver.tick(_view.frame_clock_ms)
 
 
 # Route the armory-key edges to the companion's debounced ACCEPT accelerator

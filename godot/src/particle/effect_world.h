@@ -20,7 +20,6 @@
 #include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
 #include "particle/effect_spawn_records.h"
-#include "particle/particle_def.h"
 #include "particle/particle_file.h"
 
 namespace opennova::particle {
@@ -47,7 +46,7 @@ public:
 	// Re-exports of the vocabulary the portable effect scene owns: callers
 	// keep the EffectWorld.* spelling.
 	enum {
-		PARTICLE_FLAG_FOREVER_EMIT = ParticleDef::FLAG_FOREVER_EMIT,
+		PARTICLE_FLAG_FOREVER_EMIT = opennova::particle::particle_flag::ForeverEmit,
 		ADMISSION_ALWAYS = EffectScene::ADMISSION_ALWAYS,
 		ADMISSION_REPLACE_OWNED = EffectScene::ADMISSION_REPLACE_OWNED,
 		ADMISSION_SUPPRESS_WHILE_OWNED = EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED,
@@ -150,7 +149,7 @@ public:
 	// seam between fixed warm ticks and forced draws so freshly emitted
 	// values are in the submitted draw list immediately. Returns the number
 	// of material runs.
-	int64_t render_now();
+	int64_t render_now(int64_t p_time_ms);
 	// The renderer's full draw-list diagnostics (world + first-person lists,
 	// backends, atlas pages/entries) for the F3 Particles page — the one
 	// Dictionary report this facade keeps (the allowlisted transport edge).
@@ -222,7 +221,7 @@ public:
 	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.
-	void render_frame();
+	void render_frame(int64_t p_time_ms);
 	// Value-only F3 read model (particle/effect_group_report.h). Emitter ids
 	// join portable simulation values to the renderer's draw list bounds; no
 	// particle/render Nodes escape this facade. Hidden particles report

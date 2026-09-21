@@ -64,7 +64,6 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_object_placer.cpp
     mission/mission_placement_stats.cpp
     mission/static_population_instance.cpp
-    mission/static_source_records.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
     env/environment_cube_capture.cpp
@@ -77,12 +76,7 @@ add_library(${TARGET_NAME} SHARED
     env/water_core.cpp
     env/star_field.cpp
     env/glare_occlusion.cpp
-    particle/particle_curve_ref.cpp
     particle/particle_effect.cpp
-    particle/particle_table_handles.cpp
-    particle/particle_table.cpp
-    particle/particle_graphic_layer.cpp
-    particle/particle_def.cpp
     particle/particle_file.cpp
     lights/effect_light_director.cpp
     lights/effect_light_report.cpp
@@ -116,7 +110,6 @@ add_library(${TARGET_NAME} SHARED
     object/object_data_runtime_eval.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
-    object/item_records.cpp
     object/model_light.cpp
     object/model_user_point.cpp
     object/weapon_database.cpp
@@ -144,6 +137,8 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_draw_list_stats.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
+    hud/hud_toggles.cpp
+    hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
     hud/feed_row.cpp
     hud/player_hud_weapon_def.cpp
@@ -156,7 +151,6 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
-    mission/mission_records.cpp
     mission/mission_info.cpp
     mission/mission_perf_counters.cpp
     mission/mission_root.cpp
@@ -223,7 +217,6 @@ add_library(${TARGET_NAME} SHARED
     util/texture_path_resolver.cpp
     resource_index/resource_root.cpp
     resource_index/launch_flags.cpp
-    pff/pff_document.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp
@@ -237,6 +230,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/menu_draw_list_stats.cpp
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
+    mnu/menu_driver.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

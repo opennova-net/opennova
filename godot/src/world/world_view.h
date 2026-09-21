@@ -38,6 +38,7 @@ protected:
 	virtual Ref<ResourceRoot> resource_root_impl() const { return Ref<ResourceRoot>(); }
 
 public:
+	int64_t get_frame_clock_ms() const;
 	Ref<Simulation> sim();
 	Ref<ResourceRoot> resource_root();
 };

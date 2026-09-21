@@ -1,6 +1,6 @@
 extends GutTest
 
-# Menu-RUNTIME semantics on MenuDriver (godot/game/menu_driver.gd) — the
+# Menu-RUNTIME semantics on MenuDriver (the binding over engine/runtime/menu/menu_runtime.cpp) — the
 # carve-out coverage the deleted MnuMenu Control-tree tests pinned, now driven
 # through the compiled surface: action dispatch (screen/pop/quit/url/window/
 # shell verbs), the per-screen MUSICVAR push, hotkey routing, the
@@ -191,15 +191,13 @@ func _key(keycode: Key, unicode := 0, pressed := true, echo := false) -> InputEv
 # --- (a) action dispatch --------------------------------------------------------
 
 
-func test_attached_driver_releases_its_input_and_document() -> void:
+func test_attached_driver_releases_itself_and_its_document() -> void:
 	var driver := _framed_driver(ACTIONS_XML)
 	var driver_ref: WeakRef = weakref(driver)
-	var input_ref: WeakRef = weakref(driver.input)
 	var document_ref: WeakRef = weakref(driver.document())
 	driver.get_frame().configure(null, "", null, null, {})
 	driver = null
-	assert_null(driver_ref.get_ref(), "the dispatcher does not own its driver")
-	assert_null(input_ref.get_ref(), "the frame signal does not retain the dispatcher")
+	assert_null(driver_ref.get_ref(), "the frame's signal connections do not retain the driver")
 	assert_null(document_ref.get_ref(), "closing the driver releases its document")
 
 

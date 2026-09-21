@@ -1,15 +1,8 @@
 #include "object/item_database.h"
-#include "object/item_records.h"
 #include "resource_index/resource_root.h"
 
-#include <formats/mission/mission.h> // kItemIdOffset
-#include <runtime/mission/seat_spec_extract.h>
-#include <runtime/assets/asset_store.h>
-
-#include "mission/mission_data.h"
 #include "util/data_format.h"
 
-#include <runtime/audio/envs_markers.h>
 #include <formats/def/def.h>
 
 #include <algorithm>
@@ -33,12 +26,6 @@ static_assert(ItemDatabase::ATTRIB_PLAYER_CONTROL == DEF_ITEM_ATTRIB_PLAYERCONTR
 static_assert(ItemDatabase::ATTRIB_ARMORY == DEF_ITEM_ATTRIB_ARMORY, "ATTRIB_ARMORY drifted from def.h");
 static_assert(ItemDatabase::TYPE_OBJECT == DEF_ITEM_TYPE_OBJECT, "TYPE_OBJECT drifted from DefItemType");
 static_assert(ItemDatabase::TYPE_EFFECT == DEF_ITEM_TYPE_EFFECT, "TYPE_EFFECT drifted from DefItemType");
-static_assert(ItemDatabase::EMPLACEMENT_ADDEWEAP == DEF_ITEM_EMPLACEMENT_ADDEWEAP,
-		"EMPLACEMENT_ADDEWEAP drifted from DefItemEmplacementAttachmentKind");
-static_assert(ItemDatabase::EMPLACEMENT_ADDEWEAP_G == DEF_ITEM_EMPLACEMENT_ADDEWEAP_G,
-		"EMPLACEMENT_ADDEWEAP_G drifted from DefItemEmplacementAttachmentKind");
-static_assert(ItemDatabase::EMPLACEMENT_ADDEWEAP_C == DEF_ITEM_EMPLACEMENT_ADDEWEAP_C,
-		"EMPLACEMENT_ADDEWEAP_C drifted from DefItemEmplacementAttachmentKind");
 
 void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &ItemDatabase::load);
@@ -59,14 +46,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &ItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
-	ClassDB::bind_method(
-			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
-			&ItemDatabase::extract_seat_specs_for_item);
-	ClassDB::bind_method(D_METHOD("get_emplacement_attachments", "id"), &ItemDatabase::get_emplacement_attachments);
-	ClassDB::bind_method(D_METHOD("get_emplacement_g_slot", "id"), &ItemDatabase::get_emplacement_g_slot);
-	ClassDB::bind_method(D_METHOD("get_emplacement_c_slot", "id"), &ItemDatabase::get_emplacement_c_slot);
-	ClassDB::bind_method(D_METHOD("has_mount_config", "id"), &ItemDatabase::has_mount_config);
-	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &ItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
@@ -76,9 +55,6 @@ void ItemDatabase::_bind_methods() {
 	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_POWERUP);
 	BIND_CONSTANT(TYPE_OBJECT);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
 	BIND_CONSTANT(ATTRIB_POWERUP);
 	BIND_CONSTANT(ATTRIB_PLAYER_CONTROL);
 }
@@ -316,52 +292,10 @@ String ItemDatabase::get_display_name(int id) const {
 	return row == nullptr ? String() : String(row->display_name);
 }
 
-// The def-authored closeattack launch userpoint name — the AI muzzle point the
-// placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
-// ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
+// The native launchups_closeattack field; its parser witness lives in def_items.cpp.
 String ItemDatabase::get_launchups_closeattack(int id) const {
 	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->launchups_closeattack);
-}
-
-TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(int id) const {
-	TypedArray<ItemEmplacementAttachment> out;
-	const opennova::def::DefItemDef *row = row_(id);
-	if (row == nullptr) {
-		return out;
-	}
-	for (size_t i = 0; i < row->emplacement_attachments_count; ++i) {
-		const opennova::def::DefItemEmplacementAttachment &attachment = row->emplacement_attachments[i];
-		const int stored_slot = static_cast<int>(i + 1);
-		Ref<ItemEmplacementAttachment> record;
-		record.instantiate();
-		record->assign(attachment.kind, String(attachment.userpoint), attachment.item_id,
-				stored_slot, attachment.angle_count, attachment.down_angle,
-				attachment.up_angle, stored_slot == row->emplacement_g_slot,
-				stored_slot == row->emplacement_c_slot);
-		out.push_back(record);
-	}
-	return out;
-}
-
-int ItemDatabase::get_emplacement_g_slot(int id) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	return row == nullptr ? 0 : row->emplacement_g_slot;
-}
-
-int ItemDatabase::get_emplacement_c_slot(int id) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	return row == nullptr ? 0 : row->emplacement_c_slot;
-}
-
-bool ItemDatabase::has_mount_config(int id) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	return row != nullptr && row->phrase_set_valid != 0;
-}
-
-int ItemDatabase::get_mount_config(int id) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	return row != nullptr && row->phrase_set_valid != 0 ? row->phrase_set : 0;
 }
 
 String ItemDatabase::get_husk(int id) const {
@@ -374,72 +308,11 @@ String ItemDatabase::get_huskfinal(int id) const {
 	return row == nullptr ? String() : String(row->huskfinal);
 }
 
-// S13 (ADR 0028): the envs-class dispatch + soundloop slot resolution runs in
-// engine/runtime/audio over the retained items.def parse and the mission's
-// native bms document. The shell applies its own bank-presence filtering.
-TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
-		const Ref<MissionData> &p_mission) const {
-	TypedArray<EnvsMarkerRow> out;
-	if (p_mission.is_null()) return out;
-	const std::vector<opennova::audio::EnvsMarker> markers =
-			opennova::audio::resolve_envs_markers(
-					p_mission->native_file(), native_items());
-	for (const opennova::audio::EnvsMarker &marker : markers) {
-		Ref<EnvsMarkerRow> row;
-		row.instantiate();
-		row->assign(marker);
-		out.push_back(row);
-	}
-	return out;
-}
-
-// Slot A ("particlefx") as authored — the one the runtime effect-attach pass
-// consumes (item_records.h carries the witness).
-ItemParticleFx ItemDatabase::get_particle_fx(int id) const {
-	ItemParticleFx out;
+opennova::def::DefItemParticleFx ItemDatabase::get_particle_fx(int id) const {
 	const opennova::def::DefItemDef *row = row_(id);
-	if (row == nullptr) {
-		return out;
-	}
-	out.valid = true;
-	out.effect = String(row->particlefx.effect);
-	out.userpoint = String(row->particlefx.userpoint);
-	out.secondary_effect = String(row->particlefx.secondary_effect);
-	return out;
+	return row == nullptr ? opennova::def::DefItemParticleFx{} : row->particlefx;
 }
 
 PackedInt32Array ItemDatabase::get_item_ids() const {
 	return sorted_ids_;
-}
-
-Ref<ItemSeatCard> ItemDatabase::extract_seat_specs_for_item(
-		const Ref<ResourceRoot> &p_root, int p_item_id) {
-	Ref<ItemSeatCard> out;
-	out.instantiate();
-	const int32_t type_id =
-			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
-	out->set_identity(p_item_id, type_id);
-	if (p_root.is_null()) {
-		out->set_error("missing_resource_root_or_item_db");
-		return out;
-	}
-	if (!has_item(p_item_id)) {
-		out->set_error("item_not_found");
-		return out;
-	}
-	const String graphic = get_graphic(p_item_id);
-	out->set_model(get_display_name(p_item_id), graphic,
-			graphic.is_empty() ? String() : graphic.get_file().get_basename() + ".3di");
-
-	const auto &models = p_root->native_assets();
-	opennova::mission::SeatSpecExtraction native;
-	opennova::mission::extract_item_seat_specs(
-			native_items(),
-			[&models](const std::string &key) { return models.model(key).get(); },
-			{p_item_id}, native);
-	const opennova::mission::ItemSeatSpec *spec =
-			opennova::mission::item_seat_spec_for_type(native.specs,
-					static_cast<uint16_t>(type_id));
-	if (spec != nullptr) out->assign_spec(*spec); // else: no runtime metadata — an empty card
-	return out;
 }

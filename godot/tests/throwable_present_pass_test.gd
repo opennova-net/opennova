@@ -55,26 +55,8 @@ func _thrown_models(root: Node) -> Array:
 # effect_world_test recipe): a FOREVEREMIT definition, so a round-bound group
 # stays live until the pass stops it and the report shows the detach.
 func _catalog_file() -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = "toss dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var effect := ParticleEffect.new()
-	effect.id = MOVE_EFFECT
-	effect.pdefs = PackedStringArray(["toss dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("toss dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [MOVE_EFFECT])
 
 
 # A REAL EntityPresenter with its throwable pass wired over the placer, the

@@ -1,8 +1,10 @@
 extends GutTest
 
-# Exercises the HudPos GDExtension binding over engine/formats/def hudpos.def parsing.
-# Values mirror tests/def/def_parse_hudpos_test.cpp against the shipped hudpos.def
-# from the reference fixture set (the whole script skips without it).
+# Exercises the HudPos GDExtension binding over engine/formats/def hudpos.def
+# parsing: the load contract, the design-space constants and the VEHICLE_HUD
+# block handoff. The parsed values themselves are pinned by the
+# def_parse_hudpos and hud_layout ctests against the same fixture (the whole
+# script skips without it).
 
 
 func should_skip_script():
@@ -30,90 +32,17 @@ func test_design_space_constants() -> void:
 	assert_eq(HudPos.DESIGN_HEIGHT, 768, "Witnessed HUD design height.")
 
 
-func test_health_rect_from_corners() -> void:
-	var hud := _load()
-	# health[4] = {2,739,141,757} corners -> Rect2i(x1,y1,x2-x1,y2-y1).
-	assert_eq(hud.get_health_rect(), Rect2i(2, 739, 139, 18), "Health rect from corners.")
-
-
-func test_colors_normalized() -> void:
-	var hud := _load()
-	var colors := hud.get_colors()
-	assert_true(colors.has("hud_textcolor"), "Colors dict exposes hud_textcolor.")
-	var c: Color = colors["hud_textcolor"]
-	# hud_textcolor 251,213,5 -> normalized.
-	assert_almost_eq(c.r, 251.0 / 255.0, 0.005, "hud_textcolor red normalized.")
-	assert_almost_eq(c.g, 213.0 / 255.0, 0.005, "hud_textcolor green normalized.")
-	assert_almost_eq(c.b, 5.0 / 255.0, 0.005, "hud_textcolor blue normalized.")
-
-
-func test_spinmap_bounds() -> void:
-	var hud := _load()
-	# spinmap x1=810,x2=1020,y1=552,y2=762 -> Rect2i(810,552,210,210).
-	assert_eq(hud.get_spinmap_bounds(), Rect2i(810, 552, 210, 210), "Spinmap bounds rect.")
-	assert_eq(hud.get_spinmap_wp_dist_off(), 0,
-			"An absent SPINMAPWPDISTOFF keeps the retail BSS-zero default (label live).")
-	assert_eq(hud.get_declutter_flags("SPINMAP"), PackedByteArray([0, 1, 1, 0]),
-			"Spinmap retains its authored four HUDDETAIL visibility gates.")
-
-
-func test_stances() -> void:
-	var hud := _load()
-	var stances := hud.get_stances()
-	assert_eq(stances.size(), 5, "Fixture defines 5 HUDSTANCE frames.")
-	if stances.size() > 0:
-		var s0: Dictionary = stances[0]
-		assert_eq(int(s0["id"]), 0, "First stance id.")
-		assert_eq(String(s0["texture"]), "stance_1.tga", "First stance texture.")
-		assert_eq(String(s0["name"]), "STAND", "First stance name.")
-		assert_true(s0["offset"] is Vector2i, "Stance offset is Vector2i.")
-
-
-func test_to_dictionary_shape() -> void:
-	var hud := _load()
-	var d := hud.to_dictionary()
-	for key in ["fonts", "rects", "positions", "colors", "spinmap", "stances", "static_frames"]:
-		assert_true(d.has(key), "to_dictionary exposes '%s'." % key)
-	var rects: Dictionary = d["rects"]
-	assert_eq(rects["health"], Rect2i(2, 739, 139, 18), "to_dictionary health rect matches getter.")
-	var positions: Dictionary = d["positions"]
-	assert_true(positions["ammo_count"] is Vector4i, "[4] positions are Vector4i (x,y,hidden,align).")
-	assert_true(positions["stance"] is Vector2i, "[2] positions are Vector2i.")
-	# GAMEINFO 1013,430 (2 fields) -> hidden 0, align left.
-	assert_eq(positions["game_info"], Vector4i(1013, 430, 0, 0), "game_info carries x,y,hidden,align.")
-	var misc: Dictionary = d["misc"]
-	# ALPHAFADE 30 50 3 raw file fields (base %, max %, seconds) — floats, since the
-	# original's atof keeps fractions for the x2.55/x62 converts [orig: @0x5a0882].
-	assert_eq(misc["alpha_fade"], Vector3(30, 50, 3), "alpha_fade raw triple exposed in misc.")
-	assert_eq(int(misc["spinmap_wp_dist_off"]), 0,
-			"to_dictionary preserves the absent-token BSS-zero default.")
-
-
 func test_not_loaded_is_safe() -> void:
 	var hud := HudPos.new()
 	assert_false(hud.is_loaded(), "Fresh instance is not loaded.")
-	assert_eq(hud.get_health_rect(), Rect2i(), "Unloaded getters return empty.")
-	assert_eq(hud.get_spinmap_wp_dist_off(), 0,
-			"An unloaded layout reports the live-by-default zero.")
-	assert_true(hud.get_declutter_flags("SPINMAP").is_empty(),
-			"An unloaded layout has no authored declutter row.")
-	assert_eq(hud.get_stances().size(), 0, "Unloaded stances empty.")
-	assert_eq(hud.to_dictionary().size(), 0, "Unloaded to_dictionary empty.")
-	assert_eq(hud.get_veh_stance_pos(), Vector2i(), "Unloaded HUDVEHSTANCEPOS empty.")
-	assert_eq(hud.get_lfp_flags(), Vector2i(), "Unloaded LFP_FLAGS empty.")
+	assert_null(hud.get_vehicle_hud("dbuggy1"), "An unloaded layout hands out no block.")
 
 
-# The two panel anchors the wire-up lanes consume: HUDVEHSTANCEPOS (the
-# vehicle panel's base before the stance offset) and LFP_FLAGS (the AAS zone
-# panel's right edge + row base; retail g_hudZonePanelX/Y written by the hudpos
-# parse @0x5a0563/@0x5a057b).
-func test_panel_anchors() -> void:
+# The VEHICLE_HUD block the vehicle panel presenter takes by items.def sid.
+func test_vehicle_hud_block() -> void:
 	var hud := _load()
-	assert_eq(hud.get_veh_stance_pos(), Vector2i(0, 272),
-			"HUDVEHSTANCEPOS 0 272 from the fixture.")
-	assert_eq(hud.get_lfp_flags(), Vector2i(1020, 27),
-			"LFP_FLAGS 1020 , 27 from the fixture.")
 	var block := hud.get_vehicle_hud("dbuggy1")
 	assert_not_null(block, "The buggy's VEHICLE_HUD block resolves by sid.")
 	if block != null:
 		assert_eq(block.interface_texture, "h_buggya.tga")
+	assert_null(hud.get_vehicle_hud("no_such_sid"), "An unknown sid resolves to no block.")

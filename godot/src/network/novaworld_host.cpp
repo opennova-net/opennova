@@ -9,7 +9,6 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/tick_rate.h>
-#include <net/napi/envelope.h>
 #include <net/napi/session.h>
 
 #include <string>
@@ -230,7 +229,7 @@ bool NovaWorldHost::get_host_requires_join_ticket() const {
 
 void NovaWorldHost::request_player_enter(int64_t connection_id, int64_t ip_address, int port,
                                          const String &join_ticket) {
-	if (state_ != STATE_HOSTING || !lobby_.session()) return;
+	if (!lobby_.session()) return;
 	const std::vector<uint8_t> dg = lobby_.session()->build_player_enter_request(
 			static_cast<uint32_t>(connection_id), static_cast<uint32_t>(ip_address),
 			static_cast<uint32_t>(port), to_std(join_ticket));
@@ -353,29 +352,13 @@ void NovaWorldHost::_process(double delta) {
 	}
 }
 
-// The plaintext status heartbeat retail posts to the gate's POSTIPADDRESS:POSTIPPORT
-// right after its ClientHostUpdate on the same refresh, when the gate supplied
-// both and the junction bypass is off. It rides the NAPI CRC envelope (the
-// socket layer's encrypt flag) with no NWU and no NP session: the gate reads
-// it off its own port. [orig: Lobby_UpdateServerInfo @0x4ff448 (the
-//  dword_B5F490/dword_B5F494 non-zero gate) .. @0x4ff62c (CNapiNetwork_SendUDPPacket);
-//  CNapiNPManager_SendTo @0x61ec20 passes encrypt=1]
 void NovaWorldHost::send_status_blob() {
 	const opennova::GateResponse &gate = lobby_.gate_response();
-	const bool post_ip_set =
-			(gate.post_ip[0] | gate.post_ip[1] | gate.post_ip[2] | gate.post_ip[3]) != 0;
-	if (!post_ip_set || gate.post_port == 0 || gate.post_port > 65535) return;
 	std::vector<opennova::HostPlayerSlot> roster;
 	for (const auto &entry : players_) roster.push_back(entry.second);
-	const std::string text = opennova::lobby_update_build(
-			opennova::make_host_status_blob(host_cfg(), lobby_text(), roster));
-	std::vector<uint8_t> packet(text.size() + 4);
-	size_t packet_size = 0;
-	if (opennova::napi_envelope_encode(reinterpret_cast<const uint8_t *>(text.data()), text.size(),
-	                                   packet.data(), packet.size(), &packet_size) != 0) {
-		return;
-	}
-	packet.resize(packet_size);
+	const std::vector<uint8_t> packet = opennova::lobby_update_build_datagram(
+			gate, opennova::make_host_status_blob(host_cfg(), lobby_text(), roster));
+	if (packet.empty()) return;
 	const String post_host = String::num_int64(gate.post_ip[0]) + "." + String::num_int64(gate.post_ip[1]) +
 	                         "." + String::num_int64(gate.post_ip[2]) + "." + String::num_int64(gate.post_ip[3]);
 	lobby_.send_to(post_host, static_cast<int>(gate.post_port), packet);

@@ -9,20 +9,19 @@ extends Node
 ## table filled, the RADIO_TAB_* trio hidden for non-team modes, and the tab
 ## filter + the HIDDEN_BACK / CONFIRM_* exits wired.
 ## The ladder's key selection, the empty-resolve folds, the printf forms, the
-## column headers, the tab filter and the 6 s delay are the engine's
-## (hud/end_round_overlay.h, inmatch/stat_screen_feed.h through the
-## Simulation feeds); this node owns only the device work: the HUD element,
-## the compiled stat.mnu frame, its widgets and the cursor.
+## column headers, the tab filter, the 6 s delay and the transition latch
+## itself (the once-only bytes, the wall-clock gate) are the engine's
+## (hud/end_round_overlay.h EndRoundTransition, inmatch/stat_screen_feed.h
+## through the Simulation feeds); this node owns only the device work: the
+## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
 ##  g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Server_ResetBalanceCounters + Game_InitRespawnState +
-##  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C; every pass
+##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
 ##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
-##  @0x5b7cd0; g_scoreboardDirty && now - dword_A81B2C >= 6000 ms ->
-##  UI_OpenMenuScreen("stat.mnu", "STAT") once (byte_28E561D); the STAT show
+##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
 ##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); stat_filter_tab_handler
-##  @0x562140; both once-only bytes cleared by Game_InitMissionRoundState (ex sub_5B71B0) at Game_StartMission
-##  @0x525903]
+##  @0x562140]
 
 const MENU_FILE := "stat.mnu"
 const MENU_SCREEN := "STAT"
@@ -51,9 +50,8 @@ var _armory_presenter: ArmoryPresenter = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
-var _header_seen := false
-var _header_edge_msec := 0
-var _stat_opened := false
+# The engine's transition latch (the once-only bytes + the 6 s gate).
+var _transition := EndRoundTransition.new()
 var _overlay_shown := false
 var _team_mode := false
 
@@ -117,18 +115,20 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## Mission (re)start clears the once-only latches [orig: Game_InitMissionRoundState @0x525903].
+## Mission (re)start clears the once-only latches (the engine's
+## EndRoundTransition.reset) and the device state behind them.
 func reset() -> void:
-	_header_seen = false
-	_stat_opened = false
+	_transition.reset()
 	_hide_overlay()
 	if is_open():
 		_frame.visible = false
 
 
-## One HUD frame: the announcement edge shows the overlay (and reports it so
-## the shell can tear the deploy/armory screens down); the 6 s + board gate
-## opens STAT once.
+## One HUD frame: the engine's latch steps over the sim's header / board
+## knowledge and the wall clock; this leg performs the device work its
+## verdict names — the announcement edge shows the overlay (and tears the
+## deploy/armory screens down every PRE-STAT pass), the 6 s + board gate opens
+## STAT once, and once STAT has latched nothing from this path redraws.
 func tick() -> void:
 	if _view == null:
 		return
@@ -136,38 +136,26 @@ func tick() -> void:
 	if sim == null:
 		return
 	var state: EndRoundState = sim.get_end_round_state()
-	if not state.is_header_known():
-		if _header_seen:
-			reset()
+	var step := _transition.step(state.is_header_known(), state.is_board_known(),
+			_view.frame_clock_ms)
+	if step & EndRoundTransition.STEP_RESET:
+		reset()
 		return
-	if not _header_seen:
-		_header_seen = true
-		_header_edge_msec = Time.get_ticks_msec()
-		_stat_opened = false
+	if step & EndRoundTransition.STEP_ANNOUNCED:
 		_team_mode = state.is_team_mode()
-	if not _stat_opened:
-		# Only the PRE-STAT phase tears the deploy/armory scene down (every
-		# pass) and draws the overlay; once the STAT phase latches, retail's
-		# transition returns immediately each frame — no teardown, no overlay
-		# — and after the player closes stat.mnu NOTHING from this path
-		# redraws until the host's round cycle exits the mission.
-		# [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — the locret
-		#  @0x5b864a once byte_28E561D is set; UI_TeardownScene @0x5b8674 pre-STAT
-		#  and once more on the open pass @0x5b862a]
+	if step & EndRoundTransition.STEP_PRE_STAT:
 		_tear_down_screens()
 		_apply_overlay(sim)
-		if state.is_board_known() \
-				and Time.get_ticks_msec() - _header_edge_msec \
-						>= Simulation.end_round_stat_screen_delay_msec():
+		if step & EndRoundTransition.STEP_OPEN_STAT:
 			_tear_down_screens()
 			_open_stat_screen(sim)
 	elif is_open():
-		_driver.tick(Time.get_ticks_msec())
+		_driver.tick(_view.frame_clock_ms)
 
 
 func _process(_delta: float) -> void:
 	if is_open() and _driver != null:
-		_driver.tick(Time.get_ticks_msec())
+		_driver.tick(_view.frame_clock_ms)
 
 
 # The resolved overlay ladder (the engine's end_round_overlay_resolve over the
@@ -193,7 +181,6 @@ func _hide_overlay() -> void:
 
 
 func _open_stat_screen(sim: Simulation) -> void:
-	_stat_opened = true
 	_hide_overlay()
 	if not _ensure_menu():
 		return
@@ -264,8 +251,7 @@ func teardown() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
-	_header_seen = false
-	_stat_opened = false
+	_transition.reset()
 
 
 # Buttons and radios arrive on the driver's widget_activated (value_changed

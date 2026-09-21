@@ -113,6 +113,7 @@ class Snapshot:
 					entity.get("emplaced_gun_yaw", 0))
 			out[base + Simulation.PF_EWEAP_GUNPITCH] = float(
 					entity.get("emplaced_gun_pitch", 0))
+			out[base + Simulation.PF_WEAP_SPIN] = float(entity.get("weap_spin", 0))
 			out[base + Simulation.PF_TEX_TEAM_VALID] = float(
 					entity.get("tex_team_valid", 0))
 			out[base + Simulation.PF_TEX_TEAM] = float(
@@ -259,13 +260,13 @@ func _index_with_placed(bms_id: int) -> Dictionary:
 	placed.set_process(false)
 	var index := EntityIndex.new()
 	placed.entity_ref = EntityRef.make(1, 0, bms_id)
-	index.build([placed], [])
+	index.build([placed], null)
 	return { "index": index, "placed": placed }
 
 
 func _empty_index() -> EntityIndex:
 	var index := EntityIndex.new()
-	index.build([], [])
+	index.build([], null)
 	return index
 
 
@@ -1124,13 +1125,20 @@ func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
 		"emplaced_controls_valid": 1,
 		"emplaced_gun_yaw": 0x2000,
 		"emplaced_gun_pitch": 0xE000,
+		"weap_spin": 0xFFFF,
 	}]
 	_present(p, snap)
 	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_eq(model.get_ctrl_values(), {
 		"EWEAP_GUNYAW": 0x2000,
 		"EWEAP_GUNPITCH": 0xE000,
+		"WEAP_SPIN": 0xFFFF,
 	})
+
+	# A barrel phase change alone must invalidate the wire control cache.
+	snap.entities[0]["weap_spin"] = 1234
+	_present(p, snap)
+	assert_eq(model.get_ctrl_values()["WEAP_SPIN"], 1234)
 
 	snap.entities[0]["emplaced_controls_valid"] = 0
 	_present(p, snap)

@@ -36,6 +36,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
+#include <runtime/world/music_vars.h> // MusicVarWrite (the gamemus var pump)
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan), the attach-command ids + the seat mirror
 #include <runtime/world/destruction.h> // DestructionEvents (the destruction drain)
@@ -44,6 +45,7 @@
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
+#include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
@@ -247,6 +249,7 @@ public:
 		PF_EMPLACED_CONTROLS_VALID = opennova::world::PF_EMPLACED_CONTROLS_VALID,
 		PF_EWEAP_GUNYAW = opennova::world::PF_EWEAP_GUNYAW,
 		PF_EWEAP_GUNPITCH = opennova::world::PF_EWEAP_GUNPITCH,
+		PF_WEAP_SPIN = opennova::world::PF_WEAP_SPIN,
 		PF_VEHICLE_MOTION_VALID = opennova::world::PF_VEHICLE_MOTION_VALID,
 		PF_VEHICLE_CTRL_MASK = opennova::world::PF_VEHICLE_CTRL_MASK,
 		PF_VEHICLE_TRACK_LEFT = opennova::world::PF_VEHICLE_TRACK_LEFT,
@@ -520,7 +523,6 @@ private:
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
 	using PresentRowIdentity = SimulationPresentState::PresentRowIdentity;
-	using PresentEffectPose = SimulationPresentState::PresentEffectPose;
 	using CharacterSexRow = SimulationAssetState::CharacterSexRow;
 	void _release_weather_owner();
 	// Portable mission lifecycle and cadence. During one advance call the Godot
@@ -616,14 +618,9 @@ private:
 	// One opt-in gate for every native runtime timer/counter. Retail play keeps
 	// this false; F3 Stats and the manual probe share the public ownership seam.
 	bool runtime_profiling_enabled_ = false;
-	// The FollowOwner effect-pose index over present_ (simulation_present.cpp).
+	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
+	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
-	void ensure_present_effect_pose_cache() const;
-	bool cache_present_effect_pose(
-			const opennova::replication::ClientEntityState &p_entity_state) const;
-	// The host's pool row (D-NET-140: the listen host never presents from ClientState).
-	bool cache_present_effect_pose(const opennova::world::Entity &p_entity) const;
-	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
 	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
 
 	// --- co-op LAN joiner: a pure non-authority inmatch::ClientRuntime (the Joiner role enable_join
@@ -797,6 +794,8 @@ private:
 	const opennova::inmatch::ListenHostState *host_state() const;
 	opennova::inmatch::NapiNPServerCtx *host_ctx();
 	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
+	// The role feeds' view of this session (inmatch/role_feeds.h RoleView).
+	opennova::inmatch::RoleView role_view() const;
 	// The active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source.
 	// A binding member (ADR 0042 d3: no headless joiner consumer; the binding also folds the
 	// host's own view with its perf clocks).
@@ -864,8 +863,6 @@ public:
 	opennova::world::WeatherState *weather_state();
 	const opennova::world::WeatherState *weather_state() const;
 	bool weather_state_bound() const { return weather_state() != nullptr; }
-	// The mission-start seed (the embedder's ONE derivation, env::weather_seed_from_config).
-	void seed_weather(const opennova::world::WeatherSeed &p_seed);
 	// The render owner the kernel's weather tick calls after the sim legs
 	// (null detaches); remembered so the World's death releases the owner's
 	// pointer before the environment can read a freed WeatherState.
@@ -1250,6 +1247,11 @@ public:
 	// the shell shows the DEATH deploy screen and the join watchdog stops (the
 	// remaining transitions are player-paced).
 	bool is_join_deploy_pick_pending() const;
+	// The parity harness's joiner readiness (inmatch/role_feeds.h): the deploy
+	// hold's runtime facts (the shell ANDs its DEATH screen's presented state),
+	// and the in-match arm.
+	bool is_join_deploy_hold_ready() const;
+	bool is_join_in_match_ready(bool p_auto_deploy) const;
 	// The deploy-map overlay signal (retail g_deploy_screen_active). UI only.
 	bool is_join_deploy_overlay_active() const;
 	// The frame loop's open decision for death.mnu's DEATH screen: true once
@@ -1272,7 +1274,10 @@ public:
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
-	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext);
+	// `medic_key_label` is the MedicReq binding's display string the
+	// STROVER_CALLMEDIC static takes (the controls model resolves it).
+	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext,
+			const String &p_medic_key_label);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (engine: runtime/inmatch/client_runtime.h)
@@ -1306,7 +1311,6 @@ public:
 	// engine's stat_screen_row_visible).
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
 	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
-	static int end_round_stat_screen_delay_msec();
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):
@@ -1395,6 +1399,10 @@ public:
 	int get_hud_radar_zoom_q16() const;
 	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
 	int request_hud_map_cycle();
+	// The overlay-window actions' respawn init closes the map (witness at
+	// hud::HudMapControl::on_respawn_init; ordered by HudToggles'
+	// EVENT_OVERLAY_WINDOWS_CLEARED).
+	void request_hud_map_close();
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay
@@ -1408,9 +1416,10 @@ public:
 	// per-frame HUD info. (engine: runtime/hud/hud_frame.h)
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
-	// The gamemus Var7 projection (world/music_vars.h carries the witness).
-	int get_local_player_health_percent() const;
 	int get_local_player_team() const;
+	// The gamemus var pump's writes for this frame (unbound; the world node
+	// relays them through its music_var_changed signal).
+	std::array<opennova::world::MusicVarWrite, 2> game_music_var_writes() const;
 	// The packed Avatars.def character id (npwire/character_id.h) the authority
 	// stamped on the local player — entity+0x15C on the host's own spawn, the
 	// named 0x0C record's id on a joiner (also before L exists); 0 = none yet.
@@ -2187,7 +2196,7 @@ public:
 	// get_local_player_sun_quality() so the FP parts can keep their witnessed
 	// exemption while the third-person body dims.
 	PackedInt64Array get_draw_lighting_changes(const Vector3 &p_light_dir);
-	int get_local_player_sun_quality() const { return present_.local_sun_quality; }
+	int get_local_player_sun_quality() const { return present_.sun_quality.local_quality; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
 	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,

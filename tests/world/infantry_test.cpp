@@ -1,3 +1,4 @@
+#include <runtime/anim/remote_body_state.h>
 // Infantry motor unit tests [orig: Entity_UpdateInfantryAI @0x4b9910] — the mechanics
 // the promote end-to-end walk can't isolate, each against the constants witnessed in
 // the binary (docs/world/world-wac-ai-re.md §3):
@@ -3150,17 +3151,17 @@ void test_remote_body_state_queue_gate() {
     // The shared remote body-state queue predicate [orig: the queue classes
     // @0x4c1169..0x4c1190 / @0x4c060a..0x4c0633] — both netsim's record fold
     // and the presenter FSM apply exactly this rule.
-    CHECK(remote_body_state_defers(0x4u, 0x0u));   // hold current defers everything
-    CHECK(remote_body_state_defers(0x4u, 0x1u));   // even a 0x1 replacement
-    CHECK(remote_body_state_defers(0x24u, 0x1u));  // hold bit wins over the 0x20 leg
-    CHECK(remote_body_state_defers(0x20u, 0x0u));  // 0x20 current defers a non-0x1 arrival
-    CHECK(!remote_body_state_defers(0x20u, 0x1u)); // ...but yields to the 0x1 bit
-    CHECK(!remote_body_state_defers(0x0u, 0x0u));  // plain current commits directly
-    CHECK(!remote_body_state_defers(0x2u, 0x1u));
+    CHECK(opennova::anim::remote_body_state_defers(0x4u, 0x0u));   // hold current defers everything
+    CHECK(opennova::anim::remote_body_state_defers(0x4u, 0x1u));   // even a 0x1 replacement
+    CHECK(opennova::anim::remote_body_state_defers(0x24u, 0x1u));  // hold bit wins over the 0x20 leg
+    CHECK(opennova::anim::remote_body_state_defers(0x20u, 0x0u));  // 0x20 current defers a non-0x1 arrival
+    CHECK(!opennova::anim::remote_body_state_defers(0x20u, 0x1u)); // ...but yields to the 0x1 bit
+    CHECK(!opennova::anim::remote_body_state_defers(0x0u, 0x0u));  // plain current commits directly
+    CHECK(!opennova::anim::remote_body_state_defers(0x2u, 0x1u));
     // The real table rows the netsim fold feeds through infantry_anim_flags:
     // burn 111 carries 0x004 (locked; queues), emote_1 115 carries 0x020.
-    CHECK(remote_body_state_defers(infantry_anim_flags(111), 0x0u));
-    CHECK(remote_body_state_defers(infantry_anim_flags(115),
+    CHECK(opennova::anim::remote_body_state_defers(infantry_anim_flags(111), 0x0u));
+    CHECK(opennova::anim::remote_body_state_defers(infantry_anim_flags(115),
             infantry_anim_flags(111) & ~0x1u));
 }
 

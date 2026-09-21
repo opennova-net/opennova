@@ -68,6 +68,11 @@ public:
 	}
 
 	bool has_clip(const std::string &key) const;
+	// Resolve the canonical AI body slot, then this rig's idle/reset fallbacks.
+	std::string slot_to_key(int slot) const;
+	int clip_variant_count(const std::string &key) const;
+	std::vector<float> clip_variant_lengths(const std::string &key) const;
+	float clip_length(const std::string &key, int variant = 0) const;
 	float clip_fps(const std::string &key, int variant = 0) const;
 	double clip_seconds_at_tick(const std::string &key, int32_t ticks, int variant = 0) const;
 

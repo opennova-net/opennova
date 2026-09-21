@@ -137,6 +137,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_joiner_network_diagnostics);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_pick_pending"),
 	                     &Simulation::is_join_deploy_pick_pending);
+	ClassDB::bind_method(D_METHOD("is_join_deploy_hold_ready"),
+	                     &Simulation::is_join_deploy_hold_ready);
+	ClassDB::bind_method(D_METHOD("is_join_in_match_ready", "auto_deploy"),
+	                     &Simulation::is_join_in_match_ready);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_overlay_active"),
 	                     &Simulation::is_join_deploy_overlay_active);
 	ClassDB::bind_method(D_METHOD("take_join_deploy_overlay_open"),
@@ -147,7 +151,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::send_deployment_pick);
 	ClassDB::bind_method(D_METHOD("get_deploy_list_rows", "default_key", "default_home", "zone_names"),
 	                     &Simulation::get_deploy_list_rows);
-	ClassDB::bind_method(D_METHOD("get_deploy_status", "gametext"), &Simulation::get_deploy_status);
+	ClassDB::bind_method(D_METHOD("get_deploy_status", "gametext", "medic_key_label"),
+			&Simulation::get_deploy_status);
 	ClassDB::bind_method(D_METHOD("request_local_player_medic"),
 	                     &Simulation::request_local_player_medic);
 	ClassDB::bind_method(D_METHOD("local_medic_request_cooldown_ticks"),
@@ -165,8 +170,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_end_round_columns);
 	ClassDB::bind_method(D_METHOD("get_end_round_rows", "tab"), &Simulation::get_end_round_rows,
 	                     DEFVAL(0));
-	ClassDB::bind_static_method("Simulation", D_METHOD("end_round_stat_screen_delay_msec"),
-	                            &Simulation::end_round_stat_screen_delay_msec);
 	ClassDB::bind_static_method("Simulation", D_METHOD("strip_inline_tags", "text"),
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
@@ -193,6 +196,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::request_hud_radar_zoom);
 	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
 	                     &Simulation::request_hud_map_cycle);
+	ClassDB::bind_method(D_METHOD("request_hud_map_close"),
+	                     &Simulation::request_hud_map_close);
 	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
 	                     &Simulation::get_hud_map_mode);
 	ClassDB::bind_method(D_METHOD("get_hud_big_zoom_q16"),
@@ -520,6 +525,7 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_EMPLACED_CONTROLS_VALID);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNYAW);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNPITCH);
+	BIND_ENUM_CONSTANT(PF_WEAP_SPIN);
 	BIND_ENUM_CONSTANT(PF_VEHICLE_MOTION_VALID);
 	BIND_ENUM_CONSTANT(PF_VEHICLE_CTRL_MASK);
 	BIND_ENUM_CONSTANT(PF_VEHICLE_TRACK_LEFT);

@@ -1,4 +1,6 @@
 #include "lights/effect_light_director.h"
+#include "mission/mission_object_placer.h"
+#include "mission/static_source_convert.h"
 
 #include "mission/mission_root.h"
 
@@ -7,7 +9,6 @@
 #include "env/weather.h"
 #include "lights/light_spawn.h"
 #include "mission/mission_data.h"
-#include "mission/static_source_records.h"
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
 #include "object/object_data.h"
@@ -24,7 +25,6 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/aabb.hpp>
@@ -44,56 +44,36 @@ namespace {
 constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
 constexpr const char *kCoronaShaderPath = "res://shaders/light_corona.gdshader";
 
-int now_ms() {
-	return static_cast<int>(Time::get_singleton()->get_ticks_msec());
-}
-
 } // namespace
 
 EffectLightDirector::EffectLightDirector() {
 	scene_.instantiate();
 }
 
-void EffectLightDirector::setup(Node *p_world, const Callable &p_static_sources,
-		const Callable &p_static_draw_sources, const Callable &p_static_draw_source_revision) {
-	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
-	provider_ = nullptr;
-	static_sources_ = p_static_sources;
-	static_draw_sources_ = p_static_draw_sources;
-	static_draw_source_revision_ = p_static_draw_source_revision;
-	static_rows_revision_ = -1;
+void EffectLightDirector::setup(Node *p_world, const Ref<MissionObjectPlacer> &p_placer) {
+	setup_with_provider(p_world, p_placer.ptr());
+	placer_provider_ = p_placer;
 }
 
 void EffectLightDirector::setup_with_provider(Node *p_world, StaticSourceProvider *p_provider) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	placer_provider_.unref();
 	provider_ = p_provider;
-	static_sources_ = Callable();
-	static_draw_sources_ = Callable();
-	static_draw_source_revision_ = Callable();
 	static_rows_revision_ = -1;
 }
 
-Array EffectLightDirector::_static_sources() const {
-	if (provider_ != nullptr) {
-		return provider_->static_item_effect_sources();
-	}
-	return static_sources_.is_valid() ? Array(static_sources_.call()) : Array();
+std::vector<opennova::mission::StaticEffectSource> EffectLightDirector::_static_sources() const {
+	return provider_ != nullptr ? provider_->static_item_effect_sources()
+			: std::vector<opennova::mission::StaticEffectSource>();
 }
 
-Array EffectLightDirector::_static_draw_sources() const {
-	if (provider_ != nullptr) {
-		return provider_->static_light_draw_sources();
-	}
-	return static_draw_sources_.is_valid() ? Array(static_draw_sources_.call()) : Array();
+std::vector<opennova::mission::StaticLightDrawSource> EffectLightDirector::_static_draw_sources() const {
+	return provider_ != nullptr ? provider_->static_light_draw_sources()
+			: std::vector<opennova::mission::StaticLightDrawSource>();
 }
 
 int64_t EffectLightDirector::_static_draw_source_revision() const {
-	if (provider_ != nullptr) {
-		return static_cast<int64_t>(provider_->static_light_draw_source_revision());
-	}
-	return static_draw_source_revision_.is_valid()
-			? static_cast<int64_t>(static_draw_source_revision_.call())
-			: 0;
+	return provider_ != nullptr ? static_cast<int64_t>(provider_->static_light_draw_source_revision()) : 0;
 }
 
 Node *EffectLightDirector::_world() const {
@@ -188,29 +168,26 @@ void EffectLightDirector::reattach() {
 	// the source walk, and retail still binds it to that building's owner
 	// group.
 	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const Ref<StaticEffectSource> mapped_source = static_sources_snapshot_[source_index];
-		if (mapped_source.is_null()) {
-			continue;
-		}
-		const int bms_id = mapped_source->get_bms_id();
+		const auto &mapped_source = static_sources_snapshot_[source_index];
+		const int bms_id = mapped_source.bms_id;
 		if (bms_id != 0) {
 			static_owner_by_bms_.insert(bms_id, LightScene::owner_id_for_static_source(source_index));
 		}
 	}
 	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const Ref<StaticEffectSource> source = static_sources_snapshot_[source_index];
-		if (source.is_null() || spawned_static_.has(static_cast<int>(source_index))) {
+		const auto &source = static_sources_snapshot_[source_index];
+		if (spawned_static_.has(static_cast<int>(source_index))) {
 			continue;
 		}
-		const Ref<ObjectData> data = source->get_object_data();
+		const Ref<ObjectData> data = provider_->static_source_object_data(source.asset_id);
 		if (data.is_null()) {
 			continue;
 		}
 		// Batched statics are entities too: a subobject record binds to this
 		// tagged owner and the atlas draw row declares the same identity.
 		// [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
-		const Transform3D xform = source->get_world_transform();
-		const bool is_building = source->get_kind() == MissionData::KIND_BUILDING;
+		const Transform3D xform = from_static_source_transform(source.world_transform);
+		const bool is_building = source.kind == MissionData::KIND_BUILDING;
 		// Retail skips the blink query for a building's own records; every
 		// other static resolves containment once at its placement origin.
 		const BlinkOwner blink_owner = is_building ? BlinkOwner() : _blink_owner_at(xform.origin);
@@ -458,13 +435,11 @@ void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weath
 }
 
 void EffectLightDirector::_rebuild_static_light_rows() {
-	const Array descriptors = _static_draw_sources();
+	const auto descriptors = _static_draw_sources();
 	int row_count = 0;
 	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const Ref<StaticLightDrawSource> descriptor = descriptors[i];
-		if (descriptor.is_valid()) {
-			row_count = std::max(row_count, descriptor->get_atlas_row() + 1);
-		}
+		const auto &descriptor = descriptors[i];
+		row_count = std::max(row_count, descriptor.atlas_row + 1);
 	}
 	PackedVector3Array entity_positions;
 	PackedInt32Array entity_bound_radii_q16;
@@ -481,23 +456,17 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 	interior_sections.resize(row_count);
 	active.resize(row_count);
 	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const Ref<StaticLightDrawSource> descriptor = descriptors[i];
-		if (descriptor.is_null()) {
-			continue;
-		}
-		const int atlas_row = descriptor->get_atlas_row();
-		const int source_index = descriptor->get_source_index();
+		const auto &descriptor = descriptors[i];
+		const int atlas_row = descriptor.atlas_row;
+		const int source_index = descriptor.source_index;
 		if (atlas_row < 0 || atlas_row >= row_count || source_index < 0 ||
 				source_index >= static_sources_snapshot_.size()) {
 			continue;
 		}
-		const Ref<StaticEffectSource> source = static_sources_snapshot_[source_index];
-		if (source.is_null()) {
-			continue;
-		}
-		entity_positions[atlas_row] = source->get_world_transform().origin;
-		entity_bound_radii_q16[atlas_row] = source->get_entity_bound_radius_q16();
-		active[atlas_row] = descriptor->is_active() ? 1 : 0;
+		const auto &source = static_sources_snapshot_[source_index];
+		entity_positions[atlas_row] = from_static_source_transform(source.world_transform).origin;
+		entity_bound_radii_q16[atlas_row] = source.entity_bound_radius_q16;
+		active[atlas_row] = descriptor.active ? 1 : 0;
 		// The row's two groups are the engine's static-row policy
 		// (renderer::static_light_row_groups): a building is its own
 		// interior group at section zero with the owner section re-scoped
@@ -505,11 +474,11 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		// and carries the blink interior its placement origin resolves.
 		opennova::renderer::StaticLightRowInputs inputs;
 		inputs.static_owner = static_cast<uint64_t>(LightScene::owner_id_for_static_source(source_index));
-		inputs.robj_index = descriptor->get_robj_index();
-		inputs.is_building = (descriptor->get_kind() >= 0 ? descriptor->get_kind() : source->get_kind()) ==
+		inputs.robj_index = descriptor.robj_index;
+		inputs.is_building = (descriptor.kind >= 0 ? descriptor.kind : source.kind) ==
 				MissionData::KIND_BUILDING;
 		if (!inputs.is_building) {
-			const BlinkOwner interior = _blink_owner_at(source->get_world_transform().origin);
+			const BlinkOwner interior = _blink_owner_at(from_static_source_transform(source.world_transform).origin);
 			inputs.blink_hit = interior.valid();
 			inputs.blink_owner_entity = static_cast<uint64_t>(interior.owner);
 			inputs.blink_section = interior.section;
@@ -530,7 +499,7 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 	static_rows_active_ = active;
 }
 
-void EffectLightDirector::render_frame(Camera3D *p_camera,
+void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 		const TypedArray<ObjectModel> &p_viewmodel_parts, int p_viewmodel_wire_handle,
 		bool p_run_census) {
 	if (p_camera == nullptr) {
@@ -542,7 +511,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	MissionEnvironment *env = _environment();
 	Weather *weather = _weather();
 	const Vector3 cam_pos = p_camera->get_camera_transform().origin;
-	const int time_ms = now_ms();
+	const int time_ms = static_cast<int>(p_time_ms);
 	frame_models_.clear();
 	frame_entity_positions_.clear();
 	frame_entity_bound_radii_q16_.clear();
@@ -620,6 +589,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	// hot caller skips it while the F3 Stats capture is off; a diagnostics
 	// read refreshes it on demand (run_census_now).
 	census_cam_pos_ = cam_pos;
+	census_time_ms_ = time_ms;
 	if (p_run_census) {
 		scene()->render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather);
 		census_stale_ = false;
@@ -629,7 +599,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	scene()->render_model_frame(frame_models_, frame_owners_, frame_interior_owners_,
 			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather,
 			frame_entity_positions_, frame_entity_bound_radii_q16_);
-	_render_coronas(p_camera, gain, weather, frame_models_, frame_owners_, env);
+	_render_coronas(p_camera, gain, time_ms, weather, frame_models_, frame_owners_, env);
 }
 
 void EffectLightDirector::run_census_now() {
@@ -639,7 +609,7 @@ void EffectLightDirector::run_census_now() {
 	// census_frame refreshes the rows without restamping the report's mode:
 	// a report read with the F3 stats off keeps saying what the gameplay
 	// pass (render_model_frame) reported.
-	scene()->census_frame(census_cam_pos_, QUERY_RADIUS, light_gain(), now_ms(), _weather());
+	scene()->census_frame(census_cam_pos_, QUERY_RADIUS, light_gain(), census_time_ms_, _weather());
 	census_stale_ = false;
 }
 
@@ -756,7 +726,7 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 // the env fog rides in as the fog-to-black fold
 // [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
 void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_gain,
-		Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
+		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
 	corona_frame_ = (corona_frame_ + 1) & 3;
 	Ref<EnvLightValues> fog;
@@ -776,7 +746,7 @@ void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_g
 	// hidden through visible_instance_count.
 	const Transform3D camera_transform = p_camera->get_camera_transform();
 	const int rows = scene()->fill_corona_multimesh(camera_transform.origin,
-			-camera_transform.basis.get_column(2), p_gain, now_ms(), corona_frame_, p_weather,
+			-camera_transform.basis.get_column(2), p_gain, p_time_ms, corona_frame_, p_weather,
 			p_models, p_owners, fog, instance->get_multimesh());
 	instance->set_visible(rows > 0);
 }
@@ -953,9 +923,7 @@ Ref<EffectLightReport> EffectLightDirector::get_report() {
 }
 
 void EffectLightDirector::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("setup", "world", "static_sources", "static_draw_sources",
-								 "static_draw_source_revision"),
-			&EffectLightDirector::setup, DEFVAL(Callable()));
+	ClassDB::bind_method(D_METHOD("setup", "world", "placer"), &EffectLightDirector::setup);
 	ClassDB::bind_method(D_METHOD("reset"), &EffectLightDirector::reset);
 	ClassDB::bind_method(D_METHOD("reattach"), &EffectLightDirector::reattach);
 	ClassDB::bind_static_method("EffectLightDirector", D_METHOD("owner_id_for_node", "node"),
@@ -968,7 +936,7 @@ void EffectLightDirector::_bind_methods() {
 			DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("scene"), &EffectLightDirector::scene);
 	ClassDB::bind_method(D_METHOD("light_gain"), &EffectLightDirector::light_gain);
-	ClassDB::bind_method(D_METHOD("render_frame", "camera", "viewmodel_parts",
+	ClassDB::bind_method(D_METHOD("render_frame", "camera", "time_ms", "viewmodel_parts",
 								 "viewmodel_wire_handle", "run_census"),
 			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()), DEFVAL(-1),
 			DEFVAL(true));

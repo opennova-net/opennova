@@ -728,10 +728,6 @@ claim or divergence.
   build, shares one parsed resource with terrain/foliage, clears it on unload,
   and prevents stale blockers on a subsequent no-TIL load.
 
-- `foliage_shader_contract_test.gd`: strict `D3DCMP_GREATER` boundary for the
-  shared detail include and the MODEL shader, plus the anisotropic `:fd`
-  sampler hints, the textureGrad call sites, and the conservative 4x4-terminal
-  guard.
 - `foliage_tile_cache_runtime_test.gd`: production Terrain-to-dispatcher order,
   shared `Texture2DArray` ownership, valid ready-layer/page bounds, and a
   cross-frame LOD regression proving retained fine pages cannot override the

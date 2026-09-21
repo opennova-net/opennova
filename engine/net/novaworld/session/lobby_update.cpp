@@ -1,6 +1,8 @@
 #include <net/novaworld/lobby_update.h>
 
 #include <base/io/strutil.h>
+#include <net/napi/envelope.h>
+#include <net/novaworld/gate_response.h>
 
 #include <cstdio>
 #include <string_view>
@@ -57,6 +59,29 @@ std::string lobby_update_build(const LobbyStatusBlob &blob) {
 	}
 
 	return out;
+}
+
+// The plaintext status heartbeat retail posts to the gate's POSTIPADDRESS:POSTIPPORT
+// right after its ClientHostUpdate on the same refresh, when the gate supplied
+// both and the junction bypass is off. It rides the NAPI CRC envelope (the
+// socket layer's encrypt flag) with no NWU and no NP session: the gate reads
+// it off its own port. [orig: Lobby_UpdateServerInfo @0x4ff448 (the
+//  dword_B5F490/dword_B5F494 non-zero gate) .. @0x4ff62c (CNapiNetwork_SendUDPPacket);
+//  CNapiNPManager_SendTo @0x61ec20 passes encrypt=1]
+std::vector<uint8_t> lobby_update_build_datagram(const GateResponse &gate,
+                                                 const LobbyStatusBlob &blob) {
+	const bool post_ip_set =
+			(gate.post_ip[0] | gate.post_ip[1] | gate.post_ip[2] | gate.post_ip[3]) != 0;
+	if (!post_ip_set || gate.post_port == 0 || gate.post_port > 65535) return {};
+	const std::string text = lobby_update_build(blob);
+	std::vector<uint8_t> packet(text.size() + 4);
+	size_t packet_size = 0;
+	if (napi_envelope_encode(reinterpret_cast<const uint8_t *>(text.data()), text.size(),
+	                         packet.data(), packet.size(), &packet_size) != 0) {
+		return {};
+	}
+	packet.resize(packet_size);
+	return packet;
 }
 
 bool lobby_update_parse(std::string_view text, LobbyStatusBlob &out) {

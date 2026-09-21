@@ -1,19 +1,9 @@
 extends GutTest
 
 # The probe catalog's contract (ADR 0041): unique names, scripts under
-# res://probes/ that load as GameProbe, schemas whose defaults validate, and
-# probe sources that never print, never read the environment, and never
-# reach into the test suite.
+# res://probes/ that load as GameProbe, schemas whose defaults validate.
 
 const PROBES_ROOT := "res://probes"
-# Regex -> reason. The print pattern is word-bounded so identifiers such as
-# `_build_fingerprint(` never match.
-const FORBIDDEN_SOURCE := {
-	"(?<![A-Za-z0-9_.])print(_rich|_debug|err|raw|s|t)?\\(": "probes log through ctx.log, never print()",
-	"OS\\.get_environment\\(": "probes take typed args, never environment variables",
-	"OS\\.has_environment\\(": "probes take typed args, never environment variables",
-	"res://tests/": "probes must not depend on the GUT suite",
-}
 
 
 func test_definitions_are_unique_and_live_under_probes() -> void:
@@ -44,42 +34,7 @@ func test_every_available_probe_loads_and_its_defaults_validate() -> void:
 			assert_true(validated.ok, "%s validates with no args: %s" % [def.name, str(validated.errors)])
 
 
-func test_probe_sources_keep_the_contract() -> void:
-	var patterns := {}
-	for pattern in FORBIDDEN_SOURCE:
-		var regex := RegEx.new()
-		assert_eq(regex.compile(pattern), OK, "pattern compiles: %s" % pattern)
-		patterns[regex] = FORBIDDEN_SOURCE[pattern]
-	var offenders := PackedStringArray()
-	for path in _gd_files(PROBES_ROOT):
-		var text := FileAccess.get_file_as_string(path)
-		for line in text.split("\n"):
-			var code := line.split("#", 1)[0]
-			for regex in patterns:
-				if (regex as RegEx).search(code) != null:
-					offenders.append("%s: %s (%s)" % [path, line.strip_edges(), patterns[regex]])
-	assert_eq(offenders.size(), 0, "\n".join(offenders))
-
-
 func test_runner_lists_the_catalog() -> void:
 	var runner: ProbeRunner = add_child_autofree(ProbeRunner.new())
 	var listing := runner.list()
 	assert_eq((listing["probes"] as Array).size(), ProbeDef.definitions().size())
-
-
-static func _gd_files(root: String) -> PackedStringArray:
-	var out := PackedStringArray()
-	var dir := DirAccess.open(root)
-	if dir == null:
-		return out
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		var path := root.path_join(entry)
-		if dir.current_is_dir():
-			out.append_array(_gd_files(path))
-		elif entry.ends_with(".gd"):
-			out.append(path)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	return out

@@ -110,10 +110,7 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 }
 
 bool Simulation::local_death_screen_active() const {
-	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
-	// role's view folds (the listen host's own loopback included)
-	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b, see runtime/replication/client_state.h].
-	return runtime_ != nullptr && runtime_->state().death_screen_active;
+	return opennova::inmatch::local_death_screen_active(role_view());
 }
 
 Ref<PlayerLocalView> Simulation::get_local_player_view() const {

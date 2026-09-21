@@ -6,23 +6,17 @@
 // behavior.
 #pragma once
 
+#include <runtime/inmatch/effect_pose_index.h> // EffectPoseIndex (+ the BmsHandleIndex it resolves through)
+#include <runtime/inmatch/role_feeds.h> // SunQualityFeed
+
 #include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/entity.h>         // EntityHandle
 
 #include <cstdint>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
-
-namespace opennova::inmatch {
-class ClientRuntime;
-}
-namespace opennova::world {
-class World;
-}
 
 namespace godot {
 
@@ -53,32 +47,11 @@ struct SimulationPresentState {
 	// does so once per fixed tick inside a catch-up batch. Keep the identity index
 	// native and generation-bound so GDScript does not rebuild the full PF_* buffer
 	// plus four Dictionary indexes for every catch-up tick.
-	struct PresentEffectPose {
-		Vector3 position;
-		Vector3 rotation_deg;
-	};
-	mutable bool effect_pose_cache_valid = false;
-	mutable uint32_t effect_pose_cache_logic_tick = 0;
-	mutable uint32_t effect_pose_cache_client_frame = 0;
-	mutable const opennova::inmatch::ClientRuntime *effect_pose_cache_runtime = nullptr;
-	mutable std::unordered_map<uint16_t, PresentEffectPose> effect_poses_by_handle;
-	mutable std::unordered_map<int, uint16_t> effect_handles_by_bms_id;
-	// Authored bms id -> registry handle, rebuilt on the registry's spawn
-	// serial (retail's slot carries the entity pointer from registration;
-	// this is the lookup that identity stands in for).
-	mutable std::unordered_map<int, opennova::world::EntityHandle> bms_handle_index;
-	mutable uint64_t bms_handle_index_serial = 0;
-	mutable const opennova::world::World *bms_handle_index_world = nullptr;
-	mutable std::unordered_map<int, uint16_t> effect_handles_by_ssn;
-	mutable std::unordered_map<uint64_t, uint16_t> effect_handles_by_origin;
-	// A missing owner is also stable for one decoded-client epoch. Remember
-	// misses so stale effect attachments cannot turn lazy lookup into one full
-	// entity scan per fixed tick/query. Positive caches remain authoritative
-	// when another alias materializes the same row.
-	mutable std::unordered_set<uint16_t> effect_missing_handles;
-	mutable std::unordered_set<int> effect_missing_bms_ids;
-	mutable std::unordered_set<int> effect_missing_ssns;
-	mutable std::unordered_set<uint64_t> effect_missing_origins;
+	// The present-effect pose index and the authored-id handle index
+	// (inmatch/effect_pose_index.h, world/bms_handle_index.h): both lazy,
+	// both keyed on the decoded-client epoch / the registry's spawn serial.
+	mutable opennova::inmatch::EffectPoseIndex effect_poses;
+	mutable opennova::world::BmsHandleIndex bms_handles;
 	// The PF_* present rows are built by the engine (runtime/inmatch/present_rows.h,
 	// both roles); this owns the host path's respawn-revision mirror and the
 	// scratch the PackedFloat32Array copies from.
@@ -118,14 +91,9 @@ struct SimulationPresentState {
 	// re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last;
 	std::vector<int32_t> occl_apply_culled_last;
-	// Per-entity sun-visibility quality last emitted to the shell, split by
-	// identity domain. Wire handle zero and a placed BMS id zero are both valid
-	// sentinels in their own schemas, so they must never share one integer map.
-	// Unlisted entities are quality 4 (factor 1.0), the node default.
-	std::unordered_map<int32_t, uint8_t> sun_quality_last_by_bms;
-	std::unordered_map<uint16_t, uint8_t> sun_quality_last_by_wire;
-	int64_t sun_quality_layout_revision = -1;
-	uint8_t local_sun_quality = 4;
+	// The per-drawn-entity sun-visibility diff and its last-emitted caches
+	// (inmatch/role_feeds.h SunQualityFeed carries the witnesses).
+	opennova::inmatch::SunQualityFeed sun_quality;
 	// Mutable retail Lighting_SetInteriorLightGroup state left by the marched
 	// iris samples. Outdoor samples clear it, indoor samples with interior data
 	// replace it, and indoor-no-data samples intentionally retain the previous

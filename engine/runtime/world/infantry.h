@@ -203,18 +203,6 @@ inline int32_t body_anim_slot_from_state(int state) {
 
 uint32_t infantry_anim_flags(int state);
 
-// The remote body-state QUEUE gate over two per-state anim-flags words
-// [orig: the queue classes @0x4c1169..0x4c1190 / @0x4c060a..0x4c0633]: a
-// hold-class current (flags 0x4), or a 0x20-class current whose replacement
-// lacks the 0x1 bit, defers the arrival to the current clip's completion
-// boundary; anything else commits directly. Shared by the replication record fold
-// and the presenter's body-state FSM so the rule cannot drift between them.
-inline bool remote_body_state_defers(uint32_t current_flags,
-                                     uint32_t next_flags) {
-    return (current_flags & 0x4u) != 0u ||
-            ((current_flags & 0x20u) != 0u && (next_flags & 0x1u) == 0u);
-}
-
 // The gait->stance transition-clip pair map [orig: AnimMap_UpdateEntity
 // @0x40b662..0x40b737]: a forward gait retargeting to its crouch/prone walk
 // first plays the matching 169-172 transition clip and defers the real target

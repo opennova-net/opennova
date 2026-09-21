@@ -345,7 +345,7 @@ public:
 	static double held_weapon_hand_frame_y_rad();
 
 	// Emplaced-weapon CTRL registers (bound statics = the coop_two_sim test's
-	// seam onto the native leg): EWEAP_GUNYAW/EWEAP_GUNPITCH only —
+	// seam onto the native leg): EWEAP_GUNYAW/EWEAP_GUNPITCH/WEAP_SPIN only —
 	// a bulk CTRL clear would also erase live WAC channels.
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
@@ -464,7 +464,7 @@ private:
 		// construction (rows rebuild with invalid caches). The CTRL field list
 		// lives beside its leg in entity_presenter_wire.cpp; the aim cache is
 		// the same contiguous payload the placed walk compares.
-		static constexpr int kCtrlCacheCount = 41;
+		static constexpr int kCtrlCacheCount = 42;
 		float ctrl_cache[kCtrlCacheCount];
 		std::array<float, kAimPayloadFloats> aim_cache = {};
 		bool ctrl_cache_valid = false;

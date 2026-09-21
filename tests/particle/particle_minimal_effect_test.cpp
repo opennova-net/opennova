@@ -51,6 +51,15 @@ int main() {
 	if (!expect(effect.pdefs.size() == 1, "effect has one pdef ref")) return 1;
 	if (!expect(effect.pdefs[0] == "Buildup dots", "pdef id with whitespace parses")) return 1;
 
+	// The former ParticleFile binding lookup: ordered, case-insensitive and
+	// null on a miss, with the complete authored pdef list retained.
+	if (!expect(file.find_effect("bUILDUP") == &effect, "effect lookup folds case")) return 1;
+	if (!expect(file.find_effect("missing") == nullptr, "unknown effect is absent")) return 1;
+	opennova::particle::ParticleFile duplicates;
+	duplicates.effects = {{"First", {"one"}}, {"FIRST", {"two"}}};
+	if (!expect(duplicates.find_effect("first") == &duplicates.effects[0],
+			"effect lookup preserves first definition order")) return 1;
+
 	const opennova::particle::ParticleDef &particle = file.particles[0];
 	if (!expect(particle.id == "Buildup dots", "particle id with whitespace parses")) return 1;
 	if (!expect(file.find_particle("bUILDUP DOTS") == &particle,

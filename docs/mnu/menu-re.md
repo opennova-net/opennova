@@ -210,11 +210,11 @@ and gated on by `options_screen_init @ 0x554820` and
 `Game_CloseInGameScreens @ 0x54b942`). A resolution change in flight therefore
 SUPPRESSES the remount until it settles; the request stays raised.
 
-`menu_shell.gd` ports the deferral: `_apply_expansion` validates the pick and
-stores `_expansion_reload_request`, and the public `update_menu_frame()` (the
-`_process` body, our `Menu_UpdateFrame`) consumes it at its tail through
-`_mount_expansion`. OpenNova has no video-mode state machine, so only the
-request flag gates there.
+`menu::MenuFlow` (`engine/runtime/menu/menu_flow.cpp`) owns pick validation
+and the deferred request. `menu_shell.gd::update_menu_frame()` consumes it at
+its tail through `MenuDriver.take_expansion_reload` and applies the resource
+mount in `_mount_expansion`. OpenNova has no video-mode state machine, so only
+the request flag gates there.
 
 **Scene walk** `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]`: every screen
 in the scene container (`scene+20`: `{+4 array, +8 count}`) draws via vtable+24
@@ -478,7 +478,7 @@ geometry queries
 (row/popup/arrow/table hit tests over the same layout math), the hotkey scan,
 and the edit-input module. The Godot applier (`MenuFrame`,
 `godot/src/mnu/menu_frame.cpp`) uploads textures/fonts and rasterizes
-the list; `MenuDriver` (`godot/game/menu_driver.gd`) orchestrates navigation,
+the list; `menu::MenuRuntime` (`engine/runtime/menu/menu_runtime.cpp`, bound as `MenuDriver`) orchestrates navigation,
 actions, popups, and sounds over it — since the 2026-08-10 shell cutover this
 is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
 `tests/menu/menu_frame_compiler_test`.
@@ -973,7 +973,7 @@ Reimpl (the compiled MenuFrame/MenuDriver path, the one menu runtime since the R
 cutover): `MenuFrameCompiler::emit_combo_popup` (engine/runtime/menu/menu_frame.*) draws
 the open combo's LIST_BOX popup as the first op of the menu-top overlay, so it wins the
 draw order over every sibling, and while a popup is open `MenuDriver`
-(godot/game/menu_driver.gd) routes the pointer through `pump_popup_mouse` /
+(engine/runtime/menu/menu_runtime.cpp) routes the pointer through `pump_popup_mouse` /
 `combo_popup_contains` / `combo_popup_row_at` only, implementing the witnessed
 outside-press close/consume + dead-cell rule; the driver tracks the single active
 combo (`close_active_combo_popup`) and closes it on every screen change. The earlier
@@ -1058,7 +1058,7 @@ byte-exact names/tokens/Class id + the default VK binding from the catalog's bin
 validated Forward=W/Up, Reload=R, Jump=Space, …), the Class-name table (`action_class_name`), the
 VK decoder (`key_name`), and the binding format (`format_binding`); `build_rows(device)` mirrors
 `UI_PopulateControlMappingList`. The Godot wrapper **`ControlsModel`** hands rows to
-`godot/game/menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
+`menu::OptionsScreen` (`engine/runtime/menu/options_screen.cpp`, `fill` / `switch_device`), which fills the
 `CONTROL_MAPPING` `MnuTable` via `add_rows` and wires the Keyboard/Mouse/Joystick radios to
 repopulate. The earlier reimpl left the table empty — `menu_shell` had no populate path for a
 `type="table"`, so the Controls tab rendered floating headers over a blank grid.
@@ -1136,7 +1136,7 @@ widget through a single shell `.lwf` profile - all corrected.
 Every screen event stores the active screen's `MUSICVAR` field (screen +0x14) into
 AudioVM Var2 at `0x54eff4`. The write is unconditional: an absent field contributes
 its parsed default zero, and showing the same screen again repeats the store. The
-runtime mirrors that rule in `MenuDriver` (godot/game/menu_driver.gd): every screen show
+runtime mirrors that rule in `MenuRuntime` (engine/runtime/menu/menu_runtime.cpp): every screen show
 reads `MnuDocument::get_screen_music_var` (the parsed default zero when the field is
 absent) and stores it through `MusicDirector.set_var`.
 
@@ -1438,7 +1438,7 @@ Accepted/divergent (each a documented decision, not a defect):
   registry, and close-on-screen-change/exit/hide. Since the 2026-08-10 shell
   cutover the compiled path carries all of this: `MenuFrameCompiler`'s popup
   rect/row hit tests (`engine/runtime/menu/menu_frame.cpp`) + `MenuDriver`'s
-  popup lifecycle (`godot/game/menu_driver.gd` — single-open, outside-press
+  popup lifecycle (`engine/runtime/menu/menu_runtime.cpp` — single-open, outside-press
   close/consume, close-on-screen-change/exit); the Control-tree catcher
   overlay described above is historical.
 - **D-MNU-12 (popup draw order — reimpl mapping):** the original has NO overlay draw pass —
@@ -1490,7 +1490,7 @@ Accepted/divergent (each a documented decision, not a defect):
   through the mount stack rather than the paired volume — identical on
   retail data; `.npj`/`.npz` legs not ported) + the `MissionCatalog`
   binding (the code-word stamp) + `menu_shell.gd`'s SP seeding
-  (`_seed_mission_list` clears the reimpl's row-0 preselect to match the
+  (`MenuFlow::seed_missions` clears the reimpl's row-0 preselect to match the
   witnessed no-selection populate). Pinned by `mission_catalog` ctest +
   the shell GUT SP case over the retail `00tra.bin` fixture. The HOST
   screen's populate/filter chain is split off as D-MNU-17.
@@ -1572,7 +1572,7 @@ Accepted/divergent (each a documented decision, not a defect):
   callback `@ 0x649c7d`); the reimpl deliberately inverts — `widget_activated`
   emits first — because its shell REPLACES the document on a cross-`.mnu`
   jump, and it guards the dispatch against a document swap during the emit
-  (`menu_driver.gd _emit_activated_then_dispatch`). The full story is the
+  (`MenuRuntime::activate`). The full story is the
   "Activation vs scripted ACTION order" paragraph in the popup section above.
 
 **IDB changes (2026-08-10, the D-MNU-17 host-dialog walk; saved):** repaired
@@ -1685,10 +1685,11 @@ button->mask translation, and `is_token_pressed` — the one gameplay sampling
 call: keyboard slots gated on their modifier plus the held-sampleable
 L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
 without sampling), `controls_bindings.gd` (the shared live model +
-persistence), `options_menu_controller.gd` (arm/capture/cancel +
-DEFAULTS/CLEAR_KEY, presence-gated on a CONTROL_MAPPING document since the
-2026-09-01 tidy; moved out of `menu_shell.gd` by PR #611; a screen change
-cancels an armed capture like retail's screen-owned pump state), and
+persistence), `menu::OptionsScreen` in `engine/runtime/menu/options_screen.cpp`
+(arm/capture/cancel, DEFAULTS/CLEAR_KEY, device switching and the CONTROL_MAPPING
+presence gate), reached through `MenuDriver`; `options_menu_controller.gd`
+forwards device input and applies persistence/preview requests. A screen
+change cancels an armed capture like retail's screen-owned pump state, and
 `godot/src/player/player_input_router.cpp` samples gameplay input through the live records. Divergences: persistence rides `user://controls.cfg` until the
 player.sav profile format slice exists, and the joystick capture page is not
 wired (both under D-CTRL rows). The retail arm also fires on a single click
@@ -1740,8 +1741,9 @@ saved gamma, the saved music volume (`AudioVM_SetGlobalVolume`), and a menu
 byte.
 
 Reimpl: `player_options.gd` applies edits live (retail's preview) and
-`options_menu_controller.gd` snapshots the state at surface entry —
-OPT_ACCEPT re-baselines the snapshot, OPT_CANCEL restores it and re-seeds
+`options_menu_controller.gd` snapshots the state at surface entry. The engine
+`menu::OptionsScreen` requests a new baseline on OPT_ACCEPT or restore/re-seed
+on OPT_CANCEL, which the script applies through the shared options owner
 (`menu_shell_test.gd` pins commit-vs-revert). PR #611's "Cancel only
 navigates" was a divergence, fixed 2026-09-01. Residuals, each a ledger row:
 our persist runs per edit (retail persists on Accept — invisible except
@@ -1912,7 +1914,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `MenuFrameCompiler::emit_spin_arrows` + the shared `spin_arrow_hit_` claim (parent-relative SPINUP/SPINDOWN) — `engine/runtime/menu/menu_frame.cpp` (D-MNU-16) |
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | the compiled combo face + popup — `MenuFrameCompiler::emit_combo_popup`/`combo_popup_rect` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7; the closed face pins D-MNU-15) |
-| `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | an open dropdown owns the mouse exclusively — `MenuDriver.process_mouse`'s popup branch over `MenuFrameCompiler::combo_popup_row_at`/`combo_popup_contains` (`godot/game/menu_driver.gd`, D-MNU-11) |
+| `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | an open dropdown owns the mouse exclusively — `MenuDriver.process_mouse`'s popup branch over `MenuFrameCompiler::combo_popup_row_at`/`combo_popup_contains` (`engine/runtime/menu/menu_runtime.cpp`, D-MNU-11) |
 | `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | `MenuFrameCompiler::pump_mouse` — the per-frame single-claim walk (`engine/runtime/menu/menu_frame.cpp`) |
 | `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | popup-open frames bypass the widget claim walk entirely (`MenuDriver.process_mouse` returns from the popup branch); hidden subtrees never hit in the claim walk |
 | `combobox_handle_event @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `MenuDriver` combo handling — toggle on activate, `_open_combo_popup`/`close_active_combo_popup` single-open, outside-press close, row pick -> `_combo_select` (D-MNU-11) |
@@ -1923,14 +1925,14 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
-| `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuDriver._dispatch_widget_actions` + the shell action signals — `godot/game/menu_driver.gd` |
-| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
+| `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuRuntime::activate` + the shell action signals — `engine/runtime/menu/menu_runtime.cpp` |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `OptionsScreen::fill` (`engine/runtime/menu/options_screen.cpp`) |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> binding name + display fallback) | `controls::key_binding_names` / `controls::key_name` |
 | `KeyHelp_GetStringWithFallback @ 0x51ed40` (the keyhelp.bin `Keys` lookup with the caller's fallback) | `controls::key_string` (`key_strings.h`) |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
-| `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
+| `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `OptionsScreen::switch_device` (`engine/runtime/menu/options_screen.cpp`) |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) + `CUITable_Render @ 0x6411d0` | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — FONT "W" header height, separate top-level-MIN_ITEM_HEIGHT body rows/page, full-height authored-or-22px scrollbar rect, default-state art/thumb geometry |
 | `ControlsModel` (Godot wrapper) | `godot/src/mnu/controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |

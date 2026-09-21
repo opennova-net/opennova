@@ -4,7 +4,6 @@
 #include "render/visual_layers.h"
 #include "env/weather.h"
 
-#include <godot_cpp/classes/time.hpp>
 
 #include "object/object_data.h"
 #include "resource_index/resource_root.h"
@@ -190,9 +189,9 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_silhouette_anchors);
   ClassDB::bind_method(D_METHOD("get_silhouette_anchors"),
                        &FoliageDispatcher::get_silhouette_anchors);
-  ClassDB::bind_method(D_METHOD("render_frame", "camera_xform"),
+  ClassDB::bind_method(D_METHOD("render_frame", "camera_xform", "time_ms"),
                        &FoliageDispatcher::render_frame);
-  ClassDB::bind_method(D_METHOD("render_preview", "camera_xform"),
+  ClassDB::bind_method(D_METHOD("render_preview", "camera_xform", "time_ms"),
                        &FoliageDispatcher::render_preview);
   ClassDB::bind_method(D_METHOD("reset"), &FoliageDispatcher::reset);
   ClassDB::bind_method(D_METHOD("get_total_instances"),
@@ -1475,12 +1474,12 @@ Array FoliageDispatcher::get_slot_diagnostics() const {
   return slot_diagnostics_.duplicate(true);
 }
 
-void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform) {
+void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms) {
   frame_stats_ = FrameStats{};
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.native_detail_source = terrain_ != nullptr;
 
-  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform, p_time_ms);
   if (terrain_ != nullptr) {
     const auto &patches = terrain_->get_foliage_detail_patches_native();
     view.detail_cells.reserve(patches.size());
@@ -1494,18 +1493,18 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform) {
   _compile_and_apply(view);
 }
 
-void FoliageDispatcher::render_preview(const Transform3D &p_camera_xform) {
+void FoliageDispatcher::render_preview(const Transform3D &p_camera_xform, int64_t p_time_ms) {
   frame_stats_ = FrameStats{};
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.preview_detail_source = true;
 
-  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform, p_time_ms);
   view.detail_cells = _preview_cells(p_camera_xform.origin);
   _compile_and_apply(view);
 }
 
 opennova::renderer::FoliageViewInput
-FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
+FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const {
   opennova::renderer::FoliageViewInput input;
   input.cam_x = static_cast<float>(p_camera_xform.origin.x);
   input.cam_y = static_cast<float>(p_camera_xform.origin.y);
@@ -1515,7 +1514,7 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
   input.time_ms = static_cast<uint32_t>(
       wind_clock_override_ms_ >= 0
           ? wind_clock_override_ms_
-          : static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()));
+          : p_time_ms);
   if (const Weather *weather = _weather(); weather != nullptr) {
     input.wind_osc_ring0 = weather->runtime().core().oscillator.osc_ring[0];
   }

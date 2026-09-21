@@ -127,6 +127,38 @@ int stat_field_string_index(int field_id);
 // [orig: 0x1770 @0x5b8615 in UI_ProcessEndRoundScreenTransition @0x5b8600].
 inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 
+// THE STAT TRANSITION LATCH — the once-only bytes and the wall-clock gate of
+// UI_ProcessEndRoundScreenTransition, stepped once per HUD frame by the
+// presenter, which owns the device work each verdict names (the UI scene
+// teardown, the overlay element, opening stat.mnu, the cursor).
+// [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — gate g_scoreboardDirty
+//  @0x5b8600, then `now - t0` against 0x1770 unsigned @0x5b860f..0x5b8615; t0
+//  (dword_A81B2C) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
+//  @0x430a4b (Server_ProcessRoundEnd @0x516912 on the host) and the
+//  first pass here stamps byte_28E561C; every PRE-STAT pass tears the UI scene
+//  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_scoreboardDirty
+//  && now - t0 >= 6000 ms opens stat.mnu once (byte_28E561D, one more
+//  teardown on the open pass @0x5b862a); once that byte is set the transition
+//  returns immediately each frame (the locret @0x5b864a) — no teardown, no
+//  overlay — and nothing from this path redraws until the host's round cycle
+//  exits the mission; both bytes clear at Game_InitMissionRoundState @0x525903]
+struct EndRoundTransitionStep {
+	bool announced = false; // the header edge: t0 stamps this frame
+	bool reset = false;     // the announcement went away: the latches cleared
+	bool pre_stat = false;  // the PRE-STAT phase: tear the scene down, draw the overlay
+	bool open_stat = false; // this frame opens stat.mnu (once)
+};
+struct EndRoundTransition {
+	bool header_seen = false;
+	uint32_t header_edge_ms = 0;
+	bool stat_opened = false;
+	// Game_InitMissionRoundState @0x525903: both once-only bytes clear.
+	void reset();
+	// One HUD frame over the S2C 0x1D header / 0x56 board knowledge and the
+	// wall clock (milliseconds).
+	EndRoundTransitionStep step(bool header_known, bool board_known, uint32_t now_ms);
+};
+
 // The overlay's design-space safe area: the full 1024x768 frame's top and
 // bottom rows [orig: dword_24C1900 / dword_24C1904, stamped at display-mode
 // set @0x587634 / @0x58760b — 0 / 768 for the full frame].

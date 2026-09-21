@@ -13,11 +13,19 @@
 //  entities]
 
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <vector>
 
 #include <runtime/world/impact_scar.h>
 
 namespace opennova::renderer {
+
+// No occlusion instance is a host-side all-visible fallback, represented by
+// nullopt. Missing owners are rejected before any mask lookup.
+using ScarSectionMaskLookup = std::function<std::optional<uint32_t>(world::EntityHandle)>;
+bool scar_owner_visible(const world::Entity *owner, const ScarSectionMaskLookup &section_mask);
+
 
 // The witnessed vertex stride {x, y, z, argb, u, v} [orig: the six 24-byte
 // vertices Scar_RenderCache writes; FVF 0x142].

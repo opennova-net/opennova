@@ -372,6 +372,70 @@ int main() {
 				"the env clock reads the exact integer clock");
 	}
 
+	// The mission seed and T0 publication precede the kernel's startup work;
+	// attaching the device hook must not run the first weather tick early.
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		WeatherRuntime weather;
+		weather.set_wind_strength_pct(50.0f);
+		opennova::world::WeatherState mission;
+		opennova::bms::Header header{};
+		header.start_time = (9 << 8) | 128;
+		header.minutes_per_day = 120;
+		const uint32_t start = static_cast<uint32_t>(header.start_time) << 16;
+		int phase = 0;
+		weather.run_mission_start_boundary(&env, &mission, header, [&]() {
+			ok &= expect(phase++ == 0 && mission.tod_fixed24 == start &&
+					mission.fog_target_q16() == (640 << 16) &&
+					mission.core.oscillator.intensity == 128,
+					"the hook sees the mission clock, config and current wind already seeded");
+			weather.attach_state(&mission, &env);
+			weather.set_world_tick_driven(true);
+		}, [&]() {
+			ok &= expect(phase++ == 1 && !weather.standalone() &&
+					&weather.state() == &mission && mission.tod_fixed24 == start,
+					"startup work sees the attached home before any weather tick");
+			ok &= expect(rgb_near(weather.smooth_ceiling(),
+					env.ceiling_color_target(), 1.0f / 255.0f),
+					"T0 color targets are published before startup WAC and settling");
+		});
+		ok &= expect(phase == 2, "each mission boundary callback runs once");
+	}
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		WeatherRuntime weather;
+		weather.prepare_autonomous(&env);
+		const uint32_t start = weather.state().tod_fixed24;
+		const uint32_t advance = weather.state().tod_advance_per_tick;
+		int callbacks = 0;
+		const auto unexpected = [&]() { ++callbacks; };
+		weather.run_mission_start_boundary(&env, nullptr, {}, unexpected, unexpected);
+		ok &= expect(callbacks == 0 && weather.state().tod_fixed24 == start + 255u * advance,
+				"an absent mission retains the standalone 255-tick settle without callbacks");
+		const uint32_t settled = weather.state().tod_fixed24;
+		weather.run_mission_start_boundary(nullptr, &weather.state(), {}, unexpected, unexpected);
+		ok &= expect(callbacks == 0 && weather.state().tod_fixed24 == settled,
+				"an absent environment leaves weather and callbacks untouched");
+	}
+	{
+		EnvironmentState env;
+		WeatherRuntime weather;
+		opennova::world::WeatherState mission;
+		mission.tod_fixed24 = 3u << 24;
+		mission.set_wind_scale(91);
+		int completions = 0;
+		weather.run_mission_start_boundary(&env, &mission, {}, [&]() {
+			weather.attach_state(&mission, &env);
+		}, [&]() { ++completions; });
+		ok &= expect(completions == 1 && mission.tod_fixed24 == (3u << 24) &&
+				mission.wind_scale() == 91,
+				"a missing config still attaches and completes without reseeding the mission");
+	}
+
 	// --- settle_exposure: the frozen-fixture chase fixed point --------------
 	// The capture-refresh seam (D-RLIT-2 fixture starvation): a paused
 	// runtime never ticks, so the modulator holds its mission-reset identity;

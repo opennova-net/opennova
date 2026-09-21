@@ -31,6 +31,7 @@
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <runtime/inmatch/client_replica_present.h> // the client-replica present composition (ADR 0031)
+#include <runtime/inmatch/role_feeds.h> // the role feeds (end round, friendly tags, deploy status)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <runtime/inmatch/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
@@ -61,7 +62,9 @@
 #include "object/object_data.h" // resolve_collision_instances: the .3di collision IR source
 #include "object/skeletal_anim.h"
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h" // the string-table document + the game_text_lookup factory
 #include "terrain/terrain_data.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -79,11 +82,6 @@ inline constexpr double kFixed16 = 65536.0;
 inline constexpr int kPlayerVisualItemId = opennova::mission::kPlayerVisualItemId;
 // Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the inmatch host).
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
-
-inline uint64_t present_effect_origin_key(int kind, int index) {
-	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
-	       static_cast<uint32_t>(index);
-}
 
 inline int32_t trace_profile_lane(int64_t value) {
 	return static_cast<int32_t>(std::clamp<int64_t>(

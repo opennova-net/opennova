@@ -6923,6 +6923,29 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   `Scar_FreeProjectedDecals`; called from `Entity_Destroy @0x43e8e4` (24.3)
   AND `Entity_AttachToVehicle @0x43c155` (the boarding passenger's scars).
 
+**Scar owner-visibility re-grill (2026-09-21, ADR 0040 B).** The live
+retail `Jointops.exe.kong.i64` at imagebase `0x400000` was checked by
+pseudocode and instruction inspection against the existing correspondence.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Building-owner mask | MATCHING (read-only grill) | `Scar_RenderCache @0x5cd830`, test of `g_BuildingSectionVisMask & 0x0fffffff` at `@0x5cd93d`; the native `renderer_scar_draw_list` oracle covers low bit 27 and excluded high bits |
+| Non-building containing-box gate | MATCHING after first-slot correction | `@0x5cd94a..0x5cd951` skips the entire mask scan when owner+464 is zero; otherwise `@0x5cd955..0x5cd9ac` scans four slots, building index `hit >> 20`, section `(hit >> 12) & 0x1f`, admitting on any set section bit |
+| Missing owner / missing occlusion instance | host code / not grillable | Missing registry owners remain rejected; a missing occlusion instance remains all-visible. These embedder fallbacks are exercised by `renderer_scar_draw_list` and are not attributed to a retail missing-instance branch |
+
+The predicate now lives in `renderer::scar_owner_visible` in
+`engine/runtime/renderer/scar_draw_list.cpp`; `Simulation` only resolves the
+owner and supplies optional section masks. Its old scan treated a hole at
+slot 0 followed by a hidden later hit as hidden. Retail instead accepts that
+owner immediately, consistent with the first-slot sentinel already used by
+`OcclusionWorld`. The native regression covers this exact sparse-slot case,
+the section-31 bit for a non-building owner, later visible hits and both host
+fallbacks. No retained divergence was introduced by this move.
+
+**IDB changes made during this session:** added an anchored comment at
+`@0x5cd94a` explaining the first-slot bypass, the four-hit decode and the
+native policy home. No function names or types changed; the IDB was saved.
+
 **Port status (2026-08-21, the wire-up round).** PORTED: `world::ScarCache`
 (`engine/runtime/world/impact_scar.{h,cpp}` — 128 entity rings + the shared
 world ring, handle + spawn-id lease, never evict, miss-when-full → no scar),
@@ -11043,3 +11066,87 @@ No IDB names, types, comments or saved state were changed.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-INF-26 | FIXED: requested states and playing ids are distinct; local/NPC and authority remote body channels advance at the motor head; late requests preserve the sampled tuple. | Secondary then primary update precedes body selection. [orig: Entity_UpdateInfantryAI @ 0x4B9A48; Entity_UpdateInfantryPlayerBody @ 0x4B41DF; AnimMap_UpdateDualChannels @ 0x40B8C0] | PR #652: movement, pose and channel ownership now follow the witnessed tick order. Continuous visual ghosting remains unproven. |
+
+
+## 37. Mounted-pose precision (2026-09-21)
+
+Implementation: `engine/runtime/world/vehicle_mount.cpp`, `mounted_pose.cpp`,
+`ai_system.cpp`, `mount_controls.h`, `local_player_view.cpp`, and the
+`engine/runtime/inmatch/present_rows.cpp` adapters. This bounded follow-up in
+PR #663 was checked against retail `Jointops.exe` in
+`Jointops.exe.kong.i64` (image base `0x400000`).
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Live carrier frame for seated points and attached guns | MATCHING within existing matrix arithmetic | `vehicle_mount` compares fractional yaw/pitch/roll seat and model points against the carrier collision frame. [orig: Entity_GetBoneTransformAndOrientation @ 0x4B0C50, transform @ 0x4B0D42] |
+| Bone orientation and carried body frame | MATCHING (behavioral proof) for angle precision and independent LOOK ownership | `vehicle_mount` retains fractional body/leg yaw, pitch and roll and preserves independent player LOOK. [orig: angle stores @ 0x4B0D81 / @ 0x4B0DB1 / @ 0x4B0DBB; body stores @ 0x546620..0x54665B; LOOK restore @ 0x546661 / @ 0x546664] |
+| Attached-gun presentation | host code / not grillable; behavioral proof | `netsim_present_rows` retains fractional attached-gun attitude in pool and listen-host client-backed rows. Joiner reconstruction retains decoded parent BAM values through the shared model resolver; wire formats and admission policy are unchanged. |
+| 03TR mounted view and seated cabin | MATCHING (behavioral proof) for the reproduced pose snaps | `godot/tests/mounted_view_test.gd` flies the actual authored mission after NPC boarding, checking cabin-relative positions, rigid gun angle continuity, and camera continuity. The separate H50cal pitch sign correction is D-3DI-3. |
+
+### 37.1 Witness and correction
+
+`Entity_GetBoneTransformAndOrientation` requests the current skeleton matrices
+at @ 0x4B0D1E and transforms the authored userpoint at @ 0x4B0D42. Its forward
+vector becomes a full BAM32 yaw at @ 0x4B0D81; matrix extraction writes BAM32
+pitch and roll at @ 0x4B0DB1 / @ 0x4B0DBB. There is no whole-degree narrowing.
+The attachment path likewise builds from the parent's entity matrix
+[orig: Entity_AttachToBoneAndUpdateTransform @ 0x5464B4 / @ 0x5464CB], samples
+PANM and extracts the current frame [orig: @ 0x54652B / @ 0x54656F]. It stores
+that frame into the body and both leg chases before restoring the saved
+independent LOOK [orig: @ 0x546620..0x546664]. Attached EWEAP model frames use
+[orig: Entity_UpdateTransformAndTurret @ 0x440CA0 ->
+build_bone_attachment_matrix @ 0x56C630].
+
+OpenNova's carrier motor already retained fractional BAM attitude for the
+rendered hull and collision. Seats instead read whole-degree mission mirrors;
+the model resolver also rounded its output before body and presentation
+consumers saw it. The correction selects the existing live carrier frame,
+returns BAM32 in `MountedPose`, and passes those values directly to body/leg
+state. Addeweap children retain the bone attitude in their existing live BAM
+fields. Presentation converts to float degrees at its output boundary;
+`runtime/world` continues to receive only native entity records.
+
+A directionless model userpoint and a missing model provider both retain the
+same full carrier frame. The correction adds no interpolation or extra pose
+advance. Existing attach, independent LOOK, gun-channel, animation, and
+post-carrier refresh ordering remain covered by `vehicle_mount`.
+
+### 37.2 Regression evidence and scope
+
+Before the fix, the real 03TR flight produced consecutive cabin-relative
+position jumps of 0.105021, 0.078488 and 0.077339 units for the two observed
+NPCs and the occupied minigun. Correcting only carrier matrix inputs removed
+most position drift but left 0.020979-radian rigid gun-angle jumps and camera
+forward-vector acceleration of 0.046133. This isolated the remaining loss at
+the output angle boundary; the native fractional-angle/body-frame regression
+failed there before the BAM32 correction.
+
+The final regression requires each observed cabin-relative position step to
+remain below 0.002 units, rigid gun-angle steps below 0.001 radians, and camera
+forward-vector acceleration below 0.005 during the authored banking turn.
+The corrected replay measured a maximum position step of 0.000380 units,
+a gun-angle step of 0.000691 radians, and camera acceleration of 0.003283.
+The network fanout regression also verifies a remote driver's full carrier
+heading while retaining independent wire LOOK.
+
+**Wire seam (review follow-up, 2026-09-21).** Retail keeps ONE BAM32 entity
+euler on both sides of `Entity_TransformWorldToLocal`, so a mounted record's
+carrier-local position is the seat offset whatever the carrier's attitude.
+Once the riders were posed in the live BAM frame, the replication seam still
+undid the pose through the whole-degree mirrors (`(90 - yaw) * 11930464`,
+`pitch * k`, `roll * k`), so the S2C 0x0A carrier-local player/infantry bytes
+and a mounted joiner's C2S 0x0C uplink drifted by up to `sin(0.5 deg)` times
+the seat lever arm (about 1300 16.16 units on a 2.8 m arm), re-sampled every
+whole degree of carrier motion. `entity_wire_bridge.cpp` now derives the
+carrier frame for `snapshot_world`, `apply_player_intent` and
+`build_player_uplink` from the same seeded `veh.yaw_bam` /
+`air_pitch_bam` / `air_roll_bam` fields the rider pose uses (the mirrors stay
+the unseeded placer frame); `netsim_build_player_uplink` pins the seat-local
+bytes invariant under a fractional carrier attitude on both seams.
+These checks concern attached/seated pose continuity, not section 36's
+separate visual-trail investigation. IDA comments were appended with the
+D-INF-27 record link; no names or types were changed.
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-INF-27 | FIXED: seated positions use live carrier attitude; `MountedPose` and all body, gun, camera/control and presentation consumers preserve full BAM32 angles. | Userpoint transform @ 0x4B0D42; angle stores @ 0x4B0D81 / @ 0x4B0DB1 / @ 0x4B0DBB; body/LOOK split @ 0x546620..0x546664. | PR #663 removes the reproduced 03TR minigun camera snapping and seated cabin jitter caused by whole-degree quantization. |

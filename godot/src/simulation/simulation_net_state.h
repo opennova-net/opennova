@@ -13,6 +13,7 @@
 #include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
+#include <runtime/mission/mission_text.h>          // MissionText
 #include <runtime/world/spawn_select.h>           // SpawnZoneRegistry
 
 #include "network/udp_pump.h"
@@ -64,20 +65,12 @@ struct SimulationNetState {
 	// terrain_til_data at bring-up so the initial-state burst streams the S2C
 	// 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
 	std::vector<uint8_t> terrain_til_data;
-	// MissionText briefing values parsed from the mounted <mission>.bin (or the
-	// medmssn.bin fallback) before load. These remain the RTXT's original cp1252
-	// bytes so the S2C 0x7E payload is byte-exact for localized text.
-	bool mission_text_loaded = false;
-	std::string mission_briefing3;
-	std::string mission_briefing2;
-	// Numeric suffix -> original cp1252 MissionText [Locations] value. The host
-	// bring-up resolves these against type-2044 BMS markers in spawn order for
-	// the S2C 0x0F deploy-map label block.
-	std::unordered_map<int32_t, std::string> mission_location_texts;
-	// Numeric suffix -> [PeopleNames] STRNAME%03i value; promote resolves an
-	// entity's authored display name (D-HUD-20) from its BMS name_index here
-	// (engine: runtime/mission/promote.cpp).
-	std::unordered_map<int32_t, std::string> mission_people_names;
+	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
+	// handed over before load, harvested engine-side
+	// (runtime/mission/mission_text.h): the briefing pages the S2C 0x7E payload
+	// streams byte-exact, the [Locations] deploy-map labels the host bring-up
+	// resolves, the [PeopleNames] display names promote resolves (D-HUD-20).
+	opennova::mission::MissionText mission_text;
 
 	// --- the joiner's retained join inputs -----------------------------------
 	// The per-second joiner trace switch (`net_joiner_diagnostics`).

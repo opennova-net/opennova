@@ -1,11 +1,11 @@
 #include "hud/hud_overlay.h"
-#include "hud/hud_pos.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/player_local_view.h"
 #include "util/axes.h"
 #include <algorithm>
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
+#include <runtime/hud/hud_layout_from_hudpos.h>
 
 namespace godot {
 void HudOverlay::combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite) {
@@ -17,36 +17,16 @@ void HudOverlay::combat_texture_(int slot, const String &name, opennova::hud::Hu
 	sprite = { texture.is_valid() ? texture->get_width() : 0,
 		texture.is_valid() ? texture->get_height() : 0, texture.is_valid() };
 }
-void HudOverlay::configure_combat_(const Ref<HudPos> &hudpos) {
+void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets) {
 	using namespace opennova::hud;
-	const auto &d = hudpos->native_file().hud;
 	auto &l = layout_.combat;
-	l.impact_x = d.impact_dist_pos[0];
-	l.impact_y = d.impact_dist_pos[1];
-	l.icon_x = d.wpn_icon[0];
-	l.icon_y = d.wpn_icon[1];
-	l.gear_x = d.gear_text[0];
-	l.gear_y = d.gear_text[1];
-	l.cargo_x = d.cargo_pos[0];
-	l.cargo_y = d.cargo_pos[1];
-	l.parachute_x = d.parachute_icon.x;
-	l.parachute_y = d.parachute_icon.y;
-	l.armor_x = d.armor_icon.x;
-	l.armor_y = d.armor_icon.y;
-	l.agl_tick_width = d.agl_radius;
-	l.agl_left = d.agl_tlrx[0];
-	l.agl_right = d.agl_tlrx[1];
-	l.agl_y = d.agl_ylen[0];
-	l.agl_height = d.agl_ylen[1];
-	l.agl_color = (uint32_t(d.agl_color.a) << 24) | (uint32_t(d.agl_color.r) << 16) |
-			(uint32_t(d.agl_color.g) << 8) | uint32_t(d.agl_color.b);
 	combat_texture_(kHudTexVehicleFixed, "rockpip.tga", l.vehicle_fixed);
 	combat_texture_(kHudTexVehicleLag, "turrpip.tga", l.vehicle_lag);
 	combat_texture_(kHudTexDriverCrosshair, "dirguide.tga", l.driver_crosshair);
 	combat_texture_(kHudTexTarget, "comalck2.tga", l.target);
 	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", l.target_friendly);
-	combat_texture_(kHudTexParachute, String(d.parachute_icon.texture), l.parachute);
-	combat_texture_(kHudTexArmor, String(d.armor_icon.texture), l.armor);
+	combat_texture_(kHudTexParachute, String::utf8(assets.parachute_icon.c_str()), l.parachute);
+	combat_texture_(kHudTexArmor, String::utf8(assets.armor_icon.c_str()), l.armor);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,

@@ -16,7 +16,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/anim_sample.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/remote_body_state.cpp
     # audio — mixers, bank chain, envs markers, selectors, profiles
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
@@ -30,6 +32,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start network sample
@@ -51,6 +54,13 @@ add_library(opennova_runtime STATIC
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/player_info_avatars.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/player_info_kit.cpp # the PLAYER_INFO voice list + weapon.sav kit page order
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
@@ -60,8 +70,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/static_sources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
     # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/particle)
@@ -73,12 +86,16 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers
@@ -95,6 +112,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
+    renderer/model_mesh_prepare.cpp
+    renderer/model_controls.cpp
+    renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
@@ -124,6 +144,7 @@ add_library(opennova_runtime STATIC
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_worker.cpp # the page-composition thread pool (demand / completion queues)
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
     # the retail segment raycast (format-free), plus the placed-tile surface
@@ -145,6 +166,7 @@ add_library(opennova_runtime STATIC
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/model_geometry.cpp
+    world/entity_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/mounted_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
@@ -200,6 +222,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_loadout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_look.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_present.cpp  # the local player's presentation law: the FP submit, the fire-effect gate, the batch order, the spawn-loadout projection
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/present_drains.cpp  # the present-pass row fills: throwables, vehicle trails, impacts, fires, death pieces, round glows
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/objectives_feed.cpp  # the SP objectives panel's row walk
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/music_vars.cpp       # the gamemus var pump from the local player
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
@@ -208,6 +233,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_impact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_vehicle_sights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_view.cpp  # the per-tick equipped-weapon snapshot
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
@@ -335,6 +361,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
 )
 
@@ -350,6 +378,10 @@ target_include_directories(opennova_runtime
 # PUBLIC). runtime carries the in-match session and replication, so it sits
 # above the wire-only net group.
 target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennova_crt)
+# runtime/terrain's tile composition worker runs std::thread: link the
+# platform thread library explicitly (pthread on a pre-2.34 glibc).
+find_package(Threads REQUIRED)
+target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 

@@ -58,6 +58,28 @@ bool color_byte_conversion_contract() {
 			"retail low-byte conversion truncates and wraps finite values");
 }
 
+bool lit_primary_color_contract() {
+	const std::array<float, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};
+	const std::array<float, 9> yaw90{0, 0, 1, 0, 1, 0, -1, 0, 0};
+	const std::array<float, 9> shear{1, 2, 3, 0, 1, 4, 0, 0, 1};
+	constexpr float half_pi = 1.57079632679489661923f;
+	if (!check(r::particle_lit_primary_color(1.0f, 0.0f, 0x55, identity) == 0x55c9c9c9u,
+			"identity light retains seed, alpha and ARGB channel order")) return false;
+	if (!check(r::particle_lit_primary_color(1.0f, half_pi, 0xa3, identity) == 0xa3c9c935u,
+			"roll rotates the light through the transposed view")) return false;
+	if (!check(r::particle_lit_primary_color(1.0f, half_pi, 0x72, yaw90) == 0x72c9c9c9u,
+			"roll and view multiply in the witnessed noncommutative order")) return false;
+	if (!check(r::particle_lit_primary_color(1.0f, 0.0f, 0xff, shear) == 0xffc95cccu,
+			"non-orthonormal view remains raw and over-range bytes wrap")) return false;
+	if (!check(r::particle_lit_primary_color(0.0f, half_pi, 0, identity) == 0x007f7f7fu &&
+			r::particle_lit_primary_color(-1.0f, 0.0f, 0xff, identity) == 0xff353535u,
+			"zero and negative bump scales preserve their encoded values")) return false;
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	return check(r::particle_lit_primary_color(nan, 0.0f, 0x81, identity) == 0x81000000u &&
+			r::particle_lit_primary_color(1.0f, nan, 0x24, identity) == 0x24000000u,
+			"invalid light inputs retain alpha and deterministic zero color bytes");
+}
+
 r::ParticleDrawState state(r::ParticlePipeline pipeline,
 		std::uint32_t page, std::uint8_t type, std::uint16_t variant,
 		r::ParticleRenderPass pass = r::ParticleRenderPass::Color) {
@@ -594,6 +616,7 @@ bool empty_batch_leaves_emitters_unstamped_contract() {
 
 int main() {
 	if (!color_byte_conversion_contract()) return 1;
+	if (!lit_primary_color_contract()) return 1;
 	if (!water_emitter_partition_contract()) return 1;
 	if (!domain_sort_and_material_run_contract()) return 1;
 	if (!overlapping_emitters_interleave_by_particle_depth_contract()) return 1;

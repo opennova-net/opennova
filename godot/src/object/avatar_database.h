@@ -116,6 +116,7 @@ public:
 	Error load(const String &path);
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 
+	const opennova::avatars::AvatarsFile &native_file() const { return file_; }
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

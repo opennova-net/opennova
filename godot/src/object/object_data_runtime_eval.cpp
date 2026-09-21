@@ -4,8 +4,8 @@
 #include "object/object_data_internal.h"
 
 #include <formats/env/env_weather.h>
-#include <base/io/hash.h>
 #include <runtime/renderer/material_eval.h>
+#include <runtime/renderer/model_controls.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
 #include <formats/threedi/threedi_panm_runtime.h>
 
@@ -13,7 +13,6 @@
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <array>
-#include <cstring>
 #include <vector>
 
 using namespace novaobj;
@@ -30,14 +29,6 @@ std::vector<std::string> control_register_names(const Threedi3di3 &model) {
 	return names;
 }
 
-int32_t control_value_from_variant(const Variant &value) {
-	const int64_t raw = static_cast<int64_t>(value);
-	const uint32_t low_dword = static_cast<uint32_t>(raw);
-	int32_t signed_value = 0;
-	std::memcpy(&signed_value, &low_dword, sizeof(signed_value));
-	return signed_value;
-}
-
 using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
 // The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers)
@@ -48,57 +39,14 @@ opennova::env::WeatherOscillator g_weather_rings;
 bool g_weather_rings_valid = false;
 
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
-	GlobalCtrlValues values = {};
-	values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
-	values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
-	if (dict.is_empty()) {
-		return values;
-	}
+	opennova::renderer::ModelControls controls;
 	const Array keys = dict.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		const CharString utf8 = key.utf8();
-		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
-			continue;
-		}
-		values[static_cast<size_t>(ordinal)] =
-				control_value_from_variant(dict[keys[i]]);
+		controls.store(threedi_ctrl_register_ordinal(key.utf8().get_data()),
+				static_cast<int64_t>(dict[keys[i]]));
 	}
-	return values;
-}
-
-void resolve_panm_track_register(const Threedi3di3 &model, ThreediTransform &track) {
-	if (track.control <= 0x70) {
-		return;
-	}
-	const char *name = nullptr;
-	const size_t local_ordinal = track.control_param;
-	if (model.ctrl.registers != nullptr &&
-			local_ordinal < model.ctrl.count) {
-		name = model.ctrl.registers[local_ordinal].name;
-	}
-	// PANM stores a file-local CTRL index. Retail's model loader resolves the
-	// parameter on every style above 0x70 before any track is sampled. Only
-	// style 113 later reads the register bus; 114..117 keep the resolved ordinal
-	// as their waveform phase. An absent or unknown authored name inherits
-	// CtrlName_ToOrdinal's zero result and therefore aliases LOD_FRAC.
-	// [orig: model CTRL loader @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290;
-	//  PANM_SampleTrack @ 0x5B2270]
-	track.control_param = threedi_ctrl_register_loader_ordinal(name);
-}
-
-void resolve_panm_registers(const Threedi3di3 &model,
-		std::vector<ThreediPartAnimation> &animations) {
-	for (ThreediPartAnimation &anim : animations) {
-		resolve_panm_track_register(model, anim.rotation_x);
-		resolve_panm_track_register(model, anim.rotation_y);
-		resolve_panm_track_register(model, anim.rotation_z);
-		resolve_panm_track_register(model, anim.scale_x);
-		resolve_panm_track_register(model, anim.scale_y);
-		resolve_panm_track_register(model, anim.scale_z);
-		resolve_panm_track_register(model, anim.translation);
-	}
+	return controls.runtime_values(g_weather_ctrl_flicker, g_weather_ctrl_swing);
 }
 
 Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
@@ -113,70 +61,13 @@ Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
 
 } // namespace
 
-GlobalCtrlValues ObjectData::runtime_control_values_dict_only(
-		const Dictionary &p_ctrl_values, bool &r_has_flicker,
-		bool &r_has_swing) {
-	GlobalCtrlValues values = {};
-	r_has_flicker = false;
-	r_has_swing = false;
-	const Array keys = p_ctrl_values.keys();
-	for (int i = 0; i < keys.size(); ++i) {
-		const String key = keys[i];
-		const CharString utf8 = key.utf8();
-		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
-			continue;
-		}
-		values[static_cast<size_t>(ordinal)] =
-				control_value_from_variant(p_ctrl_values[keys[i]]);
-		r_has_flicker = r_has_flicker || ordinal == THREEDI_CTRL_FLICKER;
-		r_has_swing = r_has_swing || ordinal == THREEDI_CTRL_SWING;
-	}
-	return values;
-}
-
-void ObjectData::stamp_weather_ctrl_registers(GlobalCtrlValues &r_values,
-		bool p_dict_has_flicker, bool p_dict_has_swing) {
-	// The one-shot conversion writes the weather globals first and lets dict
-	// entries override; stamping only the slots the dict left absent lands
-	// the identical table from the cached dict-only half.
-	if (!p_dict_has_flicker) {
-		r_values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
-	}
-	if (!p_dict_has_swing) {
-		r_values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
-	}
-}
-
-bool ObjectData::_effective_panm_for_lod(int p_lod_index,
-		std::vector<ThreediPartAnimation> &r_nodes) const {
-	r_nodes.clear();
-	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= native_model().lod_count)
-		return false;
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	if (lod.part_animation_count > 0 && lod.part_animations != nullptr) {
-		r_nodes.assign(lod.part_animations,
-				lod.part_animations + lod.part_animation_count);
-	} else if (native_model().part_animation_count > 0 &&
-			native_model().part_animations != nullptr) {
-		r_nodes.assign(native_model().part_animations,
-				native_model().part_animations + native_model().part_animation_count);
-	}
-	return !r_nodes.empty();
+void ObjectData::weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing) {
+	r_flicker = g_weather_ctrl_flicker;
+	r_swing = g_weather_ctrl_swing;
 }
 
 bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {
-	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= native_model().lod_count)
-		return false;
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	if (lod.render_object_count == 0 || lod.render_objects == nullptr) return false;
-	std::vector<ThreediPartAnimation> nodes;
-	_effective_panm_for_lod(p_lod_index, nodes);
-	for (const ThreediPartAnimation &node : nodes)
-		if (threedi_panm_animation_is_live(node)) return true;
-	return false;
+	return source_model_ && threedi_panm_lod_has_live(native_model(), p_lod_index);
 }
 
 int ObjectData::get_live_panm_lod() const {
@@ -194,7 +85,7 @@ bool ObjectData::has_live_panm() const {
 PackedInt32Array ObjectData::get_effective_panm_targets(int p_lod_index) const {
 	PackedInt32Array out;
 	std::vector<ThreediPartAnimation> nodes;
-	_effective_panm_for_lod(p_lod_index, nodes);
+	if (source_model_) threedi_panm_effective_for_lod(native_model(), p_lod_index, nodes);
 	for (const ThreediPartAnimation &node : nodes)
 		out.push_back(static_cast<int32_t>(node.subobject_index));
 	return out;
@@ -287,150 +178,17 @@ int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
 
 Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
-	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
-		return out;
-	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	if (lod.render_object_count == 0 || lod.render_objects == nullptr) {
-		return out;
-	}
-
-	const GlobalCtrlValues ctrl_table =
-			global_control_values_from_dict(p_ctrl_values);
-
-	std::vector<ThreediPartAnimation> effective_anims;
-	_effective_panm_for_lod(p_lod_index, effective_anims);
-	resolve_panm_registers(native_model(), effective_anims);
-	const ThreediPartAnimation *anims =
-			effective_anims.empty() ? nullptr : effective_anims.data();
-	const size_t node_count = effective_anims.size();
-
-	size_t input_count = std::max(lod.render_object_count, node_count);
-	for (size_t i = 0; i < node_count && anims != nullptr; ++i) {
-		input_count = std::max(input_count, static_cast<size_t>(anims[i].subobject_index) + 1);
-		input_count = std::max(input_count, static_cast<size_t>(anims[i].parent_subobject) + 1);
-	}
-
-	std::vector<ThreediMatrix4x4> base_transforms(input_count);
-	std::vector<ThreediVec3> pivots(input_count, ThreediVec3{0, 0, 0});
-	for (size_t i = 0; i < input_count; ++i) {
-		threedi_mat4_identity(&base_transforms[i]);
-	}
-	for (size_t i = 0; i < lod.render_object_count; ++i) {
-		const ThreediRenderObject &part = lod.render_objects[i];
-		base_transforms[i].m[12] = part.abs[0];
-		base_transforms[i].m[13] = part.abs[1];
-		base_transforms[i].m[14] = part.abs[2];
-		pivots[i] = ThreediVec3{part.abs[0], part.abs[1], part.abs[2]};
-	}
-
-	std::vector<ThreediMatrix4x4> panm_matrices(node_count);
-	std::vector<int> part_to_node(lod.render_object_count, -1);
-	if (node_count > 0 && anims != nullptr) {
-		const int rc = threedi_panm_build_node_matrices(
-				anims,
-				node_count,
-				pivots.data(),
-				nullptr,
-				base_transforms.data(),
-				nullptr,
-				threedi_panm_runtime_time_ms(p_time_ms),
-				ctrl_table.data(),
-				panm_matrices.data());
-		if (rc == 0) {
-			for (size_t i = 0; i < node_count; ++i) {
-				const uint8_t sub = anims[i].subobject_index;
-				if (sub < lod.render_object_count) {
-					part_to_node[sub] = static_cast<int>(i);
-				}
-			}
-		}
-	}
-
-	for (size_t i = 0; i < lod.render_object_count; ++i) {
-		const int node_index = part_to_node[i];
-		const ThreediMatrix4x4 &src = (node_index >= 0 && static_cast<size_t>(node_index) < panm_matrices.size())
-				? panm_matrices[node_index]
-				: base_transforms[i];
-		out[static_cast<int>(i)] = panm_matrix_to_transform(src);
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) return out;
+	const auto &lod = native_model().lods[p_lod_index];
+	if (lod.render_object_count == 0 || lod.render_objects == nullptr) return out;
+	const auto controls = global_control_values_from_dict(p_ctrl_values);
+	std::vector<ThreediMatrix4x4> matrices;
+	if (threedi_panm_pose_parts(native_model(), p_lod_index,
+			threedi_panm_runtime_time_ms(p_time_ms), controls.data(), matrices, nullptr)) {
+		for (size_t i = 0; i < matrices.size(); ++i)
+			out[static_cast<int>(i)] = panm_matrix_to_transform(matrices[i]);
 	}
 	return out;
-}
-
-// Hash the effective retail bus, not the caller's spelling. Unknown keys,
-// case variants, and duplicate aliases therefore share cache semantics with
-// the values PANM actually consumes.
-static uint64_t panm_ctrl_hash(const GlobalCtrlValues &values) {
-	uint64_t h = opennova::io::kFnv1a64Offset;
-	bool any_nonzero = false;
-	for (size_t ordinal = 0; ordinal < values.size(); ++ordinal) {
-		const uint32_t bits = static_cast<uint32_t>(values[ordinal]);
-		any_nonzero |= bits != 0;
-		h = opennova::io::fnv1a64_byte(h, static_cast<uint8_t>(ordinal));
-		for (unsigned shift = 0; shift < 32; shift += 8) {
-			h = opennova::io::fnv1a64_byte(h, static_cast<uint8_t>(bits >> shift));
-		}
-	}
-	return any_nonzero ? h : 0;
-}
-
-// (Re)build the lod-fixed evaluation state after an invalidation or LOD swap.
-// The next evaluation after this re-arms a full apply (time sentinel).
-ObjectData::PanmEvalCache *ObjectData::_panm_cache_prepare(
-		int p_lod_index) const {
-	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
-		return nullptr;
-	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	if (lod.render_object_count == 0 || lod.render_objects == nullptr) {
-		return nullptr;
-	}
-	if (panm_caches_.size() < native_model().lod_count) {
-		panm_caches_.resize(native_model().lod_count);
-	}
-	PanmEvalCache &c = panm_caches_[static_cast<size_t>(p_lod_index)];
-	if (c.valid && c.lod == p_lod_index) {
-		return &c;
-	}
-	c.lod = p_lod_index;
-	c.time_ms = INT64_MIN; // sentinel: next evaluation marks every part changed
-	c.ctrl_hash = 0;
-	c.valid = true;
-	_effective_panm_for_lod(p_lod_index, c.anims);
-	resolve_panm_registers(native_model(), c.anims);
-	c.has_noise = false;
-	for (const ThreediPartAnimation &anim : c.anims) {
-		c.has_noise = c.has_noise || threedi_panm_animation_uses_noise(anim);
-	}
-	size_t input_count = std::max(static_cast<size_t>(lod.render_object_count), c.anims.size());
-	for (const ThreediPartAnimation &anim : c.anims) {
-		input_count = std::max(input_count, static_cast<size_t>(anim.subobject_index) + 1);
-		input_count = std::max(input_count, static_cast<size_t>(anim.parent_subobject) + 1);
-	}
-	c.base_transforms.assign(input_count, ThreediMatrix4x4{});
-	c.pivots.assign(input_count, ThreediVec3{0, 0, 0});
-	for (size_t i = 0; i < input_count; ++i) {
-		threedi_mat4_identity(&c.base_transforms[i]);
-	}
-	for (size_t i = 0; i < lod.render_object_count; ++i) {
-		const ThreediRenderObject &part = lod.render_objects[i];
-		c.base_transforms[i].m[12] = part.abs[0];
-		c.base_transforms[i].m[13] = part.abs[1];
-		c.base_transforms[i].m[14] = part.abs[2];
-		c.pivots[i] = ThreediVec3{part.abs[0], part.abs[1], part.abs[2]};
-	}
-	c.node_matrices.assign(c.anims.size(), ThreediMatrix4x4{});
-	c.part_to_node.assign(lod.render_object_count, -1);
-	for (size_t i = 0; i < c.anims.size(); ++i) {
-		const uint8_t sub = c.anims[i].subobject_index;
-		if (sub < lod.render_object_count) {
-			c.part_to_node[sub] = static_cast<int>(i);
-		}
-	}
-	c.part_transforms.assign(lod.render_object_count, Transform3D());
-	c.part_revision.assign(lod.render_object_count, 0);
-	return &c;
 }
 
 int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
@@ -444,63 +202,21 @@ int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 		const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 		const Array &p_nodes, int64_t p_applied_revision) const {
-	PanmEvalCache *cache = _panm_cache_prepare(p_lod_index);
-	if (cache == nullptr) {
-		return 0;
+	if (!source_model_) return 0;
+	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table);
+	if (pose == nullptr) return 0;
+	const size_t count = std::min(pose->part_count(), static_cast<size_t>(p_nodes.size()));
+	for (size_t i = 0; i < count; ++i) {
+		const auto *matrix = pose->changed_part(i, p_applied_revision);
+		if (matrix == nullptr) continue;
+		Node3D *node = Object::cast_to<Node3D>(static_cast<Object *>(p_nodes[static_cast<int64_t>(i)]));
+		if (node != nullptr) node->set_transform(panm_matrix_to_transform(*matrix));
 	}
-	PanmEvalCache &c = *cache;
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	const GlobalCtrlValues &ctrl_table = p_ctrl_table;
-	const uint64_t ctrl_hash = panm_ctrl_hash(ctrl_table);
-	const bool first_eval = c.time_ms == INT64_MIN;
-	if (first_eval || c.has_noise ||
-			c.time_ms != p_time_ms || c.ctrl_hash != ctrl_hash) {
-		++panm_evaluation_serial_;
-		if (!c.anims.empty()) {
-			threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(),
-					c.pivots.data(), nullptr, c.base_transforms.data(), nullptr,
-					threedi_panm_runtime_time_ms(p_time_ms), ctrl_table.data(),
-					c.node_matrices.data());
-		}
-		bool any_changed = false;
-		const uint64_t next_revision = c.revision + 1;
-		for (size_t i = 0; i < lod.render_object_count; ++i) {
-			const int node_index = c.part_to_node[i];
-			const Transform3D next = panm_matrix_to_transform(
-					(node_index >= 0) ? c.node_matrices[node_index] : c.base_transforms[i]);
-			if (first_eval || next != c.part_transforms[i]) {
-				c.part_transforms[i] = next;
-				c.part_revision[i] = next_revision;
-				any_changed = true;
-			}
-		}
-		if (any_changed) {
-			c.revision = next_revision;
-		}
-		c.time_ms = p_time_ms;
-		c.ctrl_hash = ctrl_hash;
-	}
-	const uint64_t applied =
-			p_applied_revision <= 0 ? 0 : static_cast<uint64_t>(p_applied_revision);
-	if (applied == c.revision) {
-		return static_cast<int64_t>(c.revision);
-	}
-	const int node_limit =
-			std::min(static_cast<int>(lod.render_object_count), static_cast<int>(p_nodes.size()));
-	for (int i = 0; i < node_limit; ++i) {
-		if (c.part_revision[i] <= applied) {
-			continue;
-		}
-		Node3D *node = Object::cast_to<Node3D>(static_cast<Object *>(p_nodes[i]));
-		if (node != nullptr) {
-			node->set_transform(c.part_transforms[i]);
-		}
-	}
-	return static_cast<int64_t>(c.revision);
+	return static_cast<int64_t>(pose->revision());
 }
 
 int64_t ObjectData::get_panm_evaluation_serial() const {
-	return static_cast<int64_t>(panm_evaluation_serial_);
+	return static_cast<int64_t>(panm_cache_.evaluation_serial());
 }
 
 Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {

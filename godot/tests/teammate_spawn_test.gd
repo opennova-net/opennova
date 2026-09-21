@@ -60,15 +60,15 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 				assert_true(mission.set_entity_property_int(
 						MissionData.KIND_MARKER, marker.index, "wp_number", 9))
 				var spawn_event := mission.add_event(0, 0, 0)
-				assert_not_null(mission.add_event_trigger(spawn_event.index,
-						MissionEventTrigger.make(4, 1, 60, 1)))
-				assert_not_null(mission.add_event_action(spawn_event.index,
-						MissionEventAction.make(39, 2, patient.bms_id, 9)))
+				assert_true(mission.add_event_trigger(spawn_event,
+						4, 1, 60, 1))
+				assert_true(mission.add_event_action(spawn_event,
+						39, 2, patient.bms_id, 9))
 				var active_event := mission.add_event(0, 0, 0)
-				assert_not_null(mission.add_event_trigger(active_event.index,
-						MissionEventTrigger.make(6, 2, 0, 0)))
-				assert_not_null(mission.add_event_action(active_event.index,
-						MissionEventAction.make(5, 1, 61, 1)))), OK)
+				assert_true(mission.add_event_trigger(active_event,
+						6, 2, 0, 0))
+				assert_true(mission.add_event_action(active_event,
+						5, 1, 61, 1))), OK)
 	var sim := world.get_sim()
 	var runtime := world.get_runtime()
 	var presenter := runtime.get_entity_presenter()

@@ -277,9 +277,18 @@ bool resolve_model_mounted_pose_from_parts(
 	if (!affine_inverse(rest_part, rest_inverse)) return false;
 	const V3 point_in_part = affine_xform(rest_inverse, authored_model_position);
 	const V3 live_model_position = affine_xform(live_part, point_in_part);
+	// docs/world/world-wac-ai-re.md (D-INF-27).
+	// Retail transforms the userpoint through the live carrier matrix; integer
+	// mission mirrors must not quantize a moving helicopter's attachment frame.
+	// [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50, @0x4b0d42]
+	const double carrier_yaw = carrier.veh.yaw_seeded
+			? mission_yaw_deg_from_bam_heading(carrier.veh.yaw_bam) : carrier.yaw;
+	const double carrier_pitch = carrier.veh.yaw_seeded
+			? carrier.veh.air_pitch_bam * kDegreesPerBam : carrier.pitch;
+	const double carrier_roll = carrier.veh.yaw_seeded
+			? carrier.veh.air_roll_bam * kDegreesPerBam : carrier.roll;
 	const M3 carrier_basis = model_basis_from_mission_euler(
-			static_cast<double>(carrier.pitch), static_cast<double>(carrier.yaw),
-			static_cast<double>(carrier.roll));
+			carrier_pitch, carrier_yaw, carrier_roll);
 	if (!v3_finite(live_model_position) || !m3_finite(carrier_basis) ||
 			std::fabs(m3_det(carrier_basis)) < 1.0e-8)
 		return false;
@@ -331,13 +340,12 @@ bool resolve_model_mounted_pose_from_parts(
 				attachment_in_part);
 	} else {
 		const double baseline_yaw = seat.attachment_frame
-				? static_cast<double>(carrier.yaw + seat.yaw_offset)
+				? carrier_yaw + seat.yaw_offset
 				: seat.type == world::SeatType::Gunner
-				? static_cast<double>(carrier.yaw - seat.yaw_offset)
-				: static_cast<double>(carrier.yaw + seat.yaw_offset);
+				? carrier_yaw - seat.yaw_offset
+				: carrier_yaw + seat.yaw_offset;
 		const M3 baseline_basis = model_basis_from_mission_euler(
-				static_cast<double>(carrier.pitch), baseline_yaw,
-				static_cast<double>(carrier.roll));
+				carrier_pitch, baseline_yaw, carrier_roll);
 		M3 rest_basis_inverse;
 		if (!m3_inverse(rest_part.basis, rest_basis_inverse)) return false;
 		const M3 part_delta = m3_mul(live_part.basis, rest_basis_inverse);
@@ -365,9 +373,11 @@ bool resolve_model_mounted_pose_from_parts(
 	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
 			!std::isfinite(roll_deg))
 		return false;
-	out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
-	out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
-	out.roll = static_cast<int16_t>(std::lround(roll_deg));
+	// Keep the original BAM32 result through the body/attachment consumers.
+	// [orig: Entity_GetBoneTransformAndOrientation @0x4b0d81/@0x4b0db1/@0x4b0dbb]
+	out.heading = bam_heading_from_mission_yaw_deg(yaw_deg);
+	out.pitch = bam_from_degrees_wrapped(pitch_deg);
+	out.roll = bam_from_degrees_wrapped(roll_deg);
 	return true;
 }
 
@@ -384,6 +394,7 @@ void compose_mounted_pose_controls(
                 static_cast<int32_t>(sources.emplaced_gun_yaw);
         r_ctrl[THREEDI_CTRL_EWEAP_GUNPITCH] =
                 static_cast<int32_t>(sources.emplaced_gun_pitch);
+        r_ctrl[THREEDI_CTRL_WEAP_SPIN] = sources.emplaced_spin_phase;
     }
 }
 

@@ -185,7 +185,7 @@ func _process(delta: float) -> void:
 		return
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
-	_driver.tick(Time.get_ticks_msec())
+	_driver.tick(_view.frame_clock_ms)
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		close()
@@ -253,7 +253,8 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 func _populate_spawn_list(sim: Simulation) -> void:
 	if _driver == null:
 		return
-	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq"))
 	_apply_statics(status)
 	if status.permanent_death:
 		return
@@ -317,12 +318,12 @@ func _hide_team_service_buttons() -> void:
 #    local player — numbered "'<WPNames name>':  <cFF4040><n>", lettered
 #    "<letter>:  <cFF4040><n>";
 #  * STATIC_LIST_TITLE shown with the list (@0x553ab4);
-#  * STATIC_PSPRESPAWN_MSG1 (@0x553e10): "<STROVER_PSPRESPAWN>  <cFF4040><n>"
-#    while the spawn-target hold runs;
-#  * STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG (@0x553e74..0x553f60): while the
-#    local revive window runs and the player is not in a seat —
-#    "<STROVER_MEDICTIMER>  <cFF4040><n>" and STROVER_CALLMEDIC formatted with
-#    the MedicReq binding's display string (KeyBinding_FormatDisplayString).
+#  * STATIC_PSPRESPAWN_MSG1 (@0x553e10) while the spawn-target hold runs;
+#  * STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG (@0x553e74..0x553f60) while the
+#    local revive window runs and the player is not in a seat.
+# The three texts are the engine's (world/deploy_screen_feed.h
+# deploy_statics_text), resolved through gametext by the sim with the MedicReq
+# binding's display string.
 func _apply_statics(status: DeployStatus) -> void:
 	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
 	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
@@ -359,9 +360,7 @@ func _apply_statics(status: DeployStatus) -> void:
 		var show_psp := status.show_psp_respawn
 		_driver.set_widget_shown(psp_id, show_psp)
 		if show_psp:
-			_driver.set_widget_text(psp_id, "%s  <cFF4040>%d" % [
-					_game_text(Strings.SECTION_OVERLAYS, "STROVER_PSPRESPAWN", "Spawn point available in"),
-					status.hold_seconds])
+			_driver.set_widget_text(psp_id, status.psp_respawn_text)
 	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
 	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
 	if medic_id >= 0 and call_id >= 0:
@@ -369,13 +368,8 @@ func _apply_statics(status: DeployStatus) -> void:
 		_driver.set_widget_shown(medic_id, show_medic)
 		_driver.set_widget_shown(call_id, show_medic)
 		if show_medic:
-			_driver.set_widget_text(medic_id, "%s  <cFF4040>%d" % [
-					_game_text(Strings.SECTION_OVERLAYS, "STROVER_MEDICTIMER", "Medic time remaining"),
-					status.revive_seconds])
-			var key_label: String = ControlsBindings.model().display_text_for_token("MedicReq")
-			var call_format := _game_text(Strings.SECTION_OVERLAYS, "STROVER_CALLMEDIC", "Press %s to call a medic")
-			_driver.set_widget_text(call_id,
-					call_format % key_label if call_format.contains("%s") else call_format)
+			_driver.set_widget_text(medic_id, status.medic_timer_text)
+			_driver.set_widget_text(call_id, status.call_medic_text)
 
 
 # Build the compiled menu surface the same way the armory presenter does: the

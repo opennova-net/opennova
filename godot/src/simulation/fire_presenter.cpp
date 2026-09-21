@@ -10,6 +10,7 @@
 
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/renderer/tracer_frame.h>
+#include <runtime/world/player_present.h> // fire_effect_plan (the effect admission, ADR 0040 ladder E0)
 
 #include "audio/mission_audio.h"
 #include "lights/effect_light_director.h"
@@ -182,65 +183,37 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 	EffectWorld *fx_world = fx();
 	EffectLightDirector *light_director = lights();
 	for (const opennova::world::FirePresentationRow &ev : p_events) {
-		// The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
-		// spawns it on both fire arms, the local player's included [orig:
-		// WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
-		// ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
-		// both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
-		// group gate scopes it to the shooter's own draws.
-		if (light_director != nullptr && ev.mf_light != 0) {
+		// The admission (which legs, which effect, which anchor) is the engine's
+		// world::fire_effect_plan; this pass resolves the anchor against the node
+		// it renders and spawns.
+		const opennova::world::FireEffectPlan plan = opennova::world::fire_effect_plan(ev);
+		if (light_director != nullptr && plan.glow) {
 			Vector3 glow_pos = mission_to_godot(ev.origin);
-			if (ev.adm_arm) {
+			if (plan.glow_at_muzzle) {
 				const Vector3 glow_anchor = owner_->muzzle_world_for(
-						ev.shooter_handle, opennova::to_gd(ev.action_userpoint));
+						ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
 				if (glow_anchor.is_finite()) {
 					glow_pos = glow_anchor;
 				}
 			}
 			light_director->on_muzzle_fire(ev.shooter_handle, glow_pos);
 		}
-		// The local player's own fire is presented by the action-slot legs
-		// [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
-		// else's rides the ammo-def legs below. (The SOUND legs of every arm
-		// run in the sim now — world/fire_sound.h — and arrive through
-		// drain_fire_sounds; this drain owns the EFFECT legs.)
 		if (ev.is_local_player) {
 			continue;
 		}
 		++stat_fires_;
 		Vector3 origin = mission_to_godot(ev.origin);
-		String effect = opennova::to_gd(ev.effect);
-		// THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
-		// arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
-		// no ammo-def effect: it executes the ADDRESSED def's FIRE action row
-		// instead, at that weapon's own userpoint on the gfx3 model.
-		// This matters because the wire position is the shooter's EYE — retail sends
-		// Position + CameraOffset [orig: Entity_CalcWeaponFirePosition @0x4dc750] — so
-		// running the ammo-def leg on this arm draws every remote muzzle flash out of
-		// the shooter's face, roughly a metre behind the barrel.
-		// [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
-		//  the fire row @0x42f777 / @0x42f98f]
-		if (ev.adm_arm) {
-			effect = opennova::to_gd(ev.action_effect);
-			// The anchor: this shooter's held weapon, not the wire point — the
-			// rendered gun's own userpoint, which is what retail spawns at (the
-			// authority DECISION closing the S12a shadow seam: the rendered-node
-			// anchor is permanent, the sim-posed re-derivation is gone). Falling
-			// back to the wire eye position would reintroduce the very bug this
-			// fixes, so an unresolvable anchor takes the provider's own
-			// body-origin fallback — retail's deepest fallback is the entity
-			// origin [orig: @0x401867..0x401887].
+		if (plan.spawn_at_muzzle) {
+			// The rendered gun's own userpoint is the anchor (the muzzle-authority
+			// decision); an unresolvable anchor keeps the row's origin.
 			const Vector3 anchored = owner_->muzzle_world_for(
-					ev.shooter_handle, opennova::to_gd(ev.action_userpoint));
+					ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
 			if (anchored.is_finite()) {
 				origin = anchored;
 			}
 		}
-		if (fx_world != nullptr && !effect.is_empty()) {
-			// The muzzle effect at the fire origin along the fire direction
-			// [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
-			// @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
-			fx_world->spawn_effect(effect, origin, mission_to_godot(ev.forward));
+		if (fx_world != nullptr && plan.spawn) {
+			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin, mission_to_godot(ev.forward));
 			++stat_effects_;
 		}
 	}

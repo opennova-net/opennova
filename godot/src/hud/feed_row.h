@@ -9,11 +9,12 @@
 
 namespace godot {
 
+class RtxtStringFile;
+
 // One resolved message-feed row (hud::FeedRow, ADR 0040 B3). Data only: the
-// fold from a 0x1E game event to this row is the engine's feed_event_rows;
-// the presenter resolves `key` (and a camp row's `wpname_key`) against
-// gametext and formats the line through Simulation.format_feed_line /
-// format_feed_camp_line, then posts it in `color`.
+// fold from a 0x1E game event to this row is the engine's feed_event_rows,
+// and the gametext resolve + format is its feed_row_line (resolve_line); the
+// presenter posts the line in `color`.
 class FeedRow : public RefCounted {
 	GDCLASS(FeedRow, RefCounted)
 
@@ -33,8 +34,9 @@ public:
 	// The "Canned Msg" template key.
 	String get_key() const;
 	bool is_announcement() const { return value_.announce; }
-	String format_line(const String &tmpl, const String &unknown,
-			const String &bonus, const String &wpname) const;
+	// The row's line resolved against the gametext table and formatted
+	// (hud::feed_row_line); "" when the table has no template for its key.
+	String resolve_line(const Ref<RtxtStringFile> &p_gametext) const;
 	// The bonus-credited aux actor's name, only when that is the local player
 	// (drives the STRCND48 re-compose).
 	String get_extra() const;

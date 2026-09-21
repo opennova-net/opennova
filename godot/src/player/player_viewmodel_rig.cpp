@@ -346,9 +346,12 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 					p_weapon_view->get_emplaced_gun_yaw());
 			visual->set_ctrl_override(kCtrlOwnerFpEmplaced, "EWEAP_GUNPITCH",
 					p_weapon_view->get_emplaced_gun_pitch());
+			visual->set_ctrl_override(kCtrlOwnerFpEmplaced, "WEAP_SPIN",
+					p_weapon_view->get_emplaced_spin_phase());
 		} else {
 			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "EWEAP_GUNYAW");
 			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "EWEAP_GUNPITCH");
+			visual->clear_ctrl_override(kCtrlOwnerFpEmplaced, "WEAP_SPIN");
 		}
 		if (arms_part) {
 			if (writes.arms_camo) {

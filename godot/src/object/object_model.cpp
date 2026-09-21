@@ -125,11 +125,6 @@ void PanmClock::_bind_methods() {
 			"", "get_time_ms");
 }
 
-bool PanmClock::sample_frame() {
-	return sample(static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()),
-			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
-}
-
 bool PanmClock::sample(int64_t p_value_ms, int64_t p_frame) {
 	if (p_frame == sampled_frame_) {
 		return false;
@@ -173,8 +168,7 @@ void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
 	object_data_ = p_data;
 	refresh_entity_projection_sphere();
 	reset_remote_body_state();
-	part_anims_.clear();
-	part_anim_tick_accum_s_ = 0.0;
+	controls_.clear_parts();
 	active_lod_ = clamp_lod_index(active_lod_);
 	if (object_data_.is_valid() && !object_data_->is_connected("object_changed", changed)) {
 		object_data_->connect("object_changed", changed, CONNECT_DEFERRED);
@@ -748,30 +742,13 @@ void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
 	}
 }
 
-int64_t ObjectModel::ctrl_dword(int64_t p_value) {
-	// Retail's global CTRL bus stores signed dwords. Keep exact 0x10000
-	// endpoints and negative angular controls instead of narrowing to uint16.
-	int64_t next_value = p_value & 0xFFFFFFFF;
-	if (next_value >= 0x80000000LL) {
-		next_value -= 0x100000000LL;
-	}
-	return next_value;
-}
-
 opennova::renderer::ControlRegisterValues ObjectModel::runtime_ctrl_values() {
-	if (!ctrl_native_cache_valid_) {
-		ctrl_native_cache_ = ObjectData::runtime_control_values_dict_only(
-				ctrl_values_, ctrl_native_has_flicker_, ctrl_native_has_swing_);
-		ctrl_native_cache_valid_ = true;
-	}
-	opennova::renderer::ControlRegisterValues values = ctrl_native_cache_;
-	ObjectData::stamp_weather_ctrl_registers(values, ctrl_native_has_flicker_,
-			ctrl_native_has_swing_);
-	return values;
+	int32_t flicker = 0, swing = 0;
+	ObjectData::weather_ctrl_registers(flicker, swing);
+	return controls_.runtime_values(flicker, swing);
 }
 
 void ObjectModel::finish_ctrl_change(bool p_apply_now) {
-	ctrl_native_cache_valid_ = false;
 	wake_runtime_frame();
 	bounds_dirty_ = true;
 	if (p_apply_now) {
@@ -808,20 +785,13 @@ void ObjectModel::end_ctrl_update() {
 
 void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
-	if (reg.is_empty()) {
-		return;
-	}
+	if (reg.is_empty()) return;
 	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
 		linked->set_ctrl_value(reg, p_value);
 	}
-	const int64_t next_value = ctrl_dword(p_value);
-	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
-			!ctrl_value_owners_.has(reg)) {
-		return;
+	if (controls_.store(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()), p_value)) {
+		finish_ctrl_change(true);
 	}
-	ctrl_values_[reg] = next_value;
-	ctrl_value_owners_.erase(reg);
-	finish_ctrl_change(true);
 }
 
 void ObjectModel::clear_ctrl_value(const String &p_name) {
@@ -829,79 +799,51 @@ void ObjectModel::clear_ctrl_value(const String &p_name) {
 	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
 		linked->clear_ctrl_value(reg);
 	}
-	if (reg.is_empty() || !ctrl_values_.has(reg)) {
-		return;
-	}
-	ctrl_values_.erase(reg);
-	ctrl_value_owners_.erase(reg);
-	finish_ctrl_change(true);
-}
-
-// Publish one dedicated retail writer into the register's single current
-// value. The owner tag is lifecycle bookkeeping only: a stale teardown cannot
-// clear a later writer's store, and overwritten values are never stacked or
-// restored. [orig: global CTRL value slots @0x83FCE8, stride 8]
-void ObjectModel::set_ctrl_override(const String &p_owner, const String &p_name,
-		int64_t p_value) {
-	const String reg = ObjectData::canonical_control_register_name(p_name);
-	if (p_owner.is_empty() || reg.is_empty()) {
-		return;
-	}
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->set_ctrl_override(p_owner, reg, p_value);
-	}
-	const int64_t next_value = ctrl_dword(p_value);
-	const String *current_owner = ctrl_value_owners_.getptr(reg);
-	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
-			current_owner != nullptr && *current_owner == p_owner) {
-		return;
-	}
-	ctrl_values_[reg] = next_value;
-	ctrl_value_owners_[reg] = p_owner;
-	finish_ctrl_change(true);
-}
-
-void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_name) {
-	const String reg = ObjectData::canonical_control_register_name(p_name);
-	if (p_owner.is_empty() || reg.is_empty()) {
-		return;
-	}
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->clear_ctrl_override(p_owner, reg);
-	}
-	const String *current_owner = ctrl_value_owners_.getptr(reg);
-	if (current_owner == nullptr || *current_owner != p_owner) {
-		return;
-	}
-	ctrl_value_owners_.erase(reg);
-	ctrl_values_.erase(reg);
-	finish_ctrl_change(true);
-}
-
-void ObjectModel::clear_ctrl_overrides_owned(const String &p_owner) {
-	if (p_owner.is_empty()) {
-		return;
-	}
-	Vector<String> owned;
-	for (const KeyValue<String, String> &entry : ctrl_value_owners_) {
-		if (entry.value == p_owner) {
-			owned.push_back(entry.key);
-		}
-	}
-	for (const String &reg : owned) {
-		for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-			linked->clear_ctrl_override(p_owner, reg);
-		}
-		ctrl_value_owners_.erase(reg);
-		ctrl_values_.erase(reg);
-	}
-	if (!owned.is_empty()) {
+	if (controls_.clear(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()))) {
 		finish_ctrl_change(true);
 	}
 }
 
+void ObjectModel::set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value) {
+	const String reg = ObjectData::canonical_control_register_name(p_name);
+	if (p_owner.is_empty() || reg.is_empty()) return;
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->set_ctrl_override(p_owner, reg, p_value);
+	}
+	if (controls_.store(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()),
+			p_value, p_owner.utf8().get_data())) finish_ctrl_change(true);
+}
+
+void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_name) {
+	const String reg = ObjectData::canonical_control_register_name(p_name);
+	if (p_owner.is_empty() || reg.is_empty()) return;
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->clear_ctrl_override(p_owner, reg);
+	}
+	if (controls_.clear_owned(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()),
+			p_owner.utf8().get_data())) finish_ctrl_change(true);
+}
+
+void ObjectModel::clear_ctrl_overrides_owned(const String &p_owner) {
+	const std::string owner = p_owner.utf8().get_data();
+	const auto owned = controls_.owned_registers(owner);
+	for (int ordinal : owned) {
+		const String reg(opennova::threedi::threedi_ctrl_register_name(static_cast<size_t>(ordinal)));
+		for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+			linked->clear_ctrl_override(p_owner, reg);
+		}
+		controls_.clear(ordinal);
+	}
+	if (!owned.empty()) finish_ctrl_change(true);
+}
+
 Dictionary ObjectModel::get_ctrl_values() const {
-	return ctrl_values_.duplicate(true);
+	Dictionary out;
+	for (int ordinal : controls_.present_registers()) {
+		out[String(opennova::threedi::threedi_ctrl_register_name(static_cast<size_t>(ordinal)))] =
+				static_cast<int64_t>(controls_.value(ordinal));
+	}
+	return out;
 }
 
 void ObjectModel::rebuild() {
@@ -1407,7 +1349,7 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 bool ObjectModel::needs_runtime_frame_work() const {
 	if (focal_sway_active_ || bounds_dirty_ || has_live_panm_ ||
 			!dynamic_material_slots_.is_empty() ||
-			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) || !part_anims_.is_empty()) {
+			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) || controls_.has_active_parts()) {
 		return true;
 	}
 	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
@@ -1415,7 +1357,7 @@ bool ObjectModel::needs_runtime_frame_work() const {
 	}
 	return body_pose_dirty_ ||
 			(is_playing_ && anim_playing_ && !anim_external_phase_) ||
-			remote_pending_state_ >= 0;
+			remote_body_.has_pending();
 }
 
 void ObjectModel::refresh_live_panm_classification() {
@@ -1506,7 +1448,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	// registers (BoneCallback_gnrc_World @ 0x4e286c, BoneCallback_Sway_World
 	// @ 0x4e2b22, the collect @ 0x5d968d); only a model whose 3DI declares
 	// either register can read them, so only those hash. Written straight into
-	// the dictionary the evaluations below read (no batch replay: the value
+	// the native bus the evaluations below read (no batch replay: the value
 	// moves every tick anyway).
 	if (object_data_.is_valid() && object_data_->uses_weather_ctrl_registers()) {
 		const Vector3 p = get_global_position(); // Godot (x, up, -y)
@@ -1517,13 +1459,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					static_cast<int32_t>(std::lround(static_cast<double>(-p.z) * 65536.0)),
 					static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)),
 					flicker, swing)) {
-			static const String flicker_register =
-					ObjectData::canonical_control_register_name("FLICKER");
-			static const String swing_register =
-					ObjectData::canonical_control_register_name("SWING");
-			ctrl_values_[flicker_register] = static_cast<int64_t>(flicker);
-			ctrl_values_[swing_register] = static_cast<int64_t>(swing);
-			ctrl_native_cache_valid_ = false;
+			controls_.sample_weather(flicker, swing);
 		}
 	}
 	// Retail poses PANM during entity submission before the later render-batch

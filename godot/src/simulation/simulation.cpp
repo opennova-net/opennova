@@ -239,11 +239,6 @@ const opennova::world::WeatherState *Simulation::weather_state() const {
 	return world_installed_ && kernel_ ? &kernel_->world.weather : nullptr;
 }
 
-void Simulation::seed_weather(const opennova::world::WeatherSeed &p_seed) {
-	if (!world_installed_ || kernel_ == nullptr) return;
-	kernel_->world.weather.seed(p_seed);
-}
-
 void Simulation::set_weather_render_owner(Weather *p_owner) {
 	assets_.weather_owner_id = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
 										: ObjectID();
@@ -685,8 +680,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);
 	options.people_name_resolver = [this](int32_t index) {
-		const auto it = net_.mission_people_names.find(index);
-		return it != net_.mission_people_names.end() ? it->second : std::string();
+		return net_.mission_text.people_name(index);
 	};
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;

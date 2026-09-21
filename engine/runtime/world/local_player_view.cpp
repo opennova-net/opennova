@@ -631,7 +631,8 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
     out[2] = to_fixed(parent->position.z);
     out[3] = emplaced_gun_frame_heading(*parent);
     out[4] = emplaced_gun_frame_pitch(*parent);
-    out[5] = bam_from_degrees_wrapped(parent->roll);
+    out[5] = parent->veh.yaw_seeded ? parent->veh.air_roll_bam
+            : bam_from_degrees_wrapped(parent->roll);
     return true;
 }
 
@@ -977,6 +978,19 @@ void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
     // samples the viewport.
     if (player_view_narrow_aspect(viewport_w, viewport_h))
         out[2] -= static_cast<float>(kFpNarrowAspectDropQ16) / 65536.0f;
+}
+
+int local_player_health(const World &world) {
+    if (!world.cached.local_player.valid()) return 0;
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e ? e->health : 0;
+}
+
+int local_player_max_health(const World &world) {
+    if (!world.cached.local_player.valid()) return 100;
+    const AiEntity *p = world.ai.for_handle(world.cached.local_player);
+    if (!p || p->inf.max_health <= 0) return 100;
+    return p->inf.max_health;
 }
 
 } // namespace opennova::world

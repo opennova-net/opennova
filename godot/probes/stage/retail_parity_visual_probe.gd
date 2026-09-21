@@ -73,7 +73,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if _fx != null:
 		for _tick in range(10):
 			_fx.advance_fixed_tick(TICK_DT)
-			_fx.render_frame()
+			_fx.render_frame(GameWorld.current_frame_clock_ms())
 			await ctx.tree.process_frame
 	var image := await _stage.capture_after_render(_ctx.tree, _fx)
 	var file_path := output_dir.path_join("capture.png")

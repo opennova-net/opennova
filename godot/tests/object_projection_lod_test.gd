@@ -247,7 +247,7 @@ func _present_husk(placer: MissionObjectPlacer, placed: Dictionary,
 		individual: bool) -> void:
 	var container: Node3D = placed.parent.get_node("MissionObjects")
 	var index := EntityIndex.new()
-	index.build(placer.get_placed_models(), [])
+	index.build(placer.get_placed_models(), null)
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(null, index, placer)

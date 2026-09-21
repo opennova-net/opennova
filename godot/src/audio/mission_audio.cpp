@@ -6,7 +6,6 @@
 #include "mission/mission_data.h"
 #include "mission/mission_info.h"
 #include "object/item_database.h"
-#include "object/item_records.h"
 #include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
 #include "util/axes.h"
@@ -26,6 +25,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/environment/environment_state.h>
@@ -45,7 +45,7 @@ constexpr const char *kVoiceBus = "Voice";
 // set names (e.g. id 106178 "snd: Lp Flourescent Light" -> soundloop_1
 // LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4]; the engine is
 // name-keyed (docs/audio/lwf-dbf-sound-re.md) and resolves it natively
-// (audio/envs_markers.h via ItemDatabase.resolve_envs_markers).
+// (audio/envs_markers.h resolve_envs_markers).
 
 // The thunder bearing is an 8-bit binary angle (one byte = a full turn;
 // world/weather_state.h WeatherSound.bearing).
@@ -194,7 +194,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	_free_voice_nodes();
 	markers_.clear();
 	channels_.clear();
-	failed_candidate_ids_.clear();
+	channel_pool_.reset();
 	validated_candidate_ids_.clear();
 	warned_ambient_decode_failure_ = false;
 	next_candidate_id_ = 1;
@@ -239,30 +239,27 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 
 	_attach_under(p_container);
 
-	TypedArray<EnvsMarkerRow> marker_rows;
+	std::vector<opennova::audio::EnvsMarker> marker_rows;
 	// S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
 	// names resolve natively over the retained items.def and the mission's
 	// bms document (audio/envs_markers.h). The bank-presence filter below
 	// stays a shell stream-resolution concern (the original has no such
 	// gate -- a missing set is simply silent).
 	if (ambient_markers_enabled_ && item_db_.is_valid()) {
-		marker_rows = item_db_->resolve_envs_markers(p_mission);
+		marker_rows = opennova::audio::resolve_envs_markers(
+				p_mission->native_file(), item_db_->native_items());
 	}
-	for (int64_t ri = 0; ri < marker_rows.size(); ++ri) {
-		const Ref<EnvsMarkerRow> row = marker_rows[ri];
-		if (row.is_null()) {
-			continue;
-		}
+	for (const opennova::audio::EnvsMarker &row : marker_rows) {
 		stats_->set_markers_total(stats_->get_markers_total() + 1);
 		// Authored slot names -> playable slots: only sets the loaded bank chain
 		// actually carries participate; an empty slot stays SILENT in its region.
-		const PackedStringArray authored = row->get_slot_sets();
+		const auto &authored = row.slot_sets;
 		PackedStringArray slot_sets;
 		slot_sets.resize(4);
 		for (int i = 0; i < 4; ++i) {
 			slot_sets[i] = String();
 			if (i < authored.size()) {
-				const String n = authored[i];
+				const String n(authored[i].c_str());
 				if (!n.is_empty() && bank_->has_set(n)) {
 					slot_sets[i] = n;
 				}
@@ -278,10 +275,8 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		if (distinct.is_empty()) {
 			continue;
 		}
-		const Vector3 bms_pos = row->get_position();
 		const opennova::mission::PlacementVec3 placed = opennova::mission::bms_to_presentation_position(
-				opennova::mission::PlacementVec3{ static_cast<float>(bms_pos.x),
-						static_cast<float>(bms_pos.y), static_cast<float>(bms_pos.z) });
+				opennova::mission::PlacementVec3{ row.x, row.y, row.z });
 		const Vector3 pos(placed.x, placed.y, placed.z);
 		// Keep layer candidates as data. The original registers only the current
 		// region's set and has eight physical channels; it does not materialize a
@@ -307,7 +302,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 			continue;
 		}
 		marker->set_pos(pos);
-		marker->set_source_bms_id(row->get_bms_id());
+		marker->set_source_bms_id(row.bms_id);
 		marker->set_slot_sets(slot_sets);
 		marker->set_stagger_slot(static_cast<int>(markers_.size() & 0xF));
 		markers_.push_back(marker);
@@ -368,7 +363,7 @@ void MissionAudio::set_markers(const Array &p_markers, Node3D *p_container) {
 			markers_.push_back(marker);
 		}
 	}
-	failed_candidate_ids_.clear();
+	channel_pool_.forget_failures();
 	validated_candidate_ids_.clear();
 	warned_ambient_decode_failure_ = false;
 	next_candidate_id_ = 1;
@@ -427,7 +422,7 @@ Ref<MissionAudioPerf> MissionAudio::get_perf_counters() const {
 	perf->set_voice_writes(perf_voice_writes_);
 	perf->set_physical_channels(channels_.size());
 	perf->set_active_channels(active_channels);
-	perf->set_ambient_decode_failures(static_cast<int64_t>(failed_candidate_ids_.size()));
+	perf->set_ambient_decode_failures(static_cast<int64_t>(channel_pool_.failed_count()));
 	return perf;
 }
 
@@ -714,68 +709,31 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		mixer_->advance_seconds(static_cast<float>(p_delta));
 	}
 	const std::vector<opennova::audio::AmbientCandidate> &rows = mixer_->mix_rows(p_camera_pos);
-	// Ranked loudest-first (candidate-id tie-break) by the native mixer; a
-	// physical incumbent is never rebound merely because its rank within the
-	// selected eight changed.
-	Vector<Ref<MissionAudioCandidate>> candidates;
+	// Ranked loudest-first (candidate-id tie-break) by the native mixer. The
+	// rows this node can describe go to the engine's channel pool, which decides
+	// which candidate rides which physical channel (incumbents keep theirs,
+	// dropouts release, entrants restart); the stream resolve is the one device
+	// step it asks for, once per entrant, answered here and kept for the bind.
+	std::vector<opennova::audio::AmbientCandidate> describable;
+	describable.reserve(rows.size());
 	for (const opennova::audio::AmbientCandidate &row : rows) {
 		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(row.candidate_id);
-		if (binding == nullptr || binding->is_null()) {
-			continue;
-		}
-		Ref<MissionAudioCandidate> candidate;
-		candidate.instantiate();
-		candidate->set_candidate_id(row.candidate_id);
-		candidate->set_descriptor((*binding)->get_descriptor());
-		candidate->set_bus((*binding)->get_bus());
-		candidate->set_pos(Vector3(row.pos[0], row.pos[1], row.pos[2]));
-		candidate->set_vol(row.vol);
-		candidate->set_pitch_q16(row.pitch_q16);
-		candidates.push_back(candidate);
+		if (binding != nullptr && binding->is_valid()) describable.push_back(row);
 	}
-	HashMap<int, Ref<MissionAudioChannel>> incumbent_by_id; // candidate_id -> Channel
-	for (const Ref<MissionAudioChannel> &channel : channels_) {
-		if (channel->get_candidate_id() >= 0) {
-			incumbent_by_id[channel->get_candidate_id()] = channel;
-		}
-	}
+	HashMap<int, Ref<AudioStreamWAV>> resolved;
+	opennova::audio::AmbientChannelPlan plan;
+	channel_pool_.plan(describable, [&](int32_t candidate_id) {
+		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(candidate_id);
+		const Ref<AudioStreamWAV> stream =
+				_validate_candidate_stream(candidate_id, (*binding)->get_descriptor());
+		if (stream.is_null()) return false;
+		resolved[candidate_id] = stream;
+		return true;
+	}, root_attached_, plan);
+	while (channels_.size() < plan.channel_count) _new_channel();
 
-	// Resolve streams only for new candidates that would enter the top eight.
-	// Failed/corrupt descriptors are cached out and the next-ranked candidate
-	// gets the channel, matching the old eager path's "unresolvable = absent".
-	Vector<Ref<MissionAudioCandidate>> selected;
-	for (const Ref<MissionAudioCandidate> &candidate : candidates) {
-		if (selected.size() >= MIX_CHANNELS) {
-			break;
-		}
-		const int candidate_id = candidate->get_candidate_id();
-		if (failed_candidate_ids_.has(candidate_id)) {
-			continue;
-		}
-		if (!incumbent_by_id.has(candidate_id)) {
-			const Ref<AudioStreamWAV> stream = _validate_candidate_stream(candidate_id,
-					candidate->get_descriptor());
-			if (stream.is_null()) {
-				failed_candidate_ids_.insert(candidate_id);
-				continue;
-			}
-			candidate->set_resolved_stream(stream);
-		}
-		selected.push_back(candidate);
-	}
-
-	HashSet<int> selected_ids;
-	for (const Ref<MissionAudioCandidate> &candidate : selected) {
-		selected_ids.insert(candidate->get_candidate_id());
-	}
-
-	// Dropouts release their physical slot. If the same virtual candidate later
-	// re-enters it is rebound and play() starts it from the beginning, like the
-	// original transient channel registration.
-	for (const Ref<MissionAudioChannel> &channel : channels_) {
-		if (channel->get_candidate_id() < 0 || selected_ids.has(channel->get_candidate_id())) {
-			continue;
-		}
+	for (const int channel_index : plan.released) {
+		const Ref<MissionAudioChannel> &channel = channels_[channel_index];
 		AudioStreamPlayer3D *player = channel->get_player();
 		if (player != nullptr) {
 			player->stop();
@@ -786,55 +744,45 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		channel->set_candidate_id(-1);
 		writes += 1;
 	}
-
-	for (const Ref<MissionAudioCandidate> &candidate : selected) {
-		const int candidate_id = candidate->get_candidate_id();
-		Ref<MissionAudioChannel> channel;
-		if (const Ref<MissionAudioChannel> *incumbent = incumbent_by_id.getptr(candidate_id)) {
-			channel = *incumbent;
-		}
-		if (channel.is_null()) {
-			channel = _free_or_new_channel();
-			if (channel.is_null()) {
-				continue;
-			}
-			AudioStreamPlayer3D *player = channel->get_player();
-			if (player == nullptr) {
-				continue;
-			}
-			SoundBank::configure_ambient_player(player, candidate->get_resolved_stream(),
-					candidate->get_descriptor(), candidate->get_bus());
-			player->set_position(candidate->get_pos());
-			player->set_volume_db(static_cast<float>(SoundBank::volume_db_from_255(candidate->get_vol())));
-			player->set_pitch_scale(static_cast<float>(_candidate_pitch_scale(candidate)));
-			player->set_process_mode(Node::PROCESS_MODE_INHERIT);
-			channel->set_candidate_id(candidate_id);
-			player->play();
-			writes += 1;
-			continue;
-		}
-		AudioStreamPlayer3D *incumbent = channel->get_player();
-		if (incumbent == nullptr) {
-			continue;
-		}
+	for (const opennova::audio::AmbientChannelPlan::Bind &bind : plan.binds) {
+		const Ref<MissionAudioChannel> &channel = channels_[bind.channel];
+		AudioStreamPlayer3D *player = channel->get_player();
+		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(bind.row.candidate_id);
+		const Ref<AudioStreamWAV> *stream = resolved.getptr(bind.row.candidate_id);
+		if (player == nullptr || binding == nullptr || stream == nullptr) continue;
+		SoundBank::configure_ambient_player(player, *stream, (*binding)->get_descriptor(),
+				(*binding)->get_bus());
+		player->set_position(Vector3(bind.row.pos[0], bind.row.pos[1], bind.row.pos[2]));
+		player->set_volume_db(static_cast<float>(SoundBank::volume_db_from_255(bind.row.vol)));
+		player->set_pitch_scale(static_cast<float>(
+				_pitch_scale((*binding)->get_descriptor(), bind.row.pitch_q16)));
+		player->set_process_mode(Node::PROCESS_MODE_INHERIT);
+		channel->set_candidate_id(bind.row.candidate_id);
+		player->play();
+		writes += 1;
+	}
+	for (const opennova::audio::AmbientChannelPlan::Bind &update : plan.updates) {
+		AudioStreamPlayer3D *incumbent = channels_[update.channel]->get_player();
+		const Ref<MissionAudioCandidateBinding> *binding =
+				candidate_lookup_.getptr(update.row.candidate_id);
+		if (incumbent == nullptr || binding == nullptr) continue;
 		bool changed = false;
-		if (incumbent->get_position() != candidate->get_pos()) {
-			incumbent->set_position(candidate->get_pos());
+		const Vector3 pos(update.row.pos[0], update.row.pos[1], update.row.pos[2]);
+		if (incumbent->get_position() != pos) {
+			incumbent->set_position(pos);
 			changed = true;
 		}
-		const double db = SoundBank::volume_db_from_255(candidate->get_vol());
+		const double db = SoundBank::volume_db_from_255(update.row.vol);
 		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_volume_db()), db)) {
 			incumbent->set_volume_db(static_cast<float>(db));
 			changed = true;
 		}
-		const double pitch_scale = _candidate_pitch_scale(candidate);
+		const double pitch_scale = _pitch_scale((*binding)->get_descriptor(), update.row.pitch_q16);
 		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_pitch_scale()), pitch_scale)) {
 			incumbent->set_pitch_scale(static_cast<float>(pitch_scale));
 			changed = true;
 		}
-		if (changed) {
-			writes += 1;
-		}
+		if (changed) writes += 1;
 	}
 	_prune_dynamic_emitter_states();
 	_release_retired_candidate_ids();
@@ -874,7 +822,7 @@ Ref<AudioStreamWAV> MissionAudio::_validate_candidate_stream(int p_candidate_id,
 		return stream;
 	}
 	if (stats_.is_valid()) {
-		stats_->set_ambient_decode_failures(static_cast<int>(failed_candidate_ids_.size()) + 1);
+		stats_->set_ambient_decode_failures(channel_pool_.failed_count() + 1);
 	}
 	if (!warned_ambient_decode_failure_) {
 		warned_ambient_decode_failure_ = true;
@@ -886,16 +834,9 @@ Ref<AudioStreamWAV> MissionAudio::_validate_candidate_stream(int p_candidate_id,
 	return Ref<AudioStreamWAV>();
 }
 
-// A free channel, a new one under the MIX_CHANNELS budget, else null.
-Ref<MissionAudioChannel> MissionAudio::_free_or_new_channel() {
-	for (const Ref<MissionAudioChannel> &channel : channels_) {
-		if (channel->get_candidate_id() < 0) {
-			return channel;
-		}
-	}
-	if (channels_.size() >= MIX_CHANNELS || !root_attached_) {
-		return Ref<MissionAudioChannel>();
-	}
+// One more physical channel: the engine pool decided the growth under its
+// budget, on an attached root.
+Ref<MissionAudioChannel> MissionAudio::_new_channel() {
 	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 	player->set_name(vformat("AmbientChannel%d", channels_.size()));
 	player->set_volume_db(static_cast<float>(kSilentDb));
@@ -909,6 +850,7 @@ Ref<MissionAudioChannel> MissionAudio::_free_or_new_channel() {
 }
 
 void MissionAudio::_stop_all_ambient_channels() {
+	channel_pool_.release_all();
 	for (const Ref<MissionAudioChannel> &channel : channels_) {
 		AudioStreamPlayer3D *player = channel->get_player();
 		if (player != nullptr) {
@@ -950,7 +892,7 @@ void MissionAudio::teardown() {
 	root_attached_ = false;
 	markers_.clear();
 	channels_.clear();
-	failed_candidate_ids_.clear();
+	channel_pool_.reset();
 	validated_candidate_ids_.clear();
 	warned_ambient_decode_failure_ = false;
 	mixer_.unref();
@@ -1127,7 +1069,7 @@ void MissionAudio::_forget_dynamic_emitter(const String &p_key) {
 	for (int64_t i = 0; i < candidate_ids.size(); ++i) {
 		const int id = candidate_ids[i];
 		candidate_lookup_.erase(id);
-		failed_candidate_ids_.erase(id);
+		channel_pool_.forget_candidate(id);
 		validated_candidate_ids_.erase(id);
 		retired_candidate_ids_.push_back(id);
 	}
@@ -1184,11 +1126,10 @@ void MissionAudio::_release_retired_candidate_ids() {
 
 // The player's pitch: the layer's authored base pitch times the emitter's
 // 16.16 pitch word (the native mix row's pitch_q16).
-double MissionAudio::_candidate_pitch_scale(const Ref<MissionAudioCandidate> &p_candidate) {
-	const Ref<AmbientLayer> descriptor = p_candidate->get_descriptor();
-	const double base_pitch = descriptor.is_valid() ? descriptor->get_base_pitch() : 1.0;
+double MissionAudio::_pitch_scale(const Ref<AmbientLayer> &p_descriptor, int p_pitch_q16) {
+	const double base_pitch = p_descriptor.is_valid() ? p_descriptor->get_base_pitch() : 1.0;
 	return SoundBank::effective_base_pitch(base_pitch) *
-			MAX(static_cast<double>(AmbientMixer::q16_to_float(p_candidate->get_pitch_q16())), 0.0001);
+			MAX(static_cast<double>(AmbientMixer::q16_to_float(p_pitch_q16)), 0.0001);
 }
 
 // HHMM (MissionEnvironment.time_of_day) -> hours, through the engine's

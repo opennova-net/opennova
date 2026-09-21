@@ -211,6 +211,11 @@ target_include_directories(mission_placement_traits_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_placement_traits_test PRIVATE cxx_std_17)
 add_test(NAME mission_placement_traits COMMAND mission_placement_traits_test)
 
+add_executable(mission_static_sources_test mission/static_sources_test.cpp)
+target_link_libraries(mission_static_sources_test PRIVATE opennova_runtime)
+target_include_directories(mission_static_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_static_sources COMMAND mission_static_sources_test)
+
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
 target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -368,6 +373,14 @@ target_link_libraries(ambient_mixer_test PRIVATE opennova_runtime)
 target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
+
+# The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
+# binds up to the budget, incumbents keep their channel, dropouts release,
+# unresolvable entrants cached out, a pinned pool never grows.
+add_executable(ambient_channel_pool_test audio/ambient_channel_pool_test.cpp)
+target_link_libraries(ambient_channel_pool_test PRIVATE opennova_runtime)
+target_compile_features(ambient_channel_pool_test PRIVATE cxx_std_17)
+add_test(NAME ambient_channel_pool COMMAND ambient_channel_pool_test)
 
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
@@ -705,15 +718,40 @@ target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURC
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
 # native world: the sim-side .3di derivations (ADR 0028)
+add_executable(world_entity_index_test world/entity_index_test.cpp)
+target_link_libraries(world_entity_index_test PRIVATE opennova_runtime)
+target_include_directories(world_entity_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_entity_index COMMAND world_entity_index_test)
+
 add_executable(world_model_geometry_test world/model_geometry_test.cpp)
 target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_model_geometry COMMAND world_model_geometry_test)
 
+add_executable(renderer_model_controls_test renderer/model_controls_test.cpp)
+target_link_libraries(renderer_model_controls_test PRIVATE opennova_runtime)
+target_include_directories(renderer_model_controls_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_model_controls COMMAND renderer_model_controls_test)
+
+add_executable(renderer_model_panm_cache_test renderer/model_panm_cache_test.cpp)
+target_link_libraries(renderer_model_panm_cache_test PRIVATE opennova_runtime)
+target_include_directories(renderer_model_panm_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_model_panm_cache COMMAND renderer_model_panm_cache_test)
+
+add_executable(renderer_model_mesh_prepare_test renderer/model_mesh_prepare_test.cpp)
+target_link_libraries(renderer_model_mesh_prepare_test PRIVATE opennova_runtime)
+target_include_directories(renderer_model_mesh_prepare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_model_mesh_prepare COMMAND renderer_model_mesh_prepare_test)
+
 add_executable(renderer_fp_viewmodel_spec_test renderer/fp_viewmodel_spec_test.cpp)
 target_link_libraries(renderer_fp_viewmodel_spec_test PRIVATE opennova_runtime)
 target_include_directories(renderer_fp_viewmodel_spec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME renderer_fp_viewmodel_spec COMMAND renderer_fp_viewmodel_spec_test)
+
+add_executable(anim_remote_body_state_test anim/remote_body_state_test.cpp)
+target_link_libraries(anim_remote_body_state_test PRIVATE opennova_runtime)
+target_include_directories(anim_remote_body_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_remote_body_state COMMAND anim_remote_body_state_test)
 
 add_executable(anim_adm_root_motion_test anim/adm_root_motion_test.cpp)
 target_link_libraries(anim_adm_root_motion_test PRIVATE opennova_runtime)
@@ -927,6 +965,11 @@ add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
 # The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
 # present-due rule and the composited resource names.
+add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
+target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
+target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
+add_test(NAME hud_toggles COMMAND hud_toggles_test)
+
 add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
@@ -983,6 +1026,14 @@ add_executable(terrain_tile_composer_test terrain/terrain_tile_composer_test.cpp
 target_link_libraries(terrain_tile_composer_test PRIVATE opennova_runtime)
 target_include_directories(terrain_tile_composer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_tile_composer COMMAND terrain_tile_composer_test)
+
+# The page-composition thread pool (runtime/terrain/terrain_tile_composition_worker.h):
+# no sources = no work, a queued job composes one 256x256 page, a rejected
+# completion stays queued for a later budget, an epoch bump drops the queue.
+add_executable(terrain_tile_composition_worker_test terrain/terrain_tile_composition_worker_test.cpp)
+target_link_libraries(terrain_tile_composition_worker_test PRIVATE opennova_runtime)
+target_compile_features(terrain_tile_composition_worker_test PRIVATE cxx_std_17)
+add_test(NAME terrain_tile_composition_worker COMMAND terrain_tile_composition_worker_test)
 
 add_executable(terrain_scorch_test terrain/terrain_scorch_test.cpp)
 target_link_libraries(terrain_scorch_test PRIVATE opennova_runtime)
@@ -1052,6 +1103,21 @@ add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
 
+# The role feeds (inmatch/role_feeds.h): the end-round state, overlay input and stat
+# rows off a joiner's replica state, the DEATH screen status, the bare-role fallbacks.
+add_executable(role_feeds_test netsim/role_feeds_test.cpp)
+target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(role_feeds_test PRIVATE cxx_std_17)
+add_test(NAME role_feeds COMMAND role_feeds_test)
+
+# The server config flag word a joiner reads and the join entry's step
+# (inmatch/server_flags.h): the BuildFlags literals, the undiscovered word,
+# dial / enumerate / prompt.
+add_executable(join_entry_test netsim/join_entry_test.cpp)
+target_link_libraries(join_entry_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(join_entry_test PRIVATE cxx_std_17)
+add_test(NAME join_entry COMMAND join_entry_test)
+
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
 target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1064,6 +1130,20 @@ target_link_libraries(score_fanfare_test PRIVATE opennova_runtime)
 target_include_directories(score_fanfare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(score_fanfare_test PRIVATE cxx_std_17)
 add_test(NAME score_fanfare COMMAND score_fanfare_test)
+
+# The HUD's game-text compositions (hud/hud_game_text.h) and the feed row's gametext
+# resolve (hud/feed_format.h feed_row_line).
+add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
+target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
+add_test(NAME hud_game_text COMMAND hud_game_text_test)
+
+# The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
+# the corner rects, the positioned records, the packed colours, the stance slots and
+# the last-authored static frame; the retail leg reads the shipped hudpos.def.
+add_executable(hud_layout_test hud/hud_layout_test.cpp)
+target_link_libraries(hud_layout_test PRIVATE opennova_runtime)
+target_include_directories(hud_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_layout COMMAND hud_layout_test)
 
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
@@ -1122,6 +1202,34 @@ add_test(NAME script_remote_command COMMAND script_remote_command_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+# The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
+# and a synthetic document: the id tree, navigation, the state store and its replay,
+# ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.
+add_executable(menu_runtime_test menu/menu_runtime_test.cpp)
+target_link_libraries(menu_runtime_test PRIVATE opennova_runtime)
+target_compile_features(menu_runtime_test PRIVATE cxx_std_17)
+add_test(NAME menu_runtime COMMAND menu_runtime_test)
+
+# The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
+# weapon label, the ammo row, the armory row order and the weight readout.
+add_executable(loadout_labels_test menu/loadout_labels_test.cpp)
+target_link_libraries(loadout_labels_test PRIVATE opennova_runtime)
+target_compile_features(loadout_labels_test PRIVATE cxx_std_17)
+add_test(NAME loadout_labels COMMAND loadout_labels_test)
+
+add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
+target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
+add_test(NAME loadout_screen COMMAND loadout_screen_test)
+
+add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
+target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
+target_compile_features(player_info_kit_test PRIVATE cxx_std_17)
+add_test(NAME player_info_kit COMMAND player_info_kit_test)
+
+add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
+target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
+add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
+
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1274,6 +1382,10 @@ add_executable(controls_test controls/controls_test.cpp)
 target_link_libraries(controls_test PRIVATE opennova_runtime)
 target_include_directories(controls_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME controls_unit COMMAND controls_test)
+
+add_executable(player_actions_test controls/player_actions_test.cpp)
+target_link_libraries(player_actions_test PRIVATE opennova_runtime)
+add_test(NAME player_actions COMMAND player_actions_test)
 
 add_executable(mnu_unit_test mnu/mnu_unit_test.cpp)
 target_link_libraries(mnu_unit_test PRIVATE opennova_formats)
@@ -1691,6 +1803,18 @@ target_include_directories(deploy_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(deploy_screen_feed_test PRIVATE cxx_std_17)
 add_test(NAME deploy_screen_feed COMMAND deploy_screen_feed_test)
 
+# The gamemus var pump from the local player (world/music_vars.h).
+add_executable(music_vars_test world/music_vars_test.cpp)
+target_link_libraries(music_vars_test PRIVATE opennova_runtime)
+target_compile_features(music_vars_test PRIVATE cxx_std_17)
+add_test(NAME music_vars COMMAND music_vars_test)
+
+# The SP objectives panel's row walk (world/objectives_feed.h).
+add_executable(objectives_feed_test world/objectives_feed_test.cpp)
+target_link_libraries(objectives_feed_test PRIVATE opennova_runtime)
+target_compile_features(objectives_feed_test PRIVATE cxx_std_17)
+add_test(NAME objectives_feed COMMAND objectives_feed_test)
+
 # The mode-4 death lerp camera (world/death_camera.h): FROM/TO, probe, lerp.
 add_executable(death_camera_test world/death_camera_test.cpp)
 target_link_libraries(death_camera_test PRIVATE opennova_runtime)
@@ -1715,6 +1839,16 @@ target_link_libraries(local_player_view_test PRIVATE opennova_runtime)
 target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(local_player_view_test PRIVATE cxx_std_17)
 add_test(NAME local_player_view COMMAND local_player_view_test)
+
+add_executable(player_weapon_view_test world/player_weapon_view_test.cpp)
+target_link_libraries(player_weapon_view_test PRIVATE opennova_runtime)
+target_compile_features(player_weapon_view_test PRIVATE cxx_std_17)
+add_test(NAME player_weapon_view COMMAND player_weapon_view_test)
+
+add_executable(present_drains_test world/present_drains_test.cpp)
+target_link_libraries(present_drains_test PRIVATE opennova_runtime)
+target_compile_features(present_drains_test PRIVATE cxx_std_17)
+add_test(NAME present_drains COMMAND present_drains_test)
 
 add_executable(local_player_targeting_test world/local_player_targeting_test.cpp)
 target_link_libraries(local_player_targeting_test PRIVATE opennova_runtime)
@@ -1990,6 +2124,25 @@ if(MSVC)
     target_link_options(promote_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME mission_promote COMMAND promote_test)
+
+# The <mission>.bin RTXT harvest (runtime/mission/mission_text.h): the
+# briefing pages and the briefing2 -> briefing fallback, the [Locations] /
+# [PeopleNames] numeric-key sections, a rejected table.
+add_executable(mission_text_test mission/mission_text_test.cpp)
+target_link_libraries(mission_text_test PRIVATE opennova_runtime)
+target_compile_features(mission_text_test PRIVATE cxx_std_17)
+add_test(NAME mission_text COMMAND mission_text_test)
+
+# The F3 debug oracles over the kernel (runtime/mission/debug_oracles.h): the
+# hitbox view's stand-in fallback and its exclusions, the pick's zero ray and
+# empty-world miss.
+add_executable(debug_oracles_test mission/debug_oracles_test.cpp)
+target_link_libraries(debug_oracles_test PRIVATE opennova_runtime)
+target_compile_features(debug_oracles_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(debug_oracles_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME mission_debug_oracles COMMAND debug_oracles_test)
 
 # S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
 # fallback and the .aip resolve (the boot ORDER itself is pinned through

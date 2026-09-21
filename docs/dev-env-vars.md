@@ -107,5 +107,5 @@ the normal map spawn selection.
 | `scripts/ida/cite_sweep.py` | `--url` |
 
 GUT-side regeneration is an uncollected script run alone:
-`godot/tests/tools/env_vectors_regen.gd` and `shader_hashes_regen.gd`
-(`-gtest=res://tests/tools/<x>.gd -gunit_test_name=test_regen -gexit`).
+`godot/tests/tools/env_vectors_regen.gd`
+(`-gtest=res://tests/tools/env_vectors_regen.gd -gunit_test_name=test_regen -gexit`).

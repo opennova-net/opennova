@@ -19,38 +19,10 @@ namespace {
 using opennova::to_gd;
 using opennova::to_std;
 
-// --- M10 helpers: active item container + dict <-> struct converters ---
-
-// The canonical item-row container mirrors the authored format. Combo rows live
-// inside LIST_BOX; treating win.items as a mirror is destructive because it can
-// overwrite independently-authored popup alignment, appearances, and rows.
-// List/Table and the other list-like controls use the window-level ITEMS block.
-opennova::mnu::Items *items_container(opennova::mnu::Window *w) {
-	if (w == nullptr) {
-		return nullptr;
-	}
-	switch (w->type) {
-		case opennova::mnu::WindowType::List:
-		case opennova::mnu::WindowType::Table:
-		case opennova::mnu::WindowType::GlbTable:
-		case opennova::mnu::WindowType::Multi:
-		case opennova::mnu::WindowType::LanList:
-		case opennova::mnu::WindowType::SpinList:
-			return &w->items;
-		case opennova::mnu::WindowType::Combo:
-			// LIST_BOX owns combo items when it actually authors an ITEMS
-			// block under an authored LIST_BOX. A latent/disabled LIST_BOX or a
-			// styling-only one falls back to top-level ITEMS, matching runtime.
-			return w->list_box.present && w->list_box.items.present ?
-					&w->list_box.items : &w->items;
-		default:
-			return nullptr;
-	}
-}
-
-const opennova::mnu::Items *items_container(const opennova::mnu::Window *w) {
-	return items_container(const_cast<opennova::mnu::Window *>(w));
-}
+// The canonical item-row container of a list-like widget is the engine's
+// (runtime/menu menu_items_container: a combo's authored LIST_BOX rows, else
+// the window-level ITEMS block).
+using opennova::menu::menu_items_container;
 
 } // namespace
 
@@ -60,81 +32,8 @@ MnuDocument::MnuDocument() {
 
 // --- Id tree ---
 
-MnuDocument::IdWindow MnuDocument::make_id_window(const opennova::mnu::Window &w) {
-	IdWindow node;
-	node.id = next_id_++;
-	node.children.reserve(w.children.size());
-	for (const auto &child : w.children) {
-		node.children.push_back(make_id_window(child));
-	}
-	return node;
-}
-
 void MnuDocument::rebuild_ids() {
-	ids_.clear();
-	next_id_ = 1;
-	ids_.reserve(doc_.screens.size());
-	for (const auto &screen : doc_.screens) {
-		IdScreen s;
-		s.id = next_id_++;
-		s.root = make_id_window(screen.root_window);
-		ids_.push_back(std::move(s));
-	}
-}
-
-bool MnuDocument::find_in_id_window(const IdWindow &node, int id, std::vector<int> &path) {
-	if (node.id == id) {
-		return true; // path holds the chain to this node (empty == root window)
-	}
-	for (size_t i = 0; i < node.children.size(); ++i) {
-		path.push_back(static_cast<int>(i));
-		if (find_in_id_window(node.children[i], id, path)) {
-			return true;
-		}
-		path.pop_back();
-	}
-	return false;
-}
-
-MnuDocument::Locator MnuDocument::locate(int id) const {
-	Locator loc;
-	for (size_t s = 0; s < ids_.size(); ++s) {
-		if (ids_[s].id == id) {
-			loc.screen_index = static_cast<int>(s);
-			loc.is_screen = true;
-			return loc;
-		}
-		std::vector<int> path;
-		if (find_in_id_window(ids_[s].root, id, path)) {
-			loc.screen_index = static_cast<int>(s);
-			loc.path = std::move(path);
-			loc.is_screen = false;
-			return loc;
-		}
-	}
-	return loc;
-}
-
-opennova::mnu::Window *MnuDocument::window_at(const Locator &loc) {
-	if (!loc.valid() || loc.is_screen) {
-		return nullptr;
-	}
-	opennova::mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
-	for (int idx : loc.path) {
-		w = &w->children[idx];
-	}
-	return w;
-}
-
-const opennova::mnu::Window *MnuDocument::window_at(const Locator &loc) const {
-	if (!loc.valid() || loc.is_screen) {
-		return nullptr;
-	}
-	const opennova::mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
-	for (int idx : loc.path) {
-		w = &w->children[idx];
-	}
-	return w;
+	index_.build(doc_);
 }
 
 const char *MnuDocument::state_for_slot(int slot) {
@@ -209,83 +108,45 @@ int MnuDocument::get_screen_count() const {
 
 PackedInt32Array MnuDocument::get_screen_ids() const {
 	PackedInt32Array out;
-	out.resize(static_cast<int64_t>(ids_.size()));
-	for (size_t i = 0; i < ids_.size(); ++i) {
-		out.set(static_cast<int64_t>(i), ids_[i].id);
-	}
+	for (int id : index_.screen_ids()) out.push_back(id);
 	return out;
 }
 
 int MnuDocument::get_screen_root_id(int p_screen_id) const {
-	for (const auto &s : ids_) {
-		if (s.id == p_screen_id) {
-			return s.root.id;
-		}
-	}
-	return -1;
+	return index_.screen_root_id(p_screen_id);
 }
 
 bool MnuDocument::is_screen(int p_id) const {
-	const Locator loc = locate(p_id);
-	return loc.valid() && loc.is_screen;
+	return index_.screen(p_id) != nullptr;
 }
 
 int MnuDocument::get_parent_id(int p_id) const {
-	const Locator loc = locate(p_id);
-	if (!loc.valid() || loc.is_screen) {
-		return -1; // screens (and unknown ids) have no parent
-	}
-	if (loc.path.empty()) {
-		return ids_[loc.screen_index].id; // root window's parent is its screen
-	}
-	// Walk the id tree to the parent of the located node.
-	const IdWindow *node = &ids_[loc.screen_index].root;
-	for (size_t i = 0; i + 1 < loc.path.size(); ++i) {
-		node = &node->children[loc.path[i]];
-	}
-	return node->id;
+	// Screens (and unknown ids) have no parent; a root window's parent is its screen.
+	const opennova::menu::MenuDocIndex::Node *node = index_.node(p_id);
+	return node != nullptr && node->window != nullptr ? node->parent_id : -1;
 }
 
 PackedInt32Array MnuDocument::get_child_ids(int p_id) const {
 	PackedInt32Array out;
-	const Locator loc = locate(p_id);
-	if (!loc.valid()) {
-		return out;
-	}
-	if (loc.is_screen) {
-		out.push_back(ids_[loc.screen_index].root.id); // a screen's child is its root window
-		return out;
-	}
-	const IdWindow *node = &ids_[loc.screen_index].root;
-	for (int idx : loc.path) {
-		node = &node->children[idx];
-	}
-	for (const auto &child : node->children) {
-		out.push_back(child.id);
-	}
+	// A screen's one child is its root window.
+	if (const opennova::menu::MenuDocIndex::Node *node = index_.node(p_id))
+		for (int child : node->child_ids) out.push_back(child);
 	return out;
 }
 
 int MnuDocument::get_widget_type(int p_id) const {
-	const Locator loc = locate(p_id);
-	if (!loc.valid() || loc.is_screen) {
-		return -1;
-	}
-	return static_cast<int>(window_at(loc)->type);
+	const opennova::mnu::Window *w = index_.window(p_id);
+	return w != nullptr ? static_cast<int>(w->type) : -1;
 }
 
 String MnuDocument::get_widget_name(int p_id) const {
-	const Locator loc = locate(p_id);
-	if (loc.is_screen) {
-		return to_gd(doc_.screens[loc.screen_index].name);
-	}
-	const opennova::mnu::Window *w = window_at(loc);
+	if (const opennova::mnu::Screen *screen = index_.screen(p_id)) return to_gd(screen->name);
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->name) : String();
 }
 
 Rect2 MnuDocument::get_window_rect(int p_id) const {
-	const Locator loc = locate(p_id);
-	const opennova::mnu::Window *w = window_at(loc);
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return Rect2();
 	}
@@ -300,65 +161,55 @@ Rect2 MnuDocument::get_window_rect(int p_id) const {
 // --- Screen properties ---
 
 String MnuDocument::get_screen_name(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return String();
-	}
-	return to_gd(doc_.screens[loc.screen_index].name);
+	const opennova::mnu::Screen *screen = index_.screen(p_screen_id);
+	return screen != nullptr ? to_gd(screen->name) : String();
 }
 
 bool MnuDocument::get_screen_has_music_var(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	return loc.valid() && loc.is_screen &&
-			doc_.screens[loc.screen_index].has_music_var;
+	const opennova::mnu::Screen *screen = index_.screen(p_screen_id);
+	return screen != nullptr && screen->has_music_var;
 }
 
 int MnuDocument::get_screen_music_var(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return 0;
-	}
-	return doc_.screens[loc.screen_index].music_var;
+	const opennova::mnu::Screen *screen = index_.screen(p_screen_id);
+	return screen != nullptr ? screen->music_var : 0;
 }
 
 String MnuDocument::get_screen_text_rsrc(int p_screen_id) const {
-	const Locator loc = locate(p_screen_id);
-	if (!loc.valid() || !loc.is_screen) {
-		return String();
-	}
-	return to_gd(doc_.screens[loc.screen_index].text_rsrc);
+	const opennova::mnu::Screen *screen = index_.screen(p_screen_id);
+	return screen != nullptr ? to_gd(screen->text_rsrc) : String();
 }
 
 // --- Widget property read/write ---
 
 String MnuDocument::get_widget_text(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->string_data.value) : String();
 }
 
 String MnuDocument::get_widget_string_type(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->string_data.type) : String();
 }
 
 String MnuDocument::get_widget_font(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->font.name) : String();
 }
 
 String MnuDocument::get_widget_datasource(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->datasource) : String();
 }
 
 String MnuDocument::get_widget_orientation(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? to_gd(w->orientation) : String();
 }
 
 TypedArray<MnuSoundRow> MnuDocument::get_widget_sounds(int p_id) const {
 	TypedArray<MnuSoundRow> out;
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return out;
 	}
@@ -373,7 +224,7 @@ TypedArray<MnuSoundRow> MnuDocument::get_widget_sounds(int p_id) const {
 
 TypedArray<MnuActionRow> MnuDocument::get_widget_actions(int p_id) const {
 	TypedArray<MnuActionRow> out;
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return out;
 	}
@@ -389,24 +240,24 @@ TypedArray<MnuActionRow> MnuDocument::get_widget_actions(int p_id) const {
 // --- M10: item rows (list / multi / spinlist / combo) ---
 
 bool MnuDocument::is_widget_multiselect(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w != nullptr && w->items.multiselect;
 }
 
 int MnuDocument::get_item_count(int p_id) const {
-	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
 	return items ? static_cast<int>(items->items.size()) : 0;
 }
 
 int MnuDocument::find_item_row_by_value(int p_id, const String &p_value) const {
-	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
 	if (items == nullptr) return -1;
 	return opennova::menu::spinlist_row_for_value(
 			*items, to_std(p_value));
 }
 
 String MnuDocument::get_item_text(int p_id, int p_index) const {
-	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return String();
 	}
@@ -414,7 +265,7 @@ String MnuDocument::get_item_text(int p_id, int p_index) const {
 }
 
 String MnuDocument::get_item_value(int p_id, int p_index) const {
-	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return String();
 	}
@@ -424,7 +275,7 @@ String MnuDocument::get_item_value(int p_id, int p_index) const {
 // --- M10: table column template (headers / bodies) ---
 
 String MnuDocument::get_widget_color(int p_id, int p_slot) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return String();
 	}
@@ -452,7 +303,7 @@ String MnuDocument::get_widget_color(int p_id, int p_slot) const {
 }
 
 String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return String();
 	}
@@ -466,7 +317,7 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 }
 
 int MnuDocument::get_widget_flags(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	if (!w) {
 		return 0;
 	}
@@ -493,7 +344,7 @@ int MnuDocument::get_widget_flags(int p_id) const {
 }
 
 int MnuDocument::get_widget_group(int p_id) const {
-	const opennova::mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = index_.window(p_id);
 	return w ? w->group : 0;
 }
 

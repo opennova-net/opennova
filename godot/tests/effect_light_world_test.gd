@@ -221,7 +221,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 7)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
 	assert_eq(director.get_report().live, 1,
 			"the entity starts with its one authored LGHT lease")
@@ -232,7 +232,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 			"MF_Light reuses entity+0x1B4 instead of allocating beside LGHT")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
@@ -251,7 +251,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	# The fire pass (EntityPresenter's member) routes MF_Light straight into
 	# the director's on_muzzle_fire.
 	var presenter := EntityPresenter.new()
@@ -262,7 +262,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 			"the presented MF_Light event creates one muzzle glow")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1,
 			"the owned muzzle glow reaches camera-global object output")
 	presenter.present_fires([_muzzle_fire(78, Vector3.ZERO, 0)])
@@ -286,7 +286,7 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	# The destruction pass (EntityPresenter's member) routes the drain's
 	# death-light column straight into the director's on_death_light.
 	var presenter := EntityPresenter.new()
@@ -299,7 +299,7 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 			"the destruction drain creates one death flash")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1,
 			"the death flash reaches camera-global object output")
 	presenter.teardown()
@@ -312,22 +312,17 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	var transform := Transform3D(Basis.IDENTITY, Vector3(10.0, 27.0, 350.0))
 	var lit := _fixture_object_data("shed.3di")
 	var plain := _fixture_object_data("house.3di")
-	var plain_source := StaticEffectSource.new()
-	plain_source.object_data = plain
-	plain_source.world_transform = transform
-	var lit_source := StaticEffectSource.new()
-	lit_source.object_data = lit
-	lit_source.world_transform = transform
+	var placer := StaticSourceFixture.place(self, world, [plain, lit],
+			[transform.origin, transform.origin])
 	var director := EffectLightDirector.new()
-	director.setup(world, func() -> Array:
-		return [plain_source, lit_source], Callable())
+	director.setup(world, placer)
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"only the model with an authored light record spawns a pool light")
 	var camera := Camera3D.new()
 	camera.position = Vector3(10.0, 28.0, 346.0)
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_eq(rows.size(), 1, "the placed record selects for a nearby camera")
 	if rows.size() == 1:
@@ -343,7 +338,7 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"reattach respawns from the entity set instead of accumulating")
-	director.render_frame(null)
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
 
 
 func _synthetic_object_data(res_path: String) -> ObjectData:
@@ -367,27 +362,10 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	assert_true((light.position as Vector3).is_equal_approx(Vector3.ZERO))
 	assert_almost_eq(light.atten_end, 100.0, 0.001)
 	var xform := Transform3D(Basis.IDENTITY, Vector3(5.0, 1.0, 0.0))
-	var source := StaticEffectSource.new()
-	source.source_index = 0
-	source.kind = MissionData.KIND_BUILDING
-	source.entity_index = 0
-	source.bms_id = 7001
-	source.item_id = 1
-	source.object_data = data
-	source.world_transform = xform
-	var draw := StaticLightDrawSource.new()
-	draw.atlas_row = 0
-	draw.source_index = 0
-	draw.kind = MissionData.KIND_BUILDING
-	draw.entity_index = 0
-	draw.bms_id = 7001
-	draw.item_id = 1
-	draw.robj_index = 2
-	draw.world_bounds = AABB(Vector3(-5.0, -5.0, -5.0), Vector3(20.0, 20.0, 20.0))
-	draw.active = true
+	var placer := StaticSourceFixture.place(self, world, [data], [xform.origin],
+			PackedInt32Array([2]))
 	var director := EffectLightDirector.new()
-	director.setup(world, func() -> Array: return [source],
-			func() -> Array: return [draw])
+	director.setup(world, placer)
 	director.reattach()
 	assert_ne(LightScene.owner_id_for_static_source(0), 0)
 	assert_ne(LightScene.owner_id_for_static_source(0),
@@ -396,7 +374,7 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(5.0, 2.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var report := director.get_report()
 	assert_eq(report.static_rows, 1)
 	assert_eq(report.static_draws, 1)
@@ -412,95 +390,65 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 			"the atlas carries the authored LGHT transformed by its static entity")
 
 
-## Corona billboards (the D-RLIT-4 corona leg): the binding surfaces the
-## portable walk's quads [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
-## three segments toward the camera, the authored corona-disable, the
-## 100-wu cull; semantics pinned by ctest renderer_light_scene].
-func test_corona_rows_surface_the_witnessed_segments() -> void:
+## The corona billboards land as ONE MultiMesh buffer write (the D-RLIT-4
+## corona leg): pin the interleaved TRANSFORM_3D + color float layout against
+## the engine walk's witnessed values [orig: EffectWorld_RenderLightCoronas
+## @ 0x5aaf40 — three segments toward the camera, 0.1 x radius apart, half
+## size radius/2, white record color x 1/16 at full fade; the semantics are
+## the renderer_light_scene ctest's] through the headless-safe buffer seam
+## (the dummy RenderingServer stores no MultiMesh instance data).
+func test_fill_corona_multimesh_packs_the_witnessed_segments() -> void:
 	var scene := LightScene.new()
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
 	var no_models: Array[Node3D] = []
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null)
-	assert_eq(rows.size(), 3, "an enabled corona draws three segments")
-	if rows.size() == 3:
-		var first: CoronaRow = rows[0]
-		# Segments march 0.1 x radius toward the camera; half-size radius/2.
-		assert_almost_eq(first.half_size, 2.0, 0.001)
-		var pos := first.position
-		assert_almost_eq(pos.z, 0.4, 0.02,
-				"the first segment steps 0.1 x radius toward the camera")
-		var color := first.color
-		# White record color x 1/16 at full fade.
-		assert_almost_eq(color.r, 255.0 / 256.0 / 16.0, 0.002)
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
-			.masking(true, false, false)), 0)
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null)
-	assert_eq(rows.size(), 3,
-			"the corona-disabled record adds nothing to the first light's three segments")
-	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
-	# past the fog end the corona color folds to black but the quads remain.
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0))
-	assert_eq(rows.size(), 3)
-	if rows.size() == 3:
-		var fogged: Color = (rows[0] as CoronaRow).color
-		assert_almost_eq(fogged.r, 0.0, 0.0001,
-				"a corona past the fog end fades fully to black")
-
-
-## The hot corona path packs the same rows as ONE MultiMesh buffer write.
-## Pin the interleaved TRANSFORM_3D + color float layout against the
-## Dictionary seam row by row through the headless-safe buffer seam (the
-## dummy RenderingServer stores no MultiMesh instance data).
-func test_fill_corona_multimesh_matches_the_row_seam() -> void:
-	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(3.0, 2.0, -1.0), 6.0)), 0)
-	var no_models: Array[Node3D] = []
-	var fog := _fog_values(true, 1, 2.0, 40.0)
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog)
-	assert_gt(rows.size(), 0, "the seam produced comparison rows")
 	var mesh := MultiMesh.new()
 	mesh.transform_format = MultiMesh.TRANSFORM_3D
 	mesh.use_colors = true
 	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog, mesh)
-	assert_eq(count, rows.size(), "both seams walk the same quads")
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), null, mesh)
+	assert_eq(count, 3, "an enabled corona draws three segments")
 	var buffer := scene.get_last_corona_buffer()
 	assert_true(buffer.size() >= count * 16, "one 16-float record per row")
-	for i in range(count):
-		var row: CoronaRow = rows[i]
-		var half := row.half_size
-		var center := row.position
-		var color := row.color
-		var base := i * 16
-		assert_almost_eq(buffer[base + 0], half, 0.000001)
-		assert_almost_eq(buffer[base + 5], half, 0.000001)
-		assert_almost_eq(buffer[base + 10], half, 0.000001)
-		assert_almost_eq(buffer[base + 3], center.x, 0.000001)
-		assert_almost_eq(buffer[base + 7], center.y, 0.000001)
-		assert_almost_eq(buffer[base + 11], center.z, 0.000001)
-		assert_almost_eq(buffer[base + 12], color.r, 0.000001)
-		assert_almost_eq(buffer[base + 13], color.g, 0.000001)
-		assert_almost_eq(buffer[base + 14], color.b, 0.000001)
-		assert_almost_eq(buffer[base + 15], 1.0, 0.000001)
+	if buffer.size() >= 16:
+		# The scale-only basis carries the half size (radius/2) on its diagonal.
+		assert_almost_eq(buffer[0], 2.0, 0.001)
+		assert_almost_eq(buffer[5], 2.0, 0.001)
+		assert_almost_eq(buffer[10], 2.0, 0.001)
+		# The origin is the Godot-world segment center: the first segment
+		# steps 0.1 x radius from the light toward the camera.
+		assert_almost_eq(buffer[3], 0.0, 0.02)
+		assert_almost_eq(buffer[7], 1.0, 0.02)
+		assert_almost_eq(buffer[11], 0.4, 0.02)
+		# White record color x 1/16 at full fade, opaque.
+		assert_almost_eq(buffer[12], 255.0 / 256.0 / 16.0, 0.002)
+		assert_almost_eq(buffer[15], 1.0, 0.000001)
+	# A corona-disabled record adds nothing.
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
+			.masking(true, false, false)), 0)
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), null, mesh)
+	assert_eq(count, 3,
+			"the corona-disabled record adds nothing to the first light's three segments")
+	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
+	# past the fog end the corona color folds to black but the quads remain.
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0), mesh)
+	assert_eq(count, 3)
+	buffer = scene.get_last_corona_buffer()
+	if buffer.size() >= 16:
+		assert_almost_eq(buffer[12], 0.0, 0.0001,
+				"a corona past the fog end fades fully to black")
 	# A camera past the 100-wu cull empties the frame; the mesh keeps its
 	# high-water capacity and hides every instance instead of reallocating.
 	var far_count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 500.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog, mesh)
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 40.0), mesh)
 	assert_eq(far_count, 0)
 	assert_eq(mesh.visible_instance_count, 0)
-	assert_eq(mesh.instance_count, count,
-			"capacity persists at the high-water mark")
+	assert_eq(mesh.instance_count, 3, "capacity persists at the high-water mark")
 
 
 ## Static-row dirty maintenance: steady frames rewrite only gen-animated rows
@@ -573,14 +521,14 @@ func test_director_null_camera_clears_output_without_destroying_the_pool() -> vo
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	assert_gt(director.spawn_light_record(
 			_barrel_light_info(), Transform3D.IDENTITY), 0)
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1)
-	director.render_frame(null)
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
 	var report := director.get_report()
 	assert_eq(report.live, 1,
 			"temporary camera loss preserves the mission light pool")
@@ -595,11 +543,11 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_muzzle_fire(17, Vector3.ZERO)
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1)
 	director.reset()
 	var report := director.get_report()
@@ -693,12 +641,12 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 			"the control ROBJ transform differs from the entity placement matrix")
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 33)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(0.0, 2.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_gt(rows.size(), 0)
 	var saw_spawn_position := false
@@ -717,7 +665,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	part.position += Vector3(2.0, 0.0, 0.0)
 	var moved_position := node.global_transform * authored_position
 	assert_false(moved_position.is_equal_approx(spawn_position))
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	rows = director.get_report().rows
 	var still_at_spawn := false
 	var followed_entity := false
@@ -747,7 +695,7 @@ func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> v
 	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 91)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.reattach()
 	director.reattach()
 	assert_eq(director.get_report().live, 1,

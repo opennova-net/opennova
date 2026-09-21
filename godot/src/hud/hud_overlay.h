@@ -22,6 +22,7 @@
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_math.h> // FriendlyTagMode
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
 
 #include <array>
 
@@ -338,10 +339,8 @@ private:
 	bool draw_timing_enabled_ = false;
 	int64_t draw_compile_us_ = 0;
 	int64_t draw_emit_us_ = 0;
-	// The HUDVEHSTANCEPOS anchor (the vehicle panel's base before the stance
-	// offset) and the sid whose silhouette currently occupies the
-	// kHudTexVehiclePanel slot (reloaded on change).
-	Vector2i veh_stance_pos_;
+	// The sid whose silhouette currently occupies the kHudTexVehiclePanel
+	// slot (reloaded on change).
 	String vehicle_panel_sid_;
 	// Additive rows cannot share this item's blend mode: they render through a
 	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
@@ -379,7 +378,8 @@ private:
 	// saturated, alpha unchanged (the compass ring's pipeline).
 	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
-	void configure_combat_(const Ref<HudPos> &hudpos);
+	// The combat sprites' loads (the anchors are the engine fill's).
+	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
 	void combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;
 	// Stamp the cached colour/spread options into layout_.

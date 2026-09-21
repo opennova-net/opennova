@@ -4,42 +4,18 @@
 using namespace godot;
 
 void ParticleEffect::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_id", "value"), &ParticleEffect::set_id);
 	ClassDB::bind_method(D_METHOD("get_id"), &ParticleEffect::get_id);
-	ClassDB::bind_method(D_METHOD("set_pdefs", "value"), &ParticleEffect::set_pdefs);
 	ClassDB::bind_method(D_METHOD("get_pdefs"), &ParticleEffect::get_pdefs);
-
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "id"), "set_id", "get_id");
-	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "pdefs"), "set_pdefs", "get_pdefs");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "id", PROPERTY_HINT_NONE, "",
+			PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY), "", "get_id");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "pdefs", PROPERTY_HINT_NONE, "",
+			PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY), "", "get_pdefs");
 }
 
-void ParticleEffect::set_id(const String &p_value) {
-	id = p_value;
-	emit_changed();
-}
-String ParticleEffect::get_id() const { return id; }
+String ParticleEffect::get_id() const { return opennova::to_gd(value_.id); }
 
-void ParticleEffect::set_pdefs(const PackedStringArray &p_value) {
-	pdefs = p_value;
-	emit_changed();
-}
-PackedStringArray ParticleEffect::get_pdefs() const { return pdefs; }
-
-void ParticleEffect::copy_from_native(const opennova::particle::EffectDef &effect) {
-	id = opennova::to_gd(effect.id);
-	pdefs.clear();
-	pdefs.resize(static_cast<int>(effect.pdefs.size()));
-	for (int i = 0; i < static_cast<int>(effect.pdefs.size()); ++i) {
-		pdefs[i] = opennova::to_gd(effect.pdefs[static_cast<size_t>(i)]);
-	}
-}
-
-opennova::particle::EffectDef ParticleEffect::to_native() const {
-	opennova::particle::EffectDef out;
-	out.id = id.utf8().get_data();
-	out.pdefs.reserve(static_cast<size_t>(pdefs.size()));
-	for (int i = 0; i < pdefs.size(); ++i) {
-		out.pdefs.emplace_back(pdefs[i].utf8().get_data());
-	}
+PackedStringArray ParticleEffect::get_pdefs() const {
+	PackedStringArray out;
+	for (const auto &id : value_.pdefs) out.push_back(opennova::to_gd(id));
 	return out;
 }

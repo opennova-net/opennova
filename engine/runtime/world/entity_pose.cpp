@@ -678,6 +678,7 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 					static_cast<int32_t>(emplaced.gun_yaw);
 			ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =
 					static_cast<int32_t>(emplaced.gun_pitch);
+			ctrl_values[THREEDI_CTRL_WEAP_SPIN] = emplaced.spin;
 		}
 	}
 	if (e != nullptr)

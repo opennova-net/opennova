@@ -9,6 +9,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/turret_window.h>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/fire_sound.h>
 #include <runtime/world/world.h>
 
 #include <formats/def/def.h>
@@ -78,7 +79,7 @@ inline bool world_model_heat_glow_for(
 //              or +-0x2D82D80 (4 deg) for a non-Player occupant; a remote
 //              Player occupant gets neither tether. The recoil term is
 //              subtracted AFTER the pitch rate clamp [@0x440a43..0x440b37].
-// Consumer — Entity_UpdateTransformAndTurret @0x440ca0, the 'weap' class
+// Consumer — Entity_UpdateTransformAndTurret @0x440ca0, the 'ewep' class
 // update (@0x4b8e53, right after fn1): first an addeweap child riding the
 // parent ROOT publishes its words to the parent's AI brain turret channel
 // [@0x440f04..0x441020, publish_emplaced_gun_words_to_parent]; then, while
@@ -99,7 +100,41 @@ struct EmplacedWeaponControls {
 	bool valid = false;
 	uint16_t gun_yaw = 0;
 	uint16_t gun_pitch = 0;
+	uint16_t spin = 0;
 };
+
+// The ewep class update tail, before pool-0 attachment poses and the global
+// weapon-action pump. Read/decrement the inline slot kick byte even without
+// an occupant, then integrate the wrapping angle word. The later weapon pump
+// also decays that SAME byte. The audio catch-up gate never gates spin.
+// docs/threedi/3di-gp-format-re.md (D-3DI-4).
+// [orig: Entity_UpdateTransformAndTurret @0x44139D..0x441447]
+inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
+	if (!mount.emplaced_update) return;
+	const auto *weapon = world.tables.weapons.by_index(mount.primary_weapon_slot_adm);
+	if (weapon == nullptr) return; // inline slot Def +0x2D4 gate @0x4411C9
+	uint8_t &kick = mount.primary_weapon_slot.kick;
+	if (world.rules.last_tick_of_batch && kick != 0 && weapon->action_fsm.soundfireloop[0] != 0) {
+		WeaponFsmEvents sound;
+		sound.fireloop_lifetime_ticks = static_cast<int8_t>(kick);
+		weapon_sound_publish(world, mount, weapon->action_fsm, sound);
+	}
+	if (kick != 0) {
+		mount.emplaced_spin_ticks = 60;
+		--kick;
+		if (kick == 0)
+			world.out.fire_sounds.play_with_distance_delay(weapon->action_fsm.soundtrailoff,
+					mount.position, mount.bms_id, mount.handle.packed);
+	}
+	if (mount.emplaced_spin_ticks != 0) {
+		--mount.emplaced_spin_ticks;
+		if (mount.emplaced_spin_ticks != 0) {
+			const int32_t speed = mount.emplaced_spin_ticks < 128
+					? mount.emplaced_spin_ticks : int32_t(mount.emplaced_spin_ticks) - 256;
+			mount.emplaced_spin_phase = static_cast<uint16_t>(mount.emplaced_spin_phase + 32 * speed);
+		}
+	}
+}
 
 // The IsTurret per-tick traverse rate and the two gunner-yaw tethers, BAM32.
 // [orig: 0x92CF34 @0x440ae1/@0x440af0 (yaw) and @0x440afc/@0x440b0b (pitch);
@@ -130,7 +165,8 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 
 // The emplacement's own frame — retail's entity Yaw/Pitch of the ewep (+0x10 /
 // +0x14). A vehicle motor preserves sub-degree parent yaw in BAM; a static
-// EWEAP uses its mission-yaw field. Pitch has no separate motor accumulator.
+// EWEAP uses its mission-yaw field. Attached EWEAPs retain the bone's full
+// pitch in the same BAM attitude fields as their carrier.
 inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 	return mount.veh.yaw_seeded
 			? mount.veh.yaw_bam
@@ -138,7 +174,8 @@ inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 }
 
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
-	return bam_from_degrees_wrapped(static_cast<double>(mount.pitch));
+	return mount.veh.yaw_seeded ? mount.veh.air_pitch_bam
+			: bam_from_degrees_wrapped(static_cast<double>(mount.pitch));
 }
 
 // A stored word back to the BAM32 the IsTurret leg integrates: the raw 16
@@ -426,6 +463,8 @@ inline bool emplaced_weapon_controls_for(
 	out.valid = true;
 	out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
 	out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
+	// [orig: HUD_CacheWeaponSlotInfo @0x440955, unsigned word +0x320]
+	out.spin = mount.emplaced_spin_phase;
 	return true;
 }
 

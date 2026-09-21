@@ -978,9 +978,6 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_not_null(attach_db)
 	if attach_db == null:
 		return
-	var carrier_card := attach_db.extract_seat_specs_for_item(root, 105004)
-	assert_eq(carrier_card.get_seats().size(), 1,
-			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_not_null(mission.add_entity(
@@ -1097,9 +1094,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	# through the ONE native extractor on both peers.
 	var root := _native_asset_root()
 	var seat_db := _fixture_items_db()
-	var b50_card := seat_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(b50_card.get_seats().size(), 1,
-			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var mounted_item := mission.add_entity(
@@ -1230,8 +1224,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
 	assert_eq(EntityPresenter.emplaced_apply(
-			visual, visual_before_snap, visual_before_base, false), 2,
-			"production presentation consumes both decoded B50 controls")
+			visual, visual_before_snap, visual_before_base, false), 3,
+			"production presentation consumes the emplaced yaw, pitch and spin controls")
 	var visual_yaw_before: Basis = (
 			visual_parts[yaw_part] as Node3D).transform.basis
 	joiner.set_local_player_mouse(511, false)
@@ -1270,7 +1264,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		var visual_after_snap: PackedFloat32Array = visual_after_record["snapshot"]
 		var visual_after_base := int(visual_after_record["base"])
 		assert_eq(EntityPresenter.emplaced_apply(
-				visual, visual_after_snap, visual_after_base, false), 2)
+				visual, visual_after_snap, visual_after_base, false), 3)
 		var visual_yaw_after: Basis = (
 				visual_parts[yaw_part] as Node3D).transform.basis
 		var visual_yaw_delta_deg := rad_to_deg(
@@ -2737,18 +2731,15 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			Vector3(24, 0, 0), Vector3.ZERO))
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
-	assert_not_null(mission.add_event(0, 0, 0))
-	assert_not_null(mission.add_event_action(0,
-			MissionEventAction.make(37, 0, gunner_ssn)))
+	assert_gte(mission.add_event(0, 0, 0), 0)
+	assert_true(mission.add_event_action(0,
+			37, 0, gunner_ssn))
 
 	var fixture_def_root := ResourceRoot.new()
 	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)
 	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
-	var b50_card := fixture_item_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(b50_card.get_seats().size(), 1,
-			"mount exposes its authored Usegun seat")
 
 	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))

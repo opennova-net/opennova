@@ -202,7 +202,7 @@ func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -
 
 
 # The placed ObjectModel a mission record resolves to (the runtime's index).
-func _placed_node(world: GameWorld, placed: MissionEntityRecord) -> ObjectModel:
+func _placed_node(world: GameWorld, placed: EntityRef) -> ObjectModel:
 	var bms_id := placed.bms_id
 	assert_gt(bms_id, 0, "the authored entity carries a BMS id")
 	var node := world.get_runtime().get_entity_index().resolve_single(bms_id) as ObjectModel
@@ -212,7 +212,7 @@ func _placed_node(world: GameWorld, placed: MissionEntityRecord) -> ObjectModel:
 
 # One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it,
 # addressed at a placed record (net id, BMS id, packed spawn origin).
-func _control_effect(kind: String, net_id: int, placed: MissionEntityRecord) -> MissionEffect:
+func _control_effect(kind: String, net_id: int, placed: EntityRef) -> MissionEffect:
 	return MissionEffect.make(kind, net_id, placed.bms_id,
 			int(Simulation.spawn_origin_pack(placed.kind, placed.index)))
 
@@ -1304,31 +1304,9 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	assert_not_null(effect_world)
 	if effect_world == null:
 		return
-	var def := ParticleDef.new()
-	def.id = "puff dots"
-	def.emit_dur = 0.5
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 2.0
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	var graphics: Array = def.graphics
-	var layer := graphics[0] as ParticleGraphicLayer
-	layer.present = true
-	layer.texture = "bink.tga"
-	layer.alpha = 1.0
-	layer.scale_value = 1.0
-	def.graphics = graphics
-	var effect := ParticleEffect.new()
-	effect.id = "puff"
-	effect.pdefs = PackedStringArray(["puff dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
+	var file := ParticleFixture.catalog("puff dots",
+			"emit_dur = 0.5;\nemit_rate = 50;\nemit_burst = 4;\nage = 2;\nalpha = 1;\nscale = 1;\ngraphic1 = bink.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;",
+			["puff"])
 	file.source_path = ProjectSettings.globalize_path(
 			"res://../fixtures/cbin/renderable_effect_fixture.ptl")
 	effect_world.load_particle_file(file)
@@ -3051,7 +3029,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
-	var bms_id := (placed[0] as MissionEntityRecord).bms_id
+	var bms_id := (placed[0] as EntityRef).bms_id
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_entity_index().resolve_single(bms_id) as Node3D
 	assert_not_null(building, "the authored building placed a real ObjectModel")
@@ -3111,7 +3089,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
 	var building := world.get_runtime().get_entity_index().resolve_single(
-			(placed[0] as MissionEntityRecord).bms_id) as Node3D
+			(placed[0] as EntityRef).bms_id) as Node3D
 	assert_not_null(building)
 	if building == null:
 		return

@@ -4,7 +4,15 @@
 
 #include <godot_cpp/variant/packed_float32_array.hpp>
 
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+
+#include "rtxt/rtxt_string_file.h" // the string-table document + the game_text_lookup factory
+
 #include <formats/def/def.h>
+#include <runtime/menu/loadout_labels.h> // the loadout screens' labels, row order and weight line
+#include <runtime/menu/player_info_kit.h> // the PLAYER_INFO voice list + kit page order
 #include <runtime/world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
 #include <base/io/strutil.h>
@@ -42,12 +50,6 @@ void WeaponDatabase::_bind_methods() {
 			&WeaponDatabase::get_slot_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapon", "index"), &WeaponDatabase::get_weapon);
 	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &WeaponDatabase::find_weapon);
-	ClassDB::bind_method(D_METHOD("loadout_weight", "weapon_indices", "ammo_counts"),
-			&WeaponDatabase::loadout_weight);
-	ClassDB::bind_method(D_METHOD("extra_ammo_weight", "index", "count"),
-			&WeaponDatabase::extra_ammo_weight);
-	ClassDB::bind_method(D_METHOD("subclass_weapon_index", "parent_index"),
-			&WeaponDatabase::subclass_weapon_index);
 	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
 			&WeaponDatabase::encumbrance_class);
 	ClassDB::bind_static_method("WeaponDatabase",
@@ -56,9 +58,17 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_class_mask", "playerclass_value"),
 			&WeaponDatabase::player_info_class_mask);
+	ClassDB::bind_method(D_METHOD("player_info_kit_entries", "team", "player_class", "slot_indices",
+								 "slot_ammo_primary", "slot_ammo_secondary", "slot_flags",
+								 "grenade_indices", "grenade_ammo_primary", "grenade_ammo_secondary"),
+			&WeaponDatabase::player_info_kit_entries);
+	ClassDB::bind_method(D_METHOD("weapon_label", "index", "gametext"),
+			&WeaponDatabase::weapon_label);
+	ClassDB::bind_static_method("WeaponDatabase", D_METHOD("armory_slot_order", "labels"),
+			&WeaponDatabase::armory_slot_order);
 	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("default_clip_row", "saved", "maxclips"),
-			&WeaponDatabase::default_clip_row);
+			D_METHOD("loadout_weight_line", "total", "menutxt", "gameui"),
+			&WeaponDatabase::loadout_weight_line);
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&WeaponDatabase::armory_resolve_selected_class);
@@ -78,6 +88,7 @@ void WeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(ENCUMBRANCE_NORMAL);
 	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
 	BIND_CONSTANT(CLIP_COUNT_DEF_DEFAULT);
+	BIND_CONSTANT(DEFAULT_VOICE_VALUE);
 	BIND_CONSTANT(CLASS_ALLOW_ALL);
 	BIND_CONSTANT(CLASS_MASK_ALL);
 }
@@ -182,47 +193,6 @@ Ref<WeaponDef> WeaponDatabase::get_weapon(int index) const {
 	return def;
 }
 
-double WeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices,
-		const PackedInt32Array &ammo_counts) const {
-	// def_loadout_weight walks one contiguous row array; the selected rows are
-	// gathered by value (a struct copy, the parse stays the owner of its arrays).
-	std::vector<DefWeaponDef> defs;
-	std::vector<int> counts;
-	defs.reserve(weapon_indices.size());
-	counts.reserve(weapon_indices.size());
-	for (int i = 0; i < weapon_indices.size(); ++i) {
-		const DefWeaponDef *w = row(weapon_indices[i]);
-		if (w == nullptr) {
-			continue;
-		}
-		defs.push_back(*w);
-		counts.push_back(i < ammo_counts.size() ? ammo_counts[i] : -1);
-	}
-	return def_loadout_weight(defs.data(), counts.data(), defs.size());
-}
-
-double WeaponDatabase::extra_ammo_weight(int p_index, int p_count) const {
-	const DefWeaponDef *w = row(p_index);
-	if (w == nullptr) {
-		return 0.0;
-	}
-	return def_extra_ammo_weight(w, p_count);
-}
-
-int WeaponDatabase::subclass_weapon_index(int p_parent_index) const {
-	// The parent's loadout_subclasses window is contiguous in the retained
-	// table, so the engine walks the rows in place.
-	const DefWeaponDef *parent = row(p_parent_index);
-	if (parent == nullptr) {
-		return -1;
-	}
-	const size_t start = static_cast<size_t>(p_parent_index);
-	const int subclasses = std::max(parent->loadout_subclasses, 0);
-	const size_t end = std::min(weapons_file_.count, start + static_cast<size_t>(subclasses) + 1);
-	const int found = def_subclass_weapon_index(weapons_file_.entries + start, end - start, 0);
-	return found < 0 ? -1 : p_parent_index + found;
-}
-
 int WeaponDatabase::player_info_team_mask(int p_team) {
 	return opennova::world::player_info_team_mask(p_team);
 }
@@ -231,8 +201,69 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 	return opennova::world::player_info_class_mask(p_playerclass_value);
 }
 
-int WeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
-	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
+String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
+	const opennova::def::DefWeaponDef *w = row(p_index);
+	if (w == nullptr) return String();
+	return String::utf8(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)).c_str());
+}
+
+PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {
+	std::vector<std::string> labels;
+	labels.reserve(static_cast<size_t>(p_labels.size()));
+	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(p_labels[i].utf8().get_data());
+	PackedInt32Array out;
+	for (int index : opennova::menu::armory_slot_order(labels)) out.push_back(index);
+	return out;
+}
+
+String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
+		const Ref<RtxtStringFile> &p_gameui) {
+	return String::utf8(opennova::menu::loadout_weight_line(p_total,
+			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)).c_str());
+}
+
+static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
+		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
+
+Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
+		const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
+		const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
+		const PackedInt32Array &p_grenade_indices, const PackedInt32Array &p_grenade_ammo_primary,
+		const PackedInt32Array &p_grenade_ammo_secondary) const {
+	const auto pick = [](const PackedInt32Array &idx, const PackedInt32Array &pri,
+							  const PackedInt32Array &sec, const PackedInt32Array *flags,
+							  int i) {
+		opennova::menu::KitSlotPick p;
+		if (i < idx.size()) p.weapon_index = idx[i];
+		if (i < pri.size()) p.ammo_primary = pri[i];
+		if (i < sec.size()) p.ammo_secondary = sec[i];
+		if (flags != nullptr && i < flags->size()) p.flags = (*flags)[i];
+		return p;
+	};
+	opennova::menu::PlayerInfoKitSelection sel;
+	sel.team_mask = opennova::world::player_info_team_mask(p_team);
+	sel.player_class = p_player_class;
+	sel.primary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 0);
+	sel.secondary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 1);
+	sel.accessory = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 2);
+	for (int i = 0; i < 3; ++i) {
+		sel.grenades[i] = pick(p_grenade_indices, p_grenade_ammo_primary, p_grenade_ammo_secondary,
+				nullptr, i);
+	}
+	const opennova::menu::WeaponNameLookup name = [this](int32_t index) -> std::string {
+		const opennova::def::DefWeaponDef *w = row(index);
+		return w != nullptr ? std::string(w->weapon_name) : std::string();
+	};
+	Array out;
+	for (const opennova::playersav::KitEntry &e : opennova::menu::player_info_kit_entries(sel, name)) {
+		Dictionary d;
+		d["name"] = String::utf8(e.name.c_str());
+		d["ammo_primary"] = e.ammo_primary;
+		d["ammo_secondary"] = e.ammo_secondary;
+		d["flags"] = e.flags;
+		out.push_back(d);
+	}
+	return out;
 }
 
 int WeaponDatabase::armory_resolve_selected_class(int p_player_class,

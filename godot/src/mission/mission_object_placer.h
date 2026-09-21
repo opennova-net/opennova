@@ -22,7 +22,7 @@
 
 #include "mission/mission_data.h" // MissionData::EntityKind
 #include "mission/mission_placement_stats.h"
-#include "mission/static_source_records.h"
+#include "mission/static_source_provider.h"
 #include "object/item_database.h"
 #include "mission/player_visual_spec.h"
 #include "object/avatar_database.h"
@@ -61,53 +61,10 @@ namespace godot {
 // model's rest-pose meshes and materials. Ported from
 // mission_object_placer.gd (2026-08-10 de-scripting), with typed internal
 // records and stage timings returned in the stats.
-class MissionObjectPlacer : public RefCounted {
+class MissionObjectPlacer : public RefCounted, public StaticSourceProvider {
 	GDCLASS(MissionObjectPlacer, RefCounted)
 
 public:
-	// Typed shell snapshot consumed by the terrain page-shadow adapter. It
-	// preserves the BMS/item policy inputs instead of flattening eligibility
-	// into a render-layer guess; the engine collector remains the one owner of
-	// admission and ordering.
-	// [orig: Terrain_CollectAndRenderTileModels pool scans/admission
-	// @0x60D421..0x60D450; see docs/terrain/terrain-re.md]
-	struct StaticTerrainShadowSource {
-		int bms_id = 0;
-		int item_id = 0;
-		int entity_kind = -1;
-		int entity_index = -1;
-		int team = 0;
-		uint32_t entity_attrib = 0;
-		uint32_t item_attrib = 0;
-		uint32_t item_attrib2 = 0;
-		String graphic;
-		Transform3D world_transform;
-		Ref<ObjectData> object_data;
-		bool active = true;
-	};
-	// The retained static read-back rows behind the get_static_* seams; the
-	// getters mint fresh records from these so no consumer holds the
-	// placer's own row.
-	struct StaticEffectSourceRow {
-		int32_t entity_bound_radius_q16 = 0;
-		int kind = -1;
-		int entity_index = -1;
-		int bms_id = 0;
-		int item_id = 0;
-		String graphic;
-		Transform3D world_transform;
-		Ref<ObjectData> object_data;
-	};
-	struct StaticLightDrawRow {
-		int source_index = -1;
-		int kind = -1;
-		int entity_index = -1;
-		int bms_id = 0;
-		int item_id = 0;
-		int robj_index = 0;
-		AABB world_bounds;
-	};
-
 	enum {
 		RENDER_LOD = 0,
 		PLAYER_RUNTIME_TYPE_ID = opennova::mission::kPlayerRuntimeTypeId,
@@ -245,23 +202,22 @@ public:
 	void set_placed_models(const TypedArray<ObjectModel> &p_models) {
 		placed_models_ = p_models;
 	}
-	TypedArray<StaticEffectSource> get_static_item_effect_sources();
+	std::vector<opennova::mission::StaticEffectSource> static_item_effect_sources() override;
+	Ref<ItemDatabase> static_source_item_db() override { return get_item_db(); }
+	Ref<ObjectData> static_source_object_data(uint64_t asset_id) const override;
 	// One row per retained static entity/ROBJ light draw. Row order is the
 	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
 	// descriptors carry the source identity, exact world AABB, and live carve
 	// state. The EffectWorld device selects this row's <=4 lights into the
-	// shared RGBAF atlas [orig: collect_render_objects_for_batch @0x5d8ff7,
-	// see docs/render/render-lighting-re.md].
-	TypedArray<StaticLightDrawSource> get_static_light_draw_sources();
+	// shared RGBAF atlas; the native record carries the submit witness.
+	std::vector<opennova::mission::StaticLightDrawSource> static_light_draw_sources() override;
 	// Advances whenever a row is appended, the table is reset, or a carve
 	// changes any row's `active` state: consumers rebuild their packed row
 	// arrays only on a change instead of re-reading the rows every frame.
-	uint64_t get_static_light_draw_source_revision() const;
-	Vector<StaticTerrainShadowSource> get_static_terrain_shadow_sources();
+	uint64_t static_light_draw_source_revision() override;
+	std::vector<opennova::mission::StaticTerrainShadowSource> get_static_terrain_shadow_sources();
 	uint64_t get_static_terrain_shadow_source_revision();
-	// Dictionary mirror for focused shell/asset diagnostics. Production
-	// consumers use the typed snapshot above.
-	TypedArray<StaticTerrainShadowSourceRow> get_static_terrain_shadow_source_diagnostics();
+
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
@@ -286,7 +242,7 @@ public:
 			int p_index, const Transform3D &p_xform,
 			bool p_casts_static_shadow, bool p_mirror_reflected = false);
 	bool is_static_instance_hidden(int p_bms_id) const {
-		return hidden_destruction_instances_.has(p_bms_id);
+		return static_sources_.is_hidden(p_bms_id);
 	}
 	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
@@ -456,7 +412,7 @@ private:
 			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
 			const String &p_graphic, const Transform3D &p_xform,
 			const Ref<ObjectData> &p_data);
-	void _bump_static_terrain_shadow_source_revision();
+	uint64_t _retain_static_source_asset(const Ref<ObjectData> &p_data);
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
@@ -464,20 +420,8 @@ private:
 	Ref<PanmClock> panm_clock_;
 
 	TypedArray<ObjectModel> placed_models_;
-	Vector<StaticEffectSourceRow> static_item_effect_sources_;
-	Vector<StaticLightDrawRow> static_light_draw_sources_;
-	uint64_t static_light_draw_source_revision_ = 1;
-	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
-	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;
-	HashMap<int, Vector<int>> static_terrain_shadow_rows_by_bms_;
-	uint64_t static_terrain_shadow_source_revision_ = 0;
-
-	// One indexed pass over this bms id's source rows: whether any row
-	// represents it, whether policy admits any row, and whether an admitted
-	// row is base-active (unhidden). Replaces the former full-vector scans in
-	// the replacement set/clear paths.
-	void _static_shadow_bms_policy(int p_bms_id, bool &r_represented,
-			bool &r_policy_admitted, bool &r_base_active) const;
+	opennova::mission::StaticSources static_sources_;
+	HashMap<uint64_t, Ref<ObjectData>> static_source_assets_;
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
@@ -497,27 +441,7 @@ private:
 	HashMap<uint64_t, int> static_population_by_node_;
 	int static_lod_switches_ = 0;
 
-	// Destruction carve state: batched statics have no per-entity node; a
-	// destroyed one has its row removed from every population it is live in
-	// (every level's population and shadow twin) and the caller grafts the
-	// husk model at the returned transform.
-	struct DestructionInstance {
-		String graphic;
-		// Stable diagnostic identity for the graphic/reflection population.
-		// Legacy/manual registrations use `graphic`.
-		String batch_key;
-		int index = -1;
-		Transform3D xform;
-		bool casts_static_shadow = false;
-		bool mirror_reflected = false;
-		// The retained instance whose slots the carve rewrites (-1 for a
-		// manual registration without emitted populations).
-		int lod_instance = -1;
-	};
-	HashMap<int64_t, DestructionInstance> destruction_instances_;
-	HashSet<int64_t> hidden_destruction_instances_;
-	HashMap<int64_t, StaticTerrainShadowSource>
-			static_terrain_shadow_replacements_;
+
 };
 
 } // namespace godot

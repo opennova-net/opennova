@@ -169,6 +169,7 @@ bool resolve_client_eweap_attachment_pose(
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
 	ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] = static_cast<int32_t>(emplaced.gun_yaw);
 	ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] = static_cast<int32_t>(emplaced.gun_pitch);
+	ctrl_values[THREEDI_CTRL_WEAP_SPIN] = emplaced.spin;
 
 	Entity carrier;
 	carrier.item_id = static_cast<int32_t>(parent->type_id);
@@ -176,12 +177,10 @@ bool resolve_client_eweap_attachment_pose(
 			static_cast<float>(parent->x / kFixed16),
 			static_cast<float>(parent->y / kFixed16),
 			static_cast<float>(parent->z / kFixed16)};
-	carrier.yaw = static_cast<int16_t>(std::lround(
-			mission_yaw_deg_from_bam_heading(parent->heading_bam)));
-	carrier.pitch = static_cast<int16_t>(std::lround(
-			static_cast<double>(parent->pitch_bam) * kDegreesPerBam));
-	carrier.roll = static_cast<int16_t>(std::lround(
-			static_cast<double>(parent->roll_bam) * kDegreesPerBam));
+	carrier.veh.yaw_seeded = true;
+	carrier.veh.yaw_bam = parent->heading_bam;
+	carrier.veh.air_pitch_bam = parent->pitch_bam;
+	carrier.veh.air_roll_bam = parent->roll_bam;
 	return world::resolve_model_mounted_pose(
 			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
@@ -224,7 +223,8 @@ bool local_view_suppresses_mount(const mission::MissionKernel &kernel,
 
 double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls) {
 	if (e.emplacement_parent.valid() && e.emplacement_pose_metadata_resolved)
-		return static_cast<double>(e.yaw); // World::update_emplacement_attachments' exact result
+		return e.veh.yaw_seeded ? mission_yaw_deg_from_bam_heading(e.veh.yaw_bam)
+				: static_cast<double>(e.yaw);
 	if (cls == EntityClass::Vehicle && e.veh.yaw_seeded)
 		return mission_yaw_deg_from_bam_heading(e.veh.yaw_bam);
 	if (cls == EntityClass::Infantry && ae != nullptr)
@@ -449,16 +449,16 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_POS_X] = ent->position.x;
 			r[PF_POS_Y] = ent->position.z;
 			r[PF_POS_Z] = -ent->position.y;
-			r[PF_PITCH_DEG] = static_cast<float>(ent->pitch);
-			r[PF_YAW_DEG] = static_cast<float>(ent->yaw);
-			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
+			r[PF_PITCH_DEG] = static_cast<float>(pool_present_pitch_deg(*ent));
+			r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(*ent, nullptr, EntityClass::Unknown));
+			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
 		} else if (reconstructed_client_attachment_pose) {
 			r[PF_POS_X] = client_attachment_pose.position.x;
 			r[PF_POS_Y] = client_attachment_pose.position.z;
 			r[PF_POS_Z] = -client_attachment_pose.position.y;
-			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch);
-			r[PF_YAW_DEG] = static_cast<float>(client_attachment_pose.yaw);
-			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll);
+			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch * kDegreesPerBam);
+			r[PF_YAW_DEG] = static_cast<float>(mission_yaw_deg_from_bam_heading(client_attachment_pose.heading));
+			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll * kDegreesPerBam);
 		}
 		// No unattached else: the projection already wrote the decoded wire
 		// pose — the chased/snapped position, the vehicle BAM32 euler X/Y, and

@@ -69,8 +69,8 @@ func _backend_draws(tier := "") -> Array:
 
 
 func test_draw_backend_uses_retained_rendering_server_instances() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), 1000)
+	_dispatcher.render_preview(_camera_xform(), 1000)
 
 	var report: Dictionary = _dispatcher.get_backend_report()
 	assert_eq(String(report.get("backend", "")), "rendering_server_rid")
@@ -88,7 +88,7 @@ func test_draw_backend_uses_retained_rendering_server_instances() -> void:
 		"The replacement backend must not retain a MeshInstance3D fallback.")
 
 	var pool_size := int(report.get("pool_size", 0))
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), 1001)
 	var steady := _dispatcher.get_backend_report()
 	assert_eq(int(steady.get("pool_size", -1)), pool_size,
 		"A steady draw list must retain the same scenario instances.")
@@ -104,8 +104,8 @@ func test_draw_backend_uses_retained_rendering_server_instances() -> void:
 
 
 func test_probe_draw_control_targets_retained_draws_by_public_pass_identity() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var before := _dispatcher.get_backend_report()
 	assert_gt(int(before.get("visible_draws", 0)), 0)
 	var before_high_fades := {}
@@ -144,7 +144,7 @@ func test_probe_draw_control_targets_retained_draws_by_public_pass_identity() ->
 				maxf(before_fade - 0.125, 0.0), 0.000001)
 
 	# Pinning all retained draws must not isolate or otherwise change admission.
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var restored := _dispatcher.get_backend_report()
 	_dispatcher.apply_probe_draw_control(
 			FoliageDispatcher.PROBE_DRAW_ALL,
@@ -158,8 +158,8 @@ func test_probe_draw_control_targets_retained_draws_by_public_pass_identity() ->
 
 
 func test_backend_visibility_tracks_dispatcher_without_dropping_bindings() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var shown := _dispatcher.get_backend_report()
 	assert_gt(int(shown.active_draws), 0)
 
@@ -175,8 +175,8 @@ func test_backend_visibility_tracks_dispatcher_without_dropping_bindings() -> vo
 
 
 func test_backend_recreates_retained_instances_after_world_exit() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	assert_gt(int(_dispatcher.get_backend_report().pool_size), 0)
 
 	var parent := _dispatcher.get_parent()
@@ -184,7 +184,7 @@ func test_backend_recreates_retained_instances_after_world_exit() -> void:
 	assert_eq(int(_dispatcher.get_backend_report().pool_size), 0,
 		"Leaving a World3D must release every scenario instance.")
 	parent.add_child(_dispatcher)
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var rebound := _dispatcher.get_backend_report()
 	assert_true(bool(rebound.scenario_bound))
 	assert_gt(int(rebound.pool_size), 0)
@@ -195,8 +195,8 @@ func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_only")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_model_only")
 
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	assert_gt(_detail_sampler_calls, 0,
 		"DETAIL candidates must use the flat-map callback.")
 	assert_eq(_model_sampler_calls, 0,
@@ -208,7 +208,7 @@ func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 	_dispatcher.silhouette_anchors = PackedVector3Array([
 		Vector3(0.0, 0.0, -64.0),
 	])
-	_dispatcher.render_frame(_camera_xform())
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	assert_eq(_detail_sampler_calls, 0,
 		"MODEL-only rendering must not invoke the DETAIL callback.")
 	assert_gt(_model_sampler_calls, 0,
@@ -217,7 +217,7 @@ func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 
 func test_detail_preview_uses_foliage_map() -> void:
 	_foliage_index = 1
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var warmup := _dispatcher.get_frame_stats()
 	assert_eq(int(warmup.runtime_detail_intents), 0,
 		"Retail fills detail cache misses after the current draw.")
@@ -225,7 +225,7 @@ func test_detail_preview_uses_foliage_map() -> void:
 	# Pin the detail sway clock: retail's c24.x = ms x 0.003 + OscRing[0] /
 	# 65536 (Foliage_SetupVertexShaderConstants), no weather attached here.
 	_dispatcher.set_wind_clock_override_ms(1000)
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 
 	assert_true(bool(stats.preview_detail_source))
@@ -272,8 +272,8 @@ func test_detail_preview_uses_foliage_map() -> void:
 
 func test_aerial_preview_rejects_detail_cells_beyond_retail_3d_distance() -> void:
 	var aerial_camera := Transform3D(Basis(), Vector3(0.0, 747.0, 0.0))
-	_dispatcher.render_preview(aerial_camera)
-	_dispatcher.render_preview(aerial_camera)
+	_dispatcher.render_preview(aerial_camera, GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(aerial_camera, GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 
 	assert_eq(int(stats.detail_cells), 0,
@@ -286,8 +286,8 @@ func test_aerial_preview_rejects_detail_cells_beyond_retail_3d_distance() -> voi
 func test_preview_altitude_distance_drives_detail_alpha_fade() -> void:
 	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
 	var elevated_camera := Transform3D(Basis(), Vector3(8.0, 41.0, 8.0))
-	_dispatcher.render_preview(elevated_camera)
-	_dispatcher.render_preview(elevated_camera)
+	_dispatcher.render_preview(elevated_camera, GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(elevated_camera, GameWorld.current_frame_clock_ms())
 
 	var half_fade_draws := 0
 	var found_secondary_cutoff := false
@@ -306,8 +306,8 @@ func test_preview_altitude_distance_drives_detail_alpha_fade() -> void:
 
 
 func test_near_detail_submits_high_then_exact_low_secondary() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 	var visible_draws := _backend_draws("detail")
 	assert_eq(visible_draws.size(), int(stats.detail_cache_submissions),
@@ -346,8 +346,8 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 
 
 func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var unblocked := _dispatcher.get_frame_stats()
 	assert_gt(int(unblocked.runtime_detail_intents), 0,
 		"The control frame must contain foliage candidates before mission-tile exclusion.")
@@ -372,8 +372,8 @@ func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
 
 	assert_eq(_dispatcher.get_total_instances(), 0,
 		"Changing the mission tile array must evict resident unblocked geometry.")
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var blocked := _dispatcher.get_frame_stats()
 	assert_true(bool(blocked.path_blocker_available),
 		"Frame diagnostics must report that the retail blocker substrate is active.")
@@ -387,8 +387,8 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
 	var spawn_position := Vector3(297.805573, 10.0, 409.123169)
 	var spawn_camera := Transform3D(Basis(), spawn_position)
-	_dispatcher.render_preview(spawn_camera)
-	_dispatcher.render_preview(spawn_camera)
+	_dispatcher.render_preview(spawn_camera, GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(spawn_camera, GameWorld.current_frame_clock_ms())
 	var unblocked := _dispatcher.get_frame_stats()
 	var unblocked_intents := int(unblocked.runtime_detail_intents)
 	assert_gt(unblocked_intents, 0,
@@ -425,8 +425,8 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 		"The exact c5 candidate must remain eligible.")
 	_dispatcher.tile_info = tile_info
 
-	_dispatcher.render_preview(spawn_camera)
-	_dispatcher.render_preview(spawn_camera)
+	_dispatcher.render_preview(spawn_camera, GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(spawn_camera, GameWorld.current_frame_clock_ms())
 	var blocked := _dispatcher.get_frame_stats()
 	var blocked_intents := int(blocked.runtime_detail_intents)
 	assert_true(bool(blocked.path_blocker_available))
@@ -440,7 +440,7 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
-	_dispatcher.render_frame(_camera_xform())
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var far_stats := _dispatcher.get_frame_stats()
 	assert_eq(int(far_stats.runtime_detail_intents), 0)
 	assert_eq(int(far_stats.silhouette_anchors_visible), 1)
@@ -467,7 +467,7 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 	assert_true(found_model_draw)
 
 	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -20.0)])
-	_dispatcher.render_frame(_camera_xform())
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var near_stats := _dispatcher.get_frame_stats()
 	assert_eq(int(near_stats.silhouette_anchors_visible), 0)
 	assert_eq(int(near_stats.runtime_silhouette_intents), 0,
@@ -479,15 +479,15 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 func test_preview_does_not_manufacture_silhouette_anchors() -> void:
 	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array()
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 	assert_eq(int(stats.silhouette_anchors_input), 0)
 	assert_eq(int(stats.runtime_silhouette_intents), 0)
 
 
 func test_reset_clears_render_batches() -> void:
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	assert_gt(_dispatcher.get_total_instances(), 0)
 	_dispatcher.reset()
 	assert_eq(_dispatcher.get_total_instances(), 0)
@@ -497,8 +497,8 @@ func test_reset_clears_render_batches() -> void:
 
 
 func test_detail_mesh_cache_reuses_resident_geometry() -> void:
-	_dispatcher.render_preview(_camera_xform()) # cache fill after draw
-	_dispatcher.render_preview(_camera_xform()) # first resident mesh upload
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms()) # cache fill after draw
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms()) # first resident mesh upload
 	var uploaded := _dispatcher.get_frame_stats()
 	assert_gt(int(uploaded.detail_mesh_uploads), 0)
 	assert_gt(int(uploaded.detail_mesh_hits), 0,
@@ -509,7 +509,7 @@ func test_detail_mesh_cache_reuses_resident_geometry() -> void:
 		"Every first visible submission is accounted as an upload or cache hit."
 	)
 
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var reused := _dispatcher.get_frame_stats()
 	assert_eq(int(reused.detail_mesh_uploads), 0,
 		"Stable cache revisions must not rebuild ArrayMeshes every render tick.")
@@ -521,7 +521,7 @@ func test_duplicate_silhouette_anchors_reuse_mesh_but_submit_twice() -> void:
 	_foliage_index = 1
 	var anchor := Vector3(0.0, 0.0, -64.0)
 	_dispatcher.silhouette_anchors = PackedVector3Array([anchor, anchor])
-	_dispatcher.render_frame(_camera_xform())
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 
 	assert_gt(int(stats.model_mesh_uploads), 0)
@@ -535,8 +535,8 @@ func test_duplicate_silhouette_anchors_reuse_mesh_but_submit_twice() -> void:
 func test_terrain_change_invalidates_resident_geometry() -> void:
 	var data := TerrainData.new()
 	_dispatcher.colormap_source = data
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	assert_gt(_dispatcher.get_total_instances(), 0)
 
 	data.detail_density += 1
@@ -560,8 +560,8 @@ func test_non_triangle_array_mesh_disables_slot() -> void:
 	def.graphic = "line_mesh"
 	def.match = PackedInt32Array([1])
 	_dispatcher.configure_slots([def], [line_mesh], [])
-	_dispatcher.render_preview(_camera_xform())
-	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 	assert_eq(int(stats.detail_cache_regenerations), 0,
 		"Non-triangle public meshes must not enter the triangle expansion path.")
