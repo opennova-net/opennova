@@ -27,6 +27,17 @@ enum class InitialDockPlacement {
 	Center,
 	Right,
 	RightBottom, // the lower split of the right column
+	Left,        // a column split off the centre only when a window asks for it
+	Bottom,      // a strip under the centre, likewise
+};
+
+// A product's own menus on the pass's main menu bar, drawn before the pass's
+// "Windows" menu (the editor's Project / Build / Play; the game has none).
+class ImGuiPass;
+class MenuBarContributor {
+public:
+	virtual ~MenuBarContributor() = default;
+	virtual void draw_menu_bar(ImGuiPass &pass) = 0;
 };
 
 // A window's preferred first-open size in pixels, applied with
@@ -120,6 +131,8 @@ public:
 	void toggle() { set_open(!open_); }
 
 	Window &register_window(std::unique_ptr<Window> window);
+	// The product's menus (not owned; nullptr = none).
+	void set_menu_bar_contributor(MenuBarContributor *contributor) { menu_bar_ = contributor; }
 	int window_count() const { return static_cast<int>(windows_.size()); }
 	Window &window(int index) { return *windows_[static_cast<size_t>(index)]; }
 	const Window &window(int index) const { return *windows_[static_cast<size_t>(index)]; }
@@ -145,6 +158,7 @@ private:
 	void sync_visibility();
 
 	std::vector<std::unique_ptr<Window>> windows_;
+	MenuBarContributor *menu_bar_ = nullptr;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
 	bool open_ = false;

@@ -20,15 +20,19 @@ struct LaunchPlan {
 	std::string build_dir;
 };
 
-// The packaged runtime (opennova.exe) on `build_dir`.
+// The packaged runtime (opennova.exe) on `build_dir`. `engine_args` are Godot's own
+// options for the child (`--headless`, `--windowed`, `--quit-after N`), placed before
+// the `--` that starts the game flags.
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
                                  const std::string &game_code, int mcp_port,
-                                 const std::string &mission = std::string());
+                                 const std::string &mission = std::string(),
+                                 const std::vector<std::string> &engine_args = {});
 
 // The same run from source: `godot --path <project> res://game/game_runtime_root.tscn -- ...`.
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
                                    const std::string &build_dir, const std::string &game_code, int mcp_port,
-                                   const std::string &mission = std::string());
+                                   const std::string &mission = std::string(),
+                                   const std::vector<std::string> &engine_args = {});
 
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);

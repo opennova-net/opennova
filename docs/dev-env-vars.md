@@ -70,6 +70,7 @@ option.
 | `--integrity-profile <id>` | the integrity profile the host advertises / the joiner presents; applies to every joiner entry (`--lan-join` and NovaWorld browser joins). Default empty = the joiner leaves anti-cheat CRC challenges unanswered (the parity-safe posture, D-NET-181) |
 | `--capture-pcap <path>` | write the session's UDP traffic to a pcap |
 | `--mcp-port <1..65535>` | start the `opennova-game` MCP endpoint on that port ([mcp.md](mcp.md)) |
+| `--editor-smoke` | the OpenNova Editor only: name the loaded variant and quit (the packaging boot check) |
 
 ## Debug controls that replaced post-boot hooks
 
@@ -104,7 +105,7 @@ the normal map spawn selection.
 | `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
-| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |
+| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N] [--runtime-only]`; `scripts/test_godot.sh --keep-user-dir` |
 | `scripts/ida/cite_sweep.py` | `--url` |
 
 GUT-side regeneration is an uncollected script run alone:

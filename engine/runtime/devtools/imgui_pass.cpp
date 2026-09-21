@@ -38,6 +38,18 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
 			break;
 		}
 	}
+	// Likewise a bottom strip and a left column come off the centre only on request,
+	// so the game's layout (centre + right column) is untouched.
+	ImGuiID bottom_id = 0;
+	ImGuiID left_id = 0;
+	for (const auto &window : windows) {
+		const InitialDockPlacement placement = window->initial_dock_placement();
+		if (placement == InitialDockPlacement::Bottom && bottom_id == 0) {
+			ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Down, 0.30f, &bottom_id, &center_id);
+		} else if (placement == InitialDockPlacement::Left && left_id == 0) {
+			ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, 0.25f, &left_id, &center_id);
+		}
+	}
 	for (const auto &window : windows) {
 		const InitialDockPlacement placement = window->initial_dock_placement();
 		if (placement == InitialDockPlacement::Center) {
@@ -46,6 +58,10 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
 			ImGui::DockBuilderDockWindow(window->title(), right_id);
 		} else if (placement == InitialDockPlacement::RightBottom) {
 			ImGui::DockBuilderDockWindow(window->title(), right_bottom_id);
+		} else if (placement == InitialDockPlacement::Bottom) {
+			ImGui::DockBuilderDockWindow(window->title(), bottom_id);
+		} else if (placement == InitialDockPlacement::Left) {
+			ImGui::DockBuilderDockWindow(window->title(), left_id);
 		}
 	}
 	ImGui::DockBuilderFinish(dockspace_id);
@@ -151,6 +167,9 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 
 	if (ImGui::BeginMainMenuBar()) {
+		if (menu_bar_ != nullptr) {
+			menu_bar_->draw_menu_bar(*this);
+		}
 		if (ImGui::BeginMenu("Windows")) {
 			for (auto &window : windows_) {
 				if (window->is_closeable()) {

@@ -120,7 +120,11 @@ INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 # project), and a group-qualified engine path (`runtime/devtools/imgui_abi.h`)
 # is an engine include, checked by the group rules instead.
 IMGUI_INCLUDE = re.compile(r"(?:^|/)(?:imgui|imconfig)[^/]*\.h$")
-IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools")
+IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools",
+                       # The OpenNova Editor's windows on the same pass (ADR 0046 d11;
+                       # ADR 0042 d6 amended); godot/src/authoring stays behind the
+                       # imgui_abi.h pointer seam like godot/src/devtools.
+                       "engine/editor/ui", "tests/editor_ui")
 
 
 def engine_libs() -> dict[str, set[str]]:
@@ -211,7 +215,7 @@ def scan() -> tuple[list[str], int]:
                     for t in IMGUI_ALLOWED_TREES):
                 violations.append(
                     f"[imgui-containment] {where} (imgui headers are allowed "
-                    f"only under engine/runtime/devtools/ and tests/devtools/; "
+                    f"only under engine/runtime/devtools/, engine/editor/ui/ and their tests; "
                     f"ADR 0042 d6)")
                 continue
             if quote == '"' and "../" in inc and rel.parts[0] in PARENT_RELATIVE_FORBIDDEN_ROOTS:

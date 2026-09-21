@@ -26,9 +26,10 @@ toolchain. Runtime asset loading is native and the supported object input is
 3DI.
 
 The OpenNova Editor (experimental, being brought back slice by slice under ADR
-0046) is a separately exported application: a project directory of loose game files,
-a requirements checklist for everything the engine expects by name, and Play/Export
-steps that pack the archives. Its model importer will use GLB/GLTF as its scene
+0046) is a separately exported application, `opennova-editor.exe`: a project directory
+of loose game files, a checklist of every file the engine expects by name with
+"Create all missing" for a blank but bootable game, and a Build / Play step that packs
+the archives and runs the game on them. Its model importer will use GLB/GLTF as its scene
 interchange (GLB/GLTF to 3DI for runtime assets and 3DI to GLB for editing); that
 converter is not part of the current repository, and its scene contract is documented
 without depending on importer metadata or DCC custom properties.
@@ -90,6 +91,11 @@ usage and exits with code 2; an invalid or unmountable directory exits with code
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, and launch instructions.
 Game data is supplied separately. Debug builds include the game's F3 tools.
+
+They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
+OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
+with. No Godot install is needed. The editor is experimental: today it creates a
+project, fills in the files the game needs, builds and plays; the data editors follow.
 
 ## Documentation
 

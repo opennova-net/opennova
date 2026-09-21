@@ -33,7 +33,28 @@ add_library(opennova_editor STATIC
     # run — the Play launch plan and the one managed child over the platform seam
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
+    # session — the one open project and everything the editor does to it (ADR 0046 d10)
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_settings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
 )
+
+# ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the
+# pass is (OPENNOVA_IMGUI: the dev-tools or the editor flavour); OPENNOVA_EDITOR_UI tells a
+# consumer whether the windows exist in this build.
+if(OPENNOVA_IMGUI)
+    target_sources(opennova_editor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/assets_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/project_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/requirements_window.cpp
+    )
+    target_link_libraries(opennova_editor PRIVATE opennova_imgui)
+    target_compile_definitions(opennova_editor PUBLIC OPENNOVA_EDITOR_UI=1)
+else()
+    target_compile_definitions(opennova_editor PUBLIC OPENNOVA_EDITOR_UI=0)
+endif()
 
 # engine/ is the one public include root (ADR 0040): <editor/<lib>/file.h>.
 target_include_directories(opennova_editor

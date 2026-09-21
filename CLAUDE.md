@@ -69,7 +69,7 @@ processes.
 
 ```bash
 scripts/build.sh          # C++ build + full ctest (Release); --no-godot skips the GDExtension, --jobs N
-scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
+scripts/build_godot.sh    # both GDExtension variants -> godot/bin/ (--runtime-only for one); fully restart the editor after
 scripts/test_godot.sh     # GUT GDScript suite, headless
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)
 ```
@@ -158,8 +158,9 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   current worktree.
 - Never post PR comments — context goes in the PR description and commit messages. Never
   merge PRs; the maintainer merges.
-- PR CI builds only the `template_debug` GDExtension and packages debug-mode exports
-  (`-ExportMode debug`); `template_release` + release-mode packaging run on master
+- PR CI builds only the `template_debug` GDExtension (both variants) and packages
+  debug-mode exports (`-ExportMode debug`: the game zip and the editor zip);
+  `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
   `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The engine
   test job runs Ninja + sccache (the VS generator is local-only).

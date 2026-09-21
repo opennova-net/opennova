@@ -15,17 +15,27 @@ option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGu
 if(GODOTCPP_TARGET STREQUAL "template_release")
     set(OPENNOVA_DEVTOOLS OFF)
 endif()
-# Dear ImGui has no consumer when the game's dev tools are compiled out.
-if(OPENNOVA_DEVTOOLS)
+# Two GDExtension variants from one source tree (ADR 0046 d4): the runtime-only
+# `libopennova.*` the game and the Play child ship, and the editor-enabled
+# `libopennova_editor.*` the OpenNova Editor ships (and every source run loads, as
+# the superset). OFF builds the runtime variant alone.
+option(OPENNOVA_EDITOR "Build the editor-enabled GDExtension variant beside the runtime one" ON)
+# Dear ImGui builds when either product wants its pass: the game's dev tools or
+# the editor's windows (OPENNOVA_IMGUI is read by engine/).
+if(OPENNOVA_DEVTOOLS OR OPENNOVA_EDITOR)
+    set(OPENNOVA_IMGUI ON)
     add_subdirectory(../../third_party/imgui opennova_imgui)
+else()
+    set(OPENNOVA_IMGUI OFF)
 endif()
 # The engine (Shape A group targets — see engine/CMakeLists.txt).
 add_subdirectory(../../engine opennova_engine)
 
-set(TARGET_NAME "opennova")
-
-add_library(${TARGET_NAME} SHARED
-    register_types.cpp
+# The bindings, compiled once and shared by both variants: everything but the
+# entry point (register_types.cpp, which differs by what it registers), the
+# ImGui pass node (whose attach leg is per variant) and the editor's authoring
+# layer (editor variant only).
+add_library(opennova_bindings OBJECT
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
@@ -245,23 +255,17 @@ add_library(${TARGET_NAME} SHARED
     player/player_weapon_effects.cpp
 )
 
-target_include_directories(${TARGET_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+target_include_directories(opennova_bindings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # opennova_runtime carries the sim chain (runtime -> formats -> base -> io) the
 # bindings consume directly; opennova_net is the wire only and never links
 # runtime (ADR 0043 d4). The service target is deliberately absent (see the sqlite note
 # above); scripts/lint/link_graph_check.py enforces it.
-target_link_libraries(${TARGET_NAME} PRIVATE
+target_link_libraries(opennova_bindings PUBLIC
     godot-cpp
     opennova_runtime
     opennova_net
 )
-
-if(WIN32)
-    target_link_libraries(${TARGET_NAME} PRIVATE iphlpapi)
-endif()
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)
 
@@ -269,7 +273,37 @@ set(OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../bin/")
 
 # gersemi: off
 set_target_properties(
-    ${TARGET_NAME}
+    opennova_bindings
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_EXTENSIONS OFF
+        CXX_VISIBILITY_PRESET ${GODOTCPP_SYMBOL_VISIBILITY}
+        POSITION_INDEPENDENT_CODE ON
+        FOLDER "opennova"
+)
+# gersemi: on
+
+# The runtime-only variant: the game and the Play child. It never links
+# opennova_editor (link_graph_check.py), and its ImGui pass node attaches only when
+# the game's dev tools are compiled in.
+add_library(opennova SHARED
+    register_types.cpp
+    devtools/imgui_pass_node.cpp
+)
+target_include_directories(opennova PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova PRIVATE opennova_bindings)
+if(OPENNOVA_DEVTOOLS)
+    target_compile_definitions(opennova PRIVATE OPENNOVA_EDITOR=0 OPENNOVA_IMGUI_NODE=1)
+else()
+    target_compile_definitions(opennova PRIVATE OPENNOVA_EDITOR=0 OPENNOVA_IMGUI_NODE=0)
+endif()
+if(WIN32)
+    target_link_libraries(opennova PRIVATE iphlpapi)
+endif()
+
+# gersemi: off
+set_target_properties(
+    opennova
     PROPERTIES
         CXX_STANDARD 17
         CXX_EXTENSIONS OFF
@@ -282,8 +316,48 @@ set_target_properties(
         PDB_OUTPUT_DIRECTORY     "$<1:${OUTPUT_DIR}>"
 
         PREFIX "lib"
-        OUTPUT_NAME "${TARGET_NAME}${GODOTCPP_SUFFIX}"
+        OUTPUT_NAME "opennova${GODOTCPP_SUFFIX}"
 
         FOLDER "opennova"
 )
 # gersemi: on
+
+# The editor-enabled variant (ADR 0046 d4): the same bindings plus the authoring
+# layer (godot/src/authoring) and the editor core, with the ImGui pass always
+# attachable. `libopennova_editor.*`; selected by the `opennova_editor` feature tag
+# and by the plain rows of opennova.gdextension (source runs load the superset).
+if(OPENNOVA_EDITOR)
+    add_library(opennova_editor_gdext SHARED
+        register_types.cpp
+        devtools/imgui_pass_node.cpp
+        authoring/child_process.cpp
+        authoring/editor_app.cpp
+    )
+    target_include_directories(opennova_editor_gdext PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(opennova_editor_gdext PRIVATE opennova_bindings opennova_editor)
+    target_compile_definitions(opennova_editor_gdext PRIVATE OPENNOVA_EDITOR=1 OPENNOVA_IMGUI_NODE=1)
+    if(WIN32)
+        target_link_libraries(opennova_editor_gdext PRIVATE iphlpapi)
+    endif()
+
+    # gersemi: off
+    set_target_properties(
+        opennova_editor_gdext
+        PROPERTIES
+            CXX_STANDARD 17
+            CXX_EXTENSIONS OFF
+            CXX_VISIBILITY_PRESET ${GODOTCPP_SYMBOL_VISIBILITY}
+
+            POSITION_INDEPENDENT_CODE ON
+
+            LIBRARY_OUTPUT_DIRECTORY "$<1:${OUTPUT_DIR}>"
+            RUNTIME_OUTPUT_DIRECTORY "$<1:${OUTPUT_DIR}>"
+            PDB_OUTPUT_DIRECTORY     "$<1:${OUTPUT_DIR}>"
+
+            PREFIX "lib"
+            OUTPUT_NAME "opennova_editor${GODOTCPP_SUFFIX}"
+
+            FOLDER "opennova"
+    )
+    # gersemi: on
+endif()

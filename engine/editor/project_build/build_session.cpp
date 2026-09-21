@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <map>
 #include <system_error>
+#include <utility>
 
 #include <base/io/hash.h>
 #include <base/io/json.h>
@@ -237,158 +238,202 @@ std::string last_good_build_dir(const std::string &output_root) {
 	return fs::is_directory(dir, ec) ? dir.generic_string() : std::string();
 }
 
-BuildReport run_build(const BuildPlan &plan, const ProjectDocument &doc, const std::string &output_root,
-                      const std::vector<std::string> &protected_dirs, BuildProgress *progress) {
-	BuildReport report;
-	if (!plan.ok) {
-		report.diagnostics = plan.diagnostics;
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.blocked",
-		                                             "The project has problems that would stop the game; fix them first."));
-		return report;
+namespace {
+
+// The archive flavour the target game ships: every JO-family title reads PFF3
+// [orig: PFF_Open @ 0x7682e0]; the profile keys the SCR policy only, so the format
+// rides here until a profile row carries it.
+constexpr pff::PffFormat kBuildArchiveFormat = pff::PFF_FORMAT_PFF3;
+
+} // namespace
+
+BuildRun::BuildRun(BuildPlan plan, ProjectDocument doc, std::string output_root,
+                   std::vector<std::string> protected_dirs)
+		: plan_(std::move(plan)), doc_(std::move(doc)), output_root_(std::move(output_root)),
+		  protected_dirs_(std::move(protected_dirs)) {}
+
+void BuildRun::fail(Diagnostic error) {
+	report_.diagnostics.push_back(std::move(error));
+	if (!tmp_dir_.empty()) {
+		std::error_code ec;
+		fs::remove_all(tmp_dir_, ec);
 	}
-	// The archive flavour the target game ships: every JO-family title reads PFF3
-	// [orig: PFF_Open @ 0x7682e0]; the profile keys the SCR policy only, so the
-	// format rides on the target game code here until a profile row carries it.
-	const pff::PffFormat format = pff::PFF_FORMAT_PFF3;
-	(void)doc;
+	phase_ = Phase::Done;
+}
+
+bool BuildRun::step() {
+	switch (phase_) {
+	case Phase::Prepare: prepare(); break;
+	case Phase::Archives: pack_next_archive(); break;
+	case Phase::Loose: copy_next_loose(); break;
+	case Phase::Publish: publish(); break;
+	case Phase::Done: break;
+	}
+	return done();
+}
+
+// Gate, hash, settle whether this content is already built, and open the staging
+// directory.
+void BuildRun::prepare() {
+	if (!plan_.ok) {
+		report_.diagnostics = plan_.diagnostics;
+		report_.diagnostics.push_back(make_diagnostic(
+		        DiagnosticSeverity::Error, "build.blocked",
+		        "The project has problems that would stop the game; fix them first."));
+		phase_ = Phase::Done;
+		return;
+	}
 
 	// Hash every archive's content and the loose files; the build id covers all of it.
-	std::map<std::string, std::string> hashes;
 	uint64_t build_hash = io::kFnv1a64Offset;
-	for (const BuildArchive &archive : plan.archives) {
+	for (const BuildArchive &archive : plan_.archives) {
 		uint64_t hash = 0;
 		Diagnostic error;
-		if (!hash_entries(archive.entries, hash, error)) {
-			report.diagnostics.push_back(error);
-			return report;
-		}
-		hashes[archive.file_name] = hex64(hash);
+		if (!hash_entries(archive.entries, hash, error)) return fail(std::move(error));
+		hashes_[archive.file_name] = hex64(hash);
 		build_hash = io::fnv1a64_value(build_hash, hash);
 	}
 	{
 		uint64_t loose_hash = 0;
 		Diagnostic error;
-		if (!hash_entries(plan.loose, loose_hash, error)) {
-			report.diagnostics.push_back(error);
-			return report;
-		}
+		if (!hash_entries(plan_.loose, loose_hash, error)) return fail(std::move(error));
 		build_hash = io::fnv1a64_value(build_hash, loose_hash);
 	}
-	build_hash = io::fnv1a64_value(build_hash, static_cast<int>(format));
-	report.build_id = hex64(build_hash);
+	build_hash = io::fnv1a64_value(build_hash, static_cast<int>(kBuildArchiveFormat));
+	report_.build_id = hex64(build_hash);
 
 	std::string io_error;
-	if (!ensure_directory(output_root, io_error)) {
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
-		return report;
+	if (!ensure_directory(output_root_, io_error)) {
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
 	}
-	const fs::path final_dir = fs::path(output_root) / report.build_id;
+	const fs::path final_dir = fs::path(output_root_) / report_.build_id;
+	final_dir_ = final_dir.generic_string();
 	std::error_code ec;
 	if (fs::is_directory(final_dir, ec)) {
 		// Same content, same build: prove it still mounts and hand it back.
 		Diagnostic error;
-		if (verify_staged(plan, final_dir.generic_string(), error)) {
-			report.ok = true;
-			report.reused_existing = true;
-			report.build_dir = final_dir.generic_string();
-			return report;
+		if (verify_staged(plan_, final_dir_, error)) {
+			report_.ok = true;
+			report_.reused_existing = true;
+			report_.build_dir = final_dir_;
+			steps_done_ = steps_total();
+			phase_ = Phase::Done;
+			return;
 		}
 		if (!is_prunable_build_dir(final_dir)) {
-			report.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "build.write",
-			        "cannot publish the build: " + final_dir.generic_string() +
-			                " exists and is not a build directory"));
-			return report;
+			return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
+			                            "cannot publish the build: " + final_dir_ +
+			                                    " exists and is not a build directory"));
 		}
 		fs::remove_all(final_dir, ec); // a damaged build is rebuilt
 	}
 
 	LastGood last;
-	const bool have_last = read_last_good(output_root, last);
-	const fs::path last_dir = have_last ? fs::path(output_root) / last.build_id : fs::path();
+	if (read_last_good(output_root_, last)) {
+		last_dir_ = (fs::path(output_root_) / last.build_id).generic_string();
+		last_hashes_ = last.archive_hashes;
+	}
 
-	const fs::path tmp_dir = fs::path(output_root) / (report.build_id + kBuildStagingSuffix);
+	const fs::path tmp_dir = fs::path(output_root_) / (report_.build_id + kBuildStagingSuffix);
 	if (fs::exists(tmp_dir, ec) && !is_prunable_build_dir(tmp_dir)) {
-		report.diagnostics.push_back(make_diagnostic(
-		        DiagnosticSeverity::Error, "build.write",
-		        "cannot stage the build: " + tmp_dir.generic_string() + " exists and is not a build directory"));
-		return report;
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
+		                            "cannot stage the build: " + tmp_dir.generic_string() +
+		                                    " exists and is not a build directory"));
 	}
 	fs::remove_all(tmp_dir, ec);
 	if (!ensure_directory(tmp_dir.generic_string(), io_error) ||
-	    !write_file_atomic((tmp_dir / kBuildStagingMarkerFileName).generic_string(), report.build_id, io_error)) {
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
-		return report;
+	    !write_file_atomic((tmp_dir / kBuildStagingMarkerFileName).generic_string(), report_.build_id, io_error)) {
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
 	}
+	tmp_dir_ = tmp_dir.generic_string(); // from here a failure removes it
+	phase_ = Phase::Archives;
+}
 
-	const size_t total_steps = plan.archives.size() + plan.loose.size();
-	size_t step = 0;
-	for (const BuildArchive &archive : plan.archives) {
-		const fs::path target = tmp_dir / archive.file_name;
-		const auto previous = last.archive_hashes.find(archive.file_name);
-		const bool reusable = have_last && previous != last.archive_hashes.end() &&
-		                      previous->second == hashes[archive.file_name] &&
-		                      fs::is_regular_file(last_dir / archive.file_name, ec);
-		Diagnostic error;
-		if (reusable) {
-			if (!copy_file(last_dir / archive.file_name, target, error, archive.file_name)) {
-				report.diagnostics.push_back(error);
-				fs::remove_all(tmp_dir, ec);
-				return report;
-			}
-			report.archives_reused.push_back(archive.file_name);
-		} else {
-			if (!write_archive(archive, target.generic_string(), format, error)) {
-				report.diagnostics.push_back(error);
-				fs::remove_all(tmp_dir, ec);
-				return report;
-			}
-			report.archives_written.push_back(archive.file_name);
-		}
-		if (progress) progress->on_step(archive.file_name, ++step, total_steps);
+void BuildRun::pack_next_archive() {
+	if (archive_index_ >= plan_.archives.size()) {
+		phase_ = Phase::Loose;
+		return copy_next_loose();
 	}
-	std::vector<std::string> loose_names;
-	for (const BuildEntry &entry : plan.loose) {
-		Diagnostic error;
-		if (!copy_file(fs::path(entry.source_path), tmp_dir / entry.logical_name, error, entry.logical_name)) {
-			report.diagnostics.push_back(error);
-			fs::remove_all(tmp_dir, ec);
-			return report;
+	const BuildArchive &archive = plan_.archives[archive_index_++];
+	const fs::path target = fs::path(tmp_dir_) / archive.file_name;
+	const fs::path previous_file = fs::path(last_dir_) / archive.file_name;
+	const auto previous = last_hashes_.find(archive.file_name);
+	std::error_code ec;
+	const bool reusable = !last_dir_.empty() && previous != last_hashes_.end() &&
+	                      previous->second == hashes_[archive.file_name] &&
+	                      fs::is_regular_file(previous_file, ec);
+	Diagnostic error;
+	if (reusable) {
+		if (!copy_file(previous_file, target, error, archive.file_name)) return fail(std::move(error));
+		report_.archives_reused.push_back(archive.file_name);
+	} else {
+		if (!write_archive(archive, target.generic_string(), kBuildArchiveFormat, error)) {
+			return fail(std::move(error));
 		}
-		report.loose_written.push_back(entry.logical_name);
-		loose_names.push_back(entry.logical_name);
-		if (progress) progress->on_step(entry.logical_name, ++step, total_steps);
+		report_.archives_written.push_back(archive.file_name);
 	}
+	last_step_ = archive.file_name;
+	++steps_done_;
+}
 
+void BuildRun::copy_next_loose() {
+	if (loose_index_ >= plan_.loose.size()) {
+		phase_ = Phase::Publish;
+		return;
+	}
+	const BuildEntry &entry = plan_.loose[loose_index_++];
+	Diagnostic error;
+	if (!copy_file(fs::path(entry.source_path), fs::path(tmp_dir_) / entry.logical_name, error,
+	               entry.logical_name)) {
+		return fail(std::move(error));
+	}
+	report_.loose_written.push_back(entry.logical_name);
+	last_step_ = entry.logical_name;
+	++steps_done_;
+}
+
+// Prove the staged directory mounts, record it, rename it into place, prune.
+void BuildRun::publish() {
 	Diagnostic verify_error;
-	if (!verify_staged(plan, tmp_dir.generic_string(), verify_error)) {
-		report.diagnostics.push_back(verify_error);
-		fs::remove_all(tmp_dir, ec);
-		return report;
-	}
-	const io::JsonValue record = build_record(report.build_id, hashes, loose_names);
-	if (!write_file_atomic((tmp_dir / kBuildRecordFileName).generic_string(), io::json_write(record), io_error)) {
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
-		fs::remove_all(tmp_dir, ec);
-		return report;
-	}
-	fs::rename(tmp_dir, final_dir, ec);
-	if (ec) {
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.write",
-		                                             "cannot publish the build: " + ec.message()));
-		fs::remove_all(tmp_dir, ec);
-		return report;
-	}
-	fs::remove(final_dir / kBuildStagingMarkerFileName, ec); // published: the record is its proof now
-	if (!write_file_atomic((fs::path(output_root) / kLastGoodBuildFileName).generic_string(),
+	if (!verify_staged(plan_, tmp_dir_, verify_error)) return fail(std::move(verify_error));
+	const io::JsonValue record = build_record(report_.build_id, hashes_, report_.loose_written);
+	std::string io_error;
+	if (!write_file_atomic((fs::path(tmp_dir_) / kBuildRecordFileName).generic_string(),
 	                       io::json_write(record), io_error)) {
-		report.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
-		return report;
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
 	}
-	prune_old_builds(output_root, report.build_id, protected_dirs);
-	report.ok = true;
-	report.build_dir = final_dir.generic_string();
-	return report;
+	std::error_code ec;
+	fs::rename(tmp_dir_, final_dir_, ec);
+	if (ec) {
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
+		                            "cannot publish the build: " + ec.message()));
+	}
+	tmp_dir_.clear(); // published: nothing left to clean up
+	fs::remove(fs::path(final_dir_) / kBuildStagingMarkerFileName, ec); // the record is its proof now
+	if (!write_file_atomic((fs::path(output_root_) / kLastGoodBuildFileName).generic_string(),
+	                       io::json_write(record), io_error)) {
+		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+	}
+	prune_old_builds(output_root_, report_.build_id, protected_dirs_);
+	report_.ok = true;
+	report_.build_dir = final_dir_;
+	phase_ = Phase::Done;
+}
+
+BuildReport run_build(const BuildPlan &plan, const ProjectDocument &doc, const std::string &output_root,
+                      const std::vector<std::string> &protected_dirs, BuildProgress *progress) {
+	BuildRun run(plan, doc, output_root, protected_dirs);
+	size_t reported = 0;
+	while (!run.step()) {
+		if (progress && run.steps_done() > reported) {
+			reported = run.steps_done();
+			progress->on_step(run.last_step(), reported, run.steps_total());
+		}
+	}
+	if (progress && run.report().ok && !run.report().reused_existing && run.steps_done() > reported) {
+		progress->on_step(run.last_step(), run.steps_done(), run.steps_total());
+	}
+	return run.report();
 }
 
 } // namespace opennova::editor

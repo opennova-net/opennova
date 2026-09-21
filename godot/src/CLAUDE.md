@@ -60,8 +60,19 @@ Gotchas:
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot
   editor — GDExtension registration does not hot-reload, and GDScript referencing an
   unregistered class fails to parse (GUT then silently drops those test scripts).
-- The editor loads only `godot/bin/libopennova.*`. A stale editor means a stale
-  `godot/bin` DLL — rebuild via `scripts/build_godot.sh` and fully restart.
+- Two GDExtension variants come out of one build (ADR 0046 d4): `libopennova.*`
+  (runtime-only: the game and the editor's Play child) and `libopennova_editor.*`
+  (the same bindings plus `authoring/` and the editor core: what the OpenNova
+  Editor ships). A source run (the Godot editor, GUT, export scanning) loads
+  `godot/bin/libopennova_editor.*.template_debug.*`, the superset, through the
+  plain rows of `bin/opennova.gdextension`; the `opennova_runtime` /
+  `opennova_editor` feature tags of the export presets pick the shipped one. A
+  stale editor means a stale `godot/bin` DLL — rebuild via `scripts/build_godot.sh`
+  and fully restart. `authoring/` is the editor's Godot seam (the `EditorApp`
+  root node over the shared `ImGuiPassNode`, the OS process seam under Play):
+  it compiles only into the editor variant, so nothing the game ships can
+  reach it (`link_graph_check.py`), and it reaches ImGui only through the
+  `imgui_abi.h` pointer seam like `devtools/`.
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s

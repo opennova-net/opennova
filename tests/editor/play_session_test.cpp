@@ -62,6 +62,8 @@ static int test_launch_plans() {
 
 	const LaunchPlan quiet = make_play_launch_plan("opennova", "/b", "", 0);
 	TEST_EXPECT(quiet.args == std::vector<std::string>({"--log-file", "/b/session.log", "--", "--resource-dir", "/b"}));
+	const LaunchPlan headless = make_play_launch_plan("opennova", "/b", "", 0, "", {"--headless", "--quit-after", "3"});
+	TEST_EXPECT(headless.args[0] == "--headless" && headless.args[2] == "3" && headless.args[3] == "--log-file");
 
 	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "jo", 0);
 	TEST_EXPECT(source.args[0] == "--path" && source.args[1] == "C:/repo/godot");

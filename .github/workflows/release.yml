@@ -30,11 +30,13 @@ jobs:
         shell: bash
         run: scripts/build.sh --no-godot
 
-  # Tagged releases ship the runtime only. Game data is supplied via CLI.
+  # Tagged releases ship the runtime (game data is supplied via CLI) and the
+  # editor with its own copy of the runtime.
   package-godot-windows:
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
+      editor_artifact_id: ${{ steps.upload_editor.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -68,6 +70,14 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: Upload OpenNova Windows editor zip
+        id: upload_editor
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-editor-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
   release:
     runs-on: ubuntu-latest
     needs: [test, package-godot-windows]
@@ -76,11 +86,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download game artifact
+      - name: Download the game and editor artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -88,22 +98,26 @@ jobs:
           # dumps their contents into dist; skip-decompress preserves the deliverable.
           skip-decompress: true
 
-      - name: Name game zip for the release tag
+      - name: Name the zips for the release tag
         shell: bash
         run: |
           shopt -s nullglob
-          game_zips=(dist/opennova-game-windows-v*.zip)
-          if [[ ${#game_zips[@]} -ne 1 ]]; then
-            echo "::error::Expected exactly one game zip, found ${#game_zips[@]}"
-            exit 1
-          fi
-          release_zip="dist/opennova-game-windows-${GITHUB_REF_NAME}.zip"
-          if [[ "${game_zips[0]}" != "$release_zip" ]]; then
-            mv -- "${game_zips[0]}" "$release_zip"
-          fi
+          for product in game editor; do
+            zips=(dist/opennova-${product}-windows-v*.zip)
+            if [[ ${#zips[@]} -ne 1 ]]; then
+              echo "::error::Expected exactly one ${product} zip, found ${#zips[@]}"
+              exit 1
+            fi
+            release_zip="dist/opennova-${product}-windows-${GITHUB_REF_NAME}.zip"
+            if [[ "${zips[0]}" != "$release_zip" ]]; then
+              mv -- "${zips[0]}" "$release_zip"
+            fi
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/opennova-game-windows-${{ github.ref_name }}.zip
+          files: |
+            dist/opennova-game-windows-${{ github.ref_name }}.zip
+            dist/opennova-editor-windows-${{ github.ref_name }}.zip
           generate_release_notes: true

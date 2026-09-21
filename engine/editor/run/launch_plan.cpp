@@ -40,13 +40,15 @@ std::string quote(const std::string &arg) {
 } // namespace
 
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
-                                 const std::string &game_code, int mcp_port, const std::string &mission) {
+                                 const std::string &game_code, int mcp_port, const std::string &mission,
+                                 const std::vector<std::string> &engine_args) {
 	LaunchPlan plan;
 	plan.executable = runtime_executable;
 	plan.build_dir = fs::path(build_dir).generic_string();
 	plan.working_dir = plan.build_dir;
 	plan.log_file = (fs::path(build_dir) / "session.log").generic_string();
 	plan.mcp_port = mcp_port;
+	plan.args = engine_args;
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
 	append_game_flags(plan, game_code, mission);
@@ -55,7 +57,7 @@ LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const st
 
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
                                    const std::string &build_dir, const std::string &game_code, int mcp_port,
-                                   const std::string &mission) {
+                                   const std::string &mission, const std::vector<std::string> &engine_args) {
 	LaunchPlan plan;
 	plan.executable = godot_executable;
 	plan.build_dir = fs::path(build_dir).generic_string();
@@ -65,6 +67,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 	plan.args.push_back("--path");
 	plan.args.push_back(godot_project_dir);
 	plan.args.push_back("res://game/game_runtime_root.tscn");
+	for (const std::string &arg : engine_args) plan.args.push_back(arg);
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
 	append_game_flags(plan, game_code, mission);

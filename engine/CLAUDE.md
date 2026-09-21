@@ -35,15 +35,19 @@
     rules, scoring, clocks, winner evaluation, and the frozen result; wire
     code only serializes that result.
   - `editor/` — the fifth group (ADR 0046 d3): the OpenNova Editor's portable core
-    (`project`, `assets`, `requirements`, then the blank factories, the build, the play
-    session, the documents, the graph, the importers and the ImGui windows as their
-    slices land). STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its
-    validators reuse the engine's own load paths; nothing under the four groups
-    below may include or link it (`include_graph_check.py`, `link_graph_check.py`),
-    and the game and the Play child never carry it. Tooling, not a port: its sources
-    sit in the citation allowlist by the `editor/` prefix. No directory under it may
-    start with `build` (the lints skip such directories; the build lib is
-    `project_build/`).
+    (`project`, `assets`, `requirements`, `blank` (the from-scratch factories),
+    `project_build` (the steppable build), `run` (the Play session over the process
+    seam), `session` (the one open project and everything the editor does to it:
+    typed requests in, a view out), `ui` (the Dear ImGui windows on the engine's
+    pass, built only with `OPENNOVA_IMGUI`; the only tree besides
+    `runtime/devtools` that may include an ImGui header), then the documents, the
+    graph and the importers as their slices land). STATIC `opennova_editor`,
+    PUBLIC-linking `opennova_runtime` so its validators reuse the engine's own load
+    paths; nothing under the four groups below may include or link it
+    (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
+    child never carry it. Tooling, not a port: its sources sit in the citation
+    allowlist by the `editor/` prefix. No directory under it may start with `build`
+    (the lints skip such directories; the build lib is `project_build/`).
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every

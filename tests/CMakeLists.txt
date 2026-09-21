@@ -3102,6 +3102,19 @@ target_link_libraries(editor_play_session_test PRIVATE opennova_editor)
 target_include_directories(editor_play_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_play_session COMMAND editor_play_session_test)
 
+add_executable(editor_session_test editor/editor_session_test.cpp)
+target_link_libraries(editor_session_test PRIVATE opennova_editor)
+target_include_directories(editor_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session COMMAND editor_session_test)
+
+# The editor's ImGui windows over a null backend (ADR 0046 d11): built with the pass.
+if(OPENNOVA_IMGUI)
+    add_executable(editor_ui_test editor_ui/editor_windows_test.cpp)
+    target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
+    target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_ui COMMAND editor_ui_test)
+endif()
+
 add_executable(project_cli_test editor/project_cli_test.cpp)
 target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -289,21 +289,27 @@ jobs:
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
             "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
           if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
-          cmake --build $buildDir --target opennova
+          # Both variants of the flavour from the one configure (ADR 0046 d4): the
+          # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
+          cmake --build $buildDir --target opennova opennova_editor_gdext
           if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }
-          $dll = "godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll"
-          if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
+          foreach ($dll in @("godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll",
+                             "godot/bin/libopennova_editor.windows.$env:GODOTCPP_TARGET.x86_64.dll")) {
+            if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
+          }
 
       - name: sccache stats
         shell: bash
         run: sccache --show-stats
 
-      - name: Upload Windows GDExtension
+      - name: Upload Windows GDExtensions
         uses: actions/upload-artifact@v4
         with:
           name: gdext_windows_${{ matrix.target }}
           if-no-files-found: error
-          path: godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
+          path: |
+            godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
+            godot/bin/libopennova_editor.windows.${{ matrix.target }}.x86_64.dll
 
   godot-tests:
     strategy:
@@ -358,8 +364,9 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
-      # The editor binary that runs GUT loads the template_debug flavour only.
-      - name: Download GDExtension (Windows)
+      # The editor binary that runs GUT loads the template_debug flavour only
+      # (the editor-enabled variant, through the plain .gdextension row).
+      - name: Download GDExtensions (Windows)
         uses: actions/download-artifact@v4
         with:
           name: gdext_windows_template_debug
@@ -400,12 +407,14 @@ jobs:
           python scripts/ci/retail_gates_ran.py --gut-log gut.log \
             --roots jo_dir,jo_assets
 
-  # One runtime archive; users provide game data with --resource-dir.
+  # The game archive (users provide game data with --resource-dir) and the
+  # editor archive (the editor plus the runtime it plays a project with).
   package-godot-windows:
     runs-on: windows-latest
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
+      editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
@@ -450,6 +459,14 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: Upload OpenNova Windows editor zip
+        id: upload_editor
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-editor-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
   # Surface the Windows build on the PR as a single comment that updates in
   # place. Depends on the Windows package job (not the test jobs), so the link
   # only ever advances to a build that succeeded; a failed build skips this job
@@ -466,6 +483,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
+          EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -484,6 +502,7 @@ jobs:
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe; supply game data with --resource-dir | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');
