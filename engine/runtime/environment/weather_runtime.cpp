@@ -1,5 +1,6 @@
 #include <runtime/environment/weather_runtime.h>
 
+#include <runtime/environment/weather_seed.h>
 #include <runtime/renderer/light_runtime.h>
 
 #include <algorithm>
@@ -101,6 +102,32 @@ void WeatherRuntime::prewarm_mission_start(EnvironmentState *env) {
 	for (int i = 0; i < kMissionStartPrewarmTicks; ++i) {
 		tick_fixed(env);
 	}
+}
+
+void WeatherRuntime::run_mission_start_boundary(EnvironmentState *env,
+		world::WeatherState *mission_state, const bms::Header &header,
+		const std::function<void()> &bind_render,
+		const std::function<void()> &complete_mission_start) {
+	if (env == nullptr || mission_state == nullptr) {
+		prewarm_mission_start(env);
+		return;
+	}
+	// The seed: the loaded .env (its mission overrides already layered) + the
+	// BMS clock, the ONE derivation every serving embedder runs
+	// [orig: Environment_SnapStateToTargets @ 0x57d1e0;
+	//  Game_StartMission clock @ 0x525371].
+	if (env->config() != nullptr) {
+		world::WeatherSeed seed = weather_seed_from_config(*env->config(), header);
+		seed.wind_scale = static_cast<int32_t>(wind_strength_pct() / 100.0f * 256.0f);
+		mission_state->seed(seed);
+	}
+	bind_render();
+	resync_colors();
+	tick_weather(env, 0);
+	// The authority's eager WAC execution precedes the initializer; both
+	// roles then settle 255 complete ticks through the attached render hook
+	// [orig: Game_StartMission @ 0x525cb8 -> @ 0x57f878].
+	complete_mission_start();
 }
 
 void WeatherRuntime::reset_for_environment(EnvironmentState *env,

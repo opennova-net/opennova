@@ -861,8 +861,6 @@ public:
 	opennova::world::WeatherState *weather_state();
 	const opennova::world::WeatherState *weather_state() const;
 	bool weather_state_bound() const { return weather_state() != nullptr; }
-	// The mission-start seed (the embedder's ONE derivation, env::weather_seed_from_config).
-	void seed_weather(const opennova::world::WeatherSeed &p_seed);
 	// The render owner the kernel's weather tick calls after the sim legs
 	// (null detaches); remembered so the World's death releases the owner's
 	// pointer before the environment can read a freed WeatherState.

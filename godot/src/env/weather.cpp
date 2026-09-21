@@ -10,7 +10,6 @@
 #include "simulation/simulation.h"
 
 #include <formats/mission/bms.h>
-#include <runtime/environment/weather_seed.h>
 
 namespace godot {
 
@@ -270,30 +269,13 @@ void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
 		int p_minutes_per_day) {
 	Simulation *sim = Object::cast_to<Simulation>(p_sim);
 	MissionEnvironment *env = _env_node();
-	if (sim == nullptr || env == nullptr || sim->weather_state() == nullptr) {
-		prewarm_mission_start();
-		return;
-	}
-	// The seed: the loaded .env (its mission overrides already layered) + the
-	// BMS clock, the ONE derivation every serving embedder runs (retail
-	// Environment_SnapStateToTargets @ 0x57d1e0; Game_StartMission clock
-	// @ 0x525371).
 	opennova::bms::Header header{};
 	header.start_time = p_start_time_q8_8;
 	header.minutes_per_day = p_minutes_per_day;
-	if (env->state().config() != nullptr) {
-		opennova::world::WeatherSeed seed = opennova::env::weather_seed_from_config(
-				*env->state().config(), header);
-		seed.wind_scale = static_cast<int32_t>(runtime_.wind_strength_pct() / 100.0f * 256.0f);
-		sim->seed_weather(seed);
-	}
-	bind_simulation(sim);
-	runtime_.resync_colors();
-	runtime_.tick_weather(&env->state(), 0);
-	// The authority's eager WAC execution precedes the initializer; both
-	// roles then settle 255 complete ticks (the kernel calls this node's
-	// render legs each tick) (retail Game_StartMission @ 0x525cb8 -> @ 0x57f878).
-	sim->complete_mission_start();
+	runtime_.run_mission_start_boundary(env != nullptr ? &env->state() : nullptr,
+			sim != nullptr ? sim->weather_state() : nullptr, header,
+			[&]() { bind_simulation(sim); },
+			[&]() { sim->complete_mission_start(); });
 	_post_runtime(env);
 }
 
