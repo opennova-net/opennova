@@ -7,6 +7,7 @@
 #include <formats/bad/bad.h>
 #include <base/io/strutil.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/world/body_anim.h>
 
 #include <algorithm>
 #include <utility>
@@ -278,6 +279,39 @@ const SkeletalClips::LoadedClip *SkeletalClips::find_clip_variant(
 
 bool SkeletalClips::has_clip(const std::string &key) const {
 	return find_clip(key) != nullptr;
+}
+
+std::string SkeletalClips::slot_to_key(int slot) const {
+	const char *key = world::body_anim_adm_key(slot);
+	if (key[0] != '\0' && has_clip(key)) return key;
+	// A model whose .adm lacks the requested key still poses sensibly.
+	if (has_clip("anim_idle")) return "anim_idle";
+	if (has_clip("anim_reset")) return "anim_reset";
+	return {};
+}
+
+int SkeletalClips::clip_variant_count(const std::string &key) const {
+	const auto found = clip_index_.find(strutil::to_lower(key));
+	return found == clip_index_.end() ? 0 : static_cast<int>(found->second.size());
+}
+
+std::vector<float> SkeletalClips::clip_variant_lengths(const std::string &key) const {
+	std::vector<float> out;
+	const auto found = clip_index_.find(strutil::to_lower(key));
+	if (found == clip_index_.end()) return out;
+	out.reserve(found->second.size());
+	for (size_t index : found->second) {
+		const auto &clip = clips_[index].clip;
+		out.push_back(clip.fps > 0 && clip.frame_count > 0
+				? static_cast<float>(clip.frame_count) / static_cast<float>(clip.fps) : 0.0f);
+	}
+	return out;
+}
+
+float SkeletalClips::clip_length(const std::string &key, int variant) const {
+	const LoadedClip *c = find_clip_variant(key, variant);
+	if (c == nullptr || c->clip.fps == 0 || c->clip.frame_count == 0) return 0.0f;
+	return static_cast<float>(c->clip.frame_count) / static_cast<float>(c->clip.fps);
 }
 
 double SkeletalClips::clip_seconds_at_tick(const std::string &key,

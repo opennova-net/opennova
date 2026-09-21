@@ -37,10 +37,12 @@ std::vector<int> armory_slot_order(const std::vector<std::string> &labels);
 
 // The weight readout "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)": the band from
 // def_encumbrance_class (<33.3 LIGHT / <66.6 NORMAL / else HEAVY) names the
-// LIGHT_/NORMAL_/HEAVY_ENCUMBRANCE menu token; `menu_text` is the Menu-section
-// lookup with its fallback [orig: update_weapon_weight_display @0x565640 and
+// LIGHT_/NORMAL_/HEAVY_ENCUMBRANCE menu token; both lookups use the Menu
+// section with its fallback [orig: update_weapon_weight_display @0x565640 and
 // update_player_info_weight_and_weapon_icons @0x55f480 — sprintf
 // "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE].
-std::string loadout_weight_line(double total, const hud::GameTextLookup &menu_text);
+// Menu tokens prefer menutxt, then gameui, then the built-in fallback.
+std::string loadout_weight_line(double total, const hud::GameTextLookup &menutxt,
+		const hud::GameTextLookup &gameui);
 
 } // namespace opennova::menu

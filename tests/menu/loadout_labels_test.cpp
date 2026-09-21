@@ -74,11 +74,15 @@ int main() {
 			{ "Menu/LBS", "kg" },
 			{ "Menu/HEAVY_ENCUMBRANCE", "Schwer" },
 	});
-	CHECK(loadout_weight_line(12.34, empty) == "Total Weight 12.3 lbs (Light)");
-	CHECK(loadout_weight_line(33.3, empty) == "Total Weight 33.3 lbs (Normal)");
-	CHECK(loadout_weight_line(66.6, empty) == "Total Weight 66.6 lbs (Heavy)");
-	CHECK(loadout_weight_line(70.0, menu) == "Gesamtgewicht 70.0 kg (Schwer)");
-	CHECK(loadout_weight_line(0.0, menu) == "Gesamtgewicht 0.0 kg (Light)");
+	CHECK(loadout_weight_line(12.34, empty, empty) == "Total Weight 12.3 lbs (Light)");
+	CHECK(loadout_weight_line(33.3, empty, empty) == "Total Weight 33.3 lbs (Normal)");
+	CHECK(loadout_weight_line(66.6, empty, empty) == "Total Weight 66.6 lbs (Heavy)");
+	CHECK(loadout_weight_line(70.0, menu, empty) == "Gesamtgewicht 70.0 kg (Schwer)");
+	CHECK(loadout_weight_line(0.0, menu, empty) == "Gesamtgewicht 0.0 kg (Light)");
+
+	const auto overrides = table_of({{"Menu/TOTAL_WEIGHT", "Override"}, {"Menu/LBS", ""}});
+	CHECK(loadout_weight_line(70.0, empty, menu) == "Gesamtgewicht 70.0 kg (Schwer)");
+	CHECK(loadout_weight_line(70.0, overrides, menu) == "Override 70.0  (Schwer)");
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

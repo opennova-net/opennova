@@ -42,7 +42,15 @@ std::vector<int> armory_slot_order(const std::vector<std::string> &labels) {
 	return order;
 }
 
-std::string loadout_weight_line(double total, const hud::GameTextLookup &menu_text) {
+std::string loadout_weight_line(double total, const hud::GameTextLookup &menutxt,
+		const hud::GameTextLookup &gameui) {
+	// The menu-token fold: menutxt's Menu section, then gameui's, else the
+	// fallback [orig: TextResource_GetStringWithFallback(resource, "Menu", key)
+	// @0x562ee0 against the menu resource].
+	const hud::GameTextLookup menu_text =
+			[&menutxt, &gameui](const char *section, const char *key, const char *fallback) {
+				return menutxt(section, key, gameui(section, key, fallback).c_str());
+			};
 	std::string encumbrance;
 	switch (def_encumbrance_class(total)) {
 		case DEF_ENCUMBRANCE_HEAVY:

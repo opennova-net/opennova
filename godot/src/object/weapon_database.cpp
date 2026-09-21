@@ -218,16 +218,8 @@ PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_la
 
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 		const Ref<RtxtStringFile> &p_gameui) {
-	// The menu-token fold: menutxt's Menu section, then gameui's, else the
-	// fallback [orig: TextResource_GetStringWithFallback(resource, "Menu", key)
-	// @0x562ee0 against the menu resource].
-	const opennova::hud::GameTextLookup menutxt = game_text_lookup(p_menutxt);
-	const opennova::hud::GameTextLookup gameui = game_text_lookup(p_gameui);
-	const opennova::hud::GameTextLookup menu_text =
-			[&menutxt, &gameui](const char *section, const char *key, const char *fallback) {
-				return menutxt(section, key, gameui(section, key, fallback).c_str());
-			};
-	return String::utf8(opennova::menu::loadout_weight_line(p_total, menu_text).c_str());
+	return String::utf8(opennova::menu::loadout_weight_line(p_total,
+			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)).c_str());
 }
 
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,

@@ -12,7 +12,6 @@
 
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
 #include <runtime/anim/skeletal_pose.h>
-#include <runtime/world/body_anim.h>
 
 #include <utility>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -143,21 +142,7 @@ bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 }
 
 String SkeletalAnim::slot_to_key(int p_slot) const {
-	const char *key = opennova::world::body_anim_adm_key(p_slot);
-	if (key[0] != '\0') {
-		const String s(key);
-		if (find_clip(s) != nullptr) {
-			return s;
-		}
-	}
-	// Fallbacks so a model whose .adm lacks the requested key still poses sensibly.
-	if (find_clip("anim_idle") != nullptr) {
-		return String("anim_idle");
-	}
-	if (find_clip("anim_reset") != nullptr) {
-		return String("anim_reset");
-	}
-	return String();
+	return String(rig().slot_to_key(p_slot).c_str());
 }
 
 PackedStringArray SkeletalAnim::get_clip_keys() const {
@@ -181,24 +166,12 @@ Array SkeletalAnim::get_skeleton_bones() const {
 }
 
 int SkeletalAnim::get_clip_variant_count(const String &p_key) const {
-	int count = 0;
-	for (const LoadedClip &c : rig().clips()) {
-		if (String(c.key.c_str()).nocasecmp_to(p_key) == 0) {
-			++count;
-		}
-	}
-	return count;
+	return rig().clip_variant_count(p_key.utf8().get_data());
 }
 
 PackedFloat32Array SkeletalAnim::get_clip_variant_lengths(const String &p_key) const {
 	PackedFloat32Array out;
-	for (const LoadedClip &c : rig().clips()) {
-		if (String(c.key.c_str()).nocasecmp_to(p_key) == 0) {
-			out.push_back(c.clip.fps > 0 && c.clip.frame_count > 0
-					? static_cast<float>(c.clip.frame_count) / static_cast<float>(c.clip.fps)
-					: 0.0f);
-		}
-	}
+	for (float seconds : rig().clip_variant_lengths(p_key.utf8().get_data())) out.push_back(seconds);
 	return out;
 }
 
@@ -208,22 +181,16 @@ int SkeletalAnim::get_clip_frame_count(const String &p_key, int p_variant) const
 }
 
 double SkeletalAnim::get_clip_phase_seconds(const String &p_key, int p_ticks,
-                                              int p_variant) const {
-	const LoadedClip *c = find_clip_variant(p_key, p_variant);
-	return c ? c->clip.playback().seconds_at(p_ticks) : 0.0;
+		int p_variant) const {
+	return rig().clip_seconds_at_tick(p_key.utf8().get_data(), p_ticks, p_variant);
 }
 
 float SkeletalAnim::get_clip_fps(const String &p_key, int p_variant) const {
-	const LoadedClip *c = find_clip_variant(p_key, p_variant);
-	return c != nullptr ? static_cast<float>(c->clip.fps) : 0.0f;
+	return rig().clip_fps(p_key.utf8().get_data(), p_variant);
 }
 
 float SkeletalAnim::get_clip_length(const String &p_key, int p_variant) const {
-	const LoadedClip *c = find_clip_variant(p_key, p_variant);
-	if (c == nullptr || c->clip.fps == 0 || c->clip.frame_count == 0) {
-		return 0.0f;
-	}
-	return static_cast<float>(c->clip.frame_count) / static_cast<float>(c->clip.fps);
+	return rig().clip_length(p_key.utf8().get_data(), p_variant);
 }
 
 bool SkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const {

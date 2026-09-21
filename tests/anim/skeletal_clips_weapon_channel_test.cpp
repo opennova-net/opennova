@@ -223,6 +223,28 @@ int main() {
     TEST_EXPECT(clips.has_clip("anim_knife"));
     TEST_EXPECT(!clips.has_clip("anim_reload"));
     TEST_EXPECT(clips.fk_valid());
+    // The public presenter queries share the loaded ring and fallback rules.
+    TEST_EXPECT(clips.slot_to_key(0) == "anim_reset");
+    TEST_EXPECT(clips.slot_to_key(1) == "anim_idle");
+    TEST_EXPECT(clips.slot_to_key(6) == "anim_idle");
+    TEST_EXPECT(clips.slot_to_key(-1) == "anim_idle");
+    SkeletalClips reset_only;
+    TEST_EXPECT(reset_only.load_from_files(&index_assets, "reset.bad", {{"anim_reset", "reset.bad"}}));
+    TEST_EXPECT(reset_only.slot_to_key(1) == "anim_reset");
+    SkeletalClips ring;
+    TEST_EXPECT(ring.load_from_files(&index_assets, "reset.bad",
+            {{"anim_idle", "reset.bad"}, {"ANIM_IDLE", "twist.bad"}, {"other", "reset.bad"}}));
+    TEST_EXPECT(ring.clip_variant_count("AnIm_IdLe") == 2);
+    TEST_EXPECT(ring.clip_variant_count("absent") == 0);
+    const auto lengths = ring.clip_variant_lengths("ANIM_IDLE");
+    TEST_EXPECT(lengths.size() == 2 && lengths[0] > 0.0f && lengths[1] > 0.0f);
+    TEST_EXPECT(ring.clip_length("anim_idle", -1) == lengths[0]);
+    TEST_EXPECT(ring.clip_length("anim_idle", 3) == lengths[1]);
+    TEST_EXPECT(ring.clip_length("absent") == 0.0f);
+    TEST_EXPECT(ring.clip_variant_lengths("absent").empty());
+    ring.clear();
+    TEST_EXPECT(ring.slot_to_key(1).empty() && ring.clip_variant_count("anim_idle") == 0);
+    TEST_EXPECT(ring.clip_length("anim_idle") == 0.0f);
     const std::vector<int> &rig_parents = clips.parents();
     TEST_EXPECT(rig_parents.size() > static_cast<size_t>(kBodyBone));
 
