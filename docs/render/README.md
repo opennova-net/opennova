@@ -39,13 +39,10 @@ commit. A thin GUT leg (`godot/tests/render_shader_cache_handoff_test.gd`)
 pins the GDScript→native binding, while
 `godot/tests/shader_resource_contract_test.gd` pins the complete resource
 manifest and rejects runtime topology switches or source-generation paths.
-`godot/tests/object_shader_resource_hashes.golden.json` pins a normalized
-SHA-256 of each of the 132 checked-in object wrappers (128 generated + 4
-auxiliary) plus its transitive include closure, preserving the former
-composed-source regression sensitivity. A deliberate, witnessed shader change
-re-dumps by running `godot/tests/tools/shader_hashes_regen.gd` alone (its
-header carries the command line); like the state-vector dump, that run
-rewrites the golden and intentionally fails.
+The former transitive-source hash golden over the 132 object wrappers was
+retired on 2026-09-21 with the other textual source pins: a shader change is
+reviewed as a diff and validated by loading every resource
+(`shader_resource_validation_test.gd`) and by the swatch A/B below.
 
 **T2 — swatch A/B (local, mandatory per REN slice).**
 The `render_swatch` probe (`godot/probes/render/render_swatch_probe.gd`, run

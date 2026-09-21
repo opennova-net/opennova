@@ -848,8 +848,7 @@ stage-3 dp3 input to the water module's per-frame noise texture at
 the full selector decode (terrain-re.md underwater
 section — detail2-less splat maps faithfully get no modulation; the
 `saturate(4·t3²)·t0.a` PSShadow pair serves only the unported ps.1.1 tiers).
-ctest `terrain_frame_compiler` + GUT `terrain_shader_contract_test` /
-`terrain_underwater_modulation_test`.
+ctest `terrain_frame_compiler` + GUT `terrain_underwater_modulation_test`.
 A 2026-07-14 coordinate-basis audit also minted and closed D-TERRAIN-10: the
 reimpl now preserves EnvFile's direct retail getter tuple `g=(g0,g1,g2)` and
 reproduces PolyTrn's D3DCOLOR packing as GPU RGB `(g2,g0,g1)`, reimpl `(z,x,y)`.

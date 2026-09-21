@@ -3,10 +3,12 @@
 The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
 and 39 `.gdshaderinc` implementation files (193 resources total). The executable
 contract is `godot/shaders/provenance.json`, validated by
-`godot/tests/shader_resource_contract_test.gd` and
-`godot/tests/shader_provenance_pins_test.gd` (the textual contract) and by
 `godot/tests/shader_resource_validation_test.gd` (every resource loaded through
-Godot).
+Godot). The textual pins over the shader and C++ sources (the former
+`shader_resource_contract_test.gd`, `shader_provenance_pins_test.gd`,
+`foliage_shader_contract_test.gd`, `terrain_shader_contract_test.gd` and the
+transitive-source hash golden) were retired on 2026-09-21: a test asserts
+behavior through a public seam, never the text of the code.
 
 Every resource must match exactly one provenance family, every include must
 resolve inside `res://shaders` without a cycle, every include must be reachable
