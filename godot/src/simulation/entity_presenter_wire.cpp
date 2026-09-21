@@ -310,6 +310,11 @@ void EntityPresenter::register_wire_held_weapon(int p_handle, ObjectModel *p_nod
 
 void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 		int p_stride, int64_t p_layout_revision) {
+	present_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
+}
+
+void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
+		int p_stride, int64_t p_layout_revision) {
 	Simulation *s = sim();
 	Node3D *parent = container();
 	if (s == nullptr || placer_.is_null() || parent == nullptr ||
@@ -540,7 +545,7 @@ int EntityPresenter::consume_present_logic_tick_delta() {
 }
 
 bool EntityPresenter::wire_node_matches_row(ObjectModel *p_node,
-		const PackedFloat32Array &p_snap, int p_base, int p_type_id) const {
+		PresentRowsView p_snap, int p_base, int p_type_id) const {
 	const float *snap = p_snap.ptr();
 	const Ref<EntityRef> ref = p_node->get_entity_ref();
 	if (ref.is_null()) {
@@ -728,7 +733,7 @@ void EntityPresenter::reset_wire_plan_state() {
 	wire_plan_dirty_ = true;
 }
 
-void EntityPresenter::present_wire_rows(const PackedFloat32Array &snap,
+void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		int stride, int tick_delta) {
 	const int64_t size = snap.size();
 	for (WireRow &row : wire_rows_) {
@@ -746,7 +751,7 @@ void EntityPresenter::present_wire_rows(const PackedFloat32Array &snap,
 }
 
 void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
-		const PackedFloat32Array &snap, int tick_delta) {
+		PresentRowsView snap, int tick_delta) {
 	static_assert(kCtrlLegFieldCount == WireRow::kCtrlCacheCount,
 			"ctrl leg field table must match the row cache size");
 	const float *p = snap.ptr();
@@ -805,7 +810,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const Basis entity_basis = bms_to_godot_basis(rot);
 	// aim_root_basis is data-gated internally (PF_AIM_OVERLAY_VALID falls back
 	// to the entity rotation).
-	const Basis root_basis = aim_root_basis(snap, base, entity_basis);
+	const Basis root_basis = aim_root_basis_native(snap, base, entity_basis);
 	const Transform3D next_transform =
 			model->compose_entity_transform(root_basis, pos);
 	if (model->get_transform() != next_transform) {
@@ -933,7 +938,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 // prefix never back-fires as a burst. Runs for culled rows too: the sounds
 // are entity-update work, not draw work.
 void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
-		const PackedFloat32Array &snap) {
+		PresentRowsView snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
 	// The replication seeds a retargeted clip at phase 0 and advances once per
@@ -979,18 +984,18 @@ void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 // objects. The ACTIVE fields are publication ownership, so an owned zero phase
 // must still be written and a suppressed channel must release its prior value.
 void EntityPresenter::apply_wire_procedural_part(const WireRow &row,
-		ObjectModel *model, const PackedFloat32Array &snap) {
+		ObjectModel *model, PresentRowsView snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
 	if (wfield_i(p, base, Simulation::PF_ACTIVE1) > 0) {
 		model->set_part_phase(1,
-				Simulation::decode_present_part_anim_phase(snap, base, 1));
+				opennova::world::decode_present_part_anim_phase(snap, base, 1));
 	} else {
 		model->clear_part_phase(1);
 	}
 	if (wfield_i(p, base, Simulation::PF_ACTIVE2) > 0) {
 		model->set_part_phase(2,
-				Simulation::decode_present_part_anim_phase(snap, base, 2));
+				opennova::world::decode_present_part_anim_phase(snap, base, 2));
 	} else {
 		model->clear_part_phase(2);
 	}
@@ -1001,7 +1006,7 @@ void EntityPresenter::apply_wire_procedural_part(const WireRow &row,
 // state is unchanged; host-loopback rows (remote_request 0) keep per-tick
 // dispatch — their playhead rides play_body_clip_at's phase.
 void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
-		const PackedFloat32Array &snap, int tick_delta) {
+		PresentRowsView snap, int tick_delta) {
 	const float *p = snap.ptr();
 	const int base = row.base;
 	const int32_t anim_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
@@ -1130,7 +1135,7 @@ void EntityPresenter::store_wire_remote_body_cache(const WireRow &row) {
 // [orig: BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99; matrix
 //  @ 0x4b2180..0x4b22f8; gate Entity_CanFireWeapon @ 0x4dcb10]
 void EntityPresenter::update_wire_held_weapon(WireRow &row, Node3D *node,
-		const PackedFloat32Array &snap, bool body_visible) {
+		PresentRowsView snap, bool body_visible) {
 	const float *p = snap.ptr();
 	const int base = row.base;
 	const int32_t adm =

@@ -201,6 +201,7 @@ void Simulation::reset_world() {
 	present_.last_snapshot_us = 0;
 	present_.last_entity_count = 0;
 	reset_occlusion_apply_baseline();
+	present_.snapshot.reset();
 	present_.layout.clear();
 	++present_.layout_revision;
 	// The retained per-load shell inputs are mission-scoped: drop them with

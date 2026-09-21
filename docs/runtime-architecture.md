@@ -155,6 +155,26 @@ effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through
 `inmatch::Session::step_once`; it is not a second loop.
 
+`MissionRoot` leases one immutable native `SimulationPresentSnapshot` for
+both placed and wire walks: float rows, door side table, and the exact layout
+revision travel together. `Simulation` reuses its storage only when no reader
+holds the previous snapshot. A nested callback that requests another snapshot
+gets fresh storage, so the outer walk remains valid; reset also leaves an
+outstanding lease valid. Row identity comparison reuses storage and compares
+fields, not a hash. Only the bound `get_present_snapshot()` /
+`get_present_door_phases()` script/tooling boundary copies into Godot packed
+arrays. Both paths share the same native builders and consume-once joiner
+animation pulses.
+
+This lease is host implementation, not a reconstructed retail object. Retail
+walks its native pool base, used count and stride directly
+`[orig: collect_visible_entities_for_terrain @ 0x5C8C60]`
+(`@ 0x5C8CAA`, `@ 0x5C8CB2`, `@ 0x5C8CB6`). The change removes the extra
+packed-array allocation/copy between two native consumers. See
+[03TR frame costs](perf/03tr-frame-costs.md) for measurement and the real
+`MissionRoot` callback-reentrancy regression. An anchored entry comment at
+`0x5C8C60` records this traversal and the host-code boundary in the saved IDB.
+
 `GameWorld`'s static leg table (`kFrameLegs` in `godot/src/world/game_world_frame.cpp`, its literal order pinned by `frame_leg_names()`) owns the concrete Godot device order. It deliberately names
 the renderer, audio, particle, environment, and presentation operations we
 ship. We do not add a generic renderer interface for a hypothetical backend.

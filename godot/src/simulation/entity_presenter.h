@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <runtime/world/entity_pose.h>
+#include <runtime/world/present_rows.h>
 #include <runtime/world/minefield.h>
 
 #include "object/entity_index.h"
@@ -93,6 +94,7 @@ class Simulation;
 // Stop -> Play boundary (reset_wire_runtime_state) resets the passes' runtime
 // state with the wire registry.
 class EntityPresenter : public Node3D {
+	using PresentRowsView = opennova::world::PresentRowsView;
 	GDCLASS(EntityPresenter, Node3D)
 
 public:
@@ -152,9 +154,11 @@ public:
 	void present_snapshot(const PackedFloat32Array &snap, int stride,
 			int64_t layout_revision,
 			const PackedInt32Array &door_phases = PackedInt32Array());
-	PackedInt64Array profile_present_snapshot(const PackedFloat32Array &snap,
+	void present_rows(PresentRowsView snap, int stride, int64_t layout_revision,
+			const int32_t *door_phases, int64_t door_phase_count);
+	PackedInt64Array profile_present_snapshot(PresentRowsView snap,
 			int stride, int64_t layout_revision,
-			const PackedInt32Array &door_phases = PackedInt32Array());
+			const int32_t *door_phases, int64_t door_phase_count);
 
 	Ref<MissionPresentStats> get_stats_record() const;
 
@@ -174,6 +178,8 @@ public:
 	void set_spectator_camera(Camera3D *p_camera);
 
 	void present_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+			int64_t p_layout_revision);
+	void present_wire_rows_view(PresentRowsView p_snap, int p_stride,
 			int64_t p_layout_revision);
 
 	// The occlusion frame's render-gate verdict for one wire row (the
@@ -325,7 +331,8 @@ public:
 			const Basis &fallback);
 	static void aim_apply(Object *node, const PackedFloat32Array &snap, int base,
 			bool drive_root_basis);
-	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
+	static Basis aim_root_basis_native(PresentRowsView snap, int base, const Basis &fallback);
+	static void aim_apply_valid(Object *node, PresentRowsView snap,
 			int base, bool drive_root_basis);
 
 	// Third-person held-weapon placement — the ONE home (the witnessed
@@ -528,13 +535,13 @@ private:
 	// All four semantic CTRL writers over one typed model (the wire walk's
 	// per-row bundle).
 	static int wire_controls_apply(ObjectModel *model,
-			const PackedFloat32Array &snap, int base);
+			PresentRowsView snap, int base);
 
 	// --- The placed walk (entity_presenter.cpp) ---
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
-	void present_snapshot_impl(const PackedFloat32Array &snap, int stride,
-			int64_t layout_revision, const PackedInt32Array &door_phases,
+	void present_snapshot_impl(PresentRowsView snap, int stride,
+			int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
 			MissionFrameProfile *p_profile);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
@@ -552,18 +559,18 @@ private:
 	void append_wire_deferred(Object *node);
 	bool wire_plan_is_current(int64_t snapshot_size, int stride,
 			int64_t layout_revision, int64_t index_generation, int local_handle);
-	void present_wire_rows(const PackedFloat32Array &snap, int stride,
+	void present_wire_rows(PresentRowsView snap, int stride,
 			int tick_delta);
 	void present_one_wire_row(WireRow &row, ObjectModel *model,
-			const PackedFloat32Array &snap, int tick_delta);
-	void present_wire_row_body_sounds(WireRow &row, const PackedFloat32Array &snap);
+			PresentRowsView snap, int tick_delta);
+	void present_wire_row_body_sounds(WireRow &row, PresentRowsView snap);
 	void apply_wire_procedural_part(const WireRow &row, ObjectModel *model,
-			const PackedFloat32Array &snap);
+			PresentRowsView snap);
 	void apply_wire_body_anim(WireRow &row, ObjectModel *model,
-			const PackedFloat32Array &snap, int tick_delta);
+			PresentRowsView snap, int tick_delta);
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
-			const PackedFloat32Array &snap, bool body_visible);
+			PresentRowsView snap, bool body_visible);
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
 	void release_wire_handle(int handle);
 	void reset_wire_plan_state();
@@ -571,7 +578,7 @@ private:
 	void free_held_weapon(int p_handle);
 	void apply_lighting_context(int p_handle);
 	bool wire_node_matches_row(ObjectModel *p_node,
-			const PackedFloat32Array &p_snap, int p_base, int p_type_id) const;
+			PresentRowsView p_snap, int p_base, int p_type_id) const;
 	int consume_present_logic_tick_delta();
 	void frame_spectator_camera();
 	// Builds/frees the third-person gun when a body's ADM changes.

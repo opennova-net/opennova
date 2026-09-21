@@ -11,7 +11,20 @@
 // live attitude.
 #pragma once
 
+#include <cstdint>
+#include <cstring>
+#include <runtime/world/ai.h>
+
 namespace opennova::world {
+
+// Non-owning read of the existing PF_* contract. Native and script adapters
+// share these consumers without converting the native buffer to a Variant.
+struct PresentRowsView {
+	const float *values = nullptr;
+	int64_t count = 0;
+	const float *ptr() const { return values; }
+	int64_t size() const { return count; }
+};
 
 enum PresentField : int {
 	PF_KIND = 0, // mission ItemType (3 = Organic), -1 if none
@@ -247,5 +260,22 @@ enum PresentField : int {
     PF_PARACHUTE_DEPLOYED,
 	PF_STRIDE
 };
+
+inline int32_t decode_present_part_anim_phase(
+		PresentRowsView snapshot, int base, int channel) {
+	if (channel < 1 || channel > 2 || base < 0) return 0;
+	const int phase_field = PF_PHASE1 + (channel - 1) * 2;
+	const int active_field = PF_ACTIVE1 + (channel - 1) * 2;
+	if (static_cast<int64_t>(base) + active_field >= snapshot.size()) return 0;
+	const float *p = snapshot.ptr();
+	const int32_t high_code = static_cast<int32_t>(p[base + active_field]);
+	if (!part_anim_phase_active(high_code)) return 0;
+	const uint32_t low = static_cast<uint32_t>(
+			static_cast<int32_t>(p[base + phase_field])) & 0xFFFFu;
+	const uint32_t bits = (static_cast<uint32_t>(high_code - 1) << 16) | low;
+	int32_t value;
+	std::memcpy(&value, &bits, sizeof(value));
+	return value;
+}
 
 } // namespace opennova::world

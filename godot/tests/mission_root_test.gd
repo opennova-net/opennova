@@ -694,3 +694,36 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	for _i in range(count):
 		ticks += _advance_ticks(rt, step)
 	return { "ticks": ticks, "pos": rt.get_sim().get_entity_position(0) }
+
+
+func test_native_present_snapshot_survives_a_nested_script_snapshot_read() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var second_ref: EntityRef = w.mission.add_entity(
+			MissionData.KIND_ORGANIC, 0, Vector3(20, 0, 0), Vector3.ZERO)
+	var second := ObjectModel.new()
+	w.container.add_child(second)
+	second.entity_ref = second_ref
+	w.placer.placed_models.append(second)
+	var rt := MissionRoot.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
+	rt.play()
+	assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1)
+	var sim := rt.get_sim()
+	var expected := second.position
+	var reads := [0]
+	var first: ObjectModel = w.model
+	first.visibility_changed.connect(func() -> void:
+		if not first.visible or reads[0] != 0:
+			return
+		reads[0] += 1
+		assert_eq(sim.debug_set_entity_position(1, Vector3(90, 20, 3)), OK)
+		var nested := sim.get_present_snapshot()
+		assert_gt(nested.size(), 0, "a callback can request a fresh script snapshot")
+	)
+	first.visible = false
+	assert_eq(_advance_ticks(rt, 0.0), 0)
+	assert_eq(reads[0], 1, "the callback ran inside the placed walk")
+	assert_eq(second.position, expected, "later rows still read the outer immutable frame")
+	assert_eq(_advance_ticks(rt, 0.0), 0)
+	assert_eq(second.position, sim.get_entity_position(1), "the next frame reads the newer state")

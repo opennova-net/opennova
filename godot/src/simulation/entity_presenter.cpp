@@ -34,61 +34,50 @@
 // entity_presenter_wire.cpp.
 
 using namespace godot;
+using opennova::world::PresentRowsView;
 
 namespace {
 
-// CTRL register names + presentation-owner tags (String VALUES handed to the
-// model's owner-aware CTRL store — not dispatch names; the dispatch itself is
-// direct C++ calls on ObjectModel).
-struct CtrlNames {
-	String eweap_gunyaw = String("EWEAP_GUNYAW");
-	String eweap_gunpitch = String("EWEAP_GUNPITCH");
-	String weap_spin = String("WEAP_SPIN");
-	String vehicle_steering = String("VEHICLE_STEERING");
-	String vehicle_speed = String("VEHICLE_SPEED");
-	// The part-animation registers the same cveh callback publishes (catalog
-	// ordinals 46 / 47 / 60, engine/formats/threedi/threedi_ctrl_catalog.h).
-	String helo_rotor = String("HELO_ROTOR");
-	String helo_tailrotor = String("HELO_TAILROTOR");
-	String vehicle_wheels = String("VEHICLE_WHEELS");
-	String vehicle_tires[14] = { String("VEHICLE_TIRE00"), String("VEHICLE_TIRE01"),
-		String("VEHICLE_TIRE02"), String("VEHICLE_TIRE03"), String("VEHICLE_TIRE04"),
-		String("VEHICLE_TIRE05"), String("VEHICLE_TIRE06"), String("VEHICLE_TIRE07"),
-		String("VEHICLE_TIRE08"), String("VEHICLE_TIRE09"), String("VEHICLE_TIRE10"),
-		String("VEHICLE_TIRE11"), String("VEHICLE_TIRE12"), String("VEHICLE_TIRE13") };
-	String helo_gear = String("HELO_GEAR");
-	String vehicle_tracks[4] = { String("VEHICLE_WHEELS00"), String("VEHICLE_WHEELS01"),
-		String("VEHICLE_WHEELS02"), String("VEHICLE_WHEELS03") };
-	String vehicle_gun_yaw = String("VEHICLE_GUNYAW");
-	String vehicle_gun_pitch = String("VEHICLE_GUNPITCH");
-	String helo_gun_yaw = String("HELO_GUNYAW");
-	String helo_gun_pitch = String("HELO_GUNPITCH");
-	String tex_team = String("TEX_TEAM");
-	String team_swing = String("TEAMSWING");
-	String lfp_camp_percent = String("LFP_CAMPPERCENT");
-	String heat_glow = String("HEAT_GLOW");
-	String owner_emplaced = String("present:emplaced");
-	String owner_vehicle_motion = String("present:vehicle_motion");
-	String owner_sector_team = String("present:sector_team");
-	String owner_zone = String("present:zone");
-	String owner_world_heat = String("present:world_heat");
-	String owner_doors = String("present:doors");
-	String doors[30];
-	// The org0 skin bone-callback's DEATH register (catalog ordinal 6, the
-	// corpse fade) the organic rows publish from PF_DEATH_CTRL.
-	String owner_death = String("present:death");
-	String death;
-	CtrlNames() {
-		for (int i = 0; i < 30; ++i)
-			doors[i] = opennova::threedi::threedi_ctrl_register_name(
-					opennova::threedi::THREEDI_CTRL_DOOR_00 + i);
-		death = opennova::threedi::threedi_ctrl_register_name(
-				opennova::threedi::THREEDI_CTRL_DEATH);
+// Pre-resolved catalog ordinals and native lifecycle tags. See the CTRL
+// publication witness in docs/threedi/3di-gp-format-re.md.
+struct CtrlRegisters {
+	static constexpr int eweap_gunyaw = opennova::threedi::THREEDI_CTRL_EWEAP_GUNYAW;
+	static constexpr int eweap_gunpitch = opennova::threedi::THREEDI_CTRL_EWEAP_GUNPITCH;
+	static constexpr int weap_spin = opennova::threedi::THREEDI_CTRL_WEAP_SPIN;
+	static constexpr int vehicle_steering = opennova::threedi::THREEDI_CTRL_VEHICLE_STEERING;
+	static constexpr int vehicle_speed = opennova::threedi::THREEDI_CTRL_VEHICLE_SPEED;
+	static constexpr int helo_rotor = opennova::threedi::THREEDI_CTRL_HELO_ROTOR;
+	static constexpr int helo_tailrotor = opennova::threedi::THREEDI_CTRL_HELO_TAILROTOR;
+	static constexpr int vehicle_wheels = opennova::threedi::THREEDI_CTRL_VEHICLE_WHEELS;
+	static constexpr int helo_gear = opennova::threedi::THREEDI_CTRL_HELO_GEAR;
+	static constexpr int vehicle_gun_yaw = opennova::threedi::THREEDI_CTRL_VEHICLE_GUNYAW;
+	static constexpr int vehicle_gun_pitch = opennova::threedi::THREEDI_CTRL_VEHICLE_GUNPITCH;
+	static constexpr int helo_gun_yaw = opennova::threedi::THREEDI_CTRL_HELO_GUNYAW;
+	static constexpr int helo_gun_pitch = opennova::threedi::THREEDI_CTRL_HELO_GUNPITCH;
+	static constexpr int tex_team = opennova::threedi::THREEDI_CTRL_TEX_TEAM;
+	static constexpr int team_swing = opennova::threedi::THREEDI_CTRL_TEAMSWING;
+	static constexpr int lfp_camp_percent = opennova::threedi::THREEDI_CTRL_LFP_CAMPPERCENT;
+	static constexpr int heat_glow = opennova::threedi::THREEDI_CTRL_HEAT_GLOW;
+	const std::string owner_emplaced = "present:emplaced";
+	const std::string owner_vehicle_motion = "present:vehicle_motion";
+	const std::string owner_sector_team = "present:sector_team";
+	const std::string owner_zone = "present:zone";
+	const std::string owner_world_heat = "present:world_heat";
+	const std::string owner_doors = "present:doors";
+	const std::string owner_death = "present:death";
+	int vehicle_tires[14];
+	int vehicle_tracks[4];
+	int doors[30];
+	static constexpr int death = opennova::threedi::THREEDI_CTRL_DEATH;
+	CtrlRegisters() {
+		for (int i = 0; i < 14; ++i) vehicle_tires[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_TIRE00 + i;
+		for (int i = 0; i < 4; ++i) vehicle_tracks[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_WHEELS00 + i;
+		for (int i = 0; i < 30; ++i) doors[i] = opennova::threedi::THREEDI_CTRL_DOOR_00 + i;
 	}
 };
 
-const CtrlNames &names() {
-	static CtrlNames n;
+const CtrlRegisters &names() {
+	static const CtrlRegisters n;
 	return n;
 }
 
@@ -96,14 +85,14 @@ inline int32_t field_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
 }
 
-void set_owned_ctrl(ObjectModel *model, const String &owner,
-		const String &reg, int32_t value) {
-	model->set_ctrl_override(owner, reg, value);
+void set_owned_ctrl(ObjectModel *model, const std::string &owner,
+		int reg, int32_t value) {
+	model->set_ctrl_override_native(owner, reg, value);
 }
 
-void clear_owned_ctrl(ObjectModel *model, const String &owner,
-		const String &reg) {
-	model->clear_ctrl_override(owner, reg);
+void clear_owned_ctrl(ObjectModel *model, const std::string &owner,
+		int reg) {
+	model->clear_ctrl_override_native(owner, reg);
 }
 
 constexpr int AIM_PAYLOAD_FLOATS =
@@ -626,6 +615,11 @@ Object *EntityPresenter::find_skeleton(Object *root) {
 
 Basis EntityPresenter::aim_root_basis(const PackedFloat32Array &snap, int base,
 		const Basis &fallback) {
+	return aim_root_basis_native({snap.ptr(), snap.size()}, base, fallback);
+}
+
+Basis EntityPresenter::aim_root_basis_native(PresentRowsView snap, int base,
+		const Basis &fallback) {
 	const float *p = snap.ptr();
 	if (field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID) == 0) {
 		return fallback;
@@ -651,17 +645,17 @@ void EntityPresenter::aim_apply(Object *node, const PackedFloat32Array &snap,
 		model->clear_aim_overlay();
 		return;
 	}
-	aim_apply_valid(model, snap, base, drive_root_basis);
+	aim_apply_valid(model, {snap.ptr(), snap.size()}, base, drive_root_basis);
 }
 
 void EntityPresenter::aim_apply_valid(Object *node,
-		const PackedFloat32Array &snap, int base, bool drive_root_basis) {
+		PresentRowsView snap, int base, bool drive_root_basis) {
 	ObjectModel *model = Object::cast_to<ObjectModel>(node);
 	if (model == nullptr) {
 		return;
 	}
 	const Basis current_basis = model->get_basis();
-	const Basis body_basis = aim_root_basis(snap, base, current_basis);
+	const Basis body_basis = aim_root_basis_native(snap, base, current_basis);
 	if (drive_root_basis && current_basis != body_basis) {
 		model->set_basis(body_basis);
 	}
@@ -686,9 +680,9 @@ void vehicle_motion_clear_typed(ObjectModel *model);
 void zone_team_clear_typed(ObjectModel *model);
 void world_heat_clear_typed(ObjectModel *model);
 
-int emplaced_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+int emplaced_apply_typed(ObjectModel *model, PresentRowsView snap,
 		int base, bool clear_when_invalid) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, Simulation::PF_EMPLACED_CONTROLS_VALID) == 1) {
 		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw,
@@ -708,7 +702,7 @@ int emplaced_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
 }
 
 void emplaced_clear_typed(ObjectModel *model) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw);
 	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch);
 	clear_owned_ctrl(model, n.owner_emplaced, n.weap_spin);
@@ -731,15 +725,15 @@ void focal_sway_apply_typed(ObjectModel *model, const float *p, int base) {
 }
 
 int vehicle_motion_apply_typed(ObjectModel *model,
-		const PackedFloat32Array &snap, int base) {
+		PresentRowsView snap, int base) {
 	using namespace opennova::world;
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	const float *p = snap.ptr();
 	const int mask = field_i(p, base, Simulation::PF_VEHICLE_MOTION_VALID) == 1
 			? field_i(p, base, Simulation::PF_VEHICLE_CTRL_MASK)
 			: 0;
 	int writes = 0;
-	const auto apply = [&](const String &name, int flag, int field) {
+	const auto apply = [&](int name, int flag, int field) {
 		if ((mask & flag) != 0) {
 			set_owned_ctrl(model, n.owner_vehicle_motion, name, field_i(p, base, field));
 			++writes;
@@ -766,16 +760,16 @@ int vehicle_motion_apply_typed(ObjectModel *model,
 }
 
 void vehicle_motion_clear_typed(ObjectModel *model) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_gear);
-	for (const String &tire : n.vehicle_tires)
+	for (int tire : n.vehicle_tires)
 		clear_owned_ctrl(model, n.owner_vehicle_motion, tire);
-	for (const String &track : n.vehicle_tracks)
+	for (int track : n.vehicle_tracks)
 		clear_owned_ctrl(model, n.owner_vehicle_motion, track);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_gun_yaw);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_gun_pitch);
@@ -783,9 +777,9 @@ void vehicle_motion_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_gun_pitch);
 }
 
-int zone_team_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+int zone_team_apply_typed(ObjectModel *model, PresentRowsView snap,
 		int base) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	const float *p = snap.ptr();
 	int writes = 0;
 	if (field_i(p, base, Simulation::PF_TEX_TEAM_VALID) == 1) {
@@ -818,15 +812,15 @@ int zone_team_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
 }
 
 void zone_team_clear_typed(ObjectModel *model) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	clear_owned_ctrl(model, n.owner_sector_team, n.tex_team);
 	clear_owned_ctrl(model, n.owner_zone, n.team_swing);
 	clear_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent);
 }
 
-int world_heat_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+int world_heat_apply_typed(ObjectModel *model, PresentRowsView snap,
 		int base) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1) {
 		// The valid carrier-attachment scope owns cold zero too.
@@ -841,14 +835,14 @@ int world_heat_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
 }
 
 void world_heat_clear_typed(ObjectModel *model) {
-	const CtrlNames &n = names();
+	const CtrlRegisters &n = names();
 	clear_owned_ctrl(model, n.owner_world_heat, n.heat_glow);
 }
 
 } // namespace
 
 int EntityPresenter::wire_controls_apply(ObjectModel *model,
-		const PackedFloat32Array &snap, int base) {
+		PresentRowsView snap, int base) {
 	int writes = 0;
 	writes += emplaced_apply_typed(model, snap, base, true);
 	writes += vehicle_motion_apply_typed(model, snap, base);
@@ -862,7 +856,7 @@ int EntityPresenter::emplaced_apply(Object *node,
 		const PackedFloat32Array &snap, int base, bool clear_when_invalid) {
 	ObjectModel *model = Object::cast_to<ObjectModel>(node);
 	return model != nullptr
-			? emplaced_apply_typed(model, snap, base, clear_when_invalid)
+			? emplaced_apply_typed(model, {snap.ptr(), snap.size()}, base, clear_when_invalid)
 			: 0;
 }
 
@@ -870,14 +864,15 @@ int EntityPresenter::emplaced_apply(Object *node,
 
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
 	model = destruction_->visual_model(model);
-	static const String owner("present:destruction");
-	static const String registers[] = {"OBJECT_DESTROY", "OBJECT_DESTROY01", "OBJECT_DESTROY02",
-			"OBJECT_DESTROY03", "OBJECT_DESTROY04", "OBJECT_DESTROY05"};
+	static const std::string owner("present:destruction");
+	// Preserve publication before later culling and owner-scoped zero releases.
+	// Retail's direct six-slot writer and the retained-bus boundary are
+	// documented in docs/threedi/3di-gp-format-re.md (D-3DI-2).
 	model->begin_ctrl_update();
 	for (int i = 0; i < 6; ++i) {
 		const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
-		if (phase != 0) model->set_ctrl_override(owner, registers[i], phase);
-		else model->clear_ctrl_override(owner, registers[i]);
+		if (phase != 0) model->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
+		else model->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
 	}
 	model->end_ctrl_update();
 }
@@ -1016,9 +1011,9 @@ void EntityPresenter::release_part_anim_outputs() {
 		world_heat_clear_typed(model);
 		// The ordinal DOOR_xx bus has no fixed register set: release whatever
 		// this writer owns instead of probing all 30 names.
-		model->clear_ctrl_overrides_owned(names().owner_doors);
-		model->clear_ctrl_overrides_owned("present:destruction");
-		model->clear_ctrl_overrides_owned(names().owner_death);
+		model->clear_ctrl_overrides_owned_native(names().owner_doors);
+		model->clear_ctrl_overrides_owned_native("present:destruction");
+		model->clear_ctrl_overrides_owned_native(names().owner_death);
 		model->end_ctrl_update();
 	}
 }
@@ -1034,14 +1029,20 @@ const String &EntityPresenter::infantry_key(int state) {
 
 void EntityPresenter::present_snapshot(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision, const PackedInt32Array &door_phases) {
-	present_snapshot_impl(snap, stride, layout_revision, door_phases, nullptr);
+	present_rows({snap.ptr(), snap.size()}, stride, layout_revision,
+			door_phases.ptr(), door_phases.size());
+}
+
+void EntityPresenter::present_rows(PresentRowsView snap, int stride,
+		int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count) {
+	present_snapshot_impl(snap, stride, layout_revision, door_phases, door_phase_count, nullptr);
 }
 
 PackedInt64Array EntityPresenter::profile_present_snapshot(
-		const PackedFloat32Array &snap, int stride, int64_t layout_revision,
-		const PackedInt32Array &door_phases) {
+		PresentRowsView snap, int stride, int64_t layout_revision,
+		const int32_t *door_phases, int64_t door_phase_count) {
 	MissionFrameProfile profile;
-	present_snapshot_impl(snap, stride, layout_revision, door_phases, &profile);
+	present_snapshot_impl(snap, stride, layout_revision, door_phases, door_phase_count, &profile);
 	PackedInt64Array result;
 	result.resize(MISSION_PROFILE_SLOT_COUNT);
 	result.set(MISSION_PROFILE_CORE_US, profile.core_us);
@@ -1055,8 +1056,8 @@ PackedInt64Array EntityPresenter::profile_present_snapshot(
 	return result;
 }
 
-void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
-		int stride, int64_t layout_revision, const PackedInt32Array &door_phases,
+void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
+		int stride, int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
 		MissionFrameProfile *p_profile) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
@@ -1066,8 +1067,8 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 	// The door side table's (row index, count, phases...) entries sit in row
 	// order, so one cursor advanced along the ascending row walk finds each
 	// door row's entry without a search.
-	const int32_t *door_table = door_phases.ptr();
-	const int64_t door_table_size = door_phases.size();
+	const int32_t *door_table = door_phases;
+	const int64_t door_table_size = door_phase_count;
 	int64_t door_cursor = 0;
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
@@ -1225,11 +1226,11 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 			const int32_t active2 =
 					opennova::world::part_anim_phase_active(active2_code) ? 1 : 0;
 			const int32_t phase1 = active1 != 0
-					? Simulation::decode_present_part_anim_phase(
+					? opennova::world::decode_present_part_anim_phase(
 							snap, base, 1)
 					: 0;
 			const int32_t phase2 = active2 != 0
-					? Simulation::decode_present_part_anim_phase(
+					? opennova::world::decode_present_part_anim_phase(
 							snap, base, 2)
 					: 0;
 			const int32_t controls_valid =
@@ -1320,7 +1321,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				model->begin_ctrl_update();
 			}
 			if (death_work) {
-				model->set_ctrl_override(names().owner_death, names().death,
+				model->set_ctrl_override_native(names().owner_death, names().death,
 						field_i(p, base, opennova::world::PF_DEATH_CTRL));
 				++stat_control_dispatches_;
 			}
@@ -1381,7 +1382,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				// it owned, so the owner-scoped release stands in for a
 				// 30-register probe; a warm row shrinks by its published count.
 				if (cold) {
-					model->clear_ctrl_overrides_owned(names().owner_doors);
+					model->clear_ctrl_overrides_owned_native(names().owner_doors);
 				}
 				const int previous_count = cold ? 0 :
 						row.ctrl_publish_state[CTRL_PUBLISH_DOORS];
@@ -1402,12 +1403,12 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 					}
 				}
 				for (int i = 0; i < std::max(door_count, previous_count); ++i) {
-					const String &name = names().doors[i];
+					const int name = names().doors[i];
 					if (i < door_count) {
-						model->set_ctrl_override(names().owner_doors, name,
+						model->set_ctrl_override_native(names().owner_doors, name,
 								i < available ? phases[i] : 0);
 					} else {
-						model->clear_ctrl_override(names().owner_doors, name);
+						model->clear_ctrl_override_native(names().owner_doors, name);
 					}
 					++stat_control_dispatches_;
 				}

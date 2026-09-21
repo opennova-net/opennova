@@ -48,6 +48,9 @@ class Snapshot:
 					int(e.get("active2", 0)) != 0)
 			var doors: Array = e.get("doors", [])
 			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())
+			var destroy: Array = e.get("destroy", [0, 0, 0, 0, 0, 0])
+			for channel in range(6):
+				out[b + Simulation.PF_OBJECT_DESTROY + channel] = float(destroy[channel])
 			out[b + Simulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + Simulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + Simulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
@@ -1453,3 +1456,22 @@ func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> voi
 	p.set_output_channels(channels & ~EntityPresenter.OUTPUT_PART_ANIM)
 	assert_true(model.get_ctrl_values().is_empty(),
 			"freezing the output seam cannot retain its last CTRL frame")
+
+
+func test_destruction_publication_reclaims_owner_and_releases_only_its_slots() -> void:
+	var model := _model()
+	var pass_ := _make_pass(_index_of({1: model}))
+	var snap := Snapshot.new()
+	snap.entities = [{"bms_id": 1, "hidden": 1, "destroy": [65536, 32768, 1, 0, 0, 0]}]
+	_present(pass_, snap)
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "hidden rows retain destruction publication")
+	model.set_ctrl_override("other", "OBJECT_DESTROY", 65536)
+	_present(pass_, snap)
+	model.clear_ctrl_override("other", "OBJECT_DESTROY")
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "an unchanged phase reclaims equal-value ownership")
+	model.set_ctrl_override("other", "OBJECT_DESTROY01", 99)
+	snap.entities[0]["destroy"] = [0, 0, 0, 0, 0, 0]
+	_present(pass_, snap)
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"), "falling phase releases our slot")
+	assert_eq(_ctrl(model, "OBJECT_DESTROY01"), 99, "stale release preserves a later writer")
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY02"))

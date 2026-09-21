@@ -1735,57 +1735,87 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 			draw_rect(rect, color, true);
 		}
 	}
-	for (const opennova::hud::HudTri &tri : p_list.tris) {
+	// Consecutive texture runs preserve primitive order and per-vertex color.
+	// Device submission follows the font batch witness in docs/fonts/fnt-re.md;
+	// the compiler still owns all crosshair and glyph geometry.
+	const RID canvas = get_canvas_item();
+	for (size_t first = 0; first < p_list.tris.size();) {
+		const int texture = p_list.tris[first].texture;
+		size_t end = first + 1;
+		while (end < p_list.tris.size() && p_list.tris[end].texture == texture) ++end;
 		Ref<Texture2D> tex;
-		if (tri.texture >= 0 && tri.texture < kTextureSlots) {
-			tex = textures_[static_cast<size_t>(tri.texture)];
-		}
-		PackedVector2Array points;
-		points.resize(3);
-		points.set(0, Vector2(tri.a.x, tri.a.y));
-		points.set(1, Vector2(tri.b.x, tri.b.y));
-		points.set(2, Vector2(tri.c.x, tri.c.y));
-		PackedVector2Array uvs;
-		uvs.resize(3);
-		uvs.set(0, Vector2(tri.a.u, tri.a.v));
-		uvs.set(1, Vector2(tri.b.u, tri.b.v));
-		uvs.set(2, Vector2(tri.c.u, tri.c.v));
+		if (texture >= 0 && texture < kTextureSlots) tex = textures_[static_cast<size_t>(texture)];
+		const int count = static_cast<int>((end - first) * 3);
+		PackedVector2Array points, uvs;
 		PackedColorArray colors;
-		for (const auto *vertex : { &tri.a, &tri.b, &tri.c })
-			colors.push_back(opennova::color_from_argb(tri.color) *
-					opennova::color_from_argb(vertex->color));
-		draw_polygon(points, colors, uvs, tex);
+		PackedInt32Array indices;
+		points.resize(count);
+		uvs.resize(count);
+		colors.resize(count);
+		indices.resize(count);
+		Vector2 *point = points.ptrw(), *uv = uvs.ptrw();
+		Color *color = colors.ptrw();
+		int32_t *index = indices.ptrw();
+		int vertex_index = 0;
+		for (size_t i = first; i < end; ++i) {
+			const auto &tri = p_list.tris[i];
+			const Color modulation = opennova::color_from_argb(tri.color);
+			for (const auto *vertex : { &tri.a, &tri.b, &tri.c }) {
+				point[vertex_index] = Vector2(vertex->x, vertex->y);
+				uv[vertex_index] = Vector2(vertex->u, vertex->v);
+				color[vertex_index] = modulation * opennova::color_from_argb(vertex->color);
+				index[vertex_index] = vertex_index;
+				++vertex_index;
+			}
+		}
+		rs->canvas_item_add_triangle_array(canvas, indices, points, colors, uvs,
+				PackedInt32Array(), PackedFloat32Array(), tex.is_valid() ? tex->get_rid() : RID());
+		first = end;
 	}
 	for (const opennova::hud::HudLine &line : p_list.lines) {
 		draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
 				opennova::color_from_argb(line.color), line.width);
 	}
-	// Glyph quads carry explicit corner geometry (the italic pass shears the
-	// top edge), so each renders as a polygon over its page texture, keeping
-	// the engine's -0.5 vertex offsets as-is.
-	for (const opennova::hud::GameFontQuad &glyph : p_list.glyphs) {
-		if (glyph.page >= page_textures_.size()) {
+	// Keep the existing kind order, page order, italic corners, half-pixel
+	// offsets and underline layer. Never sort text by texture across runs.
+	for (size_t first = 0; first < p_list.glyphs.size();) {
+		const uint32_t page = p_list.glyphs[first].page;
+		size_t end = first + 1;
+		while (end < p_list.glyphs.size() && p_list.glyphs[end].page == page) ++end;
+		if (page >= page_textures_.size() || page_textures_[page].is_null()) {
+			first = end;
 			continue;
 		}
-		const Ref<Texture2D> page = page_textures_[glyph.page];
-		if (page.is_null()) {
-			continue;
-		}
-		PackedVector2Array points;
-		points.resize(4);
-		points.set(0, Vector2(glyph.x_top_left, glyph.y_top));
-		points.set(1, Vector2(glyph.x_top_right, glyph.y_top));
-		points.set(2, Vector2(glyph.x_bottom_right, glyph.y_bottom));
-		points.set(3, Vector2(glyph.x_bottom_left, glyph.y_bottom));
-		PackedVector2Array uvs;
-		uvs.resize(4);
-		uvs.set(0, Vector2(glyph.u0, glyph.v0));
-		uvs.set(1, Vector2(glyph.u1, glyph.v0));
-		uvs.set(2, Vector2(glyph.u1, glyph.v1));
-		uvs.set(3, Vector2(glyph.u0, glyph.v1));
+		const int count = static_cast<int>(end - first);
+		PackedVector2Array points, uvs;
 		PackedColorArray colors;
-		colors.push_back(opennova::color_from_argb(glyph.color));
-		draw_polygon(points, colors, uvs, page);
+		PackedInt32Array indices;
+		points.resize(count * 4);
+		uvs.resize(count * 4);
+		colors.resize(count * 4);
+		indices.resize(count * 6);
+		Vector2 *point = points.ptrw(), *uv = uvs.ptrw();
+		Color *color = colors.ptrw();
+		int32_t *index = indices.ptrw();
+		for (int i = 0; i < count; ++i) {
+			const auto &glyph = p_list.glyphs[first + static_cast<size_t>(i)];
+			const int base = i * 4;
+			point[base] = Vector2(glyph.x_top_left, glyph.y_top);
+			point[base + 1] = Vector2(glyph.x_top_right, glyph.y_top);
+			point[base + 2] = Vector2(glyph.x_bottom_right, glyph.y_bottom);
+			point[base + 3] = Vector2(glyph.x_bottom_left, glyph.y_bottom);
+			uv[base] = Vector2(glyph.u0, glyph.v0);
+			uv[base + 1] = Vector2(glyph.u1, glyph.v0);
+			uv[base + 2] = Vector2(glyph.u1, glyph.v1);
+			uv[base + 3] = Vector2(glyph.u0, glyph.v1);
+			const Color modulation = opennova::color_from_argb(glyph.color);
+			for (int corner = 0; corner < 4; ++corner) color[base + corner] = modulation;
+			static constexpr int corners[] = {0, 1, 2, 0, 2, 3};
+			for (int corner = 0; corner < 6; ++corner) index[i * 6 + corner] = base + corners[corner];
+		}
+		rs->canvas_item_add_triangle_array(canvas, indices, points, colors, uvs,
+				PackedInt32Array(), PackedFloat32Array(), page_textures_[page]->get_rid());
+		first = end;
 	}
 	for (const opennova::hud::GameFontUnderline &underline : p_list.underlines) {
 		draw_line(Vector2(underline.x0, underline.y), Vector2(underline.x1, underline.y),

@@ -15,6 +15,17 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## 03TR presentation costs (2026-09-21)
+
+| Reimplementation surface | Original witness | Verdict and evidence |
+|---|---|---|
+| `ObjectModel` native ordinal publication and `EntityPresenter::stamp_destroy_phases` | `[orig: CtrlName_ToOrdinal @ 0x57B290]`; `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]`; `[orig: compute_lod_fade_timers @ 0x5C3F40]`; caller `[orig: render_sector_entity @ 0x5C4190]` | Anchored by the resolver call/ordinal store and six direct register stores before subpixel rejection; jo-c recovered instructions corroborate. Host bridge preserves current ownership; global-bus D-3DI-2 remains OPEN. `renderer_model_controls` and placed/composed-model GUT regressions. [CTRL record](threedi/3di-gp-format-re.md#native-ctrl-publication-2026-09-21). |
+| `Simulation::build_present_snapshot` leased native rows shared by both present walks | `[orig: collect_visible_entities_for_terrain @ 0x5C8C60]`, pool base/count/stride reads at `@ 0x5C8CAA..0x5C8CB6` | Native retail traversal anchored in disassembly. Snapshot lifetime and packed-array boundary are host code / not grillable. `netsim_present_rows`, `mission_root_test.gd` nested-snapshot regression, and `wire_present_pass_test.gd`. [Architecture](runtime-architecture.md#godot-adapter-and-presentation). |
+| `HudOverlay::render_list_` consecutive texture/page batches | `[orig: CGameFont_DrawText @ 0x6752C0]`; `[orig: GDynamicVB_DrawPrimitive @ 0x6788E0]` | Anchored by page iteration, 384-vertex glyph flush and 128-vertex underline flush, corroborated by jo-c. Godot submission is host code / not grillable; existing kind order retained. `hud_frame_compiler`, `hud_overlay_test.gd`, and pixel-identical baseline/fixed capture. [Font record](fonts/fnt-re.md#retail-font-submission-batches-2026-09-21). |
+
+[Measurements and validation limits](perf/03tr-frame-costs.md) include every
+comparison run and the existing fixture-dependent test failure.
+
 ## PR #655 review leftovers (2026-09-19)
 
 | Reimplementation surface | Original witness | Verdict and evidence |
