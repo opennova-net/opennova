@@ -292,7 +292,7 @@ NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 	hooks.on_gate_response = [this](const opennova::GateResponse &parsed) {
 		on_gate_response(parsed);
 	};
-	hooks.verify_cookie_vars = [this]() { return make_verify_cookie_vars(); };
+	hooks.cookie_vars = [this]() { return make_cookie_vars(); };
 	hooks.on_session_created = [this](std::size_t cu_vars, std::size_t cookie_vars) {
 		trace(String("0x42 join carries ")
 		    + String::num_int64(static_cast<int64_t>(cu_vars))
@@ -329,16 +329,17 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 	    + String(parsed.udp_code2.c_str()) + "' (empty => live NW likely needs login)");
 }
 
-// Verify "Cookie" var-list (NW-S5) — the identity set the 892B
-// ClientRequestVerifyResult carries (capture frame 10166). This binding owns
-// the locale/hardware snapshot; libs owns only the witnessed field order.
-// NWUID is filled later from ServerSessionInit, and the same snapshot seeds the
-// HTTP-login cookies. Empty CD-key fields match the successful retail capture.
-std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_verify_cookie_vars() {
-	const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
-			lobby_.client_index(), lobby_.client_key());
-	identity_vars_ = opennova::make_lobby_identity_vars(idp);
-	return identity_vars_;
+// The locale/hardware snapshot seeds both the initial verify and HTTP login.
+// Each later Cookie-bearing statement reads the current HTTP jar through the
+// engine flow, so cookies issued during login/NWJoin reach the UDP session too.
+std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_cookie_vars() {
+	if (identity_vars_.empty()) {
+		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
+				lobby_.client_index(), lobby_.client_key());
+		identity_vars_ = opennova::make_lobby_identity_vars(idp);
+	}
+	sync_flow_context();
+	return flow_.session_cookie_vars();
 }
 
 // Short name for a ClientSession::State int (for the handshake diagnostics).

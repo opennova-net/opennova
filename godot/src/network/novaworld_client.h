@@ -169,7 +169,7 @@ private:
 	// our State + signals + trace ring.
 	NwuLobbySession::Hooks make_lobby_hooks();
 	void on_gate_response(const opennova::GateResponse &parsed);
-	std::vector<std::pair<std::string, std::string>> make_verify_cookie_vars();
+	std::vector<std::pair<std::string, std::string>> make_cookie_vars();
 	void trace_sent_datagram(const std::vector<uint8_t> &dg);
 	void on_session_datagram(const NwuLobbySession::RxInfo &rx);
 	void sync_session_state(); // ClientSession::State -> our State + signals

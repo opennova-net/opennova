@@ -15,6 +15,7 @@
 // echo, the 0x43/0x83 framing), this test fails.
 
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -616,9 +617,81 @@ void test_client_correlates_handshake_echoes() {
 	       "lobby ServerAuth with mismatched CK cannot install keys");
 }
 
+// The browser completes NWJoin after the UDP session has already verified.
+// Its newly issued cookies must survive the next encoded ClientPlayRequest.
+void test_play_uses_current_http_cookies() {
+	LobbyHttpFlow flow;
+	LobbyHttpContext context;
+	context.startup_url = "http://gs.opennova.test/NWStart.dll?prepare=1";
+	context.identity_vars = make_lobby_identity_vars(LobbyIdentityParams{});
+	flow.set_context(context);
+	ClientSession::Config cfg;
+	cfg.cookie_vars = [&flow]() { return flow.session_cookie_vars(); };
+	MiniServer server;
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "cookie refresh: session reaches Verified")) return;
+	context.server_nwuid = client.server_nwuid();
+	flow.set_context(context);
+	flow.login("synthetic", "synthetic");
+	flow.on_login_response(true, 200, {"Set-Cookie: EPASK=3:65537:fixture"}, {});
+	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=login"}, {});
+	const auto login = flow.on_login_response(true, 200,
+			{"Set-Cookie: NWHANDLE=synthetic", "Set-Cookie: PCID=account"}, {});
+	if (!expect(login.kind == LoginResult::Kind::Succeeded, "cookie refresh: HTTP login succeeds")) return;
+	flow.join(777);
+	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=join"}, {});
+	const std::string joi = "<TITLE>[NI=192.0.2.1&NP=32768&GS=x]</TITLE>";
+	const auto joined = flow.on_join_response(true, 200,
+			{"Set-Cookie: NWPF=28", "Set-Cookie: NWPF2=0", "Set-Cookie: PUBJOINTICKET=ticket-1"},
+			std::vector<uint8_t>(joi.begin(), joi.end()));
+	if (!expect(joined.kind == JoinResult::Kind::Resolved, "cookie refresh: NWJoin resolves")) return;
+	const auto setup = make_play_setup_vars("Host", joined.host_ip,
+			std::to_string(joined.host_port), joined.app_id, joined.ln);
+	const auto request = client.build_play_request(setup);
+	expect(!server.respond(request).empty(), "cookie refresh: service decodes the play request");
+	const auto &cookies = server.lobby.play_state["Cookie"];
+	expect(var_value(cookies, "NWPF") == "28", "play carries NWJoin NWPF instead of provoking NWEC09");
+	expect(var_value(cookies, "NWPF2") == "0", "play carries NWJoin NWPF2");
+	expect(var_value(cookies, "NWHANDLE") == "synthetic", "play carries the signed-in handle");
+	expect(var_value(cookies, "PCID") == "account", "play carries the signed-in account");
+	expect(var_value(cookies, "PUBJOINTICKET") == "ticket-1", "play carries the current join ticket");
+	expect(var_value(cookies, "NWUID") == server.nwuid, "play retains the session NWUID");
+
+	// A retry can replace existing cookies; neither the initial snapshot nor
+	// the first successful NWJoin is a valid source for this request.
+	server.respond(client.build_stop_playing());
+	flow.join(778);
+	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=retry"}, {});
+	flow.on_join_response(true, 200,
+			{"Set-Cookie: NWPF=38", "Set-Cookie: NWPF2=1", "Set-Cookie: PUBJOINTICKET=ticket-2",
+			 "Set-Cookie: NWCDKIID=issued", "Set-Cookie: CountryName=remote"},
+			std::vector<uint8_t>(joi.begin(), joi.end()));
+	server.respond(client.build_play_request(setup));
+	const auto &retry_cookies = server.lobby.play_state["Cookie"];
+	expect(var_value(retry_cookies, "NWPF") == "38" && var_value(retry_cookies, "NWPF2") == "1",
+	       "retry uses updated product cookies without hardcoding a product id");
+	expect(var_value(retry_cookies, "PUBJOINTICKET") == "ticket-2", "retry replaces the join ticket");
+	expect(var_value(retry_cookies, "NWCDKIID") == "issued", "initial empty identity cannot erase an issued cookie");
+	for (const auto &kv : context.identity_vars) {
+		if (kv.first == "CountryName")
+			expect(var_value(retry_cookies, kv.first) == kv.second, "local country overlays browser cookies");
+	}
+	int cdkiid_count = 0;
+	for (const auto &entry : retry_cookies) if (entry.name == "NWCDKIID") ++cdkiid_count;
+	expect(cdkiid_count == 1, "the refreshed Cookie list contains no duplicate identity entry");
+
+	server.respond(client.build_stop_playing());
+	flow.reset();
+	server.respond(client.build_play_request(setup));
+	const auto &reset_cookies = server.lobby.play_state["Cookie"];
+	expect(!var_has(reset_cookies, "NWPF") && !var_has(reset_cookies, "PUBJOINTICKET") &&
+	               !var_has(reset_cookies, "PCID"), "cleared HTTP cookies cannot leak into another play request");
+}
+
 } // namespace
 
 int main() {
+	test_play_uses_current_http_cookies();
 	test_parser_roundtrip();
 	test_client_correlates_handshake_echoes();
 	test_peer_disconnect_legs();
@@ -633,11 +706,13 @@ int main() {
 	// the witnessed structure. NWUID is left empty -> the client must echo it from
 	// the ServerSessionInit; NWCDKIID empty mirrors retail (verify is not
 	// CD-key-gated). Asserted on d_verify_req below.
-	cfg.verify_cookie_vars = {
-	    {"CountryName", "United States"},
-	    {"NWUID", ""},
-	    {"NWCDKIID", ""},
-	    {"NWPSSK", "ABCDEFGHIJKLMNOPQRSTUVW"},
+	cfg.cookie_vars = []() {
+		return std::vector<std::pair<std::string, std::string>>{
+			{"CountryName", "United States"},
+			{"NWUID", ""},
+			{"NWCDKIID", ""},
+			{"NWPSSK", "ABCDEFGHIJKLMNOPQRSTUVW"},
+		};
 	};
 	ClientSession client(cfg);
 

@@ -398,3 +398,17 @@ func test_host_failed_reports_and_reenables() -> void:
 	panel.host_failed("No mission available to host.")
 	assert_eq(panel.status_text(), "No mission available to host.", "the failure reason is shown")
 	assert_true(panel.host_enabled(), "Host is re-enabled on the OpenNova target")
+
+
+func test_join_rejection_resolves_menutxt_and_retains_diagnostic_code() -> void:
+	var previous := Strings.get_table(Strings.TABLE_MENUTXT)
+	var table := RtxtStringFile.new()
+	table.add_section("NovaWorld")
+	table.add_entry("NWEC09", "This game's identity does not match the server.", 0, Vector2i())
+	Strings.register_table(Strings.TABLE_MENUTXT, table)
+	var panel := _make_panel(PackedStringArray())
+	panel.client_for_test().emit_signal("connected")
+	panel.client_for_test().emit_signal("login_succeeded", "synthetic")
+	panel.client_for_test().emit_signal("join_failed", "NWEC09")
+	assert_eq(panel.message_text(), "This game's identity does not match the server.\n\n(NWEC09)")
+	Strings.register_table(Strings.TABLE_MENUTXT, previous)

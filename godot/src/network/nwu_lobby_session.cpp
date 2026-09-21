@@ -215,14 +215,12 @@ void NwuLobbySession::begin_session() {
 	// The "Cookie" var-list (the login cookie jar + locale) every Cookie-bearing
 	// statement re-serializes: the verify reply, the host request, the play
 	// request and the GLSVSS request.
-	if (hooks_.verify_cookie_vars) {
-		cfg.verify_cookie_vars = hooks_.verify_cookie_vars();
-	}
+	cfg.cookie_vars = hooks_.cookie_vars;
 
 	session_ = std::make_unique<opennova::ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);
 	if (hooks_.on_session_created) {
-		hooks_.on_session_created(cfg.cu_vars.size(), cfg.verify_cookie_vars.size());
+		hooks_.on_session_created(cfg.cu_vars.size(), cfg.cookie_vars ? cfg.cookie_vars().size() : 0);
 	}
 	connect_started_ms_ = clock_ms_;
 	connect_last_send_ms_ = clock_ms_;

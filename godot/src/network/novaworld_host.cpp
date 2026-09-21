@@ -32,7 +32,7 @@ NovaWorldHost::~NovaWorldHost() = default;
 // NWUID is echoed from the ServerSessionInit by ClientSession.
 NwuLobbySession::Hooks NovaWorldHost::make_lobby_hooks() {
 	NwuLobbySession::Hooks hooks;
-	hooks.verify_cookie_vars = [this]() {
+	hooks.cookie_vars = [this]() {
 		return opennova::make_lobby_identity_vars(collect_lobby_identity_params(
 				lobby_.client_index(), lobby_.client_key()));
 	};

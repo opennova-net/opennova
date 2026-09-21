@@ -240,6 +240,27 @@ void LobbyHttpFlow::seed_identity_cookies() {
 	}
 }
 
+// The Cookie var-list reads the browser jar at use, then overlays locale.
+// Initial identity fills the pre-login case before seed_identity_cookies runs;
+// once present, HTTP-issued cookie values (NWPF/NWPF2/account/ticket) win.
+// [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 -> cookie enumeration @ 0x64eb70]
+std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_vars() const {
+	CookieJar cookies = jar_;
+	for (const auto &kv : ctx_.identity_vars) {
+		const bool locale = strutil::iequals(kv.first, "CountryName") ||
+		                    strutil::iequals(kv.first, "Language") ||
+		                    strutil::iequals(kv.first, "TimeZoneBias");
+		if (!cookies.find(kv.first) || locale) {
+			cookies.set(kv.first, kv.first == "NWUID" && kv.second.empty()
+			                             ? ctx_.server_nwuid : kv.second);
+		}
+	}
+	std::vector<std::pair<std::string, std::string>> vars;
+	vars.reserve(cookies.names().size());
+	for (const auto &name : cookies.names()) vars.emplace_back(name, *cookies.find(name));
+	return vars;
+}
+
 // =============================== EPASK login ===============================
 
 LoginResult LobbyHttpFlow::login(const std::string &username, const std::string &password) {

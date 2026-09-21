@@ -95,7 +95,9 @@ int main() {
 	// NovaWorldHost::begin_session sets up (minus the gate-probe leg, which only
 	// resolves this endpoint; we know it directly).
 	opennova::ClientSession::Config cfg;
-	cfg.verify_cookie_vars = {{"NWUID", ""}};  // echoed from the SessionInit
+	cfg.cookie_vars = []() {
+		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+	};  // echoed from the SessionInit
 	opennova::ClientSession session(cfg);
 
 	uint16_t client_port = 0;
