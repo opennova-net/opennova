@@ -435,6 +435,7 @@ struct LocalPlayerWeaponView {
     int32_t heat = 0;
     int32_t heat_glow = 0;
     bool borrowed_usegun_slot = false;
+    int32_t usegun_mount_handle = EntityHandle::kInvalid;
     bool emplaced_controls_valid = false;
     int32_t emplaced_gun_yaw = 0;
     int32_t emplaced_gun_pitch = 0;

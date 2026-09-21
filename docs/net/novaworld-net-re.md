@@ -9984,6 +9984,23 @@ recycles dead children individually and clears the suppression mapping only at f
 group death. D-WPN-19 records the false-reading correction and the whole-group
 regression replaces the former first-child contract.
 
+**Mounted action-effect anchors (2026-09-21).** `Entity_ComputeActionTransform`
+resolves a UseGun claimant's action point against its parent when a first-person
+gun is not supplying the pose (`@0x4014a7..0x4014e6`, repeated for the final
+position/direction at `@0x40159a..0x4015ed`). The existing live-effect tracker
+reuses that resolution while the effect group lives. The 03TR objective's
+`WPN_EMPLCDMINI` has no `gfx1`: its `Minigun` world model owns `MFlash01`.
+The local effect presenter previously searched only FP/held-weapon models and
+fell back to the player origin, placing `Effect_MiniMuz` behind the mounted camera.
+The committed UseGun handle now reaches presentation through `PlayerWeaponView`;
+a world-only mount resolves both position and direction through its rendered
+part's rest-to-live PANM transform. Skeletal viewmodel points and model lights
+share that transform conversion. The installed-03TR `mounted_view_test` fires
+through the real presenter, checks the flash at the muzzle, and moves/articulates
+the carrier without firing again to verify that the same live group follows.
+Native `player_present` / `player_weapon_view` tests pin FP-model precedence and
+committed-slot identity across a pending gun switch and release.
+
 **The weapon heat model (witnessed + ported 2026-07-22).** Heat is **not a stored
 accumulator** — the slot carries a DEADLINE and the level is recomputed from what is
 left of it, so the linear cooldown is implicit and costs no per-tick work.

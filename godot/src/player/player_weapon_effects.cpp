@@ -1,6 +1,7 @@
 #include "player/player_weapon_effects.h"
 
 #include "audio/mission_audio.h"
+#include "mission/mission_root.h"
 #include "object/object_data.h"
 #include "particle/effect_scene.h"
 #include "particle/effect_spawn_records.h"
@@ -8,10 +9,11 @@
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "simulation/simulation.h"
+#include "simulation/entity_presenter.h"
+#include "world/game_world.h"
 #include "world/item_effect_director.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -327,6 +329,10 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 	if (owner == nullptr) {
 		return Variant(); // torn down; a stale resolver poll must degrade, not error
 	}
+	const ActionPoint mounted = mounted_action_particle(p_userpoint);
+	if (mounted.valid) {
+		return weapon_effect_transform(mounted.pos, mounted.dir);
+	}
 	if (owner->viewmodel() == nullptr) {
 		return Variant();
 	}
@@ -344,15 +350,42 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 // [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
 Transform3D PlayerWeaponEffects::action_particle_model_to_world(ObjectModel *p_part,
 		const Ref<ModelUserPoint> &p_info) {
-	if (p_part != nullptr) {
-		Skeleton3D *skeleton = p_part->get_skeleton();
-		const int subobject = p_info->get_subobject();
-		if (skeleton != nullptr && subobject >= 0 && subobject < skeleton->get_bone_count()) {
-			return skeleton->get_global_transform() * skeleton->get_bone_global_pose(subobject) *
-					skeleton->get_bone_global_rest(subobject).affine_inverse();
-		}
+	return p_part != nullptr ? p_part->subobject_model_to_world(p_info->get_subobject()) : Transform3D();
+}
+
+PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
+		const String &p_userpoint) const {
+	ActionPoint out;
+	LocalPlayerPresenter *owner = presenter();
+	if (owner == nullptr || weapon_view_.is_null() || p_userpoint.is_empty() ||
+			!opennova::world::action_particle_uses_mounted_gun(
+					weapon_view_->get_borrowed_usegun_slot(), owner->is_third_person(),
+					!owner->vm_parts().is_empty())) {
+		return out;
 	}
-	return p_part != nullptr ? p_part->get_global_transform() : Transform3D();
+	GameWorld *game_world = Object::cast_to<GameWorld>(world());
+	MissionRoot *runtime = game_world != nullptr ? game_world->get_runtime() : nullptr;
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	ObjectModel *gun = entities != nullptr
+			? entities->resolve_wire_handle(weapon_view_->get_usegun_mount_handle()) : nullptr;
+	const Ref<ObjectData> data = gun != nullptr ? gun->get_object_data() : Ref<ObjectData>();
+	if (data.is_null()) {
+		return out;
+	}
+	for (int i = 0; i < data->get_user_point_count(); ++i) {
+		const Ref<ModelUserPoint> point = data->get_user_point_info(i);
+		if (point.is_null() || point->get_name().nocasecmp_to(p_userpoint) != 0) {
+			continue;
+		}
+		const Transform3D pose = action_particle_model_to_world(gun, point);
+		const Vector3 direction = pose.basis.xform(point->get_rotation());
+		out.pos = pose.xform(point->get_position());
+		out.dir = direction.length_squared() > 0.000001f
+				? direction.normalized() : -pose.basis.get_column(2).normalized();
+		out.valid = true;
+		return out;
+	}
+	return out;
 }
 
 // World-space spawn point for an ACTION particle: the named user point on a
@@ -405,6 +438,10 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::third_person_action_partic
 }
 
 Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_userpoint) const {
+	const ActionPoint mounted = mounted_action_particle(p_userpoint);
+	if (mounted.valid) {
+		return mounted.pos;
+	}
 	const ActionPoint tp = third_person_action_particle(p_userpoint);
 	if (tp.valid) {
 		return tp.pos;
@@ -450,6 +487,10 @@ Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_user
 }
 
 Vector3 PlayerWeaponEffects::action_particle_world_forward(const String &p_userpoint) const {
+	const ActionPoint mounted = mounted_action_particle(p_userpoint);
+	if (mounted.valid) {
+		return mounted.dir;
+	}
 	const ActionPoint tp = third_person_action_particle(p_userpoint);
 	if (tp.valid) {
 		return tp.dir;

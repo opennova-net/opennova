@@ -69,6 +69,17 @@ void test_fire_effect_gate() {
 	// The gfx pick follows the FP bit.
 	CHECK(w::action_particle_uses_third_person_gun(true));
 	CHECK(!w::action_particle_uses_third_person_gun(false));
+	// A world-only emplacement uses its carrier in first person. A resolved
+	// FP gun wins in first person, while a third-person mount uses the carrier.
+	CHECK(w::action_particle_uses_mounted_gun(true, false, false));
+	CHECK(!w::action_particle_uses_mounted_gun(true, false, true));
+	CHECK(w::action_particle_uses_mounted_gun(true, true, false));
+	CHECK(w::action_particle_uses_mounted_gun(true, true, true));
+	for (const bool third_person : {false, true}) {
+		for (const bool fp_gun : {false, true}) {
+			CHECK(!w::action_particle_uses_mounted_gun(false, third_person, fp_gun));
+		}
+	}
 	CHECK(w::kActionEffectSpawnPolicy.suppress_while_owned);
 	CHECK(w::kActionEffectSpawnPolicy.follow_owner);
 	CHECK(w::kActionEffectSpawnPolicy.world_render_domain);

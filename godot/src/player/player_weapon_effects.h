@@ -107,6 +107,7 @@ private:
 	void fire_action_effects(const Ref<PlayerWeaponEvent> &p_event);
 	void fire_direct_action_effect(const Ref<PlayerWeaponEvent> &p_event);
 	static Transform3D action_particle_model_to_world(ObjectModel *p_part, const Ref<ModelUserPoint> &p_info);
+	ActionPoint mounted_action_particle(const String &p_userpoint) const;
 	ActionPoint third_person_action_particle(const String &p_userpoint) const;
 	Vector3 action_particle_world_position(const String &p_userpoint) const;
 	Vector3 action_particle_world_forward(const String &p_userpoint) const;

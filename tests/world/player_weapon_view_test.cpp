@@ -107,6 +107,7 @@ void test_inactive_reads_as_defaults() {
 	CHECK(v.clip == 0);
 	CHECK(v.anim_key.empty());
 	CHECK(v.hud_spread_row == 0);
+	CHECK(v.usegun_mount_handle == EntityHandle::kInvalid);
 }
 
 void test_slot_serials_and_action_legs() {
@@ -153,6 +154,26 @@ void test_slot_serials_and_action_legs() {
 	// The FP clip position is 0 without a clip key, whatever the counter says.
 	rig.weapon.anim_key.clear();
 	CHECK(rig.view().anim_advance_ticks == 0);
+}
+
+void test_effect_anchor_tracks_the_committed_usegun_slot() {
+	Rig rig;
+	rig.w.registry.configure_pool(1, 2);
+	Entity gun;
+	gun.has_item_def = true;
+	gun.item_attrib = kItemAttribEweap;
+	gun.primary_weapon_slot.clip = 33;
+	const EntityHandle first = rig.w.registry.spawn(1, gun);
+	const EntityHandle pending = rig.w.registry.spawn(1, gun);
+	rig.weapon.usegun_mount = first;
+	rig.weapon.usegun_pending_mount = pending;
+	CHECK(rig.view().clip == 33);
+	CHECK(rig.view().usegun_mount_handle == first.packed);
+	rig.weapon.usegun_mount = pending;
+	CHECK(rig.view().usegun_mount_handle == pending.packed);
+	rig.weapon.usegun_slot_active = false;
+	CHECK(rig.view().clip == 17);
+	CHECK(rig.view().usegun_mount_handle == EntityHandle::kInvalid);
 }
 
 void test_power_throw_windup() {
@@ -259,6 +280,7 @@ void test_round_ring_read_back() {
 int main() {
 	test_inactive_reads_as_defaults();
 	test_slot_serials_and_action_legs();
+	test_effect_anchor_tracks_the_committed_usegun_slot();
 	test_power_throw_windup();
 	test_crosshair_spread_rows();
 	test_heat_clamps();

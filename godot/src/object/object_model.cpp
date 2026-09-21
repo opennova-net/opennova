@@ -1705,32 +1705,31 @@ void ObjectModel::collect_point_light_draw_parts(
 	point_light_draw_parts_cache_ = r_parts;
 }
 
+Transform3D ObjectModel::subobject_model_to_world(int p_subobject) const {
+	if (skeleton_ != nullptr && p_subobject >= 0 && p_subobject < skeleton_->get_bone_count()) {
+		return skeleton_->get_global_transform() * skeleton_->get_bone_global_pose(p_subobject) *
+				skeleton_->get_bone_global_rest(p_subobject).affine_inverse();
+	}
+	Node3D *const *node = robj_nodes_.getptr(p_subobject);
+	const Transform3D *rest = robj_rest_transforms_.getptr(p_subobject);
+	if (node != nullptr && *node != nullptr && rest != nullptr) {
+		return (*node)->get_global_transform() * rest->affine_inverse();
+	}
+	return get_global_transform();
+}
+
 Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 	if (object_data_.is_null() || p_index < 0 ||
 			p_index >= object_data_->get_light_count()) {
 		return get_global_position();
 	}
 	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
-	const Vector3 model_position = info->get_position();
-	Vector3 position = get_global_transform().xform(model_position);
 	const int subobject = info->get_subobject();
 	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
 	// the rest-to-live transform, matching the user-point attachment basis.
-	if (subobject > 0 && skeleton_ != nullptr &&
-			subobject < skeleton_->get_bone_count()) {
-		position = (skeleton_->get_global_transform() *
-					   skeleton_->get_bone_global_pose(subobject) *
-					   skeleton_->get_bone_global_rest(subobject).affine_inverse())
-					   .xform(model_position);
-	} else if (subobject > 0) {
-		Node3D *const *node = robj_nodes_.getptr(subobject);
-		const Transform3D *rest = robj_rest_transforms_.getptr(subobject);
-		if (node != nullptr && *node != nullptr && rest != nullptr) {
-			position = (*node)->get_global_transform().xform(
-					rest->affine_inverse().xform(model_position));
-		}
-	}
-	return position;
+	const Transform3D model_to_world = subobject > 0
+			? subobject_model_to_world(subobject) : get_global_transform();
+	return model_to_world.xform(info->get_position());
 }
 
 void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
