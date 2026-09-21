@@ -30,6 +30,7 @@ struct WeatherOscillator;
 #include <formats/threedi/threedi_panm.h>
 
 #include <runtime/renderer/material_eval.h>
+#include <runtime/renderer/model_panm_cache.h>
 
 #include "resource_index/resource_root.h"
 
@@ -69,40 +70,7 @@ private:
 	mutable std::unordered_map<uint64_t, Array> submesh_cache;
 	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame);
 
-	// Per-frame PANM evaluation cache behind apply_panm_to_nodes: one data
-	// instance is SHARED across every placed model of the same graphic (the
-	// placer's per-graphic cache). Deterministic tracks at the same clock/bus
-	// reuse an evaluation; noise tracks deliberately re-evaluate per instance
-	// because retail consumes one CRT sample per submitted model. `changed`
-	// marks parts whose transform moved since
-	// the PREVIOUS evaluation; `revision` bumps when any did, letting a caller
-	// that already applied this revision skip every node write. One cache per
-	// authored RLOD (PANM is written per RLOD), so instances of one graphic
-	// drawn at mixed levels never evict each other's evaluation. Invalidated by
-	// _notify_object_changed()/_clear() like the submesh cache. Main-thread
-	// only.
-	struct PanmEvalCache {
-		int lod = -1;
-		int64_t time_ms = -1;
-		uint64_t ctrl_hash = 0;
-		bool valid = false;
-		bool has_noise = false;
-		uint64_t revision = 0;
-		std::vector<opennova::threedi::ThreediPartAnimation> anims;         // effective set for `lod`
-		std::vector<opennova::threedi::ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
-		std::vector<opennova::threedi::ThreediVec3> pivots;
-		std::vector<opennova::threedi::ThreediMatrix4x4> node_matrices;     // scratch, per anim node
-		std::vector<int> part_to_node;
-		std::vector<Transform3D> part_transforms;        // per part, godot frame
-		std::vector<uint64_t> part_revision;             // revision at last change
-	};
-	mutable std::vector<PanmEvalCache> panm_caches_; // indexed by LOD
-	// Diagnostic serial: increments whenever node matrices are actually
-	// evaluated for any level, even if a random sample happens to reproduce
-	// the prior transform and therefore does not mint a changed-pose revision.
-	mutable uint64_t panm_evaluation_serial_ = 0;
-	void _invalidate_panm_cache() { panm_caches_.clear(); }
-	PanmEvalCache *_panm_cache_prepare(int p_lod_index) const;
+	mutable opennova::renderer::ModelPanmCache panm_cache_;
 	// Material generator fixups depend only on the loaded document's local CTRL
 	// table. Cache their native names once instead of rebuilding a
 	// vector<string> for every material of every model on every render frame.
@@ -117,8 +85,6 @@ private:
 	void _clear();
 	void _notify_object_changed();
 	Error _open_3di(const String &p_path);
-	bool _effective_panm_for_lod(int p_lod_index,
-			std::vector<opennova::threedi::ThreediPartAnimation> &r_nodes) const;
 
 protected:
 	static void _bind_methods();

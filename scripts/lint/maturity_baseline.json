@@ -15,7 +15,8 @@
     "formats/threedi/threedi_3di3_ground_anchor.cpp",
     "formats/wac/command_table.cpp",
     "net/npwire/replay/wire_capture.cpp",
-    "runtime/assets/asset_store.cpp"
+    "runtime/assets/asset_store.cpp",
+    "runtime/renderer/model_panm_cache.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
@@ -25,7 +26,7 @@
     "gd_foreign_private_accesses": 1,
     "gd_prints_outside_debug": 0,
     "gd_test_production_subclasses": 15,
-    "godot_orig_cites": 854,
+    "godot_orig_cites": 853,
     "godot_src_dictionary_returns": 28,
     "has_method_guards": 0,
     "oversize_cpp_files": 1,
