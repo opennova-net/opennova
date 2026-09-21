@@ -910,7 +910,7 @@ end
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(0, 0, 8)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
 			1.0, 0.001, "the intact static row admits its owned light inside the entity cube")
 	var container := root.get_node("MissionObjects") as Node3D
@@ -920,7 +920,7 @@ end
 			HuskSwapEvent.make(source.bms_id, 5004)]), [])
 	var graft: ObjectModel = _husk_models(world)[0]
 	assert_eq(graft.entity_ref.bms_id, source.bms_id)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var surfaces: Array[Node] = graft.find_children("*", "GeometryInstance3D", true, false)
 	assert_gt(surfaces.size(), 0)
 	for node in surfaces:
@@ -929,7 +929,7 @@ end
 				"the live husk keeps the intact entity radius AND static owner identity")
 	presenter.reset_wire_runtime_state()
 	await get_tree().process_frame
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
 			1.0, 0.001, "restoration keeps the original static row and light lease")
 	presenter.teardown()

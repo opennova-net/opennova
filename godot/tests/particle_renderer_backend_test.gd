@@ -101,7 +101,7 @@ func test_draw_list_diagnostics_are_live_without_opt_in() -> void:
 	renderer.scene = _live_world_scene()
 	renderer.procedural_fallback_enabled = true
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	var report := renderer.get_debug_draw_list_report()
 	var camera_side: Dictionary = report.get("world_camera_side", {})
@@ -129,7 +129,7 @@ func test_draw_list_diagnostics_are_live_without_opt_in() -> void:
 			"every selected emitter owns exactly one bounds row")
 
 	var before_index := int(camera_side.get("compile_index", 0))
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var after: Dictionary = renderer.get_debug_draw_list_report().get(
 			"world_camera_side", {})
 	assert_eq(int(after.get("compile_index", 0)), before_index + 1,
@@ -150,7 +150,7 @@ func test_first_person_batch_retains_one_mesh_across_renders() -> void:
 	renderer.scene = scene
 	renderer.procedural_fallback_enabled = true
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	var batch := _first_person_batch(renderer)
 	assert_not_null(batch, "the FirstPerson tool path owns one MeshInstance3D")
@@ -169,7 +169,7 @@ func test_first_person_batch_retains_one_mesh_across_renders() -> void:
 	var mesh_id := mesh.get_instance_id()
 
 	scene.advance_in_place(0.016)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_eq(batch.mesh.get_instance_id(), mesh_id,
 			"a steady-state render rebuilds surfaces on the same ArrayMesh")
 	assert_gt((batch.mesh as ArrayMesh).get_surface_count(), 0)
@@ -179,7 +179,7 @@ func test_first_person_batch_retains_one_mesh_across_renders() -> void:
 	assert_eq(batch.mesh.get_instance_id(), mesh_id,
 			"hiding keeps the mesh resource for the next visible render")
 	renderer.hidden = false
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_true(batch.visible)
 	assert_eq(batch.mesh.get_instance_id(), mesh_id)
 	assert_gt((batch.mesh as ArrayMesh).get_surface_count(), 0)
@@ -262,7 +262,7 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	renderer.procedural_fallback_enabled = true
 	renderer.set_water_plane(0.0, null)
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	var report := renderer.get_debug_draw_list_report()
 	var far: Dictionary = report.get("world_far_side", {})
@@ -275,7 +275,7 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	assert_eq(int(near.get("water_filtered_emitters", -1)), 1)
 
 	camera.position.y = -10.0
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	report = renderer.get_debug_draw_list_report()
 	far = report.get("world_far_side", {})
 	near = report.get("world_camera_side", {})
@@ -302,7 +302,7 @@ func test_world_backend_executes_a_live_gpu_submission() -> void:
 	viewport.add_child(fog_source)
 	renderer.environment_source = fog_source
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	# Do not await frame_post_draw: headless compatibility renderers may never
 	# emit it. Ordinary process frames still exercise the callback whenever the
 	# RenderingDevice compositor is available.
@@ -363,7 +363,7 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 	# No scene/particles are needed: delayed emitters are exactly why the World
 	# compositor must manufacture its real framebuffer-specific pipeline set.
 	renderer.warm_pipelines(Vector3.ZERO)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	RenderingServer.force_draw(true)
 	RenderingServer.force_sync()
 
@@ -399,14 +399,14 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	viewport.add_child(first)
 	viewport.add_child(second)
 
-	first.render_now()
-	second.render_now()
+	first.render_now(GameWorld.current_frame_clock_ms())
+	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
 	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
 			"each renderer registers its far-side and camera-side effects once")
 	var composed := camera.compositor
-	first.render_now()
-	second.render_now()
+	first.render_now(GameWorld.current_frame_clock_ms())
+	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_eq(camera.compositor, composed,
 			"steady-state renders do not clone the composed resource")
 	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
@@ -450,7 +450,7 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 	renderer.scene = _live_world_scene()
 	renderer.procedural_fallback_enabled = true
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var live := renderer.get_debug_draw_list_report()
 	assert_false(bool(live.get("shutdown", true)), "a fresh renderer is live")
 	assert_true(bool(live.get("world_compositor_attached", false)))
@@ -469,7 +469,7 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 	# Re-entry replaces the retired effects and clears the latch: the same
 	# instance renders again, EffectWorld keeps it because it is still valid.
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var revived := renderer.get_debug_draw_list_report()
 	assert_false(bool(revived.get("shutdown", true)), "ENTER_TREE clears the latch")
 	for key in [
@@ -513,7 +513,7 @@ func test_far_particles_lead_the_camera_chain_and_terminal_stays_last() -> void:
 
 	var particle_renderer := ParticleRenderer.new()
 	viewport.add_child(particle_renderer)
-	particle_renderer.render_now()
+	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
 	var effects := camera.compositor.compositor_effects
 	assert_eq(effects.size(), 3,
@@ -554,7 +554,7 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 	renderer.procedural_fallback_enabled = true
 	renderer.set_water_plane(0.0, reflection_camera)
 	world_viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	assert_not_null(reflection_camera.compositor)
 	assert_eq(reflection_camera.compositor.get_compositor_effects().size(), 2,
@@ -644,7 +644,7 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 
 	var renderer := ParticleRenderer.new()
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_null(renderer.get_second_scene_camera())
 	assert_null(second_camera.compositor,
 			"a renderer without a second scene camera leaves every other camera alone")
@@ -657,7 +657,7 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 
 	renderer.set_second_scene_camera(second_camera)
 	assert_eq(renderer.get_second_scene_camera(), second_camera)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(second_camera.compositor)
 	if second_camera.compositor == null:
 		return
@@ -688,11 +688,11 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 
 	# Steady state composes once; clearing the camera retires the whole view.
 	var composed := second_camera.compositor
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_eq(second_camera.compositor, composed,
 			"steady-state renders do not clone the composed resource")
 	renderer.set_second_scene_camera(null)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_null(second_camera.compositor,
 			"clearing the camera restores its inherited (null) compositor")
 	report = renderer.get_debug_draw_list_report()
@@ -722,7 +722,7 @@ func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
 	renderer.set_water_plane(0.0, null)
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	var report := renderer.get_debug_draw_list_report()
 	var world_far := _slot(report, "world_far_side")
@@ -791,7 +791,7 @@ func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
 	renderer.set_water_plane(-100.0, null)
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	for _frame in 5:
 		await get_tree().process_frame
 	RenderingServer.force_draw(true)
@@ -836,7 +836,7 @@ func test_every_view_compiles_a_snapshot_lit_for_its_own_basis() -> void:
 	viewport.add_child(renderer)
 
 	# The control render: no second view.
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var control := renderer.get_debug_draw_list_report()
 	var keys := ["world_far_side", "world_camera_side",
 			"reflection_far_side", "reflection_camera_side", "first_person"]
@@ -856,7 +856,7 @@ func test_every_view_compiles_a_snapshot_lit_for_its_own_basis() -> void:
 	# back for this basis; a missing relight leaves the mirror's light in it.
 	second_camera.global_transform = camera.global_transform
 	renderer.set_second_scene_camera(second_camera)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var as_main := renderer.get_debug_draw_list_report()
 	assert_eq(int(_slot(as_main, "second_scene_camera_side").get("vertex_checksum", 0)),
 			int(_slot(as_main, "world_camera_side").get("vertex_checksum", 1)),
@@ -866,7 +866,7 @@ func test_every_view_compiles_a_snapshot_lit_for_its_own_basis() -> void:
 
 	# On the MIRROR eye it must equal the mirror list instead.
 	second_camera.global_transform = mirror_camera.global_transform
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var as_mirror := renderer.get_debug_draw_list_report()
 	assert_eq(int(_slot(as_mirror, "second_scene_camera_side").get("vertex_checksum", 0)),
 			int(_slot(as_mirror, "reflection_camera_side").get("vertex_checksum", 1)))
@@ -897,7 +897,7 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	renderer.procedural_fallback_enabled = true
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(second_camera.compositor)
 	assert_gt(int(_slot(renderer.get_debug_draw_list_report(),
 			"second_scene_camera_side").get("rendered_quad_count", 0)), 0)
@@ -908,7 +908,7 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	assert_true(_slot(hidden, "second_scene_camera_side").is_empty())
 	assert_eq(int(_slot(hidden, "second_scene_camera_backend").get("submitted_commands", -1)), 0)
 	renderer.hidden = false
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_gt(int(_slot(renderer.get_debug_draw_list_report(),
 			"second_scene_camera_backend").get("submitted_commands", 0)), 0)
 
@@ -921,7 +921,7 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	assert_false(bool(retired.get("second_scene_compositor_attached", true)))
 	assert_null(second_camera.compositor, "the departing renderer restores the second camera")
 	viewport.add_child(renderer)
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var revived := renderer.get_debug_draw_list_report()
 	for key in ["second_scene_far_backend", "second_scene_camera_backend"]:
 		assert_false(bool(_slot(revived, key).get("shutdown", true)),
@@ -932,7 +932,7 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 
 	# A camera freed while attached retires the view on the next render.
 	second_camera.free()
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var orphaned := renderer.get_debug_draw_list_report()
 	assert_false(bool(orphaned.get("second_scene_compositor_attached", true)))
 	assert_true(_slot(orphaned, "second_scene_camera_side").is_empty())
@@ -983,7 +983,7 @@ func _overlap_spawn(scene: EffectScene, name: String, depth: float) -> void:
 
 
 func _overlap_image(viewport: SubViewport, renderer: ParticleRenderer) -> Image:
-	renderer.render_now()
+	renderer.render_now(GameWorld.current_frame_clock_ms())
 	for frame in 4:
 		await get_tree().process_frame
 	RenderingServer.force_draw(true)

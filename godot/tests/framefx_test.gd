@@ -1107,7 +1107,7 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	particle_renderer.procedural_fallback_enabled = true
 	particle_renderer.set_water_plane(0.0, null)
 	viewport.add_child(particle_renderer)
-	particle_renderer.render_now()
+	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
 	for _frame in 6:
 		await get_tree().process_frame
 	RenderingServer.force_draw(true)

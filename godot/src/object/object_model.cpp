@@ -125,11 +125,6 @@ void PanmClock::_bind_methods() {
 			"", "get_time_ms");
 }
 
-bool PanmClock::sample_frame() {
-	return sample(static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()),
-			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
-}
-
 bool PanmClock::sample(int64_t p_value_ms, int64_t p_frame) {
 	if (p_frame == sampled_frame_) {
 		return false;

@@ -137,7 +137,7 @@ func tick() -> void:
 		return
 	var state: EndRoundState = sim.get_end_round_state()
 	var step := _transition.step(state.is_header_known(), state.is_board_known(),
-			Time.get_ticks_msec())
+			_view.frame_clock_ms)
 	if step & EndRoundTransition.STEP_RESET:
 		reset()
 		return
@@ -150,12 +150,12 @@ func tick() -> void:
 			_tear_down_screens()
 			_open_stat_screen(sim)
 	elif is_open():
-		_driver.tick(Time.get_ticks_msec())
+		_driver.tick(_view.frame_clock_ms)
 
 
 func _process(_delta: float) -> void:
 	if is_open() and _driver != null:
-		_driver.tick(Time.get_ticks_msec())
+		_driver.tick(_view.frame_clock_ms)
 
 
 # The resolved overlay ladder (the engine's end_round_overlay_resolve over the

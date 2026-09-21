@@ -24,7 +24,6 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/aabb.hpp>
@@ -43,10 +42,6 @@ namespace {
 // ADR 0043 d9); a bare-scene test builds the same two-level shape.
 constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
 constexpr const char *kCoronaShaderPath = "res://shaders/light_corona.gdshader";
-
-int now_ms() {
-	return static_cast<int>(Time::get_singleton()->get_ticks_msec());
-}
 
 } // namespace
 
@@ -530,7 +525,7 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 	static_rows_active_ = active;
 }
 
-void EffectLightDirector::render_frame(Camera3D *p_camera,
+void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 		const TypedArray<ObjectModel> &p_viewmodel_parts, int p_viewmodel_wire_handle,
 		bool p_run_census) {
 	if (p_camera == nullptr) {
@@ -542,7 +537,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	MissionEnvironment *env = _environment();
 	Weather *weather = _weather();
 	const Vector3 cam_pos = p_camera->get_camera_transform().origin;
-	const int time_ms = now_ms();
+	const int time_ms = static_cast<int>(p_time_ms);
 	frame_models_.clear();
 	frame_entity_positions_.clear();
 	frame_entity_bound_radii_q16_.clear();
@@ -620,6 +615,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	// hot caller skips it while the F3 Stats capture is off; a diagnostics
 	// read refreshes it on demand (run_census_now).
 	census_cam_pos_ = cam_pos;
+	census_time_ms_ = time_ms;
 	if (p_run_census) {
 		scene()->render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather);
 		census_stale_ = false;
@@ -629,7 +625,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	scene()->render_model_frame(frame_models_, frame_owners_, frame_interior_owners_,
 			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather,
 			frame_entity_positions_, frame_entity_bound_radii_q16_);
-	_render_coronas(p_camera, gain, weather, frame_models_, frame_owners_, env);
+	_render_coronas(p_camera, gain, time_ms, weather, frame_models_, frame_owners_, env);
 }
 
 void EffectLightDirector::run_census_now() {
@@ -639,7 +635,7 @@ void EffectLightDirector::run_census_now() {
 	// census_frame refreshes the rows without restamping the report's mode:
 	// a report read with the F3 stats off keeps saying what the gameplay
 	// pass (render_model_frame) reported.
-	scene()->census_frame(census_cam_pos_, QUERY_RADIUS, light_gain(), now_ms(), _weather());
+	scene()->census_frame(census_cam_pos_, QUERY_RADIUS, light_gain(), census_time_ms_, _weather());
 	census_stale_ = false;
 }
 
@@ -756,7 +752,7 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 // the env fog rides in as the fog-to-black fold
 // [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
 void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_gain,
-		Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
+		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
 	corona_frame_ = (corona_frame_ + 1) & 3;
 	Ref<EnvLightValues> fog;
@@ -776,7 +772,7 @@ void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_g
 	// hidden through visible_instance_count.
 	const Transform3D camera_transform = p_camera->get_camera_transform();
 	const int rows = scene()->fill_corona_multimesh(camera_transform.origin,
-			-camera_transform.basis.get_column(2), p_gain, now_ms(), corona_frame_, p_weather,
+			-camera_transform.basis.get_column(2), p_gain, p_time_ms, corona_frame_, p_weather,
 			p_models, p_owners, fog, instance->get_multimesh());
 	instance->set_visible(rows > 0);
 }
@@ -968,7 +964,7 @@ void EffectLightDirector::_bind_methods() {
 			DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("scene"), &EffectLightDirector::scene);
 	ClassDB::bind_method(D_METHOD("light_gain"), &EffectLightDirector::light_gain);
-	ClassDB::bind_method(D_METHOD("render_frame", "camera", "viewmodel_parts",
+	ClassDB::bind_method(D_METHOD("render_frame", "camera", "time_ms", "viewmodel_parts",
 								 "viewmodel_wire_handle", "run_census"),
 			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()), DEFVAL(-1),
 			DEFVAL(true));

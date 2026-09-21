@@ -1,4 +1,5 @@
 #include "particle/particle_renderer.h"
+#include "world/game_world.h"
 
 #include "env/mission_environment.h"
 
@@ -1327,9 +1328,10 @@ public:
 
 	void publish_world_draw_list(const Ref<ParticleCompositorEffect> &effect,
 			const opennova::renderer::ParticleDrawList &draw_list,
-			const Vector3 &camera_position, const Vector3 &camera_forward) {
+			const Vector3 &camera_position, const Vector3 &camera_forward, int64_t time_ms) {
 		auto submission = std::make_shared<ParticleWorldSubmission>();
 		submission->frame_id = draw_list.frame_id;
+		submission->time_ms = static_cast<uint32_t>(time_ms);
 		submission->commands = draw_list.commands;
 		submission->atlas = atlas_snapshot;
 		for (std::size_t component = 0; component < 3; ++component) {
@@ -1511,7 +1513,7 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("get_procedural_fallback_enabled"),
 			&ParticleRenderer::get_procedural_fallback_enabled);
-	ClassDB::bind_method(D_METHOD("render_now"),
+	ClassDB::bind_method(D_METHOD("render_now", "time_ms"),
 			&ParticleRenderer::render_now);
 	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("get_rendered_quad_count"),
@@ -1545,7 +1547,7 @@ void ParticleRenderer::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_READY) {
 		impl_->ensure_visuals(this);
 		set_process(false);
-		render_now();
+		render_now(GameWorld::current_frame_clock_ms());
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		shutdown();
 	}
@@ -1743,7 +1745,7 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 	return procedural_fallback_enabled_;
 }
 
-void ParticleRenderer::render_now() {
+void ParticleRenderer::render_now(int64_t p_time_ms) {
 	if (shutdown_ || !impl_)
 		return;
 	impl_->ensure_visuals(this);
@@ -1812,7 +1814,7 @@ void ParticleRenderer::render_now() {
 				impl_->compilers[slot].compile(impl_->render_snapshot, view);
 		impl_->slot_present[slot] = true;
 		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
-				view_camera.forward);
+				view_camera.forward, p_time_ms);
 	};
 
 	compile_world(kWorldFarSide,

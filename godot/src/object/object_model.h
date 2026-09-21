@@ -148,7 +148,6 @@ protected:
 	static void _bind_methods();
 
 public:
-	bool sample_frame();
 	bool sample(int64_t p_value_ms, int64_t p_frame);
 	int64_t get_time_ms() const { return time_ms_; }
 	void set_time_ms_for_test(int64_t p_value_ms);

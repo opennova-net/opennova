@@ -414,7 +414,8 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
 		local_character_profile_.unref();
 	}
-	panm_clock_->sample_frame();
+	panm_clock_->sample(get_frame_clock_ms(),
+			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
 	placer_->set_panm_clock(panm_clock_);
 	Dictionary options;
 	// A wire-header join deliberately has no authored body records. The load stream
@@ -1183,7 +1184,7 @@ int GameWorld::warm_effect_world_catalog() {
 	}
 	effect_world->advance_simulation_tick(Simulation::tick_dt(),
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
-	effect_world->render_now();
+	effect_world->render_now(get_frame_clock_ms());
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
 	// runs there, and the shipped game is what the full warm protects.
@@ -1197,7 +1198,7 @@ int GameWorld::warm_effect_world_catalog() {
 		rs->force_draw(true);
 		effect_world->advance_simulation_tick(Simulation::tick_dt(),
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
-		effect_world->render_now();
+		effect_world->render_now(get_frame_clock_ms());
 		rs->force_draw(true);
 		// The reset below cancels any unserviced compositor warm request. Drain
 		// the forced draws first so threaded renderers cannot race that cancel.

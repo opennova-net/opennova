@@ -150,7 +150,7 @@ public:
 	// seam between fixed warm ticks and forced draws so freshly emitted
 	// values are in the submitted draw list immediately. Returns the number
 	// of material runs.
-	int64_t render_now();
+	int64_t render_now(int64_t p_time_ms);
 	// The renderer's full draw-list diagnostics (world + first-person lists,
 	// backends, atlas pages/entries) for the F3 Particles page — the one
 	// Dictionary report this facade keeps (the allowlisted transport edge).
@@ -222,7 +222,7 @@ public:
 	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.
-	void render_frame();
+	void render_frame(int64_t p_time_ms);
 	// Value-only F3 read model (particle/effect_group_report.h). Emitter ids
 	// join portable simulation values to the renderer's draw list bounds; no
 	// particle/render Nodes escape this facade. Hidden particles report

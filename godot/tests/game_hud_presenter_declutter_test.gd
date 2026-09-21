@@ -209,12 +209,12 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	presenter.set_hud_detail_level(3)
 	presenter.tick(false)
 	var baseline: int = hud.get_draw_list_stats().glyphs
-	var now := Simulation.ticks_from_ms(Time.get_ticks_msec())
+	var now := Simulation.ticks_from_ms(world.frame_clock_ms)
 	sim.retain_feed_announcement("ABC", now)
 	presenter.tick(false)
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 3,
 			"the banner is drawn through the presenter even at detail 3")
-	now = Simulation.ticks_from_ms(Time.get_ticks_msec())
+	now = Simulation.ticks_from_ms(world.frame_clock_ms)
 	sim.retain_feed_announcement("XYZ", now - 187)
 	presenter.tick(false)
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline,
@@ -402,7 +402,7 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 			assert_eq(inset_view.get_active_render_camera(), inset_camera)
 			assert_eq(effects.get_second_scene_camera(), inset_camera,
 					"the renderer holds the Inset camera while the scope is up")
-			effects.render_frame()
+			effects.render_frame(GameWorld.current_frame_clock_ms())
 			var particles := effects.get_debug_draw_list_report()
 			assert_true(bool(particles.get("second_scene_compositor_attached", false)),
 					"the Inset camera owns a particle compositor pair while it renders")
@@ -441,7 +441,7 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 		assert_eq(hud.get_draw_list_stats().tris, 14, "lowering the optic restores the hip reticle")
 		assert_null(effects.get_second_scene_camera(),
 				"lowering the optic takes the Inset camera back from the renderer")
-		effects.render_frame()
+		effects.render_frame(GameWorld.current_frame_clock_ms())
 		assert_false(bool(effects.get_debug_draw_list_report().get(
 				"second_scene_compositor_attached", true)),
 				"an unscoped frame carries no second particle view")

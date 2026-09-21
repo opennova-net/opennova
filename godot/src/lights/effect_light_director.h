@@ -122,7 +122,7 @@ public:
 	// reaches the arms). The FLICKER phase reads the live weather wave ring;
 	// the ambient scale is the env light-state gain (the ported
 	// EffectWorld_AmbientScale channel).
-	void render_frame(Camera3D *p_camera,
+	void render_frame(Camera3D *p_camera, int64_t p_time_ms,
 			const TypedArray<ObjectModel> &p_viewmodel_parts = TypedArray<ObjectModel>(),
 			int p_viewmodel_wire_handle = -1, bool p_run_census = true);
 	// On-demand census refresh for report readers while the capture is off:
@@ -216,7 +216,8 @@ private:
 	void _ensure_model_registry(Node *p_container);
 	void _rebuild_model_registry(Node *p_container);
 	BlinkOwner _local_player_interior_group();
-	void _render_coronas(Camera3D *p_camera, const Vector3 &p_gain, Weather *p_weather,
+	void _render_coronas(Camera3D *p_camera, const Vector3 &p_gain, int p_time_ms,
+			Weather *p_weather,
 			const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 			MissionEnvironment *p_env);
 	void _clear_coronas();
@@ -275,9 +276,10 @@ private:
 	// change, reset, and reattach.
 	HashMap<int, int64_t> blink_owner_cache_;
 	// The report-only census skipped this frame (F3 capture off);
-	// run_census_now refreshes it on demand with the last frame's camera.
+	// run_census_now refreshes it on demand with the last frame's camera and clock.
 	bool census_stale_ = false;
 	Vector3 census_cam_pos_;
+	int census_time_ms_ = 0;
 	// Per-frame walk registry: MissionObjects children that are ObjectModels
 	// with their entity_ref identity read once at (re)build. Membership
 	// changes mark it dirty (child_entered_tree/child_exiting_tree on the

@@ -185,7 +185,7 @@ func _process(delta: float) -> void:
 		return
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
-	_driver.tick(Time.get_ticks_msec())
+	_driver.tick(_view.frame_clock_ms)
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		close()

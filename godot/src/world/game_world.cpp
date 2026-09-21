@@ -680,6 +680,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_effect_light_report"), &GameWorld::get_effect_light_report);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "camera_xform", "delta", "frame_input"),
 			&GameWorld::tick, DEFVAL(Transform3D()), DEFVAL(-1.0), DEFVAL(Variant()));
+	ClassDB::bind_static_method("GameWorld", D_METHOD("current_frame_clock_ms"),
+			&GameWorld::current_frame_clock_ms);
+	ClassDB::bind_method(D_METHOD("get_frame_clock_ms"), &GameWorld::get_frame_clock_ms);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_clock_ms"), "", "get_frame_clock_ms");
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_names"), &GameWorld::frame_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frozen_pose_leg_names"),
 			&GameWorld::frozen_pose_leg_names);

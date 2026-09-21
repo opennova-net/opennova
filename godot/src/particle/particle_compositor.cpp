@@ -37,7 +37,6 @@
 #include <godot_cpp/classes/render_scene_data.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/rid.hpp>
@@ -1286,10 +1285,8 @@ bool ParticleCompositorEffect::Impl::draw(
 				static_cast<float>(submission.fog_type));
 		write_f32(push_constants, 112, static_cast<float>(size.x));
 		write_f32(push_constants, 116, static_cast<float>(size.y));
-		const std::uint64_t ticks = Time::get_singleton() != nullptr ?
-				Time::get_singleton()->get_ticks_msec() : 0;
 		write_f32(push_constants, 120,
-				static_cast<float>(static_cast<std::uint32_t>(ticks)) * 0.004f);
+				static_cast<float>(submission.time_ms) * 0.004f);
 
 		int64_t draw_list = RenderingDevice::INVALID_ID;
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);

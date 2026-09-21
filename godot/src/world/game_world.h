@@ -350,6 +350,10 @@ public:
 	Ref<MissionFrameOutcome> advance_frame(const Vector3 &p_camera_pos,
 			const Transform3D &p_camera_xform, double p_delta,
 			const Ref<MissionFrameInput> &p_input);
+	// Main-thread display clock, shared by every world and menu. The first
+	// reader samples once per Engine process frame, including menu-only frames.
+	static int64_t current_frame_clock_ms();
+	int64_t get_frame_clock_ms() const { return current_frame_clock_ms(); }
 	// The leg table as literal names, in order (the frame-order pin).
 	static PackedStringArray frame_leg_names();
 	static PackedStringArray frozen_pose_leg_names();

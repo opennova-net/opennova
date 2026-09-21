@@ -84,7 +84,7 @@ func add_scene(scene: Node) -> void:
 func settle(tree: SceneTree, fx: EffectWorld, count: int) -> void:
 	for _index in range(count):
 		if fx != null:
-			fx.render_frame()
+			fx.render_frame(GameWorld.current_frame_clock_ms())
 		await tree.process_frame
 
 
@@ -92,7 +92,7 @@ func settle(tree: SceneTree, fx: EffectWorld, count: int) -> void:
 ## nothing rendered).
 func capture_after_render(tree: SceneTree, fx: EffectWorld) -> Image:
 	if fx != null:
-		fx.render_frame()
+		fx.render_frame(GameWorld.current_frame_clock_ms())
 	await tree.process_frame
 	return await capture_image(tree)
 

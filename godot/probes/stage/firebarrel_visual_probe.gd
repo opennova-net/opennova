@@ -65,7 +65,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			accum -= TICK_DT
 			_effect_world.advance_fixed_tick(TICK_DT)
 			_effect_world.advance_fixed_tick(TICK_DT)
-		_effect_world.render_frame()
+		_effect_world.render_frame(GameWorld.current_frame_clock_ms())
 		if elapsed >= float(CAPTURE_TIMES[captured.size()]):
 			var image := await _stage.capture_image(ctx.tree)
 			var path := "%s/flame_t%d.png" % [_out_dir, captured.size() + 1]

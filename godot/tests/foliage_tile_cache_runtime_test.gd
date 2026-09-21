@@ -34,7 +34,7 @@ func _settle_tile_cache_with_foliage(
 	var diagnostics: Dictionary = {}
 	for _attempt in range(512):
 		terrain.render_frame()
-		dispatcher.render_frame(camera.global_transform)
+		dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 		diagnostics = terrain.get_tile_cache_diagnostics()
 		if int(diagnostics.get("pending_jobs", -1)) == 0 \
 				and int(diagnostics.get("frame_requests", 0)) > 0 \
@@ -86,8 +86,8 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	assert_eq(int(cold.get("frame_uploads", -1)), 0)
 	# The first foliage pass fills retail's detail cache; the second submits its
 	# resident geometry without giving terrain a frame-start publication point.
-	dispatcher.render_frame(camera.global_transform)
-	dispatcher.render_frame(camera.global_transform)
+	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
+	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 	var pending_fallback_draws := 0
 	for row_value in _visible_detail_draws(dispatcher):
 		var pending_draw := row_value as Dictionary
@@ -141,7 +141,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	# finest page retained from an older frame.
 	terrain.set_lod_quality(0.3)
 	terrain.render_frame()
-	dispatcher.render_frame(camera.global_transform)
+	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 	for row_value in _visible_detail_draws(dispatcher):
 		var transition_draw := row_value as Dictionary
 		if not bool(transition_draw.tile_cache_ready):

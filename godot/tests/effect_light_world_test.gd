@@ -232,7 +232,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 			"MF_Light reuses entity+0x1B4 instead of allocating beside LGHT")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
@@ -262,7 +262,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 			"the presented MF_Light event creates one muzzle glow")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1,
 			"the owned muzzle glow reaches camera-global object output")
 	presenter.present_fires([_muzzle_fire(78, Vector3.ZERO, 0)])
@@ -299,7 +299,7 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 			"the destruction drain creates one death flash")
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1,
 			"the death flash reaches camera-global object output")
 	presenter.teardown()
@@ -327,7 +327,7 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	var camera := Camera3D.new()
 	camera.position = Vector3(10.0, 28.0, 346.0)
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_eq(rows.size(), 1, "the placed record selects for a nearby camera")
 	if rows.size() == 1:
@@ -343,7 +343,7 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"reattach respawns from the entity set instead of accumulating")
-	director.render_frame(null)
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
 
 
 func _synthetic_object_data(res_path: String) -> ObjectData:
@@ -396,7 +396,7 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(5.0, 2.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var report := director.get_report()
 	assert_eq(report.static_rows, 1)
 	assert_eq(report.static_draws, 1)
@@ -548,9 +548,9 @@ func test_director_null_camera_clears_output_without_destroying_the_pool() -> vo
 			_barrel_light_info(), Transform3D.IDENTITY), 0)
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1)
-	director.render_frame(null)
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
 	var report := director.get_report()
 	assert_eq(report.live, 1,
 			"temporary camera loss preserves the mission light pool")
@@ -569,7 +569,7 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 	director.on_muzzle_fire(17, Vector3.ZERO)
 	var camera := Camera3D.new()
 	world.add_child(camera)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(director.get_report().selected, 1)
 	director.reset()
 	var report := director.get_report()
@@ -668,7 +668,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(0.0, 2.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var rows := director.get_report().rows
 	assert_gt(rows.size(), 0)
 	var saw_spawn_position := false
@@ -687,7 +687,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	part.position += Vector3(2.0, 0.0, 0.0)
 	var moved_position := node.global_transform * authored_position
 	assert_false(moved_position.is_equal_approx(spawn_position))
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	rows = director.get_report().rows
 	var still_at_spawn := false
 	var followed_entity := false

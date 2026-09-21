@@ -192,11 +192,11 @@ public:
 
   // Runtime frame. Reads exact detail patch keys/distances from the wired
   // Terrain::get_foliage_detail_patches_native().
-  void render_frame(const Transform3D &p_camera_xform);
+  void render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
 
   // Standalone frame. Builds a deterministic 16-unit preview cell set whose
   // sampled terrain centers are at most 42 units in 3D from the camera.
-  void render_preview(const Transform3D &p_camera_xform);
+  void render_preview(const Transform3D &p_camera_xform, int64_t p_time_ms);
 
   void reset();
   int get_total_instances() const;
@@ -405,7 +405,7 @@ private:
   void _on_colormap_source_changed();
 
   opennova::renderer::FoliageViewInput
-  _view_input(const Transform3D &p_camera_xform) const;
+  _view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const;
   std::vector<opennova::foliage::DetailCell>
   _preview_cells(const Vector3 &p_camera_position) const;
   void _compile_and_apply(const opennova::renderer::FoliageViewInput &p_view);

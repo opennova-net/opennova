@@ -197,6 +197,20 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 const int GameWorld::kFrozenPoseRefreshCount =
 		sizeof(GameWorld::kFrozenPoseRefresh) / sizeof(GameWorld::kFrozenPoseRefresh[0]);
 
+int64_t GameWorld::current_frame_clock_ms() {
+	struct FrameClock {
+		int64_t frame = -1;
+		int64_t milliseconds = 0;
+	};
+	static FrameClock clock;
+	const int64_t frame = static_cast<int64_t>(Engine::get_singleton()->get_process_frames());
+	if (clock.frame != frame) {
+		clock.frame = frame;
+		clock.milliseconds = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	}
+	return clock.milliseconds;
+}
+
 PackedStringArray GameWorld::frame_leg_names() {
 	PackedStringArray names;
 	for (int i = 0; i < kFrameLegCount; ++i) {
@@ -497,7 +511,8 @@ void GameWorld::begin_device_frame() {
 }
 
 void GameWorld::sample_panm_clock() {
-	panm_clock_->sample_frame();
+	panm_clock_->sample(get_frame_clock_ms(),
+			static_cast<int64_t>(Engine::get_singleton()->get_process_frames()));
 	MissionRoot *runtime = get_runtime();
 	if (runtime != nullptr) {
 		runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
@@ -552,7 +567,7 @@ void GameWorld::render_foliage_frame() {
 			}
 		}
 		dispatcher_->set_silhouette_anchors(silhouette_anchors);
-		dispatcher_->render_frame(render_camera_xform());
+		dispatcher_->render_frame(render_camera_xform(), get_frame_clock_ms());
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }
@@ -862,7 +877,7 @@ void GameWorld::render_material_frame() {
 void GameWorld::render_particle_frame() {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world != nullptr) {
-		effect_world->render_frame();
+		effect_world->render_frame(get_frame_clock_ms());
 	}
 }
 
@@ -887,7 +902,7 @@ void GameWorld::render_light_frame() {
 		viewmodel_owner = sim->get_local_player_wire_handle();
 	}
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
-			viewmodel_parts, viewmodel_owner, frame_stats_on_);
+			get_frame_clock_ms(), viewmodel_parts, viewmodel_owner, frame_stats_on_);
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
 	render_terrain_light_leg();
@@ -897,7 +912,7 @@ void GameWorld::render_light_frame() {
 	if (slot_shadow_ != nullptr) {
 		slot_shadow_->set_light_scene(light_director_->scene());
 		slot_shadow_->set_light_context(light_director_->light_gain(),
-				static_cast<int>(Time::get_singleton()->get_ticks_msec()), weather_);
+				static_cast<int>(get_frame_clock_ms()), weather_);
 		if (resource_root_.is_valid()) {
 			slot_shadow_->set_resource_root(resource_root_);
 		}
@@ -938,7 +953,7 @@ void GameWorld::render_terrain_light_leg() {
 		return;
 	}
 	Ref<LightScene> scene = light_director_.is_valid() ? light_director_->scene() : Ref<LightScene>();
-	terrain_->set_light_context(scene, static_cast<int>(Time::get_singleton()->get_ticks_msec()));
+	terrain_->set_light_context(scene, static_cast<int>(get_frame_clock_ms()));
 }
 
 void GameWorld::update_clear_frame() {

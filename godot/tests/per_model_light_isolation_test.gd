@@ -106,7 +106,7 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(2.0, 1.0, 6.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 
 	var owner_surface := _surface_instance(owner_model)
 	var bystander_surface := _surface_instance(bystander)
@@ -185,7 +185,7 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(1.0, 1.0, 5.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var owner_surface := _surface_instance(owner_model)
 	var bystander_surface := _surface_instance(bystander)
 	if owner_surface == null or bystander_surface == null:
@@ -239,7 +239,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(1.5, 1.0, 6.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var surface_a := _surface_instance(model_a)
 	var surface_b := _surface_instance(model_b)
 	if surface_a == null or surface_b == null:
@@ -257,7 +257,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SHED_3DI)), OK)
 	assert_eq(lit.get_light_info(0).subobject, 0)
 	director.reattach()
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(float(surface_a.get_instance_shader_parameter(
 			"u_point_light_count")), 1.0,
 			"a subobject-0 static record lights every nearby draw")
@@ -624,7 +624,7 @@ func test_static_director_rows_share_entity_cube_and_keep_section_filters() -> v
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.position = origin + Vector3(0.0, 0.0, 8.0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	var atlas := _static_light_atlas(scene)
 	if atlas == null:
 		return
@@ -639,13 +639,13 @@ func test_static_director_rows_share_entity_cube_and_keep_section_filters() -> v
 			origin + Vector3(2.5, 0.0, 0.0), 0.25).attached(2, owner)), 0)
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
 			origin + Vector3(3.0, 0.0, 0.0), 0.25).attached(4, owner)), 0)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	atlas = _static_light_atlas(scene)
 	assert_almost_eq(atlas.get_pixel(5, 0).r, origin.x + 2.5, 0.001)
 	assert_almost_eq(atlas.get_pixel(5, 1).r, origin.x + 3.0, 0.001,
 			"a rejected section-2 candidate does not consume section 4's third slot")
 	var selected_bytes := atlas.get_data()
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	assert_eq(_static_light_atlas(scene).get_data(), selected_bytes,
 			"cached handle reselect preserves both per-section selections")
 
@@ -675,7 +675,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	camera.position = Vector3(20, 0, 8)
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	for model: ObjectModel in [body, head, held]:
 		var surface := _surface_instance(model)
 		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0)
@@ -683,7 +683,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 		assert_almost_eq(posr.x, light_pos.x, 0.001,
 				"the same entity cube and owner filter reach every model of the entity")
 	body.position.x += 100.0
-	director.render_frame(camera)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	for model: ObjectModel in [body, head, held]:
 		assert_eq(float(_surface_instance(model).get_instance_shader_parameter(
 				"u_point_light_count")), 0.0,

@@ -35,6 +35,7 @@ struct ParticleAtlasSnapshot {
 // buffer without allocating command-local arrays or index slices.
 struct ParticleWorldSubmission {
 	std::uint64_t frame_id = 0;
+	std::uint32_t time_ms = 0; // captured with this submission on the main thread
 	PackedByteArray triangle_vertices;
 	std::vector<opennova::renderer::ParticleDrawCommand> commands;
 	std::shared_ptr<const ParticleAtlasSnapshot> atlas;

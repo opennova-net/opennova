@@ -583,7 +583,7 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 	world.load_particle_file(_make_renderable_effect_file())
 	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
 	world.advance_fixed_tick(Simulation.tick_dt())
-	assert_gt(world.render_now(), 0,
+	assert_gt(world.render_now(GameWorld.current_frame_clock_ms()), 0,
 			"the public warm facade synchronously submits non-empty material runs")
 
 
@@ -649,8 +649,8 @@ func test_preaged_effect_receives_mission_wind_before_its_first_tick() -> void:
 	for tick in 8:
 		normal.advance_fixed_tick(0.016)
 	assert_gt(preaged.spawn_effect_transient("puff", Vector3.ZERO, Vector3.ZERO, 8), 0)
-	normal.render_now()
-	preaged.render_now()
+	normal.render_now(GameWorld.current_frame_clock_ms())
+	preaged.render_now(GameWorld.current_frame_clock_ms())
 	var expected := _single_emitter(normal)
 	var actual := _single_emitter(preaged)
 	assert_eq(actual.alive, expected.alive, "the catch-up population matches ordinary ticks")

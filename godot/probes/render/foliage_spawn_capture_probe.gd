@@ -335,14 +335,14 @@ func _probe_flicker_tier(
 		hidden: Image, base_transform: Transform3D, tier: String) -> Dictionary:
 	camera.set_global_transform(base_transform)
 	for _warmup in 2:
-		dispatcher.render_frame(base_transform)
+		dispatcher.render_frame(base_transform, GameWorld.current_frame_clock_ms())
 		_configure_flicker_draws(dispatcher, tier, false, 0.0)
 		await _ctx.wait_frames(1)
 
 	var images: Array[Image] = []
 	var setup := {}
 	for frame_index in range(FLICKER_CAPTURE_COUNT):
-		dispatcher.render_frame(base_transform)
+		dispatcher.render_frame(base_transform, GameWorld.current_frame_clock_ms())
 		setup = _configure_flicker_draws(dispatcher, tier, false, 0.0)
 		var image: Image = await _grab_flicker_image(viewport)
 		if image == null or image.is_empty():
@@ -371,7 +371,7 @@ func _probe_flicker_tier(
 		return {"ok": true, "skipped": "outside exact spawn view"}
 
 	# Positive control: dropping the isolated tier must make the same metric red.
-	dispatcher.render_frame(base_transform)
+	dispatcher.render_frame(base_transform, GameWorld.current_frame_clock_ms())
 	_configure_flicker_draws(dispatcher, tier, true, 0.0)
 	var dropout: Image = await _grab_flicker_image(viewport)
 	var control := _masked_flicker_diff(hidden, images[0], dropout)
@@ -379,10 +379,10 @@ func _probe_flicker_tier(
 
 	# Hold geometry/camera fixed and nudge only c6.a by the amount produced by
 	# 0.25 world units in retail's 20..42 fade band.
-	dispatcher.render_frame(base_transform)
+	dispatcher.render_frame(base_transform, GameWorld.current_frame_clock_ms())
 	_configure_flicker_draws(dispatcher, tier, false, 0.0)
 	var fade_a: Image = await _grab_flicker_image(viewport)
-	dispatcher.render_frame(base_transform)
+	dispatcher.render_frame(base_transform, GameWorld.current_frame_clock_ms())
 	var fade_setup := _configure_flicker_draws(
 		dispatcher, tier, false, -FLICKER_FADE_STEP)
 	var fade_b: Image = await _grab_flicker_image(viewport)

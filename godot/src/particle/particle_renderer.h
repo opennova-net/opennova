@@ -102,7 +102,7 @@ public:
 	// publishes an immutable World copy across the render-thread boundary.
 	// Process-driven rendering calls this automatically; tests and previews may
 	// call it explicitly after advancing a scene.
-	void render_now();
+	void render_now(int64_t p_time_ms);
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
 	// references escape through the F3/debug seam. They are read from each

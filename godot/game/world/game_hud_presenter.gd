@@ -645,7 +645,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 # [orig: current_tick @0x24c1968] witness). Adopting the engine's exact 16 ms
 # quantum corrects the old 0.062 ticks/ms approximation (62 Hz vs 62.5 Hz).
 func _hud_ticks() -> int:
-	return Simulation.ticks_from_ms(Time.get_ticks_msec())
+	return Simulation.ticks_from_ms(_world.frame_clock_ms)
 
 
 # The waypoint label's entry: the sim's current track entry with its display
