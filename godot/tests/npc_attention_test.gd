@@ -52,11 +52,11 @@ func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
 						assert_true(mission.set_entity_property_int(
 								MissionData.KIND_ORGANIC, actor.index, field, value))
 				var event := mission.add_event(0, 0, 0)
-				assert_not_null(event)
-				assert_not_null(mission.add_event_trigger(event.index,
-						MissionEventTrigger.make(1, 1, 20, 21)))
-				assert_not_null(mission.add_event_action(event.index,
-						MissionEventAction.make(5, 1, 40, 1)))), OK)
+				assert_gte(event, 0)
+				assert_true(mission.add_event_trigger(event,
+						1, 1, 20, 21))
+				assert_true(mission.add_event_action(event,
+						5, 1, 40, 1))), OK)
 	var sim := world.get_sim()
 	var actor := world.get_runtime().get_entity_index().resolve_single(ids[0]) as ObjectModel
 	assert_not_null(actor)

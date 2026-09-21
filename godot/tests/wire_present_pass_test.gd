@@ -259,13 +259,13 @@ func _index_with_placed(bms_id: int) -> Dictionary:
 	placed.set_process(false)
 	var index := EntityIndex.new()
 	placed.entity_ref = EntityRef.make(1, 0, bms_id)
-	index.build([placed], [])
+	index.build([placed], null)
 	return { "index": index, "placed": placed }
 
 
 func _empty_index() -> EntityIndex:
 	var index := EntityIndex.new()
-	index.build([], [])
+	index.build([], null)
 	return index
 
 

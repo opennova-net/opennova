@@ -202,7 +202,7 @@ func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -
 
 
 # The placed ObjectModel a mission record resolves to (the runtime's index).
-func _placed_node(world: GameWorld, placed: MissionEntityRecord) -> ObjectModel:
+func _placed_node(world: GameWorld, placed: EntityRef) -> ObjectModel:
 	var bms_id := placed.bms_id
 	assert_gt(bms_id, 0, "the authored entity carries a BMS id")
 	var node := world.get_runtime().get_entity_index().resolve_single(bms_id) as ObjectModel
@@ -212,7 +212,7 @@ func _placed_node(world: GameWorld, placed: MissionEntityRecord) -> ObjectModel:
 
 # One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it,
 # addressed at a placed record (net id, BMS id, packed spawn origin).
-func _control_effect(kind: String, net_id: int, placed: MissionEntityRecord) -> MissionEffect:
+func _control_effect(kind: String, net_id: int, placed: EntityRef) -> MissionEffect:
 	return MissionEffect.make(kind, net_id, placed.bms_id,
 			int(Simulation.spawn_origin_pack(placed.kind, placed.index)))
 
@@ -3029,7 +3029,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
-	var bms_id := (placed[0] as MissionEntityRecord).bms_id
+	var bms_id := (placed[0] as EntityRef).bms_id
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_entity_index().resolve_single(bms_id) as Node3D
 	assert_not_null(building, "the authored building placed a real ObjectModel")
@@ -3089,7 +3089,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
 	var building := world.get_runtime().get_entity_index().resolve_single(
-			(placed[0] as MissionEntityRecord).bms_id) as Node3D
+			(placed[0] as EntityRef).bms_id) as Node3D
 	assert_not_null(building)
 	if building == null:
 		return

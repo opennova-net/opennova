@@ -33,7 +33,7 @@ end
 		assert_eq(DirAccess.copy_absolute(
 				ProjectSettings.globalize_path("res://../fixtures/threedi/synth/%s.3di" % name),
 				_root.path_join(name + ".3di")), OK)
-	var records: Array[MissionEntityRecord] = []
+	var records: Array[EntityRef] = []
 	_world = WorldFixture.boot_minimal(self, _root, func(mission: MissionData) -> void:
 		records.append(mission.add_entity(MissionData.KIND_BUILDING, 101896,
 				Vector3(30, 0, -30), Vector3(0, 90, 0))))

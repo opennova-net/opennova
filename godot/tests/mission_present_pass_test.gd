@@ -215,7 +215,7 @@ func _index_of(by_bms_id: Dictionary) -> EntityIndex:
 		model.entity_ref = EntityRef.make(1, int(bms_id), int(bms_id))
 		models.append(model)
 	var index := EntityIndex.new()
-	index.build(models, [])
+	index.build(models, null)
 	return index
 
 
@@ -358,7 +358,7 @@ func test_transform_presentation_advances_the_static_shadow_registry_once() -> v
 	var model := _model()
 	var index := EntityIndex.new()
 	model.entity_ref = EntityRef.make(MissionData.KIND_BUILDING, 7, 501)
-	index.build([model], [])
+	index.build([model], null)
 	var placer := MissionObjectPlacer.new()
 	placer.register_static_instance(501, "Caster", 7,
 			Transform3D(Basis.IDENTITY, Vector3(-9, -9, -9)), true)
@@ -931,7 +931,7 @@ func test_resolves_by_kind_index_fallback() -> void:
 	var model := _model()
 	var index := EntityIndex.new()
 	model.entity_ref = EntityRef.make(3, 2, 0)
-	index.build([model], [])
+	index.build([model], null)
 	var p := _make_pass(index)
 	var snap := Snapshot.new()
 	snap.entities = [{ "bms_id": 0, "kind": 3, "index": 2,
@@ -1178,7 +1178,7 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	assert_eq(_stat(p, "plan_rebuilds"), 2,
 			"freeing any cached model invalidates the typed row plan immediately")
 	replacement.entity_ref = EntityRef.make(1, 21, 21)
-	index.build([replacement], [])
+	index.build([replacement], null)
 	_present(p, snap)
 	assert_almost_eq(replacement.position.x, 30.0, 0.001,
 			"the replacement receives the current row after the rebind")
@@ -1362,7 +1362,7 @@ func test_reenabled_output_channels_catch_up_to_current_state() -> void:
 
 func test_unresolved_target_does_not_crash() -> void:
 	var index := EntityIndex.new()
-	index.build([], [])
+	index.build([], null)
 	var p := _make_pass(index)
 	var snap := Snapshot.new()
 	snap.entities = [{ "bms_id": 1234, "active1": 1, "phase1": 1 }]

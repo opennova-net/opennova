@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 
@@ -64,6 +65,18 @@ bool check_mission(const fs::path &path) {
 	    parsed.layer_records.size() != static_cast<size_t>(opennova::bms::kLayerRecordCount)) {
 		std::fprintf(stderr, "  FAIL %s: fixed section count wrong (wp/grp/layer)\n", name.c_str());
 		return false;
+	}
+
+	// Former GUT waypoint-view oracle, including CP19's authored count of
+	// 39: preserve the raw record, but bound the public view to its 32 slots.
+	for (const auto &summary : opennova::mission::waypoint_summaries(parsed)) {
+		opennova::mission::WaypointPath waypoint;
+		if (summary.marker_count < 0 || summary.marker_count > 32 ||
+				!opennova::mission::waypoint_path(parsed, summary.index, waypoint) ||
+				waypoint.marker_indices.size() > 32) {
+			std::fprintf(stderr, "  FAIL %s: waypoint view exceeds its stored slots\n", name.c_str());
+			return false;
+		}
 	}
 
 	std::vector<uint8_t> encoded;

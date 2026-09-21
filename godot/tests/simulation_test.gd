@@ -1806,16 +1806,16 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 		[reference_enemy, reference_gun],
 		[rotated_enemy, rotated_gun],
 	]:
-		assert_not_null(pair[0] as MissionEntityRecord)
-		assert_not_null(pair[1] as MissionEntityRecord)
+		assert_not_null(pair[0] as EntityRef)
+		assert_not_null(pair[1] as EntityRef)
 		assert_true(md.set_entity_property_int(
 				MissionData.KIND_ORGANIC,
-				(pair[0] as MissionEntityRecord).index,
+				(pair[0] as EntityRef).index,
 				"waypoint_id", 125))
 		assert_true(md.set_entity_property_int(
 				MissionData.KIND_ORGANIC,
-				(pair[0] as MissionEntityRecord).index,
-				"wp_number", (pair[1] as MissionEntityRecord).bms_id))
+				(pair[0] as EntityRef).index,
+				"wp_number", (pair[1] as EntityRef).bms_id))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -4030,8 +4030,8 @@ func _admit_standalone_script_ticks(sim: Simulation) -> void:
 func test_empty_script_startup_closes_admission_without_humans() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 6, 0, 77))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	for _tick in range(32):
@@ -4052,8 +4052,8 @@ func test_bms_event_fires_through_binding() -> void:
 	# drains out of the shared World EffectLog.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 6, 0, 77))
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md), "loaded the scripted mission")
@@ -4109,8 +4109,8 @@ func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
 func test_fired_events_snapshot_matches_scalar() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 6, 0, 77))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_admit_standalone_script_ticks(sim)
@@ -4433,8 +4433,8 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 			MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 21, 34, ssn, 1, 1, 65536))
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The crate's controller seat comes from the committed armory model with
@@ -4499,9 +4499,9 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 			MissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_not_null(md.add_event(0, 0, 0))
+	assert_gte(md.add_event(0, 0, 0), 0)
 	for channel in [1, 2]:
-		assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, channel, 1, 65536)))
+		assert_true(md.add_event_action(0, 21, 34, ssn, channel, 1, 65536))
 
 	var item_db := _fast_rope_item_db()
 	assert_not_null(item_db)
@@ -4569,11 +4569,11 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 			MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_trigger(1, MissionEventTrigger.make(4, 1, 7, 1)))
-	assert_not_null(md.add_event_action(1, MissionEventAction.make(20, 0, ssn)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 21, 34, ssn, 1, 1, 65536))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_trigger(1, 4, 1, 7, 1))
+	assert_true(md.add_event_action(1, 20, 0, ssn))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -4682,8 +4682,8 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 			MissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, channel, 1, 65536)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 21, 34, ssn, channel, 1, 65536))
 
 	var item_db := _fast_rope_item_db()
 	assert_not_null(item_db)
@@ -4743,8 +4743,8 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 		MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 21, 34, ssn, 1, 1, 65536))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -4975,9 +4975,9 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(
-			0, MissionEventAction.make(22, 0, old_ssn)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(
+			0, 22, 0, old_ssn))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -5023,9 +5023,9 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(
-			0, MissionEventAction.make(22, 0, old_ssn)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(
+			0, 22, 0, old_ssn))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -5172,8 +5172,8 @@ func test_scripted_remove_frees_the_ai_entity_with_its_registry_slot() -> void:
 	assert_true(probe.load_from_mission_data(md))
 	var ssn := probe.get_entity_net_id(0)
 
-	assert_not_null(md.add_event(0, 0, 0))
-	assert_not_null(md.add_event_action(0, MissionEventAction.make(22, 0, ssn)))
+	assert_gte(md.add_event(0, 0, 0), 0)
+	assert_true(md.add_event_action(0, 22, 0, ssn))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_admit_standalone_script_ticks(sim)

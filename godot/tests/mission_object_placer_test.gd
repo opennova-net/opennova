@@ -387,7 +387,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 				"the visible batch supplies the static silhouette")
 		var expected_bms_ids: Array = []
 		for index in range(2):
-			expected_bms_ids.append(mission.get_entity(
+			expected_bms_ids.append(mission.get_entity_ref(
 					MissionData.KIND_BUILDING, index).bms_id)
 		assert_eq(Array(visible_batch.slot_bms_ids),
 				expected_bms_ids,

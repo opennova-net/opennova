@@ -79,13 +79,13 @@ func _mission_fixture() -> Dictionary:
 	# First row in each independent pool: exact authority handles 0x1000,
 	# 0x2000, and 0x3000. The joiner starts at x=0, deploys to x=12, then is
 	# within the retail four-unit seat scan of the vehicle at x=14.
-	var vehicle: MissionEntityRecord = mission.add_entity(
+	var vehicle: EntityRef = mission.add_entity(
 			MissionData.KIND_ITEM, VEHICLE_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: MissionEntityRecord = mission.add_entity(
+	var zone: EntityRef = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: MissionEntityRecord = mission.add_entity(
+	var marker: EntityRef = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
 	assert_not_null(vehicle)
@@ -107,13 +107,13 @@ func _designated_g_mission_fixture() -> Dictionary:
 	assert_eq(mission.create_default(), OK)
 	# The body-empty joiner deploys beside a vehicle-EWeap parent. Promotion
 	# creates its designated-G B50 child at the next exact pool-1 handle.
-	var parent: MissionEntityRecord = mission.add_entity(
+	var parent: EntityRef = mission.add_entity(
 			MissionData.KIND_ITEM, DESIGNATED_G_PARENT_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: MissionEntityRecord = mission.add_entity(
+	var zone: EntityRef = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: MissionEntityRecord = mission.add_entity(
+	var marker: EntityRef = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
 	assert_not_null(parent)

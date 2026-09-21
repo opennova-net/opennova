@@ -112,7 +112,6 @@
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
-#include "mission/mission_records.h"
 #include "mission/mission_perf_counters.h"
 #include "mission/mission_root.h"
 #include "mission/mission_setup_options.h"
@@ -305,20 +304,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
-	GDREGISTER_CLASS(MissionEntityRecord);
-	GDREGISTER_CLASS(MissionWaypointSummary);
-	GDREGISTER_CLASS(MissionWaypointPath);
-	GDREGISTER_CLASS(MissionWaypointMarker);
-	GDREGISTER_CLASS(MissionAreaTrigger);
-	GDREGISTER_CLASS(MissionWeaponLoadoutEntry);
-	GDREGISTER_CLASS(MissionGroup);
-	GDREGISTER_CLASS(MissionEvent);
-	GDREGISTER_CLASS(MissionEventTrigger);
-	GDREGISTER_CLASS(MissionEventAction);
-	GDREGISTER_CLASS(MissionLogicReference);
-	GDREGISTER_CLASS(MissionLogicDiagnostic);
-	GDREGISTER_CLASS(MissionEventChain);
-	GDREGISTER_CLASS(MissionLogicSummary);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);
 	// The present passes EntityPresenter owns (ADR 0043 d9): two are

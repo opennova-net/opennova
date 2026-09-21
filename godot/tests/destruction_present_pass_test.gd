@@ -110,7 +110,7 @@ func _husk_models(root: Node) -> Array:
 # construction-time entry channel (the one production path — never a scan).
 func _index_of(entries: Array) -> EntityIndex:
 	var index := EntityIndex.new()
-	index.build(entries, [])
+	index.build(entries, null)
 	return index
 
 
@@ -878,7 +878,7 @@ end
 	root.name = "MissionRoot"
 	world.add_child(root)
 	assert_eq(placer.place(mission, root).batched, 1)
-	var bms_id: int = mission.get_entity(MissionData.KIND_ITEM, 0).bms_id
+	var bms_id: int = mission.get_entity_ref(MissionData.KIND_ITEM, 0).bms_id
 	var director := EffectLightDirector.new()
 	director.setup(world, placer)
 	director.reattach()

@@ -60,8 +60,8 @@ func _retail_attachment_basis(direction: Vector3) -> Basis:
 
 func _blackhawk_carriers(mission: MissionData) -> Array:
 	var carriers: Array = []
-	for raw in mission.get_all_entities():
-		var entity: MissionEntityRecord = raw
+	for raw in mission.get_all_entity_refs():
+		var entity: EntityRef = raw
 		if entity.item_id == CARRIER_ITEM_ID:
 			carriers.append(entity)
 	return carriers
@@ -187,7 +187,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	for carrier in carriers:
 		var carrier_xform := MissionObjectPlacer.entity_transform(
 				carrier.position,
-				carrier.rotation_deg)
+				mission.get_entity_rotation(carrier.kind, carrier.index))
 		for anchor: ModelUserPoint in anchors:
 			var direction := anchor.rotation
 			assert_gt(direction.length_squared(), 0.99,

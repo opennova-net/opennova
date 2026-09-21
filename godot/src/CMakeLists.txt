@@ -151,7 +151,6 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
-    mission/mission_records.cpp
     mission/mission_info.cpp
     mission/mission_perf_counters.cpp
     mission/mission_root.cpp

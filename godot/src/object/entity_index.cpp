@@ -6,7 +6,7 @@
 namespace godot {
 
 void EntityIndex::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("build", "models", "area_triggers"), &EntityIndex::build);
+	ClassDB::bind_method(D_METHOD("build", "models", "mission"), &EntityIndex::build);
 	ClassDB::bind_method(D_METHOD("clear"), &EntityIndex::clear);
 	ClassDB::bind_method(D_METHOD("get_generation"), &EntityIndex::get_generation);
 	ClassDB::bind_method(D_METHOD("resolve", "bms_id", "kind", "index"),
@@ -22,9 +22,9 @@ void EntityIndex::_bind_methods() {
 }
 
 void EntityIndex::build(const TypedArray<ObjectModel> &p_models,
-		const TypedArray<MissionAreaTrigger> &p_area_triggers) {
+		const Ref<MissionData> &p_mission) {
 	clear();
-	area_triggers_ = p_area_triggers;
+	if (p_mission.is_valid()) area_triggers_ = opennova::mission::area_triggers(p_mission->native_file());
 	for (int64_t i = 0; i < p_models.size(); ++i) {
 		ObjectModel *model =
 				Object::cast_to<ObjectModel>(Object::cast_to<Object>(p_models[i]));
@@ -63,7 +63,7 @@ void EntityIndex::clear() {
 	by_kind_index_.clear();
 	by_group_.clear();
 	records_.clear();
-	area_triggers_ = TypedArray<MissionAreaTrigger>();
+	area_triggers_.clear();
 }
 
 ObjectModel *EntityIndex::resolve(int64_t p_bms_id, int64_t p_kind,
@@ -114,18 +114,15 @@ Array EntityIndex::resolve_group(int64_t p_group_id) const {
 
 Array EntityIndex::resolve_zone(int64_t p_zone_index) const {
 	Array out;
-	if (p_zone_index < 0 || p_zone_index >= area_triggers_.size()) {
+	if (p_zone_index < 0 || static_cast<size_t>(p_zone_index) >= area_triggers_.size()) {
 		return out;
 	}
-	const Ref<MissionAreaTrigger> trig = area_triggers_[p_zone_index];
-	if (trig.is_null()) {
-		return out;
-	}
-	const Vector3 amin = trig->get_min();
-	const Vector3 amax = trig->get_max();
+	const auto &trig = area_triggers_[static_cast<size_t>(p_zone_index)];
+	const Vector3 amin(trig.min_x, trig.min_y, trig.min_z);
+	const Vector3 amax(trig.max_x, trig.max_y, trig.max_z);
 	const Vector3 lo(MIN(amin.x, amax.x), MIN(amin.y, amax.y), MIN(amin.z, amax.z));
 	const Vector3 hi(MAX(amin.x, amax.x), MAX(amin.y, amax.y), MAX(amin.z, amax.z));
-	const bool check_z = trig->get_constrain_z();
+	const bool check_z = trig.constrain_z;
 	for (const EntityRecord &record : records_) {
 		ObjectModel *model = live_model(record.model_id);
 		if (model == nullptr) {

@@ -2731,9 +2731,9 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			Vector3(24, 0, 0), Vector3.ZERO))
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
-	assert_not_null(mission.add_event(0, 0, 0))
-	assert_not_null(mission.add_event_action(0,
-			MissionEventAction.make(37, 0, gunner_ssn)))
+	assert_gte(mission.add_event(0, 0, 0), 0)
+	assert_true(mission.add_event_action(0,
+			37, 0, gunner_ssn))
 
 	var fixture_def_root := ResourceRoot.new()
 	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)
