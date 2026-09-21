@@ -52,6 +52,9 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
+	// The browse window expired (the 30 s gate): the LAN screen re-enables its
+	// search button on this edge.
+	ADD_SIGNAL(MethodInfo("browse_finished"));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
 }
 
@@ -142,6 +145,7 @@ void LanSession::_process(double delta) {
 	bool announce_due = false;
 	if (!browser_.advance(delta, announce_due)) {
 		stop();
+		emit_signal("browse_finished");
 		return;
 	}
 	// Transient send errors during a re-announce are dropped like retail's

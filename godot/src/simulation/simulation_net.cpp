@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 
+#include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
 #include <runtime/inmatch/server_initial_state.h> // install_mission_location_names
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
@@ -361,6 +362,85 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
+void Simulation::set_novaworld_gsid(const String &p_gsid) {
+	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
+		ctx->novaworld_gsid = opennova::to_std(p_gsid);
+	}
+}
+
+std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
+	std::vector<HostPeerSlot> out;
+	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return out;
+	for (const opennova::inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list) {
+		if (c.type != opennova::inmatch::NapiNPConnection::kTypeServerSide ||
+				c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) {
+			continue;
+		}
+		HostPeerSlot s;
+		s.slot = c.reply.player_slot;
+		s.player_name = opennova::to_gd(c.player_name);
+		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
+		if (c.assigned_team_valid) s.team = String::num_int64(c.assigned_team);
+		out.push_back(std::move(s));
+	}
+	return out;
+}
+
+Simulation::ServerCommandResult Simulation::execute_server_command(const String &p_verb,
+		const String &p_target, const PackedStringArray &p_args) {
+	ServerCommandResult out;
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return out;
+	std::vector<std::string> args;
+	args.reserve(static_cast<size_t>(p_args.size()));
+	for (int i = 0; i < p_args.size(); ++i) args.push_back(opennova::to_std(p_args[i]));
+	const opennova::inmatch::ServerCommandOutcome outcome =
+			opennova::inmatch::Server_ExecuteServerCommand(*ctx,
+					kernel_ != nullptr ? &kernel_->world : nullptr, opennova::to_std(p_verb),
+					opennova::to_std(p_target), args);
+	out.handled = outcome.handled;
+	out.stop_hosting = outcome.stop_hosting;
+	out.config_changed = outcome.config_changed;
+	if (outcome.config_changed) {
+		// The sim's host session record is what the next session build reads.
+		net_.host_session_config.server_name = ctx->config.server_name;
+		net_.host_session_config.custom_text = ctx->config.custom_text;
+		net_.host_session_config.multiplayer_reset = ctx->config.multiplayer_reset;
+	}
+	out.server_name = opennova::to_gd(ctx->config.server_name);
+	out.server_message = opennova::to_gd(ctx->config.custom_text);
+	return out;
+}
+
+void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook) {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return;
+	ctx->novaworld_join_tickets_armed = p_armed;
+	// The prefix of the JOINTICKET key the watchdog looks up in the joiner's CD
+	// identity pairs (the engine owns the witnessed constant).
+	ctx->host_local_address =
+			p_armed ? opennova::inmatch::NapiNPServerCtx::kNovaWorldLocalAddress : "";
+	if (!p_hook) {
+		ctx->on_player_enter_request = nullptr;
+		return;
+	}
+	ctx->on_player_enter_request =
+			[hook = std::move(p_hook)](
+					const opennova::inmatch::NapiNPServerCtx::PlayerEnterRequest &p_request) {
+				hook(p_request.connection_id, p_request.peer.ip, p_request.peer.port,
+						opennova::to_gd(p_request.join_ticket));
+			};
+}
+
+bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_success,
+		int32_t p_msg_code) {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return false;
+	return opennova::inmatch::Server_ApplyPlayerEnterResult(*ctx, p_connection_id, p_success,
+			p_msg_code);
+}
+
 void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {
 	if (p_options.is_null()) return;
 	const opennova::inmatch::GameConfig &in = p_options->config();
@@ -593,6 +673,39 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		return false;
 	}
 	return true;
+}
+
+namespace {
+
+// Split an "a.b.c.d:port" endpoint at its last colon. False when there is no
+// colon, no host or a port outside 1..65535.
+bool split_endpoint(const String &p_endpoint, std::string &r_ip, uint32_t &r_port) {
+	const int colon = p_endpoint.rfind(":");
+	if (colon <= 0) return false;
+	const String port_text = p_endpoint.substr(colon + 1);
+	if (!port_text.is_valid_int()) return false;
+	const int64_t port = port_text.to_int();
+	if (port <= 0 || port > 0xFFFF) return false;
+	r_ip = opennova::to_std(p_endpoint.substr(0, colon));
+	r_port = static_cast<uint32_t>(port);
+	return true;
+}
+
+} // namespace
+
+void Simulation::set_join_proxy(const String &p_node, const String &p_relay, int64_t p_cookie) {
+	if (joiner_role_ == nullptr) return;
+	opennova::inmatch::JoinerRole::JoinProxyOptions options;
+	// A malformed part leaves its fields zero, which the role's all-six gate
+	// reads as "no proxy" -- the same outcome as a .joi without NI/NP/BK.
+	if (split_endpoint(p_node, options.proxy_node_ip, options.proxy_node_port) &&
+			split_endpoint(p_relay, options.proxy_relay_ip, options.proxy_relay_port) &&
+			p_cookie > 0 && p_cookie <= 0xFFFFFFFFLL) {
+		options.proxy_cookie = static_cast<uint32_t>(p_cookie);
+	} else {
+		options = opennova::inmatch::JoinerRole::JoinProxyOptions{};
+	}
+	joiner_role_->set_join_proxy(options);
 }
 
 bool Simulation::is_local_spectator() const {

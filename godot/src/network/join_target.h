@@ -60,6 +60,11 @@ public:
 	JOIN_TARGET_TEXT(spectator_password)
 	JOIN_TARGET_TEXT(server_password)
 	JOIN_TARGET_TEXT(join_password)
+	// The proxy-assisted NovaWorld join (the .joi NI/NP next to NK): the game
+	// node "ip:port" the 48-byte rendezvous targets and the relay "ip:port" the
+	// ordinary dial uses. Empty = no proxy (LAN, or a .joi without them).
+	JOIN_TARGET_TEXT(proxy_node)
+	JOIN_TARGET_TEXT(proxy_relay)
 #undef JOIN_TARGET_TEXT
 
 	int get_port() const { return port_; }
@@ -79,6 +84,17 @@ public:
 	void set_join_role(int p_value) { join_role_ = p_value; }
 	bool get_role_explicit() const { return role_explicit_; }
 	void set_role_explicit(bool p_value) { role_explicit_ = p_value; }
+
+	// The proxy relay cookie (the .joi BK); 0 = no proxy.
+	int64_t get_proxy_cookie() const { return proxy_cookie_; }
+	void set_proxy_cookie(int64_t p_value) { proxy_cookie_ = p_value; }
+	bool has_join_proxy() const {
+		return proxy_cookie_ != 0 && !proxy_node_.is_empty() && !proxy_relay_.is_empty();
+	}
+	// The .joi LN lobby number; nonzero means the dial targets the LAN-discovered
+	// endpoint rather than the NK relay. 0 = the ordinary NovaWorld/LAN dial.
+	int get_lobby_number() const { return lobby_number_; }
+	void set_lobby_number(int p_value) { lobby_number_ = p_value; }
 
 	int get_team_request() const { return team_request_; }
 	void set_team_request(int p_value) { team_request_ = p_value == 0 || p_value == 1 ? p_value : -1; }
@@ -125,6 +141,10 @@ private:
 	String join_password_;
 	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
+	String proxy_node_;
+	String proxy_relay_;
+	int64_t proxy_cookie_ = 0;
+	int lobby_number_ = 0;
 };
 
 } // namespace godot

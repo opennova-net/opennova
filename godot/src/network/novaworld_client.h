@@ -17,6 +17,7 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/novaworld/proxy_rendezvous.h>
 
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_gate_info.h"
@@ -61,9 +62,10 @@ public:
 		STATE_DISCONNECTED,
 		STATE_ERROR,
 		// Join legs (ADD only at the end — existing values must stay stable for
-		// GDScript). STATE_JOINING: NWJoin HTTP in flight. STATE_IN_GAME_HELLO: the
-		// in-match host:port has been resolved and handed to the game layer (joined_game);
-		// Simulation's joiner takes over the in-match handshake from here.
+		// GDScript). STATE_JOINING: NWJoin HTTP in flight, then the ClientPlayRequest
+		// awaiting its ServerPlayResult. STATE_IN_GAME_HELLO: the in-match host:port has
+		// been resolved and handed to the game layer (joined_game); Simulation's joiner
+		// takes over the in-match handshake from here.
 		STATE_JOINING,
 		STATE_IN_GAME_HELLO,
 	};
@@ -127,12 +129,32 @@ public:
 	void login(const String &username, const String &password);
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
-	// the GSB row's `rid`, resolves the in-match host address, and emits
-	// joined_game(host, port, app_id, cd_cookie). The game layer (NovaWorldPanel ->
-	// MainGame) then drives the in-match join through Simulation's joiner — this client
-	// does not send the in-match ClientHello itself (one joiner seam for LAN / NW / env
-	// joins).
+	// the GSB row's `rid`, resolves the in-match host address, sends the
+	// ClientPlayRequest (PlaySetup from the resolved .joi) and, once the service's
+	// ServerPlayResult admits the play, emits joined_game(host, port, app_id,
+	// cd_cookie). The game layer (NovaWorldPanel -> MainGame) then drives the
+	// in-match join through Simulation's joiner — this client does not send the
+	// in-match ClientHello itself (one joiner seam for LAN / NW / env joins).
 	void join(int rid);
+
+	// The proxy-assisted join fields of the last resolved .joi (NI/NP/BK next to
+	// NK): the game node "ip:port" the rendezvous targets, the relay cookie, and
+	// the relay "ip:port" (the NK endpoint). has_join_proxy() is false when the join
+	// carried none. The in-match joiner installs them as its ProxyRendezvousConfig
+	// (engine/net/novaworld/proxy_rendezvous.h) and sends the 48-byte rendezvous on
+	// its enumerator cadence.
+	bool has_join_proxy() const { return join_proxy_.enabled(); }
+	String get_join_proxy_node() const;
+	int64_t get_join_proxy_cookie() const { return static_cast<int64_t>(join_proxy_.cookie); }
+	String get_join_proxy_relay() const;
+	// The LN lobby number of the last resolved .joi (0 = none): nonzero means the
+	// in-match dial targets the LAN-discovered endpoint instead of the NK relay,
+	// and the play leg reports it as the "Lan" session var.
+	int get_join_lobby_number() const { return pending_join_.ln; }
+
+	// The retail error tag (NWECnn / the menutxt key) of the last failure reported
+	// through error_occurred / join_failed / disconnected, or empty.
+	String get_last_error_tag() const { return last_error_tag_; }
 
 	// Engine hooks.
 	void _ready() override;
@@ -151,6 +173,7 @@ private:
 	void trace_sent_datagram(const std::vector<uint8_t> &dg);
 	void on_session_datagram(const NwuLobbySession::RxInfo &rx);
 	void sync_session_state(); // ClientSession::State -> our State + signals
+	void drain_session_notices(); // the server notifications (stop/punt/command/results)
 
 	// Server-browser HTTP leg. trigger_gsb() ships the GSB GET the flow builds; the
 	// completion callback feeds the response back and caches the parsed rows.
@@ -167,12 +190,15 @@ private:
 	void on_join_request_completed(int result, int response_code,
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
-	// The NWJoin handshake resolved the in-match host:port — hand it off to the game
+	// The NWJoin handshake resolved the host: send the ClientPlayRequest and wait for
+	// the ServerPlayResult (the start-playing poll, 60 s).
+	void start_playing(const opennova::JoinResult &resolved);
+	// The service admitted the play: hand the in-match host:port to the game
 	// layer via joined_game(host, port, app_id, cd_cookie). Does NOT send an
 	// in-match hello; Simulation's joiner owns the single ClientHello (see the .cpp).
-	void resolve_join_target(const String &host, uint16_t port,
-	                         const String &app_id,
-	                         const PackedByteArray &cd_cookie);
+	void resolve_join_target();
+	// The play leg failed / timed out / was cancelled: ClientStopPlaying + join_failed(tag).
+	void abort_playing(const String &tag);
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,
@@ -198,8 +224,9 @@ private:
 	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
 	Ref<NovaWorldGateInfo> server_info_;
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
-	// endpoint, and the handshake timeout all live in here.
+	// endpoint, and the connect deadlines all live in here.
 	NwuLobbySession lobby_;
+	String last_error_tag_;
 
 	// The CD-key/hardware identity set (CountryName..NWHWI), built once per
 	// session and used for BOTH the UDP verify var-list and the HTTP login
@@ -239,8 +266,16 @@ private:
 	String nw_web_domain_;            // NovaworldWebDomainNameAndPortNumber from the
 	                                  // SessionInit (real NW); the HTTP login/GSB/join
 	                                  // host that replaces the startupurl [domainname]
-	double tick_accum_ = 0.0;
-	double heartbeat_interval_s_ = 2.0;
+	// The resolved join awaiting its ServerPlayResult (the start-playing poll):
+	// the .joi endpoint + tokens, the proxy fields, and the poll's start time.
+	opennova::JoinResult pending_join_;
+	uint32_t pending_join_rid_ = 0;          // the browsed row -> PlaySetup ServerName
+	std::string pending_join_server_name_;
+	bool play_in_flight_ = false;
+	uint32_t play_started_ms_ = 0;
+	opennova::ProxyRendezvousConfig join_proxy_;
+	std::string join_proxy_node_ip_;
+	std::string join_proxy_relay_ip_;
 };
 
 } // namespace godot

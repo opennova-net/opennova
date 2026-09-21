@@ -16,8 +16,9 @@ namespace godot {
 // LAN browser for the retail game-server UDP range. The engine's
 // LanDiscoveryBrowser (net/npwire/lan_discovery.h) owns the browse: the probe
 // identity, the 30-second window, the 3-second re-announce cadence, the reply
-// filter and the endpoint-keyed rows. This node owns only the Godot UDP
-// socket, the LanServerRow shape, and the MpMenuCompanion-facing signals.
+// filter, the 32-row cap and the first-sighting rows. This node owns only the
+// Godot UDP socket, the LanServerRow shape, and the MpMenuCompanion-facing
+// signals (servers_changed per new row, browse_finished at the window's end).
 class LanSession : public Node {
 	GDCLASS(LanSession, Node)
 

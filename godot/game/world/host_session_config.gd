@@ -72,7 +72,7 @@ func _init() -> void:
 	custom_text = NetProtocol.custom_text_default()
 	nw_gate_host = ""
 	nw_gate_port = DEFAULT_GATE_PORT
-	region = "us"
+	region_index = 0   ## the gate row Region selector: 0/1/2 -> STRNOVA07/08/09
 	advertise = ""     ## explicit advertised-IP override for the gate row
 	respawn_time = NetProtocol.DEFAULT_RESPAWN_TIME
 	time_limit_minutes = NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
