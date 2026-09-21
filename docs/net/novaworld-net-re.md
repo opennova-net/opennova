@@ -154,9 +154,9 @@ known NWEC mappings, additional host-var aliases retail emits for specific expan
 | `ClientHostRequest` | C→S | `ServerHostResult` | Registers active host; returns `RID`, `GSID`, `HostRequiresJoinTicket=0`. |
 | `ClientHostUpdate` | C→S | ACK only | Refreshes host address, player counts, keys, GSB fields. |
 | `ClientPlayRequest` | C→S | `ServerPlayResult` | Stores play setup, acknowledges selected `GSID`. |
-| `ClientPlayerEnterRequest` | C→S | `ServerPlayerEnterResult` | Confirms player entry; normalizes `ConnectionId` → `ConnectionID`. |
-| `ClientHostPlayerAdded` | C→S | ACK only | Increments host player count until next host update. |
-| `ClientHostPlayerRemoved` | C→S | ACK only | Decrements host player count. |
+| `ClientPlayerEnterRequest` | C→S (sent by the HOST for an entering joiner, not by the joining client) | `ServerPlayerEnterResult` | Confirms player entry; normalizes `ConnectionId` → `ConnectionID`. See "Join-ticket flow" below. |
+| `ClientHostPlayerAdded` | C→S | ACK only | Six direct params (`PlayerNumber`, `PlayerName`, `PlayerIpAndPort`, `PlayerPCID`, `PlayerTeam`, `PlayerType`) land in the host's roster slot; the Players column follows the roster size. |
+| `ClientHostPlayerRemoved` | C→S | ACK only | `PlayerNumber` only; removes that roster slot. |
 | `ClientStopHosting` | C→S | ACK only | Clears hosting state, removes active host row. |
 | `ClientStopPlaying` | C→S | ACK only | Clears play state. |
 
@@ -216,6 +216,63 @@ bits). Ported in `engine/net/napi/session.cpp` (`make_client_host_request` /
 `ClientSession::build_lobby_message` (host direction of ADR 0010); round-tripped against the
 gate parser in `tests/novaworld/client_session_loopback_test.cpp` (steps 8–11) and
 `tests/novaworld/lobby_vars_test.cpp`.
+
+### Join-ticket flow (`ClientPlayerEnterRequest`) — ported 2026-09-20
+
+`CNapiGameSession_SendPlayEnterRequest @ 0x4d02a0` has exactly ONE caller, and it is not the
+admission path: `CNapiNetwork_CheckPlayerTimeouts @ 0x4c8ad0` (once per periodic second, caller
+`Server_TickUpdate @ 0x51dbf3`). For a validated joiner in NetPlayer game state 3, when the
+NovaWorld arm is set (`@ 0x4c8b88`) it sends the request (`@ 0x4c8bc1`) and moves the joiner to
+state 4 (`@ 0x4c8bca`); the reply `ServerPlayerEnterResult` (`HandlePlayEnterResponse
+@ 0x4d1940`) moves it to state 6 on success or latches `{DC 2, DP1 MsgCode,
+"NWU:NWPENTERFAIL", DPC 44}`. The same watchdog reaps: state 3 without the arm after
+`0x1D4C0` ms (chat-coded punt 42 `"N.C:NONWTOVALU"`), state 4 with the arm after the same 120 s
+(`{DC 2, "N.C:NWJTICKTMOUT", DPC 44}`), state 4 without the arm at once (`"N.C:NONWTOVALU"`, 42);
+the first latched record wins. The request's `JoinTicket` is looked up in the joiner's JOIN CD
+identity pairs under the key `<localaddr>JOINTICKET` (`@ 0x4d0312..0x4d0362`), and on a
+NovaWorld transport the local-address string is the constant `"PUB"`
+(`CNapiNetwork_GetLocalAddress @ 0x4c4f60` copies `g_local_net_address_str @ 0x7ca298`), i.e. the
+`PUBJOINTICKET` cookie.
+
+Ours: `inmatch::Server_CheckPlayerTimeouts` (`server_tick.cpp`, the periodic block),
+`NapiNPServerCtx::novaworld_join_tickets_armed` / `host_local_address`
+(`kNovaWorldLocalAddress = "PUB"`) / `on_player_enter_request`, and
+`inmatch::Server_ApplyPlayerEnterResult`. The shell arms it when the registered host's
+`ServerHostResult` carried `HostRequiresJoinTicket`, binds the hook to
+`NovaWorldHost::request_player_enter` and routes `player_enter_result` back. Residuals, stated
+plainly: retail holds the joiner's `0x02` challenge while in state 4 — ours holds its spawn
+eligibility instead (a pending joiner is skipped by the spawn pump); and the roster's
+`PlayerPCID` / `PlayerType` are sent empty / `"0"`, because the in-match host does not decrypt the
+joiner's `PUBPCID` cookie (that leg of `Server_ValidatePlayerJoinRequest @ 0x512100` is unported),
+and sending the ciphertext as a PCID would be wrong. All of this is latent while
+`SessionDrive::GATE_REGISTRATION_ARMED` stays false.
+
+### `ServerCommand` — the service's admin channel, ported 2026-09-20
+
+`ServerCommand` (client msginfo table `@ 0x82c0c8` → `loc_4D22F0`, not a defined function) reads
+the `Cmd` param, tokenizes it (`String_TokenizeQuotedToArray @ 0x616d60`) and dispatches on
+`StrStartsWithNoCase @ 0x616f40`, gated on the player table, `is_authority` and in-session
+(`@ 0x4d23c0..0x4d23e7`) — host only. The lobby `ClientSession` parses it into verb + target
+suffix + args (`parse_server_command`, `engine/net/napi/session.cpp`), and
+`inmatch::Server_ExecuteServerCommand` (`server_admin_command.cpp`) runs the verb bodies:
+
+| verb | status | ours |
+|---|---|---|
+| `PuntPlayer` (`ByIndex`/`ByIpAndPort`/`ByName`/`ByPCID`) | live | the host's own slot → `stop_hosting` (`@ 0x4d2515`); a remote → chat-coded punt 39 carrying the target token (`@ 0x4d254d`) |
+| `TextChatServer` | live | S2C `0x14` channel 10 from no slot to every in-game player |
+| `TextChatPlayer` / `CmdEchoPlayer` | live | S2C `0x14` channel 10 / 14 to the resolved slot only (send mask `0x20`) |
+| `KillPlayer` | live | health 0, kill credit cleared, the full player-death event (`@ 0x4d29c6` → `Entity_CheckAndProcessDeath @ 0x51b550`) |
+| `Cycle` / `EndMission` / `GameOver` | live | round end with the parsed winner, 620-tick linger (`@ 0x4d31bf`) |
+| `Earthquake` | live | seconds clamped 0..40, default 30 (`@ 0x4d2ac2`) |
+| `Lightning` | live | local flash + S2C `0x24` `"SETFLASH1 16"` to every in-game player (`@ 0x4d2b5d`) |
+| `TimeOfDay` | live | HHMM, 1200 when absent or out of range (`@ 0x4d2be3`) |
+| `SetServerName` / `SetServerMsg` / `SetMPReset` | live | config + the host var republish on the next `ClientHostUpdate` (`@ 0x4d2cf5`, `@ 0x4d2d8a`) |
+| `ChangeTeam` / `SwapTeam` | NOT modeled | `Server_ChangeEntityTeam @ 0x518d70` — the in-match team change is unported (D-NET-148) |
+| `ReloadPlayer` / `DisarmPlayer` | NOT modeled | the retail weapon-table legs (`@ 0x4dc340` / `sub_4DC440`) have no counterpart |
+
+`ByPCID` resolves nothing on this host (see the PCID residual above). `stop_hosting` is
+`CGameSession_StopHosting @ 0x4d0e60`: session state back to 4 plus `ClientStopHosting` — the
+match itself keeps running.
 
 ## 4. NAPI in-match dispatch
 
@@ -586,7 +643,10 @@ This is what a reimplemented server must **handle**.
   `handle_client_ping` and the joiner's `on_server_ping` port `Nwu_HandlePing @0x623a70` — local-key
   check `@0x623bc2`, `WR`/`MS` TLVs `@0x623bff`/`@0x623c1a`, the reap-clock refresh `@0x623c56`,
   reply when `WR` is set `@0x623c5c`, else `rtt_ms = now - MS` `@0x623c9b`); only `0x47`/`0x87`
-  probe remains unmodeled.
+  probe remains unmodeled. Both endpoints share ONE body codec, `engine/net/npwire/session_ping.h`
+  (`[u32 peer key][WR u8][MS u32]`, `CNapiNPConnection_SendPing @0x61f080`), over the flat NapiNP
+  TLV reader/writer in `engine/net/npwire/flat_tlv.h` (`NapiNP_WriteTLV @0x61dd60` /
+  `NapiNP_ReadTLV @0x61dbe0`).
 - Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
   (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
   pcap. The then-remaining candidates have since landed: 0x22 / 0x23 / 0x28 (§5.33),
@@ -975,8 +1035,20 @@ master server, HTTP endpoint, account service, or cookie jar. Retail reuses the 
    The observed source IP/port is the join target.
    Enumeration is a CADENCE, not one burst: while enumerating, the pump re-broadcasts the whole
    port walk every 3000 ms (`CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290c0` sets the
-   enumerating send interval to 3000 at conn+368 and gates on `tick - last_send_tick`), which is
-   how a cold host that binds mid-window still appears. The 3000 leg of the pump's interval
+   enumerating send interval to 3000 at conn+368 and gates on `tick - last_send_tick`, a STRICT
+   `tick_count - last_send_tick > interval` — so a 30 s window carries nine re-announces after the
+   first, not ten; `LanDiscoveryBrowser` uses the same strict compare since 2026-09-20), which is
+   how a cold host that binds mid-window still appears. The same pump is where a NovaWorld
+   proxy join sends its 48-byte rendezvous datagram: when all six proxy fields are installed
+   (`CNapiGameSession_InitTransportConnection @ 0x4ca051..0x4ca0c7` from the `.joi` NI/NP/BK and
+   the NK relay) `CNapiNPConnection_SendPingPacket @ 0x61f8c0` fires immediately before the
+   announce burst (`@ 0x62914f..0x629159`). Ported 2026-09-20 as `JoinerRole::set_join_proxy` /
+   `pump_proxy_rendezvous` over `net/novaworld/proxy_rendezvous.h`: pumped while the hello is
+   outstanding, first pump at once and then every 3000 ms, only with all six fields set. NOT
+   applied yet: the `LN` endpoint switch (`g_lobby_num` nonzero dials the LAN-discovered endpoint
+   `byte_C8FE7C`/`byte_C8FEBC` instead of the NK one, `@ 0x4c9e6c`) — `JoinTarget` carries
+   `lobby_number`, but no producer supplies a LAN endpoint at the join seam, so the NK endpoint
+   is still dialed. The 3000 leg of the pump's interval
    select (`+37 ? 3000 : enum+20`) is confirmed to be the ENUMERATOR identity: the 0x41 announce
    builder (`NapiNPSession_SendAnnouncePacket @ 0x61fa00`) skips the player-count TLV exactly
    when +37 is set — matching the captured client probe shape, which carries none — while host
@@ -4507,6 +4579,19 @@ boundaries are exactly 310 ticks apart, independent of the world-tick modulus. `
 `0x80 @0x4C893E..0x4C8953` admits player-slot state 6 or 7 and does not test entity health, so a dead
 or respawn-pending slot still receives a due broadcast; a slot filtered out at that boundary gets no
 per-peer catch-up. Healthy LAN is 1.
+**2026-09-20:** the host byte is no longer a constant. `Server_SampleHostNetQuality`
+(`server_net_quality.cpp`, a 62-frame countdown) ports the HOST (send) window of
+`CNetQuality_UpdateMetrics @0x4C52C0` over `runtime/replication/net_quality.h` (shared with the
+joiner's client window, whose folded 0..4 level is what C2S `0x4C` now carries): frame pressure
+`clamp(256 - 16*min(fps,16), 1, 255)`, the mean of each eligible slot's 10-entry ping ring
+`*255/1000`, loss `/2.0`, each averaged over five samples and max-folded. The `0x79` byte is
+`CNetQuality +0x0C`, the SEND window's folded quality — not the combined host/client bucket.
+Two details the first port missed and the capture-pinned tests caught: with NO eligible slot
+retail stores that sample's ping and loss as **0**, not the floor 1 (`LABEL_23`), and during the
+pre-round hold the window is cleared instead of sampled (`CNetStats_ClearSendCounters
+@0x4C2F50`), so a fresh host reports 0 for its first four samples (the sums divide by 5) before
+settling at the healthy-LAN 1. The per-slot loss counters (`+100359`) are unmodeled (an eligible
+slot contributes the loss floor).
 
 **Witness:** probe3_again — `0x6B` ×266 (`count=1`, blip handle = the active player), `0x49` ×84
 (`reloadParam=195` on both player handles `0x0006`/`0x0007`), `0x13` ×18 (`deathAnimStateId=0`), `0x30` ×174
@@ -6793,6 +6878,17 @@ same function also holds the spawn-time team-BALANCE gate — `CNapiServerConfig
 every caller (the npruntime tests and the not-yet-wired host driver) wires `ctx.world` AFTER the world
 is loaded with its markers. A production driver that wires `ctx.world` DURING load must add a
 load-complete gate, else the idempotent origin fallback latches the player at (0,0,0).
+**Cadence and gates ported 2026-09-20:** the pump now runs on the shared periodic second (retail's
+call is `Server_TickUpdate @0x51dbfd` inside the reload-62 block), re-evaluates
+`alive < max_players` after every add (`@0x4c8e02` → `LABEL_5`), applies the balance-join hold
+(`@0x4c8f19..0x4c8f53`: `max(1, ceil(min(team0, team1) * balanceJoinPercent))`;
+`GameConfig::balance_join` / `balance_join_percent`) and nags a held joiner with S2C `0x03 {0}` at
+most once per 1000 ms (`@0x4c8f8d..0x4c8fd1`). The `0x03`/`0x05`/`0x04`/`0x7B` metadata ships in
+the same pump that added the player; retail writes its `0x03` BEFORE `Server_BuildPlayerInfoAndAdd`
+and ours builds the bodies after it, which the wire cannot distinguish. One phase residual:
+`tick_connections` reads the PREVIOUS world tick's `periodic_second()` flag, so an admission
+lands on the pump one frame after retail's in-`Server_TickUpdate` call. A joiner held by the
+join-ticket flow (§3) is skipped until its `ServerPlayerEnterResult` arrives.
 `[orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]`
 
 **D-NET-117** [reimpl divergence, **FIXED 2026-07-22**] **World-path pose look-pitch is sourced from
@@ -6838,9 +6934,16 @@ world stays non-null) would keep fanning 0x0A. Fixed: the snapshot + emit step i
 structure. The whole tick is gated at its call site by `is_authority`, not `is_in_session`.
 **Phase corrected 2026-09-20:** retail's 0x0A is a PRE-MOTOR snapshot — `Game_ProcessMainFrame
 @0x5263f0` runs `Client_ProcessNetworkFrame` → `Server_TickUpdate` (which sends the fan at
-K:322800 and advances only the WAC script, K:322258) → `Entity_UpdateAllEntities` — so the
-snapshot + emit now precedes `world.run_logic_tick` in `Server_TickUpdate`; it followed the motor
-step until then (a consistent one-tick lead in every broadcast pose). In the same pass the C2S
+K:322800 and advances only the WAC script, K:322258) → `Entity_UpdateAllEntities` — so each
+connection's 0x0A frame is now BUILT before `world.run_logic_tick` (`replication::build_connection_s2c`,
+staged on the connection as `staged_frame_update`) and SENT at its original position, after the
+maintenance legs, gated on `is_in_match` (retail's state==6 test at the writer,
+`Server_SendEntityStateToPlayer @0x517ba0`, so a slot a maintenance leg punted gets no trailing
+frame). The content is the pre-motor world; the capture-witnessed intra-datagram order
+`[0x16][0x31][0x79][..][0x0A]` is unchanged. Until then the snapshot followed the motor step (a
+consistent one-tick lead in every broadcast pose). Residual: the maintenance legs themselves still
+read POST-motor world state where retail reads pre-motor (all of `Server_TickUpdate` precedes the
+motor) — a one-tick phase on the 1 Hz legs, pinned by no witness yet. In the same pass the C2S
 0x0C uplink is applied INLINE in the dispatch walk, in wire order with 0x26
 (`NapiNPServerMsg_0x00C @0x501c30` → `dispatch_entity_packet_callback @0x4d6a80` read-applies
 immediately), rather than being deferred to the tick-time drain behind the other messages.
@@ -6849,8 +6952,20 @@ units with the previous frame's sub-4 ms residual (`@0x52b7b2`), clamps a bank o
 500 ms bypassing the smoother (`@0x52b83e`), otherwise applies `(7*prev + now + 4) >> 3`
 (`@0x52b85b`), and drains 4 ms quanta with the logic tick on `(g_tickPhase & 3) == 0`
 (`@0x52ba21`/`@0x52ba47`, the phase free-running across frames) — so a stall is followed by the
-EMA's geometric fast-forward, never a dropped backlog; `world::TickAccumulator` is that bank
-now, and `apps/nw_server` feeds it the measured delta instead of a constant one-tick frame.
+EMA's geometric fast-forward, never a dropped backlog; `world::TickAccumulator` carries that
+bank as its `RetailMainLoop` policy, and `apps/nw_server` selects it and feeds the measured
+delta instead of a constant one-tick frame. The Godot shell stays on the accumulator's
+default `WallClock` policy (bank seconds, drain 16 ms quanta, clamp a hitch's backlog to 31
+ticks and drop the rest): switching it to the retail bank makes every load or shader hitch
+over 500 ms fast-forward the sim by several seconds, a player-visible pacing change that is
+a maintainer decision, not a default.
+The 4 ms quantum and the free-running phase are part of the port, not an optional refinement:
+the EMA is applied to the bank INCLUDING the undrained residual, so without the quantum drain
+the smoother cannot conserve time. Worked values (pinned by `tick_accumulator_test` and the
+RetailMainLoop case of `inmatch_session_test`): a 1 ms frame after a 32 ms frame banks `(7*528 + 32 + 4) >> 3 = 466`
+units and drains 7 quanta = 2 logic ticks; a 2.0 s stall clamps to 8000 units = 125 quanta =
+31 logic ticks in that test's phase (32 from phase 0), then the following frames fast-forward
+geometrically through the EMA's memory.
 `[orig: Server_TickUpdate @0x51d7e0; Game_ProcessMainFrame @0x5266b4; Game_MainLoop @0x52b630]`
 
 **D-NET-121** [behavior, reimpl divergence **FIXED 2026-08-12**] **An unbound, freed, or
@@ -13850,7 +13965,9 @@ retail-join v21 (2026-07-02): joiner 0x0C record already golden-identical
 wire diff isolated our `C 0x29 (f=55518) → S 0x51 (f=55519)` against golden's no-reply.
 FIXED by porting the faithful no-reply: the dispatch case consumes the ack (team change is
 unmodeled — when it lands, port the @ 0x514F10 list lookup + write_entity_packet record,
-never an echo); `encode_player_spawn` and the `player_spawn_confirmed` echo-guard flag are
+never an echo; since 2026-09-20 the NovaWorld `ServerCommand` verbs `ChangeTeam` / `SwapTeam`
+(`Server_ChangeEntityTeam @ 0x518d70`, §3) are a second consumer waiting on the same team-change
+port and return unhandled until then); `encode_player_spawn` and the `player_spawn_confirmed` echo-guard flag are
 REMOVED (npruntime server_message_dispatch.cpp / novaworld ingame_encode). Pinned by
 `npruntime_handshake_server` ("0x29 draws NO 0x51 on a plain join"). The C2S 0x29 decoder
 is renamed `decode_team_spawn_ack` (was `decode_burst_entity_request` — the "entity
@@ -14014,7 +14131,11 @@ See [the witness, regressions, and remaining gaps](retail-message-dispatch-audit
   (`@0x42e200`), the 0x0F completion burst re-queued on every 0x0F (the once-per-connection
   latch was ours), and S2C 0x86 / H:0x03 in the lobby session. C2S 0x40 vehicle spawn
   (`@0x51c4c0`) carries every admission gate but its spawn goes through the
-  `deployable_spawner` embedder seam (unset = refused). Remaining examples
+  `deployable_spawner` embedder seam (unset = refused). The NovaWorld-side admin channel is
+  ported too: `ServerCommand` executes 14 of its verbs on the host (§3; `ChangeTeam` /
+  `SwapTeam` / `ReloadPlayer` / `DisarmPlayer` and the `ByPCID` target are not modeled), and
+  the join-ticket flow (`CheckPlayerTimeouts` states 3/4, `NWJTICKTMOUT` / `NWPENTERFAIL`) is
+  in place. Remaining examples
   are S2C text commands beyond SETCEASEFIRE, 0x67 teleport, 0x4E batch-kill and
   its C2S acknowledgement, 0x3B form reply, 0x7D metrics exchange, the S2C 0x29
   char/minimap update (a consumer `@0x427d00` is witnessed, no retail producer is),

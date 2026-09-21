@@ -246,6 +246,11 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
+	// How advance() banks wall-clock into ticks. The shell keeps the default
+	// WallClock bank; the dedicated host selects the retail main-loop bank
+	// (world::TickBankPolicy). Selecting a policy drops the banked time.
+	void set_tick_bank_policy(world::TickBankPolicy policy) { accumulator_.set_policy(policy); }
+	world::TickBankPolicy tick_bank_policy() const { return accumulator_.policy(); }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 
