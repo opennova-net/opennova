@@ -23,6 +23,11 @@ groups the IDs active at its baseline (master `aedf6c091`) by dependency and acc
 D-SND-18, D-PTL-27..30 and D-SAVE-1 from previously untabled gaps; the ledger remains
 the current status owner, and the dated inventory is a snapshot.
 
+**2026-09-21 closure follow-up:** D-NET-209's model-side same-state pending
+cancellation is removed by ADR 0040 E6; receive and presentation use the
+shared native arrival rule. The [remote-body arbitration re-grill](net/novaworld-net-re.md#remote-body-arbitration-re-grill-2026-09-21)
+records both live receive branches and the retained clip-completion boundary.
+
 ## Purpose
 
 The documentation index already states the rule: *a divergence is a tracked decision,

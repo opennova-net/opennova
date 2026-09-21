@@ -1410,7 +1410,7 @@ bool ObjectModel::needs_runtime_frame_work() const {
 	}
 	return body_pose_dirty_ ||
 			(is_playing_ && anim_playing_ && !anim_external_phase_) ||
-			remote_pending_state_ >= 0;
+			remote_body_.has_pending();
 }
 
 void ObjectModel::refresh_live_panm_classification() {

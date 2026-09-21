@@ -905,6 +905,10 @@ func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
 			int(Simulation.infantry_anim_flags(1)), 200)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 		"a locked current clip defers the incoming wire request")
+	# Retail's equality branch preserves the pending request and its boundary.
+	model.apply_remote_body_state(41, "anim_idle", locked_flags, 90)
+	assert_true(model.remote_body_needs_fixed_tick(),
+			"same-state receipt leaves the queued transition armed")
 	var current_length: float = model.get_skeletal_anim().get_clip_length("anim_idle")
 	assert_gt(current_length, 0.0)
 	model.advance_body_animation(current_length + 0.01)

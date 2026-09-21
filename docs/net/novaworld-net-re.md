@@ -14212,3 +14212,47 @@ never asked for a side password, while the server-password prerequisite stays.
 `test_explicit_spectator_choice_ignores_team_password`, including the
 loading-barrier shutdown settlement.
 [orig: Server_ValidatePlayerJoinRequest @ 0x5124A2]
+
+## Remote-body arbitration re-grill (2026-09-21)
+
+ADR 0040 E6 re-verifies the disagreement between the presentation machine in
+godot/src/object/object_model_anim.cpp and the receive-record fold in
+engine/runtime/replication/client_replica_body_arbitration.cpp. The live
+retail Jointops.exe.kong.i64 identity and imagebase 0x400000 match the
+correspondence pin; the pairing is anchored by the existing receive-handler
+correspondence and the current instruction stream.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Same-state receive-record arbitration | **MATCHING** | Player compare/jump skips all animation writes; the infantry branch agrees. Existing netsim_client_replica_pipeline_body_arbitration exercises armed-pending survival. |
+| Raw-request presentation and shared arrival rule | **MATCHING** on the re-grilled arbitration axis (D-NET-209 regression fixed in E6) | The model-side pending clear was divergent. Both owners now call anim::body_arrival; RemoteBodyState retains pending/completion, phase counters and float32 blend state. anim_remote_body_state covers repeats, pending retargets, null pending, queue classes, completion and 10/15-tick blending; skeletal_anim GUT pins same-state pending survival through a real clip end. |
+| Scene nodes, clip-name lookup and bone pose application | **host code / not grillable** | Godot resource and device glue; retain the skeletal/wire presentation integration tests. |
+
+The player reads current at +0x2BC and compares the decoded state before
+entering either queue class. Equality jumps directly to the non-animation
+tail. It bypasses the pending clear at +0x2B8 and the one-shot player phase
+store at +0x377. The infantry twin compares at 0x4c0606 and takes the equality
+jump at 0x4c0608; the older shorthand citation to 0x4c0606 names the compare,
+not the jump. [orig: NetPacket_SerializePlayerState @ 0x4c09c0,
+branch @ 0x4c1153..0x4c11ac; NetPacket_SerializeInfantryEntityState @ 0x4c0320,
+branch @ 0x4c0600..0x4c0641]
+
+On a different arrival, current flags 0x4 always defer. Current flags 0x20
+defer unless arrival flags contain 0x1. The queue writes only pending;
+the direct leg replaces current, clears pending and (player only) stamps
+phase. Replacing a pending request leaves the current clip's end notification
+armed. [orig: @ 0x4c1169..0x4c11a6; @ 0x4c060a..0x4c063b]
+
+Completion remains channel-owned: a nonzero pending state arms end-notify
+0x40000; a latched 0x20000 promotes pending and clears it. The phase seed
+is cleared before advancing playback, so a promoted request starts at zero.
+The channel's own retarget/advance ordering stays with each clock owner.
+[orig: AnimMap_UpdateEntity @ 0x40b5f0, pending branches
+@ 0x40b77b..0x40b7e4, playback calls @ 0x40b7f3 / @ 0x40b7fe]
+
+### IDB changes made during this re-grill
+
+Appended equality-branch comments at 0x4c115f and 0x4c0608, plus native
+source back-links on entries 0x4c09c0, 0x4c0320 and 0x40b5f0. No names,
+types or binary bytes changed. The IDB is saved at the correspondence checkpoint
+and after the final source cross-link.

@@ -27,10 +27,6 @@ constexpr double kPartAnimTickS = 0.016;
 const char *kPartAnimCtrlNames[2] = { "VEHICLE_SPECIAL1", "VEHICLE_SPECIAL2" };
 const char *kPartAnimCtrlOwners[2] = { "present:part_anim:1", "present:part_anim:2" };
 
-float f32(double p_value) {
-	return static_cast<float>(p_value);
-}
-
 } // namespace
 
 void ObjectModel::set_skeletal_anim(const Ref<SkeletalAnim> &p_skeletal) {
@@ -287,37 +283,23 @@ bool ObjectModel::select_body_clip_seeded(const String &p_key, int p_phase_ticks
 	return true;
 }
 
-// Apply one raw compact-organic body-state request with retail's remote
-// transition arbitration. A phase belongs only to an immediately accepted
-// player transition; queued states promote at tick zero when the current
-// clip reaches its completion boundary.
+// Clip lookup and pose writes adapt the shared native receive/playback state.
 bool ObjectModel::apply_remote_body_state(int p_state_id, const String &p_key,
 		int p_flags, int p_phase_ticks) {
 	for (ObjectModel *linked : live_presentation_links()) {
-		linked->apply_remote_body_state(
-				p_state_id, p_key, p_flags, p_phase_ticks);
+		linked->apply_remote_body_state(p_state_id, p_key, p_flags, p_phase_ticks);
 	}
 	wake_runtime_frame();
 	if (p_state_id < 0 || resolve_body_clip_key(p_key).is_empty()) {
 		return remote_body_needs_fixed_tick();
 	}
-	if (remote_state_ < 0) {
-		accept_remote_body_state(p_state_id, p_key, p_flags, p_phase_ticks);
-		return remote_body_needs_fixed_tick();
+	const bool had_current = remote_body_.current() >= 0 && !anim_key_.is_empty();
+	const auto arrival = remote_body_.request(p_state_id, static_cast<uint32_t>(p_flags));
+	if (arrival == opennova::anim::BodyArrival::queue) {
+		queue_remote_body_clip(p_key);
+	} else if (arrival == opennova::anim::BodyArrival::commit) {
+		accept_remote_body_clip(p_key, p_flags, p_phase_ticks, had_current);
 	}
-	if (p_state_id == remote_state_) {
-		clear_remote_body_pending();
-		return remote_body_needs_fixed_tick();
-	}
-	// The queue gate is the shared native rule (world/infantry.h
-	// remote_body_state_defers, [orig: @0x4c1169..0x4c1190 / @0x4c060a..
-	// 0x4c0633]) — the same predicate the replication record fold applies.
-	if (opennova::world::remote_body_state_defers(
-				static_cast<uint32_t>(remote_flags_), static_cast<uint32_t>(p_flags))) {
-		queue_remote_body_state(p_state_id, p_key, p_flags);
-		return remote_body_needs_fixed_tick();
-	}
-	accept_remote_body_state(p_state_id, p_key, p_flags, p_phase_ticks);
 	return remote_body_needs_fixed_tick();
 }
 
@@ -325,67 +307,33 @@ void ObjectModel::reset_remote_body_state() {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->reset_remote_body_state();
 	}
-	remote_state_ = -1;
-	remote_flags_ = 0;
-	clear_remote_body_pending();
+	remote_body_.reset();
+	remote_pending_key_ = String();
 	clear_remote_body_blend();
 }
 
-void ObjectModel::accept_remote_body_state(int p_state_id, const String &p_key,
-		int p_flags, int p_phase_ticks) {
-	clear_remote_body_pending();
-	const bool had_current = remote_state_ >= 0 && !anim_key_.is_empty();
-	remote_state_ = p_state_id;
-	remote_flags_ = p_flags;
+void ObjectModel::accept_remote_body_clip(const String &p_key,
+		int p_flags, int p_phase_ticks, bool p_had_current) {
+	remote_pending_key_ = String();
 	const int target_phase = p_phase_ticks >= 0 ? p_phase_ticks : 0;
-	if (had_current) {
+	if (p_had_current) {
 		start_remote_body_blend(p_key, p_flags, target_phase);
 	} else if (select_body_clip_seeded(p_key, target_phase)) {
 		advance_body_animation(0.0);
 	}
 }
 
-void ObjectModel::queue_remote_body_state(int p_state_id, const String &p_key,
-		int p_flags) {
-	remote_pending_state_ = p_state_id;
+void ObjectModel::queue_remote_body_clip(const String &p_key) {
 	remote_pending_key_ = p_key;
-	remote_pending_flags_ = p_flags;
-	// Completion-boundary arming: the seconds-domain sibling of replication's
-	// tick-domain arm — same three cases, units differ because this FSM owns
-	// clip TIME. A hold clip whose length cannot resolve completes IMMEDIATELY
-	// (the D-NET-209 hold-wedge safety).
-	const float length = skeletal_->get_clip_length(anim_key_, anim_variant_);
-	remote_pending_end_valid_ = true;
-	if (length <= 0.0f) {
-		remote_pending_end_time_ = 0.0;
-	} else if (skeletal_->is_clip_looping(anim_key_, anim_variant_)) {
-		remote_pending_end_time_ =
-				(Math::floor(anim_time_ / double(length)) + 1.0) * double(length);
-	} else {
-		remote_pending_end_time_ = double(length);
-	}
-	// A request arriving after a one-shot already ended promotes immediately.
-	if (promote_remote_body_pending_if_due()) {
-		advance_body_animation(0.0);
-	}
-}
-
-void ObjectModel::clear_remote_body_pending() {
-	remote_pending_state_ = -1;
-	remote_pending_key_ = String();
-	remote_pending_flags_ = 0;
-	remote_pending_end_time_ = 0.0;
-	remote_pending_end_valid_ = false;
+	remote_body_.arm_completion(anim_time_,
+			skeletal_->get_clip_length(anim_key_, anim_variant_),
+			skeletal_->is_clip_looping(anim_key_, anim_variant_));
+	if (promote_remote_body_pending_if_due()) advance_body_animation(0.0);
 }
 
 void ObjectModel::clear_remote_body_blend() {
-	remote_blend_active_ = false;
+	remote_body_.clear_blend();
 	remote_blend_source_key_ = String();
-	remote_blend_source_phase_ticks_ = 0;
-	remote_blend_source_time_ = 0.0;
-	remote_blend_target_phase_ticks_ = 0;
-	remote_blend_weight_ = 1.0f;
-	remote_blend_step_ = 0.0f;
 	clear_body_blend();
 }
 
@@ -403,105 +351,66 @@ int ObjectModel::body_phase_ticks(const String &p_key, double p_seconds) const {
 void ObjectModel::start_remote_body_blend(const String &p_target_key,
 		int p_target_flags, int p_target_phase_ticks) {
 	const String target_key = resolve_body_clip_key(p_target_key);
-	if (target_key.is_empty()) {
-		return;
-	}
-	// A retarget during A->B retains A and replaces only B with C.
-	const String source_key =
-			remote_blend_active_ ? remote_blend_source_key_ : anim_key_;
-	const int source_phase = remote_blend_active_
-			? remote_blend_source_phase_ticks_
-			: body_phase_ticks(anim_key_, anim_time_);
-	const double source_time =
-			remote_blend_active_ ? remote_blend_source_time_ : anim_time_;
-	if (source_key.is_empty() || skeletal_.is_null() ||
-			!skeletal_->has_clip(source_key)) {
+	if (target_key.is_empty()) return;
+	const String source_key = remote_body_.blending() ? remote_blend_source_key_ : anim_key_;
+	if (source_key.is_empty() || skeletal_.is_null() || !skeletal_->has_clip(source_key)) {
 		clear_remote_body_blend();
 		if (select_body_clip_seeded(target_key, p_target_phase_ticks)) {
 			advance_body_animation(0.0);
 		}
 		return;
 	}
-	remote_blend_active_ = true;
 	remote_blend_source_key_ = source_key;
-	remote_blend_source_phase_ticks_ = source_phase;
-	remote_blend_source_time_ = source_time;
-	remote_blend_target_phase_ticks_ = p_target_phase_ticks;
-	remote_blend_weight_ = 0.0f;
-	// float32 rounding matches retail's accumulated channel weight.
-	remote_blend_step_ = f32((p_target_flags & 0x400) != 0 ? 1.0 / 15.0 : 0.1);
-	pose_body_blend_at_times(remote_blend_source_key_, remote_blend_source_time_,
-			target_key,
-			clip_phase_seconds(target_key, remote_blend_target_phase_ticks_), 0.0f);
+	remote_body_.begin_blend(body_phase_ticks(anim_key_, anim_time_), anim_time_,
+			p_target_phase_ticks, static_cast<uint32_t>(p_target_flags));
+	pose_body_blend_at_times(remote_blend_source_key_, remote_body_.source_time(),
+			target_key, clip_phase_seconds(target_key, remote_body_.target_phase()),
+			remote_body_.weight());
 }
 
-// Advance one receive-side simulation tick for an already accepted target.
-// Both channels advance before the float32 target weight increments.
 bool ObjectModel::advance_remote_body_blend_tick(int p_state_id) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->advance_remote_body_blend_tick(p_state_id);
 	}
 	wake_runtime_frame();
-	if (!remote_blend_active_) {
-		if (remote_pending_state_ >= 0) {
+	if (!remote_body_.blending()) {
+		if (remote_body_.has_pending()) {
 			promote_remote_body_pending_if_due();
 			return remote_body_needs_fixed_tick();
 		}
 		return false;
 	}
-	if (p_state_id != remote_state_ && p_state_id != remote_pending_state_) {
-		return false;
-	}
-	remote_blend_source_phase_ticks_ += 1;
-	remote_blend_source_time_ = clip_phase_seconds(
-			remote_blend_source_key_, remote_blend_source_phase_ticks_);
-	remote_blend_target_phase_ticks_ += 1;
-	remote_blend_weight_ =
-			MIN(f32(double(remote_blend_weight_) + double(remote_blend_step_)), 1.0f);
+	if (!remote_body_.advance_blend(p_state_id)) return false;
+	remote_body_.set_source_time(clip_phase_seconds(
+			remote_blend_source_key_, remote_body_.source_phase()));
 	const String target_key = anim_key_;
-	if (remote_blend_weight_ >= 1.0f) {
-		const int target_phase = remote_blend_target_phase_ticks_;
+	if (remote_body_.weight() >= 1.0f) {
+		const int target_phase = remote_body_.target_phase();
 		clear_remote_body_blend();
 		if (select_body_clip_seeded(target_key, target_phase)) {
 			advance_body_animation(0.0);
 		}
 		return remote_body_needs_fixed_tick();
 	}
-	pose_body_blend_at_times(remote_blend_source_key_, remote_blend_source_time_,
-			target_key,
-			clip_phase_seconds(target_key, remote_blend_target_phase_ticks_),
-			remote_blend_weight_);
+	pose_body_blend_at_times(remote_blend_source_key_, remote_body_.source_time(),
+			target_key, clip_phase_seconds(target_key, remote_body_.target_phase()),
+			remote_body_.weight());
 	return remote_body_needs_fixed_tick();
 }
 
 bool ObjectModel::remote_body_needs_fixed_tick() const {
-	if (remote_blend_active_ || remote_pending_state_ >= 0) {
-		return true;
-	}
+	if (remote_body_.needs_tick()) return true;
 	for (ObjectModel *linked : live_presentation_links()) {
-		if (linked->remote_body_needs_fixed_tick()) {
-			return true;
-		}
+		if (linked->remote_body_needs_fixed_tick()) return true;
 	}
 	return false;
 }
 
 bool ObjectModel::promote_remote_body_pending_if_due() {
-	if (remote_pending_state_ < 0 || !remote_pending_end_valid_) {
-		return false;
-	}
-	if (anim_time_ + 0.000001 < remote_pending_end_time_) {
-		return false;
-	}
-	const int state_id = remote_pending_state_;
+	if (!remote_body_.promote_if_due(anim_time_)) return false;
 	const String key = remote_pending_key_;
-	const int flags = remote_pending_flags_;
-	clear_remote_body_pending();
-	remote_state_ = state_id;
-	remote_flags_ = flags;
-	// The queued packet's phase described the old current channel. Retail
-	// starts the promoted request at the first frame.
-	start_remote_body_blend(key, flags, 0);
+	remote_pending_key_ = String();
+	start_remote_body_blend(key, static_cast<int>(remote_body_.flags()), 0);
 	return true;
 }
 

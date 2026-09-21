@@ -728,6 +728,11 @@ target_link_libraries(renderer_fp_viewmodel_spec_test PRIVATE opennova_runtime)
 target_include_directories(renderer_fp_viewmodel_spec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME renderer_fp_viewmodel_spec COMMAND renderer_fp_viewmodel_spec_test)
 
+add_executable(anim_remote_body_state_test anim/remote_body_state_test.cpp)
+target_link_libraries(anim_remote_body_state_test PRIVATE opennova_runtime)
+target_include_directories(anim_remote_body_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_remote_body_state COMMAND anim_remote_body_state_test)
+
 add_executable(anim_adm_root_motion_test anim/adm_root_motion_test.cpp)
 target_link_libraries(anim_adm_root_motion_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
