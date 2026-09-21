@@ -94,26 +94,8 @@ const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
 # interns and spawns it without a resource root and the round-bound group
 # stays live until the throwable pass stops it.
 func _catalog_file() -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = "toss dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var effect := ParticleEffect.new()
-	effect.id = FLASHBANG_MOVE_EFFECT
-	effect.pdefs = PackedStringArray(["toss dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("toss dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [FLASHBANG_MOVE_EFFECT])
 
 
 # The round-bound move group in the effect world's public report: by id once

@@ -20,7 +20,6 @@
 #include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
 #include "particle/effect_spawn_records.h"
-#include "particle/particle_def.h"
 #include "particle/particle_file.h"
 
 namespace opennova::particle {
@@ -47,7 +46,7 @@ public:
 	// Re-exports of the vocabulary the portable effect scene owns: callers
 	// keep the EffectWorld.* spelling.
 	enum {
-		PARTICLE_FLAG_FOREVER_EMIT = ParticleDef::FLAG_FOREVER_EMIT,
+		PARTICLE_FLAG_FOREVER_EMIT = opennova::particle::particle_flag::ForeverEmit,
 		ADMISSION_ALWAYS = EffectScene::ADMISSION_ALWAYS,
 		ADMISSION_REPLACE_OWNED = EffectScene::ADMISSION_REPLACE_OWNED,
 		ADMISSION_SUPPRESS_WHILE_OWNED = EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED,

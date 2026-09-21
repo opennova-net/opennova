@@ -102,7 +102,7 @@ void write_handles(std::ostream &out, const TableEditHandles &handles) {
 }
 
 void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot) {
-	// Per CParticleDef_SaveToFile @ 0x5e4d70 graphic loop (0x5e540b..0x5e56ee).
+	// [orig: CParticleDef_SaveToFile @ 0x5e4d70; graphic loop @ 0x5e540b..0x5e56ee].
 	// Header line uses tab, space-equals, tab, then "<texture>, <blend>;".
 	out << "\tgraphic" << slot << " =\t" << layer.texture << ", "
 			<< blend_mode_name(layer.blend_mode) << ";" << NL;

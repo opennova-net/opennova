@@ -9,6 +9,16 @@
 
 namespace opennova::particle {
 
+const EffectDef *ParticleFile::find_effect(std::string_view id) const noexcept {
+	// The first case-insensitive effect-name match is the catalog definition.
+	// [orig: CEffectWorld_FindEffectDefByName @ 0x5e34f0 ->
+	// _stricmp @ 0x5e352c, see docs/particles/ptl-format-re.md].
+	for (const EffectDef &effect : effects) {
+		if (strutil::iequals(effect.id, id)) return &effect;
+	}
+	return nullptr;
+}
+
 const ParticleDef *ParticleFile::find_particle(std::string_view id) const noexcept {
 	// Particle-def names resolve case-insensitively like every by-name walk in
 	// the effect system: the EFFDEF→PARDEF member resolve compares with _stricmp

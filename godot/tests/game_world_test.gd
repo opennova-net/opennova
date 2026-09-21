@@ -1304,31 +1304,9 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	assert_not_null(effect_world)
 	if effect_world == null:
 		return
-	var def := ParticleDef.new()
-	def.id = "puff dots"
-	def.emit_dur = 0.5
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 2.0
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	var graphics: Array = def.graphics
-	var layer := graphics[0] as ParticleGraphicLayer
-	layer.present = true
-	layer.texture = "bink.tga"
-	layer.alpha = 1.0
-	layer.scale_value = 1.0
-	def.graphics = graphics
-	var effect := ParticleEffect.new()
-	effect.id = "puff"
-	effect.pdefs = PackedStringArray(["puff dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
+	var file := ParticleFixture.catalog("puff dots",
+			"emit_dur = 0.5;\nemit_rate = 50;\nemit_burst = 4;\nage = 2;\nalpha = 1;\nscale = 1;\ngraphic1 = bink.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;",
+			["puff"])
 	file.source_path = ProjectSettings.globalize_path(
 			"res://../fixtures/cbin/renderable_effect_fixture.ptl")
 	effect_world.load_particle_file(file)

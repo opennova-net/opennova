@@ -389,13 +389,8 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 		if (file.is_null()) {
 			continue;
 		}
-		const TypedArray<ParticleEffect> effects = file->get_effects();
-		for (int64_t j = 0; j < effects.size(); ++j) {
-			const Ref<ParticleEffect> effect = effects[j];
-			if (effect.is_null()) {
-				continue;
-			}
-			const String effect_id = effect->get_id();
+		for (const auto &effect : file->native_file().effects) {
+			const String effect_id(effect.id.c_str());
 			if (effect_id.is_empty() || seen.has(effect_id)) {
 				continue;
 			}

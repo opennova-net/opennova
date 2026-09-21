@@ -34,11 +34,7 @@
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
-#include "particle/particle_curve_ref.h"
 #include "particle/particle_effect.h"
-#include "particle/particle_table.h"
-#include "particle/particle_graphic_layer.h"
-#include "particle/particle_def.h"
 #include "particle/particle_file.h"
 #include "lights/effect_light_director.h"
 #include "lights/effect_light_report.h"
@@ -375,11 +371,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(Paths);
-	GDREGISTER_CLASS(ParticleCurveRef);
 	GDREGISTER_CLASS(ParticleEffect);
-	GDREGISTER_CLASS(ParticleTable);
-	GDREGISTER_CLASS(ParticleGraphicLayer);
-	GDREGISTER_CLASS(ParticleDef);
 	GDREGISTER_CLASS(ParticleFile);
 	GDREGISTER_CLASS(EffectLoadReport);
 	GDREGISTER_CLASS(EffectSpawnRequest);

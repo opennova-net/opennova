@@ -76,12 +76,7 @@ add_library(${TARGET_NAME} SHARED
     env/water_core.cpp
     env/star_field.cpp
     env/glare_occlusion.cpp
-    particle/particle_curve_ref.cpp
     particle/particle_effect.cpp
-    particle/particle_table_handles.cpp
-    particle/particle_table.cpp
-    particle/particle_graphic_layer.cpp
-    particle/particle_def.cpp
     particle/particle_file.cpp
     lights/effect_light_director.cpp
     lights/effect_light_report.cpp

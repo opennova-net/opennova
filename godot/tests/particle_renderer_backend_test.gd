@@ -29,36 +29,16 @@ func _live_fog_source() -> MissionEnvironment:
 
 
 func _live_world_scene_at_heights(heights: PackedFloat32Array) -> EffectScene:
-	var particle := ParticleDef.new()
-	particle.id = "GPU particle"
-	particle.emit_dur = 0.1
-	particle.emit_rate = 20.0
-	particle.emit_burst = 1
-	particle.age = 2.0
-	particle.alpha = 1.0
-	particle.scale_value = 1.0
-	var graphics: Array = particle.graphics
-	var layer := graphics[0] as ParticleGraphicLayer
-	layer.present = true
-	layer.texture = "gpu_contract_fallback.tga"
-	layer.blend_mode = 0
-	layer.alpha = 1.0
-	layer.scale_value = 1.0
-	particle.graphics = graphics
-
-	var effect := ParticleEffect.new()
-	effect.id = "GPU effect"
-	effect.pdefs = PackedStringArray([particle.id])
-	var file := ParticleFile.new()
-	file.particles = [particle]
-	file.effects = [effect]
+	var file := ParticleFixture.catalog("GPU particle",
+			"emit_dur = 0.1;\nemit_rate = 20;\nemit_burst = 1;\nage = 2;\nalpha = 1;\nscale = 1;\ngraphic1 = gpu_contract_fallback.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;",
+			["GPU effect"])
 
 	var scene := EffectScene.new()
 	scene.open([file])
 	for height in heights:
 		var transform := Transform3D.IDENTITY
 		transform.origin.y = height
-		var receipt := scene.spawn(EffectSpawnRequest.make(scene.intern(effect.id), transform))
+		var receipt := scene.spawn(EffectSpawnRequest.make(scene.intern("GPU effect"), transform))
 		assert_eq(receipt.status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
@@ -604,25 +584,17 @@ func _shared_world_camera(main_viewport: SubViewport) -> Camera3D:
 # camera, so its corners are the same for every view and the ONLY bytes that
 # differ between two views' compiles are that lit colour.
 func _live_lit_scene() -> EffectScene:
-	var particle := _overlap_definition("lit", 3)
-	particle.bump_scale = 1.0
-	particle.flags = 0x100
-	return _single_quad_scene(particle)
+	return _single_quad_scene("lit", 3, "bump_scale = 1;\nflags = YAWANDPITCH;")
 
 
-# One live quad of `particle` at (0, 1, 0): the definition emits exactly one
-# particle (rate 10 over 0.1 s, burst 1) and keeps it for the whole test.
-func _single_quad_scene(particle: ParticleDef) -> EffectScene:
-	var effect := ParticleEffect.new()
-	effect.id = particle.id
-	effect.pdefs = PackedStringArray([particle.id])
-	var file := ParticleFile.new()
-	file.particles = [particle]
-	file.effects = [effect]
+# One live quad at (0, 1, 0), through the same PTL loader as mounted effects.
+func _single_quad_scene(name: String, blend: int, properties: String = "") -> EffectScene:
+	var file := ParticleFixture.parse(_overlap_document(name, blend, properties))
 	var scene := EffectScene.new()
 	scene.open([file])
-	_overlap_spawn(scene, particle.id, 0.0)
+	_overlap_spawn(scene, name, 0.0)
 	return scene
+
 
 
 func _slot(report: Dictionary, key: String) -> Dictionary:
@@ -786,7 +758,7 @@ func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
 	second_camera.rotation_degrees = Vector3(0.0, 180.0, 0.0)
 
 	var renderer := ParticleRenderer.new()
-	renderer.scene = _single_quad_scene(_overlap_definition("impact", 0))
+	renderer.scene = _single_quad_scene("impact", 0)
 	renderer.texture_provider = _overlap_texture  # opaque red
 	renderer.set_water_plane(-100.0, null)
 	renderer.set_second_scene_camera(second_camera)
@@ -951,27 +923,14 @@ func _overlap_texture(name: String) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
-func _overlap_definition(name: String, blend: int) -> ParticleDef:
-	var particle := ParticleDef.new()
-	particle.id = name
-	particle.emit_dur = 0.1
-	particle.emit_rate = 10.0
-	particle.emit_burst = 1
-	particle.age = 100.0
-	particle.alpha = 1.0
-	particle.color1 = Color.WHITE
-	particle.color2 = Color.WHITE
-	particle.color3 = Color.WHITE
-	particle.color4 = Color.WHITE
-	var graphics: Array = particle.graphics
-	var layer := graphics[0] as ParticleGraphicLayer
-	layer.present = true
-	layer.texture = name + ".tga"
-	layer.blend_mode = blend
-	layer.alpha = 1.0
-	layer.scale_value = 1.0
-	particle.graphics = graphics
-	return particle
+func _overlap_document(name: String, blend: int, properties: String = "") -> String:
+	var modes := ["blend", "additive", "premult", "bump", "mod", "mod2x", "bumpadd", "distort"]
+	var authored := "emit_dur = 0.1;\nemit_rate = 10;\nemit_burst = 1;\nage = 100;\nalpha = 1;\n"
+	for index in range(1, 5):
+		authored += "color%d = 255, 255, 255;\n" % index
+	authored += "graphic1 = %s.tga, %s;\ng1_alpha = 1;\ng1_scale = 1;\n" % [name, modes[blend]]
+	return ParticleFixture.definition(name, authored + properties) + ParticleFixture.effect(name, [name])
+
 
 
 func _overlap_spawn(scene: EffectScene, name: String, depth: float) -> void:
@@ -1009,16 +968,8 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	background.environment.background_mode = Environment.BG_COLOR
 	background.environment.background_color = Color.BLACK
 	viewport.add_child(background)
-	var file := ParticleFile.new()
-	file.particles = [_overlap_definition("impact", 0),
-			_overlap_definition("smoke", 0), _overlap_definition("haze", 7)]
-	var effects: Array[ParticleEffect] = []
-	for name in ["impact", "smoke", "haze"]:
-		var effect := ParticleEffect.new()
-		effect.id = name
-		effect.pdefs = PackedStringArray([name])
-		effects.append(effect)
-	file.effects = effects
+	var file := ParticleFixture.parse(_overlap_document("impact", 0)
+			+ _overlap_document("smoke", 0) + _overlap_document("haze", 7))
 	var scene := EffectScene.new()
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
@@ -1078,14 +1029,7 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	background.environment.background_mode = Environment.BG_COLOR
 	background.environment.background_color = Color.BLACK
 	viewport.add_child(background)
-	var particle := _overlap_definition("dirt", 0)
-	(particle.graphics[0] as ParticleGraphicLayer).scale_value = 2.0
-	var effect := ParticleEffect.new()
-	effect.id = "dirt"
-	effect.pdefs = PackedStringArray([particle.id])
-	var file := ParticleFile.new()
-	file.particles = [particle]
-	file.effects = [effect]
+	var file := ParticleFixture.parse(_overlap_document("dirt", 0, "g1_scale = 2;"))
 	var scene := EffectScene.new()
 	scene.open([file])
 	var renderer := ParticleRenderer.new()

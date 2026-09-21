@@ -43,27 +43,8 @@ func before_all() -> void:
 # one effect per name, so the real EffectWorld interns and spawns them without
 # a resource root and an owned group stays live until its owner is retired.
 func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = 'wreck dots'
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	for effect_name in effect_names:
-		var effect := ParticleEffect.new()
-		effect.id = effect_name
-		effect.pdefs = PackedStringArray(['wreck dots'])
-		effects.append(effect)
-	file.effects = effects
-	return file
+	return ParticleFixture.catalog("wreck dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", effect_names)
 
 
 # Every unowned (transient) group report row.

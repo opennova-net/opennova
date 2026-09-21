@@ -289,6 +289,7 @@ struct ParticleFile {
 	std::vector<TableDef> tables;
 	std::vector<TableEditHandles> table_handles;
 
+	const EffectDef *find_effect(std::string_view id) const noexcept;
 	const ParticleDef *find_particle(std::string_view id) const noexcept;
 	const TableDef *find_table(std::string_view id) const noexcept;
 };

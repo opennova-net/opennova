@@ -172,44 +172,23 @@ func _controlled_water_material() -> ShaderMaterial:
 func _water_order_particle_scene() -> EffectScene:
 	# Colors are authored per definition. The removed spawn-time tint is not
 	# part of the retail descriptor, so it cannot distinguish these passes.
-	var file := ParticleFile.new()
-	var particles: Array[ParticleDef] = []
-	var effects: Array[ParticleEffect] = []
-	for color in [Color.BLUE, Color.GREEN]:
-		var particle := ParticleDef.new()
-		particle.id = "Water order %d" % particles.size()
-		particle.emit_dur = 0.1
-		particle.emit_rate = 20.0
-		particle.emit_burst = 1
-		particle.age = 2.0
-		particle.alpha = 1.0
-		particle.scale_value = 2.0
-		particle.color1 = color
-		particle.color2 = color
-		particle.color3 = color
-		particle.color4 = color
-		var graphics: Array = particle.graphics
-		var layer := graphics[0] as ParticleGraphicLayer
-		layer.present = true
-		layer.texture = "water_order_fallback.tga"
-		layer.blend_mode = 0
-		layer.alpha = 0.5
-		layer.scale_value = 2.0
-		particle.graphics = graphics
-		particles.append(particle)
-		var effect := ParticleEffect.new()
-		effect.id = particle.id
-		effect.pdefs = PackedStringArray([particle.id])
-		effects.append(effect)
-	file.particles = particles
-	file.effects = effects
+	var text := ""
+	for index in 2:
+		var name := "Water order %d" % index
+		var color := "0, 0, 255" if index == 0 else "0, 255, 0"
+		var properties := "emit_dur = 0.1;\nemit_rate = 20;\nemit_burst = 1;\nage = 2;\nalpha = 1;\nscale = 2;\n"
+		for corner in range(1, 5):
+			properties += "color%d = %s;\n" % [corner, color]
+		properties += "graphic1 = water_order_fallback.tga, blend;\ng1_alpha = 0.5;\ng1_scale = 2;"
+		text += ParticleFixture.definition(name, properties) + ParticleFixture.effect(name, [name])
+	var file := ParticleFixture.parse(text)
 
 	var scene := EffectScene.new()
 	scene.open([file])
 	for index in 2:
 		var transform := Transform3D.IDENTITY
 		transform.origin = Vector3(0.0, -0.05 if index == 0 else 0.05, 2.0)
-		var request := EffectSpawnRequest.make(scene.intern(effects[index].id), transform)
+		var request := EffectSpawnRequest.make(scene.intern("Water order %d" % index), transform)
 		assert_eq(scene.spawn(request).status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene

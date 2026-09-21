@@ -67,40 +67,15 @@ func _make_root() -> ResourceRoot:
 
 # One synthetic short-lived effect document (deterministic expiry, no fixture
 # dependence): one burst, sub-second lifetime.
-func _make_short_effect_file() -> ParticleFile:
-	var def := ParticleDef.new()
-	def.id = "puff dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 50.0
-	def.emit_burst = 4
-	def.age = 0.2
-	def.alpha = 1.0
-	def.scale_value = 1.0
-	var effect := ParticleEffect.new()
-	effect.id = "puff"
-	effect.pdefs = PackedStringArray(["puff dots"])
-	var file := ParticleFile.new()
-	var particles: Array = file.particles
-	particles.append(def)
-	file.particles = particles
-	var effects: Array = file.effects
-	effects.append(effect)
-	file.effects = effects
-	return file
+func _make_short_effect_file(properties: String = "") -> ParticleFile:
+	return ParticleFixture.catalog("puff dots",
+			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\n" + properties, ["puff"])
 
 
-func _make_renderable_effect_file() -> ParticleFile:
-	var file := _make_short_effect_file()
-	var particle := file.find_particle("puff dots")
-	var graphics: Array = particle.graphics
-	var layer := graphics[0] as ParticleGraphicLayer
-	layer.present = true
-	layer.texture = "particle_dot.tga"
-	layer.alpha = 1.0
-	layer.scale_value = 1.0
-	particle.graphics = graphics
-	# Point the loose-file resolver at a committed image fixture without
-	# implying that this synthetic particle file itself exists on disk.
+func _make_renderable_effect_file(properties: String = "") -> ParticleFile:
+	var file := _make_short_effect_file(
+			"graphic1 = particle_dot.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;\n" + properties)
+	# A loose texture locator; the synthetic PTL itself need not exist on disk.
 	file.source_path = ProjectSettings.globalize_path(
 			"res://../fixtures/cbin/renderable_effect_fixture.ptl")
 	return file
@@ -210,26 +185,12 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 
 
 func test_live_group_parameters_drive_rate_and_offset_without_clamping() -> void:
-	var def := ParticleDef.new()
-	def.id = "wake dots"
-	def.emit_dur = 0.1
-	def.emit_rate = 30.0
-	def.emit_rate_adj = 30.0
-	def.emit_burst = 1
-	def.y_offset = 2.0
-	def.z_offset = 4.0
-	def.age = 1.0
-	def.flags = ParticleDef.FLAG_FOREVER_EMIT
-	var effect := ParticleEffect.new()
-	effect.id = "wake"
-	effect.pdefs = PackedStringArray([def.id])
-	var file := ParticleFile.new()
-	file.particles = [def]
-	file.effects = [effect]
+	var file := ParticleFixture.catalog("wake dots",
+			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", ["wake"])
 	var world := _make_world()
 	world.load_particle_file(file)
 	var receipt: EffectSpawnReceipt = world.spawn_effect_owned_request(
-			"wake-owner", effect.id, Vector3.ZERO, Vector3.FORWARD)
+			"wake-owner", "wake", Vector3.ZERO, Vector3.FORWARD)
 	assert_true(receipt.spawned)
 
 	assert_true(world.set_group_parameters(receipt.group_id, 0.75, 0.25))
@@ -271,8 +232,7 @@ func test_runtime_reset_preserves_catalog_and_discards_live_admission() -> void:
 
 func test_pending_delayed_emitter_outlives_the_heuristic_window() -> void:
 	var world := _make_world()
-	var file := _make_short_effect_file()
-	file.find_particle("puff dots").emit_delay = 31.0
+	var file := _make_short_effect_file("emit_delay = 31;")
 	world.load_particle_file(file)
 	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
 
@@ -336,9 +296,7 @@ func test_particle_master_switch_suppresses_facades_and_checked_count() -> void:
 
 func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> void:
 	var world := _make_world()
-	var file := _make_short_effect_file()
-	var particle := file.find_particle("puff dots")
-	particle.flags = 1 << 18  # FOREVEREMIT: detachment must make it finite.
+	var file := _make_short_effect_file("flags = FOREVEREMIT;")
 	world.load_particle_file(file)
 	var positions := OwnerPositions.new()
 	positions.state = Vector3(1, 2, 3)
@@ -382,8 +340,7 @@ func test_attached_effect_composes_the_local_userpoint_offset() -> void:
 	#  masked userpoint, pos = the userpoint, forward = its direction; follow =
 	#  CEffect_UpdateEmitterTransform @ 0x5f7410].
 	var world := _make_world()
-	var file := _make_short_effect_file()
-	file.find_particle("puff dots").flags = 1 << 18  # FOREVEREMIT — the exhaust shape
+	var file := _make_short_effect_file("flags = FOREVEREMIT;")
 	world.load_particle_file(file)
 	var positions := OwnerPositions.new()
 	var start := Transform3D(Basis.IDENTITY, Vector3(10, 0, 0))
@@ -417,8 +374,7 @@ func test_attached_effect_composes_the_local_userpoint_offset() -> void:
 
 func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 	var world := _make_world()
-	var file := _make_short_effect_file()
-	file.find_particle("puff dots").flags = 1 << 18
+	var file := _make_short_effect_file("flags = FOREVEREMIT;")
 	world.load_particle_file(file)
 	var positions := OwnerPositions.new()
 	positions.state = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
@@ -446,8 +402,7 @@ func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 
 func test_release_effect_binding_drops_generation_scoped_token_and_pose_state() -> void:
 	var world := _make_world()
-	var file := _make_short_effect_file()
-	file.find_particle("puff dots").flags = 1 << 18
+	var file := _make_short_effect_file("flags = FOREVEREMIT;")
 	world.load_particle_file(file)
 	var owner_key := "throwable-move:1024"
 	var receipt := world.spawn_effect_owned_request(
@@ -489,14 +444,13 @@ func test_release_effect_binding_cleans_a_rejected_spawn_identity() -> void:
 
 func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
 	var cases := [
-		{"flag": 1 << 27, "mode": 1},  # BELOWH20: kill above.
-		{"flag": 1 << 28, "mode": 2},  # ABOVEH20: kill at/below.
+		{"flag": "BELOWH20", "mode": 1},  # BELOWH20: kill above.
+		{"flag": "ABOVEH20", "mode": 2},  # ABOVEH20: kill at/below.
 	]
 	for entry in cases:
 		var world := _make_world()
 		world.set_water_plane(12.5, null)
-		var file := _make_short_effect_file()
-		file.find_particle("puff dots").flags = entry.flag
+		var file := _make_short_effect_file("flags = %s;" % entry.flag)
 		world.load_particle_file(file)
 		world.spawn_effect("puff", Vector3.ZERO)
 		var emitter := _single_emitter(world)
@@ -636,10 +590,7 @@ func test_preaged_effect_receives_mission_wind_before_its_first_tick() -> void:
 	camera.position = Vector3(0.0, 0.0, 5.0)
 	camera.current = true
 	add_child_autofree(camera)
-	var file := _make_renderable_effect_file()
-	var particle := file.find_particle("puff dots")
-	particle.flags = particle.flags | (1 << 10) # GLOBALWIND
-	particle.age = 2.0
+	var file := _make_renderable_effect_file("flags = GLOBALWIND;\nage = 2;")
 	var normal := _make_world()
 	var preaged := _make_world()
 	for world in [normal, preaged]:
