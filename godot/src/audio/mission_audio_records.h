@@ -19,6 +19,8 @@
 
 #include "audio/ambient_layer.h"
 
+#include <runtime/audio/ambient_channel_pool.h> // kAmbientMixChannels
+
 // The typed records of the mission audio orchestrator (audio/mission_audio,
 // the former mission_audio.gd inner classes, ADR 0017): the placed marker,
 // the physical channel, the candidate binding and ranked row, the dynamic
@@ -27,10 +29,8 @@
 
 namespace godot {
 
-// The ambient emitter mix budget: the engine sorts every in-range emitter voice
-// by computed volume each frame and keeps the loudest 8 on real channels
-// [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, channel table @ 0x24D6688].
-inline constexpr int kMissionAudioMixChannels = 8;
+// The ambient emitter mix budget (the engine's channel pool carries the witness).
+inline constexpr int kMissionAudioMixChannels = opennova::audio::kAmbientMixChannels;
 
 // One placed ambient marker ("snd:" item): data, not a scene node. The four
 // time-of-day slot set names ("" = silent in that region) and, per distinct

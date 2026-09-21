@@ -17,6 +17,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
     # audio — mixers, bank chain, envs markers, selectors, profiles
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp

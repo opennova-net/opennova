@@ -369,6 +369,14 @@ target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
+# The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
+# binds up to the budget, incumbents keep their channel, dropouts release,
+# unresolvable entrants cached out, a pinned pool never grows.
+add_executable(ambient_channel_pool_test audio/ambient_channel_pool_test.cpp)
+target_link_libraries(ambient_channel_pool_test PRIVATE opennova_runtime)
+target_compile_features(ambient_channel_pool_test PRIVATE cxx_std_17)
+add_test(NAME ambient_channel_pool COMMAND ambient_channel_pool_test)
+
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
 # and the BMS type-id -> items.def id offset. [orig: @0x82ABD4 -> @0x4a8080]
