@@ -372,12 +372,9 @@ func test_transform_presentation_advances_the_static_shadow_registry_once() -> v
 	_present(p, snap)
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"the first live transform repairs the placement-time source snapshot")
-	var rows := placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(rows.size(), 1)
-	if rows.size() != 1:
-		return
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform,
-			"the shadow source follows the exact transform applied to ObjectModel")
+	assert_eq(placer.hide_static_instance(501), model.transform,
+			"the carve consumes the exact pose applied by presentation")
+	assert_true(placer.show_static_instance(501))
 	revision = placer.get_static_terrain_shadow_source_revision()
 	_present(p, snap)
 	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
@@ -386,8 +383,8 @@ func test_transform_presentation_advances_the_static_shadow_registry_once() -> v
 	_present(p, snap)
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"a later real movement invalidates the source exactly once")
-	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform)
+	assert_eq(placer.hide_static_instance(501), model.transform)
+	assert_true(placer.show_static_instance(501))
 
 
 func test_publication_ownership_writes_zero_and_releases_suppressed_channel() -> void:

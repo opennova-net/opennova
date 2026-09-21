@@ -105,7 +105,7 @@ func test_fp_models_query_the_player_even_after_camera_restamping() -> void:
 	_camera.global_position = entity_position + Vector3(50, 40, 30)
 	_presenter.restamp_viewmodel_at_camera()
 	var director := EffectLightDirector.new()
-	director.setup(_world, Callable(), Callable())
+	director.setup(_world, null)
 	var scene := director.scene()
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(entity_position, 0.01)), 0)
 	var parts: Array[ObjectModel] = _presenter.vm_parts()

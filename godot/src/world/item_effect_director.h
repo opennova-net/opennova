@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "mission/static_source_provider.h"
-#include "mission/static_source_records.h"
 #include "object/entity_ref.h"
 #include "object/item_database.h"
 #include "object/object_model.h"
@@ -76,15 +75,12 @@ private:
 // registry, the anchor resolvers, the pending / control bookkeeping, and
 // the owner-pose resolver the effect world polls. Shared state is reached
 // through the world's PUBLIC surface — get_effect_world() / get_runtime() /
-// get_node_or_null — with TWO lent private seams arriving as setup()
-// Callables, null-guarded by the world: the placer's static item-effect
-// sources, and the placer's ItemDatabase (resolved lazily; a placer exists
-// only once a mission is placed).
+// get_node_or_null — with static source facts and the item catalog read
+// from the world's native provider.
 class ItemEffectDirector : public RefCounted {
 	GDCLASS(ItemEffectDirector, RefCounted)
 
 public:
-	void setup(Node *p_world, const Callable &p_static_sources, const Callable &p_item_db_source);
 	// The C++ world's wiring (ADR 0043 slice G10): the same two seams as typed
 	// reads off the world's StaticSourceProvider, no Callables lent.
 	void setup_with_provider(Node *p_world, StaticSourceProvider *p_provider);
@@ -175,8 +171,8 @@ private:
 	MissionRoot *_runtime() const;
 	Ref<ItemDatabase> _resolve_item_db() const;
 	// The placer's static item-effect sources: the provider's when the C++
-	// world wired one, else the lent Callable's (empty without either).
-	Array _static_sources() const;
+	// world wired one (empty without it).
+	std::vector<opennova::mission::StaticEffectSource> _static_sources() const;
 	void _control_node_aliases(ObjectModel *p_node, std::vector<std::string> &r_out) const;
 	bool _control_node_is_active(const ControlNode &p_entry) const;
 	bool _register_control_node(ObjectModel *p_node, int p_kind, int p_item_id);
@@ -190,16 +186,14 @@ private:
 			bool p_controller_active = false);
 	bool _spawn_static_item_effect(EffectWorld *p_effect_world, const String &p_effect,
 			const Transform3D &p_transform);
-	int _attach_item_effect_to_static(const Ref<StaticEffectSource> &p_source, int p_source_index,
+	int _attach_item_effect_to_static(const opennova::mission::StaticEffectSource &p_source, int p_source_index,
 			const Ref<ItemDatabase> &p_item_db_override = Ref<ItemDatabase>());
 	void _retry_pending_item_effects();
 
 	// The GameWorld whose entities carry the effects (public surface only).
 	ObjectID world_id_;
-	// The C++ world's typed source seam (null for a Callable-wired harness).
+	// The native world owns the provider for the director's lifetime.
 	StaticSourceProvider *provider_ = nullptr;
-	Callable static_sources_;  // () -> Array (the placer's static item-effect sources)
-	Callable item_db_source_;  // () -> ItemDatabase or null (the placer's db, lent by the world)
 	// Debug: hide every particle effect (the dev tools' "Hide particles" —
 	// the retail master particle switch, mimicked). Off by default; survives
 	// mission reloads.
@@ -216,7 +210,7 @@ private:
 	HashMap<uint64_t, ObjectID> item_fx_registered_nodes_;
 	HashMap<uint64_t, PendingNode> item_fx_pending_nodes_;
 	HashSet<int> item_fx_registered_static_;
-	HashMap<int, Ref<StaticEffectSource>> item_fx_pending_static_;
+	HashMap<int, opennova::mission::StaticEffectSource> item_fx_pending_static_;
 	// Controller/Driver-only PlayerControl item effects are dormant at
 	// mission startup. Portable lifecycle events activate them without
 	// polling: the identity aliases with a controlling occupant, the

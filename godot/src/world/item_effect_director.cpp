@@ -1,4 +1,5 @@
 #include "world/item_effect_director.h"
+#include "mission/static_source_convert.h"
 
 #include "mission/mission_root.h"
 
@@ -51,29 +52,14 @@ void ItemEffectDirectorStats::_bind_methods() {
 #undef ITEM_EFFECT_DIRECTOR_STATS_BIND
 }
 
-void ItemEffectDirector::setup(Node *p_world, const Callable &p_static_sources,
-		const Callable &p_item_db_source) {
-	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
-	provider_ = nullptr;
-	static_sources_ = p_static_sources;
-	item_db_source_ = p_item_db_source;
-}
-
 void ItemEffectDirector::setup_with_provider(Node *p_world, StaticSourceProvider *p_provider) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
 	provider_ = p_provider;
-	static_sources_ = Callable();
-	item_db_source_ = Callable();
 }
 
-Array ItemEffectDirector::_static_sources() const {
-	if (provider_ != nullptr) {
-		return provider_->static_item_effect_sources();
-	}
-	if (static_sources_.is_valid()) {
-		return static_sources_.call();
-	}
-	return Array();
+std::vector<opennova::mission::StaticEffectSource> ItemEffectDirector::_static_sources() const {
+	return provider_ != nullptr ? provider_->static_item_effect_sources()
+			: std::vector<opennova::mission::StaticEffectSource>();
 }
 
 Node *ItemEffectDirector::_world() const {
@@ -99,13 +85,7 @@ MissionRoot *ItemEffectDirector::_runtime() const {
 // The placer's item database through the lent seam (null before a mission /
 // with no placer).
 Ref<ItemDatabase> ItemEffectDirector::_resolve_item_db() const {
-	if (provider_ != nullptr) {
-		return provider_->static_source_item_db();
-	}
-	if (!item_db_source_.is_valid()) {
-		return Ref<ItemDatabase>();
-	}
-	return Ref<ItemDatabase>(item_db_source_.call());
+	return provider_ != nullptr ? provider_->static_source_item_db() : Ref<ItemDatabase>();
 }
 
 void ItemEffectDirector::set_particles_hidden(bool p_hidden) {
@@ -254,9 +234,9 @@ void ItemEffectDirector::reattach() {
 		}
 	}
 	{
-		const Array static_sources = _static_sources();
+		const auto static_sources = _static_sources();
 		for (int64_t source_index = 0; source_index < static_sources.size(); ++source_index) {
-			const Ref<StaticEffectSource> source = static_sources[source_index];
+			const auto &source = static_sources[source_index];
 			attached += _attach_item_effect_to_static(source, static_cast<int>(source_index), item_db);
 		}
 	}
@@ -527,17 +507,17 @@ bool ItemEffectDirector::_spawn_static_item_effect(EffectWorld *p_effect_world,
 	return receipt->get_spawned();
 }
 
-int ItemEffectDirector::_attach_item_effect_to_static(const Ref<StaticEffectSource> &p_source,
+int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::StaticEffectSource &p_source,
 		int p_source_index, const Ref<ItemDatabase> &p_item_db_override) {
 	EffectWorld *effect_world = _effect_world();
-	if (effect_world == nullptr || p_source.is_null() || p_source_index < 0) {
+	if (effect_world == nullptr || p_source_index < 0) {
 		return 0;
 	}
 	if (item_fx_registered_static_.has(p_source_index)) {
 		return 0;
 	}
-	const int item_id = p_source->get_item_id();
-	const int kind = p_source->get_kind();
+	const int item_id = p_source.item_id;
+	const int kind = p_source.kind;
 	if (item_id <= 0) {
 		return 0;
 	}
@@ -552,7 +532,7 @@ int ItemEffectDirector::_attach_item_effect_to_static(const Ref<StaticEffectSour
 	const ItemParticleFx fx = item_db->get_particle_fx(item_id);
 	const String effect = fx.effect;
 	const String userpoint = fx.userpoint;
-	const Ref<ObjectData> data = p_source->get_object_data();
+	const Ref<ObjectData> data = provider_->static_source_object_data(p_source.asset_id);
 	if (effect.is_empty() || data.is_null()) {
 		return 0;
 	}
@@ -560,7 +540,7 @@ int ItemEffectDirector::_attach_item_effect_to_static(const Ref<StaticEffectSour
 		item_fx_pending_static_.insert(p_source_index, p_source);
 		return 0;
 	}
-	const Transform3D entity_transform = p_source->get_world_transform();
+	const Transform3D entity_transform = from_static_source_transform(p_source.world_transform);
 	int attached = 0;
 	// The same engine attach plan as the animated leg [orig:
 	// ItemDef_GetBoneMaskByName @ 0x49ea40]; static sources compose the
@@ -620,22 +600,20 @@ void ItemEffectDirector::_retry_pending_item_effects() {
 		_attach_item_effect_to_node(node, kind, item_id, Ref<ItemDatabase>(), controller_active);
 	}
 	Vector<int> static_ids;
-	for (const KeyValue<int, Ref<StaticEffectSource>> &kv : item_fx_pending_static_) {
+	for (const KeyValue<int, opennova::mission::StaticEffectSource> &kv : item_fx_pending_static_) {
 		static_ids.push_back(kv.key);
 	}
 	for (const int source_index : static_ids) {
-		const Ref<StaticEffectSource> *source = item_fx_pending_static_.getptr(source_index);
+		const opennova::mission::StaticEffectSource *source = item_fx_pending_static_.getptr(source_index);
 		if (source == nullptr) {
 			continue;
 		}
-		const Ref<StaticEffectSource> pending = *source;
+		const auto pending = *source;
 		_attach_item_effect_to_static(pending, source_index);
 	}
 }
 
 void ItemEffectDirector::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("setup", "world", "static_sources", "item_db_source"),
-			&ItemEffectDirector::setup);
 	ClassDB::bind_method(D_METHOD("set_particles_hidden", "hidden"),
 			&ItemEffectDirector::set_particles_hidden);
 	ClassDB::bind_method(D_METHOD("has_effect_anchor", "owner_key"),

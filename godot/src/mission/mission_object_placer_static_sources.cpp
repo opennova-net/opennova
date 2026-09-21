@@ -1,88 +1,61 @@
 #include "mission/mission_object_placer.h"
+#include "mission/static_source_convert.h"
+#include "util/string_convert.h"
 
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/typed_array.hpp>
-
 #include <runtime/world/model_geometry.h>
 #include <base/io/fixed.h>
 
-#include "mission/mission_object_placer_keys.h"
-
 using namespace opennova::threedi;
-
-// The placer's read-back seams and destruction-support registry: static
-// user-point / item-effect / light-draw sources, static terrain-shadow
-// sources, and the per-BMS static instance table. The placement walk itself
-// lives in mission_object_placer.cpp.
 
 namespace godot {
 
-// --- read-back seams ---------------------------------------------------------
-
-// Snapshot of successfully rendered static entities for mission-start item
-// effects. Every row is a value descriptor; no placed/render Node is
-// exposed; row order is placement order and stable for the mission.
-TypedArray<StaticEffectSource> MissionObjectPlacer::get_static_item_effect_sources() {
-	_check_epoch();
-	TypedArray<StaticEffectSource> out;
-	for (int i = 0; i < static_item_effect_sources_.size(); ++i) {
-		const StaticEffectSourceRow &row = static_item_effect_sources_[i];
-		Ref<StaticEffectSource> record;
-		record.instantiate();
-		record->set_kind(row.kind);
-		record->set_entity_index(row.entity_index);
-		record->set_bms_id(row.bms_id);
-		record->set_item_id(row.item_id);
-		record->set_source_index(i);
-		record->set_graphic(row.graphic);
-		record->set_world_transform(row.world_transform);
-		record->set_object_data(row.object_data);
-		record->set_entity_bound_radius_q16(row.entity_bound_radius_q16);
-		out.push_back(record);
-	}
-	return out;
+uint64_t MissionObjectPlacer::_retain_static_source_asset(const Ref<ObjectData> &p_data) {
+	if (p_data.is_null()) return 0;
+	const uint64_t id = static_cast<uint64_t>(p_data->get_instance_id());
+	static_source_assets_.insert(id, p_data);
+	return id;
 }
 
-uint64_t MissionObjectPlacer::get_static_light_draw_source_revision() const {
-	return static_light_draw_source_revision_;
+Ref<ObjectData> MissionObjectPlacer::static_source_object_data(uint64_t asset_id) const {
+	const auto *data = static_source_assets_.getptr(asset_id);
+	return data != nullptr ? *data : Ref<ObjectData>();
 }
 
-TypedArray<StaticLightDrawSource> MissionObjectPlacer::get_static_light_draw_sources() {
+std::vector<opennova::mission::StaticEffectSource>
+MissionObjectPlacer::static_item_effect_sources() {
 	_check_epoch();
-	TypedArray<StaticLightDrawSource> out;
-	for (int i = 0; i < static_light_draw_sources_.size(); ++i) {
-		const StaticLightDrawRow &row = static_light_draw_sources_[i];
-		Ref<StaticLightDrawSource> record;
-		record.instantiate();
-		record->set_atlas_row(i);
-		record->set_source_index(row.source_index);
-		record->set_kind(row.kind);
-		record->set_entity_index(row.entity_index);
-		record->set_bms_id(row.bms_id);
-		record->set_item_id(row.item_id);
-		record->set_robj_index(row.robj_index);
-		record->set_world_bounds(row.world_bounds);
-		record->set_active(row.bms_id == 0 ||
-				!hidden_destruction_instances_.has(row.bms_id));
-		out.push_back(record);
-	}
-	return out;
+	return static_sources_.effect_sources();
+}
+
+std::vector<opennova::mission::StaticLightDrawSource>
+MissionObjectPlacer::static_light_draw_sources() {
+	_check_epoch();
+	return static_sources_.light_draw_sources();
+}
+
+uint64_t MissionObjectPlacer::static_light_draw_source_revision() {
+	return static_sources_.light_revision();
+}
+
+uint64_t MissionObjectPlacer::get_static_terrain_shadow_source_revision() {
+	_check_epoch();
+	return static_sources_.shadow_revision();
+}
+
+std::vector<opennova::mission::StaticTerrainShadowSource>
+MissionObjectPlacer::get_static_terrain_shadow_sources() {
+	_check_epoch();
+	return static_sources_.shadow_sources([this](const std::string &graphic) {
+		return _retain_static_source_asset(_load_object_data(String(graphic.c_str())));
+	});
 }
 
 void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
 		int p_index, int p_bms_id, int p_team, uint32_t p_entity_attrib,
 		int p_item_id, const String &p_graphic,
 		const Transform3D &p_xform, const Ref<ObjectData> &p_data) {
-	// The retail collector walks only pool 2 then pool 1 (Terrain_CollectAndRenderTileModels
-	// @0x60d250, admission @0x60d421..0x60d450 - docs/terrain/terrain-re.md). Keeping rejected
-	// records from those pools preserves the exact policy inputs for the
-	// portable admission predicate and its diagnostics.
-	if (p_kind != opennova::mission::kEntityKindBuilding &&
-			p_kind != opennova::mission::kEntityKindItem) {
-		return;
-	}
-	StaticTerrainShadowSource source;
+	opennova::mission::StaticTerrainShadowSource source;
 	source.bms_id = p_bms_id;
 	source.item_id = p_item_id;
 	source.entity_kind = p_kind;
@@ -93,156 +66,44 @@ void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
 		source.item_attrib = item_db_->get_attrib(p_item_id);
 		source.item_attrib2 = item_db_->get_attrib2(p_item_id);
 	}
-	source.graphic = p_graphic;
-	source.world_transform = p_xform;
-	source.object_data = p_data;
-	const int row = static_terrain_shadow_sources_.size();
-	static_terrain_shadow_sources_.push_back(source);
-	static_terrain_shadow_source_rows_[entity_identity_key(p_kind, p_index)]
-			.push_back(row);
-	if (source.bms_id != 0) {
-		static_terrain_shadow_rows_by_bms_[source.bms_id].push_back(row);
-	}
-	_bump_static_terrain_shadow_source_revision();
-}
-
-void MissionObjectPlacer::_bump_static_terrain_shadow_source_revision() {
-	++static_terrain_shadow_source_revision_;
-	if (static_terrain_shadow_source_revision_ == 0) {
-		++static_terrain_shadow_source_revision_;
-	}
-}
-
-uint64_t MissionObjectPlacer::get_static_terrain_shadow_source_revision() {
-	_check_epoch();
-	return static_terrain_shadow_source_revision_;
-}
-
-Vector<MissionObjectPlacer::StaticTerrainShadowSource>
-MissionObjectPlacer::get_static_terrain_shadow_sources() {
-	_check_epoch();
-	Vector<StaticTerrainShadowSource> out = static_terrain_shadow_sources_;
-	for (int i = 0; i < out.size(); ++i) {
-		StaticTerrainShadowSource &source = out.write[i];
-		if (source.object_data.is_null() && !source.graphic.is_empty()) {
-			source.object_data = _load_object_data(source.graphic);
-		}
-		if (source.bms_id == 0) continue;
-		if (const DestructionInstance *instance =
-					destruction_instances_.getptr(source.bms_id)) {
-			source.world_transform = instance->xform;
-		}
-		source.active = !hidden_destruction_instances_.has(source.bms_id);
-		if (const StaticTerrainShadowSource *replacement =
-					static_terrain_shadow_replacements_.getptr(source.bms_id)) {
-			source.graphic = replacement->graphic;
-			source.world_transform = replacement->world_transform;
-			source.object_data = replacement->object_data.is_valid()
-					? replacement->object_data
-					: _load_object_data(replacement->graphic);
-			source.active = replacement->active;
-		}
-	}
-
-	// `register_static_instance` is the deterministic construction seam for
-	// already-resolved renderers and asset-free tests. Merge any record not
-	// already published by place() as a building-policy source;
-	// casts=false maps to the same authored NoShadow veto the collector owns.
-	for (const KeyValue<int64_t, DestructionInstance> &kv :
-			destruction_instances_) {
-		bool represented = false;
-		for (const StaticTerrainShadowSource &source : out) {
-			if (source.bms_id == static_cast<int>(kv.key)) {
-				represented = true;
-				break;
-			}
-		}
-		if (represented) continue;
-		StaticTerrainShadowSource source;
-		source.bms_id = static_cast<int>(kv.key);
-		source.entity_kind = opennova::mission::kEntityKindBuilding;
-		source.entity_index = kv.value.index;
-		source.entity_attrib = kv.value.casts_static_shadow
-				? 0u
-				: opennova::mission::kEntityAttribNoShadow;
-		source.graphic = kv.value.graphic;
-		source.world_transform = kv.value.xform;
-		source.object_data = _load_object_data(source.graphic);
-		source.active = !hidden_destruction_instances_.has(kv.key);
-		if (const StaticTerrainShadowSource *replacement =
-					static_terrain_shadow_replacements_.getptr(kv.key)) {
-			source.graphic = replacement->graphic;
-			source.world_transform = replacement->world_transform;
-			source.object_data = replacement->object_data.is_valid()
-					? replacement->object_data
-					: _load_object_data(replacement->graphic);
-			source.active = replacement->active;
-		}
-		out.push_back(source);
-	}
-	return out;
-}
-
-TypedArray<StaticTerrainShadowSourceRow>
-MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
-	TypedArray<StaticTerrainShadowSourceRow> out;
-	const Vector<StaticTerrainShadowSource> sources =
-			get_static_terrain_shadow_sources();
-	for (const StaticTerrainShadowSource &source : sources) {
-		Ref<StaticTerrainShadowSourceRow> row;
-		row.instantiate();
-		row->set_bms_id(source.bms_id);
-		row->set_item_id(source.item_id);
-		row->set_entity_kind(source.entity_kind);
-		row->set_entity_index(source.entity_index);
-		row->set_team(source.team);
-		row->set_item_attrib(static_cast<int64_t>(source.item_attrib));
-		row->set_item_attrib2(static_cast<int64_t>(source.item_attrib2));
-		row->set_graphic(source.graphic);
-		row->set_world_transform(source.world_transform);
-		row->set_object_data(source.object_data);
-		row->set_active(source.active);
-		out.push_back(row);
-	}
-	return out;
+	source.graphic = opennova::to_std(p_graphic);
+	source.world_transform = to_static_source_transform(p_xform);
+	source.asset_id = p_data.is_valid() ? static_cast<uint64_t>(p_data->get_instance_id()) : 0;
+	if (static_sources_.record_shadow(std::move(source))) _retain_static_source_asset(p_data);
 }
 
 int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 		int p_entity_index, int p_bms_id, int p_item_id,
 		const String &p_graphic, const Transform3D &p_xform) {
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_null()) {
-		return -1;
-	}
-	StaticEffectSourceRow row;
-	row.kind = p_kind;
-	row.entity_index = p_entity_index;
-	row.bms_id = p_bms_id;
-	row.item_id = p_item_id;
-	row.graphic = p_graphic;
-	row.world_transform = p_xform;
-	row.object_data = data;
-	row.entity_bound_radius_q16 = _item_entity_bound_radius_q16(p_item_id, data);
-	const int source_index = static_item_effect_sources_.size();
-	static_item_effect_sources_.push_back(row);
-	return source_index;
+	if (data.is_null()) return -1;
+	opennova::mission::StaticEffectSource source;
+	source.kind = p_kind;
+	source.entity_index = p_entity_index;
+	source.bms_id = p_bms_id;
+	source.item_id = p_item_id;
+	source.graphic = opennova::to_std(p_graphic);
+	source.world_transform = to_static_source_transform(p_xform);
+	source.asset_id = _retain_static_source_asset(data);
+	source.entity_bound_radius_q16 = _item_entity_bound_radius_q16(p_item_id, data);
+	return static_sources_.append_effect(std::move(source));
 }
 
 int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 		int p_kind, int p_entity_index, int p_bms_id, int p_item_id,
 		int p_robj_index, const AABB &p_world_bounds) {
-	StaticLightDrawRow row;
-	const int atlas_row = static_light_draw_sources_.size();
-	row.source_index = p_source_index;
-	row.kind = p_kind;
-	row.entity_index = p_entity_index;
-	row.bms_id = p_bms_id;
-	row.item_id = p_item_id;
-	row.robj_index = p_robj_index;
-	row.world_bounds = p_world_bounds;
-	static_light_draw_sources_.push_back(row);
-	++static_light_draw_source_revision_;
-	return atlas_row;
+	opennova::mission::StaticLightDrawSource source;
+	source.source_index = p_source_index;
+	source.kind = p_kind;
+	source.entity_index = p_entity_index;
+	source.bms_id = p_bms_id;
+	source.item_id = p_item_id;
+	source.robj_index = p_robj_index;
+	for (int i = 0; i < 3; ++i) {
+		source.bounds_position[i] = p_world_bounds.position[i];
+		source.bounds_size[i] = p_world_bounds.size[i];
+	}
+	return static_sources_.append_light_draw(std::move(source));
 }
 
 // --- destruction support (world-wac-ai-re §24.6) -----------------------------
@@ -250,27 +111,27 @@ int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 void MissionObjectPlacer::register_static_instance(int p_bms_id,
 		const String &p_graphic, int p_index, const Transform3D &p_xform,
 		bool p_casts_static_shadow, bool p_mirror_reflected) {
-	DestructionInstance inst;
-	inst.graphic = p_graphic;
-	inst.batch_key = p_graphic;
+	opennova::mission::StaticInstance inst;
+	inst.bms_id = p_bms_id;
+	inst.graphic = opennova::to_std(p_graphic);
+	inst.batch_key = inst.graphic;
 	inst.index = p_index;
-	inst.xform = p_xform;
+	inst.xform = to_static_source_transform(p_xform);
 	inst.casts_static_shadow = p_casts_static_shadow;
 	inst.mirror_reflected = p_mirror_reflected;
-	destruction_instances_[p_bms_id] = inst;
-	_bump_static_terrain_shadow_source_revision();
+	static_sources_.register_instance(std::move(inst), true);
 }
 
 String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec == nullptr) {
 		return String();
 	}
-	return rec->batch_key.is_empty() ? rec->graphic : rec->batch_key;
+	return String((rec->batch_key.empty() ? rec->graphic : rec->batch_key).c_str());
 }
 
 int MissionObjectPlacer::get_static_instance_binding_count(int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec == nullptr || rec->lod_instance < 0 ||
 			rec->lod_instance >= static_lod_instances_.size()) {
 		return 0;
@@ -280,13 +141,13 @@ int MissionObjectPlacer::get_static_instance_binding_count(int p_bms_id) const {
 
 bool MissionObjectPlacer::static_instance_is_mirror_reflected(
 		int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	return rec != nullptr && rec->mirror_reflected;
 }
 
 bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 		int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	return rec != nullptr && rec->casts_static_shadow;
 }
 
@@ -295,12 +156,12 @@ bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 // their capacity); returns the instance's placed transform for the husk
 // graft.
 Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec == nullptr) {
 		return Variant();
 	}
-	if (hidden_destruction_instances_.has(p_bms_id)) {
-		return rec->xform;
+	if (static_sources_.is_hidden(p_bms_id)) {
+		return from_static_source_transform(rec->xform);
 	}
 	if (rec->lod_instance >= 0 &&
 			rec->lod_instance < static_lod_instances_.size()) {
@@ -309,15 +170,13 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 		_write_static_instance_slots(rec->lod_instance, -1, touched);
 		_flush_static_population_changes(touched);
 	}
-	hidden_destruction_instances_.insert(p_bms_id);
-	++static_light_draw_source_revision_;
-	_bump_static_terrain_shadow_source_revision();
-	return rec->xform;
+	static_sources_.hide_instance(p_bms_id);
+	return from_static_source_transform(rec->xform);
 }
 
 bool MissionObjectPlacer::inherit_static_entity_projection(int p_bms_id,
 		ObjectModel *p_model) const {
-	const DestructionInstance *record = destruction_instances_.getptr(p_bms_id);
+	const auto *record = static_sources_.instance(p_bms_id);
 	if (p_model == nullptr || record == nullptr || record->lod_instance < 0 ||
 			record->lod_instance >= static_lod_instances_.size()) return false;
 	const StaticLodInstance &instance = static_lod_instances_[record->lod_instance];
@@ -331,10 +190,10 @@ bool MissionObjectPlacer::inherit_static_entity_projection(int p_bms_id,
 // other. Repeated reset calls are safe (false when the instance was not
 // hidden).
 bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
-	if (!hidden_destruction_instances_.has(p_bms_id)) {
+	if (!static_sources_.is_hidden(p_bms_id)) {
 		return false;
 	}
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec != nullptr && rec->lod_instance >= 0 &&
 			rec->lod_instance < static_lod_instances_.size()) {
 		StaticLodInstance &instance =
@@ -345,193 +204,30 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 				touched);
 		_flush_static_population_changes(touched);
 	}
-	hidden_destruction_instances_.erase(p_bms_id);
-	++static_light_draw_source_revision_;
-	_bump_static_terrain_shadow_source_revision();
+	static_sources_.show_instance(p_bms_id);
 	return true;
 }
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
 		MissionData::EntityKind p_kind, int p_index, const Transform3D &p_xform) {
 	_check_epoch();
-	bool matched = false;
-	bool saw_source_match = false;
-	bool observable_changed = false;
-	const Vector<int> *source_rows = static_terrain_shadow_source_rows_.getptr(
-			entity_identity_key(p_kind, p_index));
-	if (source_rows != nullptr) {
-		for (const int i : *source_rows) {
-			if (i < 0 || i >= static_terrain_shadow_sources_.size()) continue;
-			StaticTerrainShadowSource &source =
-					static_terrain_shadow_sources_.write[i];
-			if (source.entity_kind != p_kind || source.entity_index != p_index) {
-				continue;
-			}
-			saw_source_match = true;
-			matched = true;
-			const bool policy_admitted =
-					opennova::mission::item_casts_static_terrain_shadow(
-					source.entity_kind, source.entity_attrib,
-					source.item_attrib, source.item_attrib2);
-			bool effective_active = source.active &&
-					(source.bms_id == 0 ||
-							!hidden_destruction_instances_.has(source.bms_id));
-			StaticTerrainShadowSource *replacement = source.bms_id != 0
-					? static_terrain_shadow_replacements_.getptr(source.bms_id)
-					: nullptr;
-			if (replacement != nullptr) effective_active = replacement->active;
-			bool value_changed = false;
-			if (source.world_transform != p_xform) {
-				source.world_transform = p_xform;
-				value_changed = true;
-			}
-			if (source.bms_id != 0) {
-				if (DestructionInstance *instance =
-							destruction_instances_.getptr(source.bms_id)) {
-					if (instance->xform != p_xform) {
-						instance->xform = p_xform;
-						value_changed = true;
-					}
-				}
-				if (replacement != nullptr) {
-					if (replacement->world_transform != p_xform) {
-						replacement->world_transform = p_xform;
-						value_changed = true;
-					}
-				}
-			}
-			observable_changed |=
-					policy_admitted && effective_active && value_changed;
-		}
-	}
-	if (!saw_source_match &&
-			p_kind == opennova::mission::kEntityKindBuilding) {
-		for (KeyValue<int64_t, DestructionInstance> &kv :
-				destruction_instances_) {
-			if (kv.value.index != p_index) continue;
-			matched = true;
-			StaticTerrainShadowSource *replacement =
-					static_terrain_shadow_replacements_.getptr(kv.key);
-			const bool effective_active = kv.value.casts_static_shadow &&
-					(replacement != nullptr
-							? replacement->active
-							: !hidden_destruction_instances_.has(kv.key));
-			bool value_changed = false;
-			if (kv.value.xform != p_xform) {
-				kv.value.xform = p_xform;
-				value_changed = true;
-			}
-			if (replacement != nullptr) {
-				if (replacement->world_transform != p_xform) {
-					replacement->world_transform = p_xform;
-					value_changed = true;
-				}
-			}
-			observable_changed |= effective_active && value_changed;
-		}
-	}
-	if (observable_changed) _bump_static_terrain_shadow_source_revision();
-	return matched;
-}
-
-void MissionObjectPlacer::_static_shadow_bms_policy(int p_bms_id,
-		bool &r_represented, bool &r_policy_admitted,
-		bool &r_base_active) const {
-	r_represented = false;
-	r_policy_admitted = false;
-	r_base_active = false;
-	const Vector<int> *rows =
-			static_terrain_shadow_rows_by_bms_.getptr(p_bms_id);
-	if (rows == nullptr) return;
-	for (const int i : *rows) {
-		if (i < 0 || i >= static_terrain_shadow_sources_.size()) continue;
-		const StaticTerrainShadowSource &source =
-				static_terrain_shadow_sources_[i];
-		if (source.bms_id != p_bms_id) continue;
-		r_represented = true;
-		const bool admitted =
-				opennova::mission::item_casts_static_terrain_shadow(
-					source.entity_kind, source.entity_attrib,
-					source.item_attrib, source.item_attrib2);
-		r_policy_admitted |= admitted;
-		r_base_active |= admitted && source.active &&
-				!hidden_destruction_instances_.has(p_bms_id);
-	}
+	return static_sources_.update_shadow_transform(p_kind, p_index,
+			to_static_source_transform(p_xform));
 }
 
 bool MissionObjectPlacer::set_static_terrain_shadow_replacement(
 		int p_bms_id, const String &p_graphic, const Transform3D &p_xform,
 		bool p_active) {
 	_check_epoch();
-	bool policy_admitted = false;
-	bool base_active = false;
-	bool represented = false;
-	_static_shadow_bms_policy(p_bms_id, represented, policy_admitted,
-			base_active);
-	bool source_exists = represented;
-	if (!represented) {
-		if (const DestructionInstance *instance =
-					destruction_instances_.getptr(p_bms_id)) {
-			source_exists = true;
-			policy_admitted = instance->casts_static_shadow;
-			base_active = policy_admitted &&
-					!hidden_destruction_instances_.has(p_bms_id);
-		}
-	}
-	if (p_bms_id == 0 || p_graphic.is_empty() || !source_exists) {
-		return false;
-	}
-	StaticTerrainShadowSource replacement;
-	replacement.bms_id = p_bms_id;
-	replacement.graphic = p_graphic;
-	replacement.world_transform = p_xform;
-	replacement.object_data = _load_object_data(p_graphic);
-	replacement.active = p_active && replacement.object_data.is_valid();
-	const StaticTerrainShadowSource *current =
-			static_terrain_shadow_replacements_.getptr(p_bms_id);
-	if (current != nullptr) {
-		if (current->graphic == replacement.graphic &&
-				current->world_transform == replacement.world_transform &&
-				current->object_data.ptr() == replacement.object_data.ptr() &&
-				current->active == replacement.active) {
-			return replacement.object_data.is_valid();
-		}
-	}
-	const bool was_effective = policy_admitted &&
-			(current != nullptr ? current->active : base_active);
-	const bool becomes_effective = policy_admitted && replacement.active;
-	static_terrain_shadow_replacements_[p_bms_id] = replacement;
-	if (was_effective || becomes_effective) {
-		_bump_static_terrain_shadow_source_revision();
-	}
-	return replacement.object_data.is_valid();
+	const std::string graphic = opennova::to_std(p_graphic);
+	if (!static_sources_.accepts_replacement(p_bms_id, graphic)) return false;
+	return static_sources_.set_shadow_replacement(p_bms_id, graphic,
+			to_static_source_transform(p_xform), p_active,
+			_retain_static_source_asset(_load_object_data(p_graphic)));
 }
 
-bool MissionObjectPlacer::clear_static_terrain_shadow_replacement(
-		int p_bms_id) {
+bool MissionObjectPlacer::clear_static_terrain_shadow_replacement(int p_bms_id) {
 	_check_epoch();
-	const StaticTerrainShadowSource *replacement =
-			static_terrain_shadow_replacements_.getptr(p_bms_id);
-	if (replacement == nullptr) return false;
-	bool policy_admitted = false;
-	bool base_active = false;
-	bool represented = false;
-	_static_shadow_bms_policy(p_bms_id, represented, policy_admitted,
-			base_active);
-	if (!represented) {
-		if (const DestructionInstance *instance =
-					destruction_instances_.getptr(p_bms_id)) {
-			policy_admitted = instance->casts_static_shadow;
-			base_active = policy_admitted &&
-					!hidden_destruction_instances_.has(p_bms_id);
-		}
-	}
-	const bool was_effective = policy_admitted && replacement->active;
-	const bool becomes_effective = policy_admitted && base_active;
-	static_terrain_shadow_replacements_.erase(p_bms_id);
-	if (was_effective || becomes_effective) {
-		_bump_static_terrain_shadow_source_revision();
-	}
-	return true;
+	return static_sources_.clear_shadow_replacement(p_bms_id);
 }
 
 bool MissionObjectPlacer::register_object_data(const String &p_graphic,
@@ -541,7 +237,7 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 		return false;
 	}
 	object_data_cache_[p_graphic] = p_data;
-	_bump_static_terrain_shadow_source_revision();
+	static_sources_.bump_shadow_revision();
 	return true;
 }
 
@@ -609,7 +305,7 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;
 	static_lod_profile_cache_[p_graphic] = profile;
-	_bump_static_terrain_shadow_source_revision();
+	static_sources_.bump_shadow_revision();
 	return true;
 }
 } // namespace godot

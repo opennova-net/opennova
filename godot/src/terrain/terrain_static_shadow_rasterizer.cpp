@@ -7,6 +7,7 @@
 #include "terrain/terrain_static_shadow_rasterizer.h"
 
 #include "mission/mission_object_placer.h"
+#include "mission/static_source_convert.h"
 #include "object/object_data.h"
 #include "terrain/terrain_data.h"
 
@@ -176,20 +177,7 @@ private:
 	Ref<ObjectData> data_;
 };
 
-std::array<float, 12> transform_rows(const Transform3D &p_transform) noexcept {
-	std::array<float, 12> out{};
-	for (int row = 0; row < 3; ++row) {
-		for (int column = 0; column < 3; ++column) {
-			out[static_cast<std::size_t>(row) * 3 + column] =
-					static_cast<float>(p_transform.basis[row][column]);
-		}
-	}
-	for (int axis = 0; axis < 3; ++axis) {
-		out[9 + static_cast<std::size_t>(axis)] =
-				static_cast<float>(p_transform.origin[axis]);
-	}
-	return out;
-}
+
 
 } // namespace
 
@@ -268,10 +256,10 @@ public:
 			planner.replace_casters({}, false);
 			return;
 		}
-		const Vector<MissionObjectPlacer::StaticTerrainShadowSource> sources =
+		const auto sources =
 				placer->get_static_terrain_shadow_sources();
 		records.reserve(static_cast<std::size_t>(sources.size()));
-		for (const MissionObjectPlacer::StaticTerrainShadowSource &source :
+		for (const auto &source :
 				sources) {
 			// The planner canonicalizes and applies suppression on its own
 			// list; keep resolving unsuppressed sources only, as before.
@@ -286,7 +274,7 @@ public:
 							source.item_attrib, source.item_attrib2);
 			const std::shared_ptr<const opennova::terrain::
 					TerrainStaticShadowResolvedGeometry> geometry =
-					geometry_for(source.graphic, source.object_data);
+					geometry_for(String(source.graphic.c_str()), placer->static_source_object_data(source.asset_id));
 			if (geometry == nullptr) {
 				if (admitted) admitted_geometry_missing = true;
 				continue;
@@ -307,20 +295,15 @@ public:
 			record.item_attrib = source.item_attrib;
 			record.item_attrib2 = source.item_attrib2;
 			record.active = source.active;
-			const CharString graphic_bytes = source.graphic.utf8();
-			record.graphic.assign(graphic_bytes.get_data(),
-					static_cast<std::size_t>(graphic_bytes.length()));
-			record.world_transform = transform_rows(source.world_transform);
+			record.graphic = source.graphic;
+			record.world_transform = source.world_transform;
 			record.geometry = geometry;
 			// Point sampler, deliberately: retail grounds each caster at the
 			// entity origin, not by bilinear interpolation.
 			record.ground_y = terrain_data.is_valid()
-					? terrain_data->get_height_world(source.world_transform.origin)
+					? terrain_data->get_height_world(from_static_source_transform(source.world_transform).origin)
 					: 0.0f;
-			record.caster_identity = source.object_data.is_valid()
-					? static_cast<uint64_t>(
-							source.object_data->get_instance_id())
-					: 0;
+			record.caster_identity = source.asset_id;
 			records.push_back(std::move(record));
 		}
 		planner.replace_casters(std::move(records),

@@ -233,11 +233,9 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	assert_true(runtime.tick())
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"production MissionRoot passes its placer into the EntityPresenter")
-	var rows := placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform,
-				"production presentation and the shadow registry share one pose")
+	assert_eq(placer.hide_static_instance(bms_id), model.transform,
+			"production presentation and the carve share one pose")
+	assert_true(placer.show_static_instance(bms_id))
 
 
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:

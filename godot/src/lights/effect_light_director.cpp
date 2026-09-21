@@ -1,4 +1,6 @@
 #include "lights/effect_light_director.h"
+#include "mission/mission_object_placer.h"
+#include "mission/static_source_convert.h"
 
 #include "mission/mission_root.h"
 
@@ -7,7 +9,6 @@
 #include "env/weather.h"
 #include "lights/light_spawn.h"
 #include "mission/mission_data.h"
-#include "mission/static_source_records.h"
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
 #include "object/object_data.h"
@@ -49,46 +50,30 @@ EffectLightDirector::EffectLightDirector() {
 	scene_.instantiate();
 }
 
-void EffectLightDirector::setup(Node *p_world, const Callable &p_static_sources,
-		const Callable &p_static_draw_sources, const Callable &p_static_draw_source_revision) {
-	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
-	provider_ = nullptr;
-	static_sources_ = p_static_sources;
-	static_draw_sources_ = p_static_draw_sources;
-	static_draw_source_revision_ = p_static_draw_source_revision;
-	static_rows_revision_ = -1;
+void EffectLightDirector::setup(Node *p_world, const Ref<MissionObjectPlacer> &p_placer) {
+	setup_with_provider(p_world, p_placer.ptr());
+	placer_provider_ = p_placer;
 }
 
 void EffectLightDirector::setup_with_provider(Node *p_world, StaticSourceProvider *p_provider) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	placer_provider_.unref();
 	provider_ = p_provider;
-	static_sources_ = Callable();
-	static_draw_sources_ = Callable();
-	static_draw_source_revision_ = Callable();
 	static_rows_revision_ = -1;
 }
 
-Array EffectLightDirector::_static_sources() const {
-	if (provider_ != nullptr) {
-		return provider_->static_item_effect_sources();
-	}
-	return static_sources_.is_valid() ? Array(static_sources_.call()) : Array();
+std::vector<opennova::mission::StaticEffectSource> EffectLightDirector::_static_sources() const {
+	return provider_ != nullptr ? provider_->static_item_effect_sources()
+			: std::vector<opennova::mission::StaticEffectSource>();
 }
 
-Array EffectLightDirector::_static_draw_sources() const {
-	if (provider_ != nullptr) {
-		return provider_->static_light_draw_sources();
-	}
-	return static_draw_sources_.is_valid() ? Array(static_draw_sources_.call()) : Array();
+std::vector<opennova::mission::StaticLightDrawSource> EffectLightDirector::_static_draw_sources() const {
+	return provider_ != nullptr ? provider_->static_light_draw_sources()
+			: std::vector<opennova::mission::StaticLightDrawSource>();
 }
 
 int64_t EffectLightDirector::_static_draw_source_revision() const {
-	if (provider_ != nullptr) {
-		return static_cast<int64_t>(provider_->static_light_draw_source_revision());
-	}
-	return static_draw_source_revision_.is_valid()
-			? static_cast<int64_t>(static_draw_source_revision_.call())
-			: 0;
+	return provider_ != nullptr ? static_cast<int64_t>(provider_->static_light_draw_source_revision()) : 0;
 }
 
 Node *EffectLightDirector::_world() const {
@@ -183,29 +168,26 @@ void EffectLightDirector::reattach() {
 	// the source walk, and retail still binds it to that building's owner
 	// group.
 	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const Ref<StaticEffectSource> mapped_source = static_sources_snapshot_[source_index];
-		if (mapped_source.is_null()) {
-			continue;
-		}
-		const int bms_id = mapped_source->get_bms_id();
+		const auto &mapped_source = static_sources_snapshot_[source_index];
+		const int bms_id = mapped_source.bms_id;
 		if (bms_id != 0) {
 			static_owner_by_bms_.insert(bms_id, LightScene::owner_id_for_static_source(source_index));
 		}
 	}
 	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const Ref<StaticEffectSource> source = static_sources_snapshot_[source_index];
-		if (source.is_null() || spawned_static_.has(static_cast<int>(source_index))) {
+		const auto &source = static_sources_snapshot_[source_index];
+		if (spawned_static_.has(static_cast<int>(source_index))) {
 			continue;
 		}
-		const Ref<ObjectData> data = source->get_object_data();
+		const Ref<ObjectData> data = provider_->static_source_object_data(source.asset_id);
 		if (data.is_null()) {
 			continue;
 		}
 		// Batched statics are entities too: a subobject record binds to this
 		// tagged owner and the atlas draw row declares the same identity.
 		// [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
-		const Transform3D xform = source->get_world_transform();
-		const bool is_building = source->get_kind() == MissionData::KIND_BUILDING;
+		const Transform3D xform = from_static_source_transform(source.world_transform);
+		const bool is_building = source.kind == MissionData::KIND_BUILDING;
 		// Retail skips the blink query for a building's own records; every
 		// other static resolves containment once at its placement origin.
 		const BlinkOwner blink_owner = is_building ? BlinkOwner() : _blink_owner_at(xform.origin);
@@ -453,13 +435,11 @@ void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weath
 }
 
 void EffectLightDirector::_rebuild_static_light_rows() {
-	const Array descriptors = _static_draw_sources();
+	const auto descriptors = _static_draw_sources();
 	int row_count = 0;
 	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const Ref<StaticLightDrawSource> descriptor = descriptors[i];
-		if (descriptor.is_valid()) {
-			row_count = std::max(row_count, descriptor->get_atlas_row() + 1);
-		}
+		const auto &descriptor = descriptors[i];
+		row_count = std::max(row_count, descriptor.atlas_row + 1);
 	}
 	PackedVector3Array entity_positions;
 	PackedInt32Array entity_bound_radii_q16;
@@ -476,23 +456,17 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 	interior_sections.resize(row_count);
 	active.resize(row_count);
 	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const Ref<StaticLightDrawSource> descriptor = descriptors[i];
-		if (descriptor.is_null()) {
-			continue;
-		}
-		const int atlas_row = descriptor->get_atlas_row();
-		const int source_index = descriptor->get_source_index();
+		const auto &descriptor = descriptors[i];
+		const int atlas_row = descriptor.atlas_row;
+		const int source_index = descriptor.source_index;
 		if (atlas_row < 0 || atlas_row >= row_count || source_index < 0 ||
 				source_index >= static_sources_snapshot_.size()) {
 			continue;
 		}
-		const Ref<StaticEffectSource> source = static_sources_snapshot_[source_index];
-		if (source.is_null()) {
-			continue;
-		}
-		entity_positions[atlas_row] = source->get_world_transform().origin;
-		entity_bound_radii_q16[atlas_row] = source->get_entity_bound_radius_q16();
-		active[atlas_row] = descriptor->is_active() ? 1 : 0;
+		const auto &source = static_sources_snapshot_[source_index];
+		entity_positions[atlas_row] = from_static_source_transform(source.world_transform).origin;
+		entity_bound_radii_q16[atlas_row] = source.entity_bound_radius_q16;
+		active[atlas_row] = descriptor.active ? 1 : 0;
 		// The row's two groups are the engine's static-row policy
 		// (renderer::static_light_row_groups): a building is its own
 		// interior group at section zero with the owner section re-scoped
@@ -500,11 +474,11 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		// and carries the blink interior its placement origin resolves.
 		opennova::renderer::StaticLightRowInputs inputs;
 		inputs.static_owner = static_cast<uint64_t>(LightScene::owner_id_for_static_source(source_index));
-		inputs.robj_index = descriptor->get_robj_index();
-		inputs.is_building = (descriptor->get_kind() >= 0 ? descriptor->get_kind() : source->get_kind()) ==
+		inputs.robj_index = descriptor.robj_index;
+		inputs.is_building = (descriptor.kind >= 0 ? descriptor.kind : source.kind) ==
 				MissionData::KIND_BUILDING;
 		if (!inputs.is_building) {
-			const BlinkOwner interior = _blink_owner_at(source->get_world_transform().origin);
+			const BlinkOwner interior = _blink_owner_at(from_static_source_transform(source.world_transform).origin);
 			inputs.blink_hit = interior.valid();
 			inputs.blink_owner_entity = static_cast<uint64_t>(interior.owner);
 			inputs.blink_section = interior.section;
@@ -949,9 +923,7 @@ Ref<EffectLightReport> EffectLightDirector::get_report() {
 }
 
 void EffectLightDirector::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("setup", "world", "static_sources", "static_draw_sources",
-								 "static_draw_source_revision"),
-			&EffectLightDirector::setup, DEFVAL(Callable()));
+	ClassDB::bind_method(D_METHOD("setup", "world", "placer"), &EffectLightDirector::setup);
 	ClassDB::bind_method(D_METHOD("reset"), &EffectLightDirector::reset);
 	ClassDB::bind_method(D_METHOD("reattach"), &EffectLightDirector::reattach);
 	ClassDB::bind_static_method("EffectLightDirector", D_METHOD("owner_id_for_node", "node"),

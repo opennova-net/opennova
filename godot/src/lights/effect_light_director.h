@@ -37,6 +37,7 @@ class Camera3D;
 class EnvLightValues;
 class MissionEnvironment;
 class MissionRoot;
+class MissionObjectPlacer;
 class Simulation;
 class Weather;
 
@@ -72,9 +73,7 @@ public:
 
 	EffectLightDirector();
 
-	void setup(Node *p_world, const Callable &p_static_sources,
-			const Callable &p_static_draw_sources,
-			const Callable &p_static_draw_source_revision = Callable());
+	void setup(Node *p_world, const Ref<MissionObjectPlacer> &p_placer);
 	// The C++ world's wiring (ADR 0043 slice G10): the same three seams as
 	// typed reads off the world's StaticSourceProvider, no Callables lent.
 	void setup_with_provider(Node *p_world, StaticSourceProvider *p_provider);
@@ -192,10 +191,9 @@ private:
 	Node *_world() const;
 	MissionRoot *_runtime() const;
 	Ref<Simulation> _sim() const;
-	// The placer's three source reads: the provider's when the C++ world
-	// wired one, else the lent Callables' (empty / 0 without either).
-	Array _static_sources() const;
-	Array _static_draw_sources() const;
+	// Native placer reads through the live world or a retained placer provider.
+	std::vector<opennova::mission::StaticEffectSource> _static_sources() const;
+	std::vector<opennova::mission::StaticLightDrawSource> _static_draw_sources() const;
 	int64_t _static_draw_source_revision() const;
 	MissionEnvironment *_environment() const;
 	Weather *_weather() const;
@@ -226,11 +224,9 @@ private:
 	Ref<ImageTexture> _corona_texture();
 
 	ObjectID world_id_;
-	// The C++ world's typed source seam (null for a Callable-wired harness).
+	// Native provider; bound setup retains its real placer for the same seam.
 	StaticSourceProvider *provider_ = nullptr;
-	Callable static_sources_;
-	Callable static_draw_sources_;
-	Callable static_draw_source_revision_;
+	Ref<MissionObjectPlacer> placer_provider_;
 	// The packed static atlas rows, rebuilt only when the placer's
 	// draw-source revision (rows appended, table reset, carve state) or the
 	// static source snapshot changes. Rows are immutable identities; only
@@ -246,7 +242,7 @@ private:
 	PackedByteArray static_rows_active_;
 	Ref<LightScene> scene_;
 	HashMap<int, Vector<int64_t>> spawned_static_;
-	Array static_sources_snapshot_;
+	std::vector<opennova::mission::StaticEffectSource> static_sources_snapshot_;
 	HashMap<int, int64_t> static_owner_by_bms_;
 	HashMap<uint64_t, SpawnedNode> spawned_nodes_;
 	// Entity owner id -> its ONE cached EffectWorld handle. Retail does not

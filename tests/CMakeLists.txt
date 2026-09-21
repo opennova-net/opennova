@@ -211,6 +211,11 @@ target_include_directories(mission_placement_traits_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_placement_traits_test PRIVATE cxx_std_17)
 add_test(NAME mission_placement_traits COMMAND mission_placement_traits_test)
 
+add_executable(mission_static_sources_test mission/static_sources_test.cpp)
+target_link_libraries(mission_static_sources_test PRIVATE opennova_runtime)
+target_include_directories(mission_static_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_static_sources COMMAND mission_static_sources_test)
+
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
 target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

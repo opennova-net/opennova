@@ -508,10 +508,11 @@ private:
 	// --- the StaticSourceProvider the two directors read (the placer's static
 	//     sources, resolved lazily: a placer exists only once a mission is
 	//     placed) ---
-	TypedArray<StaticEffectSource> static_item_effect_sources() override;
-	TypedArray<StaticLightDrawSource> static_light_draw_sources() override;
+	std::vector<opennova::mission::StaticEffectSource> static_item_effect_sources() override;
+	std::vector<opennova::mission::StaticLightDrawSource> static_light_draw_sources() override;
 	uint64_t static_light_draw_source_revision() override;
 	Ref<ItemDatabase> static_source_item_db() override;
+	Ref<ObjectData> static_source_object_data(uint64_t asset_id) const override;
 
 	// --- the frame (game_world_frame.cpp) ---
 	static const FrameLeg kFrameLegs[];

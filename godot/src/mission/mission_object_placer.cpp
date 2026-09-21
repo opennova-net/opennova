@@ -1,5 +1,7 @@
 #include <runtime/renderer/render_order.h>
 #include "mission/mission_object_placer.h"
+#include "mission/static_source_convert.h"
+#include "util/string_convert.h"
 
 #include <formats/mission/mission.h> // the entity read the native place() walks
 #include "util/axes.h"
@@ -146,17 +148,8 @@ void MissionObjectPlacer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_models", PROPERTY_HINT_ARRAY_TYPE,
 						 "ObjectModel"),
 			"set_placed_models", "get_placed_models");
-	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
-			&MissionObjectPlacer::get_static_item_effect_sources);
-	ClassDB::bind_method(D_METHOD("get_static_light_draw_sources"),
-			&MissionObjectPlacer::get_static_light_draw_sources);
-	ClassDB::bind_method(D_METHOD("get_static_light_draw_source_revision"),
-			&MissionObjectPlacer::get_static_light_draw_source_revision);
 	ClassDB::bind_method(D_METHOD("get_static_instance_binding_count", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_binding_count);
-	ClassDB::bind_method(
-			D_METHOD("get_static_terrain_shadow_source_diagnostics"),
-			&MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics);
 	ClassDB::bind_method(
 			D_METHOD("get_static_terrain_shadow_source_revision"),
 			&MissionObjectPlacer::get_static_terrain_shadow_source_revision);
@@ -273,11 +266,15 @@ void MissionObjectPlacer::_check_epoch() {
 	static_lod_profile_cache_.clear();
 	graphic_panm_cache_.clear();
 	occlusion_cache_.clear();
-	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
-		static_terrain_shadow_sources_.write[i].object_data.unref();
+	static_sources_.invalidate_shadow_assets();
+	// Effect snapshots retain their resources across a root epoch, like the
+	// old placed rows; the shadow-only references are released here.
+	HashMap<uint64_t, Ref<ObjectData>> retained;
+	for (const auto &source : static_sources_.effect_sources()) {
+		if (const auto *data = static_source_assets_.getptr(source.asset_id))
+			retained.insert(source.asset_id, *data);
 	}
-	static_terrain_shadow_replacements_.clear();
-	_bump_static_terrain_shadow_source_revision();
+	static_source_assets_ = std::move(retained);
 }
 
 // --- coordinate conversion ---------------------------------------------------
@@ -434,21 +431,13 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 	_check_epoch();
 	Ref<MissionPlacementStats> stats;
 	stats.instantiate();
-	destruction_instances_.clear();
-	hidden_destruction_instances_.clear();
+	static_sources_.clear();
+	static_source_assets_.clear();
 	static_lod_profiles_.clear();
 	static_lod_instances_.clear();
 	static_populations_.clear();
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
-	static_terrain_shadow_replacements_.clear();
-	static_item_effect_sources_.clear();
-	static_light_draw_sources_.clear();
-	++static_light_draw_source_revision_;
-	static_terrain_shadow_sources_.clear();
-	static_terrain_shadow_source_rows_.clear();
-	static_terrain_shadow_rows_by_bms_.clear();
-	_bump_static_terrain_shadow_source_revision();
 	placed_models_ = TypedArray<ObjectModel>();
 	if (p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
@@ -759,16 +748,17 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 
 			const int bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
 			if (bms_id != 0) {
-				DestructionInstance inst;
-				inst.graphic = graphic;
-				inst.batch_key = group_key;
+				opennova::mission::StaticInstance inst;
+				inst.bms_id = bms_id;
+				inst.graphic = opennova::to_std(graphic);
+				inst.batch_key = opennova::to_std(group_key);
 				inst.index = i;
-				inst.xform = group.xforms[i];
+				inst.xform = to_static_source_transform(group.xforms[i]);
 				inst.casts_static_shadow =
 						i < group.shadow_slots.size() && group.shadow_slots[i];
 				inst.mirror_reflected = group.mirror_reflected;
 				inst.lod_instance = lod_rows[i];
-				destruction_instances_[bms_id] = inst;
+				static_sources_.register_instance(std::move(inst), false);
 			}
 		}
 		Vector<int> global_slots;
@@ -1779,7 +1769,7 @@ int MissionObjectPlacer::update_static_lods(
 }
 
 int MissionObjectPlacer::get_static_instance_lod(int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec == nullptr || rec->lod_instance < 0 ||
 			rec->lod_instance >= static_lod_instances_.size()) {
 		return -2;
@@ -1790,7 +1780,7 @@ int MissionObjectPlacer::get_static_instance_lod(int p_bms_id) const {
 Array MissionObjectPlacer::get_static_instance_live_populations(
 		int p_bms_id) const {
 	Array out;
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	const auto *rec = static_sources_.instance(p_bms_id);
 	if (rec == nullptr || rec->lod_instance < 0 ||
 			rec->lod_instance >= static_lod_instances_.size()) {
 		return out;

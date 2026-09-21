@@ -221,7 +221,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 7)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
 	assert_eq(director.get_report().live, 1,
 			"the entity starts with its one authored LGHT lease")
@@ -251,7 +251,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	# The fire pass (EntityPresenter's member) routes MF_Light straight into
 	# the director's on_muzzle_fire.
 	var presenter := EntityPresenter.new()
@@ -286,7 +286,7 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	# The destruction pass (EntityPresenter's member) routes the drain's
 	# death-light column straight into the director's on_death_light.
 	var presenter := EntityPresenter.new()
@@ -312,15 +312,10 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	var transform := Transform3D(Basis.IDENTITY, Vector3(10.0, 27.0, 350.0))
 	var lit := _fixture_object_data("shed.3di")
 	var plain := _fixture_object_data("house.3di")
-	var plain_source := StaticEffectSource.new()
-	plain_source.object_data = plain
-	plain_source.world_transform = transform
-	var lit_source := StaticEffectSource.new()
-	lit_source.object_data = lit
-	lit_source.world_transform = transform
+	var placer := StaticSourceFixture.place(self, world, [plain, lit],
+			[transform.origin, transform.origin])
 	var director := EffectLightDirector.new()
-	director.setup(world, func() -> Array:
-		return [plain_source, lit_source], Callable())
+	director.setup(world, placer)
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"only the model with an authored light record spawns a pool light")
@@ -367,27 +362,10 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	assert_true((light.position as Vector3).is_equal_approx(Vector3.ZERO))
 	assert_almost_eq(light.atten_end, 100.0, 0.001)
 	var xform := Transform3D(Basis.IDENTITY, Vector3(5.0, 1.0, 0.0))
-	var source := StaticEffectSource.new()
-	source.source_index = 0
-	source.kind = MissionData.KIND_BUILDING
-	source.entity_index = 0
-	source.bms_id = 7001
-	source.item_id = 1
-	source.object_data = data
-	source.world_transform = xform
-	var draw := StaticLightDrawSource.new()
-	draw.atlas_row = 0
-	draw.source_index = 0
-	draw.kind = MissionData.KIND_BUILDING
-	draw.entity_index = 0
-	draw.bms_id = 7001
-	draw.item_id = 1
-	draw.robj_index = 2
-	draw.world_bounds = AABB(Vector3(-5.0, -5.0, -5.0), Vector3(20.0, 20.0, 20.0))
-	draw.active = true
+	var placer := StaticSourceFixture.place(self, world, [data], [xform.origin],
+			PackedInt32Array([2]))
 	var director := EffectLightDirector.new()
-	director.setup(world, func() -> Array: return [source],
-			func() -> Array: return [draw])
+	director.setup(world, placer)
 	director.reattach()
 	assert_ne(LightScene.owner_id_for_static_source(0), 0)
 	assert_ne(LightScene.owner_id_for_static_source(0),
@@ -543,7 +521,7 @@ func test_director_null_camera_clears_output_without_destroying_the_pool() -> vo
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	assert_gt(director.spawn_light_record(
 			_barrel_light_info(), Transform3D.IDENTITY), 0)
 	var camera := Camera3D.new()
@@ -565,7 +543,7 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_muzzle_fire(17, Vector3.ZERO)
 	var camera := Camera3D.new()
 	world.add_child(camera)
@@ -663,7 +641,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 			"the control ROBJ transform differs from the entity placement matrix")
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 33)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
 	var camera := Camera3D.new()
 	world.add_child(camera)
@@ -717,7 +695,7 @@ func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> v
 	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 91)
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, null)
 	director.reattach()
 	director.reattach()
 	assert_eq(director.get_report().live, 1,

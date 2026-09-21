@@ -28,7 +28,6 @@
 #include "mission/mission_object_placer.h"
 #include "mission/mission_placement_stats.h"
 #include "mission/static_population_instance.h"
-#include "mission/static_source_records.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
 #include "env/sun_shadow.h"
@@ -224,9 +223,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
 	GDREGISTER_CLASS(StaticPopulationInstance);
-	GDREGISTER_CLASS(StaticEffectSource);
-	GDREGISTER_CLASS(StaticLightDrawSource);
-	GDREGISTER_CLASS(StaticTerrainShadowSourceRow);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
