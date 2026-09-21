@@ -86,6 +86,7 @@ public:
 	X(bool, emplaced_controls_valid, BOOL)                                  \
 	X(int, emplaced_gun_yaw, INT)                                           \
 	X(int, emplaced_gun_pitch, INT)                                         \
+	X(int, emplaced_spin_phase, INT)                                        \
 	/* the FIRE -> RoundData_AddRound seam diagnostics */                   \
 	X(int, round_ring_count, INT)                                           \
 	X(int, last_round_flags, INT)                                           \

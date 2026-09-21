@@ -105,6 +105,7 @@ enum PresentField : int {
 	PF_EMPLACED_CONTROLS_VALID = PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 	PF_EWEAP_GUNYAW,
 	PF_EWEAP_GUNPITCH,
+	PF_WEAP_SPIN,
 	// Vehicle render controls projected from authoritative motor/brain state.
 	// CTRL_MASK selects the callback-owned groups. Joiner compacts lack the source fields, so those
 	// rows remain invalid rather than inferring motion from lossy transforms.

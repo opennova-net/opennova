@@ -171,6 +171,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			v.emplaced_controls_valid = true;
 			v.emplaced_gun_yaw = static_cast<int>(emplaced.gun_yaw);
 			v.emplaced_gun_pitch = static_cast<int>(emplaced.gun_pitch);
+			v.emplaced_spin_phase = emplaced.spin;
 		}
 	}
 	// Read-only diagnostics for the local FIRE -> RoundData_AddRound seam. The last

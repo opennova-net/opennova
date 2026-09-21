@@ -180,6 +180,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+		// The physics callback table's ewep row selects the gun update.
+		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
+		e->emplaced_update = def != nullptr && strutil::iequals(def->move_function, "ewep");
 		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";
 		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
         e->reverb = def != nullptr ? int16_t(def->reverb) : 0;

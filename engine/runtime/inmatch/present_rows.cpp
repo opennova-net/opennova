@@ -169,6 +169,7 @@ bool resolve_client_eweap_attachment_pose(
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
 	ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] = static_cast<int32_t>(emplaced.gun_yaw);
 	ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] = static_cast<int32_t>(emplaced.gun_pitch);
+	ctrl_values[THREEDI_CTRL_WEAP_SPIN] = emplaced.spin;
 
 	Entity carrier;
 	carrier.item_id = static_cast<int32_t>(parent->type_id);

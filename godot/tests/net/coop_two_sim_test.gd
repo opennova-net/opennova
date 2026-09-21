@@ -1224,8 +1224,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
 	assert_eq(EntityPresenter.emplaced_apply(
-			visual, visual_before_snap, visual_before_base, false), 2,
-			"production presentation consumes both decoded B50 controls")
+			visual, visual_before_snap, visual_before_base, false), 3,
+			"production presentation consumes the emplaced yaw, pitch and spin controls")
 	var visual_yaw_before: Basis = (
 			visual_parts[yaw_part] as Node3D).transform.basis
 	joiner.set_local_player_mouse(511, false)
@@ -1264,7 +1264,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		var visual_after_snap: PackedFloat32Array = visual_after_record["snapshot"]
 		var visual_after_base := int(visual_after_record["base"])
 		assert_eq(EntityPresenter.emplaced_apply(
-				visual, visual_after_snap, visual_after_base, false), 2)
+				visual, visual_after_snap, visual_after_base, false), 3)
 		var visual_yaw_after: Basis = (
 				visual_parts[yaw_part] as Node3D).transform.basis
 		var visual_yaw_delta_deg := rad_to_deg(

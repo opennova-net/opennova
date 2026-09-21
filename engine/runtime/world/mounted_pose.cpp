@@ -394,6 +394,7 @@ void compose_mounted_pose_controls(
                 static_cast<int32_t>(sources.emplaced_gun_yaw);
         r_ctrl[THREEDI_CTRL_EWEAP_GUNPITCH] =
                 static_cast<int32_t>(sources.emplaced_gun_pitch);
+        r_ctrl[THREEDI_CTRL_WEAP_SPIN] = sources.emplaced_spin_phase;
     }
 }
 

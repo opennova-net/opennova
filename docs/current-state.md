@@ -4,6 +4,8 @@ PR #663 also fixes 03TR mounted aiming: the shared PANM evaluator now
 retains authored animation frames ([D-3DI-3](threedi/3di-gp-format-re.md#retail-panm-animation-frames-2026-09-21)),
 and mounted bodies/guns retain fractional carrier attitude through camera and
 presentation ([D-INF-27](world/world-wac-ai-re.md#37-mounted-pose-precision-2026-09-21)).
+The objective minigun now publishes its witnessed barrel-spin phase while
+firing and coasting down ([D-3DI-4](threedi/3di-gp-format-re.md#retail-emplaced-barrel-spin-2026-09-21)).
 
 The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
 guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,

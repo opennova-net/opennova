@@ -57,6 +57,7 @@ inline bool emplaced_weapon_controls_for_client(
  out.valid = true;
  out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
  out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
+ out.spin = mount.emplaced_spin_phase;
  return true;
 }
 
@@ -66,6 +67,7 @@ inline void write_present_emplaced_controls(
 	record[world::PF_EMPLACED_CONTROLS_VALID] = 1.0f;
 	record[world::PF_EWEAP_GUNYAW] = static_cast<float>(controls.gun_yaw);
 	record[world::PF_EWEAP_GUNPITCH] = static_cast<float>(controls.gun_pitch);
+	record[world::PF_WEAP_SPIN] = static_cast<float>(controls.spin);
 }
 
 inline bool aim_overlay_inputs_for_client(

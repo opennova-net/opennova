@@ -974,6 +974,7 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 		sources.has_emplaced = true;
 		sources.emplaced_gun_yaw = emplaced.gun_yaw;
 		sources.emplaced_gun_pitch = emplaced.gun_pitch;
+		sources.emplaced_spin_phase = emplaced.spin;
 	}
 	int32_t ctrl_bus[THREEDI_CTRL_REGISTER_COUNT] = {};
 	world::compose_mounted_pose_controls(carrier.item_attrib, sources, ctrl_bus);

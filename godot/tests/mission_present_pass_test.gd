@@ -73,6 +73,7 @@ class Snapshot:
 					e.get("emplaced_gun_yaw", 0))
 			out[b + Simulation.PF_EWEAP_GUNPITCH] = float(
 					e.get("emplaced_gun_pitch", 0))
+			out[b + Simulation.PF_WEAP_SPIN] = float(e.get("weap_spin", 0))
 			out[b + Simulation.PF_VEHICLE_MOTION_VALID] = float(
 					e.get("vehicle_motion_valid", 0))
 			out[b + Simulation.PF_VEHICLE_CTRL_MASK] = float(
@@ -296,9 +297,9 @@ func test_cold_door_row_releases_only_what_the_door_writer_owned() -> void:
 	assert_false(model.get_ctrl_values().has("DOOR_05"),
 			"the cold present releases the stale door this writer owned")
 	assert_eq(_ctrl(model, "DOOR_00"), 77, "a foreign DOOR register survives the cold release")
-	assert_eq(_stat(p, "control_dispatches") - before, 8,
+	assert_eq(_stat(p, "control_dispatches") - before, 9,
 			"a zero-door cold row pays only the sibling writers' cold clears " +
-			"(2 emplaced + 2 vehicle + 3 zone + 1 heat), no door probes")
+			"(3 emplaced + 2 vehicle + 3 zone + 1 heat), no door probes")
 	snap.entities[0]["doors"] = [0, 65536]
 	_present(p, snap)
 	assert_eq(_ctrl(model, "DOOR_00"), 0, "a door row overwrites the foreign value (one CTRL value)")
@@ -507,11 +508,13 @@ func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
 		"emplaced_controls_valid": 1,
 		"emplaced_gun_yaw": 0x1234,
 		"emplaced_gun_pitch": 0xFEDC,
+		"weap_spin": 0xFFFF,
 	}]
 	_present(p, snap)
 	assert_eq(model.get_ctrl_values(), {
 		"EWEAP_GUNYAW": 0x1234,
 		"EWEAP_GUNPITCH": 0xFEDC,
+		"WEAP_SPIN": 0xFFFF,
 	}, "semantic controls do not alias model-order PLAYPARTANIM channels")
 
 	snap.entities[0]["emplaced_controls_valid"] = 0
@@ -683,6 +686,7 @@ func test_part_anim_and_emplaced_controls_remain_independent() -> void:
 		"VEHICLE_SPECIAL2": 0xEEEE,
 		"EWEAP_GUNYAW": 0x2222,
 		"EWEAP_GUNPITCH": 0xDDDD,
+		"WEAP_SPIN": 0,
 	}, "retail publishes generic and emplaced systems on distinct semantic registers")
 
 	snap.entities[0]["emplaced_controls_valid"] = 0
@@ -1053,8 +1057,8 @@ func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers()
 			stats.part_dispatches + 1,
 			"an active PLAYPART writer is reasserted at every submission")
 	assert_eq(int(next_stats["control_dispatches"]),
-			int(stats["control_dispatches"]) + 2,
-			"the two valid EWEAP writers are reasserted at every submission")
+			int(stats["control_dispatches"]) + 3,
+			"the three valid emplaced writers are reasserted at every submission")
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 0x1111,
 			"the reasserted writers land on the same values")
 	assert_eq(_ctrl(model, "EWEAP_GUNYAW"), 0x2222)

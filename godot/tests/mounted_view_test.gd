@@ -135,3 +135,70 @@ func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> vo
 	gut.p("03TR camera: largest forward-vector acceleration %.6f; gun angle step %.6f" % [largest_camera_delta_change, largest_gun_angle_step])
 	assert_lt(largest_camera_delta_change, 0.005,
 			"the minigun camera follows the flight without discrete pose snaps")
+
+
+func test_03tr_minigun_barrel_rotates_while_firing() -> void:
+	var world := await _load_world()
+	if world == null:
+		return
+	var sim := world.get_sim()
+	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_true(sim.local_player_select_seat(1))
+	_frame(world, _camera, 96)
+	var gun_handle := 0
+	var snapshot := sim.get_present_snapshot()
+	for base in range(0, snapshot.size(), sim.get_present_stride()):
+		if int(snapshot[base + Simulation.PF_WIRE_HANDLE]) == sim.get_local_player_wire_handle():
+			gun_handle = int(snapshot[base + Simulation.PF_CARRIER_HANDLE])
+	var gun := world.get_runtime().get_entity_presenter().resolve_wire_handle(gun_handle) as ObjectModel
+	assert_not_null(gun, "the mounted minigun is presented")
+	if gun == null:
+		return
+	var data := gun.get_object_data()
+	var rest := data.evaluate_panm(0, 0, {"WEAP_SPIN": 0})
+	var rotated := data.evaluate_panm(0, 0, {"WEAP_SPIN": 16384})
+	var barrel_id := -1
+	var parts := gun.get_render_part_nodes()
+	for key in rest:
+		if parts.has(key) and not (rest[key] as Transform3D).basis.is_equal_approx(
+				(rotated[key] as Transform3D).basis):
+			barrel_id = int(key)
+			break
+	assert_gte(barrel_id, 0, "the installed minigun authors a WEAP_SPIN barrel")
+	if barrel_id < 0:
+		return
+	var barrel := parts[barrel_id] as Node3D
+	var clock := PanmClock.new()
+	clock.set_time_ms_for_test(0)
+	gun.set_panm_clock(clock)
+	gun.advance_runtime_frame(0.0)
+	var greatest_turn := 0.0
+	var fired_before := sim.get_local_player_weapon_state().fired_serial
+	for tick in 96:
+		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
+		frame_input.set_weapon_input(true, tick == 0, false)
+		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_presenter.after_world_tick()
+		clock.set_time_ms_for_test((tick + 1) * 16)
+		gun.advance_runtime_frame(Simulation.tick_dt())
+		# Remove the live yaw/pitch contribution: only the barrel's authored
+		# spin may satisfy this assertion, never recoil or helicopter motion.
+		var without_spin := gun.get_ctrl_values().duplicate()
+		without_spin["WEAP_SPIN"] = 0
+		var unspun := data.evaluate_panm(0, clock.time_ms, without_spin)[barrel_id] as Transform3D
+		greatest_turn = maxf(greatest_turn, unspun.basis.get_rotation_quaternion().angle_to(
+				barrel.transform.basis.get_rotation_quaternion()))
+	gut.p("03TR minigun barrel: greatest turn %.6f; controls %s" % [greatest_turn, gun.get_ctrl_values()])
+	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
+			"the mounted gun actually fires rounds")
+	assert_gt(greatest_turn, 0.1, "the minigun barrel visibly rotates while firing")
+
+	var phase_at_release := int(gun.get_ctrl_values().get("WEAP_SPIN", 0))
+	_frame(world, _camera, 8)
+	assert_ne(int(gun.get_ctrl_values().get("WEAP_SPIN", 0)), phase_at_release,
+			"the barrel keeps turning after the trigger is released")
+	_frame(world, _camera, 120)
+	var stopped_phase := int(gun.get_ctrl_values().get("WEAP_SPIN", 0))
+	_frame(world, _camera, 16)
+	assert_eq(int(gun.get_ctrl_values().get("WEAP_SPIN", 0)), stopped_phase,
+			"the barrel holds its final angle after coasting down")

@@ -882,6 +882,12 @@ struct Entity {
     // [orig: Entity_UpdateChildAttachment @0x4409A0 stores @0x440b23/@0x440b45
     //  (yaw) and @0x440b58 (pitch); Entity_UpdateTransformAndTurret @0x440ca0
     //  window write-back @0x44125c (yaw) / @0x4412a4 (pitch)]
+    // The ewep class update's barrel accumulator and coast-down byte.
+    // Its firing source is the SAME inline MountSlot kick byte (+0x30F).
+    // [orig: Entity_UpdateTransformAndTurret @0x4413FE..0x441447]
+    bool emplaced_update = false; // items.def move_function ewep
+    uint8_t emplaced_spin_ticks = 0; // entity+0x31B
+    uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
     int16_t emplaced_gun_pitch_word = 0; // entity+0x324
     // The subobject (bone) the child's anchor userpoint rides — retail reads

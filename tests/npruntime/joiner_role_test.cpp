@@ -1051,12 +1051,17 @@ bool run_local_replica_turret_channel() {
  if (!expect(local->mounted && local->mount_type == w::SeatType::Gunner,
    "confirmed UseGun mounts local L")) return false;
  world.registry.get(handle)->emplaced_gun_yaw_word = 0;
+ world.registry.get(handle)->emplaced_spin_phase = 0xFEDC;
  h.kernel->local.input.look_heading = 0x55555555;
  h.role.run_tick(h.input);
  const auto *mount = state.find(handle.packed);
  if (!expect(mount && mount->emplaced_gun_yaw_word == -147 &&
    world.registry.get(handle)->emplaced_gun_yaw_word == -147,
    "local joiner publishes exactly one slew from the world body")) return false;
+ w::EmplacedWeaponControls controls;
+ if (!expect(inmatch::emplaced_weapon_controls_for_client(*mount, controls) &&
+   controls.spin == 0xFEDC,
+   "local joiner forwards the world barrel phase without a wire field")) return false;
  return expect(h.kernel->local.input.look_heading == 0x3FFF7FC0,
    "local joiner input is tethered within ninety degrees of the gun");
 }

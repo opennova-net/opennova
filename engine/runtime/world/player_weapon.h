@@ -438,6 +438,7 @@ struct LocalPlayerWeaponView {
     bool emplaced_controls_valid = false;
     int32_t emplaced_gun_yaw = 0;
     int32_t emplaced_gun_pitch = 0;
+    int32_t emplaced_spin_phase = 0;
     int32_t round_ring_count = 0;
     int32_t last_round_flags = 0;
     int32_t last_round_subtype = 0;

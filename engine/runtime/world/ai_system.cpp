@@ -630,6 +630,9 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);
+    world.registry.for_each_in_pool(1, [&](const Entity &entity) {
+        tick_emplaced_weapon_animation(world, *world.registry.get(entity.handle));
+    });
     // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
     // motor delta, then resolve contacts against that same pose.
     // [orig: Entity_UpdateAllEntities @0x4C2158..0x4C21F1 before the

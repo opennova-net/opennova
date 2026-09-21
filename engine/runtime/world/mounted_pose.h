@@ -28,6 +28,7 @@ struct MountedPoseControlSources {
     bool has_emplaced = false;
     float emplaced_gun_yaw = 0.0f;
     float emplaced_gun_pitch = 0.0f;
+    uint16_t emplaced_spin_phase = 0;
 };
 
 void compose_mounted_pose_controls(
