@@ -58,12 +58,6 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_class_mask", "playerclass_value"),
 			&WeaponDatabase::player_info_class_mask);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("player_info_voice_values", "sex"),
-			&WeaponDatabase::player_info_voice_values);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("player_info_voice_selection", "saved", "values"),
-			&WeaponDatabase::player_info_voice_selection);
 	ClassDB::bind_method(D_METHOD("player_info_kit_entries", "team", "player_class", "slot_indices",
 								 "slot_ammo_primary", "slot_ammo_secondary", "slot_flags",
 								 "grenade_indices", "grenade_ammo_primary", "grenade_ammo_secondary"),
@@ -238,19 +232,6 @@ String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringF
 
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
 		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
-
-PackedInt32Array WeaponDatabase::player_info_voice_values(int p_sex) {
-	PackedInt32Array out;
-	for (int32_t value : opennova::menu::player_info_voice_values(p_sex)) out.push_back(value);
-	return out;
-}
-
-int WeaponDatabase::player_info_voice_selection(int p_saved, const PackedInt32Array &p_values) {
-	std::vector<int32_t> values;
-	values.reserve(static_cast<size_t>(p_values.size()));
-	for (int i = 0; i < p_values.size(); ++i) values.push_back(p_values[i]);
-	return opennova::menu::player_info_voice_selection(p_saved, values);
-}
 
 Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
 		const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,

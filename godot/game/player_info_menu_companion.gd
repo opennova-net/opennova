@@ -9,31 +9,11 @@ extends MenuCompanion
 # controls unique to this screen, riding the shell's MenuDriver over the compiled
 # MenuFrame surface (widgets addressed by document id via _id/widget_id).
 #
-# Faithful to the witnessed original (docs/playerinfo/avatars-re.md, "Screen
-# orchestration", D-PLAYERINFO-5/7):
-#   - team 0 = blue/good, 1 = red/evil; a nationality is shown only when
-#     (alignment != 0) == (team != 0)
-#     [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0]
-#   - selecting a nationality resets the division and refills division + combo;
-#     selecting a division refills the combo list
-#     [orig: PlayerInfo_HandleNationalitySelect @ 0x560600,
-#            PlayerInfo_HandleDivisionSelect @ 0x560690]
-#   - the COMBO_LIST label is "<head display> - <body display>" resolved through the
-#     "Avatars" RTXT section
-#     [orig: populate_avatar_combo_list @ 0x560210]
-# The in-world avatar appearance (D-PLAYERINFO-1) and full profile persistence are
-# later phases; snapshot() exposes the current selection for the ACCEPT seam.
-
-# The "Avatars" RTXT section the nationality/division/combo display keys resolve
-# against [orig: TextResource_GetStringWithFallback(resource, "Avatars", nameKey)].
+# Avatar cascade, voice rows and preview-trigger selection live in the native
+# MenuDriver controller. This companion supplies resources and persisted picks,
+# then applies the requested preview update to its mounted Godot nodes.
 const ATBL_SECTION := "Avatars"
-
-# TESTPLAYERVOICE is a semantic screen command, not the button's generic click sound.
-# Retail resolves the trigger from the current avatar and plays it from the dedicated
-# menu bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
 const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
-const VOICE_PREVIEW_BANK := "menu.lwf"
-const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 
 # The 3D character preview (compatible head/body .3di composited). Mounted over
 # the PLAYER_PREVIEW widget rect and fed the
@@ -73,18 +53,11 @@ var _ammo_sec: Dictionary = {}
 # [orig: g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
 var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
 var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
-var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
-var _sel_nat := -1
-var _sel_div := -1
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
-# PLAYERVOICE row -> the row's VALUE (0 for DEFAULT_VOICE, else the CHARVOICE id);
-# the list is filled at runtime, so the values live here the way _nat_db_index
-# carries the nationality list's.
-var _voice_values: Array[int] = []
 # The persisted voice override per side, 0 = DEFAULT_VOICE.
 # retail: the profile bytes g_curPlayerProfile[teamIndex + 1532] @ 0x25510FC.
 var _voice_override: Dictionary = {}
@@ -198,28 +171,25 @@ func _restore_character_selection(side: int) -> void:
 	if saved == null:
 		return
 	var nat_index := saved.nationality
-	var visible_nat_row := _nat_db_index.find(nat_index)
+	var visible_nat_row := nationality_rows().find(nat_index)
 	var nat_combo := _id("NATIONALITY")
 	if visible_nat_row < 0 or nat_combo < 0:
 		return
 	_driver.select_row(nat_combo, visible_nat_row, false)
-	_sel_nat = nat_index
-	_populate_divisions()
+	_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
 	var div_index := saved.division
 	var div_combo := _id("DIVISION")
 	if div_index < 0 or div_index >= _db.get_division_count(nat_index) or div_combo < 0:
 		return
 	_driver.select_row(div_combo, div_index, false)
-	_sel_div = div_index
-	_populate_combos()
+	_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
 	var combo_index := saved.combo
 	var combo := _id("COMBO_LIST")
 	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index) \
 			or combo < 0:
 		return
 	_driver.select_row(combo, combo_index, false)
-	_populate_voices()
-	_refresh_preview()
+	_update_avatars(MenuDriver.AVATAR_COMBO, 0)
 
 
 func _restore_player_class() -> void:
@@ -239,16 +209,6 @@ func _restore_player_class() -> void:
 			return
 
 
-# Resolve a nationality/division/combo display key against the gametext table's "Avatars"
-# section -- the table the original consults for these names
-# [orig: GameText_GetStringWithFallback @ 0x51eb90 / g_TextGameText @ 0xB4C2AC; "Avatars"
-# section, docs/playerinfo/avatars-re.md]. The shell registers gametext (Game.bin) into the
-# shared Strings registry at boot. A miss falls back to the raw key (the witnessed
-# fallback; not the "??section:key??" debug marker Strings.lookup would return).
-func _display_name(key: String) -> String:
-	return Strings.lookup_or(Strings.TABLE_GAMEUI, ATBL_SECTION, key, key)
-
-
 # --- Loadout (weapon slot lists) ----------------------------------------------
 
 ## Inject a weapon database for tests or another shell-owned resource mount. Keeping
@@ -262,7 +222,10 @@ func set_database(db: AvatarDatabase) -> void:
 
 ## The NATIONALITY list's visible rows as nationality DB indices, in row order.
 func nationality_rows() -> Array[int]:
-	return _nat_db_index.duplicate()
+	var rows: Array[int] = []
+	if _driver != null:
+		rows.assign(_driver.player_info_nationality_rows())
+	return rows
 
 
 ## The selected team: 0 = blue/good, 1 = red/evil.
@@ -497,90 +460,18 @@ func _update_icons() -> void:
 
 # --- Population (the cascade) -------------------------------------------------
 
-# Fill NATIONALITY, filtered by team alignment, then cascade into division/combo/voice.
-# [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; team filter D-PLAYERINFO-5]
 func _populate_nationalities() -> void:
-	var combo := _id("NATIONALITY")
-	if combo < 0:
-		return
-	_nat_db_index.clear()
-	var rows := PackedStringArray()
-	if _db != null:
-		for i in _db.get_nationality_count():
-			var nat := _db.get_nationality(i)
-			var align := nat.alignment
-			# show only when (alignment != 0) == (team != 0): good->blue(0), evil->red(1)
-			if (align != 0) != (_team != 0):
-				continue
-			_nat_db_index.append(i)
-			rows.append(_display_name(nat.name_key))
-	_set_combo_items(combo, rows)
-	_sel_nat = _nat_db_index[0] if not _nat_db_index.is_empty() else -1
-	_populate_divisions()
+	_update_avatars(MenuDriver.AVATAR_TEAM, 0)
 
 
-# [orig: PlayerInfo_PopulateDivisionList @ 0x55da50]
-func _populate_divisions() -> void:
-	var combo := _id("DIVISION")
-	if combo < 0:
-		return
-	var rows := PackedStringArray()
-	if _db != null and _sel_nat >= 0:
-		for i in _db.get_division_count(_sel_nat):
-			var div := _db.get_division(_sel_nat, i)
-			rows.append(_display_name(div.name_key))
-	_set_combo_items(combo, rows)
-	_sel_div = 0 if rows.size() > 0 else -1
-	_populate_combos()
-
-
-# Each row is "<head display> - <body display>" (last - first).
-# [orig: populate_avatar_combo_list @ 0x560210]
-func _populate_combos() -> void:
-	var combo := _id("COMBO_LIST")
-	if combo < 0:
-		return
-	var rows := PackedStringArray()
-	if _db != null and _sel_nat >= 0 and _sel_div >= 0:
-		for i in _db.get_combo_count(_sel_nat, _sel_div):
-			var c := _db.get_combo(_sel_nat, _sel_div, i)
-			var last := _display_name(c.get_head().display_name)
-			var first := _display_name(c.get_body().display_name)
-			rows.append("%s - %s" % [last, first])
-	_set_combo_items(combo, rows)
-	_populate_voices()
-	_refresh_preview()
-
-
-# The voice list is avatar-derived: DEFAULT_VOICE (value 0) plus every ENABLED
-# voice-table row whose sex matches the selected head's `sex` byte, each row
-# valued with its CHARVOICE id. A persisted override that is not one of those
-# rows is reset to DEFAULT_VOICE, and the list then selects BY VALUE.
-# retail: populate_player_voice_combo @ 0x55dce0 -- clear the list, resolve the
-# selected avatar's SEX through the combo record (sub_57AE90 @ 0x57ae90 returns
-# combo+280, which CAvatarDefs_ParseConfigLine stores from the head part's
-# sex field @ 0x57aad2; a combo the registry cannot resolve yields 0 = male),
-# add DEFAULT_VOICE, walk the table, then
-# `if (!found) profile[team + 1532] = 0` and
-# UIList_SelectByValue(list, profile[team + 1532], 1).
-func _populate_voices() -> void:
-	var combo := _id("PLAYERVOICE")
-	if combo < 0:
-		return
-	# The values (DEFAULT_VOICE first, then the enabled table rows of the
-	# selected head's sex) and the persisted-override reset are the engine's;
-	# this companion resolves the labels and applies the selection.
-	var values := WeaponDatabase.player_info_voice_values(_selected_combo_head_sex())
-	var rows := PackedStringArray()
-	_voice_values.clear()
-	for voice in values:
-		_voice_values.append(voice)
-		rows.append(_menu_text("DEFAULT_VOICE", "Default")
-				if voice == WeaponDatabase.DEFAULT_VOICE_VALUE
-				else _menu_text("CHARVOICE_%d" % voice, "Voice %d" % voice))
-	_voice_override[_team] = WeaponDatabase.player_info_voice_selection(selected_voice(), values)
-	_set_combo_items(combo, rows)
-	_driver.select_row(combo, maxi(_voice_values.find(selected_voice()), 0), false)
+func _update_avatars(change: int, value: int) -> void:
+	_populating = true
+	_voice_override[_team] = _driver.update_player_info_avatars(_db, change, value,
+			_team, selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
+			Strings.get_table(Strings.TABLE_MENUTXT))
+	_populating = false
+	if _driver.player_info_avatar_preview_changed():
+		_refresh_preview()
 
 
 ## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
@@ -589,57 +480,14 @@ func selected_voice() -> int:
 	return int(_voice_override.get(_team, WeaponDatabase.DEFAULT_VOICE_VALUE))
 
 
-# The selected combo head's SEX byte, the voice list's filter key. An
-# unresolvable selection yields 0 (male) the way retail's failed registry
-# lookup does. retail: sub_57AE90 @ 0x57ae90 -> MinimapSlot_FindByPackedId
-# @ 0x57a270, `return 0` on a miss @ 0x57aeb5.
-func _selected_combo_head_sex() -> int:
-	var head := _selected_combo_head()
-	return head.sex if head != null else 0
-
-
-# The selected combo head's own `voice` byte, the voice PREVIEW fallback.
-# retail: Avatars_ResolveSelectionIndex @ 0x57ae60 reads combo+284, stored from
-# the head part's voice field @ 0x57aae3.
-func _selected_combo_head_voice() -> int:
-	var head := _selected_combo_head()
-	return head.voice if head != null else -1
-
-
-func _selected_combo_head() -> AvatarPartRow:
-	if _db == null or _sel_nat < 0 or _sel_div < 0:
-		return null
-	var combo := _id("COMBO_LIST")
-	var idx := _driver.selected_row(combo) if combo >= 0 else 0
-	if idx < 0:
-		idx = 0
-	if idx >= _db.get_combo_count(_sel_nat, _sel_div):
-		return null
-	return _db.get_combo(_sel_nat, _sel_div, idx).get_head()
-
-
-# PLAYERVOICE selection: store the picked ROW VALUE as this side's override.
-# Retail does NOT repopulate the list here.
-# retail: sub_560030 @ 0x560030 -- `g_curPlayerProfile[teamIndex + 1532] =
-# *(BYTE *)(eventData + 16)`, the selection notification's value byte.
 func _on_voice_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_voice_override[_team] = (_voice_values[row]
-			if row >= 0 and row < _voice_values.size() else WeaponDatabase.DEFAULT_VOICE_VALUE)
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_VOICE, row)
 
 
 func _preview_voice() -> void:
-	if _driver == null:
-		return
-	# retail: PlayerInfo_PreviewVoice @ 0x55ff70 -- the persisted override when
-	# NON-ZERO, else the selected combo head's own voice byte.
-	var voice := selected_voice()
-	if voice == WeaponDatabase.DEFAULT_VOICE_VALUE:
-		voice = _selected_combo_head_voice()
-	if voice < 0:
-		return
-	_driver.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
+	if _driver != null:
+		_driver.preview_player_info_voice(_db, selected_voice())
 
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
@@ -681,14 +529,13 @@ func _on_widget_hover_changed(id: int, hovered: bool) -> void:
 
 
 func _refresh_preview() -> void:
-	if _preview == null or _db == null or _sel_nat < 0 or _sel_div < 0:
+	if _preview == null:
 		return
-	var idx := _selected_combo_index()
-	if idx < 0 or idx >= _db.get_combo_count(_sel_nat, _sel_div):
-		return
-	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the
-	# portrait stops at the resolved part .3di geometry.]
-	_preview.load_combo(_db.get_combo(_sel_nat, _sel_div, idx))
+	var combo := _driver.player_info_avatar_combo(_db)
+	if combo != null:
+		# The portrait stops at the resolved part geometry; D-PLAYERINFO-1
+		# tracks the separate spawned-player model seam.
+		_preview.load_combo(combo)
 
 
 func _selected_combo_index() -> int:
@@ -730,27 +577,18 @@ func _on_screen_changed(_screen_name: String) -> void:
 # --- Selection handlers (cascade edges) ---------------------------------------
 
 func _on_nat_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_sel_nat = _nat_db_index[row] if row >= 0 and row < _nat_db_index.size() else -1
-	_populate_divisions()  # resets the division selection and refills division + combo
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_NATIONALITY, row)
 
 
 func _on_div_selected(row: int, _value: String) -> void:
-	if _populating:
-		return
-	_sel_div = row
-	_populate_combos()
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_DIVISION, row)
 
 
-# retail: PlayerInfo_HandleVoiceSelect @ 0x55fe00 -- the COMBO_LIST handler
-# despite its name (registered against "COMBO_LIST" @ 0x5615a6): it stores the
-# picked avatar and rebuilds PLAYERVOICE for the new head.
 func _on_combo_selected(_row: int, _value: String) -> void:
-	if _populating:
-		return
-	_populate_voices()  # the voice list is avatar-derived; refresh on a combo change
-	_refresh_preview()
+	if not _populating:
+		_update_avatars(MenuDriver.AVATAR_COMBO, 0)
 
 
 # --- Team radios (SIDE_BLUE / SIDE_RED) ---------------------------------------
@@ -770,8 +608,7 @@ func _on_side_red() -> void:
 	_set_team(1)
 
 
-# A team change re-filters the nationality list and resets the cascade
-# [orig: PlayerInfo_SaveAndRepopulate @ 0x5608f0 re-runs PopulateAllControls(team)].
+# Apply the native team cascade, then restore the shell's saved side picks.
 func _set_team(team: int) -> void:
 	if team == _team:
 		return
@@ -792,7 +629,8 @@ func _set_team(team: int) -> void:
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------
 
 func _current_character_selection() -> PlayerCharacterSelectionState.Selection:
-	return _character_state.make_selection(_team, _sel_nat, _sel_div,
+	return _character_state.make_selection(_team,
+			_driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_selected_combo_index(), _selected_player_class())
 
 
@@ -813,7 +651,7 @@ func snapshot() -> Dictionary:
 	# stores the notification's value byte into the profile and re-selects the
 	# list by that value on the next populate.
 	var profile := _character_state.snapshot(
-			_team, _sel_nat, _sel_div,
+			_team, _driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_driver.selected_row(combo) if combo >= 0 else -1,
 			player_class, _edit_text("PLAYERNAME"), selected_voice())
 	# Missing weapon.def means there was no loadout choice to commit. Keep that

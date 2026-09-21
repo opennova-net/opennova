@@ -15,6 +15,7 @@
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/options_screen.h>
+#include <runtime/menu/player_info_avatars.h>
 
 #include <memory>
 #include <vector>
@@ -32,6 +33,8 @@ class MnuDocument;
 class MusicDirector;
 class ResourceRoot;
 class RtxtStringFile;
+class AvatarDatabase;
+class AvatarComboRow;
 class WeaponDatabase;
 class WeaponDef;
 
@@ -75,6 +78,7 @@ class MenuDriver : public RefCounted {
 	opennova::menu::MenuFlow flow_;
 	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
+	opennova::menu::PlayerInfoAvatars avatars_;
 	std::unique_ptr<FrameSeam> seam_;
 	ObjectID frame_id_;
 	ObjectID audio_id_;
@@ -158,6 +162,23 @@ public:
 			const Dictionary &p_primary, const Dictionary &p_secondary) const;
 	double armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
 			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades) const;
+
+	enum AvatarChange {
+		AVATAR_TEAM = int(opennova::menu::PlayerInfoAvatars::Change::Team),
+		AVATAR_NATIONALITY = int(opennova::menu::PlayerInfoAvatars::Change::Nationality),
+		AVATAR_DIVISION = int(opennova::menu::PlayerInfoAvatars::Change::Division),
+		AVATAR_COMBO = int(opennova::menu::PlayerInfoAvatars::Change::Combo),
+		AVATAR_VOICE = int(opennova::menu::PlayerInfoAvatars::Change::Voice),
+	};
+	int update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
+			int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
+			const Ref<RtxtStringFile> &p_menutxt);
+	PackedInt32Array player_info_nationality_rows() const;
+	int player_info_avatar_nationality() const { return avatars_.nationality; }
+	int player_info_avatar_division() const { return avatars_.division; }
+	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
+	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
+	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();
 	~MenuDriver() override;
@@ -255,3 +276,4 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
+VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);

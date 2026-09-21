@@ -3,8 +3,8 @@
 // The PLAYER_INFO screen's kit model (ADR 0040 ladder E4): the voice-list
 // rows and the persisted-override reset, and the weapon.sav kit page in the
 // order retail serializes it. The masks, slot filters, clip rows and weights
-// live in runtime/world/player_loadout.h and formats/def; the screen
-// controller (the GDScript companion) applies these to its widgets.
+// live in runtime/world/player_loadout.h and formats/def; native menu
+// controllers apply these to MenuRuntime, while the shell supplies resources.
 
 #include <formats/playersav/weapon_sav.h>
 

@@ -125,14 +125,10 @@ public:
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
 	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
-	// player_info_kit.h): the PLAYERVOICE list values for a head's sex byte
-	// (DEFAULT_VOICE first), the persisted-override reset, and the weapon.sav
-	// kit page in retail's order. The page takes the three category picks and
+	// player_info_kit.h): the weapon.sav kit page in retail's order. The page takes the three category picks and
 	// the three fixed grenade picks as parallel arrays (weapon-table index,
 	// primary count, secondary count, flags) and returns one Dictionary per
 	// KitEntry (name, ammo_primary, ammo_secondary, flags).
-	static PackedInt32Array player_info_voice_values(int p_sex);
-	static int player_info_voice_selection(int p_saved, const PackedInt32Array &p_values);
 	Array player_info_kit_entries(int p_team, int p_player_class,
 			const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
 			const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,

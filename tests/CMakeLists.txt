@@ -1221,6 +1221,10 @@ target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
 target_compile_features(player_info_kit_test PRIVATE cxx_std_17)
 add_test(NAME player_info_kit COMMAND player_info_kit_test)
 
+add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
+target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
+add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
+
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

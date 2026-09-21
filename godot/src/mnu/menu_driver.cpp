@@ -8,6 +8,8 @@
 #include "mission/mission_catalog.h"
 #include "mnu/menu_frame.h"
 #include "object/weapon_database.h"
+#include "object/avatar_database.h"
+#include "object/avatar_records.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
@@ -812,9 +814,51 @@ double MenuDriver::armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
 			loadout_parents(p_parents), loadout_indices(p_grenades));
 }
 
+int MenuDriver::update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
+		int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
+		const Ref<RtxtStringFile> &p_menutxt) {
+	const opennova::avatars::AvatarsFile empty{};
+	return avatars_.update(runtime_, p_db.is_valid() ? p_db->native_file() : empty,
+			static_cast<opennova::menu::PlayerInfoAvatars::Change>(p_change), p_value, p_team, p_voice,
+			game_text_lookup(p_gameui), game_text_lookup(p_menutxt));
+}
+
+PackedInt32Array MenuDriver::player_info_nationality_rows() const {
+	PackedInt32Array rows;
+	for (int index : avatars_.nationalities) rows.push_back(index);
+	return rows;
+}
+
+Ref<AvatarComboRow> MenuDriver::player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const {
+	if (p_db.is_null()) return {};
+	const auto *combo = avatars_.selected_combo(runtime_, p_db->native_file());
+	if (!combo) return {};
+	const auto &division = p_db->native_file().nationalities[avatars_.nationality].divisions[avatars_.division];
+	return p_db->get_combo(avatars_.nationality, avatars_.division, static_cast<int>(combo - division.combos));
+}
+
+void MenuDriver::preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice) {
+	const opennova::avatars::AvatarsFile empty{};
+	const std::string trigger = avatars_.voice_preview_trigger(runtime_,
+			p_db.is_valid() ? p_db->native_file() : empty, p_voice);
+	if (!trigger.empty()) play_widget_sound(to_gd(trigger), opennova::menu::kPlayerInfoVoiceBank);
+}
+
 // ---- bindings ----------------------------------------------------------------------
 
 void MenuDriver::_bind_methods() {
+	BIND_ENUM_CONSTANT(AVATAR_TEAM);
+	BIND_ENUM_CONSTANT(AVATAR_NATIONALITY);
+	BIND_ENUM_CONSTANT(AVATAR_DIVISION);
+	BIND_ENUM_CONSTANT(AVATAR_COMBO);
+	BIND_ENUM_CONSTANT(AVATAR_VOICE);
+	ClassDB::bind_method(D_METHOD("update_player_info_avatars", "db", "change", "value", "team", "voice", "gameui", "menutxt"), &MenuDriver::update_player_info_avatars);
+	ClassDB::bind_method(D_METHOD("player_info_nationality_rows"), &MenuDriver::player_info_nationality_rows);
+	ClassDB::bind_method(D_METHOD("player_info_avatar_nationality"), &MenuDriver::player_info_avatar_nationality);
+	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);
+	ClassDB::bind_method(D_METHOD("player_info_avatar_preview_changed"), &MenuDriver::player_info_avatar_preview_changed);
+	ClassDB::bind_method(D_METHOD("player_info_avatar_combo", "db"), &MenuDriver::player_info_avatar_combo);
+	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
 	ClassDB::bind_method(D_METHOD("fill_player_info_ammo", "weapons", "control", "parent", "primary", "secondary", "type", "text"), &MenuDriver::fill_player_info_ammo);
 	ClassDB::bind_method(D_METHOD("fill_armory_ammo", "weapons", "control", "parent", "current_name", "current_clips", "text"), &MenuDriver::fill_armory_ammo);
 	ClassDB::bind_method(D_METHOD("fill_player_info_grenades", "weapons", "class_mask", "team_mask", "counts", "text"), &MenuDriver::fill_player_info_grenades);
