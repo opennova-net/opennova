@@ -1057,6 +1057,13 @@ add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
 
+# The role feeds (inmatch/role_feeds.h): the end-round state, overlay input and stat
+# rows off a joiner's replica state, the DEATH screen status, the bare-role fallbacks.
+add_executable(role_feeds_test netsim/role_feeds_test.cpp)
+target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(role_feeds_test PRIVATE cxx_std_17)
+add_test(NAME role_feeds COMMAND role_feeds_test)
+
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
 target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

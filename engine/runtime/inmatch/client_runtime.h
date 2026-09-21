@@ -534,6 +534,7 @@ public:
 	// riders/attachments from observing the previous world-mover tick.
 	void refresh_remote_attachments() { view_.refresh_carried_entities(); }
 	replication::ClientReplicaPipeline &view() { return view_; }
+	const replication::ClientReplicaPipeline &view() const { return view_; }
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 
 private:

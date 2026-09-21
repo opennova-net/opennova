@@ -44,6 +44,7 @@
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
+#include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
@@ -797,6 +798,8 @@ private:
 	const opennova::inmatch::ListenHostState *host_state() const;
 	opennova::inmatch::NapiNPServerCtx *host_ctx();
 	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
+	// The role feeds' view of this session (inmatch/role_feeds.h RoleView).
+	opennova::inmatch::RoleView role_view() const;
 	// The active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source.
 	// A binding member (ADR 0042 d3: no headless joiner consumer; the binding also folds the
 	// host's own view with its perf clocks).

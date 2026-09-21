@@ -31,6 +31,7 @@
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <runtime/inmatch/client_replica_present.h> // the client-replica present composition (ADR 0031)
+#include <runtime/inmatch/role_feeds.h> // the role feeds (end round, friendly tags, deploy status)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <runtime/inmatch/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
