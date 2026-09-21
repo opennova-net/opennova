@@ -47,16 +47,26 @@ static void parse_view_pose(const char *s, size_t len, float position[3], int32_
         rotation[i] = parse_fixed16_digits_n(values[i + 3].s, values[i + 3].len);
 }
 
+void def_init_weapon(DefWeaponDef &value) {
+    memset(&value, 0, sizeof(value));
+                /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
+                value.renderfov = 80.0f;
+                /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
+                   'scope_min_mag', the scope zoom floor] */
+                value.scope_min_mag = 2;
+                /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
+                for (int &stability : value.stability_fp16) stability = 0x10000;
+}
+
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
-static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
+static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out, DefParseReport *report) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
     size_t entries_cap = 0, acl_cap = 0;
     DefWeaponDef cw; memset(&cw, 0, sizeof(cw));
     DefWeaponAction ca; memset(&ca, 0, sizeof(ca));
-    size_t cw_raw_cap = 0, cw_act_cap = 0, cw_sight_cap = 0;
-    size_t ca_raw_cap = 0;
+    size_t cw_act_cap = 0, cw_sight_cap = 0;
 
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
@@ -64,7 +74,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
     while (next_line(&it, &line, &line_len)) {
         size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
+        const char *trimmed = trim_def_line(line, line_len, &tlen);
         if (tlen == 0) continue;
 
         size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
@@ -72,32 +82,37 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
         /* Top-level ammoclass_max_carry */
         if (lower_starts_with(lower, ll, "ammoclass_max_carry", 19)) {
-            DA_PUSH_RAW(out->ammo_class_lines, out->ammo_class_lines_count, acl_cap, line, line_len);
+            Token values[3];
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+            const int n = tokenize(v, vl, values, 3);
+            if (n == 2) {
+                DefAmmoClassCarry carry{};
+                safe_copy(carry.name, sizeof(carry.name), values[0].s, values[0].len);
+                carry.max_carry = parse_int_n(values[1].s, values[1].len);
+                DA_PUSH(out->ammo_classes, out->ammo_classes_count, acl_cap, carry);
+                validate_property(DefRecordKind::Carry, trimmed, tlen, out->unmodeled_count, report, it.line, carry.name);
+            } else authoring_issue(out->unmodeled_count, report, it.line, "", trimmed, tlen, DefIssueCode::InvalidValue);
             continue;
         }
 
         if (state == ST_TOP) {
             if (lower_starts_with(lower, ll, "weapon", 6)) {
                 memset(&cw, 0, sizeof(cw));
-                cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
-                /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
-                cw.renderfov = 80.0f;
-                /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
-                   'scope_min_mag', the scope zoom floor] */
-                cw.scope_min_mag = 2;
-                /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
-                for (int &stability : cw.stability_fp16) stability = 0x10000;
+                cw_act_cap = 0; cw_sight_cap = 0;
+                def_init_weapon(cw);
                 extract_quoted(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
+                validate_header(trimmed, tlen, 6, sizeof(cw.weapon_name), true, cw.unmodeled_count, report, it.line, cw.weapon_name);
                 state = ST_WEAPON;
-            }
+            } else authoring_issue(out->unmodeled_count, report, it.line, "", trimmed, tlen);
             continue;
         }
 
         if (state == ST_WEAPON) {
             if (lower_starts_with(lower, ll, "action", 6)) {
                 memset(&ca, 0, sizeof(ca));
-                ca_raw_cap = 0;
+
                 extract_quoted(trimmed, tlen, ca.name, sizeof(ca.name));
+                validate_header(trimmed, tlen, 6, sizeof(ca.name), true, ca.unmodeled_count, report, it.line, ca.name);
                 state = ST_ACTION;
                 continue;
             }
@@ -105,7 +120,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
                 DA_PUSH(out->entries, out->count, entries_cap, cw);
                 memset(&cw, 0, sizeof(cw));
-                cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
+                cw_act_cap = 0; cw_sight_cap = 0;
                 state = ST_TOP;
                 continue;
             }
@@ -229,7 +244,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
                 for (int ti = 0; ti < n; ++ti) {
-                    if (cw.charfilter_count >= 8) break;
+                    if (cw.charfilter_count >= 8) {
+                        authoring_issue(cw.unmodeled_count, report, it.line, cw.weapon_name, trimmed, tlen, DefIssueCode::Unrepresentable);
+                        break;
+                    }
                     safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
                               tok[ti].s, tok[ti].len);
                     ++cw.charfilter_count;
@@ -249,7 +267,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
                 for (int ti = 0; ti < n; ++ti) {
-                    if (cw.teamfilter_count >= 4) break;
+                    if (cw.teamfilter_count >= 4) {
+                        authoring_issue(cw.unmodeled_count, report, it.line, cw.weapon_name, trimmed, tlen, DefIssueCode::Unrepresentable);
+                        break;
+                    }
                     safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
                               tok[ti].s, tok[ti].len);
                     ++cw.teamfilter_count;
@@ -368,7 +389,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     cw.flags2 |= fe->bit2;
                     parsed = 1;
                 }
-                /* Unknown flags fall through to raw_lines */
+                /* Unknown flags produce a diagnostic */
             } else if (lower_match_key(lower, ll, "stability", 9)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 Token values[3];
@@ -561,8 +582,9 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
+            if (parsed) validate_property(DefRecordKind::Weapon, trimmed, tlen, cw.unmodeled_count, report, it.line, cw.weapon_name);
             if (!parsed) {
-                DA_PUSH_RAW(cw.raw_lines, cw.raw_lines_count, cw_raw_cap, line, line_len);
+                authoring_issue(cw.unmodeled_count, report, it.line, cw.weapon_name, trimmed, tlen);
             }
             continue;
         }
@@ -571,7 +593,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
                 DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
                 memset(&ca, 0, sizeof(ca));
-                ca_raw_cap = 0;
+
                 state = ST_WEAPON;
                 continue;
             }
@@ -582,8 +604,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                zeroed generated defaults at bind time
                [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end";
                the driver forwards in-ACTION lines before its own `action`
-               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Falling
-               through to raw_lines below reproduces exactly that. Every
+               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Recording a diagnostic below preserves that refusal. Every
                shipped weapon.def corpus (JOX, JOTAC localres, RevX02, JO:CA,
                jox01, demo) is fully END-terminated, so no retail data hits
                this path. */
@@ -594,7 +615,35 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 consume_value_str(trimmed, tlen, 4, ca.anim, sizeof(ca.anim));
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "function", 8)) {
-                consume_value_str(trimmed, tlen, 8, ca.function, sizeof(ca.function));
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                Token args[6]; const int count = tokenize(v, vl, args, 6);
+                if (count > 0) safe_copy(ca.function, sizeof(ca.function), args[0].s, args[0].len);
+                ca.function_args_count = count > 0 ? static_cast<size_t>(count - 1) : 0;
+                if (ca.function_args_count > 4) {
+                    authoring_issue(ca.unmodeled_count, report, it.line, ca.name, trimmed, tlen, DefIssueCode::InvalidValue);
+                    ca.function_args_count = 4;
+                }
+                for (size_t i = 0; i < ca.function_args_count; ++i)
+                    ca.function_args[i] = parse_int_n(args[i + 1].s, args[i + 1].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ctrlreg", 7)) {
+                consume_value_str(trimmed, tlen, 7, ca.ctrl_register, sizeof(ca.ctrl_register));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ctrlreginc", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                ca.ctrl_increment = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "texttoken", 9)) {
+                consume_value_str(trimmed, tlen, 9, ca.text_token, sizeof(ca.text_token));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "dupsound", 8)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                Token args[2]; const int n = tokenize(v, vl, args, 2);
+                if (n == 2) {
+                    ca.duplicate_sound_count = parse_int_n(args[0].s, args[0].len);
+                    if (ca.duplicate_sound_count == 1) ca.duplicate_sound_count = 0;
+                    ca.duplicate_sound_delay = parse_int_n(args[1].s, args[1].len);
+                } else authoring_issue(ca.unmodeled_count, report, it.line, ca.name, trimmed, tlen, DefIssueCode::InvalidValue);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "delaystart", 10)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
@@ -641,43 +690,45 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 				parsed = 1;
 			}
 
+			if (parsed) validate_property(DefRecordKind::Action, trimmed, tlen, ca.unmodeled_count, report, it.line, ca.name);
 			if (!parsed) {
-				DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
+				authoring_issue(ca.unmodeled_count, report, it.line, ca.name, trimmed, tlen);
 			}
 		}
     }
 
+    if (state != ST_TOP) {
+        authoring_issue(out->unmodeled_count, report, it.line, cw.weapon_name, "end", 3, DefIssueCode::MalformedBlock);
+        free(cw.actions);
+        free(cw.sights);
+    }
     return 0;
 }
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+int def_parse_weapons(const char *path, DefWeaponsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_weapons_buf(buf, file_len, out);
+    int rc = parse_weapons_buf(buf, file_len, out, report);
     free(buf);
     return rc;
 }
 
-int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_weapons_buf((const char *)data, size, out);
+    return parse_weapons_buf((const char *)data, size, out, report);
 }
 
 void def_free_weapons(DefWeaponsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
-        for (size_t j = 0; j < f->entries[i].actions_count; ++j) {
-            free(f->entries[i].actions[j].raw_lines);
-        }
         free(f->entries[i].actions);
         free(f->entries[i].sights);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
-    free(f->ammo_class_lines);
+    free(f->ammo_classes);
     memset(f, 0, sizeof(*f));
 }
 

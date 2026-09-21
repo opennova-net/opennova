@@ -7,6 +7,10 @@
 #include <utility>
 
 #include <editor/blank/create_missing.h>
+#include <editor/blank/blank_factory.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/project/project_files.h>
+#include <editor/documents/catalog_validation.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/run/launch_plan.h>
 
@@ -46,6 +50,7 @@ void ProjectSession::set_launcher(PlayLauncher launcher) {
 }
 
 bool ProjectSession::handle(const EditorRequest &request) {
+	if (guard_unsaved(request) || handle_document(request)) return true;
 	switch (request.kind) {
 	case EditorRequestKind::NewProject: new_project(request.path, request.text); return true;
 	case EditorRequestKind::OpenProject: open_project(request.path); return true;
@@ -55,7 +60,14 @@ bool ProjectSession::handle(const EditorRequest &request) {
 		save_editor_settings();
 		return true;
 	case EditorRequestKind::Rescan:
-		if (view_.project_open) refresh();
+		if (view_.project_open) {
+            for (auto &document : documents_) if (!document->dirty()) {
+                auto loaded = std::make_shared<EditableDocument>(); Diagnostic error;
+                if (loaded->load((fs::path(paths_.root) / document->path()).generic_string(),
+                    document->path(), document->kind(), view_.document.target_game, error)) document = loaded;
+            }
+            view_.selection = {}; update_document_view(); refresh();
+        }
 		return true;
 	case EditorRequestKind::SetTitle:
 		if (view_.project_open && !request.text.empty()) {
@@ -90,8 +102,9 @@ bool ProjectSession::handle(const EditorRequest &request) {
 	case EditorRequestKind::StopPlay: stop_play(); return true;
 	case EditorRequestKind::PickDirectory:
 	case EditorRequestKind::PickFile:
-	case EditorRequestKind::RevealPath:
-	case EditorRequestKind::Quit: return false;
+	case EditorRequestKind::RevealPath: return false;
+	case EditorRequestKind::Quit: view_.quit_requested = true; touch(); return true;
+	default: return false;
 	}
 	return false;
 }
@@ -180,6 +193,8 @@ void ProjectSession::close_project() {
 		finish_build();
 	}
 	const std::string title = view_.document.title;
+	documents_.clear(); view_.active_document.clear(); view_.selection = {};
+	update_document_view();
 	view_.project_open = false;
 	view_.project_root.clear();
 	view_.document = ProjectDocument();
@@ -203,6 +218,7 @@ void ProjectSession::refresh() {
 	view_.requirements = evaluate_requirements(view_.document, view_.scan);
 	view_.diagnostics = view_.scan.diagnostics;
 	for (const Diagnostic &d : view_.requirements.diagnostics) view_.diagnostics.push_back(d);
+	validate_documents();
 	touch();
 }
 
@@ -237,6 +253,11 @@ void ProjectSession::create_missing(const std::string &role) {
 }
 
 void ProjectSession::start_build(bool then_play) {
+	if (documents_dirty()) {
+		view_.has_build = false; view_.last_build = BuildReport(); play_after_build_ = false;
+		report(make_diagnostic(DiagnosticSeverity::Error, "build.unsaved", "Save the edited catalog files before Build or Play."));
+		return;
+	}
 	if (then_play && play_.state() != PlayState::Stopped) {
 		report(make_diagnostic(DiagnosticSeverity::Error, "play.already_running",
 		                       "The game is already running; stop it before starting it again."));
@@ -387,6 +408,173 @@ void ProjectSession::save_editor_settings() {
 	if (!::opennova::editor::save_editor_settings(settings_path_, settings_, error)) report(error);
 	view_.recent_projects = settings_.recent_projects;
 	touch();
+}
+
+
+EditableDocument *ProjectSession::document_for(const std::string &path) {
+	const std::string &wanted = path.empty() ? view_.active_document : path;
+	for (auto &document : documents_)
+		if (document->path() == wanted || normalized_logical_name(fs::path(document->path()).filename().string()) == normalized_logical_name(wanted))
+			return document.get();
+	return nullptr;
+}
+
+bool ProjectSession::documents_dirty() const {
+	for (const auto &document : documents_) if (document->dirty()) return true;
+	return false;
+}
+
+void ProjectSession::update_document_view() {
+	view_.documents.clear();
+	for (const auto &document : documents_) view_.documents.push_back(document);
+	touch();
+}
+
+void ProjectSession::validate_documents() {
+	view_.diagnostics = view_.scan.diagnostics;
+	for (const auto &d : view_.requirements.diagnostics) view_.diagnostics.push_back(d);
+	for (const auto &d : validate_catalogs(paths_, view_.document, view_.scan, view_.documents))
+		view_.diagnostics.push_back(d);
+	touch();
+}
+
+bool ProjectSession::save_documents(bool all) {
+	if (build_) {
+		report(make_diagnostic(DiagnosticSeverity::Error, "document.build_running", "Wait for the build to finish before saving."));
+		return false;
+	}
+	for (const auto &document : documents_) {
+		if ((!all && document->path() != view_.active_document) || !document->dirty()) continue;
+		Diagnostic error;
+		if (!document->save(error)) { report(error); return false; }
+	}
+	update_document_view();
+	refresh();
+	view_.status = "Saved.";
+	return true;
+}
+
+bool ProjectSession::handle_document(const EditorRequest &request) {
+    switch (request.kind) {
+    case EditorRequestKind::CreateCatalog: {
+        if (!view_.project_open || build_) return true;
+        const std::string name = normalized_logical_name(request.path);
+        if (name != "ITEMS.DEF" && name != "WEAPON.DEF" && name != "AMMO.DEF") return true;
+        const AssetKind kind = classify_asset(request.path, nullptr);
+        const auto *existing = view_.scan.find(request.path);
+        if (!existing) {
+            const auto target = fs::path(paths_.root) / blank_placement_dir(kind) / request.path;
+            std::error_code ec;
+            if (fs::exists(target, ec) || ec) {
+                report(make_diagnostic(DiagnosticSeverity::Error, "document.conflict", "Rescan before creating this catalog.", request.path));
+                return true;
+            }
+            std::vector<uint8_t> bytes; Diagnostic error;
+            BlankRequest blank; blank.logical_name = request.path; blank.project_title = view_.document.title;
+            if (!make_blank(blank, kind, bytes, error)) { report(error); return true; }
+            std::string message;
+            if (!ensure_directory(target.parent_path().generic_string(), message) ||
+                !write_file_atomic(target.generic_string(), bytes.data(), bytes.size(), message)) {
+                report(make_diagnostic(DiagnosticSeverity::Error, "document.write", message, request.path));
+                return true;
+            }
+            refresh();
+        }
+        handle(make_request(EditorRequestKind::OpenDocument, request.path));
+        return true;
+    }
+	case EditorRequestKind::OpenDocument:
+	case EditorRequestKind::ReloadDocument: {
+		if (!view_.project_open) return true;
+		const std::string path = request.path.empty() ? view_.active_document : request.path;
+		if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
+			view_.active_document = document_for(path)->path(); view_.selection = request.catalog_edit.address; touch(); return true;
+		}
+		for (const auto &asset : view_.scan.entries) {
+			if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
+			auto document = std::make_shared<EditableDocument>(); Diagnostic error;
+			if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(), asset.relative_path,
+				asset.kind, view_.document.target_game, error)) { report(error); return true; }
+			for (auto it = documents_.begin(); it != documents_.end(); ++it)
+				if ((*it)->path() == asset.relative_path) { documents_.erase(it); break; }
+			documents_.push_back(document); view_.active_document = document->path();
+			view_.selection = request.catalog_edit.address;
+			update_document_view(); validate_documents(); return true;
+		}
+		report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The catalog file was not found.", path));
+		return true;
+	}
+	case EditorRequestKind::CloseDocument: {
+		const std::string path = request.path.empty() ? view_.active_document : request.path;
+		for (auto it = documents_.begin(); it != documents_.end(); ++it)
+			if ((*it)->path() == path) { documents_.erase(it); break; }
+		if (view_.active_document == path) view_.active_document = documents_.empty() ? "" : documents_.back()->path();
+		view_.selection = {}; update_document_view(); validate_documents(); return true;
+	}
+	case EditorRequestKind::SelectRecord:
+		if (!request.path.empty()) view_.active_document = request.path;
+		view_.selection = request.catalog_edit.address; touch(); return true;
+	case EditorRequestKind::EditRecord: {
+		if (auto *document = document_for(request.path)) {
+			Diagnostic error;
+			if (!document->apply(request.catalog_edit, error)) report(error);
+			else {
+				if (request.catalog_edit.operation == CatalogOperation::Add || request.catalog_edit.operation == CatalogOperation::Duplicate) {
+					const auto kind = request.catalog_edit.address.kind;
+					const bool top = kind == document->record_kind() || kind == def::DefRecordKind::Carry;
+					view_.selection = {top ? document->last_added() : request.catalog_edit.address.row, kind,
+						top ? 0 : document->last_added()};
+				}
+				update_document_view(); validate_documents();
+				view_.status = "Edited " + document->path() + ".";
+			}
+		}
+		return true;
+	}
+	case EditorRequestKind::Undo:
+	case EditorRequestKind::Redo:
+		if (auto *document = document_for(request.path)) {
+			if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
+			update_document_view(); validate_documents();
+		}
+		return true;
+	case EditorRequestKind::EndEdit:
+		if (auto *document = document_for(request.path)) document->end_edit_group();
+		return true;
+	case EditorRequestKind::Save: save_documents(false); return true;
+	case EditorRequestKind::SaveAll: save_documents(true); return true;
+	default: return false;
+	}
+}
+
+bool ProjectSession::guard_unsaved(const EditorRequest &request) {
+	if (request.kind == EditorRequestKind::ResolveUnsaved) {
+		if (!pending_request_) return true;
+		if (request.unsaved_choice == UnsavedChoice::Cancel) {
+			pending_request_.reset(); view_.unsaved_prompt = false; touch(); return true;
+		}
+		if (request.unsaved_choice == UnsavedChoice::SaveAll && !save_documents(true)) return true;
+		EditorRequest pending = *pending_request_;
+		pending_request_.reset(); view_.unsaved_prompt = false;
+		if (request.unsaved_choice == UnsavedChoice::Discard) {
+			if (pending.kind == EditorRequestKind::CloseDocument || pending.kind == EditorRequestKind::ReloadDocument) {
+				for (auto it = documents_.begin(); it != documents_.end(); ++it)
+					if ((*it)->path() == pending.path) { documents_.erase(it); break; }
+			} else documents_.clear();
+			update_document_view();
+		}
+		handle(pending); return true;
+	}
+	bool guard = false;
+	if (request.kind == EditorRequestKind::CloseDocument || request.kind == EditorRequestKind::ReloadDocument) {
+		if (const auto *document = document_for(request.path)) guard = document->dirty();
+	} else if (request.kind == EditorRequestKind::NewProject || request.kind == EditorRequestKind::OpenProject ||
+		request.kind == EditorRequestKind::CloseProject || request.kind == EditorRequestKind::Quit) guard = documents_dirty();
+	if (!guard) return false;
+	pending_request_ = request;
+	if (request.kind == EditorRequestKind::CloseDocument || request.kind == EditorRequestKind::ReloadDocument)
+		pending_request_->path = document_for(request.path)->path();
+	view_.unsaved_prompt = true; touch(); return true;
 }
 
 } // namespace opennova::editor

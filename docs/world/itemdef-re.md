@@ -221,11 +221,46 @@ field. The G/C designation and authored limits are carried into runtime
 metadata, but their specialized control/HUD consumers are likewise deferred;
 this slice does not claim those behaviors.
 
+## Catalog authoring (2026-09-21)
+
+The `def_write` and `editor_catalog` ctests cover native record writers and the
+editor document path. These are authoring facilities over the existing parsers,
+not ports of `ItemDef_DumpToFile`. They regenerate CRLF text, preserve record and
+nested collection order, and compare reparsed native members before saving.
+Unsupported properties and malformed values carry line/record/field diagnostics
+and prevent saving; no raw lines are retained.
+
+Additional evidence from retail `Jointops.exe.kong.i64`, image base `0x400000`,
+with no IDB changes. All item rows were witnessed in
+[orig: ItemDef_ParseProperty @ 0x49EB00]:
+
+| Property | Witnessed meaning | Native model / verdict |
+| --- | --- | --- |
+| `score` | Signed word at `+0x194` | `score`, signed-word narrowing; MATCHING |
+| `graphicenemy` | Enemy model name at `+0x90` | `graphic_enemy`, model symbol; MATCHING |
+| `textid` | Text token at `+0x526` | `text_id`; MATCHING |
+| `rotor_parts` | Two low bytes of `deathTime`, then two low bytes of `clipsize` | Last-write byte aliases of the existing integer fields; MATCHING |
+| `aux_parts` | Two high bytes of `clipsize`, then two high bytes of `deathTime` | Same native fields; MATCHING |
+| `powerupdef` | Copies a definition name into the union at `deathTime`, then sets `attrib` bit 2 | `powerup_def` plus `DEF_ITEM_ATTRIB_POWERUP`. Mixed powerup and door/death declarations are refused for authoring. |
+| `subtype`, `max_attack_dist`, `max_engagement_dist`, `min_engagement_dist`, `fire_timer` | Tail comparisons return without a field store | Unsupported authoring directives; no invented runtime fields. |
+
+Door and squib aliases share `deathTime` / `clipsize` / `doorType` storage.
+The writer emits a canonical spelling that reproduces their stored values.
+Primary/female sound-profile coupling and acceleration's default deceleration
+receive explicit overrides when needed to preserve the final model.
+
+Synthetic tests cover aliases, zero overrides, spawn registries, nested records,
+malformed headers and unsupported input. The optional retail leg loads installed
+files through VFS, proves whole-file refusal for unsupported directives, then
+round-trips supported records. It does not claim every retail file is editable
+or byte-identical.
+
 ## Divergence catalog
 
 | ID | Ours | Original (Jointops.exe) | Why / consequence |
 | --- | --- | --- | --- |
-| D-ITEMDEF-1 **[FIXED 2026-07-05, maturity-par-itemdef]** | `engine/formats/def` `item_type_from_string` (`def.cpp:700`): marker=1, vehicle=2, person=3, building=4, decoration=5, foliage=6, object=7, powerup=8; `effect` unhandled | `ItemDef_ParseProperty`: **vehicle=1, decoration=2, foliage=2, person=3, marker=4, building=5, powerup=6, object=6, effect=8** | the reimpl invented sequential-by-order values; only `person=3` agreed. `type` is not wire-serialized, so no interop break, but any runtime/editor branch on `DefItemDef.type` expecting engine semantics (e.g. effect=8, person=3 special-casing in `EntityDef_LoadModelsAndCallbacks`) was wrong. **FIXED:** `item_type_from_string` now returns the witnessed engine values via named `DefItemType` constants (`engine/formats/def/def.h`), including `effect=8`; the `DefItemDef.type` comment is corrected; the `mission` authoring `entity_kind_for_item_type` switch and the Godot `ItemDatabase::TYPE_*` mirror (static-asserted against `DefItemType`) were updated in the same change. Mapping pinned by `tests/def/def_parse_item_type_test.cpp` (full string→value table) and re-cited in `tests/def/def_parse_items_test.cpp` + `tests/mission/mission_authoring_test.cpp`. The mapping is non-injective (decoration=foliage=2, powerup=object=6). The reimpl is parse-only (string→value) and no consumer converts a numeric `type` back to a token, so the collision has no reverse-direction consequence and no reverse table was invented; if a value→string need ever arises it must be witnessed first (open question — `ItemDef_DumpToFile @0x49e250` is the candidate site). |
+| D-ITEMDEF-4 **[PERMANENT 2026-09-21, ADR 0046 S5]** | Item/weapon/ammo writers generate canonical CRLF text from typed native fields; comments, layout and equivalent aliases are normalized. Unsupported, malformed and mixed powerup/door union input is refused. | Retail loaders accept hand-authored text and permissively ignore legacy directives; native unions allow overlapping meanings. | Maintainer-approved typed authoring under ADR 0003: no raw passthrough. Reparse equality protects modeled values and ordered collections. Runtime callers retain permissive parsing and may omit authoring reports. |
+| D-ITEMDEF-1 **[FIXED 2026-07-05, maturity-par-itemdef]** | `engine/formats/def` `item_type_from_string` (`def.cpp:700`): marker=1, vehicle=2, person=3, building=4, decoration=5, foliage=6, object=7, powerup=8; `effect` unhandled | `ItemDef_ParseProperty`: **vehicle=1, decoration=2, foliage=2, person=3, marker=4, building=5, powerup=6, object=6, effect=8** | the reimpl invented sequential-by-order values; only `person=3` agreed. `type` is not wire-serialized, so no interop break, but any runtime/editor branch on `DefItemDef.type` expecting engine semantics (e.g. effect=8, person=3 special-casing in `EntityDef_LoadModelsAndCallbacks`) was wrong. **FIXED:** `item_type_from_string` now returns the witnessed engine values via named `DefItemType` constants (`engine/formats/def/def.h`), including `effect=8`; the `DefItemDef.type` comment is corrected; the `mission` authoring `entity_kind_for_item_type` switch and the Godot `ItemDatabase::TYPE_*` mirror (static-asserted against `DefItemType`) were updated in the same change. Mapping pinned by `tests/def/def_parse_item_type_test.cpp` (full string→value table) and re-cited in `tests/def/def_parse_items_test.cpp` + `tests/mission/mission_authoring_test.cpp`. The mapping is non-injective (decoration=foliage=2, powerup=object=6). The S5 writer chooses `decoration` for value 2 and `powerup` for value 6 under D-ITEMDEF-4; both spellings reparse to the witnessed value. |
 | D-ITEMDEF-2 | (IDB) `ItemDef+0xf0…0x12c` were auto-named `rtCounter0..4`; entity `+0x30/34/38` likewise | they are load-time resolved **model pointers** (`graphicModel`/`huskModel`/`huskFinalModel`/`graphicEnemyModel`/`virtualDisplayModel`), copied to the entity by `Entity_InitFromItemDef` | renamed in-IDB this session. The actual runtime counters are the resolved-sound-id block `+0x82c…` zeroed by `ItemDef_ResetAllRuntimeCounters`. Supersedes the "+48/52/56 counters" wording in `correspondence.md`/net-re §5.2b. |
 | D-ITEMDEF-3 | net-re **§6.8** lifted `healthMax`/`armorMax` out of `pad_17C` and referenced a "§6.9" | full struct now mapped here; there is no §6.9 in net-re | net-re §6.8 is superseded by this record; the `+286`/`+288` health/armor flow is unchanged and re-cited here. |
 
@@ -248,5 +283,6 @@ this slice does not claim those behaviors.
   `phraseSet @+0x86c`, and parts of `pad_1B0`.
 - `DefItemDef` covers only the net/render-relevant subset; the physics block,
   attrib flags, particle keys, `phrase_set` (with presence), `primary_weapon`,
-  and `addeweap*` child attachments ARE parsed. The remaining ordinary
-  seat/door/sound tables are not yet parsed by `engine/formats/def`.
+  and `addeweap*` child attachments ARE parsed. Door/squib numeric aliases,
+  sound-loop names and the S5 fields above are modeled too; remaining runtime
+  consumers and unrecognized directives do not gain invented behavior.

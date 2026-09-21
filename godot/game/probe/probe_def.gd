@@ -227,6 +227,15 @@ static func _is_integral(value: Variant) -> bool:
 
 static func _build_definitions() -> Array[ProbeDef]:
 	return [
+		ProbeDef.make("catalog_readback",
+				"Verify authored item, weapon and ammo values in this process's mounted resource root.",
+				RUNTIME + "catalog_readback_probe.gd", {
+					"item_id": { "type": "integer" }, "item_name": { "type": "string" },
+					"weapon_name": { "type": "string" }, "weapon_clipsize": { "type": "integer" },
+					"ammo_name": { "type": "string" }, "ammo_velocity": { "type": "integer" },
+				}, ["item_id", "item_name", "weapon_name", "weapon_clipsize", "ammo_name", "ammo_velocity"],
+				false, false, 30_000),
+
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
 				+ "leg, the runtime's sim/present/effects spans) for a fixed window "

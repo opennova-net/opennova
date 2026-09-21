@@ -67,6 +67,7 @@
 #include "object/object_shader_cache.h"
 #include "object/item_database.h"
 #include "object/weapon_database.h"
+#include "object/ammo_database.h"
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
 #include "object/model_light.h"
@@ -247,6 +248,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponDef);
 	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
+	GDREGISTER_CLASS(AmmoDatabase);
 	GDREGISTER_CLASS(AvatarPartRow);
 	GDREGISTER_CLASS(AvatarComboRow);
 	GDREGISTER_CLASS(AvatarNationalityRow);

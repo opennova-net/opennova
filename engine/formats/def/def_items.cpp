@@ -83,7 +83,9 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
    decompilation (`off_7C7D78`), so its identity with our `bob`
    field is NOT witnessed for defaulting purposes and `bob` is deliberately
    left at 0. */
-static void apply_item_def_defaults(DefItemDef *d) {
+void def_init_item(DefItemDef &value) {
+    memset(&value, 0, sizeof(value));
+    DefItemDef *d = &value;
     d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
     d->torque = 3;         /* [orig: torque] */
     d->mass = 5;           /* [orig: mass] */
@@ -102,13 +104,13 @@ static void apply_item_def_defaults(DefItemDef *d) {
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser. */
-static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) {
+static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefItemDef current;
     memset(&current, 0, sizeof(current));
-    apply_item_def_defaults(&current);
+    def_init_item(current);
     int in_block = 0;
-    size_t raw_cap = 0;
+    bool powerup_branch = false, numeric_branch = false;
     size_t emplacement_attachments_cap = 0;
 
     LineIter it = {buf, file_len, 0};
@@ -117,7 +119,7 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 
     while (next_line(&it, &line, &line_len)) {
         size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
+        const char *trimmed = trim_def_line(line, line_len, &tlen);
         if (tlen == 0) continue;
 
         size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
@@ -126,29 +128,73 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         if (!in_block) {
             if (lower_starts_with(lower, ll, "begin", 5)) {
                 memset(&current, 0, sizeof(current));
-                apply_item_def_defaults(&current); /* [orig: the begin arm calls
+                def_init_item(current); /* [orig: the begin arm calls
                     ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
-                raw_cap = 0;
+
                 emplacement_attachments_cap = 0;
+                powerup_branch = numeric_branch = false;
                 extract_quoted(trimmed, tlen, current.display_name, sizeof(current.display_name));
+                validate_header(trimmed, tlen, 5, sizeof(current.display_name), true, current.unmodeled_count, report, it.line, current.display_name);
                 in_block = 1;
-            }
+            } else authoring_issue(out->unmodeled_count, report, it.line, "", trimmed, tlen);
             continue;
         }
 
         if (ll == 3 && memcmp(lower, "end", 3) == 0) {
+            if (powerup_branch && numeric_branch)
+                authoring_issue(current.unmodeled_count, report, it.line, current.display_name,
+                    "powerupdef", 10, DefIssueCode::Unrepresentable);
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
-            apply_item_def_defaults(&current);
-            raw_cap = 0;
+            def_init_item(current);
+
             emplacement_attachments_cap = 0;
             in_block = 0;
             continue;
         }
 
+        // These are alternate meanings of the original's type-specific union.
+        // Mixing both cannot be represented by a symbolic powerup definition.
+        powerup_branch |= lower_match_key(lower, ll, "powerupdef", 10) != 0;
+        for (const char *key : {"deathtime", "clipsize", "num_doors", "first_door", "door_type", "door_dir",
+                "open_rate", "max_angle", "sqb_rate", "sqb_distance", "sqb_error", "rotor_parts", "aux_parts",
+                "door_open_sound_id", "door_close_sound_id"})
+            numeric_branch |= lower_match_key(lower, ll, key, strlen(key)) != 0;
         int parsed = 0;
 
-        if (lower_match_key(lower, ll, "sqb_rate", 8) ||
+        if (lower_match_key(lower, ll, "powerupdef", 10)) {
+            // A symbolic powerup definition, not a death/door numeric value.
+            // [orig: ItemDef_ParseProperty @0x49EB00, powerupdef copies to the
+            // type-specific union at deathTime and sets attrib POWERUP]
+            consume_value_str(trimmed, tlen, 10, current.powerup_def, sizeof(current.powerup_def));
+            current.attrib |= DEF_ITEM_ATTRIB_POWERUP;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "score", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.score = signed_i16_value(parse_int_n(v, vl));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "graphicenemy", 12)) {
+            consume_value_str(trimmed, tlen, 12, current.graphic_enemy, sizeof(current.graphic_enemy));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "textid", 6)) {
+            consume_value_str(trimmed, tlen, 6, current.text_id, sizeof(current.text_id));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "rotor_parts", 11) ||
+                   lower_match_key(lower, ll, "aux_parts", 9)) {
+            // Byte aliases of the door/death fields, preserving last-write order.
+            // [orig: ItemDef_ParseProperty @0x49EB00, rotor_parts / aux_parts arms]
+            const bool rotor = lower_match_key(lower, ll, "rotor_parts", 11);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, rotor ? 11 : 9, &vl);
+            Token values[4]; const int n = tokenize(v, vl, values, 4);
+            for (int i = 0; i < n; ++i) {
+                int &field = (rotor ? i < 2 : i >= 2) ? current.deathtime_ticks : current.clipsize;
+                const int shift = 8 * ((rotor ? 0 : 2) + (i % 2));
+                const uint32_t bits = (uint32_t(field) & ~(255u << shift)) |
+                    ((uint32_t(parse_int_n(values[i].s, values[i].len)) & 255u) << shift);
+                field = static_cast<int32_t>(bits);
+            }
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "sqb_rate", 8) ||
                 lower_match_key(lower, ll, "sqb_distance", 12) ||
                 lower_match_key(lower, ll, "sqb_error", 9)) {
             // These share the door/death fields, including last-write order.
@@ -476,10 +522,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             const int n = tokenize(v, vl, tok, 6);
             /* Retail has four fixed slots. A fifth valid record is recognized but
                silently ignored. The optional arc is all-or-none: partial tails
-               remain raw diagnostics instead of inventing missing limits. */
+               produce authoring diagnostics instead of inventing missing limits. */
             if (n == 2 || n >= 6) {
                 parsed = 1;
                 if (current.emplacement_attachments_count >= 4) {
+                    authoring_issue(current.unmodeled_count, report, it.line, current.display_name, trimmed, tlen, DefIssueCode::Unrepresentable);
                     continue;
                 }
                 DefItemEmplacementAttachment attachment;
@@ -992,35 +1039,39 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
 		}
 
+		if (parsed) validate_property(DefRecordKind::Item, trimmed, tlen, current.unmodeled_count, report, it.line, current.display_name);
 		if (!parsed) {
-			DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+			authoring_issue(current.unmodeled_count, report, it.line, current.display_name, trimmed, tlen);
 		}
 	}
 
+    if (in_block) {
+        authoring_issue(out->unmodeled_count, report, it.line, current.display_name, "end", 3, DefIssueCode::MalformedBlock);
+        free(current.emplacement_attachments);
+    }
     return 0;
 }
 
-int def_parse_items(const char *path, DefItemsFile *out) {
+int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_items_buf(buf, file_len, out);
+    int rc = parse_items_buf(buf, file_len, out, report);
     free(buf);
     return rc;
 }
 
-int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out) {
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_items_buf((const char *)data, size, out);
+    return parse_items_buf((const char *)data, size, out, report);
 }
 
 void def_free_items(DefItemsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         free(f->entries[i].emplacement_attachments);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
     memset(f, 0, sizeof(*f));

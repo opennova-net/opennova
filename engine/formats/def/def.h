@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <formats/def/def_diagnostic.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -67,6 +69,8 @@ inline constexpr int DEF_AMMO_KZ_SLASH = 7;
 
 typedef struct DefAmmoDef {
     char name[64];
+    uint8_t doppler_divisor; // [orig: AmmoDef_ParseProperty @0x40A6E9, byte +240]
+    char kz_sound[64]; // [orig: AmmoDef_ParseProperty @0x40A94B, sound-set symbol]
     int velocity;            /* +4, integer units/s [orig: 'velocity' branch @0x40a2d0] */
     int heat_det_range;      /* +100, signed world-unit word */
     int boresight_maxang;    /* +88, BAM cone */
@@ -127,8 +131,7 @@ typedef struct DefAmmoDef {
     int turnrate_maxyaw; /* +84 */
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
-    char (*raw_lines)[512];
-    size_t raw_lines_count;
+    size_t unmodeled_count; // Diagnostics only; no source text is retained.
     /* Kill-zone blast geometry (appended; layout stability). The explosion
      * queue's blast radius is kz_maxradius (or the entry's float override); the
      * linear damage falloff starts at kz_minradius; kz_pieslice != 0 makes the
@@ -165,6 +168,7 @@ typedef struct DefAmmoDef {
 typedef struct DefAmmoFile {
     DefAmmoDef *entries;
     size_t count;
+    size_t unmodeled_count; // File-level or incomplete-block findings.
 } DefAmmoFile;
 
 /* ========================================================================= */
@@ -200,8 +204,17 @@ typedef struct DefWeaponAction {
     char particle[128];
     char particleuserpoint[128];
 	int action_value; /* ActionDef+52: mounted tank recoil amplitude [orig: @0x40270F] */
-	char (*raw_lines)[512];
-	size_t raw_lines_count;
+    // Authored operands, separate from resolved runtime pointers/handles.
+    // [orig: ActionDef_ParseScriptLine @0x4023C0, property stores @0x4025F3,
+    // @0x40260C, @0x4027CF, @0x402839, @0x4028B7, @0x40296E..0x402A91]
+    char ctrl_register[64];
+    int ctrl_increment;
+    int duplicate_sound_count;
+    int duplicate_sound_delay;
+    char text_token[128];
+    int function_args[4];
+    size_t function_args_count;
+	size_t unmodeled_count; // Diagnostics only; no source text is retained.
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -329,8 +342,7 @@ typedef struct DefWeaponDef {
     int32_t tpos_rotation_deg_q16[3];
     DefSightEntry *sights;
     size_t sights_count;
-    char (*raw_lines)[512];
-    size_t raw_lines_count;
+    size_t unmodeled_count; // Diagnostics only; no source text is retained.
     /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
        consumer populate_weapon_slot_lists @ 0x560430]. Appended to keep the leading
        struct offsets (and native layouts) stable. loadout_selectable (+32: a row
@@ -492,11 +504,17 @@ typedef struct DefWeaponDef {
     int emplacedstance;
 } DefWeaponDef;
 
+struct DefAmmoClassCarry {
+    char name[64];
+    int max_carry;
+};
+
 typedef struct DefWeaponsFile {
-    char (*ammo_class_lines)[512];
-    size_t ammo_class_lines_count;
+    DefAmmoClassCarry *ammo_classes;
+    size_t ammo_classes_count;
     DefWeaponDef *entries;
     size_t count;
+    size_t unmodeled_count; // File-level or incomplete-block findings.
 } DefWeaponsFile;
 
 /* ========================================================================= */
@@ -616,6 +634,10 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB2_FARP = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB2_LANDMINE = 0x00004000u;
 
 typedef struct DefItemDef {
+    char powerup_def[64]; // powerup branch of the death/door union [orig: ItemDef_ParseProperty @0x49EB00]
+    int score; // signed word [orig: ItemDef_ParseProperty @0x49EB00, score -> +0x194]
+    char graphic_enemy[128]; // [orig: ItemDef_ParseProperty @0x49EB00, graphicenemy]
+    char text_id[32]; // [orig: ItemDef_ParseProperty @0x49EB00, textid -> +0x526]
     char display_name[128];
     int id;
     char sid[64];
@@ -776,8 +798,7 @@ typedef struct DefItemDef {
     char particleother[32];    /* +0x4B2 [orig: @ 0x4a1713] */
     char particlefinale[32];   /* +0x4E4 [orig: @ 0x4a175b] */
     char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
-    char (*raw_lines)[512];
-    size_t raw_lines_count;
+    size_t unmodeled_count; // Diagnostics only; no source text is retained.
     /* Four organic fire ammo names; lndm also reads closeattack/marker3.
        [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B..+0x5CB;
        Entity_InitOrganicAI @ 0x4BFCC0 -> entity+0x358..+0x35B] */
@@ -932,6 +953,7 @@ typedef struct DefItemsFile {
     size_t count;
 	int vehicle_spawn_ids[32];
 	int vehicle_spawn_id_count;
+    size_t unmodeled_count; // File-level or incomplete-block findings.
 } DefItemsFile;
 
 /* ========================================================================= */
@@ -1106,22 +1128,32 @@ typedef struct DefHudPosFile {
 /* API                                                                       */
 /* ========================================================================= */
 
-int def_parse_ammo(const char *path, DefAmmoFile *out);
+// Shared record defaults: the parser and from-scratch authoring use these.
+void def_init_item(DefItemDef &value);
+void def_init_weapon(DefWeaponDef &value);
+void def_init_ammo(DefAmmoDef &value);
+const char *def_ammo_flag_keyword(size_t index);
+uint32_t def_ammo_flag_bit(size_t index);
+const char *def_ammo_kz_keyword(size_t index);
+const char *def_ammo_tracer_keyword(size_t index);
+int def_ammo_tracer_value(size_t index);
+
+int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report = nullptr);
 /* Parse ammo.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_ammo as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report = nullptr);
 void def_free_ammo(DefAmmoFile *f);
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out);
+int def_parse_weapons(const char *path, DefWeaponsFile *out, DefParseReport *report = nullptr);
 /* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report = nullptr);
 void def_free_weapons(DefWeaponsFile *f);
 
-int def_parse_items(const char *path, DefItemsFile *out);
+int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report = nullptr);
 /* Parse items.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_items as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report = nullptr);
 void def_free_items(DefItemsFile *f);
 
 /* The items.def `attrib:` keyword tables, read-only by index: the SAME tables the

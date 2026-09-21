@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <editor/documents/editable_document.h>
 
 namespace opennova::editor {
 
@@ -21,6 +22,9 @@ enum class EditorRequestKind {
 	Build,
 	Play,                 // build, then run the game on the build
 	StopPlay,
+	CreateCatalog, OpenDocument, ReloadDocument, CloseDocument,
+	SelectRecord, EditRecord, EndEdit,
+	Save, SaveAll, Undo, Redo, ResolveUnsaved,
 	// Shell-only: the portable session cannot serve these.
 	PickDirectory,        // purpose says what the picked directory is for
 	PickFile,             // purpose = RuntimeExecutable
@@ -30,12 +34,16 @@ enum class EditorRequestKind {
 
 enum class PickPurpose { None, NewProjectLocation, OpenProject, RuntimeExecutable };
 
+enum class UnsavedChoice { SaveAll, Discard, Cancel };
+
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
 	std::string path;
 	std::string text;
 	bool flag = false;
 	PickPurpose purpose = PickPurpose::None;
+	CatalogEdit catalog_edit;
+	UnsavedChoice unsaved_choice = UnsavedChoice::Cancel;
 };
 
 inline EditorRequest make_request(EditorRequestKind kind, std::string path = std::string(),

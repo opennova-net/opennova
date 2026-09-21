@@ -1,5 +1,6 @@
 #include <editor/project_build/build_plan.h>
 
+#include <editor/documents/catalog_validation.h>
 #include <algorithm>
 #include <filesystem>
 
@@ -7,7 +8,7 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-BuildPlan plan_build(const ProjectPaths &paths, const ProjectDocument &, const AssetScan &scan,
+BuildPlan plan_build(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                      const RequirementReport &requirements) {
 	BuildPlan plan;
 	// The three boot-table archives always exist in a build, even empty: the boot gate
@@ -20,6 +21,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const ProjectDocument &, const A
 		plan.archives.push_back(std::move(archive));
 	}
 
+	// The same catalog gate is used by CLI validate and the editor.
+	for (const auto &d : validate_catalogs(paths, project, scan)) plan.diagnostics.push_back(d);
 	// The gate: a broken tree or an unmet requirement never packs.
 	for (const Diagnostic &d : scan.diagnostics) {
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);

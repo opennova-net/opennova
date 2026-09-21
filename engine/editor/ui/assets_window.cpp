@@ -28,7 +28,9 @@ void AssetsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	for (const AssetEntry &entry : v.scan.entries) {
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();
-		ImGui::TextUnformatted(entry.relative_path.c_str());
+		if (ImGui::Selectable(entry.relative_path.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
+			ImGui::IsMouseDoubleClicked(0) && is_catalog_kind(entry.kind))
+			host_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
 		if (ImGui::IsItemHovered() && entry.logical_name != entry.relative_path) {
 			ImGui::SetTooltip("The game sees it as %s", entry.logical_name.c_str());
 		}

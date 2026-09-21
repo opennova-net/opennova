@@ -403,7 +403,7 @@ int main(void) {
        16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
        Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it
        onto Underwater's 0x4 — corrected), LaserBeam = 0x40000000 (previously
-       unmapped -> raw_lines only), NoAmmoTypes = flags2 0x40.
+       unmapped -> authoring diagnostic), NoAmmoTypes = flags2 0x40.
        [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
        Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
     if (m4->flags != (0x100 | 0x2 | 0x1000000 | 0x40000000)) {

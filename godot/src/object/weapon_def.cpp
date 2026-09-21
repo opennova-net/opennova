@@ -105,8 +105,6 @@ void WeaponSightRow::_bind_methods() {
 void WeaponActionRow::assign(const DefWeaponAction &p_value) {
 	value_ = p_value;
 	// The writer-only raw line buffer stays with the parse.
-	value_.raw_lines = nullptr;
-	value_.raw_lines_count = 0;
 }
 
 Ref<WeaponActionRow> WeaponActionRow::make(const String &p_name, int p_delaystart,
@@ -169,13 +167,6 @@ void WeaponDef::assign(int p_index, const DefWeaponDef &p_value) {
 	value_ = p_value;
 	sights_.assign(p_value.sights, p_value.sights + p_value.sights_count);
 	actions_.assign(p_value.actions, p_value.actions + p_value.actions_count);
-	// The writer-only raw line buffers stay with the parse.
-	value_.raw_lines = nullptr;
-	value_.raw_lines_count = 0;
-	for (DefWeaponAction &action : actions_) {
-		action.raw_lines = nullptr;
-		action.raw_lines_count = 0;
-	}
 	rebind_rows();
 }
 

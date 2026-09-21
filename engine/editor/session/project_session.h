@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,12 +51,19 @@ public:
 	// Run a build in progress to its end (a test, a command line).
 	void finish_build();
 
+	EditableDocument *document_for(const std::string &path = {});
+	bool documents_dirty() const;
 	bool project_open() const { return view_.project_open; }
 	bool build_running() const { return build_ != nullptr; }
 	// The directory the running game uses ("" when none): the build never prunes it.
 	std::string running_build_dir() const { return play_.running_build_dir(); }
 
 private:
+	bool handle_document(const EditorRequest &request);
+	bool guard_unsaved(const EditorRequest &request);
+	bool save_documents(bool all);
+	void update_document_view();
+	void validate_documents();
 	bool new_project(const std::string &dir, const std::string &title);
 	bool open_project(const std::string &dir);
 	void close_project();
@@ -85,6 +93,8 @@ private:
 	std::string game_log_file_;
 	uint64_t game_log_offset_ = 0;
 	std::string game_log_partial_;
+	std::vector<std::shared_ptr<EditableDocument>> documents_;
+	std::optional<EditorRequest> pending_request_;
 	SessionView view_;
 };
 

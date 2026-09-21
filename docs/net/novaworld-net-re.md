@@ -9287,6 +9287,22 @@ scopeup,scopeup_map,scopedown,scopedown_map,switchfrom_map}`, `powerup_pickup`,
 suffixes ship as ACTION names (never scopeup/scopedown/overheated), and FUNCTION only
 ever names `wpn_std_<own suffix>` — the `*_map` variants are unused by weapons.
 
+**Typed authoring (2026-09-21).** `DefWeaponAction` carries the `ctrlreg`
+symbol, `ctrlreginc` integer, `dupsound` count/delay, `texttoken` key and up to
+four authored function arguments. The count-1 duplicate-sound normalization to
+zero is preserved (`ActionDef_ParseScriptLine @ 0x4023C0`, stores
+`@0x4025F3` / `@0x40260C`); control lookup is `@0x4027FA`,
+increment `@0x4027CF`, text lookup `@0x4028B7`, and function argument
+packing `@0x40296E..0x402A91`. Typed inputs replace raw lines; the deferred
+CTRL animator is unchanged. Top-level `ammoclass_max_carry` rows are typed
+name/limit records consumed directly by the runtime weapon-table builder.
+
+The ammo parser also models `dopplerdiv` as the native byte store
+(`AmmoDef_ParseProperty @ 0x40A2D0`, `@0x40A6E9`) and `kz_sound` as a sound
+symbol (lookup `@0x40A94B`, destination `+76`). `def_write` covers action
+arguments, sights/effects, carries and tracer names; canonicalization follows
+[D-ITEMDEF-4](../world/itemdef-re.md#catalog-authoring-2026-09-21).
+
 **The bind + bake** [orig: `Anim_InitActions @ 0x541fa0`]. After a weapon block parses,
 each of the 12 slots at `WeaponDef+0x2A4` binds by looking up `<weaponName>_<suffix>`
 against the suffix table `@ 0x830B90` — 12 `{suffix, defaultHandler}` pairs in id order:

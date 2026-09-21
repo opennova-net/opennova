@@ -33,8 +33,8 @@ Facts the decision rests on: `engine/base/gameprofile/required_resources` is the
 witnessed manifest of every file the engine demands by name (80 rows with phase,
 severity and failure text; `docs/required-resources.md`); boot archives are a fixed
 table (`kBootArchiveTable`); logical names resolve flat and case-insensitively, PFF
-names are 16 bytes; native writers exist for every format the first slices need except
-`.def`; there is no reference index; release GDExtensions compile without Dear ImGui.
+names are 16 bytes; at the decision date, native writers existed for every format the first slices needed except
+`.def` (S5 supplies the three catalog writers); there is no reference index; release GDExtensions compile without Dear ImGui.
 
 ## Decision
 
@@ -145,6 +145,41 @@ names are 16 bytes; native writers exist for every format the first slices need 
     editors with the shared `MenuFrame` preview; the asset graph; imports. Later: further
     def inspectors, missions, GLB/GLTF to 3DI under ADR 0038, fonts, audio, the editor
     MCP, expansion-type projects, the deferred deployment contract, plugins.
+
+## S5 catalog implementation (2026-09-21)
+
+The first document feature covers `items.def`, `weapon.def` and `ammo.def`. The
+catalog and inspector use the native records and their nested actions, sights,
+attachments, effects and carry limits. A concrete member/property inventory in
+`formats/def` drives controls and canonical writers. It is authoring infrastructure:
+the five `def_schema*` / `def_write*` implementation files are individually
+citation-allowlisted. Parsing remains in the existing family parsers. These
+families retain no raw lines, source spans or opaque passthrough payloads.
+
+`EditableDocument` owns rows with session-local identities and a history of
+changed rows. Consecutive edits to one field coalesce until control deactivation;
+save establishes a history checkpoint. Display sorting leaves file order alone.
+Saving reparses generated text and compares every modeled native field,
+including derived values and ordered nested collections. The existing atomic
+write helper replaces the source only after its content fingerprint still
+matches. Conflicts and failed writes leave the file and checkpoint alone.
+
+Serializable drafts may be saved with incomplete references. The shared
+validator reports duplicate identities, missing required references and advisory
+references whose symbol tables are not resolved yet. Build/Play refuses errors
+and dirty documents. File/record/field locations feed Problems navigation.
+Unknown or malformed source input blocks editing and saving until corrected
+and reloaded. Normalization is recorded in
+[D-ITEMDEF-4](../world/itemdef-re.md#catalog-authoring-2026-09-21).
+
+The windows support explicit catalog creation, filtering, display-only sorting,
+record/nested edits, reference selection, Save/Save All and undo/redo. Close,
+project changes and Quit offer Save All / Discard / Cancel. Rescan reloads clean
+documents and preserves dirty ones. The Godot shell dispatches typed requests;
+the Play acceptance test reads the mounted build through runtime databases.
+A general asset graph and imports remain later slices.
+
+![Catalog and typed inspector](../images/editor-catalog.png)
 
 ## Consequences
 

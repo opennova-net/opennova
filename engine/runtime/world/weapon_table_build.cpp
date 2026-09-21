@@ -234,15 +234,11 @@ world::WeaponTable build_weapon_table(
 
 	// Top-level `ammoclass_max_carry <class> <n>` -> the per-class carry caps
 	// [orig: parse @0x543873 -> the cap table @0x24E7DE0; clamp use @0x540b26].
-	for (size_t i = 0; i < weapons.ammo_class_lines_count; ++i) {
-		const char *line = weapons.ammo_class_lines[i];
-		char cls[64] = {};
-		int cap = 0;
-		if (std::sscanf(line, "%*s %63s %d", cls, &cap) == 2) {
-			int id = ammo_class_register(cls);
-			table.ammo_class_caps[static_cast<size_t>(id)] = cap;
-		}
-	}
+	for (size_t i = 0; i < weapons.ammo_classes_count; ++i) {
+        const def::DefAmmoClassCarry &carry = weapons.ammo_classes[i];
+        const int id = ammo_class_register(carry.name);
+        table.ammo_class_caps[static_cast<size_t>(id)] = carry.max_carry;
+    }
 
 	// Entry 0: the engine-created "null" def — AnimDef_InitAll wipes the 255-entry table and
 	// names slot 0 right before weapon.def parses [orig: @0x543615; Game_StartMission

@@ -64,6 +64,27 @@ public:
 	// One session poll (what _process does each frame).
 	void pump();
 
+
+	bool create_catalog(const godot::String &p_path);
+	bool open_catalog(const String &p_path);
+	int get_catalog_row_count() const;
+	int64_t get_catalog_row_id(int p_index) const;
+	String get_catalog_row_name(int p_index) const;
+	int64_t add_catalog_record(const String &p_kind, int64_t p_parent = 0);
+	bool remove_catalog_record(int64_t p_id);
+	bool set_catalog_text(int64_t p_id, const String &p_field, const String &p_value);
+	bool set_catalog_integer(int64_t p_id, const String &p_field, int64_t p_value);
+	bool set_catalog_real(int64_t p_id, const String &p_field, double p_value);
+	String get_catalog_text(int64_t p_id, const String &p_field) const;
+	int64_t get_catalog_integer(int64_t p_id, const String &p_field) const;
+	bool save_catalogs();
+	void catalog_undo();
+	void catalog_redo();
+	bool is_catalog_dirty() const;
+	bool has_unsaved_prompt() const;
+	void resolve_unsaved(int p_choice);
+	int get_play_mcp_port() const;
+
 	bool is_project_open() const;
 	String get_project_title() const;
 	String get_project_root() const;
@@ -83,6 +104,7 @@ public:
 	bool is_source_run() const;
 
 protected:
+	void _notification(int p_what);
 	static void _bind_methods();
 	opennova::devtools::ImGuiPass *engine_pass() override;
 	void after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layout_us) override;

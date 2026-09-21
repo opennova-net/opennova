@@ -32,10 +32,12 @@ void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 1.5f);
 	ImGui::TableHeadersRow();
 	// Errors first, then warnings, then notes; each group in its reported order.
+	int problem_index = 0;
 	for (const DiagnosticSeverity severity :
 	     {DiagnosticSeverity::Error, DiagnosticSeverity::Warning, DiagnosticSeverity::Info}) {
 		for (const Diagnostic &d : v.diagnostics) {
 			if (d.severity != severity) continue;
+			ImGui::PushID(problem_index++);
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 			ImGui::TextColored(severity_color(d.severity), "%s", diagnostic_severity_label(d.severity));
@@ -43,7 +45,12 @@ void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			ImGui::TextWrapped("%s", d.message.c_str());
 			if (ImGui::IsItemHovered() && !d.code.empty()) ImGui::SetTooltip("%s", d.code.c_str());
 			ImGui::TableNextColumn();
-			ImGui::TextUnformatted(d.asset.c_str());
+			if (ImGui::Selectable((d.asset + (d.line ? ":" + std::to_string(d.line) : "")).c_str())) {
+				auto request = make_request(EditorRequestKind::OpenDocument, d.asset, d.record);
+				request.catalog_edit.address = {d.row_id, d.record_kind, d.child_id};
+				host_.request(std::move(request));
+			}
+            ImGui::PopID();
 		}
 	}
 	ImGui::EndTable();

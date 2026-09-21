@@ -1,5 +1,6 @@
 #pragma once
 
+#include <editor/documents/editable_document.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -21,6 +22,11 @@ namespace opennova::editor {
 struct SessionView {
 	uint64_t revision = 0;
 
+	std::vector<std::shared_ptr<const EditableDocument>> documents;
+	std::string active_document;
+	CatalogAddress selection;
+	bool unsaved_prompt = false;
+	bool quit_requested = false;
 	bool project_open = false;
 	std::string project_root;
 	ProjectDocument document;

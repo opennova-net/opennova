@@ -34,6 +34,12 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_weapons.cpp  # WEAPONS.DEF
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_schema_records.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_schema_properties.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_write.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_write_record.cpp
+
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp

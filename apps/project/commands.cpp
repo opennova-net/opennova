@@ -10,6 +10,7 @@
 #include <editor/project/project_document.h>
 #include <editor/requirements/requirements.h>
 
+#include <editor/documents/catalog_validation.h>
 #include <cstring>
 #include <map>
 #include <string>
@@ -41,6 +42,9 @@ void print_diagnostic(std::FILE *out, const Diagnostic &d) {
 	std::fprintf(out, "%s %s: %s", diagnostic_severity_label(d.severity), d.code.c_str(),
 	             d.message.c_str());
 	if (!d.asset.empty()) std::fprintf(out, " [%s]", d.asset.c_str());
+    if (d.line) std::fprintf(out, " line %zu", d.line);
+    if (!d.record.empty()) std::fprintf(out, " record %s", d.record.c_str());
+    if (!d.field.empty()) std::fprintf(out, " field %s", d.field.c_str());
 	std::fputc('\n', out);
 }
 
@@ -136,6 +140,10 @@ int command_validate(int argc, const char *const *argv, std::FILE *out, std::FIL
 	if (!open_for_report(argv[1], project, err)) return 2;
 	print_summary(out, project);
 	int errors = 0;
+	for (const auto &d : validate_catalogs(project.paths, project.doc, project.scan)) {
+		print_diagnostic(out, d);
+		if (d.severity == DiagnosticSeverity::Error) ++errors;
+	}
 	for (const Diagnostic &d : project.scan.diagnostics) {
 		print_diagnostic(out, d);
 		if (d.severity == DiagnosticSeverity::Error) ++errors;

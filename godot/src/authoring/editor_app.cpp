@@ -28,6 +28,26 @@ constexpr const char *kSmokeFlag = "--editor-smoke";
 } // namespace
 
 void EditorApp::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("create_catalog", "path"), &EditorApp::create_catalog);
+	ClassDB::bind_method(D_METHOD("open_catalog", "path"), &EditorApp::open_catalog);
+	ClassDB::bind_method(D_METHOD("get_catalog_row_count"), &EditorApp::get_catalog_row_count);
+	ClassDB::bind_method(D_METHOD("get_catalog_row_id", "index"), &EditorApp::get_catalog_row_id);
+	ClassDB::bind_method(D_METHOD("get_catalog_row_name", "index"), &EditorApp::get_catalog_row_name);
+	ClassDB::bind_method(D_METHOD("remove_catalog_record", "id"), &EditorApp::remove_catalog_record);
+	ClassDB::bind_method(D_METHOD("set_catalog_text", "id", "field", "value"), &EditorApp::set_catalog_text);
+	ClassDB::bind_method(D_METHOD("set_catalog_integer", "id", "field", "value"), &EditorApp::set_catalog_integer);
+	ClassDB::bind_method(D_METHOD("set_catalog_real", "id", "field", "value"), &EditorApp::set_catalog_real);
+	ClassDB::bind_method(D_METHOD("get_catalog_text", "id", "field"), &EditorApp::get_catalog_text);
+	ClassDB::bind_method(D_METHOD("get_catalog_integer", "id", "field"), &EditorApp::get_catalog_integer);
+	ClassDB::bind_method(D_METHOD("save_catalogs"), &EditorApp::save_catalogs);
+	ClassDB::bind_method(D_METHOD("catalog_undo"), &EditorApp::catalog_undo);
+	ClassDB::bind_method(D_METHOD("catalog_redo"), &EditorApp::catalog_redo);
+	ClassDB::bind_method(D_METHOD("is_catalog_dirty"), &EditorApp::is_catalog_dirty);
+	ClassDB::bind_method(D_METHOD("has_unsaved_prompt"), &EditorApp::has_unsaved_prompt);
+	ClassDB::bind_method(D_METHOD("resolve_unsaved", "choice"), &EditorApp::resolve_unsaved);
+	ClassDB::bind_method(D_METHOD("get_play_mcp_port"), &EditorApp::get_play_mcp_port);
+	ClassDB::bind_method(D_METHOD("add_catalog_record", "kind", "parent"), &EditorApp::add_catalog_record, DEFVAL(0));
+
 	ClassDB::bind_method(D_METHOD("set_settings_path", "path"), &EditorApp::set_settings_path);
 	ClassDB::bind_method(D_METHOD("get_settings_path"), &EditorApp::get_settings_path);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "settings_path"), "set_settings_path", "get_settings_path");
@@ -115,6 +135,7 @@ PlayLauncher EditorApp::make_launcher(int p_mcp_port) const {
 }
 
 void EditorApp::_ready() {
+	if (get_tree()->get_current_scene() == this) get_tree()->set_auto_accept_quit(false);
 	ensure_session();
 	ImGuiPassNode::_ready();
 	// The session pumps whether or not the workspace draws (headless tests, the smoke).
@@ -154,6 +175,7 @@ void EditorApp::pump() {
 	ensure_session();
 	drain_requests();
 	session_->poll();
+	if (session_->view().quit_requested) get_tree()->quit(0);
 }
 
 void EditorApp::drain_requests() {
@@ -363,6 +385,127 @@ PackedStringArray EditorApp::get_recent_projects() const {
 		}
 	}
 	return roots;
+}
+
+
+namespace {
+opennova::editor::CatalogAddress catalog_address(const opennova::editor::EditableDocument &document, int64_t id) {
+	using namespace opennova::def;
+	for (const auto &row : document.rows()) {
+		if (row->id == uint64_t(id)) return {row->id, row->kind, 0};
+		for (auto child : row->children) if (child == uint64_t(id))
+			return {row->id, row->kind == DefRecordKind::Item ? DefRecordKind::Attachment :
+				row->kind == DefRecordKind::Weapon ? DefRecordKind::Action : DefRecordKind::Effect, child};
+		for (auto child : row->sights) if (child == uint64_t(id)) return {row->id, DefRecordKind::Sight, child};
+	}
+	return {};
+}
+bool catalog_set(ProjectSession &session, int64_t id, const String &field, opennova::def::DefValue value) {
+	auto *document = session.document_for();
+	if (!document) return false;
+	const auto before = document->revision();
+	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord, document->path());
+	request.catalog_edit.address = catalog_address(*document, id);
+	request.catalog_edit.field = opennova::to_std(field); request.catalog_edit.value = std::move(value);
+	session.handle(request);
+	return document->revision() != before;
+}
+}
+bool EditorApp::create_catalog(const String &p_path) {
+    ensure_session();
+    session_->handle(opennova::editor::make_request(EditorRequestKind::CreateCatalog, opennova::to_std(p_path)));
+    return session_->document_for(opennova::to_std(p_path)) != nullptr;
+}
+bool EditorApp::open_catalog(const String &p_path) {
+	ensure_session();
+	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenDocument, opennova::to_std(p_path)));
+	return session_->document_for(opennova::to_std(p_path)) != nullptr;
+}
+int EditorApp::get_catalog_row_count() const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	return document ? int(document->rows().size()) : 0;
+}
+int64_t EditorApp::get_catalog_row_id(int p_index) const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	return document && p_index >= 0 && size_t(p_index) < document->rows().size() ? int64_t(document->rows()[p_index]->id) : 0;
+}
+String EditorApp::get_catalog_row_name(int p_index) const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	return document && p_index >= 0 && size_t(p_index) < document->rows().size() ? opennova::to_gd(document->rows()[p_index]->name()) : String();
+}
+int64_t EditorApp::add_catalog_record(const String &p_kind, int64_t p_parent) {
+	ensure_session();
+	auto *document = session_->document_for(); if (!document) return 0;
+	const char *kinds[] = {"item", "weapon", "ammo", "action", "sight", "attachment", "effect", "carry"};
+	int type = -1;
+	for (int i = 0; i < 8; ++i) if (p_kind == kinds[i]) type = i;
+	if (type < 0) return 0;
+	const auto revision = document->revision();
+	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
+	request.catalog_edit.operation = opennova::editor::CatalogOperation::Add;
+	request.catalog_edit.address = {uint64_t(p_parent), static_cast<opennova::def::DefRecordKind>(type), 0};
+	session_->handle(request);
+	return document->revision() != revision ? int64_t(document->last_added()) : 0;
+}
+bool EditorApp::set_catalog_text(int64_t p_id, const String &p_field, const String &p_value) {
+	ensure_session(); return catalog_set(*session_, p_id, p_field, opennova::to_std(p_value));
+}
+bool EditorApp::set_catalog_integer(int64_t p_id, const String &p_field, int64_t p_value) {
+	ensure_session(); return catalog_set(*session_, p_id, p_field, p_value);
+}
+bool EditorApp::set_catalog_real(int64_t p_id, const String &p_field, double p_value) {
+	ensure_session(); return catalog_set(*session_, p_id, p_field, p_value);
+}
+String EditorApp::get_catalog_text(int64_t p_id, const String &p_field) const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	if (!document) return {};
+	const auto address = catalog_address(*document, p_id);
+	const auto *field = opennova::def::def_field(address.kind, opennova::to_std(p_field));
+	const void *record = document->record(address);
+	if (!field || !record || field->type != opennova::def::DefFieldType::Text) return {};
+	return opennova::to_gd(std::get<std::string>(opennova::def::def_get(record, *field)));
+}
+int64_t EditorApp::get_catalog_integer(int64_t p_id, const String &p_field) const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	if (!document) return 0;
+	const auto address = catalog_address(*document, p_id);
+	const auto *field = opennova::def::def_field(address.kind, opennova::to_std(p_field));
+	const void *record = document->record(address);
+	if (!field || !record) return 0;
+	const auto value = opennova::def::def_get(record, *field);
+	return std::holds_alternative<int64_t>(value) ? std::get<int64_t>(value) : 0;
+}
+bool EditorApp::remove_catalog_record(int64_t p_id) {
+	ensure_session(); auto *document = session_->document_for(); if (!document) return false;
+	const auto revision = document->revision();
+	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
+	request.catalog_edit.operation = opennova::editor::CatalogOperation::Remove;
+	request.catalog_edit.address = catalog_address(*document, p_id);
+	session_->handle(request); return document->revision() != revision;
+}
+bool EditorApp::save_catalogs() {
+	ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::SaveAll));
+	return !session_->documents_dirty();
+}
+void EditorApp::catalog_undo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Undo)); }
+void EditorApp::catalog_redo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Redo)); }
+bool EditorApp::is_catalog_dirty() const {
+	const auto *document = session_ ? session_->document_for() : nullptr;
+	return document && document->dirty();
+}
+bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view().unsaved_prompt; }
+void EditorApp::resolve_unsaved(int p_choice) {
+	if (p_choice < 0 || p_choice > 2) return;
+	ensure_session();
+	auto request = opennova::editor::make_request(EditorRequestKind::ResolveUnsaved);
+	request.unsaved_choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
+	session_->handle(request);
+}
+int EditorApp::get_play_mcp_port() const { return session_ ? session_->launcher().mcp_port : 0; }
+void EditorApp::_notification(int p_what) {
+	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
+		ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Quit));
+	}
 }
 
 } // namespace godot

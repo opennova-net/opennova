@@ -63,7 +63,7 @@ static int test_lifecycle() {
 	EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
 	pick.purpose = PickPurpose::OpenProject;
 	TEST_EXPECT(!session.handle(pick));
-	TEST_EXPECT(!session.handle(make_request(EditorRequestKind::Quit)));
+	TEST_EXPECT(session.handle(make_request(EditorRequestKind::Quit)));
 	TEST_EXPECT(session.handle(make_request(EditorRequestKind::Build))); // no project: nothing happens
 	TEST_EXPECT(!session.build_running());
 

@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <editor/ui/assets_window.h>
+#include <editor/ui/catalog_window.h>
 #include <editor/ui/output_window.h>
 #include <editor/ui/problems_window.h>
 #include <editor/ui/project_window.h>
@@ -18,6 +19,8 @@ EditorWindows::EditorWindows() {
 	project_window_ = project.get();
 	pass_.register_window(std::move(project));
 	pass_.register_window(std::make_unique<AssetsWindow>(*this));
+	pass_.register_window(std::make_unique<CatalogWindow>(*this));
+	pass_.register_window(std::make_unique<CatalogInspector>(*this));
 	pass_.register_window(std::make_unique<RequirementsWindow>(*this));
 	pass_.register_window(std::make_unique<ProblemsWindow>(*this));
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
@@ -70,6 +73,8 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 			}
 			ImGui::EndMenu();
 		}
+		if (ImGui::MenuItem("Save", "Ctrl+S", false, !v.active_document.empty())) request(make_request(EditorRequestKind::Save));
+		if (ImGui::MenuItem("Save All", "Ctrl+Shift+S", false, !v.documents.empty())) request(make_request(EditorRequestKind::SaveAll));
 		if (ImGui::MenuItem("Refresh files", nullptr, false, v.project_open)) {
 			request(make_request(EditorRequestKind::Rescan));
 		}
@@ -101,9 +106,34 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 		}
 		ImGui::EndMenu();
 	}
+
+	const EditableDocument *document = nullptr;
+	for (const auto &d : v.documents) if (d->path() == v.active_document) document = d.get();
+	if (ImGui::BeginMenu("Edit")) {
+		if (ImGui::MenuItem("Undo", "Ctrl+Z", false, document && document->can_undo())) request(make_request(EditorRequestKind::Undo));
+		if (ImGui::MenuItem("Redo", "Ctrl+Y", false, document && document->can_redo())) request(make_request(EditorRequestKind::Redo));
+		ImGui::EndMenu();
+	}
+	if (v.unsaved_prompt) ImGui::OpenPopup("Unsaved changes");
+	if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextUnformatted("Save the edited files before continuing?");
+		for (const auto choice : {UnsavedChoice::SaveAll, UnsavedChoice::Discard, UnsavedChoice::Cancel}) {
+			if (choice != UnsavedChoice::SaveAll) ImGui::SameLine();
+			if (ImGui::Button(choice == UnsavedChoice::SaveAll ? "Save All" : choice == UnsavedChoice::Discard ? "Discard" : "Cancel")) {
+				auto action = make_request(EditorRequestKind::ResolveUnsaved);
+				action.unsaved_choice = choice; request(std::move(action)); ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::EndPopup();
+	}
+
 	// The shortcuts the menu labels promise.
 	const ImGuiIO &io = ImGui::GetIO();
 	if (!io.WantTextInput) {
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
+			request(make_request(io.KeyShift ? EditorRequestKind::SaveAll : EditorRequestKind::Save));
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) request(make_request(EditorRequestKind::Undo));
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) request(make_request(EditorRequestKind::Redo));
 		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && !v.build_running) {
 			request(make_request(EditorRequestKind::Build));
 		}

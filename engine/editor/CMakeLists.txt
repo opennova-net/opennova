@@ -19,6 +19,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/create_missing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/editable_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
     # project — project.opennova, the cache directory, machine-local settings, file plumbing
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
@@ -44,6 +46,7 @@ add_library(opennova_editor STATIC
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/assets_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_window.cpp

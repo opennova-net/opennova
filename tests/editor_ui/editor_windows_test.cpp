@@ -8,6 +8,7 @@
 #include <string>
 
 #include <editor/session/session_view.h>
+#include "../editor/editor_test_support.h"
 #include <editor/ui/editor_windows.h>
 
 #include <imgui.h>
@@ -99,7 +100,7 @@ void test_windows_and_layout() {
 	NullBackend backend;
 	EditorWindows windows;
 	const devtools::ImGuiPass &pass = windows.pass();
-	CHECK(pass.window_count() == 5, "five windows");
+	CHECK(pass.window_count() == 7, "seven windows");
 	const devtools::Window *project = find_window(pass, "Project");
 	CHECK(project != nullptr && !project->is_closeable(), "Project is the home window and never closes");
 	CHECK(project != nullptr && project->initial_dock_placement() == devtools::InitialDockPlacement::Center,
@@ -123,7 +124,13 @@ void test_windows_and_layout() {
 	CHECK(ImGui::GetDrawData() != nullptr && ImGui::GetDrawData()->TotalVtxCount > 0, "draw data");
 
 	// A seeded open project draws every window's table.
-	const SessionView v = seeded_view();
+    SessionView v = seeded_view();
+    editor_test::TempProjectDir dir("opennova_catalog_ui_test");
+    CHECK(editor_test::write_text(dir.file("items.def"), "begin \"Marker\"\nid 100001\ntype marker\nend\n"), "catalog fixture");
+    auto document = std::make_shared<EditableDocument>(); Diagnostic error;
+    CHECK(document->load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error), "catalog loads");
+    v.documents.push_back(document); v.active_document = document->path();
+    v.selection = {document->rows()[0]->id, opennova::def::DefRecordKind::Item, 0};
 	windows.set_view(&v);
 	CHECK(frame(windows, 3), "the project layout draws");
 	CHECK(ImGui::GetDrawData()->TotalVtxCount > 0, "draw data with a project");

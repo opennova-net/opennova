@@ -3119,3 +3119,13 @@ add_executable(project_cli_test editor/project_cli_test.cpp)
 target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_cli COMMAND project_cli_test)
+
+add_executable(def_write_test def/def_write_test.cpp)
+target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_write COMMAND def_write_test)
+
+add_executable(editor_catalog_test editor/catalog_document_test.cpp)
+target_link_libraries(editor_catalog_test PRIVATE opennova_editor)
+target_include_directories(editor_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_catalog COMMAND editor_catalog_test)

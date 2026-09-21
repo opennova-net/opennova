@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <formats/def/def_schema.h>
 #include <vector>
 
 namespace opennova::editor {
@@ -19,6 +20,10 @@ struct Diagnostic {
 	std::string message;
 	std::string asset;
 	std::string field;
+	std::string record;
+	size_t line = 0;
+	uint64_t row_id = 0, child_id = 0;
+	def::DefRecordKind record_kind = def::DefRecordKind::Item;
 };
 
 inline Diagnostic make_diagnostic(DiagnosticSeverity severity, std::string code,

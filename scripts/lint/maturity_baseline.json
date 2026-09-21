@@ -18,7 +18,12 @@
     "runtime/assets/asset_store.cpp",
     "runtime/renderer/model_panm_cache.cpp",
     "runtime/world/entity_index.cpp",
-    "editor/"
+    "editor/",
+    "formats/def/def_schema.cpp",
+    "formats/def/def_schema_records.cpp",
+    "formats/def/def_schema_properties.cpp",
+    "formats/def/def_write.cpp",
+    "formats/def/def_write_record.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

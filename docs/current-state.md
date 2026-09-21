@@ -175,7 +175,9 @@ The one non-parity program in flight is the OpenNova Editor
 editor returning as a second Godot product, landing slice by slice in the order its
 decision 12 names (project core and CLI, blank factories, build and Play, the shell and
 packaging, the item/weapon/ammo catalog, strings and menus, the asset graph, imports);
-the ADR is that program's only tracked plan.
+the ADR is that program's only tracked plan. S5 supplies typed catalogs,
+canonical DEF writers, undo/save lifecycle and focused reference validation.
+The next feature slice is strings and menus with the shared `MenuFrame` preview.
 
 Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is

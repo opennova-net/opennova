@@ -14,6 +14,7 @@
 // TUs pull it in wholesale, so no call site changes.
 
 #include <formats/def/def.h>
+#include <formats/def/def_schema.h>
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -26,11 +27,12 @@ namespace opennova::defscan {
 typedef struct { const char *s; size_t len; } Token;
 
 /* Line iterator: walks through buf splitting on \n, stripping \r */
-typedef struct {
+struct LineIter {
     const char *buf;
     size_t buf_len;
     size_t pos;
-} LineIter;
+    size_t line = 0;
+};
 
 typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEntry;
 
@@ -54,6 +56,20 @@ typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEnt
     (raw_count)++; \
 } while(0)
 
+// Counts a finding even when the caller does not collect details. Writers refuse
+// any affected record/file; diagnostics never carry replayable source text.
+void authoring_issue(size_t &count, opennova::def::DefParseReport *report,
+                     size_t line, const char *record, const char *key, size_t key_len,
+                     opennova::def::DefIssueCode code = opennova::def::DefIssueCode::UnknownProperty);
+
+void validate_header(const char *line, size_t length, size_t key_length, size_t capacity, bool quoted,
+                     size_t &issues, opennova::def::DefParseReport *report, size_t number, const char *record);
+void validate_property(opennova::def::DefRecordKind kind, const char *line, size_t length,
+                       size_t &issues, opennova::def::DefParseReport *report,
+                       size_t number, const char *record);
+const FlagEntry *weapon_flag_at(size_t index);
+const char *death_piece_keyword(size_t index);
+const char *trim_def_line(const char *s, size_t len, size_t *out_len);
 char *read_file(const char *path, size_t *out_len);
 
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len);
