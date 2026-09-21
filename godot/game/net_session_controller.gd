@@ -137,20 +137,16 @@ func join_lan_server(target: JoinTarget) -> void:
 		target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
-	if (target.role_explicit
-			and (not target.server_password_required() or not target.server_password.is_empty())
-			and (target.join_role == JoinTarget.ROLE_SPECTATOR
-				or not target.has_team_password() or not target.join_password.is_empty())):
-		_start_lan_join(target)
-		return
-	if target.server_flags < 0:
-		_begin_spectator_preflight(target)
-		return
-	if (target.allows_spectators() or target.server_password_required()
-			or target.has_team_password() or target.allows_team_choice()):
-		_show_join_role_prompt(target)
-		return
-	_start_lan_join(target)
+	# The entry's step is the engine's (inmatch/server_flags.h join_entry_step):
+	# dial, enumerate the endpoint for its flag word first, or ask the retail
+	# player/spectator question.
+	match target.entry_step(false):
+		JoinTarget.ENTRY_PREFLIGHT:
+			_begin_spectator_preflight(target)
+		JoinTarget.ENTRY_PROMPT:
+			_show_join_role_prompt(target)
+		_:
+			_start_lan_join(target)
 
 
 # Complete the join only after the retail Player/Spectator decision has been
@@ -243,8 +239,7 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 		if target.game_type < 0:
 			target.game_type = row.gametype
 	_cancel_spectator_probe()
-	if (target.allows_spectators() or target.server_password_required()
-			or target.has_team_password() or target.allows_team_choice()):
+	if target.entry_step(true) == JoinTarget.ENTRY_PROMPT:
 		_show_join_role_prompt(target)
 	else:
 		_start_lan_join(target)

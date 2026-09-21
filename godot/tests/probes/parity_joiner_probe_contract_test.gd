@@ -67,33 +67,31 @@ func test_witness_carries_every_runner_snapshot_field_and_nothing_undeclared() -
 
 
 func test_readiness_rules_match_the_witnessed_split() -> void:
+	# The runtime halves (the pick owed on a bound handle, no error, the
+	# session alive; the local player in the InMatch phase, the auto-deploy
+	# pick cleared) are the engine's typed verdicts (the role_feeds ctest);
+	# the witness gates them on the mode and, for the hold, the shell's
+	# presented DEATH screen.
 	var state := ParityJoinerWitness.empty_state()
 	assert_false(ParityJoinerWitness.in_match_ready(state, "in_match", false))
-	state.local_player = true
-	state.in_match = true
+	state.match_ready = true
 	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", false))
-	state.pick_pending = true
 	assert_false(ParityJoinerWitness.in_match_ready(state, "in_match", true),
-			"auto-deploy readiness waits for the pick to clear")
-	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", false))
+			"auto-deploy readiness is the engine's auto-deploy verdict (the pick must clear)")
+	state.match_ready_auto = true
+	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", true))
 	assert_false(ParityJoinerWitness.in_match_ready(state, "deploy_hold", false))
 
-	# deploy_hold: the pick pending on a granted handle with the DEATH screen
-	# presented at the witnessed admission stage, no error, session alive.
 	var hold := ParityJoinerWitness.empty_state()
-	hold.pick_pending = true
-	hold.self_handle = 3
+	hold.hold_ready = true
 	hold.deploy_presented = true
-	hold.join_admission_stage = ParityJoinerWitness.DEPLOY_HOLD_ADMISSION_STAGE
 	assert_true(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
 	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "in_match"))
-	hold.session_lost = true
-	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
-	hold.session_lost = false
-	hold.join_error = "kicked"
-	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
-	hold.join_error = ""
 	hold.deploy_presented = false
+	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"),
+			"the DEATH screen must be presented")
+	hold.deploy_presented = true
+	hold.hold_ready = false
 	assert_false(ParityJoinerWitness.deploy_hold_ready(hold, "deploy_hold"))
 
 
