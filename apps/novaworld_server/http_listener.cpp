@@ -1321,6 +1321,27 @@ void HttpListener::register_public_api_routes(const std::string &public_host) {
 				e["exp"]          = h.exp;
 				e["exp_bits"]     = h.exp_bits;
 				e["ver1"]         = h.ver1;
+				e["time_left"]    = h.time_left;
+				e["time_of_day"]  = h.time_of_day;
+				e["msg"]          = h.msg;
+				e["mod"]          = h.mod;
+				e["age"]          = h.age;
+				e["pb_server"]    = h.pb_server;
+				// The host-reported PlayerList (one entry per slot).
+				std::vector<crow::json::wvalue> roster_entries;
+				try {
+					auto roster = hostdb::list_roster(db_, h.rid);
+					roster_entries.reserve(roster.size());
+					for (const auto &s : roster) {
+						crow::json::wvalue re;
+						re["slot"]        = s.slot;
+						re["player_name"] = s.player_name;
+						re["team"]        = s.team;
+						re["type"]        = s.type;
+						roster_entries.push_back(std::move(re));
+					}
+				} catch (const db::SqliteError &) { /* ignore */ }
+				e["roster"] = std::move(roster_entries);
 				std::vector<crow::json::wvalue> player_entries;
 				try {
 					auto players = hostdb::list_players(db_, h.rid);
@@ -2009,32 +2030,10 @@ void HttpListener::register_legacy_host_join_routes(
 			auto rows = hostdb::list_hosts_by_game(db_, game_slug);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
-				opennova::GsbServerEntry e;
-				e.rid = h.rid;    // host id — the GSB row's first u32 (the join rid)
-				e.ip  = h.host_ip;  // row dword1: the ping-target IPv4 retail's
-				// browser formats from entry+4 on the XXXX finalize
-				// [orig: NapiGameList_StartPingSweep @ 0x63BCF0]. The joiner still
-				// resolves the connect address from the NK token (/NWJoin.dll?rid=).
-				e.server_name  = h.server_name.empty() ? std::string("Unnamed Server") : h.server_name;
-				e.players      = h.player_count;
-				e.max_players  = h.max_players;
-				e.region       = h.region;
-				e.game_type    = h.game_type.empty() ? std::string("COOP") : h.game_type;
-				e.mission_name = h.mission_name;
-				e.country      = h.country.empty() ? h.region : h.country;
-				e.password     = h.password.empty() ? std::string("N") : h.password;
-				e.locked       = h.locked.empty() ? std::string("N") : h.locked;
-				e.dedicated    = h.dedicated.empty() ? std::string("Y") : h.dedicated;
-				e.stat         = h.stat.empty() ? std::string("N") : h.stat;
-				e.exp          = h.exp;
-				e.exp_bits     = h.exp_bits.empty()
-				                   ? (h.game == "dfx2_consumer" ? std::string("1") : std::string("3"))
-				                   : h.exp_bits;
-				e.ver1         = h.ver1.empty()
-				                   ? (h.game == "dfx2_consumer" ? std::string("1") : std::string("3"))
-				                   : h.ver1;
-				e.joicon2      = h.joicon2.empty() ? std::string("4000") : h.joicon2;
-				entries.push_back(std::move(e));
+				// Every FLDS column carries the host-reported value and the row
+				// tail carries the host's roster names (hostdb::gsb_entry_from_host).
+				entries.push_back(hostdb::gsb_entry_from_host(
+						h, hostdb::list_roster(db_, h.rid)));
 			}
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());

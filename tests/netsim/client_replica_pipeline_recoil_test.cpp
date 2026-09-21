@@ -100,6 +100,9 @@ int main() {
 	// byte exactly for codec identity.
 	ns::ClientReplicaPipeline wire_view;
 	wire_view.set_item_class_resolver(&classify);
+	// The spawn stream's row: a compact 0x0A never creates one
+	// [orig: NapiNPClientMsg_0x00A @0x42FEC0, pre-apply check @0x4307B1..0x4307FA].
+	wire_view.state().upsert(7).type_id = kPlayerType;
 	wire_view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(7, 0x40));
 	ns::ClientEntityState *wire_player = wire_view.state().find(7);
 	ok = expect(wire_player != nullptr && wire_player->heading_bam == 0x40000000,

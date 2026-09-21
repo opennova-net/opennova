@@ -18,26 +18,26 @@ bool expect(bool condition, const char *message) {
 // Probe is the NWU-transformed (tag + NUL) bytes.
 bool check_probe_length_and_determinism() {
 	using opennova::gate_probe_build;
-	using opennova::GATE_PROBE_TAG_JODEMO;
-	const auto p1 = gate_probe_build();
-	const auto p2 = gate_probe_build();
-	if (!expect(p1.size() == std::strlen(GATE_PROBE_TAG_JODEMO) + 1,
+	using opennova::GATE_PROBE_TAG_JOINTOPS;
+	const auto p1 = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
+	const auto p2 = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
+	if (!expect(p1.size() == std::strlen(GATE_PROBE_TAG_JOINTOPS) + 1,
 			"probe length == strlen(tag) + 1 NUL")) return false;
 	if (!expect(p1 == p2, "probe is deterministic")) return false;
 	return true;
 }
 
-// Decrypt a probe back via nwu_encrypt -> recovers "jopd:cus4\0".
+// Decrypt a probe back via nwu_encrypt -> recovers "jop:cus2\0".
 bool check_probe_roundtrip_to_tag() {
 	using opennova::gate_probe_build;
 	using opennova::GATE_NWU_KEY;
-	using opennova::GATE_PROBE_TAG_JODEMO;
-	auto probe = gate_probe_build();
+	using opennova::GATE_PROBE_TAG_JOINTOPS;
+	auto probe = gate_probe_build(GATE_PROBE_TAG_JOINTOPS);
 	opennova::nwu_encrypt(probe.data(), probe.size(), GATE_NWU_KEY);
 	if (!expect(probe.back() == 0, "last byte is NUL after inverse")) return false;
 	const std::string recovered(reinterpret_cast<const char *>(probe.data()),
 			probe.size() - 1);
-	if (!expect(recovered == GATE_PROBE_TAG_JODEMO, "recovered plaintext == 'jopd:cus4'")) return false;
+	if (!expect(recovered == GATE_PROBE_TAG_JOINTOPS, "recovered plaintext == 'jop:cus2'")) return false;
 	return true;
 }
 
@@ -90,6 +90,6 @@ int main() {
 	if (!check_probe_roundtrip_to_tag()) return 1;
 	if (!check_gate_response_roundtrip()) return 1;
 	if (!check_bad_inputs()) return 1;
-	std::printf("OK: gate probe + encrypted response roundtrip (key=\"GATEAPI\", tag=\"jopd:cus4\")\n");
+	std::printf("OK: gate probe + encrypted response roundtrip (key=\"GATEAPI\", tag=\"jop:cus2\")\n");
 	return 0;
 }

@@ -95,7 +95,9 @@ int main() {
 	// NovaWorldHost::begin_session sets up (minus the gate-probe leg, which only
 	// resolves this endpoint; we know it directly).
 	opennova::ClientSession::Config cfg;
-	cfg.verify_cookie_vars = {{"NWUID", ""}};  // echoed from the SessionInit
+	cfg.cookie_vars = []() {
+		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+	};  // echoed from the SessionInit
 	opennova::ClientSession session(cfg);
 
 	uint16_t client_port = 0;
@@ -285,10 +287,9 @@ int main() {
 		    /*Cookie*/    {{0, "NWUID", session.server_nwuid()}},
 		    /*HostSetup*/ {{0, "AppId", "28"}, {0, "LobbyName", "jop_2_consumer"},
 		                   {0, "MaxPlayers", "24"}},
-		    /*Host*/      {{0, "ServerName", "E2E Listen Host"}, {0, "ServerIP", "127.0.0.1"},
-		                   {0, "ServerPortNumber", "32768"}, {0, "Players", "1"},
-		                   {0, "Region", "us"}},
-		    /*PlayerList*/{{0, "Slot0", "Host"}});
+		    /*Host*/      {{0, "ServerName", "E2E Listen Host"}, {0, "Port", "32768"},
+		                   {0, "Players", "1"}, {0, "Region", "us"}},
+		    /*PlayerList*/{{0, "PlayerName", "Host"}});
 		auto dg = session.build_lobby_message(host_req);
 		expect(!dg.empty(), "host-request datagram built (session Verified)");
 		send(dg);
@@ -305,7 +306,7 @@ int main() {
 			const auto &lobby = hosted[0].lobby;
 			expect(lobby.hosting, "snapshot host is hosting");
 			expect(lobby.server_name == "E2E Listen Host", "snapshot ServerName matches");
-			expect(lobby.host_port == 32768, "snapshot host_port matches ServerPortNumber");
+			expect(lobby.host_port == 32768, "snapshot host_port matches the positive Host.Port override");
 			expect(lobby.max_players == 24, "snapshot MaxPlayers matches");
 			expect(lobby.game == "jop_2_consumer", "snapshot LobbyName matches");
 		}
@@ -313,7 +314,7 @@ int main() {
 		// A ClientHostUpdate refreshes the live occupancy on the same session.
 		auto upd = opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "2"}},
-		    /*PlayerList*/{{0, "Slot0", "Host"}, {0, "Slot1", "Joiner"}});
+		    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"}});
 		send(session.build_lobby_message(upd));
 		int players = 0;
 		for (int i = 0; i < 100; ++i) {

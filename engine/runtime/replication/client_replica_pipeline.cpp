@@ -1868,6 +1868,35 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	for (size_t rec_i = 0; rec_i < fu.records.size(); ++rec_i) {
 		const FrameUpdateRecord &rec = fu.records[rec_i];
 		if (record_folded[rec_i] != 0u) continue;
+		// The retail pre-apply consistency check, run for EVERY tag-1 record
+		// ahead of its class callback (no-callback types included): the
+		// addressed pool slot must hold a live entity whose itemDef id and
+		// defIndex match the wire type — else a C2S 0x0F entity request is
+		// queued and the callback runs against a NULL target, consuming the
+		// record's bytes and landing nothing. A handle outside pools 0..4 or
+		// past its pool's capacity resolves to no slot at all: consumed
+		// silently, no request. A compact record therefore NEVER creates or
+		// re-types a row — only the spawn stream (0x0C/0x0D/0x10/0x20/0x18)
+		// does, and a row the team-assign leg created ahead of its spawn
+		// (type 0) is exactly retail's itemDef-less slot. [orig:
+		// NapiNPClientMsg_0x00A @0x42FEC0 — the pool resolve `(handle &
+		// 0xF000) < 0x5000` + `slot < capacity`, the check @0x4307B1..0x4307C4
+		// (itemDef null / itemDef->id != type / entity->defIndex != idx),
+		// QueueReliableMessage(0x0F, [u16 handle]) @0x4307E9, the target
+		// nulled @0x4307F2..0x4307FA]
+		{
+			const int pool = rec.handle >> 12;
+			const bool slot_exists = rec.handle != wire_handle::kInvalid &&
+					pool < world::kEntityPoolCount &&
+					static_cast<std::size_t>(rec.handle & 0x0FFFu) <
+							world::retail_pool_capacity(pool);
+			const ClientEntityState *slot_row = state_.find(rec.handle);
+			if (!slot_exists || slot_row == nullptr || slot_row->type_id != rec.type_id) {
+				if (slot_exists) queue_carrier_repair(rec.handle);
+				record_folded[rec_i] = 1u;
+				continue;
+			}
+		}
 		if (rec.cls == EntityClass::NoNetworkCallback) {
 			record_folded[rec_i] = 1u;
 			continue;
@@ -1887,11 +1916,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			continue;
 		}
 		record_folded[rec_i] = 1u;
-		ClientEntityState *existing = state_.find(rec.handle);
-		const bool type_changed = existing != nullptr &&
-				existing->type_id != rec.type_id;
-		ClientEntityState &es = state_.upsert(rec.handle);
-		if (type_changed) state_.mark_topology_changed();
+		// The row exists with this exact type (the pre-apply check above): a
+		// compact never upserts, and a handle reused for a different type is
+		// re-armed by the spawn stream that re-typed it, never here.
+		ClientEntityState &es = *state_.find(rec.handle);
 		// Capture the previous body-anim sample before the per-record clear: if
 		// this record REPLACES it with a different state within one decode fold,
 		// the old value becomes the transition PULSE presentation still has to
@@ -1904,18 +1932,6 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		                               es.cls == EntityClass::Infantry;
 		const uint8_t prev_anim_state = es.anim_state_id;
 		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
-		if (es.type_id != rec.type_id && es.type_id != 0) {
-			// A handle reused for a different type: the stamped adm, the
-			// playing channel, and the arbitration FSM pair are the OLD
-			// body's — re-resolve and re-arm.
-			es.rm_adm_id = -2;
-			row_channel_disarm(es);
-			es.net_anim_current = -1;
-			es.net_anim_pending = 0;
-			es.net_anim_pending_boundary = -1;
-			es.net_anim_ratio_live = false;
-		}
-		es.type_id = rec.type_id;
 		es.cls = rec.cls;
 		es.seen_this_frame = true;
 		// Every compact record is a complete sample of these organic fields. Clear the

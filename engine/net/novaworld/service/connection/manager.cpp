@@ -1,8 +1,18 @@
 #include <net/novaworld/connection/manager.h>
 
+#include <net/npwire/session_hello.h>
+
 #include <utility>
 
 namespace opennova {
+
+uint64_t novaworldudp_session_timeout_ms() {
+	// cs field 0 is timeout_ms in both directions of the service template.
+	for (const CsField &f : default_server_cs_fields()) {
+		if (f.field_index == 0) return f.value;
+	}
+	return 240000u;
+}
 
 const char *drop_reason_name(DropReason r) {
 	switch (r) {

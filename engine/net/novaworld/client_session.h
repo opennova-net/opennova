@@ -1,11 +1,15 @@
 #pragma once
 
-#include <net/napi/tlv.h>  // NapiMessage (lobby container shape)
+#include <net/napi/session.h>       // ClientVar / ServerCommand / the NWEC maps
+#include <net/napi/tlv.h>           // NapiMessage (lobby container shape)
+#include <net/novaworld/lobby_vars.h> // HostRegistration / HostPlayerSlot
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -17,23 +21,30 @@ namespace opennova {
 // machine that drives the NovaWorld *session* UDP channel from the client
 // side. The gate-probe leg (which yields the session host:port) lives in the
 // caller; ClientSession starts at ClientHello and runs the handshake through
-// the lobby verify exchange:
+// the lobby verify exchange, then the host-registration and start-playing
+// legs and the server notifications:
 //
 //   start()                       -> ClientHello (0x41)
 //   <- ServerHello (0x81)            : learn host key `hk`
 //   ClientAuth (0x42)                : hk echoed, ck = client key, client scrk
-//   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1)
+//   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1) + the CS block
 //   process_periodic_update() -> ClientConnected (0x43): begin lobby verification
 //   <- ServerStartVerify (0x83)
 //   ClientRequestVerifyResult (0x43)
-//   <- ServerVerifyResult (0x83)     : Success=1 -> Verified (lobby-ready)
+//   <- ServerVerifyResult (0x83)     : Success=1 -> Verified (lobby-ready, retail state 4)
+//   build_host_request() / build_play_request() -> the host (5->6) / play (7->8) legs
+//   <- ServerHostResult / ServerPlayResult / ServerPlayerEnterResult / ServerGLSVSSResults
+//   <- ServerStopHosting / ServerStopPlaying / ServerLeaveNovaWorld / ServerCommand (notices)
+//   <- ServerGoodBye (0x86) / the H:0x03 description record : the peer's disconnect
 //
 // No socket I/O lives here (engine convention: portable C++ in engine/, Godot
-// wrapper in engine/). The caller owns the UDP socket and pumps bytes: send
-// what start()/handle_datagram() return, and feed every received datagram
-// back into handle_datagram(). Each leg is unit-testable via in-process
-// loopback against apps/novaworld_server's own parsers/builders — see
-// docs/adr/0010-novaworld-client-completion.md.
+// wrapper in godot/). The caller owns the UDP socket and pumps bytes: send
+// what start()/handle_datagram()/pump_send_intervals() return, feed every
+// received datagram back into handle_datagram(), and set the wall clock
+// (set_clock_ms) before each pump — the negotiated intervals and the
+// receive-silence reap are millisecond windows. Each leg is unit-testable via
+// in-process loopback against apps/novaworld_server's own parsers/builders —
+// see docs/adr/0010-novaworld-client-completion.md.
 //
 // [mirror: apps/novaworld_server/nw_udp_listener.cpp — the server direction
 //  of the same wire protocol; this class inverts request <-> response]
@@ -45,8 +56,23 @@ public:
 		Auth,       // ClientAuth sent, awaiting ServerAuth
 		Verifying,  // ServerAuth accepted; lobby verify handshake in flight
 		Verified,   // ServerVerifyResult(Success=1) — lobby-ready
-		Closed,     // GoodBye sent
-		Error,      // protocol/envelope error or server rejection
+		Closed,     // GoodBye sent, or the peer closed / punted / reaped us (see disconnect_event)
+		Error,      // protocol error or server rejection
+	};
+
+	// The host-registration leg [orig: CGameSession_SetState @0x4ce140 states 4/5/6].
+	enum class HostState {
+		Idle,        // state 4: verified, not hosting
+		Requested,   // state 5: ClientHostRequest sent, awaiting ServerHostResult
+		Established, // state 6: registered (HostCommands consumed)
+		Failed,      // back to state 4 with a MsgCode (host_result())
+	};
+	// The start-playing leg [orig: states 4/7/8].
+	enum class PlayState {
+		Idle,
+		Requested,   // state 7: ClientPlayRequest sent, awaiting ServerPlayResult
+		Playing,     // state 8
+		Failed,      // back to state 4 with a MsgCode (play_result())
 	};
 
 	struct Config {
@@ -95,24 +121,32 @@ public:
 		};
 		std::vector<CuVar> cu_vars;
 
-		// Verify-request "Cookie" var-list (NW-S5, witnessed byte-for-byte in the
-		// genuine .204 capture, fixtures/novaworld/nw204_lobby.hexcap frame 10166).
-		// CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0 first has
-		// CNapiSession_ReadLocaleInfo @ 0x4ce390 clear session+388 and enumerate
-		// every cookie for the browser's current host, then SendVerifyRequest
-		// @ 0x4d3620 serializes that list as "Cookie". The gate response seeds
-		// locale/expansion fields; OnNovaWorldConnected @ 0x4d1570 adds NWUID and
-		// the machine fields. Each (name, value) becomes a ClientVar{VarFNum="0",
-		// VarName,VarValue}
-		// child of a ClientVarList(VarList="Cookie") inside the
-		// ClientRequestVerifyResult. The retail set (in order) is CountryName,
-		// Language, TimeZoneBias, MyInstalledExpBits, NWUID, NWCDKIID, NWCDKIIDEXP1,
-		// NWPSSK, NWUSID, NWHWI — and on the wire NWCDKIID/NWCDKIIDEXP1 are EMPTY
-		// yet the live server still returns Success=1, so the lobby verify is NOT
-		// credential-gated. Empty here still emits an empty Cookie parent. The
-		// entry named "NWUID" with an empty
+		// The "Cookie" var-list (NW-S5, witnessed byte-for-byte in the genuine
+		// .204 capture, fixtures/novaworld/nw204_lobby.hexcap frame 10166): the
+		// browser's cookie jar for the NovaWorld host plus the locale trio, which
+		// CNapiSession_ReadLocaleInfo @ 0x4ce390 rebuilds into session+388 before
+		// EVERY statement that serializes it — the verify reply, the host
+		// request, the play request and the GLSVSS request. The gate response
+		// seeds locale/expansion fields; OnNovaWorldConnected @ 0x4d1570 adds NWUID
+		// and the machine fields. Each (name, value) becomes a ClientVar{VarFNum="0",
+		// VarName,VarValue} child of a ClientVarList(VarList="Cookie"). The retail
+		// set (in order) is CountryName, Language, TimeZoneBias, MyInstalledExpBits,
+		// NWUID, NWCDKIID, NWCDKIIDEXP1, NWPSSK, NWUSID, NWHWI — and on the wire
+		// NWCDKIID/NWCDKIIDEXP1 are EMPTY yet the live server still returns
+		// Success=1, so the lobby verify is NOT credential-gated. Empty here still
+		// emits an empty Cookie parent. The entry named "NWUID" with an empty
 		// value is filled at runtime from the ServerSessionInit's NWUID (echo).
-		std::vector<std::pair<std::string, std::string>> verify_cookie_vars;
+		// Called at serialization time so HTTP login/NWJoin updates are included.
+		std::function<std::vector<std::pair<std::string, std::string>>()> cookie_vars;
+
+		// The gate's GLSVSS trio: the request string (GLSVSSREQUEST; empty = the leg is
+		// off), the repeat interval (GLSVSSRIMS, ms) and the after-game interval
+		// (GLSVSSAGRMS, ms) that arms the deadline when the session returns to state 4
+		// from Playing. [orig: CGameSession_SetState @0x4ce140 case 4 (byte_B5FD40 /
+		//  dword_B5FF40 / dword_B5FF44); ProcessPeriodicUpdate @0x4d4400]
+		std::string glsvss_request;
+		int32_t glsvss_rims_ms = 0;
+		int32_t glsvss_agrms_ms = 0;
 
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
@@ -122,37 +156,100 @@ public:
 		static Config jointoperations();
 	};
 
+	// The NOVAWORLDUDP service connection template (the client direction, cs_dir0): the
+	// receive-silence reap window and the three send intervals. Overlaid by the 0x82 CS block
+	// and later H:0x00 CS_CONFIG_UPDATE records. [orig: CNapiGameSession_InitNPConnection
+	//  @0x4d3be0 @0x4d3e1f (240000 / 60000 / 1000 / -1); NapiNP_HandleServerJoinResponse
+	//  @0x629840 (the overlay); CNapiNPConnection_HandleCSConfigUpdate @0x621940]
+	struct ConnectionSettings {
+		int32_t timeout_ms = 240000;           // CS field 0
+		int32_t idle_send_interval_ms = 60000; // CS field 4 — the empty keepalive leg
+		int32_t active_send_interval_ms = 1000;// CS field 5 — the queued-payload leg
+		int32_t packet_queue_interval_ms = -1; // CS field 6 — the missing-seq leg (off)
+	};
+
+	// A server notification the owner acts on (state changes are already applied).
+	struct PlayerEnterResult {
+		uint32_t connection_id = 0;
+		int success = 0;
+		int msg_code = 0;
+		std::string player_ticket;    // 128-char cap
+		std::string access_code_list; // 8192-char cap
+	};
+	struct Notice {
+		enum class Kind {
+			HostResult,        // ServerHostResult landed (host_state() / host_result())
+			PlayResult,        // ServerPlayResult landed (play_state() / play_result())
+			StopHosting,       // ServerStopHosting: fields + msg_key, host leg back to Idle
+			StopPlaying,       // ServerStopPlaying: fields, play leg back to Idle, exit reason 12
+			LeaveNovaWorld,    // ServerLeaveNovaWorld: the punt; the session is Closed
+			Command,           // ServerCommand: `command`
+			GlsvssResults,     // ServerGLSVSSResults: `glsvss_results`
+			PlayerEnterResult, // ServerPlayerEnterResult: `player_enter`
+		};
+		Kind kind = Kind::HostResult;
+		ServerResultFields fields;
+		std::string msg_key;          // StopHosting: novaworld_server_msg_code_key(MsgCode)
+		ServerCommand command;
+		std::string glsvss_results;
+		PlayerEnterResult player_enter;
+	};
+
 	// Two constructors rather than a `Config config = {}` default argument:
 	// GCC/clang reject `= {}` for this aggregate-with-NSDMIs (MSVC accepts it),
 	// which broke the Linux/macOS CI builds.
 	ClientSession();
 	explicit ClientSession(Config config);
 
+	// The owner's wall clock in milliseconds (GetTickCount in retail). Set it before
+	// pump_send_intervals()/process_periodic_update(); every framed send and every
+	// admitted datagram is stamped with the latest value.
+	void set_clock_ms(uint32_t now_ms) { clock_ms_ = now_ms; }
+
 	// Begin the handshake. Returns the ClientHello datagram to send (envelope
 	// + NWU already applied — ready for the wire). Transitions Idle -> Hello.
 	std::vector<uint8_t> start();
 
+	// The datagram the current connect stage re-sends on the retransmit cadence
+	// (SESSION_CONNECT_RETRANSMIT_MS): the ClientHello while awaiting the ServerHello,
+	// the ClientAuth while awaiting the ServerAuth; empty in every other state.
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 (the 0x41 re-announce);
+	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
+	std::vector<uint8_t> retransmit_stage_datagram();
+
 	// Feed one inbound datagram (received off the UDP socket, CRC envelope
 	// intact). Appends zero or more datagrams to send in reply to `out`.
-	// Returns false on a protocol/envelope error or a server rejection (state
-	// becomes Error; see last_error()). A datagram that isn't expected in the
-	// current state is ignored (returns true, leaves `out` untouched).
+	// Returns false on a protocol error or a server rejection (state becomes
+	// Error; see last_error()). A datagram that fails the envelope/NWU decode is
+	// TOSSED (counted, logged) without touching the session, as retail's receive
+	// pump does; one that isn't expected in the current state is ignored.
 	bool handle_datagram(const uint8_t *data, size_t len,
 	                     std::vector<std::vector<uint8_t>> &out);
 
 	// Run one session-periodic update after the caller has drained inbound
 	// datagrams. Once ServerSessionInit has established the NP connection and
 	// moved the session to Verifying, the first update emits ClientConnected;
-	// later updates do not repeat it. Keeping this boundary explicit matches
-	// retail's conn_state==5 && session_state==2 timing instead of replying
-	// synchronously from handle_datagram().
+	// later updates do not repeat it. Once Verified, the GLSVSS deadline is
+	// polled here at most once per SESSION_GLSVSS_POLL_MS. Keeping this boundary
+	// explicit matches retail's conn_state==5 && session_state==2 timing instead
+	// of replying synchronously from handle_datagram().
 	void process_periodic_update(std::vector<std::vector<uint8_t>> &out);
+
+	// The connection's send-interval pump over the negotiated CS values: once the
+	// NP connection is up (Verifying/Verified), emits the header-only 0x43 when
+	// nothing is queued or retained and idle_send_interval_ms has elapsed since
+	// the last framed send, and reaps the connection (a latched CLNTTMOUT
+	// disconnect, state Closed) when timeout_ms of receive silence has passed.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0 @0x629041..0x629067;
+	//  PumpStateMachine @0x6292e0 case 5 @0x6295a2..0x62961c]
+	void pump_send_intervals(std::vector<std::vector<uint8_t>> &out);
 
 	// Build a keep-alive: a header-only 0x43 with no inner messages (advances
 	// our seq, acks the peer). Valid once Verified.
 	std::vector<uint8_t> build_heartbeat();
 
-	// Build a ClientGoodBye (0x46) datagram and mark the session Closed.
+	// Build a ClientGoodBye (0x46) datagram and mark the session Closed. Carries the
+	// latched disconnect record when the peer/reap set one, else the zero record.
 	std::vector<uint8_t> build_goodbye();
 
 	// Wrap one lobby container (e.g. a ClientHostRequest / ClientHostUpdate built
@@ -160,6 +257,53 @@ public:
 	// host-registration send path. Valid only once Verified (returns an empty
 	// vector otherwise); advances our seq + acks the peer like any other 0x43.
 	std::vector<uint8_t> build_lobby_message(const NapiMessage &container);
+
+	// ---- the host leg -------------------------------------------------------
+	// ClientHostRequest (state 4 -> 5); the Cookie is the verify set with NWUID filled.
+	// [orig: CNapiGameSession_StartHostingSession @0x4d4540 -> SendHostRequest @0x4d3700]
+	std::vector<uint8_t> build_host_request(const HostRegistration &cfg, int currently_hosting);
+	// ClientHostUpdate with the given Host and PlayerList vars (full lists or dirty deltas).
+	std::vector<uint8_t> build_host_update(const std::vector<ClientVar> &host,
+	                                       const std::vector<ClientVar> &player_list);
+	// ClientHostPlayerAdded / ClientHostPlayerRemoved — only while Established (state 6);
+	// empty otherwise. [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
+	std::vector<uint8_t> build_host_player_added(const HostPlayerSlot &player);
+	std::vector<uint8_t> build_host_player_removed(int player_number);
+	// ClientPlayerEnterRequest for a joiner entering the hosted game; empty unless
+	// hosting is established. [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0]
+	std::vector<uint8_t> build_player_enter_request(uint32_t connection_id, uint32_t ip_address,
+	                                                uint32_t port_number,
+	                                                const std::string &join_ticket);
+	// ClientStopHosting (states 5/6 -> 4). [orig: CGameSession_StopHosting @0x4d0e60]
+	std::vector<uint8_t> build_stop_hosting();
+	HostState host_state() const { return host_state_; }
+	const ServerResultFields &host_result() const { return host_result_; }
+	// The GSID the successful ServerHostResult's HostCommands carried (128-char cap): the
+	// value the in-match host publishes as its 0x81 SUS1. Empty until Established.
+	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1]
+	const std::string &host_gsid() const { return host_gsid_; }
+	int host_requires_join_ticket() const { return host_requires_join_ticket_; }
+	const std::map<std::string, std::string> &host_commands() const { return host_commands_; }
+
+	// ---- the play leg -------------------------------------------------------
+	// ClientPlayRequest (state 4 -> 7) with the PlaySetup vars (make_play_setup_vars).
+	// [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 -> SendPlayRequest @0x4d3920]
+	std::vector<uint8_t> build_play_request(const std::vector<ClientVar> &play_setup);
+	// ClientStopPlaying (states 7/8 -> 4). [orig: CGameSession_StopPlaying @0x4d0ec0]
+	std::vector<uint8_t> build_stop_playing();
+	PlayState play_state() const { return play_state_; }
+	const ServerResultFields &play_result() const { return play_result_; }
+
+	// ---- notifications ------------------------------------------------------
+	// Notices accumulated by handle_datagram, oldest first; the call drains them.
+	std::vector<Notice> take_notices();
+	// g_mission_exit_reason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
+	int mission_exit_reason() const { return mission_exit_reason_; }
+	// The peer's / reap's latched disconnect record once the session Closed on it.
+	bool disconnected_by_peer() const { return disconnected_by_peer_; }
+	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
+	// Datagrams tossed at the envelope/NWU layer (retail's "NAPI TOSSED" log line).
+	uint32_t tossed_datagrams() const { return tossed_datagrams_; }
 
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
@@ -178,6 +322,10 @@ public:
 	const std::string &server_nwuid() const { return server_nwuid_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
 	const std::string &last_error() const { return last_error_; }
+	const ConnectionSettings &connection_settings() const { return cs_; }
+	// The verify Cookie set with the SessionInit NWUID substituted — what every
+	// Cookie-bearing statement serializes.
+	std::vector<ClientVar> cookie_vars() const;
 
 private:
 	std::vector<uint8_t> build_client_hello();
@@ -185,22 +333,29 @@ private:
 	// Wrap a single lobby container (by name; fields/children optional) as a
 	// 0x43 ProtocolMessage stream + header, ready for the wire.
 	std::vector<uint8_t> build_lobby_packet(const NapiMessage &container);
-	// Build the ClientRequestVerifyResult: a SessIdString field plus, when
-	// cfg_.verify_cookie_vars is set, the "Cookie" var-list (NW-S5, NWUID echoed
-	// from the ServerSessionInit). Bare when no cookie vars are configured.
+	// Build the ClientRequestVerifyResult: a SessIdString field plus the "Cookie"
+	// var-list (NW-S5, NWUID echoed from the ServerSessionInit) — rebuilt on
+	// EVERY ServerStartVerify. Bare when no cookie vars are configured.
 	std::vector<uint8_t> build_verify_request();
+	std::vector<uint8_t> build_glsvss_request();
 
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
+	void on_server_goodbye(const std::vector<uint8_t> &body);
 	void on_server_protocol_message(const std::vector<uint8_t> &body,
 	                                std::vector<std::vector<uint8_t>> &out);
 	void dispatch_server_container(const NapiMessage &container,
 	                               std::vector<std::vector<uint8_t>> &out);
+	void apply_cs_config_update(const ProtocolMessage &pm);
+	void latch_disconnect(const DisconnectEvent &event);
+	void set_lobby_state(int state); // the CGameSession_SetState mirror (GLSVSS arming)
 	void fail(std::string reason);
 
 	Config cfg_;
 	State state_ = State::Idle;
+	HostState host_state_ = HostState::Idle;
+	PlayState play_state_ = PlayState::Idle;
 
 	uint32_t server_hk_ = 0;       // ServerHello.hk — echoed in ClientAuth
 	uint32_t server_sk_ = 0;       // ServerAuth.sk — session_id on our 0x43s
@@ -210,11 +365,33 @@ private:
 	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
+	ConnectionSettings cs_;
+
+	// The host / play legs' last results and the HostCommands.
+	ServerResultFields host_result_;
+	ServerResultFields play_result_;
+	std::string host_gsid_;
+	int host_requires_join_ticket_ = 0;
+	std::map<std::string, std::string> host_commands_;
+	std::vector<Notice> notices_;
+	int mission_exit_reason_ = 0;
+	DisconnectEvent disconnect_event_;
+	bool disconnect_latched_ = false;
+	bool disconnected_by_peer_ = false;
+	uint32_t tossed_datagrams_ = 0;
+
+	// The clocks (all in the owner's ms clock).
+	uint32_t clock_ms_ = 0;
+	uint32_t last_framed_send_ms_ = 0;   // conn->last_send_interval_tick
+	uint32_t last_receive_ms_ = 0;       // conn->_pad4[20], refreshed per admitted datagram
+	bool receive_clock_armed_ = false;   // state-5 entry (the accepted 0x82)
+	uint32_t glsvss_deadline_ms_ = 0;    // session+579 (0 = disarmed)
+	uint32_t glsvss_poll_ms_ = 0;        // session+578
+	int lobby_state_ = 0;                // the CGameSession state (4/5/6/7/8) for GLSVSS arming
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]
 	bool sent_client_connected_ = false;
-	bool sent_verify_request_ = false;
 	ProtocolReassemblyState reassembly_;
 };
 

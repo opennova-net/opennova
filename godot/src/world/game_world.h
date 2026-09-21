@@ -499,6 +499,10 @@ public:
 	void on_frame_stats_capture_changed(bool p_active);
 	void on_nw_host_registered();
 	void on_nw_host_error(const String &p_message);
+	void on_nw_host_server_command(const String &p_verb, const String &p_target,
+			const PackedStringArray &p_args);
+	void on_nw_host_player_enter_result(int64_t p_connection_id, int p_success, int p_msg_code,
+			const String &p_player_ticket, const String &p_access_code_list);
 
 protected:
 	static void _bind_methods();

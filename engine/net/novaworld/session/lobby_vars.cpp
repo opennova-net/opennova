@@ -1,5 +1,7 @@
 #include <net/novaworld/lobby_vars.h>
 
+#include <base/io/strutil.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -8,41 +10,176 @@
 
 namespace opennova {
 
-// [orig: NovaWorldHost::build_host_vars] — the Host(this+532) ClientVarList, in retail's column order.
-std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg) {
+namespace {
+
+// CNapiVarList_SetOrCreate over a vector: update the (case-insensitive) match in place, else
+// append. [orig: CNapiVarList_SetOrCreate @0x6318c0 -> NapiLinkedList_FindByTypeAndName
+//  @0x6304f0 (type 0 + Napi_StrCaseEqual) / CNapiVarList_CreateEntry @0x6317c0 (append)]
+void set_or_create(std::vector<ClientVar> &list, const char *name, std::string value) {
+	for (ClientVar &v : list) {
+		if (v.fnum == 0 && strutil::iequals(v.name, name)) {
+			v.value = std::move(value);
+			return;
+		}
+	}
+	list.push_back({0, name, std::move(value)});
+}
+
+} // namespace
+
+std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg) {
+	std::vector<ClientVar> setup;
+	set_or_create(setup, "LobbyName", cfg.lobby_name);
+	set_or_create(setup, "ServerName", cfg.server_name);
+	set_or_create(setup, "Msg", cfg.server_message);
+	set_or_create(setup, "MaxPlayers", std::to_string(cfg.max_players));
+	set_or_create(setup, "Password", cfg.password ? "1" : "0");
+	set_or_create(setup, "Dedicated", cfg.listen_host ? "0" : "1");
+	set_or_create(setup, "AppId", std::to_string(cfg.app_id));
+	set_or_create(setup, "AccessCodeList", cfg.access_code_list);
+	set_or_create(setup, "PLoad", "");
+	set_or_create(setup, "Exp", cfg.expansion);
+	set_or_create(setup, "LAN", std::to_string(cfg.lan_only));
+	return setup;
+}
+
+std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const HostLobbyText &text,
+                                          bool full) {
 	std::vector<ClientVar> host;
-	host.push_back({0, "ServerName", cfg.server_name});
-	host.push_back({0, "ServerPortNumber", std::to_string(cfg.game_port)});
-	host.push_back({0, "Players", std::to_string(cfg.player_count)});
-	host.push_back({0, "MaxPlayers", std::to_string(cfg.max_players)});
-	host.push_back({0, "Region", cfg.region});
-	if (!cfg.advertise_ip.empty()) {
-		host.push_back({0, "ServerIP", cfg.advertise_ip});
+	// [orig: BuildHostVarLists @0x4d0b50 — the +532 run]
+	set_or_create(host, "LobbyName", cfg.lobby_name);
+	set_or_create(host, "ServerName", cfg.server_name);
+	set_or_create(host, "Msg", cfg.server_message);
+	set_or_create(host, "MaxPlayers", std::to_string(cfg.max_players));
+	set_or_create(host, "AppId", std::to_string(cfg.app_id));
+	set_or_create(host, "PLoad", "");
+	set_or_create(host, "Exp", cfg.expansion);
+	set_or_create(host, "LAN", std::to_string(cfg.lan_only));
+	if (!full) return host;
+
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0]
+	set_or_create(host, "LobbyName", cfg.lobby_name);
+	set_or_create(host, "HostKey", cfg.host_key);
+	set_or_create(host, "ServerName", cfg.server_name);
+	set_or_create(host, "GameType", cfg.game_type);
+	set_or_create(host, "MissionName", cfg.mission_name);
+	// lod_level 0/1/2 -> STRNOVA07/08/09, anything else the literal "?" @0x4fea1f.
+	std::string region = "?";
+	if (cfg.region_index >= 0 && cfg.region_index <= 2)
+		region = text.region[static_cast<size_t>(cfg.region_index)];
+	set_or_create(host, "Region", region);
+	set_or_create(host, "Players", std::to_string(cfg.player_count));
+	set_or_create(host, "MaxPlayers", std::to_string(cfg.max_players));
+	set_or_create(host, "MI1", std::to_string(cfg.mi1));
+	set_or_create(host, "MI2", std::to_string(cfg.mi2));
+	set_or_create(host, "MI3", std::to_string(cfg.mi3));
+	// Dedicated = "No" when the host is itself a player (is_mp_session_peer) @0x4fec27.
+	set_or_create(host, "Dedicated", cfg.listen_host ? text.no : text.yes);
+	set_or_create(host, "Locked", cfg.locked ? text.yes : text.no);
+	set_or_create(host, "Skins", cfg.skins ? text.yes : text.no);
+	if (cfg.round_time_remaining_ticks < 0) {
+		set_or_create(host, "TimeLeft", text.no_time_limit);
+	} else {
+		// "%i" of g_round_time_remaining / 3720 (62 ticks * 60 s: whole minutes) @0x4fedc5.
+		set_or_create(host, "TimeLeft", std::to_string(cfg.round_time_remaining_ticks / 3720));
 	}
-	if (!cfg.mission_name.empty()) {
-		host.push_back({0, "MissionName", cfg.mission_name});
+	set_or_create(host, "Password", cfg.password ? text.yes : text.no);
+	// (g_rules_flags & 1) is the tracers-OFF rule bit @0x4feec2.
+	set_or_create(host, "Tracers", cfg.tracers ? text.yes : text.no);
+	// Mod = the expansion name, or the literal " " (word_7C11E4) when none @0x4feee8.
+	set_or_create(host, "Mod", cfg.expansion.empty() ? " " : cfg.expansion);
+	// Country: "XX" while join-locked; else the configured code unless it is "XX" or empty,
+	// which fold to " " @0x4fef0b..0x4fef46.
+	std::string country;
+	if (cfg.locked) country = "XX";
+	else if (!strutil::iequals(cfg.country, "XX") && !cfg.country.empty()) country = cfg.country;
+	else country = " ";
+	set_or_create(host, "Country", country);
+	set_or_create(host, "Msg", cfg.server_message);
+	set_or_create(host, "Port", "-1");                       // word_7C3328 @0x4fef6d
+	set_or_create(host, "AllowPing", cfg.allow_ping ? "y" : "n"); // 121 / 110 @0x4fef8b
+	{
+		// "%ld %2.2ld:%2.2ld:%2.2ld" over the uptime in ms @0x4ff033.
+		const unsigned long s = cfg.uptime_ms / 1000u;
+		char age[64];
+		std::snprintf(age, sizeof(age), "%lu %2.2lu:%2.2lu:%2.2lu", s / 60u / 60u / 24u,
+		              s / 60u / 60u % 24u, s / 60u % 60u, s % 60u);
+		set_or_create(host, "Age", age);
 	}
+	{
+		const size_t tod = (cfg.time_of_day >= 1 && cfg.time_of_day <= 4)
+		                   ? static_cast<size_t>(cfg.time_of_day) : 0u;
+		set_or_create(host, "TimeOfDay", text.time_of_day[tod]);
+	}
+	set_or_create(host, "AppID", std::to_string(cfg.app_id)); // folds onto "AppId"
+	set_or_create(host, "PCIDKey", std::to_string(cfg.pcid_key));
+	set_or_create(host, "GameServerBaffleKey", std::to_string(cfg.game_server_baffle_key));
+	set_or_create(host, "Stat", "N");                        // @0x4ff1fc
+	// The level-range buffer is the literal "+", which equals word_7C4BA0 ("+"), so the
+	// emitted value is always " " @0x4ff22b..0x4ff251.
+	set_or_create(host, "LevelRange", " ");
+	set_or_create(host, "BBMode", std::to_string(cfg.bb_mode));
+	set_or_create(host, "GCC", cfg.gcc);
+	set_or_create(host, "GV", cfg.version);
+	set_or_create(host, "Version", cfg.version);
+	if (cfg.dedicated_server) {
+		set_or_create(host, "CountryName", cfg.country_name);
+		set_or_create(host, "Lang", cfg.language);
+		set_or_create(host, "TZB", std::to_string(cfg.tz_bias));
+	}
+	set_or_create(host, "Ver1", "3");                        // @0x4ff3ea
+	set_or_create(host, "Ver2", "2345");                     // @0x4ff3ff
+	set_or_create(host, "PBServer", cfg.pb_server ? "1" : "0");
 	return host;
 }
 
-// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
-NapiMessage make_host_request(const HostRegistration &cfg, const std::string &server_nwuid) {
-	std::vector<ClientVar> cookie = {{0, "NWUID", server_nwuid}};
-	std::vector<ClientVar> host_setup = {
-		{0, "AppId", cfg.app_id},
-		{0, "LobbyName", cfg.lobby_name},
-		{0, "MaxPlayers", std::to_string(cfg.max_players)},
-		{0, "ServerPortNumber", std::to_string(cfg.game_port)},
-	};
-	std::vector<ClientVar> player_list = {{0, "Slot0", cfg.player_name}};
-	return make_client_host_request(/*CurrentlyHosting*/ 1, cookie, host_setup,
-	                                make_host_var_list(cfg), player_list);
+std::vector<ClientVar> make_player_list(const std::vector<HostPlayerSlot> &players) {
+	std::vector<ClientVar> list;
+	for (const HostPlayerSlot &p : players) {
+		list.push_back({p.slot, "PlayerName", p.player_name});
+		list.push_back({p.slot, "PlayerIpAndPort", p.ip_and_port});
+		list.push_back({p.slot, "PlayerPCID", p.pcid});
+		list.push_back({p.slot, "PlayerTeam", p.team});
+		list.push_back({p.slot, "PlayerType", p.type});
+	}
+	return list;
 }
 
-// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860]
-NapiMessage make_host_update(const HostRegistration &cfg) {
-	std::vector<ClientVar> player_list = {{0, "Slot0", cfg.player_name}};
-	return make_client_host_update(make_host_var_list(cfg), player_list);
+// [orig: Lobby_UpdateServerInfo @0x4ff448..0x4ff62c]
+LobbyStatusBlob make_host_status_blob(const HostRegistration &cfg, const HostLobbyText &text,
+                                      const std::vector<HostPlayerSlot> &players) {
+	LobbyStatusBlob blob;
+	blob.lobby_name = cfg.lobby_name;
+	blob.host_key = cfg.host_key;
+	for (const ClientVar &v : make_host_var_list(cfg, text, /*full=*/true)) {
+		blob.host_vars.emplace_back(v.name, v.value);
+	}
+	for (const HostPlayerSlot &p : players) {
+		blob.player_names.push_back(p.player_name);
+	}
+	blob.send_player_names = cfg.send_player_list;
+	return blob;
+}
+
+std::vector<ClientVar> dirty_client_vars(const std::vector<ClientVar> &previous,
+                                         const std::vector<ClientVar> &next) {
+	std::vector<ClientVar> dirty;
+	for (const ClientVar &n : next) {
+		const auto it = std::find_if(previous.begin(), previous.end(), [&](const ClientVar &p) {
+			return p.fnum == n.fnum && strutil::iequals(p.name, n.name);
+		});
+		// String_ExactMatch: a changed VALUE dirties; a new entry is created dirty.
+		if (it == previous.end() || it->value != n.value) dirty.push_back(n);
+	}
+	return dirty;
+}
+
+// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
+NapiMessage make_host_request(const HostRegistration &cfg, const std::vector<ClientVar> &cookie,
+                              int currently_hosting) {
+	HostLobbyText text;
+	return make_client_host_request(currently_hosting, cookie, make_host_setup_var_list(cfg),
+	                                make_host_var_list(cfg, text, /*full=*/false), {});
 }
 
 // [orig: NovaWorldClient::az_fingerprint]

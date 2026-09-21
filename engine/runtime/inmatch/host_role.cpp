@@ -269,6 +269,17 @@ void HostRole::run_tick(const TickInput &input) {
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
 }
 
+bool HostRole::session_lost(SessionError &error) const {
+	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;
+	if (!ctx.round_end_announced || ctx.round_end_linger_ticks != 0 ||
+			ctx.is_in_session != 0)
+		return false;
+	error = {SessionErrorCode::RoundEnded,
+			"round ended: the post-round linger expired and the session closed"};
+	return true;
+}
+
 // The host's mission exit. Retail's authority teardown walks every active
 // player slot in the in-match states 2..7 and sends each one S2C 0x25 (empty
 // body, one-send to that slot), sets its net player to game state 8 and its

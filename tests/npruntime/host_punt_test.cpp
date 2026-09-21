@@ -287,7 +287,9 @@ bool check_decode_is_order_and_shape_robust() {
 		DisconnectEvent truncated_event;
 		parse_disconnect_event(truncated.data(), truncated.size(), truncated_event);
 	}
-	// A body whose final TLV claims more bytes than remain is malformed, not a short read.
+	// A body whose final TLV claims more bytes than remain ends the walk there: the fields
+	// gathered before it stand and the description still counts (retail's receiver moves the
+	// connection to state 6 no matter what the walk yielded @0x621d59).
 	std::vector<uint8_t> overrun;
 	append_tlv(overrun, "DC", u32_value(2));
 	overrun.push_back('D');
@@ -298,17 +300,20 @@ bool check_decode_is_order_and_shape_robust() {
 	overrun.push_back(0x00);
 	overrun.push_back(0x01);
 	DisconnectEvent overrun_event;
-	if (!expect(!parse_disconnect_event(overrun.data(), overrun.size(), overrun_event),
-	            "a value that claims more bytes than remain is rejected"))
+	if (!expect(parse_disconnect_event(overrun.data(), overrun.size(), overrun_event) &&
+	                    overrun_event.dc == 2 && overrun_event.dpc == 0,
+	            "a value that claims more bytes than remain stops the walk and keeps prior fields"))
 		return false;
 
-	// A well-formed TLV run with none of the seven names is not a disconnect block — the shape
-	// gate the dispatcher relies on to leave other settings traffic alone.
+	// A well-formed TLV run with none of the seven names is still a disconnect block with zero
+	// defaults — the dispatcher gates on the H:0x03 tag, not on the body's contents.
 	std::vector<uint8_t> foreign;
 	append_tlv(foreign, "XX", u32_value(7));
 	DisconnectEvent foreign_event;
-	return expect(!parse_disconnect_event(foreign.data(), foreign.size(), foreign_event),
-	              "a TLV run carrying no known field is not a disconnect block");
+	return expect(parse_disconnect_event(foreign.data(), foreign.size(), foreign_event) &&
+	                      foreign_event.dc == 0 && foreign_event.dpc == 0 &&
+	                      foreign_event.dstr.empty() && foreign_event.ddstr.empty(),
+	              "a TLV run carrying no known field decodes to a zero-default disconnect block");
 }
 
 bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
@@ -492,15 +497,19 @@ bool check_ordinary_settings_traffic_is_undisturbed() {
 	            "the settings pre-pass still reads the client-direction send holdoff"))
 		return false;
 
-	// A settings-flagged tag 3 whose body is not a TLV run is not a disconnect: the gate keys on
-	// the body parsing, not the tag alone.
+	// A settings-flagged tag 3 whose body is not a TLV run STILL closes the session: retail's
+	// description handler stops its TLV walk on the read failure, records the zero-default
+	// description and moves an established connection to state 6 unconditionally — the gate is
+	// the tag, never the body. (This pinned the opposite while parse_disconnect_event demanded a
+	// well-formed, recognized field.)
+	// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621AE0 — walk @0x621B8C..0x621B96,
+	//  `conn_state == 5` -> CNapiNPConnection_SetState(conn, 6) @0x621D59]
 	SessionSequencing noise_tx{2, 0};
 	const std::vector<uint8_t> noise = frame_s2c(noise_tx,
 			{make_protocol_message(0x03, {0xFF, 0xFE, 0xFD, 0xFC}, kDescriptionFlags)});
 	joiner.handle_datagram(noise.data(), noise.size());
-	return expect(!joiner.session_lost() &&
-	                      joiner.phase() == inmatch::JoinerConnection::Phase::InMatch,
-	              "a tag-3 body that is not a disconnect block leaves the session open");
+	return expect(joiner.session_lost(),
+	              "a tag-3 description closes the session even when its body is not a TLV run");
 }
 
 bool check_host_control_punt(uint32_t charattr_silence,
@@ -1359,50 +1368,71 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	if (!expect(entity != nullptr, "dead-age fixture retains its player entity"))
 		return false;
 
-	entity->engine_flags |= opennova::world::kEntityFlagDead;
-	live.reply.dead_live_ticks = 359;
-	inmatch::Server_TickUpdate(ctx);
-	replication::Datagram datagram;
-	if (!expect(transport.pop_outbound(datagram) && datagram.tag == s2c::RTT_ECHO,
-			"the first state-6 tick emits its periodic RTT echo")) return false;
-	if (!expect(live.reply.dead_live_ticks == 360 &&
-				!live.host_disconnect_sent && !transport.pop_outbound(datagram),
-			"exactly 360 consecutive dead ticks does not emit t7"))
-		return false;
+	// The counter lives inside the g_periodic_second_timer block: it advances
+	// once per periodic SECOND, never per tick [orig: Server_TickUpdate
+	// @0x51DB93 reload 62; @0x51E066..0x51E07D; @0x51E187].
+	auto tick_to_periodic_second = [&]() {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+	};
+	auto drain_outbound = [&]() {
+		std::vector<replication::Datagram> out;
+		replication::Datagram datagram;
+		while (transport.pop_outbound(datagram)) out.push_back(datagram);
+		return out;
+	};
 
-	// A single live tick resets the slot counter rather than pausing it.
+	entity->engine_flags |= opennova::world::kEntityFlagDead;
+	live.reply.dead_live_seconds = 359;
+	tick_to_periodic_second();
+	(void)drain_outbound();
+	if (!expect(live.reply.dead_live_seconds == 360 && !live.host_disconnect_sent,
+			"exactly 360 consecutive dead seconds does not emit t7"))
+		return false;
+	// The intervening ordinary ticks do not touch the counter.
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.match.periodic_second() ||
+				live.reply.dead_live_seconds == 360,
+			"a non-boundary dead tick leaves the dead-age counter alone"))
+		return false;
+	(void)drain_outbound();
+
+	// A single live boundary resets the slot counter rather than pausing it.
 	entity->engine_flags &= ~opennova::world::kEntityFlagDead;
-	inmatch::Server_TickUpdate(ctx);
-	if (!expect(live.reply.dead_live_ticks == 0 &&
-				!live.host_disconnect_sent && !transport.pop_outbound(datagram),
-			"a live state-6 frame resets the dead-age counter"))
+	tick_to_periodic_second();
+	(void)drain_outbound();
+	if (!expect(live.reply.dead_live_seconds == 0 && !live.host_disconnect_sent,
+			"a live state-6 second resets the dead-age counter"))
 		return false;
 
 	entity->engine_flags |= opennova::world::kEntityFlagDead;
-	live.reply.dead_live_ticks = 360;
+	live.reply.dead_live_seconds = 360;
 	ctx.config.permanent_death = true;
-	inmatch::Server_TickUpdate(ctx);
-	if (!expect(live.reply.dead_live_ticks == 361 &&
-				!live.host_disconnect_sent && !transport.pop_outbound(datagram),
+	tick_to_periodic_second();
+	(void)drain_outbound();
+	if (!expect(live.reply.dead_live_seconds == 361 && !live.host_disconnect_sent,
 			"permanent-death mode suppresses t7 after the strict boundary"))
 		return false;
 
 	ctx.config.permanent_death = false;
-	inmatch::Server_TickUpdate(ctx);
+	tick_to_periodic_second();
 	DisconnectEvent expected;
 	expected.ds = 1;
 	expected.dc = 2;
 	expected.dstr = "t7";
 	expected.dpc = 33;
 	expected.ddstr = "LogPuntEvent";
-	return expect(live.host_disconnect_sent &&
-				live.host_disconnect_mismatch_type == 7 &&
-				transport.pop_outbound(datagram) && !transport.has_outbound() &&
-				datagram.reliable &&
+	bool saw_punt = false;
+	for (const replication::Datagram &datagram : drain_outbound()) {
+		if (datagram.tag != hightag::DESCRIPTION_PACKET) continue;
+		saw_punt = datagram.reliable &&
 				datagram.protocol_flags_raw == kDescriptionFlags &&
-				datagram.tag == hightag::DESCRIPTION_PACKET &&
-				datagram.body == connection_description_to_bytes(expected),
-			"the first non-permanent tick over 360 emits exact t7");
+				datagram.body == connection_description_to_bytes(expected);
+	}
+	return expect(live.host_disconnect_sent &&
+				live.host_disconnect_mismatch_type == 7 && saw_punt,
+			"the first non-permanent second over 360 emits exact t7");
 }
 
 // The type-6 producer: the 1 Hz violation sweep. With the MaxFriendlyKills limit L,

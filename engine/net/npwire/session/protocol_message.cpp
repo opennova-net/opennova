@@ -584,32 +584,41 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 // (three-state model in retail) and onnet's nw_udp_server.py
 // process_protocol_message (None/START/MIDDLE/END classification).
 //
-// Retail's frag bits collapse to a single rule for the dispatch decision:
-//   FRAG_CONT (0x04) set    = "more fragments coming"  → BUFFER, no dispatch
-//   FRAG_CONT (0x04) clear  = "this is the last/only piece" → DISPATCH
+// The split buffer is touched ONLY when a fragment bit is set: retail tests
+// `(msg_type & 6) != 0` first (`and eax, 6 / jz` @0x6225b1..0x6225c7) and an
+// unfragmented record takes the direct path (`final_len = payload_len`
+// @0x622675) without appending to, or clearing, a pending stream. So
+// FIRST(A), NONE(B), FINAL(C) dispatches B alone and then A+C.
 //
-// The three-state breakdown for completeness:
+// The three-state breakdown:
 //   flags & 0x06 == 0x04 (FIRST)   → reset buffer + append, no dispatch
 //   flags & 0x06 == 0x06 (MID)     → append, no dispatch
 //   flags & 0x06 == 0x02 (FINAL)   → append + dispatch reassembled
-//   flags & 0x06 == 0x00 (NONE)    → dispatch directly (single message)
+//   flags & 0x06 == 0x00 (NONE)    → dispatch directly, pending stream untouched
 //
 // Regression history: an earlier rewrite used `frag_first && !frag_end`
 // (= dispatch on FRAG_CONT+FRAG_END) which broke retail's mid-fragment
-// flag=0x46 by dispatching it prematurely.
+// flag=0x46 by dispatching it prematurely; a later one appended NONE records
+// to a pending stream (D-NET-202's "when no stream is pending" was never a
+// retail condition).
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  const ProtocolMessage &msg,
                                  std::vector<uint8_t> &payload_out,
                                  bool *was_fragmented) {
-	if (was_fragmented) {
-		*was_fragmented = msg.flags.frag_cont || msg.flags.frag_end ||
-				!state.buffer.empty();
-	}
 	payload_out.clear();
 	static_assert((PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END) == 0x06u,
 	              "the witnessed fragment-state mask");
-	if ((msg.flags.raw & (PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END)) ==
-	    PROTOCOL_MSG_FLAG_FRAG_CONT) {
+	const uint8_t frag_state =
+			msg.flags.raw & (PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END);
+	if (frag_state == 0) {
+		// [orig: DispatchMessage @0x622675 — `used_frag_buffer` stays 0, the
+		//  split buffer is neither appended to nor reset]
+		if (was_fragmented) *was_fragmented = false;
+		payload_out = msg.payload;
+		return true;
+	}
+	if (was_fragmented) *was_fragmented = true;
+	if (frag_state == PROTOCOL_MSG_FLAG_FRAG_CONT) {
 		state.buffer.clear();
 	}
 	state.buffer.insert(state.buffer.end(), msg.payload.begin(), msg.payload.end());

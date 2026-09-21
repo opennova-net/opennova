@@ -2,11 +2,14 @@
 
 #include <net/novacrypto/url_cipher.h>
 
+#include <cstdlib>
+
 namespace opennova {
 
 // (jodemo Auth_ParseRegistrationURL @0x514c40 was the demo-era anchor.)
 // [orig: parse_connection_query_string @0x54dfb0 — HOSTKEY= preempts @0x54e0be; NK/CK are decoded
-//  with the cipher keys @0x7d3f30 / @0x7d3f04 ('&'-terminated), NI/NP/BK/LN/GS are copied plain]
+//  with the cipher keys @0x7d3f30 / @0x7d3f04 ('&'-terminated), NI/NP/BK/GS are copied plain,
+//  LN is `atol`'d @0x54e33e]
 
 namespace {
 
@@ -43,9 +46,8 @@ bool registration_url_parse(std::string_view url,
 	const size_t hk = find_token(url, "HOSTKEY=");
 	if (hk != std::string_view::npos) {
 		out.has_host_key = true;
-		// The original trims at an unidentified "chars" set and then at ']'.
-		// We implement the latter (witnessed) and leave the "chars" trim as
-		// a no-op since the set's contents aren't verified in the log yet.
+		// The original trims at "&" (@0x7d3f20) and then at "]" (@0x7c18e4);
+		// extract_plain_value is the '&' cut.
 		std::string raw = extract_plain_value(url, hk);
 		const size_t close_bracket = raw.find(']');
 		if (close_bracket != std::string::npos) {
@@ -88,6 +90,14 @@ bool registration_url_parse(std::string_view url,
 	}
 	if (const size_t bk = find_token(url, "BK="); bk != std::string_view::npos) {
 		out.bank_key = extract_plain_value(url, bk);
+	}
+	// [orig: LN= copied '&'-terminated then `*lobby_num = atol(temp_str)` @0x54e33e;
+	//  GS= copied '&'-terminated into gs_buf @0x54e38a (never read afterwards)]
+	if (const size_t ln = find_token(url, "LN="); ln != std::string_view::npos) {
+		out.ln = static_cast<int>(std::atol(extract_plain_value(url, ln).c_str()));
+	}
+	if (const size_t gs = find_token(url, "GS="); gs != std::string_view::npos) {
+		out.gs = extract_plain_value(url, gs);
 	}
 
 	return true;

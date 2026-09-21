@@ -2120,8 +2120,12 @@ bool run_roundtrip() {
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
-		// spawn gate opens; ship the burst replies back to the client.
+		// spawn gate opens; ship the burst replies back to the client. The match service advances
+		// with each host tick: the pending-player spawn pump admits only on its periodic second
+		// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0, called from Server_TickUpdate
+		//  @0x51DBFD inside the reload-62 block].
 		for (int k = 0; k < 6; ++k) {
+			world.match.advance_tick(world);
 			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
@@ -2232,7 +2236,16 @@ bool run_roundtrip() {
 		for (const inmatch::HostAcceptEvent &e : r.events) staged += inmatch::apply_in_match_c2s(ctx, e);
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	}
-	if (!expect(staged == 1, "exactly one C2S 0x0C staged via apply_in_match_c2s")) return false;
+	// With a World bound the host read-applies the 0x0C inside the dispatch walk, in
+	// wire order (retail's NapiNPServerMsg_0x00C @0x501C30); nothing is surfaced for
+	// the tick-time FIFO, so the joiner entity already sits at the uplink pose here.
+	if (!expect(staged == 0, "no C2S 0x0C is staged for the tick drain once a World applies it inline")) return false;
+	{
+		const w::Entity *snapped = world.registry.get(Hh);
+		if (!expect(snapped != nullptr &&
+		                    snapped->position.x == static_cast<float>(w::from_fixed(up.pos_x)),
+		            "the dispatch walk SNAPped the joiner before the authoritative tick")) return false;
+	}
 
 	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
 	// the remote peer's per-connection send boundary exactly as the owner does
@@ -2584,6 +2597,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		for (int k = 0; k < 6; ++k) {
+			// The spawn pump admits on the match's periodic second [orig: @0x51DBFD].
+			world.match.advance_tick(world);
 			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
@@ -3571,6 +3586,10 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	logic_probe.hook = &hook;
 	world.add_system(&logic_probe);
 
+	// The pending-player spawn pump admits on the match's periodic second: this
+	// pump is the one that follows it. [orig: CNapiServer_ProcessPendingPlayerSpawns
+	//  @0x4C8DC0, called from Server_TickUpdate @0x51DBFD inside the reload-62 block]
+	world.match.advance_tick(world);
 	NullDatagramSocket sock;
 	inmatch::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
 
@@ -4074,6 +4093,220 @@ bool run_reverse_rtt_probe_is_echoed() {
 			"reverse RTT response echoes the timestamp and clears the flag") &&
 			expect(joiner.retained_outbound_depth() == 0,
 					"reactive C2S 0x2C is absent from NACK retention");
+}
+
+// The pong of our own C2S 0x2C (S2C 0x57 with the echo flag CLEAR) lands the
+// completed round trip in the ten-entry ring and the current-ping word; the
+// ring's mean counts every slot, zero-initialized ones included, and nothing
+// is queued back [orig: NapiNPClientMsg_0x057_RTT @0x432280;
+// CNetStats_GetAveragePing @0x4C2750].
+bool run_rtt_pong_fills_the_client_ring() {
+	const std::string client_scrk = "CLIENT-PONG-RTT-SCRK";
+	const std::string server_scrk = "SERVER-PONG-RTT-SCRK";
+	inmatch::JoinerConnection joiner("PongRtt", [] { return uint64_t{0x55667788u}; });
+	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
+	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	if (!expect(joiner.client_ping_ms() == 0 && joiner.client_average_ping_ms() == 0,
+			"a fresh connection has measured nothing"))
+		return false;
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	// Our ping's stamp was 0x55667000: the round trip is 0x788 ms.
+	const std::vector<uint8_t> pong = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x57, {0x00, 0x70, 0x66, 0x55, 0x00})});
+	const inmatch::JoinerConnection::PollResult result =
+			joiner.handle_datagram(pong.data(), pong.size());
+	if (!expect(result.outbound.empty() && result.queued_send_messages.empty(),
+			"a flag=0 0x57 queues nothing back"))
+		return false;
+	if (!expect(joiner.client_ping_ms() == 0x788u &&
+					joiner.client_average_ping_ms() == 0x788u / 10u,
+			"the pong lands the round trip and the ten-slot mean"))
+		return false;
+	const std::vector<uint8_t> second = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x57, {0x00, 0x77, 0x66, 0x55, 0x00})});
+	(void)joiner.handle_datagram(second.data(), second.size());
+	return expect(joiner.client_ping_ms() == 0x88u &&
+					joiner.client_average_ping_ms() == (0x788u + 0x88u) / 10u,
+			"the second pong advances the ring index and the mean");
+}
+
+// The outer connection ping (S2C 0x85, `[u32 CK][WR][MS]` under the session
+// NWU key): WR set answers with a 0x45 keyed by the server's SK carrying the
+// same MS and WR clear; WR clear lands the round trip; a foreign key is
+// dropped [orig: Nwu_HandlePing @0x623A70 -> CNapiNPConnection_SendPing
+// @0x61DF00].
+bool run_server_ping_answers_and_measures() {
+	const std::string client_scrk = "CLIENT-PING-SCRK";
+	const std::string server_scrk = "SERVER-PING-SCRK";
+	uint64_t now_ms = 5000;
+	inmatch::JoinerConnection joiner("OuterPing", [&now_ms] { return now_ms; });
+	joiner.seed_in_match(0x10203040u, 7u, client_scrk, server_scrk,
+	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	const auto ping_body = [](uint32_t key, uint8_t wr, uint32_t ms) {
+		std::vector<uint8_t> body = {
+				static_cast<uint8_t>(key), static_cast<uint8_t>(key >> 8),
+				static_cast<uint8_t>(key >> 16), static_cast<uint8_t>(key >> 24),
+				'W', 'R', 0, 1, 0, wr,
+				'M', 'S', 0, 4, 0,
+				static_cast<uint8_t>(ms), static_cast<uint8_t>(ms >> 8),
+				static_cast<uint8_t>(ms >> 16), static_cast<uint8_t>(ms >> 24),
+		};
+		return body;
+	};
+	// A request keyed by our CK (7): the pong goes out and the reap clock is
+	// re-stamped at the receive.
+	now_ms = 5500;
+	const std::vector<uint8_t> request =
+			nw_encode_outbound(0x85, ping_body(7u, 1, 0xAABBCCDDu));
+	inmatch::JoinerConnection::PollResult result =
+			joiner.handle_datagram(request.data(), request.size());
+	if (!expect(result.outbound.size() == 1, "a keyed WR ping draws one reply datagram"))
+		return false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> reply;
+	if (!expect(nw_decode_inbound(result.outbound[0].data(), result.outbound[0].size(),
+						opcode, reply) &&
+					opcode == 0x45 && reply == ping_body(0x10203040u, 0, 0xAABBCCDDu),
+			"the reply is a 0x45 keyed by the server SK, WR clear, the same MS"))
+		return false;
+	if (!expect(joiner.milliseconds_since_last_receive() == 0,
+			"the ping refreshed the reap clock"))
+		return false;
+	// The host's pong of our ping: rtt = now - MS.
+	now_ms = 6000;
+	const std::vector<uint8_t> pong = nw_encode_outbound(0x85, ping_body(7u, 0, 5750u));
+	result = joiner.handle_datagram(pong.data(), pong.size());
+	if (!expect(result.outbound.empty() && joiner.session_ping_ms() == 250u,
+			"a WR-clear ping lands the outer round trip"))
+		return false;
+	// A foreign receiver key is dropped silently.
+	const std::vector<uint8_t> foreign = nw_encode_outbound(0x85, ping_body(9u, 1, 1u));
+	result = joiner.handle_datagram(foreign.data(), foreign.size());
+	return expect(result.outbound.empty() && joiner.session_ping_ms() == 250u,
+			"a ping keyed by another connection is ignored");
+}
+
+// Every decoded S2C 0x0F re-queues the six-message completion burst; there is
+// no once-per-session latch [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab].
+bool run_world_state_load_bursts_on_every_0x0f() {
+	const std::string client_scrk = "CLIENT-0F-BURST-SCRK";
+	const std::string server_scrk = "SERVER-0F-BURST-SCRK";
+	inmatch::JoinerConnection joiner("Burst");
+	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
+	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	// 23-byte fixed header, the 128 pool dwords, zero waypoint/location counts.
+	const std::vector<uint8_t> body(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const auto burst_count = [](const inmatch::JoinerConnection::PollResult &r) {
+		int loadout_requests = 0;
+		for (const ProtocolMessage &m : r.queued_send_messages)
+			if (m.tag == c2s::LOADOUT_REQUEST) ++loadout_requests;
+		return loadout_requests;
+	};
+	const std::vector<uint8_t> first = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, body)});
+	const inmatch::JoinerConnection::PollResult r1 =
+			joiner.handle_datagram(first.data(), first.size());
+	if (!expect(burst_count(r1) == 1, "the first 0x0F queues its completion burst"))
+		return false;
+	const std::vector<uint8_t> second = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, body)});
+	const inmatch::JoinerConnection::PollResult r2 =
+			joiner.handle_datagram(second.data(), second.size());
+	return expect(burst_count(r2) == 1, "a second 0x0F queues the burst again");
+}
+
+// The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
+// the 59-character cut, refused for a repeat inside the 1280 ms flood window,
+// and dropped for the non-peer channels 4/5 [orig: Chat_SendGlobalMessage
+// @0x49A6B0; Chat_CheckFloodControl @0x498F60; Chat_StripHtmlTags @0x4983F0].
+bool run_chat_uplink_api() {
+	const std::string client_scrk = "CLIENT-CHAT-SCRK";
+	const std::string server_scrk = "SERVER-CHAT-SCRK";
+	uint64_t now_ms = 10000;
+	inmatch::ClientRuntime client("Chatter", [&now_ms] { return now_ms; });
+	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
+			"a global line is accepted"))
+		return false;
+	if (!expect(!client.queue_chat_message(2, "hi <b>there</b>"),
+			"the same line inside the flood window is refused"))
+		return false;
+	if (!expect(!client.queue_chat_message(4, "all"),
+			"the non-peer all channel sends nothing from a joiner"))
+		return false;
+	const std::vector<std::vector<uint8_t>> outbound = client.Client_ProcessNetworkFrame(1);
+	std::vector<uint8_t> chat_body;
+	for (const std::vector<uint8_t> &datagram : outbound) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::CHAT_MESSAGE) chat_body = m.payload;
+	}
+	const std::vector<uint8_t> expected = {2, 'h', 'i', ' ', 't', 'h', 'e', 'r', 'e', 0};
+	if (!expect(chat_body == expected, "the line rides out as [channel][stripped cstr]"))
+		return false;
+	// Past the window the same line goes again; a long line is cut to 59 first.
+	now_ms += 0x501;
+	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
+			"the same line past the flood window is accepted"))
+		return false;
+	const std::string long_line(70, 'x');
+	if (!expect(client.queue_chat_message(1, long_line), "a long team line is accepted"))
+		return false;
+	const std::vector<std::vector<uint8_t>> again = client.Client_ProcessNetworkFrame(2);
+	std::size_t long_body = 0;
+	for (const std::vector<uint8_t> &datagram : again) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::CHAT_MESSAGE && !m.payload.empty() && m.payload[0] == 1)
+				long_body = m.payload.size();
+	}
+	return expect(long_body == 1 + 59 + 1, "a long line is cut to 59 characters");
+}
+
+// The client window of CNetQuality: a ring of 400 ms round trips scores the
+// ping term 102, and once five 62-frame samples fill the window the combined
+// scalar folds to level 2 [orig: CNetQuality_UpdateMetrics @0x4C52C0;
+// the Game_ProcessMainFrame countdown; CNetQuality_SetLevel @0x4C3060].
+bool run_client_quality_level_folds_the_ping_ring() {
+	const std::string client_scrk = "CLIENT-QUALITY-SCRK";
+	const std::string server_scrk = "SERVER-QUALITY-SCRK";
+	inmatch::ClientRuntime client("Quality", [] { return uint64_t{100000}; });
+	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	std::vector<ProtocolMessage> pongs;
+	for (int i = 0; i < 10; ++i) {
+		// stamp = now - 400 -> a 400 ms round trip.
+		const uint32_t stamp = 100000u - 400u;
+		pongs.push_back(make_protocol_message(0x57,
+				{static_cast<uint8_t>(stamp), static_cast<uint8_t>(stamp >> 8),
+				 static_cast<uint8_t>(stamp >> 16), static_cast<uint8_t>(stamp >> 24), 0x00}));
+	}
+	const std::vector<uint8_t> datagram =
+			frame_server_session(server_tx, server_scrk, 1u, pongs);
+	client.receive(datagram.data(), datagram.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.client_average_ping_ms() == 400 && client.net_quality_level() == 0,
+			"ten pongs fill the ring; the level waits for the 62-frame fold"))
+		return false;
+	for (uint32_t tick = 2; tick <= 62; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.net_quality_level() == 1,
+			"the first sample truncates to 102/5 -> level 1"))
+		return false;
+	for (uint32_t tick = 63; tick <= 62 * 5; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	return expect(client.net_quality_level() == 2 && client.state().net.level == 2 &&
+					client.state().net.ping_ms == 400,
+			"five samples of 102 fold to level 2 on the state as well");
 }
 
 bool run_direct_uplink_framing_is_transient() {
@@ -5894,6 +6127,11 @@ int main() {
 	                run_padding_echo_retail_clamp(/*requested_len=*/2000, /*expected_body=*/512) &&
 	                run_joiner_admits_exact_retail_message_prefix() &&
 	                run_joiner_splits_to_fill_remaining_packet_space() &&
+	                run_rtt_pong_fills_the_client_ring() &&
+	                run_server_ping_answers_and_measures() &&
+	                run_world_state_load_bursts_on_every_0x0f() &&
+	                run_chat_uplink_api() &&
+	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

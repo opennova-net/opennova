@@ -1,4 +1,11 @@
+// The plaintext host-status heartbeat [orig: Lobby_UpdateServerInfo
+// @0x4ff473..0x4ff62c]: builder and parser round-trip, sanitization
+// [orig: String_SanitizeForLobby @0x4fe750], the doubled LobbyName/HostKey
+// entries, the player suffix and its absence.
+
 #include <net/novaworld/lobby_update.h>
+#include <net/novaworld/gate_response.h>
+#include <net/napi/envelope.h>
 
 #include <cstdio>
 #include <string>
@@ -17,110 +24,177 @@ bool contains(const std::string &haystack, const std::string &needle) {
 	return haystack.find(needle) != std::string::npos;
 }
 
-opennova::LobbyServerInfo make_sample_info() {
-	opennova::LobbyServerInfo info;
-	info.lobby_name = "NovaWorld";
-	info.host_key = "ABC DEF?1234";
-	info.host_did = "DID-42";
-	info.server_name = "";
-	info.game_type = "Team Deathmatch";
-	info.mission_name = "Camo=Clash";
-	info.region = "North America";
-	info.players = 4;
-	info.max_players = 16;
-	info.mi1 = 1;
-	info.mi2 = 2;
-	info.mi3 = 3;
-	info.dedicated = true;
-	info.locked = false;
-	info.skins_allowed = true;
-	info.password_protected = false;
-	info.tracers_disabled = false;
-	info.time_left = "60";
-	info.country = "US";
-	info.tod = "Day";
-	info.access_code_list = "";
-	info.app_id = 16;
-	info.pcid_key = 0xDEADBEEF;
-	info.game_server_baffle_key = 0x1234;
-	info.stat = "+";
-	info.bb_mode = 0;
-	info.gv = "1.0.0.9";
-	info.version = "1.0.0.9";
-	info.country_name = "United States";
-	info.lang = "en";
-	info.timezone_bias = -300;
-	info.pb_server = false;
-	info.allow_ping = 121;
-	info.msg = "hello@world";
-	info.mod = "jox01";
-	info.gcc = "US";
-	info.player_names = {"Foo @Bar"};
-	return info;
+opennova::LobbyStatusBlob make_sample_blob() {
+	opennova::LobbyStatusBlob blob;
+	blob.lobby_name = "jop_2_consumer";
+	blob.host_key = "ABC DEF?1234";
+	// The Host list in retail SetOrCreate order: BuildHostVarLists' entries
+	// first [orig: @0x4d0d08..0x4d0dee], then Lobby_UpdateServerInfo's.
+	blob.host_vars = {
+		{"LobbyName", "jop_2_consumer"},
+		{"ServerName", ""},
+		{"Msg", "hello@world"},
+		{"MaxPlayers", "16"},
+		{"AppId", "4321"},
+		{"PLoad", ""},
+		{"Exp", "jox01"},
+		{"LAN", "0"},
+		{"HostKey", "ABC DEF?1234"},
+		{"GameType", "Team Deathmatch"},
+		{"MissionName", "Camo=Clash"},
+		{"Region", "North America"},
+		{"Players", "4"},
+		{"MI1", "1"}, {"MI2", "2"}, {"MI3", "3"},
+		{"Dedicated", "Yes"},
+		{"Locked", "No"},
+		{"Skins", "Yes"},
+		{"TimeLeft", "60"},
+		{"Password", "No"},
+		{"Tracers", "Yes"},
+		{"Mod", "jox01"},
+		{"Country", "US"},
+		{"Port", "-1"},
+		{"AllowPing", "y"},
+		{"Age", "0 00:12:34"},
+		{"TimeOfDay", "Day"},
+		{"AppID", "4321"},
+		{"PCIDKey", "16777216"},
+		{"GameServerBaffleKey", "4660"},
+		{"Stat", "N"},
+		{"LevelRange", " "},
+		{"BBMode", "0"},
+		{"GCC", "US"},
+		{"GV", "1.7.5.7"},
+		{"Version", "1.7.5.7"},
+		{"Ver1", "3"},
+		{"Ver2", "2345"},
+		{"PBServer", "0"},
+	};
+	blob.player_names = {"Foo @Bar"};
+	return blob;
+}
+
+bool check_sanitize() {
+	if (!expect(opennova::lobby_sanitize_value("") == "---", "empty -> ---")) return false;
+	if (!expect(opennova::lobby_sanitize_value("a b?c@d=e") == "a+b+c+d+e",
+			"space ? @ = -> +")) return false;
+	if (!expect(opennova::lobby_sanitize_value(" ") == "+", "single space -> +")) return false;
+	return true;
 }
 
 bool check_update_blob() {
-	const auto info = make_sample_info();
-	const std::string blob = opennova::lobby_update_build(info);
-	if (!expect(blob.find("NovaWorld  HostKey = ABC+DEF+1234") == 0,
-			"blob starts with lobby name and two spaces before sanitized HostKey")) return false;
-	if (!expect(contains(blob, " ServerName = ---"), "empty ServerName sanitizes to ---")) return false;
-	if (!expect(contains(blob, " GameType = Team+Deathmatch"), "GameType sanitized")) return false;
-	if (!expect(contains(blob, " MissionName = Camo+Clash"), "MissionName sanitized")) return false;
-	if (!expect(contains(blob, " Region = North+America"), "Region sanitized")) return false;
-	if (!expect(contains(blob, " Players = 4"), "Players count")) return false;
-	if (!expect(contains(blob, " MaxPlayers = 16"), "MaxPlayers count")) return false;
-	if (!expect(contains(blob, " Dedicated = Y"), "Dedicated uses STRNOVA yes token")) return false;
-	if (!expect(contains(blob, " Locked = N"), "Locked uses STRNOVA no token")) return false;
-	if (!expect(contains(blob, " Country = US"), "Country code")) return false;
-	if (!expect(contains(blob, " Msg = hello+world"), "Msg field sanitized")) return false;
-	if (!expect(contains(blob, " Age = "), "Age replaces Uptime")) return false;
-	if (!expect(contains(blob, " TimeOfDay = Day"), "TimeOfDay")) return false;
-	if (!expect(contains(blob, " Port = -1"), "Port = -1 (constant per binary)")) return false;
-	if (!expect(contains(blob, " AllowPing = 121"), "AllowPing with ping-enabled value 121")) return false;
-	if (!expect(contains(blob, " Mod = jox01"), "Mod field")) return false;
-	if (!expect(contains(blob, " GCC = US"), "GCC field")) return false;
-	if (!expect(contains(blob, " Ver1 = 3"), "Ver1 retail constant")) return false;
-	if (!expect(contains(blob, " Ver2 = 2345"), "Ver2 retail constant")) return false;
-	if (!expect(contains(blob, " PBServer = 0"), "PBServer disabled")) return false;
-	if (!expect(contains(blob, " p=Foo++Bar"), "player suffix sanitized")) return false;
-	if (!expect(!contains(blob, " HostDID "), "HostDID omitted")) return false;
-	if (!expect(!contains(blob, " AccessCodeList "), "AccessCodeList omitted")) return false;
-	if (!expect(!contains(blob, " Uptime "), "Uptime omitted")) return false;
-	if (!expect(!contains(blob, " TimezoneBias "), "TimezoneBias omitted")) return false;
-	if (!expect(blob.find("DELETE") == std::string::npos, "no fabricated delete suffix")) return false;
+	const auto blob = make_sample_blob();
+	const std::string text = opennova::lobby_update_build(blob);
+	if (!expect(text.find("jop_2_consumer  HostKey = ABC+DEF+1234") == 0,
+			"blob starts with lobby name, two spaces, sanitized HostKey")) return false;
+	if (!expect(contains(text, " LobbyName = jop_2_consumer"), "LobbyName repeats as a list entry")) return false;
+	if (!expect(contains(text, " HostKey = ABC+DEF+1234 LobbyName"), "HostKey preamble precedes the list walk")) return false;
+	if (!expect(text.find(" HostKey = ABC+DEF+1234") != text.rfind(" HostKey = ABC+DEF+1234"),
+			"HostKey appears twice (preamble + list entry)")) return false;
+	if (!expect(contains(text, " ServerName = ---"), "empty ServerName sanitizes to ---")) return false;
+	if (!expect(contains(text, " GameType = Team+Deathmatch"), "GameType sanitized")) return false;
+	if (!expect(contains(text, " MissionName = Camo+Clash"), "MissionName sanitized")) return false;
+	if (!expect(contains(text, " Region = North+America"), "Region sanitized")) return false;
+	if (!expect(contains(text, " Msg = hello+world"), "Msg sanitized")) return false;
+	if (!expect(contains(text, " MI1 = 1 MI2 = 2 MI3 = 3"), "MI1/MI2/MI3 present")) return false;
+	if (!expect(contains(text, " Port = -1"), "Port = -1")) return false;
+	if (!expect(contains(text, " AllowPing = y"), "AllowPing is the y/n character")) return false;
+	if (!expect(contains(text, " Age = 0+00:12:34"), "Age sanitized")) return false;
+	if (!expect(contains(text, " AppID = 4321"), "AppID present")) return false;
+	if (!expect(contains(text, " PCIDKey = 16777216"), "PCIDKey present")) return false;
+	if (!expect(contains(text, " GameServerBaffleKey = 4660"), "GameServerBaffleKey present")) return false;
+	if (!expect(contains(text, " LevelRange = +"), "one-space LevelRange sanitizes to +")) return false;
+	if (!expect(contains(text, " GV = 1.7.5.7 Version = 1.7.5.7"), "GV + Version present")) return false;
+	if (!expect(contains(text, " Ver1 = 3 Ver2 = 2345 PBServer = 0"), "Ver1/Ver2/PBServer tail")) return false;
+	if (!expect(contains(text, " p=Foo++Bar"), "player suffix sanitized")) return false;
+	if (!expect(!contains(text, "Expbits") && !contains(text, "Joicon2") && !contains(text, "PIX"),
+			"no non-retail keys")) return false;
 	return true;
 }
 
-bool check_level_range_always_space() {
-	auto info = make_sample_info();
-	info.level_range = "";
-	const std::string blob = opennova::lobby_update_build(info);
-	if (!expect(contains(blob, " Stat = N"), "Stat always N")) return false;
-	if (!expect(contains(blob, " LevelRange =  "), "empty LevelRange emits one-space value")) return false;
-	// With a level range set retail still publishes the single-space placeholder.
-	info.level_range = "5-15";
-	const std::string blob2 = opennova::lobby_update_build(info);
-	if (!expect(contains(blob2, " LevelRange =  "),
-			"non-empty LevelRange still emits one-space placeholder")) return false;
+bool check_player_suffix() {
+	auto blob = make_sample_blob();
+	blob.player_names.clear();
+	const std::string none = opennova::lobby_update_build(blob);
+	if (!expect(none.size() >= 3 && none.compare(none.size() - 3, 3, " p=") == 0,
+			"no players -> a lone \" p=\"")) return false;
+	blob.player_names = {"a", "b c"};
+	const std::string two = opennova::lobby_update_build(blob);
+	if (!expect(two.size() >= 10 && two.compare(two.size() - 10, 10, " p=a p=b+c") == 0,
+			"one p= per player")) return false;
+	blob.send_player_names = false;
+	const std::string off = opennova::lobby_update_build(blob);
+	if (!expect(!contains(off, " p="), "send_player_names off -> no suffix")) return false;
 	return true;
 }
 
-bool check_extra_pairs() {
-	auto info = make_sample_info();
-	info.extra_pairs.push_back({"Custom Key", "Custom=Value"});
-	const std::string blob = opennova::lobby_update_build(info);
-	if (!expect(contains(blob, " Custom+Key = Custom+Value"),
-			"extra_pairs sanitized at tail")) return false;
+bool check_post_datagram() {
+	opennova::LobbyStatusBlob blob;
+	blob.lobby_name = "jop_2_consumer";
+	blob.host_key = "K";
+	blob.host_vars = {{"ServerName", "Test Host"}};
+	blob.player_names = {"A B"};
+	opennova::GateResponse gate;
+	gate.post_port = 7597;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "no POST address suppresses the heartbeat")) return false;
+	gate.post_ip = {0, 0, 0, 1};
+	gate.post_port = 0;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "no POST port suppresses the heartbeat")) return false;
+	gate.post_port = 65536;
+	if (!expect(opennova::lobby_update_build_datagram(gate, blob).empty(),
+	            "an out-of-range POST port suppresses the heartbeat")) return false;
+	gate.post_port = 65535;
+	const auto packet = opennova::lobby_update_build_datagram(gate, blob);
+	if (!expect(!packet.empty(), "any nonzero address and a valid port emit a heartbeat")) return false;
+	std::vector<uint8_t> decoded(packet.size());
+	size_t decoded_size = 0;
+	if (!expect(opennova::napi_envelope_decode(packet.data(), packet.size(), decoded.data(),
+	                                          decoded.size(), &decoded_size) == 0,
+	            "POST heartbeat has a valid NAPI CRC envelope")) return false;
+	const std::string text(decoded.begin(), decoded.begin() + decoded_size);
+	return expect(text == "jop_2_consumer  HostKey = K ServerName = Test+Host p=A+B",
+	              "CRC payload is the sanitized plaintext, without NWU or session framing");
+}
+
+bool check_parse_roundtrip() {
+	const auto blob = make_sample_blob();
+	const std::string text = opennova::lobby_update_build(blob);
+	opennova::LobbyStatusBlob parsed;
+	if (!expect(opennova::lobby_update_parse(text, parsed), "parse succeeds")) return false;
+	if (!expect(parsed.lobby_name == "jop_2_consumer", "lobby name")) return false;
+	if (!expect(parsed.host_key == "ABC+DEF+1234", "host key (sanitized)")) return false;
+	if (!expect(parsed.host_vars.size() == blob.host_vars.size(), "every var survives")) return false;
+	if (!expect(parsed.host_vars[0].first == "LobbyName", "order preserved")) return false;
+	if (!expect(opennova::lobby_status_value(parsed, "gametype") == "Team+Deathmatch",
+			"case-insensitive lookup")) return false;
+	if (!expect(opennova::lobby_status_value(parsed, "ServerName") == "---", "--- kept")) return false;
+	if (!expect(parsed.player_names.size() == 1 && parsed.player_names[0] == "Foo++Bar",
+			"player names")) return false;
+	if (!expect(parsed.send_player_names, "player suffix seen")) return false;
+
+	opennova::LobbyStatusBlob none;
+	if (!expect(opennova::lobby_update_parse("jop_2_consumer  HostKey = K p=", none), "lone p= parses")) return false;
+	if (!expect(none.host_vars.empty() && none.player_names.empty() && none.send_player_names,
+			"lone p= -> no names, suffix seen")) return false;
+	opennova::LobbyStatusBlob off;
+	if (!expect(opennova::lobby_update_parse("jop_2_consumer  HostKey = K A = 1", off), "no suffix parses")) return false;
+	if (!expect(!off.send_player_names && off.host_vars.size() == 1, "no suffix -> flag off")) return false;
+	opennova::LobbyStatusBlob bad;
+	if (!expect(!opennova::lobby_update_parse("jop:cus2", bad), "a gate tag is not a blob")) return false;
+	if (!expect(!opennova::lobby_update_parse("", bad), "empty is not a blob")) return false;
 	return true;
 }
 
 } // namespace
 
 int main() {
+	if (!check_sanitize()) return 1;
 	if (!check_update_blob()) return 1;
-	if (!check_level_range_always_space()) return 1;
-	if (!check_extra_pairs()) return 1;
-	std::printf("OK: lobby_update text KV blob matches retail host registration shape\n");
+	if (!check_player_suffix()) return 1;
+	if (!check_parse_roundtrip()) return 1;
+	if (!check_post_datagram()) return 1;
+	std::printf("OK: lobby_update text KV blob matches the retail host status heartbeat\n");
 	return 0;
 }

@@ -4,9 +4,11 @@
 #include <runtime/devtools/tick_profile.h>
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
+#include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
+#include <base/io/tick_rate.h>            // kTicksPerSecondInt (the default frame-rate sample)
 
 #include <cstddef>
 #include <cstdint>
@@ -200,6 +202,14 @@ public:
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
 	// this profile (the embedder's, normally the world's; null = no clocks).
 	void set_profile(devtools::TickProfile *profile) { profile_ = profile; }
+	// The chat flood table's 16 recent lines `[u32 time][char[64]]`: a repeat
+	// of a line sent within 1280 ms is refused, an older repeat is moved to the
+	// newest slot [orig: Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte
+	//  table @0xB3B788, the `<= 0x500` window, the shift-down + append].
+	struct ChatFloodEntry {
+		uint32_t time_ms = 0;
+		std::string text;
+	};
 
 	// Typed gameplay seams used by the simulation; protocol tags/framing remain
 	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
@@ -214,6 +224,31 @@ public:
 	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
+	// One C2S 0x0D chat line `[u8 channel][cstr text]` on the wire channel the
+	// caller's sender picked (retail's per-key senders: 2 global, 1 team on a
+	// peer, 12 squad on a peer, 11 admin, 13 the squad-alt key; 4 all / 5 team
+	// exist only for a non-peer, so a joiner drops them). The retail sender
+	// gates: in session, non-empty, `!g_death_screen_active || g_spawn_success_
+	// gate` (the admin key: `!g_death_screen_active` alone), the 1280 ms
+	// per-identical-line flood table, then the `<...>` strip; queued reliable
+	// with the 310-flush finite lifetime. False = gated/flooded, nothing sent.
+	// [orig: Chat_SendGlobalMessage @0x49A6B0, Chat_SendAdminMessage
+	//  @0x49A780, sub_49A840 @0x49A840, Chat_SendTeamMessage @0x49A900,
+	//  Chat_SendSquadMessage @0x49AA50, sub_49ABA0 @0x49ABA0,
+	//  Chat_SendAllMessage @0x49AC70 -> CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
+	bool queue_chat_message(uint8_t channel, const std::string &text);
+	// The embedder's measured frame rate for the quality metric's frame-pressure
+	// term [orig: dword_24E1F10]; the default is the logic rate (no pressure —
+	// any rate at or above 16 scores the floor). Joiner only.
+	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
+	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
+	// client's own ping readings (0 before the first completed round trip).
+	uint8_t net_quality_level() const { return net_quality_; }
+	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
+	uint32_t client_average_ping_ms() const {
+		return joiner_ ? joiner_->client_average_ping_ms() : 0;
+	}
+	uint32_t session_ping_ms() const { return joiner_ ? joiner_->session_ping_ms() : 0; }
 	// Action 6 on a designated-G mounted EWeap selects the child's embedded
 	// MountSlot or its groundEntity vehicle slot. Authority confirms via the
 	// ordinary compact player echo; this only queues the reliable C2S 0x16.
@@ -562,6 +597,14 @@ private:
 	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
 	// loopback view runs it too (retail's client frame is role-agnostic).
 	void tick_roster_revive_countdown();
+	// The once-per-62-frames CNetQuality update + level fold that precedes the
+	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
+	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
+	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
+	void update_net_quality();
+	// Chat_CheckFloodControl @0x498F60: truncates `text` to 59 characters in
+	// place first, then the table walk; true = the line may go out.
+	bool chat_flood_control(std::string &text);
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only
@@ -607,7 +650,15 @@ private:
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.
-	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] 0 = best (host clamps 0..4)
+	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] the 0..4 level
+	                                     // CNetQuality_SetLevel folds every 62 frames; 0 = best
+	// The client (RECEIVE) window of the CNetQuality object and its inputs
+	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
+	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
+	replication::NetQualityWindow client_quality_window_;
+	int32_t observed_frame_rate_ = io::kTicksPerSecondInt; // [orig: dword_24E1F10]
+	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
+	std::array<ChatFloodEntry, 16> chat_flood_{};       // [orig: @0xB3B788]
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the
 	// countdown re-arms from this at every open boundary [orig: cs_dir0.

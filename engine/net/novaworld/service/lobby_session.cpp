@@ -7,22 +7,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <initializer_list>
 #include <iomanip>
 #include <random>
 #include <sstream>
 #include <utility>
 #include <base/io/log.h>
+#include <base/io/strutil.h>
 
 namespace opennova {
 
 namespace {
 
 std::string field_to_string(const NapiField *f) {
-	if (!f || f->data.empty()) return {};
-	const char *p = reinterpret_cast<const char *>(f->data.data());
-	size_t n = f->data.size();
-	while (n > 0 && p[n - 1] == '\0') --n;
-	return std::string(p, n);
+	return f ? opennova::field_to_string(*f) : std::string();
 }
 
 const NapiField *find_field(const NapiMessage &msg, const std::string &name) {
@@ -52,7 +50,6 @@ void set_field(NapiMessage &msg, const std::string &name, const std::string &val
 
 // Look for an "AppId" ClientVar nested anywhere under the container, in
 // case the field is buried inside a nested ClientVarList we didn't peel out.
-// Mirrors onnet's _find_app_id_in_container.
 std::string find_app_id_recursive(const NapiMessage &msg) {
 	if (msg.name == "ClientVar") {
 		std::string vname, vvalue;
@@ -60,7 +57,7 @@ std::string find_app_id_recursive(const NapiMessage &msg) {
 			if (f.name == "VarName")  vname  = field_to_string(&f);
 			else if (f.name == "VarValue") vvalue = field_to_string(&f);
 		}
-		if (vname == "AppId" && !vvalue.empty()) return vvalue;
+		if (strutil::iequals(vname, "AppId") && !vvalue.empty()) return vvalue;
 	}
 	for (const auto &child : msg.children) {
 		auto found = find_app_id_recursive(child);
@@ -70,7 +67,7 @@ std::string find_app_id_recursive(const NapiMessage &msg) {
 }
 
 std::string default_sess_id() {
-	// 32-char hex token (matches onnet's secrets.token_hex(16)).
+	// 32-char hex token (policy: the service mints the SessIdString).
 	static thread_local std::mt19937_64 gen{std::random_device{}()};
 	std::uniform_int_distribution<uint64_t> pick;
 	uint64_t a = pick(gen);
@@ -112,20 +109,6 @@ std::string default_gsid(const std::string &app_id) {
 	return std::string(buf);
 }
 
-uint32_t default_rid(const std::string &app_id) {
-	uint32_t suffix = 0;
-	try {
-		if (!app_id.empty()) {
-			suffix = static_cast<uint32_t>(std::stoul(app_id)) & 0x0FFFu;
-		}
-	} catch (...) {}
-	if (suffix == 0) {
-		static thread_local std::mt19937 gen{std::random_device{}()};
-		suffix = std::uniform_int_distribution<uint32_t>{0, 0x0FFFu}(gen);
-	}
-	return 0x0A000000u | suffix;
-}
-
 int parse_int_safe(const std::string &s) {
 	try {
 		auto slash = s.find('/');
@@ -135,14 +118,11 @@ int parse_int_safe(const std::string &s) {
 	}
 }
 
-std::string first_value(const std::map<std::string, std::string> &a,
-                        const std::map<std::string, std::string> &b,
+std::string first_value(const VarList &a, const VarList &b,
                         std::initializer_list<const char *> keys) {
 	for (const char *key : keys) {
-		auto it = a.find(key);
-		if (it != a.end() && !it->second.empty()) return it->second;
-		it = b.find(key);
-		if (it != b.end() && !it->second.empty()) return it->second;
+		if (auto v = var_value(a, key); !v.empty()) return v;
+		if (auto v = var_value(b, key); !v.empty()) return v;
 	}
 	return {};
 }
@@ -154,9 +134,12 @@ std::string yn_value(const std::string &v, const char *fallback) {
 	return v;
 }
 
+// Fold the host-reported Host/HostSetup vars into the browser-row fields.
+// Column names follow the retail Host list [orig: Lobby_UpdateServerInfo
+// @0x4fe8c0]; the alternate spellings keep earlier OpenNova hosts readable.
 void refresh_gsb_fields(LobbyState &state,
-                        const std::map<std::string, std::string> &host_setup,
-                        const std::map<std::string, std::string> &host_info) {
+                        const VarList &host_setup,
+                        const VarList &host_info) {
 	if (auto v = first_value(host_info, host_setup, {"GameType", "GameTypeName", "GameMode"}); !v.empty()) state.game_type = v;
 	if (auto v = first_value(host_info, host_setup, {"MissionName", "Mission", "MapName"}); !v.empty()) state.mission_name = v;
 	if (auto v = first_value(host_info, host_setup, {"Country", "CountryCode"}); !v.empty()) state.country = v;
@@ -168,13 +151,106 @@ void refresh_gsb_fields(LobbyState &state,
 	if (auto v = first_value(host_info, host_setup, {"Expbits", "ExpBits", "EXPBITS"}); !v.empty()) state.exp_bits = v;
 	if (auto v = first_value(host_info, host_setup, {"VER1", "Ver1", "Version1"}); !v.empty()) state.ver1 = v;
 	if (auto v = first_value(host_info, host_setup, {"Joicon2", "JOICON2"}); !v.empty()) state.joicon2 = v;
+	if (auto v = first_value(host_info, host_setup, {"TimeLeft"}); !v.empty()) state.time_left = v;
+	if (auto v = first_value(host_info, host_setup, {"TimeOfDay"}); !v.empty()) state.time_of_day = v;
+	if (auto v = first_value(host_info, host_setup, {"Msg"}); !v.empty()) state.msg = v;
+	if (auto v = first_value(host_info, host_setup, {"Mod"}); !v.empty()) state.mod = v;
+	if (auto v = first_value(host_info, host_setup, {"Age"}); !v.empty()) state.age = v;
+	if (auto v = first_value(host_info, host_setup, {"PBServer", "PBSERVER"}); !v.empty()) state.pb_server = v;
+	if (auto v = first_value(host_info, host_setup, {"LevelRange"}); !v.empty()) state.level_range = v;
+	if (auto v = first_value(host_info, host_setup, {"BBMode"}); !v.empty()) state.bb_mode = v;
+	if (auto v = first_value(host_info, host_setup, {"Skins"}); !v.empty()) state.skins = yn_value(v, "N");
+	if (auto v = first_value(host_info, host_setup, {"Tracers"}); !v.empty()) state.tracers = yn_value(v, "Y");
+	if (auto v = first_value(host_info, host_setup, {"PIX"}); !v.empty()) state.pix = v;
+}
+
+// The host's own keys ride the Host list on both ClientHostRequest and
+// ClientHostUpdate (the same list object is serialized by both
+// [orig: CNapiGameSession_SendHostRequest @0x4d37e0 / SendHostUpdate
+// @0x4d3860]); PCIDKey rotates every refresh, so the latest value wins.
+void refresh_host_keys(LobbyState &state, const VarList &host_info) {
+	if (var_has(host_info, "HostKey")) state.host_key = var_value(host_info, "HostKey");
+	if (var_has(host_info, "PCIDKey")) state.pcid_key = var_value(host_info, "PCIDKey");
+}
+
+// The joinable game endpoint. A retail Host list carries no address and its
+// Port is the literal "-1" [orig: Lobby_UpdateServerInfo @0x4fef6d]; the host's
+// own game endpoint is what its PlayerList slot 0 (the host player) reports as
+// PlayerIpAndPort [orig: Server_PlayerAdd @0x51d45c formats the slot's
+// connection ip:port]. Service policy for the stored endpoint, in precedence:
+// slot 0's PlayerIpAndPort (an empty ip half, as an OpenNova host without an
+// advertised address sends, takes the observed source address), then a
+// positive Port (an OpenNova host behind a port map), then the observed UDP
+// source.
+void refresh_host_endpoint(LobbyState &state, const VarList &host_info,
+                           const std::vector<HostRosterSlot> &roster,
+                           const std::string &remote_ip, uint16_t remote_port) {
+	if (state.host_ip.empty()) state.host_ip = remote_ip;
+	for (const auto &s : roster) {
+		if (s.slot != 0) continue;
+		const size_t colon = s.ip_and_port.rfind(':');
+		if (colon == std::string::npos) break;
+		const int port = parse_int_safe(s.ip_and_port.substr(colon + 1));
+		if (port <= 0) break;
+		const std::string ip = s.ip_and_port.substr(0, colon);
+		state.host_ip = ip.empty() ? remote_ip : ip;
+		state.host_port = port;
+		return;
+	}
+	if (const int port = parse_int_safe(var_value(host_info, "Port")); port > 0) {
+		state.host_port = port;
+	} else if (state.host_port == 0) {
+		state.host_port = remote_port;
+	}
+}
+
+// One ClientHostPlayerAdded / ClientHostPlayerRemoved statement's params:
+// PlayerNumber is the slot the five vars are keyed by in the PlayerList
+// [orig: CNapiGameSession_SendPlayerAdded @0x4cfec0 — PlayerNumber, PlayerName,
+//  PlayerIpAndPort, PlayerPCID, PlayerTeam, PlayerType; SendPlayerRemoved
+//  @0x4d01a0 — PlayerNumber only].
+HostRosterSlot roster_slot_from_statement(const NapiMessage &msg) {
+	HostRosterSlot s;
+	for (const auto &f : msg.fields) {
+		const auto value = field_to_string(&f);
+		if      (strutil::iequals(f.name, "PlayerNumber"))    s.slot = parse_int_safe(value);
+		else if (strutil::iequals(f.name, "PlayerName"))      s.player_name = value;
+		else if (strutil::iequals(f.name, "PlayerIpAndPort")) s.ip_and_port = value;
+		else if (strutil::iequals(f.name, "PlayerPCID"))      s.pcid = value;
+		else if (strutil::iequals(f.name, "PlayerTeam"))      s.team = value;
+		else if (strutil::iequals(f.name, "PlayerType"))      s.type = value;
+	}
+	return s;
+}
+
+void persist_roster(opennova::db::Database *db, const LobbyState &state) {
+	if (!db || state.rid == 0) return;
+	try {
+		hostdb::replace_roster(*db, state.rid, state.roster);
+	} catch (const std::exception &e) {
+		opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN host_roster replace: %s", e.what());
+	}
 }
 
 } // namespace
 
-std::map<std::string, std::map<std::string, std::string>>
-extract_var_lists(const NapiMessage &container) {
-	std::map<std::string, std::map<std::string, std::string>> out;
+bool var_has(const VarList &list, std::string_view name, int fnum) {
+	for (const auto &e : list) {
+		if (e.fnum == fnum && strutil::iequals(e.name, name)) return true;
+	}
+	return false;
+}
+
+std::string var_value(const VarList &list, std::string_view name, int fnum) {
+	for (const auto &e : list) {
+		if (e.fnum == fnum && strutil::iequals(e.name, name)) return e.value;
+	}
+	return {};
+}
+
+VarLists extract_var_lists(const NapiMessage &container) {
+	VarLists out;
 	for (const auto &child : container.children) {
 		if (child.name != "ClientVarList") continue;
 		const auto list_name = field_to_string(find_field(child, "VarList"));
@@ -182,18 +258,51 @@ extract_var_lists(const NapiMessage &container) {
 		auto &entries = out[list_name];
 		for (const auto &entry : child.children) {
 			if (entry.name != "ClientVar") continue;
-			const auto vname  = field_to_string(find_field(entry, "VarName"));
-			const auto vvalue = field_to_string(find_field(entry, "VarValue"));
-			if (!vname.empty()) entries[vname] = vvalue;
+			VarEntry var;
+			var.fnum  = parse_int_safe(field_to_string(find_field(entry, "VarFNum")));
+			var.name  = field_to_string(find_field(entry, "VarName"));
+			var.value = field_to_string(find_field(entry, "VarValue"));
+			if (!var.name.empty()) entries.push_back(std::move(var));
 		}
 	}
 	return out;
 }
 
+std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) {
+	std::vector<HostRosterSlot> roster;
+	auto slot_for = [&roster](int fnum) -> HostRosterSlot & {
+		for (auto &s : roster) if (s.slot == fnum) return s;
+		roster.push_back({});
+		roster.back().slot = fnum;
+		return roster.back();
+	};
+	for (const auto &e : player_list) {
+		if (strutil::iequals(e.name, "PlayerName"))           slot_for(e.fnum).player_name = e.value;
+		else if (strutil::iequals(e.name, "PlayerIpAndPort")) slot_for(e.fnum).ip_and_port = e.value;
+		else if (strutil::iequals(e.name, "PlayerPCID"))      slot_for(e.fnum).pcid = e.value;
+		else if (strutil::iequals(e.name, "PlayerTeam"))      slot_for(e.fnum).team = e.value;
+		else if (strutil::iequals(e.name, "PlayerType"))      slot_for(e.fnum).type = e.value;
+	}
+	return roster;
+}
+
 LobbySession::LobbySession()
 	: sess_id_gen_(default_sess_id),
-	  gsid_gen_(default_gsid),
-	  rid_gen_(default_rid) {}
+	  gsid_gen_(default_gsid) {}
+
+// policy: the host id is minted here and only here. It is the u32 the
+// browser row carries and the `rid=` the join URL echoes, so two live hosts
+// must never share one. The host's AppId cannot serve: retail draws it per
+// session from (GetTickCount + rand) % 9000 + 1000 [orig:
+// CNapiNetwork_RandomizeTimeout @0x4c4d9a, sole caller
+// CNapiGameSession_BuildHostVarLists @0x4d0c6a], so two retail hosts can
+// present the same value. The table is cleared at boot, so a per-process
+// monotonic suffix under the 0x0A prefix is unique for the run.
+uint32_t LobbySession::mint_rid() {
+	uint32_t suffix = next_rid_suffix_++ & 0x00FFFFFFu;
+	if (suffix == 0) suffix = next_rid_suffix_++ & 0x00FFFFFFu;
+	return 0x0A000000u | suffix;
+}
 
 LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
                                            LobbyState &state,
@@ -205,6 +314,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	else if (name == "ClientHostRequest")           return handle_client_host_request(inner_message, state, remote_ip, remote_port);
 	else if (name == "ClientHostUpdate")            return handle_client_host_update(inner_message, state, remote_ip);
 	else if (name == "ClientPlayRequest")           return handle_client_play_request(inner_message, state);
+	else if (name == "ClientGLSVSSRequest")         return handle_client_glsvss_request(inner_message, state);
 	else if (name == "ClientPlayerEnterRequest") {
 		NapiMessage reply;
 		reply.name = "ServerPlayerEnterResult";
@@ -234,29 +344,52 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 				port_field.empty() ? "0" : port_field.c_str(), nullptr, 10));
 		return out;
 	}
-	// Retail sends ClientHostPlayerAdded immediately after a successful host
-	// registration (the host itself counts as the first player); onnet doesn't
-	// reply either (no entry in onnet/onnw/novaworldudp.py). Bump player_count
-	// optimistically so /api/hosts reflects the joined player even before the
-	// next ClientHostUpdate arrives. (G.6 lifecycle.)
-	else if (name == "ClientHostPlayerAdded") {
-		state.player_count = std::max(1, state.player_count + 1);
+	// A retail host sends ClientHostPlayerAdded after every player join and
+	// ClientHostPlayerRemoved on every disconnect, in session state 6
+	// [orig: CNapiGameSession_SendPlayerAdded @0x4cfec0 (PlayerNumber,
+	//  PlayerName, PlayerIpAndPort, PlayerPCID, PlayerTeam, PlayerType) /
+	//  SendPlayerRemoved @0x4d01a0 (PlayerNumber only)]; neither expects a
+	// reply. The statement is the per-slot roster delta between two
+	// ClientHostUpdates: it lands in the roster (slot 0 also re-resolves the
+	// game endpoint) and the Players column follows the roster size, so
+	// /api/hosts and the GSB reflect the join before the next refresh.
+	else if (name == "ClientHostPlayerAdded" || name == "ClientHostPlayerRemoved") {
+		const HostRosterSlot slot = roster_slot_from_statement(inner_message);
+		auto it = std::find_if(state.roster.begin(), state.roster.end(),
+				[&slot](const HostRosterSlot &s) { return s.slot == slot.slot; });
+		if (name == "ClientHostPlayerAdded") {
+			if (it != state.roster.end()) *it = slot;
+			else state.roster.push_back(slot);
+			if (slot.slot == 0) {
+				refresh_host_endpoint(state, {}, state.roster, remote_ip, remote_port);
+				if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
+				if (reflect_port_ != 0)   state.host_port = reflect_port_;
+			}
+		} else if (it != state.roster.end()) {
+			state.roster.erase(it);
+		}
+		state.player_count = static_cast<int>(state.roster.size());
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] player_added rid=%u players=%d/%d",
-		            state.rid, state.player_count, state.max_players);
-		return {{}, "ClientHostPlayerAdded"};
-	}
-	else if (name == "ClientHostPlayerRemoved") {
-		state.player_count = std::max(0, state.player_count - 1);
-		opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] player_removed rid=%u players=%d/%d",
-		            state.rid, state.player_count, state.max_players);
-		return {{}, "ClientHostPlayerRemoved"};
+		"[lobby] %s rid=%u slot=%d players=%d/%d",
+		            name == "ClientHostPlayerAdded" ? "player_added" : "player_removed",
+		            state.rid, slot.slot, state.player_count, state.max_players);
+		if (db_ && state.rid != 0) {
+			try {
+				hostdb::update_host(*db_,
+					hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0));
+			} catch (const std::exception &e) {
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+			"[lobby] WARN active_hosts roster update: %s", e.what());
+			}
+			persist_roster(db_, state);
+		}
+		return {{}, name};
 	}
 	else if (name == "ClientStopHosting") {
 		const uint32_t rid = state.rid;
 		state.hosting = false;
 		state.player_count = 0;
+		state.roster.clear();
 		if (db_ && rid != 0) {
 			try { hostdb::remove_host_by_rid(*db_, rid); }
 			catch (const std::exception &e) {
@@ -272,18 +405,27 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		state.play_state.clear();
 		return {{}, "ClientStopPlaying"};
 	}
+	// An empty statement with no params and no reply path in the client:
+	// the builder [orig: CNapiGameSession_SendUpdateVars @0x4d05e0] has no
+	// caller in the retail binary, so the statement is accepted and logged
+	// rather than surfaced as unknown.
+	else if (name == "ClientUpdateVars") {
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] update_vars rid=%u (no-op)", state.rid);
+		return {{}, "ClientUpdateVars"};
+	}
 	return LobbyDispatchResult{{}, std::string("unknown:") + name};
 }
 
-// witness: onnw/novaworldudp.py:114-120 — empty container response
+// ClientConnected -> the empty ServerStartVerify challenge.
 LobbyDispatchResult LobbySession::handle_client_connected(const NapiMessage &, LobbyState &) {
 	NapiMessage reply;
 	reply.name = "ServerStartVerify";
 	return {{std::move(reply)}, "ClientConnected"};
 }
 
-// witness: onnw/novaworldudp.py:122-137 — Success=1, SessIdString token,
-// embedded ServerVarList(VarList="ConnectCommands").
+// ClientRequestVerifyResult -> Success=1, SessIdString token, embedded
+// ServerVarList(VarList="ConnectCommands").
 LobbyDispatchResult LobbySession::handle_client_request_verify_result(
 		const NapiMessage &, LobbyState &state) {
 	if (state.sess_id_string.empty()) {
@@ -303,72 +445,65 @@ LobbyDispatchResult LobbySession::handle_client_request_verify_result(
 	return {{std::move(reply)}, "ClientRequestVerifyResult"};
 }
 
-// witness: onnw/novaworldudp.py:139-245 — extracts HostSetup + Host var
-// lists, resolves AppId/LobbyName, mints gsid+rid, persists host state,
-// returns ServerHostResult with HostCommands(GSID, HostRequiresJoinTicket).
+// ClientHostRequest carries four ClientVarLists — Cookie (the login cookie
+// jar plus CountryName/Language/TimeZoneBias), HostSetup, Host and
+// PlayerList [orig: CNapiGameSession_SendHostRequest @0x4d37b4..0x4d37f6] —
+// plus CurrentlyHosting (0 on a fresh host, 1 on a re-host) and VarCheck.
+// Neither Cookie nor CurrentlyHosting gates admission here. The reply is
+// ServerHostResult with Rid and the HostCommands ServerVarList (GSID,
+// HostRequiresJoinTicket), which the host stores
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d59d0].
 LobbyDispatchResult LobbySession::handle_client_host_request(
 		const NapiMessage &msg, LobbyState &state,
 		const std::string &remote_ip, uint16_t remote_port) {
 	auto var_lists = extract_var_lists(msg);
-	auto host_setup = var_lists["HostSetup"];
-	auto host_info  = var_lists["Host"];
+	const VarList &host_setup = var_lists["HostSetup"];
+	const VarList &host_info  = var_lists["Host"];
 	if (host_setup.empty() && host_info.empty()) {
 		return {{}, "ClientHostRequest:missing-var-lists"};
 	}
 
-	std::string app_id = host_setup.count("AppId") ? host_setup["AppId"]
-	                   : host_info.count("AppId")  ? host_info["AppId"]
-	                                               : find_app_id_recursive(msg);
+	std::string app_id = var_value(host_setup, "AppId");
+	if (app_id.empty()) app_id = var_value(host_info, "AppId");
+	if (app_id.empty()) app_id = find_app_id_recursive(msg);
 
-	std::string lobby_name = host_setup.count("LobbyName") ? host_setup["LobbyName"]
-	                                                       : std::string();
+	std::string lobby_name = var_value(host_setup, "LobbyName");
+	if (lobby_name.empty()) lobby_name = var_value(host_info, "LobbyName");
 
 	if (state.gsid.empty()) state.gsid = gsid_gen_(app_id);
-	if (state.rid == 0)     state.rid  = rid_gen_(app_id);
+	if (state.rid == 0)     state.rid  = rid_gen_ ? rid_gen_() : mint_rid();
 	state.game = lobby_name;
 	state.app_id = app_id;
 	state.hosting = true;
 
-	state.host_ip = host_info.count("ServerIP") ? host_info["ServerIP"]
-	             : (state.host_ip.empty() ? remote_ip : state.host_ip);
-	if (host_info.count("ServerPortNumber")) {
-		state.host_port = parse_int_safe(host_info["ServerPortNumber"]);
-	} else if (host_setup.count("ServerPortNumber")) {
-		state.host_port = parse_int_safe(host_setup["ServerPortNumber"]);
-	} else if (state.host_port == 0) {
-		state.host_port = remote_port;
-	}
+	state.roster = roster_from_player_list(var_lists["PlayerList"]);
+	refresh_host_endpoint(state, host_info, state.roster, remote_ip, remote_port);
 	// Reflection override (dev/NAT): force a locally reachable host endpoint so
 	// joiners can connect, instead of the observed docker-gateway source.
-	// [cf onnw/novaworldudp.py:186,274 — ONNET_CLIENT_REFLECT_IP/PORT]
 	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
 	if (reflect_port_ != 0)   state.host_port = reflect_port_;
 
-	state.server_name  = host_info.count("ServerName") ? host_info["ServerName"] : state.server_name;
-	state.player_count = host_info.count("Players")    ? parse_int_safe(host_info["Players"]) : state.player_count;
-	state.max_players  = host_setup.count("MaxPlayers") ? parse_int_safe(host_setup["MaxPlayers"]) : state.max_players;
-	state.region       = host_info.count("Region") ? host_info["Region"]
-	                  : host_info.count("Country") ? host_info["Country"]
-	                                               : (state.region.empty() ? std::string("us") : state.region);
+	if (var_has(host_info, "ServerName")) state.server_name = var_value(host_info, "ServerName");
+	else if (var_has(host_setup, "ServerName")) state.server_name = var_value(host_setup, "ServerName");
+	if (var_has(host_info, "Players"))    state.player_count = parse_int_safe(var_value(host_info, "Players"));
+	if (var_has(host_setup, "MaxPlayers")) state.max_players = parse_int_safe(var_value(host_setup, "MaxPlayers"));
+	else if (var_has(host_info, "MaxPlayers")) state.max_players = parse_int_safe(var_value(host_info, "MaxPlayers"));
+	if (var_has(host_info, "Region"))       state.region = var_value(host_info, "Region");
+	else if (var_has(host_info, "Country")) state.region = var_value(host_info, "Country");
+	else if (state.region.empty())          state.region = "us";
+	refresh_host_keys(state, host_info);
 	refresh_gsb_fields(state, host_setup, host_info);
+	if (state.player_count == 0 && !state.roster.empty()) {
+		state.player_count = static_cast<int>(state.roster.size());
+	}
 
-	// Diagnostic for the host/join "stuck on Enumerating" symptom: show what
-	// endpoint the server OBSERVED for the host (UDP source) vs. what the host
-	// ADVERTISED (Host.ServerIP / ServerPortNumber) vs. what we STORED. Under a
-	// docker-bridge dev setup the observed source is the proxy gateway
-	// (172.x:ephemeral) and retail usually advertises neither, so the stored
-	// endpoint is unreachable by a joiner. Host networking lets the server see
-	// the real client endpoint (the prod path). [cf onnw/novaworldudp.py:182-194]
 	{
 		std::string host_keys;
-		for (const auto &kv : host_info) { host_keys += kv.first; host_keys += ' '; }
+		for (const auto &e : host_info) { host_keys += e.name; host_keys += ' '; }
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] host-addr request observed=%s:%u advertised ServerIP=%s "
-		            "ServerPortNumber(Host)=%s ServerPortNumber(Setup)=%s stored=%s:%d Host{ %s}",
+		"[lobby] host-addr request observed=%s:%u Port=%s stored=%s:%d Host{ %s}",
 		            remote_ip.c_str(), static_cast<unsigned>(remote_port),
-		            host_info.count("ServerIP") ? host_info["ServerIP"].c_str() : "(absent)",
-		            host_info.count("ServerPortNumber") ? host_info["ServerPortNumber"].c_str() : "(absent)",
-		            host_setup.count("ServerPortNumber") ? host_setup["ServerPortNumber"].c_str() : "(absent)",
+		            var_has(host_info, "Port") ? var_value(host_info, "Port").c_str() : "(absent)",
 		            state.host_ip.c_str(), state.host_port, host_keys.c_str());
 	}
 
@@ -388,21 +523,14 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	reply.children.push_back(std::move(host_commands));
 
 	opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s",
+		"[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s pcid_key=%zuB roster=%zu",
 	            state.rid, state.gsid.c_str(), state.server_name.c_str(),
 	            state.host_ip.c_str(), state.host_port, state.game.c_str(),
-	            state.app_id.c_str());
+	            state.app_id.c_str(), state.pcid_key.size(), state.roster.size());
 
-	// Phase I.2: persist to DB so /jop_2.gsb + /api/hosts query SQL
-	// rather than the in-memory snapshot. db_ is null in tests.
+	// Persist so /jop_2.gsb + /api/hosts query SQL rather than the in-memory
+	// snapshot. db_ is null in tests.
 	if (db_) {
-		// Diagnostic (join-failure triage): a ClientHostRequest re-sent AFTER a
-		// PCIDKey-bearing update would, via INSERT OR REPLACE, wipe the stored
-		// pcid_key back to empty (onnet's upsert preserves it). Watch this go
-		// non-empty -> empty across requests.
-		opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] host request upsert rid=%u pcid_key=%zuB host_key=%zuB",
-		            state.rid, state.pcid_key.size(), state.host_key.size());
 		try {
 			hostdb::upsert_host(*db_,
 				hostdb::row_from_lobby(state, remote_ip, remote_port));
@@ -410,62 +538,52 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"[lobby] WARN active_hosts upsert: %s", e.what());
 		}
+		persist_roster(db_, state);
 	}
 
 	return {{std::move(reply)}, "ClientHostRequest"};
 }
 
-// witness: onnw/novaworldudp.py:247-296 — silent: parse var lists, refresh
-// host_key/pcid_key/players/etc into state. No reply.
+// ClientHostUpdate is silent: refresh the Host / PlayerList snapshot. Retail
+// resends the whole Host list on every refresh, so every column is re-read.
 LobbyDispatchResult LobbySession::handle_client_host_update(
 		const NapiMessage &msg, LobbyState &state, const std::string &remote_ip) {
 	state.last_host_update = extract_var_lists(msg);
-	const auto host_vars = state.last_host_update["Host"];
-	if (host_vars.count("HostKey"))         state.host_key  = host_vars.at("HostKey");
-	if (host_vars.count("PCIDKey"))         state.pcid_key  = host_vars.at("PCIDKey");
+	const VarList &host_vars  = state.last_host_update["Host"];
+	const VarList &host_setup = state.last_host_update["HostSetup"];
+	refresh_host_keys(state, host_vars);
 	{
-		// Diagnostic (join-failure triage): does the host's ClientHostUpdate
-		// actually carry PCIDKey? If pcid_key stays empty here, the join emits
-		// an empty PUBPCID and the retail client reports "login info invalid or
-		// expired". Dump the Host var keys + the resolved key lengths.
 		std::string update_keys;
-		for (const auto &kv : host_vars) { update_keys += kv.first; update_keys += ' '; }
+		for (const auto &e : host_vars) { update_keys += e.name; update_keys += ' '; }
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
 		"[lobby] host update vars Host{ %s} host_key=%zuB pcid_key=%zuB",
 		            update_keys.c_str(), state.host_key.size(), state.pcid_key.size());
 	}
-	if (host_vars.count("ServerIP"))        state.host_ip   = host_vars.at("ServerIP");
-	if (host_vars.count("ServerPortNumber"))state.host_port = parse_int_safe(host_vars.at("ServerPortNumber"));
-	if (host_vars.count("ServerName"))      state.server_name = host_vars.at("ServerName");
-	if (host_vars.count("Players"))         state.player_count = parse_int_safe(host_vars.at("Players"));
-	else if (host_vars.count("CurrentPlayers")) state.player_count = parse_int_safe(host_vars.at("CurrentPlayers"));
-	if (host_vars.count("MaxPlayers"))      state.max_players  = parse_int_safe(host_vars.at("MaxPlayers"));
-	if (host_vars.count("Region"))          state.region       = host_vars.at("Region");
-	else if (host_vars.count("Country"))    state.region       = host_vars.at("Country");
-	const auto host_setup = state.last_host_update["HostSetup"];
+	if (var_has(host_vars, "ServerName"))      state.server_name = var_value(host_vars, "ServerName");
+	if (var_has(host_vars, "Players"))         state.player_count = parse_int_safe(var_value(host_vars, "Players"));
+	if (var_has(host_vars, "MaxPlayers"))      state.max_players  = parse_int_safe(var_value(host_vars, "MaxPlayers"));
+	else if (var_has(host_setup, "MaxPlayers")) state.max_players = parse_int_safe(var_value(host_setup, "MaxPlayers"));
+	if (var_has(host_vars, "Region"))          state.region       = var_value(host_vars, "Region");
+	else if (var_has(host_vars, "Country"))    state.region       = var_value(host_vars, "Country");
 	refresh_gsb_fields(state, host_setup, host_vars);
+	if (state.last_host_update.count("PlayerList")) {
+		state.roster = roster_from_player_list(state.last_host_update["PlayerList"]);
+	}
 
-	if (state.host_ip.empty()) state.host_ip = remote_ip;
+	refresh_host_endpoint(state, host_vars, state.roster, remote_ip, /*remote_port=*/0);
 	// Reflection override (dev/NAT) — same as the host-request path.
 	if (!reflect_ip_.empty()) state.host_ip   = reflect_ip_;
 	if (reflect_port_ != 0)   state.host_port = reflect_port_;
 
 	opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] update rid=%u players=%d/%d server_name='%s'",
+		"[lobby] update rid=%u players=%d/%d server_name='%s' stored=%s:%d roster=%zu",
 	            state.rid, state.player_count, state.max_players,
-	            state.server_name.c_str());
-	opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] host-addr update observed=%s advertised ServerIP=%s "
-	            "ServerPortNumber=%s stored=%s:%d",
-	            remote_ip.c_str(),
-	            host_vars.count("ServerIP") ? host_vars.at("ServerIP").c_str() : "(absent)",
-	            host_vars.count("ServerPortNumber") ? host_vars.at("ServerPortNumber").c_str() : "(absent)",
-	            state.host_ip.c_str(), state.host_port);
+	            state.server_name.c_str(), state.host_ip.c_str(), state.host_port,
+	            state.roster.size());
 
-	// Phase I.2: keep DB row in sync. We don't have peer_port in the
-	// update handler signature; pass 0 — the row already exists from the
-	// initial upsert with the right peer addr, and update_host() doesn't
-	// rely on peer_port for the WHERE clause.
+	// Keep the DB row in sync. No peer_port in the update handler signature;
+	// pass 0 — the row already exists from the initial upsert with the right
+	// peer addr, and update_host() doesn't rely on peer_port for the WHERE.
 	if (db_) {
 		try {
 			hostdb::update_host(*db_,
@@ -474,13 +592,13 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"[lobby] WARN active_hosts update: %s", e.what());
 		}
+		persist_roster(db_, state);
 	}
 
 	return {{}, "ClientHostUpdate"};
 }
 
-// witness: onnw/novaworldudp.py:298-315 — captures play_state, returns
-// ServerPlayResult with empty PlayCommands ServerVarList.
+// ClientPlayRequest -> ServerPlayResult with an empty PlayCommands list.
 LobbyDispatchResult LobbySession::handle_client_play_request(
 		const NapiMessage &msg, LobbyState &state) {
 	state.play_state = extract_var_lists(msg);
@@ -498,6 +616,26 @@ LobbyDispatchResult LobbySession::handle_client_play_request(
 	reply.children.push_back(std::move(play_commands));
 
 	return {{std::move(reply)}, "ClientPlayRequest"};
+}
+
+// ClientGLSVSSRequest {GLSVSSRequest, Cookie list} [orig:
+// CNapiGameSession_SendGLSVSSRequest @0x4d3a70/@0x4d3a98] -> ServerGLSVSSResults.
+// The consumer walks the reply's params for one named "GLSVSSResults"
+// (<= 1024 bytes) and, only when found, installs it as the CHARGLSVSSDATA
+// form field and reloads the character data
+// [orig: CNapiGameSession_HandleGLSVSSResults @0x4d33be..0x4d3416]; with
+// nothing configured the param is omitted so the client no-ops.
+LobbyDispatchResult LobbySession::handle_client_glsvss_request(
+		const NapiMessage &msg, LobbyState &state) {
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] glsvss request rid=%u GLSVSSRequest='%s'",
+	            state.rid, field_to_string(find_field(msg, "GLSVSSRequest")).c_str());
+	NapiMessage reply;
+	reply.name = "ServerGLSVSSResults";
+	if (!glsvss_results_.empty()) {
+		set_field(reply, "GLSVSSResults", glsvss_results_.substr(0, 1023));
+	}
+	return {{std::move(reply)}, "ClientGLSVSSRequest"};
 }
 
 } // namespace opennova

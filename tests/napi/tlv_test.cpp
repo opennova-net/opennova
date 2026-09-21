@@ -238,10 +238,72 @@ bool check_malformed_rejected() {
 	return true;
 }
 
+// The retail constructor bounds: names 1..63 bytes, field data under 4096
+// bytes, enforced by the writer AND the reader (a stock peer aborts the
+// whole statement parse on a violation).
+// [orig: NapiStatementParam_Create @0x632b71 / @0x632b90; NapiStatement_Create @0x6329c3]
+bool check_retail_bounds() {
+	auto encodes = [](const opennova::NapiMessage &m) {
+		std::vector<uint8_t> buf(opennova::napi_message_size(m) + 16, 0);
+		size_t n = 0;
+		return opennova::napi_message_encode(m, buf.data(), buf.size(), &n) == 0;
+	};
+	auto decodes = [](const std::vector<uint8_t> &wire) {
+		opennova::NapiMessage m;
+		size_t cons = 0;
+		return opennova::napi_message_decode(wire.data(), wire.size(), m, &cons) == 0;
+	};
+	auto field_wire = [](const std::string &name, size_t dlen) {
+		std::vector<uint8_t> w = {0x02, 'c', 0x00, 0x04};
+		w.insert(w.end(), name.begin(), name.end());
+		w.push_back(0x00);
+		w.push_back(static_cast<uint8_t>(dlen & 0xFFu));
+		w.push_back(static_cast<uint8_t>((dlen >> 8) & 0xFFu));
+		w.insert(w.end(), dlen, 0xAB);
+		w.push_back(0x00);
+		w.push_back(0x05);
+		w.push_back(0x03);
+		return w;
+	};
+
+	opennova::NapiMessage m;
+	m.name = "c";
+	m.fields.push_back({std::string(63, 'n'), {0x01}});
+	if (!expect(encodes(m), "63-byte field name encodes")) return false;
+	if (!expect(decodes(field_wire(std::string(63, 'n'), 1)), "63-byte field name decodes")) return false;
+	m.fields[0].name = std::string(64, 'n');
+	if (!expect(!encodes(m), "64-byte field name is rejected by the writer")) return false;
+	if (!expect(!decodes(field_wire(std::string(64, 'n'), 1)), "64-byte field name is rejected by the reader")) return false;
+	m.fields[0].name = "";
+	if (!expect(!encodes(m), "empty field name is rejected by the writer")) return false;
+	if (!expect(!decodes(field_wire("", 1)), "empty field name is rejected by the reader")) return false;
+
+	m.fields[0].name = "k";
+	m.fields[0].data.assign(4095, 0xAB);
+	if (!expect(encodes(m), "4095-byte data encodes")) return false;
+	if (!expect(decodes(field_wire("k", 4095)), "4095-byte data decodes")) return false;
+	m.fields[0].data.assign(4096, 0xAB);
+	if (!expect(!encodes(m), "4096-byte data is rejected by the writer")) return false;
+	if (!expect(!decodes(field_wire("k", 4096)), "4096-byte data is rejected by the reader")) return false;
+
+	opennova::NapiMessage container;
+	container.name = std::string(64, 'c');
+	if (!expect(!encodes(container), "64-byte container name is rejected by the writer")) return false;
+	container.name = "";
+	if (!expect(!encodes(container), "empty container name is rejected by the writer")) return false;
+	std::vector<uint8_t> long_container = {0x02};
+	long_container.insert(long_container.end(), 64, 'c');
+	long_container.push_back(0x00);
+	long_container.push_back(0x03);
+	if (!expect(!decodes(long_container), "64-byte container name is rejected by the reader")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
 	if (!check_size_math()) return 1;
+	if (!check_retail_bounds()) return 1;
 	if (!check_empty_container()) return 1;
 	if (!check_fields_only()) return 1;
 	if (!check_nested_containers()) return 1;

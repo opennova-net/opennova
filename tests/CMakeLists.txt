@@ -2278,7 +2278,7 @@ target_include_directories(gate_probe_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_probe COMMAND gate_probe_test)
 
 add_executable(lobby_update_test novaworld/lobby_update_test.cpp)
-target_link_libraries(lobby_update_test PRIVATE opennova_novaworld_service)
+target_link_libraries(lobby_update_test PRIVATE opennova_net)
 target_include_directories(lobby_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lobby_update COMMAND lobby_update_test)
 
@@ -2722,6 +2722,14 @@ add_test(NAME netsim_client_replica_pipeline_contact_resolver
     COMMAND netsim_client_replica_pipeline_contact_resolver_test)
 add_test(NAME netsim_client_replica_pipeline_target_carrier_follow
     COMMAND netsim_client_replica_pipeline_target_carrier_follow_test)
+add_executable(netsim_client_replica_pipeline_compact_self_heal_test
+    netsim/client_replica_pipeline_compact_self_heal_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_compact_self_heal_test PRIVATE opennova_runtime)
+add_test(NAME netsim_client_replica_pipeline_compact_self_heal
+    COMMAND netsim_client_replica_pipeline_compact_self_heal_test)
+add_executable(netsim_net_quality_test netsim/net_quality_test.cpp)
+target_link_libraries(netsim_net_quality_test PRIVATE opennova_runtime)
+add_test(NAME netsim_net_quality COMMAND netsim_net_quality_test)
 
 add_executable(netsim_client_replica_pipeline_class_resolver_test
     netsim/client_replica_pipeline_class_resolver_test.cpp)
@@ -2908,6 +2916,11 @@ target_link_libraries(npruntime_handshake_server_test
     PRIVATE opennova_net opennova_runtime opennova_formats)
 target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
+
+add_executable(npruntime_host_producers_test npruntime/host_producers_test.cpp)
+target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_producers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_producers COMMAND npruntime_host_producers_test)
 
 # The `_NSTMOUT.TXT` connection-template override (CNapiNetwork_Init's NEVER / seconds /
 # negative legs) and the joiner's 0x82 CS overlay of the host's timeout_ms / msg_out_max:

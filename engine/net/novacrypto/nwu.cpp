@@ -160,12 +160,10 @@ NwuDerived nwu_derive(uint32_t seed) {
 
 uint32_t nwu_compute_seed(std::string_view key) {
 	// [orig: NapiNP_ComputeKeySeed @ 0x618430 (retail) | Crypto_ComputeSeed @ 0x5e5160 (demo)]
-	// Mirrors Crypto_ComputeSeed@0x5e5160: sum of (i + key[i]*key[i]) +
-	// keylen + 50. Null-key sentinel (3252) is not reachable via string_view,
-	// but we return it on empty to preserve the 'no key provided' signal.
-	if (key.empty()) {
-		return 3252u;
-	}
+	// Sum of (i + key[i]*key[i]) + keylen + 50. The 3252 sentinel is the
+	// NULL-POINTER arm only (`test edi, edi` @0x618435); a non-null empty
+	// string skips the loop and returns 0 + 0 + 50 (`lea eax, [esi+edx+32h]`
+	// @0x618475). A string_view is never null, so 3252 is unreachable here.
 	const int klen = static_cast<int>(key.size());
 	int acc = 0;
 	for (int i = 0; i < klen; ++i) {

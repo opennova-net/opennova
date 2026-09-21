@@ -60,7 +60,6 @@ namespace opennova::inmatch {
 // [orig: parse_server_session_variables @0x520440, store @0x520478].
 uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len);
 
-
 enum class TerrainTilState : uint8_t {
 	Absent = 0,
 	Receiving = 1,
@@ -611,6 +610,18 @@ public:
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
+	// The client's own ping: the last completed S2C 0x57 round trip and the
+	// ten-entry ring's mean (see rtt_ring_ below) [orig: dword_A860D4;
+	//  CNetStats_GetAveragePing @0x4C2750].
+	uint32_t client_ping_ms() const { return rtt_current_ms_; }
+	uint32_t client_average_ping_ms() const {
+		uint32_t sum = 0;
+		for (const uint32_t sample : rtt_ring_) sum += sample;
+		return sum / static_cast<uint32_t>(rtt_ring_.size());
+	}
+	// The outer 0x45/0x85 connection ping's rtt (conn->session_keys.rtt_ms);
+	// 0 until the host answers one [orig: Nwu_HandlePing @0x623C9B].
+	uint32_t session_ping_ms() const { return session_rtt_ms_; }
 	const std::string &client_scrk() const { return conn_.client_scrk; }
 	const std::string &server_scrk() const { return conn_.server_scrk; }
 	const std::string &last_error() const { return last_error_; }
@@ -663,6 +674,10 @@ private:
 	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
 	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.
 	void on_server_goodbye(const std::vector<uint8_t> &body, PollResult &out);
+	// S2C 0x85 the outer connection ping: keyed by OUR CK, `WR` set = the host wants our 0x45
+	// pong of its `MS` stamp, clear = the pong of our own ping (rtt = now - MS). Either form
+	// refreshes the reap clock exactly like an admitted 0x83.
+	void on_server_ping(const std::vector<uint8_t> &body, PollResult &out);
 	// Store `event` (with `role` as DS) as the connection's disconnect record only while none is
 	// latched — retail's store-if-!valid slot. The 128/32-byte record caps apply.
 	void latch_disconnect_event(const DisconnectEvent &event, uint32_t role);
@@ -706,11 +721,11 @@ private:
 	uint64_t handshake_last_send_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
 	// Wall-clock stamp of the last IN-ORDER admitted 0x83 (a zero-message keepalive counts;
-	// duplicates, futures, 0x84 resend lists and every other opcode do not) — retail's
-	// per-connection reap clock conn+0x5E8, initialized at state-5 entry (the accepted 0x82)
-	// and measured against cs_dir0.timeout_ms.
+	// duplicates, futures, 0x84 resend lists and every other opcode do not) or of a
+	// key-matched 0x85 ping — retail's per-connection reap clock conn+0x5E8, initialized at
+	// state-5 entry (the accepted 0x82) and measured against cs_dir0.timeout_ms.
 	// [orig: CNapiNPConnection_OnStateChange @0x62612f (init); CNapiNPConnection_ParseMessages
-	//  @0x625d54 (stamp); Nwu_HandlePing @0x623c56 (the unmodeled 0x85 ping also stamps);
+	//  @0x625d54 (stamp); Nwu_HandlePing @0x623c56 (the 0x85 ping stamps it too);
 	//  read by PumpStateMachine @0x6295b2]
 	uint64_t last_receive_ms_ = 0;
 	bool receive_clock_armed_ = false;
@@ -762,9 +777,21 @@ private:
 	// this scalar on a malformed body and retains the latest valid value.
 	// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]
 	uint32_t spawn_ack_timestamp_ = 0;
-	// The complete six-message S2C 0x0F reply burst is emitted once per session.
-	// [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab]
-	bool world_state_completion_sent_ = false;
+	// The client's own round-trip measurement: every S2C 0x57 with the echo
+	// flag CLEAR is the pong of our C2S 0x2C ping, and its `now - timestamp`
+	// lands in a ten-entry ring (the index wraps at 10) plus the current-ping
+	// word; the ring's mean (all ten slots, zero-initialized slots included)
+	// is the quality metric's ping term. [orig: NapiNPClientMsg_0x057_RTT
+	//  @0x432210 — the flag=0 arm @0x432280 (rtt into
+	//  stru_A86920.ring[index], dword_A860D4 = rtt, ++index >= 10 -> 0);
+	//  CNetStats_GetAveragePing @0x4C2750 = sum(ring[0..9]) / 10]
+	std::array<uint32_t, 10> rtt_ring_{};
+	uint32_t rtt_ring_index_ = 0;
+	uint32_t rtt_current_ms_ = 0;
+	// The OUTER connection ping's own measurement (conn->session_keys.rtt_ms):
+	// a 0x85 with WR clear is the host's pong of our 0x45 [orig: Nwu_HandlePing
+	//  @0x623A70, the rtt store @0x623C9B].
+	uint32_t session_rtt_ms_ = 0;
 
 	bool has_self_handle_ = false;
 	uint16_t self_handle_ = 0;  // wire handle H, learned via the owning connection ID (pool<<12|slot)

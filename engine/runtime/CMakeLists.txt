@@ -347,12 +347,17 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_revive.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_vehicle_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp

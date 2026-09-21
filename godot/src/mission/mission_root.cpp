@@ -202,6 +202,13 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 					"MissionRoot: could not dial co-op host %s:%d — joiner disabled.",
 					join_target->get_host_ip(), join_target->get_port()));
 		}
+		// The proxy-assisted NovaWorld join rides the same target (the preloaded
+		// drive path installs it at its own dial).
+		if (needs_join_connection && join_target.is_valid() && join_target->has_join_proxy() &&
+				sim_->is_joiner()) {
+			sim_->set_join_proxy(join_target->get_proxy_node(), join_target->get_proxy_relay(),
+					join_target->get_proxy_cookie());
+		}
 		// The JOIN VERSIONCRCSTRING checksum reads the loose
 		// expansion/<name>/version.txt under the install root (D-NET-166).
 		if (needs_join_connection && options->get_resource_root().is_valid()) {

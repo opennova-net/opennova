@@ -139,7 +139,8 @@ int main() {
 				"zero-tick edges survive to the next tick")) return 1;
 	}
 
-	// The retail hitch clamp is owned here and drops the clamped backlog.
+	// The hitch clamp is owned here and, under the shell's default wall-clock
+	// bank, drops the clamped backlog.
 	{
 		TickProbe target;
 		Session session(target);
@@ -154,6 +155,29 @@ int main() {
 		tiny.delta_seconds = 0.001;
 		if (!expect(session.advance(tiny).ticks_run() == 0,
 				"clamped backlog is dropped")) return 1;
+	}
+
+	// The dedicated host's policy is the retail main-loop bank: a stall caps at
+	// 500 ms of bank, and the frame after it is smoothed against that clamped
+	// history — retail's post-stall fast-forward, not a dropped backlog
+	// [orig: Game_MainLoop @0x52B630 — clamp @0x52B83E, EMA @0x52B85B].
+	{
+		TickProbe target;
+		Session session(target);
+		session.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
+		if (!load(session)) return 1;
+		if (!expect(session.tick_bank_policy() == opennova::world::TickBankPolicy::RetailMainLoop,
+				"loading keeps the selected bank policy")) return 1;
+		FrameInput hitch;
+		hitch.delta_seconds = 1.0;
+		if (!expect(session.advance(hitch).ticks_run() ==
+					TickAccumulator::kRetailMaxCatchupTicks,
+				"retail bank: a hitch clamps to 500 ms of quanta")) return 1;
+		FrameInput tiny;
+		tiny.delta_seconds = 0.001;
+		// (7 * 8000 + 16 + 4) >> 3 = 7002 units -> 109 quanta from phase 125 -> 27.
+		if (!expect(session.advance(tiny).ticks_run() == 27,
+				"retail bank: the frame after a stall fast-forwards")) return 1;
 	}
 
 	// Pause clears banked time; manual step and reset stay local-only.

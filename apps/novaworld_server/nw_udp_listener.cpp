@@ -257,6 +257,11 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	}
 	opennova::net::close_socket(sock);
 	bound_port_ = bound;
+	// The SessionInit CU carries the web domain as bare host:port — the
+	// retail client prepends the scheme itself
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4d1627 sprintf("http://%s")].
+	web_domain_ = config.public_host + ":" + std::to_string(config.http_port);
+	lobby_session_.set_glsvss_results(config.glsvss_results);
 
 	stop_requested_.store(false);
 	initialize_jo_host();
@@ -561,7 +566,7 @@ void NwUdpListener::run_loop() {
 			                                     client_port, server_sk,
 			                                     server_scrk,
 			                                     /*novaworld_name=*/"NWServer",
-			                                     /*novaworld_web_url=*/"http://127.0.0.1:8080",
+			                                     /*novaworld_web_url=*/web_domain_,
 			                                     /*nwuid=*/nwuid);
 			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
 			                                 server_auth_to_bytes(reply));

@@ -743,7 +743,7 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasSide)
 		w.u8(0);        // side [orig: slot+100577]
 	if (field_flags & kPlayerSyncHasQuality)
-		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
+		w.u8(ctx.quality); // quality [orig: slot+418 @0x506213; client clamps <=4 @0x431370]
 	if (field_flags & kPlayerSyncHasAccountId)
 		w.u32(0);       // NovaWorld account netId [orig: the slot connection's napi_player_data+420
 		                //  @0x506257, else 0 @0x506246] — 0 = a LAN account (no clan-roster node);

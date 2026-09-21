@@ -153,6 +153,7 @@ int main() {
 	// --- Listeners --------------------------------------------------------
 	GateListener gate;
 	gate.set_unknown_tracker(&unknown_tracker);
+	gate.set_database(dbh.get());
 	if (!gate.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: gate listener start failed\n");
 		return 1;

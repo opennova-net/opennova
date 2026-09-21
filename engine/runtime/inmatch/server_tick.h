@@ -80,6 +80,19 @@ void Server_TickUpdate(NapiNPServerCtx &ctx);
 void Server_RecalculateAllPlayerKitWeights(
 		std::vector<NapiNPConnection> &roster, world::World &world);
 
+// The join-phase validation watchdog (NetPlayer states 3/4): the NovaWorld
+// ClientPlayerEnterRequest announcement on an armed host, the 120 s
+// NONWTOVALU / NWJTICKTMOUT reaps. Runs from the periodic block; exposed for
+// the shell-driven ticket flow and its tests.
+// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0, caller @0x51DBF3]
+void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx);
+// The service's ServerPlayerEnterResult for a held joiner (see
+// NapiNPServerCtx::on_player_enter_request). Success admits it into the spawn
+// pump; a failure punts it with "NWU:NWPENTERFAIL" carrying MsgCode.
+// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
+bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
+		bool success, int32_t msg_code);
+
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_state runs once per client
 // epoch, then leaves to the SpawnPoint refresh + the 14-tick pool-1 phase

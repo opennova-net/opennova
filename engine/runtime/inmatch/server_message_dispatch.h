@@ -33,6 +33,8 @@ struct EntityHandle;
 // builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
 namespace opennova::inmatch {
 
+struct NapiNPServerCtx;
+
 using MissionMetadataBlob = std::array<uint8_t, 180>;
 
 // Build the session-owned S2C 0x64 raw content. The two random regions and
@@ -86,6 +88,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 struct ServerDispatchInputs {
 	uint32_t session_uptime_ms = 0;
 	const MissionMetadataBlob *mission_metadata_blob = nullptr;
+	// The live transfer identities the 0x60 / 0x64 chunk headers carry and the
+	// C2S 0x33 / 0x37 re-requests must echo (a foreign token restarts at 0):
+	// retail's per-process mission counters, 1 for a fresh process's first
+	// mission. [orig: g_replayBlockMagic @0xC86FC4 (++ in Game_StartMission
+	//  @0x5247F3); dword_C86FC8 (++ in CNapiGameSession_InitRandomSeedOrRequest
+	//  @0x51E9C1)]
+	uint32_t server_info_transfer_id = 1;
+	uint32_t mission_metadata_transfer_id = 1;
 	// stru_C947D8: the board frozen by the round-end producer; the 0x2B service
 	// cuts chunks from it and never rebuilds. [orig: NapiNPServerMsg_HandleReplayDataRequest
 	// @0x514FE0 -> NetPacket_WriteReplayStreamChunk @0x506F60]
@@ -94,6 +104,12 @@ struct ServerDispatchInputs {
 	// null or empty is retail's null lookup and the whole handler no-ops.
 	// [orig: Server_BroadcastMedicRequest @0x5153C9..0x5153D0]
 	const std::string *medic_request_format = nullptr;
+	// The owning host context, for the handlers that read host-wide state the
+	// per-connection inputs above do not carry (the location labels the chat
+	// tag reads, the vehicle-spawn limit table, the deployable spawner seam,
+	// the ping policy). Null on the World-less unit path: those handlers then
+	// consume their message without acting.
+	NapiNPServerCtx *server_ctx = nullptr;
 };
 
 // The 0x580 send set shared by the player-death 0x54 split and the C2S 0x2E

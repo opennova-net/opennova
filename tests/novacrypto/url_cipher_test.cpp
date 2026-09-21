@@ -83,16 +83,28 @@ bool check_empty_cases() {
 	return true;
 }
 
-// Inputs longer than the key length must wrap modularly. The key length
-// for both NK and CK is 21 bytes — verify past the 21st position.
-bool check_key_wrap() {
+// The key walk is LINEAR over the 21-byte key plus its NUL slot: position 21
+// is keyed by 0 (cipher = plain - '0'), and anything past it is cut (retail
+// reads uninitialised stack there). [orig: parse_connection_query_string
+// @0x54dfb0 — `char cipher_key[128]` + sprintf, `ni_src[cipher_key - nk_buf]`]
+bool check_key_nul_slot_and_cut() {
 	using opennova::url_cipher_decode;
 	using opennova::url_cipher_encode;
 	using opennova::URL_CIPHER_KEY_NK;
-	const std::string plain(40, 'X'); // 40 chars, past the 21-byte key boundary
-	const std::string encoded = url_cipher_encode(plain, URL_CIPHER_KEY_NK);
-	const std::string decoded = url_cipher_decode(encoded, URL_CIPHER_KEY_NK);
-	if (!expect(decoded == plain, "40-byte input roundtrips with 21-byte key via modular wrap")) return false;
+	const std::string key = URL_CIPHER_KEY_NK;
+	if (!expect(key.size() == 21, "the NK key is 21 bytes")) return false;
+	const std::string plain22 = std::string(21, 'X') + "Y";
+	const std::string encoded22 = url_cipher_encode(plain22, key);
+	if (!expect(encoded22.size() == 22, "a 22-char token encodes in full")) return false;
+	if (!expect(static_cast<uint8_t>(encoded22[21]) == static_cast<uint8_t>('Y' - '0'),
+	            "position 21 is keyed by the NUL slot: cipher = plain - '0'")) return false;
+	if (!expect(url_cipher_decode(encoded22, key) == plain22,
+	            "a 22-char token roundtrips through the NUL slot")) return false;
+	const std::string plain40(40, 'X');
+	const std::string encoded40 = url_cipher_encode(plain40, key);
+	if (!expect(encoded40.size() == 22, "encode cuts a token at keylen + 1")) return false;
+	if (!expect(url_cipher_decode(std::string(40, 'a'), key).size() == 22,
+	            "decode cuts a token at keylen + 1")) return false;
 	return true;
 }
 
@@ -122,7 +134,7 @@ int main() {
 	if (!check_ck_key_roundtrip()) return 1;
 	if (!check_ampersand_terminator()) return 1;
 	if (!check_empty_cases()) return 1;
-	if (!check_key_wrap()) return 1;
+	if (!check_key_nul_slot_and_cut()) return 1;
 	if (!check_python_golden_vectors()) return 1;
 	std::printf("OK: url_cipher roundtrips + byte vector + '&' terminator\n");
 	return 0;

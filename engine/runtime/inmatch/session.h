@@ -40,6 +40,10 @@ enum class SessionErrorCode : uint8_t {
 	LoadFailed,
 	SessionLost,
 	TickFailed,
+	// A dedicated host's round-end linger expired: retail stores the mission
+	// exit reason and leaves the mission; a headless host exits its loop.
+	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_mission_exit_reason 4/3]
+	RoundEnded,
 };
 
 struct SessionError {
@@ -242,6 +246,11 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
+	// How advance() banks wall-clock into ticks. The shell keeps the default
+	// WallClock bank; the dedicated host selects the retail main-loop bank
+	// (world::TickBankPolicy). Selecting a policy drops the banked time.
+	void set_tick_bank_policy(world::TickBankPolicy policy) { accumulator_.set_policy(policy); }
+	world::TickBankPolicy tick_bank_policy() const { return accumulator_.policy(); }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 

@@ -6,16 +6,48 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova {
 namespace db { class Database; }
 
+// One entry of a client-sent var list, in wire order. `fnum` is the retail
+// VarFNum: 0 for a plain host/setup variable, the player-slot index for the
+// indexed PlayerList entries, so N players keep N distinct
+// (fnum, "PlayerName") entries instead of collapsing onto one key.
+// [orig: NapiStatement_SerializeVarList @0x4d0660 writes VarFNum/VarName/VarValue
+//  per node; Server_PlayerAdd @0x51d441..0x51d4aa writes PlayerName /
+//  PlayerIpAndPort / PlayerPCID / PlayerTeam / PlayerType keyed by the slot]
+struct VarEntry {
+	int fnum = 0;
+	std::string name;
+	std::string value;
+};
+using VarList = std::vector<VarEntry>;
+// Top-level keys are VarList names (e.g. "HostSetup"); values keep the wire order.
+using VarLists = std::map<std::string, VarList>;
+
+// Lookup helpers over a VarList. `var_value` returns the value of the first
+// entry matching (fnum, name) or an empty string; `var_has` reports presence.
+// Names compare case-insensitively (retail's CNapiVarList_FindByTypeAndName
+// walks Napi_StrCaseEqual).
+bool var_has(const VarList &list, std::string_view name, int fnum = 0);
+std::string var_value(const VarList &list, std::string_view name, int fnum = 0);
+
+// One player slot the host reported in its PlayerList (the five retail
+// per-slot vars, grouped by VarFNum).
+struct HostRosterSlot {
+	int slot = 0;                 // VarFNum
+	std::string player_name;      // PlayerName
+	std::string ip_and_port;      // PlayerIpAndPort
+	std::string pcid;             // PlayerPCID
+	std::string team;             // PlayerTeam
+	std::string type;             // PlayerType
+};
+
 // Per-connection lobby state. Persists across protocol messages on the
 // same UDP session (keyed by Connection.id in the standalone server).
-//
-// Mirrors the Python `session.host_state` and `session.play_state`
-// dictionaries in onnet/onnw/novaworldudp.py.
 struct LobbyState {
 	// Set during handle_client_request_verify_result.
 	std::string sess_id_string;     // hex token returned in ServerVerifyResult
@@ -26,10 +58,10 @@ struct LobbyState {
 	std::string gsid;               // game-server identifier returned in HostCommands
 	uint32_t    rid = 0;            // numeric room/host id returned in ServerHostResult.Rid
 	std::string game;               // LobbyName from HostSetup (e.g. "jop_2_consumer")
-	std::string host_ip;            // from HostInfo.ServerIP, falls back to remote addr
-	int         host_port = 0;
-	std::string host_key;           // from ClientHostUpdate
-	std::string pcid_key;           // from ClientHostUpdate
+	std::string host_ip;            // the observed UDP source (retail advertises no address)
+	int         host_port = 0;      // Host.Port when > 0, else the observed UDP source port
+	std::string host_key;           // Host.HostKey (request or update)
+	std::string pcid_key;           // Host.PCIDKey (request or update; rotates every refresh)
 	std::string server_name;
 	int         player_count = 0;
 	int         max_players = 0;
@@ -46,10 +78,28 @@ struct LobbyState {
 	std::string exp_bits;
 	std::string ver1;
 	std::string joicon2;
+	// The remaining Host columns the retail browser row carries verbatim
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0 writes TimeLeft @0x4fedc5, Msg
+	//  @0x4fef46, Age @0x4ff033, TimeOfDay @0x4ff153, LevelRange @0x4ff251,
+	//  BBMode @0x4ff297, PBServer @0x4ff43c, Skins @0x4fed52, Tracers @0x4feec2,
+	//  Mod @0x4feee8]. Empty until the host reports them.
+	std::string time_left;
+	std::string time_of_day;
+	std::string msg;
+	std::string mod;
+	std::string age;
+	std::string pb_server;
+	std::string level_range;
+	std::string bb_mode;
+	std::string skins;
+	std::string tracers;
+	std::string pix;
+	// The host's PlayerList, one entry per reported slot (VarFNum-keyed).
+	std::vector<HostRosterSlot> roster;
 
 	// Last full var-lists snapshot — useful for /api/lobbies introspection.
-	std::map<std::string, std::map<std::string, std::string>> last_host_update;
-	std::map<std::string, std::map<std::string, std::string>> play_state;
+	VarLists last_host_update;
+	VarLists play_state;
 };
 
 struct LobbyDispatchResult {
@@ -78,11 +128,14 @@ struct LobbyDispatchResult {
 };
 
 // Utility: peel "ClientVarList" children out of a parsed Container into
-// the nested-map form onnet's _extract_var_lists / _client_var_list_to_dict
-// produce. Top-level keys are VarList names (e.g. "HostSetup"); inner
-// maps are VarName -> VarValue (NUL-trimmed ASCII).
-std::map<std::string, std::map<std::string, std::string>>
-extract_var_lists(const NapiMessage &container);
+// VarLists. Top-level keys are VarList names (e.g. "HostSetup"); each list
+// keeps every ClientVar in wire order with its VarFNum, so indexed entries
+// (the PlayerList) survive intact.
+VarLists extract_var_lists(const NapiMessage &container);
+
+// Group a PlayerList into per-slot roster entries (one HostRosterSlot per
+// distinct VarFNum, in first-seen order).
+std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list);
 
 class LobbySession {
 public:
@@ -106,6 +159,13 @@ public:
 		reflect_port_ = port;
 	}
 
+	// The GLSVSSResults string a ClientGLSVSSRequest is answered with. Empty
+	// (the default) answers with a ServerGLSVSSResults that carries no
+	// GLSVSSResults param, which the retail consumer treats as a no-op
+	// [orig: CNapiGameSession_HandleGLSVSSResults @0x4d3380 acts only when the
+	//  param is found].
+	void set_glsvss_results(std::string results) { glsvss_results_ = std::move(results); }
+
 	// Dispatch one inbound lobby message. `inner_message` is the outer
 	// container's first child (the actual ClientConnected / ClientHostRequest /
 	// etc.). `state` is the caller-owned per-connection state.
@@ -120,9 +180,11 @@ public:
 	void set_gsid_generator(std::function<std::string(const std::string&)> g) {
 		gsid_gen_ = std::move(g);
 	}
-	void set_rid_generator(std::function<uint32_t(const std::string&)> g) {
-		rid_gen_ = std::move(g);
-	}
+	// The host RID is minted by the service alone (see mint_rid); tests may
+	// pin it. The generator takes no input on purpose: nothing the host sends
+	// is a uniqueness source (its AppId is a per-session random in
+	// [1000, 9999] [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]).
+	void set_rid_generator(std::function<uint32_t()> g) { rid_gen_ = std::move(g); }
 
 private:
 	LobbyDispatchResult handle_client_connected(const NapiMessage &msg, LobbyState &state);
@@ -132,10 +194,14 @@ private:
 	LobbyDispatchResult handle_client_host_update(const NapiMessage &msg, LobbyState &state,
 	                                              const std::string &remote_ip);
 	LobbyDispatchResult handle_client_play_request(const NapiMessage &msg, LobbyState &state);
+	LobbyDispatchResult handle_client_glsvss_request(const NapiMessage &msg, LobbyState &state);
+	uint32_t mint_rid();
 
 	IdGenerator sess_id_gen_;
 	std::function<std::string(const std::string&)> gsid_gen_;
-	std::function<uint32_t(const std::string&)> rid_gen_;
+	std::function<uint32_t()> rid_gen_;     // null == mint_rid()
+	uint32_t next_rid_suffix_ = 1;          // policy: monotonic per process
+	std::string glsvss_results_;
 	opennova::db::Database *db_ = nullptr;  // optional, null in tests
 	std::string reflect_ip_;                // ONNET_CLIENT_REFLECT_IP (empty=unset)
 	uint16_t    reflect_port_ = 0;          // client NovaWorld session port (0=unset)

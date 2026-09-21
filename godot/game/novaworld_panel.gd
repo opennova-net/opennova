@@ -669,7 +669,14 @@ func _on_join_failed(reason: String) -> void:
 	if not _logged_in or _suppress_client_messages:
 		return
 	_join_button.disabled = _selected_row() == null
-	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
+	# NWEC tags are keys in menutxt.bin; HTTP failures already carry prose.
+	var message := reason
+	var menutxt := Strings.get_table(Strings.TABLE_MENUTXT)
+	if menutxt != null and menutxt.has_string(reason):
+		var localized := menutxt.get_string(reason)
+		if not localized.is_empty() and localized != reason:
+			message = "%s\n\n(%s)" % [localized, reason]
+	_show_message(message, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 
 
 # True only on the FIRST Join press for a row whose advertised expansion the
@@ -711,6 +718,14 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
 	target.app_id = app_id
 	target.cd_cookie = cd_cookie
+	# The proxy-assisted join fields (the .joi NI/NP/BK) and the LN lobby number
+	# ride the target so the in-match joiner can install its rendezvous config
+	# and pick the LAN-discovered endpoint over the relay.
+	if _client.has_join_proxy():
+		target.proxy_node = _client.get_join_proxy_node()
+		target.proxy_relay = _client.get_join_proxy_relay()
+		target.proxy_cookie = _client.get_join_proxy_cookie()
+	target.lobby_number = _client.get_join_lobby_number()
 	join_in_match_requested.emit(target)
 
 

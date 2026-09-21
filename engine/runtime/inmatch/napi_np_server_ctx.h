@@ -8,8 +8,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include <functional>
+
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
+#include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there
@@ -173,6 +177,14 @@ struct NapiNPServerCtx {
 	// A local healthy LAN resolves to 1; the shell binding may replace it when
 	// equivalent live telemetry is available.
 	uint8_t host_network_quality = 1;
+	// The host CNetQuality SEND window that derives the byte above, sampled
+	// every 62 frames while in session [orig: Game_ProcessMainFrame @0x52658B,
+	//  the dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
+	replication::NetQualityWindow host_quality_window;
+	uint32_t net_quality_sample_countdown = 0;
+	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.
+	// [orig: g_weapon_broadcast_slot_cursor, Server_TickUpdate @0x51DE79]
+	int32_t quality_broadcast_slot_cursor = 0;
 	// [orig: g_network_quality_broadcast_timer] One global explicit countdown,
 	// reset to zero by Server_InitNewRoundState @0x51CA9E. Server_TickUpdate
 	// decrements a positive value, emits when it reaches/is zero, then reloads
@@ -242,6 +254,14 @@ struct NapiNPServerCtx {
 	// session id, then serves that same block to every joiner/re-request.
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
 	std::array<uint8_t, 180> mission_metadata_blob{};
+	// The live transfer identities the 0x60 / 0x64 chunk headers carry: retail's
+	// two process-global mission counters, each incremented once per mission
+	// start, so a fresh process's first mission serves id 1 on both. A C2S
+	// 0x33 / 0x37 carrying another token restarts its transfer at offset 0.
+	// [orig: g_replayBlockMagic @0xC86FC4 (`++` in Game_StartMission @0x5247F3);
+	//  dword_C86FC8 (`++` in CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1)]
+	uint32_t server_info_transfer_id = 0;
+	uint32_t mission_metadata_transfer_id = 0;
 
 	// Retail's overloaded g_spawn_success_gate is deliberately not copied into
 	// this host context. Per-connection InitialStateBurst owns load progress;
@@ -259,9 +279,86 @@ struct NapiNPServerCtx {
 		uint32_t server_sk = 0;    // forced ServerAuth.sk
 		std::string nwuid;         // forced ServerAuth nwuid (60-char hex)
 		std::string novaworld_name = "NWServer";
-		std::string novaworld_web_url = "http://127.0.0.1:8080";
+		// Bare host:port — the retail client prefixes "http://" itself
+		// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1627
+		//  sprintf(url, "http://%s", domain)].
+		std::string novaworld_web_url = "127.0.0.1:8080";
 	};
 	ServerKeyMint server_key_mint;
+
+	// The GSID the NovaWorld service returned in ServerHostResult HostCommands,
+	// installed by the shell's NovaWorld host binding once registration
+	// succeeds; empty on a pure LAN host. Advertised as the 0x81 SUS1.
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 — "GSID"
+	//  @0x4D5BD6 -> byte_24D5A12 @0x4D5BEE -> np_protocol->server_user_string1
+	//  @0x4D5C0F]
+	std::string novaworld_gsid;
+
+	// The NovaWorld join-ticket arm (byte_B60100 & 0x40): set by the shell on a
+	// NovaWorld-registered host whose ServerHostResult carried
+	// HostRequiresJoinTicket. Armed, every validated joiner is announced to the
+	// service as a ClientPlayerEnterRequest and held in game state 4 until the
+	// ServerPlayerEnterResult (Server_ApplyPlayerEnterResult) or the 120 s
+	// NWJTICKTMOUT reap; a pure LAN host leaves it clear.
+	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — the arm reads
+	//  @0x4C8B88 / @0x4C8CA9, SendPlayEnterRequest @0x4C8BC1, SetGameState(4)
+	//  @0x4C8BCA]
+	bool novaworld_join_tickets_armed = false;
+	// The host's own address string (CNapiNetwork_GetLocalAddress @0x4C4F60):
+	// it prefixes the JOINTICKET key the request looks up in the joiner's CD
+	// identity blob ("<localaddr>JOINTICKET"). Empty = no lookup, an empty
+	// ticket rides the request (retail: GetLocalAddress failed). On a NovaWorld
+	// transport retail's string is the constant "PUB", so the key is the
+	// PUBJOINTICKET cookie; the shell installs kNovaWorldLocalAddress when it arms.
+	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D0312..0x4D0362;
+	//  CNapiNetwork_GetLocalAddress @0x4C4F60 copies g_local_net_address_str @0x7CA298]
+	static constexpr const char *kNovaWorldLocalAddress = "PUB";
+	std::string host_local_address;
+	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
+	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
+	// NovaWorld host session (ClientSession::build_player_enter_request); an
+	// unbound hook drops the request, and the joiner then reaps on the ticket
+	// deadline exactly as a service that never answered.
+	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D02A0 — ConnectionId
+	//  @0x4D0396, IpAddress @0x4D03D0, PortNumber @0x4D040B, JoinTicket @0x4D046B]
+	struct PlayerEnterRequest {
+		uint32_t connection_id = 0;
+		PeerAddr peer{};
+		std::string join_ticket;
+	};
+	std::function<void(const PlayerEnterRequest &)> on_player_enter_request;
+
+	// A ServerCommand Cycle / EndMission / GameOver ends the round and then
+	// overrides the linger Server_ProcessRoundEnd stored (2790) with 620 ticks;
+	// nonzero here is consumed by the announcing pass, then cleared.
+	// [orig: the ServerCommand handler loc_4D22F0 — Server_ProcessRoundEnd
+	//  @0x4D31C0, g_endround_linger_timer = 0x26C @0x4D31CA]
+	uint32_t round_end_linger_override_ticks = 0;
+
+	// The host EntityLimit table behind the vehicle-spawn availability reply
+	// (C2S 0x42 -> S2C 0x70) and the C2S 0x40 spawn gate: one row per spawnable
+	// items.def id. Retail's 73-dword rows carry the id (row[0]), the type cap
+	// (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
+	// cap) and the per-team slot counts (row[3 + team], -1 = unlimited).
+	// Empty = no limit table loaded: the reply carries only its terminator and
+	// every spawn is refused, exactly as an empty g_entityLimitTable.
+	// [orig: g_entityLimitTable @0xC7B480 / g_entityLimitCount @0xC84680;
+	//  serialize_weapon_overlay_slots_0 @0x5105A0; sub_5104C0 @0x5104C0]
+	struct VehicleSpawnLimitRow {
+		uint16_t type_id = 0;
+		int32_t type_cap = -1;                // row[1]
+		int32_t per_team_flag = -1;           // row[2]
+		std::array<int32_t, 8> team_slots{};  // row[3 + team]
+	};
+	std::vector<VehicleSpawnLimitRow> vehicle_spawn_limits;
+	// dword_24D1E38: the "unlimited vehicle spawns" host global. 0xFF/0xFF rows
+	// on the wire and the limit check bypassed. [orig: @0x5105FF, @0x51C5F6]
+	bool vehicle_spawns_unlimited = false;
+	// The world-side spawner Entity_SpawnDeployable @0x51C2B0 delegates to: the
+	// embedder that owns the items.def traits sweep installs it; the C2S 0x40
+	// handler refuses the spawn when unset. Returns the new pool-1 handle.
+	std::function<world::EntityHandle(world::World &, uint16_t item_id, uint8_t team,
+			const int32_t position[3])> deployable_spawner;
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

@@ -178,6 +178,7 @@ int main() {
 		view.set_item_class_resolver(&classify);
 		view.set_remote_motion_mode(true);
 		view.set_root_motion_source(&source);
+		view.state().upsert(kPlayerHandle).type_id = kPlayerType; // the spawn stream's row
 		view.apply(0x0A, player_frame(static_cast<uint8_t>(anim_state::kIdle)));
 		opennova::replication::ClientEntityState *es = view.state().find(kPlayerHandle);
 		TEST_EXPECT(es != nullptr);

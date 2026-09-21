@@ -46,7 +46,7 @@ bool serve_one_probe(uint16_t bound_port, const std::string &response_body) {
 	opennova::nwu_encrypt(plain.data(), plain.size(), opennova::GATE_NWU_KEY);
 	const std::string tag(reinterpret_cast<const char *>(plain.data()),
 			plain.empty() ? 0 : plain.size() - 1);
-	if (tag != opennova::GATE_PROBE_TAG_JODEMO) return false;
+	if (tag != opennova::GATE_PROBE_TAG_JOINTOPS) return false;
 
 	std::vector<uint8_t> reply_inner(response_body.begin(), response_body.end());
 	opennova::nwu_decrypt(reply_inner.data(), reply_inner.size(), opennova::GATE_NWU_KEY);
@@ -93,7 +93,7 @@ int main() {
 	opennova::net::ScopedSocket client(opennova::net::udp_bind(0));
 	if (!expect(client.is_valid(), "client bind")) return 1;
 
-	const auto probe_inner = opennova::gate_probe_build();
+	const auto probe_inner = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
 	std::vector<uint8_t> probe(probe_inner.size() + 16);
 	size_t probe_size = 0;
 	if (!expect(opennova::napi_envelope_encode(probe_inner.data(), probe_inner.size(),

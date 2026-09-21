@@ -186,6 +186,34 @@ bool check_fragment_reassembly_three_fragments() {
 	return true;
 }
 
+// An unfragmented record interleaved with a pending stream dispatches on its
+// own and leaves the stream intact: FIRST(A), NONE(B), FINAL(C) yields B, then
+// A+C. [orig: CNapiNPConnection_DispatchMessage @0x622570 — the split buffer
+// is touched only when (msg_type & 6) != 0 @0x6225b1; the direct path
+// @0x622675 neither appends nor clears]
+bool check_unfragmented_record_leaves_pending_stream() {
+	opennova::ProtocolReassemblyState state;
+	auto first = opennova::make_protocol_message(0x00, {0x01, 0x02}, 0x24); // LEN8 + FRAG_CONT
+	auto lone  = opennova::make_protocol_message(0x00, {0xBB}, 0x20);       // LEN8, no frag bits
+	auto last  = opennova::make_protocol_message(0x00, {0x03}, 0x22);       // LEN8 + FRAG_END
+	std::vector<uint8_t> payload;
+	bool was_fragmented = true;
+	if (!expect(!opennova::reassemble_protocol_payload(state, first, payload, &was_fragmented),
+			"FIRST buffers")) return false;
+	if (!expect(opennova::reassemble_protocol_payload(state, lone, payload, &was_fragmented),
+			"NONE dispatches immediately with a stream pending")) return false;
+	if (!expect(payload == std::vector<uint8_t>({0xBB}),
+			"NONE dispatches its own payload only")) return false;
+	if (!expect(!was_fragmented, "NONE reports unfragmented even with a stream pending")) return false;
+	if (!expect(state.buffer == std::vector<uint8_t>({0x01, 0x02}),
+			"the pending stream is untouched by the NONE record")) return false;
+	if (!expect(opennova::reassemble_protocol_payload(state, last, payload, &was_fragmented),
+			"FINAL flushes the stream after the interleaved record")) return false;
+	if (!expect(payload == std::vector<uint8_t>({0x01, 0x02, 0x03}),
+			"FIRST+FINAL reassemble without the interleaved bytes")) return false;
+	return expect(was_fragmented, "FINAL reports fragmented");
+}
+
 } // namespace
 
 // [D-NET-8] A truncated inner stream still dispatches the final partial message, zero-padded to its
@@ -763,6 +791,7 @@ int main() {
 	ok = check_fragment_reassembly_flushes_on_no_cont() && ok;
 	ok = check_first_fragment_resets_stale_buffer() && ok;
 	ok = check_fragment_reassembly_three_fragments() && ok;
+	ok = check_unfragmented_record_leaves_pending_stream() && ok;
 	ok = check_skip_bytes_round_trip() && ok;
 	return ok ? 0 : 1;
 }

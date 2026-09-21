@@ -133,14 +133,123 @@ int test_client_hello_minimal() {
 	TEST_EXPECT(!has_tlv_field(bytes, "EPN"));
 	TEST_EXPECT(!has_tlv_field(bytes, "ET"));
 
-	// PM's retail gate is exposure, not value: an exposed empty transport
-	// still writes a zero-valued PM field.
+	// PM is written only for a NONZERO count: retail's announce builder has no
+	// "present but zero" state [orig: NapiNPSession_SendAnnouncePacket
+	// @0x61fa00 @0x61fcca/@0x61fcda]. The parse-side presence marker stays.
 	src.pm_present = true;
 	bytes = client_hello_to_bytes(src);
+	TEST_EXPECT(!has_tlv_field(bytes, "PM"));
+	src.pm = 3;
+	bytes = client_hello_to_bytes(src);
 	TEST_EXPECT(has_tlv_field(bytes, "PM"));
-	ClientHello with_zero_pm;
-	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), with_zero_pm));
-	TEST_EXPECT(with_zero_pm.pm_present && with_zero_pm.pm == 0);
+	ClientHello with_pm;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), with_pm));
+	TEST_EXPECT(with_pm.pm_present && with_pm.pm == 3);
+
+	// No tag is required to parse: a PM-only announce (no PN at all) is a
+	// valid hello whose admission is decided by client_hello_admits.
+	ClientHello pm_only;
+	pm_only.pm = 1;
+	bytes = client_hello_to_bytes(pm_only);
+	ClientHello parsed_pm_only;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), parsed_pm_only));
+	TEST_EXPECT(parsed_pm_only.pn.empty() && parsed_pm_only.pm == 1);
+	TEST_EXPECT(!parse_client_hello(nullptr, 0, parsed_pm_only));
+	return 0;
+}
+
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — the NVS/PN/PG/PV1
+//  compares run only under `if (!protocol_version)`; jnz @0x6217c2 jumps a
+//  nonzero PM straight to the ServerInfo reply @0x6218fc]
+int test_client_hello_admits_nonzero_pm_without_identity() {
+	ClientHello retail = opennova::make_jointoperations_client_hello(5);
+	TEST_EXPECT(opennova::client_hello_admits(retail));
+
+	ClientHello foreign;
+	foreign.pn = "SOMEOTHERGAME";
+	foreign.pv1 = "9.9.9";
+	TEST_EXPECT(!opennova::client_hello_admits(foreign));
+	foreign.pm = 2;
+	TEST_EXPECT(opennova::client_hello_admits(foreign));
+
+	ClientHello bare;
+	bare.pm = 1;
+	TEST_EXPECT(opennova::client_hello_admits(bare));
+	bare.pm = 0;
+	TEST_EXPECT(!opennova::client_hello_admits(bare));
+	return 0;
+}
+
+// [orig: HandleClientJoin @0x62b750 and NapiNP_HandleServerJoinResponse
+//  @0x629840 compare every tag through Napi_StrCaseEqual @0x616e70]
+int test_client_and_server_auth_tag_names_are_case_insensitive() {
+	ClientAuth src;
+	src.ci = 4;
+	src.hk = 0x0FE0E112u;
+	src.ck = 0xDEADBEEFu;
+	src.na = "jop:cus2";
+	src.scrk = "KEY";
+	auto bytes = client_auth_to_bytes(src);
+	// Lower-case every tag NAME in a flat-TLV run ([name\0][LE16][value]),
+	// leaving the values alone.
+	auto lower_tags = [](std::vector<uint8_t> in) {
+		size_t pos = 0;
+		while (pos < in.size()) {
+			size_t name_end = pos;
+			while (name_end < in.size() && in[name_end] != 0) {
+				if (in[name_end] >= 'A' && in[name_end] <= 'Z') in[name_end] = static_cast<uint8_t>(in[name_end] + 32);
+				++name_end;
+			}
+			if (name_end + 2 >= in.size()) break;
+			const uint16_t sz = static_cast<uint16_t>(in[name_end + 1]) |
+			                    (static_cast<uint16_t>(in[name_end + 2]) << 8);
+			pos = name_end + 3 + sz;
+		}
+		return in;
+	};
+	const auto lowered = lower_tags(bytes);
+	ClientAuth round;
+	TEST_EXPECT(parse_client_auth(lowered.data(), lowered.size(), round));
+	TEST_EXPECT(round.ci == 4 && round.hk == 0x0FE0E112u && round.ck == 0xDEADBEEFu);
+	TEST_EXPECT(round.na == "jop:cus2" && round.scrk == "KEY");
+
+	ServerAuth sa;
+	sa.ci = 4;
+	sa.ck = 0xDEADBEEFu;
+	sa.sk = 0x12345678u;
+	sa.scrk = "SERVERKEY";
+	sa.rip = 0x7F000001u;
+	const auto sa_lowered = lower_tags(server_auth_to_bytes(sa));
+	ServerAuth sa_round;
+	TEST_EXPECT(parse_server_auth(sa_lowered.data(), sa_lowered.size(), sa_round));
+	TEST_EXPECT(sa_round.sk == 0x12345678u && sa_round.scrk == "SERVERKEY" && sa_round.rip == 0x7F000001u);
+
+	ServerHello sh;
+	sh.hk = 0xABCDEF01u;
+	sh.sn = "Host";
+	const auto sh_lowered = lower_tags(server_hello_to_bytes(sh));
+	ServerHello sh_round;
+	TEST_EXPECT(parse_server_hello(sh_lowered.data(), sh_lowered.size(), sh_round));
+	TEST_EXPECT(sh_round.hk == 0xABCDEF01u && sh_round.sn == "Host");
+	return 0;
+}
+
+// [orig: CNapiNetwork_Init @0x4caa53..0x4caa76 (0x4000 ceiling);
+//  CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3e17 (0x10000 ceiling)]
+int test_cs_field13_follows_the_mpmaxpacketsize_clamp() {
+	auto field13 = [](const std::vector<opennova::CsField> &cs) {
+		for (const auto &f : cs) if (f.field_index == 13) return f.value;
+		return 0u;
+	};
+	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields()) == 1300u);
+	TEST_EXPECT(field13(opennova::jointoperations_server_cs_fields(0)) == 1300u);
+	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(50)) == 100u);
+	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(4000)) == 4000u);
+	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(20000)) == 16384u);
+	TEST_EXPECT(field13(opennova::default_client_cs_fields()) == 1300u);
+	TEST_EXPECT(field13(opennova::default_server_cs_fields(20000)) == 20000u);
+	TEST_EXPECT(field13(opennova::default_client_cs_fields(70000)) == 65536u);
+	TEST_EXPECT(field13(opennova::default_client_cs_fields(7)) == 100u);
 	return 0;
 }
 
@@ -266,24 +375,111 @@ int test_server_hello_omitted_metadata_parses_empty() {
 
 int test_server_hello_game_metadata_has_retail_order() {
 	ServerHello hello;
+	hello.pg = opennova::jointoperations_protocol_guid();
 	hello.p1 = 0x00010020u;
 	hello.p2 = 0x00000904u;
 	hello.np = 1;
 	hello.mp = 4;
+	hello.rip = 0xC0A80101u;
+	hello.rpn = 32768;
 	hello.sus1 = "live-session-user-string";
 	hello.sus2 = "revx02";
 
 	const auto bytes = server_hello_to_bytes(hello);
+	// NC/EIP/EPN are zero here and therefore absent, like retail's writer.
 	const std::vector<std::string> expected_names = {
 			"CI", "CO", "AP", "BDAT", "PN", "PG", "PV1", "PV2", "PV3",
-			"HK", "SN", "SF", "P1", "P2", "NP", "MP", "NC", "RIP", "RPN",
-			"SUS1", "SUS2", "EIP", "EPN"};
+			"HK", "SN", "SF", "P1", "P2", "NP", "MP", "RIP", "RPN",
+			"SUS1", "SUS2"};
 	TEST_EXPECT(tlv_field_names(bytes) == expected_names);
 
 	ServerHello parsed;
 	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
 	TEST_EXPECT(parsed.p2 == 0x00000904u);
 	TEST_EXPECT(parsed.sus1 == "live-session-user-string");
+	TEST_EXPECT(parsed.rip == 0xC0A80101u && parsed.nc == 0 && parsed.eip == 0);
+	return 0;
+}
+
+// Zero numerics, empty strings and a null GUID are omitted; CI/HK/SN/SF are
+// the only unconditional tags. [orig: NapiNPProtocol_SendServerInfoPacket
+//  @0x6204b0 — every string gated on `field[0]`, every dword on nonzero,
+//  PG on !NapiGUID_IsNull @0x6206d5, HK @0x6207ad / SN @0x6207da / SF
+//  @0x620898 unconditional]
+int test_server_hello_zero_and_empty_fields_are_omitted() {
+	ServerHello hello;
+	hello.co.clear();
+	hello.ap.clear();
+	hello.bdat.clear();
+	hello.pn.clear();
+	hello.pv1.clear();
+	hello.pv2.clear();
+	hello.pv3.clear();
+	hello.sn.clear();
+	const auto bytes = server_hello_to_bytes(hello);
+	const std::vector<std::string> expected_names = {"CI", "HK", "SN", "SF"};
+	TEST_EXPECT(tlv_field_names(bytes) == expected_names);
+	TEST_EXPECT(!has_tlv_field(bytes, "PG"));
+	TEST_EXPECT(!has_tlv_field(bytes, "NC"));
+	TEST_EXPECT(!has_tlv_field(bytes, "EIP"));
+	TEST_EXPECT(!has_tlv_field(bytes, "EPN"));
+	TEST_EXPECT(!has_tlv_field(bytes, "ET"));
+	ServerHello parsed;
+	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
+	// SN is unconditional, so its empty value round-trips; an absent PN leaves
+	// the record's default in place (the reader zero-inits its own record).
+	TEST_EXPECT(parsed.sn.empty() && !has_tlv_field(bytes, "PN") && !parsed.locale_block);
+	return 0;
+}
+
+// Every field the retail writer can emit, in its order, round-trips.
+// [orig: writer @0x6204b0 CI..ET; reader Nwu_HandleServerHello @0x626d20]
+int test_server_hello_full_field_set_has_retail_order() {
+	ServerHello hello;
+	hello.ci = 9;
+	hello.de = 0x11u;
+	hello.ut = 12345u;
+	hello.pg = opennova::jointoperations_protocol_guid();
+	hello.locale_block = true;
+	hello.cn = "United States";
+	hello.lng = "";  // an empty string inside the block still ships its NUL
+	hello.tzb = 300u;
+	hello.sf = 0;
+	hello.p1 = 1; hello.p2 = 2; hello.p3 = 3; hello.p4 = 4;
+	hello.p5 = 5; hello.p6 = 6; hello.p7 = 7; hello.p8 = 8;
+	hello.np = 10;
+	hello.mp = 32;
+	hello.npw = 2;
+	hello.nc = 1;
+	hello.rip = 0x0A000001u;
+	hello.rpn = 17479;
+	hello.sus1 = "GSID-01-DEADBEEF";
+	hello.sus2 = "jox01";
+	hello.sus3 = "three";
+	hello.sus4 = "four";
+	hello.eip = 0x0A000002u;
+	hello.epn = 32770;
+	hello.et = 1;
+
+	const auto bytes = server_hello_to_bytes(hello);
+	const std::vector<std::string> expected_names = {
+			"CI", "CO", "AP", "BDAT", "DE", "UT", "PN", "PG", "PV1", "PV2", "PV3",
+			"HK", "SN", "CN", "LNG", "TZB", "SF",
+			"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "NP", "MP", "NPW",
+			"NC", "RIP", "RPN", "SUS1", "SUS2", "SUS3", "SUS4", "EIP", "EPN", "ET"};
+	TEST_EXPECT(tlv_field_names(bytes) == expected_names);
+
+	ServerHello parsed;
+	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
+	TEST_EXPECT(parsed.ci == 9 && parsed.de == 0x11u && parsed.ut == 12345u);
+	TEST_EXPECT(std::memcmp(parsed.pg.data(), hello.pg.data(), 16) == 0);
+	TEST_EXPECT(parsed.locale_block && parsed.cn == "United States" && parsed.lng.empty() && parsed.tzb == 300u);
+	TEST_EXPECT(parsed.p3 == 3 && parsed.p4 == 4 && parsed.p5 == 5 && parsed.p6 == 6 && parsed.p7 == 7 && parsed.p8 == 8);
+	TEST_EXPECT(parsed.np == 10 && parsed.mp == 32 && parsed.npw == 2 && parsed.nc == 1);
+	TEST_EXPECT(parsed.rip == 0x0A000001u && parsed.rpn == 17479);
+	TEST_EXPECT(parsed.sus1 == "GSID-01-DEADBEEF" && parsed.sus2 == "jox01");
+	TEST_EXPECT(parsed.sus3 == "three" && parsed.sus4 == "four");
+	TEST_EXPECT(parsed.eip == 0x0A000002u && parsed.epn == 32770 && parsed.et == 1);
 	return 0;
 }
 
@@ -293,12 +489,17 @@ int main() {
 	if (test_client_hello_roundtrip() != 0) return 1;
 	if (test_client_hello_minimal() != 0) return 1;
 	if (test_client_hello_tag_names_are_case_insensitive() != 0) return 1;
+	if (test_client_hello_admits_nonzero_pm_without_identity() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
+	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
+	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
 	if (test_server_hello_game_metadata_has_retail_order() != 0) return 1;
+	if (test_server_hello_zero_and_empty_fields_are_omitted() != 0) return 1;
+	if (test_server_hello_full_field_set_has_retail_order() != 0) return 1;
 	std::printf("OK: session hello/auth serializer roundtrip and gating\n");
 	return 0;
 }

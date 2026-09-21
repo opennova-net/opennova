@@ -47,6 +47,9 @@ func set_lan_session(session: LanSession) -> void:
 	if _lan_session != null \
 			and _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.disconnect(_on_lan_browse_error)
+	if _lan_session != null \
+			and _lan_session.browse_finished.is_connected(_on_lan_browse_finished):
+		_lan_session.browse_finished.disconnect(_on_lan_browse_finished)
 	_lan_session = session
 	if _lan_session != null \
 			and not _lan_session.servers_changed.is_connected(_on_servers_changed):
@@ -54,6 +57,9 @@ func set_lan_session(session: LanSession) -> void:
 	if _lan_session != null \
 			and not _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
+	if _lan_session != null \
+			and not _lan_session.browse_finished.is_connected(_on_lan_browse_finished):
+		_lan_session.browse_finished.connect(_on_lan_browse_finished)
 
 
 # All of mp.mnu's screens are addressable at once, so we wire every owned
@@ -88,7 +94,26 @@ func _on_lan_search() -> void:
 		if int(_lan_session.start_browsing()) != OK and _browse_error.is_empty():
 			_on_lan_browse_error("could not start the search")
 			return
+		# While the 30 s window runs the search button is non-interactive and reads
+		# the menutxt MP_STATUS_SEARCHING token; the window's end restores MP_SEARCH.
+		_set_lan_search_state(true)
 	_refresh_lan_list()
+
+
+# The browse window closed: LAN_SEARCH is interactive again with its MP_SEARCH text.
+func _on_lan_browse_finished() -> void:
+	_set_lan_search_state(false)
+
+
+func _set_lan_search_state(searching: bool) -> void:
+	var id := _id("LAN_SEARCH")
+	if id < 0:
+		return
+	_driver.set_widget_disabled(id, searching)
+	var key := "MP_STATUS_SEARCHING" if searching else "MP_SEARCH"
+	var text := Strings.menu_text(key, "")
+	if not text.is_empty():
+		_driver.set_widget_text(id, text)
 
 
 # A failed bind or an all-sends-failed probe burst was previously console-only,
@@ -127,7 +152,10 @@ func _format_server_row(s: LanServerRow) -> String:
 	# Retail LAN enumeration has not joined the session yet, so map identity is
 	# deliberately absent here; it arrives in the normal post-auth 0x7B stream.
 	# The row format is the witnessed retail pair: with an advertised expansion
-	# variant "%s - %s (%ld/%ld)", else "%s (%ld/%ld)".
+	# variant "%s - %s (%ld/%ld)", else "%s (%ld/%ld)". The list walks the
+	# translated session record CNapiNetwork_OnSessionDiscovered @0x4c8470 fills
+	# from the 0x81 (SN -> +32, NP -> +580, MP -> +584, SUS2 -> +1104), which
+	# the row copies 32 bytes of the expansion from.
 	# [orig: UI_ProcessLANSessionStateMachine @ 0x558de0 sprintf @0x559493/@0x5594b9]
 	var expansion := s.expansion.strip_edges()
 	if expansion.is_empty():
@@ -261,6 +289,11 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 		return
 	if widget_name == "LAN_GAME_LIST" and kind == "list":
 		_selected_server = index
+		# A single click on the list makes LAN_JOINGAME interactive; the double
+		# click joins.
+		var join := _id("LAN_JOINGAME")
+		if join >= 0:
+			_driver.set_widget_disabled(join, false)
 	if widget_name == "GAME_TYPE" and kind == "spinlist":
 		_driver.filter_host_missions()
 

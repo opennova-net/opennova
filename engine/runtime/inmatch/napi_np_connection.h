@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <runtime/replication/connection.h>             // replication::Connection, replication::TransportMode
 #include <runtime/inmatch/session_timeout_config.h>     // SessionTimeoutConfig (the cs_dir template copy)
@@ -255,6 +257,45 @@ struct WeaponSlotState {
 // reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
 struct SessionReplyState {
 	uint32_t rtt_request_countdown = 0; // player slot +89816, Server_TickUpdate @0x51D7E0
+	// The host-measured round trip of this player's last completed C2S 0x2C
+	// return leg (`GetTickCount - sent`, zeroed for the listen host's own local
+	// slot) and its ring. Retail keeps ten dwords at +100368 with the ring
+	// cursor at +100408: the cursor is pre-incremented, wraps past 10 to 0, and
+	// the sample is stored at cursor*4 — so cursor 10 aliases the cursor dword
+	// itself, which the next pre-increment then reads as a huge index and wraps.
+	// The eleven-entry array below IS that layout (index 10 = the cursor).
+	// [orig: NapiNPServerMsg_HandlePingResponse @0x515116..0x515155]
+	uint32_t rtt_ms = 0;                         // +94400
+	std::array<uint32_t, 11> rtt_ring{};         // +100368..+100408 (slot 10 = cursor)
+	// Consecutive out-of-range samples under the host's min/max ping checks;
+	// strictly over 20 punts the player. [orig: +94404 / +94406, @0x51519A..0x51521A]
+	uint16_t min_ping_strikes = 0;
+	uint16_t max_ping_strikes = 0;
+	// The client's reported connection-quality level (C2S 0x4C, clamped 0..4)
+	// and the dirty flag the 1 Hz S2C 0x46 quality resend consumes. A fresh
+	// slot advertises 1 (the witnessed join-broadcast value).
+	// [orig: slot+418 / slot+89860, sub_5006E0 @0x5006E0; the resend walk
+	//  Server_TickUpdate @0x51DE79..0x51DF4A]
+	uint8_t client_quality = 1;
+	bool client_quality_dirty = false;
+	// The host frame clock stamped by the C2S 0x3D loaded-model page reply; the
+	// reply carries no payload the host reads. [orig: NapiNPServerMsg_0x03D
+	//  @0x500EC0 -> player+97560 = dword_A87060]
+	uint32_t loaded_model_reply_frame = 0;
+	// The revive pose GameEvent_RevivePlayer saves on the victim (its live
+	// position raised 0x4000, and yaw/pitch/roll) for the deploy that follows a
+	// medic revive. [orig: @0x517DCD..0x517E09 (weaponSlots[20..40])]
+	bool revive_pose_valid = false;
+	int32_t revive_pos[3] = {0, 0, 0};
+	int16_t revive_yaw = 0, revive_pitch = 0, revive_roll = 0;
+	// A C2S 0x51 spectator-respawn request the dispatcher admitted; the host
+	// tick performs the conversion (it needs the owning context).
+	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
+	bool spectator_convert_pending = false;
+	int16_t spectator_convert_killer = -1;
+	// Host ms of this player's last accepted chat (the 1000 ms per-sender
+	// throttle; 0 = never). [orig: slot+100360, NapiNPServer_HandleChatMessage @0x5137FF]
+	uint32_t chat_last_ms = 0;
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
@@ -280,6 +321,13 @@ struct SessionReplyState {
 	// client resets its team between the first two packets).
 	bool admission_metadata_pushed = false;
 	bool spawn_metadata_pushed = false;
+	// A pending player the spawn pump HELD (capacity or team balance) is re-sent
+	// the S2C 0x03 restriction flag at most once per 1000 ms (netPlayer+36 is the
+	// last send stamp); the pump stages the nag, tick_connections frames it.
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F7A..0x4C8FD1]
+	bool admission_hold_nag_pending = false;
+	uint32_t admission_hold_nag_host_ms = 0;
+	bool admission_hold_nag_host_ms_valid = false;
 	uint32_t admission_completed_tick = 0;
 	bool roster_pushed = false;
 	uint32_t roster_completed_tick = 0;
@@ -307,7 +355,10 @@ struct SessionReplyState {
 	// Consecutive state-6 ticks whose owned entity carries Flags bit 0x02.
 	// Retail increments before comparing, resets immediately on a live frame,
 	// and emits the t7 punt on tick 361 when permanent death is disabled.
-	uint32_t dead_live_ticks = 0;
+	// playerSlot+89864: consecutive periodic SECONDS the state-6 entity has
+	// carried Flags bit 0x02; punt type 7 fires strictly over 360 of them.
+	// [orig: Server_TickUpdate @0x51E066..0x51E07D inside the 62-tick block]
+	uint32_t dead_live_seconds = 0;
 	uint32_t control_challenge_seed = 0;
 	// Per-player XOR salts used by the two definition-integrity reply handlers.
 	// They are zero in the currently witnessed session setup, but belong to the
@@ -452,6 +503,13 @@ struct NapiNPConnection {
 	uint32_t s2c_send_holdoff_ticks = 0;
 	uint32_t s2c_send_holdoff_countdown = 0;
 	bool s2c_send_boundary_open = true;
+	// This tick's 0x0A, built BEFORE the entity motor and queued after the
+	// maintenance legs: retail's frame is a pre-motor snapshot that still
+	// follows the maintenance sends inside Server_TickUpdate.
+	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4
+	//  (per-slot 0x0A last, @0x51E3D6..0x51E450), Entity_UpdateAllEntities @0x52674B]
+	std::vector<uint8_t> staged_frame_update;
+	bool frame_update_staged = false;
 	// Hold routed guidance until the frame that can carry its fire descriptor.
 	std::vector<std::vector<uint8_t>> pending_guidance;
 	// The configured period is known when the node is allocated, but +0x648 is
@@ -498,6 +556,30 @@ struct NapiNPConnection {
 	ProtocolReassemblyState c2s_reassembly{};
 	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
 	                                     // framed S2C packet, ticked by tick_connections
+	// The host-clock millisecond at which the 0x42 join was accepted: the
+	// validation-phase deadline base (netPlayer+0xA4) that reaps a peer which
+	// keeps talking but never completes its admission.
+	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4] @0x4C8B8A]
+	uint32_t join_validated_host_ms = 0;
+	// The C2S 0x00 JOIN's CD identity blob as [name][value] pairs: the joiner's
+	// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies. Empty on LAN.
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 "CD" -> the cookie
+	//  buffer; KeyValueBuffer_FindValue @0x4C2A30 walks it by key]
+	std::vector<std::pair<std::string, std::string>> join_identity_pairs;
+	// NetPlayer game state 4 (the NovaWorld ticket wait): the
+	// ClientPlayerEnterRequest went to the service; admitted = its result was
+	// success (state 6), and the spawn pump holds the player until then. The
+	// deadline base stays join_validated_host_ms.
+	// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA;
+	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — state-4 gate
+	//  @0x4D1B3E, SetGameState(6) @0x4D1C11]
+	bool player_enter_requested = false;
+	bool player_enter_admitted = false;
+	bool player_enter_pending() const { return player_enter_requested && !player_enter_admitted; }
+	// The last outer-namespace 0x45 ping round trip this host measured
+	// (session_keys.rtt_ms; stored when the peer answers our MS without WR).
+	// [orig: Nwu_HandlePing @0x623C9B]
+	uint32_t session_ping_rtt_ms = 0;
 	uint32_t receive_inactive_ms = 0;     // elapsed since the last IN-ORDER admitted session packet
 	                                     // (a zero-message keepalive counts; duplicates, futures,
 	                                     // resend lists and every other opcode do not) — retail's

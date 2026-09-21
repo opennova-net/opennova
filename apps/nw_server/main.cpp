@@ -474,18 +474,30 @@ int main(int argc, char **argv) {
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
 	role.set_socket(&dgram);
 	inmatch::Session session(role);
+	// The dedicated host runs the witnessed retail bank; the shell keeps the
+	// wall-clock one (world::TickBankPolicy).
+	session.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
 	if (!session.begin_load().applied() || !session.complete_load().applied()) {
 		std::fprintf(stderr, "nw-server: failed to start mission session\n");
 		net::shutdown();
 		return 1;
 	}
+	// The session banks the MEASURED wall clock, exactly as Game_MainLoop banks
+	// GetTickCount deltas: a hitch lands as one long frame that the accumulator
+	// clamps and smooths, not as a run of synthetic one-tick frames.
+	auto last_frame = clock::now();
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
+		const auto now = clock::now();
 		inmatch::FrameInput input;
-		input.delta_seconds = world::TickAccumulator::kTickDt;
+		input.delta_seconds = std::chrono::duration<double>(now - last_frame).count();
+		last_frame = now;
 		const inmatch::FrameOutcome outcome = session.advance(input);
 		if (outcome.terminal()) {
-			std::fprintf(stderr, "nw-server: mission session failed: %s\n",
-					outcome.error.message.c_str());
+			if (outcome.error.code == inmatch::SessionErrorCode::RoundEnded)
+				std::fprintf(stderr, "nw-server: %s\n", outcome.error.message.c_str());
+			else
+				std::fprintf(stderr, "nw-server: mission session failed: %s\n",
+						outcome.error.message.c_str());
 			break;
 		}
 		std::this_thread::sleep_until(

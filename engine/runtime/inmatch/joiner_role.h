@@ -18,6 +18,7 @@
 // serial its registry-derived caches re-derive from).
 #pragma once
 
+#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -80,6 +81,23 @@ public:
 	// The dialed socket and the host it reaches; null = socketless (every send
 	// dropped, nothing received — the headless tests).
 	void set_socket(opennova::IDatagramSocket *socket, const PeerAddr &host);
+	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK next to NK): the game
+	// node the 48-byte rendezvous targets, the relay cookie and the NK relay
+	// endpoint the ordinary dial uses. All six fields set = the rendezvous is
+	// sent to the node every 3000 ms ahead of each announce while the hello is
+	// outstanding; any field missing = no proxy (LAN, or a .joi without them).
+	// The shell fills these from JoinTarget.proxy_node / proxy_relay /
+	// proxy_cookie. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
+	//  install @0x4ca051..0x4ca0c7; the all-six gate
+	//  CNapiNPConnection_PumpEnumeratorAndSend @0x62914f..0x629159]
+	struct JoinProxyOptions {
+		std::string proxy_node_ip;    // NI, a dotted quad
+		uint32_t proxy_node_port = 0; // NP
+		uint32_t proxy_cookie = 0;    // atol(BK)
+		std::string proxy_relay_ip;   // the NK-decoded host, a dotted quad
+		uint32_t proxy_relay_port = 0; // the NK-decoded port
+	};
+	void set_join_proxy(const JoinProxyOptions &options);
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange, but no World exists yet to tick and the
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello
@@ -171,6 +189,7 @@ public:
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
+		world_state_revision_seen_ = 0;
 		replica_peer_scratch_src_ = nullptr;
 		replica_peer_scratch_count_ = 0;
 		replica_peer_scratch_tick_ = 0;
@@ -197,6 +216,9 @@ private:
 	void deposit_inbound();
 	// ClientHello once (Idle -> Hello) on the first armed frame.
 	void send_hello_once();
+	// The proxy rendezvous datagram to the game node, on the enumerator's
+	// 3000 ms interval, ahead of the announce it precedes.
+	void pump_proxy_rendezvous();
 	// Resolve each decoded organic row's adm id once its type is known.
 	void resolve_row_adm_ids();
 	uint64_t infantry_adm_revision_seen_ = 0;
@@ -221,6 +243,9 @@ private:
 	void apply_weather_sample();
 	void materialize_replica_world();
 	void spawn_and_arm_local_player();
+	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
+	// un-hide) and, for a waypoint gametype, the host-filtered route.
+	void apply_world_state_load();
 	void apply_authoritative_health();
 	void sync_authoritative_mount();
 	void apply_mounted_ammo_update();
@@ -232,6 +257,12 @@ private:
 
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
+	// The proxy rendezvous: the installed six fields, the node endpoint and
+	// the enumerator's last-send clock (0 = never sent, the first pump sends).
+	// [orig: conn+1464..+1484; enum_info+52 @0x629108/@0x62911f]
+	ProxyRendezvousConfig proxy_{};
+	PeerAddr proxy_node_addr_{};
+	uint64_t proxy_last_send_ms_ = 0;
 	int64_t last_net_us_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships
 	// (before the decoded-state folds) so the stats board measures exactly the
@@ -270,6 +301,8 @@ private:
 	// Receive-once cursor for the conditional flags2&0x0f==8 mounted-ammo
 	// record. A stale net sample must not refill a locally firing gun each tick.
 	uint32_t mounted_ammo_revision_seen_ = 0;
+	// The last S2C 0x0F landing applied to L (ClientState::world_state.revision).
+	uint32_t world_state_revision_seen_ = 0;
 	bool redeploy_release_pending_ = false;
 	uint32_t redeploy_health_updates_at_release_ = 0;
 	uint32_t now_tick_ = 0;
