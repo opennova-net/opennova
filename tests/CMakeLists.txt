@@ -728,6 +728,11 @@ target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_model_geometry COMMAND world_model_geometry_test)
 
+add_executable(renderer_model_controls_test renderer/model_controls_test.cpp)
+target_link_libraries(renderer_model_controls_test PRIVATE opennova_runtime)
+target_include_directories(renderer_model_controls_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_model_controls COMMAND renderer_model_controls_test)
+
 add_executable(renderer_model_panm_cache_test renderer/model_panm_cache_test.cpp)
 target_link_libraries(renderer_model_panm_cache_test PRIVATE opennova_runtime)
 target_include_directories(renderer_model_panm_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -292,9 +292,7 @@ String ItemDatabase::get_display_name(int id) const {
 	return row == nullptr ? String() : String(row->display_name);
 }
 
-// The def-authored closeattack launch userpoint name — the AI muzzle point the
-// placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
-// ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
+// The native launchups_closeattack field; its parser witness lives in def_items.cpp.
 String ItemDatabase::get_launchups_closeattack(int id) const {
 	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->launchups_closeattack);

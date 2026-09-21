@@ -5,6 +5,7 @@
 
 #include <formats/env/env_weather.h>
 #include <runtime/renderer/material_eval.h>
+#include <runtime/renderer/model_controls.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
 #include <formats/threedi/threedi_panm_runtime.h>
 
@@ -12,7 +13,6 @@
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <array>
-#include <cstring>
 #include <vector>
 
 using namespace novaobj;
@@ -29,14 +29,6 @@ std::vector<std::string> control_register_names(const Threedi3di3 &model) {
 	return names;
 }
 
-int32_t control_value_from_variant(const Variant &value) {
-	const int64_t raw = static_cast<int64_t>(value);
-	const uint32_t low_dword = static_cast<uint32_t>(raw);
-	int32_t signed_value = 0;
-	std::memcpy(&signed_value, &low_dword, sizeof(signed_value));
-	return signed_value;
-}
-
 using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
 // The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers)
@@ -47,24 +39,14 @@ opennova::env::WeatherOscillator g_weather_rings;
 bool g_weather_rings_valid = false;
 
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
-	GlobalCtrlValues values = {};
-	values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
-	values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
-	if (dict.is_empty()) {
-		return values;
-	}
+	opennova::renderer::ModelControls controls;
 	const Array keys = dict.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		const CharString utf8 = key.utf8();
-		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
-			continue;
-		}
-		values[static_cast<size_t>(ordinal)] =
-				control_value_from_variant(dict[keys[i]]);
+		controls.store(threedi_ctrl_register_ordinal(key.utf8().get_data()),
+				static_cast<int64_t>(dict[keys[i]]));
 	}
-	return values;
+	return controls.runtime_values(g_weather_ctrl_flicker, g_weather_ctrl_swing);
 }
 
 Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
@@ -79,39 +61,9 @@ Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
 
 } // namespace
 
-GlobalCtrlValues ObjectData::runtime_control_values_dict_only(
-		const Dictionary &p_ctrl_values, bool &r_has_flicker,
-		bool &r_has_swing) {
-	GlobalCtrlValues values = {};
-	r_has_flicker = false;
-	r_has_swing = false;
-	const Array keys = p_ctrl_values.keys();
-	for (int i = 0; i < keys.size(); ++i) {
-		const String key = keys[i];
-		const CharString utf8 = key.utf8();
-		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
-			continue;
-		}
-		values[static_cast<size_t>(ordinal)] =
-				control_value_from_variant(p_ctrl_values[keys[i]]);
-		r_has_flicker = r_has_flicker || ordinal == THREEDI_CTRL_FLICKER;
-		r_has_swing = r_has_swing || ordinal == THREEDI_CTRL_SWING;
-	}
-	return values;
-}
-
-void ObjectData::stamp_weather_ctrl_registers(GlobalCtrlValues &r_values,
-		bool p_dict_has_flicker, bool p_dict_has_swing) {
-	// The one-shot conversion writes the weather globals first and lets dict
-	// entries override; stamping only the slots the dict left absent lands
-	// the identical table from the cached dict-only half.
-	if (!p_dict_has_flicker) {
-		r_values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
-	}
-	if (!p_dict_has_swing) {
-		r_values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
-	}
+void ObjectData::weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing) {
+	r_flicker = g_weather_ctrl_flicker;
+	r_swing = g_weather_ctrl_swing;
 }
 
 bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {

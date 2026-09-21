@@ -188,13 +188,6 @@ public:
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 	int get_user_point_bone_mask(const String &p_name) const;
-	// PLAYPARTANIM's engine math (one impl in engine/runtime/world ai.h): the
-	// witnessed rate from ANIMTIME seconds
-	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. The sweep step is
-	// world::part_anim_step, which the model's part-anim channels call
-	// directly; the authoritative AI path integrates in AiSystem and presents
-	// through set_part_phase.
-	static int part_anim_rate_for_seconds(double p_seconds);
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked
@@ -273,16 +266,7 @@ public:
 	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 			const Array &p_nodes, int64_t p_applied_revision) const;
-	// The dict conversion split for retained callers: the dict-only half
-	// caches per change; FLICKER/SWING ride the live weather globals at use
-	// time unless the dict pins them (the same override order the one-shot
-	// runtime_control_values applies).
-	static opennova::renderer::ControlRegisterValues
-	runtime_control_values_dict_only(const Dictionary &p_ctrl_values,
-			bool &r_has_flicker, bool &r_has_swing);
-	static void stamp_weather_ctrl_registers(
-			opennova::renderer::ControlRegisterValues &r_values,
-			bool p_dict_has_flicker, bool p_dict_has_swing);
+	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 };

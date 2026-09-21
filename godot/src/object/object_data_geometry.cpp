@@ -6,7 +6,6 @@
 
 #include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <runtime/renderer/model_mesh_prepare.h>
-#include <runtime/world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -106,10 +105,6 @@ int ObjectData::get_user_point_bone_mask(const String &p_name) const {
 	if (!source_model_) return 0;
 	return threedi_3di3_user_point_mask(&native_model(),
 			p_name.utf8().get_data());
-}
-
-int ObjectData::part_anim_rate_for_seconds(double p_seconds) {
-	return opennova::world::part_anim_rate_from_seconds(p_seconds);
 }
 
 bool ObjectData::has_collision() const {

@@ -12,22 +12,12 @@
 #include <godot_cpp/core/math.hpp>
 
 #include <runtime/anim/aim_overlay.h> // kOverlayClassCount (the nine overlay classes)
-#include <runtime/world/ai.h> // kPartAnimPhaseOne (the PLAYPARTANIM phase domain)
 #include <runtime/world/infantry.h>
 
 #include <algorithm>
 #include <limits>
 
 namespace godot {
-
-namespace {
-
-constexpr double kPartAnimTickS = 0.016;
-
-const char *kPartAnimCtrlNames[2] = { "VEHICLE_SPECIAL1", "VEHICLE_SPECIAL2" };
-const char *kPartAnimCtrlOwners[2] = { "present:part_anim:1", "present:part_anim:2" };
-
-} // namespace
 
 void ObjectModel::set_skeletal_anim(const Ref<SkeletalAnim> &p_skeletal) {
 	wake_runtime_frame();
@@ -544,176 +534,75 @@ double ObjectModel::get_animation_time() const {
 	return CLAMP(anim_time_, 0.0, double(length));
 }
 
-// --- Part-animation channels (PLAYPARTANIM mission action) -----------------
-// [orig: Entity_ApplyCommand @0x43ab60 case 0x22; the per-channel publisher
-//  HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38 -> VEHICLE_SPECIAL1/2]
+// --- Part-animation channel device application ----------------------------
 
 String ObjectModel::resolve_anim_channel_register(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) {
-		return String();
-	}
-	return String(kPartAnimCtrlNames[p_slot]);
+	if (p_slot < 0 || p_slot > 1) return String();
+	const int ordinal = opennova::renderer::ModelControls::part_register(p_slot + 1);
+	return ordinal < 0 ? String() : String(opennova::threedi::threedi_ctrl_register_name(
+			static_cast<size_t>(ordinal)));
 }
 
 String ObjectModel::resolve_anim_channel_owner(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) {
-		return String();
-	}
-	return String(kPartAnimCtrlOwners[p_slot]);
+	if (p_slot < 0 || p_slot > 1) return String();
+	return String(opennova::renderer::ModelControls::part_owner(p_slot + 1));
 }
 
-// Play a model part animation from a local runtime controller. The authoritative
-// AI path integrates the same fields in AiSystem and presents them through
-// set_part_phase().
 void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_part_anim(p_channel, p_play_type, p_time_s);
 	}
 	wake_runtime_frame();
-	const int slot = p_channel - 1;
-	if (slot < 0 || slot > 1) {
-		return; // the original validates channel in {1,2}
-	}
-	if (p_play_type < -1 || p_play_type > 1) {
-		return;
-	}
-	const String reg = resolve_anim_channel_register(slot);
-	if (reg.is_empty()) {
-		return;
-	}
-	if (p_play_type == 0) {
-		part_anims_.erase(reg); // Stop: freeze the part at its current value
-		return;
-	}
-	if (part_anims_.is_empty()) {
-		part_anim_tick_accum_s_ = 0.0;
-	}
-	PartAnimChannel channel;
-	channel.dir = p_play_type;
-	channel.rate = ObjectData::part_anim_rate_for_seconds(p_time_s);
-	channel.value = ctrl_values_.has(reg) ? int64_t(ctrl_values_[reg]) : 0;
-	part_anims_[reg] = channel;
+	controls_.play_part(p_channel, p_play_type, p_time_s);
 }
 
-// Seed a locally controlled channel at its rest start (0 forward / max reverse)
-// then play. Stop must freeze the part where it is (no reseed).
 void ObjectModel::restart_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->restart_part_anim(p_channel, p_play_type, p_time_s);
 	}
 	wake_runtime_frame();
-	const int slot = p_channel - 1;
-	if (slot < 0 || slot > 1 || p_play_type < -1 || p_play_type > 1) {
-		return;
-	}
-	const String reg = resolve_anim_channel_register(slot);
-	if (!reg.is_empty() && p_play_type != 0) {
-		// Rest start: 0 forward, one full phase (world/ai.h) reversed.
-		ctrl_values_[reg] = p_play_type >= 0
-				? 0
-				: static_cast<int64_t>(opennova::world::kPartAnimPhaseOne);
-		ctrl_value_owners_.erase(reg);
-		finish_ctrl_change(false);
-	}
+	using Restart = opennova::renderer::ModelControls::Restart;
+	const Restart result = controls_.restart_part(p_channel, p_play_type, p_time_s);
+	if (result == Restart::Invalid) return;
+	if (result == Restart::Seeded) finish_ctrl_change(false);
+	// Keep the linked-node play notification after their restart notification.
 	play_part_anim(p_channel, p_play_type, p_time_s);
 }
 
-// Pose a part channel directly to the engine-computed signed dword (the
-// faithful runtime path: the AI brain integrates the PLAYPARTANIM phase
-// in-engine and the owner writes it to the PANM control register here).
 void ObjectModel::set_part_phase(int p_channel, int64_t p_phase) {
 	wake_runtime_frame();
-	const int slot = p_channel - 1;
-	const String reg = resolve_anim_channel_register(slot);
-	const String owner = resolve_anim_channel_owner(slot);
-	if (reg.is_empty() || owner.is_empty()) {
-		return;
-	}
-	const int64_t next_phase = ctrl_dword(p_phase);
-	part_anims_.erase(reg); // the engine owns this channel's phase
-	set_ctrl_override(owner, reg, next_phase);
+	const String reg = resolve_anim_channel_register(p_channel - 1);
+	const String owner = resolve_anim_channel_owner(p_channel - 1);
+	if (reg.is_empty() || owner.is_empty()) return;
+	controls_.release_part(p_channel);
+	set_ctrl_override(owner, reg, p_phase);
 }
 
-// Release PLAYPARTANIM's ownership of one semantic register — distinct from
-// publishing zero (retail suppresses VEHICLE_SPECIAL1 altogether for
-// ItemDefAttrib FastRope 0x1000 while still publishing SPECIAL2).
 void ObjectModel::clear_part_phase(int p_channel) {
 	wake_runtime_frame();
-	const int slot = p_channel - 1;
-	const String reg = resolve_anim_channel_register(slot);
-	const String owner = resolve_anim_channel_owner(slot);
-	if (reg.is_empty() || owner.is_empty()) {
-		return;
-	}
-	part_anims_.erase(reg);
+	const String reg = resolve_anim_channel_register(p_channel - 1);
+	const String owner = resolve_anim_channel_owner(p_channel - 1);
+	if (reg.is_empty() || owner.is_empty()) return;
+	controls_.release_part(p_channel);
 	clear_ctrl_override(owner, reg);
 }
 
 void ObjectModel::clear_part_anims() {
-	for (ObjectModel *linked : live_presentation_links()) {
-		linked->clear_part_anims();
-	}
+	for (ObjectModel *linked : live_presentation_links()) linked->clear_part_anims();
 	wake_runtime_frame();
-	part_anims_.clear();
-	part_anim_tick_accum_s_ = 0.0;
+	controls_.clear_parts();
 }
 
 PackedStringArray ObjectModel::get_active_part_anim_registers() const {
 	PackedStringArray result;
-	for (const KeyValue<String, PartAnimChannel> &kv : part_anims_) {
-		result.push_back(kv.key);
+	for (int ordinal : controls_.active_part_registers()) {
+		result.push_back(String(opennova::threedi::threedi_ctrl_register_name(static_cast<size_t>(ordinal))));
 	}
 	return result;
 }
 
-// Advance at retail's fixed 16 ms cadence with wrapping signed-dword ADD/SUB.
-// Only strict overshoot clamps and stops; landing exactly on an endpoint keeps
-// the direction live for one more tick.
-// [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]
 bool ObjectModel::advance_part_anims(double p_delta) {
-	if (part_anims_.is_empty() || p_delta <= 0.0) {
-		return false;
-	}
-	part_anim_tick_accum_s_ += p_delta;
-	const int tick_count = static_cast<int>(
-			Math::floor((part_anim_tick_accum_s_ + 0.000000001) / kPartAnimTickS));
-	if (tick_count <= 0) {
-		return false;
-	}
-	part_anim_tick_accum_s_ -= double(tick_count) * kPartAnimTickS;
-	bool changed = false;
-	for (int tick = 0; tick < tick_count; ++tick) {
-		if (part_anims_.is_empty()) {
-			break;
-		}
-		// Writes straight into ctrl_values_ (NOT set_ctrl_value, which would
-		// eagerly re-evaluate per channel); the enclosing apply_runtime_state
-		// applies the result once, in the same frame.
-		Vector<String> finished;
-		for (KeyValue<String, PartAnimChannel> &kv : part_anims_) {
-			const int64_t previous = kv.value.value;
-			int32_t phase = static_cast<int32_t>(previous);
-			const bool step_finished = opennova::world::part_anim_step(phase,
-					static_cast<int32_t>(kv.value.dir), static_cast<int32_t>(kv.value.rate));
-			const int64_t next_value = phase;
-			kv.value.value = next_value;
-			// A register entering the table is a change even when its first
-			// step lands on the phase it started from.
-			const bool inserted = !ctrl_values_.has(kv.key);
-			ctrl_values_[kv.key] = next_value;
-			ctrl_value_owners_.erase(kv.key);
-			changed = changed || inserted || next_value != previous;
-			if (step_finished) {
-				finished.push_back(kv.key);
-			}
-		}
-		for (const String &reg : finished) {
-			part_anims_.erase(reg);
-		}
-	}
-	if (changed) {
-		ctrl_native_cache_valid_ = false;
-	}
+	const bool changed = controls_.advance_parts(p_delta);
 	bounds_dirty_ = bounds_dirty_ || changed;
 	return changed;
 }
