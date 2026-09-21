@@ -201,7 +201,7 @@ public:
 	PackedInt32Array suppressed_bms_ids;
 	mutable opennova::terrain::TerrainStaticShadowPlanner planner;
 	std::shared_ptr<const opennova::terrain::TerrainFieldStore> receiver_storage;
-	mutable std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+	mutable std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 			compilation_snapshot;
 	mutable opennova::terrain::TerrainStaticShadowPlannerDiagnostics
 			async_diagnostics;
@@ -631,7 +631,7 @@ TerrainStaticShadowRasterizer::plan_page(
 	return impl_->planner.plan(p_page);
 }
 
-std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 TerrainStaticShadowRasterizer::compilation_snapshot() const {
 	// The revision moves only on a structural change (caster set, light
 	// quantum, receiver terrain, config); material time is per job, so a
@@ -642,7 +642,7 @@ TerrainStaticShadowRasterizer::compilation_snapshot() const {
 	if (impl_->compilation_snapshot == nullptr ||
 			impl_->compilation_snapshot->revision != revision) {
 		auto snapshot =
-				std::make_shared<TerrainStaticShadowCompilationSnapshot>();
+				std::make_shared<opennova::terrain::TerrainStaticShadowCompilationSnapshot>();
 		snapshot->revision = revision;
 		snapshot->receiver_storage = impl_->receiver_storage;
 		snapshot->planner = impl_->planner;

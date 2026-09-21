@@ -10,11 +10,17 @@ func _source(path: String) -> String:
 func test_device_snapshots_shadow_state_before_queuing_portable_work() -> void:
 	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
 	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
+	# The snapshot and the composition worker are the engine's
+	# (runtime/terrain/terrain_tile_composition_worker.h); the device only
+	# publishes and consumes them.
+	var worker_header := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.h")
 	assert_true(header.contains("class TerrainStaticShadowPageRasterizer"),
 		"The device needs a typed page compiler, not a framebuffer-opacity hook.")
-	assert_true(header.contains("TerrainStaticShadowCompilationSnapshot"))
 	assert_true(header.contains(
-			"std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>"),
+			"std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>"))
+	assert_true(worker_header.contains(
+			"const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> &shadow"),
 		"Only an immutable portable snapshot may cross the worker boundary.")
 	var refresh := source.find("TerrainTileCacheDevice::_refresh_shadow_snapshot()")
 	var snapshot := source.find(
@@ -54,14 +60,15 @@ func test_device_snapshots_shadow_state_before_queuing_portable_work() -> void:
 
 
 func test_worker_snapshot_owns_the_complete_receiver_height_field() -> void:
-	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
+	var worker_header := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.h")
 	var rasterizer := _source(
 			"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
 	# Since ADR 0042 d4 the one receiver owner is the engine's terrain field
 	# store: it keeps the copied CPT height samples and the TRN routing grid
 	# alive for the worker snapshots.
-	assert_true(header.contains(
-			"std::shared_ptr<const opennova::terrain::TerrainFieldStore>"),
+	assert_true(worker_header.contains(
+			"std::shared_ptr<const TerrainFieldStore> receiver_storage"),
 			"The immutable worker snapshot needs one owner for every receiver pointer.")
 	var refresh := rasterizer.find("void refresh_receiver_terrain()")
 	var snapshot := rasterizer.find("TerrainStaticShadowRasterizer::compilation_snapshot()")
@@ -80,12 +87,17 @@ func test_worker_snapshot_owns_the_complete_receiver_height_field() -> void:
 
 func test_workers_finish_exact_pages_before_generation_checked_upload() -> void:
 	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
-	var worker := source.find("void worker_loop()")
-	var compose := source.find("compose_terrain_tile_page(", worker)
-	var plan := source.find("shadow_planner.plan(", compose)
-	var begin_alpha := source.find("begin_terrain_static_shadow_alpha_page(", plan)
-	var raster := source.find("shadow_planner.rasterize(", begin_alpha)
-	var apply_alpha := source.find("apply_terrain_static_shadow_alpha_page(", raster)
+	# The composition itself runs on the engine's worker threads.
+	var worker_source := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.cpp")
+	var worker_header := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.h")
+	var worker := worker_source.find("TerrainTileCompositionWorker::worker_loop()")
+	var compose := worker_source.find("compose_terrain_tile_page(", worker)
+	var plan := worker_source.find("shadow_planner.plan(", compose)
+	var begin_alpha := worker_source.find("begin_terrain_static_shadow_alpha_page(", plan)
+	var raster := worker_source.find("shadow_planner.rasterize(", begin_alpha)
+	var apply_alpha := worker_source.find("apply_terrain_static_shadow_alpha_page(", raster)
 	var drain := source.find("TerrainTileCacheDevice::_drain_completed()")
 	var generation_gate := source.find("cache_.can_publish(job)", drain)
 	var make_image := source.find("image_from_rgba8(completion.pixels)", drain)
@@ -107,8 +119,8 @@ func test_workers_finish_exact_pages_before_generation_checked_upload() -> void:
 	assert_gt(upload, make_image,
 		"The validated RGB-invariant page must be the page uploaded and published.")
 	assert_gt(publish, upload)
-	assert_true(source.contains("kWorkerCount = 2"))
-	assert_true(source.contains("kUploadBudgetPerFrame = 2"))
+	assert_true(worker_header.contains("kWorkerCount = 2"))
+	assert_true(worker_header.contains("kUploadBudgetPerFrame = 2"))
 	assert_true(source.contains("take_completion_if("),
 		"Cold layers (no published payload on screen) drain outside the"
 		+ " refresh budget so first-fill completes in a few frames.")
@@ -124,25 +136,29 @@ func test_workers_finish_exact_pages_before_generation_checked_upload() -> void:
 
 func test_device_coalesces_stale_work_and_prioritizes_current_frame_demand() -> void:
 	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
-	var async_state := source.find("struct TerrainTileCacheDevice::AsyncState")
-	var device_constructor := source.find(
-			"TerrainTileCacheDevice::TerrainTileCacheDevice()", async_state)
-	assert_gt(async_state, -1)
-	assert_gt(device_constructor, async_state)
-	var body := source.substr(async_state, device_constructor - async_state)
-	assert_true(body.contains("TerrainTileCompositionDemandQueue demand_queue"),
+	# The demand / completion policy is the engine worker's
+	# (runtime/terrain/terrain_tile_composition_worker.{h,cpp}).
+	var worker_header := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.h")
+	var worker_source := _source(
+			"res://../engine/runtime/terrain/terrain_tile_composition_worker.cpp")
+	assert_true(source.contains("std::unique_ptr<opennova::terrain::TerrainTileCompositionWorker> async_")
+			or _source("res://src/terrain/terrain_tile_cache_device.h").contains(
+			"std::unique_ptr<opennova::terrain::TerrainTileCompositionWorker> async_"),
+			"The device composes through the engine's worker, never a private thread pool.")
+	assert_true(worker_header.contains("TerrainTileCompositionDemandQueue demand_queue_"),
 			"The worker payload queue must consume the portable demand-order policy.")
-	assert_true(body.contains("TerrainTileCompositionDemandQueue completion_queue"),
+	assert_true(worker_header.contains("TerrainTileCompositionDemandQueue completion_queue_"),
 			"Completed payloads must use the same current-frame-first policy before upload.")
-	assert_true(body.contains("demand_queue.enqueue("),
+	assert_true(worker_source.contains("demand_queue_.enqueue("),
 			"Enqueue must coalesce an older generation for the same cache layer.")
-	assert_true(body.contains("completion_queue.remove_older_generations("),
+	assert_true(worker_source.contains("completion_queue_.remove_older_generations("),
 			"A new layer generation must purge an already-completed superseded payload.")
-	assert_true(body.contains("removed_sequences"),
+	assert_true(worker_source.contains("removed_sequences"),
 			"Coalesced schedule entries must remove their matching queued payloads.")
-	assert_true(body.contains("demand_queue.take_next()"),
+	assert_true(worker_source.contains("demand_queue_.take_next()"),
 			"Workers must select newest-frame demand instead of dequeuing strict FIFO.")
-	assert_true(body.contains("completion_queue.take_next()"),
+	assert_true(worker_header.contains("completion_queue_.take_next()"),
 			"The upload gate must select current-frame completions instead of strict FIFO.")
 	assert_true(source.contains("diagnostic_frame_id_, shadow_snapshot"),
 			"Every queued page must carry the render frame that demanded it.")

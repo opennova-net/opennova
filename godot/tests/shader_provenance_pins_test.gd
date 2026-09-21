@@ -625,8 +625,12 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 			["til_build_entry_render_uv_quad", "sample_tilestrip", "compose_overlay_rgba",
 			"add_dot3_alpha(output, dot3_alpha)"], "terrain_tile_composer.cpp")
 	_contains_all(_read_repo("godot/src/terrain/terrain_tile_cache_device.cpp"),
-			["get_tilestrip_tex()", "snapshot->tilestrip", "result.tilestrip = &tilestrip"],
+			["get_tilestrip_tex()", "snapshot->tilestrip"],
 			"terrain_tile_cache_device.cpp")
+	# The page sources cross to the engine's composition worker as one snapshot.
+	_contains_all(_read_repo("engine/runtime/terrain/terrain_tile_composition_worker.h"),
+			["Rgba8Image tilestrip", "result.tilestrip = &tilestrip"],
+			"terrain_tile_composition_worker.h")
 	var terrain := _read(SHADER_ROOT.path_join("terrain.gdshader"))
 	var foliage := _read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc"))
 	for shader in [terrain, foliage]:

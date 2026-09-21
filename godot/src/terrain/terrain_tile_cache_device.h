@@ -1,8 +1,9 @@
 #pragma once
 
 // Godot device adapter for the engine-owned terrain tile-composition cache.
-// Page identity, LRU, invalidation, and pixel composition remain portable;
-// this class owns only source extraction, Texture2DArray upload, and counters.
+// Page identity, LRU, invalidation, pixel composition and the composition
+// thread pool remain portable; this class owns only source extraction,
+// Texture2DArray upload, and counters.
 
 #include <godot_cpp/classes/texture2d_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -14,6 +15,7 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_composition_worker.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
 #include <array>
@@ -28,25 +30,13 @@ class TerrainData;
 class TerrainSurfaceInputs;
 class TerrainTileInfo;
 
-// Main-thread-owned provider state published once per semantic shadow epoch
-// (caster set, light quantum, receiver terrain, config — never material time,
-// which rides each work item). Worker threads clone only the portable planner,
-// whose immutable caster set is shared by pointer, and keep the receiver
-// terrain store (the engine's one cpt/trn field builder, ADR 0042 d4) alive;
-// no Godot Object or rendering API crosses the worker boundary.
-struct TerrainStaticShadowCompilationSnapshot {
-	uint64_t revision = 0;
-	std::shared_ptr<const opennova::terrain::TerrainFieldStore> receiver_storage;
-	opennova::terrain::TerrainStaticShadowPlanner planner;
-};
-
 // Non-owning producer seam between mission/ObjectData geometry resolution and
 // the page-cache device. Only immutable portable snapshots cross to workers;
 // the device owns generation validation and the render-thread upload commit.
 class TerrainStaticShadowPageRasterizer {
 public:
 	virtual ~TerrainStaticShadowPageRasterizer() = default;
-	virtual std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+	virtual std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const = 0;
 	// Main-thread only: the memoized per-page plan on the LIVE planner. The
 	// provider mutates planner state only before the device's request loop
@@ -110,7 +100,6 @@ public:
 	bool is_ready() const { return texture_.is_valid() && sources_ready_; }
 
 private:
-	struct AsyncState;
 	void _drain_completed();
 	bool _refresh_shadow_snapshot();
 	void _reset_shadow_epoch_diagnostics();
@@ -126,7 +115,9 @@ private:
 			opennova::terrain::TerrainTilePageSourceView &r_sources) const;
 
 	opennova::TerrainTileCompositionCache cache_;
-	std::unique_ptr<AsyncState> async_;
+	// The page-composition thread pool (engine): demand / completion queues,
+	// the source snapshot, the epoch cancel.
+	std::unique_ptr<opennova::terrain::TerrainTileCompositionWorker> async_;
 	Ref<Texture2DArray> texture_;
 	bool tile_overlay_required_ = false;
 	bool tile_overlay_ready_ = false;
@@ -148,7 +139,7 @@ private:
 	uint64_t scorch_records_rejected_ = 0;
 	uint64_t scorch_page_invalidations_ = 0;
 	TerrainStaticShadowPageRasterizer *static_shadow_rasterizer_ = nullptr;
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
+	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 			shadow_snapshot_;
 	uint64_t shadow_raster_jobs_ = 0;
 	uint64_t shadow_raster_failures_ = 0;
