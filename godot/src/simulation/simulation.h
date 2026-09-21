@@ -2149,7 +2149,7 @@ public:
 	// get_local_player_sun_quality() so the FP parts can keep their witnessed
 	// exemption while the third-person body dims.
 	PackedInt64Array get_draw_lighting_changes(const Vector3 &p_light_dir);
-	int get_local_player_sun_quality() const { return present_.local_sun_quality; }
+	int get_local_player_sun_quality() const { return present_.sun_quality.local_quality; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
 	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,

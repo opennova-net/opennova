@@ -72,49 +72,10 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 
 bool Simulation::fill_lfp_zones(int p_local_team,
 		std::vector<opennova::hud::HudLfpZone> &r_zones) {
-	r_zones.clear();
-	if (!kernel_ || !runtime_ || !kernel_->world.cached.local_player.valid()) return false;
-	const opennova::world::Entity *local =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (local == nullptr) return false;
-	// The zone-timer entry as the marker reads it: the client runtime's
-	// 13-DWORD image of the retail shared timer list (present only once a
-	// 0x6F value has arrived, which is when retail's CProximityList_FindEntryById
-	// @0x598730 finds one), plus the two contest bytes the same message carries.
-	const opennova::world::LfpZoneTimerLookup timer =
-			[this](opennova::world::EntityHandle h, opennova::world::LfpZoneTimer &t) {
-				const auto it = runtime_->zone_states().find(h.packed);
-				if (it == runtime_->zone_states().end() || !it->second.has_value)
-					return false;
-				const auto &e = it->second.entry;
-				t.team = e.mode_a;
-				t.value = e.value_current;
-				t.control = e.value_target;
-				t.limit = e.value_limit;
-				t.rate = e.value_rate;
-				t.active = e.value_active;
-				t.count_owner = e.contest_owner;
-				t.count_other = e.contest_other;
-				return true;
-			};
-	// The transient minimap slot's flag byte for the zone (+4 & 0xC0 gates the
-	// marker; retail walks the 1160-slot transient bank @0x5a2517..0x5a256e).
-	// The 0x6B ring slots land in the special bank here, so both are searched.
-	const opennova::world::LfpCaptureFlagsLookup capture_flags =
-			[this](opennova::world::EntityHandle h) -> uint8_t {
-				const opennova::replication::ClientMinimapState &map =
-						runtime_->state().minimap;
-				for (const auto &slot : map.transient) {
-					if (slot.active && slot.handle == h.packed) return slot.flags;
-				}
-				for (const auto &slot : map.special) {
-					if (slot.active && slot.handle == h.packed) return slot.flags;
-				}
-				return 0;
-			};
-	opennova::world::build_lfp_zones(kernel_->world, deploy_zone_registry(), *local,
-			p_local_team, timer, capture_flags, r_zones);
-	return true;
+	// The zone walk with the role's zone-timer image and minimap slot flags
+	// (inmatch/role_feeds.h collect_lfp_zones carries the witnesses).
+	return opennova::inmatch::collect_lfp_zones(role_view(), deploy_zone_registry(), p_local_team,
+			r_zones);
 }
 
 int64_t Simulation::get_session_game_type() const {

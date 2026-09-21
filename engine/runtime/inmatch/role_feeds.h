@@ -14,10 +14,13 @@
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/friendly_tags.h>
+#include <runtime/world/lfp_feed.h>
 #include <runtime/world/spawn_select.h>
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace opennova::mission {
@@ -81,5 +84,55 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 		const world::SpawnZoneRegistry &zones, const std::string &medic_key_label,
 		const hud::GameTextLookup &gametext);
+
+// The AAS zone status panel's zone rows: the world's zone walk
+// (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
+// 13-DWORD image of the retail shared timer list, present once a 0x6F value
+// has arrived, which is when retail's CProximityList_FindEntryById @0x598730
+// finds one — and the transient / special minimap slot's flag byte (+4 &
+// 0xC0 gates the marker; retail walks the 1160-slot transient bank
+// @0x5a2517..0x5a256e; the 0x6B ring slots land in the special bank here).
+// False without a kernel, a replica runtime or a local player.
+bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		int local_team, std::vector<hud::HudLfpZone> &out);
+
+// THE PER-DRAWN-ENTITY SUN-VISIBILITY FEED (D-RLIT-3). Retail computes the
+// factor inside the sector render walk for every entity it draws and pushes
+// it onto the render-state stack around that entity's submits
+// [orig: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
+//  @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md];
+// contained entities take the interior light group instead and the factor
+// stays 1.0. The blocked-ray count and eligibility gate are the collision
+// world's; this feed mirrors both drawn identity domains (placed rows by BMS
+// id, wire-rendered rows by handle) and diffs the quality per identity so a
+// steady frame emits nothing. Unlisted entities are quality 4 (factor 1.0).
+struct SunQualityChange {
+	bool wire = false; // false: `bms_id` names a placed row; true: `handle` a wire row
+	int32_t bms_id = 0;
+	uint16_t handle = 0;
+	uint8_t quality = 4;
+};
+struct SunQualityFeed {
+	// Per-entity quality last emitted, split by identity domain: wire handle
+	// zero and a placed BMS id zero are both valid sentinels in their own
+	// schemas, so they never share one integer map.
+	std::unordered_map<int32_t, uint8_t> last_by_bms;
+	std::unordered_map<uint16_t, uint8_t> last_by_wire;
+	int64_t layout_revision_seen = -1;
+	// The local player's own quality (a spawned entity outside the placed
+	// walk): the presenter seam's only — the FP parts keep the witnessed
+	// effectScale=1 exemption while the third-person body dims.
+	uint8_t local_quality = 4;
+
+	// One display frame. `sun_step_q16` is light_dir * 200 u in mission fixed
+	// [orig: end = start + 200 * lightdir @0x5c6858..0x5c6876]; `culled_bms` /
+	// `culled_wire` are the occlusion pass's culled identities (retail only rays
+	// a drawn entity: a culled one keeps its last factor until it renders
+	// again); a new `layout_revision` forgets the wire-domain cache.
+	void collect(const RoleView &view, const int32_t sun_step_q16[3],
+			const std::unordered_set<int32_t> &culled_bms,
+			const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,
+			std::vector<SunQualityChange> &out);
+};
 
 } // namespace opennova::inmatch

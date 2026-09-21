@@ -9,6 +9,8 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
+#include <runtime/replication/entity_wire_bridge.h> // entity_class_of
+#include <runtime/world/collision.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -277,6 +279,205 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 			text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
 			text("WPNames", zone_key, "Spawn Point"));
 	return v;
+}
+
+bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		int local_team, std::vector<hud::HudLfpZone> &out) {
+	out.clear();
+	if (view.kernel == nullptr || view.runtime == nullptr ||
+			!view.kernel->world.cached.local_player.valid())
+		return false;
+	const world::World &w = view.kernel->world;
+	const world::Entity *local = w.registry.get(w.cached.local_player);
+	if (local == nullptr) return false;
+	const ClientRuntime *runtime = view.runtime;
+	// The zone-timer entry as the marker reads it.
+	const world::LfpZoneTimerLookup timer = [runtime](world::EntityHandle h,
+													  world::LfpZoneTimer &t) {
+		const auto it = runtime->zone_states().find(h.packed);
+		if (it == runtime->zone_states().end() || !it->second.has_value) return false;
+		const auto &e = it->second.entry;
+		t.team = e.mode_a;
+		t.value = e.value_current;
+		t.control = e.value_target;
+		t.limit = e.value_limit;
+		t.rate = e.value_rate;
+		t.active = e.value_active;
+		t.count_owner = e.contest_owner;
+		t.count_other = e.contest_other;
+		return true;
+	};
+	// The transient minimap slot's flag byte for the zone; the 0x6B ring slots
+	// land in the special bank here, so both are searched.
+	const world::LfpCaptureFlagsLookup capture_flags = [runtime](world::EntityHandle h) -> uint8_t {
+		const replication::ClientMinimapState &map = runtime->state().minimap;
+		for (const auto &slot : map.transient)
+			if (slot.active && slot.handle == h.packed) return slot.flags;
+		for (const auto &slot : map.special)
+			if (slot.active && slot.handle == h.packed) return slot.flags;
+		return 0;
+	};
+	world::build_lfp_zones(w, zones, *local, local_team, timer, capture_flags, out);
+	return true;
+}
+
+void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3],
+		const std::unordered_set<int32_t> &culled_bms,
+		const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,
+		std::vector<SunQualityChange> &out) {
+	out.clear();
+	if (view.kernel == nullptr) return;
+	mission::MissionKernel &kernel = *view.kernel;
+	world::World &w = kernel.world;
+	if (layout_revision_seen != layout_revision) {
+		last_by_wire.clear();
+		layout_revision_seen = layout_revision;
+	}
+
+	const auto entity_quality = [&](const world::Entity &e) {
+		// Contained entities route through the interior light group; the
+		// outdoor factor stays 1.0 [orig: the blink-ref branch @0x5c74b7].
+		// The +0x1C0 slice gate [orig: @0x5c6808] lives inside the ray walk:
+		// an entity with no proximity-candidate slice blocks nothing and holds
+		// quality 4 — statics never ray, and only slice candidates (structures
+		// overlapping the entity's inflated bubble) can shade it.
+		if (e.blink_hits[0] != 0) return static_cast<uint8_t>(4);
+		const int blocked = kernel.collision.sun_visibility_blocked_rays(w, e, sun_step_q16);
+		return static_cast<uint8_t>(4 - blocked);
+	};
+
+	// The local player is a spawned entity (bms_id 0, outside the placed-node
+	// walk); its quality feeds the presenter seam only.
+	const world::Entity *local = w.registry.get(w.cached.local_player);
+	local_quality = local != nullptr ? entity_quality(*local) : 4;
+
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.kind == world::EntityKind::Building || e.kind == world::EntityKind::Marker) return;
+		// Only authored placements have a placed node addressed by BMS id.
+		// Runtime-spawned rows can also carry a nonzero bms_id (players use
+		// their net id), but the wire walk owns their rendering.
+		if (e.bms_id == 0 || e.spawn_origin == world::kSpawnOriginNone) return;
+		if (e.handle == w.cached.local_player) return;
+		// Retail only rays a drawn entity; a culled one keeps its last factor
+		// until it renders again (the stack slot is simply never pushed).
+		if (culled_bms.count(e.bms_id) != 0) return;
+		const uint8_t quality = entity_quality(e);
+		const auto it = last_by_bms.find(e.bms_id);
+		const uint8_t last = it != last_by_bms.end() ? it->second : 4;
+		if (quality == last) return;
+		last_by_bms[e.bms_id] = quality;
+		out.push_back(SunQualityChange{ false, e.bms_id, 0, quality });
+	});
+
+	// Every rendered role consumes ClientState. Placed rows above continue to
+	// address their placed node by BMS id; only rows without authored identity
+	// reach the wire walk and therefore need a wire-handle lighting update.
+	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
+	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
+	// check below. Host/SP rows use their authoritative exact-handle entity.
+	// Cadence: like the registry walk above, the casts run per display frame.
+	// Retail casts inside the sector render walk for every drawn entity every
+	// frame; only the candidate SLICE the walker iterates refreshes on the
+	// 17-tick arena edge, which CollisionWorld::build_tick_tables already
+	// mirrors for wire rows [orig: Terrain_RenderSectorEntities @0x5c7bf1 /
+	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
+	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
+	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
+	// Entity_BuildProximityListsFromPools @0x4c2418, see
+	// docs/render/render-lighting-re.md]. Throttling the casts themselves to
+	// that cadence would hold a moving vehicle's sun factor stale for up to 16
+	// ticks; the per-handle cache below only suppresses unchanged emits.
+	if (!view.joiner) {
+		// The host presents its own pools (D-NET-140 closed): the wire-rendered
+		// rows are the runtime-spawned pool-0 organics and pool-1 dynamics with
+		// no authored identity; placed rows went through the walk above.
+		for (int pool = 0; pool <= 1; ++pool) {
+			w.registry.for_each_in_pool(pool, [&](const world::Entity &e) {
+				const uint16_t handle = e.handle.packed;
+				if (e.item_id == 0 || e.handle == w.cached.local_player ||
+						e.spawn_origin != world::kSpawnOriginNone) {
+					last_by_wire.erase(handle);
+					return;
+				}
+				// A hidden row is not drawn, so retail does not push a new stack
+				// value; preserve the last emitted quality (see the wire loop).
+				if ((e.flags & 0x01u) != 0) return;
+				const EntityClass cls = replication::entity_class_of(e);
+				const bool person_source = pool == 0 &&
+						(cls == EntityClass::Player || cls == EntityClass::Infantry);
+				const bool dynamic_source = pool == 1 &&
+						kernel.wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
+								.pool1_candidate_source_eligible;
+				if (!person_source && !dynamic_source) {
+					last_by_wire.erase(handle);
+					return;
+				}
+				const uint8_t quality = entity_quality(e);
+				const auto it = last_by_wire.find(handle);
+				const uint8_t last = it != last_by_wire.end() ? it->second : 4;
+				if (quality == last) return;
+				last_by_wire[handle] = quality;
+				out.push_back(SunQualityChange{ true, 0, handle, quality });
+			});
+		}
+	} else if (view.runtime != nullptr) {
+		const ClientRuntime &runtime = *view.runtime;
+		for (const replication::ClientEntityState &es : runtime.state().entities) {
+			const uint16_t handle = es.handle;
+			if (handle == world::EntityHandle::kInvalid || es.type_id == 0 ||
+					(runtime.has_self_handle() && handle == runtime.self_handle())) {
+				last_by_wire.erase(handle);
+				continue;
+			}
+			// Retail only rays a drawn entity; a culled one keeps its last
+			// factor until it renders again (see the registry walk above).
+			if (culled_wire.count(static_cast<int32_t>(handle)) != 0) continue;
+			// A hidden row is not drawn, so retail does not push a new stack
+			// value. Preserve the last emitted quality: if it moves while hidden,
+			// the first visible frame must compare against that retained material
+			// state and emit the restoration instead of assuming default quality 4.
+			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
+
+			const world::EntityHandle h{ handle };
+			const world::Entity *joiner_twin = nullptr;
+			if (h.pool() != 0) {
+				const world::Entity *candidate = w.registry.get(h);
+				if (candidate != nullptr && static_cast<uint16_t>(candidate->item_id) == es.type_id)
+					joiner_twin = candidate;
+			}
+			// The wire walk defers authored rows to their placed node (or static
+			// batch). Do not repeat the same native ray query and cache an update
+			// for a wire node that deliberately does not exist.
+			if (h == w.cached.local_player ||
+					(joiner_twin != nullptr && joiner_twin->spawn_origin != world::kSpawnOriginNone)) {
+				last_by_wire.erase(handle);
+				continue;
+			}
+
+			const bool person_source = h.pool() == 0 &&
+					(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry);
+			const world::ResolvedCollisionShape shape = kernel.wire_collision_shape_for_type(es.type_id);
+			const bool dynamic_source = h.pool() == 1 && shape.pool1_candidate_source_eligible;
+			if (!person_source && !dynamic_source) {
+				last_by_wire.erase(handle);
+				continue;
+			}
+
+			uint8_t quality = 4;
+			if ((es.rm_entity_flags & world::kEntityFlagIndoors) == 0 &&
+					(joiner_twin == nullptr || joiner_twin->blink_hits[0] == 0)) {
+				const int blocked = kernel.collision.wire_sun_visibility_blocked_rays(w, handle,
+						world::FixedVec3{ es.x, es.y, es.z }, shape.bbox_center_q16, sun_step_q16);
+				quality = static_cast<uint8_t>(4 - blocked);
+			}
+
+			const auto it = last_by_wire.find(handle);
+			const uint8_t last = it != last_by_wire.end() ? it->second : 4;
+			if (quality == last) continue;
+			last_by_wire[handle] = quality;
+			out.push_back(SunQualityChange{ true, 0, handle, quality });
+		}
+	}
 }
 
 } // namespace opennova::inmatch

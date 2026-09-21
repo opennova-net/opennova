@@ -234,220 +234,32 @@ float Simulation::sun_quality_factor(int p_quality) const {
 	return opennova::renderer::sun_visibility_factor(4 - p_quality);
 }
 
-// The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes
-// the factor inside the sector render walk for every entity it draws and
-// pushes it onto the render-state stack around that entity's submits
-// [orig: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
-// @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md];
-// contained entities take the interior light group instead and the factor
-// stays 1.0. The blocked-ray count and eligibility gate are engine-side
-// (world::CollisionWorld); this walk mirrors both drawn identity domains and
-// diffs quality per BMS id or wire handle so a steady frame emits nothing.
+// The per-drawn-entity sun-visibility factor feed (D-RLIT-3): the walk, the
+// two identity domains and the per-identity diff are the engine's
+// (inmatch/role_feeds.h SunQualityFeed); this leg maps the light direction
+// into mission fixed, hands over the occlusion pass's culled identities and
+// packs the changes as (id-or-handle, kind, quality) triples.
 PackedInt64Array Simulation::get_draw_lighting_changes(
 		const Vector3 &p_light_dir) {
 	PackedInt64Array out;
 	if (!kernel_) return out;
-
 	// Sun step in mission fixed: light_dir * 200 u, the same tuple mapping the
-	// iris march uses [orig: end = start + 200 * lightdir @0x5c6858..0x5c6876].
+	// iris march uses.
 	const int32_t sun[3] = {
 		opennova::world::to_fixed(p_light_dir.x * 200.0f),
 		opennova::world::to_fixed(-p_light_dir.z * 200.0f),
 		opennova::world::to_fixed(p_light_dir.y * 200.0f)};
-
-	std::unordered_set<int32_t> culled(present_.occlusion_culled_bms.begin(),
-	                                   present_.occlusion_culled_bms.end());
-	if (present_.sun_quality_layout_revision != present_.layout_revision) {
-		present_.sun_quality_last_by_wire.clear();
-		present_.sun_quality_layout_revision = present_.layout_revision;
-	}
-
-	const auto entity_quality = [&](const opennova::world::Entity &e) {
-		// Contained entities route through the interior light group; the
-		// outdoor factor stays 1.0 [orig: the blink-ref branch @0x5c74b7].
-		// The +0x1C0 slice gate [orig: @0x5c6808] lives inside the ray walk:
-		// an entity with no proximity-candidate slice blocks nothing and holds
-		// quality 4 — statics never ray, and only slice candidates (structures
-		// overlapping the entity's inflated bubble) can shade it.
-		if (e.blink_hits[0] != 0) return static_cast<uint8_t>(4);
-		const int blocked =
-				kernel_->collision.sun_visibility_blocked_rays(kernel_->world, e, sun);
-		return static_cast<uint8_t>(4 - blocked);
-	};
-
-	// The local player is a spawned entity (bms_id 0, outside the placed-node
-	// walk); its quality feeds the presenter seam only — the FP parts keep the
-	// witnessed effectScale=1 exemption while the third-person body dims.
-	const opennova::world::Entity *local =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	present_.local_sun_quality = local != nullptr ? entity_quality(*local) : 4;
-
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind == opennova::world::EntityKind::Building ||
-		    e.kind == opennova::world::EntityKind::Marker)
-			return;
-		// Only authored placements have a MissionPresentPass node addressed by
-		// BMS id. Runtime-spawned rows can also carry a nonzero bms_id (players
-		// use their net id), but the EntityPresenter wire walk owns their rendering.
-		if (e.bms_id == 0 ||
-				e.spawn_origin == opennova::world::kSpawnOriginNone)
-			return;
-		if (e.handle == kernel_->world.cached.local_player) return;
-		// Retail only rays a drawn entity; a culled one keeps its last factor
-		// until it renders again (the stack slot is simply never pushed).
-		if (culled.count(e.bms_id) != 0) return;
-		const uint8_t quality = entity_quality(e);
-		const auto it = present_.sun_quality_last_by_bms.find(e.bms_id);
-		const uint8_t last =
-				it != present_.sun_quality_last_by_bms.end() ? it->second : 4;
-		if (quality == last) return;
-		present_.sun_quality_last_by_bms[e.bms_id] = quality;
-		out.push_back(-1);
-		out.push_back(e.bms_id);
-		out.push_back(quality);
-	});
-
-	// Every rendered role consumes ClientState. Placed rows above continue to
-	// address MissionPresentPass by BMS id; only rows without authored identity
-	// reach the EntityPresenter wire walk and therefore need a wire-handle lighting update.
-	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
-	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
-	// check below. Host/SP rows use their authoritative exact-handle entity.
-	// Cadence: like the registry walk above, the three casts run per display
-	// frame. Retail casts inside the sector render walk for every drawn entity
-	// every frame; only the candidate SLICE the walker iterates refreshes on
-	// the 17-tick arena edge, which CollisionWorld::build_tick_tables already
-	// mirrors for wire rows [orig: Terrain_RenderSectorEntities @0x5c7bf1 /
-	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
-	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
-	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
-	// Entity_BuildProximityListsFromPools @0x4c2418, see
-	// docs/render/render-lighting-re.md]. Throttling the casts themselves to
-	// that cadence would hold a moving vehicle's sun factor stale for up to
-	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
-	if (!is_joiner()) {
-		// The host presents its own pools (D-NET-140 closed): the wire-rendered
-		// rows are the runtime-spawned pool-0 organics and pool-1 dynamics with
-		// no authored identity; placed rows went through the walk above.
-		for (int pool = 0; pool <= 1; ++pool) {
-			kernel_->world.registry.for_each_in_pool(pool, [&](const opennova::world::Entity &e) {
-				const uint16_t handle = e.handle.packed;
-				if (e.item_id == 0 || e.handle == kernel_->world.cached.local_player ||
-						e.spawn_origin != opennova::world::kSpawnOriginNone) {
-					present_.sun_quality_last_by_wire.erase(handle);
-					return;
-				}
-				// A hidden row is not drawn, so retail does not push a new stack
-				// value; preserve the last emitted quality (see the wire loop).
-				if ((e.flags & 0x01u) != 0) return;
-				const opennova::EntityClass cls = opennova::replication::entity_class_of(e);
-				const bool person_source = pool == 0 &&
-						(cls == opennova::EntityClass::Player ||
-						 cls == opennova::EntityClass::Infantry);
-				const bool dynamic_source = pool == 1 &&
-						kernel_->wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
-								.pool1_candidate_source_eligible;
-				if (!person_source && !dynamic_source) {
-					present_.sun_quality_last_by_wire.erase(handle);
-					return;
-				}
-				const uint8_t quality = entity_quality(e);
-				const auto it = present_.sun_quality_last_by_wire.find(handle);
-				const uint8_t last =
-						it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
-				if (quality == last) return;
-				present_.sun_quality_last_by_wire[handle] = quality;
-				out.push_back(handle);
-				out.push_back(0);
-				out.push_back(quality);
-			});
-		}
-	} else if (runtime_) {
-		const std::unordered_set<int32_t> wire_culled(
-				present_.occlusion_culled_wire.begin(), present_.occlusion_culled_wire.end());
-		for (const opennova::replication::ClientEntityState &es :
-				runtime_->state().entities) {
-			const uint16_t handle = es.handle;
-			if (handle == opennova::world::EntityHandle::kInvalid ||
-					es.type_id == 0 ||
-					(runtime_->has_self_handle() &&
-					 handle == runtime_->self_handle())) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-			// Retail only rays a drawn entity; a culled one keeps its last
-			// factor until it renders again (see the registry walk above).
-			if (wire_culled.count(static_cast<int32_t>(handle)) != 0) continue;
-			// A hidden row is not drawn, so retail does not push a new stack
-			// value. Preserve the last emitted quality: if it moves while hidden,
-			// the first visible frame must compare against that retained material
-			// state and emit the restoration instead of assuming default quality 4.
-			if (es.state_flags_known && (es.state_flags & 0x01u) != 0)
-				continue;
-
-			const opennova::world::EntityHandle h{handle};
-			const opennova::world::Entity *native = nullptr;
-			const opennova::world::Entity *joiner_twin = nullptr;
-			if (!is_joiner()) {
-				const opennova::world::Entity *candidate =
-						kernel_->world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					native = candidate;
-			} else if (h.pool() != 0) {
-				const opennova::world::Entity *candidate =
-						kernel_->world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					joiner_twin = candidate;
-			}
-			// The EntityPresenter wire walk defers authored rows to their placed node (or
-			// static batch). Do not repeat the same native ray query and cache an
-			// update for a wire node that deliberately does not exist.
-			const opennova::world::Entity *placed =
-					native != nullptr ? native : joiner_twin;
-			if (h == kernel_->world.cached.local_player ||
-					(placed != nullptr && placed->spawn_origin !=
-							opennova::world::kSpawnOriginNone)) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-
-			const bool person_source = h.pool() == 0 &&
-					(es.cls == opennova::EntityClass::Player ||
-					 es.cls == opennova::EntityClass::Infantry);
-			const opennova::world::ResolvedCollisionShape shape =
-					kernel_->wire_collision_shape_for_type(es.type_id);
-			const bool dynamic_source = h.pool() == 1 &&
-					shape.pool1_candidate_source_eligible;
-			if (!person_source && !dynamic_source) {
-				present_.sun_quality_last_by_wire.erase(handle);
-				continue;
-			}
-
-			uint8_t quality = 4;
-			if (native != nullptr) {
-				quality = entity_quality(*native);
-			} else if ((es.rm_entity_flags &
-					opennova::world::kEntityFlagIndoors) == 0 &&
-					(joiner_twin == nullptr ||
-					 joiner_twin->blink_hits[0] == 0)) {
-				const int blocked = kernel_->collision.wire_sun_visibility_blocked_rays(
-						kernel_->world, handle,
-						opennova::world::FixedVec3{es.x, es.y, es.z},
-						shape.bbox_center_q16, sun);
-				quality = static_cast<uint8_t>(4 - blocked);
-			}
-
-			const auto it = present_.sun_quality_last_by_wire.find(handle);
-			const uint8_t last =
-					it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
-			if (quality == last) continue;
-			present_.sun_quality_last_by_wire[handle] = quality;
-			out.push_back(handle);
-			out.push_back(0);
-			out.push_back(quality);
-		}
+	const std::unordered_set<int32_t> culled(present_.occlusion_culled_bms.begin(),
+			present_.occlusion_culled_bms.end());
+	const std::unordered_set<int32_t> wire_culled(present_.occlusion_culled_wire.begin(),
+			present_.occlusion_culled_wire.end());
+	std::vector<opennova::inmatch::SunQualityChange> changes;
+	present_.sun_quality.collect(role_view(), sun, culled, wire_culled,
+			static_cast<int64_t>(present_.layout_revision), changes);
+	for (const opennova::inmatch::SunQualityChange &c : changes) {
+		out.push_back(c.wire ? static_cast<int64_t>(c.handle) : -1);
+		out.push_back(c.wire ? 0 : c.bms_id);
+		out.push_back(c.quality);
 	}
 	return out;
 }
@@ -471,10 +283,7 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.occl_apply_building_last.clear();
 	present_.occl_apply_culled_last.clear();
 	present_.occl_apply_culled_wire_last.clear();
-	present_.sun_quality_last_by_bms.clear();
-	present_.sun_quality_last_by_wire.clear();
-	present_.sun_quality_layout_revision = -1;
-	present_.local_sun_quality = 4;
+	present_.sun_quality = opennova::inmatch::SunQualityFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
 	present_.iris_interior_group_section = 0;
 }

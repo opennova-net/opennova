@@ -342,6 +342,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
 )
 

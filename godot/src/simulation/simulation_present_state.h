@@ -6,6 +6,8 @@
 // behavior.
 #pragma once
 
+#include <runtime/inmatch/role_feeds.h> // SunQualityFeed
+
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -118,14 +120,9 @@ struct SimulationPresentState {
 	// re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last;
 	std::vector<int32_t> occl_apply_culled_last;
-	// Per-entity sun-visibility quality last emitted to the shell, split by
-	// identity domain. Wire handle zero and a placed BMS id zero are both valid
-	// sentinels in their own schemas, so they must never share one integer map.
-	// Unlisted entities are quality 4 (factor 1.0), the node default.
-	std::unordered_map<int32_t, uint8_t> sun_quality_last_by_bms;
-	std::unordered_map<uint16_t, uint8_t> sun_quality_last_by_wire;
-	int64_t sun_quality_layout_revision = -1;
-	uint8_t local_sun_quality = 4;
+	// The per-drawn-entity sun-visibility diff and its last-emitted caches
+	// (inmatch/role_feeds.h SunQualityFeed carries the witnesses).
+	opennova::inmatch::SunQualityFeed sun_quality;
 	// Mutable retail Lighting_SetInteriorLightGroup state left by the marched
 	// iris samples. Outdoor samples clear it, indoor samples with interior data
 	// replace it, and indoor-no-data samples intentionally retain the previous
