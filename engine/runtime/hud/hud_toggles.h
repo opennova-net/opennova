@@ -11,8 +11,10 @@
 //  _0 dispatch cases @0x4E0601 (huddetail), @0x49afc7 (hudcolor), @0x4E0561
 //  (showhud), @0x49b68b (goals), @0x49c073 / @0x49c0d9 / @0x49c0f6 (the view
 //  actions), @0x49bb68 (playerlist), @0x49b55a (OldMessages), @0x49bd29
-//  (ShowScore), @0x49b573 (friendly tags); the respawn init clears
-//  @0x4993ae / @0x49939a / @0x499381]
+//  (ShowScore), @0x49b573 (friendly tags); the respawn init
+//  Game_InitRespawnState @0x499360 the window actions run through the
+//  keeping wrapper @0x4993c0 clears @0x499381 / @0x499395 / @0x49939a /
+//  @0x49939f and, for a session peer, @0x4993ae]
 
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_math.h>
@@ -53,8 +55,11 @@ struct HudToggleState {
 // whether the huddetail and hudcolor rows currently resolve to a common key
 // (retail's scan is FIRST-MATCH-WINS by catalog row, huddetail 50 before
 // hudcolor 76, so a shared key lets huddetail consume the edge — the D-CTRL-4
-// adjudication), the chord and gate bits, and whether a session is live (the
-// ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29]).
+// adjudication), the chord and gate bits, and whether an MP session is live
+// (the ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
+// the respawn init closes the player list only for a session peer
+// [orig: is_in_session && is_mp_session_peer @0x4993a4..0x4993ae] — every
+// HUD-bearing process in a session is that peer).
 struct HudKeyPoll {
 	bool huddetail = false;
 	bool hudcolor = false;
@@ -86,15 +91,18 @@ inline constexpr uint32_t kThirdPersonSelected = 0x80;
 inline constexpr uint32_t kScoreboardToggled = 0x100;
 inline constexpr uint32_t kMessageLogToggled = 0x200;
 inline constexpr uint32_t kShowScoreToggled = 0x400;
+// A window action ran the respawn init: the embedder closes the sim's map
+// overlay mode beside the windows this state already cleared
+// [orig: g_mapOverlayMode = 0 @0x499395].
+inline constexpr uint32_t kOverlayWindowsCleared = 0x800;
 } // namespace hud_toggle_event
 
 // One frame's poll: advances every latch, applies the cycles and toggles to
 // the state, returns the hud_toggle_event bits that fired.
 uint32_t hud_toggles_poll(HudToggleState &state, const HudKeyPoll &keys);
 
-// The respawn / mission init clears the three overlay windows (and every
-// latch), keeping the color, detail, showhud and friendly-tag globals
-// [orig: @0x4993ae / @0x49939a / @0x499381].
+// The mission teardown clears the four overlay windows and their latches,
+// keeping the color, detail, showhud and friendly-tag globals.
 void hud_toggles_reset_mission(HudToggleState &state);
 
 // The death-screen edge forces the declutter level to the blank level through

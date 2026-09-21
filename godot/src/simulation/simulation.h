@@ -1399,6 +1399,10 @@ public:
 	int get_hud_radar_zoom_q16() const;
 	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
 	int request_hud_map_cycle();
+	// The overlay-window actions' respawn init closes the map (witness at
+	// hud::HudMapControl::on_respawn_init; ordered by HudToggles'
+	// EVENT_OVERLAY_WINDOWS_CLEARED).
+	void request_hud_map_close();
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay
@@ -1412,7 +1416,6 @@ public:
 	// per-frame HUD info. (engine: runtime/hud/hud_frame.h)
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
-	// The gamemus Var7 projection (world/music_vars.h carries the witness).
 	int get_local_player_team() const;
 	// The gamemus var pump's writes for this frame (unbound; the world node
 	// relays them through its music_var_changed signal).

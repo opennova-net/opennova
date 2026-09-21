@@ -138,11 +138,14 @@ and `engine/runtime/renderer/model_panm_cache.cpp`.
 |---|---|---|
 | Authored animation-frame selection and composition | MATCHING (behavioral proof) | `threedi_panm_pose`, `renderer_model_panm_cache`, and the real 03TR truck camera in `mounted_view_test.gd`; D-3DI-3 |
 
-The render loader copies **disk PANM byte +6** into runtime PANM dword +8.
-The similarly named disk dword +8 is not that selector. Each render LOD
-receives the model's MTRX table. A positive selector chooses one matrix;
-zero bypasses the table. [orig: GPM_LoadRenderModel @ 0x5B5000 (store
-@ 0x5B569C); ThreediGp_LoadFromFile @ 0x5B5780 (table @ 0x5B5F8C)]
+The render loader copies **disk PANM byte +6** into runtime PANM dword +8
+**sign-extended** (`movsx` @ 0x5B5698). The similarly named disk dword +8
+is not that selector. Each render LOD receives the model's MTRX table. A
+positive selector chooses one matrix; zero AND every negative byte
+(0x80..0xFF; 386 PANM nodes of the shipped corpus carry 0xFF) bypass the
+table, the runtime gate being `selector <= 0` @ 0x58E3FE..0x58E415.
+[orig: GPM_LoadRenderModel @ 0x5B5000 (store @ 0x5B569C);
+ThreediGp_LoadFromFile @ 0x5B5780 (table @ 0x5B5F8C)]
 
 For an Euler or spinner node, retail multiplies the pivot/scale matrix by
 that authored frame, evaluates the rotations, multiplies by the frame's

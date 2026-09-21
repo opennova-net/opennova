@@ -6,7 +6,7 @@
 // HudLfpZone per registry entry for the panel element.
 // [orig: the list walk in HUD_DrawZoneStatusPanel @0x5a2480 (SpawnZoneList_*
 //  @0x43b920/@0x43b930); the per-marker reads in HUD_DrawZoneMarker @0x5986f0 —
-//  the timer entry CProximityList_FindEntryById @0x598730, the team byte
+//  the timer entry CProximityList_FindEntryById @0x537f50 (call @0x598719), the team byte
 //  +0x162 @0x59873a, the cylinder @0x5987a6..0x598810, the counts
 //  @0x598866/@0x599009..0x59902b, the distance @0x5990ac..0x599108]
 // Witness record: docs/interface/hud-re.md "AAS zone status panel".

@@ -336,6 +336,10 @@ public:
 
 private:
 	void emit_(const MenuEvent &event) const;
+	// Bumped by every open_document: activate() compares it, not the document
+	// pointer, so an observer that frees and re-binds a document at the same
+	// address cannot have the old widget's ACTION rows run against it.
+	uint32_t open_generation_ = 0;
 	MenuWidgetRuntimeState &state_of_(int id);
 	const MenuWidgetRuntimeState *saved_state_(int id) const;
 	void index_document_();

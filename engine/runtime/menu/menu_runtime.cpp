@@ -161,6 +161,7 @@ void MenuRuntime::emit_(const MenuEvent &event) const {
 
 bool MenuRuntime::open_document(const mnu::Document *doc, const std::string &menu_file,
 		const std::string &target_screen) {
+	++open_generation_;
 	index_.clear();
 	menu_file_ = menu_file;
 	id_state_.clear();
@@ -669,13 +670,13 @@ void MenuRuntime::push_table_selection_(int id) {
 // ---- activation / actions ---------------------------------------------------
 
 void MenuRuntime::activate(int id) {
-	const mnu::Document *doc_at_emit = index_.document();
+	const uint32_t generation_at_emit = open_generation_;
 	MenuEvent e;
 	e.kind = MenuEvent::Kind::WidgetActivated;
 	e.id = id;
 	e.text = widget_name_of(id);
 	emit_(e);
-	if (index_.document() != doc_at_emit) return; // an observer swapped the document
+	if (open_generation_ != generation_at_emit) return; // an observer swapped the document
 	const mnu::Window *w = index_.window(id);
 	if (w == nullptr) return;
 	// A cross-.mnu jump frees the document mid-walk: dispatch a copy.

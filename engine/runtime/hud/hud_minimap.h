@@ -439,6 +439,10 @@ struct HudMapControl {
 	// The render gate zeroes the mode whenever the local player is dead.
 	// [orig: @0x5cac67..0x5cac6d — g_mapOverlayMode = 0 on Flags & 2]
 	void on_local_player_dead() { mode = 0; }
+	// The respawn init every overlay-window action runs zeroes the mode
+	// (hud_toggles.h kOverlayWindowsCleared) [orig: Game_InitRespawnState
+	// @0x499360, g_mapOverlayMode = 0 @0x499395].
+	void on_respawn_init() { mode = 0; }
 };
 
 

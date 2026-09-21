@@ -745,8 +745,12 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             fire[3] = mount->veh.yaw_seeded
                     ? mount->veh.yaw_bam
                     : bam_heading_from_mission_yaw_deg(static_cast<double>(mount->yaw));
-            fire[4] = bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
-            fire[5] = bam_from_degrees_wrapped(static_cast<double>(mount->roll));
+            fire[4] = mount->veh.yaw_seeded
+                    ? mount->veh.air_pitch_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
+            fire[5] = mount->veh.yaw_seeded
+                    ? mount->veh.air_roll_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(mount->roll));
         }
 		world.vehicles.weapon_recoil(*owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, fire[3], fire[4]);

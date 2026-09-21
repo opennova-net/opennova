@@ -171,6 +171,13 @@ int main() {
     frames[0] = frames[1];
     CHECK(threedi_panm_pose_parts(gun, 0, 0, bus, mats, nullptr));
     CHECK(near(mats[0].m[9], 0.38268343f));
+    // The runtime selector is the disk byte sign-extended (movsx) and gated
+    // `<= 0`: 0xFF (the corpus' common authored value) is -1, a bypass, not
+    // row 255 past the two-row table. [orig: GPM_LoadRenderModel @ 0x5B5698;
+    // Model_TransformBoneMatrices @ 0x58E3FE..0x58E415]
+    barrel.matrix_index = 0xFF;
+    CHECK(threedi_panm_pose_parts(gun, 0, 0, bus, mats, nullptr));
+    CHECK(near(mats[0].m[9], 0.38268343f));
 
     // An affine animation frame needs its actual inverse, including its
     // translation. At a quarter turn, (0,0,0) -> (10,20,30) -> (-20,10,30)

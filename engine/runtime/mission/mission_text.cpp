@@ -49,7 +49,9 @@ void harvest_indexed(const rtxt::File &table, const char *section_lc, std::size_
 			int32_t index = 0;
 			for (std::size_t i = prefix_len; valid && i < entry->key.size(); ++i) {
 				const char digit = entry->key[i];
-				if (digit < '0' || digit > '9' || index > 214748364) {
+				// Stop one digit short of INT32_MAX: 214748364 * 10 + 8 overflows.
+				if (digit < '0' || digit > '9' || index > 214748364 ||
+						(index == 214748364 && digit > '7')) {
 					valid = false;
 					break;
 				}

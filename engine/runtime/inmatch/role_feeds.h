@@ -122,8 +122,8 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // The AAS zone status panel's zone rows: the world's zone walk
 // (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
 // 13-DWORD image of the retail shared timer list, present once a 0x6F value
-// has arrived, which is when retail's CProximityList_FindEntryById @0x598730
-// finds one — and the transient / special minimap slot's flag byte (+4 &
+// has arrived, which is when retail's CProximityList_FindEntryById @0x537f50
+// (called from HUD_DrawZoneMarker @0x598719) finds one — and the transient / special minimap slot's flag byte (+4 &
 // 0xC0 gates the marker; retail walks the 1160-slot transient bank
 // @0x5a2517..0x5a256e; the 0x6B ring slots land in the special bank here).
 // False without a kernel, a replica runtime or a local player.

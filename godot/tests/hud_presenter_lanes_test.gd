@@ -46,16 +46,18 @@ func _font_overlay() -> HudOverlay:
 
 
 # The OldMessages action is an EDGE that toggles the window flag on the
-# engine's HudToggles (the rule itself is pinned by the hud_toggles ctest);
-# the binding carries the flag across polls and reset_mission() clears it
-# like retail's respawn init [orig: xor g_showMessageLog,1 @0x49b55a;
-# Game_InitRespawnState @0x49939a].
+# engine's HudToggles and runs the respawn init that keeps one window up
+# (the rule itself is pinned by the hud_toggles ctest); the binding carries
+# the flag across polls and reset_mission() clears it like retail's respawn
+# init [orig: xor g_showMessageLog,1 @0x49b55a; Game_InitRespawnState
+# @0x49939a].
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()
 	var poll := func(down: bool, chorded: bool, active: bool) -> int:
 		return toggles.poll(false, false, false, false, false, false, false, false,
 				false, false, down, false, chorded, active, false)
-	assert_eq(poll.call(true, false, true), HudToggles.EVENT_MESSAGE_LOG_TOGGLED)
+	assert_eq(poll.call(true, false, true),
+			HudToggles.EVENT_MESSAGE_LOG_TOGGLED | HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED)
 	assert_true(toggles.is_message_log_open(), "The first down-edge opens the window.")
 	assert_eq(poll.call(true, false, true), 0, "A held key does not re-toggle.")
 	poll.call(false, false, true)

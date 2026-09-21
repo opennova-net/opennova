@@ -50,13 +50,16 @@ inline bool iequals(std::string_view a, std::string_view b)
     return true;
 }
 
-// Strict weak ordering for case-insensitive map/set keys.
+// Strict weak ordering for case-insensitive map/set keys. Bytes compare
+// UNSIGNED, as the CRT `_stricmp` the original sorts with does (a
+// high-bit lead byte of a localized label sorts after every ASCII byte,
+// never before it).
 inline bool iless(std::string_view a, std::string_view b)
 {
     const size_t n = a.size() < b.size() ? a.size() : b.size();
     for (size_t i = 0; i < n; ++i) {
-        const char ca = ascii_tolower(a[i]);
-        const char cb = ascii_tolower(b[i]);
+        const unsigned char ca = static_cast<unsigned char>(ascii_tolower(a[i]));
+        const unsigned char cb = static_cast<unsigned char>(ascii_tolower(b[i]));
         if (ca != cb)
             return ca < cb;
     }
