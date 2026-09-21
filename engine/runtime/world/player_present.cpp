@@ -56,6 +56,11 @@ bool action_particle_uses_third_person_gun(bool third_person) {
     return third_person;
 }
 
+bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
+                                     bool third_person, bool has_first_person_gun) {
+    return borrowed_usegun_slot && (third_person || !has_first_person_gun);
+}
+
 // [orig: ActionSlot_BeginActivePhase @0x53f830; the gate
 //  ActionSlot_ExecuteActionNoEffect @ 0x541a4d; the rescope block @0x54139e]
 void weapon_batch_plan(bool view_active, int32_t view_play_serial, int32_t play_serial,

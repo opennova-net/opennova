@@ -202,3 +202,94 @@ func test_03tr_minigun_barrel_rotates_while_firing() -> void:
 	_frame(world, _camera, 16)
 	assert_eq(int(gun.get_ctrl_values().get("WEAP_SPIN", 0)), stopped_phase,
 			"the barrel holds its final angle after coasting down")
+
+
+func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
+	var world := await _load_world()
+	if world == null:
+		return
+	var sim := world.get_sim()
+	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_true(sim.local_player_select_seat(1))
+	_frame(world, _camera, 96)
+	assert_true(world.local_player_viewmodel_parts().is_empty(),
+			"this mounted weapon renders its world model without a first-person gun")
+	var gun_handle := 0
+	var snapshot := sim.get_present_snapshot()
+	for base in range(0, snapshot.size(), sim.get_present_stride()):
+		if int(snapshot[base + Simulation.PF_WIRE_HANDLE]) == sim.get_local_player_wire_handle():
+			gun_handle = int(snapshot[base + Simulation.PF_CARRIER_HANDLE])
+	var gun := world.get_runtime().get_entity_presenter().resolve_wire_handle(gun_handle) as ObjectModel
+	assert_not_null(gun)
+	if gun == null:
+		return
+	var data := gun.get_object_data()
+	var muzzle: ModelUserPoint
+	for i in data.get_user_point_count():
+		var point := data.get_user_point_info(i)
+		if point.name.nocasecmp_to("MFlash01") == 0:
+			muzzle = point
+	assert_not_null(muzzle, "the mounted model authors the muzzle point")
+	if muzzle == null:
+		return
+	var part := gun.get_render_part_nodes().get(muzzle.subobject) as Node3D
+	assert_not_null(part)
+	if part == null:
+		return
+	# Userpoints are in model space; rendered part vertices are relative to
+	# the authored pivot. Derive that pivot from the model's bone hierarchy.
+	var origins := data.get_bone_origins()
+	var parents := data.get_bone_parents()
+	var bone := muzzle.subobject
+	var pivot := origins[bone]
+	while parents[bone] != bone:
+		bone = parents[bone]
+		pivot += origins[bone]
+	var muzzle_local := muzzle.position - Vector3(-pivot.x, pivot.y, pivot.z)
+	var effects := world.get_effect_world()
+	var fired_before := sim.get_local_player_weapon_state().fired_serial
+	var flash_id := -1
+	for tick in 16:
+		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
+		frame_input.set_weapon_input(true, tick == 0, false)
+		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_presenter.after_world_tick()
+		for group in effects.get_debug_group_report():
+			if group.name == "Effect_MiniMuz":
+				flash_id = group.id
+		if flash_id >= 0:
+			break
+	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
+			"the real mounted weapon fires")
+	assert_gte(flash_id, 0, "firing creates the authored muzzle-flash effect")
+	if flash_id < 0:
+		return
+	var first_muzzle := Vector3.ZERO
+	for pose_step in 2:
+		if pose_step == 1:
+			# Move the rendered carrier and articulate its gun without firing
+			# again: the SAME live group must follow position and direction.
+			gun.position += Vector3(1.0, 0.0, 0.0)
+			gun.set_ctrl_override("test:muzzle", "EWEAP_GUNYAW", 8192)
+			gun.set_ctrl_override("test:muzzle", "EWEAP_GUNPITCH", 4096)
+		gun.advance_runtime_frame(0.0)
+		effects.render_frame(GameWorld.current_frame_clock_ms())
+		var expected := part.to_global(muzzle_local)
+		var expected_forward := (part.global_basis * muzzle.rotation).normalized()
+		if pose_step == 0:
+			first_muzzle = expected
+			assert_true(_camera.is_position_in_frustum(expected), "the muzzle is in the firing view")
+		else:
+			assert_gt(expected.distance_to(first_muzzle), 0.5, "the live muzzle actually moved")
+		var live_particles := 0
+		for group in effects.get_debug_group_report():
+			if group.id != flash_id:
+				continue
+			assert_lt(group.transform.origin.distance_to(expected), 0.002,
+					"the live flash follows the mounted gun's posed muzzle")
+			for emitter in group.emitters:
+				live_particles += emitter.alive
+				assert_lt(emitter.position.distance_to(expected), 0.002)
+				assert_gt(emitter.forward.dot(expected_forward), 0.9999,
+						"the flash direction follows the gun part")
+		assert_gt(live_particles, 0, "the same muzzle-flash group still has visible particles")

@@ -156,6 +156,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 		v.heat_glow = std::clamp(heat, 0, 0x10000);
 	}
 	v.borrowed_usegun_slot = w.usegun_slot_active;
+	v.usegun_mount_handle = w.usegun_slot_active ? w.usegun_mount.packed : EntityHandle::kInvalid;
 	v.emplaced_controls_valid = false;
 	v.emplaced_gun_yaw = 0;
 	v.emplaced_gun_pitch = 0;

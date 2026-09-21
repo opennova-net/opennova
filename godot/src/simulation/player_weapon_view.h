@@ -83,6 +83,7 @@ public:
 	X(int, heat, INT)                                                       \
 	X(int, heat_glow, INT)                                                  \
 	X(bool, borrowed_usegun_slot, BOOL)                                     \
+	X(int, usegun_mount_handle, INT)                                        \
 	/* the emplaced gun's controls when the local body gunners it */        \
 	X(bool, emplaced_controls_valid, BOOL)                                  \
 	X(int, emplaced_gun_yaw, INT)                                           \
