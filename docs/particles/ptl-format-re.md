@@ -1259,7 +1259,8 @@ last §8 case-semantics thread):
 - Port fix landed with the witness: `ParticleFile::find_particle` →
   `strutil::iequals`; `EffectScene` `definition_by_name` keys + the pdefs
   probe → `fold_ascii` (identity AND duplicate detection);
-  `ParticleFile::find_effect`/`find_particle` → `nocasecmp_to`. Pinned by
+  the engine `ParticleFile::find_effect`/`find_particle` → `strutil::iequals`
+  (`engine/formats/particle/particle.cpp`). Pinned by
   `pdef_reference_resolution_is_case_insensitive_contract` (effect-scene
   contract ctest) and the minimal-effect `find_particle` fold check.
 - Same session, the former ONED preview emitter's flipbook resolution was aligned

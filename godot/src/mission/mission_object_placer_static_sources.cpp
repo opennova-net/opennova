@@ -47,7 +47,7 @@ std::vector<opennova::mission::StaticTerrainShadowSource>
 MissionObjectPlacer::get_static_terrain_shadow_sources() {
 	_check_epoch();
 	return static_sources_.shadow_sources([this](const std::string &graphic) {
-		return _retain_static_source_asset(_load_object_data(String(graphic.c_str())));
+		return _retain_static_source_asset(_load_object_data(opennova::to_gd(graphic)));
 	});
 }
 
@@ -127,7 +127,7 @@ String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {
 	if (rec == nullptr) {
 		return String();
 	}
-	return String((rec->batch_key.empty() ? rec->graphic : rec->batch_key).c_str());
+	return opennova::to_gd(rec->batch_key.empty() ? rec->graphic : rec->batch_key);
 }
 
 int MissionObjectPlacer::get_static_instance_binding_count(int p_bms_id) const {

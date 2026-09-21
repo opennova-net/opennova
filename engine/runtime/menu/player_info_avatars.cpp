@@ -29,12 +29,12 @@ struct Fill {
 	// Preserve the existing gameui/Avatars lookup and its raw-key fallback.
 	// [orig: GameText_GetStringWithFallback @0x51eb90 / g_TextGameText @0xB4C2AC;
 	//  TextResource_GetStringWithFallback(resource, "Avatars", nameKey)]
-	std::string name(const char *key) const { return gameui("Avatars", key, key); }
+	std::string name(const char *key) const { return hud::game_text(gameui, "Avatars", key, key); }
 	std::string voice_label(int value) const {
 		const std::string key = value == kDefaultVoiceValue ? "DEFAULT_VOICE" : "CHARVOICE_" + std::to_string(value);
 		const std::string fallback = value == kDefaultVoiceValue ? "Default" : "Voice " + std::to_string(value);
-		const std::string ui = gameui("Avatars", key.c_str(), fallback.c_str());
-		return menutxt("Menu", key.c_str(), ui.c_str());
+		const std::string ui = hud::game_text(gameui, "Avatars", key.c_str(), fallback.c_str());
+		return hud::game_text(menutxt, "Menu", key.c_str(), ui.c_str());
 	}
 	void items(int id, const std::vector<std::string> &rows) {
 		menu.set_widget_items(id, rows);

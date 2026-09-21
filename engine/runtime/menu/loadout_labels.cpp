@@ -17,7 +17,7 @@ namespace opennova::menu {
 
 std::string weapon_label(const DefWeaponDef &w, const hud::GameTextLookup &gametext) {
 	if (w.loadout_menu_textid[0] == '\0') return w.weapon_name;
-	return gametext("WepDes", w.loadout_menu_textid, w.weapon_name);
+	return hud::game_text(gametext, "WepDes", w.loadout_menu_textid, w.weapon_name);
 }
 
 std::string ammo_row_label(const DefWeaponDef *w, int clips, const hud::GameTextLookup &gametext) {
@@ -27,7 +27,7 @@ std::string ammo_row_label(const DefWeaponDef *w, int clips, const hud::GameText
 		return out;
 	}
 	const std::string round_label = w->round_type[0] != '\0'
-			? gametext("WepDes", w->round_type, w->round_type)
+			? hud::game_text(gametext, "WepDes", w->round_type, w->round_type)
 			: std::string();
 	std::snprintf(out, sizeof(out), "%d - %s", clips * w->clipsize, round_label.c_str());
 	return out;
@@ -49,7 +49,8 @@ std::string loadout_weight_line(double total, const hud::GameTextLookup &menutxt
 	// @0x562ee0 against the menu resource].
 	const hud::GameTextLookup menu_text =
 			[&menutxt, &gameui](const char *section, const char *key, const char *fallback) {
-				return menutxt(section, key, gameui(section, key, fallback).c_str());
+				return hud::game_text(menutxt, section, key,
+						hud::game_text(gameui, section, key, fallback).c_str());
 			};
 	std::string encumbrance;
 	switch (def_encumbrance_class(total)) {

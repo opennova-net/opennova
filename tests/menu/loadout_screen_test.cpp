@@ -141,7 +141,9 @@ void test_grenade_position_and_visibility() {
 	CHECK(menu.item_count(first) == 1 && menu.selected_row(first) == 0); // banned still owns row 1
 	CHECK(menu.item_count(second) == 4 && menu.selected_row(second) == 2);
 	CHECK(menu.selected_row(third) == 0); // no current tuple chooses zero
-	CHECK(!menu.is_widget_shown(first)); // armory retains the authored/runtime visibility
+	// Ours: the armory retains the authored/runtime visibility where retail shows
+	// every assigned grenade control (@0x56481f, D-MNU-9).
+	CHECK(!menu.is_widget_shown(first));
 	CHECK(armory_fill_grenades(menu, weapons.file, 1, 2, {}, {}, text).empty());
 	CHECK(menu.get_widget_items(first) == (std::vector<std::string>{"0 - "}));
 	const auto partial = document({"GRENADE_AMMO1", "GRENADE_AMMO3"});
@@ -162,7 +164,9 @@ void test_armory_ammo_reselection() {
 	CHECK(menu.selected_row(id) == 2);
 	armory_fill_ammo(menu, weapons.file, "PRIMARY", -1, "WPN_0", 1, text);
 	CHECK(menu.item_count(id) == 0 && menu.selected_row(id) == -1);
-	weapons.rows[0].clipsize = 0; // armory still lists maxclips; PLAYER_INFO hides
+	// Ours: the armory still lists maxclips where retail hides AMMO1 on clipsize
+	// <= 0 as PLAYER_INFO does (@0x564be2, D-MNU-9).
+	weapons.rows[0].clipsize = 0;
 	armory_fill_ammo(menu, weapons.file, "PRIMARY", 0, "", -1, text);
 	CHECK(menu.item_count(id) == 3 && menu.selected_row(id) == 2);
 	CHECK(menu.item_text(id, 0) == "0 - ROUND");
@@ -178,7 +182,8 @@ void test_weight_gates_and_count_asymmetry() {
 	menu.set_widget_shown(second, false);
 	const LoadoutParentIndices parents{0, 1, -1};
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4, 6}, {}, {}) == 18.25);
-	// Hidden AMMO2 still contributes; hidden/absent grenade controls do not.
+	// Hidden AMMO2 still contributes; hidden/absent grenade controls do not
+	// (ours: retail gates every extra-ammo arm on IsShown, D-MNU-9).
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4, 6}, {{0, 0}, {3, 0}}, {{0, 0}}) == 12.25);
 	menu.set_widget_shown(first, false);
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4}, {}, {}) == 12.25);
@@ -186,11 +191,13 @@ void test_weight_gates_and_count_asymmetry() {
 	menu.select_row(first, 2, false);
 	menu.select_row(second, 1, false);
 	CHECK(armory_screen_weight(menu, weapons.file, parents, {3, 4, 6}) == 12.25);
-	// Armory includes hidden grenade rows but excludes every subclass term.
+	// Armory includes hidden grenade rows (ours, see armory_screen_weight) but
+	// excludes every subclass term.
 	menu.select_row(first, 0, false);
 	CHECK(armory_screen_weight(menu, weapons.file, parents, {3, 4}) == 9.25);
 	menu.set_widget_items(menu.widget_id("PRIMARY_AMMO1"), {});
-	CHECK(armory_screen_weight(menu, weapons.file, parents, {3, 4}) == 10.25); // empty ammo -> default
+	// An unselected AMMO1 falls to the maxclips term (ours: retail adds no term).
+	CHECK(armory_screen_weight(menu, weapons.file, parents, {3, 4}) == 10.25);
 	CHECK(player_info_screen_weight(menu, weapons.file, {-1, 99, -2}, {-1}, {}, {}) == 0.0);
 	CHECK(armory_screen_weight(menu, {}, parents, {3, 4}) == 0.0);
 }

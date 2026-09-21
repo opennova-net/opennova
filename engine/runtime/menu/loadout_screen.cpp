@@ -72,8 +72,12 @@ int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 			const bool locked = (w->flags2 & def::DEF_WEAPON_FLAG2_NOAMMOTYPES) != 0;
 			menu.set_widget_disabled(type, locked);
 			if (locked) saved_type = 0;
-			// Select by VALUE, not position; a miss retains the selection
-			// [orig: the @0x55def0 row select].
+			// Retail selects the ROW INDEX of the saved type
+			// (set_row_visibility_0 @0x55e0af) from the byte read BEFORE the
+			// NOAMMOTYPES reset; this selects by authored value after it. The
+			// two agree because player.mnu authors FMJ/AP/SP as 0/1/2 in row
+			// order, and a locked combo then shows the reset row (D-MNU-9's
+			// deferred cascade); a miss retains the selection.
 			for (int row = 0; row < menu.item_count(type); ++row) {
 				if (menu.item_value(type, row) == std::to_string(saved_type)) {
 					menu.select_row(type, row, false);
@@ -186,11 +190,17 @@ double player_info_screen_weight(const MenuRuntime &menu, const def::DefWeaponsF
 }
 
 // The WEAPON screen still defers its ammo-TYPE/sub-weapon cascade. Parent
-// weights come first; extra-ammo terms read positive selected rows, including
-// hidden controls. An absent grenade control contributes zero clips.
+// weights come first; extra-ammo terms read positive selected rows. An
+// absent grenade control contributes zero clips.
 // [orig: calculate_equipped_weapons_weight @0x565490 -- adm[85]/65536 +
 //  (row+1)*ammoDef[84]/65536; calculate_loadout_weight @0x55f1f0 sibling;
 //  the grenade selected_row*adm[84] arm @0x5655c9..0x56561c]
+// NOT yet the retail gates (D-MNU-9): retail reads each AMMO1 / TYPE /
+// GRENADE arm only while its control IsShown (@0x565504 / @0x56556d /
+// @0x5655d6) and has no maxclips default for an unselected AMMO1 (no term at
+// all); this side reads hidden controls too and lets armory_selected_clips'
+// -1 fall to def_loadout_weight's maxclips term. Vacuous today (the armory
+// never hides these controls), pinned as ours in loadout_screen_test.
 double armory_screen_weight(const MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const LoadoutParentIndices &parents, const std::vector<int> &grenades) {
 	std::vector<def::DefWeaponDef> rows;

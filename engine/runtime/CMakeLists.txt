@@ -378,6 +378,10 @@ target_include_directories(opennova_runtime
 # PUBLIC). runtime carries the in-match session and replication, so it sits
 # above the wire-only net group.
 target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennova_crt)
+# runtime/terrain's tile composition worker runs std::thread: link the
+# platform thread library explicitly (pthread on a pre-2.34 glibc).
+find_package(Threads REQUIRED)
+target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 

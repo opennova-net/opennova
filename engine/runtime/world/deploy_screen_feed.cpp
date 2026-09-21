@@ -137,7 +137,7 @@ DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
                                       const std::string &medic_key_label,
                                       const hud::GameTextLookup &lookup) {
     const auto text = [&lookup](const char *key, const char *fallback) {
-        return lookup ? lookup("Overlays", key, fallback) : std::string(fallback);
+        return hud::game_text(lookup, "Overlays", key, fallback);
     };
     DeployStaticsText out;
     char buf[256];
@@ -166,7 +166,7 @@ DeployInstructions build_deploy_instructions(
         const DeployInstructionsInput &in, const hud::GameTextLookup &lookup) {
     // [orig: UI_UpdateDeathScreenContent @ 0x5536A0]
     const auto text = [&lookup](const char *key, const char *fallback = "") {
-        return lookup ? lookup("Overlays", key, fallback) : std::string(fallback);
+        return hud::game_text(lookup, "Overlays", key, fallback);
     };
     DeployInstructions out;
     out.permanent_death = in.permanent_death && in.dead;

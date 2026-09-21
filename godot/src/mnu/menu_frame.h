@@ -36,7 +36,7 @@ class ResourceRoot;
 // docs/mnu/menu-re.md); this Control keeps only what a device leg may keep:
 // VFS texture/.fnt upload, the typed per-widget state marshalling, and
 // rasterizing the compiled MenuDrawList with CanvasItem draw calls. The game
-// menu shell (godot/game/menu_driver.gd + menu_shell.gd) and test
+// menu shell (the MenuDriver binding over engine/runtime/menu + menu_shell.gd) and test
 // Menus canvas both drive this one surface.
 class MenuFrame : public Control {
 	GDCLASS(MenuFrame, Control)
