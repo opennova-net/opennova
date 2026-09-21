@@ -1370,6 +1370,10 @@ target_link_libraries(controls_test PRIVATE opennova_runtime)
 target_include_directories(controls_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME controls_unit COMMAND controls_test)
 
+add_executable(player_actions_test controls/player_actions_test.cpp)
+target_link_libraries(player_actions_test PRIVATE opennova_runtime)
+add_test(NAME player_actions COMMAND player_actions_test)
+
 add_executable(mnu_unit_test mnu/mnu_unit_test.cpp)
 target_link_libraries(mnu_unit_test PRIVATE opennova_formats)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

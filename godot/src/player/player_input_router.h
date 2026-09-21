@@ -4,10 +4,10 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <cstdint>
+#include <runtime/controls/player_actions.h>
 
 #include "mnu/controls_model.h"
 #include "player/player_move_intent.h"
@@ -20,8 +20,8 @@ class Simulation;
 
 // The local player's input sampling/routing (the former player_input_router.gd,
 // ADR 0043 slice G8), a plain member of LocalPlayerPresenter: the
-// movement-state sampling into the sim, the weapon trigger/switch edge
-// latches, the gameplay keys (B/N/NVG/stance), mouse look, and mouse
+// movement/device sampling into the native controls::PlayerActions table,
+// request forwarding, the raw B/N/NVG gameplay keys, mouse look, and mouse
 // capture/release. The presenter keeps the camera cluster and the
 // avatar/viewmodel presentation; the camera MODE is the sim's resolved word
 // (the arbiter over the chase preference and the seat), mirrored by the
@@ -32,8 +32,6 @@ class Simulation;
 // null model reads every token released.
 class PlayerInputRouter {
 public:
-	PlayerInputRouter();
-
 	// The world serves the sim; the presenter serves the presentation surfaces
 	// this router drives around the sample (fly-camera lock, model lifetime,
 	// the head-bone eye).
@@ -67,18 +65,6 @@ private:
 	LocalPlayerPresenter *presenter() const;
 	// The token's binding held RIGHT NOW (released with no model).
 	bool pressed(const char *p_token) const;
-	void sample_weapon_input(const Ref<MissionFrameInput> &p_frame_input, bool p_gameplay_input_active);
-	void send_weapon_switch_input(bool p_captured);
-	void sample_hud_input(bool p_active);
-	void sample_use_item(bool p_active);
-	// Whether the live USE hold swallows the token's press this frame: the
-	// hold was live LAST frame and the key firing the row is a digit.
-	bool digit_swallowed(const char *p_token) const;
-	// A row's down edge as retail's key-EVENT dispatch sees it: the RAW held
-	// state latches (a key held across an inactive frame never re-fires when
-	// the gate reopens) and a swallowed digit fires nothing.
-	bool event_row_edge(const char *p_token, bool p_active, bool &r_was_down) const;
-	void request_stance(int p_stance);
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
 
@@ -86,40 +72,9 @@ private:
 	ObjectID presenter_id_;
 	Ref<ControlsModel> controls_;
 	Ref<PlayerMoveIntent> input_override_;
-	bool fire_was_held_ = false;
-	bool reload_was_down_ = false;
-	bool scope_was_down_ = false;
-	bool medic_was_down_ = false;
+	opennova::controls::PlayerActions actions_;
 	Vector2 look_delta_;
 	int64_t frame_sequence_ = 0;
-	// The manual weapon-switch keys -- the retail defaults from the shipped
-	// binding catalog: rows 28-36 Knife '1' / Secondary '2' / Primary '3' /
-	// Flashbang '4' / FragGrenade '5' / SmokeGrenade '6' / Accessory '7' /
-	// Detonator '8' / medpack '9' fire the category actions 201-209
-	// (categories 1..9), rows 39/40 cycleweaponP '[' / cycleweaponN ']' cycle
-	// prev/next [orig: input cases 200-210 @ 0x4e1144 ->
-	// Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-	// Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows].
-	PackedStringArray weapon_category_tokens_;
-	int category_was_down_ = 0;
-	bool seat_was_down_[10] = {};
-	// The USE-ITEM hold chain (sample_use_item): the frame latch the polled
-	// `useitem` row sets (dword_24C18DC), its previous-frame copy
-	// (dword_24C18E0), the hold-consumed flag a seat digit or a shell chord
-	// sets (dword_24C18E4), the shell's pending consume, and the raw digit
-	// latches the special-key arm edges from.
-	bool use_latched_ = false;
-	bool use_held_prev_ = false;
-	bool use_hold_consumed_ = false;
-	bool use_consume_pending_ = false;
-	bool use_digit_was_down_[10] = {};
-	bool cycle_prev_was_down_ = false;
-	bool cycle_next_was_down_ = false;
-	bool radar_out_was_down_ = false;
-	bool radar_in_was_down_ = false;
-	bool map_toggle_was_down_ = false;
-    bool stance_was_down_[3] = {};
-    bool scope_zero_was_down_[2] = {};
 };
 
 } // namespace godot

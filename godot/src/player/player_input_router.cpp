@@ -9,20 +9,50 @@
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 
-#include <cmath>
-
-#include <runtime/world/player_present.h>
-
 using namespace godot;
 
 namespace {
 
+class GodotActionSource final : public opennova::controls::PlayerActionSource {
+public:
+	explicit GodotActionSource(const Ref<ControlsModel> &p_controls) : controls_(p_controls) {}
+	bool pressed(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_pressed(p_token);
+	}
+	int pressed_key(const char *p_token) const override {
+		return controls_.is_valid() ? controls_->pressed_key_for_token(p_token) : 0;
+	}
+	bool digit_down(int p_digit) const override {
+		Input *input = Input::get_singleton();
+		return input != nullptr &&
+				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
+	}
+
+private:
+	const Ref<ControlsModel> &controls_;
+};
+
+void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActionRequest &p_request) {
+	using Action = opennova::controls::PlayerAction;
+	switch (p_request.action) {
+		case Action::ToggleMount: p_sim.local_player_toggle_mount(); break;
+		case Action::SelectSeat: p_sim.local_player_select_seat(p_request.value); break;
+		case Action::ToggleScope: p_sim.request_local_player_scope_toggle(); break;
+		case Action::WeaponCategory:
+			p_sim.request_local_player_weapon_category(
+					static_cast<Simulation::WeaponCategory>(p_request.value));
+			break;
+		case Action::WeaponCycle: p_sim.request_local_player_weapon_cycle(p_request.value); break;
+		case Action::Stance:
+			p_sim.request_local_player_stance(static_cast<Simulation::Stance>(p_request.value));
+			break;
+		case Action::ScopeZero: p_sim.request_local_player_scope_zero(p_request.value); break;
+		case Action::RadarZoom: p_sim.request_hud_radar_zoom(p_request.value); break;
+		case Action::MapCycle: p_sim.request_hud_map_cycle(); break;
+	}
+}
 
 } // namespace
-
-PlayerInputRouter::PlayerInputRouter() {
-	weapon_category_tokens_ = ControlsModel::weapon_category_tokens();
-}
 
 void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 		const Ref<ControlsModel> &p_controls) {
@@ -115,225 +145,18 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
         p_gameplay_input_active && pressed("turn_left"), p_gameplay_input_active && pressed("turn_right"));
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
-	// The USE hold ages first: its previous-frame state decides which digit
-	// presses the binding rows below never see.
-	sample_use_item(p_gameplay_input_active);
-	sample_weapon_input(frame_input, p_gameplay_input_active);
-	sample_hud_input(p_gameplay_input_active);
+	const Ref<Simulation> action_sim = sim();
+	const auto actions = actions_.poll(GodotActionSource(controls_),
+			{p_gameplay_input_active, input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED,
+					action_sim.is_valid()});
+	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
+			actions.reload_edge, actions.medic_edge);
+	for (const auto &request : actions.requests) apply_player_action(*action_sim.ptr(), request);
 	return frame_input;
 }
 
-// The weapon trigger input: LMB fire (held + edge), R reload (raw edge -- the
-// full-magazine/empty-reserve refusal is the SIM's dispatch gate), RMB the
-// ADS toggle REQUEST (the sim gates it and owns the engaged state). Only
-// while the mouse is captured - UI clicks never fire. [orig: the binding
-// dispatch cases 0x95 fire / 0xD3 reload / 6 scope,
-// Input_HandleActionBinding_0 @0x4e0420 -- ported in engine/runtime/world
-// weapon_fsm + Simulation]
-void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_frame_input,
-		bool p_gameplay_input_active) {
-	const Ref<Simulation> weapon_sim = sim();
-	Input *input = Input::get_singleton();
-	const bool captured = p_gameplay_input_active &&
-			input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
-	const bool fire_held = captured && pressed("attack_1");
-	const bool fire_edge = fire_held && !fire_was_held_;
-	fire_was_held_ = fire_held;
-	const bool reload_down = captured && pressed("magazine");
-	const bool reload_edge = reload_down && !reload_was_down_;
-	reload_was_down_ = reload_down;
-	// The scope request reads the configurable `scope` row (catalog row 105).
-	const bool scope_down = captured && pressed("scope");
-	if (scope_down && !scope_was_down_ && weapon_sim.is_valid()) {
-		weapon_sim->request_local_player_scope_toggle();
-	}
-	scope_was_down_ = scope_down;
-	// The dead player's medic call: an action binding, so it samples whenever
-	// the router runs -- the death screen holds the mouse free and retail's
-	// binding dispatch still fires it there; the sim's gates (dead + the
-	// 310-tick cooldown) make a stray press inert.
-	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
-	const bool medic_down = pressed("MedicReq");
-	const bool medic_edge = medic_down && !medic_was_down_;
-	medic_was_down_ = medic_down;
-	// Latches update even with no sim (the deleted forwarders no-op'd
-	// downstream): a key held across a mission reload must not fire a spurious
-	// edge on the first frame the new sim appears.
-	p_frame_input->set_weapon_input(fire_held, fire_edge, reload_edge, medic_edge);
-	send_weapon_switch_input(captured);
-}
-
-// The category keys (1..9) and the cycle pair ('['/']'): edge-triggered
-// requests into the sim's switch walks; the sim applies the witnessed
-// stance/FSM gates and answers through the event drain (switch_to_weapon /
-// switch_denied).
-void PlayerInputRouter::send_weapon_switch_input(bool p_captured) {
-	const Ref<Simulation> switch_sim = sim();
-	// The seat rows default to Ctrl+1..Ctrl+0 and the weapon categories to the
-	// bare digits; the binding sampler's two passes keep them apart (Ctrl+1
-	// fires only seat1, a bare 1 only Knife), so neither side is gated on the
-	// mount state here. Off a mount the seat action is an engine no-op (no
-	// slot list), and a control seat refuses the category switch inside the
-	// engine's walk, as retail does. The other seat path, USE held + a raw
-	// digit, is sample_use_item's special-key arm, and while that hold is live
-	// the digit rows below never fire.
-	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22;
-	//  Player_SwitchToWeaponByHandle parentSlot gate @0x4e0192]
-	static const char *seat_tokens[] = {"seat1", "seat2", "seat3", "seat4", "seat5",
-			"seat6", "seat7", "seat8", "seat9", "seat10"};
-	for (int i = 0; i < 10; ++i) {
-		if (event_row_edge(seat_tokens[i], p_captured, seat_was_down_[i]) &&
-				switch_sim.is_valid()) {
-			switch_sim->local_player_select_seat(i);
-		}
-	}
-	// The category latches ride the RAW key state like the other event rows:
-	// a digit held across an armory/F3 window, or under the USE hold, must not
-	// switch when the gate reopens.
-	int down_mask = 0;
-	for (int64_t i = 0; i < weapon_category_tokens_.size(); ++i) {
-		const CharString token = weapon_category_tokens_[i].utf8();
-		if (!pressed(token.get_data())) {
-			continue;
-		}
-		down_mask |= 1 << i;
-		if (p_captured && (category_was_down_ & (1 << i)) == 0 &&
-				!digit_swallowed(token.get_data()) && switch_sim.is_valid()) {
-			switch_sim->request_local_player_weapon_category(
-					static_cast<Simulation::WeaponCategory>(i + 1));
-		}
-	}
-	category_was_down_ = down_mask;
-	if (event_row_edge("cycleweaponP", p_captured, cycle_prev_was_down_) &&
-			switch_sim.is_valid()) {
-		switch_sim->request_local_player_weapon_cycle(-1);
-	}
-	if (event_row_edge("cycleweaponN", p_captured, cycle_next_was_down_) &&
-			switch_sim.is_valid()) {
-		switch_sim->request_local_player_weapon_cycle(1);
-	}
-}
-
-bool PlayerInputRouter::digit_swallowed(const char *p_token) const {
-	if (!use_held_prev_ || controls_.is_null()) {
-		return false;
-	}
-	// The VK digits 0x30..0x39 [orig: the (key - 48) <= 9 test @0x49c6e0].
-	const int vk = controls_->pressed_key_for_token(p_token);
-	return vk >= 0x30 && vk <= 0x39;
-}
-
-bool PlayerInputRouter::event_row_edge(const char *p_token, bool p_active,
-		bool &r_was_down) const {
-	const bool down = pressed(p_token);
-	return opennova::world::latched_key_edge(down,
-			p_active && !(down && digit_swallowed(p_token)), r_was_down);
-}
-
 void PlayerInputRouter::consume_use_hold() {
-	use_consume_pending_ = true;
-}
-
-// The USE-ITEM hold, retail's per-frame chain over the polled `useitem` row
-// (row 44, default Shift; its flag 4 makes it a held binding whose action
-// fires every frame the key is down). Input_ProcessFrame ages the frame
-// latch (dword_24C18E0 = dword_24C18DC, then clears it); the action's
-// LABEL_121 arm re-latches it and, on a FRESH press, clears the consumed
-// flag dword_24C18E4; a digit key pressed while the hold was live LAST frame
-// is a special key handled before the binding tables: it selects seat
-// (digit - 1) with the 0 key as seat 9 once per hold, marks the hold
-// consumed, and the digit reaches no binding row; the release edge
-// (!dword_24C18DC && dword_24C18E0) runs the mount toggle unless the hold was
-// consumed. The press's armory/vehicle-menu arms are the shell's: it opens
-// the screen on the key event, and the inactive gameplay frames that follow
-// reset this chain, as does a shell chord through consume_use_hold.
-// [orig: Input_ProcessFrame @0x49d520 -- the latch aging @0x49d57f..0x49d585,
-//  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
-//  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
-//  @0x4e0b65..0x4e0b71; Input_HandleSpecialKeys @0x49c5c0, the held-USE digit
-//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790]
-void PlayerInputRouter::sample_use_item(bool p_active) {
-	use_held_prev_ = use_latched_;
-	use_latched_ = false;
-	if (!p_active) {
-		// A menu, the tools window or the armory screen over the hold: no
-		// toggle on the release that follows, no seat pick behind them.
-		use_held_prev_ = false;
-	}
-	if (p_active && pressed("useitem")) {
-		if (!use_held_prev_) {
-			use_hold_consumed_ = false;
-		}
-		use_latched_ = true;
-	}
-	if (use_consume_pending_) {
-		use_hold_consumed_ = true;
-		use_consume_pending_ = false;
-	}
-	const Ref<Simulation> use_sim = sim();
-	Input *input = Input::get_singleton();
-	for (int digit = 0; digit < 10; ++digit) {
-		// The VK digit codes 0x30..0x39 are Godot's KEY_0..KEY_9 values.
-		const bool down = input != nullptr &&
-				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + digit));
-		if (!opennova::world::latched_key_edge(down, use_held_prev_,
-					use_digit_was_down_[digit])) {
-			continue;
-		}
-		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
-		const int seat = digit == 0 ? 9 : digit - 1;
-		if (!use_hold_consumed_ && use_sim.is_valid()) {
-			use_sim->local_player_select_seat(seat);
-		}
-		use_hold_consumed_ = true;
-	}
-	if (!use_latched_ && use_held_prev_ && !use_hold_consumed_ && use_sim.is_valid()) {
-		use_sim->local_player_toggle_mount();
-	}
-}
-
-// The retail radar-zoom bindings are ordinary configurable key rows applying
-// one multiplicative step on the down edge: radarout GROWS the world-extent
-// value (x1.15 toward 0x100000) and radarin shrinks it (x0.85 toward 4096).
-// huddetail (dispatch code 19) is a live arm of the IN-GAME dispatcher, the
-// declutter cycle, and GameHudPresenter samples it beside the other HUD rows
-// (hud-re.md D-CTRL-4). [orig: Input_HandleActionBinding @0x49AD40 -- radarout
-//  row 48 = case 361 @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 ->
-//  Input_HandleActionBinding_0 @0x4e060b..0x4e0624 -> CRenderState_SetLayerVisibility
-//  @0x59B0F0]
-void PlayerInputRouter::sample_hud_input(bool p_active) {
-    static const char *stance_tokens[] = {"Stand", "Crouch", "Prone"};
-    for (int i = 0; i < 3; ++i)
-        if (event_row_edge(stance_tokens[i], p_active, stance_was_down_[i])) request_stance(i);
-    const Ref<Simulation> zero_sim = sim();
-    if (zero_sim.is_valid()) {
-        if (event_row_edge("ScopeZeroDec", p_active, scope_zero_was_down_[0]))
-            zero_sim->request_local_player_scope_zero(-1);
-        if (event_row_edge("ScopeZeroInc", p_active, scope_zero_was_down_[1]))
-            zero_sim->request_local_player_scope_zero(1);
-    }
-	// The down-edge latches ride the RAW key state (the engine's
-	// latched_key_edge, world/player_present.h, carries the retail scan's
-	// witness): a key held across an armory/F3 window must NOT re-fire when
-	// the gate reopens.
-	const Ref<Simulation> hud_sim = sim();
-	if (event_row_edge("radarout", p_active, radar_out_was_down_) &&
-			hud_sim.is_valid()) {
-		hud_sim->request_hud_radar_zoom(1);
-	}
-	if (event_row_edge("radarin", p_active, radar_in_was_down_) &&
-			hud_sim.is_valid()) {
-		hud_sim->request_hud_radar_zoom(-1);
-	}
-	// map_toggle (row 98, default M) cycles the big-map mode: off -> the
-	// north-up window -> fullscreen -> off. The retail arm lives in the
-	// IN-GAME dispatcher, not the menu-context one.
-	// [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
-	//  @0x520bc0 (0->2->3->0)]
-	if (event_row_edge("map_toggle", p_active, map_toggle_was_down_) &&
-			hud_sim.is_valid()) {
-		hud_sim->request_hud_map_cycle();
-	}
+	actions_.consume_use_hold();
 }
 
 // Edge-triggered gameplay keys. No key here moves the camera: the view rows
@@ -343,13 +166,7 @@ void PlayerInputRouter::sample_hud_input(bool p_active) {
 // its other HUD rows [orig: Input_HandleActionBinding cases 400/401/402
 // @0x49c073..0x49c107; the arbiter Render_ProcessMainSceneFrame @0x5ca1d2;
 // full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14
-// (D-INF-11), net-re §5.39]. Stance is the witnessed 3-key SELECT -- Z prone,
-// X crouch, C stand (catalog ids 9/10/11, defaults Z/X/C) -- each key
-// REQUESTS its stance from the sim, which applies the mutual exclusion and
-// the ForceCrouch refusal (the C2S 0x1D semantics). [orig: input cases
-// 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e ->
-// NapiNPServerMsg_HandleStanceChange @0x501c60]
-// The stance rows 9/10/11 are polled through the binding table (sample_hud_input).
+// (D-INF-11), net-re §5.39]. Stance rows are polled by the native action table.
 // The keys below still read RAW keycodes rather than the binding table's rows
 // (binocular action 26 / NVG action 41 / gain actions 56/57): ported verbatim
 // from the GDScript router, a tracked divergence follow-up.
@@ -395,13 +212,6 @@ bool PlayerInputRouter::handle_key_input(const Ref<InputEvent> &p_event, bool p_
 	return false;
 }
 
-void PlayerInputRouter::request_stance(int p_stance) {
-	const Ref<Simulation> stance_sim = sim();
-	if (stance_sim.is_valid()) {
-		stance_sim->request_local_player_stance(static_cast<Simulation::Stance>(p_stance));
-	}
-}
-
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline
 // (the sim owns sensitivity, the scoped zoom reduction, Y-invert, and the
 // pitch clamps). [orig: Input_ProcessMouseAxisBindings @0x499680 -> the axis
@@ -418,14 +228,9 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
         const String token = controls_->mouse_event_token(button->get_button_index());
         const Ref<Simulation> event_sim = sim();
         if (event_sim.is_null()) return false;
-        if (token == "cycleweaponP") event_sim->request_local_player_weapon_cycle(-1);
-        else if (token == "cycleweaponN") event_sim->request_local_player_weapon_cycle(1);
-        else if (token == "ScopeZeroDec") event_sim->request_local_player_scope_zero(-1);
-        else if (token == "ScopeZeroInc") event_sim->request_local_player_scope_zero(1);
-        else if (token == "Prone") request_stance(Simulation::STANCE_PRONE);
-        else if (token == "Crouch") request_stance(Simulation::STANCE_CROUCH);
-        else if (token == "Stand") request_stance(Simulation::STANCE_STAND);
-        else return false;
+        const auto request = opennova::controls::player_wheel_action(token.utf8().get_data());
+        if (!request) return false;
+        apply_player_action(*event_sim.ptr(), *request);
         return true;
     }
 	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
@@ -437,11 +242,7 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 }
 
 void PlayerInputRouter::reset() {
-	fire_was_held_ = false;
-	reload_was_down_ = false;
-	scope_was_down_ = false;
-    for (bool &held : stance_was_down_) held = false;
-    for (bool &held : scope_zero_was_down_) held = false;
+	actions_.reset();
 	look_delta_ = Vector2();
 }
 

@@ -32,6 +32,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start network sample

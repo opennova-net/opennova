@@ -28,7 +28,7 @@ extends GutTest
 #   tick per frame, and the phase math is ctest-pinned engine state.
 # - the router's capture-gated trigger sampling (LMB only while captured): a
 #   headless display cannot hold real mouse buttons; the fire test injects on
-#   the same sim seam the router drives.
+#   the same sim seam the router drives; native player_actions covers capture gates.
 # - aim_range on a world with NO terrain object: unreachable on a loaded real
 #   world; the raycast-miss -> 1000 fallback covers the same readout behavior.
 
@@ -405,6 +405,49 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 		_frame(world, presenter, camera)
 		assert_eq(int(sim.get_local_player_stance()), int(pair[1]),
 				"the sim grants the requested stance for key %d" % pair[0])
+
+
+func test_overlay_key_latch_and_remapped_wheel_reach_the_sim() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	var crouch := -1
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Crouch":
+			crouch = model.action_index_for_row(i)
+	assert_gte(crouch, 0)
+	model.assign_mouse_mask(crouch,
+			ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_WHEEL_UP))
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	await get_tree().process_frame
+	var sim := world.get_sim()
+
+	_hold(KEY_Z, true)
+	_frame(world, presenter, camera, 2, false)
+	assert_eq(int(sim.get_local_player_stance()), 0, "an overlay blocks the new prone press")
+	_frame(world, presenter, camera, 2)
+	assert_eq(int(sim.get_local_player_stance()), 0, "closing it does not re-fire the held key")
+	_hold(KEY_Z, false)
+	_frame(world, presenter, camera)
+	_hold(KEY_Z, true)
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 2, "a fresh press reaches the sim")
+	_hold(KEY_Z, false)
+	_frame(world, presenter, camera)
+
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	assert_false(presenter.handle_input(wheel, false), "an overlay also blocks wheel requests")
+	assert_eq(int(sim.get_local_player_stance()), 2)
+	assert_true(presenter.handle_input(wheel, true), "the remapped wheel reaches the native table")
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 1, "the wheel requests crouch without mouse capture")
 
 
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
