@@ -162,6 +162,7 @@ add_library(opennova_runtime STATIC
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/model_geometry.cpp
+    world/entity_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/mounted_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp

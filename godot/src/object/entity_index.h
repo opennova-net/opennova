@@ -1,20 +1,14 @@
 #pragma once
 
-// The mission entity index, NATIVE (the former mission_entity_registry.gd):
-// maps a loaded mission's live animated entity models back to the identities
-// a mission ACTION targets — a single entity's SSN (bms_id), a group id, or
-// an area-trigger zone. Built once from the placer's registered models, each
-// carrying its EntityRef (construction-time registration, never a child
-// scan); the present appliers resolve through direct typed calls.
+// Device adapter for the portable presentation entity index. ObjectDB owns
+// liveness; the engine owns identity, group and mission-zone selection.
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/templates/hash_map.hpp>
-#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "mission/mission_data.h"
-#include <formats/mission/mission.h>
+#include <runtime/world/entity_index.h>
 #include <vector>
 #include "object/object_model.h"
 
@@ -23,28 +17,12 @@ namespace godot {
 class EntityIndex : public RefCounted {
 	GDCLASS(EntityIndex, RefCounted)
 
-	struct EntityRecord {
-		ObjectID model_id;
-		Vector3 position; // mission-space
-		int team = -1;
-	};
+	opennova::world::EntityIndex index_;
 
-	HashMap<int64_t, ObjectID> by_bms_id_;
-	HashMap<int64_t, ObjectID> by_kind_index_;
-	HashMap<int64_t, Vector<ObjectID>> by_group_;
-	Vector<EntityRecord> records_;
-	std::vector<opennova::mission::AreaTriggerRecord> area_triggers_;
-	int64_t generation_ = 0;
-
-	// Keep both signed 32-bit inputs distinct without a formatted String in
-	// the per-frame present path.
-	static int64_t origin_key(int64_t p_kind, int64_t p_index) {
-		return (p_kind << 32) | (p_index & 0xffffffff);
+	ObjectModel *live_model(uint64_t p_id) const {
+		return p_id == 0 ? nullptr : Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(p_id)));
 	}
-
-	ObjectModel *live_model(const ObjectID &p_id) const {
-		return Object::cast_to<ObjectModel>(ObjectDB::get_instance(p_id));
-	}
+	void append_live(const std::vector<uint64_t> &p_ids, Array &r_out) const;
 
 protected:
 	static void _bind_methods();
@@ -56,7 +34,7 @@ public:
 	void build(const TypedArray<ObjectModel> &p_models,
 			const Ref<MissionData> &p_mission);
 	void clear();
-	int64_t get_generation() const { return generation_; }
+	int64_t get_generation() const { return static_cast<int64_t>(index_.generation()); }
 
 	// THE resolver for the present path: by file id (bms_id) first — stable
 	// for saved loose missions — then by (kind, index), which also supports an

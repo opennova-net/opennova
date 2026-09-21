@@ -718,6 +718,11 @@ target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURC
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
 # native world: the sim-side .3di derivations (ADR 0028)
+add_executable(world_entity_index_test world/entity_index_test.cpp)
+target_link_libraries(world_entity_index_test PRIVATE opennova_runtime)
+target_include_directories(world_entity_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_entity_index COMMAND world_entity_index_test)
+
 add_executable(world_model_geometry_test world/model_geometry_test.cpp)
 target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

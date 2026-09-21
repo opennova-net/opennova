@@ -16,7 +16,8 @@
     "formats/wac/command_table.cpp",
     "net/npwire/replay/wire_capture.cpp",
     "runtime/assets/asset_store.cpp",
-    "runtime/renderer/model_panm_cache.cpp"
+    "runtime/renderer/model_panm_cache.cpp",
+    "runtime/world/entity_index.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

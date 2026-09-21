@@ -122,8 +122,13 @@ func test_freed_member_is_filtered() -> void:
 	add_child_autofree(container)
 	var a := _entry(container, 1, 5, 0, Vector3.ZERO)
 	var b := _entry(container, 2, 5, 0, Vector3.ZERO)
+	b.entity_ref.index = 1
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_eq(mission.add_area_trigger(Vector3(-1, -1, -1), Vector3.ONE, true, false, 0), 0)
 	var index := EntityIndex.new()
-	index.build([a, b], null)
+	index.build([a, b], mission)
+	assert_eq(index.resolve(2, 1, 0), b, "a live primary wins over a different origin")
 	var freed: Node = b
 	container.remove_child(freed)
 	freed.free()
@@ -131,6 +136,10 @@ func test_freed_member_is_filtered() -> void:
 	var g5 := index.resolve_group(5)
 	assert_eq(g5.size(), 1, "the freed member is filtered from its group")
 	assert_true(g5.has(a))
+
+	assert_eq(index.resolve(2, 1, 0), a, "a freed primary falls back to the live origin")
+	assert_eq(index.resolve_zone(0), [a], "zone results filter the freed model")
+	assert_eq(index.get_animatable_nodes(), [a], "the diagnostic set filters the freed model")
 
 
 func test_models_without_an_entity_ref_are_skipped() -> void:
