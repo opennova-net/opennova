@@ -766,8 +766,8 @@ public:
 			float p_viewport_height);
 	Dictionary get_render_part_nodes() const;
 	// A model-space attachment through the rendered subobject's live pose.
-	// Handles both skeletal bones and rigid PANM parts; missing parts use
-	// the model root. C++ consumers share the rest-to-live conversion.
+	// Skeletal bones need their inverse rest pose; rigid PANM parts already
+	// map model space directly. Missing parts use the model root.
 	Transform3D subobject_model_to_world(int p_subobject) const;
 	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
 	void set_section_visibility_mask(int64_t p_mask);

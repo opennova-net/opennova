@@ -1711,9 +1711,11 @@ Transform3D ObjectModel::subobject_model_to_world(int p_subobject) const {
 				skeleton_->get_bone_global_rest(p_subobject).affine_inverse();
 	}
 	Node3D *const *node = robj_nodes_.getptr(p_subobject);
-	const Transform3D *rest = robj_rest_transforms_.getptr(p_subobject);
-	if (node != nullptr && *node != nullptr && rest != nullptr) {
-		return (*node)->get_global_transform() * rest->affine_inverse();
+	if (node != nullptr && *node != nullptr) {
+		// Rigid meshes and userpoints are both in model space. The ROBJ
+		// node already carries the complete PANM pivot/rotation transform;
+		// subtracting the rest pivot again offsets attachments from the mesh.
+		return (*node)->get_global_transform();
 	}
 	return get_global_transform();
 }
@@ -1726,7 +1728,7 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
 	const int subobject = info->get_subobject();
 	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
-	// the rest-to-live transform, matching the user-point attachment basis.
+	// the live rendered part, matching the user-point attachment basis.
 	const Transform3D model_to_world = subobject > 0
 			? subobject_model_to_world(subobject) : get_global_transform();
 	return model_to_world.xform(info->get_position());

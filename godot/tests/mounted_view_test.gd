@@ -236,16 +236,30 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 	assert_not_null(part)
 	if part == null:
 		return
-	# Userpoints are in model space; rendered part vertices are relative to
-	# the authored pivot. Derive that pivot from the model's bone hierarchy.
-	var origins := data.get_bone_origins()
-	var parents := data.get_bone_parents()
-	var bone := muzzle.subobject
-	var pivot := origins[bone]
-	while parents[bone] != bone:
-		bone = parents[bone]
-		pivot += origins[bone]
-	var muzzle_local := muzzle.position - Vector3(-pivot.x, pivot.y, pivot.z)
+	# The spinning barrel provides a geometry check independent of the
+	# userpoint transform. Rigid vertices and userpoints share model space.
+	var parts := gun.get_render_part_nodes()
+	var rest := data.evaluate_panm(0, 0, {"WEAP_SPIN": 0})
+	var rotated := data.evaluate_panm(0, 0, {"WEAP_SPIN": 16384})
+	var barrel: Node3D
+	for key in rest:
+		if parts.has(key) and not (rest[key] as Transform3D).basis.is_equal_approx(
+				(rotated[key] as Transform3D).basis):
+			barrel = parts[key]
+			break
+	assert_not_null(barrel, "the installed model has a spinning barrel")
+	if barrel == null:
+		return
+	var barrel_bounds := AABB()
+	var have_barrel_mesh := false
+	for child in barrel.get_children():
+		if child is MeshInstance3D and child.mesh != null and child.visible:
+			var bounds: AABB = child.transform * child.get_aabb()
+			barrel_bounds = barrel_bounds.merge(bounds) if have_barrel_mesh else bounds
+			have_barrel_mesh = true
+	assert_true(have_barrel_mesh, "the barrel has rendered geometry")
+	if not have_barrel_mesh:
+		return
 	var effects := world.get_effect_world()
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	var flash_id := -1
@@ -274,7 +288,7 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 			gun.set_ctrl_override("test:muzzle", "EWEAP_GUNPITCH", 4096)
 		gun.advance_runtime_frame(0.0)
 		effects.render_frame(GameWorld.current_frame_clock_ms())
-		var expected := part.to_global(muzzle_local)
+		var expected := part.to_global(muzzle.position)
 		var expected_forward := (part.global_basis * muzzle.rotation).normalized()
 		if pose_step == 0:
 			first_muzzle = expected
@@ -285,6 +299,13 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 		for group in effects.get_debug_group_report():
 			if group.id != flash_id:
 				continue
+			var flash_in_barrel := barrel.to_local(group.transform.origin)
+			var center := barrel_bounds.get_center()
+			var radial_error := Vector2(flash_in_barrel.x - center.x,
+					flash_in_barrel.y - center.y).length()
+			assert_lt(radial_error, 0.10, "the flash lies on the rendered barrel axis")
+			assert_lt(absf(flash_in_barrel.z - barrel_bounds.end.z), 0.12,
+					"the flash starts at the end of the rendered barrel")
 			assert_lt(group.transform.origin.distance_to(expected), 0.002,
 					"the live flash follows the mounted gun's posed muzzle")
 			for emitter in group.emitters:

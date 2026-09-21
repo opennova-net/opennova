@@ -9994,10 +9994,16 @@ The local effect presenter previously searched only FP/held-weapon models and
 fell back to the player origin, placing `Effect_MiniMuz` behind the mounted camera.
 The committed UseGun handle now reaches presentation through `PlayerWeaponView`;
 a world-only mount resolves both position and direction through its rendered
-part's rest-to-live PANM transform. Skeletal viewmodel points and model lights
-share that transform conversion. The installed-03TR `mounted_view_test` fires
-through the real presenter, checks the flash at the muzzle, and moves/articulates
-the carrier without firing again to verify that the same live group follows.
+part's live PANM transform. Rigid ROBJ nodes already apply the complete
+pivot/rotation matrix to model-space vertices and userpoints: subtracting the
+rest pivot again moves this minigun's flash about 24 cm below its authored
+muzzle. This matches the native userpoint path (`Userpoint_ComputeWorldTransform`
+`@0x56c4dd..0x56c513`, recorded in `world/entity_pose.cpp`). Skeletal viewmodel
+points still need their inverse rest pose; model lights share the appropriate
+rendered-part conversion. The installed-03TR `mounted_view_test` fires through
+the real presenter, independently checks the flash against the spinning
+barrel's mesh bounds as well as the authored point, and moves/articulates the
+carrier without firing again to verify that the same live group follows.
 Native `player_present` / `player_weapon_view` tests pin FP-model precedence and
 committed-slot identity across a pending gun switch and release.
 
