@@ -12,12 +12,9 @@ namespace opennova::editor {
 // The editor's one managed game child (ADR 0046 d8/d10): Stopped, Running, or Stopping
 // after a stop request until the child is gone or the deadline forces it. One child at a
 // time: a start while another runs is refused. poll() is non-blocking and is what moves
-// the machine; the UI calls it every frame, the CLI in a loop.
-//
-// STAGED, NOT WIRED (2026-09-20, editor S3): the live owner is the editor shell's
-// EditorApp (godot/src/authoring/editor_app.*, S4), which implements ProcessPlatform
-// over the OS process API and polls the session once per frame; until it lands the
-// session runs only over the fake platform in tests/editor/play_session_test.cpp.
+// the machine; the UI calls it every frame, the CLI in a loop. The project session
+// (editor/session/project_session.h) owns the one instance; the editor shell's
+// EditorApp supplies the platform (godot/src/authoring/child_process.h).
 enum class PlayState { Stopped, Running, Stopping };
 
 inline constexpr int64_t kPlayStopDeadlineMs = 5000;
