@@ -9,6 +9,31 @@
 
 namespace opennova::renderer {
 
+// [orig: Scar_RenderCache @0x5CD830 -- building mask @0x5cd93d;
+//  first blink-hit sentinel @0x5cd94a..0x5cd951; four-hit scan @0x5cd955..0x5cd9ac]
+// Entity::blink_hits carries ((section & 0x1F) | (pool_index << 8)) << 12.
+// A building draws on any LOW-28 mask bit. Other owners bypass the mask
+// entirely when their FIRST containing-box slot (+464) is zero; otherwise
+// any of the four hits (+464..+476) may admit them. Missing occlusion
+// instances retain the embedder's all-visible fallback.
+bool scar_owner_visible(const world::Entity *owner, const ScarSectionMaskLookup &section_mask) {
+	if (!owner) return false;
+	if (owner->kind == world::EntityKind::Building) {
+		const auto mask = section_mask(owner->handle);
+		return !mask || ((*mask & 0x0FFFFFFFu) != 0u);
+	}
+	if (owner->blink_hits[0] == 0u) return true;
+	for (const uint32_t hit : owner->blink_hits) {
+		if (hit == 0u) continue;
+		const int section = static_cast<int>((hit >> 12) & 0x1Fu);
+		const auto building = world::EntityHandle::make(2, static_cast<int>(hit >> 20));
+		const auto mask = section_mask(building);
+		if (!mask || ((*mask & (1u << section)) != 0u)) return true;
+	}
+	return false;
+}
+
+
 namespace {
 
 using opennova::world::ScarRing;

@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 
 using namespace opennova::world;
 using opennova::renderer::ScarDrawList;
@@ -210,7 +211,47 @@ void test_strip_mode_words() {
 			"a foreign word decodes field by field");
 }
 
+void test_native_owner_visibility() {
+	std::unordered_map<uint16_t, uint32_t> masks;
+	int reads = 0;
+	const opennova::renderer::ScarSectionMaskLookup lookup = [&](EntityHandle handle) -> std::optional<uint32_t> {
+		++reads;
+		const auto found = masks.find(handle.packed);
+		return found == masks.end() ? std::nullopt : std::optional<uint32_t>(found->second);
+	};
+	using opennova::renderer::scar_owner_visible;
+	CHECK(!scar_owner_visible(nullptr, lookup) && reads == 0, "absent owner is rejected without a mask read");
+	Entity owner;
+	owner.handle = EntityHandle::make(2, 7);
+	owner.kind = EntityKind::Building;
+	CHECK(scar_owner_visible(&owner, lookup), "an unregistered occlusion instance keeps the all-visible host fallback");
+	masks[owner.handle.packed] = 0;
+	CHECK(!scar_owner_visible(&owner, lookup), "zero building mask is hidden");
+	masks[owner.handle.packed] = 0xF0000000u;
+	CHECK(!scar_owner_visible(&owner, lookup), "building ignores the high four bits");
+	masks[owner.handle.packed] = 0x08000000u;
+	CHECK(scar_owner_visible(&owner, lookup), "building includes bit 27");
+	owner.kind = EntityKind::Organic;
+	for (auto &hit : owner.blink_hits) hit = 0;
+	owner.blink_hits[1] = (7u << 20) | (3u << 12);
+	masks[EntityHandle::make(2, 7).packed] = 0;
+	reads = 0;
+	CHECK(scar_owner_visible(&owner, lookup) && reads == 0,
+			"retail's first empty blink slot bypasses later nonzero slots");
+	owner.blink_hits[0] = (8u << 20) | (31u << 12);
+	masks[EntityHandle::make(2, 8).packed] = 0;
+	CHECK(!scar_owner_visible(&owner, lookup), "all referenced sections hidden");
+	masks[EntityHandle::make(2, 8).packed] = 0x80000000u;
+	CHECK(scar_owner_visible(&owner, lookup), "non-building hit includes section 31");
+	masks[EntityHandle::make(2, 8).packed] = 0;
+	masks[EntityHandle::make(2, 7).packed] = 1u << 3;
+	CHECK(scar_owner_visible(&owner, lookup), "a later containing box can admit the owner");
+	masks.erase(EntityHandle::make(2, 7).packed);
+	CHECK(scar_owner_visible(&owner, lookup), "a missing containing-building instance keeps the host fallback");
+}
+
 int main() {
+	test_native_owner_visibility();
 	test_quad_order_and_uvs();
 	test_batches_per_texture_and_ring_order();
 	test_fog_box_cull_is_world_only();

@@ -41,7 +41,7 @@ appear in tracked docs:
 | Binary | What it is | Where it is used |
 |---|---|---|
 | `Jointops.exe` | the shipped JO: Combined Arms executable ("retail", as distinct from the demo) | the default for every citation — [correspondence.md](correspondence.md) |
-| `dfx2med.exe` | the DFX2 Mission EDitor; same engine lineage as JO, shared `.bms` format | editor-side cross-checks: [bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world-wac-ai-re.md](world/world-wac-ai-re.md) |
+| `dfx2med.exe` | the DFX2 Mission EDitor; same engine lineage as JO, shared `.bms` format | editor-side cross-checks: [bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world-wac-ai-re.md](world/world-wac-ai-re.md); 2026-09-21 scar owner-visibility re-grill and native predicate: world record section 24.9 |
 | `ModSuperOed.exe` | NovaLogic's original mod-tools OED, the 3DI exporter (32-bit PE) | the 3DI3 wire format and its writers: [3di-gp-format-re.md](threedi/3di-gp-format-re.md); also the ground-truth comparator (§5 below) |
 | `dfvas.exe` | Delta Force: Black Hawk Down affiliate build | GP-era runtime `.3di` loaders: [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
 | `jodemo.exe` | the JO demo | historical citations only — the env grill re-anchored every jodemo-era address to retail ([env-tod-re.md](env/env-tod-re.md), atmosphere-parity appendix) |

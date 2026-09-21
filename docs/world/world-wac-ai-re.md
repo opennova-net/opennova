@@ -6923,6 +6923,29 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   `Scar_FreeProjectedDecals`; called from `Entity_Destroy @0x43e8e4` (24.3)
   AND `Entity_AttachToVehicle @0x43c155` (the boarding passenger's scars).
 
+**Scar owner-visibility re-grill (2026-09-21, ADR 0040 B).** The live
+retail `Jointops.exe.kong.i64` at imagebase `0x400000` was checked by
+pseudocode and instruction inspection against the existing correspondence.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Building-owner mask | MATCHING (read-only grill) | `Scar_RenderCache @0x5cd830`, test of `g_BuildingSectionVisMask & 0x0fffffff` at `@0x5cd93d`; the native `renderer_scar_draw_list` oracle covers low bit 27 and excluded high bits |
+| Non-building containing-box gate | MATCHING after first-slot correction | `@0x5cd94a..0x5cd951` skips the entire mask scan when owner+464 is zero; otherwise `@0x5cd955..0x5cd9ac` scans four slots, building index `hit >> 20`, section `(hit >> 12) & 0x1f`, admitting on any set section bit |
+| Missing owner / missing occlusion instance | host code / not grillable | Missing registry owners remain rejected; a missing occlusion instance remains all-visible. These embedder fallbacks are exercised by `renderer_scar_draw_list` and are not attributed to a retail missing-instance branch |
+
+The predicate now lives in `renderer::scar_owner_visible` in
+`engine/runtime/renderer/scar_draw_list.cpp`; `Simulation` only resolves the
+owner and supplies optional section masks. Its old scan treated a hole at
+slot 0 followed by a hidden later hit as hidden. Retail instead accepts that
+owner immediately, consistent with the first-slot sentinel already used by
+`OcclusionWorld`. The native regression covers this exact sparse-slot case,
+the section-31 bit for a non-building owner, later visible hits and both host
+fallbacks. No retained divergence was introduced by this move.
+
+**IDB changes made during this session:** added an anchored comment at
+`@0x5cd94a` explaining the first-slot bypass, the four-hit decode and the
+native policy home. No function names or types changed; the IDB was saved.
+
 **Port status (2026-08-21, the wire-up round).** PORTED: `world::ScarCache`
 (`engine/runtime/world/impact_scar.{h,cpp}` — 128 entity rings + the shared
 world ring, handle + spawn-id lease, never evict, miss-when-full → no scar),
