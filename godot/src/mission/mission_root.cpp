@@ -455,10 +455,6 @@ Ref<PlayerAimOverlay> MissionRoot::local_player_aim_overlay() const {
 	return sim_.is_valid() ? sim_->get_local_player_aim_overlay() : Ref<PlayerAimOverlay>();
 }
 
-int MissionRoot::local_player_team() const {
-	return sim_.is_valid() ? sim_->get_local_player_team() : 0;
-}
-
 void MissionRoot::set_frame_stats(const Ref<FrameStats> &p_board) {
 	if (p_board == frame_stats_) {
 		return;

@@ -19,8 +19,10 @@ void carrier_pose(const World &world, const Entity &carrier, int32_t out[6]) {
     const AiEntity *body = world.ai.for_handle(carrier.handle);
     out[3] = body ? body->heading : carrier.veh.yaw_seeded ? carrier.veh.yaw_bam
         : bam_heading_from_mission_yaw_deg(carrier.yaw);
-    out[4] = body ? body->pitch : bam_from_degrees_wrapped(carrier.pitch);
-    out[5] = body ? body->roll : bam_from_degrees_wrapped(carrier.roll);
+    out[4] = body ? body->pitch : carrier.veh.yaw_seeded ? carrier.veh.air_pitch_bam
+        : bam_from_degrees_wrapped(carrier.pitch);
+    out[5] = body ? body->roll : carrier.veh.yaw_seeded ? carrier.veh.air_roll_bam
+        : bam_from_degrees_wrapped(carrier.roll);
 }
 
 // The weapon userpoint of `carrier` for the barrel the pre-consumption clip

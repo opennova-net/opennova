@@ -182,7 +182,6 @@ func teardown() -> void:
 	_hud_objective = ""
 	_endround_banner = ""
 	_toggles.reset_mission()
-	_toggles.set_objectives_visible(false)
 	_scoreboard.reset()
 	_vehicle_panel.reset()
 	_message_log.reset()
@@ -535,14 +534,22 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The key sampling is this presenter's; the edge latches, the cycles, the
 	# window toggles and the shared-key shadowing are the engine's poll.
 	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
-	_apply_toggle_events(_toggles.poll(
-			ControlsBindings.pressed("huddetail"), ControlsBindings.pressed("hudcolor"),
-			_hud_rows_share_key(), ControlsBindings.pressed("showhud"),
+	var detail_down := ControlsBindings.pressed("huddetail")
+	var color_down := ControlsBindings.pressed("hudcolor")
+	var toggle_events := _toggles.poll(
+			detail_down, color_down,
+			detail_down and color_down and _hud_rows_share_key(),
+			ControlsBindings.pressed("showhud"),
 			ControlsBindings.pressed("dotsize"), ControlsBindings.pressed("Goals"),
 			ControlsBindings.pressed("view1st"), ControlsBindings.pressed("viewwithgun"),
 			ControlsBindings.pressed("viewchase"), ControlsBindings.pressed("playerlist_alt"),
 			ControlsBindings.pressed("OldMessages"), ControlsBindings.pressed("ShowScore"),
-			hud_keys_chorded, gameplay_input_active, sim.is_mp_session()))
+			hud_keys_chorded, gameplay_input_active, sim.is_mp_session())
+	# The window actions' respawn init also closes the sim's map overlay (the
+	# witness rides hud_toggles.h kOverlayWindowsCleared).
+	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
+		sim.request_hud_map_close()
+	_apply_toggle_events(toggle_events)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,

@@ -131,8 +131,11 @@ inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 // UI_ProcessEndRoundScreenTransition, stepped once per HUD frame by the
 // presenter, which owns the device work each verdict names (the UI scene
 // teardown, the overlay element, opening stat.mnu, the cursor).
-// [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — the first pass stamps
-//  byte_28E561C and t0 (dword_A81B2C); every PRE-STAT pass tears the UI scene
+// [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — gate g_scoreboardDirty
+//  @0x5b8600, then `now - t0` against 0x1770 unsigned @0x5b860f..0x5b8615; t0
+//  (dword_A81B2C) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
+//  @0x430a4b (Server_ProcessRoundEnd @0x516912 on the host) and the
+//  first pass here stamps byte_28E561C; every PRE-STAT pass tears the UI scene
 //  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_scoreboardDirty
 //  && now - t0 >= 6000 ms opens stat.mnu once (byte_28E561D, one more
 //  teardown on the open pass @0x5b862a); once that byte is set the transition

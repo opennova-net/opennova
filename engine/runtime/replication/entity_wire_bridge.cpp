@@ -79,6 +79,36 @@ uint8_t player_class_for_wire(const world::Entity &e) {
 	return e.player_class;
 }
 
+constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches snapshot_of)
+
+// Engine-frame heading BAM the wire carries at entity+16 — (90 - mission_yaw) deg, the
+// same convention snapshot_of writes and every spawn decoder reads (D-NET-86).
+int32_t engine_heading_bam(int16_t mission_yaw) {
+	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
+}
+
+// Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
+int32_t engine_axis_bam(int16_t degrees) {
+	return static_cast<int32_t>(static_cast<int64_t>(degrees) * kBamPerDegree);
+}
+
+// The carrier frame a mounted seat-local position is measured against: the one
+// BAM32 entity euler retail keeps on both sides of Entity_TransformWorldToLocal.
+// A seeded carrier (every vehicle past its first motor tick) poses its riders in
+// its live BAM frame (vehicle_mount.cpp entity_local_point_world), so the wire
+// undoes that same frame — through the whole-degree mirrors the seat-local bytes
+// would drift by up to sin(0.5 deg) x the seat lever arm with every sub-degree of
+// carrier attitude. The mirrors remain the unseeded (flat placer) frame.
+int32_t carrier_heading_bam(const world::Entity &c) {
+	return c.veh.yaw_seeded ? c.veh.yaw_bam : engine_heading_bam(c.yaw);
+}
+int32_t carrier_pitch_bam(const world::Entity &c) {
+	return c.veh.yaw_seeded ? c.veh.air_pitch_bam : engine_axis_bam(c.pitch);
+}
+int32_t carrier_roll_bam(const world::Entity &c) {
+	return c.veh.yaw_seeded ? c.veh.air_roll_bam : engine_axis_bam(c.roll);
+}
+
 } // namespace
 
 uint8_t health_classification_byte(int32_t health, int32_t health_max, uint8_t player_class) {
@@ -248,19 +278,16 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		if (carrier != wire_handle::kInvalid) {
 			if (const world::Entity *c =
 			            w.registry.get(world::EntityHandle{carrier})) {
-				constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 				s.carrier_pose_valid = true;
 				s.carrier_x = world::to_fixed(c->position.x);
 				s.carrier_y = world::to_fixed(c->position.y);
 				s.carrier_z = world::to_fixed(c->position.z);
 				// Same engine-frame conventions as snapshot_of: yaw is (90 - mission)
-				// framed, pitch a pure widen (D-NET-86).
-				s.carrier_yaw_bam = static_cast<int32_t>(
-						static_cast<int64_t>(90 - c->yaw) * kBamPerDegree);
-				s.carrier_pitch_bam = static_cast<int32_t>(
-						static_cast<int64_t>(c->pitch) * kBamPerDegree);
-				s.carrier_roll_bam = static_cast<int32_t>(
-						static_cast<int64_t>(c->roll) * kBamPerDegree);
+				// framed, pitch a pure widen (D-NET-86) — read from the frame the
+				// rider was posed in (carrier_heading_bam).
+				s.carrier_yaw_bam = carrier_heading_bam(*c);
+				s.carrier_pitch_bam = carrier_pitch_bam(*c);
+				s.carrier_roll_bam = carrier_roll_bam(*c);
 			}
 		}
 		out.push_back(s);
@@ -269,19 +296,6 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 }
 
 namespace {
-
-constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches snapshot_of)
-
-// Engine-frame heading BAM the wire carries at entity+16 — (90 - mission_yaw) deg, the
-// same convention snapshot_of writes and every spawn decoder reads (D-NET-86).
-int32_t engine_heading_bam(int16_t mission_yaw) {
-	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
-}
-
-// Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
-int32_t engine_axis_bam(int16_t degrees) {
-	return static_cast<int32_t>(static_cast<int64_t>(degrees) * kBamPerDegree);
-}
 
 // entity+36 GamePlayerEntity Flags word for a PLAYER spawn record, written verbatim by the
 // original serializers [orig: serialize_entity_states_to_buffer @0x5030a0 writes
@@ -664,15 +678,15 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	if (grounded) {
 		if (const world::Entity *carrier = world.registry.get(
 		            world::EntityHandle{static_cast<uint16_t>(intent.carrier_handle)})) {
-			const int32_t carrier_yaw_bam = engine_heading_bam(carrier->yaw);
+			const int32_t carrier_yaw_bam = carrier_heading_bam(*carrier);
 			const WorldPose w = network_transform_local_to_world(
 					intent.pos_x, intent.pos_y, intent.pos_z,
 					world::to_fixed(carrier->position.x),
 					world::to_fixed(carrier->position.y),
 					world::to_fixed(carrier->position.z),
 					static_cast<uint32_t>(carrier_yaw_bam),
-					static_cast<uint32_t>(engine_axis_bam(carrier->pitch)),
-					static_cast<uint32_t>(engine_axis_bam(carrier->roll)));
+					static_cast<uint32_t>(carrier_pitch_bam(*carrier)),
+					static_cast<uint32_t>(carrier_roll_bam(*carrier)));
 			wire_x = w.x;
 			wire_y = w.y;
 			wire_z = w.z;
@@ -817,15 +831,15 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	else if (e.ground_target.valid())
 		carrier_handle = e.ground_target;
 	if (const world::Entity *carrier = world.registry.get(carrier_handle)) {
-		const int32_t carrier_yaw_bam = engine_heading_bam(carrier->yaw);
+		const int32_t carrier_yaw_bam = carrier_heading_bam(*carrier);
 		const WorldPose local = network_transform_world_to_local(
 				ae.pos[0], ae.pos[1], ae.pos[2],
 				world::to_fixed(carrier->position.x),
 				world::to_fixed(carrier->position.y),
 				world::to_fixed(carrier->position.z),
 				static_cast<uint32_t>(carrier_yaw_bam),
-				static_cast<uint32_t>(engine_axis_bam(carrier->pitch)),
-				static_cast<uint32_t>(engine_axis_bam(carrier->roll)));
+				static_cast<uint32_t>(carrier_pitch_bam(*carrier)),
+				static_cast<uint32_t>(carrier_roll_bam(*carrier)));
 		up.carrier_handle = carrier_handle.packed;
 		up.pos_x = local.x;
 		up.pos_y = local.y;

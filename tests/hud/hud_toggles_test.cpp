@@ -93,7 +93,8 @@ void test_showhud_goals_dotsize_and_view_actions() {
 	k.showhud = false;
 	k.dotsize = true;
 	k.goals = true;
-	CHECK(hud_toggles_poll(s, k) == (kDotsizeCycled | kObjectivesToggled));
+	CHECK(hud_toggles_poll(s, k) ==
+			(kDotsizeCycled | kObjectivesToggled | kOverlayWindowsCleared));
 	CHECK(s.objectives_visible);
 	k.dotsize = false;
 	k.goals = false;
@@ -113,37 +114,88 @@ void test_showhud_goals_dotsize_and_view_actions() {
 	CHECK(s.showhud_flags == 3); // chase never touches the gun bit
 }
 
+// The overlay windows keep ONE up: every window action runs the respawn init
+// through the keeping wrapper [orig: Game_InitRespawnState @0x499360;
+// Game_InitRespawnStateKeepingToggle @0x4993c0], which closes the others and
+// orders the sim's map overlay closed; the player list is closed by the
+// others only for a session peer [orig: @0x4993a4..0x4993ae].
 void test_overlay_windows() {
 	HudToggleState s;
 	HudKeyPoll k = keys();
+	// Out of a session (SP): Tab and J on one frame — Tab's open edge runs the
+	// init first, then J's flip closes nothing but the (SP-safe) player list
+	// survives J's init.
 	k.playerlist = true;
 	k.old_messages = true;
-	CHECK(hud_toggles_poll(s, k) == (kScoreboardToggled | kMessageLogToggled));
+	CHECK(hud_toggles_poll(s, k) ==
+			(kScoreboardToggled | kMessageLogToggled | kOverlayWindowsCleared));
 	CHECK(s.scoreboard_open && s.message_log_open);
 	k.playerlist = false;
 	k.old_messages = false;
+	hud_toggles_poll(s, k);
+	// G (objectives) closes J's message log and keeps the SP player list.
+	k.goals = true;
+	CHECK(hud_toggles_poll(s, k) == (kObjectivesToggled | kOverlayWindowsCleared));
+	CHECK(s.objectives_visible && !s.message_log_open && s.scoreboard_open);
+	k.goals = false;
 	hud_toggles_poll(s, k);
 	// ShowScore is SP-only: in a session the press is swallowed (latch set).
 	k.show_score = true;
 	k.in_session = true;
 	CHECK(hud_toggles_poll(s, k) == 0);
-	CHECK(!s.end_round_stats_open && s.message_log_open);
+	CHECK(!s.end_round_stats_open && s.objectives_visible);
 	k.show_score = false;
 	hud_toggles_poll(s, k);
 	// Out of a session it opens and the respawn-init wrapper closes the
-	// message log beside it.
+	// objectives panel beside it.
 	k.show_score = true;
 	k.in_session = false;
-	CHECK(hud_toggles_poll(s, k) == kShowScoreToggled);
-	CHECK(s.end_round_stats_open && !s.message_log_open && s.scoreboard_open);
-	// The respawn init clears the three windows and every latch; the color,
-	// detail, showhud and friendly-tag globals survive.
+	CHECK(hud_toggles_poll(s, k) == (kShowScoreToggled | kOverlayWindowsCleared));
+	CHECK(s.end_round_stats_open && !s.objectives_visible && s.scoreboard_open);
+	k.show_score = false;
+	hud_toggles_poll(s, k);
+	// In a session (a peer): J closes the Show Score panel AND the player
+	// list; Tab's open edge then closes J's log; Tab's close edge clears only
+	// the list.
+	k.in_session = true;
+	k.old_messages = true;
+	CHECK(hud_toggles_poll(s, k) == (kMessageLogToggled | kOverlayWindowsCleared));
+	CHECK(s.message_log_open && !s.end_round_stats_open && !s.scoreboard_open);
+	k.old_messages = false;
+	hud_toggles_poll(s, k);
+	k.playerlist = true;
+	CHECK(hud_toggles_poll(s, k) == (kScoreboardToggled | kOverlayWindowsCleared));
+	CHECK(s.scoreboard_open && !s.message_log_open);
+	k.playerlist = false;
+	hud_toggles_poll(s, k);
+	k.old_messages = true;
+	hud_toggles_poll(s, k); // J closes the list (peer) and opens the log
+	k.old_messages = false;
+	hud_toggles_poll(s, k);
+	k.playerlist = true;
+	hud_toggles_poll(s, k); // Tab open edge closes the log
+	k.playerlist = false;
+	hud_toggles_poll(s, k);
+	s.message_log_open = true; // a log opened by other means ...
+	k.playerlist = true;
+	CHECK(hud_toggles_poll(s, k) == kScoreboardToggled); // ... survives Tab's close edge
+	CHECK(!s.scoreboard_open && s.message_log_open);
+	k.playerlist = false;
+	hud_toggles_poll(s, k);
+	// The mission teardown clears the four windows and their latches; the
+	// color, detail, showhud and friendly-tag globals and the HUD-row latches
+	// survive.
 	s.hud_color_index = 4;
 	s.hud_detail_level = 2;
+	k.playerlist = true;
+	hud_toggles_poll(s, k);
+	s.objectives_visible = true;
+	s.huddetail.was_down = true;
 	hud_toggles_reset_mission(s);
-	CHECK(!s.scoreboard_open && !s.message_log_open && !s.end_round_stats_open);
+	CHECK(!s.scoreboard_open && !s.message_log_open && !s.end_round_stats_open &&
+			!s.objectives_visible);
 	CHECK(s.hud_color_index == 4 && s.hud_detail_level == 2);
-	CHECK(!s.show_score.was_down && !s.playerlist.was_down);
+	CHECK(!s.show_score.was_down && !s.playerlist.was_down && s.huddetail.was_down);
 }
 
 void test_death_screen_and_friendly_tags() {

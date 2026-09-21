@@ -26,7 +26,7 @@ void fill_objective_rows(const World &world, const hud::GameTextLookup &mission_
 		hud::HudObjectiveRow row;
 		char key[32];
 		std::snprintf(key, sizeof(key), "STRWINCOND%03d", static_cast<int>(id));
-		if (mission_text) row.text = mission_text("WinConditions", key, "");
+		row.text = hud::game_text(mission_text, "WinConditions", key, "");
 		row.done = (sg.won & (1u << slot)) != 0;
 		r_rows.push_back(std::move(row));
 	}

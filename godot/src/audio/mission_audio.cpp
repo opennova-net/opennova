@@ -45,7 +45,7 @@ constexpr const char *kVoiceBus = "Voice";
 // set names (e.g. id 106178 "snd: Lp Flourescent Light" -> soundloop_1
 // LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4]; the engine is
 // name-keyed (docs/audio/lwf-dbf-sound-re.md) and resolves it natively
-// (audio/envs_markers.h via ItemDatabase.resolve_envs_markers).
+// (audio/envs_markers.h resolve_envs_markers).
 
 // The thunder bearing is an 8-bit binary angle (one byte = a full turn;
 // world/weather_state.h WeatherSound.bearing).

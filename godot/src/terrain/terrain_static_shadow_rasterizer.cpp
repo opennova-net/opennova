@@ -10,6 +10,7 @@
 #include "mission/static_source_convert.h"
 #include "object/object_data.h"
 #include "terrain/terrain_data.h"
+#include "util/string_convert.h"
 
 #include <runtime/terrain/terrain_static_shadow.h>
 #include <base/io/hash.h>
@@ -274,7 +275,7 @@ public:
 							source.item_attrib, source.item_attrib2);
 			const std::shared_ptr<const opennova::terrain::
 					TerrainStaticShadowResolvedGeometry> geometry =
-					geometry_for(String(source.graphic.c_str()), placer->static_source_object_data(source.asset_id));
+					geometry_for(opennova::to_gd(source.graphic), placer->static_source_object_data(source.asset_id));
 			if (geometry == nullptr) {
 				if (admitted) admitted_geometry_missing = true;
 				continue;

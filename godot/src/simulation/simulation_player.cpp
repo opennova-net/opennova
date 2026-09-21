@@ -167,6 +167,10 @@ int Simulation::request_hud_map_cycle() {
 	return kernel_->local.hud_map_control.cycle();
 }
 
+void Simulation::request_hud_map_close() {
+	kernel_->local.hud_map_control.on_respawn_init();
+}
+
 int Simulation::get_hud_map_mode() const {
 	return kernel_->local.hud_map_control.mode;
 }

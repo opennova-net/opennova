@@ -45,8 +45,13 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		uint16_t self_handle) {
 	for (auto &mount : state.entities) {
 		mount.emplaced_controls_valid = false;
+		// The materialized world row's phase, only while that row is still this
+		// wire entity's type (a reused handle must not forward a foreign phase).
 		const auto *spin_source = world.registry.get(world::EntityHandle{mount.handle});
-		mount.emplaced_spin_phase = spin_source != nullptr ? spin_source->emplaced_spin_phase : 0;
+		mount.emplaced_spin_phase = spin_source != nullptr &&
+						static_cast<uint16_t>(spin_source->item_id) == mount.type_id
+				? spin_source->emplaced_spin_phase
+				: 0;
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;

@@ -113,40 +113,6 @@ public:
 	void set_bus(const StringName &p_value) { bus_ = p_value; }
 };
 
-// One ranked mix row the native mixer returned this frame, joined to its
-// binding; `resolved_stream` is filled for an entrant that reaches the top
-// eight.
-class MissionAudioCandidate : public RefCounted {
-	GDCLASS(MissionAudioCandidate, RefCounted)
-
-	int candidate_id_ = 0;
-	Ref<AmbientLayer> descriptor_;
-	StringName bus_;
-	Vector3 pos_;
-	int vol_ = 0;
-	int pitch_q16_ = 0;
-	Ref<AudioStreamWAV> resolved_stream_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	int get_candidate_id() const { return candidate_id_; }
-	void set_candidate_id(int p_value) { candidate_id_ = p_value; }
-	Ref<AmbientLayer> get_descriptor() const { return descriptor_; }
-	void set_descriptor(const Ref<AmbientLayer> &p_value) { descriptor_ = p_value; }
-	StringName get_bus() const { return bus_; }
-	void set_bus(const StringName &p_value) { bus_ = p_value; }
-	Vector3 get_pos() const { return pos_; }
-	void set_pos(const Vector3 &p_value) { pos_ = p_value; }
-	int get_vol() const { return vol_; }
-	void set_vol(int p_value) { vol_ = p_value; }
-	int get_pitch_q16() const { return pitch_q16_; }
-	void set_pitch_q16(int p_value) { pitch_q16_ = p_value; }
-	Ref<AudioStreamWAV> get_resolved_stream() const { return resolved_stream_; }
-	void set_resolved_stream(const Ref<AudioStreamWAV> &p_value) { resolved_stream_ = p_value; }
-};
-
 // One dynamic emitter lane's live registration ((source lifetime, lane) key):
 // the set it plays, its stable candidate ids, and the tick it expires.
 class MissionAudioDynamicEmitter : public RefCounted {

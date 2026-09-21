@@ -12,6 +12,30 @@ bool HudKeyEdge::step(bool down, bool active, bool chorded) {
 	return edge;
 }
 
+namespace {
+
+// The respawn init every overlay-window action runs: clears the end-round
+// stats, the map overlay mode, the message log and the objectives panel, and
+// the player list only for a session peer (a joiner or the listen host; the
+// HUD never runs on a dedicated server), then restores the one window the
+// action just flipped — keep-one across the windows [orig:
+// Game_InitRespawnState @0x499360 (@0x499381 / @0x499395 / @0x49939a /
+// @0x49939f; @0x4993ae behind is_in_session && is_mp_session_peer);
+// Game_InitRespawnStateKeepingToggle @0x4993c0 saves and restores *arg].
+// The map overlay lives in the sim's HudMapControl; the event bit orders
+// that clear from the embedder.
+uint32_t respawn_init_keeping(HudToggleState &s, bool *keep, bool in_session) {
+	const bool kept = *keep;
+	s.end_round_stats_open = false;
+	s.message_log_open = false;
+	s.objectives_visible = false;
+	if (in_session) s.scoreboard_open = false;
+	*keep = kept;
+	return hud_toggle_event::kOverlayWindowsCleared;
+}
+
+} // namespace
+
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	using namespace hud_toggle_event;
 	uint32_t events = 0;
@@ -44,10 +68,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	if (s.dotsize.step(k.dotsize, k.active, k.chorded)) events |= kDotsizeCycled;
 	if (s.goals.step(k.goals, k.active, k.chorded)) {
-		// The objectives panel toggle [orig: the co-op action toggle @0x49b68b —
-		// dword_24C18CC ^= 0xFF]
+		// The objectives panel toggle, then the respawn init keeping it [orig:
+		// the co-op action toggle @0x49b68b — dword_24C18CC ^= 0xFF; the
+		// wrapper call @0x49b69a]
 		s.objectives_visible = !s.objectives_visible;
-		events |= kObjectivesToggled;
+		events |= kObjectivesToggled | respawn_init_keeping(s, &s.objectives_visible, k.in_session);
 	}
 	// The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 	// viewchase F4): first person clears the FP-gun bit, gun view sets it, and
@@ -70,41 +95,41 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	if (s.viewchase.step(k.viewchase, k.active, k.chorded)) events |= kThirdPersonSelected;
 	// The Tab player list TOGGLES the panel-visible flag — retail keeps the
-	// board up until the next press [orig: Scoreboard_TogglePlayerList
-	// @0x4244c0 from the dispatch case @0x49bb68]
+	// board up until the next press; the OPEN edge runs the respawn init
+	// first (the close edge clears only the panel) [orig:
+	// Scoreboard_TogglePlayerList @0x4244c0 from the dispatch case @0x49bb68;
+	// Game_InitRespawnState @0x4244df on the 0 -> 1 edge]
 	if (s.playerlist.step(k.playerlist, k.active, k.chorded)) {
 		s.scoreboard_open = !s.scoreboard_open;
 		events |= kScoreboardToggled;
+		if (s.scoreboard_open)
+			events |= respawn_init_keeping(s, &s.scoreboard_open, k.in_session);
 	}
-	// The Recent Messages window [orig: `xor g_showMessageLog, 1` @0x49b55a]
+	// The Recent Messages window, then the respawn init keeping it [orig:
+	// `xor g_showMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
 	if (s.old_messages.step(k.old_messages, k.active, k.chorded)) {
 		s.message_log_open = !s.message_log_open;
-		events |= kMessageLogToggled;
+		events |= kMessageLogToggled | respawn_init_keeping(s, &s.message_log_open, k.in_session);
 	}
 	// The SP Show Score panel: settable only OUTSIDE a session; each flip runs
 	// the respawn-init wrapper, which clears the other overlay windows and
 	// keeps this one [orig: case 422 @0x49bd29 (the !is_in_session gate) ->
-	// Game_InitRespawnStateKeepingToggle @0x4993c0]
+	// Game_InitRespawnStateKeepingToggle @0x4993c0 @0x49bd4b]
 	if (s.show_score.step(k.show_score, k.active && !k.in_session, k.chorded)) {
 		s.end_round_stats_open = !s.end_round_stats_open;
-		s.message_log_open = false;
-		events |= kShowScoreToggled;
+		events |= kShowScoreToggled | respawn_init_keeping(s, &s.end_round_stats_open, false);
 	}
 	return events;
 }
 
 void hud_toggles_reset_mission(HudToggleState &s) {
+	// The mission teardown: the four windows and their three latches. The
+	// HUD-row latches follow the ungated key state and survive, as the key
+	// scan's per-key state does in retail.
 	s.scoreboard_open = false;
 	s.message_log_open = false;
 	s.end_round_stats_open = false;
-	s.huddetail.reset();
-	s.hudcolor.reset();
-	s.showhud.reset();
-	s.dotsize.reset();
-	s.goals.reset();
-	s.view1st.reset();
-	s.viewwithgun.reset();
-	s.viewchase.reset();
+	s.objectives_visible = false;
 	s.playerlist.reset();
 	s.old_messages.reset();
 	s.show_score.reset();

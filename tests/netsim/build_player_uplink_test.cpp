@@ -15,6 +15,7 @@
 #include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <net/npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
@@ -485,6 +486,102 @@ bool run_equipped_adm_ingest_gate() {
 	return true;
 }
 
+// A seeded carrier (every vehicle past its first motor tick) poses its riders
+// in its live BAM frame (vehicle_mount.cpp entity_local_point_world), so both
+// wire seams must undo that same frame: retail keeps ONE BAM32 entity euler on
+// both sides of Entity_TransformWorldToLocal, and the carrier-local bytes are
+// the seat offset whatever the carrier's sub-degree attitude. Through the
+// whole-degree mirrors they drifted by sin(0.5 deg) x the lever arm. Pin the
+// invariant on the joiner's C2S 0x0C uplink and on the authority's S2C 0x0A
+// carrier frame by sampling the same seat under a flat unseeded carrier and a
+// seeded one at a fractional attitude.
+bool run_seeded_carrier_seat_local_is_attitude_invariant() {
+	struct Sample {
+		int32_t x = 0, y = 0, z = 0;
+		int32_t snap_yaw = 0, snap_pitch = 0, snap_roll = 0;
+	};
+	auto sample = [](bool seeded, double yaw_deg, double pitch_deg, double roll_deg,
+	                 Sample &out) -> bool {
+		w::World world;
+		world.registry.configure_pool(0, 8);
+		world.registry.configure_pool(1, 8);
+		w::Entity player_seed;
+		player_seed.kind = w::EntityKind::Organic;
+		player_seed.item_id = 0x14B9;
+		player_seed.player_class = 8;
+		player_seed.health = 150;
+		player_seed.health_max = 150;
+		const w::EntityHandle player_h = world.registry.spawn(0, player_seed);
+		world.ai.attach(player_h);
+		w::AiEntity *body = world.ai.for_handle(player_h);
+		if (!expect(body != nullptr, "seeded-carrier rider body attached")) return false;
+		body->inf.active = true;
+		body->inf.is_local_player = true;
+		w::Entity carrier_seed;
+		carrier_seed.kind = w::EntityKind::Item;
+		carrier_seed.item_id = 0x1004;
+		carrier_seed.position = {85.0f, -20.0f, 7.0f};
+		carrier_seed.yaw = static_cast<int16_t>(std::lround(yaw_deg));
+		carrier_seed.pitch = static_cast<int16_t>(std::lround(pitch_deg));
+		carrier_seed.roll = static_cast<int16_t>(std::lround(roll_deg));
+		carrier_seed.health = 3000;
+		carrier_seed.health_max = 3000;
+		w::Seat seat;
+		seat.type = w::SeatType::Passenger;
+		seat.retail_slot = 8;
+		seat.bone_index = 3;
+		seat.seat_local = {2.5f, -1.25f, 1.0f};
+		carrier_seed.seats.push_back(seat);
+		const w::EntityHandle carrier_h = world.registry.spawn(1, carrier_seed);
+		w::Entity *carrier = world.registry.get(carrier_h);
+		if (seeded) {
+			carrier->veh.yaw_seeded = true;
+			carrier->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(yaw_deg);
+			carrier->veh.air_pitch_bam = w::bam_from_degrees_wrapped(pitch_deg);
+			carrier->veh.air_roll_bam = w::bam_from_degrees_wrapped(roll_deg);
+		}
+		if (!expect(world.vehicles.process_attach(player_h, carrier_h, 3),
+		            "seeded-carrier rider mounted")) return false;
+		body->heading = 0x61230000;
+		if (!expect(world.ai.refresh_mounted_pose(*body, world),
+		            "seeded-carrier rider posed")) return false;
+		const nw::PlayerExtendedUplink up = ns::build_player_uplink(
+				world, *world.registry.get(player_h), *body);
+		out.x = up.pos_x;
+		out.y = up.pos_y;
+		out.z = up.pos_z;
+		bool found = false;
+		for (const auto &s : ns::snapshot_world(world)) {
+			if (s.wire_handle != player_h.packed) continue;
+			found = s.carrier_pose_valid && s.mount_handle == carrier_h.packed;
+			out.snap_yaw = s.carrier_yaw_bam;
+			out.snap_pitch = s.carrier_pitch_bam;
+			out.snap_roll = s.carrier_roll_bam;
+		}
+		return expect(found, "seeded-carrier rider snapshot carries its carrier pose");
+	};
+	Sample flat, tilted;
+	if (!sample(false, 0.0, 0.0, 0.0, flat)) return false;
+	if (!sample(true, 33.4, 12.6, -7.3, tilted)) return false;
+	// The flat unseeded carrier's local IS the seat offset in the wire frame; the
+	// seeded fractional attitude must reproduce it to within the 16.16 rounding
+	// of the pose round trip (the degree mirrors were ~1300 units out).
+	auto near = [](int32_t a, int32_t b) { return std::abs(a - b) <= 8; };
+	if (!expect(near(tilted.x, flat.x) && near(tilted.y, flat.y) && near(tilted.z, flat.z),
+	            "uplink seat-local position is invariant under the carrier's attitude"))
+		return false;
+	if (!expect(tilted.snap_yaw == w::bam_heading_from_mission_yaw_deg(33.4) &&
+	                    tilted.snap_pitch == w::bam_from_degrees_wrapped(12.6) &&
+	                    tilted.snap_roll == w::bam_from_degrees_wrapped(-7.3),
+	            "snapshot carrier frame is the seeded BAM euler the rider was posed in"))
+		return false;
+	if (!expect(flat.snap_yaw == carrier_heading_bam(w::Entity{}) && flat.snap_pitch == 0 &&
+	                    flat.snap_roll == 0,
+	            "unseeded snapshot carrier frame keeps the degree mirrors"))
+		return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -492,6 +589,7 @@ int main() {
 	ok = run_field_mapping() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
+	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;
 	ok = run_ground_target_carrier_roundtrip() && ok;
 	ok = run_scope_flag_reaches_host() && ok;
 	ok = run_equipped_adm_ingest_gate() && ok;

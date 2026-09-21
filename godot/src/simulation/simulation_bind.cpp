@@ -196,6 +196,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::request_hud_radar_zoom);
 	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
 	                     &Simulation::request_hud_map_cycle);
+	ClassDB::bind_method(D_METHOD("request_hud_map_close"),
+	                     &Simulation::request_hud_map_close);
 	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
 	                     &Simulation::get_hud_map_mode);
 	ClassDB::bind_method(D_METHOD("get_hud_big_zoom_q16"),

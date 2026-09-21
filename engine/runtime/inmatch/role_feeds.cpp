@@ -38,6 +38,18 @@ int32_t round_ticks_remaining(const RoleView &view) {
 	return std::max(0, remaining);
 }
 
+// The local player's team the end-round overlay compares the winner against
+// [orig: draw_endround_stats_overlay @0x5b7cd0 reads byte_A85B48 @0x5b7f56].
+// A joiner latches it from S2C 0x04 (ClientRuntime::assigned_team); the
+// listen host's HostClient runtime never receives that record (the latch
+// stays 0), so the authority reads its own player entity — retail's host
+// latches the same value from its loopback 0x04 @0x425499.
+int local_team_of(const RoleView &view) {
+	if (view.joiner) return view.runtime != nullptr ? view.runtime->assigned_team() : 0;
+	const world::Entity *player = view.kernel != nullptr ? view.kernel->local.player() : nullptr;
+	return player != nullptr ? player->team : 0;
+}
+
 } // namespace
 
 EndRoundSessionState end_round_session_state(const RoleView &view) {
@@ -54,7 +66,7 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	v.my_index = static_cast<int>(er.header.player_index);
 	v.round_ticks = round_ticks_remaining(view);
 	v.death_screen = local_death_screen_active(view);
-	v.local_team = static_cast<int>(view.runtime->assigned_team());
+	v.local_team = local_team_of(view);
 	// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
 	// 0x10000 bit, base/gameprofile/game_type.h; the show callback's witness is
 	// stat_screen_feed.h's).
@@ -75,7 +87,7 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 	in.game_type = view.runtime->game_type();
 	in.draw = er.header.draw != 0;
 	in.winner_team = er.header.winner_team;
-	in.local_team = view.runtime->assigned_team();
+	in.local_team = static_cast<uint8_t>(local_team_of(view));
 	in.death_screen = local_death_screen_active(view);
 	in.team_scores[0] = er.header.team_score_0;
 	in.team_scores[1] = er.header.team_score_1;
@@ -273,7 +285,7 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 	char zone_key[32];
 	std::snprintf(zone_key, sizeof zone_key, "STRWPNAME%03d", line.zone_index + 1);
 	const auto text = [&gametext](const char *section, const char *key, const char *fallback) {
-		return gametext ? gametext(section, key, fallback) : std::string(fallback);
+		return hud::game_text(gametext, section, key, fallback);
 	};
 	v.respawn_text = world::deploy_status_text(line,
 			text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),

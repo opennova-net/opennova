@@ -11128,6 +11128,21 @@ The corrected replay measured a maximum position step of 0.000380 units,
 a gun-angle step of 0.000691 radians, and camera acceleration of 0.003283.
 The network fanout regression also verifies a remote driver's full carrier
 heading while retaining independent wire LOOK.
+
+**Wire seam (review follow-up, 2026-09-21).** Retail keeps ONE BAM32 entity
+euler on both sides of `Entity_TransformWorldToLocal`, so a mounted record's
+carrier-local position is the seat offset whatever the carrier's attitude.
+Once the riders were posed in the live BAM frame, the replication seam still
+undid the pose through the whole-degree mirrors (`(90 - yaw) * 11930464`,
+`pitch * k`, `roll * k`), so the S2C 0x0A carrier-local player/infantry bytes
+and a mounted joiner's C2S 0x0C uplink drifted by up to `sin(0.5 deg)` times
+the seat lever arm (about 1300 16.16 units on a 2.8 m arm), re-sampled every
+whole degree of carrier motion. `entity_wire_bridge.cpp` now derives the
+carrier frame for `snapshot_world`, `apply_player_intent` and
+`build_player_uplink` from the same seeded `veh.yaw_bam` /
+`air_pitch_bam` / `air_roll_bam` fields the rider pose uses (the mirrors stay
+the unseeded placer frame); `netsim_build_player_uplink` pins the seat-local
+bytes invariant under a fractional carrier attitude on both seams.
 These checks concern attached/seated pose continuity, not section 36's
 separate visual-trail investigation. IDA comments were appended with the
 D-INF-27 record link; no names or types were changed.

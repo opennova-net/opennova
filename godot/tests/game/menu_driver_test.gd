@@ -1,6 +1,6 @@
 extends GutTest
 
-# Menu-RUNTIME semantics on MenuDriver (godot/game/menu_driver.gd) — the
+# Menu-RUNTIME semantics on MenuDriver (the binding over engine/runtime/menu/menu_runtime.cpp) — the
 # carve-out coverage the deleted MnuMenu Control-tree tests pinned, now driven
 # through the compiled surface: action dispatch (screen/pop/quit/url/window/
 # shell verbs), the per-screen MUSICVAR push, hotkey routing, the

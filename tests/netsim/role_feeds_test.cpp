@@ -81,6 +81,27 @@ int main() {
 	// A negative round clock reads as 0 (the untimed arm).
 	cs.round_time_remaining_ticks = -1;
 	CHECK(end_round_session_state(joiner).round_ticks == 0);
+	// The joiner's local team is the S2C 0x04 latch; a listen host never
+	// receives that record, so the authority reads its own player entity
+	// [orig: byte_A85B48 @0x5b7f56, latched on the host from its loopback
+	// 0x04 @0x425499].
+	{
+		ClientRuntime host_runtime("host");
+		host_runtime.state().end_round = cs.end_round;
+		mission::MissionKernel kernel;
+		kernel.world.registry.configure_pool(0, 8);
+		world::Entity seed;
+		seed.kind = world::EntityKind::Organic;
+		seed.team = 2;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
+		RoleView host;
+		host.runtime = &host_runtime;
+		host.kernel = &kernel;
+		CHECK(host_runtime.assigned_team() == 0);
+		CHECK(end_round_session_state(host).local_team == 2);
+		CHECK(end_round_overlay_input(host).local_team == 2);
+		CHECK(end_round_session_state(joiner).local_team == 0); // the joiner's latch, unset here
+	}
 
 	// The DEATH screen facts: the sub-block-0 timers and the being-revived latch.
 	cs.respawn_penalty_seconds = 4;

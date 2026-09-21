@@ -77,34 +77,6 @@ void MissionAudioCandidateBinding::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "bus"), "set_bus", "get_bus");
 }
 
-// --------------------------------------------------------- MissionAudioCandidate
-
-void MissionAudioCandidate::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_candidate_id"), &MissionAudioCandidate::get_candidate_id);
-	ClassDB::bind_method(D_METHOD("set_candidate_id", "value"), &MissionAudioCandidate::set_candidate_id);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "candidate_id"), "set_candidate_id", "get_candidate_id");
-	ClassDB::bind_method(D_METHOD("get_descriptor"), &MissionAudioCandidate::get_descriptor);
-	ClassDB::bind_method(D_METHOD("set_descriptor", "value"), &MissionAudioCandidate::set_descriptor);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "descriptor", PROPERTY_HINT_RESOURCE_TYPE, "AmbientLayer"),
-			"set_descriptor", "get_descriptor");
-	ClassDB::bind_method(D_METHOD("get_bus"), &MissionAudioCandidate::get_bus);
-	ClassDB::bind_method(D_METHOD("set_bus", "value"), &MissionAudioCandidate::set_bus);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "bus"), "set_bus", "get_bus");
-	ClassDB::bind_method(D_METHOD("get_pos"), &MissionAudioCandidate::get_pos);
-	ClassDB::bind_method(D_METHOD("set_pos", "value"), &MissionAudioCandidate::set_pos);
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "pos"), "set_pos", "get_pos");
-	ClassDB::bind_method(D_METHOD("get_vol"), &MissionAudioCandidate::get_vol);
-	ClassDB::bind_method(D_METHOD("set_vol", "value"), &MissionAudioCandidate::set_vol);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "vol"), "set_vol", "get_vol");
-	ClassDB::bind_method(D_METHOD("get_pitch_q16"), &MissionAudioCandidate::get_pitch_q16);
-	ClassDB::bind_method(D_METHOD("set_pitch_q16", "value"), &MissionAudioCandidate::set_pitch_q16);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "pitch_q16"), "set_pitch_q16", "get_pitch_q16");
-	ClassDB::bind_method(D_METHOD("get_resolved_stream"), &MissionAudioCandidate::get_resolved_stream);
-	ClassDB::bind_method(D_METHOD("set_resolved_stream", "value"), &MissionAudioCandidate::set_resolved_stream);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "resolved_stream", PROPERTY_HINT_RESOURCE_TYPE, "AudioStreamWAV"),
-			"set_resolved_stream", "get_resolved_stream");
-}
-
 // ---------------------------------------------------- MissionAudioDynamicEmitter
 
 void MissionAudioDynamicEmitter::_bind_methods() {
