@@ -989,6 +989,14 @@ target_link_libraries(terrain_tile_composer_test PRIVATE opennova_runtime)
 target_include_directories(terrain_tile_composer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_tile_composer COMMAND terrain_tile_composer_test)
 
+# The page-composition thread pool (runtime/terrain/terrain_tile_composition_worker.h):
+# no sources = no work, a queued job composes one 256x256 page, a rejected
+# completion stays queued for a later budget, an epoch bump drops the queue.
+add_executable(terrain_tile_composition_worker_test terrain/terrain_tile_composition_worker_test.cpp)
+target_link_libraries(terrain_tile_composition_worker_test PRIVATE opennova_runtime)
+target_compile_features(terrain_tile_composition_worker_test PRIVATE cxx_std_17)
+add_test(NAME terrain_tile_composition_worker COMMAND terrain_tile_composition_worker_test)
+
 add_executable(terrain_scorch_test terrain/terrain_scorch_test.cpp)
 target_link_libraries(terrain_scorch_test PRIVATE opennova_runtime)
 target_include_directories(terrain_scorch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2074,6 +2082,17 @@ add_executable(mission_text_test mission/mission_text_test.cpp)
 target_link_libraries(mission_text_test PRIVATE opennova_runtime)
 target_compile_features(mission_text_test PRIVATE cxx_std_17)
 add_test(NAME mission_text COMMAND mission_text_test)
+
+# The F3 debug oracles over the kernel (runtime/mission/debug_oracles.h): the
+# hitbox view's stand-in fallback and its exclusions, the pick's zero ray and
+# empty-world miss.
+add_executable(debug_oracles_test mission/debug_oracles_test.cpp)
+target_link_libraries(debug_oracles_test PRIVATE opennova_runtime)
+target_compile_features(debug_oracles_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(debug_oracles_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME mission_debug_oracles COMMAND debug_oracles_test)
 
 # S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
 # fallback and the .aip resolve (the boot ORDER itself is pinned through

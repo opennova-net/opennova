@@ -321,6 +321,16 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 	return true;
 }
 
+hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view) {
+	hud::HudMapGridOrigin v;
+	v.present = view.kernel != nullptr && view.kernel->world.tables.map_grid_origin_present;
+	v.x_q16 = v.present ? view.kernel->world.tables.map_grid_origin_x : 0;
+	v.y_q16 = v.present ? view.kernel->world.tables.map_grid_origin_y : 0;
+	if (!v.present && view.runtime != nullptr)
+		v.present = replication::client_minimap_grid_origin(view.runtime->state(), v.x_q16, v.y_q16);
+	return v;
+}
+
 bool joiner_deploy_hold_ready(const RoleView &view) {
 	if (!view.joiner || view.runtime == nullptr) return false;
 	const ClientRuntime &runtime = *view.runtime;

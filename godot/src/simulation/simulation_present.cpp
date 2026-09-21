@@ -99,23 +99,11 @@ Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 }
 
 Ref<HudMapGridOrigin> Simulation::get_hud_map_grid_origin() const {
-	// The map grid-label origin: the mission's first type-2043 marker. The
-	// host stashes it at promotion from the mission doc; a JOINER promotes a
-	// marker-less wire-header BMS (D-NET-194), so its origin resolves from
-	// the replicated pool-3 entity in the decoded view instead — the same
-	// client-side pool scan retail's HUD init runs (witness at
-	// World::map_grid_origin_x / HudMinimapInput::grid_origin_x).
-	opennova::hud::HudMapGridOrigin v;
-	v.present = kernel_ != nullptr && kernel_->world.tables.map_grid_origin_present;
-	v.x_q16 = v.present ? kernel_->world.tables.map_grid_origin_x : 0;
-	v.y_q16 = v.present ? kernel_->world.tables.map_grid_origin_y : 0;
-	if (!v.present && runtime_ != nullptr) {
-		v.present = opennova::replication::client_minimap_grid_origin(
-				runtime_->state(), v.x_q16, v.y_q16);
-	}
+	// The authority's promoted marker or the joiner's decoded pool-3 row
+	// (inmatch/role_feeds.h).
 	Ref<HudMapGridOrigin> out;
 	out.instantiate();
-	out->assign(v);
+	out->assign(opennova::inmatch::hud_map_grid_origin(role_view()));
 	return out;
 }
 

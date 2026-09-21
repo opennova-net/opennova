@@ -3,6 +3,7 @@
 // the entity_pick probe), the debug round spawn, and the ray/contact capture
 // seams the engine's F3 Rays and Physics windows drive natively.
 #include "simulation/simulation_internal.h"
+#include <runtime/mission/debug_oracles.h> // the hitbox view and the entity pick
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 
@@ -462,29 +463,14 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 }
 
 Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
-	constexpr int32_t kEntityCap = 96;
+	// The hitbox view is the engine's (mission/debug_oracles.h); this marshals
+	// its rows into Godot space.
 	Ref<HitboxDebugReport> out;
 	out.instantiate();
 	if (!kernel_) return out;
-
-	// Anchor on the local player. All hitbox payloads use
-	// the same 80-unit debug budget; a preview with no player sweeps to the caps.
-	int32_t anchor[3] = {0, 0, 0};
-	int32_t debug_range = -1;
-	const opennova::world::EntityHandle local_player =
-	    kernel_->world.cached.local_player;
-	const opennova::world::Entity *lp =
-	    local_player.valid() ? kernel_->world.registry.get(local_player) : nullptr;
-	if (lp != nullptr) {
-		anchor[0] = opennova::world::to_fixed(lp->position.x);
-		anchor[1] = opennova::world::to_fixed(lp->position.y);
-		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		debug_range = 80 << 16; // the organic-fallback scan below shares the budget
-	}
-	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
-	    kernel_->hitboxes(lp != nullptr ? lp->position : opennova::world::Vec3{},
-	                      lp != nullptr ? 80.0f : -1.0f, kEntityCap, 24000);
-	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
+	opennova::mission::DebugHitboxReport report;
+	opennova::mission::collect_debug_hitboxes(*kernel_, report);
+	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : report.entities) {
 		Ref<HitboxDebugEntity> d;
 		d.instantiate();
 		d->set_entity_handle(static_cast<int>(ent.handle.packed));
@@ -513,56 +499,10 @@ Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
 		d->set_flags(flags);
 		out->add_entity(d);
 	}
-
-	// Posed pool-0 COBJ spheres from the exact person narrow phase. They share
-	// the nearby 80-unit/96-actor debug budget. Preserve F3's late-spawn demand
-	// bridge even though the local avatar is presentation-hidden; one spare query
-	// slot then prevents its authored rows from consuming the target budget.
-	// Entities whose graphic cannot supply usable authored sections are appended
-	// below with the bounded compatibility fallback used by RoundSim.
-	if (local_player.valid()) kernel_->ensure_collision_instance(kernel_->world, local_player);
-	std::unordered_map<uint16_t, bool> posed_handles;
-	const std::vector<opennova::world::CollisionWorld::DebugPersonSection> people =
-	    kernel_->collision.debug_person_sections(
-	        kernel_->world, anchor, debug_range, kEntityCap + 1);
-	for (const opennova::world::CollisionWorld::DebugPersonSection &person : people) {
-		if (person.handle == local_player) continue;
-		const bool new_handle =
-		    posed_handles.find(person.handle.packed) == posed_handles.end();
-		if (new_handle && posed_handles.size() >= static_cast<size_t>(kEntityCap)) break;
-		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(person.handle.packed),
-		    person.section, godot_from_fixed3(person.center),
-		    static_cast<float>(person.radius / kFixed16),
-		    static_cast<float>(person.authored_radius / kFixed16), person.masked, false));
-		posed_handles[person.handle.packed] = true;
-	}
-	const size_t pool0 = kernel_->world.registry.pool_capacity(0);
-	int fallback_entity_count = static_cast<int>(posed_handles.size());
-	for (size_t s = 0; s < pool0; ++s) {
-		if (fallback_entity_count >= kEntityCap) break;
-		const opennova::world::Entity *e =
-		    kernel_->world.registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(s)});
-		if (e == nullptr || e->handle == local_player ||
-		    (e->engine_flags & 0x02000001u) != 0 ||
-		    posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())
-			continue;
-		if (debug_range >= 0) {
-			const int32_t ep[3] = {
-			    opennova::world::to_fixed(e->position.x),
-			    opennova::world::to_fixed(e->position.y),
-			    opennova::world::to_fixed(e->position.z)};
-			if (std::llabs(static_cast<int64_t>(ep[0]) - anchor[0]) > debug_range ||
-			    std::llabs(static_cast<int64_t>(ep[1]) - anchor[1]) > debug_range ||
-			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > debug_range)
-				continue;
-		}
-		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(s), 1,
-		    Vector3(e->position.x,
-		            e->position.z + opennova::world::kOrganicStandInCenterZ,
-		            -e->position.y),
-		    opennova::world::kOrganicStandInRadius, opennova::world::kOrganicStandInRadius,
-		    false, true));
-		++fallback_entity_count;
+	for (const opennova::mission::DebugHitboxOrganic &o : report.organics) {
+		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(o.handle.packed), o.section,
+				godot_from_fixed3(o.center), static_cast<float>(o.radius_q16 / kFixed16),
+				static_cast<float>(o.authored_radius_q16 / kFixed16), o.masked, o.fallback));
 	}
 	return out;
 }
@@ -598,102 +538,50 @@ int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_
 Ref<DebugPickCard> Simulation::debug_pick_entity(const Vector3 &p_from_godot,
                                              const Vector3 &p_dir_godot,
                                              float p_max_range_units) {
-	// Every field carries its typed default (the stable-card convention).
+	// Every field carries its typed default (the stable-card convention); the
+	// pick itself is the engine's (mission/debug_oracles.h).
 	Ref<DebugPickCard> out;
 	out.instantiate();
 	if (!kernel_) return out;
-	out->set_tick(static_cast<int64_t>(kernel_->world.logic_tick));
-
 	// Godot world (x, up, z) -> mission (x, -z, up) — the debug_spawn_round
-	// conversion; the direction is normalized in doubles.
-	const double dx = p_dir_godot.x;
-	const double dy = -static_cast<double>(p_dir_godot.z);
-	const double dz = p_dir_godot.y;
-	const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
-	if (len <= 0.0) return out;
-	double range = static_cast<double>(p_max_range_units);
-	if (range < 1.0) range = 1.0;
-	if (range > 2000.0) range = 2000.0;
-	const double fx = p_from_godot.x;
-	const double fy = -static_cast<double>(p_from_godot.z);
-	const double fz = p_from_godot.y;
-
-	opennova::world::ProjectileTrace trace;
-	trace.start = opennova::world::FixedVec3{
-	    opennova::world::to_fixed(static_cast<float>(fx)),
-	    opennova::world::to_fixed(static_cast<float>(fy)),
-	    opennova::world::to_fixed(static_cast<float>(fz))};
-	trace.end = opennova::world::FixedVec3{
-	    opennova::world::to_fixed(static_cast<float>(fx + dx / len * range)),
-	    opennova::world::to_fixed(static_cast<float>(fy + dy / len * range)),
-	    opennova::world::to_fixed(static_cast<float>(fz + dz / len * range))};
-	// A plain geometric ray, exactly what a bullet would test: ammo_flags
-	// stays 0 (0x80 would bypass terrain, 0x4000000 would skip material-17
-	// faces), persons are walked, wire proxies excluded. The local player is
-	// the owner, so an eye ray never picks the picker — or the vehicle they
-	// are mounted in (the ray[18] mount exclusion).
-	trace.owner = kernel_->world.cached.local_player;
-	trace.radius_q16 = 0;
-	trace.ammo_flags = 0;
-	const opennova::world::CollisionWorld::RayDebugScope ray_scope(
-	    kernel_->collision,
-	    opennova::world::CollisionWorld::RayDebugCategory::kPick);
-	const opennova::world::ProjectileHit hit =
-	    kernel_->collision.trace_projectile(kernel_->world, trace);
-	if (!hit.hit()) return out;
-
-	const int32_t hp[3] = {hit.position_q16.x, hit.position_q16.y, hit.position_q16.z};
-	const int32_t hn[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
-	out->set_hit_position_godot(godot_from_fixed3(hp));
-	out->set_hit_normal_godot(godot_from_fixed3(hn));
-	out->set_distance_units(static_cast<float>(range * (static_cast<double>(hit.t_q16) / 65536.0)));
-	out->set_section(hit.section_index);
-	out->set_face(hit.face_index);
-	out->set_bone(hit.bone_index);
-	out->set_hit_zone(hit.hit_zone);
-	out->set_surface_type(hit.surface_type);
-	out->set_material_flags(static_cast<int64_t>(hit.material_flags));
-
-	switch (hit.hit_class) {
-		case opennova::world::ProjectileHitClass::Terrain:
-			out->set_blocked("terrain");
-			return out;
-		case opennova::world::ProjectileHitClass::Water:
-			out->set_blocked("water");
-			return out;
-		default:
-			break;
+	// conversion.
+	const double from[3] = { p_from_godot.x, -static_cast<double>(p_from_godot.z), p_from_godot.y };
+	const double dir[3] = { p_dir_godot.x, -static_cast<double>(p_dir_godot.z), p_dir_godot.y };
+	opennova::mission::DebugPick pick;
+	opennova::mission::debug_pick_entity(*kernel_, from, dir, p_max_range_units, pick);
+	out->set_tick(static_cast<int64_t>(pick.tick));
+	out->set_hit_position_godot(godot_from_fixed3(pick.hit_position_q16));
+	out->set_hit_normal_godot(godot_from_fixed3(pick.hit_normal_q16));
+	out->set_distance_units(pick.distance_units);
+	out->set_section(pick.section);
+	out->set_face(pick.face);
+	out->set_bone(pick.bone);
+	out->set_hit_zone(pick.hit_zone);
+	out->set_surface_type(pick.surface_type);
+	out->set_material_flags(static_cast<int64_t>(pick.material_flags));
+	switch (pick.blocked) {
+		case opennova::mission::DebugPick::Blocked::Terrain: out->set_blocked("terrain"); break;
+		case opennova::mission::DebugPick::Blocked::Water: out->set_blocked("water"); break;
+		case opennova::mission::DebugPick::Blocked::Proxy: out->set_blocked("proxy"); break;
+		case opennova::mission::DebugPick::Blocked::None: break;
 	}
-	const opennova::world::Entity *ent = kernel_->world.registry.get(hit.geometry_entity);
-	if (ent == nullptr) {
-		// A decoded wire proxy or an already-freed slot: the geometry hit but
-		// carries no pickable identity (joined visual-only clients).
-		out->set_blocked("proxy");
-		return out;
-	}
+	if (!pick.hit) return out;
 	out->set_hit(true);
-	switch (hit.hit_class) {
-		case opennova::world::ProjectileHitClass::StaticEntity:
-			out->set_hit_class("static");
-			break;
-		case opennova::world::ProjectileHitClass::DynamicEntity:
-			out->set_hit_class("dynamic");
-			break;
-		default:
-			out->set_hit_class("person");
-			break;
+	switch (pick.hit_class) {
+		case opennova::mission::DebugPick::HitClass::Static: out->set_hit_class("static"); break;
+		case opennova::mission::DebugPick::HitClass::Dynamic: out->set_hit_class("dynamic"); break;
+		default: out->set_hit_class("person"); break;
 	}
-	out->set_entity_handle(static_cast<int>(hit.geometry_entity.packed));
-	out->set_pool(hit.geometry_entity.pool());
-	out->set_kind(opennova::world::spawn_origin_kind(ent->spawn_origin));
-	out->set_index(static_cast<int>(
-			opennova::world::spawn_origin_index(ent->spawn_origin)));
-	out->set_bms_id(ent->bms_id);
-	out->set_net_id(static_cast<int>(ent->net_id));
-	out->set_item_id(ent->item_id);
-	out->set_name(String(ent->name.c_str()));
-	out->set_position_godot(mission_to_godot(ent->position));
-	out->set_bound_radius(ent->bound_radius);
+	out->set_entity_handle(static_cast<int>(pick.entity.packed));
+	out->set_pool(pick.entity.pool());
+	out->set_kind(pick.kind);
+	out->set_index(pick.index);
+	out->set_bms_id(pick.bms_id);
+	out->set_net_id(pick.net_id);
+	out->set_item_id(pick.item_id);
+	out->set_name(String(pick.name.c_str()));
+	out->set_position_godot(mission_to_godot(pick.position));
+	out->set_bound_radius(pick.bound_radius);
 	return out;
 }
 

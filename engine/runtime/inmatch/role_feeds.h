@@ -11,6 +11,7 @@
 
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/friendly_tags.h>
@@ -84,6 +85,14 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 		const world::SpawnZoneRegistry &zones, const std::string &medic_key_label,
 		const hud::GameTextLookup &gametext);
+
+// The map grid-label origin: the mission's first type-2043 marker. The
+// authority stashes it at promotion from the mission doc; a JOINER promotes
+// a marker-less wire-header BMS (D-NET-194), so its origin resolves from the
+// replicated pool-3 entity in the decoded view instead — the same
+// client-side pool scan retail's HUD init runs (witness at
+// World::map_grid_origin_x / replication::client_minimap_grid_origin).
+hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view);
 
 // THE JOINER'S READINESS the parity harness classifies (the WITNESSED
 // deploy-hold split, docs/net/novaworld-net-re.md §5.61: the client enters its
