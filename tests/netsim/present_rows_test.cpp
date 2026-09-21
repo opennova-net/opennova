@@ -9,6 +9,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h>
 #include <net/npwire/ingame_decode.h>
@@ -298,6 +299,53 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	return ok;
 }
 
+// Both pool and client-backed collectors must retain an attached gun's live
+// frame. The authored integer mirrors intentionally differ from that frame.
+bool test_attached_rows_retain_subdegree_frame() {
+    opennova::mission::MissionKernel kernel;
+    kernel.world.registry.configure_pool(1, 4);
+    kernel.world.registry.configure_pool(2, 4);
+    w::Entity *parent = spawn_pool_row(kernel, 1, 0, 1291);
+    w::Entity *gun = spawn_pool_row(kernel, 2, 0, 1871);
+    if (!expect(parent && gun, "carrier and attached gun spawn")) return false;
+    gun->emplacement_parent = parent->handle;
+    gun->emplacement_parent_spawn_id = parent->registry_spawn_id;
+    gun->emplacement_pose_metadata_resolved = true;
+    gun->veh.yaw_seeded = true;
+    gun->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(33.125);
+    gun->veh.air_pitch_bam = w::bam_from_degrees_wrapped(2.49);
+    gun->veh.air_roll_bam = w::bam_from_degrees_wrapped(-1.51);
+    gun->yaw = 33; gun->pitch = 2; gun->roll = -2;
+    im::PoolPresentLifecycleMap lifecycle;
+    std::vector<float> rows;
+    im::DoorPhaseTable doors;
+    const auto check_gun = [&]() {
+        for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i) {
+            const float *r = row_at(rows, i);
+            if (static_cast<uint16_t>(r[w::PF_WIRE_HANDLE]) != gun->handle.packed) continue;
+            return expect(std::abs(r[w::PF_YAW_DEG] - 33.125f) < 1e-4f &&
+                          std::abs(r[w::PF_PITCH_DEG] - 2.49f) < 1e-4f &&
+                          std::abs(r[w::PF_ROLL_DEG] + 1.51f) < 1e-4f,
+                          "attached gun retains the sub-degree bone attitude");
+        }
+        return expect(false, "attached gun is presented");
+    };
+    im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+    bool ok = check_gun();
+    im::ClientRuntime runtime("AttachedRows");
+    opennova::replication::ClientEntityState decoded;
+    decoded.handle = gun->handle.packed;
+    decoded.type_id = 1871;
+    decoded.cls = opennova::EntityClass::NoNetworkCallback;
+    decoded.parent_handle = parent->handle.packed;
+    runtime.state().upsert(decoded.handle) = decoded;
+    // The listen host enriches its client-backed rows from the authoritative
+    // pool. Joiners use decoded parents/model assets, never this authority row.
+    im::build_client_replica_present_rows({kernel, &runtime, false}, lifecycle, rows, doors);
+    ok = check_gun() && ok;
+    return ok;
+}
+
 bool test_door_phases_reach_present_rows() {
     opennova::mission::MissionKernel kernel;
     kernel.world.registry.configure_pool(2, 1);
@@ -475,6 +523,7 @@ bool test_death_ctrl_register_reaches_present_rows() {
 }
 
 int main() {
+    test_attached_rows_retain_subdegree_frame();
     test_joiner_palm_source_and_local_fragment();
     test_door_phases_reach_present_rows();
     test_joiner_door_phases_reach_present_rows();

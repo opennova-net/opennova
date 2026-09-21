@@ -15,6 +15,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
+#include <runtime/world/mounted_pose.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
@@ -120,6 +121,11 @@ void look_at(World &w, EntityHandle player_h, const Vec3 &target) {
 	}
 }
 
+MountedPose pose_degrees(Vec3 position, double yaw, double pitch, double roll) {
+    return {position, bam_heading_from_mission_yaw_deg(yaw),
+            bam_from_degrees_wrapped(pitch), bam_from_degrees_wrapped(roll)};
+}
+
 struct FakeMountedPoseProvider final : IPoseProvider {
     bool available = true;
     MountedPose pose;
@@ -159,9 +165,9 @@ struct HeadingMountedPoseProvider final : IPoseProvider {
         const float heading_steps = static_cast<float>(gunner->heading) / 16777216.0f;
         const float pitch_steps = static_cast<float>(gunner->pitch) / 16777216.0f;
         out.position = {heading_steps, pitch_steps, 41.0f};
-        out.yaw = static_cast<int16_t>(10 + std::lround(heading_steps));
-        out.pitch = static_cast<int16_t>(20 + std::lround(pitch_steps));
-        out.roll = -30;
+        out.heading = bam_heading_from_mission_yaw_deg(10 + std::lround(heading_steps));
+        out.pitch = bam_from_degrees_wrapped(20 + std::lround(pitch_steps));
+        out.roll = bam_from_degrees_wrapped(-30);
         return true;
     }
 
@@ -175,9 +181,9 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
     CHECK(std::abs(entity.position.x - expected.position.x) < 0.0001f);
     CHECK(std::abs(entity.position.y - expected.position.y) < 0.0001f);
     CHECK(std::abs(entity.position.z - expected.position.z) < 0.0001f);
-    CHECK(entity.yaw == expected.yaw);
-    CHECK(entity.pitch == expected.pitch);
-    CHECK(entity.roll == expected.roll);
+    CHECK(entity.yaw == std::lround(mission_yaw_deg_from_bam_heading(expected.heading)));
+    CHECK(entity.pitch == std::lround(expected.pitch * kDegreesPerBam));
+    CHECK(entity.roll == std::lround(expected.roll * kDegreesPerBam));
 }
 
 // Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
@@ -311,7 +317,7 @@ void test_live_pose_provider_and_static_fallback() {
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         FakeMountedPoseProvider provider;
-        provider.pose = {{101.25f, -42.5f, 8.75f}, 37, -12, 17};
+        provider.pose = pose_degrees({101.25f, -42.5f, 8.75f}, 37, -12, 17);
         w.pose_provider = &provider;
 
         Entity vehicle;
@@ -351,7 +357,7 @@ void test_live_pose_provider_and_static_fallback() {
         w.registry.configure_pool(1, 4);
         AiSystem &ai = w.ai;
         FakeMountedPoseProvider provider;
-        provider.pose = {{11.0f, 12.0f, 13.0f}, 21, -8, 9};
+        provider.pose = pose_degrees({11.0f, 12.0f, 13.0f}, 21, -8, 9);
         w.pose_provider = &provider;
 
         Entity vehicle;
@@ -384,22 +390,22 @@ void test_live_pose_provider_and_static_fallback() {
         // The carrier changes the BODY frame; idle LOOK remains independent.
         body->heading = body->inf.aim_heading = 0;
         body->pitch = body->inf.aim_pitch = 0;
-        provider.pose = {{31.5f, 32.25f, 33.75f}, 44, 15, -19};
+        provider.pose = pose_degrees({31.5f, 32.25f, 33.75f}, 44, 15, -19);
         TickContext ctx{};
         ctx.is_authority = true;
         ai.tick(w, ctx);
 
         const Entity *mounted = w.registry.get(occupant_h);
         MountedPose expected = provider.pose;
-        expected.yaw = 90; // BAM look 0, while the seated body faces yaw 44.
+        expected.heading = 0; // BAM look 0, while the seated body faces yaw 44.
         check_pose(*mounted, expected);
         CHECK(body->heading == 0 && !body->inf.aim_valid);
         CHECK(body->pos[0] == to_fixed(31.5));
         CHECK(body->pos[1] == to_fixed(32.25));
         CHECK(body->pos[2] == to_fixed(33.75));
-        CHECK(body->inf.body_heading == (90 - provider.pose.yaw) * 11930464);
-        CHECK(body->body_pitch == bam_from_degrees_wrapped(provider.pose.pitch));
-        CHECK(body->roll == bam_from_degrees_wrapped(provider.pose.roll));
+        CHECK(body->inf.body_heading == provider.pose.heading);
+        CHECK(body->body_pitch == provider.pose.pitch);
+        CHECK(body->roll == provider.pose.roll);
     }
 
     {
@@ -469,7 +475,7 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(mounted->yaw == 87); // independent chased look, not provider body yaw 12
         CHECK(mounted->pitch == 21);
         CHECK(mounted->roll == -30);
-        CHECK(body->inf.body_heading == (90 - 12) * 11930464);
+        CHECK(body->inf.body_heading == bam_heading_from_mission_yaw_deg(12));
         CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
         CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
 
@@ -548,7 +554,7 @@ void test_live_pose_provider_and_static_fallback() {
         // {2,3,4}): Rz(90-yaw)Ry(-pitch)Rx(roll) on the un-swizzled local —
         // was {13, 18, 34} while the fallback was yaw-only (the pre-§6.13
         // stand-in). [orig: @0x4b0c50 over @0x613f40]
-        const MountedPose expected = {{12.726887f, 17.658988f, 34.010455f}, 100, 4, 5};
+        const MountedPose expected = pose_degrees({12.726887f, 17.658988f, 34.010455f}, 100, 4, 5);
 
         Entity occupant;
         w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
@@ -556,7 +562,7 @@ void test_live_pose_provider_and_static_fallback() {
 
         FakeMountedPoseProvider provider;
         provider.available = false;
-        provider.pose = {{999.0f, 999.0f, 999.0f}, -1, -2, -3};
+        provider.pose = pose_degrees({999.0f, 999.0f, 999.0f}, -1, -2, -3);
         w.pose_provider = &provider;
         occupant = Entity{};
         w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
@@ -2733,6 +2739,90 @@ void test_vehicle_hull_stops_at_building() {
 // the frame the collision shell is posed with (target_view). A yaw-only seat
 // frame under a rolled carrier is the witnessed 00TRg dismount 4-pin
 // (AI-PARITY-CONCEPT §6.13). [orig: @0x4b0c50 over @0x613f40]
+// A live helicopter carries sub-degree BAM angles even while its authored
+// integer-degree mirrors stay zero. Both the passenger seat and the model's
+// addeweap anchor must move with that live frame, as the rendered hull does.
+void test_seat_and_emplacement_keep_subdegree_carrier_pose() {
+    using namespace opennova::threedi;
+    Entity carrier{};
+    carrier.position = {100.0f, 200.0f, 30.0f};
+    carrier.veh.yaw_seeded = true;
+    carrier.veh.yaw_bam = bam_heading_from_mission_yaw_deg(0.25);
+    carrier.veh.air_pitch_bam = bam_from_degrees_wrapped(0.25);
+    carrier.veh.air_roll_bam = bam_from_degrees_wrapped(-0.25);
+    const int32_t raw[3] = {4 * 65536, 65536, -2 * 65536};
+    int32_t expected[3];
+    entity_placement_matrix(carrier).transform_point(raw, expected);
+    const Vec3 seat_local{-1.0f, 4.0f, -2.0f};
+    const Vec3 seat_world = entity_local_point_world(carrier, seat_local);
+    CHECK(std::abs(seat_world.x - from_fixed(expected[0])) < 0.001);
+    CHECK(std::abs(seat_world.y - from_fixed(expected[1])) < 0.001);
+    CHECK(std::abs(seat_world.z - from_fixed(expected[2])) < 0.001);
+
+    ThreediRenderObject part{};
+    ThreediLod lod{};
+    lod.render_objects = &part;
+    lod.render_object_count = 1;
+    ThreediUserPoint point{};
+    point.x = raw[0]; point.y = raw[1]; point.z = raw[2];
+    point.rot_x = 65536;
+    Threedi3di3 model{};
+    model.lods = &lod;
+    model.lod_count = 1;
+    model.user_points = &point;
+    model.user_point_count = 1;
+    Seat anchor{};
+    anchor.type = SeatType::Gunner;
+    anchor.bone_index = 1;
+    anchor.attachment_frame = true;
+    MountedPose pose;
+    CHECK(resolve_model_mounted_pose(model, carrier, anchor, nullptr, 0, pose));
+    CHECK(std::abs(pose.position.x - from_fixed(expected[0])) < 0.001);
+    CHECK(std::abs(pose.position.y - from_fixed(expected[1])) < 0.001);
+    CHECK(std::abs(pose.position.z - from_fixed(expected[2])) < 0.001);
+    // The bone resolver must retain the same fractional attitude as its point.
+    CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.001);
+    CHECK(std::abs(pose.pitch * kDegreesPerBam - 0.25) < 0.001);
+    CHECK(std::abs(pose.roll * kDegreesPerBam + 0.25) < 0.001);
+    // A point without an authored direction falls back to the same full frame.
+    point.rot_x = 0;
+    CHECK(resolve_model_mounted_pose(model, carrier, anchor, nullptr, 0, pose));
+    CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.001);
+    CHECK(std::abs(pose.pitch * kDegreesPerBam - 0.25) < 0.001);
+    CHECK(std::abs(pose.roll * kDegreesPerBam + 0.25) < 0.001);
+
+    World w;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    carrier.health = 100;
+    carrier.alive = true;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.seat_local = seat_local;
+    carrier.seats.push_back(seat);
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier);
+    Entity occupant;
+    occupant.health = 100;
+    occupant.alive = true;
+    occupant.mounted = true;
+    occupant.mount_target = carrier_h;
+    occupant.mount_seat = 0;
+    occupant.mount_type = SeatType::Passenger;
+    const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+    AiEntity *body = w.ai.at(w.ai.attach(occupant_h));
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->heading = bam_heading_from_mission_yaw_deg(33.125);
+    body->pitch = bam_from_degrees_wrapped(-6.25);
+    const int32_t look_heading = body->heading, look_pitch = body->pitch;
+    CHECK(w.ai.refresh_mounted_pose(*body, w));
+    CHECK(body->inf.body_heading == carrier.veh.yaw_bam);
+    CHECK(body->inf.leg_yaw[0] == carrier.veh.yaw_bam);
+    CHECK(body->body_pitch == carrier.veh.air_pitch_bam);
+    CHECK(body->roll == carrier.veh.air_roll_bam);
+    CHECK(body->heading == look_heading && body->pitch == look_pitch);
+}
+
 void test_seat_frame_matches_collision_frame() {
     Entity veh{};
     veh.position = Vec3{100.0f, 200.0f, 30.0f};
@@ -2840,6 +2930,7 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
 }
 
 int main() {
+    test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();
 	test_vehicle_pending_death_survives_drive_tick();
 	test_seat_frame_matches_collision_frame();

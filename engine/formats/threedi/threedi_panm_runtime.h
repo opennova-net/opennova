@@ -31,12 +31,15 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
 //   sampling reads that slot only for style 113; styles 114..117 use the
 //   resolved ordinal as their waveform phase byte.
 // - pivots: Per-subobject pivot points (size = max subobject_index + 1)
+// - animation_frames is the model MTRX table. PANM matrix_index (disk +6)
+//   selects a frame when nonzero; zero bypasses the table.
 // - view_inverse is optional; if NULL, identity is used (IDA uses flt_1604CC8).
 // - mul_override is optional 4x4 to post-multiply outputs (NULL to skip).
 // Returns 0 on success, -1 on invalid args.
 int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      size_t node_count,
                                      const ThreediVec3 *pivots,
+                                     const ThreediMatrixTable *animation_frames,
                                      const ThreediMatrix4x4 *view_inverse,
                                      const ThreediMatrix4x4 *in_matrices,
                                      const ThreediMatrix4x4 *mul_override,

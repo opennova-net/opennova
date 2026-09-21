@@ -101,6 +101,43 @@ int main() {
     pose = cache.evaluate(model, 0, 0, controls);
     TEST_EXPECT(pose->revision() == 4 && near(pose->changed_part(0, 3)->m[12], rest_x));
 
+    // H50cal's authored animation frame reverses the barrel's pitch axis.
+    // The retained renderer must agree with the simulation's userpoint pose.
+    ThreediMatrix4x4 frames[2];
+    threedi_mat4_identity(&frames[0]);
+    threedi_mat4_identity(&frames[1]);
+    frames[1].m[0] = frames[1].m[10] = -1.0f;
+    model.mtrx.count = 2;
+    model.mtrx.matrices = frames;
+    model_node = {};
+    model_node.parent_subobject = 0xff;
+    model_node.flags = 2u << 8;
+    model_node.matrix_index = 1;
+    model_node.rotation_y.control = 113;
+    model_node.rotation_y.start = 16384;
+    std::strcpy(reg.name, "EWEAP_GUNPITCH");
+    controls = {};
+    controls[THREEDI_CTRL_EWEAP_GUNPITCH] = 0xf000;
+    cache.clear();
+    pose = cache.evaluate(model, 0, 0, controls);
+    TEST_EXPECT(near(pose->changed_part(0, 0)->m[9], 0.38268343f));
+    controls[THREEDI_CTRL_EWEAP_GUNPITCH] = 0x1000;
+    pose = cache.evaluate(model, 0, 0, controls);
+    TEST_EXPECT(near(pose->changed_part(0, 0)->m[9], -0.38268343f));
+
+    // Invalid authored frame references retain the same base-pose fallback
+    // as the simulation evaluator, instead of publishing partial/zero matrices.
+    model.mtrx.count = 1;
+    cache.clear();
+    pose = cache.evaluate(model, 0, 0, controls);
+    TEST_EXPECT(near(pose->changed_part(0, 0)->m[12], parts[0].abs[0]));
+    TEST_EXPECT(near(pose->changed_part(0, 0)->m[0], 1.0f));
+
+    model_node = {};
+    model_node.parent_subobject = 0xff;
+    model_node.flags = static_cast<uint32_t>(THREEDI_TRANS_X) << 24;
+    model_node.translation.end = 256;
+    cache.clear();
     // Even a noise sample that produces an identical pose counts as an
     // evaluation. Keep a zero-length track to make that outcome deterministic.
     model_node.translation.control = 0x36;

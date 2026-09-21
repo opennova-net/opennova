@@ -19,9 +19,11 @@ class World;
 // seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
 struct MountedPose {
     Vec3 position;
-    int16_t yaw = 0;
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    // Live orientation is BAM32, never the whole-degree mission mirrors.
+    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0d81/@0x4b0db1/@0x4b0dbb]
+    int32_t heading = 0;
+    int32_t pitch = 0;
+    int32_t roll = 0;
 };
 
 // Seat-type pose/channel predicates (moved beside the mount surface, S7a):

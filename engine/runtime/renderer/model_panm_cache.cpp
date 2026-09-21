@@ -92,14 +92,16 @@ const ModelPanmPose *ModelPanmCache::evaluate(const threedi::Threedi3di3 &model,
     const bool first = c.time_ms == std::numeric_limits<int64_t>::min();
     if (first || c.has_noise || c.time_ms != time_ms || c.ctrl_hash != hash) {
         ++evaluation_serial_;
+        bool built = true;
         if (!c.anims.empty())
-            threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(), c.pivots.data(),
-                    nullptr, c.base_transforms.data(), nullptr, threedi_panm_runtime_time_ms(time_ms),
-                    controls.data(), c.node_matrices.data());
+            built = threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(), c.pivots.data(),
+                    &model.mtrx, nullptr, c.base_transforms.data(), nullptr, threedi_panm_runtime_time_ms(time_ms),
+                    controls.data(), c.node_matrices.data()) == 0;
         bool any_changed = false;
         const uint64_t next_revision = c.pose.revision_ + 1;
         for (size_t i = 0; i < c.pose.matrices_.size(); ++i) {
-            const int node_index = c.part_to_node[i];
+            // Match threedi_panm_pose_parts' base-pose fallback on invalid PANM.
+            const int node_index = built ? c.part_to_node[i] : -1;
             const auto &next = node_index >= 0 ? c.node_matrices[node_index] : c.base_transforms[i];
             if (first || !same_affine_transform(next, c.pose.matrices_[i])) {
                 c.pose.matrices_[i] = next;

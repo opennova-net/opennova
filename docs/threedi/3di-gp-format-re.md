@@ -127,6 +127,43 @@ in `main()`. The only other `_controlfp` sites in OED are local save/restore
 wrappers (D3DX shader preprocessor and a few math helpers) that do not change the
 process-wide state.
 
+### Retail PANM animation frames (2026-09-21)
+
+This bounded re-grill uses retail **Jointops.exe**, imagebase `0x400000`,
+IDB `Jointops.exe.kong.i64`. The implementing paths are
+`engine/formats/threedi/threedi_panm_matrices.cpp`, the model pose evaluator,
+and `engine/runtime/renderer/model_panm_cache.cpp`.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Authored animation-frame selection and composition | MATCHING (behavioral proof) | `threedi_panm_pose`, `renderer_model_panm_cache`, and the real 03TR truck camera in `mounted_view_test.gd`; D-3DI-3 |
+
+The render loader copies **disk PANM byte +6** into runtime PANM dword +8.
+The similarly named disk dword +8 is not that selector. Each render LOD
+receives the model's MTRX table. A positive selector chooses one matrix;
+zero bypasses the table. [orig: GPM_LoadRenderModel @ 0x5B5000 (store
+@ 0x5B569C); ThreediGp_LoadFromFile @ 0x5B5780 (table @ 0x5B5F8C)]
+
+For an Euler or spinner node, retail multiplies the pivot/scale matrix by
+that authored frame, evaluates the rotations, multiplies by the frame's
+full affine inverse, and then applies the input orientation and pivot.
+The inverse includes translation and scale; transposing its rotation alone
+is insufficient. [orig: Model_TransformBoneMatrices @ 0x58E390 (selection
+@ 0x58E3FE..0x58E44F, Euler @ 0x58E8AA / @ 0x58EAA7, spinner @ 0x58E648 /
+@ 0x58E764); Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]
+
+`H50cal.3di` demonstrates the omission: its barrel selects MTRX row 1,
+`diag(-1, 1, -1, 1)`, and authors pitch from 360 to 0. Ignoring that frame
+reverses both the visible barrel and its CAMERA userpoint. The shared
+native evaluator now accepts the MTRX table from both model-level callers;
+mouse input, stored gun words, and camera conversion retain their original
+signs. The 03TR test drives mouse-up through `LocalPlayerPresenter`, the
+real world tick, and the mounted camera. It failed with camera pitch
+-8.789 degrees for +8.789 degrees of aim before the fix.
+
+This verdict covers the recovered animation-frame branch, not every
+PANM mode or whole-process floating-point identity. No IDA names changed.
+
 ### Retail PANM control-register sampling (Jointops.exe)
 
 This subsection is the live runtime complement to the OED format findings
@@ -728,6 +765,7 @@ ledger's permanent register carries D-3DI-1.
 
 | ID | Divergence | Disposition |
 |---|---|---|
+| D-3DI-3 | PANM ignored the authored MTRX animation frame, reversing the H50cal barrel and mounted camera pitch. | **FIXED 2026-09-21 in PR #663** - select disk byte +6 and compose frame/rotation/inverse in the shared simulation and retained-render evaluator; see the animation-frame witness above. |
 | D-3DI-1 | Byte-exact `MTRX` output requires OED's x87 `_PC_24` (24-bit single) precision (§1 "Derived chunks" MTRX derivation + §1 "OED x87 control word"); a 64-bit SSE2 build diverges in low FP bits. A parity sub-build restores byte-exactness via `_controlfp(_PC_24, _MCW_PC)` early in `main()`. | **PERMANENT** — an x87 FP-precision constraint, not a math error; the parity sub-build is the documented path when byte-exactness is needed. [orig: ComputeMTRX @ 0x452990 / WriteMTRX @ 0x452FA0 / _setdefaultprecision @ 0x52A27C] |
 
 The §2.14 "Open items" are unresearched questions (no witnessed behavior gap yet)

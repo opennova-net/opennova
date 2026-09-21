@@ -28,6 +28,12 @@ cancellation is removed by ADR 0040 E6; receive and presentation use the
 shared native arrival rule. The [remote-body arbitration re-grill](net/novaworld-net-re.md#remote-body-arbitration-re-grill-2026-09-21)
 records both live receive branches and the retained clip-completion boundary.
 
+**2026-09-21 closure:** D-3DI-3 restores PANM authored animation frames,
+fixing the 03TR truck .50 cal pitch inversion; see the
+[3DI animation-frame record](threedi/3di-gp-format-re.md#retail-panm-animation-frames-2026-09-21). D-INF-27
+removes whole-degree narrowing from mounted positions and bone/body/gun angles,
+fixing the reproduced 03TR seated-flight pose snaps; see [world section 37](world/world-wac-ai-re.md#37-mounted-pose-precision-2026-09-21).
+
 ## Purpose
 
 The documentation index already states the rule: *a divergence is a tracked decision,

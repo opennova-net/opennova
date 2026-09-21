@@ -195,13 +195,13 @@ void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
 }
 
 Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
-    // Build the SAME frame collision serves (target_view): heading from the
-    // stored mission yaw, pitch/roll BAM-wrapped from degrees, through
-    // collision_matrix_from_euler [orig: @0x613f40]. Pure-yaw carriers keep the
-    // pre-existing 2D rotate bit-for-bit (the euler matrix reduces to it, but
-    // the trig paths differ in rounding; the fast path also skips the matrix).
+    // Seat points use the carrier's live BAM frame, as collision/render do;
+    // the mission-degree mirrors discard sub-degree flight motion. Unseeded
+    // flat mission objects can use the direct 2D rotate.
+    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50, point @0x4b0d42;
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
     const Vec3 &L = local;
-    if (vehicle.pitch == 0 && vehicle.roll == 0) {
+    if (!vehicle.veh.yaw_seeded && vehicle.pitch == 0 && vehicle.roll == 0) {
         constexpr double kDeg2Rad = io::kRadiansPerDegree;
         const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
         const double ca = std::cos(a), sa = std::sin(a);
@@ -211,13 +211,15 @@ Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
         p.z = vehicle.position.z + L.z;
         return p;
     }
-    const int32_t heading =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
+    const int32_t heading = vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
+            : bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
     const int32_t origin[3] = {0, 0, 0};
     const CollisionMatrix m = collision_matrix_from_euler(
             heading,
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.roll)), origin);
+            vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch)),
+            vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
+                    : bam_from_degrees_wrapped(static_cast<double>(vehicle.roll)), origin);
     // seat_local is pre-swizzled ((-y, x, z) over the raw authored ints — a
     // baked-in Rz(90)), while the collision euler matrix with heading
     // bam(90 - yaw) expects RAW model coordinates: un-swizzle first, so the
@@ -258,28 +260,40 @@ void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehic
         body->inf.target_heading = seat_heading;
 }
 
-void VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
+MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
     World &world = world_;
     MountedPose live;
-    if (world.pose_provider != nullptr &&
-        world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
-        occ.position = live.position;
-        occ.yaw = live.yaw;
-        occ.pitch = live.pitch;
-        occ.roll = live.roll;
-        return;
+    if (world.pose_provider == nullptr ||
+        !world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
+        // The root/local fallback uses the same complete carrier frame as
+        // collision. Only an unseeded mission row needs degree-to-BAM conversion.
+        // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over @0x613f40]
+        live.position = entity_local_point_world(vehicle, seat.seat_local);
+        const int offset = !seat.attachment_frame && seat.type == SeatType::Gunner
+                ? -seat.yaw_offset : seat.yaw_offset;
+        live.heading = vehicle.veh.yaw_seeded
+                ? io::bam_sub(vehicle.veh.yaw_bam, bam_from_degrees_wrapped(offset))
+                : static_cast<int32_t>(static_cast<int64_t>(90 - mounted_pose_yaw(vehicle, seat)) * 11930464);
+        live.pitch = vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
+                : bam_from_degrees_wrapped(vehicle.pitch);
+        live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
+                : bam_from_degrees_wrapped(vehicle.roll);
     }
-    // The seat-local offset through the carrier's FULL orientation frame (yaw +
-    // pitch + roll). Retail's seat bone path reads the one entity orientation
-    // matrix, the same matrix the collision shell is posed with; a yaw-only
-    // rotate here left every mounted body (and its dismount start) in an
-    // unrolled frame while the collision volumes leaned with the vehicle.
-    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over
-    //  Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
-    occ.position = entity_local_point_world(vehicle, seat.seat_local);
-    occ.yaw = mounted_pose_yaw(vehicle, seat);
-    occ.pitch = vehicle.pitch;
-    occ.roll = vehicle.roll;
+    occ.position = live.position;
+    occ.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(live.heading)));
+    occ.pitch = static_cast<int16_t>(std::lround(live.pitch * kDegreesPerBam));
+    occ.roll = static_cast<int16_t>(std::lround(live.roll * kDegreesPerBam));
+    if (seat.attachment_frame) {
+        // An addeweap child carries the full bone attitude into its own model,
+        // collision, and camera. Ordinary infantry retain independent LOOK.
+        // [orig: Entity_UpdateTransformAndTurret @0x440ca0 ->
+        //  build_bone_attachment_matrix @0x56c630]
+        occ.veh.yaw_seeded = true;
+        occ.veh.yaw_bam = live.heading;
+        occ.veh.air_pitch_bam = live.pitch;
+        occ.veh.air_roll_bam = live.roll;
+    }
+    return live;
 }
 
 } // namespace opennova::world

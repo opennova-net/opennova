@@ -631,7 +631,8 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
     out[2] = to_fixed(parent->position.z);
     out[3] = emplaced_gun_frame_heading(*parent);
     out[4] = emplaced_gun_frame_pitch(*parent);
-    out[5] = bam_from_degrees_wrapped(parent->roll);
+    out[5] = parent->veh.yaw_seeded ? parent->veh.air_roll_bam
+            : bam_from_degrees_wrapped(parent->roll);
     return true;
 }
 

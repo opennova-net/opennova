@@ -1946,10 +1946,9 @@ bool run_vehicle_drive_authority() {
 	                    driver_ai->heading == driver_wire_look,
 	            "post-motor mounted refresh preserves remote driver LOOK"))
 		return false;
-	const int32_t seat_body_heading = static_cast<int32_t>(
-			static_cast<int64_t>(90 - veh->yaw) * 11930464);
-	if (!expect(driver_ai->inf.body_heading == seat_body_heading,
-	            "remote driver's carried body remains seat-owned"))
+	if (!expect(veh->veh.yaw_seeded &&
+                    driver_ai->inf.body_heading == veh->veh.yaw_bam,
+	            "remote driver's carried body retains the full-precision seat heading"))
 		return false;
 
 	// Complete 62 authority ticks: the vehicle keeps consuming the replicated input.

@@ -129,9 +129,9 @@ int main(void) {
     memcpy(&spinner.rotation_y.control, &coefficient, sizeof(coefficient));
     threedi_mat4_identity(&input);
     ok &= expect_eq("spinner_t0_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, &input, NULL, 0, NULL, &at_zero), 0);
+        &spinner, 1, &pivot, NULL, NULL, &input, NULL, 0, NULL, &at_zero), 0);
     ok &= expect_eq("spinner_t250_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, &input, NULL, 250, NULL, &at_quarter), 0);
+        &spinner, 1, &pivot, NULL, NULL, &input, NULL, 250, NULL, &at_quarter), 0);
     ok &= expect_near("spinner_t0_m0", at_zero.m[0], 1.0f);
     ok &= expect_near("spinner_t0_m1", at_zero.m[1], 0.0f);
     ok &= expect_near("spinner_t250_m0", at_quarter.m[0], 0.0f);
