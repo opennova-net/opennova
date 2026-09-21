@@ -266,7 +266,11 @@ std::vector<uint8_t> ClientSession::build_lobby_message(const NapiMessage &conta
 
 std::vector<ClientVar> ClientSession::cookie_vars() const {
 	std::vector<ClientVar> cookie;
-	for (const auto &kv : cfg_.verify_cookie_vars) {
+	// Retail rebuilds from the current browser jar before every Cookie-bearing
+	// statement, including the play leg after NWJoin.
+	// [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390; ConnectOrHost @ 0x4d543a]
+	if (!cfg_.cookie_vars) return cookie;
+	for (const auto &kv : cfg_.cookie_vars()) {
 		const std::string &value =
 		    (kv.first == "NWUID" && kv.second.empty()) ? server_nwuid_ : kv.second;
 		cookie.push_back({0, kv.first, value});

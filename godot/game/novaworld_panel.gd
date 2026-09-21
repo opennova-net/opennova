@@ -669,7 +669,14 @@ func _on_join_failed(reason: String) -> void:
 	if not _logged_in or _suppress_client_messages:
 		return
 	_join_button.disabled = _selected_row() == null
-	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
+	# NWEC tags are keys in menutxt.bin; HTTP failures already carry prose.
+	var message := reason
+	var menutxt := Strings.get_table(Strings.TABLE_MENUTXT)
+	if menutxt != null and menutxt.has_string(reason):
+		var localized := menutxt.get_string(reason)
+		if not localized.is_empty() and localized != reason:
+			message = "%s\n\n(%s)" % [localized, reason]
+	_show_message(message, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 
 
 # True only on the FIRST Join press for a row whose advertised expansion the

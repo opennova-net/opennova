@@ -133,6 +133,8 @@ public:
 
 	// Exposed for the owner's cookie diagnostics / tests.
 	const CookieJar &cookies() const { return jar_; }
+	// Current browser cookies plus the locale/initial identity for UDP statements.
+	std::vector<std::pair<std::string, std::string>> session_cookie_vars() const;
 
 private:
 	enum class LoginStep { Idle, Prepare, NwStart, Post, Poll };

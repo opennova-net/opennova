@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -135,7 +136,8 @@ public:
 		// Success=1, so the lobby verify is NOT credential-gated. Empty here still
 		// emits an empty Cookie parent. The entry named "NWUID" with an empty
 		// value is filled at runtime from the ServerSessionInit's NWUID (echo).
-		std::vector<std::pair<std::string, std::string>> verify_cookie_vars;
+		// Called at serialization time so HTTP login/NWJoin updates are included.
+		std::function<std::vector<std::pair<std::string, std::string>>()> cookie_vars;
 
 		// The gate's GLSVSS trio: the request string (GLSVSSREQUEST; empty = the leg is
 		// off), the repeat interval (GLSVSSRIMS, ms) and the after-game interval

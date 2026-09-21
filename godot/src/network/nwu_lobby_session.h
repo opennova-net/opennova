@@ -41,9 +41,9 @@ public:
 		// client stashes its server_info dictionary here; the auth codes the
 		// 0x42 join carries are stashed by the driver itself).
 		std::function<void(const opennova::GateResponse &)> on_gate_response;
-		// The verify "Cookie" var-list for this role (client: the full lobby
-		// identity set, NW-S5; host: the NWUID echo only).
-		std::function<std::vector<std::pair<std::string, std::string>>()> verify_cookie_vars;
+		// The current "Cookie" var-list for this role, read for each statement
+		// (client: browser cookies + locale; host: the lobby identity set).
+		std::function<std::vector<std::pair<std::string, std::string>>()> cookie_vars;
 		// The session was created; its ClientHello ships right after.
 		std::function<void(std::size_t cu_vars, std::size_t cookie_vars)> on_session_created;
 		// An outbound datagram just shipped on the NW socket (trace hook).

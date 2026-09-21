@@ -12307,7 +12307,7 @@ NWUID echoed from the SessionInit; opcode-0x82 NWUID extraction in `on_server_au
 (`novaworld_client.cpp`) sends the retail join CU set (11 chunks, type=2) and populates the
 verify identity (CD-key fields empty, NWHWI/locale best-effort telemetry — the verify is not
 gated on them). The OpenNova-server loopback (`client_session_loopback_test`, now also asserting
-the verify structure + NWUID echo) stays green: it keeps `verify_cookie_vars` empty for a bare
+the verify structure + NWUID echo) stays green: it leaves the `cookie_vars` provider unset for a bare
 verify, which the permissive server accepts. Oracle: `nw204_lobby_decode_test`. There is **no
 CD-key boundary** for the lobby VALIDATE — the milestone is reachable without credentials.
 
@@ -12333,6 +12333,20 @@ exact contract is witnessed in the user's retail capture (`~/Desktop/capture.pca
 6. `GET /NWJoin.dll?needexpkey=…&success=jop_2_join.joi&failure=…&relay=…&msgbase=…&nodb=…&pfid=28&
    mode=Login&rid=<RID>` → Set-Cookie `NWJOINSESSIONTAG`; then `GET /NWJoin.dll` → `.joi`
    `[NK&CK&NI&NP&BK]`.
+
+**UDP play handoff (2026-09-21):** the Cookie list must be rebuilt from the current
+browser jar after NWJoin, not retained from the pre-login lobby verify. Retail
+`CNapiGameSession_ConnectOrHost` calls `CNapiSession_ReadLocaleInfo` at `0x4d543a`
+immediately before `StartPlayingSession`; the reader at `0x4ce390` enumerates all
+browser cookies through `0x63a5b0` / `0x64eb70`, then overlays locale. The new play
+leg in #666 initially reused the verify snapshot, dropping the NWJoin `NWPF` /
+`NWPF2` and account/ticket cookies. Service MsgCode 3005 maps to `NWEC09` (product
+family IDs do not match; `ConnectOrHost @ 0x4d568f`). `ClientSession::Config::cookie_vars`
+is now read on every Cookie-bearing statement from `LobbyHttpFlow::session_cookie_vars`.
+The `client_session_loopback` regression drives HTTP login and NWJoin through the
+encoded UDP request, including cookie replacement and reset; it does not claim a
+live-service retest. The join-error dialog resolves NWEC keys from `menutxt.bin`
+(the retail `sub_5583E0 @ 0x5583e0` path), retaining the code for diagnostics.
 
 Findings (witnessed, correcting prior inference):
 - **The web host comes from the UDP SessionInit**, CU `NovaworldWebDomainNameAndPortNumber`

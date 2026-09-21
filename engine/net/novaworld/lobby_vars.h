@@ -187,7 +187,7 @@ inline constexpr int kNwpsskLen = 23;
 inline constexpr int kNwusidLen = 16;
 
 // The NW-S5 10-var identity "Cookie" set (capture frame 10166), built once and reused for BOTH the
-// UDP verify var-list (ClientSession::Config::verify_cookie_vars) and the HTTP login cookies. NWUID
+// UDP verify var-list (ClientSession::Config::cookie_vars) and the HTTP login cookies. NWUID
 // is left empty here (the consumer substitutes the SessionInit nwuid at use). The XOR masks + the
 // lengths kNwpsskLen/kNwusidLen (23/16) on NWPSSK/NWUSID are load-bearing.
 // [orig: NovaWorldClient::begin_session identity build]
