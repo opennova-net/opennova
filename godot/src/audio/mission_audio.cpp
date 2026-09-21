@@ -6,7 +6,6 @@
 #include "mission/mission_data.h"
 #include "mission/mission_info.h"
 #include "object/item_database.h"
-#include "object/item_records.h"
 #include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
 #include "util/axes.h"
@@ -26,6 +25,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/environment/environment_state.h>
@@ -239,30 +239,27 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 
 	_attach_under(p_container);
 
-	TypedArray<EnvsMarkerRow> marker_rows;
+	std::vector<opennova::audio::EnvsMarker> marker_rows;
 	// S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
 	// names resolve natively over the retained items.def and the mission's
 	// bms document (audio/envs_markers.h). The bank-presence filter below
 	// stays a shell stream-resolution concern (the original has no such
 	// gate -- a missing set is simply silent).
 	if (ambient_markers_enabled_ && item_db_.is_valid()) {
-		marker_rows = item_db_->resolve_envs_markers(p_mission);
+		marker_rows = opennova::audio::resolve_envs_markers(
+				p_mission->native_file(), item_db_->native_items());
 	}
-	for (int64_t ri = 0; ri < marker_rows.size(); ++ri) {
-		const Ref<EnvsMarkerRow> row = marker_rows[ri];
-		if (row.is_null()) {
-			continue;
-		}
+	for (const opennova::audio::EnvsMarker &row : marker_rows) {
 		stats_->set_markers_total(stats_->get_markers_total() + 1);
 		// Authored slot names -> playable slots: only sets the loaded bank chain
 		// actually carries participate; an empty slot stays SILENT in its region.
-		const PackedStringArray authored = row->get_slot_sets();
+		const auto &authored = row.slot_sets;
 		PackedStringArray slot_sets;
 		slot_sets.resize(4);
 		for (int i = 0; i < 4; ++i) {
 			slot_sets[i] = String();
 			if (i < authored.size()) {
-				const String n = authored[i];
+				const String n(authored[i].c_str());
 				if (!n.is_empty() && bank_->has_set(n)) {
 					slot_sets[i] = n;
 				}
@@ -278,10 +275,8 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		if (distinct.is_empty()) {
 			continue;
 		}
-		const Vector3 bms_pos = row->get_position();
 		const opennova::mission::PlacementVec3 placed = opennova::mission::bms_to_presentation_position(
-				opennova::mission::PlacementVec3{ static_cast<float>(bms_pos.x),
-						static_cast<float>(bms_pos.y), static_cast<float>(bms_pos.z) });
+				opennova::mission::PlacementVec3{ row.x, row.y, row.z });
 		const Vector3 pos(placed.x, placed.y, placed.z);
 		// Keep layer candidates as data. The original registers only the current
 		// region's set and has eight physical channels; it does not materialize a
@@ -307,7 +302,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 			continue;
 		}
 		marker->set_pos(pos);
-		marker->set_source_bms_id(row->get_bms_id());
+		marker->set_source_bms_id(row.bms_id);
 		marker->set_slot_sets(slot_sets);
 		marker->set_stagger_slot(static_cast<int>(markers_.size() & 0xF));
 		markers_.push_back(marker);

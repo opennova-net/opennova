@@ -3,7 +3,6 @@
 
 #include "mission/mission_root.h"
 
-#include "object/item_records.h"
 #include "object/model_user_point.h"
 #include "object/object_data.h"
 #include "particle/effect_world.h"
@@ -428,9 +427,9 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 		}
 		return 0;
 	}
-	const ItemParticleFx fx = item_db->get_particle_fx(p_item_id);
-	const String effect = fx.effect;
-	const String userpoint = fx.userpoint;
+	const opennova::def::DefItemParticleFx fx = item_db->get_particle_fx(p_item_id);
+	const String effect(fx.effect);
+	const String userpoint(fx.userpoint);
 	if (effect.is_empty()) {
 		return 0;
 	}
@@ -529,9 +528,9 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 			!opennova::world::item_effect_pool_allows(kind, item_db->get_attrib(item_id))) {
 		return 0;
 	}
-	const ItemParticleFx fx = item_db->get_particle_fx(item_id);
-	const String effect = fx.effect;
-	const String userpoint = fx.userpoint;
+	const opennova::def::DefItemParticleFx fx = item_db->get_particle_fx(item_id);
+	const String effect(fx.effect);
+	const String userpoint(fx.userpoint);
 	const Ref<ObjectData> data = provider_->static_source_object_data(p_source.asset_id);
 	if (effect.is_empty() || data.is_null()) {
 		return 0;

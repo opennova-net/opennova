@@ -115,7 +115,6 @@ add_library(${TARGET_NAME} SHARED
     object/object_data_runtime_eval.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
-    object/item_records.cpp
     object/model_light.cpp
     object/model_user_point.cpp
     object/weapon_database.cpp

@@ -73,7 +73,6 @@
 #include "object/weapon_database.h"
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
-#include "object/item_records.h"
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 #include "object/avatar_records.h"
@@ -243,10 +242,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectShaderCache);
 	GDREGISTER_CLASS(ModelLight);
 	GDREGISTER_CLASS(ModelUserPoint);
-	GDREGISTER_CLASS(ItemEmplacementAttachment);
-	GDREGISTER_CLASS(EnvsMarkerRow);
-	GDREGISTER_CLASS(ItemSeatAttachmentRow);
-	GDREGISTER_CLASS(ItemSeatCard);
 	GDREGISTER_CLASS(ItemDatabase);
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);

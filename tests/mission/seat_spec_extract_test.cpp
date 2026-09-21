@@ -6,6 +6,10 @@
 // fallback, the child recursion, and the runtime-metadata filter.
 #include <formats/def/def.h>
 #include <runtime/mission/seat_spec_extract.h>
+#include <runtime/assets/asset_store.h>
+#include <base/resource_index/resource_index.h>
+
+#include "common/test_paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -50,9 +54,45 @@ DefItemDef def_row(int id, const char *graphic) {
     return d;
 }
 
+// Former ItemSeatCard GUT oracle: a real parsed definition and model go
+// through the same extractor used by mission boot, without ClassDB records.
+void fixture_mount() {
+    const std::string root = test_paths_repo_root(__FILE__);
+    ResourceIndex index;
+    CHECK(index.scan(root + "/fixtures/def", {}, VfsMountMode::LooseOnly));
+    std::vector<uint8_t> bytes;
+    CHECK(index.read_file("items.def", bytes));
+    DefItemsFile items{};
+    CHECK(def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0);
+    CHECK(index.scan(root + "/fixtures/threedi/synth", {}, VfsMountMode::LooseOnly));
+    assets::AssetStore models{&index};
+    SeatSpecExtraction out;
+    extract_item_seat_specs(items,
+            [&models](const std::string &key) { return models.model(key).get(); },
+            {101419, 999999}, out);
+    CHECK(out.specs.size() == 1); // unknown item contributes no inspection row
+    const auto *spec = item_seat_spec_for_type(out.specs, 1419);
+    CHECK(spec != nullptr);
+    if (spec) {
+        CHECK(spec->mount_config_valid && spec->mount_config == 4);
+        CHECK(spec->primary_weapon == "WPN_EMPLCD50NA");
+        CHECK(spec->seats.size() == 1);
+        if (spec->seats.size() == 1) {
+            const world::Seat &seat = spec->seats[0];
+            CHECK(seat.source_name == "Usegun");
+            CHECK(seat.bone_index == 6);
+            CHECK(seat.type == world::SeatType::Gunner);
+            CHECK(seat.retail_slot == 9);
+            CHECK(!seat.occupant.valid());
+        }
+    }
+    def_free_items(&items);
+}
+
 } // namespace
 
 int main() {
+    fixture_mount();
     // ---- the conversions, standalone ----
     // Raw (1, 2, 3) world-units authored -> mission local (-2, 1, 3).
     const ThreediUserPoint probe = up("sitex", 1, 2, 3);

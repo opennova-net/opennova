@@ -65,13 +65,6 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var part_index := userpoint.subobject
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
-	var card := item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
-	var seats := card.get_seats()
-	assert_eq(seats.size(), 1)
-	var seat: EntityCardSeat = seats[0]
-	assert_eq(seat.get_source_name().to_lower(), "usegun")
-	assert_eq(seat.get_bone_index() - 1, userpoint_index,
-			"the runtime selected the exact retail Usegun row")
 
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
@@ -82,6 +75,14 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_gt(sim.get_mounted_graphic_source_count(), 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
+	var card := sim.entity_card_by_net_id(gun.bms_id)
+	var seats := card.get_seats()
+	assert_eq(seats.size(), 1)
+	var seat: EntityCardSeat = seats[0]
+	assert_eq(seat.get_source_name().to_lower(), "usegun")
+	assert_eq(seat.get_bone_index() - 1, userpoint_index,
+			"the runtime selected the exact retail Usegun row")
+
 	assert_eq(sim.spawn_local_player_at_start(), 1)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)

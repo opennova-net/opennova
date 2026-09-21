@@ -527,6 +527,8 @@ typedef enum DefItemType {
    token; particlefx and particlefxw3/w4 never read one. The original copies
    each name unguarded into 32-char slots of the ItemDef+0x278 block; we
    truncate safely. [orig: ItemDef_ParseProperty @ 0x49eb00] */
+// Slot-A runtime attach witness: resolve_item_materials_and_spawn_bone_trails
+// [orig: @ 0x522ee0 -> Entity_SpawnBoneTrailEffect @ 0x43bef0].
 typedef struct DefItemParticleFx {
     char effect[32];
     char userpoint[32];
