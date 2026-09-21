@@ -40,7 +40,12 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::STRING, join_password)
 	JOIN_TARGET_PROPERTY(Variant::INT, team_request)
 	JOIN_TARGET_PROPERTY(Variant::BOOL, role_explicit)
+	JOIN_TARGET_PROPERTY(Variant::STRING, proxy_node)
+	JOIN_TARGET_PROPERTY(Variant::STRING, proxy_relay)
+	JOIN_TARGET_PROPERTY(Variant::INT, proxy_cookie)
+	JOIN_TARGET_PROPERTY(Variant::INT, lobby_number)
 #undef JOIN_TARGET_PROPERTY
+	ClassDB::bind_method(D_METHOD("has_join_proxy"), &JoinTarget::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("allows_team_choice"), &JoinTarget::allows_team_choice);
 	ClassDB::bind_method(D_METHOD("has_team_password"), &JoinTarget::has_team_password);
 	ClassDB::bind_method(D_METHOD("allows_spectators"), &JoinTarget::allows_spectators);

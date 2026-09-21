@@ -544,6 +544,17 @@ void GameWorld::on_nw_host_error(const String &p_message) {
 	drive_.on_nw_host_error(p_message);
 }
 
+void GameWorld::on_nw_host_server_command(const String &p_verb, const String &p_target,
+		const PackedStringArray &p_args) {
+	drive_.on_nw_host_server_command(p_verb, p_target, p_args);
+}
+
+void GameWorld::on_nw_host_player_enter_result(int64_t p_connection_id, int p_success,
+		int p_msg_code, const String &p_player_ticket, const String &p_access_code_list) {
+	drive_.on_nw_host_player_enter_result(p_connection_id, p_success, p_msg_code,
+			p_player_ticket, p_access_code_list);
+}
+
 // --- bindings ----------------------------------------------------------------
 
 void GameWorld::_bind_methods() {

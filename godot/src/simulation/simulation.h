@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <godot_cpp/core/object_id.hpp>
 #include <string>
@@ -1002,6 +1003,46 @@ public:
 	}
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
+	// The NovaWorld GSID the gate's ServerHostResult carried, published by the
+	// in-match host as its 0x81 SUS1; no-op without a host role, empty on pure LAN.
+	void set_novaworld_gsid(const String &p_gsid);
+	// The admitted remote joiners as the NovaWorld host's PlayerList sees them
+	// (Server_PlayerAdd's five per-slot vars): one entry per server-side
+	// connection past player admission, keyed by its roster slot. The host's own
+	// slot is not listed (the gate binding adds itself at registration).
+	struct HostPeerSlot {
+		int slot = 0;
+		String player_name;
+		String ip_and_port;         // "a.b.c.d:port"
+		String team;                // "%ld" of the assigned team; empty until assigned
+	};
+	std::vector<HostPeerSlot> host_peer_slots() const;
+	// A NovaWorld ServerCommand (the NovaWorldHost `server_command` signal's verb,
+	// target selector and argument tokens) run against the in-match host through
+	// inmatch::Server_ExecuteServerCommand. The caller owns the two shell legs:
+	// `stop_hosting` (drop the gate registration) and `config_changed` (republish
+	// the name / message columns below on the gate registration). A config change
+	// is also kept on the sim's host session record, so a later session rebuild
+	// retains it. Unhandled without a host role.
+	struct ServerCommandResult {
+		bool handled = false;
+		bool stop_hosting = false;
+		bool config_changed = false;
+		String server_name;    // the live config after the verb ran
+		String server_message;
+	};
+	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
+			const PackedStringArray &p_args);
+	// The NovaWorld join-ticket flow of a gate-registered host. `armed` arms the
+	// in-match watchdog's ClientPlayerEnterRequest leg (a registration whose
+	// ServerHostResult carried HostRequiresJoinTicket); the hook receives each
+	// request (the joiner's ConnectionId, its endpoint as the inet_addr dword +
+	// port, and its JOINTICKET) and an empty hook unbinds. The service's answer
+	// returns through apply_player_enter_result. All three no-op without a host role.
+	using PlayerEnterRequestHook = std::function<void(uint32_t p_connection_id,
+			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
+	void set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook);
+	bool apply_player_enter_result(uint32_t p_connection_id, bool p_success, int32_t p_msg_code);
 	// The hosted-session request (network/host_session_options.h): every
 	// user-facing field lands; the sim-owned fields (the mission header blob,
 	// the score tables) are untouched. Call BEFORE loading a mission.
@@ -1029,6 +1070,11 @@ public:
 			const String &p_server_password = String(),
 			const String &p_join_password = String());
 	bool is_joiner() const { return session_.kind() == opennova::inmatch::RoleKind::Joiner; }
+	// The proxy-assisted NovaWorld join (JoinTarget.proxy_node / proxy_relay as
+	// "ip:port" plus proxy_cookie): installs the joiner role's rendezvous config.
+	// Call after enable_join and before the first poll; a missing part installs
+	// nothing (the role's all-six gate), as does a sim that is not a joiner.
+	void set_join_proxy(const String &p_node, const String &p_relay, int64_t p_cookie);
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the mission root hides their placed representation.
 	PackedInt32Array take_retired_placement_ids();

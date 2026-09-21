@@ -167,7 +167,7 @@ Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
 	copy->dir_ = dir_;
 	copy->nw_gate_host_ = nw_gate_host_;
 	copy->nw_gate_port_ = nw_gate_port_;
-	copy->region_ = region_;
+	copy->region_index_ = region_index_;
 	copy->advertise_ = advertise_;
 	return copy;
 }
@@ -237,7 +237,7 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::STRING, dir)
 	HOST_SESSION_PROPERTY(Variant::STRING, nw_gate_host)
 	HOST_SESSION_PROPERTY(Variant::INT, nw_gate_port)
-	HOST_SESSION_PROPERTY(Variant::STRING, region)
+	HOST_SESSION_PROPERTY(Variant::INT, region_index)
 	HOST_SESSION_PROPERTY(Variant::STRING, advertise)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);

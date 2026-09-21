@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include "mission/mission_setup_options.h"
@@ -12,6 +13,9 @@
 #include "player/player_spawn_loadout.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
+
+#include <map>
+#include <string>
 
 namespace godot {
 
@@ -125,6 +129,16 @@ public:
 	// The bound signal targets of the gate registration (the world forwards).
 	void on_nw_host_registered();
 	void on_nw_host_error(const String &p_message);
+	// A ServerCommand from the NovaWorld service: run it on the in-match host,
+	// then the two shell legs of its outcome -- drop the gate registration when
+	// the service punted the host's own slot, republish the changed server name /
+	// message columns on the next refresh.
+	void on_nw_host_server_command(const String &p_verb, const String &p_target,
+			const PackedStringArray &p_args);
+	// The service's answer for a joiner the in-match host announced: success
+	// releases it to the spawn pump, a failure punts it with the MsgCode.
+	void on_nw_host_player_enter_result(int64_t p_connection_id, int p_success, int p_msg_code,
+			const String &p_player_ticket, const String &p_access_code_list);
 
 private:
 	// One reset for the typed request staging, used by every session
@@ -143,6 +157,16 @@ private:
 	void cancel_join_preload();
 	void maybe_start_nw_host(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name);
 	NovaWorldHost *nw_host() const;
+	// Mirror the admitted joiners onto the gate registration's per-slot roster
+	// (the PlayerList + ClientHostPlayerAdded/Removed).
+	void sync_nw_host_roster(NovaWorldHost *p_host, const Ref<Simulation> &p_sim);
+	// The gate registration's teardown (ClientStopHosting + the node), with the
+	// in-match host's NovaWorld state -- the GSID it advertises, the join-ticket
+	// arm and its request hook -- cleared first. reset() and a service punt of
+	// the host's own slot both end here; the match itself keeps running.
+	// `p_from_host_signal` defers the node's stop when the caller is one of the
+	// registration node's own signal handlers.
+	void stop_nw_host(bool p_from_host_signal);
 
 	GameWorld *world_ = nullptr;
 	// The native session policy: windows, latches, edge ordering, reason text.
@@ -150,9 +174,12 @@ private:
 	// NovaWorldHost: registers a LAN/co-op listen host with the NovaWorld gate
 	// so a retail client can browse + join it (F1). Only created when a gate
 	// was supplied (MissionSetupOptions.nw_gate_host); absent for pure-LAN
-	// play. Fed the live player count from observe_tick(), torn down in
+	// play. Fed the admitted-joiner roster from observe_tick(), torn down in
 	// reset(). A child node of the world, held by identity.
 	ObjectID nw_host_id_;
+	// The roster slots last mirrored onto the gate registration: slot -> the
+	// per-slot signature (name|ip:port|team), so only a changed slot re-sends.
+	std::map<int, std::string> nw_roster_sent_;
 	// The typed session request at the shell seam (ADR 0017): exactly one is
 	// non-null during a net load -- the host screen's HostSessionOptions or
 	// the joiner's dial JoinTarget -- stamped onto MissionSetupOptions as

@@ -37,7 +37,7 @@ class HostSessionOptions : public RefCounted {
 	String dir_;
 	String nw_gate_host_;
 	int nw_gate_port_ = opennova::kNovaWorldGatePort;
-	String region_ = "us";
+	int region_index_ = 0;
 	String advertise_;
 
 protected:
@@ -160,8 +160,10 @@ public:
 	void set_nw_gate_host(const String &p_host) { nw_gate_host_ = p_host; }
 	int get_nw_gate_port() const { return nw_gate_port_; }
 	void set_nw_gate_port(int p_port) { nw_gate_port_ = p_port; }
-	String get_region() const { return region_; }
-	void set_region(const String &p_region) { region_ = p_region; }
+	// The gate row's Region column selector (0/1/2 -> the STRNOVA07/08/09
+	// gametext tokens; the NovaWorldHost resolves it through the gametext table).
+	int get_region_index() const { return region_index_; }
+	void set_region_index(int p_index) { region_index_ = p_index; }
 	// Explicit advertised-IP override for the gate row.
 	String get_advertise() const { return advertise_; }
 	void set_advertise(const String &p_advertise) { advertise_ = p_advertise; }

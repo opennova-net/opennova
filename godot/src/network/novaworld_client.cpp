@@ -16,12 +16,14 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <net/napi/envelope.h>
+#include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
+#include <net/novaworld/proxy_rendezvous.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -91,6 +93,12 @@ void NovaWorldClient::_bind_methods() {
 	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
+	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
+	ClassDB::bind_method(D_METHOD("get_join_proxy_node"), &NovaWorldClient::get_join_proxy_node);
+	ClassDB::bind_method(D_METHOD("get_join_proxy_cookie"), &NovaWorldClient::get_join_proxy_cookie);
+	ClassDB::bind_method(D_METHOD("get_join_proxy_relay"), &NovaWorldClient::get_join_proxy_relay);
+	ClassDB::bind_method(D_METHOD("get_join_lobby_number"), &NovaWorldClient::get_join_lobby_number);
+	ClassDB::bind_method(D_METHOD("get_last_error_tag"), &NovaWorldClient::get_last_error_tag);
 	// Bound so the HTTPRequest.request_completed signals can target them.
 	ClassDB::bind_method(
 		D_METHOD("on_gsb_request_completed", "result", "response_code", "headers", "body"),
@@ -121,6 +129,11 @@ void NovaWorldClient::_bind_methods() {
 	                      PropertyInfo(Variant::INT, "port"),
 	                      PropertyInfo(Variant::STRING, "app_id"),
 	                      PropertyInfo(Variant::PACKED_BYTE_ARRAY, "cd_cookie")));
+	// The service punted us (ServerLeaveNovaWorld): the MsgCode the menutxt
+	// ERR_PUNTEDFROMNOVAWORLD text substitutes for its [[$]].
+	ADD_SIGNAL(MethodInfo("punted", PropertyInfo(Variant::INT, "msg_code")));
+	// The service ended our play (ServerStopPlaying); mission exit reason 12.
+	ADD_SIGNAL(MethodInfo("play_stopped", PropertyInfo(Variant::INT, "msg_code")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_GATE_PROBING);
@@ -141,6 +154,18 @@ void NovaWorldClient::set_player_name(const String &name) { player_name_ = name;
 String NovaWorldClient::get_player_name() const { return player_name_; }
 
 Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
+
+String NovaWorldClient::get_join_proxy_node() const {
+	if (!join_proxy_.enabled()) return String();
+	return String(join_proxy_node_ip_.c_str()) + ":" +
+	       String::num_int64(static_cast<int64_t>(join_proxy_.node_port));
+}
+
+String NovaWorldClient::get_join_proxy_relay() const {
+	if (!join_proxy_.enabled()) return String();
+	return String(join_proxy_relay_ip_.c_str()) + ":" +
+	       String::num_int64(static_cast<int64_t>(join_proxy_.relay_port));
+}
 
 void NovaWorldClient::trace(const String &line) {
 	UtilityFunctions::print_verbose(line);
@@ -164,6 +189,9 @@ void NovaWorldClient::start() {
 	flow_.reset();
 	nw_web_domain_ = String();
 	identity_vars_.clear();
+	last_error_tag_ = String();
+	play_in_flight_ = false;
+	join_proxy_ = opennova::ProxyRendezvousConfig{};
 
 	// HTTP fetchers are child nodes. Created once and reused; each
 	// request_completed signal drives its own bound callback. browser_http_ is
@@ -202,9 +230,18 @@ void NovaWorldClient::start() {
 }
 
 void NovaWorldClient::stop() {
-	if (lobby_.session() && lobby_.sockets_open() &&
-	    (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
-		lobby_.send(lobby_.session()->build_goodbye());
+	if (lobby_.session() && lobby_.sockets_open()) {
+		// A play in flight is cancelled the retail way (ClientStopPlaying, the
+		// ConnectOrHost escape/timeout leg), then the session leaves.
+		if (play_in_flight_) {
+			lobby_.send(lobby_.session()->build_stop_playing());
+			play_in_flight_ = false;
+		}
+		if (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO ||
+		    state_ == STATE_SESSION_JOIN || state_ == STATE_JOINING ||
+		    state_ == STATE_IN_GAME_HELLO) {
+			lobby_.send(lobby_.session()->build_goodbye());
+		}
 	}
 	if (browser_http_ != nullptr) {
 		browser_http_->cancel_request();
@@ -233,16 +270,17 @@ void NovaWorldClient::_process(double delta) {
 		return;
 	}
 
-	// The driver pumps the gate + session sockets and the handshake timeout;
-	// role progress arrives through the hooks (sync_session_state / traces).
+	// The driver pumps the gate + session sockets, the stage retransmits, the
+	// connect deadlines and the session's negotiated keepalive/reap; role
+	// progress arrives through the hooks (sync_session_state / traces).
 	lobby_.process(delta);
+	drain_session_notices();
 
-	tick_accum_ += delta;
-	if (state_ == STATE_CONNECTED && tick_accum_ >= heartbeat_interval_s_) {
-		tick_accum_ = 0.0;
-		if (lobby_.session()) {
-			lobby_.send(lobby_.session()->build_heartbeat());
-		}
+	// The start-playing poll: the ServerPlayResult must land within the connect
+	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
+	if (play_in_flight_ && lobby_.session() &&
+	    lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
+		abort_playing(String(opennova::NWEC_PLAY_TIMEOUT));
 	}
 }
 
@@ -265,7 +303,10 @@ NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 	hooks.on_sent = [this](const std::vector<uint8_t> &dg) { trace_sent_datagram(dg); };
 	hooks.on_received = [this](const NwuLobbySession::RxInfo &rx) { on_session_datagram(rx); };
 	hooks.on_session_state = [this]() { sync_session_state(); };
-	hooks.on_fatal = [this](const String &message) { enter_state(STATE_ERROR, message); };
+	hooks.on_fatal = [this](const String &message) {
+		last_error_tag_ = message;
+		enter_state(STATE_ERROR, message);
+	};
 	hooks.on_soft_error = [this](const String &message) {
 		emit_signal("error_occurred", message);
 	};
@@ -414,14 +455,66 @@ void NovaWorldClient::sync_session_state() {
 		if (state_ != STATE_CONNECTED && state_ != STATE_JOINING &&
 		    state_ != STATE_IN_GAME_HELLO) {
 			enter_state(STATE_CONNECTED);
-			tick_accum_ = 0.0;
+		}
+		break;
+	case S::Closed:
+		// The peer closed / punted us, or the receive-silence reap fired: the
+		// latched disconnect record's tag is the reason.
+		if (session->disconnected_by_peer() && state_ != STATE_DISCONNECTED) {
+			last_error_tag_ = String(session->last_error().c_str());
+			play_in_flight_ = false;
+			enter_state(STATE_DISCONNECTED, last_error_tag_);
 		}
 		break;
 	case S::Error:
-		enter_state(STATE_ERROR, String(session->last_error().c_str()));
+		last_error_tag_ = String(session->last_error().c_str());
+		enter_state(STATE_ERROR, last_error_tag_);
 		break;
 	default:
 		break;
+	}
+}
+
+// The server notifications the session parsed this frame (ServerPlayResult,
+// ServerStopPlaying, ServerLeaveNovaWorld, ServerGLSVSSResults: the client
+// msginfo rows ClientSession dispatches, engine/net/novaworld/session).
+void NovaWorldClient::drain_session_notices() {
+	opennova::ClientSession *session = lobby_.session();
+	if (!session) return;
+	using Notice = opennova::ClientSession::Notice;
+	for (const Notice &notice : session->take_notices()) {
+		switch (notice.kind) {
+		case Notice::Kind::PlayResult:
+			if (!play_in_flight_) break;
+			if (notice.fields.success) {
+				play_in_flight_ = false;
+				resolve_join_target();
+			} else {
+				// The rejected play maps through the dword_B60110 switch (NWEC04..14).
+				abort_playing(String(opennova::novaworld_error_tag(
+						opennova::novaworld_error_from_code(notice.fields.msg_code)).c_str()));
+			}
+			break;
+		case Notice::Kind::StopPlaying:
+			play_in_flight_ = false;
+			trace(String("ServerStopPlaying msgcode=")
+			    + String::num_int64(notice.fields.msg_code));
+			emit_signal("play_stopped", notice.fields.msg_code);
+			break;
+		case Notice::Kind::LeaveNovaWorld:
+			play_in_flight_ = false;
+			last_error_tag_ = String(opennova::MENUTXT_PUNTED_FROM_NOVAWORLD);
+			trace(String("ServerLeaveNovaWorld msgcode=")
+			    + String::num_int64(notice.fields.msg_code));
+			emit_signal("punted", notice.fields.msg_code);
+			break;
+		case Notice::Kind::GlsvssResults:
+			trace(String("ServerGLSVSSResults: ")
+			    + String::num_int64(static_cast<int64_t>(notice.glsvss_results.size())) + "B");
+			break;
+		default:
+			break;
+		}
 	}
 }
 
@@ -669,10 +762,19 @@ void NovaWorldClient::join(int rid) {
 		emit_signal("join_failed", String("The matchmaking join service is unavailable."));
 		return;
 	}
-	if (flow_.join_active()) {
+	if (flow_.join_active() || play_in_flight_) {
 		return;  // a join is already in flight
 	}
 	sync_flow_context();
+	// The browsed row's name rides the PlaySetup as ServerName (g_napi_np_ctx.field_11AC).
+	pending_join_rid_ = static_cast<uint32_t>(rid);
+	pending_join_server_name_.clear();
+	for (const opennova::GsbServerEntry &entry : server_entries_) {
+		if (entry.rid == pending_join_rid_) {
+			pending_join_server_name_ = entry.server_name;
+			break;
+		}
+	}
 	const opennova::JoinResult r = flow_.join(static_cast<uint32_t>(rid));
 	switch (r.kind) {
 	case opennova::JoinResult::Kind::NeedRequest:
@@ -710,18 +812,11 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 			emit_signal("join_failed", String("Could not resolve the selected game."));
 		}
 		break;
-	case opennova::JoinResult::Kind::Resolved: {
+	case opennova::JoinResult::Kind::Resolved:
 		trace(String("join resolved host ") + String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
-		PackedByteArray cd;
-		if (!r.cd_cookie.empty()) {
-			cd.resize(static_cast<int64_t>(r.cd_cookie.size()));
-			std::memcpy(cd.ptrw(), r.cd_cookie.data(), r.cd_cookie.size());
-		}
-		resolve_join_target(String(r.host_ip.c_str()), r.host_port,
-			String(r.app_id.c_str()), cd);
+		start_playing(r);
 		break;
-	}
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
 		// the old non-200 (formerly stuck JOINING) and bad-.joi (CONNECTED) into one path.
@@ -731,24 +826,78 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 	}
 }
 
-// The NWJoin handshake has resolved the in-match host:port. Hand that off to the game layer and
-// stop — the panel routes joined_game into Simulation's joiner (load_mission_as_joiner ->
+// The .joi resolved: register the play with the service before dialing the host.
+// PlaySetup carries the browsed row's name, the .joi-decoded endpoint, the CK join
+// token and the LN lobby number; the ServerPlayResult (state 8) releases the
+// in-match handoff, a rejection or the 60 s poll cancels it with ClientStopPlaying
+// (the PlaySetup shape and the state machine are engine-side: make_play_setup_vars,
+// ClientSession::build_play_request).
+void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
+	pending_join_ = resolved;
+	// NI/NP/BK next to NK: the proxy-assisted join fields the in-match joiner
+	// installs on its NP connection (engine/net/novaworld/proxy_rendezvous.h).
+	join_proxy_ = opennova::ProxyRendezvousConfig{};
+	join_proxy_.node_addr = opennova::proxy_inet_addr(resolved.ni);
+	join_proxy_.node_port = static_cast<uint32_t>(std::strtol(resolved.np.c_str(), nullptr, 10));
+	join_proxy_.cookie = static_cast<uint32_t>(std::strtol(resolved.bk.c_str(), nullptr, 10));
+	join_proxy_.relay_addr = opennova::proxy_inet_addr(resolved.host_ip);
+	join_proxy_.relay_port = resolved.host_port;
+	join_proxy_node_ip_ = resolved.ni;
+	join_proxy_relay_ip_ = resolved.host_ip;
+	opennova::ClientSession *session = lobby_.session();
+	if (!session || !session->is_verified()) {
+		enter_state(STATE_CONNECTED);
+		emit_signal("join_failed", String(opennova::NWEC_WRONG_SESSION_STATE));
+		return;
+	}
+	const std::vector<opennova::ClientVar> play_setup = opennova::make_play_setup_vars(
+			pending_join_server_name_, resolved.host_ip, std::to_string(resolved.host_port),
+			resolved.app_id, resolved.ln);
+	const std::vector<uint8_t> dg = session->build_play_request(play_setup);
+	if (dg.empty()) {
+		enter_state(STATE_CONNECTED);
+		emit_signal("join_failed", String(opennova::NWEC_PLAY_START_FAILED));
+		return;
+	}
+	lobby_.send(dg);
+	play_in_flight_ = true;
+	play_started_ms_ = lobby_.clock_ms();
+}
+
+void NovaWorldClient::abort_playing(const String &tag) {
+	if (play_in_flight_ && lobby_.session()) {
+		lobby_.send(lobby_.session()->build_stop_playing());
+	}
+	play_in_flight_ = false;
+	last_error_tag_ = tag;
+	enter_state(STATE_CONNECTED);
+	emit_signal("join_failed", tag);
+}
+
+// The service admitted the play (state 8). Hand the in-match host:port off to the game layer
+// and stop — the panel routes joined_game into Simulation's joiner (load_mission_as_joiner ->
 // enable_join), which owns the SINGLE in-match ClientHello (the joiner role's runtime_->start(), the
 // witnessed CNapiGameSession_InitNPConnection path). We deliberately do NOT send our own in-match
 // hello here: that would be a second, conflicting handshake on a third socket (the old "send one
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
-void NovaWorldClient::resolve_join_target(const String &host, uint16_t port,
-                                          const String &app_id,
-                                          const PackedByteArray &cd_cookie) {
+void NovaWorldClient::resolve_join_target() {
+	const String host = String(pending_join_.host_ip.c_str());
+	const uint16_t port = pending_join_.host_port;
 	trace(String("join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
 		+ " — handing off to the in-match joiner (Simulation owns the ClientHello)");
 	enter_state(STATE_IN_GAME_HELLO);
+	PackedByteArray cd;
+	if (!pending_join_.cd_cookie.empty()) {
+		cd.resize(static_cast<int64_t>(pending_join_.cd_cookie.size()));
+		std::memcpy(cd.ptrw(), pending_join_.cd_cookie.data(), pending_join_.cd_cookie.size());
+	}
 	// The APPID join token (decoded .joi CK) and the CD identity cookie (packed
 	// PUB* blob) travel with the address: a NovaWorld host validates the APPID in
 	// the ClientAuth (code 9) and the CD cookie in the 0x00 JOIN (codes 23/24/25).
-	emit_signal("joined_game", host, static_cast<int>(port), app_id, cd_cookie);
+	emit_signal("joined_game", host, static_cast<int>(port),
+	            String(pending_join_.app_id.c_str()), cd);
 }
 
 void NovaWorldClient::enter_state(State next, const String &reason) {
