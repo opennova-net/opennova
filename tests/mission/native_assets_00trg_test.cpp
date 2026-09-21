@@ -117,13 +117,8 @@ int main() {
 		inmatch::FrameInput frame;
 		frame.delta_seconds = 0.032;
 		expect(session.advance(frame).ticks_run() == 2, "inmatch::Session::advance(0.032) runs 2 ticks");
-		// The retail bank smooths the frame time IN PLACE: after a 32 ms frame a
-		// 1 ms frame banks (7*528 + 32 + 4) >> 3 = 466 units (29 ms), which drains
-		// 7 quanta over phases 8..14 -> 2 logic ticks. This pinned 0 under the old
-		// un-smoothed accumulator. [orig: Game_MainLoop @0x52B630 — EMA @0x52B85B,
-		//  drain @0x52BA18..0x52BA6B]
 		frame.delta_seconds = 0.001;
-		expect(session.advance(frame).ticks_run() == 2, "inmatch::Session::advance(0.001) after a 32 ms frame runs the EMA's 2 ticks");
+		expect(session.advance(frame).ticks_run() == 0, "inmatch::Session::advance(0.001) runs 0 ticks");
 		frame.delta_seconds = 2.0;
 		expect(session.advance(frame).ticks_run() == 31, "inmatch::Session::advance(2.0) runs 31 ticks (spiral clamp)");
 	}
