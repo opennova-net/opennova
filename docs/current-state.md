@@ -1,5 +1,10 @@
 # Where the project is, and what is next
 
+The [03TR frame-cost fixes](perf/03tr-frame-costs.md) remove repeated CTRL name
+conversion, the native-to-packed snapshot round trip, and per-glyph HUD draw
+submission. The record contains clean measurements, the jo-c/live-IDA witnesses,
+regression results and remaining frame-time variation; D-3DI-2 remains open.
+
 PR #663 also fixes 03TR mounted aiming: the shared PANM evaluator now
 retains authored animation frames ([D-3DI-3](threedi/3di-gp-format-re.md#retail-panm-animation-frames-2026-09-21)),
 and mounted bodies/guns retain fractional carrier attitude through camera and

@@ -336,7 +336,7 @@ private:
 	// teardown safe when a child is queued.
 	struct PresentationLink {
 		ObjectID id;
-		HashSet<String> part_local_registers; // canonical register names
+		std::bitset<opennova::threedi::THREEDI_CTRL_REGISTER_COUNT> part_local_registers;
 	};
 	Vector<PresentationLink> presentation_links_;
 	int ctrl_batch_depth_ = 0;
@@ -559,8 +559,7 @@ private:
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
 	Vector<ObjectModel *> live_presentation_links() const;
-	Vector<ObjectModel *> live_presentation_links_sharing(
-			const String &p_register) const;
+	static ObjectModel *resolve_presentation_link(const PresentationLink &p_link);
 
 	// --- body/part animation (object_model_anim.cpp) ---
 	void resolve_muzzle_userpoint();
@@ -876,6 +875,11 @@ public:
 	void set_ctrl_value(const String &p_name, int64_t p_value);
 	void clear_ctrl_value(const String &p_name);
 	void set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value);
+	// Native presentation already knows the catalog ordinal. Resolve names only
+	// at script/config ingress; preserve the same ordered store and sample path.
+	void set_ctrl_override_native(const std::string &p_owner, int p_ordinal, int64_t p_value);
+	void clear_ctrl_override_native(const std::string &p_owner, int p_ordinal);
+	void clear_ctrl_overrides_owned_native(const std::string &p_owner);
 	void clear_ctrl_override(const String &p_owner, const String &p_name);
 	// Release every register `p_owner` holds here (and on the linked parts that
 	// share them): the cold/teardown release of a writer whose register set is

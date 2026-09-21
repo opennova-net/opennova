@@ -189,23 +189,10 @@ Vector<ObjectModel *> ObjectModel::live_presentation_links() const {
 	return out;
 }
 
-// The linked parts that share `p_register` with this model — every link except
-// those whose composer declared the register part-local.
-Vector<ObjectModel *> ObjectModel::live_presentation_links_sharing(
-		const String &p_register) const {
-	Vector<ObjectModel *> out;
-	for (const PresentationLink &link : presentation_links_) {
-		if (link.part_local_registers.has(p_register)) {
-			continue;
-		}
-		ObjectModel *model = link.id.is_valid()
-				? Object::cast_to<ObjectModel>(ObjectDB::get_instance(link.id))
-				: nullptr;
-		if (model != nullptr) {
-			out.push_back(model);
-		}
-	}
-	return out;
+ObjectModel *ObjectModel::resolve_presentation_link(const PresentationLink &p_link) {
+	return p_link.id.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(p_link.id))
+			: nullptr;
 }
 
 void ObjectModel::add_presentation_link(ObjectModel *p_model,
@@ -223,9 +210,8 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	link.id = id;
 	for (const String &name : p_part_local_registers) {
 		const String reg = ObjectData::canonical_control_register_name(name);
-		if (!reg.is_empty()) {
-			link.part_local_registers.insert(reg);
-		}
+		const int ordinal = opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data());
+		if (ordinal >= 0) link.part_local_registers.set(static_cast<size_t>(ordinal));
 	}
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
@@ -763,8 +749,9 @@ void ObjectModel::finish_ctrl_change(bool p_apply_now) {
 // Batch the ordered register stores that precede one retained-model sample.
 // [see the GDScript origin's rationale — one shared waveform/random advance]
 void ObjectModel::begin_ctrl_update() {
-	for (ObjectModel *linked : live_presentation_links()) {
-		linked->begin_ctrl_update();
+	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
+		const PresentationLink link = presentation_links_[i];
+		if (ObjectModel *linked = resolve_presentation_link(link)) linked->begin_ctrl_update();
 	}
 	++ctrl_batch_depth_;
 }
@@ -778,59 +765,78 @@ void ObjectModel::end_ctrl_update() {
 		ctrl_batch_dirty_ = false;
 		apply_runtime_state(0.0);
 	}
-	for (ObjectModel *linked : live_presentation_links()) {
-		linked->end_ctrl_update();
+	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
+		const PresentationLink link = presentation_links_[i];
+		if (ObjectModel *linked = resolve_presentation_link(link)) linked->end_ctrl_update();
 	}
 }
 
 void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (reg.is_empty()) return;
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->set_ctrl_value(reg, p_value);
-	}
-	if (controls_.store(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()), p_value)) {
-		finish_ctrl_change(true);
-	}
+	set_ctrl_override_native({}, opennova::threedi::threedi_ctrl_register_ordinal(
+			reg.utf8().get_data()), p_value);
 }
 
 void ObjectModel::clear_ctrl_value(const String &p_name) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->clear_ctrl_value(reg);
-	}
-	if (controls_.clear(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()))) {
-		finish_ctrl_change(true);
-	}
+	const int ordinal = opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data());
+	if (ordinal < 0) return;
+	// An empty native clear owner denotes the unconditional public value clear.
+	clear_ctrl_override_native({}, ordinal);
 }
 
 void ObjectModel::set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (p_owner.is_empty() || reg.is_empty()) return;
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->set_ctrl_override(p_owner, reg, p_value);
-	}
-	if (controls_.store(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()),
-			p_value, p_owner.utf8().get_data())) finish_ctrl_change(true);
+	set_ctrl_override_native(p_owner.utf8().get_data(),
+			opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()), p_value);
 }
 
 void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_name) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (p_owner.is_empty() || reg.is_empty()) return;
-	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-		linked->clear_ctrl_override(p_owner, reg);
+	clear_ctrl_override_native(p_owner.utf8().get_data(),
+			opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()));
+}
+
+void ObjectModel::set_ctrl_override_native(
+		const std::string &p_owner, int p_ordinal, int64_t p_value) {
+	if (p_ordinal < 0 || p_ordinal >= opennova::threedi::THREEDI_CTRL_REGISTER_COUNT) return;
+	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
+		const PresentationLink link = presentation_links_[i];
+		if (link.part_local_registers[static_cast<size_t>(p_ordinal)]) continue;
+		if (ObjectModel *linked = resolve_presentation_link(link))
+			linked->set_ctrl_override_native(p_owner, p_ordinal, p_value);
 	}
-	if (controls_.clear_owned(opennova::threedi::threedi_ctrl_register_ordinal(reg.utf8().get_data()),
-			p_owner.utf8().get_data())) finish_ctrl_change(true);
+	if (controls_.store(p_ordinal, p_value, p_owner)) finish_ctrl_change(true);
+}
+
+void ObjectModel::clear_ctrl_override_native(const std::string &p_owner, int p_ordinal) {
+	if (p_ordinal < 0 || p_ordinal >= opennova::threedi::THREEDI_CTRL_REGISTER_COUNT) return;
+	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
+		const PresentationLink link = presentation_links_[i];
+		if (link.part_local_registers[static_cast<size_t>(p_ordinal)]) continue;
+		if (ObjectModel *linked = resolve_presentation_link(link))
+			linked->clear_ctrl_override_native(p_owner, p_ordinal);
+	}
+	const bool changed = p_owner.empty() ? controls_.clear(p_ordinal)
+			: controls_.clear_owned(p_ordinal, p_owner);
+	if (changed) finish_ctrl_change(true);
 }
 
 void ObjectModel::clear_ctrl_overrides_owned(const String &p_owner) {
-	const std::string owner = p_owner.utf8().get_data();
-	const auto owned = controls_.owned_registers(owner);
+	clear_ctrl_overrides_owned_native(p_owner.utf8().get_data());
+}
+
+void ObjectModel::clear_ctrl_overrides_owned_native(const std::string &p_owner) {
+	const auto owned = controls_.owned_registers(p_owner);
 	for (int ordinal : owned) {
-		const String reg(opennova::threedi::threedi_ctrl_register_name(static_cast<size_t>(ordinal)));
-		for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
-			linked->clear_ctrl_override(p_owner, reg);
+		for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
+			const PresentationLink link = presentation_links_[i];
+			if (link.part_local_registers[static_cast<size_t>(ordinal)]) continue;
+			if (ObjectModel *linked = resolve_presentation_link(link))
+				linked->clear_ctrl_override_native(p_owner, ordinal);
 		}
 		controls_.clear(ordinal);
 	}

@@ -94,6 +94,34 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	assert_eq(int(head.get_ctrl_values().get("TEX_CAMO1", -1)), 32,
 			"TEX_CAMO stays local to each retained draw, like retail's per-part stores")
 
+	# Drive the native publication bridge through the real composed-avatar link.
+	# The composer alone authors link exclusions; no test-only link API is needed.
+	var index := EntityIndex.new()
+	body.entity_ref = EntityRef.make(MissionData.KIND_ORGANIC, 0, 1)
+	index.build([body], null)
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(null, index)
+	var rows := PackedFloat32Array()
+	rows.resize(Simulation.PF_STRIDE)
+	rows[Simulation.PF_BMS_ID] = 1
+	rows[Simulation.PF_BODY_ANIM_SLOT] = -1
+	rows[Simulation.PF_ANIM_STATE] = -1
+	rows[Simulation.PF_HIDDEN] = 1
+	rows[Simulation.PF_OBJECT_DESTROY] = 65536
+	presenter.present_snapshot(rows, Simulation.PF_STRIDE, 1)
+	assert_eq(int(head.get_ctrl_values().get("OBJECT_DESTROY", -1)), 65536,
+			"destruction publication reaches the composer's linked part")
+	head.set_ctrl_override("other", "OBJECT_DESTROY", 2)
+	presenter.present_snapshot(rows, Simulation.PF_STRIDE, 1)
+	assert_eq(int(head.get_ctrl_values().get("OBJECT_DESTROY", -1)), 65536,
+			"stable native publication reclaims the linked part's overwritten slot")
+	assert_eq(int(head.get_ctrl_values().get("TEX_CAMO1", -1)), 32,
+			"native publication preserves the linked part's local camo")
+	head.free()
+	presenter.present_snapshot(rows, Simulation.PF_STRIDE, 1)
+	assert_eq(int(body.get_ctrl_values().get("OBJECT_DESTROY", -1)), 65536,
+			"a deleted linked part leaves root publication valid")
 	parent.free()
 	DirAccess.remove_absolute(item_path)
 	DirAccess.remove_absolute(avatar_path)

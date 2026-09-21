@@ -571,20 +571,24 @@ void ObjectModel::restart_part_anim(int p_channel, int p_play_type, double p_tim
 
 void ObjectModel::set_part_phase(int p_channel, int64_t p_phase) {
 	wake_runtime_frame();
-	const String reg = resolve_anim_channel_register(p_channel - 1);
-	const String owner = resolve_anim_channel_owner(p_channel - 1);
-	if (reg.is_empty() || owner.is_empty()) return;
+	const int ordinal = opennova::renderer::ModelControls::part_register(p_channel);
+	if (ordinal < 0) return;
+	static const std::string owners[] = {
+		opennova::renderer::ModelControls::part_owner(1),
+		opennova::renderer::ModelControls::part_owner(2)};
 	controls_.release_part(p_channel);
-	set_ctrl_override(owner, reg, p_phase);
+	set_ctrl_override_native(owners[p_channel - 1], ordinal, p_phase);
 }
 
 void ObjectModel::clear_part_phase(int p_channel) {
 	wake_runtime_frame();
-	const String reg = resolve_anim_channel_register(p_channel - 1);
-	const String owner = resolve_anim_channel_owner(p_channel - 1);
-	if (reg.is_empty() || owner.is_empty()) return;
+	const int ordinal = opennova::renderer::ModelControls::part_register(p_channel);
+	if (ordinal < 0) return;
+	static const std::string owners[] = {
+		opennova::renderer::ModelControls::part_owner(1),
+		opennova::renderer::ModelControls::part_owner(2)};
 	controls_.release_part(p_channel);
-	clear_ctrl_override(owner, reg);
+	clear_ctrl_override_native(owners[p_channel - 1], ordinal);
 }
 
 void ObjectModel::clear_part_anims() {

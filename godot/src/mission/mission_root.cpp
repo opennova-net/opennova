@@ -630,18 +630,20 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 	}
 	// Both walks consume the same immutable row buffer. Fetching it once also
 	// makes their topology revision refer to exactly the same layout.
-	const PackedFloat32Array snapshot = sim_->get_present_snapshot();
-	// The door phases of the rows that publish any, built beside those rows.
-	const PackedInt32Array door_phases = sim_->get_present_door_phases();
+	const auto snapshot = sim_->build_present_snapshot();
+	const opennova::world::PresentRowsView rows{
+			snapshot->rows.data(), static_cast<int64_t>(snapshot->rows.size())};
+	const auto &door_phases = snapshot->door_phases;
 	if (p_stats_on) {
 		// The native buffer build the fetch above just paid for.
 		frame_stats_->add(FrameStats::PRESENT_SNAPSHOT, sim_->get_last_present_snapshot_us());
 	}
-	const int64_t layout_revision = sim_->get_present_layout_revision();
+	const int64_t layout_revision = static_cast<int64_t>(snapshot->layout_revision);
 	const int64_t mission_start = p_stats_on ? now_usec() : 0;
 	if (p_stats_on) {
 		const PackedInt64Array profile = presenter->profile_present_snapshot(
-				snapshot, stride, layout_revision, door_phases);
+				rows, stride, layout_revision, door_phases.data(),
+				static_cast<int64_t>(door_phases.size()));
 		if (profile.size() >= EntityPresenter::MISSION_PROFILE_SLOT_COUNT) {
 			frame_stats_->add(FrameStats::PRESENT_MISSION_CORE,
 					profile[EntityPresenter::MISSION_PROFILE_CORE_US]);
@@ -662,11 +664,12 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 		}
 		frame_stats_->add(FrameStats::PRESENT_MISSION, now_usec() - mission_start);
 	} else {
-		presenter->present_snapshot(snapshot, stride, layout_revision, door_phases);
+		presenter->present_rows(rows, stride, layout_revision, door_phases.data(),
+				static_cast<int64_t>(door_phases.size()));
 	}
 	// The wire walk is a no-op until setup_wire ran (a placer-less preview).
 	const int64_t wire_start = p_stats_on ? now_usec() : 0;
-	presenter->present_wire_snapshot(snapshot, stride, layout_revision);
+	presenter->present_wire_rows_view(rows, stride, layout_revision);
 	if (p_stats_on) {
 		frame_stats_->add(FrameStats::PRESENT_WIRE, now_usec() - wire_start);
 		const Ref<WirePresentStats> wire_stats = presenter->get_wire_stats_record();

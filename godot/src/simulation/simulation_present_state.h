@@ -15,10 +15,17 @@
 #include <runtime/world/entity.h>         // EntityHandle
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 namespace godot {
+
+struct SimulationPresentSnapshot {
+	std::vector<float> rows;
+	opennova::inmatch::DoorPhaseTable door_phases;
+	uint64_t layout_revision = 0;
+};
 
 struct SimulationPresentState {
 	// --- the present snapshot ---------------------------------------------------
@@ -54,11 +61,9 @@ struct SimulationPresentState {
 	mutable opennova::world::BmsHandleIndex bms_handles;
 	// The PF_* present rows are built by the engine (runtime/inmatch/present_rows.h,
 	// both roles); this owns the host path's respawn-revision mirror and the
-	// scratch the PackedFloat32Array copies from.
+	// leased native snapshot storage. Script reads copy only at their boundary.
 	mutable opennova::inmatch::PoolPresentLifecycleMap pool_lifecycle;
-	mutable std::vector<float> rows_scratch;
-	// The door side table of the last snapshot (runtime/inmatch/present_rows.h).
-	mutable opennova::inmatch::DoorPhaseTable door_phases_scratch;
+	mutable std::shared_ptr<SimulationPresentSnapshot> snapshot;
 	// The last snapshot's build time and row count (the F3 counters).
 	mutable uint64_t last_snapshot_us = 0;
 	mutable int last_entity_count = 0;

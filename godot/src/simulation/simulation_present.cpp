@@ -651,21 +651,8 @@ int Simulation::get_entity_wire_handle(int p_index) const {
 
 int32_t Simulation::decode_present_part_anim_phase(
 		const PackedFloat32Array &p_snapshot, int p_base, int p_channel) {
-	if (p_channel < 1 || p_channel > 2 || p_base < 0) return 0;
-	const int phase_field = PF_PHASE1 + (p_channel - 1) * 2;
-	const int active_field = PF_ACTIVE1 + (p_channel - 1) * 2;
-	if (p_base + active_field >= p_snapshot.size()) return 0;
-	const float *p = p_snapshot.ptr();
-	const int32_t high_code =
-			static_cast<int32_t>(p[p_base + active_field]);
-	if (!opennova::world::part_anim_phase_active(high_code)) return 0;
-	const uint32_t low = static_cast<uint32_t>(
-			static_cast<int32_t>(p[p_base + phase_field])) & 0xFFFFu;
-	const uint32_t bits =
-			(static_cast<uint32_t>(high_code - 1) << 16) | low;
-	int32_t value;
-	std::memcpy(&value, &bits, sizeof(value));
-	return value;
+	return opennova::world::decode_present_part_anim_phase(
+			{p_snapshot.ptr(), p_snapshot.size()}, p_base, p_channel);
 }
 
 int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
@@ -688,7 +675,7 @@ bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
 	return true;
 }
 
-PackedFloat32Array Simulation::get_present_snapshot() const {
+std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snapshot() const {
 	const uint64_t start_us =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
@@ -699,50 +686,61 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.
-	PackedFloat32Array out;
-	present_.door_phases_scratch.clear();
+	if (!present_.snapshot || !present_.snapshot.unique())
+		present_.snapshot = std::make_shared<SimulationPresentSnapshot>();
+	auto &frame = *present_.snapshot;
+	frame.rows.clear();
+	frame.door_phases.clear();
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
-					context, present_.pool_lifecycle, present_.rows_scratch, present_.door_phases_scratch);
+					context, present_.pool_lifecycle, frame.rows, frame.door_phases);
 			// Consume-once: each transition pulse dispatches exactly one presented
 			// frame (the rows copied any live pulse into PF_ANIM_STATE_PULSE).
 			runtime_->state().clear_anim_pulses();
 		} else {
 			opennova::inmatch::build_world_present_rows(context, present_.pool_lifecycle,
-					present_.rows_scratch, present_.door_phases_scratch);
+					frame.rows, frame.door_phases);
 		}
-		out.resize(static_cast<int64_t>(present_.rows_scratch.size()));
-		if (!present_.rows_scratch.empty())
-			std::memcpy(out.ptrw(), present_.rows_scratch.data(),
-					present_.rows_scratch.size() * sizeof(float));
 	}
-	present_.last_entity_count = static_cast<int>(out.size() / PF_STRIDE);
-	std::vector<PresentRowIdentity> next_layout;
-	next_layout.reserve(static_cast<std::size_t>(present_.last_entity_count));
-	const float *rows = out.ptr();
+	present_.last_entity_count = static_cast<int>(frame.rows.size() / PF_STRIDE);
+	// Reuse the identity storage and compare exact fields, never a hash.
+	bool changed = present_.layout.size() != static_cast<size_t>(present_.last_entity_count);
+	present_.layout.resize(static_cast<size_t>(present_.last_entity_count));
 	for (int i = 0; i < present_.last_entity_count; ++i) {
-		const float *row = rows + static_cast<int64_t>(i) * PF_STRIDE;
-		next_layout.push_back(PresentRowIdentity{
+		const float *row = frame.rows.data() + static_cast<int64_t>(i) * PF_STRIDE;
+		const PresentRowIdentity identity{
 				static_cast<int32_t>(row[PF_WIRE_HANDLE]),
 				static_cast<int32_t>(row[PF_TYPE_ID]),
 				static_cast<int32_t>(row[PF_BMS_ID]),
 				static_cast<int32_t>(row[PF_KIND]),
-				static_cast<int32_t>(row[PF_INDEX])});
+				static_cast<int32_t>(row[PF_INDEX])};
+		if (!(present_.layout[static_cast<size_t>(i)] == identity)) {
+			present_.layout[static_cast<size_t>(i)] = identity;
+			changed = true;
+		}
 	}
-	if (next_layout != present_.layout) {
-		present_.layout = std::move(next_layout);
-		++present_.layout_revision;
-	}
+	if (changed) ++present_.layout_revision;
+	frame.layout_revision = present_.layout_revision;
 	if (runtime_profiling_enabled_)
 		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
+	return present_.snapshot;
+}
+
+PackedFloat32Array Simulation::get_present_snapshot() const {
+	const auto frame = build_present_snapshot();
+	PackedFloat32Array out;
+	out.resize(static_cast<int64_t>(frame->rows.size()));
+	if (!frame->rows.empty())
+		std::memcpy(out.ptrw(), frame->rows.data(), frame->rows.size() * sizeof(float));
 	return out;
 }
 
 PackedInt32Array Simulation::get_present_door_phases() const {
 	PackedInt32Array out;
-	const opennova::inmatch::DoorPhaseTable &table = present_.door_phases_scratch;
+	if (!present_.snapshot) return out;
+	const auto &table = present_.snapshot->door_phases;
 	out.resize(static_cast<int64_t>(table.size()));
 	if (!table.empty())
 		std::memcpy(out.ptrw(), table.data(), table.size() * sizeof(int32_t));

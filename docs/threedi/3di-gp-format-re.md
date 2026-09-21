@@ -245,7 +245,7 @@ catalog/loader/writer audit on 2026-07-29.
 | PANM scalar-track sampler (`engine/formats/threedi/threedi_panm_runtime.cpp`) | **MATCHING MATH / PARTIAL RNG LIFETIME** | `threedi_panm_sample_track_raw` structurally translates `[orig: PANM_SampleTrack @ 0x5b2270]`; controlled and deterministic waveform paths are pinned, and noise dispatch consumes per submitted instance, but its LCG is not yet retail's whole-process CRT stream |
 | Controlled PANM mode catalog | **MATCHING** | only type 113 reads a control register; 114–117 remain ordinary waveform types `[orig: PANM_SampleTrack @ 0x5b2270; wave_lookup @ 0x5de6b0]`; all known shipped controlled PANM tracks are type 113 |
 | Runtime slot layout and consumer math | **MATCHING** | each global slot is an 8-byte pair: signed value dword at `0x83FCE8 + 8·ordinal`, adjacent state dword at `0x83FCEC + 8·ordinal`; PANM reads the signed value with retail low-dword `IMUL`/arithmetic-shift behavior |
-| Process-global bus lifetime/arbitration | **OPEN** | retail keeps one persistent 96-slot array shared by every model draw; the retained OpenNova path currently constructs a zero-based array from each model's current Dictionary, so unwritten values do not flow across models in retail draw order. Retail's later batch snapshot/restore preserves written material values but does not erase that submission-time persistence requirement (D-3DI-2) |
+| Process-global bus lifetime/arbitration | **OPEN** | retail keeps one persistent 96-slot array shared by every model draw; the retained OpenNova path currently samples each model's own `ModelControls` array, so unwritten values do not flow across models in retail draw order. Retail's later batch snapshot/restore preserves written material values but does not erase that submission-time persistence requirement (D-3DI-2) |
 | Noise RNG lifetime/call order | **OPEN** | retail `CWaveformTable_Build @0x5DE360` consumes 256 calls from the same process CRT `rand()` later used by PANM/material/light noise, interleaved with unrelated engine callers. OpenNova shares one MSVC-formula stream only among the ported waveform consumers and uses a precomputed table, so dispatch/math and intra-consumer order match but the runtime sample sequence does not (D-3DI-2) |
 | Retail CTRL producers | **PARTIAL PORT** | the complete dedicated-writer census is recorded below; the catalog, remap semantics, and consumers are implemented, but several retail semantic producers remain separate port gaps |
 
@@ -478,6 +478,44 @@ load/runtime/export fidelity, not a claim of retail OED UI parity for those
 unused PANM styles.
 
 ---
+
+### Native CTRL publication (2026-09-21)
+
+The performance work preserves the existing producer order and retained-model
+ownership while removing repeated Godot String normalization and temporary
+linked-part lists. The relevant retail facts were rechecked in live
+`Jointops.exe.kong.i64` and against `~/Development/jo-c` at
+`f2f7c22dbec6c3d1dab31ad1c6a516a6edb45a3c`.
+
+| Surface | Verdict | Anchored witness |
+|---|---|---|
+| Load-time name resolution | MATCHING (read-only grill) of the existing catalog contract | `[orig: CtrlName_ToOrdinal @ 0x57B290]` scans the case-insensitive descriptor table; `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` calls it at `@ 0x5B46D7` and stores the ordinal in record `+0x18` at `@ 0x5B46E6`. Names need not be resolved at every publication. |
+| Destruction stores and timing | MATCHING (read-only grill) of the direct-store witness; retained ownership remains D-3DI-2 | `[orig: compute_lod_fade_timers @ 0x5C3F40]` zeroes six signed dword slots at `@ 0x5C3F48..0x5C3F66`, then computes destruction/husk phases. `[orig: render_sector_entity @ 0x5C4190]` calls it at `@ 0x5C4200`, before the later subpixel rejection at `@ 0x5C42DE`. The curated function name is retained; an older foliage/LOD description does not describe these stores. |
+| Part phases and door/team stores | MATCHING (read-only grill) of the existing publication contract | `[orig: HUD_CacheEntityDisplayInfo @ 0x4A3D90]` writes channels at `@ 0x4A3E2D` / `@ 0x4A3E38`; `[orig: build_bone_transforms @ 0x4E3070]` indexes consecutive door ordinals at `@ 0x4E3145`; `[orig: render_sector_entity @ 0x5C4190]` writes signed team at `@ 0x5C425F`. These are direct values, without a same-value publication gate. |
+| Native bridge and linked retained models | host code / not grillable | `ObjectModel` consumes catalog ordinals and native owner tags; linked-part masks resolve once when linked. Every propagation revalidates its ObjectID. `renderer_model_controls`, `mission_present_pass_test.gd`, `object_model_part_anim_test.gd`, and `player_visual_resolver_test.gd` cover the retained semantics. |
+
+Jo-c corroboration: `app/reconstruction_infantry_native.inc:31429`
+(hash-pinned recovered `0x5C3F40` block; direct stores at `:31441`),
+`Jointops.exe.kong.c:477894` (publisher), `:478148` (caller), and
+`docs/part-control-reconstruction.md`. Its
+`docs/helicopter-rotor-gap-repair-300.md` also records the consequence of
+restoring the loader/resolver: valid nonzero rotor ordinals restore rotation.
+No jo-c files were edited.
+
+`EntityPresenter` now uses the native bridge for destruction, part, vehicle,
+team, heat, door and death publication. It still publishes destruction before
+later culling, and still reaches linked parts on an unchanged value. The
+`ModelControls` store compares both **value and owner**; skipping a publication
+only because the value matches would lose an intervening owner's write.
+Zero destruction phases still release only this retained writer, preserving
+foreign owners. Retail instead writes zero to its global slots: that existing
+lifetime/arbitration difference remains **OPEN as D-3DI-2**. This optimization
+neither closes that divergence nor moves publication behind final visibility.
+
+IDB changes: appended anchored entry comments at `0x5B4640` and `0x5C3F40`
+with the resolver/store sites, destruction interpretation and reimplementation
+cross-links. No curated names or types were changed; the IDB was saved.
+[03TR frame costs](../perf/03tr-frame-costs.md) owns the measured effect.
 
 ## 2. GP runtime format — corpus probe findings
 

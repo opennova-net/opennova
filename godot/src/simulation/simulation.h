@@ -2070,6 +2070,9 @@ public:
 	// ONE batched present snapshot for the per-tick render pass: a flat PackedFloat32Array of
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
 	// ~10 Variant-boxed scalar getter calls per entity the present loop would otherwise make.
+	// Immutable native lease, including the matching door table and revision.
+	// A subsequent build/reset cannot overwrite a frame still being consumed.
+	std::shared_ptr<const SimulationPresentSnapshot> build_present_snapshot() const;
 	PackedFloat32Array get_present_snapshot() const;
 	// The door side table the most recent get_present_snapshot() built beside
 	// its rows: (row index, count, phase[count]) int32 entries in row order,
