@@ -19,7 +19,11 @@ public:
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 private:
+	void draw_import();
 	EditorHost &host_;
+	std::vector<bool> selected_;
+	char filter_[128]{};
+	bool replace_existing_ = false;
 };
 
 } // namespace opennova::editor

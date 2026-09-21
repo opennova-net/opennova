@@ -94,8 +94,9 @@ void ProjectWindow::draw_open_project() {
 		if (!ImGui::IsAnyItemActive()) copy_into(edited_title_, sizeof(edited_title_), v.document.title);
 		edited_title_revision_ = v.revision;
 	}
-	if (runtime_revision_ != v.revision) {
-		if (!ImGui::IsAnyItemActive()) copy_into(runtime_, sizeof(runtime_), v.runtime_executable);
+	if (runtime_revision_ != v.revision && !ImGui::IsAnyItemActive()) {
+		copy_into(runtime_, sizeof(runtime_), v.runtime_executable);
+		copy_into(retail_, sizeof(retail_), v.retail_directory);
 		runtime_revision_ = v.revision;
 	}
 
@@ -117,6 +118,14 @@ void ProjectWindow::draw_open_project() {
 	ImGui::SameLine();
 	ImGui::BeginDisabled(v.play_state != PlayState::Running);
 	if (ImGui::Button("Stop")) host_.request(make_request(EditorRequestKind::StopPlay));
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(v.build_running || v.play_state != PlayState::Stopped);
+	bool retail = v.play_retail;
+	if (ImGui::Checkbox("Play in retail", &retail)) {
+		EditorRequest set = make_request(EditorRequestKind::SetPlayRetail);
+		set.flag = retail;
+		host_.request(set);
+	}
 	ImGui::EndDisabled();
 	if (v.build_running) {
 		const float fraction = v.build_total == 0 ? 0.0f : static_cast<float>(v.build_done) / static_cast<float>(v.build_total);
@@ -147,10 +156,20 @@ void ProjectWindow::draw_open_project() {
 		set.flag = multiplayer;
 		host_.request(set);
 	}
+	if (ImGui::InputText("Retail install", retail_, sizeof(retail_), ImGuiInputTextFlags_EnterReturnsTrue)) {
+		host_.request(make_request(EditorRequestKind::SetRetailDirectory, retail_));
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Browse...##retail")) {
+		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
+		pick.purpose = PickPurpose::RetailDirectory;
+		host_.request(pick);
+	}
+	ImGui::TextDisabled("Joint Operations installation folder.");
 	if (v.source_run) {
-		ImGui::TextWrapped("Play runs the game from the source checkout: %s", v.runtime_executable.c_str());
+		ImGui::TextWrapped("OpenNova runtime (source checkout): %s", v.runtime_executable.c_str());
 	} else {
-		if (ImGui::InputText("Game runtime", runtime_, sizeof(runtime_), ImGuiInputTextFlags_EnterReturnsTrue)) {
+		if (ImGui::InputText("OpenNova runtime", runtime_, sizeof(runtime_), ImGuiInputTextFlags_EnterReturnsTrue)) {
 			host_.request(make_request(EditorRequestKind::SetRuntimeExecutable, runtime_));
 		}
 		ImGui::SameLine();

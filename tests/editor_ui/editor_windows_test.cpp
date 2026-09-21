@@ -137,6 +137,11 @@ void test_windows_and_layout() {
 	CHECK(windows.pending_requests() == 0, "drawing raises no request by itself");
 	for (uint64_t i = 4; i < 8; ++i) frame(windows, i); // the dock layout settles
 	CHECK(windows.pending_requests() == 0, "still none");
+	v.import_sources = {{"C:/assets/notes.txt", {}}, {"C:/assets/data.pff", "main.mnu"}};
+	v.import_open = true;
+	CHECK(frame(windows, 8), "import choices draw");
+	CHECK(frame(windows, 9), "import choices settle");
+	CHECK(windows.pending_requests() == 0, "previewing an import writes nothing");
 	windows.pass().detach_imgui();
 }
 
@@ -163,6 +168,10 @@ void test_requests_round_trip() {
 	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::SetRuntimeExecutable &&
 	              out.path == "C:/tools/opennova.exe",
 	      "runtime pick");
+	windows.deliver_pick(PickPurpose::RetailDirectory, "C:/games/Joint Operations");
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::SetRetailDirectory &&
+	              out.path == "C:/games/Joint Operations",
+	      "retail folder pick");
 	windows.deliver_pick(PickPurpose::OpenProject, "");
 	CHECK(!windows.take_request(out), "a cancelled pick raises nothing");
 	windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");

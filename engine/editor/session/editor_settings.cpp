@@ -37,6 +37,8 @@ bool load_editor_settings(const std::string &path, EditorSettings &out, Diagnost
 	}
 	EditorSettings settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
+	settings.retail_directory = json.get_string("retail_directory", "");
+	settings.play_retail = json.get_bool("play_retail", false);
 	if (const io::JsonValue *recent = json.get("recent_projects"); recent && recent->is_array()) {
 		for (const io::JsonValue &item : recent->array) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
@@ -50,6 +52,8 @@ bool save_editor_settings(const std::string &path, const EditorSettings &setting
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kEditorSettingsSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
+	json.set("retail_directory", io::JsonValue::make_string(settings.retail_directory));
+	json.set("play_retail", io::JsonValue::make_bool(settings.play_retail));
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
 	json.set("recent_projects", std::move(recent));

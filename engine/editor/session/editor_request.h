@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <editor/assets/asset_import.h>
 #include <editor/documents/editable_document.h>
 
 namespace opennova::editor {
@@ -18,6 +19,9 @@ enum class EditorRequestKind {
 	SetTitle,             // text
 	SetFeature,           // text = "mission" | "multiplayer", flag = on/off
 	SetRuntimeExecutable, // path ("" = the runtime packaged beside the editor)
+	PreviewImport, ImportFiles, CancelImport,
+	SetRetailDirectory,   // path = the local Joint Operations install
+	SetPlayRetail,        // flag = launch retail instead of OpenNova
 	CreateMissing,        // text = one role, or "" for every missing Required file
 	Build,
 	Play,                 // build, then run the game on the build
@@ -27,12 +31,12 @@ enum class EditorRequestKind {
 	Save, SaveAll, Undo, Redo, ResolveUnsaved,
 	// Shell-only: the portable session cannot serve these.
 	PickDirectory,        // purpose says what the picked directory is for
-	PickFile,             // purpose = RuntimeExecutable
+	PickFile,             // purpose = RuntimeExecutable; ImportFiles picks multiple files
 	RevealPath,           // path: show it in the OS file manager
 	Quit,
 };
 
-enum class PickPurpose { None, NewProjectLocation, OpenProject, RuntimeExecutable };
+enum class PickPurpose { None, NewProjectLocation, OpenProject, RuntimeExecutable, RetailDirectory, ImportFiles };
 
 enum class UnsavedChoice { SaveAll, Discard, Cancel };
 
@@ -42,6 +46,8 @@ struct EditorRequest {
 	std::string text;
 	bool flag = false;
 	PickPurpose purpose = PickPurpose::None;
+	std::vector<std::string> paths; // files chosen for PreviewImport
+	std::vector<ImportSource> imports; // selected files/members for ImportFiles; flag = replace
 	CatalogEdit catalog_edit;
 	UnsavedChoice unsaved_choice = UnsavedChoice::Cancel;
 };

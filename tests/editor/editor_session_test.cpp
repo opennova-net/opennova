@@ -9,6 +9,8 @@
 #include <vector>
 
 #include <editor/session/project_session.h>
+#include <editor/project/project_files.h>
+#include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -193,6 +195,183 @@ static int test_lifecycle() {
 	return 0;
 }
 
+static int test_import() {
+	editor_test::TempProjectDir dir("opennova_editor_import_test");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Imports"));
+	const std::string loose = dir.file("loose.txt");
+	const std::string packed = dir.file("source.pff");
+	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
+	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
+	const opennova::pff::PffWriteEntry entries[] = {
+		{"note.txt", data, sizeof(data), 0, 0, 0},
+		{"unused.txt", data, sizeof(data), 0, 0, 0},
+	};
+	TEST_EXPECT(opennova::pff::pff_write_archive(packed.c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                           entries, 2) == opennova::pff::PFF_WRITE_OK);
+	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
+	preview.paths = {loose, packed};
+	session.handle(preview);
+	TEST_EXPECT(session.view().import_open && session.view().import_sources.size() == 3);
+	session.handle(make_request(EditorRequestKind::CancelImport));
+	TEST_EXPECT(!session.view().import_open && session.view().import_sources.empty());
+	session.handle(preview);
+	EditorRequest importing = make_request(EditorRequestKind::ImportFiles);
+	importing.imports = {{loose, {}}, {packed, "note.txt"}};
+	session.handle(importing);
+	TEST_EXPECT(!session.view().import_open);
+	TEST_EXPECT(session.view().scan.find("loose.txt") && session.view().scan.find("note.txt"));
+	TEST_EXPECT(!session.view().scan.find("unused.txt"));
+	std::string text, error;
+	TEST_EXPECT(read_file_text(dir.file("project/note.txt"), text, error) && text == "packed");
+	TEST_EXPECT(read_file_text(loose, text, error) && text == "loose file");
+
+	// Replacing is explicit and uses the existing project's path and spelling.
+	fs::create_directory(dir.file("project/custom"));
+	fs::rename(dir.file("project/note.txt"), dir.file("project/custom/NOTE.TXT"));
+	TEST_EXPECT(editor_test::write_text(dir.file("project/custom/NOTE.TXT"), "authored"));
+	importing.imports = {{packed, "note.txt"}};
+	session.handle(importing);
+	TEST_EXPECT(session.view().diagnostics.back().code == "import.exists");
+	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "authored");
+	importing.flag = true;
+	session.handle(importing);
+	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "packed");
+	TEST_EXPECT(!fs::exists(dir.file("project/note.txt")));
+
+	// Import never discards an unsaved catalog. A clean open document reloads after replacement.
+	const std::string items = dir.file("items.def");
+	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	importing.imports = {{items, {}}};
+	session.handle(importing);
+	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	TEST_EXPECT(session.view().documents.size() == 1);
+	EditorRequest edit = make_request(EditorRequestKind::EditRecord, "defs/items.def");
+	edit.catalog_edit.address = {session.view().documents[0]->rows()[0]->id, opennova::def::DefRecordKind::Item, 0};
+	edit.catalog_edit.field = "hp"; edit.catalog_edit.value = int64_t(20);
+	session.handle(edit);
+	TEST_EXPECT(session.documents_dirty());
+	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
+	session.handle(importing);
+	TEST_EXPECT(session.view().diagnostics.back().code == "import.unsaved");
+	TEST_EXPECT(read_file_text(dir.file("project/defs/items.def"), text, error) && text.find("hp 10") != std::string::npos);
+	session.handle(make_request(EditorRequestKind::Undo));
+	session.handle(importing);
+	TEST_EXPECT(std::get<opennova::def::DefItemDef>(session.view().documents[0]->rows()[0]->data).hp == 30);
+
+	const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
+	const auto invalid = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}},
+	                                  paths, session.view().document, false);
+	TEST_EXPECT(invalid.imported.empty() && invalid.diagnostics.size() == 2);
+	TEST_EXPECT(invalid.diagnostics[0].code == "import.name");
+	TEST_EXPECT(!fs::exists(dir.file("escape.txt")));
+	const auto duplicates = import_assets({{loose, {}}, {loose, {}}}, paths, session.view().document, true);
+	TEST_EXPECT(duplicates.imported.size() == 1 && duplicates.diagnostics.size() == 1);
+	TEST_EXPECT(duplicates.diagnostics[0].code == "import.duplicate");
+	TEST_EXPECT(editor_test::write_text(dir.file("bad.pff"), "not an archive"));
+	preview.paths = {dir.file("bad.pff"), dir.file("missing.txt")};
+	session.handle(preview);
+	TEST_EXPECT(!session.view().import_open);
+	return 0;
+}
+
+static int test_retail_play() {
+	editor_test::TempProjectDir dir("opennova_editor_retail_play_test");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	TEST_EXPECT(!session.view().play_retail && session.view().retail_directory.empty());
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail test"));
+	session.handle(make_request(EditorRequestKind::CreateMissing));
+	EditorRequest retail = make_request(EditorRequestKind::SetPlayRetail);
+	retail.flag = true;
+	session.handle(retail);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 0 && session.view().diagnostics.back().code == "play.retail_missing");
+
+	const std::string install = dir.file("retail install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
+	TEST_EXPECT(editor_test::write_text(install + "/binkw32.dll", "ordinary Bink"));
+	session.handle(make_request(EditorRequestKind::SetRetailDirectory, install));
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 0);
+	TEST_EXPECT(session.view().diagnostics.back().message.find("game.cfg") != std::string::npos);
+	const std::string built = session.view().last_build.build_dir;
+	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe")); // missing source: no partial stage
+	std::vector<uint8_t> archive_before, archive_after;
+	std::string io_error;
+	TEST_EXPECT(read_file_bytes(built + "/localres.pff", archive_before, io_error));
+
+	TEST_EXPECT(editor_test::write_text(install + "/game.cfg", "video settings"));
+	TEST_EXPECT(editor_test::write_text(install + "/binkw32_.dll", "real JOTAC Bink"));
+	// Retail is selected even in a source checkout with OpenNova arguments and an MCP port.
+	PlayLauncher launcher;
+	launcher.source_run = true;
+	launcher.executable = dir.file("godot.exe");
+	TEST_EXPECT(editor_test::write_text(launcher.executable, "test runtime"));
+	launcher.godot_project_dir = dir.file("godot");
+	launcher.engine_args = {"--headless"};
+	launcher.mcp_port = 8999;
+	session.set_launcher(launcher);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 1 && session.view().play_state == PlayState::Running);
+	TEST_EXPECT(platform.last_plan.executable == built + "/Jointops.exe");
+	TEST_EXPECT(platform.last_plan.working_dir == built && session.running_build_dir() == built);
+	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}));
+	TEST_EXPECT(platform.last_plan.mcp_port == 0 && platform.last_plan.log_file == built + "/_filelog.txt");
+	std::string copied;
+	TEST_EXPECT(read_file_text(built + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
+	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "video settings");
+	{
+		FakePlatform other;
+		ProjectSession reopened(other, dir.file("settings.json"));
+		TEST_EXPECT(reopened.view().play_retail && reopened.view().retail_directory == install);
+	}
+	session.handle(make_request(EditorRequestKind::Build));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 1); // Build stays a build with the retail checkbox checked
+	session.handle(make_request(EditorRequestKind::StopPlay));
+	session.poll();
+	TEST_EXPECT(session.view().play_state == PlayState::Stopped);
+
+	// Ordinary installs use the plain Bink DLL. A missing source cannot launch the
+	// staged executable left from the successful run.
+	fs::remove(fs::path(install) / "binkw32_.dll");
+	TEST_EXPECT(editor_test::write_text(built + "/game.cfg", "project video settings"));
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 2);
+	TEST_EXPECT(read_file_text(built + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
+	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "project video settings");
+	session.handle(make_request(EditorRequestKind::StopPlay));
+	session.poll();
+	fs::remove(fs::path(install) / "Jointops.exe");
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 2 && session.view().play_state == PlayState::Stopped);
+
+	// A copy failure is also reported before any child starts.
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
+	fs::remove(fs::path(built) / "binkw32.dll");
+	fs::create_directory(fs::path(built) / "binkw32.dll");
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 2 && session.view().diagnostics.back().code == "play.retail_copy");
+
+	retail.flag = false;
+	session.handle(retail);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.executable == launcher.executable);
+	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
+	TEST_EXPECT(read_file_bytes(built + "/localres.pff", archive_after, io_error) && archive_after == archive_before);
+	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings");
+	return 0;
+}
+
 static int test_editor_settings() {
 	editor_test::TempProjectDir dir("opennova_editor_settings_test");
 	EditorSettings settings;
@@ -217,6 +396,8 @@ static int test_editor_settings() {
 int main() {
 	int failures = 0;
 	failures += test_editor_settings();
+	failures += test_retail_play();
+	failures += test_import();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

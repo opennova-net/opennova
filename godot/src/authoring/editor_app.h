@@ -116,6 +116,7 @@ private:
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
+	void _on_files_selected(const PackedStringArray &p_files);
 	void _on_picker_canceled();
 	int allocate_mcp_port();
 	opennova::editor::PlayLauncher make_launcher(int p_mcp_port) const;

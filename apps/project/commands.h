@@ -8,6 +8,7 @@
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
 //   opennova-project build <dir> [--out <dir>]
+//   opennova-project import <dir> <source> [--entry <name>]... [--replace]
 //
 // Exit 0 on success (validate: no errors and no unmet required row; create-missing:
 // every missing required file created; build: a directory the runtime boots), 1 when

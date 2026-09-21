@@ -17,6 +17,8 @@ inline constexpr size_t kRecentProjectsMax = 10;
 struct EditorSettings {
 	std::vector<std::string> recent_projects; // project roots, most recent first
 	std::string runtime_executable;           // "" = the runtime packaged beside the editor
+	std::string retail_directory;             // local Joint Operations install
+	bool play_retail = false;
 };
 
 // A missing file reads as defaults; a present but invalid file is an error.

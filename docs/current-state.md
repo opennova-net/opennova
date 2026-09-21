@@ -176,7 +176,8 @@ editor returning as a second Godot product, landing slice by slice in the order 
 decision 12 names (project core and CLI, blank factories, build and Play, the shell and
 packaging, the item/weapon/ammo catalog, strings and menus, the asset graph, imports);
 the ADR is that program's only tracked plan. S5 supplies typed catalogs,
-canonical DEF writers, undo/save lifecycle and focused reference validation.
+canonical DEF writers, undo/save lifecycle and focused reference validation,
+plus generic native-file/PFF import and the retail Play option for validation.
 The next feature slice is strings and menus with the shared `MenuFrame` preview.
 
 Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <editor/documents/editable_document.h>
+#include <editor/assets/asset_import.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -47,7 +48,12 @@ struct SessionView {
 	std::string play_command_line;
 	bool play_exited_on_its_own = false;
 	std::string runtime_executable; // what Play launches (resolved; "" = none found)
-	bool source_run = false;        // Play drives the Godot binary at the source project
+	bool source_run = false;        // OpenNova Play drives the Godot binary at the source project
+	std::string retail_directory;
+	bool play_retail = false;
+
+	std::vector<ImportSource> import_sources;
+	bool import_open = false;
 
 	std::vector<std::string> output; // the build log and the running game's log, oldest first
 	std::vector<std::string> recent_projects;

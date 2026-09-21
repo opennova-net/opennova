@@ -177,9 +177,35 @@ record/nested edits, reference selection, Save/Save All and undo/redo. Close,
 project changes and Quit offer Save All / Discard / Cancel. Rescan reloads clean
 documents and preserves dirty ones. The Godot shell dispatches typed requests;
 the Play acceptance test reads the mounted build through runtime databases.
-A general asset graph and imports remain later slices.
+A general asset graph and source-format conversion remain later slices.
+
+For retail validation, **Play in retail** below Build/Play selects Joint Operations.
+The **Retail install** folder lives in the editor's machine settings. Play builds
+normally, copies only `Jointops.exe`, Bink (preferring `binkw32_.dll` as
+`binkw32.dll`) and `game.cfg` beside the built data, and launches
+`/w /d /FRISK` there through the same managed child. This restores the launch
+recipe from `godot/modtools/game_packer.gd` and `game_run_session.gd` at
+`4521b859e^`. The retail install is only read; the packed build data is unchanged.
+An existing built `game.cfg` is kept, preserving authored or adjusted video settings.
+Build alone does not launch a child. Missing runtime files or failed copies
+prevent launch; retail's `_filelog.txt` feeds Output instead of an MCP endpoint.
+
+**Import...** in Project files accepts native loose files or selected members of
+any PFF archive. The file picker is generic and independent of the retail setting.
+A selection dialog offers filtering and explicit replacement. Imports copy into
+the usual project folders, preserving an existing file's path when replacing it,
+then rescan and reload clean documents. Dirty catalogs must be saved first.
+The existing VFS supplies archive decoding; imported native files need no
+conversion cache or sidecar. The CLI shares this core:
+`opennova-project import <project> <source> [--entry <name>]... [--replace]`.
+Imports do not pull dependencies automatically; missing references remain visible
+in Problems.
 
 ![Catalog and typed inspector](../images/editor-catalog.png)
+
+![Retail Play and settings](../images/editor-retail-play.png)
+
+![Generic native-file and PFF import](../images/editor-import.png)
 
 ## Consequences
 

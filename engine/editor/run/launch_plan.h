@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/diagnostic.h>
+
 namespace opennova::editor {
 
 // The argument vector Play spawns (ADR 0046 d8): the game runtime on a build directory,
@@ -33,6 +35,11 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
                                    const std::string &build_dir, const std::string &game_code, int mcp_port,
                                    const std::string &mission = std::string(),
                                    const std::vector<std::string> &engine_args = {});
+
+// Copy the three retail runtime files beside the built data, then prepare the
+// historical Jointops.exe /w /d /FRISK launch. The retail install is only read.
+bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
+                                LaunchPlan &out, Diagnostic &error);
 
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);

@@ -38,6 +38,7 @@ private:
 	char title_[128] = "My Game";
 	char location_[512] = "";
 	char runtime_[512] = "";
+	char retail_[512] = "";
 	char edited_title_[128] = "";
 	uint64_t edited_title_revision_ = ~uint64_t{0};
 	uint64_t runtime_revision_ = ~uint64_t{0};

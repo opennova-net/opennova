@@ -60,6 +60,15 @@ static int test_new_status_validate() {
 	TEST_EXPECT(run({"build", root, "--out", dir.file("elsewhere")}) == 0);
 	TEST_EXPECT(std::filesystem::is_regular_file(dir.file("elsewhere") + "/last_good.json"));
 
+	// Generic native file import uses the same core and requires explicit replacement.
+	TEST_EXPECT(run({"import", root}) == 2);
+	const std::string source = dir.file("source.txt");
+	TEST_EXPECT(editor_test::write_text(source, "imported file"));
+	TEST_EXPECT(run({"import", root, source}) == 0);
+	TEST_EXPECT(std::filesystem::is_regular_file(root + "/source.txt"));
+	TEST_EXPECT(run({"import", root, source}) == 1);
+	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0);
+
 	// A file with the wrong content behind a required name is an error too.
 	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));
 	TEST_EXPECT(run({"validate", root}) == 1);

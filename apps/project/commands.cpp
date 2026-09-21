@@ -1,6 +1,8 @@
 #include "commands.h"
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/asset_import.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/create_missing.h>
 #include <editor/model/diagnostic.h>
@@ -28,6 +30,7 @@ int usage(std::FILE *err, const char *why) {
 	             "       opennova-project status <dir>\n"
 	             "       opennova-project validate <dir>\n"
 	             "       opennova-project create-missing <dir> [--role <token>]\n"
+	             "       opennova-project import <dir> <source> [--entry <name>]... [--replace]\n"
 	             "       opennova-project build <dir> [--out <dir>]\n"
 	             "  new             create an empty project (project.opennova + .opennova/) in <dir>\n"
 	             "  status          the project's title, game, asset count and requirements summary\n"
@@ -193,6 +196,29 @@ struct PrintProgress : BuildProgress {
 	}
 };
 
+int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
+	if (argc < 3) return usage(err, "import needs a project directory and a source file");
+	std::vector<ImportSource> sources;
+	bool replace = false;
+	for (int i = 3; i < argc; ++i) {
+		const std::string arg = argv[i];
+		if (arg == "--replace") replace = true;
+		else if (arg == "--entry" && i + 1 < argc) sources.push_back({argv[2], argv[++i]});
+		else return usage(err, ("unknown or incomplete import option " + arg).c_str());
+	}
+	if (sources.empty()) {
+		if (opennova::strutil::ends_with_icase(argv[2], ".pff"))
+			return usage(err, "choose PFF members with --entry <name> (repeat for more files)");
+		sources.push_back({argv[2], {}});
+	}
+	OpenedProject project;
+	if (!open_for_report(argv[1], project, err)) return 2;
+	const ImportResult result = import_assets(sources, project.paths, project.doc, replace);
+	for (const auto &path : result.imported) std::fprintf(out, "imported %s\n", path.c_str());
+	for (const auto &d : result.diagnostics) print_diagnostic(err, d);
+	return result.diagnostics.empty() ? 0 : 1;
+}
+
 int command_build(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
 	std::string dir, out_dir;
 	for (int i = 1; i < argc; ++i) {
@@ -245,6 +271,7 @@ int run_project_command(int argc, const char *const *argv, std::FILE *out, std::
 	if (command == "status") return command_status(argc, argv, out, err);
 	if (command == "validate") return command_validate(argc, argv, out, err);
 	if (command == "create-missing") return command_create_missing(argc, argv, out, err);
+	if (command == "import") return command_import(argc, argv, out, err);
 	if (command == "build") return command_build(argc, argv, out, err);
 	if (command == "-h" || command == "--help" || command == "help") return usage(err, nullptr);
 	return usage(err, ("unknown command " + command).c_str());

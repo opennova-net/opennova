@@ -32,6 +32,8 @@ ProjectSession::ProjectSession(ProcessPlatform &platform, std::string editor_set
 		report(error);
 	}
 	view_.recent_projects = settings_.recent_projects;
+	view_.retail_directory = settings_.retail_directory;
+	view_.play_retail = settings_.play_retail;
 	view_.status = "No project open.";
 	touch();
 }
@@ -89,6 +91,46 @@ bool ProjectSession::handle(const EditorRequest &request) {
 		save_editor_settings();
 		view_.runtime_executable = resolve_runtime_executable();
 		touch();
+		return true;
+	case EditorRequestKind::PreviewImport:
+		if (view_.project_open) {
+			std::vector<Diagnostic> diagnostics;
+			view_.import_sources = list_import_sources(request.paths, diagnostics);
+			view_.import_open = !view_.import_sources.empty();
+			for (const auto &d : diagnostics) report(d);
+			touch();
+		}
+		return true;
+	case EditorRequestKind::CancelImport:
+		view_.import_open = false;
+		view_.import_sources.clear();
+		touch();
+		return true;
+	case EditorRequestKind::ImportFiles:
+		view_.import_open = false;
+		view_.import_sources.clear();
+		if (!view_.project_open) return true;
+		if (documents_dirty()) {
+			report(make_diagnostic(DiagnosticSeverity::Error, "import.unsaved",
+			                       "Save edited catalog files before importing."));
+			return true;
+		}
+		{
+			const ImportResult imported = import_assets(request.imports, paths_, view_.document, request.flag);
+			handle(make_request(EditorRequestKind::Rescan));
+			for (const auto &path : imported.imported) note("Imported " + path);
+			for (const auto &d : imported.diagnostics) report(d);
+			view_.status = std::to_string(imported.imported.size()) + " file(s) imported.";
+			touch();
+		}
+		return true;
+	case EditorRequestKind::SetRetailDirectory:
+		settings_.retail_directory = request.path;
+		save_editor_settings();
+		return true;
+	case EditorRequestKind::SetPlayRetail:
+		settings_.play_retail = request.flag;
+		save_editor_settings();
 		return true;
 	case EditorRequestKind::CreateMissing:
 		if (view_.project_open) create_missing(request.text);
@@ -196,6 +238,8 @@ void ProjectSession::close_project() {
 	documents_.clear(); view_.active_document.clear(); view_.selection = {};
 	update_document_view();
 	view_.project_open = false;
+	view_.import_open = false;
+	view_.import_sources.clear();
 	view_.project_root.clear();
 	view_.document = ProjectDocument();
 	view_.scan = AssetScan();
@@ -314,31 +358,40 @@ std::string ProjectSession::resolve_runtime_executable() const {
 }
 
 void ProjectSession::start_play() {
-	const std::string executable = resolve_runtime_executable();
-	std::error_code ec;
-	if (executable.empty() || !fs::is_regular_file(executable, ec)) {
-		report(make_diagnostic(DiagnosticSeverity::Error, "play.runtime_missing",
-		                       executable.empty()
-		                               ? "No game runtime is set; choose opennova.exe under Project."
-		                               : "The game runtime was not found: " + executable));
-		view_.status = "The game runtime was not found.";
-		touch();
-		return;
-	}
 	const std::string &build_dir = view_.last_build.build_dir;
-	const LaunchPlan plan =
-	        launcher_.source_run
-	                ? make_source_launch_plan(executable, launcher_.godot_project_dir, build_dir,
-	                                          view_.document.target_game, launcher_.mcp_port, std::string(),
-	                                          launcher_.engine_args)
-	                : make_play_launch_plan(executable, build_dir, view_.document.target_game,
-	                                        launcher_.mcp_port, std::string(), launcher_.engine_args);
+	LaunchPlan plan;
+	Diagnostic error;
+	std::error_code ec;
+	if (settings_.play_retail) {
+		if (!prepare_retail_launch_plan(settings_.retail_directory, build_dir, plan, error)) {
+			report(error);
+			view_.status = "Retail could not be prepared; see Problems.";
+			touch();
+			return;
+		}
+	} else {
+		const std::string executable = resolve_runtime_executable();
+		if (executable.empty() || !fs::is_regular_file(executable, ec)) {
+			report(make_diagnostic(DiagnosticSeverity::Error, "play.runtime_missing",
+			                       executable.empty()
+			                               ? "No game runtime is set; choose opennova.exe under Project."
+			                               : "The game runtime was not found: " + executable));
+			view_.status = "The game runtime was not found.";
+			touch();
+			return;
+		}
+		plan = launcher_.source_run
+		               ? make_source_launch_plan(executable, launcher_.godot_project_dir, build_dir,
+		                                         view_.document.target_game, launcher_.mcp_port, std::string(),
+		                                         launcher_.engine_args)
+		               : make_play_launch_plan(executable, build_dir, view_.document.target_game,
+		                                       launcher_.mcp_port, std::string(), launcher_.engine_args);
+	}
 	// The game rewrites its log; drop the previous run's so the tail starts clean.
 	fs::remove(plan.log_file, ec);
 	game_log_file_ = plan.log_file;
 	game_log_offset_ = 0;
 	game_log_partial_.clear();
-	Diagnostic error;
 	if (!play_.start(plan, error)) {
 		report(error);
 		view_.status = "The game could not be started.";
@@ -350,7 +403,7 @@ void ProjectSession::start_play() {
 	view_.play_command_line = launch_plan_command_line(plan);
 	view_.play_exited_on_its_own = false;
 	note("Running: " + view_.play_command_line);
-	view_.status = "Game running.";
+	view_.status = settings_.play_retail ? "Retail running." : "Game running.";
 	touch();
 }
 
@@ -407,6 +460,8 @@ void ProjectSession::save_editor_settings() {
 	Diagnostic error;
 	if (!::opennova::editor::save_editor_settings(settings_path_, settings_, error)) report(error);
 	view_.recent_projects = settings_.recent_projects;
+	view_.retail_directory = settings_.retail_directory;
+	view_.play_retail = settings_.play_retail;
 	touch();
 }
 

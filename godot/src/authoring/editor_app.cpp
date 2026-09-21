@@ -79,6 +79,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_source_run"), &EditorApp::is_source_run);
 	ClassDB::bind_method(D_METHOD("_on_dir_selected", "dir"), &EditorApp::_on_dir_selected);
 	ClassDB::bind_method(D_METHOD("_on_file_selected", "file"), &EditorApp::_on_file_selected);
+	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
 	ClassDB::bind_method(D_METHOD("_on_picker_canceled"), &EditorApp::_on_picker_canceled);
 }
 
@@ -184,7 +185,7 @@ void EditorApp::drain_requests() {
 	while (windows_->take_request(request)) {
 		if (request.kind == EditorRequestKind::Play) {
 			// The port is the shell's to allocate: a fresh loopback port per run.
-			session_->set_launcher(make_launcher(allocate_mcp_port()));
+			session_->set_launcher(make_launcher(session_->view().play_retail ? 0 : allocate_mcp_port()));
 		}
 		if (!session_->handle(request)) {
 			serve(request);
@@ -223,10 +224,12 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		add_child(picker_);
 		picker_->connect("dir_selected", Callable(this, "_on_dir_selected"));
 		picker_->connect("file_selected", Callable(this, "_on_file_selected"));
+		picker_->connect("files_selected", Callable(this, "_on_files_selected"));
 		picker_->connect("canceled", Callable(this, "_on_picker_canceled"));
 	}
 	pending_pick_ = p_purpose;
-	picker_->set_file_mode(p_directory ? FileDialog::FILE_MODE_OPEN_DIR : FileDialog::FILE_MODE_OPEN_FILE);
+	picker_->set_file_mode(p_directory ? FileDialog::FILE_MODE_OPEN_DIR :
+			p_purpose == PickPurpose::ImportFiles ? FileDialog::FILE_MODE_OPEN_FILES : FileDialog::FILE_MODE_OPEN_FILE);
 	PackedStringArray filters;
 	switch (p_purpose) {
 		case PickPurpose::NewProjectLocation:
@@ -239,6 +242,12 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Choose the game runtime (opennova.exe)");
 			filters.push_back("*.exe ; Game runtime");
 			break;
+		case PickPurpose::RetailDirectory:
+			picker_->set_title("Choose the Joint Operations install folder");
+			break;
+		case PickPurpose::ImportFiles:
+			picker_->set_title("Import files or PFF contents");
+			break;
 		case PickPurpose::None:
 			break;
 	}
@@ -250,6 +259,14 @@ void EditorApp::_on_dir_selected(const String &p_dir) {
 #if OPENNOVA_EDITOR_UI
 	windows_->deliver_pick(pending_pick_, opennova::to_std(p_dir));
 #endif
+	pending_pick_ = PickPurpose::None;
+}
+
+void EditorApp::_on_files_selected(const PackedStringArray &p_files) {
+	ensure_session();
+	EditorRequest request = opennova::editor::make_request(EditorRequestKind::PreviewImport);
+	for (int i = 0; i < p_files.size(); ++i) request.paths.push_back(opennova::to_std(p_files[i]));
+	session_->handle(request);
 	pending_pick_ = PickPurpose::None;
 }
 
@@ -312,7 +329,7 @@ bool EditorApp::build() {
 
 bool EditorApp::play() {
 	ensure_session();
-	session_->set_launcher(make_launcher(allocate_mcp_port()));
+	session_->set_launcher(make_launcher(session_->view().play_retail ? 0 : allocate_mcp_port()));
 	session_->handle(opennova::editor::make_request(EditorRequestKind::Play));
 	session_->finish_build();
 	return session_->view().play_state == PlayState::Running;

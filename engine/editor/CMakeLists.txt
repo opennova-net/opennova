@@ -9,6 +9,7 @@
 add_library(opennova_editor STATIC
     # assets — what a project file is to the engine
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     # blank — the from-scratch files behind Create / Create all missing
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp

@@ -55,6 +55,10 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::RuntimeExecutable:
 		request(make_request(EditorRequestKind::SetRuntimeExecutable, path));
 		break;
+	case PickPurpose::RetailDirectory:
+		request(make_request(EditorRequestKind::SetRetailDirectory, path));
+		break;
+	case PickPurpose::ImportFiles: break; // the multi-file result goes directly to the session
 	case PickPurpose::None: break;
 	}
 }
