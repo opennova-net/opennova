@@ -1,8 +1,8 @@
 // The loader strip decode every renderer pass performs over a parsed
 // Threedi3di3 LOD, plus the material-id -> material-array lookup that goes with
 // it. One implementation for the portable terrain static-shadow geometry
-// (engine/runtime/terrain) and the Godot ObjectData surface builder
-// (godot/src/object) — previously two verbatim copies.
+// (engine/runtime/terrain) and the CPU model mesh preparation
+// (engine/runtime/renderer) — previously two verbatim copies.
 // [orig: STRP runtime decode — basic loop @ 0x474CAF, skinned @ 0x474B60;
 //  record fields in docs/threedi/3di-gp-format-re.md STRP/ROBJ].
 #pragma once

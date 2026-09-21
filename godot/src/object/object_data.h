@@ -193,7 +193,6 @@ public:
 	// The loaded document's LOD count (0 when empty).
 	int get_lod_count() const;
 
-	Array get_lod_surfaces(int p_lod_index) const;
 	bool is_skinned(int p_lod_index) const;
 	// One MTRL row (object/material_info.h, C++-only); false out of range.
 	bool get_material_info(int p_index, MaterialInfo &r_info) const;

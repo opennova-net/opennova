@@ -5,7 +5,7 @@
 #include "object/model_user_point.h"
 
 #include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
-#include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
+#include <runtime/renderer/model_mesh_prepare.h>
 #include <runtime/world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
 #include <godot_cpp/classes/mesh.hpp>
@@ -20,23 +20,35 @@ using namespace opennova::threedi;
 
 namespace {
 
-Vector3 godot_position(const ThreediVertex &v) {
-	return Vector3(-v.position[0], v.position[1], v.position[2]);
-}
-
-Vector3 godot_normal(const ThreediVertex &v) {
-	return Vector3(-v.normal[0], v.normal[1], v.normal[2]);
-}
-
-bool vertex_has_tangents(const ThreediVertex &v) {
-	if ((v.flags & THREEDI_VERTEX_FLAG_TANGENTS) != 0) {
-		return true;
+Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
+	PackedVector3Array vertices, normals;
+	PackedVector2Array uvs, uvs2;
+	PackedFloat32Array tangents, weights;
+	PackedInt32Array bones, indices;
+	for (const auto &v : surface.vertices) vertices.push_back(Vector3(v[0], v[1], v[2]));
+	for (const auto &v : surface.normals) normals.push_back(Vector3(v[0], v[1], v[2]));
+	for (const auto &v : surface.uvs) uvs.push_back(Vector2(v[0], v[1]));
+	for (const auto &v : surface.uvs2) uvs2.push_back(Vector2(v[0], v[1]));
+	for (const auto &v : surface.tangents)
+		for (const auto value : v) tangents.push_back(value);
+	for (const auto &v : surface.bones)
+		for (const auto value : v) bones.push_back(value);
+	for (const auto &v : surface.weights)
+		for (const auto value : v) weights.push_back(value);
+	for (const auto value : surface.indices) indices.push_back(value);
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	arrays[Mesh::ARRAY_TEX_UV] = uvs;
+	arrays[Mesh::ARRAY_TEX_UV2] = uvs2;
+	if (!tangents.is_empty()) arrays[Mesh::ARRAY_TANGENT] = tangents;
+	if (!bones.is_empty()) {
+		arrays[Mesh::ARRAY_BONES] = bones;
+		arrays[Mesh::ARRAY_WEIGHTS] = weights;
 	}
-	const float tangent_len =
-			v.tangent[0] * v.tangent[0] + v.tangent[1] * v.tangent[1] + v.tangent[2] * v.tangent[2];
-	const float bitangent_len =
-			v.bitangent[0] * v.bitangent[0] + v.bitangent[1] * v.bitangent[1] + v.bitangent[2] * v.bitangent[2];
-	return tangent_len > 0.000001f && bitangent_len > 0.000001f;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	return arrays;
 }
 
 } // namespace
@@ -118,11 +130,11 @@ Array ObjectData::get_collision_volumes() const {
 	// ConvexPolygonShape3D hulls from them.
 	//
 	// Coordinate frame: unlike render geometry (RDTA, which the 3DI reader stores already
-	// converted to engine space, so the Godot boundary only needs godot_position's
+	// converted to engine space, so the Godot boundary only needs the render frame's
 	// negate-x), collision geometry (CVRT) is stored in *workspace* space with no
 	// conversion, as validated against the visual mesh AABB. RDTA reaches engine
 	// space via (-y, z, x); composing that with
-	// godot_position's negate-x gives the net workspace->Godot map (x, y, z) -> (y, z, x),
+	// the render frame's negate-x gives the net workspace->Godot map (x, y, z) -> (y, z, x),
 	// a pure cyclic axis rotation. Applying it makes a hull placed at the same transform
 	// as the visual model coincide with it.
 	Array out;
@@ -236,151 +248,6 @@ bool ObjectData::is_skinned(int p_lod_index) const {
 			opennova::world::model_is_skinned(native_model(), p_lod_index);
 }
 
-Array ObjectData::get_lod_surfaces(int p_lod_index) const {
-	Array result;
-	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
-		return result;
-	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	if (lod.vertices.items == nullptr || lod.indices.indices == nullptr || lod.strips == nullptr) {
-		return result;
-	}
-
-	// Strips are stored sequentially per render object, opaque strips first,
-	// then alpha strips [orig: the RMDL/ROBJ walk every renderer pass performs].
-	// Walking parts with a cursor recovers each strip's owning part and its
-	// opaque/alpha classification.
-	size_t strip_cursor = 0;
-	for (size_t part_idx = 0; part_idx < lod.render_object_count; ++part_idx) {
-		const ThreediRenderObject &ro = lod.render_objects[part_idx];
-		const size_t part_strip_count = static_cast<size_t>(ro.num_strips + ro.num_alpha_strips);
-		for (size_t s = 0; s < part_strip_count && strip_cursor < lod.strip_count; ++s, ++strip_cursor) {
-			const size_t prim_index = strip_cursor;
-			const ThreediTriangleStrip &strip = lod.strips[prim_index];
-			std::vector<uint16_t> decoded_indices;
-			if (!threedi_decode_strip_indices(lod, strip, decoded_indices)) {
-				continue;
-			}
-
-			const uint32_t vertex_offset = static_cast<uint32_t>(strip.start_vertex);
-			const uint32_t vertex_count = static_cast<uint32_t>(strip.num_vertices);
-			bool has_tangents = true;
-			for (uint32_t i = 0; i < vertex_count; ++i) {
-				if (!vertex_has_tangents(lod.vertices.items[vertex_offset + i])) {
-					has_tangents = false;
-					break;
-				}
-			}
-
-			PackedVector3Array vertices;
-			PackedVector3Array normals;
-			PackedVector2Array uvs;
-			PackedVector2Array uvs2;
-			PackedFloat32Array tangents;
-			PackedInt32Array indices;
-			// Per-vertex skinning, emitted only for skinned strips. ARRAY_BONES carries 4
-			// *skeleton* bone indices (the per-vertex bone_indices are local indices into this
-			// strip's bone_table, which maps local -> skeleton; we remap here so the owner
-			// can bind one whole-skeleton Skin). ARRAY_WEIGHTS carries the 4 matching weights.
-			// [orig: the runtime skins via the .bad skeleton; bone_table is the per-strip remap.]
-			const bool skinned = strip.bone_table_length > 0;
-			PackedInt32Array bones;
-			PackedFloat32Array weights;
-			auto get_vertex = [&](uint16_t local_index) -> const ThreediVertex * {
-				const uint32_t src_index = vertex_offset + static_cast<uint32_t>(local_index);
-				if (src_index >= lod.vertices.count) {
-					return nullptr;
-				}
-				return &lod.vertices.items[src_index];
-			};
-			auto push_vertex = [&](const ThreediVertex &v) {
-				const Vector3 normal = godot_normal(v);
-				const Vector3 tangent(-v.tangent[0], v.tangent[1], v.tangent[2]);
-				const Vector3 bitangent(-v.bitangent[0], v.bitangent[1], v.bitangent[2]);
-				vertices.push_back(godot_position(v));
-				normals.push_back(normal);
-				uvs.push_back(Vector2(v.uv0[0], v.uv0[1]));
-				uvs2.push_back(Vector2(v.uv1[0], v.uv1[1]));
-				if (has_tangents) {
-					const float w = normal.cross(tangent).dot(bitangent) < 0.0f ? -1.0f : 1.0f;
-					tangents.push_back(tangent.x);
-					tangents.push_back(tangent.y);
-					tangents.push_back(tangent.z);
-					tangents.push_back(w);
-				}
-				if (skinned) {
-					for (int k = 0; k < 4; ++k) {
-						const int local = static_cast<int>(v.bone_indices[k]);
-						const int bone = (local >= 0 && local < strip.bone_table_length)
-								? static_cast<int>(strip.bone_table[local])
-								: 0;
-						bones.push_back(bone);
-					}
-					// The authored vertex carries 3 weights; the 4th influence is unused.
-					float w0 = v.bone_weights[0];
-					float w1 = v.bone_weights[1];
-					float w2 = v.bone_weights[2];
-					float w3 = 0.0f;
-					float sum = w0 + w1 + w2 + w3;
-					if (sum <= 1e-6f) {  // degenerate: pin fully to the first influence
-						w0 = 1.0f;
-						w1 = w2 = w3 = 0.0f;
-						sum = 1.0f;
-					}
-					weights.push_back(w0 / sum);
-					weights.push_back(w1 / sum);
-					weights.push_back(w2 / sum);
-					weights.push_back(w3 / sum);
-				}
-				indices.push_back(vertices.size() - 1);
-			};
-			auto push_triangle = [&](uint16_t a, uint16_t b, uint16_t c) {
-				const ThreediVertex *va = get_vertex(a);
-				const ThreediVertex *vb = get_vertex(b);
-				const ThreediVertex *vc = get_vertex(c);
-				if (va == nullptr || vb == nullptr || vc == nullptr) {
-					return;
-				}
-
-				push_vertex(*va);
-				push_vertex(*vb);
-				push_vertex(*vc);
-			};
-
-			for (size_t i = 0; i + 2 < decoded_indices.size(); i += 3) {
-				push_triangle(decoded_indices[i], decoded_indices[i + 1], decoded_indices[i + 2]);
-			}
-
-			if (vertices.is_empty()) {
-				continue;
-			}
-			Dictionary surface;
-			surface["primitive_index"] = static_cast<int64_t>(prim_index);
-			surface["material_index"] = strip.material_index;
-			surface["material_array_index"] = threedi_material_array_index_for_id(native_model(), strip.material_index);
-			surface["part_index"] = static_cast<int>(part_idx);
-			surface["abs"] = godot_vec3(ro.abs);
-			surface["is_alpha"] = s >= static_cast<size_t>(ro.num_strips);
-			surface["vertex_offset"] = static_cast<int64_t>(vertex_offset);
-			surface["vertices"] = vertices;
-			surface["normals"] = normals;
-			surface["uvs"] = uvs;
-			surface["uvs2"] = uvs2;
-			if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
-				surface["tangents"] = tangents;
-			}
-			if (skinned && bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4) {
-				surface["bones"] = bones;
-				surface["weights"] = weights;
-				surface["is_skinned"] = true;
-			}
-			surface["indices"] = indices;
-			result.push_back(surface);
-		}
-	}
-	return result;
-}
-
 uint64_t ObjectData::_submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame) {
 	return static_cast<uint64_t>(p_lod_index) |
 			(static_cast<uint64_t>(p_skeletal ? 1 : 0) << 16) |
@@ -403,109 +270,25 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 	if (cached != submesh_cache.end()) {
 		return cached->second.duplicate(true);
 	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	const Array surfaces = get_lod_surfaces(p_lod_index);
-	for (int i = 0; i < surfaces.size(); ++i) {
-		const Dictionary surface = surfaces[i];
-		const int part_index = static_cast<int>(surface.get("part_index", 0));
-		const int material_array_index = static_cast<int>(surface.get("material_array_index", surface.get("material_index", 0)));
-
-		PackedVector3Array vertices = surface.get("vertices", PackedVector3Array());
-		if (vertices.is_empty()) {
-			continue;
-		}
-		PackedVector3Array normals = surface.get("normals", PackedVector3Array());
-		PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
-		PackedInt32Array mesh_indices = surface.get("indices", PackedInt32Array());
-		if (p_native_frame) {
-			// Undo the baked (-x,y,z) runtime mirror: native positions/normals/tangents, and
-			// reverse each triangle's winding — the source D3D clockwise-front order is only
-			// CCW-correct for Godot BECAUSE of that mirror; unmirrored it must be re-reversed.
-			// (See header: the FP viewmodel path, paired with SkeletalAnim model_bind.)
-			for (int v = 0; v < vertices.size(); ++v) {
-				const Vector3 p = vertices[v];
-				vertices.set(v, Vector3(-p.x, p.y, p.z));
-			}
-			for (int v = 0; v < normals.size(); ++v) {
-				const Vector3 n = normals[v];
-				normals.set(v, Vector3(-n.x, n.y, n.z));
-			}
-			for (int t = 0; t + 3 < tangents.size(); t += 4) {
-				tangents.set(t, -tangents[t]);          // tangent x back to native
-				tangents.set(t + 3, -tangents[t + 3]);  // bitangent handedness follows the mirror
-			}
-			for (int t = 0; t + 2 < mesh_indices.size(); t += 3) {
-				const int32_t tmp = mesh_indices[t + 1];
-				mesh_indices.set(t + 1, mesh_indices[t + 2]);
-				mesh_indices.set(t + 2, tmp);
-			}
-		}
-
-		Array arrays;
-		arrays.resize(Mesh::ARRAY_MAX);
-		arrays[Mesh::ARRAY_VERTEX] = vertices;
-		arrays[Mesh::ARRAY_NORMAL] = normals;
-		arrays[Mesh::ARRAY_TEX_UV] = surface.get("uvs", PackedVector2Array());
-		arrays[Mesh::ARRAY_TEX_UV2] = surface.get("uvs2", PackedVector2Array());
-		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
-			arrays[Mesh::ARRAY_TANGENT] = tangents;
-		}
-		// Skinning arrays (4 bones + 4 weights per vertex). ArrayMesh requires both present
-		// together; only attach when both are valid for this surface's vertex count.
-		PackedInt32Array bones = surface.get("bones", PackedInt32Array());
-		PackedFloat32Array weights = surface.get("weights", PackedFloat32Array());
-		bool surface_skinned = bones.size() == vertices.size() * 4 && weights.size() == vertices.size() * 4;
-		// Rigid "fake skinning": when a skeleton will be applied (p_skeletal) but this surface
-		// has no per-vertex skin, fully weight every vertex (1.0) to a single bone = the part's
-		// subobject index. The .bad skeleton is authored so subobject i <-> bone i, so the rigid
-		// part follows that bone. [orig: rigid weapon parts ride a bone via fake skinning.]
-		if (!surface_skinned && p_skeletal) {
-			const int bone = p_bone_count > 0 ? CLAMP(part_index, 0, p_bone_count - 1) : MAX(part_index, 0);
-			const int vcount = static_cast<int>(vertices.size());
-			bones.resize(vcount * 4);
-			weights.resize(vcount * 4);
-			for (int v = 0; v < vcount; ++v) {
-				bones.set(v * 4 + 0, bone);
-				bones.set(v * 4 + 1, 0);
-				bones.set(v * 4 + 2, 0);
-				bones.set(v * 4 + 3, 0);
-				weights.set(v * 4 + 0, 1.0f);
-				weights.set(v * 4 + 1, 0.0f);
-				weights.set(v * 4 + 2, 0.0f);
-				weights.set(v * 4 + 3, 0.0f);
-			}
-			surface_skinned = true;
-		}
-		if (surface_skinned) {
-			arrays[Mesh::ARRAY_BONES] = bones;
-			arrays[Mesh::ARRAY_WEIGHTS] = weights;
-		}
-		arrays[Mesh::ARRAY_INDEX] = mesh_indices;
-
+	const auto surfaces = opennova::renderer::prepare_model_mesh(
+			native_model(), p_lod_index, {p_skeletal, p_bone_count, p_native_frame});
+	for (const auto &surface : surfaces) {
 		Ref<ArrayMesh> mesh;
 		mesh.instantiate();
-		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-		mesh->surface_set_name(0, vformat("material_%d", material_array_index));
-
-		Vector3 abs = Vector3();
-		int parent_index = -1;
-		if (part_index >= 0 && static_cast<size_t>(part_index) < lod.render_object_count) {
-			const ThreediRenderObject &part = lod.render_objects[part_index];
-			abs = godot_vec3(part.abs);
-			parent_index = part.parent_index;
-		}
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface));
+		mesh->surface_set_name(0, vformat("material_%d", surface.material_array_index));
 
 		Dictionary entry;
-		entry["robj_index"] = part_index;
-		entry["part_index"] = part_index;
-		entry["material_index"] = material_array_index;
-		entry["source_material_index"] = surface.get("material_index", material_array_index);
-		entry["is_alpha"] = surface.get("is_alpha", false);
+		entry["robj_index"] = surface.part_index;
+		entry["part_index"] = surface.part_index;
+		entry["material_index"] = surface.material_array_index;
+		entry["source_material_index"] = surface.material_index;
+		entry["is_alpha"] = surface.is_alpha;
 		entry["mesh"] = mesh;
-		entry["abs"] = abs;
-		entry["parent_index"] = parent_index;
-		entry["primitive_index"] = surface.get("primitive_index", i);
-		entry["is_skinned"] = surface_skinned;
+		entry["abs"] = Vector3(surface.abs[0], surface.abs[1], surface.abs[2]);
+		entry["parent_index"] = surface.parent_index;
+		entry["primitive_index"] = static_cast<int64_t>(surface.primitive_index);
+		entry["is_skinned"] = !surface.bones.empty();
 		result.push_back(entry);
 	}
 	// Keep the pristine copy; the caller gets its own entry dictionaries. The

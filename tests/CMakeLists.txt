@@ -723,6 +723,11 @@ target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_model_geometry COMMAND world_model_geometry_test)
 
+add_executable(renderer_model_mesh_prepare_test renderer/model_mesh_prepare_test.cpp)
+target_link_libraries(renderer_model_mesh_prepare_test PRIVATE opennova_runtime)
+target_include_directories(renderer_model_mesh_prepare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_model_mesh_prepare COMMAND renderer_model_mesh_prepare_test)
+
 add_executable(renderer_fp_viewmodel_spec_test renderer/fp_viewmodel_spec_test.cpp)
 target_link_libraries(renderer_fp_viewmodel_spec_test PRIVATE opennova_runtime)
 target_include_directories(renderer_fp_viewmodel_spec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
