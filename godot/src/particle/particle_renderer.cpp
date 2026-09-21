@@ -237,18 +237,6 @@ std::uint32_t pack_argb(float red, float green, float blue, float alpha) {
 			static_cast<std::uint32_t>(unit_byte(blue));
 }
 
-std::uint32_t pack_argb_bytes(std::uint8_t red, std::uint8_t green,
-		std::uint8_t blue, std::uint8_t alpha) {
-	return (static_cast<std::uint32_t>(alpha) << 24) |
-			(static_cast<std::uint32_t>(red) << 16) |
-			(static_cast<std::uint32_t>(green) << 8) |
-			static_cast<std::uint32_t>(blue);
-}
-
-std::uint8_t retail_low_byte(float value) {
-	return opennova::renderer::particle_retail_low_byte(value);
-}
-
 Color unpack_argb(std::uint32_t value) {
 	constexpr float inv = 1.0f / 255.0f;
 	return Color(
@@ -1049,21 +1037,11 @@ public:
 
 	static std::uint32_t lit_primary_color(const LitQuadInput &lit,
 			const Basis &view_basis) {
-		// k = 0.5773503 and the transpose(Rx(roll) * view) light rotation
-		// (CParticleEmitter_BuildBillboardQuads @0x5e6d60 - docs/particles/ptl-format-re.md).
-		constexpr float light_component = 0.5773503f;
-		const Vector3 seed = lit.bump_scale *
-				Vector3(light_component, light_component, light_component);
-		const Basis rotate_x(Vector3(1.0f, 0.0f, 0.0f), lit.roll);
-		// Literal retail operation: transpose(Rx(roll) * view).
-		const Vector3 light_local =
-				(rotate_x * view_basis).transposed().xform(seed);
-		// Exact FVF ordering for Bump/Bumpadd: DIFFUSE (Godot COLOR) carries
-		// encoded light + particle alpha; SPECULAR (CUSTOM0) keeps the original
-		// modulated RGB with opaque alpha.
-		return pack_argb_bytes(retail_low_byte(light_local.x),
-				retail_low_byte(light_local.y), retail_low_byte(light_local.z),
-				lit.alpha);
+		std::array<float, 9> rows;
+		for (int row = 0; row < 3; ++row)
+			for (int col = 0; col < 3; ++col)
+				rows[row * 3 + col] = static_cast<float>(view_basis[row][col]);
+		return opennova::renderer::particle_lit_primary_color(lit.bump_scale, lit.roll, lit.alpha, rows);
 	}
 
 	// Re-derives the view-dependent Bump/Bumpadd DIFFUSE channel for a second
