@@ -85,6 +85,31 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 		const world::SpawnZoneRegistry &zones, const std::string &medic_key_label,
 		const hud::GameTextLookup &gametext);
 
+// THE JOINER'S READINESS the parity harness classifies (the WITNESSED
+// deploy-hold split, docs/net/novaworld-net-re.md §5.61: the client enters its
+// protocol InMatch phase and owns a live motor after the first loadout grant
+// so its pre-pick C2S 0x0C flows, while the player-paced DEATH screen holds
+// presentation). Both are false on every role but a live joiner.
+// The deploy hold: the pick is the player's (AwaitDeployPick) on a bound self
+// handle, no join error, the session alive — the embedder ANDs its DEATH
+// screen's presented state.
+bool joiner_deploy_hold_ready(const RoleView &view);
+// In match: a local player in the protocol's InMatch phase; an auto-deploy run
+// also waits for the pick to clear.
+bool joiner_in_match_ready(const RoleView &view, bool auto_deploy);
+
+// The DEATH screen's zone rows [orig: UI_UpdateDeathScreenContent @0x5536a0 —
+// def present, team match, SECURED (a numbered zone lists only at full control:
+// the zone-timer EntryById[9] >= [10] gate), attrib 0x40000; letter = 'A' +
+// registry index, name = WPNames/STRWPNAME%03d(index+1)]. The local BMS owns
+// membership/letter identity; live S2C 0x6F/0x53 owns team + control. Every
+// TEAM zone is emitted with its `secured` verdict: the second (occupant) loop
+// of the populate has no secured gate, so the list builder
+// (world/deploy_screen_feed.h) decides which rows list and where the
+// occupants land. A joiner's feed: false (nothing emitted) on every other role.
+bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		std::vector<world::DeployZoneRow> &out);
+
 // The AAS zone status panel's zone rows: the world's zone walk
 // (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
 // 13-DWORD image of the retail shared timer list, present once a 0x6F value

@@ -400,6 +400,7 @@ public:
 
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
+	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
 	// The joiner's read of its own dead bit: the recipient-local 0x0A health

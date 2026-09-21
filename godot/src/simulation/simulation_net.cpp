@@ -14,7 +14,6 @@
 #include <cmath>
 #include <cstring>
 
-#include <runtime/inmatch/server_initial_state.h> // install_mission_location_names
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
@@ -29,7 +28,6 @@
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
-#include <formats/rtxt/rtxt.h>
 #include <runtime/world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/display_server.hpp>
@@ -71,12 +69,8 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 		if (host_config.server_name.empty()) host_config.server_name = "OpenNova LAN Host";
 		host_config.max_players = net_.host_max_players; // the UI player cap as configure_host_session published it (host_player_slot_limit)
 	} else {
-		host_config.server_name = "SINGLEPLAYERGAME";
-		// Mirrors HostRole::bring_up_singleplayer: the SP launcher advertises the
-		// literal attribute word 0x3A06 and one player (docs/net/novaworld-net-re.md §5.0).
-		host_config.mp_attributes = 0x3A06u;
-		host_config.max_players = 1;
-		host_config.game_type = mission_game_type();
+		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0).
+		host_config = inmatch::singleplayer_game_config(mission_game_type());
 	}
 	inmatch::HostBringup bringup;
 	bringup.host_cfg.config = host_config;
@@ -90,10 +84,7 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 		bringup.host_cfg.local_character_vars = net_.local_character_vars;
 	}
 	bringup.terrain_til_data = net_.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
-	bringup.mission_text_loaded = net_.mission_text_loaded;
-	bringup.mission_briefing3 = net_.mission_briefing3;
-	bringup.mission_briefing2 = net_.mission_briefing2;
-	bringup.mission_location_texts = net_.mission_location_texts;
+	bringup.mission_text = net_.mission_text;
 	return bringup;
 }
 
@@ -200,88 +191,15 @@ void Simulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
 }
 
 void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
-	net_.mission_text_loaded = false;
-	net_.mission_briefing3.clear();
-	net_.mission_briefing2.clear();
-	net_.mission_location_texts.clear();
-	net_.mission_people_names.clear();
+	// Empty bytes (no text file) leave the table unloaded without a warning.
+	net_.mission_text = opennova::mission::MissionText();
 	if (p_rtxt_bytes.is_empty()) return;
-
-	opennova::rtxt::File table;
 	std::string error;
-	if (!opennova::rtxt::parse(p_rtxt_bytes.ptr(),
-	                           static_cast<std::size_t>(p_rtxt_bytes.size()),
-	                           table, error)) {
+	if (!opennova::mission::parse_mission_text(p_rtxt_bytes.ptr(),
+				static_cast<std::size_t>(p_rtxt_bytes.size()), net_.mission_text, error)) {
 		UtilityFunctions::push_warning(String("Simulation: mission text RTXT rejected: ") +
 		                               opennova::to_gd(error));
-		return;
 	}
-
-	// Preserve the table's raw cp1252 bytes. Retail uses an empty briefing2 as
-	// the signal to fall back to briefing [orig: @0x506649..0x506660].
-	if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing3"))
-		net_.mission_briefing3 = e->text;
-	if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing2"))
-		net_.mission_briefing2 = e->text;
-	if (net_.mission_briefing2.empty()) {
-		if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing"))
-			net_.mission_briefing2 = e->text;
-	}
-
-	// The numeric-key section harvests, raw cp1252 values with only the ASCII
-	// section/key interpreted: [Locations] LOCATION%03i (type-2044 markers by
-	// one-based spawn order, the S2C 0x0F deploy-map labels) and [PeopleNames]
-	// STRNAME%03i (the D-HUD-20 authored entity display names promote resolves
-	// from each record's name_index — the witnessed resolve is cited at the
-	// promote.cpp port site).
-	const auto fold = [](char c) {
-		return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-	};
-	const auto harvest_indexed = [&](const char *section_lc,
-			std::size_t section_len, const char *prefix_lc,
-			std::size_t prefix_len,
-			std::unordered_map<int32_t, std::string> &out_map) {
-		for (std::size_t section_index = 0;
-		     section_index < table.sections.size(); ++section_index) {
-			const std::string &section_name = table.sections[section_index].name;
-			if (section_name.size() != section_len) continue;
-			bool is_match = true;
-			for (std::size_t i = 0; i < section_len; ++i) {
-				if (fold(section_name[i]) != section_lc[i]) {
-					is_match = false;
-					break;
-				}
-			}
-			if (!is_match) continue;
-
-			for (const opennova::rtxt::Entry *entry :
-			     table.get_section_entries(static_cast<uint32_t>(section_index))) {
-				if (entry == nullptr || entry->key.size() <= prefix_len) continue;
-				bool valid = true;
-				for (std::size_t i = 0; i < prefix_len; ++i) {
-					if (fold(entry->key[i]) != prefix_lc[i]) {
-						valid = false;
-						break;
-					}
-				}
-				int32_t index = 0;
-				for (std::size_t i = prefix_len; valid && i < entry->key.size();
-				     ++i) {
-					const char digit = entry->key[i];
-					if (digit < '0' || digit > '9' || index > 214748364) {
-						valid = false;
-						break;
-					}
-					index = index * 10 + (digit - '0');
-				}
-				if (valid) out_map.emplace(index, entry->text);
-			}
-			break;
-		}
-	};
-	harvest_indexed("locations", 9, "location", 8, net_.mission_location_texts);
-	harvest_indexed("peoplenames", 11, "strname", 7, net_.mission_people_names);
-	net_.mission_text_loaded = true;
 }
 
 bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes) {
@@ -855,6 +773,14 @@ bool Simulation::is_join_deploy_pick_pending() const {
 	return is_joiner() && runtime_ && runtime_->deployment_pick_pending();
 }
 
+bool Simulation::is_join_deploy_hold_ready() const {
+	return opennova::inmatch::joiner_deploy_hold_ready(role_view());
+}
+
+bool Simulation::is_join_in_match_ready(bool p_auto_deploy) const {
+	return opennova::inmatch::joiner_in_match_ready(role_view(), p_auto_deploy);
+}
+
 bool Simulation::is_join_deploy_overlay_active() const {
 	// The deploy-map overlay (retail g_deploy_screen_active): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
@@ -896,81 +822,10 @@ const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 }
 
 std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
-	// The DEATH screen's zone rows [orig: UI_UpdateDeathScreenContent @0x5536a0 —
-	// def present, team match, SECURED (a numbered zone lists only at full control:
-	// the zone-timer EntryById[9] >= [10] gate), attrib 0x40000; letter = 'A' +
-	// registry index, name = WPNames/STRWPNAME%03d(index+1)]. The local BMS owns
-	// membership/letter identity; live S2C 0x6F/0x53 owns team + control. Every
-	// TEAM zone is emitted with its `secured` verdict: the second (occupant)
-	// loop of the populate has no secured gate, so the engine builder decides
-	// which rows list and where the occupants land.
+	// The DEATH screen's zone rows (inmatch/role_feeds.h carries the witnesses).
 	std::vector<opennova::world::DeployZoneRow> rows;
-	if (!kernel_ || !is_joiner() || !runtime_) return rows;
-	const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
-	const uint8_t team = runtime_->assigned_team();
-	const opennova::replication::ClientState &cs = runtime_->state();
-	const uint16_t self_handle = runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu;
-	for (size_t i = 0; i < reg.entries.size(); ++i) {
-		const opennova::world::Entity *e = kernel_->world.registry.get(reg.entries[i]);
-		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
-		uint8_t effective_team = e->team;
-		int32_t effective_control = e->zone_control;
-		int32_t effective_limit = 0x10000;
-		const auto live = runtime_->zone_states().find(e->handle.packed);
-		if (live != runtime_->zone_states().end()) {
-			// The DEATH list reads the value entry's team and exact value >= limit
-			// gate. 0x53 is the separate timed-capture window; retaining an old
-			// window after a later 0x6F must not overwrite this ownership channel.
-			// [orig: UI_UpdateDeathScreenContent @0x5536a0; §5.49/§5.61]
-			if (live->second.has_value) {
-				effective_team = live->second.value.mode;
-				effective_control = live->second.value.value_s;
-				effective_limit = live->second.value.limit_s;
-			}
-		}
-		if (effective_team != team) continue;
-		opennova::world::DeployZoneRow row;
-		row.index = static_cast<int>(i);
-		row.letter = static_cast<char>('A' + static_cast<int>(i));
-		row.name_key = vformat("STRWPNAME%03d", static_cast<int>(i) + 1).utf8().get_data();
-		// The first-loop gate: a zone whose live timer entry sits below its limit
-		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
-		// number term (an earlier port carried one) — the retail list walk tests
-		// only the timer entry's level against its limit and then the def's
-		// spawn-zone attribute (engine record: deploy_screen_feed.h cites the
-		// UI_UpdateDeathScreenContent list loop).
-		row.secured = !(effective_control < effective_limit);
-		// The 0x6E wave group on this zone: its countdown (entity+548) and the
-		// queued members, named through the roster the way retail reads the
-		// member entity's Name (the player entity's name IS the roster name)
-		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
-		if (cs.spawn_waves.known) {
-			for (const opennova::SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
-				if (g.zone_handle != e->handle.packed) continue;
-				row.wave_countdown = static_cast<uint16_t>(g.wave_countdown);
-				for (uint16_t member : g.members) {
-					opennova::world::DeployOccupant o;
-					o.handle = member;
-					std::string name;
-					const opennova::world::EntityHandle mh{member};
-					for (const opennova::replication::ClientRosterSlot &slot : cs.roster) {
-						if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) {
-							name = slot.name;
-							break;
-						}
-					}
-					if (name.empty()) {
-						if (const opennova::replication::ClientEntityState *row_state = cs.find(member))
-							name = row_state->name;
-					}
-					o.name = name;
-					o.self = member == self_handle;
-					row.occupants.push_back(o);
-				}
-			}
-		}
-		rows.push_back(row);
-	}
+	if (!kernel_) return rows;
+	opennova::inmatch::deploy_zone_rows(role_view(), deploy_zone_registry(), rows);
 	return rows;
 }
 

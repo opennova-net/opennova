@@ -107,6 +107,81 @@ int main() {
 		CHECK(!deploy_screen_status(joiner, world::SpawnZoneRegistry(), "Q", gametext).statics.medic);
 	}
 
+	// The parity harness's readiness: false on the bare role and on a joiner
+	// runtime that never entered the protocol's InMatch phase (the positive
+	// legs are the harness's own witness).
+	{
+		RoleView bare;
+		CHECK(!joiner_deploy_hold_ready(bare) && !joiner_in_match_ready(bare, false));
+		mission::MissionKernel kernel;
+		RoleView jv;
+		jv.kernel = &kernel;
+		jv.runtime = &runtime;
+		jv.joiner = true;
+		CHECK(!joiner_deploy_hold_ready(jv)); // no pick owed, no self handle
+		CHECK(!joiner_in_match_ready(jv, false)); // no local player, not in match
+	}
+
+	// The DEATH screen's zone rows: a joiner's feed over the local BMS zone
+	// facts (team, control) with the 0x6E wave group's occupants named through
+	// the roster; every other role emits nothing.
+	{
+		mission::MissionKernel kernel;
+		kernel.world.registry.configure_pool(2, 8);
+		world::Entity zone;
+		zone.kind = world::EntityKind::Item;
+		zone.has_item_def = true;
+		zone.is_spawn_point = true;
+		zone.alive = true;
+		zone.team = 0; // the runtime's assigned team before a joiner binds
+		zone.zone_control = 0x10000;
+		const world::EntityHandle secured = kernel.world.registry.spawn(2, zone);
+		zone.zone_control = 0x8000;
+		const world::EntityHandle contested = kernel.world.registry.spawn(2, zone);
+		zone.team = 1;
+		zone.zone_control = 0x10000;
+		const world::EntityHandle theirs = kernel.world.registry.spawn(2, zone);
+		world::SpawnZoneRegistry reg;
+		reg.entries = { secured, contested, theirs };
+		SpawnWaveGroup group;
+		group.zone_handle = secured.packed;
+		group.wave_countdown = 42;
+		group.members = { 3, 4 };
+		cs.spawn_waves.known = true;
+		cs.spawn_waves.value.groups = { group };
+		replication::ClientRosterSlot ace;
+		ace.bound = true;
+		ace.entity_slot = 3;
+		ace.name = "Ace";
+		cs.roster[0] = ace;
+		replication::ClientEntityState member;
+		member.handle = 4;
+		member.name = "Bravo";
+		cs.entities.push_back(member);
+		RoleView jv;
+		jv.kernel = &kernel;
+		jv.runtime = &runtime;
+		jv.joiner = true;
+		std::vector<world::DeployZoneRow> rows;
+		CHECK(deploy_zone_rows(jv, reg, rows));
+		CHECK(rows.size() == 2); // the other team's zone is not a row
+		CHECK(rows.size() == 2 && rows[0].index == 0 && rows[0].letter == 'A' &&
+				rows[0].name_key == "STRWPNAME001" && rows[0].secured);
+		CHECK(rows.size() == 2 && rows[0].wave_countdown == 42 && rows[0].occupants.size() == 2);
+		CHECK(rows.size() == 2 && rows[0].occupants.size() == 2 && rows[0].occupants[0].name == "Ace" &&
+				rows[0].occupants[1].name == "Bravo" && !rows[0].occupants[0].self);
+		CHECK(rows.size() == 2 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
+				rows[1].occupants.empty());
+		// The authority's view (the listen host) lists nothing through this feed.
+		RoleView hv;
+		hv.kernel = &kernel;
+		hv.runtime = &runtime;
+		CHECK(!deploy_zone_rows(hv, reg, rows) && rows.empty());
+		cs.spawn_waves = replication::ClientSpawnWaveStatus();
+		cs.roster[0] = replication::ClientRosterSlot();
+		cs.entities.clear();
+	}
+
 	// The present-effect pose index over a joiner's decoded rows: a lookup
 	// resolves through the wire row (mission units, the yaw off the heading),
 	// a miss is remembered for the epoch, and a newly applied replica frame

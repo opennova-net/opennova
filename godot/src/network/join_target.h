@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/server_flags.h>
 
 namespace godot {
 
@@ -28,14 +29,21 @@ public:
 		ROLE_PLAYER = 0,
 		ROLE_SPECTATOR = 1,
 	};
-	// The ServerHello P2 flag bits the LAN row carries (LanServerRow.server_flags).
+	// The ServerHello P2 flag bits the LAN row carries (LanServerRow.server_flags;
+	// the engine's inmatch/server_flags.h names them).
 	enum ServerFlag {
-		FLAG_TEAM_CHOICE = 0x4,
-		FLAG_SERVER_PASSWORD = 0x8,
-		FLAG_RED_PASSWORD = 0x10,
-		FLAG_BLUE_PASSWORD = 0x20,
-		FLAG_ALLOW_SPECTATORS = 0x2000,
-		FLAG_SPECTATOR_PASSWORD = 0x4000,
+		FLAG_TEAM_CHOICE = opennova::inmatch::server_flag::kTeamChoice,
+		FLAG_SERVER_PASSWORD = opennova::inmatch::server_flag::kServerPassword,
+		FLAG_RED_PASSWORD = opennova::inmatch::server_flag::kSideBPassword,
+		FLAG_BLUE_PASSWORD = opennova::inmatch::server_flag::kSideAPassword,
+		FLAG_ALLOW_SPECTATORS = opennova::inmatch::server_flag::kSpectators,
+		FLAG_SPECTATOR_PASSWORD = opennova::inmatch::server_flag::kSpectatorPassword,
+	};
+	// The join entry's next step (inmatch::join_entry_step).
+	enum EntryStep {
+		ENTRY_DIAL = 0,
+		ENTRY_PREFLIGHT = 1,
+		ENTRY_PROMPT = 2,
 	};
 
 #define JOIN_TARGET_TEXT(m_name)                                       \
@@ -83,20 +91,36 @@ public:
 	int get_team_request() const { return team_request_; }
 	void set_team_request(int p_value) { team_request_ = p_value == 0 || p_value == 1 ? p_value : -1; }
 	bool allows_team_choice() const {
-		return server_flags_ >= 0 && (server_flags_ & FLAG_TEAM_CHOICE) != 0;
+		return opennova::inmatch::server_allows_team_choice(server_flags_);
 	}
 	bool has_team_password() const {
-		return server_flags_ >= 0 &&
-				(server_flags_ & (FLAG_BLUE_PASSWORD | FLAG_RED_PASSWORD)) != 0;
+		return opennova::inmatch::server_has_side_password(server_flags_);
 	}
 	bool server_password_required() const {
-		return server_flags_ >= 0 && (server_flags_ & FLAG_SERVER_PASSWORD) != 0;
+		return opennova::inmatch::server_password_required(server_flags_);
 	}
 	bool allows_spectators() const {
-		return server_flags_ >= 0 && (server_flags_ & FLAG_ALLOW_SPECTATORS) != 0;
+		return opennova::inmatch::server_allows_spectators(server_flags_);
 	}
 	bool spectator_password_required() const {
-		return server_flags_ >= 0 && (server_flags_ & FLAG_SPECTATOR_PASSWORD) != 0;
+		return opennova::inmatch::server_spectator_password_required(server_flags_);
+	}
+	// What the shell does with this target before dialing: dial, enumerate
+	// the endpoint for its flag word first (`preflighted`: that enumeration
+	// already ran), or ask the player/spectator question.
+	int entry_step(bool p_preflighted) const {
+		opennova::inmatch::JoinEntryFacts facts;
+		facts.server_flags = server_flags_;
+		facts.role_explicit = role_explicit_;
+		facts.spectator = join_role_ == ROLE_SPECTATOR;
+		facts.server_password_given = !server_password_.is_empty();
+		facts.side_password_given = !join_password_.is_empty();
+		switch (opennova::inmatch::join_entry_step(facts, p_preflighted)) {
+		case opennova::inmatch::JoinEntryStep::Preflight: return ENTRY_PREFLIGHT;
+		case opennova::inmatch::JoinEntryStep::Prompt: return ENTRY_PROMPT;
+		case opennova::inmatch::JoinEntryStep::Dial: break;
+		}
+		return ENTRY_DIAL;
 	}
 
 	// Decode a LanSession discovery row. Map identity is deliberately absent
@@ -131,3 +155,4 @@ private:
 
 VARIANT_ENUM_CAST(godot::JoinTarget::Role);
 VARIANT_ENUM_CAST(godot::JoinTarget::ServerFlag);
+VARIANT_ENUM_CAST(godot::JoinTarget::EntryStep);

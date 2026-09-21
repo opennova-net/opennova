@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_initial_state.h>
 
 #include <runtime/inmatch/batch_chunker.h> // inmatch::slice_batch_pages (the shared byte-budget pager, ADR 0013)
+#include <runtime/inmatch/server_flags.h> // the flag word's named bits
 #include <runtime/inmatch/server_tick.h> // Server_RerollPlayerTickSeed
 
 #include <algorithm>
@@ -68,7 +69,7 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	// dword_2550A04 is the one live mp-attribute store. Its TeamChoose bit feeds
 	// BuildFlags even for a non-team game (fresh retail DM advertises 0x904).
 	if ((r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
-		flags = 4;
+		flags = server_flag::kTeamChoice;
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
 	case 1: flags |= 0x400u; break;           // single-player host
 	case 2: flags |= 0x100u; break;           // LAN
@@ -77,19 +78,19 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	}
 	flags |= 0x800u;
 	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // SP clears it
-	if (!gs.server_password.empty()) flags |= 0x8u;
+	if (!gs.server_password.empty()) flags |= server_flag::kServerPassword;
 	// The password bit is NESTED under spectators-enabled: a configured
 	// password with spectating off advertises neither bit.
 	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0 — the 0x4000 strlen check
 	// @0x4c4ead sits inside the `if (g_spectator_slots)` @0x4c4e8a]
 	if (gs.spectator_slots != 0) {
-		flags |= 0x2000u;
-		if (!gs.spectator_password.empty()) flags |= 0x4000u;
+		flags |= server_flag::kSpectators;
+		if (!gs.spectator_password.empty()) flags |= server_flag::kSpectatorPassword;
 	}
 	if ((gs.game_type & 0x10000u) != 0) {     // team game
-		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= 0x4u;
-		if (!gs.side_a_password.empty()) flags |= 0x20u;
-		if (!gs.side_b_password.empty()) flags |= 0x10u;
+		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= server_flag::kTeamChoice;
+		if (!gs.side_a_password.empty()) flags |= server_flag::kSideAPassword;
+		if (!gs.side_b_password.empty()) flags |= server_flag::kSideBPassword;
 	}
 	if (r.permanent_death) flags |= 0x8000u;
 	if (r.allow_sniper_scope_zoom) flags |= 0x10000u; // [orig g_mp_allowsniperscopezoom @0x2550CA4]

@@ -459,6 +459,8 @@ public:
 		return post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 		       post_auth_stage_ == PostAuthStage::AwaitDeployRelease;
 	}
+	// The player-paced half alone: the pick is owed and not yet sent.
+	bool awaiting_deploy_pick() const { return post_auth_stage_ == PostAuthStage::AwaitDeployPick; }
 	// Monotonic initial-admission boundary: the host's deployment policy and
 	// BOTH profile-side 0x5A grants have been consumed. This is deliberately
 	// independent from Phase::InMatch (the first grant opens gameplay early)

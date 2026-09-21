@@ -92,19 +92,20 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 		state.client_runtime->view().set_item_class_resolver(item_class_resolver_);
 }
 
+GameConfig singleplayer_game_config(uint32_t game_type) {
+	inmatch::GameConfig config;
+	config.server_name = "SINGLEPLAYERGAME";
+	config.mp_attributes = 0x3A06u;
+	config.max_players = 1;
+	config.game_type = game_type;
+	return config;
+}
+
 // [orig: SinglePlayer_StartMission @0x561af0]
 void HostRole::bring_up_singleplayer() {
 	mission::MissionKernel &kernel = *kernel_;
-	inmatch::GameConfig config;
-	config.server_name = "SINGLEPLAYERGAME";
-	// The SP launcher stores the attribute word LITERALLY after Game_SaveConfig
-	// (not the cfg default 0x3A02) and one player, then copies both into the
-	// game settings [orig: SinglePlayer_StartMission — `multiplayerAttributeFlags_34C
-	//  = 14854` @0x561bb7 -> game_settings.mp_attributes @0x561cdb; maxPlayers_3F4 = 1
-	//  @0x561c1d -> game_settings.max_players = 1 @0x561cec].
-	config.mp_attributes = 0x3A06u;
-	config.max_players = 1;
-	config.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
+	const inmatch::GameConfig config = singleplayer_game_config(
+			game_type::for_mission_attribs(kernel.mission.header.attrib_flags));
 	reset_state(config, /*serve_and_play=*/true);
 	state.host_owner.host_loopback = &state.host_loop;
 	inmatch::HostConfig host_cfg;
@@ -139,10 +140,10 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
-	ctx.mission_text_loaded = bringup.mission_text_loaded;
-	ctx.mission_briefing3 = bringup.mission_briefing3;
-	ctx.mission_briefing2 = bringup.mission_briefing2;
-	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_location_texts);
+	ctx.mission_text_loaded = bringup.mission_text.loaded;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3;
+	ctx.mission_briefing2 = bringup.mission_text.briefing2;
+	inmatch::install_mission_location_names(ctx, kernel.mission, bringup.mission_text.location_texts);
 	inmatch::start_host_session(state.host_owner, host_cfg);
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);

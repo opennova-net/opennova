@@ -48,6 +48,7 @@ void JoinTarget::_bind_methods() {
 			&JoinTarget::server_password_required);
 	ClassDB::bind_method(D_METHOD("spectator_password_required"),
 			&JoinTarget::spectator_password_required);
+	ClassDB::bind_method(D_METHOD("entry_step", "preflighted"), &JoinTarget::entry_step);
 	ClassDB::bind_static_method("JoinTarget", D_METHOD("from_lan_row", "row"),
 			&JoinTarget::from_lan_row);
 	BIND_ENUM_CONSTANT(ROLE_PLAYER);
@@ -58,6 +59,9 @@ void JoinTarget::_bind_methods() {
 	BIND_ENUM_CONSTANT(FLAG_RED_PASSWORD);
 	BIND_ENUM_CONSTANT(FLAG_ALLOW_SPECTATORS);
 	BIND_ENUM_CONSTANT(FLAG_SPECTATOR_PASSWORD);
+	BIND_ENUM_CONSTANT(ENTRY_DIAL);
+	BIND_ENUM_CONSTANT(ENTRY_PREFLIGHT);
+	BIND_ENUM_CONSTANT(ENTRY_PROMPT);
 }
 
 } // namespace godot

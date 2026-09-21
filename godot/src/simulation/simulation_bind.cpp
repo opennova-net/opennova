@@ -136,6 +136,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_joiner_network_diagnostics);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_pick_pending"),
 	                     &Simulation::is_join_deploy_pick_pending);
+	ClassDB::bind_method(D_METHOD("is_join_deploy_hold_ready"),
+	                     &Simulation::is_join_deploy_hold_ready);
+	ClassDB::bind_method(D_METHOD("is_join_in_match_ready", "auto_deploy"),
+	                     &Simulation::is_join_in_match_ready);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_overlay_active"),
 	                     &Simulation::is_join_deploy_overlay_active);
 	ClassDB::bind_method(D_METHOD("take_join_deploy_overlay_open"),

@@ -63,6 +63,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp

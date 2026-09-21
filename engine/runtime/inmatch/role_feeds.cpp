@@ -321,6 +321,95 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 	return true;
 }
 
+bool joiner_deploy_hold_ready(const RoleView &view) {
+	if (!view.joiner || view.runtime == nullptr) return false;
+	const ClientRuntime &runtime = *view.runtime;
+	return runtime.awaiting_deploy_pick() && runtime.has_self_handle() &&
+			runtime.last_error().empty() && !runtime.session_lost();
+}
+
+bool joiner_in_match_ready(const RoleView &view, bool auto_deploy) {
+	if (!view.joiner || view.runtime == nullptr || view.kernel == nullptr) return false;
+	const ClientRuntime &runtime = *view.runtime;
+	return view.kernel->world.cached.local_player.valid() && runtime.in_match() &&
+			(!auto_deploy || !runtime.deployment_pick_pending());
+}
+
+bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		std::vector<world::DeployZoneRow> &out) {
+	out.clear();
+	if (view.kernel == nullptr || !view.joiner || view.runtime == nullptr) return false;
+	const ClientRuntime &runtime = *view.runtime;
+	const world::World &w = view.kernel->world;
+	const uint8_t team = runtime.assigned_team();
+	const replication::ClientState &cs = runtime.state();
+	const uint16_t self_handle = runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu;
+	for (size_t i = 0; i < zones.entries.size(); ++i) {
+		const world::Entity *e = w.registry.get(zones.entries[i]);
+		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
+		uint8_t effective_team = e->team;
+		int32_t effective_control = e->zone_control;
+		int32_t effective_limit = 0x10000;
+		const auto live = runtime.zone_states().find(e->handle.packed);
+		if (live != runtime.zone_states().end()) {
+			// The DEATH list reads the value entry's team and exact value >= limit
+			// gate. 0x53 is the separate timed-capture window; retaining an old
+			// window after a later 0x6F must not overwrite this ownership channel.
+			// [orig: UI_UpdateDeathScreenContent @0x5536a0; §5.49/§5.61]
+			if (live->second.has_value) {
+				effective_team = live->second.value.mode;
+				effective_control = live->second.value.value_s;
+				effective_limit = live->second.value.limit_s;
+			}
+		}
+		if (effective_team != team) continue;
+		world::DeployZoneRow row;
+		row.index = static_cast<int>(i);
+		row.letter = static_cast<char>('A' + static_cast<int>(i));
+		char name_key[32];
+		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", static_cast<int>(i) + 1);
+		row.name_key = name_key;
+		// The first-loop gate: a zone whose live timer entry sits below its limit
+		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
+		// number term (an earlier port carried one) — the retail list walk tests
+		// only the timer entry's level against its limit and then the def's
+		// spawn-zone attribute (engine record: deploy_screen_feed.h cites the
+		// UI_UpdateDeathScreenContent list loop).
+		row.secured = !(effective_control < effective_limit);
+		// The 0x6E wave group on this zone: its countdown (entity+548) and the
+		// queued members, named through the roster the way retail reads the
+		// member entity's Name (the player entity's name IS the roster name)
+		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
+		if (cs.spawn_waves.known) {
+			for (const SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
+				if (g.zone_handle != e->handle.packed) continue;
+				row.wave_countdown = static_cast<uint16_t>(g.wave_countdown);
+				for (uint16_t member : g.members) {
+					world::DeployOccupant o;
+					o.handle = member;
+					std::string name;
+					const world::EntityHandle mh{ member };
+					for (const replication::ClientRosterSlot &slot : cs.roster) {
+						if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) {
+							name = slot.name;
+							break;
+						}
+					}
+					if (name.empty()) {
+						if (const replication::ClientEntityState *row_state = cs.find(member))
+							name = row_state->name;
+					}
+					o.name = name;
+					o.self = member == self_handle;
+					row.occupants.push_back(o);
+				}
+			}
+		}
+		out.push_back(row);
+	}
+	return true;
+}
+
 void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3],
 		const std::unordered_set<int32_t> &culled_bms,
 		const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,

@@ -1064,6 +1064,14 @@ target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
 target_compile_features(role_feeds_test PRIVATE cxx_std_17)
 add_test(NAME role_feeds COMMAND role_feeds_test)
 
+# The server config flag word a joiner reads and the join entry's step
+# (inmatch/server_flags.h): the BuildFlags literals, the undiscovered word,
+# dial / enumerate / prompt.
+add_executable(join_entry_test netsim/join_entry_test.cpp)
+target_link_libraries(join_entry_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(join_entry_test PRIVATE cxx_std_17)
+add_test(NAME join_entry COMMAND join_entry_test)
+
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
 target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2058,6 +2066,14 @@ if(MSVC)
     target_link_options(promote_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME mission_promote COMMAND promote_test)
+
+# The <mission>.bin RTXT harvest (runtime/mission/mission_text.h): the
+# briefing pages and the briefing2 -> briefing fallback, the [Locations] /
+# [PeopleNames] numeric-key sections, a rejected table.
+add_executable(mission_text_test mission/mission_text_test.cpp)
+target_link_libraries(mission_text_test PRIVATE opennova_runtime)
+target_compile_features(mission_text_test PRIVATE cxx_std_17)
+add_test(NAME mission_text COMMAND mission_text_test)
 
 # S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
 # fallback and the .aip resolve (the boot ORDER itself is pinned through

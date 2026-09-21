@@ -1202,6 +1202,11 @@ public:
 	// the shell shows the DEATH deploy screen and the join watchdog stops (the
 	// remaining transitions are player-paced).
 	bool is_join_deploy_pick_pending() const;
+	// The parity harness's joiner readiness (inmatch/role_feeds.h): the deploy
+	// hold's runtime facts (the shell ANDs its DEATH screen's presented state),
+	// and the in-match arm.
+	bool is_join_deploy_hold_ready() const;
+	bool is_join_in_match_ready(bool p_auto_deploy) const;
 	// The deploy-map overlay signal (retail g_deploy_screen_active). UI only.
 	bool is_join_deploy_overlay_active() const;
 	// The frame loop's open decision for death.mnu's DEATH screen: true once
