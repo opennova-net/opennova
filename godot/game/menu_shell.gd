@@ -2,7 +2,7 @@ class_name MenuShell
 extends Control
 
 # Runtime menu shell: drives the compiled menu surface — a MenuFrame (the
-# engine draw-list/pump Control) orchestrated by MenuDriver (menu_driver.gd),
+# engine draw-list/pump Control) orchestrated by MenuDriver,
 # loading the game's .mnu menu set + audio from the user's resource directory.
 # Music streams through the shared MusicService autoload (one context at a
 # time, like the original AudioVM): the shell opens the MENU context; GameWorld
@@ -115,11 +115,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "CA_MISSION_LIST",
 	"MAP_LIST",
 ])
-# The SP mission-select lists (witnessed retail control names): these filter
-# to the Co-op family, show catalog titles, drive the briefing pane, and gate
-# the confirm control on a selection [orig: SinglePlayer_PopulateMissionList
-# @ 0x561840 / SinglePlayer_MissionListEventHandler @ 0x561ed0 — IA_LIST and
-# CA_MISSION_LIST are the two lists the SP screen handlers name].
+# The engine menu flow recognizes these SP lists and owns their selection gate.
 @export var sp_mission_list_names := PackedStringArray([
 	"IA_LIST", "CA_MISSION_LIST",
 ])
@@ -127,8 +123,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var briefing_pane_names := PackedStringArray([
 	"BRIEFING",
 ])
-# The SP confirm control disabled until a mission row is selected
-# [orig: the ACCEPT SetInteractiveRecursive pair @ 0x56198d / 0x561f6a].
+# The SP confirm controls receive the engine selection gate.
 @export var sp_accept_control_names := PackedStringArray([
 	"ACCEPT",
 ])
@@ -174,16 +169,7 @@ var _options_controller: OptionsMenuController = null
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[MenuStackEntry] = []  # cross-.mnu back stack
 var _current_file := ""
-var _selected_mission := ""
-# Per-widget catalog rows behind the seeded mission lists (widget id ->
-# Array[MissionCatalogRow]); the display text carries titles, so launches
-# resolve the FILE through this model rather than the row text.
-var _mission_rows := {}
 var _selected_expansion := ""
-# The pending expansion remount: raised by the Mods click, consumed by the next
-# menu update tick ("" = no request).
-# retail: the request flag dword_252DD90 @ 0x252DD90.
-var _expansion_reload_request := ""
 var _in_game := false
 # Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
 var _named_handlers: Dictionary = {}
@@ -417,7 +403,7 @@ func open_menu(file: String, target_screen: String) -> bool:
 		push_warning("MenuShell: could not load menu '%s'" % file)
 		return false
 	_current_file = file
-	_selected_mission = ""
+	_driver.clear_selected_mission()
 	# Shipped same-file screen jumps name their own file (mp.mnu does); the
 	# driver routes them as in-menu navigation by comparing against this
 	# basename.
@@ -502,7 +488,9 @@ func _on_screen_changed(screen_name: String) -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
-	_mission_rows.clear()
+	_driver.clear_mission_rows()
+	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
+			sp_accept_control_names)
 
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -562,59 +550,9 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		handler.call()
 
 
-# Seed a mission list from the catalog. The SP lists (witnessed names) show
-# the Co-op family only, with titles and the loose "*" marker; the populate
-# clears the briefing pane and disables ACCEPT, and a selection surviving in
-# the driver's per-document state re-arms ACCEPT on re-entry
-# [orig: SinglePlayer_PopulateMissionList @ 0x561840 + the activate refresh
-# SinglePlayer_RefreshAcceptOnActivate @ 0x561a20].
+# The catalog is the resource seam; filtering, selection and ACCEPT live in the engine.
 func _seed_mission_list(id: int) -> void:
-	var sp := _is_sp_mission_list(_driver.widget_name_of(id))
-	var rows: Array = []
-	var texts := PackedStringArray()
-	for row: MissionCatalogRow in MissionCatalog.rows(_root):
-		if sp and not MissionCatalog.sp_visible(row.get_game_type()):
-			continue
-		rows.append(row)
-		texts.append(row.display_text())
-	_mission_rows[id] = rows
-	_driver.set_widget_items(id, texts)
-	if sp:
-		# The witnessed populate leaves NO selection (set_widget_items'
-		# row-0 preselect is a Control-semantics artifact) — ACCEPT arms
-		# only when a selection exists [orig: UIList_CountSelectedItems
-		# @ 0x6445c0 > 0 gates the activate refresh].
-		_driver.select_row(id, -1, false)
-		_set_briefing_text("")
-		_set_sp_accept_enabled(false)
-
-
-func _is_sp_mission_list(widget_name: String) -> bool:
-	for n in sp_mission_list_names:
-		if widget_name.nocasecmp_to(n) == 0:
-			return true
-	return false
-
-
-func _mission_row_at(id: int, row: int) -> MissionCatalogRow:
-	var rows: Array = _mission_rows.get(id, [])
-	if row < 0 or row >= rows.size():
-		return null
-	return rows[row]
-
-
-func _set_briefing_text(text: String) -> void:
-	for n in briefing_pane_names:
-		var id := _driver.widget_id(n)
-		if id >= 0:
-			_driver.set_widget_text(id, text)
-
-
-func _set_sp_accept_enabled(enabled: bool) -> void:
-	for n in sp_accept_control_names:
-		var id := _driver.widget_id(n)
-		if id >= 0:
-			_driver.set_widget_disabled(id, not enabled)
+	_driver.seed_mission_list(id, MissionCatalog.rows(_root))
 
 
 func _on_list_activated(id: int, row: int) -> void:
@@ -622,11 +560,7 @@ func _on_list_activated(id: int, row: int) -> void:
 	# list (the ItemList item_activated flows).
 	var widget_name := _driver.widget_name_of(id)
 	if _is_mission_list(widget_name):
-		# Double-click launches the row's FILE (the row text carries the
-		# display title) [orig: the 0x5000002 arm @ 0x561f8d].
-		var mission_row := _mission_row_at(id, row)
-		if mission_row != null:
-			_selected_mission = mission_row.get_file()
+		_driver.activate_mission(id, row)
 		_on_start_control()
 	elif _is_mod_list(widget_name):
 		if row >= 0 and row < _driver.item_count(id):
@@ -664,45 +598,24 @@ func _on_apply_selected_mod() -> void:
 		_apply_expansion(_driver.item_text(id, idx))
 
 
-# Choosing an expansion only RAISES the reload request: the remount runs at the
-# next menu update tick. The click handler validates the pick the way the
-# original does before it raises the flag (an unusable pick leaves it lowered).
-# retail: the expansion-select handler sets dword_252DD90 = 1 @ 0x55ad4f (and
-# clears it @ 0x55ad5b when the pick did not take), and
-# Menu_UpdateFrame @ 0x5528a0 calls Game_ReloadExpansionAndMods @ 0x552710
-# on the following tick.
+# The engine queues the pick; the shell applies its resource request at the frame tail.
 func _apply_expansion(name: String) -> void:
-	if _root == null or name.is_empty() or name == _current_expansion():
+	if _root == null:
 		return
-	# Expansions layer packed archives, so only a runtime (PFF) mount can switch
-	# them. A loose-root play-test mount (ADR 0025) lists no expansions to begin
-	# with; this guard keeps a hand-driven selection from remounting the loose
-	# root through mount_runtime and clearing it on the inevitable failure.
-	if not _root.is_runtime_mount():
+	if not _driver.request_expansion(name, _current_expansion(), _root.is_runtime_mount()):
 		push_warning("MenuShell: expansions need a packed game install; the loose mount stands")
-		return
-	_expansion_reload_request = name
 
 
-## True while an expansion pick is waiting for the next menu update tick.
 func has_pending_expansion_reload() -> bool:
-	return not _expansion_reload_request.is_empty()
+	return _driver != null and _driver.has_pending_expansion_reload()
 
 
-# The Menu_UpdateFrame tail: run the pending reload and lower the flag.
-# retail: `if (dword_252DD90 && !dword_25C7708) { Game_ReloadExpansionAndMods();
-# dword_252DD90 = 0; }` @ 0x552906-0x55291d. The second flag is the
-# video-mode-change state machine's state (0 = idle, 2 = apply pending,
-# 3 = awaiting confirm; apply_video_mode_change @ 0x55a590, seeded 0 by
-# sub_555710 @ 0x555734), which suppresses the remount while a resolution
-# change is in flight. OpenNova has no such state machine, so only the request
-# flag gates here.
 func _consume_expansion_reload_request() -> void:
-	var pending := _expansion_reload_request
-	if pending.is_empty():
+	if _driver == null:
 		return
-	_expansion_reload_request = ""
-	_mount_expansion(pending)
+	var pending := _driver.take_expansion_reload()
+	if not pending.is_empty():
+		_mount_expansion(pending)
 
 
 # Mount the chosen expansion onto the live root, refresh the content that depends on
@@ -739,7 +652,7 @@ func _mount_expansion(name: String) -> void:
 # After a mount change, re-fill anything seeded from the resource dir so the
 # expansion's maps/missions appear; the prior mission pick is now stale.
 func _refresh_dependent_content() -> void:
-	_selected_mission = ""
+	_driver.clear_selected_mission()
 	for list_name in mission_list_names:
 		var id := _driver.widget_id(list_name)
 		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
@@ -793,14 +706,7 @@ func _on_quit_requested() -> void:
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
 	if kind == "list" and _is_mission_list(widget_name):
-		var mission_row := _mission_row_at(_driver.widget_id(widget_name), index)
-		_selected_mission = mission_row.get_file() if mission_row != null else value
-		# A selection on the SP screen fills the briefing pane and arms ACCEPT
-		# [orig: SinglePlayer_MissionListEventHandler @ 0x561ed0 — BRIEFING
-		# SetText from the entry's briefing pointer + ACCEPT re-enable].
-		if mission_row != null and _is_sp_mission_list(widget_name):
-			_set_briefing_text(mission_row.get_briefing())
-			_set_sp_accept_enabled(true)
+		_driver.select_mission(_driver.widget_id(widget_name), index, value)
 	elif kind == "list" and _is_mod_list(widget_name):
 		# Single click previews the description; activation (double-click) mounts it.
 		_update_mod_desc(value)
@@ -824,7 +730,7 @@ func _on_start_control() -> void:
 	# The retail ACCEPT handler launches only through a SHOWN mission list's
 	# current entry (or the IA_LIST's selected value); with nothing selected it
 	# does nothing (docs/mnu/menu-re.md, SINGLE_PLAYER). No catalog fallback.
-	var mission := _selected_mission
+	var mission := get_selected_mission()
 	if mission.is_empty():
 		push_warning("MenuShell: start pressed with no mission selected")
 		return
@@ -992,7 +898,7 @@ func get_current_menu_file() -> String:
 
 
 func get_selected_mission() -> String:
-	return _selected_mission
+	return _driver.get_selected_mission() if _driver != null else ""
 
 
 func get_selected_expansion() -> String:

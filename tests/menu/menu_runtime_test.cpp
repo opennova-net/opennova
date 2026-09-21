@@ -11,6 +11,9 @@
 //  edit_widget_handle_input_event @0x661510]
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_flow.h>
+#include <runtime/menu/options_screen.h>
+#include <base/gameprofile/game_type.h>
 
 #include <cstdio>
 #include <map>
@@ -592,6 +595,191 @@ void test_input() {
 	CHECK(!rt.handle_key(key, 0, false) && !rt.process_wheel(0, 0, 1));
 }
 
+
+mnu::Document flow_document(bool options = false) {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "MAIN";
+	screen.root_window = widget("ROOT", mnu::WindowType::Window);
+	screen.root_window.children = {
+		widget("IA_LIST", mnu::WindowType::List),
+		widget("BRIEFING", mnu::WindowType::Static),
+		widget("ACCEPT", mnu::WindowType::Button),
+		widget("MISSION_LIST", mnu::WindowType::Multi),
+		widget("SELECTED_MISSIONS", mnu::WindowType::Table),
+		widget("START_GAME", mnu::WindowType::Button),
+		widget("MAIN_WRAPPER", mnu::WindowType::Window),
+		widget("OPTIONS_WRAPPER", mnu::WindowType::Window)};
+	auto filter = widget("GAME_TYPE", mnu::WindowType::SpinList);
+	filter.items.present = true;
+	filter.items.items = {item("All", "255"), item("Team", "1")};
+	screen.root_window.children.push_back(filter);
+	auto country = widget("GAME_LOCATION", mnu::WindowType::SpinList);
+	country.items.present = true;
+	country.items.items = {item("CAN Canada", "0"), item("USA United States", "1"),
+		item("USA second", "2")};
+	screen.root_window.children.push_back(country);
+	if (options) {
+		screen.root_window.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
+		screen.root_window.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
+		screen.root_window.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
+	}
+	doc.screens.push_back(screen);
+	return doc;
+}
+
+void test_shell_flow() {
+	auto doc = flow_document();
+	MenuRuntime menu;
+	menu.open_document(&doc, "sp.mnu", "");
+	MenuFlow flow;
+	flow.set_mission_controls({"ia_list", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
+	const int list = menu.widget_id("IA_LIST"), accept = menu.widget_id("ACCEPT");
+	const std::vector<MissionChoice> choices = {
+		{"coop.bms", "Co-op title *", "Briefing", game_type::kCoop},
+		{"dm.bms", "DM title", "Other", game_type::kDeathmatch}};
+	flow.seed_missions(menu, list, choices);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Co-op title *");
+	CHECK(menu.selected_row(list) == -1 && menu.is_widget_disabled(accept));
+	CHECK(menu.get_widget_text(menu.widget_id("BRIEFING")).empty());
+	flow.select_mission(menu, list, 0, "display title");
+	CHECK(flow.selected_mission() == "coop.bms" && !menu.is_widget_disabled(accept));
+	CHECK(menu.get_widget_text(menu.widget_id("BRIEFING")) == "Briefing");
+	flow.seed_missions(menu, list, choices);
+	CHECK(menu.selected_row(list) == -1 && menu.is_widget_disabled(accept));
+	flow.clear_selected_mission();
+	flow.activate_mission(list, 0);
+	CHECK(flow.selected_mission() == "coop.bms");
+	flow.clear_rows();
+	flow.select_mission(menu, list, 0, "fallback.bms");
+	CHECK(flow.selected_mission() == "fallback.bms");
+	flow.seed_missions(menu, menu.widget_id("MISSION_LIST"), choices);
+	CHECK(menu.item_count(menu.widget_id("MISSION_LIST")) == 2);
+
+	using Pick = MenuFlow::ExpansionPick;
+	CHECK(flow.request_expansion("", "old", true) == Pick::Ignored);
+	CHECK(flow.request_expansion("old", "old", true) == Pick::Ignored);
+	CHECK(flow.request_expansion("new", "old", false) == Pick::NeedsPackedRoot);
+	CHECK(!flow.has_pending_expansion());
+	CHECK(flow.request_expansion("new", "old", true) == Pick::Queued);
+	CHECK(flow.has_pending_expansion());
+	CHECK(flow.request_expansion("old", "old", true) == Pick::Ignored);
+	CHECK(flow.take_expansion_reload() == "new");
+	CHECK(!flow.has_pending_expansion() && flow.take_expansion_reload().empty());
+	flow.request_expansion("first", "", true);
+	flow.request_expansion("last", "", true);
+	CHECK(flow.take_expansion_reload() == "last");
+}
+
+void test_host_dialog() {
+	auto doc = flow_document();
+	MenuRuntime menu;
+	menu.open_document(&doc, "mp.mnu", "");
+	HostDialog host;
+	const std::vector<MissionChoice> rows = {
+		{"sp.bms", "Training", "", game_type::kCoop},
+		{"team.bms", "Team", "", game_type::kTeamDeathmatch},
+		{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
+		{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}};
+	host.seed(menu, rows);
+	const int list = menu.widget_id("MISSION_LIST"), table = menu.widget_id("SELECTED_MISSIONS");
+	CHECK(menu.item_count(list) == 3 && menu.selected_row(list) == -1);
+	CHECK(!host.can_start() && menu.is_widget_disabled(menu.widget_id("START_GAME")));
+	menu.set_selected_set(list, {0, 2});
+	host.add_selected(menu, [](const char *section, const char *, const char *) {
+		CHECK(std::string(section) == "GateTypeAbbrev");
+		return std::string("localized");
+	});
+	CHECK(host.selected_missions() == (std::vector<std::string>{"team.bms", "dm.bms"}));
+	CHECK(menu.table_cell_text(table, 0, 1) == "localized");
+	CHECK(menu.table_cell_text(table, 0, 2) == "1" && menu.table_cell_text(table, 1, 2) == "0");
+	CHECK(menu.item_count(list) == 1 && host.can_start());
+	CHECK(!menu.is_widget_disabled(menu.widget_id("START_GAME")));
+	menu.select_row(menu.widget_id("GAME_TYPE"), 1, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 0);
+	menu.table_select_row(table, 0, false);
+	menu.table_select_row(table, 1, true);
+	host.remove_selected(menu);
+	CHECK(!host.can_start() && menu.table_row_count(table) == 0);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Team");
+	const int country = menu.widget_id("GAME_LOCATION");
+	HostDialog::select_location(menu, country, "usa");
+	CHECK(menu.selected_row(country) == 1);
+	HostDialog::select_location(menu, country, "unknown");
+	CHECK(menu.selected_row(country) == 1);
+	host.seed(menu, rows);
+	CHECK(!host.can_start() && host.selected_missions().empty());
+}
+
+void test_options_screen() {
+	auto doc = flow_document(true);
+	MenuRuntime menu;
+	menu.open_document(&doc, "options.mnu", "");
+	controls::BindingSet bindings;
+	OptionsScreen options;
+	options.prepare(menu, bindings);
+	const int table = menu.widget_id("CONTROL_MAPPING");
+	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
+	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
+	options.arm(menu, bindings, table, 0);
+	CHECK(menu.table_cell_text(table, 0, 2).empty());
+	RemapInput input;
+	input.kind = RemapInput::Kind::Key;
+	input.vk = 'Y';
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(menu.table_cell_text(table, 0, 2).empty()); // key release keeps capture
+	input.pressed = true;
+	input.vk = 0; // unmapped device key
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	input.vk = 0xDE; // rejected retail capture
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	input.vk = 'Y';
+	CHECK(options.consume(menu, bindings, input) ==
+		(OptionsScreen::Consumed | OptionsScreen::PersistBindings));
+	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
+	options.arm(menu, bindings, table, 0);
+	input.escape = true;
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
+	options.arm(menu, bindings, table, 0);
+	options.end_remap(menu, bindings, true); // screen change
+	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
+	menu.table_select_row(table, 0, false);
+	CHECK(options.activate(menu, bindings, "CLEAR_KEY") == OptionsScreen::PersistBindings);
+	CHECK(menu.table_cell_text(table, 0, 2).empty());
+	CHECK(options.activate(menu, bindings, "DEFAULTS") == OptionsScreen::PersistBindings);
+	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
+	options.activate(menu, bindings, "MOUSE");
+	options.arm(menu, bindings, table, 0);
+	input = RemapInput();
+	input.kind = RemapInput::Kind::Mouse;
+	input.mouse_mask = controls::kMouseRight;
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None); // release falls through
+	input.pressed = true;
+	CHECK(options.consume(menu, bindings, input) ==
+		(OptionsScreen::Consumed | OptionsScreen::PersistBindings));
+	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
+	options.activate(menu, bindings, "JOYSTICK");
+	options.arm(menu, bindings, table, 0);
+	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
+	CHECK(options.activate(menu, bindings, "OPT_ACCEPT") == OptionsScreen::CommitPreview);
+	CHECK(options.activate(menu, bindings, "OPT_CANCEL") == OptionsScreen::RestorePreview);
+	OptionsScreen::show_ingame_main(menu);
+	CHECK(menu.is_widget_shown(menu.widget_id("MAIN_WRAPPER")));
+	CHECK(!menu.is_widget_shown(menu.widget_id("OPTIONS_WRAPPER")));
+
+	auto non_options = flow_document();
+	menu.open_document(&non_options, "sp.mnu", "");
+	options.prepare(menu, bindings);
+	CHECK(!options.is_surface());
+	CHECK(options.activate(menu, bindings, "DEFAULTS") == OptionsScreen::None);
+	CHECK(options.activate(menu, bindings, "OPT_CANCEL") == OptionsScreen::None);
+	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
+}
+
 } // namespace
 
 int main() {
@@ -599,6 +787,9 @@ int main() {
 	test_navigation_replay_and_actions();
 	test_radio_spin_tables_scroll();
 	test_input();
+	test_shell_flow();
+	test_host_dialog();
+	test_options_screen();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

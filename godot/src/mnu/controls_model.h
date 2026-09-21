@@ -26,6 +26,9 @@ protected:
 	static void _bind_methods();
 
 public:
+	opennova::controls::BindingSet &native_bindings() { return bindings_; }
+	const opennova::controls::BindingSet &native_bindings() const { return bindings_; }
+
 	enum Device {
 		DEVICE_KEYBOARD = 0,
 		DEVICE_MOUSE = 1,

@@ -13,6 +13,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_flow.h>
+#include <runtime/menu/options_screen.h>
 
 #include <memory>
 #include <vector>
@@ -22,6 +24,8 @@
 namespace godot {
 
 class MenuAudio;
+class ControlsModel;
+class MissionCatalogRow;
 class MenuFrame;
 class MnsStyleSheet;
 class MnuDocument;
@@ -66,6 +70,9 @@ class MenuDriver : public RefCounted {
 	friend class FrameSeam;
 
 	opennova::menu::MenuRuntime runtime_;
+	opennova::menu::MenuFlow flow_;
+	opennova::menu::HostDialog host_dialog_;
+	opennova::menu::OptionsScreen options_;
 	std::unique_ptr<FrameSeam> seam_;
 	ObjectID frame_id_;
 	ObjectID audio_id_;
@@ -103,6 +110,38 @@ protected:
 	static void _bind_methods();
 
 public:
+	enum OptionsEffect {
+		OPTIONS_CONSUMED = opennova::menu::OptionsScreen::Consumed,
+		OPTIONS_PERSIST_BINDINGS = opennova::menu::OptionsScreen::PersistBindings,
+		OPTIONS_COMMIT_PREVIEW = opennova::menu::OptionsScreen::CommitPreview,
+		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
+	};
+	void set_mission_controls(const PackedStringArray &p_lists,
+			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
+	void clear_mission_rows() { flow_.clear_rows(); }
+	void seed_mission_list(int p_id, const TypedArray<MissionCatalogRow> &p_rows);
+	void select_mission(int p_id, int p_row, const String &p_fallback);
+	void activate_mission(int p_id, int p_row) { flow_.activate_mission(p_id, p_row); }
+	String get_selected_mission() const;
+	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	bool request_expansion(const String &p_name, const String &p_current, bool p_packed);
+	bool has_pending_expansion_reload() const { return flow_.has_pending_expansion(); }
+	String take_expansion_reload();
+	void seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows);
+	void filter_host_missions() { host_dialog_.filter(runtime_); }
+	void add_host_missions(const Ref<RtxtStringFile> &p_text);
+	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
+	bool can_start_host() const { return host_dialog_.can_start(); }
+	PackedStringArray selected_host_missions() const;
+	void select_host_location(int p_id, const String &p_country);
+	void prepare_options(const Ref<ControlsModel> &p_controls);
+	bool is_options_surface() const { return options_.is_surface(); }
+	int activate_options(const Ref<ControlsModel> &p_controls, const String &p_name);
+	void arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row);
+	int consume_options_input(const Ref<ControlsModel> &p_controls, const Ref<InputEvent> &p_event);
+	void end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill);
+	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
+
 	MenuDriver();
 	~MenuDriver() override;
 
@@ -197,3 +236,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);

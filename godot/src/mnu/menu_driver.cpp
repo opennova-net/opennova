@@ -4,6 +4,8 @@
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/credits_player.h"
 #include "mnu/menu_audio.h"
+#include "mnu/controls_model.h"
+#include "mission/mission_catalog.h"
 #include "mnu/menu_frame.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
@@ -12,6 +14,7 @@
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -22,6 +25,16 @@ using opennova::to_std;
 namespace godot {
 
 namespace {
+
+std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<MissionCatalogRow> &rows) {
+	std::vector<opennova::menu::MissionChoice> choices;
+	for (int i = 0; i < rows.size(); ++i) {
+		const Ref<MissionCatalogRow> row = rows[i];
+		if (row.is_valid()) choices.push_back({to_std(row->get_file()), to_std(row->display_text()),
+				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type())});
+	}
+	return choices;
+}
 
 std::vector<std::string> to_std_strings(const PackedStringArray &p_values) {
 	std::vector<std::string> out;
@@ -631,9 +644,116 @@ void MenuDriver::tick(int64_t p_time_ms) {
 	if (MenuFrame *frame = frame_()) frame->set_time_ms(p_time_ms);
 }
 
+void MenuDriver::set_mission_controls(const PackedStringArray &p_lists,
+		const PackedStringArray &p_briefings, const PackedStringArray &p_accepts) {
+	flow_.set_mission_controls(to_std_strings(p_lists), to_std_strings(p_briefings),
+			to_std_strings(p_accepts));
+}
+
+void MenuDriver::seed_mission_list(int p_id, const TypedArray<MissionCatalogRow> &p_rows) {
+	flow_.seed_missions(runtime_, p_id, mission_choices(p_rows));
+}
+
+void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
+	flow_.select_mission(runtime_, p_id, p_row, to_std(p_fallback));
+}
+
+String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
+
+bool MenuDriver::request_expansion(const String &p_name, const String &p_current, bool p_packed) {
+	return flow_.request_expansion(to_std(p_name), to_std(p_current), p_packed) !=
+			opennova::menu::MenuFlow::ExpansionPick::NeedsPackedRoot;
+}
+
+String MenuDriver::take_expansion_reload() { return to_gd(flow_.take_expansion_reload()); }
+
+void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
+	host_dialog_.seed(runtime_, mission_choices(p_rows));
+}
+
+void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {
+	host_dialog_.add_selected(runtime_, game_text_lookup(p_text));
+}
+
+PackedStringArray MenuDriver::selected_host_missions() const {
+	return to_gd_strings(host_dialog_.selected_missions());
+}
+
+void MenuDriver::select_host_location(int p_id, const String &p_country) {
+	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
+}
+
+void MenuDriver::prepare_options(const Ref<ControlsModel> &p_controls) {
+	if (p_controls.is_valid()) options_.prepare(runtime_, p_controls->native_bindings());
+}
+
+int MenuDriver::activate_options(const Ref<ControlsModel> &p_controls, const String &p_name) {
+	return p_controls.is_valid() ? options_.activate(runtime_, p_controls->native_bindings(),
+			to_std(p_name)) : 0;
+}
+
+void MenuDriver::arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row) {
+	if (p_controls.is_valid()) options_.arm(runtime_, p_controls->native_bindings(), p_id, p_row);
+}
+
+int MenuDriver::consume_options_input(const Ref<ControlsModel> &p_controls,
+		const Ref<InputEvent> &p_event) {
+	if (p_controls.is_null() || p_event.is_null()) return 0;
+	opennova::menu::RemapInput input;
+	const Ref<InputEventKey> key = p_event;
+	const Ref<InputEventMouseButton> mouse = p_event;
+	if (key.is_valid()) {
+		input.kind = opennova::menu::RemapInput::Kind::Key;
+		input.pressed = key->is_pressed();
+		input.escape = key->get_physical_keycode() == Key::KEY_ESCAPE;
+		input.vk = ControlsModel::vk_from_godot_key(static_cast<int>(key->get_physical_keycode()));
+		input.ctrl = key->is_ctrl_pressed();
+		input.shift = key->is_shift_pressed();
+		input.repeat = key->is_echo();
+	} else if (mouse.is_valid()) {
+		input.kind = opennova::menu::RemapInput::Kind::Mouse;
+		input.pressed = mouse->is_pressed();
+		input.mouse_mask = static_cast<uint16_t>(ControlsModel::mouse_mask_from_godot_button(
+				static_cast<int>(mouse->get_button_index())));
+	}
+	return options_.consume(runtime_, p_controls->native_bindings(), input);
+}
+
+void MenuDriver::end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill) {
+	if (p_controls.is_valid()) options_.end_remap(runtime_, p_controls->native_bindings(), p_refill);
+}
+
 // ---- bindings ----------------------------------------------------------------------
 
 void MenuDriver::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_mission_controls", "lists", "briefings", "accepts"), &MenuDriver::set_mission_controls);
+	ClassDB::bind_method(D_METHOD("clear_mission_rows"), &MenuDriver::clear_mission_rows);
+	ClassDB::bind_method(D_METHOD("seed_mission_list", "id", "rows"), &MenuDriver::seed_mission_list);
+	ClassDB::bind_method(D_METHOD("select_mission", "id", "row", "fallback"), &MenuDriver::select_mission);
+	ClassDB::bind_method(D_METHOD("activate_mission", "id", "row"), &MenuDriver::activate_mission);
+	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
+	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
+	ClassDB::bind_method(D_METHOD("request_expansion", "name", "current", "packed"), &MenuDriver::request_expansion);
+	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
+	ClassDB::bind_method(D_METHOD("take_expansion_reload"), &MenuDriver::take_expansion_reload);
+	ClassDB::bind_method(D_METHOD("seed_host_pool", "rows"), &MenuDriver::seed_host_pool);
+	ClassDB::bind_method(D_METHOD("filter_host_missions"), &MenuDriver::filter_host_missions);
+	ClassDB::bind_method(D_METHOD("add_host_missions", "text"), &MenuDriver::add_host_missions);
+	ClassDB::bind_method(D_METHOD("remove_host_missions"), &MenuDriver::remove_host_missions);
+	ClassDB::bind_method(D_METHOD("can_start_host"), &MenuDriver::can_start_host);
+	ClassDB::bind_method(D_METHOD("selected_host_missions"), &MenuDriver::selected_host_missions);
+	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
+	ClassDB::bind_method(D_METHOD("prepare_options", "controls"), &MenuDriver::prepare_options);
+	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
+	ClassDB::bind_method(D_METHOD("activate_options", "controls", "name"), &MenuDriver::activate_options);
+	ClassDB::bind_method(D_METHOD("arm_options_remap", "controls", "id", "row"), &MenuDriver::arm_options_remap);
+	ClassDB::bind_method(D_METHOD("consume_options_input", "controls", "event"), &MenuDriver::consume_options_input);
+	ClassDB::bind_method(D_METHOD("end_options_remap", "controls", "refill"), &MenuDriver::end_options_remap);
+	ClassDB::bind_method(D_METHOD("show_ingame_main"), &MenuDriver::show_ingame_main);
+	BIND_ENUM_CONSTANT(OPTIONS_CONSUMED);
+	BIND_ENUM_CONSTANT(OPTIONS_PERSIST_BINDINGS);
+	BIND_ENUM_CONSTANT(OPTIONS_COMMIT_PREVIEW);
+	BIND_ENUM_CONSTANT(OPTIONS_RESTORE_PREVIEW);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);

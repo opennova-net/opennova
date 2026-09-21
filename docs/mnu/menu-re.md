@@ -210,11 +210,11 @@ and gated on by `options_screen_init @ 0x554820` and
 `Game_CloseInGameScreens @ 0x54b942`). A resolution change in flight therefore
 SUPPRESSES the remount until it settles; the request stays raised.
 
-`menu_shell.gd` ports the deferral: `_apply_expansion` validates the pick and
-stores `_expansion_reload_request`, and the public `update_menu_frame()` (the
-`_process` body, our `Menu_UpdateFrame`) consumes it at its tail through
-`_mount_expansion`. OpenNova has no video-mode state machine, so only the
-request flag gates there.
+`menu::MenuFlow` (`engine/runtime/menu/menu_flow.cpp`) owns pick validation
+and the deferred request. `menu_shell.gd::update_menu_frame()` consumes it at
+its tail through `MenuDriver.take_expansion_reload` and applies the resource
+mount in `_mount_expansion`. OpenNova has no video-mode state machine, so only
+the request flag gates there.
 
 **Scene walk** `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]`: every screen
 in the scene container (`scene+20`: `{+4 array, +8 count}`) draws via vtable+24
@@ -1685,10 +1685,11 @@ button->mask translation, and `is_token_pressed` — the one gameplay sampling
 call: keyboard slots gated on their modifier plus the held-sampleable
 L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
 without sampling), `controls_bindings.gd` (the shared live model +
-persistence), `options_menu_controller.gd` (arm/capture/cancel +
-DEFAULTS/CLEAR_KEY, presence-gated on a CONTROL_MAPPING document since the
-2026-09-01 tidy; moved out of `menu_shell.gd` by PR #611; a screen change
-cancels an armed capture like retail's screen-owned pump state), and
+persistence), `menu::OptionsScreen` in `engine/runtime/menu/options_screen.cpp`
+(arm/capture/cancel, DEFAULTS/CLEAR_KEY, device switching and the CONTROL_MAPPING
+presence gate), reached through `MenuDriver`; `options_menu_controller.gd`
+forwards device input and applies persistence/preview requests. A screen
+change cancels an armed capture like retail's screen-owned pump state, and
 `godot/src/player/player_input_router.cpp` samples gameplay input through the live records. Divergences: persistence rides `user://controls.cfg` until the
 player.sav profile format slice exists, and the joystick capture page is not
 wired (both under D-CTRL rows). The retail arm also fires on a single click
@@ -1740,8 +1741,9 @@ saved gamma, the saved music volume (`AudioVM_SetGlobalVolume`), and a menu
 byte.
 
 Reimpl: `player_options.gd` applies edits live (retail's preview) and
-`options_menu_controller.gd` snapshots the state at surface entry —
-OPT_ACCEPT re-baselines the snapshot, OPT_CANCEL restores it and re-seeds
+`options_menu_controller.gd` snapshots the state at surface entry. The engine
+`menu::OptionsScreen` requests a new baseline on OPT_ACCEPT or restore/re-seed
+on OPT_CANCEL, which the script applies through the shared options owner
 (`menu_shell_test.gd` pins commit-vs-revert). PR #611's "Cancel only
 navigates" was a divergence, fixed 2026-09-01. Residuals, each a ledger row:
 our persist runs per edit (retail persists on Accept — invisible except
