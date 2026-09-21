@@ -592,204 +592,35 @@ PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const 
 }
 
 void Simulation::invalidate_present_effect_pose_cache() const {
-	present_.effect_pose_cache_valid = false;
-	present_.effect_pose_cache_runtime = nullptr;
-	present_.effect_poses_by_handle.clear();
-	present_.effect_handles_by_bms_id.clear();
-	present_.effect_handles_by_ssn.clear();
-	present_.effect_handles_by_origin.clear();
-	present_.effect_missing_handles.clear();
-	present_.effect_missing_bms_ids.clear();
-	present_.effect_missing_ssns.clear();
-	present_.effect_missing_origins.clear();
+	present_.effect_poses.invalidate();
 }
 
-void Simulation::ensure_present_effect_pose_cache() const {
-	if (!kernel_ || !runtime_) {
-		if (present_.effect_pose_cache_valid) invalidate_present_effect_pose_cache();
-		return;
-	}
+namespace {
 
-	const opennova::replication::ClientState &client = runtime_->state();
-	const uint32_t logic_tick = kernel_->world.logic_tick;
-	if (present_.effect_pose_cache_valid &&
-			present_.effect_pose_cache_runtime == runtime_ &&
-			present_.effect_pose_cache_logic_tick == logic_tick &&
-			present_.effect_pose_cache_client_frame == client.frames_applied) {
-		return;
-	}
-
-	present_.effect_poses_by_handle.clear();
-	present_.effect_handles_by_bms_id.clear();
-	present_.effect_handles_by_ssn.clear();
-	present_.effect_handles_by_origin.clear();
-	present_.effect_missing_handles.clear();
-	present_.effect_missing_bms_ids.clear();
-	present_.effect_missing_ssns.clear();
-	present_.effect_missing_origins.clear();
-	present_.effect_pose_cache_logic_tick = logic_tick;
-	present_.effect_pose_cache_client_frame = client.frames_applied;
-	present_.effect_pose_cache_runtime = runtime_;
-	present_.effect_pose_cache_valid = true;
-}
-
-bool Simulation::cache_present_effect_pose(
-		const opennova::replication::ClientEntityState &p_entity_state) const {
-	// Match build_client_replica_present_rows' joiner self-filter: the host's
-	// wire echo H is not drawn and therefore cannot own a presented effect.
-	// Packed handle zero is a valid pool-0 identity, so presence rides the
-	// runtime's explicit validity seam, never a zero sentinel.
-	if (is_joiner() && runtime_ && runtime_->has_self_handle() &&
-			p_entity_state.handle == runtime_->self_handle()) {
-		return false;
-	}
-	if (present_.effect_poses_by_handle.find(p_entity_state.handle) !=
-			present_.effect_poses_by_handle.end()) {
-		return true;
-	}
-
-	const int32_t heading_bam = p_entity_state.heading_bam;
-	// Host/listen presentation can recover the authored pitch and roll from the
-	// authoritative registry. The compact peer row only carries yaw; joiners
-	// therefore retain the wire-only zeroes here.
-	const opennova::world::Entity *entity = is_joiner() ? nullptr : kernel_->world.registry.get(
-			opennova::world::EntityHandle{p_entity_state.handle});
-	PresentEffectPose pose;
-	pose.position = Vector3(
-			static_cast<float>(p_entity_state.x / kFixed16),
-			static_cast<float>(p_entity_state.z / kFixed16),
-			static_cast<float>(-p_entity_state.y / kFixed16));
-	pose.rotation_deg = Vector3(
-			entity ? static_cast<float>(entity->pitch) : 0.0f,
-			static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
-					heading_bam)),
-			entity ? static_cast<float>(entity->roll) : 0.0f);
-	present_.effect_poses_by_handle[p_entity_state.handle] = pose;
-	present_.effect_missing_handles.erase(p_entity_state.handle);
-
-	// A joiner's decoded handles belong to the host, so only wire identity is
-	// meaningful there. Host/listen views can resolve every alias from the same
-	// registry entity used by get_present_snapshot().
-	if (is_joiner() || !entity) return true;
-	if (entity->bms_id > 0) {
-		const int bms_id = static_cast<int>(entity->bms_id);
-		present_.effect_handles_by_bms_id[bms_id] =
-				p_entity_state.handle;
-		present_.effect_missing_bms_ids.erase(bms_id);
-	}
-	if (entity->net_id > 0) {
-		const int ssn = static_cast<int>(entity->net_id);
-		present_.effect_handles_by_ssn[ssn] =
-				p_entity_state.handle;
-		present_.effect_missing_ssns.erase(ssn);
-	}
-	const int kind = opennova::world::spawn_origin_kind(entity->spawn_origin);
-	const int index = static_cast<int>(opennova::world::spawn_origin_index(entity->spawn_origin));
-	const uint64_t origin = present_effect_origin_key(kind, index);
-	present_.effect_handles_by_origin[origin] =
-			p_entity_state.handle;
-	present_.effect_missing_origins.erase(origin);
-	return true;
-}
-
-bool Simulation::cache_present_effect_pose(
-		const opennova::world::Entity &p_entity) const {
-	const uint16_t handle = p_entity.handle.packed;
-	if (present_.effect_poses_by_handle.find(handle) !=
-			present_.effect_poses_by_handle.end()) {
-		return true;
-	}
-	const AiEntity *ae = kernel_->world.ai.for_handle(p_entity.handle);
-	PresentEffectPose pose;
-	pose.position = Vector3(p_entity.position.x, p_entity.position.z,
-			-p_entity.position.y);
-	pose.rotation_deg = Vector3(
-			static_cast<float>(opennova::inmatch::pool_present_pitch_deg(p_entity)),
-			static_cast<float>(opennova::inmatch::pool_present_yaw_deg(
-					p_entity, ae, opennova::replication::entity_class_of(p_entity))),
-			static_cast<float>(opennova::inmatch::pool_present_roll_deg(p_entity)));
-	present_.effect_poses_by_handle[handle] = pose;
-	present_.effect_missing_handles.erase(handle);
-	if (p_entity.bms_id > 0) {
-		const int bms_id = static_cast<int>(p_entity.bms_id);
-		present_.effect_handles_by_bms_id[bms_id] = handle;
-		present_.effect_missing_bms_ids.erase(bms_id);
-	}
-	if (p_entity.net_id > 0) {
-		const int ssn = static_cast<int>(p_entity.net_id);
-		present_.effect_handles_by_ssn[ssn] = handle;
-		present_.effect_missing_ssns.erase(ssn);
-	}
-	const int kind = opennova::world::spawn_origin_kind(p_entity.spawn_origin);
-	const int index = static_cast<int>(
-			opennova::world::spawn_origin_index(p_entity.spawn_origin));
-	const uint64_t origin = present_effect_origin_key(kind, index);
-	present_.effect_handles_by_origin[origin] = handle;
-	present_.effect_missing_origins.erase(origin);
-	return true;
-}
-
-PackedVector3Array Simulation::cached_present_effect_state_for_handle(
-		uint16_t p_handle) const {
+// The engine pose (mission units, degrees) as the presenter's state pair:
+// the Godot-space position and the (pitch, yaw, roll) rotation.
+PackedVector3Array effect_state_of(const opennova::inmatch::EffectPose *p_pose) {
 	PackedVector3Array out;
-	const auto found = present_.effect_poses_by_handle.find(p_handle);
-	if (found == present_.effect_poses_by_handle.end()) return out;
-	out.resize(EFFECT_STATE_COUNT);
-	out.set(EFFECT_STATE_POSITION, found->second.position);
-	out.set(EFFECT_STATE_ROTATION_DEG, found->second.rotation_deg);
+	if (p_pose == nullptr) return out;
+	out.resize(Simulation::EFFECT_STATE_COUNT);
+	out.set(Simulation::EFFECT_STATE_POSITION, Vector3(p_pose->x, p_pose->z, -p_pose->y));
+	out.set(Simulation::EFFECT_STATE_ROTATION_DEG,
+			Vector3(p_pose->pitch_deg, p_pose->yaw_deg, p_pose->roll_deg));
 	return out;
 }
 
+} // namespace
+
+// The lazily indexed pose an attached effect follows, by every identity an
+// attachment names (inmatch/effect_pose_index.h carries the rules: the
+// joiner self-filter, the wire-only identity on a joiner, the per-epoch
+// misses).
 PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle) const {
-	ensure_present_effect_pose_cache();
-	PackedVector3Array cached = cached_present_effect_state_for_handle(p_handle);
-	if (!cached.is_empty() || !runtime_) return cached;
-	if (present_.effect_missing_handles.find(p_handle) !=
-			present_.effect_missing_handles.end()) {
-		return PackedVector3Array();
-	}
-	if (!is_joiner()) {
-		const opennova::world::Entity *entity =
-				kernel_->world.registry.get(opennova::world::EntityHandle{p_handle});
-		if (entity != nullptr && cache_present_effect_pose(*entity)) {
-			return cached_present_effect_state_for_handle(p_handle);
-		}
-		present_.effect_missing_handles.insert(p_handle);
-		return PackedVector3Array();
-	}
-	for (const opennova::replication::ClientEntityState &entity_state :
-			runtime_->state().entities) {
-		if (entity_state.handle != p_handle) continue;
-		if (cache_present_effect_pose(entity_state)) {
-			return cached_present_effect_state_for_handle(p_handle);
-		}
-		break;
-	}
-	present_.effect_missing_handles.insert(p_handle);
-	return PackedVector3Array();
+	return effect_state_of(present_.effect_poses.for_handle(role_view(), p_handle));
 }
 
 PackedVector3Array Simulation::get_present_effect_state_for_ssn(int p_ssn) const {
-	if (p_ssn <= 0) return PackedVector3Array();
-	ensure_present_effect_pose_cache();
-	const auto found = present_.effect_handles_by_ssn.find(p_ssn);
-	if (found != present_.effect_handles_by_ssn.end()) {
-		return cached_present_effect_state_for_handle(found->second);
-	}
-	if (!runtime_ || is_joiner()) return PackedVector3Array();
-	if (present_.effect_missing_ssns.find(p_ssn) !=
-			present_.effect_missing_ssns.end()) {
-		return PackedVector3Array();
-	}
-	const opennova::world::Entity *match = nullptr;
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (match == nullptr && static_cast<int>(e.net_id) == p_ssn) match = &e;
-	});
-	if (match != nullptr && cache_present_effect_pose(*match)) {
-		return cached_present_effect_state_for_handle(match->handle.packed);
-	}
-	present_.effect_missing_ssns.insert(p_ssn);
-	return PackedVector3Array();
+	return effect_state_of(present_.effect_poses.for_ssn(role_view(), p_ssn));
 }
 
 PackedVector3Array Simulation::get_present_effect_state_for_wire_handle(
@@ -802,52 +633,13 @@ PackedVector3Array Simulation::get_present_effect_state_for_wire_handle(
 }
 
 PackedVector3Array Simulation::get_present_effect_state_for_bms_id(int p_bms_id) const {
-	if (p_bms_id <= 0) return PackedVector3Array();
-	ensure_present_effect_pose_cache();
-	const auto found = present_.effect_handles_by_bms_id.find(p_bms_id);
-	if (found != present_.effect_handles_by_bms_id.end()) {
-		return cached_present_effect_state_for_handle(found->second);
-	}
-	if (!runtime_ || is_joiner()) return PackedVector3Array();
-	if (present_.effect_missing_bms_ids.find(p_bms_id) !=
-			present_.effect_missing_bms_ids.end()) {
-		return PackedVector3Array();
-	}
-	const opennova::world::Entity *entity =
-			kernel_->world.registry.get(handle_for_bms_id(p_bms_id));
-	if (entity != nullptr && cache_present_effect_pose(*entity)) {
-		return cached_present_effect_state_for_handle(entity->handle.packed);
-	}
-	present_.effect_missing_bms_ids.insert(p_bms_id);
-	return PackedVector3Array();
+	return effect_state_of(
+			present_.effect_poses.for_bms_id(role_view(), p_bms_id, present_.bms_handles));
 }
 
 PackedVector3Array Simulation::get_present_effect_state_for_origin(
 		int p_kind, int p_index) const {
-	if (p_kind < 0 || p_index < 0) return PackedVector3Array();
-	ensure_present_effect_pose_cache();
-	const uint64_t requested_origin = present_effect_origin_key(p_kind, p_index);
-	const auto found = present_.effect_handles_by_origin.find(requested_origin);
-	if (found != present_.effect_handles_by_origin.end()) {
-		return cached_present_effect_state_for_handle(found->second);
-	}
-	if (!runtime_ || is_joiner()) return PackedVector3Array();
-	if (present_.effect_missing_origins.find(requested_origin) !=
-			present_.effect_missing_origins.end()) {
-		return PackedVector3Array();
-	}
-	const opennova::world::Entity *match = nullptr;
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (match != nullptr) return;
-		const int kind = opennova::world::spawn_origin_kind(e.spawn_origin);
-		const int index = static_cast<int>(opennova::world::spawn_origin_index(e.spawn_origin));
-		if (present_effect_origin_key(kind, index) == requested_origin) match = &e;
-	});
-	if (match != nullptr && cache_present_effect_pose(*match)) {
-		return cached_present_effect_state_for_handle(match->handle.packed);
-	}
-	present_.effect_missing_origins.insert(requested_origin);
-	return PackedVector3Array();
+	return effect_state_of(present_.effect_poses.for_origin(role_view(), p_kind, p_index));
 }
 
 // [D-NET-112] entity+0x78 ownerConnectionId (the connection/dcb that owns this entity). A networked

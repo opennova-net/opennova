@@ -521,7 +521,6 @@ private:
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
 	using PresentRowIdentity = SimulationPresentState::PresentRowIdentity;
-	using PresentEffectPose = SimulationPresentState::PresentEffectPose;
 	using CharacterSexRow = SimulationAssetState::CharacterSexRow;
 	void _release_weather_owner();
 	// Portable mission lifecycle and cadence. During one advance call the Godot
@@ -617,14 +616,9 @@ private:
 	// One opt-in gate for every native runtime timer/counter. Retail play keeps
 	// this false; F3 Stats and the manual probe share the public ownership seam.
 	bool runtime_profiling_enabled_ = false;
-	// The FollowOwner effect-pose index over present_ (simulation_present.cpp).
+	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
+	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
-	void ensure_present_effect_pose_cache() const;
-	bool cache_present_effect_pose(
-			const opennova::replication::ClientEntityState &p_entity_state) const;
-	// The host's pool row (D-NET-140: the listen host never presents from ClientState).
-	bool cache_present_effect_pose(const opennova::world::Entity &p_entity) const;
-	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
 	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
 
 	// --- co-op LAN joiner: a pure non-authority inmatch::ClientRuntime (the Joiner role enable_join

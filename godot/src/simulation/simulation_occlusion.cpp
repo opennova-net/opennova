@@ -420,24 +420,10 @@ int Simulation::sound_source_bms_id(uint16_t p_handle) const {
 }
 
 opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const {
-	if (!kernel_ || p_bms_id <= 0) return opennova::world::EntityHandle{};
-	const uint64_t serial = kernel_->world.registry.spawn_serial();
-	if (present_.bms_handle_index_world != &kernel_->world || present_.bms_handle_index_serial != serial) {
-		present_.bms_handle_index.clear();
-		kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-			if (e.bms_id > 0 && present_.bms_handle_index.find(e.bms_id) == present_.bms_handle_index.end())
-				present_.bms_handle_index[e.bms_id] = e.handle;
-		});
-		present_.bms_handle_index_world = &kernel_->world;
-		present_.bms_handle_index_serial = serial;
-	}
-	const auto found = present_.bms_handle_index.find(p_bms_id);
-	if (found == present_.bms_handle_index.end()) return opennova::world::EntityHandle{};
-	// A despawned row's slot may have been reused; confirm the occupant still
-	// carries the id before handing the handle out.
-	const opennova::world::Entity *e = kernel_->world.registry.get(found->second);
-	return e != nullptr && e->bms_id == p_bms_id ? found->second
-	                                              : opennova::world::EntityHandle{};
+	// The authored id -> handle index (world/bms_handle_index.h), rebuilt on
+	// the registry's spawn serial.
+	if (!kernel_) return opennova::world::EntityHandle{};
+	return present_.bms_handles.resolve(kernel_->world, p_bms_id);
 }
 
 PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,

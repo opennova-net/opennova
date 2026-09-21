@@ -83,11 +83,6 @@ inline constexpr int kPlayerVisualItemId = opennova::mission::kPlayerVisualItemI
 // Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the inmatch host).
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
 
-inline uint64_t present_effect_origin_key(int kind, int index) {
-	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
-	       static_cast<uint32_t>(index);
-}
-
 inline int32_t trace_profile_lane(int64_t value) {
 	return static_cast<int32_t>(std::clamp<int64_t>(
 			value, 0, std::numeric_limits<int32_t>::max()));

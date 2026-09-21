@@ -101,6 +101,10 @@ bool EffectPoseIndex::cache_(const RoleView &view, const world::Entity &entity) 
 	const uint16_t handle = entity.handle.packed;
 	if (poses_by_handle_.find(handle) != poses_by_handle_.end()) return true;
 	const world::AiEntity *ae = view.kernel->world.ai.for_handle(entity.handle);
+	// The owner's presented pose is the same read the present rows make: the
+	// position and the 32-bit euler triple the model matrix is built over
+	// [orig: Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 over
+	//  entity+0x10..0x18, e.g. HUD_BuildEntityInfo @0x4B84C9].
 	EffectPose pose;
 	pose.x = entity.position.x;
 	pose.y = entity.position.y;
