@@ -258,7 +258,10 @@ void VehicleSystem::tick_simple_motor(
 		rotor_machine_tick(e, t);
 	}
 	if (prediction) {
-		vehicle_client_chase(e);
+		// Both selector-zero movers run the plain chase template [orig:
+		// Entity_ProcessInfantryPhysics @0x46E62E..0x46E85A;
+		// Entity_ProcessAirVehiclePhysics @0x470129..0x470355].
+		vehicle_client_chase(e, VehicleChaseFamily::Plain, 0);
 		if (controller != nullptr && controller->handle == world_.cached.local_player) {
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.cmd_speed = io::bam_sar(io::bam_add(m.cmd_speed, m.net_recv_speed), 1);

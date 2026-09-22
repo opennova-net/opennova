@@ -2114,6 +2114,73 @@ void test_prediction_keeps_player_control_tail() {
 	CHECK(m.engine_sound_latched);
 }
 
+// Each mover family keeps its own crash/settle gates in the client chase.
+// [orig: ctan radius @0x48913B..0x48916E, snap heading @0x4891D5..0x489208,
+//  heading step @0x48933D..0x48935B; cveh snap @0x48B5FB..0x48B622, Z step
+//  @0x48B798..0x48B7B9; cbik snap @0x4846EB..0x48472D; cbot Z step
+//  @0x48DD8A..0x48DDAB]
+void test_client_chase_family_gates() {
+	struct Result {
+		Vec3 pos;
+		int32_t yaw;
+	};
+	// A record 8 u ahead and 1 u up, heading +0x10000000: beyond the idle 2 u
+	// snap radius, inside the tank's widened 12 u one.
+	const auto chase = [](VehicleChaseFamily family, bool crashed, bool air, int32_t up_z,
+								uint8_t wheelie) {
+		Entity e;
+		e.position = { 0.0f, 0.0f, 0.0f };
+		if (air) e.flags |= kEntityFlagInAir;
+		auto &m = e.veh;
+		m.crashed = crashed ? 1 : 0;
+		m.wheelie_active = wheelie;
+		m.net_smooth_target[0] = 8 << 16;
+		m.net_smooth_target[2] = 1 << 16;
+		m.net_smooth_heading = 0x10000000;
+		vehicle_client_chase(e, family, up_z);
+		return Result{ e.position, m.yaw_bam };
+	};
+	// The tank widens a latched hull's radius, so it interpolates instead.
+	Result r = chase(VehicleChaseFamily::Tank, true, false, 0x10000, 0);
+	CHECK(r.pos.x > 0.0f && r.pos.x < 8.0f);
+	CHECK(r.yaw == 0); // neither the snap nor the step moves a latched heading
+	r = chase(VehicleChaseFamily::Tank, false, false, 0x10000, 0);
+	CHECK(r.pos.x == 8.0f && r.pos.z == 1.0f && r.yaw == 0x10000000);
+	// The ground core keeps heading and Z while crashed, and snaps both otherwise.
+	r = chase(VehicleChaseFamily::Ground, true, false, 0x10000, 0);
+	CHECK(r.pos.x == 8.0f && r.pos.z == 0.0f && r.yaw == 0);
+	r = chase(VehicleChaseFamily::Ground, false, false, 0x10000, 0);
+	CHECK(r.pos.x == 8.0f && r.pos.z == 1.0f && r.yaw == 0x10000000);
+	// The bike always moves Z but holds heading while wheeling or inverted.
+	r = chase(VehicleChaseFamily::Bike, false, false, 0x10000, 1);
+	CHECK(r.pos.z == 1.0f && r.yaw == 0);
+	r = chase(VehicleChaseFamily::Bike, false, false, -1, 0);
+	CHECK(r.pos.z == 1.0f && r.yaw == 0);
+	r = chase(VehicleChaseFamily::Bike, false, false, 0, 0);
+	CHECK(r.yaw == 0x10000000);
+
+	// The per-tick heading step: ungated on the ground core, gated on the tank.
+	const auto step = [](VehicleChaseFamily family, bool crashed, bool air) {
+		Entity e;
+		if (air) e.flags |= kEntityFlagInAir;
+		auto &m = e.veh;
+		m.crashed = crashed ? 1 : 0;
+		m.net_smooth_target[0] = 1 << 16; // 1 u: inside the snap radius
+		m.net_smooth_target[2] = 1 << 16;
+		m.net_smooth_heading = 20 * 1000;
+		vehicle_client_chase(e, family, 0x10000);
+		return Result{ e.position, m.yaw_bam };
+	};
+	CHECK(step(VehicleChaseFamily::Ground, true, false).yaw == 1000);
+	CHECK(step(VehicleChaseFamily::Tank, true, false).yaw == 0);
+	// Z steps on the plain template always; the ground families step it only
+	// while airborne and unlatched.
+	CHECK(step(VehicleChaseFamily::Plain, false, false).pos.z > 0.0f);
+	CHECK(step(VehicleChaseFamily::Ground, false, false).pos.z == 0.0f);
+	CHECK(step(VehicleChaseFamily::Ground, true, true).pos.z == 0.0f);
+	CHECK(step(VehicleChaseFamily::Ground, false, true).pos.z > 0.0f);
+}
+
 // The handbrake latch reads the +0x170 claimant rather than the input block's
 // controller, so a predicting client latches it too.
 // [orig: cveh `cmp [esi+170h], edx` @0x48C03C; cbik @0x4851E8]
@@ -2363,6 +2430,7 @@ int main() {
 	test_tank_and_bike_ignore_physics_selector();
 	test_prediction_keeps_player_control_tail();
 	test_prediction_latches_handbrake_from_claimant();
+	test_client_chase_family_gates();
 	test_skid_effects_and_sound_edges();
 	test_handbrake_skid_and_grip_recovery();
 	test_tank_pivot_retains_direction_and_previous_track_rate();

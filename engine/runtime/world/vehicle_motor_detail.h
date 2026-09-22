@@ -51,7 +51,9 @@ Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &
 
 int32_t turn_pilot_view(World &, Entity &, int32_t delta);
 void stage_player_vehicle_input(World &, Entity &, Entity &, const VehicleTraits &);
-void vehicle_client_chase(Entity &);
+// The client chase template of each mover family (defined in vehicle_motor.cpp).
+enum class VehicleChaseFamily : uint8_t { Plain, Ground, Bike, Tank };
+void vehicle_client_chase(Entity &, VehicleChaseFamily family, int32_t entry_up_z16);
 
 namespace detail {
 

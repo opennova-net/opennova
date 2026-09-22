@@ -1019,13 +1019,37 @@ VehicleEulerBasisQ16 vehicle_euler_basis_q16(int32_t yaw_bam,
 
 } // namespace
 
-// The shared per-record vehicle chase (the §5.38e template) applied to a WORLD
+// The per-record vehicle chase (the §5.38e template) applied to a WORLD
 // entity's live pose — the interp block every family mover runs before its
-// physics [orig: @0x48DB6B..0x48DDD4 (watercraft instance); same constants in
-// every family]. Steps the registry position/heading and owns the stale-record
-// command coast-down.
-void vehicle_client_chase(Entity &veh) {
+// physics. All five movers share the radii, buckets and stale-record coast;
+// their crash/settle gates differ:
+//   Plain (cbot and both selector-zero movers): snap and step every axis.
+//   Ground (cveh): the snap moves heading and Z only while neither crashed nor
+//     settled; the per-tick heading step is ungated.
+//   Bike (cbik): the snap always moves Z; heading snaps and steps only while
+//     unlatched, not wheeling (+0x3DE) and upright at mover entry.
+//   Tank (ctan): a crashed, settled or +0x2FC hull widens the snap radius to
+//     0xC0000; heading snaps and steps only while unlatched; Z snaps always.
+// Every family but Plain steps Z only while airborne and unlatched.
+// [orig: cbot @0x48DB6B..0x48DDD4; selector-zero ground @0x46E62E..0x46E85A and
+//  boat @0x470129..0x470355; cveh @0x48B563..0x48B7C5 (snap gates
+//  @0x48B5FB..0x48B622, Z step @0x48B798..0x48B7B9); cbik @0x484666..0x4848F3
+//  (snap @0x4846EB..0x48472D, heading step @0x48487D..0x4848A4, position
+//  step @0x4848AE..0x4848E3 with its Z gate @0x4848C2, up.z of the entry
+//  row @0x484039); ctan
+//  @0x48912B..0x4893A6 (radius @0x48913B..0x48916E, snap heading
+//  @0x4891D5..0x489208, heading step @0x48933D..0x48935B, Z step
+//  @0x489379..0x48939A)]
+void vehicle_client_chase(Entity &veh, VehicleChaseFamily family, int32_t entry_up_z16) {
 	Entity::VehicleMotorState &m = veh.veh;
+	const bool latched = m.crashed != 0 || m.settle_2f0 != 0;
+	bool heading_free = true;
+	if (family == VehicleChaseFamily::Tank)
+		heading_free = !latched;
+	else if (family == VehicleChaseFamily::Bike)
+		heading_free = !latched && m.wheelie_active == 0 && entry_up_z16 >= 0;
+	const bool z_step = family == VehicleChaseFamily::Plain ||
+			((veh.flags & kEntityFlagInAir) != 0 && !latched);
 	int32_t px = to_fixed(veh.position.x);
 	int32_t py = to_fixed(veh.position.y);
     int32_t pz = to_fixed(veh.position.z);
@@ -1040,12 +1064,16 @@ void vehicle_client_chase(Entity &veh) {
                                                 : static_cast<int32_t>(dd);
         // Snap radius 0x60000 while the received speed says "moving" (>= 293),
         // else 0x20000 [orig: @0x48DB9B..0x48DBAC].
-        const int32_t snap = m.net_recv_speed >= 293 ? 0x60000 : 0x20000;
+        int32_t snap = m.net_recv_speed >= 293 ? 0x60000 : 0x20000;
+        if (family == VehicleChaseFamily::Tank && (latched || m.wreck_2fc != 0))
+            snap = 0xC0000;
         if (dist > snap) {
             px = m.net_smooth_target[0];
             py = m.net_smooth_target[1];
-            pz = m.net_smooth_target[2];
-            m.yaw_bam = m.net_smooth_heading;
+            if (family != VehicleChaseFamily::Ground || !latched)
+                pz = m.net_smooth_target[2];
+            if (family == VehicleChaseFamily::Ground ? !latched : heading_free)
+                m.yaw_bam = m.net_smooth_heading;
             m.net_smooth_target[0] = 0;
             m.net_smooth_target[1] = 0;
             m.net_smooth_target[2] = 0;
@@ -1073,19 +1101,16 @@ void vehicle_client_chase(Entity &veh) {
     }
     {
         const int16_t progress = m.net_interp_progress;
-        if (progress < 20)
+        if (progress < 20 && heading_free)
             m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
         if (progress < m.net_interp_steps) {
             px += m.net_smooth_target[0];
             py += m.net_smooth_target[1];
-            // The Z step is AIRBORNE-ONLY: on contact, Z is contact-solve
-            // owned (the platform/ground solves resettle it every tick), so
-            // the template chases record Z only while Flags 0x2000 is up
-            // [orig: bike @0x4848ae..0x4848e3; the identical ground gate
-            // @0x48b7aa..0x48b7b9]. The witnessed !settled && !crashed
-            // companions ride the park/wreck latches — dead and wire-frozen
-            // rows never reach this mover (the sim clears net_predicted).
-            if ((veh.flags & kEntityFlagInAir) != 0)
+            // On contact, Z is contact-solve owned (the ground solves resettle
+            // it every tick), so the ground templates chase record Z only while
+            // airborne and neither crashed nor settled; wreck-frozen rows never
+            // reach this mover (the sim clears net_predicted).
+            if (z_step)
                 pz += m.net_smooth_target[2];
         }
         if (progress >= 128) {
@@ -1767,7 +1792,7 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	vehicle_follow_carrier(world, veh);
 
 	// ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
-	vehicle_client_chase(veh);
+	vehicle_client_chase(veh, VehicleChaseFamily::Plain, 0);
 	if (!watercraft_has_platform_geometry(traits)) {
 		watercraft_refresh_fallback_afloat(world, veh, traits);
 	} else if (!m.plat_solve_valid) {
@@ -2127,7 +2152,8 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 // and advances the same motor/contact state with authority health writes disabled.
 void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits) {
 	// The same class-table split as the authority tick_motor: the ctank and
-	// cbike rows ignore the selector [orig: @0x48F000..0x48F007, @0x48EFF0..0x48EFF7].
+	// cbike rows ignore the selector [orig: Entity_DispatchPhysics_ctank
+	// @0x48F000..0x48F007, Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7].
 	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
 			traits.family != VehicleFamily::Bike) {
 		tick_simple_motor(veh, traits, nullptr, true);
@@ -2148,9 +2174,17 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
     }
+	// The bike's chase reads the up.z of the mover-entry matrix, built before
+	// the carrier follow [orig: Entity_UpdateLightVehiclePhysics @0x484039].
+	const int32_t entry_up_z16 =
+			vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22.m[10] >> 6;
 	vehicle_refresh_ground_link(world, veh, traits);
 	vehicle_follow_carrier(world, veh);
-	vehicle_client_chase(veh);
+	vehicle_client_chase(veh,
+			traits.family == VehicleFamily::Tank     ? VehicleChaseFamily::Tank
+					: traits.family == VehicleFamily::Bike ? VehicleChaseFamily::Bike
+														   : VehicleChaseFamily::Ground,
+			entry_up_z16);
 	// Register mirror / local-driver gate (see the watercraft mirror note).
 	if (Entity *local_driver =
                 resolve_local_vehicle_controller(world, veh, traits)) {
