@@ -110,7 +110,7 @@ void vehicle_suspension_respawn(Entity::VehicleMotorState &m) {
 	m.settle_2f0 = 0;
 	m.crashed = 0;
 	m.landing_2ee = 0;
-	m.settled_2f2 = 0;
+	m.grounded = false; // +0x2F2 @0x45fffd
 	m.wreck_2fc = 0;
 	m.airborne_stamp_2f8 = 0;
 	m.crash_request = 0;
@@ -150,17 +150,27 @@ void VehicleSystem::suspension_crash_tests(Entity &veh, const VehicleTraits &tra
 			m.fresh_2f1 = 0;
 		}
 	}
+}
+
+void VehicleSystem::suspension_client_crash_window(Entity &veh, SuspensionFamily family) {
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	const bool airborne = (veh.flags & kEntityFlagInAir) != 0;
 	// (c) the client crash window [orig: tracked @0x47e793..0x47e7ee; tank
 	//  @0x478b6c..0x478bd6]: client-only, a fresh-spawned row that is not
 	//  crashed (the tank also requires !settle_2f0 @0x478b8a; the tracked
 	//  gate @0x47e793..0x47e7a8 reads only +0x2F1 and +0x2EC) stamps the tick
-	//  it went airborne and requests for the next ten ticks; past them the
-	//  stamp clears and the row counts as respawned.
+	//  its in-air flag was last seen and requests for the next ten ticks; past
+	//  them the stamp clears and the row counts as respawned. The tank runs it
+	//  at its grounded entry, after the sink growth, so the in-air flag is the
+	//  previous tick's.
 	const bool settle_term = family == SuspensionFamily::Tank && m.settle_2f0 != 0;
 	if (!world.rules.logic_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
 	    !settle_term) {
 		if (airborne && m.airborne_stamp_2f8 == 0) m.airborne_stamp_2f8 = world.logic_tick;
-		if (world.logic_tick - m.airborne_stamp_2f8 < kClientCrashWindowTicks) {
+		// Signed tick age [orig: `sub eax, [esi+2F8h]; cmp eax, 0Ah; jge` @0x478BB5..0x478BBE].
+		if (int32_t(world.logic_tick - m.airborne_stamp_2f8) <
+				int32_t(kClientCrashWindowTicks)) {
 			m.crash_request = 1;
 		} else {
 			m.crash_request = 0;

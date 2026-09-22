@@ -336,6 +336,14 @@ void vehicle_recoil_impulse(
 		World &, Entity &, const VehicleTraits &, int32_t amplitude, const int32_t direction[3]);
 void vehicle_apply_chassis(World &, Entity &, CollisionMatrix &);
 void vehicle_clear_chassis_forces(Entity &, const int32_t corners[4][3], int mode);
+// [orig: Entity_QueueSuspensionForce @0x45C0B0]
+void vehicle_queue_suspension_force(
+		Entity::VehicleMotorState &, int channel, int32_t rate, const int32_t direction[3]);
+// The crashed tank's track-strike forces and tumble cue. `support` holds the
+// four wheel depths the retail call reads at record offset +8.
+// [orig: Entity_ApplyWheelSuspensionForces @0x463560]
+void vehicle_apply_wheel_suspension_forces(World &, Entity &, const VehicleTraits &,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix);
 
 // The air + ground contact/suspension solves (vehicle_contact_solve.cpp) — the
 // client-executed subsets of Entity_ProcessAircraftContactPhysics

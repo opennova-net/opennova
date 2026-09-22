@@ -1,6 +1,8 @@
 #include "vehicle_motor_detail.h"
 #include "world.h"
 
+#include <runtime/audio/sound_profile.h>
+
 namespace opennova::world::detail {
 namespace {
 CollisionMatrix identity() {
@@ -310,6 +312,78 @@ void vehicle_clear_chassis_forces(Entity &e, const int32_t corners[4][3], int mo
 		force = {};
 }
 
+// One force record per channel, taken only while the retained contact rock is
+// idle and the channel holds no positive rate.
+// [orig: Entity_QueueSuspensionForce @0x45C0B0]
+void vehicle_queue_suspension_force(
+		Entity::VehicleMotorState &m, int channel, int32_t rate, const int32_t direction[3]) {
+	if (static_cast<uint32_t>(channel) > 3u || m.chassis_contact_active)
+		return;
+	auto &force = m.chassis_forces[channel];
+	if (force.rate > 0)
+		return;
+	std::copy_n(direction, 3, force.direction);
+	force.rate = rate;
+	force.scratch = 3;
+}
+
+// A crashed tank striking the ground on its tracks. The first strike in each
+// speed band plays one tumble cue; every call re-enters the crash state and
+// queues one force per wheel: supported wheels press along -up, clear wheels
+// lift along +up, each stiffened by the hull's forward tilt. A missing input
+// only enters the crash state.
+// [orig: Entity_ApplyWheelSuspensionForces @0x463560, called from
+//  Entity_ProcessWheeledVehiclePhysics @0x478A9F / @0x478C4D]
+void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+	auto &m = e.veh;
+	if (!has_contact || support == nullptr || matrix == nullptr) {
+		// [orig: @0x463563..0x463583 -> @0x463727..0x46373A]
+		m.byte_2ef = 1;
+		m.crashed = 1;
+		vehicle_clear_chassis(m);
+		return;
+	}
+	vehicle_clear_chassis(m); // [orig: @0x46358E]
+	const int32_t speed = io::bam_abs(m.speed);
+	if (speed > 0x4000) {
+		// [orig: @0x4635A4..0x4635D2, profile +0xBC]
+		if (!m.tumble_hard_latched)
+			world.vehicles.play_contact_sound(e, traits, audio::kSlotTumbleHitHard);
+		m.tumble_hard_latched = true;
+	} else if (speed > 0x3000) {
+		// [orig: @0x4635DA..0x463607, profile +0xC0]
+		if (!m.tumble_med_latched)
+			world.vehicles.play_contact_sound(e, traits, audio::kSlotTumbleHitMed);
+		m.tumble_med_latched = true;
+	} else if (!m.tumble_med_latched) {
+		// The soft cue reads the medium latch without setting a latch of its
+		// own: `movsx edx, byte [+318h]; test edx, 100h` is bit 7.
+		// [orig: @0x463610..0x463634, profile +0xC4]
+		world.vehicles.play_contact_sound(e, traits, audio::kSlotTumbleHitSoft);
+	}
+	m.crashed = 1; // [orig: @0x463642]
+	const int32_t up[3] = { matrix->m[2] >> 6, matrix->m[6] >> 6, matrix->m[10] >> 6 };
+	const int32_t down[3] = { io::bam_sub(0, up[0]), io::bam_sub(0, up[1]),
+		io::bam_sub(0, up[2]) };
+	// |forward.z| as a fraction, held in the x87 register (no float store);
+	// the fldz/fcom pair only rejects a negative value.
+	// [orig: @0x463659..0x46369A, flt_7C3310]
+	double tilt = double(io::bam_abs(matrix->m[8] >> 6)) * double(1.52587890625e-05f);
+	if (tilt < 0.0)
+		tilt = 0.0;
+	for (int k = 0; k < 4; ++k) {
+		// [orig: `cmp dword ptr [edx], 0; jle` @0x4636C2; flt_7C6EA8 = -3000.0,
+		//  flt_7C6EA4 = -1000.0; Entity_QueueSuspensionForce call @0x463704]
+		if (support[k] > 0)
+			vehicle_queue_suspension_force(
+					m, k, io::bam_sub(8000, int32_t(tilt * double(-3000.0f))), down);
+		else
+			vehicle_queue_suspension_force(
+					m, k, io::bam_sub(800, int32_t(tilt * double(-1000.0f))), up);
+	}
+}
+
 // Apply this tick's retained matrix BEFORE advancing its identity blend.
 // [orig: Entity_ApplyBoneAttachmentTransform @0x45A750]
 void vehicle_apply_chassis(World &world, Entity &e, CollisionMatrix &matrix) {
@@ -349,9 +423,16 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
 	bool fit = true;
 	out.z_avg = out.positive_z_avg = pz;
+	// A pending request enters the latch seed. A client still missing the
+	// replicated bit stays unlatched and skips every latched arm below.
+	// [orig: tank @0x469933..0x469989 -> @0x469AB0; tracked @0x46B1A6..0x46B200
+	//  -> @0x46B325]
+	const bool seed_entered = m.crash_request != 0 && m.crashed == 0;
 	const bool armed = world.vehicles.suspension_arm(e, false, corners, contacts);
 	if (armed) {
 		vehicle_apply_chassis(world, e, matrix);
+		fit = (e.flags & kEntityFlagInAir) == 0;
+	} else if (seed_entered) {
 		fit = (e.flags & kEntityFlagInAir) == 0;
 	} else if (m.crashed && !m.byte_2ef) {
 		vehicle_apply_chassis(world, e, matrix);
@@ -372,11 +453,14 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 			m.crashed = 0;
 			std::fill_n(m.plat_acc, 4, 0);
 		} else {
-			// Rebuild the whole authored footprint at the current attitude.
-			// [orig: Entity_ComputeBoundingQuad @0x45B6E0, call @0x46B50F/@0x46B6D6]
+			// Rebuild the whole collision box at the current attitude: the box
+			// spans, each halved by the quad builder.
+			// [orig: spans @0x469B93..0x469BA5 (tank) / @0x46B449..0x46B462
+			//  (tracked); Entity_ComputeBoundingQuad @0x45B6E0 halves both
+			//  @0x45B8E4..0x45B9A3; calls @0x469D54/@0x469F65, @0x46B50F/@0x46B6D6]
 			if (const auto *traits = world.vehicles.traits.get(e.item_id)) {
-				const int32_t hx = (traits->foot_x_hi - traits->foot_x_lo) >> 1;
-				const int32_t hy = (traits->foot_y_hi - traits->foot_y_lo) >> 1;
+				const int32_t hx = (traits->box_x_hi - traits->box_x_lo) >> 1;
+				const int32_t hy = (traits->box_y_hi - traits->box_y_lo) >> 1;
 				const int32_t local[4][3] = { { hx, hy, 0 }, { hx, -hy, 0 }, { -hx, -hy, 0 },
 					{ -hx, hy, 0 } };
 				for (int k = 0; k < 4; ++k) {

@@ -232,17 +232,19 @@ public:
 	// altitude servo, aero response and full aircraft contact solve.
 	// Witness sites: [orig: @0x490310]
 	void aircraft_client_tick(Entity &veh, const VehicleTraits &traits);
-	// 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
-    //  the client window @0x47e793..0x47e7ee; tank @0x477760..0x4777bf +
-    //  @0x478b6c..0x478bd6]: (a) |up.z| under the flip bound (the ABSOLUTE
+	// 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8;
+    //  tank @0x477760..0x4777bf]: (a) |up.z| under the flip bound (the ABSOLUTE
     //  value: `cdq; xor; sub` @0x47d722..0x47d726 / @0x477748..0x477753 — an
     //  inverted hull does not tip-test), or — tracked only — the replicated bit
     //  set, while airborne; (b) the authority: |slide_z| > 0x7000 — a client:
-    //  airborne with the bit; (c) the CLIENT window: with fresh_2f1 == 0,
-    //  !crashed (and, tank only, !settle_2f0): stamp the airborne tick once,
-    //  request while the stamp is under 10 ticks old, else clear the stamp and
-    //  raise fresh_2f1.
+    //  airborne with the bit.
     void suspension_crash_tests(Entity &veh, const VehicleTraits &traits, int32_t up_z16, SuspensionFamily family);
+    // 1c. The CLIENT crash window [orig: tracked @0x47e793..0x47e7ee; tank
+    //  @0x478b6c..0x478bd6, the tank's grounded entry after its sink growth]:
+    //  with fresh_2f1 == 0, !crashed (and, tank only, !settle_2f0): stamp the
+    //  in-air tick once, request while the stamp is under 10 ticks old, else
+    //  clear the stamp and raise fresh_2f1.
+    void suspension_client_crash_window(Entity &veh, SuspensionFamily family);
     // 3a. The GROUNDED spring loop [orig: @0x47E960..0x47EC1F], per wheel with
     //  spring != 0: the free-fall catch-up (corner −= max(sink − growth, 0)), the
     //  landing IMPULSE (sink > thr && contact → energy += 0.5·mass·sink², the
