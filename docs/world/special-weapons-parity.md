@@ -150,6 +150,16 @@ in the earlier switching test did not reach:
   entity's pre-callback before resolving the weapon userpoint
   (`0x545A89..0x545A94`); the tank callback publishes turret words at
   `0x449ECF..0x449EE2`.
+- The shared death consumer wrote the player-only `damage_state = -1` latch
+  onto vehicles. Stock 07TR's APCs could respawn with full health but reject
+  every later projectile. Gate that latch on the player flag, matching
+  `Entity_CheckAndProcessDeath @0x51B550` (`Flags & 0x100` at `0x51B55D`);
+  the non-player leg only notifies and scores. `Entity_RespawnVehicle
+  @0x45FF40` restores vehicle health without touching entity+0x124. The
+  `npruntime_round_sim` regression destroys, routes the death, respawns and
+  destroys the same vehicle with real projectiles. It failed on the second
+  life before the fix; it and the projectile/player-maintenance suites pass
+  afterward.
 
 The installed JOTAC cannon and coax sights have the same authored zoom. Its
 base definitions share `M1IRN.TGA`; `revx02` adds different hint textures
@@ -169,16 +179,26 @@ these changes; that coverage records the tested flight rather than attributing
 an unobserved failure to one fix.
 
 `godot/tests/tank_training_test.gd` loads the authored course through GameWorld,
-boards the live cannon seat with USE, switches/fires both guns, follows the
-instructor and landing-craft convoy, and destroys the enemy vehicles with
-normal cannon input. The assertions reach BMS events 92 and 93 and team-1
-victory. The final windowed Vulkan run passed both tests and all 49 assertions; an earlier
-headless run also reached victory. Only player positioning and aim use the
-existing debug seam; no
-health, deaths or objective completions are injected. It selects installed
-`revx02` when available (the configured JOTAC game and reference course),
-otherwise base JO. The separate switching suite continues to discover all
-four authored carriers across the installation's mounts.
+boards the live cannon seat with USE, switches/fires alternate guns when
+installed, follows the instructor and landing-craft convoy, and destroys
+vehicles with normal cannon input. It requires BMS events 92 and 93 and
+team-1 victory. The stock Combined Arms `jox01` headless run passed both
+tests and all 39 assertions. The earlier windowed Vulkan `revx02` run passed
+both tests and all 49 assertions, including actual right-button events.
+
+The fixture uses debug positioning and aim, with no injected health, deaths
+or objective completions. It aims from the observed native muzzle and
+corrects relative mounted pitch while the hull moves across slopes. When
+stock APCs respawn behind terrain, it first requires both authored convoy
+arrival/release gates (49 and 48), then moves the tank into sight of those
+survivors. That explicit combat setup means the test does not establish an
+unaided playthrough from the convoy's final stop.
+
+The test selects installed `revx02` when available, otherwise discovers the
+base/expansion mount serving `07TR.bms` (stock Combined Arms packs it in
+`jox01`). Missing mission data fails setup rather than silently skipping the
+course on CI's mounted retail root. The separate switching suite continues
+to discover all four authored carriers across the installation's mounts.
 
 A follow-up reported only the roof gun's `.50 Cal` attachment label. The
 full game reproduces that view when aimed at the upper turret: the cannon's
@@ -191,10 +211,14 @@ label's screen-pixel anchor so this test checks on-screen visibility; the
 text/count getters also include labels projected outside the viewport.
 The other tanks' cannon seats are occupied by the authored NPC crews; the
 free training cannon belongs to tank 33 beside the player's spawn.
+The stock turret can carry its userpoint without a render-part node, so the
+rendered-seat oracle uses the model root in that case. The upper-view angle
+is derived from the installed seat and camera frustum; it covers both stock
+and mod seat heights without assuming the JOTAC model's coordinates.
 
 An additional JOTAC **base-mount** run exposed a separate convoy failure:
 allied tank 34 fell into the water near the landing point and never released
 the APC wave (event 48). The mission and carrier models match `revx02`, but
 the base LCAC authors water speed 130 and mass 160 versus 74 and 87 in
 `revx02`. This data variant remains an open comparison against the original
-runtime; the complete-course victory witness here is for `revx02`.
+runtime; the victory witnesses above cover `revx02` and stock `jox01`.

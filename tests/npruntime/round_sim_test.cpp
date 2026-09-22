@@ -54,6 +54,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "conn_fixture.h"
@@ -176,6 +177,90 @@ Drained drain_all(ns::LoopbackChannel &t) {
 		out.raw.push_back(std::move(raw));
 	}
 	return out;
+}
+
+// Non-player deaths take only the notification/scoring leg, so a respawned
+// vehicle remains damageable. Player dead/spawn protection must not leak into
+// the shared death route. [orig: Entity_CheckAndProcessDeath @0x51B550;
+// Entity_RespawnVehicle @0x45FF40]
+bool test_respawned_vehicle_takes_projectile_damage() {
+	auto world_owner = std::make_unique<w::World>();
+	w::World &world = *world_owner;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = true;
+
+	w::Entity shooter_seed;
+	shooter_seed.kind = w::EntityKind::Organic;
+	const auto shooter = world.registry.spawn(0, shooter_seed);
+	w::Entity vehicle_seed;
+	vehicle_seed.kind = w::EntityKind::Item;
+	vehicle_seed.has_item_def = true;
+	vehicle_seed.item_type = 1;
+	vehicle_seed.item_id = 1213;
+	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
+	vehicle_seed.position = {5.0f, 0.0f, 0.0f};
+	vehicle_seed.health = vehicle_seed.health_max = 20;
+	vehicle_seed.bound_radius = 1.0f;
+	const auto vehicle = world.registry.spawn(1, vehicle_seed);
+	// A vertical authored collision face at the vehicle origin, crossed by +X.
+	w::CollisionWorld collision;
+	w::CollisionModel model;
+	model.face_vertices = {{0, -256, -256}, {0, 256, -256}, {0, 0, 256}};
+	w::CollisionFace face;
+	face.v[0] = 0; face.v[1] = 1; face.v[2] = 2;
+	face.normal[0] = -16384;
+	face.axis = 4;
+	face.min[0] = face.max[0] = 0;
+	face.min[1] = face.min[2] = -65536;
+	face.max[1] = face.max[2] = 65536;
+	model.faces.push_back(face);
+	model.sections.resize(1);
+	model.sections[0].face_count = 1;
+	model.sections[0].face_vertex_count = 3;
+	collision.assign_entity(vehicle, collision.add_model(std::move(model)));
+	const int32_t position[3] = {5 * 65536, 0, 0};
+	collision.publish_entity_section_matrices(
+			vehicle, {w::collision_matrix_from_heading(0, position)});
+	collision.build_tick_tables(world);
+	world.collision = &collision;
+
+	w::AmmoTableEntry ammo;
+	ammo.name = "VEHICLE_RESPAWN_TEST";
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.weight_in_grains = 875;
+	ammo.min_damage = ammo.max_damage = 20;
+	ammo.max_age_ticks = 8;
+	ammo.flags = w::kAmmoFlagNoGravity;
+	world.tables.ammo.entries.push_back(ammo);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+
+	for (int life = 0; life < 2; ++life) {
+		w::RoundSpawnParams params;
+		params.owner = shooter;
+		params.shooter_handle = shooter.packed;
+		params.ammo_index = 0;
+		if (!expect(world.round_sim.spawn(world, params) >= 0,
+		            "a live projectile spawns for each vehicle life")) return false;
+		world.round_sim.tick(world, nullptr);
+		if (!expect(world.registry.get(vehicle)->health == 0 &&
+		            world.round_sim.deaths.size() == 1,
+		            life == 0 ? "a projectile destroys the initial vehicle"
+		                      : "a projectile destroys the respawned vehicle")) return false;
+		inmatch::Server_TickUpdate(ctx);
+		w::Entity &body = *world.registry.get(vehicle);
+		if (!expect(!body.alive && (body.flags & 2u) != 0,
+		            "the shared death route publishes the vehicle's dead state")) return false;
+		world.vehicles.respawn(body);
+		if (!expect(body.alive && body.health == body.health_max,
+		            "vehicle respawn restores its health")) return false;
+	}
+	return true;
 }
 
 bool run_death_feed_classifier_matrix() {
@@ -936,6 +1021,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 } // namespace
 
 int main() {
+	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
