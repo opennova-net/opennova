@@ -445,7 +445,6 @@ struct AiEntity {
     uint16_t relmat_id = 0;    // entity+284 (RelationMatrix_SetBitB key)
     uint8_t team = 0;          // entity+354 (team id; 0 = neutral)
     bool see_all = false;      // entity+104 aiSlot[4] & 0x200 (targets any team)
-    int32_t arrival_prox = 0;  // entity+32 def +2340 (heading arrival proximity, patrol)
     // brain[2] is this entity's movement controller. Its +16 phase survives
     // world ticks and advances only through the selected movement callback.
     // [orig: AI_BeginUpdate @0x457B40; world-wac-ai-re.md (D-AI-14)]
@@ -968,20 +967,30 @@ public:
     // is recomposed from the carrier's final same-frame transform.
     bool refresh_mounted_pose(AiEntity &e, World &world);
 
-    // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
-    // list + node (nearest of the list when node < 0) + the per-leg turn-budget seed.
-    // [orig: Entity_SetWaypointByTeam @0x43cdb4; nearest = Entity_FindNearestTriggerByType
-    // @0x407ea0]
-    void apply_route_order(AiEntity &e, int32_t list, int32_t node);
+    // The brain half of every waypoint REDIRECT writer (EntityCommands'
+    // group/single/WAC orders): the mode/list/node words copied from the slot the
+    // writer just stored. [orig: Entity_SetWaypointByTeam @0x43CE02..0x43CE30 /
+    // @0x43CEDD..0x43CEFE; Entity_SetWaypointForTeam @0x43DDA8..0x43DDCB /
+    // @0x43DE3C..0x43DE6A; WacCmd_SsnToWp @0x4F1D6A..0x4F1D99]
+    void copy_route_order_to_brain(AiEntity &e);
+    // The waypoint refresh (its -1 not tested) plus the per-leg turn budget
+    // (|Yaw - bearing| / denom) << 5 that three of the writer legs run after the
+    // copy. [orig: Entity_SetWaypointByTeam @0x43CE36..0x43CE4F;
+    // Entity_SetWaypointForTeam @0x43DE70..0x43DE89; WacCmd_SsnToWp @0x4F1D9F..0x4F1DB9]
+    void seed_route_turn_budget(AiEntity &e);
     // Quantized 3D distance; the last equal-distance node wins. Reserved
     // boarding commands retain slot[38]. [orig: @0x407EA0]
     int32_t nearest_route_node(const AiEntity &e, uint32_t list) const;
 
     // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
-    // controller [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp
-    // @0x48c002-0x48c02d and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness)]:
-    //  - controller == nullptr (or dead vehicle): hold heading + zero speed and stamp the
-    //    brain into state 22 (the parked/player-mode state);
+    // controller, shared by the cveh and ctan movers whose legs are instruction-equivalent
+    // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp @0x48c002-0x48c02d
+    // and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness);
+    // Entity_UpdateTankVehiclePhysics @0x488AB0 — AI leg @0x4897DB..0x489C00, parked
+    // @0x489BCE..0x489BF9]:
+    //  - controller == nullptr (or Flags & 0x10000002): hold heading + zero speed and
+    //    stamp the brain into state 22 (the parked/player-mode state). Zero health
+    //    alone does not park;
     //  - an AI controller: hand state 22 back to 16, cmd speed = min(brain outSpeed,
     //    player_speed), re-resolve the waypoint target when the per-leg turn budget
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x

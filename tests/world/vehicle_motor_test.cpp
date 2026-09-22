@@ -1402,8 +1402,13 @@ static void test_helo_waits_for_its_boarders() {
     walker.kind = EntityKind::Organic;
     const EntityHandle wh = w.registry.spawn(0, walker);
     AiEntity &wb = *ai.at(ai.attach(wh));
-    wb.brain.f[37] = 125;   // "Goto SSN and board"
-    wb.brain.f[38] = 420;   // ...this helo
+    // The board order lives in the walker's AiSlot (entity+0x68), not its brain
+    // [orig: the hold's `mov ecx,[eax+68h]` walk, cveh @0x48BFC1..0x48BFDA;
+    //  the writer WacCmd_SsnToSsn @0x4F73E4..0x4F73F7].
+    wb.slot.f[37] = 125;    // "Goto SSN and board"
+    wb.slot.f[38] = 420;    // ...this helo
+    wb.brain.f[37] = 16;    // a brain word of the same index plays no part
+    wb.brain.f[38] = 0;
 
     Entity *hv = w.registry.get(hh);
     CHECK(ai.vehicle_waits_for_boarders(w, *hv));
@@ -1416,14 +1421,17 @@ static void test_helo_waits_for_its_boarders() {
     CHECK(ai.vehicle_waits_for_boarders(w, *hv));
 
     // A body boarding a DIFFERENT hull never holds this one.
-    wb.brain.f[38] = 421;
+    wb.slot.f[38] = 421;
     CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
-    wb.brain.f[38] = 420;
+    wb.slot.f[38] = 420;
 
-    // Neither does one that is not running the board order at all.
-    wb.brain.f[37] = 16;
-    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    // Neither does one that is not running the board order at all, even with
+    // the brain words of the same indices set.
+    wb.slot.f[37] = 16;
     wb.brain.f[37] = 125;
+    wb.brain.f[38] = 420;
+    CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
+    wb.slot.f[37] = 125;
 
     // Dead or hidden bodies are skipped -- retail's (Flags & 3) == 0 gate.
     we->flags |= 2u;

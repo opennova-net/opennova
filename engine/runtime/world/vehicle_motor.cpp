@@ -534,7 +534,11 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
             occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
 
     if (traits.player_control && !prediction) {
-        if (occ == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
+        // Zero health alone does not park: the driver's leg runs until the dying
+        // state's death transforms raise the dead bit.
+        // [orig: cveh @0x48B972..0x48B987; ctan @0x48954B..0x489560;
+        //  cbik @0x484A98..0x484AAD]
+        if (occ == nullptr || (veh.flags & 0x10000002u) != 0) {
 			// Without a live controller, steer holds the current heading and command speed decays
 			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
 			// lifecycle.

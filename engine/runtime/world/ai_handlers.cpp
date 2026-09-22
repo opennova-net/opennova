@@ -216,10 +216,22 @@ void h_patrol_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kFireTimer] = ft - b.f[AiBrain::kStep]; // -= step [brain[9] -= brain[7]]
 
     if (e.patrol_goal != 0) { // [orig: *(scheduler+8)] still en route to the patrol goal
-        int32_t prox = e.arrival_prox;          // [orig: *(entity+32 def +2340)]
+        // The arrival proximity is the entity def's turn-rate word (itemDef+0x924,
+        // the word the ground and tank movers read as turnRate), compared with
+        // brain[132] — the mover's last steer target, not a state-machine copy
+        // (vehicle_system mirrors it back after the mover).
+        // [orig: AI_UpdatePatrolBehavior `mov ecx,[edi+20h]; mov eax,[ecx+924h];
+        //  mov esi,[esi+210h]` @0x457DCB..0x457DD4]
+        int32_t prox = 0;
+        if (ctx.world != nullptr)
+            if (const Entity *ent = ctx.world->registry.get(e.handle))
+                if (const VehicleTraits *t = ctx.world->vehicles.traits.get(ent->item_id))
+                    prox = t->turn_rate;
         int32_t target_h = b.f[AiBrain::kWorkHeading]; // brain[132] working heading
         int32_t h = e.heading;                  // entity+16
-        if (h < target_h + prox && h > target_h - prox)
+        // Signed compares against the wrapping `lea`/`sub` bounds
+        // [orig: @0x457DDD..0x457DEC].
+        if (h < io::bam_add(target_h, prox) && h > io::bam_sub(target_h, prox))
             e.patrol_goal = 0;                  // arrived -> clear the goal
     } else if ((e.profile.flags100 & 2) != 0) {
         b.set_pend(b.f[AiBrain::kFallback]);    // [orig: brain[5] = brain[6]] use fallback state
@@ -269,10 +281,11 @@ void h_enter_ground_combat(AiThinkCtx &ctx) {
 }
 
 // [orig: AI_EnterState_GroundEvade @0x467400] state-18 enter: the same alert block, then
-// route by def class flags (profile+96): bit0 organic -> pending 17 when brain[38] holds a
-// target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
+// route by the profile's EVADE_FLAGS (profile+96, aip.h token names; `test al,1`
+// @0x467452, `test al,4` @0x467488): FOLLOW_WP (0x1) -> pending 17 when brain[38] holds
+// a target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
 // after enter, so the re-route commits — the witnessed off_815238[4*state] tail call);
-// bit2 tracked -> 17; else wheeled-alive -> the flee waypoint (controller triple
+// FLEE (0x4) -> 17; else alive -> the flee waypoint (controller triple
 // {1, 0x7FFFFFFF, 1}, freeze work transform, moveStep 16); dead -> death event 3|4.
 void h_enter_ground_evade(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
@@ -286,19 +299,19 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
     } else {
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
     }
-    if ((e.profile.flags96 & 1) != 0) {        // organic class
+    if ((e.profile.flags96 & 1) != 0) {        // EVADE_FLAGS FOLLOW_WP
         const int32_t next = (b.f[AiBrain::kTargetSlot] != 0) ? kAiGroundCombat
                                                               : kAiGroundFollowWp;
         b.set_pend(next);
         ctx.sys->row(next).enter(ctx);          // tail-call the routed enter
         return;
     }
-    if ((e.profile.flags96 & 4) != 0) {        // tracked class
+    if ((e.profile.flags96 & 4) != 0) {        // EVADE_FLAGS FLEE
         b.set_pend(kAiGroundCombat);
         ctx.sys->row(kAiGroundCombat).enter(ctx);
         return;
     }
-    if (e.health > 0) {                        // wheeled, alive: flee waypoint
+    if (e.health > 0) {                        // neither flag, alive: flee waypoint
         e.patrol_f0 = 1;                       // [orig: controller triple {1, 0x7FFFFFFF, 1}]
         e.patrol_delta = 0x7FFFFFFF;
         e.patrol_goal = 1;
@@ -729,7 +742,13 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
     } else {
         b.f[AiBrain::kWorkPitch] = 0; // [orig: ai_data[133] @0x467d77]
         b.f[AiBrain::kWorkRoll] = 0;  // [orig: ai_data[134]]
-        b.f[136] = 0;                 // [orig: ai_data[136] — the commanded speed +544]
+        // brain+0x220 IS the mover's commanded-speed register (the wire's
+        // forward-speed word): the port's split keeps the motor copy in step.
+        // [orig: `mov [esi+220h],ebx` @0x467D83]
+        b.f[136] = 0;
+        if (ctx.world != nullptr)
+            if (Entity *vehicle = ctx.world->registry.get(e.handle))
+                vehicle->veh.cmd_speed = 0;
         b.f[AiBrain::kOutSpeed] = 0;  // [orig: ai_data[128]]
     }
 }

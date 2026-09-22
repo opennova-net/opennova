@@ -170,40 +170,39 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
     return best;
 }
 
-// The brain half of a waypoint REDIRECT order [orig: Entity_SetWaypointByTeam @0x43cdb4
-// per-entity block — aiComp[35]=1 mode, [37]=list, [38]=node (nearest of the list when
-// unresolved [orig: Entity_FindNearestTriggerByType @0x407ea0]), think cooldown 0,
-// carrier ref cleared, then the brain wp slots + the per-leg turn budget seed].
-void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
-    AiBrain &b = e.brain;
-    // Commands 0 and 123..127 have no NavChannel. Their node is an authored
-    // operand (e.g. a carrier SSN), so the writer must neither reject the
-    // command nor clamp its operand to a route length. Only -1 means nearest.
-    if (node == -1) node = nearest_route_node(e, static_cast<uint32_t>(list));
-    b.f[AiBrain::kWpType] = 1;                                     // [orig: aiComp[35] = 1]
-    b.f[AiBrain::kWpChannel] = list;                               // [orig: aiComp[37]]
-    b.f[AiBrain::kWpNode] = node;                                 // [orig: aiComp[38]]
-    // The SLOT half of the same witnessed block — the INFANTRY think navigates
-    // from slot+140/+148/+152, not the brain registers, and a spawn command
-    // (waypoint_id 123..127) parked in slot[37] otherwise short-circuits the
-    // think forever (the 00TRg debarked-crew freeze: detached, brain routed,
-    // slot still 125 -> the reserved-command early-return every think).
-    // [orig: Entity_SetWaypointByTeam @0x43cdb4 per-entity block — aiComp+140=1,
-    // +148=list, +152=node, think cooldown 0, carrier ref cleared]
-    e.slot.f[35] = 1;
-    e.slot.f[37] = list;
-    e.slot.f[38] = b.f[AiBrain::kWpNode];
-    e.slot.f[36] = 0;          // carrier ref cleared [orig: aiComp+144 = 0]
-    e.inf.wait_cooldown = 0;   // think cooldown 0 [orig: entity[74] = 0]
-    // The turn-budget seed [orig: the tail block @0x43cdb4 — AIWaypoint_UpdateTarget +
-    // budget = 32*|Yaw - bearing| / ((speed_param >> 15) + 32)].
-    if (ai_waypoint_update_target(b, e.pos, nav) == 0) {
-        const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        // 32-bit wrapping sub like the delta clamp — the short-way angle near the
-        // ±half-turn seam [orig: a plain x86 sub, then cdq/xor/sub abs].
-        const int32_t err = iabs32(e.heading - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32LL * err / denom);
-    }
+// The per-leg turn budget the ground drive legs and three of the route writers
+// seed: |Yaw - bearing| (a wrapping 32-bit sub, then cdq/xor/sub abs) through a
+// signed 32-bit idiv by ((brain[35] >> 15) + 32), THEN `shl eax,5`.
+// [orig: ctan @0x48988E..0x4898A2 and cveh @0x48BCC5..0x48BCD9 (the drive
+//  legs); Entity_SetWaypointByTeam @0x43CE3B..0x43CE4F; Entity_SetWaypointForTeam
+//  @0x43DE75..0x43DE89; WacCmd_SsnToWp @0x4F1DA4..0x4F1DB9]
+static int32_t route_turn_budget(const AiBrain &b, int32_t heading) {
+    const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
+    const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
+    return static_cast<int32_t>(static_cast<uint32_t>(err / denom) << 5);
+}
+
+// The brain half every redirect writer shares: mode, list and node copied from
+// the slot words the writer just stored (commands 0 and 123..127 included; their
+// node is an authored operand such as a carrier SSN, never clamped to a route).
+// [orig: Entity_SetWaypointByTeam @0x43CE02..0x43CE30 (pool 0) and
+//  @0x43CEDD..0x43CEFE (pool 1); Entity_SetWaypointForTeam @0x43DDA8..0x43DDCB
+//  (pool 0) and @0x43DE3C..0x43DE6A (pool 1); WacCmd_SsnToWp @0x4F1D6A..0x4F1D99]
+void AiSystem::copy_route_order_to_brain(AiEntity &e) {
+    e.brain.f[AiBrain::kWpType] = e.slot.f[35];
+    e.brain.f[AiBrain::kWpChannel] = e.slot.f[37];
+    e.brain.f[AiBrain::kWpNode] = e.slot.f[38];
+}
+
+// The seed that follows the copy in three of the five writer legs: the waypoint
+// refresh, whose -1 result is not tested, then the turn budget from the entity
+// Yaw. The group writer's pool-1 leg and the single writer's pool-0 leg stop at
+// the copy, so a redirected vehicle keeps its current leg's budget there.
+// [orig: Entity_SetWaypointByTeam @0x43CE36..0x43CE4F; Entity_SetWaypointForTeam
+//  @0x43DE70..0x43DE89; WacCmd_SsnToWp @0x4F1D9F..0x4F1DB9]
+void AiSystem::seed_route_turn_budget(AiEntity &e) {
+    ai_waypoint_update_target(e.brain, e.pos, nav);
+    e.brain.f[AiBrain::kAnimFlag] = route_turn_budget(e.brain, e.heading);
 }
 
 // Aircraft steering uses full-angle x87 FCOS, independently of the vehicle
@@ -427,16 +426,23 @@ void AiSystem::apply_min_ai_crew_clamp(World &world, Entity &veh,
         veh.health = static_cast<int32_t>(static_cast<int16_t>(traits.critical_hp));
 }
 
-// See ai.h — the vehicle-physics AI/parked input staging. [orig: Entity_UpdateVehiclePhysics
-// @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
+// See ai.h — the vehicle-physics AI/parked input staging, one staging for the
+// ground movers whose legs are instruction-equivalent: cveh [orig:
+// Entity_UpdateVehiclePhysics @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg
+// @0x48bc12-0x48c034] and ctan [orig: Entity_UpdateTankVehiclePhysics @0x488AB0:
+// AI-driver leg @0x4897DB..0x489C00 (avoid brake @0x489958..0x489B33, boarder
+// hold @0x489B38..0x489BCC), parked @0x489BCE..0x489BF9].
 void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                                 const VehicleTraits &traits, VehicleDriveCmd &out) {
     AiEntity *ve = for_handle(veh.handle);
     if (ve == nullptr) return; // no brain: the motor's own no-controller hold stands in
     AiBrain &b = ve->brain;
 
-    const bool wrecked = veh.health <= 0 || !veh.alive;
-    if (controller == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
+    // Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: a hull
+    // at zero health whose dead bit is not up yet keeps its driver's leg until
+    // the dying state's death transforms land, exactly like the player leg.
+    // [orig: ctan @0x48954B..0x489560; cveh @0x48B972..0x48B987]
+    if (controller == nullptr || (veh.flags & 0x10000002u) != 0) {
 		// Parked/no driver: the motor's no-controller branch holds heading + zeroes the
 		// command; the brain drops into the player-mode/parked state and the
 		// stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
@@ -450,7 +456,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     }
 
     // An AI controller sits in the ctrl/drvr seat — the autopilot leg.
-    if (b.f[AiBrain::kCurState] == 22) { // [orig: @0x48bc16]
+    if (b.f[AiBrain::kCurState] == 22) { // [orig: @0x48bc16; ctan @0x4897DF]
         b.f[AiBrain::kCurState] = 16;
     }
 
@@ -459,34 +465,31 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
             : bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
 
     // cmd speed = the SM mover's out-speed, capped at the def player_speed
-    // [orig: @0x48bc23-0x48bc48 — aiComp[136] = min(brain[128], playerSpeed);
-    //  the aiComp[135] <- brain[127] target mirror is an unmodeled slot].
+    // [orig: @0x48bc23-0x48bc48; ctan @0x4897EC..0x489811 — aiComp[136] =
+    //  min(brain[128], playerSpeed); the aiComp[135] <- brain[127] target mirror is
+    //  an unmodeled slot].
     int32_t cmd_speed = b.f[AiBrain::kOutSpeed];
     if (cmd_speed > traits.player_speed) cmd_speed = traits.player_speed;
-    // The minAI crew health clamp [orig: @0x48bc4e-0x48bc94].
+    // The minAI crew health clamp [orig: @0x48bc4e-0x48bc94; ctan @0x489817..0x48985D].
     apply_min_ai_crew_clamp(world, veh, traits);
 
     // Per-leg turn budget: recomputed whenever the mover's node advance cleared it.
-    // [orig: @0x48bc9a-0x48bccf — budget = 32 * |Yaw - bearing| / ((storedKeyTime >> 15) + 32)]
+    // [orig: @0x48bc9a-0x48bcd9; ctan @0x489863..0x4898A2]
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
-        const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        // 32-bit wrapping sub like the delta clamp below — the short-way angle near
-        // the ±half-turn seam [orig: a plain x86 sub, then cdq/xor/sub abs].
-        const int32_t err = iabs32(heading - b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kAnimFlag] = static_cast<int32_t>(32LL * err / denom);
+        b.f[AiBrain::kAnimFlag] = route_turn_budget(b, heading);
     }
 
     // Bearing delta clamped to the budget (32-bit wrap semantics are load-bearing near
-    // the +-half-turn seam) [orig: @0x48bcdf-0x48bcf9].
-    int32_t delta = b.f[AiBrain::kWpBearing] - heading;
+    // the +-half-turn seam) [orig: @0x48bcdf-0x48bcf9; ctan @0x4898A8..0x4898C2].
+    int32_t delta = io::bam_sub(b.f[AiBrain::kWpBearing], heading);
     const int32_t budget = b.f[AiBrain::kAnimFlag];
     if (delta > budget) delta = budget;
     if (delta < -budget) delta = -budget;
 
     // Sharp legs on a slow-steering vehicle damp the speed 0.75x per ~30/60 deg of
-    // residual turn [orig: @0x48bcfb-0x48bd51 — turnRate2 << 6 < budget, thresholds
-    // 357913920 / 715827840, factor 49152/65536].
+    // residual turn [orig: @0x48bcfb-0x48bd73; ctan @0x4898C4..0x48993C — turnRate2 << 6
+    // < budget, thresholds 357913920 / 715827840, factor 49152/65536].
     if ((traits.turn_rate2 << 6) < budget) {
         const int32_t a = std::abs(delta);
         if (a > 357913920)
@@ -495,16 +498,17 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
             cmd_speed = static_cast<int32_t>((49152LL * cmd_speed + 0x8000) >> 16);
     }
 
-    // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26] — shared with the cbot
-    // leg (vehicle_avoid_brake above).
+    // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26; ctan @0x489958..0x489B33] —
+    // shared with the cbot leg (vehicle_avoid_brake above).
     cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed);
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
-    out.steer_target_bam = heading + delta + (delta >> 3); // [orig: @0x48bd7f]
+    // [orig: @0x48bd7f; ctan @0x489948..0x489952]
+    out.steer_target_bam = io::bam_add(io::bam_add(heading, delta), delta >> 3);
     // The wait-for-boarders stop: a full stop while any live unmounted pool-0
-    // body runs the boarding think toward THIS vehicle [orig: @0x48bf6f-0x48bff9
-    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80; the motor zeroes
-    // the ramp for every AI command].
+    // body runs the boarding think toward THIS vehicle [orig: @0x48bf6f-0x48bff9;
+    // ctan @0x489B38..0x489BCC — aiComp[132] = Yaw, [136] = 0, [137] = 0,
+    // Flags &= ~0x80; the motor zeroes the ramp for every AI command].
     if (vehicle_waits_for_boarders(world, veh)) {
         out.steer_target_bam = heading;
         out.cmd_speed = 0;
@@ -650,11 +654,15 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 // vehicle can still take someone (Entity_CanEnterVehicle), then walks pool 0 for
 // a live, unmounted body whose AI is running the BOARD order at this hull.
 //
-// The three brain slots are the ones the board think already writes: f[37] is
-// the command (125 = "Goto SSN and board"), f[38] the target's authored id.
+// The board order lives in the walker's AiSlot (entity+0x68), the words the
+// boarding command writes: slot[37] (+0x94) is the command (125 = "Goto SSN and
+// board"), slot[38] (+0x98) the target's authored id. The brain (entity+0x64)
+// plays no part.
 // [orig: the shared wait-for-boarders block — air @ kong 94590, watercraft
-//  @0x48E75B; gates `entity[7] != 0`, `(Flags & 3) == 0`, aiComp non-null,
-//  aiComp[37] == 125, aiComp[38] == entity->DcbId, and `!entity[90]` (unmounted)]
+//  @0x48E75B, cveh @0x48BFB6..0x48BFE2, ctan @0x489B82..0x489BAE: gates
+//  `entity[7] != 0`, `(Flags & 3) == 0`, `mov ecx,[eax+68h]` non-null,
+//  `cmp [ecx+94h],7Dh`, `[ecx+98h] == entity->DcbId`, and `!entity[90]`
+//  (unmounted); the writer WacCmd_SsnToSsn @0x4F73E4..0x4F73F7]
 bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
 	// The whole admission predicate gates the hold, including the stable
 	// saved-pose/deck/spawn arms. [orig: Entity_CanEnterVehicle @0x435480]
@@ -670,9 +678,9 @@ bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
         if ((e.flags & 3u) != 0) return;
         if (e.mounted) return;                 // [orig: !entity[90]]
         const AiEntity *b = for_handle(e.handle);
-        if (b == nullptr) return;              // [orig: the aiComp null test]
-        if (b->brain.f[37] != 125) return;     // not running the board order
-        if (b->brain.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
+        if (b == nullptr) return;              // [orig: the aiSlot null test]
+        if (b->slot.f[37] != 125) return;      // not running the board order
+        if (b->slot.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
         waiting = true;
     });
     return waiting;

@@ -3416,11 +3416,19 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
-        int idx = sys.attach(EntityHandle::make(0, 0));
+        // The arrival proximity is the def turn-rate word (itemDef+0x924), read
+        // live from the entity's def [orig: @0x457DCB..0x457DCE].
+        w.registry.configure_pool(1, 1);
+        Entity hull;
+        hull.item_id = 1294;
+        const EntityHandle hull_h = w.registry.spawn(1, hull);
+        VehicleTraits hull_traits;
+        hull_traits.turn_rate = 100;
+        w.vehicles.traits.set(hull.item_id, hull_traits);
+        int idx = sys.attach(hull_h);
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade; // 18
         e.brain.f[AiBrain::kWorkHeading] = 1000;        // brain[132] target heading
-        e.arrival_prox = 100;
         e.heading = 1050;                                // within [900,1100] -> arrived
         e.patrol_goal = 1;
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
@@ -3470,7 +3478,7 @@ int main() {
         e.brain.f[AiBrain::kFireTimer] = 50;
         e.brain.f[AiBrain::kStep] = 64;
         e.patrol_goal = 1;                    // stay in the goal branch (no transition)
-        e.brain.f[AiBrain::kWorkHeading] = 0; e.arrival_prox = 1; e.heading = 1000; // not arrived
+        e.brain.f[AiBrain::kWorkHeading] = 0; e.heading = 1000; // no def: prox 0, not arrived
         int before = sys.unported_calls;
         sys.row(kAiGroundEvade).tick(ctx);
 		CHECK(sys.unported_calls == before); // the countermeasure path is implemented

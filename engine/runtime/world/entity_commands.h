@@ -81,9 +81,16 @@ public:
     // WAC teleSSN has a witnessed marker self-copy; BMS uses the real teleport above.
     bool wac_teleport_ssn(EntityTarget source, int32_t marker_wp_number);
     bool play_ssn_soundset(EntityTarget target, const std::string &set);
-    // `node < 0` selects the nearest node on the list (the two-argument WAC form);
-    // BMS RedirectSingleTo carries an explicit node in param3.
-    bool set_ssn_waypoint(EntityTarget ssn, int32_t wp, int32_t node = -1);
+    // WAC SSNtoWP: the node is always the nearest of the list; no detach and no
+    // cooldown/carrier resets, then the brain copy and the turn-budget seed.
+    // [orig: WacCmd_SsnToWp @0x4F1CE0]
+    bool set_ssn_waypoint(EntityTarget ssn, int32_t wp);
+    // BMS RedirectSingleTo (event action 19): the first pool-0 slot holder whose
+    // net id matches takes the order and ends the walk (detach, resets, brain copy,
+    // no budget); otherwise every matching pool-1 slot holder takes it with the
+    // budget seed. `node < 0` selects the nearest node; BMS carries param3.
+    // [orig: Entity_SetWaypointForTeam @0x43DD00, dispatched @0x4547DB]
+    int redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t node);
     bool set_ssn_engage_min(EntityTarget ssn, int32_t v);
     bool set_ssn_engage_max(EntityTarget ssn, int32_t v);
     bool set_ssn_attack_max(EntityTarget ssn, int32_t v);
@@ -230,8 +237,11 @@ public:
 
     // --- group (by group id) ---
     int kill_group(int group);          // returns members affected
-    // `node < 0` selects the nearest node on the list; BMS RedirectGroupTo passes
-    // its authored param3 here instead of silently replacing it with nearest.
+    // BMS RedirectGroupTo (event action 1) and WAC GtoWP. `node < 0` selects the
+    // nearest node on the list; BMS passes its authored param3. Pool-0 members
+    // detach, reset their cooldown/carrier words and seed the turn budget;
+    // pool-1 members only take the slot and brain words.
+    // [orig: Entity_SetWaypointByTeam @0x43CD20, dispatched @0x454315]
     int group_to_waypoint(int group, int32_t wp, int32_t node = -1);
     int set_group_hp(int group, int32_t hp);
     int set_group_engage_min(int group, int32_t v);

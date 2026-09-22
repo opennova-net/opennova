@@ -505,7 +505,9 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::VaporizeSingle: cmds.remove_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
         case bms::ActionType::RedirectSingleTo:
-            cmds.set_ssn_waypoint(static_cast<uint16_t>(a.param1), a.param2, a.param3);
+            // [orig: EventAction_Dispatch case 19 @0x4547CF..0x4547DB ->
+            //  Entity_SetWaypointForTeam @0x43DD00]
+            cmds.redirect_ssn_to_waypoint(a.param1, a.param2, a.param3);
             break;
         case bms::ActionType::RedirectGroupTo:
             cmds.group_to_waypoint(a.param1, a.param2, a.param3);
