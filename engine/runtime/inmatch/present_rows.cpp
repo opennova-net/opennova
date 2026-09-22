@@ -67,9 +67,9 @@ inline void write_present_world_model_heat_glow(float *record, const World &worl
 
 inline void write_present_vehicle_motion_controls(float *record, const World &world,
 		const Entity &entity) {
-	// The authoritative motor owns these controls. Its render callback selects
-	// which channels may be published; joiner compact rows leave VALID clear
-	// because they do not carry the full animation and turret state.
+	// The row's motor owns these controls — the authority's, or on a joiner the
+	// client mover that predicts its twin. Its render callback selects which
+	// channels may be published.
 	const FocalSwayPose sway = world.rotor_wash.sway_pose(entity);
 	record[PF_FOCAL_SWAY_VALID] = sway.active ? 1.0f : 0.0f;
 	if (sway.active) {
@@ -351,8 +351,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					world::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
-			// motor fields. Do this only for the authoritative registry row:
-			// the compact view has no steer/currentSpeed source to reconstruct.
+			// motor fields; a joiner publishes its own twin's below.
 			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
 			//  stores @0x4929D7 / @0x4929F1]
 			write_present_vehicle_motion_controls(r, kernel.world, *ent);
@@ -560,6 +559,16 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
 				//  @0x4E3180 (@0x4e3201..0x4e3218)]
 				write_present_doors(r, i, kernel.world, *local, door_phases);
+				// The vehicle render callbacks run on every peer against the
+				// client's own mover state (the joiner's world-side prediction
+				// advances the same tracks, wheel phase and springs), so a
+				// joiner publishes its local twin's controls exactly as the
+				// authority collector does.
+				// [orig: HUD_CacheEntityDebugStats @0x449C10 (tank track words
+				//  @0x449C3C..0x449C69); Entity_CacheVehicleHUDStats @0x4929B0;
+				//  the client mover's track phase Entity_UpdateTankVehiclePhysics
+				//  @0x489F98 / @0x489FA0]
+				write_present_vehicle_motion_controls(r, kernel.world, *local);
 			}
 			const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
 			if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
