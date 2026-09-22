@@ -1371,6 +1371,15 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     ai.pump_mounted_weapon_slots(*w, 68);
     CHECK(w->out.rounds.count == before);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
+
+    // A held target at zero health still draws the request until the next
+    // think clears it: retail tests only the target pointer.
+    // [orig: Entity_UpdateInfantryAI `mov eax,[edi+0Ch]; test eax,eax; jz`
+    //  @0x4BF4CF..0x4BF4D4]
+    w->registry.get(target_h)->health = 0;
+    gun_live->primary_weapon_slot = WeaponSlotState{};
+    ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
+    CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
 }
 
 static void test_mounted_look_traverses_before_fire_request() {
