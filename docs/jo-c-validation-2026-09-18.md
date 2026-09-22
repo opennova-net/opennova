@@ -1,5 +1,9 @@
 # JO-C validation and fixes - 2026-09-18
 
+> **Dated snapshot.** This report records the 2026-09-18 validation. The
+> [divergence ledger](divergence-ledger.md) and owning RE records track later
+> status changes.
+
 The concrete differences found in this pass are corrected: guided-round birth,
 lifetime and motion; shared loaded-ammo storage; blast section marking; indoor
 projectile terrain admission; parachute descent; writable WAC night state;

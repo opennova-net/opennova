@@ -1,31 +1,14 @@
-# godot/tests/ — GUT suite
+# godot/tests/ - GUT suite
 
-- Run via `scripts/test_godot.sh` (headless; needs `GODOT_BIN` or a binary in the main
-  checkout's `.godot-bin/`). On a fresh worktree run `scripts/bootstrap_godot.sh`
-  (installs GUT and the imgui-godot addon the `DevTools` node expects) and then
-  `"$GODOT_BIN" --headless --path godot --import`, or engine classes appear missing.
-  Headless runs never attach an ImGui context: `DevTools.is_available()` is false
-  there while its open state (F3, capture, input policy) still works and is tested.
-- Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
-- No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
-  (`docs/mcp.md`, ADR 0041): registered in `ProbeDef.definitions()`
-  (`godot/game/probe/`), driven through the game's MCP endpoint with typed
-  arguments, judged by their verdict. Their GUT companions
-  (the catalog contract, the render-fixture and foliage-capture contracts, the
-  parity-joiner contract) live in `godot/tests/probes/`. An assertion over the
-  portable engine is a ctest under `tests/<domain>/`, gated on the retail roots
-  when it needs retail data (`docs/asset-gated-tests.md`).
-- GUT exits 0 when a script fails to parse — it is silently dropped from collection.
-  `scripts/test_godot.sh` greps for parse errors and dropped scripts; prefer it over
-  invoking `gut_cmdln.gd` directly, and replicate those greps after any direct run.
-- The full suite is flaky (shared `user://` state). Before trusting a failure, re-run the
-  failing file alone:
-  `"$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd -gtest=res://tests/<file> -gexit`.
-  (Flag reference: `godot/addons/gut/cli/gut_cli.gd` after bootstrap — `-gselect`
-  filename substring, `-gunit_test_name` test-name substring.)
-- If a test needs a newly registered engine class, rebuild the GDExtension first
-  (`scripts/build_godot.sh`) — see `godot/src/CLAUDE.md`.
-- C++ tests live in `/tests` (ctest). Keep the two suites separate.
+Use the [GUT skill](../../.claude/skills/gut/SKILL.md) for setup,
+collection, silent-drop checks, and isolated reruns. This directory
+contains `*_test.gd` files extending `GutTest`; native engine assertions
+belong in `tests/`. Runtime `game_probe` tools live in `godot/probes/`
+([MCP guide](../../docs/mcp.md)); only their contracts are tested here.
+
+Headless runs have no ImGui context: `DevTools.is_available()` is false,
+though its open state and input policy remain testable.
+
 - Tests drive real fixtures (ADR 0043 rule 11): never subclass a production Node or
   world-layer class to override behavior, never poke a `_private`. Boot the real object
   through `support/world_fixture.gd` (`WorldFixture.boot_minimal` — the packaged

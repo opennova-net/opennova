@@ -1,8 +1,8 @@
 # Historical ONED authoring/runtime parity: the shared-node patterns
 
 > **Historical.** [ADR 0037](../adr/0037-oned-runs-game-data.md) removed ONED's
-> authoring and preview surfaces. The patterns below document the retired
-> editor implementation; they are not current architecture guidance.
+> authoring and preview surfaces; [ADR 0045](../adr/0045-cli-game-data-runtime-only.md)
+> later removed ONED itself. The patterns below document retired behavior.
 
 How ONED's former authoring surfaces reused game rendering and data systems for
 previews without becoming a second gameplay runtime. These patterns were

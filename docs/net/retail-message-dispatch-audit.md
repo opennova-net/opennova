@@ -1,5 +1,8 @@
 # Retail message dispatch audit (2026-09-09)
 
+> **Dated snapshot.** The [network RE record](novaworld-net-re.md) and
+> [divergence ledger](../divergence-ledger.md) own subsequent D-NET-218 work.
+
 The retail dispatch tables contain **193 handlers: 122 S2C and 71 C2S**.
 The previous wire coverage catalog contained 113. This audit adds the missing
 80 entries and fixes the receive/host behaviors below. It does not establish

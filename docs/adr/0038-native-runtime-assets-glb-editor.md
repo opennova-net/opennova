@@ -6,6 +6,9 @@
   add-ons, ASE/OED/TDP authoring pipeline, and the flat shared-library model in
   ADR 0024. Updates ADRs 0027, 0029, 0034, and 0037 where they describe those
   retired surfaces. Their runtime and layering decisions remain in force.
+- **Later test change**: the shader source-pinning tests named below were
+  retired on 2026-09-21. See the current
+  [shader validation guide](../render/shader-validation.md).
 
 ## Context
 

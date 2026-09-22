@@ -2,8 +2,9 @@
 
 > **Historical program.** The program closed on 2026-07-12. Any remaining
 > ONED workspace roadmap or editor-backlog language below was retired by
-> [ADR 0037](adr/0037-oned-runs-game-data.md); ONED is now run-only. The
-> landed-slices and C-ABI logs remain append-only records. The flat C ABI, its
+> [ADR 0037](adr/0037-oned-runs-game-data.md); [ADR 0045](adr/0045-cli-game-data-runtime-only.md)
+> later removed ONED entirely. The landed-slices and C-ABI logs remain
+> append-only records. The flat C ABI, its
 > `abi_export_identity` guard (the since-deleted `abi_exports_check.py` and its
 > baseline) and the release-deliverables validator were retired by
 > [ADR 0038](adr/0038-native-runtime-assets-glb-editor.md) (2026-08-26); the

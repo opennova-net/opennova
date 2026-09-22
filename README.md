@@ -25,10 +25,9 @@ The project does not ship a Python, Qt, Blender, or standalone asset-importer
 toolchain. Runtime asset loading is native and the supported object input is
 3DI.
 
-A future editor will use GLB/GLTF as its scene interchange: GLB/GLTF to 3DI
-for runtime assets and 3DI to GLB for editing. That converter is not part of
-the current repository. Its scene contract is documented without depending on
-importer metadata or DCC custom properties.
+The proposed future GLB/GLTF editor interchange is recorded in
+[ADR 0038](docs/adr/0038-native-runtime-assets-glb-editor.md); no converter
+ships in this repository.
 
 ## Build and test
 
@@ -51,16 +50,8 @@ scripts/build.sh --no-godot
 scripts/test_godot.sh
 ```
 
-The equivalent native commands are:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-ctest --test-dir build --output-on-failure -C Release
-```
-
-See [DEVELOPING.md](DEVELOPING.md) for the GDExtension, servers, launcher, and
-retail-compatibility development workflows.
+See [DEVELOPING.md](DEVELOPING.md) for the manual CMake commands, GDExtension,
+servers, launcher, and retail-compatibility workflows.
 
 ## Run OpenNova
 

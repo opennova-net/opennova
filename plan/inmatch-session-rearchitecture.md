@@ -1,5 +1,9 @@
 # In-match Session and Godot Frame Pipeline master plan
 
+> **Historical plan.** This cutover completed in PR #465. Its frame-pipeline
+> architecture was later superseded by
+> [ADR 0043](../docs/adr/0043-canonical-cpp-and-godot-hard-cut.md).
+
 > **Status:** COMPLETE
 >
 > **Delivery:** one coordinated cutover PR; no compatibility period and no

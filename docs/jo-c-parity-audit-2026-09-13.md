@@ -1,5 +1,9 @@
 # JO-C parity audit and implementation plan
 
+> **Dated snapshot.** The inventory and proposed order below describe the
+> 2026-09-13 baseline. Use the [divergence ledger](divergence-ledger.md) for
+> current dispositions and the owning RE records for subsequent evidence.
+
 Date: 2026-09-13. OpenNova baseline: `aedf6c091cba0db41dd3eb54f00b17430e5307e5`
 (includes PR #648). Branch: `audit/jo-c-parity-2026-09-13`.
 

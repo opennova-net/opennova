@@ -12,6 +12,7 @@
   camera, shell UI) stands.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) narrows ONED from an
   authoring front-end to run controls; Godot remains first-class.
+  [ADR 0045](0045-cli-game-data-runtime-only.md) later removes ONED entirely.
   [ADR 0040](0040-the-engine-is-one-namespace.md) finishes decision 5 (the
   files, identifiers and macros drop the prefix too; bindings include
   root-relative) and restates §2's consumer list honestly.

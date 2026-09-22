@@ -1,5 +1,9 @@
 # Track C: launcher (hosts-file model) and website
 
+> **Historical plan.** The NovaWorld integration landed in PR #136. Use the
+> [launcher guide](../launcher/README.md) and [DEPLOY.md](../DEPLOY.md)
+> for current instructions.
+
 ## Launcher
 
 Port of the reference C# launcher (.NET 8 WinForms tray app) into top-level

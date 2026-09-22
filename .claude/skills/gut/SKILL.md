@@ -40,10 +40,13 @@ This is the trusted entry point: it greps the log for
 `SCRIPT ERROR: Parse Error` and `Ignoring script .*does not extend GutTest`
 and fails on either — both mean a script was silently skipped, usually a parse
 error or an unregistered GDExtension class (stale/missing DLL).
+Use `--keep-user-dir` only when you need to inspect the wrapper's isolated
+`user://` directory after the run; the wrapper removes it otherwise.
 
 ## Single file / single test (isolation runs)
 
-The wrapper takes no arguments; invoke GUT directly:
+The wrapper accepts only `--keep-user-dir`, not a test selector. Invoke GUT
+directly to select one file or test:
 
     "$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd \
       -gtest=res://tests/<file>_test.gd -gexit
@@ -59,9 +62,10 @@ The wrapper takes no arguments; invoke GUT directly:
 
 ## Flaky-failure protocol (mandatory)
 
-Full-suite failures can come from shared `user://` state (tests can encounter
-the same persisted product config as a local run, including
-`user://opennova.cfg`). On any reported failure:
+The wrapper isolates `user://` from the developer's real settings, but tests
+still share that isolated directory within one suite run. A file can therefore
+fail because an earlier test wrote `user://opennova.cfg` or other state. On
+any reported failure:
 
 1. Re-run that test FILE alone with `-gtest=` as above.
 2. Fails alone → real failure; debug it.

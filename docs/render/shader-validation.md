@@ -1,18 +1,21 @@
 # Shader validation contract
 
-The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
-and 39 `.gdshaderinc` implementation files (193 resources total). The executable
-contract is `godot/shaders/provenance.json`, validated by
-`godot/tests/shader_resource_validation_test.gd` (every resource loaded through
-Godot). The textual pins over the shader and C++ sources (the former
+The checked-in shader set contains 156 `.gdshader` entry points and 39
+`.gdshaderinc` implementation files (195 resources total).
+`godot/shaders/provenance.json` records their provenance.
+`godot/tests/shader_resource_validation_test.gd` loads every resource through
+Godot, while `godot/tests/render_shader_cache_handoff_test.gd` checks the
+bounded object-pipeline manifest. Neither test validates every claim in the
+provenance catalog. The textual pins over shader and C++ sources (the former
 `shader_resource_contract_test.gd`, `shader_provenance_pins_test.gd`,
 `foliage_shader_contract_test.gd`, `terrain_shader_contract_test.gd` and the
 transitive-source hash golden) were retired on 2026-09-21: a test asserts
 behavior through a public seam, never the text of the code.
 
-Every resource must match exactly one provenance family, every include must
-resolve inside `res://shaders` without a cycle, every include must be reachable
-from a wrapper, and every source must have exactly one Godot UID sidecar.
+The catalog's intended coverage is one provenance family per resource,
+includes resolved inside `res://shaders` without cycles, and one Godot UID
+sidecar per source. The loading test catches import and include failures;
+review the catalog and source inventory when changing provenance.
 Wrappers inherit citations through their include closure and through their
 family contract; this is intentional for the 128 generated object wrappers
 and four declared auxiliary EnvironmentMirrorTextured P3 postmultiply passes

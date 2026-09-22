@@ -69,14 +69,9 @@ engineering is recorded in
 as an in-process listen server, so co-op and multiplayer share one replication path
 ([the listen-server ADR](docs/adr/0011-single-player-in-process-listen-server.md)).
 
-## Where we are today
+## Current status
 
-OpenNova is pre-1.0 and under active development. The engine and its format libraries
-are the most exercised surfaces; the runtime loads the game data, runs the terrain
-and foliage systems, and simulates missions (WAC scripts, BMS events, AI);
-the gameplay systems (weapons, projectile physics and damage, throwables,
-mounted and emplaced weapons, vehicles, item destruction, optics and the HUD)
-are ported with test coverage, and multiplayer runs on the wire-compatible
-in-match protocol ("NovaWorld and multiplayer" above). Every system here is
-experimental. See the [README](README.md) for current capabilities, downloads,
-and build steps.
+OpenNova is pre-1.0 and under active development. See the
+[current-state router](docs/current-state.md) and
+[divergence ledger](docs/divergence-ledger.md) for current work, and the
+[README](README.md) for downloads and build steps.

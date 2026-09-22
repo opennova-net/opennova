@@ -1,6 +1,6 @@
 ---
 name: re-doc
-description: Authors or refreshes a golden reverse-engineering record under docs/<domain>/<system>-re.md in this repo's exact format — verdict table, witness map with [orig] citations, stable D-<DOMAIN>-n divergence catalog, and the cross-file index updates. Use after a grill-ida or engine-research session to land the freshly witnessed findings into tracked docs, in the same session.
+description: Authors or refreshes a reverse-engineering record under docs/<domain>/<system>-re.md with verdicts, cited witnesses, and stable divergence IDs. Use after a grill-ida or engine-research session to land findings in the owning record and update affected indexes.
 ---
 
 # Land a golden RE record
@@ -28,24 +28,24 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
   never renumber; document gaps rather than closing them.
 - Hard rule: no raw decompiled code is ever committed — summarize and cite.
 
-## Cross-file updates (the part that gets forgotten)
+## Cross-file updates
 
-1. `docs/README.md` — add/refresh the "RE records by domain" row and status
-   (landed / unlanded with PR reference / in flight).
-2. `docs/divergence-ledger.md` — close/open the D-rows in the same PR;
+1. `docs/divergence-ledger.md` — close/open the D-rows in the same PR;
    `python scripts/lint/ledger_check.py --write` regenerates the scoreboard.
    A D-id born in the ledger must ALSO get its full row in the record's
    catalog — the ledger mirrors, the record owns.
-3. `docs/engine-primer.md` — the domain's subsystem row — and
-   `docs/current-state.md` — the domain's routing row.
-4. `docs/correspondence.md` — add the grilled functions to the parity matrix
-   with verdicts.
-5. Code↔doc sync — source comments cite `docs/<domain>/<x>-re.md (D-...)`;
+2. `docs/correspondence.md` — update only when the findings change a function
+   correspondence or its verdict.
+3. `docs/README.md` — add or rename a record link only when the set or names
+   of records change. Update `docs/engine-primer.md` only when its subsystem
+   map changes, and `docs/current-state.md` only when its routing or phase changes. Dated
+   progress belongs in the owning record, not these navigation pages.
+4. Code↔doc sync — source comments cite `docs/<domain>/<x>-re.md (D-...)`;
    grep the repo for the doc's D-IDs and confirm every cited ID exists in the
    doc and vice versa.
-6. New ADR if a policy decision emerged: next number in `docs/adr/`, linked
+5. New ADR if a policy decision emerged: next number in `docs/adr/`, linked
    from the docs README ADR table.
-7. Open questions survive only as the record's explicit unknown/follow-up
+6. Open questions survive only as the record's explicit unknown/follow-up
    entries — there is no scratch directory; what isn't landed is lost. The
    record stays pristine: the best current understanding, no drafts, no raw
    decompilation, no session chatter.

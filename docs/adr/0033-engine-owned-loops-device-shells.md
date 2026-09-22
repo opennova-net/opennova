@@ -1,40 +1,12 @@
 # ADR 0033: the engine owns the loops; shells are devices
 
-- **Status**: accepted (2026-08-09; the rearchitecture plan, maintainer-approved).
-  **Superseded in full by [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md)
-  (2026-09-02)**: the engine-owns-the-loops rule, the R2 draw-list
-  presentation and the device-leg test survive there restated; the
-  `inmatch::TickTarget` seam named below dies for a `Session` owning a `Role`.
-  This file is the record of the rearchitecture round.
-- **Amended**: ADR 0035 (2026-08-10) replaced the R1 callback-driven
-  `FrameDriver`; ADR 0036 (2026-08-22) cuts its lifecycle owner over to
-  `inmatch::Session` plus the first-class `GameFramePipeline`.
-  The R2 draw-list and R3 dispositions below remain in force; R4 is CLOSED
-  permanently by [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
-  (2026-08-28) — no second backend, ever — which also supersedes decision 1's
-  RenderBackend/InputSource/AudioSink triad with the real seams
-  (`inmatch::TickTarget`, `GameFramePipeline`, the draw-list compilers +
-  native appliers). R3's reopen clause stands, decoupled from any backend.
-- **Updated**: [ADR 0037](0037-oned-runs-game-data.md) retires ONED authoring
-  surfaces; the engine-loop and runtime-device decisions remain in force.
-- **Owners**: runtime architecture
-- **Supersedes/updates**: **replaces ADR 0031 and ADR 0032 in full as the
-  standing architecture contract — there is ONE seam (the device boundary)
-  and one rule.** ADR 0031's five-band contract and its census stay valid as
-  the historical record that motivated this decision, but the bands stop
-  being a live rule; ADR 0032's operative rules survive by RESTATEMENT inside
-  this ADR (decision 3 below), not as a second contract. Would have reversed
-  ADR 0023's "the queue itself (a device-era artifact) is not reproduced" at
-  stage R3 (the queues carry the pass ORDER, and the order is the parity) —
-  the R3 spike (2026-08-10) closed the rung NOT TAKEN, so the reversal never
-  took effect and ADR 0023's disposition stands (§R3 spike result below);
-  supersedes ADR 0028 decision 5's standing rule ("GDScript in
-  `godot/src/` wires, adapts, and presents") for the GAME runtime at
-  stage R1 — GDScript remains the authoring language of ONED; narrows the
-  Control-tree menu presentation (the PR #68 lineage) to authoring-only at
-  stage R2. ADR 0016's principle ("engine behavior does not live in
-  GDScript") is not superseded — it is *completed*: the runtime's
-  orchestration follows the editor's math out of GDScript.
+- **Status**: historical rearchitecture decision, accepted 2026-08-09.
+  [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) supersedes it in full
+  and restates the surviving engine and draw-list rules. The R1 frame design
+  changed under ADRs 0035 and 0036; R3 closed without a render-queue port,
+  and [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md) closed R4's
+  second-backend proposal. This document records the original decision and
+  its discarded paths, not current implementation guidance.
 
 ## Context
 

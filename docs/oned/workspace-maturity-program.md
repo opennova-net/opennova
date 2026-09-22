@@ -1,8 +1,8 @@
 # ONED workspace maturity program (the maturity program's ONED track)
 
 > **Historical.** [ADR 0037](../adr/0037-oned-runs-game-data.md) removed every
-> ONED authoring workspace in a hard cut. This closed program is retained as a
-> record and is not a roadmap.
+> ONED authoring workspace; [ADR 0045](../adr/0045-cli-game-data-runtime-only.md)
+> later removed ONED itself. This closed program is a record, not a roadmap.
 
 **This document was the ONED track detail of the
 [maturity program](../maturity-program.md)** — the umbrella owned waves,

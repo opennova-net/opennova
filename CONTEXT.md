@@ -127,16 +127,10 @@ record is `docs/net/novaworld-net-re.md`.
 _Avoid_: "our own protocol", custom packet format
 
 **Host / Joiner**:
-The authoritative side of an in-match session (the **host**) versus a remote peer that
-came in through the join handshake (a **joiner**). Under the listen server the host runs
-a local client too; "client" survives in wire-protocol prose (retail message names).
-This is the ONLY meaning of "host" in this codebase. UI attachment points are
-containers, presentation owners are **Presenters**, application front-ends are
-**Shells**, the application embedding a portable lib is its **embedder**, and our
-engine contrasted with retail is **the reimpl** — never "the host". A review
-concern, not a lint (ADR 0043 retired `host_lint.py`).
-_Avoid_: master/slave, owner (when you mean the host); host for anything that is not
-the authoritative session side
+The **host** is the authoritative side of an in-match session; a **joiner**
+is a remote peer admitted through the join handshake. A listen server also
+runs a local client. Use *host* only for the authoritative session side.
+_Avoid_: master/slave; host for a UI container, shell, or library embedder
 
 **Listen server**:
 A host that is simultaneously the authoritative server and a local client. OpenNova's
@@ -167,17 +161,12 @@ service's domain. Code and libs are named by their domain, never bare "net".
 _Avoid_: unqualified "net code", lobby (for either)
 
 **Wire codec / In-match session / Match**:
-The two stable in-match boundaries and the gameplay model (ADR 0043 d3/d4, superseding ADR 0036). The **wire
-codec** (`engine/net/npwire`, ADR 0019) is the retail compatibility contract and
-encodes/decodes the byte stream; its message catalog is the single source of
-truth (ADR 0013). The **in-match session**
-(`opennova::inmatch::Session`, `engine/runtime/inmatch`) owns lifecycle, role,
-fixed cadence, retained input, and tick outcomes. The authoritative **Match**
-(`world::Match`) owns rules, player/team statistics, clock, winner evaluation,
-and the frozen end-round result. `npruntime` and `netsim` are implementation
-directories beneath those boundaries, not peer layers or extension seams.
-_Avoid_: "the netcode" (name the wire transaction, session behavior, or match rule);
-"net seam" / "net runtime layer" as public architecture
+The **wire codec** encodes and decodes retail-compatible network bytes.
+The **in-match session** owns lifecycle, role, cadence, and input consumption.
+The authoritative **Match** owns rules, statistics, clock, and round result.
+See [ADR 0043](docs/adr/0043-canonical-cpp-and-godot-hard-cut.md) for their
+implementation boundaries.
+_Avoid_: "the netcode" when one of these specific responsibilities is meant
 
 **Packet / Draw list**:
 A **packet** is wire data — bytes on the network, and nothing else. What a frame
@@ -199,18 +188,11 @@ A human participant in a match. A Player controls a Person and may control a sep
 _Avoid_: infantry, avatar, client (when the human participant is meant)
 
 **Spectator**:
-The third session role (#601, D-NET-217): a human admitted into a live match who
-controls no Person. Signed capacity and an optional password live on
-`GameConfig` (`spectator_slots` 0 disabled / −1 shared / positive dedicated);
-the join decides Player vs Spectator before ClientAuth; the authority still
-allocates a roster slot and a hidden, damage-disabled team-0 body while S2C
-0x75 drives the client's free-fly camera, the 0x16 row rides the spectator
-trailer, and the canonical bit is `replication::Connection::spectator`
-(`slot+100567`). The retail deploy-hold bit covers spectators in the priority
-build; the record is `docs/net/novaworld-net-re.md` §5.0e.
-_Avoid_: observer, ghost, "dead player" (a spectator never deployed);
-squad-mode vocabulary for the 0x2000/0x4000 BuildFlags bits (D-NET-217 refuted
-the `g_squad_*` reading)
+A human admitted to a live match who controls no Person and does not
+deploy. Retail wire handling still assigns a roster slot and a hidden body;
+the [network record](docs/net/novaworld-net-re.md) owns the admission,
+capacity, camera, and replication details (D-NET-217).
+_Avoid_: observer, ghost, "dead player"
 
 **Vehicle**:
 A carrier Entity with its own physical state. Its driver, controller, gunner, or passenger remains a separate Person.
@@ -374,13 +356,7 @@ The per-frame apply step that projects simulation state onto scene nodes
 _Avoid_: render pass, sync pass
 
 **Weather home**:
-`world::WeatherState` on the simulation tick — the ONE home for weather
-authority state (#597): `MissionKernel::tick_weather` runs the sim legs after
-every logic tick and calls the `IWeatherRenderTick` render owner; the tick
-model is `env::WeatherRuntime`, the file/core math `engine/formats/env`, and
-`env::weather_seed_from_config` the one seed derivation. Standalone owners
-(previews, GUT fixtures) tick `EnvironmentState::standalone_weather()` through
-the same runtime. Record: `docs/env/env-tod-re.md`.
-_Avoid_: a second weather clock or state copy anywhere (the pre-#597
-`EnvNetworkState` / render-side accumulator shapes); "environment system" for
-the weather authority (the `.env` document model is `formats/env`)
+The authoritative weather state, `world::WeatherState`, advances on the
+simulation tick; rendering observes its result. The
+[environment record](docs/env/env-tod-re.md) owns its runtime details.
+_Avoid_: a second weather clock or state copy

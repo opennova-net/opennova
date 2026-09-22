@@ -1,5 +1,8 @@
 # Track B: infrastructure, deployment, 1Password secrets
 
+> **Historical plan.** The NovaWorld integration landed in PR #136. Use
+> [DEPLOY.md](../DEPLOY.md) for current deployment instructions.
+
 ## Constraints
 
 1. Secrets come only from a 1Password vault. The operator handles exactly one secret:

@@ -140,7 +140,7 @@ textures, a `.def` points at a `.3di` and its `.bad` animations, a mission point
 definitions ([GOALS.md](../GOALS.md)). Honoring those conventions instead of
 hardcoding is the project's second pillar. Format tools write the canonical files
 directly, and the runtime resolves their names without an editor-owned project or
-asset database (same doc; [ADR 0037](adr/0037-oned-runs-game-data.md)).
+asset database ([ADR 0045](adr/0045-cli-game-data-runtime-only.md)).
 
 ### Wire format / network compatibility
 

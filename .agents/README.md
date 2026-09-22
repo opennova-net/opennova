@@ -1,89 +1,35 @@
-# OpenNova Agent Guide
+# Networking agent runbooks
 
-These runbooks cover retail-compatible OpenNova networking. The goal is not
-to invent a new multiplayer architecture. The goal is to make retail clients,
-retail hosts, OpenNova clients, OpenNova listen hosts, and future dedicated
-hosts speak the same in-match protocol.
+These guides are for retail-compatible OpenNova matchmaking and in-match
+work. Start with [the network RE record](../docs/net/novaworld-net-re.md)
+for witnessed behavior and the [divergence ledger](../docs/divergence-ledger.md)
+for open parity gaps. [ADR 0043](../docs/adr/0043-canonical-cpp-and-godot-hard-cut.md)
+owns the current architecture; the
+[in-match roadmap](../engine/runtime/inmatch/ROADMAP.md) records its
+completed build. [network.md](network.md) is a short redirect for older links.
 
-Orient from these for any networking task — consult what the task needs rather than
-reading end to end (the net RE record is grep-navigated: §5 index at its top,
-divergences in its §8 catalog):
+## Choose a runbook
 
-- `CLAUDE.md`, `CONTEXT.md`, and `GOALS.md`
-- `docs/README.md` and `docs/engine-primer.md`
-- `docs/adr/0009-in-match-net-seam.md`
-- `docs/adr/0010-novaworld-client-completion.md`
-- `docs/adr/0011-single-player-in-process-listen-server.md`
-- `docs/adr/0012-player-is-host-side-server-entity.md`
-- `docs/net/novaworld-net-re.md`
-- `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`
-  (`.agents/network.md` is now a redirect to the current architecture owners:
-  `engine/runtime/inmatch/ROADMAP.md`, ADR 0013, ADR 0019)
-- `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
-  in-match networking; `engine/runtime/inmatch/ROADMAP.md` is the completed build record
-  behind it, not current status
-- `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
-  from the witnessed retail chain (phase counter + sub-blocks + priority/budget
-  entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and
-  the current ported-vs-not state.
-- `.agents/retail-lan-parity.md` — onHook-first four-topology retail/OpenNova LAN
-  probing without the retired generated Python parity matrix. onHook is an
-  external `opennova-int` executable passed as `-OnHookMcpPath`, never a
-  registered MCP server: without it, report the parity leg as blocked.
-- `docs/mcp.md` — the game's own `opennova-game` MCP (launch with `--mcp-port`,
-  `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog, the `game_probe`
-  runtime probes, the `parity_joiner_*` witnesses the runner classifies).
+| Task | Guide |
+| --- | --- |
+| Capture, packet mismatch, or retail interop | [Interop](interop.md) and the [packet-diff template](templates/packet-diff.md) |
+| Unwitnessed retail behavior or suspected divergence | [IDA](ida.md) and the [witness template](templates/ida-witness.md) |
+| Local, retail, or service reproduction | [Debugging](debug.md) and the [live-repro template](templates/live-repro.md) |
+| Retail/OpenNova LAN topology comparison | [Retail LAN parity](retail-lan-parity.md) |
+| S2C 0x0A emit work | [0x0A witness and porting record](porting-0a-emit.md); its status table is historical |
+| Cleanup without behavior changes | [Safe-refactor template](templates/safe-refactor.md) |
 
-## Working Rules
+The [game MCP guide](../docs/mcp.md) covers runtime probes. Retail
+automation uses the external onHook executable described in the LAN guide.
 
-- Retail wire compatibility is the target. Original binary witnesses, retail
-  captures, and tracked RE docs outrank guesses.
-- Do not create a second gameplay network path. LAN, NovaWorld-routed joins,
-  and future dedicated hosting must converge on the same in-match seam.
-- Unknown packets and mismatches are tracked, not silently ignored.
-- Do not commit raw decompiled code, raw retail captures, secrets, account data,
-  local install paths, or machine-specific IP addresses.
-- Keep protocol logic in Godot-free libraries. Apps and Godot bindings own
-  process, sockets, UI, and presentation.
-- Do not use raw passthrough blobs to make a writer or encoder pass parity.
-  Model the fields structurally unless a tracked ADR explicitly says otherwise.
-- Treat the source and `docs/net/novaworld-net-re.md` as live truth; `plan/` holds
-  completed-effort records (the NovaWorld-integration status tables), not current state.
+## Standing rules
 
-## Consolidated net core (ADR 0013)
-
-- **Message catalog is the single source of truth**:
-  `engine/net/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
-  coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
-  message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
-- **Capture → inspect loop**: host from the Godot game, `dumpcap`, then
-  `nw_pp --coverage <cap>` (undecoded backlog by volume) and `nw_pp --stream <cap>`.
-  The CI wire gates are `nw_codec_identity` and `nw_self_capture` over the committed
-  `fixtures/novaworld/` set (`docs/asset-gated-tests.md`, the two-tier gate). Full
-  loop in `scripts/net/README.md`.
-- **Server state authority is `world::EntityRegistry`** — the net layer reads handle/pose/
-  team *through* it, never a parallel cache. Host bring-up is the one shared
-  `inmatch::start_host_session` helper. See `docs/adr/0013-consolidated-net-core.md`.
-
-## Task Routing
-
-- Packet mismatch or retail interop failure: start with
-  `.agents/templates/packet-diff.md`.
-- Unwitnessed original behavior or suspected divergence from retail:
-  start with `.agents/templates/ida-witness.md`.
-- Local, retail, or live-service reproduction:
-  start with `.agents/templates/live-repro.md`.
-- Cleanup or deduplication:
-  start with `.agents/templates/safe-refactor.md`.
-
-## Report Format
-
-Every networking report should include:
-
-- Target path: OpenNova host, retail host, OpenNova joiner, retail joiner, or
-  dedicated/headless host.
-- Evidence: test names, capture names, decoded packet tags, IDA addresses, or
-  source lines.
-- Verdict: matching, divergent, unknown, blocked, or docs-only.
-- Next action: narrow code fix, capture needed, IDA witness needed, test gap, or
-  no change.
+- Retail packets and captures outrank guesses. Keep protocol and crypto
+  in Godot-free engine code; apps and Godot own sockets, UI, and devices.
+- Use the one in-match session and wire codec. Do not add a second gameplay
+  network path or hide an unknown packet.
+- Keep raw retail captures, decompiled code, credentials, account data,
+  local paths, and machine-specific addresses out of tracked files.
+- For a networking report, name the topology, evidence (test, capture,
+  packet tag, or IDA address), verdict, and next action. Call a missing
+  witness *unknown* or *blocked*, not matching.

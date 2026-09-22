@@ -1,176 +1,125 @@
 # OpenNova documentation
 
-The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
-guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,
-parachute descent, writable night, reverb selection, specialized textures,
-AI callback/controller ownership, player steering/brake transitions, and
-unseated helicopter carry with authored NPC boarding/stop orders
-([world section 35](world/world-wac-ai-re.md#35-unseated-helicopter-riders-and-reserved-route-orders-2026-09-18)).
-Mission saves are excluded; the report distinguishes remaining wider gaps.
+This index routes readers to the current architecture, work queues, decisions,
+and reverse-engineering records. The records own their evidence and dated
+findings; this page does not repeat their progress logs.
 
-Tracked golden docs: architecture maps, decision records (ADRs), and
-reverse-engineering records — kept pristine, representing the best current
-understanding of the original engine. RE findings land here directly, and
-git history is the only archive: everything an agent or contributor needs
-for the full picture is tracked in this repo.
+Original-engine claims use `[orig: Name @ 0xADDR]` citations, normally against
+retail `Jointops.exe`. Use the curated IDB name at that address; qualify another
+binary in the marker. RE records own stable `D-<DOMAIN>-n` entries and witness
+details. The [divergence ledger](divergence-ledger.md) lists open parity gaps
+and points to their owning records. Do not commit raw decompiled code.
 
-Conventions: original-engine functions are cited inline as
-`[orig: Name @ 0xADDR]` (addresses are `Jointops.exe` retail unless a doc says
-otherwise). RE records carry correspondence tables, divergence lists
-(`D-XXX-n`), and per-claim verdicts. No raw decompiled code is ever committed;
-behavior is summarized and cited.
+## Architecture and current work
 
-- **Names are the IDB's.** `Name` is the function or global name the curated
-  `Jointops.exe.kong.i64` carries at that address, in its `Subsystem_Action`
-  style (class members keep their `C` prefix: `CNapiNPConnection_*`,
-  `CParticleEmitter_*`, `AudioVM_Op_*`). When the IDB renames, the cites follow
-  in the same change and the old name survives only as `(ex Old)`. An inner
-  site is cited as `Func @0xFUNC (the call @0xSITE)` or, inside a block that
-  already names its function, as a bare `[orig: @0xSITE]`. A call site is never
-  cited as if it were the callee's own address.
-- **Other images are qualified.** Addresses from another binary carry the
-  image in the marker — `Name @ 0xADDR, misldr.dll`, `Name @0xADDR (dfx2med.exe)`,
-  `(ModSuperOed.exe)`, `(binkw32.dll)`, `(jodemo)` — and one marker never mixes
-  two images (`engine-primer.md` §2 lists the images).
-- **The ledger is OPEN-only.** [`divergence-ledger.md`](divergence-ledger.md)'s
-  per-domain tables list open rows; a FIXED / PERMANENT row retires to a dated
-  closure line there and keeps its full row in the owning record. Every D-id in
-  the ledger resolves to exactly one record row, and
-  `scripts/lint/ledger_check.py --check` keeps the scoreboard honest. The
-  three-way drift check (code markers ↔ IDB names ↔ record rows) is
-  `scripts/ida/cite_sweep.py`, run against a live IDA.
-
-## Architecture
-
-The current [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
-owns its implementation scope and mission acceptance gates. Behavior evidence
-lands in [world-wac-ai-re.md section 33](world/world-wac-ai-re.md).
-
-| Doc | What it covers |
-|---|---|
-| [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |
-| [`engine-primer.md`](engine-primer.md) | Start here for engine work: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
-| [`runtime-architecture.md`](runtime-architecture.md) | How a match runs under ADR 0043: the portable `inmatch::Session` tick and the `GameWorld` frame-leg table's device order, mapped onto the original main loop |
-| [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
-| [`perf/03tr-frame-costs.md`](perf/03tr-frame-costs.md) | 03TR frame diagnosis, native CTRL/snapshot and HUD batching fixes, clean before/after measurements, retail/jo-c witnesses and validation limits |
-| [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
-| [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
-| [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
-| [`dev-env-vars.md`](dev-env-vars.md) | The environment-variable registry (the two machine roots, `GODOT_BIN`, the service family, the OS variables) and the launch-flag / argv tables that replaced the env hooks; enforced by `scripts/lint/env_lint.py` |
-| [`asset-gated-tests.md`](asset-gated-tests.md) | Every root-gated test: the root→data matrix, Skipped (77) vs SKIP-LEG reporting, local setup, the reference-assets repository CI uses, why captures are never committed |
-| [`mcp.md`](mcp.md) | The game MCP: launching the runtime with `--mcp-port`, the two client layers, the tool catalog, the `game_probe` runtime probes and how to write one (ADR 0041) |
-| [`threedi/scene-naming-contract.md`](threedi/scene-naming-contract.md) | Format-neutral scene names reserved for the future GLB/GLTF ↔ 3DI editor seam; no importer metadata or DCC custom properties |
-| [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |
-| [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
-| [`jo-c-parity-audit-2026-09-13.md`](jo-c-parity-audit-2026-09-13.md) | Subsystem/backlog sweep against jo-c at master `aedf6c091`, seven newly tabled gaps, and a dependency-ordered fix plan over the 126 IDs active at that baseline in a dated [inventory](jo-c-parity-audit-2026-09-13.json), a snapshot the same PR has since moved past (D-NET-169 closed, D-NET-167 narrowed); the ledger remains the live status owner |
-| [`render/README.md`](render/README.md) | The render domain's own index: which REN record covers what, and the three-tier parity instrument (state vectors, offline compare, retail scene attestation); it is the sub-index for the render pages not listed here ([`render/shader-validation.md`](render/shader-validation.md), [`render/render-lighting-parity-2026-08-15.md`](render/render-lighting-parity-2026-08-15.md)) |
-| [`oned/editor-layer-program.md`](oned/editor-layer-program.md), [`oned/workspace-maturity-program.md`](oned/workspace-maturity-program.md), [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | Historical records of the retired ONED authoring layer (ADR 0037 cut ONED to run-only): the authoring-layer improvement program, the ONED workspace maturity track, and the authoring/runtime shared-node patterns. Implementation history, not current guidance |
-| [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and minimum game-data tree |
+- [Current state](current-state.md): phase and routes to each domain's work.
+- [Runtime architecture](runtime-architecture.md): the current mission frame
+  and engine/Godot boundary under [ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md).
+- [Engine primer](engine-primer.md): original binaries, shared conventions,
+  subsystem map, and research tools.
+- [Correspondence](correspondence.md): function-level retail/reimplementation
+  verdicts.
+- [Divergence ledger](divergence-ledger.md): live parity backlog and scoreboard.
+- [Required resources](required-resources.md): boot-required game data.
+- [Environment and launch options](dev-env-vars.md), [asset-gated
+  tests](asset-gated-tests.md), and [game MCP](mcp.md): operational references.
+- [Render index](render/README.md): render records and comparison procedure.
 
 ## Decision records
 
-| ADR | Decision |
-|---|---|
-| [0001](adr/0001-mnu-action-command-boundary.md) | MNU: Actions live in the file, Commands come from the shell by control name |
-| [0002](adr/0002-mnu-round-trip-preserves-superset.md) | MNU: round-trip preserves the format superset |
-| [0003](adr/0003-no-raw-passthrough-create-from-scratch.md) | MNU: no raw byte passthrough; documents are created from scratch |
-| [0004](adr/0004-audio-selection-pushdown.md) | Audio: member selection pushed down into the portable audio lib (now `engine/runtime/audio`) |
-| [0005](adr/0005-mnu-var-expansion-policy.md) | MNU: `%VAR%` expansion policy |
-| [0006](adr/0006-unified-mission-runtime-present-pass.md) | Unified mission present pass and entity index; its former embedded editor preview is superseded by ADR 0025 |
-| [0007](adr/0007-skeletal-runtime-and-entity-visual.md) | Skeletal `.bad`/`.adm` runtime and the entity-visual contract (spelled `NovaEntityVisual` at the time; the name was retired by ADR 0040 and the symbol no longer exists); that duck-typed dispatch is superseded by ADR 0033's R2 draw-list cutover (the skeletal-runtime decisions stand) |
-| [0008](adr/0008-pff-writer-policy.md) | PFF writer: zero timestamp/checksum for new entries, verbatim for retained |
-| [0009](adr/0009-in-match-net-seam.md) | Historical in-match `NetSystem`/`INetCommandSink` seam; public-topology decisions superseded by ADR 0036 |
-| [0010](adr/0010-novaworld-client-completion.md) | NovaWorld client completion: gate → hello → auth → verify → join, then the JointOperations proto-switch |
-| [0011](adr/0011-single-player-in-process-listen-server.md) | Single-player is the in-process listen server (network-shaped); supersedes ADR 0009's "SP pays nothing" |
-| [0012](adr/0012-player-is-host-side-server-entity.md) | The player is a host-side server entity driven by a wire-shaped (C2S 0x0C) intent |
-| [0013](adr/0013-consolidated-net-core.md) | Consolidated in-match net core: one message registry + capture→golden-diff harness, EntityRegistry as the one server-state authority, one host bring-up helper |
-| [0014](adr/0014-mns-lossless-document-model.md) | MNS: stylesheets parse into a lossless document; the flat table is its flatten() view |
-| [0015](adr/0015-two-products-serve-mode.md) | Two Godot products; the server is a serve MODE of the game exe, not a product. OpenNova Launcher is published separately; ADR 0045 removes the ONED product, the serve-mode rule stands |
-| [0016](adr/0016-engine-editor-boundary.md) | Historical editor-layer decision; its one-way engine dependency rule remains, while ADR 0037 removes the authoring product; historical in full since ADR 0042, whose boundary rule carries the surviving one-implementation principle |
-| [0017](adr/0017-typed-records-named-constants.md) | Contracts are typed records, not dictionaries; constants are named, not magic |
-| [0018](adr/0018-public-api-testability.md) | Tests exercise public seams; a test that needs a private is an API bug report |
-| [0019](adr/0019-npwire-game-wire-lib.md) | `engine/net/npwire` is the game wire protocol lib; matchmaking (novaworld) sits on it, direction npwire → napi/novacrypto |
-| [0020](adr/0020-world-terrain-query-seam.md) | `engine/runtime/terrain_query` is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
-| [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
-| [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
-| [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
-| [0024](adr/0024-lib-family-topology.md) | Historical lib-family topology. Its per-lib targets and family link groups are superseded by ADR 0029; ADR 0038 retires its flat shared-FFI model. The directory layout stands |
-| [0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md) | The standalone game is the sole live mission runtime; ADR 0037 retains loose Run/Stop and removes F6/current-mission authoring behavior |
-| [0026](adr/0026-one-client-replica-pipeline.md) | One decoded-entity stack: `ClientReplicaPipeline` is the sole S2C reducer, `EntityPresenter` the sole presenter, and Person/controller/Vehicle are independent domain axes |
-| [0027](adr/0027-3di3-only-no-model-ir.md) | 3DI3 is the only model format and consumers walk the parsed `Threedi3di3` directly; the `ThreediModelIR` layer and GP-era (GPM/GPS/GPP) reader/writer are removed |
-| [0028](adr/0028-engine-directory-and-shell-adapter.md) | `engine/` is the engine (four groups: base/formats/runtime/net), `godot/src/` is the shell adapter; new engine logic starts in the engine and gameplay loops live in the engine. Its "directories only" target-name clause is superseded by ADR 0029 |
-| [0029](adr/0029-engine-group-targets.md) | Engine target topology: the per-lib CMake targets and family groups collapse into five STATIC group targets (`opennova_formats` — with mission's format half folded in — `opennova_base`, `opennova_runtime`, `opennova_net`, `opennova_novaworld_service`) plus `opennova_io`; base links ABOVE formats; sqlite containment stays linker-enforced by the separate service target; ADR 0020's terrain seam moves to `include_graph_check.py`. ADR 0037 removes the former `opennova_oned_edit` interface leaf; ADR 0038 removes the `opennova_shared` staging |
-| [0030](adr/0030-formats-placement-criterion.md) | The formats placement rule: ALL file knowledge lives in `engine/formats/` (parsed model + read/write over io/ only) and no format parser stays runtime-fused — runtime keeps only execution over the parsed model (VM, emitter, promotion); plus the shared-include-prefix rule for split domains and the extraction discipline |
-| [0031](adr/0031-adapter-composition-contract.md) | The adapter composition contract: the five bands adapter C++ may be (binding glue, ONED document surface, presentation, res:// loaders, documented seam bridges); engine-grade logic starts in `engine/` (ADR 0028's rule extended to adapter C++); the `adapter_cpp_orig_cites` ratchet makes "thin wrappers only" measurable; the per-TU simulation/ dispositions *(superseded as the standing contract by ADR 0033; census + dispositions remain the record)* |
-| [0032](adr/0032-direct-document-io.md) | Direct document I/O — godot/ adds nothing but Godot: Nova formats never integrate with Godot's resource system (the ResourceFormat fleet is deleted); documents read/write themselves via load_from_path/save_to_path; adapter code exists only where a Godot type, API, or lifecycle demands it *(replaced by ADR 0033, which restates the operative rules)* |
-| [0033](adr/0033-engine-owned-loops-device-shells.md) | THE standing architecture contract, replacing ADRs 0031/0032 in full: the engine owns the main/tick/render loops; shells are devices (RenderBackend/InputSource/AudioSink); the R1-R4 ladder (frame port, draw-list presentation, spike-gated render frame, optional second backend); absorbs direct document I/O; supersedes 0028's runtime-GDScript rule at R1. The R3 spike (2026-08-10) closed that rung NOT TAKEN, so 0023's queue non-port stands; R1's `FrameDriver` is superseded by ADR 0035; ADR 0042 (2026-08-28) closed R4 permanently and superseded d1's device triad with the real seams (`inmatch::TickTarget`, `GameFramePipeline`, the draw-list compilers + native appliers) |
-| [0034](adr/0034-first-class-godot.md) | Godot is the first-class shell: the adapter framing and shell-neutral pretense retire; ADR 0037 narrows ONED from an authoring front-end to run controls |
-| [0035](adr/0035-mission-session-game-frame-pipeline.md) | Historical MissionSession cutover with the first-class Godot frame pipeline; lifecycle name/location superseded by ADR 0036, device-order decisions remain |
-| [0036](adr/0036-one-inmatch-session-wire-first.md) | One `opennova::inmatch::Session`, `world::Match` owns gameplay, and `npwire` is the retail compatibility boundary; full cutover with no legacy API (accepted 2026-08-22) |
-| [0037](adr/0037-oned-runs-game-data.md) | Hard cut: ONED stores run settings, runs OpenNova loose, stages and runs retail, and stops its child; no authoring, project/import system, workspaces, or MCP; hidden `--pack-game` remains release infrastructure (ONED provisions superseded by ADR 0045) |
-| [0038](adr/0038-native-runtime-assets-glb-editor.md) | Hard cut to native runtime assets: Python/DCC and ASE/OED/TDP authoring retire; ObjectData is immutable 3DI; a future editor uses an independent GLB/GLTF ↔ 3DI seam |
-| [0039](adr/0039-in-engine-dev-tools.md) | Hard cut: the tool UI moves into the engine as Dear ImGui windows on one `ImGuiPass` (`engine/runtime/devtools`, docking + multi-viewport) with one Godot seam node per product and the imgui-godot addon — the game's F3 dev tools (debug builds only) and ONED's run surface; the GDScript overlay and ONED's Control scene are deleted; updates ADR 0034 d6, ADR 0031's seam note and ADR 0037's UI |
-| [0040](adr/0040-the-engine-is-one-namespace.md) | The engine is one namespace: no `Nova`/`nova_` prefix anywhere (files follow the type they declare; `NovaWorld*`, `NovaLogic`, `opennova*` survive as proper nouns), `engine/` is the one public include root with group-qualified `<group/lib/file.h>` includes, and the group order + Godot-free boundary are a lint (`include_graph_check.py`); updates ADR 0024/0029's include-root clause and ADR 0034 d5/§2 |
-| [0041](adr/0041-probes-are-mcp-tools-launch-flags.md) | Probes are registered `game_probe` tools reading typed arguments; launch behaviour is a launch flag with four documented machine roots; `godot/probes/` is source-only; an assertion over the portable engine is a ctest; retail is driven only through onhook-mcp; fixtures are minted, authored or keep |
-| [0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) | Godot is the permanent sole shell (ADR 0033 R4 CLOSED, the device triad superseded by the real seams); the boundary rule (an engine fact is computed in one engine function; device facts are typed Godot code beside their owner); one mission kernel (`mission::MissionKernel`) + one listen-host frame (`inmatch::listen_host`) promoted from the retail-mission rig; the terrain-field provider moves engine-side; inspection/control are engine functions; F3 windows take records in, typed requests out; one cite marker (`[orig:]` everywhere) |
-| [0043](adr/0043-canonical-cpp-and-godot-hard-cut.md) | THE current-architecture record (supersedes 0031/0032/0033/0035/0036, amends 0042/0034/0018/0020/0029): the hard cut to canonical C++ and Godot — behavior moves onto owning systems (`VehicleSystem`, `ZoneSystem`, `LocalPlayer`; `AiSystem` by value; `MissionKernel` = boot + state), one `inmatch::Session` owning a `Role` (Local/Host/Joiner) replaces `TickTarget`/`listen_host`/`tick_no_net`, `net/` means wire (netsim -> `runtime/replication`, npruntime + inmatch -> `runtime/inmatch`), one `TickProfile` replaces the perf structs, the Godot world is C++ Nodes (`GameWorld`, `MissionRoot`, `EntityPresenter`, `EffectWorld`, `MissionAudio`, `LocalPlayerPresenter`) with the frame order in one C++ leg table, two carrier mechanisms, tests drive real fixtures (no subclass doubles of production Nodes), MCP out of the release export; governance: `godot_orig_cites` (one gauge), `gd_foreign_private_accesses` (replaces the GDScript size ratchet), `cite_census.py`, the tick digest; `host_lint` and the prose rules retired |
-| [0044](adr/0044-shared-native-assets.md) | Shared native assets: one `assets::AssetStore` per mounted resource source, shared by `MissionKernel`, `ObjectData` and `SkeletalAnim` (immutable 3DI/ADM/BAD/rig handles; the index revision and the process-wide cache epoch invalidate later lookups while issued handles stay valid snapshots); `runtime/simassets` dissolved into `anim`/`mission`/`world`/`renderer` |
-| [0045](adr/0045-cli-game-data-runtime-only.md) | Hard cut: CLI game data (`--resource-dir` is required) and a runtime-only distribution; the source-owned game tree, its packaging and ONED are removed (supersedes 0037, the bundled-data/picker contracts of 0025, and the ONED provisions of 0015 and 0039) |
+[ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md) is the current
+architecture contract, amended by [ADR 0044](adr/0044-shared-native-assets.md).
+[ADR 0045](adr/0045-cli-game-data-runtime-only.md) defines the runtime-only
+distribution. Earlier ADRs record the decisions that led here; read each
+record's status or supersession note before applying its implementation advice.
 
-## RE records by domain
+- [0001: MNU Actions stay authored; Commands stay shell-bound by control name](adr/0001-mnu-action-command-boundary.md)
+- [0002: Round-trip preserves every authored attribute, even ones the runtime ignores](adr/0002-mnu-round-trip-preserves-superset.md)
+- [0003: The editor models every construct; no raw import-to-export passthrough](adr/0003-no-raw-passthrough-create-from-scratch.md)
+- [0004: Sound-set member selection pushed down to libs/audio](adr/0004-audio-selection-pushdown.md)
+- [0005: `%VAR%` expansion: keep raw tokens in the document, expand per field at build](adr/0005-mnu-var-expansion-policy.md)
+- [0006: Unified mission runtime present pass](adr/0006-unified-mission-runtime-present-pass.md)
+- [0007: Runtime skeletal animation (`.bad`/`.adm`) + the `NovaEntityVisual` contract](adr/0007-skeletal-runtime-and-entity-visual.md)
+- [0008: PFF writer policy](adr/0008-pff-writer-policy.md)
+- [0009: In-match networking enters the world tick through one seam](adr/0009-in-match-net-seam.md)
+- [0010: Completing the NovaWorld client (switchable OpenNova / real NovaWorld)](adr/0010-novaworld-client-completion.md)
+- [0011: Single-player is the in-process listen server (network-shaped from day one)](adr/0011-single-player-in-process-listen-server.md)
+- [0012: The player is a host-side server entity driven by a wire-shaped intent](adr/0012-player-is-host-side-server-entity.md)
+- [0013: Consolidated in-match net core: one message registry, one server-state model](adr/0013-consolidated-net-core.md)
+- [0014: MNS stylesheets parse into a lossless document; runtime uses its evaluated view](adr/0014-mns-lossless-document-model.md)
+- [0015: Two Godot products; the server is a mode of the game, not a product](adr/0015-two-products-serve-mode.md)
+- [0016: The editor is a detachable layer over public engine APIs; engine behavior does not live in GDScript](adr/0016-engine-editor-boundary.md)
+- [0017: Contracts are typed records, not dictionaries; constants are named, not magic](adr/0017-typed-records-named-constants.md)
+- [0018: Tests exercise public seams; a test that needs a private is an API bug report](adr/0018-public-api-testability.md)
+- [0019: libs/npwire — the game wire protocol library](adr/0019-npwire-game-wire-lib.md)
+- [0020: the world→terrain seam — libs/terrain_query](adr/0020-world-terrain-query-seam.md)
+- [0021: Avatars.def writer policy](adr/0021-avatars-writer-policy.md)
+- [0022: Divergence burn-down and the permanent register](adr/0022-divergence-burn-down.md)
+- [0023: Render visual parity (the REN track)](adr/0023-render-visual-parity.md)
+- [0024: lib family topology — one lib per format, families as link groups](adr/0024-lib-family-topology.md)
+- [0025: the standalone game is ONED's only live mission runtime](adr/0025-standalone-game-is-the-only-live-mission-runtime.md)
+- [0026: one client replica pipeline and one wire presenter](adr/0026-one-client-replica-pipeline.md)
+- [0027: DI3 is the only model format, consumed directly — no model IR](adr/0027-3di3-only-no-model-ir.md)
+- [0028: engine/ is the engine; godot/src/ is the shell adapter](adr/0028-engine-directory-and-shell-adapter.md)
+- [0029: engine target topology — five group archives, per-lib targets retired](adr/0029-engine-group-targets.md)
+- [0030: the formats placement criterion — what earns an engine/formats/ lib](adr/0030-formats-placement-criterion.md)
+- [0031: the adapter composition contract — what earns C++ in godot/src/](adr/0031-adapter-composition-contract.md)
+- [0032: direct document I/O — godot/ adds nothing but Godot](adr/0032-direct-document-io.md)
+- [0033: the engine owns the loops; shells are devices](adr/0033-engine-owned-loops-device-shells.md)
+- [0034: Godot is the first-class shell](adr/0034-first-class-godot.md)
+- [0035: MissionSession with a first-class Godot frame pipeline](adr/0035-mission-session-game-frame-pipeline.md)
+- [0036: one in-match session, wire-first compatibility](adr/0036-one-inmatch-session-wire-first.md)
+- [0037: ONED runs game data; it does not edit it](adr/0037-oned-runs-game-data.md)
+- [0038: Native runtime assets now; GLB at the future editor seam](adr/0038-native-runtime-assets-glb-editor.md)
+- [0039: The tool UI lives in the engine, drawn with Dear ImGui](adr/0039-in-engine-dev-tools.md)
+- [0040: the engine is one namespace — no Nova prefix, files follow classes, group-qualified includes](adr/0040-the-engine-is-one-namespace.md)
+- [0041: Probes are MCP tools; launch behaviour is a launch flag](adr/0041-probes-are-mcp-tools-launch-flags.md)
+- [0042: Godot is the permanent shell; one mission kernel; engine facts through engine functions](adr/0042-godot-permanent-shell-one-mission-kernel.md)
+- [0043: canonical C++ and canonical Godot — one session with roles, the world is C++ Nodes, tests drive real fixtures](adr/0043-canonical-cpp-and-godot-hard-cut.md)
+- [0044: shared native assets](adr/0044-shared-native-assets.md)
+- [0045: CLI game data and a runtime-only distribution](adr/0045-cli-game-data-runtime-only.md)
 
-| Domain | Doc | Status |
-|---|---|---|
-| Animation | [`anim/adm-bad-format-re.md`](anim/adm-bad-format-re.md) | landed (consolidation 2026-08-08 — the `.adm`/`.bad` format pair gathered from the §5.40 grill chain, ADR 0007, and the correspondence rows; formats closed, the body-rig consumer tail stays D-INF-13) |
-| Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed (+ §sound-profile: the SndProf.def system + infantry slot-sound consumers, witnessed + ported 2026-07-17, D-SND-10..15; + §driver cadence: the ambient tick/frame clock split witnessed 2026-07-28, D-SND-16 minted + PORTED same day into engine/runtime/audio AmbientMixer; + D-SND-17: the ground-vehicle sound emitter slice PORTED 2026-07-29); one-shot listener-view filtering verified (D-SND-19, 2026-09-13); reverb remains OPEN + NEEDS-RE as D-SND-18 |
-| Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
-| Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
-| Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed (rewritten end to end by the 2026-08-30 weather port #597: ONE weather home — `world::WeatherState` on the sim tick — the WAC weather handlers, precipitation, thunder, the overcast cross-fade, the scalar-channel springs; env #15/#16/#18 closed that day; the chase-shake leg and the mode-1 sin chain landed at the 2026-08-30 tidy) 2026-09-16 PR #650 review: the Godot clear-color bridge fixes the 00TRa/00TRg sky seam, with a windowed pixel regression. |
-| Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..4; cp1252 glyph mapping fixed 2026-07-19; retail font-batch witness and Godot batching verified 2026-09-21) |
-| Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (fresh 2026-07-13 re-grill and replacement: ported detail/MODEL tier semantics, separate flat-detail and sector-routed MODEL authored-map gates, all-surface LOD0 geometry, `:fd`, shaders, static `.til` RGB/tint at the pre-wind coordinate, persistent LRU/1000-entry cache cadence, identity/eviction order, and matching shadow-off for retail's dead flag; D-FOLIAGE-7/-9/-10 bound the general page/cache + ordered RT producer, visibility membership, and reimpl draw order/reflection; D-FOLIAGE-14, collection independent of the 224-entry main list, minted and closed 2026-09-13) |
-| Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`; D-TIL-1..4 all FIXED — latest D-TIL-4 flip/rotate composition order 2026-08-20; tile-set atlas source witnessed) |
-| Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
-| Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (fresh 2026-07-13 rendering re-grill: exact eight-family LOD selector, authored coefficient/DBlend/paired mips, four-lock heightfield-normal atlas, bare cached-tile RGB/DOT3 alpha, direct light packing, top ps.1.4 arithmetic, overlay order, and fog; D-TERRAIN-7 bounds the remaining runtime dynamic-composition and local-light/shadow work; D-TERRAIN-9 retired with ONED authoring; D-TERRAIN-8 FIXED 2026-08-13; D-TERRAIN-12, the empty-sector flat fallback, FIXED 2026-09-13) |
-| Interface | [`interface/loading-screen-re.md`](interface/loading-screen-re.md) | landed (2026-07-12; re-verified no-drift + SP splash witnessed AND ported 2026-08-15: sidecar rule, MP session text, bar + creep, splash; D-LOADSCR-1..8 — the epilog re-show D-LOADSCR-8 deferred) |
-| Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (2026-07-09: weapon-coupled elements witnessed AND ported — ammo/name text, clip indicator, crosshair spread, stance cross-fade, triggered text; 2026-07-11 re-grill: every ported function fresh-decompiled, seven port fixes, D-HUD-1..10; 2026-07-17: attach labels witnessed AND ported — seat/armory floats + the attachtextid chain, D-HUD-11..14, bottom prompts deferred; 2026-07-18: waypoint HUD chain + weapon heat bar + the MISSION OBJECTIVES panel witnessed AND ported — the "radar @0x599700" misnomer resolved as the heat bar, D-HUD-15..18; 2026-07-31: exact recoil/movement accumulators wired into projectile, camera, aim overlay, and HUD spread — D-HUD-7 CLOSED; 2026-08-10/11: friendly tags witnessed AND ported — D-HUD-20; 2026-08-13/15: the gameplay spinmap + the M-map witnessed AND ported (D-HUD-2 closed — the earlier "no in-HUD radar" gloss corrected), the hud_color_index scheme (D-CTRL-4), and the HUDDECLUT declutter system ported 2026-08-15; open: D-HUD-19 windowed map views, D-HUD-21 in-map legs, D-HUD-22 label text); 2026-08-21: the mounted-vehicle panel, the Recent Messages window + the player-chat ring (D-HUD-6 narrowed), the AAS zone status panel and the map medic marker witnessed AND ported end to end (`HUD_DrawMedicCrossQuad` unified in `hud_medic_cross.h`); 2026-08-25 tidy #553–#573: the end-round overlay resolve/folds, the STAT tab filter and the deploy status text + `<…>` stripper pushed down out of the presenters into the engine feeds (`end_round_overlay_resolve`, `deploy_status_text`, `hud::strip_inline_tags` = `Chat_StripHtmlTags @0x4983f0`), the C2S chat sender gate + flood ring witnessed (`Chat_SendGlobalMessage @0x49a6b0`, `Chat_CheckFloodControl @0x498f60`; follow-up); the catalog runs D-HUD-1..28 (rows added since: D-HUD-23 the S2C 0x1E message feed and D-HUD-24 the Tab scoreboard, both partial; D-HUD-25 the MP end-of-round presentation FIXED 2026-08-24; D-HUD-26 the flags2-0x200 Inset terrain-ring scope scene, minted 2026-08-30 and FIXED 2026-09-19; D-HUD-28 the seat/stance HUD dispatch, FIXED 2026-09-19; the weapon and vehicle mode matrix is [`interface/weapon-vehicle-hud-validation.md`](interface/weapon-vehicle-hud-validation.md)); 2026-09-05: mounted panel and remote rider HP definition-ID handoffs repaired, with live retail LAN panel/seat/drive checks (D-NET-157) PR #645: native-aspect sights correction is ported; live manual scope-zero/rangefinder feeds and the scope camera/readouts are ported (D-HUD-27, PR #650 review); 2026-09-19 #655 leftovers: the combat texts' font slots, the 2:1 LollyPop head, the death-screen latch as the one HUD death gate and the Inset scene's particle passes are witnessed in the record's weapon / vehicle combat cues section. |
-| Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown grill, D-MNU-7/8 fixed; + 2026-07-11 in-game armory re-grill, D-MNU-9; + 2026-07-16 dropdown-input grill, D-MNU-11 fixed / D-MNU-12 reimpl mapping; + 2026-07-18 loadout grill — multi-slot ACCEPT + availability filter live, net-re §5.63; + 2026-08-09/10 draw-walk + interiors + multiline-wrap grills — the compiled MenuFrame/MenuDriver path is the ONE menu runtime, D-MNU-12 dissolved, D-MNU-13 narrowed to RADIOEDIT + compiled-path follow-ups; + 2026-08-15 D-MNU-19 (activation vs scripted ACTION order) cataloged as a kept reimpl-structural divergence; + 2026-08-25 the menu Bink decoder's witness — binkw32.dll's YUV law (`YUV_init @0x30019F00`, `BinkCopyToBufferRect @0x30013220`) and JO's D3DFMT→BINKSURFACE surface pick (`BinkVideoSlot_RenderFrameToTexture @0x567540`); the #561 BT.601 conversion REFUTED and ported); 2026-09-11 host rule readback/sentinels and explicit aspect selection ported |
-| Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (shell wiring, architectural) |
-| Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed (§10 structural action closure 2026-08-30; explicit residuals bounded there); 2026-09-11 placement admission and loadout sanitizer ported, bounded malformed-input D-EVT-7 proposed as a class-D permanent entry (PR #646), pending maintainer ratification; 2026-09-13: the post-PreMission numbered-variable reset (D-EVT-8), the shared mutable WAC/BMS clock with one admission per tick (D-WAC-7) and the signed action count (D-EVT-9) ported |
-| Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
-| Mission savegames | [`mission/savegame-re.md`](mission/savegame-re.md) | unported runtime snapshots/restore and slot lifecycle; source-comparison starting points and research/acceptance boundary, D-SAVE-1 |
-| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record — layering, matchmaking, and the in-match protocol; §5 carries the tag-level findings (including the 2026-07-31 exact recoil/spread re-grill in §5.60), §8 the D-NET divergence catalog with per-entry fix/live-verify state; §5.68 the end-of-round board (the 0x56 chunk fold ported 2026-08-21), §5.38e's 2026-08-21 block-bounds correction; §5.40's 2026-08-22 eighth pass (the viewmodel placement grill: the pos/tpos field map corrected, the FP frustum == the world frustum, the retail FP bone builders transliterated and matched to 0.6 mm); §5.0e the spectator system (2026-08-30, #601/D-NET-217: discovery bits, the two reject vehicles, team-0 hidden spawn, 0x75/0x0A/0x16, free-fly — plus the tidy round's slot hide-bytes/deploy-hold appendix); §5.10 the 2026-09-04/05 joiner seat confirmation, selection and remote-occupancy overlay pass; 2026-09-13: numeric self-identity and side-password admission ported; squad challenge remains D-NET-167; [2026-09-19 tank training switch fix](world/special-weapons-parity.md#tank-training-right-click-follow-up) in PR #655; 2026-09-21: [remote-body arbitration re-grill](net/novaworld-net-re.md#remote-body-arbitration-re-grill-2026-09-21) fixes the model-side same-state pending cancellation through a shared native rule |
-| Net | [`net/retail-message-dispatch-audit.md`](net/retail-message-dispatch-audit.md) | the 2026-09-09 retail dispatch-table audit: 193 handlers (122 S2C, 71 C2S), the 80 entries the wire coverage catalog lacked, and the receive/host fixes; the runtime remainder is D-NET-218 |
-| Net | [`net/retail-vehicle-deployment-regression.md`](net/retail-vehicle-deployment-regression.md) | the 2026-09-09 retail vehicle snapback after initial deployment: cause and fix; owning protocol record net-re §5.10, §5.61, §5.64 |
-| Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | landed (#237 merged 2026-07-16) — the `.ptl` stack + effect world; re-grilled 2026-07-12/13/15/16 (weapon/vehicle effect chains, the rewrite grill, curve-table stricmp, name-resolution case fold) and 2026-09-17 (the simulation sweep: child chains, per-particle ORBIT, sub-frame emission, the dead collision leg, TOPALIGN, the environment tints, mission wind, NOVISNOUPDATE — D-PTL-27..30 closed); the ownership residual D-PTL-26 remains open |
-| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`engine/formats/avatars` + runtime `PlayerInfoMenuCompanion`; cascade/team/voice/preview/loadout live; packed-id world + first-person composition — the character's combo arms are the only FP arms source — raw per-part `TEX_CAMO`, networking, active-slot blue/red selection, and avatar/class persistence ported 2026-08-15). Open: D-PLAYERINFO-9 (newly edited kit-page serialization + `player.sav` options), D-PLAYERINFO-12's five-slot selector. |
-| Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..11) |
-| Render | [`render/render-order-re.md`](render/render-order-re.md) | landed (REN-3: the batch queues, sort keys, technique-class selection, render-state stack, and the frame pass sequence — D-RORD-1..11 (D-RORD-10/11 closed by the #595 renderer merge: the native-path cutover and the RLOD hard-switch witness); the ordering ladder ported to `engine/runtime/renderer/render_order`; D-RORD-12, the RLOD projection sphere from exact CMDL bounds, minted and closed 2026-09-13) |
-| Render | [`render/render-lighting-re.md`](render/render-lighting-re.md) | landed (REN-5: the iris/modulator chain, the world lighting block + entity uniforms + hemisphere lights, dynamic point lights, terrain/foliage c0/c1, lighting textures + the cubemap sources — D-RLIT-1..9; ported to `engine/runtime/renderer/light_runtime` + `engine/formats/env::ModulatorChain`; 2026-07-18: the marched iris sampling PORTED — D-RLIT-2; 2026-08-20: the render-slot entity ground-shadow pipeline witnessed end to end and PORTED — planner `engine/runtime/renderer/render_slot_shadow`, device `SlotShadow` + the terrain drape pass; 2026-08-21: the model-light BLINK-BOX OWNER attach and the per-draw INTERIOR light group PORTED — `renderer::resolve_model_light_owner` + `LightDrawContext::groups`); 2026-08-21: the per-light terrain projected pass witnessed end to end and PORTED — `LightScene::collect_terrain_pass_rows` + the procedural falloff textures + the terrain shader fold (D-RLIT-4 closed 2026-08-23 after the max-quality foliage selector was proved inert; the AmbientScale / `Env_TerrainColorRecip` attribution corrected); the catalog runs D-RLIT-1..11 (D-RLIT-10, the #595 environment-cube RD rewrite, PERMANENT class C; D-RLIT-11, the entity-query cube and 63-candidate object limit, minted and closed 2026-09-13) |
-| Render | [`render/render-occlusion-re.md`](render/render-occlusion-re.md) | landed 2026-07-16 (blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, sound-occlusion witness — the catalog runs D-OCC-1..15: 1..8 open witness details (record-only), 9..15 the port-pass divergences tabled/registered in the ledger's Render — occlusion section at the 2026-08-30 tidy; sound occlusion (closes D-SND-7) + the indoor frame gates ported on the occlusion slice; the section-mask/portal engine ported 2026-07-17 (init, mask build, traversal, occluder culling); D-OCC-16, the `bound_sphere_fixed` midpoint/scale arithmetic, minted and closed 2026-09-13) |
-| 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`engine/formats/threedi`); PANM animation-frame and emplaced barrel-spin corrections in PR #663 (D-3DI-3/4); native CTRL publication witness 2026-09-21 (D-3DI-2 still open) |
-| 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
-| VFS/PFF | [`vfs/vfs-pff-mount-re.md`](vfs/vfs-pff-mount-re.md) | landed (PAR-R7 audit: the mount stack, resolution order, /d gate, D-VFS-1..11) |
-| World | [`world/npc-script-coverage.md`](world/npc-script-coverage.md) | 2026-09-09 routing snapshot: every declared WAC command, BMS trigger/action and brain-table row with its branch; an inventory, not a parity or playthrough verdict (acceptance gates live in [world/npc-mission-completion.md](world/npc-mission-completion.md)) |
-| World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed; 2026-09-11 follow-up: model-aware infantry slopes, global stance sounds and player/NPC burn selection implemented; world record sections 3.5, 17.3b and 17.4b. |
-| Item class events | [World §24.3a](world/world-wac-ai-re.md#243a-class-clocks-regional-shots-barrels-buildings-flags-and-targets) | Pool clocks, regional SHOT resources, brrl/bldg/bld2/cran/emit/ele0/door/target/envs/flag; remaining class dependencies are explicit; 2026-09-21 scar owner-visibility re-grill and native predicate: world record section 24.9 |
-| World | [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) | Full vehicle authority/prediction, state, animation, HUD transport, sound and effects record. Sections 1 through 10 retain dated research; 11 through 37 describe the completed PR #640 port. D-VEH-1 remains the closed probe-geometry correction; D-VEH-2 records bounded full-bank water-ring retirement. PR #645: non-PlayerControl hover target is ported and covered through the vehicle pass. Section 38 records the #645 crash-height, bike axle and wheelie corrections with native regression coverage. |
-| World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide; §14 third-person body aim overlay / torso bend + camera modes, local player ported 2026-07-08; §14.8 upper-body weapon channel producer, local player FULLY ported 2026-07-09 incl. the special_hold/attack_anim kind ladder + arms-dip; §14.3 pitch kick resolved = the audio output power meter — remainder tracked D-INF-11; §15 world-object collision + blink boxes, engine-research 2026-07-09 + full re-grill 2026-07-11 — ported engine/runtime/world/collision, D-COL-1..11; §16 ground-AI combat chain, engine-research 2026-07-16 — SM rows 16/17/18 + targeting feed + fire convergence witnessed, port tracked D-AI-1..3; §17 infantry combat pass + state-17 tick digest, engine-research 2026-07-16 session 2 — perception/attack-anims/anim-event fire/aim model + the 0x472e00 full body, port tracked D-AI-4/5; §18 fire presentation + the LOS raycast internals, engine-research 2026-07-16 session 4 — ai_launch/ai_launcheffect/MF_Light/tracer_type legs + Physics_RaycastTerrainAndSectors, ported (fire_present_pass + CollisionWorld::raycast_clear), tracked D-AI-7/8; §19 death presentation, engine-research 2026-07-16 session 5 — ported, tracked D-AI-9; §20 round-outcome loop, engine-research 2026-07-16 session 6 — WAC win/lose + named-value table + Server_ProcessRoundEnd + SP end presentation, ported + 04TR probe PASS, tracked D-AI-10; §21 fire-origin/userpoint chain, engine-research 2026-07-16 session 7 — the posed gun-flash userpoint muzzle seam LANDED (D-AI-6 fire-origin clause closed), CP01 muzzle probe PASS; §22 org2 player-body physics grill, grill-ida 2026-07-16 session 8 — the player heading/leg model (legs chase the yaw, body = leg midpoint), per-tick −208 gravity, jump cooldown/momentum, the airborne/landing edges + the org1 leg corrections, ported — D-INF-10/-12 CLOSED, D-INF-20/21 opened; §17.4b the trigger-word sound legs (footsteps by surface + capsule-bottom dip, SSAudio foley, landing pair, death-scream night gate = EnableNVG, the org2 chute/freefall family), witnessed + ported 2026-07-17 with the audio record's D-SND-10..15; §23 the vehicle pass, engine-research 2026-07-16 session 9 — USE-ITEM mount chain + BMS mount triggers 38-41 + vehicle physics parked/AI-driver legs + AI boarding chain + player deploy group stamp, ported (vehicle_attach toggle/scan, vehicle_ai_drive, group 1), tracked D-AI-11); §24 item destruction — native collision/damage, destructible death, husk swap, death-piece motion/ring, and the main item-settle callback family ported and validated; the remaining ground-transition gaps are tracked in D-ITEM-14; retail residuals remain bounded, including piece meshes, effect banks/steam, triangle debris, glass, the specialized unitType-3 mover, bridge water shocks, and loaded-husk gating tracked in D-ITEM-1..20; §15.8a the hit-chain re-grill 2026-07-18 — format layer cleared, exclusion set + strict terrain tie-break ported, round ballistics/residuals ledgered within D-ITEM-1..13; §25 the tracer visual system, grill-ida 2026-07-18 — the trail emitter pool @ 0x2BF5270 + the 12 tracer_type style blocks + the camera-facing ribbon renderer witnessed and ported (world/tracer_trails + RoundSim + fire_present_pass ribbons), D-AI-8c closed into D-AI-12; §27 throwables, engine-research 2026-07-20 — the PowerThrow charge chain, the items.def class-tag motors (nade/schl/clym/vmne/lndm) + grenade bounce/fuse, satchel/claymore stick + placed-device conversion, the think/detonate chain incl. the detonator and the claymore cone/fan, ported (engine/runtime/world/throwables + RoundSim dispatches), tracked D-THROW-1..10; §28 the entity Flags dword bit table, consolidation 2026-07-29 — backs the kEntityFlag* constants in world/entity.h; §29 the org water/float channel + deck-ride, engine-research 2026-08-06 — both motors' deep-water float blocks (0x8000/0x200000, hysteresis, buoyant-rise/bob-snap forms), root suppressions, the groundEntity pose-follow with rotate-about-carrier, ported for DECODED rows via the D-NET-196 replica tails; local-motor water rides D-INF-3 (the ladder tail landed with §30); §30 the ladder climb state machine, engine-research + port 2026-08-15 — the D-COL-5 climb motor landed: CL entry gate/anchor snap, the alignment chase, states 32–35, the dismount/exit legs incl. the corrected grounded BOTTOM dismount, the org1 congestion hold + 0x80 Z-chase (kEntityFlagAiClimb named), the ±120° view clamp + arms lock; residuals = the AI climb-order writer + the parachute/carried gate halves + the remote-climber authority display); §24.9 (2026-08-21) the `Scar_*` impact-scar family witnessed AND ported (the glass userpoint leg residual), §24.3 debris ownership, §14.6 the mounted camera ported, §25.9 the in-flight round effect's lifecycle ported; §31 the AI convoy movement chain audited end to end 2026-08-24 — eleven links witnessed matching from nav node to wheel, the pool-walk gate's ItemTypeIndex defect closed, the pool-1 slot-assignment divergence recorded and shown inert, and the open surface narrowed to the NavChannel data; 2026-08-25 tidy #553–#573 — §23.4 the AI boarding chain PORTED (#571: walk-to-seat, channels 123..127, the 126/127 legs; residual = the 64-tick seat re-upgrade), §23.3 the AIP HELO keys' 16.16 conversions witnessed (`AIProfile_ParseProperty` type-1 arms @0x45f684..0x45f9eb; #567's raw storage REFUTED and fixed), §17.10 D-AI-4's record row, §31.4 the pool-1 slot = BMS record index ported (the spawn-filter holes stay the open half); §26 allegiance/damage/mounted-weapon parity (grill-ida 2026-07-20: BMS combat flags + Berserk same-team exception, actual-hit alerting, retail no-op near misses, mounted aim/request/FSM fire, collision-force suppression, and death-detach animation witnessed + ported; production ADM-backed automatic action durations landed 2026-08-15, closing D-WPN-26); §24 refresh 2026-08-23, superseding the older §24 summary above: D-ITEM-18 closed (the specialized unitType-3 main-husk mover, four-probe slope solve, dual authority blast, scorch/effects, and delayed pitch-settle callback ported and focused-test pinned; remaining object-ground participation tracked once under D-ITEM-9 and authored landing/water sound slots under D-ITEM-10); §32 (2026-08-30) WAC predicate/action rows + queued ChangeAI path witnessed and ported; §27.6a (2026-09-04) retail mission minefields `lndm` ported and validated on `00TRd`/`CP09`, D-THROW-6 closed; 2026-09-05: numbered seat keys share the mounted panel list and send confirmed joiner requests (world-wac-ai-re section 23.1, D-AI-11 d); §33 (2026-09-08/09) the NPC AI + mission-scripting pass: WAC timing/arithmetic/dispatch closure, BMS target selectors, organic init/respawn, doors, teammate operations, GRM facial state (`engine/formats/grm` + `engine/runtime/world/facial_animation`), escort/medic, rotor wash, terrain-gradient motors, airborne collision; D-INF-5/D-INF-24/D-AI-5 FIXED, D-WAC-1/2, D-GRM-1, D-TMATE-1 proposed PERMANENT (class D) PR #645: semantic blast-seat protection, once-per-tick turret slew and primary-weapon aircraft clamp validated. 2026-09-13: D-WPN-36..39, D-WAC-8..10 and D-AI-13 FIXED (scoped stability drift, airborne ADS bias, authored ADS rotation and the optical/position clock; the WAC auto DWORD, decimal V# prefixes and M# context binding; vehicle-avoidance quantization); D-WPN-40, the pending-slot pose binding, open; [2026-09-18 movement parity](jo-c-validation-2026-09-18.md#ai-and-player-movement-follow-through): D-AI-14 / D-VEH-3 fixed in PR #652; PR #652 [animation timing audit](world/world-wac-ai-re.md#36-animation-and-relative-motion-timing-audit-2026-09-18): D-INF-26 fixed; current-tick local head and spectator preparation order aligned; visual trails await user comparison; PR #663 [mounted-pose precision](world/world-wac-ai-re.md#37-mounted-pose-precision-2026-09-21) closes D-INF-27 |
+## Reverse-engineering records by domain
 
-The UNAUDITED set was emptied by the PAR-R1..R7 sweep (2026-07-05), then
-reopened the same day with the three runtime-render systems the REN track
-audits — materials/state, draw order, lighting (the records land under
-`docs/render/` at REN-2/3/5; see the
-[divergence ledger](divergence-ledger.md)'s audit track and
-[ADR 0023](adr/0023-render-visual-parity.md)). Every other subsystem has a
-dedicated RE record (full or partial) or a tracked-by-composition audit. The
-project glossary lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the
-project vision is [`GOALS.md`](../GOALS.md).
+- **Animation and models:** [ADM/BAD](anim/adm-bad-format-re.md);
+  [3DI GP](threedi/3di-gp-format-re.md), [3DI LW](threedi/3di-lw-format-re.md),
+  and the [scene naming contract](threedi/scene-naming-contract.md).
+- **Audio:** [LWF/DBF sound](audio/lwf-dbf-sound-re.md) and
+  [MUS/SBF music](audio/mus-sbf-re.md).
+- **World and mission:** [world, WAC, and AI](world/world-wac-ai-re.md),
+  [vehicle movers](world/vehicle-client-movers-re.md),
+  [item definitions](world/itemdef-re.md),
+  [NPC script coverage](world/npc-script-coverage.md),
+  [NPC mission completion](world/npc-mission-completion.md),
+  [special weapons](world/special-weapons-parity.md),
+  [BMS events](mission/bms-event-runtime-re.md),
+  [MIS format](mission/mis-format-re.md), and
+  [savegames](mission/savegame-re.md).
+- **Network:** [NovaWorld and in-match protocol](net/novaworld-net-re.md),
+  [retail dispatch audit](net/retail-message-dispatch-audit.md), and
+  [vehicle deployment regression](net/retail-vehicle-deployment-regression.md).
+- **Rendering and environment:** [render records](render/README.md),
+  [terrain](terrain/terrain-re.md), [tiles](tiles/til-re.md),
+  [foliage](foliage/foliage-re.md), [environment and time of day](env/env-tod-re.md),
+  [honored environment fields](env/env-honored-matrix.md), and
+  [particles](particles/ptl-format-re.md).
+- **Interface and data:** [HUD](interface/hud-re.md),
+  [weapon/vehicle HUD validation](interface/weapon-vehicle-hud-validation.md),
+  [loading screen](interface/loading-screen-re.md),
+  [RTXT strings](interface/rtxt-strings-re.md),
+  [MNU menus](mnu/menu-re.md), [menu wiring](mnu/menu-wiring.md),
+  [fonts](fonts/fnt-re.md), [avatars](playerinfo/avatars-re.md),
+  [credits](credits/cbin-re.md), and [VFS/PFF](vfs/vfs-pff-mount-re.md).
 
-The [HUD #645 follow-up](interface/hud-re.md#645-follow-ups-flag-feed-announcement-banner-and-death-instructions-2026-09-11) records flag-feed keys, delayed voice cues, the centre kill banner, and death-screen instructions.
+## Dated and retired-program records
 
-### PR #645 follow-up records (2026-09-11)
-
-The active parity slice covers the deferred gameplay, wire, controls, sound, and rendering findings. Detailed new witnesses are in [item classes and squib](world/world-wac-ai-re.md#243b-squib-and-shared-class-effects-2026-09-11), [animation timing](anim/adm-bad-format-re.md#playback-clock-follow-up-2026-09-11), [item effect replication](net/novaworld-net-re.md#item-explosion-and-state-receive-order-2026-09-11), [normal maps](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11), and [projection/thermal waves](render/render-order-re.md#projection-and-thermal-wave-follow-up-2026-09-11). Vehicle, HUD, mission, controls, and audio findings remain in their domain records; the divergence ledger retains unrelated open work.
-
-The runtime-only distribution and required CLI data directory are defined in
-[ADR 0045](adr/0045-cli-game-data-runtime-only.md).
+The [2026-09-13 JO-C audit](jo-c-parity-audit-2026-09-13.md) and
+[2026-09-18 validation](jo-c-validation-2026-09-18.md) are dated evidence,
+not live status. The [maturity program](maturity-program.md) and
+[ONED editor](oned/editor-layer-program.md),
+[workspace](oned/workspace-maturity-program.md), and
+[runtime-parity](oned/editor-runtime-parity.md) programs are historical.
+[Performance records](perf/03tr-frame-costs.md) include the
+[mission-load](perf/mission-load-baseline.md) and
+[re-ground](perf/reground-baseline.md) baselines. For current work, return
+to the ledger and current-state router.

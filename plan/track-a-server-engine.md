@@ -1,5 +1,9 @@
 # Track A: NovaWorld server reland, protocol completeness, IDA grill, engine client
 
+> **Historical plan.** The NovaWorld integration landed in PR #136. See
+> [plan status](status.md) for its milestones and the
+> [network RE record](../docs/net/novaworld-net-re.md) for current behavior.
+
 ## Reland mechanics (PR 3)
 
 Source: `net/pr37-rescue` (merge commit `1bb779e1`, "Implement NovaWorld web and UDP
