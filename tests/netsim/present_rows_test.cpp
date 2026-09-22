@@ -608,7 +608,10 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
 	im::PoolPresentLifecycleMap plain_lifecycle;
 	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);
-	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_MOTION_VALID] == 0.0f,
+	// The hull still publishes its own motion controls (the joiner twin's
+	// tracks and wheels); only the gun bit stays clear.
+	ok = expect((static_cast<uint32_t>(row_at(rows, 0)[w::PF_VEHICLE_CTRL_MASK]) &
+					w::VC_VEHICLE_GUN) == 0,
 			"a child without the ewep class update publishes no gun words") && ok;
 	return ok;
 }
