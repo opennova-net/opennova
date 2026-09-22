@@ -600,13 +600,15 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
     const Entity *parent = world.registry.get(rider.mount_target);
     if (parent == nullptr) return false;
     const AiEntity *body = world.ai.for_handle(rider.handle);
-    const bool posable = parent->has_item_def &&
-            (parent->item_attrib & kItemAttribEweap) != 0 && world.collision != nullptr &&
+    const bool eweap = parent->has_item_def && (parent->item_attrib & kItemAttribEweap) != 0;
+    const bool posable = eweap && world.collision != nullptr &&
             world.collision->entity_model_id(parent->handle) >= 0;
     if (parent->has_item_def && !posable) {
-        // Not an EWEAP, or no model to pose: the rider's own Position +
-        // CameraOffset and rotation triple. [orig: @0x545EB7..0x545EEA;
-        //  the no-skeleton copy @0x545F17..0x545F4E]
+        // Not an EWEAP, or an EWEAP with no model to pose: the rider's own
+        // Position + CameraOffset and its full-width rotation triple (the
+        // seat carry's BAM32 Roll, never the whole-degree registry mirror).
+        // [orig: not an EWEAP @0x545EB7..0x545EEA; the no-skeleton copy
+        //  @0x545F17..0x545F4E]
         out[0] = io::bam_add(body ? body->pos[0] : to_fixed(rider.position.x),
                 body ? body->inf.eye_offset_x : rider.eye_offset_x);
         out[1] = io::bam_add(body ? body->pos[1] : to_fixed(rider.position.y),
@@ -615,7 +617,11 @@ bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[
                 body ? body->inf.eye_offset_z : rider.eye_offset_z);
         out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
         out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
-        out[5] = bam_from_degrees_wrapped(rider.roll);
+        out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
+        // Only the EWEAP copy then adds the rider's +0x94 word (the body
+        // attitude triple's roll slot, saved_live_roll) to the pitch
+        // [orig: mov edx, [edi+94h]; add [eax+10h], edx @0x545F48..0x545F4E].
+        if (eweap) out[4] = io::bam_add(out[4], rider.saved_live_roll);
         return true;
     }
     // [orig: CAMERA byte parent+0x318 @0x545F5B; the posed record and its
@@ -641,14 +647,18 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
     const Entity *parent = world.registry.get(rider.mount_target);
     if (parent == nullptr || !parent->has_item_def) return false;
     // Mode 0 opens with the rider's own Position and rotation triple; the
-    // callbacks rewrite what they own. [orig: @0x437D6F..0x437D9B]
+    // callbacks rewrite what they own. The Roll word is the seat carry's
+    // full BAM32 roll, never the whole-degree registry mirror [orig:
+    // @0x437D6F..0x437D9B, Roll `mov ecx, [esi+18h]` @0x437D86; the carry
+    // writes it through Entity_AttachToBoneAndUpdateTransform @0x5463D0 ->
+    // Math_FixedPointMatrixToEulerAngles @0x54656F].
     const AiEntity *body = world.ai.for_handle(rider.handle);
     out[0] = body ? body->pos[0] : to_fixed(rider.position.x);
     out[1] = body ? body->pos[1] : to_fixed(rider.position.y);
     out[2] = body ? body->pos[2] : to_fixed(rider.position.z);
     out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
     out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
-    out[5] = bam_from_degrees_wrapped(rider.roll);
+    out[5] = body ? body->roll : bam_from_degrees_wrapped(rider.roll);
     if (parent->virtual_display_camera) {
         // Every input row carries a camera callback, so def+0x174 never fails
         // the gate; def+0x1C0 is the virtual-display userpoint byte.
@@ -675,7 +685,8 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
             return true;
         }
         // [orig: null / troop camera callback @0x4DC710 -- Position +
-        //  CameraOffset (+0x6C) and the carrier's own rotation triple]
+        //  CameraOffset (+0x6C) and the carrier's own rotation triple, all
+        //  three full-width words @0x4DC732..0x4DC741]
         const AiEntity *carrier_body = world.ai.for_handle(carrier->handle);
         out[0] = io::bam_add(to_fixed(carrier->position.x), carrier->eye_offset_x);
         out[1] = io::bam_add(to_fixed(carrier->position.y), carrier->eye_offset_y);
@@ -683,8 +694,12 @@ bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[
         out[3] = carrier_body ? carrier_body->heading
                 : carrier->veh.yaw_seeded ? carrier->veh.yaw_bam
                                           : bam_heading_from_mission_yaw_deg(carrier->yaw);
-        out[4] = carrier_body ? carrier_body->pitch : bam_from_degrees_wrapped(carrier->pitch);
-        out[5] = carrier_body ? carrier_body->roll : bam_from_degrees_wrapped(carrier->roll);
+        out[4] = carrier_body ? carrier_body->pitch
+                : carrier->veh.yaw_seeded ? carrier->veh.air_pitch_bam
+                                          : bam_from_degrees_wrapped(carrier->pitch);
+        out[5] = carrier_body ? carrier_body->roll
+                : carrier->veh.yaw_seeded ? carrier->veh.air_roll_bam
+                                          : bam_from_degrees_wrapped(carrier->roll);
         return true;
     }
     // The seat-bone leg: an EWEAP that is not PlayerControl, a Person rider.
