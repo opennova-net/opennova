@@ -345,7 +345,9 @@ void LocalPlayerPresenter::after_world_tick() {
 		set_spectator_camera_active(false);
 		return;
 	}
-	view_ = visuals_->local_player_view();
+	// The display frame's one camera compose; every other read of the view
+	// (weapon-event placement, the mode refresh, the HUD) observes it.
+	view_ = visuals_->present_local_player_view();
 	if (is_local_spectator()) {
 		// The first spectator frame starts at the last authoritative player
 		// camera pose (or the spectator entity's initial pose on a fresh join).
@@ -798,9 +800,8 @@ void LocalPlayerPresenter::set_model_lighting_context(ObjectModel *p_model, bool
 
 // The engine decides the swap (the claimant seat, the first-person camera mode
 // and the def's authored display ride world::LocalPlayerViewFrame; the hull's
-// present row is local-view suppressed the same frame). This presenter only
-// holds the frame's one view snapshot -- assembling another would advance the
-// rendered view's shake filters a second time -- so it is the feed; the entity
+// present row is local-view suppressed the same frame). This presenter holds
+// the frame's one composed view snapshot, so it is the feed; the entity
 // presenter owns the vehicle's nodes and does the drawing.
 void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
 	Node *node = world();

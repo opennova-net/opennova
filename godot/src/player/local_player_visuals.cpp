@@ -489,6 +489,14 @@ Ref<PlayerLocalView> LocalPlayerVisuals::local_player_view() const {
 	return view_sim->get_local_player_view();
 }
 
+Ref<PlayerLocalView> LocalPlayerVisuals::present_local_player_view() const {
+	const Ref<Simulation> view_sim = sim();
+	if (view_sim.is_null()) {
+		return Ref<PlayerLocalView>();
+	}
+	return view_sim->present_local_player_view();
+}
+
 Ref<PlayerWeaponView> LocalPlayerVisuals::local_player_weapon_view() const {
 	const Ref<Simulation> view_sim = sim();
 	if (view_sim.is_null()) {

@@ -243,6 +243,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_third_person_selected", "selected"), &Simulation::set_local_player_third_person_selected);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
+	ClassDB::bind_method(D_METHOD("present_local_player_view"), &Simulation::present_local_player_view);
 	ClassDB::bind_static_method("Simulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect", "mode"), &Simulation::fov_vertical_from_horizontal, DEFVAL(-1));
 	ClassDB::bind_static_method("Simulation", D_METHOD("fresh_profile_aspect_mode", "width", "height"), &Simulation::fresh_profile_aspect_mode);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);

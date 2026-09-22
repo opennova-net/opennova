@@ -445,18 +445,34 @@ int main() {
 
 	// The camera shake: the counter decays ONCE per tick in the pre-tick pass
 	// (never per frame), while every composed frame advances the IIR filters
-	// again from the same PRNG word — two frames between ticks differ
-	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d].
+	// again from the same PRNG word — two rendered frames between ticks
+	// differ. Observing the view between composes reads the last composed
+	// view and advances nothing, so two observations agree and leave the
+	// filters where the frames left them
+	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d;
+	//  the only other callers @ 0x5c9841 (the Inset scene) / @ 0x52b082].
 	kernel.local.view.shake.counter = 10;
 	tick_no_net(kernel);
 	CHECK(kernel.local.view.shake.counter == 8);
 	{
-		const w::LocalPlayerViewFrame frame_a = kernel.local.view_frame();
-		const w::LocalPlayerViewFrame frame_b = kernel.local.view_frame();
+		const w::LocalPlayerViewFrame frame_a = kernel.local.present_view_frame();
+		const w::LocalPlayerViewFrame frame_b = kernel.local.present_view_frame();
 		CHECK(kernel.local.view.shake.counter == 8);
 		CHECK(frame_a.camera.yaw_deg != frame_b.camera.yaw_deg ||
 		      frame_a.camera.pitch_deg != frame_b.camera.pitch_deg ||
 		      frame_a.camera.roll_deg != frame_b.camera.roll_deg);
+		const w::CameraShakeState filters = kernel.local.view.shake;
+		const w::LocalPlayerViewFrame seen_a = kernel.local.view_frame();
+		const w::LocalPlayerViewFrame seen_b = kernel.local.view_frame();
+		CHECK(seen_a.camera_pose_valid && seen_b.camera_pose_valid);
+		CHECK(seen_a.camera.yaw_deg == seen_b.camera.yaw_deg &&
+		      seen_a.camera.pitch_deg == seen_b.camera.pitch_deg &&
+		      seen_a.camera.roll_deg == seen_b.camera.roll_deg);
+		CHECK(seen_a.camera.yaw_deg == frame_b.camera.yaw_deg &&
+		      seen_a.camera.pitch_deg == frame_b.camera.pitch_deg);
+		CHECK(kernel.local.view.shake.yaw == filters.yaw &&
+		      kernel.local.view.shake.pitch == filters.pitch &&
+		      kernel.local.view.shake.roll == filters.roll);
 	}
 	tick_no_net(kernel);
 	CHECK(kernel.local.view.shake.counter == 6);

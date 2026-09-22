@@ -108,6 +108,13 @@ public:
     bool find_numbered_seat(int index, VehicleSeatSelection &out,
             const VehicleOccupancySource *source = nullptr);
     bool select_numbered_seat(int index);
+    // The RENDERED frame: the binocular sway latch, the main scene's camera
+    // compose (and the Inset scene's), then the main scene's optical offsets.
+    // It advances the composition state, so the presenter's per-frame leg is
+    // its one live caller [orig: Render_ProcessMainSceneFrame @0x5CA0F0].
+    LocalPlayerViewFrame present_view_frame();
+    // The same frame OBSERVED: the camera is the last composed view and
+    // nothing advances (weapon-event placement, mode refresh, diagnostics).
     LocalPlayerViewFrame view_frame();
     // The Player_CanFireWeapon verdict the body updater and the HUD share
     // [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
@@ -155,11 +162,11 @@ public:
     // The post-tick local pumps in retail order: the sim-wrote-the-view fold,
     // the per-frame view promoter, then the equipped-slot FSM pump.
     void run_local_player_post_tick();
-    // One 62.5 Hz tick of the view state over view_session_inputs, before the
-    // weapon pump (the order the world tick keeps: retail's
-    // Player_UpdatePerFrame call precedes the later
-    // WeaponAction_ProcessAllEntities call). The joiner frame runs it between
-    // its heading fold and its own weapon pump.
+    // One 62.5 Hz tick of the view state over view_session_inputs, then the
+    // aim acquisition and the quantum's camera compose, before the weapon
+    // pump (the order the world tick keeps: retail's Player_UpdatePerFrame
+    // call precedes the later WeaponAction_ProcessAllEntities call). The
+    // joiner frame runs it between its heading fold and its own weapon pump.
     void tick_view();
     void update_aim_target();
     // Reset the frame-input state and seed the look heading from the (auto-)

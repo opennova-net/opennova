@@ -292,18 +292,14 @@ bool LocalPlayer::select_numbered_seat(int index) {
 	return changed;
 }
 
-w::LocalPlayerViewFrame LocalPlayer::view_frame() {
-	World &world = world_;
-	// The rendered view owns this latch; target-lock queries and fixed ticks
-	// must not advance the shared mission PRNG. [orig:
-	// Render_ProcessMainSceneFrame @ 0x5ca0f0, latch @0x5ca3e1..0x5ca3f3]
-	w::local_player_binocular_sway_latch(world, view, view_tracker);
-	w::LocalPlayerViewFrame f;
-	w::local_player_view_frame(&world, weapon, view, view_tracker, f);
-	// The main scene's camera zero, after camera composition. Input, body aim
-	// and the unadjusted targeting query retain their own frames.
-	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
-	// Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
+namespace {
+
+// The main scene's camera zero, after camera composition. Input, body aim
+// and the unadjusted targeting query retain their own frames.
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
+// Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
+void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,
+		w::LocalPlayerViewFrame &f) {
 	const auto *slot = w::active_local_weapon_slot(world, weapon);
 	if (f.camera_pose_valid && f.binoculars_view_active) {
 		// Already converted from BAM to mission-coordinate deltas.
@@ -316,6 +312,30 @@ w::LocalPlayerViewFrame LocalPlayer::view_frame() {
 		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * degrees_per_bam);
 		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * degrees_per_bam);
 	}
+}
+
+} // namespace
+
+w::LocalPlayerViewFrame LocalPlayer::present_view_frame() {
+	World &world = world_;
+	// The rendered view owns this latch; target-lock queries and fixed ticks
+	// must not advance the shared mission PRNG. [orig:
+	// Render_ProcessMainSceneFrame @ 0x5ca0f0, latch @0x5ca3e1..0x5ca3f3]
+	w::local_player_binocular_sway_latch(world, view, view_tracker);
+	w::LocalPlayerViewFrame f;
+	w::local_player_view_frame(&world, weapon, view, view_tracker, f);
+	apply_main_scene_optics(world, weapon, f);
+	return f;
+}
+
+w::LocalPlayerViewFrame LocalPlayer::view_frame() {
+	World &world = world_;
+	// Observation composes nothing: the camera is the view the last compose
+	// left, and neither the shake filters, the chase look-ahead nor the
+	// binocular latch move.
+	w::LocalPlayerViewFrame f;
+	w::local_player_view_observe(&world, weapon, view, view_tracker, f);
+	apply_main_scene_optics(world, weapon, f);
 	return f;
 }
 
@@ -516,7 +536,17 @@ void LocalPlayer::run_local_player_post_tick() {
 void LocalPlayer::tick_view() {
 	World &world = world_;
 	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs);
-    update_aim_target();
+	// Retail acquires the aim inside the entity update, BEFORE the quantum's
+	// camera compose, so its camera leg reads the view the previous compose
+	// left [orig: Game_ProcessMainFrame -- Entity_UpdateAllEntities @0x52674B
+	//  precedes Camera_ComputeThirdPersonView @0x526781].
+	update_aim_target();
+	// The quantum's own compose: it advances the shake filters and the chase
+	// look-ahead once per logic tick and leaves g_view_pos / g_view_rot for
+	// the readers until the next compose [orig: @0x526781].
+	w::PlayerCameraPose composed;
+	bool mounted_camera = false;
+	w::local_player_camera_compose(world, view, view_tracker, composed, mounted_camera);
 }
 
 void LocalPlayer::reset_for_new_round() {

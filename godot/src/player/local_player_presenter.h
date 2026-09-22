@@ -131,8 +131,8 @@ public:
 	// tick [orig: g_camera_mode @0xA890C8]. Nothing on the shell writes it
 	// directly.
 	bool is_third_person() const { return third_person_; }
-	// The last presented snapshot: observation must not compose a new view
-	// (which advances camera-shake filters and may latch binocular RNG).
+	// The last presented snapshot: the frame the camera displays, composed
+	// once per display frame by after_world_tick.
 	Ref<PlayerLocalView> presented_view() const { return view_; }
 
 	// Debug experiments (the dev tools' Player controls): keep the FP arms

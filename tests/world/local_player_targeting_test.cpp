@@ -191,6 +191,90 @@ void test_designator_lock_stores_the_mountable_guns_hull() {
     CHECK((body.slot.f[2] & 1) != 0);
 }
 
+// THE CAMERA LEG: out of first person (or with no weapon) the far point is
+// Entity_BuildCameraView's — the fire pose x 1000, none of the weapon-view
+// offsets, its pitch cleared in a controller seat — and the ray STARTS at
+// the view the last compose left, so a wall beside that eye catches it
+// while the fire pose's own line passes below. No camera is composed here:
+// the shake filters stay where they were.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4E90..0x4B4EA1 -> @0x4B4F90;
+//  Entity_BuildCameraView @0x4B0E30 -- fire pose @0x4B0E46, the parentSlot-2
+//  pitch clear @0x4B0E50..0x4B0E61, (1000, 0, 0) @0x4B0EDF; the start
+//  g_view_pos @0x4B4FDE / @0x4B5006 / @0x4B501B]
+void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
+    LocalWorld lw;
+    CollisionWorld collision;
+    lw.w.collision = &collision;
+    AiEntity &body = lw.body();
+    body.pitch = bam_from_degrees_wrapped(10.0);
+    LocalPlayer local(lw.w);
+    // Unarmed in first person: the camera leg by the EquippedSlot gate.
+    local.weapon.active = false;
+    local.view.shake.counter = 40;
+    local.view.shake.yaw = 0x01000000;
+    lw.w.weather.core.oscillator.prng = 0x6B8B4567u;
+    int32_t fire[6];
+    local_weapon_fire_pose(lw.w, local.weapon, local.weapon.slot.clip, false, fire);
+    const int32_t forward[3] = {1000 << 16, 0, 0};
+    int32_t endpoint[3];
+    collision_matrix_from_euler(fire[3], fire[4], fire[5], fire).transform_point(forward, endpoint);
+    // The last composed eye sits 47 u above the player.
+    local.view_tracker.composed.eye[0] = 10.0f;
+    local.view_tracker.composed.eye[1] = 20.0f;
+    local.view_tracker.composed.eye[2] = 50.0f;
+    local.view_tracker.composed_valid = true;
+    lw.w.logic_tick = 16;
+    local.update_aim_target();
+    CHECK(body.inf.aim_point[0] == endpoint[0] && body.inf.aim_point[1] == endpoint[1] &&
+          body.inf.aim_point[2] == endpoint[2]);
+    CHECK(local.view.shake.yaw == 0x01000000);
+
+    // Armed in the chase, the same leg. A wall 100 u down +X at the height
+    // the eye-to-endpoint line crosses it (z ~ 62.8) stops the ray; the fire
+    // pose's own line would pass 40 u below.
+    local.weapon.active = true;
+    local.view.camera_mode = 1;
+    local.view.third_person = true;
+    Entity wall;
+    wall.kind = EntityKind::Item;
+    wall.item_id = 5; wall.has_item_def = true; wall.item_type = 5;
+    wall.health = 100; wall.alive = true;
+    wall.position = {110.0f, 20.0f, 62.0f};
+    wall.bound_radius = 2.0f;
+    const EntityHandle wall_handle = lw.w.registry.spawn(1, wall);
+    collision.assign_entity(wall_handle, collision.add_model(vertical_quad_model()));
+    const int32_t pose[3] = {110 << 16, 20 << 16, 62 << 16};
+    CHECK(collision.publish_entity_section_matrices(
+            wall_handle, {collision_matrix_from_heading(0, pose)}));
+    collision.build_tick_tables(lw.w);
+    lw.w.logic_tick = 32;
+    local.update_aim_target();
+    CHECK(body.inf.head_look_target == wall_handle);
+    CHECK(std::abs(body.inf.aim_point[0] - (110 << 16)) < 0x1000);
+    CHECK(body.inf.aim_point[2] > (62 << 16) && body.inf.aim_point[2] < (64 << 16));
+
+    // A controller seat clears the fire pose's pitch before the far point.
+    lw.w.registry.get(wall_handle)->position = {110.0f, 20.0f, 500.0f};
+    const int32_t away[3] = {110 << 16, 20 << 16, 500 << 16};
+    CHECK(collision.publish_entity_section_matrices(
+            wall_handle, {collision_matrix_from_heading(0, away)}));
+    collision.build_tick_tables(lw.w);
+    Entity seat;
+    seat.kind = EntityKind::Item;
+    seat.item_id = 6; seat.has_item_def = true; seat.item_type = 1;
+    seat.position = {10.0f, 20.0f, 3.0f};
+    const EntityHandle seat_handle = lw.w.registry.spawn(1, seat);
+    lw.entity().mounted = true;
+    lw.entity().mount_target = seat_handle;
+    lw.entity().mount_type = SeatType::Controller;
+    local_weapon_fire_pose(lw.w, local.weapon, local.weapon.slot.clip, false, fire);
+    fire[4] = 0;
+    collision_matrix_from_euler(fire[3], fire[4], fire[5], fire).transform_point(forward, endpoint);
+    lw.w.logic_tick = 48;
+    local.update_aim_target();
+    CHECK(body.inf.aim_point[0] == endpoint[0] && body.inf.aim_point[2] == endpoint[2]);
+}
+
 // The locked tone registers only on a frame's last logic tick; the lock
 // itself still lands while the bank catches up.
 // [orig: dword_24E0E80 @0x4b5229 ahead of SoundEmitter_Register @0x4b5280;
@@ -222,6 +306,7 @@ int main() {
     test_weapon_view_ray_takes_the_scope_zero_back_out();
     test_designator_lock_stores_the_mountable_guns_hull();
     test_locked_tone_waits_for_the_last_catch_up_tick();
+    test_camera_leg_aims_the_fire_pose_from_the_composed_eye();
     if (failures == 0) std::printf("local_player_targeting_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

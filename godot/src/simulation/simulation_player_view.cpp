@@ -120,6 +120,13 @@ Ref<PlayerLocalView> Simulation::get_local_player_view() const {
 	return out;
 }
 
+Ref<PlayerLocalView> Simulation::present_local_player_view() {
+	Ref<PlayerLocalView> out;
+	out.instantiate();
+	out->assign(kernel_->local.present_view_frame());
+	return out;
+}
+
 Vector3 Simulation::local_player_viewmodel_rotation_bias_deg() const {
 	int32_t bias[3];
 	opennova::world::local_player_viewmodel_rotation_bias(&kernel_->world,

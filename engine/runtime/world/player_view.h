@@ -118,21 +118,25 @@ inline bool player_view_narrow_aspect(int viewport_w, int viewport_h) {
 // The MOUNTED camera's inputs, resolved by the hosting simulation from the
 // local player's carrier each tick: a control seat (mount state +0x168 == 2
 // or 5 — Entity::is_vehicle_control_seat()) with the carrier's position,
-// heading and bound radius, its watercraft class (itemDef+0x196 in {3,4}),
-// and the water plane the clearances read. `control_seat` false = on foot or
-// a passenger/gunner seat, which keeps the on-foot chase.
+// heading, look-ahead target and bound radius, its watercraft class
+// (itemDef+0x196 in {3,4}), and the water plane the clearances read.
+// `control_seat` false = on foot or a passenger/gunner seat, which keeps the
+// on-foot chase.
 // [orig: the +0x168/+0x16C reads in ThirdPersonCamera_Update @0x437B1F and
 //  Camera_ComputeThirdPersonView @0x438100/@0x43845A/@0x43861D]
 struct MountedCameraInput {
     bool control_seat = false;
     int32_t carrier_pos_q16[3] = {0, 0, 0}; // mission space, 16.16
     int32_t carrier_yaw_bam = 0;            // BAM32 heading
-    // The carrier's unit forward in mission space (its chassis matrix's first
-    // column — the look-ahead point is that matrix times (6, 0, 0), rotation
-    // only) [orig: parentMatrix(+0xB4) x (6.0, 0, 0) @0x438811..0x4388b5].
-    float carrier_forward[3] = {0.0f, 1.0f, 0.0f};
+    // The look-ahead target (16.16): the carrier's orientation matrix times
+    // (6.0, 0, 0), rotation only, so it follows the hull's pitch as well as
+    // its heading [orig: Math_TransformPointFixedPoint22 @0x412E90 of
+    //  parentMatrix(+0xB4) x (0x60000, 0, 0), called @0x438855].
+    int32_t lookahead_target_q16[3] = {0, 0, 0};
     float bound_radius = 0.0f;              // carrier +0, mission units
     bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
+    // The water plane every chase eye clears, on foot as well as mounted
+    // [orig: Env_WaterHeightFixed + 0x4000 @0x438409..0x43841E].
     float water_z = 0.0f;                   // Env_WaterHeightFixed, units
 };
 
@@ -443,12 +447,13 @@ struct PlayerViewState {
     bool debug_third_person_on_foot = false;
     // The first-person camera shake (CameraShakeState below): the pre-tick
     // input pass decays its counter, the quake tick HARD-SETS it [orig:
-    // dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29], and Camera_ComputeThird-
-    // PersonView samples it — advancing the IIR filters — once per quantum
-    // (the post-tick view pass) AND once per rendered frame (the camera
-    // compose, whose deltas render) [orig: the callers @ 0x526781 and
-    //  @ 0x5ca34d]; the frame read therefore mutates, like retail's globals.
-    mutable CameraShakeState shake;
+    // dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29], and every
+    // Camera_ComputeThirdPersonView call samples it — advancing the IIR
+    // filters — once per quantum, once per rendered frame and once more for
+    // the Inset scene [orig: the callers @ 0x526781, @ 0x5ca34d and
+    //  @ 0x5c9841]. Only local_player_camera_compose advances it; an observed
+    // frame reads the view the last compose left.
+    CameraShakeState shake;
     // The three fullscreen damage-feedback words (ScreenFlashState above):
     // armed by the damage/collision/revive legs, decayed beside the shake in
     // the same pre-tick pass, cleared by the local respawn.
@@ -464,11 +469,19 @@ struct PlayerViewState {
     // it (>> 4 on x/y, >> 5 on z, half-step rounded) and `tp_anchor` mirrors
     // it; the on-foot float ease keeps it in step for a seamless mount.
     int32_t tp_anchor_q16[3] = {0, 0, 0};
-    // The mounted look-ahead offset (16.16), eased a thirty-second per tick
-    // toward the carrier's forward x 6.0; the look-at point is the anchor plus
-    // this [orig: g_camera_lookahead += (target - lookahead + 16) >> 5 per axis
-    // @0x438811..0x4388b5].
+    // The mounted look-ahead offset (16.16), eased a thirty-second toward the
+    // carrier's matrix x 6.0 by EVERY compose of the mounted chase — each
+    // logic quantum's and each rendered frame's, so the ease runs faster at a
+    // higher frame rate exactly as retail's does; the look-at point is the
+    // pivot plus this [orig: g_camera_lookahead += (target - lookahead + 16)
+    // >> 5 per axis @0x43885A..0x4388AF, inside Camera_ComputeThirdPersonView
+    // @0x437D10 (called @0x526781 and @0x5CA34D)].
     int32_t lookahead_q16[3] = {0, 0, 0};
+    // The ground-entity leg's lift: the longest CameraOffset seen while the
+    // person stands or sits on a crashed or settled vehicle; every person-leg
+    // compose clears it [orig: dword_A89140 — the max @0x437F03..0x437F0B,
+    //  cleared @0x437F9C].
+    int32_t ground_leg_lift_q16 = 0;
     MountedCameraInput mount;
 };
 
@@ -788,29 +801,36 @@ void camera_shake_sample_chase(const CameraShakeState &st, uint32_t weather_prng
 void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain,
                                       bool indoors, float eye[3]);
 
-// The composed local camera for one presented frame, mission space — the
-// witnessed pose math; the presenting shell converts frames and stamps the
-// Camera3D node. `anchor_eye` is live Position + the motor's CameraOffset;
-// pass valid=false for the non-person +1.0 bump over `position`.
-// `aim_yaw/pitch_deg` are the post-binocular aim angles. `terrain` + `indoors`
-// feed third-person clearance; the motor already floors the on-foot head.
+// The camera legs of one Camera_ComputeThirdPersonView call that need no
+// world lookup, mission space — the witnessed pose math; the presenting shell
+// converts frames and stamps the Camera3D node. The mode-0 carrier legs and
+// the ground-entity leg run before this (local_player_camera_compose,
+// world/local_player_view.h). `anchor_eye` is live Position + the motor's
+// CameraOffset; pass valid=false for a non-person entity. `aim_yaw/pitch_deg`
+// are the body's aim angles and `entity_roll_deg` its own Roll word.
+// `terrain` + `indoors` feed the chase clearances; the motor already floors
+// the on-foot head. `march_candidates` is the entity's proximity-candidate
+// count being non-zero (the chase march's gate). Advances the composition's
+// own state: the person leg clears the ground-entity lift and the mounted
+// chase eases the look-ahead.
 // First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
-// on-foot person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled
-// back kFpEyePullback along the view forward; pitch adds the doubled recoil;
-// roll = torsoRoll + lean/4.
-// Third person [orig: mode 1 @ 0x438100..0x4383e2]: the chased anchor plus
-// the pivot nudge R*(nudge,nudge,nudge) backed off by the march-landed
-// distance along the orbit forward; roll 0. With no march collision ported,
-// emitting the seed angles equals the original's final look-at recompute.
-// Mounted (`v.mount.control_seat`) [orig: the mounted arm of mode 1 — yaw
-// @0x438138..0x43814A, pitch @0x438150, distance @0x438121..0x438136, the
-// clearances @0x438409..0x438456, the slope march @0x43846E..0x438619, the
-// watercraft drop @0x43861D..0x43864C, the look-ahead @0x438767..0x4387C9]:
-// the eye sits mount_distance(r) behind the eased mounted anchor along the
-// quarter-damped look yaw at the fixed downward pitch, is floored by the
-// water/terrain clearances and the slope raise, dropped r/2 on a watercraft,
-// and the final angles look at the point 6 u ahead of the carrier
-// (world/tp_camera_mount.h carries the constants).
+// person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled back
+// kFpEyePullback along the view forward; pitch adds the doubled recoil;
+// roll = torsoRoll + lean/4. A non-person entity takes the +1.0 bump over
+// Position under its own rotation triple instead [orig: @0x437E89..0x437E99].
+// Third person [orig: mode 1 @ 0x4380E4..0x438650 and the look-at
+// @0x4387DF..0x43892D]: the anchor-translated view matrix places the eye
+// `distance` back (or on the collision march's landing) and the pivot nudge
+// R*(nudge,nudge,nudge) is the look-at target; the clearances apply to every
+// chase eye; roll 0. Mounted (`v.mount.control_seat`) [orig: the mounted arm
+// of mode 1 — yaw @0x438138..0x43814A, pitch @0x438150, distance
+// @0x438121..0x438136, the slope march @0x43846E..0x438619, the watercraft
+// drop @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
+// mount_distance(r) behind the eased mounted anchor along the quarter-damped
+// look yaw at the fixed downward pitch, is floored by the clearances and the
+// slope raise, dropped r/2 on a watercraft, and the final angles look at the
+// pivot plus the eased look-ahead (world/tp_camera_mount.h carries the
+// constants).
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO
 // poses lerped against `v.view_tick` (world/death_camera.h), converted
 // through world/angle.h; roll rides the same lerp.
@@ -821,7 +841,7 @@ struct PlayerCameraPose {
     float roll_deg = 0.0f;
     bool third_person = false;
 };
-void player_view_compose_camera(const PlayerViewState &v,
+void player_view_compose_camera(PlayerViewState &v,
                                 const float position[3],
                                 const float anchor_eye[3], bool anchor_valid,
                                 const terrain::TerrainHeightField *terrain,
@@ -829,7 +849,7 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 float aim_yaw_deg, float aim_pitch_deg,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
-                                bool carrier_view, float carrier_roll_deg,
+                                bool march_candidates, float entity_roll_deg,
                                 PlayerCameraPose &out);
 
 } // namespace opennova::world

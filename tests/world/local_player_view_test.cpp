@@ -280,6 +280,177 @@ void test_seat_bone_pose_rider_legs() {
     CHECK(out[4] == body->pitch + rider.saved_live_roll);
 }
 
+// A seat neither carrier leg admits (no virtual display, not an EWEAP) hands
+// the view to the legs an on-foot person takes. On an ordinary ground entity
+// that is the person leg — the doubled recoil, the torso + lean/4 roll and
+// the 0.1875 pull-back over the seated CameraOffset. While the ground entity
+// is a vehicle in its crashed or settled latch, the ground-entity leg sets
+// the eye along that vehicle's up axis instead — the longest CameraOffset
+// seen as the lift — under the entity's own triple; the next person-leg
+// compose clears the lift.
+// [orig: Camera_ComputeThirdPersonView @0x437D10 — the def type test
+//  @0x437E89, the ground-entity leg @0x437EB5..0x437F97 (its lift
+//  @0x437EE5..0x437F0B, Math_ExtractRow2FromFixedPoint22 @0x6137A0 via
+//  @0x437F2B, the scaled add @0x437F33..0x437F91), the person leg
+//  @0x437F9C..0x438031 clearing the lift @0x437F9C]
+void test_unadmitted_seat_takes_the_ground_or_person_leg() {
+    const auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity *body = lw.ai.for_handle(lw.local);
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->heading = 0x40000000; // mission yaw 0: the view faces +Y
+    body->roll = bam_from_degrees_wrapped(1.25);
+    body->inf.torso_roll = bam_from_degrees_wrapped(4.0);
+    Entity &rider = lw.entity();
+    rider.has_item_def = true;
+    rider.item_type = 3;
+    rider.eye_offset_z = 0x18000; // 1.5 u above the seat
+    Entity jeep;
+    jeep.has_item_def = true;
+    jeep.item_type = 1;
+    jeep.position = {10.0f, 20.0f, 2.0f};
+    jeep.veh.yaw_seeded = true;
+    jeep.veh.yaw_bam = 0x40000000;
+    jeep.veh.air_roll_bam = 0x08000000; // banked 11.25 degrees
+    const EntityHandle jeep_handle = lw.w.registry.spawn(0, jeep);
+    rider.mounted = true;
+    rider.mount_target = jeep_handle;
+    rider.ground_target = jeep_handle;
+    rider.mount_type = SeatType::Passenger;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.camera_pose_valid && !frame.mounted_camera);
+    CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 4.5f));
+    CHECK(near(frame.camera.roll_deg, 4.0f));
+
+    // The crashed jeep: its up axis times the 1.5 u lift over the Position.
+    lw.w.registry.get(jeep_handle)->veh.crashed = 1;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    const int32_t jeep_pos[3] = {10 * 65536, 20 * 65536, 2 * 65536};
+    const CollisionMatrix jeep_frame =
+            collision_matrix_from_euler(0x40000000, 0, 0x08000000, jeep_pos);
+    const int32_t up[3] = {jeep_frame.m[2] >> 6, jeep_frame.m[6] >> 6, jeep_frame.m[10] >> 6};
+    CHECK(up[0] != 0 || up[1] != 0); // the bank tips the axis
+    CHECK(view.ground_leg_lift_q16 == 0x18000);
+    for (int i = 0; i < 3; ++i) {
+        const int32_t lift = static_cast<int32_t>((int64_t(up[i]) * 0x18000 + 0x8000) >> 16);
+        CHECK(near(frame.camera.eye[i], static_cast<float>((body->pos[i] + lift) / 65536.0)));
+    }
+    CHECK(near(frame.camera.roll_deg, 1.25f));
+    CHECK(near(frame.camera.pitch_deg, 0.0f));
+    // A shorter CameraOffset keeps the longest lift; the settle byte admits
+    // the leg as well as the crash byte.
+    rider.eye_offset_z = 0x10000;
+    lw.w.registry.get(jeep_handle)->veh.crashed = 0;
+    lw.w.registry.get(jeep_handle)->veh.settle_2f0 = 1;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(view.ground_leg_lift_q16 == 0x18000);
+    // Back on the person leg the lift clears.
+    lw.w.registry.get(jeep_handle)->veh.settle_2f0 = 0;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(view.ground_leg_lift_q16 == 0);
+    CHECK(near(frame.camera.eye[2], 4.0f));
+}
+
+// Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw
+// (90 - heading) takes it negated while pitch and roll take it as is.
+// [orig: `add g_view_rot_yaw, edx` @0x4380D9 in the mode-0 IIR block;
+//  `add g_view_rot_pitch` @0x4380D0 / `add g_view_rot_roll` @0x4380C7]
+void test_shake_turns_the_bam_heading() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity *body = lw.ai.for_handle(lw.local);
+    body->inf.active = true;
+    body->heading = 0x40000000;
+    lw.w.weather.core.oscillator.prng = 0x6B8B4567u;
+    LocalPlayerWeapon w;
+    PlayerViewState v;
+    v.shake.counter = 40;
+    v.shake.yaw = 0x01234567;
+    v.shake.pitch = -0x00ABCDEF;
+    v.shake.roll = 0x00765432;
+    PlayerViewState quiet = v;
+    quiet.shake.counter = 0;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame base, shaken;
+    local_player_view_frame(&lw.w, w, quiet, t, base);
+    CameraShakeState step = v.shake;
+    int32_t d_yaw = 0, d_pitch = 0, d_roll = 0;
+    camera_shake_sample(step, lw.w.weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
+    CHECK(d_yaw != 0 && d_pitch != 0 && d_roll != 0);
+    local_player_view_frame(&lw.w, w, v, t, shaken);
+    const double deg = 360.0 / 4294967296.0;
+    CHECK(std::fabs(shaken.camera.yaw_deg - (base.camera.yaw_deg - float(d_yaw * deg))) < 1e-4f);
+    CHECK(std::fabs(shaken.camera.pitch_deg - (base.camera.pitch_deg + float(d_pitch * deg))) < 1e-4f);
+    CHECK(std::fabs(shaken.camera.roll_deg - (base.camera.roll_deg + float(d_roll * deg))) < 1e-4f);
+    CHECK(v.shake.yaw == step.yaw && v.shake.pitch == step.pitch && v.shake.roll == step.roll);
+}
+
+// The mounted chase look-ahead: its target is the carrier's own matrix x
+// (6, 0, 0), so a hull pitched up lifts it, and EVERY compose steps it — the
+// rendered frame's as well as the quantum's — while an observed frame leaves
+// it where it was. [orig: parentMatrix(+0xB4) through
+//  Math_TransformPointFixedPoint22 @0x412E90 via @0x438855; the ease
+//  @0x43885A..0x4388AF inside Camera_ComputeThirdPersonView @0x437D10,
+//  called per quantum @0x526781 and per rendered frame @0x5CA34D]
+void test_chase_lookahead_follows_the_hull_on_every_compose() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity *body = lw.ai.for_handle(lw.local);
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->heading = 0x40000000;
+    Entity &rider = lw.entity();
+    rider.has_item_def = true;
+    rider.item_type = 3;
+    Entity hull;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.position = {10.0f, 20.0f, 2.0f};
+    hull.bound_radius = 5.0f;
+    hull.veh.yaw_seeded = true;
+    hull.veh.yaw_bam = 0x40000000; // mission yaw 0
+    hull.veh.air_pitch_bam = bam_from_degrees_wrapped(10.0);
+    const EntityHandle hull_handle = lw.w.registry.spawn(0, hull);
+    rider.mounted = true;
+    rider.mount_target = hull_handle;
+    rider.mount_type = SeatType::Driver;
+    PlayerViewState v;
+    v.third_person_selected = true;
+    LocalPlayerViewTracker t;
+    local_player_view_tick(&lw.w, v, t, {});
+    CHECK(v.camera_mode == 1 && v.mount.control_seat);
+    const int32_t zero[3] = {0, 0, 0};
+    const int32_t ahead[3] = {6 << 16, 0, 0};
+    int32_t target[3];
+    collision_matrix_from_euler(0x40000000, bam_from_degrees_wrapped(10.0), 0, zero)
+            .rotate_point(ahead, target);
+    CHECK(target[2] > 0); // the pitched hull lifts the point
+    CHECK(v.mount.lookahead_target_q16[0] == target[0] &&
+          v.mount.lookahead_target_q16[1] == target[1] &&
+          v.mount.lookahead_target_q16[2] == target[2]);
+    int32_t expected[3] = {v.lookahead_q16[0], v.lookahead_q16[1], v.lookahead_q16[2]};
+    LocalPlayerWeapon w;
+    LocalPlayerViewFrame frame;
+    for (int f = 0; f < 3; ++f) {
+        local_player_view_frame(&lw.w, w, v, t, frame);
+        for (int i = 0; i < 3; ++i) expected[i] += (target[i] - expected[i] + 16) >> 5;
+        CHECK(v.lookahead_q16[0] == expected[0] && v.lookahead_q16[1] == expected[1] &&
+              v.lookahead_q16[2] == expected[2]);
+        local_player_view_observe(&lw.w, w, v, t, frame);
+        CHECK(v.lookahead_q16[0] == expected[0] && v.lookahead_q16[1] == expected[1] &&
+              v.lookahead_q16[2] == expected[2]);
+    }
+    CHECK(v.lookahead_q16[2] > 0);
+}
+
 // --- the scope toggle's refusal ladder ------------------------------------
 
 void test_scope_toggle_refuses_inactive_weapon() {
@@ -353,7 +524,7 @@ void test_binoculars_refused_while_power_throw_charges_and_rng_untouched() {
     const uint32_t before = lw.w.prng16_state;
     CHECK(!local_player_binoculars_toggle(lw.w, player.weapon, player.view, player.view_tracker));
     CHECK(!player.view.binoculars_requested);
-    player.view_frame();
+    player.present_view_frame();
     CHECK(lw.w.prng16_state == before);
     CHECK(!player.view_tracker.binocular_sway_latched);
 }
@@ -379,14 +550,19 @@ void test_binocular_sway_seeds_once_per_activation() {
     CHECK(lw.w.prng16_state == expected);
     CHECK(!toggle());
     tick();
-    player.view_frame();
+    player.present_view_frame();
     CHECK(lw.w.prng16_state == expected);
     CHECK(!t.binocular_sway_latched);
 
     CHECK(toggle());
     tick();
     CHECK(lw.w.prng16_state == expected);
+    // Observing the view is not a rendered frame: it neither draws the seed
+    // nor sets the latch.
     player.view_frame();
+    CHECK(lw.w.prng16_state == expected);
+    CHECK(!t.binocular_sway_latched);
+    player.present_view_frame();
     opennova::io::rotating_prng_next16(expected);
     CHECK(lw.w.prng16_state == expected);
     CHECK(t.binocular_sway_latched);
@@ -398,7 +574,7 @@ void test_binocular_sway_seeds_once_per_activation() {
     tick();
     CHECK(toggle());
     tick();
-    player.view_frame();
+    player.present_view_frame();
     CHECK(lw.w.prng16_state == expected);
     CHECK(t.binocular_yaw_offset_deg == yaw && t.binocular_pitch_offset_deg == pitch);
 
@@ -407,12 +583,12 @@ void test_binocular_sway_seeds_once_per_activation() {
     v.move_held = true;
     tick();
     CHECK(!v.binoculars_view_active);
-    player.view_frame();
+    player.present_view_frame();
     CHECK(!t.binocular_sway_latched);
     v.move_held = false;
     tick();
     CHECK(lw.w.prng16_state == expected);
-    player.view_frame();
+    player.present_view_frame();
     opennova::io::rotating_prng_next16(expected);
     CHECK(lw.w.prng16_state == expected);
 }
@@ -1707,26 +1883,26 @@ void test_rendered_scope_applies_elevation_and_parallax() {
         ScopedAimFixture f;
         f.body().inf.stance = stance;
         f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
-        auto base = f.player.view_frame();
+        auto base = f.player.present_view_frame();
         CHECK(base.camera_pose_valid);
         f.player.weapon.slot.zero_pitch = 0x01000000; // 1.40625 degrees
         f.player.weapon.slot.zero_yaw = 0x00800000; // 0.703125 degrees
-        auto zeroed = f.player.view_frame();
+        auto zeroed = f.player.present_view_frame();
         CHECK(std::abs(zeroed.camera.pitch_deg - base.camera.pitch_deg + 1.40625f) < 0.00001f);
         // Mission yaw is 90 - retail BAM yaw, hence the inverted sign.
         CHECK(std::abs(zeroed.camera.yaw_deg - base.camera.yaw_deg + 0.703125f) < 0.00001f);
         f.player.weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
-        auto sighted = f.player.view_frame();
+        auto sighted = f.player.present_view_frame();
         CHECK(std::abs(sighted.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);
         f.player.weapon.def.scope_zero.max_steps = 10;
-        sighted = f.player.view_frame();
+        sighted = f.player.present_view_frame();
         CHECK(std::abs(sighted.camera.pitch_deg - zeroed.camera.pitch_deg) < 0.00001f);
         f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
         CHECK(f.body().pitch == 0 && f.body().heading == 0);
         CHECK(f.player.input.look_pitch == 0 && f.player.input.look_heading == 0);
         f.player.view.scope_engaged = false;
         f.player.view.scope_settled = false;
-        auto hip = f.player.view_frame();
+        auto hip = f.player.present_view_frame();
         CHECK(std::abs(hip.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);
         CHECK(std::abs(hip.camera.yaw_deg - base.camera.yaw_deg) < 0.00001f);
     }
@@ -1864,7 +2040,7 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
     // The next pre-tick input copy must not erase the body's aim additions.
     f.player.apply_player_input_pre_tick();
     CHECK(f.body().inf.target_heading == -408 && f.body().inf.look_pitch == -396);
-    LocalPlayerViewFrame frame = f.player.view_frame();
+    LocalPlayerViewFrame frame = f.player.present_view_frame();
     CHECK(frame.camera_pose_valid);
     CHECK(std::abs(frame.camera.yaw_deg - (90.0 + 408.0 * 360.0 / 4294967296.0)) < 0.00001);
     CHECK(std::abs(frame.camera.pitch_deg - (-396.0 * 360.0 / 4294967296.0)) < 0.000001);
@@ -2074,6 +2250,9 @@ int main() {
     test_scope_zero_bake_max_range();
     test_mounted_first_person_camera_belongs_to_the_carrier();
     test_seat_bone_pose_rider_legs();
+    test_unadmitted_seat_takes_the_ground_or_person_leg();
+    test_shake_turns_the_bam_heading();
+    test_chase_lookahead_follows_the_hull_on_every_compose();
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
     test_inset_scope_refused_under_nvg();
