@@ -1378,6 +1378,18 @@ Accepted/divergent (each a documented decision, not a defect):
   `hudcolor` row reachable by rebinding, which retail's shadowing leaves dormant on the
   stock keymap (ledger register; the palette port itself is hud-re.md's
   `hud_color_index` scheme).
+- **D-CTRL-5 (`cycleweaponP/N` signs) - minted-and-closed 2026-09-22 (FIXED); pointer row,
+  owned by the [tank record](../world/tank-parity-re.md#divergence-catalog):** action 212
+  (`cycleweaponP`, catalog "Cycle Weapon Prev", default wheel-up 0x400 / `[`) passes +1 to
+  weapon cycling or +2 to a variable optic, and 214 (`cycleweaponN`, wheel-down 0x800 /
+  `]`) -1 / -2 [orig: Input_HandleActionBinding_0 @0x4E0420, calls @0x4E1341 /
+  @0x4E13D7 / @0x4E1396 / @0x4E13A4]; the port had the signs reversed, which also reversed
+  infantry weapon cycling. The same PR ported the WM_MOUSEWHEEL notch remainder: each
+  message's signed delta joins a persistent remainder, and every whole ±120 dispatches one
+  0x100 / 0x200 event [orig: Input_DispatchMouseEvent @0x761470, delta @0x7614AB /
+  @0x7614AE, calls @0x76158F / @0x7615C0; cleared only by Input_ResetMouseState @0x761260
+  at process start], as `controls::WheelRemainder` fed `lround(factor * 120)` per Godot
+  wheel event (`player_actions`, GUT `local_player_presenter_test.gd`).
 
 - **D-MNU-1 (`%VAR%` mechanism; PERMANENT 2026-08-29, ADR 0022 register):** per-field build-time expansion vs whole-buffer
   pre-parse - the runtime result matches for stylesheet vars; shell-var-in-text is a

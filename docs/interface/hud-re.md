@@ -272,6 +272,16 @@ out_y = (design_y * screen_h + 384) / 768
 before drawing. The inverse (`[orig: Viewport_ScreenToVirtual @0x5d2c70]`,
 ×1024/width) maps screen points (e.g. the crosshair's screen center) back into
 the design space. (Matches the 1024×768 design space the oscarmike reference used.)
+It is integer arithmetic, signed and truncating toward zero:
+x = (x · 1024 + w/2) / w (`shl` `@0x5D2C7E`, `sar` `@0x5D2C83`, `idiv`
+`@0x5D2C88`), y = (y · 768 + h/2) / h (`@0x5D2C95..0x5D2CA2`), ahead of every
+projected cue (`@0x592852`, the bracket anchor `@0x592D32`, the commander
+`@0x59E77E`). The commander clamp is integer too: dx/dy `@0x59E78B..0x59E791`,
+the distance `ftol` `@0x59E7C9`, `334 · d / dist` by `idiv`
+`@0x59E7D6..0x59E80F`, and the connecting line ends at the integer screen
+centre (w/2, h/2) `@0x59E855..0x59E86F`, not the rounded design (512, 384).
+Ported 2026-09-22 (`hud_math::screen_to_design_x/_y`; `hud_combat`
+`integer_screen_mapping`).
 
 **Port home (S15, 2026-08-07):** the whole HUD view-helper MATH cluster —
 this scaling, the ALPHAFADE decay (quirk included), the stance Q16
@@ -1208,9 +1218,19 @@ and health-band rules below are unchanged.
 Witnessed in #536/#537/#540/#541, re-witnessed in the post-merge review, and
 completed in the wire-up round (the list builder, the gate, the label digits):
 
+- **Caller gate** (2026-09-22, PR #671 fix round): `HUD_RenderOverlays
+  @0x5A7BB0` draws no panel without a root entity (`@0x5A7CAE`) and calls the
+  drawer only on the slot-3 arm with the weapon group visible (`@0x5A7CE4`),
+  the slot-1 arm (`@0x5A7CFF`) and the slot-2/5 arm (`@0x5A7D23`); every other
+  slot falls to `@0x5A7D5F` (`cmp eax,1; jnz` `@0x5A7CF5..0x5A7CF8`). The port's
+  extra `mount_slot == 0` arm is removed. The gate reuses
+  `hud_stance_group_visible`, whose slot-0-with-WPNGRP arm is retail's no-root
+  stance case (`@0x5A7D42..0x5A7D55`); a shown panel with slot 0 cannot occur in
+  play (a mounted rider's seat type is 1..5), and only the synthetic
+  `hud_overlay_test.gd` vehicle-panel fixture relies on it.
 - **Gate** `@0x5a5038`: the panel draws iff the root vehicle's def has the
   VEHICLE_HUD `interface` texture loaded with nonzero size (`itemDef+0x960/
-  +0x964/+0x968`). There is NO seat-class gate: the root is `rootEntity
+  +0x964/+0x968`). There is NO seat-class gate inside the drawer: the root is `rootEntity
   @0x27235bc`, whose writer is UNWITNESSABLE (all five xrefs are reads — the
   HUD entity-info block is filled from outside the image), and the list
   builder re-roots a mount on an attached gun child to its parent vehicle
@@ -1235,10 +1255,25 @@ completed in the wire-up round (the list builder, the gate, the label digits):
   and the own-seat X): a passenger seat = its 1-based list
   position mod 10 `@0x5a5283`, an emplacement = i + 2 `@0x5a5602`, the driver =
   1 `@0x5a57ee`; the own seat draws the literal "X" (`0x7d9f4c`) `@0x5a586b`.
+  The emplacement digit redraws (2026-09-22): for each gun slot i whose
+  `def[0x214 + i]` matches the child's bone, the WHOLE slot list is walked with a
+  type-9 counter starting at -1 (`@0x5A5593`), incremented on type-9 entries
+  (`@0x5A55A0..0x5A55A7`), and the digit is drawn at EVERY list position whose
+  counter equals i (`cmp` `@0x5A55AC`, walk end `@0x5A5670`); the label repeats
+  once per following non-emplacement entry and never draws when the list holds
+  fewer than i + 1 emplacements (`emplace_label_draws`, `vehicle_panel_feed`).
 - **Bands**: riders and the driver `(health << 16) / max` (max → 1) with the
   unsigned/signed asymmetry below; emplacement occupants through
   `HUD_ClassifyHealthBand(min(ratio, 0x10000))` `@0x5a54e3` (2 Good, 1
   Middle); the silhouette takes the HULL's band `@0x5a50d1`.
+- **Silhouette window** (2026-09-22): the panel's
+  `draw_textured_quad_with_border @0x590C40` call (`@0x5A50D1`) passes the
+  silhouette's authored width/height as both the texture and the quad extent;
+  u0 = 0.05 / tex_w (`flt_7C68E8` = 0.05f `@0x590D36`, divides
+  `@0x590D3C..0x590D40`), u1 = 1 − u0 + 1 / (right − left) in scaled screen
+  pixels (`@0x590D5E..0x590D77`), v the same (`@0x590D7B..0x590D8C`), with
+  (u0, v0) at the top-left vertex and (u1, v1) at the bottom-right
+  (`hud_math::bordered_quad_uv`; the helper's other callers still draw 0..1).
 
 - **Data**: the `hudpos.def` `VEHICLE_HUD … VEHICLE_END` blocks (one per item
   `sid`; 50 shipped, 28 in the tracked fixture) — see the token map below.
@@ -1389,6 +1424,17 @@ master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
   `STROVER_FARP_WAIT` "Reload available in %d seconds" (`dword_A85B70`) /
   `STROVER_FARP_RELOADING` "Reloading" (`!dword_A85B74`)
   `[orig: @0x5bdff8..0x5be10e]`.
+- **Text (2026-09-22, PR #671 fix round)**: `service_prompt_text`
+  (`engine/runtime/hud/hud_game_text.h`) builds the line with CRT sprintf
+  semantics and each call's own arguments: the key name for the armory and bay
+  lines (`@0x5BDF45`, `@0x5BDFC9`), the seconds for the FARP wait (`@0x5BE09C`),
+  none for FARP reloading (`@0x5BE0E9`). The armory and FARP templates come
+  through `GameText_GetString`, whose miss is "" (`@0x51EC08`; calls
+  `@0x5BDF37`, `@0x5BE08E`, `@0x5BE0DE`), so the invented English fallbacks the
+  Godot presenter carried are gone; only the vehicle bay keeps its compiled-in
+  fallback `"!Press '%s' to activate vehicle bay menu"`
+  (`GameText_GetStringWithFallback` call `@0x5BDFBB`, string pushed
+  `@0x5BDFAC`). Ctest `hud_game_text`.
 
 Every line is one call of the same shape: design anchor (0x200, 0x118) =
 (512, 280), the **large** overlay slot `g_hudLabelFontLarge @0xB4C3A0`
@@ -2301,8 +2347,9 @@ behind it.
 ### Scope camera zero and readouts (2026-09-16, D-HUD-27)
 
 **MATCHING for the ordinary Sighted/Scoped view and textual readouts.**
-`LocalPlayer::view_frame` consumes the active slot's elevation/parallax in
-`Render_ProcessMainSceneFrame`'s modern camera branches. Sighted takes
+`LocalPlayer::present_view_frame` (the rendered frame) applies the active slot's
+elevation/parallax in `Render_ProcessMainSceneFrame`'s modern camera branches,
+and the `LocalPlayer::view_frame` observation mirrors it. Sighted takes
 precedence and applies the offsets only when `WeaponDef+0x84` (maximum zero
 steps) is nonzero; Scoped applies them whenever the slot exists. Both subtract
 slot+4 from camera pitch and add slot+8 to BAM yaw, after camera composition;
@@ -2332,19 +2379,35 @@ HUD_RenderAllOverlays @ 0x5a8070, call @ 0x5a8526]`
   weapon can have magnification and an authored scope card while omitting
   this label, exactly as retail does. `[orig: @ 0x59e97c..0x59e9f6]`
 
-The 2026-09-22 formatting follow-up (D-HUD-30) rechecked the two integer
-`sprintf` calls in the retail binary. Installed `Overlays/STROVER_DIST` uses
+The 2026-09-22 formatting follow-up (D-HUD-30) rechecked the HUD's CRT
+`sprintf @ 0x76A9E4` call sites. Installed `Overlays/STROVER_DIST` uses
 `Distance: %ldm`; the reimplementation recognized only the unmodified `%d`,
-`%i` and `%u` forms, leaving the long conversion visible. Scope and mortar
-impact text now share `sight_integer_text`, preserving Win32 32-bit signed /
-unsigned integer behavior for the optional `l` modifier, escaped percent,
-and literal unsupported conversions. The over-1km label remains literal.
+`%i` and `%u` forms, leaving the long conversion visible. The PR #671 review
+fix round replaced the first formatter with `hud_sprintf`
+(`engine/runtime/hud/hud_game_text.h`), which runs each template with its own
+call's argument list, as CRT sprintf does:
+
+- One int, the whole integer specification (flags, width, precision; `l`/`h`/
+  `I32` size prefixes reduced to 32/16 bits; `%%`): the scope range at
+  `@ 0x59E530` (reached by the 1 m floor push `@ 0x59E4E7` through the `jmp`
+  `@ 0x59E504`, and by the signed divide `@ 0x59E506..0x59E511`),
+  `hud_scope_zero` `@ 0x59E8F6`, `hud_scope_mag` `@ 0x59E9BD` (the raw slot
+  word `@ 0x59E99E`), the mortar impact `@ 0x5A8972` and the FARP wait
+  `@ 0x5BE09C`.
+- No argument: `STROVER_DIST1KM` `@ 0x59E4D5`, `hud_scope_zero_auto` /
+  `hud_scope_zero_none` `@ 0x59E938` and FARP reloading `@ 0x5BE0E9`; `%%`
+  collapses, and a conversion with no argument prints literally (retail would
+  read an unrelated stack word; no installed template has one).
+- The key name: the armory and vehicle-bay prompts `@ 0x5BDF45` / `@ 0x5BDFC9`.
+
+A missing mortar template is `GameText_GetString`'s miss, "" (`@ 0x51EC08`),
+not the invented `"%d m"` default the port carried.
 `hud_frame_compiler::test_optical_distance_long_format` checks the emitted
-characters for both callers, including the 1000m boundary; four assertions
-fail before the fix and pass afterward. All four focused HUD native suites
-and 28 Godot HUD/installed-asset tests (421 assertions) pass. This was a
+characters for both callers, including the 1000m boundary and the no-argument
+collapse; `hud_game_text` covers the prompt lines. The earlier citation of
+`@ 0x59E504` as a call was wrong: it is the floor arm's `jmp`. This was a
 read-only IDA check; no IDB changes were made.
-[orig: HUD_DrawScopeOverlayDetails @ 0x59E420, calls @ 0x59E504 / @ 0x59E530;
+[orig: HUD_DrawScopeOverlayDetails @ 0x59E420, sprintf @ 0x59E530;
 HUD_RenderAllOverlays @ 0x5A8070, text lookup @ 0x5A8961 and sprintf @ 0x5A8972]
 
 Evidence: ctests `local_player_view` (standing/prone camera offsets, Sighted
@@ -2412,10 +2475,11 @@ were made for this review.
 | D-HUD-23 | The kill/objective/medic message feed: S2C 0x1E folds to typed client events (`replication::ClientGameEvent`), each line is the game's own "Canned Msg" template with the witnessed substitution, and the line posts to the SYSTEM ring (see "The message feeds") with the per-case color table; the verbose gate is held at the verbose-on session default | `[orig: Chat_FormatMessage @0x422C60 -> String_ReplaceAllCaseInsensitive @0x422970]` (sequential case-insensitive `$A` then `$B`), the `STRCND48` bonus re-compose when aux is the local player `[orig: @0x422CA2]`, `STRCLI01` "Unknown" for a null actor `[orig: @0x422DDA]`; the `@0x426270` color switch (own white `-1` / other grey `0xFFAFAFAF`; friendly-fire 7/8/9 and 16-18/27-31/35-37 white; bonus 32/33/34 yellow `-256`; medic trio 38/39/45 + SSKB 46/47 `0xFF008CEE`; PSP/LFP blue `0xFF00AFFF` / red `0xFFFF0000`; 40 red, 48 orange `-32768`; camp 59/60 by team byte with the `WPNames[level+1]` `%s` compose `[orig: @0x4272EC/@0x427327]`); the suppression set (50-53 format-and-return `@0x42702E-@0x42716D`; 58 tip-only `@0x427202`); the verbose gate on uninvolved kill lines `[orig: g_MpVerbose2 @0x24D2154, 13 tests @0x426472..@0x4267C6]` | **OPEN (partial).** The 0x1E fold, the SYSTEM ring and the witnessed line/color policy are ported. Runtime team/gametype keys (19/20/21/46/47), signed SSKB counts, and flag-event immediate/delayed sounds are ported (2026-09-11; details below). Residuals: join/leave lines + the host-exclusion filter have their roster (D-HUD-24 folds S2C 0x46 into `ClientState`) and only need wiring; player-slot names with `<ch>clan<co>` tags `[orig: @0x422E1D]` (roster names serve today); the verbose keybind toggle `[orig: @0x49B78F]`; the other PSP/LFP/camp team sounds, tips and effect spawns beside the lines. |
 | D-HUD-24 | The Tab scoreboard. DATA lane: S2C 0x16 folds to `ClientScoreboard` (flags, rows in wire order, the team table, the in-game/spectator trailer) and S2C 0x46 to a connection-slot roster, both in `ClientState`; joiners receive all three lanes on the reducer stream, the host's own view binds via the loopback self-0x46 (D-NET-114 form). PANEL (drawn 2026-08-19): `HudFrameCompiler::element_scoreboard` + `hud::hud_scoreboard` carry the witnessed layout in raw design-space constants through the shared scaler, every string on `g_hudLabelFontBold`; a press-TOGGLE on the playerlist action; the stdbox geometry (pieces, fill insets, the title notch, the screen-anchored wrap-tiled fill) pinned by ctest `hud_frame_compiler`; the monogram watermark deliberately not drawn (pure additive over a measured all-black sheet) | data: `[orig: NapiNPClientMsg_PlayerList @0x42FAE0; NapiNPClientMsg_PlayerSync @0x431370; Server_BuildAndBroadcastScoreboard @0x50D960 every 311 ticks]` — every well-formed 0x16 applies unconditionally (an empty update EMPTIES the board `@0x42fb46`), roster-unknown rows drop `@0x42fc05`, name/clan join at apply time `@0x42fd4c..0x42fd8f`, a 0x46 removal deactivates + wipes the slot `@0x434730/@0x4346c0`; the second row u16 is a STATUS BITFIELD not a ping `@0x42fdb4`, the fourth is accumulated points/EXP `@0x52C8E0`, the team-row bytes are kothHold/ctfFlag `@0x50dc62/@0x50dd30`. panel: `HUD_DrawKillList @0x423A30` + the header block `@0x423060` — stdbox (20,78)-(1004,550) `HUD_DrawLabelBox @0x423a90`, header rungs 105..185 stepping 0x14 `@0x42315c..0x42322a`, rows from base + 18 `@0x423d30` while y < 490 `@0x424168`, non-team modes (types 0/1/8) alternate x190/x690 with a SIGNED score, team modes column by team and draw only live-entity rows `@0x423d1b`, spectators at x440 with no score/rank `@0x423e04`, one GLOBAL rank counter `@0x42424f`, the neticon2.tga band `NetIcon_DrawConnectionQualityBand @0x4c2ee0`, the status-glyph append order `@0x423f29-0x4240e5`; the toggle `Scoreboard_TogglePlayerList @0x4244c0` from `@0x49bb68`, the drawer gate `HUD_DrawKillListIfVisible @0x424300`; the stdbox scale `s = surface_w / 1600` `@0x51f02e`, the fill cell extraction `@0x56adbd-0x56ae44` -> `stdbox_draw_fill_wrap_tiled @0x56b5d0` | **OPEN (partial).** One capability gap, not a missing witness: the eight border pieces bind border x boxtile as ONE combined material with a screen-anchored second stage `[orig: CGfxTexture_Create @0x56af3c, applied @0x56b902; draw_textured_quad_0 @0x56b3e0]`, so retail's pieces read camo where ours read plain stencil (needs a second texture stage the HUD quad stream does not carry). PORTED 2026-08-29: the C2S 0x22 unknown-row retry (reducer-queued slot ids, one reliable `{slot, 0x1CF7}` per dropped row framed by the joiner runtime `@0x42fc05..0x42fc3a`) and the 4-team page (`g_num_teams_config > 2 && dword_A87060 & 0x80` flips the team board to teams 3/4 with 0xFFFFFF00/0xFFFF027F every 128 HUD frames `@0x423cd0-0x423cf1`; the joiner's side count is the 0x16 team-table byte `@0x42fdda`). Unported tails: the per-mode team-score header block `@0x4232bf-0x423a12`; the per-recipient SU status gate `@0x423ef8`; host-side sessionvar strings; the host-side 0x16 serializer's `CPlayerStats` sources (`encode_player_list` emits zero status/score words, so an opennova-HOSTED board shows zero scores; retail-server joins are unaffected); the slot+0x20 label `@0x434870`; the same-team class suffix `@0x423d8a`; the KOTH countdown row `@0x423e7d`; the PgUp/PgDn page fold `@0x423c1c`. Full row text: the ledger's D-HUD-24 entry. |
 | D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`engine/runtime/inmatch/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_round_time_remaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `draw_endround_stats_overlay @0x5b7cd0`; `populate_stat_results_list @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_showEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
-| D-HUD-26 | **FIXED 2026-09-19.** Scoped + FLAGS2 Inset uses a separate scene viewport, aperture/ring/cross, friendly label, slot offsets and third shake sample | Definition `+0x0C & 0x200` `[orig: @0x5CA2B1..0x5CA2B4]`, scene `@0x5C9740..0x5CA0E1` | This is not the mortar view. Native geometry and live viewport lifecycle/declutter tests cover the port; mortar impact prediction/designator/map callbacks are separate. |
+| D-HUD-26 | **FIXED 2026-09-19.** Scoped + FLAGS2 Inset uses a separate scene viewport, aperture/ring/cross, friendly label, slot offsets and a full second compose (its own shake step and, mounted, its own look-ahead step; the Inset offsets a copy of the composed view `@0x5C9846..0x5C9903`, corrected 2026-09-22 from "a third shake sample") | Definition `+0x0C & 0x200` `[orig: @0x5CA2B1..0x5CA2B4]`, scene `@0x5C9740..0x5CA0E1` | This is not the mortar view. Native geometry and live viewport lifecycle/declutter tests cover the port; mortar impact prediction/designator/map callbacks are separate. |
 | D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The flag-8 vehicle target reticle and D-HUD-26 Inset scene were added in the 2026-09-19 follow-up. |
 | D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CBE..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8440` (seat switch `@0x4B863D..0x4B8767`, EmplacedStance override `@0x4B8539..0x4B8549`; the carrier-is-a-vehicle leg `@0x4B84D1..0x4B8507` is DEAD because `HUD_RenderAllOverlays` zeroes the struct `@0x5A80A5..0x5A80B1` first, so a gunner always reads Emplaced); Inset `@0x4DCCB0` (called `@0x592AE5`); centred cues slide on-screen and recolour `draw_textured_quad_centered @0x5909E0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
-| D-HUD-30 | **FIXED 2026-09-22.** Scope and mortar Distance labels left the installed `%ld` conversion literal | Both callers pass the localized `STROVER_DIST` and an integer to `sprintf`: scope @ 0x59E504 / @ 0x59E530; impact @ 0x5A8972 | Shared safe optical integer formatting handles Win32 long conversions; actual glyph-output regressions cover both callers, percent escapes and the 1000m boundary. D-HUD-29 remains owned by the [tank record](../world/tank-parity-re.md). |
+| D-HUD-29 | Pointer row: owned by the [tank record](../world/tank-parity-re.md#divergence-catalog). Live HUD observation recomposed the camera and advanced shake/drift state; the HUD consumes the displayed snapshot, and every non-rendering reader observes the last composed view. | `Camera_ComputeThirdPersonView @0x437D10` callers `@0x526781` / `@0x5CA34D` / `@0x5C9841` | Minted-and-closed 2026-09-22 (FIXED) in PR #671; GUT `game_hud_presenter_declutter_test.gd` (`test_hud_uses_the_presented_camera_frame`). |
+| D-HUD-30 | **Minted-and-closed 2026-09-22 (FIXED).** Scope and mortar Distance labels left the installed `%ld` conversion literal | Both callers pass the localized `STROVER_DIST` and one integer to `sprintf`: scope `@ 0x59E530` (the floor arm's `jmp` `@ 0x59E504` joins it); impact `@ 0x5A8972`; the no-argument labels `@ 0x59E4D5` / `@ 0x59E938` | `hud_sprintf` runs each HUD template with CRT sprintf semantics and its call's own argument list (the whole integer specification, `l`/`h`/`I32` prefixes reduced to 32/16 bits, `%%`); glyph-output regressions cover both callers, the no-argument collapse and the 1000m boundary. |
 
 ## Follow-ups (not yet witnessed / deferred)
 
