@@ -300,8 +300,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// WRECK pose (drive-authority witness 2026-07-04 — a LIVE driven vehicle stays
 			// full-form; the old "mounted form" reading was the D-NET-63-era misnomer). Bit
 			// 0x02's wire transitions drive Entity_KillBySlotId / Entity_RespawnVehicle on the
-			// client [orig: @0x460a25/@0x460918] — our route_round_deaths does not yet kill
-			// vehicles, so live emission always takes the full form (correct for ridden ones).
+			// client [orig: @0x460a25/@0x460918]; the vehicle's own death dispatch publishes
+			// Flags 6 (entity_update_death_transforms), so only a wreck takes the short form.
 			//
 			// op1 carrier: the vehicle's groundEntity (entity+0x28) alone — the deck or
 			// structure it rests on, which the ground raycast maintains every 8th tick
@@ -338,6 +338,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.vehicle.euler_z = yaw_bam16; // world heading i16 [orig: @0x460cec -> @0x460d0a]
 			}
 			rec.vehicle.flags_byte = e.state_flags;
+			// The wreck's dead-pose tail: the world Roll then Pitch dwords, each as its
+			// rounded high half; the parented form transforms only eulerZ.
+			// [orig: Entity_SerializeVehicleState `test byte [edi+24h],4` @0x460D28;
+			// Roll `add ecx,8000h; sar ecx,10h` @0x460D31..0x460D3A; Pitch @0x460D52
+			// -> @0x460DF5..0x460DFE]
+			rec.vehicle.euler_y = static_cast<int16_t>(
+					(static_cast<uint32_t>(e.roll_bam) + 0x00008000u) >> 16);
+			rec.vehicle.euler_x = static_cast<int16_t>(
+					(static_cast<uint32_t>(e.pitch_bam) + 0x00008000u) >> 16);
 			// entity+286 = the vehicle HEALTH word, stored back verbatim by the read
 			// [orig: write @0x460d9b, read store @0x460aff]. Sending 0 here zeroed every
 			// vehicle's health each frame — live-witnessed as all map vehicles dying

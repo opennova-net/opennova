@@ -147,18 +147,22 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	// The encoder takes the rounded high byte and the present inverts (90 - bam/deg) back to
 	// mission yaw, so listen-server NPCs now face the same way as the AI-pool present and the
 	// local-player avatar (which bypasses this bridge). [orig: Entity_SpawnFromBMSRecord
-	// @0x40e9f0; resolves open question Q1]
-	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
-	s.euler_z = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
+	// @0x40e9f0; resolves open question Q1]. A seeded mover keeps the dword itself, so
+	// its whole-degree mirror never reaches the wire: the vehicle compact rounds the
+	// high half of the full BAM [orig: Entity_SerializeVehicleState @0x460CEC..0x460D0A].
+	s.euler_z = carrier_heading_bam(e);
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
 	// items.def-resolved healthMax when the item-traits sweep stamped it; else the struct's
 	// class-8 player default (150) stands (see GameEntitySnapshot::health_max).
 	if (e.health_max > 0) s.health_max = e.health_max;
 	s.player_class = player_class_for_wire(e); // field-17 low nibble (entity+0x294)
-	// Engine pitch BAM (entity+0x14): a pure degree widen — pitch has no (90-x) frame
-	// inversion (that is yaw-only, D-NET-86). Entity::pitch is mission degrees.
-	s.pitch_bam = static_cast<int32_t>(static_cast<int64_t>(e.pitch) * kBamPerDegree);
+	// Engine pitch/roll BAM (entity+0x14/+0x18): a pure degree widen — neither has the
+	// (90-x) frame inversion (that is yaw-only, D-NET-86); a seeded mover's own BAM wins
+	// like the heading. The wreck's dead-pose compact carries both
+	// [orig: Entity_SerializeVehicleState @0x460D31 / @0x460D52].
+	s.pitch_bam = carrier_pitch_bam(e);
+	s.roll_bam = carrier_roll_bam(e);
 	// The +0x12C movement-INPUT byte the owning client uplinked (apply_player_intent ingests
 	// it) — NOT the visual anim slot: remote players are motor-driven from replicated input
 	// [orig: case-2 apply @0x4c11ec; witness 2026-07-02 corrected the anim_slot misnomer].
@@ -446,9 +450,11 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	rec.pos_y = world::to_fixed(e.position.y);
 	rec.pos_z = world::to_fixed(e.position.z);
 	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
-	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation).
-	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_heading_bam(e.yaw)) >> 16);
-	rec.pitch_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_axis_bam(e.pitch)) >> 16);
+	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation). The
+	// writer truncates the live dwords, so a seeded mover sends its own BAM
+	// [orig: serialize_object_to_buffer movzx word [ebx+12h] @0x505166, [ebx+16h] @0x505179].
+	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_heading_bam(e)) >> 16);
+	rec.pitch_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_pitch_bam(e)) >> 16);
 	rec.ai_state = static_cast<uint8_t>(e.ai_state); // entity+692 low byte, serialized raw
 	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
 	// (see build_pool0_organic_batch; D-NET-146/137).
@@ -475,9 +481,12 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
-		rec.euler_z = engine_heading_bam(e.yaw);
-		rec.euler_x = engine_axis_bam(e.pitch);
-		rec.euler_y = engine_axis_bam(e.roll);
+		// The entity+16/+20/+24 dwords, full width: a seeded mover's own BAM, not its
+		// whole-degree mirror [orig: serialize_entity_pool_to_packet_0 @0x503B37,
+		// @0x503B53, @0x503B6F].
+		rec.euler_z = carrier_heading_bam(e);
+		rec.euler_x = carrier_pitch_bam(e);
+		rec.euler_y = carrier_roll_bam(e);
 		rec.team_byte = e.team;
 		// items.def addeweap children use retail's existing entity+368
 		// relationship in the 0x0D spawn record. Positions remain absolute world

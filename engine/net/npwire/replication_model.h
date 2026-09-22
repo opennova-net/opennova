@@ -94,6 +94,9 @@ struct GameEntitySnapshot {
 	// high byte `(v + 0x800000) >> 24` [orig: @0x4c0c77]. Pure degree->BAM widen (no (90-x)
 	// frame inversion — that is yaw-only).
 	int32_t pitch_bam = 0;
+	// Engine roll (entity+0x18, BAM32). Only the vehicle compact's dead-pose tail carries it,
+	// as its rounded high half [orig: Entity_SerializeVehicleState @0x460D31].
+	int32_t roll_bam = 0;
 	// entity+0x12C low byte — the player compact record's movement-input byte [orig: @0x4c0c9c].
 	uint8_t move_input_byte = 0;
 	// entity+0x2B0 — the equipped-weapon AdmDef index the player record's off-16 anim_def_index
