@@ -582,6 +582,8 @@ Closed 2026-08-12: **D-WPN-30** -> `FIXED` - every ammo.def fixed-point key pars
 
 ### UI — menus/controls, sound, player-info, HUD
 
+Closed 2026-09-22: **D-HUD-30** -> `FIXED` - scope and mortar Distance labels now substitute the installed Win32 `%ld` integer format. Shared formatter and emitted-glyph regressions: [HUD record](interface/hud-re.md#scope-camera-zero-and-readouts-2026-09-16-d-hud-27).
+
 Closed 2026-09-19: **D-HUD-8** -> `FIXED` — the original FVF `0x2C4` proves color is vertex diffuse (+16), with zero specular (+20); the older decompiler-derived premise was wrong. Crosshair corners/midpoints now snap before tapering, with literal UVs (`@0x590F50`, `@0x678962/@0x678A3E`).
 
 Closed 2026-09-19: **D-HUD-26** -> `FIXED` — Scoped + FLAGS2 Inset now renders its own offset/shaken scene viewport, aperture, green ring/cross and friendly label; native geometry and live camera/lifecycle/declutter regressions cover it (`@0x5C9740..0x5CA0E1`, flags load `@0x5CA2B1`). The old mortar/base-FLAGS attribution was wrong. See [weapon/vehicle HUD validation](interface/weapon-vehicle-hud-validation.md).
@@ -1568,4 +1570,4 @@ Closed 2026-09-18: **D-VEH-3** -> `FIXED` - full-precision player steering, anal
 Closed 2026-09-18: **D-INF-25** / **D-AI-15** -> `FIXED` - unseated local/authority bodies follow the current carrier pose after vehicle motors; authored boarding and stop commands bypass route lookup and retain their SSN/node operand. [World record section 35](world/world-wac-ai-re.md#35-unseated-helicopter-riders-and-reserved-route-orders-2026-09-18); `infantry_terrain`, `event_runtime_bms`, and the 50-second real-data `parachute_09tr` takeoff regression.
 
 
-Closed 2026-09-22: **D-CTRL-5**, **D-VEH-4**, **D-VEH-5**, **D-HUD-29** -> `FIXED` ? default/remapped zoom signs, tank merged support and airborne fit, precise camera basis, and HUD consumption of the displayed camera snapshot. Owning catalog and evidence: [tank-parity-re.md](world/tank-parity-re.md). D-SND-17 is narrowed to the shared sound-ready gate after the tank pivot cue/latch/loop implementation; retail LAN and device-only course acceptance remain unverified.
+Closed 2026-09-22: **D-CTRL-5**, **D-VEH-4**, **D-VEH-5**, **D-HUD-29** -> `FIXED` - default/remapped zoom signs, tank merged support and airborne fit, precise camera basis, and HUD consumption of the displayed camera snapshot. Owning catalog and evidence: [tank-parity-re.md](world/tank-parity-re.md). D-SND-17 is narrowed to the shared sound-ready gate after the tank pivot cue/latch/loop implementation; retail LAN and device-only course acceptance remain unverified.

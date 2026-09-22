@@ -2226,6 +2226,42 @@ void test_scope_details(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
 }
 
+// The installed STROVER_DIST format uses a Win32 long conversion. Assert
+// the actual emitted characters, not just glyph count or a synthetic %d.
+void test_optical_distance_long_format(const fnt_font_t *font) {
+    fnt_font_t distinct = *font;
+    for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
+        distinct.glyphs[i].uv.u0 = float(i) / 256.0f;
+        distinct.glyphs[i].uv.u1 = float(i + 8) / 256.0f;
+    }
+    HudFrameCompiler compiler;
+    compiler.configure(HudLayout{}, &distinct);
+    const auto text = [&](const HudFrameState &state) {
+        std::string result;
+        for (const auto &glyph : compiler.compile(state, 1024, 768).glyphs)
+            result += char(std::lround(glyph.u0 * 256.0f) + 0x20);
+        return result;
+    };
+    HudFrameState state;
+    state.scope.active = true;
+    state.scope.rangefinder = true;
+    state.scope.range_format = "Distance: %ldm";
+    state.scope.range_over_1km = "Distance: 1km+";
+    state.scope.range_q16 = 127 << 16;
+    CHECK(text(state) == "Distance: 127m", "scope substitutes the installed %ld range format");
+    state.scope.range_q16 = 1000 << 16;
+    CHECK(text(state) == "Distance: 1000m", "1000m still formats the exact scope distance");
+    ++state.scope.range_q16;
+    CHECK(text(state) == "Distance: 1km+", "the over-1km label stays literal");
+    state = {};
+    state.combat.impact_distance = true;
+    state.combat.impact_distance_m = 89;
+    state.combat.impact_format = "Distance: %ldm";
+    CHECK(text(state) == "Distance: 89m", "mortar substitutes the same installed %ld format");
+    state.combat.impact_format = "%li %lu %% %n";
+    CHECK(text(state) == "89 89 % %n", "integer long aliases and escaped percent remain safe");
+}
+
 // HUD info already includes the chambered round for a capacity-one launcher.
 // Reload transfers reserve into the chamber without changing that displayed total.
 // [orig: HUD_BuildEntityInfo @0x4B85EF; ammo flash @0x599A30]
@@ -2364,6 +2400,7 @@ int main() {
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);
 	test_scope_details(&font);
+	test_optical_distance_long_format(&font);
 	test_kill_announcement(&font);
 	test_measure_advance_and_trailing_pad(&font);
 	test_layout_pages_bold_underline(&font);

@@ -102,26 +102,8 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 		ring(draw_list_, x, y - 2 * radius, float(radius), 2, 2, c.designator_color);
 	}
 	if (c.impact_distance) {
-		// Formats are localized device inputs; the native safe formatter owns
-		// the supported retail integer placeholder, including %u/%d and %%.
-		std::string text;
-		for (size_t i = 0; i < c.impact_format.size(); ++i) {
-			const char ch = c.impact_format[i];
-			if (ch == '%' && i + 1 < c.impact_format.size()) {
-				const char next = c.impact_format[i + 1];
-				if (next == 'd' || next == 'u' || next == 'i') {
-					text += std::to_string(c.impact_distance_m);
-					++i;
-					continue;
-				}
-				if (next == '%') {
-					text += '%';
-					++i;
-					continue;
-				}
-			}
-			text += ch;
-		}
+		// Scope and impact labels consume the same authored integer format.
+		const std::string text = sight_integer_text(c.impact_format, c.impact_distance_m);
 		// The line draws LEFT-aligned in the hudpos font, its design anchor pulled
 		// back by half the text's width as the BOLD slot measures it: the
 		// unscaled extent times that slot's scale, truncated, then halved.

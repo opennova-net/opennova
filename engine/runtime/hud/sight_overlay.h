@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 // The standard-weapon SIGHTS card's per-row draw modes and the sight-scale
 // cycle [orig: draw_weapon_sight_overlays @0x4dce00]. Each authored weapon.def
@@ -13,6 +14,10 @@
 // the compiler's sights element) only rasterises the rectangle this returns.
 
 namespace opennova::hud {
+
+// Localized optical readouts use 32-bit integer conversions, including
+// Win32 %ld/%li/%lu. Preserve %% and unsupported conversions literally.
+std::string sight_integer_text(const std::string &format, int32_t value);
 
 // ---------------------------------------------------------------------------
 // The per-player sight-scale index (retail dword_B76780): selects which of

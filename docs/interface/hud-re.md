@@ -60,7 +60,7 @@ completed launcher targeting, Inset scene, mortar impact HUD, and pilot instrume
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Scope camera zero + range/elevation/magnification text | MATCHING (D-HUD-27) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; HUD_DrawScopeOverlayDetails @ 0x59e420]`; `local_player_view`, `hud_frame_compiler`; windowed default L115A prone probe |
+| Scope camera zero + range/elevation/magnification text | MATCHING (D-HUD-27, D-HUD-30) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; HUD_DrawScopeOverlayDetails @ 0x59e420]`; `local_player_view`, `hud_frame_compiler`; windowed default L115A prone probe |
 | Render pipeline + two-struct model | confirm-only (read-only grill) | `[orig: HUD_RenderAllOverlays @0x5a8070]` → `[orig: HUD_RenderOverlays @0x5a7bb0]` → element draws; per-frame `[orig: HUD_BuildEntityInfo @0x4b8440]` |
 | Virtual coordinate space (1024×768) | ported (`engine/runtime/hud/hud_math` — the virtual-coords scale) | `[orig: Viewport_ScaleToVirtualCoords @0x5d2b20]` exact formula; `hud_helpers_test.gd` |
 | Health bar | ported (`HudFrameCompiler::element_health` + `hud_math::health_color_band_fp16`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
@@ -2332,6 +2332,21 @@ HUD_RenderAllOverlays @ 0x5a8070, call @ 0x5a8526]`
   weapon can have magnification and an authored scope card while omitting
   this label, exactly as retail does. `[orig: @ 0x59e97c..0x59e9f6]`
 
+The 2026-09-22 formatting follow-up (D-HUD-30) rechecked the two integer
+`sprintf` calls in the retail binary. Installed `Overlays/STROVER_DIST` uses
+`Distance: %ldm`; the reimplementation recognized only the unmodified `%d`,
+`%i` and `%u` forms, leaving the long conversion visible. Scope and mortar
+impact text now share `sight_integer_text`, preserving Win32 32-bit signed /
+unsigned integer behavior for the optional `l` modifier, escaped percent,
+and literal unsupported conversions. The over-1km label remains literal.
+`hud_frame_compiler::test_optical_distance_long_format` checks the emitted
+characters for both callers, including the 1000m boundary; four assertions
+fail before the fix and pass afterward. All four focused HUD native suites
+and 28 Godot HUD/installed-asset tests (421 assertions) pass. This was a
+read-only IDA check; no IDB changes were made.
+[orig: HUD_DrawScopeOverlayDetails @ 0x59E420, calls @ 0x59E504 / @ 0x59E530;
+HUD_RenderAllOverlays @ 0x5A8070, text lookup @ 0x5A8961 and sprintf @ 0x5A8972]
+
 Evidence: ctests `local_player_view` (standing/prone camera offsets, Sighted
 maximum-zero gate, unchanged input/body aim and hip view) and
 `hud_frame_compiler` (range boundary, over-range color, manual/auto/none zero,
@@ -2400,6 +2415,7 @@ were made for this review.
 | D-HUD-26 | **FIXED 2026-09-19.** Scoped + FLAGS2 Inset uses a separate scene viewport, aperture/ring/cross, friendly label, slot offsets and third shake sample | Definition `+0x0C & 0x200` `[orig: @0x5CA2B1..0x5CA2B4]`, scene `@0x5C9740..0x5CA0E1` | This is not the mortar view. Native geometry and live viewport lifecycle/declutter tests cover the port; mortar impact prediction/designator/map callbacks are separate. |
 | D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The flag-8 vehicle target reticle and D-HUD-26 Inset scene were added in the 2026-09-19 follow-up. |
 | D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CBE..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8440` (seat switch `@0x4B863D..0x4B8767`, EmplacedStance override `@0x4B8539..0x4B8549`; the carrier-is-a-vehicle leg `@0x4B84D1..0x4B8507` is DEAD because `HUD_RenderAllOverlays` zeroes the struct `@0x5A80A5..0x5A80B1` first, so a gunner always reads Emplaced); Inset `@0x4DCCB0` (called `@0x592AE5`); centred cues slide on-screen and recolour `draw_textured_quad_centered @0x5909E0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
+| D-HUD-30 | **FIXED 2026-09-22.** Scope and mortar Distance labels left the installed `%ld` conversion literal | Both callers pass the localized `STROVER_DIST` and an integer to `sprintf`: scope @ 0x59E504 / @ 0x59E530; impact @ 0x5A8972 | Shared safe optical integer formatting handles Win32 long conversions; actual glyph-output regressions cover both callers, percent escapes and the 1000m boundary. D-HUD-29 remains owned by the [tank record](../world/tank-parity-re.md). |
 
 ## Follow-ups (not yet witnessed / deferred)
 

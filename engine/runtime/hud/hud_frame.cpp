@@ -434,27 +434,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	return draw_list_;
 }
 
-// docs/interface/hud-re.md (D-HUD-27).
-// [orig: HUD_DrawScopeOverlayDetails @ 0x59e420]. Text templates carry one
-// integer conversion. Preserve ordinary text and %% without accepting pointer
-// conversions from an authored string.
-static std::string scope_integer_text(const std::string &format, int value) {
-    std::string out;
-    for (size_t i = 0; i < format.size(); ++i) {
-        if (format[i] == '%' && i + 1 < format.size()) {
-            const char next = format[i + 1];
-            if (next == 'd' || next == 'i' || next == 'u') {
-                out += std::to_string(value);
-                ++i;
-                continue;
-            }
-            if (next == '%') ++i;
-        }
-        out += format[i];
-    }
-    return out;
-}
-
+// docs/interface/hud-re.md (D-HUD-27, D-HUD-30).
+// [orig: HUD_DrawScopeOverlayDetails @ 0x59e420].
 void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w, float h) {
     const auto &scope = state.scope;
     if (!scope.active || state.binoculars_view_active) return;
@@ -465,18 +446,18 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
     if (scope.rangefinder) { // Flags & 0x400 @0x59e4a9
         const auto text = scope.range_q16 > 1000 * 65536
             ? scope.range_over_1km
-            : scope_integer_text(scope.range_format, std::max(scope.range_q16 / 65536, 1));
+            : sight_integer_text(scope.range_format, std::max(scope.range_q16 / 65536, 1));
         const bool beyond = scope.max_range_q16 != 0 && scope.range_q16 > scope.max_range_q16;
         draw(text, layout_.scope_range, beyond ? 0xFFFF5050u : color);
     }
     if (scope.zeroable) { // Flags & 0x800 @0x59e8a2
         const auto text = scope.zero_word < 0
             ? (scope.zero_word == -1 ? scope.zero_auto : scope.zero_none)
-            : scope_integer_text(scope.zero_format, scope.zero_step_metres * scope.zero_word);
+            : sight_integer_text(scope.zero_format, scope.zero_step_metres * scope.zero_word);
         draw(text, layout_.scope_zero, color);
     }
     if (scope.scoped)
-        draw(scope_integer_text(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
+        draw(sight_integer_text(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
     ++draw_list_.elements_drawn;
 }
 
