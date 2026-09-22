@@ -2711,6 +2711,15 @@ target_link_libraries(netsim_vehicle_carrier_prediction_test PRIVATE opennova_ne
 add_test(NAME netsim_vehicle_carrier_prediction
     COMMAND netsim_vehicle_carrier_prediction_test)
 
+# The joiner's replica vehicle rows through the production JoinerRole frame:
+# the §5.13 record tail (Flags bits, health word, kill edge), the mover freeze
+# and the remote +0x170 claimant.
+add_executable(netsim_joiner_vehicle_replica_test
+    netsim/joiner_vehicle_replica_test.cpp)
+target_link_libraries(netsim_joiner_vehicle_replica_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_joiner_vehicle_replica
+    COMMAND netsim_joiner_vehicle_replica_test)
+
 add_executable(netsim_client_replica_pipeline_target_carrier_follow_test
     netsim/client_replica_pipeline_target_carrier_follow_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_target_carrier_follow_test

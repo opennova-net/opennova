@@ -1012,11 +1012,13 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		// attachment. Hold its last world pose until a resolvable carried sample
 		// (or an explicit free-standing sample) arrives.
 		if (es.carrier_handle != wire_handle::kInvalid) continue;
-		// The universal mover-skip: wire bit0 (carried-object/killed/not-ready
+		// The organic mover-skip: wire bit0 (carried-object/killed/not-ready
 		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
 		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
-		// the bit rides the wire raw, §5.38e §5].
-		if (es.state_flags_known && (es.state_flags & 0x01u) != 0u) continue;
+		// the bit rides the wire raw, §5.38e §5]. No vehicle mover tests it
+		// [orig: Entity_UpdatePool1Slot calls the mover @0x4B8E53 ungated].
+		if (es.cls != EntityClass::Vehicle && es.state_flags_known &&
+				(es.state_flags & 0x01u) != 0u) continue;
 		// A dead row holds its death pose until the respawn snap (D-NET-66);
 		// vehicles mark the wreck with the dead-pose bit instead of bit 1.
 		const uint8_t dead_bit = es.cls == EntityClass::Vehicle

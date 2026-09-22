@@ -104,7 +104,7 @@ nw::FrameUpdate player_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t az
 // speed rides weapon_aim_y compressed (retail vehicleData[177], decompressed
 // at the store); decompressed >= 293 (~0.28 m/s) selects the 0x60000 snap.
 nw::FrameUpdate vehicle_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t az,
-                              int32_t x, int32_t speed_fx = 8192) {
+                              int32_t x, int32_t speed_fx = 8192, uint8_t flags = 0) {
 	nw::FrameUpdate fu = header_only_frame();
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;
@@ -118,7 +118,7 @@ nw::FrameUpdate vehicle_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t a
 	r.vehicle.pos_y_compressed = nw::network_compress_fixedpoint(0);
 	r.vehicle.pos_z_compressed = nw::network_compress_fixedpoint(0);
 	r.vehicle.euler_z = 0x2000;
-	r.vehicle.flags_byte = 0;      // live form
+	r.vehicle.flags_byte = flags;  // live form (no dead-pose bit)
 	r.vehicle.is_dead_pose = false;
 	r.vehicle.health_word = 100;   // 0 would kill the vehicle every fold
 	r.vehicle.weapon_aim_y = nw::network_compress_fixedpoint(speed_fx);
@@ -416,6 +416,29 @@ bool run_vehicle_bucket_ladder_is_verbatim() {
 	             d, stepped, expected);
 	return expect(stepped == expected,
 	              "vehicle ladder 0x9000 takes the 20-bucket verbatim step");
+}
+
+// Wire bit0 holds only an ORGANIC row at its staged pose: no vehicle mover
+// tests it and the pool-1 update calls the vehicle mover ungated, so a vehicle
+// record carrying bit0 keeps chasing. [orig: Entity_UpdateInfantryAI's Flags&1
+// return @0x4b9a03; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
+bool run_vehicle_bit0_record_keeps_chasing() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x1031;
+	seed_row(view, handle, kVehicleType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(vehicle_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF); // snap-arm
+	const int32_t x0 = view.state().find(handle)->x;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(
+	                   vehicle_frame(handle, ax, ay, az, x0 + 0x9000, 8192, 0x01)));
+	view.tick_remote_motion(0xFFFF);
+	const int32_t stepped = view.state().find(handle)->x - x0;
+	std::fprintf(stderr, "[vehicle-bit0] step=%d\n", stepped);
+	return expect(stepped > 0, "a vehicle record carrying wire bit0 keeps chasing");
 }
 
 // The starvation decay drains the FULL int32 decompressed register — signed,
@@ -1206,6 +1229,7 @@ int main() {
 	ok &= run_respawn_snaps_without_glide();
 	ok &= run_org2_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bucket_ladder_is_verbatim();
+	ok &= run_vehicle_bit0_record_keeps_chasing();
 	ok &= run_vehicle_starvation_decay_is_signed_untruncated();
 	ok &= run_player_pitch_chases_wire_byte();
 	ok &= run_infantry_first_record_does_not_swing_to_zero();
