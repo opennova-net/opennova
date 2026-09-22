@@ -15,11 +15,12 @@ namespace opennova::world {
 //  Entity_ProcessAircraftContactPhysics @0x47EF10].
 //
 // This header is the oscillator KERNEL; world/vehicle_suspension.cpp is the
-// leg that calls it from the tracked (§7) and light (§9) contact solves of
-// vehicle-client-movers-re.md over each tick's pad depths, owning the parked
-// latch and the per-wheel state on Entity::VehicleMotorState (wired
-// 2026-08-21; the wheeled §8 family's linear/slow pair is still pending its
-// witness). The probe radii those solves derive (`r = beam >> 2`, the spine
+// leg that calls it from the tracked (§7), wheeled (§8) and light (§9) contact
+// solves of vehicle-client-movers-re.md over each tick's pad depths, owning the
+// parked latch and the per-wheel state on Entity::VehicleMotorState. The
+// wheeled (tank) family takes the linear compress and the slow oscillator
+// [orig: Suspension_CompressWheelLinear @0x45CEB0; Suspension_OscillateWheel
+// @0x45D240]. The probe radii those solves derive (`r = beam >> 2`, the spine
 // floor 0x2000 @0x47C9E8) live THERE, not here.
 //
 // OWNERSHIP, witnessed at both conform exits: Pitch and Roll are written
@@ -99,6 +100,12 @@ struct ConformOscillator {
 int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 		int32_t &impact, int32_t step, int32_t travel, int32_t spring);
 
+// The tank's LINEAR compression step: the energy and impact sink drain by half
+// the low-dword spring x step product instead of the quadratic term.
+// [orig: Suspension_CompressWheelLinear @0x45CEB0]
+int32_t conform_spring_compress_linear(ConformOscillator &osc, int32_t &compression,
+		int32_t &impact, int32_t step, int32_t travel, int32_t spring);
+
 // OSCILLATION step, run once the wheel is releasing. Returns the change in
 // compression, which the caller consumes [orig: the subtraction @0x47EBC3].
 //
@@ -110,10 +117,8 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 // far too quickly. `entity_a0` is the entity+0xA0 field the hard-landing test
 // reads; `shock` is the def's field (+0x904), clamped to [0, 10] IN PLACE here
 // exactly as retail writes the clamp back into the item def
-// @0x45D18F..0x45D1A2 — pass the def's field, never a copy.
-int32_t conform_spring_compress_linear(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t step, int32_t travel, int32_t spring);
-
+// @0x45D18F..0x45D1A2 — pass the def's field, never a copy. The tank passes
+// the slow phase step [orig: Suspension_OscillateWheel @0x45D240, flt_7C6A14].
 int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression, int32_t &impact,
 		int32_t &shock, int32_t spring, int32_t entity_a0, float phase_step = kOscPhaseStep);
 
