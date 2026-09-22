@@ -1406,26 +1406,17 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 		if (classify(child.type_id) != EntityClass::NoNetworkCallback)
 			continue;
 		// The 0x0D TARGET is the structural carrier (groundEntity/+40) and
-		// outranks any parent: retail's transform never reads +368.
-		if (child.target_handle != wire_handle::kInvalid) {
-			persistent_carrier[i] = child.target_handle;
-			continue;
-		}
-		if (child.parent_handle == wire_handle::kInvalid) continue;
-		// A POOL-0 parent on a no-callback child is the occupant/driver
-		// back-reference, never a transform parent (live retail 0x0D witness,
-		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
-		// parent=<its gunner's pool-0 handle>, while the gunner's own record
-		// carries parent=<the gun> — composing both closes a mutual
-		// seat/parent loop that ratchets the pair through the depth passes
-		// (the reported climbing/spinning emplacements). The structural
-		// carrier of a mounted-on-vehicle gun rides the record's separate
-		// TARGET field, consumed above.
+		// outranks any parent: retail's transform never reads +368. A POOL-0
+		// parent on a no-callback child is the occupant/driver back-reference,
+		// never a transform parent (live retail 0x0D witness, 00TRg 2026-08-04:
+		// an OCCUPIED "50cal on 180 tripod" spawns with parent=<its gunner's
+		// pool-0 handle>, while the gunner's own record carries parent=<the
+		// gun> — composing both closes a mutual seat/parent loop that ratchets
+		// the pair through the depth passes (the reported climbing/spinning
+		// emplacements). persistent_carrier_handle (client_state.h) is that rule.
 		// [orig: 0x0D store @0x433289 — entity+368 occupantEntity back-ref;
 		//  target → groundEntity resolve @0x4332bc, store @0x4332d7]
-		if (world::EntityHandle{child.parent_handle}.pool() == 0)
-			continue;
-		persistent_carrier[i] = child.parent_handle;
+		persistent_carrier[i] = persistent_carrier_handle(child);
 	}
 	// Repeating the composition makes mixed seat/persistent-parent chains
 	// independent of pool/vector ordering while preserving the promotion depth

@@ -216,6 +216,61 @@ bool run_pool1_spawn_mount_handles() {
 			"host 0x0D preserves sparse occupied mountHandles by retail slot");
 }
 
+// The 0x0D PARENT is the occupantEntity (+0x170) back-reference and the
+// TARGET the groundEntity (+0x28): a driven hull names its driver, and an
+// addeweap child names its gunner (or nothing) while its hull rides the target.
+// [orig: serialize_entity_pool_to_packet_0 `mov eax, [ebp+170h]` @0x503BC9
+//  (flag 0x100 @0x503BD3), `mov eax, [ebp+28h]` @0x503C22]
+bool run_pool1_spawn_parent_is_the_occupant() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 8);
+	w::Entity person;
+	person.kind = w::EntityKind::Organic;
+	const w::EntityHandle driver_h = world.registry.spawn(0, person);
+	const w::EntityHandle gunner_h = world.registry.spawn(0, person);
+	w::Entity hull;
+	hull.kind = w::EntityKind::Item;
+	hull.item_id = 0x050E;
+	hull.primary_occupant = driver_h;
+	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.item_id = 0x058B;
+	gun.emplacement_parent = hull_h;
+	gun.emplacement_parent_spawn_id = world.registry.get(hull_h)->registry_spawn_id;
+	gun.ground_target = hull_h;
+	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const auto decoded_record = [&](w::EntityHandle h, nw::PoolSpawnRecord &out) {
+		const std::vector<uint8_t> wire =
+				nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+		nw::PoolSpawnBatch decoded;
+		if (!nw::decode_pool_spawn_batch(wire.data(), wire.size(), decoded)) return false;
+		for (const nw::PoolSpawnRecord &r : decoded.records)
+			if (r.slot_id == h.packed) {
+				out = r;
+				return true;
+			}
+		return false;
+	};
+	nw::PoolSpawnRecord hull_rec, gun_rec;
+	bool ok = expect(driver_h.valid() && gunner_h.valid() && hull_h.valid() && gun_h.valid() &&
+	                         decoded_record(hull_h, hull_rec) && decoded_record(gun_h, gun_rec),
+	                 "the hull and its addeweap gun round-trip");
+	ok &= expect((hull_rec.spawn_flags & 0x0100u) != 0 && hull_rec.parent_handle == driver_h.packed,
+	             "a driven hull's parent is its driver (+0x170)");
+	ok &= expect((gun_rec.spawn_flags & 0x0100u) == 0 && gun_rec.parent_handle == 0xFFFFu &&
+	                     (gun_rec.spawn_flags & 0x0200u) != 0 &&
+	                     gun_rec.target_handle == hull_h.packed,
+	             "an empty addeweap gun names no parent; its hull rides the target (+0x28)");
+	world.registry.get(gun_h)->primary_occupant = gunner_h;
+	ok &= expect(decoded_record(gun_h, gun_rec) && gun_rec.parent_handle == gunner_h.packed &&
+	                     gun_rec.target_handle == hull_h.packed,
+	             "a manned gun's parent is its gunner");
+	if (ok) std::printf("PASS pool1_spawn_parent_is_the_occupant\n");
+	return ok;
+}
+
 bool run_pool2_static() {
 	FourPoolWorld world;
 	nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
@@ -499,6 +554,7 @@ int main() {
 	ok = run_pool1_spawn_ai_capable() && ok;
 	ok = run_pool1_spawn_non_ai() && ok;
 	ok = run_pool1_spawn_mount_handles() && ok;
+	ok = run_pool1_spawn_parent_is_the_occupant() && ok;
 	ok = run_pool2_static() && ok;
 	ok = run_pool2_static_slot_alignment() && ok;
 	ok = run_pool3_marker() && ok;

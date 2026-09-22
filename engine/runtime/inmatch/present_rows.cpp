@@ -117,9 +117,12 @@ bool resolve_client_eweap_attachment_pose(
 		const std::unordered_map<int32_t, std::string> &graphics_by_type,
 		const assets::AssetStore &models,
 		uint32_t time_ms, MountedPose &out) {
-	if (child.parent_handle == EntityHandle::kInvalid) return false;
+	// The carrier is the child's followed one (its 0x0D target), never the
+	// occupant back-reference the parent field carries.
+	const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
+	if (carrier_handle == EntityHandle::kInvalid) return false;
 	const replication::ClientEntityState *parent =
-			client_entity_for_handle(state, child.parent_handle);
+			client_entity_for_handle(state, carrier_handle);
 	if (parent == nullptr) return false;
 	const mission::ItemSeatSpec *parent_spec =
 			mission::item_seat_spec_for_type(specs, parent->type_id);
@@ -431,7 +434,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		const bool authoritative_attachment_pose =
 				ent != nullptr && ent->emplacement_parent.valid() &&
 				ent->emplacement_pose_metadata_resolved &&
-				ent->emplacement_parent.packed == es.parent_handle;
+				ent->emplacement_parent.packed == replication::persistent_carrier_handle(es);
 		MountedPose client_attachment_pose;
 		const uint32_t attachment_time_ms = kernel.panm_time_override_ms >= 0
 				? static_cast<uint32_t>(kernel.panm_time_override_ms)

@@ -1674,10 +1674,11 @@ void JoinerRole::mirror_mission_entities() {
 				local->emplacement_parent.valid()
 				? world.registry.get(local->emplacement_parent)
 				: nullptr;
+		const uint16_t followed_carrier = replication::persistent_carrier_handle(es);
 		const bool unresolved_persistent_attachment =
-				es.parent_pose_valid && es.parent_handle != 0xFFFFu &&
+				es.parent_pose_valid && followed_carrier != 0xFFFFu &&
 				!local->emplacement_pose_metadata_resolved &&
-				local->emplacement_parent.packed == es.parent_handle &&
+				local->emplacement_parent.packed == followed_carrier &&
 				attachment_parent != nullptr &&
 				attachment_parent->registry_spawn_id ==
 						local->emplacement_parent_spawn_id;
