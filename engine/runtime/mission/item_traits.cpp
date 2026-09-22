@@ -183,6 +183,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		// The physics callback table's ewep row selects the gun update.
 		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
 		e->emplaced_update = def != nullptr && strutil::iequals(def->move_function, "ewep");
+		// The render tag picks the def+0x144 CTRL callback; the ewep row's
+		// publishes the gun words (world/mount_controls.h).
+		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
+		//  BoneCallback_LookupByTag @0x4E32ED..0x4E3306, row 'ewep' @0x82CFA0]
+		e->emplaced_ctrl_publisher =
+				def != nullptr && fourcc_prefix(def->render_function) == "ewep";
 		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";
 		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
         e->reverb = def != nullptr ? int16_t(def->reverb) : 0;

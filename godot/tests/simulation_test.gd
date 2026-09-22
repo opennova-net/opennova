@@ -3260,10 +3260,10 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 		return
 	# The emplacement carries a deterministic HEAT_GLOW collision track: the
 	# mount fixture with its LOD0 rows replaced by one register-driven slide of
-	# part 1 (0..4 wu on CTRL 0 = HEAT_GLOW). The scoped parent visual/collision
-	# frame must sample its embedded MountSlot only while a live UseGun child is
-	# attached; the local FP state is the comparison witness for the
-	# intentionally different endpoint.
+	# part 1 (0..4 wu on CTRL 0 = HEAT_GLOW). The gun's visual/collision frame
+	# samples its embedded MountSlot through the ewep writer, occupied or not;
+	# the local FP state is the comparison witness for the intentionally
+	# different endpoint.
 	# [orig: attachment caller @ 0x546518;
 	#  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
 	var object_data := ObjectData.new()
@@ -3316,10 +3316,18 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	sim.drain_local_player_weapon_events()
 	sim.step()
 
+	# The 'ewep' render class's writer has no occupant test: an unoccupied
+	# gun publishes its own cold slot.
+	# [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
+	#  row @0x82CFA0]
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, gun_index,
-			Simulation.PF_WORLD_HEAT_GLOW_VALID), 0,
-			"an unoccupied carrier is outside retail's attachment writer scope")
+			Simulation.PF_WORLD_HEAT_GLOW_VALID), 1,
+			"the ewep writer publishes an unoccupied gun too")
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, gun_index,
+			Simulation.PF_WORLD_HEAT_GLOW), 0,
+			"an unoccupied gun's slot is cold")
 	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:

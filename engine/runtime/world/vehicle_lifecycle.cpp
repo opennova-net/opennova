@@ -397,12 +397,15 @@ void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 			continue;
 		world_.out.scars.clear_entity(handle);
 		if (other->item_type != 1) {
-			// The two words are zeroed for every matched non-vehicle peer; the
-			// clip/reserve split only follows when a weapon row resolves.
+			// The stored gun words (+0x324 pitch, +0x322 yaw) are zeroed for
+			// every matched non-vehicle peer: the turret of a destroyed carrier
+			// returns to rest. The clip/reserve split only follows when a
+			// weapon row resolves, and leaves the ammo alone otherwise.
 			// [orig: +804/+802 = 0 @0x5470f9..0x547100, then the optional
-			//  WeaponSlot_SplitAmmoIntoClipAndReserve @0x547107..0x54710e]
-			other->primary_weapon_slot.clip = 0;
-			other->primary_weapon_slot.reserve = 0;
+			//  WeaponSlot_SplitAmmoIntoClipAndReserve @0x547107..0x54710e;
+			//  the split's -1 guards @0x546382..0x54638B]
+			other->emplaced_gun_pitch_word = 0;
+			other->emplaced_gun_yaw_word = 0;
 			const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm);
 			if (weapon != nullptr && weapon->startrounds != -1 && weapon->clipsize != -1) {
 				other->primary_weapon_slot.clip =

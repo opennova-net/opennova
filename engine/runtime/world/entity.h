@@ -886,6 +886,13 @@ struct Entity {
     // Its firing source is the SAME inline MountSlot kick byte (+0x30F).
     // [orig: Entity_UpdateTransformAndTurret @0x4413FE..0x441447]
     bool emplaced_update = false; // items.def move_function ewep
+    // The render class row's CTRL callback (def+0x144): the 'ewep' row
+    // installs the writer that publishes the stored gun words, the spin word
+    // and the inline slot's heat at every render and every userpoint
+    // transform of this entity, occupied or not (world/mount_controls.h).
+    // [orig: render-class row 'ewep' @0x82CFA0 -> HUD_CacheWeaponSlotInfo
+    //  @0x440930, installed by BoneCallback_LookupByTag @0x4E32ED..0x4E3306]
+    bool emplaced_ctrl_publisher = false; // items.def render_function ewep
     uint8_t emplaced_spin_ticks = 0; // entity+0x31B
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322

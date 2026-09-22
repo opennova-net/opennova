@@ -982,9 +982,27 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 		sources.part_anim_phase0 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0];
 		sources.part_anim_phase1 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0 + 1];
 	}
-	sources.has_heat_glow = w::world_model_heat_glow_for(world, carrier, sources.heat_glow);
+	// An addeweap attachment frame is posed through build_bone_attachment_matrix,
+	// which runs the carrier's own render-class CTRL callback first (the ewep
+	// writer only for an 'ewep' class; another class leaves the words its
+	// UseGun rider's seat call wrote). A UseGun rider's attachment never calls
+	// that callback: it calls the ewep writer directly on the carrier, whatever
+	// its class. Registers neither call writes read the global CTRL bus as the
+	// carrier's last class publication left it, which the vehicle projection
+	// below stands for.
+	// [orig: build_bone_attachment_matrix def+0x144 @0x56C6DC..0x56C6F3, reached
+	//  from Entity_UpdateTransformAndTurret @0x44109D;
+	//  Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518]
 	w::EmplacedWeaponControls emplaced;
-	if (w::emplaced_weapon_controls_for(world, carrier, emplaced)) {
+	if (seat.attachment_frame) {
+		sources.has_heat_glow = w::world_model_heat_glow_for(world, carrier, sources.heat_glow);
+		w::emplaced_weapon_controls_for(world, carrier, emplaced);
+	} else {
+		sources.has_heat_glow = true;
+		sources.heat_glow = w::emplaced_slot_heat_glow(world, carrier);
+		emplaced = w::emplaced_weapon_controls_of(carrier);
+	}
+	if (emplaced.valid) {
 		sources.has_emplaced = true;
 		sources.emplaced_gun_yaw = emplaced.gun_yaw;
 		sources.emplaced_gun_pitch = emplaced.gun_pitch;

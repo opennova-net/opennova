@@ -1290,14 +1290,34 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if not joiner.get_local_player_view().mounted \
-				and not host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
-				and _present_field_for_type(joiner, 1419,
-						Simulation.PF_EMPLACED_CONTROLS_VALID) == 0:
+				and not host.entity_card_by_ai_index(host_joiner_index).is_mounted():
 			detached_echoed = true
 			break
 		OS.delay_msec(2)
 	assert_true(detached_echoed,
-			"host echo retires both the local mount and parent gun controls")
+			"host echo retires the local mount")
+	# The ewep writer has no occupant test and nothing clears the gun words on
+	# a detach: once the echoed seat change has landed, the emptied gun keeps
+	# publishing its last traverse.
+	# [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
+	#  row @0x82CFA0]
+	for _settle in range(60):
+		joiner.step()
+		host.step()
+		OS.delay_msec(2)
+	var held_yaw := _present_field_for_type(joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
+	for _hold in range(30):
+		joiner.step()
+		host.step()
+		OS.delay_msec(2)
+	assert_eq(_present_field_for_type(joiner, 1419,
+			Simulation.PF_EMPLACED_CONTROLS_VALID), 1,
+			"the emptied gun still publishes its controls")
+	assert_eq(_present_field_for_type(joiner, 1419,
+			Simulation.PF_EWEAP_GUNYAW), held_yaw,
+			"the emptied gun holds its last traverse")
+	assert_ne(held_yaw, 0,
+			"the held traverse is the gunner's, not a return to rest")
 
 
 func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:

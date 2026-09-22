@@ -20,41 +20,80 @@
 
 namespace opennova::world {
 
-// Derive HEAT_GLOW only for the carrier model participating in a live UseGun
-// bone attachment. Retail does not publish this for every entity: infantry
-// player/AI update calls Entity_AttachToBoneAndUpdateTransform only for
-// parentSlot 3, and that helper caches the PARENT carrier's inline MountSlot
-// immediately before transforming the parent's PANM/bones. Our retained model
-// and collision paths therefore use the same validated carrier/child relation.
-// The separate first-person writer has its own 0x10000 endpoint.
-// [orig: Entity_UpdateInfantryPlayerBody @ 0x4B63BF..0x4B63C7;
-//  Entity_UpdateInfantryAI @ 0x4BEC1B..0x4BEC23;
-//  Entity_AttachToBoneAndUpdateTransform @ 0x546424..0x54652B;
-//  HUD_CacheWeaponSlotInfo @ 0x440930]
+// ---------------------------------------------------------------------------
+// The ewep class's CTRL writer: three registers published from the gun's own
+// state -- the stored gun words (EWEAP_GUNYAW/GUNPITCH), the barrel spin word
+// (WEAP_SPIN) and the inline MountSlot's heat (HEAT_GLOW: literal zero once the
+// heat window has lapsed, else the accumulated heat capped at the largest
+// unsigned word; the separate first-person writer has its own 0x10000
+// endpoint). The 'ewep' render class installs it as def+0x144, so it runs
+// before every render and every userpoint transform of the gun, occupied or
+// not: nothing clears the words on a detach, and an emptied turret holds its
+// last traverse. A UseGun rider's seat attachment also calls it directly on
+// the PARENT carrier, whatever that carrier's render class, before posing the
+// carrier's PANM/bones.
+// [orig: HUD_CacheWeaponSlotInfo @ 0x440930 (words @0x440934..0x440948, spin
+//  @0x44094E..0x440955, heat @0x44095B..0x440991); the 'ewep' render-class row
+//  @0x82CFA0 through BoneCallback_LookupByTag @0x4E32ED..0x4E3306; callers
+//  Entity_RenderVehicleModel @0x440852..0x440866,
+//  Entity_ComputeUserpointWorldTransform @0x545CA3..0x545CAE,
+//  Entity_ComputeUserpointTransform @0x545A89..0x545A94,
+//  build_bone_attachment_matrix @0x56C6DC..0x56C6F3; the seat call
+//  Entity_AttachToBoneAndUpdateTransform @ 0x546424..0x54652B (the call
+//  @0x546517..0x546518), reached for parentSlot 3 from
+//  Entity_UpdateInfantryPlayerBody @ 0x4B63BF..0x4B63C7 and
+//  Entity_UpdateInfantryAI @ 0x4BEC1B..0x4BEC23. The words' only writers are
+//  Entity_UpdateChildAttachment @0x440B23/@0x440B45/@0x440B58, the window
+//  clamp @0x44125C/@0x4412A4, the carrier-destruction reset @0x5470F9/@0x547100
+//  and the lag pip's save/restore @0x59EA6A..0x59EAF3]
+// ---------------------------------------------------------------------------
+
+// The writer's heat leg on the gun's own inline slot.
+inline int32_t emplaced_slot_heat_glow(const World &world, const Entity &gun) {
+	const WeaponTableEntry *weapon = gun.primary_weapon_slot_adm != kAdmSlotNone
+			? world.tables.weapons.by_index(gun.primary_weapon_slot_adm)
+			: nullptr;
+	if (weapon == nullptr) return 0;
+	return weapon_slot_world_heat_glow(weapon->action_fsm, gun.primary_weapon_slot,
+			static_cast<int32_t>(world.logic_tick));
+}
+
+// The seat call: a living parentSlot-3 rider whose carrier seat names a
+// userpoint runs the writer on its PARENT carrier every tick, whatever the
+// carrier's render class. A carrier of another class publishes nothing of
+// its own, so the rider's words stay on the global CTRL bus for that
+// carrier's render, collision and attachment frames while the rider holds
+// the seat.
+// [orig: Entity_AttachToBoneAndUpdateTransform userpoint gate
+//  @0x546424..0x54643F, the call @0x546517..0x546518]
+inline bool usegun_rider_writes_carrier(const World &world, const Entity &carrier) {
+	if (!carrier.primary_weapon_owner.valid()) return false;
+	const Entity *rider = world.registry.get(carrier.primary_weapon_owner);
+	if (rider == nullptr || !rider->alive || rider->health <= 0 ||
+			!rider->mounted ||
+			rider->mount_type != SeatType::Gunner ||
+			rider->mount_target != carrier.handle ||
+			rider->mount_seat < 0 ||
+			rider->mount_seat >= static_cast<int>(carrier.seats.size()))
+		return false;
+	const Seat &seat = carrier.seats[static_cast<size_t>(rider->mount_seat)];
+	if (seat.type != SeatType::Gunner ||
+			seat.bone_index == 0 || seat.occupant != rider->handle)
+		return false;
+	return world.ai.for_handle(rider->handle) != nullptr;
+}
+
+// HEAT_GLOW as the carrier's frames read it: an 'ewep' render class
+// publishes it from its inline slot, occupied or not; any other class only
+// through a UseGun rider's seat call.
 inline bool world_model_heat_glow_for(
 		const World &world,
 		const Entity &carrier,
 		int32_t &r_heat_glow) {
 	r_heat_glow = 0;
-	if (!carrier.primary_weapon_owner.valid()) return false;
-	const Entity *child = world.registry.get(carrier.primary_weapon_owner);
-	if (child == nullptr || !child->alive || child->health <= 0 ||
-			!child->mounted ||
-			child->mount_type != SeatType::Gunner ||
-			child->mount_target != carrier.handle ||
-			child->mount_seat < 0 ||
-			child->mount_seat >= static_cast<int>(carrier.seats.size()))
+	if (!carrier.emplaced_ctrl_publisher && !usegun_rider_writes_carrier(world, carrier))
 		return false;
-	const Seat &seat = carrier.seats[static_cast<size_t>(child->mount_seat)];
-	if (seat.type != SeatType::Gunner ||
-			seat.bone_index == 0 || seat.occupant != child->handle)
-		return false;
-	const WeaponTableEntry *weapon =
-			world.tables.weapons.by_index(carrier.primary_weapon_slot_adm);
-	if (weapon == nullptr) return false;
-	const int32_t tick = static_cast<int32_t>(world.logic_tick);
-	r_heat_glow = weapon_slot_world_heat_glow(
-			weapon->action_fsm, carrier.primary_weapon_slot, tick);
+	r_heat_glow = emplaced_slot_heat_glow(world, carrier);
 	return true;
 }
 
@@ -373,7 +412,13 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 // (slot 1 at parent+0x474, its def +0x494: targetpitchmax +0x13C /
 // targetpitchmin +0x140 / targetyawrange +0x144) and writes yaw to
 // +0x1D8/+0x1F0 and pitch to +0x1DC/+0x1F4. It runs BEFORE the window leg
-// below, on the words the refresh just produced.
+// below, on the words the refresh just produced. It belongs to the ewep class
+// update, which runs every tick whether or not the gun is occupied, behind
+// the gun's own weapon Def: an emptied turret keeps driving the hull turret
+// channel with its held words.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the class update, no
+//  age or occupant gate); Entity_UpdateTransformAndTurret Def gate
+//  @0x440E8C..0x440EA0]
 // That aircraft slot is initialized from the parent's authored primary_weapon,
 // the same field used for an ewep's +0x2B4 slot. Resolve that existing table row.
 // [orig: Entity_InitInfantryBoneData @0x490160, call @0x49017b;
@@ -388,7 +433,10 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 //  @0x441007/@0x44100d (yaw) and @0x44101a/@0x441020 (pitch)]
 inline void publish_emplaced_gun_words_to_parent(World &world,
 		const Entity &mount) {
-	if (!mount.emplacement_parent.valid()) return;
+	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
+	if (mount.primary_weapon_slot_adm == kAdmSlotNone ||
+			world.tables.weapons.by_index(mount.primary_weapon_slot_adm) == nullptr)
+		return;
 	// A child promoted onto an authored userpoint (index > 0) that rides the
 	// parent root; an unstamped subobject (-1) keeps the leg off.
 	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
@@ -441,30 +489,46 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 	clamp_emplaced_gun_words_to_window(world, mount, gunner);
 }
 
-// The publication: the stored words, verbatim, while the gun has a live
-// UseGun occupant. Nothing is recomputed here — the words are what the tick
-// left (slewed, tethered, window-pinned), exactly what the model's
-// EWEAP_GUNYAW/GUNPITCH CTRL registers read in retail.
-// [orig: the CTRL-global writers read the +0x322/+0x324 high words; the
-//  0x440ca0 leg publishes them to the parent brain @0x440f70..0x441020]
+// The ewep class update's every-tick legs outside the occupied channel: the
+// parent-brain publication, then the barrel spin tail. An occupied gun
+// publishes again from tick_emplaced_weapon_channel once its producer has
+// refreshed the words, so the brain ends the tick on the fresh words.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 -> Entity_UpdateTransformAndTurret
+//  @0x440ca0 (publication @0x440f04..0x441020, spin tail @0x44139D..0x441447)]
+inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
+	publish_emplaced_gun_words_to_parent(world, mount);
+	tick_emplaced_weapon_animation(world, mount);
+}
+
+// The writer's three words, verbatim: the words are what the channel left
+// (slewed, tethered, window-pinned) or held since the last gunner left,
+// exactly what the model's EWEAP_GUNYAW/GUNPITCH and WEAP_SPIN registers read.
+// [orig: HUD_CacheWeaponSlotInfo @0x440934..0x440948 (+0x322/+0x324 high
+//  words), @0x440955 (unsigned spin word +0x320)]
+inline EmplacedWeaponControls emplaced_weapon_controls_of(const Entity &mount) {
+	EmplacedWeaponControls out;
+	out.valid = true;
+	out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
+	out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
+	out.spin = mount.emplaced_spin_phase;
+	return out;
+}
+
+// The words as the carrier's frames read them: an 'ewep' render class
+// publishes them whether or not anyone is seated; any other class only
+// through a UseGun rider's seat call.
+// [orig: the 'ewep' render-class row @0x82CFA0 -> HUD_CacheWeaponSlotInfo
+//  @0x440930, no occupant test; the seat call @0x546517..0x546518; the
+//  0x440ca0 leg publishes the same words to the parent brain
+//  @0x440f70..0x441020]
 inline bool emplaced_weapon_controls_for(
 		const World &world,
 		const Entity &mount,
 		EmplacedWeaponControls &out) {
 	out = EmplacedWeaponControls{};
-	if (!mount.primary_weapon_owner.valid()) return false;
-	const Entity *occupant = world.registry.get(mount.primary_weapon_owner);
-	if (occupant == nullptr || !occupant->alive || occupant->health <= 0 ||
-			!occupant->mounted ||
-			occupant->mount_type != SeatType::Gunner ||
-			occupant->mount_target != mount.handle)
+	if (!mount.emplaced_ctrl_publisher && !usegun_rider_writes_carrier(world, mount))
 		return false;
-	if (world.ai.for_handle(occupant->handle) == nullptr) return false;
-	out.valid = true;
-	out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
-	out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
-	// [orig: HUD_CacheWeaponSlotInfo @0x440955, unsigned word +0x320]
-	out.spin = mount.emplaced_spin_phase;
+	out = emplaced_weapon_controls_of(mount);
 	return true;
 }
 

@@ -1079,6 +1079,11 @@ void process_destructible_death(World &world, Entity &target) {
 }
 
 uint32_t spawn_death_pieces(World &world, Entity &target) {
+    // A refNum group's children are cleaned up before any gate: their held
+    // gun words reset, their ammo re-splits, their gunners detach.
+    // [orig: Entity_SpawnDeathPieces @0x493409..0x49344D ->
+    //  Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+    if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
     // [orig: Entity_SpawnDeathPieces @ 0x493400] Gate: not already husked, a
     // husk model exists, not fully underwater.
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
@@ -1276,6 +1281,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot (the AI
     // rows already snapshot net_saved_live_pose), then the unitType dispatch,
     // then the death sounds.]
+    // The refNum group cleanup leads. [orig: @0x494669..0x494673 ->
+    // Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+    if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
     const bool matched_row = unit_type == 1 || unit_type == 2 || unit_type == 3 ||
