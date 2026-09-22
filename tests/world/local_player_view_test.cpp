@@ -18,6 +18,7 @@
 #include <runtime/controls/player_actions.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/local_player.h>
@@ -135,6 +136,17 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     CHECK(std::abs(out[1] - (200 * 65536 - 6344 - 0x3000)) <= 2);
     CHECK(out[3] == 0x40000000);
     body->heading = 0;
+    // The rider's Roll word is the seat carry's full BAM32 roll: the driver's
+    // view banks with the hull smoothly, never in the registry's whole-degree
+    // steps. [orig: Camera_ComputeThirdPersonView @0x437D86 reads [esi+18h];
+    //  Entity_AttachToBoneAndUpdateTransform @0x5463D0 writes it through
+    //  Math_FixedPointMatrixToEulerAngles @0x54656F]
+    body->roll = bam_from_degrees_wrapped(2.49);
+    rider.roll = 2; // the whole-degree mirror
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(out[5] == body->roll);
+    body->roll = 0;
+    rider.roll = 0;
     // The `tank` render class draws the virtual display instead of the hull
     // for the local CLAIMANT in mode 0 only. [orig: 0x449EF0 @0x449F12..0x449F27]
     {
@@ -171,6 +183,17 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     live_hull.veh.yaw_bam = 0x20000000;
     CHECK(local_player_mounted_camera(lw.w, rider, out));
     CHECK(out[0] == 100 * 65536 && out[2] == 12 * 65536 && out[3] == 0x20000000);
+    // All three of the carrier's words are full width: a motorized hull's
+    // pitch and roll are its BAM attitude, like its heading, never the
+    // whole-degree mirrors. [orig: @0x4DC732..0x4DC741]
+    live_hull.veh.air_pitch_bam = bam_from_degrees_wrapped(2.49);
+    live_hull.veh.air_roll_bam = bam_from_degrees_wrapped(-1.51);
+    live_hull.pitch = 2;
+    live_hull.roll = -2;
+    CHECK(local_player_mounted_camera(lw.w, rider, out));
+    CHECK(out[4] == live_hull.veh.air_pitch_bam && out[5] == live_hull.veh.air_roll_bam);
+    live_hull.veh.air_pitch_bam = live_hull.veh.air_roll_bam = 0;
+    live_hull.pitch = live_hull.roll = 0;
     // No virtual display on a plain vehicle: the person legs keep the view.
     live_hull.virtual_display_camera = false;
     CHECK(!local_player_mounted_camera(lw.w, rider, out));
@@ -217,6 +240,44 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     CHECK(!local_player_mounted_camera(lw.w, rider, out));
     lw.w.pose_provider = nullptr;
     lw.w.collision = nullptr;
+}
+
+// Entity_GetBoneWorldPosition's rider legs: a non-EWEAP parent hands back the
+// rider's Position + CameraOffset and its full-width rotation triple; an
+// EWEAP with no model to pose does the same, then adds the rider's +0x94
+// word to the pitch. [orig: Entity_GetBoneWorldPosition @0x545E60 — not an
+//  EWEAP @0x545EB7..0x545EEA; no skeleton @0x545F17..0x545F4E, the +0x94 add
+//  @0x545F48..0x545F4E]
+void test_seat_bone_pose_rider_legs() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity *body = lw.ai.for_handle(lw.local);
+    body->inf.active = true;
+    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->heading = 0x12345678;
+    body->pitch = 0x01000000;
+    body->roll = bam_from_degrees_wrapped(1.3);
+    body->inf.eye_offset_z = 0x18000;
+    Entity &rider = lw.entity();
+    rider.roll = 1; // the whole-degree mirror
+    rider.saved_live_roll = 0x00400000;
+    Entity parent;
+    parent.has_item_def = true;
+    parent.item_type = 1;
+    parent.position = {30.0f, 40.0f, 5.0f};
+    const EntityHandle parent_handle = lw.w.registry.spawn(0, parent);
+    rider.mounted = true;
+    rider.mount_target = parent_handle;
+    rider.mount_type = SeatType::Gunner;
+    int32_t out[6];
+    CHECK(local_player_seat_bone_pose(lw.w, rider, out));
+    CHECK(out[0] == 10 * 65536 && out[1] == 20 * 65536 && out[2] == 3 * 65536 + 0x18000);
+    CHECK(out[3] == body->heading && out[4] == body->pitch && out[5] == body->roll);
+    // An EWEAP without a model (no collision world to pose it in).
+    lw.w.registry.get(parent_handle)->item_attrib = kItemAttribEweap;
+    CHECK(local_player_seat_bone_pose(lw.w, rider, out));
+    CHECK(out[3] == body->heading && out[5] == body->roll);
+    CHECK(out[4] == body->pitch + rider.saved_live_roll);
 }
 
 // --- the scope toggle's refusal ladder ------------------------------------
@@ -2012,6 +2073,7 @@ int main() {
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();
     test_mounted_first_person_camera_belongs_to_the_carrier();
+    test_seat_bone_pose_rider_legs();
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
     test_inset_scope_refused_under_nvg();
