@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -47,6 +48,26 @@ struct PlayerActionFrame {
 	bool medic_edge = false;
 	// Apply in order: the USE special-key/release arm precedes binding rows.
 	std::vector<PlayerActionRequest> requests;
+};
+
+// The WM_MOUSEWHEEL accumulator in front of the wheel binding rows: each
+// message's signed delta (WHEEL_DELTA 120 per notch, positive away from the
+// user) joins a persistent remainder, and every whole +120 dispatches one
+// wheel-up event (the 0x400 binding mask) while every whole -120 dispatches one
+// wheel-down event (0x800); the rest carries into the next message.
+// [orig: Input_DispatchMouseEvent @ 0x761470 -- `sar eax,10h` / `add eax,
+//  g_MouseState.wheelRemainder` @ 0x7614AB..0x7614AE, the +120 walk firing
+//  event 0x100 @ 0x761575..0x7615AA, the -120 walk firing 0x200
+//  @ 0x7615AC..0x7615DB; the events map to masks 0x400 / 0x800 in
+//  try_dispatch_binding_by_weapon_type @ 0x4992FC / @ 0x499311]
+inline constexpr int32_t kWheelDelta = 120;
+class WheelRemainder {
+public:
+	// Returns the signed whole-notch count this delta completes.
+	int feed(int32_t delta);
+
+private:
+	int32_t remainder_ = 0;
 };
 
 // Owns the action table's gates and latches across frames and mission rebuilds.
