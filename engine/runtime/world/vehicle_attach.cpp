@@ -476,9 +476,9 @@ bool VehicleSystem::detach(EntityHandle player) {
     // every matching seat handle on the mount target releases (all 10 slots in the
     // original; our seat vector sweeps by occupant), Flags &= ~0x40 and the mount trio
     // clears. The EquippedSlot backup is restored for a player and cleared for an
-    // NPC below. The claimant-only ground sound clear/stop now rides
-    // vehicle_release_primary_occupant; the engine-state 7 / attached-effect release
-    // remains unmodeled (D-NET-157).
+    // NPC below. The claimant-only ground sound clear/stop and the vehicle
+    // slot's counter cut ride vehicle_release_primary_occupant; the
+    // attached-effect release remains unmodeled (D-NET-157).
     occ->net_stance_bits = 0;
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {

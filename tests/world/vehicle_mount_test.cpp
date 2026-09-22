@@ -3203,7 +3203,39 @@ static void test_use_scan_and_label_follow_live_seat_pose() {
     r.w.pose_provider = nullptr;
 }
 
+// The claimant leaving a PlayerControl vehicle cuts the running action of the
+// vehicle's weapon slot short: a nonzero counter drops to 7 ticks. An idle
+// slot, a passenger leaving and a vehicle without the attrib keep theirs.
+// [orig: Entity_DetachFromVehicle @0x4356E3..0x4356FF]
+static void test_claimant_detach_cuts_vehicle_slot_action() {
+    Rig r;
+    r.veh().item_attrib |= kItemAttribPlayerControl;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    CHECK(r.veh().primary_occupant == r.player_h);
+    r.veh().primary_weapon_slot.counter = 40;
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.veh().primary_weapon_slot.counter == 7);
+
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    r.veh().primary_weapon_slot.counter = 0;
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.veh().primary_weapon_slot.counter == 0);
+
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+    CHECK(!r.veh().primary_occupant.valid());
+    r.veh().primary_weapon_slot.counter = 40;
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.veh().primary_weapon_slot.counter == 40);
+
+    r.veh().item_attrib &= ~kItemAttribPlayerControl;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    CHECK(r.veh().primary_occupant == r.player_h);
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.veh().primary_weapon_slot.counter == 40);
+}
+
 int main() {
+    test_claimant_detach_cuts_vehicle_slot_action();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();

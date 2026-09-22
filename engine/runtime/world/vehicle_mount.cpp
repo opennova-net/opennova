@@ -82,6 +82,14 @@ bool VehicleSystem::release_primary_occupant(Entity &vehicle, EntityHandle occup
     // occupant — leaves the latch untouched.
     if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
         return false;
+    // A PlayerControl vehicle's claimant leaving cuts the running action of
+    // its vehicle weapon slot short: a nonzero MountSlot counter drops to 7.
+    // [orig: Def gate @0x4356D0, attrib 0x40 @0x4356EF..0x4356F4, +0x474
+    //  counter @0x4356F6..0x4356FF; the slot is Entity_GetWeaponSlots
+    //  @0x5460FA's vehicle MountSlot]
+    if (vehicle.has_item_def && (vehicle.item_attrib & kItemAttribPlayerControl) != 0 &&
+            vehicle.primary_weapon_slot.counter != 0)
+        vehicle.primary_weapon_slot.counter = 7;
     // The PlayerControl leg: the all-zero fold and the stop on the departing
     // occupant, then the +0x1CC smoke emitter release; the next mover tick
     // re-arms the smoke while the damage band still holds.
