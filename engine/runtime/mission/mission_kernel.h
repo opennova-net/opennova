@@ -417,6 +417,9 @@ public:
 			world::SkeletalAnchor, int32_t out[3]) override;
 	bool resolve_userpoint_transform(world::World &w, world::EntityHandle entity,
 			int userpoint_index, int32_t out[6]) override;
+	bool resolve_userpoint_frame(world::World &w, world::EntityHandle entity,
+			const opennova::threedi::Threedi3di3 *model, int userpoint_index, int32_t out[6],
+			int32_t out_direction[3]) override;
 	bool resolve_userpoint_rigid(world::World &w, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
 

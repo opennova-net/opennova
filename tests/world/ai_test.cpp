@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/body_anim.h>
@@ -1214,6 +1215,108 @@ static void test_mounted_gunner_acquires_and_fires() {
     CHECK(fired);
 }
 
+// The AI gunner's shot leaves from the gun's point for the barrel its slot's
+// clip selected before the shot spent a round (a no-clip gun's 0xFFFF word
+// selects barrel 3), and a def carrying a third-person model fires from its
+// resolved launch point on that model instead.
+// [orig: WeaponAction_Fire @0x542BF7 -> Entity_CalcWeaponFirePosition
+//  @0x4DC7E6..0x4DC7F6 -> Entity_ComputeUserpointWorldTransform barrel
+//  @0x545D40..0x545D4B, gfx3 leg @0x545D06..0x545D85; consume @0x542C75;
+//  the no-clip word WeaponSlot_InitFromEntityDef @0x54670F..0x546713]
+static void test_mounted_gunner_fires_from_the_slot_barrel() {
+    struct GunPoints : IPoseProvider {
+        EntityHandle gun;
+        int point = 0;
+        const opennova::threedi::Threedi3di3 *model = nullptr;
+        bool resolve_userpoint_frame(World &, EntityHandle h, const opennova::threedi::Threedi3di3 *m,
+                int index, int32_t out[6], int32_t *) override {
+            if (h != gun) return false;
+            point = index;
+            model = m;
+            out[0] = (m != nullptr ? 100 + index : index) << 16;
+            out[1] = 0;
+            out[2] = 1 << 16;
+            out[3] = 0; out[4] = 0; out[5] = 0;
+            return true;
+        }
+    };
+    const opennova::threedi::Threedi3di3 gfx3{};
+    for (const bool third_person : {false, true}) {
+        auto w = std::make_unique<World>();
+        w->registry.configure_pool(0, 8);
+        w->registry.configure_pool(1, 8);
+        seed_test_rifle_ammo(*w);
+
+        Entity enemy_seed{};
+        enemy_seed.kind = EntityKind::Organic;
+        enemy_seed.item_id = 1001;
+        enemy_seed.has_item_def = true;
+        enemy_seed.item_type = 3;
+        enemy_seed.team = 2;
+        enemy_seed.health = 100;
+        enemy_seed.net_id = 0x21;
+        enemy_seed.group_id = 2;
+        enemy_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+        w->registry.spawn(0, enemy_seed);
+
+        Entity gun{};
+        gun.kind = EntityKind::Item;
+        gun.team = 1;
+        gun.net_id = 0x31;
+        gun.yaw = 90;
+        gun.item_attrib = kItemAttribEweap;
+        gun.primary_weapon.assign(1, 'x');
+        for (int barrel = 0; barrel < 4; ++barrel)
+            gun.weapon_userpoint_bytes[barrel][0] = static_cast<uint8_t>(10 + barrel);
+        Seat seat{};
+        seat.type = SeatType::Gunner;
+        gun.seats.push_back(seat);
+        GunPoints points;
+        points.gun = w->registry.spawn(1, gun);
+        w->pose_provider = &points;
+        w->tables.weapons.entries.resize(2);
+        w->tables.weapons.entries[1].name.assign(1, 'x');
+        w->tables.weapons.entries[1].ammo_index = 1;
+        w->tables.weapons.entries[1].valid = true;
+        configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+        if (third_person) {
+            w->tables.weapons.entries[1].third_person_model_asset =
+                    std::shared_ptr<const opennova::threedi::Threedi3di3>(
+                            &gfx3, [](const opennova::threedi::Threedi3di3 *) {});
+            w->tables.weapons.entries[1].launch_userpoint = 5;
+        }
+
+        Entity npc_seed{};
+        npc_seed.kind = EntityKind::Organic;
+        npc_seed.team = 1;
+        npc_seed.health = 100;
+        npc_seed.net_id = 0x11;
+        npc_seed.group_id = 1;
+        const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+        AttackEventSource clips;
+        AiSystem &ai = w->ai;
+        ai.is_authority = true;
+        ai.root_motion = &clips;
+        AiEntity &npc = *ai.at(ai.attach(npc_h));
+        configure_rifleman(npc, 0x11, 1);
+        w->add_system(&ai);
+        npc.profile.organic.ammo.fill(0);
+        CHECK(w->commands.mount(0x11, 0x31));
+        CHECK(w->registry.get(points.gun)->primary_weapon_slot.clip == -1);
+
+        bool fired = false;
+        for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
+            w->run_logic_tick(true);
+            fired = w->out.rounds.count > 0;
+        }
+        CHECK(fired);
+        if (fired)
+            CHECK(w->out.rounds.records[0].origin_x == (third_person ? 105 : 13) << 16);
+        w->pose_provider = nullptr;
+    }
+}
+
 // The water-crossing edge: a hull that drops below the water plane records ONE
 // crossing, not one per frame, and stops recording while it stays under. This is
 // the trigger behind the S2C 0x34 fan retail emits at every splash - the last
@@ -1372,8 +1475,12 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     // bone's euler, which the round leaves along.
     // [orig: Entity_CalcWeaponFirePosition parentSlot 3 @0x4dc7e6;
     //  Entity_FireWeaponAndSendPacket copies out[0..2] + out[3]/[4]]
+    // The resolver's zero-fill copies the one authored fire byte to every
+    // barrel, and a no-clip gun's clip word selects barrel 3.
+    // [orig: Entity_ResolveBoneUserpoints @0x545940; the barrel select
+    //  @0x545D40..0x545D4B]
     gun_live->item_attrib |= kItemAttribEweap;
-    gun_live->weapon_userpoint_bytes[0][0] = 1;
+    for (auto &barrel : gun_live->weapon_userpoint_bytes) barrel[0] = 1;
     FakeMuzzleProvider provider;
     provider.userpoints[gun_live->handle.packed] =
             {0x12345, -0x23456, 0x34567, 0x40000000, static_cast<int32_t>(0xFF000000u), 0};
@@ -3748,6 +3855,7 @@ int main() {
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
+    test_mounted_gunner_fires_from_the_slot_barrel();
     test_water_crossing_fires_once_on_entry();
     test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();

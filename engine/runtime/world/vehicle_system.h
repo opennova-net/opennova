@@ -21,6 +21,7 @@
 namespace opennova::world {
 
 class World;
+struct WeaponTableEntry;
 
 class VehicleSystem {
 public:
@@ -343,9 +344,12 @@ public:
 	void tick_simple_motor(
 			Entity &, const VehicleTraits &, const VehicleDriveCmd *, bool prediction);
 	void slew_turret(Entity &veh, int32_t step);
-	// ActionDef+52 rocks the tank carrying an occupied emplacement.
+	// ActionDef+52 rocks the tank carrying an occupied emplacement, against
+	// the direction of the gun's point for the fired slot (`fired` def, its
+	// clip as the fire tail leaves it, `column` from its action pair).
 	// [orig: WeaponAction_Fire @0x542B10; ActionSlot_ExecuteAction @0x4020A0]
-	void weapon_recoil(const Entity &shooter, int32_t amplitude, int32_t yaw, int32_t pitch);
+	void weapon_recoil(const Entity &shooter, int32_t amplitude, const WeaponTableEntry *fired,
+			int32_t slot_clip, int column);
 	void projectile_impact(
 			Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]);
 

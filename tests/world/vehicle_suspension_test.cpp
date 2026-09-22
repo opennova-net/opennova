@@ -791,8 +791,28 @@ void test_tank_grounded_catch_up_skips_within_one_step() {
 	CHECK(m.landing_2ee == 0, "and the same-side pair clears the marker");
 }
 
-// Authored action_value survives parse/bake and rocks only a mounted CTANK.
-// [orig: ActionDef_ParseScriptLine @0x4023C0; WeaponAction_Fire @0x542B10]
+// The gun's point for the fired slot: a fixed authored direction through a
+// posed bone, recording which point and whether the direction was asked for.
+struct GunPointProvider : IPoseProvider {
+	int32_t direction[3] = { 65536, 0, 0 };
+	int point = 0;
+	bool asked_direction = false;
+	bool resolve_userpoint_frame(World &, EntityHandle, const opennova::threedi::Threedi3di3 *,
+			int index, int32_t out[6], int32_t out_direction[3]) override {
+		point = index;
+		asked_direction = out_direction != nullptr;
+		for (int i = 0; i < 6; ++i) out[i] = 0;
+		if (out_direction != nullptr)
+			for (int k = 0; k < 3; ++k) out_direction[k] = direction[k];
+		return true;
+	}
+};
+
+// Authored action_value survives parse/bake and rocks only a mounted CTANK,
+// against the direction of the gun's point for the fired slot as the fire
+// tail leaves it (the clip spent, the flash field of FIRE->RECOIL).
+// [orig: ActionDef_ParseScriptLine @0x4023C0; WeaponAction_Fire @0x542B10,
+//  the point @0x542D45..0x542D5B negated @0x542D60..0x542D7D]
 void test_mounted_action_recoil() {
 	auto heap = make_world(true);
 	World &w = *heap;
@@ -810,27 +830,47 @@ void test_mounted_action_recoil() {
 	w.vehicles.traits.set(v.item_id, t);
 	Entity gun;
 	gun.ground_target = vh;
+	gun.item_attrib = kItemAttribEweap;
+	gun.weapon_userpoint_bytes[2][1] = 9; // barrel 2, the flash field
+	gun.weapon_userpoint_bytes[2][0] = 8; // barrel 2, the fire field
 	const auto gh = w.registry.spawn(1, gun);
+	w.tables.weapons.entries.resize(1);
+	w.tables.weapons.entries[0].valid = true;
+	const WeaponTableEntry *fired = &w.tables.weapons.entries[0];
+	GunPointProvider points;
+	w.pose_provider = &points;
 	Entity person;
 	person.mounted = true;
 	person.mount_type = SeatType::Gunner;
 	person.mount_target = gh;
 	w.logic_tick = 120;
-	w.vehicles.weapon_recoil(person, 20, 0, 0);
+	w.vehicles.weapon_recoil(person, 20, fired, 6, 1);
+	CHECK(points.point == 9 && points.asked_direction,
+			"the flash point of the barrel the spent clip selects, with its direction");
 	CHECK(v.veh.chassis_active && v.veh.chassis_contact_active, "tank rocks on fire");
 	CHECK(v.veh.chassis_blend_tick == 120 && v.veh.chassis_blend_ticks == 40,
 			"recoil blends for 40 ticks");
-	CHECK(v.veh.chassis_impulse_direction[0] == -65536, "recoil opposes shot direction");
+	CHECK(v.veh.chassis_impulse_direction[0] == -65536,
+			"recoil opposes the gun point's authored direction");
 	const int32_t pitch = v.veh.chassis_matrix[8];
 	CHECK(pitch != 0, "the recoil pair tilts the chassis");
-	w.vehicles.weapon_recoil(person, 0, 0, 0);
+	w.vehicles.weapon_recoil(person, 0, fired, 6, 1);
 	CHECK(v.veh.chassis_matrix[8] == pitch, "zero action value preserves the previous recoil");
-	w.vehicles.weapon_recoil(person, 20, int32_t(0x80000000u), 0);
-	CHECK(int64_t(pitch) * v.veh.chassis_matrix[8] < 0, "opposite shot reverses recoil pitch");
+	points.direction[0] = -65536;
+	w.vehicles.weapon_recoil(person, 20, fired, 6, 1);
+	CHECK(int64_t(pitch) * v.veh.chassis_matrix[8] < 0,
+			"a point facing the other way reverses recoil pitch");
 	for (const auto &f : v.veh.chassis_forces)
 		CHECK(f.rate == 0, "applied force slots are consumed");
+	// No slot def is the raw leg: no point, the gun's raw forward stands in
+	// (mission yaw 0 faces +Y).
+	points.point = 0;
+	w.vehicles.weapon_recoil(person, 20, nullptr, 6, 1);
+	CHECK(points.point == 0, "a slot without a def poses no point");
+	CHECK(v.veh.chassis_impulse_direction[1] == -65536, "the raw gun forward stands in");
+	w.pose_provider = nullptr;
 	person.mount_type = SeatType::Driver;
-	w.vehicles.weapon_recoil(person, 55, 0, 0);
+	w.vehicles.weapon_recoil(person, 55, fired, 6, 1);
 	CHECK(v.veh.chassis_impulse_amplitude == 20, "ordinary seats do not rock their vehicle");
 
 	v.has_item_def = true;

@@ -8,9 +8,14 @@
 
 #include <cctype>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <runtime/world/weapon_fsm.h>
+
+namespace opennova::threedi {
+struct Threedi3di3;
+}
 
 namespace opennova::world {
 
@@ -91,6 +96,18 @@ struct WeaponTableEntry {
     // swapped: `model_1p` there reads +0x170, which is this field.
     // [orig: WeaponDef.tpModel +0x170, read @ 0x4e3cd3]
     std::string third_person_model;
+    // That model as the parser loaded it (null when `gfx3` is absent or its
+    // load failed) and the launch userpoint resolved on it once every def has
+    // parsed: the first case-insensitive match of `launchuserpoint` (+0x2E8),
+    // 1-based, 0 when unnamed or unmatched. A fired slot whose def carries this
+    // model poses its launch point on it through the carrier instead of the
+    // carrier's own slot bytes. [orig: parse @0x544FCE..0x545092 (load) and
+    //  @0x544479..0x5444AC (name); WeaponDef_ResolveAllReferences
+    //  @0x5402C2..0x540316 -> modelgpm_FindUserpointByName @0x5B2170; consumers
+    //  Entity_ComputeUserpointWorldTransform @0x545D06..0x545D85,
+    //  Entity_ComputeUserpointTransform @0x545AEF..0x545BA5]
+    std::shared_ptr<const threedi::Threedi3di3> third_person_model_asset;
+    uint8_t launch_userpoint = 0; // +0x2D4
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].

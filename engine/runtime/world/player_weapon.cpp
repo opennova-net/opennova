@@ -1119,8 +1119,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 shooter->last_fire_target = fire_target;
 				w.round_sequence = static_cast<uint16_t>(w.round_sequence + 1u);
 				const uint16_t shot_seq = w.round_sequence;
+				// The fire tail reads the gun's point for the slot as the FSM
+				// leaves it: next = RECOIL (the mflash column), the clip spent.
+				// [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
 				world.vehicles.weapon_recoil(*shooter,
-						w.def.actions[weapon_action::kFire].action_value, dir_yaw, dir_pitch);
+						w.def.actions[weapon_action::kFire].action_value, adm,
+						active_local_weapon_slot(world, w)->clip, 1);
 
 				RoundEvent round_event;
 				round_event.shooter_handle = !io.is_authority
