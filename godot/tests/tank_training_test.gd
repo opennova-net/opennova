@@ -128,10 +128,10 @@ func _fight_convoy(sim: Simulation) -> void:
 	assert_eq(sim.get_round_outcome_debug().get_winner_team(), 1)
 
 
-func test_07tr_tank_course_from_boarding_to_victory() -> void:
+func _boot_training() -> ResourceRoot:
 	if RetailData.install().is_empty():
 		pending("OPENNOVA_JO_DIR with 07TR.bms is required")
-		return
+		return null
 	var root := ResourceRoot.new()
 	# Use the installed revx02 course when available, matching the reference
 	# data and configured JOTAC game; ordinary JO installs use the base course.
@@ -144,13 +144,20 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	assert_eq(mission.open_from_resource_root(root, "07TR.bms"), OK)
 	assert_eq(_world.load_mission_data(mission, "07TR.bms"), OK)
 	_world.set_process(false)
-	var sim := _world.get_sim()
 	_camera = Camera3D.new()
 	add_child_autofree(_camera)
 	_camera.make_current()
 	_presenter = LocalPlayerPresenter.new()
 	add_child_autofree(_presenter)
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
+	return root
+
+
+func test_07tr_tank_course_from_boarding_to_victory() -> void:
+	var root := _boot_training()
+	if root == null:
+		return
+	var sim := _world.get_sim()
 	for ssn in [37, 38, 202, 203]:
 		assert_gt(sim.entity_card_by_net_id(ssn).get_mission_position().z, 11.5,
 				"landing craft starts afloat before its crew boards")
@@ -159,12 +166,7 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	assert_not_null(tank)
 	if tank == null:
 		return
-	var cannon: EntityCard
-	var snapshot := sim.get_present_snapshot()
-	for base in range(0, snapshot.size(), sim.get_present_stride()):
-		var card := sim.entity_card(int(snapshot[base + Simulation.PF_WIRE_HANDLE]))
-		if card != null and card.get_item_id() == 166 and card.get_mission_position().distance_to(tank.get_mission_position()) < 10.0:
-			cannon = card
+	var cannon := _tank_cannon(sim, tank)
 	assert_not_null(cannon)
 	if cannon == null:
 		return
@@ -232,3 +234,91 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	_presenter.teardown()
 	_presenter = null
 	_world.unload()
+
+
+func _tank_cannon(sim: Simulation, tank: EntityCard) -> EntityCard:
+	var snapshot := sim.get_present_snapshot()
+	for base in range(0, snapshot.size(), sim.get_present_stride()):
+		var card := sim.entity_card(int(snapshot[base + Simulation.PF_WIRE_HANDLE]))
+		if card != null and card.get_item_id() == 166 and card.get_mission_position().distance_to(tank.get_mission_position()) < 10.0:
+			return card
+	return null
+
+
+func _visible_attach_texts(hud: HudOverlay, gametext: RtxtStringFile) -> Array[String]:
+	_presenter.after_world_tick()
+	hud.set_attach_labels(_camera.global_transform, _presenter.view_projection(), gametext, _world.get_sim())
+	var texts: Array[String] = []
+	for i in hud.get_attach_label_count():
+		if hud.get_viewport().get_visible_rect().has_point(hud.get_attach_label_position(i)):
+			texts.append(hud.get_attach_label_text(i))
+	return texts
+
+
+func _use(sim: Simulation) -> void:
+	if DisplayServer.get_name() == "headless":
+		assert_true(sim.local_player_toggle_mount())
+		return
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_CAPTURED)
+	for pressed: bool in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = KEY_SHIFT
+		event.physical_keycode = KEY_SHIFT
+		event.pressed = pressed
+		Input.parse_input_event(event)
+		Input.flush_buffered_events()
+		_presenter.before_world_tick(Simulation.tick_dt(), false, true)
+
+
+func test_07tr_cannon_prompt_from_landing_craft_deck() -> void:
+	var root := _boot_training()
+	if root == null:
+		return
+	var sim := _world.get_sim()
+	_advance(sim)
+	var cannon := _tank_cannon(sim, sim.entity_card_by_net_id(33))
+	assert_not_null(cannon)
+	if cannon == null:
+		return
+	var seat: EntityCardSeat = cannon.get_seats()[0]
+	assert_false(seat.is_occupied(), "the player's training cannon is free")
+	var target := _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
+	var approach := target + Vector3(0, 3, 0)
+	# Approach at the player's walkable craft-deck height and let normal
+	# collision settle the position.
+	approach.z = MountLook.local_player_mission_position(sim).z
+	MountLook.face(sim, target, approach)
+	_advance(sim, 32)
+	target = _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
+	var gametext := RtxtStringFile.new()
+	assert_eq(gametext.load_from_byte_array(root.read_file("gametext.bin")), OK)
+	var hud := HudOverlay.new()
+	add_child_autofree(hud)
+	var here := MountLook.local_player_mission_position(sim)
+	var yaw := rad_to_deg(atan2(target.x - here.x, target.y - here.y))
+	assert_eq(sim.debug_teleport_local_player(here, yaw, 15.0), OK)
+	_advance(sim, 1)
+	var texts := _visible_attach_texts(hud, gametext)
+	gut.p("Upper-turret view attachment labels: " + str(texts))
+	assert_has(texts, ".50 Cal", "the upper gun remains in view")
+	assert_does_not_have(texts, "120 MM Cannon", "the lower cannon anchor is below this view")
+	# Re-aim at the cannon from the SAME standing position. This catches an
+	# empty/missing HUD label as well as a label/USE selection disagreement.
+	MountLook.face(sim, target)
+	_advance(sim, 1)
+	texts = _visible_attach_texts(hud, gametext)
+	gut.p("Cannon view attachment labels: " + str(texts))
+	assert_has(texts, "120 MM Cannon")
+	assert_gte(hud.get_attach_label_selected(), 0)
+	assert_eq(hud.get_attach_label_text(hud.get_attach_label_selected()), "120 MM Cannon",
+			"looking at the visible cannon prompt selects its seat")
+	_use(sim)
+	_advance(sim)
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M1TURRET",
+			"USE boards the cannon advertised by the HUD")
+	for tick in 1250:
+		if sim.has_event_fired(15):
+			break
+		_advance(sim, 1)
+	assert_true(sim.has_event_fired(15), "boarding the visible cannon prompt starts the lesson")

@@ -193,6 +193,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_attach_label_selected);
 	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
 			&HudOverlay::get_attach_label_text);
+	ClassDB::bind_method(D_METHOD("get_attach_label_position", "index"),
+			&HudOverlay::get_attach_label_position);
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
 								  "camera_projection", "fog_distance_units", "sim"),
 			&HudOverlay::set_friendly_tags);
@@ -1084,6 +1086,14 @@ String HudOverlay::get_attach_label_text(int p_index) const {
 		return String();
 	}
 	return opennova::to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
+}
+
+Vector2 HudOverlay::get_attach_label_position(int p_index) const {
+	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
+		return Vector2();
+	}
+	const auto &label = state_.attach_labels[static_cast<size_t>(p_index)];
+	return Vector2(label.screen_x, label.screen_y);
 }
 
 // [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
