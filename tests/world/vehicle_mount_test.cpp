@@ -7,6 +7,7 @@
 //    AI-driver leg @0x48bc12-0x48c034
 //  - the player deploy group stamp @0x519fd0 (commandGroup = 1)
 #include <base/io/bam.h>
+#include <runtime/devtools/tick_profile.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -2038,6 +2039,130 @@ void test_handbrake_latch() {
     CHECK((drv.net_move_input & 0x10u) == 0);
 }
 
+// A truck/tank brain with a live AI driver in the control seat and a route
+// node straight ahead, for the drive-leg ownership tests below.
+struct DriveRig {
+    Rig r{30.0f};
+    VehicleTraits t = truck_traits();
+    EntityHandle driver;
+    explicit DriveRig(VehicleFamily family) {
+        t.family = family;
+        r.w.vehicles.traits.set(r.veh().item_id, t);
+        AiEntity &ve = *r.sys.at(r.sys.attach(r.veh_h));
+        ve.pos[0] = 100 << 16;
+        ve.pos[1] = 200 << 16;
+        ve.pos[2] = 10 << 16;
+        r.sys.nav.channels.resize(3);
+        r.sys.nav.channels[2].count = 1;
+        r.sys.nav.channels[2].entries[0] = 0;
+        r.sys.nav.nodes.resize(1);
+        r.sys.nav.nodes[0] = NavEntry{{2 << 16, 300 << 16, 200 << 16, 10 << 16, 0}};
+        AiBrain &b = ve.brain;
+        b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 16;
+        b.f[AiBrain::kWpType] = 1;
+        b.f[AiBrain::kWpChannel] = 2;
+        b.f[AiBrain::kOutSpeed] = 40 * 293;
+        r.veh().veh.yaw_seeded = true;
+        r.veh().veh.yaw_bam = 0; // facing the node
+        Entity npc;
+        npc.kind = EntityKind::Organic;
+        npc.item_id = 2072;
+        npc.health = 150;
+        npc.alive = true;
+        driver = r.w.registry.spawn(0, npc);
+        CHECK(r.w.vehicles.process_attach(driver, r.veh_h, 1));
+    }
+    AiEntity &brain() { return *r.sys.for_handle(r.veh_h); }
+    void motor_pass() {
+        opennova::devtools::ProfileLap lap(r.w.profile);
+        r.w.vehicles.tick_motors(true, lap);
+    }
+};
+
+// Zero health alone does not park: until the dying state's death transforms
+// raise the dead bit, the hull keeps its AI driver's leg (route command, no 22
+// stamp); the dead bit then parks it.
+// [orig: ctan @0x48954B..0x489560; cveh @0x48B972..0x48B987]
+void test_zero_health_hull_keeps_its_driver_leg() {
+    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Tank}) {
+        DriveRig d(family);
+        d.r.veh().health = 0;
+        d.r.veh().alive = false;
+        Entity *ctrl = d.r.w.vehicles.resolve_controller(d.r.veh());
+        CHECK(ctrl != nullptr);
+        VehicleDriveCmd cmd;
+        d.r.sys.vehicle_ai_drive(d.r.w, d.r.veh(), ctrl, d.t, cmd);
+        CHECK(cmd.ai_drive && cmd.cmd_speed == 40 * 293);
+        CHECK(d.brain().brain.f[AiBrain::kCurState] == 16);
+        d.r.w.vehicles.tick_motor(d.r.veh(), d.t, &cmd);
+        CHECK(d.r.veh().veh.cmd_speed == 40 * 293);
+        d.r.veh().flags |= kEntityFlagDead;
+        VehicleDriveCmd parked;
+        d.r.sys.vehicle_ai_drive(d.r.w, d.r.veh(), ctrl, d.t, parked);
+        CHECK(!parked.ai_drive);
+        CHECK(d.brain().brain.f[AiBrain::kCurState] == 22);
+        d.r.w.vehicles.tick_motor(d.r.veh(), d.t, &parked);
+        CHECK(d.r.veh().veh.cmd_speed == 0);
+    }
+}
+
+// A PLAYER driver whose eye sits under the water plane hands a ground or tank
+// hull to the AI leg, as the boat does: the brain's 22 becomes 16 and the command
+// is the brain's out-speed, not the player's last input.
+// [orig: cveh @0x48B9A0..0x48B9AC -> @0x48BC12; ctan @0x489579..0x489585
+//  -> @0x4897DB]
+void test_submerged_player_driver_takes_the_ai_leg() {
+    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Tank}) {
+        Rig r(2.0f);
+        VehicleTraits t = truck_traits();
+        t.family = family;
+        r.w.vehicles.traits.set(r.veh().item_id, t);
+        r.sys.attach(r.veh_h);
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        AiEntity &ve = *r.sys.for_handle(r.veh_h);
+        ve.brain.f[AiBrain::kCurState] = ve.brain.f[AiBrain::kPendState] = 22;
+        ve.brain.f[AiBrain::kOutSpeed] = 0; // the brain holds its hull still
+        r.veh().veh.cmd_speed = 12345;      // the player's last command
+        Entity &pl = r.player();
+        pl.eye_offset_z = 65536;
+        r.w.env.water_z = to_fixed(pl.position.z) + (2 << 16);
+        opennova::devtools::ProfileLap lap(r.w.profile);
+        r.w.vehicles.tick_motors(true, lap);
+        CHECK(r.sys.for_handle(r.veh_h)->brain.f[AiBrain::kCurState] == 16);
+        CHECK(r.veh().veh.cmd_speed == 0);
+    }
+}
+
+// The mover's command registers are the brain's own words 132/136/137 in retail
+// (one dword each): after the motor pass the brain reads the mover's steer target
+// and command back, over any state-machine write. The dying tick's zeroing of
+// the commanded speed reaches the mover register the same way.
+// [orig: ctan [ebx+210h] @0x489952 / [ebx+220h] @0x489811 with ebx = entity+0x64
+//  @0x488ACA; AI_UpdatePatrolBehavior reads [esi+210h] @0x457DD4;
+//  AI_TickState_VehicleDying `mov [esi+220h],ebx` @0x467D83]
+void test_mover_command_registers_are_the_brain_words() {
+    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Tank}) {
+        DriveRig d(family);
+        d.brain().brain.f[AiBrain::kWorkHeading] = 777; // a state-machine write
+        d.motor_pass();
+        const AiBrain &b = d.brain().brain;
+        CHECK(b.f[AiBrain::kWorkHeading] == d.r.veh().veh.steer_target_bam);
+        CHECK(b.f[AiBrain::kWorkHeading] != 777);
+        CHECK(b.f[136] == d.r.veh().veh.cmd_speed && b.f[136] != 0);
+        CHECK(b.f[137] == d.r.veh().veh.steer_ramp_bam);
+
+        // The dying tick, still moving: its [136] zero is the mover's command.
+        AiEntity &ve = d.brain();
+        ve.brain.f[AiBrain::kCurState] = 21;
+        d.r.veh().veh.vel_x = 5000;           // >= 1057 and > 1024 per tick: moving
+        d.r.veh().veh.cmd_speed = 5000;
+        AiThinkCtx ctx{&d.r.sys, &ve, &d.r.w, nullptr};
+        d.r.sys.row(21).tick(ctx);
+        CHECK(ve.brain.f[136] == 0);
+        CHECK(d.r.veh().veh.cmd_speed == 0);
+    }
+}
+
 // The ground twin of the boarders hold [orig: @0x48bf6f-0x48bff9]: an AI
 // driver holds at cmd 0 while a body walks over to a free seat.
 void test_ground_waits_for_boarders() {
@@ -2070,9 +2195,11 @@ void test_ground_waits_for_boarders() {
     walker.alive = true;
     walker.has_item_def = true;
     const EntityHandle wh = r.w.registry.spawn(0, walker);
-    AiEntity &wb = *r.sys.at(r.sys.attach(wh));
-    wb.brain.f[37] = 125;
-    wb.brain.f[38] = static_cast<int32_t>(r.veh().net_id);
+    r.sys.attach(wh);
+    // The real board order (SSNtoSSN) stores the command in the walker's SLOT,
+    // where the hold reads it [orig: WacCmd_SsnToSsn @0x4F73E4..0x4F73F7; the
+    // reader cveh @0x48BFC1..0x48BFDA].
+    CHECK(r.w.commands.order_boarding(wh, r.veh_h));
     VehicleDriveCmd cmd1;
     r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
     CHECK(cmd1.ai_drive);
@@ -2252,10 +2379,11 @@ void test_helo_authority_health() {
     CHECK(h.r.veh().health == 0);
 }
 
-// The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
-// commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
-// [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
-//  AI_HandleCommand @0x465770 0xA/0xB]
+// The group redirect reaches a pool-1 BRAIN (mode/list/node) without the pool-0
+// leg's resets or budget seed, and the BMS speed commands write kSpeedA/kSpeedB at
+// the witnessed x65536/225 scale.
+// [orig: Entity_SetWaypointByTeam @0x43CD20 (pool 1 @0x43CE5A..0x43CF01);
+//  Entity_ApplyCommand @0x43ab60 0x1D/0x1E -> AI_HandleCommand @0x465770 0xA/0xB]
 void test_redirect_and_speed_commands() {
     Rig r(30.0f);
     r.veh().group_id = 3; // 00TRa's truck group
@@ -2276,6 +2404,12 @@ void test_redirect_and_speed_commands() {
     // the 00TRg debarked-crew freeze: slot[37]=125 short-circuits the infantry
     // think forever if the redirect only writes the brain registers.
     ve.slot.f[37] = 125;
+    // The pool-1 leg carries no cooldown/carrier reset and no waypoint refresh:
+    // the vehicle keeps its current leg's budget and bearing.
+    ve.slot.f[36] = 77;
+    ve.inf.wait_cooldown = 5;
+    ve.brain.f[AiBrain::kAnimFlag] = 1234;
+    ve.brain.f[AiBrain::kWpBearing] = 4321;
     CHECK(r.w.commands.group_to_waypoint(3, 2) == 1); // RedirectGroupTo(3, list 2)
     AiBrain &b = ve.brain;
     CHECK(b.f[AiBrain::kWpType] == 1);
@@ -2284,13 +2418,14 @@ void test_redirect_and_speed_commands() {
     // the scan's fallback initializer, so a broken nearest-node scan fails here.
     CHECK(b.f[AiBrain::kWpNode] == 1);
     CHECK(r.veh().wp_number == 1);
+    CHECK(b.f[AiBrain::kAnimFlag] == 1234 && b.f[AiBrain::kWpBearing] == 4321);
     // The SLOT half of the witnessed redirect block [orig: Entity_SetWaypointByTeam
-    // @0x43cdb4 — aiComp+140=1, +148=list, +152=node, carrier cleared]: the
-    // infantry think navigates from these, not the brain registers.
+    // @0x43CE91..0x43CECF — aiComp+140=1, +148=list, +152=node]: the infantry
+    // think navigates from these, not the brain registers.
     CHECK(ve.slot.f[35] == 1);
     CHECK(ve.slot.f[37] == 2);
     CHECK(ve.slot.f[38] == 1);
-    CHECK(ve.slot.f[36] == 0);
+    CHECK(ve.slot.f[36] == 77 && ve.inf.wait_cooldown == 5);
 
     // BMS RedirectGroupTo carries an explicit node in param3. It must not be
     // replaced by the nearest-node sentinel used by the two-argument WAC form.
@@ -2313,7 +2448,9 @@ void test_redirect_and_speed_commands() {
     r.sys.events.process_timed(r.sys, r.w);
     CHECK(b.f[AiBrain::kSpeedA] == 16019); // trunc(55 * 1000 * 4.4444446e-6 * 65536)
 
-    // A mounted NON-player in the group auto-detaches on redirect [orig: @0x43cdb4].
+    // A mounted NON-player slot holder in the group auto-detaches on redirect
+    // [orig: @0x43CD86..0x43CD98]; a body without a slot is skipped outright
+    // [orig: @0x43CD7E].
     Entity npc;
     npc.net_id = 900;
     npc.kind = EntityKind::Organic;
@@ -2325,19 +2462,78 @@ void test_redirect_and_speed_commands() {
     CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
     CHECK(r.w.registry.get(nh)->mounted);
     r.w.commands.group_to_waypoint(3, 2);
+    CHECK(r.w.registry.get(nh)->mounted);
+    r.sys.attach(nh);
+    r.w.commands.group_to_waypoint(3, 2);
     CHECK(!r.w.registry.get(nh)->mounted);
 
-    // The budget's bearing error is a WRAPPING 32-bit sub [orig: a plain x86 sub,
-    // @0x48bc9a-cf]: heading just short of +half-turn, node bearing just past
-    // -half-turn = a ~0.1 deg true error, not ~360 deg. The unwrapped form cast a
-    // NEGATIVE budget here, inverting the delta clamp.
+    // The WAC SSNtoWP and the pool-1 leg of RedirectSingleTo DO refresh the
+    // waypoint and seed the budget: (|Yaw - bearing| / denom) << 5, the idiv
+    // FIRST. The bearing error is a WRAPPING 32-bit sub: heading just short of
+    // +half-turn, node bearing just past -half-turn = a ~0.1 deg true error, not
+    // ~360 deg. [orig: WacCmd_SsnToWp @0x4F1D9F..0x4F1DB9; Entity_SetWaypointForTeam
+    //  @0x43DE70..0x43DE89]
     r.sys.nav.nodes[0] =
             NavEntry{{1 << 16, -300 * 65536, static_cast<int32_t>(199.5 * 65536),
                       10 << 16, 0}};
-    ve.heading = 2147000000; // the +pi side of the seam
-    r.sys.apply_route_order(ve, 2, 0);
-    CHECK(b.f[AiBrain::kAnimFlag] >= 0);
-    CHECK(b.f[AiBrain::kAnimFlag] < (1 << 22)); // the short-way error stays small
+    // Node 1 moves far off so node 0 is the nearest for the WAC form.
+    r.sys.nav.nodes[1] = NavEntry{{1 << 16, 5000 << 16, 200 << 16, 10 << 16, 0}};
+    AiEntity &truck = *r.sys.for_handle(r.veh_h);
+    truck.heading = 2147000000; // the +pi side of the seam
+    CHECK(r.w.commands.set_ssn_waypoint(r.veh_h, 2));
+    CHECK(truck.brain.f[AiBrain::kWpNode] == 0);
+    CHECK(truck.brain.f[AiBrain::kAnimFlag] >= 0);
+    CHECK(truck.brain.f[AiBrain::kAnimFlag] < (1 << 22)); // the short-way error stays small
+    const int32_t denom = (truck.brain.f[AiBrain::kStoredKeyTime] >> 15) + 32;
+    const int32_t err = std::abs(static_cast<int32_t>(static_cast<uint32_t>(truck.heading) -
+                                 static_cast<uint32_t>(truck.brain.f[AiBrain::kWpBearing])));
+    CHECK(truck.brain.f[AiBrain::kAnimFlag] == (err / denom) * 32);
+    truck.brain.f[AiBrain::kAnimFlag] = 0;
+    CHECK(r.w.commands.redirect_ssn_to_waypoint(11, 2, 0) == 1); // the truck's SSN
+    CHECK(truck.brain.f[AiBrain::kAnimFlag] == (err / denom) * 32);
+}
+
+// The per-leg turn budget of the ground/tank drive leg divides BEFORE the x32:
+// (|Yaw - bearing| / ((brain[35] >> 15) + 32)) << 5. A multiply-first form rounds
+// differently whenever the error is not a multiple of the divisor.
+// [orig: cveh `cdq; idiv edi; shl eax,5` @0x48BCD3..0x48BCD6; ctan @0x48989C..0x48989F]
+void test_ai_drive_budget_divides_first() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicles.traits.set(r.veh().item_id, t);
+    AiEntity &ve = *r.sys.at(r.sys.attach(r.veh_h));
+    ve.pos[0] = 100 << 16;
+    ve.pos[1] = 200 << 16;
+    ve.pos[2] = 10 << 16;
+    r.sys.nav.channels.resize(3);
+    r.sys.nav.channels[2].count = 1;
+    r.sys.nav.channels[2].entries[0] = 0;
+    r.sys.nav.nodes.resize(1);
+    // A node up and to the left: a bearing error that is not a multiple of 33.
+    r.sys.nav.nodes[0] = NavEntry{{1 << 16, 130 << 16, 290 << 16, 10 << 16, 0}};
+    AiBrain &b = ve.brain;
+    b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 16;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 2;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kStoredKeyTime] = 1 << 15; // denominator 33
+    b.f[AiBrain::kOutSpeed] = 40 * 293;
+    r.veh().veh.yaw_seeded = true;
+    r.veh().veh.yaw_bam = 0;
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    const EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    VehicleDriveCmd cmd;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), r.w.vehicles.resolve_controller(r.veh()), t, cmd);
+    CHECK(cmd.ai_drive);
+    const int32_t err = std::abs(b.f[AiBrain::kWpBearing]);
+    CHECK(err % 33 != 0);
+    CHECK(b.f[AiBrain::kAnimFlag] == (err / 33) * 32);
+    CHECK(b.f[AiBrain::kAnimFlag] != static_cast<int32_t>(32LL * err / 33));
 }
 
 // The SP drive input mirror: a mounted LOCAL player's live move bits reach the wire
@@ -3044,9 +3240,13 @@ int main() {
     test_min_ai_crew_clamp();
     test_handbrake_latch();
     test_ground_waits_for_boarders();
+    test_zero_health_hull_keeps_its_driver_leg();
+    test_submerged_player_driver_takes_the_ai_leg();
+    test_mover_command_registers_are_the_brain_words();
     test_helo_ai_flight();
     test_helo_authority_health();
     test_redirect_and_speed_commands();
+    test_ai_drive_budget_divides_first();
     test_local_player_drive_mirror();
 	test_driver_animation();
 	test_player_spawn_group();

@@ -164,11 +164,13 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                         ctrl != nullptr && ctrl->alive && ctrl->health > 0;
                 bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
                                    ctrl->player_class != 0;
-                // A boat whose PLAYER driver has their head under the water plane
-                // is driven by the AI leg [orig: the submerged-driver cut
-                // @0x48DFD3..0x48DFDF routes to the AI leg @0x48E247].
-                if (player_ctrl && traits->family == VehicleFamily::Watercraft &&
-                    watercraft_driver_submerged(world, *ctrl))
+                // A PLAYER driver whose head is under the water plane is driven
+                // by the AI leg in every family this staging serves, not only the
+                // boat. [orig: the submerged-driver cuts — cveh @0x48B9A0..0x48B9AC
+                // -> @0x48BC12; ctan @0x489579..0x489585 -> @0x4897DB; cbik
+                // @0x484AC6..0x484AD2 -> @0x484DB8; cbot @0x48DFD3..0x48DFDF
+                // -> @0x48E247]
+                if (player_ctrl && watercraft_driver_submerged(world, *ctrl))
                     player_ctrl = false;
                 if (player_ctrl) {
                     // A player drive freezes the SM mover exactly like the parked leg —
@@ -206,6 +208,16 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                 ve->heading = veh->veh.yaw_seeded
                         ? veh->veh.yaw_bam
                         : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+                // The mover's command registers ARE brain[132]/[136]/[137]
+                // (brain+0x210/+0x220/+0x224, the mover's moveMode base = entity
+                // +0x64): the next think reads the mover's steer target back, e.g.
+                // the evade tick's arrival test. The aircraft branch above carries
+                // its own mirror. [orig: ctan stores @0x489952 / @0x489811, cveh
+                // @0x48BD89 / @0x48BC35; the base load @0x488ACA..0x488AD9; the
+                // reader AI_UpdatePatrolBehavior @0x457DD4]
+                ve->brain.f[AiBrain::kWorkHeading] = veh->veh.steer_target_bam;
+                ve->brain.f[136] = veh->veh.cmd_speed;
+                ve->brain.f[137] = veh->veh.steer_ramp_bam;
             }
         }
         vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_MOTORS);

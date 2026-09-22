@@ -436,35 +436,82 @@ bool EntityCommands::set_ssn_guard(EntityTarget ssn, bool guard) {
 
 namespace {
 
-// The per-entity leg of a waypoint REDIRECT [orig: Entity_SetWaypointByTeam @0x43cdb4]:
-// a mounted NON-player auto-detaches [orig: Entity_DetachFromVehicleIfServer @0x4359d0],
-// the entity route fields update, and the brain (when the entity carries one) takes the
-// mode/list/node order + the turn-budget seed.
-void apply_waypoint_order(World &world, Entity &e, int32_t list, int32_t node) {
-    const bool is_player = e.handle.pool() == 0 && e.player_class != 0;
-    if (e.mounted && !is_player) world.commands.dismount(e.handle);
+// The slot half every redirect writer stores: route mode 1, the list, and the
+// node (the nearest node of the list for the -1 sentinel, any other operand kept:
+// commands 0 and 123..127 carry e.g. a carrier SSN, never clamped to a route).
+// The registry entity mirrors the list/node as its script/debug-facing route.
+// [orig: Entity_SetWaypointByTeam @0x43CDA0..0x43CDEA / @0x43CE91..0x43CECF;
+//  Entity_SetWaypointForTeam @0x43DD49..0x43DD9D / @0x43DDF8..0x43DE35;
+//  WacCmd_SsnToWp @0x4F1D35..0x4F1D5A; Entity_FindNearestTriggerByType @0x407EA0]
+void write_route_slot(World &world, Entity &e, AiEntity &ae, int32_t list, int32_t node) {
+    ae.slot.f[35] = 1;
+    ae.slot.f[37] = list;
+    ae.slot.f[38] = node == -1 ? world.ai.nearest_route_node(ae, static_cast<uint32_t>(list))
+                               : node;
     e.waypoint_id = static_cast<uint8_t>(list);
-    // Retail keeps the authored node, resolving only the -1 sentinel to nearest.
-    // [orig: Entity_SetWaypointByTeam @0x43cdb4 ->
-    // Entity_FindNearestTriggerByType @0x407ea0]
-    e.wp_number = node >= 0 ? node : 0;
-    if (AiEntity *ae = world.ai.for_handle(e.handle)) {
-        world.ai.apply_route_order(*ae, list, node);
-        // Mirror the resolved nearest/clamped node into the registry entity,
-        // which is the script/debug-facing route state.
-        if (ae->brain.f[AiBrain::kWpType] == 1 &&
-            ae->brain.f[AiBrain::kWpChannel] == list)
-            e.wp_number = ae->brain.f[AiBrain::kWpNode];
-    }
+    e.wp_number = ae.slot.f[38];
+}
+
+// A mounted body leaves its seat only on the authority [orig:
+// Entity_DetachFromVehicleIfServer @0x4359D0..0x4359E5].
+void detach_if_server(World &world, Entity &e) {
+    if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
 }
 
 } // namespace
 
-bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp, int32_t node) {
+bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp) {
+    // [orig: WacCmd_SsnToWp @0x4F1CE0 — the item gate @0x4F1D29, the slot gate
+    //  @0x4F1D2F, the nearest node @0x4F1D52 (no explicit-node form), the brain
+    //  gate @0x4F1D66]. No detach, cooldown, carrier or flag write.
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    apply_waypoint_order(world_, *e, wp, node);
+    if (e == nullptr || e->item_id == 0) return false;
+    AiEntity *ae = world_.ai.for_handle(e->handle);
+    if (ae == nullptr) return false;
+    write_route_slot(world_, *e, *ae, wp, -1);
+    world_.ai.copy_route_order_to_brain(*ae);
+    world_.ai.seed_route_turn_budget(*ae);
     return true;
+}
+
+int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t node) {
+    // Pool 0: the first slot holder whose net id matches takes the order and
+    // ENDS the walk — detach, the think cooldown and carrier word reset, the
+    // brain copy, and no budget seed. [orig: Entity_SetWaypointForTeam
+    //  @0x43DD2C..0x43DDCF — match @0x43DD2C, slot gate @0x43DD31, detach
+    //  @0x43DD37..0x43DD41, +0x128 @0x43DD69, slot+0x90 @0x43DD73, return
+    //  @0x43DDCF (and @0x43DDA2 without a brain)]
+    Entity *first = nullptr;
+    world_.registry.for_each_in_pool(0, [&](const Entity &candidate) {
+        if (first != nullptr || static_cast<int32_t>(candidate.net_id) != ssn) return;
+        if (world_.ai.for_handle(candidate.handle) == nullptr) return;
+        first = world_.registry.get(candidate.handle);
+    });
+    if (first != nullptr) {
+        detach_if_server(world_, *first);
+        AiEntity &ae = *world_.ai.for_handle(first->handle);
+        write_route_slot(world_, *first, ae, wp, node);
+        ae.inf.wait_cooldown = 0;
+        ae.slot.f[36] = 0;
+        world_.ai.copy_route_order_to_brain(ae);
+        return 1;
+    }
+    // Pool 1: every matching slot holder, with the budget seed and without the
+    // resets. [orig: @0x43DDD0..0x43DE89 — match @0x43DDED, slot gate @0x43DDF2]
+    std::vector<EntityHandle> members;
+    world_.registry.for_each_in_pool(1, [&](const Entity &candidate) {
+        if (static_cast<int32_t>(candidate.net_id) == ssn &&
+                world_.ai.for_handle(candidate.handle) != nullptr)
+            members.push_back(candidate.handle);
+    });
+    for (EntityHandle h : members) {
+        Entity &e = *world_.registry.get(h);
+        AiEntity &ae = *world_.ai.for_handle(h);
+        write_route_slot(world_, e, ae, wp, node);
+        world_.ai.copy_route_order_to_brain(ae);
+        world_.ai.seed_route_turn_budget(ae);
+    }
+    return static_cast<int>(members.size());
 }
 
 namespace {
@@ -1034,13 +1081,39 @@ int EntityCommands::kill_group(int group) {
 }
 
 int EntityCommands::group_to_waypoint(int group, int32_t wp, int32_t node) {
-    // [orig: Entity_SetWaypointByTeam @0x43cdb4 — commandGroup match over pools 0..1]
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    // [orig: Entity_SetWaypointByTeam @0x43CD20 — the signed commandGroup word
+    //  match @0x43CD6D / @0x43CE7B and the slot gate @0x43CD7E / @0x43CE8A over
+    //  pools 0 then 1]
     int n = 0;
-    for (EntityHandle h : members) {
-        Entity *e = world_.registry.get(h);
-        if (e) { apply_waypoint_order(world_, *e, wp, node); ++n; }
+    for (int pool = 0; pool <= 1; ++pool) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each_in_pool(pool, [&](const Entity &candidate) {
+            if (static_cast<int16_t>(candidate.group_id) == group &&
+                    world_.ai.for_handle(candidate.handle) != nullptr)
+                members.push_back(candidate.handle);
+        });
+        for (EntityHandle h : members) {
+            Entity &e = *world_.registry.get(h);
+            if (pool == 0 && ((e.flags | e.engine_flags) & kEntityFlagPlayer) == 0)
+                detach_if_server(world_, e); // [orig: @0x43CD86..0x43CD98]
+            AiEntity &ae = *world_.ai.for_handle(h);
+            write_route_slot(world_, e, ae, wp, node);
+            if (pool == 0) {
+                ae.inf.wait_cooldown = 0; // [orig: +0x128 = 0 @0x43CDC4]
+                ae.slot.f[36] = 0;        // [orig: slot+0x90 = 0 @0x43CDCA]
+            }
+            // The priority-target mark drops in both pools
+            // [orig: Flags &= ~0x4000 @0x43CDF3 / @0x43CED2].
+            e.flags &= ~kEntityFlagPriorityTarget;
+            e.engine_flags &= ~kEntityFlagPriorityTarget;
+            world_.ai.copy_route_order_to_brain(ae);
+            // Only the pool-0 leg refreshes the waypoint and seeds the budget; a
+            // redirected vehicle keeps its current leg's budget until the next
+            // node advance spends it [orig: pool 1 @0x43CEDD..0x43CF01 has no
+            // refresh].
+            if (pool == 0) world_.ai.seed_route_turn_budget(ae);
+            ++n;
+        }
     }
     return n;
 }
