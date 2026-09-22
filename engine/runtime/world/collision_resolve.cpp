@@ -90,8 +90,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Per-resolve blink/query state. [orig: the g_Blink* clears @ 0x4b2d54-0x4b2d7d]
-    // The +0x2c aux latches and resolver kill/sound/callback side effects remain
-    // deferred (D-COL-8); the mounted/carried source gate is modeled below.
+    // The +0x2c aux latches and the resolver's remaining sound/callback side
+    // effects stay deferred (D-COL-8); the run-over kill and bump sound are
+    // ported below, and the mounted/carried source gate is modeled here.
     // Mounted/carried sources still compute contacts and dispatch their flags,
     // but suppress every model push force. Retail forms this latch from a live
     // modeled parent, OR source Flags&0x40.
@@ -565,13 +566,18 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (replica_flags_ != nullptr && (blink.flags & kBlinkIndoorsBit) != 0)
         *replica_flags_ |= kEntityFlagIndoors;
 
-    // The run-over kill [orig: @0x4b37c2..0x4b39f7 — gates and the kill in
-    // vehicle_collision_damage.h]. The pusher's displacement is its mover-entry
-    // savedLivePose delta (+0x80); the victim's is measured from the resolver's
-    // previous-tick pose (its +0x80 stamp lives in the body motors' prologues).
-    if (pusher.valid() && ent != nullptr && is_authority) {
+    // The run-over kill and the bump sound [orig: @0x4b37c2..0x4b3a5c — gates,
+    // the kill and the sound in vehicle_collision_damage.h]. The pusher's
+    // displacement is its mover-entry savedLivePose delta (+0x80); the victim's
+    // is measured from the resolver's previous-tick pose (its +0x80 stamp lives
+    // in the body motors' prologues).
+    if (pusher.valid() && ent != nullptr) {
         const Entity *p = world.registry.get(pusher);
-        if (p != nullptr && p->has_item_def) {
+        const uint32_t vflags = ent->flags | ent->engine_flags;
+        if (p != nullptr && p->has_item_def &&
+                run_over_contact_applies(p->item_type == 1, ent->ground_target == pusher,
+                                         (p->flags & kEntityFlagDead) != 0, health,
+                                         (vflags & kEntityFlagDead) != 0)) {
 			const int32_t pdx = p->saved_live_valid
 					? io::bam_sub(to_fixed(p->position.x), p->saved_live_pos[0])
 					: 0;
@@ -593,19 +599,29 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const AiEntity *va = world.ai.for_handle(source);
             berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
                       (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
-            const uint32_t vflags = ent->flags | ent->engine_flags;
+            // A player victim keeps its life while its damage-disabled word
+            // (entity+0x124: spawn protection or the dead latch) is set, or
+            // while its slot carries the spectator latch (+0x188D7).
+            // [orig: `test eax, 100h` @0x4b3918, `cmp [esi+124h], 0`
+            //  @0x4b391f; Entity_ValidatePtr @0x4b3933, the slot byte
+            //  @0x4b393f]
+            bool player_protected = false;
+            if ((vflags & kEntityFlagPlayer) != 0) {
+                const MatchPlayer *slot = world.match.player(source);
+                player_protected = ent->damage_state != 0 ||
+                                   (slot != nullptr && slot->spectator);
+            }
             if (run_over_kill_applies(p->item_type == 1, ent->ground_target == pusher,
                                       (p->flags & kEntityFlagDead) != 0, health,
                                       (vflags & kEntityFlagDead) != 0, pusher_move, rel_move,
                                       p->team == ent->team, berserk, is_authority,
-                                      (vflags & kEntityFlagIndestructible) != 0)) {
-                // A player victim: retail also exempts a spectating slot
-                // (@0x4b393f — the player-slot byte +0x188D7); the +0x124
-                // dword gate @0x4b391f is unmodeled (a deployed player's is
-                // non-zero).
+                                      (vflags & kEntityFlagIndestructible) != 0,
+                                      player_protected)) {
+                // The approach quadrant reads the victim's displacement minus
+                // the pusher's [orig: @0x4b395d..0x4b3963].
                 const int quadrant = run_over_quadrant(
                         bam_heading_from_mission_yaw_deg(static_cast<double>(ent->yaw)),
-                        rdx, rdy);
+                        io::bam_sub(vdx, pdx), io::bam_sub(vdy, pdy));
                 ent->death_anim_state = compute_death_anim_state(
                         kRunOverDeathBone, quadrant, kRunOverDeathCause);
                 ent->last_attacker = p->primary_occupant; // [orig: +0x178 = pusher->occupantEntity]
@@ -617,6 +633,24 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 d.killer_handle = p->primary_occupant.valid()
                         ? p->primary_occupant.packed : 0xFFFFu;
                 world.round_sim.deaths.push_back(d);
+            }
+            // The bump sound follows on every peer, killed or not: the
+            // pusher's profile slot 38 at the victim, held for 31 ticks.
+            // [orig: @0x4b39fd..0x4b3a53]
+            if (run_over_sound_applies(pusher_move, rel_move)) {
+                const VehicleTraits *traits = world.vehicles.traits.get(p->item_id);
+                const audio::SoundProfile *profile = traits == nullptr ? nullptr
+                        : world.tables.sound_profiles.find(traits->sound_profile.empty()
+                                ? "default" : traits->sound_profile.c_str());
+                const std::string set = profile != nullptr
+                        ? profile->set_names[audio::kSlotImpactOrganic] : std::string{};
+                if (!set.empty() &&
+                        world.out.fire_sounds.track_trigger(set.c_str(), kRunOverSoundSuppressTicks))
+                    world.out.fire_sounds.play_with_distance_delay(set.c_str(),
+                            Vec3{static_cast<float>(from_fixed(pos[0])),
+                                 static_cast<float>(from_fixed(pos[1])),
+                                 static_cast<float>(from_fixed(pos[2]))},
+                            ent->bms_id, source.packed);
             }
         }
     }
