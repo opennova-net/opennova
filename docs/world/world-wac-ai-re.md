@@ -6256,9 +6256,11 @@ post-merge tidy.
 **The client fold (witnessed + ported 2026-08-05, D-NET-208).** The "a
 non-authority client destroys on phase 4" leg above is DRIVEN by two S2C
 routes, both ending in the same class death callback with reason 4:
-S2C `0x13` `[u16 handle][i16 killerSource]` — the health<=0 detection's
-non-player broadcast (`Entity_CheckAndProcessDeath @ 0x51b550`, msg 19, mask
-0x90) → `NapiNPClientMsg_EntityDeath @ 0x42eb50` (Health=0 @ 0x42ebd6,
+S2C `0x13` `[u16 handle][i16 killerSource]` — the health<=0 router's
+AI-infantry broadcast (`Entity_CheckAndProcessDeath @ 0x51b550`, msg 19, mask
+0x90; the router is reached only from the organic bodies, so a retail host never
+sends 0x13 for a destructible or a vehicle, though the client handler accepts one
+for any pool<5 handle; corrected 2026-09-22) → `NapiNPClientMsg_EntityDeath @ 0x42eb50` (Health=0 @ 0x42ebd6,
 `deathAnimStateId` @ 0x42ebdf — the wire's i16 killerSource doubles as the remote
 death-anim selection for organics, the same store zeroes the +0x1BA word (its IDB
 gloss "clear ammo/weapon field" remains wrong), and while the destructible fold
@@ -6281,8 +6283,11 @@ under the MP visual-client predicate, and `godot/src/mission/mission_root.cpp` b
 destruction present pass for joiners. Named deferrals: the pool-0 organic
 0x13 leg (presentation stays on the compact dead bit), the 0x13
 local-player camera-lerp/scope leg, vehicle (is_ai_capable) victims (their
-death rides the rows-21/23 state machine, §19.6), and the 0x26 itemType-1
-flags-bit0 strip (our fold passes no flags).
+death rides the rows-21/23 state machine, §19.6; the host half is ported
+2026-09-22, the state enters sending the 0x26 kill record (vehicle record
+section 24), while on the joiner `destruction_notify_item_damage` still returns
+early for them, so an AI vehicle's twin takes Health 0 without the husk swap),
+and the 0x26 itemType-1 flags-bit0 strip (our fold passes no flags).
 
 ### 24.3a Class clocks, regional shots, barrels, buildings, flags, and targets
 
@@ -11140,7 +11145,7 @@ NPCs chasing their previous helipad waypoints.
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B52A0..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
+| Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B5288..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
 | Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. This is not a claim that every interleaved world subsystem has identical scheduling. |
 | Redirect command admission and operand | MATCHING | `Entity_SetWaypointByTeam @0x43CD20` (pool-0 store @0x43CDB4) writes mode/channel/node without looking up a route; only node -1 requests nearest. Both slot and brain mirrors retain command 123's SSN and command 0's stop. The other two writers, `Entity_SetWaypointForTeam @0x43DD00` and `WacCmd_SsnToWp @0x4F1CE0`, are separated since 2026-09-22 (§23.4). |
 
@@ -11170,7 +11175,7 @@ is fixed; that issue remains a separate live presentation investigation.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-INF-25 | Local and authority organic motors apply carrier translation, capsule-biased rotation and look/body adoption after vehicle motors; org2 retains pitch-follow lag. | Org1 @0x4BA45D..0x4BA891, org2 @0x4B52A0..0x4B57E5; pool ordering @0x4C2158 / @0x4C2426. | FIXED 2026-09-18 in PR #652; unseated training helicopter riders retain support through takeoff. Replica scheduling remains the separate section 29.2 limitation. |
+| D-INF-25 | Local and authority organic motors apply carrier translation, capsule-biased rotation and look/body adoption after vehicle motors; org2 retains pitch-follow lag. | Org1 @0x4BA45D..0x4BA891, org2 @0x4B5288..0x4B57E5; pool ordering @0x4C2158 / @0x4C2426. | FIXED 2026-09-18 in PR #652; unseated training helicopter riders retain support through takeoff. Replica scheduling remains the separate section 29.2 limitation. |
 | D-AI-15 | Route-order writers accept reserved commands and preserve authored operands without NavChannel admission/clamping. | `Entity_SetWaypointByTeam @0x43CD20` (pool-0 store @0x43CDB4); only -1 resolves nearest. | FIXED 2026-09-18 in PR #652; boarding/stop orders replace the old routes instead of letting NPCs walk out of a moving cabin. |
 
 

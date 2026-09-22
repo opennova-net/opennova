@@ -3833,8 +3833,15 @@ the ground core:
      and steps only while unlatched (@ 0x4891D5..0x489208,
      @ 0x48933D..0x48935B); Z snaps always and steps as ground
      (@ 0x489379..0x48939A).
-   Only wire-frozen rows (state bits 0x01/0x04, deck rides) leave prediction;
-   crashed and settled rows run the chase. The differential track-scroll
+   Only dead-pose rows (state bit 0x04) and pool-1 deck rides leave
+   prediction. Wire bit 0x01 is the organic mover-skip, which no vehicle mover
+   tests (`Entity_UpdatePool1Slot` calls the mover with no Flags test,
+   @ 0x4B8E41..0x4B8E53), so a bit-0x01 vehicle row keeps chasing (corrected
+   2026-09-22, `netsim_remote_motion_smoothness`). Crashed and settled rows run
+   the chase. A joiner mirrors each accepted record's 0xB9 Flags bits onto its
+   twin before the client movers run (@ 0x460AEA..0x460AFC), so the client
+   crash arm (@ 0x46997C..0x469982) sees the host's word
+   (`netsim_joiner_vehicle_replica::run_record_tail_mirrors_flags_and_health`). The differential track-scroll
    accumulators (`track_phase_tick`, section 11) and the turret slew chase
    (`slew_turret`, section 11) are ported.
 7. **Crash stop** [orig: @ 0x489C06..0x489C1C]: the tank stops a crashed hull
@@ -3941,8 +3948,15 @@ complete mission-level vehicle parity.
 | Skid latch under the settle gate: cveh settle jump `@0x48D163..0x48D16A` lands ON the skid section `@0x48D264` (bit 8: and `@0x48D2C4`, set `@0x48D2EB`, clear `@0x48D345`); ctan's settle jump `@0x48AAB7..0x48AABE` lands at `0x48AD49` PAST its skid section `@0x48ABCB..0x48ACB5`; `flt_7C19E0` = 0x4EFFFE00 = 2147418112.0 | A settled cveh/cbik wreck still runs the skid latch/clear; only the tank skips it. The skid test is `ftol(min(sqrt(cx²+cy²+cz²), 2147418112.0)) != 0` with speed nonzero and `!(Flags & 0x2000)`. `+0x318` bit values: 1 claimant latch (`@0x48D3A5`), 2 reverse latch (`@0x48D1D7`), 4 lights latch (`@0x48D358`), 8 skid latch (`@0x48D2C4`), 0x20 a tank-only latch (`@0x48AAE0`). (Corrected 2026-09-08.) |
 | Helicopter loops: `update_vehicle_effect_emissions @0x528F20` `@0x52919D..0x5291CE` / `@0x5291ED..0x52921D` / `@0x529235..0x529260`; lifetime `effect_params+16 = 15 @0x528F94` → `SoundEmitter_RegisterSetLayers` slot word 21 `@0x528471`; `ItemDef_ResolveAllResources @0x49E7F0` fills `ItemDef.soundLoopId[7] @0x82C` from `res[16+i]` | Lane 21 reads `soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop), lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`), lane 1 `soundLoopId[0]` (+2092 = Soundloop_1); each registers with lifetime 15 (the ground fold's `SoundEmitter_Register @0x5292A6` packs 30). Retail sndprof.def helicopter profiles author only soundloop_2/3 (SP_Apache1: V_APACHE_ILP / V_APACHE_DLP .8 1.2), so lane 1 is normally silent and Soundloop_4..7 are never consulted. (Corrected 2026-09-08 — the PR row had slots 7/6/5; `vehicle_part_anim::test_helicopter_sound_curves_and_decay`.) |
 
-The presentation mask carries ownership only. Joiner compact rows still do
-not publish authoritative vehicle controls. Native regressions cover
+The presentation mask carries ownership only. A joiner publishes its local
+twin's motor controls (track phases, steering, speed, wheel phase, tire and
+rotor channels) exactly as the authority collector does, because the render
+callbacks run on every peer against that peer's own mover state [orig:
+HUD_CacheEntityDebugStats @ 0x449C10, track words @ 0x449C3C..0x449C69;
+Entity_CacheVehicleHUDStats @ 0x4929B0; the client mover's track phases
+Entity_UpdateTankVehiclePhysics @ 0x489F98 / @ 0x489FA0] (2026-09-22,
+`netsim_present_rows::test_joiner_vehicle_motion_controls_reach_present_rows`);
+the turret gun yaw/pitch words still have no joiner source. Native regressions cover
 cadence/authority, submersion, sound transitions, rotor timing, wrapped track
 math, turret commit boundaries and snapshot transport. GUT covers channel
 updates and ground-to-tank-to-helo ownership changes.
@@ -4635,6 +4649,24 @@ parser accepts STD=0, GROUND BOAT=1/TRAIN=3, and HELO PLANE=2. An alive
 idle boat copies its pose into the work transform and sets work Z to water.
 A dead boat queues event 3; other dead idle ground rows and state 14 queue
 event 5.
+
+**The kill record (2026-09-22, the tank fix round).** After the death
+transforms, an in-session authority sends the S2C 0x26 kill record (section 0)
+from the ground vehicle's dying and destroyed enters and the aircraft's dying
+and dead enters, each through `Server_SendEntityStatePacket @0x509D70`:
+`AI_TransitionToDeath_GroundVehicle` (Flags&4 test `@0x467B32`, send
+`@0x467B43..0x467B58`), `AI_TransitionToDestroyed_Vehicle`
+`@0x467E40..0x467E55`, `AI_TransitionToDeath_Vehicle` `@0x46694E..0x466963`
+and `Entity_ProcessVehicleDestruction` `@0x466B2C..0x466B41`. Vehicles never
+send S2C 0x13: the router `Entity_CheckAndProcessDeath @0x51B550` is reached
+only from the organic bodies (`@0x4B4CEA`, `@0x4B9D4D`, the console kill
+`@0x4D29EC`). Ported in `h_enter_vehicle_dying`, `h_enter_vehicle_dead`,
+`h_enter_aircraft_dying` and `h_enter_aircraft_dead`; `route_round_deaths`
+now runs the organic transaction and the 0x13 send only for Organic victims
+(`ai::test_vehicle_death_states_send_kill_record`, `npruntime_round_sim`,
+`npruntime_round_end`). The death dispatch also sets Flags 6 on the Flags word
+the compact serializes (`Entity_DispatchDeathCallback @0x493F63`), so the
+wreck streams the dead-pose form (net-re §5.13).
 
 ### Respawn marker research
 
@@ -5525,6 +5557,10 @@ table, NPC-parent coast, dispatch and per-family client chase gates (§10), the
 AI boarder hold, route writers, turn budget and submerged-driver cut (world
 record §23.3 and §23.4), the vehicle AI slot seed and respawn class init
 (section 18), and the ground-family mover-head savedLivePose stamp (§10 item
-13). Installed stock and JOTAC assisted 07TR course
+13). Its joiner legs are ported too: the vehicle death states' 0x26 kill
+record (section 24), the dead-pose form and full-width wire attitude, the
+reader's Flags/health/kill tail and the wreck-only freeze (§10 item 6),
+remote claimants, joiner motion controls (section 11), the 0x0D parent/target
+split and the first-frame tick. Installed stock and JOTAC assisted 07TR course
 runs pass; complete live-retail/normal-input acceptance remains unverified
 there.
