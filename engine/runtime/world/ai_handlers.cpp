@@ -647,8 +647,8 @@ int32_t death_speed(const AiEntity &e) {
 // immediate destroy event. The death-transform leg runs the witnessed order
 // [orig: Entity_UpdateDeathTransforms @0x494660]: pose snapshot, the unitType death
 // dispatch (husk swap Flags|=6 + death pieces), the death sounds/effects + kz blasts —
-// entity_update_death_transforms (world/destruction.cpp). The S2C 0x26 emit stays a
-// net-track stub (§24).
+// entity_update_death_transforms (world/destruction.cpp). An in-session authority then
+// sends the S2C 0x26 kill record (section 0); vehicles never use the organic 0x13.
 void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
@@ -657,8 +657,12 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
     e.net_saved_live_pose[2] = e.pos[2];
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
-            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate @0x467b4e]
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: AI_TransitionToDeath_GroundVehicle Flags&4 gate @0x467b32]
                 entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
+                // [orig: AI_TransitionToDeath_GroundVehicle @0x467B43..0x467B58 ->
+                //  Server_SendEntityStatePacket(entity, 0)]
+                emit_item_state(*ctx.world, *ent, 0);
+            }
         }
     }
 	// The `Parent` (ItemDef+0x548) gate over the brain's +576/+580 gunner-attachment
@@ -772,8 +776,12 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
     death_alert_block(ctx, e);
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
-            if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate]
+            if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: the Flags&4 gate]
                 entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
+                // [orig: AI_TransitionToDestroyed_Vehicle @0x467E40..0x467E55 ->
+                //  Server_SendEntityStatePacket(entity, 0)]
+                emit_item_state(*ctx.world, *ent, 0);
+            }
 			ent->veh.stuck_ticks = 0; // [orig: moveTimer +0x148 = 0 @0x467E22]
 			ent->team = 0; // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
 						   //  and drops out of ordinary target scans]
@@ -955,8 +963,12 @@ void h_enter_aircraft_dying(AiThinkCtx &ctx) {
 			const int cannon_index = world.tables.ammo.index_of("20mm");
 			const bool cannon = cannon_index >= 0 && ai.slot.f[24] == cannon_index;
 			if (!cannon && ((entity->flags | entity->engine_flags) & kEntityFlagHusk) == 0 &&
-					aircraft_death_ground(world, *entity) < to_fixed(entity->position.z))
+					aircraft_death_ground(world, *entity) < to_fixed(entity->position.z)) {
 				entity_init_aircraft_death(world, *entity, true);
+				// [orig: AI_TransitionToDeath_Vehicle @0x46694E..0x466963 ->
+				//  Server_SendEntityStatePacket(entity, 0)]
+				emit_item_state(world, *entity, 0);
+			}
 		}
 	}
 	death_alert_block(ctx, ai);
@@ -1010,6 +1022,9 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 				entity_init_aircraft_death(world, *entity,
 						ground == INT32_MIN ||
 								io::bam_sub(ground, 0x4000) <= to_fixed(entity->position.z));
+				// [orig: Entity_ProcessVehicleDestruction @0x466B2C..0x466B41 ->
+				//  Server_SendEntityStatePacket(entity, 0)]
+				emit_item_state(world, *entity, 0);
 			}
 			entity->flags |= 6;
 			entity->engine_flags |= 6;
