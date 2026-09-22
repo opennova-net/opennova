@@ -96,33 +96,40 @@ void LocalPlayer::update_aim_target() {
         local_weapon_fire_pose(world_, weapon, active_local_weapon_slot(world_, weapon)->clip,
                 player_view_scope_settled(view), fire);
         int32_t origin[3] = {fire[0], fire[1], fire[2]};
-        int32_t yaw = fire[3], pitch = fire[4], roll = fire[5];
-        // The weapon-view offsets: the scope-zero elevation comes back OUT of
-        // the ray while the weapon can fire. A binocular view substitutes
-        // its wander. The shared fire pose supplies mounted and mortar seeds.
-        // [orig: Entity_UpdateInfantryPlayerBody @0x4B4EA7..0x4B4EE0;
-        // binocular offsets @0x4B4EC8..0x4B4ED6; Entity_BuildCameraFromWeaponView
-        // yaw @0x4B0F52 and pitch @0x4B0F56]
-        const bool can_fire = local_player_can_fire();
-        if (view.binoculars_view_active) {
-            yaw = io::bam_sub(yaw, bam_from_degrees_wrapped(view_tracker.binocular_yaw_offset_deg));
-            pitch = io::bam_add(pitch, bam_from_degrees_wrapped(view_tracker.binocular_pitch_offset_deg));
-        } else if (can_fire) {
-            pitch = io::bam_sub(pitch, active_local_weapon_slot(world_, weapon)->zero_pitch);
-        }
-        if (view.camera_mode != 0 || !weapon.active) {
-            LocalPlayerViewFrame frame;
-            local_player_view_frame(&world_, weapon, view, view_tracker, frame);
-            if (frame.camera_pose_valid) {
-                for (int i = 0; i < 3; ++i) origin[i] = static_cast<int32_t>(frame.camera.eye[i] * 65536.0f);
-                yaw = bam_heading_from_mission_yaw_deg(frame.camera.yaw_deg);
-                pitch = bam_from_degrees_wrapped(frame.camera.pitch_deg);
-                roll = bam_from_degrees_wrapped(frame.camera.roll_deg);
-            }
-        }
         const int32_t forward[3] = {1000 << 16, 0, 0};
         int32_t endpoint[3];
-        collision_matrix_from_euler(yaw, pitch, roll, origin).transform_point(forward, endpoint);
+        if (view.camera_mode != 0 || !weapon.active) {
+            // THE CAMERA LEG: the far point is Entity_BuildCameraView's — the
+            // fire pose itself, none of the weapon-view offsets, its pitch
+            // cleared in a controller seat — and the ray STARTS at the view
+            // the last compose left in g_view_pos; no camera is composed here.
+            // [orig: the gate @0x4B4E90..0x4B4EA1 -> @0x4B4F90;
+            //  Entity_BuildCameraView @0x4B0E30 -- fire pose @0x4B0E46, the
+            //  parentSlot-2 pitch clear @0x4B0E50..0x4B0E61, (1000, 0, 0)
+            //  @0x4B0EDF; the start @0x4B4FDE / @0x4B5006 / @0x4B501B]
+            if (e->mounted && e->mount_type == SeatType::Controller) fire[4] = 0;
+            collision_matrix_from_euler(fire[3], fire[4], fire[5], fire)
+                    .transform_point(forward, endpoint);
+            for (int i = 0; i < 3; ++i)
+                origin[i] = static_cast<int32_t>(view_tracker.composed.eye[i] * 65536.0f);
+        } else {
+            int32_t yaw = fire[3], pitch = fire[4], roll = fire[5];
+            // The weapon-view offsets: the scope-zero elevation comes back OUT
+            // of the ray while the weapon can fire. A binocular view
+            // substitutes its wander. The shared fire pose supplies mounted
+            // and mortar seeds.
+            // [orig: Entity_UpdateInfantryPlayerBody @0x4B4EA7..0x4B4EE0;
+            // binocular offsets @0x4B4EC8..0x4B4ED6; Entity_BuildCameraFromWeaponView
+            // yaw @0x4B0F52 and pitch @0x4B0F56]
+            const bool can_fire = local_player_can_fire();
+            if (view.binoculars_view_active) {
+                yaw = io::bam_sub(yaw, bam_from_degrees_wrapped(view_tracker.binocular_yaw_offset_deg));
+                pitch = io::bam_add(pitch, bam_from_degrees_wrapped(view_tracker.binocular_pitch_offset_deg));
+            } else if (can_fire) {
+                pitch = io::bam_sub(pitch, active_local_weapon_slot(world_, weapon)->zero_pitch);
+            }
+            collision_matrix_from_euler(yaw, pitch, roll, origin).transform_point(forward, endpoint);
+        }
         // A gunner's ray STARTS at the carrier's seat-bone pose (the posed
         // CAMERA userpoint); only the far point rides the weapon view.
         // [orig: parentSlot == 3 @0x4B4F1C -> Entity_GetBoneWorldPosition

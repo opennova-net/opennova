@@ -143,8 +143,12 @@ public:
 	// raw active state deliberately survives third person in the simulation.
 	void set_local_player_nvg_view(bool p_active, int p_gain);
 	// The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once
-	// at this edge (ADR 0017); null without a sim.
+	// at this edge (ADR 0017); null without a sim. Observation only: the
+	// camera is the last composed view and nothing advances.
 	Ref<PlayerLocalView> local_player_view() const;
+	// The rendered frame's view: composes this display frame's camera, which
+	// advances the composition state. The presenter's per-frame leg only.
+	Ref<PlayerLocalView> present_local_player_view() const;
 	// The equipped-weapon FSM view; null when no weapon FSM is installed.
 	Ref<PlayerWeaponView> local_player_weapon_view() const;
 	// Destructively drain the equipped FSM's ordered presentation batch.

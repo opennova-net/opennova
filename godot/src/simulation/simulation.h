@@ -1524,9 +1524,16 @@ public:
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);
-	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
-	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
+	// The view-state snapshot OBSERVED: the effect/optics/HUD state read now
+	// and the camera the last compose left (engine: LocalPlayer::view_frame).
+	// Read-only: it advances neither the shake filters, the chase look-ahead
+	// nor the binocular latch.
 	Ref<PlayerLocalView> get_local_player_view() const;
+	// The RENDERED frame's snapshot: the camera composed for this display
+	// frame, which advances the composition state (engine:
+	// LocalPlayer::present_view_frame). The local-view presenter's per-frame
+	// leg is its one live caller.
+	Ref<PlayerLocalView> present_local_player_view();
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use (engine: runtime/world/player_view.cpp).
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect, int p_mode = -1);

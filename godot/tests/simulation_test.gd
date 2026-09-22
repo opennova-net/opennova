@@ -673,11 +673,18 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 	assert_true(view.binoculars_raised)
 	assert_true(view.binoculars_view_active)
 	assert_almost_eq(view.fov_h_deg, 20.0, 0.001)
+	assert_eq(Vector2(view.binocular_yaw_offset_deg, view.binocular_pitch_offset_deg),
+			Vector2.ZERO, "observing the view never latches the sway")
+	# The rendered frame owns the latch [orig: Render_ProcessMainSceneFrame
+	#  @0x5CA3E1..0x5CA3F3 -> Binoculars_RandomizeSwayOffsets].
+	view = sim.present_local_player_view()
 	var jitter := Vector2(
 			view.binocular_yaw_offset_deg,
 			view.binocular_pitch_offset_deg)
 	assert_almost_eq(jitter.length(), 2.8125, 0.0001,
-			"the toggle seeds the fixed 0x02000000-BAM displacement")
+			"the rendered frame seeds the fixed 0x02000000-BAM displacement")
+	assert_eq(sim.get_local_player_view().binocular_yaw_offset_deg,
+			view.binocular_yaw_offset_deg, "later observations read the latched sway")
 
 	sim.set_player_input(true, false, false, false, false, false, false)
 	view = sim.get_local_player_view()

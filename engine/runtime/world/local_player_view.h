@@ -63,6 +63,15 @@ struct LocalPlayerViewTracker {
     // The death stamp's edge detector [orig: g_camera_lerp_start_tick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;
+    // The last composed view: retail's g_view_pos / g_view_rot, which every
+    // Camera_ComputeThirdPersonView call overwrites (once per logic quantum,
+    // once per rendered frame, once more for the Inset scene) and every reader
+    // between calls takes as it stands: the aim acquisition's camera leg and
+    // the between-frame observations. Zero with no local player to compose
+    // over [orig: @0x438B4A..0x438B68].
+    PlayerCameraPose composed;
+    bool composed_valid = false;
+    bool composed_mounted = false;
 };
 
 // What the camera arbiter reads from the SESSION (the net layer sits above
@@ -240,8 +249,8 @@ int local_player_max_health(const World &world);
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
 // input and turn the charge into an unintended release) and while a scope is
-// engaged in a gunner seat. The render latch in LocalPlayer::view_frame owns
-// the displacement and PRNG draw. Returns the new requested state (false
+// engaged in a gunner seat. The render latch in LocalPlayer::present_view_frame
+// owns the displacement and PRNG draw. Returns the new requested state (false
 // also = refused). [orig: g_fireChargeStartTick @0xB76800; the action 26 gate]
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
                                     PlayerViewState &v, LocalPlayerViewTracker &t);
@@ -271,8 +280,8 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
 // WeaponAction_ProcessAllEntities call, so this tick's settle promoter is
 // visible to action routing while an action's unscope/rescope begins easing
 // on the next tick [orig: call sites @0x42c18e / @0x526786; promoter
-// @0x4de4f7; Camera_ComputeThirdPersonView @0x437D10; ThirdPersonCamera_Update
-// @0x437b70..76; the non-person bump @0x437e8f].
+// @0x4de4f7; ThirdPersonCamera_Update @0x437b70..76]. The quantum's camera
+// compose is LocalPlayer::tick_view's, after the aim acquisition.
 void local_player_view_tick(World *world, PlayerViewState &v,
                             LocalPlayerViewTracker &t,
                             const LocalViewSessionInputs &session);
@@ -384,9 +393,35 @@ struct LocalPlayerViewFrame {
     EntityHandle virtual_display_carrier;
     std::string virtual_display_model;
 };
-void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
-		LocalPlayerViewTracker &t,
-                             LocalPlayerViewFrame &out);
+
+// ONE Camera_ComputeThirdPersonView call over the local player: the pose
+// (the mode-0 carrier legs, the ground-entity leg, else the person / chase /
+// death legs of player_view_compose_camera), then this call's shake — the
+// mode-0 IIR step or the stateless chase chain, both added to the BAM heading
+// — recorded as the last composed view. It advances the composition's own
+// state (the shake filters, the chase look-ahead, the ground-entity lift), so
+// it runs exactly where retail calls it: once per logic quantum
+// (LocalPlayer::tick_view), once per rendered frame and once more for the
+// Inset scene (local_player_view_frame). False with no local player, whose
+// view words zero.
+// [orig: Camera_ComputeThirdPersonView @0x437D10, called @0x526781 /
+//  @0x5CA34D / @0x5C9841]
+bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerViewTracker &t,
+                                 PlayerCameraPose &out, bool &mounted_camera);
+
+// The RENDERED frame: the view read plus the main scene's compose and, with
+// the Inset scene up, its second compose and slot offsets. Advances the
+// composition state; the presenter's per-frame leg is its one live caller.
+// [orig: Render_ProcessMainSceneFrame @0x5CA34D; Render_RadarCompassOverlay
+//  @0x5C9841..0x5C9903]
+void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
+                             LocalPlayerViewTracker &t, LocalPlayerViewFrame &out);
+
+// The same read OBSERVED between composes: the camera is the last composed
+// view (g_view_pos / g_view_rot) and nothing advances — the weapon-event
+// placement, the mode refresh and every diagnostic read this one.
+void local_player_view_observe(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
+                               LocalPlayerViewTracker &t, LocalPlayerViewFrame &out);
 
 // THE MOUNTED FIRST-PERSON CAMERA. Mode 0 hands a seated rider's view to its
 // carrier before any person leg runs:

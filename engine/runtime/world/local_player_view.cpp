@@ -21,6 +21,7 @@
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/death_camera.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
 #include <runtime/world/vehicle_mount.h> // vehicle_prepare_weapon_slot, mount_blocks_weapon_channel
 #include <runtime/world/weapon_fsm.h>
@@ -32,8 +33,6 @@ using namespace opennova::def;
 namespace opennova::world {
 
 namespace {
-
-constexpr double kPi = io::kPi;
 
 const Entity *local_entity(World *world) {
     return world != nullptr ? world->registry.get(world->cached.local_player) : nullptr;
@@ -511,28 +510,25 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // @0x5ca1e2..0x5ca1f2], so the read precedes the mode resolve and the
     // effective-mode refresh below.
     MountedCameraInput mount;
+    // Every chase eye clears the water plane [orig: @0x438409..0x43841E].
+    mount.water_z = static_cast<float>(world->env.water_z) / 65536.0f;
     const Entity *carrier = e->mounted ? world->registry.get(e->mount_target) : nullptr;
     if (carrier != nullptr && is_vehicle_control_seat(e->mount_type)) {
         int32_t pitch_bam = 0, roll_bam = 0;
         carrier_pose_fixed(*carrier, mount.carrier_pos_q16, mount.carrier_yaw_bam, pitch_bam,
                            roll_bam);
         mount.control_seat = true;
-        // The carrier's unit forward for the 6 u look-ahead. Retail takes the
-        // chassis matrix's first column (parentMatrix +0xB4 x (6,0,0)); this
-        // reads the carrier through carrier_pose_fixed, whose yaw is the one
-        // attitude term every mover family stamps, so the forward is the
-        // yaw-only form (sin yaw, cos yaw, 0) in mission space -- the pitch/roll
-        // fold of the full chassis matrix is not composed here [orig:
-        // Camera_ComputeThirdPersonView @0x438811..0x4388b5, see
-        // docs/world/world-wac-ai-re.md section 14.6].
-        const double forward_yaw_rad =
-            mission_yaw_deg_from_bam_heading(mount.carrier_yaw_bam) * (kPi / 180.0);
-        mount.carrier_forward[0] = static_cast<float>(std::sin(forward_yaw_rad));
-        mount.carrier_forward[1] = static_cast<float>(std::cos(forward_yaw_rad));
-        mount.carrier_forward[2] = 0.0f;
+        // The look-ahead target: the carrier's own orientation matrix (the
+        // mover rebuilds it from the entity euler at its tail) times (6.0, 0,
+        // 0), rotation only, so a pitched hull tilts it too [orig:
+        // Math_TransformPointFixedPoint22 @0x412E90 over parentMatrix(+0xB4),
+        // called @0x438855].
+        const int32_t zero[3] = {0, 0, 0};
+        const int32_t ahead[3] = {to_fixed(kMountLookaheadDistance), 0, 0};
+        collision_matrix_from_euler(mount.carrier_yaw_bam, pitch_bam, roll_bam, zero)
+                .rotate_point(ahead, mount.lookahead_target_q16);
         mount.bound_radius = carrier->bound_radius;
         mount.watercraft = carrier->item_unit_type == 3 || carrier->item_unit_type == 4;
-        mount.water_z = static_cast<float>(world->env.water_z) / 65536.0f;
     }
     v.mount = mount;
     // The remaining arbiter inputs [orig: Render_ProcessMainSceneFrame
@@ -571,20 +567,6 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     const Vec3 current_eye = player_eye_position(*e);
     const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
     player_view_tick(v, eye);
-    // The per-quantum camera compose advances the three shake IIR filters
-    // from the tick's weather PRNG word (the deltas it yields are overwritten
-    // by the rendered frame's own compose below, exactly as retail's per-frame
-    // call re-derives the view) [orig: Game_ProcessMainFrame @ 0x526774 ->
-    //  Camera_ComputeThirdPersonView @ 0x526781, the mode-0 block
-    //  @ 0x43803c..0x4380df]. Any other camera mode leaves the filters be —
-    // the chase leg (@ 0x438939..0x4389e5) is stateless, so its per-quantum
-    // evaluation has nothing to advance and only the frame sample renders.
-    if (v.camera_mode == 0) {
-        int32_t d_yaw = 0;
-        int32_t d_pitch = 0;
-        int32_t d_roll = 0;
-        camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
-    }
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,
@@ -756,7 +738,12 @@ static void fill_hud_context(World *world, const Entity *local,
     if ((local->flags & kEntityFlagParachute) != 0) out.hud_stance = 5;
 }
 
-void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
+namespace {
+
+// The frame's reads of the current state: the effect states, the optics and
+// HUD context, the chase anchor, the FP terms and the virtual-display
+// verdict. Nothing here composes the camera.
+void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
 		LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
     out = LocalPlayerViewFrame();
     WeaponSlotState *active_slot =
@@ -864,14 +851,9 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];
     out.tp_anchor_valid = v.tp_anchor_valid;
-    // The composed camera pose + its FP components -- one native composition
-    // (player_view.h, S8): the shell converts frames and stamps the Camera3D
-    // node. The recoil doubling and torso+lean/4 roll stay exported separately
-    // for diagnostics/probes; authoritative look pitch never inherits the
-    // camera-only doubling.
-    // [orig: Camera_ComputeThirdPersonView @0x437d10 -- the on-foot person leg
-    //  @0x437f9c..0x438031, the TP leg @0x438100..0x4383e2, recoil @0x437fc7,
-    //  roll @0x437fe6]
+    // The FP components of the composed camera, exported separately for
+    // diagnostics/probes; authoritative look pitch never inherits the
+    // camera-only doubling. [orig: recoil @0x437fc7, roll @0x437fe6]
     if (world == nullptr || !world->cached.local_player.valid()) return;
     const AiEntity *p = world->ai.for_handle(world->cached.local_player);
     if (p == nullptr) return;
@@ -880,41 +862,6 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.fp_pitch_recoil_deg = player_view_fp_pitch_recoil_deg(p->inf.recoil_pitch);
     out.fp_roll_deg = player_view_fp_roll_deg(p->inf.torso_roll, p->inf.lean_angle);
     if (e == nullptr) return;
-    // Compose from the body aim. The rendered view adds optical offsets
-    // afterwards, matching the main-scene consumer in LocalPlayer::view_frame.
-    float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
-    float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
-    const float position[3] = {e->position.x, e->position.y, e->position.z};
-    // CameraOffset already includes the current motor's posed head and its
-    // on-foot terrain floor. Re-anchor it after the motor's translation.
-    // [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
-    const Vec3 current_eye = player_eye_position(*e);
-    const float anchor_eye[3] = {current_eye.x, current_eye.y, current_eye.z};
-    const bool seated_eye = e->mounted;
-    player_view_compose_camera(v, position, anchor_eye, p->inf.active,
-                               world->ai.terrain,
-                               (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
-                               p->inf.recoil_pitch, p->inf.torso_roll, p->inf.lean_angle,
-                               // The carrier leg: a seated occupant's view rotation is
-                               // the entity triple, and the person leg is jumped over
-                               // entirely. The roll is the seat-carried hull bank the
-                               // mount pose wrote, never the standing torso tilt.
-                               seated_eye, static_cast<float>(e->roll), out.camera);
-    // A seated first-person view belongs to the carrier: its virtual-display
-    // camera callback, or the gun's posed CAMERA userpoint. Chase (mode 1) and
-    // the death lerp never reach this leg.
-    // [orig: Camera_ComputeThirdPersonView mode 0 @0x437DAC..0x437EAD]
-    int32_t mounted[6];
-    if (seated_eye && !out.camera.third_person && v.camera_mode == 0 &&
-            local_player_mounted_camera(*world, *e, mounted)) {
-        out.camera.eye[0] = static_cast<float>(from_fixed(mounted[0]));
-        out.camera.eye[1] = static_cast<float>(from_fixed(mounted[1]));
-        out.camera.eye[2] = static_cast<float>(from_fixed(mounted[2]));
-        out.camera.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(mounted[3]));
-        out.camera.pitch_deg = static_cast<float>(static_cast<double>(mounted[4]) * kDegreesPerBam);
-        out.camera.roll_deg = static_cast<float>(static_cast<double>(mounted[5]) * kDegreesPerBam);
-        out.mounted_camera = true;
-    }
     if (const Entity *vehicle = world->registry.get(e->mount_target)) {
         if (local_view_draws_virtual_display(*world, v, *vehicle)) {
             out.virtual_display_active = true;
@@ -922,43 +869,171 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
             out.virtual_display_model = vehicle->virtual_display_model;
         }
     }
-	out.inset_camera = out.camera; // unshaken pose, before either scene sample
-    // The camera shake, per rendered frame: retail's scene frame calls
-    // Camera_ComputeThirdPersonView once more per frame after the per-quantum
-    // call [orig: Render_ProcessMainSceneFrame @ 0x5ca34d]. First person
-    // samples the three IIR filters again from the current weather PRNG word
-    // (unchanged between ticks) [orig: the mode-0 block @ 0x43803c..0x4380df,
-    //  the >> 6 applies @ 0x4380b0..0x4380d9]; the chase applies the
-    // STATELESS sin/cos chain over the raw counter and the engine tick
-    // [orig: the mode>=1 block @ 0x438939..0x4389e5 — the mode-4 lerp then
-    //  overwrites the rotation wholesale, so only mode 1 renders it]. The
-	// Inset overlay samples the same filters once again below (@0x5C9841).
-    if (world != nullptr) {
-        int32_t d_yaw = 0;
-        int32_t d_pitch = 0;
-        int32_t d_roll = 0;
-        if (!out.camera.third_person) {
-            camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch,
-                                d_roll);
-        } else if (out.camera_mode == 1) {
-            camera_shake_sample_chase(v.shake, world->weather.core.oscillator.prng,
-                                      world->logic_tick, d_yaw, d_pitch, d_roll);
-        }
-        constexpr float kDegPerBam = 360.0f / 4294967296.0f;
-        out.camera.yaw_deg += static_cast<float>(d_yaw) * kDegPerBam;
-        out.camera.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
-        out.camera.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
+}
+
+// THE GROUND-ENTITY LEG: a person whose groundEntity is a vehicle (def type
+// 1) in its crashed or settled latch sets the eye along that vehicle's up
+// axis, the longest CameraOffset seen as the lift, under its own rotation
+// triple — neither the recoil doubling nor the lean roll nor the pull-back.
+// [orig: Camera_ComputeThirdPersonView @0x437EB5..0x437F97 — groundEntity
+//  +0x28 @0x437EB5, Entity_HasActiveParent @0x402BB0 via @0x437EC2, the
+//  +0x2EC / +0x2F0 bytes @0x437ECF..0x437EDF]
+bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
+                        PlayerViewState &v, PlayerCameraPose &out) {
+    const Entity *ground = world.registry.get(e.ground_target);
+    if (ground == nullptr || !ground->has_item_def || ground->item_type != 1 ||
+            (ground->veh.crashed == 0 && ground->veh.settle_2f0 == 0))
+        return false;
+    // |CameraOffset| through the x87 (x² + y²) + z², fsqrt, ftol, kept as a
+    // running maximum [orig: @0x437EE5..0x437F0B].
+    const double ox = e.eye_offset_x;
+    const double oy = e.eye_offset_y;
+    const double oz = e.eye_offset_z;
+    const int32_t length = static_cast<int32_t>(std::sqrt(ox * ox + oy * oy + oz * oz));
+    if (length > v.ground_leg_lift_q16) v.ground_leg_lift_q16 = length;
+    // The ground's up axis: its euler matrix's third column, >> 6 to 16.16
+    // [orig: Math_BuildFixedPointMatrixFromEulerAngles via @0x437F1C,
+    //  Math_ExtractRow2FromFixedPoint22 @0x6137A0 via @0x437F2B].
+    int32_t ground_pos[3];
+    int32_t ground_yaw = 0, ground_pitch = 0, ground_roll = 0;
+    carrier_pose_fixed(*ground, ground_pos, ground_yaw, ground_pitch, ground_roll);
+    const CollisionMatrix frame =
+            collision_matrix_from_euler(ground_yaw, ground_pitch, ground_roll, ground_pos);
+    const int32_t up[3] = {frame.m[2] >> 6, frame.m[6] >> 6, frame.m[10] >> 6};
+    // Position plus the up axis scaled by the lift, each product rounded
+    // [orig: @0x437F33..0x437F91].
+    for (int i = 0; i < 3; ++i) {
+        const int32_t lift = static_cast<int32_t>(
+                (static_cast<int64_t>(up[i]) * v.ground_leg_lift_q16 + 0x8000) >> 16);
+        out.eye[i] = static_cast<float>(from_fixed(io::bam_add(p.pos[i], lift)));
     }
-	if (out.inset_scope_active) {
-		int32_t yaw = 0, pitch = 0, roll = 0;
-		camera_shake_sample(v.shake, world->weather.core.oscillator.prng, yaw, pitch, roll);
-		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
-		out.inset_camera.yaw_deg += float(yaw * degrees_per_bam);
-		out.inset_camera.pitch_deg += float(pitch * degrees_per_bam);
-		out.inset_camera.roll_deg += float(roll * degrees_per_bam);
-		out.inset_camera.yaw_deg -= float(active_slot->zero_yaw * degrees_per_bam);
-		out.inset_camera.pitch_deg -= float(active_slot->zero_pitch * degrees_per_bam);
-	}
+    // The rotation stays the entity's own triple [orig: @0x437D86..0x437D9B].
+    out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(p.heading));
+    out.pitch_deg = static_cast<float>(static_cast<double>(p.pitch) * kDegreesPerBam);
+    out.roll_deg = static_cast<float>(static_cast<double>(p.roll) * kDegreesPerBam);
+    out.third_person = false;
+    return true;
+}
+
+// The Inset scene's own slot offsets on its composed camera.
+// [orig: Render_RadarCompassOverlay @0x5C9841..0x5C9903]
+void apply_inset_slot_offsets(World &world, LocalPlayerWeapon &w, LocalPlayerViewFrame &out) {
+    const WeaponSlotState *slot = active_local_weapon_slot(world, w);
+    constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+    out.inset_camera.yaw_deg -= float(slot->zero_yaw * degrees_per_bam);
+    out.inset_camera.pitch_deg -= float(slot->zero_pitch * degrees_per_bam);
+}
+
+} // namespace
+
+bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerViewTracker &t,
+                                 PlayerCameraPose &out, bool &mounted_camera) {
+    out = PlayerCameraPose();
+    mounted_camera = false;
+    const AiEntity *p = world.cached.local_player.valid()
+            ? world.ai.for_handle(world.cached.local_player) : nullptr;
+    const Entity *e = p != nullptr ? world.registry.get(world.cached.local_player) : nullptr;
+    if (p == nullptr || e == nullptr) {
+        // Nothing to compose over: the view words zero [orig: the tracked
+        // entity / local player tests @0x437D42 / @0x437D4E ->
+        //  @0x438B4A..0x438B68].
+        t.composed = PlayerCameraPose();
+        t.composed_valid = false;
+        t.composed_mounted = false;
+        return false;
+    }
+    // Compose from the body aim. The rendered view adds optical offsets
+    // afterwards (LocalPlayer::present_view_frame).
+    const float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
+    const float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
+    int32_t mounted[6];
+    if (v.camera_mode == 0 && e->mounted && local_player_mounted_camera(world, *e, mounted)) {
+        // A seated first-person view belongs to the carrier: its
+        // virtual-display camera callback, or the gun's posed CAMERA
+        // userpoint [orig: Camera_ComputeThirdPersonView mode 0
+        //  @0x437DAC..0x437EAD].
+        out.eye[0] = static_cast<float>(from_fixed(mounted[0]));
+        out.eye[1] = static_cast<float>(from_fixed(mounted[1]));
+        out.eye[2] = static_cast<float>(from_fixed(mounted[2]));
+        out.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(mounted[3]));
+        out.pitch_deg = static_cast<float>(static_cast<double>(mounted[4]) * kDegreesPerBam);
+        out.roll_deg = static_cast<float>(static_cast<double>(mounted[5]) * kDegreesPerBam);
+        mounted_camera = true;
+    } else if (!(v.camera_mode == 0 && p->inf.active && compose_ground_leg(world, *p, *e, v, out))) {
+        const float position[3] = {e->position.x, e->position.y, e->position.z};
+        // CameraOffset already includes the current motor's posed head and
+        // its on-foot terrain floor. Re-anchor it after the motor's
+        // translation. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
+        const Vec3 current_eye = player_eye_position(*e);
+        const float anchor_eye[3] = {current_eye.x, current_eye.y, current_eye.z};
+        // The chase march runs only with proximity candidates at hand
+        // [orig: the entity +0x1C0 count @0x4381CB].
+        const bool march_candidates =
+                world.collision != nullptr && world.collision->candidate_count(e->handle) > 0;
+        player_view_compose_camera(v, position, anchor_eye, p->inf.active, world.ai.terrain,
+                                   (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
+                                   p->inf.recoil_pitch, p->inf.torso_roll, p->inf.lean_angle,
+                                   march_candidates,
+                                   static_cast<float>(static_cast<double>(p->roll) * kDegreesPerBam),
+                                   out);
+    }
+    // This call's shake. First person advances the three IIR filters from the
+    // current weather PRNG word (unchanged between ticks) [orig: the mode-0
+    // block @0x43803C..0x4380DF, the >> 6 applies @0x4380B0..0x4380D9]; the
+    // chase applies the STATELESS sin/cos chain over the raw counter and the
+    // engine tick [orig: the mode-1 block @0x438939..0x4389E5]; the mode-4
+    // lerp takes neither. Both add to the BAM HEADING (`add g_view_rot_yaw`
+    // @0x4380D9 / @0x43898B), so the mission yaw (90 - heading) takes the
+    // negated delta.
+    int32_t d_yaw = 0;
+    int32_t d_pitch = 0;
+    int32_t d_roll = 0;
+    if (v.camera_mode == 0) {
+        camera_shake_sample(v.shake, world.weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
+    } else if (v.camera_mode == 1) {
+        camera_shake_sample_chase(v.shake, world.weather.core.oscillator.prng, world.logic_tick,
+                                  d_yaw, d_pitch, d_roll);
+    }
+    constexpr float kDegPerBam = 360.0f / 4294967296.0f;
+    out.yaw_deg -= static_cast<float>(d_yaw) * kDegPerBam;
+    out.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
+    out.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
+    // The call leaves its view in g_view_pos / g_view_rot for every reader
+    // until the next call.
+    t.composed = out;
+    t.composed_valid = true;
+    t.composed_mounted = mounted_camera;
+    return true;
+}
+
+void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
+                             LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
+    fill_view_context(world, w, v, t, out);
+    if (world == nullptr) return;
+    // The main scene composes its camera once per rendered frame
+    // [orig: Render_ProcessMainSceneFrame @0x5CA34D].
+    if (!local_player_camera_compose(*world, v, t, out.camera, out.mounted_camera)) return;
+    out.inset_camera = out.camera;
+    if (out.inset_scope_active) {
+        // The Inset scene composes once more — a second shake step — then
+        // takes its own slot offsets [orig: Render_RadarCompassOverlay
+        //  @0x5C9841].
+        bool inset_mounted = false;
+        local_player_camera_compose(*world, v, t, out.inset_camera, inset_mounted);
+        apply_inset_slot_offsets(*world, w, out);
+    }
+    out.camera_pose_valid = true;
+}
+
+void local_player_view_observe(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
+                               LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
+    fill_view_context(world, w, v, t, out);
+    if (world == nullptr || !t.composed_valid) return;
+    // Between composes the view is what the last one left behind.
+    out.camera = t.composed;
+    out.mounted_camera = t.composed_mounted;
+    out.inset_camera = out.camera;
+    if (out.inset_scope_active) apply_inset_slot_offsets(*world, w, out);
     out.camera_pose_valid = true;
 }
 

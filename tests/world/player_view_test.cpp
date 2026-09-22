@@ -933,10 +933,17 @@ void test_compose_camera_first_person() {
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 5.0f, 0.001f));
 
-    // No anchor: the non-person +1.0 bump over position [orig: @ 0x437e8f].
+    // No anchor: the non-person +1.0 bump over position under the entity's
+    // own rotation triple, then straight to the tail — no pull-back, no
+    // recoil doubling, no torso/lean roll [orig: @ 0x437e8f, the jump to the
+    // shake @0x437E99; the triple @0x437D86..0x437D9B].
     player_view_compose_camera(v, position, position, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+            0.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, false, 3.5f, pose);
+    CHECK(near_eq(pose.eye[0], 10.0f, 0.001f));
+    CHECK(near_eq(pose.eye[1], 20.0f, 0.001f));
     CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
+    CHECK(near_eq(pose.pitch_deg, 0.0f, 0.001f));
+    CHECK(near_eq(pose.roll_deg, 3.5f, 0.001f));
 }
 
 // The D-INF-18 terrain floor [orig: Entity_UpdateInfantryPlayerBody
@@ -998,9 +1005,28 @@ void test_compose_camera_terrain_floor() {
     CHECK(near_eq(pose.eye[2], 12.0625f, 0.001f));
 }
 
-// The TP leg: the chased anchor wins over the live eye, the pivot nudges
-// 0.125 along forward+left+up, the eye backs off the march-landed 0.75, roll
-// stays 0 and the recoil doubling does NOT apply.
+// The chase's final look-at: mission yaw (clockwise from +Y, [0, 360)) and
+// pitch from the eye to the target [orig: fpatan @0x4388BD / @0x43891B].
+void chase_look_at(const float eye[3], const float target[3], float &yaw_deg, float &pitch_deg) {
+    const double tx = static_cast<double>(target[0]) - eye[0];
+    const double ty = static_cast<double>(target[1]) - eye[1];
+    const double tz = static_cast<double>(target[2]) - eye[2];
+    const double to_deg = 180.0 / 3.14159265358979323846;
+    double yaw = std::atan2(tx, ty) * to_deg;
+    if (yaw < 0.0) yaw += 360.0;
+    yaw_deg = static_cast<float>(yaw);
+    pitch_deg = static_cast<float>(std::atan2(tz, std::sqrt(tx * tx + ty * ty)) * to_deg);
+}
+
+// The TP leg [orig: Camera_ComputeThirdPersonView @0x437D10 — the anchor-
+// translated view matrix @0x438179, the pivot @0x43817E..0x4381D9, the eye
+// @0x4383E0..0x4383FB, the march gates @0x4381CB / @0x4381E3 and its no-force
+// exit @0x438334..0x438341, the look-at @0x4387DF..0x43892D]: the chased
+// anchor wins over the live eye; the eye backs off the ANCHOR (the
+// march-landed 0.75 only with proximity candidates at hand, else the full
+// 1.0); the pivot nudged 0.125 along forward+left+up is the LOOK-AT TARGET,
+// never the eye, so the view turns left and up off the seed; roll stays 0
+// and the recoil doubling does NOT apply.
 void test_compose_camera_third_person() {
     PlayerViewState v;
     v.third_person = true;
@@ -1010,19 +1036,27 @@ void test_compose_camera_third_person() {
     v.tp_anchor[2] = 3.0f;
     const float position[3] = {0.0f, 0.0f, 0.0f};
     const float anchor[3] = {9.0f, 9.0f, 9.0f}; // must be ignored
-    PlayerCameraPose pose;
     const int32_t deg_bam = 11930465;
-    player_view_compose_camera(v, position, anchor, true, nullptr, false,
-            0.0f, 0.0f,
-            deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, false, 0.0f, pose);
-    CHECK(pose.third_person);
-    CHECK(near_eq(pose.pitch_deg, kTpOrbitPitchDeg));
-    CHECK(pose.roll_deg == 0.0f);
     // yaw 0 pitch 0: mission fwd = (0, 1, 0), left = (-1, 0, 0), up = (0, 0, 1).
-    // pivot = anchor + (fwd+left+up)*0.125; eye = pivot - fwd*0.75.
-    CHECK(near_eq(pose.eye[0], 1.0f - 0.125f));
-    CHECK(near_eq(pose.eye[1], 2.0f + 0.125f - 0.75f));
-    CHECK(near_eq(pose.eye[2], 3.0f + 0.125f));
+    const float pivot[3] = {1.0f - 0.125f, 2.0f + 0.125f, 3.0f + 0.125f};
+    for (const bool candidates : {false, true}) {
+        PlayerCameraPose pose;
+        player_view_compose_camera(v, position, anchor, true, nullptr, false,
+                0.0f, 0.0f,
+                deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, candidates, 0.0f,
+                pose);
+        CHECK(pose.third_person);
+        CHECK(pose.roll_deg == 0.0f);
+        const float back = candidates ? 0.75f : kTpDistance;
+        CHECK(near_eq(pose.eye[0], 1.0f));
+        CHECK(near_eq(pose.eye[1], 2.0f - back));
+        CHECK(near_eq(pose.eye[2], 3.0f));
+        float yaw = 0.0f, pitch = 0.0f;
+        chase_look_at(pose.eye, pivot, yaw, pitch);
+        CHECK(near_eq(pose.yaw_deg, yaw, 1e-4f));
+        CHECK(near_eq(pose.pitch_deg, pitch, 1e-4f));
+        CHECK(pose.yaw_deg > 270.0f && pose.pitch_deg > kTpOrbitPitchDeg + 1.0f);
+    }
 }
 
 // THE MOUNTED LEG [orig: the mount-state 2/5 arm of mode 1 — the lift
@@ -1040,10 +1074,11 @@ PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
     v.mount.carrier_yaw_bam = bam_heading_from_mission_yaw_deg(0.0); // mission yaw 0
     v.mount.bound_radius = bound_radius;
     v.mount.water_z = -1000.0f;
-    v.mount.carrier_forward[0] = 0.0f; // mission yaw 0 = +Y
-    v.mount.carrier_forward[1] = 1.0f;
-    v.mount.carrier_forward[2] = 0.0f;
-    // The anchor and the look-ahead as the tick would have settled them:
+    // A level carrier at mission yaw 0 (= +Y): its matrix x (6, 0, 0).
+    v.mount.lookahead_target_q16[0] = 0;
+    v.mount.lookahead_target_q16[1] = 6 * 0x10000;
+    v.mount.lookahead_target_q16[2] = 0;
+    // The anchor and the look-ahead as the composes would have settled them:
     // carrier + lift, and the carrier's forward x 6.
     v.tp_anchor_valid = true;
     v.tp_anchor[0] = 0.0f;
@@ -1074,11 +1109,33 @@ void test_compose_camera_mounted() {
     CHECK(near_eq(pose.eye[0], 0.0f, 0.001f));
     CHECK(near_eq(pose.eye[1], -7.0f * std::cos(p), 0.001f));
     CHECK(near_eq(pose.eye[2], 11.5f - 7.0f * std::sin(p), 0.001f));
-    // The final angles look at the anchor + the look-ahead (6 u along the
-    // carrier's forward): the yaw stays on the carrier heading, the pitch
-    // looks DOWN at it.
-    CHECK(near_eq(pose.yaw_deg, 0.0f, 0.01f) || near_eq(pose.yaw_deg, 360.0f, 0.01f));
-    CHECK(pose.pitch_deg < 0.0f);
+    // The final angles look at the PIVOT — the anchor nudged 0.125 along
+    // forward (0, cos p, sin p) + left (-1, 0, 0) + up (0, -sin p, cos p) —
+    // plus the look-ahead (6 u along the carrier's forward): the view turns
+    // a little left of the carrier heading and looks DOWN at the point.
+    // [orig: the pivot @0x43817E..0x4381D9 is the look-at target; the
+    //  look-ahead rides it @0x43887B..0x4388A0]
+    {
+        const float target[3] = {-0.125f,
+                0.125f * (std::cos(p) - std::sin(p)) + 6.0f,
+                11.5f + 0.125f * (std::sin(p) + std::cos(p))};
+        float yaw = 0.0f, pitch = 0.0f;
+        chase_look_at(pose.eye, target, yaw, pitch);
+        CHECK(near_eq(pose.yaw_deg, yaw, 1e-3f));
+        CHECK(near_eq(pose.pitch_deg, pitch, 1e-3f));
+        CHECK(pose.yaw_deg > 359.0f && pose.yaw_deg < 359.9f);
+        CHECK(pose.pitch_deg < 0.0f);
+    }
+    // The collision march lands a 7 u chase 6.75 u back with proximity
+    // candidates at hand; a tank-sized radius (8.5 u, past the 8.0 gate)
+    // never marches [orig: @0x4381CB / @0x4381E3, landing @0x438334..0x438341].
+    player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, true, 0.0f, pose);
+    CHECK(near_eq(pose.eye[1], -6.75f * std::cos(p), 0.001f));
+    PlayerViewState tank = mounted_state(5.0f);
+    player_view_compose_camera(tank, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, true, 0.0f, pose);
+    CHECK(near_eq(pose.eye[1], -8.5f * std::cos(p), 0.001f));
 
     // The lift floor: r = 1 lifts 1.0, not 0.375; distance 2.5.
     PlayerViewState small = mounted_state(1.0f);
@@ -1197,23 +1254,54 @@ void test_tick_mounted_anchor_ease() {
     v.mount.carrier_pos_q16[1] = 0;
     v.mount.carrier_pos_q16[2] = 32 * 0x10000;
     v.mount.bound_radius = 4.0f; // lift 1.5 -> target z 33.5
-    v.mount.carrier_forward[0] = 0.0f;
-    v.mount.carrier_forward[1] = 1.0f;
-    v.mount.carrier_forward[2] = 0.0f;
+    v.mount.lookahead_target_q16[1] = 6 * 0x10000;
     player_view_tick(v, eye);
     // x: a sixteenth of 16 = 1.0; z: a thirty-second of 33.5 = 1.046875.
     CHECK(v.tp_anchor_q16[0] == 0x10000);
     CHECK(near_eq(v.tp_anchor[0], 1.0f));
     CHECK(v.tp_anchor_q16[2] == (33 * 0x10000 + 0x8000 + 16) >> 5);
     CHECK(near_eq(v.tp_anchor[2], 1.046875f, 0.0001f));
-    // The look-ahead eases a thirty-second toward forward x 6 = (0, 6, 0).
-    CHECK(v.lookahead_q16[0] == 0);
-    CHECK(v.lookahead_q16[1] == (6 * 0x10000 + 16) >> 5);
-    CHECK(v.lookahead_q16[2] == 0);
+    // The tick eases the anchor only: the look-ahead belongs to the compose
+    // (test_mounted_lookahead_eases_on_every_compose).
+    CHECK(v.lookahead_q16[0] == 0 && v.lookahead_q16[1] == 0 && v.lookahead_q16[2] == 0);
     // Dismounting returns to the quarter-step float ease from where it was.
     v.mount.control_seat = false;
     player_view_tick(v, eye);
     CHECK(near_eq(v.tp_anchor[0], 0.75f, 0.0001f));
+}
+
+// THE LOOK-AHEAD EASE belongs to every compose of the mounted chase: each
+// call steps it a thirty-second per axis toward the carrier matrix x (6, 0,
+// 0) — a pitched hull's target climbs with it — so the per-quantum and the
+// per-frame composes both advance it, and a higher frame rate eases faster.
+// [orig: g_camera_lookahead @0x43885A..0x4388AF inside
+//  Camera_ComputeThirdPersonView @0x437D10, called per quantum @0x526781 and
+//  per rendered frame @0x5CA34D]
+void test_mounted_lookahead_eases_on_every_compose() {
+    PlayerViewState v = mounted_state(5.0f);
+    for (int i = 0; i < 3; ++i) v.lookahead_q16[i] = 0;
+    // A hull pitched 10 degrees up: (6 cos 10, 0, 6 sin 10) turned to yaw 0.
+    v.mount.lookahead_target_q16[0] = 0;
+    v.mount.lookahead_target_q16[1] = 387242;
+    v.mount.lookahead_target_q16[2] = 68280;
+    const float position[3] = {0.0f, 0.0f, 10.0f};
+    const float no_anchor[3] = {0.0f, 0.0f, 0.0f};
+    int32_t expected[3] = {0, 0, 0};
+    PlayerCameraPose pose;
+    float last_pitch = 0.0f;
+    for (int call = 0; call < 4; ++call) {
+        player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
+                0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
+        for (int i = 0; i < 3; ++i)
+            expected[i] += (v.mount.lookahead_target_q16[i] - expected[i] + 16) >> 5;
+        CHECK(v.lookahead_q16[0] == expected[0]);
+        CHECK(v.lookahead_q16[1] == expected[1]);
+        CHECK(v.lookahead_q16[2] == expected[2]);
+        // The look-at follows the eased point up the hull's slope.
+        if (call > 0) CHECK(pose.pitch_deg > last_pitch);
+        last_pitch = pose.pitch_deg;
+    }
+    CHECK(v.lookahead_q16[2] > 0);
 }
 
 // The view-frame bias: (raw def pos + the published Q16 bias / 256) / 256;
@@ -1476,6 +1564,7 @@ int main() {
     test_compose_camera_mounted();
     test_compose_camera_mounted_terrain();
     test_tick_mounted_anchor_ease();
+    test_mounted_lookahead_eases_on_every_compose();
     test_bias_view_units();
     test_motion_lead_tracker();
     if (failures == 0) std::printf("player_view_test: all passed\n");

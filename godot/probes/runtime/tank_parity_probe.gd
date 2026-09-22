@@ -1,7 +1,7 @@
 extends GameProbe
 
-## Observation reads the presenter's published snapshot, never
-## Simulation.get_local_player_view(), whose compose advances shake filters.
+## Observation reads the presenter's published snapshot, the view the
+## camera displays; reading it composes nothing.
 var _ctx: ProbeContext
 
 
