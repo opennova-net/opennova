@@ -6,6 +6,7 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/player_weapon.h>
 #include <algorithm>
 #include <cmath>
 
@@ -373,10 +374,15 @@ void AiSystem::organic_fire_pose(World &world, const AiEntity &e,
     const Entity *parent = entity != nullptr ? world.registry.get(entity->mount_target) : nullptr;
     if (parent != nullptr && entity->mount_type == SeatType::Gunner &&
             parent->has_item_def && (parent->item_attrib & 0x20u) != 0) {
-        // This special parent uses weapon slot zero's fire-origin point.
-        // [orig: @0x4B2682..0x4B26B6 -> @0x545C60, slot=0/field=0]
-        if (world.pose_provider != nullptr && world.pose_provider->resolve_userpoint_transform(
-                world, parent->handle, weapon_userpoint_byte(*parent, 0, 0), out)) return;
+        // This special parent names the point through its own inline slot:
+        // that def's gfx3 launch point, else the parent's byte for the barrel
+        // the slot's live clip selects, in the field its action pair selects.
+        // [orig: @0x4B2682..0x4B26B6 -> Entity_ComputeUserpointWorldTransform
+        //  @0x545C60 with a NULL slot, the inline +0x2B4 @0x545CBC]
+        const WeaponSlotState &slot = parent->primary_weapon_slot;
+        if (carrier_weapon_userpoint(world, *parent,
+                world.tables.weapons.by_index(parent->primary_weapon_slot_adm), slot.clip,
+                weapon_userpoint_field(slot), out)) return;
         if (const AiEntity *parent_body = for_handle(parent->handle)) {
             weapon_fire_origin(*parent_body, out);
             out[3] = parent_body->heading; out[4] = parent_body->pitch; out[5] = parent_body->roll;

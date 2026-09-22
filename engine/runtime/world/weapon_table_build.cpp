@@ -1,7 +1,9 @@
 #include <runtime/world/weapon_table_build.h>
 
 #include <base/io/strutil.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/adm_clip_index.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
 
@@ -308,6 +310,25 @@ world::WeaponTable build_weapon_table(
 		e.run_anim = d.run_anim;
 		e.has_first_person_model_reference = d.gfx1[0] != '\0';
 		e.third_person_model = d.gfx3; // the held 3P gun [orig: tpModel +0x170]
+		// The parser loads the gfx3 model outright; the launch userpoint named on
+		// the def resolves on it only after every def has parsed, as the first
+		// case-insensitive name match, 1-based (0 = unnamed or unmatched).
+		// [orig: WeaponDefs_ParseLineCallback load @0x544FCE, store @0x545092;
+		//  WeaponDef_ResolveAllReferences +0x2D4 reset @0x5402CA, gfx3 gate
+		//  @0x5402D8, lookup @0x5402EF, store @0x540316;
+		//  modelgpm_FindUserpointByName @0x5B21E0..0x5B21EF]
+		if (resources != nullptr && d.gfx3[0] != '\0') {
+			e.third_person_model_asset = resources->model(d.gfx3);
+			const threedi::Threedi3di3 *gfx3 = e.third_person_model_asset.get();
+			if (gfx3 != nullptr && d.launch_user_point[0] != '\0' && gfx3->user_points != nullptr) {
+				for (size_t i = 0; i < gfx3->user_point_count; ++i) {
+					if (strutil::iequals(gfx3->user_points[i].name, d.launch_user_point)) {
+						e.launch_userpoint = static_cast<uint8_t>(i + 1);
+						break;
+					}
+				}
+			}
+		}
 		// Bind this weapon's ACTION rows into the same 12-state descriptor table
 		// consumed by a MountSlot. The production path supplies this definition's
 		// ADM duration rings; assetless callers retain the witnessed unresolved-zero

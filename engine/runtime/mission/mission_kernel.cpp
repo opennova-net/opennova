@@ -1073,6 +1073,13 @@ bool MissionKernel::resolve_userpoint_transform(w::World &p_world, w::EntityHand
 	return collision_pose.resolve_userpoint_transform(p_world, entity, userpoint_index, out);
 }
 
+bool MissionKernel::resolve_userpoint_frame(w::World &p_world, w::EntityHandle entity,
+		const Threedi3di3 *model, int userpoint_index, int32_t out[6],
+		int32_t out_direction[3]) {
+	return collision_pose.resolve_userpoint_frame(p_world, entity, model, userpoint_index, out,
+			out_direction);
+}
+
 bool MissionKernel::resolve_userpoint_rigid(w::World &p_world, w::EntityHandle entity,
 		int userpoint_index, int32_t out[3]) {
 	return collision_pose.resolve_userpoint_rigid(p_world, entity, userpoint_index, out);

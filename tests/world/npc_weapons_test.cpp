@@ -175,16 +175,43 @@ static void test_attachment_fallback_and_special_parent() {
     CHECK(pose[0] == 100 && pose[1] == 200 && pose[2] == 300);
     CHECK(pose[3] == f.body().heading && pose[4] == f.body().pitch);
 
+    // The special parent names the point through its inline slot: the barrel
+    // its live clip selects, the field its action pair selects, and only with
+    // a def in that slot. [orig: Entity_GetAttachmentWorldPosition
+    //  @0x4B26A9..0x4B26B6 -> Entity_ComputeUserpointWorldTransform with a
+    //  NULL slot (the inline +0x2B4 @0x545CBC; slot->Def @0x545CC6; barrel
+    //  @0x545D40..0x545D4B; field @0x545D17..0x545D3F)]
+    f.world.tables.weapons.entries.resize(1);
+    f.world.tables.weapons.entries[0].valid = true;
     Entity parent;
     parent.item_id = 9; parent.has_item_def = true; parent.item_attrib = 0x20;
     parent.position = {10, 20, 30};
     parent.weapon_userpoint_bytes[0][0] = 7;
+    parent.weapon_userpoint_bytes[2][0] = 5;
+    parent.weapon_userpoint_bytes[2][1] = 3;
+    parent.primary_weapon_slot_adm = 0;
+    parent.primary_weapon_slot.clip = 4;
     const auto carrier = f.world.registry.spawn(1, parent);
     f.entity().mount_target = carrier;
     f.entity().mount_type = SeatType::Gunner;
     f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
     CHECK(f.points.parent_seen == carrier && f.points.parent_point == 7);
     CHECK(pose[0] == 101 && pose[3] == 404 && pose[4] == 505 && pose[5] == 606);
+    f.world.registry.get(carrier)->primary_weapon_slot.clip = 6;
+    f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
+    CHECK(f.points.parent_point == 5);
+    f.world.registry.get(carrier)->primary_weapon_slot.current = weapon_action::kFire;
+    f.world.registry.get(carrier)->primary_weapon_slot.next = weapon_action::kRecoil;
+    f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
+    CHECK(f.points.parent_point == 3);
+    f.world.registry.get(carrier)->primary_weapon_slot = WeaponSlotState{};
+    f.world.registry.get(carrier)->primary_weapon_slot.clip = 4;
+    f.world.registry.get(carrier)->primary_weapon_slot_adm = kAdmSlotNone;
+    f.points.parent_point = 0;
+    f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
+    CHECK(f.points.parent_point == 0);
+    CHECK(pose[0] == 10 * 65536 && pose[1] == 20 * 65536 && pose[2] == 30 * 65536);
+    f.world.registry.get(carrier)->primary_weapon_slot_adm = 0;
     f.points.parent_resolves = false;
     f.world.ai.organic_fire_pose(f.world, f.body(), 0, pose);
     CHECK(pose[0] == 10 * 65536 && pose[1] == 20 * 65536 && pose[2] == 30 * 65536);

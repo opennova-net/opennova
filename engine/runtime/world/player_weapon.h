@@ -293,6 +293,35 @@ bool local_weapon_seat_flag(const LocalPlayerWeapon &, bool scope_settled, uint3
 void local_weapon_fire_pose(World &, const LocalPlayerWeapon &,
                            int32_t clip_before_consume, bool scope_settled, int32_t out[6]);
 
+// The weapon point of a fired slot on `carrier`, the half both userpoint
+// transforms share: a def carrying a third-person model (gfx3) poses its
+// resolved launch userpoint on that model through the carrier; any other
+// def poses the carrier's own slot byte for barrel `clip & 3` in `column`.
+// `out_direction`, when set, also receives the point's authored direction
+// through the posed bone. False is retail's raw leg (no def, a zero index,
+// no posed model): nothing is written and the caller copies the raw pose.
+// [orig: Entity_ComputeUserpointWorldTransform @0x545CC6..0x545D85;
+//  Entity_ComputeUserpointTransform @0x545AAC..0x545BA5]
+bool carrier_weapon_userpoint(World &, const Entity &carrier, const WeaponTableEntry *fired,
+                              int32_t clip, int column, int32_t out[6],
+                              int32_t out_direction[3] = nullptr);
+
+// Entity_ComputeUserpointWorldTransform for a fired slot: the weapon point,
+// else the carrier's raw pose (out_direction then stays unwritten).
+// [orig: Entity_ComputeUserpointWorldTransform @0x545C60; raw copy @0x545E1F]
+bool carrier_weapon_world_pose(World &, const Entity &carrier, const WeaponTableEntry *fired,
+                               int32_t clip, int column, int32_t out[6],
+                               int32_t out_direction[3] = nullptr);
+
+// The UseGun gunner branch of the fire position, shared by every mounted
+// shooter's fire tick: a G-attached gun routed to its parent slot fires from
+// the HULL through the local-space helper, any other gun through its own
+// world-space helper. The fired slot's def picks the gfx3 launch point;
+// clip_before_consume the barrel, in column 0.
+// [orig: Entity_CalcWeaponFirePosition gunner branch @0x4DC7A0..0x4DC802]
+void usegun_fire_pose(World &, const Entity &gun, const WeaponTableEntry *fired,
+                      int32_t clip_before_consume, int32_t out[6]);
+
 // The seat/equip gates the switch walks consume.
 // [orig: the parentSlot {2,3,5} stance gate @ 0x4e0192; the equip-commit
 //  defer gates {2,3} @ 0x4dd6fc]

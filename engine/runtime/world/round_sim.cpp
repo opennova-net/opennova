@@ -783,10 +783,19 @@ void record_round_fire(World &world, RoundSim &sim,
 					round_event_flag::kAdmIndexed) {
 		const auto *weapon = world.tables.weapons.by_index(params.adm_index);
 		if (Entity *shooter = world.registry.get(params.owner);
-				shooter != nullptr && weapon != nullptr)
+				shooter != nullptr && weapon != nullptr) {
+			// The replay runs the FIRE row on the gun's own slot, re-armed to
+			// FIRE over the RECOIL next an earlier replay left (the mflash
+			// column), at the clip that slot holds on this peer.
+			// [orig: Entity_GetWeaponSlots @0x42F841; cur = FIRE @0x42F8A0;
+			//  next = RECOIL @0x42F99F..0x42F9A2; the row @0x42F98F]
+			const Entity *gun = world.registry.get(shooter->mount_target);
+			const WeaponSlotState *slot =
+					gun != nullptr ? world.vehicles.resolve_mounted_ammo_slot(*gun) : nullptr;
 			world.vehicles.weapon_recoil(*shooter,
-					weapon->action_fsm.actions[weapon_action::kFire].action_value,
-					params.dir_yaw_bam, params.dir_pitch_bam);
+					weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
+					slot != nullptr ? slot->clip : 0, 1);
+		}
 	}
 	// The sound legs run on the same logic-tick moment (world/fire_sound.h).
 	fire_sound_on_spawn(world, params);

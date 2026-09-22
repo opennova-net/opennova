@@ -480,6 +480,63 @@ int main(void) {
 		def_free_weapons(&no_adm);
 	}
 
+	// The gfx3 model loads with its def and the launch userpoint resolves on it
+	// once every def has parsed: the first case-insensitive name match,
+	// 1-based; an unmatched or unnamed point stays 0, a def without gfx3 (or a
+	// build without a resource source) loads no model.
+	// [orig: WeaponDefs_ParseLineCallback load @0x544FCE, store @0x545092,
+	//  launchuserpoint @0x544479..0x5444AC; WeaponDef_ResolveAllReferences
+	//  @0x5402C2..0x540316 -> modelgpm_FindUserpointByName @0x5B2170]
+	{
+		static const char kLaunch[] =
+				"weapon \"WPN_GFX3_CAMERA\"\n"
+				"\tgfx3 mount\n"
+				"\tlaunchuserpoint CAMERA\n"
+				"end\n"
+				"weapon \"WPN_GFX3_FLASH\"\n"
+				"\tgfx3 mount\n"
+				"\tlaunchuserpoint mflash01\n"
+				"end\n"
+				"weapon \"WPN_GFX3_MISSING\"\n"
+				"\tgfx3 mount\n"
+				"\tlaunchuserpoint missing\n"
+				"end\n"
+				"weapon \"WPN_GFX3_UNNAMED\"\n"
+				"\tgfx3 mount\n"
+				"end\n"
+				"weapon \"WPN_NO_GFX3\"\n"
+				"\tlaunchuserpoint camera\n"
+				"end\n";
+		DefWeaponsFile launch{};
+		CHECK(def_parse_weapons_memory(
+				reinterpret_cast<const uint8_t *>(kLaunch),
+				sizeof(kLaunch) - 1, &launch) == 0);
+		opennova::ResourceIndex index;
+		opennova::assets::AssetStore models{&index};
+		CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth"));
+		const world::WeaponTable table = world::build_weapon_table(launch, &models);
+		// fixtures/threedi/synth/mount.3di: BCasing, Bullet, Camera, heat,
+		// MFlash01, Usegun.
+		const world::WeaponTableEntry *camera = table.by_index(1);
+		const world::WeaponTableEntry *flash = table.by_index(2);
+		const world::WeaponTableEntry *missing = table.by_index(3);
+		const world::WeaponTableEntry *unnamed = table.by_index(4);
+		const world::WeaponTableEntry *no_gfx3 = table.by_index(5);
+		CHECK(camera != nullptr && camera->third_person_model_asset != nullptr &&
+				camera->launch_userpoint == 3);
+		CHECK(flash != nullptr && flash->launch_userpoint == 5);
+		CHECK(missing != nullptr && missing->third_person_model_asset != nullptr &&
+				missing->launch_userpoint == 0);
+		CHECK(unnamed != nullptr && unnamed->third_person_model_asset != nullptr &&
+				unnamed->launch_userpoint == 0);
+		CHECK(no_gfx3 != nullptr && no_gfx3->third_person_model_asset == nullptr &&
+				no_gfx3->launch_userpoint == 0);
+		const world::WeaponTable bare = world::build_weapon_table(launch);
+		CHECK(bare.by_index(1) != nullptr && bare.by_index(1)->third_person_model_asset == nullptr &&
+				bare.by_index(1)->launch_userpoint == 0);
+		def_free_weapons(&launch);
+	}
+
 	std::printf("weapon_table: %s\n", failures == 0 ? "OK" : "FAILED");
 	return failures == 0 ? 0 : 1;
 }

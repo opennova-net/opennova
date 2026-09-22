@@ -196,13 +196,34 @@ void EntityPoseProvider::register_userpoint_model(int32_t model_id,
 //  pose @0x56c4dd, point @0x56c4f2..0x56c513, euler @0x56c604)]
 bool EntityPoseProvider::resolve_userpoint_transform(world::World &world,
 		world::EntityHandle entity, int userpoint_index, int32_t out[6]) {
-	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
-		return false;
+	return resolve_userpoint_frame(world, entity, nullptr, userpoint_index, out, nullptr);
+}
+
+// The model argument is any posed model: the entity's own, or a fired
+// weapon's third-person model evaluated over the same placement and the
+// entity's CTRL publication (the weapon's own PANM reads the carrier's
+// registers). The direction leg transforms the record's authored direction
+// by the posed bone's rotation, then turns the bone matrix by that
+// direction's LOCAL yaw atan2(y, x) and pitch atan2(z, |xy|) before the
+// euler is read, so the reported euler faces along the authored direction.
+// [orig: Userpoint_ComputeWorldTransform @0x56c420 (modelData @0x56c478;
+//  direction @0x56C52A..0x56C534; |xy| clamp flt_7C19E0 @0x56C563..0x56C576
+//  and _ftol2 @0x56C57F; pitch @0x56C59E..0x56C5AE, yaw @0x56C5C7..0x56C5E1,
+//  both dbl_7C19D8 and truncating; Math_BuildFixedPointRotationMatrixYXZ
+//  @0x56C5EF postmultiplies through Matrix_Multiply3x4_FixedPoint @0x613940)]
+bool EntityPoseProvider::resolve_userpoint_frame(world::World &world,
+		world::EntityHandle entity, const Threedi3di3 *model, int userpoint_index,
+		int32_t out[6], int32_t out_direction[3]) {
+	if (out == nullptr || userpoint_index <= 0) return false;
 	const world::Entity *e = world.registry.get(entity);
 	if (e == nullptr) return false;
-	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
-	if (found == userpoint_models_.end() || found->second == nullptr) return false;
-	const Threedi3di3 &model3di = *found->second;
+	if (model == nullptr) {
+		if (world.collision == nullptr) return false;
+		const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+		if (found == userpoint_models_.end() || found->second == nullptr) return false;
+		model = found->second.get();
+	}
+	const Threedi3di3 &model3di = *model;
 	if (model3di.user_points == nullptr ||
 			static_cast<size_t>(userpoint_index) > model3di.user_point_count)
 		return false;
@@ -223,6 +244,36 @@ bool EntityPoseProvider::resolve_userpoint_transform(world::World &world,
 	// [orig: @0x56c4f2..0x56c513 transforms record[+0..+8] as stored].
 	const int32_t local_q16[3] = {point.x, point.y, point.z};
 	bone_world.transform_point(local_q16, out);
+	if (out_direction != nullptr) {
+		const int32_t direction_q16[3] = {point.rot_x, point.rot_y, point.rot_z};
+		bone_world.rotate_point(direction_q16, out_direction);
+		constexpr double kBamPerRadian = 683565275.5764316; // dbl_7C19D8
+		constexpr double kHorizontalCap = 2147418112.0;     // flt_7C19E0
+		const auto chop = [](double value) {
+			return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
+		};
+		const double x = static_cast<double>(point.rot_x);
+		const double y = static_cast<double>(point.rot_y);
+		double horizontal = std::sqrt(x * x + y * y);
+		if (kHorizontalCap < horizontal) horizontal = kHorizontalCap;
+		const int32_t horizontal_int = static_cast<int32_t>(horizontal);
+		const int32_t pitch = chop(std::atan2(static_cast<double>(point.rot_z),
+				static_cast<double>(horizontal_int)) * kBamPerRadian);
+		const int32_t yaw = chop(std::atan2(y, x) * kBamPerRadian);
+		const int32_t zero[3] = {};
+		const world::CollisionMatrix turn =
+				world::collision_matrix_from_euler(yaw, pitch, 0, zero);
+		world::CollisionMatrix turned = bone_world;
+		for (int r = 0; r < 3; ++r) {
+			for (int c = 0; c < 3; ++c) {
+				int64_t sum = 0x200000;
+				for (int k = 0; k < 3; ++k)
+					sum += static_cast<int64_t>(bone_world.m[4 * r + k]) * turn.m[4 * k + c];
+				turned.m[4 * r + c] = static_cast<int32_t>(sum >> 22);
+			}
+		}
+		bone_world = turned;
+	}
 	world::collision_matrix_to_euler(bone_world, out + 3);
 	return true;
 }

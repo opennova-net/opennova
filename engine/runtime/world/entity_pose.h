@@ -151,6 +151,9 @@ public:
 	bool resolve_userpoint_transform(world::World &world,
 			world::EntityHandle entity, int userpoint_index,
 			int32_t out[6]) override;
+	bool resolve_userpoint_frame(world::World &world, world::EntityHandle entity,
+			const opennova::threedi::Threedi3di3 *model, int userpoint_index,
+			int32_t out[6], int32_t out_direction[3]) override;
 	bool resolve_named_transform(
 			world::World &, world::EntityHandle, const char *name, int32_t out[6]) override;
 	int last_named_userpoint(world::World &, world::EntityHandle, const char *) override;

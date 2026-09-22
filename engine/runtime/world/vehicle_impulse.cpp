@@ -1,5 +1,6 @@
 #include "vehicle_motor_detail.h"
 #include "world.h"
+#include <runtime/world/player_weapon.h>
 
 namespace opennova::world {
 namespace {
@@ -185,11 +186,14 @@ void VehicleSystem::projectile_impact(
 }
 
 // A mounted gun's ground link identifies its carrier. Only CTANK executes
-// recoil, and a zero action value leaves an existing impulse untouched.
-// [orig: WeaponAction_Fire @0x542B10, tail @0x542D1D..0x542DA1;
-// ActionSlot_ExecuteAction @0x4020A0, tail @0x402196..0x402233]
-void VehicleSystem::weapon_recoil(
-		const Entity &shooter, int32_t amplitude, int32_t yaw, int32_t pitch) {
+// recoil, and a zero action value leaves an existing impulse untouched. The
+// impulse runs against the direction of the gun's point for the fired slot:
+// the point's authored direction through the posed bone, negated.
+// [orig: WeaponAction_Fire @0x542B10, tail @0x542D1F..0x542DA1 (the point
+//  @0x542D45..0x542D5B, negated @0x542D60..0x542D7D); ActionSlot_ExecuteAction
+//  @0x4020A0, tail @0x402196..0x402233 (the point @0x4021D1..0x4021ED)]
+void VehicleSystem::weapon_recoil(const Entity &shooter, int32_t amplitude,
+		const WeaponTableEntry *fired, int32_t slot_clip, int column) {
 	if (amplitude == 0 || !shooter.mounted || shooter.mount_type != SeatType::Gunner)
 		return;
 	const Entity *gun = world_.registry.get(shooter.mount_target);
@@ -201,9 +205,18 @@ void VehicleSystem::weapon_recoil(
 	const VehicleTraits *t = traits.get(carrier->item_id);
 	if (t == nullptr || t->family != VehicleFamily::Tank)
 		return;
-	const auto frame = detail::vehicle_euler_basis(yaw, pitch, 0).q22;
-	const int32_t direction[3] = { io::bam_sub(0, frame.m[0] >> 6), io::bam_sub(0, frame.m[4] >> 6),
-		io::bam_sub(0, frame.m[8] >> 6) };
+	int32_t pose[6];
+	int32_t point_direction[3];
+	if (!carrier_weapon_world_pose(world_, *gun, fired, slot_clip, column, pose, point_direction)) {
+		// The raw leg writes no direction (retail reads its stack local as it
+		// stands); the gun's raw forward stands in.
+		const auto frame = detail::vehicle_euler_basis(pose[3], pose[4], 0).q22;
+		point_direction[0] = frame.m[0] >> 6;
+		point_direction[1] = frame.m[4] >> 6;
+		point_direction[2] = frame.m[8] >> 6;
+	}
+	const int32_t direction[3] = { io::bam_sub(0, point_direction[0]),
+		io::bam_sub(0, point_direction[1]), io::bam_sub(0, point_direction[2]) };
 	detail::vehicle_recoil_impulse(world_, *carrier, *t, amplitude, direction);
 }
 } // namespace opennova::world

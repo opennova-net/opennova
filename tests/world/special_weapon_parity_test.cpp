@@ -1,5 +1,9 @@
 // Retail gameplay seams: 0x4DFA40, 0x4E0EC3, 0x4DC750, 0x445DB0,
 // 0x446060 and 0x488AB0. The jo-c guided vectors cover the separate motor.
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/world/hud_combat_feed.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/throwables.h>
@@ -152,10 +156,24 @@ void designator_fire_uses_the_measured_position() {
 struct Poses : IPoseProvider {
     EntityHandle queried;
     int userpoint = 0;
+    const opennova::threedi::Threedi3di3 *model = nullptr;
+    bool asked_direction = false;
+    int32_t placement_pitch = 0; // the queried carrier's placement pitch
     bool resolve_userpoint_transform(World &, EntityHandle h, int index, int32_t out[6]) override {
         queried = h; userpoint = index;
         const int32_t pose[6] = {14*65536,22*65536,5*65536,5*degree,12*degree,0};
         std::copy_n(pose, 6, out); return true;
+    }
+    bool resolve_userpoint_frame(World &world, EntityHandle h,
+            const opennova::threedi::Threedi3di3 *m, int index, int32_t out[6],
+            int32_t out_direction[3]) override {
+        model = m;
+        asked_direction = out_direction != nullptr;
+        if (const Entity *e = world.registry.get(h)) placement_pitch = e->veh.air_pitch_bam;
+        if (out_direction != nullptr) {
+            out_direction[0] = 65536; out_direction[1] = 0; out_direction[2] = 0;
+        }
+        return resolve_userpoint_transform(world, h, index, out);
     }
     bool resolve_muzzle_pose(World &, EntityHandle, int32_t out[3]) override {
         out[0] = 800*65536; out[1] = 900*65536; out[2] = 100*65536;
@@ -207,7 +225,151 @@ void redirected_gunner_fires_from_the_hull() {
     r.world.registry.get(gun_handle)->primary_weapon_slot.redirect_to_parent_slot = true;
     local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
     CHECK(poses.queried == hull_handle && poses.userpoint == 21);
+    CHECK(!poses.asked_direction);
+    // The local-space helper folds an EWEAP hull's view tilt into its Pitch
+    // while the point is posed, then restores it.
+    // [orig: Entity_ComputeUserpointTransform fold @0x545BAB..0x545BBF,
+    //  undone @0x545BF4..0x545C09]
+    Entity &tilted = *r.world.registry.get(hull_handle);
+    tilted.veh.yaw_seeded = true;
+    tilted.veh.air_pitch_bam = 5*degree;
+    tilted.veh.view_tilt_bam = -3*degree;
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.queried == hull_handle && poses.placement_pitch == 2*degree);
+    CHECK(r.world.registry.get(hull_handle)->veh.air_pitch_bam == 5*degree);
     r.world.pose_provider = nullptr;
+}
+// A fired def carrying a third-person model fires from its resolved launch
+// point on that model, posed through the gun, and never reads the gun's slot
+// bytes; a zero launch index is the raw leg (the gun's own pose).
+// [orig: Entity_ComputeUserpointWorldTransform gfx3 leg @0x545D06..0x545D85,
+//  raw copy @0x545E1F]
+void gfx3_weapon_fires_from_its_launch_point() {
+    Rig r;
+    const auto gfx3 = std::make_shared<opennova::threedi::Threedi3di3>();
+    auto &weapon = r.world.tables.weapons.entries[1];
+    weapon.third_person_model_asset = gfx3;
+    weapon.launch_userpoint = 3;
+    Entity gun;
+    gun.kind = EntityKind::Item; gun.has_item_def = true; gun.item_type = 6;
+    gun.item_attrib = kItemAttribEweap;
+    gun.position = {12,20,2};
+    for (auto &barrel : gun.weapon_userpoint_bytes) barrel[0] = 9;
+    const auto gun_handle = r.world.registry.spawn(1, gun);
+    auto &shooter = *r.world.registry.get(r.shooter);
+    shooter.mounted = true; shooter.mount_target = gun_handle; shooter.mount_type = SeatType::Gunner;
+    Poses poses; r.world.pose_provider = &poses;
+    const auto fire = r.fire();
+    CHECK(poses.queried == gun_handle && poses.userpoint == 3 && poses.model == gfx3.get());
+    CHECK(fire.fired.round.origin_x == 14*65536 && fire.fired.round.origin_z == 5*65536);
+    weapon.launch_userpoint = 0;
+    poses.userpoint = 0; poses.model = nullptr;
+    int32_t pose[6];
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.userpoint == 0 && poses.model == nullptr);
+    CHECK(pose[0] == 12*65536 && pose[1] == 20*65536 && pose[2] == 2*65536);
+    r.world.pose_provider = nullptr;
+}
+// The controller helper asks for its point's direction, which turns the fire
+// euler; the gunner arms ask for none.
+// [orig: Entity_CalcWeaponFirePosition outDirection @0x4DC829 ->
+//  Entity_ComputeUserpointTransform @0x4DC83A; gunner @0x4DC7F6 (NULL)]
+void controller_fire_asks_for_the_point_direction() {
+    Rig r;
+    Entity carrier;
+    carrier.kind = EntityKind::Item; carrier.has_item_def = true; carrier.item_type = 1;
+    carrier.item_attrib = kItemAttribEweap;
+    carrier.weapon_userpoint_bytes[0][0] = 11;
+    const auto carrier_handle = r.world.registry.spawn(1, carrier);
+    auto &shooter = *r.world.registry.get(r.shooter);
+    shooter.mounted = true; shooter.mount_target = carrier_handle;
+    shooter.mount_type = SeatType::Controller;
+    Poses poses; r.world.pose_provider = &poses;
+    int32_t pose[6];
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.queried == carrier_handle && poses.userpoint == 11 && poses.asked_direction);
+    shooter.mount_type = SeatType::Gunner;
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.queried == carrier_handle && !poses.asked_direction);
+    r.world.pose_provider = nullptr;
+}
+// The commander's line starts at the attached gun's point for the gun's own
+// slot: a gfx3 def's launch point on that model, else the gun's byte.
+// [orig: HUD_DrawScopeOverlayDetails -> Entity_ComputeUserpointWorldTransform
+//  @0x59E680, the occupant's slot @0x59E66A]
+void commander_line_starts_at_the_gun_launch_point() {
+    Rig r;
+    CollisionWorld collision;
+    r.world.collision = &collision;
+    Entity hull;
+    hull.kind = EntityKind::Item; hull.has_item_def = true; hull.item_type = 1;
+    hull.item_id = 30;
+    const auto hull_handle = r.world.registry.spawn(1, hull);
+    Entity commander_seat;
+    commander_seat.kind = EntityKind::Item; commander_seat.has_item_def = true;
+    commander_seat.item_id = 31; commander_seat.ground_target = hull_handle;
+    const auto seat_handle = r.world.registry.spawn(1, commander_seat);
+    Entity gunner;
+    gunner.kind = EntityKind::Organic; gunner.alive = true; gunner.health = 100;
+    gunner.mounted = true;
+    const auto gunner_handle = r.world.registry.spawn(0, gunner);
+    Entity gun;
+    gun.kind = EntityKind::Item; gun.has_item_def = true; gun.item_id = 32;
+    gun.item_attrib = kItemAttribEweap;
+    gun.emplacement_parent = hull_handle;
+    gun.emplacement_attachment_flags = 1;
+    gun.primary_occupant = gunner_handle;
+    gun.primary_weapon_slot_adm = 1;
+    gun.position = {12,20,2};
+    for (auto &barrel : gun.weapon_userpoint_bytes) barrel[0] = 9;
+    const auto gun_handle = r.world.registry.spawn(1, gun);
+    auto &shooter = *r.world.registry.get(r.shooter);
+    shooter.mounted = true; shooter.mount_target = seat_handle;
+    shooter.mount_type = SeatType::Controller;
+    r.local.weapon.def.flags |= 8;
+    Poses poses; r.world.pose_provider = &poses;
+    LocalPlayerViewFrame frame;
+    LocalPlayerViewTracker tracker;
+    frame.scope_details_active = true;
+    fill_hud_combat_view(r.world, r.local.weapon, frame, tracker, true);
+    CHECK(frame.hud_combat.commander_valid);
+    CHECK(poses.queried == gun_handle && poses.userpoint == 9 && poses.model == nullptr);
+    const auto gfx3 = std::make_shared<opennova::threedi::Threedi3di3>();
+    r.world.tables.weapons.entries[1].third_person_model_asset = gfx3;
+    r.world.tables.weapons.entries[1].launch_userpoint = 4;
+    frame = {};
+    frame.scope_details_active = true;
+    fill_hud_combat_view(r.world, r.local.weapon, frame, tracker, true);
+    CHECK(poses.queried == gun_handle && poses.userpoint == 4 && poses.model == gfx3.get());
+    r.world.pose_provider = nullptr;
+    r.world.collision = nullptr;
+}
+// The engine provider's direction leg: the record's authored direction through
+// the posed bone, and the euler turned by that direction's local yaw.
+// [orig: Userpoint_ComputeWorldTransform @0x56C52A..0x56C604]
+void pose_provider_turns_the_euler_by_the_point_direction() {
+    auto storage = std::make_unique<World>();
+    World &world = *storage;
+    world.registry.configure_pool(1, 2);
+    Entity seed;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    const auto handle = world.registry.spawn(1, seed);
+    opennova::threedi::ThreediUserPoint point{};
+    point.x = 65536; point.rot_y = 65536; point.subobject_index = -1;
+    opennova::threedi::Threedi3di3 model{};
+    model.user_points = &point;
+    model.user_point_count = 1;
+    EntityPoseProvider provider;
+    int32_t plain[6], turned[6], direction[3];
+    CHECK(provider.resolve_userpoint_frame(world, handle, &model, 1, plain, nullptr));
+    CHECK(provider.resolve_userpoint_frame(world, handle, &model, 1, turned, direction));
+    CHECK(turned[0] == plain[0] && turned[1] == plain[1] && turned[2] == plain[2]);
+    // Mission yaw 0 is heading 90 deg: local +Y points along world -X, and the
+    // point's euler turns a further quarter turn.
+    CHECK(direction[0] < -65500 && direction[1] > -16 && direction[1] < 16 && direction[2] == 0);
+    const int32_t turn = int32_t(uint32_t(turned[3]) - uint32_t(plain[3]));
+    CHECK(turn > 0x40000000 - 0x10000 && turn < 0x40000000 + 0x10000);
+    CHECK(!provider.resolve_userpoint_frame(world, handle, &model, 2, plain, nullptr));
 }
 // ctank input does not translate lean keys into bike jump/brake flags.
 // [orig: Entity_UpdateTankVehiclePhysics @0x489675..0x4896A7]
@@ -277,6 +439,10 @@ int main() {
     only_scoped_mortar_absorbs_pitch_once_promoted();
     tank_gunner_fires_from_the_selected_barrel();
     redirected_gunner_fires_from_the_hull();
+    gfx3_weapon_fires_from_its_launch_point();
+    controller_fire_asks_for_the_point_direction();
+    commander_line_starts_at_the_gun_launch_point();
+    pose_provider_turns_the_euler_by_the_point_direction();
     guided_rounds_track_the_target_aim_origin();
     tank_input_preserves_non_input_flags();
     if (!failures) std::puts("special_weapon_parity: all checks passed");

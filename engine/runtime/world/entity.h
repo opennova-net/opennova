@@ -1269,4 +1269,13 @@ inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
     return e.weapon_userpoint_bytes[slot][field];
 }
 
+// The field a slot's action pair selects: the flash (1) while FIRE hands over
+// to RECOIL, the casing (2) through RECOIL, else the fire origin (0).
+// [orig: Entity_ComputeUserpointWorldTransform @0x545D17..0x545D3F]
+inline int weapon_userpoint_field(const WeaponSlotState &slot) {
+    if (slot.current == weapon_action::kFire)
+        return slot.next == weapon_action::kRecoil ? 1 : 0;
+    return slot.current == weapon_action::kRecoil ? 2 : 0;
+}
+
 } // namespace opennova::world

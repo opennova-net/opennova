@@ -170,13 +170,17 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				const Entity *occupant = world.registry.get(gun.primary_occupant);
 				if (!occupant || !occupant->mounted)
 					return;
+				// The gun's point for its slot: that def's gfx3 launch point,
+				// else the gun's byte for the barrel and field the slot's live
+				// clip and action pair select; the raw gun position otherwise.
+				// [orig: Entity_ComputeUserpointWorldTransform @0x59E680, the
+				//  occupant's slot +0x118 @0x59E66A]
 				int32_t origin[6] = { to_fixed(gun.position.x), to_fixed(gun.position.y),
 					to_fixed(gun.position.z), 0, 0, 0 };
-				const uint8_t point =
-						weapon_userpoint_byte(gun, uint32_t(gun.primary_weapon_slot.clip) & 3u, 0);
-				if (point && world.pose_provider)
-					world.pose_provider->resolve_userpoint_transform(
-							world, gun.handle, point, origin);
+				const WeaponSlotState &slot = gun.primary_weapon_slot;
+				carrier_weapon_userpoint(world, gun,
+						world.tables.weapons.by_index(gun.primary_weapon_slot_adm), slot.clip,
+						weapon_userpoint_field(slot), origin);
 				const auto *aim_body = world.ai.for_handle(occupant->handle);
 				const auto eye = player_eye_position(*occupant);
 				const int32_t camera[3] = { to_fixed(eye.x), to_fixed(eye.y), to_fixed(eye.z) };

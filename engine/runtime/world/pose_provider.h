@@ -15,6 +15,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace opennova::threedi {
+struct Threedi3di3;
+}
+
 namespace opennova::world {
 
 class World;
@@ -64,6 +68,21 @@ public:
 	virtual bool resolve_userpoint_transform(
 			World &, EntityHandle, int /*userpoint_index*/, int32_t /*out*/[6]) {
 		return false;
+	}
+	// The same transform over any model posed through the entity: `model`
+	// null is the entity's own userpoint model, else that model (a fired
+	// weapon's third-person gfx3) through the entity's placement and CTRL
+	// publication. A non-null `out_direction` also receives the record's
+	// authored direction through the posed bone (16.16), and the reported
+	// euler turns by that direction's local yaw/pitch; without it the euler
+	// is the posed bone's own. The default serves the plain query only.
+	// [orig: Userpoint_ComputeWorldTransform @0x56c420 (modelData argument;
+	//  the direction leg @0x56C524..0x56C5F4)]
+	virtual bool resolve_userpoint_frame(World &world, EntityHandle entity,
+			const threedi::Threedi3di3 *model, int userpoint_index, int32_t out[6],
+			int32_t out_direction[3]) {
+		return model == nullptr && out_direction == nullptr &&
+				resolve_userpoint_transform(world, entity, userpoint_index, out);
 	}
 	// Named model point through the live part pose, used by AI entry walks.
 	// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
