@@ -1063,6 +1063,8 @@ struct Entity {
 
 		bool pivot_sound_latched = false; // brain+0x318 bit 5: stationary tank turn
 		int32_t pivot_sound_prev_rate = 0; // brain+0x328: prior yaw rate, not slide_z
+		int32_t tread_sound_accum = 0; // brain+0x320: even-tick travel sum (slot 45)
+		int32_t tread_sound_prev_speed = 0; // brain+0x324: the previous even tick's speed
 		bool skid_sound_latched = false; // brain+0x318 bit 3
 		uint32_t rev_sound_ticks = 0; // brain+0x31C
 		bool skid_effects_requested = false; // per-tick bone-effect producer

@@ -220,14 +220,14 @@ Entity *VehicleSystem::resolve_controller(Entity &veh) {
         if (controller == nullptr) controller = occ;
     }
     // Stale claimant (for example, a scripted/despawned occupant that bypassed detach):
-    // validate the +368 mirror each tick alongside the seat sweep. The stop edge
-    // fires for THE claimant only, matching the detach leg; a surviving second control
-    // occupant does not inherit the claim (it re-arms only on a fresh attach).
-    // [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c]
+    // validate the +368 mirror each tick alongside the seat sweep. The mover only
+    // nulls the claim here; its tail's leave edge sounds the hull stop this tick. A
+    // surviving second control occupant does not inherit the claim (it re-arms only on
+    // a fresh attach). [orig: Entity_UpdateTankVehiclePhysics @0x489484..0x4894BE;
+    // cveh @0x48b8a1-0x48b944]
     if (veh.primary_occupant.valid()) {
         Entity *po = world.registry.get(veh.primary_occupant);
         if (po == nullptr || !po->mounted || po->mount_target != veh.handle) {
-            world.vehicles.stop_ground_sound(veh);
             veh.primary_occupant = EntityHandle{};
             world.vehicles.emit_control_stopped(veh);
         }
@@ -952,6 +952,10 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	// rotor machine, so it never draws that machine's PRNG roll.
 	if (traits.player_control)
 		world.vehicles.part_anim_tick(veh, traits);
+	// The tank's tread cue follows the PlayerControl block.
+	// [orig: Entity_UpdateTankVehiclePhysics @0x48AE45..0x48AEA1]
+	if (traits.family == VehicleFamily::Tank)
+		world.vehicles.update_tread_sound(veh, traits);
     if (traits.family == VehicleFamily::Bike)
         m.wheelie_request = 0; // [orig: Entity_UpdateLightVehiclePhysics @ 0x4869F9]
 }

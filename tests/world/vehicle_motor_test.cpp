@@ -1075,9 +1075,11 @@ void test_reverse_sound_and_direction_shift_edges() {
 }
 
 // The claimant detach edge immediately clears both moving lanes and plays the
-// profile's engine-stop one-shot. Idle receives no refresh and retires through
-// its existing 30-tick keep-alive.
-// [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c]
+// profile's engine-stop one-shot on the departing occupant, while its eye
+// clears the water plane. Idle receives no refresh and retires through its
+// existing 30-tick keep-alive; the direction and engine latches stay set.
+// [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c, stop on the occupant
+//  @0x43571B..0x43573E]
 void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
     Rig r;
     VehicleTraits t = buggy_traits();
@@ -1086,6 +1088,8 @@ void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
     r.w.vehicles.traits.set(r.veh().item_id, t);
     r.mount();
     r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    r.veh().veh.reverse_sound_latched = true;
+    r.veh().veh.engine_sound_latched = true;
     r.w.out.sound_emitters.clear();
     r.w.out.slot_sounds.clear();
 
@@ -1104,6 +1108,22 @@ void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
     if (r.w.out.slot_sounds.size() == 1) {
         CHECK(r.w.out.slot_sounds[0].slot == 31);
         CHECK(std::strcmp(r.w.out.slot_sounds[0].set_name, "V_TRUCK_STOP") == 0);
+        CHECK(r.w.out.slot_sounds[0].source_handle == r.drv_h.packed);
+        CHECK(r.w.out.slot_sounds[0].pos[0] == to_fixed(r.drv().position.x));
+    }
+    CHECK(r.veh().veh.reverse_sound_latched);
+    CHECK(r.veh().veh.engine_sound_latched);
+
+    // An occupant whose eye sits under the water plane leaves silently.
+    {
+        Rig u;
+        load_transport_sound_profile(u.w);
+        u.w.vehicles.traits.set(u.veh().item_id, t);
+        u.mount();
+        u.w.env.water_z = to_fixed(u.drv().position.z) + u.drv().eye_offset_z;
+        u.w.out.slot_sounds.clear();
+        CHECK(u.w.vehicles.detach(u.drv_h));
+        CHECK(u.w.out.slot_sounds.empty());
     }
 
     // The idle lane was already drained into the host before detach. While its
@@ -1122,6 +1142,28 @@ void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
         CHECK(anchor.emitted_tick == r.w.logic_tick + 1);
         CHECK(anchor.pitch_q16 == 0);
         CHECK(anchor.volume_q8_8 == 0);
+    }
+}
+
+// The PlayerControl claimant's detach also releases the +0x1CC smoke emitter;
+// a claimant leaving a non-PlayerControl item keeps it.
+// [orig: Entity_DetachFromVehicle @0x435746..0x435759]
+void test_claimant_detach_releases_smoke_emitter() {
+    for (const bool player_control : {true, false}) {
+        Rig r;
+        VehicleTraits t = buggy_traits();
+        t.player_control = player_control;
+        r.w.vehicles.traits.set(r.veh().item_id, t);
+        r.mount();
+        CHECK(r.veh().primary_occupant == r.drv_h);
+        r.veh().veh.damage_smoke_active = true;
+        r.w.out.destruction.effects.clear();
+        CHECK(r.w.vehicles.detach(r.drv_h));
+        int releases = 0;
+        for (const DestructionEffectEvent &fx : r.w.out.destruction.effects)
+            if (fx.family == 4 && fx.release && fx.attach_net_id == r.veh().net_id) ++releases;
+        CHECK(releases == (player_control ? 1 : 0));
+        CHECK(r.veh().veh.damage_smoke_active == !player_control);
     }
 }
 
@@ -1561,9 +1603,19 @@ void test_engine_and_light_sound_edges() {
 	CHECK(r.w.vehicles.detach(r.drv_h));
 	CHECK(r.w.out.slot_sounds.size() == 1);
 	CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStop);
+	CHECK(r.w.out.slot_sounds[0].source_handle == r.drv_h.packed);
+	r.w.out.slot_sounds.clear();
+	// Detach leaves bit 0 set, so the mover's leave edge sounds the hull stop.
+	// [orig: cveh @0x48D3DA..0x48D421]
+	r.w.vehicles.update_engine_sound(r.veh(), t);
+	CHECK(r.w.out.slot_sounds.size() == 1);
+	if (r.w.out.slot_sounds.size() == 1) {
+		CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStop);
+		CHECK(r.w.out.slot_sounds[0].source_handle == r.veh_h.packed);
+	}
 	r.w.out.slot_sounds.clear();
 	r.w.vehicles.update_engine_sound(r.veh(), t);
-	CHECK(r.w.out.slot_sounds.empty()); // detach already cleared the edge
+	CHECK(r.w.out.slot_sounds.empty()); // the edge fires once
 
 	r.mount();
 	t.family = VehicleFamily::Helicopter;
@@ -1658,17 +1710,23 @@ void test_selector_zero_sound_tails() {
 	boat.w.vehicles.tick_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.empty());
 	CHECK(boat.veh().veh.engine_sound_latched);
-	// The claimant's departure: the detach leg fires the stop one-shot and
-	// drops the latch [orig: Entity_DetachFromVehicle @0x4356e9..0x435759]; the
-	// mover's own no-claimant arm then has nothing left to fire.
+	// The claimant's departure: the detach leg fires the stop on the departing
+	// occupant without touching the latch, so the mover's own leave edge fires
+	// a second stop on the hull. [orig: Entity_DetachFromVehicle
+	// @0x43571B..0x43573E; selector-zero boat leave edge @0x4700A1..0x4700EB]
 	boat.w.out.slot_sounds.clear();
 	CHECK(boat.w.vehicles.detach(boat.drv_h));
+	CHECK(boat.veh().veh.engine_sound_latched);
 	boat.w.vehicles.tick_motor(boat.veh(), t);
 	CHECK(!boat.veh().veh.engine_sound_latched);
 	int stops = 0;
 	for (const auto &sound : boat.w.out.slot_sounds)
 		if (sound.slot == opennova::audio::kSlotEngineStop) ++stops;
-	CHECK(stops == 1);
+	CHECK(stops == 2);
+	if (boat.w.out.slot_sounds.size() == 2) {
+		CHECK(boat.w.out.slot_sounds[0].source_handle == boat.drv_h.packed);
+		CHECK(boat.w.out.slot_sounds[1].source_handle == boat.veh_h.packed);
+	}
 }
 
 // The critical warning (profile slot 34) cadence: `& 0x1F` in the ground
@@ -1860,7 +1918,7 @@ void test_tank_pivot_sound_latch_and_loop() {
 		m.wheel_rate_bam = -100000;
 		CHECK(fold(true) == 65535); // collision idle still reaches the clamped pivot loop
 		m.settle_2f0 = 1;
-		CHECK(fold() == -1); // parked tanks skip the fold and retain the latch
+		CHECK(fold() == -1); // crash-settled tanks skip the fold and retain the latch
 		m.settle_2f0 = 0;
 		m.speed = t.player_speed;
 		CHECK(fold() == -1); // no idle registration at maximum speed; also clears latch
@@ -2181,6 +2239,134 @@ void test_client_chase_family_gates() {
 	CHECK(step(VehicleChaseFamily::Ground, false, true).pos.z > 0.0f);
 }
 
+// The tread cue: every even tick adds this and the previous even tick's speed;
+// a sum at or past +-0x80000 plays slot 45 on the hull and restarts. Odd ticks
+// are skipped, and the doubled sum's top bit is dropped.
+// [orig: Entity_UpdateTankVehiclePhysics @0x48AE45..0x48AEA1]
+void test_tank_tread_sound_accumulates_even_ticks() {
+	Rig r;
+	static constexpr char profile[] = "begin \"SP_Tread\"\n drive_repeat V_TREADS\nend\n";
+	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.sound_profile = "SP_Tread";
+	auto &m = r.veh().veh;
+	m.speed = 0x10000;
+	r.w.logic_tick = 1;
+	r.w.vehicles.update_tread_sound(r.veh(), t);
+	CHECK(m.tread_sound_accum == 0 && m.tread_sound_prev_speed == 0); // odd tick
+	r.w.logic_tick = 2;
+	r.w.vehicles.update_tread_sound(r.veh(), t);
+	CHECK(m.tread_sound_accum == 0x10000 && m.tread_sound_prev_speed == 0x10000);
+	for (uint32_t tick = 4; tick <= 8; tick += 2) {
+		r.w.logic_tick = tick;
+		r.w.vehicles.update_tread_sound(r.veh(), t);
+	}
+	CHECK(m.tread_sound_accum == 0x70000);
+	CHECK(r.w.out.slot_sounds.empty());
+	r.w.logic_tick = 10;
+	r.w.vehicles.update_tread_sound(r.veh(), t); // 0x70000 + 0x20000 passes 0x80000
+	CHECK(m.tread_sound_accum == 0);
+	CHECK(r.w.out.slot_sounds.size() == 1);
+	if (r.w.out.slot_sounds.size() == 1) {
+		CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotDriveRepeat);
+		CHECK(r.w.out.slot_sounds[0].source_handle == r.veh_h.packed);
+	}
+	// Reverse travel sounds the same cue at -0x80000.
+	r.w.out.slot_sounds.clear();
+	m.speed = -0x40000;
+	m.tread_sound_prev_speed = -0x40000;
+	r.w.logic_tick = 12;
+	r.w.vehicles.update_tread_sound(r.veh(), t);
+	CHECK(r.w.out.slot_sounds.size() == 1 && m.tread_sound_accum == 0);
+	// `add eax, eax; sar eax, 1`: bit 31 of the sum is dropped.
+	m.speed = 0x40000000;
+	m.tread_sound_prev_speed = 0x40000000;
+	m.tread_sound_accum = 0;
+	r.w.out.slot_sounds.clear();
+	r.w.logic_tick = 14;
+	r.w.vehicles.update_tread_sound(r.veh(), t);
+	CHECK(r.w.out.slot_sounds.empty() && m.tread_sound_accum == 0);
+	// The motor tail runs it for every tank, crash-settled or not.
+	Rig s;
+	CHECK(s.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	s.veh().veh.settle_2f0 = 1;
+	s.veh().veh.tread_sound_accum = 0x7FFFF;
+	s.veh().veh.speed = 0;
+	s.veh().veh.tread_sound_prev_speed = 1;
+	s.w.logic_tick = 2;
+	auto st = t;
+	st.player_control = false;
+	s.w.vehicles.tick_motor(s.veh(), st);
+	bool tread = false;
+	for (const auto &sound : s.w.out.slot_sounds)
+		tread = tread || sound.slot == opennova::audio::kSlotDriveRepeat;
+	CHECK(tread);
+}
+
+// The movement fold and its high-rev, skid and pivot sections run only on the
+// last logic tick of an outer-loop batch; the tank's +0x328 store is inside the
+// gate and the rev timer is not. [orig: Game_MainLoop @0x52BA24..0x52BA3A;
+// Entity_UpdateTankVehiclePhysics `jz loc_48AD5B` @0x48AAA5]
+void test_catch_up_ticks_skip_the_movement_fold() {
+	Rig r;
+	static constexpr char profile[] =
+			"begin \"SP_Gate\"\n Soundloop_1 IDLE 1 1\n swivel_shift SHIFT\nend\n";
+	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.sound_profile = "SP_Gate";
+	r.mount();
+	auto &m = r.veh().veh;
+	m.wheel_rate_bam = 40000;
+	m.steer_target_bam = 0x10000000;
+	m.pivot_sound_prev_rate = 7;
+	r.w.rules.last_tick_of_batch = false;
+	const uint32_t rev = m.rev_sound_ticks;
+	r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+	r.w.vehicles.update_traction_sound(r.veh(), t);
+	CHECK(r.w.out.sound_emitters.size() == 0);
+	CHECK(r.w.out.slot_sounds.empty());
+	CHECK(!m.pivot_sound_latched);
+	CHECK(m.pivot_sound_prev_rate == 7);
+	CHECK(m.rev_sound_ticks == rev + 1);
+	r.w.rules.last_tick_of_batch = true;
+	r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+	r.w.vehicles.update_traction_sound(r.veh(), t);
+	CHECK(r.w.out.sound_emitters.size() != 0);
+	CHECK(m.pivot_sound_latched);
+	CHECK(m.pivot_sound_prev_rate == 40000);
+}
+
+// A crash-settled tank skips the fold but keeps its registered lanes anchored
+// on the hull until they expire. [orig: Entity_UpdateTankVehiclePhysics
+// jump @0x48AABE]
+void test_crash_settled_tank_keeps_lane_anchor() {
+	Rig r;
+	static constexpr char profile[] = "begin \"SP_Anchor\"\n Soundloop_1 IDLE 1 1\nend\n";
+	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.sound_profile = "SP_Anchor";
+	r.mount();
+	r.w.vehicles.update_ground_sound(r.veh(), t, false, false); // registers idle
+	CHECK(r.veh().veh.sound_anchor_until_tick != 0);
+	r.veh().veh.settle_2f0 = 1;
+	r.w.out.sound_emitters.clear();
+	++r.w.logic_tick;
+	r.veh().position.x += 1.0f;
+	r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+	CHECK(r.w.out.sound_emitters.size() == 1);
+	if (r.w.out.sound_emitters.size() == 1) {
+		CHECK(r.w.out.sound_emitters[0].source_only);
+		CHECK(r.w.out.sound_emitters[0].pos.x == r.veh().position.x);
+	}
+	r.w.out.sound_emitters.clear();
+	r.w.logic_tick += 40; // past the 30-tick keep-alive
+	r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+	CHECK(r.w.out.sound_emitters.size() == 0);
+}
+
 // The handbrake latch reads the +0x170 claimant rather than the input block's
 // controller, so a predicting client latches it too.
 // [orig: cveh `cmp [esi+170h], edx` @0x48C03C; cbik @0x4851E8]
@@ -2431,6 +2617,9 @@ int main() {
 	test_prediction_keeps_player_control_tail();
 	test_prediction_latches_handbrake_from_claimant();
 	test_client_chase_family_gates();
+	test_tank_tread_sound_accumulates_even_ticks();
+	test_catch_up_ticks_skip_the_movement_fold();
+	test_crash_settled_tank_keeps_lane_anchor();
 	test_skid_effects_and_sound_edges();
 	test_handbrake_skid_and_grip_recovery();
 	test_tank_pivot_retains_direction_and_previous_track_rate();
@@ -2471,6 +2660,7 @@ int main() {
     test_forward_sound_gear_pitch_sawtooth();
     test_reverse_sound_and_direction_shift_edges();
     test_claimant_detach_clears_motion_lanes_and_plays_stop();
+    test_claimant_detach_releases_smoke_emitter();
     test_hull_collision_clears_motion_lanes_and_forces_full_idle();
 	test_vehicle_impact_role_and_momentum_edge();
 	test_claimant_detach_at_water_plane_clears_without_stop_oneshot();

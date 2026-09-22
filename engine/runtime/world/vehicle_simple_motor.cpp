@@ -384,7 +384,10 @@ void VehicleSystem::tick_simple_motor(
 	//  @0x46F88B..0x46F8C0, lights @0x46F8C3..0x46F8FC, claimant edge
 	//  @0x46F8FC..0x46F99C, part spin @0x46F99E, timer @0x46F9A6]
 	update_ground_sound(e, t, e.health <= 0, m.plat_airborne_ticks > 30);
-	if (controller != nullptr && m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
+	// The high-rev edge sits inside the same last-tick gate as the fold.
+	// [orig: Entity_ProcessInfantryPhysics @0x46F7C8..0x46F7CE]
+	if (world_.rules.last_tick_of_batch && controller != nullptr && m.rev_sound_ticks > 124 &&
+			m.plat_airborne_ticks > 30) {
 		play_contact_sound(e, t, 33);
 		m.rev_sound_ticks = 0;
 	}

@@ -277,12 +277,15 @@ public:
 	// collision clears both motion lanes and forces a full idle refresh; wreck/all-zero
 	// clears motion without refreshing idle.
 	void update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided);
-    // Claimant-only detach/stale-claim leg: clear the motion lanes and fire the
-    // authored engine-stop one-shot when strictly above the mission water plane. The
-    // idle lane is not refreshed and expires from its 30-tick keep-alive, matching
-    // the original zero-argument movement-sound call.
-	void stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16 = 0);
+    // The claimant's detach leg: clear the motion lanes and fire the authored
+    // engine-stop one-shot on the departing occupant while its eye clears the
+    // water plane. The idle lane is not refreshed and expires from its 30-tick
+    // keep-alive, matching the original zero-argument movement-sound call; the
+    // engine latch stays set for the mover's own leave edge.
+	void play_claimant_detach_sound(Entity &vehicle, const Entity *occupant);
 	void update_traction_sound(Entity &vehicle, const VehicleTraits &traits);
+	// The tank's tread cue (profile slot 45) on its even-tick travel sum.
+	void update_tread_sound(Entity &vehicle, const VehicleTraits &traits);
 	// The lights edge (slot 24) then the claimant start/stop edge — the ground
 	// tail's adjacent pair [orig: @0x46F8C3..0x46F99C; cveh @0x48D34E..0x48D429].
 	void update_engine_sound(Entity &vehicle, const VehicleTraits &traits);
