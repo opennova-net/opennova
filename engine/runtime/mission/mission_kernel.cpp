@@ -704,6 +704,16 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 	}
+	// Every peer then zeroes the frame tick, and each frame advances it ahead
+	// of its entity update, so the first frame runs at tick 1 on the host and
+	// on every client alike [orig: Game_StartMission `mov tick, ebx` (ebx = 0)
+	// @0x525B9F, past the is_authority-gated pre pass @0x525B78..0x525B90;
+	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of
+	// Entity_UpdateAllEntities @0x52674B]. World::run_logic_tick advances its
+	// clock after the tick, so the same first frame starts from 1 here; a
+	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
+	// tick out of phase.
+	world.logic_tick = 1;
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;

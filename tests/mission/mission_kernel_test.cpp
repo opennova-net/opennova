@@ -127,6 +127,29 @@ static void run_boot_trace_gates() {
 	}
 }
 
+// Every peer starts the mission on the same frame clock: retail zeroes `tick`
+// on the host and on each client alike, past the authority-only pre pass, and
+// advances it ahead of every frame's entity update, so the first frame runs at
+// tick 1 whether or not this peer ran the pre pass.
+// [orig: Game_StartMission `mov tick, ebx` (ebx = 0) @0x525B9F, the
+//  is_authority gate @0x525B78; Game_ProcessMainFrame `add tick, ebx`
+//  @0x5265B4 ahead of Entity_UpdateAllEntities @0x52674B]
+static void test_first_frame_tick_matches_on_host_and_joiner() {
+	for (bool joiner : {false, true}) {
+		bms::File mission{};
+		mission.items = {item(164, 0, 0, 0)};
+		ms::MissionKernel kernel;
+		kernel.open_document(mission, "first-frame", {});
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.joiner = joiner;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.world.logic_tick == 1u);
+	}
+}
+
 // The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
 // kernel itself owns no tick).
 static void tick_no_net(opennova::mission::MissionKernel &kernel) {
@@ -400,6 +423,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
 }
 
 int main() {
+    test_first_frame_tick_matches_on_host_and_joiner();
     test_initial_wac_binds_the_preopened_music_context();
     test_empty_wac_clock_and_baseline_gate();
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
