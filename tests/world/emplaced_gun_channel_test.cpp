@@ -631,6 +631,12 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    // A slot the port has not bound yet still carries the Def its item def
+    // names: retail binds it at spawn.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A]
+    pr.r.gun().primary_weapon = "CHILD_GUN";
+    tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
 }
 
 // The destroyed carrier's refNum children return to rest: their held gun

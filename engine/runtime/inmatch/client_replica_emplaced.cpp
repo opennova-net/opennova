@@ -2,6 +2,8 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/present_rows.h>
+#include <runtime/world/vehicle_motor.h>
 
 namespace opennova::inmatch {
 namespace {
@@ -35,7 +37,93 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 			spec.turret_pitch_min_bam);
 	return window;
 }
+
+// The parent brain's profile type. A joiner row has no brain to read it
+// from: its ai_function brain class stands in, else its motor family, as the
+// rotor machine selects (vehicle_part_anim.h).
+int32_t replica_parent_profile_type(const world::World &world, const world::Entity &parent) {
+	if (const world::AiEntity *ai = world.ai.for_handle(parent.handle))
+		return ai->profile.type;
+	const world::VehicleTraits *traits = world.vehicles.traits.get(parent.item_id);
+	if (traits == nullptr) return 0;
+	if (traits->brain_class != world::VehicleBrainClass::Unset)
+		return traits->brain_class == world::VehicleBrainClass::Air ? 1 : 2;
+	return world::vehicle_family_uses_direct_air_mover(traits->family) ? 1 : 2;
+}
+
+// The ewep class update's parent publication, the joiner's form: through the
+// same gates (an ewep class child with a slot Def, riding the unique authored
+// attachment row of its carrier on an authored userpoint of the carrier's
+// root subobject) the child's words land on the carrier's replica row.
+// [orig: Entity_UpdateTransformAndTurret @0x440ca0 — Def gate
+//  @0x440E8C..0x440EA0, userpoint gates @0x440f04..0x440f50, profile type
+//  @0x440f65..0x440f6b, values @0x440f70..0x441020]
+void publish_replica_gun_words(replication::ClientState &state,
+		const std::vector<mission::ItemSeatSpec> &specs, const world::World &world) {
+	for (const replication::ClientEntityState &child : state.entities) {
+		if (child.parent_handle == world::EntityHandle::kInvalid) continue;
+		const world::Entity *child_twin = world.registry.get(world::EntityHandle{child.handle});
+		if (child_twin == nullptr || static_cast<uint16_t>(child_twin->item_id) != child.type_id ||
+				!child_twin->emplaced_update || world::emplaced_slot_def(world, *child_twin) == nullptr)
+			continue;
+		replication::ClientEntityState *carrier = state.find(child.parent_handle);
+		if (carrier == nullptr) continue;
+		const mission::ItemSeatSpec *carrier_spec =
+				mission::item_seat_spec_for_type(specs, carrier->type_id);
+		if (carrier_spec == nullptr) continue;
+		const mission::ItemEmplacementAttachmentSpec *attachment = nullptr;
+		bool ambiguous = false;
+		for (const mission::ItemEmplacementAttachmentSpec &candidate :
+				carrier_spec->emplacement_attachments) {
+			if (candidate.child_type_id != static_cast<int32_t>(child.type_id)) continue;
+			if (attachment != nullptr) ambiguous = true;
+			attachment = &candidate;
+		}
+		if (ambiguous || attachment == nullptr || !attachment->anchor_found ||
+				attachment->anchor.bone_index == 0 || attachment->anchor_subobject != 0)
+			continue;
+		const world::Entity *carrier_twin =
+				world.registry.get(world::EntityHandle{carrier->handle});
+		if (carrier_twin == nullptr ||
+				static_cast<uint16_t>(carrier_twin->item_id) != carrier->type_id)
+			continue;
+		const world::EmplacedParentGunWords words = world::emplaced_parent_gun_words(world,
+				*carrier_twin, replica_parent_profile_type(world, *carrier_twin),
+				child.emplaced_gun_yaw_word, child.emplaced_gun_pitch_word);
+		if (words.yaw) {
+			carrier->carried_gun_yaw_word = world::emplaced_bam_word(words.yaw_bam);
+			carrier->carried_gun_words_valid = true;
+		}
+		if (words.pitch)
+			carrier->carried_gun_pitch_word = world::emplaced_bam_word(words.pitch_bam);
+	}
+}
 } //namespace
+
+// The tank render callback publishes VEHICLE_GUNYAW/GUNPITCH, and a GROUND
+// brain (or the helicopter callback) the HELO pair, from the brain's active
+// words; on a joiner the replica row carries the words its children
+// published. [orig: HUD_CacheEntityDebugStats @0x449ECF..0x449EE2;
+//  HUD_CacheEntityDisplayInfo @0x4A3D90]
+void write_present_replica_vehicle_gun(float *record, const world::World &world,
+		const world::Entity &twin, const replication::ClientEntityState &carrier) {
+	if (!carrier.carried_gun_words_valid) return;
+	const world::VehicleTraits *traits = world.vehicles.traits.get(twin.item_id);
+	if (traits == nullptr || traits->render_family == world::VehicleRenderFamily::None) return;
+	const int32_t profile_type = replica_parent_profile_type(world, twin);
+	uint32_t mask = record[world::PF_VEHICLE_MOTION_VALID] == 1.0f
+			? static_cast<uint32_t>(record[world::PF_VEHICLE_CTRL_MASK])
+			: 0u;
+	if (traits->render_family == world::VehicleRenderFamily::Tank || profile_type == 2)
+		mask |= world::VC_VEHICLE_GUN;
+	if (traits->render_family == world::VehicleRenderFamily::Helicopter ||
+			(traits->render_family != world::VehicleRenderFamily::Tank && profile_type == 1))
+		mask |= world::VC_HELO_GUN;
+	record[world::PF_VEHICLE_MOTION_VALID] = 1.0f;
+	record[world::PF_VEHICLE_CTRL_MASK] = static_cast<float>(mask);
+	record[world::PF_VEHICLE_GUN_YAW] = static_cast<float>(carrier.carried_gun_yaw_word);
+	record[world::PF_VEHICLE_GUN_PITCH] = static_cast<float>(carrier.carried_gun_pitch_word);
+}
 
 // Client emplacements run the same callbacks. Remote look belongs to
 // ClientState; L's world body already ran the shared channel this tick.
@@ -106,5 +194,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
+	publish_replica_gun_words(state, specs, world);
 }
 } //namespace opennova::inmatch

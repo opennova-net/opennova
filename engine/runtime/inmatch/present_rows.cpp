@@ -2,6 +2,7 @@
 #include <runtime/inmatch/present_rows.h>
 
 #include <runtime/inmatch/client_replica_present.h> // the emplaced/overlay/held-weapon writers
+#include <runtime/inmatch/client_replica_emplaced.h> // the joiner's carrier gun words
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 #include <runtime/inmatch/replica_query.h> // client_entity_for_handle
 #include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
@@ -572,6 +573,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  the client mover's track phase Entity_UpdateTankVehiclePhysics
 				//  @0x489F98 / @0x489FA0]
 				write_present_vehicle_motion_controls(r, kernel.world, *local);
+				// A joiner runs no brains: the gun words this carrier's ewep
+				// children published on its replica row stand for the brain
+				// words its tank/helo render callback reads.
+				// [orig: Entity_UpdateTransformAndTurret @0x440F70..0x441020;
+				//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+				write_present_replica_vehicle_gun(r, kernel.world, *local, es);
 			}
 			const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
 			if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&

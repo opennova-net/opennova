@@ -2,6 +2,7 @@
 // ADR 0043 G3): the host/SP pool walk and the joiner's decoded-replica walk,
 // pinned over a bare MissionKernel whose registry rows and ClientState are
 // authored directly (no boot, no socket, no Godot).
+#include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/present_rows.h>
@@ -527,6 +528,91 @@ bool test_joiner_palm_source_and_local_fragment() {
 // The org0 skin bone-callback's DEATH register rides the authoritative organic
 // row (world::death_ctrl_register_value): live 0xFFFF, the 186-tick ramp once
 // dead, 0 for the last 62 ticks; a non-organic row reads the live value.
+// A joiner runs no brains: the tank turret child's class update publishes its
+// gun yaw word on the hull's replica row, and the hull row carries it as the
+// tank render callback's VEHICLE_GUNYAW, held once the turret stops moving.
+// A child that is no ewep class publishes nothing.
+// [orig: Entity_UpdateTransformAndTurret GROUND @0x440F70..0x440F8A;
+//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+bool test_joiner_hull_gun_words_follow_the_turret_child() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 4);
+	im::ClientRuntime runtime("TankRows");
+	w::Entity *hull = spawn_pool_row(kernel, 1, 0, 700);
+	w::Entity *turret = spawn_pool_row(kernel, 1, 1, 701);
+	if (!expect(hull != nullptr && turret != nullptr, "tank rows spawn")) return false;
+	turret->emplaced_update = true;
+	turret->primary_weapon = "WPN_TURRET";
+	kernel.world.tables.weapons.entries.resize(1);
+	kernel.world.tables.weapons.entries[0].valid = true;
+	kernel.world.tables.weapons.entries[0].name = "WPN_TURRET";
+	w::VehicleTraits traits;
+	traits.render_family = w::VehicleRenderFamily::Tank;
+	traits.family = w::VehicleFamily::Tank;
+	kernel.world.vehicles.traits.set(700, traits);
+	opennova::mission::ItemSeatSpec spec;
+	spec.type_id = 700;
+	opennova::mission::ItemEmplacementAttachmentSpec attachment;
+	attachment.child_type_id = 701;
+	attachment.anchor_found = true;
+	attachment.anchor.bone_index = 3;
+	attachment.anchor_subobject = 0;
+	spec.emplacement_attachments.push_back(attachment);
+	kernel.seat_specs.push_back(spec);
+	opennova::replication::ClientEntityState hull_row;
+	hull_row.handle = hull->handle.packed;
+	hull_row.type_id = 700;
+	hull_row.cls = opennova::EntityClass::NoNetworkCallback;
+	runtime.state().upsert(hull_row.handle) = hull_row;
+	opennova::replication::ClientEntityState turret_row;
+	turret_row.handle = turret->handle.packed;
+	turret_row.type_id = 701;
+	turret_row.cls = opennova::EntityClass::NoNetworkCallback;
+	turret_row.parent_handle = hull_row.handle;
+	turret_row.emplaced_gun_yaw_word = 0x1234;
+	runtime.state().upsert(turret_row.handle) = turret_row;
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
+	const im::PresentRowsContext context{ kernel, &runtime, true };
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == 2 * w::PF_STRIDE, "a hull row and a turret row")) return false;
+	const float *hull_present = row_at(rows, 0);
+	bool ok = expect(hull_present[w::PF_VEHICLE_MOTION_VALID] == 1.0f &&
+					(static_cast<uint32_t>(hull_present[w::PF_VEHICLE_CTRL_MASK]) &
+							w::VC_VEHICLE_GUN) != 0 &&
+					hull_present[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
+			"the turret's yaw word drives the joiner hull's VEHICLE_GUNYAW");
+	runtime.state().find(turret_row.handle)->parent_handle = w::EntityHandle::kInvalid;
+	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
+			"the hull keeps the last published word, like the brain") && ok;
+
+	opennova::mission::MissionKernel plain;
+	plain.world.registry.configure_pool(1, 4);
+	im::ClientRuntime plain_runtime("PlainRows");
+	w::Entity *plain_hull = spawn_pool_row(plain, 1, 0, 700);
+	w::Entity *plain_child = spawn_pool_row(plain, 1, 1, 701);
+	plain_child->primary_weapon = "WPN_TURRET";
+	plain.world.tables.weapons.entries = kernel.world.tables.weapons.entries;
+	plain.world.vehicles.traits.set(700, traits);
+	plain.seat_specs.push_back(spec);
+	hull_row.handle = plain_hull->handle.packed;
+	turret_row.handle = plain_child->handle.packed;
+	turret_row.parent_handle = hull_row.handle;
+	plain_runtime.state().upsert(hull_row.handle) = hull_row;
+	plain_runtime.state().upsert(turret_row.handle) = turret_row;
+	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF);
+	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
+	im::PoolPresentLifecycleMap plain_lifecycle;
+	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_MOTION_VALID] == 0.0f,
+			"a child without the ewep class update publishes no gun words") && ok;
+	return ok;
+}
+
 bool test_death_ctrl_register_reaches_present_rows() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(0, 4);
@@ -576,6 +662,7 @@ int main() {
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
+	ok = test_joiner_hull_gun_words_follow_the_turret_child() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;
