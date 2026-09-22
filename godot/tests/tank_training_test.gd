@@ -5,9 +5,11 @@ extends GutTest
 # progression use the normal runtime. No objectives or deaths are injected.
 const MountLook := preload("res://tests/support/mount_look.gd")
 const ENEMY_VEHICLES := [416, 318, 321, 415, 317, 320, 568, 572]
-const RUNNING_APCS := [568, 572]
+const FINAL_APCS := [568, 572]
 var _presenter: LocalPlayerPresenter
 var _world: GameWorld
+var _cannon_handle := -1
+var _launch_offset := Vector3.ZERO
 var _camera: Camera3D
 
 
@@ -59,6 +61,9 @@ func _fire_gun(sim: Simulation) -> int:
 		for shot: FirePresentationEvent in sim.drain_fire_presentation_events():
 			if shot.get_is_local_player():
 				ammo = shot.get_ammo_index()
+				if sim.get_local_player_weapon_name() == "WPN_M1TURRET":
+					_launch_offset = _camera.global_basis.inverse() * (
+							shot.get_origin() - sim.entity_card(_cannon_handle).get_position())
 				alignment = minf(alignment, shot.get_forward().dot(-_camera.global_basis.z))
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, serial, "the equipped tank gun fires")
 	assert_gte(ammo, 0, "firing produces a real local projectile")
@@ -73,7 +78,8 @@ func _seat_target(handle: int, bone: int) -> Vector3:
 	_presenter.after_world_tick()
 	var model := _world.get_runtime().get_entity_presenter().resolve_wire_handle(handle) as ObjectModel
 	var point := model.get_object_data().get_user_point_info(bone - 1)
-	var part := model.get_render_part_nodes()[point.subobject] as Node3D
+	# Stock emplacement models can carry userpoints without a render part.
+	var part := model.get_render_part_nodes().get(point.subobject, model) as Node3D
 	var pos := part.to_global(point.position)
 	return Vector3(pos.x, -pos.z, pos.y)
 
@@ -87,9 +93,19 @@ func _combat_target(sim: Simulation) -> EntityCard:
 		if card == null or not card.has_ai() or not card.is_alive() or card.get_health() <= 0:
 			continue
 		var candidate := card.get_mission_position().distance_to(hull.get_mission_position())
-		# These authored EngineRunning APCs can respawn. Weaken both before
-		# finishing them together so the course can enter its victory window.
-		if card.get_net_id() in RUNNING_APCS:
+		if candidate > 500.0:
+			continue
+		var aim := card.get_mission_position() + Vector3(0, 0, 0.5)
+		var hit := _world.get_terrain_data().raycast_terrain(
+				_camera.global_position, Vector3(aim.x, aim.z, -aim.y))
+		if hit.is_finite():
+			continue
+		# Clear the tank groups before the later APC waves.
+		if card.get_item_id() == 1213:
+			candidate += 1000.0
+		# The final APCs can respawn. Weaken both before finishing them
+		# together so the course can enter its victory window.
+		if card.get_net_id() in FINAL_APCS:
 			candidate += 10000.0
 			if card.get_health() <= 6000:
 				candidate += 1000.0
@@ -101,25 +117,60 @@ func _combat_target(sim: Simulation) -> EntityCard:
 
 func _fight_convoy(sim: Simulation) -> void:
 	var serial := sim.get_local_player_weapon_state().fired_serial
-	for combat_step in 100:
-		var target := _combat_target(sim)
-		if target == null:
-			break
-		MountLook.face(sim, target.get_mission_position() + Vector3(0, 0, 1.5))
-		_advance(sim, 125)
-		var weaken_apc := target.get_net_id() in RUNNING_APCS and target.get_health() > 6000
-		for tick in 375:
-			# Repeated presses operate the semi-automatic cannon after its reload.
-			sim.set_local_player_weapon_input(tick % 12 < 6, tick % 12 == 0, false)
-			_advance(sim, 1)
-			var live := sim.entity_card_by_net_id(target.get_net_id())
-			if live == null or not live.is_alive() or live.get_health() <= 0:
-				break
-			if weaken_apc and live.get_health() <= 6000:
-				break
-		sim.set_local_player_weapon_input(false, false, false)
+	sim.drain_fire_presentation_events()
+	var target: EntityCard
+	var repositioned := false
+	for tick in 37500:
 		if sim.get_round_outcome_debug().get_ended():
 			break
+		if tick % 62 == 0:
+			target = _combat_target(sim)
+			if target == null and not repositioned and sim.has_event_fired(49) and sim.has_event_fired(48):
+				var survivors: Array[EntityCard] = []
+				var other_targets_alive := false
+				for ssn in ENEMY_VEHICLES:
+					var enemy := sim.entity_card_by_net_id(ssn)
+					if enemy == null or not enemy.is_alive() or enemy.get_health() <= 0:
+						continue
+					if ssn in FINAL_APCS:
+						survivors.append(enemy)
+					else:
+						other_targets_alive = true
+				if not other_targets_alive and not survivors.is_empty():
+					# Stock APCs can respawn behind terrain after the convoy stops.
+					# Preserve the authored drive, then position the combat fixture
+					# in sight of the survivors. Damage and victory remain normal.
+					var position := survivors[0].get_mission_position() + Vector3(30, -40, 0)
+					position.z = _world.get_terrain_data().get_height_world_bilinear(Vector3(position.x, 0, -position.y)) + 0.5
+					var hull := sim.entity_card_by_net_id(33)
+					assert_eq(sim.debug_set_entity_position(hull.get_ai_index(), position), OK)
+					repositioned = true
+					gut.p("07TR combat fixture: advance the tank to the respawned APCs after the authored route.")
+		elif target != null:
+			target = sim.entity_card_by_net_id(target.get_net_id())
+		var aligned := false
+		if target != null and target.is_alive() and target.get_health() > 0:
+			var aim := target.get_mission_position() + Vector3(0, 0, 0.5)
+			# Use the observed native muzzle, and correct the view incrementally:
+			# mounted pitch is relative to the hull, which can be on a slope.
+			var launch := sim.entity_card(_cannon_handle).get_position() + _camera.global_basis * _launch_offset
+			var direction := (Vector3(aim.x, aim.z, -aim.y) - launch).normalized()
+			var forward := -_camera.global_basis.z
+			var yaw_error := wrapf(rad_to_deg(atan2(direction.x, -direction.z) - atan2(forward.x, -forward.z)), -180.0, 180.0)
+			var pitch_error := rad_to_deg(asin(direction.y) - asin(forward.y))
+			sim.debug_teleport_local_player(MountLook.local_player_mission_position(sim),
+					sim.get_local_player_yaw_deg() + yaw_error * 0.5,
+					sim.get_local_player_pitch_deg() + pitch_error * 0.5)
+			aligned = direction.dot(forward) > 0.99999
+		# Keep tracking moving targets and press again when the cannon reloads.
+		sim.set_local_player_weapon_input(aligned and tick % 12 < 6,
+				aligned and tick % 12 == 0, false)
+		_advance(sim, 1)
+		for shot: FirePresentationEvent in sim.drain_fire_presentation_events():
+			if shot.get_is_local_player():
+				_launch_offset = _camera.global_basis.inverse() * (
+						shot.get_origin() - sim.entity_card(_cannon_handle).get_position())
+	sim.set_local_player_weapon_input(false, false, false)
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, serial, "combat fires real cannon rounds")
 	_advance(sim, 1250)
 	assert_true(sim.has_event_fired(92), "all six enemy groups satisfy the destruction objective")
@@ -132,17 +183,33 @@ func _boot_training() -> ResourceRoot:
 	if RetailData.install().is_empty():
 		pending("OPENNOVA_JO_DIR with 07TR.bms is required")
 		return null
-	var root := ResourceRoot.new()
-	# Use the installed revx02 course when available, matching the reference
-	# data and configured JOTAC game; ordinary JO installs use the base course.
-	var expansion := "revx02" if "revx02" in RetailData.expansions() else ""
-	assert_eq(root.mount_runtime(RetailData.install(), expansion), OK)
+	var root: ResourceRoot
+	# Preserve the configured JOTAC course when present. Other installs may
+	# pack 07TR only in an expansion (stock Combined Arms uses jox01).
+	if "revx02" in RetailData.expansions():
+		root = ResourceRoot.new()
+		var mount_error := root.mount_runtime(RetailData.install(), "revx02")
+		assert_eq(mount_error, OK)
+		if mount_error != OK:
+			return null
+	else:
+		root = RetailData.mount_install_with("07TR.bms")
+		assert_not_null(root, "the installed base or an expansion must serve 07TR.bms")
+		if root == null:
+			return null
+	var expansion := root.get_expansion()
 	gut.p("07TR course mount: base" if expansion.is_empty() else "07TR course mount: " + expansion)
+	var mission := MissionData.new()
+	var open_error := mission.open_from_resource_root(root, "07TR.bms")
+	assert_eq(open_error, OK)
+	if open_error != OK:
+		return null
 	_world = WorldFixture.make_world(self)
 	_world.set_resource_root(root)
-	var mission := MissionData.new()
-	assert_eq(mission.open_from_resource_root(root, "07TR.bms"), OK)
-	assert_eq(_world.load_mission_data(mission, "07TR.bms"), OK)
+	var load_error := _world.load_mission_data(mission, "07TR.bms")
+	assert_eq(load_error, OK)
+	if load_error != OK:
+		return null
 	_world.set_process(false)
 	_camera = Camera3D.new()
 	add_child_autofree(_camera)
@@ -172,6 +239,7 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 		return
 	var seat: EntityCardSeat = cannon.get_seats()[0]
 	var target := _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
+	_cannon_handle = cannon.get_wire_handle()
 	MountLook.face(sim, target, target + Vector3(1.5, 0, 0))
 	_advance(sim, 18) # refresh USE's proximity list after positioning
 	target = _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
@@ -219,18 +287,9 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	_advance(sim, 3750)
 	assert_gt(sim.entity_card_by_net_id(33).get_mission_position().distance_to(start), 15.0,
 			"the instructor drives the tank along the course")
-	for leg in 30:
-		_advance(sim, 1250)
-		if sim.has_event_fired(49):
-			break
-	assert_true(sim.has_event_fired(49), "the convoy reaches its final firing position")
-	if not sim.has_event_fired(49):
-		return
-	_advance(sim, 6250) # let the full enemy convoy reach its firing positions
-	assert_true(sim.has_event_fired(48), "the other allied tank releases the APC wave")
-	if not sim.has_event_fired(48):
-		return
 	_fight_convoy(sim)
+	assert_true(sim.has_event_fired(49), "the convoy reaches its final firing position")
+	assert_true(sim.has_event_fired(48), "the other allied tank releases the APC wave")
 	_presenter.teardown()
 	_presenter = null
 	_world.unload()
@@ -297,7 +356,12 @@ func test_07tr_cannon_prompt_from_landing_craft_deck() -> void:
 	add_child_autofree(hud)
 	var here := MountLook.local_player_mission_position(sim)
 	var yaw := rad_to_deg(atan2(target.x - here.x, target.y - here.y))
-	assert_eq(sim.debug_teleport_local_player(here, yaw, 15.0), OK)
+	# Stock and mod models place the cannon seat at different heights. Start
+	# just above its view-frustum edge, keeping the higher roof gun in view.
+	MountLook.face(sim, target)
+	var half_fov := rad_to_deg(atan(1.0 / _presenter.view_projection().y.y))
+	var upper_pitch := sim.get_local_player_pitch_deg() + half_fov + 5.0
+	assert_eq(sim.debug_teleport_local_player(here, yaw, upper_pitch), OK)
 	_advance(sim, 1)
 	var texts := _visible_attach_texts(hud, gametext)
 	gut.p("Upper-turret view attachment labels: " + str(texts))

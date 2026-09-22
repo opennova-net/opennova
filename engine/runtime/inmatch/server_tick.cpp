@@ -676,7 +676,11 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		if (world::Entity *victim = world.registry.get(d.victim)) {
 			victim->flags |= 2u;
 			victim->alive = false;
-			victim->damage_state = -1;
+			// The player-only dead/protection latch is not reset by vehicle
+			// respawn; setting it on an item makes the next life invulnerable.
+			// [orig: Entity_CheckAndProcessDeath @0x51B55D gates the player leg;
+			// Entity_RespawnVehicle @0x45FF40 does not touch entity+0x124]
+			if (victim_is_player) victim->damage_state = -1;
 		}
 		if (victim_connection != nullptr) {
 			// A normal other-player kill opens the exact 120-second revive
