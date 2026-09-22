@@ -696,6 +696,43 @@ void tank_landing_pass_consumes_queued_forces() {
     CHECK(v.veh.chassis_forces[0].rate == 0);
 }
 
+// A hull at or below its critical drain drops the smoke emitter at the solve
+// head, before the sleep gate, as a signed word compare.
+// [orig: @0x475E25..0x475E50, release @0x475E52..0x475E65]
+void tank_critical_drain_releases_smoke() {
+    for (int health : {8, 7, 6}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Tank, true);
+        t.critical_drain = 7;
+        auto &v = r.entity();
+        v.health = health;
+        v.veh.damage_smoke_active = true;
+        v.primary_occupant = {}; // an unoccupied hull at rest takes the sleep return
+        v.veh.speed = v.veh.cmd_speed = 0;
+        v.veh.slide_z = -100;
+        v.veh.contact_solved_once = false;
+        stamp_saved_live_pose(v);
+        int32_t z = 65536;
+        r.contact(t, z);
+        CHECK(!v.veh.contact_solved_once);
+        CHECK(v.veh.damage_smoke_active == (health > 7));
+        int releases = 0;
+        for (const auto &fx : r.world.out.destruction.effects)
+            releases += fx.family == 4 && fx.release ? 1 : 0;
+        CHECK(releases == (health > 7 ? 0 : 1));
+    }
+    // A drain past the word range compares on its low word: 0x10007 is 7.
+    Rig r;
+    auto t = r.traits(VehicleFamily::Tank, true);
+    t.critical_drain = 0x10007;
+    auto &v = r.entity();
+    v.health = 7;
+    v.veh.damage_smoke_active = true;
+    int32_t z = 65536;
+    r.contact(t, z);
+    CHECK(!v.veh.damage_smoke_active);
+}
+
 // The sleep gate also compares the attitude with the mover-entry pose.
 // [orig: Transform_ComparePartial @0x459180, call @0x475EFB]
 void tank_sleep_gate_compares_attitude() {
@@ -730,6 +767,7 @@ int main() {
     tank_sinks_survive_water();
     tank_sleep_gate_compares_attitude();
     tank_landing_pass_consumes_queued_forces();
+    tank_critical_drain_releases_smoke();
     tank_wall_contact_stops_hull();
     tank_terrain_slope_sets_no_wall_bytes();
     tank_mass_share_leaves_suspension_depths();
