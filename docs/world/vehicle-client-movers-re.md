@@ -3955,8 +3955,18 @@ callbacks run on every peer against that peer's own mover state [orig:
 HUD_CacheEntityDebugStats @ 0x449C10, track words @ 0x449C3C..0x449C69;
 Entity_CacheVehicleHUDStats @ 0x4929B0; the client mover's track phases
 Entity_UpdateTankVehiclePhysics @ 0x489F98 / @ 0x489FA0] (2026-09-22,
-`netsim_present_rows::test_joiner_vehicle_motion_controls_reach_present_rows`);
-the turret gun yaw/pitch words still have no joiner source. Native regressions cover
+`netsim_present_rows::test_joiner_vehicle_motion_controls_reach_present_rows`).
+The hull's gun yaw/pitch words come from the turret child: its ewep class update
+writes them into the parent brain [orig: Entity_UpdateTransformAndTurret Def gate
+@ 0x440E8C..0x440EA0, profile type @ 0x440F65..0x440F6B, GROUND
+@ 0x440F70..0x440F8A, HELO @ 0x440FA1..0x441020], where the tank render callback
+reads them [orig: @ 0x449ECF..0x449EE2]. A joiner runs no brains, so its form of
+the class update lands the words on the carrier's replica row
+(`ClientEntityState::carried_gun_*`) and takes the profile type from the
+ai_function brain class, else the motor family: a joiner-side structural
+stand-in (D-NET-157 context), not a new row (2026-09-22,
+`netsim_present_rows::test_joiner_hull_gun_words_follow_the_turret_child`).
+Native regressions cover
 cadence/authority, submersion, sound transitions, rotor timing, wrapped track
 math, turret commit boundaries and snapshot transport. GUT covers channel
 updates and ground-to-tank-to-helo ownership changes.
@@ -4762,9 +4772,13 @@ one centre ray (`@0x457254`/`@0x45735d`); its per-tap ray KIND is not ported
 `@0x45725d`/`@0x457281`/`@0x4572c1`, east/centre
 `Entity_RaycastGroundHeightAndObject @0x414320` `@0x4572a1`/`@0x4572e0`; the
 reimpl uses one ray kind — D-NET-161 (e)).
-`Vehicle_CleanupTeamEntitiesOnDestruction` zeroes clip/reserve (+804/+802)
-unconditionally `@0x5470f9..0x547100` for every matched non-vehicle peer before
-the optional split `@0x547107` (ported 2026-09-08).
+`Vehicle_CleanupTeamEntitiesOnDestruction` zeroes the gun words (+804/+802 are
++0x324 pitch and +0x322 yaw, not clip/reserve) unconditionally
+`@0x5470f9..0x547100` for every matched non-vehicle peer before the optional ammo
+split `@0x547107..0x54710e`; both death legs lead with the cleanup for a refNum
+carrier (`Entity_SpawnDeathPieces @0x493409..0x49344d`,
+`Entity_UpdateDeathTransforms @0x494669..0x494673`) (ported 2026-09-08; the words
+corrected 2026-09-22, `emplaced_gun_channel::test_carrier_destruction_resets_child_words`).
 
 ### 26.1 The vehicle-class brain machine, its class key and the brain lifetime
 
@@ -5560,7 +5574,11 @@ record §23.3 and §23.4), the vehicle AI slot seed and respawn class init
 13). Its joiner legs are ported too: the vehicle death states' 0x26 kill
 record (section 24), the dead-pose form and full-width wire attitude, the
 reader's Flags/health/kill tail and the wreck-only freeze (§10 item 6),
-remote claimants, joiner motion controls (section 11), the 0x0D parent/target
-split and the first-frame tick. Installed stock and JOTAC assisted 07TR course
+remote claimants, joiner motion controls and hull gun words (section 11), the
+0x0D parent/target split and the first-frame tick. The weapons legs landed with
+them: the ewep CTRL publication with no occupant test (an emptied turret holds
+its traverse), the claimant's vehicle-slot cut on detach, the mounted fire pose
+(gfx3 launch point, barrel, view-tilt fold, point direction), the unconditional
+turret window and the live seat points (tank record). Installed stock and JOTAC assisted 07TR course
 runs pass; complete live-retail/normal-input acceptance remains unverified
 there.

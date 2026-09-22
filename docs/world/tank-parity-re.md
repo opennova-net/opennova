@@ -2,7 +2,8 @@
 
 Tank audit of the portable engine and its Godot presentation:
 `engine/runtime/world` (the tank contact solve, the tank mover, vehicle sound,
-the mounted camera, AI drivers and gunners, damage, run-over and seats),
+the mounted camera, AI drivers and gunners, damage, run-over, seats and the
+mounted weapons),
 `engine/runtime/controls` (action signs, the wheel remainder),
 `engine/runtime/hud` (optical text, the vehicle panel), `engine/runtime/mission`
 (seat extraction, AI slot seeding, the frame clock), `engine/runtime/inmatch` and
@@ -31,6 +32,7 @@ below as witnessed and ported behavior, not as divergence rows.
 | Godot camera stamp and HUD snapshot | host code / not grillable; **behavioral proof** that both cameras stamp the composed angles and every reader observes one composed view | GUT `local_player_presenter_test.gd` (`test_camera_direction_keeps_precision_far_from_origin`, `test_camera_keeps_its_heading_looking_straight_up_or_down`), `game_hud_presenter_declutter_test.gd` (`test_hud_uses_the_presented_camera_frame`, `test_inset_camera_direction_keeps_precision_far_from_origin`) |
 | HUD text and the vehicle panel | **MATCHING (behavioral proof)** for per-call CRT sprintf, the panel's seat-slot gate, emplacement labels, the silhouette window and integer screen mapping | D-HUD-30 in the [HUD record](../interface/hud-re.md); `hud_frame_compiler`, `hud_game_text`, `hud_combat` (`integer_screen_mapping`), `vehicle_panel_feed`, `hud_vehicle_panel` |
 | Seats, cannon/alternate weapon, roof gun and panel routing | **MATCHING (behavioral proof)** for tested routes and the load-time seat walk | `mission_seat_spec_extract`, `vehicle_mount`, `vehicle_panel_feed`, `hud_vehicle_panel`, `special_weapon_parity`, `host_role`; installed `tank_parity_test.gd` and `mounted_weapon_switch_test.gd` |
+| Mounted weapons: the fire pose (gfx3 launch point, barrel, view-tilt fold, point direction), turret windows, the ewep CTRL publication, the claimant's slot cut and live seat points | **MATCHING (behavioral proof)** for the legs in the witness map; before the fix round a gfx3 def (JOTAC `WPN_M1TURRET` and its siblings) fired from `bullet01` instead of its launch userpoint | `special_weapon_parity` (`gfx3_weapon_fires_from_its_launch_point`, `controller_fire_asks_for_the_point_direction`, `commander_line_starts_at_the_gun_launch_point`, `pose_provider_turns_the_euler_by_the_point_direction`), `ai` (`test_mounted_gunner_fires_from_the_slot_barrel`), `npc_weapons`, `vehicle_suspension`, `npruntime_weapon_table`, `turret_window` (`weapon_window_clamps_unconditionally`), `emplaced_gun_channel`, `inmatch_joiner_role`, `vehicle_mount` (`test_claimant_detach_cuts_vehicle_slot_action`, `test_use_scan_poses_every_seat_kind_live`), `netsim_present_rows` (`test_joiner_hull_gun_words_follow_the_turret_child`); GUT `mission_present_pass_test.gd`, `simulation_test.gd`, `net/coop_two_sim_test.gd` |
 | AI drivers, gunners and vehicle AI slots | **MATCHING (behavioral proof)** for the legs in the witness map | `vehicle_mount` (`test_ai_drive_budget_divides_first`, `test_zero_health_hull_keeps_its_driver_leg`, `test_submerged_player_driver_takes_the_ai_leg`, `test_mover_command_registers_are_the_brain_words`), `vehicle_motor`, `infantry` (`test_aim_lead_uses_the_target_saved_live_pose`, `test_body_tick_stamps_saved_live_pose`, `test_mounted_gunner_aims_in_the_parent_frame`), `mission_promote` (`test_vehicle_records_seed_the_ai_slot`), `mission_item_traits`, `event_runtime_bms`, `ai`, `destruction` |
 | Damage: kill zones, blast legs, knife, run-over and occupants | **MATCHING (behavioral proof)** | `projectile_combat` (`test_jox_tank_round_bullets_class_splashes`, `test_impact_producers_apply_their_own_gates`, `test_armed_expiry_detonates_only_a_kill_zone_class`), `destruction` (`test_blast_on_a_crewed_vehicle_scales_by_occupants`, `test_blast_respects_the_damage_disabled_word`, `test_zero_damage_blast_still_runs_the_item_leg`, `test_person_blast_quadrant_faces_the_blast`, `test_knife_kill_zone`), `collision` (`test_run_over_spares_a_protected_player`, `test_run_over_kills_an_enemy_and_plays_the_bump`), `vehicle_collision_damage` |
 | Authored 07TR progression | Passing assisted integration, **not normal-input completion proof** | `tank_training_test.gd`: real mount, rounds, damage, BMS destruction/victory; debug positioning/aim and final APC positioning remain in the fixture |
@@ -456,6 +458,93 @@ per following list entry, the silhouette takes the bordered texture window
   [orig: Entity_FindNearestSeatOrArmory @ 0x435D50]. The wreck bury arm samples
   `Terrain_SampleHeightBilinear @ 0x6067B0` (call `@ 0x467F3C`).
 
+### Mounted weapons
+
+- **The ewep CTRL publication.** The 'ewep' render class installs
+  `HUD_CacheWeaponSlotInfo @ 0x440930` as its def+0x144 CTRL callback (row
+  `0x82CFA0` column 2, through `BoneCallback_LookupByTag @ 0x4E32ED..0x4E3306`
+  from `EntityDef_InitAllCallbacks @ 0x4A5AEA..0x4A5B03`), and the writer has no
+  occupant test: every render and every userpoint or attachment frame of an
+  ewep gun publishes the gun words (+0x322/+0x324, `@ 0x440934..0x440948`),
+  the spin word (+0x320, `@ 0x44094E..0x440955`) and the inline slot's heat
+  (`@ 0x44095B..0x440991`). The def+0x144 callers are
+  `Entity_RenderVehicleModel @ 0x440852..0x440866`,
+  `Entity_ComputeUserpointWorldTransform @ 0x545CA3..0x545CAE`,
+  `Entity_ComputeUserpointTransform @ 0x545A89..0x545A94` and
+  `build_bone_attachment_matrix @ 0x56C6DC..0x56C6F3`; a UseGun rider's seat
+  attach also calls the writer directly (`@ 0x546517..0x546518`). Nothing
+  clears the words on a detach: their only writers are the producer
+  (`@ 0x440B23`, `@ 0x440B45`, `@ 0x440B58`), the window clamp (`@ 0x44125C`,
+  `@ 0x4412A4`), the carrier-destruction reset and the lag pip's save/restore
+  (`@ 0x59EA6A..0x59EAF3`). The class update runs every tick
+  (`Entity_UpdatePool1Slot @ 0x4B8E41..0x4B8E53`), so the parent-brain turret
+  publication (`@ 0x440F04..0x441020`, behind the Def gate
+  `@ 0x440E8C..0x440EA0`) keeps driving the hull turret after the gunner
+  leaves, and an emptied turret holds its last traverse.
+- **The carrier-destruction reset.** `Vehicle_CleanupTeamEntitiesOnDestruction`
+  zeroes the child's gun words (+0x324 pitch, +0x322 yaw;
+  `@ 0x5470F9..0x547100`), not its clip and reserve, which only the optional
+  ammo split touches (`@ 0x547107..0x54710E`). Both death legs lead with the
+  cleanup for a refNum carrier (`Entity_SpawnDeathPieces @ 0x493409..0x49344D`,
+  `Entity_UpdateDeathTransforms @ 0x494669..0x494673`).
+- **The claimant's slot cut.** A PlayerControl vehicle's claimant leaving cuts
+  the running action of its vehicle MountSlot: +0x474 is that slot
+  (`Entity_GetWeaponSlots @ 0x5460FA`) and its +0 the action counter, which
+  drops to 7 when nonzero, so an in-progress action finishes seven ticks later.
+  It is not an engine state. [orig: Entity_DetachFromVehicle, Def gate
+  @ 0x4356D0, claimant compare @ 0x4356E3, attrib 0x40 @ 0x4356EF..0x4356F4,
+  counter @ 0x4356F6..0x4356FF]
+- **The gfx3 launch point.** A fired def carrying a third-person model (gfx3,
+  +0x170, stored `@ 0x545092`) fires from its launch userpoint on that model,
+  posed through the carrier; `WeaponDef_ResolveAllReferences` resolves the
+  name (+0x2E8, `@ 0x544479..0x5444AC`) to the 1-based +0x2D4 on gfx3 (reset
+  `@ 0x5402CA`, gfx3 gate `@ 0x5402D8`, lookup `@ 0x5402EF`, store
+  `@ 0x540316`), and a zero index is the raw leg. JOTAC `WPN_M1TURRET`
+  (`gfx3 M1trret`, `LAUNCHUSERPOINT CAMERA`) fires from `camera`, as do
+  `WPN_BTRTURRET`, `WPN_STRYKERTURRET`, `WPN_EMP50BD` and `WPN_T80_DshKTURRET`;
+  stock JOX `WPN_M1TURRET` / `WPN_T80TURRET` author no gfx3, so their
+  `launchuserpoint camera` is inert and `bullet01` is right. The commander
+  line starts at the same point (`HUD_DrawScopeOverlayDetails` `@ 0x59E66A` /
+  `@ 0x59E680`). [orig: Entity_ComputeUserpointWorldTransform
+  @ 0x545D06..0x545D85; Entity_ComputeUserpointTransform @ 0x545AEF..0x545BA5]
+- **The view-tilt fold.** The local-space helper folds any EWEAP entity's view
+  tilt into Pitch while the point is posed (`@ 0x545BAB..0x545BBF`) and undoes
+  it only after a point resolves (`@ 0x545BF4..0x545C09`), for the controller
+  seat and for the G-redirect arm's hull alike (`@ 0x4DC7CD..0x4DC7D9`).
+- **The barrel.** The AI gunner selects the barrel from the clip before the
+  ammo is consumed (slot+0x10 & 3, `@ 0x545D40..0x545D4B`, read before
+  `@ 0x542C75`); the organic walk passes no slot and uses the parent's inline
+  slot (`Entity_GetAttachmentWorldPosition @ 0x4B26A9..0x4B26B6`; field from
+  the action pair `@ 0x545D17..0x545D3F`). A no-clip gun's clip word is 0xFFFF
+  (`@ 0x54670F..0x546713`), so it fires from barrel 3, which the resolver's
+  zero-fill makes barrel 0's point on a single-barrel gun
+  (`Entity_ResolveBoneUserpoints @ 0x545940`).
+- **The hull rock.** The fire tail rocks the hull against the gun point's
+  authored direction for the slot as the tail leaves it (current FIRE, next
+  RECOIL `@ 0x542C9E`, so the flash field, with the clip already spent), not
+  the fire euler's forward. [orig:
+  WeaponAction_Fire tail @ 0x542D1F..0x542DA1, point @ 0x542D45..0x542D5B,
+  negation @ 0x542D60..0x542D7D; ActionSlot_ExecuteAction @ 0x4021D1..0x4021ED
+  for the remote replay]
+- **The point direction.** The controller branch passes an outDirection
+  (`@ 0x4DC829`), so the fire euler turns by the point's authored local
+  yaw/pitch (`Userpoint_ComputeWorldTransform @ 0x56C524..0x56C5F4`); every
+  stock fire point authors (1,0,0), so stock data does not reach it.
+- **Turret windows.** With no addeweap arc the gun reads its weapon def's
+  window as the parser's integer bounds (degrees x 11930464, wrapping;
+  targetpitchmin stored negated), and both axes clamp to it every time, so a
+  zero bound pins its axis and 180 stops 128 BAM short of the half circle;
+  only a gun with neither an arc nor a weapon def has no window. JOTAC
+  `WPN_ROCKTDFLT` and `WPN_C130_DOOR` (yawrange 0) lock their traverse. [orig:
+  WeaponDefs_ParseLineCallback @ 0x5443EC, @ 0x544424, @ 0x54446E;
+  Entity_GetWeaponTurretLimits @ 0x540E2C..0x540E58; Math_ClampAngleToBounds
+  calls @ 0x44123C / @ 0x44128C; AdmDef_InitEntryDefaults @ 0x53FEFF]
+- **Seat points.** The USE scan and the attach labels pose every seat kind at
+  its live bone through `build_bone_attachment_matrix` (seat kinds
+  `@ 0x435F6C..0x435FDF`, call `@ 0x435FFA`; labels
+  `draw_vehicle_seat_and_armory_labels @ 0x5A3553`); the rider pose for
+  non-gunner seats is unchanged.
+
 ### Joiner replication
 
 - **Death messages.** S2C 0x13 is organic-only. The router
@@ -508,7 +597,15 @@ per following list entry, the silhouette takes the bordered texture window
   mover state (`HUD_CacheEntityDebugStats @ 0x449C10`, track words
   `@ 0x449C3C..0x449C69`; `Entity_CacheVehicleHUDStats @ 0x4929B0`), and the
   client mover advances the tracks (`@ 0x489F98` / `@ 0x489FA0`), so a joiner
-  publishes its twin's motor controls as the authority collector does.
+  publishes its twin's motor controls as the authority collector does. The
+  hull's gun yaw/pitch come from the turret child's words: the ewep class
+  update writes them into the parent brain (`@ 0x440F70..0x440F8A` ground,
+  `@ 0x440FA1..0x441020` helo) and the tank render callback reads them there
+  (`@ 0x449ECF..0x449EE2`). A joiner runs no brains, so its form of the class
+  update lands the words on the carrier's replica row
+  (`ClientEntityState::carried_gun_*`) and takes the brain profile type
+  (`@ 0x440F65..0x440F6B`) from the ai_function class, else the motor family,
+  a joiner-side structural stand-in (D-NET-157 context).
 - **Full-width attitude on the wire.** The compact heading is the rounded high
   half of the eulerZ dword (`Entity_SerializeVehicleState @ 0x460CEC..0x460D0A`),
   the 0x0D spawn carries the three dwords whole

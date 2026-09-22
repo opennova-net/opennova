@@ -73,7 +73,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `find_best_vehicle_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 exact root/ground-child walk and weights (ctrl 0x2000 < gun 0x20000 < root sitex 0x200000 < child sitex 0x2000000) | **matching** (canonical world operation; D-AI-11 g closed) |
 | `VehicleSystem::presnap_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
 | `Simulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
-| live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic seats and the full matrix basis remain open) |
+| live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic-seat rider poses and the full matrix basis remain open; the USE scan and the attach labels pose every seat kind at its live bone, 2026-09-22, §23.1) |
 | joiner S2C 0x13/0x26 death fold (`ClientReplicaPipeline::apply_entity_death` → `destruction_notify_item_damage(…, 4)`) | `NapiNPClientMsg_EntityDeath` / `Entity_KillBySlotId` | 0x42eb50 / 0x42bce0 | §24.3 client fold; ctest `npruntime_entity_lifecycle_net` + `destruction` net-kill case | **matching** for destructible victims (D-NET-208; organic 0x13 death-anim + local-player camera legs deferred) |
 | `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
 | `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
@@ -5065,6 +5065,35 @@ projectile preview, the crosshair, a sector-action message, and the fire tick;
 only with a live action-effect tracker or an open heat window), the NVG laser, the joiner's
 round-event effect, and debug lines. Nothing per frame writes a muzzle the simulation reads.
 
+**The mounted fire pose (2026-09-22, the tank fix round).** One shared port of the weapon point
+both userpoint transforms compute for a fired slot (`carrier_weapon_userpoint`,
+`carrier_weapon_world_pose`, `usegun_fire_pose` in `player_weapon_pose.cpp`, with the provider's
+`resolve_userpoint_frame`) serves the local pump, the AI gunner, the organic attachment walk and
+the HUD's lag pip and commander line:
+
+- A fired def carrying a third-person model (gfx3, `+0x170`) fires from its launch userpoint on
+  that model, posed through the carrier (`@ 0x545d06..0x545d85`, modelData `@ 0x545df8`;
+  `Entity_ComputeUserpointTransform @ 0x545aef..0x545ba5`); `WeaponDef_ResolveAllReferences`
+  resolves the name to the 1-based `+0x2D4` on gfx3 (`@ 0x5402ca..0x540316`), and a zero index
+  is the raw leg.
+- The barrel is the clip's low two bits (slot+0x10 & 3, `@ 0x545d40..0x545d4b`), read before
+  the ammo is consumed (`@ 0x542c75`). `Entity_GetAttachmentWorldPosition` passes no slot
+  (`@ 0x4b26a9..0x4b26b6`), so the organic walk reads the parent's inline slot (`@ 0x545cbc`)
+  and its action pair's field (`@ 0x545d17..0x545d3f`). A no-clip gun's clip word is 0xFFFF
+  (`WeaponSlot_InitFromEntityDef @ 0x54670f..0x546713`), so it fires from barrel 3, which the
+  zero-fill makes barrel 0's point on a single-barrel gun.
+- The local-space helper folds any EWEAP entity's view tilt into Pitch while the point is
+  posed (`@ 0x545bab..0x545bbf`, undone `@ 0x545bf4..0x545c09` only after a point resolves),
+  for the controller seat and the G-redirect arm's hull alike (`@ 0x4dc7cd..0x4dc7d9`).
+- The controller branch passes an outDirection (`@ 0x4dc829`), so
+  `Userpoint_ComputeWorldTransform`'s direction leg (`@ 0x56c524..0x56c5f4`: the rotated
+  direction `@ 0x56c52a..0x56c534`, pitch `@ 0x56c59e..0x56c5ae`, yaw `@ 0x56c5c7..0x56c5e1`,
+  `Math_BuildFixedPointRotationMatrixYXZ` `@ 0x56c5ef`) turns the fire euler by the point's
+  authored local yaw/pitch; every stock fire point authors (1,0,0).
+
+Tests: `special_weapon_parity`, `ai` (`test_mounted_gunner_fires_from_the_slot_barrel`),
+`npc_weapons`, `vehicle_suspension`, `npruntime_weapon_table`.
+
 ## 22. Appendix: the org2 player-body physics grill (grill-ida, 2026-07-16 session 8)
 
 The dedicated player-physics grill D-INF-10/D-INF-12 deferred to. Scope: the
@@ -5324,7 +5353,15 @@ while seat-swapping); after the reach (`@ 0x436113`) and cone (`@ 0x43611F`)
 gates, the LOS call (`@ 0x436183`) precedes the best-score compare
 (`@ 0x43618F`) [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130;
 retail order ported 2026-09-22]; score =
-`horiz + (dist3d >> 9)`, lowest wins. The armory leg (attrib 0x80000, bone
+`horiz + (dist3d >> 9)`, lowest wins. The posed bone position comes from
+`build_bone_attachment_matrix` for every seat kind (kinds `@ 0x435F6C..0x435FDF`,
+call `@ 0x435FFA`), which runs the carrier's render-class CTRL callback
+(def+0x144, `@ 0x56C6DC..0x56C6F3`) and then its PANM/bones; the attach labels
+pose the same way (`draw_vehicle_seat_and_armory_labels @ 0x5A3553`). The port
+scores and labels every kind at its live bone through the attachment-frame
+form (2026-09-22, `vehicle_mount::test_use_scan_poses_every_seat_kind_live`;
+non-gunner seats had scored at their rest point); the rider pose for
+non-gunner seats is unchanged. The armory leg (attrib 0x80000, bone
 prefix "armory", seatType 4) shares the math. Angle terms are computed and
 capped but feed nothing measurable (vestigial).
 
@@ -7421,7 +7458,7 @@ would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe
 | projectile near-miss behavior | **MATCHING** (read-only grill) | listener-only tail in §26.4; deliberately no AI notification |
 | mounted aim, request gates, action-FSM fire, muzzle, and shooter ownership | **MATCHING** (behavioral proof) | §26.5-§26.6; `ai` and `npruntime_weapon_table` ctests |
 | late-spawn player body-ADM binding + configured UseGun pose | **MATCHING** (behavioral proof) | §26.5b; asset-backed `simulation_test.gd` |
-| live UseGun root position | **MATCHING** relationship/root-position core | §23.5/§26.5a; asset-gated 00TRc E50triB GUT; joiner authoritative relationship confirmation landed; generic seats and full matrix basis remain open |
+| live UseGun root position | **MATCHING** relationship/root-position core | §23.5/§26.5a; asset-gated 00TRc E50triB GUT; joiner authoritative relationship confirmation landed; generic-seat rider poses and full matrix basis remain open (the USE scan and labels pose every seat kind at its live bone, 2026-09-22) |
 | mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
 | mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
 | automatic ADM-derived action duration in the runtime table builder | **MATCHING** | §26.8; D-WPN-26 fixed; `npruntime_weapon_table` |
@@ -7581,8 +7618,15 @@ A remote Player skips the two yaw tethers, an NPC receives the four-degree
 write-back, and local L receives the ninety-degree tether through its existing
 world body. L's result is copied to its wire presentation without another slew.
 Remote recoil decays after the gun has consumed it. Presentation only reads the
-retained words; an empty seat disables that presentation channel while preserving
-its words for the next occupant. `inmatch_joiner_role` pins consecutive -147/-294
+retained words, and an emptied turret keeps publishing them, so it holds its last
+traverse: the ewep class callback has no occupant test, nothing clears the words on a
+detach (their writers are the producer `@0x440B23`/`@0x440B45`/`@0x440B58`, the window
+clamp `@0x44125C`/`@0x4412A4`, the carrier-destruction reset `@0x5470F9..0x547100` and the
+lag pip's save/restore `@0x59EA6A..0x59EAF3`), and the class update keeps running every
+tick (`Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53`), so the hull turret keeps following
+through the parent-brain publication (corrected 2026-09-22; `emplaced_gun_channel`,
+`inmatch_joiner_role`, GUT `mission_present_pass_test.gd`, `simulation_test.gd`,
+`net/coop_two_sim_test.gd`). `inmatch_joiner_role` pins consecutive -147/-294
 high words, remote Player/NPC/local L behavior, the authored window, recoil before
 decay, repeated presentation reads, and dismount. [orig:
 Entity_UpdateChildAttachment @ 0x4409A0; Entity_UpdateTransformAndTurret @ 0x440CA0]
@@ -7601,8 +7645,10 @@ model-order PLAYPARTANIM phases, so B50Cal received HEAT_GLOW plus yaw at
 zero and could never receive pitch. The fixed path derives one typed semantic
 pair from the validated parent primary-weapon owner and applies the exact
 names after generic channels to authoritative collision, placed and wire
-presentation, and every first-person weapon part. Dismount/death clears only
-those two owned names. The client path joins the decoded carrier, mount bone,
+presentation, and every first-person weapon part. A dismount keeps those two
+owned names (the emptied turret holds its traverse); the carrier-destruction
+cleanup zeroes the words (`Vehicle_CleanupTeamEntitiesOnDestruction`,
+`@0x5470F9..0x547100`; corrected 2026-09-22). The client path joins the decoded carrier, mount bone,
 and current heading without extending the retail wire. A player compact already
 carries live entity Pitch; because the port splits Entity from AiEntity, the
 world-to-wire player lift restores that live AiEntity value before witnessed
@@ -7620,10 +7666,18 @@ Those same EWEAP controls also pose the parent PANM consumed by the mounted carr
 exactly those three in local order, but the loader remaps them to global ordinals.
 
 Retail has dedicated heat writers outside the generic ACTION animator. The world writer is
-`HUD_CacheWeaponSlotInfo @0x440930`, whose sole caller is the valid-bone branch of
-`Entity_AttachToBoneAndUpdateTransform @0x546518`. It receives the parent carrier, validates the
-live UseGun/Gunner child relationship, and publishes that child's weapon heat to the carrier model's
-`HEAT_GLOW` slot at `0x440969` and `0x440991`; it is not a blanket world-render callback. The
+the 'ewep' render class's CTRL callback `HUD_CacheWeaponSlotInfo @0x440930` (render-class row
+'ewep' `@0x82CFA0` column 2, installed as def+0x144 by `BoneCallback_LookupByTag
+@0x4E32ED..0x4E3306` from `EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03`). It has no occupant
+test: every render and every userpoint or attachment frame of an ewep gun publishes the gun words
+(`@0x440934..0x440948`), the spin word (`@0x44094E..0x440955`) and the inline slot's heat to
+`HEAT_GLOW` at `0x440969` and `0x440991`. The def+0x144 callers are `Entity_RenderVehicleModel
+@0x440852..0x440866`, `Entity_ComputeUserpointWorldTransform @0x545CA3..0x545CAE`,
+`Entity_ComputeUserpointTransform @0x545A89..0x545A94` and `build_bone_attachment_matrix
+@0x56C6DC..0x56C6F3`; a UseGun rider's seat attach also calls the writer directly on its parent
+carrier (`Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518`, userpoint gate
+`@0x546424..0x54643F`). (Corrected 2026-09-22: the earlier text named the seat attach as the
+sole caller and scoped the writer to a live UseGun child.) The
 first-person viewmodel path writes the same register at `0x4DEEC2..0x4DEEF5`
 `[orig: Player_RenderFirstPersonViewModel @0x4DED60]`. It remains true that no shipped
 `weapon.def` row authors `ctrlreg`, but that corpus fact says nothing about these hard-coded writers.
@@ -7631,9 +7685,10 @@ first-person viewmodel path writes the same register at `0x4DEEC2..0x4DEEF5`
 OpenNova's first-person writer exposes a separate `heat_glow` value clamped to `[0,0x10000]` and
 publishes the current `HEAT_GLOW` value with a writer identity used only to reject stale teardown;
 there is no value rollback stack. The
-authority/SP/listen world writer reconstructs the witnessed attachment predicate, publishes cold
-zero, and caps the hot leg at `0xFFFF`; presentation and collision consume the same scoped carrier
-value. Wire-direct snapshots carry that result too. Compact joiner rows do not contain enough
+authority/SP/listen world writer publishes for every 'ewep' render class, occupied or not
+(`Entity::emplaced_ctrl_publisher`, from the items.def render_function tag), and for any other
+class only while a UseGun rider's seat call writes the carrier; it caps the hot leg at `0xFFFF`,
+and presentation and collision consume the same value (`emplaced_gun_channel`). Wire-direct snapshots carry that result too. Compact joiner rows do not contain enough
 attachment/heat state to reconstruct it, so remote joiner heat remains unavailable. The particle
 emitter and compact-joiner reconstruction are the two remaining D-WPN-28 residuals.
 After yaw/pitch update the port transforms the authored UseGun point through its owning
