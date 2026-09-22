@@ -1,7 +1,6 @@
 #include "hud/hud_inset_scope.h"
 #include "render/visual_layers.h"
 #include "simulation/player_local_view.h"
-#include "simulation/simulation.h"
 #include "util/axes.h"
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -81,12 +80,12 @@ void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *sour
 	camera_->set_cull_mask(source->get_cull_mask() & ~visual_layers::SECOND_SCENE_VIEW_EXCLUDED);
 	camera_->set_environment(source->get_environment());
 	camera_->set_attributes(source->get_attributes());
+	// The same stamp as the gameplay camera: the basis straight from the
+	// composed angles, so the magnified Inset view keeps its direction far
+	// from the origin (D-VEH-5, util/axes.h).
 	const auto &pose = v.inset_camera;
-	const Vector3 eye = mission_to_godot(pose.eye);
-	const Vector3 forward = Simulation::presentation_forward(pose.yaw_deg, pose.pitch_deg);
-	camera_->set_global_position(eye);
-	camera_->look_at(eye + forward, Vector3(0, 1, 0));
-	camera_->rotate_object_local(Vector3(0, 0, -1), Math::deg_to_rad(pose.roll_deg));
+	camera_->set_global_transform(mission_view_transform(
+			mission_to_godot(pose.eye), pose.yaw_deg, pose.pitch_deg, pose.roll_deg));
 	target_->set_update_mode(
 			is_visible_in_tree() ? SubViewport::UPDATE_ALWAYS : SubViewport::UPDATE_DISABLED);
 	queue_redraw();

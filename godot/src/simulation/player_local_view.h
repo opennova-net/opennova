@@ -96,6 +96,14 @@ public:
 	float get_camera_yaw_deg() const;
 	float get_camera_pitch_deg() const;
 	float get_camera_roll_deg() const;
+	// The Inset scene's own composed camera (its second shake step and slot
+	// offsets), the pose HudInsetScope stamps; read 0 while the pose is
+	// invalid.
+	bool get_inset_scope_active() const { return value_.inset_scope_active; }
+	Vector3 get_inset_camera_eye() const;
+	float get_inset_camera_yaw_deg() const;
+	float get_inset_camera_pitch_deg() const;
+	float get_inset_camera_roll_deg() const;
 	// The local player's vehicle draws its virtual display this frame in place
 	// of the hull: the carrier's packed pool/slot handle and the lowercased
 	// graphic key (empty = the def authors none, so nothing draws). The

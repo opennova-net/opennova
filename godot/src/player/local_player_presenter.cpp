@@ -11,6 +11,7 @@
 #include "simulation/player_weapon_view.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain_data.h"
+#include "util/axes.h"
 
 #include <godot_cpp/classes/camera_attributes.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -737,21 +738,14 @@ void LocalPlayerPresenter::stamp_camera_pose() {
 		return;
 	}
 	if (view_.is_valid() && view_->get_camera_pose_valid()) {
-		const Vector3 forward = Simulation::presentation_forward(view_->get_camera_yaw_deg(),
-				view_->get_camera_pitch_deg());
-		const Vector3 eye = view_->get_camera_eye();
-		// Construct orientation independently of translation. eye + forward
-		// rounds away low direction bits far from the origin (07TR's tank),
-		// making a fixed aim jitter as the carrier translates.
-		// docs/world/tank-parity-re.md (D-VEH-5).
-		cam->set_global_transform(Transform3D(
-				Basis::looking_at(forward, Vector3(0.0f, 1.0f, 0.0f)), eye));
-		// The FP roll (torsoRoll + lean/4, composed in the sim; 0 in third
-		// person). Sign pinned presenter-side: lean right (positive lean) tilts
-		// the view right. [orig: @0x437fe6]
-		if (Math::abs(view_->get_camera_roll_deg()) > 0.001f) {
-			cam->rotate_object_local(Vector3(0.0f, 0.0f, -1.0f), Math::deg_to_rad(view_->get_camera_roll_deg()));
-		}
+		// The basis is built straight from the composed angles (the FP roll —
+		// torsoRoll + lean/4, 0 in third person — included), never looked at
+		// from a far eye: eye + forward rounds away low direction bits far
+		// from the origin (07TR's tank) and a look-at loses the heading
+		// straight up. docs/world/tank-parity-re.md (D-VEH-5).
+		cam->set_global_transform(mission_view_transform(view_->get_camera_eye(),
+				view_->get_camera_yaw_deg(), view_->get_camera_pitch_deg(),
+				view_->get_camera_roll_deg()));
 	}
 }
 

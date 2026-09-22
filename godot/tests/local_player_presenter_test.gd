@@ -1248,3 +1248,29 @@ func test_camera_direction_keeps_precision_far_from_origin() -> void:
 			assert_lt((-camera.global_basis.z - expected).length(), 0.000001,
 					"camera orientation is independent of world-coordinate magnitude")
 	presenter.teardown()
+
+
+# Straight up or straight down the view keeps its heading: the basis is the
+# composed yaw / pitch / roll rotation itself, which has no pole, never a
+# look-at along the up axis (whose right vector degenerates there)
+# [orig: Viewport_BuildProjectionMatrix @0x410FB0 -- the view's three axis
+#  rotations @0x4112A4..0x4112EB].
+func test_camera_keeps_its_heading_looking_straight_up_or_down() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	for pitch in [90.0, -90.0]:
+		for yaw in [0.0, 30.0, 135.0]:
+			assert_eq(world.get_sim().debug_teleport_local_player(
+					Vector3(256.0, 256.0, 40.0), yaw, pitch), OK)
+			presenter.after_world_tick()
+			var view := presenter.presented_view()
+			assert_almost_eq(view.camera_pitch_deg, pitch, 0.001, "the view looks along the pole")
+			assert_almost_eq(view.camera_roll_deg, 0.0, 0.001, "a calm body composes no roll")
+			var heading := deg_to_rad(view.camera_yaw_deg)
+			assert_lt((camera.global_basis.x - Vector3(cos(heading), 0.0, sin(heading))).length(),
+					0.00001, "the camera's right keeps the composed heading at the pole")
+			assert_lt((-camera.global_basis.z - Vector3(0.0, signf(pitch), 0.0)).length(),
+					0.00001, "the camera looks straight along the pole")
+	presenter.teardown()
