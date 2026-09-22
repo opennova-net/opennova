@@ -2276,7 +2276,7 @@ at 0x7C7D78 (bytes 62 6F 62 00 = `"bob"`; Hex-Rays mis-renders it as off_7C7D78)
 | +0x934 | pitch | `pitch` | 0x49DE56 | platform §5 pitchThr = pitch * 0.1 * 4096.0 (409.6 heavy-rolled) — bow-lift trigger |
 | +0x938 | pitchVelocity | `pitch_velocity` | 0x49DE92 | platform §5 liftHi = pitch_velocity*100 (light) / *q*0.004 (heavy) — bow-lift amount |
 | +0x93C | (unk591) | `bob` | 0x49DECE | platform §5 dipExit = pitchThr * (1 - 0.1*bob) — porpoise exit |
-| +0x948 | flip | `flip` | 0x49DF82 | ground movers: airborne disable request when fitted |up.z| < flip * 0.01 * 65536 [orig: 0x477742..0x477762, flt_7C56A8 * flt_7C32BC]; clamped [0,100] by the platform fn |
+| +0x948 | flip | `flip` | 0x49DF82 | ground movers: airborne disable request when fitted |up.z| < flip * 0.01 * 65536 [orig: 0x477742..0x477762, flt_7C56A8 * flt_7C32BC]; clamped [0,100] by the platform fn and [0,55] by the tank contact solve's head [orig: 0x476166..0x476187] |
 
 Clamps at 0x481ACC..0x481BA3 (platform fn, every call): lean [0,30],
 lean_velocity [0,20], pitch [0,10], pitch_velocity [0,10], bob [0,10], flip [0,100].
@@ -3695,6 +3695,26 @@ Z):
    contact-direction downhill tail [orig: @ 0x4794B0..0x4795B5], landing and
    crush damage, and the landing-pass force consume
    (`Entity_ClearSuspensionForces` call @ 0x477FB6).
+8. **A crashed authority tank never self-rights** (the 07TR tank 34
+   integration run, 2026-09-22; no contact divergence). The arming seed sets
+   Flags 0x10 on the authority [orig: @ 0x469976] and only
+   `Entity_RespawnVehicle` rewrites it, Flags = (Flags & 0x400) | 0x2000
+   [orig: @ 0x45FFB2..0x460009]; nothing in the tank family clears it, and
+   every righting path tests it: the grounded-tail recovery
+   @ 0x479352..0x47943E, the common-tail rebuild @ 0x47948A..0x4794A8, the
+   settle block's rebuild (`test Flags, 10h` @ 0x4781D4) and the rest path
+   @ 0x475FA2..0x475FC6 (the client twin @ 0x4782CA is non-authority only).
+   Such a tank settles through the mover's crashed arm (@ 0x48A684..0x48A81F;
+   +0x2F0 at |speed| < 0x1000, @ 0x48A7E0..0x48A816), burns
+   (@ 0x478125..0x478288; the 5/tick drain skips Flags 0x4000000), latches
+   the wreck (@ 0x47853C..0x478643) and waits for respawn.
+   `Entity_RebuildOrientationMatrixFromAxes @ 0x4632E0` keeps the forward
+   axis, so it keeps pitch and clears only roll: it cannot right a
+   nose-stand. The tank mover applies the groundEntity (+0x28) delta
+   unconditionally [orig: @ 0x488CFC..0x489106] and refreshes the link every
+   8 ticks [orig: @ 0x488B69..0x488B81]. The solve head's only [0,55] clamp
+   is the tip threshold def+0x948 [orig: @ 0x476166..0x476187]; the tank fit
+   has no pitch clamp.
 
 Port: `wheeled_contact_solve` (engine/runtime/world/vehicle_contact_solve.cpp),
 routed by `VehicleFamily::Tank`. Bench: the tank rest/drop legs (exact rest at

@@ -181,7 +181,8 @@ these changes; that coverage records the tested flight rather than attributing
 an unobserved failure to one fix.
 
 `godot/tests/tank_training_test.gd` loads the authored course through GameWorld,
-boards the live cannon seat with USE, switches/fires alternate guns when
+boards the live cannon seat with USE once LCAC 38 has landed (see below),
+switches/fires alternate guns when
 installed, follows the instructor and landing-craft convoy, and destroys
 vehicles with normal cannon input. It requires BMS events 92 and 93 and
 team-1 victory. The stock Combined Arms `jox01` headless run passed both
@@ -222,5 +223,21 @@ An additional JOTAC **base-mount** run exposed a separate convoy failure:
 allied tank 34 fell into the water near the landing point and never released
 the APC wave (event 48). The mission and carrier models match `revx02`, but
 the base LCAC authors water speed 130 and mass 160 versus 74 and 87 in
-`revx02`. This data variant remains an open comparison against the original
-runtime; the victory witnesses above cover `revx02` and stock `jox01`.
+`revx02`. The victory witnesses above cover `revx02` and stock `jox01`.
+
+**The boarding order (2026-09-22, the PR #671 fix round).** A tank-34 stall
+comes from a race built only of retail behavior. Boarding at once lets event
+17 release tank 34 before LCAC 38 lands: LCAC 38 (`ai_function cbot`,
+`move_function catv`, so it runs the cveh AI leg) waits for its passenger
+SSN 9 under the boarder hold (`Entity_UpdateVehiclePhysics
+@0x48BFB6..0x48BFE2`); its pool-1 avoid brake (`@0x48BD8F..0x48BF26`) counts
+its cargo's addeweap children, because the carrier exclusion checks only one
+level (`@0x48BE1D..0x48BE25`) and the children spawn in pool 1 with +0x28 =
+the tank (`Entity_SpawnWeaponOverlays @0x40F300`, `@0x40F40B`); and the
+list-2 end parks 15 u short (a one-shot list, wp_distance 15). Tank 34 then
+drives off the moving bow and either catches the bottom or nose-dives past
+-88 degrees, and a crashed authority tank never self-rights
+([tank record](tank-parity-re.md)), so the course stalls without event 48.
+The course is therefore deterministic only when the player boards after the
+landing; the course test now does that (6a7722d57), and events 17, 19, 49 and
+48 fire with the round ending in victory, natively and in GUT.
