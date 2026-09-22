@@ -581,10 +581,17 @@ private:
     std::unordered_map<uint16_t, uint32_t> remote_visual_tracer_counters_;
 };
 
-// Queue an explosive round's kill zone at its stop [orig: the kztype-gated
-// WeaponEffect_PushExplosionQueueEntry push @ 0x4e83c0 the impact/expiry
-// handlers run]. Shared with the throwable motors (world/throwables.cpp).
+// Queue a round's kill zone at its stop: the raw push, ungated; each caller
+// applies its producer's gates [orig: WeaponEffect_PushExplosionQueueEntry
+// @ 0x4E83C0]. Shared with the throwable motors (world/throwables.cpp).
 void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
                     const AmmoTableEntry &ammo);
+
+// The live occupant count of a vehicle and the occupant damage reduction the
+// round and blast damage paths share [orig: Entity_CountMountedEntities
+// @ 0x435970; Entity_ApplyOccupantDamageScale @ 0x4E5A50].
+int vehicle_occupant_count(const World &world, EntityHandle vehicle);
+int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
+                                     int32_t damage);
 
 } // namespace opennova::world
