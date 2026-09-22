@@ -38,37 +38,36 @@ std::string trimmed(const char *name) {
 	return strutil::trim(name != nullptr ? name : "");
 }
 
-// Entity_GetBoneSlotType performs a case-insensitive comparison at byte zero
-// of the model's USRP row name; whitespace trimming is reimpl-side hygiene,
-// and embedded tokens are not seats.
-// [orig: strnicmp(name, "sitex"/"ctrlx"/"UseGun"/"drvrx", 5/6) @ 0x434ED0]
-std::string canonical_seat_name(const char *name) {
-	return strutil::to_lower(trimmed(name));
+// A userpoint's raw USRP name: every seat and armory compare reads it as
+// authored, from byte zero, with no trim.
+std::string user_point_name(const ThreediUserPoint &point) {
+	return strutil::fixed_string(point.name, sizeof(point.name));
 }
 
-bool begins_with(const std::string &value, const char *prefix) {
-	const size_t n = std::strlen(prefix);
-	return value.size() >= n && value.compare(0, n, prefix) == 0;
-}
-
-world::SeatType seat_type_for_user_point(const std::string &canonical) {
-	if (begins_with(canonical, "sitex")) return world::SeatType::Passenger;
-	if (begins_with(canonical, "ctrlx")) return world::SeatType::Controller;
-	if (begins_with(canonical, "usegun")) return world::SeatType::Gunner;
-	if (begins_with(canonical, "drvrx")) return world::SeatType::Driver;
+// The seat class a bone name carries: sitex, ctrlx and drvrx are 5-character
+// case-insensitive prefixes at byte zero, UseGun a case-insensitive
+// whole-name compare, so embedded tokens and suffixed UseGun names are not
+// seats. [orig: Entity_GetBoneSlotType @ 0x434ED0 — the strnicmp legs
+//  @ 0x434F16 / @ 0x434F34 / @ 0x434F52, the _stricmp @ 0x434F6E]
+world::SeatType seat_type_for_user_point(const std::string &name) {
+	if (strutil::starts_with_icase(name, "sitex")) return world::SeatType::Passenger;
+	if (strutil::starts_with_icase(name, "ctrlx")) return world::SeatType::Controller;
+	if (strutil::starts_with_icase(name, "drvrx")) return world::SeatType::Driver;
+	if (strutil::iequals(name, "UseGun")) return world::SeatType::Gunner;
 	return world::SeatType::None;
 }
 
 // sitexNN / ctrlxNN / drvrxNN select the numbered sit pose (0..30); UseGun
 // always poses 0. Leading ASCII digits only, breaking at the first non-digit.
-int seat_pose_index_for_user_point(const std::string &canonical) {
-	if (!(begins_with(canonical, "sitex") || begins_with(canonical, "ctrlx") ||
-			begins_with(canonical, "drvrx")))
+int seat_pose_index_for_user_point(const std::string &name) {
+	if (!(strutil::starts_with_icase(name, "sitex") ||
+			strutil::starts_with_icase(name, "ctrlx") ||
+			strutil::starts_with_icase(name, "drvrx")))
 		return 0;
 	int value = 0;
 	bool any = false;
-	for (size_t i = 5; i < canonical.size(); ++i) {
-		const char c = canonical[i];
+	for (size_t i = 5; i < name.size(); ++i) {
+		const char c = name[i];
 		if (c < '0' || c > '9') break;
 		any = true;
 		value = value * 10 + (c - '0');
@@ -121,47 +120,48 @@ namespace {
 
 void extract_seats(const Threedi3di3 &model,
 		std::vector<world::Seat> &r_seats) {
-	// Retail keeps the gameplay/userpoint list and the ten occupant handles in
-	// different layouts: sitex rows fill 0..7, ctrlx/drvrx share 8, UseGun is
-	// 9. Carry the fixed slot beside the dense gameplay record, first-claim
-	// wins (the ingest's used-slot rule).
-	// [orig: ItemDef seatBoneIndex/controlBone/useGunBone +0x25D..+0x266]
-	int passenger_slot = 0;
-	bool retail_slots_used[10] = {};
+	// The load-time resolve binds one userpoint row (1-based) to each of the
+	// ten occupant slots: sitex rows fill 0..7 in order and a ninth writes
+	// slot 8 and ends the scan; ctrlx and drvrx share slot 8 and UseGun takes
+	// 9, the last match winning. The runtime reads only these bones, so they
+	// alone are seats, emitted in userpoint order beside their fixed slot.
+	// [orig: EntityDef_LoadModelsAndCallbacks @ 0x439F50 — the ItemDef
+	//  seatBoneIndex/controlBone/useGunBone +0x25D..+0x266 walk
+	//  @ 0x43A47B..0x43A5CD, the scan end `cmp ebp, 8; jg` @ 0x43A5AF;
+	//  the slot consumers Entity_FindNearestSeatOrArmory @ 0x435F37 and
+	//  Entity_FindAvailableSeat @ 0x436835]
+	std::array<size_t, 10> row_for_slot{}; // userpoint index + 1, 0 = none
+	int passengers = 0;
 	for (size_t i = 0; model.user_points != nullptr &&
 			i < model.user_point_count; ++i) {
+		const std::string name = user_point_name(model.user_points[i]);
+		if (strutil::starts_with_icase(name, "sitex")) {
+			row_for_slot[static_cast<size_t>(passengers)] = i + 1; // [orig: @ 0x43A4F0]
+			++passengers;
+		} else if (strutil::starts_with_icase(name, "ctrlx") ||
+				strutil::starts_with_icase(name, "drvrx")) {
+			row_for_slot[8] = i + 1; // [orig: @ 0x43A532 / @ 0x43A570]
+		} else if (strutil::iequals(name, "UseGun")) {
+			row_for_slot[9] = i + 1; // [orig: @ 0x43A5A9]
+		}
+		if (passengers > 8) break;
+	}
+	for (size_t i = 0; model.user_points != nullptr &&
+			i < model.user_point_count; ++i) {
+		size_t retail_slot = row_for_slot.size();
+		for (size_t slot = 0; slot < row_for_slot.size(); ++slot)
+			if (row_for_slot[slot] == i + 1) retail_slot = slot;
+		if (retail_slot == row_for_slot.size()) continue;
 		const ThreediUserPoint &up = model.user_points[i];
-		const std::string canonical = canonical_seat_name(up.name);
-		const world::SeatType type = seat_type_for_user_point(canonical);
-		if (type == world::SeatType::None) continue;
-		int retail_slot = -1;
-		switch (type) {
-			case world::SeatType::Passenger:
-				if (passenger_slot < 8) retail_slot = passenger_slot;
-				++passenger_slot;
-				break;
-			case world::SeatType::Controller:
-			case world::SeatType::Driver:
-				retail_slot = 8;
-				break;
-			case world::SeatType::Gunner:
-				retail_slot = 9;
-				break;
-			default:
-				break;
-		}
+		const std::string name = user_point_name(up);
 		world::Seat seat;
-		seat.type = type;
-		if (retail_slot >= 0 && retail_slot < 10 &&
-				!retail_slots_used[retail_slot]) {
-			seat.retail_slot = static_cast<uint8_t>(retail_slot);
-			retail_slots_used[retail_slot] = true;
-		}
+		seat.type = seat_type_for_user_point(name);
+		seat.retail_slot = static_cast<uint8_t>(retail_slot);
 		seat.bone_index = static_cast<uint8_t>(
 				std::clamp(static_cast<int>(i) + 1, 0, 255));
 		seat.pose_index = static_cast<uint8_t>(
-				seat_pose_index_for_user_point(canonical));
-		seat.source_name = up.name;
+				seat_pose_index_for_user_point(name));
+		seat.source_name = name;
 		seat.seat_local = seat_local_from_user_point(up);
 		seat.yaw_offset = static_cast<int16_t>(std::clamp<int>(
 				seat_yaw_offset_from_user_point(up),
@@ -179,7 +179,7 @@ void extract_armory_points(const Threedi3di3 &model,
 	for (size_t i = 0; model.user_points != nullptr &&
 			i < model.user_point_count; ++i) {
 		const ThreediUserPoint &up = model.user_points[i];
-		if (!begins_with(canonical_seat_name(up.name), "armory")) continue;
+		if (!strutil::starts_with_icase(user_point_name(up), "armory")) continue;
 		r_points.push_back(seat_local_from_user_point(up));
 	}
 }
