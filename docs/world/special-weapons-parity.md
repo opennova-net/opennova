@@ -172,13 +172,25 @@ an unobserved failure to one fix.
 boards the live cannon seat with USE, switches/fires both guns, follows the
 instructor and landing-craft convoy, and destroys the enemy vehicles with
 normal cannon input. The assertions reach BMS events 92 and 93 and team-1
-victory. The final windowed Vulkan run passed all 34 assertions; an earlier
+victory. The final windowed Vulkan run passed both tests and all 49 assertions; an earlier
 headless run also reached victory. Only player positioning and aim use the
 existing debug seam; no
 health, deaths or objective completions are injected. It selects installed
 `revx02` when available (the configured JOTAC game and reference course),
 otherwise base JO. The separate switching suite continues to discover all
 four authored carriers across the installation's mounts.
+
+A follow-up reported only the roof gun's `.50 Cal` attachment label. The
+full game reproduces that view when aimed at the upper turret: the cannon's
+lower authored `usegun` point projects below the viewport. Looking down from
+the same craft-deck position reveals and selects `120 MM Cannon`. The focused
+`test_07tr_cannon_prompt_from_landing_craft_deck` checks both views, presses
+Shift/USE through the windowed input router, and reaches the instructor's
+boarding event. All 15 assertions passed. HUD inspection now exposes each
+label's screen-pixel anchor so this test checks on-screen visibility; the
+text/count getters also include labels projected outside the viewport.
+The other tanks' cannon seats are occupied by the authored NPC crews; the
+free training cannon belongs to tank 33 beside the player's spawn.
 
 An additional JOTAC **base-mount** run exposed a separate convoy failure:
 allied tank 34 fell into the water near the landing point and never released

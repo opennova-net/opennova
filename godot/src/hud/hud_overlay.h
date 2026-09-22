@@ -182,10 +182,11 @@ public:
 			const Ref<Simulation> &p_sim);
 	// The read seams over the projected labels (tests and probes): the count,
 	// the index of the full-bright nearest label (-1 = none) and a label's
-	// resolved text.
+	// resolved text and screen-pixel anchor (which may be outside the viewport).
 	int get_attach_label_count() const;
 	int get_attach_label_selected() const;
 	String get_attach_label_text(int p_index) const;
+	Vector2 get_attach_label_position(int p_index) const;
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play
 	// camera with its view distance and fed to the compiler's element; the
