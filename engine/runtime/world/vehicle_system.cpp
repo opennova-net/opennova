@@ -60,7 +60,10 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 			}
 			// Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
 			// stamps every mover carries; rider deltas read (current - saved)].
-			stamp_saved_live_pose(*veh);
+			// The ground-family movers stamp at their own head (tick_motor).
+			if (traits->family == VehicleFamily::Watercraft ||
+					vehicle_family_uses_direct_air_mover(traits->family))
+				stamp_saved_live_pose(*veh);
 			// The family movers promote a freshly allocated brain out of the
 			// allocator's state 0 at their HEAD, before the occupant/AI-driver
 			// block reads the word: the AI leg's PRETTY -> FOLLOWWP hand-back
@@ -258,8 +261,14 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 			// so a frozen/parked hull reads as zero rider delta — retail
 			// stamps in every mover prologue regardless of the later bails
 			// [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
-			// @0x4b530b../@0x4ba47f..].
-			stamp_saved_live_pose(*veh);
+			// @0x4b530b../@0x4ba47f..]. The ground-family client mover stamps
+			// at its own head, ahead of its chase.
+			const bool ground_client_mover = veh->veh.net_predicted && veh->health > 0 &&
+					(traits->family == VehicleFamily::Ground ||
+							traits->family == VehicleFamily::Bike ||
+							traits->family == VehicleFamily::Tank);
+			if (!ground_client_mover)
+				stamp_saved_live_pose(*veh);
 			// The joiner-side family prediction (net-re §5.38e B-facet, all
             // four families landed): each mover chases the staged wire target
             // and predicts between records from the mirrored speed/steer
@@ -275,10 +284,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     (traits->family == VehicleFamily::Helicopter ||
                      traits->family == VehicleFamily::Plane)) {
                 world.vehicles.aircraft_client_tick(*veh, *traits);
-            } else if (veh->veh.net_predicted && veh->health > 0 &&
-                    (traits->family == VehicleFamily::Ground ||
-                     traits->family == VehicleFamily::Bike ||
-                     traits->family == VehicleFamily::Tank)) {
+            } else if (ground_client_mover) {
                 // Runs the motor core, whose tail already ticks the movement
                 // sound — skip the separate sound call below for this row.
                 // Bikes and tanks ride the same entry; the core branches on
@@ -286,7 +292,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                 // vZ up-cap, contact-gated integration, always-applied yaw)
                 // and the ctan deltas (gravity 250, contact-gated integration
                 // with the ±2·decel reversal clamps, full-basis velocity,
-                // parked-gated yaw with the airborne quarter-rate)
+                // crash-settle-gated yaw with the airborne quarter-rate)
                 // [orig: @0x483FE0 / @0x488AB0 vs @0x48AF00].
                 world.vehicles.ground_client_tick(*veh, *traits);
                 continue;
