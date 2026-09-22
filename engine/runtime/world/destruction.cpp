@@ -1346,6 +1346,11 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // The second death entry clears the scar ring the same way
     // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 ahead of the Flags |= 6].
     if (!was_husked) world.out.scars.clear_entity(target.handle);
+    // Retail keeps one Flags dword; the runtime `flags` half is the copy a
+    // vehicle compact serializes, so the wreck streams the dead-pose form.
+    // [orig: Entity_DispatchDeathCallback `or [edi+24h], edx` @0x493F63; its
+    //  no-row arm @0x493F48]
+    target.flags |= kEntityFlagDead | kEntityFlagHusk;
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;

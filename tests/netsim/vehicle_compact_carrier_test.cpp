@@ -27,6 +27,8 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <base/io/bam.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
@@ -185,6 +187,88 @@ bool run_fan_carrier_and_vertical_velocity() {
 	}
 	ok &= expect(rec_loose->vehicle.vertical_velocity == nw::network_compress_fixedpoint(3 * 65536),
 	             "the free-standing tail carries its vertical velocity too");
+	return ok;
+}
+
+// (c) The host fan reads the live dwords: a seeded hull's heading word is the
+// rounded high half of its own BAM, never its whole-degree mirror, and a hull
+// the death dispatch husked streams the 15-byte dead-pose form whose tail is its
+// world roll then pitch, each rounded.
+// [orig: Entity_SerializeVehicleState — eulerZ @0x460CEC..0x460D0A, the form
+//  select @0x460D28, Roll @0x460D31, Pitch @0x460D52;
+//  Entity_DispatchDeathCallback `or [edi+24h],edx` @0x493F63]
+bool run_fan_full_precision_heading_and_wreck_pose() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 16);
+	const w::EntityHandle host_h =
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 0, 0xFFF0));
+	w::Entity hull = vehicle_seed(0x050B, {130.0f, 110.0f, 10.0f}, 0);
+	hull.veh.yaw_seeded = true;
+	hull.veh.yaw_bam = 0x12345678;        // 25.6 deg engine heading, sub-degree
+	hull.veh.air_pitch_bam = -0x0123ABCD; // the wreck's tilted attitude
+	hull.veh.air_roll_bam = 0x09876543;
+	hull.yaw = static_cast<int16_t>(std::lround(
+			w::mission_yaw_deg_from_bam_heading(hull.veh.yaw_bam)));
+	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	if (!expect(host_h.valid() && hull_h.valid(), "host and hull spawned")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	const auto resolver = [](uint16_t tid) {
+		return tid == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Vehicle;
+	};
+	const auto hull_record = [&](nw::FrameUpdate &fu) -> const nw::FrameUpdateRecord * {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		while (ch.client_recv(dg)) {
+			if (dg.tag != nw::s2c::PER_FRAME_UPDATE) continue;
+			fu = nw::FrameUpdate{};
+			if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu)) continue;
+			for (const nw::FrameUpdateRecord &rec : fu.records)
+				if (rec.cls == nw::EntityClass::Vehicle && rec.handle == hull_h.packed)
+					return &rec;
+		}
+		return nullptr;
+	};
+	bool ok = true;
+	nw::FrameUpdate live_frame;
+	const nw::FrameUpdateRecord *live = hull_record(live_frame);
+	ok &= expect(live != nullptr && !live->vehicle.is_dead_pose &&
+	                     live->vehicle.euler_z == static_cast<int16_t>(0x1234),
+	             "a seeded hull's heading word rounds its own BAM (0x12345678 -> 0x1234)");
+	// The 0x0D spawn record carries the three dwords themselves and the 0x18
+	// rebuild their truncated high words [orig: serialize_entity_pool_to_packet_0
+	// @0x503B37, @0x503B53, @0x503B6F; serialize_object_to_buffer @0x505166 /
+	// @0x505179].
+	{
+		const nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
+		const nw::PoolSpawnRecord *spawn = nullptr;
+		for (const nw::PoolSpawnRecord &r : batch.records)
+			if (r.slot_id == hull_h.packed) spawn = &r;
+		ok &= expect(spawn != nullptr && spawn->euler_z == 0x12345678 &&
+		                     spawn->euler_x == -0x0123ABCD && spawn->euler_y == 0x09876543,
+		             "the 0x0D spawn record carries the seeded hull's own BAM dwords");
+		const nw::FullEntitySpawnRecord full =
+				ns::build_full_entity_spawn(*world.registry.get(hull_h));
+		ok &= expect(full.heading_hi == 0x1234 &&
+		                     full.pitch_hi == static_cast<uint16_t>(uint32_t(-0x0123ABCD) >> 16),
+		             "the 0x18 rebuild carries the same dwords' truncated high words");
+	}
+
+	w::entity_update_death_transforms(world, *world.registry.get(hull_h), /*silent=*/true);
+	nw::FrameUpdate dead_frame;
+	const nw::FrameUpdateRecord *dead = hull_record(dead_frame);
+	ok &= expect(dead != nullptr && dead->vehicle.is_dead_pose &&
+	                     (dead->vehicle.flags_byte & 0x06u) == 0x06u,
+	             "a husked hull streams the dead-pose form with Flags 6");
+	ok &= expect(dead != nullptr &&
+	                     dead->vehicle.euler_y == static_cast<int16_t>(
+	                             (uint32_t(0x09876543) + 0x8000u) >> 16) &&
+	                     dead->vehicle.euler_x == static_cast<int16_t>(
+	                             (uint32_t(-0x0123ABCD) + 0x8000u) >> 16),
+	             "the dead-pose tail carries the wreck's rounded roll then pitch");
 	return ok;
 }
 
@@ -355,6 +439,7 @@ bool run_pipeline_parented_form() {
 int main() {
 	bool ok = true;
 	ok &= run_fan_carrier_and_vertical_velocity();
+	ok &= run_fan_full_precision_heading_and_wreck_pose();
 	ok &= run_pipeline_parented_form();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "vehicle_compact_carrier_test: %d failure(s)\n", failures);
