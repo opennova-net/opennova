@@ -36,7 +36,7 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 25 | Gkill | 0x4F1F40 | Group | Explicit branch; consumer witnessed in section 33.10 (wac_behavior) |
 | 26 | Gremove | 0x4F1F80 | Group | Explicit branch; consumer witnessed in section 33.10 (wac_behavior) |
 | 27 | Gsetaccuracy | 0x4F7BE0 | Number, Number, Number | Explicit branch; verify consumer |
-| 28 | GtoWP | 0x4ED3D0 | Number, WpList | Explicit branch; verify consumer |
+| 28 | GtoWP | 0x4ED3D0 | Number, WpList | Explicit branch; consumer `Entity_SetWaypointByTeam @0x43CD20` (call `@0x4ED3DC`, node -1; the handler's IDB name `TextResource_GetMissionString` is a misnomer), ported as `EntityCommands::group_to_waypoint` (2026-09-22, world-wac-ai-re section 23.4) |
 | 29 | kill | 0x4EDC90 | Number | Explicit branch; verify consumer |
 | 30 | remove | 0x4EDCA0 | Number | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
 | 31 | teleport | 0x4EE170 | Number, Target | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
@@ -56,7 +56,7 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 45 | holdSSN | 0x4F7810 | Ssn | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 46 | unholdSSN | 0x4F7870 | Ssn | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 47 | setaccuracy | 0x4F2070 | Ssn, Number, Number | Explicit branch; verify consumer |
-| 48 | SSNtoWP | 0x4F1CE0 | Ssn, WpList | Explicit branch; verify consumer |
+| 48 | SSNtoWP | 0x4F1CE0 | Ssn, WpList | Explicit branch; the handler is itself the route writer (nearest node, no detach or resets, brain copy and budget), ported as `EntityCommands::set_ssn_waypoint` (2026-09-22, world-wac-ai-re section 23.4) |
 | 49 | killSSN | 0x4F1E40 | Ssn | Explicit branch; verify consumer |
 | 50 | removeSSN | 0x4F1EE0 | Ssn | Explicit branch; verify consumer |
 | 51 | teleSSN | 0x4F7E00 | Ssn, Target | Explicit branch; consumer witnessed in section 33.13 (wac_behavior); replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |

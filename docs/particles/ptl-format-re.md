@@ -1016,7 +1016,10 @@ carried here.
   ground-decal intensity and the dust/spray/skid wake dispatch
   (`update_vehicle_effect_emissions @ 0x528f20`, vehicle-def curve words 220..231 —
   effect ids 1=dust/11=spray/21=skid into the global effect-slot system); and the
-  engine-state 7 write on detach (the D-NET-157 engine-state model).
+  turret-slot state 7 write on detach (`+0x474 = 7` when nonzero,
+  `Entity_DetachFromVehicle @ 0x4355f0`, `@0x4356F6..0x4356FF`, the D-NET-157
+  engine-state model). The same detach leg's `+0x1CC` emitter release
+  (`@0x435746..0x435759`) is ported (2026-09-22, `VehicleSystem::release_primary_occupant`).
 - **The heavy-damage vehicle smoke into the shared +0x1CC slot**: `g_FxHandleSmkSigB` at
   hp < max/4 (`Entity_UpdateVehiclePhysics @ 0x48b0f1`, only when +0x1CC is empty) and
   `g_FxHandleVehicleFireMed` into +0x400 at critical hp (`@ 0x48b0bc`) — the port's

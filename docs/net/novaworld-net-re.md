@@ -5562,9 +5562,13 @@ parent def's `unitType (+0x196) ∈ {3, 4}` `@0x43861d..0x43864c` — watercraft
 not aircraft (`Entity_ClassifyForMinimap @0x50fa70`; the staged header's
 "aircraft drop" was a misnomer); the look-ahead `@0x438811..0x4388b5`: target =
 parentMatrix(+0xB4) × (6.0, 0, 0), `g_camera_lookahead += (target − lookahead
-+ 16) >> 5` per axis, yaw/pitch through fpatan. The device fills
-`PlayerViewState::mount` per tick (`carrier_forward` in the yaw-only form — a
-stated fold: the seam reads the fixed heading, not the full chassis matrix).
++ 16) >> 5` per axis `@0x43885A..0x4388AF`, eased on EVERY compose (per quantum
+`@0x526781`, per rendered frame `@0x5CA34D`, the Inset scene `@0x5C9841`),
+yaw/pitch through fpatan. `local_player_view_tick` fills
+`PlayerViewState::mount` per tick with the look-ahead target
+`lookahead_target_q16` = the carrier's euler matrix × (6.0, 0, 0), the full
+rotation (corrected 2026-09-22: the device had filled a yaw-only
+`carrier_forward` and eased once per tick; world-wac-ai-re §14.6).
 `Camera_SetTrackedEntity`'s orbit/tracked seeds stay the tracked deferral.
 
 **Mode flag `dword_A890C8`** (set by `[orig: Camera_SetTrackedEntity @ 0x4391d0]`; tracked entity =
@@ -5737,9 +5741,11 @@ Zoom keys (view actions 409/410): `dist −/+= max(dist>>6, 0x800)` clamped [0.5
 (Position + CameraOffset `@ 0x437b70`; the sim receives the sample per frame via
 `set_local_player_eye`); orientation = the seed angles (equal to the witnessed look-at
 while the collision march is unported); the third-person body renders with the §14 aim
-overlay (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march,
+overlay (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred at that date: the collision march,
 orbit/zoom keys, the 0.125u look-at nudge, vehicle mode-1 (no local mounting), the
-kill-cam distance reel, the weather/impact shake.
+kill-cam distance reel, the weather/impact shake. (Historical list: the shake was
+ported 2026-08-30, and the nudge and the march's landing on 2026-09-22; the
+bone-collision force pull-in `@ 0x4382D9` stays deferred.)
 
 **Port re-home (2026-08-07, S8/ADR 0028):** the camera COMPOSITION moved into the
 engine — `world/player_view.h` `player_view_compose_camera` builds the whole
@@ -5747,9 +5753,15 @@ mission-space pose per drain (FP: the CameraOffset floor — witnessed `@ 0x4b6b
 the sample-less capsule leg only; the head-bone legs store unfloored (2026-08-19,
 D-INF-18) — + non-person
 bump `@ 0x437e8f`, the recoil-doubled pitch `@ 0x437fc7`, roll = torsoRoll + lean/4
-`@ 0x437fe6`, the −0x3000 forward pull-back `@ 0x438001`; TP: the chased anchor +
-the 0.125u pivot nudge `@ 0x43818a` backed off by the march's no-collision landing
-`@ 0x438213..0x43832e` — landed 0.75u at the reset distance 1.0), and the FP
+`@ 0x437fe6`, the −0x3000 forward pull-back `@ 0x438001`; TP: the eye is the
+anchor-translated view matrix's image of (−distance, 0, 0) (`@ 0x4383E0..0x4383FB`);
+with proximity candidates below 8.0u (`@ 0x4381CB` / `@ 0x4381E3`) it is instead the
+march's no-collision landing (0.75u at the reset distance 1.0; the pivot itself
+with one step or none, `@ 0x43821F`); the 0.125u pivot nudge
+(`@ 0x43817E..0x4381D9`) is the look-at TARGET, and the final yaw/pitch look from
+the eye at it (`@ 0x4387DF..0x43892D`). (Corrected 2026-09-22: this paragraph had
+the nudge on the eye; `compose_chase_camera` now serves the on-foot and mounted
+arms alike, with the march gated on candidates and distance), and the FP
 viewmodel bias (`pos`/`tpos` /256 blend + the NoCardSwitch suppression) is
 `player_view_bias_view_units`. `godot/src/player/local_player_presenter.cpp` converts the
 `PlayerLocalView.camera_*` pose to the Godot frame and stamps the node;
@@ -8218,11 +8230,17 @@ before damage calculation. `Projectile_ProcessDamageOnTarget` zeros damage for e
 flag 0x4000000, signed itemDef+400 impact armor -1, ammo `penetration_impact` below that
 armor class, or nonzero entity+292 damage state. A type-1 vehicle with more than one
 eligible live pool-0 direct/one-nested occupant reduces damage by
-`min(count * damage_reduc_pp, damage_reduc_max)`. The occupant scan counts the ATTACH
-chain — a candidate whose parentEntity(+40) is the vehicle, or whose attach carrier's
-groundEntity(+0x28) is — never plain deck-standing
-[orig: `Entity_CountMountedEntities @ 0x435970`]; the reimpl maps +40 to
-`Entity::mount_target` (fixed 2026-07-20 from a ground-reference mis-channel).
+`min(count * damage_reduc_pp, damage_reduc_max)`. The occupant scan walks pool 0,
+skips rows without an ItemDef or with Flags & 2 (`@ 0x4359A9..0x4359B2`), and counts a
+row whose groundEntity (+0x28) is the vehicle (`mov ecx, [ecx+28h]` `@ 0x4359B4`) or
+whose groundEntity's groundEntity is (`@ 0x4359BB..0x4359C2`); there is no mount link
+or mounted-flag test, so deck standers count, and seated riders count because the
+organic movers keep their groundEntity on the parent every update
+(`Entity_UpdateInfantryPlayerBody @ 0x4B41A2..0x4B41B4`)
+[orig: `Entity_CountMountedEntities @ 0x435970`]. The reimpl reads
+`ground_target` for both hops (`vehicle_occupant_count`, round_sim.cpp; corrected
+2026-09-22: the 2026-07-20 text and port read the attach chain, +40 /
+`Entity::mount_target`, which retail never tests).
 Health and armor use signed-16 storage
 semantics; damage clamps to remaining health, and itemDef+84 flag 0x40000000 applies the
 retail NoDie `health - 1` clamp before the wrapping signed-16 subtraction.
@@ -9755,11 +9773,12 @@ aliased onto Underwater's 0x4 — replaced with the full two-dword table
   mount clamp `local_player_scope_zoom_mount_clamp` (world/local_player_view.h,
   ctest `local_player_view`), the def fields `DefWeaponDef::scope_min_mag` /
   `scope_max_mag_arg2` (formats/def, ctest `def_parse_weapons`) and the session
-  bit `World::rules.allow_sniper_scope_zoom`; the remaining wiring is the
-  `Simulation::request_local_player_weapon_cycle` call into the route, the
-  `local_weapon_install` call into the clamp (both need `scope_min_mag` carried
-  through `WeaponInstallData` / `LocalPlayerWeapon`), the host/joiner stamps of
-  the rules bit, and the `WeaponSlot_InitFromDef` zoom seed below (D-WPN-9).
+  bit `World::rules.allow_sniper_scope_zoom`. The route call
+  (`Simulation::request_local_player_weapon_cycle`) is wired, and the
+  `WeaponSlot_InitFromDef` zoom seed below is ported (2026-09-22: the inventory
+  fill, a fresh install, the emplacement prepare and the zoom-step write-back);
+  the remaining wiring is the `local_weapon_install` call into the clamp (Scoped
+  defs only) and the host/joiner stamps of the rules bit (D-WPN-9).
 - The engage leg replicates C2S 0x1D (type 169) when seat-flag 0x40000 allows,
   and seat-flag 0x10000 zeroes the pitch.
 
@@ -10118,9 +10137,11 @@ remains unwalked);
 the `*_map` scope function variants;
 the `g_FpWeaponViewFlags` option bits beyond bit 0; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
-the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-step wiring
-(the `scope_min_mag` def field, the 212/214 route and the mount-time clamp -- the
-`Player_AdjustWeaponElevation` leaf is ported as `local_player_adjust_scope_zoom`); the
+the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-step wiring's
+last caller (the mount-time clamp `@0x4dfad3..0x4dfb16`, whose helper
+`local_player_scope_zoom_mount_clamp` has no caller; the `scope_min_mag` def field, the
+212/214 route and the `Player_AdjustWeaponElevation` leaf `local_player_adjust_scope_zoom`
+are ported, D-WPN-9); the
 HandGunUp auto-follow (player flag 0x4000 writer); the emplaced-gun overheat glow port
 (the heat window leg above); the kick sound-layer port (`SoundEmitter_RegisterSetLayers`);
 the Barrett/REVVY visual A/B outside the now-closed action-slot suppression question
@@ -10228,13 +10249,16 @@ one per-entity array keyed by a build-time ammo-class registry (D-WPN-24).
   is_client bit, TRUE in SP mode 3). game.lwf ships the set. Reimpl:
   `MissionAudio.ui_soundset` + `PlayerWeaponEffects._play_switch_deny_sound` on
   the sim's `switch_denied` event.
-- `Player_CycleWeaponSlot @ 0x4dfe70` — next/previous (input cases 212/214, ±1) over ALL
+- `Player_CycleWeaponSlot @ 0x4dfe70`: input case 212 (catalog "Cycle Weapon Prev",
+  `cycleweaponP`) passes +1, the next-higher combo index, and 214 ("Cycle Weapon Next")
+  -1 (`add edi, ebp` `@0x4dfef6`), over ALL
   780 combos with wraparound; EVERY candidate needs the ammo score (no weapon_class
   exemption `@ 0x4dff39`); reaching the start again returns silently (no deny). Cases
   212/214 (`Input_HandleActionBinding_0 @0x4e130c..0x4e13ae`, corrected 2026-09-12)
   first return on `g_binocularsViewActive || g_fireChargeStartTick`, then become a
-  SCOPE ZOOM STEP instead of a cycle -- `Player_AdjustWeaponElevation(212: +2, 214: -2)`
-  (`@0x4e1396` / `@0x4e13d7`, its only callers) -- when the equipped def's
+  SCOPE ZOOM STEP instead of a cycle -- `Player_AdjustWeaponElevation(212: +2
+  @0x4e13d7, 214: -2 @0x4e1396)`, its only callers (the address pair was swapped
+  here until 2026-09-22) -- when the equipped def's
   `scope_min_mag` (+0x98) != `scope_max_mag` (+0x90) and `Player_CanFireWeapon()`
   (the optical-view gate: promoted scope or vehicle-gunner scope, first person, not
   moving, not submerged) holds; case 215 zooms +2 / -2 by its fifth argument;
@@ -10255,11 +10279,20 @@ one per-entity array keyed by a build-time ammo-class registry (D-WPN-24).
   `local_player_adjust_scope_zoom`, the dispatcher leg
   `local_player_weapon_cycle_route`, the mount clamp
   `local_player_scope_zoom_mount_clamp` and the def fields (`DefWeaponDef::
-  scope_min_mag` / `scope_max_mag_arg2`, ctest `def_parse_weapons`) are landed;
-  the calls into the route and the clamp, the rules-bit stamps and the
-  `WeaponSlot_InitFromDef` seed (a per-inventory-slot zoom the port's
-  `WeaponInventorySlot` does not carry yet; the mount clamp reproduces it for
-  every shipped row but WPN_EMP50BD's `8 8`) are the open wiring (D-WPN-9).
+  scope_min_mag` / `scope_max_mag_arg2`, ctest `def_parse_weapons`) are landed,
+  the route call is wired (`Simulation::request_local_player_weapon_cycle`), and
+  the `WeaponSlot_InitFromDef` seed is ported (2026-09-22):
+  `WeaponInventorySlot::scope_zoom` is MountSlot+0xC, seeded by the fill with the
+  local player as owner, restored at the mount and written back by a zoom step;
+  the emplacement slot is seeded ownerless in `VehicleSystem::prepare_weapon_slot`
+  (`WeaponSlot_InitFromEntityDef @0x5466c0` passes no owner `@0x546706`, so no
+  sniper lock `@0x53eef7`; ctests `weapon_inventory`, `vehicle_mount`,
+  `player_loadout`, `npruntime_weapon_table`, `mission_kernel`). The earlier
+  claim that the mount clamp reproduces the seed for every shipped row was
+  wrong: the clamp runs only for Scoped defs (`@0x4dfac7..0x4dfad1`), and
+  `WPN_M1TURRET` / `WPN_T80TURRET` and every JOTAC Sighted variable optic are
+  Sighted-only. Still open (D-WPN-9): the clamp's caller and the rules-bit
+  stamps.
 
 **The mount + commit.** `Player_MountWeaponSlot @ 0x4dfa40`: stamps `g_pendingWeaponSlot
 @ 0xB75FD0`, queues SWITCHRANK on the equipped slot when the new def shares its category
@@ -13431,8 +13464,10 @@ ledger row and in the 2026-09-07/08 update below. Vehicle-client-movers-re
 sections 12 through 37 complete model contact, traction, force/crash/death
 state, renderer controls, selector-zero craft, amphibious dispatch, mounted/AI
 controls, carrier pose, respawn markers, trails, rotor wash and water rings.
-D-ITEM-15 closes with its wreck-bank consumers; D-SND-17 is likewise OPEN but
-narrowed (the tank fold's extra-effect argument and the sound-ready gate). The
+D-ITEM-15 closes with its wreck-bank consumers; D-SND-17, left open at that
+review for the tank fold's extra-effect argument and the sound-ready gate,
+closed 2026-09-22 when both were ported (the argument is the yaw rate; the gate
+is the last-tick-of-batch flag; audio record D-SND-17). The
 dated history below
 records earlier port boundaries; current coverage is the vehicle record's
 verdict table.
@@ -13532,7 +13567,7 @@ ground boarders hold, helo AI flight, helo health machine), `watercraft_client_m
 (submerged cut), `def_parse_items`, `vehicle_collision_damage`. Still deferred: the air
 flare scan, the pilot analog collective and the pilot yaw follow of the burn spiral, the
 spawn-parent (+0x264) anchor lift, the run-over player gates (+0x124 / the spectator
-slot byte +0x188D7), the FX/sound seams of every leg above.
+slot byte +0x188D7; ported 2026-09-22), the FX/sound seams of every leg above.
 2026-09-07/08 update (PR #640 + its review; vehicle-client-movers-re sections 11
 through 37): PORTED — the selector-zero ground/boat movers and the amphibious
 dispatch (`Entity_DispatchPhysicsUpdate @ 0x48F010`), model-probe contacts and
@@ -13560,7 +13595,9 @@ The remaining review residuals (the ledger row is authoritative) are:
 `Entity_CalcAverageGroundHeight @ 0x457230`'s per-tap ray kinds; (f) the
 `entity+684` brain-step mirror `@ 0x458568`/`@ 0x4585b4`; (g) the brain machine
 for non-vehicle-class pool-1 brains (ewep row `@ 0x8130a8`); (h) the 2026-09-01
-run-over player gates, unchanged.
+run-over player gates, PORTED 2026-09-22 (`Entity_MovementCollisionResolver
+@ 0x4B2BD0`, `@ 0x4B3918..0x4B3946`; world-wac-ai-re §29.3). (d) and (f) were
+ported 2026-09-12; the ledger row lists what remains.
 
 **D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
 learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire
@@ -14405,11 +14442,13 @@ reserve-pool getter Entity_GetScoreValueBySlotType @ 0x5406E0]
 
 **D-WPN-9 needs caller completion, not another zoom-step helper.**
 `scope_min_mag` is parsed, and `simulation_player_weapon.cpp` routes actions 212/214
-through the active weapon's limits. The mount clamp helper is defined in
-`local_player_view.cpp` with no caller. Action 215, the remaining scope/refusal
-conditions and network/session legs retain their existing open scope. Recheck all
-active dispatch arms against `Player_AdjustWeaponElevation @0x4DBDF0` and the
-`0x4E130C..0x4E13AE` / `0x4DFAD3..0x4DFB16` sites before closure.
+through `local_player_weapon_cycle_route`, which carries their refusal and route
+gates (`0x4E130C..0x4E13AE`); every slot starts at its `WeaponSlot_InitFromDef`
+seed (2026-09-22). The mount clamp helper is defined in `local_player_view.cpp`
+with no caller. Action 215, that caller, the `allow_sniper_scope_zoom` writer and
+the network/session legs retain their existing open scope. Recheck all active
+dispatch arms against `Player_AdjustWeaponElevation @0x4DBDF0` and the
+`0x4DFAD3..0x4DFB16` site before closure.
 
 
 ### Protected admission implementation (2026-09-13)

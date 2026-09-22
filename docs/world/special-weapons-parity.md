@@ -66,9 +66,11 @@ mechanics; they are not claimed as retail asset measurements.
   AI/warning consumers and C2S command-map 0x44 overload. The AI Javelin no-lock
   1200-unit forward query (`push 4B00000h @0x445DD1`) is also not covered by this pass; the
   adapter still supplies the retained owner aim point on that fallback path.
-- Tank sound's extra-effect argument remains D-SND-17. These corrections do not
-  claim complete tracked-vehicle dynamics or every mounted rig's alternate
-  userpoint/model transform behavior.
+- The tank sound's extra-effect argument (the yaw rate, not slide_z) and the
+  rest of D-SND-17 were ported and the row closed on 2026-09-22; see the
+  [tank record](tank-parity-re.md). These corrections do not claim complete
+  tracked-vehicle dynamics or every mounted rig's alternate userpoint/model
+  transform behavior.
 - The initial gameplay pass used synthetic fixtures. The later HUD follow-up
   mounts the installed JOTAC data for launcher/mortar/vehicle tests. Mixed
   original/OpenNova live play is still a separate validation boundary.

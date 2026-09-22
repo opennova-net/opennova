@@ -302,18 +302,25 @@ the weather keeps advancing while the entities are held (the reimpl's
   rendered frame from the scene frame (`Render_ProcessMainSceneFrame
   @ 0x5ca34d`; a third time from `Render_RadarCompassOverlay @ 0x5c9841` when
   the compass overlay draws), each call re-deriving the view so the frame's
-  own sample renders: ported 2026-08-30 as the pre-tick decay, the post-tick
-  advance in `local_player_view_tick`, and the per-frame sample in
-  `local_player_view_frame`. The compose's mode>=1 leg applies a SECOND,
+  own sample renders: ported 2026-08-30 as the pre-tick decay, the per-quantum
+  compose (`local_player_camera_compose` from `LocalPlayer::tick_view`) and the
+  per-frame compose (`local_player_view_frame` from
+  `LocalPlayer::present_view_frame`); since 2026-09-22 those are the only
+  composes, and every other reader observes the last composed view. The
+  compose's mode>=1 leg applies a SECOND,
   stateless shake instead of the IIR filters — `amp = (min(4*counter, 255) *
-  ((prng & 0xFF) + 64)) >> 8`, `yaw += trunc(sin(C*0.4)*amp)`, `pitch +=
+  ((prng & 0xFF) + 64)) >> 8`, `yaw += trunc(sin(C*0.4)*amp)` (on the BAM
+  heading, `@ 0x43898B`, so the mission yaw subtracts it; the mode-0 IIR
+  `>> 6` yaw applies the same way, `@ 0x4380D9`), `pitch +=
   trunc(sin(C*2/7)*amp) - (trunc(sin(T*25/34)*amp) >> 2)`, `roll =
   trunc(sin(C*2/11)*amp) - (trunc(cos(T*0.862069)*amp) >> 2)` over the
   look-at's zero roll (`@ 0x438939..0x4389e5`; the mode-4 lerp then overwrites
   the rotation, so only the chase renders it) — ported 2026-08-30 (tidy round)
-  as `camera_shake_sample_chase`, applied in `local_player_view_frame`'s
-  third-person branch; the Inset overlay's extra call is mirrored as one more filter sample after the
-  main scene's (`@0x5C9841`; D-HUD-26 FIXED 2026-09-19);
+  as `camera_shake_sample_chase`, applied by `local_player_camera_compose` in
+  mode 1; the Inset overlay's extra call is a full second compose (its own
+  shake step and, mounted, its own look-ahead step) whose view `g_view_*` keeps,
+  the Inset offsetting a copy (`@0x5C9846..0x5C9903`; `@0x5C9841`; D-HUD-26
+  FIXED 2026-09-19);
   pool-1 entities whose def carries
   `attrib & 0x40` likewise (`@ 0x57ebde..0x57ec29`, the shake when the player's
   parent is displaced); `--Env_QuakeTicks` (`@ 0x57ec61`). Then the HIT BLACKOUT
