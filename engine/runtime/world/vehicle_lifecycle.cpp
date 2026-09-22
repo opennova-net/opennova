@@ -160,17 +160,87 @@ void VehicleSystem::initialize_mission_vehicles() {
 		capture_spawn_pose(e);
 		mirror_pose(world_, e);
 		// The respawn budget seed: a hull with an AI slot stores thinkCooldown
-		// (+0x128) = aiRuntime[18] / 31 (the signed magic divide 0x84210843,
-		// sar 5, sign fix), which tick_dead consumes one per respawn and holds
-		// at 1. Promote seeds slot[18] = 62 * spawns, so the budget is 2 * spawns.
-		// [orig: Game_StartMission @0x526071..0x526095]
+		// (+0x128) = aiRuntime[18] / 62 (the signed magic divide 0x84210843
+		// with the dividend added back, sar 5, sign fix), which tick_dead
+		// consumes one per respawn and holds at 1. Promote seeds slot[18] =
+		// 62 * spawns for every AI-class record, so the budget is the authored
+		// spawn count. [orig: Game_StartMission @0x526079..0x52608F]
 		if (AiEntity *ai = world_.ai.for_handle(e.handle))
-			ai->inf.wait_cooldown = ai->slot.f[18] / 31;
+			ai->inf.wait_cooldown = ai->slot.f[18] / 62;
 	}
+}
+
+// The class init bound at ItemDef+0x148 from the ai_function row, re-run with
+// the brain already allocated: vehicle rows (cveh/cbot/ctrn) run
+// Entity_InitVehicleAIFromDef, CHel/cpln Entity_InitHelicopterAIFromDef; the two
+// differ in their speed words (kept as AiProfile::class_speed_a/b) and the
+// helicopter's patrol-offset draw. The model-range words brain+0x2C/+0x30 carry
+// no ported consumer and are not modeled.
+// [orig: Entity_LookupRenderCallbacks @0x407E33..0x407E36 binds the row's fn2;
+//  Entity_InitVehicleAIFromDef @0x4686C0 (stamp @0x4686D3..0x468703, slot gate
+//  @0x46878D, re-seed @0x46885B..0x468964); Entity_InitHelicopterAIFromDef
+//  @0x4683C0 (@0x4683D4..0x468404, @0x46848E, @0x46852A..0x468692)]
+bool VehicleSystem::rerun_class_init(Entity &e) {
+	AiEntity *ai = world_.ai.for_handle(e.handle);
+	if (ai == nullptr)
+		return false;
+	stamp_saved_live_pose(e);
+	AiBrain &b = ai->brain;
+	const VehicleTraits *t = traits.get(e.item_id);
+	const bool helicopter = t != nullptr &&
+			(t->brain_class == VehicleBrainClass::Air ||
+					(t->brain_class == VehicleBrainClass::Unset &&
+							vehicle_family_uses_direct_air_mover(t->family)));
+	// The authored route from the slot [orig: @0x46885B..0x46887F; helo
+	// @0x46852A..0x468552].
+	if (ai->slot.f[35] != 0) {
+		b.f[AiBrain::kWpType] = 1;
+		b.f[AiBrain::kWpChannel] = ai->slot.f[37];
+		b.f[AiBrain::kWpNode] = ai->slot.f[38];
+	}
+	// Ammo refills from the profile blocks, gated on the resolved ammo byte
+	// (+0x94 / +0xB4, AmmoDef_LookupByName's 0 = none) [orig: @0x468882..0x4688B7;
+	//  helo @0x468555..0x46858D].
+	const AiProfile &p = ai->profile;
+	b.f[AiBrain::kAmmoA] = p.fire_a.ammo_index > 0 ? p.fire_a.ammo_cap : 0;
+	b.f[AiBrain::kAmmoB] = p.fire_b.ammo_index > 0 ? p.fire_b.ammo_cap : 0;
+	// [orig: @0x4688C1..0x4688D3; helo @0x468597..0x4685A9]
+	b.f[AiBrain::kSpeedA] = p.class_speed_a;
+	b.f[AiBrain::kSpeedB] = p.class_speed_b;
+	// The turret words from the first TURRET-flagged block [orig:
+	// @0x4688D9..0x46890F; helo @0x4685AF..0x4685E7].
+	if ((p.fire_a.flags & 1u) != 0)
+		b.f[AiBrain::kActiveYaw] = b.f[AiBrain::kStagingBlock + 3] = p.fire_a.facing_bam;
+	else if ((p.fire_b.flags & 1u) != 0)
+		b.f[AiBrain::kActiveYaw] = b.f[AiBrain::kStagingBlock + 3] = p.fire_b.facing_bam;
+	// The helicopter's patrol offset, (draw16 % 20) << 16 [orig: @0x4685ED..0x46863F].
+	if (helicopter)
+		b.f[51] = (static_cast<uint16_t>(world_.ai.prng_step_a()) % 20) << 16;
+	// Step 16 and the 0..15 think stagger [orig: @0x468915..0x46893B; helo
+	// @0x468645..0x468669].
+	b.f[AiBrain::kStep] = 16;
+	e.spawn_phase = world_.vehicle_ai_spawn_phase;
+	world_.vehicle_ai_spawn_phase = (world_.vehicle_ai_spawn_phase + 1) & 15;
+	// The CURRENT state's enter re-runs — for a wreck the dead state's enter:
+	// the ally alert, the reference clear, the team byte (tick_dead restores it)
+	// and step 62. [orig: `call off_815238[cur*16]` @0x468945..0x468952; helo
+	// @0x468673..0x468680]
+	AiThinkCtx ctx{&world_.ai, ai, &world_, nullptr};
+	world_.ai.row(b.f[AiBrain::kCurState]).enter(ctx);
+	// [orig: @0x46895A..0x468964; helo @0x468682..0x468692]
+	setup_gunner_attachments(e);
+	return true;
 }
 
 // [orig: Entity_RespawnVehicle @0x45FF40]
 void VehicleSystem::respawn(Entity &e) {
+	// The ai_function class init runs first; only when it ran do the rotor
+	// speed/rate words drop. [orig: `cmp [eax+148h],ebx ... call ecx`
+	//  @0x45FF53..0x45FF68; +0x468/+0x460 = 0 @0x45FF6D..0x45FF73]
+	if (rerun_class_init(e)) {
+		e.veh.part_spin.rate = 0;
+		e.veh.part_spin.speed = 0;
+	}
 	// [orig: Entity_RespawnVehicle @0x460186 -> EntityList_ClearParentRef
 	// @0x43ED10] Only allocated pool-0 rows whose ground reference matches.
 	world_.registry.for_each_in_pool(0, [&](const Entity &row) {
@@ -222,6 +292,7 @@ void VehicleSystem::respawn(Entity &e) {
 	e.attach_parent = {};
 	e.attach_bone = 0;
 	e.death_tick = 0;
+	e.last_attacker = {}; // the kill credit [orig: `mov [esi+178h],ebx` @0x460074]
 	e.section_mask = 0;
 	e.spawned_piece_mask = 0;
 	m.vel_x = m.vel_y = 0;

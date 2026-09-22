@@ -115,6 +115,11 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
         if (kind == EntityKind::Item)
             b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
     }
+    // The resolved speed words the class init's respawn re-run reloads
+    // [orig: Entity_InitVehicleAIFromDef @0x4688C1..0x4688D3;
+    //  Entity_InitHelicopterAIFromDef @0x468597..0x4685A9].
+    ae.profile.class_speed_a = b.f[AiBrain::kSpeedA];
+    ae.profile.class_speed_b = b.f[AiBrain::kSpeedB];
     ae.profile.class_priority[0] = data.priority_air;
     ae.profile.class_priority[1] = data.priority_ground;
     ae.profile.class_priority[2] = data.priority_organics;
@@ -130,15 +135,14 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
             ae.profile.slot_class[i] = ents[3 - i].second;
     }
     // The GROUND weapon def blocks (profile+120/+152) + their brain
-    // seeds. The ammo COUNT seed's spawn copy site (brain[53]/[54]) is
-    // still unwitnessed (world-wac-ai-re §17.7 item 1: the plain spawn
-    // path is a block/memset and only the command and savegame-restore
-    // writers are found; tracked under D-AI-2), while the stationary
-    // pump reads brain[53]/[54] as the live counts of the +120/+152
-    // capacities, so the capacities seed them here. The authored
-    // "*_weap" ammo names resolve against the loaded ammo table at the
-    // item-traits sweep [orig: AIProfile_ParseProperty @0x45de70 GROUND
-    // block; AIEntity_ProcessWeaponFire field map §17.6].
+    // seeds. The ammo COUNT words brain[53]/[54] are the class init's
+    // copy of the +120/+152 capacities, gated on each block's resolved
+    // ammo byte [orig: Entity_InitVehicleAIFromDef @0x468882..0x4688B7].
+    // The authored "*_weap" names resolve against the loaded ammo table
+    // at the item-traits sweep, which applies that gate
+    // (mission::resolve_ai_weapons); until then the capacities stand in
+    // [orig: AIProfile_ParseProperty @0x45de70 GROUND block;
+    // AIEntity_ProcessWeaponFire field map §17.6].
     if (data.type == 1 || data.type == 2) {
         const auto seed_block = [](world::AiProfile::WeaponFire &dst,
                                         const aip::WeaponBlock &src) {
@@ -402,6 +406,11 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 			break;
 		}
     }
+	// The speed words the class init's respawn re-run reloads (the resolved
+	// profile's, else the embedder default) [orig: Entity_InitVehicleAIFromDef
+	// @0x4688C1..0x4688D3].
+	ae.profile.class_speed_a = b.f[AiBrain::kSpeedA];
+	ae.profile.class_speed_b = b.f[AiBrain::kSpeedB];
 	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
 	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
 	// profile row found or not (AIProfile_LoadOrFind never returns null there). Organics
@@ -420,7 +429,7 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // Id 0 is the reserved no-route id REGARDLESS of the table's slot-0 contents
     // — retail's positional table simply never authors list 0 and every consumer
     // 0-gates [orig: AIWaypoint_UpdateTarget @0x457380 navMeshId==0 -> -1]; the
-    // slot half's witnessed seeding is gated the same way (init_infantry below).
+    // slot half's witnessed seeding is gated the same way (init_ai_slot below).
     const NavChannel *ch =
             e.waypoint_id != 0 ? ai.nav.channel(e.waypoint_id) : nullptr;
     if (ch && ch->count > 0) {
@@ -430,14 +439,23 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     }
 }
 
-// Seed the infantry motor + AiSlot for an organic (entity class org1). Field map grounded in
-// Entity_SpawnFromBMSRecord @0x40e9f0 (the AiSlot block) — see docs/world/world-wac-ai-re.md §3.2.
-void init_infantry(AiEntity &ae, const bms::Entity &e) {
+// Seed the infantry motor for an organic (entity class org1).
+void init_infantry(AiEntity &ae) {
     ae.inf.active = true;
     // Body and independent look start at the authored facing.
     ae.inf.body_heading = ae.inf.target_heading = ae.inf.aim_heading = ae.heading;
     ae.inf.aim_pitch = ae.pitch;
+}
 
+// Seed the AiSlot from the BMS record. Retail allocates and fills the slot for
+// EVERY record whose def carries the AI-class attrib (0x100000), vehicles
+// included — the vehicle respawn budget (slot[18]) and route restart
+// (slot[35/37/38]) read these words. Field map grounded in
+// Entity_SpawnFromBMSRecord @0x40e9f0 (the AiSlot block) — see
+// docs/world/world-wac-ai-re.md §3.2.
+// [orig: the def gate `test [eax+54h],100000h` @0x40ED4E ahead of
+//  Entity_AllocateAISlot @0x40ED5C; the fills @0x40ED61..0x40F054]
+void init_ai_slot(AiEntity &ae, const bms::Entity &e) {
     AiSlot &s = ae.slot;
     // The authored AI attributes become AiSlot[1] control bits at spawn. Berserk
     // is retail's intentional attack-anyone exception to normal team filtering.
@@ -812,7 +830,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
 	// order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
 	// Command 123/124/125 boarders spawn ON FOOT and walk in through the infantry
 	// think's board leg (infantry_board.cpp), exactly like retail — spawn stores
-	// only the order (slot+148/+152 via init_infantry).
+	// only the order (slot+148/+152 via init_ai_slot).
 	// [orig: Entity_SpawnFromBMSRecord @0x40e9f0 stores the order; the walk/attach
 	//  is Entity_UpdateInfantryAI @0x4b9910]
 	// A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
@@ -908,11 +926,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
                 AiEntity &ae = *ai.at(ai_idx);
+                // The record's slot seed precedes the class init's brain.
+                // [orig: Entity_SpawnFromBMSRecord @0x40ED4E..0x40F054, then
+                //  Entity_InitAllFromModels -> the def callbacks]
+                init_ai_slot(ae, e);
                 init_brain(ae, e, opts, world, ai, kind);
                 if (kind == EntityKind::Organic) {
                     // Soldiers run the infantry motor, not the vehicle SM.
                     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI]
-                    init_infantry(ae, e);
+                    init_infantry(ae);
                 }
                 ae.net_id = seed.net_id;
                 ae.relmat_id = seed.net_id; // provisional relation-matrix id (net layer = later)
