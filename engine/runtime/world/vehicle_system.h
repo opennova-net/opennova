@@ -171,6 +171,17 @@ public:
     // [orig: Entity_DetachFromVehicle @0x4355f0 — `occupantEntity == entity` gate @0x4356e9,
     // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c]
     bool release_primary_occupant(Entity &vehicle, EntityHandle occupant);
+    // A joiner's decoded remote organics live outside the native pools; the joiner
+    // binds itself here so the +368 readers still see a remote claimant. Null on the
+    // authority, where every claimant is a native row.
+    const VehicleOccupancySource *occupancy_source = nullptr;
+    // The +368 claimant as the per-tick readers take it: the native claimant row, else
+    // the occupancy source's transient projection into `scratch`. `claimant_present`
+    // is the bare non-null test. [orig: occupantEntity reads, e.g.
+    // Entity_UpdateTankVehiclePhysics `cmp dword ptr [esi+170h],0` @0x48AACF /
+    // @0x48AB91 / @0x48ACB5]
+    const Entity *claimant(const Entity &vehicle, Entity &scratch) const;
+    bool claimant_present(const Entity &vehicle) const;
     // Swap a UseGun occupant to the parent's embedded weapon slot, preserving the
     // personal equipped AdmDef for detach. Returns true once the parent weapon resolves.
     // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73]

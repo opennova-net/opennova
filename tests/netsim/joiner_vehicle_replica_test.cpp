@@ -1,6 +1,7 @@
 // A joiner's replica vehicle rows through the production JoinerRole frame:
 // the §5.13 reader's record tail (the host's Flags bits, the health word, the
-// destroyed-bit kill edge) and the mover freeze.
+// destroyed-bit kill edge), the mover freeze, and the +0x170 claimant a
+// retail client attaches from its remote riders' records.
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
@@ -8,6 +9,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/peer_addr.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/joiner_role.h>
@@ -18,6 +20,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -45,6 +48,7 @@ const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
 constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
 constexpr uint16_t kSelfHandle = 0x0005;
+constexpr uint16_t kRemoteDriver = 0x0006;
 constexpr int32_t kTankType = 1296;
 constexpr uint8_t kControlBone = 1;
 
@@ -208,6 +212,66 @@ bool run_freeze_predicate_and_pivot_clear() {
 	return ok;
 }
 
+// A retail client attaches every remote rider from its records, so +0x170
+// names a remote driver on the client too; the tank tail then arms the pivot
+// cue for a remote pivot. The joiner's own row never answers remotely.
+// [orig: NetPacket_SerializePlayerState @0x4C1317 -> Entity_TryAttachOrDetach ->
+//  Entity_AttachToVehicleSlot @0x4947D2 / @0x4948D8;
+//  Entity_UpdateTankVehiclePhysics @0x48ACB5..0x48AD53]
+bool run_remote_driver_is_the_claimant() {
+	Harness h;
+	bool ok = true;
+	w::World &world = h.kernel->world;
+	static constexpr char kProfile[] =
+			"begin \"SP_RemoteTank\"\n Soundloop_1 TANK_IDLE 1 1\n swivel_shift TANK_SHIFT\nend\n";
+	ok &= expect(world.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1,
+	             "the tank sound profile parses");
+	w::VehicleTraits traits = *world.vehicles.traits.get(kTankType);
+	traits.sound_profile = "SP_RemoteTank";
+	w::Entity scratch;
+	ok &= expect(world.vehicles.claimant(h.hull(), scratch) == nullptr,
+	             "an empty hull has no claimant");
+	replication::ClientEntityState &driver = h.role.runtime->state().upsert(kRemoteDriver);
+	driver.cls = EntityClass::Player;
+	driver.type_id = static_cast<uint16_t>(w::kPlayerInfantryTypeId);
+	driver.carrier_handle = h.tank.packed;
+	driver.mount_bone = kControlBone;
+	driver.net_has_compact = true;
+	const w::Entity *claimant = world.vehicles.claimant(h.hull(), scratch);
+	ok &= expect(claimant != nullptr && claimant->mounted &&
+	                     claimant->mount_target == h.tank &&
+	                     claimant->handle == w::EntityHandle{kRemoteDriver},
+	             "the remote driver on the control seat is the hull's claimant");
+	w::Entity::VehicleMotorState &m = h.hull().veh;
+	m.settle_2f0 = 0;
+	m.speed = 0;
+	m.wheel_rate_bam = 40000;
+	m.pivot_sound_latched = false;
+	m.steer_target_bam = io::bam_add(m.yaw_bam, 0x08000000);
+	world.out.slot_sounds.clear();
+	world.vehicles.update_traction_sound(h.hull(), traits);
+	ok &= expect(m.pivot_sound_latched && world.out.slot_sounds.size() == 1 &&
+	                     world.out.slot_sounds[0].slot == 46,
+	             "a remote driver's pivot arms the swivel cue on the joiner");
+	// The engine-running latch of the part-spin machine reads the same +0x170
+	// [orig: Entity_UpdatePartSpinAccumulator @0x4928E8].
+	m.part_spin = {};
+	world.vehicles.rotor_machine_tick(h.hull(), traits);
+	ok &= expect(m.part_spin.speed == w::kRotorRateFull,
+	             "a remote driver spins the part accumulator up on the joiner");
+	driver.mount_bone = 0;
+	driver.carrier_handle = w::EntityHandle::kInvalid;
+	ok &= expect(world.vehicles.claimant(h.hull(), scratch) == nullptr,
+	             "a dismounted rider leaves no claimant");
+	replication::ClientEntityState &self = h.role.runtime->state().upsert(kSelfHandle);
+	self.cls = EntityClass::Player;
+	self.carrier_handle = h.tank.packed;
+	self.mount_bone = kControlBone;
+	ok &= expect(world.vehicles.claimant(h.hull(), scratch) == nullptr,
+	             "the joiner's own wire row never answers as a remote claimant");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -215,6 +279,7 @@ int main() {
 	ok &= run_record_tail_mirrors_flags_and_health();
 	ok &= run_destroyed_bit_kills_the_client_row();
 	ok &= run_freeze_predicate_and_pivot_clear();
+	ok &= run_remote_driver_is_the_claimant();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

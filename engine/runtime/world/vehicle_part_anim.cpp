@@ -69,8 +69,8 @@ void VehicleSystem::rotor_machine_tick(Entity &veh, const VehicleTraits &traits)
 	if (machine != RotorMachine::None) {
 		// The engine-running latch: the +0x170 occupantEntity read @0x4928E8 is
 		// the claimant that Entity::primary_occupant mirrors (attach/detach own
-		// it), not any-control-seat occupancy.
-		const bool occupied = veh.primary_occupant.valid();
+		// it), not any-control-seat occupancy; a joiner's remote claimant counts.
+		const bool occupied = world.vehicles.claimant_present(veh);
 
 		// Seed the rate when it is zero. A non-player-control item rolls from
 		// the shared stream — the roll is the one PRNG draw this tick takes,
