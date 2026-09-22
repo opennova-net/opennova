@@ -1518,10 +1518,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // Only rounds the motor armed detonate at this head; an ordinary
             // ballistic lifetime expiry vanishes silently, and so does an armed
             // round whose ammo carries no kill-zone class: the push and the
-            // obj-row effect both sit behind the kztype test.
-            // [orig: Projectile_UpdatePhysics — the flag test @0x4E9DC6, the
-            //  kztype producer gate @0x4E9DDC..0x4E9DE1 (jz to the release),
-            //  the push @0x4E9E03]
+            // obj-row effect both sit behind the kztype test. The head is
+            // common to every round of the array, the useownmove ones whose
+            // class motor it runs included, so JO's smoke grenade (no kztype)
+            // presents its obj row only at the motor's arm boundary.
+            // [orig: Weapon_UpdateAllProjectiles @0x4EC020 -> Projectile_UpdatePhysics
+            //  — the flag test @0x4E9DC6, the kztype producer gate
+            //  @0x4E9DDC..0x4E9DE1 (jz to Projectile_ReleaseEffects @0x4E9E6D),
+            //  the push @0x4E9E03, the obj row @0x4E9E65; the useownmove motor
+            //  call @0x4E9F1E]
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry && fuze_ammo->kztype != 0) {
                 if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);

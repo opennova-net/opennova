@@ -501,21 +501,27 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
 
     // FUSE: two ticks before expiry [orig: @ 0x444976 — above water arms the
     // detonate-at-expiry flag (0x1000); submerged detonates NOW with the
-    // depth-keyed underwater tags and zeroes the age].
+    // depth-keyed underwater tags and zeroes the age]. The flag is consumed by
+    // RoundSim's expiry head, the Projectile_UpdatePhysics head that runs
+    // this motor, and so shares its kztype gate: a grenade without a
+    // kill-zone class (JO's smoke) releases there silently. The submerged
+    // push tests no class. [orig: the flag @0x444A29; the push @0x444A0F]
     const int32_t remaining = r.max_age_ticks - elapsed;
     if (remaining == 2) {
         if (r.pos.z >= from_fixed(water)) {
             r.det_at_expiry = true;
         } else {
             const double depth = from_fixed(water) - r.pos.z;
+            // Tags 27 and 26 sit at the water surface, tag 25 at the round
+            // [orig: the descriptor z = Env_WaterHeightFixed @0x4449BE for
+            //  the calls @0x4449CC (26) / @0x4449DE (27); the round z
+            //  restored @0x4449EE for @0x4449F2 (25)].
+            const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};
             if (depth > 3.0) {
-                push_motor_effect(sim, r, 27,
-                                  Vec3{r.pos.x, r.pos.y,
-                                       static_cast<float>(from_fixed(water))},
-                                  world.logic_tick);
+                push_motor_effect(sim, r, 27, surface, world.logic_tick);
                 push_motor_effect(sim, r, 25, r.pos, world.logic_tick);
             } else {
-                push_motor_effect(sim, r, 26, r.pos, world.logic_tick);
+                push_motor_effect(sim, r, 26, surface, world.logic_tick);
             }
             if (allow_consequences) detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;

@@ -637,6 +637,80 @@ void test_grenade_fuse_tick_boundaries() {
     }
 }
 
+// A useownmove grenade without a kill-zone class (JO's grenadesm: no kztype,
+// arm_age 5 s, obj row EXPLO_SMOK_GREN) presents its obj row once, from the
+// motor's arm boundary. Its above-water fuse only arms the 0x1000 flag, and
+// the expiry head (Projectile_UpdatePhysics, which runs every round of the
+// array, the motor-driven ones included) releases it silently: the push and
+// the obj row both sit behind the head's kztype test. The same round with a
+// kill-zone class presents the obj row a second time and queues its zone.
+// [orig: Weapon_UpdateAllProjectiles @0x4EC020 -> Projectile_UpdatePhysics
+//  @0x4E9D70 — flag @0x4E9DC6, kztype @0x4E9DDC..0x4E9DE1, push @0x4E9E03,
+//  obj row @0x4E9E65, the motor call @0x4E9F1E; Entity_UpdateGrenadePhysics
+//  @0x443F50 — arm obj row @0x444908..0x444967, fuse flag @0x444A29]
+void test_smoke_grenade_expiry_presents_no_second_obj_row() {
+    for (const int32_t kztype : {0, static_cast<int32_t>(ammo_kz::kC4)}) {
+        Rig rig(0);
+        auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
+        ammo.kztype = kztype;
+        ammo.kz_damage = 0;
+        ammo.max_age_ticks = 8;
+        ammo.arm_age_ticks = 3;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        rig.tick(20);
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+        int obj_rows = 0;
+        for (const RoundImpact &imp : rig.w.round_sim.impacts)
+            if (imp.effect_tag == 4 && imp.ammo_index == kAmmoGrenade) ++obj_rows;
+        CHECK(obj_rows == (kztype == 0 ? 1 : 2));
+        CHECK(rig.w.explosions.queue.size() == (kztype == 0 ? 0u : 1u));
+    }
+}
+
+// A submerged fuse detonates in the motor itself and tests no class, so the
+// smoke grenade queues a zone entry there too (the drain drops it at radius
+// 0). Within 3 u of the surface it presents tag 26 at the water surface;
+// deeper, tag 27 at the surface and tag 25 at the round.
+// [orig: Entity_UpdateGrenadePhysics — the depth test @0x4449A4, the
+//  descriptor z = Env_WaterHeightFixed @0x4449BE, tag 26 @0x4449CC, tag 27
+//  @0x4449DE, the round z @0x4449EE for tag 25 @0x4449F2, the push @0x444A0F]
+void test_submerged_fuse_presents_at_the_water_surface() {
+    for (const float start_z : {8.0f, 5.0f}) {
+        Rig rig(0);
+        rig.w.env.water_z = to_fixed(10.0);
+        auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
+        ammo.kztype = 0;
+        ammo.kz_damage = 0;
+        ammo.max_age_ticks = 5;
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, start_z}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        rig.tick(4);
+        CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
+        CHECK(rig.w.explosions.queue.size() == 1);
+        if (!rig.w.explosions.queue.empty())
+            CHECK(rig.w.explosions.queue[0].type == 0);
+        const RoundImpact *tag25 = nullptr;
+        const RoundImpact *tag26 = nullptr;
+        const RoundImpact *tag27 = nullptr;
+        for (const RoundImpact &imp : rig.w.round_sim.impacts) {
+            if (imp.effect_tag == 25) tag25 = &imp;
+            if (imp.effect_tag == 26) tag26 = &imp;
+            if (imp.effect_tag == 27) tag27 = &imp;
+        }
+        if (start_z > 7.0f) { // about 2 u deep
+            CHECK(tag26 != nullptr && tag25 == nullptr && tag27 == nullptr);
+            if (tag26 != nullptr) CHECK(std::fabs(tag26->position.z - 10.0f) < 1e-4f);
+        } else { // about 5 u deep
+            CHECK(tag27 != nullptr && tag25 != nullptr && tag26 == nullptr);
+            if (tag27 != nullptr) CHECK(std::fabs(tag27->position.z - 10.0f) < 1e-4f);
+            if (tag25 != nullptr) CHECK(tag25->position.z < 5.1f);
+        }
+    }
+}
+
 // A ballistic (non-motor) explosive round expiring mid-air vanishes silently
 // [orig: the expiry head requires the motor-armed 0x1000 flag].
 void test_ballistic_expiry_is_silent() {
@@ -1401,6 +1475,8 @@ int main() {
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();
     test_grenade_fuse_tick_boundaries();
+    test_smoke_grenade_expiry_presents_no_second_obj_row();
+    test_submerged_fuse_presents_at_the_water_surface();
     test_ballistic_expiry_is_silent();
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();

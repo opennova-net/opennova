@@ -1990,13 +1990,15 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 
 	# The loop bound only has to outlast the mounted fuse (base JO authors 1860
 	# ticks, the revx02 expansion 2480); what this pins is that BOTH sides retire
-	# the round on the same fuse and each present exactly one event.
+	# the round on the same fuse and neither presents a fuse event: the expiry
+	# head presents the obj row only for a nonzero kztype, which grenadesm lacks.
+	# [orig: Projectile_UpdatePhysics @0x4E9DC6, kztype @0x4E9DDC..0x4E9DE1]
 	assert_eq(_throwable_visual_count(host, 1875), 0,
 			"authority releases the smoke grenade on its authored fuse")
 	assert_eq(_throwable_visual_count(joiner, 1875), 0,
 			"joiner releases the replicated smoke grenade on the same fuse")
-	assert_eq(host_fuse_sounds, 1, "authority presents one actual fuse event")
-	assert_eq(joiner_fuse_sounds, 1, "joiner presents one actual fuse event")
+	assert_eq(host_fuse_sounds, 0, "authority presents no fuse event for the class-less smoke")
+	assert_eq(joiner_fuse_sounds, 0, "joiner presents no fuse event for the class-less smoke")
 
 
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
