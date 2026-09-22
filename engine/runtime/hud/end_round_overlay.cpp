@@ -1,4 +1,5 @@
 #include <runtime/hud/end_round_overlay.h>
+#include <runtime/hud/hud_game_text.h>
 #include <base/io/tick_rate.h>
 
 #include <algorithm>
@@ -282,54 +283,6 @@ bool key_present_but_empty(const EndRoundTextLookup &lookup, const std::string &
 	return lookup(key, value) && value.empty();
 }
 
-struct ResolvedArg {
-	std::string text;
-	int32_t number = 0;
-	bool is_number = false;
-};
-
-// The ladder's sprintf forms: %s, %d / %i, %ld, %02d. The arm's argument list
-// always matches its format in retail; an unmatched spec is left in place.
-std::string sprintf_ladder(const std::string &fmt, const std::vector<ResolvedArg> &args) {
-	std::string out;
-	size_t next = 0;
-	for (size_t i = 0; i < fmt.size(); ++i) {
-		if (fmt[i] != '%') {
-			out += fmt[i];
-			continue;
-		}
-		size_t j = i + 1;
-		if (j < fmt.size() && fmt[j] == '%') {
-			out += '%';
-			i = j;
-			continue;
-		}
-		std::string spec = "%";
-		while (j < fmt.size() && fmt[j] >= '0' && fmt[j] <= '9') spec += fmt[j++];
-		while (j < fmt.size() && fmt[j] == 'l') ++j;
-		if (j >= fmt.size() || next >= args.size()) {
-			out += fmt.substr(i);
-			break;
-		}
-		const char conv = fmt[j];
-		const ResolvedArg &a = args[next];
-		if (conv == 's') {
-			out += a.text;
-			++next;
-		} else if (conv == 'd' || conv == 'i') {
-			char buf[32];
-			std::snprintf(buf, sizeof buf, (spec + "d").c_str(),
-					static_cast<int>(a.is_number ? a.number : 0));
-			out += buf;
-			++next;
-		} else {
-			out += fmt.substr(i, j - i + 1);
-		}
-		i = j;
-	}
-	return out;
-}
-
 } // namespace
 
 std::vector<EndRoundResolvedLine> end_round_overlay_resolve(
@@ -351,17 +304,19 @@ std::vector<EndRoundResolvedLine> end_round_overlay_resolve(
 		} else {
 			fmt = resolve_text(lookup, line.key, line.fallback, line.literal);
 		}
-		std::vector<ResolvedArg> args;
+		std::vector<HudTextArg> args;
 		args.reserve(line.args.size());
 		for (const EndRoundArg &a : line.args) {
-			ResolvedArg r;
+			HudTextArg r;
 			r.is_number = a.is_number;
 			r.number = a.number;
 			if (!a.is_number) r.text = resolve_text(lookup, a.key, a.fallback, a.literal);
 			args.push_back(std::move(r));
 		}
 		EndRoundResolvedLine resolved;
-		resolved.text = args.empty() ? fmt : sprintf_ladder(fmt, args);
+		// The row's sprintf over its own argument list: %s, %d / %i, %ld,
+		// %02d (hud_game_text.h hud_sprintf).
+		resolved.text = args.empty() ? fmt : hud_sprintf(fmt, args);
 		resolved.y = line.y - y_shift;
 		out.push_back(std::move(resolved));
 	}

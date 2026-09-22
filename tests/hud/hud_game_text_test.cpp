@@ -96,6 +96,56 @@ int main() {
 	unknown_key.attacker = "Alice";
 	CHECK(feed_row_line(unknown_key, gametext).empty());
 
+	// The HUD sprintf: the template IS the CRT format and the call site's own
+	// argument list feeds it. Integer conversions take the whole CRT spec
+	// (flags, width, precision) with the size prefix reduced to retail's
+	// 32-bit int; `h` narrows first. [orig: sprintf @0x76A9E4 call sites
+	// @0x59E530 / @0x59E8F6 / @0x59E9BD / @0x5A8972 (one int)]
+	CHECK(hud_sprintf("Distance: %ldm", 127) == "Distance: 127m");
+	CHECK(hud_sprintf("%li / %lu / %I32d", -3) == "-3 / %lu / %I32d");
+	CHECK(hud_sprintf("%lu", -1) == "4294967295");
+	CHECK(hud_sprintf("%04d|%-4d|%+d|% d|%.3d", 7) == "0007|%-4d|%+d|% d|%.3d");
+	CHECK(hud_sprintf("%hd %hu", 65535) == "-1 %hu");
+	CHECK(hud_sprintf("%#x %X %o %c", 255) == "0xff %X %o %c");
+	CHECK(hud_sprintf("%c", 'A') == "A");
+	CHECK(hud_sprintf("100%% %d%%", 5) == "100% 5%");
+	// Forms the call never passed stay literal; a mismatched kind uses up its
+	// slot; a printed NUL ends the string.
+	CHECK(hud_sprintf("%n %p %f %S %*d %lld", 1) == "%n %p %f %S %*d %lld");
+	CHECK(hud_sprintf("%s m", 12) == "%s m");
+	CHECK(hud_sprintf("x%cy", 0) == "x");
+	CHECK(hud_sprintf("50%") == "50%");
+	// No argument: %% collapses and every conversion stays literal
+	// [orig: @0x59E4D5 STROVER_DIST1KM, @0x59E938 auto/none, @0x5BE0E9].
+	CHECK(hud_sprintf("> 1km %d%%") == "> 1km %d%");
+	// The mixed end-round lists and a string argument.
+	HudTextArg name;
+	name.text = "Blue";
+	HudTextArg twelve;
+	twelve.number = 12;
+	twelve.is_number = true;
+	CHECK(hud_sprintf("%s : %ld", {name, twelve}) == "Blue : 12");
+	CHECK(hud_sprintf("%-6s|%.2s|%hs|%ls", {name, name, name, name}) == "Blue  |Bl|Blue|%ls");
+	CHECK(hud_sprintf("%d %s", {name, twelve}) == "%d %s");
+
+	// The service line [orig: HUD_DrawGameplayOverlays @0x5BDE60]: the armory
+	// and FARP templates miss to "" (GameText_GetString @0x51EC08), the bay
+	// keeps its compiled-in fallback; the key name, the seconds, or nothing
+	// formats each.
+	const GameTextLookup overlays = table_of({
+			{ "Overlays/STROVER_ARMORY_INFO", "Press '%s' for gear" },
+			{ "Overlays/STROVER_FARP_WAIT", "Rearm in %d" },
+			{ "Overlays/STROVER_FARP_RELOADING", "Rearming 100%%" },
+	});
+	CHECK(service_prompt_text(1, "E", 0, overlays) == "Press 'E' for gear");
+	CHECK(service_prompt_text(2, "E", 0, overlays) == "!Press 'E' to activate vehicle bay menu");
+	CHECK(service_prompt_text(3, "E", 7, overlays) == "Rearm in 7");
+	CHECK(service_prompt_text(4, "E", 7, overlays) == "Rearming 100%");
+	CHECK(service_prompt_text(1, "E", 0, empty).empty());
+	CHECK(service_prompt_text(3, "E", 7, empty).empty());
+	CHECK(service_prompt_text(4, "E", 7, empty).empty());
+	CHECK(service_prompt_text(0, "E", 7, overlays).empty());
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

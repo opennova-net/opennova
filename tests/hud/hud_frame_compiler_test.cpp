@@ -1748,6 +1748,9 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 
 	auto &vp = state.vehicle_panel;
 	vp.shown = true;
+	// A rooted passenger seat (slot 1) always takes the panel arm
+	// [orig: HUD_RenderOverlays @0x5A7CFA..0x5A7CFF].
+	state.mount_slot = 1;
 	vp.anchor_x = 300; vp.anchor_y = 400;
 	vp.stance_offset_x = -12; vp.stance_offset_y = 6;
 	vp.hull_health = 100; vp.hull_max_health = 100;
@@ -1816,8 +1819,50 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 		found = true;
 		CHECK(std::fabs(q.x0 - 288.0f) < 1.0f, "silhouette x rides the stance offset");
 		CHECK(std::fabs(q.y0 - 406.0f) < 1.0f, "silhouette y rides the stance offset");
+		// The bordered quad's texture window: 0.05 / authored extent inside
+		// the top-left, 1 - that + 1 / (on-screen extent) at the far edge
+		// [orig: draw_textured_quad_with_border @0x590D2F..0x590D85].
+		CHECK(q.u0 == static_cast<float>(0.05f / 64.0), "u0 is the border over the authored width");
+		CHECK(q.v0 == static_cast<float>(0.05f / 32.0), "v0 is the border over the authored height");
+		CHECK(q.u1 == static_cast<float>(1.0 - 0.05f / 64.0 + 1.0 / 64.0),
+				"u1 overshoots by one on-screen texel");
+		CHECK(q.v1 == static_cast<float>(1.0 - 0.05f / 32.0 + 1.0 / 32.0),
+				"v1 overshoots by one on-screen texel");
 	}
 	CHECK(found, "the silhouette draws when its texture is present");
+
+	// Seat slot 0 has no panel arm of its own: with WPNGRP hidden nothing
+	// draws the panel, while the passenger arm ignores WPNGRP
+	// [orig: `cmp eax,1; jnz` @0x5A7CF5..0x5A7CF8 -> @0x5A7D5F; the slot-1
+	//  arm @0x5A7CFA..0x5A7CFF].
+	const auto count_panel_quads = [&]() {
+		size_t n = 0;
+		for (const auto &q : compiler.compile(state, 1024.0f, 768.0f).quads)
+			if (q.texture == opennova::hud::kHudTexVehiclePanel) ++n;
+		return n;
+	};
+	state.declutter_visible[opennova::hud::kDeclutterWpnGrp] = false;
+	state.mount_slot = 0;
+	CHECK(count_panel_quads() == 0, "seat slot 0 draws no panel without WPNGRP");
+	state.mount_slot = 1;
+	CHECK(count_panel_quads() == 1, "the passenger arm draws it regardless of WPNGRP");
+	state.declutter_visible[opennova::hud::kDeclutterWpnGrp] = true;
+
+	// An emplacement label redraws once per list position its type-9 count
+	// matches: label_draws copies of the same glyphs, zero drawing none.
+	// [orig: HUD_DrawVehicleHealthBars @0x5A55A0..0x5A5670]
+	vp.seats.clear();
+	HudVehicleSeat gun; gun.x = 40; gun.y = 7; gun.label = "2";
+	vp.seats.push_back(gun);
+	const auto glyphs_with = [&](int draws) {
+		vp.seats[0].label_draws = draws;
+		return compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
+	};
+	const size_t none = glyphs_with(0);
+	const size_t one = glyphs_with(1);
+	CHECK(one > none, "one draw prints the digit");
+	CHECK(glyphs_with(3) - none == 3 * (one - none),
+			"the label draws once per matching list position");
 }
 
 // The Recent Messages (J) window: both rings listed in one titled stdbox,
@@ -2252,14 +2297,30 @@ void test_optical_distance_long_format(const fnt_font_t *font) {
     state.scope.range_q16 = 1000 << 16;
     CHECK(text(state) == "Distance: 1000m", "1000m still formats the exact scope distance");
     ++state.scope.range_q16;
-    CHECK(text(state) == "Distance: 1km+", "the over-1km label stays literal");
+    CHECK(text(state) == "Distance: 1km+", "the over-1km label is its own template");
+    // The over-1km label is sprintf'd with NO argument: %% collapses and a
+    // conversion prints literally [orig: HUD_DrawScopeOverlayDetails @0x59E4D5].
+    state.scope.range_over_1km = "Over 1km: 100%% %d";
+    CHECK(text(state) == "Over 1km: 100% %d", "the no-argument sprintf collapses %%");
     state = {};
     state.combat.impact_distance = true;
     state.combat.impact_distance_m = 89;
     state.combat.impact_format = "Distance: %ldm";
     CHECK(text(state) == "Distance: 89m", "mortar substitutes the same installed %ld format");
-    state.combat.impact_format = "%li %lu %% %n";
-    CHECK(text(state) == "89 89 % %n", "integer long aliases and escaped percent remain safe");
+    state.combat.impact_format = "%li m %%";
+    CHECK(text(state) == "89 m %", "the long alias and the escaped percent format like CRT sprintf");
+    // An unresolved template is GameText_GetString's miss: nothing draws
+    // [orig: @0x51EC08].
+    state.combat.impact_format = opennova::hud::HudCombatState{}.impact_format;
+    CHECK(text(state).empty(), "no invented fallback text");
+    // The magnification readout is CRT sprintf with its one int: the whole
+    // spec applies, flags and width included [orig: @0x59E9BD].
+    state = {};
+    state.scope.active = true;
+    state.scope.scoped = true;
+    state.scope.magnification = 4;
+    state.scope.magnification_format = "%02dx";
+    CHECK(text(state) == "04x", "the readout takes the whole integer specification");
 }
 
 // HUD info already includes the chambered round for a capacity-one launcher.

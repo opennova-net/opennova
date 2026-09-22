@@ -8,9 +8,53 @@
 
 #include <runtime/hud/game_text_lookup.h>
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace opennova::hud {
+
+// One argument of a HUD template's sprintf: a 32-bit integer or a string.
+struct HudTextArg {
+	std::string text;
+	int32_t number = 0;
+	bool is_number = false;
+};
+
+// The CRT sprintf the HUD runs over a localized template: retail hands the
+// authored text to sprintf AS THE FORMAT with the call site's own argument
+// list -- none for the over-1km / auto / none scope labels and the FARP
+// reloading line, one 32-bit int for the scope range / zero / magnification
+// readouts, the mortar distance and the FARP wait, one key-name string for the
+// armory and vehicle-bay prompts, and the end-round rows' mixed lists. A
+// conversion `%[-+ #0]*[0-9]*(.[0-9]*)?(h|l|I32)?[diouxXc]` takes the next
+// integer argument and `%[-+ #0]*[0-9]*(.[0-9]*)?h?s` the next string, printed
+// through the host snprintf with retail's 32-bit int (`h` narrows to 16 bits
+// first); `%%` prints '%'. Everything else stays literal text: a conversion
+// whose argument is missing or of the other kind (its slot is still used up),
+// and every form that would read memory the call never passed (%n, %p, %S,
+// %e/%f/%g, `*` widths, 64-bit sizes). A printed NUL ends the string, as the
+// drawers read a C string.
+// [orig: sprintf @0x76A9E4 -- HUD_DrawScopeOverlayDetails @0x59E4D5
+//  (STROVER_DIST1KM, no argument), @0x59E530 (STROVER_DIST), @0x59E8F6
+//  (hud_scope_zero), @0x59E938 (hud_scope_zero_auto / _none, no argument),
+//  @0x59E9BD (hud_scope_mag); HUD_RenderAllOverlays @0x5A8972 (STROVER_DIST);
+//  HUD_DrawGameplayOverlays @0x5BDF45 / @0x5BDFC9 (key name), @0x5BE09C
+//  (seconds), @0x5BE0E9 (no argument)]
+std::string hud_sprintf(const std::string &format, const std::vector<HudTextArg> &args);
+std::string hud_sprintf(const std::string &format);
+std::string hud_sprintf(const std::string &format, int32_t value);
+
+// The armory / vehicle-bay / FARP service line (prompt 1 armory, 2 vehicle bay,
+// 3 FARP wait, 4 FARP reloading; anything else is ""). The armory and FARP
+// templates come through GameText_GetString, whose miss is "" (@0x51EC08); the
+// bay's through GameText_GetStringWithFallback with its compiled-in fallback.
+// The key name formats the armory and bay lines, the seconds the wait line.
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 -- armory @0x5BDF1B..0x5BDF45,
+//  bay @0x5BDF9A..0x5BDFC9 (fallback @0x5BDFAC), FARP wait @0x5BE07A..0x5BE09C,
+//  reloading @0x5BE0D4..0x5BE0E9]
+std::string service_prompt_text(int prompt, const std::string &use_key, int32_t wait_seconds,
+		const GameTextLookup &gametext);
 
 // The waypoint label's display name. Our SP runtime is the co-op session
 // shape (gametype 0x30020), whose `& 0x20000` branch keys STRWPNAME by the

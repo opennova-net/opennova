@@ -3,6 +3,7 @@
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_medic_cross.h>
 
 #include <algorithm>
@@ -413,8 +414,12 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_friendly_tags(state);
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
-	// cover it, not the other way round.
-    if (hud_stance_group_visible(state) || state.mount_slot == 0)
+	// cover it, not the other way round. The panel rides the seat dispatch's
+	// stance arms (slots 1 / 2 / 5, and 3 under WPNGRP); seat slot 0 has no
+	// panel arm of its own, so a hidden WPNGRP hides it there too
+	// [orig: HUD_RenderOverlays -- no root @0x5A7CAE; the panel calls
+	//  @0x5A7CE4 / @0x5A7CFF / @0x5A7D23; `cmp eax,1; jnz` @0x5A7CF5..0x5A7CF8].
+    if (hud_stance_group_visible(state))
         element_vehicle_panel(state, surface_w, surface_h);
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
@@ -443,21 +448,24 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
     const auto draw = [&](const std::string &text, const HudPosRecord &pos, uint32_t tint) {
         emit_text(text.c_str(), pos.x, pos.y, w, h, half_bright_argb(tint), 0u);
     };
+    // Every readout is the CRT sprintf of its template: the over-1km, auto and
+    // none labels with NO argument (%% collapses, a conversion stays literal),
+    // the rest with their one int (hud_game_text.h hud_sprintf).
     if (scope.rangefinder) { // Flags & 0x400 @0x59e4a9
         const auto text = scope.range_q16 > 1000 * 65536
-            ? scope.range_over_1km
-            : sight_integer_text(scope.range_format, std::max(scope.range_q16 / 65536, 1));
+            ? hud_sprintf(scope.range_over_1km) // @0x59e4d5
+            : hud_sprintf(scope.range_format, std::max(scope.range_q16 / 65536, 1));
         const bool beyond = scope.max_range_q16 != 0 && scope.range_q16 > scope.max_range_q16;
         draw(text, layout_.scope_range, beyond ? 0xFFFF5050u : color);
     }
     if (scope.zeroable) { // Flags & 0x800 @0x59e8a2
         const auto text = scope.zero_word < 0
-            ? (scope.zero_word == -1 ? scope.zero_auto : scope.zero_none)
-            : sight_integer_text(scope.zero_format, scope.zero_step_metres * scope.zero_word);
+            ? hud_sprintf(scope.zero_word == -1 ? scope.zero_auto : scope.zero_none) // @0x59e938
+            : hud_sprintf(scope.zero_format, scope.zero_step_metres * scope.zero_word);
         draw(text, layout_.scope_zero, color);
     }
     if (scope.scoped)
-        draw(sight_integer_text(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
+        draw(hud_sprintf(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
     ++draw_list_.elements_drawn;
 }
 
