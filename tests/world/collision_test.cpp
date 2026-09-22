@@ -14,14 +14,18 @@
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
+#include <runtime/audio/sound_profile.h>
 #include <runtime/terrain_query/height_field.h>
 #include <base/io/bam.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/infantry.h>
 #include <runtime/world/iris_march.h>
+#include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -5703,7 +5707,140 @@ void test_fixed_matrix_euler_round_trip() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The run-over leg of the movement resolver [orig:
+// Entity_MovementCollisionResolver @0x4B37C2..0x4B3A5C]: a vehicle hull that
+// moved into a person this tick pushes it out; past the displacement gates it
+// kills an unprotected enemy (the driver takes the credit) and plays the
+// hull's organic-impact sound at the victim.
+struct RunOverRig {
+	World world;
+	CollisionWorld cw;
+	Field field{0};
+	EntityHandle driver;
+	EntityHandle vehicle;
+	EntityHandle victim;
+	CollisionWorld::ResolveState state;
+	int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+	int32_t vel[3] = {0, 0, 0};
+	int16_t health = 100;
+
+	RunOverRig() {
+		world.registry.configure_pool(0, 8);
+		world.registry.configure_pool(1, 4);
+		cw.terrain = &field.field;
+		Entity d;
+		d.kind = EntityKind::Organic;
+		d.position = {50.0f, 50.0f, 0.0f};
+		d.team = 1;
+		d.alive = true;
+		driver = world.registry.spawn(0, d);
+		Entity v;
+		v.kind = EntityKind::Item;
+		v.item_id = 900;
+		v.has_item_def = true;
+		v.item_type = 1;
+		v.health = 500;
+		v.position = {10.0f, 10.0f, 0.0f};
+		v.yaw = 90; // mission 90 = engine heading 0: the box stays axis-aligned
+		v.team = 1;
+		v.alive = true;
+		v.primary_occupant = driver;
+		vehicle = world.registry.spawn(1, v);
+		Entity s;
+		s.kind = EntityKind::Organic;
+		s.has_item_def = true;
+		s.item_type = 3;
+		s.health = 100;
+		s.position = {12.8f, 10.0f, 0.0f};
+		s.bound_radius = 1.0f;
+		s.yaw = 90; // facing +x, away from the hull
+		s.team = 2;
+		s.alive = true;
+		victim = world.registry.spawn(0, s);
+		cw.assign_entity(vehicle, cw.add_model(box_model(1, 0, 2.0, 2.0, 3.0)));
+		VehicleTraits traits;
+		traits.sound_profile = "SP_Hull";
+		world.vehicles.traits.set(900, traits);
+		const std::string profile = std::string("begin \"SP_Hull\"\n  ") +
+				opennova::audio::sound_profile_slot_keyword(opennova::audio::kSlotImpactOrganic) +
+				" V_HULL_BUMP\nend\n";
+		CHECK(world.tables.sound_profiles.parse(profile.data(), profile.size()) == 1);
+		world.out.fire_sounds.set_listener(Vec3{12.0f, 10.0f, 0.0f});
+		for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+		// Stamp the previous pose outside the +X wall (x = 12) while the hull
+		// has no displacement yet.
+		resolve(0);
+	}
+
+	void resolve(uint32_t tick) {
+		cw.resolve_entity(world, victim, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+				false, true, tick, 43, 0u, health);
+	}
+
+	// The hull advanced one unit toward +x this tick (0x10000 > 0x27B0) while
+	// the victim stepped into its +X wall.
+	void run_over() {
+		Entity &hull = *world.registry.get(vehicle);
+		hull.saved_live_valid = true;
+		hull.saved_live_pos[0] = fx(9.0);
+		hull.saved_live_pos[1] = fx(10.0);
+		hull.saved_live_pos[2] = 0;
+		world.registry.get(victim)->position.x = 11.6f;
+		for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+		pos[0] = fx(11.6);
+		resolve(1);
+	}
+};
+
+// The kill: the death anim's quadrant reads the victim's displacement minus
+// the hull's, which points back at the hull behind the victim (quadrant 2);
+// the driver takes the credit; the bump plays at the victim and its set is
+// then held. [orig: @0x4B395D..0x4B39A7 (quadrant), @0x4B39C1..0x4B39E2
+// (credit), @0x4B39FD..0x4B3A4E (the sound, Server_TrackEntityInTable 0x1F)]
+void test_run_over_kills_an_enemy_and_plays_the_bump() {
+	RunOverRig rig;
+	rig.run_over();
+	CHECK(rig.pos[0] > fx(11.6)); // the hull pushed the victim out
+	CHECK(rig.health == 0);
+	const Entity *v = rig.world.registry.get(rig.victim);
+	const int behind = compute_death_anim_state(kRunOverDeathBone, 2, kRunOverDeathCause);
+	CHECK(behind != compute_death_anim_state(kRunOverDeathBone, 0, kRunOverDeathCause));
+	CHECK(v != nullptr && v->death_anim_state == behind);
+	CHECK(v != nullptr && v->last_attacker == rig.driver);
+	bool credited = false;
+	for (const RoundDeath &death : rig.world.round_sim.deaths)
+		if (death.victim == rig.victim && death.killer == rig.driver) credited = true;
+	CHECK(credited);
+	const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
+	CHECK(sounds.size() == 1 && sounds[0].set_name == "V_HULL_BUMP");
+	CHECK(!rig.world.out.fire_sounds.track_trigger("V_HULL_BUMP", 1));
+}
+
+// A player victim survives while its damage-disabled word is set (spawn
+// protection) or its slot carries the spectator latch; the bump still plays.
+// [orig: `test eax, 100h` @0x4B3918, `cmp dword ptr [esi+124h], 0` @0x4B391F,
+//  Entity_ValidatePtr @0x4B3933 and the slot byte +0x188D7 @0x4B393F]
+void test_run_over_spares_a_protected_player() {
+	for (int mode = 0; mode < 3; ++mode) {
+		RunOverRig rig;
+		Entity &v = *rig.world.registry.get(rig.victim);
+		v.flags |= kEntityFlagPlayer;
+		if (mode == 1) v.damage_state = 620;
+		if (mode == 2) {
+			rig.world.match.upsert_player({rig.victim, 0, "V"});
+			rig.world.match.set_player_spectator(rig.victim, true);
+		}
+		rig.run_over();
+		CHECK(rig.health == (mode == 0 ? 0 : 100));
+		CHECK(rig.world.round_sim.deaths.size() == (mode == 0 ? 1u : 0u));
+		CHECK(rig.world.out.fire_sounds.drain().size() == 1);
+	}
+}
+
 int main() {
+	test_run_over_kills_an_enemy_and_plays_the_bump();
+	test_run_over_spares_a_protected_player();
 	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
 	test_door_contact_and_player_collision_split();

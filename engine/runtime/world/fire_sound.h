@@ -116,6 +116,11 @@ public:
     void play_immediate(const char *set_name, const Vec3 &pos,
                         int32_t source_bms_id, uint16_t source_handle = 0xFFFF);
 
+    // The shared 32-entry trigger suppression table: true when the set was
+    // not held and a free row took it for `suppression_ticks`.
+    // [orig: Server_TrackEntityInTable @ 0x527B30]
+    bool track_trigger(const char *set_name, int32_t suppression_ticks);
+
     // Shared 32-entry trigger suppression table plus the ordinary 128-slot
     // pending pool. Reservation survives a full pending pool, as in retail.
     // [orig: Server_TrackEntityInTable @ 0x527B30; EffectSlot_AllocateAndInit @ 0x527C30]

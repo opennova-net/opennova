@@ -84,18 +84,24 @@ void FireSoundQueue::play_with_distance_delay(const char *set_name,
 }
 
 
-void FireSoundQueue::play_throttled_interface(const char *set_name, const Vec3 &pos,
-        int32_t delay_ticks, int32_t suppression_ticks) {
-    // [orig: Server_TrackEntityInTable @ 0x527B30]
-    if (!set_name || !*set_name) return;
+bool FireSoundQueue::track_trigger(const char *set_name, int32_t suppression_ticks) {
+    // [orig: Server_TrackEntityInTable @ 0x527B30 — a null id @0x527B35, a
+    // held id @0x527B49, the first free row @0x527B4D..0x527B56, full @0x527B60]
+    if (!set_name || !*set_name) return false;
     TriggerHold *free = nullptr;
     for (auto &hold : trigger_holds_) {
-        if (hold.name == set_name) return;
+        if (hold.name == set_name) return false;
         if (hold.name.empty() && !free) free = &hold;
     }
-    if (!free) return;
+    if (!free) return false;
     free->name = set_name;
     free->countdown = suppression_ticks;
+    return true;
+}
+
+void FireSoundQueue::play_throttled_interface(const char *set_name, const Vec3 &pos,
+        int32_t delay_ticks, int32_t suppression_ticks) {
+    if (!track_trigger(set_name, suppression_ticks)) return;
     // [orig: EffectSlot_AllocateAndInit @ 0x527C30]
     for (auto &slot : slots_) {
         if (slot.active) continue;
