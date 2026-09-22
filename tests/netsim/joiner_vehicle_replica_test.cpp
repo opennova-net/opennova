@@ -1,7 +1,8 @@
 // A joiner's replica vehicle rows through the production JoinerRole frame:
 // the §5.13 reader's record tail (the host's Flags bits, the health word, the
-// destroyed-bit kill edge), the mover freeze, and the +0x170 claimant a
-// retail client attaches from its remote riders' records.
+// destroyed-bit kill edge), the mover freeze, the +0x170 claimant a retail
+// client attaches from its remote riders' records, and the 0x0D carrier an
+// addeweap child follows.
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
@@ -272,6 +273,49 @@ bool run_remote_driver_is_the_claimant() {
 	return ok;
 }
 
+// An addeweap child whose authored slot the joiner could not resolve adopts the
+// rigid pose its decoded row recomposes from the carrier it follows: the 0x0D
+// TARGET (groundEntity), never the occupant back-reference in the parent field.
+// [orig: serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22;
+//  the ewep move fn Entity_UpdateTransformAndTurret reads groundEntity @0x440CBF]
+bool run_unresolved_attachment_follows_its_target_carrier() {
+	Harness h;
+	bool ok = true;
+	w::World &world = h.kernel->world;
+	static constexpr uint16_t kGunType = 1871;
+	h.role.runtime->view().set_item_class_resolver(
+			[](uint16_t type) -> std::optional<EntityClass> {
+				if (type == kTankType) return EntityClass::Vehicle;
+				if (type == kGunType) return EntityClass::NoNetworkCallback;
+				if (type == w::kPlayerInfantryTypeId) return EntityClass::Player;
+				return std::nullopt;
+			});
+	w::Entity gun_seed;
+	gun_seed.kind = w::EntityKind::Item;
+	gun_seed.item_id = kGunType;
+	gun_seed.spawn_origin = (1u << 24) | 4u;
+	gun_seed.position = h.hull().position;
+	gun_seed.emplacement_parent = h.tank;
+	gun_seed.emplacement_parent_spawn_id = h.hull().registry_spawn_id;
+	const w::EntityHandle gun = world.registry.spawn(1, gun_seed);
+	ok &= expect(gun.valid(), "the attached gun spawned");
+	replication::ClientEntityState &row = h.role.runtime->state().upsert(gun.packed);
+	row.type_id = kGunType;
+	row.cls = EntityClass::NoNetworkCallback;
+	row.x = w::to_fixed(gun_seed.position.x);
+	row.y = w::to_fixed(gun_seed.position.y);
+	row.z = w::to_fixed(gun_seed.position.z);
+	row.heading_bam = w::bam_heading_from_mission_yaw_deg(30);
+	row.target_handle = h.tank.packed;
+	row.parent_handle = 0x0003; // its gunner, a pool-0 back-reference
+	h.role.run_tick(h.input);
+	h.role.run_tick(h.input);
+	const w::Entity *live = world.registry.get(gun);
+	ok &= expect(live != nullptr && live->yaw == 30,
+	             "the unresolved attachment adopts the pose recomposed on its target carrier");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -280,6 +324,7 @@ int main() {
 	ok &= run_destroyed_bit_kills_the_client_row();
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
+	ok &= run_unresolved_attachment_follows_its_target_carrier();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

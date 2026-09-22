@@ -387,9 +387,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 				row->cls == EntityClass::Infantry || row->cls == EntityClass::Vehicle ||
 				row->cls == EntityClass::Guided;
 		if (!compact_class) {
-			const world::Entity *carrier = row->target_handle != 0xFFFFu
-					? resolve(row->target_handle)
-					: resolve(row->parent_handle);
+			const world::Entity *carrier = resolve(persistent_carrier_handle(*row));
 			if (carrier != nullptr) {
 				child->emplacement_parent = carrier->handle;
 				child->emplacement_parent_spawn_id = carrier->registry_spawn_id;

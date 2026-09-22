@@ -488,16 +488,14 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.euler_x = carrier_pitch_bam(e);
 		rec.euler_y = carrier_roll_bam(e);
 		rec.team_byte = e.team;
-		// items.def addeweap children use retail's existing entity+368
-		// relationship in the 0x0D spawn record. Positions remain absolute world
-		// coordinates; the client derives the rigid child-to-parent transform only
-		// after the complete batch has populated both rows.
-		if (e.emplacement_parent.valid()) {
-			const world::Entity *parent = w.registry.get(e.emplacement_parent);
-			if (parent != nullptr && parent->registry_spawn_id ==
-					e.emplacement_parent_spawn_id)
-				rec.parent_handle = e.emplacement_parent.packed;
-		}
+		// The PARENT field is the occupantEntity (+0x170) back-reference: a
+		// vehicle's driver, a gun's gunner. An addeweap child's carrier is never
+		// written here; it rides the TARGET below (its groundEntity), which the
+		// client follows. [orig: serialize_entity_pool_to_packet_0
+		// `mov eax, [ebp+170h]` @0x503BC9, flag 0x100 @0x503BD3, the pool walk
+		// @0x503BDB..0x503C07]
+		if (e.primary_occupant.valid() && w.registry.get(e.primary_occupant) != nullptr)
+			rec.parent_handle = e.primary_occupant.packed;
 		// The separate flag-0x0200 TARGET field carries the structural carrier
 		// (groundEntity/+40) the mounted child rides — retail serializes it
 		// from the stored pointer, independent of parent. The joiner's

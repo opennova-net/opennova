@@ -337,10 +337,14 @@ bool test_attached_rows_retain_subdegree_frame() {
     decoded.handle = gun->handle.packed;
     decoded.type_id = 1871;
     decoded.cls = opennova::EntityClass::NoNetworkCallback;
-    decoded.parent_handle = parent->handle.packed;
+    // The 0x0D form: the carrier rides the TARGET (groundEntity), the parent is
+    // the gunner back-reference (+0x170) [orig: serialize_entity_pool_to_packet_0
+    // +0x170 @0x503BC9, +0x28 @0x503C22].
+    decoded.target_handle = parent->handle.packed;
+    decoded.parent_handle = 0x0003;
     runtime.state().upsert(decoded.handle) = decoded;
     // The listen host enriches its client-backed rows from the authoritative
-    // pool. Joiners use decoded parents/model assets, never this authority row.
+    // pool. Joiners use decoded carriers/model assets, never this authority row.
     im::build_client_replica_present_rows({kernel, &runtime, false}, lifecycle, rows, doors);
     ok = check_gun() && ok;
     return ok;

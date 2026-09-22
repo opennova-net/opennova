@@ -9,6 +9,7 @@
 #include <runtime/hud/feed_format.h>
 #include <net/npwire/entity_class.h> // EntityClass
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
+#include <net/npwire/wire_handle.h>
 #include <runtime/world/parachute.h>
 
 namespace opennova::replication {
@@ -541,6 +542,22 @@ struct ClientEntityState {
 	int32_t net_seat_local_heading_bam = 0;
 	bool net_seat_valid = false;
 };
+
+// The carrier a compact-less (no-callback) child's pose follows: its 0x0D
+// TARGET (groundEntity, +0x28) when streamed, else a parent outside pool 0.
+// A pool-0 parent is the occupantEntity (+0x170) back-reference of a gunner
+// or driver, never a transform parent (D-NET-195). One rule for the ClientState
+// recompose, the world materializer, the joiner mirror and the present rows.
+// [orig: NapiNPClientMsg_0x00D occupantEntity store @0x433289, groundEntity
+//  store @0x4332D7; the ewep move fn Entity_UpdateTransformAndTurret reads
+//  groundEntity @0x440CBF]
+inline uint16_t persistent_carrier_handle(const ClientEntityState &row) {
+	if (row.target_handle != wire_handle::kInvalid) return row.target_handle;
+	if (row.parent_handle == wire_handle::kInvalid ||
+			wire_handle::pool(row.parent_handle) == wire_handle::kPoolOrganic)
+		return wire_handle::kInvalid;
+	return row.parent_handle;
+}
 
 // Latest environment sample carried by the S2C 0x0A header. The revision is an
 // ordered-message edge for optional history consumers; the live simulation may

@@ -914,11 +914,13 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 }
 
 // An items.def addeweap child is a real pool-1 entity, but its ewep callback is
-// intentionally NoNetworkCallback: retail carries the exact parent relation in
-// the load-time 0x0D record and the client keeps the child attached locally.
-// Prove that production 0x0D -> ClientState relationship drives later parent
-// motion, and that the parent's replicated death retires the child rather than
+// intentionally NoNetworkCallback: retail carries the child's carrier in the
+// load-time 0x0D record's TARGET (its groundEntity) and the client keeps the
+// child attached locally; the PARENT field is only the occupant back-reference.
+// Prove that production 0x0D -> ClientState relationship drives later carrier
+// motion, and that the carrier's replicated death retires the child rather than
 // leaving its spawn pose in the presented replica state forever.
+// [orig: serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 bool run_parented_pool_spawn_follows_and_retires() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
@@ -944,6 +946,7 @@ bool run_parented_pool_spawn_follows_and_retires() {
 	child_seed.emplacement_parent = parent_h;
 	child_seed.emplacement_parent_spawn_id =
 			world.registry.get(parent_h)->registry_spawn_id;
+	child_seed.ground_target = parent_h; // mission promotion's groundEntity link
 	child_seed.emplacement_local = {2.0f, 0.0f, 0.0f};
 	// This fixture constructs the authority-side authored row directly rather
 	// than through mission promotion, so its exact attachment slot is known.
@@ -961,8 +964,10 @@ bool run_parented_pool_spawn_follows_and_retires() {
 	const ns::ClientEntityState *decoded_child = view.state().find(child_h.packed);
 	const ns::ClientEntityState *decoded_parent = view.state().find(parent_h.packed);
 	if (!expect(decoded_child != nullptr && decoded_parent != nullptr &&
-	                    decoded_child->parent_handle == parent_h.packed,
-	            "0x0D retains the synthetic child's exact parent handle")) return false;
+	                    decoded_child->target_handle == parent_h.packed &&
+	                    decoded_child->parent_handle == 0xFFFFu,
+	            "0x0D carries the child's carrier in the target and no occupant parent"))
+		return false;
 	const int32_t initial_child_x = decoded_child->x;
 	const int32_t initial_parent_delta_x = decoded_child->x - decoded_parent->x;
 
