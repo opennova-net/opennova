@@ -14,6 +14,8 @@
 #include <vector>
 
 #include <formats/def/def.h>
+#include <runtime/controls/binding_set.h>
+#include <runtime/controls/player_actions.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
@@ -699,6 +701,42 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     w.active = false;
     CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kCycle);
     CHECK(lw.w.out.script_sounds.size() == 2);
+}
+
+// Exercise the complete default mouse binding -> action -> optical route.
+// [orig: catalog P/N @0x816A1C/@0x816A88; Input_HandleActionBinding_0 @0x4E0420]
+void test_default_wheel_binding_zooms_in_away_from_the_player() {
+    using namespace opennova::controls;
+    LocalWorld lw;
+    LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED | DEF_WEAPON_FLAG_FORCESCOPED);
+    weapon.scope_max_mag = 10;
+    weapon.slot.scope_zoom = 4;
+    PlayerViewState view;
+    ScopeZoomLimits limits;
+    limits.scope_min_mag = 2;
+    BindingSet bindings;
+    std::size_t count = 0;
+    const auto *rows = catalog(&count);
+    const auto step = [&](uint16_t wheel, int expected) {
+        const int index = bindings.mouse_event_action(wheel, [](int) { return false; });
+        CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
+        if (index < 0 || static_cast<std::size_t>(index) >= count) return;
+        const auto request = player_wheel_action(rows[index].token);
+        CHECK(request && request->action == PlayerAction::WeaponCycle);
+        if (!request) return;
+        CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);
+        CHECK(weapon.slot.scope_zoom == expected);
+    };
+    step(kMouseWheelUp, 6);
+    step(kMouseWheelUp, 8);
+    step(kMouseWheelUp, 10);
+    step(kMouseWheelUp, 10);
+    step(kMouseWheelDown, 8);
+    step(kMouseWheelDown, 6);
+    step(kMouseWheelDown, 4);
+    step(kMouseWheelDown, 2);
+    step(kMouseWheelDown, 2);
+    CHECK(lw.w.out.script_sounds.size() == 7);
 }
 
 void test_frame_reads_the_state_and_the_card_selector() {
@@ -1992,6 +2030,7 @@ int main() {
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
+    test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();
     test_view_uses_current_motor_offset_and_live_position();

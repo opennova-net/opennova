@@ -301,9 +301,47 @@ void crashed_upright_depth_precedes_springs() {
         CHECK(z == 65536);
     }
 }
+// A climbing track can be supported by its inboard belly station while its
+// outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
+// catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
+// @ 0x478DA4, @ 0x47931B..0x47934C]
+void tank_belly_support_keeps_corners_grounded() {
+    for (bool authority : {false, true}) {
+        Rig r;
+        r.world.rules.logic_authority = authority;
+        r.world.ai.is_authority = authority;
+        auto t = r.traits(VehicleFamily::Tank, true);
+        t.spring = 8;
+        t.spring_comp = 100;
+        auto &m = r.entity().veh;
+        m.air_pitch_bam = bam_from_degrees_wrapped(10);
+        m.plat_acc[0] = m.plat_acc[1] = 1000;
+        int32_t z = to_fixed(0.8f);
+        r.contact(t, z);
+        CHECK(m.plat_acc[0] == 0 && m.plat_acc[1] == 0);
+        CHECK((r.entity().flags & kEntityFlagInAir) == 0);
+    }
+}
+
+// A falling corner keeps its accumulated drop in the airborne chassis fit.
+// Otherwise the tank holds its attitude until a wheel touches, then snaps.
+// [orig: @ 0x478834..0x47884D; fit @ 0x478AA7..0x478AC3]
+void tank_airborne_fit_applies_corner_drop() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Tank, true);
+    auto &m = r.entity().veh;
+    m.plat_acc[0] = m.plat_acc[1] = 1000;
+    int32_t z = 10 * 65536;
+    r.contact(t, z);
+    CHECK((r.entity().flags & kEntityFlagInAir) != 0);
+    CHECK(m.air_pitch_bam < 0);
+    CHECK(std::abs(m.air_roll_bam) < 1000);
+}
 } // namespace
 
 int main() {
+    tank_belly_support_keeps_corners_grounded();
+    tank_airborne_fit_applies_corner_drop();
     wheelie_request_and_acceleration();
     wheelie_launch_velocity_and_input();
     wheelie_vertical_cap_and_catchup();

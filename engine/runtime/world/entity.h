@@ -1061,6 +1061,8 @@ struct Entity {
 		bool damage_smoke_active = false; // emitter +0x1CC
 		bool damage_fire_active = false; // emitter +0x400
 
+		bool pivot_sound_latched = false; // brain+0x318 bit 5: stationary tank turn
+		int32_t pivot_sound_prev_rate = 0; // brain+0x328: prior yaw rate, not slide_z
 		bool skid_sound_latched = false; // brain+0x318 bit 3
 		uint32_t rev_sound_ticks = 0; // brain+0x31C
 		bool skid_effects_requested = false; // per-tick bone-effect producer
@@ -1069,7 +1071,7 @@ struct Entity {
 		bool engine_sound_latched = false; // brain+0x318 bit 0: claimant start/stop
 		bool light_sound_latched = false; // brain+0x318 bit 2: lights-on audio edge
 		bool reverse_sound_latched = false; // movement-sound direction bit
-											// [orig: vehicleData+0x318 bit 2]
+											// [orig: vehicleData+0x318 bit 1]
 		uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
         bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
                                       // vehicles spawn RESTING (contact resolved at init),

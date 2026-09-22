@@ -153,6 +153,7 @@ public:
 	WEAPON_DEF_SCALAR(int, flags, flags)
 	WEAPON_DEF_SCALAR(int, flags2, flags2)
 	WEAPON_DEF_SCALAR(float, scope_max_mag, scope_max_mag)
+	WEAPON_DEF_SCALAR(int, scope_min_mag, scope_min_mag)
 	WEAPON_DEF_SCALAR(float, renderfov, renderfov)
 	WEAPON_DEF_SCALAR(int, special_hold, special_hold)
 	WEAPON_DEF_SCALAR(int, attack_anim, attack_anim)

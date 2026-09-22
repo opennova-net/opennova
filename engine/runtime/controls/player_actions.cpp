@@ -55,8 +55,12 @@ const ActionRow kRows[] = {
 	{weapon_category_token(6), {Action::WeaponCategory, 7}, Gate::Captured},
 	{weapon_category_token(7), {Action::WeaponCategory, 8}, Gate::Captured},
 	{weapon_category_token(8), {Action::WeaponCategory, 9}, Gate::Captured},
-	{"cycleweaponP", {Action::WeaponCycle, -1}, Gate::Captured, Wheel},
-	{"cycleweaponN", {Action::WeaponCycle, 1}, Gate::Captured, Wheel},
+	// P is retail action 212; N is 214. Their signed arguments also drive
+	// optical magnification, so reversing them reverses tank wheel zoom.
+	// [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls @ 0x4E1341 / @ 0x4E13A4]
+	// docs/world/tank-parity-re.md (D-CTRL-5).
+	{"cycleweaponP", {Action::WeaponCycle, 1}, Gate::Captured, Wheel},
+	{"cycleweaponN", {Action::WeaponCycle, -1}, Gate::Captured, Wheel},
 	// Three-key SELECT: the sim owns mutual exclusion and ForceCrouch refusal.
 	// [orig: input cases 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e ->
 	//  NapiNPServerMsg_HandleStanceChange @0x501c60]

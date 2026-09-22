@@ -1802,6 +1802,71 @@ void test_tank_pivot_retains_direction_and_previous_track_rate() {
 	CHECK(m.track_phase[0] == expected[0] && m.track_phase[1] == expected[1]);
 }
 
+// Tank pivot uses the yaw rate (entity+0xA4), not vertical velocity (+0xA0).
+// The loop consumes the prior latch; the edge updates it afterward.
+// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, @ 0x48AAE0 and @ 0x48ACB5]
+void test_tank_pivot_sound_latch_and_loop() {
+	for (bool authority : { false, true }) {
+		Rig r;
+		r.w.ai.is_authority = authority;
+		r.mount();
+		auto t = buggy_traits();
+		t.family = VehicleFamily::Tank;
+		t.sound_profile = "SP_TankPivot";
+		static constexpr char profile[] =
+				"begin \"SP_TankPivot\"\n"
+				" Soundloop_1 TANK_IDLE 1 1\n"
+				" Soundloop_4 TANK_PIVOT 1 1\n"
+				" swivel_shift TANK_SHIFT\nend\n";
+		CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+		auto &m = r.veh().veh;
+		m.yaw_bam = 0;
+		m.slide_z = -123; // deliberately distinct from the yaw-rate volume
+		m.wheel_rate_bam = 40000;
+		const auto fold = [&](bool collided = false) {
+			r.w.out.sound_emitters.clear();
+			r.w.out.slot_sounds.clear();
+			r.w.vehicles.update_ground_sound(r.veh(), t, false, collided);
+			r.w.vehicles.update_traction_sound(r.veh(), t);
+			int volume = -1;
+			for (size_t i = 0; i < r.w.out.sound_emitters.size(); ++i) {
+				const auto &event = r.w.out.sound_emitters[i];
+				if (event.lane != 40) continue;
+				CHECK(event.slot == 3 && event.set_name == "TANK_PIVOT");
+				CHECK(event.pitch_q16 == 65536 && event.lifetime_ticks == 30);
+				volume = event.volume_q8_8;
+			}
+			return volume;
+		};
+		m.steer_target_bam = 0x071C71C0; // strict > ten degrees
+		CHECK(fold() == -1);
+		CHECK(r.w.out.slot_sounds.empty());
+		++m.steer_target_bam;
+		CHECK(fold() == -1); // first tick only arms and plays swivel_shift
+		CHECK(r.w.out.slot_sounds.size() == 1);
+		if (!r.w.out.slot_sounds.empty()) CHECK(r.w.out.slot_sounds[0].slot == 46);
+		m.steer_target_bam = 0; // the latch persists inside the start threshold
+		CHECK(fold() == 40000);
+		CHECK(r.w.out.slot_sounds.empty());
+		m.wheel_rate_bam = -50000;
+		CHECK(fold() == 50000); // old latch is consumed before direction reversal clears it
+		CHECK(fold() == -1);
+		m.steer_target_bam = -0x071C71C1;
+		CHECK(fold() == -1);
+		CHECK(r.w.out.slot_sounds.size() == 1);
+		m.wheel_rate_bam = -100000;
+		CHECK(fold(true) == 65535); // collision idle still reaches the clamped pivot loop
+		m.settle_2f0 = 1;
+		CHECK(fold() == -1); // parked tanks skip the fold and retain the latch
+		m.settle_2f0 = 0;
+		m.speed = t.player_speed;
+		CHECK(fold() == -1); // no idle registration at maximum speed; also clears latch
+		m.speed = 0;
+		m.wheel_rate_bam = 0;
+		CHECK(fold() == -1);
+	}
+}
+
 void test_skid_effects_and_sound_edges() {
 	Rig r;
 	r.mount();
@@ -2022,6 +2087,7 @@ int main() {
     test_local_controls_reach_first_carrier_tick();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
+	test_tank_pivot_sound_latch_and_loop();
 	test_skid_effects_and_sound_edges();
 	test_handbrake_skid_and_grip_recovery();
 	test_tank_pivot_retains_direction_and_previous_track_rate();

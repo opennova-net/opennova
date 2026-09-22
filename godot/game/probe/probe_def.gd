@@ -494,6 +494,20 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"zero_delta": { "type": "integer", "default": 0 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 900_000),
+		ProbeDef.make("tank_parity",
+				"Record the presented camera, tank/gun poses, suspension, weapon and HUD "
+				+ "state without recomposing the camera. Optional assisted boarding, seat "
+				+ "selection and device zoom/drive/fire exercises; artifacts are observations, "
+				+ "not an automatic retail-parity verdict.",
+				RUNTIME + "tank_parity_probe.gd", {
+					"vehicle_net_id": { "type": "integer", "minimum": 0, "default": 33 },
+					"vehicle_handle": { "type": "integer", "minimum": -1, "default": -1 },
+					"mount_handle": { "type": "integer", "minimum": -1, "default": -1 },
+					"seat": { "type": "integer", "minimum": -1, "maximum": 9, "default": -1 },
+					"scenario": { "type": "string", "enum": ["observe", "zoom", "drive", "fire"], "default": "observe" },
+					"sample_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": 10000 },
+					"capture": { "type": "boolean", "default": true },
+				}, [], false, true, 300_000),
 		ProbeDef.make("runtime_root_window",
 				"The embedded game view (GameRuntimeRoot, the debug windowed startup) on the "
 				+ "live process: the game runs inside one always-updating SubViewport, the "

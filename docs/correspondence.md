@@ -1615,3 +1615,13 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | Reverb selection @ 0x4B5F9E..0x4B633F; preset copy @ 0x7BDD12 | world/reverb.h, audio/mission_audio.cpp | MATCHING selector/preset boundary: 40 original mixer cases, no observed coefficient-dependent output. IDB comment appended at the copy. Full mixer equivalence unclaimed. |
 
 Pinned executable and regeneration commands: [validation report](jo-c-validation-2026-09-18.md).
+
+
+## Tank audit (2026-09-22)
+
+| Original | Address | Behavior | Evidence | Verdict |
+| --- | --- | --- | --- | --- |
+| `Input_HandleActionBinding_0` | `0x4E0420` | Action 212 cycles +1 or zooms +2; 214 cycles -1 or zooms -2; default wheel/bracket catalog rows | [Tank record](world/tank-parity-re.md), D-CTRL-5; `player_actions`, `local_player_view`, installed GUT | MATCHING (behavioral proof) |
+| `Entity_ProcessWheeledVehiclePhysics` | `0x475DE0` | Merged wheel/belly support, diagonal sink reset and adjusted airborne corner fit | Tank record, D-VEH-4; `vehicle_followups`, `vehicle_suspension` | MATCHING for these branches |
+| `Camera_ComputeThirdPersonView` | `0x437D10` | Posed mounted frame; stateful first-person shake sampling | Tank record, D-VEH-5 / D-HUD-29; native `player_view`, `local_player_view`; Godot presenter and HUD suites | Native pose witnessed; Godot precision/snapshot fixes behaviorally proved; complete sample cadence not certified |
+| `Entity_UpdateTankVehiclePhysics` / `Entity_ProcessMovementSoundEffects` | `0x488AB0` / `0x5294A0` | Stationary pivot latch/cue and lane-40 `Soundloop_4` volume from yaw rate (`entity+0xA4`) | Tank record; D-SND-17 audio record; `vehicle_motor` | MATCHING for pivot branches; shared sound-ready gate open |
