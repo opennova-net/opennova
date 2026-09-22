@@ -423,6 +423,43 @@ bool test_joiner_door_phases_reach_present_rows() {
 	return ok;
 }
 
+// The joiner projection publishes a replica vehicle's controls from its local
+// twin, whose client mover advances the same tracks, wheels and springs: the
+// tank render callback reads those live fields on every peer.
+// [orig: HUD_CacheEntityDebugStats @0x449C10, track words @0x449C3C..0x449C69;
+//  the client mover's track phase Entity_UpdateTankVehiclePhysics @0x489F98 /
+//  @0x489FA0]
+bool test_joiner_vehicle_motion_controls_reach_present_rows() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 2);
+	im::ClientRuntime runtime("TankRows");
+	w::Entity *e = spawn_pool_row(kernel, 1, 0, 1296);
+	if (!expect(e != nullptr, "joiner tank row spawns")) return false;
+	w::VehicleTraits traits;
+	traits.family = w::VehicleFamily::Tank;
+	traits.render_family = w::VehicleRenderFamily::Tank;
+	kernel.world.vehicles.traits.set(1296, traits);
+	e->veh.track_phase[0] = 0x12340000;
+	e->veh.track_phase[1] = 0x56780000;
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = e->handle.packed;
+	decoded.type_id = 1296;
+	decoded.cls = opennova::EntityClass::Vehicle;
+	runtime.state().upsert(decoded.handle) = decoded;
+	const im::PresentRowsContext context{ kernel, &runtime, true };
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == w::PF_STRIDE, "one joiner tank row")) return false;
+	const float *row = row_at(rows, 0);
+	return expect(row[w::PF_VEHICLE_MOTION_VALID] == 1.0f &&
+					(static_cast<int>(row[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TRACKS) != 0 &&
+					row[w::PF_VEHICLE_TRACK_LEFT] == float(0x1234) &&
+					row[w::PF_VEHICLE_TRACK_RIGHT] == float(0x5678),
+			"a joiner's tank row publishes its twin's track phases");
+}
+
 bool test_joiner_palm_source_and_local_fragment() {
     opennova::mission::MissionKernel kernel;
     kernel.world.registry.configure_pool(2, 4);
@@ -534,6 +571,7 @@ int main() {
 	ok = test_full_spawn_parachute_state_reaches_player_and_infantry_rows() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
+	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;
