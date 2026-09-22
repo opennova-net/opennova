@@ -314,3 +314,38 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 				assert_gt(emitter.forward.dot(expected_forward), 0.9999,
 						"the flash direction follows the gun part")
 		assert_gt(live_particles, 0, "the same muzzle-flash group still has visible particles")
+
+
+func test_03tr_npc_minigunner_remains_attached_during_takeoff() -> void:
+	var world := await _load_world()
+	if world == null:
+		return
+	var sim := world.get_sim()
+	assert_eq(sim.debug_crew_local_player(44), OK)
+	assert_true(sim.local_player_select_seat(1), "crew the minigun that starts the flight objective")
+	_frame(world, _camera, 500)
+	var gunner := sim.entity_card_by_net_id(1750)
+	assert_true(gunner.is_mounted(), "the NPC boards the other authored minigun")
+	assert_eq(gunner.get_mount_type(), 3)
+	if not gunner.is_mounted():
+		return
+	var start := sim.entity_card_by_net_id(44).get_mission_position()
+	var lost_seat := false
+	var max_distance := 0.0
+	# Eighty seconds covers takeoff, the first bank and sustained flight.
+	for tick in 5000:
+		_frame(world, _camera)
+		gunner = sim.entity_card_by_net_id(1750)
+		var heli := sim.entity_card_by_net_id(44)
+		lost_seat = lost_seat or not gunner.is_mounted()
+		max_distance = maxf(max_distance,
+				gunner.get_mission_position().distance_to(heli.get_mission_position()))
+		var cabin := world.get_runtime().get_entity_index().resolve_single(44)
+		var rider := world.get_runtime().get_entity_index().resolve_single(1750)
+		max_distance = maxf(max_distance, rider.global_position.distance_to(cabin.global_position))
+		if tick % 64 == 0:
+			await get_tree().process_frame
+	assert_gt(sim.entity_card_by_net_id(44).get_mission_position().distance_to(start), 100.0,
+			"the objective helicopter takes off and follows its route")
+	assert_false(lost_seat, "the NPC retains the minigun seat throughout flight")
+	assert_lt(max_distance, 6.0, "both the simulated and rendered NPC travel with the helicopter")

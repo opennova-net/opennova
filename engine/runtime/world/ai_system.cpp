@@ -771,6 +771,12 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
+    // Both organic movers refresh groundEntity from parentEntity before the
+    // mounted branch. PLYRONSSN follows this link through a turret to its hull
+    // (07TR's boarding gate); retaining the pre-boarding contact stalls it.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0;
+    //  Entity_UpdateInfantryAI @0x4B9910; PLYRONSSN @0x4F1260]
+    occ->ground_target = veh->handle;
     const Seat &seat = veh->seats[occ->mount_seat];
     // Local input owns LOOK before retail evaluates the parent UseGun bone. Our
     // split AiEntity keeps that input in the infantry latch until the mounted

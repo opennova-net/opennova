@@ -4,6 +4,8 @@
 // (the Godot Transform3D round trip contributed no semantics — its basis
 // conversions are reproduced here explicitly).
 #include <runtime/world/mounted_pose.h>
+#include <runtime/world/world.h>
+#include <runtime/world/vehicle_motor.h>
 
 #include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/renderer/direction_look_at.h>
@@ -396,6 +398,36 @@ void compose_mounted_pose_controls(
                 static_cast<int32_t>(sources.emplaced_gun_pitch);
         r_ctrl[THREEDI_CTRL_WEAP_SPIN] = sources.emplaced_spin_phase;
     }
+}
+
+void compose_vehicle_pose_controls(World &world, const Entity &carrier,
+        int32_t (&r_ctrl)[THREEDI_CTRL_REGISTER_COUNT]) {
+    const auto *traits = world.vehicles.traits.get(carrier.item_id);
+    if (traits == nullptr) return;
+    // The same callback projection used by the render snapshot. Without it,
+    // a tank's hull-mounted coax fires from the unturned turret rest pose.
+    // [orig: Entity_ComputeUserpointTransform pre-callback @0x545A89..0x545A94;
+    //  tank CTRL publication @0x449C10, turret words @0x449ECF..0x449EE2]
+    const auto values = vehicle_ctrl_registers(carrier.veh, traits->render_family,
+            world.ai.for_handle(carrier.handle));
+    const auto write = [&](int index, int mask, int32_t value) {
+        if ((values.mask & mask) != 0) r_ctrl[index] = value;
+    };
+    write(THREEDI_CTRL_VEHICLE_STEERING, VC_STEERING, values.steering);
+    write(THREEDI_CTRL_VEHICLE_SPEED, VC_SPEED, values.speed);
+    write(THREEDI_CTRL_HELO_ROTOR, VC_ROTORS, values.rotor);
+    write(THREEDI_CTRL_HELO_TAILROTOR, VC_ROTORS, values.tail_rotor);
+    write(THREEDI_CTRL_VEHICLE_WHEELS, VC_WHEELS, values.wheels);
+    write(THREEDI_CTRL_HELO_GEAR, VC_HELO_GEAR, values.gear);
+    for (int i = 0; i < 14; ++i)
+        write(THREEDI_CTRL_VEHICLE_TIRE00 + i,
+                i < 6 ? VC_TIRES | VC_TANK_TIRES : VC_TANK_TIRES, values.tires[i]);
+    for (int i = 0; i < 4; ++i)
+        write(THREEDI_CTRL_VEHICLE_WHEELS00 + i, VC_TRACKS, values.tracks[i & 1]);
+    write(THREEDI_CTRL_VEHICLE_GUNYAW, VC_VEHICLE_GUN, values.gun_yaw);
+    write(THREEDI_CTRL_VEHICLE_GUNPITCH, VC_VEHICLE_GUN, values.gun_pitch);
+    write(THREEDI_CTRL_HELO_GUNYAW, VC_HELO_GUN, values.gun_yaw);
+    write(THREEDI_CTRL_HELO_GUNPITCH, VC_HELO_GUN, values.gun_pitch);
 }
 
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms) {
