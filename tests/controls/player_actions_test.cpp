@@ -65,7 +65,7 @@ bool test_order_and_held_rows() {
 	for (int seat = 0; seat < 10; ++seat) expected.push_back({Action::SelectSeat, seat});
 	for (int category = 1; category <= 9; ++category)
 		expected.push_back({Action::WeaponCategory, category});
-	for (const auto request : {PlayerActionRequest{Action::WeaponCycle, -1}, {Action::WeaponCycle, 1},
+	for (const auto request : {PlayerActionRequest{Action::WeaponCycle, 1}, {Action::WeaponCycle, -1},
 			{Action::Stance, 0}, {Action::Stance, 1}, {Action::Stance, 2}, {Action::ScopeZero, -1},
 			{Action::ScopeZero, 1}, {Action::RadarZoom, 1}, {Action::RadarZoom, -1}, {Action::MapCycle}})
 		expected.push_back(request);
@@ -222,7 +222,7 @@ bool test_use_swallows_only_digit_event_rows() {
 			CHECK(requests_are(frame, {{Action::ToggleScope}}));
 		} else {
 			CHECK(requests_are(frame, {{Action::ToggleScope}, {Action::SelectSeat, 4},
-					{Action::WeaponCategory, 3}, {Action::WeaponCycle, 1}, {Action::Stance, 2},
+					{Action::WeaponCategory, 3}, {Action::WeaponCycle, -1}, {Action::Stance, 2},
 					{Action::ScopeZero, 1}, {Action::RadarZoom, 1}, {Action::MapCycle}}));
 		}
 	}
@@ -263,8 +263,8 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 
 bool test_wheel_subset_and_repeated_events() {
 	struct WheelCase { const char *token; Action action; int value; };
-	for (const auto &row : {WheelCase{"cycleweaponP", Action::WeaponCycle, -1},
-			{"cycleweaponN", Action::WeaponCycle, 1}, {"ScopeZeroDec", Action::ScopeZero, -1},
+	for (const auto &row : {WheelCase{"cycleweaponP", Action::WeaponCycle, 1},
+			{"cycleweaponN", Action::WeaponCycle, -1}, {"ScopeZeroDec", Action::ScopeZero, -1},
 			{"ScopeZeroInc", Action::ScopeZero, 1}, {"Prone", Action::Stance, 2},
 			{"Crouch", Action::Stance, 1}, {"Stand", Action::Stance, 0}}) {
 		for (int event = 0; event < 2; ++event) {

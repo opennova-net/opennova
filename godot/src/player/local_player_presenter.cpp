@@ -738,8 +738,12 @@ void LocalPlayerPresenter::stamp_camera_pose() {
 		const Vector3 forward = Simulation::presentation_forward(view_->get_camera_yaw_deg(),
 				view_->get_camera_pitch_deg());
 		const Vector3 eye = view_->get_camera_eye();
-		cam->set_global_position(eye);
-		cam->look_at(eye + forward, Vector3(0.0f, 1.0f, 0.0f));
+		// Construct orientation independently of translation. eye + forward
+		// rounds away low direction bits far from the origin (07TR's tank),
+		// making a fixed aim jitter as the carrier translates.
+		// docs/world/tank-parity-re.md (D-VEH-5).
+		cam->set_global_transform(Transform3D(
+				Basis::looking_at(forward, Vector3(0.0f, 1.0f, 0.0f)), eye));
 		// The FP roll (torsoRoll + lean/4, composed in the sim; 0 in third
 		// person). Sign pinned presenter-side: lean right (positive lean) tilts
 		// the view right. [orig: @0x437fe6]
@@ -1083,6 +1087,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("held_weapon"), &LocalPlayerPresenter::held_weapon);
 	ClassDB::bind_method(D_METHOD("camera"), &LocalPlayerPresenter::camera);
 	ClassDB::bind_method(D_METHOD("view_projection"), &LocalPlayerPresenter::view_projection);
+	ClassDB::bind_method(D_METHOD("presented_view"), &LocalPlayerPresenter::presented_view);
 	ClassDB::bind_method(D_METHOD("projection_camera"), &LocalPlayerPresenter::projection_camera);
 	ClassDB::bind_method(D_METHOD("projection_viewport"), &LocalPlayerPresenter::projection_viewport);
 	ClassDB::bind_method(D_METHOD("projection_scale_y"), &LocalPlayerPresenter::projection_scale_y);

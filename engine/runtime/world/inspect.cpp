@@ -186,7 +186,16 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.vp = ve->pitch;
 		d.vr = ve->roll;
 		d.mspd = ve->veh.speed;
-		for (int wi = 0; wi < 4; ++wi) d.wc[wi] = ve->veh.wheel_comp[wi];
+		d.pose_bam[0] = ve->veh.yaw_bam;
+		d.pose_bam[1] = ve->veh.air_pitch_bam;
+		d.pose_bam[2] = ve->veh.air_roll_bam;
+		for (int wi = 0; wi < 6; ++wi) d.wc[wi] = ve->veh.wheel_comp[wi];
+		for (int wi = 0; wi < 4; ++wi) {
+			d.sink[wi] = ve->veh.plat_acc[wi];
+			d.spring_amplitude[wi] = ve->veh.wheel_osc[wi].amplitude;
+			d.spring_energy[wi] = ve->veh.wheel_osc[wi].energy;
+			d.spring_impulse[wi] = ve->veh.wheel_osc[wi].impulse;
+		}
 		// per-pad contact depths (diagnostic, §6.15 flap hunt)
 		for (int wi = 0; wi < 4; ++wi) d.pd[wi] = ve->veh.dbg_pad_depth[wi];
 		d.macc = ve->veh.speed_accel;

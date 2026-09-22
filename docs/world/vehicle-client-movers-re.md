@@ -29,7 +29,7 @@ correction — proposed in PR #640, pending maintainer ratification at merge.
 | Model contacts, springs, traction, chassis and carrier motion | Ported; #645 crash-height, bike axle and wheelie corrections included | Sections 12 through 15, 19 through 20, 22 through 23, 27, 38; collision, vehicle_suspension, vehicle_followups, vehicle_mount |
 | Occupancy, AI, death and respawn state | Ported (the `entity+684` think countdown ported 2026-09-12, the former D-NET-161 (f); open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the emplacement brain dispatch: D-NET-161 (b), (e), (g); the gunner-attachment runtime of section 26.2 awaits its three data hooks) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount, vehicle_attachments |
 | Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
-| Ground/boat/aircraft sound and contact edges | Ported (open: the tank fold's extra-effect argument and the sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
+| Ground/boat/aircraft sound and contact edges | Ported (tank pivot cue/latch/fourth loop completed 2026-09-22; open: sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
 | Wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings | Ported | Sections 28 through 29, 32; destruction, vehicle_part_anim, vehicle_trail_present_pass, shader_resource_contract |
 | Full water-ring bank expiry | PERMANENT bounded-pool correction (proposed in PR #640, requires maintainer ratification at merge) | D-VEH-2; saturated 128-slot retirement regression; ADR 0022 register entry |
 
@@ -5374,3 +5374,15 @@ read are independently witnessed at @ 0x48E063 / @ 0x48E122; its existing tests
 remain the family integration coverage. The new executable vectors prove the
 bounded ground/bike command stage, not full contact or multiplayer playthrough
 parity. [orig: Entity_UpdateWatercraftPhysics @ 0x48D480]
+
+
+## 40. Tank contact, camera and pivot-sound follow-up (2026-09-22)
+
+The [tank record](tank-parity-re.md) owns D-VEH-4/5, D-CTRL-5 and D-HUD-29:
+merged wheel/belly support and airborne corner-fit corrections, camera basis
+precision, wheel signs and HUD snapshot consumption. It also narrows D-SND-17:
+the fourth loop uses yaw rate (`entity+0xA4`), not `slide_z` (`+0xA0`) as the
+older review stated. Its pivot-start cue, latch transitions and lane-40 loop
+are ported with authority/client regression coverage; the shared sound-ready
+gate remains open. Installed stock and JOTAC assisted 07TR course runs pass;
+complete live-retail/normal-input acceptance remains unverified there.

@@ -1229,3 +1229,22 @@ func test_local_avatar_body_channel_follows_the_sim_tuple() -> void:
 	presenter.teardown()
 	assert_true(_local_avatar(world) == null or _local_avatar(world).is_queued_for_deletion(),
 			"teardown releases the presenter-owned avatar")
+
+
+func test_camera_direction_keeps_precision_far_from_origin() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	# The training tank is hundreds of units from the origin. Adding a unit
+	# aim vector to that float position before look_at quantizes its direction.
+	for distance in [800.0, 8192.0]:
+		for offset in [0.0, 0.03125, 0.0625]:
+			assert_eq(world.get_sim().debug_teleport_local_player(
+					Vector3(distance + offset, -distance, 10.0), 123.456, 7.891), OK)
+			presenter.after_world_tick()
+			var view := presenter.presented_view()
+			var expected := _forward_for(view.camera_yaw_deg, view.camera_pitch_deg)
+			assert_lt((-camera.global_basis.z - expected).length(), 0.000001,
+					"camera orientation is independent of world-coordinate magnitude")
+	presenter.teardown()

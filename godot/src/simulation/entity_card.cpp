@@ -97,8 +97,21 @@ Dictionary ai_json(const AiDetail &d) {
 		out["vr"] = d.vr;
 		out["mspd"] = d.mspd;
 		Array wc;
-		for (int i = 0; i < 4; ++i) wc.append(d.wc[i]);
+		for (int i = 0; i < 6; ++i) wc.append(d.wc[i]);
 		out["wc"] = wc;
+		Array pose, sink, amplitude, energy, impulse;
+		for (int i = 0; i < 3; ++i) pose.append(d.pose_bam[i]);
+		for (int i = 0; i < 4; ++i) {
+			sink.append(d.sink[i]);
+			amplitude.append(d.spring_amplitude[i]);
+			energy.append(d.spring_energy[i]);
+			impulse.append(d.spring_impulse[i]);
+		}
+		out["pose_bam"] = pose;
+		out["sink"] = sink;
+		out["spring_amplitude"] = amplitude;
+		out["spring_energy"] = energy;
+		out["spring_impulse"] = impulse;
 		Array pd;
 		for (int i = 0; i < 4; ++i) pd.append(d.pd[i]);
 		out["pd"] = pd;

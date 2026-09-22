@@ -457,7 +457,12 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var flash_revive := 0
 	var flash_revive_channel := 255
 	var hud_overlays_suppressed := false
-	var lv: PlayerLocalView = _world.local_player_view()
+	# Camera composition advances shake/drift state. The live HUD consumes the
+	# frame already stamped by the player presenter; standalone HUDs compose
+	# their own frame only when no camera presenter owns it.
+	# docs/world/tank-parity-re.md (D-HUD-29).
+	var lv: PlayerLocalView = _player_presenter.presented_view() \
+			if _player_presenter != null else _world.local_player_view()
 	if lv != null:
 		scope_card = lv.scope_card_active
 		_sight_slide_multiplier = lv.sight_slide_multiplier

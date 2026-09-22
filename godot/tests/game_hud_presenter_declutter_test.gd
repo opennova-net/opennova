@@ -481,3 +481,37 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 	presenter.teardown()
 	assert_null(effects.get_second_scene_camera(),
 			"HUD teardown leaves the renderer no camera of a freed overlay")
+
+
+func test_hud_uses_the_presented_camera_frame() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	world.set_process(false)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.make_current()
+	var player: LocalPlayerPresenter = add_child_autofree(LocalPlayerPresenter.new())
+	player.setup(world, camera, null, ControlsModel.new())
+	var hud_presenter: GameHudPresenter = add_child_autofree(GameHudPresenter.new())
+	hud_presenter.setup(world, player, null)
+	hud_presenter.ensure_game_hud()
+	var sim := world.get_sim()
+	sim.step()
+	player.after_world_tick()
+	var published := player.presented_view()
+	assert_false(published.nvg_visible)
+	assert_true(sim.request_local_player_nvg_toggle())
+	sim.step()
+	# A consumer must not compose a second camera frame: composition also
+	# advances the native shake IIR and binocular drift. Observe this through
+	# the NVG overlay, which must agree with the camera's published context.
+	var nvg := hud_presenter.get_game_hud().get_node("PlayerViewEffects/NvgPost") as ColorRect
+	for i in 3:
+		hud_presenter.tick()
+		assert_false(nvg.visible, "HUD stays on the displayed camera frame")
+		assert_eq(player.presented_view(), published)
+	player.after_world_tick()
+	hud_presenter.tick()
+	assert_true(player.presented_view().nvg_visible)
+	assert_true(nvg.visible, "the next presented frame updates both camera and overlay")
+	player.teardown()

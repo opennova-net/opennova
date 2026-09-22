@@ -550,7 +550,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 // Tank/wheeled contact uses thirteen probes: four pads, six belly stations and three spine probes.
 // Its spring pair, stability flags, head-on wall stop and slide_z absorption differ from the
 // tracked family. Authority damage, client prediction and wreck state share the original gates.
-// See vehicle-client-movers-re.md sections 8 and 12-32.
+// See vehicle-client-movers-re.md sections 8 and 12-32, and
+// docs/world/tank-parity-re.md (D-VEH-4).
 // Witness sites: [orig: @0x475DE0, @0x488AB0, @0x48a9ef, @0x48f004, @0x477157, @0x47733f,
 // @0x477e6a, @0x45CEB0, @0x45D240]
 void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
@@ -725,14 +726,19 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
     //  0x478BD6] and the +250 sink growth over the four wheel pads
     // [orig: @0x478510..0x47852B]. The tank's own spring pair (the linear
     // compress / slow oscillator) is the header's named residual.
-    const bool wheel_contact[4] = {d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0};
+    // The four track supports combine each wheel and its belly station.
+    // A clear wheel above a supported belly must not accumulate free fall.
+    // [orig: @ 0x4784CC..0x47853A; catch-up @ 0x478DA4]
+    const bool wheel_contact[4] = {slot_max[0] != 0, slot_max[1] != 0,
+            slot_max[2] != 0, slot_max[3] != 0};
 	vehicle_landing_damage(world, veh, traits, d, 7, up_z16);
 	world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tank);
 	vehicle_suspension_grow_sinks(veh, wheel_contact, 4, kSinkGrowthTank,
                                   /*latch_gated=*/true, /*pre_gate_skip=*/false);
 
-	const bool crash_contacts[7] = { d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0, d[4] != 0,
-		d[5] != 0, d[6] != 0 };
+	const bool crash_contacts[7] = { wheel_contact[0], wheel_contact[1],
+        wheel_contact[2], wheel_contact[3], slot_max[4] != 0,
+        slot_max[5] != 0, slot_max[6] != 0 };
 	vehicle_crush_damage(world, veh, traits, d + 10, up_z16);
 	vehicle_crash_state(world, veh, traits, crash_contacts, up_z16);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
@@ -750,7 +756,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		// [orig: @0x47931B..0x47943E] tank recovery does not require
 		// a negative up axis: the crashed arm accepts up.z < 8192.
 		for (int k = 0; k < 4; ++k)
-			if (d[k] > 0)
+			if (slot_max[k] > 0)
 				m.plat_acc[k] = 0;
 		if (((veh.flags | veh.engine_flags) & 0x10u) == 0 &&
 				((m.crashed && up_z16 < 8192) || m.settle_2f0)) {
@@ -810,7 +816,9 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 			basis.q22.rotate_point(local[k], rotated);
 			corners[k][0] = io::bam_add(px, rotated[0]);
 			corners[k][1] = io::bam_add(py, rotated[1]);
-			corners[k][2] = io::bam_add(pz, rotated[2]);
+			// Airborne catch-up changes the fitted attitude before contact.
+            // [orig: @ 0x478834..0x47884D, @ 0x478AA7]
+            corners[k][2] = io::bam_add(io::bam_add(pz, rotated[2]), corner_adj[k]);
 		}
 		PlatFit fit;
 		vehicle_suspension_fit(world, veh, corners, crash_contacts, fit, px, py, pz, true);
@@ -848,6 +856,13 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	}
     PlatFit fit;
 	const bool fitted = vehicle_suspension_fit(world, veh, c, crash_contacts, fit, px, py, pz, true);
+    // A diagonally supported track pair clears every retained sink. The
+    // parked latch lowers the threshold from 250 to zero.
+    // [orig: @ 0x478FF2..0x479040]
+    const int32_t support_threshold = m.settle_2f0 ? 0 : 250;
+    if ((slot_max[0] > support_threshold && slot_max[2] > support_threshold) ||
+            (slot_max[1] > support_threshold && slot_max[3] > support_threshold))
+        std::fill_n(m.plat_acc, 4, 0);
 	// Conform writes pitch and roll, and adopts yaw in the crashed/latched arms.
 	// Witness sites: [orig: @0x478AB1, @0x478AD8]
 	m.air_pitch_bam = fit.pitch_bam;

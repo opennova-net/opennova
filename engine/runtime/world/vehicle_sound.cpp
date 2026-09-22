@@ -27,6 +27,7 @@ namespace {
 constexpr uint8_t kIdleLane = 0;
 constexpr uint8_t kForwardLane = 10;
 constexpr uint8_t kReverseLane = 20;
+constexpr uint8_t kPivotLane = 40;
 constexpr uint16_t kEmitterLifetimeTicks = 30;
 constexpr int32_t kUnityQ16 = io::kFp16OneInt;
 constexpr uint16_t kFullVolumeQ8_8 = 0xFFFF;
@@ -202,6 +203,10 @@ void VehicleSystem::play_contact_sound(Entity &vehicle, const VehicleTraits &tra
 
 void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {
     World &world = world_;
+	// A parked tank skips the movement fold; its existing emitter expires.
+	// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, jump @ 0x48AABE]
+	if (traits.family == VehicleFamily::Tank && vehicle.veh.settle_2f0 != 0)
+		return;
     const audio::SoundProfile *profile = profile_for(world, traits);
 
     // The PlayerControl ground caller skips the movement-sound function entirely
@@ -251,6 +256,24 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
 			max_speed = vehicle.veh.cmd_speed;
 	}
 	const int64_t denominator = magnitude_i32(max_speed);
+	const auto emit_idle_and_pivot = [&](uint16_t volume) {
+		emit_emitter(world, vehicle, kIdleLane, audio::kSlotSoundLoop1,
+				set_for_slot(profile, traits, audio::kSlotSoundLoop1), kUnityQ16, volume);
+		// Retail reaches the fourth loop only after an idle registration. The
+		// tank caller passes abs(entity+0xA4), its YAW RATE; +0xA0 is slide_z.
+		// Preserve the signed abs wrap and low-word volume at INT_MIN.
+		// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, @ 0x48AAE0;
+		// Entity_ProcessMovementSoundEffects @ 0x5294A0, @ 0x529887..0x5298C6]
+		// docs/audio/lwf-dbf-sound-re.md (D-SND-17).
+		if (traits.family == VehicleFamily::Tank && vehicle.veh.pivot_sound_latched) {
+			const int32_t rate = vehicle.veh.wheel_rate_bam;
+			const int32_t amount = rate < 0 ? io::bam_sub(0, rate) : rate;
+			if (amount != 0)
+				emit_emitter(world, vehicle, kPivotLane, audio::kSlotSoundLoop1 + 3,
+						set_for_slot(profile, traits, audio::kSlotSoundLoop1 + 3), kUnityQ16,
+						static_cast<uint16_t>(std::min<int32_t>(amount, 0xFFFF)));
+		}
+	};
 	if (stopped || denominator <= 0) {
 		emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
                      {}, 0, 0);
@@ -265,9 +288,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
                      {}, 0, 0);
         emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
                      {}, 0, 0);
-        emit_emitter(world, vehicle, kIdleLane, audio::kSlotSoundLoop1,
-                     set_for_slot(profile, traits, audio::kSlotSoundLoop1),
-                     kUnityQ16, kFullVolumeQ8_8);
+		emit_idle_and_pivot(kFullVolumeQ8_8);
 	} else {
 		int64_t speed = magnitude_i32(vehicle.veh.speed);
 		if (speed == 0 && vehicle.saved_live_valid) {
@@ -312,9 +333,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
             int64_t volume = kUnityQ16 - (speed << 16) / denominator;
             volume = std::clamp<int64_t>(volume, 0, kFullVolumeQ8_8);
             if (volume > 0) {
-                emit_emitter(world, vehicle, kIdleLane, audio::kSlotSoundLoop1,
-                             set_for_slot(profile, traits, audio::kSlotSoundLoop1),
-                             kUnityQ16, static_cast<uint16_t>(volume));
+				emit_idle_and_pivot(static_cast<uint16_t>(volume));
             }
         }
 	}
@@ -369,6 +388,29 @@ void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &
 		if (skid && !m.skid_sound_latched)
 			play_contact_sound(vehicle, traits, 25);
 		m.skid_sound_latched = skid;
+	}
+	if (traits.family == VehicleFamily::Tank) {
+		// The stationary-turn edge follows the loop, so its first refresh is
+		// next tick. Start above ten degrees of heading error; retain through
+		// the threshold until translation, zero rate, or a rate sign change.
+		// Parked tanks preserve the latch but still save the current rate.
+		// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, @ 0x48ACB5..0x48AD53]
+		if (m.settle_2f0 == 0) {
+			if (world_.registry.get(vehicle.primary_occupant) != nullptr &&
+					!m.pivot_sound_latched && m.speed == 0 && m.wheel_rate_bam != 0) {
+				const int32_t error = io::bam_sub(m.steer_target_bam, m.yaw_bam);
+				const int32_t magnitude = error < 0 ? io::bam_sub(0, error) : error;
+				if (magnitude > 0x071C71C0) {
+					m.pivot_sound_latched = true;
+					emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits,
+							audio::kSlotSwivelShift);
+				}
+			} else if (m.pivot_sound_latched && (m.speed != 0 || m.wheel_rate_bam == 0 ||
+					((uint32_t(m.pivot_sound_prev_rate) ^ uint32_t(m.wheel_rate_bam)) & 0x80000000u))) {
+				m.pivot_sound_latched = false;
+			}
+		}
+		m.pivot_sound_prev_rate = m.wheel_rate_bam;
 	}
 	++m.rev_sound_ticks;
 }

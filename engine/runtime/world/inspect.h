@@ -150,8 +150,7 @@ struct AiDetail {
 	int32_t out_speed = 0;
 
 	// --- brain combat/movement registers (the F3 AI window's deep pane; raw
-	//     brain dwords named in ai.h AiBrain::Idx, BAMs left as BAM32 like
-	//     vp/vr) ---
+	//     brain dwords named in ai.h AiBrain::Idx, angles left as BAM32) ---
 	bool target_valid = false;       // brain kTargetSlot != 0 (packed+1 rebase)
 	int32_t target_handle = -1;      // rebased packed wire handle (-1 = null)
 	std::string target_name;         // registry name of the target, when live
@@ -192,10 +191,15 @@ struct AiDetail {
 	bool primary_occupant = false;
 	int32_t veh_family = -1;
 	bool player_control = false;
-	int32_t vp = 0; // entity pitch (BAM32)
-	int32_t vr = 0; // entity roll (BAM32)
+	int32_t vp = 0; // legacy rounded entity pitch (degrees)
+	int32_t vr = 0; // legacy rounded entity roll (degrees)
 	int32_t mspd = 0;
-	int32_t wc[4] = {};
+	int32_t wc[6] = {}; // four corners plus the tank's two middle channels
+	int32_t pose_bam[3] = {}; // motor yaw/pitch/roll, full precision
+	int32_t sink[4] = {};
+	int32_t spring_amplitude[4] = {};
+	int32_t spring_energy[4] = {};
+	int32_t spring_impulse[4] = {};
 	int32_t pd[4] = {};
 	int32_t macc = 0;
 	bool mgnd = false;
