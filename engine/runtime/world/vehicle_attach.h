@@ -44,6 +44,9 @@ public:
             const Entity &carrier, const Seat &seat, EntityHandle requester) const = 0;
     virtual void collect_hostile_mounts(
             const Entity &requester, std::vector<EntityHandle> &out) const = 0;
+    // The carrier's +0x170 claimant when it is a decoded remote organic: projected
+    // into `out` for this one query and never stored.
+    virtual bool remote_claimant(const Entity &carrier, Entity &out) const = 0;
 };
 
 VehicleSeatOccupancy vehicle_seat_occupancy(

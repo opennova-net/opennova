@@ -68,6 +68,8 @@ public:
 	JoinerRole() = default;
 	// The embedder's form: constructed with the loadout profile seams it keeps.
 	explicit JoinerRole(KitSeams seams);
+	// Unbinds the vehicle occupancy source bind() installed on the kernel's world.
+	~JoinerRole() override;
 
 	// (Re)build the runtime for a join; the request is retained so a load that
 	// rebuilds an as-yet unstarted joiner (bring_up) rebuilds it the same way.
@@ -114,6 +116,7 @@ public:
 			const world::Seat &seat, world::EntityHandle requester) const override;
 	void collect_hostile_mounts(const world::Entity &requester,
 			std::vector<world::EntityHandle> &out) const override;
+	bool remote_claimant(const world::Entity &carrier, world::Entity &out) const override;
 
 	bool spectator() const override { return runtime && runtime->is_spectator(); }
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }

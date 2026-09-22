@@ -75,8 +75,8 @@ uint32_t producer_tick(const World &world) {
 }
 
 bool has_live_primary_claimant(const World &world, const Entity &vehicle) {
-    if (!vehicle.primary_occupant.valid()) return false;
-    const Entity *claimant = world.registry.get(vehicle.primary_occupant);
+    Entity scratch; // a joiner's remote claimant projects here
+    const Entity *claimant = world.vehicles.claimant(vehicle, scratch);
     return claimant != nullptr && claimant->mounted &&
            claimant->mount_target == vehicle.handle;
 }
@@ -248,7 +248,8 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
         return;
     }
 
-	const Entity *claimant = world.registry.get(vehicle.primary_occupant);
+	Entity claimant_scratch;
+	const Entity *claimant = world.vehicles.claimant(vehicle, claimant_scratch);
 	const bool submerged_driver = claimant != nullptr && claimant->player_class != 0 &&
 			watercraft_driver_submerged(world, *claimant);
 	// Retail zeroes all four sound arguments when a player claimant's eye is
@@ -364,7 +365,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     // the claimant latch @0x48d3a5.
     // [orig: @0x48d1d1..0x48d222; the selector-zero twins @0x46f828..0x46f888
     //  and @0x4715da..0x471667]
-    if (!vehicle.primary_occupant.valid()) return;
+    if (!world.vehicles.claimant_present(vehicle)) return;
     if (!vehicle.veh.reverse_sound_latched && vehicle.veh.cmd_speed < 0 &&
         vehicle.veh.speed < 0) {
         vehicle.veh.reverse_sound_latched = true;
@@ -394,8 +395,10 @@ void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &
 	// The high-rev, skid and tank pivot sections share the fold's last-tick
 	// gate, the tank's +0x328 prior-rate store included; the rev timer does
 	// not. [orig: ctan `jz loc_48AD5B` @0x48AAA5; cveh @0x48D15D; cbik @0x486710]
+	Entity claimant_scratch;
+	const bool claimant = world_.vehicles.claimant(vehicle, claimant_scratch) != nullptr;
 	if (world_.rules.last_tick_of_batch) {
-		if (m.settle_2f0 == 0 && world_.registry.get(vehicle.primary_occupant) != nullptr &&
+		if (m.settle_2f0 == 0 && claimant &&
 				m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
 			m.rev_sound_ticks = 0;
 			emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
@@ -419,7 +422,7 @@ void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &
 			// rate. [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0,
 			// @ 0x48ACB5..0x48AD53]
 			if (m.settle_2f0 == 0) {
-				if (world_.registry.get(vehicle.primary_occupant) != nullptr &&
+				if (claimant &&
 						!m.pivot_sound_latched && m.speed == 0 && m.wheel_rate_bam != 0) {
 					const int32_t error = io::bam_sub(m.steer_target_bam, m.yaw_bam);
 					const int32_t magnitude = error < 0 ? io::bam_sub(0, error) : error;
@@ -493,7 +496,8 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 	if (!traits.player_control)
 		return;
 	const auto *profile = profile_for(world_, traits);
-	const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
+	Entity occupant_scratch;
+	const Entity *occupant = world_.vehicles.claimant(vehicle, occupant_scratch);
 	if (occupant != nullptr) {
 		if (!vehicle.veh.engine_sound_latched) {
 			vehicle.veh.engine_sound_latched = true;
@@ -611,7 +615,8 @@ void VehicleSystem::play_rotor_start_sound(Entity &vehicle, const VehicleTraits 
 			static_cast<int64_t>(to_fixed(vehicle.position.z)) + vehicle.eye_offset_z <=
 					world_.env.water_z)
 		return;
-	const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
+	Entity occupant_scratch;
+	const Entity *occupant = world_.vehicles.claimant(vehicle, occupant_scratch);
 	if (occupant == nullptr)
 		return;
 	// Retail anchors this one-shot on the pilot, whose sound pointer is passed

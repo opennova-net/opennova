@@ -52,6 +52,11 @@ namespace opennova::inmatch {
 
 JoinerRole::JoinerRole(KitSeams seams) : kit_seams(std::move(seams)) {}
 
+JoinerRole::~JoinerRole() {
+	if (kernel_ != nullptr && kernel_->world.vehicles.occupancy_source == this)
+		kernel_->world.vehicles.occupancy_source = nullptr;
+}
+
 ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRole join_role,
 		const std::string &spectator_password, const std::string &server_password,
 		const std::string &join_password) {
@@ -67,8 +72,13 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 }
 
 void JoinerRole::bind(mission::MissionKernel &kernel) {
+	// The previous kernel may already be gone (a load swaps it before the
+	// rebind); only the new one is touched.
 	Role::bind(kernel);
 	if (runtime) runtime->set_profile(&kernel.profile);
+	// The +368 readers (the vehicle sound and part-spin gates) resolve remote
+	// claimants through this role's decoded state.
+	kernel.world.vehicles.occupancy_source = this;
 }
 
 // The boot hook's bring-up. A retail-style menu join has already
@@ -234,6 +244,74 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 				: tier == 1 ? (upper + lower) >> 1 : lower >> 1;
 	}
 	return result;
+}
+
+// The +368 claimant a retail client attaches from the decoded records: the remote
+// rider on the carrier's control seat. The mover's per-tick validation keeps only a
+// ctrlx/drvrx occupant on the control bone, so that seat relation alone reproduces
+// the claim; the retained 0x0D slot seeds it until the rider's first compact, as in
+// seat_occupancy. The row projects into a transient body for the +368 readers; the
+// decoded row carries no eye sample (the roster tags' record residue).
+// [orig: NetPacket_SerializePlayerState @0x4C1317 /
+//  NetPacket_SerializeInfantryEntityState @0x4C0678 -> Entity_TryAttachOrDetach ->
+//  Entity_ProcessVehicleAttach @0x435AA0 -> Entity_AttachToVehicleSlot stores
+//  @0x4947D2 / @0x4948D8; validation Entity_UpdateTankVehiclePhysics
+//  @0x489484..0x4894BE]
+bool JoinerRole::remote_claimant(const world::Entity &carrier, world::Entity &out) const {
+	if (!runtime) return false;
+	const world::Seat *control = nullptr;
+	for (const world::Seat &seat : carrier.seats) {
+		if (world::is_vehicle_control_seat(seat.type)) {
+			control = &seat;
+			break;
+		}
+	}
+	if (control == nullptr) return false;
+	const auto &state = runtime->state();
+	const auto is_self = [&](uint16_t handle) {
+		return runtime->has_self_handle() && handle == runtime->self_handle();
+	};
+	const auto dead = [](const replication::ClientEntityState &row) {
+		return row.state_flags_known && (row.state_flags & world::kEntityFlagDead) != 0;
+	};
+	const replication::ClientEntityState *rider = nullptr;
+	for (const auto &row : state.entities) {
+		if (row.cls != EntityClass::Player && row.cls != EntityClass::Infantry) continue;
+		if (is_self(row.handle) || dead(row)) continue;
+		if (row.carrier_handle == carrier.handle.packed &&
+				row.mount_bone == control->bone_index) {
+			rider = &row;
+			break;
+		}
+	}
+	if (rider == nullptr && control->occupant.valid() && !is_self(control->occupant.packed)) {
+		const replication::ClientEntityState *seeded =
+				client_entity_for_handle(state, control->occupant.packed);
+		if (seeded != nullptr &&
+				(seeded->cls == EntityClass::Player || seeded->cls == EntityClass::Infantry) &&
+				!dead(*seeded) &&
+				(!seeded->net_has_compact ||
+						(seeded->carrier_handle == carrier.handle.packed &&
+								seeded->mount_bone == control->bone_index)))
+			rider = seeded;
+	}
+	if (rider == nullptr) return false;
+	out = world::Entity{};
+	out.handle = world::EntityHandle{rider->handle};
+	out.item_id = rider->type_id;
+	out.position = {static_cast<float>(rider->x) / 65536.0f,
+			static_cast<float>(rider->y) / 65536.0f, static_cast<float>(rider->z) / 65536.0f};
+	out.team = rider->team_known ? rider->team : 0;
+	out.flags = rider->state_flags;
+	if (rider->cls == EntityClass::Player) {
+		out.engine_flags |= world::kEntityFlagPlayer;
+		out.player_class = rider->spawn_player_class;
+	}
+	out.mounted = true;
+	out.mount_target = carrier.handle;
+	out.mount_type = control->type;
+	out.mount_bone = control->bone_index;
+	return true;
 }
 
 void JoinerRole::collect_hostile_mounts(const world::Entity &requester,

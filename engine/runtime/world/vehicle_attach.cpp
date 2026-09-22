@@ -245,6 +245,27 @@ VehicleSeatOccupancy vehicle_seat_occupancy(
     return result;
 }
 
+// Every retail client attaches remote players and AI to their seats from the
+// decoded records, so +368 names a remote driver there too; a joiner answers the
+// same readers through its occupancy source.
+// [orig: NetPacket_SerializePlayerState @0x4C1317 /
+//  NetPacket_SerializeInfantryEntityState @0x4C0678 -> Entity_TryAttachOrDetach ->
+//  Entity_ProcessVehicleAttach @0x435AA0 -> Entity_AttachToVehicleSlot +368
+//  stores @0x4947D2 / @0x4948D8]
+const Entity *VehicleSystem::claimant(const Entity &vehicle, Entity &scratch) const {
+    if (vehicle.primary_occupant.valid()) return world_.registry.get(vehicle.primary_occupant);
+    if (occupancy_source != nullptr && occupancy_source->remote_claimant(vehicle, scratch))
+        return &scratch;
+    return nullptr;
+}
+
+bool VehicleSystem::claimant_present(const Entity &vehicle) const {
+    if (vehicle.primary_occupant.valid()) return true;
+    if (occupancy_source == nullptr) return false;
+    Entity scratch;
+    return occupancy_source->remote_claimant(vehicle, scratch);
+}
+
 // [orig: Entity_FindAvailableSeat @0x436790..0x4368BB]
 bool find_numbered_vehicle_seat(const World &world, const Entity &player, int index,
         VehicleSeatSelection &out, const VehicleOccupancySource *source) {
