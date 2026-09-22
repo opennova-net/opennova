@@ -131,7 +131,7 @@ void test_display_expand_and_fill() {
 
     WeaponInventory inv;
     inv.reset(f.t);
-    auto fill = weapon_inventory_load_from_display(f.t, display, inv);
+    auto fill = weapon_inventory_load_from_display(f.t, display, inv, 8, false);
     CHECK(fill.warnings.empty());
     CHECK(inv.slot(1 * 65 + 0)->adm_index == f.knife);
     CHECK(inv.slot(3 * 65 + 0)->adm_index == f.m4);
@@ -146,11 +146,11 @@ void test_display_expand_and_fill() {
     WeaponInventory inv2;
     inv2.reset(t2);
     auto fill2 = weapon_inventory_load_from_display(
-            t2, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv2);
+            t2, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv2, 8, false);
     CHECK(fill2.warnings.size() == 1);
     CHECK(inv2.slot(3 * 65 + 0)->adm_index == f.m4);
     // Unresolved display names warn [orig: "couldn't find wpn index"].
-    auto fill3 = weapon_inventory_load_from_display(f.t, {"WPN_GHOST"}, inv2);
+    auto fill3 = weapon_inventory_load_from_display(f.t, {"WPN_GHOST"}, inv2, 8, false);
     CHECK(fill3.warnings.size() == 1);
 }
 
@@ -159,7 +159,7 @@ void test_pools_and_recalc() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_GRENADEFB", "WPN_PISTOL"}, inv);
+            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_GRENADEFB", "WPN_PISTOL"}, inv, 8, false);
 
     // Rifleman: plain startrounds seed [orig: pools[class] = def+0x5C @ 0x5416b9].
     weapon_inventory_seed_pools(f.t, inv, 8);
@@ -201,7 +201,7 @@ void test_select() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PARACHUTE"}, inv);
+            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PARACHUTE"}, inv, 8, false);
 
     // Category-level select: combo 195 stages the first populated normal slot of
     // category 3 [orig: the group scan @ 0x4dd749].
@@ -239,7 +239,7 @@ void test_switch_walks() {
     weapon_inventory_load_from_display(
             f.t,
             {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_GRENADEFB"},
-            inv);
+            inv, 8, false);
     weapon_inventory_seed_pools(f.t, inv, 8);
     weapon_inventory_recalc_clips(f.t, inv);
     inv.equipped_combo = 195; // the M4
@@ -302,14 +302,14 @@ void test_switch_walks() {
     gates.seat_blocked = false;
 
     // NoSelect never mounts via the manual walk [orig: the flags2&1 term].
-    weapon_inventory_load_from_display(f.t, {"WPN_PARACHUTE"}, inv);
+    weapon_inventory_load_from_display(f.t, {"WPN_PARACHUTE"}, inv, 8, false);
     r = weapon_switch_to_handle(f.t, inv, 10 * 65, gates);
     CHECK(r.kind == WeaponSwitchOutcome::kDeny);
 
     // No equipped slot: the select fallback stages one first [orig: @ 0x4e0223].
     WeaponInventory inv2;
     inv2.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv2);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv2, 8, false);
     weapon_inventory_seed_pools(f.t, inv2, 8);
     weapon_inventory_recalc_clips(f.t, inv2);
     inv2.equipped_combo = -1;
@@ -332,7 +332,7 @@ void test_committed_switch_only_draws_after_holstering() {
         WeaponInventory inv;
         inv.reset(f.t);
         weapon_inventory_load_from_display(f.t,
-                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv);
+                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv, 8, false);
         weapon_inventory_seed_pools(f.t, inv, 8);
         weapon_inventory_recalc_clips(f.t, inv);
         inv.equipped_combo = 3 * 65;
@@ -384,7 +384,7 @@ void test_cycle() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO"}, inv);
+            f.t, {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false);
     weapon_inventory_seed_pools(f.t, inv, 8);
     weapon_inventory_recalc_clips(f.t, inv);
     inv.equipped_combo = 130; // the pistol
@@ -410,7 +410,7 @@ void test_cycle() {
     CHECK(weapon_cycle_slot(f.t, inv, 0, gates).kind == WeaponSwitchOutcome::kNone);
     WeaponInventory lone;
     lone.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_PISTOL"}, lone);
+    weapon_inventory_load_from_display(f.t, {"WPN_PISTOL"}, lone, 8, false);
     weapon_inventory_seed_pools(f.t, lone, 8);
     weapon_inventory_recalc_clips(f.t, lone);
     lone.equipped_combo = 130;
@@ -459,7 +459,7 @@ static int test_knife_is_selectable() {
 	Fixture f;
 	WeaponInventory inv;
 	inv.reset(f.t);
-	weapon_inventory_load_from_display(f.t, {"WPN_KNIFE", "WPN_M4AUTO"}, inv);
+	weapon_inventory_load_from_display(f.t, {"WPN_KNIFE", "WPN_M4AUTO"}, inv, 8, false);
 	weapon_inventory_seed_pools(f.t, inv, 8);
 	weapon_inventory_recalc_clips(f.t, inv);
 	inv.equipped_combo = 3 * 65; // holding the rifle
@@ -489,7 +489,7 @@ static int test_local_held_weapon_visible() {
 	weapon.active = true;
 	WeaponInventory inv;
 	inv.reset(world.tables.weapons);
-	weapon_inventory_load_from_display(world.tables.weapons, {"WPN_M4AUTO"}, inv);
+	weapon_inventory_load_from_display(world.tables.weapons, {"WPN_M4AUTO"}, inv, 8, false);
 	weapon_inventory_seed_pools(world.tables.weapons, inv, 8);
 	weapon_inventory_recalc_clips(world.tables.weapons, inv);
 	inv.equipped_combo = 3 * 65;
@@ -537,7 +537,7 @@ void test_two_weapons_share_loaded_ammo() {
     b.ammo_class = a.ammo_class;
     WeaponInventory inv;
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false);
     weapon_pool_set(f.t, inv, a.ammo_class_id, 100);
     weapon_inventory_recalc_clips(f.t, inv);
     CHECK(weapon_pool_get(inv, a.ammo_class_id) == 70);
@@ -550,7 +550,56 @@ void test_two_weapons_share_loaded_ammo() {
     CHECK(weapon_pool_get(inv, a.ammo_class_id) == 63);
 }
 
+// The fill seeds each slot's scope zoom (MountSlot+0xC) with the local player
+// as its owner: the def's second scope_max_mag value clamped into
+// [floor, scope_max_mag], the floor being scope_min_mag or, for a class-6 owner
+// on a category-3 def without the sniper permission, scope_max_mag. A floor
+// above the max still wins (the `jl` arm stores it unchecked).
+// [orig: WeaponSlot_InitFromDef @ 0x53EEF1..0x53EF44, entityPtr from
+//  WeaponSlotTable_LoadAllFromDefs @ 0x5414FC]
+void test_fill_seeds_the_slot_zoom() {
+    Fixture f;
+    WeaponTableEntry &m4 = f.t.entries[static_cast<size_t>(f.m4)];
+    m4.scope_max_mag = 10;     // 'scope_max_mag 10 2' (the JOX M1/T80 turret shape)
+    m4.scope_initial_mag = 2;
+    WeaponTableEntry &ak = f.t.entries[static_cast<size_t>(f.ak)];
+    ak.scope_max_mag = 12;     // one value: the seed starts at the floor
+    ak.scope_min_mag = 4;
+    WeaponTableEntry &pistol = f.t.entries[static_cast<size_t>(f.pistol)];
+    pistol.scope_max_mag = 2;  // an over-max second value is capped
+    pistol.scope_initial_mag = 9;
+    pistol.scope_min_mag = 1;
+    // The knife authors nothing: the record-default floor 2 wins over max 0.
+    const std::vector<std::string> kit = {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO",
+                                          "WPN_AK47AUTO"};
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, kit, inv, 8, false);
+    CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 2);
+    CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 4);
+    CHECK(inv.slot(2 * 65 + 0)->scope_zoom == 2);
+    CHECK(inv.slot(1 * 65 + 0)->scope_zoom == 2);
+    // A class-6 owner on the Primary (category 3) defs floors them at the max;
+    // the permission lifts it, and the lock never touches another category.
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, kit, inv, 6, false);
+    CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 10);
+    CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 12);
+    CHECK(inv.slot(2 * 65 + 0)->scope_zoom == 2);
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, kit, inv, 6, true);
+    CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 2);
+    CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 4);
+    CHECK(weapon_slot_zoom_sniper_lock(6, 3, false));
+    CHECK(!weapon_slot_zoom_sniper_lock(8, 3, false));
+    CHECK(!weapon_slot_zoom_sniper_lock(6, 11, false));
+    CHECK(weapon_slot_initial_zoom(7, 0, 2, false) == 2);  // revx02 cannon 'SCOPE_MAX_MAG 7'
+    CHECK(weapon_slot_initial_zoom(12, 0, 1, false) == 1); // revx02 RCWS 'MAX 12 / MIN 1'
+    CHECK(weapon_slot_initial_zoom(8, 8, 2, false) == 8);  // WPN_EMP50BD '8 8'
+}
+
 int main() {
+    test_fill_seeds_the_slot_zoom();
     test_two_weapons_share_loaded_ammo();
     test_knife_is_selectable();
     test_local_held_weapon_visible();

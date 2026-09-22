@@ -33,6 +33,11 @@ func _zoom(sim: Simulation, def: WeaponDef) -> void:
 		return # Fixed optics do not use the variable-magnification branch.
 	var weapon := sim.get_local_player_weapon_name()
 	var previous := _presenter.presented_view().scope_magnification
+	# The gun's own slot starts at the slot-init seed: the second scope_max_mag
+	# value clamped into [scope_min_mag, scope_max_mag], never the lazy maximum.
+	# An emplacement slot has no owner entity, so no sniper lock applies.
+	assert_eq(previous, clampi(def.scope_initial_mag, def.scope_min_mag, int(def.scope_max_mag)),
+			"the optic starts at its authored seed")
 	for i in 32:
 		_wheel(sim, MOUSE_BUTTON_WHEEL_UP)
 		var zoom := _presenter.presented_view().scope_magnification

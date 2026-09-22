@@ -290,6 +290,9 @@ world::WeaponTable build_weapon_table(
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
+		e.scope_max_mag = static_cast<int32_t>(d.scope_max_mag); // atol'd, kept as a float
+		e.scope_initial_mag = d.scope_max_mag_arg2;
+		e.scope_min_mag = d.scope_min_mag;
 		for (int row = 0; row < 6; ++row) e.error_fp16[row] = d.error_fp16[row];
 		e.error_hip_theta_fp16 = d.error_hip_theta_fp16;
 		e.error_up_theta_fp16 = d.error_up_theta_fp16;

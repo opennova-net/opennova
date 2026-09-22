@@ -198,9 +198,26 @@ void weapon_pool_add(const WeaponTable &table, WeaponInventory &inv, int class_i
     inv.pools[static_cast<size_t>(class_id)] = v;
 }
 
+bool weapon_slot_zoom_sniper_lock(int32_t owner_class, int32_t def_category,
+                                  bool allow_sniper_scope_zoom) {
+    // [orig: WeaponSlot_InitFromDef — `cmp [ebp+294h],6` @ 0x53EEF9, `cmp [ecx],3`
+    //  @ 0x53EF02, the permission @ 0x53EF07..0x53EF25]
+    return owner_class == 6 && def_category == 3 && !allow_sniper_scope_zoom;
+}
+
+int32_t weapon_slot_initial_zoom(int32_t scope_max_mag, int32_t scope_initial_mag,
+                                 int32_t scope_min_mag, bool sniper_lock) {
+    // [orig: WeaponSlot_InitFromDef — floor = Def+0x98 @ 0x53EEF1, or Def+0x90
+    //  under the lock @ 0x53EF27; +0xC = Def+0x94 @ 0x53EF2D..0x53EF35]
+    const int32_t floor = sniper_lock ? scope_max_mag : scope_min_mag;
+    if (scope_initial_mag < floor) return floor;                   // @ 0x53EF38 -> @ 0x53EF44
+    return scope_initial_mag > scope_max_mag ? scope_max_mag       // @ 0x53EF3A..0x53EF44
+                                             : scope_initial_mag;
+}
+
 WeaponFillResult weapon_inventory_load_from_display(
         const WeaponTable &table, const std::vector<std::string> &display,
-        WeaponInventory &inv) {
+        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom) {
     // [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414E0]
     WeaponFillResult result;
     char msg[192];
@@ -244,6 +261,9 @@ WeaponFillResult weapon_inventory_load_from_display(
         slot->adm_index = static_cast<int16_t>(adm);
         slot->clip = 0;
         slot->scope_zero = weapon_scope_zero_initial(def->action_fsm.scope_zero);
+        slot->scope_zoom = weapon_slot_initial_zoom(def->scope_max_mag, def->scope_initial_mag,
+                def->scope_min_mag,
+                weapon_slot_zoom_sniper_lock(owner_class, def->category, allow_sniper_scope_zoom));
     }
     return result;
 }

@@ -106,6 +106,14 @@ struct WeaponTableEntry {
     int32_t special_hold = 0; // 1..8 selects the hold-pose ladder; 0 = rifles (mirror)
     int32_t attack_anim = 0;  // 1 knife_attack 62 / 2 grenade_attack 63; else no stamp
     int32_t run_anim = 0;     // run-gait class
+    // The scope zoom range a slot's MountSlot+0xC is seeded from and walked in:
+    // 'scope_max_mag <max> [<initial>]' -> +0x90 / +0x94 and 'scope_min_mag'
+    // -> +0x98, record default 2 (weapon_inventory.h weapon_slot_initial_zoom)
+    // [orig: WeaponDefs_ParseLineCallback @ 0x544F29 / @ 0x544F44 / @ 0x544F7A;
+    //  AdmDef_InitEntryDefaults @ 0x53FF73].
+    int32_t scope_max_mag = 0;
+    int32_t scope_initial_mag = 0;
+    int32_t scope_min_mag = 2;
     // Per-char-class startrounds overrides at the original's raw value-table indices
     // (medic=1 sniper=2 gunner=3 rifleman=5 engineer=6; 0/4 unused; 0 = absent)
     // [orig: 'classrounds' handler @0x543ab0 -> AdmDef+0x60+value*4].

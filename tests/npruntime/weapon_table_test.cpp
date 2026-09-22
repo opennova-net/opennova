@@ -104,6 +104,32 @@ int main(void) {
         def_free_weapons(&parsed);
     }
 
+    // The zoom seed's three def words survive the promotion: 'scope_max_mag'
+    // max (+0x90) and second value (+0x94), 'scope_min_mag' (+0x98, record
+    // default 2) [orig: WeaponDefs_ParseLineCallback @0x544F29 / @0x544F44 /
+    // @0x544F7A; AdmDef_InitEntryDefaults @0x53FF73].
+    {
+        static const char kZoom[] =
+            "weapon \"WPN_TURRET_ZOOM\"\nscope_max_mag 10 2\nend\n"
+            "weapon \"WPN_RCWS_ZOOM\"\nscope_max_mag 12\nscope_min_mag 1\nend\n"
+            "weapon \"WPN_NO_OPTIC\"\nend\n";
+        DefWeaponsFile parsed{};
+        CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kZoom),
+                sizeof(kZoom) - 1, &parsed) == 0);
+        const world::WeaponTable table = world::build_weapon_table(parsed);
+        const int expected[3][3] = {{10, 2, 2}, {12, 0, 1}, {0, 0, 2}};
+        for (int row = 1; row <= 3; ++row) {
+            const world::WeaponTableEntry *weapon = table.by_index(row);
+            CHECK(weapon != nullptr);
+            if (weapon == nullptr) continue;
+            CHECK(weapon->scope_max_mag == expected[row - 1][0]);
+            CHECK(weapon->scope_initial_mag == expected[row - 1][1]);
+            CHECK(weapon->scope_min_mag == expected[row - 1][2]);
+        }
+        CHECK(table.by_index(0)->scope_min_mag == 2); // the engine-created null row
+        def_free_weapons(&parsed);
+    }
+
 	if (const std::string install = retail::install(); !install.empty()) {
 		if (live_weapon_oracle(install, std::string()) != 0) return 1;
 		for (const std::string &expansion : retail::expansions())

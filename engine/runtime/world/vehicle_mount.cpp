@@ -12,6 +12,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
@@ -109,6 +110,14 @@ bool VehicleSystem::prepare_weapon_slot(Entity &vehicle) {
                 weapon->action_fsm.scope_zero, vehicle.primary_weapon_slot.scope_zero);
         vehicle.primary_weapon_slot.zero_yaw = weapon_scope_zero_yaw(
             weapon->action_fsm.scope_zero, vehicle.primary_weapon_slot.scope_zero);
+        // The zoom seed (MountSlot+0xC). The emplacement's own slot has no
+        // owner entity, so the class-6 sniper lock never applies here: a
+        // tank cannon starts at its floor, a JOTAC roof sight at 1x
+        // [orig: WeaponSlot_InitFromEntityDef passes entityPtr 0 @0x546706;
+        //  WeaponSlot_InitFromDef skips the lock @0x53EEF7, seed
+        //  @0x53EF2D..0x53EF44].
+        vehicle.primary_weapon_slot.scope_zoom = weapon_slot_initial_zoom(weapon->scope_max_mag,
+                weapon->scope_initial_mag, weapon->scope_min_mag, /*sniper_lock=*/false);
         if (weapon->clipsize < 0) {
             vehicle.primary_weapon_slot.clip = -1;
         } else {

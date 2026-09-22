@@ -57,15 +57,18 @@ void Simulation::request_local_player_weapon_category(WeaponCategory p_category)
 }
 
 void Simulation::request_local_player_weapon_cycle(int p_direction) {
-	// The next/prev-weapon actions (212/214) are dual-purpose: the engine's
-	// dispatcher leg (runtime/world/local_player_view.h
-	// local_player_weapon_cycle_route) refuses them while the binocular view
-	// is up or a PowerThrow charge is live, steps the scope zoom by +/-2 in
-	// place of a cycle while the optical view is up on a def whose
-	// scope_min_mag differs from scope_max_mag, and otherwise hands the cycle
-	// (weapon_cycle_slot) back to this walk. The def's scope_min_mag rides
-	// from the kernel's retained weapon.def row; a shell-installed row with no
-	// retained parse takes the engine's record default.
+	// The weapon-cycle actions (cycleweaponP = 212 passes +1, cycleweaponN =
+	// 214 passes -1) are dual-purpose: the engine's dispatcher leg
+	// (runtime/world/local_player_view.h local_player_weapon_cycle_route)
+	// refuses them while the binocular view is up or a PowerThrow charge is
+	// live, steps the scope zoom by +/-2 in place of a cycle while the optical
+	// view is up on a def whose scope_min_mag differs from scope_max_mag, and
+	// otherwise hands the cycle (weapon_cycle_slot: +1 = the next-higher slot)
+	// back to this walk. A step on the personal slot lands in its inventory
+	// entry (player_weapon.h local_weapon_store_scope_zoom). The def's
+	// scope_min_mag rides from the kernel's retained weapon.def row; a
+	// shell-installed row with no retained parse takes the engine's record
+	// default.
 	const DefWeaponDef *row = native_equipped_weapon_row();
 	const int32_t scope_min_mag = row != nullptr
 			? row->scope_min_mag
@@ -76,7 +79,11 @@ void Simulation::request_local_player_weapon_cycle(int p_direction) {
 	switch (opennova::world::local_player_weapon_cycle_route(kernel_->world,
 			kernel_->local.weapon, kernel_->local.view, limits, p_direction)) {
 		case opennova::world::WeaponCycleRoute::kRefused:
+			return;
 		case opennova::world::WeaponCycleRoute::kZoomStep:
+			if (kernel_->local.inventory_valid)
+				opennova::world::local_weapon_store_scope_zoom(kernel_->world,
+						kernel_->local.weapon, kernel_->local.inventory);
 			return;
 		case opennova::world::WeaponCycleRoute::kCycle:
 			break;

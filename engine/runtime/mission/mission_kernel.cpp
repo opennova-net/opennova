@@ -846,12 +846,16 @@ bool MissionKernel::restore_baseline() {
 	} else if (usegun_was_pending) {
 		// The presenter never left the personal local.weapon, but its outgoing slot
 		// may already be inside SWITCHFROM/RANK. Cancel only that action state
-		// while retaining the personal magazine and reserve.
+		// while retaining the personal magazine and reserve, and the slot's scope
+		// zoom: MountSlot+0xC belongs to the slot, not to its action state
+		// [orig: seeded once per slot by WeaponSlot_InitFromDef @0x53EF35].
 		const int32_t clip = local.weapon.slot.clip;
 		const int32_t reserve = local.weapon.slot.reserve;
+		const int32_t zoom = local.weapon.slot.scope_zoom;
 		local.weapon.slot = w::WeaponSlotState{};
 		local.weapon.slot.clip = clip;
 		local.weapon.slot.reserve = reserve;
+		local.weapon.slot.scope_zoom = zoom;
 	}
 	// Retail's SP restart re-runs Game_StartMission [orig: Game_RestartRoundSP
 	// @0x5263DB -> Game_StartMission @0x524360]. There the player re-init's weapon
