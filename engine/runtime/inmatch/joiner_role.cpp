@@ -1631,14 +1631,45 @@ void JoinerRole::mirror_mission_entities() {
 								world::VehicleFamily::Helicopter ||
 						traits->family == world::VehicleFamily::Plane;
 				world::Entity::VehicleMotorState &m = local->veh;
-				// The witnessed mover freezes: wire bit0 (not-ready/attached),
-				// the dead-pose/wreck bit, and a carried row riding a MOVING
-				// deck (a pool-1 carrier: LCAC/ship) all stop the prediction
-				// motor — the row keeps its snapped wire pose (wreck eulers
-				// included) / its per-tick seat-follow, and the mirror-back
-				// below yields via net_predicted [orig: the Flags&1 early return
-				// @0x4b9a03; the dead-pose short form's frozen live stores
-				// @0x460930..0x460A50]. D-NET-66: death stays a snap.
+				// The reader's tail on each accepted record: the destroyed bit
+				// snaps a client row that is not dead yet and kills it through
+				// Entity_KillBySlotId(slot, 0, 0) while its Health word is
+				// nonzero; Flags bits 0/3/4/5/7 then follow the wire (1/2/6 stay
+				// the client's own) and the record's health word lands, zero for
+				// the dead-pose form or a kill.
+				// [orig: Entity_SerializeVehicleState @0x460560 — kill edge
+				//  @0x460A1A..0x460AE2, Flags @0x460AEA..0x460AFC, Health store
+				//  @0x460AF1..0x460AFF; the short form's zero @0x460688]
+				if (es.state_flags_known && es.compact_revision != m.net_seen_revision) {
+					int16_t health_word = static_cast<int16_t>(es.health_word);
+					if ((es.state_flags & world::kEntityFlagDead) != 0u &&
+							((local->flags | local->engine_flags) &
+									world::kEntityFlagDead) == 0u) {
+						local->position.x = static_cast<float>(es.x) / 65536.0f;
+						local->position.y = static_cast<float>(es.y) / 65536.0f;
+						local->position.z = static_cast<float>(es.z) / 65536.0f;
+						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
+						local->yaw = static_cast<int16_t>(std::lround(
+								world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
+						if (local->health != 0) {
+							health_word = 0;
+							world::apply_item_state_event(world, *local, 0);
+						}
+					}
+					const uint32_t wire_flags = es.state_flags;
+					local->flags ^= (local->flags ^ wire_flags) & 0xB9u;
+					local->engine_flags ^= (local->engine_flags ^ wire_flags) & 0xB9u;
+					local->health = health_word;
+				}
+				// The mover freezes: the dead-pose/wreck form and a carried row
+				// riding a MOVING deck (a pool-1 carrier: LCAC/ship) stop the
+				// prediction motor — the row keeps its snapped wire pose (wreck
+				// eulers included) / its per-tick seat-follow, and the mirror-back
+				// below yields via net_predicted [orig: the dead-pose short form's
+				// frozen live stores @0x460930..0x460A50]. D-NET-66: death stays a
+				// snap. Wire bit0 is not a vehicle freeze: no vehicle mover tests it
+				// and the pool-1 update calls the mover ungated [orig:
+				// Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
 				// A vehicle whose §5.13 carrier is a STATIC (pool 2/3: the
 				// bridge, roof or ramp its groundEntity resolves to while it
 				// drives over a structure) is not a deck ride: the fold composed
@@ -1652,9 +1683,7 @@ void JoinerRole::mirror_mission_entities() {
 						world::EntityHandle{es.carrier_handle}.pool() == 1;
 				const bool wire_frozen =
 						(es.state_flags_known &&
-								(es.state_flags &
-										(0x01u | replication::kVehicleFlagDeadPose)) !=
-										0u) ||
+								(es.state_flags & replication::kVehicleFlagDeadPose) != 0u) ||
 						deck_ride;
 				if (wire_frozen) {
 					// The row holds its snapped/followed pose; the registry
@@ -1676,6 +1705,12 @@ void JoinerRole::mirror_mission_entities() {
 					m.speed_accel = 0;
 					m.cmd_speed = 0;
 					m.slide_z = 0;
+					// The yaw rate and the tank's pivot latch as well: the frozen
+					// row's fold would otherwise keep re-registering the fourth
+					// loop from a latch the traction tail can no longer clear.
+					m.wheel_rate_bam = 0;
+					m.pivot_sound_latched = false;
+					m.pivot_sound_prev_rate = 0;
 					es.vehicle_vertical_velocity_pending = false;
 					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
 							m.plat_acc[3] = 0;
