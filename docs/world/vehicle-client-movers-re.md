@@ -26,10 +26,10 @@ correction — proposed in PR #640, pending maintainer ratification at merge.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction (the selector-zero boat's PlayerControl block, its claimant edge and part-spin call, ported 2026-09-12; the former D-NET-161 (d)) | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor, vehicle_part_anim |
-| Model contacts, springs, traction, chassis and carrier motion | Ported; #645 crash-height, bike axle and wheelie corrections included | Sections 12 through 15, 19 through 20, 22 through 23, 27, 38; collision, vehicle_suspension, vehicle_followups, vehicle_mount |
-| Occupancy, AI, death and respawn state | Ported (the `entity+684` think countdown ported 2026-09-12, the former D-NET-161 (f); open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the emplacement brain dispatch: D-NET-161 (b), (e), (g); the gunner-attachment runtime of section 26.2 awaits its three data hooks) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount, vehicle_attachments |
+| Model contacts, springs, traction, chassis and carrier motion | Ported; #645 crash-height, bike axle and wheelie corrections included; the tank solve's crash, wreck, wall and stability machinery and the tank mover's impulse, crash-stop, trail, slope and per-family chase gates completed 2026-09-22 (D-VEH-4, the [tank record](tank-parity-re.md)) | §8, §10, sections 12 through 15, 19 through 20, 22 through 23, 27, 38, 40; collision, vehicle_suspension, vehicle_followups, vehicle_mount, vehicle_motor |
+| Occupancy, AI, death and respawn state | Ported (the `entity+684` think countdown ported 2026-09-12, the former D-NET-161 (f); the AI slot seed for every AI-class record, the /62 respawn budget and the respawn class-init re-run 2026-09-22; open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the emplacement brain dispatch: D-NET-161 (b), (e), (g); the gunner-attachment runtime of section 26.2 awaits its three data hooks) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount, mission_promote, vehicle_attachments |
 | Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
-| Ground/boat/aircraft sound and contact edges | Ported (tank pivot cue/latch/fourth loop completed 2026-09-22; open: sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
+| Ground/boat/aircraft sound and contact edges | Ported (tank pivot cue/latch/fourth loop, the tread cue, the tank solve's tumble cues, the corrected detach stop and the last-tick gate completed 2026-09-22; D-SND-17 closed) | Sections 11 through 13, 29, 31 through 33, 40; vehicle_motor, vehicle_suspension, ambient_mixer, mission_audio |
 | Wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings | Ported | Sections 28 through 29, 32; destruction, vehicle_part_anim, vehicle_trail_present_pass, shader_resource_contract |
 | Full water-ring bank expiry | PERMANENT bounded-pool correction (proposed in PR #640, requires maintainer ratification at merge) | D-VEH-2; saturated 128-slot retirement regression; ADR 0022 register entry |
 
@@ -608,7 +608,12 @@ occupant's own word, wire-visible in the echo), the submerged-driver cut
 wheel), the minAI clamp (`AiSystem::apply_min_ai_crew_clamp`), the boarding-wait
 hold, and the stuck check (`AiSystem::check_vehicle_stuck`); ctest
 `watercraft_client_motor` (`run_submerged_driver_hands_to_ai_leg`) and
-`vehicle_mount`.
+`vehicle_mount`. The same submerged-driver cut sits in all four ground-template
+movers (cveh `@ 0x48B9A0..0x48B9AC` -> `@ 0x48BC12`, ctan `@ 0x489579..0x489585`
+-> `@ 0x4897DB`, cbik `@ 0x484AC6..0x484AD2` -> `@ 0x484DB8`, cbot
+`@ 0x48DFD3..0x48DFDF` -> `@ 0x48E247`; catv and ctrn use the cveh mover); the
+port applied it only to the boat until 2026-09-22
+(`vehicle_mount::test_submerged_player_driver_takes_the_ai_leg`).
 
 ### 1.13 The AIR authority half (witnessed + ported 2026-09-01)
 
@@ -3619,64 +3624,77 @@ Z):
 1. **THIRTEEN probes, every radius r = beam >> 2** [orig: geometry
    @ 0x4762B8..0x476559; the 13 radius stores all copy suspensionOffset]:
    the 4 wheel pads of §7 (footprint corners inset r, Z = box_z_lo + r + the
-   per-wheel +0x2D4 sink — zero in the client subset), SIX belly stations
+   per-wheel +0x2D4 sink), SIX belly stations
    along the two side rails at X = foot_x_lo + r + {3q, 3q, q, q, 2q, 2q}
    with q = ftol(0.75 × box_x_span) >> 2 (flt_7C3DC8 = 0.75) and the
    front/rear/averaged per-side sinks in Z, and THREE spine probes at
    X = box_x_lo + {3L/4, L/2, L/4}, Y = box ymid, Z = box_z_hi − w/+w/−w with
    w = (beam >> 3) − 0x4000 (the MIDDLE spine probe sits ABOVE the deck).
    There is no separate spine radius.
-2. **The 7-slot contact model** [orig: the pair maxes @ 0x4780E5..0x478131]:
+2. **The 7-slot contact model** [orig: the slot merge @ 0x4784CC..0x4784FF]:
    slot k = max(d_wheel_k, d_belly_k) for the four wheel/rail pairs, slots
-   4..6 = the spine d's. The sev-3 0.25-cut scans the strongest of the first
-   SEVEN probe forces only [orig: init from probe 0 @ 0x476BC3].
-3. **Per-probe planar-contact + reverse flags → the stability contact byte**
-   [orig: the per-probe walk @ 0x477BF4..0x477D0A; the byte
-   @ 0x477F31..0x477FB4]: a probe "contacts" when it produced a planar force;
-   a contacted probe is a REVERSE hit when its normalized force opposes the
-   contact direction past −0.75 (−49152). The contact byte requires
-   `up.z(Q16) > 0x2000` (NOT §7's 4096) and the LEADING axle for the current
-   gear (front pads forward, rear pads in reverse) to be SYMMETRIC — both
-   contacted or neither — with no reverse hit on it. The direction is the
-   +0x3BC contact-direction store, falling back to the basis forward row when
-   empty [orig: @ 0x477A48..] — our subset defers the store (D-NET-161), so
-   the fallback IS the direction.
-4. **The head-on wall stop** [orig: @ 0x477D3E..0x477E30]: the summed
-   contacted force, normalized, against the same direction — past −0.871
-   (−57070) the drive state zeroes (velocityX/Y and currentSpeed). The
-   authority park-move damage riding it is deferred.
+   4..6 = the spine d's. The slots decide sink growth, grounded catch-up and
+   the tail's sink clear (D-VEH-4, [tank record](tank-parity-re.md)). The
+   sev-3 0.25-cut scans the strongest of the first SEVEN probe forces only
+   [orig: init from probe 0 @ 0x476BC3]. The two depth views: the probe
+   records hold the last pass and feed the slots, the maxes, the crash and
+   wheel depths, the springs and the lifts; the averaged, mass-shared copy
+   feeds only landing, crush and the wreck latch [orig: pass one @ 0x476A8E,
+   copy @ 0x476A93..0x476B3A, pass two @ 0x477037, mass share @ 0x47720D].
+3. **Wall bytes and the stability byte** [orig: `Entity_CheckCollisionState
+   @ 0x462A30`; the walk @ 0x477940..0x477AF8; the byte
+   @ 0x477CF9..0x477DA5]: only a probe that struck a steep model face carries
+   a wall byte, OR-ed across passes; terrain never does. A flagged probe is a
+   REVERSE hit when its normalized force opposes the contact direction past
+   −0.75 (−49152, @ 0x477AD3). The stability byte +0x2F2 (`grounded`)
+   requires `up.z(Q16) > 0x2000` (NOT §7's 4096), the LEADING axle for the
+   current gear (front pads forward, rear pads in reverse) to be SYMMETRIC —
+   both flagged or neither — with no reverse hit on it, and none of +0x2EC,
+   +0x2F0, +0x2FC (@ 0x477D2F..0x477DA5). The direction is the +0x3BC
+   contact-direction store, falling back to the basis forward row when empty
+   [orig: @ 0x477A48..]. (Corrected 2026-09-22: the earlier text flagged any
+   probe with a planar force and omitted the three latch gates.)
+4. **The wall stop** [orig: any wall byte zeroes velocityX/Y and
+   currentSpeed @ 0x477B7B..0x477B87; the head-on test @ 0x477B8D..0x477C09]:
+   the summed flagged force, normalized, against the same direction — past
+   −0.871 (−57070) the stop repeats. The authority head-on damage riding it
+   is dead code in retail: its operand is `xor eax, eax` @ 0x477C90, the
+   speed just zeroed.
 5. **The Z select absorbs into slideDecay** [orig: `slideDecay += solvedZ −
    Position.Z; if (slideDecay > 0) slideDecay = 0; Position.Z = solvedZ`
-   @ 0x478BE3..0x478C06]: no §7 +0x2000 rise clamp — the landing step cancels
-   the fall velocity instead. The solver is
+   @ 0x47904A..0x4790A1 / @ 0x4791B8..0x479205]: no §7 +0x2000 rise clamp —
+   the landing step cancels the fall velocity instead. The solver is
    `Entity_ComputeSuspensionAndOrientation` @ 0x4698A0 (the third §4-family
-   instance; positive-only corner average + fidiv by the positive count
-   @ 0x46AF54..0x46AFE1, the same MAIN_FIT core as `plat_fit_corners`).
+   instance, the same MAIN_FIT core as `plat_fit_corners`).
    Inverted: select the retained maximum over ALL 13 d's [orig: seed
    @ 0x478391, gate (+2EC || up.z < 0 || +2F0) @ 0x4783BA..0x4783D1, the
    13-record max (stride 0Ch, bound 9Ch) @ 0x4783D5..0x4783EC, consumer
    `Position.Z +=` @ 0x479311..0x479318; the four-WHEEL max the failed-fit
    arms add instead is seeded @ 0x478B69/@ 0x478B72, scanned
    @ 0x478D0E..0x478D4D and consumed @ 0x479075..0x479079 /
-   @ 0x4791D9..0x4791DD]; the upside no-wheel-contact arm lifts by
-   the max over the SEVEN contact slots [orig: @ 0x47843E..0x478540].
+   @ 0x4791D9..0x4791DD]. The airborne branch lifts a crashed or inverted
+   hull by the max over the SEVEN contact slots [orig: @ 0x478720..0x478735,
+   `Position.Z +=` @ 0x478887].
 6. **The corner quad lifts by the four WHEEL d's only** (belly/spine d's feed
-   severity and the Z maxes) [orig: the zero-state spring loop
-   `dest[corner].z += d_k` @ 0x478A16..; `Suspension_CompressWheelLinear`
-   @ 0x45CEB0 and `Suspension_OscillateWheel` @ 0x45D240 are the live
-   spring machinery — sinks grow +250/tick on airborne wheels, decay through
-   the brake curve — all zero-state in the subset, so pads probe at
-   box_z_lo + r and the lifts are raw, exactly like the zero-state original].
-7. **Live-in-retail legs deferred with their §7-shared seams**: the sev-3
-   entity momentum exchange and the entity-mass delta scaling (mass-gated
-   transfer at `hit mass < 2×own` [orig: @ 0x476E19-region]), the crash/flip
-   latches (the |up·z| < cos(flip) capsize byte, the falling-crash client arm
-   keyed airborne+parked, the settle machine + its Yaw adoption,
-   `Entity_ApplyWheelSuspensionForces` @ 0x463560's parked spring apply), the
-   contact-direction downhill store (renormalized with fixed Z = −28672 while
-   descending [orig: the tail @ 0x479518-region]), authority damage
-   (spine-impact, underside-crush, park-move, burn), and every sound/FX/
-   overlay send.
+   severity and the Z maxes). `Suspension_CompressWheelLinear @ 0x45CEB0` and
+   `Suspension_OscillateWheel @ 0x45D240` are the live spring machinery (section
+   14): sinks grow +250/tick on unsupported corners and each corner's drop
+   adjustment feeds the fit [orig: the spring loop @ 0x4787EC..0x478879,
+   adjustment @ 0x478834..0x47884D]. (Corrected 2026-09-22: the springs run
+   live, not zero-state.)
+7. **Ported since, with the §7-shared seams** (sections 12 through 14, 19
+   through 20, 23 and 27, and the [tank record](tank-parity-re.md)'s
+   2026-09-22 witness map): the sev-3 entity momentum exchange and the
+   pass-two mass share, the crash, flip and wreck latches (`+0x2EF` writers
+   @ 0x4785DF, @ 0x4787D3, @ 0x478991, @ 0x478C80; clear @ 0x478ABC) with the
+   settle machine and the solve-head forcing, the grounded crashed block
+   @ 0x478BDD..0x478CCC with `Entity_ApplyWheelSuspensionForces @ 0x463560`
+   and its tumble cues, the client crash window at the grounded entry
+   (@ 0x478B6C..0x478BD6), the common-tail righting of a penetrating inverted
+   hull without Flags 0x10 (@ 0x47948A..0x4794A8, both branches), the
+   contact-direction downhill tail [orig: @ 0x4794B0..0x4795B5], landing and
+   crush damage, and the landing-pass force consume
+   (`Entity_ClearSuspensionForces` call @ 0x477FB6).
 
 Port: `wheeled_contact_solve` (engine/runtime/world/vehicle_contact_solve.cpp),
 routed by `VehicleFamily::Tank`. Bench: the tank rest/drop legs (exact rest at
@@ -3773,30 +3791,99 @@ the ground core:
 3. **The servo clamp tree** [orig: chase @ 0x489d79..0x489d84, clamps
    @ 0x489d89..0x489e79]: a direction REVERSAL clamps at ±2·deceleration
    (the ground core keeps the raw 1/32 chase); same-direction at
-   ±acceleration (target ≠ 0) or ±deceleration (target 0). The slope
-   anti-creep legs (±decel >> 2 at |speed| ≤ 4096, the ∓2·decel hard arm)
-   ride the deferred contact-direction store — with the store empty retail
-   takes exactly the plain caps.
+   ±acceleration (target ≠ 0) or ±deceleration (target 0). The sharp-steering
+   caps (±decel >> 2 at |speed| ≤ 4096, the ∓2·decel hard arm) are ported with
+   the traction legs [orig: @ 0x489DB1..0x489E97]. A zero-command tank whose
+   +0x16C parent is an NPC keeps the raw servo [orig: @ 0x489EBA..0x489ECB].
 4. **Full-basis drive velocity** [orig: the contact velocity-build stores
    @ 0x48a5ac..0x48a8b4]: velocity = speed × the normalized basis forward
    row, slideDecay REPLACED by speed × fwd.z — the tank drives along its
    conformed pitch. The low-speed contact-direction realign (the ±5°/tick
    BuildYXZ ±59652323 cross-product rotate toward forward) and the downhill
-   creep-hold ride the deferred D-NET-161 store; the empty-store arm is
-   exactly velocity = speed × fwd.
-5. **Yaw applied unless PARKED, quartered airborne** [orig:
-   @ 0x48a9f7..0x48aa1d `if (!parkedByte) Yaw += (Flags & 0x2000) ?
+   creep-hold are ported with the traction legs (section 13). The recovery
+   arm (target 0 without sharp steering, or |speed| <= 0x2000) stores
+   slideDecay unconditionally [orig: @ 0x48A5D4]; only the straight arm keeps
+   a crashed hull's vertical velocity [orig: @ 0x48A28D..0x48A2AE].
+5. **Yaw applied unless crash-settled, quartered airborne** [orig:
+   @ 0x48a9f7..0x48aa1d `if (!settleByte) Yaw += (Flags & 0x2000) ?
    modelPtr0 >> 2 : modelPtr0`] — the bike shape keyed on the solve-owned
-   flag; the park byte rides the deferred latch machine.
-6. **Named deferrals**: the differential track-scroll accumulators
-   (animStateId/deathAnimStateId — presentation, no consumer in our runtime
-   yet), the turret slew chase (brain 460..504, the ±0x2108421 step), the
-   carrier-follow rotation composition (our carrier recompose owns carried
-   rows), the AI drive/avoidance legs, and the joiner interp block — whose
-   ladder {6,8,10,15,20,25,30} at {0x2AAA, 0x4000, 0x5555, 0x8000, 0x10000,
-   0x20000}, 0x2000 deadband, 0x60000/0x20000-at-reg<293 snap (0xC0000
-   crashed), (delta+10)/20 heading, and (v+64)>>7 drift decay are IDENTICAL
-   to the already-ported ground/vehicle chase — no netsim change needed.
+   flag. The +0x2F0 byte is the post-crash settle latch (setters
+   @ 0x475FAE, @ 0x476067, @ 0x4780EC, @ 0x469C42, @ 0x48A816, all crash
+   paths), not retail's Flags 0x10 park bit.
+6. **Joiner interp block, per family** (Corrected 2026-09-22: the earlier text
+   called the tank's gates IDENTICAL to the ground chase; the shared ladder
+   {6,8,10,15,20,25,30} at {0x2AAA, 0x4000, 0x5555, 0x8000, 0x10000,
+   0x20000}, 0x2000 deadband, 0x60000/0x20000-at-reg<293 snap, (delta+10)/20
+   heading and (v+64)>>7 drift decay are common, the gates are not; ported as
+   `vehicle_client_chase` with `VehicleChaseFamily`,
+   `vehicle_motor::test_client_chase_family_gates`):
+   - Plain (cbot @ 0x48DB6B..0x48DDD4, selector-zero ground
+     @ 0x46E62E..0x46E85A and boat @ 0x470129..0x470355): snap and step every
+     axis; Z steps whether or not airborne.
+   - Ground (cveh @ 0x48B563..0x48B7C5): the snap moves heading and Z only
+     while neither crashed nor settled (@ 0x48B5FB..0x48B622); the per-tick
+     heading step is ungated (@ 0x48B767..0x48B77A); Z steps only while
+     airborne and unlatched (@ 0x48B798..0x48B7B9).
+   - Bike (cbik @ 0x484666..0x4848F3): the snap always moves Z; heading snaps
+     and steps only while unlatched, not wheeling (+0x3DE) and upright in the
+     entry matrix (@ 0x4846EB..0x48472D, @ 0x48487D..0x4848A4); Z steps as
+     ground (@ 0x4848AE..0x4848E3).
+   - Tank (ctan @ 0x48912B..0x4893A6): a crashed, crash-settled or +0x2FC hull
+     widens the snap radius to 0xC0000 (@ 0x48913B..0x48916E); heading snaps
+     and steps only while unlatched (@ 0x4891D5..0x489208,
+     @ 0x48933D..0x48935B); Z snaps always and steps as ground
+     (@ 0x489379..0x48939A).
+   Only wire-frozen rows (state bits 0x01/0x04, deck rides) leave prediction;
+   crashed and settled rows run the chase. The differential track-scroll
+   accumulators (`track_phase_tick`, section 11) and the turret slew chase
+   (`slew_turret`, section 11) are ported.
+7. **Crash stop** [orig: @ 0x489C06..0x489C1C]: the tank stops a crashed hull
+   only with +0x2EF as well as +0x2EC, like the bike; the ground core stops on
+   +0x2EC alone [orig: @ 0x48C086..0x48C08F]. The contact solve owns the
+   +0x2EF writes (§8 item 7).
+8. **Recoil and heavy-hit impulse** [orig: @ 0x48A8C0..0x48A9C0]: while the
+   +0x3EC direction is nonzero, dir × trunc(+0x3FC × 28.16f) (flt_7C6FA0)
+   joins vel_x, vel_y and slideDecay every tick (Q16, round half up), after the
+   crash-settle zero and before integration; the direction clears once +0x3DC
+   drops. Only the tank mover reads the impulse (section 27).
+9. **Slope factor** [orig: ctan @ 0x489CE6..0x489D01, cveh
+   @ 0x48C1C6..0x48C1D7, cbik @ 0x485362..0x48537E]: the movers sample the
+   `Math_BuildSinTable` cos table at (Pitch + 0x200000) >> 22; the port used
+   a continuous cosine and wrongly called it the D-INF-4 equivalent until
+   2026-09-22.
+10. **Trails** sample only at the end of the contact arms; the airborne and
+    off-contact arms jump past them [orig: ctan @ 0x48A60D..0x48A67F vs
+    @ 0x48A684; cveh @ 0x48CD93..0x48CDFD vs @ 0x48CE02; cbik
+    @ 0x486170..0x4861F1 vs @ 0x4861F6] (section 28).
+11. **Dispatch**: the ctank and cbike class rows call their movers without
+    testing the physics selector [orig: `Entity_DispatchPhysics_ctank
+    @ 0x48F000..0x48F007`, `Entity_DispatchPhysics_cbike @ 0x48EFF0..0x48EFF7`];
+    cveh, ctrn, catv and cbot test it.
+12. **Role gate**: only the input block is role-gated [orig: ctan
+    @ 0x489522..0x489545; cveh @ 0x48B949..0x48B96C]. The seat sweep and the
+    PlayerControl tail (claimant fold gate @ 0x48AAC4..0x48AADA, engine
+    start/stop and part spin @ 0x48AD94..0x48AE3D) run on predicting clients,
+    and the handbrake latch reads the +0x170 claimant [orig: cveh @ 0x48C03C,
+    cbik @ 0x4851E8].
+13. **Entry pose**: every mover prologue copies the pose (+0x04..+0x18) to
+    savedLivePose (+0x80..+0x94) before its first bail, on every role [orig:
+    ctan @ 0x488B24..0x488B50, cveh @ 0x48AF74..0x48AFA0, cbik
+    @ 0x484054..0x484080, cbot @ 0x48D4AC..0x48D4E9]; `tick_motor` and
+    `ground_client_tick` stamp after their seed, and the world vehicle passes
+    stamp the rows whose mover does not.
+14. **Command registers**: the ground and tank templates keep steer target,
+    command speed and ramp in brain+0x210/+0x220/+0x224 [orig: ctan
+    @ 0x489952 / @ 0x489811; cveh @ 0x48BD89 / @ 0x48BC35]. The port holds them
+    in `VehicleMotorState` and mirrors them back into brain[132]/[136]/[137]
+    after the ground/boat motor.
+
+Tests for items 3 through 14: `vehicle_motor` (`test_tank_npc_parent_coast_keeps_raw_servo`,
+`test_tank_crashed_vertical_velocity_arms`, `test_client_chase_family_gates`,
+`test_tank_crash_stop_needs_2ef`, `test_tank_impulse_pushes_velocity`,
+`test_slope_factor_samples_quantized_table`, `test_trails_sample_only_in_contact_arms`,
+`test_tank_and_bike_ignore_physics_selector`, `test_prediction_keeps_player_control_tail`,
+`test_prediction_latches_handbrake_from_claimant`, `test_mover_prologue_stamps_saved_live_pose`)
+and `vehicle_mount` (`test_mover_command_registers_are_the_brain_words`).
 
 ### 10.4 The aircraft local-driver input map
 
@@ -3848,7 +3935,7 @@ complete mission-level vehicle parity.
 | `[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]`, `@ 0x4929F6..0x492AC5` | TIRE00..05 are clamp(comp0), clamp(comp1), clamp((comp0+comp2)>>1), clamp((comp1+comp3)>>1), clamp(comp3), clamp(comp2). Average before clamping. |
 | Renderer table `@ 0x82CFD0..0x82D00F`; `[orig: HUD_CacheEntityDebugStats @ 0x449C10]`; `[orig: HUD_CacheInfantryDisplayInfo @ 0x48F1A0]` (the IDB name; a misnomer — the chel render cache: rotor `+0x466`, gear `+0x470`, view `+0x45E`; sections 14 and 16 use this one name); `[orig: HUD_CacheVehicleDisplayInfo @ 0x48F140]` | `render_function` selects independently of `move_function`. Tank WHEELS00..03 alternate unsigned track high words. Gun yaw/pitch use signed active-brain high words (`@ 0x449ECF..0x449EE2`). Ground, tank, helo and plane own different channel subsets; absent channels are released. The curated tank/helo function names were retained despite their misleading descriptions. |
 | `[orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]`, `@ 0x5294A8..0x5294D8`, `@ 0x52953B..0x52959D`; ground caller `@ 0x48D196..0x48D1B8` | A submerged player claimant takes the stop branch. Zero speed substitutes saved-live-pose XYZ displacement, then sqrt/clamp/truncate and the 256 deadband. Ground's speed denominator falls back to brain speed A, then command speed. |
-| `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, sound tail; `[orig: Entity_UpdateWatercraftPhysics @ 0x48D480]`, engine edge | Ground lights emit slot 24 on the rising edge. First claimant emits slot 30 when the occupant eye is above water. Claimant loss clears motion lanes and emits slot 31 subject to the hull water gate. Explicit detach clears the same latch, avoiding a second stop. Mover stop includes +0x18000 clearance; detach has its own gate. |
+| `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, sound tail; `[orig: Entity_UpdateWatercraftPhysics @ 0x48D480]`, engine edge | Ground lights emit slot 24 on the rising edge. First claimant emits slot 30 when the occupant eye is above water. Claimant loss clears motion lanes and emits slot 31 subject to the hull water gate. Explicit detach (`Entity_DetachFromVehicle @ 0x4355F0`, `@ 0x4356EF..0x435759`) clears the motion lanes and plays slot 31 on the departing occupant while its eye clears the water (`@ 0x43571B..0x43573E`), releases the +0x1CC smoke emitter and writes no +0x318 bit, so the mover's leave edge plays a second stop on the hull the next tick (tank `@ 0x48ADE9..0x48AE33`; corrected 2026-09-22, the port had cleared the latch). Mover stop includes +0x18000 clearance. |
 | Mounted panel gate `@ 0x5A5038` | A missing interface texture suppresses both silhouette and seats. A valid texture admits both. |
 | Critical warning (slot 34) cadence: `Entity_UpdateVehiclePhysics` `test bl,1Fh @0x48B08C`; `Entity_UpdateLightVehiclePhysics @0x48416C`; `Entity_UpdateTankVehiclePhysics @0x488C44`; `Entity_UpdateWatercraftPhysics @0x48D61F`; `Entity_ProcessInfantryPhysics @0x46E250..0x46E266`; `Entity_ProcessAirVehiclePhysics @0x46FB79`; `Entity_UpdateAircraftPhysics` `test byte ptr [esp+var_A4],3Fh @0x4904D7..0x4904F0` | The slot-34 warning fires on the `& 0x1F` (32-tick) phase for every mover except the direct-air family, which uses `& 0x3F` (64 ticks); the `0x3F` tests in the other movers are the authority health regen/drain cadence, not the warning. (Corrected 2026-09-08; `vehicle_motor::test_warning_cadence_by_family`.) |
 | Skid latch under the settle gate: cveh settle jump `@0x48D163..0x48D16A` lands ON the skid section `@0x48D264` (bit 8: and `@0x48D2C4`, set `@0x48D2EB`, clear `@0x48D345`); ctan's settle jump `@0x48AAB7..0x48AABE` lands at `0x48AD49` PAST its skid section `@0x48ABCB..0x48ACB5`; `flt_7C19E0` = 0x4EFFFE00 = 2147418112.0 | A settled cveh/cbik wreck still runs the skid latch/clear; only the tank skips it. The skid test is `ftol(min(sqrt(cx²+cy²+cz²), 2147418112.0)) != 0` with speed nonzero and `!(Flags & 0x2000)`. `+0x318` bit values: 1 claimant latch (`@0x48D3A5`), 2 reverse latch (`@0x48D1D7`), 4 lights latch (`@0x48D358`), 8 skid latch (`@0x48D2C4`), 0x20 a tank-only latch (`@0x48AAE0`). (Corrected 2026-09-08.) |
@@ -3941,12 +4028,14 @@ GUT exercises snapshot transport, renderer ownership and retail attachments.
 These checks establish the covered branches, not an exhaustive retail LAN
 or pixel-by-pixel comparison. D-NET-196 remains open for organic body-conform
 presentation and its authority smoothing arm, outside the vehicle consumers.
-D-NET-161 and D-SND-17 remain OPEN, narrowed to the residuals the 2026-09-08
-review witnessed and did not port (the bike off-contact launch-vector arm, the
-pool-3 deck-marker localization, the flare off28 target, the selector-zero boat
-part-spin call, the ground-height tap ray kinds, the `entity+684` step mirror,
-the emplacement brain dispatch; the tank fold's extra-effect argument and the
-sound-ready gate) — each with its witness in the ledger row.
+D-NET-161 remains OPEN, narrowed to the residuals the 2026-09-08 review
+witnessed and did not port (the pool-3 deck-marker localization, the flare
+off28 target, the ground-height tap ray kinds, the emplacement brain dispatch;
+the bike launch vector, the selector-zero boat part-spin call, the
+`entity+684` step mirror and the run-over player gates have since been ported),
+each with its witness in the ledger row. D-SND-17 closed 2026-09-22 when the
+tank fold's extra-effect argument (the yaw rate), the tread cue and the
+last-tick gate were ported (section 40).
 
 ## Section 12: model probe contacts and impact response (2026-09-07)
 
@@ -4142,10 +4231,14 @@ the impact sink.
 energy by half the low-dword spring/step product. The tank caps each step at
 1023. Grounded release uses
 [orig: Suspension_OscillateWheel @ 0x45D240] with the slow float phase step
-0.08722222596406937; airborne wheels do not run free oscillation. The common
-tail releases compression into the latest positive terrain gap
-[orig: @ 0x4790A1..0x4792FE]. `vehicle_suspension` exercises these numerical
-boundaries; `vehicle_motor` covers the integrated family path.
+0.08722222596406937; airborne wheels do not run free oscillation. The upright,
+uncrashed grounded tail releases compression into each positive terrain gap
+[orig: @ 0x4790A1..0x4791B3 settled, @ 0x479205..0x47930F otherwise]; the
+airborne branch (which jumps to `0x479445`, `@ 0x478B54` / `@ 0x478B64`) and the
+crashed/inverted grounded path (`@ 0x479311..0x479318`) keep their compression.
+(Corrected 2026-09-22: the earlier text had a common-tail release.)
+`vehicle_suspension` exercises these numerical boundaries; `vehicle_motor` and
+`vehicle_followups` (`tank_airborne_tail`) cover the integrated family path.
 
 The grounded catch-up (2026-09-08): `mov eax,[eax]; sub eax,0FAh; test eax,eax;
 jle loc_478E27` `@0x478DC0..0x478DC9` returns before the same-side pair-clear
@@ -4330,15 +4423,25 @@ physics before authority-only removal/respawn decisions. A player-controlled
 wreck is removed when flag 0x1000 is set or vehicle respawn is disabled. After
 15 ticks, a nonzero cooldown decrements; a transition from one to zero restores
 one and returns, while other values continue. The overlay-wait arm moves the
-wreck by 5000 units in X/Y and buries it 1000 below terrain. Otherwise the saved
-pose/team and waypoint registers are restored before `Entity_RespawnVehicle
+wreck by 5000 units in X/Y and buries it 1000 below terrain
+(`Terrain_SampleHeightBilinear @0x6067B0`, call `@0x467F3C`). Otherwise the saved
+pose/team and the route from the AiSlot words +0x94/+0x98 (`@0x468005..0x46801D`)
+are restored before `Entity_RespawnVehicle
 @0x45FF40` (the IDB name; the PR's `Entity_Respawn` → `Entity_InitFromItemDef`
 chain was wrong — its callees are `Entity_ClearSuspensionState`,
 `EntityDef_LoadModelsAndCallbacks`, `Entity_BuildProximityListsFromPools`,
 `Entity_RaycastGroundHeightAndObject`, `Math_BuildFixedPointMatrixFromEulerAngles`,
 `EntityList_ClearParentRef` and `CEffectEmitter_ReleaseSafe` on `+0x1CC`
 `@0x460199` / `+0x400` `@0x4601b2`; it zeroes the words `+0x138` `@0x4600ae` and
-`+0x1AC` `@0x46006e` and pends `cur == 15 ? 14 : 22` `@0x460130`).
+`+0x1AC` `@0x46006e` and pends `cur == 15 ? 14 : 22` `@0x460130`). Its first
+act re-runs the class's ItemDef+0x148 init (`@0x45FF53..0x45FF68`, then
++0x468/+0x460 = 0 `@0x45FF6D..0x45FF73`): `Entity_InitVehicleAIFromDef
+@0x4686C0` stamps the class, keeps an existing brain, copies the slot route raw,
+seeds the weapon ammo gated on the profile's resolved ammo bytes
+(`@0x468882..0x4688B7`), the speeds, the turret, step 16 with its stagger, the
+current state's enter and the gunner setup; the helicopter twin is `@0x4683C0`.
+It also zeroes the kill credit +0x178 (`@0x460074`). Ported 2026-09-22 as
+`VehicleSystem::rerun_class_init` at the head of `VehicleSystem::respawn`.
 The implemented reset restores health, clears seats and death state, resets
 motion/springs/chassis and controls, sets flags to preserved 0x400 plus 0x22000,
 sets vertical speed to -501, and resamples the ground. Not re-witnessed at the
@@ -4350,13 +4453,21 @@ three event-driven bank releases plus `vehicle_release_damage_effects`
 above (`Entity_RaycastGroundHeightAndObject(entity,0,0,0x10000,0x100000)`, Z =
 ground + brain[11], water clamp, Flags |= 0x40, `+0x2A4` = Z, `+0x165` = `+0x162`,
 the update callback, `+0x264` = groundEntity, `Entity_TransformWorldToLocal` into
-`+0x24C`); it then seeds `thinkCooldown` (`+0x128`) = `aiSlot[18] / 31`
-`@0x526071..0x526095` (`imul 0x84210843; sar 5`) for each hull with an AI slot —
-promote seeds slot[18] = 62·spawns, so the budget is 2·spawns, and
-`AI_TickState_VehicleDead` consumes one per respawn and holds at 1
-`@0x467eff..0x467f1c` (`vehicle_lifecycle.cpp initialize_mission_vehicles`,
-ported 2026-09-08). The pool-3 spawn-MARKER leg that precedes it is NOT ported —
-section 25.
+`+0x24C`); it then seeds `thinkCooldown` (`+0x128`) = `aiSlot[18] / 62`
+`@0x526079..0x52608F` (`imul 0x84210843; add edx, ecx; sar 5`, the sign fix: the
+dividend add-back makes it a signed divide by 62, not 31) for each hull with an AI
+slot. The spawn seeds slot[18] = 62 times the authored spawn count (record +0x3E,
+`Entity_SpawnFromBMSRecord @0x40EFE4..0x40EFF4`, def gate AI attrib 0x100000
+`@0x40ED4E`), so the budget is the spawn count, and `AI_TickState_VehicleDead`
+consumes one per respawn and holds at 1 `@0x467eff..0x467f1c`
+(`vehicle_lifecycle.cpp initialize_mission_vehicles`, ported 2026-09-08; the /62
+divide and the vehicle slot seed, `promote.cpp init_ai_slot`, corrected
+2026-09-22: before that promote seeded organics only, so a vehicle's budget was 0,
+which meant unlimited respawns). On jox01 07TR the enemy hulls author zero spawns
+and no route, so their budget stays 0 there (unlimited respawns, as retail's
+0 / 62), and their respawn route comes from the slot words the event redirects
+wrote. The pool-3 spawn-MARKER leg that
+precedes it is NOT ported — section 25.
 
 `vehicle_lifecycle.cpp` owns these transitions. `destruction` tests cover the
 15/16-tick boundary, cooldown one/two, team/health/suspension restoration,
@@ -4764,7 +4875,13 @@ posed bounds. Heavy projectile hits use incoming projectile velocity,
 the signed wrapped weight threshold and the original two-stage force
 assignment. The contact solver preserves that impulse across its first
 solve. [orig: Entity_InitVehicleSuspensionGeometry @ 0x474580;
-Entity_SetupInfantryForcePoints @ 0x475220]
+Entity_SetupInfantryForcePoints @ 0x475220] The tank translates under it:
+while the +0x3EC direction is nonzero, dir × trunc(+0x3FC × 28.16f)
+(`flt_7C6FA0`) joins vel_x, vel_y and slideDecay every tick (Q16, round half
+up), after the crash-settle zero and before integration, and the direction
+clears once +0x3DC drops; only the tank mover reads the impulse
+[orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, @ 0x48A8C0..0x48A9C0]
+(ported 2026-09-22, `vehicle_motor::test_tank_impulse_pushes_velocity`).
 
 The bike's head-on test considers wall normals, normalizes the complete
 velocity, and uses the -57070 dot threshold. Its severity bands preserve
@@ -4804,7 +4921,12 @@ missing point. Camera admission, the quarter-rate/even-tick family cadence,
 wet/dry release edges, full placement transforms and the wrapped magnitude
 calculation are preserved. The Godot VehicleTrailPresenter follows these
 sampled points and retires groups by registry lifetime.
-[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]
+[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0] The ground-family movers
+sample their trails only at the end of the contact arms; the airborne and
+off-contact arms jump past them [orig: ctan @ 0x48A60D..0x48A67F vs
+@ 0x48A684; cveh @ 0x48CD93..0x48CDFD vs @ 0x48CE02; cbik
+@ 0x486170..0x4861F1 vs @ 0x4861F6] (ported 2026-09-22,
+`vehicle_motor::test_trails_sample_only_in_contact_arms`).
 
 Proof: `destruction`, `watercraft_client_motor`, GUT
 `destruction_present_pass_test.gd` and
@@ -5017,7 +5139,11 @@ with NO fold when all zero `@0x4715AA..0x4715C6`, fold (isColliding 0)
 claimant edge, NO part spin, NO timer. The reverse-shift (slot 32) `PlaySound`
 sites are `@0x46F883` (ground) and `@0x471621` (boat) — the old D-SND-17 tail's
 "aircraft slot-30 start" reading of those two addresses was wrong. The
-`dword_24E0E80` sound-ready gate itself has no reimpl equivalent (D-SND-17).
+`dword_24E0E80` gate is the outer loop's last-tick-of-batch flag
+(`Game_MainLoop` `@0x52BA24..0x52BA3A`), carried as
+`World::rules.last_tick_of_batch` and applied at both twins' folds and the
+ground twin's inline high-rev (`@0x46F7C8..0x46F7CE`) since 2026-09-22
+(D-SND-17 closed).
 
 vehicle_simple_contact.cpp preserves the crossed four-pad order plus
 three upper probes, the second pass's old-depth-plus-half-old/new sum,
@@ -5081,6 +5207,8 @@ also checking the authoritative pose and mounted prediction order.
 |---|---|---|---|
 | D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` zeroes the removed slot and shifts the suffix (`@0x5DDDCB..0x5DDDFC`) without ever clearing slot 127; `sub_5DDE10 @ 0x5DDE10` steps its cursor back onto the removed index (`@0x5DDEAD..0x5DDEC0`) | PERMANENT — proposed in PR #640 (2026-09-07), requires maintainer ratification at merge (no sign-off recorded yet; [ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register) original-bug class): a completely full bank otherwise re-copies and re-expires the duplicated final row forever. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
 | D-VEH-3 | Player steering reads the full BAM heading; analog input clears inactive digital direction; prior brake state and the retained +0x3C8 direction select the original ground/bike branches. | Ground @ 0x48B847..0x48C095 and bike @ 0x48496D..0x48526F; section 39. | FIXED 2026-09-18 in PR #652. 640 original-instruction command-state vectors cover heading precision, analog cancellation, stale directions and brake transitions. |
+| D-VEH-4 | Pointer row: owned by the [tank record](tank-parity-re.md#divergence-catalog). Tank corner support now uses merged wheel/belly contact, clears the sinks on a supported diagonal and keeps each corner's drop in the airborne fit. | `Entity_ProcessWheeledVehiclePhysics @ 0x475DE0`: merge @ 0x4784CC, growth @ 0x478510, catch-up @ 0x478DA4, diagonal @ 0x478FF2..0x479040, tail @ 0x47931B..0x47934C, fit call @ 0x478B1C | Minted-and-closed 2026-09-22 (FIXED) in PR #671; `vehicle_followups`. |
+| D-VEH-5 | Pointer row: owned by the [tank record](tank-parity-re.md#divergence-catalog). The Godot gameplay and Inset cameras stamp a basis built from the composed angles instead of `look_at(eye + forward)`. | Retail builds the view from the euler triple: `Viewport_BuildProjectionMatrix @ 0x410FB0`, rotations @ 0x4112A4..0x4112EB | Minted-and-closed 2026-09-22 (FIXED) in PR #671; a presentation precision fix for every far-from-origin view, filed here where it was found. GUT `local_player_presenter_test.gd`, `game_hud_presenter_declutter_test.gd`. |
 
 ## 35. Ground and boat pedal view turn
 
@@ -5202,9 +5330,15 @@ existing working speed, so a fresh brain's zero stays zero through the mover's
 hand-back. `vehicle_motor` now requires the fresh routeless hull to stay exactly
 still from its first tick. [orig: Entity_UpdatePool1Slot @ 0x4B8DD0
 (callback @ 0x4B8E3C, motor @ 0x4B8E53); D-AI-14 in the world record.]
-Residuals noted, not
-ledgered: `AiEntity::arrival_prox` (retail def+2340) is never stamped, so a brain
-entering GROUND_EVADE with the flee goal stays in row 18; `AiEntity::has_physics`
+The former
+`AiEntity::arrival_prox` residual is resolved (2026-09-22): the patrol arrival
+proximity is the def's +0x924 turn-rate word (`VehicleTraits::turn_rate`), read
+live against brain[132] [orig: AI_UpdatePatrolBehavior, `@0x457DCB..0x457DD4`],
+which the ground/tank mover now mirrors back each motor pass (§10 item 14), and
+`h_vehicle_dying_tick` zeroes the mover's command speed with brain[136]
+[orig: AI_TickState_VehicleDying, `mov [esi+220h], ebx` @0x467D83]. Residual
+noted, not
+ledgered: `AiEntity::has_physics`
 (the entity+368 stand-in) defaults true for promoted vehicles while retail's +368
 is null until a driver boards.
 
@@ -5380,9 +5514,17 @@ parity. [orig: Entity_UpdateWatercraftPhysics @ 0x48D480]
 
 The [tank record](tank-parity-re.md) owns D-VEH-4/5, D-CTRL-5 and D-HUD-29:
 merged wheel/belly support and airborne corner-fit corrections, camera basis
-precision, wheel signs and HUD snapshot consumption. It also narrows D-SND-17:
+precision, wheel signs and HUD snapshot consumption. It also closes D-SND-17:
 the fourth loop uses yaw rate (`entity+0xA4`), not `slide_z` (`+0xA0`) as the
-older review stated. Its pivot-start cue, latch transitions and lane-40 loop
-are ported with authority/client regression coverage; the shared sound-ready
-gate remains open. Installed stock and JOTAC assisted 07TR course runs pass;
-complete live-retail/normal-input acceptance remains unverified there.
+older review stated, and the pivot-start cue, latch transitions and lane-40
+loop, the slot-45 tread cue, the corrected claimant detach stop and the shared
+last-tick gate are ported. The PR #671 review fix round, recorded in that
+record's witness map, also ported the tank solve's crash, wreck, wall and
+stability machinery (§8), the tank mover's impulse, crash stop, trails, slope
+table, NPC-parent coast, dispatch and per-family client chase gates (§10), the
+AI boarder hold, route writers, turn budget and submerged-driver cut (world
+record §23.3 and §23.4), the vehicle AI slot seed and respawn class init
+(section 18), and the ground-family mover-head savedLivePose stamp (§10 item
+13). Installed stock and JOTAC assisted 07TR course
+runs pass; complete live-retail/normal-input acceptance remains unverified
+there.

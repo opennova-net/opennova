@@ -75,7 +75,19 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
   points from the primary model's bone user-points: `"sitex"` → `seatMask`
   `+0x25c` bit + `seatBoneIndex[8]` `+0x25d`; `"ctrlx"`/`"drvrx"` →
   `controlBone` `+0x265`; `"UseGun"` → `useGunBone` `+0x266`. `type==8`
-  (effect) and `type==3` (person) take special branches.
+  (effect) and `type==3` (person) take special branches. The seat walk
+  (`@0x43A47B..0x43A5CD`) zeroes the slot bytes (`@0x43A47B`,
+  `@0x43A484` / `@0x43A48A`) and scans the raw userpoint names (+0x20, 48-byte
+  stride, no trim): `sitex`, `ctrlx` and `drvrx` are five-character
+  `strnicmp` prefixes (`@0x43A4BC`, `@0x43A50B`, `@0x43A549`; the seat store
+  `seatBoneIndex[passengers++] = row + 1` `@0x43A4F0`), `UseGun` a whole-name
+  `_stricmp` (`@0x43A582`); the last match wins for `controlBone` and
+  `useGunBone` (`@0x43A532`, `@0x43A570`, `@0x43A5A9`), and `cmp ebp, 8; jg`
+  (`@0x43A5AF`) ends the scan after a ninth `sitex`, whose store lands on
+  `controlBone` (+0x25D + 8). Ported 2026-09-22 as `extract_seats`
+  (`mission/seat_spec_extract.cpp`, ctest `mission_seat_spec_extract`); no stock
+  JOX model has more than eight `sitex` rows, a second `ctrlx`/`drvrx` or a
+  suffixed or padded `UseGun`, so stock seat tables are unchanged.
 - **`Entity_InitFromItemDef @ 0x49e550`** — the item-template→entity copy
   (table below).
 
