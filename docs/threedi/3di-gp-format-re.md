@@ -204,10 +204,13 @@ and advances the class tail once before organic attachment poses.
 WeaponAction_ProcessFrame @ 0x541262..0x54129B]
 
 `HUD_CacheWeaponSlotInfo` zero-extends `+0x320` into the value dword at
-`0x83FEB0`, global ordinal **57 (`WEAP_SPIN`)**. Its attachment caller
-caches the parent immediately before evaluating the parent's PANM.
+`0x83FEB0`, global ordinal **57 (`WEAP_SPIN`)**. It is the 'ewep' render
+class's CTRL callback (def+0x144), so it runs before every render, userpoint
+transform and attachment frame of the gun, manned or not; a UseGun rider's
+seat attach also calls it directly on the parent carrier, immediately before
+evaluating the parent's PANM (corrected 2026-09-22).
 [orig: HUD_CacheWeaponSlotInfo @ 0x440955;
-Entity_AttachToBoneAndUpdateTransform @ 0x546518..0x54652B]
+Entity_AttachToBoneAndUpdateTransform @ 0x546517..0x54652B]
 
 The phase now travels beside the existing emplaced yaw/pitch words through
 simulation and collision poses, mounted attachments, placed/wire model
@@ -420,11 +423,23 @@ The currently hosted writer-value families are:
   This is a fixed semantic mapping, not a walk over model
   CTRL order `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator
   @ 0x456710; HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38]`.
-- `HEAT_GLOW` (54) is live: the attachment path writes it at `0x440969` and
-  `0x440991` while resolving the parent carrier's PANM/bones for a live UseGun
-  child, and the first-person viewmodel writes it at `0x4DEEC2..0x4DEEF5`
-  `[orig: HUD_CacheWeaponSlotInfo @ 0x440930, sole caller
-  Entity_AttachToBoneAndUpdateTransform @ 0x546518;
+- `HEAT_GLOW` (54) is live: the 'ewep' render class's CTRL callback
+  `HUD_CacheWeaponSlotInfo @ 0x440930` writes it at `0x440969`/`0x440991`
+  before every render, userpoint transform and attachment frame of the gun,
+  occupied or not; a UseGun rider's seat attach also calls it directly on its
+  parent carrier (`@ 0x546517..0x546518`), and the first-person viewmodel
+  writes it at `0x4DEEC2..0x4DEEF5`. OpenNova publishes per entity: for every
+  'ewep' render class (`Entity::emplaced_ctrl_publisher`), and for any other
+  class only while a UseGun rider's seat call writes the carrier. Retail's bus
+  is process-global and keeps the last writer's words, so a non-ewep
+  carrier's frames there read whatever the last writer left (D-3DI-2).
+  (Corrected 2026-09-22: the earlier text named the seat attach as the sole
+  caller.) `[orig: HUD_CacheWeaponSlotInfo @ 0x440930, render-class row
+  'ewep' @ 0x82CFA0 installed by BoneCallback_LookupByTag
+  @ 0x4E32ED..0x4E3306; def+0x144 callers Entity_RenderVehicleModel
+  @ 0x440852..0x440866, Entity_ComputeUserpointWorldTransform
+  @ 0x545CA3..0x545CAE, Entity_ComputeUserpointTransform @ 0x545A89..0x545A94,
+  build_bone_attachment_matrix @ 0x56C6DC..0x56C6F3;
   Player_RenderFirstPersonViewModel @ 0x4DED60]`.
 - `TALK` (5) and `DEATH` (6) have exactly one retail writer, the org0 skin
   bone-callback `BoneCallback_org0_Skin @ 0x4E3620` (world-wac-ai-re §13.6):
