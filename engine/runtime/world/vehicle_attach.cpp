@@ -156,12 +156,20 @@ Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
 }
 
 Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
-    // USE scores the live bone matrix, just as the seated body follows it.
-    // A rest-only point targets the wrong hatch when a turret is animated.
-    // [orig: build_bone_attachment_matrix @0x435FE7 / labels @0x5A3553]
+    // USE scores every seat kind (sitex, ctrlx, drvrx and UseGun alike) at
+    // its live bone through the carrier's attachment build: the carrier's
+    // render-class CTRL callback, then its PANM/bones. That is the provider's
+    // attachment-frame form, whatever the seat's own kind. A rest-only point
+    // targets the wrong hatch when a turret is animated.
+    // [orig: Entity_FindNearestSeatOrArmory seat kinds @0x435F6C..0x435FDF ->
+    //  build_bone_attachment_matrix @0x435FFA (its def+0x144 call
+    //  @0x56C6DC..0x56C6F3); labels @0x5A3553]
+    Seat query = s;
+    query.type = SeatType::Gunner;
+    query.attachment_frame = true;
     MountedPose pose;
     if (world.pose_provider != nullptr &&
-            world.pose_provider->resolve_mounted_pose(world, veh, s, pose))
+            world.pose_provider->resolve_mounted_pose(world, veh, query, pose))
         return pose.position;
     return local_point_world_pos(veh, s.seat_local);
 }
