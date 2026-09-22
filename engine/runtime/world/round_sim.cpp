@@ -140,16 +140,17 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
                                  std::sin(phase))};
 }
 
-// Queue an explosive round's kill zone at its stop. Knife/medic/bullet classes
-// never take this projectile detonation path. Shared with the throwable
-// motors [orig: WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0].
+// The raw kill-zone push every projectile producer shares: the stop position,
+// the round's angles, the ammo's kztype word as the entry type, the ammo, the
+// owner and the shot word, with a zero radius override. It tests nothing:
+// each producer applies its own kztype / arm-age / damage gates before the
+// call, and the drain's type switch and radius check decide what the entry
+// does (a kztype-2 bullet entry is queued and then dies at the zero-radius
+// check). Shared with the throwable motors.
+// [orig: WeaponEffect_PushExplosionQueueEntry @ 0x4E83C0 — the type from word
+//  +0x2C @0x4E842E, the radius override fldz @0x4E83FA / fstp @0x4E8432]
 void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
                     const AmmoTableEntry &ammo) {
-    if (ammo.kz_maxradius <= 0.0f || ammo.kz_damage == 0) return;
-    if (ammo.kztype != ammo_kz::kStandard &&
-        ammo.kztype != ammo_kz::kRadiusBlast &&
-        ammo.kztype != ammo_kz::kC4 && ammo.kztype != ammo_kz::kSlash)
-        return;
     ExplosionEntry explosion;
     explosion.pos = at;
     explosion.dir_bam = round.yaw_bam; // [orig: entry dir <- the round angles]
@@ -159,6 +160,48 @@ void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
     explosion.hit_word = round.shot_seq;
     explosion.radius_override = 0.0f;
     world.explosions.queue_explosion(world, explosion);
+}
+
+// The pool-0 walk counts a candidate with an ItemDef and no Flags & 2 whose
+// groundEntity is the vehicle, or whose groundEntity's own groundEntity is.
+// Both hops read the same +0x28 link and neither tests the mounted flag:
+// the organic movers refresh a seated body's groundEntity from its parent
+// every update, so riders, a gunner on a deck gun and bodies standing on the
+// deck all count. [orig: Entity_CountMountedEntities @ 0x435970 — the ItemDef
+// and Flags & 2 skips @0x4359A9..0x4359B2, `mov ecx, [ecx+28h]` @0x4359B4,
+// the second hop @0x4359BB..0x4359C2]
+int vehicle_occupant_count(const World &world, EntityHandle vehicle) {
+    int count = 0;
+    world.registry.for_each_in_pool(0, [&](const Entity &candidate) {
+        if (!candidate.has_item_def) return;
+        if ((candidate.flags & 2u) != 0) return;
+        if (candidate.ground_target == vehicle) {
+            ++count;
+            return;
+        }
+        const Entity *ground = world.registry.get(candidate.ground_target);
+        if (ground != nullptr && ground->ground_target == vehicle) ++count;
+    });
+    return count;
+}
+
+// A vehicle (ItemDef type 1) hit by positive damage with more than one
+// occupant keeps damage - ftol(damage * min(count * damage_reduc_pp,
+// damage_reduc_max)). Both the round and the blast paths call it.
+// [orig: Entity_ApplyOccupantDamageScale @ 0x4E5A50 — type/damage gates
+//  @0x4E5A58..0x4E5A66, count @0x4E5A69, the max clamp @0x4E5A87..0x4E5A99,
+//  the truncated product @0x4E5AA5..0x4E5AB0]
+int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
+                                     int32_t damage) {
+    if (target.item_type != 1 || !target.has_item_def || damage <= 0) return damage;
+    const int count = vehicle_occupant_count(world, target.handle);
+    if (count <= 1) return damage;
+    double factor = static_cast<double>(count) *
+                    static_cast<double>(target.damage_reduc_pp);
+    if (factor > static_cast<double>(target.damage_reduc_max))
+        factor = static_cast<double>(target.damage_reduc_max);
+    const int32_t reduction = static_cast<int32_t>(static_cast<double>(damage) * factor);
+    return damage - reduction;
 }
 
 namespace {
@@ -632,41 +675,6 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
     //  leg @0x4ecc38..0x4ecc42]
     apply_aerodynamic_drag(velocity_q16, ammo, 0, 0, kPersonHitDragSurface);
     return damage;
-}
-
-// [orig: Entity_CountMountedEntities @ 0x435970] The pool-0 walk counts a live
-// candidate whose ATTACH parent (+40 — our mount_target) is the vehicle, or
-// whose attach parent's groundEntity (+0x28 — our ground_target) is: a person
-// seated on a deck-standing gun counts toward the carrier. Deck-standers with
-// no attach do not count.
-int vehicle_occupant_count(const World &world, EntityHandle vehicle) {
-    int count = 0;
-    world.registry.for_each([&](const Entity &candidate) {
-        if (candidate.handle.pool() != 0) return;
-        if (!candidate.has_item_def) return;
-        if ((candidate.flags & 2u) != 0) return;
-        if (!candidate.mounted) return;
-        if (candidate.mount_target == vehicle) {
-            ++count;
-            return;
-        }
-        const Entity *carrier = world.registry.get(candidate.mount_target);
-        if (carrier != nullptr && carrier->ground_target == vehicle) ++count;
-    });
-    return count;
-}
-
-int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
-                                     int32_t damage) {
-    if (target.item_type != 1 || !target.has_item_def || damage <= 0) return damage;
-    const int count = vehicle_occupant_count(world, target.handle);
-    if (count <= 1) return damage;
-    double factor = static_cast<double>(count) *
-                    static_cast<double>(target.damage_reduc_pp);
-    if (factor > static_cast<double>(target.damage_reduc_max))
-        factor = static_cast<double>(target.damage_reduc_max);
-    const int32_t reduction = static_cast<int32_t>(static_cast<double>(damage) * factor);
-    return damage - reduction;
 }
 
 // Normalized flight direction for the impact descriptor
@@ -1499,9 +1507,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // [orig: Projectile_UpdatePhysics @ 0x4e9da7..0x4e9f4e].
         if (r.det_at_expiry || (r.guided_family != GuidedFamily::None && (r.guided.flags & 1)) || r.age_ticks >= r.max_age_ticks) {
             // Only rounds the motor armed detonate at this head; an ordinary
-            // ballistic lifetime expiry vanishes silently.
+            // ballistic lifetime expiry vanishes silently, and so does an armed
+            // round whose ammo carries no kill-zone class: the push and the
+            // obj-row effect both sit behind the kztype test.
+            // [orig: Projectile_UpdatePhysics — the flag test @0x4E9DC6, the
+            //  kztype producer gate @0x4E9DDC..0x4E9DE1 (jz to the release),
+            //  the push @0x4E9E03]
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
-            if (fuze_ammo != nullptr && r.det_at_expiry) {
+            if (fuze_ammo != nullptr && r.det_at_expiry && fuze_ammo->kztype != 0) {
                 if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
                 if (impacts.size() < kMaxPendingImpacts) {
                     RoundImpact imp;
@@ -2023,11 +2036,56 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                            scar_ammo != nullptr ? scar_ammo->scar_type : 0);
         }
 
-        // Every explosive round stop queues its authored kill zone. The queue
-        // drains after the round simulation, preserving direct-hit-before-AoE
-        // consequence ordering.
-        if (authoritative && ammo != nullptr)
-            detonate_round(world, r, impact_position, *ammo);
+        // The kill-zone producer of each impact handler, with that handler's own
+        // gates ahead of the shared push; the queue drains after the round
+        // simulation, preserving direct-hit-before-AoE consequence ordering.
+        //  - terrain: any kill-zone class on an armed round [orig:
+        //    Projectile_HandleTerrainImpact @0x4E928C (kztype) /
+        //    @0x4E9292..0x4E92A1 (arm age), push @0x4E92C0];
+        //  - item: the damage call absorbed the round (an ItemDef, and a face
+        //    material outside 7/15/16/17/19, which pass through), a kill-zone
+        //    class and an armed round [orig: Projectile_HandleEntityImpact
+        //    @0x4E9866 (absorbed), @0x4E986E (kztype), @0x4E9875..0x4E9884
+        //    (arm age), push @0x4E98A2; the returns of
+        //    Projectile_ProcessDamageOnTarget @0x4E7FCB / @0x4E823D..0x4E8266];
+        //  - person: a kill-zone class, an armed round, the session authority
+        //    and a nonzero kz_damage [orig: Projectile_HandleTerrainImpact_0
+        //    @0x4E9AE2..0x4E9B08, push @0x4E9B26];
+        //  - water: the lifetime is halved first, then only an ODD class
+        //    passes the compiled `!prearm & kztype` bit test, and the halved
+        //    age must strictly pass the arm age [orig:
+        //    Projectile_SpawnImpactEffect @0x4E9C40..0x4E9C62, push @0x4E9C81].
+        if (authoritative && ammo != nullptr) {
+            const bool armed = r.age_ticks >= ammo->arm_age_ticks;
+            bool produce = false;
+            switch (collision.hit_class) {
+                case ProjectileHitClass::Terrain:
+                    produce = ammo->kztype != 0 && armed;
+                    break;
+                case ProjectileHitClass::StaticEntity:
+                case ProjectileHitClass::DynamicEntity: {
+                    const int32_t material = collision.surface_type;
+                    const bool absorbed = target != nullptr && target->has_item_def &&
+                            material != 7 && material != 15 && material != 16 &&
+                            material != 17 && material != 19;
+                    produce = absorbed && ammo->kztype != 0 && armed;
+                    break;
+                }
+                case ProjectileHitClass::Person:
+                    produce = ammo->kztype != 0 && armed && ammo->kz_damage != 0;
+                    break;
+                case ProjectileHitClass::Water: {
+                    const int32_t remaining = r.max_age_ticks - r.age_ticks;
+                    const int32_t halved_age = r.max_age_ticks - (remaining >> 1);
+                    produce = armed && (ammo->kztype & 1) != 0 &&
+                              halved_age > ammo->arm_age_ticks;
+                    break;
+                }
+                default:
+                    break;
+            }
+            if (produce) detonate_round(world, r, impact_position, *ammo);
+        }
 
         RoundDebugEvent event;
         event.tick = world.logic_tick;

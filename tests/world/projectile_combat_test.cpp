@@ -1827,7 +1827,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     child->item_type = 3;
     child->item_attrib = 0x20u;
     child->ground_target = vehicle_h; // the one-hop damage rollup channel
-    child->mounted = true;            // the retail +40 attach the occupant scan reads
+    child->mounted = true;
     child->mount_target = vehicle_h;
     child->has_item_def = true;
 
@@ -1846,8 +1846,11 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
         CHECK(r.world.round_sim.impacts[0].effect_tag == 23);
     };
     // [orig: Entity_CountMountedEntities @ 0x435970] Occupants are counted by
-    // the ATTACH parent, not by standing: candidate.mount_target == vehicle, or
-    // the candidate's carrier stands on the vehicle (carrier.ground_target).
+    // the groundEntity link alone (+0x28, both hops @0x4359B4..0x4359C2): the
+    // candidate's own link is the vehicle, or its link's link is. A seated
+    // rider carries its parent there because the organic movers refresh it
+    // every update [orig: Entity_UpdateInfantryPlayerBody @0x4B41A2..0x4B41B4],
+    // which these riders mirror.
     const auto add_rider = [&](EntityHandle mount, uint32_t flags = 0,
                                int pool = 0) {
         Entity rider;
@@ -1859,6 +1862,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
         rider.flags = flags;
         rider.mounted = true;
         rider.mount_target = mount;
+        rider.ground_target = mount;
         return r.world.registry.spawn(pool, rider);
     };
 
@@ -1870,7 +1874,8 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     const EntityHandle nested = add_rider(r.target);
     fire_expect(76); // count 3: 0.30 capped to 0.25; trunc(25.25) = 25
 
-    add_rider(vehicle_h, 0x2u);
+    const EntityHandle flagged = add_rider(vehicle_h, 0x2u);
+    CHECK(flagged.valid());
     fire_expect(76); // Flags&2 occupants are excluded
 
     CHECK(add_rider(vehicle_h, 0, 1).valid());
@@ -1886,18 +1891,35 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     CHECK(r.world.registry.spawn(0, no_item_def).valid());
     fire_expect(76); // a pool-0 slot without an ItemDef pointer is also excluded
 
+    // Lift the cap so the count itself is observable: 3 x 0.10 -> 30.
+    r.world.registry.get(vehicle_h)->damage_reduc_max = 0.5f;
+    fire_expect(71);
+
     Entity deck_stander;
     deck_stander.kind = EntityKind::Organic;
     deck_stander.has_item_def = true;
     deck_stander.item_type = 3;
     deck_stander.position = {100.0f, 100.0f, 100.0f};
     deck_stander.health = 100;
-    deck_stander.ground_target = vehicle_h; // standing on the deck, not attached
-    CHECK(r.world.registry.spawn(0, deck_stander).valid());
-    fire_expect(76); // retail counts the +40 attach chain, never plain standing
+    deck_stander.ground_target = vehicle_h; // standing on the deck, not seated
+    const EntityHandle deck = r.world.registry.spawn(0, deck_stander);
+    CHECK(deck.valid());
+    fire_expect(61); // a deck stander counts: 4 x 0.10 -> trunc(40.4) = 40
 
-    add_rider(nested);
-    fire_expect(76); // two intermediates deep is outside the retail count
+    // A seat parent alone, without the groundEntity link, is not what the
+    // scan reads (the pool is full: reuse the deck stander's row).
+    Entity *seated = r.world.registry.get(deck);
+    seated->ground_target = EntityHandle{};
+    seated->mounted = true;
+    seated->mount_target = vehicle_h;
+    fire_expect(71);
+
+    // Two intermediates deep is outside the retail count.
+    Entity *deep = r.world.registry.get(flagged);
+    deep->flags = 0;
+    deep->mount_target = nested;
+    deep->ground_target = nested;
+    fire_expect(71);
 }
 
 void test_retail_force_order_and_stock_gates() {
@@ -2914,6 +2936,9 @@ void test_guided_round_uses_live_target_ammo_and_pool_lifetime() {
     CHECK(round.yaw_bam==-1000000); // ammo's yaw limit, not a fixed default
     CHECK(round.vel.x>3.9f && round.vel.x<=4.0f); // this ammo's 248 u/s
     CHECK(round.guided.target==rig.target.packed);
+    // The armed head presents its obj row only for a kill-zone class
+    // [orig: Projectile_UpdatePhysics @0x4E9DDC].
+    ammo.kztype=ammo_kz::kStandard;
     round.guided.flags|=1; round.det_at_expiry=true;
     world.round_sim.tick(world,nullptr);
     CHECK(!round.active && world.round_sim.find_guided(77)==nullptr);
@@ -2923,7 +2948,158 @@ void test_guided_round_uses_live_target_ammo_and_pool_lifetime() {
     CHECK(world.round_sim.find_guided(77)==nullptr);
 }
 
+// The armed-expiry head pushes the kill zone, and presents its obj row, only
+// for an ammo with a kill-zone class; a kztype-0 armed round releases
+// silently. [orig: Projectile_UpdatePhysics @0x4E9DC6 (flag), @0x4E9DDC..
+// 0x4E9DE1 (kztype), push @0x4E9E03]
+void test_armed_expiry_detonates_only_a_kill_zone_class() {
+    for (int32_t kztype : {0, static_cast<int32_t>(ammo_kz::kBullets)}) {
+        Rig r;
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
+        ammo.kztype = kztype;
+        ammo.kz_damage = 50;
+        ammo.kz_maxradius = 4.0f;
+        const int slot = r.fire();
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        r.world.round_sim.rounds[static_cast<size_t>(slot)].det_at_expiry = true;
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(!r.world.round_sim.rounds[static_cast<size_t>(slot)].active);
+        if (kztype == 0) {
+            CHECK(r.world.explosions.queue.empty());
+            CHECK(r.world.round_sim.impacts.empty());
+        } else {
+            CHECK(r.world.explosions.queue.size() == 1);
+            if (!r.world.explosions.queue.empty())
+                CHECK(r.world.explosions.queue[0].type == ammo_kz::kBullets);
+            CHECK(r.world.round_sim.impacts.size() == 1);
+            if (!r.world.round_sim.impacts.empty())
+                CHECK(r.world.round_sim.impacts[0].effect_tag == 4);
+        }
+    }
+}
+
+// Each impact handler has its own kill-zone producer gates and none of them
+// filters the class beyond nonzero: the person handler needs the class, an
+// armed round, the authority and a nonzero kz_damage; the terrain handler
+// only the class and an armed round.
+// [orig: Projectile_HandleTerrainImpact_0 @0x4E9AE2..0x4E9B08 -> @0x4E9B26;
+//  Projectile_HandleTerrainImpact @0x4E928C..0x4E92A1 -> @0x4E92C0]
+void test_impact_producers_apply_their_own_gates() {
+    const auto person_queues = [](int32_t kztype, int32_t kz_damage, int32_t arm_age) {
+        Rig r;
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
+        ammo.kztype = kztype;
+        ammo.kz_damage = kz_damage;
+        ammo.kz_maxradius = 4.0f;
+        ammo.arm_age_ticks = arm_age;
+        CHECK(r.fire() >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.active_count == (arm_age > 0 ? 1 : 0)); // a dud flies on
+        return r.world.explosions.queue.size();
+    };
+    CHECK(person_queues(ammo_kz::kBullets, 50, 0) == 1);
+    CHECK(person_queues(ammo_kz::kBullets, 0, 0) == 0); // @0x4E9B02
+    CHECK(person_queues(0, 50, 0) == 0);                // @0x4E9AE2
+    CHECK(person_queues(ammo_kz::kStandard, 50, 2) == 0); // pre-arm @0x4E9AE9
+
+    const auto terrain_queues = [](int32_t kztype, int32_t kz_damage, int32_t arm_age) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        Entity shooter;
+        shooter.kind = EntityKind::Organic;
+        shooter.item_type = 3;
+        shooter.position = {0.0f, 0.0f, 10.0f};
+        const EntityHandle owner = world.registry.spawn(0, shooter);
+        AmmoTableEntry ammo;
+        ammo.name = "KZ_TERRAIN";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.arm_age_ticks = arm_age;
+        ammo.kztype = kztype;
+        ammo.kz_damage = kz_damage;
+        ammo.kz_maxradius = 4.0f;
+        world.tables.ammo.entries.push_back(ammo);
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld collision;
+        collision.terrain = &flat;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        RoundSpawnParams params;
+        params.owner = owner;
+        params.shooter_handle = owner.packed;
+        params.origin = {10.0f, -20.0f, 2.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params);
+        CHECK(slot >= 0);
+        if (slot < 0) return size_t{99};
+        world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{0.0f, 0.0f, -10.0f};
+        world.round_sim.tick(world, &flat, &collision);
+        return world.explosions.queue.size();
+    };
+    CHECK(terrain_queues(ammo_kz::kBullets, 50, 0) == 1);
+    CHECK(terrain_queues(ammo_kz::kBullets, 0, 0) == 1); // no kz_damage read
+    CHECK(terrain_queues(ammo_kz::kStandard, 50, 5) == 0); // pre-arm @0x4E9292..0x4E92A1
+    CHECK(terrain_queues(0, 50, 0) == 0);                 // no class @0x4E928C
+}
+
+// Stock JOX tank rounds carry the Bullets kill-zone class (kztype 6,
+// rounds_kz_Bullets): M1Round authors kz_damage 205 over 6..12 units. The
+// round's stop queues its kill zone and the drain's 2/5/6/7 arm splashes a
+// bystander the round never touched.
+// [orig: the kztype name table @0x8133E0 (rounds_kz_Bullets @0x813410);
+//  Projectile_HandleTerrainImpact_0 @0x4E9B26; the drain jumptable
+//  @0x4EADC6 -> @0x4EADCD, Entity_ApplyWeaponDamage @0x4E6820]
+void test_jox_tank_round_bullets_class_splashes() {
+    Rig r;
+    AmmoTableEntry m1;
+    m1.name = "M1Round";
+    m1.valid = true;
+    m1.velocity = 620;
+    m1.max_age_ticks = 20;
+    m1.weight_in_grains = 875;
+    m1.kztype = ammo_kz::kBullets;
+    m1.kz_damage = 205;
+    m1.kz_minradius = 6.0f;
+    m1.kz_maxradius = 12.0f;
+    const int m1_index = static_cast<int>(r.world.tables.ammo.entries.size());
+    r.world.tables.ammo.entries.push_back(m1);
+
+    Entity bystander;
+    bystander.kind = EntityKind::Organic;
+    bystander.has_item_def = true;
+    bystander.item_type = 3;
+    bystander.position = {5.0f, 4.0f, 0.0f};
+    bystander.bound_radius = 0.6f;
+    bystander.health = bystander.health_max = 1000;
+    const EntityHandle bystander_h = r.world.registry.spawn(0, bystander);
+
+    RoundSpawnParams p;
+    p.owner = r.shooter;
+    p.shooter_handle = r.shooter.packed;
+    p.origin = {0.0f, 0.0f, 0.9f};
+    p.ammo_index = m1_index;
+    CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.explosions.queue.size() == 1);
+    if (!r.world.explosions.queue.empty())
+        CHECK(r.world.explosions.queue[0].type == ammo_kz::kBullets);
+    r.world.explosions.process(r.world, nullptr, nullptr, -1.0e9f, r.world.out.destruction);
+    // Well inside kz_minradius: the full 205, no falloff.
+    CHECK(r.world.registry.get(bystander_h)->health == 1000 - 205);
+}
+
 int main() {
+    test_armed_expiry_detonates_only_a_kill_zone_class();
+    test_impact_producers_apply_their_own_gates();
+    test_jox_tank_round_bullets_class_splashes();
     test_guided_round_uses_live_target_ammo_and_pool_lifetime();
     test_projectile_indoor_terrain_gate();
     test_item_callbacks_receive_geometric_section_on_both_peers();
