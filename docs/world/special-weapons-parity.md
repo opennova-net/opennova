@@ -122,3 +122,67 @@ the moment it is claimed. No retail assets are stored in the repository.
 
 The native `host_role` regression always runs. The original scope fallback and
 the data's ordinary roof-gun seats are unchanged.
+
+## Tank course and attachment follow-up (2026-09-21)
+
+The authored 07TR course exposed failures that the extra unoccupied carriers
+in the earlier switching test did not reach:
+
+- GameWorld published the water plane after mission-start vehicle grounding.
+  Three offshore LCACs settled on the seabed; their crews could not board and
+  the route gate releasing the tank convoy never fired. Publish the plane
+  before the mission-start boundary, matching the water clamp already used by
+  `Game_StartMission @0x525F80..0x526071`.
+- Mounted organics retained a pre-boarding ground reference. Both retail
+  organic movers refresh `groundEntity` from `parentEntity` before their
+  mounted branch (`0x4B40E0`, `0x4B9910`). Restore that publication so
+  `PLYRONSSN @0x4F1260` can follow the gun-to-hull chain for the boarding gate.
+- USE and attach labels addressed rest-pose seats. Resolve their live bone
+  position through the mounted-pose provider; the original USE scorer builds
+  the attachment matrix at `0x435FE7`. The authored M1A1 now boards its cannon
+  when aimed at that cannon seat, rather than scoring a different hatch.
+- Native userpoint PANM evaluation omitted the vehicle CTRL channels that
+  rendering already received. The redirected coax muzzle therefore stayed in
+  the turret's rest direction: an actual 07TR shot was about 62 degrees away
+  from its sight (forward dot 0.471). Share the motor's vehicle control
+  projection with native userpoint/collision and mounted-seat poses. The same
+  shot now agrees with the sight (dot approximately 1.0). Retail runs the
+  entity's pre-callback before resolving the weapon userpoint
+  (`0x545A89..0x545A94`); the tank callback publishes turret words at
+  `0x449ECF..0x449EE2`.
+
+The installed JOTAC cannon and coax sights have the same authored zoom. Its
+base definitions share `M1IRN.TGA`; `revx02` adds different hint textures
+(`Coaxhnt1.tga` / `Coaxhnt2.tga`). Action 6 switches those weapon slots; it does
+not transfer the player to the separate roof gun.
+The existing windowed Vulkan `mounted_weapon_switch_test.gd` again passed all
+151 assertions using real right-button events, including independent ammunition
+and the HUD sight card on the M1A1, T80, Apache and Ka-52.
+
+`vehicle_mount` adds regressions for a live seat outside its rest-pose USE
+reach and the mounted ground relationship on both local and NPC bodies.
+The 03TR mounted-view suite additionally follows NPC 1750 through 80 seconds
+of takeoff, banking and flight, checking both the simulation seat and rendered
+body distance from the objective helicopter. All five mounted-view tests
+passed (91 assertions). The reported NPC detachment was not reproduced before
+these changes; that coverage records the tested flight rather than attributing
+an unobserved failure to one fix.
+
+`godot/tests/tank_training_test.gd` loads the authored course through GameWorld,
+boards the live cannon seat with USE, switches/fires both guns, follows the
+instructor and landing-craft convoy, and destroys the enemy vehicles with
+normal cannon input. The assertions reach BMS events 92 and 93 and team-1
+victory. The final windowed Vulkan run passed all 34 assertions; an earlier
+headless run also reached victory. Only player positioning and aim use the
+existing debug seam; no
+health, deaths or objective completions are injected. It selects installed
+`revx02` when available (the configured JOTAC game and reference course),
+otherwise base JO. The separate switching suite continues to discover all
+four authored carriers across the installation's mounts.
+
+An additional JOTAC **base-mount** run exposed a separate convoy failure:
+allied tank 34 fell into the water near the landing point and never released
+the APC wave (event 48). The mission and carrier models match `revx02`, but
+the base LCAC authors water speed 130 and mass 160 versus 74 and 87 in
+`revx02`. This data variant remains an open comparison against the original
+runtime; the complete-course victory witness here is for `revx02`.

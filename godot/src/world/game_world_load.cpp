@@ -1038,6 +1038,12 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// and the entity presenter carrying the wire render gates + lighting
 	// contexts. Re-handed per load; unload's reset() forgets them.
 	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter());
+	// Vehicle initialization at the mission-start boundary grounds hulls against
+	// the water plane. Seed it before that pass, including unoccupied craft:
+	// 07TR's offshore LCACs otherwise settle on the seabed before crews board.
+	// The native clamp lives in VehicleSystem::initialize_mission_vehicles.
+	if (water_ != nullptr)
+		runtime->get_sim()->set_water_z(water_->get_water_height());
 	run_mission_start_environment_boundary();
 	sync_runtime_profiling();
 	// The player profile's saved weapon kits, loaded before ANY kit is applied
@@ -1047,11 +1053,6 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	load_player_weapon_profile();
 	player_visuals_->apply_local_player_spawn_loadout();
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
-	if (water_ != nullptr) {
-		// Water may have been built before the runtime existed — re-push the
-		// sim-side plane the footstep/landing legs compare feet against.
-		runtime->get_sim()->set_water_z(water_->get_water_height());
-	}
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
 	runtime->connect("fixed_tick_completed", callable_mp(this, &GameWorld::on_runtime_fixed_tick));
 	runtime->connect("simulation_restarted", callable_mp(this, &GameWorld::on_runtime_simulation_restarted));

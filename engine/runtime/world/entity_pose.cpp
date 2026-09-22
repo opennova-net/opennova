@@ -17,6 +17,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/mounted_pose.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -684,6 +685,8 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 	if (e != nullptr)
 		world.doors.write_phases(*e, ctrl_values + THREEDI_CTRL_DOOR_00,
 				world::DoorSystem::kMaxDoors);
+	if (e != nullptr)
+		compose_vehicle_pose_controls(world, *e, ctrl_values);
 	const uint32_t time_ms = panm_time_override_ms >= 0
 			? static_cast<uint32_t>(panm_time_override_ms)
 			: world.logic_tick * 16u;

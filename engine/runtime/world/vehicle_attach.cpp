@@ -155,7 +155,14 @@ Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
     return entity_local_point_world(veh, local);
 }
 
-Vec3 seat_world_pos(const Entity &veh, const Seat &s) {
+Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
+    // USE scores the live bone matrix, just as the seated body follows it.
+    // A rest-only point targets the wrong hatch when a turret is animated.
+    // [orig: build_bone_attachment_matrix @0x435FE7 / labels @0x5A3553]
+    MountedPose pose;
+    if (world.pose_provider != nullptr &&
+            world.pose_provider->resolve_mounted_pose(world, veh, s, pose))
+        return pose.position;
     return local_point_world_pos(veh, s.seat_local);
 }
 
@@ -652,7 +659,7 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
                 if (s.type == SeatType::None) continue; // [orig: boneIdx == 0 skip]
                 if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
                     continue; // [orig: mountHandles != 0xFFFF]
-                consider(cand, seat_world_pos(cand, s), i, s.type);
+                consider(cand, seat_world_pos(world, cand, s), i, s.type);
             }
             return;
         }
@@ -728,7 +735,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
                 if (s.type == SeatType::None) continue;
                 if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
                     continue;
-                emit(cand, seat_world_pos(cand, s), i, s.type, false);
+                emit(cand, seat_world_pos(world, cand, s), i, s.type, false);
             }
             return;
         }

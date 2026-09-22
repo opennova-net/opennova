@@ -35,6 +35,11 @@ void compose_mounted_pose_controls(
         uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
         int32_t (&r_ctrl)[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT]);
 
+// Vehicle render callbacks also feed PANM before resolving a userpoint.
+// Keep mounted seats and native muzzle/collision poses on the same controls.
+void compose_vehicle_pose_controls(World &world, const Entity &carrier,
+        int32_t (&r_ctrl)[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT]);
+
 // The resolver's PANM clock: retail's 16 ms logic-tick time, unless a debug
 // override (>= 0) pins it.
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms);

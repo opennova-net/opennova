@@ -1357,6 +1357,21 @@ void test_bms_mount_predicates() {
     CHECK(r.player().pre_use_gun_equipped_adm_index == 7);
     CHECK(r.player().use_gun_slot_swapped);
     CHECK(r.w.registry.get(gh)->primary_weapon_owner == r.player_h);
+    // PLYRONSSN reads groundEntity, not parentEntity. Both org1 and org2
+    // refresh that relationship on a mounted update, even when no floor ray
+    // can reach the carrier (07TR's cannon and 03TR's airborne minigun).
+    auto &body = *r.sys.at(r.sys.attach(r.player_h));
+    body.inf.active = true;
+    body.health = 150;
+    for (bool local : {false, true}) {
+        body.inf.is_local_player = local;
+        r.player().ground_target = {};
+        CHECK(!cmds.local_player_standing_on_ssn(11));
+        CHECK(r.sys.pose_if_mounted(body, r.w));
+        CHECK(r.player().ground_target == gh);
+        CHECK(cmds.local_player_standing_on_ssn(11));
+    }
+
     CHECK(r.w.vehicles.detach(r.player_h));
     CHECK(r.player().equipped_adm_index == 7);
     CHECK(!r.player().use_gun_slot_swapped);
@@ -2929,7 +2944,35 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
     }
 }
 
+// USE and its label must address the same live bone that seats the rider.
+// A tank turret can turn the seat away from its model's rest position.
+static void test_use_scan_and_label_follow_live_seat_pose() {
+    Rig r;
+    r.veh().seats.resize(1);
+    r.veh().seats[0].type = SeatType::Gunner;
+    r.veh().seats[0].seat_local = {20.0f, 0.0f, 0.0f};
+    FakeMountedPoseProvider provider;
+    provider.pose = pose_degrees({102.0f, 201.0f, 10.5f}, 0, 0, 0);
+    r.w.pose_provider = &provider;
+    look_at(r.w, r.player_h, provider.pose.position);
+    VehicleSeatSelection hit;
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    CHECK(hit.vehicle == r.veh_h && hit.seat_index == 0);
+    std::vector<AttachLabel> labels;
+    r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+    CHECK(labels.size() == 1);
+    if (!labels.empty()) {
+        CHECK(std::abs(labels[0].world_pos.x - provider.pose.position.x) < 1e-5f);
+        CHECK(std::abs(labels[0].world_pos.y - provider.pose.position.y) < 1e-5f);
+        CHECK(std::abs(labels[0].world_pos.z - provider.pose.position.z - 0.1875f) < 1e-5f);
+    }
+    provider.available = false;
+    CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+    r.w.pose_provider = nullptr;
+}
+
 int main() {
+    test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();
 	test_vehicle_pending_death_survives_drive_tick();
