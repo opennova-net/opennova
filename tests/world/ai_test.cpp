@@ -815,6 +815,13 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
 }
 
 static void configure_test_emplacement_weapon(WeaponTableEntry &weapon) {
+    // Every stock emplaced weapon authors its turret window (WPN_EMP50TRI:
+    // 180/45/45): an unauthored def keeps zero bounds, which pin both axes.
+    // [orig: AdmDef_InitEntryDefaults @0x53FEFF (zeroed def); the fallback
+    //  window Entity_GetWeaponTurretLimits @0x540E2C..0x540E58]
+    weapon.turret_yaw_range_deg = 180;
+    weapon.turret_pitch_max_deg = 45;
+    weapon.turret_pitch_min_deg = 45;
     weapon.clipsize = -1;
     weapon.action_fsm.clip_capacity = -1;
     for (int action = 0; action < weapon_action::kCount; ++action)

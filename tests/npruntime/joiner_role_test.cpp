@@ -992,9 +992,13 @@ bool run_replica_turret_channel() {
  h.role.run_tick(h.input);
  if (!expect(state.find(2)->heading_bam == 0x2D7AD80,
    "NPC gunner yaw is written back at the four-degree tether")) return false;
- // Immediate gun, authored 45-degree window: word and gunner look both pin.
+ // Immediate gun, a stamped 45-degree yaw window (pitch +-90): word and
+ // gunner look both pin on yaw.
  h.kernel->seat_specs[0].item_attrib2 = 0;
+ h.kernel->seat_specs[0].turret_limits_valid = true;
  h.kernel->seat_specs[0].turret_yaw_range_bam = 0x20000000;
+ h.kernel->seat_specs[0].turret_pitch_max_bam = 0x40000000;
+ h.kernel->seat_specs[0].turret_pitch_min_bam = 0x40000000;
  state.find(2)->heading_bam = 0x55555555;
  state.find(2)->pitch_bam = 0;
  state.find(2)->recoil_pitch = 0x4000000;

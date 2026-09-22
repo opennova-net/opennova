@@ -335,9 +335,9 @@ inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant, AiEnt
 // view cannot rotate past the gun's limits while mounted. Window source
 // selection lives in world::select_turret_window — the per-seat addeweap arc
 // first, the weapon-def window second (the [orig] map is on the helper).
-// Per-seat clamps BOTH axes with the quartet verbatim (an authored zero pair
-// pins); the weapon-def leg keeps the witnessed per-axis zero-means-no-window
-// semantics.
+// Both legs clamp BOTH axes unconditionally, so a zero bound pins its axis
+// (a weapon-def yawrange of 0 locks the traverse); only a gun with neither
+// an authored quartet nor a weapon def has no window.
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0 — gate `occupant &&
 //  occupant->parentEntity == this` @0x4411d1..0x4411ea; the words read
 //  @0x4411f0/@0x4411f7; Entity_GetWeaponTurretLimits @0x441228;
@@ -350,21 +350,11 @@ inline void clamp_emplaced_gun_channel(EmplacedGunChannel &channel,
  EmplacedGunnerLook &gunner, int32_t gun_yaw, int32_t gun_pitch, const TurretWindow &window) {
  int32_t yaw = emplaced_word_bam(channel.yaw);
  int32_t pitch = emplaced_word_bam(channel.pitch);
-	bool yaw_clamped = false;
-	bool pitch_clamped = false;
-	if (window.per_seat) {
-		yaw_clamped = emplaced_clamp_turret_bam(yaw, window.yaw_upper,
-				window.yaw_lower);
-		pitch_clamped = emplaced_clamp_turret_bam(pitch, window.pitch_upper,
-				window.pitch_lower);
-	} else {
-		if (window.yaw_upper != 0)
-			yaw_clamped = emplaced_clamp_turret_bam(yaw, window.yaw_upper,
-					window.yaw_lower);
-		if (window.pitch_upper != 0 || window.pitch_lower != 0)
-			pitch_clamped = emplaced_clamp_turret_bam(pitch, window.pitch_upper,
-					window.pitch_lower);
-	}
+	if (!window.active) return;
+	const bool yaw_clamped = emplaced_clamp_turret_bam(yaw, window.yaw_upper,
+			window.yaw_lower);
+	const bool pitch_clamped = emplaced_clamp_turret_bam(pitch, window.pitch_upper,
+			window.pitch_lower);
 	if (yaw_clamped) {
 		channel.yaw = emplaced_bam_word(yaw);
 		gunner.heading = opennova::io::bam_sub(gun_yaw, yaw);
@@ -458,18 +448,16 @@ inline void publish_emplaced_gun_words_to_parent(World &world,
 	if (weapon_index < 0) return;
 	const WeaponTableEntry &parent_weapon = world.tables.weapons.entries[weapon_index];
 	int32_t pitch = emplaced_word_bam(mount.emplaced_gun_pitch_word);
-	// Retail reads the parser's raw BAM limits here, without the child's
-	// optional-window conversion. Keep the integer multiply and wrap: 180
-	// spans the signed angle domain and zero locks an axis.
+	// Retail reads the parser's raw BAM limits here: the integer multiply
+	// and wrap, 180 spans the signed angle domain and zero locks an axis.
 	// [orig: WeaponDefs_ParseLineCallback @0x543680, integer conversions
 	// @0x5443ec / @0x544424 / @0x544441..0x54446e]
-	const auto limit_bam = [](int16_t degrees) {
-		return static_cast<int32_t>(static_cast<uint32_t>(degrees) * 11930464u);
-	};
-	const int32_t yaw_range = limit_bam(parent_weapon.turret_yaw_range_deg);
+	const int32_t yaw_range = turret_window_limit_bam(parent_weapon.turret_yaw_range_deg);
 	emplaced_clamp_turret_bam(yaw, yaw_range, opennova::io::bam_sub(0, yaw_range));
-	emplaced_clamp_turret_bam(pitch, limit_bam(parent_weapon.turret_pitch_max_deg),
-			opennova::io::bam_sub(0, limit_bam(parent_weapon.turret_pitch_min_deg)));
+	emplaced_clamp_turret_bam(pitch,
+			turret_window_limit_bam(parent_weapon.turret_pitch_max_deg),
+			opennova::io::bam_sub(0,
+					turret_window_limit_bam(parent_weapon.turret_pitch_min_deg)));
 	parent_ai->brain.f[AiBrain::kActiveYaw] = yaw;
 	parent_ai->brain.f[AiBrain::kStagingBlock + 3] = yaw;
 	parent_ai->brain.f[AiBrain::kActivePitch] = pitch;
