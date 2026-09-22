@@ -616,6 +616,13 @@ void wheeled_enter_crash(Entity::VehicleMotorState &m) {
 // dispatcher @0x48F004; Suspension_CompressWheelLinear @0x45CEB0; Suspension_OscillateWheel
 // @0x45D240]
 void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
+	// A hull at or below its critical drain drops the smoke emitter before
+	// anything else, a sleeping hull included. Both sides are signed words.
+	// [orig: Health vs def+0x182 @0x475E25..0x475E50 (`cmp cx, [eax+182h]; jg`);
+	//  CEffectEmitter_ReleaseSafe of +0x1CC @0x475E52..0x475E65]
+	if (static_cast<int16_t>(veh.health) <= static_cast<int16_t>(traits.critical_drain))
+		vehicle_smoke_effect(world, veh, true);
+
 	// The wheeled sleep gate checks zero motion, the family flags, occupancy and spring energy.
 	// X/Y and the attitude must still equal the mover-entry pose; a row the mover did not stamp
 	// compares X/Y against the caller's start.
