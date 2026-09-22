@@ -476,6 +476,13 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         m.air_roll_bam = static_cast<int32_t>(veh.roll) * 11930464;
         m.yaw_seeded = true;
 	}
+	// The mover prologue copies the entry pose to savedLivePose (+0x80..+0x94)
+	// ahead of every bail, on every role and on Game_StartMission's direct
+	// call. A predicting client stamps at its own entry, before the chase.
+	// [orig: ctan @0x488B24..0x488B50; cveh @0x48AF74..0x48AFA0; cbik
+	//  @0x484054..0x484080; Game_StartMission `call ecx` @0x526010]
+	if (!prediction)
+		stamp_saved_live_pose(veh);
 
 	if (!m.net_predicted) {
 		vehicle_refresh_ground_link(world, veh, traits);
@@ -2178,6 +2185,10 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
     }
+	// The prologue's savedLivePose stamp precedes the chase.
+	// [orig: ctan @0x488B24..0x488B50, chase @0x48912B; cveh
+	//  @0x48AF74..0x48AFA0; cbik @0x484054..0x484080]
+	stamp_saved_live_pose(veh);
 	// The bike's chase reads the up.z of the mover-entry matrix, built before
 	// the carrier follow [orig: Entity_UpdateLightVehiclePhysics @0x484039].
 	const int32_t entry_up_z16 =

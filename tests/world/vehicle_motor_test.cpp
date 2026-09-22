@@ -2239,6 +2239,48 @@ void test_client_chase_family_gates() {
 	CHECK(step(VehicleChaseFamily::Ground, false, true).pos.z > 0.0f);
 }
 
+// The mover prologue stamps savedLivePose from its entry pose, including the
+// direct call Game_StartMission makes; a predicting client stamps before its
+// chase moves the hull.
+// [orig: ctan @0x488B24..0x488B50, chase @0x48912B; Game_StartMission
+//  @0x526010]
+void test_mover_prologue_stamps_saved_live_pose() {
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	{
+		Rig r;
+		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.veh().pitch = 5;
+		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
+			to_fixed(r.veh().position.z) };
+		CHECK(!r.veh().saved_live_valid);
+		r.w.vehicles.tick_motor(r.veh(), t);
+		CHECK(r.veh().saved_live_valid);
+		for (int axis = 0; axis < 3; ++axis)
+			CHECK(r.veh().saved_live_pos[axis] == entry[axis]);
+		// The stamp copies the BAM attitude the mover starts from.
+		CHECK(r.veh().saved_live_pitch == 5 * 11930464);
+	}
+	{
+		Rig r;
+		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.w.ai.is_authority = false;
+		auto &m = r.veh().veh;
+		m.net_predicted = true;
+		m.yaw_seeded = true;
+		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
+			to_fixed(r.veh().position.z) };
+		m.net_smooth_target[0] = entry[0] + (8 << 16);
+		m.net_smooth_target[1] = entry[1];
+		m.net_smooth_target[2] = entry[2];
+		r.w.vehicles.ground_client_tick(r.veh(), t);
+		CHECK(to_fixed(r.veh().position.x) != entry[0]); // the chase moved the hull
+		CHECK(r.veh().saved_live_valid);
+		for (int axis = 0; axis < 3; ++axis)
+			CHECK(r.veh().saved_live_pos[axis] == entry[axis]);
+	}
+}
+
 // The tread cue: every even tick adds this and the previous even tick's speed;
 // a sum at or past +-0x80000 plays slot 45 on the hull and restarts. Odd ticks
 // are skipped, and the doubled sum's top bit is dropped.
@@ -2617,6 +2659,7 @@ int main() {
 	test_prediction_keeps_player_control_tail();
 	test_prediction_latches_handbrake_from_claimant();
 	test_client_chase_family_gates();
+	test_mover_prologue_stamps_saved_live_pose();
 	test_tank_tread_sound_accumulates_even_ticks();
 	test_catch_up_ticks_skip_the_movement_fold();
 	test_crash_settled_tank_keeps_lane_anchor();
