@@ -3203,6 +3203,39 @@ static void test_use_scan_and_label_follow_live_seat_pose() {
     r.w.pose_provider = nullptr;
 }
 
+// USE and its labels score every seat kind at its live bone through the
+// carrier's attachment build, not only a UseGun seat. The provider answers
+// that attachment form and declines a plain rider pose for a non-gunner seat.
+// [orig: Entity_FindNearestSeatOrArmory seat kinds @0x435F6C..0x435FDF ->
+//  build_bone_attachment_matrix @0x435FFA; labels @0x5A3553]
+struct AttachmentFormProvider final : IPoseProvider {
+    MountedPose pose;
+    bool resolve_mounted_pose(World &, const Entity &, const Seat &seat,
+                              MountedPose &out) override {
+        if (seat.type != SeatType::Gunner || !seat.attachment_frame) return false;
+        out = pose;
+        out.position.z += static_cast<float>(seat.bone_index);
+        return true;
+    }
+};
+static void test_use_scan_poses_every_seat_kind_live() {
+    Rig r;
+    AttachmentFormProvider provider;
+    provider.pose = pose_degrees({101.0f, 201.0f, 9.0f}, 0, 0, 0);
+    r.w.pose_provider = &provider;
+    std::vector<AttachLabel> labels;
+    r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+    CHECK(labels.size() == 2);
+    for (const AttachLabel &label : labels) {
+        const Seat &seat = r.veh().seats[static_cast<size_t>(label.seat_index)];
+        CHECK(std::abs(label.world_pos.x - 101.0f) < 1e-5f);
+        CHECK(std::abs(label.world_pos.y - 201.0f) < 1e-5f);
+        CHECK(std::abs(label.world_pos.z -
+                (9.0f + static_cast<float>(seat.bone_index) + 0.1875f)) < 1e-5f);
+    }
+    r.w.pose_provider = nullptr;
+}
+
 // The claimant leaving a PlayerControl vehicle cuts the running action of the
 // vehicle's weapon slot short: a nonzero counter drops to 7 ticks. An idle
 // slot, a passenger leaving and a vehicle without the attrib keep theirs.
@@ -3235,6 +3268,7 @@ static void test_claimant_detach_cuts_vehicle_slot_action() {
 }
 
 int main() {
+    test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
