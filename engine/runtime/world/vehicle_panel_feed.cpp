@@ -126,6 +126,8 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
         return occupancy.occupied && !occupancy.rider_resolved;
     };
     char label[8];
+    int slot_types[kVehiclePanelSlotMax] = {};
+    for (int pos = 0; pos < slots.count; ++pos) slot_types[pos] = slots[pos].type;
 
     for (int pos = 0; pos < slots.count; ++pos) {
         const VehiclePanelSlot &slot = slots[pos];
@@ -150,6 +152,7 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
             row.is_emplacement = true;
             std::snprintf(label, sizeof(label), "%1d",
                     hud::emplace_label_digit(slot.gun_slot));
+            row.label_draws = hud::emplace_label_draws(slot_types, slots.count, slot.gun_slot);
             unresolved = occupant_row(*child, gun_seat(*child), row);
         } else {
             // A passenger seat pair [orig: @0x5a5112..0x5a5364, digit

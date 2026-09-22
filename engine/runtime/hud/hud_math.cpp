@@ -16,6 +16,36 @@ double pixel_delta_to_design(double delta, double surface, double design_extent)
 	return delta * design_extent / surface;
 }
 
+// [orig: Viewport_ScreenToVirtual @0x5D2C70 -- `shl eax,0Ah` @0x5D2C7E,
+//  `sar edx,1` @0x5D2C83, `idiv ecx` @0x5D2C88]
+int32_t screen_to_design_x(int32_t x, int32_t surface_w) {
+	if (surface_w == 0) return 0;
+	return static_cast<int32_t>((static_cast<int64_t>(x) * 1024 + (surface_w >> 1)) / surface_w);
+}
+
+// [orig: `lea eax,[eax+eax*2]; shl eax,8` @0x5D2C95..0x5D2C98, `sar edx,1`
+//  @0x5D2C9D, `idiv ecx` @0x5D2CA2]
+int32_t screen_to_design_y(int32_t y, int32_t surface_h) {
+	if (surface_h == 0) return 0;
+	return static_cast<int32_t>((static_cast<int64_t>(y) * 768 + (surface_h >> 1)) / surface_h);
+}
+
+BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,
+		double bottom) {
+	// [orig: draw_textured_quad_with_border @0x590D2F..0x590D8C] The x87 walk
+	// keeps u0 / v0 unrounded for the far-edge sums and stores each as float.
+	BorderedQuadUv uv;
+	if (tex_w == 0 || tex_h == 0 || right == left || bottom == top) return uv;
+	const double border = static_cast<double>(0.05f);
+	const double u0 = border / tex_w;
+	const double v0 = border / tex_h;
+	uv.u0 = static_cast<float>(u0);
+	uv.v0 = static_cast<float>(v0);
+	uv.u1 = static_cast<float>(1.0 - u0 + 1.0 / (right - left));
+	uv.v1 = static_cast<float>(1.0 - v0 + 1.0 / (bottom - top));
+	return uv;
+}
+
 // [orig: draw_hud_ammo_indicator @0x599af9; draw-stance @0x599fc0] Exact
 // integer translation, including the elapsed-0 u16 underflow quirk (elapsed 0
 // reads fully decayed — one 62 Hz tick of latency).

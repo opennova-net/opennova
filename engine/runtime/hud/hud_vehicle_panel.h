@@ -62,6 +62,24 @@ inline int emplace_label_digit(int gun_slot_index) {
 }
 inline constexpr int kDriverLabelDigit = 1;
 
+// The emplacement digit's draw count. The label arm walks the WHOLE slot
+// list counting type-9 entries from -1 and draws the gun slot's digit at every
+// list position whose running count equals the gun slot index: once for the
+// matching emplacement entry, again for each later non-emplacement entry up to
+// the next emplacement, and never when the list holds fewer emplacements than
+// index + 1 [orig: HUD_DrawVehicleHealthBars -- count -1 @0x5A5593, the type-9
+// increment @0x5A55A0..0x5A55A7, `cmp count,edi` @0x5A55AC, the walk's end
+// @0x5A5670].
+inline int emplace_label_draws(const int *slot_types, int count, int gun_slot_index) {
+	int draws = 0;
+	int emplacements = -1;
+	for (int i = 0; i < count; ++i) {
+		if (slot_types[i] == 9) ++emplacements;
+		if (emplacements == gun_slot_index) ++draws;
+	}
+	return draws;
+}
+
 // The seat label's anchor: the marker box's CENTRE, floor-divided
 // [orig: baseX + w/2 + slotX, baseY + slotY + h/2 -- note the x form adds the
 //  half-extent before the slot offset and the y form after, which lands the

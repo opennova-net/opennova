@@ -29,11 +29,15 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 	//  @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
 	//  bottom @0x590AB4..0x590ACB]
 	constexpr uint32_t edge_color = uint32_t(-32736);
-	auto centered = [&](const HudProjectedPoint &p, const HudSprite &sprite, int tex,
-							uint32_t color) {
-		if (!p.valid || !sprite.valid)
+	// The projected cue's integer screen pixel (the projection's `>> 16` floors
+	// it) mapped into design units [orig: Viewport_ScreenToVirtual @0x5D2C70,
+	// called ahead of each cue, e.g. @0x592852 / @0x59E77E].
+	const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
+	const auto design_x = [&](float px) { return screen_to_design_x(int32_t(std::floor(px)), surface_w); };
+	const auto design_y = [&](float py) { return screen_to_design_y(int32_t(std::floor(py)), surface_h); };
+	auto centered_design = [&](int cx, int cy, const HudSprite &sprite, int tex, uint32_t color) {
+		if (!sprite.valid)
 			return;
-		const int cx = int(p.x * 1024 / w), cy = int(p.y * 768 / h);
 		int left = cx - sprite.width / 2, right = sprite.width / 2 + cx;
 		int top = cy - sprite.height / 2, bottom = cy + sprite.height / 2;
 		if (left < 0) {
@@ -59,6 +63,12 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		emit_rect(sx(float(left), w), sy(float(top), h), sx(float(right), w),
 				sy(float(bottom), h), color, true, tex);
 	};
+	auto centered = [&](const HudProjectedPoint &p, const HudSprite &sprite, int tex,
+							uint32_t color) {
+		if (!p.valid)
+			return;
+		centered_design(design_x(p.x), design_y(p.y), sprite, tex, color);
+	};
 	if (c.vehicle_fixed)
 		centered(c.vehicle_fixed_point, l.vehicle_fixed, kHudTexVehicleFixed, active_color(s));
 	if (c.vehicle_lag) {
@@ -82,8 +92,9 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		// Four diagonal corner strokes around the MAIN aim anchor, not the
 		// tracked target point. [orig: @0x592D32..0x592DD7]
 		if (c.target_brackets) {
-			const float x = s.aim_valid ? s.aim_screen_x * 1024 / w : 512;
-			const float y = s.aim_valid ? s.aim_screen_y * 768 / h : 384;
+			// [orig: the anchor's Viewport_ScreenToVirtual @0x592D32]
+			const float x = s.aim_valid ? float(design_x(s.aim_screen_x)) : 512;
+			const float y = s.aim_valid ? float(design_y(s.aim_screen_y)) : 384;
 			for (int dx : { -1, 1 })
 				for (int dy : { -1, 1 }) {
 					float x0 = x + dx * 13, y0 = y + dy * 13;
@@ -110,23 +121,25 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		}
 	}
 	// The commander's reticle is a scope detail, independent of XHAIRS.
-	// Clamp to the 334-design-pixel circle and connect it to the center.
-	// [orig: HUD_DrawScopeOverlayDetails @0x59E74D..0x59E87F]
+	// Clamp to the 334-design-pixel circle and connect it to the screen
+	// centre, all in integers: dx/dy from the design point, the truncated
+	// distance, then 334 * d / dist (idiv), the line ending at (w/2, h/2).
+	// [orig: HUD_DrawScopeOverlayDetails @0x59E74D..0x59E87F -- the mapping
+	//  @0x59E77E, dx/dy @0x59E78B..0x59E791, ftol @0x59E7C9, the clamp
+	//  @0x59E7D6..0x59E80F, the centre @0x59E855..0x59E86F]
 	if (s.scope.active && c.commander && c.commander_point.valid) {
-		auto p = c.commander_point;
-		float x = p.x * 1024 / w - 512, y = p.y * 768 / h - 384;
-		const int distance = int(std::sqrt(x * x + y * y));
+		int x0 = design_x(c.commander_point.x), y0 = design_y(c.commander_point.y);
+		const int dx = x0 - 512, dy = y0 - 384;
+		const int distance = int(std::sqrt(double(dx) * dx + double(dy) * dy));
 		uint32_t color = active_color(s);
 		if (distance > 334) {
-			x = int(334 * x / distance);
-			y = int(334 * y / distance);
+			x0 = 334 * dx / distance + 512;
+			y0 = 334 * dy / distance + 384;
 			color = uint32_t(-32736);
 		}
-		p.x = (512 + x) * w / 1024;
-		p.y = (384 + y) * h / 768;
-		centered(p, l.commander, kHudTexCommander, color);
-		draw_list_.lines.push_back(
-				{ sx(512 + x, w), sy(384 + y, h), sx(512, w), sy(384, h), 1, color });
+		centered_design(x0, y0, l.commander, kHudTexCommander, color);
+		draw_list_.lines.push_back({ sx(float(x0), w), sy(float(y0), h),
+				float(surface_w / 2), float(surface_h / 2), 1, color });
 	}
 }
 

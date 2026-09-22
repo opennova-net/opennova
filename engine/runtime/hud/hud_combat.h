@@ -60,7 +60,9 @@ struct HudCombatState {
 	bool driver_crosshair = false, vehicle_fixed = false, vehicle_lag = false,
 		 vehicle_lag_center = false;
 	HudProjectedPoint vehicle_fixed_point, vehicle_lag_point;
-	std::string target_name, impact_format = "%d m";
+	// The mortar distance template, Overlays/STROVER_DIST. Unresolved it is
+	// GameText_GetString's miss, "" [orig: @0x5A8961 -> the miss @0x51EC08].
+	std::string target_name, impact_format;
 	int32_t impact_x_q16 = 0, impact_y_q16 = 0, impact_radius_q16 = 0;
 	uint16_t impact_distance_m = 0;
 	float inset_fov_over_zoom = 0, designator_scale = 1;

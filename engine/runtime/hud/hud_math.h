@@ -27,6 +27,27 @@ double scale_axis(double design, double surface, double design_extent);
 // integer pixel deltas commute with scale_axis' rounding.
 double pixel_delta_to_design(double delta, double surface, double design_extent);
 
+// The inverse, a surface PIXEL back to a design coordinate, in integers:
+// x = (x * 1024 + w / 2) / w and y = (y * 768 + h / 2) / h, the half an
+// arithmetic shift and the divide truncating toward zero (0 on a degenerate
+// surface) [orig: Viewport_ScreenToVirtual @0x5D2C70 -- x @0x5D2C7C..0x5D2C8A,
+// y @0x5D2C93..0x5D2CA5].
+int32_t screen_to_design_x(int32_t x, int32_t surface_w);
+int32_t screen_to_design_y(int32_t y, int32_t surface_h);
+
+// The bordered textured quad's texture window: u0 = 0.05 / tex_w inside the
+// left edge, u1 = 1 - u0 + 1 / (right - left) in on-screen pixels, and the
+// same on v; tex_w / tex_h are the caller's AUTHORED extents. The vertex
+// order puts (u0, v0) at the top-left and (u1, v1) at the bottom-right.
+// [orig: draw_textured_quad_with_border @0x590C40 -- 0.05 (flt_7C68E8)
+//  @0x590D36, u0 / v0 @0x590D3C..0x590D5A, u1 @0x590D5E..0x590D77,
+//  v1 @0x590D7B..0x590D8C]
+struct BorderedQuadUv {
+	float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+};
+BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,
+		double bottom);
+
 // ---------------------------------------------------------------------------
 // The ALPHAFADE ramp [orig: alphafade parse @0x5a086c — 2.55 (percent ->
 // 0..255 alpha) and 62.0 (seconds -> ticks); decay @0x599af9/@0x599fc0]:

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/inset_scope.h>
 namespace opennova::hud {
 namespace {
@@ -102,8 +103,9 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 		ring(draw_list_, x, y - 2 * radius, float(radius), 2, 2, c.designator_color);
 	}
 	if (c.impact_distance) {
-		// Scope and impact labels consume the same authored integer format.
-		const std::string text = sight_integer_text(c.impact_format, c.impact_distance_m);
+		// The authored STROVER_DIST template's sprintf with its one int, the
+		// scope range's formatter (hud_game_text.h hud_sprintf).
+		const std::string text = hud_sprintf(c.impact_format, c.impact_distance_m);
 		// The line draws LEFT-aligned in the hudpos font, its design anchor pulled
 		// back by half the text's width as the BOLD slot measures it: the
 		// unscaled extent times that slot's scale, truncated, then halved.

@@ -515,6 +515,10 @@ struct HudVehicleSeat {
 	int32_t max_health = 0;
 	// The seat-select key label an EMPTY seat shows. Empty string draws none.
 	std::string label;
+	// How many times the label is drawn over itself: an emplacement's digit
+	// repeats once per slot-list position its running emplacement count
+	// matches (hud_vehicle_panel.h emplace_label_draws); every other label once.
+	int label_draws = 1;
 	// The local player's own seat draws an X over the box, last.
 	bool own_seat = false;
 	// Which retail mountHandles slot this marker stands for: passenger seats

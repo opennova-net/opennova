@@ -54,11 +54,17 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 	if (vp.silhouette_valid && vp.silhouette_w > 0 && vp.silhouette_h > 0) {
 		const uint32_t tint =
 				band_color(layout_, seat_health_band(vp.hull_health, vp.hull_max_health));
-		emit_rect_uv(sx(static_cast<float>(base_x), w),
-				sy(static_cast<float>(base_y), h),
-				sx(static_cast<float>(base_x + vp.silhouette_w), w),
-				sy(static_cast<float>(base_y + vp.silhouette_h), h),
-				0.0f, 0.0f, 1.0f, 1.0f, tint, kHudTexVehiclePanel);
+		// The bordered quad: its texture window reads the authored extent
+		// against the scaled corners [orig: draw_textured_quad_with_border
+		// @0x590C40, the panel's call @0x5A50D1 passes the silhouette size as
+		// both the texture and the quad extent].
+		const float x0 = sx(static_cast<float>(base_x), w);
+		const float y0 = sy(static_cast<float>(base_y), h);
+		const float x1 = sx(static_cast<float>(base_x + vp.silhouette_w), w);
+		const float y1 = sy(static_cast<float>(base_y + vp.silhouette_h), h);
+		const BorderedQuadUv uv =
+				bordered_quad_uv(vp.silhouette_w, vp.silhouette_h, x0, y0, x1, y1);
+		emit_rect_uv(x0, y0, x1, y1, uv.u0, uv.v0, uv.u1, uv.v1, tint, kHudTexVehiclePanel);
 	}
 
 	// 2. The seat boxes. An OCCUPIED seat is a filled rect banded by its rider's
@@ -109,8 +115,9 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 		};
 		for (const HudVehicleSeat &seat : vp.seats) {
 			if (seat.occupied || seat.label.empty()) continue;
-			centred_label(seat.label.c_str(), seat_label_x(base_x, seat.x),
-					seat_label_y(base_y, seat.y));
+			for (int draw = 0; draw < seat.label_draws; ++draw)
+				centred_label(seat.label.c_str(), seat_label_x(base_x, seat.x),
+						seat_label_y(base_y, seat.y));
 		}
 
 		// 4. The local player's own seat, marked LAST so nothing draws over it

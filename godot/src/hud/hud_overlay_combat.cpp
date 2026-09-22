@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
+#include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
 namespace godot {
@@ -76,19 +77,10 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	s.aim_point = project(v.aim, v.aim_valid);
 	s.commander_point = project(v.commander, v.commander_valid);
 	if (s.service_prompt) {
-		static const char *keys[] = { "", "STROVER_ARMORY_INFO", "STROVER_VEHICLEBAY_INFO",
-			"STROVER_FARP_WAIT", "STROVER_FARP_RELOADING" };
-		static const char *fallback[] = { "", "Press '%s' to select equipment",
-			"!Press '%s' to activate vehicle bay menu", "Rearm in %d", "Rearming" };
-		String prompt = gametext.is_valid()
-				? gametext->get_string_in_section("Overlays", keys[s.service_prompt])
-				: String();
-		if (prompt.is_empty())
-			prompt = fallback[s.service_prompt];
-		prompt = prompt.replace("%s", use_key)
-						 .replace("%d", String::num_int64(s.service_wait_seconds))
-						 .replace("%u", String::num_int64(s.service_wait_seconds));
-		s.service_text = prompt.utf8().get_data();
+		// The templates, their miss rules and the sprintf are the engine's
+		// (hud/hud_game_text.h service_prompt_text).
+		s.service_text = service_prompt_text(s.service_prompt, use_key.utf8().get_data(),
+				s.service_wait_seconds, game_text_lookup(gametext));
 	}
 	if (gametext.is_valid()) {
 		const String impact = gametext->get_string_in_section("Overlays", "STROVER_DIST");

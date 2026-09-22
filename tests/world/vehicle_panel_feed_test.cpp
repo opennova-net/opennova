@@ -215,6 +215,29 @@ int main() {
         CHECK(s3 && s3->occupied && s3->health == 40 && s3->label == "4");
     }
 
+    // --- the emplacement digit's draw count [orig: HUD_DrawVehicleHealthBars
+    //     @0x5A5593..0x5A55AC]: the lone gun child sits on gun slot 1, but the
+    //     list holds one type-9 entry, whose running count is 0 -- its digit
+    //     never draws. On gun slot 0 it draws for its own entry and once more
+    //     for each of the two passenger entries after it.
+    {
+        Rig r;
+        std::vector<hud::HudVehicleSeat> rows;
+        fill_vehicle_panel_seats(r.w, r.veh, r.driver, r.block, rows);
+        const hud::HudVehicleSeat *g = row_at(rows, 51, 61);
+        CHECK(g && !g->occupied && g->label == "3" && g->label_draws == 0);
+        r.e(r.gun).emplacement_slot = 0;
+        fill_vehicle_panel_seats(r.w, r.veh, r.driver, r.block, rows);
+        g = row_at(rows, 50, 60);
+        CHECK(g && g->label == "2" && g->label_draws == 3);
+        const hud::HudVehicleSeat *drv = row_at(rows, 10, 11);
+        CHECK(drv && drv->label == "1" && drv->label_draws == 1);
+        const int types[] = {8, 9, 0, 9, 3};
+        CHECK(hud::emplace_label_draws(types, 5, 0) == 2);
+        CHECK(hud::emplace_label_draws(types, 5, 1) == 2);
+        CHECK(hud::emplace_label_draws(types, 5, 2) == 0);
+    }
+
     // --- an authored block with fewer pairs than the vehicle offers drops the
     //     unauthored seats rather than placing them at zero.
     {

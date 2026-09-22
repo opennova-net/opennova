@@ -230,6 +230,7 @@ static void combat_text_font_slots() {
 	s = {};
 	s.combat.impact_distance = true;
 	s.combat.impact_distance_m = 89;
+	s.combat.impact_format = "%d m"; // the authored Overlays/STROVER_DIST shape
 	const auto &distance = compiler.compile(s, 1024, 768);
 	CHECK(pages(distance, kHudFontSlotHud) == 4 && pages(distance, kHudFontSlotLabelBold) == 0);
 	CHECK(!distance.glyphs.empty() && near(distance.glyphs[0].x_top_left, 476.5f));
@@ -531,7 +532,59 @@ static void sent_feedback() {
 	send();
 	CHECK(peer.state().hud_hit_feedback_frames == 10);
 }
+// The projected cues reach design space through the integer screen mapping
+// (x * 1024 + w / 2) / w, not a truncated float scale, and the commander's
+// clamp runs in integers with its line ending at the integer screen centre.
+// [orig: Viewport_ScreenToVirtual @0x5D2C70; HUD_DrawScopeOverlayDetails
+//  @0x59E77E..0x59E87F]
+static void integer_screen_mapping() {
+	CHECK(screen_to_design_x(499, 1000) == 511); // 510.976 rounds, not truncates
+	CHECK(screen_to_design_x(1000, 1000) == 1024);
+	CHECK(screen_to_design_y(300, 768) == 300);
+	CHECK(screen_to_design_y(1, 1080) == 1); // (768 + 540) / 1080
+	CHECK(screen_to_design_x(-3, 1000) == -2); // idiv truncates toward zero
+	HudLayout layout;
+	layout.combat.target = { 12, 16, true };
+	layout.combat.commander = { 10, 10, true };
+	HudFrameCompiler compiler;
+	compiler.configure(layout, nullptr);
+	HudFrameState s;
+	s.weapon.active = true; // the targeting cues ride the weapon cluster
+	s.combat.target_cursor = true;
+	s.combat.target_point = { 499, 300, 0, true };
+	const auto &target = compiler.compile(s, 1000, 768);
+	bool found = false;
+	for (const auto &q : target.quads) {
+		if (q.texture != kHudTexTarget) continue;
+		found = true;
+		// Design centre 511 -> left 505 -> floor((505 * 1000 + 512) / 1024).
+		CHECK(near(q.x0, 493));
+	}
+	CHECK(found);
+	s = {};
+	s.weapon.active = true;
+	s.scope.active = true;
+	s.combat.commander = true;
+	s.combat.commander_point = { 998, 383, 0, true };
+	const auto &command = compiler.compile(s, 999, 768);
+	// Design (1023, 383): dx 511, dy -1, distance 511, so the clamp lands on
+	// (334 * 511 / 511 + 512, 334 * -1 / 511 + 384) = (846, 384).
+	bool reticle = false;
+	for (const auto &q : command.quads) {
+		if (q.texture != kHudTexCommander) continue;
+		reticle = true;
+		CHECK(near(q.x0, float(scale_axis(841, 999, 1024))));
+		CHECK(near(q.y0, float(scale_axis(379, 768, 768))));
+	}
+	CHECK(reticle);
+	CHECK(std::any_of(command.lines.begin(), command.lines.end(), [](const auto &l) {
+		return l.color == uint32_t(-32736) && near(l.x0, float(scale_axis(846, 999, 1024))) &&
+				near(l.x1, 499) && near(l.y1, 384);
+	}));
+}
+
 int main() {
+	integer_screen_mapping();
 	geometry_and_draw();
 	mortar_map_callbacks();
 	mortar_map_and_world_cues();
