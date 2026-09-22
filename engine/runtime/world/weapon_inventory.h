@@ -113,7 +113,30 @@ struct WeaponInventorySlot {
     int16_t adm_index = -1;
     int32_t clip = 0;
     int16_t scope_zero = 0;
+    // The slot's scope zoom (MountSlot+0xC). The personal slot IS this entry
+    // in retail (EquippedSlot +0x118 points into the slot table), so a mount
+    // reads back the zoom the slot was left at.
+    int32_t scope_zoom = 0;
 };
+
+// The class-6 sniper lock WeaponSlot_InitFromDef applies to an OWNED slot's zoom
+// floor: an owner of player class 6 on a category-3 (Primary) def floors the seed
+// at scope_max_mag unless sniper scope zoom is allowed. The permission is the
+// session's byte in a session and the config's own option offline; the caller
+// passes it. A slot initialized without an owner (the emplacement's own slot)
+// never locks [orig: WeaponSlot_InitFromDef @ 0x53EEF1..0x53EF27 — entityPtr 0
+// skips @ 0x53EEF7, class @ 0x53EEF9, category @ 0x53EF02, byte_A821F0
+// @ 0x53EF17 / allowSniperScopeZoom_5EC @ 0x53EF1F].
+bool weapon_slot_zoom_sniper_lock(int32_t owner_class, int32_t def_category,
+                                  bool allow_sniper_scope_zoom);
+
+// The slot's initial scope zoom, MountSlot+0xC [orig: WeaponSlot_InitFromDef
+// @ 0x53EF2D..0x53EF44]: the def's second scope_max_mag value; below the floor
+// (scope_min_mag, or scope_max_mag under the sniper lock) it takes the floor
+// unchecked against the max (`jl` @ 0x53EF38), otherwise it is capped at
+// scope_max_mag. So an absent second value starts every optic at its floor.
+int32_t weapon_slot_initial_zoom(int32_t scope_max_mag, int32_t scope_initial_mag,
+                                 int32_t scope_min_mag, bool sniper_lock);
 
 struct WeaponInventory {
     std::array<WeaponInventorySlot, weapon_combo::kSlotCount> slots;
@@ -171,12 +194,15 @@ void weapon_pool_add(const WeaponTable &table, WeaponInventory &inv, int class_i
 // display name, land it at slot rank+65*category, keep the FIRST def on a combo
 // collision (the original logs "overloading" and keeps the incumbent), gather the
 // carry bits. Unresolved names append a warning ("couldn't find wpn %s" shape).
+// Each landed slot takes the zoom seed with the local player as its owner
+// (owner_class, the sniper permission) [orig: entityPtr @ 0x5414FC passed to
+// WeaponSlot_InitFromDef @ 0x5415E4].
 struct WeaponFillResult {
     std::vector<std::string> warnings;
 };
 WeaponFillResult weapon_inventory_load_from_display(
         const WeaponTable &table, const std::vector<std::string> &display,
-        WeaponInventory &inv);
+        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom);
 
 // The spawn pool seeding [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690, ex the
 // 'WeaponOverlay_BuildTypeLookup' misnomer]: for every populated slot,

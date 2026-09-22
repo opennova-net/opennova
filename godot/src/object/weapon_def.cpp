@@ -313,6 +313,7 @@ void WeaponDef::_bind_methods() {
 	WEAPON_DEF_PROP(Variant::INT, flags2);
 	WEAPON_DEF_PROP(Variant::FLOAT, scope_max_mag);
 	WEAPON_DEF_PROP(Variant::INT, scope_min_mag);
+	WEAPON_DEF_PROP(Variant::INT, scope_initial_mag);
 	WEAPON_DEF_PROP(Variant::STRING, animadm);
 	WEAPON_DEF_PROP(Variant::STRING, gfx1);
 	WEAPON_DEF_PROP(Variant::STRING, gfx3);

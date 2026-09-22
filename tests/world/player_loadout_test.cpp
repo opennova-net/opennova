@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include <runtime/world/player_loadout.h>
+#include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -142,6 +143,59 @@ void test_class_latch_survives_kit_reset() {
 }
 
 
+// The personal slot's scope zoom rides its inventory entry (MountSlot+0xC):
+// the spawn rebuild seeds it with the local player as the owner, a mount reads
+// the entry back, a zoom step stores into it, and the next mount of the slot
+// reads the stepped zoom back instead of the lazy max. A def the equipped entry
+// does not back seeds a fresh slot and stores nothing.
+// [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415E4 -> WeaponSlot_InitFromDef
+//  @ 0x53EF2D..0x53EF44; Player_AdjustWeaponElevation @ 0x4DBE6C]
+void test_rebuild_and_mount_carry_the_slot_zoom() {
+    Rig r;
+    WeaponTableEntry &m4 = r.world.tables.weapons.entries[static_cast<size_t>(r.m4)];
+    m4.scope_max_mag = 10; // one authored value: the seed starts at the floor 2
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    Entity *player = r.world.registry.get(r.world.cached.local_player);
+    player->player_class = 8;
+    r.loadout.spawn_kit = kit_of("WPN_M4AUTO");
+    r.loadout.spawn_kit_set = true;
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.inventory.equipped_combo == 3 * 65);
+    CHECK(r.inventory.slot(3 * 65)->scope_zoom == 2);
+
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.scope_max_mag = 10.0f;
+    data.hud_category = 3;
+    PlayerViewState view;
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.scope_zoom == 2);
+    r.weapon.slot.scope_zoom = 6; // a +2, +2 zoom step on the mounted slot
+    local_weapon_store_scope_zoom(r.world, r.weapon, r.inventory);
+    CHECK(r.inventory.slot(3 * 65)->scope_zoom == 6);
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.scope_zoom == 6);
+
+    // A class-6 owner on the Primary def: the rebuild floors the seed at the max.
+    player->player_class = 6;
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.inventory.slot(3 * 65)->scope_zoom == 10);
+
+    WeaponInstallData shell;
+    shell.name = "WPN_SHELL_ONLY";
+    shell.scope_max_mag = 12.0f;
+    shell.scope_min_mag = 4;
+    shell.hud_category = 2;
+    local_weapon_install(r.world, r.weapon, shell, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.scope_zoom == 4);
+    r.weapon.slot.scope_zoom = 8;
+    local_weapon_store_scope_zoom(r.world, r.weapon, r.inventory);
+    CHECK(r.inventory.slot(3 * 65)->scope_zoom == 10);
+}
+
 void test_armor_carry_bit_follows_accepted_loadout() {
     Rig r;
     r.world.registry.configure_pool(0, 1);
@@ -205,6 +259,7 @@ int main() {
     test_accept_requested_ammo_and_banned_validation();
     test_class_latch_survives_kit_reset();
     test_armor_carry_bit_follows_accepted_loadout();
+    test_rebuild_and_mount_carry_the_slot_zoom();
     test_armory_class_policy();
     test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");

@@ -255,6 +255,28 @@ static void test_empty_wac_clock_and_baseline_gate() {
     }
 }
 
+// A Stop/restart that finds a UseGun switch still pending cancels only the
+// personal slot's action state: its magazine, its reserve and its scope zoom
+// (MountSlot+0xC, slot state seeded once per slot) survive the cancel.
+// [orig: WeaponSlot_InitFromDef @0x53EF35]
+static void test_restart_cancel_keeps_the_personal_slot_zoom() {
+	ms::MissionKernel kernel;
+	kernel.open_document(bms::File{}, "synth", ms::BootFileSource{});
+	ms::KernelBootOptions options;
+	options.playable = false;
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	kernel.local.weapon.usegun_switch = w::LocalUseGunSwitch::kAttach;
+	kernel.local.weapon.slot.current = w::weapon_action::kSwitchFrom;
+	kernel.local.weapon.slot.clip = 9;
+	kernel.local.weapon.slot.reserve = 30;
+	kernel.local.weapon.slot.scope_zoom = 6;
+	CHECK(kernel.restore_baseline());
+	CHECK(kernel.local.weapon.slot.current != w::weapon_action::kSwitchFrom);
+	CHECK(kernel.local.weapon.slot.clip == 9 && kernel.local.weapon.slot.reserve == 30);
+	CHECK(kernel.local.weapon.slot.scope_zoom == 6);
+}
+
 static void test_initial_wac_waits_for_the_weather_owner_once() {
     std::map<std::string, std::string> files;
     files["synth.wac"] = "if never then inc(v1) fov(40) endif\n";
@@ -384,6 +406,7 @@ int main() {
 	test_vehicle_spawn_pose_is_captured_after_initial_wac();
 	test_numbered_vars_reset_after_premission_before_initial_wac();
 	test_initial_wac_waits_for_the_weather_owner_once();
+	test_restart_cancel_keeps_the_personal_slot_zoom();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
 	std::map<std::string, std::string> files;

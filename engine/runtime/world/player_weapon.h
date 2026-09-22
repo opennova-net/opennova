@@ -217,6 +217,11 @@ struct WeaponInstallData {
     int32_t heat_decay_per_tick = 0;
     int32_t heat_glow_threshold = 0;
     float scope_max_mag = 0.0f;
+    // The zoom seed's other two def words (weapon_inventory.h
+    // weapon_slot_initial_zoom): scope_max_mag's second value (+0x94) and
+    // scope_min_mag (+0x98, record default 2).
+    int32_t scope_initial_mag = 0;
+    int32_t scope_min_mag = 2;
     int32_t attack_anim = 0;
     int32_t run_anim = 0;
     int32_t clipsize = 0;
@@ -323,6 +328,13 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
                           bool preserve_slot_state,
                           bool allow_same_weapon_rebake,
                           WeaponInventory *inventory, PlayerViewState &view);
+// A zoom step on the personal slot lands in its inventory entry, the storage
+// the next mount reads back: retail's EquippedSlot IS that slot-table entry,
+// so the step's store is the entry's own zoom [orig: Player_AdjustWeaponElevation
+// stores MountSlot+0xC @0x4DBE6C]. A borrowed UseGun slot, and an install the
+// equipped entry does not back (a shell-installed def), store nothing.
+void local_weapon_store_scope_zoom(const World &world, const LocalPlayerWeapon &w,
+                                   WeaponInventory &inventory);
 void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view);
 
 // The LOCAL branch of retail's held-weapon draw gate: the weapon model is

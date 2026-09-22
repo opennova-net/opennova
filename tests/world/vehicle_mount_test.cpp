@@ -1479,6 +1479,42 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
     CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
 }
 
+// An emplacement's slot starts its optic at the WeaponSlot_InitFromDef seed,
+// never at the lazy max: a slot initialized without an owner entity skips the
+// class-6 sniper lock, so even a sniper-class gunner's cannon starts at the
+// floor. [orig: WeaponSlot_InitFromEntityDef entityPtr 0 @0x546706;
+//  WeaponSlot_InitFromDef @0x53EEF7 / @0x53EF2D..0x53EF44]
+void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
+    World w;
+    w.tables.weapons.entries.resize(3);
+    WeaponTableEntry &cannon = w.tables.weapons.entries[1];
+    cannon.name = "WPN_M1TURRET";
+    cannon.category = 3; // a Primary category must still not lock an ownerless slot
+    cannon.scope_max_mag = 10;
+    cannon.scope_initial_mag = 2; // JOX 'scope_max_mag 10 2'
+    cannon.valid = true;
+    WeaponTableEntry &rcws = w.tables.weapons.entries[2];
+    rcws.name = "WPN_STRYKERTURRET";
+    rcws.category = 11;
+    rcws.scope_max_mag = 12; // JOTAC 'SCOPE_MAX_MAG 12' / 'SCOPE_MIN_MAG 1'
+    rcws.scope_min_mag = 1;
+    rcws.valid = true;
+    w.rules.allow_sniper_scope_zoom = false;
+
+    Entity gun;
+    gun.primary_weapon = cannon.name;
+    CHECK(w.vehicles.prepare_weapon_slot(gun));
+    CHECK(gun.primary_weapon_slot.scope_zoom == 2);
+    // A later prepare of the same live slot keeps the stepped zoom.
+    gun.primary_weapon_slot.scope_zoom = 6;
+    CHECK(w.vehicles.prepare_weapon_slot(gun));
+    CHECK(gun.primary_weapon_slot.scope_zoom == 6);
+    Entity roof;
+    roof.primary_weapon = rcws.name;
+    CHECK(w.vehicles.prepare_weapon_slot(roof));
+    CHECK(roof.primary_weapon_slot.scope_zoom == 1);
+}
+
 // A HOST-crewed helicopter's rotor turns from the authority pass: the helo
 // mover is the unported residual, but retail runs the part-animation
 // accumulator from EVERY mover's tail, the helo mover included, so the pass
@@ -3000,6 +3036,7 @@ int main() {
     test_bms_mount_predicates();
     test_mounted_ammo_slot_route();
     test_prepare_vehicle_weapon_slot_after_armory_load();
+    test_prepare_vehicle_weapon_slot_seeds_the_zoom();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();
     test_ai_drive_avoid_quantized_footprints();

@@ -35,6 +35,14 @@ Vec3 local_player_mission_position(const World &world) {
 	return e != nullptr ? e->position : Vec3{};
 }
 
+// The personal slot's zoom seed owner test: the local player, with the same
+// permission the inventory fill passes (player_loadout.cpp).
+bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
+	const Entity *player = world.registry.get(world.cached.local_player);
+	return player != nullptr && weapon_slot_zoom_sniper_lock(player->player_class,
+			def_category, world.rules.allow_sniper_scope_zoom);
+}
+
 } // namespace
 
 WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
@@ -562,6 +570,12 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 			 w.slot.current == weapon_action::kSwitchTo);
 	if (!preserve_slot_state) {
 		w.slot = WeaponSlotState{};
+		// A fresh slot takes WeaponSlot_InitFromDef's zoom seed with the local
+		// player as its owner; an inventory-backed install reads back its
+		// entry's zoom below [orig: WeaponSlot_InitFromDef @0x53EF2D..0x53EF44].
+		w.slot.scope_zoom = weapon_slot_initial_zoom(static_cast<int32_t>(data.scope_max_mag),
+				data.scope_initial_mag, data.scope_min_mag,
+				local_slot_zoom_sniper_lock(world, data.hud_category));
         w.slot.scope_zero = weapon_scope_zero_initial(w.def.scope_zero);
         if ((flags & 3) != 0)
             w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, w.slot.scope_zero);
@@ -584,6 +598,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
                         world.tables.weapons, *inventory, inventory->equipped_combo);
                 w.slot.shared_clip = def->ammo_bucket != 0;
                 w.slot.scope_zero = eq->scope_zero;
+                w.slot.scope_zoom = eq->scope_zoom;
                 w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
                 w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, eq->scope_zero);
 				w.slot.reserve =
@@ -640,6 +655,17 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     player_view_weapon_mount(view, data.flags, category_changed);
 	w.def_name = data.name;
 	w.active = true;
+}
+
+void local_weapon_store_scope_zoom(const World &world, const LocalPlayerWeapon &w,
+                                   WeaponInventory &inventory) {
+	if (!w.active || w.usegun_slot_active) return;
+	WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo);
+	if (entry == nullptr || entry->adm_index < 0) return;
+	const WeaponTableEntry *def =
+			world.tables.weapons.by_index(static_cast<uint8_t>(entry->adm_index));
+	if (def == nullptr || !strutil::iequals(def->name, w.def_name)) return;
+	entry->scope_zoom = w.slot.scope_zoom;
 }
 
 void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
@@ -1333,6 +1359,8 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 	data.heat_decay_per_tick = row.heat_decay_per_tick;
 	data.heat_glow_threshold = row.heat_glow_threshold;
 	data.scope_max_mag = row.scope_max_mag;
+	data.scope_initial_mag = row.scope_max_mag_arg2;
+	data.scope_min_mag = row.scope_min_mag;
     data.hud_category = row.category;
     data.emplaced_stance = row.emplacedstance;
     // The parser negates the minimum and uses truncated BAM/degree.

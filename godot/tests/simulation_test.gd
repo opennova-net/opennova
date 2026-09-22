@@ -1572,13 +1572,16 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 
 
 func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> void:
-	# The next/prev-weapon actions are dual-purpose: while the optical view is
-	# up on a def whose scope_min_mag (the record default 2) differs from its
-	# scope_max_mag they step the slot zoom by +2 / -2 in place of a cycle,
-	# clamped into [scope_min_mag, scope_max_mag]; at the hip they cycle
-	# (engine: runtime/world/local_player_view.h local_player_weapon_cycle_route,
+	# The weapon-cycle actions are dual-purpose: while the optical view is up
+	# on a def whose scope_min_mag (the record default 2) differs from its
+	# scope_max_mag, cycleweaponP (+1) and cycleweaponN (-1) step the slot
+	# zoom by +2 / -2 in place of a cycle, clamped into [scope_min_mag,
+	# scope_max_mag]; at the hip they cycle (engine:
+	# runtime/world/local_player_view.h local_player_weapon_cycle_route,
 	# Input_HandleActionBinding_0 cases 212/214 -> Player_AdjustWeaponElevation).
-	# A Sighted def projects the slot zoom straight into the view fov (80 / zoom).
+	# A Sighted def projects the slot zoom straight into the view fov (80 / zoom),
+	# and a fresh slot starts at its seed, the floor for a one-value
+	# scope_max_mag (runtime/world/weapon_inventory.h weapon_slot_initial_zoom).
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
@@ -1589,6 +1592,7 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 	def.set_actions([WeaponActionRow.make("idle", 0, 0)])
 	def.flags = 0x01000902 # the M4 EOTech vector: Scoped + Sighted (the optical view)
 	def.scope_max_mag = 10.0
+	def.scope_min_mag = 2 # the record default a parsed row carries
 	def.clipsize = 30
 	def.startrounds = 60
 	sim.set_local_player_weapon(def, {})
@@ -1598,8 +1602,10 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 		sim.step()
 	assert_almost_eq(sim.get_local_player_view().scope_fraction, 1.0, 0.001,
 			"the ADS ease settled before the zoom steps")
-	# Four next-weapon presses walk the zoom up to scope_max_mag: +2 per press
-	# from the mount seed, capped at the max (2 -> 4 -> 6 -> 8 -> 10).
+	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 40.0, 0.001,
+			"the fresh slot starts at its seed 2 (80 / 2), not the lazy maximum")
+	# Four cycleweaponP (+1) presses walk the zoom up to scope_max_mag: +2 per
+	# press from the seed, capped at the max (2 -> 4 -> 6 -> 8 -> 10).
 	for _i in range(4):
 		sim.request_local_player_weapon_cycle(1)
 		sim.step()
@@ -1608,11 +1614,11 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 	sim.request_local_player_weapon_cycle(-1)
 	sim.step()
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 10.0, 0.001,
-			"prev-weapon steps the zoom down by 2 (80 / 8)")
+			"cycleweaponN (-1) steps the zoom down by 2 (80 / 8)")
 	sim.request_local_player_weapon_cycle(1)
 	sim.step()
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 8.0, 0.001,
-			"next-weapon steps it back up by 2, capped at scope_max_mag")
+			"cycleweaponP (+1) steps it back up by 2, capped at scope_max_mag")
 	assert_almost_eq(sim.get_local_player_view().scope_fraction, 1.0, 0.001,
 			"no zoom step ever cycled the weapon (the optical view stayed up)")
 
