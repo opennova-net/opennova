@@ -7,6 +7,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/dir_table.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h>
@@ -18,10 +19,12 @@
 
 #include <formats/def/def.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 using namespace opennova::world;
@@ -1867,6 +1870,269 @@ void test_tank_pivot_sound_latch_and_loop() {
 	}
 }
 
+// A tank rides its recoil / heavy-hit impulse: the unit direction scaled by
+// trunc(amplitude * 28.16f) joins the velocity every tick while the chassis
+// contact byte holds, and the direction clears on the tick it drops.
+// [orig: Entity_UpdateTankVehiclePhysics @0x48A8C0..0x48A9C0]
+void test_tank_impulse_pushes_velocity() {
+	Rig r;
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.player_control = false;
+	auto &m = r.veh().veh;
+	m.yaw_seeded = true;
+	m.chassis_impulse_direction[0] = -65536;
+	m.chassis_impulse_amplitude = 10; // the stock WPN_M1TURRET fire action_value
+	m.chassis_contact_active = true;
+	const float x0 = r.veh().position.x;
+	r.tick(1, t);
+	// trunc(10 * 28.16f) = 281, then (-65536 * 281 + 0x8000) >> 16 = -281.
+	CHECK(m.vel_x == -281);
+	CHECK(m.chassis_impulse_direction[0] == -65536);
+	CHECK(r.veh().position.x < x0);
+	m.chassis_contact_active = false;
+	r.tick(1, t);
+	CHECK(m.vel_x == -281); // the last push lands before the clear
+	CHECK(m.chassis_impulse_direction[0] == 0);
+	r.tick(1, t);
+	CHECK(m.vel_x == 0);
+	// Other families never read the impulse.
+	Rig g;
+	auto gt = buggy_traits();
+	gt.player_control = false;
+	g.veh().veh.yaw_seeded = true;
+	g.veh().veh.chassis_impulse_direction[0] = -65536;
+	g.veh().veh.chassis_impulse_amplitude = 10;
+	g.veh().veh.chassis_contact_active = true;
+	g.tick(1, gt);
+	CHECK(g.veh().veh.vel_x == 0);
+}
+
+// The ground core stops a crashed hull outright; the tank also needs +0x2EF.
+// [orig: cveh @0x48C086..0x48C08F; Entity_UpdateTankVehiclePhysics
+//  @0x489C06..0x489C1C]
+void test_tank_crash_stop_needs_2ef() {
+	for (const VehicleFamily family : { VehicleFamily::Tank, VehicleFamily::Ground }) {
+		for (int latch = 0; latch < 2; ++latch) {
+			Rig r;
+			auto t = buggy_traits();
+			t.family = family;
+			t.player_control = false;
+			auto &m = r.veh().veh;
+			m.yaw_seeded = true;
+			m.crashed = 1;
+			m.byte_2ef = static_cast<uint8_t>(latch);
+			m.cmd_speed = 16384;
+			r.tick(1, t);
+			const bool stopped = family == VehicleFamily::Ground || latch == 1;
+			CHECK((m.cmd_speed == 0) == stopped);
+		}
+	}
+}
+
+// The tank's recovery arm stores slideDecay even on a crashed hull; only the
+// straight arm keeps a crashed hull's vertical velocity.
+// [orig: Entity_UpdateTankVehiclePhysics store @0x48A5D4; straight arm Z gate
+//  @0x48A28D..0x48A2AE]
+void test_tank_crashed_vertical_velocity_arms() {
+	Rig r;
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	auto &m = r.veh().veh;
+	m.crashed = 1;
+	m.slide_z = -5000;
+	m.speed = 4000; // commanded, |speed| <= 0x2000: the recovery arm
+	CHECK(detail::vehicle_traction_velocity(r.w, r.veh(), t, 4000));
+	CHECK(m.slide_z == 0); // speed * forward.z on the level row
+	m.slide_z = -5000;
+	m.speed = 20000; // the straight arm
+	CHECK(detail::vehicle_traction_velocity(r.w, r.veh(), t, 20000));
+	CHECK(m.slide_z == -5000);
+	m.crashed = 0;
+	CHECK(detail::vehicle_traction_velocity(r.w, r.veh(), t, 20000));
+	CHECK(m.slide_z == 0);
+}
+
+// Movement trails sample only at the end of the contact arms: the airborne
+// and off-contact arms jump past them. [orig: ctan @0x48A60D..0x48A67F vs
+// @0x48A684; cveh @0x48CD93..0x48CDFD vs @0x48CE02; cbik @0x486170..0x4861F1
+// vs @0x4861F6]
+void test_trails_sample_only_in_contact_arms() {
+	for (const VehicleFamily family :
+			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike }) {
+		Rig r;
+		auto t = buggy_traits();
+		t.family = family;
+		t.player_control = false;
+		for (int i = 0; i < 2; ++i) {
+			t.trails[i].effect = "trail" + std::to_string(i + 1);
+			t.trails[i].mask = static_cast<uint16_t>(1u << i);
+		}
+		t.trail_point_count = 2;
+		t.trail_points[0] = { { 65536, 0, 0 }, { 0, 0, 65536 } };
+		t.trail_points[1] = { { -65536, 0, 0 }, { 0, 0, 65536 } };
+		r.w.out.fire_sounds.set_listener(r.veh().position);
+		auto &m = r.veh().veh;
+		m.yaw_seeded = true;
+		m.contact_solved_once = true;
+		m.cmd_speed = 16384;
+		m.speed = 16384;
+		const int trail_lane = family == VehicleFamily::Ground ? 1 : 0;
+		r.veh().flags |= kEntityFlagInAir; // airborne arm
+		r.w.logic_tick = 4;
+		r.tick(1, t);
+		CHECK(m.trails.points[trail_lane].definition == 0);
+		r.veh().flags &= ~kEntityFlagInAir;
+		m.grounded = false; // off-contact arm
+		r.w.logic_tick = 8;
+		r.tick(1, t);
+		CHECK(m.trails.points[trail_lane].definition == 0);
+		m.grounded = true; // contact arm
+		r.w.logic_tick = 12;
+		r.tick(1, t);
+		CHECK(m.trails.points[trail_lane].definition != 0);
+	}
+}
+
+// The slope factor samples the runtime table at (pitch + 0x200000) >> 22 rather
+// than a continuous cosine. [orig: Entity_UpdateTankVehiclePhysics
+//  @0x489CE6..0x489D01; cveh @0x48C1C6..0x48C1D7; cbik @0x485362..0x48537E]
+void test_slope_factor_samples_quantized_table() {
+	for (const VehicleFamily family :
+			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike }) {
+		Rig r;
+		auto t = buggy_traits();
+		t.family = family;
+		t.player_control = false;
+		auto &m = r.veh().veh;
+		m.yaw_seeded = true;
+		r.veh().pitch = 10;
+		m.speed = 20000;
+		m.cmd_speed = 20000;
+		const int32_t pitch_bam = 10 * 11930464;
+		int32_t c = 0, s = 0;
+		quantized_dir(pitch_bam, c, s);
+		const auto target_for = [](int32_t cos22) {
+			const int32_t c2 = static_cast<int32_t>((static_cast<int64_t>(cos22) * cos22) >> 22);
+			return static_cast<int32_t>((static_cast<int64_t>(c2) * 20000) >> 22);
+		};
+		const int32_t target = target_for(c);
+		const int32_t continuous = target_for(
+				static_cast<int32_t>(std::cos(pitch_bam * opennova::io::kRadiansPerBam) * 4194304.0));
+		CHECK(continuous != target); // the case discriminates the two samplers
+		r.tick(1, t);
+		const int32_t accel =
+				std::clamp((target - 20000 + 16) >> 5, -t.acceleration, t.acceleration);
+		CHECK(m.speed == 20000 + accel);
+	}
+}
+
+// A zero-command tank whose parent is an NPC keeps the raw servo instead of
+// the deceleration clamp, as in the ground core.
+// [orig: Entity_UpdateTankVehiclePhysics @0x489EBA..0x489ECB; cveh
+//  @0x48C428..0x48C43F]
+void test_tank_npc_parent_coast_keeps_raw_servo() {
+	for (const bool npc_parent : { false, true }) {
+		Rig r;
+		auto t = buggy_traits();
+		t.family = VehicleFamily::Tank;
+		t.player_control = false;
+		Entity parent;
+		parent.kind = EntityKind::Item;
+		parent.flags = npc_parent ? 0u : 0x100u;
+		const EntityHandle parent_h = r.w.registry.spawn(1, parent);
+		r.veh().mount_target = parent_h;
+		auto &m = r.veh().veh;
+		m.yaw_seeded = true;
+		m.speed = 20000;
+		m.cmd_speed = 0;
+		r.tick(1, t);
+		const int32_t raw = (0 - 20000 + 16) >> 5;
+		CHECK(m.speed == 20000 + (npc_parent ? raw : -t.deceleration));
+	}
+}
+
+// The ctank and cbike rows call their movers without testing the selector.
+// [orig: Entity_DispatchPhysics_ctank @0x48F000..0x48F007;
+//  Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7; cveh tests it @0x48EFC7]
+void test_tank_and_bike_ignore_physics_selector() {
+	Rig r;
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.player_control = false;
+	t.physics = 0;
+	auto &m = r.veh().veh;
+	m.yaw_seeded = true;
+	m.speed = 10000;
+	m.cmd_speed = 10000;
+	r.tick(1, t);
+	CHECK(m.track_phase[0] != 0 && m.track_phase[1] != 0); // the tank mover ran
+	Rig b;
+	auto bt = buggy_traits();
+	bt.family = VehicleFamily::Bike;
+	bt.player_control = false;
+	bt.physics = 0;
+	b.veh().veh.yaw_seeded = true;
+	b.veh().veh.speed = 8192;
+	b.veh().flags |= 0x20u;
+	b.tick(1, bt);
+	CHECK(b.veh().veh.wheelie_active != 0); // the light mover's wheelie arm ran
+}
+
+// A predicting client runs the PlayerControl tail with the real row: an
+// unclaimed hull skips the movement fold, and a claimant arms the start edge.
+// Only the input block is role-gated. [orig: ctan input gate @0x489522..0x489545;
+// tail gates @0x48AAC4..0x48AADA and @0x48AD94..0x48AE3D]
+void test_prediction_keeps_player_control_tail() {
+	Rig r;
+	static constexpr char profile[] =
+			"begin \"SP_Pred\"\n Soundloop_1 IDLE 1 1\n enginestart V_START\nend\n";
+	CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	auto t = buggy_traits();
+	t.family = VehicleFamily::Tank;
+	t.sound_profile = "SP_Pred";
+	r.w.vehicles.traits.set(r.veh().item_id, t);
+	r.w.ai.is_authority = false;
+	auto &m = r.veh().veh;
+	m.net_predicted = true;
+	m.yaw_seeded = true;
+	r.w.vehicles.ground_client_tick(r.veh(), t);
+	bool idle = false;
+	for (size_t i = 0; i < r.w.out.sound_emitters.size(); ++i)
+		idle = idle || (r.w.out.sound_emitters[i].lane == 0 &&
+								r.w.out.sound_emitters[i].volume_q8_8 != 0);
+	CHECK(!idle); // no claimant: the PlayerControl caller skips the fold
+	CHECK(r.w.out.slot_sounds.empty());
+	r.mount();
+	r.w.env.water_z = -(1 << 16); // the claimant's eye sits above the water plane
+	r.w.out.slot_sounds.clear();
+	r.w.vehicles.ground_client_tick(r.veh(), t);
+	bool started = false;
+	for (const auto &sound : r.w.out.slot_sounds)
+		started = started || sound.slot == opennova::audio::kSlotEngineStart;
+	CHECK(started);
+	CHECK(m.engine_sound_latched);
+}
+
+// The handbrake latch reads the +0x170 claimant rather than the input block's
+// controller, so a predicting client latches it too.
+// [orig: cveh `cmp [esi+170h], edx` @0x48C03C; cbik @0x4851E8]
+void test_prediction_latches_handbrake_from_claimant() {
+	Rig r;
+	auto t = buggy_traits();
+	t.hand_brake = 1;
+	r.mount();
+	r.w.ai.is_authority = false;
+	auto &m = r.veh().veh;
+	m.net_predicted = true;
+	m.yaw_seeded = true;
+	m.net_recv_speed = 16384;
+	r.veh().flags |= 0x8u; // the lean-right mirror
+	r.w.vehicles.ground_client_tick(r.veh(), t);
+	CHECK(m.handbrake_latched == 1);
+	CHECK(m.cmd_speed == 0);
+}
+
 void test_skid_effects_and_sound_edges() {
 	Rig r;
 	r.mount();
@@ -2088,6 +2354,15 @@ int main() {
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_tank_pivot_sound_latch_and_loop();
+	test_tank_impulse_pushes_velocity();
+	test_tank_crash_stop_needs_2ef();
+	test_tank_crashed_vertical_velocity_arms();
+	test_trails_sample_only_in_contact_arms();
+	test_slope_factor_samples_quantized_table();
+	test_tank_npc_parent_coast_keeps_raw_servo();
+	test_tank_and_bike_ignore_physics_selector();
+	test_prediction_keeps_player_control_tail();
+	test_prediction_latches_handbrake_from_claimant();
 	test_skid_effects_and_sound_edges();
 	test_handbrake_skid_and_grip_recovery();
 	test_tank_pivot_retains_direction_and_previous_track_rate();

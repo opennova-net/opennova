@@ -88,7 +88,10 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 	// The critical fire band uses health before the cadence drain. Tank first
 	// smokes, switching to large fire strictly below criticalHp/8.
 	// [orig: @0x48B046..0x48B0E7, @0x488C38..0x488CC7]
+	// The ctank/cbike rows never reach that mover [orig:
+	// Entity_DispatchPhysics_ctank @0x48F000, Entity_DispatchPhysics_cbike @0x48EFF0].
 	if (t.physics == 0 && t.family != VehicleFamily::Watercraft &&
+			t.family != VehicleFamily::Tank && t.family != VehicleFamily::Bike &&
 			!vehicle_family_uses_direct_air_mover(t.family)) {
 		// The simple ground callback only sounds its critical warning.
 		// [orig: Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the

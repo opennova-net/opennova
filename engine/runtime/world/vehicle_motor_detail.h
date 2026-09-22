@@ -286,7 +286,7 @@ bool vehicle_traction_acceleration(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
 void vehicle_wheel_traction_tick(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
-void vehicle_traction_velocity(
+bool vehicle_traction_velocity(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
 void vehicle_capture_contact_direction(Entity &vehicle, const VehicleEulerBasis &basis);
 void vehicle_contact_downhill_tail(Entity &vehicle, int32_t pz);

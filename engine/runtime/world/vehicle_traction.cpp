@@ -31,8 +31,11 @@ void cross_q16(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
 }
 
 bool sharp_steering(const Entity::VehicleMotorState &m) {
-	// This is the wheel-angle register +0x2B4, not chassis pitch.
-	// [orig: Entity_UpdateTankVehiclePhysics @0x488AB0, @0x489BB1..0x489C32]
+	// This is the wheel-angle register +0x2B4, not chassis pitch: its folded
+	// angle in degrees (x 360/2^32, +360 when negative, 360-x above 180) against
+	// 4.0, once for the acceleration caps and once for the velocity arms.
+	// [orig: Entity_UpdateTankVehiclePhysics @0x488AB0, @0x489D24..0x489D77 and
+	//  @0x48A00B..0x48A03D; flt_7C3BA8/7C3BA4/7C69EC/7C44B8]
 	return std::abs(double(m.steer_state) * 8.381903171539307e-8) > 4.0;
 }
 
@@ -72,7 +75,7 @@ void turn_contact_direction(
 // True means the skid branch supplied the complete acceleration, so the
 // ordinary acceleration/deceleration clamp tree is skipped.
 // [orig: cveh @0x48C330..0x48C3D0; cbik @0x4853EB..0x485501;
-// ctan @0x489C3A..0x489F34]
+// ctan @0x489D79..0x489F19]
 bool vehicle_traction_acceleration(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
 	auto &m = vehicle.veh;
@@ -154,10 +157,12 @@ void vehicle_wheel_traction_tick(
 // Retain the previous drive direction throughout a handbrake skid, then
 // turn it back toward the chassis in one-degree steps after the authored
 // recovery window. Tanks use their separate five-degree/low-speed ladder.
+// Returns true when a contact arm ran; the airborne and off-contact arms
+// return false (they also skip the movement trails).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, @0x48C55A..0x48CF97;
 // Entity_UpdateLightVehiclePhysics @0x483FE0, @0x48586D..0x48659B;
 // Entity_UpdateTankVehiclePhysics @0x488AB0, @0x489FA0..0x48A82C]
-void vehicle_traction_velocity(
+bool vehicle_traction_velocity(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
 	auto &m = vehicle.veh;
 	const bool tank = traits.family == VehicleFamily::Tank;
@@ -170,7 +175,7 @@ void vehicle_traction_velocity(
 	// Flags 0x2000 (airborne) holds every register in all three movers
 	// [orig: @0x48CE02..0x48CE04 / @0x4861F6..0x4861F8 / @0x48A684..0x48A686].
 	if ((vehicle.flags & kEntityFlagInAir) != 0)
-		return;
+		return false;
 	// Off contact. The ground/bike movers reach this arm on `+0x2F2 == 0 &&
 	// +0x3CD == 0` (no handbrake); the tank on `+0x2F2 == 0` alone [orig: cveh
 	// @0x48C587..0x48C5A6; cbik @0x4858CC..0x4858EB; ctan @0x489FEE..0x48A005].
@@ -178,7 +183,7 @@ void vehicle_traction_velocity(
 		// Before the first solve nothing moves [orig: `cmp +0x3CE, 0; jz`
 		// @0x48CE17 / @0x48620B / @0x48A699].
 		if (!m.contact_solved_once)
-			return;
+			return false;
 		// The GROUND mover alone refreshes or clears the slip stamp off contact
 		// [orig: @0x48CE24..0x48CE61]; the cbik arm @0x4861F6..0x48621F and the
 		// ctan arm @0x48A684..0x48A6AD carry no +0x3F8 handling.
@@ -215,7 +220,7 @@ void vehicle_traction_velocity(
 				else clear_direction(m);
 			} else if (!tank)
 				velocity_from_direction(m, forward, m.speed, forward[2] < 0);
-			return;
+			return false;
 		}
 		// Crashed: each family's own arm.
 		if (tank) {
@@ -264,7 +269,7 @@ void vehicle_traction_velocity(
 			m.wheel_rate_bam = m.air_roll_rate = m.air_pitch_rate = 0;
 			m.settle_2f0 = 1;
 		}
-		return;
+		return false;
 	}
 	if (tank) {
 		if (target_speed == 0 && sharp_steering(m)) {
@@ -275,25 +280,34 @@ void vehicle_traction_velocity(
 			m.contact_direction[2] = std::min(0, m.contact_direction[2]);
 			velocity_from_direction(m, m.contact_direction, io::bam_abs(m.speed), true);
 			m.wheel_rate_bam = q16_mul_rhu(-16384, m.steer_state >> 2);
-			return;
+			return true;
 		}
-		if ((target_speed == 0 || io::bam_abs(m.speed) <= 8192) &&
-				vehicle_has_contact_direction(m)) {
+		// The straight arm leaves any retained skid frame alone, and only it
+		// keeps a crashed hull's vertical velocity.
+		// [orig: @0x48A1E6..0x48A2BE, crashed Z gate @0x48A28D..0x48A2AE]
+		if (target_speed != 0 && io::bam_abs(m.speed) > 8192) {
+			velocity_from_direction(m, forward, m.speed, m.crashed == 0);
+			m.wheel_rate_bam = q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+			return true;
+		}
+		// The recovery arm advances the stored skid frame but drives along the
+		// current forward row; only the sharp, zero-command arm uses the frame.
+		// Its slideDecay store is unconditional, crashed or not.
+		// [orig: @0x48A2C3..0x48A607, store @0x48A5D4]
+		if (vehicle_has_contact_direction(m)) {
 			if (dot_q16(forward, m.contact_direction) >= 61439 || m.speed <= 1280)
 				clear_direction(m);
 			else
 				turn_contact_direction(m, forward, up, 59652323);
 		}
-		// Retail advances the stored skid frame but drives along the current
-		// forward row in this arm; only the sharp, zero-command arm uses it.
-		velocity_from_direction(m, forward, m.speed, m.crashed == 0 || target_speed == 0);
+		velocity_from_direction(m, forward, m.speed, true);
 		m.wheel_rate_bam = q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
-		return;
+		return true;
 	}
 	if (m.handbrake_latched != 0 && m.speed != 0 && vehicle_has_contact_direction(m)) {
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
         if (bike) m.wheelie_active = 0; // [orig: @ 0x4859E0]
-		return;
+		return true;
 	}
     if (bike && m.handbrake_latched == 0 && m.wheelie_active) {
         // [orig: Entity_UpdateLightVehiclePhysics @ 0x486052..0x486149]
@@ -302,21 +316,21 @@ void vehicle_traction_velocity(
         int32_t direction[3];
         q16_normalize(raw, direction);
         velocity_from_direction(m, direction, m.speed, m.crashed == 0);
-        return;
+        return true;
     }
 	if (!vehicle_has_contact_direction(m)) {
 		clear_direction(m);
 		velocity_from_direction(m, forward, m.speed, m.crashed == 0);
-		return;
+		return true;
 	}
 	if (m.slip_started_tick == 0) {
 		m.slip_started_tick = world.logic_tick;
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
-		return;
+		return true;
 	}
 	if (int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip)) {
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
-		return;
+		return true;
 	}
 	if (dot_q16(forward, m.contact_direction) < 0) {
 		if (io::bam_abs(m.speed) > 256) {
@@ -325,7 +339,7 @@ void vehicle_traction_velocity(
 				m.speed = io::bam_sub(m.speed, traits.acceleration);
 			if (m.speed < 0)
 				m.speed = io::bam_add(m.speed, traits.acceleration);
-			return;
+			return true;
 		}
 	} else {
 		int32_t a[3], b[3];
@@ -336,11 +350,12 @@ void vehicle_traction_velocity(
 		if (dot_q16(a, b) < 61166 && m.speed > 0) {
 			turn_contact_direction(m, forward, up, 11930464);
 			velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
-			return;
+			return true;
 		}
 	}
 	clear_direction(m);
 	velocity_from_direction(m, forward, m.speed, m.crashed == 0);
+	return true;
 }
 
 // Handbrake contact latches forward with uphill motion removed, normalized

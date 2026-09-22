@@ -204,13 +204,16 @@ public:
     // +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in
     // Entity_UpdateVehiclePhysics @0x48af00]
     Entity *resolve_controller(Entity &veh);
-    // One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
-    // traits carry a non-zero `physics` selector). Consumes the controlling occupant's
-    // replicated input (or the AI-driver command when the controller is an NPC), advances
-    // Entity::position / Entity::yaw and the persistent Entity::veh motor state.
-    // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the authority drive core;
+    // One tick of the ground-vehicle motor for `veh` (a pool-1 entity whose traits
+    // carry a non-zero `physics` selector, or any ctank/cbike row). Consumes the
+    // controlling occupant's replicated input (or the AI-driver command when the
+    // controller is an NPC), advances Entity::position / Entity::yaw and the
+    // persistent Entity::veh motor state. `prediction` skips only the role-gated
+    // input block: ground_client_tick has already staged the registers.
+    // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the drive core;
     // block-level cites inline]
-    void tick_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd = nullptr);
+    void tick_motor(Entity &veh, const VehicleTraits &traits,
+            const VehicleDriveCmd *ai_cmd = nullptr, bool prediction = false);
 	// Watercraft prediction runs the received-register chase, local-driver reconciliation and the
 	// full motor/platform solve. The shared state includes speed, steer, heave, pitch, roll,
 	// planing, water/air flags and wreck latches; authority-only damage remains gated.
