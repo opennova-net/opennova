@@ -35,8 +35,10 @@ void compose_mounted_pose_controls(
         uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
         int32_t (&r_ctrl)[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT]);
 
-// Vehicle render callbacks also feed PANM before resolving a userpoint.
-// Keep mounted seats and native muzzle/collision poses on the same controls.
+// The vehicle render class's CTRL callback (def+0x144), which retail runs
+// before every userpoint transform and bone attachment frame of that entity.
+// A UseGun seat attachment does not call it; there the projection stands for
+// the global bus value the carrier's last class publication left.
 void compose_vehicle_pose_controls(World &world, const Entity &carrier,
         int32_t (&r_ctrl)[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT]);
 

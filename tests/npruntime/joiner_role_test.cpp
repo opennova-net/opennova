@@ -942,6 +942,15 @@ bool run_received_loadout_policy_and_sounds() {
 bool run_replica_turret_channel() {
  Harness h;
  h.role.poll_preload();
+ // The replica's materialized world twin: an 'ewep' render class.
+ auto &world = h.kernel->world;
+ world.registry.configure_pool(1, 4);
+ w::Entity twin;
+ twin.kind = w::EntityKind::Item;
+ twin.item_id = 123;
+ twin.emplaced_ctrl_publisher = true;
+ if (!expect(world.registry.spawn(1, twin).packed == 0x1000,
+   "the world twin shares the wire handle")) return false;
  auto &state = h.role.runtime->state();
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
@@ -997,8 +1006,18 @@ bool run_replica_turret_channel() {
    "gun pitch consumes recoil before the body decay")) return false;
  state.find(2)->carrier_handle = 0xFFFF;
  h.role.run_tick(h.input);
+ // The ewep writer has no occupant test: the dismounted turret keeps
+ // publishing the words it was left at.
+ // [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class row
+ //  @0x82CFA0]
+ const auto *held = state.find(0x1000);
+ if (!expect(held->emplaced_controls_valid && held->emplaced_gun_yaw_word == -8192 &&
+   held->emplaced_gun_pitch_word == -1024,
+   "a dismounted turret holds its last traverse")) return false;
+ world.registry.get(w::EntityHandle{0x1000})->emplaced_ctrl_publisher = false;
+ h.role.run_tick(h.input);
  return expect(!state.find(0x1000)->emplaced_controls_valid,
-   "dismount clears presentation validity");
+   "another render class publishes no EWEAP words");
 }
 
 

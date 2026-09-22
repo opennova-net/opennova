@@ -630,8 +630,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);
+    // The ewep class update runs every tick, occupied or not.
+    // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     world.registry.for_each_in_pool(1, [&](const Entity &entity) {
-        tick_emplaced_weapon_animation(world, *world.registry.get(entity.handle));
+        tick_emplaced_weapon_class_update(world, *world.registry.get(entity.handle));
     });
     // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
     // motor delta, then resolve contacts against that same pose.

@@ -502,7 +502,7 @@ func test_both_channels_posed() -> void:
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL2"), 200, "both active channels posed")
 
 
-func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
+func test_emplaced_weapon_uses_named_controls_holds_and_releases() -> void:
 	var model := _model()
 	var p := _make_pass(_index_of({ 8: model }))
 	var snap := Snapshot.new()
@@ -513,17 +513,27 @@ func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
 		"emplaced_gun_pitch": 0xFEDC,
 		"weap_spin": 0xFFFF,
 	}]
-	_present(p, snap)
-	assert_eq(model.get_ctrl_values(), {
+	var held := {
 		"EWEAP_GUNYAW": 0x1234,
 		"EWEAP_GUNPITCH": 0xFEDC,
 		"WEAP_SPIN": 0xFFFF,
-	}, "semantic controls do not alias model-order PLAYPARTANIM channels")
+	}
+	_present(p, snap)
+	assert_eq(model.get_ctrl_values(), held,
+			"semantic controls do not alias model-order PLAYPARTANIM channels")
+
+	# The ewep writer has no occupant test, so a gun its gunner left keeps
+	# publishing the same words: the turret holds its last traverse.
+	# [orig: HUD_CacheWeaponSlotInfo @0x440930 via def+0x144 of the 'ewep'
+	#  render-class row @0x82CFA0]
+	_present(p, snap)
+	assert_eq(model.get_ctrl_values(), held,
+			"a dismounted gun's held words stay applied")
 
 	snap.entities[0]["emplaced_controls_valid"] = 0
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().is_empty(),
-			"dismount/death clears retained EWEAP controls")
+			"a row that stops publishing releases the retained EWEAP controls")
 
 
 func test_world_heat_glow_owns_cold_zero_and_releases_unavailable_state() -> void:
@@ -699,7 +709,7 @@ func test_part_anim_and_emplaced_controls_remain_independent() -> void:
 	assert_eq(model.get_ctrl_values(), {
 		"VEHICLE_SPECIAL1": 0x3333,
 		"VEHICLE_SPECIAL2": 0xCCCC,
-	}, "dismount clears only stale EWEAP ownership")
+	}, "a row that stops publishing releases only the EWEAP registers")
 
 
 func test_first_invalid_emplaced_state_clears_stale_node_controls() -> void:

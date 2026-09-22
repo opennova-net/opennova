@@ -44,14 +44,17 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
 		uint16_t self_handle) {
 	for (auto &mount : state.entities) {
-		mount.emplaced_controls_valid = false;
 		// The materialized world row's phase, only while that row is still this
 		// wire entity's type (a reused handle must not forward a foreign phase).
 		const auto *spin_source = world.registry.get(world::EntityHandle{mount.handle});
-		mount.emplaced_spin_phase = spin_source != nullptr &&
-						static_cast<uint16_t>(spin_source->item_id) == mount.type_id
-				? spin_source->emplaced_spin_phase
-				: 0;
+		const bool same_type = spin_source != nullptr &&
+				static_cast<uint16_t>(spin_source->item_id) == mount.type_id;
+		mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
+		// An 'ewep' render class publishes its held words whether or not a
+		// gunner is seated: an emptied turret keeps its last traverse.
+		// [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
+		//  row @0x82CFA0, no occupant test]
+		mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;

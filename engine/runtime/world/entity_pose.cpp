@@ -661,9 +661,10 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 		ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL1] = phase_for(0);
 	}
 	ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL2] = phase_for(1);
-	// The generic collision frame receives HEAT_GLOW only when this model is
-	// the carrier in a live UseGun attachment relation; a scoped cold slot
-	// still reads literal zero. [orig: attachment caller @ 0x546518;
+	// The generic collision frame receives HEAT_GLOW from the carrier's
+	// writer: an 'ewep' render class occupied or not, any other class through
+	// a live UseGun rider's seat call; a cold slot still reads literal zero.
+	// [orig: attachment caller @ 0x546518;
 	//  HUD_CacheWeaponSlotInfo cold/hot stores @ 0x440969/@ 0x440991]
 	if (e != nullptr) {
 		int32_t heat_glow = 0;

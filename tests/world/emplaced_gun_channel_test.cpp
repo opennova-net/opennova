@@ -53,6 +53,8 @@ struct Rig {
         gun_seed.yaw = 0;
         gun_seed.pitch = 0;
         gun_seed.item_attrib2 = attrib2;
+        // An 'ewep' render class: the writer that publishes the gun words.
+        gun_seed.emplaced_ctrl_publisher = true;
         Seat usegun;
         usegun.type = SeatType::Gunner;
         usegun.bone_index = 6;
@@ -306,6 +308,18 @@ struct ParentRig {
         gun.emplacement_parent = parent_h;
         gun.emplacement_bone = 1;
         gun.emplacement_anchor_subobject = anchor_subobject;
+        // The publication belongs to the ewep class update and runs behind
+        // the gun's own weapon Def; this Def's window spans every angle.
+        // [orig: Entity_UpdateTransformAndTurret Def gate @0x440E8C..0x440EA0]
+        gun.emplaced_update = true;
+        r.w.tables.weapons.entries.resize(1);
+        WeaponTableEntry &gun_weapon = r.w.tables.weapons.entries[0];
+        gun_weapon.valid = true;
+        gun_weapon.name = "CHILD_GUN";
+        gun_weapon.turret_yaw_range_deg = 180;
+        gun_weapon.turret_pitch_max_deg = 90;
+        gun_weapon.turret_pitch_min_deg = 90;
+        gun.primary_weapon_slot_adm = 0;
     }
 };
 
@@ -488,9 +502,153 @@ void test_barrel_spin_once_before_weapon_pump() {
     CHECK(r.gun().emplaced_spin_phase == 3744);
 }
 
+// The ewep class's CTRL writer has no occupant test: once the gunner leaves,
+// the gun keeps publishing its held words, its spin word and its inline
+// slot's heat, and only an 'ewep' render class publishes them at all.
+// [orig: HUD_CacheWeaponSlotInfo @0x440930 (words @0x440934..0x440948, spin
+//  @0x44094E..0x440955, heat @0x44095B..0x440991), def+0x144 of the 'ewep'
+//  render-class row @0x82CFA0; the words' only writers @0x440B23/@0x440B58
+//  (producer), @0x44125C/@0x4412A4 (window), @0x5470F9/@0x547100 (carrier
+//  destruction)]
+void test_unoccupied_gun_publishes_held_words_spin_and_heat() {
+    Rig r(/*local=*/false, /*player_bit=*/false);
+    r.w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = r.w.tables.weapons.entries[0];
+    weapon.valid = true;
+    weapon.action_fsm.heat_per_shot = 100;
+    weapon.action_fsm.heat_decay_per_tick = 7;
+    r.gun().primary_weapon_slot_adm = 0;
+    r.look(bam_sub(kGunHeading, 0x10000000), 0x02000000);
+    r.tick_channel();
+    const int16_t yaw = r.gun().emplaced_gun_yaw_word;
+    const int16_t pitch = r.gun().emplaced_gun_pitch_word;
+    CHECK(yaw != 0 && pitch != 0);
+    r.gun().emplaced_spin_phase = 0x1234;
+    r.w.logic_tick = 50;
+    r.gun().primary_weapon_slot.heat_window_end_tick = 60;
+
+    // A carrier of another render class publishes only through its UseGun
+    // rider's seat call. [orig: Entity_AttachToBoneAndUpdateTransform
+    //  @0x546517..0x546518]
+    r.gun().emplaced_ctrl_publisher = false;
+    EmplacedWeaponControls seat_call;
+    CHECK(emplaced_weapon_controls_for(r.w, r.gun(), seat_call));
+    CHECK(seat_call.gun_yaw == static_cast<uint16_t>(yaw));
+    int32_t seat_heat = -1;
+    CHECK(world_model_heat_glow_for(r.w, r.gun(), seat_heat));
+    CHECK(seat_heat == 70);
+    r.gun().emplaced_ctrl_publisher = true;
+
+    CHECK(r.w.vehicles.detach(r.gunner_h));
+    CHECK(!r.gunner().mounted);
+    EmplacedWeaponControls held;
+    CHECK(emplaced_weapon_controls_for(r.w, r.gun(), held));
+    CHECK(held.valid);
+    CHECK(held.gun_yaw == static_cast<uint16_t>(yaw));
+    CHECK(held.gun_pitch == static_cast<uint16_t>(pitch));
+    CHECK(held.spin == 0x1234);
+    int32_t heat = -1;
+    CHECK(world_model_heat_glow_for(r.w, r.gun(), heat));
+    CHECK(heat == 70); // 10 ticks of window x 7 per tick
+    r.w.logic_tick = 60;
+    CHECK(world_model_heat_glow_for(r.w, r.gun(), heat));
+    CHECK(heat == 0); // the cold leg still publishes literal zero
+
+    // With the rider gone, another render class's callback writes none of
+    // the three.
+    r.gun().emplaced_ctrl_publisher = false;
+    CHECK(!emplaced_weapon_controls_for(r.w, r.gun(), held));
+    CHECK(!world_model_heat_glow_for(r.w, r.gun(), heat));
+}
+
+// The ewep class update runs every tick whether or not the gun is manned:
+// an emptied turret keeps driving its hull's turret channel with the held
+// word, so the hull turret does not drift back when the gunner leaves.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 -> the publication
+//  @0x440f04..0x441020, behind the Def gate @0x440E8C..0x440EA0]
+void test_parent_publication_runs_unoccupied_every_tick() {
+    ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, /*parent_attrib=*/0);
+    pr.r.look(bam_sub(kGunHeading, 20 * kBamPerDegree), 0);
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    const int32_t yaw = emplaced_word_bam(pr.r.gun().emplaced_gun_yaw_word);
+    CHECK(yaw != 0);
+    CHECK(pr.r.w.vehicles.detach(pr.r.gunner_h));
+    pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
+    pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] = 0x12340000;
+    tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == yaw);
+    // The world tick's pool-1 walk runs that class update for the empty gun.
+    pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
+    pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] = 0x12340000;
+    // A live parent generation keeps the child attached through the world
+    // tick's orphan peel; the hull's own brain stays out of this tick.
+    pr.r.gun().emplacement_parent_spawn_id =
+            pr.r.w.registry.get(pr.parent_h)->registry_spawn_id;
+    pr.r.w.registry.get(pr.parent_h)->spawn_phase = 1000;
+    pr.r.w.add_system(&pr.r.w.ai);
+    pr.r.w.run_logic_tick(true);
+    CHECK(pr.r.w.registry.get(pr.r.gun_h) != nullptr);
+    if (pr.r.w.registry.get(pr.r.gun_h) == nullptr) return;
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
+    // Without the gun's weapon Def the class update publishes nothing.
+    pr.r.gun().primary_weapon_slot_adm = kAdmSlotNone;
+    pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
+    tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+}
+
+// The destroyed carrier's refNum children return to rest: their held gun
+// words are zeroed, and their ammo re-splits only through a resolved Def.
+// [orig: Vehicle_CleanupTeamEntitiesOnDestruction @0x547040 (+0x324/+0x322 =
+//  0 @0x5470f9..0x547100; WeaponSlot_SplitAmmoIntoClipAndReserve
+//  @0x547107..0x54710e)]
+void test_carrier_destruction_resets_child_words() {
+    Rig r(/*local=*/false, /*player_bit=*/false);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.has_item_def = true;
+    carrier.item_type = 1;
+    carrier.item_attrib = 0x40u;
+    carrier.ref_num = 7;
+    carrier.health = 0;
+    const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
+    Entity &gun = r.gun();
+    gun.has_item_def = true;
+    gun.item_attrib |= kItemAttribEweap;
+    gun.ref_num = 7;
+    gun.emplaced_gun_yaw_word = 0x1234;
+    gun.emplaced_gun_pitch_word = -0x234;
+    gun.primary_weapon_slot.clip = 3;
+    gun.primary_weapon_slot.reserve = 9;
+    r.w.vehicles.cleanup_destroyed_ref_group(*r.w.registry.get(carrier_h));
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    CHECK(r.gun().emplaced_gun_pitch_word == 0);
+    // No weapon row: the split never runs and the ammo stays.
+    CHECK(r.gun().primary_weapon_slot.clip == 3);
+    CHECK(r.gun().primary_weapon_slot.reserve == 9);
+
+    // Both death legs lead with that cleanup for a refNum carrier, ahead of
+    // every husk gate. [orig: Entity_SpawnDeathPieces @0x493409..0x49344D;
+    //  Entity_UpdateDeathTransforms @0x494669..0x494673]
+    r.gun().emplaced_gun_yaw_word = 0x1234;
+    r.gun().emplaced_gun_pitch_word = -0x234;
+    spawn_death_pieces(r.w, *r.w.registry.get(carrier_h));
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    CHECK(r.gun().emplaced_gun_pitch_word == 0);
+    r.gun().emplaced_gun_yaw_word = 0x1234;
+    r.gun().emplaced_gun_pitch_word = -0x234;
+    entity_update_death_transforms(r.w, *r.w.registry.get(carrier_h), /*silent=*/true);
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    CHECK(r.gun().emplaced_gun_pitch_word == 0);
+}
+
 } // namespace
 
 int main() {
+    test_unoccupied_gun_publishes_held_words_spin_and_heat();
+    test_parent_publication_runs_unoccupied_every_tick();
+    test_carrier_destruction_resets_child_words();
     test_barrel_spin_once_before_weapon_pump();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();

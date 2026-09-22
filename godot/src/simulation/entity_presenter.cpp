@@ -693,8 +693,8 @@ int emplaced_apply_typed(ObjectModel *model, PresentRowsView snap,
 				field_i(p, base, Simulation::PF_WEAP_SPIN));
 		return 3;
 	}
-	// Nodes persist across dismount/death: remove only the three controls this
-	// presenter owns — a bulk CTRL clear would also erase live WAC channels.
+	// Nodes persist when a row stops publishing: remove only the three controls
+	// this presenter owns — a bulk CTRL clear would also erase live WAC channels.
 	if (clear_when_invalid) {
 		emplaced_clear_typed(model);
 	}
@@ -823,9 +823,10 @@ int world_heat_apply_typed(ObjectModel *model, PresentRowsView snap,
 	const CtrlRegisters &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1) {
-		// The valid carrier-attachment scope owns cold zero too.
-		// [orig: HUD_CacheWeaponSlotInfo @ 0x440969 / @ 0x440991,
-		//  sole caller @ 0x546518]
+		// The ewep writer publishes cold zero too.
+		// [orig: HUD_CacheWeaponSlotInfo @ 0x440969 / @ 0x440991, the 'ewep'
+		//  render-class row's CTRL callback @0x82CFA0, also called directly
+		//  by a UseGun seat attachment @ 0x546518]
 		set_owned_ctrl(model, n.owner_world_heat, n.heat_glow,
 				field_i(p, base, Simulation::PF_WORLD_HEAT_GLOW));
 		return 1;
