@@ -339,6 +339,12 @@ struct AiProfile {
     int8_t slot_class[4] = {3, 2, 1, 0}; // +40..+52: class ids, priority-descending
 	int32_t subtype = 0; // +20: STD 0 / BOAT 1 / PLANE 2 / TRAIN 3
 	int32_t type = 0; // +16: HELO 1 / GROUND 2 / ORGANIC 3 (0 = unresolved)
+	// The class init's brain[49]/[50] sources as the spawn resolved them (vehicle
+	// init +0xC4/+0xC0, helicopter init +0xD4/+0xC8); the respawn re-run reloads
+	// them over any command-set speed. [orig: Entity_InitVehicleAIFromDef
+	// @0x4688C1..0x4688D3; Entity_InitHelicopterAIFromDef @0x468597..0x4685A9]
+	int32_t class_speed_a = 0;
+	int32_t class_speed_b = 0;
 };
 
 

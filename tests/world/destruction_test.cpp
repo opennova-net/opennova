@@ -2419,9 +2419,42 @@ static void test_vehicle_respawn_lifecycle() {
 	ai.inf.wait_cooldown = 1;
 	w.vehicles.tick_dead(e, ai);
 	CHECK(e.health == 0 && ai.inf.wait_cooldown == 1);
+	// The class init re-run at the head of respawn: the profile speeds over any
+	// command-set speed, the ammo refilled from a resolved block (an unresolved
+	// block empties), the turret words, step 16 then the dead state's enter
+	// (step 62, the group alert), the 0..15 think stagger and the rotor words
+	// dropped; the respawn body clears the kill credit.
+	// [orig: Entity_RespawnVehicle @0x45FF53..0x45FF73 -> Entity_InitVehicleAIFromDef
+	//  @0x46885B..0x468964; +0x178 = 0 @0x460074]
+	ai.profile.class_speed_a = 111;
+	ai.profile.class_speed_b = 222;
+	ai.brain.f[AiBrain::kSpeedA] = 5;
+	ai.brain.f[AiBrain::kSpeedB] = 6;
+	ai.profile.fire_a.ammo_index = 3;
+	ai.profile.fire_a.ammo_cap = 7;
+	ai.profile.fire_a.flags = 1;
+	ai.profile.fire_a.facing_bam = 4242;
+	ai.profile.fire_b.ammo_index = 0;
+	ai.profile.fire_b.ammo_cap = 9;
+	ai.brain.f[AiBrain::kAmmoA] = 0;
+	ai.brain.f[AiBrain::kAmmoB] = 4;
+	ai.brain.f[AiBrain::kStep] = 1;
+	w.vehicle_ai_spawn_phase = 15;
+	e.last_attacker = h;
+	e.veh.part_spin.rate = 500;
+	e.veh.part_spin.speed = 600;
 	ai.inf.wait_cooldown = 2; // a value above one decrements AND proceeds
 	w.vehicles.tick_dead(e, ai);
 	CHECK(ai.inf.wait_cooldown == 1 && e.health == 500 && ai.health == 500);
+	CHECK(ai.brain.f[AiBrain::kSpeedA] == 111 && ai.brain.f[AiBrain::kSpeedB] == 222);
+	CHECK(ai.brain.f[AiBrain::kAmmoA] == 7 && ai.brain.f[AiBrain::kAmmoB] == 0);
+	CHECK(ai.brain.f[AiBrain::kActiveYaw] == 4242 &&
+			ai.brain.f[AiBrain::kStagingBlock + 3] == 4242);
+	CHECK(ai.brain.f[AiBrain::kStep] == 62);
+	CHECK(ai.brain.f[AiBrain::kAlert] == 2);
+	CHECK(e.spawn_phase == 15 && w.vehicle_ai_spawn_phase == 0);
+	CHECK(!e.last_attacker.valid());
+	CHECK(e.veh.part_spin.rate == 0 && e.veh.part_spin.speed == 0);
 	CHECK(e.position.x == 10 && e.position.y == 20 && e.position.z == 30);
 	CHECK(e.alive && e.team == 2 && ai.team == 2);
 	CHECK(e.engine_flags == 0x22400 && e.flags == e.engine_flags);

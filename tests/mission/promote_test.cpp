@@ -571,6 +571,69 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
 		std::exit(1);
 }
 
+// Every AI-class record gets its slot from the record, vehicles included: the
+// respawn budget slot[18] = 62 * spawns (the mission start turns it into the
+// spawn count with a /62) and the authored route slot[35/37/38] that the dead
+// state's respawn restarts.
+// [orig: Entity_SpawnFromBMSRecord @0x40ED4E..0x40F054 (slot+0x48 @0x40EFE4..0x40EFF4,
+//  +0x8C/+0x94/+0x98 @0x40F02F..0x40F054); Game_StartMission @0x526079..0x52608F;
+//  AI_TickState_VehicleDead @0x468005..0x46801D]
+static void test_vehicle_records_seed_the_ai_slot() {
+    int failures = 0;
+    static constexpr int32_t kTruckType = 1237;
+    bms::File m{};
+    bms::Entity truck{};
+    truck.type = bms::ItemType::Item;
+    truck.type_id = kTruckType;
+    truck.spawns = 3;
+    truck.waypoint_id = 4;
+    truck.wp_number = 2;
+    m.items.push_back(truck);
+    mission::PromoteOptions opts;
+    mission::ItemSeatSpec spec;
+    spec.type_id = kTruckType;
+    Seat ctrl;
+    ctrl.type = SeatType::Controller;
+    spec.seats.push_back(ctrl);
+    opts.item_seat_specs.push_back(spec);
+    World world;
+    world.ai.is_authority = true;
+    const mission::PromoteResult r = mission::promote_mission(m, world, opts);
+    CHECK(r.brains == 1);
+    const AiEntity &ai = *world.ai.at(0);
+    CHECK(ai.slot.f[18] == 62 * 3);
+    CHECK(ai.slot.f[35] == 1 && ai.slot.f[37] == 4 && ai.slot.f[38] == 2);
+    VehicleTraits t;
+    t.player_control = true;
+    t.physics = 1;
+    world.vehicles.traits.set(kTruckType, t);
+    world.vehicles.initialize_mission_vehicles();
+    CHECK(world.ai.at(0)->inf.wait_cooldown == 3);
+    // The wreck's respawn restarts the authored route from those slot words,
+    // over wherever the brain's route had got to.
+    // [orig: AI_TickState_VehicleDead @0x468005..0x46801D]
+    AiEntity &vai = *world.ai.at(0);
+    Entity &veh = *world.registry.get(vai.handle);
+    ItemDeathTraits death;
+    death.static_death = true;
+    world.tables.item_death_traits.set(kTruckType, death);
+    veh.item_attrib |= kItemAttribPlayerControl;
+    veh.health = 0;
+    veh.alive = false;
+    veh.flags = veh.engine_flags = kEntityFlagHusk | kEntityFlagDead;
+    vai.brain.f[AiBrain::kCurState] = 23;
+    vai.brain.f[AiBrain::kWpType] = 0;
+    vai.brain.f[AiBrain::kWpChannel] = 9;
+    vai.brain.f[AiBrain::kWpNode] = 7;
+    for (int i = 0; i < 16; ++i)
+        world.vehicles.tick_dead(veh, vai);
+    CHECK(vai.inf.wait_cooldown == 2); // this tick respawned
+    CHECK(vai.brain.f[AiBrain::kWpType] == 1);
+    CHECK(vai.brain.f[AiBrain::kWpChannel] == 4 && vai.brain.f[AiBrain::kWpNode] == 2);
+    if (failures)
+        std::exit(1);
+}
+
 static void test_script_spatial_tables_are_promoted_and_replaced() {
     bms::File mission{};
     bms::AreaTrigger area{};
@@ -1226,6 +1289,7 @@ int main() {
     test_emplacement_parent_death_cascades();
     test_unresolved_emplacement_preserves_streamed_pose();
     test_nameless_vehicle_takes_the_retail_default_profile();
+    test_vehicle_records_seed_the_ai_slot();
 
     // ---- organics are routed through the INFANTRY motor with seeded slots ----
     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI @0x4b9910;

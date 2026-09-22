@@ -615,6 +615,29 @@ int main() {
         CHECK(player_b->profile.sound_profile_female == -1);
     }
 
+    // ---- the vehicle class init's ammo copy, gated on the resolved byte ----
+    // A resolved block seeds its count; a miss and the null AT_NULL row (the
+    // lookup's 0) seed zero over promote's stand-in capacities.
+    // [orig: Entity_InitVehicleAIFromDef @0x468882..0x4688B7]
+    {
+        AiEntity *tank_b = ai.at(ai.attach(tank_h));
+        CHECK(tank_b != nullptr);
+        if (tank_b != nullptr) {
+            tank_b->profile.fire_a.ammo_name = "AT_RIFLE";
+            tank_b->profile.fire_a.ammo_cap = 12;
+            tank_b->profile.fire_b.ammo_name = "AT_BOGUS";
+            tank_b->profile.fire_b.ammo_cap = 9;
+            tank_b->brain.f[AiBrain::kAmmoA] = 12;
+            tank_b->brain.f[AiBrain::kAmmoB] = 9;
+            mission::resolve_ai_weapons(w, file, tank_h);
+            CHECK(tank_b->brain.f[AiBrain::kAmmoA] == 12);
+            CHECK(tank_b->brain.f[AiBrain::kAmmoB] == 0);
+            tank_b->profile.fire_a.ammo_name = "AT_NULL";
+            mission::resolve_ai_weapons(w, file, tank_h);
+            CHECK(tank_b->brain.f[AiBrain::kAmmoA] == 0);
+        }
+    }
+
     // ---- the per-DEF organic binding (the wire body channel's resolve) ----
     // Resolved for every def, not per spawned AiEntity — a joiner world with
     // no mission AI still binds every replicated type; the tank def has no

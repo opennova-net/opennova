@@ -339,6 +339,13 @@ public:
 			Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]);
 
 private:
+	// The ai_function class init re-run at the head of respawn: the brain exists,
+	// so it re-seeds the route, ammo, speeds and turret words, re-staggers the
+	// think phase, re-enters the current state and rebuilds the gunner list.
+	// False when the entity carries no AI component (no class init ran).
+	// [orig: Entity_RespawnVehicle @0x45FF53..0x45FF68 -> ItemDef+0x148]
+	bool rerun_class_init(Entity &vehicle);
+
     World &world_;
 	struct SpawnMarker {
 		EntityHandle marker, zone;

@@ -606,6 +606,17 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
             wf->ammo_index = world.tables.ammo.index_of(wf->ammo_name.c_str());
             if (wf->ammo_index >= 0) ++armed;
         }
+        // The vehicle class init's ammo copy: a block's count seeds its brain
+        // word only when the block's ammo resolved (the byte
+        // AmmoDef_LookupByName stored, 0 for a miss or the null AT_NULL row),
+        // else zero. [orig: Entity_InitVehicleAIFromDef @0x468882..0x4688B7;
+        //  Entity_InitHelicopterAIFromDef @0x468555..0x46858D]
+        const world::Entity *body = world.registry.get(ae->handle);
+        if (body != nullptr && body->kind == world::EntityKind::Item) {
+            const world::AiProfile &p = ae->profile;
+            ae->brain.f[world::AiBrain::kAmmoA] = p.fire_a.ammo_index > 0 ? p.fire_a.ammo_cap : 0;
+            ae->brain.f[world::AiBrain::kAmmoB] = p.fire_b.ammo_index > 0 ? p.fire_b.ammo_cap : 0;
+        }
     }
     return armed;
 }
