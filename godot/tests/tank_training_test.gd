@@ -229,6 +229,7 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 		assert_gt(sim.entity_card_by_net_id(ssn).get_mission_position().z, 11.5,
 				"landing craft starts afloat before its crew boards")
 	_advance(sim)
+	_await_second_landing(sim)
 	var tank := sim.entity_card_by_net_id(33)
 	assert_not_null(tank)
 	if tank == null:
@@ -293,6 +294,30 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	_presenter.teardown()
 	_presenter = null
 	_world.unload()
+
+
+# Board once the second landing craft has put its tanks on the beach. Boarding
+# at once starts the instructor's chain early enough that event 17 releases
+# tank 34 while LCAC 38 still crawls in over deep water; whether that tank
+# lands or nose-dives off the moving bow then depends on sub-second timing
+# under the retail boarder hold and avoid brake (docs/world/tank-parity-re.md).
+# A player who boards after the landing gets the deterministic course.
+func _await_second_landing(sim: Simulation) -> void:
+	var lcac := sim.entity_card_by_net_id(38)
+	assert_not_null(lcac)
+	if lcac == null:
+		return
+	var start := lcac.get_mission_position()
+	var last := start
+	var still := 0
+	for step in 80:
+		_advance(sim, 62)
+		var now := sim.entity_card_by_net_id(38).get_mission_position()
+		still = still + 1 if now.distance_to(last) < 0.05 else 0
+		last = now
+		if still >= 2 and now.distance_to(start) > 10.0:
+			return
+	fail_test("LCAC 38 lands within 80 seconds")
 
 
 func _tank_cannon(sim: Simulation, tank: EntityCard) -> EntityCard:
