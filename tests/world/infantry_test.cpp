@@ -4338,16 +4338,16 @@ static void test_walking_aim_gates_on_the_body_cone() {
             red = make(0, 2, red_x, red_y);
             blue = make(1, 1, 0, 0);
             red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
-            // A held target with its lead sample seeded, the idle clip (43:
+            // A held target standing still over its last tick (its mover
+            // stamped savedLivePose at its current position, so the lead is
+            // zero [orig: `sub ecx,[edi+80h]` @0x4BC72A]), the idle clip (43:
             // flags 0x048, block 1 only), the body and the yaw both at bearing
             // 0 (east), a stale route heading the skip must keep, and a live
             // hold timer so the think takes the approach arm instead of
             // stamping the reaction timer [orig: the stamp @0x4bc2a6 sits in
             // the in-range arm].
             blue->inf.combat_target = red->handle;
-            blue->inf.aim_point[0] = red_x;
-            blue->inf.aim_point[1] = red_y;
-            blue->inf.aim_point[2] = 0;
+            stamp_saved_live_pose(*w.registry.get(red->handle));
             blue->inf.anim_state = anim_state::kIdle;
             CHECK((infantry_anim_flags(blue->inf.anim_state) & 0x18u) == 0x8u);
             blue->inf.body_heading = 0;
@@ -4386,6 +4386,147 @@ static void test_walking_aim_gates_on_the_body_cone() {
         CHECK(!r.blue->inf.fire_secondary_latch);
         CHECK(r.blue->inf.combat_move_timer == 0);
     }
+}
+
+// Two bodies for the aim-solution legs: red (the target, team 2) and blue (the
+// shooter, team 1, at the origin), zero aim error, blue holding red.
+struct AimRig {
+    // Off the perception cadence (key & 0x1F != 0).
+    enum : uint32_t { kKey = 16 + 3 * 512 };
+    World w;
+    AiEntity *red = nullptr;
+    AiEntity *blue = nullptr;
+    AimRig(int32_t red_x, int32_t red_y, int32_t red_z) {
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        AiSystem &ai = w.ai;
+        auto make = [&](int idx, uint8_t team, int32_t x, int32_t y, int32_t z) {
+            Entity body{};
+            body.alive = true;
+            body.item_id = 1001;
+            body.item_type = 3;
+            body.kind = EntityKind::Organic;
+            body.health = 150;
+            body.team = team;
+            body.net_id = uint16_t(700 + idx);
+            body.position = {float(x) / 65536.0f, float(y) / 65536.0f, float(z) / 65536.0f};
+            AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
+            e->inf.active = true;
+            e->net_id = body.net_id;
+            e->team = team;
+            e->health = 150;
+            e->inf.max_health = 150;
+            e->pos[0] = x;
+            e->pos[1] = y;
+            e->pos[2] = z;
+            e->slot.f[15] = 8 * 65536;
+            e->slot.f[16] = 32768;
+            e->slot.f[17] = 40 * 65536;
+            e->slot.f[22] = 0x400;
+            return e;
+        };
+        red = make(0, 2, red_x, red_y, red_z);
+        blue = make(1, 1, 0, 0, 0);
+        red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
+        blue->inf.combat_target = red->handle;
+        blue->inf.body_heading = 0;
+        blue->heading = 0;
+        blue->inf.combat_move_timer = 1;
+    }
+    Entity &red_entity() { return *w.registry.get(red->handle); }
+    Entity &blue_entity() { return *w.registry.get(blue->handle); }
+    void think() { w.ai.infantry_combat_think(*blue, w, kKey); }
+};
+
+// The aim leads the target by ITS OWN last-tick displacement, Position minus the
+// savedLivePose its mover stamped, times dist/0x81074 + 1 (the vertical at half
+// that), and the led point becomes the entity aimPoint. The shooter's own
+// think-interval sample (the previous aimPoint) plays no part.
+// [orig: block 1 @0x4BC6FB..0x4BC798 — `sub ecx,[edi+80h]` @0x4BC72A, the
+//  stores @0x4BC738/@0x4BC74E/@0x4BC798; block 2 @0x4BCAFE..0x4BCB69]
+static void test_aim_lead_uses_the_target_saved_live_pose() {
+    AimRig r(20 * 65536, 0, 0); // 20 u: lead = 1310720 / 0x81074 + 1 = 3
+    r.blue->inf.anim_state = anim_state::kIdle; // flag 0x8: block 1
+    Entity &red = r.red_entity();
+    red.saved_live_pos[0] = 20 * 65536 - 16384; // moved +0.25 u east over its last tick
+    red.saved_live_pos[1] = 0;
+    red.saved_live_pos[2] = 32768;              // and 0.5 u down
+    red.saved_live_valid = true;
+    r.blue->inf.aim_point[0] = 12345;           // a stale sample must not matter
+    r.blue->inf.aim_point[1] = -777;
+    r.blue->inf.aim_point[2] = 99;
+    r.think();
+    CHECK(r.blue->inf.aim_point[0] == 20 * 65536 + 3 * 16384);
+    CHECK(r.blue->inf.aim_point[1] == 0);
+    CHECK(r.blue->inf.aim_point[2] == (3 >> 1) * -32768);
+    // A target never stamped leads by zero.
+    AimRig still(20 * 65536, 0, 0);
+    still.blue->inf.anim_state = anim_state::kIdle;
+    still.think();
+    CHECK(still.blue->inf.aim_point[0] == 20 * 65536 && still.blue->inf.aim_point[2] == 0);
+}
+
+// Every body tick stamps savedLivePose from the position it starts the tick at.
+// [orig: org1 Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E; org2
+//  Entity_UpdateInfantryPlayerBody @0x4B4187..0x4B419C]
+static void test_body_tick_stamps_saved_live_pose() {
+    AimRig r(20 * 65536, 3 * 65536, 0);
+    Entity &red = r.red_entity();
+    CHECK(!red.saved_live_valid);
+    run_ticks(r.w.ai, r.w, 1, 2);
+    CHECK(red.saved_live_valid);
+    CHECK(red.saved_live_pos[0] == 20 * 65536 && red.saved_live_pos[1] == 3 * 65536);
+}
+
+// A UseGun body (parentSlot 3) solves its aim in the PARENT's frame: the delta
+// rotates by the parent's yaw/pitch/roll, the local bearing/elevation come out,
+// and the parent's yaw and pitch are added back. On a gun rolled 90 degrees a
+// target 45 degrees to the left in the world lies 45 degrees BELOW the gun's
+// forward axis; the world-frame arm would instead aim 45 degrees left, level.
+// A level mount reproduces the world solution through the added-back yaw.
+// [orig: Entity_UpdateInfantryAI block 2 — gate `cmp [esi+168h],3` @0x4BCD1C,
+//  parent @0x4BCD31; trig @0x4BCD3F..0x4BCDB5; rotation @0x4BCDB9..0x4BCEAA;
+//  +0x2EC @0x4BCEF1, +0x2D0 @0x4BCF1E; the world arm @0x4BCF29..0x4BCF9D]
+static void test_mounted_gunner_aims_in_the_parent_frame() {
+    const auto solve = [](int32_t parent_yaw, int32_t parent_roll, bool mounted,
+                          int32_t &heading, int32_t &pitch) {
+        AimRig r(10 * 65536, 10 * 65536, 0);
+        r.blue->inf.anim_state = anim_state::kAttack; // flag 0x10: block 2
+        CHECK((infantry_anim_flags(r.blue->inf.anim_state) & 0x10u) != 0);
+        stamp_saved_live_pose(r.red_entity());
+        Entity gun{};
+        gun.kind = EntityKind::Item;
+        gun.item_id = 2001;
+        gun.veh.yaw_seeded = true;
+        gun.veh.yaw_bam = parent_yaw;
+        gun.veh.air_pitch_bam = 0;
+        gun.veh.air_roll_bam = parent_roll;
+        const EntityHandle gun_h = r.w.registry.spawn(1, gun);
+        Entity &blue = r.blue_entity();
+        blue.mounted = mounted;
+        blue.mount_type = SeatType::Gunner;
+        blue.mount_target = gun_h;
+        r.think();
+        CHECK(r.blue->inf.aim_valid);
+        heading = r.blue->inf.aim_heading;
+        pitch = r.blue->inf.aim_pitch;
+    };
+    const auto near = [](int32_t a, int32_t b) {
+        return opennova::io::bam_abs(opennova::io::bam_sub(a, b)) < (1 << 20);
+    };
+    int32_t heading = 0, pitch = 0;
+    // Rolled 90 degrees: the local elevation is -45 degrees, the local bearing 0.
+    solve(0, 0x40000000, true, heading, pitch);
+    CHECK(near(heading, 0));
+    CHECK(near(pitch, -0x20000000));
+    // The same body unmounted takes the world arm: 45 degrees left, level.
+    solve(0, 0x40000000, false, heading, pitch);
+    CHECK(near(heading, 0x20000000));
+    CHECK(near(pitch, 0));
+    // A level mount yawed 90 degrees: local -45, plus the parent's 90.
+    solve(0x40000000, 0, true, heading, pitch);
+    CHECK(near(heading, 0x20000000));
+    CHECK(near(pitch, 0));
 }
 
 // The 32-tick scan's empty result re-commits the held target on phases 1-3
@@ -4642,6 +4783,9 @@ int main() {
     test_reselecting_current_state_arbitrates_player_but_skips_org1();
     test_aimed_think_clears_stale_detour_state();
     test_walking_aim_gates_on_the_body_cone();
+    test_aim_lead_uses_the_target_saved_live_pose();
+    test_body_tick_stamps_saved_live_pose();
+    test_mounted_gunner_aims_in_the_parent_frame();
     test_short_phase_scan_miss_keeps_the_held_target();
     test_self_attachment_chases_the_s_point_through_a_combat_approach();
     test_npc_corpse_expiry_runs_the_shared_destroy();

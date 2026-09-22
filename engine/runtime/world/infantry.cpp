@@ -1092,6 +1092,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.inf.last_events = have_clip ? frame.events : 0;
         animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
     }
+    // Both bodies stamp the mover-entry savedLivePose (+0x80..+0x88) before any
+    // motion, remote org2 peers included; a shooter's lead reads the target's
+    // Position minus this stamp as its one-tick displacement.
+    // [orig: org1 Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E (after the dual
+    //  channel advance, before the authority/interpolation gate); org2
+    //  Entity_UpdateInfantryPlayerBody @0x4B4187..0x4B419C]
+    if (tick_entity != nullptr) stamp_saved_live_pose(*tick_entity);
     // The org2 queued USE survives a ground-probe clear through entity+0x180.
     // Clear the request after the attempt, including failed mounts. Ordinary
     // local input still enters through LocalPlayer::toggle_mount.

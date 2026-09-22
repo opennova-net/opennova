@@ -182,6 +182,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (found.valid()) {
             const Entity *t = world.registry.get(found);
             if (t != nullptr) {
+                // The scan hit seeds the aimPoint (+0x30C..+0x314) with the
+                // target's Position [orig: @0x4BBF36..0x4BBF54]; the lead reads
+                // the target's own savedLivePose, never this word.
                 inf.aim_point[0] = static_cast<int32_t>(t->position.x * io::kFp16One);
                 inf.aim_point[1] = static_cast<int32_t>(t->position.y * io::kFp16One);
                 inf.aim_point[2] = static_cast<int32_t>(t->position.z * io::kFp16One);
@@ -411,16 +414,27 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // Block 2 re-arms the hold timer for a teamless (slot+4 & 8) body ahead of
     // its aim writes. [orig: @0x4bca44..0x4bca76]
     if (attack_stance && (slot.f[1] & 8) != 0) inf.combat_move_timer = slot.f[22] >> 4;
-    // Lead the target by its per-tick delta x (dist/0x81074 + 1). The previous-position
-    // sample lives in aim_point between think ticks [orig: target savedLivePose +0x80..].
+    // Lead the target by its OWN last-tick displacement: target Position minus
+    // its savedLivePose (+0x80..+0x88, which every mover stamps at its head),
+    // times lead = dist/0x81074 + 1 (a reciprocal multiply), the vertical by
+    // lead >> 1, all wrapping 32-bit; the led point is stored as the entity
+    // aimPoint (+0x30C..+0x314). A target never stamped leads by zero.
+    // [orig: block 1 @0x4BC6FB..0x4BC798 (`sub ecx,[edi+80h]` @0x4BC72A);
+    //  block 2 @0x4BCAFE..0x4BCB69 (`sub ecx,[ebp+80h]` @0x4BCB2D)]
     const int32_t lead = dist16 / 0x81074 + 1;
+    const int32_t *saved = tent->saved_live_valid ? tent->saved_live_pos : tpos;
+    const auto lead_axis = [](int32_t now, int32_t before, int32_t scale) {
+        return opennova::io::bam_add(now, static_cast<int32_t>(
+                static_cast<uint32_t>(opennova::io::bam_sub(now, before)) *
+                static_cast<uint32_t>(scale)));
+    };
     int32_t led[3];
-    led[0] = tpos[0] + lead * (tpos[0] - inf.aim_point[0]);
-    led[1] = tpos[1] + lead * (tpos[1] - inf.aim_point[1]);
-    led[2] = tpos[2] + (lead >> 1) * (tpos[2] - inf.aim_point[2]); // vertical lead halved
-    inf.aim_point[0] = tpos[0];
-    inf.aim_point[1] = tpos[1];
-    inf.aim_point[2] = tpos[2];
+    led[0] = lead_axis(tpos[0], saved[0], lead);
+    led[1] = lead_axis(tpos[1], saved[1], lead);
+    led[2] = lead_axis(tpos[2], saved[2], lead >> 1); // vertical lead halved
+    inf.aim_point[0] = led[0];
+    inf.aim_point[1] = led[1];
+    inf.aim_point[2] = led[2];
 
     // The sawtooth aim error: accuracy A when this target was already fired at
     // (aiRef0 == target), else B; scaled by the difficulty global [orig: err =
@@ -449,36 +463,92 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     organic_fire_pose(world, e, 1, eye);
     // The aim TARGET point is the target's aim origin, not its ground origin
     // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
-    // @0x43b4b0]. The lead stays computed over the raw positions (inf.aim_point
-    // is also the movement sample); the origin offset is added on top.
+    // @0x43b4b0]. The lead is computed over the raw positions above; the origin
+    // offset is added on top.
     int32_t t_origin[3];
     weapon_aim_origin(world, *tent, t_origin);
-    const double adx = static_cast<double>(led[0]) + (t_origin[0] - tpos[0]) - eye[0];
-    const double ady = static_cast<double>(led[1]) + (t_origin[1] - tpos[1]) - eye[1];
-    const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
-    const double horiz = std::sqrt(adx * adx + ady * ady);
-    const int32_t bearing = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady));
-    const int32_t elevation =
-            static_cast<int32_t>(std::atan2(adz, horiz) * opennova::io::kBamPerRadian);
+    // The aim delta in wrapping 32-bit integers, as both blocks store it.
+    const int32_t adx = opennova::io::bam_sub(
+            opennova::io::bam_add(led[0], opennova::io::bam_sub(t_origin[0], tpos[0])), eye[0]);
+    const int32_t ady = opennova::io::bam_sub(
+            opennova::io::bam_add(led[1], opennova::io::bam_sub(t_origin[1], tpos[1])), eye[1]);
+    const int32_t adz = opennova::io::bam_sub(
+            opennova::io::bam_add(led[2], opennova::io::bam_sub(t_origin[2], tpos[2])), eye[2]);
+    // Bearing = truncated fpatan(dy, dx) in BAM; elevation = truncated fpatan(dz,
+    // h) where h is the horizontal length already TRUNCATED to an integer (block
+    // 2 clamps it to 2147418112.0 first).
+    // [orig: block 1 @0x4BC832..0x4BC85C / @0x4BC89B..0x4BC8BE; block 2's world
+    //  arm @0x4BCF2D..0x4BCF92]
+    const auto solve_bearing_elevation = [](int32_t dx, int32_t dy, int32_t dz,
+            int32_t &bearing_out, int32_t &elevation_out) {
+        const double fdx = static_cast<double>(dx);
+        const double fdy = static_cast<double>(dy);
+        const int32_t horiz = static_cast<int32_t>(
+                std::min(std::sqrt(fdx * fdx + fdy * fdy), 2147418112.0));
+        bearing_out = bearing_to(dx, dy);
+        elevation_out = static_cast<int32_t>(
+                std::atan2(static_cast<double>(dz), static_cast<double>(horiz)) *
+                opennova::io::kBamPerRadian);
+    };
+    int32_t bearing = 0;
+    int32_t elevation = 0;
+    solve_bearing_elevation(adx, ady, adz, bearing, elevation);
     // The heading candidate: bearing + the heading error [orig: block 1
     // `mov ecx,[esp+60h]; sub ecx,eax` @0x4bc861..0x4bc865; block 2 `sub ebx,eax`
     // @0x4bcf71]; the pitch: elevation + the pitch error [orig: block 1
     // @0x4bc8cd..0x4bc8da; block 2 @0x4bcf97..0x4bcf9d].
-    const int32_t candidate = opennova::io::bam_add(bearing, err_heading);
-    const int32_t pitch = opennova::io::bam_add(elevation, err_pitch);
+    int32_t candidate = opennova::io::bam_add(bearing, err_heading);
+    int32_t pitch = opennova::io::bam_add(elevation, err_pitch);
 
     if (attack_stance) {
-        // Unported: block 2's parentSlot-3 mounted arm. With parentSlot 3 and a
-        // parent entity [orig: `cmp [esi+168h],3` @0x4bcd1c; `[esi+16Ch]`
-        // @0x4bcd31] retail rotates the aim delta into the parent's frame by
-        // the parent's yaw/pitch/roll sin/cos [orig: @0x4bcd3f..0x4bcea8],
-        // solves the local bearing and elevation, and adds the parent's yaw
-        // to +0x2EC [orig: `add ebx,[edi+10h]` @0x4bceee] and its pitch to
-        // +0x2D0 [orig: `add eax,[edi+14h]` @0x4bcf1b] ahead of the same tail
-        // @0x4bcfa3. An on-foot body takes the world-frame arm modeled here
-        // [orig: @0x4bcf29..0x4bcf9d].
-        inf.aim_heading = candidate; // [orig: @0x4bcf75]
-        inf.aim_pitch = pitch;       // [orig: @0x4bcf9d]
+        // A UseGun body (parentSlot 3) with a parent solves in the PARENT's
+        // frame: the delta rotates through the parent's yaw, pitch and roll
+        // (22-bit cosines, negated sines, the Entity_TransformWorldToLocal
+        // sequence), the local bearing/elevation come out of the rotated vector,
+        // and the parent's own yaw and pitch are added back. The gun words
+        // (parent angles minus the occupant look) then hold the true local
+        // solution on a tilted carrier. Everyone else takes the world-frame arm.
+        // [orig: gate `cmp [esi+168h],3` @0x4BCD1C, parent `[esi+16Ch]`
+        //  @0x4BCD31..0x4BCD39; trig @0x4BCD3F..0x4BCDB5 (dbl_7C3608 angle
+        //  scale, dbl_7C3600 cosines, dbl_7C57B0 = -2^22 sines); rotation
+        //  @0x4BCDB9..0x4BCEAA; bearing + parent Yaw @0x4BCECD..0x4BCEF1; pitch +
+        //  parent Pitch @0x4BCEF7..0x4BCF1E; the world arm @0x4BCF29..0x4BCF9D]
+        const Entity *parent = self_entity != nullptr && self_entity->mounted &&
+                self_entity->mount_type == SeatType::Gunner
+                ? world.registry.get(self_entity->mount_target) : nullptr;
+        if (parent != nullptr) {
+            int32_t parent_pos[3];
+            int32_t parent_yaw = 0, parent_pitch = 0, parent_roll = 0;
+            carrier_pose_fixed(*parent, parent_pos, parent_yaw, parent_pitch, parent_roll);
+            const auto cos22 = [](int32_t angle) {
+                return static_cast<int32_t>(
+                        std::cos(static_cast<double>(angle) * 1.4629627251502471e-9) * 4194304.0);
+            };
+            const auto neg_sin22 = [](int32_t angle) {
+                return static_cast<int32_t>(
+                        std::sin(static_cast<double>(angle) * 1.4629627251502471e-9) * -4194304.0);
+            };
+            const auto mul22 = [](int32_t a, int32_t b) {
+                return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+            };
+            const int32_t cy = cos22(parent_yaw), cp = cos22(parent_pitch),
+                          cr = cos22(parent_roll);
+            const int32_t sy = neg_sin22(parent_yaw), sp = neg_sin22(parent_pitch),
+                          sr = neg_sin22(parent_roll);
+            const int32_t x1 = opennova::io::bam_sub(mul22(cy, adx), mul22(sy, ady));
+            const int32_t y1 = opennova::io::bam_add(mul22(sy, adx), mul22(cy, ady));
+            const int32_t x2 = opennova::io::bam_sub(mul22(cp, x1), mul22(sp, adz));
+            const int32_t z1 = opennova::io::bam_add(mul22(sp, x1), mul22(cp, adz));
+            const int32_t y2 = opennova::io::bam_sub(mul22(cr, y1), mul22(sr, z1));
+            const int32_t z2 = opennova::io::bam_add(mul22(sr, y1), mul22(cr, z1)); // [orig: @0x4BCEA8]
+            solve_bearing_elevation(x2, y2, z2, bearing, elevation);
+            candidate = opennova::io::bam_add( // [orig: `add ebx,[edi+10h]` @0x4BCEEE]
+                    opennova::io::bam_add(bearing, err_heading), parent_yaw);
+            pitch = opennova::io::bam_add( // [orig: `add eax,[edi+14h]` @0x4BCF1B]
+                    opennova::io::bam_add(elevation, err_pitch), parent_pitch);
+        }
+        inf.aim_heading = candidate; // [orig: @0x4BCEF1 / @0x4bcf75]
+        inf.aim_pitch = pitch;       // [orig: @0x4BCF1E / @0x4bcf9d]
         inf.aim_established = true;
         inf.aim_override = true;
         inf.aim_valid = true;        // aimFlag [orig: @0x4bcfb1]
@@ -607,8 +677,11 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     // [orig: Entity_UpdateInfantryAI @0x4bf4cf..0x4bf4ee]
     if ((key & 3u) != 0) return;
 
+    // Only a null target ends the request: a held target at zero health keeps
+    // drawing FIRE until the next think clears it.
+    // [orig: `mov eax,[edi+0Ch]; test eax,eax; jz` @0x4BF4CF..0x4BF4D4]
     const Entity *target = world.registry.get(inf.combat_target);
-    if (target == nullptr || target->health <= 0) return;
+    if (target == nullptr) return;
 
     const int32_t target_pos[3] = {
         static_cast<int32_t>(target->position.x * io::kFp16One),

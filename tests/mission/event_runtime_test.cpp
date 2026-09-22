@@ -164,7 +164,10 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     npc.health = 100;
     npc.inf.combat_target = target_h;
     npc.inf.anim_state = world::anim_state::kAttack;
-    npc.inf.aim_point[0] = 20 << 16; // no lead: target is stationary
+    // No lead: the target stood still over its last tick, so its mover's
+    // savedLivePose stamp equals its position [orig: the lead's
+    // `sub ecx,[ebp+80h]` @0x4BCB2D].
+    world::stamp_saved_live_pose(*w.registry.get(target_h));
     npc.slot.f[11] = 1;              // fresh-target accuracy parameter
 
     // Spread 1 (the mission-load default is 10 [orig: WacScript_FreeAll @0x4f6395];
@@ -187,7 +190,6 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     CHECK(w.script.vars.get_mission(0) == 0); // the named lvalue must not alias V0
     CHECK(w.script.vars.get_mission(9) == 1); // WAC can read its write back
 
-    npc.inf.aim_point[0] = 20 << 16;
     ai.infantry_combat_think(npc, w, /*key=*/1);
     CHECK(npc.inf.aim_heading == default_heading * 3);
 }
