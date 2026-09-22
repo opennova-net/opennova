@@ -17,6 +17,8 @@
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
 
+#include "vehicle_motor_detail.h"
+
 namespace opennova::world {
 
 static void emit_vehicle_control(World &world, const char *kind, uint16_t target_net_id,
@@ -80,7 +82,14 @@ bool VehicleSystem::release_primary_occupant(Entity &vehicle, EntityHandle occup
     // occupant — leaves the latch untouched.
     if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
         return false;
-    world.vehicles.stop_ground_sound(vehicle);
+    // The PlayerControl leg: the all-zero fold and the stop on the departing
+    // occupant, then the +0x1CC smoke emitter release; the next mover tick
+    // re-arms the smoke while the damage band still holds.
+    // [orig: Entity_DetachFromVehicle @0x4356EF..0x435759]
+    world.vehicles.play_claimant_detach_sound(vehicle, world.registry.get(occupant));
+    if (const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
+            traits != nullptr && traits->player_control)
+        detail::vehicle_smoke_effect(world, vehicle, /*release=*/true);
     vehicle.primary_occupant = EntityHandle{};
     world.vehicles.emit_control_stopped(vehicle);
     return true;

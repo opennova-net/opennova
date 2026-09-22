@@ -1048,7 +1048,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 			vehicle_suspension_fit(world, veh, c, slot_contacts, fit, px, py, pz, true);
 	adopt_fit(fit);
     // A diagonally supported track pair clears every retained sink. The
-    // parked latch lowers the threshold from 250 to zero.
+    // crash-settle latch lowers the threshold from 250 to zero.
     // [orig: @0x478FF2..0x479040]
     const int32_t support_threshold = m.settle_2f0 ? 0 : 250;
     if ((slot_max[0] > support_threshold && slot_max[2] > support_threshold) ||

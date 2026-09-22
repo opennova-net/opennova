@@ -93,6 +93,15 @@ void emit_source_anchor(World &world, const Entity &vehicle) {
     world.out.sound_emitters.publish(std::move(ev));
 }
 
+// Retail slots retain the entity-position pointer while an unrefreshed lane
+// expires. While a lane registered by an earlier fold is still alive, this
+// source-only intent keeps it spatially attached without renewing it.
+void anchor_residual_lanes(World &world, const Entity &vehicle) {
+    const uint32_t remaining = vehicle.veh.sound_anchor_until_tick - producer_tick(world);
+    if (vehicle.veh.sound_anchor_until_tick != 0 && remaining <= kEmitterLifetimeTicks)
+        emit_source_anchor(world, vehicle);
+}
+
 // `lifetime_ticks` is the registration's effect_params word +16: 30 for the
 // ground fold's loops, 15 for the helicopter's three. [orig: SoundEmitter_Register
 // @0x529270 packs its fifth argument @0x5292A6; update_vehicle_effect_emissions
@@ -138,6 +147,14 @@ void emit_profile_oneshot(World &world, const Entity &vehicle,
     ev.slot = static_cast<uint8_t>(slot);
     std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
     world.out.slot_sounds.push_back(ev);
+}
+
+// The all-zero movement fold (speed and reference speed zero): an explicit
+// clear of the forward and reverse lanes; the idle lane expires on its own.
+// [orig: Entity_ProcessMovementSoundEffects @0x5294A0 called with zeros]
+void clear_motion_lanes(World &world, Entity &vehicle) {
+	emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1, {}, 0, 0);
+	emit_emitter(world, vehicle, kReverseLane, audio::kSlotSoundLoop1 + 2, {}, 0, 0);
 }
 
 int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
@@ -203,10 +220,20 @@ void VehicleSystem::play_contact_sound(Entity &vehicle, const VehicleTraits &tra
 
 void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {
     World &world = world_;
-	// A parked tank skips the movement fold; its existing emitter expires.
-	// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, jump @ 0x48AABE]
-	if (traits.family == VehicleFamily::Tank && vehicle.veh.settle_2f0 != 0)
+	// Every mover fronts its movement fold with the outer loop's last-tick
+	// flag: a catch-up tick leaves the registered lanes untouched.
+	// [orig: dword_24E0E80 set by Game_MainLoop @0x52BA24..0x52BA3A; read by
+	//  cveh @0x48D156, ctan @0x48AA9E, cbik @0x48670A, cbot @0x48EDFF and the
+	//  selector-zero ground @0x46F7C8 and boat @0x471523 movers]
+	if (!world.rules.last_tick_of_batch)
 		return;
+	// A crash-settled tank skips the movement fold; its registered lanes expire
+	// while the source anchor keeps them on the hull.
+	// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, jump @ 0x48AABE]
+	if (traits.family == VehicleFamily::Tank && vehicle.veh.settle_2f0 != 0) {
+		anchor_residual_lanes(world, vehicle);
+		return;
+	}
     const audio::SoundProfile *profile = profile_for(world, traits);
 
     // The PlayerControl ground caller skips the movement-sound function entirely
@@ -217,16 +244,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     // (IDB: Entity_ProcessInfantryPhysics @0x46E100 / Entity_ProcessAirVehiclePhysics
     // @0x46FA00, both misnomers)]
     if (traits.player_control && !has_live_primary_claimant(world, vehicle)) {
-        const uint32_t now = producer_tick(world);
-        const uint32_t remaining =
-                vehicle.veh.sound_anchor_until_tick - now;
-        if (vehicle.veh.sound_anchor_until_tick != 0 &&
-            remaining <= kEmitterLifetimeTicks) {
-            // Retail slots retain the entity-position pointer while an
-            // unrefreshed lane expires. This source-only intent keeps that
-            // residual lane spatially attached without renewing its lifetime.
-            emit_source_anchor(world, vehicle);
-        }
+        anchor_residual_lanes(world, vehicle);
         return;
     }
 
@@ -373,46 +391,74 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
 // @0x48AAB7..0x48AABE -> @0x48AD49, skid @0x48ABCB..0x48ACB5]
 void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &traits) {
 	auto &m = vehicle.veh;
-	if (m.settle_2f0 == 0 && world_.registry.get(vehicle.primary_occupant) != nullptr &&
-			m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
-		m.rev_sound_ticks = 0;
-		emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
-	}
-	if (m.settle_2f0 == 0 || traits.family != VehicleFamily::Tank) {
-		const double cx = m.contact_direction[0], cy = m.contact_direction[1],
-					 cz = m.contact_direction[2];
-		const int32_t magnitude = static_cast<int32_t>(
-				std::min(std::sqrt(cx * cx + cy * cy + cz * cz), 2147418112.0));
-		const bool skid =
-				magnitude != 0 && m.speed != 0 && (vehicle.flags & kEntityFlagInAir) == 0;
-		if (skid && !m.skid_sound_latched)
-			play_contact_sound(vehicle, traits, 25);
-		m.skid_sound_latched = skid;
-	}
-	if (traits.family == VehicleFamily::Tank) {
-		// The stationary-turn edge follows the loop, so its first refresh is
-		// next tick. Start above ten degrees of heading error; retain through
-		// the threshold until translation, zero rate, or a rate sign change.
-		// Parked tanks preserve the latch but still save the current rate.
-		// [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0, @ 0x48ACB5..0x48AD53]
-		if (m.settle_2f0 == 0) {
-			if (world_.registry.get(vehicle.primary_occupant) != nullptr &&
-					!m.pivot_sound_latched && m.speed == 0 && m.wheel_rate_bam != 0) {
-				const int32_t error = io::bam_sub(m.steer_target_bam, m.yaw_bam);
-				const int32_t magnitude = error < 0 ? io::bam_sub(0, error) : error;
-				if (magnitude > 0x071C71C0) {
-					m.pivot_sound_latched = true;
-					emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits,
-							audio::kSlotSwivelShift);
-				}
-			} else if (m.pivot_sound_latched && (m.speed != 0 || m.wheel_rate_bam == 0 ||
-					((uint32_t(m.pivot_sound_prev_rate) ^ uint32_t(m.wheel_rate_bam)) & 0x80000000u))) {
-				m.pivot_sound_latched = false;
-			}
+	// The high-rev, skid and tank pivot sections share the fold's last-tick
+	// gate, the tank's +0x328 prior-rate store included; the rev timer does
+	// not. [orig: ctan `jz loc_48AD5B` @0x48AAA5; cveh @0x48D15D; cbik @0x486710]
+	if (world_.rules.last_tick_of_batch) {
+		if (m.settle_2f0 == 0 && world_.registry.get(vehicle.primary_occupant) != nullptr &&
+				m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
+			m.rev_sound_ticks = 0;
+			emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
 		}
-		m.pivot_sound_prev_rate = m.wheel_rate_bam;
+		if (m.settle_2f0 == 0 || traits.family != VehicleFamily::Tank) {
+			const double cx = m.contact_direction[0], cy = m.contact_direction[1],
+						 cz = m.contact_direction[2];
+			const int32_t magnitude = static_cast<int32_t>(
+					std::min(std::sqrt(cx * cx + cy * cy + cz * cz), 2147418112.0));
+			const bool skid =
+					magnitude != 0 && m.speed != 0 && (vehicle.flags & kEntityFlagInAir) == 0;
+			if (skid && !m.skid_sound_latched)
+				play_contact_sound(vehicle, traits, 25);
+			m.skid_sound_latched = skid;
+		}
+		if (traits.family == VehicleFamily::Tank) {
+			// The stationary-turn edge follows the loop, so its first refresh is
+			// next tick. Start above ten degrees of heading error; retain through
+			// the threshold until translation, zero rate, or a rate sign change.
+			// Crash-settled tanks preserve the latch but still save the current
+			// rate. [orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0,
+			// @ 0x48ACB5..0x48AD53]
+			if (m.settle_2f0 == 0) {
+				if (world_.registry.get(vehicle.primary_occupant) != nullptr &&
+						!m.pivot_sound_latched && m.speed == 0 && m.wheel_rate_bam != 0) {
+					const int32_t error = io::bam_sub(m.steer_target_bam, m.yaw_bam);
+					const int32_t magnitude = error < 0 ? io::bam_sub(0, error) : error;
+					if (magnitude > 0x071C71C0) {
+						m.pivot_sound_latched = true;
+						emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits,
+								audio::kSlotSwivelShift);
+					}
+				} else if (m.pivot_sound_latched && (m.speed != 0 || m.wheel_rate_bam == 0 ||
+						((uint32_t(m.pivot_sound_prev_rate) ^ uint32_t(m.wheel_rate_bam)) &
+								0x80000000u))) {
+					m.pivot_sound_latched = false;
+				}
+			}
+			m.pivot_sound_prev_rate = m.wheel_rate_bam;
+		}
 	}
 	++m.rev_sound_ticks;
+}
+
+// The tank's tread cue: every even tick adds this speed and the previous even
+// tick's; a sum at or past +-0x80000 plays profile slot 45 on the hull and
+// restarts. It runs for every tank, crash-settled, unoccupied or not, outside
+// the last-tick gate. `add eax, eax; sar eax, 1` keeps the sum's low 31 bits.
+// [orig: Entity_UpdateTankVehiclePhysics @0x48AE45..0x48AEA1, `test byte ptr
+//  tick, 1` @0x48AE45 on current_tick, which Game_ProcessMainFrame @0x5265B4
+//  increments before the entity update]
+void VehicleSystem::update_tread_sound(Entity &vehicle, const VehicleTraits &traits) {
+	auto &m = vehicle.veh;
+	if ((world_.logic_tick & 1u) != 0)
+		return;
+	const uint32_t sum = uint32_t(m.speed) + uint32_t(m.tread_sound_prev_speed);
+	m.tread_sound_accum = io::bam_add(m.tread_sound_accum, io::bam_sar(int32_t(sum << 1), 1));
+	m.tread_sound_prev_speed = m.speed;
+	if (m.tread_sound_accum >= 0x80000 || m.tread_sound_accum <= -0x80000) {
+		emit_profile_oneshot(
+				world_, vehicle, profile_for(world_, traits), traits, audio::kSlotDriveRepeat);
+		m.tread_sound_accum = 0;
+	}
 }
 
 // The claimant and lights edge lanes follow the continuous movement fold. The
@@ -456,7 +502,16 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 				emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStart);
 		}
 	} else if (vehicle.veh.engine_sound_latched) {
-		stop_ground_sound(vehicle, 0x18000);
+		// The leave edge clears bit 0 alone. Every mover but the full
+		// watercraft runs the all-zero fold first; all of them sound the stop
+		// on the hull when its Z + 0x18000 clears the water plane.
+		// [orig: ctan @0x48ADE9..0x48AE33; cveh @0x48D3DA..0x48D421; selector-zero
+		//  boat @0x4700A1..0x4700EB; cbot without the fold @0x48DB26..0x48DB5D]
+		vehicle.veh.engine_sound_latched = false;
+		if (traits.family != VehicleFamily::Watercraft || traits.physics == 0)
+			clear_motion_lanes(world_, vehicle);
+		if (static_cast<int64_t>(to_fixed(vehicle.position.z)) + 0x18000 > world_.env.water_z)
+			emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStop);
 	}
 }
 
@@ -467,6 +522,10 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 // [orig: update_vehicle_effect_emissions @ 0x528F20;
 //  Entity_UpdateHeloRotorSpin @ 0x48FA70]
 void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &traits) {
+	// The same last-tick gate fronts the rotor loops.
+	// [orig: Entity_UpdateHeloRotorSpin @0x48FDD3..0x48FDDA]
+	if (!world_.rules.last_tick_of_batch)
+		return;
 	if (((vehicle.flags | vehicle.engine_flags) & 2u) != 0)
 		return;
 	const auto *profile = profile_for(world_, traits);
@@ -561,22 +620,22 @@ void VehicleSystem::play_rotor_start_sound(Entity &vehicle, const VehicleTraits 
 			world_, *occupant, profile_for(world_, traits), traits, audio::kSlotEngineStart);
 }
 
-void VehicleSystem::stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16) {
+// The PlayerControl claimant's detach leg: the all-zero fold, then the stop
+// one-shot positioned at and anchored on the departing occupant while its eye
+// clears the water plane. It writes no brain+0x318 latch, so the mover's own
+// leave edge sounds a second stop on the hull the next tick.
+// [orig: Entity_DetachFromVehicle @0x4355F0, fold @0x435709..0x435716, stop
+//  @0x43571B..0x43573E (`push esi; lea eax,[esi+4]`)]
+void VehicleSystem::play_claimant_detach_sound(Entity &vehicle, const Entity *occupant) {
 	World &world = world_;
 	const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
     if (traits == nullptr || !traits->player_control) return;
-    const audio::SoundProfile *profile = profile_for(world, *traits);
-    emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
-                 {}, 0, 0);
-    emit_emitter(world, vehicle, kReverseLane, audio::kSlotSoundLoop1 + 2,
-                 {}, 0, 0);
-    vehicle.veh.reverse_sound_latched = false;
-	vehicle.veh.engine_sound_latched = false;
-	if (world.env.water_z == 0 ||
-			static_cast<int64_t>(to_fixed(vehicle.position.z)) + water_clearance_q16 >
-					world.env.water_z) {
-		emit_profile_oneshot(world, vehicle, profile, *traits, audio::kSlotEngineStop);
-	}
+	clear_motion_lanes(world, vehicle);
+	if (occupant != nullptr &&
+			static_cast<int64_t>(to_fixed(occupant->position.z)) + occupant->eye_offset_z >
+					world.env.water_z)
+		emit_profile_oneshot(
+				world, *occupant, profile_for(world, *traits), *traits, audio::kSlotEngineStop);
 }
 
 } // namespace opennova::world
