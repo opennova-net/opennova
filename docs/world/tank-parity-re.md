@@ -5,7 +5,9 @@ Tank audit of the portable engine and its Godot presentation:
 the mounted camera, AI drivers and gunners, damage, run-over and seats),
 `engine/runtime/controls` (action signs, the wheel remainder),
 `engine/runtime/hud` (optical text, the vehicle panel), `engine/runtime/mission`
-(seat extraction, AI slot seeding), `godot/src/player/local_player_presenter.cpp`,
+(seat extraction, AI slot seeding, the frame clock), `engine/runtime/inmatch` and
+`engine/runtime/replication` (joiner replication of tanks and their deaths),
+`godot/src/player/local_player_presenter.cpp`,
 `godot/src/player/player_input_router.cpp`, `godot/src/hud/hud_inset_scope.cpp`,
 `godot/src/util/axes.h` and `godot/game/world/game_hud_presenter.gd`. Binary:
 retail **Jointops.exe**, IDB `Jointops.exe.kong.i64`; all addresses below belong
@@ -32,6 +34,7 @@ below as witnessed and ported behavior, not as divergence rows.
 | AI drivers, gunners and vehicle AI slots | **MATCHING (behavioral proof)** for the legs in the witness map | `vehicle_mount` (`test_ai_drive_budget_divides_first`, `test_zero_health_hull_keeps_its_driver_leg`, `test_submerged_player_driver_takes_the_ai_leg`, `test_mover_command_registers_are_the_brain_words`), `vehicle_motor`, `infantry` (`test_aim_lead_uses_the_target_saved_live_pose`, `test_body_tick_stamps_saved_live_pose`, `test_mounted_gunner_aims_in_the_parent_frame`), `mission_promote` (`test_vehicle_records_seed_the_ai_slot`), `mission_item_traits`, `event_runtime_bms`, `ai`, `destruction` |
 | Damage: kill zones, blast legs, knife, run-over and occupants | **MATCHING (behavioral proof)** | `projectile_combat` (`test_jox_tank_round_bullets_class_splashes`, `test_impact_producers_apply_their_own_gates`, `test_armed_expiry_detonates_only_a_kill_zone_class`), `destruction` (`test_blast_on_a_crewed_vehicle_scales_by_occupants`, `test_blast_respects_the_damage_disabled_word`, `test_zero_damage_blast_still_runs_the_item_leg`, `test_person_blast_quadrant_faces_the_blast`, `test_knife_kill_zone`), `collision` (`test_run_over_spares_a_protected_player`, `test_run_over_kills_an_enemy_and_plays_the_bump`), `vehicle_collision_damage` |
 | Authored 07TR progression | Passing assisted integration, **not normal-input completion proof** | `tank_training_test.gd`: real mount, rounds, damage, BMS destruction/victory; debug positioning/aim and final APC positioning remain in the fixture |
+| Joiner replication: death messages, wreck pose, record tail, claimants, controls, wire attitude, 0x0D relations, frame clock | **MATCHING (behavioral proof)** for the legs in the witness map | `ai` (`test_vehicle_death_states_send_kill_record`), `npruntime_round_sim`, `npruntime_round_end`, `netsim_vehicle_compact_carrier` (`run_fan_full_precision_heading_and_wreck_pose`), `netsim_joiner_vehicle_replica` (record tail, kill edge, freeze and pivot clear, remote claimant, target carrier), `netsim_remote_motion_smoothness`, `netsim_present_rows` (`test_joiner_vehicle_motion_controls_reach_present_rows`), `netsim_world_stream_extractors` (`run_pool1_spawn_parent_is_the_occupant`), `netsim_client_world_materializer` (`pool0_parent_never_aliases_the_native_body`), `netsim_loopback_identity`, `mission_kernel` (`test_first_frame_tick_matches_on_host_and_joiner`) |
 | Multiplayer carrier model | Passing portable regressions and OpenNova host/joiner admission; mounted live retail matrix **unverified** | `netsim_vehicle_carrier_prediction`, `netsim_vehicle_compact_carrier`, `netsim_client_replica_pipeline_target_carrier_follow`, `host_role`; see acceptance limits below |
 
 ## Witness map
@@ -452,6 +455,84 @@ per following list entry, the silhouette takes the bordered texture window
   reach and cone gates and precedes the best-score compare (`@ 0x43618F`)
   [orig: Entity_FindNearestSeatOrArmory @ 0x435D50]. The wreck bury arm samples
   `Terrain_SampleHeightBilinear @ 0x6067B0` (call `@ 0x467F3C`).
+
+### Joiner replication
+
+- **Death messages.** S2C 0x13 is organic-only. The router
+  `Entity_CheckAndProcessDeath @ 0x51B550` is reached only from the player body
+  (`@ 0x4B4CEA`), the infantry AI (`@ 0x4B9D4D`) and the console kill
+  (`@ 0x4D29EC`, an undefined function region), and the only two 0x13 sends are
+  `GameEvent_PlayerDeath @ 0x516DD0` (`push 13h` `@ 0x516E8E`) and the router's
+  AI leg (`@ 0x51B58F`). A vehicle's death reaches clients as the S2C 0x26 kill
+  record (section 0), sent after the death transforms by an in-session
+  authority from the ground vehicle's dying and destroyed enters and the
+  aircraft's dying and dead enters. `route_round_deaths` runs the organic
+  transaction, the Flags/alive publication and the 0x13 send only for Organic
+  victims. [orig: AI_TransitionToDeath_GroundVehicle @ 0x467B43..0x467B58,
+  Flags&4 test @ 0x467B32; AI_TransitionToDestroyed_Vehicle
+  @ 0x467E40..0x467E55; AI_TransitionToDeath_Vehicle @ 0x46694E..0x466963;
+  Entity_ProcessVehicleDestruction @ 0x466B2C..0x466B41;
+  Server_SendEntityStatePacket @ 0x509D70]
+- **The wreck pose form.** The death dispatch sets Flags 6 on the Flags word
+  the compact serializes (`Entity_DispatchDeathCallback`, `or [edi+24h], edx`
+  `@ 0x493F63`; the no-row arm `@ 0x493F48`), so a wreck streams the 15-byte
+  dead-pose form (select `@ 0x460D28`): Roll then Pitch, each rounded to its
+  high half (`@ 0x460D31..0x460D3A`, `@ 0x460D52`, `@ 0x460DF5..0x460DFE`).
+  [orig: Entity_SerializeVehicleState @ 0x460560]
+- **The reader tail.** A joiner runs the reader's tail on its twin for every
+  accepted vehicle record (`JoinerRole::mirror_mission_entities`): Flags bits
+  0/3/4/5/7 follow the wire and 1/2/6 stay the client's (`@ 0x460AEA..0x460AFC`),
+  which feeds the client crash arm (`Entity_ComputeSuspensionAndOrientation
+  @ 0x46997C..0x469982`) and the lights bit 0x80; the destroyed bit kills a
+  twin that is not dead yet while its Health is nonzero
+  (`@ 0x460A1A..0x460AE2`); and the health word lands (`@ 0x460AF1..0x460AFF`),
+  zero in the dead-pose form (`@ 0x460688`).
+- **No bit0 freeze.** Wire bit0 is the organic mover-skip
+  (`Entity_UpdateInfantryAI @ 0x4B9A03`); `Entity_UpdatePool1Slot` calls a
+  vehicle mover with no Flags test (`@ 0x4B8E41..0x4B8E53`). A joiner freezes
+  a vehicle only on the dead-pose form or a pool-1 deck ride, and the freeze
+  zeroes the yaw rate and the pivot latch, the end state the tank tail reaches
+  once the rate is zero (`@ 0x48ACB5..0x48AD53`).
+- **Remote claimants.** A retail client attaches every remote rider from its
+  records (`NetPacket_SerializePlayerState @ 0x4C1317`,
+  `NetPacket_SerializeInfantryEntityState @ 0x4C0678`, then
+  `Entity_ProcessVehicleAttach @ 0x435AA0` and the +0x170 stores
+  `Entity_AttachToVehicleSlot @ 0x4947D2` / `@ 0x4948D8`), so the tank's +0x170
+  readers (`@ 0x48AACF`, `@ 0x48AB91`, `@ 0x48ACB5`;
+  `Entity_UpdatePartSpinAccumulator @ 0x4928E8`) see a remote driver. A joiner
+  has no native rows for remote bodies (D-NET-157), so
+  `JoinerRole::remote_claimant` projects the control-seat rider from
+  ClientState per query, never stored, and `VehicleSystem::claimant()` /
+  `claimant_present()` serve those readers.
+- **Motion controls.** The render callbacks run on every peer against its own
+  mover state (`HUD_CacheEntityDebugStats @ 0x449C10`, track words
+  `@ 0x449C3C..0x449C69`; `Entity_CacheVehicleHUDStats @ 0x4929B0`), and the
+  client mover advances the tracks (`@ 0x489F98` / `@ 0x489FA0`), so a joiner
+  publishes its twin's motor controls as the authority collector does.
+- **Full-width attitude on the wire.** The compact heading is the rounded high
+  half of the eulerZ dword (`Entity_SerializeVehicleState @ 0x460CEC..0x460D0A`),
+  the 0x0D spawn carries the three dwords whole
+  (`serialize_entity_pool_to_packet_0 @ 0x503B37`, `@ 0x503B53`, `@ 0x503B6F`)
+  and the 0x18 rebuild truncates their high words (`serialize_object_to_buffer
+  @ 0x505166`, `@ 0x505179`). The host reads a seeded mover's own BAM and keeps
+  the whole-degree mirror only for an unseeded entity.
+- **0x0D parent and target.** The 0x0D parent is the +0x170 occupant
+  back-reference, a hull's driver or a gun's gunner (`@ 0x503BC9`, flag
+  `@ 0x503BD3`); the target is +0x28, an addeweap child's carrier
+  (`@ 0x503C22`); a client stores them at `NapiNPClientMsg_0x00D @ 0x433289` /
+  `@ 0x4332D7`. The host now writes both that way, and every joiner consumer
+  takes the carrier from `replication::persistent_carrier_handle` (the target,
+  else a parent outside pool 0). The joiner materializer resolves only
+  materialized pool-1..3 lifetimes, so a retail host's 0x0D that names its own
+  player (0x0000) as a vehicle's occupant no longer attaches the vehicle to
+  the joiner's own body.
+- **Frame clock.** `Game_StartMission` zeroes the frame tick on every peer past
+  the authority-only pre pass (`mov tick, ebx` `@ 0x525B9F`, gate `@ 0x525B78`),
+  and `Game_ProcessMainFrame` adds one before the entity update (`@ 0x5265B4`,
+  call `@ 0x52674B`), so the first mission frame runs at tick 1 everywhere. The
+  kernel boot sets `World::logic_tick = 1` for every role; a joiner had run its
+  even/odd cadences (the tread cue `@ 0x48AE45`, the family health cadences)
+  one tick out of phase.
 
 ## Divergence catalog
 

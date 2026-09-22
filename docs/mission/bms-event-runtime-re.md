@@ -589,7 +589,7 @@ bit flip it.
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
 | `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
 | `WacVm::time()` | `dword_C6EAD8` |
-| `World::logic_tick` | `current_tick @0x24c1968` |
+| `World::logic_tick` | `current_tick @0x24c1968`; `Game_StartMission` zeroes it on every peer past the authority-gated pre pass (`mov tick, ebx` @0x525b9f, gate @0x525b78) and `Game_ProcessMainFrame` adds one before `Entity_UpdateAllEntities` (@0x5265b4, call @0x52674b), so the first mission frame runs at tick 1 on the host and on every client; `MissionKernel::boot` sets `logic_tick = 1` for every role, the post-increment equivalent (2026-09-22, `mission_kernel::test_first_frame_tick_matches_on_host_and_joiner`) |
 | `World::run_logic_tick` system order | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate → Entity_UpdateAllEntities) |
 | `promote_mission` | `Mission_LoadBMSFile @0x40f4e0` spawn loops |
 | `Entity.net_id` | entity +124 ← record dword +8 (`@0x40e9f0`) |
