@@ -7911,7 +7911,8 @@ emission stop when the round disappears while emitted particles drain. In
 particular, `grenadesm` authors `move Effect_SmokeToss`; that trail is present
 before and after its five-second `arm_age`. The arm boundary only submits the
 separate `obj` row sound, and neither stops the move group nor detonates the
-round. A mounted JO+`revx02` production-data probe resolves its TrcrID item
+round; `grenadesm` authors no kztype, so its fuse releases the round silently
+(§27.4). A mounted JO+`revx02` production-data probe resolves its TrcrID item
 101875 as `graphic Flsh_3rd`, `ai_function nade`, `move_function nade`, and
 the ammo row as `velocity 20`, `max_age 40`; the 40-second fuse owns both
 round and move-group retirement. Those two fields are an **expansion
@@ -8003,11 +8004,28 @@ arm_age(+12) → the ammo obj row (tag 4) fires once — the smoke-pour start.
 FUSE timing follows the retail head exactly: `Projectile_UpdatePhysics`
 tests armed/expired state **before** this tick's age increment and motor; the
 ported motor therefore computes retail elapsed age as stored age−1. At exactly
-2 ticks remaining, above water → runtime flag 0x1000, and the next lifetime
-head queues `WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0` + obj tag 4
-**only under 0x1000** (an ordinary expired round vanishes silently);
-submerged → immediate detonation with depth-keyed tags (>3 u: 27+25, else 26)
-and zeroed age. The useownmove leg `[orig: @ 0x4e9f06]` runs ONLY the motor
+2 ticks remaining, above water → runtime flag 0x1000 only (`@ 0x444a29`), and
+the next lifetime head queues `WeaponEffect_PushExplosionQueueEntry @ 0x4e83c0`
+(`@ 0x4e9e03`) + obj tag 4 (`@ 0x4e9e65`) **only under 0x1000**
+(`@ 0x4e9dc6`) **and only for a nonzero ammo kztype**
+(`@ 0x4e9ddc..0x4e9de1`; zero jumps straight to `Projectile_ReleaseEffects`
+at `@ 0x4e9e6d`, whose release `@ 0x4e8280` presents nothing). That head is
+`Projectile_UpdatePhysics @ 0x4e9d70`, which every round of the 512-slot
+array runs (`Weapon_UpdateAllProjectiles @ 0x4ec020`), the motor-driven
+useownmove rounds included (the motor call `@ 0x4e9f1e`), so a kztype-0
+grenade (JO's `grenadesm`) presents its obj row once, at the arm boundary
+(`@ 0x444908..0x444967`), and releases silently at its fuse; an ordinary
+expired round vanishes silently too (corrected 2026-09-22: the earlier text
+had the fuse present obj tag 4 for every grenade; `throwables`
+`test_smoke_grenade_expiry_presents_no_second_obj_row`, GUT
+`throwable_repro_test.gd`, `net/coop_two_sim_test.gd`).
+Submerged → immediate detonation with depth-keyed tags (>3 u: 27+25, else
+26) and zeroed age; tags 26 and 27 present at the WATER SURFACE (the
+descriptor z is `Env_WaterHeightFixed`, `@ 0x4449be`; calls `@ 0x4449cc` /
+`@ 0x4449de`) and tag 25 at the round (its z restored `@ 0x4449ee`, call
+`@ 0x4449f2`), and the push `@ 0x444a0f` tests no class (corrected
+2026-09-22: the port had put tag 26 at the round;
+`test_submerged_fuse_presents_at_the_water_surface`). The useownmove leg `[orig: @ 0x4e9f06]` runs ONLY the motor
 (+ proximity list): no stock ray, gravity, drag, or collision; noage (0x4000)
 skips aging.
 

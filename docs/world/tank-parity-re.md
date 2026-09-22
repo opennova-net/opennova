@@ -35,7 +35,7 @@ below as witnessed and ported behavior, not as divergence rows.
 | Mounted weapons: the fire pose (gfx3 launch point, barrel, view-tilt fold, point direction), turret windows, the ewep CTRL publication, the claimant's slot cut and live seat points | **MATCHING (behavioral proof)** for the legs in the witness map; before the fix round a gfx3 def (JOTAC `WPN_M1TURRET` and its siblings) fired from `bullet01` instead of its launch userpoint | `special_weapon_parity` (`gfx3_weapon_fires_from_its_launch_point`, `controller_fire_asks_for_the_point_direction`, `commander_line_starts_at_the_gun_launch_point`, `pose_provider_turns_the_euler_by_the_point_direction`), `ai` (`test_mounted_gunner_fires_from_the_slot_barrel`), `npc_weapons`, `vehicle_suspension`, `npruntime_weapon_table`, `turret_window` (`weapon_window_clamps_unconditionally`), `emplaced_gun_channel`, `inmatch_joiner_role`, `vehicle_mount` (`test_claimant_detach_cuts_vehicle_slot_action`, `test_use_scan_poses_every_seat_kind_live`), `netsim_present_rows` (`test_joiner_hull_gun_words_follow_the_turret_child`); GUT `mission_present_pass_test.gd`, `simulation_test.gd`, `net/coop_two_sim_test.gd` |
 | AI drivers, gunners and vehicle AI slots | **MATCHING (behavioral proof)** for the legs in the witness map | `vehicle_mount` (`test_ai_drive_budget_divides_first`, `test_zero_health_hull_keeps_its_driver_leg`, `test_submerged_player_driver_takes_the_ai_leg`, `test_mover_command_registers_are_the_brain_words`), `vehicle_motor`, `infantry` (`test_aim_lead_uses_the_target_saved_live_pose`, `test_body_tick_stamps_saved_live_pose`, `test_mounted_gunner_aims_in_the_parent_frame`), `mission_promote` (`test_vehicle_records_seed_the_ai_slot`), `mission_item_traits`, `event_runtime_bms`, `ai`, `destruction` |
 | Damage: kill zones, blast legs, knife, run-over and occupants | **MATCHING (behavioral proof)** | `projectile_combat` (`test_jox_tank_round_bullets_class_splashes`, `test_impact_producers_apply_their_own_gates`, `test_armed_expiry_detonates_only_a_kill_zone_class`), `destruction` (`test_blast_on_a_crewed_vehicle_scales_by_occupants`, `test_blast_respects_the_damage_disabled_word`, `test_zero_damage_blast_still_runs_the_item_leg`, `test_person_blast_quadrant_faces_the_blast`, `test_knife_kill_zone`), `collision` (`test_run_over_spares_a_protected_player`, `test_run_over_kills_an_enemy_and_plays_the_bump`), `vehicle_collision_damage` |
-| Authored 07TR progression | Passing assisted integration, **not normal-input completion proof** | `tank_training_test.gd`: real mount, rounds, damage, BMS destruction/victory; debug positioning/aim and final APC positioning remain in the fixture |
+| Authored 07TR progression | Passing assisted integration, **not normal-input completion proof** | `tank_training_test.gd`: real mount after LCAC 38 lands (the deterministic boarding order, see the validation limits), rounds, damage, BMS destruction/victory; debug positioning/aim and final APC positioning remain in the fixture |
 | Joiner replication: death messages, wreck pose, record tail, claimants, controls, wire attitude, 0x0D relations, frame clock | **MATCHING (behavioral proof)** for the legs in the witness map | `ai` (`test_vehicle_death_states_send_kill_record`), `npruntime_round_sim`, `npruntime_round_end`, `netsim_vehicle_compact_carrier` (`run_fan_full_precision_heading_and_wreck_pose`), `netsim_joiner_vehicle_replica` (record tail, kill edge, freeze and pivot clear, remote claimant, target carrier), `netsim_remote_motion_smoothness`, `netsim_present_rows` (`test_joiner_vehicle_motion_controls_reach_present_rows`), `netsim_world_stream_extractors` (`run_pool1_spawn_parent_is_the_occupant`), `netsim_client_world_materializer` (`pool0_parent_never_aliases_the_native_body`), `netsim_loopback_identity`, `mission_kernel` (`test_first_frame_tick_matches_on_host_and_joiner`) |
 | Multiplayer carrier model | Passing portable regressions and OpenNova host/joiner admission; mounted live retail matrix **unverified** | `netsim_vehicle_carrier_prediction`, `netsim_vehicle_compact_carrier`, `netsim_client_replica_pipeline_target_carrier_follow`, `host_role`; see acceptance limits below |
 
@@ -202,6 +202,33 @@ machinery:
   quad uses the collision box spans, halved by the quad builder (tank
   `@ 0x469B93..0x469BA5`, tracked `@ 0x46B449..0x46B462`,
   `Entity_ComputeBoundingQuad @ 0x45B8E4..0x45B9A3`).
+
+The integration run's 07TR tank 34 (a tank that fell off its landing craft
+and never recovered) found no contact divergence; it pinned these retail
+rules:
+
+- **Flags 0x10 on the authority.** The arming seed sets it on the authority
+  (`Entity_ComputeSuspensionAndOrientation @ 0x469976`), and only
+  `Entity_RespawnVehicle` rewrites it, Flags = (Flags & 0x400) | 0x2000
+  (`@ 0x45FFB2..0x460009`); nothing in the tank family clears it. Every tank
+  righting path tests it: the grounded-tail recovery
+  (`@ 0x479352..0x47943E`), the common-tail rebuild (`@ 0x47948A..0x4794A8`),
+  the settle block's rebuild (`test Flags, 10h` `@ 0x4781D4`) and the rest
+  path (`@ 0x475FA2..0x475FC6`); the client twin (`@ 0x4782CA`) is
+  non-authority only.
+- **No self-righting.** A crashed authority tank therefore never rights
+  itself. It settles through the crashed arm (`@ 0x48A684..0x48A81F`; +0x2F0
+  at |speed| < 0x1000, `@ 0x48A7E0..0x48A816`), burns
+  (`@ 0x478125..0x478288`; the 5/tick drain skips Flags 0x4000000), latches
+  the wreck (`@ 0x47853C..0x478643`) and waits for respawn.
+- **The righting rebuild keeps forward.**
+  `Entity_RebuildOrientationMatrixFromAxes @ 0x4632E0` keeps the forward axis,
+  so it keeps pitch and clears only roll; it cannot right a nose-stand.
+- **Carrier follow.** The tank mover applies the groundEntity (+0x28) delta
+  unconditionally (`@ 0x488CFC..0x489106`), with the link refreshed every 8
+  ticks (`@ 0x488B69..0x488B81`).
+- **The head clamp.** The solve head's only [0,55] clamp is the tip threshold
+  def+0x948 (`@ 0x476166..0x476187`); the tank fit has no pitch clamp.
 
 A 5,000-tick JOTAC training capture using the same assisted boarding setup
 measured maximum consecutive camera pitch change of 1.42027° before and
@@ -658,6 +685,23 @@ are implemented. Wider vehicle residuals remain in D-NET-161 and the
   tests / 801 assertions. Both reach the authored training victory through the
   assisted course fixture. This is not proof of a human or device-only
   playthrough.
+- The authored course is deterministic only when the player boards after
+  LCAC 38 has landed. Boarding at once lets event 17 release tank 34 while
+  LCAC 38 is still coming in over 7-11 m of water, for three retail reasons:
+  LCAC 38 (`ai_function cbot`, `move_function catv`, so it runs the cveh AI
+  leg) waits for its passenger SSN 9 under the boarder hold
+  (`Entity_UpdateVehiclePhysics @ 0x48BFB6..0x48BFE2`); its pool-1 avoid brake
+  (`@ 0x48BD8F..0x48BF26`) counts its cargo's addeweap children, because the
+  carrier exclusion checks only one level (`@ 0x48BE1D..0x48BE25`) and the
+  children spawn in pool 1 with +0x28 = the tank
+  (`Entity_SpawnWeaponOverlays @ 0x40F300`, `@ 0x40F40B`); and the list-2 end
+  parks 15 u short (a one-shot list, wp_distance 15). Tank 34 then drives off
+  the moving bow and either catches the bottom or nose-dives past -88 degrees,
+  and an authority tank never self-rights (the contact solve above), so the
+  course stalls without event 48. Every leg is retail behavior; the outcome
+  is sub-second timing. `tank_training_test.gd` now boards the cannon once
+  LCAC 38 has stopped, which is ordinary play (6a7722d57): events 17, 19, 49
+  and 48 fire and the round ends in victory, natively and in GUT.
 - Two windowed `tank_parity` zoom captures contain 758 and 284 frames, with
   cannon mount and posed userpoint data in every frame. The second starts at
   2x: wheel-up reaches 4x, 6x, 7x and clamps; wheel-down reaches 5x, 3x, 2x
