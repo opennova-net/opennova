@@ -632,9 +632,10 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
         // 4.0 u @0x436113 and the cone gate @0x43611f..0x436123.
         const int32_t score = d3 + (aim >> 9);
         if (d3 > 0x40000 || aim > max_aim_bam) return;
-        if (score >= best_score) return;
-        // LOS gate LAST [orig: @0x436183].
+        // The LOS gate, then the best-score compare [orig: the LOS call
+        // @0x436183, `cmp ebx, [esp+0A0h+var_74]` @0x43618F].
         if (!point_los_clear(world, player, cand, sp)) return;
+        if (score >= best_score) return;
         best_score = score;
         out.vehicle = cand.handle;
         out.seat_index = index;

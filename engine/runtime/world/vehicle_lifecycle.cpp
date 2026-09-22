@@ -350,6 +350,10 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 		}
 	}
 	if (m.respawn_waiting_for_overlay) {
+		// The bury: 5000 u out on both axes and 1000 u under the terrain
+		// there; the radius-0 average is that one bilinear sample.
+		// [orig: +0x13880000 @0x467F22 / @0x467F2C; Terrain_SampleHeightBilinear
+		//  @0x6067B0 called @0x467F3C; `sub eax, 3E80000h` @0x467F41]
 		int32_t pos[6];
 		read_pose(e, pos);
 		pos[0] = bam_add(pos[0], 327680000);
