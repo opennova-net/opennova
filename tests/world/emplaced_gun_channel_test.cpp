@@ -172,6 +172,38 @@ void test_window_clamp_writes_occupant_look() {
             static_cast<int16_t>((10 * kBamPerDegree) >> 16));
 }
 
+// Without an authored arc the weapon def's window clamps both axes every
+// time, in the parser's integer BAM: a zero yawrange locks the traverse at
+// the gun's own heading (the JOTAC WPN_ROCKTDFLT / WPN_C130_DOOR shape), and
+// a gun with no weapon def has no window at all.
+// [orig: Entity_GetWeaponTurretLimits fallback @0x540E2C..0x540E58;
+//  Math_ClampAngleToBounds @0x44123C / @0x44128C, unconditional;
+//  WeaponDefs_ParseLineCallback imul 0xB60B60 @0x5443EC]
+void test_weapon_window_zero_yawrange_locks_traverse() {
+    Rig r(/*local=*/false, /*player_bit=*/false);
+    r.w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = r.w.tables.weapons.entries[0];
+    weapon.valid = true;
+    weapon.turret_yaw_range_deg = 0;
+    weapon.turret_pitch_max_deg = 5;
+    weapon.turret_pitch_min_deg = 5;
+    r.gun().primary_weapon_slot_adm = 0;
+    const int32_t look_heading = bam_sub(kGunHeading, 40 * kBamPerDegree);
+    r.look(look_heading, -12 * kBamPerDegree);
+    r.tick_channel();
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    CHECK(r.gun().emplaced_gun_pitch_word ==
+            static_cast<int16_t>((5 * kBamPerDegree) >> 16));
+    CHECK(r.body->heading == kGunHeading);
+    CHECK(r.body->pitch == -5 * kBamPerDegree);
+    // No weapon def: no window, the look stands.
+    r.gun().primary_weapon_slot_adm = kAdmSlotNone;
+    r.look(look_heading, -12 * kBamPerDegree);
+    r.tick_channel();
+    CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>((40 * kBamPerDegree) >> 16));
+    CHECK(r.body->heading == look_heading);
+}
+
 // IsTurret: the words slew toward the look at most 0x92CF34 per tick from
 // the previous word (rounded by the 0x8000 half-step); a look within the
 // tether leaves the gunner untouched. [orig: @0x440a43..0x440b37]
@@ -515,6 +547,9 @@ void test_unoccupied_gun_publishes_held_words_spin_and_heat() {
     r.w.tables.weapons.entries.resize(1);
     WeaponTableEntry &weapon = r.w.tables.weapons.entries[0];
     weapon.valid = true;
+    weapon.turret_yaw_range_deg = 180;
+    weapon.turret_pitch_max_deg = 90;
+    weapon.turret_pitch_min_deg = 90;
     weapon.action_fsm.heat_per_shot = 100;
     weapon.action_fsm.heat_decay_per_tick = 7;
     r.gun().primary_weapon_slot_adm = 0;
@@ -646,6 +681,7 @@ void test_carrier_destruction_resets_child_words() {
 } // namespace
 
 int main() {
+    test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
     test_carrier_destruction_resets_child_words();

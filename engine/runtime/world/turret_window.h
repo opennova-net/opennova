@@ -29,43 +29,52 @@ struct TurretWindow {
 	int32_t pitch_upper = 0;
 	int32_t pitch_lower = 0;
 	// True when the per-seat authored quartet was selected (the addeweap arc);
-	// false = the weapon-def fallback (possibly empty).
+	// false = the weapon-def fallback.
 	bool per_seat = false;
+	// Whether a window exists at all: the per-seat quartet, or a weapon def
+	// to read the fallback from. An active window clamps BOTH axes every
+	// time, so a zero bound pins its axis.
+	bool active = false;
 	bool empty() const {
 		return yaw_upper == 0 && yaw_lower == 0 && pitch_upper == 0 &&
 				pitch_lower == 0;
 	}
 };
 
-// Degrees -> BAM clamp bound for the weapon-def leg. A half-arc of 180 or
-// more is the full circle (the "360" gun family) — no effective window; 0
-// tells callers to skip. [orig: the itemDef fallback consumers' witnessed
-// no-window semantics, docs/net/novaworld-net-re.md §5.38e]
+// Degrees -> BAM bound exactly as the weapon-def parser stores it: the
+// integer multiply by 11930464 that wraps, so 180 stops 128 BAM short of the
+// half circle and 0 is a real bound. The fallback's consumers clamp to it
+// unconditionally. [orig: WeaponDefs_ParseLineCallback targetpitchmax
+//  imul 0xB60B60 @0x5443EC, targetpitchmin imul 0xFF49F4A0 (negated)
+//  @0x544424, targetyawrange store @0x54446E; Entity_GetWeaponTurretLimits
+//  fallback @0x540E2C..0x540E58]
 inline int32_t turret_window_limit_bam(int16_t degrees) {
-	if (degrees <= 0 || degrees >= 180) return 0;
 	return static_cast<int32_t>(
-			bam_from_degrees_wrapped(static_cast<double>(degrees)));
+			static_cast<uint32_t>(static_cast<int32_t>(degrees)) * 11930464u);
 }
 
 // Select the clamp window: the per-seat authored quartet (down/up/right/left,
 // signed BAM as parsed) wins when any value is nonzero; otherwise the
-// fallback window (symmetric yaw range, +max/-min pitch), all in BAM.
+// fallback window (symmetric yaw range, +max/-min pitch), all in BAM, which
+// exists only when the gun has a weapon def to read it from.
 // [orig: Entity_GetWeaponTurretLimits @0x540d70 — the all-zero test
 // @0x540e27 selects between the two legs]
 inline TurretWindow select_turret_window_bam(int32_t down_limit_bam,
 		int32_t up_limit_bam, int32_t right_limit_bam, int32_t left_limit_bam,
-		int32_t fallback_yaw_range_bam, int32_t fallback_pitch_max_bam,
-		int32_t fallback_pitch_min_bam) {
+		bool fallback_valid, int32_t fallback_yaw_range_bam,
+		int32_t fallback_pitch_max_bam, int32_t fallback_pitch_min_bam) {
 	TurretWindow window;
 	if ((down_limit_bam | up_limit_bam | right_limit_bam | left_limit_bam) !=
 			0) {
 		window.per_seat = true;
+		window.active = true;
 		window.yaw_upper = right_limit_bam;
 		window.yaw_lower = left_limit_bam;
 		window.pitch_upper = down_limit_bam;
 		window.pitch_lower = up_limit_bam;
 		return window;
 	}
+	window.active = fallback_valid;
 	window.yaw_upper = fallback_yaw_range_bam;
 	window.yaw_lower = -fallback_yaw_range_bam;
 	window.pitch_upper = fallback_pitch_max_bam;
@@ -74,12 +83,12 @@ inline TurretWindow select_turret_window_bam(int32_t down_limit_bam,
 }
 
 // The weapon-table flavor of the fallback: degree fields through the
-// >=180-is-no-window conversion (entry may be null).
+// parser's integer conversion (a null entry has no fallback window).
 inline TurretWindow select_turret_window(int32_t down_limit_bam,
 		int32_t up_limit_bam, int32_t right_limit_bam, int32_t left_limit_bam,
 		const WeaponTableEntry *entry) {
 	return select_turret_window_bam(down_limit_bam, up_limit_bam,
-			right_limit_bam, left_limit_bam,
+			right_limit_bam, left_limit_bam, entry != nullptr,
 			entry != nullptr
 					? turret_window_limit_bam(entry->turret_yaw_range_deg)
 					: 0,

@@ -83,6 +83,10 @@ struct ItemSeatSpec {
     int32_t turret_yaw_range_bam = 0;
     int32_t turret_pitch_max_bam = 0;
     int32_t turret_pitch_min_bam = 0;
+    // Whether a weapon.def row stamped the three limits: without one the gun
+    // has no fallback window at all. [orig: the slot Def read
+    //  @0x540E2C..0x540E58]
+    bool turret_limits_valid = false;
 };
 
 struct PromoteOptions {

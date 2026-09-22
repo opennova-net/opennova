@@ -310,6 +310,7 @@ void stamp_seat_spec_turret_limits(world::World &world,
 						? world.tables.weapons.by_index(static_cast<uint8_t>(index))
 						: nullptr;
 		if (entry == nullptr) continue;
+		spec.turret_limits_valid = true;
 		spec.turret_yaw_range_bam =
 				world::turret_window_limit_bam(entry->turret_yaw_range_deg);
 		spec.turret_pitch_max_bam =

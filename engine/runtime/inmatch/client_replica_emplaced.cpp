@@ -31,7 +31,8 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 	const world::TurretWindow window = world::select_turret_window_bam(
 			arc != nullptr ? arc->down_limit_bam : 0, arc != nullptr ? arc->up_limit_bam : 0,
 			arc != nullptr ? arc->right_limit_bam : 0, arc != nullptr ? arc->left_limit_bam : 0,
-			spec.turret_yaw_range_bam, spec.turret_pitch_max_bam, spec.turret_pitch_min_bam);
+			spec.turret_limits_valid, spec.turret_yaw_range_bam, spec.turret_pitch_max_bam,
+			spec.turret_pitch_min_bam);
 	return window;
 }
 } //namespace
