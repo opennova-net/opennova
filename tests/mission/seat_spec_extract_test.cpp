@@ -108,15 +108,20 @@ int main() {
     CHECK(seat_yaw_offset_from_user_point(up("s", 0, 0, 0, 0, 0, 65536)) == 0);
 
     // ---- the carrier model: seats, armory, an attachment anchor ----
+    // The load-time resolve keeps one bone per retail slot: the LAST
+    // ctrlx/drvrx owns slot 8, and UseGun is a whole-name compare.
+    // [orig: EntityDef_LoadModelsAndCallbacks @0x43A47B..0x43A5CD —
+    //  the slot-8 stores @0x43A532 / @0x43A570, the _stricmp @0x43A582]
     std::vector<ThreediUserPoint> carrier_points = {
         up("sitex06", 1, 2, 3),            // passenger, pose 6, slot 0
         up("sitex", 4, 5, 6),              // passenger, slot 1
-        up("CtrlX02", 7, 8, 9),            // controller, pose 2, slot 8
-        up("DRVRX", 10, 11, 12),           // driver: slot 8 taken -> none
-        up("Usegun07", 13, 14, 15),        // gunner, pose 0 (UseGun never poses)
+        up("CtrlX02", 7, 8, 9),            // slot 8 until the driver below
+        up("DRVRX03", 10, 11, 12),         // driver, pose 3: the last match owns slot 8
+        up("Usegun", 13, 14, 15),          // gunner (any case), pose 0, slot 9
         up("armory1", 16, 17, 18),         // armory anchor (attrib-gated)
         up("engine", 19, 20, 21),          // not a seat
         up(" GunAnchor ", 22, 23, 24, 0, 65536, 0, 5), // attachment target
+        up("Usegun07", 25, 26, 27),        // not a seat: suffixed UseGun
     };
     Threedi3di3 carrier_model;
     std::memset(&carrier_model, 0, sizeof(carrier_model));
@@ -198,10 +203,10 @@ int main() {
     CHECK(cs.type_id == 500);
     CHECK(cs.mount_config_valid && cs.mount_config == 4);
     CHECK(cs.primary_weapon == "WPN_50CAL");
-    // 2 passengers + controller + driver + gunner; the driver row is kept —
-    // only its retail slot is unassigned after the controller claimed 8.
-    CHECK(cs.seats.size() == 5);
-    if (cs.seats.size() == 5) {
+    // 2 passengers + the driver (slot 8) + the gunner (slot 9); the
+    // overridden CtrlX02 row and the suffixed Usegun07 row are not seats.
+    CHECK(cs.seats.size() == 4);
+    if (cs.seats.size() == 4) {
         const world::Seat &p0 = cs.seats[0];
         CHECK(p0.type == world::SeatType::Passenger && p0.retail_slot == 0 &&
                 p0.bone_index == 1 && p0.pose_index == 6);
@@ -210,13 +215,10 @@ int main() {
         CHECK(p0.source_name == "sitex06");
         const world::Seat &p1 = cs.seats[1];
         CHECK(p1.type == world::SeatType::Passenger && p1.retail_slot == 1);
-        const world::Seat &ctrl = cs.seats[2];
-        CHECK(ctrl.type == world::SeatType::Controller &&
-                ctrl.retail_slot == 8 && ctrl.pose_index == 2);
-        const world::Seat &drv = cs.seats[3];
-        CHECK(drv.type == world::SeatType::Driver &&
-                drv.retail_slot == 0xFF); // slot 8 already claimed
-        const world::Seat &gun = cs.seats[4];
+        const world::Seat &drv = cs.seats[2];
+        CHECK(drv.type == world::SeatType::Driver && drv.retail_slot == 8 &&
+                drv.bone_index == 4 && drv.pose_index == 3);
+        const world::Seat &gun = cs.seats[3];
         CHECK(gun.type == world::SeatType::Gunner && gun.retail_slot == 9 &&
                 gun.pose_index == 0 && gun.bone_index == 5);
     }
@@ -268,14 +270,17 @@ int main() {
             !os.emplacement_attachments[0].anchor_found);
 
     // ---- prefix-at-byte-zero negatives + the pose-digit clamp ----
-    // Embedded tokens are not seats — the witnessed compare runs at name byte
-    // zero [orig: strnicmp(name, "sitex"/"ctrlx"/"UseGun"/"drvrx", 5/6)
-    // @ 0x434ED0] — and authored pose digits clamp to the 0..30 sit window.
-    // (These two rows were pinned in the retired GDScript extractor's tests.)
+    // Embedded tokens are not seats — the witnessed compares run on the raw
+    // name from byte zero, with no trim, and UseGun matches the whole name
+    // [orig: EntityDef_LoadModelsAndCallbacks strnicmp @0x43A4BC / @0x43A50B /
+    // @0x43A549, _stricmp @0x43A582] — and authored pose digits clamp to the
+    // 0..30 sit window.
     std::vector<ThreediUserPoint> edge_points = {
         up("fooUseGun", 1, 0, 0), // embedded token: never a gunner seat
         up("xctrlx", 2, 0, 0),    // embedded token: never a controller
         up("sitex99", 3, 0, 0),   // pose digits 99 clamp to 30
+        up(" sitex01", 4, 0, 0),  // leading blank: not a passenger
+        up("UseGun ", 5, 0, 0),   // trailing blank: not the whole name
     };
     Threedi3di3 edge_model;
     std::memset(&edge_model, 0, sizeof(edge_model));
@@ -297,11 +302,48 @@ int main() {
     CHECK(edge_out.specs.size() == 1);
     if (!edge_out.specs.empty()) {
         const mission::ItemSeatSpec &es = edge_out.specs[0];
-        CHECK(es.seats.size() == 1); // only sitex99 typed; both tokens rejected
+        CHECK(es.seats.size() == 1); // only sitex99 typed; the rest rejected
         if (es.seats.size() == 1) {
             CHECK(es.seats[0].type == world::SeatType::Passenger);
             CHECK(es.seats[0].pose_index == 30);
             CHECK(es.seats[0].source_name == "sitex99");
+        }
+    }
+
+    // ---- nine passengers: the ninth sitex writes slot 8 and ends the scan ----
+    // The passenger index runs past the 8-byte seat array into the control
+    // bone, so a ninth sitex replaces an earlier ctrlx there, and the walk
+    // stops: a later sitex or UseGun is never bound.
+    // [orig: EntityDef_LoadModelsAndCallbacks — the store
+    //  `mov [ebx+ebp+25Dh], cl` @0x43A4F0, `cmp ebp, 8; jg` @0x43A5AF]
+    std::vector<ThreediUserPoint> crowd_points = {up("ctrlx", 0, 0, 0)};
+    for (int i = 0; i < 10; ++i) {
+        char name[16];
+        std::snprintf(name, sizeof(name), "sitex%02d", i);
+        crowd_points.push_back(up(name, i, 0, 0));
+    }
+    crowd_points.push_back(up("UseGun", 20, 0, 0));
+    Threedi3di3 crowd_model;
+    std::memset(&crowd_model, 0, sizeof(crowd_model));
+    crowd_model.user_points = crowd_points.data();
+    crowd_model.user_point_count = crowd_points.size();
+    DefItemDef crowd_defs[1] = {def_row(100900, "crowd")};
+    DefItemsFile crowd_items;
+    crowd_items.entries = crowd_defs;
+    crowd_items.count = 1;
+    const ModelLookupFn crowd_lookup = [&](const std::string &graphic) {
+        return graphic == "crowd" ? &crowd_model : nullptr;
+    };
+    SeatSpecExtraction crowd_out;
+    extract_item_seat_specs(crowd_items, crowd_lookup, {100900}, crowd_out);
+    CHECK(crowd_out.specs.size() == 1);
+    if (!crowd_out.specs.empty()) {
+        const std::vector<world::Seat> &seats = crowd_out.specs[0].seats;
+        CHECK(seats.size() == 9); // sitex00..sitex08; ctrlx, sitex09, UseGun unbound
+        for (size_t i = 0; i < seats.size() && i < 9; ++i) {
+            CHECK(seats[i].type == world::SeatType::Passenger);
+            CHECK(seats[i].retail_slot == i);
+            CHECK(seats[i].bone_index == i + 2);
         }
     }
 
