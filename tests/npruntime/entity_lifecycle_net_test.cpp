@@ -619,17 +619,20 @@ bool run_empty_slot_sweep_retires_the_row() {
 }
 
 // ---------------------------------------------------------------------------------
-// (D) the S2C 0x13 entity-death fold — a destructible's only live death channel
+// (D) the S2C 0x13 / 0x26 entity-death folds on a destructible row
 // ---------------------------------------------------------------------------------
 
-// The host notifies every non-player death as S2C 0x13 [u16 handle][i16 killer].
-// The connection surfaces the validated body, the replica fold zeroes the row's
-// health, and drain_effect_commands hands the record to the embedding sim exactly
-// once, so it can run the class death callback (reason 4 — the husk/explosion
-// chain) on the world twin. Regression: 0x13 used to be dropped at the
-// connection's tag chain — a joiner never saw a destructible die.
-// [orig: sender Entity_CheckAndProcessDeath @0x51b550 (msg 19, mask 0x90);
-//  handler NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
+// Only the organic death transaction sends S2C 0x13 [u16 handle][i16 deathAnim];
+// a destructible's live death channel is the 0x26 kill-sync its class callback
+// sends. The client's 0x13 handler takes any valid handle, so both tags are
+// pinned here on one streamed static: the connection surfaces the validated
+// body, the replica fold zeroes the row's health, and drain_effect_commands hands
+// the record to the embedding sim exactly once, so it can run the class death
+// callback (reason 4 — the husk/explosion chain) on the world twin. Regression:
+// both tags used to be dropped at the connection's tag chain.
+// [orig: senders Entity_CheckAndProcessDeath @0x51b550 (msg 19, mask 0x90,
+//  called only for organics) and GameEvent_PlayerDeath @0x516E8E; handler
+//  NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
 //  deathCallback(entity, 4, 0) @0x42ebf5]
 bool run_entity_death_notify_reaches_the_sim() {
 	constexpr uint16_t kSelf = 0x0005;

@@ -179,10 +179,14 @@ Drained drain_all(ns::LoopbackChannel &t) {
 	return out;
 }
 
-// Non-player deaths take only the notification/scoring leg, so a respawned
-// vehicle remains damageable. Player dead/spawn protection must not leak into
-// the shared death route. [orig: Entity_CheckAndProcessDeath @0x51B550;
-// Entity_RespawnVehicle @0x45FF40]
+// A vehicle death takes only the scoring leg of the death route: the organic
+// 0x13 transaction never runs for it, and its Flags/alive belong to its own
+// death states (which also send its S2C 0x26), so a respawned vehicle remains
+// damageable. [orig: Entity_CheckAndProcessDeath @0x51B550, called only from
+// Entity_UpdateInfantryPlayerBody @0x4B4CEA, Entity_UpdateInfantryAI @0x4B9D4D
+// and the console kill @0x4D29EC; the only 0x13 sends are GameEvent_PlayerDeath
+// @0x516E8E and Entity_CheckAndProcessDeath @0x51B58F;
+// AI_TransitionToDeath_GroundVehicle @0x467B58; Entity_RespawnVehicle @0x45FF40]
 bool test_respawned_vehicle_takes_projectile_damage() {
 	auto world_owner = std::make_unique<w::World>();
 	w::World &world = *world_owner;
@@ -239,6 +243,9 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_conn(
+			2, 1, &remote_wire, ns::TransportMode::Client, shooter, true));
 
 	for (int life = 0; life < 2; ++life) {
 		w::RoundSpawnParams params;
@@ -252,10 +259,24 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 		            world.round_sim.deaths.size() == 1,
 		            life == 0 ? "a projectile destroys the initial vehicle"
 		                      : "a projectile destroys the respawned vehicle")) return false;
+		drain_all(remote_wire);
 		inmatch::Server_TickUpdate(ctx);
 		w::Entity &body = *world.registry.get(vehicle);
-		if (!expect(!body.alive && (body.flags & 2u) != 0,
-		            "the shared death route publishes the vehicle's dead state")) return false;
+		if (!expect((body.flags & 2u) == 0,
+		            "the organic death route never publishes the vehicle's Flags bit 1"))
+			return false;
+		const Drained sent = drain_all(remote_wire);
+		bool vehicle_0x13 = false;
+		for (const auto &death : sent.tag(s2c::ENTITY_DEATH))
+			if (death.size() >= 2 && (death[0] | (death[1] << 8)) == vehicle.packed)
+				vehicle_0x13 = true;
+		bool vehicle_0x26 = false;
+		for (const auto &kill : sent.tag(s2c::KILL_SYNC))
+			if (kill.size() >= 2 && (kill[0] | (kill[1] << 8)) == vehicle.packed)
+				vehicle_0x26 = true;
+		if (!expect(!vehicle_0x13 && vehicle_0x26,
+		            "a vehicle death fans its class S2C 0x26, never the organic 0x13"))
+			return false;
 		world.vehicles.respawn(body);
 		if (!expect(body.alive && body.health == body.health_max,
 		            "vehicle respawn restores its health")) return false;

@@ -629,9 +629,15 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 // Drain each transport-free RoundDeath through the one retail player-death
 // transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
 // 0x1E active-player feed, conditional 0x54 Medic state, scoring, and respawn
-// holds. AI victims stop after the 0x13/scoring leg.
-// [orig: Entity_CheckAndProcessDeath @0x51B550 ->
-// GameEvent_PlayerDeath @0x516DD0]
+// holds. AI victims stop after the 0x13/scoring leg. That transaction is the
+// organic body's alone: its only callers are the player body, the infantry AI
+// and the console kill. Vehicles and items keep only the score ledger and the SP
+// tally here; their class death paths own Flags and the S2C 0x26 kill record.
+// [orig: Entity_CheckAndProcessDeath @0x51B550, called only from
+// Entity_UpdateInfantryPlayerBody @0x4B4CEA, Entity_UpdateInfantryAI @0x4B9D4D
+// and the console kill @0x4D29EC -> GameEvent_PlayerDeath @0x516DD0; the only
+// 0x13 sends are GameEvent_PlayerDeath @0x516E8E and
+// Entity_CheckAndProcessDeath @0x51B58F]
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
@@ -639,6 +645,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		const world::Entity *killer_entity = world.registry.get(d.killer);
 		const bool victim_is_player = victim_entity != nullptr &&
 				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
+		const bool organic_victim = victim_entity != nullptr &&
+				victim_entity->kind == world::EntityKind::Organic;
 		// The revive-window and resend gates read the victim's live entity+44
 		// cause word BEFORE the classifier clears the bit it reports.
 		// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
@@ -673,14 +681,13 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// the client spawn hook (pose snap + reset). Without this bit the victim never
 		// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
 		// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
-		if (world::Entity *victim = world.registry.get(d.victim)) {
-			victim->flags |= 2u;
-			victim->alive = false;
-			// The player-only dead/protection latch is not reset by vehicle
-			// respawn; setting it on an item makes the next life invulnerable.
-			// [orig: Entity_CheckAndProcessDeath @0x51B55D gates the player leg;
-			// Entity_RespawnVehicle @0x45FF40 does not touch entity+0x124]
-			if (victim_is_player) victim->damage_state = -1;
+		if (organic_victim) {
+			victim_entity->flags |= 2u;
+			victim_entity->alive = false;
+			// The dead/protection latch is the player leg's alone.
+			// [orig: Entity_CheckAndProcessDeath tests Flags & 0x100
+			// @0x51B555..0x51B55D before GameEvent_PlayerDeath]
+			if (victim_is_player) victim_entity->damage_state = -1;
 		}
 		if (victim_connection != nullptr) {
 			// A normal other-player kill opens the exact 120-second revive
@@ -701,7 +708,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 					(victim_cause_bits & 0xC00u) == 0u;
 		}
 
-		if (ctx.is_in_session) {
+		if (ctx.is_in_session && organic_victim) {
 			std::vector<uint8_t> body13;
 			put_u16le(body13, d.victim_handle);
 			// word1 = the victim's entity+0x2C0 death-anim slot AS THE SENDER

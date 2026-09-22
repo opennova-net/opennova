@@ -119,6 +119,48 @@ void test_vehicle_death_rows() {
     }
 }
 
+// A vehicle's own death states replicate its kill: right after the death
+// transforms, an in-session authority sends S2C 0x26 with section 0 (queued as
+// the host's item-state event); the destroyed enter finds the hull husked and
+// sends nothing more. Neither enter sends on a joiner or outside a session.
+// [orig: AI_TransitionToDeath_GroundVehicle @0x467B43..0x467B58;
+//  AI_TransitionToDestroyed_Vehicle @0x467E40..0x467E55;
+//  Server_SendEntityStatePacket @0x509D70]
+void test_vehicle_death_states_send_kill_record() {
+    const auto kill_records = [](const World &w, EntityHandle h) {
+        int count = 0;
+        for (const auto &event : w.out.entity_events)
+            if (const auto *state = std::get_if<ItemStateEvent>(&event))
+                if (state->handle == h.packed && state->section == 0) ++count;
+        return count;
+    };
+    for (int role = 0; role < 3; ++role) {
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        w.registry.configure_pool(1, 4);
+        w.rules.logic_authority = role != 1; // role 1: a joiner
+        w.rules.mp_session = role != 2;      // role 2: single player
+        Entity seed;
+        seed.team = 1;
+        seed.health = 0;
+        seed.has_item_def = true;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
+        sys.is_authority = w.rules.logic_authority;
+        AiEntity &e = *sys.at(sys.attach(h));
+        e.team = 1;
+        e.vel_x = 100;
+        e.brain.f[AiBrain::kCurState] = 21;
+        AiThinkCtx ctx{&sys, &e, &w, nullptr};
+        sys.row(21).enter(ctx);
+        CHECK(kill_records(w, h) == (role == 0 ? 1 : 0));
+        CHECK((w.registry.get(h)->flags & 6u) == 6u); // the dispatch's Flags |= 6
+        sys.row(23).enter(ctx);
+        CHECK(kill_records(w, h) == (role == 0 ? 1 : 0));
+    }
+}
+
 // The sim resolves the launch point at each fire event, with a raw-origin fallback.
 // A stand-in for the asset-aware muzzle-pose provider (EntityPoseProvider
 // in production): fixed points per handle, so the consumers' plumbing is pinned
@@ -3692,6 +3734,7 @@ int main() {
     }
 
     test_vehicle_death_rows();
+    test_vehicle_death_states_send_kill_record();
     test_vehicle_brain_think_countdown();
     test_fire_pass_uses_embedder_fed_muzzle();
     test_weapon_fire_origin_fallback_chain();

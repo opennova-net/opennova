@@ -739,10 +739,17 @@ void test_demolition_death_routes_score_and_round_wire() {
 				scorer->stats[w::MatchStats::kPoints] == 50 &&
 				world.match.team_stats(1)[w::MatchStats::kTargetsDestroyed] == 1,
 			"S&D/A&D death routing awards the exact target event to player and team");
+		// The organic death transaction never runs for the target: its class
+		// callback owns its Flags and its S2C 0x26 kill record.
+		// [orig: Entity_CheckAndProcessDeath @0x51B550, called only from
+		//  Entity_UpdateInfantryPlayerBody @0x4B4CEA, Entity_UpdateInfantryAI
+		//  @0x4B9D4D and the console kill @0x4D29EC; the only 0x13 sends are
+		//  GameEvent_PlayerDeath @0x516E8E and Entity_CheckAndProcessDeath
+		//  @0x51B58F]
 		const w::Entity *dead_target = world.registry.get(target);
-		expect(dead_target != nullptr && !dead_target->alive &&
-				(dead_target->flags & w::kEntityFlagDead) != 0,
-			"demolition target enters the shared authoritative dead state");
+		expect(dead_target != nullptr && dead_target->alive &&
+				(dead_target->flags & w::kEntityFlagDead) == 0,
+			"the organic death route leaves the demolition target to its class callback");
 
 		bool saw_death = false;
 		ns::Datagram datagram;
@@ -750,16 +757,12 @@ void test_demolition_death_routes_score_and_round_wire() {
 			if (datagram.tag != s2c::ENTITY_DEATH) continue;
 			EntityDeathRecord death;
 			size_t consumed = 0;
-			// word1 is the victim's +0x2C0 death-anim slot, never the killer;
-			// a building never stages one. [orig: BuildDeathNotifyPayload @0x5036E0]
 			if (decode_entity_death(datagram.body.data(), datagram.body.size(),
 					death, consumed) && consumed == datagram.body.size() &&
-					death.entity_handle == target.packed &&
-					death.death_anim_state_id == 0)
+					death.entity_handle == target.packed)
 				saw_death = true;
 		}
-		expect(saw_death,
-			"demolition target death fans the exact 0x13 target handle + zero death-anim slot");
+		expect(!saw_death, "a demolition target death never fans the organic S2C 0x13");
 
 		for (int i = 0; i < 60; ++i) inmatch::Server_TickUpdate(ctx);
 		expect(!world.match.outcome().ended,
