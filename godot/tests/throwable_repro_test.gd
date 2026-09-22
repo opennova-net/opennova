@@ -334,7 +334,11 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 # The production smoke ammo reuses the flashbang's nade/nade TrcrID item.  Its
 # five-second ARM boundary fires the obj row once (the witnessed smoke-pour
 # start) but the projectile remains alive and harmless until its fuse expires.
-# The same obj row presents again at actual expiry.
+# At expiry it releases silently: the fuse arms the 0x1000 flag, and the
+# Projectile_UpdatePhysics head that runs the nade motor presents the obj row
+# (and queues the kill zone) only for a nonzero kztype, which grenadesm lacks.
+# [orig: Projectile_UpdatePhysics @0x4E9DC6, kztype @0x4E9DDC..0x4E9DE1 ->
+# Projectile_ReleaseEffects; the motor call @0x4E9F1E]
 #
 # The fuse length here is whatever the MOUNTED ammo.def authors.  This test loads
 # the reference fixture set's def/ammo.def (RetailData.def_root()), a byte-exact
@@ -400,7 +404,8 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 			break
 	assert_between(fuse_tick, 1850, 1870,
 			"the smoke grenade expires on base JO's 30-second (1860-tick) fuse")
-	assert_eq(fuse_sounds, 1, "the obj-row fuse sound is presented only at expiry")
+	assert_eq(fuse_sounds, 0,
+			"without a kill-zone class the expiry presents no second obj-row event")
 
 
 # The windup exposure the HUD charge bar reads [orig: g_fireChargeStartTick ->
