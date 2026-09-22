@@ -16,6 +16,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
@@ -320,16 +321,17 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
     return true;
 }
 
-// The dead-attacker kill-credit walk [orig: @ 0x4eae95..0x4eaece — while the
+// The dead-attacker kill-credit walk [orig: @ 0x4eae8c..0x4eaece — while the
 // candidate is dead and not player-controlled (Flags & 0x100), follow its own
-// lastAttacker; two hops witnessed].
+// lastAttacker; two hops witnessed]. A hop takes the link as stored, empty
+// included: a dead source nobody damaged credits no one [orig: the stores
+// @ 0x4eaeb3 / @ 0x4eaece run ahead of the null branch].
 EntityHandle resolve_attacker_chain(World &world, EntityHandle owner) {
     EntityHandle resolved = owner;
     for (int hop = 0; hop < 2; ++hop) {
         const Entity *e = world.registry.get(resolved);
         if (e == nullptr) break;
         if (e->health > 0 || (e->engine_flags & kEntityFlagPlayer) != 0) break;
-        if (!e->last_attacker.valid()) break;
         resolved = e->last_attacker;
     }
     return resolved;
@@ -360,8 +362,11 @@ bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_ta
     return distance <= static_cast<uint32_t>(cone_half_bam);
 }
 
-// Shared health drain for a non-organic victim + the item death notify.
-// [orig: the Entity_ApplyWeaponDamage non-person tail @ 0x4e6f0d-0x4e6fc1]
+// Shared health drain for a non-organic victim + the item death notify. It
+// runs for a live victim whatever the damage, 0 included: an armor-blocked
+// blast still stores the attacker and notifies the class callback.
+// [orig: the Entity_ApplyWeaponDamage non-person tail @ 0x4e6f0d-0x4e6fc1 —
+//  the only gates are Flags & 2 @0x4E6EFD and Health > 0 @0x4E6F0A]
 void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
                              EntityHandle attacker, int32_t ammo_index) {
     if ((target.engine_flags & kEntityFlagDead) != 0 || target.health <= 0) return;
@@ -386,35 +391,103 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
     }
 }
 
+// The per-victim callback a queue entry's type installs [orig: the jumptable
+// @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyVehicleCollisionDamage,
+// nullsub_91].
+enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee };
+
+// The ammo's kill-zone damage as the drain and its callbacks read it: the
+// kz_damage word off-session or on the session authority, 0 on a session
+// peer [orig: Entity_GetNetIdIfAuthority @ 0x4E4010 — an IDB misnomer; it
+// returns word +0x2E @0x4E4029].
+int32_t kz_damage_if_authority(const World &world, const AmmoTableEntry &ammo) {
+    if (world.rules.mp_session && !world.rules.logic_authority) return 0;
+    return ammo.kz_damage;
+}
+
+// The kind-1 (knife) kill-zone callback for one victim [orig:
+// Entity_ApplyVehicleCollisionDamage @ 0x4E6620]. Only a live, non-immune
+// person other than the source takes it; it deals the ammo's kz_damage in
+// full (no falloff, armor, occupant or NoDie term), latches the knife cause
+// bit and notifies the class callback with event 3.
+void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntry &e) {
+    const uint32_t flags = target.flags | target.engine_flags;
+    // [orig: the person test @0x4E6633, Flags & 2 @0x4E6647, the source
+    //  test @0x4E6657, Flags & 0x4000000 @0x4E665F]
+    if (!collision_damage_applies(target.item_type, flags, target.handle == e.owner)) return;
+    // The approach quadrant from the victim toward the entry point.
+    // [orig: @0x4E666A..0x4E66B1 — the fpatan @0x4E668D; the shift @0x4E6725]
+    const int quadrant = approach_quadrant(
+            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
+            io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
+            io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)),
+            kCollisionQuadrantBias);
+    const int32_t before = target.health;
+    if (before <= 0) return; // [orig: `test bp, bp; jle` @0x4E66B7..0x4E66BE]
+    // The kill credit: the dead-source walk [orig: @0x4E66C4..0x4E6707 — the
+    // first +0x178 store @0x4E66C6].
+    target.last_attacker = resolve_attacker_chain(world, e.owner);
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
+    const int32_t damage = ammo != nullptr ? kz_damage_if_authority(world, *ammo) : 0;
+    // The signed-word subtraction, no clamp [orig: @0x4E6729 / @0x4E672E].
+    target.health = retail_signed_i16(static_cast<int64_t>(before) - damage);
+    target.death_anim_state = compute_death_anim_state(
+            kCollisionDeathBone, quadrant, kCollisionDeathCause); // [orig: @0x4E674C]
+    target.cause_flags |= kDamageFlagCollision; // [orig: @0x4E6740]
+    // deathCallback(target, 3, 0) [orig: @0x4E6752]: the person callbacks
+    // take event 3 like the blast's event 2, except that the plyr body keeps
+    // its cause bits (3 is in the no-clear set) and only re-arms its think
+    // [orig: Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F,
+    //  @0x407B5E]. The AI reaction rides the RoundHit drain, as for a blast.
+    world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
+    if ((flags & kEntityFlagPlayer) != 0) target.spawn_phase = 64;
+    if (collision_kill_fires(before, target.health)) {
+        // The kill event credits the entry's source itself, not the walk
+        // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
+        //  @0x4E6773].
+        RoundDeath d;
+        d.victim = target.handle;
+        d.killer = e.owner;
+        d.victim_handle = target.handle.packed;
+        d.killer_handle = e.owner.packed;
+        d.ammo_index = e.ammo_index;
+        d.event_flags = target.cause_flags & 0xF00u;
+        world.round_sim.deaths.push_back(d);
+    }
+}
+
 // The AoE damage applicator for one victim [orig: Entity_ApplyWeaponDamage
 // @ 0x4e6820]. `distance` is the surface distance (center distance minus the
 // victim's bound radius, clamped at 0 by the caller), `blast_radius` the
 // resolved radius.
 void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity &target, const ExplosionEntry &e,
-                                EntityHandle attacker, float distance, float blast_radius) {
+                                float distance, float blast_radius) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
-    // In-session building gate. `World::mp_session` is the retail session
-    // discriminator here: our socketless SP host still uses loopback transport
-    // but must retain offline damage semantics.
-    // [orig: g_napi_np_ctx.is_in_session && ItemType_Building &&
-    // !g_destroy_buildings @0x4E682E..0x4E6860]
-    if (world.rules.mp_session && target.kind == EntityKind::Building &&
-        !world.rules.destroy_buildings)
+    // In a session only the authority applies blast damage, and a Building
+    // takes it only under the destroy-buildings rule. `World::mp_session` is
+    // the retail session discriminator here: our socketless SP host still uses
+    // loopback transport but must retain offline damage semantics.
+    // [orig: g_napi_np_ctx.is_in_session && (!is_authority || ItemType_Building
+    // && !g_destroy_buildings) @0x4E682E..0x4E6860]
+    if (world.rules.mp_session &&
+        (!world.rules.logic_authority ||
+         (target.kind == EntityKind::Building && !world.rules.destroy_buildings)))
         return;
-    const Entity *owner = world.registry.get(attacker);
-    // Same-team blast immunity when the def authors attrib 0x8000
-    // [orig: @ 0x4e688d].
+    // The source entity itself (entry+0x20, not the resolved attacker) is the
+    // side the same-team immunity compares, when the def authors attrib 0x8000
+    // [orig: @ 0x4e686e..0x4e688d].
+    const Entity *owner = world.registry.get(e.owner);
     if (owner != nullptr && traits != nullptr && traits->team_protect &&
         owner->team == target.team)
         return;
     // Indestructible / invulnerable armor word [orig: @ 0x4e68aa].
     if ((target.engine_flags & kEntityFlagIndestructible) != 0) return;
     if (traits != nullptr && traits->armor_blast == -1) return;
-    // The last-attacker store happens right after the gates and BEFORE any damage
-    // math, so a blast that resolves to 0 damage still rebinds the victim's
-    // attacker [orig: `pad_1ba = sourceHandle->groundEntity` @ 0x4e68b0].
-    target.last_attacker = attacker;
+    // The store right after these gates is the victim's shot word (+0x1BA =
+    // entry+0x28 @ 0x4e68b0), not an attacker: the attacker (+0x178) is
+    // written only by the damage legs below, and by the drain afterwards when
+    // the victim still has none [orig: @0x4EB319 / @0x4EB593 / @0x4EB86F].
 
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
     if (ammo == nullptr) return;
@@ -437,42 +510,52 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // Blast armor class gate [orig: @ 0x4e69b0 — ammo penetration_kz (+200)
     // must reach def+0x192].
     if (traits != nullptr && ammo->penetration_kz < traits->armor_blast) damage = 0;
-    // Already dying [orig: the +0x124 gate @ 0x4e69b8].
-    if (target.health <= 0) damage = 0;
-    // Occupant damage scale for vehicles (Entity_ApplyOccupantDamageScale
-    // @ 0x4e5a50) — internals unwitnessed; occupants take their own pool-0
-    // damage from the same sweep (tracked §24).
+    // The damage-disabled word (entity+0x124: a player's spawn protection or
+    // dead latch, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
+    // [esi+124h], 0` @ 0x4e69b8..0x4e69c3].
+    if (target.damage_state != 0) damage = 0;
+    // A vehicle's occupants reduce what reaches its hull
+    // [orig: ItemDef type 1 @ 0x4e69c7 -> Entity_ApplyOccupantDamageScale
+    //  @ 0x4e69d3].
+    damage = apply_vehicle_occupant_scale(world, target, damage);
     // NoDie clamps to health-1 [orig: @ 0x4e69e9].
     if (traits != nullptr && traits->no_die && damage >= target.health)
         damage = target.health - 1;
-    if (damage <= 0) return;
+    // The kill credit this victim takes: the dead-source walk, run from the
+    // entry's source when the leg stores it [orig: @ 0x4e6b0c..0x4e6b52 /
+    // @ 0x4e6f13..0x4e6f59].
+    const EntityHandle attacker = resolve_attacker_chain(world, e.owner);
 
     if (target.kind == EntityKind::Organic) {
         // The person path [orig: @ 0x4e6a01-0x4e6c5d]: the death-anim selection
-        // at damage time — bone hardcoded 1 (torso @ 0x4e6ac7), quadrant from
-        // the blast direction vs the victim's heading, cause 2, or a ~25% roll
-        // for 3 taken ONLY when the surface distance lies in [4.0, 8.0) u (the
-        // PRNG draw happens only in that band) [orig: @ 0x4e6a61-0x4e6aa0], 4
-        // when the source kz is Slash (type 7 @ 0x4e6abb).
+        // runs for every person the callback reaches, damage 0 included —
+        // bone hardcoded 1 (torso @ 0x4e6ac7), quadrant from the blast
+        // direction vs the victim's heading, cause 2, or a ~25% roll for 3
+        // taken ONLY when the surface distance lies in [4.0, 8.0) u (the PRNG
+        // draw happens only in that band) [orig: @ 0x4e6a61-0x4e6aa0], 4 when
+        // the source kz is Slash (type 7 @ 0x4e6abb). Only then does positive
+        // damage on a live body take the leg [orig: `test edi, edi; jle` @
+        // 0x4e6ad6, Flags & 2 @ 0x4e6ae1, Health > 0 @ 0x4e6aeb..0x4e6aee].
+        // The quadrant reads the bearing from the victim toward the blast
+        // point, biased by 0x1FFFFFFF, so a blast in front is quadrant 0
+        // [orig: the entry-minus-target fpatan @ 0x4e6a07..0x4e6a2e,
+        //  `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @ 0x4e6a58..0x4e6a5e].
         const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
-        const Vec3 from_blast = vec_sub(target.position, e.pos);
-        const int quadrant =
-                death_quadrant_from_round(heading_bam, -from_blast.x, -from_blast.y);
+        const int quadrant = approach_quadrant(heading_bam,
+                io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
+                io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)), 0x1FFFFFFFu);
         int cause = death_cause::kExplosive;
         if (d16 >= 0x40000 && d16 < 0x80000)
             cause = (death_rand16(world) < 0x4000) ? death_cause::kFire : death_cause::kExplosive;
         if (e.type == ammo_kz::kSlash) cause = death_cause::kGeneric;
         const int32_t before = target.health;
-        if ((target.engine_flags & kEntityFlagDead) == 0 && before > 0) {
+        if (damage > 0 && (target.engine_flags & kEntityFlagDead) == 0 && before > 0) {
             if (damage < before)
                 target.health = before - damage;
             else
                 target.health = 0;
-            // The staging needs applied damage as well as a live body (the
-            // `damage <= 0` return above already guarantees it here)
-            // [orig: Entity_ApplyWeaponDamage @0x4e6aee].
-            if (damage > 0)
-                target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
+            target.last_attacker = attacker; // [orig: +0x178 @ 0x4e6b11]
+            target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
@@ -641,11 +724,9 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         ++events.explosions_processed;
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
         if (ammo == nullptr) continue;
-        // Type dispatch [orig: the switch @ 0x4eadc6]: 2/5/6/7 -> weapon
-        // damage; 1 (vehicle ram) is a cited stub at this altitude (the ram
-        // rides the vehicle pass); 3 (the medic kit) routes to the medic
-        // interaction below.
-        if (e.type == ammo_kz::kKnife) continue;
+        // Type dispatch [orig: the switch @ 0x4eadc6]: 3 (the medic kit) routes
+        // to the medic interaction below; every other type picks its per-victim
+        // callback and radius further down.
         if (e.type == ammo_kz::kMedic) {
             // The kz-type-3 callback is GameEvent_HandleMedicInteraction only
             // when the owner's class carries the Medic charattr (AnimMap slot
@@ -677,12 +758,58 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
             }
             continue;
         }
-        float blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eadcd]
+        // The callback and radius each type takes [orig: the jumptable
+        // @ 0x4eadc6]: 2/5/6/7 the weapon damage at kz_maxradius (@ 0x4eadcd);
+        // 1 the knife callback at kz_maxradius, one unit wider when the
+        // source's class carries KnifeBonus (@ 0x4eae0c..0x4eae34); 4 the
+        // weapon damage at the source's bound radius when there is a source
+        // (@ 0x4eae3c..0x4eae52); any other type a no-op callback at radius 0
+        // (@ 0x4eae56). A nonzero override replaces the radius
+        // (@ 0x4eae64..0x4eae80) and a zero radius drops the whole entry, the
+        // kill switch for zero-radius bullet rows (@ 0x4eae84).
+        const Entity *source = world.registry.get(e.owner);
+        KillZoneCallback callback = KillZoneCallback::None;
+        float blast_radius = 0.0f;
+        switch (e.type) {
+            case ammo_kz::kKnife:
+                callback = KillZoneCallback::Melee;
+                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eae0c]
+                if (source != nullptr &&
+                        world.tables.class_has_attribute(
+                                source->player_class, MissionTables::kCharAttrKnifeBonus))
+                    blast_radius += 1.0f; // [orig: add edi, 10000h @ 0x4eae34]
+                break;
+            case ammo_kz::kStandard:
+            case ammo_kz::kC4:
+            case ammo_kz::kBullets:
+            case ammo_kz::kSlash:
+                callback = KillZoneCallback::WeaponDamage;
+                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eadcd]
+                break;
+            case ammo_kz::kRadiusBlast:
+                callback = KillZoneCallback::WeaponDamage;
+                blast_radius = source != nullptr ? source->bound_radius
+                                                 : ammo->kz_maxradius; // [orig: @ 0x4eae52]
+                break;
+            default:
+                break;
+        }
         if (e.radius_override != 0.0f)
             blast_radius = e.radius_override;    // [orig: the E+0x2C float @ 0x4eae64]
-        if (blast_radius <= 0.0f || ammo->kz_damage == 0) continue;
+        if (blast_radius <= 0.0f) continue;
         const int32_t cone_half = ammo->kz_pieslice_bam; // [orig: E+28 -> +60 @ 0x4eadad]
         const EntityHandle resolved = resolve_attacker_chain(world, e.owner);
+        // One victim's callback, then the drain's own attacker store when the
+        // callback left the victim without one [orig: `call [esp+var_9C]`
+        // @ 0x4eb312 / @ 0x4eb58c / @ 0x4eb868, the +0x178 fallbacks
+        // @ 0x4eb319..0x4eb329 / @ 0x4eb593..0x4eb5a4 / @ 0x4eb86f..0x4eb880].
+        const auto run_callback = [&](Entity &t, float surface) {
+            if (callback == KillZoneCallback::WeaponDamage)
+                entity_apply_weapon_damage(world, collision, t, e, surface, blast_radius);
+            else if (callback == KillZoneCallback::Melee)
+                entity_apply_melee_damage(world, t, e);
+            if (!t.last_attacker.valid()) t.last_attacker = resolved;
+        };
 
         // --- pool 0, organics [orig: @ 0x4eaeda-0x4eb32c] — skipped when the
         // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. ---
@@ -743,32 +870,51 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                                          t->handle, 0.0f, /*query_parent_cleared=*/true))
                         continue;
                 }
-                // Burn reacts before the damage callback's armor/team gates.
-                // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
-                // Its attached hit emitter [orig: @0x4EB292] remains a separate
-                // explosion-presentation gap recorded in world-wac-ai-re §24.
-                if (t->item_type == 3)
-                    apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                // A victim whose damage-disabled word (entity+0x124: spawn
+                // protection or the dead latch) is set skips the burn, the hit
+                // emitter and every later leg [orig: `cmp [edi+124h], ebx; jnz`
+                // @ 0x4eb17e..0x4eb18b].
+                if (t->damage_state == 0) {
+                    // Burn reacts before the damage callback's armor/team gates.
+                    // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
+                    // Its attached hit emitter [orig: @0x4EB292] remains a separate
+                    // explosion-presentation gap recorded in world-wac-ai-re §24.
+                    if (t->item_type == 3)
+                        apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                    // An entry that deals no damage here stops after the burn:
+                    // a zero kz_damage, or any entry on a non-authority session
+                    // peer, where the damage read returns 0; the medic kit is
+                    // the exception [orig: Entity_GetNetIdIfAuthority @0x4E4010
+                    // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
+                    if (kz_damage_if_authority(world, *ammo) == 0) continue;
+                }
                 // A LIVE player body inside the blast arms the local damage
                 // feedback a SECOND time, ahead of the damage callback: retail
                 // gates on Flags & 0x100 (Player) && !(Flags & 2) (alive), the
-                // victim's unwitnessed +0x124 word being zero (the same word
-                // that gates the damage callback below, so our port's implicit
-                // reading of it as always-zero carries here), the victim being
-                // the local player, and the entry's kz type not being 3.
-                // [orig: @0x4eb2b6..0x4eb2df -> Player_OnDamageReceived @0x4dd880]
+                // victim's +0x124 word being zero, the victim being the local
+                // player, and the entry's kz type not being 3. The kill event
+                // the same leg calls next returns at its null attacker handle.
+                // [orig: @0x4eb2b6..0x4eb2df -> Player_OnDamageReceived @0x4dd880;
+                //  Score_ProcessNetworkKillEvent @0x4eb2f2 -> @0x4fd49d]
                 if (((t->flags | t->engine_flags) & kEntityFlagPlayer) != 0 &&
                         (t->engine_flags & kEntityFlagDead) == 0 &&
+                        t->damage_state == 0 &&
                         t->handle == world.cached.local_player &&
                         e.type != ammo_kz::kMedic)
                     player_on_damage_received(world);
-                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
+                // The damage-disabled word keeps the callback away entirely
+                // [orig: `cmp [edi+124h], ebx; jnz` @ 0x4eb2fa..0x4eb300].
+                if (t->damage_state != 0) continue;
+                run_callback(*t, surface);
             }
         }
 
         // --- pool 1, movable items [orig: @ 0x4eb334-0x4eb5a8] — NoMItems
         // gate [orig: & 0x100000 @ 0x4eb378]. Types 1/3 never sweep items
-        // [orig: @ 0x4eb343]. ---
+        // [orig: @ 0x4eb337..0x4eb343], and nor does an entry that deals no
+        // damage (a zero kz_damage, or a non-authority session peer)
+        // [orig: @ 0x4eb349..0x4eb36c] — pool 2 included.
+        if (e.type == ammo_kz::kKnife || kz_damage_if_authority(world, *ammo) == 0) continue;
         if ((ammo->flags & kAmmoFlagNoMItems) == 0) {
             const size_t pool1 = world.registry.pool_capacity(1);
             for (size_t s = 0; s < pool1; ++s) {
@@ -798,7 +944,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     t->death_blast_center = e.pos;
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
-                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
+                run_callback(*t, surface);
             }
         }
 
@@ -830,7 +976,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         world, *t, e.pos, ammo->kz_maxradius, events);
                 if (t->health > 0 && runs_tree_death_body(world, *t))
                     t->death_blast_center = e.pos;
-                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
+                run_callback(*t, surface);
             }
         }
     }

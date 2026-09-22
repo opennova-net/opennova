@@ -495,9 +495,9 @@ public:
     void queue_explosion(World &world, const ExplosionEntry &e);
 
     // Drain the queue against the entity pools [orig:
-    // Projectile_ProcessExplosionQueue @ 0x4ead80]. Kill-zone types 2/5/6/7
-    // route to the weapon-damage applicator; 1 (vehicle ram) and 3 (medic) are
-    // cited stubs at this altitude.
+    // Projectile_ProcessExplosionQueue @ 0x4ead80]. Kill-zone types 2/4/5/6/7
+    // route to the weapon-damage applicator, 1 (the knife) to the melee
+    // applicator, 3 to the medic revive; a zero resolved radius drops the entry.
     void process(World &world, CollisionWorld *collision,
                  const terrain::TerrainHeightField *terrain, float water_height,
                  DestructionEvents &events);

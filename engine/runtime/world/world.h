@@ -481,6 +481,7 @@ struct MissionTables {
     //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
     //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
     std::array<uint32_t, 16> class_attribute_flags{};
+    static constexpr uint32_t kCharAttrKnifeBonus = 0x4u;
     static constexpr uint32_t kCharAttrMedic = 0x8u;
     bool class_has_attribute(uint8_t player_class, uint32_t bit) const {
         const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
