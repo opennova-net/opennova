@@ -14,6 +14,8 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -281,8 +283,9 @@ void test_explosion_damage_gates() {
     w.tables.ammo.entries[1].kz_damage = 100;
 
     // Blast armor gate: an ammo whose penetration_kz is below the armor word
-    // zeroes its damage [orig: @0x4e69b0] -- but the last-attacker store precedes
-    // the damage math, so a 0-damage blast still rebinds it [orig: @0x4e68b0].
+    // zeroes its damage [orig: @0x4e69b0] -- but the non-person tail runs for
+    // 0 damage too, so a 0-damage blast still rebinds the attacker
+    // [orig: the tail gates @0x4E6EFD / @0x4E6F0A, the +0x178 store @0x4E6F18].
     b->health = 120;
     b->last_attacker = EntityHandle{};
     ItemDeathTraits armored = barrel_traits();
@@ -3325,7 +3328,473 @@ void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
     CHECK(w.registry.get(h)->section_mask == 2u);
 }
 
+// Queue one entry and drain it.
+void run_blast(World &w, const ExplosionEntry &e) {
+    w.explosions.queue_explosion(w, e);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+}
+
+// A crewed vehicle's hull keeps the blast less its occupant share: 100 at the
+// center with two riders at 0.25 each (capped at 0.5) leaves 50.
+// [orig: Entity_ApplyWeaponDamage — ItemDef type 1 @0x4E69C7 ->
+//  Entity_ApplyOccupantDamageScale @0x4E69D3; Entity_CountMountedEntities
+//  @0x435970]
+void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.item_id = 700;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.health = hull.health_max = 500;
+    hull.bound_radius = 1.0f;
+    hull.damage_reduc_pp = 0.25f;
+    hull.damage_reduc_max = 0.5f;
+    const EntityHandle vehicle = w.registry.spawn(1, hull);
+    for (int i = 0; i < 2; ++i) {
+        Entity rider;
+        rider.kind = EntityKind::Organic;
+        rider.has_item_def = true;
+        rider.item_type = 3;
+        rider.health = rider.health_max = 100;
+        rider.position = Vec3{100.0f + 5.0f * static_cast<float>(i), 0.0f, 0.0f}; // out of reach
+        rider.ground_target = vehicle;
+        w.registry.spawn(0, rider);
+    }
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    CHECK(w.registry.get(vehicle)->health == 500 - 50);
+}
+
+// The victim's damage-disabled word (entity+0x124) zeroes a blast: a death
+// piece (-1) and a spawn-protected player (the 620-tick countdown) keep their
+// health, and the same bodies take the blast once the word clears.
+// [orig: Entity_ApplyWeaponDamage `cmp dword ptr [esi+124h], 0`
+//  @0x4E69B8..0x4E69C3; the drain's pool-0 tests @0x4EB17E..0x4EB18B and
+//  @0x4EB2FA..0x4EB300]
+void test_blast_respects_the_damage_disabled_word() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity piece;
+    piece.kind = EntityKind::Item;
+    piece.item_id = 500;
+    piece.health = piece.health_max = 120;
+    piece.bound_radius = 1.0f;
+    piece.position = Vec3{2.0f, 0.0f, 0.0f};
+    piece.damage_state = -1;
+    const EntityHandle item = w.registry.spawn(1, piece);
+    w.tables.item_death_traits.set(500, barrel_traits());
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type = 3;
+    person.health = person.health_max = 200;
+    person.bound_radius = 0.6f;
+    person.position = Vec3{-2.0f, 0.0f, 0.0f};
+    person.damage_state = 620;
+    const EntityHandle body = w.registry.spawn(0, person);
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health == 120);
+    CHECK(w.registry.get(body)->health == 200);
+    w.registry.get(item)->damage_state = 0;
+    w.registry.get(body)->damage_state = 0;
+    run_blast(w, e);
+    CHECK(w.registry.get(item)->health < 120);
+    CHECK(w.registry.get(body)->health < 200);
+}
+
+// An armor-blocked blast (0 damage) still runs the non-person leg: the
+// flagged sections break and the tail stores the attacker. No damage test
+// sits ahead of the person/item split.
+// [orig: Entity_ApplyWeaponDamage — the split @0x4E69FD, the section pass
+//  @0x4E6C5E..0x4E6E6B, the tail gates @0x4E6EFD / @0x4E6F0A, the store
+//  @0x4E6F18]
+void test_zero_damage_blast_still_runs_the_item_leg() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 2);
+    w.registry.configure_pool(2, 4);
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.health = 100;
+    shooter.position = Vec3{200.0f, 0.0f, 0.0f};
+    const EntityHandle owner = w.registry.spawn(0, shooter);
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 510;
+    seed.item_type = 5;
+    seed.has_item_def = true;
+    seed.health = seed.health_max = 1000;
+    seed.bound_radius = 20;
+    seed.position = {20, 30, 10};
+    const EntityHandle h = w.registry.spawn(2, seed);
+    ItemDeathTraits armored = barrel_traits();
+    armored.armor_blast = 60; // > penetration_kz 50: the damage reads 0
+    w.tables.item_death_traits.set(510, armored);
+    CollisionModel model;
+    model.sections.resize(2);
+    for (auto &sec : model.sections) {
+        sec.flags = 2;
+        sec.authored_bounds = true;
+        sec.radius = 65536;
+    }
+    model.sections[0].flags = 0;
+    CollisionWorld collision;
+    collision.assign_entity(h, collision.add_model(std::move(model)));
+    collision.build_initial_tables(w);
+    w.collision = &collision;
+    ExplosionEntry blast;
+    blast.type = ammo_kz::kStandard;
+    blast.ammo_index = 1;
+    blast.pos = seed.position;
+    blast.owner = owner;
+    w.explosions.queue_explosion(w, blast);
+    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    const Entity *building = w.registry.get(h);
+    CHECK(building->health == 1000);
+    CHECK(building->section_mask == 2u);
+    CHECK(building->last_attacker == owner);
+}
+
+// The person leg selects the blast death anim for every victim the callback
+// reaches, 0 damage included, so a victim 4..8 u out draws the fire roll
+// whether or not its armor stops the damage.
+// [orig: Entity_ApplyWeaponDamage — the band test and the PRNG draw
+//  @0x4E6A61..0x4E6AA0 ahead of `test edi, edi; jle` @0x4E6AD6]
+void test_zero_damage_person_blast_still_draws_the_cause_roll() {
+    const auto rng_after = [](bool armored) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        w.registry.configure_pool(0, 2);
+        Entity person;
+        person.kind = EntityKind::Organic;
+        person.has_item_def = true;
+        person.item_type = 3;
+        person.item_id = 600;
+        person.health = person.health_max = 1000;
+        person.bound_radius = 0.6f;
+        person.position = Vec3{5.6f, 0.0f, 0.0f}; // surface distance 5.0
+        const EntityHandle body = w.registry.spawn(0, person);
+        if (armored) {
+            ItemDeathTraits traits;
+            traits.armor_blast = 60; // > penetration_kz 50
+            w.tables.item_death_traits.set(600, traits);
+        }
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.type = ammo_kz::kStandard;
+        e.ammo_index = 1;
+        run_blast(w, e);
+        CHECK((w.registry.get(body)->health == 1000) == armored);
+        return w.destruction_rng.state;
+    };
+    DestructionRng one_draw;
+    one_draw.next16();
+    CHECK(rng_after(false) == one_draw.state);
+    CHECK(rng_after(true) == one_draw.state);
+}
+
+// The person quadrant reads the bearing from the victim toward the blast
+// point: a blast in front of the victim is quadrant 0.
+// [orig: Entity_ApplyWeaponDamage — the entry-minus-target fpatan
+//  @0x4E6A07..0x4E6A2E, `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @0x4E6A58..0x4E6A5E]
+void test_person_blast_quadrant_faces_the_blast() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 2);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type = 3;
+    person.health = person.health_max = 1000;
+    person.bound_radius = 0.6f;
+    person.yaw = 90; // engine heading 0: facing +x
+    const EntityHandle body = w.registry.spawn(0, person);
+    ExplosionEntry e;
+    e.pos = Vec3{1.0f, 0.0f, 0.0f}; // in front, surface 0.4 (no fire roll)
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    const int front = compute_death_anim_state(1, 0, death_cause::kExplosive);
+    CHECK(front != compute_death_anim_state(1, 2, death_cause::kExplosive));
+    CHECK(w.registry.get(body)->health == 900);
+    CHECK(w.registry.get(body)->death_anim_state == front);
+}
+
+// A kill zone that deals no damage still reaches the organic burn: the
+// drain's damage read sits after it, per victim, not ahead of the entry.
+// [orig: Projectile_ProcessExplosionQueue — the burn
+//  Entity_ApplyCollisionForce @0x4EB1D2 ahead of the damage read
+//  Entity_GetNetIdIfAuthority @0x4EB2A0]
+void test_zero_damage_kill_zone_still_burns() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.tables.ammo.entries[1].kz_damage = 0;
+    w.tables.ammo.entries[1].secondary_anim = 1;
+    w.registry.configure_pool(0, 2);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type = 3;
+    person.health = person.health_max = 100;
+    person.bound_radius = 0.6f;
+    person.position = Vec3{2.0f, 0.0f, 0.0f};
+    const EntityHandle body = w.registry.spawn(0, person);
+    w.ai.attach(body);
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    run_blast(w, e);
+    CHECK(w.ai.for_handle(body) != nullptr && w.ai.for_handle(body)->inf.burn_state == 1);
+    CHECK(w.registry.get(body)->health == 100);
+}
+
+// Same-team immunity compares the entry's SOURCE entity, not the kill credit
+// the dead-source walk resolves: a dead friendly truck's blast spares its
+// team's protected items even when an enemy killed the truck, and the drain
+// then stores the resolved credit on the untouched victim.
+// [orig: Entity_ApplyWeaponDamage `mov eax, [ebx+20h]` and the team bytes
+//  @0x4E686E..0x4E6881, the attrib 0x8000 test @0x4E6886; the drain's
+//  +0x178 fallback @0x4EB593..0x4EB5A4]
+void test_team_immunity_compares_the_blast_source() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity enemy;
+    enemy.kind = EntityKind::Organic;
+    enemy.health = 100;
+    enemy.team = 2;
+    enemy.position = Vec3{200.0f, 0.0f, 0.0f};
+    const EntityHandle killer = w.registry.spawn(0, enemy);
+    Entity truck;
+    truck.kind = EntityKind::Item;
+    truck.health = 0;
+    truck.engine_flags |= kEntityFlagDead;
+    truck.team = 1;
+    truck.last_attacker = killer;
+    truck.position = Vec3{300.0f, 0.0f, 0.0f};
+    const EntityHandle source = w.registry.spawn(1, truck);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.item_id = 520;
+    crate.health = crate.health_max = 120;
+    crate.team = 1;
+    crate.bound_radius = 1.0f;
+    crate.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle protected_item = w.registry.spawn(1, crate);
+    ItemDeathTraits traits = barrel_traits();
+    traits.team_protect = true;
+    w.tables.item_death_traits.set(520, traits);
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    e.owner = source;
+    run_blast(w, e);
+    CHECK(w.registry.get(protected_item)->health == 120);
+    CHECK(w.registry.get(protected_item)->last_attacker == killer);
+}
+
+// A hop of the dead-source walk takes the link as stored: a dead source
+// nobody damaged credits no one, not itself.
+// [orig: Projectile_ProcessExplosionQueue — the stores @0x4EAEB3 /
+//  @0x4EAECE run ahead of the null branch; the applicator's walk
+//  @0x4E6F13..0x4E6F59]
+void test_dead_unattributed_source_credits_no_one() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity dead;
+    dead.kind = EntityKind::Item;
+    dead.health = 0;
+    dead.engine_flags |= kEntityFlagDead;
+    dead.position = Vec3{300.0f, 0.0f, 0.0f};
+    const EntityHandle source = w.registry.spawn(1, dead);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type = 3;
+    person.health = person.health_max = 40;
+    person.bound_radius = 0.6f;
+    const EntityHandle body = w.registry.spawn(0, person);
+    Entity barrel;
+    barrel.kind = EntityKind::Item;
+    barrel.item_id = 500;
+    barrel.health = barrel.health_max = 40;
+    barrel.bound_radius = 1.0f;
+    barrel.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle item = w.registry.spawn(1, barrel);
+    w.tables.item_death_traits.set(500, barrel_traits());
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    e.owner = source;
+    run_blast(w, e);
+    int body_deaths = 0;
+    int item_deaths = 0;
+    for (const RoundDeath &death : w.round_sim.deaths) {
+        if (death.victim == body) {
+            ++body_deaths;
+            CHECK(!death.killer.valid());
+        }
+        if (death.victim == item) {
+            ++item_deaths;
+            CHECK(!death.killer.valid());
+        }
+    }
+    CHECK(body_deaths == 1 && item_deaths == 1);
+    CHECK(!w.registry.get(body)->last_attacker.valid());
+    CHECK(!w.registry.get(item)->last_attacker.valid());
+}
+
+// A session peer without the authority applies no blast: its damage read
+// returns 0, which stops the drain after the burn and skips the item pools,
+// and the applicator returns at its session head.
+// [orig: Entity_GetNetIdIfAuthority @0x4E4010, read @0x4EB2A0 / @0x4EB349;
+//  Entity_ApplyWeaponDamage @0x4E683A..0x4E684A]
+void test_session_peer_without_authority_applies_no_blast() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 2);
+    w.registry.configure_pool(1, 2);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type = 3;
+    person.health = person.health_max = 200;
+    person.bound_radius = 0.6f;
+    person.position = Vec3{-1.0f, 0.0f, 0.0f};
+    const EntityHandle body = w.registry.spawn(0, person);
+    Entity barrel;
+    barrel.kind = EntityKind::Item;
+    barrel.item_id = 500;
+    barrel.health = barrel.health_max = 120;
+    barrel.bound_radius = 1.0f;
+    barrel.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle item = w.registry.spawn(1, barrel);
+    w.tables.item_death_traits.set(500, barrel_traits());
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    w.rules.mp_session = true;
+    w.rules.logic_authority = false;
+    run_blast(w, e);
+    CHECK(w.registry.get(body)->health == 200);
+    CHECK(w.registry.get(item)->health == 120);
+    w.rules.logic_authority = true;
+    run_blast(w, e);
+    CHECK(w.registry.get(body)->health < 200);
+    CHECK(w.registry.get(item)->health < 120);
+}
+
+// The kind-1 (knife) kill zone: a live person other than the source inside
+// kz_maxradius takes the full kz_damage as a signed-word subtraction with the
+// knife cause bit, and the kill event credits the source; items are never
+// swept, and a KnifeBonus class reaches one unit further.
+// [orig: Projectile_ProcessExplosionQueue — jumptable @0x4EADC6 case 1
+//  @0x4EAE0C..0x4EAE34, the item-pool skip @0x4EB337..0x4EB343;
+//  Entity_ApplyVehicleCollisionDamage @0x4E6620]
+void test_knife_kill_zone() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 2);
+    w.tables.ammo.entries.resize(2);
+    AmmoTableEntry &knife = w.tables.ammo.entries[1];
+    knife.name = "KNIFE";
+    knife.valid = true;
+    knife.kztype = ammo_kz::kKnife;
+    knife.kz_damage = 150;
+    knife.kz_maxradius = 1.5f;
+    Entity attacker_seed;
+    attacker_seed.kind = EntityKind::Organic;
+    attacker_seed.has_item_def = true;
+    attacker_seed.item_type = 3;
+    attacker_seed.health = 100;
+    attacker_seed.bound_radius = 0.6f;
+    attacker_seed.player_class = 1;
+    attacker_seed.team = 1;
+    const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
+    Entity victim_seed = attacker_seed;
+    victim_seed.team = 2;
+    victim_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+    victim_seed.yaw = 270; // engine heading 0x80000000: facing the attacker
+    const EntityHandle victim = w.registry.spawn(0, victim_seed);
+    Entity far_seed = victim_seed;
+    far_seed.position = Vec3{-2.6f, 0.0f, 0.0f}; // surface 2.0: past 1.5, inside 2.5
+    const EntityHandle far_victim = w.registry.spawn(0, far_seed);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.item_id = 500;
+    crate.health = crate.health_max = 120;
+    crate.bound_radius = 1.0f;
+    crate.position = Vec3{0.5f, 0.0f, 0.0f};
+    const EntityHandle item = w.registry.spawn(1, crate);
+    w.tables.item_death_traits.set(500, barrel_traits());
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kKnife;
+    e.ammo_index = 1;
+    e.owner = attacker;
+    run_blast(w, e);
+    const Entity *v = w.registry.get(victim);
+    CHECK(v->health == -50);
+    CHECK((v->cause_flags & kDamageFlagCollision) != 0);
+    CHECK(v->last_attacker == attacker);
+    CHECK(v->death_anim_state ==
+            compute_death_anim_state(kCollisionDeathBone, 0, kCollisionDeathCause));
+    bool credited = false;
+    for (const RoundDeath &death : w.round_sim.deaths)
+        if (death.victim == victim && death.killer == attacker &&
+                death.event_flags == kDamageFlagCollision)
+            credited = true;
+    CHECK(credited);
+    CHECK(w.registry.get(attacker)->health == 100);
+    CHECK(w.registry.get(far_victim)->health == 100);
+    CHECK(w.registry.get(item)->health == 120);
+    w.tables.class_attribute_flags[0] = MissionTables::kCharAttrKnifeBonus;
+    run_blast(w, e);
+    CHECK(w.registry.get(far_victim)->health == -50);
+    CHECK(w.registry.get(item)->health == 120);
+}
+
 int main() {
+    test_blast_on_a_crewed_vehicle_scales_by_occupants();
+    test_blast_respects_the_damage_disabled_word();
+    test_zero_damage_blast_still_runs_the_item_leg();
+    test_zero_damage_person_blast_still_draws_the_cause_roll();
+    test_person_blast_quadrant_faces_the_blast();
+    test_zero_damage_kill_zone_still_burns();
+    test_team_immunity_compares_the_blast_source();
+    test_dead_unattributed_source_credits_no_one();
+    test_session_peer_without_authority_applies_no_blast();
+    test_knife_kill_zone();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
