@@ -33,6 +33,22 @@ float PlayerLocalView::get_camera_roll_deg() const {
 	return value_.camera_pose_valid ? value_.camera.roll_deg : 0.0f;
 }
 
+Vector3 PlayerLocalView::get_inset_camera_eye() const {
+	return value_.camera_pose_valid ? mission_to_godot(value_.inset_camera.eye) : Vector3();
+}
+
+float PlayerLocalView::get_inset_camera_yaw_deg() const {
+	return value_.camera_pose_valid ? value_.inset_camera.yaw_deg : 0.0f;
+}
+
+float PlayerLocalView::get_inset_camera_pitch_deg() const {
+	return value_.camera_pose_valid ? value_.inset_camera.pitch_deg : 0.0f;
+}
+
+float PlayerLocalView::get_inset_camera_roll_deg() const {
+	return value_.camera_pose_valid ? value_.inset_camera.roll_deg : 0.0f;
+}
+
 int PlayerLocalView::get_virtual_display_carrier() const {
 	return value_.virtual_display_carrier.packed;
 }
@@ -88,6 +104,11 @@ void PlayerLocalView::_bind_methods() {
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_yaw_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_pitch_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_roll_deg)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, inset_scope_active)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::VECTOR3, inset_camera_eye)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, inset_camera_yaw_deg)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, inset_camera_pitch_deg)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, inset_camera_roll_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, virtual_display_active)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, virtual_display_carrier)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::STRING, virtual_display_model)

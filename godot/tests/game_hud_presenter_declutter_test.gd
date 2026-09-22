@@ -305,10 +305,9 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 			"without a live target the HUD projects through the camera's own projection")
 
 
-# Exercise the live GameWorld -> PlayerLocalView -> presenter -> draw-list path.
-# Inset belongs to the equipped weapon, including on foot; a seat proxy loses it.
-# [orig: Player_IsVehicleHasAutoAim @0x4dccb0; HUD_DrawCrosshair @0x592afa]
-func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> void:
+# The staged root with two scoped copies of the M4 row, WPN_HUD_INSET (the
+# Inset flag) and WPN_HUD_PLAIN, over a synthetic white 8x8 reticle atlas.
+func _stage_inset_weapons() -> void:
 	_staged_dir = HudFixture.stage_root(true)
 	var source := FileAccess.get_file_as_string(_staged_dir.path_join("weapon.def"))
 	var start := source.find('weapon "WPN_M4AUTO"')
@@ -335,6 +334,13 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 	var texture := FileAccess.open(_staged_dir.path_join("cross01.tga"), FileAccess.WRITE)
 	texture.store_buffer(bytes)
 	texture.close()
+
+
+# Exercise the live GameWorld -> PlayerLocalView -> presenter -> draw-list path.
+# Inset belongs to the equipped weapon, including on foot; a seat proxy loses it.
+# [orig: Player_IsVehicleHasAutoAim @0x4dccb0; HUD_DrawCrosshair @0x592afa]
+func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> void:
+	_stage_inset_weapons()
 	var world := WorldFixture.boot_minimal(self, _staged_dir)
 	world.set_process(false)
 	var sim := world.get_sim()
@@ -481,6 +487,60 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 	presenter.teardown()
 	assert_null(effects.get_second_scene_camera(),
 			"HUD teardown leaves the renderer no camera of a freed overlay")
+
+
+# The Inset camera stamps through the gameplay camera's helper: its basis is
+# built from the Inset's own composed angles, never looked at from its far
+# eye, so the magnified view keeps its direction hundreds of units from the
+# origin (the tank ranges; docs/world/tank-parity-re.md D-VEH-5).
+func test_inset_camera_direction_keeps_precision_far_from_origin() -> void:
+	_stage_inset_weapons()
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	world.set_process(false)
+	var sim := world.get_sim()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.make_current()
+	var player: LocalPlayerPresenter = add_child_autofree(LocalPlayerPresenter.new())
+	player.setup(world, camera, null, ControlsModel.new())
+	var presenter: GameHudPresenter = add_child_autofree(GameHudPresenter.new())
+	presenter.setup(world, player, null)
+	presenter.ensure_game_hud()
+	presenter.set_hud_detail_level(0)
+	var hud := presenter.get_game_hud()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	hud.size = Vector2(1024, 768)
+	# Settle on the fixture terrain first: the airborne ADS refusal would
+	# keep the optic down.
+	for _i in range(90):
+		sim.step()
+	assert_true(world.set_local_player_weapon_by_name("WPN_HUD_INSET"))
+	for _i in range(30):
+		sim.step()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(30):
+		sim.step()
+	var scope := hud.get_node("InsetScope") as HudInsetScope
+	for distance in [800.0, 8192.0]:
+		for offset in [0.0, 0.03125, 0.0625]:
+			assert_eq(sim.debug_teleport_local_player(
+					Vector3(distance + offset, -distance, 10.0), 123.456, 7.891), OK)
+			player.after_world_tick()
+			presenter.tick()
+			var view := player.presented_view()
+			assert_true(view.inset_scope_active, "the Inset optic stays raised")
+			assert_true(scope.is_scope_active(), "the HUD renders the Inset pass")
+			if not scope.is_scope_active():
+				break
+			var inset_camera := scope.get_render_viewport().get_camera_3d()
+			assert_almost_eq((inset_camera.global_position - view.inset_camera_eye).length(),
+					0.0, 0.001, "the Inset camera sits at its composed eye")
+			var expected := Simulation.presentation_forward(
+					view.inset_camera_yaw_deg, view.inset_camera_pitch_deg)
+			assert_lt((-inset_camera.global_basis.z - expected).length(), 0.000001,
+					"the Inset camera's direction is independent of world-coordinate magnitude")
+	presenter.teardown()
+	player.teardown()
 
 
 func test_hud_uses_the_presented_camera_frame() -> void:

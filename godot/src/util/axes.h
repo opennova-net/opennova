@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/env/env.h>
@@ -74,6 +75,23 @@ inline Basis bms_to_godot_basis(const Vector3 &rot_deg) {
 					static_cast<float>(rot_deg.z));
 	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
 			Vector3(b.z.x, b.z.y, b.z.z));
+}
+
+// The Godot camera transform of a composed mission view: eye (Godot space)
+// and mission-euler yaw / pitch / roll in degrees. The basis is the engine's
+// view matrix Rz(90 - yaw) * Ry(-pitch) * Rx(roll) through the same BMS
+// converter the entities place with, turned a half circle about Y because a
+// Godot camera looks down -Z where the converter's model faces +Z. Built
+// straight from the angles — never a look-at from the eye — it keeps every
+// direction bit at any distance from the origin, has no pole looking
+// straight up or down, and carries the roll in the one construction (the
+// hull and its cockpit bank through the same matrix). Every gameplay camera
+// the local view drives stamps through this one helper.
+inline Transform3D mission_view_transform(const Vector3 &eye, float yaw_deg, float pitch_deg,
+		float roll_deg) {
+	const Basis model = bms_to_godot_basis(Vector3(pitch_deg, yaw_deg, roll_deg));
+	return Transform3D(Basis(-model.get_column(0), model.get_column(1), -model.get_column(2)),
+			eye);
 }
 
 } // namespace godot
