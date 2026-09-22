@@ -14,6 +14,7 @@ The 2026-09-22 pass uses read-only disassembly; no IDA renames were made.
 | Tank support and free-fall fit | **MATCHING (behavioral proof)** for merged support, sink resets and airborne corner correction | Six instruction ranges below; red/green `vehicle_followups` cases on authority and client state; existing `vehicle_suspension`, `ground_conform` |
 | Motor, traction and track channels | **MATCHING (read-only grill)** within the existing motor record's scope | `vehicle_motor`, `vehicle_part_anim`; [family motor and traction witnesses](vehicle-client-movers-re.md); this pass also rechecked track phase before the velocity solve at `@ 0x489F6E` |
 | Mounted camera and Godot transform | host code / not grillable at the Godot boundary; native pose uses witnessed camera rules | `local_player_view`, `player_view`, `vehicle_attachments`, `emplaced_gun_channel`; `local_player_presenter_test.gd` 19 tests / 1,668 assertions, including six far-origin orientations |
+| Optical Distance text | **MATCHING (behavioral proof)** for installed Win32 integer formats | D-HUD-30 in the [HUD record](../interface/hud-re.md); emitted-glyph regressions for scope and mortar, including `%ld`, plus the 1000m boundary |
 | HUD camera snapshot | host code / not grillable; **behavioral proof** of one shared displayed context | `game_hud_presenter_declutter_test.gd` 8 tests / 164 assertions; the new test fails before the change and passes afterward |
 | Seats, cannon/alternate weapon, roof gun, optics and panel | **MATCHING (behavioral proof)** for tested routes | `vehicle_mount`, `vehicle_panel_feed`, `hud_vehicle_panel`, `special_weapon_parity`, `host_role`; installed `tank_parity_test.gd` and `mounted_weapon_switch_test.gd` |
 | Stationary tank pivot sound | **MATCHING (behavioral proof)** for the latch, cue and fourth loop | `vehicle_motor::test_tank_pivot_sound_latch_and_loop`; caller `@ 0x48AAE0`, latch `@ 0x48ACB5`, consumer `@ 0x529887`; D-SND-17 retains the shared sound-ready gate |
@@ -32,6 +33,12 @@ the existing optical route already interpreted positive as increasing
 magnification. The fix belongs in action resolution, preserving remapping and
 keyboard behavior. [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls at
 @ 0x4E1341, @ 0x4E13D5, @ 0x4E13A4 and @ 0x4E1396]
+
+A follow-up checked the Windows mouse-input path as well as injected Godot
+events: downward wheel input widened the displayed vertical FOV from 6.87 to
+9.64 to 16.19 degrees; upward input narrowed it back. The user also confirmed
+correct physical wheel direction in the restarted build. No additional input
+mapping change was needed in that follow-up.
 
 The native regression resolves the actual default binding through the action
 catalog into the optical route, including both bounds and click-on-change.

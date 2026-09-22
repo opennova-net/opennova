@@ -8,6 +8,37 @@
 
 namespace opennova::hud {
 
+// Both scope range and mortar impact labels format STROVER_DIST, whose
+// installed text uses %ld. Retail's 32-bit long is independent of our ABI.
+// [orig: HUD_DrawScopeOverlayDetails @ 0x59E420, sprintf @ 0x59E530;
+// HUD_RenderAllOverlays @ 0x5A8070, sprintf @ 0x5A8972]
+// docs/interface/hud-re.md (D-HUD-30).
+std::string sight_integer_text(const std::string &format, int32_t value) {
+    std::string out;
+    for (size_t i = 0; i < format.size(); ++i) {
+        if (format[i] == '%' && i + 1 < format.size()) {
+            size_t conversion = i + 1;
+            if (format[conversion] == '%') {
+                out += '%';
+                i = conversion;
+                continue;
+            }
+            if (format[conversion] == 'l') ++conversion;
+            if (conversion < format.size()) {
+                const char kind = format[conversion];
+                if (kind == 'd' || kind == 'i' || kind == 'u') {
+                    out += kind == 'u' ? std::to_string(static_cast<uint32_t>(value))
+                                       : std::to_string(value);
+                    i = conversion;
+                    continue;
+                }
+            }
+        }
+        out += format[i];
+    }
+    return out;
+}
+
 int next_sight_scale_index(int index) {
 	// [orig: `mov eax,dword_B76780; add eax,ebx` (ebx = 1) @0x4e0c31..0x4e0c36;
 	//  `cmp eax,3; mov dword_B76780,eax; jl` keeps the sum @0x4e0c38..0x4e0c40;
