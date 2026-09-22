@@ -17,7 +17,9 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/ground_conform.h>
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/vehicle_suspension.h>
 #include <runtime/world/world.h>
 
@@ -171,7 +173,8 @@ void test_arming_keeps_the_spring_state() {
 // Entity_RespawnVehicle's write set.
 void test_respawn_field_set() {
 	Entity::VehicleMotorState m;
-	m.settle_2f0 = m.crashed = m.landing_2ee = m.settled_2f2 = m.wreck_2fc = 1;
+	m.settle_2f0 = m.crashed = m.landing_2ee = m.wreck_2fc = 1;
+	m.grounded = true; // +0x2F2
 	m.crash_request = 1;
 	m.fresh_2f1 = 0;
 	m.airborne_stamp_2f8 = 77;
@@ -179,7 +182,7 @@ void test_respawn_field_set() {
 	m.wheel_comp[0] = 9;
 	vehicle_suspension_respawn(m);
 	CHECK(m.settle_2f0 == 0 && m.crashed == 0 && m.landing_2ee == 0 &&
-					m.settled_2f2 == 0 && m.wreck_2fc == 0 && m.crash_request == 0 &&
+					!m.grounded && m.wreck_2fc == 0 && m.crash_request == 0 &&
 					m.airborne_stamp_2f8 == 0,
 			"the respawn zeroes the latch set");
 	CHECK(m.fresh_2f1 == 1, "and raises +0x2F1");
@@ -262,27 +265,27 @@ void test_crash_tests() {
 		EntityHandle h;
 		Entity &veh = spawn_veh(w, h);
 		w.logic_tick = 100;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
 				"grounded: the window does not open (tick - 0 >= 10)");
 		CHECK(veh.veh.fresh_2f1 == 1, "and a never-airborne fresh row is marked respawned");
 		veh.veh.fresh_2f1 = 0;
 		veh.flags |= kEntityFlagInAir;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.airborne_stamp_2f8 == 100 && veh.veh.crash_request == 1,
 				"airborne: the stamp takes the tick and the window requests");
 		vehicle_suspension_tick_tail(veh, t);
 		w.logic_tick = 109;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1, "nine ticks in: still requesting");
 		vehicle_suspension_tick_tail(veh, t);
 		w.logic_tick = 110;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0 &&
 						veh.veh.fresh_2f1 == 1,
 				"ten ticks: the window closes, the stamp clears, +0x2F1 raises");
 		w.logic_tick = 111;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
 				"a respawned row never re-opens the window");
 	}
@@ -296,10 +299,10 @@ void test_crash_tests() {
 		w.logic_tick = 100;
 		veh.flags |= kEntityFlagInAir;
 		veh.veh.settle_2f0 = 1;
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tank);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tank);
 		CHECK(veh.veh.crash_request == 0 && veh.veh.airborne_stamp_2f8 == 0,
 				"a settling tank does not open the window");
-		w.vehicles.suspension_crash_tests(veh, t, 60000, SuspensionFamily::Tracked);
+		w.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
 		CHECK(veh.veh.crash_request == 1 && veh.veh.airborne_stamp_2f8 == 100,
 				"a settling tracked row does");
 	}
@@ -564,6 +567,140 @@ void test_post_contact_and_tail() {
 
 // The oscillator clamps the def's shock IN PLACE: a row the traits table
 // knows sees its shared entry clamped, as retail clamps the shared def.
+int slot_count(const World &w, int slot) {
+	int count = 0;
+	for (const auto &sound : w.out.slot_sounds)
+		count += sound.slot == slot ? 1 : 0;
+	return count;
+}
+
+// The crashed tank's track strike: one tumble cue per speed band (the soft cue
+// reads the medium latch), the crash byte, and one queued force per wheel
+// stiffened by the forward tilt. A missing input only enters the crash state.
+// [orig: Entity_ApplyWheelSuspensionForces @0x463560; Entity_QueueSuspensionForce
+//  @0x45C0B0; flt_7C6EA8 = -3000.0, flt_7C6EA4 = -1000.0]
+void test_tank_wheel_suspension_forces() {
+	auto heap = make_world(true);
+	World &w = *heap;
+	static constexpr char kProfile[] =
+			"begin \"SP_TankHit\"\n"
+			"  tumble_hithard T_HARD\n"
+			"  tumble_hitmed T_MED\n"
+			"  tumble_hitsoft T_SOFT\n"
+			"end\n";
+	CHECK(w.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1, "profile parses");
+	EntityHandle h;
+	Entity &v = spawn_veh(w, h);
+	VehicleTraits t = sprung_traits();
+	t.family = VehicleFamily::Tank;
+	t.sound_profile = "SP_TankHit";
+	auto &m = v.veh;
+	const CollisionMatrix level = detail::vehicle_euler_basis(0, 0, 0).q22;
+	const int32_t support[4] = { 100, 0, 5, -3 };
+	const auto clear_forces = [&] {
+		for (auto &force : m.chassis_forces) force = {};
+	};
+
+	m.speed = -0x4001;
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &level);
+	CHECK(m.crashed == 1 && m.byte_2ef == 0, "a strike crashes without the sound byte");
+	CHECK(m.tumble_hard_latched && slot_count(w, 47) == 1, "|speed| past 0x4000: the hard cue");
+	CHECK(m.chassis_forces[0].rate == 8000 && m.chassis_forces[0].direction[2] == -65536 &&
+					m.chassis_forces[0].scratch == 3,
+			"a supported wheel presses along -up");
+	CHECK(m.chassis_forces[1].rate == 800 && m.chassis_forces[1].direction[2] == 65536,
+			"a clear wheel lifts along +up");
+	CHECK(m.chassis_forces[3].rate == 800, "a negative depth is clear");
+	clear_forces();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &level);
+	CHECK(slot_count(w, 47) == 1, "the hard latch holds");
+
+	m.speed = 0x3001;
+	clear_forces();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &level);
+	CHECK(m.tumble_med_latched && slot_count(w, 48) == 1, "past 0x3000: the medium cue");
+	m.speed = 0x3000;
+	clear_forces();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &level);
+	CHECK(slot_count(w, 49) == 0, "the medium latch silences the soft cue");
+	m.tumble_med_latched = false;
+	clear_forces();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &level);
+	CHECK(slot_count(w, 49) == 1 && !m.tumble_med_latched, "the soft cue sets no latch");
+
+	// A 30-degree pitch: |forward.z| = 0.5 stiffens both rates.
+	const CollisionMatrix pitched =
+			detail::vehicle_euler_basis(0, bam_from_degrees_wrapped(30.0), 0).q22;
+	clear_forces();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, true, support, &pitched);
+	CHECK(std::abs(m.chassis_forces[0].rate - 9500) <= 1, "8000 - ftol(0.5 * -3000)");
+	CHECK(std::abs(m.chassis_forces[1].rate - 1300) <= 1, "800 - ftol(0.5 * -1000)");
+
+	// The queue skips a retained contact rock and a channel still holding a rate.
+	const int32_t up[3] = { 0, 0, 65536 };
+	clear_forces();
+	m.chassis_contact_active = true;
+	detail::vehicle_queue_suspension_force(m, 0, 5, up);
+	CHECK(m.chassis_forces[0].rate == 0, "a retained rock takes no force");
+	m.chassis_contact_active = false;
+	m.chassis_forces[0].rate = 7;
+	detail::vehicle_queue_suspension_force(m, 0, 5, up);
+	CHECK(m.chassis_forces[0].rate == 7, "a positive rate keeps its channel");
+
+	m.crashed = m.byte_2ef = 0;
+	const size_t sounds = w.out.slot_sounds.size();
+	detail::vehicle_apply_wheel_suspension_forces(w, v, t, false, support, &level);
+	CHECK(m.crashed == 1 && m.byte_2ef == 1 && w.out.slot_sounds.size() == sounds,
+			"a missing input only enters the crash state");
+}
+
+// A pending request enters the latch seed; a client still missing the
+// replicated bit stays unlatched and skips every latched arm, fitting while
+// grounded. [orig: Entity_ComputeSuspensionAndOrientation @0x4698A0,
+//  @0x469933..0x469989 -> @0x469AB0; tracked twin @0x46B1A6..0x46B200 -> @0x46B325]
+void test_fit_seed_skips_latched_arms() {
+	auto heap = make_world(false);
+	World &w = *heap;
+	EntityHandle h;
+	Entity &v = spawn_veh(w, h);
+	v.veh.crash_request = 1;
+	v.veh.chassis_contact_active = true; // the tank's retained rock arm
+	int32_t corners[4][3] = { { 65536, 65536, 0 }, { 65536, -65536, 0 },
+		{ -65536, -65536, 0 }, { -65536, 65536, 0 } };
+	detail::PlatFit fit;
+	CHECK(detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true),
+			"an unlatched client seed still fits on the ground");
+	CHECK(v.veh.crashed == 0, "and the client stays unlatched");
+}
+
+// The crash arm rebuilds its quad from the collision box spans, halved by the
+// quad builder, not from the footprint.
+// [orig: spans @0x469B93..0x469BA5; Entity_ComputeBoundingQuad @0x45B6E0
+//  halving @0x45B8E4..0x45B9A3, call @0x469D54]
+void test_crash_arm_quad_uses_the_box() {
+	auto heap = make_world(true);
+	World &w = *heap;
+	EntityHandle h;
+	Entity &v = spawn_veh(w, h);
+	VehicleTraits t = sprung_traits();
+	t.family = VehicleFamily::Tank;
+	t.box_x_lo = -2 * 65536;
+	t.box_x_hi = 2 * 65536;
+	t.box_y_lo = -65536;
+	t.box_y_hi = 65536;
+	t.foot_x_lo = t.foot_x_hi = t.foot_y_lo = t.foot_y_hi = 0;
+	w.vehicles.traits.set(v.item_id, t);
+	v.veh.crashed = 1;
+	v.veh.byte_2ef = 1;
+	v.veh.speed = 0;
+	v.veh.air_roll_bam = int32_t(0x80000000u); // inverted: the slow arm, not the settle
+	int32_t corners[4][3] = {};
+	detail::PlatFit fit;
+	detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true);
+	CHECK(std::abs(corners[0][0] - 131072) <= 2 && std::abs(std::abs(corners[0][1]) - 65536) <= 2,
+			"the crash quad spans the box");
+}
+
 void test_shock_clamps_the_table_entry_in_place() {
 	auto w_heap = make_world(true);
 	World &w = *w_heap;
@@ -750,6 +887,9 @@ int main() {
 	test_airborne_loop_full_step_and_catch_up();
 	test_post_contact_and_tail();
 	test_shock_clamps_the_table_entry_in_place();
+	test_tank_wheel_suspension_forces();
+	test_fit_seed_skips_latched_arms();
+	test_crash_arm_quad_uses_the_box();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

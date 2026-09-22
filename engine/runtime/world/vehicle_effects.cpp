@@ -121,8 +121,9 @@ void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &t, boo
 }
 
 // The contact latches own wreck-rest burning, independently of the 64-tick
-// critical-health band. Call after sink growth and before the fit selection.
-// [orig: ground @0x47DC68..0x47DF79; tank @0x4780DC..0x4782B9;
+// critical-health band. Call before the fit selection: after the sink growth in
+// every family but the tank, whose block precedes its growth.
+// [orig: ground @0x47DC68..0x47DF79; tank @0x4780CD..0x478381 (growth @0x478510);
 // bike @0x47AC46..0x47AD65; air @0x4807C6..0x480BC7;
 // boat @0x483474..0x48367D]
 void vehicle_crash_state(
@@ -193,7 +194,10 @@ void vehicle_crash_state(
 		vehicle_rebuild_rest_orientation(world, e, false);
 	}
 	m.spring_energy = std::max(0, m.spring_energy);
-	if (!boat && !bike &&
+	// The tank solve has no such clear: its sinks change only at the crashed
+	// clear, the wreck latch, the diagonal reset and the contact tail.
+	// [orig: tank sink stores @0x47810D, @0x4785E6, @0x47902E, @0x47931F]
+	if (!boat && !bike && !tank &&
 			((m.wreck_2fc && up < 0) ||
 					((e.flags & kEntityFlagInAir) != 0 &&
 							to_fixed(e.position.z) < world.env.water_z)))

@@ -1072,11 +1072,19 @@ struct Entity {
 		bool light_sound_latched = false; // brain+0x318 bit 2: lights-on audio edge
 		bool reverse_sound_latched = false; // movement-sound direction bit
 											// [orig: vehicleData+0x318 bit 1]
+		// brain+0x318 bits 6/7: the tank's hard and medium tumble cues. Bit 7
+		// also gates the soft cue; the airborne tail clears both.
+		// [orig: Entity_ApplyWheelSuspensionForces @0x4635D2 / @0x463607;
+		//  Entity_ProcessWheeledVehiclePhysics `and byte ptr [eax+318h], 3Fh` @0x478AAE]
+		bool tumble_hard_latched = false;
+		bool tumble_med_latched = false;
 		uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
-        bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
+        bool grounded = true;         // wheel contact / +0x2F2 [orig: BYTE2(entity->aiRef0) reuse];
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick
-                                      // re-derives it from the terrain clamp
+                                      // re-derives it from the terrain clamp. The same byte
+                                      // gates the tracked extend loop's pre-gate and is
+                                      // cleared by Entity_RespawnVehicle @0x45FFFD.
 
         // --- Joiner-side vehicle prediction (net-re §5.38e, D-NET-196). The
         // wire record apply stages these and the family client mover chases +
@@ -1196,7 +1204,7 @@ struct Entity {
         uint8_t byte_2ef = 0;        // +0x2EF — zeroed at arming
         uint8_t settle_2f0 = 0;      // +0x2F0 — the wreck/settle latch
         uint8_t fresh_2f1 = 0;       // +0x2F1 — 1 after Entity_RespawnVehicle
-        uint8_t settled_2f2 = 0;     // +0x2F2 — settled upright (the sleep path)
+                                     // (+0x2F2 is `grounded` above)
         uint8_t wreck_2fc = 0;       // +0x2FC — wreck-settled / bike fall latch
         uint8_t wheelie_request = 0; // +0x3DD, cleared at the light mover tail
         uint8_t wheelie_active = 0; // +0x3DE, retained through the launch

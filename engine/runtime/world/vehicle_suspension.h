@@ -29,7 +29,8 @@
 //   +0x2F0  settle_2f0          the wreck/settle latch (gates the airborne spring loop)
 //   +0x2F1  fresh_2f1           1 after Entity_RespawnVehicle, 0 after a BMS spawn (memset),
 //                               cleared by the crash tests, re-raised by the client window
-//   +0x2F2  settled_2f2         the sleep path's "settled upright" byte
+//   +0x2F2  grounded            the stability/contact byte the solves and the
+//                               sleep path write (VehicleMotorState::grounded)
 //   +0x2F8  airborne_stamp_2f8  the client crash window's airborne tick stamp
 //   +0x2FC  wreck_2fc           wreck-settled / bike fall-over latch; the light
 //                               chassis helper uses +0x460 as its angular rate
@@ -130,7 +131,7 @@ void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
                                         bool rear_contact, bool any_spine_contact);
 
 // 2. Sink growth [orig: tracked extend loop @0x47db70..0x47dbd1 with the
-//  pre-gate @0x47db76..0x47dba8 (skipped when !settled_2f2 && all sinks == 0
+//  pre-gate @0x47db76..0x47dba8 (skipped when !grounded && all sinks == 0
 //  && up.z < 0); tank @0x478510..0x47852b; bike @0x47ab36..0x47abdc with NO
 //  latch terms and its own +0x2F2 shape]. `latch_gated` selects the
 //  `!crash_request && !crashed` terms (tracked/tank) vs the bike's none.
