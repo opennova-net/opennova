@@ -367,26 +367,33 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		child->emplacement_parent = world::EntityHandle{};
 		child->emplacement_parent_spawn_id = 0;
 		child->ground_target = world::EntityHandle{};
-		if (row->parent_handle != 0xFFFFu) {
-			const world::EntityHandle parent_handle{row->parent_handle};
-			const world::Entity *parent = parent_handle.pool() >= 1 &&
-					parent_handle.pool() <= 3
-					? owned(world, parent_handle)
-					: world.registry.get(parent_handle);
-			if (parent != nullptr) {
-				child->emplacement_parent = parent->handle;
-				child->emplacement_parent_spawn_id = parent->registry_spawn_id;
+		// Only materialized pool-1..3 lifetimes resolve. A pool-0 handle is a wire
+		// identity with no native row here: the joiner's own body L need not sit
+		// at its wire slot, and a remote slot equal to L's handle must not name
+		// it (a retail host's 0x0D can carry parent 0x0000, its own player).
+		const auto resolve = [&](uint16_t packed_handle) -> const world::Entity * {
+			const world::EntityHandle handle{packed_handle};
+			if (packed_handle == 0xFFFFu || handle.pool() < 1 || handle.pool() > 3)
+				return nullptr;
+			return owned(world, handle); // generation-safe: a foreign reuse stays clear
+		};
+		if (const world::Entity *target = resolve(row->target_handle))
+			child->ground_target = target->handle;
+		// The structural carrier a child rides is its TARGET; a parent names it
+		// only when no target is streamed and it is not the pool-0 occupant
+		// back-ref. Classes with their own compact motion never take one (the
+		// ClientState recompose's rule, D-NET-195).
+		const bool compact_class = row->cls == EntityClass::Player ||
+				row->cls == EntityClass::Infantry || row->cls == EntityClass::Vehicle ||
+				row->cls == EntityClass::Guided;
+		if (!compact_class) {
+			const world::Entity *carrier = row->target_handle != 0xFFFFu
+					? resolve(row->target_handle)
+					: resolve(row->parent_handle);
+			if (carrier != nullptr) {
+				child->emplacement_parent = carrier->handle;
+				child->emplacement_parent_spawn_id = carrier->registry_spawn_id;
 			}
-		}
-		if (row->target_handle != 0xFFFFu) {
-			const world::EntityHandle target_handle{row->target_handle};
-			const world::Entity *target = target_handle.pool() >= 1 &&
-					target_handle.pool() <= 3
-					? owned(world, target_handle)
-					: world.registry.get(target_handle);
-			// `owned` makes the assignment generation-safe; a same-handle
-			// foreign replacement leaves it clear.
-			if (target != nullptr) child->ground_target = target->handle;
 		}
 	}
 

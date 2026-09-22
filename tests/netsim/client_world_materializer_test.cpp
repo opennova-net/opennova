@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 
 namespace {
 
@@ -273,6 +274,12 @@ bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 
 bool wire_target_authors_ground_separately_from_parent() {
 	ns::ClientReplicaPipeline pipeline;
+	// The gun is an addeweap (no network callback) child.
+	pipeline.set_item_class_resolver(
+			[](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {
+				if (type == 5009) return nw::EntityClass::NoNetworkCallback;
+				return std::nullopt;
+			});
 	nw::PoolSpawnRecord hull;
 	hull.slot_id = 0x1002;
 	hull.item_type_id = 5008;
@@ -285,10 +292,11 @@ bool wire_target_authors_ground_separately_from_parent() {
 	// The 0x0D parent and target are two relationships: parent is the
 	// occupant/driver BACK-REF for an occupied mount, the separate flag-0x0200
 	// target field authors retail groundEntity (+40) — the DRIVING hull a boat
-	// gun rides. The materializer must never let the parent author the
-	// structural carrier. [orig: NapiNPClientMsg_0x00D @0x432C40 — parent →
-	// occupantEntity (+368) store @0x433289; target → groundEntity
-	// resolve @0x4332bc, store @0x4332d7]
+	// gun rides and the carrier the ewep class update follows. The materializer
+	// must never let the parent author the structural carrier. [orig:
+	// NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity (+368) store
+	// @0x433289; target → groundEntity resolve @0x4332bc, store @0x4332d7;
+	// serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 	gun.parent_handle = occupant_ref.slot_id;
 	gun.target_handle = hull.slot_id;
 	nw::PoolSpawnBatch batch;
@@ -303,20 +311,21 @@ bool wire_target_authors_ground_separately_from_parent() {
 	const w::EntityHandle hull_h{hull.slot_id};
 	const w::EntityHandle occupant_h{occupant_ref.slot_id};
 	const w::EntityHandle gun_h{gun.slot_id};
-	const w::Entity *live_occupant = materializer.owned(world, occupant_h);
+	const w::Entity *live_hull = materializer.owned(world, hull_h);
 	const w::Entity *live_gun = materializer.owned(world, gun_h);
-	if (!expect(first.spawned.size() == 3 && live_occupant != nullptr &&
-			live_gun != nullptr && live_gun->emplacement_parent == occupant_h &&
+	if (!expect(first.spawned.size() == 3 && live_hull != nullptr &&
+			live_gun != nullptr && live_gun->emplacement_parent == hull_h &&
+			live_gun->emplacement_parent != occupant_h &&
 			live_gun->ground_target == hull_h &&
 			live_gun->emplacement_parent_spawn_id ==
-					live_occupant->registry_spawn_id,
-			"the 0x0D target authors retail groundEntity; the parent stays a back-ref"))
+					live_hull->registry_spawn_id,
+			"the 0x0D target authors retail groundEntity and the attachment carrier; "
+			"the parent stays a back-ref"))
 		return false;
 
 	// Losing the materializer-owned TARGET lifetime must clear the structural
 	// carrier; an unrelated replacement at the same packed handle cannot be
-	// adopted by the next fold. The parent relation is independent and
-	// survives.
+	// adopted by the next fold, and the occupant back-ref never stands in.
 	world.registry.despawn(hull_h);
 	if (!expect(world.registry.get(hull_h) == nullptr,
 			"the materialized target lifetime can be retired"))
@@ -330,8 +339,55 @@ bool wire_target_authors_ground_separately_from_parent() {
 	live_gun = materializer.owned(world, gun_h);
 	return expect(live_gun != nullptr &&
 			!live_gun->ground_target.valid() &&
-			live_gun->emplacement_parent == occupant_h,
+			!live_gun->emplacement_parent.valid(),
 			"a foreign replacement lifetime cannot inherit the wire target relation");
+}
+
+// A retail host's 0x0D can name its own player (slot 0) as a vehicle's
+// occupantEntity parent — the D-NET-195 dune buggy. The joiner's native body
+// L sits at pool-0 slot 0 too; that wire identity must never resolve to it,
+// or the vehicle becomes an attachment of the joiner's own body and the
+// orphan sweep removes it when the joiner dies. Only materialized pool-1..3
+// lifetimes resolve, and a vehicle takes no 0x0D carrier at all.
+// [orig: NapiNPClientMsg_0x00D occupantEntity store @0x433289;
+//  serialize_entity_pool_to_packet_0 +0x170 @0x503BC9]
+bool pool0_parent_never_aliases_the_native_body() {
+	ns::ClientReplicaPipeline pipeline;
+	static constexpr uint16_t kVehicleType = 5011;
+	pipeline.set_item_class_resolver(
+			[](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {
+				if (type == kVehicleType) return nw::EntityClass::Vehicle;
+				if (type == 5009) return nw::EntityClass::NoNetworkCallback;
+				return std::nullopt;
+			});
+	nw::PoolSpawnRecord buggy;
+	buggy.slot_id = 0x1006;
+	buggy.item_type_id = kVehicleType;
+	buggy.parent_handle = 0x0000; // Player #1 on the retail host
+	nw::PoolSpawnRecord gun;
+	gun.slot_id = 0x1007;
+	gun.item_type_id = 5009;
+	gun.parent_handle = 0x0000; // its gunner, the same host player
+	nw::PoolSpawnBatch batch;
+	batch.records = {buggy, gun};
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	const w::EntityHandle native_l = world.registry.spawn(0, body);
+	if (!expect(native_l.packed == 0x0000, "the native body occupies pool-0 slot 0"))
+		return false;
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+	const w::Entity *live_buggy = materializer.owned(world, w::EntityHandle{buggy.slot_id});
+	const w::Entity *live_gun = materializer.owned(world, w::EntityHandle{gun.slot_id});
+	return expect(live_buggy != nullptr && live_gun != nullptr &&
+			!live_buggy->emplacement_parent.valid() &&
+			!live_gun->emplacement_parent.valid(),
+			"a pool-0 wire parent never resolves to the joiner's native body");
 }
 
 bool deployed_item_spawn_update_and_remove_materialize() {
@@ -1074,6 +1130,7 @@ int main() {
 	if (!external_same_type_reuse_is_never_mutated_or_retired()) return 1;
 	if (!preoccupied_exact_slot_requires_a_fresh_wire_generation()) return 1;
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
+	if (!pool0_parent_never_aliases_the_native_body()) return 1;
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
 	if (!entity_remove_detaches_children_in_place()) return 1;
 	if (!objective_state_attaches_and_detaches_flag()) return 1;
