@@ -450,6 +450,57 @@ func test_overlay_key_latch_and_remapped_wheel_reach_the_sim() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 1, "the wheel requests crouch without mouse capture")
 
 
+func test_wheel_factor_accumulates_whole_notches() -> void:
+	# A high-resolution wheel reports sub-notch messages (factor = |delta| /
+	# WHEEL_DELTA): they add up before any wheel binding fires, and deltas of
+	# the other sign cancel inside one notch (controls/player_actions.h
+	# WheelRemainder).
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	var crouch := -1
+	var stand := -1
+	for i in rows.size():
+		var label := (rows[i] as PackedStringArray)[1]
+		if label == "Crouch":
+			crouch = model.action_index_for_row(i)
+		elif label == "Stand":
+			stand = model.action_index_for_row(i)
+	assert_gte(crouch, 0)
+	assert_gte(stand, 0)
+	model.assign_mouse_mask(crouch,
+			ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_WHEEL_UP))
+	model.assign_mouse_mask(stand,
+			ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_WHEEL_DOWN))
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var wheel := func(button: MouseButton, factor: float) -> bool:
+		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = true
+		event.factor = factor
+		return presenter.handle_input(event, true)
+
+	assert_true(wheel.call(MOUSE_BUTTON_WHEEL_UP, 0.5), "a sub-notch message is consumed")
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 0, "half a notch dispatches nothing")
+	assert_true(wheel.call(MOUSE_BUTTON_WHEEL_UP, 0.5))
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 1, "the second half completes one crouch notch")
+	assert_true(wheel.call(MOUSE_BUTTON_WHEEL_DOWN, 0.4))
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 1, "a partial reverse notch dispatches nothing")
+	assert_true(wheel.call(MOUSE_BUTTON_WHEEL_DOWN, 0.6))
+	_frame(world, presenter, camera, 3)
+	assert_eq(int(sim.get_local_player_stance()), 0, "the reverse deltas complete one stand notch")
+
+
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()

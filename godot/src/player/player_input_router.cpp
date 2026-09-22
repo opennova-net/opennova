@@ -9,6 +9,8 @@
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 
+#include <cmath>
+
 using namespace godot;
 
 namespace {
@@ -225,12 +227,24 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
     if (button != nullptr && button->is_pressed() && controls_.is_valid() &&
         (button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ||
          button->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
-        const String token = controls_->mouse_event_token(button->get_button_index());
         const Ref<Simulation> event_sim = sim();
         if (event_sim.is_null()) return false;
-        const auto request = opennova::controls::player_wheel_action(token.utf8().get_data());
-        if (!request) return false;
-        apply_player_action(*event_sim.ptr(), *request);
+        // The event's factor is |delta| / WHEEL_DELTA (0 where the platform
+        // reports none: one notch). The native accumulator turns the message
+        // stream into whole notches (controls/player_actions.h WheelRemainder).
+        const float factor = button->get_factor();
+        const int32_t units = factor > 0.0f
+                ? static_cast<int32_t>(std::lround(factor * opennova::controls::kWheelDelta))
+                : opennova::controls::kWheelDelta;
+        int notches = wheel_.feed(
+                button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? units : -units);
+        const auto dispatch = [&](MouseButton p_wheel) {
+            const String token = controls_->mouse_event_token(p_wheel);
+            if (const auto request = opennova::controls::player_wheel_action(token.utf8().get_data()))
+                apply_player_action(*event_sim.ptr(), *request);
+        };
+        for (; notches > 0; --notches) dispatch(MOUSE_BUTTON_WHEEL_UP);
+        for (; notches < 0; ++notches) dispatch(MOUSE_BUTTON_WHEEL_DOWN);
         return true;
     }
 	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());

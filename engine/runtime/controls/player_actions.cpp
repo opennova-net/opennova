@@ -55,9 +55,11 @@ const ActionRow kRows[] = {
 	{weapon_category_token(6), {Action::WeaponCategory, 7}, Gate::Captured},
 	{weapon_category_token(7), {Action::WeaponCategory, 8}, Gate::Captured},
 	{weapon_category_token(8), {Action::WeaponCategory, 9}, Gate::Captured},
-	// P is retail action 212; N is 214. Their signed arguments also drive
-	// optical magnification, so reversing them reverses tank wheel zoom.
-	// [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls @ 0x4E1341 / @ 0x4E13A4]
+	// P is retail action 212 (+1: the next-higher weapon slot, or a +2 step of
+	// a variable optic), N is 214 (-1 / -2), although the catalog names P
+	// "Cycle Weapon Prev". The sign drives both infantry cycling and optical
+	// magnification. [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls
+	// @ 0x4E1341 / @ 0x4E13A4; Player_CycleWeaponSlot `add edi,ebp` @ 0x4DFEF6]
 	// docs/world/tank-parity-re.md (D-CTRL-5).
 	{"cycleweaponP", {Action::WeaponCycle, 1}, Gate::Captured, Wheel},
 	{"cycleweaponN", {Action::WeaponCycle, -1}, Gate::Captured, Wheel},
@@ -171,6 +173,15 @@ void PlayerActions::reset() {
 
 void PlayerActions::consume_use_hold() {
 	use_consume_pending_ = true;
+}
+
+int WheelRemainder::feed(int32_t delta) {
+	// [orig: Input_DispatchMouseEvent @ 0x7614A9..0x7615DB]
+	remainder_ += delta;
+	int notches = 0;
+	for (; remainder_ >= kWheelDelta; remainder_ -= kWheelDelta) ++notches;  // @ 0x761575..0x7615AA
+	for (; remainder_ <= -kWheelDelta; remainder_ += kWheelDelta) --notches; // @ 0x7615AC..0x7615DB
+	return notches;
 }
 
 std::optional<PlayerActionRequest> player_wheel_action(std::string_view token) {

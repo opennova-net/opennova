@@ -212,7 +212,8 @@ void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimi
                                          WeaponSlotState &slot);
 
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
-// cases 0xD4 (212, next) / 0xD6 (214, prev) @0x4e130c..0x4e13ae]: refused while
+// cases 0xD4 (212, cycleweaponP "Cycle Weapon Prev": +1 / +2) / 0xD6 (214,
+// cycleweaponN "Cycle Weapon Next": -1 / -2) @0x4e130c..0x4e13ae]: refused while
 // the binocular view is up or a PowerThrow charge is live (g_fireChargeStartTick);
 // on an equipped def whose scope_min_mag != scope_max_mag while the optical view
 // is up (Player_CanFireWeapon) the action steps the zoom by +2 / -2 in place of a

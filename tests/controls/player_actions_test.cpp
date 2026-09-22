@@ -279,13 +279,36 @@ bool test_wheel_subset_and_repeated_events() {
 
 } // namespace
 
+// The WM_MOUSEWHEEL accumulator: whole +/-120 notches dispatch, one event per
+// notch, and the remainder (either sign) carries into the next message, so a
+// high-resolution wheel's sub-notch messages add up before anything fires.
+// [orig: Input_DispatchMouseEvent @ 0x7614A9..0x7615DB]
+bool test_wheel_remainder_dispatches_whole_notches() {
+	WheelRemainder wheel;
+	CHECK(wheel.feed(kWheelDelta) == 1);
+	CHECK(wheel.feed(-kWheelDelta) == -1);
+	CHECK(wheel.feed(60) == 0);
+	CHECK(wheel.feed(60) == 1);
+	CHECK(wheel.feed(240) == 2);      // a coalesced message fires two events
+	CHECK(wheel.feed(-50) == 0);
+	CHECK(wheel.feed(-70) == -1);
+	CHECK(wheel.feed(100) == 0);      // +100 left over...
+	CHECK(wheel.feed(-40) == 0);      // ...opposite deltas cancel inside one notch
+	CHECK(wheel.feed(-179) == 0);     // 60 - 179 = -119: still short of a notch
+	CHECK(wheel.feed(-1) == -1);
+	CHECK(wheel.feed(359) == 2);      // 359 - 240 = 119 carried
+	CHECK(wheel.feed(1) == 1);
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
 			test_missing_simulation_freezes_only_scope_zero, test_reset_preserves_switch_hud_medic_and_use_state,
 			test_use_previous_frame_and_single_seat, test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
-			test_live_binding_modifier_remap_and_use_stream, test_wheel_subset_and_repeated_events})
+			test_live_binding_modifier_remap_and_use_stream, test_wheel_subset_and_repeated_events,
+			test_wheel_remainder_dispatches_whole_notches})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

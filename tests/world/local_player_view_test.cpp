@@ -906,7 +906,7 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     lw.w.rules.allow_sniper_scope_zoom = false;
     lw.entity().player_class = 8;
 
-    // The route: next (+1) steps +2, prev (-1) steps -2 with the GF_SCOPE click,
+    // The route: cycleweaponP (+1) steps +2, cycleweaponN (-1) steps -2 with the GF_SCOPE click,
     // and no cycle; at the cap the step still takes the route, just silently.
     lw.w.out.script_sounds.clear();
     w.slot.scope_zoom = 4;

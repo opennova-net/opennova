@@ -73,6 +73,9 @@ private:
 	Ref<ControlsModel> controls_;
 	Ref<PlayerMoveIntent> input_override_;
 	opennova::controls::PlayerActions actions_;
+	// The wheel notch remainder. Retail clears it only at process start, so it
+	// survives the reset-state path like the switch latches.
+	opennova::controls::WheelRemainder wheel_;
 	Vector2 look_delta_;
 	int64_t frame_sequence_ = 0;
 };
