@@ -292,7 +292,7 @@ void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &
 
 // A landing reaction runs once at the first positive probe depth, before
 // the spring loop consumes the accumulated free-fall sinks.
-// [orig: ground @0x47D9A5..0x47DABD; tank @0x4778E4..0x477A03;
+// [orig: ground @0x47D9A5..0x47DABD; tank @0x477DAC..0x477EEE;
 // bike @0x47A592..0x47A708; aircraft @0x480428..0x480557]
 void vehicle_landing_damage(World &world, Entity &e, const VehicleTraits &t, const int32_t *depth,
 		int count, int32_t up) {
@@ -334,7 +334,7 @@ void vehicle_landing_damage(World &world, Entity &e, const VehicleTraits &t, con
 
 // Inverted hulls crushed onto their roof during a long fall die even when
 // the ordinary impact severity is small. [orig: @0x47DBE8..0x47DC4C;
-// @0x477DA7..0x477E0B; @0x47AA96..0x47AAF1; @0x480749..0x4807AA]
+// tank @0x478024..0x47809D; @0x47AA96..0x47AAF1; @0x480749..0x4807AA]
 void vehicle_crush_damage(
 		World &world, Entity &e, const VehicleTraits &t, const int32_t *spine, int32_t up) {
 	const auto &m = e.veh;
