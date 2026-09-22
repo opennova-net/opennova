@@ -421,12 +421,60 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 //  slot-1 def [edi+494h] @0x440fbc, Math_ClampAngleToBounds yaw (+0x144,
 //  -0x144) @0x440fea and pitch (+0x13C, +0x140) @0x440ffa, stores
 //  @0x441007/@0x44100d (yaw) and @0x44101a/@0x441020 (pitch)]
+// The gun's inline slot Def. Retail binds it at spawn from the def's
+// primary weapon name; the port binds the slot on its first use, so an
+// unbound gun resolves the same name.
+// [orig: WeaponSlot_InitFromEntityDef @0x5466C0 (name lookup @0x5466E8,
+//  the slot Def @0x546709..0x54670A)]
+inline const WeaponTableEntry *emplaced_slot_def(const World &world, const Entity &gun) {
+	if (gun.primary_weapon_slot_adm != kAdmSlotNone)
+		return world.tables.weapons.by_index(gun.primary_weapon_slot_adm);
+	const int index = world.tables.weapons.index_of(gun.primary_weapon.c_str());
+	return index >= 0 && index <= 0xFF
+			? world.tables.weapons.by_index(static_cast<uint8_t>(index))
+			: nullptr;
+}
+
+// The publication's value leg, by the parent brain's profile type: GROUND
+// (2) takes the raw yaw word; HELO (1) under an EWeap def takes both words
+// clamped by the parent's own weapon window, in the parser's raw BAM (the
+// integer multiply and wrap: 180 spans the signed domain, zero locks an
+// axis). [orig: type 2 @0x440f70..0x440f8a; type 1 @0x440fa1..0x441020;
+//  WeaponDefs_ParseLineCallback @0x543680, integer conversions @0x5443ec /
+//  @0x544424 / @0x544441..0x54446e]
+struct EmplacedParentGunWords {
+	bool yaw = false;
+	bool pitch = false;
+	int32_t yaw_bam = 0;
+	int32_t pitch_bam = 0;
+};
+inline EmplacedParentGunWords emplaced_parent_gun_words(const World &world,
+		const Entity &parent, int32_t profile_type, int16_t yaw_word, int16_t pitch_word) {
+	EmplacedParentGunWords out;
+	out.yaw_bam = emplaced_word_bam(yaw_word);
+	if (profile_type == 2) {
+		out.yaw = true;
+		return out;
+	}
+	if (profile_type != 1 || (parent.item_attrib & kItemAttribEweap) == 0) return out;
+	const int weapon_index = world.tables.weapons.index_of(parent.primary_weapon.c_str());
+	if (weapon_index < 0) return out;
+	const WeaponTableEntry &parent_weapon = world.tables.weapons.entries[weapon_index];
+	out.pitch_bam = emplaced_word_bam(pitch_word);
+	const int32_t yaw_range = turret_window_limit_bam(parent_weapon.turret_yaw_range_deg);
+	emplaced_clamp_turret_bam(out.yaw_bam, yaw_range, opennova::io::bam_sub(0, yaw_range));
+	emplaced_clamp_turret_bam(out.pitch_bam,
+			turret_window_limit_bam(parent_weapon.turret_pitch_max_deg),
+			opennova::io::bam_sub(0,
+					turret_window_limit_bam(parent_weapon.turret_pitch_min_deg)));
+	out.yaw = out.pitch = true;
+	return out;
+}
+
 inline void publish_emplaced_gun_words_to_parent(World &world,
 		const Entity &mount) {
 	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
-	if (mount.primary_weapon_slot_adm == kAdmSlotNone ||
-			world.tables.weapons.by_index(mount.primary_weapon_slot_adm) == nullptr)
-		return;
+	if (emplaced_slot_def(world, mount) == nullptr) return;
 	// A child promoted onto an authored userpoint (index > 0) that rides the
 	// parent root; an unstamped subobject (-1) keeps the leg off.
 	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
@@ -434,34 +482,18 @@ inline void publish_emplaced_gun_words_to_parent(World &world,
 	AiEntity *parent_ai = world.ai.for_handle(mount.emplacement_parent);
 	if (parent_ai == nullptr || parent_ai->brain.f[AiBrain::kOwner] == 0)
 		return;
-	int32_t yaw = emplaced_word_bam(mount.emplaced_gun_yaw_word);
-	if (parent_ai->profile.type == 2) {
-		parent_ai->brain.f[AiBrain::kActiveYaw] = yaw;
-		parent_ai->brain.f[AiBrain::kStagingBlock + 3] = yaw;
-		return;
-	}
-	if (parent_ai->profile.type != 1) return;
 	const Entity *parent = world.registry.get(mount.emplacement_parent);
-	if (parent == nullptr || (parent->item_attrib & kItemAttribEweap) == 0)
-		return;
-	const int weapon_index = world.tables.weapons.index_of(parent->primary_weapon.c_str());
-	if (weapon_index < 0) return;
-	const WeaponTableEntry &parent_weapon = world.tables.weapons.entries[weapon_index];
-	int32_t pitch = emplaced_word_bam(mount.emplaced_gun_pitch_word);
-	// Retail reads the parser's raw BAM limits here: the integer multiply
-	// and wrap, 180 spans the signed angle domain and zero locks an axis.
-	// [orig: WeaponDefs_ParseLineCallback @0x543680, integer conversions
-	// @0x5443ec / @0x544424 / @0x544441..0x54446e]
-	const int32_t yaw_range = turret_window_limit_bam(parent_weapon.turret_yaw_range_deg);
-	emplaced_clamp_turret_bam(yaw, yaw_range, opennova::io::bam_sub(0, yaw_range));
-	emplaced_clamp_turret_bam(pitch,
-			turret_window_limit_bam(parent_weapon.turret_pitch_max_deg),
-			opennova::io::bam_sub(0,
-					turret_window_limit_bam(parent_weapon.turret_pitch_min_deg)));
-	parent_ai->brain.f[AiBrain::kActiveYaw] = yaw;
-	parent_ai->brain.f[AiBrain::kStagingBlock + 3] = yaw;
-	parent_ai->brain.f[AiBrain::kActivePitch] = pitch;
-	parent_ai->brain.f[AiBrain::kStagingBlock + 4] = pitch;
+	if (parent == nullptr) return;
+	const EmplacedParentGunWords words = emplaced_parent_gun_words(world, *parent,
+			parent_ai->profile.type, mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word);
+	if (words.yaw) {
+		parent_ai->brain.f[AiBrain::kActiveYaw] = words.yaw_bam;
+		parent_ai->brain.f[AiBrain::kStagingBlock + 3] = words.yaw_bam;
+	}
+	if (words.pitch) {
+		parent_ai->brain.f[AiBrain::kActivePitch] = words.pitch_bam;
+		parent_ai->brain.f[AiBrain::kStagingBlock + 4] = words.pitch_bam;
+	}
 }
 
 // One occupied tick of the gun channel in retail order: the ai-fn refresh,
