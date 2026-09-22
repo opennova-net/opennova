@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/dir_table.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
@@ -36,12 +37,16 @@ constexpr int32_t kSteerRampCap = 596523200; // 0x238E38C0
 constexpr int32_t kGravityStep = 324;
 constexpr int32_t kGravityStepBike = 250;
 
-// Full-precision quantized trig at 2^22 — the original samples the 1024-entry
-// fixed-point cos table [orig: off_849934, idx = (bam + 0x200000) >> 22]; the
-// infantry motor established the same computed equivalent (D-INF-4).
-int32_t cos22_of_bam(int32_t bam) {
-    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
-    return static_cast<int32_t>(std::cos(a) * io::kQ22One);
+// The slope factor samples the runtime-built 1024-step table, not a continuous
+// cosine: the half-bin index rounding and the truncated table entries both
+// reach the cos^2 term. [orig: off_849934 = Math_BuildSinTable @0x613050
+// output + 0x400; ctan Entity_UpdateTankVehiclePhysics @0x489CE6..0x489D01,
+// cveh Entity_UpdateVehiclePhysics @0x48C1C6..0x48C1D7, cbik
+// Entity_UpdateLightVehiclePhysics @0x485362..0x48537E]
+int32_t slope_cos22(int32_t pitch_bam) {
+	int32_t cos22 = 0, sin22 = 0;
+	quantized_dir(pitch_bam, cos22, sin22);
+	return cos22;
 }
 
 // The x87 trig pair (cos22/sin22_of_bam_x87) lives in vehicle_motor_detail.h —
@@ -439,7 +444,8 @@ static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
 // of Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0] — is declared in
 // vehicle_motor_detail.h and defined in vehicle_contact_solve.cpp.
 
-void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
+void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
+		const VehicleDriveCmd *ai_cmd, bool prediction) {
 	// [orig: Entity_DispatchPhysicsUpdate @0x48F010]
 	if (traits.amphibian && (veh.flags & 0x8000u) != 0) {
 		VehicleTraits afloat = traits;
@@ -448,8 +454,12 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 		return;
 	}
 	World &world = world_;
-	// Selector zero dispatches to the simple motor. [orig: @0x48EFC7]
-	if (traits.physics == 0) {
+	// Selector zero dispatches the cveh row to the simple motor. The ctank and
+	// cbike rows call their movers without testing the selector.
+	// [orig: Entity_DispatchPhysics_cveh @0x48EFC7; Entity_DispatchPhysics_ctank
+	//  @0x48F000..0x48F007; Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7]
+	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
+			traits.family != VehicleFamily::Bike) {
 		tick_simple_motor(veh, traits, ai_cmd, false);
 		return;
 	}
@@ -501,9 +511,12 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 
 	// ------------------------------------------------------------------ input block
 	// [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
-	// @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
-	// it as prediction — we ARE the authority host.]
-	Entity *occ = traits.player_control ? world.vehicles.resolve_controller(veh) : nullptr;
+	// @0x48b949-0x48c034; ctan @0x489522..0x489545.] Only this block is role-gated:
+	// the authority runs it, while a predicting client (`prediction`) has already
+	// swept the seats and staged its local driver or the received registers.
+	// Everything after it, including the PlayerControl tail, runs on both roles.
+	Entity *occ = traits.player_control && !prediction ? world.vehicles.resolve_controller(veh)
+													   : nullptr;
     // A DEAD controller counts as none. The infantry death edge now detaches first;
     // this remains the same-frame safety gate when motor/system ordering varies.
     // [orig: infantry death detach @0x4b9c57..0x4b9c60]
@@ -513,7 +526,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
     const bool player_occupant =
             occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
 
-    if (traits.player_control) {
+    if (traits.player_control && !prediction) {
         if (occ == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
 			// Without a live controller, steer holds the current heading and command speed decays
 			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
@@ -554,12 +567,16 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
     //  (@0x48c086..0x48c08f); the cbik twin has the same shape; ctan never
     //  writes +0x3CD]. Flags bit 3 is the player leg's lean-right mirror, so the
     // handbrake IS the lean-right key while driving. (Re-homed 2026-09-10 from
-    // inside the player_control gate, jo-c cross-check.)
+    // inside the player_control gate, jo-c cross-check.) The occupant test reads
+    // the +0x170 claimant, not the input block's controller, so it holds on a
+    // predicting client [orig: cveh `cmp [esi+170h], edx` @0x48C03C; cbik
+    // @0x4851E8].
     if (traits.family != VehicleFamily::Tank) {
         const bool brake_enabled = traits.family == VehicleFamily::Bike
                 ? m.wheelie_active == 0 && m.bike_ground_contact_ticks > 0
                 : traits.hand_brake != 0;
-        if (occ != nullptr && (veh.flags & 0x8u) != 0 && brake_enabled)
+        if (world.registry.get(veh.primary_occupant) != nullptr && (veh.flags & 0x8u) != 0 &&
+                brake_enabled)
             m.handbrake_latched = 1;
         else
             m.handbrake_latched = 0;
@@ -570,7 +587,15 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
     // wheelie-active byte store @0x48524C]
     if (traits.family == VehicleFamily::Bike && (veh.flags & 0x20u) && m.speed > 4096)
         m.wheelie_request = m.wheelie_active = 1;
-    if (m.crashed != 0 && (traits.family != VehicleFamily::Bike || m.byte_2ef))
+    // The ground core stops a crashed hull outright. The bike and the tank also
+    // require +0x2EF, a latch their own contact solves own; the tank solve
+    // clears it in its airborne leg, so an airborne crashed tank keeps its
+    // command. [orig: cveh @0x48C086..0x48C08F; Entity_UpdateTankVehiclePhysics
+    //  @0x489C06..0x489C1C `cmp [esi+2EFh],0; jz; cmp [esi+2ECh],0; jz`;
+    //  tank clear @0x478ABC]
+    if (m.crashed != 0 &&
+            ((traits.family != VehicleFamily::Bike && traits.family != VehicleFamily::Tank) ||
+                    m.byte_2ef))
         m.cmd_speed = 0;
 
     // ------------------------------------------------------------- steering chase
@@ -653,7 +678,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 		const int32_t pitch_bam = wheeled_solve
 				? m.air_pitch_bam
 				: static_cast<int32_t>(static_cast<int64_t>(veh.pitch) * 11930464);
-		const int32_t c = cos22_of_bam(pitch_bam);
+		const int32_t c = slope_cos22(pitch_bam);
         const int32_t c2 = static_cast<int32_t>((static_cast<int64_t>(c) * c) >> 22);
         target_speed = static_cast<int32_t>((static_cast<int64_t>(c2) * cmd) >> 22);
 
@@ -676,8 +701,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 			// start) clamps at ±2·deceleration — where the ground core keeps
 			// the raw 1/32 chase — and same-direction drive clamps to
 			// ±acceleration (target != 0) or ±deceleration (target == 0). The
-			// steering/skid caps precede these plain caps
-			// [orig: the |dir|==0 arm @0x489C3A..0x489C6C].
+			// sharp-steering caps precede these plain caps when a contact
+			// direction is retained [orig: @0x489DB1..0x489E97].
 			const bool reversal = (target_speed > 0 && m.speed <= 0) ||
 					(target_speed < 0 && m.speed >= 0) || (target_speed == 0 && m.speed == 0);
 			if (reversal) {
@@ -688,7 +713,11 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 				if (m.speed_accel > traits.acceleration)
 					m.speed_accel = traits.acceleration;
 				if (m.speed_accel < -traits.acceleration) m.speed_accel = -traits.acceleration;
-			} else {
+			} else if (const Entity *parent = world.registry.get(veh.mount_target);
+					parent == nullptr || (parent->flags & 0x100u) != 0) {
+				// NPC-mounted zero-command coast retains the raw servo, as in
+				// the ground core. [orig: Entity_UpdateTankVehiclePhysics
+				// @0x489EBA..0x489ECB, parent +0x16C]
 				if (m.speed_accel > traits.deceleration)
 					m.speed_accel = traits.deceleration;
 				if (m.speed_accel < -traits.deceleration) m.speed_accel = -traits.deceleration;
@@ -751,9 +780,14 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 		// remain @0x48ec74 / @0x48ed3b..0x48ed6b, ctan @0x48a5ac..0x48a8b4,
 		// and Entity_UpdateVehiclePhysics @0x48AF00 (kong @116468 / @116470,
 		// @116425..@116490 and @116804..@116831).
-		detail::vehicle_traction_velocity(world, veh, traits, target_speed);
+		const bool contact_arm = detail::vehicle_traction_velocity(world, veh, traits, target_speed);
 		detail::vehicle_emit_skid_effects(world, veh, traits);
-		detail::vehicle_sample_trails(world, veh, traits, target_speed);
+		// Movement trails sample only at the end of the contact arms; the
+		// airborne and off-contact arms jump past them.
+		// [orig: cveh @0x48CD93..0x48CDFD (off-contact arm @0x48CE02); cbik
+		//  @0x486170..0x4861F1 (@0x4861F6); ctan @0x48A60D..0x48A67F (@0x48A684)]
+		if (contact_arm)
+			detail::vehicle_sample_trails(world, veh, traits, target_speed);
 		if (traits.family == VehicleFamily::Bike) {
             // Grounded wheelies retain upward launch velocity.
             // [orig: Entity_UpdateLightVehiclePhysics @ 0x48657E..0x48659D]
@@ -788,14 +822,34 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 					veh.last_attacker = {};
 			}
 		}
-		// A settled tank (the +0x2F0 latch) zeroes its planar velocity after the
-		// water block — the halving coast alone never reaches zero on a negative
+		// A crash-settled tank (the +0x2F0 latch) zeroes its planar velocity after
+		// the water block — the halving coast alone never reaches zero on a negative
 		// LSB (`-1 >> 1 == -1`), so without this the hull creeps forever and the
 		// sleep gate never closes [orig: `cmp byte ptr [esi+2F0h],0` @0x48a8ab ->
 		// velocityX = velocityY = 0 in Entity_UpdateTankVehiclePhysics].
 		if (traits.family == VehicleFamily::Tank && m.settle_2f0 != 0) {
 			m.vel_x = 0;
 			m.vel_y = 0;
+		}
+		// The tank alone translates under its recoil and heavy-hit impulse: the
+		// unit direction scaled by trunc(amplitude * 28.16f) joins all three
+		// velocity words every tick, and the direction clears once the chassis
+		// contact byte drops. [orig: Entity_UpdateTankVehiclePhysics
+		//  @0x48A8C0..0x48A9C0; writers Entity_InitVehicleSuspensionGeometry
+		//  @0x475152..0x4751D4, Entity_SetupInfantryForcePoints @0x475D0E..0x475DB2]
+		if (traits.family == VehicleFamily::Tank) {
+			const int32_t *dir = m.chassis_impulse_direction;
+			const double length = std::sqrt(double(dir[0]) * dir[0] + double(dir[1]) * dir[1] +
+					double(dir[2]) * dir[2]);
+			if (static_cast<int32_t>(std::min(length, 2147418112.0)) > 0) {
+				const int32_t scale = static_cast<int32_t>(
+						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
+				m.vel_x = io::bam_add(m.vel_x, q16_mul_rhu(dir[0], scale));
+				m.vel_y = io::bam_add(m.vel_y, q16_mul_rhu(dir[1], scale));
+				m.slide_z = io::bam_add(m.slide_z, q16_mul_rhu(dir[2], scale));
+			}
+			if (!m.chassis_contact_active)
+				std::fill_n(m.chassis_impulse_direction, 3, 0);
 		}
 
 		const int32_t prev[3] = { to_fixed(veh.position.x), to_fixed(veh.position.y),
@@ -860,7 +914,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
                     : io::bam_sar(m.wheel_rate_bam, 2);
             m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
 		} else if (traits.family == VehicleFamily::Tank && m.settle_2f0 == 0) {
-			// Tank yaw is gated by the parked latch and quartered in the crashed arm.
+			// Tank yaw is gated by the crash-settled latch and quartered in the
+			// airborne arm.
 			// Witness sites: [orig: @0x48a9f7, @0x48aa1d]
 			const int32_t yaw_step =
 					(wheeled_solve ? (veh.flags & kEntityFlagInAir) != 0 : !m.grounded)
@@ -2071,7 +2126,10 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 // Ground-family prediction runs the shared chase, stages local-driver input or remote commands,
 // and advances the same motor/contact state with authority health writes disabled.
 void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits) {
-	if (traits.physics == 0) {
+	// The same class-table split as the authority tick_motor: the ctank and
+	// cbike rows ignore the selector [orig: @0x48F000..0x48F007, @0x48EFF0..0x48EFF7].
+	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
+			traits.family != VehicleFamily::Bike) {
 		tick_simple_motor(veh, traits, nullptr, true);
 		return;
 	}
@@ -2108,17 +2166,13 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
         m.cmd_speed = m.net_recv_speed;
         m.steer_target_bam = m.net_recv_steer_bam;
     }
-    VehicleTraits core = traits;
-    core.player_control = false; // bypass the occupant/input block, keep the core
-    world.vehicles.tick_motor(veh, core, nullptr);
-    // The bypass also hid the mover's attrib-0x40 tail. Retail keys that tail
-    // on the ITEM's attrib alone, and a client runs it for every hull it is
-    // not driving, so run it here with the real row.
-    // [orig: cveh gate `test byte [itemDef+54h],40h` @0x48D38B, the
-    //  Entity_UpdatePartSpinAccumulator call @0x48D42B; ctan @0x48AD97/@0x48AE3D;
-    //  cbik @0x486944/@0x4869EA]
-    if (traits.player_control)
-        world.vehicles.part_anim_tick(veh, traits);
+    // Only the input block is role-gated; the core runs with the real row so
+    // the PlayerControl tail (claimant sound gates, engine start/stop, part
+    // spin) runs for every hull the client predicts.
+    // [orig: ctan input gate @0x489522..0x489545 vs the ungated tail gates
+    //  @0x48AAC4..0x48AADA and @0x48AD94..0x48AE3D; cveh @0x48B949..0x48B96C vs
+    //  @0x48D38B..0x48D42B; cbik @0x486941..0x4869EA]
+    world.vehicles.tick_motor(veh, traits, nullptr, /*prediction=*/true);
 }
 
 } // namespace opennova::world
