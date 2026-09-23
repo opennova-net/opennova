@@ -6073,14 +6073,15 @@ skip, the crush stamp and the graded bands [orig: Entity_CheckCollisionState @ 0
 half @ 0x462DFB..0x4632CC]) + the motor's
 push/decay leg; ctest `vehicle_mount`
 (`test_vehicle_hull_stops_at_building` — a driving truck grinds to a stop at
-a wall square). Deferred (D-NET-161): the
-v84/v85 slope-threshold derivation (caller locals, unwitnessed), the severity-3 damage block, the second averaged pass
-with its pushable-other mass-ratio force split (`otherMass/(otherMass+mass)`
-@ 0x463037-0x46324d / @ 0x47d24a). the SM's kinematic `apply_locomotion`
+a wall square). The legs once deferred here are ported: the soft and hard
+thresholds are the def's cos22(maxSlope +0x8F4) and cos22(slipSlope +0x8F8)
+(vehicle-client-movers-re §6), and the severity-3 impact damage, the scrape edge with its
+momentum exchange and the second pass's scaling by the other vehicle's mass share
+(`otherMass/(otherMass+mass)` @ 0x463037-0x46324d / @ 0x47d24a) ride the family solves
+(vehicle-client-movers-re Section 12, 2026-09-07). The SM's kinematic `apply_locomotion`
 RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
 (waypoints, visited bits, states), the motor is the only integrator, matching
-the original split. Deferrals stay under D-NET-161 (updated in
-[novaworld-net-re.md](../net/novaworld-net-re.md)).
+the original split.
 
 The live motor now also supplies the two cveh control-register fields for
 which OpenNova owns exact sources. `VEHICLE_STEERING` zero-extends the high
