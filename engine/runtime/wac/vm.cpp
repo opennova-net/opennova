@@ -388,7 +388,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "remove")) { cmds.remove_group(A(0)); return 0; }
     if (ieq(n, "ssnuse")) return cmds.use_boarding_target(H(0));
     if (ieq(n, "SSNHP")) return cmds.set_ssn_hp(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)) ? 1 : 0;
+    if (ieq(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)); // 1 only when clamped
     if (ieq(n, "SSNtoWP")) return cmds.set_ssn_waypoint(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "SSNMin")) return cmds.set_ssn_engage_min(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "SSNMax")) return cmds.set_ssn_engage_max(H(0), A(1)) ? 1 : 0;
@@ -479,8 +479,11 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         }
         return 0;
     }
-    if (ieq(n, "GtoWP")) return cmds.group_to_waypoint(A(0), A(1));
-    if (ieq(n, "GroupHP")) return cmds.set_group_hp(A(0), A(1));
+    // Both return 1 whatever they visited [orig: TextResource_GetMissionString
+    // (the GtoWP handler, IDB misnomer) @0x4ED3E4; WacScript_SetEntityTeamSlot
+    // (the GroupHP handler) @0x4F7BD0].
+    if (ieq(n, "GtoWP")) { cmds.group_to_waypoint(A(0), A(1)); return 1; }
+    if (ieq(n, "GroupHP")) { cmds.set_group_hp(A(0), A(1)); return 1; }
     if (ieq(n, "GroupMin")) return cmds.set_group_engage_min(A(0), A(1));
     if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
     if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
@@ -522,8 +525,11 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "ppunt") || ieq(n, "pkillpunt"))
         return w.match.request_player_punt(w, world::EntityHandle{static_cast<uint16_t>(auto_item_)},
                                            ieq(n, "pkillpunt"));
-    if (ieq(n, "Gsetaccuracy"))
-        return cmds.set_group_accuracy(A(0), A(1), A(2));
+    if (ieq(n, "Gsetaccuracy")) {
+        // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0 — return 1 @0x4F7C43]
+        cmds.set_group_accuracy(A(0), A(1), A(2));
+        return 1;
+    }
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
     if (ieq(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }
@@ -535,7 +541,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
     if (ieq(n, "fov")) { cmds.set_fov(A(0)); return 0; }
     if (ieq(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
-    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 0; }
+    // [orig: WacCmd_Tod @0x4EDC70 — return 1 @0x4EDC7F]
+    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 1; }
     if (ieq(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
     if (ieq(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
     // The handlers pack three independent operands, retaining carries between
@@ -560,7 +567,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "win")) {
         w.out.effects.push({"win", A(0), 0, 0, 0, std::string()});
         w.process_round_end(A(0));
-        return 0;
+        return 1; // [orig: WacAction_Win @0x4ED4AD]
     }
     // [orig: WacAction_Lose @0x4ed3f0 — team 0 resolves Misc/STRMISC_KILLEDGREEN,
     // team 1 Misc/STRMISC_KILLEDBLUE, each through the banner trio

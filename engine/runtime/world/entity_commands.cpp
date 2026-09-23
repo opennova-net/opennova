@@ -178,6 +178,17 @@ bool script_kill_crosses_edge(const Entity &e) {
     return e.health > 0 && ((e.flags | e.engine_flags) & kEntityFlagDead) == 0;
 }
 
+// Edge stand-in (organic death transaction) after a script health write, until
+// the org1/org2 death edge owns it: a living organic the write took to zero or
+// below crosses the edge once; the written health word is kept.
+// [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550]
+void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
+    if (e.kind != EntityKind::Organic || !crosses_edge || e.health > 0) return;
+    const int32_t word = e.health;
+    raise_scripted_death(world, e, e.handle);
+    e.health = word;
+}
+
 // The brain machine an SM-brained item's class event callback runs: CHel/cpln
 // reach the air machine, cveh/cbot/ctrn the vehicle machine; a traits row built
 // without its def falls back to its mover family, and a brain without a traits
@@ -504,20 +515,43 @@ void EntityCommands::set_group_respawns(int32_t group, int32_t count) {
 }
 
 bool EntityCommands::set_ssn_hp(EntityTarget ssn, int32_t hp) {
+    // No gate past the resolve: the health word, then the attacker cleared.
+    // [orig: WacCmd_SsnHp @0x4F2100 — `mov [eax+11Eh],dx` @0x4F214C,
+    //  `mov [eax+178h],0` @0x4F2153, return 1 @0x4F215D]
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (!e) return false;
-    e->health = hp;
-    e->alive = hp > 0;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    e->health = retail_signed_i16(hp);
+    e->last_attacker = {};
+    script_health_edge_stand_in(world_, *e, crosses_edge);
     return true;
 }
 
-bool EntityCommands::add_ssn_hp(EntityTarget ssn, int32_t delta) {
+int32_t EntityCommands::add_ssn_hp(EntityTarget ssn, int32_t delta) {
+    // The ItemDef pointer gates it (not the ItemTypeIndex); the 16-bit add
+    // floors at 0 and caps at the def healthMax word, each returning 1 with the
+    // attacker kept; an unclamped add clears the attacker and returns 0.
+    // [orig: WacCmd_SsnAddHp @0x4F2170 — gate @0x4F21B8..0x4F21BD, `add
+    //  [eax+11Eh],cx` @0x4F21C4, floor @0x4F21D7..0x4F21E5, cap
+    //  @0x4F21E6..0x4F21FE, lastAttacker 0 @0x4F21FF, return 0 @0x4F2209]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->health += delta;
-    if (e->health < 0) e->health = 0;
-    e->alive = e->health > 0;
-    return true;
+    if (e == nullptr || !e->has_item_def) return 0;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    const int32_t sum = retail_signed_i16(static_cast<int64_t>(e->health) + delta);
+    const int32_t cap = retail_signed_i16(e->health_max);
+    int32_t result = 0;
+    if (sum < 0) {
+        e->health = 0;
+        result = 1;
+    } else if (sum > cap) {
+        e->health = cap;
+        result = 1;
+    } else {
+        e->health = sum;
+        e->last_attacker = {};
+    }
+    script_health_edge_stand_in(world_, *e, crosses_edge);
+    return result;
 }
 
 bool EntityCommands::set_ssn_accuracy(EntityTarget ssn, int32_t primary,
@@ -1324,23 +1358,28 @@ int EntityCommands::group_to_waypoint(int group, int32_t wp, int32_t node) {
 }
 
 int EntityCommands::set_group_hp(int group, int32_t hp) {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    // Pools 0, 1, 2, every row whose signed commandGroup word matches: the
+    // health word and nothing else (no gate, the attacker kept). Returns the
+    // rows written. The IDB name of the handler is a misnomer.
+    // [orig: WacScript_SetEntityTeamSlot @0x4F7B30 — pool 0 @0x4F7B30, pool 1
+    //  @0x4F7B6D, pool 2 @0x4F7B9D, the group match @0x4F7B57, the health word
+    //  @0x4F7B64]
     int n = 0;
-    for (EntityHandle h : members) {
-        Entity *e = world_.registry.get(h);
-        if (!e) continue;
-        // Setting a group to zero health is a kill by another name, and retail's
-        // motor edge cannot tell the two apart — it only sees the zero. Same
-        // notify, same unstamped killer.
-        if (hp <= 0 && e->health > 0 && (e->flags & kEntityFlagDead) == 0) {
-            raise_scripted_death(world_, *e, h);
+    for (const int pool : {0, 1, 2}) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            if (static_cast<int16_t>(row.group_id) == group) members.push_back(row.handle);
+        });
+        for (EntityHandle h : members) {
+            Entity *e = world_.registry.get(h);
+            if (e == nullptr) continue;
+            // A zeroing write is a kill by another name: retail's motor edge
+            // only sees the zero, with the same unstamped killer.
+            const bool crosses_edge = script_kill_crosses_edge(*e);
+            e->health = retail_signed_i16(hp);
+            script_health_edge_stand_in(world_, *e, crosses_edge);
             ++n;
-            continue;
         }
-        e->health = hp;
-        e->alive = hp > 0;
-        ++n;
     }
     return n;
 }

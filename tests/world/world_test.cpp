@@ -460,6 +460,7 @@ int main() {
         // Zeroing a group's health is the same edge by another name - the motor
         // only ever sees the zero.
         Entity c; c.net_id = 902; c.group_id = 11; c.alive = true; c.health = 150;
+        c.kind = EntityKind::Organic;
         kw.registry.spawn(0, c);
         kw.commands.set_group_hp(11, 0);
         CHECK(kw.round_sim.deaths.size() == 1);
@@ -468,6 +469,7 @@ int main() {
         // A non-lethal set stays silent.
         kw.round_sim.deaths.clear();
         Entity d; d.net_id = 903; d.group_id = 12; d.alive = true; d.health = 150;
+        d.kind = EntityKind::Organic;
         kw.registry.spawn(0, d);
         kw.commands.set_group_hp(12, 75);
         CHECK(kw.round_sim.deaths.empty());

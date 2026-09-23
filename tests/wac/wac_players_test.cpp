@@ -278,8 +278,10 @@ static void test_remote_command_classes() {
         f.world.registry.get(handle)->engine_flags |= kEntityFlagPlayer; // the humans group
     std::vector<ScriptRemoteCommand> &queue = f.world.out.script_remote_commands;
     // PLOOP visits the member array in reverse: third, second, then local.
+    // Each pass reports 1: the targeted class without the call, the local
+    // text handler by its own return [orig: Chat_AddSystemMessage @0x4EDB64].
     f.run("ploop\nptext(hello) store(v1) add(v2,v1)\nend\n");
-    CHECK(f.value(1) == 0 && f.value(2) == 2);
+    CHECK(f.value(1) == 1 && f.value(2) == 3);
     CHECK(f.world.out.effects.count("text") == 1);
     CHECK(queue.size() == 2);
     if (queue.size() == 2) {
@@ -293,7 +295,7 @@ static void test_remote_command_classes() {
     queue.clear();
     // A broadcast row: one record, and the local handler still runs.
     f.run("text(all) store(v3)\n");
-    CHECK(f.value(3) == 0 && f.world.out.effects.count("text") == 2);
+    CHECK(f.value(3) == 1 && f.world.out.effects.count("text") == 2);
     CHECK(queue.size() == 1 && !queue[0].targeted &&
           queue[0].command_index == wac_command_index("text"));
     CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "all");
@@ -302,7 +304,7 @@ static void test_remote_command_classes() {
     // unregistered, invalid or local selection.
     f.run(f.select(npc) + "ptext(npc) store(v4)\nitem=65535\nptext(none) store(v5)\n" +
           f.select(local) + "pwave(brief)\n");
-    CHECK(f.value(4) == 0 && f.value(5) == 0);
+    CHECK(f.value(4) == 1 && f.value(5) == 1);
     CHECK(f.world.out.effects.count("text") == 4);
     CHECK(f.world.out.effects.count("dialog_wav") == 1);
     CHECK(queue.empty());

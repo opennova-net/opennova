@@ -1585,11 +1585,13 @@ static void test_single_health_triggers() {
     org.alive = true;
     org.health = 100;
     org.health_max = 100;
+    org.has_item_def = true; // resolved def: SSNADDHP's ItemDef gate passes
     w.registry.spawn(0, org);
     org.net_id = 44; // a pool-2 sibling: outside the retail scan set
     w.registry.spawn(2, org);
     org.net_id = 45; // unresolved def: health_max 0
     org.health_max = 0;
+    org.has_item_def = false;
     w.registry.spawn(0, org);
 
     mission::BmsEventSystem sys;

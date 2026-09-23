@@ -73,8 +73,13 @@ public:
     // hit record; the IDB name is a misnomer. [orig: Entity_ResetWeaponState @0x4F1E40]
     bool wac_kill_ssn(EntityTarget ssn);
     bool remove_ssn(EntityTarget ssn);
+    // WAC SSNHP: the health word, the attacker cleared; no gate.
+    // [orig: WacCmd_SsnHp @0x4F2100]
     bool set_ssn_hp(EntityTarget ssn, int32_t hp);
-    bool add_ssn_hp(EntityTarget ssn, int32_t delta);
+    // WAC SSNADDHP: the ItemDef gate, the 16-bit add floored at 0 and capped at
+    // the def healthMax (each returns 1); an unclamped add clears the attacker
+    // and returns 0. [orig: WacCmd_SsnAddHp @0x4F2170]
+    int32_t add_ssn_hp(EntityTarget ssn, int32_t delta);
     // WAC accuracy writes the controller-slot error pair as max(0, 100-value).
     // [orig: WacCmd_SetAccuracy @0x4F2070]
     bool set_ssn_accuracy(EntityTarget ssn, int32_t primary, int32_t secondary);
@@ -265,6 +270,8 @@ public:
     // pool-1 members only take the slot and brain words.
     // [orig: Entity_SetWaypointByTeam @0x43CD20, dispatched @0x454315]
     int group_to_waypoint(int group, int32_t wp, int32_t node = -1);
+    // WAC GroupHP: pools 0-2, the health word of every matching row; returns the
+    // rows written. [orig: WacScript_SetEntityTeamSlot @0x4F7B30 (IDB misnomer)]
     int set_group_hp(int group, int32_t hp);
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);

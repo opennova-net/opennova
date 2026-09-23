@@ -75,9 +75,11 @@ RemoteCommandResult run_remote_command(world::World &w, int cmd,
     if (ieq(n, "enableSSN")) return {true, cmds.set_ssn_disabled(H(0), false) ? 1 : 0};
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
-    if (ieq(n, "quake")) { cmds.quake(A(0)); return {true, 0}; }
-    if (ieq(n, "flash")) { cmds.lightning_flash(); return {true, 0}; }
-    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return {true, 0}; }
+    // All three return 1 [orig: WacCmd_Quake @0x4ED4CE; Env_TriggerLightningFlashA
+    // @0x4ED50A; Env_TriggerLightningFlashB @0x4ED51A].
+    if (ieq(n, "quake")) { cmds.quake(A(0)); return {true, 1}; }
+    if (ieq(n, "flash")) { cmds.lightning_flash(); return {true, 1}; }
+    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return {true, 1}; }
 
     // ---- player text / debug console ----
     // text/ptext feed the player message channel [orig: WAC text @ 0x4EDB50
@@ -85,21 +87,24 @@ RemoteCommandResult run_remote_command(world::World &w, int cmd,
     // distinct on-screen debug channel [orig: @ 0x4EDBE0 ->
     // Chat_AddDebugMessage]. Keep them separate so game hosts can present
     // mission text without leaking authored debug output into the HUD.
+    // Every one returns 1 [orig: Chat_AddSystemMessage @0x4EDB64;
+    // Chat_AddFormattedIntMessage @0x4EDBC0; Wac_ConsolDebugMessage @0x4EDBF4;
+    // WacCmd_ConsolNumber @0x4EDC50].
     if (ieq(n, "text") || ieq(n, "ptext")) {
         w.out.effects.push({"text", 0, 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
     if (ieq(n, "consol") || ieq(n, "pconsol")) {
         w.out.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
     if (ieq(n, "text#")) {
         w.out.effects.push({"text", A(1), 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
     if (ieq(n, "consol#")) {
         w.out.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
 
     // A dedicated, mission-owned voice channel with synchronous asset resolution

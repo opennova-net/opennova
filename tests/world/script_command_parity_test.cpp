@@ -368,6 +368,189 @@ static void test_ssn_item_gates_and_authority_detach() {
     CHECK(w.ai.for_handle(rider)->slot.f[37] == 0);
 }
 
+// SSNHP stores the health word (a 16-bit wrap) and clears the attacker, with no
+// gate, and returns 1. A write that leaves a living organic at or below zero
+// crosses the death edge once (with the cleared attacker) and keeps the word.
+// [orig: WacCmd_SsnHp @0x4F2100 — `mov [eax+11Eh],dx` @0x4F214C,
+// `mov [eax+178h],0` @0x4F2153, return 1 @0x4F215D]
+static void test_ssn_hp_word_and_attacker() {
+    ScriptWorld w;
+    const EntityHandle npc = spawn_npc(w, 200, 30);
+    const EntityHandle shooter = spawn_npc(w, 201, 31);
+    Entity *e = w.registry.get(npc);
+    e->last_attacker = shooter;
+    CHECK(w.commands.set_ssn_hp(npc, 40000));
+    CHECK(e->health == -25536);             // the word, not 40000
+    CHECK(!e->last_attacker.valid());
+    CHECK(w.round_sim.deaths.size() == 1);
+    if (w.round_sim.deaths.size() == 1) CHECK(!w.round_sim.deaths[0].killer.valid());
+    // A later positive write lifts the word only: no alive write, no second death.
+    e->engine_flags |= kEntityFlagDead;     // the edge claimed it
+    CHECK(w.commands.set_ssn_hp(npc, 50));
+    CHECK(e->health == 50 && !e->alive);
+    CHECK(w.commands.set_ssn_hp(npc, -7));
+    CHECK(e->health == -7);
+    CHECK(w.round_sim.deaths.size() == 1);
+    // No ItemTypeIndex or ItemDef gate.
+    Entity itemless;
+    itemless.net_id = 202;
+    itemless.health = 5;
+    const EntityHandle bare = w.registry.spawn(1, itemless);
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then set(v1,7) SSNHP(202,9000) store(v1) endif\n"));
+    run(w, 1);
+    CHECK(w.registry.get(bare)->health == 9000);
+    CHECK(w.script.vars.get_mission(1) == 1);
+}
+
+// SSNADDHP: the ItemDef pointer gates it (not the ItemTypeIndex); the 16-bit
+// add floors at 0 and caps at the def healthMax, each returning 1 with the
+// attacker kept; a plain add clears the attacker and returns 0.
+// [orig: WacCmd_SsnAddHp @0x4F2170 — gate @0x4F21B8..0x4F21BD, `add
+// [eax+11Eh],cx` @0x4F21C4, floor @0x4F21D7..0x4F21E5, cap @0x4F21E6..0x4F21FE,
+// `mov [eax+178h],0` @0x4F21FF, return 0 @0x4F2209]
+static void test_ssn_add_hp_gate_clamp_return() {
+    ScriptWorld w;
+    const EntityHandle npc = spawn_npc(w, 210, 32, 50);
+    const EntityHandle shooter = spawn_npc(w, 211, 33);
+    Entity *e = w.registry.get(npc);
+    e->last_attacker = shooter;
+    CHECK(w.commands.add_ssn_hp(npc, 20) == 0);
+    CHECK(e->health == 70 && !e->last_attacker.valid());
+    e->last_attacker = shooter;
+    CHECK(w.commands.add_ssn_hp(npc, 45) == 1);   // capped at healthMax
+    CHECK(e->health == 100 && e->last_attacker == shooter);
+    // No ItemDef: refused and untouched; a missing ItemTypeIndex is no gate.
+    e->has_item_def = false;
+    CHECK(w.commands.add_ssn_hp(npc, -5) == 0);
+    CHECK(e->health == 100);
+    e->has_item_def = true;
+    e->item_id = 0;
+    CHECK(w.commands.add_ssn_hp(npc, -5) == 0);
+    CHECK(e->health == 95);
+    // Below zero: floored, the attacker kept, the edge crossed once.
+    e->last_attacker = shooter;
+    CHECK(w.commands.add_ssn_hp(npc, -150) == 1);
+    CHECK(e->health == 0 && e->last_attacker == shooter);
+    CHECK(w.round_sim.deaths.size() == 1);
+    if (w.round_sim.deaths.size() == 1) CHECK(w.round_sim.deaths[0].killer == shooter);
+    // The add is 16-bit: 32000 + 1000 reads negative and floors.
+    const EntityHandle big = spawn_npc(w, 212, 32, 32000);
+    w.registry.get(big)->health_max = 32767;
+    CHECK(w.commands.add_ssn_hp(big, 1000) == 1);
+    CHECK(w.registry.get(big)->health == 0);
+    // The script reads the handler's return.
+    spawn_npc(w, 213, 32, 90);
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then SSNADDHP(213,500) store(v1) set(v2,7) SSNADDHP(213,-1) "
+            "store(v2) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
+}
+
+// GroupHP walks pools 0, 1, 2 (a pool-3 member is skipped) and stores the
+// health word of every matching row, touching nothing else (no attacker, no
+// alive write), and returns 1. A zeroing write keeps the word; only a living
+// organic crosses the death edge. The handler's IDB name is a misnomer.
+// [orig: WacScript_SetEntityTeamSlot @0x4F7B30 — pools @0x4F7B30/@0x4F7B6D/
+// @0x4F7B9D, the signed group match @0x4F7B57, the word @0x4F7B64, return 1
+// @0x4F7BD0]
+static void test_group_hp_pools_word_and_return() {
+    ScriptWorld w;
+    const EntityHandle a = spawn_npc(w, 220, 34);
+    const EntityHandle shooter = spawn_npc(w, 221, 35);
+    w.registry.get(a)->last_attacker = shooter;
+    Entity vehicle;
+    vehicle.net_id = 222;
+    vehicle.group_id = 34;
+    vehicle.item_id = 2001;
+    vehicle.health = 300;
+    const EntityHandle v = w.registry.spawn(1, vehicle);
+    Entity marker;
+    marker.net_id = 223;
+    marker.kind = EntityKind::Marker;
+    marker.group_id = 34;
+    marker.health = 20;
+    const EntityHandle m = w.registry.spawn(3, marker);
+    const EntityHandle corpse = spawn_npc(w, 224, 34, 0);
+    Entity *c = w.registry.get(corpse);
+    c->engine_flags |= kEntityFlagDead;
+    c->alive = false;
+    CHECK(w.commands.set_group_hp(34, 90) == 3);
+    CHECK(w.registry.get(a)->health == 90 && w.registry.get(a)->last_attacker == shooter);
+    CHECK(w.registry.get(v)->health == 90);
+    CHECK(w.registry.get(m)->health == 20);
+    CHECK(c->health == 90 && !c->alive);    // a corpse keeps its latch
+    CHECK(w.round_sim.deaths.empty());
+    CHECK(w.commands.set_group_hp(34, -5) == 3);
+    CHECK(w.registry.get(a)->health == -5 && c->health == -5 && w.registry.get(v)->health == -5);
+    CHECK(w.round_sim.deaths.size() == 1);
+    if (w.round_sim.deaths.size() == 1) CHECK(w.round_sim.deaths[0].victim == a);
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then set(v1,7) GroupHP(34,60) store(v1) set(v2,7) GroupHP(77,60) "
+            "store(v2) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1); // no member: still 1
+}
+
+// Handlers that return 1 whatever they did; the value folds into the
+// accumulator `store` reads.
+// [orig: WacAction_Win @0x4ED4AD; WacCmd_Tod @0x4EDC7F; WacCmd_Quake @0x4ED4CE;
+// Env_TriggerLightningFlashA @0x4ED50A; Env_TriggerLightningFlashB @0x4ED51A;
+// Chat_AddSystemMessage @0x4EDB64; Chat_AddFormattedIntMessage @0x4EDBC0;
+// Wac_ConsolDebugMessage @0x4EDBF4; WacCmd_ConsolNumber @0x4EDC50;
+// TextResource_GetMissionString (GtoWP) @0x4ED3E4; WacCmd_GroupSetAccuracy
+// @0x4F7C43]
+static void test_wac_handler_returns() {
+    ScriptWorld w;
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then "
+            "set(v1,7) TOD(600) store(v1) "
+            "set(v2,7) quake(1) store(v2) "
+            "set(v3,7) flash() store(v3) "
+            "set(v4,7) farflash() store(v4) "
+            "set(v5,7) text(a_text) store(v5) "
+            "set(v6,7) consol(a_debug) store(v6) "
+            "set(v7,7) text#(n_text,3) store(v7) "
+            "set(v8,7) consol#(n_debug,4) store(v8) "
+            "set(v9,7) GtoWP(40,1) store(v9) "
+            "set(v10,7) Gsetaccuracy(40,50,50) store(v10) "
+            "set(v11,7) ptext(p_text) store(v11) "
+            "set(v12,7) pconsol(p_debug) store(v12) "
+            "set(v13,7) win(0) store(v13) "
+            "endif\n"));
+    run(w, 1);
+    for (int i = 1; i <= 13; ++i) {
+        if (w.script.vars.get_mission(i) != 1)
+            std::printf("  v%d = %d\n", i, static_cast<int>(w.script.vars.get_mission(i)));
+        CHECK(w.script.vars.get_mission(i) == 1);
+    }
+}
+
+// TOD stores minute * 0x44444 raw; the weather tick wraps the advanced clock
+// into the day on the SIGNED word, so a negative minute lands before midnight.
+// [orig: WacCmd_Tod @0x4EDC70 — `imul eax,44444h` @0x4EDC74, the store
+// @0x4EDC7A; Environment_ComputeTimeOfDayColors @0x57DE40 — the signed wrap
+// @0x57DE51..0x57DE78, the store @0x57DE84]
+static void test_tod_raw_store_and_signed_day_wrap() {
+    ScriptWorld w;
+    WeatherTickEvents events;
+    w.commands.set_time_of_day_minutes(-60);
+    CHECK(w.weather.tod_fixed24 == 0xFF000010u);          // -60 * 0x44444, raw
+    w.weather.tick_sim(nullptr, events);
+    CHECK(w.weather.tod_fixed24 == 0x17000010u);          // 23:00, not 15:00
+    w.commands.set_time_of_day_minutes(1500);            // past a day
+    CHECK(w.weather.tod_fixed24 == 1500u * 0x44444u);
+    w.weather.tick_sim(nullptr, events);
+    CHECK(w.weather.tod_fixed24 == 1500u * 0x44444u - WeatherState::kTodDayFixed24);
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
@@ -380,6 +563,11 @@ int main() {
     test_ssn_dead_alive_read_the_flag();
     test_ssn_wounded_signed_compare();
     test_ssn_item_gates_and_authority_detach();
+    test_ssn_hp_word_and_attacker();
+    test_ssn_add_hp_gate_clamp_return();
+    test_group_hp_pools_word_and_return();
+    test_wac_handler_returns();
+    test_tod_raw_store_and_signed_day_wrap();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;
