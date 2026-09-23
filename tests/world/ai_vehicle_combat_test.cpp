@@ -5,7 +5,7 @@
 // target, WEAPON_TURRET blocks stage between processed ticks, the no-ammo
 // latch forces the processed leg, the primary continuation solves from a level
 // pitch, the stationary RC_FIRE leg, the ATEAM sweep, the ATEAM_LOCK replay
-// and the chase.
+// and the chase; and the state-8 aircraft tick's rescan clear.
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -474,6 +474,70 @@ static void test_chase_matches_the_target_inside_min_chase() {
     }
 }
 
+// R2-2, the aircraft twin: the state-8 tick rescans through the same
+// AIEntity_TryAcquireTarget, so a rescan that finds nothing clears brain[38],
+// AiSlot[3] and the refcount there too. The tick still bears on the old
+// pointer (the flee heading here) and the processed fire has no solver target.
+// [orig: Entity_ProcessInfantryWeaponFire @0x471710: TryAcquireTarget call
+//  @0x472349, `test eax,eax; jz` @0x472351..0x472355, flee heading
+//  `lea ecx,[ebx+7FFFFF80h]` @0x4723DA]
+static void test_aircraft_failed_rescan_drops_the_target() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(1, 8);
+    w.tables.ammo.entries.resize(2);
+    w.tables.ammo.entries[1].valid = true;
+    w.tables.ammo.entries[1].velocity = 620;
+    w.tables.ammo.entries[1].max_age_ticks = 100;
+    Entity hull{};
+    hull.alive = true;
+    hull.health = 500;
+    hull.team = 1;
+    hull.position = Vec3{0.0f, 0.0f, 10.0f};
+    const EntityHandle hull_h = w.registry.spawn(1, hull);
+    Entity victim{};
+    victim.alive = true;
+    victim.health = 100;
+    victim.team = 2;
+    victim.position = Vec3{100.0f, 0.0f, 10.0f};
+    const EntityHandle victim_h = w.registry.spawn(0, victim);
+
+    AiSystem &sys = w.ai;
+    sys.is_authority = true;
+    AiEntity &ai = *sys.at(sys.attach(hull_h));
+    ai.health = 500;
+    ai.team = 1;
+    ai.pos[2] = 10 << 16;
+    AiProfile &p = ai.profile;
+    p.type = 1;
+    p.flags100 = 4; // FLEE: the processed leg turns to the half-turn heading
+    p.approach_cap = 1000 << 16;
+    p.radar_fov_bam = INT32_MAX;
+    p.fov_secondary = 0x7f;
+    p.fire_a.ammo_index = 1;
+    p.fire_a.cone_bam = INT32_MAX;
+    p.fire_interval_a = 1;
+    AiBrain &b = ai.brain;
+    b.f[AiBrain::kSpeedA] = 2000;
+    b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = kAiHeloCombat;
+    AiThinkCtx ctx{&sys, &ai, &w, nullptr};
+    sys.row(kAiHeloCombat).enter(ctx);
+    sys.ai_set_target(w, ai, victim_h);
+    b.f[AiBrain::kAmmoA] = 4;
+    b.f[AiBrain::kAccuracy] = 4;
+    b.f[AiBrain::kTickAccum] = 15;      // the enter's step 1 completes a processed tick
+    b.f[AiBrain::kRetargetTimer] = 240; // + 16 this tick = 256 > 248: the rescan runs
+    CHECK(w.registry.get(victim_h)->ai_target_refcount == 1);
+    sys.row(kAiHeloCombat).tick(ctx);
+    CHECK(b.f[AiBrain::kRetargetTimer] == 0);
+    CHECK(b.f[AiBrain::kTargetSlot] == 0);
+    CHECK(ai.slot.f[3] == 0);
+    CHECK(w.registry.get(victim_h)->ai_target_refcount == 0);
+    CHECK(b.f[AiBrain::kWorkHeading] == 0x7FFFFF80); // bearing 0 plus the half turn
+    CHECK(w.out.rounds.count == 0);
+}
+
 int main() {
     test_processed_fire_checks_los_and_the_continuation_defers_it();
     test_failed_rescan_drops_the_target();
@@ -484,6 +548,7 @@ int main() {
     test_ateam_sweep_steps_per_shot();
     test_ateam_lock_replays_the_saved_pose();
     test_chase_matches_the_target_inside_min_chase();
+    test_aircraft_failed_rescan_drops_the_target();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

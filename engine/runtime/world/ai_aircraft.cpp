@@ -726,16 +726,21 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		follow();
 		return;
 	}
+	// Every rescan feeds its result to Entity_SetAITarget, so a scan that finds
+	// nothing clears brain[38]; the bearing keeps the old pointer while the
+	// solves below read brain[38] [orig: AIEntity_TryAcquireTarget @0x4716B0
+	// (`call Entity_SetAITarget` @0x4716F0); caller `test eax,eax; jz`
+	// @0x472351..0x472355].
+	const Entity *tracked = target;
 	if (b.f[AiBrain::kRetargetTimer] > 248) {
 		b.f[AiBrain::kRetargetTimer] = 0;
 		AiTarget fresh{};
-		if (acquire_target(world, ai, fresh))
-			ai_set_target(world, ai, fresh.handle);
+		ai_set_target(world, ai, acquire_target(world, ai, fresh) ? fresh.handle : EntityHandle{});
 		target = target_entity(world, b.f[AiBrain::kTargetSlot]);
-		if (target == nullptr)
-			return;
+		if (target != nullptr)
+			tracked = target;
 	}
-	const int32_t bearing = target_heading(ai, *target);
+	const int32_t bearing = target_heading(ai, *tracked);
 	if ((p.flags100 & 1) != 0)
 		follow();
 	else if ((p.flags100 & 4) != 0 || b.f[AiBrain::kNoTargetIdle] != 0)
