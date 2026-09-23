@@ -626,17 +626,12 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac,
 				world.rules.projectile_authority ? files_ : no_layers,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
-		if (status == wac::WacLayeredLoadStatus::kBlocked) {
-			if (options.wac_strict_diagnostics) {
-				wac_blocked_error = std::move(wac_error);
-			} else {
-				io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
-						wac_error.c_str());
-			}
-		} else {
+				&world, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
+		// Only strict mode refuses a program; the game's policy always installs.
+		if (status == wac::WacLayeredLoadStatus::kBlocked)
+			wac_blocked_error = std::move(wac_error);
+		else
 			wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
-		}
 	}
 	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
 	// net-re §5.2b) — after load (the spawn needs the AI system wired). A

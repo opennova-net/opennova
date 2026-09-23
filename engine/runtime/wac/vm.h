@@ -72,6 +72,10 @@ public:
     uint64_t dispatch_count() const { return dispatch_count_; }
 	RuntimeState capture_runtime_state() const;
 	void restore_runtime_state(const Program &program, const RuntimeState &state);
+	// The dword behind a variable, event or engine operand as it stands now
+	// (0 for any other kind): what a new compile's GLOOP operand reads before
+	// the load resets it. [orig: Script_Compile @0x4F368A]
+	int32_t current_value(opennova::world::World &world, uint32_t ref) const;
 
 private:
     const Program *prog_ = nullptr;

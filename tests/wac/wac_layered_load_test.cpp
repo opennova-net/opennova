@@ -1,11 +1,11 @@
 // The game.wac / server.wac / <mission>.wac layered load (engine/runtime/wac/
 // wac_layered_load.h): the retail layer order compiled as ONE program, the
-// absent-layers BMS-only case, and the two diagnostic policies — the game's
-// lenient one and the dedicated golden host's strict one, where EVERY
-// diagnostic is fatal because running a partial script is a known wire-parity
-// failure. (The behavioral checks moved here from the deleted apps/nw_server
+// absent-layers BMS-only case, and the two diagnostic policies: the game's,
+// which like retail always installs, and the dedicated golden host's strict
+// one, which refuses a literal missing the mounted catalogs. (The behavioral checks moved here from the deleted apps/nw_server
 // startup lib's tests, ADR 0042 d3.)
 
+#include <formats/wac/bytecode.h>
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
@@ -104,7 +104,7 @@ void test_wac_layers_execute_in_retail_order() {
 	world.cached.humans = 1;
 	wc::WacSystem wac;
 	std::string error;
-	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world,
 				  /*strict_diagnostics=*/true, error) ==
 			wc::WacLayeredLoadStatus::kLoaded);
 	CHECK(error.empty());
@@ -152,7 +152,7 @@ void test_retail_two_word_else_if_chain_nests() {
 	world.cached.humans = 1;
 	wc::WacSystem wac;
 	std::string error;
-	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world,
 				  /*strict_diagnostics=*/false, error) ==
 			wc::WacLayeredLoadStatus::kLoaded);
 	CHECK(error.empty());
@@ -165,26 +165,65 @@ void test_retail_two_word_else_if_chain_nests() {
 	CHECK(world.script.vars.get_mission(2) == 0); // the trailing IF sits in the else branch
 }
 
-void test_strict_mode_blocks_what_the_game_only_warns_on() {
-	// The shared compiler labels recoverable/legacy issues as WARNINGS —
-	// an unknown command, an out-of-range V# clamp — so the game's lenient
-	// policy keeps retail scripts running. Both are lossy compiles, so the
-	// golden host's strict policy must refuse them rather than diverge on
-	// the wire.
+void test_only_strict_mode_refuses_and_only_catalog_misses() {
+	// Retail never refuses a script: an unknown command or an out-of-range
+	// V# is a first error and the program runs [orig: WacScript_InitAndLoad
+	// @0x4F94A8 / @0x4F950E / @0x4F9597 ignore the returns, @0x4F976B
+	// executes]. Both policies load them. A literal that misses the mounted
+	// FX catalog (here the root has none) is where the port could part from
+	// retail, so the strict host refuses it; the game's policy still loads.
 	for (const char *source : {"if never then bogus_command_xyz(1) endif\n",
 				 "if never then set(v9999,1) endif\n"}) {
 		TempResourceRoot root;
 		root.write("sample.wac", source);
-		wc::WacSystem lenient, strict;
-		std::string error;
-		CHECK(wc::wac_layered_load(lenient, root.files(), "sample", nullptr,
-					  /*strict_diagnostics=*/false, error) ==
-				wc::WacLayeredLoadStatus::kLoaded);
-		CHECK(error.empty());
-		CHECK(wc::wac_layered_load(strict, root.files(), "sample", nullptr,
-					  /*strict_diagnostics=*/true, error) ==
-				wc::WacLayeredLoadStatus::kBlocked);
-		CHECK(error.find("failed to compile cleanly") != std::string::npos);
+		for (const bool strict : {false, true}) {
+			wc::WacSystem wac;
+			std::string error;
+			CHECK(wc::wac_layered_load(wac, root.files(), "sample", nullptr, strict, error) ==
+					wc::WacLayeredLoadStatus::kLoaded);
+			CHECK(error.empty() && !wac.program().diagnostics.empty());
+		}
+	}
+	TempResourceRoot root;
+	root.write("sample.wac", "if never then fx2tgt(nosuch, 1) endif\n");
+	wc::WacSystem lenient, strict;
+	std::string error;
+	CHECK(wc::wac_layered_load(lenient, root.files(), "sample", nullptr,
+				  /*strict_diagnostics=*/false, error) ==
+			wc::WacLayeredLoadStatus::kLoaded);
+	CHECK(error.empty());
+	CHECK(wc::wac_layered_load(strict, root.files(), "sample", nullptr,
+				  /*strict_diagnostics=*/true, error) ==
+			wc::WacLayeredLoadStatus::kBlocked);
+	CHECK(error.find("sample.wac (1) Unknown FX") != std::string::npos);
+}
+
+// A GLOOP operand ORs the dword behind its resolved address into the GROUP
+// word while the compile runs: a named value, a V# and an event read what the
+// world and the installed program hold before the load resets anything.
+// [orig: Script_Compile @0x4F365D..0x4F3693 (`mov ecx, [eax]` @0x4F368A,
+// `or [eax], ecx` @0x4F3693)]
+void test_gloop_operand_ors_the_load_time_dword() {
+	TempResourceRoot root;
+	root.write("sample.wac",
+			"gloop accuracyspread inc(v1) end\n"
+			"gloop v5 inc(v2) end\n"
+			"gloop g_redai inc(v3) end\n");
+	w::World world;
+	world.script.wac_values.accuracy_spread = 3;
+	world.script.vars.set_mission(5, 2);
+	wc::WacSystem wac;
+	std::string error;
+	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world, false, error) ==
+			wc::WacLayeredLoadStatus::kLoaded);
+	std::vector<uint32_t> groups;
+	for (const uint32_t word : wac.program().code)
+		if (wc::instr_op(word) == wc::Op::GroupIter) groups.push_back(word);
+	CHECK(groups.size() == 3);
+	if (groups.size() == 3) {
+		CHECK(groups[0] == 0x0A000003u); // the named value's dword
+		CHECK(groups[1] == 0x0A000002u); // V5's dword
+		CHECK(groups[2] == 0x0A000006u); // the pooled group index
 	}
 }
 
@@ -198,7 +237,7 @@ void test_run_files_share_order_symbols_and_diagnostics() {
     w::World world;
     wc::WacSystem wac;
     std::string error;
-    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world,
             true, error) == wc::WacLayeredLoadStatus::kLoaded);
     CHECK(error.empty());
     world.add_system(&wac);
@@ -213,7 +252,7 @@ void test_run_files_share_order_symbols_and_diagnostics() {
     // depth gate before any file read. [orig: Script_Compile @0x4F35A5..0x4F35E1]
     const auto first_error = [&](const char *leaf) {
         root.write("leaf.wac", leaf);
-        const bool loaded = wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+        const bool loaded = wc::wac_layered_load(wac, root.files(), "sample", &world,
                 false, error) == wc::WacLayeredLoadStatus::kLoaded;
         const auto &diagnostics = wac.program().diagnostics;
         return loaded && !diagnostics.empty() ? diagnostics[0].message : std::string();
@@ -226,11 +265,10 @@ void test_run_files_share_order_symbols_and_diagnostics() {
 } // namespace
 
 // `gloop(G_x)` is the retail Unknown Group leg, not a structural error: the
-// `(` is the group token, the compile keeps running with group 0, and the
-// game's lenient policy loads the script (the strict host still refuses every
-// diagnostic). [orig: Script_Compile tokenizer @0x4f32e0..0x4f3464; the GLOOP
-//  operand resolve @0x4f365d..0x4f3693 -> WacScript_ResolveParameter group leg
-//  @0x4f30fc]
+// `(` is the group token, the compile keeps running with group 0, and both
+// policies load the script. [orig: Script_Compile tokenizer
+//  @0x4f32e0..0x4f3464; the GLOOP operand resolve @0x4f365d..0x4f3693 ->
+//  WacScript_ResolveParameter group leg @0x4f30fc]
 void test_parenthesised_gloop_is_the_unknown_group_leg() {
 	TempResourceRoot root;
 	root.write("sample.wac", "gloop(G_ai) inc(v1) end\ninc(v2)\n");
@@ -238,7 +276,7 @@ void test_parenthesised_gloop_is_the_unknown_group_leg() {
 	world.registry.configure_pool(0, 4);
 	wc::WacSystem lenient, strict;
 	std::string error;
-	CHECK(wc::wac_layered_load(lenient, root.files(), "sample", &world.registry,
+	CHECK(wc::wac_layered_load(lenient, root.files(), "sample", &world,
 				  /*strict_diagnostics=*/false, error) ==
 			wc::WacLayeredLoadStatus::kLoaded);
 	CHECK(error.empty());
@@ -247,10 +285,10 @@ void test_parenthesised_gloop_is_the_unknown_group_leg() {
 	CHECK(lenient.execute_initial(world));
 	CHECK(world.script.vars.get_mission(1) == 0); // group 0 is empty: the body never runs
 	CHECK(world.script.vars.get_mission(2) == 1); // the script kept running past the error
-	CHECK(wc::wac_layered_load(strict, root.files(), "sample", &world.registry,
+	CHECK(wc::wac_layered_load(strict, root.files(), "sample", &world,
 				  /*strict_diagnostics=*/true, error) ==
-			wc::WacLayeredLoadStatus::kBlocked);
-	CHECK(error.find("failed to compile cleanly") != std::string::npos);
+			wc::WacLayeredLoadStatus::kLoaded);
+	CHECK(error.empty());
 	bool unknown_group = false;
 	for (const wc::Diagnostic &d : lenient.program().diagnostics)
 		if (!d.error && d.message.find("Unknown Group") != std::string::npos) unknown_group = true;
@@ -263,7 +301,8 @@ int main() {
 	test_wac_layers_execute_in_retail_order();
 	test_absent_layers_are_the_valid_bms_only_mission();
 	test_retail_two_word_else_if_chain_nests();
-	test_strict_mode_blocks_what_the_game_only_warns_on();
+	test_only_strict_mode_refuses_and_only_catalog_misses();
+	test_gloop_operand_ors_the_load_time_dword();
 	std::printf(failures ? "WAC LAYERED LOAD TEST FAILED (%d)\n"
 	                     : "wac layered load test passed\n",
 	            failures);

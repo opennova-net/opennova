@@ -86,7 +86,7 @@ def signed(value):
 def strcspn_ci(text, charset):
     """SHLWAPI StrCSpnIA; the real API when the host has it."""
     if os.name == 'nt':
-        api = ctypes.WinDLL(str(Path(os.environ['SystemRoot']) / 'System32' / 'shlwapi.dll')).StrCSpnIA
+        api = ctypes.WinDLL('shlwapi.dll').StrCSpnIA
         api.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
         api.restype = ctypes.c_int
         return api(text, charset)

@@ -193,6 +193,18 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
     }
 }
 
+int32_t WacVm::current_value(opennova::world::World &w, uint32_t ref) const {
+    switch (operand_kind(ref)) {
+        case OperandKind::MissionVar:
+        case OperandKind::GlobalVar:
+        case OperandKind::EventFired:
+        case OperandKind::Builtin:
+            return read(w, ref);
+        default:
+            return 0;
+    }
+}
+
 // The string a string-typed parameter hands its handler. Text and Filename
 // are raw slots: the handler reads the bytes at the operand's address, the
 // string-pool copy the resolver made [orig: WacScript_ResolveParameter

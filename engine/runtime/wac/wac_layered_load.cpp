@@ -1,5 +1,7 @@
 #include <runtime/wac/wac_layered_load.h>
 
+#include <formats/mus/mus.h>
+#include <formats/wac/bytecode.h>
 #include <formats/wac/program.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/world/ammo_table_build.h>
@@ -7,6 +9,7 @@
 #include <formats/particle/parser.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/audio/bank_chain.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <string>
@@ -55,7 +58,7 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
 
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
-		const std::string &mission_basename, world::EntityRegistry *registry,
+		const std::string &mission_basename, world::World *world,
 		bool strict_diagnostics, std::string &error, particle::EffectCatalogNames *effect_catalog,
         const audio::SoundSetIndex *sound_catalog,
         const std::shared_ptr<opennova::mus::MusGlobals> &music_globals) {
@@ -86,7 +89,15 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		sources.emplace_back(bytes.begin(), bytes.end());
         env.source_names.push_back(name);
 	}
-	env.registry = registry;
+	env.registry = world != nullptr ? &world->registry : nullptr;
+	// The GLOOP operand reads the dword behind a variable, event or engine
+	// word as the load finds it: the installed program's VM and the world,
+	// or the music context. [orig: Script_Compile @0x4F368A..0x4F3693]
+	env.load_dword = [&system, world, music_globals](uint32_t ref) -> uint32_t {
+		if (operand_kind(ref) == OperandKind::MusicVar)
+			return music_globals ? uint32_t(mus::mus_globals_read(*music_globals, operand_index(ref))) : 0u;
+		return world != nullptr ? uint32_t(system.vm().current_value(*world, ref)) : 0u;
+	};
     // WAC binds ammo names during compilation, before the initial execution.
     // Read the same mounted ammo.def/table builder as MissionKernel: this
     // temporary table supplies indices, while World owns live ballistics.
@@ -108,17 +119,16 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
     if (!effect_catalog) load_script_effect_catalog(files, temporary_effects);
     env.effects = effect_catalog ? effect_catalog : &temporary_effects;
 	Program program = compile_program(sources, env);
-	// ok() is false only when a diagnostic carries error=true, so the strict
-	// arm's "every diagnostic is fatal" test subsumes it.
-	const bool blocked =
-			strict_diagnostics ? !program.diagnostics.empty() : !program.ok();
-	if (blocked) {
-		error = "WAC for " + mission_basename + " failed to compile cleanly (" +
+	// Only strict mode refuses, and only a catalog miss (Diagnostic::error).
+	if (strict_diagnostics && !program.ok()) {
+		error = "WAC for " + mission_basename + " misses the mounted catalogs (" +
 				std::to_string(program.error_count()) + " error(s), " +
 				std::to_string(program.diagnostics.size()) + " diagnostic(s))";
 		for (const Diagnostic &diagnostic : program.diagnostics) {
-			error += ": line " + std::to_string(diagnostic.line) + ", column " +
-					std::to_string(diagnostic.col) + ": " + diagnostic.message;
+			if (!diagnostic.error) continue;
+			const std::string file = diagnostic.source < program.source_names.size()
+					? program.source_names[diagnostic.source] : std::string();
+			error += ": " + file + " (" + std::to_string(diagnostic.line) + ") " + diagnostic.message;
 			break;
 		}
 		return WacLayeredLoadStatus::kBlocked;

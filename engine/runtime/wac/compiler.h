@@ -9,6 +9,7 @@
 // bytecode.h; the instruction words are the retail encoding.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -45,6 +46,10 @@ struct CompileEnv {
     std::vector<std::string> source_names; // parallel to compile_program's source texts
     std::function<bool(const std::string &, std::string &)> load_source; // RUN's mounted-file reader
     std::shared_ptr<opennova::mus::MusGlobals> music_globals;
+    // The dword behind a variable, event or engine operand while the compile
+    // runs, before the load resets anything: a GLOOP operand ORs it into the
+    // GROUP word. Absent answers 0. [orig: Script_Compile @0x4F368A..0x4F3693]
+    std::function<uint32_t(uint32_t ref)> load_dword;
 };
 
 // One source compiled as a whole program (terminator appended).

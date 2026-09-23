@@ -71,10 +71,10 @@ struct KernelBootOptions {
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
-	// EVERY WAC diagnostic is fatal and fails the boot (the dedicated golden
-	// host's policy — running a partial script is a known wire-parity
-	// failure). false = the game's lenient policy: only a compile FAILURE
-	// blocks, and a blocked program merely disables scripts with a warning.
+	// A WAC literal that misses the mounted FX, SOUNDSET or AMMO catalog fails
+	// the boot (the dedicated golden host's policy: the port's catalogs are
+	// where a compile could part from retail's). false = the game's policy,
+	// retail's: the program always installs with its first error recorded.
 	// Feeds wac_layered_load's strict_diagnostics flag.
 	bool wac_strict_diagnostics = false;
 	bool collision = true;

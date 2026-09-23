@@ -13,7 +13,7 @@
 #include <string>
 
 namespace opennova::world {
-class EntityRegistry;
+class World;
 }
 
 namespace opennova::particle { class EffectCatalogNames; struct EffectSceneConfig; }
@@ -24,23 +24,26 @@ namespace opennova::wac {
 enum class WacLayeredLoadStatus {
 	kAbsent,  // no layer exists: an empty program is installed for the BMS-only mission
 	kLoaded,  // compiled and installed on the WacSystem
-	kBlocked, // diagnostics blocked the load; `error` says why, scripts stay off
+	kBlocked, // strict mode refused the program; `error` says why, scripts stay off
 };
 
-// `registry` lets symbolic group/area names resolve to interned ids; mission
-// promotion has populated it by the time the boot's install_wac step runs.
-// Lenient (`strict_diagnostics` false — the game's policy, and the rig's):
-// only a program that failed to compile (`!ok()`) is blocked; the shared
-// compiler labels recoverable/legacy syntax issues as warnings so retail
-// scripts keep running. Strict (the dedicated golden host's policy): EVERY
-// diagnostic is fatal — running a partial script is a known wire-parity
-// failure. The FX and SOUNDSET literals bind against the embedder's catalogs
-// (MissionKernel builds both once per boot, see load_script_effect_catalog /
-// load_script_sound_sets); a caller without them gets temporaries read from
-// the same files.
+// `world` lends its registry, so symbolic group names resolve to the mission's
+// groups (mission promotion has populated it by the time the boot's
+// install_wac step runs), and the values a GLOOP operand reads before the load
+// resets them (CompileEnv::load_dword). Lenient (`strict_diagnostics` false,
+// the game's policy): retail never refuses a script, it keeps the first
+// error and runs what compiled [orig: WacScript_InitAndLoad @0x4F91F0 ignores
+// the compiles' returns @0x4F94A8 / @0x4F950E / @0x4F9597 and executes
+// @0x4F976B]. Strict (the dedicated golden host's policy): a literal that
+// misses the embedder's FX, SOUNDSET or AMMO catalog (Diagnostic::error),
+// where the port's catalogs could part from retail's, refuses the boot; every
+// other first error is retail's own and loads. The FX and SOUNDSET literals
+// bind against the embedder's catalogs (MissionKernel builds both once per
+// boot, see load_script_effect_catalog / load_script_sound_sets); a caller
+// without them gets temporaries read from the same files.
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
-		const std::string &mission_basename, world::EntityRegistry *registry,
+		const std::string &mission_basename, world::World *world,
 		bool strict_diagnostics, std::string &error,
         particle::EffectCatalogNames *effect_catalog = nullptr,
         const audio::SoundSetIndex *sound_catalog = nullptr,

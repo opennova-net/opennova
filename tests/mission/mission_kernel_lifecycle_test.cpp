@@ -3,9 +3,9 @@
 // before open, an unmountable root), the play-start baseline the embedders
 // seal after the spawn (capture_baseline / restore_baseline rewind the
 // registry, the local player's position and health, the logic clock and the
-// event latches), the strict-vs-lenient WAC diagnostic policy (a program
-// that compiles with a warning loads under the game's policy and refuses the
-// boot under the dedicated host's), and the no-terrain path (no field, no
+// event latches), the strict-vs-lenient WAC diagnostic policy (retail's own
+// first errors load under both, a literal the mounted catalogs miss refuses
+// the dedicated host's boot), and the no-terrain path (no field, no
 // grounding, the teleport seams still work).
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -165,9 +165,8 @@ int main() {
 	}
 
 	// --- the WAC diagnostic policy ---------------------------------------------
-	// An unknown command is a compiler WARNING (older games extend the
-	// keyword set): the program compiles, so the game's lenient policy loads
-	// it and the dedicated host's strict policy refuses the boot.
+	// An unknown command is retail's first error "Unknown '...'" and the
+	// program runs anyway, so the game's policy loads it.
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
@@ -181,6 +180,8 @@ int main() {
 		CHECK(kernel.wac_loaded);
 		CHECK(kernel.wac.vm().loaded());
 	}
+	// Strict mode loads retail's own first errors and refuses only a literal
+	// the mounted catalogs miss (no .ptl here, so every FX name misses).
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
@@ -190,11 +191,23 @@ int main() {
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
 		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.wac_loaded);
+		CHECK(!kernel.wac.program().diagnostics.empty() &&
+				kernel.wac.program().diagnostics[0].message == "Unknown 'BOGUS_COMMAND'");
+	}
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then fx2tgt(nosuch_effect, 1) endif\n";
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.wac_strict_diagnostics = true;
+		std::string error;
 		CHECK(!kernel.boot(options, error));
 		CHECK(!kernel.wac_loaded);
-		CHECK(error.find("failed to compile cleanly") != std::string::npos);
-		// retail's wording, the token upper-cased [orig: Script_Compile @0x4F5284..0x4F52B4]
-		CHECK(error.find("Unknown 'BOGUS_COMMAND'") != std::string::npos);
+		CHECK(error.find("Unknown FX") != std::string::npos);
 	}
 	// No script at all is the valid BMS-only mission under both policies.
 	{

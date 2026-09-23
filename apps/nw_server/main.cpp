@@ -401,9 +401,9 @@ int main(int argc, char **argv) {
 	}
 
 	// --- The kernel boot as DedicatedHost: terrain grounding, tables,
-	//     collision, infantry .adm, the strict WAC walk (EVERY diagnostic is
-	//     fatal here — running a partial script is a known wire-parity
-	//     failure), and the HostOnly session bring-up at the witnessed spot
+	//     collision, infantry .adm, the strict WAC walk (a literal missing the
+	//     mounted FX/SOUNDSET/AMMO catalogs refuses the boot: there the port
+	//     could part from retail), and the HostOnly session bring-up at the witnessed spot
 	//     inside the load. A refused boot aborts before the UDP socket opens. ---
 	// The host role (ADR 0043 d3): the listen state, the bring-up, and the ONE
 	// dedicated frame every fixed tick; `host` aliases its state for the ctx feeds.

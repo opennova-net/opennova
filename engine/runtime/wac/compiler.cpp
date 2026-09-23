@@ -1284,11 +1284,14 @@ private:
 	}
 
 	// The dword a resolved address holds during the compile: a pool slot's
-	// value; the variable banks and engine words hold nothing yet.
+	// value, else what the embedder's variable banks, events and engine
+	// words hold before the load resets them. [orig: `mov ecx, [eax]`
+	// @0x4F368A]
 	uint32_t compile_time_dword(uint32_t ref) const {
-		if (operand_kind(ref) == OperandKind::Pool && operand_index(ref) < prog_.operands.size())
-			return static_cast<uint32_t>(prog_.operands[operand_index(ref)]);
-		return 0;
+		if (operand_kind(ref) == OperandKind::Pool)
+			return operand_index(ref) < prog_.operands.size()
+					? static_cast<uint32_t>(prog_.operands[operand_index(ref)]) : 0u;
+		return env_.load_dword ? env_.load_dword(ref) : 0u;
 	}
 };
 

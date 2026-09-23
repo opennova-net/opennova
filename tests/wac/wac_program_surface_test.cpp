@@ -93,7 +93,7 @@ static void test_layered_load_layers_and_skips_absent() {
         WacSystem sys;
         std::string error;
         const WacLayeredLoadStatus status = wac_layered_load(sys, source_over(&files), "m01",
-                /*registry=*/nullptr, /*strict_diagnostics=*/false, error);
+                /*world=*/nullptr, /*strict_diagnostics=*/false, error);
         CHECK(status == WacLayeredLoadStatus::kLoaded);
         CHECK(sys.program().event_count == 1);
         CHECK(sys.vm().loaded());
@@ -103,7 +103,7 @@ static void test_layered_load_layers_and_skips_absent() {
         WacSystem sys;
         std::string error;
         const WacLayeredLoadStatus status = wac_layered_load(sys, source_over(&empty), "m01",
-                /*registry=*/nullptr, /*strict_diagnostics=*/false, error);
+                /*world=*/nullptr, /*strict_diagnostics=*/false, error);
         CHECK(status == WacLayeredLoadStatus::kAbsent);
         CHECK(sys.vm().loaded());
         CHECK(sys.program().code.size() == 1);
