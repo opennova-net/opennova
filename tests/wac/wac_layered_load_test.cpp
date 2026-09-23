@@ -5,6 +5,7 @@
 // one, which refuses a literal missing the mounted catalogs. (The behavioral checks moved here from the deleted apps/nw_server
 // startup lib's tests, ADR 0042 d3.)
 
+#include <formats/rtxt/rtxt.h>
 #include <formats/wac/bytecode.h>
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/wac/wac_system.h>
@@ -19,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -60,6 +62,18 @@ public:
 		std::ofstream output(path / name, std::ios::binary);
 		output << source;
 		CHECK(output.good());
+	}
+
+	// One RTXT table with a single "Text" section.
+	void write_text(const std::string &name,
+			const std::vector<std::pair<std::string, std::string>> &rows) const {
+		opennova::rtxt::File table;
+		table.sections.push_back({"Text", uint32_t(rows.size())});
+		for (const auto &[key, text] : rows) table.entries.push_back({key, text, {}, 0});
+		std::vector<uint8_t> bytes;
+		std::string error;
+		CHECK(opennova::rtxt::write(table, bytes, error));
+		write(name, std::string(bytes.begin(), bytes.end()));
 	}
 
 	// The embedder's mounted-file source over this directory (the shape the
@@ -262,6 +276,36 @@ void test_run_files_share_order_symbols_and_diagnostics() {
     CHECK(first_error("run missing\n") == "A run file can't run more files");
 }
 
+// A TextToken resolves at the compile: the mission's text table, then
+// gametext.bin; with no mission table every key is the shared "".
+// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0 (no table @0x51ECE7,
+// the game-text fallback @0x51ED08, the "" @0x51ED2A)]
+void test_text_tokens_read_the_mounted_text_tables() {
+	const char *script = "ssnname(5, TT_GREETING) ssnname(6, TT_FALLBACK) ssnname(7, TT_NOSUCH)\n";
+	const auto texts = [](const wc::Program &program) {
+		std::vector<std::string> out;
+		for (const wc::TextToken &token : program.text_tokens) out.push_back(token.key + "=" + token.text);
+		return out;
+	};
+	TempResourceRoot root;
+	root.write("sample.wac", script);
+	root.write_text("sample.bin", {{"GREETING", "Welcome"}});
+	root.write_text("gametext.bin", {{"FALLBACK", "From game"}, {"GREETING", "Shadowed"}});
+	wc::WacSystem wac;
+	std::string error;
+	CHECK(wc::wac_layered_load(wac, root.files(), "sample", nullptr, false, error) ==
+			wc::WacLayeredLoadStatus::kLoaded);
+	CHECK((texts(wac.program()) ==
+			std::vector<std::string>{"GREETING=Welcome", "FALLBACK=From game", "="}));
+
+	TempResourceRoot bare;
+	bare.write("sample.wac", script);
+	bare.write_text("gametext.bin", {{"FALLBACK", "From game"}});
+	CHECK(wc::wac_layered_load(wac, bare.files(), "sample", nullptr, false, error) ==
+			wc::WacLayeredLoadStatus::kLoaded);
+	CHECK((texts(wac.program()) == std::vector<std::string>{"="}));
+}
+
 } // namespace
 
 // `gloop(G_x)` is the retail Unknown Group leg, not a structural error: the
@@ -303,6 +347,7 @@ int main() {
 	test_retail_two_word_else_if_chain_nests();
 	test_only_strict_mode_refuses_and_only_catalog_misses();
 	test_gloop_operand_ors_the_load_time_dword();
+	test_text_tokens_read_the_mounted_text_tables();
 	std::printf(failures ? "WAC LAYERED LOAD TEST FAILED (%d)\n"
 	                     : "wac layered load test passed\n",
 	            failures);

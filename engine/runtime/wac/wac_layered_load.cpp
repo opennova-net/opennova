@@ -1,6 +1,7 @@
 #include <runtime/wac/wac_layered_load.h>
 
 #include <formats/mus/mus.h>
+#include <formats/rtxt/rtxt.h>
 #include <formats/wac/bytecode.h>
 #include <formats/wac/program.h>
 #include <runtime/wac/compiler.h>
@@ -118,6 +119,38 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
     particle::EffectCatalogNames temporary_effects;
     if (!effect_catalog) load_script_effect_catalog(files, temporary_effects);
     env.effects = effect_catalog ? effect_catalog : &temporary_effects;
+	// TextToken keys resolve here, at the compile: the expansion's override
+	// table first, then the mission's text table (<mission>.bin, else
+	// medmssn.bin), then gametext.bin. With no mission table loaded, or no
+	// entry, every key answers the one shared "".
+	// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0 ->
+	// TextResource_FindEntryByKey @0x75D450 (the override test @0x75D461);
+	// the tables: TextResource_LoadMissionTextBin @0x51ED90, Expansion_LoadAssets
+	// @0x4A4730 (the TextResource_LoadOverrideTable call @0x4A49DE)]
+	rtxt::File mission_text, game_text, override_text;
+	const auto load_text = [&files](const std::string &name, rtxt::File &table) {
+		std::vector<uint8_t> bytes;
+		std::string parse_error;
+		return files.has_file(name) && files.read_file(name, bytes) &&
+				rtxt::parse(bytes.data(), bytes.size(), table, parse_error);
+	};
+	std::vector<uint8_t> mission_text_bytes;
+	std::string text_error;
+	const bool has_mission_text =
+			mission::resolve_mission_text(files, mission_basename, mission_text_bytes) !=
+					mission::MissionTextSource::kNone &&
+			rtxt::parse(mission_text_bytes.data(), mission_text_bytes.size(), mission_text, text_error);
+	const bool has_game_text = load_text("gametext.bin", game_text);
+	const bool has_override = !files.expansion_name.empty() &&
+			load_text("expansion\\" + files.expansion_name + "\\" + files.expansion_name + ".bin",
+					override_text);
+	env.text_token = [&](const std::string &key) -> std::optional<std::string> {
+		if (!has_mission_text) return std::nullopt;
+		if (has_override && override_text.has(key)) return override_text.get(key);
+		if (mission_text.has(key)) return mission_text.get(key);
+		if (has_game_text && game_text.has(key)) return game_text.get(key);
+		return std::nullopt;
+	};
 	Program program = compile_program(sources, env);
 	// Only strict mode refuses, and only a catalog miss (Diagnostic::error).
 	if (strict_diagnostics && !program.ok()) {
