@@ -37,8 +37,16 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     int32_t radius = std::min(range >> 1, 0x280000); // [orig: @0x4B09A1]
     if ((self_flags & 0x40) != 0) radius = 0;
     const int context = self->mounted ? 9 : 7 + ((self->item_attrib & 0x400) != 0);
-    int32_t pose[6] = {0, 0, 0, e.heading, e.pitch, e.roll};
-    sys.weapon_aim_origin(world, e, pose);
+    // The range/arc metrics frame is the scanner's own position and
+    // orientation (ctx[0] = entity+4) [orig: Entity_FindNearestThreat
+    // @0x4B09D0..0x4B09D3; Entity_FindTargets @0x53A67C..0x53A687;
+    // compute_relative_position_metrics @0x545723..0x545735]. The LOS rays
+    // start at its weapon fire position, which for a UseGun gunner is the
+    // gun's own point, not the eye inside the hull; anything but a posed
+    // point takes the fire-origin recipe [orig: @0x53A658..0x53A679].
+    const int32_t pose[6] = {e.pos[0], e.pos[1], e.pos[2], e.heading, e.pitch, e.roll};
+    int32_t origin[3];
+    if (sys.weapon_fire_position(world, e, origin) != 1) sys.weapon_aim_origin(world, e, origin);
     struct Candidate { EntityHandle handle; int32_t score; };
     std::vector<Candidate> candidates;
     candidates.reserve(128);
@@ -107,14 +115,14 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
         const Entity *target = world.registry.get(candidate.handle);
         int32_t aim[3];
         sys.weapon_aim_origin(world, *target, aim);
-        if (sys.line_of_sight_clear(world, pose, aim, e.handle, candidate.handle)) return candidate.handle;
+        if (sys.line_of_sight_clear(world, origin, aim, e.handle, candidate.handle)) return candidate.handle;
         // Alternate ray, 3/8 unit forward, only for the retail flag arm.
         // [orig: Entity_FindTargets @0x53AE4C..0x53AF2B]
         if ((self_flags & 0x800000) != 0) {
             const int32_t zero[3] = {}, offset[3] = {24576, 0, 0};
             int32_t shifted[3];
             collision_matrix_from_euler(e.heading, 0, 0, zero).rotate_point(offset, shifted);
-            for (int axis = 0; axis < 3; ++axis) shifted[axis] = io::bam_add(pose[axis], shifted[axis]);
+            for (int axis = 0; axis < 3; ++axis) shifted[axis] = io::bam_add(origin[axis], shifted[axis]);
             if (sys.line_of_sight_clear(world, shifted, aim, e.handle, candidate.handle)) return candidate.handle;
         }
     }

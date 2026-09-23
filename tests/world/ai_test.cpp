@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
@@ -1320,6 +1321,267 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         CHECK(fired);
         if (fired)
             CHECK(w->out.rounds.records[0].origin_x == (third_person ? 105 : 13) << 16);
+        w->pose_provider = nullptr;
+    }
+}
+
+// The weapon fire POSITION and its quality, leg by leg: no item def copies the
+// raw position (3); a person on a UseGun seat of an EWeap parent takes that
+// parent's gun point (1); any other person its position plus CameraOffset,
+// with no phase and no jitter (1); a non-person without a model the raw
+// position (3); a modeled one its def+1351 LOOK point (1), else its position
+// raised 0.75 u (2). [orig: Entity_GetWeaponFirePosition @0x43B630: raw
+//  @0x43B7B4..0x43B7C9, gun point @0x43B64D..0x43B68A, CameraOffset
+//  @0x43B68F..0x43B6B6, no model @0x43B6B7..0x43B6EC, LOOK @0x43B749..0x43B78C,
+//  raised @0x43B78D..0x43B7B3]
+static void test_weapon_fire_position_legs() {
+    struct GunFrame : FakeMuzzleProvider {
+        EntityHandle gun;
+        int point = 0;
+        bool resolve_userpoint_frame(World &, EntityHandle h,
+                const opennova::threedi::Threedi3di3 *, int index, int32_t out[6],
+                int32_t *) override {
+            if (h != gun) return false;
+            point = index;
+            out[0] = 7 << 16; out[1] = 8 << 16; out[2] = 9 << 16;
+            out[3] = 0; out[4] = 0; out[5] = 0;
+            return true;
+        }
+    };
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    w->registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w->collision = &collision;
+    GunFrame provider;
+    w->pose_provider = &provider;
+    AiSystem &sys = w->ai;
+
+    Entity person_seed{};
+    person_seed.kind = EntityKind::Organic;
+    person_seed.health = 100;
+    person_seed.team = 1;
+    person_seed.net_id = 0x11;
+    const EntityHandle person_h = w->registry.spawn(0, person_seed);
+    Entity veh_seed{};
+    veh_seed.kind = EntityKind::Item;
+    veh_seed.has_item_def = true;
+    veh_seed.item_type = 1;
+    const EntityHandle veh_h = w->registry.spawn(1, veh_seed);
+    const int person_index = sys.attach(person_h);
+    const int veh_index = sys.attach(veh_h);
+    AiEntity &person = *sys.at(person_index);
+    configure_rifleman(person, 0x11, 1);
+    person.pos[0] = 1 << 16; person.pos[1] = 2 << 16; person.pos[2] = 3 << 16;
+    person.inf.eye_offset_x = 0x100;
+    person.inf.eye_offset_y = -0x200;
+    person.inf.eye_offset_z = 0x18000;
+
+    int32_t out[3];
+    // No item def: the raw position.
+    CHECK(sys.weapon_fire_position(*w, person, out) == 3);
+    CHECK(out[0] == (1 << 16) && out[1] == (2 << 16) && out[2] == (3 << 16));
+
+    // A person: position plus CameraOffset, the same on either aim phase.
+    w->registry.get(person_h)->has_item_def = true;
+    w->registry.get(person_h)->item_type = 3;
+    for (const uint32_t tick : {0u, 128u}) {
+        w->logic_tick = tick;
+        CHECK(sys.weapon_fire_position(*w, person, out) == 1);
+        CHECK(out[0] == (1 << 16) + 0x100 && out[1] == (2 << 16) - 0x200 &&
+              out[2] == (3 << 16) + 0x18000);
+    }
+
+    // Seated on a UseGun seat of an EWeap gun: that gun's point, the barrel
+    // its no-clip word selects.
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.has_item_def = true;
+    gun.item_attrib = kItemAttribEweap;
+    gun.primary_weapon.assign(1, 'x');
+    for (int barrel = 0; barrel < 4; ++barrel)
+        gun.weapon_userpoint_bytes[barrel][0] = static_cast<uint8_t>(10 + barrel);
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    provider.gun = w->registry.spawn(1, gun);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+    CHECK(w->commands.mount(0x11, 0x31));
+    CHECK(sys.weapon_fire_position(*w, person, out) == 1);
+    CHECK(out[0] == (7 << 16) && out[1] == (8 << 16) && out[2] == (9 << 16));
+    CHECK(provider.point == 13);
+    // Without the EWeap attrib the seat's parent is no gun: the CameraOffset leg.
+    w->registry.get(provider.gun)->item_attrib = 0;
+    CHECK(sys.weapon_fire_position(*w, person, out) == 1);
+    CHECK(out[0] == person.pos[0] + 0x100 && out[2] == person.pos[2] + 0x18000);
+
+    // A non-person without a model: the raw position.
+    AiEntity &veh = *sys.at(veh_index);
+    veh.pos[0] = 10 << 16; veh.pos[1] = 20 << 16; veh.pos[2] = 30 << 16;
+    CHECK(sys.weapon_fire_position(*w, veh, out) == 3);
+    CHECK(out[0] == (10 << 16) && out[1] == (20 << 16) && out[2] == (30 << 16));
+    // A model without a LOOK point: the position raised 0.75 u.
+    collision.assign_entity(veh_h, collision.add_model(CollisionModel{}));
+    CHECK(sys.weapon_fire_position(*w, veh, out) == 2);
+    CHECK(out[0] == (10 << 16) && out[1] == (20 << 16) && out[2] == (30 << 16) + 0xC000);
+    // The def+1351 LOOK point through the placement matrix.
+    provider.rigid_points[veh_h.packed] = {11 << 16, 22 << 16, 33 << 16};
+    w->registry.get(veh_h)->look_userpoint_byte = 5;
+    CHECK(sys.weapon_fire_position(*w, veh, out) == 1);
+    CHECK(out[0] == (11 << 16) && out[1] == (22 << 16) && out[2] == (33 << 16));
+    CHECK(provider.rigid_index_seen == 5);
+    w->pose_provider = nullptr;
+    w->collision = nullptr;
+}
+
+// A UseGun gunner's threat scan casts its sight rays from the GUN's point,
+// not from its eye, and measures range/arc from its own position.
+// [orig: Entity_FindTargets @0x53A658..0x53A679 -> Entity_GetWeaponFirePosition
+//  @0x43B64D..0x43B68A; metrics frame ctx[0] = entity+4 @0x4B09D0..0x4B09D3]
+// In 07TR a cannon gunner's eye sits inside its own hull, which the LOS walk
+// does not exclude, so an eye-origin scan never saw a target and no AI tank
+// cannon ever fired. A 2 u ridge between the pair stands in for that hull
+// here: it blocks every eye-level ray and none from the gun. An NPC on a
+// tank turret cannon (IsTurret, one round in the breech) and one on a roof
+// .50 (OnTurret, belt-fed) each acquire the enemy vehicle behind it and
+// spawn rounds from the gun's point.
+static void test_turret_gunners_scan_from_the_gun_point() {
+    struct RidgeField {
+        enum { kDim = 512 };
+        std::vector<uint16_t> heightmap;
+        std::vector<int> sector_grid;
+        opennova::terrain::TerrainHeightField field;
+        RidgeField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+            for (int z = 0; z < kDim; ++z)
+                for (int x = 8; x <= 12; ++x)
+                    heightmap[z * kDim + x] = static_cast<uint16_t>(2.0 * 256.0); // 2 u
+            field.heightmap = heightmap.data();
+            field.dim = kDim;
+            field.layout.sector_grid = sector_grid.data();
+            field.layout.origin_x = 0;
+            field.layout.origin_y = 0;
+        }
+    };
+    static RidgeField ridge;
+    struct GunPoint : IPoseProvider {
+        EntityHandle gun;
+        bool resolve_userpoint_frame(World &, EntityHandle h,
+                const opennova::threedi::Threedi3di3 *, int, int32_t out[6],
+                int32_t *) override {
+            if (h != gun) return false;
+            out[0] = 2 << 16; out[1] = 100 << 16; out[2] = 6 << 16; // above the ridge
+            out[3] = 0; out[4] = 0; out[5] = 0;
+            return true;
+        }
+    };
+    for (const bool cannon : {true, false}) {
+        auto w = std::make_unique<World>();
+        w->registry.configure_pool(0, 8);
+        w->registry.configure_pool(1, 8);
+        seed_test_rifle_ammo(*w);
+
+        Entity enemy_seed{};
+        enemy_seed.kind = EntityKind::Item;
+        enemy_seed.item_id = 1002;
+        enemy_seed.has_item_def = true;
+        enemy_seed.item_type = 1;
+        enemy_seed.team = 2;
+        enemy_seed.health = 1000;
+        enemy_seed.net_id = 0x21;
+        enemy_seed.group_id = 2;
+        enemy_seed.position = Vec3{20.0f, 100.0f, 0.0f};
+        const EntityHandle enemy_h = w->registry.spawn(1, enemy_seed);
+
+        Entity gun{};
+        gun.kind = EntityKind::Item;
+        gun.item_id = cannon ? 100166 : 100182;
+        gun.has_item_def = true;
+        gun.team = 1;
+        gun.net_id = 0x31;
+        gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+        gun.position = Vec3{2.0f, 100.0f, 0.0f};
+        gun.item_attrib = kItemAttribEweap;
+        gun.item_attrib2 = cannon ? opennova::def::DEF_ITEM_ATTRIB2_ISTURRET
+                                  : opennova::def::DEF_ITEM_ATTRIB2_ONTURRET;
+        gun.primary_weapon.assign(1, 'x');
+        for (int barrel = 0; barrel < 4; ++barrel)
+            gun.weapon_userpoint_bytes[barrel][0] = static_cast<uint8_t>(10 + barrel);
+        Seat seat{};
+        seat.type = SeatType::Gunner;
+        gun.seats.push_back(seat);
+        GunPoint point;
+        point.gun = w->registry.spawn(1, gun);
+        w->pose_provider = &point;
+        w->tables.weapons.entries.resize(2);
+        WeaponTableEntry &weapon = w->tables.weapons.entries[1];
+        weapon.name.assign(1, 'x');
+        weapon.ammo_index = 1;
+        weapon.valid = true;
+        configure_test_emplacement_weapon(weapon);
+        if (cannon) {
+            // WPN_M1TURRET: one round in the breech, 40 carried.
+            weapon.clipsize = 1;
+            weapon.startrounds = 40;
+            weapon.action_fsm.clip_capacity = 1;
+        }
+
+        Entity npc_seed{};
+        npc_seed.kind = EntityKind::Organic;
+        npc_seed.item_id = 1001;
+        npc_seed.has_item_def = true;
+        npc_seed.item_type = 3;
+        npc_seed.team = 1;
+        npc_seed.health = 100;
+        npc_seed.net_id = 0x11;
+        npc_seed.group_id = 1;
+        npc_seed.position = Vec3{2.0f, 100.0f, 0.0f};
+        const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+        AttackEventSource clips;
+        AiSystem &ai = w->ai;
+        ai.is_authority = true;
+        ai.root_motion = &clips;
+        ai.terrain = &ridge.field;
+        AiEntity &npc = *ai.at(ai.attach(npc_h));
+        configure_rifleman(npc, 0x11, 1);
+        npc.pos[0] = 2 << 16;
+        npc.pos[1] = 100 << 16;
+        w->add_system(&ai);
+        npc.profile.organic.ammo.fill(0);
+        CHECK(w->commands.mount(0x11, 0x31));
+        CHECK(w->registry.get(point.gun)->primary_weapon_slot.clip == (cannon ? 1 : -1));
+
+        // The rig: a ray from anywhere up to 1 u above the gunner is blocked,
+        // the gun point's ray is clear.
+        int32_t aim[3], from[3];
+        ai.weapon_aim_origin(*w, *w->registry.get(enemy_h), aim);
+        for (const int32_t lift : {0, 1 << 16}) {
+            from[0] = npc.pos[0]; from[1] = npc.pos[1]; from[2] = npc.pos[2] + lift;
+            CHECK(!ai.line_of_sight_clear(*w, from, aim, npc_h, enemy_h));
+        }
+        CHECK(ai.weapon_fire_position(*w, npc, from) == 1);
+        CHECK(from[0] == (2 << 16) && from[1] == (100 << 16) && from[2] == (6 << 16));
+        CHECK(ai.line_of_sight_clear(*w, from, aim, npc_h, enemy_h));
+
+        bool acquired = false;
+        bool fired = false;
+        for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
+            w->run_logic_tick(true);
+            acquired = acquired || npc.inf.combat_target == enemy_h;
+            fired = fired || w->out.rounds.count > 0;
+        }
+        CHECK(acquired);
+        CHECK(fired);
+        if (fired) {
+            CHECK(w->out.rounds.records[0].origin_x == (2 << 16));
+            CHECK(w->out.rounds.records[0].origin_z == (6 << 16));
+        }
+        ai.terrain = nullptr;
         w->pose_provider = nullptr;
     }
 }
@@ -3863,6 +4125,8 @@ int main() {
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();
     test_mounted_gunner_fires_from_the_slot_barrel();
+    test_weapon_fire_position_legs();
+    test_turret_gunners_scan_from_the_gun_point();
     test_water_crossing_fires_once_on_entry();
     test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
