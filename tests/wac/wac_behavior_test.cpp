@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <runtime/wac/compiler.h>
 #include <runtime/mission/event_runtime.h>
@@ -1952,6 +1953,38 @@ static void test_boundary_lookahead_drops_an_outranked_frame() {
     for (const uint32_t w : minus.code) CHECK(instr_op(w) != Op::MarkFired);
 }
 
+// A Text or Filename slot fed a variable, a global or a pooled value hands
+// the handler that dword's ADDRESS: the text is its bytes, least significant
+// first, to the first NUL, running on into the next words of the bank (V255
+// into the first declared slot) or the pool; the S2C 0x23 record copies the
+// same bytes. [orig: WacScript_ExecuteBytecode @0x4F5F92 (case 5), the
+// payload's string copy @0x4F5D71..0x4F5DAB]
+static void test_raw_text_slots_read_the_operand_bytes() {
+    BehaviorWorld w;
+    w.match.configure({});
+    Program program = compile_source(
+        "var first\n"
+        "set(v1, 1145258561) set(v2, 17989)\n" // 0x44434241 "ABCD", 0x4645 "EF"
+        "set(v255, 1094795585) set(first, 66)\n" // 0x41414141, then "B"
+        "set(g7, 67)\n"
+        "text(v1) text(v255) text(g7) text(v9) text(g_humans)\n", {});
+    CHECK(program.ok());
+    WacVm vm; vm.load(program); vm.execute(w);
+    std::vector<std::string> shown;
+    for (const Effect &e : w.out.effects.entries())
+        if (e.kind == "text") shown.push_back(e.str);
+    CHECK(shown.size() == 5);
+    if (shown.size() == 5) {
+        CHECK(shown[0] == "ABCDEF");
+        CHECK(shown[1] == "AAAAB");
+        CHECK(shown[2] == "C");
+        CHECK(shown[3].empty()); // a zero dword is the empty string
+        CHECK(shown[4] == "\x01"); // G_humans pools its group index, 1
+    }
+    const auto &queue = w.out.script_remote_commands;
+    CHECK(queue.size() == 5 && queue[0].args.size() == 1 && queue[0].args[0].text == "ABCDEF");
+}
+
 int main() {
     test_player_values_cache_at_bytecode_entry();
     test_outcome_cache_changes_on_next_execution();
@@ -1977,6 +2010,7 @@ int main() {
     test_arithmetic_assignment_and_retail_expression_order();
     test_auto_parentheses_and_minus_token_context();
     test_boundary_lookahead_drops_an_outranked_frame();
+    test_raw_text_slots_read_the_operand_bytes();
     test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup();
     test_named_event_reset_and_declared_variables();
     test_empty_server_holds_script_divider_after_boot();

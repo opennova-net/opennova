@@ -206,10 +206,17 @@ int32_t WacVm::current_value(opennova::world::World &w, uint32_t ref) const {
 }
 
 // The string a string-typed parameter hands its handler. Text and Filename
-// are raw slots: the handler reads the bytes at the operand's address, the
+// are raw slots: the call passes the operand's ADDRESS and the handler reads
+// the bytes there [orig: WacScript_ExecuteBytecode @0x4F5F92 (case 5),
+// @0x4F5FA9 (case 6), @0x4F6012 (case 9)]. A string operand is the
 // string-pool copy the resolver made [orig: WacScript_ResolveParameter
-// @0x4F2E16]. A TextToken slot's dword is the text pointer the resolver
-// pooled [orig: @0x4F2FAE], here the index of the program's text token.
+// @0x4F2E16]; any other operand is a dword whose bytes run, least
+// significant first, up to the first NUL, on into the words stored after it:
+// the numbered, declared and global banks sit end to end, and the value pool
+// is one array. The model ends where those blocks end (the IF-tick array
+// follows the globals), and an engine, event or music dword stands alone.
+// A TextToken slot's dword is the text pointer the resolver pooled
+// [orig: @0x4F2FAE], here the index of the program's text token.
 std::string WacVm::operand_string(opennova::world::World &w, uint32_t ref, ParamType type) const {
     if (type == ParamType::TextToken) {
         const int32_t token = read(w, ref);
@@ -217,8 +224,39 @@ std::string WacVm::operand_string(opennova::world::World &w, uint32_t ref, Param
                 ? prog_->text_tokens[size_t(token)].text : std::string();
     }
     if (type != ParamType::Text && type != ParamType::Filename) return std::string();
-    if (operand_kind(ref) == OperandKind::Text) return prog_->text_at(operand_index(ref));
-    return std::string();
+    const uint32_t index = operand_index(ref);
+    if (operand_kind(ref) == OperandKind::Text) return prog_->text_at(index);
+    std::string text;
+    // False once the dword held a NUL: the string ended inside it.
+    const auto append = [&text](int32_t word) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            const char byte = static_cast<char>((uint32_t(word) >> shift) & 0xFFu);
+            if (byte == '\0') return false;
+            text += byte;
+        }
+        return true;
+    };
+    const auto &vars = w.script.vars;
+    switch (operand_kind(ref)) {
+        case OperandKind::MissionVar: {
+            int i = static_cast<int>(index);
+            while (i < world::ScriptVarStore::kMissionVars && append(vars.get_mission(i))) ++i;
+            if (i < world::ScriptVarStore::kMissionVars) break;
+            for (int g = 0; g < world::ScriptVarStore::kGlobalVars && append(vars.get_global(g)); ++g) {}
+            break;
+        }
+        case OperandKind::GlobalVar:
+            for (int g = static_cast<int>(index); g < world::ScriptVarStore::kGlobalVars &&
+                    append(vars.get_global(g)); ++g) {}
+            break;
+        case OperandKind::Pool:
+            for (size_t i = index; i < prog_->operands.size() && append(prog_->operands[i]); ++i) {}
+            break;
+        default:
+            append(read(w, ref));
+            break;
+    }
+    return text;
 }
 
 int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args, int argc, uint32_t instruction) {
