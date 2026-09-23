@@ -204,6 +204,8 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
         world.ai.process_infantry_state_machine(*ae, world, event);
 }
 
+} // namespace
+
 // The class event callback a script kill fires, entity+0x1C8(entity, phase, 0),
 // reading the global hit record as the kill left it: WAC killSSN zeroed it,
 // while the BMS kills cleared only its damage word (and a KillSingle pool-0
@@ -211,7 +213,7 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 // recorded round. [orig: Entity_ResetWeaponState @0x4F1EC7..0x4F1ED2;
 // Entity_KillByNetId @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3,
 // phase 4); Entity_KillAllByNetId @0x43C936..0x43C93F]
-void script_kill_class_event(World &world, Entity &e, int phase) {
+void hit_record_class_event(World &world, Entity &e, int phase) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
         const uint32_t flags = e.flags | e.engine_flags;
@@ -267,8 +269,6 @@ void script_kill_class_event(World &world, Entity &e, int phase) {
              record.round_pitch_bam, record.round_roll_bam});
 }
 
-} // namespace
-
 bool EntityCommands::kill_ssn(EntityTarget ssn) {
     // The BMS KillSingle action: the first matching row, pools 0..3. Pool 0 also
     // loses its attacker and staged death clip; pools 1/2 fire phase 1 and pool 3
@@ -289,7 +289,7 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
         e->death_anim_state = 0;
         world_.round_sim.hit_record.owner = {};
     }
-    script_kill_class_event(world_, *e, pool == 3 ? 4 : 1);
+    hit_record_class_event(world_, *e, pool == 3 ? 4 : 1);
     // The organic death transaction: an org1 body's own edge raises it, the
     // player bodies take this stand-in for theirs
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
@@ -312,7 +312,7 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     e->health = 0;
     e->last_attacker = {};
     if (e->item_type == 3) e->death_anim_state = 0;
-    script_kill_class_event(world_, *e, 1);
+    hit_record_class_event(world_, *e, 1);
     // The organic death transaction: an org1 body's own edge raises it, the
     // player bodies take this stand-in for theirs
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
@@ -1381,7 +1381,7 @@ int EntityCommands::kill_group(int group) {
             //  (pool 0), @0x43C9D0 / @0x43C9D3 (pool 1)].
             world_.round_sim.hit_record.damage = 0;
             world_.round_sim.hit_record.owner = {};
-            script_kill_class_event(world_, *e, 1);
+            hit_record_class_event(world_, *e, 1);
             // The organic death transaction: an org1 body's own edge raises
             // it, the player bodies take this stand-in; only the living cross
             // it, so a group killed twice notifies once [orig: @0x4B9D4D /

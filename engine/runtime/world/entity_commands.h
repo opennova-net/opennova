@@ -409,4 +409,12 @@ private:
     World &world_;
 };
 
+// The class event callback entity+0x1C8(entity, phase, 0), reading the global
+// hit record as its caller left it: the person callbacks for an organic, the
+// brain machine for an AI-data item, the item death class otherwise. The
+// script kills and the vehicle death's child kill fire it.
+// [orig: g_EntityClassEventCallbackTable @0x813000, resolved per def by
+//  EntityDef_InitAllCallbacks @0x4a5aae]
+void hit_record_class_event(World &world, Entity &e, int phase);
+
 } // namespace opennova::world

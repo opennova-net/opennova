@@ -812,11 +812,14 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
         }
     }
 	// The `Parent` (ItemDef+0x548) gate over the brain's +576/+580 gunner-attachment
-	// list the class init built (VehicleSystem::setup_gunner_attachments): every
-	// live child's health word is zeroed and its class death callback runs with
-	// phase 1, on clients too [orig: AI_TransitionToDeath_GroundVehicle
-	// @0x467B6E (the +1352 byte) .. @0x467BBB (child deathCallback(child, 1, 0));
-	// the +286 > 0 gate @0x467B9A, the hit-record attacker clear @0x467BAD].
+	// list the class init built (VehicleSystem::setup_gunner_attachments): for every
+	// live child the global hit record's damage word is cleared, the child's
+	// health word is zeroed and its class event callback runs with phase 1 on
+	// that record, on clients too. The child's attacker (+0x178) is left alone.
+	// [orig: AI_TransitionToDeath_GroundVehicle @0x467B6E (the +1352 byte); the
+	//  loop @0x467B90..0x467BCC: the +286 > 0 gate @0x467B92..0x467B9A,
+	//  Projectile_GetHitRecord @0x467B9C, health 0 @0x467BA5, the record's +0x30
+	//  cleared @0x467BAD, child+0x1C8(child, 1, 0) @0x467BB0..0x467BBB]
 	if (ctx.world != nullptr) {
 		World &world = *ctx.world;
 		const Entity *parent = world.registry.get(e.handle);
@@ -831,10 +834,10 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 				Entity *child = world.registry.get(EntityHandle{ static_cast<uint16_t>(word - 1) });
 				if (child == nullptr || child->health <= 0) continue;
 				child->health = 0;
-				child->last_attacker = {};
 				if (AiEntity *brain = world.ai.for_handle(child->handle))
 					brain->health = 0;
-				destruction_notify_item_damage(world, *child, 1);
+				world.round_sim.hit_record.damage = 0;
+				hit_record_class_event(world, *child, 1);
 			}
 		}
 	}

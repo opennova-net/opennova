@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <iterator>
 #include <memory>
+#include <variant>
 #include <vector>
 
 #include <formats/aip/aip.h>
@@ -14,6 +15,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity_commands.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/world.h>
 
@@ -526,6 +528,77 @@ void test_ground_samples_add_the_brain_floors() {
     CHECK(detail::vehicle_ground_height_at(w, e, air, pos) == 0x20000);
 }
 
+
+// The ground death enter kills the brain's live gunner-attachment children on
+// the global hit record: for each, the record's damage word is cleared (its
+// section and round stay), the child's health zeroed and its class event
+// callback run with phase 1 on that record, so an item child's death leg sends
+// the record's section and a brained child's machine takes event 1. The
+// child's attacker (+0x178) stays.
+// [orig: AI_TransitionToDeath_GroundVehicle @0x467B90..0x467BCC: health 0
+//  @0x467BA5, the record's +0x30 cleared @0x467BAD, child+0x1C8(child, 1, 0)
+//  @0x467BB0..0x467BBB]
+void test_ground_death_kills_children_on_the_hit_record() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    w.rules.logic_authority = true;
+    w.rules.mp_session = true;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.alive = true;
+    seed.item_id = 600;
+    seed.health = 0;
+    const EntityHandle hull = w.registry.spawn(1, seed);
+    seed.item_id = 601;
+    seed.health = 50;
+    seed.last_attacker = hull;
+    const EntityHandle item_child = w.registry.spawn(1, seed);
+    seed.item_id = 602;
+    seed.is_ai_capable = true;
+    const EntityHandle brain_child = w.registry.spawn(1, seed);
+    w.ai.attach(hull);
+    w.ai.attach(brain_child);
+    AiEntity &ai = *w.ai.for_handle(hull);
+    ai.brain.f[AiBrain::kOwner] = 1;
+    ai.brain.f[AiBrain::kAttachCount] = 2;
+    ai.brain.f[AiBrain::kAttachSlots + 1] = int32_t(item_child.packed) + 1;
+    ai.brain.f[AiBrain::kAttachSlots + 3] = int32_t(brain_child.packed) + 1;
+    w.ai.for_handle(brain_child)->brain.f[AiBrain::kOwner] = 1;
+    VehicleTraits vt;
+    vt.attrib_parent = true;
+    vt.brain_class = VehicleBrainClass::Ground;
+    w.vehicles.traits.set(600, vt);
+    ItemDeathTraits tree;
+    tree.death_class = ItemDeathClass::kTree;
+    w.tables.item_death_traits.set(601, tree);
+    HitRecord &record = w.round_sim.hit_record;
+    record.damage = 77;
+    record.section = 5;
+    AiThinkCtx ctx{&w.ai, &ai, &w, nullptr};
+    w.ai.row(21).enter(ctx); // GROUND_DYING
+
+    const Entity &child = *w.registry.get(item_child);
+    CHECK(child.health == 0);
+    CHECK(child.last_attacker == hull);
+    CHECK(record.damage == 0 && record.section == 5);
+    int child_sends = 0;
+    for (const auto &event : w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == item_child.packed) {
+                ++child_sends;
+                CHECK(state->section == 5);
+            }
+    CHECK(child_sends == 1);
+    CHECK(w.registry.get(brain_child)->health == 0);
+    const int child_index = w.ai.index_of(*w.ai.for_handle(brain_child));
+    int notifications = 0;
+    for (int i = 0; i < w.ai.events.count(); ++i)
+        if (w.ai.events.at(i).f[0] == 1 && w.ai.events.at(i).entity_index() == child_index)
+            ++notifications;
+    CHECK(notifications == 1);
+}
+
 } // namespace
 
 int main() {
@@ -541,6 +614,7 @@ int main() {
     test_change_ai_brain_arms_need_the_vehicle_brain();
     test_change_ai_slot_arms_without_a_token();
     test_ground_samples_add_the_brain_floors();
+    test_ground_death_kills_children_on_the_hit_record();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }
