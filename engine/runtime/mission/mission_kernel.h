@@ -214,7 +214,7 @@ public:
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:
 	// Environment_UpdateWeatherTick @ 0x57e9b0 from Game_ProcessMainFrame
-	// @ 0x526774, after Entity_UpdateAllEntities @ 0x52674b]: the world's sim
+	// @ 0x526774, after the Entity_UpdateAllEntities call @ 0x52674b]: the world's sim
 	// legs, the thunder one-shots into world.out.weather_sounds, the local quake
 	// shake arm, then the installed render owner's color legs. Every embedder
 	// tick (the no-net tick, the listen frame, the joiner frame, the dedicated

@@ -171,9 +171,9 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
     // also applies pre-tick) and before the server/entity updates that seed
-    // the rest [orig: Sound_TickPendingSlots @ 0x526697 in
-    // Game_ProcessMainFrame, between Client_ProcessNetworkFrame and
-    // Server_TickUpdate / Entity_UpdateAllEntities].
+    // the rest [orig: Game_ProcessMainFrame @0x5263F0 (the
+    // Sound_TickPendingSlots call @0x526697), between the
+    // Client_ProcessNetworkFrame and Server_TickUpdate calls].
     out.fire_sounds.tick();
     // The presenting-client identity for the spawn-time tracer style select — stamped
     // before the system loop so out.rounds spawned THIS tick (AI fire, local fire) select
@@ -272,8 +272,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         // pieces locally. The MP visual client (the round pool's predicate
         // above) therefore drains them as well; its authoritative state keeps
         // arriving over the wire regardless.
-        // [orig: Entity_UpdateAllEntities @0x4c2100 — DeathPiece_TickAll
-        //  @0x4c221c, Projectile_ProcessExplosionQueue @0x4c223f, and the
+        // [orig: Entity_UpdateAllEntities @0x4c2100 — the DeathPiece_TickAll
+        //  call @0x4c221c, the Projectile_ProcessExplosionQueue call @0x4c223f, and the
         //  pool-2/3 update-callback walk, all unconditional]
         // The water plane: env.water_z (16.16, the #265 sound-profile home) —
         // zero means "no water authored", the same read the wreck gates use
@@ -310,15 +310,15 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
             recount_group_initials();
         } else if (--group_recount_timer_ <= 0) {
             // The 62-tick live rescan [orig: Server_TickUpdate timer
-            // @ 0x51db6d, reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup
-            // @ 0x51dc02].
+            // @ 0x51db6d, reload 0x3E @ 0x51db93 -> the EntityPool_RecountLiveByGroup
+            // call @ 0x51dc02].
             group_recount_timer_ = 0x3E;
             recount_group_live();
         }
     }
 	if (gameplay)
 		rotor_wash.tick();
-	++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
+	++logic_tick; // [orig: tick @0x24c1968 advances once per frame tick]
 	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.

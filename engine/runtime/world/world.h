@@ -3,7 +3,7 @@
 // Holds the entity registry, the shared variable store, environment + effect
 // state, the cached per-tick transient state, the entity-command primitive layer
 // (the shared Entity_* operations), and the tick service that drives registered
-// systems (WAC VM, BMS event evaluator, future GDScript) at the authoritative
+// systems (WAC VM, BMS event evaluator) at the authoritative
 // logic-tick cadence. Editor and runtime drive the SAME World; the editor just
 // owns the clock (and can pause/step/snapshot).
 #pragma once
@@ -185,7 +185,7 @@ struct CachedFrameState {
 // Mutable engine values exposed to mission scripts through retail's named-value
 // table. This is distinct from V#/G#/M#: named values are direct pointers into
 // engine state, so consumers such as infantry AI observe WAC writes immediately.
-// [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2940]
+// [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2920]
 struct WacNamedValues {
     // Seeded 10 at every mission load and teardown [orig: WacScript_FreeAll @0x4f6395
     // `mov wac_var_accuracyspread, 0Ah`, called from GameMode_CreateDefaultDefs @0x4f9061
@@ -209,7 +209,7 @@ struct WacNamedValues {
     static constexpr int32_t kDefaultFallmps = 13;
     int32_t fallmps = kDefaultFallmps;
 	// USE cannot change the mounted local player's seat while this is nonzero.
-	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
+	// Forced script detaches still apply. [orig: dword_C6EADC @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
 	// Two more rows of the named-value table @0x82EEF0. breathtime: the host's
@@ -825,7 +825,7 @@ public:
 
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
-    // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
+    // [orig: tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
     //  Per-system cadences divide it: the WAC VM executes every 62nd tick
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
@@ -848,7 +848,7 @@ public:
     // is epilog_screen_active() below.
     // [orig: Server_TickUpdate @0x51d7e0, the gate @0x51d8bd — `if
     //  (!g_preround_delay_timer && (wac_var_humans || !wac_var_ticks) &&
-    //  !g_epilog_screen_active)` around WacScript_AdvanceTick @0x51d8bf +
+    //  !g_epilog_screen_active)` around the WacScript_AdvanceTick call @0x51d8bf +
     //  Server_UpdateEntityIdleTimers + EventTrigger_UpdateQuarterRoundRobin
     //  @0x454d50]
     bool script_may_advance() const {

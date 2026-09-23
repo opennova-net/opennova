@@ -220,8 +220,9 @@ int32_t spawn_angle_bam(int32_t deg) {
     return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
 }
 
-// Provisional kind -> g_pool_list index. The exact original mapping matters only for the
-// deferred acquire_target pool scan (P2), not for movement; documented in notes §10.
+// Kind -> g_pool_list index: the BMS loader places each record list in its own pool.
+// [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1 @0x40f9bb..0x40f9c6, pool 2
+//  @0x40fa28..0x40fa34, pool 3 @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19]
 int pool_for_kind(EntityKind k) {
     switch (k) {
         case EntityKind::Organic: return 0;
@@ -884,7 +885,10 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         return false;
     };
     std::vector<EntityHandle> promoted_item_handles;
-    uint32_t spawn_phase_counter = 0; // dword_A77638, reset per load [orig: @0x40f5c0 area]
+    // dword_A77638, zeroed by the mission reset every load runs [orig: the
+    // reset CAIGroup_HasGuardTaskFromIndex2 (an IDB misnomer) @0x40DBD1, called
+    // from Mission_LoadBMSFile @0x40F50E]
+    uint32_t spawn_phase_counter = 0;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         // Pool 0's used count is the ACCEPTED record count while every
         // accepted record still lands at its record index, so with k
@@ -895,7 +899,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // record count and keep their holes addressable.
         // [orig: Mission_LoadBMSFile @0x40fb0d..0x40fb34 — Pool_GetEntry(0,
         //  record index), `add edi,ebp` on a spawn success, Pool_SetUsed(0,
-        //  edi) vs the record-count Pool_SetUsed @0x40f9db/@0x40fa4a/@0x40faba;
+        //  edi) vs the record-count Pool_SetUsed calls @0x40f9db/@0x40fa4a/@0x40faba;
         //  the `used` walks: Entity_UpdateAllEntities @0x4c243b,
         //  EntityPool_FindByNetId @0x4f0a2d, Pool_AllocEntry @0x442230]
         std::vector<char> admitted(vec.size());
@@ -934,7 +938,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             // entry would be. [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1
             // @0x40f9bb..0x40f9c6, pool 2 @0x40fa28..0x40fa34, pool 3
             // @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19; the per-pool
-            // Pool_SetUsed @0x40f9db/@0x40fa4a/@0x40faba/@0x40fb34]
+            // Pool_SetUsed calls @0x40f9db/@0x40fa4a/@0x40faba/@0x40fb34]
             const EntityHandle want = EntityHandle::make(
                     pool_for_kind(kind), static_cast<int>(idx - 1));
             if (world.registry.get(want) != nullptr) world.registry.despawn(want);

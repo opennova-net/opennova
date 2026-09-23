@@ -1221,8 +1221,9 @@ static void test_mounted_gunner_acquires_and_fires() {
     for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
         // Exercise the production phase order: entity AI queues FIRE, the global
         // action pump consumes it, then the projectile pass steps the new round.
-        // [orig: Entity_UpdateAllEntities @0x52674b, WeaponAction_ProcessAllEntities
-        //  @0x526786, Weapon_UpdateAllProjectiles @0x4ec020]
+        // [orig: Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674b and
+        //  WeaponAction_ProcessAllEntities call @0x526786; Weapon_UpdateAllProjectiles
+        //  @0x4ec020]
         w->run_logic_tick(true);
         acquired = acquired || npc.inf.combat_target == enemy_h;
         fired = fired || w->out.rounds.count > 0;

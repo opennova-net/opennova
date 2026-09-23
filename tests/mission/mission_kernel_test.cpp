@@ -164,7 +164,7 @@ static void test_joiner_installs_only_the_wac_terminator() {
 // tick 1 whether or not this peer ran the pre pass.
 // [orig: Game_StartMission `mov tick, ebx` (ebx = 0) @0x525B9F, the
 //  is_authority gate @0x525B78; Game_ProcessMainFrame `add tick, ebx`
-//  @0x5265B4 ahead of Entity_UpdateAllEntities @0x52674B]
+//  @0x5265B4 ahead of the Entity_UpdateAllEntities call @0x52674B]
 static void test_first_frame_tick_matches_on_host_and_joiner() {
 	for (bool joiner : {false, true}) {
 		bms::File mission{};
@@ -528,7 +528,7 @@ int main() {
 	// differ. Observing the view between composes reads the last composed
 	// view and advances nothing, so two observations agree and leave the
 	// filters where the frames left them
-	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d;
+	// [orig: @ 0x4de590; the Camera_ComputeThirdPersonView calls @ 0x526781 / @ 0x5ca34d;
 	//  the only other callers @ 0x5c9841 (the Inset scene) / @ 0x52b082].
 	kernel.local.view.shake.counter = 10;
 	tick_no_net(kernel);

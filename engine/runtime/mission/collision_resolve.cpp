@@ -772,7 +772,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				hs = state.husk_pieces_by_graphic.emplace(
 						piece_key, std::move(info)).first;
-				// Piece bound = the husk model's CMDL sphere [orig: Entity_InitFromModel @0x40dced..0x40de16]
+				// Piece bound = the husk model's CMDL sphere [orig: Entity_InitFromModel @0x40dceb..0x40de16]
 				if (piece_m3 != nullptr) {
 					const int32_t piece_bound_q16 =
 							world::model_bound_radius_q16_from_3di(*piece_m3);

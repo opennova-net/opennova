@@ -585,7 +585,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		(void)install_infantry_anim(options.infantry_adm);
 	}
 	// The script compiler's SOUNDSET and FX name catalogs, from the mounted
-	// banks and effect documents [orig: WacScript_ResolveParameter @0x4F2940
+	// banks and effect documents [orig: WacScript_ResolveParameter @0x4F2920
 	// binds both against the loaded tables; CEffectWorld_InternEffectHandle
 	// @0x5F7310]. Independent of the wac gate: a compile that arrives after
 	// the boot (Simulation::compile_and_set_wac) binds the same names.
@@ -718,8 +718,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// of its entity update, so the first frame runs at tick 1 on the host and
 	// on every client alike [orig: Game_StartMission `mov tick, ebx` (ebx = 0)
 	// @0x525B9F, past the is_authority-gated pre pass @0x525B78..0x525B90;
-	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of
-	// Entity_UpdateAllEntities @0x52674B]. World::run_logic_tick advances its
+	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
+	// Entity_UpdateAllEntities call @0x52674B]. World::run_logic_tick advances its
 	// clock after the tick, so the same first frame starts from 1 here; a
 	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
 	// tick out of phase.
@@ -902,9 +902,11 @@ bool MissionKernel::restore_baseline() {
 	}
 	// Retail's SP restart re-runs Game_StartMission [orig: Game_RestartRoundSP
 	// @0x5263DB -> Game_StartMission @0x524360]. There the player re-init's weapon
-	// switch resets the FOV target to 80 [orig: Player_InitPlayer @0x525BBC ->
-	// Player_SwitchToWeaponByHandle @0x4E19A1 -> Player_ResetCameraAndMovementState
-	// @0x4DE202] BEFORE Environment_SnapStateToTargets @0x525CAE re-seeds it from
+	// switch resets the FOV target to 80 [orig: Game_StartMission's
+	// Player_InitPlayer call @0x525BBC -> Player_InitPlayer's
+	// Player_SwitchToWeaponByHandle call @0x4E19A1 ->
+	// Player_ResetCameraAndMovementState @0x4DE202] BEFORE the
+	// Environment_SnapStateToTargets call @0x525CAE re-seeds it from
 	// the .env default (@0x57D2BB) and the WacScript_InitAndLoad call @0x525CB3 re-applies
 	// the script's fov (WacCmd_Fov @0x4EDEA7), so the post-restart target is the
 	// authored value. The sealed baseline already holds that post-init target:
