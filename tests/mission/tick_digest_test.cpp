@@ -83,10 +83,14 @@ namespace {
 // [orig: Game_ProcessMainFrame @0x526703..0x526742]. The synthetic mission runs
 // WAC with no human, so its world holds after the first tick, which moves the
 // chain from 0xe8c5a2c197da3de8 (the commit before it still gives that value).
-// A held world covers almost nothing, so the chain now stands in one human, as
-// a played mission has: the WAC tick and the entity update run every tick
+// A held world covers almost nothing, so the chain now counts one human, as a
+// played mission has: the WAC tick and the entity update run every tick
 // again, which moves the chain from 0xe5830c6fd01c9439.
-constexpr uint64_t kSyntheticDigest = 0xc35a881f8f092209ULL;
+// The org1 think head then seeds the aim pitch from the SSN on every think and
+// skips an airborne body's think [orig: Entity_UpdateInfantryAI
+// @0x4BAA4B..0x4BAA66], which moves the chain from 0xc35a881f8f092209
+// (reverting that one commit restores it).
+constexpr uint64_t kSyntheticDigest = 0xa22209beb52b4e4fULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -186,8 +190,8 @@ bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
 using test_boot::source_over;
 
 // Two opposing squads plus a few items, and a WAC layer whose writes are part
-// of the chain. The chain stands in one human (the WAC 'humans' count the
-// server tick rebuilds), so neither the WAC tick nor the entity update holds.
+// of the chain. The kernel's own player is the one human the bare tick
+// counts, so neither the WAC tick nor the entity update holds.
 bms::File synthetic_mission() {
 	bms::File m{};
 	int32_t next_id = 20;
@@ -214,7 +218,6 @@ bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 	ms::KernelBootOptions options;
 	if (!kernel.boot(options, error)) return false;
-	kernel.world.cached.humans = 1;
 	Digest d;
 	hash_world(d, kernel.world);
 	for (int i = 0; i < ticks; ++i) {
