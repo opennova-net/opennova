@@ -83,7 +83,14 @@ int main() {
         CHECK(traits && !traits->player_control);
         const int expected_state = attempt == 0 ? 7 : 14;
         CHECK(heli && heli->brain.f[w::AiBrain::kCurState] == expected_state);
-        CHECK(heli && heli->pos[0] == initial_x);
+        // The two medics stand on the helicopter (their ground link), so the
+        // entity update's pool-0 walk wakes its contact solve every fourth
+        // tick. [orig: HeliLift_SpawnFlyover @0x452980/@0x4529BD (the +0x28
+        //  stores); Entity_UpdateAllEntities -- the Entity_FindChildByDefType
+        //  call @0x4C2484, `test tick,3` @0x4C25CE -> sub_459290 @0x459290]
+        const w::Entity *hull = rig.world.registry.get(slot.helicopter);
+        CHECK(hull && ((hull->flags | hull->engine_flags) & 0x40u) != 0);
+        CHECK(hull && hull->veh.contact_wake_tick == ((rig.world.logic_tick - 1u) & ~3u));
         CHECK(rig.world.teammates.at(0)->state == w::TeammateOperations::State::FlyToHover);
         w::EntityHandle existing;
         for (int i = 0; i < rig.world.ai.count(); ++i) {

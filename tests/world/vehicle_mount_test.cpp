@@ -1524,6 +1524,45 @@ void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
 // HELO_ROTOR register (the angle's high word) advances while crewed, then
 // winds down at the helo machine's 46603/tick after the dismount.
 // [orig: the HELO twin @0x48FA70 from the aircraft mover's tail @0x4905A6]
+// A body claims the vehicle under it after its update: the first vehicle on
+// its ground chain (a seated body re-reads its parent every tick) takes the
+// body's team when it is player-controllable and the body is seated or
+// nobody holds it; every fourth tick the vehicle's contact solve is woken. A
+// busted or spawn-point vehicle keeps its team but is still woken.
+// [orig: Entity_UpdateAllEntities -- Entity_FindChildByDefType @0x4C2484,
+//  the attrib/Flags gates @0x4C2494..0x4C24C1, the seated test @0x4C24C7,
+//  the team copy @0x4C259E..0x4C25A4, `test tick,3` @0x4C25CE -> sub_459290
+//  @0x459290]
+void test_seated_body_claims_its_vehicle() {
+    for (const bool spawn_point : {false, true}) {
+        Rig r;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        if (spawn_point) r.veh().item_attrib |= kItemAttribSpawnPoint;
+        r.veh().team = 2;
+        r.player().team = 1;
+        AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        for (uint32_t t = 1; t <= 4; ++t) {
+            ctx.logic_tick = t;
+            r.w.logic_tick = t;
+            r.w.update_all_entities(ctx);
+            CHECK(r.player().ground_target == r.veh_h);
+            CHECK(r.veh().team == (spawn_point ? 2 : 1));
+            // Only tick 4 of these wakes the vehicle.
+            CHECK(((r.veh().flags & 0x40u) != 0) == (t == 4));
+        }
+        CHECK(r.veh().veh.contact_wake_tick == 4);
+    }
+}
+
 void test_host_crewed_helicopter_rotor_turns() {
     Rig r;
     VehicleTraits t = truck_traits();
@@ -3283,6 +3322,7 @@ int main() {
 	test_seat_frame_matches_collision_frame();
 	test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
+    test_seated_body_claims_its_vehicle();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();

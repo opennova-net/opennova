@@ -150,6 +150,77 @@ void World::load_systems() {
     ai.on_load(*this);
 }
 
+// The pool-0 walk's tail after a live body's update: the first vehicle
+// (def type 1) on the body's ground-entity chain takes the body's team and
+// its berserk bit when that vehicle is player-controllable, no spawn point,
+// neither busted (0x1000) nor dead, and the body is seated or nobody holds the
+// vehicle (a same-team body skips the hold scan outside a session or in a
+// co-op game type). Every fourth tick the vehicle's contact solve is woken.
+// [orig: Entity_UpdateAllEntities -- the dead skip @0x4C2477, the
+//  Entity_FindChildByDefType(body, 1, 1) call @0x4C2484 (the +0x28 walk,
+//  19 hops @0x43BEC0..0x43BEDF), the attrib/Flags gates @0x4C2494..0x4C24C1,
+//  the seated test @0x4C24C7, the same-team skip @0x4C24DC..0x4C2501, the
+//  ten seat words @0x4C2507..0x4C251F, the refNum peer scan
+//  @0x4C2521..0x4C257E, the copy @0x4C258E..0x4C25C7, `test tick,3`
+//  @0x4C25CE and sub_459290 @0x459290 (`or [e+24h],40h; mov [e+3B8h],tick`)]
+static void claim_standing_vehicle(World &world, const Entity &body) {
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0u) return;
+    Entity *vehicle = nullptr;
+    Entity *node = world.registry.get(body.ground_target);
+    for (int depth = 1; node != nullptr && node->has_item_def && depth < 20; ++depth) {
+        if (node->item_type == 1) {
+            vehicle = node;
+            break;
+        }
+        node = world.registry.get(node->ground_target);
+    }
+    if (vehicle == nullptr) return;
+    const uint32_t vehicle_flags = vehicle->flags | vehicle->engine_flags;
+    if ((vehicle->item_attrib & kItemAttribPlayerControl) != 0 &&
+            (vehicle->item_attrib & kItemAttribSpawnPoint) == 0 &&
+            (vehicle_flags & 0x1000u) == 0 && (vehicle_flags & kEntityFlagDead) == 0) {
+        const bool seated = body.mount_target.valid();
+        bool held = false;
+        if (!seated) {
+            const bool skip_scan = vehicle->team == body.team &&
+                    (!world.rules.session_open ||
+                     (world.match.rules().game_type & 0x10000u) != 0);
+            if (!skip_scan) {
+                for (const Seat &seat : vehicle->seats)
+                    if (seat.occupant.valid()) held = true;
+                if (!held && vehicle->ref_num != 0) {
+                    const EntityHandle vh = vehicle->handle;
+                    const uint8_t ref = vehicle->ref_num;
+                    world.registry.for_each([&](const Entity &peer) {
+                        if (held || peer.handle == vh || peer.ref_num != ref) return;
+                        if (((peer.flags | peer.engine_flags) & kEntityFlagCarried) != 0) return;
+                        if (peer.ground_target != vh || !peer.has_item_def ||
+                                (peer.item_attrib & kItemAttribEweap) == 0)
+                            return;
+                        if (peer.primary_occupant.valid()) held = true;
+                    });
+                }
+            }
+        }
+        if (seated || !held) {
+            vehicle->team = body.team;
+            AiEntity *body_brain = world.ai.for_handle(body.handle);
+            AiEntity *vehicle_brain = world.ai.for_handle(vehicle->handle);
+            if (body_brain != nullptr && vehicle_brain != nullptr) {
+                constexpr int32_t kBerserk = 0x200;
+                int32_t &flags = vehicle_brain->slot.f[AiSlot::kBehaviorFlags];
+                flags = (body_brain->slot.f[AiSlot::kBehaviorFlags] & kBerserk) != 0
+                        ? flags | kBerserk : flags & ~kBerserk;
+            }
+        }
+    }
+    if ((world.logic_tick & 3u) == 0) {
+        vehicle->flags |= 0x40u;
+        vehicle->engine_flags |= 0x40u;
+        vehicle->veh.contact_wake_tick = world.logic_tick;
+    }
+}
+
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
     const EntityHandle handle = row.handle;
@@ -394,6 +465,8 @@ void World::update_all_entities(const TickContext &ctx) {
         if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
             continue;
         ai.update_organic(*body, *this, ctx.logic_tick);
+        if (const Entity *live = registry.get(EntityHandle::make(0, static_cast<int>(slot))))
+            claim_standing_vehicle(*this, *live);
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
 }
