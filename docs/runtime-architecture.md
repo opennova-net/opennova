@@ -68,9 +68,12 @@ round-over latch `g_spawn_success_gate` skips it (raised by
 `Server_ProcessRoundEnd @0x5164F0`, the S2C 0x1D handler `NapiNPClientMsg_0x01D
 @0x430840` and `Cine_StartPlayback @0x577840`, cleared at
 `Game_StartMission @0x524360`).
-`wac_var_humans` counts pool-0 rows with a definition, Flags 0x100 and not Flags 1
-(`Server_BuildEntitySlotLists @0x4F97A0`, `@0x4F9809` / `@0x4F9815` /
-`@0x4F9820`): a dead player counts, a hidden or not-yet-deployed one does not.
+`wac_var_humans` counts live pool-0 rows with Flags 0x100 and not Flags 1
+(`Server_BuildEntitySlotLists @0x4F97A0`, `@0x4F9815` / `@0x4F9820`): a dead
+player counts, a hidden or not-yet-deployed one does not. Its definition test
+(`@0x4F9809`) only tests for an allocated row, because every spawn links an
+items.def row, row 0 for a type items.def lacks (`ItemList_FindIndexByTypeId
+@0x49E100`, the miss `@0x49E131`).
 Port: `World::entity_update_admitted`, with the death-screen exemption stamped by
 `HostRole` (`CachedFrameState::peer_death_screen`). While the epilog screen is up,
 `Entity_UpdateAllEntities @0x4C2100` takes its epilog path (`@0x4C211D..0x4C2128` →
