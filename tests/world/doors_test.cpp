@@ -5,6 +5,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
 #include <runtime/world/pose_provider.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -63,7 +64,10 @@ static void test_parse_and_bind() {
     CHECK(items.entries[1].deathtime_ticks == 558); // explicit zero defaults to 8 seconds + grace
     CHECK(items.entries[1].clipsize == 9);
     CHECK(items.entries[2].deathtime_ticks == 30);
-    CHECK(items.entries[2].door_open_rate_q16 == 0);
+    // 65536 / (0 * 62) is +inf, which _ftol2_sse's SSE2 leg turns into the
+    // integer indefinite. [orig: ItemDef_ParseProperty @0x49EB00 (the
+    // _ftol2_sse call @0x49F91E); _ftol2_sse @0x76BC15]
+    CHECK(items.entries[2].door_open_rate_q16 == INT32_MIN);
 
     World w;
     w.registry.configure_pool(2, 4);

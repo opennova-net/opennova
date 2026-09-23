@@ -1,4 +1,5 @@
 #include <formats/def/def.h>
+#include <base/io/crt_ftol.h>
 
 // Split out of def.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -8,7 +9,6 @@
 #include "def_scan.h"
 
 #include <ctype.h>
-#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,13 +27,6 @@ namespace opennova::def {
    foliage share 2, powerup and object share 6; an unknown token leaves 0
    (unset), and 7 is unused. [orig: ItemDef_ParseProperty @ 0x49eb00;
    docs/world/itemdef-re.md D-ITEMDEF-1] */
-// x87 _ftol2_sse stores the low dword of a truncated signed i64.
-static int32_t retail_integer(double value) {
-    if (!std::isfinite(value) || value < -9223372036854775808.0 ||
-            value >= 9223372036854775808.0) return 0;
-    return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
-}
-
 static int item_type_from_string(const char *s, size_t len) {
     char low[16];
     size_t ll = len < 15 ? len : 15;
@@ -152,7 +145,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 lower_match_key(lower, ll, "sqb_distance", 12) ||
                 lower_match_key(lower, ll, "sqb_error", 9)) {
             // These share the door/death fields, including last-write order.
-            // [orig: ItemDef_ParseProperty @0x49EB00, squib arms @0x49F06F]
+            // Each value goes through _ftol2_sse's SSE2 leg (io/crt_ftol.h).
+            // [orig: ItemDef_ParseProperty @0x49EB00, squib arms @0x49F06F (the
+            // _ftol2_sse calls @0x49F093 / @0x49F0DC / @0x49F125)]
             const bool rate = lower_match_key(lower, ll, "sqb_rate", 8);
             const bool distance = lower_match_key(lower, ll, "sqb_distance", 12);
             size_t vl;
@@ -160,9 +155,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             char value[128];
             safe_copy(value, sizeof(value), v, vl);
             const double number = atof(value);
-            if (rate) current.deathtime_ticks = retail_integer(62.0 / number);
-            else if (distance) current.clipsize = retail_integer(number * 65536.0);
-            else current.door_type = static_cast<uint32_t>(retail_integer(number * 65536.0));
+            if (rate) current.deathtime_ticks = io::retail_ftol_sse2(62.0 / number);
+            else if (distance) current.clipsize = io::retail_ftol_sse2(number * 65536.0);
+            else current.door_type = static_cast<uint32_t>(io::retail_ftol_sse2(number * 65536.0));
             parsed = 1;
         } else if (lower_match_key(lower, ll, "num_doors", 9) ||
                 lower_match_key(lower, ll, "first_door", 10)) {
@@ -197,8 +192,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             char value[128];
             safe_copy(value, sizeof(value), v, vl);
             const double number = atof(value);
-            if (rate) current.door_open_rate_q16 = retail_integer(65536.0 / (number * 62.0));
-            else current.door_max_angle_bam = retail_integer(number * (1.0 / 360.0) * 4294967295.0);
+            // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
+            // @0x49F91E for open_rate, @0x49F96D for max_angle)]
+            if (rate) current.door_open_rate_q16 = io::retail_ftol_sse2(65536.0 / (number * 62.0));
+            else current.door_max_angle_bam = io::retail_ftol_sse2(number * (1.0 / 360.0) * 4294967295.0);
             parsed = 1;
         } else if (lower_match_key(lower, ll, "door_open_sound_id", 18) ||
                 lower_match_key(lower, ll, "door_close_sound_id", 19)) {
@@ -314,7 +311,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             for (int column = 0; column < 3; ++column) {
                 const double seconds = column < n
                         ? atof(std::string(values[column].s, values[column].len).c_str()) : 0.0;
-                current.destroy_timing_ticks[column] = retail_integer(seconds * 62.0);
+                // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
+                // @0x49EE7E / @0x49EEA5 / @0x49EECF)]
+                current.destroy_timing_ticks[column] = io::retail_ftol_sse2(seconds * 62.0);
             }
             parsed = 1;
         } else if (lower_match_key(lower, ll, "dawnshot", 8) ||
@@ -338,7 +337,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 const int token = column + (particle_time ? 0 : 1);
                 const double seconds = token < n
                         ? atof(std::string(values[token].s, values[token].len).c_str()) : 0.0;
-                current.shot_delay_ticks[region][column] = retail_integer(seconds * 62.0);
+                // [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls
+                // @0x49FAD1 for particletesttime, @0x49FC79..0x49FE5C for the shots)]
+                current.shot_delay_ticks[region][column] = io::retail_ftol_sse2(seconds * 62.0);
             }
             parsed = 1;
 		} else if (lower_match_key(lower, ll, "ai_function", 11)) {

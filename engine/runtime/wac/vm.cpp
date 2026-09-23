@@ -8,7 +8,7 @@
 #include <formats/wac/command.h>
 #include <formats/wac/help.h>
 #include <runtime/wac/remote_command.h>
-#include <runtime/wac/retail_ftol.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/world.h>
 
 #include <base/io/strutil.h>
@@ -33,7 +33,7 @@ int32_t power_fold(int32_t base, int32_t exponent) {
         if (magnitude) square *= square;
     } while (magnitude);
     if (exponent < 0) result = 1.0 / result;
-    return retail_ftol_sse2(result);
+    return io::retail_ftol_sse2(result);
 }
 
 

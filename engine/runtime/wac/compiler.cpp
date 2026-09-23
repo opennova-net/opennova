@@ -1,5 +1,5 @@
 #include <runtime/wac/compiler.h>
-#include <runtime/wac/retail_ftol.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 
@@ -1280,7 +1280,8 @@ private:
 		} else if (expected == int(ParamType::Hour)) {
 			value *= 60.0;
 		}
-		return pooled(f, retail_ftol_sse2(value), kind, expected); // [orig: _ftol2_sse @0x4F2D8C]
+		// [orig: WacScript_ResolveParameter @0x4F2920 (the _ftol2_sse call @0x4F2D8C)]
+		return pooled(f, io::retail_ftol_sse2(value), kind, expected);
 	}
 
 	// The dword a resolved address holds during the compile: a pool slot's

@@ -1,5 +1,6 @@
 // Test parsing items.def — spot-check "dbuggy1" and "Player #1" entries, plus
 // the per-item particle-effect keys over an inline snippet.
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -608,8 +609,33 @@ static int test_regional_sound_delays() {
     return ok ? 0 : 1;
 }
 
+// Every scaled items.def value goes through _ftol2_sse, and the shipped game
+// takes its SSE2 leg: an infinity or a truncation outside int32 is the integer
+// indefinite 0x80000000, not the low dword of a 64-bit truncation.
+// [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls @0x49F96D for
+// max_angle, @0x49F093 for sqb_rate, @0x49EE7E / @0x49EEA5 / @0x49EECF for
+// destroy_timing, @0x49FCA3 for the dawnshot delay); _ftol2_sse @0x76BC15]
+static int test_out_of_range_values_take_the_sse2_leg() {
+    const char text[] =
+        "begin Door\n id 1\n max_angle 270\n sqb_rate 0\n end\n"
+        "begin Timed\n id 2\n destroy_timing 40000000 -40000000 1\n dawnshot Bird 1 40000000\n end\n";
+    DefItemsFile items{};
+    if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
+            sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
+    const auto &door = items.entries[0];
+    const auto &timed = items.entries[1];
+    const bool ok = door.door_max_angle_bam == INT32_MIN && door.deathtime_ticks == INT32_MIN &&
+            timed.destroy_timing_ticks[0] == INT32_MIN && timed.destroy_timing_ticks[1] == INT32_MIN &&
+            timed.destroy_timing_ticks[2] == 62 &&
+            timed.shot_delay_ticks[0][0] == 62 && timed.shot_delay_ticks[0][1] == INT32_MIN;
+    if (!ok) fprintf(stderr, "FAIL out-of-range items.def conversions\n");
+    def_free_items(&items);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
     if (test_regional_sound_delays() != 0) return 1;
+    if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;
 	if (test_vehicle_spawn_lists() != 0)
 		return 1;
 	if (test_item_def_allocator_defaults() != 0) {
