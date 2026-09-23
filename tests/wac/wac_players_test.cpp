@@ -395,6 +395,43 @@ static void test_remote_command_fanout_reaches_owner_and_remotes() {
     CHECK(f.world.out.effects.count("text") == 1); // the host ran only the broadcast row
 }
 
+// onptick compares the selected player's slot play-tick dword, in whole
+// seconds, with its argument; it is not the VM clock. The server tick advances
+// that dword once per tick for an in-match slot whose entity is present and not
+// hidden, without the 1860-tick saturation of the control-request age.
+// [orig: WacCmd_OnPlayerTick @0x4F0E10 — the Entity_ValidatePtr call @0x4F0E58,
+//  `mov ecx,[eax+184h]` @0x4F0E65, /62 @0x4F0E6B..0x4F0E7C; Server_TickUpdate
+//  `add [esi+184h],1` @0x51D977]
+static void test_onptick_reads_the_slot_play_ticks() {
+    HostFixture f;
+    MatchPlayer *slot = f.world.match.player(f.actor);
+    CHECK(slot != nullptr && slot->play_ticks == 0);
+    if (slot == nullptr) return;
+    for (int i = 0; i < 124; ++i) nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 124);
+    f.run(f.select(f.actor) + "onptick(2) store(v1)\nonptick(1) store(v2)\nontick(0) store(v3)\n");
+    CHECK(f.value(1) == 1 && f.value(2) == 0 && f.value(3) == 1);
+    // A hidden body (Flags bit 0) pauses the count; so does a pending deploy.
+    f.world.registry.get(f.actor)->flags |= kEntityFlagCarried;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 124);
+    f.world.registry.get(f.actor)->flags &= ~kEntityFlagCarried;
+    f.ctx.np_protocol.connection_list.front().link.respawn_pending = true;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 124);
+    f.ctx.np_protocol.connection_list.front().link.respawn_pending = false;
+    // No saturation past the control-request gate.
+    slot->play_ticks = 1860u * 3u;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 1860u * 3u + 1u);
+    f.run(f.select(f.actor) + "onptick(90) store(v4)\n");
+    CHECK(f.value(4) == 1);
+    // An entity without an active slot, and no selection, read 0.
+    const auto npc = f.spawn(12, 1, false);
+    f.run(f.select(npc) + "onptick(0) store(v5)\nitem=65535\nonptick(0) store(v6)\n");
+    CHECK(f.value(5) == 0 && f.value(6) == 0);
+}
+
 int main() {
     test_registered_slot_predicates_and_byte_bank();
     test_experience_raw_scoring_validation_and_retry();
@@ -403,6 +440,7 @@ int main() {
     test_punt_retry_local_and_stale_slot_guards();
     test_remote_command_classes();
     test_remote_command_fanout_reaches_owner_and_remotes();
+    test_onptick_reads_the_slot_play_ticks();
     std::printf("wac_players: %d failures\n", failures);
     return failures ? 1 : 0;
 }

@@ -190,6 +190,12 @@ struct MatchPlayer {
     // score event 25. It advances for every periodic pass, whether or not the
     // mission contains a capture source. [orig: @0x5087C9..0x5087F1]
     int32_t periodic_score_ticks = 0;
+    // Player-slot +0x184: the server ticks this slot spent in state 6 with its
+    // entity present and not hidden (Flags bit 0), unsaturated and zero at
+    // player-add; WAC onptick reads it in whole seconds.
+    // [orig: Server_TickUpdate `add [esi+184h],1` @0x51D977;
+    //  WacCmd_OnPlayerTick @0x4F0E65]
+    uint32_t play_ticks = 0;
     // WAC pisvar/psetvar address player-slot bytes +392..+408. A new
     // player-add clears them; team changes and death do not.
     // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;

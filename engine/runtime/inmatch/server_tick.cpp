@@ -1602,6 +1602,12 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		if (age_eligible &&
 				reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
 			++reply.control_live_ticks;
+		// The same slot dword unsaturated, where WAC onptick reads it.
+		// [orig: Server_TickUpdate `add [esi+184h],1` @0x51D977]
+		if (age_eligible) {
+			if (world::MatchPlayer *slot = world.match.player(age_player->handle))
+				++slot->play_ticks;
+		}
 	}
 }
 

@@ -277,7 +277,18 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // [orig: WacCmd_Past @0x4ED010; WacCmd_Before @0x4ED030]
     if (ieq(n, "past")) return static_cast<int32_t>(time_ - uint32_t(A(0))) >= 0;
     if (ieq(n, "before")) return static_cast<int32_t>(time_ - uint32_t(A(0))) < 0;
-    if (ieq(n, "ontick") || ieq(n, "onptick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
+    if (ieq(n, "ontick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
+    if (ieq(n, "onptick")) {
+        // The selected player's slot play-tick dword in whole seconds (a
+        // truncating signed /62); an entity without an active slot reads 0.
+        // [orig: WacCmd_OnPlayerTick @0x4F0E10 — the Entity_ValidatePtr call
+        //  @0x4F0E58, `mov ecx,[eax+184h]` @0x4F0E65, /62 @0x4F0E6B..0x4F0E7C,
+        //  the compare @0x4F0E7E..0x4F0E86]
+        const world::EntityHandle handle{static_cast<uint16_t>(auto_item_)};
+        const world::MatchPlayer *player = w.match.player(handle);
+        if (w.registry.get(handle) == nullptr || player == nullptr) return 0;
+        return static_cast<int32_t>(player->play_ticks) / 62 == A(0) ? 1 : 0;
+    }
     if (ieq(n, "elapse")) {
         // An event which has never fired is immediately eligible.
         // [orig: WacCmd_Elapse @0x4ECEF0]
