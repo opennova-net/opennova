@@ -46,10 +46,20 @@ through `tick_infantry`; section 3 records its mechanics.
 
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
-0x8153b8` = `{id, fn}` pairs: ids 0–4 step movers (id4 = `AI_BeginUpdate` = the alive step;
-ids 0–3 = directional death movers incl. `AI_ProcessMovementStep @ 0x466db0` = death-fall:
-controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = ground+0x50000,
-180° flip when grounded, pitch rate brain[45]<<14), ids 0x10000–0x10005 target-calc fns.
+0x8153b8` = `{id, fn}` pairs. Ids 0-3 are the HELO_EVADE maneuvers installed only by the
+evade enter `AI_TransitionToDeath_Infantry @ 0x465F60` (a misnomer; id 3 `@ 0x466109`, id 1
+`@ 0x466195`, id 0 `@ 0x4661EC`, id 2 `@ 0x46624D`) and chained to id 3 when a phase limit is
+reached (`@ 0x461C9D`, `@ 0x461D1D`, `@ 0x466D93`): id 0 `@ 0x461C30` and id 2 `@ 0x461CB0`
+hold ground + 5 u for 248/434 phase, id 1 `@ 0x466C20` turns +-0x3FFFFFC0 at phase 186 then
+faces the target (speed A) until 372, id 3 `@ 0x466DB0` hovers in place (work X/Y = pos,
+Z = ground(0x50000) + 5 u, heading = Yaw + 0x7FFFFFFF, or Yaw with brain[127] = brain[45] << 14
+when brain[48] is set) until 744, then pending 8 (or brain[6]) at the end or past 372 with a
+target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only the savegame restore
+(`Entity_CopyVehicleDefToAIComp @ 0x45DE53`) can select it. The combat enter
+`AI_EnterState_AircraftCombat @ 0x466330` installs 0x10005 (`AI_CalcHelicopterTarget
+@ 0x461870`, the PLANE mover) for profile subtype 2 (`@ 0x466386`), else 0x10000
+(`AI_CalcGroundVehicleTarget @ 0x4613A0`, the HELICOPTER mover; `@ 0x466391`); ids
+0x10001..0x10004 are `return 0` stubs (`@ 0x457B00..0x457B30`).
 `brain[2]` = per-entity 32-byte controller; controller[0] points at the current pair.
 
 ## 2. Correspondence map (engine/runtime/world ↔ Jointops.exe)
@@ -73,7 +83,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `VehicleSystem::player_toggle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
 | `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u 3D gate and the aim cone, score `d3 + aim/512`, enemy-occupant reject, LOS before the best compare; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
 | `find_best_vehicle_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 exact root/ground-child walk and weights (ctrl 0x2000 < gun 0x20000 < root sitex 0x200000 < child sitex 0x2000000) | **matching** (canonical world operation; D-AI-11 g closed) |
-| `VehicleSystem::presnap_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
+| `VehicleSystem::presnap_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = gun.Yaw − (the gun's stored yaw word +0x322 << 16), other seats the bone yaw); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
 | `LocalPlayer::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
 | live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic-seat rider poses and the full matrix basis remain open; the USE scan and the attach labels pose every seat kind at its live bone, 2026-09-22, §23.1) |
 | joiner S2C 0x13/0x26 death fold (`ClientReplicaPipeline::apply_entity_death` → `destruction_notify_item_damage(…, 4)`) | `NapiNPClientMsg_EntityDeath` / `Entity_KillBySlotId` | 0x42eb50 / 0x42bce0 | §24.3 client fold; ctest `npruntime_entity_lifecycle_net` + `destruction` net-kill case | **matching** for destructible victims (D-NET-208; organic 0x13 death-anim + local-player camera legs deferred) |
@@ -376,7 +386,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by the target item definition's `phrase_set @+0x86c`); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
-    (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
+    (entity+24 of the vehicle, ±71582784) and speed (+668). entity+24 (+0x18) is the hull's roll BAM,
+    compared signed (`@ 0x4B65D0` / `@ 0x4BEE3D`): a hull placed at roll 180 holds 0x80000000 in the
+    spawn form and selects sit_24_right (110), where 180 x 11930464 = 0x7FFFFF80 would pick
+    sit_24_left (109). Port status: `UseGun`/gunner seats
     select `anim_emplaced` 67 plus the production-extracted config variant when that clip exists;
     non-gunner seats use the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`).
     Config presence is explicit, so unknown does not alias authored config 0. UseGun root position
@@ -730,8 +743,10 @@ Jointops.exe retail unless marked `dfx2med.exe` (the DFX2 mission editor, imageb
   `initialize_vehicle_brain` that the dynamic teammate spawn already used.
 
 ### 7.2 Heading convention — RESOLVED: engine heading = 90 − yaw
-Spawn writes `entityData[4] = (90 − bmsYawDeg) · kBamPerDegree` (`kBamPerDegree = 11930464 = 2^32/360`),
-so the **engine heading is `90 − yaw`**, not yaw (closes the long-open "90-yaw vs 180-yaw" item). The
+Spawn writes `entityData[4] = ((int32)((90 − bmsYawDeg) << 16) / 360) << 16` through the 0B60B60B7h
+signed divide, truncating toward zero `[orig: Entity_SpawnFromBMSRecord @ 0x40EB42..0x40EB66]`
+(corrected 2026-09-23 from `(90 − yaw) · 11930464`: the low 16 bits are always 0, so yaw 0 spawns
+at 0x40000000, not 0x3FFFFFC0; port `world::spawn_angle_bam`), so the **engine heading is `90 − yaw`**, not yaw (closes the long-open "90-yaw vs 180-yaw" item). The
 waypoint mover writes `kWorkHeading = atan2(dY, dX)` — an ENGINE-frame bearing.
 
 **The bug this exposed:** our brain heading was inconsistent between parked and moving — the spawn seed
@@ -740,29 +755,34 @@ stored mission-frame yaw while the mover stored engine-frame bearing, and the pr
 and faced east: a direction-dependent error, not a constant offset.
 
 **Fix (shipped):** store `heading` in the ENGINE frame everywhere, matching the original — seed
-`(90 − yaw) · kBamPerDegree` (promote), mount pose `(90 − occ.yaw)`, and convert back once at the
+the spawn form (`world::spawn_angle_bam`, promote), mount pose `(90 − occ.yaw)`, and convert back once at the
 present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot basis
 (`MissionObjectPlacer.bms_to_godot_basis`) already applies the faithful `RotY(90 − v)` plus a
 `RotY(90)` .3di model-forward correction (net `RotY(180 − v)`) where `v` is the MISSION yaw — the
 `90 − yaw` belongs in the basis builder, never doubled into the seed.
 
 ### 7.3 Pitch/roll spawn scaling
-`entityData[5]/[6] = deg · 2^32/360` — same BAM scaling as heading, **no 90 offset**.
+`entityData[5]/[6] = ((deg << 16) / 360) << 16`, the same spawn form as heading with **no 90
+offset** `[orig: Entity_SpawnFromBMSRecord @ 0x40EB69..0x40EBA6]`.
 
-### 7.4 Movement-step layer (the fuller ground mover — port deferred)
-- `AI_UpdateMovementTarget @ 0x460e40` is the REAL ground waypoint mover (vs our lean
-  `AI_UpdateWaypointMovement @ 0x457bd0` port): calls `AIWaypoint_UpdateTarget`, advances the node with
-  the same loop/one-shot logic we ported, sets X/Y from the node (mode 1 bone / mode 3 literal), and
-  drives the VERTICAL: `brain[131] = nodeZ` when `aiComp[108]` (= profile+14, set in
-  `Entity_InitVehicleAI`), else ground via `Entity_CalcAverageGroundHeight(e, 0x200000)` plus the def
-  heightOffset (`def[20]==2` selects the raw offset), floored at `def[232] + ground`
-  (= `max(targetZ, ground)`); then heading = bearing + near-target speed halving.
+### 7.4 Movement-step layer (the HELO waypoint mover and the move-step table)
+- `AI_UpdateMovementTarget @ 0x460e40` is the HELO waypoint mover (the state 7/8 speed and the HELO
+  profile altitude/climb fields `@ 0x460E4A..0x460E74`); its callers are the state-7 tick `@ 0x4666C1`,
+  the state-8 tick `@ 0x4723AC` / `@ 0x472A0E` / `@ 0x472A9C` and the ground state-17 RC_FIRE arm
+  `@ 0x4730D9`, all ported. It calls `AIWaypoint_UpdateTarget`, advances the node with the same
+  loop/one-shot logic, sets X/Y from the node (mode 1 bone / mode 3 literal), and drives the VERTICAL:
+  `brain[131] = nodeZ` when brain[108] (= profile+0x38 USE_WAYPOINT_Z, copied by
+  `Entity_InitVehicleAI @ 0x4602AF`) is set, else ground via
+  `Entity_CalcAverageGroundHeight(e, 0x200000)` plus the altitude (profile+0x14 (subtype) == 2, PLANE,
+  selects the raw altitude), floored at ground + profile+0xE8 (min_agl) (= `max(targetZ, ground)`);
+  then heading = bearing + near-target speed halving. It reads the AIUSEWPZ latch brain+432 `@ 0x460FC7`.
 - `AI_ProcessMovementStep @ 0x466db0` pins X/Y to the current pos, sets
   `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
-  phase counters. This session labeled it "the vehicle mover" — **superseded by §1.3**, which
-  identified it as a directional **death-fall mover** (move-step ids 0–3); the mechanics stand.
-- Dispatcher facts confirmed: SM dispatcher `@ 0x4581B0` (24-row table @ 0x815238),
-  event args 0=update / 1=spawn / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
+  phase counters: it is move-step id 3, the HELO_EVADE hover (§1.3), not a death mover.
+- Dispatcher facts confirmed: the air-class machine `@ 0x4581B0` (IDB
+  `EntityAI_ProcessInfantryStateMachine`; the ground-class twin is `@ 0x4583C0`; 24-row table
+  @ 0x815238), event args 0=update / 1=the class callback's kill/damage notification (it queues
+  AIEvent {1, channel 9 air / 0 ground, index, 0, the hit record's owner +0x44}, §38.1) / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
   controller row 4 with a per-entity phase limit of 496, not a per-frame admission
   budget (corrected in section 34). The callback thunks for `cbot/cpln/ctrn` resolve
   the earlier driver lead near @ 0x462120.
@@ -980,7 +1000,8 @@ pitch (the emplaced gun's occupant pitch store `@ 0x4412b3`); otherwise pitch st
 the host validates the relationship and the requester applies it only after the S2C 0x0A carrier/bone
 echo. The same heading synchronization then runs on that authoritative attach/detach edge.
 `pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
-yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
+yaw_offset, the carried body frame; the attach-time pre-snap is gun.Yaw minus the gun's stored
+yaw word +0x322 << 16, §23.1); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
 `Entity.yaw`, synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`,
 and roll, then skips SM + locomotion and auto-dismounts when the vehicle is gone. Remote
 `AiEntity.heading` stays in the seat frame; the local `heading`/`pitch` remain the full-precision
@@ -1021,12 +1042,14 @@ the former failure. Deviations (NOT silently absorbed):
    `find_best_vehicle_seat`, §23.1).
 4. **Mounted-pose variants.** `UseGun` consumes the target definition's production-parsed
    `phrase_set` (including valid zero), and non-gunners consume numbered `sit_N`. The sit_24
-   driver-lean 107–110 variants remain open.
+   driver-lean 107..110 variants are ported (`mounted_anim_state_for_seat`, `ai_detail.h`).
 5. **Generic seat-local pose stand-in** — UseGun root position now follows the owning part's live
    control-posed userpoint, but non-UseGun seats still use binding-fed `seat_local`/`yaw_offset` rather
    than the true per-tick `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` result. The full UseGun
    matrix basis is also not claimed. These residuals remain distinct from the matching request-time
-   yaw pre-snap.
+   yaw pre-snap. The unseeded carrier frame is the spawn form (2026-09-23), and every seat point
+   goes through the fixed-point euler matrix (`Math_BuildFixedPointMatrixFromEulerAngles
+   @ 0x613f40`), the same one a moved carrier uses; the flat unseeded 2D rotate is gone.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
@@ -1067,7 +1090,10 @@ as if they ignore the dx/dy offsets and return a flat field — WRONG. Disasm + 
 show each builds `pos = {x+dx, y+dy, z + 0x10000 − 0x300000}` (a ray from z+1.0 down to z−47.0) and
 calls `raycast_entity_collision @ 0x413760`, which writes the sampled ground height back into `pos.z`
 (returned in eax) — the 5 taps DO sample 5 distinct columns. `Entity_RaycastGroundHeightAndObject` additionally stores the
-raycast collision-object at record+40. The real sampler is
+raycast collision-object at record+40 (`mov [esi+28h],eax` `@ 0x414370`); the average uses it for
+the east and centre taps (`@ 0x4572A1` / `@ 0x4572E0`) and the radius-0 arm (`@ 0x45735D`), the
+plain kind for north, south and west (`@ 0x45725D` / `@ 0x457281` / `@ 0x4572C1`), so the centre
+hit (null on a miss) is the ground link that survives each sample. The real sampler is
 `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`: a LoRes pass, then back/forward step + 8-iteration
 bisection refine (the per-step terrain samples are `Terrain_SampleHeightBilinear @ 0x6067b0` —
 that callee sat IDB-mistyped as a `void()` "null_stub" so decompiles elided it; retyped at the
@@ -1128,6 +1154,25 @@ until those def fields are RE'd; (3) pos[2] snaps (no climb-rate physics); (4) t
   command channels (**D-INF-2**), so the soldiers idled on the terrain instead of riding their
   carrier; the channels are honored since PR #640 (the staged board walk, §23.4) and the 00TRa
   soldiers board their trucks (ctest `vehicle_ride_00tra`).
+- **The runtime nav table** (witnessed and ported 2026-09-22, §38.5). A record whose count is
+  exactly 1 is one-shot whatever its authored flags (`cmp [eax+4],ebp; jnz; or [eax],ebp` with
+  ebp = 1 `@ 0x40F971`, over the 128 records `@ 0x40FB72..0x40FBB2`; the XML loader does the same
+  `@ 0x4CC59C..0x4CC5A9`); shipped redirects onto such lists are 04TR actions 138/139/140 (lists
+  42/43/44) and CP01/02/04/05/06/08/11/12/15. Nodes are read as the flat word 34 * channel + 2 +
+  node of the 128-record block with no bound on the node (`AIWaypoint_UpdateTarget`,
+  `mov edx, Buffer+8[ecx*4]` `@ 0x457476`; `Entity_FindNearestTriggerByType @ 0x407F0B..0x407F6B`,
+  bounded only by the raw count), and resolve through `Pool_GetEntryUnchecked(3, idx) @ 0x441FC0`:
+  a slot no marker fills is the zeroed pool-3 entry (`Pool_Clear @ 0x442060`), position 0 and
+  radius 0. A count past 32 therefore walks into the next record's words (CP19 list 6, count 39,
+  reads list 7's zero words as marker 0), a start node past the count reads the raw slot word
+  (00TRf SSN 1166, CP07 SSN 2019, the CP15 organics), and in 00TRf, CP15 and CP19 marker 0 is a
+  type-2043 Map Centerpoint with radius 0, so a body routed onto it never arrives. The arrival
+  radius (entity+0 = wp_distance << 16, 0x8000 when 0) is written only for marker types 6005
+  (`@ 0x40F096..0x40F0A4`), 6006 (`@ 0x40F157..0x40F16D`) and 2044 (`@ 0x40F213..0x40F221`); every
+  other marker keeps the spawn memset's 0 (`@ 0x40EA27`); the hold word entity+0x148 = 62 * the
+  record's signed word +0x3E is 6005-only (`@ 0x40F066..0x40F08D`). The class inits copy the slot's
+  route words into the brain verbatim, with no count test and no clamp (§38.5). Port:
+  `NavNodeTable::entry_index` / `NavNodeTable::slot` in `promote.cpp` (`route_parity`).
 
 ## 12. Appendix: entity placement — Ground userpoint (dfx2med.exe)
 
@@ -5375,7 +5420,9 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 - Mounted pose phase captures seat yaw/pitch/roll before the local look rewrite,
   synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`, and roll,
   and keeps the remote seat heading separate from the local player's full-precision look.
-  The non-cardinal yaw path retains the witnessed `(90 - yaw) * 11930464` integer convention.
+  An unseeded carrier's angles are its placement's spawn form, ((deg << 16) / 360) << 16
+  [orig: Entity_SpawnFromBMSRecord @ 0x40EB42..0x40EBA6], and the seat offset composes in BAM as for
+  a seeded carrier (`pose_mounted_occupant`, 2026-09-23).
 - Player heading/legs rewritten to the §22.1 model (was the org1 approximation);
   NPC legs corrected to the midpoint re-plant value, staggered windows, and the
   walk half-snap path (§3.3).
@@ -5540,8 +5587,10 @@ its one writer is `Server_PositionPlayerForSpawn @ 0x50D44D`) ->
 no seat, `return 0` (`@ 0x436903`, no scan); else the proximity scan
 (corrected 2026-09-12; vehicle-client-movers-re §36). Either result feeds
 `Entity_RequestVehicleAttach @ 0x4364A0` — which pre-snaps the requester yaw
-from the seat bone (UseGun seats: `vehicle->Yaw - (HIWORD(SpawnOrigin.Z) << 16)`;
-others: the bone euler yaw), then applies directly on the authority
+from the seat bone (UseGun seats: gun.Yaw − (the gun's stored yaw word +0x322 << 16),
+`@ 0x43655F..0x43656E`, so the requester faces along the gun's current traverse; others: the bone
+euler yaw, `@ 0x4365BF..0x4365C3`; the seat userpoint's authored facing `Seat::yaw_offset` turns
+only the carried body frame), then applies directly on the authority
 (`Entity_ProcessVehicleAttach`) or queues C2S 0x26.
 
 OpenNova now performs that snap before either in-process attach relationship is written. Because the
@@ -5764,7 +5813,9 @@ through `_ftol2_sse` at `0x48BE86`, then reads each footprint cosine from
 at `0x48BE98..0x48BEA0`, self index/load at `0x48BEC9..0x48BEDB`. The shared
 `vehicle_avoid_brake` now uses `quantized_dir` for both reads and truncates the
 bearing while preserving its wrapped half-turn word. The ground and boat callers
-retain the same ordered pool scan, compounded brake factor and carrier exclusions.
+retain the same ordered pool scan, compounded brake factor and carrier exclusions; only the
+walk gate differs (ground skips ItemTypeIndex 0, boat and aircraft admit ItemTypeIndex 1 only,
+§31.3).
 The adjacent boat slip FSIN and aircraft steering FSIN/FCOS are full-angle x87
 operations; their computations remain separate (`0x48E43D`, `0x4917DB/0x4917E6`).
 
@@ -6098,8 +6149,9 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   AI_HandleCommand @ 0x465770 cases 0xA/0xB].
 - **Vehicle brains**: known drivable classes consume the resolved profile's
   initial state, speeds, perception priorities, weapon blocks and aircraft
-  flight fields. Initial current, pending and fallback state come from
-  profile +24 (`Entity_InitVehicleAI @ 0x460200`); transport zero-priority
+  flight fields. Initial current, pending and fallback state are 0:
+  `Entity_InitVehicleAI @ 0x460200` reads them back from the zeroed brain (`mov ebx,[esi+18h]`
+  `@ 0x46024B`, stores `@ 0x46028B..0x460291`), and the first mover tick promotes 0 -> PRETTY; transport zero-priority
   profiles suppress acquisition through the class-priority test. Pure-gunner
   parents use the mounted organic's perception and weapon slot.
 
@@ -9150,8 +9202,10 @@ The brake's pool-walk gate skipped a neighbour whose bound radius was <= 0,
 cited to `@0x48bdd9`. Retail's gate there reads **`entity+0x1C`, which is
 `ItemTypeIndex`** (offset derived by walking `GamePlayerEntity` and validated
 against four known anchors on the way: Yaw `0x10`, itemDef `0x20`, Flags
-`0x24`, groundEntity `0x28`), stamped at spawn as `defIndex`
-`[orig: Entity_SpawnFromBMSRecord @0x40E9F0]`. The occupancy half of retail's
+`0x24`, groundEntity `0x28`), stamped at spawn by `mov [esi+1Ch],ebp`
+`[orig: Entity_SpawnFromBMSRecord @0x40EBFC]` from `ItemList_FindIndexByTypeId @0x49E100`: the
+items.def load-order ordinal of the FIRST row carrying the type id, 0 when no row does (each
+`begin` allocates the next row, `ItemDef_ParseProperty @0x49EBA8`, gItemCount++ `@0x49E3BE`). The occupancy half of retail's
 walk is already covered by our registry returning null for an unused slot, so
 the radius test was an additional gate with no counterpart in the original.
 
@@ -9160,6 +9214,20 @@ mission the radius test skipped nothing and never disagreed with the
 item-type test, so the fix is a no-op here and the rig's output is
 byte-identical across it. Ported regardless: an unwitnessed gate is a defect
 even when it is inert, and the next mission need not be so forgiving.
+
+The gate differs by family (corrected 2026-09-22). The ground forms skip index 0 only
+(`cmp dword ptr [edi+1Ch],0; jz`: `Entity_UpdateVehiclePhysics @0x48BDD9`,
+`Entity_UpdateTankVehiclePhysics @0x4899A2`, `Entity_UpdateLightVehiclePhysics @0x484F7F`,
+`Entity_UpdateMountedInfantryMovement @0x4878A2`, `Entity_ProcessInfantryPhysics @0x46EE70`);
+the boat and aircraft forms load ecx = 1 for the walk's count decrement and compare the index
+against the same register (`mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`:
+`Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5`, `Entity_ProcessAirVehiclePhysics
+@0x470B08/@0x470B23`, `Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6`), so they brake ONLY
+behind ItemTypeIndex 1, the second items.def row ("Flyable Ka-52", id 100172, in the shipped
+file): in practice a retail boat or aircraft never brakes for another hull. The port had used
+`item_id != 0` for all three walks; `Entity::item_type_index` now carries the real ordinal
+(stamped by the items.def traits sweep, `mission::resolve_item_traits`) and
+`vehicle_avoid_brake` takes the family's gate (`route_parity`).
 
 ### 31.4 Fixed pool slots and placement admission
 
@@ -9178,14 +9246,18 @@ remap. `mission_promote` pins both admitted records and untouched slot holes;
 
 ### 31.5 What this leaves
 
-Every consumer of the nav channel is witnessed faithful, so if the outcome
-differs, what differs is what they consume. The remaining unaudited surface is
-the `NavChannel`/`NavEntry` data itself: node positions, the per-channel count
-and loop flag, and in particular the arrival threshold `node->f[0]`, which
-becomes `aiState[23]` and gates BOTH the node advance and the arrival halve. A
-wrong threshold has exactly this bug's signature, because it is compared
-against a per-entity distance and therefore fires at a different moment for
-each vehicle depending on where that vehicle is.
+The NavChannel/NavEntry data was audited 2026-09-22: node positions are the
+marker record's +0x10/+0x14/+0x18; the arrival threshold f[0] is the marker's
+entity+0 = wp_distance << 16 (0x8000 when 0), written only for marker types
+6005/6006/2044 (`Entity_SpawnFromBMSRecord @0x40F096..0x40F0A4` /
+`@0x40F15F..0x40F16D` / `@0x40F213..0x40F221`) and never overwritten for the
+model-less waypoint def (`Entity_InitFromModel` skips the radius block
+`@0x40DCCB..0x40DCD1`); every shipped route node (11,235 across 115 missions) is a
+type-6005 marker with a nonzero wp_distance. The one normalization the loader
+applies is the single-node one-shot OR (`Mission_LoadBMSFile @0x40FB72..0x40FBB2`,
+§11), ported 2026-09-22. 00TRg's convoy lists have count <= 32 and flags 1, so the
+residual this section chased is not in the nav data; the convoy has not been
+re-measured since D-AI-13.
 
 ### 31.6 Method notes worth keeping
 
@@ -10615,7 +10687,10 @@ the local-player rule bit 0x800 are its candidate gates. It does not require
 health or an ItemDef pointer. The distance clamp is an upper bound: flt_7C19E0 =
 2147418112.0f (bits 0x4EFFFE00). The unsigned (radius - distance) >> 16
 closeness term admits the retail diagonal-underflow score. The remaining score
-is speaker/friendly +8, local player +2, nearby facing-me +4, last look -12,
+is speaker/friendly +8, local player +2, nearby facing-me +4 (the look-back cone reads the candidate's
+entity+0x10 heading, strict < 11C71C60h [orig: @0x4BE2C3; @0x4BE2D0], as does the
+head-tracking twin @0x4BE6BE / @0x4BE6CB; for a body without a brain of its own
+the port reads its placement heading in the spawn form), last look -12,
 exclusion of the previous look, baseline -12 and the SSN/tick phase term. LOS
 uses the exact eye endpoints.
 
@@ -10994,7 +11069,16 @@ inheriting AiEntity's test-fixture default.
 
 The helicopter starts 600 units along world X and 80 above the marker, with
 heading 2147483520, hover height 35, radius 20, and queued commands 7/5 and
-11/120. The medic offset uses the original quarter-unit heading offset, minus
+11/120. That heading is `HeliLift_SpawnFlyover`'s literal 0x7FFFFF80
+[orig: @0x4527E7], held exactly: `Entity_SpawnHelicopter` copies the spawn
+x/y/z/yaw into the template (@0x452209..0x45224C) and zeroes pitch and roll
+(ebx = 0 @0x4521B5, stores @0x452253 / @0x45225A); the port's spawner seeds
+`veh.yaw_bam` from the request heading with zero pitch and roll (2026-09-23). The
+flyover medic heading 0x3FFFFFC0 is that seed minus 3FFFFFC0h (@0x452948); the
+pickup medics spawn on the marker's own transform [orig: HeliLift_SpawnPickup
+@0x4525E0 (`lea ebp,[eax+4]` @0x45262E, into both Entity_SpawnFromItemDef calls
+@0x452650 / @0x4526A5)], so their heading is the marker's placement heading in
+the spawn form. The medic offset uses the original quarter-unit heading offset, minus
 one-eighth on XY and 1.5 on Z; the second is another quarter unit along both XY
 axes. Their initial slots, team, orders, corpse timers, heading and
 animation-state seeds follow [orig: Entity_SpawnHelicopter @0x4521A0;
@@ -11522,6 +11606,17 @@ same authority/client guards now apply to those events in the port.
 [orig: EntityAI_ProcessVehicleStateMachine @ 0x4583C0 (default branch
 @ 0x45846D); EntityAI_ProcessInfantryStateMachine @ 0x4581B0 (default branch
 @ 0x458261)]
+
+The aircraft mover writes only the current state brain+0x10 (2026-09-22): 0 -> 14
+at its head (@ 0x490377..0x49037D), 14 -> 7 on the AI leg (@ 0x49158A..0x491590),
+14 in the parked leg (@ 0x491C66, after `AI_CheckVehicleStuckState` @ 0x491C5E)
+and 14 in the player leg (@ 0x490F6A); its only pending write is the dying request
+(@ 0x4903A1) [orig: Entity_UpdateAircraftPhysics @ 0x490310]. Parked means no
+occupant or Flags & 0x10000002 (@ 0x490F16..0x490F25), with no health term. With
+the class init's pending 0 the air dispatcher commits 0 after every think
+(@ 0x458384..0x4583B0, the countdown zeroed), so an AI helicopter thinks on every
+pool-1 visit like the ground brains, whose legs already stamped the current word
+only (`route_parity`).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
