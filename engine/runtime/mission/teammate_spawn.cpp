@@ -71,6 +71,17 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     const int index = world.ai.attach(handle);
     mission::resolve_item_traits(world, *table, item_wire_class_, handle);
     Entity &entity = *world.registry.get(handle);
+    // The helicopter takes the request's transform verbatim: its BAM heading
+    // (the flyover's 0x7FFFFF80) with zero pitch and roll, never a rounding
+    // through the degree mirror. [orig: Entity_SpawnHelicopter @0x452209..0x45224C
+    //  (x/y/z/yaw from spawnPos), @0x452253/@0x45225A (pitch/roll = ebx = 0,
+    //  @0x4521B5); HeliLift_SpawnFlyover @0x4527E7]
+    if (request.helicopter) {
+        entity.veh.yaw_seeded = true;
+        entity.veh.yaw_bam = request.heading;
+        entity.veh.air_pitch_bam = 0;
+        entity.veh.air_roll_bam = 0;
+    }
     AiEntity &ai = *world.ai.at(index);
     std::copy_n(request.pos, 3, ai.pos);
     std::copy_n(request.pos, 3, ai.net_saved_live_pose);

@@ -128,9 +128,11 @@ void test_watercraft_seeds_read_the_spawn_form() {
     }
 }
 
-// The aircraft mover's own seed (a dead predicted hull returns before its live
-// controls) and the AI drive's seed ahead of it (a non-PlayerControl aircraft
-// returns right after copying its command registers).
+// The aircraft mover's own seed (a dead hull returns before its live controls)
+// and the AI drive's seed ahead of it (a non-PlayerControl aircraft returns
+// right after copying its command registers). An authority row seeds its
+// pitch and roll as well (@0x490355/@0x49035E); a predicted row keeps the
+// attitude its arming landed from the wire.
 void test_aircraft_seeds_read_the_spawn_form() {
     {
         Rig r;
@@ -140,8 +142,22 @@ void test_aircraft_seeds_read_the_spawn_form() {
         auto &m = r.veh().veh;
         m.net_predicted = true;
         m.net_interp_progress = 20;
+        m.air_pitch_bam = 777; // the arming's replicated attitude
+        m.air_roll_bam = -555;
         r.w.vehicles.aircraft_client_tick(r.veh(), t);
         CHECK(m.yaw_bam == kHeading89);
+        CHECK(m.air_pitch_bam == 777 && m.air_roll_bam == -555);
+    }
+    {
+        Rig r;
+        r.kill();
+        const VehicleTraits t = motor_traits(VehicleFamily::Helicopter);
+        auto &m = r.veh().veh;
+        m.ai_drive = true; // the authority AI leg staged this tick
+        r.w.vehicles.aircraft_client_tick(r.veh(), t);
+        CHECK(m.yaw_bam == kHeading89);
+        CHECK(m.air_pitch_bam == kPitch10);
+        CHECK(m.air_roll_bam == kRollMinus3);
     }
     {
         Rig r;
@@ -149,6 +165,8 @@ void test_aircraft_seeds_read_the_spawn_form() {
         r.w.ai.attach(r.veh_h);
         r.w.ai.chel_ai_drive(r.w, r.veh(), nullptr, t);
         CHECK(r.veh().veh.yaw_bam == kHeading89);
+        CHECK(r.veh().veh.air_pitch_bam == kPitch10);
+        CHECK(r.veh().veh.air_roll_bam == kRollMinus3);
     }
 }
 

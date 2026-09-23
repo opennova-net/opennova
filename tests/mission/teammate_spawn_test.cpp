@@ -1,6 +1,7 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include <runtime/world/teammate_operations.h>
+#include <runtime/world/vehicle_motor.h>
 #include <formats/aip/aip.h>
 #include <formats/def/def.h>
 #include <runtime/mission/mission_kernel.h>
@@ -56,9 +57,47 @@ void test_helicopter_ammo_seed_needs_a_resolved_byte() {
     CHECK(ai->brain.f[w::AiBrain::kAmmoA] == 5);
     CHECK(ai->brain.f[w::AiBrain::kAmmoB] == 0);
 }
+// The flyover helicopter takes its spawn transform verbatim: heading
+// 0x7FFFFF80, zero pitch and roll. Its first AI flight pass must read that
+// heading, not the degree mirror's 270 rounded back to 0x80000000.
+// [orig: HeliLift_SpawnFlyover @0x4527E7 (the heading); Entity_SpawnHelicopter
+//  @0x452209..0x45224C (x/y/z/yaw from spawnPos), @0x452253/@0x45225A (pitch/roll 0)]
+void test_flyover_helicopter_keeps_its_spawn_heading() {
+    std::array<def::DefItemDef, 1> rows{};
+    rows[0].id = mission::kItemIdOffset + 1281;
+    rows[0].type = 1;
+    rows[0].attrib = w::kItemAttribAIData;
+    rows[0].hp = 100;
+    std::strcpy(rows[0].ai_function, "CHel");
+    def::DefItemsFile items{rows.data(), rows.size()};
+    auto kernel = std::make_unique<mission::MissionKernel>();
+    kernel->set_items_table(&items);
+    kernel->world.registry.configure_pool(0, 8);
+    kernel->world.registry.configure_pool(1, 8);
+    static const char kProfile[] = "type HELO\n";
+    kernel->ai_profiles.push_back({"h_bhawkn",
+            aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
+                    sizeof(kProfile) - 1)});
+    w::TeammateSpawn request;
+    request.item_type = 1281;
+    request.ssn = 11000;
+    request.heading = 2147483520; // 0x7FFFFF80
+    request.helicopter = true;
+    const w::EntityHandle heli = kernel->spawn_teammate(request);
+    w::Entity *hull = kernel->world.registry.get(heli);
+    CHECK(hull != nullptr);
+    if (hull == nullptr) return;
+    int32_t pos[3], yaw = 0, pitch = 1, roll = 1;
+    w::carrier_pose_fixed(*hull, pos, yaw, pitch, roll);
+    CHECK(yaw == 2147483520 && pitch == 0 && roll == 0);
+    kernel->world.ai.chel_ai_drive(kernel->world, *hull, nullptr, w::VehicleTraits{});
+    CHECK(hull->veh.yaw_bam == 2147483520);
+    CHECK(hull->veh.air_pitch_bam == 0 && hull->veh.air_roll_bam == 0);
+}
 }
 int main() {
     test_helicopter_ammo_seed_needs_a_resolved_byte();
+    test_flyover_helicopter_keeps_its_spawn_heading();
     if (failures) {
         std::printf("retail teammate factory: FAIL\n");
         return 1;
