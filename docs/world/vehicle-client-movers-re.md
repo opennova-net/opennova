@@ -597,10 +597,11 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
      only a candidate whose ItemTypeIndex is 1 brakes the boat (the second
      items.def row, "Flyable Ka-52", in the shipped file), where the ground
      forms skip ItemTypeIndex 0 only (`cmp dword ptr [edi+1Ch],0; jz`:
-     `Entity_UpdateVehiclePhysics @0x48BDD9`, `Entity_UpdateTankVehiclePhysics
-     @0x4899A2`, `Entity_UpdateLightVehiclePhysics @0x484F7F`,
-     `Entity_UpdateMountedInfantryMovement @0x4878A2`,
-     `Entity_ProcessInfantryPhysics @0x46EE70`). A retail boat or aircraft
+     `Entity_UpdateVehiclePhysics @0x48AF00` (`@0x48BDD9`),
+     `Entity_UpdateTankVehiclePhysics @0x488AB0` (`@0x4899A2`),
+     `Entity_UpdateLightVehiclePhysics @0x483FE0` (`@0x484F7F`),
+     `Entity_UpdateMountedInfantryMovement @0x486A50` (`@0x4878A2`),
+     `Entity_ProcessInfantryPhysics @0x46E100` (`@0x46EE70`)). A retail boat or aircraft
      therefore never brakes for another hull in practice. The port shares
      `vehicle_avoid_brake` with the family's gate over `Entity::item_type_index`
      (corrected 2026-09-22; it had gated all three walks on a nonzero type id);
