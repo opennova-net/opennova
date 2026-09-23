@@ -444,7 +444,9 @@ static void test_trigger_count_is_signed_in_the_chain() {
 }
 
 // reset_after == 0: a repeat event re-fires on EVERY processing pass while its chain
-// holds [orig: the LABEL_24 path clears +20 in the same call].
+// holds: the zero reload word clears the +20 latch in the same call
+// [orig: EventTrigger_UpdateEntry @0x454C30 — the ResetAfter test @0x454CC5, the
+//  zero-reload jump @0x454CD5 to the latch clear @0x454D46].
 static void test_repeat_zero_refires_every_pass() {
     World w;
     w.cached.humans = 1;
