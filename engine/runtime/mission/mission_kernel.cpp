@@ -616,7 +616,12 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("wac");
 		wac_loaded = false;
 		std::string wac_error;
-		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
+		// A non-authoritative load compiles no layer: it installs only the
+		// terminator. [orig: WacScript_InitAndLoad @0x4F9437 (the authority
+		// test), @0x4F944E (jz past the three compiles), @0x4F95A9 ('zzzz')]
+		const mission::BootFileSource no_layers{};
+		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac,
+				world.rules.projectile_authority ? files_ : no_layers,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
 				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {

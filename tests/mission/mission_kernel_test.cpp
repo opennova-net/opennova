@@ -7,6 +7,7 @@
 // the local role's tick advances the logic clock, the teleport/health seams round-trip
 // through both stores, and the CanFire verdict answers over the spawned
 // player. The retail-path legs stay in tests/common/retail_mission_files.
+#include <formats/wac/bytecode.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 
@@ -124,6 +125,36 @@ static void run_boot_trace_gates() {
 				"mission_text", "load_mission", "wac", "spawn_local_player", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(kernel.local.has_local_player());
+	}
+}
+
+// Only the authority compiles the mission's WAC layers: a joiner's load skips
+// all three compiles and installs the bare terminator.
+// [orig: WacScript_InitAndLoad @0x4F9437 (the authority test), @0x4F944E,
+//  @0x4F95A9]
+static void test_joiner_installs_only_the_wac_terminator() {
+	for (bool joiner : {false, true}) {
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then inc(v1) endif\n";
+		bms::File m{};
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		ms::MissionKernel kernel;
+		kernel.open_document(std::move(m), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.joiner = joiner;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.wac.vm().loaded());
+		CHECK(kernel.wac_loaded == !joiner);
+		if (joiner) {
+			CHECK(kernel.wac.program().code.size() == 1);
+			CHECK(kernel.wac.program().code[0] == wac::kProgramTerminator);
+			CHECK(kernel.wac.program().event_count == 0);
+		} else {
+			CHECK(kernel.wac.program().event_count == 1);
+		}
 	}
 }
 
@@ -424,6 +455,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
 
 int main() {
     test_first_frame_tick_matches_on_host_and_joiner();
+    test_joiner_installs_only_the_wac_terminator();
     test_initial_wac_binds_the_preopened_music_context();
     test_empty_wac_clock_and_baseline_gate();
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
