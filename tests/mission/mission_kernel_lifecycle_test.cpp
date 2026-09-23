@@ -9,9 +9,11 @@
 // grounding, the teleport seams still work).
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
+#include <formats/def/def.h>
 
 #include "common/boot_file_source.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -86,6 +88,65 @@ static void tick_no_net(opennova::mission::MissionKernel &kernel) {
 // and MSVC does not reliably overlap main()'s block-scoped locals, so stack
 // kernels overflow the 1 MB default stack (STATUS_STACK_OVERFLOW in main).
 int main() {
+	// --- the spawn-marker list is built before the PreMission pass ------------
+	// A PreMission action that hands the lowest zone to team 2 does not reorder
+	// the markers: the list was built with that zone on team 1, where a
+	// marker's priority is its own zone number.
+	// [orig: Game_StartMission — the build_spawn_marker_budget_list call
+	//  @0x5252C6 precedes the EventTrigger_UpdateAllWithFlag2 call @0x525B86;
+	//  build_spawn_marker_budget_list @0x529B40]
+	{
+		std::array<def::DefItemDef, 2> rows{};
+		rows[0].id = ms::kItemIdOffset + 900;
+		rows[0].type = 5;
+		rows[0].attrib = 0x60000u;
+		rows[0].hp = 100;
+		rows[1].id = ms::kItemIdOffset + 901;
+		rows[1].type = 4;
+		rows[1].attrib2 = 4u;
+		rows[1].hp = 100;
+		def::DefItemsFile items{rows.data(), rows.size()};
+		bms::File m{};
+		bms::Entity low = item(/*type_id=*/900, 10 << 16, 0, 0);
+		low.id = 50;
+		low.team = 1;
+		low.lfp_group = 1;
+		bms::Entity high = item(/*type_id=*/900, 20 << 16, 0, 0);
+		high.id = 51;
+		high.team = 2;
+		high.lfp_group = 2;
+		m.items = {low, high};
+		bms::Entity marker{};
+		marker.type = bms::ItemType::Marker;
+		marker.type_id = 901;
+		marker.id = 52;
+		marker.lfp_group = 2;
+		marker.x = 20 << 16;
+		m.markers = {marker};
+		bms::Event event{};
+		event.flags = bms::EventFlags::PreMission;
+		event.action_index = 0;
+		event.action_count = 1;
+		bms::Action action{};
+		action.action_type = bms::ActionType::ChangeSteamAction;
+		action.param1 = 50;
+		action.param2 = 2;
+		m.events = {event};
+		m.actions = {action};
+		std::map<std::string, std::string> files;
+		auto kernel = std::make_unique<ms::MissionKernel>();
+		kernel->open_document(std::move(m), "synth", source_over(&files));
+		kernel->set_items_table(&items);
+		ms::KernelBootOptions options;
+		options.playable = false;
+		std::string error;
+		CHECK(kernel->boot(options, error));
+		const w::Entity *zone = kernel->world.registry.get(w::EntityHandle::make(1, 0));
+		const w::Entity *placed = kernel->world.registry.get(w::EntityHandle::make(3, 0));
+		CHECK(zone != nullptr && zone->team == 2); // the PreMission action ran
+		CHECK(placed != nullptr && placed->vehicle_spawn_priority == 2);
+	}
+
 	// --- the ordering guards ---------------------------------------------------
 	{
 		auto kernel_box = std::make_unique<ms::MissionKernel>();

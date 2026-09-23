@@ -694,6 +694,14 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		error = wac_blocked_error;
 		return false;
 	}
+	// The vehicle spawn-marker list is built from the mission as loaded, once
+	// the definitions are attached and ahead of the class inits, the
+	// PreMission pass and the WAC's initial execution.
+	// [orig: Game_StartMission — the per-vehicle sub_529A80 walk
+	//  @0x52527A..0x5252BF and the build_spawn_marker_budget_list call
+	//  @0x5252C6 precede the Entity_InitAllFromModels call @0x52567F and the
+	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
+	world.vehicles.build_spawn_markers();
 	// Definition callbacks finish before the pre-mission event pass. In
 	// particular, NPCs need their own ADM, ammunition and collision bindings.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0]
@@ -760,7 +768,6 @@ bool MissionKernel::complete_mission_start() {
 	world.weather.mission_start_init();
 	for (int i = 0; i < 255; ++i) tick_weather();
 	w::count_mission_units(world);
-	world.vehicles.build_spawn_markers();
 	if (world.rules.projectile_authority)
 		world.vehicles.initialize_mission_vehicles();
 	capture_baseline();
