@@ -1,12 +1,14 @@
 // The vehicle-brain state rows against their retail witnesses: what each ground
 // and aircraft row reads off the entity record and writes into the brain and slot.
-// Driven through the public row table (AiSystem::row) and the class dispatchers.
+// Driven through the public row table (AiSystem::row), the class dispatchers and
+// the ChangeAI command seam (EntityCommands::apply_ai_command).
 #include <cstdio>
 #include <memory>
 
 #include <formats/aip/aip.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/entity_commands.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -326,6 +328,66 @@ void test_class_init_keys_on_the_item_class() {
     CHECK(climber.profile.patrol_climb == -100);
 }
 
+
+// The brain half of ChangeAI needs the vehicle brain at entity+0x64: an organic
+// target (it carries only the AI slot at +0x68) takes its slot arm but queues
+// no AI event, and PLAYPARTANIM, AIUSEWPZ and TARGETSSN leave its brain words
+// alone; a vehicle target takes every arm.
+// [orig: Entity_ApplyCommand @0x43AB60, the +0x64 gates @0x43AC34 (red alert,
+//  after the slot byte), @0x43B0A0 (DRIVESKILL), @0x43B136 (TARGETSSN),
+//  @0x43B158 (AIUSEWPZ), @0x43B1C1 (PLAYPARTANIM)]
+void test_change_ai_brain_arms_need_the_vehicle_brain() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 2);
+    w.registry.configure_pool(1, 2);
+    Entity person;
+    person.net_id = 42;
+    person.kind = EntityKind::Organic;
+    const EntityHandle org = w.registry.spawn(0, person);
+    Entity hull;
+    hull.net_id = 43;
+    hull.kind = EntityKind::Item;
+    const EntityHandle veh = w.registry.spawn(1, hull);
+    w.ai.attach(org);
+    w.ai.attach(veh);
+    AiEntity &o = *w.ai.for_handle(org);
+    AiEntity &v = *w.ai.for_handle(veh);
+    o.inf.active = true;
+    o.brain.f[AiBrain::kPriorityTarget] = 5;
+    v.brain.f[AiBrain::kPriorityTarget] = 5;
+
+    const int before = w.ai.events.count();
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kRedAlert, 0, 0, 0));
+    CHECK(o.slot.bytes()[AiSlot::kAlertByte] == 2);
+    CHECK(w.ai.events.count() == before);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kRedAlert, 0, 0, 0));
+    CHECK(v.slot.bytes()[AiSlot::kAlertByte] == 2);
+    CHECK(w.ai.events.count() == before + 1);
+    if (w.ai.events.count() == before + 1)
+        CHECK(w.ai.events.at(before).f[0] == 6 && w.ai.events.at(before).f[3] == 2);
+
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kDriveSkill, 3, 0, 0));
+    CHECK(w.ai.events.count() == before + 1);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kDriveSkill, 3, 0, 0));
+    CHECK(w.ai.events.count() == before + 2);
+
+    CHECK(w.commands.apply_ai_command(42, 0x22, 1, 1, 0x10000));
+    CHECK(o.brain.f[AiBrain::kPartAnimDir0] == 0 && o.brain.f[AiBrain::kPartAnimRate0] == 0);
+    CHECK(w.commands.apply_ai_command(43, 0x22, 1, 1, 0x10000));
+    CHECK(v.brain.f[AiBrain::kPartAnimDir0] == 1 && v.brain.f[AiBrain::kPartAnimRate0] == 1048);
+
+    CHECK(w.commands.apply_ai_command(42, 0x20, 0, 0, 0));
+    CHECK(o.brain.f[AiBrain::kUseWaypointZones] == 0);
+    CHECK(w.commands.apply_ai_command(43, 0x20, 0, 0, 0));
+    CHECK(v.brain.f[AiBrain::kUseWaypointZones] == 1);
+
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kTargetSsn, 0, 0, 0));
+    CHECK(o.brain.f[AiBrain::kPriorityTarget] == 5);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kTargetSsn, 0, 0, 0));
+    CHECK(v.brain.f[AiBrain::kPriorityTarget] == 0);
+}
+
 } // namespace
 
 int main() {
@@ -338,6 +400,7 @@ int main() {
     test_aircraft_dead_enter_wakes_as_team_zero();
     test_part_anim_rate_uses_the_single_precision_tick();
     test_class_update_leaves_the_body_anim_alone();
+    test_change_ai_brain_arms_need_the_vehicle_brain();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

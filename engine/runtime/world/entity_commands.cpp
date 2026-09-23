@@ -1946,9 +1946,12 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
             // No switch arms in this binary. [orig: Entity_ApplyCommand @0x43AB60]
             break;
         case EntityCommands::kTargetSsn: {
-            // The helper writes brain+148. Its live pool-0 match returns
-            // before storing; all other paths clear the old priority pointer.
-            // [orig: Entity_ApplyCommand @0x43AB60 -> Entity_FindByNetId @0x4655B0]
+            // The helper writes brain+148, so the arm needs the vehicle brain
+            // (an organic has none). Its live pool-0 match returns before
+            // storing; all other paths clear the old priority pointer.
+            // [orig: Entity_ApplyCommand @0x43AB60 case 44, the +0x64 gate
+            //  @0x43B136..0x43B13B -> Entity_FindByNetId @0x4655B0]
+            if (ae.inf.active) break;
             if (p2 != 0) {
                 bool preserve = false;
                 for (size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
@@ -2099,6 +2102,22 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
     sys.events.queue(ev);
 }
 
+// The brain half of Entity_ApplyCommand: every queued-event arm and the direct
+// brain arms (AIUSEWPZ/AICLEARWPZ/PLAYPARTANIM) first require the vehicle brain
+// at entity+0x64. An organic carries only the AI slot, so its slot arms apply
+// and these do not (TARGETSSN's arm carries the same gate). [orig:
+//  Entity_ApplyCommand, the `mov eax,[reg+64h]` gate per arm: the alerts
+//  @0x43AC34 (red, after the slot byte), @0x43AC94 (yellow), @0x43AD04 (green);
+//  DRIVESKILL @0x43B0A0, AIMSKILL @0x43B0BE, AISETSTATE @0x43B0DC, COMBATSPEED
+//  @0x43B0FA, PATROLSPEED @0x43B118, START_FIRING @0x43B2C4, FIRING_ANGLE
+//  @0x43B2DB; AIUSEWPZ @0x43B158, AICLEARWPZ @0x43B177, PLAYPARTANIM @0x43B1C1]
+void apply_ai_brain_arms(World &world, AiEntity &ae, int sub_type, int32_t p2, int32_t p3,
+                         int32_t p4) {
+    if (ae.inf.active) return;
+    queue_ai_brain_event(world.ai, ae, sub_type, p2);
+    ai_apply_command(ae.brain, sub_type, p2, p3, p4);
+}
+
 // One Entity_ApplyCommand over a resolved row: the entity arms first (no
 // aiRuntime gate), then the controller, queued-event and brain halves when
 // the row has an AI component. True when some arm took the command.
@@ -2111,8 +2130,7 @@ bool apply_row_ai_command(World &world, EntityHandle handle, int sub_type, int32
     AiEntity *ae = world.ai.for_handle(handle);
     if (ae == nullptr) return false;
     apply_ai_controller_command(world, *entity, *ae, sub_type, p2, p3);
-    queue_ai_brain_event(world.ai, *ae, sub_type, p2);
-    ai_apply_command(ae->brain, sub_type, p2, p3, p4);
+    apply_ai_brain_arms(world, *ae, sub_type, p2, p3, p4);
     return true;
 }
 
