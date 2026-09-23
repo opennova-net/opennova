@@ -268,7 +268,7 @@ Every named schema value is listed below. Explicit cases are counted against the
 | 23 | PlayerInputBit11 | Explicit case; no setter in the image |
 | 24 | PlayerInputBit12 | Explicit case; no setter in the image |
 | 25 | PlayerInputBit13 | Explicit case; no setter in the image |
-| 26 | PlayerLookByteBit0Clear | Explicit case, constant true: the byte's only store writes 0 (`HUD_BuildEntityInfo @0x4B84D9`, bms-event-runtime-re section 1.4) |
+| 26 | PlayerLookByteBit0Clear | Explicit case, constant true: the byte's only store writes 0 (`HUD_BuildEntityInfo @0x4B8440` (the store @0x4B84D9), bms-event-runtime-re section 1.4) |
 | 27 | PlayerLookByteBit0Set | Explicit case, constant false (the same witness) |
 | 28 | PlayerInputBit29 | Explicit case; no setter in the image |
 | 29 | PlayerInputBit14 | Explicit case; no setter in the image |

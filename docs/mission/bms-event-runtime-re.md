@@ -14,7 +14,7 @@ claim in this record is tied to a retail witness; addresses are cited inline.
 | Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail boundary D-EVT-7 (PERMANENT, class D) | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
 | Event timers, trigger chain and conditions (2026-09-23) | MATCHING (retail-executed vectors) | `EventTrigger_UpdateEntry @ 0x454c30`, `EventTrigger_EvaluateChain @ 0x454050`, `EventTrigger_EvaluateCondition @ 0x453620`; 479 retail vectors in `mission_event_vectors` (`scripts/oracles/mission_event_parity.py`), `event_runtime_bms`, `bms_event_parity`; sections 1.2 to 1.4, 7.4 |
 | Action dispatch (2026-09-23) | MATCHING, except action 38's consumer (unresolved, section 7.5) | `EventAction_Dispatch @ 0x4542e0`; `bms_event_parity`, `bms_hud_relay`, `mission_mount`, `hud_item_flash`, `script_command_parity`; sections 1.5, 7.5, 10 |
-| PreMission / PostMission passes (2026-09-23) | MATCHING | `Game_StartMission @ 0x525b86`, `Game_TeardownMission @ 0x52266c`; `mission_kernel_lifecycle`, `event_runtime_bms`, `mission_event_vectors`; section 1.6, D-EVT-4 |
+| PreMission / PostMission passes (2026-09-23) | MATCHING | `Game_StartMission @ 0x524360` (the call @ 0x525b86), `Game_TeardownMission @ 0x522350` (the call @ 0x52266c); `mission_kernel_lifecycle`, `event_runtime_bms`, `mission_event_vectors`; section 1.6, D-EVT-4 |
 
 ## 1. The original system
 
@@ -454,7 +454,11 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   Berserk read (18), the input-bit family (19-25, 28-30, 32, 33) with the
   mirror seed at chain entry and the commit at both fire sites, the dialog
   registry pair (34/35), the satchel-in-area scan (37); the never-set masks
-  22-25/28-30 read false as in retail. Subs 26/27 are constant true/false: the
+  22-25/28-30 read false as in retail. The view actions write their own bits (400
+  -> 0x4000000, 401 -> 0x10000000, 402 -> 0x8000000, `Input_HandleActionBinding
+  @0x49AD40` cases @0x49C073/@0x49C0D9/@0x49C0F6) through
+  `Simulation::apply_local_player_view_action` (2026-09-23); 412 and 405..410 have
+  no binding-table row, so their bits never set in retail either. Subs 26/27 are constant true/false: the
   look byte's bit 0 is never set, its only store writing 0 (§1.4; PORTED
   2026-09-23), which closes the cat-7 part of this row; the row stays OPEN for
   the holding pair's generic carry/save producers and the sub-45 yaw residual
@@ -472,8 +476,9 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
 - **D-EVT-4 — pre/post pass cadence: FIXED 2026-07-05 (witness settled; callers
   landed 2026-09-23).**
   One-shot per transition, never periodic: pre has exactly one call site
-  (`Game_StartMission @0x525b86`, authority-gated, before `tick = 0`
-  @0x525b9f); post is called once from `Game_TeardownMission @0x52266c`, after
+  (`Game_StartMission @0x524360`, the call @0x525b86, authority-gated, before
+  `tick = 0` @0x525b9f); post is called once from `Game_TeardownMission
+  @0x522350` (the call @0x52266c), after
   the teardown destroyed pools 0..2, and from `Game_RestartRoundSP @0x5263a0`
   (ex the kong misnomer "Game_PlayVideoFile"), whose call @0x5263ae sweeps
   nothing because the round restart's mission reset already freed the event
@@ -698,12 +703,12 @@ bit flip it.
 | `BmsEventSystem::evaluate_chain` | `EventTrigger_EvaluateChain @0x454050` |
 | `BmsEventSystem::evaluate_trigger` | `EventTrigger_EvaluateCondition @0x453620` |
 | `BmsEventSystem::dispatch_action` | `EventAction_Dispatch @0x4542e0` |
-| `BmsEventSystem::tick` (pre + normal passes) / `run_post_mission_pass` (post) | `@0x454dc0` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` / `@0x454e00`, run once by `MissionKernel::run_post_mission_pass` from `HostRole::close` / `LocalRole::close` [orig: Game_TeardownMission @0x52266c] |
+| `BmsEventSystem::tick` (pre + normal passes) / `run_post_mission_pass` (post) | `@0x454dc0` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` / `@0x454e00`, run once by `MissionKernel::run_post_mission_pass` from `HostRole::close` / `LocalRole::close` [orig: Game_TeardownMission @0x522350 (the call @0x52266c)] |
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
 | `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
 | `WacVm::time()` | `dword_C6EAD8` |
 | `World::logic_tick` | `current_tick @0x24c1968`; `Game_StartMission` zeroes it on every peer past the authority-gated pre pass (`mov tick, ebx` @0x525b9f, gate @0x525b78) and `Game_ProcessMainFrame` adds one before `Entity_UpdateAllEntities` (@0x5265b4, call @0x52674b), so the first mission frame runs at tick 1 on the host and on every client; `MissionKernel::boot` sets `logic_tick = 1` for every role, the post-increment equivalent (2026-09-22, `mission_kernel::test_first_frame_tick_matches_on_host_and_joiner`) |
-| `World::run_logic_tick` system order (`run_script_pass` then `run_entity_pass`, split by the host's server tick around its 0x0A) | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate → the gated Entity_UpdateAllEntities @0x52674b) |
+| `World::run_logic_tick` system order (`run_script_pass` then `run_entity_pass`, split by the host's server tick around its 0x0A) | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate, then the gated Entity_UpdateAllEntities, the call @0x52674b) |
 | `promote_mission` | `Mission_LoadBMSFile @0x40f4e0` spawn loops |
 | `Entity.net_id` | entity +124 ← record dword +8 (`@0x40e9f0`) |
 | `EntityRegistry::find_by_net_id` | `EntityPool_FindByNetId @0x4f0a20` |
@@ -810,7 +815,7 @@ bytes or its overflowing 2048-byte temporary buffer. The three shipped chunks
 in ASP_G8a, ASR_C2A and TKR_G3A with broken separators now retain the witnessed
 record order instead of searching for embedded weapon names. Canonical reparse
 is stable across all 116 locally available missions; this is not a byte-equality
-claim for malformed input. **D-EVT-7 (PERMANENT, class D: a never-reproduce of retail's out-of-buffer reads; ADR 0022 register)** records that boundary: bounded
+claim for malformed input. **D-EVT-7 (PERMANENT, class D: a never-reproduce of retail's out-of-buffer reads; ratified by the merge of PR #646, 2026-09-12; ADR 0022 register)** records that boundary: bounded
 missing-string reads and preservation of oversized typed records differ from
 retail's out-of-buffer reads and final 2048-byte copy cap. No unsafe retail
 execution behavior is claimed by the parser tests.
@@ -1142,7 +1147,7 @@ MedicAssisting, sub3 Evacuating. No params.
 | 18 | PlayerBerserk | local player's AiSlot behavior word & 0x200, returned raw (@0x453B85..0x453B99): the chain folds 0x200, so NOT-Berserk reads 0x201 (true), Berserk AND true reads 0 and Berserk XOR true reads 0x201 (§1.3) | — |
 | 19/20/21 | FirstPerson/ThirdPerson/Cockpit | view bits 0x4000000/0x8000000/0x10000000 in `g_InputActionBits` (0xB3B738), set by the view actions 400 view1st / 402 viewchase / 401 viewwithgun and consumed through the mirror (§1.4) | — |
 | 22/23/24/25 | PlayerInputBit10/11/12/13 | bits 0x400/0x800/0x1000/0x2000: no setter in the image, false in retail | — |
-| 26/27 | PlayerLookByteBit0Clear/Set | `(byte_27234FC & 1) == 0` / `!= 0` (@0x453CA5 / @0x453CB6): sub 26 true, sub 27 false: the byte's only store writes 0 (`HUD_BuildEntityInfo @0x4B84D9`, §1.4) | — |
+| 26/27 | PlayerLookByteBit0Clear/Set | `(byte_27234FC & 1) == 0` / `!= 0` (@0x453CA5 / @0x453CB6): sub 26 true, sub 27 false: the byte's only store writes 0 (`HUD_BuildEntityInfo @0x4B8440` (the store @0x4B84D9), §1.4) | — |
 | 28/29/30 | PlayerInputBit29/14/15 | bits 0x20000000/0x4000/0x8000: no setter, false in retail | — |
 | 32 | PlayerInputBitIndex | `1 << p1` (shift count masked to 5 bits) | BIT index |
 | 33 | PlayerInputBitIndexPlus15 | `1 << (byte@12 + 15)` (the low byte of p1) | BIT index |
