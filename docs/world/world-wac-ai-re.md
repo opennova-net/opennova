@@ -12071,9 +12071,9 @@ inside the named function, re-read read-only in the IDB; names are the IDB's as 
 changed). The older sections that stated the superseded behavior are corrected in
 place; this section is the pass's witness map.
 
-Retail-executed vectors back most slices: `ai_brain_rows` (the dispatchers' idle
-latch and alert edge, the class-walk sort, the ChangeAI arms),
-`movement_brain_parity`, `aim_metrics_parity`
+Retail-executed vectors back most slices: `movement_brain_parity` (the dispatchers'
+idle latch and alert edge), `ai_brain_rows` (the class-walk sort through the CRT
+`_qsort`), `aim_metrics_parity`
 (`scripts/oracles/aim_metrics_parity.py`, 120 cases), `infantry_org1_parity` (the
 org1 vertical tail run under Unicorn), `wac_retail_vectors`
 (`scripts/oracles/wac_parity.py`: the original compiler over 269 synthetic sources
@@ -12083,7 +12083,7 @@ listing by SHA-256) and `mission_event_vectors`
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Brain class routing, idle latch, alert edge, event 1 | MATCHING (behavioral proof) | `ai_brain_rows`: 128 idle-latch and 36 alert rows executed on the retail dispatchers; only the five brain-class rows run a machine (§38.1) |
+| Brain class routing, idle latch, alert edge, event 1 | MATCHING (behavioral proof) | `movement_brain_parity`: 128 idle-latch and 36 alert rows executed on the retail dispatchers; `ai_brain_rows`: only the five brain-class rows run a machine (§38.1) |
 | Brain class walk order | MATCHING (behavioral proof) | `ai_brain_rows`: 262 class-walk rows through the CRT `_qsort` shortsort |
 | Brain allocation, class inits, AI-attribute fold, aim skill copy, husk floors | MATCHING (read-only grill) | `ai_brain_rows`, `mission_promote` |
 | ChangeAI arms (slot gate, brain gate) | MATCHING (read-only grill) | `ai_brain_rows` (`test_change_ai_slot_arms_without_a_token`, `test_change_ai_brain_arms_need_the_vehicle_brain`) |
@@ -12094,8 +12094,8 @@ listing by SHA-256) and `mission_event_vectors`
 | AI and script LOS (exclusion set, pool walks, range split) | MATCHING (read-only grill) | `ai_los`, `script_command_parity` |
 | Global hit record and the script kills that read it | MATCHING (read-only grill), LiveRound slot identity carried | `hit_record` |
 | Org1 vertical tail, odd-tick skip, phase order | MATCHING (behavioral proof) | `infantry_org1_parity` |
-| Org1 death edge as the NPC death transaction | MATCHING (read-only grill); org2 transaction carried (D-AI-9) | `infantry`, `ai_corpse`, `ai_threat` |
-| Org1 corpse tumble, dead slope aim, torso roll, mounted rider, seat-bone fail arm | MATCHING (read-only grill) | `infantry`, `infantry_terrain`, `vehicle_mount` |
+| Org1 death edge as the NPC death transaction | MATCHING (read-only grill); org2 transaction carried (D-AI-9) | `infantry_org1_parity`, `death_state`, `ai_corpse`, `ai_threat` |
+| Org1 corpse tumble, dead slope aim, torso roll, mounted rider, seat-bone fail arm | MATCHING (read-only grill) | `infantry_org1_parity`, `infantry`, `vehicle_mount` |
 | Animation variant rings (per .adm, last token first) | MATCHING (read-only grill) for org1 bodies; replica rows and the first-person weapon rings carried | `infantry`, `ai_threat`, `ai_corpse` |
 | Org1 think (head, perception, combat legs, guard family, board walk, selector, ride link, idle facing) | MATCHING (read-only grill); D-INF-2 re-scoped | `infantry_think`, `infantry_attention`, `infantry_escort` |
 | Nav table, route seed, spawn angles, ItemTypeIndex, first-row item ids | MATCHING (read-only grill) | `route_parity`, `vehicle_placement_angles`, `mission_promote`, `mission_item_traits` |
