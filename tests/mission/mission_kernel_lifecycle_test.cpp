@@ -284,8 +284,9 @@ int main() {
 	// --- the teardown's PostMission sweep ------------------------------------------
 	// The authority's mission exit destroys pools 0, 1 and 2 (the pool-3
 	// markers stay), then sweeps the PostMission entries exactly once; nothing
-	// sweeps them while the mission runs. So a trigger naming the pool-1 item
-	// reads it gone while one naming the resident marker still passes.
+	// sweeps them while the mission runs. So a SingleAlive trigger naming the
+	// pool-1 item reads it gone, and one naming the resident pool-3 marker
+	// fails too, because that row walk never covers pool 3.
 	// [orig: Game_TeardownMission — Entity_Destroy over pools 0..2
 	//  @0x522365..0x5223C8, EventTrigger_UpdateAllWithFlag4 @0x52266C]
 	{
@@ -341,7 +342,10 @@ int main() {
 		role.close();
 		CHECK(kernel.world.script.vars.get_mission(9) == 1);  // no trigger: the sweep ran once
 		CHECK(kernel.world.script.vars.get_mission(10) == 0); // the pool-1 item was destroyed first
-		CHECK(kernel.world.script.vars.get_mission(11) == 1); // the pool-3 marker is still resident
+		// The pool-3 marker is still resident (checked below), but SingleAlive
+		// never sees pool 3: its row walk covers pools 0, 1 and 2 only.
+		// [orig: Entity_IsAliveByBmsRef @0x43E640]
+		CHECK(kernel.world.script.vars.get_mission(11) == 0);
 		CHECK(kernel.world.registry.by_net_id(21) == nullptr);
 		CHECK(kernel.world.registry.by_net_id(31) == nullptr);
 		CHECK(kernel.world.registry.by_net_id(41) != nullptr);
