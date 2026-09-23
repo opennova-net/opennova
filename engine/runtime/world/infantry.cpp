@@ -309,11 +309,11 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
         //  adm authors them [orig: @0x4bd70f..0x4bd73f], so the base gait survives.)
         case anim_state::kStop:
             // [orig: Entity_UpdateInfantryAI @0x4b9910 post-pass, kong 154811:
-            //  animStateId == 147 && animMap[147] == animMap[0] -> 43]. Retail
-            // converts AFTER the commit, at the end of the same think with no
-            // observer in between; resolving before the commit is a declared
-            // placement adaptation. Data-driven per body: 29 of the 219 retail
-            // .adms author anim_stop and play 147; Eindo_R.adm does not.
+            //  animStateId == 147 && animMap[147] == animMap[0] -> 43]. The
+            // org1 selector commits 147 raw and the think's post-commit fix-up
+            // converts it; the other callers resolve it here. Data-driven per
+            // body: 29 of the 219 retail .adms author anim_stop and play 147;
+            // Eindo_R.adm does not.
             break;
         case anim_state::kIdle2:
         case anim_state::kIdle3:
@@ -593,9 +593,12 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     // A forced state stays numerically selected even if the ADM aliases that
     // slot to RESET. The ordinary gait fallbacks still apply to a later override.
     // [orig: raw forced store @0x4BD266, common arbitration @0x4B9910]
-    const int resolved = world.script.forced_animation != 0 &&
-            target == world.script.forced_animation ? target :
-            infantry_resolve_state(inf.adm_id, target);
+    // A stop (147) is arbitrated raw as well: the post-commit fix-up turns an
+    // unauthored stop into 43 after the commit [orig: the arbitration
+    // @0x4BD837..0x4BD874 on the raw selection; the fix-up @0x4BE080..0x4BE09A].
+    const bool raw = target == anim_state::kStop ||
+            (world.script.forced_animation != 0 && target == world.script.forced_animation);
+    const int resolved = raw ? target : infantry_resolve_state(inf.adm_id, target);
     commit_body_state(inf, resolved);
 }
 

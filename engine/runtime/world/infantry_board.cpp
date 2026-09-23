@@ -295,6 +295,11 @@ void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachm
         inf.path_state = 0;
         self->flags &= ~0x40000u;
         self->engine_flags &= ~0x40000u;
+        // The selector tail still runs for the attachment: it publishes the
+        // move mode to +0x36A and the hit flinch consumes wasHit.
+        // [orig: +0x36A @0x4BD356; the wasHit clear @0x4BD6EE]
+        inf.prev_move_mode = inf.move_mode;
+        inf.was_hit = false;
         commit_body_state(inf, world.ai.infantry_resolve_state(inf.adm_id, 150));
     } else {
         inf.move_mode = 6;

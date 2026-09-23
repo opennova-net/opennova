@@ -960,6 +960,41 @@ static void test_teamless_coward_scans_as_team_two() {
     CHECK(r.blue().inf.combat_target == enemy);
 }
 
+// A stop (147) is arbitrated raw: from an exit-gated state (115, flags 0x20)
+// the movement-flagged 147 commits at once, where the idle it would resolve to
+// (43, no 0x1) only queues. [orig: the arbitration @0x4BD845..0x4BD874 on the
+// raw selection; the fix-up @0x4BE080..0x4BE09A turns it into 43 later]
+static void test_stop_is_arbitrated_raw() {
+    Rig r(fx(200), 0, 0, {1, 43, 115});
+    r.blue().inf.anim_state = 115;
+    r.blue().inf.anim_pending = 0;
+    r.w.ai.infantry_select(r.blue(), r.w, anim_state::kStop);
+    CHECK(r.blue().inf.anim_state == anim_state::kStop);
+    CHECK(r.blue().inf.anim_pending == 0);
+}
+
+// The attachment within reach still runs the selector tail: the move mode
+// reaches +0x36A and the hit flinch consumes wasHit. [orig: +0x36A @0x4BD356;
+// the wasHit clear @0x4BD6EE]
+static void test_attachment_publishes_the_move_mode_and_consumes_the_hit() {
+    Rig r(fx(200), 0, 0, {1, 43, 150});
+    const EntityHandle post = r.item(900, 6, 0, 0, 0);
+    Points points;
+    points.carrier = post;
+    points.points.push_back({"attach", {0, 0, 0, 0, 0, 0}});
+    r.w.pose_provider = &points;
+    r.blue_entity().attach_parent = post;
+    r.blue_entity().attach_bone = 1;
+    r.blue().inf.was_hit = true;
+    r.blue().inf.prev_move_mode = 3;
+    r.blue().slot.f[1] |= 1; // blind: no perception scan
+    r.tick(16);
+    CHECK(r.blue().inf.anim_state == 150);
+    CHECK(r.blue().inf.prev_move_mode == 0);
+    CHECK(!r.blue().inf.was_hit);
+    r.w.pose_provider = nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -996,6 +1031,8 @@ int main() {
     test_combat_approach_runs_as_run_attack();
     test_scripted_idle_watches_the_local_player();
     test_teamless_coward_scans_as_team_two();
+    test_stop_is_arbitrated_raw();
+    test_attachment_publishes_the_move_mode_and_consumes_the_hit();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;
