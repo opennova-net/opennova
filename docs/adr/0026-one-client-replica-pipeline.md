@@ -1,6 +1,7 @@
 # ADR 0026: one client replica pipeline and one wire presenter
 
-- **Status**: accepted (2026-08-01)
+- **Status**: accepted (2026-08-01); decision 5 amended 2026-09-23 (duplicated
+  ids resolve to their first definition, as retail does)
 - **Updates**: [ADR 0009](0009-in-match-net-seam.md),
   [ADR 0011](0011-single-player-in-process-listen-server.md), and
   [ADR 0013](0013-consolidated-net-core.md)
@@ -67,10 +68,27 @@ physical kind of either entity.
    - `StoragePool` describes runtime allocation. D-NET-97 is not witnessed, so
      this axis remains unresolved rather than being inferred from BMS kind,
      item type, or a wire codec.
-5. **Unknown and ambiguous item definitions fail closed.** Missing callback
-   mappings and duplicate definition/wire ids never guess an Infantry or
-   Vehicle record width. The raw item fields and all four callback tags remain
-   available for later retail evidence.
+5. **Unknown item definitions fail closed; a duplicated id resolves to its
+   first definition.** Missing or unwitnessed callback mappings never guess an
+   Infantry or Vehicle record width. The raw item fields and all four callback
+   tags remain available.
+
+   *Amended 2026-09-23.* The original text also failed duplicate
+   definition/wire ids closed, pending "later retail evidence". The evidence
+   is in: retail resolves a type id on both sides with the same first-match
+   scan, which returns the first `items.def` row carrying the id and 0 when
+   none does `[orig: ItemList_FindIndexByTypeId @0x49E100 (the compare
+   @0x49E120..0x49E122)]`. The host's entity carries that row's ItemDef
+   `[orig: Entity_SpawnFromBMSRecord @0x40E9F0 (the index store @0x40EBFC, the
+   ItemDef pointer @0x40EBFF..0x40EC07)]`, and the client's entity creation
+   resolves the received wire type through the same scan and takes the index,
+   the ItemDef and the row's callbacks from it `[orig: NapiNPClientMsg_0x00D
+   @0x432C40 (the call @0x4332DA, the stores @0x4332DF..0x43331A)]`. A later
+   row repeating an id is therefore unreachable and never selects a record
+   width: `ItemReplicationCatalog` resolves both keys to the first definition
+   and keeps the repeats listed in `issues()` (ctest
+   `netsim_item_replication_catalog`). The shipped `ITEMS.DEF` repeats four
+   ids (100508, 100415, 100439 and 102044; [itemdef record](../world/itemdef-re.md)).
 6. **NovaWorld is not a second entity stack.** `NovaWorldClient` owns
    matchmaking, lobby identity, and the handoff to an in-match endpoint.
    `npruntime`/`npwire` own gameplay replication. `NovaWorldClient` is a
