@@ -57,9 +57,9 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	if (!assets_.item_replication_catalog ||
 			assets_.item_replication_catalog_db.ptr() != p_item_db.ptr() ||
 			assets_.item_replication_catalog_revision != p_item_db->get_revision()) {
-		// Built straight off the retained parse: the per-row walk keeps
-		// duplicate definition ids so the catalog can classify them as
-		// ambiguous and fail closed.
+		// Built straight off the retained parse: the per-row walk sees every
+		// row, so the catalog resolves a duplicated id to its first row and
+		// lists the repeats.
 		assets_.item_replication_catalog =
 				std::make_shared<const opennova::replication::ItemReplicationCatalog>(
 						opennova::replication::ItemReplicationCatalog::from_items_def(
@@ -72,8 +72,8 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	kernel_->resolve_item_traits(
 			[catalog = assets_.item_replication_catalog](int def_id) {
 				// The same immutable profile supplies the host stamp and the
-				// client decode width. Missing/ambiguous definitions fail
-				// closed as Unknown.
+				// client decode width. A missing or unresolved definition
+				// fails closed as Unknown.
 				const opennova::replication::ItemReplicationProfile *replication =
 						catalog->by_definition_id(def_id);
 				return static_cast<uint8_t>(replication != nullptr

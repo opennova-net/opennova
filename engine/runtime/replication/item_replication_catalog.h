@@ -142,8 +142,10 @@ struct ItemCatalogIssue {
 };
 
 // Immutable, fail-closed lookup built once from loaded items.def. Definitions
-// outside the 16-bit wire range remain queryable by full id. Duplicate keys are
-// removed from their index so ambiguity cannot silently select a record width.
+// outside the 16-bit wire range remain queryable by full id. A duplicated
+// definition or wire id resolves to its FIRST definition, the row retail's
+// type-id lookup returns on both host and client; the repeats are listed in
+// issues(). [orig: ItemList_FindIndexByTypeId @0x49E100]
 class ItemReplicationCatalog {
 public:
 	static constexpr int32_t kDefinitionIdOffset = 100000;
@@ -156,9 +158,9 @@ public:
 	const ItemReplicationProfile *by_wire_type(uint16_t wire_type_id) const noexcept;
 
 	// Presence-aware record-width resolution. A present Unknown is a known but
-	// unresolved/ambiguous items.def entry and is therefore terminal: callers
-	// must fail closed instead of consulting pool or heuristic fallbacks. nullopt
-	// means this catalog has no definition for the wire id.
+	// unresolved items.def entry and is therefore terminal: callers must fail
+	// closed instead of consulting pool or heuristic fallbacks. nullopt means
+	// this catalog has no definition for the wire id.
 	std::optional<EntityClass> resolve_wire_entity_class(
 			uint16_t wire_type_id) const noexcept;
 

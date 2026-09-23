@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 
 #include <formats/def/def.h>
@@ -163,33 +162,26 @@ ItemReplicationCatalog ItemReplicationCatalog::from_definitions(
 	for (const ItemReplicationDefinition &definition : definitions)
 		catalog.profiles_.push_back(profile_from(definition));
 
-	std::unordered_set<int32_t> ambiguous_definitions;
-	std::unordered_set<uint16_t> ambiguous_wire_types;
+	// A repeated definition or wire id resolves to its FIRST definition, the row
+	// every retail type-id lookup returns: the host's serialize callback and the
+	// client's record width both come from that row, so a later duplicate never
+	// selects a width. The repeats stay listed in issues() for tooling.
+	// [orig: ItemList_FindIndexByTypeId @0x49E100 returns the first match; the
+	//  client's entity creation resolves the wire type through it and takes
+	//  +0x1C/+0x20 and the row's callbacks from that index,
+	//  NapiNPClientMsg_0x00D @0x4332DA..0x43331A]
 	for (size_t i = 0; i < catalog.profiles_.size(); ++i) {
 		const ItemReplicationProfile &profile = catalog.profiles_[i];
-		if (ambiguous_definitions.count(profile.definition_id) == 0) {
-			const auto inserted = catalog.definition_index_.emplace(profile.definition_id, i);
-			if (!inserted.second) {
-				catalog.definition_index_.erase(profile.definition_id);
-				ambiguous_definitions.insert(profile.definition_id);
-				catalog.issues_.push_back({ItemCatalogIssueCode::DuplicateDefinitionId,
-						profile.definition_id, profile.wire_type_id});
-			}
-		}
-		if (!profile.wire_type_id || ambiguous_wire_types.count(*profile.wire_type_id) != 0)
-			continue;
-		const auto inserted = catalog.wire_index_.emplace(*profile.wire_type_id, i);
-		catalog.wire_class_resolutions_.emplace(
-				*profile.wire_type_id, profile.wire_entity_class());
-		if (!inserted.second) {
-			catalog.wire_index_.erase(*profile.wire_type_id);
-			// Keep the key present while making its result terminal/fail-closed.
-			catalog.wire_class_resolutions_[*profile.wire_type_id] =
-					EntityClass::Unknown;
-			ambiguous_wire_types.insert(*profile.wire_type_id);
+		if (!catalog.definition_index_.emplace(profile.definition_id, i).second)
+			catalog.issues_.push_back({ItemCatalogIssueCode::DuplicateDefinitionId,
+					profile.definition_id, profile.wire_type_id});
+		if (!profile.wire_type_id) continue;
+		if (catalog.wire_index_.emplace(*profile.wire_type_id, i).second)
+			catalog.wire_class_resolutions_.emplace(
+					*profile.wire_type_id, profile.wire_entity_class());
+		else
 			catalog.issues_.push_back({ItemCatalogIssueCode::DuplicateWireTypeId,
 					profile.definition_id, profile.wire_type_id});
-		}
 	}
 	return catalog;
 }
