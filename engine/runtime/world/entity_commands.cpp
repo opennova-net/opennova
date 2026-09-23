@@ -2022,7 +2022,55 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
             ae.slot.f[AiSlot::kSightRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
             break;
-        default: break;
+        // The slot arms with no editor token: each gates on the AI slot (+0x68),
+        // which every AiEntity carries, and writes one slot word or behavior bit.
+        // The arithmetic is the signed wrapping int32 of the original.
+        case 1: // slot+0x20 = p2 [orig: case 1 @0x43AB7F, store @0x43AB92]
+            ae.slot.f[8] = p2;
+            break;
+        case 3: // [orig: case 3 @0x43ABC2 — bit 0x2000 @0x43ABD7/@0x43ABE4]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x2000u, p2 != 0);
+            break;
+        case 4: // [orig: case 4 @0x43ABF1 — bit 0x10000 @0x43AC06/@0x43AC13]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x10000u, p2 != 0);
+            break;
+        case 7: // slot+0x84 = (p2 << 16) / 360 [orig: case 7 @0x43AD5C, store @0x43AD85]
+            ae.slot.f[33] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 16) / 360;
+            break;
+        case 9: // slot+0x30 = (p2 << 16) / 100 [orig: case 9 @0x43ADCE, store @0x43ADF5]
+            ae.slot.f[12] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 16) / 100;
+            break;
+        case 10: // slot+0x48 = p2 * 62 [orig: case 10 @0x43ADFD, store @0x43AE19]
+            ae.slot.f[18] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 11: // slot+0x4C = p2 * 62 [orig: case 11 @0x43AE21, store @0x43AE3D]
+            ae.slot.f[19] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 12: // slot+0x54 = p2 * 62 [orig: case 12 @0x43AE45, store @0x43AE61]
+            ae.slot.f[21] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 13: // slot+0x38 = (p2 << 8) / 360 [orig: case 13 @0x43AE69, store @0x43AE92]
+            ae.slot.f[14] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 8) / 360;
+            break;
+        case 14: // [orig: case 14 @0x43AE9A — bit 0x100 @0x43AEAF/@0x43AEBC]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x100u, p2 != 0);
+            break;
+        case 18: // [orig: case 18 @0x43AF50 — bit 0x800 @0x43AF65/@0x43AF72]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x800u, p2 != 0);
+            break;
+        case 19: // [orig: case 19 @0x43AF7F — bit 0x200000 @0x43AF94/@0x43AFA1]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200000u, p2 != 0);
+            break;
+        case 20: // [orig: case 20 @0x43B03A — bit 0x8000 @0x43B04F/@0x43B05C]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x8000u, p2 != 0);
+            break;
+        case 24: // [orig: case 24 @0x43B00B — bit 0x80000 @0x43B020/@0x43B02D]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x80000u, p2 != 0);
+            break;
+        case 25: // [orig: case 25 @0x43AFDC — bit 0x100000 @0x43AFF1/@0x43AFFE]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x100000u, p2 != 0);
+            break;
+        default: break; // cases 35..39 are the switch's default [orig: @0x43B336]
     }
 }
 

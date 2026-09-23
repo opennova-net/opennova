@@ -244,7 +244,6 @@ void AiWindow::draw_tables() {
                 case world::RuntimeGapKind::WacOpcode: kind = "WAC opcode"; break;
                 case world::RuntimeGapKind::WacInstructionLimit: kind = "WAC instruction limit"; break;
                 case world::RuntimeGapKind::BmsAction: kind = "BMS action"; break;
-                case world::RuntimeGapKind::AiCommand: kind = "AI command"; break;
                 case world::RuntimeGapKind::AiStateHandler: kind = "AI state"; break;
             }
             ImGui::Text("%s %d/%d, event %d, site %d: %llu calls (ticks %u..%u)",

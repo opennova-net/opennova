@@ -2,7 +2,9 @@
 // and aircraft row reads off the entity record and writes into the brain and slot.
 // Driven through the public row table (AiSystem::row), the class dispatchers and
 // the ChangeAI command seam (EntityCommands::apply_ai_command).
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 
 #include <formats/aip/aip.h>
@@ -388,6 +390,62 @@ void test_change_ai_brain_arms_need_the_vehicle_brain() {
     CHECK(v.brain.f[AiBrain::kPriorityTarget] == 0);
 }
 
+// The ChangeAI subs with no editor token write the target's AI slot: word
+// stores in the original's signed wrapping int32 arithmetic (the divides are
+// the compiler's magic-number signed divides), and behavior bits set by a
+// nonzero p2 and cleared by zero. Subs 35..39 are the switch's default and
+// write nothing. Expected words from the retail instruction sequences.
+// [orig: Entity_ApplyCommand @0x43AB60 cases 1 @0x43AB7F, 3 @0x43ABC2,
+//  4 @0x43ABF1, 7 @0x43AD5C, 9 @0x43ADCE, 10 @0x43ADFD, 11 @0x43AE21,
+//  12 @0x43AE45, 13 @0x43AE69, 14 @0x43AE9A, 18 @0x43AF50, 19 @0x43AF7F,
+//  20 @0x43B03A, 24 @0x43B00B, 25 @0x43AFDC; the default @0x43B336]
+void test_change_ai_slot_arms_without_a_token() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 1);
+    Entity person;
+    person.net_id = 42;
+    person.kind = EntityKind::Organic;
+    const EntityHandle org = w.registry.spawn(0, person);
+    w.ai.attach(org);
+    AiEntity &o = *w.ai.for_handle(org);
+    o.inf.active = true;
+    AiSlot &s = o.slot;
+    const auto cmd = [&](int sub, int32_t p2) {
+        return w.commands.apply_ai_command(42, sub, p2, 0, 0);
+    };
+
+    CHECK(cmd(1, 77) && s.f[8] == 77);
+    CHECK(cmd(7, 90) && s.f[33] == 16384);
+    CHECK(cmd(7, -90) && s.f[33] == -16384);
+    CHECK(cmd(7, 0x8000) && s.f[33] == -5965232);
+    CHECK(cmd(9, 50) && s.f[12] == 32768);
+    CHECK(cmd(9, -1) && s.f[12] == -655);
+    CHECK(cmd(10, 3) && s.f[18] == 186);
+    CHECK(cmd(11, -2) && s.f[19] == -124);
+    CHECK(cmd(12, 0x7FFFFFFF) && s.f[21] == -62);
+    CHECK(cmd(13, 180) && s.f[14] == 128);
+    CHECK(cmd(13, 1) && s.f[14] == 0);
+
+    const struct { int sub; uint32_t bit; } bits[] = {{3, 0x2000u}, {4, 0x10000u},
+            {14, 0x100u}, {18, 0x800u}, {19, 0x200000u}, {20, 0x8000u},
+            {24, 0x80000u}, {25, 0x100000u}};
+    for (const auto &b : bits) {
+        s.f[AiSlot::kBehaviorFlags] = 0;
+        CHECK(cmd(b.sub, 5) && static_cast<uint32_t>(s.f[AiSlot::kBehaviorFlags]) == b.bit);
+        s.f[AiSlot::kBehaviorFlags] = -1;
+        CHECK(cmd(b.sub, 0) && static_cast<uint32_t>(s.f[AiSlot::kBehaviorFlags]) == ~b.bit);
+    }
+
+    const AiSlot slot_before = s;
+    const AiBrain brain_before = o.brain;
+    const int events_before = w.ai.events.count();
+    for (int sub = 35; sub <= 39; ++sub) CHECK(cmd(sub, 1));
+    CHECK(std::equal(std::begin(s.f), std::end(s.f), std::begin(slot_before.f)));
+    CHECK(std::equal(std::begin(o.brain.f), std::end(o.brain.f), std::begin(brain_before.f)));
+    CHECK(w.ai.events.count() == events_before);
+}
+
 } // namespace
 
 int main() {
@@ -401,6 +459,7 @@ int main() {
     test_part_anim_rate_uses_the_single_precision_tick();
     test_class_update_leaves_the_body_anim_alone();
     test_change_ai_brain_arms_need_the_vehicle_brain();
+    test_change_ai_slot_arms_without_a_token();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

@@ -359,8 +359,9 @@ public:
     // (e.g. PLAYPARTANIM: p2=channel, p3=play_type, p4=time). No-op (returns false / 0)
     // when there is no AI system or no brain for the target.
     // The ChangeAI action's sub-type ids, the dfx2med token names
-    // [orig: Entity_ApplyCommand @0x43ab60's switch]. Subs the port does not
-    // carry are reported by cumulative mission diagnostics.
+    // [orig: Entity_ApplyCommand @0x43ab60's switch]. Every arm of the switch is
+    // carried; subs 1, 3, 4, 7, 9..14, 18..20, 24 and 25 have no editor token and
+    // are dispatched by number; 35..39 are the switch's default (no arm).
     enum ChangeAiSub : int {
         kGuardBit = 2,
         kRedAlert = 5,
