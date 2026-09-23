@@ -723,24 +723,33 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 
 bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
                                            const AiProfile::WeaponFire &wb, int32_t aim_offset,
-                                           bool skip_los, int32_t out[6]) {
+                                           bool skip_los, int32_t out[6], bool seeded) {
     AiBrain &b = e.brain;
     const uint32_t flags = wb.flags;
+
+    // Every retail caller pre-seeds the out block with the entity's
+    // Position/Yaw/Pitch/Roll (entity+4..+0x18) before the call, and the
+    // ground primary continuation levels that pitch first [orig:
+    // AIEntity_ProcessWeaponFire @0x472F1D..0x472F4B, @0x473821]; an unseeded
+    // caller gets the common copy.
+    if (!seeded) {
+        out[0] = e.pos[0];
+        out[1] = e.pos[1];
+        out[2] = e.pos[2];
+        out[3] = e.heading;
+        out[4] = e.pitch;
+        out[5] = e.roll;
+    }
 
     // Head gate [orig: @0x4569B2 — (weaponDef+16 & 0x18) == 0 && no target -> 0].
     if ((flags & 0x18u) == 0 && target == nullptr) return false;
     b.bytes()[AiBrain::kBoneFlagByte] = 0; // [orig: @0x4569D5]
 
-    // Muzzle origin + frame pre-seed. The empty-bone-list leg: entity position
-    // with +2.0u Z [orig: @0x456B03 out[2] += 0x20000]; angles pre-seeded from
-    // the entity (the call sites copy entity+4..+0x18 into the out block), then
-    // the def yaw bias [orig: @0x456B1C out[3] += weaponDef+0x14].
-    out[0] = e.pos[0];
-    out[1] = e.pos[1];
-	out[2] = io::bam_add(e.pos[2], 0x20000);
-	out[3] = io::bam_add(e.heading, wb.facing_bam);
-	out[4] = e.pitch;
-	out[5] = e.roll;
+    // Muzzle origin. The empty-bone-list leg lifts the seeded position 2.0u
+    // [orig: @0x456B03 out[2] += 0x20000] (a resolved bone point replaces it
+    // below), then the def yaw bias [orig: @0x456B1C out[3] += weaponDef+0x14].
+	out[2] = io::bam_add(out[2], 0x20000);
+	out[3] = io::bam_add(out[3], wb.facing_bam);
 	const bool secondary = &wb == &e.profile.fire_b;
 	const int count_index = secondary ? AiBrain::kBoneCountB : AiBrain::kBoneCountA;
 	const int count = std::clamp(b.f[count_index], 0, 16);

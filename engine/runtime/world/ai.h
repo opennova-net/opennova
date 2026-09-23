@@ -885,8 +885,12 @@ public:
                                              int32_t metrics[6]);
 	bool weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
 			const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]);
+	// `seeded` = the caller already copied the retail pre-seed (entity
+	// Position/Yaw/Pitch/Roll, or the ground primary continuation's levelled
+	// pitch) into `out`; otherwise the solve seeds it from the entity.
 	bool solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
-			const AiProfile::WeaponFire &wb, int32_t aim_offset, bool skip_los, int32_t out[6]);
+			const AiProfile::WeaponFire &wb, int32_t aim_offset, bool skip_los, int32_t out[6],
+			bool seeded = false);
 
 	// [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
     // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
