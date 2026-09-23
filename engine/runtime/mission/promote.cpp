@@ -972,7 +972,10 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                     init_infantry(ae);
                 }
                 ae.net_id = seed.net_id;
-                ae.relmat_id = seed.net_id; // provisional relation-matrix id (net layer = later)
+                // The relation group key is the record's command group,
+                // sign-extended into entity+0x11C [orig: Entity_SpawnFromBMSRecord
+                // `movsx eax,byte ptr [edi+4Eh]; mov [esi+11Ch],ax` @0x40EBB3..0x40EBB7].
+                ae.relmat_id = static_cast<uint16_t>(static_cast<int8_t>(seed.group_id));
                 ae.health = 100;
                 if (kind == EntityKind::Item) {
                     world.registry.get(h)->spawn_phase = world.vehicle_ai_spawn_phase;

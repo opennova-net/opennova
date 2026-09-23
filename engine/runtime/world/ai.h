@@ -512,7 +512,7 @@ struct AiEntity {
 struct AiTarget {
     int32_t relmat_id = 0;       // target+284 (pad6_pre[24], i16) — relation-matrix key
     int32_t net_id = 0;          // target+124 (DcbId)
-    bool has_controller = false; // target pad3_pre[48] nonzero -> PRNG branch A (inline) vs B
+    bool has_brain = false;      // target+0x64 (the SM brain) nonzero -> jitter branch A vs B
     EntityHandle handle;         // container rebase: the world handle (orig: the entity ptr)
 };
 
@@ -531,7 +531,7 @@ struct AiCandidate {
     int32_t range_secondary = 0;// candidate+420 (*210): max secondary-FOV engage range
     int32_t relmat_id = 0;      // candidate+284
     int32_t net_id = 0;         // candidate+124 (DcbId)
-    bool has_controller = false;// candidate pad3_pre[48]
+    bool has_brain = false;     // candidate+0x64: carries an SM brain (persons carry none)
     bool is_priority = false;   // == brain+148 priority target -> LOS-only bypass
     // Preset LOS verdict for injected lists (default: clear). The live feed passes a
     // lazy evaluator instead — LOS runs only for a would-be best / the priority
@@ -822,7 +822,7 @@ public:
 
     // [orig: the engagement block @0x4677b3..0x4678b2] APPLY the sees+targeted quads to
     // world.relations (D-AI-3 closed) + record the trace, Entity_SetAITarget, reset the
-    // combat timer, set the fire-delay (exact PRNG jitter; the has_controller branch is
+    // combat timer, set the fire-delay (exact PRNG jitter; the brained-target branch is
     // guarded by base-delay, the other is unconditional), pending = 17.
 	void engage_target(World &world, AiEntity &e, const AiTarget &t, bool aircraft = false);
 

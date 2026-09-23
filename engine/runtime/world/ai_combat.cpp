@@ -116,7 +116,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             cand.range_secondary = c->heat_sig;
             cand.relmat_id = c->group_id;                  // group key (+0x11C commandGroup)
             cand.net_id = c->net_id;                       // single key (+0x7C SSN)
-            cand.has_controller = (c->owner_connection_id != 0);
+            // The engage keys its jitter on the target's SM brain pointer
+            // (entity+0x64); a person's body carries none [orig:
+            // AI_HandleEvent_HelicopterCombatD `cmp [ebx+64h],ebp` @0x4677EA].
+            cand.has_brain = cand_ai != nullptr && !cand_ai->inf.active;
             // The scanner's brain+148 priority target [orig: read @0x467350; the same
             // packed+1 null rebase as kTargetSlot].
             cand.is_priority =
@@ -232,7 +235,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
 
         if (c.is_priority) { // [orig: 0x467350 — reached only past the gate] priority -> LOS-only bypass
             if (!los_blocked(c)) { // Entity_CheckMutualLineOfSight @0x539be0
-                out = AiTarget{c.relmat_id, c.net_id, c.has_controller, c.handle};
+                out = AiTarget{c.relmat_id, c.net_id, c.has_brain, c.handle};
                 return true;
             }
             continue; // priority but LOS blocked -> skip (no best-of, matches the orig else-if)
@@ -243,7 +246,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         }
     }
     if (best) {
-        out = AiTarget{best->relmat_id, best->net_id, best->has_controller, best->handle};
+        out = AiTarget{best->relmat_id, best->net_id, best->has_brain, best->handle};
         return true;
     }
     return false;
@@ -884,9 +887,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
 }
 
 // The engagement block [orig: @0x4677b3..0x4678b2]: the sees quad, Entity_SetAITarget,
-// reset the combat timer, set the fire-delay with the exact PRNG jitter (the
-// has_controller branch guards the jitter by base-delay and uses the inline LCG; the
-// other branch always jitters via PRNG_Next16), pending = 17, then the targeted quad.
+// reset the combat timer, set the fire-delay with the exact PRNG jitter (a target with
+// an SM brain guards the jitter by base-delay and uses the inline LCG; a brainless one
+// always jitters via PRNG_Next16), pending = 17, then the targeted quad.
 // The rel_ops trace keeps the recorded shape the tests pin; the APPLY is D-AI-3.
 void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool aircraft) {
 	AiBrain &b = e.brain;
@@ -909,7 +912,9 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
     b.f[AiBrain::kCombatTimer] = 0;        // [orig: ai_comp[40] = 0]
     b.f[AiBrain::kFireDelay] = e.profile.field104; // [orig: ai_comp[41] = *(profile+104)]
 	// Both aircraft branches use the guarded A-stream jitter. [orig: @0x466460]
-	if (aircraft || t.has_controller) {
+	// The ground engage picks the branch by the target's SM brain pointer
+	// [orig: `cmp [ebx+64h],ebp; jz loc_4678C2` @0x4677EA..0x4677EF].
+	if (aircraft || t.has_brain) {
 		// [orig: branch A — jitter only if base_delay != 0; inline LCG on dword_31BFBB8]
 		if (e.profile.field104 != 0)
             b.f[AiBrain::kFireDelay] += static_cast<int32_t>(static_cast<uint16_t>(prng_step_a()) % 62);

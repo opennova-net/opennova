@@ -839,6 +839,7 @@ int main() {
     // @0x40e9f0 -> entity+124 = record dword @+8]
     m.organics[0].id = 1;
     m.organics[1].id = 2;
+    m.organics[0].group_id = 5;
     m.buildings[0].id = 3;
     m.markers[0].id = 10;
     m.markers[1].id = 11;
@@ -940,6 +941,9 @@ int main() {
     CHECK(e0->profile.slot_class[0] == 3);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
+    // The relation group key is the record's command group, not its SSN
+    // [orig: Entity_SpawnFromBMSRecord @0x40EBB3..0x40EBB7 -> entity+0x11C].
+    CHECK(e0->relmat_id == 5);
     CHECK((e0->slot.f[1] & 0x209) == 0x209);
     CHECK(e0->see_all);
     CHECK((world.registry.get(world.registry.find_by_net_id(1))->engine_flags &

@@ -3482,14 +3482,14 @@ int main() {
         near.handle = EntityHandle::make(1, 6);
         near.team = 2; near.pos[0] = 100 << 16; near.health = 100;
         near.range_primary = 1000; near.range_secondary = 1000;
-        near.relmat_id = 0x22; near.net_id = 0x222; near.has_controller = true;
+        near.relmat_id = 0x22; near.net_id = 0x222; near.has_brain = true;
 
         AiTarget out{};
         CHECK(sys.acquire_target_from(e, {far, near}, out) == true);
         CHECK(sys.find_target_calls == 1);
         CHECK(out.net_id == 0x222);          // nearer -> higher range_score -> chosen
         CHECK(out.relmat_id == 0x22);
-        CHECK(out.has_controller == true);
+        CHECK(out.has_brain == true);
 
         // Same-team candidate is filtered out -> no target.
         AiCandidate same{};
@@ -3767,7 +3767,7 @@ int main() {
         e.relmat_id = 0x1234;
         e.net_id = 0x9999;
         e.profile.field104 = 0;
-        AiTarget t{0x55, 0x66, /*has_controller=*/false};
+        AiTarget t{0x55, 0x66, /*has_brain=*/false};
 
         sys.engage_target(w, e, t);
 
@@ -3787,7 +3787,7 @@ int main() {
         CHECK(sys.rel_ops[7].op == kRelSpotted      && sys.rel_ops[7].a == 0x9999 && sys.rel_ops[7].b == 0x66);
     }
 
-    // ---- engage_target: branch A (has_controller) guards jitter by base-delay; sign-extends relmat ----
+    // ---- engage_target: branch A (a brained target) guards jitter by base-delay; sign-extends relmat ----
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
@@ -3798,7 +3798,7 @@ int main() {
         AiEntity &e = *sys.at(idx);
         e.relmat_id = 0x8000;             // high bit set -> (int16) sign-extends to -32768
         e.profile.field104 = 0;           // base delay 0 -> branch A skips jitter entirely
-        AiTarget t{0x55, 0x66, /*has_controller=*/true};
+        AiTarget t{0x55, 0x66, /*has_brain=*/true};
         sys.engage_target(w, e, t);
         CHECK(e.brain.f[AiBrain::kFireDelay] == 0);     // no jitter when base_delay == 0
         CHECK(sys.prng_a == 1);                          // stream A untouched (jitter skipped)
@@ -3811,7 +3811,7 @@ int main() {
         int i2 = sys2.attach(EntityHandle::make(0, 0));
         AiEntity &e2 = *sys2.at(i2);
         e2.profile.field104 = 100;
-        AiTarget t2{1, 2, /*has_controller=*/true};
+        AiTarget t2{1, 2, /*has_brain=*/true};
         sys2.engage_target(w, e2, t2);
         CHECK(e2.brain.f[AiBrain::kFireDelay] == 149);   // 100 + 49
         CHECK(sys2.prng_a == 0x8011u);                   // stream A advanced

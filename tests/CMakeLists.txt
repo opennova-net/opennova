@@ -1585,6 +1585,14 @@ target_include_directories(ai_vehicle_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(ai_vehicle_combat_test PRIVATE cxx_std_17)
 add_test(NAME ai_vehicle_combat COMMAND ai_vehicle_combat_test)
 
+# The SM target feed (AI_FindBestTargetB @0x466F60) and the engage bookkeeping
+# against their retail witnesses.
+add_executable(ai_targeting_test world/ai_targeting_test.cpp)
+target_link_libraries(ai_targeting_test PRIVATE opennova_runtime)
+target_include_directories(ai_targeting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_targeting_test PRIVATE cxx_std_17)
+add_test(NAME ai_targeting COMMAND ai_targeting_test)
+
 add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
 target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
