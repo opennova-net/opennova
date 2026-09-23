@@ -566,7 +566,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // @0x51D7E0 / Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
     // call @0x52674B)]
     lap.restart();
-    if (gameplay) update_all_entities(ctx);
+    if (gameplay && entity_update_admitted(is_authority)) update_all_entities(ctx);
     // The global weapon-action pump follows the complete entity update, so a
     // round a pump fires first moves on the next tick.
     // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call

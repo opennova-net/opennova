@@ -169,17 +169,26 @@ struct CachedFrameState {
     uint8_t sound_listener_view_flags = 6; // startup; camera 0 -> 2, other -> 4 [orig: @0x43924A]
     EntityHandle local_player;
     int32_t local_health = 0;
-    // Active human player slot count — the WAC 'humans' builtin, rebuilt by the host
-    // server tick just before the script pre-pass. Doubles in the original as the
-    // empty-dedicated-server world-run gate (entities/WAC advance while humans > 0
-    // || ticks == 0); an SP host always counts its own player. [orig: wac_var_humans
-    // @0xC6EB14 — Server_BuildEntitySlotLists @0x4f97a0: zero @0x4f97c6, +1 per
-    // active human slot @0x4f98b1]
+    // The human count — the WAC 'humans' builtin, rebuilt by the host server
+    // tick just before the script pre-pass: every pool-0 row with an item def
+    // and the Player bit (Flags 0x100) that is not hidden (Flags 1: a player
+    // still waiting to deploy is hidden). Doubles in the original as the
+    // empty-server world-run gate (entities/WAC advance while humans > 0 ||
+    // ticks == 0). [orig: wac_var_humans @0xC6EB14 — Server_BuildEntitySlotLists
+    // @0x4f97a0: zero @0x4f97c6, the def test @0x4F9809, `test eax,100h`
+    // @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
     int32_t humans = 0;
     // Derived view of the VM's mutable clock, published before admission and
     // after execution/restore. Only the VM clock is serialized; this projection
     // lets the world gate read retail's shared word. [orig: wac_var_ticks @0xC6EAD8]
     int32_t wac_ticks = 0;
+    // A host that also plays (the listen host and single player,
+    // is_mp_session_peer) whose own player is on the death screen: the
+    // entity-update gate skips its empty-world hold. The host role stamps it
+    // each frame from its local client's death-screen latch.
+    // [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
+    //  `cmp g_death_screen_active,0` @0x526713]
+    bool peer_death_screen = false;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value
@@ -896,6 +905,21 @@ public:
     //  @0x454d50]
     bool script_may_advance() const {
         return (cached.humans > 0 || cached.wac_ticks == 0) && !epilog_screen_active();
+    }
+    // Game_ProcessMainFrame's gate over the whole entity update. On the
+    // authority an empty world (no human, a started WAC clock) holds still,
+    // unless a playing host's own player is on the death screen; in a session
+    // the ended round holds every peer still (the round-over latch the round
+    // end raises). The pre-round byte half is the PreRound tick phase.
+    // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
+    //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
+    //  is_in_session` @0x526734, `cmp g_spawn_success_gate` @0x52673C;
+    //  the latch writer Server_ProcessRoundEnd @0x5168E4]
+    bool entity_update_admitted(bool is_authority) const {
+        if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&
+                cached.wac_ticks != 0)
+            return false;
+        return !(rules.mp_session && match.outcome().ended);
     }
     // The SP end-of-round screen's gate over the script tick. A single-player
     // round that ends against the player (`Server_ProcessRoundEnd` with any

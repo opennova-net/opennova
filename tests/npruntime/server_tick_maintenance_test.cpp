@@ -363,6 +363,35 @@ bool check_deploy_seeds_protection_and_armory_state() {
 // The 1 Hz round-robin 0x2F flag refresh.
 // --------------------------------------------------------------------------
 
+// The WAC humans count walks pool 0: an item-def row with the Player bit that
+// is not hidden counts, a dead one included. A player still waiting to deploy
+// (hidden), an NPC and a def-less player row do not, and no connection is
+// needed. [orig: Server_BuildEntitySlotLists @0x4f97a0 -- the def test
+// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
+bool check_humans_count_the_visible_players() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	auto spawn = [&](bool def, uint32_t flags) {
+		w::Entity e;
+		e.kind = w::EntityKind::Organic;
+		e.has_item_def = def;
+		e.engine_flags = flags;
+		e.alive = true;
+		e.health = 100;
+		world.registry.spawn(0, e);
+	};
+	spawn(true, w::kEntityFlagPlayer);
+	spawn(true, w::kEntityFlagPlayer | w::kEntityFlagCarried);
+	spawn(true, 0);
+	spawn(false, w::kEntityFlagPlayer);
+	spawn(true, w::kEntityFlagPlayer | w::kEntityFlagDead);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(world.cached.humans == 2, "the humans count takes the two visible players");
+}
+
 bool check_flag_refresh_round_robin() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -1376,6 +1405,7 @@ int main() {
 	ok = check_spawn_protection_cleared_by_validated_fire() && ok;
 	ok = check_deploy_seeds_protection_and_armory_state() && ok;
 	ok = check_flag_refresh_round_robin() && ok;
+	ok = check_humans_count_the_visible_players() && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
 	ok = check_team_downed_resend() && ok;

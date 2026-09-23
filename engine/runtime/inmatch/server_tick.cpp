@@ -1735,20 +1735,21 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		replication::drain_connection_c2s(world, conn.link);
 	}
 
-	// (1b) The WAC 'humans' count: active human player slots, rebuilt each server tick
-	// just before the script pass — the original also uses it as the empty-dedicated-
-	// server world-run gate (entities/WAC advance while humans > 0 || ticks == 0); an
-	// SP host always counts its own loopback player. [orig: Server_BuildEntitySlotLists
-	// @0x4f97a0 — zero @0x4f97c6, +1 per active human slot @0x4f98b1; called from
-	// Server_TickUpdate @0x51d89a before the WAC pre-pass]
+	// (1b) The WAC 'humans' count, rebuilt each server tick just before the script
+	// pass: every pool-0 row with an item def and the Player bit that is not hidden
+	// (a player waiting to deploy is). The original also uses it as the empty-server
+	// world-run gate (entities/WAC advance while humans > 0 || ticks == 0).
+	// [orig: Server_BuildEntitySlotLists @0x4f97a0 — zero @0x4f97c6, the def test
+	// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1;
+	// called from Server_TickUpdate @0x51d89a before the WAC pre-pass]
 	{
 		int32_t humans = 0;
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			// Entity ownership stands in for the original's slot-state-6 check —
-			// the SP host's loopback owns its player from the spawn on, while its
-			// in-match phase flag rides the burst bookkeeping.
-			if (conn.link.owned_entity.valid()) ++humans;
-		}
+		world.registry.for_each_in_pool(0, [&humans](const world::Entity &e) {
+			const uint32_t flags = e.flags | e.engine_flags;
+			if (e.has_item_def && (flags & world::kEntityFlagPlayer) != 0 &&
+					(flags & world::kEntityFlagCarried) == 0)
+				++humans;
+		});
 		world.cached.humans = humans;
 	}
 

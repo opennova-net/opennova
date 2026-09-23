@@ -149,6 +149,32 @@ int main() {
         CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 2);
     }
 
+    // The entity update's admission: an authority with no human and a started
+    // WAC clock holds the whole update (the counter stands), a playing host
+    // whose own player is on the death screen is exempt, a non-authority peer
+    // never takes the humans test, and a session's ended round holds every peer.
+    // [orig: Game_ProcessMainFrame @0x526703..0x526742]
+    {
+        World gw;
+        gw.cached.wac_ticks = 5;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 0);
+        gw.cached.peer_death_screen = true;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 1);
+        gw.cached.peer_death_screen = false;
+        gw.run_logic_tick(false);
+        CHECK(gw.entity_update_counter == 2);
+        gw.cached.humans = 1;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 3);
+        gw.rules.mp_session = true;
+        CHECK(gw.match.finish(2, gw));
+        gw.run_logic_tick(false);
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 3);
+    }
+
     // Persistent sound intents use a bounded latest-value mailbox. A host with
     // no audio presenter can run indefinitely without accumulating one string-
     // owning row per vehicle per tick; a keyed refresh keeps its producer clock.

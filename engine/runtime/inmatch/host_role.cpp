@@ -236,6 +236,13 @@ void HostRole::run_tick(const TickInput &input) {
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
 	kernel.local.apply_player_input_pre_tick();
+	// The entity-update gate's exemption for a host that also plays: its own
+	// client's death-screen latch, folded at the end of the previous frame as
+	// retail's client receive sets it at the head of this one.
+	// [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
+	//  `cmp g_death_screen_active,0` @0x526713]
+	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
+			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
     if (local_round_reset_seen_ != kernel.local.round_reset_revision) {

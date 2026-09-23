@@ -137,6 +137,11 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
+	// Retail holds an empty world still once the WAC clock has started: no
+	// human and ticks != 0 skip the whole entity update. The bare no-net tick
+	// has no server tick to count humans, so the idle pair stands in for one
+	// joined player. [orig: Game_ProcessMainFrame @0x52671C..0x52672A]
+	rig.world.cached.humans = 1;
 	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION [orig: AnimMap_UpdateEntity
 	// @0x40b5f0]: the kernel registers E_STAND.adm as the default clip set; a
 	// mount without it cannot measure pathing at all.
