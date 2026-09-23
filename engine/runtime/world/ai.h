@@ -103,6 +103,8 @@ struct AiBrain {
         kStep = 7,         // think period / controller phase step (idle 16 / patrol 64) [byte +28]
         kFireTimer = 9,    // fire countdown (decrements by kStep) [byte +36]
         kTick = 10,        // ++ each SM update [byte +40]
+        kModelFloor = 11,  // |intact model floor| from the class init [byte +44]
+        kHuskFloor = 12,   // |husk floor| from the class init [byte +48]
         // ---- waypoint sub-struct (passed to AIWaypoint_UpdateTarget as brain+52) ----
         kWpType = 13,      // waypoint type: 1 nav-node, 3 literal coord [byte +52]
         kWpChannel = 14,   // nav/anim channel id (= navMeshId)        [byte +56]
@@ -674,6 +676,17 @@ struct GroundClearance {
 int32_t calc_average_ground_height(const terrain::TerrainHeightField &field,
                                    const int32_t pos[3], int32_t sample_radius,
                                    const GroundClearance &clearance);
+
+// The brain height offset every AI ground sample ends with: a vehicle brain
+// adds its husk floor brain[12] when the entity is dead (Flags & 2 or health
+// <= 0) and carries a first husk model (entity+0x34), else its intact floor
+// brain[11]; a caller without a vehicle brain (an organic, or no AI) adds
+// nothing. [orig: Entity_CalcAverageGroundHeight @0x457333..0x457367 and its
+// inline copies AI_InitDeathState @0x4576E8..0x457705, AI_InitGroundHeight
+// @0x45780D..0x45782C, AI_CheckLethalDamage @0x457950..0x45796D,
+// AI_TransitionToDeath_Vehicle @0x46691B..0x466939 and @0x4669CE..0x4669EC,
+// Entity_ProcessVehicleDestruction @0x466AEE..0x466B0D]
+int32_t brain_ground_offset(const World &world, const Entity &entity);
 
 // A recorded RelationMatrix_SetBitA/B side effect (net-replication bookkeeping the
 // mover emits per node advance). The live TriggerRelations matrices are updated alongside

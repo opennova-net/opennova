@@ -6,11 +6,15 @@
 #include <cstdio>
 #include <iterator>
 #include <memory>
+#include <vector>
 
 #include <formats/aip/aip.h>
 #include <runtime/mission/promote.h>
+#include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity_commands.h>
+#include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -446,6 +450,82 @@ void test_change_ai_slot_arms_without_a_token() {
     CHECK(w.ai.events.count() == events_before);
 }
 
+
+// A flat terrain column at height 0 for the aircraft ground samples.
+struct FlatField {
+    static constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap;
+    std::vector<int> sector_grid;
+    opennova::terrain::TerrainHeightField field;
+    FlatField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+        field.heightmap = heightmap.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+        field.layout.origin_x = 0;
+        field.layout.origin_y = 0;
+    }
+};
+
+// Every AI ground sample ends with the brain's floor word: the husk floor
+// brain[12] when the entity is dead (Flags & 2 or health <= 0) and carries a
+// first husk model (entity+0x34), else the intact floor brain[11]. The husk
+// traits never stand in for the brain word at sample time. Driven through the
+// HELO_LAND enter's work Z and the aircraft mover's ground sample.
+// [orig: AI_InitDeathState @0x4576E8..0x457705; Entity_CalcAverageGroundHeight
+//  @0x457333..0x457367; Entity_UpdateAircraftPhysics @0x490310 (the
+//  Entity_CalcAverageGroundHeight call @0x4909F6)]
+void test_ground_samples_add_the_brain_floors() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    FlatField flat;
+    w.tables.terrain = &flat.field;
+    w.env.water_z = INT32_MIN;
+    w.registry.configure_pool(1, 2);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 500;
+    seed.health = 100;
+    seed.alive = true;
+    seed.position = {10, 10, 10};
+    const EntityHandle h = w.registry.spawn(1, seed);
+    w.ai.attach(h);
+    AiEntity &ai = *w.ai.for_handle(h);
+    ai.brain.f[AiBrain::kOwner] = 1;
+    ai.brain.f[AiBrain::kModelFloor] = 0x20000;
+    ai.brain.f[AiBrain::kHuskFloor] = 0x30000;
+    Entity &e = *w.registry.get(h);
+    e.veh.air_probe_z_off = 0x20000; // the class init writes both from one floor
+    ItemDeathTraits traits;
+    traits.has_husk = true;
+    traits.husk_model_loaded = true;
+    traits.primary_husk_loaded = true;
+    traits.husk_rest_min_z = -5.0f;
+    w.tables.item_death_traits.set(500, traits);
+    AiThinkCtx ctx{&w.ai, &ai, &w, nullptr};
+    const auto land_z = [&]() {
+        w.ai.row(kAiHeloLand).enter(ctx);
+        return ai.brain.f[AiBrain::kWorkPosZ];
+    };
+    VehicleTraits air;
+    air.family = VehicleFamily::Helicopter;
+    const int32_t pos[3] = {10 << 16, 10 << 16, 10 << 16};
+
+    CHECK(land_z() == 0x20000);
+    e.health = 0;
+    CHECK(land_z() == 0x30000);
+    // Flags & 2 alone takes the husk floor, in the row and in the mover sample.
+    e.health = 100;
+    e.flags |= kEntityFlagDead;
+    e.engine_flags |= kEntityFlagDead;
+    CHECK(land_z() == 0x30000);
+    CHECK(detail::vehicle_ground_height_at(w, e, air, pos) == 0x30000);
+    // A huskFinal-only definition leaves entity+0x34 null: the intact floor.
+    traits.primary_husk_loaded = false;
+    w.tables.item_death_traits.set(500, traits);
+    CHECK(land_z() == 0x20000);
+    CHECK(detail::vehicle_ground_height_at(w, e, air, pos) == 0x20000);
+}
+
 } // namespace
 
 int main() {
@@ -460,6 +540,7 @@ int main() {
     test_class_update_leaves_the_body_anim_alone();
     test_change_ai_brain_arms_need_the_vehicle_brain();
     test_change_ai_slot_arms_without_a_token();
+    test_ground_samples_add_the_brain_floors();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

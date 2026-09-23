@@ -11,11 +11,7 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 	Entity *entity = world.registry.get(ai.handle);
 	if (entity == nullptr)
 		return INT32_MIN;
-	int32_t offset = entity->veh.air_probe_z_off;
-	if (entity->health <= 0 || ((entity->flags | entity->engine_flags) & 2) != 0)
-		if (const auto *t = world.tables.item_death_traits.get(entity->item_id))
-			if (t->husk_model_loaded)
-				offset = to_fixed(std::abs(t->husk_rest_min_z));
+	const int32_t offset = brain_ground_offset(world, *entity);
 	int32_t pos[3] = { to_fixed(entity->position.x), to_fixed(entity->position.y),
 		to_fixed(entity->position.z) };
 	int32_t ground = INT32_MIN;

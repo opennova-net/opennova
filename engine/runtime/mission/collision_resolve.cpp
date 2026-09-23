@@ -523,7 +523,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							static_cast<int32_t>(vt->box_z_lo < 0 ? 0u - uint32_t(vt->box_z_lo)
 																  : uint32_t(vt->box_z_lo));
 					if (world::AiEntity *ai = world.ai.for_handle(e->handle))
-						ai->brain.f[11] = e->veh.air_probe_z_off;
+						ai->brain.f[world::AiBrain::kModelFloor] = e->veh.air_probe_z_off;
 				}
 			}
 		}
@@ -809,6 +809,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					t->husk_section_centers = info.centers;
 				t->husk_rest_min_z = info.rest_min_z;
 				t->husk_rest_max_z = info.rest_max_z;
+				// brain[12] is the husk floor's absolute value, read from the
+				// husk (the final one when it loaded, else the first) by the class
+				// init under brain[11]'s gate: the helicopter family always, the
+				// vehicle family unless the profile is a boat (subtype 1).
+				// [orig: Entity_InitHelicopterAIFromDef @0x4684FA..0x468527;
+				//  Entity_InitVehicleAIFromDef @0x468839..0x468858]
+				const world::VehicleTraits *husk_vt =
+						h.pool() == 1 ? world.vehicles.traits.get(e->item_id) : nullptr;
+				world::AiEntity *husk_ai = world.ai.for_handle(e->handle);
+				if (husk_vt != nullptr && husk_ai != nullptr && !husk_ai->inf.active &&
+						t->husk_model_loaded &&
+						(husk_vt->brain_class == world::VehicleBrainClass::Air ||
+								(husk_vt->brain_class == world::VehicleBrainClass::Ground &&
+										husk_ai->profile.subtype != 1)))
+					husk_ai->brain.f[world::AiBrain::kHuskFloor] =
+							world::to_fixed(std::abs(t->husk_rest_min_z));
 			}
 			// Only entity+52's FIRST husk model joins this signed max. A
 			// huskFinal-only definition has no substitute operand here.

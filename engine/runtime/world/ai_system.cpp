@@ -965,6 +965,20 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     return result;
 }
 
+// See the header.
+int32_t brain_ground_offset(const World &world, const Entity &entity) {
+    const AiEntity *ai = world.ai.for_handle(entity.handle);
+    if (ai == nullptr || ai->inf.active) return 0; // no vehicle brain at +0x64
+    const bool dead = ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0 ||
+                      entity.health <= 0;
+    if (dead) {
+        const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+        if (traits != nullptr && traits->primary_husk_loaded)
+            return ai->brain.f[AiBrain::kHuskFloor];
+    }
+    return ai->brain.f[AiBrain::kModelFloor];
+}
+
 // ----------------------------------------------------------------------------
 
 } // namespace opennova::world

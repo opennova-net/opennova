@@ -956,7 +956,7 @@ void h_vehicle_dead_tick(AiThinkCtx &ctx) {
 void h_vehicle_dead_event(AiThinkCtx &) {}
 
 // Ground clearance for the aircraft death states: lift 1, search down 48,
-// then the intact/dead model's authored height offset.
+// then the brain's intact/husk floor (brain_ground_offset).
 // [orig: AI_TransitionToDeath_Vehicle @0x4668D9..0x46693C; AI_CheckLethalDamage
 //  @0x45791F..0x457970]
 int32_t aircraft_death_ground(World &world, Entity &entity) {
@@ -970,12 +970,7 @@ int32_t aircraft_death_ground(World &world, Entity &entity) {
 		ground = calc_average_ground_height(*world.tables.terrain, pos, 0, GroundClearance{});
 	if (entity.primary_occupant.valid())
 		ground = std::max(ground, world.env.water_z);
-	int32_t offset = entity.veh.air_probe_z_off;
-	if (entity.health <= 0 || ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0)
-		if (const auto *t = world.tables.item_death_traits.get(entity.item_id))
-			if (t->husk_model_loaded)
-				offset = to_fixed(std::abs(t->husk_rest_min_z));
-	return ground == INT32_MIN ? ground : io::bam_add(ground, offset);
+	return ground == INT32_MIN ? ground : io::bam_add(ground, brain_ground_offset(world, entity));
 }
 
 // [orig: AI_InitDeathState @0x457690; AI_InitGroundHeight @0x4577D0]

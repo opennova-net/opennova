@@ -114,13 +114,7 @@ int32_t vehicle_ground_height_at(
 	if (air && ground != INT32_MIN) {
 		if (world.registry.get(vehicle.primary_occupant) != nullptr)
 			ground = std::max(ground, world.env.water_z);
-		int32_t offset = m.air_probe_z_off;
-		if (vehicle.health <= 0) {
-			const auto *death = world.tables.item_death_traits.get(vehicle.item_id);
-			if (death != nullptr && death->husk_model_loaded)
-				offset = to_fixed(std::abs(death->husk_rest_min_z));
-		}
-		ground = io::bam_add(ground, offset);
+		ground = io::bam_add(ground, brain_ground_offset(world, vehicle));
 	}
 	return ground;
 }
