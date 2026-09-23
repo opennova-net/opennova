@@ -244,7 +244,6 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
         inf.move_target[0] = target[0];
         inf.move_target[1] = target[1];
         inf.move_target[2] = target[2];
-        inf.target_heading = bearing_to(target[0] - e.pos[0], target[1] - e.pos[1]);
         return;
     }
 
@@ -286,7 +285,6 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
     inf.move_target[0] = target[0];
     inf.move_target[1] = target[1];
     inf.move_target[2] = target[2];
-    inf.target_heading = bearing_to(target[0] - e.pos[0], target[1] - e.pos[1]);
 }
 
 // ----------------------------------------------------------------------------

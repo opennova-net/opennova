@@ -32,8 +32,12 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     const Entity *self = world.registry.get(e.handle);
     if (self == nullptr || (e.slot.f[1] & 1) != 0) return {};
     const bool scanner_berserk = (e.slot.f[1] & 0x200) != 0;
+    // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
+    // the team byte around the scan [orig: Entity_UpdateInfantryAI
+    // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
+    const uint8_t team = (e.team == 0 && (e.slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
     // [orig: scanner-team setup @0x4B0A02]
-    if (e.team == 0 && !scanner_berserk) return {};
+    if (team == 0 && !scanner_berserk) return {};
     const uint32_t self_flags = self->flags | self->engine_flags;
     int32_t radius = std::min(range >> 1, 0x280000); // [orig: @0x4B09A1]
     if ((self_flags & 0x40) != 0) radius = 0;
@@ -66,7 +70,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const AiEntity *candidate_ai = sys.for_handle(h);
             const bool candidate_berserk = candidate_ai != nullptr && (candidate_ai->slot.f[1] & 0x200) != 0;
             if (!selected && !scanner_berserk && !candidate_berserk &&
-                    (c->team == 0 || c->team == e.team)) continue;
+                    (c->team == 0 || c->team == team)) continue;
             if (!self->target_selectors.allows(c->net_id, c->group_id)) continue;
             // Pool 2's explicitly selected targets bypass the armor-pair gate.
             // [orig: @0x53A878, @0x53AA86, @0x53AC3F]
@@ -214,6 +218,15 @@ void aim_eye(const int32_t body[3], const int32_t muzzle[3], const int32_t aim[3
     eye[0] = io::bam_add(body[0], io::bam_sar(io::bam_sub(muzzle[0], body[0]), 2));
     eye[1] = io::bam_add(body[1], io::bam_sar(io::bam_sub(muzzle[1], body[1]), 2));
     eye[2] = muzzle[2];
+}
+
+// The Q16 Position of a body: the motor's own lane when it has one.
+void body_position(const AiSystem &sys, const Entity &entity, int32_t out[3]) {
+    if (const AiEntity *body = sys.for_handle(entity.handle)) {
+        std::copy_n(body->pos, 3, out);
+        return;
+    }
+    registry_position(entity, out);
 }
 
 // The target lead both blocks store as the aimPoint: the target's own last-tick
@@ -442,8 +455,6 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 inf.move_target[0] = tpos[0];
                 inf.move_target[1] = tpos[1];
                 inf.move_target[2] = tpos[2];
-                inf.target_heading =
-                        bearing_to(tpos[0] - e.pos[0], tpos[1] - e.pos[1]);
             } else if (avail(anim_state::kIdle3)) {
                 inf.move_mode = 7;
                 inf.target_dist = 0;
@@ -724,6 +735,32 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         }
     }
 
+    // A scripted idle (130..136) watches the local player: the aim heading and
+    // pitch toward its Position (the planar length truncated, no clamp), aimFlag
+    // down and the override up, the body re-faced past 45 degrees, no move and
+    // the detour cleared. [orig: @0x4BCFF5..0x4BD0F4]
+    if (inf.anim_state >= 130 && inf.anim_state <= 136) {
+        if (const Entity *player = world.registry.get(world.cached.local_player)) {
+            int32_t at[3];
+            body_position(*this, *player, at);
+            const int32_t dx = io::bam_sub(at[0], e.pos[0]);
+            const int32_t dy = io::bam_sub(at[1], e.pos[1]);
+            const int32_t dz = io::bam_sub(at[2], e.pos[2]);
+            const int32_t heading =
+                    ftol32(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
+            const int32_t planar = ftol32(std::sqrt(double(dx) * dx + double(dy) * dy));
+            inf.aim_heading = heading;
+            inf.aim_pitch = ftol32(std::atan2(double(dz), double(planar)) * io::kBamPerRadian);
+            inf.aim_valid = false;
+            inf.aim_override = true;
+            if (io::bam_abs(io::bam_sub(heading, inf.target_heading)) > 0x1FFFFFE0)
+                inf.target_heading = heading;
+            inf.move_mode = 0;
+            inf.target_dist = 0;
+            inf.path_state = 0;
+        }
+    }
+
     // The reload override on every path, after the aim blocks: a def clipsize,
     // the reload clip and a signed magazine word at or below zero select 65 with
     // no movement; whenever the CURRENT state is 65 the word refills from the
@@ -799,8 +836,9 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     const auto shoot = [&](uint8_t id, const int32_t pose[6]) {
         if (entity) entity->equipped_adm_index = id;
         if (id == 0) return;
-        // WeaponSlot_FireAndSpawnEffects owns this session gate. The
-        // caller's marks and magazine decrement still occur on a client.
+        // WeaponSlot_FireAndSpawnEffects owns this session gate; the pass
+        // itself runs on the authority only (tick_infantry's gate), so the
+        // marks and the magazine decrement are authority work too.
         // [orig: @0x53F440, @0x4BF345..0x4BF4AD]
         if (!is_in_session || is_authority) {
             if (inf.aim_established) ++inf.dbg_fires_aimed; else ++inf.dbg_fires_body;

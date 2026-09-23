@@ -4576,10 +4576,13 @@ static void test_walking_aim_gates_on_the_body_cone() {
     const int32_t err_heading = static_cast<int32_t>(err_unit * (32 - 4));
     const int32_t err_pitch = static_cast<int32_t>(err_unit * (32 - 7));
     {
-        // Due east: the candidate (bearing 0 + the error) sits on the body.
+        // Due east: the candidate (bearing 0 + the error) sits on the body. The
+        // approach arm writes only the goal; the stale target heading stays for
+        // the moving selection's detour to replace [orig: the approach
+        // @0x4BC2F5..0x4BC316; ai_find_cover_position +0x1A8 @0x4AFF2C].
         Rig r(2 * 65536, 0);
         r.think();
-        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0);
+        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0x20000000);
         CHECK(r.blue->inf.aim_valid);
         CHECK(r.blue->inf.aim_heading == opennova::io::bam_add(err_heading, err_heading));
         CHECK(r.blue->inf.aim_pitch == err_pitch);

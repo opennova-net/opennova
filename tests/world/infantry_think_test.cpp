@@ -516,14 +516,19 @@ static void test_leaving_guard_plays_guard_leave() {
 
 // The think's legs end in the common move tail: a guard keeps the think-entry
 // target heading, and a marker wait rewrites that local along with the target
-// and aim headings. [orig: the entry local @0x4BA9B4..0x4BA9BA; the restore
-// @0x4BBE11..0x4BBE1E; the marker wait @0x4BAD1E..0x4BAD48]
+// and aim headings. The route leg itself writes only the goal; a moving
+// selection's detour publishes the bearing. [orig: the entry local
+// @0x4BA9B4..0x4BA9BA; the restore @0x4BBE11..0x4BBE1E; the marker wait
+// @0x4BAD1E..0x4BAD48; the detour's +0x1A8 write ai_find_cover_position
+// @0x4AFF2C]
 static void test_guard_keeps_the_think_entry_heading() {
     {
         Rig r(fx(60), 0, 0);
         r.route(0, fx(20));
         r.w.ai.infantry_think(r.blue(), r.w);
         CHECK(r.blue().inf.move_mode == 3);
+        CHECK(r.blue().inf.target_heading == 0);
+        r.w.ai.infantry_select(r.blue(), r.w, 0);
         CHECK(r.blue().inf.target_heading == 0x40000000);
     }
     {
@@ -915,6 +920,46 @@ static void test_combat_approach_runs_as_run_attack() {
     CHECK(select(3) == anim_state::kRunForward);
 }
 
+// A scripted idle (130..136) watches the local player: aim heading and pitch
+// toward its Position, aimFlag down, the override up, the body re-faced past 45
+// degrees, no move. [orig: Entity_UpdateInfantryAI @0x4BCFF5..0x4BD0F4]
+static void test_scripted_idle_watches_the_local_player() {
+    Rig r(fx(60), 0, 0);
+    const EntityHandle player = r.make(2, 1, 0, fx(10), fx(1));
+    r.w.cached.local_player = player;
+    r.blue().inf.combat_target = {};
+    r.blue().slot.f[3] = 0;
+    r.blue().inf.anim_state = 131;
+    r.blue().inf.aim_valid = true;
+    r.blue().inf.move_mode = 3;
+    r.blue().inf.target_dist = fx(5);
+    r.blue().inf.path_state = 2;
+    r.think();
+    const int32_t heading = chop(std::atan2(double(fx(10)), 0.0) * kBamPerRadian);
+    const int32_t pitch = chop(std::atan2(double(fx(1)), double(fx(10))) * kBamPerRadian);
+    CHECK(r.blue().inf.aim_heading == heading);
+    CHECK(r.blue().inf.aim_pitch == pitch);
+    CHECK(!r.blue().inf.aim_valid);
+    CHECK(r.blue().inf.aim_override);
+    CHECK(r.blue().inf.target_heading == heading);
+    CHECK(r.blue().inf.move_mode == 0 && r.blue().inf.target_dist == 0);
+    CHECK(r.blue().inf.path_state == 0);
+}
+
+// A coward with no team scans as team 2: a team-1 body is its enemy and a
+// team-2 body its friend. [orig: Entity_UpdateInfantryAI @0x4BBEB5..0x4BBED8]
+static void test_teamless_coward_scans_as_team_two() {
+    Rig r(fx(5), 0, 0);
+    const EntityHandle enemy = r.make(2, 1, 0, fx(6), 0);
+    r.blue().team = 0;
+    r.blue_entity().team = 0;
+    r.blue().slot.f[1] |= 8;
+    r.blue().inf.combat_target = {};
+    r.blue().slot.f[3] = 0;
+    r.think(128); // phase 0 of the 32-tick perception
+    CHECK(r.blue().inf.combat_target == enemy);
+}
+
 } // namespace
 
 int main() {
@@ -949,6 +994,8 @@ int main() {
     test_airborne_think_skips_after_the_pitch_seed();
     test_swimming_selects_the_swim_clips();
     test_combat_approach_runs_as_run_attack();
+    test_scripted_idle_watches_the_local_player();
+    test_teamless_coward_scans_as_team_two();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;

@@ -300,8 +300,6 @@ void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachm
         inf.move_mode = 6;
         inf.arrival_radius = 0x10000;
         std::copy_n(pose.point, 3, inf.move_target);
-        inf.target_heading = board_bearing_to(io::bam_sub(pose.point[0], e.pos[0]),
-                                             io::bam_sub(pose.point[1], e.pos[1]));
         world.ai.infantry_select(e, world);
     }
 }
@@ -343,10 +341,12 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_
     const int32_t command = slot.f[37];
 
     if (command == 126) {
-        // GOTO GROUP -> a stationary guard. Retail parks the shared gait select
-        // at moveMode 3 with targetDist == arrivalRadius == 10.0u, which resolves
-        // to no motion; our think contract encodes that outcome as the move_mode 0
-        // the caller's per-think reset already left in place.
+        // GOTO GROUP. Retail sets moveMode 3 with targetDist == arrivalRadius ==
+        // 10.0u but never writes the goal locals, so its moving selection (the
+        // distance alone gates it @0x4BD3DB) detours toward whatever the stack
+        // frame held and walks (the detour's +0x1A8 write @0x4AFF2C). That goal
+        // is undefined memory; the port keeps the body in place (move_mode 0 from
+        // the per-think reset), the D-INF-2 declared divergence.
         // [orig: the ==126 leg @0x4baabd..0x4baacf — moveMode=3, dist=radius=0xA0000]
         return;
     }
@@ -375,7 +375,6 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_
         inf.move_target[0] = tgt[0];
         inf.move_target[1] = tgt[1];
         inf.move_target[2] = tgt[2];
-        inf.target_heading = board_bearing_to(tgt[0] - e.pos[0], tgt[1] - e.pos[1]);
         return;
     }
 
@@ -483,7 +482,6 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	inf.target_dist = dist;
 	inf.arrival_radius = radius;
 	std::copy_n(goal, 3, inf.move_target);
-	inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
 }
 
 } // namespace opennova::world
