@@ -30,8 +30,9 @@ Retail's `Game_ProcessMainFrame @0x5263F0` runs, in order:
 per-player walk (`@0x51D88B`), the receive pump (`@0x51D895`), the humans count
 (`@0x51D89A`), the WAC tick (`@0x51D8BF`), the every-32 legs (the spawn-marker
 assignment `@0x51D8D2` and the idle timers `@0x51D8D7`), the BMS quarter pass
-(`@0x51D8F4`), the scoreboard legs (`@0x51D90D` / `@0x51D912`), the play-tick and
-scoring walk (`@0x51D960..0x51D98F`), the periodic second (`@0x51DB6D..0x51E1B2`,
+(`@0x51D8F4`), the scoreboard legs (`@0x51D90D` / `@0x51D912`), the play-tick
+walk with its per-slot scoring call (`@0x51D94B..0x51D9A3`, ahead of the
+`is_in_session` test `@0x51D9A5`, so single player counts too), the periodic second (`@0x51DB6D..0x51E1B2`,
 which also recounts the live groups), the per-slot 0x0A (`@0x51E3E4`) and the
 send pump (`@0x51E487`). Then come the gated `Entity_UpdateAllEntities @0x4C2100`
 (the call `@0x52674B`), the tracers (`@0x526758`), the weather (`@0x526774`), the
@@ -187,11 +188,17 @@ PR #587), so boot, state and the no-net tick have one implementation and the
 session interface provably does not depend on Godot. The target adds only
 resource resolution, Godot value conversion and the device pipeline; none of
 that leaks into the portable session state machine. The kernel also carries the
-session facts the tooling and the shell flow used to re-derive: `session_open`
-(set by every net bring-up, the single-player listen server included, so it is
-not retail's `is_in_session`: the port models that fact as `rules.mp_session`,
-which a listen host, a dedicated host and a joiner set and single player never
-does, and `AiSystem::is_in_session` is stamped from it per entity update), the
+session facts the tooling and the shell flow used to re-derive: retail's
+`is_in_session` as `rules.mp_session`, which a listen host, a dedicated host and
+a joiner set and single player never does. The in-session readers key on it,
+among them `AiSystem::is_in_session`, stamped from it per entity update, for the death
+event's in-session arm (`EntityAI_ProcessInfantryStateMachine @0x4581B0`,
+`@0x458273`), the friendly-tag team mode (`HUD_DrawCrosshair @0x592640`,
+`@0x5926C0..0x5926D0`), the zoom floor outside a session
+(`Player_AdjustWeaponZoomLevel @0x4DBCC0`, `@0x4DBD0C`) and the unarmed UseGun
+rejection (`Entity_AttachToUseGunSlot @0x546B80`, `@0x546BF6..0x546C0D`); the
+former `session_open` flag, which every net bring-up set, the single-player
+listen server included, is gone. The kernel also carries the
 medic-call cooldown
 (`tick_medic_cooldown` / `stamp_medic_request`), the local dead bit
 (`local_player_dead`; a joiner reads its replica through
