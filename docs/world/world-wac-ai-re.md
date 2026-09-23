@@ -3222,17 +3222,22 @@ internals = open item, §16.5).
   EntityPool_GetPtrFromHandle(record+476)`, beside `+152 = handle(record+480)`
   `@ 0x45dbb3-0x45dbc5`) and the release/clear walkers (`Entity_ClearAllReferences
   @ 0x4656bd`-family nulls). A flat-displacement sweep of every `[reg+94h]` store
-  found NO live gameplay producer — an indexed-store writer may exist unswept
-  (open follow-up below). The consumer is ported (packed+1 rebase in
-  `AiBrain::kPriorityTarget`); with no producer the slot stays null, as today.
+  found no gameplay store because the live producer is `Entity_FindByNetId
+  @ 0x4655B0` behind ChangeAI 44 (TARGETSSN), which leaves only 0 behind (below).
+  The consumer is ported (packed+1 rebase in `AiBrain::kPriorityTarget`); the slot
+  therefore stays null in practice.
   (The `Entity_SetWaypointByTeam @ 0x43cd20` `+0x94` writes are the CONTROLLER
   struct at `entity+0x68` — waypoint type/index at controller `+0x8C..+0x98` —
   not the brain; the two structs were disambiguated this session.)
-- **Open follow-ups**: the brain[37] live producer (indexed-store sweep; check the
-  WAC `ai` command family); the `dword_24C1930` bit `0x800` writer (an MP-rules
-  word — the reimpl seam `World::rules.ai_rules_skip_local_player` defaults clear and the
-  net wire into it is pending); variant A `AI_FindBestTarget @ 0x465a50` remains
-  unwitnessed (§16.5 item 7).
+- **Follow-ups, RESOLVED 2026-09-23.** The brain[37] producer is ChangeAI 44
+  (`Entity_ApplyCommand` case 44 `@ 0x43B136..0x43B13B`) -> `Entity_FindByNetId(brain,
+  ssn) @ 0x4655B0` writing brain+0x94, where only 0 survives: the unconditional clear
+  (`@ 0x465654`) runs after the pool-1/2 stores and a live pool-0 match returns before
+  storing (`@ 0x4655E9`). `dword_24C1930` is the local debug/cheat word, not an MP
+  rule: 0x800 toggles on input action 123 (`@ 0x4E07A4`; catalog row 123 is empty and
+  unbound), 0x100 through `@ 0x4DC9C0`, 0x400 through action 74, zeroed by
+  `Game_StartMission` (`@ 0x525B25`); no net wire exists or is needed. Variant A
+  `AI_FindBestTarget @ 0x465a50` is witnessed (§16.5 item 7).
 
 ### 16.3 Target bookkeeping
 
@@ -3242,8 +3247,10 @@ internals = open item, §16.5).
   refuted. Target ptr lands in brain[38] (`+152`) AND `AiSlot[3]` (`+12`).
 - `[orig: AIEntity_TryAcquireTarget @ 0x4716b0]` — retarget cadence: brain[42] (`+168`)
   must exceed **248 ticks** (~4 s), reset to 0 on scan; `profile+16 == 1` selects
-  `AI_FindBestTarget @ 0x465a50` (variant A, unwitnessed) else `@ 0x466f60`; result →
-  `Entity_SetAITarget`. Called from both fire ticks (`@ 0x472e00`, `@ 0x471710`).
+  `AI_FindBestTarget @ 0x465a50` (variant A, witnessed: identical to B except its arc
+  bytes load sign-extended, §38.2; `cmp dword ptr [eax+10h],1` `@ 0x4716D5`) else
+  `@ 0x466f60`; the result goes to `Entity_SetAITarget` unconditionally, a null result
+  included (`@ 0x4716F0`). Called from both fire ticks (`@ 0x472e00`, `@ 0x471710`).
   brain[42]'s incrementer is unwitnessed (open, §16.5).
 - `[orig: Entity_AlertNearbyAllies @ 0x4654b0]` (ex "ScanForNearbyEnemies" — misnomer, the
   team compare is EQUAL): pool-1 scan for same-team, alive, non-building entities within
@@ -3253,8 +3260,8 @@ internals = open item, §16.5).
 
 ### 16.4 The fire chain converges with the player path
 
-State-17 tick `[orig: AIEntity_ProcessWeaponFire @ 0x472e00]` (5965 B, cc 133 — full body
-digest pending, §16.5; curated IDB comments give: cooldowns `+208/+210` vs `def+124` rate,
+State-17 tick `[orig: AIEntity_ProcessWeaponFire @ 0x472e00]` (5965 B, cc 133; the full body
+digest is §17.6; curated IDB comments give: cooldowns `+208/+210` vs `def+124` rate,
 ammo `+212/+216`, `def+100` mode flags 0x80 stationary / 0x40 burst / 0x20 sweep, PRNG
 scatter `mod (6 − accuracy)`, sweep wrap −196608) calls per shot:
 
@@ -3283,7 +3290,10 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
    the aircraft brain's weapon-fire leg (the IDB name is a misnomer and is kept; the
    PR #640 alias `AI_UpdateAircraftCombat` never existed in the IDB) — ported in
    `ai_aircraft.cpp`, vehicle-client-movers-re §26.
-7. `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1` classes).
+7. RESOLVED 2026-09-23: `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1`
+   classes) is instruction-identical to `AI_FindBestTargetB` except that both arc bytes
+   load sign-extended (`movsx` `@ 0x465A8C` / `@ 0x465A9B`), so a HELO arc over 180
+   degrees never acquires; its five call sites use it (§38.2, `ai_targeting`).
 
 ### 16.6 IDB write-backs (2026-07-16, saved)
 
@@ -3346,6 +3356,12 @@ Runs when `tick & 0x1F == 0` (the per-entity staggered tick, §3.1):
   layer uses, §16.3), same-target tick counter `+0x33C` increments (reset on switch),
   and `Flags &= ~0x4000` — the own priority-target mark DECAYS each scan and is
   re-armed by firing (§17.4), so recent shooters score ×6 to everyone (§16.2).
+  The mark has two writers: the organic fire (`@ 0x4BF370`) and `RoundData_SpawnRound`'s
+  tail for every non-silenced ballistic round (`test byte ptr [edi],8; jnz; or dword
+  ptr [ebp+24h],4000h` `@ 0x4EC842..0x4EC847`) plus the shotgun fan
+  (`Weapon_SpawnProjectileBurstWithSpread` `@ 0x4EBE61..0x4EBE66`), so players carry the
+  weight too and a silenced round leaves no mark; the clear is `and dword ptr
+  [esi+24h],0FFFFBFFFh` (`@ 0x4BBF88`).
 
 ### 17.2 The feed — `Entity_FindNearestThreat @ 0x4b0990` → `Entity_FindTargets @ 0x53a610`
 
@@ -3755,41 +3771,71 @@ delay), `brain[42] += 16` (the §16.3 retarget timer — its incrementer), and w
   secondary = `+180/+156`/word +210/`brain[54]`/`brain[72]/brain+292`/`profile+152`.
   Each shot: `Entity_ComputeWeaponFireTransform_0 @ 0x456980` (CORRECTED — the old
   `0x455b30` cite was a transcription slip; full digest §17.9) solves the fire pose
-  (arg 7 = the ctx 0x8000 defer-LOS bit, 0 at the stationary/continuation sites, 1
-  at the mobile sites — NOT a track-only switch) → `Weapon_FireProcess @ 0x53f5b0`
+  (arg 7 = the ctx 0x8000 defer-LOS bit, not a track-only switch: 0, LOS checked, at the
+  stationary RC_FIRE solves (`push 0` `@ 0x472F45` / `@ 0x472FCC`) and at the processed-tick
+  fire (`push 0` `@ 0x473D3C` / `@ 0x473E26`, solves `@ 0x473D57` / `@ 0x473E44`); 1, LOS
+  deferred, at the between-tick brain[106] continuation (`push 1` `@ 0x473850` /
+  `@ 0x4735A0`, solves `@ 0x47386B` / `@ 0x4735C9`) and at the WEAPON_TURRET staging
+  (`push 1` `@ 0x47337E`, solve `@ 0x4733A4`; secondary `@ 0x473488`)) → `Weapon_FireProcess @ 0x53f5b0`
   → ammo−−, cooldown word = 0, `brain[106]` = which (1/2), bone-flag byte 784 |=
-  0x40 `@ 0x47306f`. Not aligned ≥ 620 → pending = fallback. Every processed tick
+  0x40 `@ 0x47306f`. Weapons free zeroes the give-up timer brain[40] every visit
+  (`mov [esi+0A0h],0` `@ 0x472EF2`) and fires unless the no-ammo latch brain[48] is set
+  (`@ 0x472EEB`): primary then secondary; neither fired → bone byte 0 and brain[106] = 0
+  (`@ 0x47308B..0x473092`). Weapons held: bone byte 0 and brain[40] ≥ 620 → pending =
+  fallback (`cmp [esi+0A0h],26Ch; jl` `@ 0x47309E..0x4730AF`). Every processed tick
   `Entity_SetAITarget(entity, 0)` (stationary mode keeps no brain[38] target — so in
   practice only the WEAPON_PITCHLOCKED* solver legs, which need no target, fire) and
   `profile+100 & 1` → `AI_UpdateMovementTarget @ 0x460e40`.
 - **0x40 burst** (.aip `ATEAM_LOCK`): `brain[181]` = the window (armed to 1 by each
-  targeted shot, +step while ≤ 186, else 0). CORRECTED 2026-08-12: the between-ticks
-  `brain[106]` continuation sites (`@ 0x473d57` primary / `@ 0x473e44` secondary) DO
-  re-solve — same solver, arg 7 = 0 (LOS on), fresh aim offset, then scatter — the
-  old "re-fires the saved solution without re-solving" gloss was wrong. The saved
-  deltas `brain[182..187]` (primary) / `[188..193]` (secondary) = out-transform minus
-  entity pos/angles, captured at each mobile/continuation solve `@ 0x4735f9..0x47363a`
-  (their consumer is elsewhere — presentation/suspension, unwalked).
+  targeted shot, +step while ≤ 186, else 0). CORRECTED 2026-09-23: `@ 0x473D57` / `@ 0x473E44`
+  are the PROCESSED-tick fire; the between-tick continuation solves at `@ 0x47386B`
+  (primary) / `@ 0x4735C9` (secondary) with arg 7 = 1. The locked burst: while brain[181]
+  is armed, the leg `@ 0x4730E9..0x4732D9` refires brain[106]'s weapon at the hull pose
+  plus its saved deltas (all six components, no solve, no scatter; primary
+  `@ 0x473208..0x4732AA`, secondary `@ 0x473142..0x4731DD`); held past a quarter of the
+  PRIMARY rate the bone byte clears (`@ 0x4732B5..0x4732C3`); brain[48] holds it
+  (`@ 0x4730FE`). The saved deltas `brain[182..187]` (primary) / `[188..193]`
+  (secondary) = out-transform minus entity pos/angles are captured only under
+  ATEAM_LOCK, at every staging, continuation and processed solve (e.g.
+  `@ 0x4733AC..0x4733FA` staging, `@ 0x4735EC..0x47363A` secondary continuation,
+  `@ 0x473F47..0x473F95` processed primary); their consumer is that replay.
 - **0x20 sweep**: each shot `brain[180] += 10918` (1/6 u), passed as the transform's
-  lateral bias; on > 196608 (3.0) reset to −196608 AND `brain[38] = 0` (drop target →
-  rescan) — the strafing-MG walk.
+  lateral bias; on > 196608 (3.0) reset to −196608 AND `brain[38] = 0` per SHOT at every mobile
+  site (`@ 0x473737`, `@ 0x4739DA`, `@ 0x474093`, `@ 0x474175`), a direct write: AiSlot[3]
+  and the target refcount keep the old target (the strafing-MG walk).
 
 No target (`brain[38]` null): `brain[180] = −196608`, movement flag 1 → waypoint walk,
 flag 4 → hold heading; else the **search sweep** (workHeading = yaw ± 0x3FFFFFC0 by
 `brain[40]` phases ≤124 / >434, speed = `brain[50]`) and `AI_FindBestTargetB
 @ 0x466f60` → on found: the 8 relation ops in the §16.4 order, `Entity_SetAITarget`,
-`brain[40] = 0`, `brain[41] = profile+104` (+ `LCG_31BFBB8 % 62` when nonzero — NOTE:
-this site jitters both controller-branches alike, unlike the state-16 engage's A/B
-split, §16.4) → return; none + `brain[40] > 620` → SetAITarget(0), pending = fallback.
-Target dead → SetAITarget(0). Fire leg (processed ticks or `brain[48]` — a forced-
-process flag, writer unwitnessed): `brain[41]` nonzero → move only;
-`AIEntity_TryAcquireTarget @ 0x4716b0` may retarget; chase = approach cap
-`profile+76`, min range `+188`, match the target's speed inside `+184` (target
-`brain[136]` or |velocity|), give-up > 620 beyond the cap; **fire gate** = folded
+`brain[40] = 0`, `brain[41] = profile+104` (+ `LCG_31BFBB8 % 62` when nonzero; NOTE:
+this site jitters brained and brainless targets alike, unlike the state-16 engage,
+which keys on the target's SM brain pointer: `cmp [ebx+64h],ebp; jz`
+`@ 0x4677EA..0x4677EF` in `AI_HandleEvent_HelicopterCombatD @ 0x467730`, brained ->
+the guarded LCG `@ 0x467803..0x467866`, brainless -> `PRNG_Next16 % 62`) → return; none + `brain[40] > 620` → SetAITarget(0), pending = fallback.
+Target dead → SetAITarget(0). Fire leg (processed ticks, or every visit while `brain[48]` is set: the
+dispatchers' no-ammo latch, §38.1, forces the processed leg `@ 0x473309` and turns
+the chase into the half-turn heading, `@ 0x473AB1` -> `lea eax,[ebx+7FFFFF80h]`
+`@ 0x473C08`): `brain[41]` nonzero → move only;
+`AIEntity_TryAcquireTarget @ 0x4716b0` always hands its scan result to
+`Entity_SetAITarget` (`@ 0x4716F0`), so a rescan that finds nothing clears brain[38],
+AiSlot[3] and the refcount (the caller keeps its old pointer for the bearing only,
+`jz` `@ 0x473A41..0x473A45`; the solver reads brain[38] itself, `@ 0x4569A4`); chase =
+the truncated, clamped planar 16.16 distance against the approach cap `profile+0x4C`
+(`@ 0x473AF3`; beyond it only the > 620 give-up); at or beyond max_chase `profile+0xBC`
+(`@ 0x473B29`) full speed; inside it the give-up timer rests only while
+`AI_GetSuspensionFirePoint @ 0x456860` validates the target (`@ 0x473B36` /
+`@ 0x473BE4`), speed = speedA from min_chase `profile+0xB8` on (`@ 0x473B53`), closer
+than that the target's `brain[136]` (entity+0x64 non-null, `@ 0x473B72`) else its
+planar |vel| (+0x98/+0x9C, `@ 0x473B83..0x473BCE`); the common tail clamps the output
+speed to [0, speedA] and zeroes brain[129]/[130]/[133]/[134]/[138]
+(`@ 0x473C14..0x473C50`); **fire gate** = folded
 |targetHeading − yaw| ≤ `((profile+67 | 1) | 2) >> 1` (the secondary-FOV arc — byte
 +67 is the top byte of the +64 `view_fov` BAM dword, §17.9c); weapon select as
-stationary (+ the anti-building swap: target `Flags & 0x100` → `byte_AE076E/F` via
-`sub_545930`, §17.7 item 4); solve with the aim offset passed through the
+stationary (+ the dead player-missile swap: target `Flags & 0x100`
+AND `Team_IsPlayerTeam(ammo byte)` (a missile-ammo set, AE0768..AE076D) →
+`byte_AE076E/F` only if `sub_545930` returns 0 or 2; `sub_545930` is `mov eax,1;
+retn`, so the swap never happens); solve with the aim offset passed through the
 `distance` global `@ 0xB21F8C` (written at every mobile/continuation site
 `@ 0x473367..0x47337e`: `0x20` ATEAM → `brain[180]`, `0x40` ATEAM_LOCK → −196608
 (−3.0 u), else 0) then **scatter** `@ 0x473640..0x473716`: two `dword_31BFBB8`
@@ -3798,9 +3844,12 @@ rol-LCG draws (`x' = rol(rol(x,11)+x,4) ^ 1`, value = low u16), each
 `brain[43]` = accuracy 0–5), the scaled value's parity picks the sign (odd adds,
 even subtracts), applied to yaw then pitch → `Weapon_FireProcess`. Between
 processed ticks the `brain[106]` continuation keeps the volley running
-cooldown-gated through the same solver (§17.6 burst bullet), and
-`profile+136/+168` bit 0 (`WEAPON_TURRET`) stages/refreshes the turret solution
-without firing.
+cooldown-gated through the same solver (§17.6 burst bullet; the primary's pre-seeded
+pitch is zeroed first, `mov [esp+40h+var_8],ebx` `@ 0x473821`), and with no volley on
+record a `profile+136/+168` bit-0 (`WEAPON_TURRET`) block re-solves every visit
+(primary `@ 0x47332D`, secondary `@ 0x47340E`), so its turret slews per visit without
+firing; a processed tick on which neither weapon fires sets brain[106] = 0 and the
+bone byte 0 (`@ 0x4741CC..0x4741D6`). `ai_vehicle_combat` pins these legs.
 
 ### 17.7 Open follow-ups (this session's unknowns)
 
@@ -3810,22 +3859,30 @@ without firing.
    (profile +0x94/+0xB4): a block whose ammo resolves to a non-null row seeds its
    capacity, else 0. Ported in `mission::resolve_ai_weapons` (item_traits.cpp),
    with promote's capacities standing in until that sweep (`mission_item_traits`).
-   Still open: `brain[43]` (accuracy; the 0..4-clamped `aim_skill` at profile+28 is
-   the PROBABLE source); the class init does not write +0xAC, and the only found
-   +785/+0x311 writers are the command and the savegame restore.
+   `brain[43]` is WITNESSED (2026-09-23): `Entity_InitVehicleAI` copies the
+   0..4-clamped `aim_skill` profile+0x1C into brain+0xAC for every profile
+   (`@ 0x460294..0x460297`, §38.1); the only found +785/+0x311 writers are the command
+   and the savegame restore.
 2. RESOLVED 2026-08-12 → §17.9: `Entity_ComputeWeaponFireTransform_0 @ 0x456980`
    (the old `0x455b30` cite was wrong) witnessed in full and ported (D-AI-2).
-3. `brain[48]` (the forced-process flag read by the state-17 tick) writer.
-4. The anti-building weapon swap (`sub_545930` + `byte_AE076E/F` selection).
+3. RESOLVED 2026-09-23: `brain[48]` is the dispatchers' no-ammo idle latch
+   (`EntityAI_ProcessInfantryStateMachine @ 0x4581C4..0x4581F4`,
+   `EntityAI_ProcessVehicleStateMachine @ 0x4583D7..0x458402`; §38.1), read by the
+   state-17 tick `@ 0x472EEB` / `@ 0x4730FE` / `@ 0x473309` / `@ 0x473AB1`.
+4. RESOLVED 2026-09-23 (dead): the swap is the player-missile swap and never happens,
+   since `sub_545930` is `mov eax,1; retn` (§17.6).
 5. RESOLVED 2026-08-12 → §17.9b: `compute_relative_position_metrics @ 0x545710`
    witnessed in full (the metrics ARE the SM aim solve's angle source).
 6. RESOLVED 2026-08-12 → §17.9b: `Entity_GetWeaponFirePosition @ 0x43b630` (the old
    `0x53a2e0` cite was off). Its six legs and their quality returns are in §17.9b
    (ported 2026-09-22); callers fall back to `Entity_ComputeWeaponFireOrigin
    @ 0x43b4b0` when quality != 1.
-7. The scripted-idle aim leg's `Flags & 0x80000` gate writer (aim-at-player poses).
-8. NEW: the saved continuation-delta blocks' (`brain[182..193]`) consumer (captured
-   at every mobile/continuation solve; nothing in the fire pump reads them back).
+7. RESOLVED 2026-09-23: there is no such gate or writer; entity Flags 0x40000/0x80000
+   have no writer in the binary, and the scripted-idle watch (130..136) has no Flags
+   term (§38.4).
+8. RESOLVED 2026-09-23: the saved deltas are captured only under ATEAM_LOCK and
+   consumed by the ATEAM_LOCK replay (`@ 0x47310B..0x4732B3` ground,
+   `@ 0x471A24..0x471BA4` air; §17.6).
 9. NEW: `Weapon_FireProcess @ 0x53f5b0`'s composition of the out-transform with the
    weapon mount/bone rest frame — with an authored nonzero `primary_facing` the
    solver's world compose alone lands at (bearing − bias); whether the spawn re-adds
@@ -3896,18 +3953,23 @@ stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
   exactly double (`step·0x318C631`, ±0x4210842). On every snap the per-type turret
   diagnostic globals get the active yaw/pitch high words (`profile+16` == 2 GROUND →
   `dword_83FEE0/83FEE8`, == 1 HELO → `dword_83FE88/83FE90`) `@ 0x456e33/0x456f9c`.
-- `AI_GetSuspensionFirePoint @ 0x456860` reads the active yaw (`brain[118]`) +
-  `profile+140` for the suspension fire point — the D-AI-2 adjacency consumer.
+- `AI_GetSuspensionFirePoint @ 0x456860` is a target-sight check (the IDB name
+  misleads): it reads the brain's target brain[38] (`@ 0x45686A..0x45686D`), returns 0
+  without one (`@ 0x456875..0x456881`), then builds the shooter-frame metrics context
+  from the entity's pose with the active yaw (`brain[118]`) + `profile+140`. Its callers
+  are the two aircraft movers (`@ 0x4616B1` / `@ 0x4616E0`, `@ 0x461A5B` / `@ 0x461B0F`)
+  and the state-17 chase (`@ 0x473B36` / `@ 0x473BE4`); port
+  `aircraft_target_in_sight`.
 
 **PORT** (2026-08-12): `AiSystem::solve_weapon_fire_transform`
 (engine/runtime/world/ai_combat.cpp) + the three `h_ground_combat_tick` fire legs
 (stationary/continuation/mobile, ai_handlers.cpp `sm_weapon_fire`) + the WAC AI
-commands 0x15/0x16 (`ai_handle_command`). Bounded deviations, cited at the port
-sites: no SM muzzle bone lists in the world model (the empty-list leg always runs —
-muzzle = pos + 2.0 u Z; the bone-list/current-pose refine rides the skeletal-pose
-seam like D-AI-6), the solve frame is yaw-only (AiEntity carries no pitch/roll —
-level shooters identical), the §17.2 ctx range legs stay with the acquire-time
-gates, and the CTRL diagnostic globals are unported (D-3DI-2 owns the bus). The
+commands 0x15/0x16 (`ai_handle_command`). The bone lists are filled at spawn
+(`Entity_InitVehicleAI`'s prefix scans `@ 0x4603A6..0x460414`: prim/bullet01/bullet02 to
+the primary list, sec/bullet02 to the secondary, flare to the flare list), the solve
+uses the full entity frame (pitch and roll), and the validator ctx legs apply
+(`weapon_target_metrics`); the CTRL diagnostic globals remain unported (D-3DI-2 owns
+the bus). The
 `ai` ctest `test_sm_turret_fire` pins the mobile solve/fire, the SLOW slew hold,
 and the RC_FIRE + PITCHLOCKED_MINUS45 stationary leg behind the guard byte.
 
@@ -3942,13 +4004,24 @@ pose: the same gate and the same call as `Entity_GetAttachmentWorldPosition
 `test_turret_gunners_scan_from_the_gun_point`).
 `compute_relative_position_metrics @ 0x545710`: full digest in §17.9 (the fpatan
 operand order and the `dbl_7C19D8` = 683565275.5764316 = 2³¹/π scale are exact in
-the disasm; the decompiler's tail for out[3] is wrong).
+the disasm; the decompiler's tail for out[3] is wrong). Both distances are `fild;
+fsqrt; fistp` (`@ 0x5457CD..0x5457D3`, `@ 0x5457EC..0x5457F2`) under the game's
+nearest-even control word, so they are ROUNDED to whole units (the squares are
+already whole units squared: `sar 8; imul; add 8000h; shrd 10h`), a wrapped
+(negative) sum giving 0; the two angles truncate (`_ftol2_sse`).
+`aim_metrics_parity` executes 120 cases (`scripts/oracles/aim_metrics_parity.py`).
+`Entity_ValidateWeaponTarget @ 0x53A400`'s head keeps a destroyed (Flags & 2) or
+health <= 0 target only while tick - death tick (+0x1AC) <= 16
+(`@ 0x53A425..0x53A443`), and rejects a Player target while dword_24C1930 & 0x800
+is up (`@ 0x53A46E..0x53A478`) or once g_spawn_success_gate is set
+(`@ 0x53A482..0x53A489`) (`ai_targeting`).
 
 ### 17.9c The .aip GROUND property set — `AIProfile_ParseProperty @ 0x45de70` (witnessed 2026-08-12)
 
 Dispatch is gated on the profile `type` (+16: HELO 1 / GROUND 2 / ORGANIC 3);
 ORGANIC returns before any key dispatch (organic .aip files carry data for
-NOTHING; their keys are dead), and the HELO set remains unwitnessed. GROUND keys
+NOTHING; their keys are dead); the HELO set is witnessed in §23.3 (the 2026-08-25
+addendum). GROUND keys
 (offset ← conversion): `rank`→+60 atol; `default_state`→+24
 (`AIState_LookupByName`); `view_fov`→+64 and `radar_fov`→+72 (atof ×
 `dbl_7C6E18` = 11930464.0, deg→BAM32, x87-chopped — profile bytes +67/+75 read by
@@ -3961,7 +4034,8 @@ class-enable words, closing D-AI-1's data-supply witness); `react_time`→+104 a
 +112 (atof × dbl_7C6AC0); `primary/secondary_ammo`→+120/+152 (atol);
 `primary/secondary_weap`→ byte +148/+180 (`AmmoDef_LookupByName`);
 `primary/secondary_facing`→+140/+172 and `_pitch`→+144/+176 (deg→BAM32);
-`min/max_chase_dist`→+188/+184 (atof × 65536); `patrol/combat_speed`→+192/+196
+`min_chase_dist`→+0xB8 (184, `@ 0x45F58D`) and `max_chase_dist`→+0xBC (188,
+`@ 0x45F5CF`) (atof × 65536); `patrol/combat_speed`→+192/+196
 (the D-AI-11 pair). Flag token loops: `primary/secondary_flags`→+136/+168 —
 `WEAPON_TURRET` 0x1, `WEAPON_SLOW` 0x2, `WEAPON_FAST` 0x4, `WEAPON_PITCHLOCKED`
 0x8, `WEAPON_PITCHLOCKED_MINUS45` 0x10; `EVADE_FLAGS`→+96 / `COMBAT_FLAGS`→+100 —
@@ -4138,8 +4212,8 @@ Returns TRUE = CLEAR. Arg 5 is a RAY RADIUS (not a flag): the terrain leg lowers
 both endpoint Z by it (thick-ray conservative) and the sector leg inflates every
 bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`).
 
-1. **Terrain leg** `[orig: @ 0x53993d-0x539968]`: skipped when BOTH entities carry
-   `Flags & 0x800000` INDOORS (the heightmap has no interiors — indoor-to-indoor
+1. **Terrain leg** `[orig: @ 0x53993d-0x539968]`: skipped when BOTH endpoint entities
+   (A and B themselves, `@ 0x53993F..0x53994C`) carry `Flags & 0x800000` INDOORS (the heightmap has no interiors — indoor-to-indoor
    sight would false-block); the null-entity variant instead skips it when either
    ENDPOINT is below terrain (`Terrain_GetHeightAtPosition @ 0x606720`). Otherwise
    `Terrain_RaycastHeightmapHiRes @ 0x60c760` (null out-hit) — hit → BLOCKED.
@@ -4151,11 +4225,14 @@ bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`
    16.16 direction, per-axis min/max box, length; segments < 16 raw (1/4096 u)
    return CLEAR without walking.
 3. **Sector leg** `[orig: raycast_against_entity_pool @ 0x538720; pool 2 statics
-   then pool 1 dynamics @ 0x539a3a]` per entity: in-use (+0x28) with a collision
+   then pool 1 dynamics @ 0x539a3a]`, each walked by its POOL's used count (pool 2
+   `@ 0x539A16..0x539A30`, not the proximity table, whose count stops at 1199; pool 1
+   `@ 0x539A40..0x539A5A` once pool 2 came back clear), per entity: in-use (+0x28) with a collision
    block (`graphicModel+176`, husk model +52 substituted when `Flags & 4`
    destroyed); skip `Flags & 1`, skip `Flags & 0x8000000` (unless the include
-   flag), skip entityA/B, their collision handles (entity +364/+616 → ctx[19]/[20])
-   and entities whose +0x28 owner-link equals A/B; bound-sphere broad phase
+   flag), skip entityA/B and their PARENT slots ctx[19]/[20] (the +0x16C seat mount, else the
+   +0x268 carried object; `@ 0x5399BD..0x539A12`) and candidates whose +0x28
+   groundEntity is A or B (`@ 0x53882F..0x538877`; the parents' riders are NOT skipped); bound-sphere broad phase
    (segment box + unclamped closest-approach projection, the shared @ 0x4139a4
    block); **itemDef type 3 (person)** = bound-sphere-only BLOCK with a same-team
    < 3.0 u exemption (ray end clamps to the person) `[orig: @ 0x5389b1-0x538a10]`;
@@ -4167,7 +4244,8 @@ bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`
    blocked either way `[orig: miss_result = 0 @ 0x5390e6]`.
 
 Port: `CollisionWorld::raycast_clear` (terrain leg + the two-pass registry walk +
-the owner-link exclusion + the `ray_line_distance` broad phase +
+the A/B/parentA/parentB exclusion set, whose parent slots the AI LOS fills through
+`los_walker_parent`, + the `ray_line_distance` broad phase +
 `collision_raycast_model`), first-hit early-out (boolean-equivalent). Residuals in
 D-AI-7: the husk-model swap (no husk collision instances yet) and the type-3
 person case (person-kind residents of the walked pools don't exist in our world —
@@ -4273,6 +4351,13 @@ This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFrom
 - Type 4 = reset/re-kill: health = 0 + re-select from the hit record. Any other
   type (the damage appliers call mode 2) → `entity+0x148 = 62` (a 1 s
   recently-damaged hold on the same field the corpse timer reuses).
+
+The global hit record (80 bytes at 0xB7C620) and its writers are §38.2. After any
+round has hit anything, a BMS KillSingle or KillGroup of a person runs these legs on
+the LAST recorded round (its section, approach quadrant, ammo force and owner), and
+the org1 death edge's unstaged callback does the same for an NPC whose health a
+script zeroed; WAC killSSN memsets the record first (`@ 0x4F1E8F..0x4F1E99`) and a
+fresh mission starts it zeroed (`hit_record`).
 
 The explosive path (`Entity_ApplyWeaponDamage @ 0x4e6820` person leg `@ 0x4e6a01`)
 selects inline instead: bone hardcoded 1 (torso), quadrant from the IMPACT-to-victim
@@ -7583,7 +7668,10 @@ the scanner or the candidate carries `AiSlot[1] & 0x200`
 [orig: Entity_FindTargets @ 0x53a7ea-0x53a824]. That bit is the Berserk spawn mapping in
 §26.2, not an unrelated host-side `see_all` switch. The infantry feed now reads this slot
 bit directly, so a normal allied pair never engages or fires while authored Berserk actors
-retain retail's attack-anyone behavior.
+retain retail's attack-anyone behavior. Every consumer reads the bit live (the SM class
+walk `@ 0x466FAB` / `@ 0x4670CD` / `@ 0x4670E1`; the kill feed's type choice in
+`GameEvent_PlayerDeath @ 0x51709C..0x5170DA`), so a scripted ChangeAI Berserk (case 0x10
+`@ 0x43AEF6`) takes effect at once; the former `AiEntity::see_all` spawn copy is gone.
 
 ### 26.4 Damage wakes AI; near misses do not
 
@@ -9168,8 +9256,10 @@ the entity/controller side effects.
 
 **D-AI-2 update:** the former residual “WAC `ai` command queue parsed, no
 producer” is fixed by the shared `EntityCommands` queue producer and the
-`AI_HandleCommand` cases above. D-AI-2 remains OPEN for its existing turret,
-HELO-profile, suspension-fire-point, CTRL, and mount-frame residuals. The
+`AI_HandleCommand` cases above. D-AI-2 remains OPEN for its CTRL diagnostic
+globals and the mount-frame composition; the turret staging, the HELO profile keys,
+the target-sight check, the bone lists, the full solve frame and the saved-delta
+replay are ported (§17.6, §17.9, §38.2). The
 command consumers, including FIND_AND_USE and AINODEPATH, are documented
 with their witnesses and regression coverage in section 33.
 
