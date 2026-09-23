@@ -78,7 +78,12 @@ namespace {
 // longer carry it in brain[49]/[50], which moves the chain from 0x31938283c4bbc368
 // (bisected to that one commit; the brain stream reproduced the old value by
 // restoring only the default speed).
-constexpr uint64_t kSyntheticDigest = 0xe8c5a2c197da3de8ULL;
+// The pass then ports the entity-update admission: an authority with no human
+// in the world and a WAC clock past its first run skips the whole entity update
+// [orig: Game_ProcessMainFrame @0x526703..0x526742]. The synthetic mission runs
+// WAC with no human, so its world holds after the first tick, which moves the
+// chain from 0xe8c5a2c197da3de8 (the commit before it still gives that value).
+constexpr uint64_t kSyntheticDigest = 0xe5830c6fd01c9439ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
