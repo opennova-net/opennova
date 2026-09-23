@@ -734,9 +734,10 @@ void test_org1_ladder_hold_press_and_top_select() {
     CHECK(m->inf.anim_state == anim_state::kClimbIdle);
 
     // The 0x80 climb order: gravity becomes the capped sixteenth-step Z chase
-    // to the move target, on the even key tick. [orig: @ 0x4bf6d2-0x4bf6e5]
+    // to the persisted goal Z (+0x304), on the even key tick. [orig: @ 0x4bf6d2-0x4bf6e5;
+    // the read @0x4BF6C7]
     pe->flags |= kEntityFlagAiClimb;
-    m->inf.move_target[2] = fx(5.0);
+    m->inf.goal_z = fx(5.0);
     const int32_t z_before = m->pos[2];
     run_ticks(rig.ai, rig.world, 7, 9);
     CHECK(m->pos[2] > z_before);
@@ -4613,9 +4614,13 @@ static void test_short_phase_scan_miss_keeps_the_held_target() {
 }
 
 // The self-attachment chase pulls toward the stamped S point, which no other
-// think path rewrites, while the same think's combat approach keeps retargeting
-// the movement goal. [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664;
-//  the approach arm @0x4BC2F5..0x4BC316 writes frame locals and the goal Z only]
+// think path rewrites. The stamp also raises Flags 0x40, so the guard family
+// drops the same think's combat approach and holds the body in guard (140):
+// the approach arm only wrote frame locals, and a cancelled move never
+// persists its goal Z, so the chase floors Z at the stamped S Z.
+// [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664; the approach
+//  arm @0x4BC2F5..0x4BC316 writes frame locals; guard @0x4BD196..0x4BD1BB;
+//  +0x304 only on a moving selection @0x4bd3f7]
 static void test_self_attachment_chases_the_s_point_through_a_combat_approach() {
     struct EntryPoints : IPoseProvider {
         EntityHandle carrier;
@@ -4680,14 +4685,15 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     self->slot.f[38] = 77;
     // net 200: thinks on tick % 16 == 0. Stage 0 -> E arrival (tick 0), S arrival
     // (tick 16), the stamp (tick 32) while the body faces the enemy 67.5 deg off
-    // the S yaw: attached, not yet converged. The approach runs in the same think.
+    // the S yaw: attached, not yet converged. The approach runs in the same think
+    // and the guard legs drop it.
     run_ticks(w.ai, w, 0, 33);
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.self_attach_point[0] == fx(30) && self->inf.self_attach_point[1] == fx(30));
-    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
-    // The approach goal Z is the enemy's Z [orig: rayEnd.Z @0x4bc302 ->
-    // entity+0x304 @0x4bd3f7]; the chase floors the body there.
-    CHECK(self->inf.move_target[2] == fx(2));
+    CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
+    // The approach's goal Z (the enemy's, rayEnd.Z @0x4bc302) never reaches
+    // +0x304: the stamp's S Z stays the floor.
+    CHECK(self->inf.goal_z == 0);
     CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
     // Knock the body 8 u east of the S point. Every tick between thinks the
     // chase pulls X/Y an eighth of the way back [orig: @0x4bf636..0x4bf65f] and
@@ -4701,11 +4707,11 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         run_ticks(w.ai, w, tick, tick + 1);
         CHECK(self->pos[0] == expected);
         CHECK(self->pos[1] == fx(30));
-        CHECK(self->pos[2] >= fx(2));
+        CHECK(self->pos[2] == 0);
         x = self->pos[0];
     }
     CHECK(w.registry.get(handle)->attach_parent == handle);
-    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
+    CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
     CHECK(w.ai.unported_calls == 0);
 }
 

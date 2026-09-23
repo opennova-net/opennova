@@ -101,6 +101,9 @@ enum : int {
     kDraggerWalk = 138,
     kGuard = 140,
     kGuardLook = 141,
+    kGuardAttack = 142, // [orig: g_animStateNameTable @0x8135F0 142..144 =
+    kGuardCover = 143,  //  guard_attack / guard_cover / guard_leave]
+    kGuardLeave = 144,
     kWoundedWalk = 145,
     kWoundedRun = 146,
     kStop = 147,
@@ -330,9 +333,15 @@ struct InfantryState {
     int move_mode = 0;
     int32_t target_dist = 0;
     int32_t arrival_radius = 0;
-    // The goal. Retail persists only its Z (entity+0x304, every moving selection
-    // @0x4BD3F7 and the S stamp @0x4BB852); the X/Y are per-think frame locals.
+    // The think's goal: per-think frame locals (rayEnd) the legs write and the
+    // selector and detour read.
     int32_t move_target[3] = {};
+    // The goal Z retail persists (entity+0x304): written only by a moving
+    // selection, the S stamp and the organic init, read by the self-attachment
+    // floor and the AiClimb chase. A move a later leg cancels never reaches it.
+    // [orig: Entity_UpdateInfantryAI @0x4BD3F7 / @0x4BB852, reads @0x4BF653 /
+    //  @0x4BF6C7; Entity_InitOrganicAI @0x4BFE07]
+    int32_t goal_z = 0;
     // The authored S point the self-attachment chase pulls toward while
     // attach_parent == self. Written only by the S stamp, read only by the chase.
     // [orig: entity+0x2FC/+0x300; stamp @0x4BB846/0x4BB84C, chase @0x4BF636/0x4BF63C]

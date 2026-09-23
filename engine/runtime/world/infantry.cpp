@@ -141,9 +141,13 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 void AiSystem::infantry_think(AiEntity &e, World &world) {
     InfantryState &inf = e.inf;
     AiSlot &slot = e.slot;
+    // The think-entry target heading, kept in a frame local; only the marker
+    // wait and the S stage rewrite it. [orig: Entity_UpdateInfantryAI
+    //  @0x4BA9B4..0x4BA9BA; rewrites @0x4BAD41 / @0x4BB7D0]
+    int32_t entry_heading = inf.target_heading;
 
-    // [orig: entity[74] decremented once per think; dump 1338]
-    if (inf.wait_cooldown > 0) --inf.wait_cooldown;
+    // The think cooldown (+0x128) steps down while nonzero [orig: @0x4BAA7B..0x4BAAB1].
+    if (inf.wait_cooldown != 0) inf.wait_cooldown = io::bam_sub(inf.wait_cooldown, 1);
 
     inf.move_mode = 0;
     inf.target_dist = 0;
@@ -159,12 +163,33 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     // hold, 127 follow the local player — dispatched in infantry_board.cpp,
     // BEFORE the has-route gate like the original (retires the D-INF-2
     // early-return). [orig: the @0x4b9910 command dispatch on aiComp+148]
-    if (ch >= 123 && ch <= 127) {
-        infantry_command_think(e, world);
+    if (ch >= 123 && ch <= 127)
+        infantry_command_think(e, world, entry_heading);
+    else
+        infantry_route_think(e, world, entry_heading);
+    // Every leg ends in the common move tail: a Flags 0x40 (guard) body keeps
+    // the think-entry heading. [orig: @0x4BBE11..0x4BBE1E]
+    const Entity *self = world.registry.get(e.handle);
+    if (self != nullptr && ((self->flags | self->engine_flags) & kEntityFlagMounted) != 0)
+        inf.target_heading = entry_heading;
+}
+
+void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_heading) {
+    InfantryState &inf = e.inf;
+    AiSlot &slot = e.slot;
+    const int32_t ch = slot.f[37];
+    // Without the has-route flag (slot+140), or while the cooldown holds, the
+    // walk clears the entry-stage byte +0x361 [orig: @0x4BABBD..0x4BABCF ->
+    // @0x4BAE80..0x4BAE88]; channel 0 clears the has-route flag like an empty
+    // channel [orig: @0x4BABDD..0x4BABE5 -> @0x4BAE75].
+    if (slot.f[35] == 0 || inf.wait_cooldown != 0) {
+        inf.board_entry_stage = 0;
         return;
     }
-    // [orig: dump 1409 — needs the has-route flag (slot+140) and no hold cooldown]
-    if (ch == 0 || slot.f[35] == 0 || inf.wait_cooldown > 0) return;
+    if (ch == 0) {
+        slot.f[35] = 0;
+        return;
+    }
 
     const NavChannel *nc = nav.channel(ch);
     if (nc == nullptr || nc->count == 0) { // [orig: dword_A71DD4[34*ch]==0 -> clear order]
@@ -217,9 +242,13 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     mark_waypoint_visited(e, world, ch, node);
 
     if (mk->wait_ticks != 0) {
-        // Face the marker's authored heading and hold. [orig: dump 1468-1477 —
-        // entity[106] = marker+16; entity[74] = (wait + 8) >> 4 think-ticks]
+        // Face the marker's authored heading and hold: the target heading, the
+        // aim heading and the think-entry local all take it. [orig:
+        // @0x4BAD1E..0x4BAD48 — +0x1A8 / +0x2EC = marker+16 @0x4BAD29 /
+        // @0x4BAD2F, the entry local @0x4BAD41; +0x128 = (wait + 8) >> 4 @0x4BAD48]
         inf.target_heading = mk->f[4];
+        inf.aim_heading = mk->f[4];
+        entry_heading = mk->f[4];
         inf.wait_cooldown = (mk->wait_ticks + 8) >> 4;
     }
 
@@ -434,6 +463,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
     const bool dragging = infantry_is_dragger(e, world);
     if (moving) {
+        // Only a moving selection persists the goal Z [orig: @0x4BD3F7].
+        inf.goal_z = inf.move_target[2];
         // A dragger searches and compares turn error while facing away from
         // its travel goal. Restore body heading after the gait choice below.
         // [orig: @0x4BD468, @0x4BD5B1]
@@ -1370,21 +1401,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
             // On a ladder the NPC's gait selection is suppressed — the org1
             // on-ladder block after the resolve owns states 32-35 (the same-tick
-            // overwrite mapping as the player selection skip above; retail also
-            // zeroes a speed local our selector has no carrier for).
-            // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
+            // overwrite mapping as the player selection skip above). The combat
+            // tail already dropped the move ahead of the guard, hold and reaction
+            // legs [orig: @ 0x4bd18d]; the skipped selection's zero-distance leg
+            // clears the path state [orig: @0x4BD2E9].
             if (tick_entity != nullptr &&
                 ((tick_entity->flags | tick_entity->engine_flags) &
                  kEntityFlagLadderContact) != 0) {
-                inf.move_mode = 0;
-                inf.target_dist = 0;
                 inf.path_state = 0;
             }
 		else if (!attachment.parent.valid()) {
 			infantry_select(e, world, combat_state);
-			if (inf.board_anim >= 0 && inf.move_mode == 0 &&
-					(tick_entity == nullptr || !tick_entity->mounted))
-				inf.request_body_animation(inf.board_anim);
 		}
         }
 	}
@@ -1841,7 +1868,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // the fall terminal), on the even key tick like the gravity it
             // replaces. The order writer rides the AI-order slice.
             // [orig: @ 0x4bf6d2-0x4bf6e5; floor pick @ 0x4bf6e5 + clamp @ 0x4bf7d4]
-            int32_t step = (inf.move_target[2] - e.pos[2] + 8) >> 4;
+            int32_t step = (inf.goal_z - e.pos[2] + 8) >> 4;
             if (step > 0x4000) step = 0x4000;
             inf.vel[2] = step;
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;

@@ -1,14 +1,19 @@
-// The org1 think block's combat legs against the retail instructions
-// [orig: Entity_UpdateInfantryAI @0x4B9910, the think @0x4BA970..0x4BE7FD]:
-// the held (possibly dead) target and post_attack as the chain's last link,
-// the no-target search walk, the aim target point and eye, the lead distance,
-// the hold-timer tail, the reload on every path, the retaliation LOS and the
-// persistent aimFlag. Synthetic bodies and clips; no retail data.
+// The org1 think block against the retail instructions [orig:
+// Entity_UpdateInfantryAI @0x4B9910, the think @0x4BA970..0x4BE7FD]: the
+// combat legs (the held, possibly dead, target and post_attack as the chain's
+// last link, the no-target search walk, the aim target point and eye, the lead
+// distance, the hold-timer tail, the reload on every path, the retaliation LOS
+// and the persistent aimFlag), the guard family and the holdSSN hold at the
+// combat tail, the think-entry heading restore, and the board walk's arrival,
+// S stage, E-point claim and UseGun ring. Synthetic bodies and clips; no
+// retail data.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 #include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/bam.h>
@@ -56,6 +61,22 @@ struct Muzzle : IPoseProvider {
         const AiEntity *e = ai->for_handle(h);
         for (int axis = 0; axis < 3; ++axis) out[axis] = e->pos[axis] + offset[axis];
         return true;
+    }
+};
+
+// Authored named points (E/G/S/UseGun) on one carrier.
+struct Points : IPoseProvider {
+    EntityHandle carrier;
+    std::vector<std::pair<std::string, std::vector<int32_t>>> points;
+    bool resolve_named_transform(World &, EntityHandle h, const char *name,
+                                 int32_t out[6]) override {
+        if (h != carrier) return false;
+        for (const auto &point : points) {
+            if (point.first != name) continue;
+            std::copy(point.second.begin(), point.second.end(), out);
+            return true;
+        }
+        return false;
     }
 };
 
@@ -114,6 +135,53 @@ struct Rig {
         red_entity().health = 0;
         red_entity().flags |= kEntityFlagDead;
         red().health = 0;
+    }
+    Entity &blue_entity() { return *w.registry.get(blue_h); }
+    void guard() {
+        blue_entity().flags |= kEntityFlagMounted;
+        blue_entity().engine_flags |= kEntityFlagMounted;
+    }
+    bool guarding() {
+        return ((blue_entity().flags | blue_entity().engine_flags) & kEntityFlagMounted) != 0;
+    }
+    // A pool-1 item for the board walk, at (x, y, 0).
+    EntityHandle item(uint16_t net_id, uint8_t item_type, uint32_t attrib, int32_t x, int32_t y) {
+        Entity item{};
+        item.alive = true;
+        item.item_id = 2001;
+        item.item_type = item_type;
+        item.has_item_def = true;
+        item.item_attrib = attrib;
+        item.kind = EntityKind::Item;
+        item.health = item.health_max = 100;
+        item.net_id = net_id;
+        item.bound_radius = 1.0f;
+        item.position = {float(x) / 65536.0f, float(y) / 65536.0f, 0.0f};
+        return w.registry.spawn(1, item);
+    }
+    // Blue ordered to board SSN `net_id` (command 125) [orig: slot+148 / +152].
+    void board(uint16_t net_id) {
+        blue().slot.f[37] = 125;
+        blue().slot.f[38] = net_id;
+        blue().inf.combat_target = {};
+        blue().slot.f[3] = 0;
+    }
+    // A one-node route on channel 1 [orig: slot+140 has-route, slot+148
+    // channel, slot+152 node].
+    void route(int32_t x, int32_t y, int32_t wait_ticks = 0, int32_t facing = 0) {
+        w.ai.nav.channels.resize(2);
+        w.ai.nav.channels[1].count = 1;
+        w.ai.nav.channels[1].entries[0] = 0;
+        NavEntry node;
+        node.f[0] = 0x8000;
+        node.f[1] = x;
+        node.f[2] = y;
+        node.f[4] = facing;
+        node.wait_ticks = wait_ticks;
+        w.ai.nav.nodes.assign(1, node);
+        blue().slot.f[35] = 1;
+        blue().slot.f[37] = 1;
+        blue().slot.f[38] = 0;
     }
 };
 
@@ -370,6 +438,268 @@ static void test_reload_runs_without_a_target() {
     }
 }
 
+// A Flags 0x40 (guard) body holds in place in guard: the combat approach's move
+// is dropped and 140 proposed, and the selection never persists the cancelled
+// goal Z. [orig: @0x4BD196..0x4BD1BB; the +0x304 write @0x4BD3F7 on a moving
+// selection only]
+static void test_guard_holds_in_place() {
+    Rig r(fx(20), 0, fx(2), {43, 44, 49, 140, 155});
+    r.guard();
+    r.blue().inf.combat_move_timer = 1; // no reaction: the approach arm runs
+    const int state = r.think();
+    CHECK(state == anim_state::kGuard);
+    CHECK(r.blue().inf.move_mode == 0 && r.blue().inf.target_dist == 0);
+    r.w.ai.infantry_select(r.blue(), r.w, state);
+    CHECK(r.blue().inf.goal_z == 0);
+    CHECK(r.blue().inf.anim_state == anim_state::kGuard);
+    CHECK(r.guarding());
+}
+
+// A hit takes guard_cover (143); a chosen reaction takes guard_attack (142)
+// with moveMode 7; without the guard clip the flag drops from both mirrors.
+// [orig: @0x4BD1BE..0x4BD1F8; the clear @0x4BD1B8..0x4BD1BB]
+static void test_guard_cover_attack_and_the_missing_clip() {
+    {
+        Rig r(fx(20), 0, 0, {43, 44, 49, 140, 143, 155});
+        r.guard();
+        r.blue().inf.combat_move_timer = 1;
+        r.blue().inf.was_hit = true;
+        CHECK(r.think() == anim_state::kGuardCover);
+        CHECK(r.blue().inf.move_mode == 0);
+    }
+    {
+        Rig r(fx(5), 0, 0, {43, 44, 49, 140, 142, 155});
+        r.guard();
+        CHECK(r.think() == anim_state::kGuardAttack);
+        CHECK(r.blue().inf.move_mode == 7 && r.blue().inf.target_dist == 0);
+    }
+    {
+        Rig r(fx(20), 0, 0, {43, 44, 49, 155});
+        r.guard();
+        r.blue().inf.combat_move_timer = 1;
+        CHECK(r.think() != anim_state::kGuard);
+        CHECK(r.blue().inf.move_mode == 0);
+        CHECK((r.blue_entity().flags & kEntityFlagMounted) == 0);
+        CHECK((r.blue_entity().engine_flags & kEntityFlagMounted) == 0);
+    }
+}
+
+// Off guard, a current guard state leaves through guard_leave (144) with no
+// move. [orig: @0x4BD1FA..0x4BD231]
+static void test_leaving_guard_plays_guard_leave() {
+    Rig r(fx(20), 0, 0, {43, 44, 49, 140, 144, 155});
+    r.blue().inf.combat_move_timer = 1;
+    r.blue().inf.anim_state = anim_state::kGuard;
+    CHECK(r.think() == anim_state::kGuardLeave);
+    CHECK(r.blue().inf.move_mode == 0 && r.blue().inf.target_dist == 0);
+}
+
+// The think's legs end in the common move tail: a guard keeps the think-entry
+// target heading, and a marker wait rewrites that local along with the target
+// and aim headings. [orig: the entry local @0x4BA9B4..0x4BA9BA; the restore
+// @0x4BBE11..0x4BBE1E; the marker wait @0x4BAD1E..0x4BAD48]
+static void test_guard_keeps_the_think_entry_heading() {
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.move_mode == 3);
+        CHECK(r.blue().inf.target_heading == 0x40000000);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.guard();
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.move_mode == 3);
+        CHECK(r.blue().inf.target_heading == 0);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, 0, 32, 0x20000000);
+        r.guard();
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.target_heading == 0x20000000);
+        CHECK(r.blue().inf.aim_heading == 0x20000000);
+        CHECK(r.blue().inf.wait_cooldown == (32 + 8) >> 4);
+    }
+}
+
+// The WAC holdSSN bit parks the body in moveMode 12 after the guard legs; a
+// chosen reaction still wins with 7. [orig: @0x4BD235..0x4BD251]
+static void test_hold_parks_the_body() {
+    {
+        Rig r(fx(20), 0, 0);
+        r.blue_entity().cause_flags |= 0x2000u;
+        r.blue().inf.combat_move_timer = 1;
+        r.think();
+        CHECK(r.blue().inf.move_mode == 12 && r.blue().inf.target_dist == 0);
+    }
+    {
+        Rig r(fx(5), 0, 0);
+        r.blue_entity().cause_flags |= 0x2000u;
+        CHECK(r.think() == anim_state::kAttack);
+        CHECK(r.blue().inf.move_mode == 7);
+    }
+}
+
+// Without the has-route flag, or while the cooldown holds, the route leg clears
+// the entry stage; channel 0 drops the has-route flag; the cooldown steps down
+// while nonzero, a negative one included. [orig: @0x4BAA7B..0x4BAAB1;
+// @0x4BABBD..0x4BABE5 -> @0x4BAE75 / @0x4BAE80..0x4BAE88]
+static void test_route_gate_clears_the_entry_stage() {
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.blue().slot.f[35] = 0;
+        r.blue().inf.board_entry_stage = 3;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.board_entry_stage == 0);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.blue().inf.wait_cooldown = -3;
+        r.blue().inf.board_entry_stage = 3;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.wait_cooldown == -4);
+        CHECK(r.blue().inf.move_mode == 0);
+        CHECK(r.blue().inf.board_entry_stage == 0);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.blue().slot.f[37] = 0;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().slot.f[35] == 0);
+    }
+}
+
+// The board arrival clears Flags 0x40 and the parent slot only when the attach
+// it tried left the body unparented: an arrival that cannot attach keeps a
+// guard. [orig: gate @0x4BBDA6..0x4BBDC8; clear @0x4BBDFA..0x4BBE07]
+static void test_board_arrival_clears_the_guard_only_after_an_attach() {
+    {
+        Rig r(fx(60), 0, 0);
+        r.item(900, 3, 0, fx(1), 0);
+        r.board(900);
+        r.guard();
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.move_mode == 0);
+        CHECK((r.blue_entity().flags & kEntityFlagMounted) != 0);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.item(900, 3, kItemAttribPlayerControl, fx(1), 0);
+        r.board(900);
+        r.guard();
+        r.blue_entity().mount_type = SeatType::Passenger;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(!r.blue_entity().mounted);
+        CHECK((r.blue_entity().flags & kEntityFlagMounted) == 0);
+        CHECK((r.blue_entity().engine_flags & kEntityFlagMounted) == 0);
+        CHECK(r.blue_entity().mount_type == SeatType::None);
+    }
+    {
+        // A live carrier that cannot be entered: the goal is the body itself in a
+        // 125 u ring, so the arrival runs with the attach gated off.
+        // [orig: @0x4BB2CE..0x4BB2E8]
+        Rig r(fx(60), 0, 0);
+        r.item(900, 1, kItemAttribPlayerControl, fx(30), 0);
+        r.board(900);
+        r.guard();
+        r.blue().inf.board_entry_stage = 2;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.move_mode == 0);
+        CHECK(r.blue().inf.board_entry_stage == 3);
+        CHECK((r.blue_entity().flags & kEntityFlagMounted) != 0);
+    }
+}
+
+// The S stage writes the S yaw into the target heading and the think-entry
+// local, never the body yaw; with the guard clip it stores 140 raw and proposes
+// it. [orig: @0x4BB7CA / @0x4BB7D0; Flags |= 0x40 @0x4BB81C; +0x2BC / the selection
+// @0x4BB82F..0x4BB835]
+static void test_s_stage_sets_the_heading_locals_and_the_guard() {
+    Rig r(fx(60), 0, 0, {43, 44, 49, 140, 147});
+    const EntityHandle carrier = r.item(900, 6, 0, fx(3), 0);
+    Points points;
+    points.carrier = carrier;
+    points.points.push_back({"S1", {fx(1), fx(1), 0, 0x10000000, 0, 0}});
+    r.w.pose_provider = &points;
+    r.board(900);
+    r.blue().inf.board_entry_stage = 4;
+    r.blue().heading = 0x7000;
+    r.w.ai.infantry_think(r.blue(), r.w);
+    CHECK(r.blue().inf.target_heading == 0x10000000);
+    CHECK(r.blue().heading == 0x7000);
+    CHECK(r.guarding());
+    CHECK((r.blue_entity().engine_flags & kEntityFlagMounted) != 0);
+    CHECK(r.blue().inf.anim_state == anim_state::kGuard);
+    CHECK(r.blue().inf.goal_z == 0);
+    CHECK(r.think() == anim_state::kGuard);
+    r.w.pose_provider = nullptr;
+}
+
+// The command legs' proposal is the combat think's starting selection.
+// [orig: the G stage's 147 @0x4BB72A carried into the combat legs]
+static void test_board_proposal_reaches_the_selection() {
+    Rig r(fx(60), 0, 0, {43, 44, 49, 147});
+    const EntityHandle carrier = r.item(900, 6, 0, fx(20), 0);
+    Points points;
+    points.carrier = carrier;
+    points.points.push_back({"G1", {fx(10), 0, 0, 0, 0, 0}});
+    r.w.pose_provider = &points;
+    r.board(900);
+    r.blue().inf.board_entry_stage = 2;
+    r.w.ai.infantry_think(r.blue(), r.w);
+    CHECK(r.blue().inf.move_mode == 3);
+    CHECK(r.think() == anim_state::kStop);
+    r.w.pose_provider = nullptr;
+}
+
+// The E-point claim runs only for a target resolved outside pool 0.
+// [orig: `jnz loc_4BB187` @0x4BAEF1; the claim @0x4BAF9B..0x4BB185]
+static void test_claim_skips_a_pool_zero_target() {
+    {
+        Rig r(fx(60), 0, 0);
+        r.board(r.red_entity().net_id);
+        r.blue().inf.board_entry_slot = 5;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.board_entry_slot == 5);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.item(900, 3, 0, fx(20), 0);
+        r.board(900);
+        r.blue().inf.board_entry_slot = 5;
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.board_entry_slot == 1);
+    }
+}
+
+// The UseGun ring widens to 3 u while the gun holds its +0x170 occupant, not
+// its weapon owner. [orig: `cmp dword ptr [edx+170h],0` @0x4BB39C]
+static void test_use_gun_ring_reads_the_occupant() {
+    const auto ring = [](bool occupant, bool owner) {
+        Rig r(fx(60), 0, 0);
+        const EntityHandle gun = r.item(900, 6, 0, fx(20), 0);
+        Points points;
+        points.carrier = gun;
+        points.points.push_back({"UseGun", {fx(20), 0, 0, 0, 0, 0}});
+        r.w.pose_provider = &points;
+        if (occupant) r.w.registry.get(gun)->primary_occupant = r.red_h;
+        if (owner) r.w.registry.get(gun)->primary_weapon_owner = r.red_h;
+        r.board(900);
+        r.w.ai.infantry_think(r.blue(), r.w);
+        const int32_t radius = r.blue().inf.arrival_radius;
+        r.w.pose_provider = nullptr;
+        return radius;
+    };
+    CHECK(ring(true, false) == 0x30000);
+    CHECK(ring(false, true) == 0x10000);
+}
+
 } // namespace
 
 int main() {
@@ -385,6 +715,17 @@ int main() {
     test_hold_timer_tail_runs_without_a_target();
     test_aim_flag_is_not_cleared_by_the_combat_think();
     test_reload_runs_without_a_target();
+    test_guard_holds_in_place();
+    test_guard_cover_attack_and_the_missing_clip();
+    test_leaving_guard_plays_guard_leave();
+    test_guard_keeps_the_think_entry_heading();
+    test_hold_parks_the_body();
+    test_route_gate_clears_the_entry_stage();
+    test_board_arrival_clears_the_guard_only_after_an_attach();
+    test_s_stage_sets_the_heading_locals_and_the_guard();
+    test_board_proposal_reaches_the_selection();
+    test_claim_skips_a_pool_zero_target();
+    test_use_gun_ring_reads_the_occupant();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;

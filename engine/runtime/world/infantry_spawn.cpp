@@ -74,7 +74,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
     entity.dragger = {};
     entity.dragger_spawn_id = 0;
     body->collide_state.skip_counter = 0;
-    inf.move_target[2] = body->pos[2];
+    inf.goal_z = body->pos[2]; // [orig: Entity_InitOrganicAI @0x4BFE07]
     inf.magazine = static_cast<int16_t>(body->profile.clip_size);
 
     const auto available = [&](int state) {

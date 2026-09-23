@@ -998,7 +998,8 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     CHECK(w.script.vars.get_mission(1) == 1);
     CHECK(w.script.vars.get_mission(2) == 0);
 
-    w.ai.infantry_board_think(brain, w, brain.slot.f[37]);
+    int32_t entry_heading = brain.inf.target_heading;
+    w.ai.infantry_board_think(brain, w, brain.slot.f[37], entry_heading);
     CHECK(w.registry.get(sh)->mounted);
     CHECK(w.registry.get(sh)->mount_target == ch);
     run(w, sys, 1);

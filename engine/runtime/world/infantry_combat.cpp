@@ -254,7 +254,12 @@ bool infantry_entity_los(AiSystem &ai, World &world, EntityHandle a, EntityHandl
 
 int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     InfantryState &inf = e.inf;
-    int selected_state = 0;
+    // The selected-state local carries on from the command legs: their 147 /
+    // 140 proposal is what the combat legs override or keep [orig: seeded 43
+    // @0x4BAA90 (our 0 = the selector's 43), board writes @0x4BB72A /
+    // @0x4BB80E / @0x4BB835].
+    int selected_state = inf.board_anim >= 0 ? inf.board_anim : 0;
+    inf.board_anim = -1;
     // The think's hasReaction and aim-override frame locals [orig:
     // Entity_UpdateInfantryAI @0x4B9910 — var_10B8 / var_10B4, zeroed at the
     // motor head @0x4B99BF / @0x4B99C6].
@@ -349,10 +354,15 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (self_entity != nullptr) self_entity->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
-    // [orig: @0x4BBF8F..0x4BC047] The nonzero burn branch skips the
-    // ENTIRE behavior/aim/gait block, reaching animation arbitration at LABEL_754.
+    // [orig: @0x4BBF8F..0x4BC047] The nonzero burn branch skips the ENTIRE
+    // behavior/aim/gait block, reaching the arbitration head [orig:
+    // Entity_UpdateInfantryAI @0x4BD7FD, the `jnz` @0x4BC04E].
+    // A stage without its clip leaves the proposal standing [orig: the local is
+    // written only under the clip tests @0x4BBFAF / @0x4BBFD3 / @0x4BBFF7 /
+    // @0x4BC01B].
     if (inf.burn_state != 0) {
-        selected_state = select_infantry_burn(inf, root_motion, false, key);
+        const int burn = select_infantry_burn(inf, root_motion, false, key);
+        if (burn != 0) selected_state = burn;
         if (inf.burn_state != 0) return selected_state;
     }
 
@@ -728,6 +738,52 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     if (inf.anim_state == anim_state::kReload)
         inf.magazine = static_cast<int16_t>(static_cast<uint16_t>(e.profile.clip_size));
 
+    // One Flags read feeds the ladder and guard legs [orig: `mov ecx,[esi+24h]`
+    // @0x4BD184]. On a ladder the move is dropped [orig: Flags 0x100000
+    // @0x4BD187..0x4BD194].
+    const uint32_t tail_flags = self_entity != nullptr
+            ? (self_entity->flags | self_entity->engine_flags) : 0u;
+    if ((tail_flags & kEntityFlagLadderContact) != 0) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+    }
+    // The guard family [orig: @0x4BD196..0x4BD231]. A Flags 0x40 body holds in
+    // place in guard (140); without the clip the flag drops [orig:
+    // @0x4BD19B..0x4BD1BB]. A hit since the last think (the wasHit byte the
+    // think captured at entry @0x4BA9A2 / @0x4BA9C1) takes guard_cover (143)
+    // [orig: @0x4BD1BE..0x4BD1D5]; a chosen reaction takes guard_attack (142)
+    // with moveMode 7 [orig: @0x4BD1D9..0x4BD1F8]. Off guard, a current
+    // 140..143 leaves through guard_leave (144) with no move [orig:
+    // @0x4BD1FA..0x4BD231].
+    if ((tail_flags & kEntityFlagMounted) != 0) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+        if (avail(anim_state::kGuard)) {
+            selected_state = anim_state::kGuard;
+        } else if (self_entity != nullptr) {
+            self_entity->flags &= ~kEntityFlagMounted;
+            self_entity->engine_flags &= ~kEntityFlagMounted;
+        }
+        if (inf.was_hit && avail(anim_state::kGuardCover)) selected_state = anim_state::kGuardCover;
+        if (inf.combat_reaction && avail(anim_state::kGuardAttack)) {
+            selected_state = anim_state::kGuardAttack;
+            inf.move_mode = 7;
+        }
+    } else if (avail(anim_state::kGuardLeave) &&
+               (inf.anim_state == anim_state::kGuardCover || inf.anim_state == anim_state::kGuard ||
+                inf.anim_state == anim_state::kGuardLook ||
+                inf.anim_state == anim_state::kGuardAttack)) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+        selected_state = anim_state::kGuardLeave;
+    }
+    // The WAC holdSSN hold (+0x2C bit 0x2000) parks the body in moveMode 12
+    // [orig: @0x4BD235..0x4BD240; set/clear by WacCmd_HoldSsn @0x4F785D /
+    // WacCmd_UnholdSsn @0x4F78BD].
+    if (self_entity != nullptr && (self_entity->cause_flags & 0x2000u) != 0) {
+        inf.move_mode = 12;
+        inf.target_dist = 0;
+    }
     // A chosen reaction holds the body [orig: `cmp var_10B8,0; jz` ->
     // moveMode 7, distance 0 @0x4BD245..0x4BD251].
     if (inf.combat_reaction) {

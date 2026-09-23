@@ -1131,13 +1131,18 @@ public:
     // The 16-tick navigation think: waypoint channel walk (arrival, relmat marks, marker
     // wait + facing, one-shot end), commands 123..127. Writes inf.move_* + target_heading.
     void infantry_think(AiEntity &e, World &world);
+    // Its route leg (channels 1..122): the has-route/cooldown gate and the node walk.
+    void infantry_route_think(AiEntity &e, World &world, int32_t &entry_heading);
     // The reserved-command legs of the think (slot+148 = 123..127): the
     // Goto-SSN-and-board family with per-command seat filters, the goto-group
     // hold, and follow-local-player. Bodies in infantry_board.cpp.
+    // `entry_heading` is the think-entry target heading the S stage rewrites
+    // together with the target heading.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 command dispatch;
     //  Entity_FindBestSeatSlot @0x4351f0; Entity_RequestVehicleAttach @0x4364a0]
-    void infantry_command_think(AiEntity &e, World &world);
-    void infantry_board_think(AiEntity &e, World &world, int32_t command);
+    void infantry_command_think(AiEntity &e, World &world, int32_t &entry_heading);
+    void infantry_board_think(AiEntity &e, World &world, int32_t command,
+                              int32_t &entry_heading);
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
     void infantry_select(AiEntity &e, World &world, int selected_state = 0);
