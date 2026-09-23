@@ -331,6 +331,13 @@ void test_infantry_detour_one_leg_fallback() {
 
 // A normal route walker must consume a real collision-produced state and get
 // around the wall through its root-motion motor, without staging a detour point.
+// The walker stands on the field: the resolver's ground probe clips against the
+// terrain for any source that is not indoors [orig: raycast_entity_collision
+// @0x41377E..0x413791], so a walker on a heightfield never goes airborne and
+// its think is not held by the airborne skip [orig: Entity_UpdateInfantryAI
+// @0x4BAA57..0x4BAA66]. The entity pass re-syncs the collision world's terrain
+// from world.tables.terrain every tick (RoundSim::tick), so the rig wires that
+// one field into the tables too, as MissionKernel::wire_terrain does.
 void test_infantry_route_walks_around_wall() {
     struct WalkingSource : IRootMotionSource {
         bool has_clip(int, int) const override { return true; }
@@ -347,6 +354,7 @@ void test_infantry_route_walks_around_wall() {
     } source;
     Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
     rig.move_soldier(14.0, 10.0, 0.0);
+    rig.world.tables.terrain = &rig.field.field;
     auto &ai = rig.world.ai;
     ai.collision = &rig.cw;
     ai.terrain = &rig.field.field;
@@ -371,6 +379,7 @@ void test_infantry_route_walks_around_wall() {
     bool saw_blockage = false;
     bool saw_detour = false;
     bool arrived = false;
+    bool grounded = true;
     for (uint32_t tick = 0; tick < 1200; ++tick) {
         TickContext context;
         context.world = &rig.world;
@@ -379,11 +388,15 @@ void test_infantry_route_walks_around_wall() {
         rig.world.update_all_entities(context);
         saw_blockage |= body.inf.path_state == 1;
         saw_detour |= body.inf.path_state == 2;
+        const Entity *walker = rig.world.registry.get(rig.soldier);
+        grounded &= walker != nullptr &&
+                ((walker->flags | walker->engine_flags) & kEntityFlagInAir) == 0;
         if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {
             arrived = true;
             break;
         }
     }
+    CHECK(grounded);
     CHECK(saw_blockage && saw_detour);
     CHECK(arrived);
 }
