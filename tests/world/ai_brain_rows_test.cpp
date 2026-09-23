@@ -149,6 +149,39 @@ void test_evade_flee_leg_turns_about_at_combat_speed() {
           e.brain.f[AiBrain::kWorkPosZ] == 9);
 }
 
+// The aircraft dead enter clears the team byte at its head, before the ally wake
+// compares it: the wake reaches team-0 hulls, not the former teammates.
+// [orig: Entity_ProcessVehicleDestruction `mov byte ptr [esi+162h],0` @0x466A9F,
+//  Entity_AlertNearbyAllies @0x466B77]
+void test_aircraft_dead_enter_wakes_as_team_zero() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    const auto spawn_hull = [&](uint8_t team, float x) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 1307;
+        seed.health = 100;
+        seed.team = team;
+        seed.position = {x, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(1, seed);
+        AiEntity &ai = *w.ai.at(w.ai.attach(h));
+        ai.brain.f[AiBrain::kOwner] = 1;
+        ai.team = team;
+        ai.pos[0] = static_cast<int32_t>(x * 65536.0f);
+        return h;
+    };
+    const EntityHandle dead = spawn_hull(1, 0.0f);
+    const EntityHandle mate = spawn_hull(1, 10.0f);
+    const EntityHandle other = spawn_hull(0, 20.0f);
+    AiEntity &e = *w.ai.for_handle(dead);
+    AiThinkCtx ctx{&w.ai, &e, &w, nullptr};
+    w.ai.row(15).enter(ctx);
+    CHECK(e.team == 0);
+    CHECK(w.ai.for_handle(mate)->brain.f[AiBrain::kAlert] == 0);
+    CHECK(w.ai.for_handle(other)->brain.f[AiBrain::kAlert] == 2);
+}
+
 // PLAYPARTANIM's rate divides the single-precision flt_7C3B40 (0.016f) by the
 // ANIMTIME seconds: ANIMTIME 1 (1/65536 s) is 68719480, not the double's
 // 68719476. Rates from the retail instructions executed for each ANIMTIME.
@@ -203,6 +236,7 @@ int main() {
     test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();
     test_evade_flee_leg_turns_about_at_combat_speed();
+    test_aircraft_dead_enter_wakes_as_team_zero();
     test_part_anim_rate_uses_the_single_precision_tick();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;

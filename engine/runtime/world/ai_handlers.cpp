@@ -1153,6 +1153,10 @@ void h_aircraft_dying_tick(AiThinkCtx &ctx) {
 // [orig: Entity_ProcessVehicleDestruction @0x466A80]
 void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 	auto &ai = *ctx.self;
+	// The team byte clears at the head, so the ally wake below compares team 0
+	// [orig: `mov byte ptr [esi+162h],0` @0x466A9F ahead of
+	//  Entity_AlertNearbyAllies @0x466B77].
+	ai.team = 0;
 	if (ctx.world != nullptr) {
 		World &world = *ctx.world;
 		if (Entity *entity = world.registry.get(ai.handle)) {
@@ -1186,7 +1190,6 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 		}
 	}
 	alert_block(ctx, ai);
-	ai.team = 0;
 	ai.brain.f[AiBrain::kStep] = 62;
 }
 
