@@ -72,7 +72,13 @@ namespace {
 // ((deg << 16) / 360) << 16 [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66],
 // in place of deg * 11930464: every spawned heading loses its low 16 bits,
 // which moves the chain from 0x18f8080dd8fcdb68.
-constexpr uint64_t kSyntheticDigest = 0x31938283c4bbc368ULL;
+// The same pass keys the brain class init on the item class, not the profile
+// type [orig: Entity_InitHelicopterAIFromDef @0x4683C0 / Entity_InitVehicleAIFromDef
+// @0x4686C0], and drops the invented default speed of 20: organic brains no
+// longer carry it in brain[49]/[50], which moves the chain from 0x31938283c4bbc368
+// (bisected to that one commit; the brain stream reproduced the old value by
+// restoring only the default speed).
+constexpr uint64_t kSyntheticDigest = 0xe8c5a2c197da3de8ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
