@@ -499,8 +499,12 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
             for (world::EntityHandle h : groups_[group]) {
                 if (const world::Entity *entity = w.registry.get(h)) {
                     // Gkill runs the killSSN body on every handle (its own
-                    // ItemTypeIndex gate) [orig: WacCmd_GroupKill @0x4F1F40 ->
-                    // @0x4F1F5E]; Gremove removes without a gate.
+                    // ItemTypeIndex gate) [orig: WacCmd_GroupKill @0x4F1F40
+                    // (the killSSN body call @0x4F1F5E)]; Gremove removes without
+                    // a gate [orig: WacCmd_GroupRemove @0x4F1F80 (the
+                    // Server_RemoveEntityAndNotify call @0x4F1FF2)]. Both return
+                    // 0 [orig: WacCmd_GroupKill @0x4F1F72; WacCmd_GroupRemove
+                    // @0x4F2006].
                     if (ieq(n, "Gkill")) cmds.wac_kill_ssn(h);
                     else cmds.remove_ssn(h);
                 }
