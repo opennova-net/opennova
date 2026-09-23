@@ -430,6 +430,14 @@ public:
 			int32_t out_direction[3]) override;
 	bool resolve_userpoint_rigid(world::World &w, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
+	bool resolve_named_transform(world::World &w, world::EntityHandle entity,
+			const char *name, int32_t out[6]) override;
+	int last_named_userpoint(world::World &w, world::EntityHandle entity,
+			const char *name) override;
+	bool resolve_userpoint_pivot(world::World &w, world::EntityHandle entity,
+			int userpoint_index, int32_t out[3]) override;
+	bool resolve_section_pivot(world::World &w, world::EntityHandle entity,
+			int part, int32_t out[3]) override;
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;

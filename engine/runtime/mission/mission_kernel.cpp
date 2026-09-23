@@ -1129,6 +1129,26 @@ bool MissionKernel::resolve_userpoint_rigid(w::World &p_world, w::EntityHandle e
 	return collision_pose.resolve_userpoint_rigid(p_world, entity, userpoint_index, out);
 }
 
+bool MissionKernel::resolve_named_transform(w::World &p_world, w::EntityHandle entity,
+		const char *name, int32_t out[6]) {
+	return collision_pose.resolve_named_transform(p_world, entity, name, out);
+}
+
+int MissionKernel::last_named_userpoint(w::World &p_world, w::EntityHandle entity,
+		const char *name) {
+	return collision_pose.last_named_userpoint(p_world, entity, name);
+}
+
+bool MissionKernel::resolve_userpoint_pivot(w::World &p_world, w::EntityHandle entity,
+		int userpoint_index, int32_t out[3]) {
+	return collision_pose.resolve_userpoint_pivot(p_world, entity, userpoint_index, out);
+}
+
+bool MissionKernel::resolve_section_pivot(w::World &p_world, w::EntityHandle entity,
+		int part, int32_t out[3]) {
+	return collision_pose.resolve_section_pivot(p_world, entity, part, out);
+}
+
 // --- world::IPoseProvider: collision sections --------------------------------
 
 bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle entity) {
