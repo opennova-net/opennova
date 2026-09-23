@@ -1416,8 +1416,10 @@ void test_specialized_piece_physics_callback() {
 
     DestructionRng expected_rng = w.destruction_rng;
     const uint16_t angle_roll = expected_rng.next16();
-    const int32_t initial_pitch = 10 * 11930464;
-    const int32_t initial_roll = -3 * 11930464;
+    // The piece still holds its placement angles, the spawn form (low half
+    // zero). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+    const int32_t initial_pitch = 119275520; // ((10 << 16) / 360) << 16
+    const int32_t initial_roll = -35782656;  // ((-3 << 16) / 360) << 16
     const int32_t expected_pitch = (angle_roll & 1u) != 0
             ? initial_pitch + 0x00100000
             : initial_pitch;

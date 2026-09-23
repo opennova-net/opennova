@@ -233,6 +233,26 @@ void test_automatic_expression() {
 	CHECK(f.slot(h).automatic == 8); // animation table entry 140
 }
 
+// A looked-at body without a brain of its own faces back from its placement
+// heading, the spawn form of 90 - yaw: at yaw -112 the look-back cone edge falls
+// between that and 202 x 11930464. [orig: Entity_SpawnFromBMSRecord
+//  @0x40EB42..0x40EB66; Entity_UpdateInfantryAI @0x4BE6BE (the tracking's target
+//  heading read), cone @0x4BE6CB]
+void test_look_back_uses_the_placement_heading() {
+	Fixture f;
+	const auto h = f.spawn(1), target = f.spawn(2, 1.5f);
+	f.world.ai.attach(h);
+	auto &body = *f.world.ai.for_handle(h);
+	body.inf.active = true; body.inf.adm_id = 1; body.health = 100;
+	body.inf.anim_state = 140; body.inf.body_heading = 0;
+	body.inf.head_look_target = target;
+	f.entity(target).position.y = -5668.0f / 65536.0f;
+	f.entity(target).yaw = -112;
+	f.world.ai.root_motion = &f.motion;
+	infantry_attention_think(f.world.ai, body, f.world, 0x80);
+	CHECK(f.slot(h).automatic == 6);
+}
+
 } // namespace
 
 int main() {
@@ -241,5 +261,6 @@ int main() {
 	test_mesh_and_texture_schedule();
 	test_slot_lifetime_and_capacity();
 	test_automatic_expression();
+	test_look_back_uses_the_placement_heading();
 	return failures ? 1 : 0;
 }

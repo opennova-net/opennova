@@ -299,11 +299,11 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
                 ? -seat.yaw_offset : seat.yaw_offset;
         live.heading = vehicle.veh.yaw_seeded
                 ? io::bam_sub(vehicle.veh.yaw_bam, bam_from_degrees_wrapped(offset))
-                : static_cast<int32_t>(static_cast<int64_t>(90 - mounted_pose_yaw(vehicle, seat)) * 11930464);
+                : io::bam_sub(spawn_angle_bam(90 - vehicle.yaw), bam_from_degrees_wrapped(offset));
         live.pitch = vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
-                : bam_from_degrees_wrapped(vehicle.pitch);
+                : spawn_angle_bam(vehicle.pitch);
         live.roll = vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
-                : bam_from_degrees_wrapped(vehicle.roll);
+                : spawn_angle_bam(vehicle.roll);
     }
     occ.position = live.position;
     occ.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(live.heading)));

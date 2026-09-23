@@ -589,14 +589,14 @@ int main() {
     }
 
     // ---- mounted seat orientation feeds the carried body while gunner look stays live ----
-    // The seat is authored in mission degrees, while every AiEntity yaw field is engine BAM:
-    // heading = (90 - mission yaw) * 11930464. For a gunner, 37 - 11 = 26 degrees,
-    // so the witnessed integer convention produces (90 - 26) * 11930464 = 763549696.
-    // [orig: seat carry @0x4b654e-0x4b6575; heading multiplier @0x4659fa]
+    // The unmoved gun still holds its placement angles in the spawn form (low half zero):
+    // heading ((90 - 37) << 16) / 360 << 16 = 632291328, which the gunner's 11-degree seat
+    // offset turns to 763526440; pitch -12 and roll 17 take the same form.
+    // [orig: seat carry @0x4b654e-0x4b6575; Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
     [] {
-        constexpr int32_t kSeatHeading = 763549696;
-        constexpr int32_t kSeatPitch = -143165577;
-        constexpr int32_t kSeatRoll = 202817900;
+        constexpr int32_t kSeatHeading = 763526440;
+        constexpr int32_t kSeatPitch = -143130624;
+        constexpr int32_t kSeatRoll = 202768384;
         const int32_t kRequestHeading =
                 world::bam_heading_from_mission_yaw_deg(26.0);
         const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
@@ -652,9 +652,9 @@ int main() {
     // The AiEntity camera mirrors retain the full-precision look heading/pitch; the body,
     // both leg chains, body pitch, and roll remain attached to the seat.
     [] {
-        constexpr int32_t kSeatHeading = 763549696;
-        constexpr int32_t kSeatPitch = -143165577;
-        constexpr int32_t kSeatRoll = 202817900;
+        constexpr int32_t kSeatHeading = 763526440;
+        constexpr int32_t kSeatPitch = -143130624;
+        constexpr int32_t kSeatRoll = 202768384;
         const int32_t request_heading =
                 world::bam_heading_from_mission_yaw_deg(26.0);
         const int32_t look_heading = world::bam_heading_from_mission_yaw_deg(137.25);

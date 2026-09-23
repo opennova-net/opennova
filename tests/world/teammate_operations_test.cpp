@@ -168,8 +168,14 @@ void test_same_tick_hover_fallthrough() {
     CHECK(f.world.ai.events.at(2).f[3] == 20 && f.world.ai.events.at(3).f[3] == 0);
 }
 void test_pickup_and_invalid_helicopter_boundary() {
-    Fixture f; f.action(1);
+    // Both medics spawn on the marker's own transform, whose heading is its
+    // placement's spawn form: yaw 1 -> ((89 << 16) / 360) << 16. [orig:
+    //  HeliLift_SpawnPickup @0x45262E (lea ebp,[eax+4]; the Entity_SpawnFromItemDef
+    //  calls @0x452650/@0x4526A5); Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+    Fixture f; f.world.registry.get(f.marker)->yaw = 1; f.action(1);
     CHECK(f.factory.requests.size() == 2);
+    CHECK(f.factory.requests[0].heading == 1061748736);
+    CHECK(f.factory.requests[1].heading == 1061748736);
     CHECK(!f.slot().helicopter.valid());
     CHECK(f.world.registry.get(f.patient)->corpse_timer == 10000);
     CHECK(f.world.ai.for_handle(f.slot().first.handle)->slot.f[38] == 73);

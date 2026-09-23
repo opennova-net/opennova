@@ -7,6 +7,7 @@
 // and combat legs all reach for.
 
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -43,7 +44,7 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	int state = anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
 	if (state == 100) {
 		const int32_t roll = target.veh.yaw_seeded ? target.veh.air_roll_bam
-												   : int32_t(int64_t(target.roll) * 11930464);
+												   : spawn_angle_bam(target.roll);
 		if (roll < -71582784)
 			state = 110;
 		if (roll > 71582784)
@@ -61,8 +62,8 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / (2*pi)
 
-// mission yaw degrees -> 32-bit binary angle (entity+16). [orig: AI_HandleCommand cmd 0x16
-// @0x4659fa; matches promote.cpp's seed.] Used to mirror a posed mount transform into the brain.
+// Whole degrees -> 32-bit binary angle by the original's multiplier, used for the commanded
+// elevation (brain+0x314) only. [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
 constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the original multiplier
 
 // Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]

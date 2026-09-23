@@ -21,7 +21,7 @@ std::array<int32_t, 3> position(const World &world, const Entity &entity) {
 }
 int32_t heading(const World &world, const Entity &entity) {
     const AiEntity *ai = world.ai.for_handle(entity.handle);
-    return ai ? ai->heading : bam_heading_from_mission_yaw_deg(entity.yaw);
+    return ai ? ai->heading : spawn_angle_bam(90 - entity.yaw);
 }
 // The lift code's Q22 sine/cosine: the heading scaled to radians by the
 // image's own constant dbl_7C3608 = 1.4629627251502471e-09 (a hair above

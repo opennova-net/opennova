@@ -183,7 +183,7 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
             const int32_t bearing = bearing_to(dx, dy);
             const AiEntity *candidate_body = ai.for_handle(candidate.handle);
             const int32_t candidate_yaw = candidate_body ? candidate_body->heading
-                    : bam_heading_from_mission_yaw_deg(candidate.yaw);
+                    : spawn_angle_bam(90 - candidate.yaw);
             if (distance < 2 * 65536 &&
                     io::bam_abs(io::bam_add(io::bam_sub(bearing, candidate_yaw),
                                            INT32_MIN)) < 298261600)
@@ -263,7 +263,7 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
     // [orig: Entity_UpdateInfantryAI @0x4BE6AE..0x4BE729]
     const AiEntity *target_body = ai.for_handle(target->handle);
     const int32_t target_heading = target_body ? target_body->heading :
-            static_cast<int32_t>(int64_t(90 - target->yaw) * 11930464);
+            spawn_angle_bam(90 - target->yaw);
     if (distance_of(dx, dy, dz) < 2 * 65536 &&
             io::bam_abs(io::bam_sub(io::bam_sub(bearing, target_heading), INT32_MIN)) < 298261600) {
         const uint32_t phase = key & 0x180u;

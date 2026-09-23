@@ -128,12 +128,9 @@ int16_t death_angle_degrees_from_bam(int32_t bam) {
 void seed_piece_physics_angles(Entity &entity) {
     Entity::VehicleMotorState &motion = entity.veh;
     if (motion.yaw_seeded) return;
-    motion.yaw_bam =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(entity.yaw));
-    motion.air_pitch_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(static_cast<int32_t>(entity.pitch)) * 11930464u);
-    motion.air_roll_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(static_cast<int32_t>(entity.roll)) * 11930464u);
+    motion.yaw_bam = spawn_angle_bam(90 - entity.yaw);
+    motion.air_pitch_bam = spawn_angle_bam(entity.pitch);
+    motion.air_roll_bam = spawn_angle_bam(entity.roll);
     motion.yaw_seeded = true;
 }
 

@@ -241,7 +241,9 @@ void test_usegun_attach_presnaps_local_look() {
 
     CHECK(ai.pose_if_mounted(body, w));
     CHECK(body.heading == expected_heading);
-    CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
+    // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432, turned by the
+    // 12-degree seat offset. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+    CHECK(body.inf.body_heading == 799312009);
 }
 
 // A remote player's LOOK is still independent in either vehicle-control seat.
@@ -292,7 +294,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         CHECK(body.heading == look_heading);
         CHECK(body.pitch == look_pitch);
         CHECK(w.registry.get(player_h)->yaw == 45);
-        CHECK(body.inf.body_heading == 90 * 11930464);
+        CHECK(body.inf.body_heading == 0x40000000); // yaw 0: the spawn form of 90
 
         Entity *live_vehicle = w.registry.get(vehicle_h);
         live_vehicle->position = {40.0f, 50.0f, 60.0f};
@@ -301,7 +303,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         CHECK(body.heading == look_heading);
         CHECK(body.pitch == look_pitch);
         CHECK(w.registry.get(player_h)->yaw == 45);
-        CHECK(body.inf.body_heading == 70 * 11930464);
+        CHECK(body.inf.body_heading == 835125248); // ((70 << 16) / 360) << 16
         const Entity *mounted = w.registry.get(player_h);
         CHECK(body.pos[0] == to_fixed(mounted->position.x));
         CHECK(body.pos[1] == to_fixed(mounted->position.y));
@@ -2669,6 +2671,17 @@ void test_driver_animation() {
 			CHECK(body.inf.anim_state == c.state);
 			CHECK(body.inf.anim_pending == 0);
 		}
+		// An unseeded hull reads its placement roll in the spawn form: 180 degrees is
+		// 0x80000000, below -6 degrees (sit_24_right); 180 x 11930464 = 0x7FFFFF80
+		// would pick sit_24_left.
+		// [orig: Entity_SpawnFromBMSRecord @0x40EB89..0x40EBA6; the roll cmps
+		//  Entity_UpdateInfantryPlayerBody @0x4B65D0 / Entity_UpdateInfantryAI @0x4BEE3D]
+		r.veh().veh.yaw_seeded = false;
+		r.veh().roll = 180;
+		r.veh().veh.speed = 200;
+		CHECK(r.sys.pose_if_mounted(body, r.w));
+		CHECK(body.inf.anim_state == 110);
+		r.veh().veh.yaw_seeded = true;
 		r.veh().seats[0].pose_index = 23;
 		r.veh().veh.speed = 0;
 		CHECK(r.sys.pose_if_mounted(body, r.w));

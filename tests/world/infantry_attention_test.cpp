@@ -174,6 +174,21 @@ static void test_candidate_filters_and_unsigned_diagonal_score() {
     }
 }
 
+// A candidate without a brain of its own looks back from its placement heading,
+// the spawn form of 90 - yaw (low half zero). At yaw -112 the 25-degree cone
+// edge falls between that and the continuous conversion, and the +4 is all that
+// admits this teamless candidate: (14 u - 1.5 u) >> 16 = 12, minus 12, plus 0.
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66; Entity_UpdateInfantryAI
+//  @0x4BE2C3 (the scan's candidate heading read), cone @0x4BE2D0]
+static void test_candidate_look_back_uses_the_placement_heading() {
+    Fixture f;
+    f.body().slot.f[17] = fixed(14);
+    const auto target = f.person({1.5f, -5156.0f / 65536.0f, 2}, 10, 3, 0);
+    f.world.registry.get(target)->yaw = -112;
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == target);
+}
+
 static void test_spotting_side_effects_precede_front_arc() {
     Fixture corpse;
     const auto dead = corpse.person({-3, 1, 2}, 9, 3, 2);
@@ -350,6 +365,7 @@ int main() {
     test_idle_scan_relations_and_history();
     test_speaker_identity_and_authority();
     test_candidate_filters_and_unsigned_diagonal_score();
+    test_candidate_look_back_uses_the_placement_heading();
     test_spotting_side_effects_precede_front_arc();
     test_eye_tracking_clip_availability_and_cleanup();
     test_terrain_occludes_spotting();
