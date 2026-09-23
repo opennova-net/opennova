@@ -98,7 +98,18 @@ builds the spawn-marker list right after the mission load (the
 `Entity_InitAllFromModels @0x40E460` (`@0x52567F`), the authority-gated PreMission
 pass (the `EventTrigger_UpdateAllWithFlag2 @0x454DC0` call `@0x525B86`) and the WAC's first
 execution; `MissionKernel::boot` builds it once the definitions are attached and
-before the organic init. The PostMission pass runs once at teardown
+before the organic init. Two boot-order differences remain open. The local
+player spawns before the PreMission pass, where retail's
+`Player_InitPlayer @0x4E15F0` call (`@0x525BBC`) follows the pass, and the later
+boot legs (the `.adm` bind, the item traits, the loadout, the organic init) act
+on that row, so moving the spawn reorders them too. The gunner attachments bind
+in `initialize_mission_vehicles`, after the PreMission pass, the first WAC run
+and the 255 weather ticks, where retail binds them in the class inits, before
+the pass and on every peer (`Entity_InitVehicleAIFromDef @0x4686C0` and
+`Entity_InitHelicopterAIFromDef @0x4683C0` call
+`Entity_SetupGunnerAttachments @0x468100`, `@0x468964` / `@0x468692`); the port's
+bind needs the gun points the collision boot step fills. No shipped JOX item
+sets Parent. The PostMission pass runs once at teardown
 (`MissionKernel::run_post_mission_pass` from `HostRole::close` and
 `LocalRole::close`; `Game_TeardownMission @0x522350`, the call `@0x52266C`).
 
