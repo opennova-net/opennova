@@ -3,8 +3,11 @@
 // PRETTY hold, and the vehicle/boat/aircraft avoid-brake gates.
 //  - Mission_LoadBMSFile @0x40F4E0: the waypoint block and its normalization
 //  - Entity_UpdateAircraftPhysics @0x490310: the parked/crewed/player legs
+//  - the avoid-brake walks' ItemTypeIndex gates (ground, boat, aircraft)
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
@@ -201,12 +204,132 @@ void test_player_pilot_holds_pretty() {
     CHECK(b.f[AiBrain::kCurState] == 7);
 }
 
+// ItemTypeIndex is the items.def load-order ordinal of the FIRST row carrying
+// the entity's type id, and 0 when no row does: each `begin` appends the next
+// row and the lookup scans from row 0.
+// [orig: Entity_SpawnFromBMSRecord `mov [esi+1Ch],ebp` @0x40EBFC;
+//  ItemList_FindIndexByTypeId @0x49E100; ItemDef_AllocateWithDefaults bumps
+//  gItemCount @0x49E3BE]
+void test_item_type_index_is_the_first_row_ordinal() {
+    static const char kItems[] = R"(begin "Null"
+  id 100000
+end
+
+begin "Flyable"
+  id 100172
+end
+
+begin "Truck"
+  id 101294
+end
+
+begin "Flyable again"
+  id 100172
+end
+)";
+    def::DefItemsFile items = {};
+    CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+                                      sizeof(kItems) - 1, &items) == 0);
+    CHECK(items.count == 4);
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 8);
+    const auto spawn = [&](int32_t item_id) {
+        Entity e{};
+        e.kind = EntityKind::Item;
+        e.alive = true;
+        e.item_id = item_id;
+        e.item_type_index = -1;
+        return w.registry.spawn(1, e);
+    };
+    const EntityHandle null_h = spawn(0);
+    const EntityHandle flyable_h = spawn(172);
+    const EntityHandle truck_h = spawn(1294);
+    const EntityHandle stray_h = spawn(4242);
+    mission::resolve_item_traits(w, items, [](int) -> uint8_t { return 0; });
+    CHECK(w.registry.get(null_h)->item_type_index == 0);
+    CHECK(w.registry.get(flyable_h)->item_type_index == 1); // not the later duplicate
+    CHECK(w.registry.get(truck_h)->item_type_index == 2);
+    CHECK(w.registry.get(stray_h)->item_type_index == 0);
+    def::def_free_items(&items);
+}
+
+// The avoid-brake walk admits a pool-1 neighbour by its ItemTypeIndex
+// (entity+0x1C, the items.def load-order ordinal), and the families disagree:
+// the ground walk skips index 0 only, while the boat and aircraft walks load 1
+// into ecx for their count decrement and compare the index against that
+// register, so they brake behind index-1 neighbours (the second items.def row)
+// and nothing else.
+// [orig: Entity_UpdateVehiclePhysics `cmp dword ptr [edi+1Ch],0` @0x48BDD9;
+//  Entity_UpdateWatercraftPhysics `mov ecx,1` @0x48E5AA, `cmp [edi+1Ch],ecx`
+//  @0x48E5C5; Entity_UpdateAircraftPhysics @0x4919D1 / @0x4919E6]
+void test_avoid_brake_item_index_gates() {
+    enum class Leg { Ground, Boat, Air };
+    struct Case { Leg leg; int32_t index; bool brakes; };
+    const Case cases[] = {
+        {Leg::Ground, 0, false}, {Leg::Ground, 1, true}, {Leg::Ground, 5, true},
+        {Leg::Boat, 0, false},   {Leg::Boat, 1, true},   {Leg::Boat, 5, false},
+        {Leg::Air, 0, false},    {Leg::Air, 1, true},    {Leg::Air, 5, false},
+    };
+    for (const Case &c : cases) {
+        AirRig r;
+        r.seat_pilot();
+        r.helo().bound_radius = 5.0f;
+        r.helo().veh.yaw_bam = 0; // nose along +x
+        r.helo().veh.yaw_seeded = true;
+        AiBrain &b = r.brain();
+        b.f[AiBrain::kOutSpeed] = 65536;
+        // A hull 6 u dead ahead: the two 5 u footprints overlap.
+        Entity rock{};
+        rock.kind = EntityKind::Item;
+        rock.alive = true;
+        rock.item_id = 999;
+        rock.item_type_index = c.index;
+        rock.position = {6.0f, 0.0f, 50.0f};
+        rock.bound_radius = 5.0f;
+        rock.veh.yaw_seeded = true;
+        r.w.registry.spawn(1, rock);
+        // One brake: ((id + (frame << 8)) & 0x7FFF) + 0x4000 over 65536.
+        const int32_t braked = static_cast<int32_t>(
+                ((static_cast<uint32_t>(r.helo().net_id) +
+                  (static_cast<uint32_t>(r.w.logic_tick) << 8)) & 0x7FFFu) + 0x4000u);
+        int32_t speed = 0;
+        if (c.leg == Leg::Air) {
+            // Crewed, no route: the forward command is the out-speed straight
+            // into the brake.
+            b.f[AiBrain::kCurState] = 7;
+            r.w.ai.chel_ai_drive(r.w, r.helo(), &r.pilot(), r.traits);
+            speed = r.helo().veh.cmd_speed;
+        } else {
+            VehicleTraits t;
+            t.player_speed = t.water_speed = 65536;
+            t.player_control = true;
+            b.f[AiBrain::kCurState] = 16;
+            VehicleDriveCmd cmd;
+            if (c.leg == Leg::Boat)
+                r.w.ai.watercraft_ai_drive(r.w, r.helo(), &r.pilot(), t, cmd);
+            else
+                r.w.ai.vehicle_ai_drive(r.w, r.helo(), &r.pilot(), t, cmd);
+            CHECK(cmd.ai_drive);
+            speed = cmd.cmd_speed;
+        }
+        const int32_t expect = c.brakes ? braked : 65536;
+        if (speed != expect) {
+            std::printf("FAIL %s:%d  leg %d index %d: speed %d, want %d\n", __FILE__,
+                        __LINE__, static_cast<int>(c.leg), c.index, speed, expect);
+            ++failures;
+        }
+    }
+}
+
 } // namespace
 
 int main() {
     test_single_node_lists_are_one_shot();
     test_air_leg_stamps_current_state_only();
     test_player_pilot_holds_pretty();
+    test_item_type_index_is_the_first_row_ordinal();
+    test_avoid_brake_item_index_gates();
     if (failures == 0) std::printf("route_parity: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

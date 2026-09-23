@@ -129,6 +129,15 @@ std::string fourcc_prefix(const char *tag) {
 void resolve_item_traits(world::World &world, const DefItemsFile &items,
                          const ItemWireClassFn &wire_class, world::EntityHandle only) {
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
+    // The items.def load-order ordinal of the FIRST row per id: each `begin`
+    // appends the next slot, and the lookup returns the first match or 0.
+    // [orig: the `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the
+    //  row, ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount;
+    //  ItemList_FindIndexByTypeId @0x49E100 scans from row 0]
+    std::unordered_map<int, int32_t> first_index;
+    first_index.reserve(items.count);
+    for (size_t i = 0; i < items.count; ++i)
+        first_index.emplace(items.entries[i].id, static_cast<int32_t>(i));
     // Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
     // after this sweep) seed full health without an item-db reach-back [orig:
     // Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
@@ -165,6 +174,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
+        // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC]
+        const auto ordinal = first_index.find(def_id);
+        e->item_type_index = ordinal != first_index.end() ? ordinal->second : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
         // [orig: Entity_InitOrganicAI @0x4BFE08, def+0x894]

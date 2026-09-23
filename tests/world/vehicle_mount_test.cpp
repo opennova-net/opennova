@@ -1723,10 +1723,13 @@ void test_ai_drive_avoid_brake() {
     CHECK(cmd0.ai_drive);
     CHECK(cmd0.cmd_speed > 0);
 
-    // A parked prop dead AHEAD (+x), footprints overlapping.
+    // A parked prop dead AHEAD (+x), footprints overlapping. The ground walk
+    // admits any nonzero ItemTypeIndex [orig: Entity_UpdateVehiclePhysics
+    // `cmp dword ptr [edi+1Ch],0` @0x48BDD9].
     Entity prop;
     prop.kind = EntityKind::Item;
     prop.item_id = 999;
+    prop.item_type_index = 7;
     prop.position = Vec3{104.0f, 200.0f, 10.0f};
     prop.bound_radius = 3.0f;
     const EntityHandle ph = r.w.registry.spawn(1, prop);
@@ -1806,9 +1809,13 @@ void test_ai_drive_avoid_quantized_footprints() {
             return command.cmd_speed;
         };
         CHECK(speed() == 65536);
+        // ItemTypeIndex 1 passes both walks: the ground walk skips index 0, the
+        // boat walk admits index 1 only [orig: Entity_UpdateVehiclePhysics
+        // @0x48BDD9; Entity_UpdateWatercraftPhysics @0x48E5C5].
         Entity obstacle;
         obstacle.kind = EntityKind::Item;
         obstacle.item_id = 999;
+        obstacle.item_type_index = 1;
         obstacle.bound_radius = 5.0f;
         obstacle.veh.yaw_seeded = true;
         const EntityHandle other = r.w.registry.spawn(1, obstacle);

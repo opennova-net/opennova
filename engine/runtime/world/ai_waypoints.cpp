@@ -219,16 +219,32 @@ static int32_t avoid_sin22(int32_t bam) {
     return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
-// The pool-1 avoid BRAKE, shared by the ground and cbot AI-driver legs — the
-// two sites are instruction-identical (footprint ellipse, dead-ahead cone,
-// id/frame-keyed factor) [orig: ground @0x48bd8f-0x48bf26; cbot
-// @0x48E577..0x48E756]: for every pool-1 neighbor whose heading-aware footprint
-// ellipse overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead,
-// the command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
+// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
+// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
+// load 1 into ecx for the walk's decrement and compare the index against that
+// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
+// items.def row).
+// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
+//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
+//  Entity_UpdateLightVehiclePhysics @0x484F7F, Entity_ProcessInfantryPhysics
+//  @0x46EE70; boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`
+//  — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
+//  Entity_ProcessAirVehiclePhysics @0x470B08/@0x470B23,
+//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
+enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
+
+// The pool-1 avoid BRAKE, shared by the ground, cbot and aircraft AI legs: the
+// sites are instruction-identical (footprint ellipse, dead-ahead cone,
+// id/frame-keyed factor) apart from the walk gate above [orig: ground
+// @0x48bd8f-0x48bf26; cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
+// @0x4919A4..0x491B67]:
+// for every admitted pool-1 neighbor whose heading-aware footprint ellipse
+// overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead, the
+// command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
 // tick — vehicles brake behind obstacles; deflecting off them through the hull
 // contact was never the retail path-follow behavior.
 static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
-                                   int32_t cmd_speed) {
+                                   int32_t cmd_speed, AvoidBrakeWalk walk) {
     const int32_t self_bound = to_fixed(veh.bound_radius);
     const int32_t sx = to_fixed(veh.position.x);
     const int32_t sy = to_fixed(veh.position.y);
@@ -239,13 +255,14 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
         // The pool walk's live gate is an ITEM-TYPE test, not a radius test:
-        // retail reads entity+0x1C and skips the slot when it is zero.
-        // entity+0x1C is ItemTypeIndex, stamped at spawn as `defIndex`
-        // [orig: the gate @0x48bdd9 `*(_DWORD *)(base + 28) == 0`;
-        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40E9F0].
+        // retail reads entity+0x1C (ItemTypeIndex) and applies the family's
+        // AvoidBrakeWalk rule [orig: the gates listed at AvoidBrakeWalk;
+        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40EBFC].
         // (The occupancy half of retail's walk is our null check above:
         //  EntityRegistry::get returns nullptr for an unused slot.)
-        if (o->item_id == 0) continue;
+        if (walk == AvoidBrakeWalk::SkipIndexZero ? o->item_type_index == 0
+                                                  : o->item_type_index != 1)
+            continue;
         const int32_t ob = to_fixed(o->bound_radius);
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
         const int32_t dx = sx - to_fixed(o->position.x);
@@ -499,8 +516,10 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     }
 
     // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26; ctan @0x489958..0x489B33] —
-    // shared with the cbot leg (vehicle_avoid_brake above).
-    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed);
+    // shared with the cbot leg (vehicle_avoid_brake above); the ground walk skips
+    // ItemTypeIndex 0 only.
+    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed,
+                                    AvoidBrakeWalk::SkipIndexZero);
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     // [orig: @0x48bd7f; ctan @0x489948..0x489952]
@@ -628,9 +647,10 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
             cmd_speed = static_cast<int32_t>((16384LL * cmd_speed + 0x8000) >> 16);
     }
 
-    // The pool-1 avoid BRAKE — the cbot copy of the ground block
-    // [orig: @0x48E577..0x48E756].
-    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed);
+    // The pool-1 avoid BRAKE — the cbot copy of the ground block, walking only
+    // ItemTypeIndex 1 [orig: @0x48E577..0x48E756, the gate @0x48E5C5].
+    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed,
+                                    AvoidBrakeWalk::OnlyIndexOne);
 
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
@@ -891,8 +911,10 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 
 	// The pool-1 separation damp on the forward command [orig: @0x4919fc..0x491b67
 	// — the same footprint ellipse, dead-ahead cone and id/frame factor as the
-	// ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`].
-	m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed);
+	// ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`
+	// @0x4919E6].
+	m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed,
+	                                  AvoidBrakeWalk::OnlyIndexOne);
 
     // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
     // live, unmounted body is still walking over to board it: heading pinned to

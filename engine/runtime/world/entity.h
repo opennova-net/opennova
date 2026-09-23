@@ -335,6 +335,12 @@ struct Entity {
 
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
+    // entity+0x1C ItemTypeIndex: the item's ordinal in the items.def load order,
+    // the first row whose type id matches and 0 when none does (the "Null" row is
+    // ordinal 0 too). Stamped by the item-traits sweep.
+    // [orig: Entity_SpawnFromBMSRecord `mov [esi+1Ch],ebp` @0x40EBFC, ebp from
+    //  ItemList_FindIndexByTypeId @0x49E100]
+    int32_t item_type_index = 0;
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
 	bool render_sway = false;
 	uint8_t item_type = 0; // raw ItemDef+0x5C type (1 vehicle, 3 person)
