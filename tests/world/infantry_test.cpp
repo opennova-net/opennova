@@ -2632,6 +2632,46 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->inf.vel[0] == -2048);
 }
 
+// The org1 slopes shift the 32-bit height difference in 32 bits before the
+// clamp: a lateral step of 0.6875 u (a 4 u/u ramp across the 0.171875 u probe
+// pair) wraps the <<16 and flips the roll's sign; a probe that finds no ground
+// returns the ray's end, so the pass still runs. [orig: Entity_UpdateInfantryAI
+// `sub ecx,eax; shl ecx,10h` @0x4BA225..0x4BA227; Entity_RaycastGroundHeight
+// @0x4142C0 returns the clipped end @0x41430D]
+void test_slope_pass_org1_wraps_its_32_bit_slopes() {
+    Field steep([](int x) { // 4 u per u along X
+        int v = x * 1024;
+        return static_cast<uint16_t>(v > 65535 ? 65535 : v);
+    });
+    {
+        World w;
+        AiSystem ai;
+        ai.terrain = &steep.field;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->heading = 0x40000000; // facing +Y: the lateral probe pair runs along X
+        e->pos[0] = fx(20);
+        e->pos[1] = fx(20);
+        e->pos[2] = fx(80) + fx(0.5); // both lateral columns inside the 2 u ray
+        e->inf.anim_state = anim_state::kWalkProneForward; // conform
+        ai.infantry_slope_pass(*e, w, 0, 0);
+        // left - right = -0xB000: <<16 wraps to +0x50000000, clamped to +656175520
+        CHECK(e->roll == (656175520 + 4) >> 3);
+    }
+    {
+        World w;
+        AiSystem ai;
+        TerrainHeightField no_ground; // no height field: every probe misses
+        ai.terrain = &no_ground;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kWalkProneForward;
+        e->body_pitch = 0x01000000;
+        ai.infantry_slope_pass(*e, w, 0, 0);
+        CHECK(e->body_pitch == 0x01000000 + ((0 - 0x01000000 + 4) >> 3));
+    }
+}
+
 } // namespace
 
 // P1c death presentation (world-wac-ai-re §19). In its own function: a new block
@@ -4833,6 +4873,7 @@ int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
     test_slope_pass_org1_selector_and_chase();
+    test_slope_pass_org1_wraps_its_32_bit_slopes();
     // ---- body heading: quarter-step toward the target, clamped ±69273360/tick ----
     // [orig: 0x4b9910 dump 4600-4611 — step = (diff + 2) >> 2, clamp]
     {

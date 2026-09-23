@@ -88,7 +88,9 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
             ((e.pos[1] + e.pos[0]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
     const int32_t bob = static_cast<int32_t>(
             std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * kWaterBobAmplitude);
-    const int32_t target = water + bob - (tick_entity->eye_offset_z >> 1)
+    // The eye height is this tick's restamp (the motor's +0x74), not last tick's
+    // registry mirror. [orig: `mov ecx,[esi+74h]` @0x4BFB66]
+    const int32_t target = water + bob - (e.inf.eye_offset_z >> 1)
                          - kWaterFloatSink + depth;
 
     // The entry edge, fanned once. Which of the two sounds it takes is the body's

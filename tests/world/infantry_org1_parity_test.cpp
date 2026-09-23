@@ -453,6 +453,95 @@ void test_org1_rider_turns_with_its_carrier() {
     }
 }
 
+// ---- the low-severity motor legs (R3-14, R3-15, R3-17, R3-18) ----
+
+// R3-14: while the SP epilog screen is up (a lost round, from the tick after it
+// ended) the NPC motor does nothing at all. [orig: Entity_UpdateInfantryAI
+// @0x4B998C..0x4B99CD]
+void test_org1_motor_holds_under_the_epilog() {
+    Org1Rig rig;
+    rig.e().pos[2] = fx(1) + fx(8);
+    rig.airborne();
+    rig.w->logic_tick = 2;
+    rig.w->process_round_end(2);
+    rig.tick(4); // an even key tick: gravity would run
+    CHECK(rig.w->epilog_screen_active());
+    CHECK(rig.e().pos[2] == fx(1) + fx(8));
+    CHECK(rig.e().inf.vel[2] == 0);
+}
+
+// R3-15: a corpse afloat (or in the air, or on a ladder: Flags 0x10A000) takes
+// the level decay, not the slope conform, unless its clip itself conforms (the
+// death family's flag bit 2); here it holds the idle clip.
+// [orig: Entity_UpdateInfantryAI anim test @0x4BA11E, dead leg
+// `test eax,10A000h` @0x4BA12C]
+void test_org1_afloat_corpse_decays() {
+    Org1Rig rig;
+    arm_death(rig);
+    rig.entity().death_anim_state = 184;
+    rig.tick(71);
+    rig.e().inf.request_body_animation(anim_state::kIdle);
+    rig.entity().flags |= kEntityFlagDrowning;
+    rig.e().body_pitch = 0x01000000;
+    rig.e().inf.aim_valid = true;
+    rig.tick(72);
+    CHECK(rig.e().body_pitch == 0x01000000 - ((0x01000000 + 8) >> 4));
+    CHECK(rig.e().inf.aim_valid); // no conform pass, no dead slope aim
+}
+
+// R3-17: the org1 airborne edge stamps only a parachutist that is not carried:
+// 47, else 31 when only that clip is authored, else nothing.
+// [orig: Entity_UpdateInfantryAI @0x4BF8D4..0x4BF8F7]
+void test_org1_airborne_edge_stamp() {
+    {
+        Org1Rig rig; // neither 47 nor 31 authored: the clip stays
+        rig.e().pos[2] = fx(1) + fx(8);
+        rig.entity().flags |= kEntityFlagParachute;
+        rig.tick(2);
+        CHECK(rig.e().inf.airborne);
+        CHECK(rig.e().inf.anim_state == anim_state::kIdle);
+    }
+    {
+        Org1Rig rig; // carried: no stamp
+        rig.source.clips.insert(anim_state::kParachute);
+        rig.e().pos[2] = fx(1) + fx(8);
+        rig.entity().flags |= kEntityFlagParachute | kEntityFlagMounted;
+        rig.tick(2);
+        CHECK(rig.e().inf.anim_state == anim_state::kIdle);
+    }
+    {
+        Org1Rig rig; // 31 only
+        rig.source.clips.insert(anim_state::kJumpLoop);
+        rig.e().pos[2] = fx(1) + fx(8);
+        rig.entity().flags |= kEntityFlagParachute;
+        rig.tick(2);
+        CHECK(rig.e().inf.anim_state == anim_state::kJumpLoop);
+    }
+    {
+        Org1Rig rig; // 47
+        rig.source.clips.insert(anim_state::kParachute);
+        rig.e().pos[2] = fx(1) + fx(8);
+        rig.entity().flags |= kEntityFlagParachute;
+        rig.tick(2);
+        CHECK(rig.e().inf.anim_state == anim_state::kParachute);
+    }
+}
+
+// R3-18: the org1 float target reads this tick's eye height (the motor's
+// restamp, 0x9000 here), not last tick's registry mirror: the first row of the
+// water vectors holds with a stale mirror. [orig: Entity_UpdateInfantryAI
+// `mov ecx,[esi+74h]` @0x4BFB66]
+void test_org1_float_reads_this_ticks_eye() {
+    Org1Rig rig;
+    rig.w->env.water_z = fx(10);
+    rig.e().pos[2] = fx(8);
+    rig.e().inf.vel[2] = -8000;
+    rig.airborne();
+    rig.entity().eye_offset_z = 0x20000; // stale
+    rig.tick(2);
+    CHECK(rig.e().pos[2] == 552421);
+}
+
 // ---- the org1 phase order (R3-8) ----
 
 // R3-8: org1 chases its heading and look after the think and BEFORE its fire
@@ -561,6 +650,10 @@ int main() {
     test_player_body_death_edge_legs();
     test_org1_rider_scrubs_its_fall_flags();
     test_org1_rider_turns_with_its_carrier();
+    test_org1_motor_holds_under_the_epilog();
+    test_org1_afloat_corpse_decays();
+    test_org1_airborne_edge_stamp();
+    test_org1_float_reads_this_ticks_eye();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

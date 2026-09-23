@@ -1160,6 +1160,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // While the SP epilog screen is up the NPC motor does nothing at all.
+    // [orig: Entity_UpdateInfantryAI `cmp g_epilog_screen_active,ebp` @0x4B998C,
+    //  `jnz loc_4BFC8B` @0x4B99CD]
+    if (npc_body && world.epilog_screen_active()) return;
     if (tick_entity != nullptr && npc_body) {
         npc_respawn_unhide(world, *this, *tick_entity);
         if (((tick_entity->flags | tick_entity->engine_flags) & 1u) != 0) return;
@@ -1996,10 +2000,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                             ? anim_state::kParachute : anim_state::kJumpLoop;
                     if (inf.anim_state != falling_state) inf.request_body_animation(falling_state);
                 } else if (org1_body ? !org1_dead_now() : e.health > 0) { // [orig: `test al,2` @0x4BF8CD]
-                    if (tick_entity && ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute)) {
-                        const int falling_state = !root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute)
-                                ? anim_state::kParachute : anim_state::kJumpLoop;
-                        inf.request_body_animation(falling_state);
+                    // A carried body takes no stamp; a parachutist takes 47, or 31
+                    // when only that clip is authored, or keeps its clip.
+                    // [orig: `test al,40h` @0x4BF8D4, `test al,20h` @0x4BF8D8,
+                    //  47 @0x4BF8DC..0x4BF8E6, 31 @0x4BF8F2..0x4BF8F7]
+                    const uint32_t edge_flags = tick_entity != nullptr
+                            ? (tick_entity->flags | tick_entity->engine_flags) : 0u;
+                    if ((edge_flags & kEntityFlagMounted) == 0 &&
+                            (edge_flags & kEntityFlagParachute) != 0) {
+                        if (!root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute))
+                            inf.request_body_animation(anim_state::kParachute);
+                        else if (root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop))
+                            inf.request_body_animation(anim_state::kJumpLoop);
                     }
                     inf.anim_pending = 0; // [orig: @0x4bf901]
                 }

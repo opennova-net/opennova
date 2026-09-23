@@ -84,10 +84,12 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
 
     // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
-    // draggers 137-139), or a grounded corpse. The original's dead leg also requires
-    // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
+    // draggers 137-139), or a corpse that is neither in the air, afloat nor on a
+    // ladder (Flags 0x10A000). [orig: org1 dead leg `test eax,10A000h`
+    //  @0x4BA12C; org2 @0x4B6DB6]
     const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
-                         (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
+                         (infantry_anim_flags(inf.anim_state) & 2u) != 0 ||
+                         (dead && (slope_flags & 0x10A000u) == 0);
     if (!conform) {
         // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
         // [orig: @0x4ba133-0x4ba152 / @0x4b6dbd-0x4b6ddc]
@@ -106,12 +108,18 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         if (collision != nullptr)
             return collision->raycast_ground(world, e.handle, e.pos, dx, dy,
                                              0x4000, 0x20000, nullptr);
-        // The bare terrain-only embedder has no collision world.
+        // The bare terrain-only embedder has no collision world: the terrain
+        // column stands in for the ray, and a miss (off the field, or a floor
+        // below the ray's reach) returns the ray's end, as the probe does.
+        // [orig: Entity_RaycastGroundHeight @0x4142C0 returns the clipped end
+        //  @0x41430D]
         int32_t p[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy), e.pos[2]};
         GroundClearance clearance = ground_clearance;
         clearance.has_physics = e.has_physics;
         clearance.use_dead = dead;
-        return calc_average_ground_height(*terrain, p, 0, clearance);
+        const int32_t h = calc_average_ground_height(*terrain, p, 0, clearance);
+        const int32_t ray_end = io::bam_sub(io::bam_add(e.pos[2], 0x4000), 0x20000);
+        return h == INT32_MIN || h < ray_end ? ray_end : h;
     };
 
     int32_t c, s;
@@ -124,9 +132,6 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     const int32_t lx = -(fy >> 2), ly = fx >> 2;
     const int32_t h_left = probe(lx, ly);
     const int32_t h_right = probe(-lx, -ly);
-    if (h_ahead == INT32_MIN || h_behind == INT32_MIN || h_left == INT32_MIN ||
-        h_right == INT32_MIN)
-        return; // off the height field
 
     int32_t pitch_slope, roll_slope, threshold;
     if (org2) {
@@ -140,15 +145,17 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
             kBamPerRadian);
         threshold = dead ? kSlideThreshold : kSlideThresholdLive; // [orig: @0x4b6ee5]
     } else {
-        // Small-angle approximation, clamped. [orig: @0x4BA1CB <<14 / @0x4BA227 <<16]
-        pitch_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_ahead) - h_behind) << 14,
-                              -kSlopeClamp),
-            kSlopeClamp));
-        roll_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_left) - h_right) << 16,
-                              -kSlopeClamp),
-            kSlopeClamp));
+        // Small-angle approximation: the 32-bit difference shifted in 32 bits
+        // (a drop of 2 u or more wraps the <<14, 0.5 u the <<16), then the
+        // signed clamp. [orig: `sub ebp,eax; shl ebp,0Eh` @0x4BA1C9..0x4BA1CB,
+        //  clamp @0x4BA1D1..0x4BA1E8; `sub ecx,eax; shl ecx,10h`
+        //  @0x4BA225..0x4BA227, clamp @0x4BA22D..0x4BA244]
+        pitch_slope = std::clamp(static_cast<int32_t>(
+                static_cast<uint32_t>(io::bam_sub(h_ahead, h_behind)) << 14),
+                -kSlopeClamp, kSlopeClamp);
+        roll_slope = std::clamp(static_cast<int32_t>(
+                static_cast<uint32_t>(io::bam_sub(h_left, h_right)) << 16),
+                -kSlopeClamp, kSlopeClamp);
         threshold = kSlideThreshold;
     }
 
