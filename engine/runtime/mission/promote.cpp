@@ -60,6 +60,35 @@ std::string ai_profile_name_for(
     return "helo1";
 }
 
+// The profile loader's class-walk order: four {class index, key} pairs with the
+// keys loaded only for HELO/GROUND profiles (every other type, and the memset
+// record a missing .aip loads, sorts four zero keys), sorted by the CRT qsort,
+// then stored REVERSED into +0x28..+0x34. qsort hands a 4-element array to its
+// unstable selection shortsort: each pass carries the first strictly greater key
+// (compare = the wrapping key difference) to the end of the unsorted range, so
+// equal keys do NOT keep their order: four zero keys walk {0, 3, 2, 1}.
+// [orig: AIProfile_LoadOrFind @0x45FE53..0x45FEBA (keys, jump tables
+//  @0x45FF14/@0x45FF24), `call _qsort` @0x45FECA with CompareFunction
+//  @0x455D90 (a.key - b.key); _qsort @0x76D6A0; reversed store
+//  @0x45FED9..0x45FF04]
+static void sort_class_walk(AiProfile &profile, bool keyed) {
+    std::array<std::pair<int8_t, int32_t>, 4> ents{}; // {class index, key}
+    for (int8_t i = 0; i < 4; ++i)
+        ents[i] = {i, keyed ? profile.class_priority[i] : 0};
+    for (int hi = 3; hi > 0; --hi) {
+        int max = 0;
+        for (int p = 1; p <= hi; ++p) {
+            const int32_t diff = static_cast<int32_t>(
+                    static_cast<uint32_t>(ents[p].second) -
+                    static_cast<uint32_t>(ents[max].second));
+            if (diff > 0) max = p;
+        }
+        std::swap(ents[max], ents[hi]);
+    }
+    for (int i = 0; i < 4; ++i)
+        profile.slot_class[i] = ents[3 - i].first;
+}
+
 // Shared DEF/profile initialization for placed and dynamically spawned AI.
 // [orig: Entity_InitVehicleAI @0x460200; Entity_InitHelicopterAI @0x461F00]
 void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, EntityKind kind) {
@@ -79,11 +108,8 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
     // The §16.2 class walk data: the four class-priority words and the
     // derived +40..+52 walk order. The parse is already type-gated like
     // retail's, so the words carry exactly what AIProfile_ParseProperty
-    // wrote; the sort loads its keys only for HELO/GROUND profiles
-    // [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
-    // AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
-    // ascending, insertion-stable at 4 entries) stored REVERSED
-    // @0x45fed9-0x45ff04].
+    // wrote [orig: AIProfile_ParseProperty @0x45de70 +80..+92]; the walk
+    // order is sorted from them in the block below.
     ae.profile.type = data.type;
     ae.profile.subtype = data.subtype;
     // The parsed profile is the runtime profile: retain its flight and
@@ -125,16 +151,7 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
     ae.profile.class_priority[1] = data.priority_ground;
     ae.profile.class_priority[2] = data.priority_organics;
     ae.profile.class_priority[3] = data.priority_decorations;
-    {
-        const bool keyed = data.type == 1 || data.type == 2;
-        std::array<std::pair<int32_t, int8_t>, 4> ents{};
-        for (int8_t i = 0; i < 4; ++i)
-            ents[i] = {keyed ? ae.profile.class_priority[i] : 0, i};
-        std::stable_sort(ents.begin(), ents.end(),
-                         [](const auto &a, const auto &b) { return a.first < b.first; });
-        for (int i = 0; i < 4; ++i)
-            ae.profile.slot_class[i] = ents[3 - i].second;
-    }
+    sort_class_walk(ae.profile, data.type == 1 || data.type == 2);
     // The GROUND weapon def blocks (profile+120/+152) + their brain
     // seeds. The ammo COUNT words brain[53]/[54] are the class init's
     // copy of the +120/+152 capacities, gated on each block's resolved
@@ -408,13 +425,18 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0 name arms].
 	const std::string want =
             ai_profile_name_for(e, kind == EntityKind::Item, opts.ai_profile_defaults);
+    bool profiled = false;
     if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile != want) continue;
 			initialize_ai_profile(ae, ps.data, ai, kind);
+			profiled = true;
 			break;
 		}
     }
+    // A vehicle brain whose .aip did not load still walks the loader's sort of
+    // the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
+    if (!profiled && kind == EntityKind::Item) sort_class_walk(ae.profile, false);
 	// The speed words the class init's respawn re-run reloads (the resolved
 	// profile's, else the embedder default) [orig: Entity_InitVehicleAIFromDef
 	// @0x4688C1..0x4688D3].

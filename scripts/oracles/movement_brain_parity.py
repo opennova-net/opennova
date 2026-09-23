@@ -141,6 +141,17 @@ class Machine:
             self.rd(BRAIN + n * 4) for n in (128, 131, 132, 133, 134, 138)
         ]
 
+    def class_walk(self, keys):
+        # The profile loader's four {class index, priority key} pairs through the
+        # CRT qsort with CompareFunction, read back in the loader's reversed store
+        # order (+0x28 = the last pair ... +0x34 = the first).
+        self.reset()
+        for i, key in enumerate(keys):
+            self.wr(BRAIN + 8 * i, i, key)
+        self.wr(STACK, STOP, BRAIN, 4, 8, 0x455D90)
+        self.run(0x76D6A0, STOP)
+        return [self.rd(BRAIN + 8 * i) for i in (3, 2, 1, 0)]
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -191,6 +202,14 @@ def main():
         v = [phase, step, flags]
         recovery.append(v + machine.recovery(v))
     fixture('aircraft_recovery_vectors.inc', recovery)
+
+    walks = []
+    extra = [(0x7FFFFFFF, -1, 0, 5), (-0x80000000, 0x7FFFFFFF, 1, 1), (-5, -5, 10, -5),
+             (200, 10, 100, 0), (10, 200, 100, 0), (1000000, -1000000, 3, 3)]
+    for keys in list(itertools.product((0, 1, 2, 3), repeat=4)) + extra:
+        v = list(keys)
+        walks.append(v + machine.class_walk(v))
+    fixture('ai_class_walk_vectors.inc', walks)
 
 
 if __name__ == '__main__':

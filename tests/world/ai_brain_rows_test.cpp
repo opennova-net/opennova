@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <memory>
 
+#include <formats/aip/aip.h>
+#include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
@@ -116,10 +118,42 @@ void test_alert_enters_raise_the_own_slot_alert() {
     }
 }
 
+// The profile loader's class-walk order against the retail CRT qsort run on
+// every {0..3}^4 priority tuple plus wrapping keys: the unstable selection
+// shortsort, stored reversed. Only HELO/GROUND profiles load their keys.
+// [orig: AIProfile_LoadOrFind `call _qsort` @0x45FECA -> _qsort @0x76D6A0,
+//  CompareFunction @0x455D90]
+void test_class_walk_matches_the_retail_qsort() {
+    static const int32_t cases[][8] = {
+#include "fixtures/ai_class_walk_vectors.inc"
+    };
+    auto owned = std::make_unique<World>();
+    for (const auto &v : cases) {
+        AiEntity ae;
+        opennova::aip::Profile p;
+        p.type = 2;
+        p.priority_air = v[0];
+        p.priority_ground = v[1];
+        p.priority_organics = v[2];
+        p.priority_decorations = v[3];
+        opennova::mission::initialize_ai_profile(ae, p, owned->ai, EntityKind::Item);
+        for (int i = 0; i < 4; ++i) CHECK(ae.profile.slot_class[i] == v[4 + i]);
+    }
+    // Any other profile type sorts four zero keys, whatever it authored.
+    AiEntity other;
+    opennova::aip::Profile organic;
+    organic.type = 3;
+    organic.priority_air = 7;
+    opennova::mission::initialize_ai_profile(other, organic, owned->ai, EntityKind::Item);
+    CHECK(other.profile.slot_class[0] == 0 && other.profile.slot_class[1] == 3 &&
+          other.profile.slot_class[2] == 2 && other.profile.slot_class[3] == 1);
+}
+
 } // namespace
 
 int main() {
     test_ground_rows_read_the_live_hull_words();
+    test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;

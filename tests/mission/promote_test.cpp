@@ -603,6 +603,10 @@ static void test_vehicle_records_seed_the_ai_slot() {
     const AiEntity &ai = *world.ai.at(0);
     CHECK(ai.slot.f[18] == 62 * 3);
     CHECK(ai.slot.f[35] == 1 && ai.slot.f[37] == 4 && ai.slot.f[38] == 2);
+    // No .aip loaded: the loader still sorts the zeroed record's four keys
+    // through the CRT qsort's shortsort [orig: AIProfile_LoadOrFind @0x45FECA].
+    CHECK(ai.profile.slot_class[0] == 0 && ai.profile.slot_class[1] == 3 &&
+          ai.profile.slot_class[2] == 2 && ai.profile.slot_class[3] == 1);
     VehicleTraits t;
     t.player_control = true;
     t.physics = 1;
@@ -935,8 +939,9 @@ int main() {
     CHECK(e1->profile.slot_class[1] == 2); // organics
     CHECK(e1->profile.slot_class[2] == 0); // air
     CHECK(e1->profile.slot_class[3] == 3); // decorations last
-    // Organic 0 resolved no profile: retail's memset-0 record — zero priorities,
-    // tie order {3,2,1,0} (insertion-stable ascending, stored reversed).
+    // Organic 0 resolved no profile and owns no vehicle brain, so nothing sorts
+    // its walk: zero priorities, the untouched default order. (A profile-less
+    // VEHICLE brain sorts the zeroed record's keys to {0,3,2,1}: ai_brain_rows.)
     CHECK(e0->profile.class_priority[1] == 0);
     CHECK(e0->profile.slot_class[0] == 3);
     CHECK(e0->pos[0] == 0);               // spawned at origin
