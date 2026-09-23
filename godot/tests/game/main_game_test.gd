@@ -426,6 +426,26 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 		"debug_text stays off the objective line")
 	assert_eq(presenter.pending_hud_message_count(), 2,
 		"the text line and the non-empty debug_text line queue for the rings")
+	assert_eq(presenter.pending_chat_line_count(), 1,
+		"the text line rides the CHAT ring, the debug_text line the SYSTEM ring")
+
+
+func test_script_chat_lines_ride_the_chat_ring() -> void:
+	# WAC text/ptext/text# and the lose line post into the CHAT ring
+	# (Chat_AddMessageChannel1); the BMS triggered text and the console lines
+	# post into the SYSTEM ring (Chat_AddDebugMessage).
+	var presenter := GameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([
+		MissionEffect.make("text", 0, 0, 0, "Proceed to the beach"),
+		MissionEffect.make("text", 7),
+		MissionEffect.make("debug_text", 0, 0, 0, "Current Objective: Weapons Cache"),
+		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
+	])
+	assert_eq(presenter.pending_hud_message_count(), 4,
+		"every line queues until the HUD mounts")
+	assert_eq(presenter.pending_chat_line_count(), 2,
+		"the WAC text line and the lose line are CHAT ring lines")
 
 
 func test_lose_effect_sets_endround_banner_and_message() -> void:
@@ -443,6 +463,8 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 			"the lose banner resolves (or marks) the Misc gametext key")
 	assert_eq(presenter.pending_hud_message_count(), 1,
 			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
+	assert_eq(presenter.pending_chat_line_count(), 1,
+			"that line rides the CHAT ring")
 	presenter.teardown()
 	assert_eq(presenter.endround_banner_line(), "",
 			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")

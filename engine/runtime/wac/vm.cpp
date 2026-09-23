@@ -650,7 +650,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // Any other team id is a NO-OP returning 0. The banner trio is embedder
     // presentation — the effect carries the gametext key, the embedder resolves it
     // against the 'Misc' section; the banners persist until the next round start
-    // (cleared by the round-start HUD reset @0x5b71b0).]
+    // (cleared by the round-start HUD reset @0x5b71b0).] The chat line lands in
+    // the CHAT ring in raw white, not with the triggered text [orig:
+    // GameMsg_AddChatLineAndRelay @0x5BA170 (the Chat_AddMessageChannel1(line,
+    // -1, 930) call @0x5BA197)].
     if (ieq(n, "lose")) {
         const int32_t team = A(0);
         if (team != 0 && team != 1) return 0;
