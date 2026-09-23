@@ -1700,12 +1700,20 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				joiner_snapshot[joiner_base + Simulation.PF_ROLL_DEG],
 				host_snapshot[host_base + Simulation.PF_ROLL_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle roll")
+	# The physics family is the item's def trait, so it is read from the
+	# placed row's own card. A placed item owns an AI brain only when its row
+	# carries the AI-class attrib AND a brain-class ai_function at spawn
+	# (Entity_SpawnFromBMSRecord's AIData test, then the class init), and
+	# this fixture resolves its items after the load, so the buggy is not an
+	# AI-pool row.
 	var family := -1
-	for ai_index in range(host.get_entity_count()):
-		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
-		if card.get_item_id() == 1291:
-			family = card.get_vehicle_family()
-			break
+	if not host_record.is_empty():
+		var host_rows: PackedFloat32Array = host_record["snapshot"]
+		var buggy_card: EntityCard = host.entity_card(
+				int(host_rows[int(host_record["base"]) + Simulation.PF_WIRE_HANDLE]))
+		if buggy_card != null:
+			assert_eq(buggy_card.get_item_id(), 1291, "the presented row is the placed buggy")
+			family = buggy_card.get_vehicle_family()
 	assert_eq(family, 0,
 			"the ai_function chel / move_function cveh Dune Buggy uses Ground physics")
 
