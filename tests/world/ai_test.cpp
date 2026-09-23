@@ -738,6 +738,41 @@ struct DeathTransitionRootSource final : IRootMotionSource {
 // [orig: Entity_UpdateAllEntities -- the Weapon_UpdateAllProjectiles call
 //  @0x4C223A and the Projectile_ProcessExplosionQueue call @0x4c223f precede
 //  the pool-0 walk @0x4C2426; Entity_OnDamageReceived @0x4af859..0x4af878]
+// The entity update stamps the retail is_in_session fact from the session
+// rules: a joiner's brain then takes the in-session death arm (the death tick,
+// then the type-20 event), and single player, the in-process listen server
+// with session_open set, stays outside the session.
+// [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission @0x561AF0
+//  leaves it clear (read back @0x561E73); EntityAI_ProcessInfantryStateMachine
+//  @0x458273 (the death-event arm)]
+static void test_entity_update_stamps_the_session_fact() {
+    auto heap = std::make_unique<World>();
+    World &w = *heap;
+    TickContext ctx{};
+    ctx.world = &w;
+    ctx.is_authority = false;
+    w.rules.mp_session = true;
+    w.rules.session_open = true;
+    w.update_all_entities(ctx);
+    CHECK(w.ai.is_in_session);
+    AiEntity &e = *w.ai.at(w.ai.attach(EntityHandle::make(0, 0)));
+    e.health = 100;
+    e.vel_x = 2000;
+    e.vel_z = 0;
+    e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
+    w.ai.process_infantry_state_machine(e, w, 4);
+    CHECK(e.health == 0);
+    bool saw_20 = false;
+    for (int i = 0; i < w.ai.events.count(); ++i)
+        if (w.ai.events.at(i).type() == 20) saw_20 = true;
+    CHECK(saw_20);
+
+    w.rules.mp_session = false;
+    ctx.is_authority = true;
+    w.update_all_entities(ctx);
+    CHECK(!w.ai.is_in_session);
+}
+
 static void test_round_hit_reaches_the_same_pass_body_update() {
     auto heap = std::make_unique<World>();
     World &w = *heap;
@@ -4240,6 +4275,7 @@ int main() {
     test_joiner_evaluates_vehicle_idle_without_integrating_motor();
     test_lethal_hit_blends_into_death_animation_without_position_jump();
     test_round_hit_reaches_the_same_pass_body_update();
+    test_entity_update_stamps_the_session_fact();
     test_sm_turret_fire();
 	test_aircraft_combat_states();
 	test_vehicle_weapon_pose_and_target_cleanup();

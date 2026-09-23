@@ -1573,6 +1573,54 @@ void test_seated_body_claims_its_vehicle() {
 // vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
 // [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
 //  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
+// A same-team body standing on a vehicle skips the hold scan outside a
+// session. Single player (the in-process listen server, session_open set) is
+// outside it, so the body's berserk bit reaches the vehicle although a rider
+// holds it; in a non-co-op session the rider's hold blocks the copy.
+// [orig: Entity_UpdateAllEntities -- `cmp g_napi_np_ctx.is_in_session,0`
+//  @0x4C24EA, `test g_GameType,10000h` @0x4C24F7, the seat words
+//  @0x4C2507..0x4C251F, the berserk sync @0x4C25B8..0x4C25C7;
+//  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
+void test_same_team_hold_scan_follows_the_session() {
+    for (const bool mp : {false, true}) {
+        Rig r;
+        r.w.rules.session_open = true;
+        r.w.rules.mp_session = mp;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        r.veh().team = 1;
+        r.player().team = 1;
+        Entity rider;
+        rider.kind = EntityKind::Organic;
+        rider.item_id = 2072;
+        rider.health = 150;
+        rider.alive = true;
+        rider.team = 1;
+        const EntityHandle rider_h = r.w.registry.spawn(0, rider);
+        CHECK(r.w.vehicles.process_attach(rider_h, r.veh_h, 2)); // the sitex seat
+        r.sys.attach(r.veh_h);
+        r.sys.attach(r.player_h);
+        AiEntity &body = *r.sys.for_handle(r.player_h);
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        body.slot.f[AiSlot::kBehaviorFlags] |= 0x200;
+        r.player().ground_target = r.veh_h; // standing on it, not seated
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        ctx.logic_tick = 1;
+        r.w.logic_tick = 1;
+        r.w.update_all_entities(ctx);
+        const AiEntity *vehicle_brain = r.sys.for_handle(r.veh_h);
+        CHECK(vehicle_brain != nullptr);
+        if (vehicle_brain == nullptr) continue;
+        const bool copied = (vehicle_brain->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0;
+        CHECK(copied == !mp);
+    }
+}
+
 void test_epilog_entity_update() {
     Rig r;
     r.veh().item_type = 1;
@@ -3395,6 +3443,7 @@ int main() {
     test_host_crewed_helicopter_rotor_turns();
     test_seated_body_claims_its_vehicle();
     test_epilog_entity_update();
+    test_same_team_hold_scan_follows_the_session();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();

@@ -123,11 +123,11 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         ai.inf.adm_id = adm_id;
         world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
     }
+    // The weapon resolve also lands the helicopter class init's ammo copy: a
+    // block's count seeds its brain word only when the block resolved a
+    // nonzero ammo byte, so the null first row seeds nothing.
+    // [orig: Entity_InitHelicopterAIFromDef @0x468555..0x46858D]
     mission::resolve_ai_weapons(world, *table, handle, &assets());
-    if (profile) {
-        ai.brain.f[AiBrain::kAmmoA] = ai.profile.fire_a.ammo_index >= 0 ? profile->primary.ammo : 0;
-        ai.brain.f[AiBrain::kAmmoB] = ai.profile.fire_b.ammo_index >= 0 ? profile->secondary.ammo : 0;
-    }
     ensure_collision_instance(world, handle);
     if (!profile) initialize_organic_ai(world, entity);
     if (profile) {

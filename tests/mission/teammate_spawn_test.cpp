@@ -1,9 +1,14 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include <runtime/world/teammate_operations.h>
+#include <formats/aip/aip.h>
+#include <formats/def/def.h>
+#include <runtime/mission/mission_kernel.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
 using namespace opennova;
@@ -11,8 +16,53 @@ namespace w = opennova::world;
 namespace {
 int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %d: %s\n", __LINE__, #c); ++failures; } } while (0)
+// The helicopter's class init copies a weapon block's ammo count into the
+// brain only when the block resolved a nonzero ammo byte: the null first ammo
+// row resolves to byte 0 and seeds nothing.
+// [orig: Entity_InitHelicopterAIFromDef @0x468555..0x46858D (`cmp byte ptr
+//  [eax+94h],0`, `cmp byte ptr [eax+0B4h],0`); AmmoDef_LookupByName @0x409870]
+void test_helicopter_ammo_seed_needs_a_resolved_byte() {
+    std::array<def::DefItemDef, 1> rows{};
+    rows[0].id = mission::kItemIdOffset + 1281;
+    rows[0].type = 1;
+    rows[0].attrib = w::kItemAttribAIData;
+    rows[0].hp = 100;
+    std::strcpy(rows[0].ai_function, "CHel");
+    def::DefItemsFile items{rows.data(), rows.size()};
+    auto kernel = std::make_unique<mission::MissionKernel>();
+    kernel->set_items_table(&items);
+    kernel->world.registry.configure_pool(0, 8);
+    kernel->world.registry.configure_pool(1, 8);
+    kernel->world.tables.ammo.entries.resize(2);
+    kernel->world.tables.ammo.entries[0].name = "AT_NULL";
+    kernel->world.tables.ammo.entries[0].valid = true;
+    kernel->world.tables.ammo.entries[1].name = "50CAL";
+    kernel->world.tables.ammo.entries[1].valid = true;
+    static const char kProfile[] =
+            "type HELO\nprimary_weap 50CAL\nprimary_ammo 5\n"
+            "secondary_weap AT_NULL\nsecondary_ammo 7\n";
+    kernel->ai_profiles.push_back({"h_bhawkn",
+            aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
+                    sizeof(kProfile) - 1)});
+    w::TeammateSpawn request;
+    request.item_type = 1281;
+    request.ssn = 11000;
+    request.helicopter = true;
+    const w::EntityHandle heli = kernel->spawn_teammate(request);
+    CHECK(heli.valid());
+    const w::AiEntity *ai = kernel->world.ai.for_handle(heli);
+    CHECK(ai != nullptr);
+    if (ai == nullptr) return;
+    CHECK(ai->brain.f[w::AiBrain::kAmmoA] == 5);
+    CHECK(ai->brain.f[w::AiBrain::kAmmoB] == 0);
+}
 }
 int main() {
+    test_helicopter_ammo_seed_needs_a_resolved_byte();
+    if (failures) {
+        std::printf("retail teammate factory: FAIL\n");
+        return 1;
+    }
     RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (CP01 and the teammate DEF/AIP assets)");
     auto owned = std::make_unique<testrig::RetailMissionRig>();
     auto &rig = *owned;

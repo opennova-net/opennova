@@ -183,7 +183,7 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
         bool held = false;
         if (!seated) {
             const bool skip_scan = vehicle->team == body.team &&
-                    (!world.rules.session_open ||
+                    (!world.rules.mp_session ||
                      (world.match.rules().game_type & 0x10000u) != 0);
             if (!skip_scan) {
                 for (const Seat &seat : vehicle->seats)
@@ -368,6 +368,14 @@ void World::update_all_entities(const TickContext &ctx) {
     devtools::ProfileLap lap(profile);
     const bool is_authority = ctx.is_authority;
     ai.is_authority = is_authority;
+    // The retail is_in_session fact is set for a listen host, a dedicated host
+    // and a joiner, never for single player: the SP launch leaves it clear
+    // while it runs the in-process listen server (whose bring-up sets
+    // rules.session_open), so rules.mp_session carries it.
+    // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission
+    //  @0x561AF0 (read back @0x561E73); the death-event arm
+    //  EntityAI_ProcessInfantryStateMachine @0x458273]
+    ai.is_in_session = rules.mp_session;
     if (ai.collision != nullptr)
         ai.collision->local_player = cached.local_player; // blink accumulation target
     // These presentation events describe only the current authoritative tick.
