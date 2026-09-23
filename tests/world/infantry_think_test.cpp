@@ -995,6 +995,21 @@ static void test_attachment_publishes_the_move_mode_and_consumes_the_hit() {
     r.w.pose_provider = nullptr;
 }
 
+// The jog/run fallback runs inside the moving branch, before the wounded
+// substitution: a body with neither run clip walks, and a wounded walker takes
+// wounded_walk. [orig: Entity_UpdateInfantryAI @0x4BD5C5..0x4BD61D, then the
+// wounded gaits @0x4BD6F5..0x4BD744]
+static void test_run_fallback_precedes_the_wounded_gait() {
+    Rig r(fx(200), 0, 0, {1, 43, 145});
+    r.blue().inf.damage_timer = 5; // alerted: the run gait
+    r.blue().health = 50;          // at or under half of 150
+    r.blue().inf.move_mode = 3;
+    r.blue().inf.target_dist = fx(10);
+    r.blue().inf.move_target[0] = fx(10);
+    r.w.ai.infantry_select(r.blue(), r.w, 0);
+    CHECK(r.blue().inf.anim_state == anim_state::kWoundedWalk);
+}
+
 } // namespace
 
 int main() {
@@ -1033,6 +1048,7 @@ int main() {
     test_teamless_coward_scans_as_team_two();
     test_stop_is_arbitrated_raw();
     test_attachment_publishes_the_move_mode_and_consumes_the_hit();
+    test_run_fallback_precedes_the_wounded_gait();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;

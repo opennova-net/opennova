@@ -508,6 +508,17 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
     };
 
+    // Still inside the moving branch, ahead of every substitution below, the
+    // jog/run pair falls back: a missing jog runs, a missing run jogs, else
+    // walks. [orig: Entity_UpdateInfantryAI @0x4BD5C5..0x4BD61D]
+    if (moving) {
+        if (target == anim_state::kJogForward && !has(anim_state::kJogForward))
+            target = anim_state::kRunForward;
+        if (target == anim_state::kRunForward && !has(anim_state::kRunForward))
+            target = has(anim_state::kJogForward) ? anim_state::kJogForward
+                                                   : anim_state::kWalkForward;
+    }
+
     // Alerted idle: damageTimer or the slot alert byte (NOT wasHit) promotes 43 to the
     // armed idle 49 when the combat pass holds a target in slot[3], else 44.
     // [orig: Entity_UpdateInfantryAI @0x4bd2f0..0x4bd31c]
