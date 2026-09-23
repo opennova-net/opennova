@@ -957,6 +957,8 @@ public:
     // The attached collision model id for a live entity (-1 = no instance);
     // the userpoint leg of the muzzle-pose provider keys its parsed model by it.
     int32_t entity_model_id(EntityHandle h) const;
+    // The husk-stage model id attached beside it (-1 = none or no instance).
+    int32_t entity_husk_model_id(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
 
     // --- the per-tick snapshot ---

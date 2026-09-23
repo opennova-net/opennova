@@ -694,6 +694,30 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     //  Entity_UpdateInfantryAI @0x4B9910; PLYRONSSN @0x4F1260]
     occ->ground_target = veh->handle;
     const Seat &seat = veh->seats[occ->mount_seat];
+    // An NPC's ordinary seat resolves through the carrier's seat bone. When that
+    // lookup fails, the authority kills a rider boarding-ordered at the carrier
+    // or at the carrier's ground link (crediting the carrier's last attacker) and
+    // detaches every such rider; a client keeps it seated, unposed.
+    // [orig: Entity_UpdateInfantryAI Entity_GetBoneTransformAndOrientation call
+    //  @0x4BED72, test @0x4BED7A..0x4BED7C; the fail arm @0x4BEE93..0x4BEED8;
+    //  Entity_DetachFromVehicleIfServer @0x4BEEDF; +0x28 = +0x16C @0x4BEEE7..0x4BEEEF]
+    if (npc_mounted_body(e, *occ) && veh->has_item_def && seat.type != SeatType::Gunner &&
+            world.pose_provider != nullptr &&
+            !world.pose_provider->resolve_seat_bone(world, *veh, seat.bone_index)) {
+        if (!is_authority) return true;
+        const int32_t order = e.slot.f[37];
+        const int32_t target = e.slot.f[38];
+        const Entity *ground = world.registry.get(veh->ground_target);
+        if ((order == kCommandAttachPassengerOnly || order == kCommandAttachSkipController ||
+                    order == kCommandAttachAnySeat) &&
+                (target == veh->net_id || (ground != nullptr && target == ground->net_id))) {
+            occ->health = e.health = 0;
+            occ->last_attacker = veh->last_attacker;
+        }
+        world.vehicles.detach(e.handle);
+        occ->ground_target = {};
+        return false;
+    }
     // Local input owns LOOK before retail evaluates the parent UseGun bone. Our
     // split AiEntity keeps that input in the infantry latch until the mounted
     // branch, so expose it before the host asks for the live parent pose.

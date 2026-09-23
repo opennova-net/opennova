@@ -410,6 +410,8 @@ public:
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
 	bool resolve_mounted_pose(world::World &w, const world::Entity &carrier,
 			const world::Seat &seat, world::MountedPose &out) override;
+	bool resolve_seat_bone(world::World &w, const world::Entity &carrier,
+			int bone_index) override;
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
 	bool build_section_matrices(world::World &w, world::EntityHandle entity,
 			int32_t model_id, const world::CollisionMatrix &entity_world,

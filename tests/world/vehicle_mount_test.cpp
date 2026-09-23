@@ -13,6 +13,8 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/entity_pose.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
@@ -3435,6 +3437,168 @@ static void test_claimant_detach_cuts_vehicle_slot_action() {
     CHECK(r.veh().primary_weapon_slot.counter == 40);
 }
 
+// An NPC's ordinary seat resolves through the carrier's seat bone. When that
+// lookup fails, the authority kills a rider boarding-ordered (123..125) at the
+// carrier or at the carrier's ground link, crediting the carrier's last
+// attacker, and detaches every such rider; a client keeps it seated. The
+// UseGun seat and a def-less carrier never ask.
+// [orig: Entity_UpdateInfantryAI @0x4BED72..0x4BED7C, @0x4BEE93..0x4BEEE4]
+static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
+    struct SeatBoneProvider final : IPoseProvider {
+        bool resolves = false;
+        int queries = 0;
+        int last_bone = -1;
+        bool resolve_seat_bone(World &, const Entity &, int bone_index) override {
+            ++queries;
+            last_bone = bone_index;
+            return resolves;
+        }
+    };
+    struct Outcome {
+        bool killed = false;
+        bool credited = false;
+        bool detached = false;
+        int queries = 0;
+        int bone = -1;
+    };
+    const auto run = [](int32_t order, int32_t target_ssn, bool authority, SeatType type,
+                        bool resolves, bool item_def) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        SeatBoneProvider provider;
+        provider.resolves = resolves;
+        w.pose_provider = &provider;
+        Entity attacker;
+        attacker.net_id = 400;
+        attacker.kind = EntityKind::Organic;
+        attacker.health = 100;
+        attacker.alive = true;
+        const EntityHandle attacker_h = w.registry.spawn(0, attacker);
+        Entity deck;
+        deck.net_id = 300;
+        deck.kind = EntityKind::Item;
+        deck.health = 100;
+        deck.alive = true;
+        const EntityHandle deck_h = w.registry.spawn(1, deck);
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        vehicle.has_item_def = item_def;
+        vehicle.ground_target = deck_h;
+        vehicle.last_attacker = attacker_h;
+        Seat seat;
+        seat.type = type;
+        seat.bone_index = 7;
+        seat.source_name = type == SeatType::Gunner ? "UseGun" : "sitex00";
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+        AiEntity *body = w.ai.at(w.ai.attach(occupant_h));
+        body->net_id = 100;
+        body->health = 100;
+        body->inf.active = true;
+        body->slot.f[37] = order;
+        body->slot.f[38] = target_ssn;
+        CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
+        w.ai.is_authority = authority;
+        w.ai.tick_infantry(*body, w, 1);
+        const Entity *occ = w.registry.get(occupant_h);
+        Outcome out;
+        out.killed = occ->health == 0 && body->health == 0;
+        out.credited = occ->last_attacker == attacker_h;
+        out.detached = !occ->mounted && !occ->ground_target.valid();
+        out.queries = provider.queries;
+        out.bone = provider.last_bone;
+        return out;
+    };
+
+    // A board order at the carrier: killed with the carrier's credit, detached.
+    Outcome o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, false, true);
+    CHECK(o.queries == 1 && o.bone == 7);
+    CHECK(o.killed && o.credited && o.detached);
+    // At the carrier's ground link, and each of the three board orders.
+    o = run(kCommandAttachSkipController, 300, true, SeatType::Passenger, false, true);
+    CHECK(o.killed && o.credited && o.detached);
+    o = run(kCommandAttachAnySeat, 200, true, SeatType::Driver, false, true);
+    CHECK(o.killed && o.credited && o.detached);
+    // No board order, or one aimed elsewhere: detached alive.
+    o = run(0, 200, true, SeatType::Passenger, false, true);
+    CHECK(!o.killed && !o.credited && o.detached);
+    o = run(kCommandAttachPassengerOnly, 999, true, SeatType::Passenger, false, true);
+    CHECK(!o.killed && o.detached);
+    // A client neither kills nor detaches.
+    o = run(kCommandAttachPassengerOnly, 200, false, SeatType::Passenger, false, true);
+    CHECK(!o.killed && !o.detached);
+    // A resolving bone keeps the rider seated.
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, true, true);
+    CHECK(o.queries == 1 && !o.killed && !o.detached);
+    // The UseGun seat and a def-less carrier never ask.
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Gunner, false, true);
+    CHECK(o.queries == 0 && !o.killed && !o.detached);
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, false, false);
+    CHECK(o.queries == 0 && !o.killed && !o.detached);
+}
+
+// The model-aware provider answers the lookup from the carrier's attached
+// model: bone 0 and a bone past the model's userpoint count fail, a model
+// without bounding volumes fails, the husk bit swaps in the husk model when
+// one is attached, a carrier without a model fails, and a world without
+// collision has no model data to decline with.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+static void test_entity_pose_seat_bone_lookup() {
+    World w;
+    w.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w.collision = &collision;
+    EntityPoseProvider poses;
+    opennova::threedi::ThreediUserPoint points[3] = {};
+    opennova::threedi::ThreediCollisionModel block = {};
+    block.model_data.num_bounding_volumes = 1;
+    opennova::threedi::Threedi3di3 intact = {};
+    intact.user_points = points;
+    intact.user_point_count = 3;
+    intact.collision = &block;
+    opennova::threedi::Threedi3di3 husk = intact;
+    husk.user_point_count = 1;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.net_id = 5;
+    const EntityHandle carrier_h = w.registry.spawn(1, seed);
+    seed.net_id = 6;
+    const EntityHandle bare_h = w.registry.spawn(1, seed);
+    const int32_t intact_id = collision.add_model(CollisionModel{});
+    const int32_t husk_id = collision.add_model(CollisionModel{});
+    collision.assign_entity(carrier_h, intact_id);
+    collision.assign_entity_husk(carrier_h, husk_id);
+    poses.register_userpoint_model(intact_id,
+            std::make_shared<opennova::threedi::Threedi3di3>(intact));
+    poses.register_userpoint_model(husk_id,
+            std::make_shared<opennova::threedi::Threedi3di3>(husk));
+    Entity &carrier = *w.registry.get(carrier_h);
+    CHECK(poses.resolve_seat_bone(w, carrier, 1));
+    CHECK(poses.resolve_seat_bone(w, carrier, 3));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 0));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 4));
+    carrier.engine_flags |= kEntityFlagHusk;
+    CHECK(poses.resolve_seat_bone(w, carrier, 1));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 3)); // the husk authors one bone
+    carrier.engine_flags &= ~kEntityFlagHusk;
+    block.model_data.num_bounding_volumes = 0;
+    CHECK(!poses.resolve_seat_bone(w, carrier, 1));
+    block.model_data.num_bounding_volumes = 1;
+    CHECK(!poses.resolve_seat_bone(w, *w.registry.get(bare_h), 1));
+    w.collision = nullptr;
+    CHECK(poses.resolve_seat_bone(w, *w.registry.get(bare_h), 1));
+}
+
 int main() {
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
@@ -3450,6 +3614,8 @@ int main() {
     test_same_team_hold_scan_follows_the_session();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_pose_provider_and_static_fallback();
+    test_npc_seat_bone_failure_kills_boarders_and_detaches();
+    test_entity_pose_seat_bone_lookup();
     test_toggle_nearest_seat();
     test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();

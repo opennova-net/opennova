@@ -1085,6 +1085,14 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	return resolved;
 }
 
+// Without a mounted store there is no model data: the static seat stands.
+bool MissionKernel::resolve_seat_bone(w::World &p_world, const w::Entity &carrier,
+		int bone_index) {
+	if (&p_world != &world || !assets().has_source()) return true;
+	ensure_collision_instance(p_world, carrier.handle);
+	return collision_pose.resolve_seat_bone(p_world, carrier, bone_index);
+}
+
 // --- world::IPoseProvider: muzzles / userpoints (the sim pose) ---------------
 
 bool MissionKernel::resolve_skeletal_anchor(w::World &p_world, w::EntityHandle entity,
