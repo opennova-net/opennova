@@ -12,6 +12,7 @@
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/weather_state.h>
+#include <runtime/world/world.h>
 #include <runtime/renderer/device_fog.h>
 #include <formats/env/env_celestial.h>
 #include <formats/env/env_weather.h>
@@ -493,6 +494,54 @@ int main() {
 						weather.core().cloud_scroll.acc_l2_v ==
 								scroll_before.acc_l2_v,
 				"the settle may not advance the cloud-scroll accumulators");
+	}
+
+	// --- the iris re-target gate: a local player and WAC `autogain` ---------
+	// The render leg re-targets the modulator only with a local player entity
+	// and the `autogain` named value nonzero; the simulation samples both into
+	// the weather home each tick. A closed gate leaves the modulator on its
+	// last target (here the mission-reset identity).
+	// [orig: Environment_ApplyFogAndAmbient @0x57E50B..0x57E51B, both `jz` to
+	//  the exit @0x57E53D]
+	{
+		opennova::world::World world;
+		world.registry.configure_pool(0, 4);
+		opennova::world::WeatherTickEvents events;
+		world.weather.tick_sim(&world, events);
+		ok &= expect(!world.weather.iris_retarget_enabled,
+				"no local player closes the iris gate");
+		opennova::world::Entity body;
+		body.net_id = 1;
+		world.cached.local_player = world.registry.spawn(0, body);
+		world.weather.tick_sim(&world, events);
+		ok &= expect(world.weather.iris_retarget_enabled,
+				"a local player with autogain 1 opens the iris gate");
+		world.script.wac_values.autogain = 0;
+		world.weather.tick_sim(&world, events);
+		ok &= expect(!world.weather.iris_retarget_enabled,
+				"set(autogain,0) closes the iris gate");
+		world.weather.tick_sim(nullptr, events);
+		ok &= expect(!world.weather.iris_retarget_enabled,
+				"a tick without a World keeps the last sample");
+
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		WeatherRuntime weather;
+		weather.prepare_world_driven(&env);
+		weather.state().iris_retarget_enabled = false;
+		const int32_t samples[3] = {8, 8, 8};
+		weather.set_iris_samples(samples, 3);
+		weather.settle_exposure(&env);
+		ok &= expect(near(weather.color_src_gain().r, 1.0f) &&
+						near(weather.color_src_gain().g, 1.0f) &&
+						near(weather.color_src_gain().b, 1.0f),
+				"a closed iris gate holds the modulator on its target");
+		weather.state().iris_retarget_enabled = true;
+		weather.settle_exposure(&env);
+		ok &= expect(!near(weather.color_src_gain().r, 1.0f),
+				"an open iris gate re-targets the modulator");
 	}
 
 	// --- sun veil: the dot^32 white-quad alpha + modulator-2 stop-down ------

@@ -216,9 +216,10 @@ struct WacNamedValues {
 	// drown limit is four samples per second of it (Server_UpdateEntityIdleTimers
 	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
 	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
-	// @0x59d70f reads it (that bar is not ported). autogain's one consumer,
-	// Environment_ApplyFogAndAmbient @0x57e514, is not ported. Both seeded by
-	// WacScript_FreeAll [orig: @0x4f6381 = 20; @0x4f6371 = 1].
+	// @0x59d70f reads it (that bar is not ported). autogain is the iris
+	// re-target switch (Environment_ApplyFogAndAmbient @0x57E514, sampled into
+	// WeatherState::iris_retarget_enabled). Both seeded by WacScript_FreeAll
+	// [orig: @0x4f6381 = 20; @0x4f6371 = 1].
 	int32_t breathtime = 20;
 	int32_t autogain = 1;
     // location() reads this cached player-body result, not a named-table row.

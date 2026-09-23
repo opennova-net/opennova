@@ -367,6 +367,12 @@ void WeatherState::set_wind_scale(int32_t value) {
 
 void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
     events = WeatherTickEvents{};
+    // The render pass's iris re-target gate, sampled from its two globals
+    // [orig: Environment_ApplyFogAndAmbient @0x57E50B..0x57E51B].
+    if (world != nullptr) {
+        iris_retarget_enabled = world->registry.get(world->cached.local_player) != nullptr &&
+                world->script.wac_values.autogain != 0;
+    }
     // The clock: the TOD colors compute at curtime + advance, i.e. at the
     // advanced clock [orig: @ 0x57e9c7], which they wrap into the day and
     // store; the 310-tick minute counter [orig: @ 0x57e9da..0x57e9ef].

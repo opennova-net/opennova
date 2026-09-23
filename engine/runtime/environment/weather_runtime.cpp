@@ -198,6 +198,12 @@ void WeatherRuntime::feed_exposure_target(EnvironmentState *env) {
 	if (env == nullptr || env->config() == nullptr) {
 		return;
 	}
+	// No local player, or the WAC `autogain` switch off: the modulator keeps
+	// its last target [orig: Environment_ApplyFogAndAmbient @0x57E50B..0x57E51B,
+	// both `jz` to the exit @0x57E53D] (world::WeatherState carries the gate).
+	if (!state_->iris_retarget_enabled) {
+		return;
+	}
 	// The iris auto-exposure target (env #17): the marched in-world gain
 	// when the shell stamps samples, else the outdoor fallback — chased by
 	// the modulator over 62 ticks; retail re-targets every render pass,
