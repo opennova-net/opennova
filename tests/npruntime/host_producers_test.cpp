@@ -427,10 +427,24 @@ bool check_medic_revive_transaction() {
 	victim->health = 0;
 	victim->alive = false;
 	victim->position = {12.0f, 34.0f, 5.0f};
+	w::MatchRules medic_rules;
+	medic_rules.game_type = 0x10000u; // TDM
+	medic_rules.score_values.emplace();
+	(*medic_rules.score_values)[7] = 4; // MEDICSAVE
+	f.world.match.configure(medic_rules);
+	f.world.match.upsert_player({f.players[1], 2, "P2"});
 	for (auto &t : f.transports) (void)drain(t);
 	f.world.round_sim.medic_revives.push_back(w::MedicRevive{f.players[0], f.players[1]});
 	inmatch::Server_TickUpdate(f.ctx);
 	if (!expect(victim->medic_reviving, "the victim's +0x1E0 latch is set")) return false;
+	// The revive scores the medic's MEDICSAVE [orig: GameEvent_RevivePlayer
+	// @0x517CD0 (the event-6 call @0x517DC5)].
+	const w::MatchPlayer *medic = f.world.match.player(f.players[1]);
+	if (!expect(medic != nullptr && medic->stats[w::MatchStats::kMedicSaves] == 1 &&
+					medic->stats[w::MatchStats::kPoints] == 4 &&
+					f.world.match.team_stats(1)[w::MatchStats::kMedicSaves] == 1,
+			"the revive scores event 6 on the medic and its team row"))
+		return false;
 	if (!expect(f.conn(0).reply.revive_pose_valid &&
 					f.conn(0).reply.revive_pos[2] == (5 << 16) + 0x4000,
 			"the revive pose is saved raised 0x4000"))

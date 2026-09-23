@@ -1166,6 +1166,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// append (the roster row mirrors the slot's spectator latch).
 				// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 authority leg
 				//  @0x42be03..0x42bf34 -> Server_ClientFiredRound @0x50c736..0x50c75d]
+				// The authority's own local round scores the shot (scorer
+				// event 1) ahead of that clear. [orig: Server_ClientFiredRound
+				//  @0x50BAA0 (the event-1 call @0x50C727)]
+				if (io.is_authority)
+					world.match.record_shot(world, world.cached.local_player);
 				if (io.is_authority && world.rules.mp_session &&
 						shooter->damage_state != 0) {
 					const MatchPlayer *row = world.match.player(world.cached.local_player);

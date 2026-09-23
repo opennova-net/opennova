@@ -664,6 +664,14 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// and the human-player-victim bucket (victim+534 -> 0xC846A0, unreachable
 		// behind the score gate) are unmodeled — counts only, which is what the WAC
 		// predicates and the epilog columns consume (D-AI-10; world-wac-ai-re §20.4).
+		// Past the gates, scorer event 12 runs in EVERY session, ahead of the SP
+		// test below [orig: the event-12 call @0x4FD438, then `cmp is_in_session,
+		// 0` @0x4FD440].
+		if (d.kill_event && d.killer.valid()) {
+			if (const world::Entity *scored = world.registry.get(d.victim);
+					scored != nullptr && scored->has_item_def && scored->item_score != 0)
+				world.match.record_kill_event(world, d.killer, d.victim);
+		}
 		if (!world.rules.mp_session && d.kill_event && d.killer.valid()) {
 			if (const world::Entity *victim2 = world.registry.get(d.victim);
 					victim2 != nullptr && victim2->has_item_def && victim2->item_score != 0) {

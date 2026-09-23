@@ -7,6 +7,7 @@
 #include <limits>
 #include <utility>
 
+#include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
@@ -544,13 +545,35 @@ int32_t Match::score_value(size_t status_index) const {
                : 0;
 }
 
-void Match::add_event(MatchPlayer &player, size_t counter, int32_t points,
-                      int32_t raw_delta) {
+// Every scorer points award is RecordEvent 28 with param2 = 0, so a positive
+// amount also shares with the Player's +0x170 links (half, then a quarter).
+// Only event 25 passes param2 = 1 and keeps its award unshared.
+// [orig: GameEvent_ProcessScoring — case 25's `push 1` @0x530989 is the one
+//  nonzero param2; CPlayerStats_RecordEvent case 28 @0x52CAF8..0x52CBB3]
+void Match::add_event(const World &world, MatchPlayer &player, size_t counter,
+                      int32_t points, int32_t raw_delta, bool share) {
     if (!gt::has_score_table(rules_.game_type))
         return;
     player.stats[counter] = wrap_add(player.stats[counter], raw_delta);
-    player.stats[MatchStats::kPoints] =
-        wrap_add(player.stats[MatchStats::kPoints], points);
+    if (share)
+        share_experience(world, player, points);
+    else
+        player.stats[MatchStats::kPoints] =
+            wrap_add(player.stats[MatchStats::kPoints], points);
+}
+
+void Match::add_points(const World &world, MatchPlayer &player, int32_t points) {
+    if (!gt::has_score_table(rules_.game_type))
+        return;
+    share_experience(world, player, points);
+}
+
+void Match::add_team_points(uint8_t team, int32_t points) {
+    if ((rules_.game_type & 0x10000u) == 0 || !gt::has_score_table(rules_.game_type) ||
+        team >= teams_.size())
+        return;
+    teams_[team][MatchStats::kPoints] =
+        wrap_add(teams_[team][MatchStats::kPoints], points);
 }
 
 // The scorer resolves the actor's TeamRecords row only when g_GameType carries
@@ -639,7 +662,7 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     flag->primary_occupant = player_handle;
     flag->flags |= kEntityFlagCarried;
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
-    add_event(*scorer, MatchStats::kFlagPickups, score_value(11));
+    add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
                                 player_handle,
@@ -695,7 +718,7 @@ void Match::record_flag_save(World &world, EntityHandle player_handle,
     //  ++team[28] (= team field 11) @0x52f988 with the same award @0x52f98c;
     //  dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8
     //  @0x517b03) from Entity_ProcessWaypointInteraction @0x4AD820]
-    add_event(*scorer, MatchStats::kFlagSaves, score_value(9));
+    add_event(world, *scorer, MatchStats::kFlagSaves, score_value(9));
     add_team_event(entity->team, MatchStats::kFlagSaves, score_value(9));
 }
 
@@ -709,7 +732,7 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
     if (scorer == nullptr || carrier == nullptr)
         return;
     Entity *flag = world.registry.get(flag_handle);
-    add_event(*scorer, MatchStats::kFlagCaptures, score_value(10));
+    add_event(world, *scorer, MatchStats::kFlagCaptures, score_value(10));
     if (flag == nullptr)
         return;
     // The team leg is routed by the FLAG TYPE in every game type: a captured
@@ -780,7 +803,7 @@ void Match::record_target_destroyed(const World &world, EntityHandle target_hand
     //  @0x52f627 covers the whole event, the occupant awards included.]
     const int32_t bonus = score_value(13);
     if (attacker && gt::has_score_table(rules_.game_type)) {
-        add_event(*attacker, MatchStats::kTargetsDestroyed, 0);
+        add_event(world, *attacker, MatchStats::kTargetsDestroyed, 0);
         share_experience(world, *attacker, bonus);
     }
     if ((rules_.game_type & 0x10000u) != 0)
@@ -868,8 +891,28 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
 
 void Match::record_death(World &world, EntityHandle victim_handle,
                          EntityHandle killer_handle, uint32_t cause_flags) {
+    // A Player's death first unlinks every pool-0 AI body whose +0x170
+    // point-share link names it. [orig: GameEvent_PlayerDeath
+    // @0x516E07..0x516E45]
+    if (const Entity *dead = world.registry.get(victim_handle);
+            dead != nullptr &&
+            ((dead->flags | dead->engine_flags) & kEntityFlagPlayer) != 0) {
+        world.registry.for_each_in_pool(0, [&](const Entity &row) {
+            if (row.handle == victim_handle || row.primary_occupant != victim_handle ||
+                    world.ai.for_handle(row.handle) == nullptr)
+                return;
+            world.registry.get(row.handle)->primary_occupant = EntityHandle{};
+        });
+    }
     if (outcome_.ended)
         return;
+    // The kill scorer reads the victim's carried-object link (+0x268) as the
+    // death finds it, before the drop clears it.
+    // [orig: GameEvent_ProcessScoring @0x530246..0x530277]
+    bool victim_carried_flag = false;
+    if (const Entity *dead = world.registry.get(victim_handle))
+        if (const Entity *carried = world.registry.get(dead->mounted_child))
+            victim_carried_flag = carried->has_item_def && is_flag(carried->item_id);
     drop_carried_object(world, victim_handle);
     const Entity *victim_entity = world.registry.get(victim_handle);
     if (victim_entity == nullptr)
@@ -886,9 +929,10 @@ void Match::record_death(World &world, EntityHandle victim_handle,
     // the non-Player call @0x51B5B3]
     if (player(victim_handle) != nullptr) {
         score_death(world, victim_handle);
-        score_kill(world, killer_handle, victim_handle, cause_flags);
+        score_kill(world, killer_handle, victim_handle, cause_flags,
+                   victim_carried_flag);
     } else if (is_person(*victim_entity)) {
-        score_kill(world, killer_handle, victim_handle, cause_flags);
+        score_kill(world, killer_handle, victim_handle, cause_flags, false);
     }
 }
 
@@ -902,14 +946,15 @@ void Match::score_death(World &world, EntityHandle victim_handle) {
     const Entity *victim_entity = world.registry.get(victim_handle);
     if (victim == nullptr || victim_entity == nullptr || victim->spectator)
         return;
-    add_event(*victim, MatchStats::kDeaths, score_value(5));
+    add_event(world, *victim, MatchStats::kDeaths, score_value(5));
     add_team_event(victim_entity->team, MatchStats::kDeaths, score_value(5));
 }
 
 // Scorer event 3 with an other-entity (the victim).
 // [orig: GameEvent_ProcessScoring @0x52F550 case 3 @0x52FF43]
 void Match::score_kill(World &world, EntityHandle killer_handle,
-                       EntityHandle victim_handle, uint32_t cause_flags) {
+                       EntityHandle victim_handle, uint32_t cause_flags,
+                       bool victim_carried_flag) {
     // The category gate precedes everything, then the head refuses a
     // spectator-latched slot on either side.
     // [orig: @0x52F617..0x52F640; @0x52F6E1..0x52F701]
@@ -945,20 +990,22 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     const uint8_t victim_team = victim_entity->team;
     const bool team_mode = (rules_.game_type & 0x10000u) != 0;
 
-    // The entity+0x2C kill-cause counters, each with its own points.
+    // The victim's entity+0x2C kill-cause counters, each with its own points
+    // and team mirror, on both the person and the Player arm.
     // [orig: 0x100 -> RecordEvent 16 + MULTIPLEKILL, 0x800 -> 17 +
-    //  HEADSHOTKILL, 0x400 -> 18 + KNIFEKILL]
+    //  HEADSHOTKILL, 0x400 -> 18 + KNIFEKILL: @0x530076..0x530178 (person),
+    //  @0x530357..0x53046F (Player)]
     auto cause_bonuses = [&]() {
         if ((cause_flags & 0x100u) != 0) {
-            add_event(*killer, MatchStats::kMultipleKills, score_value(16));
+            add_event(world, *killer, MatchStats::kMultipleKills, score_value(16));
             add_team_event(killer_team, MatchStats::kMultipleKills, score_value(16));
         }
         if ((cause_flags & 0x800u) != 0) {
-            add_event(*killer, MatchStats::kHeadshotKills, score_value(17));
+            add_event(world, *killer, MatchStats::kHeadshotKills, score_value(17));
             add_team_event(killer_team, MatchStats::kHeadshotKills, score_value(17));
         }
         if ((cause_flags & 0x400u) != 0) {
-            add_event(*killer, MatchStats::kKnifeKills, score_value(18));
+            add_event(world, *killer, MatchStats::kKnifeKills, score_value(18));
             add_team_event(killer_team, MatchStats::kKnifeKills, score_value(18));
         }
     };
@@ -971,7 +1018,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         //  team mirror @0x53005E / @0x530071, cause legs @0x530076..0x530178]
         if (killer_team == 0 || victim_team == 0 || killer_team == victim_team)
             return;
-        add_event(*killer, MatchStats::kEnemyKills, score_value(3));
+        add_event(world, *killer, MatchStats::kEnemyKills, score_value(3));
         add_team_event(killer_team, MatchStats::kEnemyKills, score_value(3));
         cause_bonuses();
         return;
@@ -980,7 +1027,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     if (killer_handle == victim_handle) {
         // Suicide: RecordEvent 5 + SUICIDE. [orig: `cmp ebx, edx` @0x530182,
         // @0x530186..0x5301D5]
-        add_event(*killer, MatchStats::kSuicides, score_value(4));
+        add_event(world, *killer, MatchStats::kSuicides, score_value(4));
         add_team_event(killer_team, MatchStats::kSuicides, score_value(4));
         return;
     }
@@ -991,15 +1038,31 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         // [orig: @0x5301E4..0x5301EE `test esi, esi` / `test eax, eax` /
         //  `cmp esi, eax`; RecordEvent 3 + FRIENDLYKILL @0x5301FD..0x530237;
         //  feed-only see-all @0x5170A6..0x517113]
-        add_event(*killer, MatchStats::kTeamKills, score_value(2));
+        add_event(world, *killer, MatchStats::kTeamKills, score_value(2));
         add_team_event(killer_team, MatchStats::kTeamKills, score_value(2));
         return;
     }
 
     // Enemy Player kill: RecordEvent 4 + ENEMYKILL.
     // [orig: @0x530246..0x5302F9]
-    add_event(*killer, MatchStats::kEnemyKills, score_value(3));
+    add_event(world, *killer, MatchStats::kEnemyKills, score_value(3));
     add_team_event(killer_team, MatchStats::kEnemyKills, score_value(3));
+
+    // A victim carrying a flag adds FLAGCARRIERKILL, then the cause bits, then
+    // a sniper-class victim's ENEMYSNIPERKILL points (no counter), each with
+    // its team mirror, all before the zone bonuses.
+    // [orig: the carried-flag test @0x530246..0x530277, RecordEvent 20 +
+    //  FLAGCARRIERKILL @0x5302FE..0x530352; the victim class-6 points
+    //  @0x530474..0x5304AB]
+    if (victim_carried_flag) {
+        add_event(world, *killer, MatchStats::kFlagCarrierKills, score_value(20));
+        add_team_event(killer_team, MatchStats::kFlagCarrierKills, score_value(20));
+    }
+    cause_bonuses();
+    if (victim_entity->player_class == 6) {
+        add_points(world, *killer, score_value(28));
+        add_team_points(killer_team, score_value(28));
+    }
 
     // The six objective-proximity bonuses are independent tests and may
     // all fire for one kill. Bit 0 works in solo and team modes; the four
@@ -1009,7 +1072,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     const uint8_t attacker_mask = killer->objective_proximity_mask;
     const uint8_t victim_mask = victim->objective_proximity_mask;
     auto bonus = [&](size_t counter, size_t score_index) {
-        add_event(*killer, counter, score_value(score_index));
+        add_event(world, *killer, counter, score_value(score_index));
         add_team_event(killer_team, counter, score_value(score_index));
     };
     if ((victim_mask & 0x01u) != 0)
@@ -1030,6 +1093,60 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
 }
 
+// Scorer event 12: the victim's signed `score` word goes to field 30 through
+// RecordEvent 29 (no points) on the killer's slot, and on the killer's team
+// row whenever the team bit resolves one, Player or not.
+// [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438);
+//  GameEvent_ProcessScoring case 12 @0x52FEC2..0x52FF0F]
+void Match::record_kill_event(const World &world, EntityHandle killer_handle,
+                              EntityHandle victim_handle) {
+    if (!gt::has_score_table(rules_.game_type))
+        return;
+    const Entity *killer_entity = world.registry.get(killer_handle);
+    const Entity *victim_entity = world.registry.get(victim_handle);
+    MatchPlayer *killer = player(killer_handle);
+    MatchPlayer *victim = player(victim_handle);
+    // [orig: the scorer head's spectator refusals @0x52F6E1..0x52F701]
+    if ((killer != nullptr && killer->spectator) ||
+        (victim != nullptr && victim->spectator))
+        return;
+    // [orig: `test edx, edx` / the def test @0x52FEC2..0x52FECF]
+    if (killer_entity == nullptr || victim_entity == nullptr || !victim_entity->has_item_def)
+        return;
+    const int32_t score = victim_entity->item_score;
+    if (killer != nullptr)
+        add_event(world, *killer, MatchStats::kUnitScore, 0, score);
+    add_team_event(killer_entity->team, MatchStats::kUnitScore, 0, score);
+}
+
+// Scorer event 1: one shot (RecordEvent 1) plus the FIRE value on the
+// shooter's slot, with the team-mode mirror.
+// [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727);
+//  GameEvent_ProcessScoring case 1 @0x52FB2A..0x52FC13]
+void Match::record_shot(const World &world, EntityHandle shooter_handle) {
+    const Entity *shooter_entity = world.registry.get(shooter_handle);
+    MatchPlayer *shooter = player(shooter_handle);
+    if (shooter_entity == nullptr || (shooter != nullptr && shooter->spectator))
+        return;
+    if (shooter != nullptr)
+        add_event(world, *shooter, MatchStats::kShotsFired, score_value(0));
+    add_team_event(shooter_entity->team, MatchStats::kShotsFired, score_value(0));
+}
+
+// Scorer event 6: the medic's MEDICSAVE (RecordEvent 8 + value 7), with the
+// team-mode mirror.
+// [orig: GameEvent_RevivePlayer @0x517CD0 (the event-6 call @0x517DC5);
+//  GameEvent_ProcessScoring case 6 @0x52FCD8..0x52FD2B]
+void Match::record_revive(const World &world, EntityHandle medic_handle) {
+    const Entity *medic_entity = world.registry.get(medic_handle);
+    MatchPlayer *medic = player(medic_handle);
+    if (medic_entity == nullptr || (medic != nullptr && medic->spectator))
+        return;
+    if (medic != nullptr)
+        add_event(world, *medic, MatchStats::kMedicSaves, score_value(7));
+    add_team_event(medic_entity->team, MatchStats::kMedicSaves, score_value(7));
+}
+
 void Match::record_zone_capture(const World &world,
                                 const std::vector<EntityHandle> &scorers) {
     if (outcome_.ended)
@@ -1045,7 +1162,7 @@ void Match::record_zone_capture(const World &world,
         // alive same-team slot in radius. Event 24 increments raw stats[39]
         // and applies table[108] = status value 34 to raw stats[29].
         // [orig: call @0x500D84; case 24 @0x5307C2]
-        add_event(*scorer, MatchStats::kZoneTakeovers, score_value(34));
+        add_event(world, *scorer, MatchStats::kZoneTakeovers, score_value(34));
         add_team_event(scorer_entity->team, MatchStats::kZoneTakeovers, score_value(34));
     }
 }
@@ -1079,7 +1196,8 @@ void Match::update_objective_proximity(const World &world) {
         // it for every live, non-respawn-pending player and dispatches event
         // 25 on exact multiples of status value 36 (values < 1 use 0xffff).
         // Event 25 updates only the player: raw stat 40 receives the original
-        // status-36 value and points receive status value 35.
+        // status-36 value and points receive status value 35, the one award
+        // that never shares with the +0x170 links (param2 = 1).
         // [orig: Server_UpdateCaptureZoneProximity @0x5087C9..0x5087F1;
         // GameEvent_ProcessScoring case 25 @0x530968..0x530990]
         if (live) {
@@ -1089,8 +1207,8 @@ void Match::update_objective_proximity(const World &world) {
             if (scoring_interval < 1)
                 scoring_interval = 0xffff;
             if (match_player.periodic_score_ticks % scoring_interval == 0) {
-                add_event(match_player, MatchStats::kPeriodicScoreUnits,
-                          score_value(35), score_value(36));
+                add_event(world, match_player, MatchStats::kPeriodicScoreUnits,
+                          score_value(35), score_value(36), /*share=*/false);
             }
         }
 
@@ -1168,7 +1286,7 @@ void Match::update_objective_proximity(const World &world) {
                 // Events 18: hill time/status 12, points/status 33.
                 // [orig: call @0x508CE2..0x508CEA; scorer
                 // @0x5307B8..0x530821]
-                add_event(match_player, MatchStats::kHillTime,
+                add_event(world, match_player, MatchStats::kHillTime,
                           score_value(33), raw_delta);
                 if (team_mode)
                     add_team_event(player_entity->team, MatchStats::kHillTime,
@@ -1183,7 +1301,7 @@ void Match::update_objective_proximity(const World &world) {
                     // the original scorer and is intentionally retained.
                     // [orig: call @0x508CBE..0x508CEA; player/team split
                     // @0x530890..0x5308F9]
-                    add_event(match_player, MatchStats::kFriendlyZoneTime,
+                    add_event(world, match_player, MatchStats::kFriendlyZoneTime,
                               score_value(32), raw_delta);
                     if (team_mode)
                         add_team_event(player_entity->team,
@@ -1193,7 +1311,7 @@ void Match::update_objective_proximity(const World &world) {
                     // Event 19: hostile-zone time/status 12 and
                     // points/status 31. [orig: call @0x508C95..0x508CB1;
                     // scorer @0x530824..0x53088D]
-                    add_event(match_player, MatchStats::kHostileZoneTime,
+                    add_event(world, match_player, MatchStats::kHostileZoneTime,
                               score_value(31), raw_delta);
                     if (team_mode)
                         add_team_event(player_entity->team,

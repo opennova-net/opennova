@@ -1435,9 +1435,58 @@ void test_org1_death_transaction_is_the_motor_edge() {
 			"an edge record never re-latches the row it no longer owns");
 }
 
+// Scorer event 12 rides the kill accounting in every session: a lethal-edge
+// kill of a scored victim adds its `score` word to the killer's field 30, the
+// 0x56 row's third word; a death with no kill event adds nothing.
+// [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438, ahead
+// of the session test @0x4FD440); Server_BuildEndOfRoundScoreboard @0x508F30]
+void test_kill_event_unit_score_rides_every_session() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.rules.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	world.match.configure(rules);
+	const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
+	w::Entity npc;
+	npc.kind = w::EntityKind::Organic;
+	npc.has_item_def = true;
+	npc.item_type = 3;
+	npc.item_score = 25;
+	npc.team = 2;
+	npc.alive = true;
+	npc.health = 100;
+	const w::EntityHandle scored = world.registry.spawn(0, npc);
+	const w::EntityHandle scripted = world.registry.spawn(0, npc);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	inmatch::Server_TickUpdate(ctx);
+	push_kill(world, scored, ace);
+	push_death(world, scripted, ace);
+	inmatch::Server_TickUpdate(ctx);
+	const w::MatchPlayer *row = world.match.player(ace);
+	expect(row != nullptr && row->stats[w::MatchStats::kUnitScore] == 25 &&
+			row->stats[w::MatchStats::kEnemyKills] == 2 &&
+			world.match.team_stats(1)[w::MatchStats::kUnitScore] == 25,
+			"only the kill event adds the victim's score to field 30");
+	expect(world.kill_stats.enemy_kills_by_player == 0 &&
+			world.kill_stats.enemy_kills_by_others == 0,
+			"the session skips the SP tallies");
+	world.process_round_end(1);
+	const EndRoundStats board = inmatch::build_end_round_stats(world.match.result());
+	expect(board.players.size() == 1 && board.players[0].assists == 25,
+			"the 0x56 row's third word carries field 30");
+}
+
 int main() {
 	test_end_round_row_flags_word_is_field_11();
 	test_org1_death_transaction_is_the_motor_edge();
+	test_kill_event_unit_score_rides_every_session();
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;

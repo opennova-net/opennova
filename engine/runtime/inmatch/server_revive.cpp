@@ -13,7 +13,7 @@ namespace opennova::inmatch {
 
 namespace {
 
-constexpr uint8_t kMedicClass = 5;            // healer+660 == 5 @0x517D28
+constexpr uint8_t kMedicClass = 5;            // healer+660 == 5 @0x517D07
 constexpr uint8_t kReviveEvent = 38;          // GameEvent_BuildPayload(0x26, ...)
 constexpr int32_t kRevivePoseRaise = 0x4000;  // +0.25 world units @0x517E09
 
@@ -36,7 +36,7 @@ void Server_RouteMedicRevives(NapiNPServerCtx &ctx, world::World &world) {
 		world::Entity *victim = world.registry.get(r.victim);   // Entity_ValidatePtr @0x517CD9
 		world::Entity *healer = world.registry.get(r.healer);   // @0x517CF3
 		if (victim == nullptr || healer == nullptr) continue;
-		if (healer->player_class != kMedicClass) continue;      // @0x517D28
+		if (healer->player_class != kMedicClass) continue;      // @0x517D07
 		if ((victim->flags & world::kEntityFlagDead) == 0u) continue;
 		NapiNPConnection *victim_connection = connection_for(ctx, r.victim);
 		NapiNPConnection *healer_connection = connection_for(ctx, r.healer);
@@ -56,8 +56,9 @@ void Server_RouteMedicRevives(NapiNPServerCtx &ctx, world::World &world) {
 				candidate.link.transport->host_send(s2c::PLAYER_DOWNED_STATE, body);
 			}
 		}
-		// GameEvent_ProcessScoring(g_GameType, healer, 6, 0, 0) @0x517DC5: no
-		// Match scorer models event 6 yet.
+		// The medic's MEDICSAVE [orig: GameEvent_RevivePlayer @0x517CD0 (the
+		// GameEvent_ProcessScoring(g_GameType, healer, 6, 0, 0) call @0x517DC5)].
+		world.match.record_revive(world, r.healer);
 
 		// The revive pose the following deploy consumes [orig: @0x517DCD..0x517E09].
 		if (victim_connection != nullptr) {

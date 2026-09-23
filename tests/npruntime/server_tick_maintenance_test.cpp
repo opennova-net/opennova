@@ -1281,6 +1281,54 @@ bool check_shared_loaded_ammo_fire_and_reload() {
             "the other weapon sees the reload without rewriting either private clip");
 }
 
+// A validated primary round scores one FIRE event (field 2 plus the FIRE
+// value); a rejected round and an alt-fire round score nothing.
+// [orig: Server_ClientFiredRound @0x50BAA0 — the alt return @0x50BB0D, the
+//  event-1 call @0x50C727]
+bool check_validated_fire_scores_one_shot() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	rules.score_values.emplace();
+	(*rules.score_values)[0] = 3; // FIRE
+	world.match.configure(rules);
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
+	const w::EntityHandle other = w::spawn_remote_player(world, player_spawn(1, 0, 0));
+	world.match.upsert_player({shooter, 3, "Shooter"});
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	roster.push_back(make_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	uint32_t client_tick = conn.tick_seed;
+	auto dispatch_fire = [&](std::vector<uint8_t> body) {
+		std::vector<ProtocolMessage> msgs;
+		msgs.push_back(make_protocol_message(c2s::FIRED_ROUND, std::move(body)));
+		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+	};
+	const w::MatchPlayer *row = world.match.player(shooter);
+	dispatch_fire(fire_body(conn, other.packed, 5, client_tick)); // spoofed: rejected
+	if (!expect(row->stats[w::MatchStats::kShotsFired] == 0, "a rejected round scores no shot"))
+		return false;
+	dispatch_fire(fire_body(conn, shooter.packed, 5, client_tick));
+	if (!expect(world.out.rounds.count == 1 && row->stats[w::MatchStats::kShotsFired] == 1 &&
+					row->stats[w::MatchStats::kPoints] == 3 &&
+					world.match.team_stats(1)[w::MatchStats::kShotsFired] == 1,
+			"the validated round scores one FIRE event"))
+		return false;
+	ClientFiredRound alt;
+	alt.current_tick = ++client_tick;
+	alt.shooter_handle = shooter.packed;
+	alt.target_handle = 0xFFFF;
+	alt.adm_index = 5;
+	alt.fire_flags = 0x23; // bit 0: alt fire
+	dispatch_fire(encode_client_fired_round(alt));
+	return expect(world.out.rounds.count == 2 && row->stats[w::MatchStats::kShotsFired] == 1,
+			"an alt-fire round is appended without a FIRE event");
+}
+
 bool check_guidance_waits_for_spawn_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
@@ -1322,6 +1370,7 @@ bool check_guidance_waits_for_spawn_frame() {
 
 int main() {
 	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
+	ok = check_validated_fire_scores_one_shot() && ok;
 	ok = check_spawn_protection_seeded_at_creation() && ok;
 	ok = check_spawn_protection_countdown_and_gates() && ok;
 	ok = check_spawn_protection_cleared_by_validated_fire() && ok;

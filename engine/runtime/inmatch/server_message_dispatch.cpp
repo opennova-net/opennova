@@ -2017,6 +2017,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
 				}
 				shooter->last_fire_target = fire_target;
+				// A primary round re-enters through the adm fire action, whose
+				// local pass scores the shot (scorer event 1) once it clears the
+				// pose checks; alt fire returns through RoundData_AddRound first.
+				// [orig: Server_ClientFiredRound @0x50BAA0 — alt @0x50BB0D, the
+				//  event-1 call @0x50C727]
+				if (!alt_fire) world->match.record_shot(*world, conn.link.owned_entity);
 				// The validated round ends the shooter's spawn protection: an in-session
 				// authority clears entity+292 for a non-spectator slot whose value is
 				// nonzero. A rejected fire never reaches this store. The listen host's own

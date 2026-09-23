@@ -98,10 +98,17 @@ std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
 // the former kAssists alias of index 11 was the decoder's column-name guess.
 struct MatchStats {
     static constexpr size_t kFieldCount = 42;
+    // RecordEvent 1: one per accepted round a Player fires (FIELD id 9, and
+    // the shots-per-kill words). [orig: GameEvent_ProcessScoring case 1
+    // @0x52FB2A; CPlayerStats_RecordEvent case 1 @0x52C8FB]
+    static constexpr size_t kShotsFired = 2;
     static constexpr size_t kTeamKills = 4;
     static constexpr size_t kEnemyKills = 5;
     static constexpr size_t kSuicides = 6;
     static constexpr size_t kDeaths = 7;
+    // RecordEvent 8: a medic's revive (MEDICSAVE, FIELD id 10).
+    // [orig: GameEvent_ProcessScoring case 6 @0x52FCD8]
+    static constexpr size_t kMedicSaves = 9;
     static constexpr size_t kFlagSaves = 11;
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
@@ -112,6 +119,10 @@ struct MatchStats {
     static constexpr size_t kMultipleKills = 17;
     static constexpr size_t kHeadshotKills = 18;
     static constexpr size_t kKnifeKills = 19;
+    // RecordEvent 20: an enemy Player killed while carrying a flag
+    // (FLAGCARRIERKILL, FIELD id 14). [orig: GameEvent_ProcessScoring
+    // @0x530246..0x530277 / @0x5302FE..0x530352]
+    static constexpr size_t kFlagCarrierKills = 21;
     static constexpr size_t kVictimNearNeutralObjectiveKills = 22;
     static constexpr size_t kAttackerNearNeutralObjectiveKills = 23;
     static constexpr size_t kVictimNearAttackerObjectiveKills = 24;
@@ -120,6 +131,11 @@ struct MatchStats {
     static constexpr size_t kAttackerNearVictimObjectiveKills = 27;
     static constexpr size_t kSharedPointAwards = 28;
     static constexpr size_t kPoints = 29;
+    // RecordEvent 29: the sum of the victims' ItemDef `score` words (scorer
+    // event 12, FIELD id 20, the 0x56 row's third word); no points.
+    // [orig: GameEvent_ProcessScoring case 12 @0x52FEC2..0x52FF0F;
+    // CPlayerStats_RecordEvent case 29 @0x52CBB6]
+    static constexpr size_t kUnitScore = 30;
     static constexpr size_t kHillTime = 31;
     static constexpr size_t kHostileZoneTime = 32;
     static constexpr size_t kFriendlyZoneTime = 33;
@@ -342,6 +358,19 @@ class Match {
                       EntityHandle killer = EntityHandle{},
                       uint32_t cause_flags = 0);
 
+    // Scorer event 12, run by the kill accounting at a damage-pass lethal
+    // edge before the death itself is processed: the victim's `score` word
+    // adds to the killer's field 30 (and its team row in team modes).
+    // [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438)]
+    void record_kill_event(const World &world, EntityHandle killer,
+                           EntityHandle victim);
+    // Scorer event 1: an accepted non-alt round fired by a Player.
+    // [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727)]
+    void record_shot(const World &world, EntityHandle shooter);
+    // Scorer event 6: a medic revived a downed teammate.
+    // [orig: GameEvent_RevivePlayer @0x517CD0 (the event-6 call @0x517DC5)]
+    void record_revive(const World &world, EntityHandle medic);
+
     // Objective scorer cases 9 and 11. The ordinary runtime paths call these
     // from carry contact and death routing; they remain public for script/WAC
     // producers that author the same retail events.
@@ -400,8 +429,13 @@ class Match {
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
     int32_t score_value(size_t status_index) const;
-    void add_event(MatchPlayer &player, size_t counter, int32_t points,
-                   int32_t raw_delta = 1);
+    // RecordEvent(counter) then the RecordEvent 28 points award, which shares
+    // with the +0x170 links unless `share` is false (scorer event 25 alone).
+    void add_event(const World &world, MatchPlayer &player, size_t counter,
+                   int32_t points, int32_t raw_delta = 1, bool share = true);
+    // A bare RecordEvent 28 award (no counter), on a Player and its team row.
+    void add_points(const World &world, MatchPlayer &player, int32_t points);
+    void add_team_points(uint8_t team, int32_t points);
     // The scorer's team leg: TeamRecords[team] exists only in team modes.
     void add_team_event(uint8_t team, size_t counter, int32_t points,
                         int32_t raw_delta = 1);
@@ -412,7 +446,7 @@ class Match {
     // Scorer event 3 without a victim (a Player's own death) and with one.
     void score_death(World &world, EntityHandle victim);
     void score_kill(World &world, EntityHandle killer, EntityHandle victim,
-                    uint32_t cause_flags);
+                    uint32_t cause_flags, bool victim_carried_flag);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);

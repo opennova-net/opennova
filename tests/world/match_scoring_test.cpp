@@ -237,6 +237,160 @@ void test_non_player_killer_credits_its_link() {
     CHECK(linked->stats[MatchStats::kPoints] == 5);
 }
 
+// Scorer event 12 adds the victim's signed `score` word to field 30 with no
+// points: on the killer's slot, and on the killer's team row whenever the
+// team bit resolves one (an NPC killer's row too). A spectator is refused.
+// [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438);
+// GameEvent_ProcessScoring case 12 @0x52FEC2..0x52FF0F]
+void test_kill_event_adds_the_victim_score() {
+    auto world = make_world(gt::kTeamDeathmatch);
+    const EntityHandle ace = player(*world, 0, 1);
+    const EntityHandle rifleman = npc(*world, 2);
+    world->registry.get(rifleman)->item_score = 25;
+    world->match.record_kill_event(*world, ace, rifleman);
+    const MatchPlayer *killer = world->match.player(ace);
+    CHECK(killer->stats[MatchStats::kUnitScore] == 25);
+    CHECK(killer->stats[MatchStats::kPoints] == 0);
+    CHECK(world->match.team_stats(1)[MatchStats::kUnitScore] == 25);
+
+    const EntityHandle gunner = npc(*world, 2);
+    world->match.record_kill_event(*world, gunner, npc(*world, 1));
+    CHECK(world->match.team_stats(2)[MatchStats::kUnitScore] == 10);
+
+    world->match.set_player_spectator(ace, true);
+    world->match.record_kill_event(*world, ace, rifleman);
+    CHECK(killer->stats[MatchStats::kUnitScore] == 25);
+
+    auto dm = make_world(gt::kDeathmatch);
+    const EntityHandle solo = player(*dm, 0, 1);
+    dm->match.record_kill_event(*dm, solo, npc(*dm, 2));
+    CHECK(dm->match.player(solo)->stats[MatchStats::kUnitScore] == 10);
+    CHECK(dm->match.team_stats(1)[MatchStats::kUnitScore] == 0);
+}
+
+// Scorer event 1: one shot plus the FIRE value per accepted round, with the
+// team-mode mirror; a spectator's round scores nothing.
+// [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727);
+// GameEvent_ProcessScoring case 1 @0x52FB2A..0x52FC13]
+void test_shot_scores_fire() {
+    MatchRules fire = rules(gt::kTeamDeathmatch);
+    (*fire.score_values)[0] = 1; // FIRE
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->match.configure(fire);
+    const EntityHandle ace = player(*world, 0, 2);
+    world->match.record_shot(*world, ace);
+    world->match.record_shot(*world, ace);
+    const MatchPlayer *shooter = world->match.player(ace);
+    CHECK(shooter->stats[MatchStats::kShotsFired] == 2);
+    CHECK(shooter->stats[MatchStats::kPoints] == 2);
+    CHECK(world->match.team_stats(2)[MatchStats::kShotsFired] == 2);
+    world->match.set_player_spectator(ace, true);
+    world->match.record_shot(*world, ace);
+    CHECK(shooter->stats[MatchStats::kShotsFired] == 2);
+}
+
+// A killed enemy Player carrying a flag adds FLAGCARRIERKILL; the victim's
+// cause bits add their bonuses; a sniper-class (6) victim adds the
+// ENEMYSNIPERKILL points with no counter. Each mirrors onto the team row.
+// [orig: GameEvent_ProcessScoring @0x530246..0x5304AB]
+void test_enemy_player_kill_bonuses() {
+    MatchRules bonus = rules(gt::kTeamDeathmatch);
+    (*bonus.score_values)[20] = 17; // FLAGCARRIERKILL
+    (*bonus.score_values)[28] = 19; // ENEMYSNIPERKILL
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->registry.configure_pool(1, 16);
+    world->match.configure(bonus);
+    const EntityHandle ace = player(*world, 0, 1);
+    const EntityHandle carrier = player(*world, 1, 2);
+    Entity flag;
+    flag.kind = EntityKind::Item;
+    flag.item_id = 4093;
+    flag.has_item_def = true;
+    const EntityHandle red_flag = world->registry.spawn(1, flag);
+    world->registry.get(carrier)->mounted_child = red_flag;
+    world->registry.get(red_flag)->primary_occupant = carrier;
+    world->registry.get(carrier)->player_class = 6;
+
+    world->match.record_death(*world, carrier, ace, 0x800u);
+    const MatchPlayer *killer = world->match.player(ace);
+    CHECK(killer->stats[MatchStats::kEnemyKills] == 1);
+    CHECK(killer->stats[MatchStats::kFlagCarrierKills] == 1);
+    CHECK(killer->stats[MatchStats::kHeadshotKills] == 1);
+    CHECK(killer->stats[MatchStats::kPoints] == 10 + 17 + 11 + 19);
+    CHECK(world->match.team_stats(1)[MatchStats::kFlagCarrierKills] == 1);
+    CHECK(world->match.team_stats(1)[MatchStats::kPoints] == 10 + 17 + 11 + 19);
+    CHECK(!world->registry.get(carrier)->mounted_child.valid());
+
+    // The same kill of an empty-handed rifleman adds none of them.
+    world->registry.get(carrier)->player_class = 8;
+    world->match.record_death(*world, carrier, ace);
+    CHECK(killer->stats[MatchStats::kFlagCarrierKills] == 1);
+    CHECK(killer->stats[MatchStats::kPoints] == 57 + 10);
+}
+
+// Scorer event 6: the medic's MEDICSAVE counter and value, team-mirrored.
+// [orig: GameEvent_RevivePlayer @0x517CD0 (the event-6 call @0x517DC5);
+// GameEvent_ProcessScoring case 6 @0x52FCD8..0x52FD2B]
+void test_revive_scores_medicsave() {
+    MatchRules medic = rules(gt::kTeamDeathmatch);
+    (*medic.score_values)[7] = 4; // MEDICSAVE
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->match.configure(medic);
+    const EntityHandle doc = player(*world, 0, 1);
+    world->match.record_revive(*world, doc);
+    CHECK(world->match.player(doc)->stats[MatchStats::kMedicSaves] == 1);
+    CHECK(world->match.player(doc)->stats[MatchStats::kPoints] == 4);
+    CHECK(world->match.team_stats(1)[MatchStats::kMedicSaves] == 1);
+}
+
+// Every points award is RecordEvent 28 with param2 = 0, so it shares half
+// with the Player on the earner's +0x170 link; event 25 alone keeps its award.
+// A Player's death clears every pool-0 AI body's link to it.
+// [orig: CPlayerStats_RecordEvent case 28 @0x52CAF8..0x52CBB3; case 25's
+// param2 @0x530989; GameEvent_PlayerDeath @0x516E07..0x516E45]
+void test_points_share_with_the_link() {
+    MatchRules share = rules(gt::kTeamDeathmatch);
+    (*share.score_values)[35] = 6; // ALIVE
+    (*share.score_values)[36] = 1; // ALIVEQUANTUM
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->registry.configure_pool(1, 16);
+    world->match.configure(share);
+    const EntityHandle rider = player(*world, 0, 1);
+    const EntityHandle driver = player(*world, 1, 1);
+    const EntityHandle enemy = player(*world, 2, 2);
+    world->registry.get(rider)->primary_occupant = driver;
+
+    world->match.record_death(*world, enemy, rider);
+    const MatchPlayer *earner = world->match.player(rider);
+    const MatchPlayer *linked = world->match.player(driver);
+    CHECK(earner->stats[MatchStats::kPoints] == 10);
+    CHECK(linked->stats[MatchStats::kPoints] == 5);
+    CHECK(linked->stats[MatchStats::kSharedPointAwards] == 1);
+
+    for (int tick = 0; tick < 3 * 62; ++tick)
+        world->match.advance_tick(*world);
+    CHECK(earner->stats[MatchStats::kPeriodicScoreUnits] > 0);
+    CHECK(linked->stats[MatchStats::kSharedPointAwards] == 1);
+    CHECK(linked->stats[MatchStats::kPoints] - 5 ==
+          linked->stats[MatchStats::kPeriodicScoreUnits] * 6);
+
+    // The driver's death unlinks the pool-0 AI rider; a pool-0 body without an
+    // AI component and a pool-1 hull keep theirs.
+    const EntityHandle statue = npc(*world, 1);
+    world->registry.get(statue)->primary_occupant = driver;
+    const EntityHandle hull = npc(*world, 1, 1);
+    world->registry.get(hull)->primary_occupant = driver;
+    world->ai.attach(rider);
+    world->match.record_death(*world, driver, enemy);
+    CHECK(!world->registry.get(rider)->primary_occupant.valid());
+    CHECK(world->registry.get(statue)->primary_occupant == driver);
+    CHECK(world->registry.get(hull)->primary_occupant == driver);
+}
+
 } // namespace
 
 int main() {
@@ -245,6 +399,11 @@ int main() {
     test_flag_capture_team_rows_follow_the_flag_type();
     test_npc_person_victims_score_their_killer();
     test_non_player_killer_credits_its_link();
+    test_kill_event_adds_the_victim_score();
+    test_shot_scores_fire();
+    test_enemy_player_kill_bonuses();
+    test_revive_scores_medicsave();
+    test_points_share_with_the_link();
     if (failures != 0) {
         std::printf("match_scoring_test: %d failure(s)\n", failures);
         return 1;
