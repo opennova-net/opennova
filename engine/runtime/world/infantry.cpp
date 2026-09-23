@@ -70,33 +70,12 @@ constexpr int32_t kTerminalVelZ = -32768;
 // [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
 // mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
 constexpr int32_t kJumpImpulseVelZ = 0x1600;
-// The org1 float model (see infantry_water_block). The hysteresis gap and the
-// sink are 16.16 (0.625u and ~0.0187u); the bob shares the sink's magnitude, so
-// a floating body rides between the plane and 0.037u under it — a ripple, not a
-// visible heave. [orig: the 0xA000 entry bias @0x4bfb84, -0x4C9 @0x4bfbf1, the
-// sin amplitude dbl_7C9C28 and the phase pair flt_7C6950 * dbl_7C9BD0]
-// The phase pair is the LITERAL 1/256 * 3.1 (Jointops.exe bytes @0x7C6950 =
-// 0.00390625f, @0x7C9BD0 = 3.1 double) -- not pi/256; corrected 2026-08-23.
-// The org2 (player) arm reads the NEGATED amplitude dbl_7C9BC8 = -1224.0 and
-// subtracts it (kong 149040-149047), so both motors bob in the same phase.
-constexpr int32_t kWaterFloatHysteresis = 0xA000;
-constexpr int32_t kWaterFloatSink = 1225;
-constexpr double kWaterBobAmplitude = 1224.0;
-constexpr double kWaterBobPhaseScale = 0.00390625 * 3.1;
-// org2 dive bit: fully-submerged latch, set below the surface line - 0x2000,
-// cleared at the surface clamp and on the not-submerged exit (~0x208000).
-// [orig: set @0x4b81ef; clear @0x4b8176; exit @0x4b8373]
-constexpr uint32_t kEntityFlagDiveLatch = 0x200000u;
-constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4b81d0 `surf - 0x2000`]
-constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4b8124 `+ 112`]
-constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4b80d6 `+ 4096`]
-constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 // The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
 // drowning/water (0x8000), and the terrain-gradient slide bit (0x10000).
 // Carried (0x40) is tested separately immediately afterward. The reimpl keeps
 // flags in two mirrors plus a typed mounted relation, so collapse those carriers
 // at the one shared local/remote eligibility seam.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b7ea0-0x4b7ebd]
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B7EA4..0x4B7EBD]
 constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
 // [orig: turn-in-place gates; dump 2940-2952]
 constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
@@ -624,7 +603,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
         uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     // Burn selection bypasses the ordinary movement/swim/lean selector, including
-    // the pass that clears the timer. [orig: Entity_UpdateInfantryPlayerBody @0x4B70D9..0x4B717E -> LABEL_654]
+    // the pass that clears the timer. [orig: Entity_UpdateInfantryPlayerBody @0x4B70D9..0x4B717E -> @0x4B729D]
     if (inf.burn_state != 0) {
         const int target = select_infantry_burn(inf, root_motion, true, logic_tick);
         commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
@@ -637,7 +616,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
 
     // No in-air branch here: the original SKIPS this selection while airborne
     // (@0x4b70b8) — the jump block stamps 30/31 and the fall edge stamps 31 (47
-    // parachute rides the unmodeled Flags 0x20) directly [orig: @0x4b7ef2/@0x4b7e5c].
+    // under a deployed chute, Flags 0x20) directly [orig: @0x4b7ef2/@0x4B7E61].
     int target;
     if (inf.player_moving) {
         inf.idle_counter = 0;                        // [orig: @0x4b719b]
@@ -744,8 +723,8 @@ void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
     inf.lean_angle =
         io::bam_sub(inf.lean_angle, io::bam_sar(io::bam_add(inf.lean_angle, 8), 4));
     if (e.health <= 0) return;                      // [orig: the Flags&2 gate legs]
-    // The ladder latch blocks the ramp (hands on the rungs); the parachute half
-    // of the same mask rides D-INF-20. [orig: (Flags & 0x100020) gate @0x4b7dad]
+    // The ladder latch (hands on the rungs) and a deployed chute block the ramp.
+    // [orig: (Flags & 0x100020) gate @0x4b7dad]
     if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) != 0)
         return;
     // The prone skip reads prone_local = the latch AND none of Flags 0x10A000
@@ -901,7 +880,7 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
             (entity->mounted || entity->ground_target.valid());
     // Org1's carrier branch bypasses the gradient without touching Flags
     // 0x10000 after the deck rotation. Org2 clears the bit for a carrier.
-    // [orig: carrier @0x4BA85B; exit @0x4BA891]
+    // [orig: carrier @0x4BA85A; exit @0x4BA891]
     if (npc && carried) return false;
     const uint32_t flags = entity != nullptr ? entity->flags | entity->engine_flags : 0u;
     terrain::TerrainHeightGradient gradient;
@@ -945,8 +924,8 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
     // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
     // the body heading is written as their midpoint — the legs lead, the body
     // follows, and the §14 torso twist is (yaw − leg midpoint). The parachute
-    // (Flags 0x20) sixteenth-step body chase @0x4b494d and the seat-bone
-    // follow @0x4b654e ride the parachute/mount slices.
+    // (Flags 0x20) sixteenth-step body chase @0x4b494d runs first, below; the
+    // seat-bone follow @0x4b654e is the mounted pose (ai_system.cpp).
     //
     // While latched on a ladder the view yaw is clamped to ±120° of the
     // body heading (infantry_ladder.cpp). [orig: gate @ 0x4b4978; clamp
@@ -1293,7 +1272,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         if (inf.burn_state != 0) {
             // The live burn branch reaches the common arbiter directly.
-            // [orig: Entity_UpdateInfantryAI @0x4B9910, LABEL_754]
+            // [orig: Entity_UpdateInfantryAI @0x4BC047..0x4BC04E -> @0x4BD7FD]
             const int target = combat_state > 0 ? combat_state : anim_state::kIdle;
             commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
         } else {
@@ -1370,7 +1349,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // motor-head channel update and current view/seat/lean pose. The local
     // on-foot path terrain-floors the absolute eye; the mounted path does not.
     // The capsule fallback retains the org1/org2 extent and lean formulas.
-    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66D0;
+    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
     //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8;
     //  org1 @0x4BF078..0x4BF14C]
     if (have_clip) {
@@ -1647,9 +1626,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // float -64.0 (fcos/fsin, fmul flt_7C9BD8, _ftol2_sse — no narrowing
         // before the multiply) [orig: @0x4b78e5..0x4b790f; flt_7C9BD8 =
         // C2800000]. The DOUBLED arm (Flags&0x20 chute deployed,
-        // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) is
-        // unreachable until the parachute state lands (D-INF-20) and stays
-        // unported -- declared, not bridged.
+        // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) adds
+        // the same term again.
         if (inf.player_moving) {
             const double angle =
                     static_cast<double>(static_cast<int16_t>(e.heading >> 16)) *
@@ -2072,7 +2050,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // counts down, held-at-1 until the key releases (no auto-repeat while held),
         // jump only from 0 [orig: maintenance @0x4b7de0-0x4b7e15, release edge
         // @0x4b7e78-0x4b7e82]. Gates [orig: @0x4b7e8c-0x4b7ebd]: cooldown 0, not
-        // prone (the var_10AC selection local), !(Flags & 0x1A002) — in-air, dead,
+        // prone (the selection's prone local @0x4B417D/@0x4B4183), !(Flags & 0x1A002) — in-air, dead,
         // and the water pair (unmodeled) — the key held (MoveOrder bit 5), not
         // carried (0x40). The flag carriers are modeled even though the swimming
         // transition producer remains D-INF-3. The impulse: 3/4 of the rotated root step into
@@ -2131,7 +2109,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
             inf.jump_requested = false;
             // The not-jumping tail [orig: @0x4b7f71..0x4b8019]: a gate failed and
-            // the resolver clearance is <= 0 (`cmp var_10FC,0; jg 0x4b8020`
+            // the resolver clearance is <= 0 (the clearance local's `jg 0x4b8020`
             // @0x4b7f71..0x4b7f76).
             if (!jump_gates_open && foot_clearance <= 0) {
                 // The landing on the word's OWN bit: retail re-tests the Flags

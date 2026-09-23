@@ -8,7 +8,7 @@
 
 namespace opennova::world {
 // [orig: org1 Entity_UpdateInfantryAI @0x4BA45D..0x4BA891;
-// org2 Entity_UpdateInfantryPlayerBody @0x4B52A0..0x4B5726]
+// org2 Entity_UpdateInfantryPlayerBody @0x4B529F..0x4B5726]
 static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, bool player_body) {
     Entity *self = world.registry.get(e.handle);
     // Seat posing owns mounted bodies; only the free-standing delta was missing.

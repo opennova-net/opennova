@@ -49,7 +49,7 @@ LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
     // The CLIMBER behavior bit (ChangeAI sub 17) is the third fresh-entry
     // qualifier at the ladder gate [orig: aiRuntime+4 & 0x400 @0x4b3267..
     // 0x4b3271, Entity_MovementCollisionResolver]. The AI move-order arm of
-    // the same test (var_60 @0x4b3257) stays unported: declared, not bridged.
+    // the same test (its move-order local @0x4b3257) stays unported: declared, not bridged.
     lio.ai_wants_climb =
         (static_cast<uint32_t>(e.slot.f[AiSlot::kBehaviorFlags]) & AiSlot::kClimber) != 0;
     lio.is_local_player = inf.is_local_player;

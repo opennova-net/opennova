@@ -47,7 +47,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
 
     // Dead + in-air takes the corpse-tumble branch instead of the slope pass in both
     // originals (bodyPitch/roll/yaw spin ramps) — unported; the death-fall mover owns
-    // the drop today. [orig: org1 @0x4ba0b2-0x4ba107; org2 @0x4b6ccb-0x4b6d90]
+    // the drop today. [orig: org1 @0x4BA0B0..0x4BA107; org2 @0x4b6ccb-0x4b6d90]
     // Org1 reads "dead" off the Flags word its death edge latches, not health.
     // [orig: `and ecx,2` @0x4BA084]
     const Entity *slope_entity = world.registry.get(e.handle);
@@ -114,7 +114,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
             kBamPerRadian);
         threshold = dead ? kSlideThreshold : kSlideThresholdLive; // [orig: @0x4b6ee5]
     } else {
-        // Small-angle approximation, clamped. [orig: @0x4ba1cd <<14 / @0x4ba22b <<16]
+        // Small-angle approximation, clamped. [orig: @0x4BA1CB <<14 / @0x4BA227 <<16]
         pitch_slope = static_cast<int32_t>(std::min<int64_t>(
             std::max<int64_t>((static_cast<int64_t>(h_ahead) - h_behind) << 14,
                               -kSlopeClamp),
@@ -128,7 +128,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
 
     // Slide on steep ground: velocity gains dir<<11>>22 (org1, per 8-tick pass) or
     // dir<<9>>22 (org2, per 2-tick pass), along/against the facing for pitch and
-    // perpendicular for roll. [orig: @0x4ba24c-0x4ba2fe <<11; @0x4b6f01-0x4b6fa3 <<9]
+    // perpendicular for roll. [orig: @0x4BA249..0x4BA2FB <<11; @0x4b6f01-0x4b6fa3 <<9]
     const int shift = org2 ? 9 : 11;
     const int32_t slide_x = static_cast<int32_t>((static_cast<int64_t>(c) << shift) >> 22);
     const int32_t slide_y = static_cast<int32_t>((static_cast<int64_t>(s) << shift) >> 22);

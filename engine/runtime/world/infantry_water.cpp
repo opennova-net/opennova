@@ -18,7 +18,7 @@ namespace {
 // The org1 float model (see infantry_water_block). The hysteresis gap and the
 // sink are 16.16 (0.625u and ~0.0187u); the bob shares the sink's magnitude, so
 // a floating body rides between the plane and 0.037u under it — a ripple, not a
-// visible heave. [orig: the 0xA000 entry bias @0x4bfb84, -0x4C9 @0x4bfbf1, the
+// visible heave. [orig: the 0xA000 entry bias @0x4BFAF0..0x4BFAF8, -0x4C9 @0x4BFB7D, the
 // sin amplitude dbl_7C9C28 and the phase pair flt_7C6950 * dbl_7C9BD0]
 // The phase pair is the LITERAL 1/256 * 3.1 (Jointops.exe bytes @0x7C6950 =
 // 0.00390625f, @0x7C9BD0 = 3.1 double) -- not pi/256; corrected 2026-08-23.
@@ -32,10 +32,10 @@ constexpr double kWaterBobPhaseScale = 0.00390625 * 3.1;
 // cleared at the surface clamp and on the not-submerged exit (~0x208000).
 // [orig: set @0x4b81ef; clear @0x4b8176; exit @0x4b8373]
 constexpr uint32_t kEntityFlagDiveLatch = 0x200000u;
-constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4b81d0 `surf - 0x2000`]
-constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4b8124 `+ 112`]
-constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4b80d6 `+ 4096`]
-constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
+constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4B81C2 `surf - 0x2000`]
+constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4B811D `+ 112`]
+constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4B80D4 `+ 4096`]
+constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4B80F3..0x4B810E `2048`]
 
 } // namespace
 

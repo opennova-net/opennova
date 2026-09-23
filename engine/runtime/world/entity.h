@@ -215,7 +215,9 @@ inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_weapon
 inline constexpr uint32_t kEntityFlagParachute = 0x20;        // deployed chute (D-INF-20) [orig: radius leg @0x4b3aac]
 inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-climb chase mode: gravity becomes the
                                                               // sixteenth-step Z chase to the AI move target (floor
-                                                              // -16384); the AI-order writer rides its own slice
+                                                              // -16384); set at spawn by the BMS record's attribute
+                                                              // bits 0x4000 / 0x20000 [orig: Entity_SpawnFromBMSRecord
+                                                              // @0x40EE2A..0x40EE33, @0x40EE70..0x40EE79]
                                                               // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
 inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]

@@ -97,7 +97,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // Stance-change (0x1D) and the extended movement uplink (0x0C) can arrive in
         // the same network pump.  The jump block is per-tick and reads the CURRENT
         // MoveOrder prone bit; the fourth-tick locomotion selector below is not an
-        // eligibility cache. [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181;
+        // eligibility cache. [orig: MoveOrder&0x100 -> the prone local @0x4b4165-0x4b4181;
         // prone gate @0x4b7e99]
         const bool replicated_prone = (ent->net_stance_bits & 0x1u) != 0;
         const bool jump_state_blocked = player_jump_world_state_blocked(inf, ent);

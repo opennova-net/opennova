@@ -228,7 +228,7 @@ inline int gait_stance_transition_clip(int current, int target) {
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
 // [orig: g_animStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
-// @0x4EC252..0x4EC27A]
+// @0x4EC251..0x4EC27A]
 inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
 inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
 
@@ -356,7 +356,7 @@ struct InfantryState {
     // The request is entity+0x2BC; the playing id is AnimMap slot+0x3C.
     // Body selection only writes the request. The next motor-head update
     // commits it and advances the corresponding playheads together.
-    // [orig: AnimMap_UpdateEntity @0x40B633..0x40B779]
+    // [orig: AnimMap_UpdateEntity @0x40B630..0x40B778]
     int anim_playing_state = -1;
     int32_t clip_phase = 0;
     // The primary AnimMap keeps both playheads alive while it cross-fades state
@@ -589,7 +589,7 @@ struct InfantryState {
     // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
     // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_weaponScopeActive,
     // Flags|8 from g_binocularsRaised (the case-26 input toggle @ 0x4e064c, forced
-    // off when dead / spawn-gated / inputFlags&0x1E; no host binoculars input yet)].
+    // off when dead / spawn-gated / inputFlags&0x1E)].
     bool scope_raised = false;
     bool binoculars_raised = false;
     // The arms-dip feed (entity+0x371 byte / +0x36C pitch-kick term): while the

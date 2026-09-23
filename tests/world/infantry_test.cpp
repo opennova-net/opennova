@@ -980,7 +980,7 @@ void test_remote_player_body_anim() {
 // A stance-change message can be dispatched before the same frame's extended player
 // uplink.  The authority jump gate reads the reconstructed MoveOrder word directly;
 // it must not wait for the fourth-tick locomotion-selection cadence to observe prone.
-// [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
+// [orig: MoveOrder&0x100 -> the prone local @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
 void test_remote_player_same_tick_prone_jump_is_rejected() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -1016,7 +1016,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
 // An airborne wire peer can have cooldown zero (for example, a ledge fall or a peer
 // first observed after launch); press/release/repress while still airborne must not
 // manufacture jump_start records.  Once grounded, a fresh press may launch normally.
-// [orig: `test Flags,1A002h` @0x4b7ea0; in-air bit 0x2000]
+// [orig: `test Flags,1A002h` @0x4B7EA4; in-air bit 0x2000]
 void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -1062,7 +1062,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
 // Preserve the rest of retail's jump eligibility mask on the authority copy.  These
 // flags are live world state, independent of the remote movement-input byte: dead,
 // in-air/swimming, both water bits, and carried bodies all reject a jump stamp.
-// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4b7ea0-0x4b7ebd]
+// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4B7EA4..0x4B7EBD]
 void test_remote_player_jump_respects_world_state_flag_gates() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -2570,7 +2570,7 @@ void test_slope_prone_body_conforms_org2() {
 
 // The org1 leg + the selector, unit-driven through the pass itself (the NPC think/
 // select churn would otherwise rewrite the anim state before the pass sees it).
-// [orig: selector @0x4ba10f; chase @0x4ba320; decay @0x4ba133; slide @0x4ba24c]
+// [orig: selector @0x4ba10f; chase @0x4ba320; decay @0x4ba133; slide @0x4BA249]
 void test_slope_pass_org1_selector_and_chase() {
     // Gradient 1 u/u (the steep 45-deg dune of the slide test).
     Field ramp([](int x) {
@@ -2675,7 +2675,8 @@ void test_death_presentation() {
     }
 
     // ---- corpse persistence: countdown -> despawn (no local player = no watcher) ----
-    // [orig: @0x4b9e6a decrement / Entity_Destroy @0x4b9f93; our despawn = hidden]
+    // [orig: Entity_UpdateInfantryAI @0x4B9910: decrement @0x4b9e6a, the Entity_Destroy
+    //  call @0x4B9F93; our despawn = hidden]
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
@@ -3100,7 +3101,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     // An authored person (`deathtime 30`, parse-scaled to 30*62 + 62 ticks
     // [orig: ItemDef_ParseProperty @0x49fa6c-0x49faa0 -> def+0x890; the death edge
     //  copies it to entity+0x148 @0x4b9c97]). A def-less row keeps 0, and the edge
-    // tick's persistence block then destroys the row (Entity_Destroy @0x4b9f93)
+    // tick's persistence block then destroys the row (the Entity_Destroy call @0x4B9F93)
     // before the death clip is ever staged, which this test is not about.
     seed.deathtime_ticks = 30 * 62 + 62;
     const EntityHandle handle = w->registry.spawn(0, seed);
@@ -4709,9 +4710,10 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
 }
 
 // Corpse expiry is the shared destroy: incoming brain references and the
-// shared-ring scars the body wrote go with the row. [orig: @0x4B9F93 ->
-//  Entity_Destroy @0x43E810: Scar_ClearEntriesByEntity @0x43E8E4,
-//  Entity_ClearAllReferences @0x43E921 over the pool-1 brains' +148/+156]
+// shared-ring scars the body wrote go with the row. [orig: Entity_UpdateInfantryAI
+//  @0x4B9910 (the Entity_Destroy call @0x4B9F93) -> Entity_Destroy @0x43E810 (the
+//  Scar_ClearEntriesByEntity call @0x43E8E4, the Entity_ClearAllReferences call
+//  @0x43E921 over the pool-1 brains' +148/+156)]
 static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     NpcRespawnRig r;
     World &w = *r.storage;
@@ -5150,9 +5152,11 @@ int main() {
         CHECK(e->pos[0] == 0);
     }
 
-    // ---- gravity: -416 every 2 ticks to terminal -32768; landing + fall damage ----
-    // [orig: dump 5088-5173 — pos.z += 2*vel_z; damage when vel_z <= -1057*scale,
-    //  health -= excess >> 4 (dword_C6EAE4 = the fallmps named value)]
+    // ---- gravity: -416 per even key tick to terminal -32768 (pos.z += 2*vel_z,
+    // then the quarter-step tail keeps a quarter of it); landing + fall damage ----
+    // [orig: Entity_UpdateInfantryAI gravity @0x4bf7bf, pos @0x4bf7ec, tail
+    //  @0x4BFC65..0x4BFC86; damage when vel_z <= -1057*scale @0x4BF839, health -=
+    //  excess >> 4 @0x4BF848..0x4BF864 (dword_C6EAE4 = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;
@@ -5801,7 +5805,7 @@ int main() {
         run_ticks(ai, w, 100, 101);           // release edge
         CHECK(e->inf.jump_cooldown == 0);
 
-        // Prone bodies never jump. [orig: the var_10AC gate @0x4b7e99]
+        // Prone bodies never jump. [orig: the prone-local gate @0x4b7e99]
         e->inf.stance = InfantryState::Stance::kProne;
         e->inf.jump_requested = true;
         run_ticks(ai, w, 101, 102);

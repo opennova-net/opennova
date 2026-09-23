@@ -40,7 +40,7 @@ void blend_root_frame(const RootMotionFrame &previous, const RootMotionFrame &cu
 
 // Reconcile the requested id before checking the OLD channel's end flag.
 // Promoting a pending request does not re-enter initialization in this call.
-// [orig: AnimMap_UpdateEntity @0x40B633..0x40B7C9]
+// [orig: AnimMap_UpdateEntity @0x40B630..0x40B7C9]
 static void prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source) {
     if (inf.anim_playing_state < 0) inf.anim_playing_state = inf.anim_state;
     if (inf.anim_state != inf.body_clip_state())

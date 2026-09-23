@@ -36,7 +36,7 @@ bool infantry_is_dragger(const AiEntity &, const World &);
 bool infantry_drag_corpse(AiEntity &, World &);
 // Called after the authority's 16-tick selection; scan every 256 ticks, or every 32
 // while the entity is the scripted voice speaker.
-// [orig: Entity_UpdateInfantryAI @0x4BE0D0..0x4BE7FD]
+// [orig: Entity_UpdateInfantryAI @0x4BE0CA..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
 
 // Per-tick attachment sample, resolved before think and consumed before root motion.
