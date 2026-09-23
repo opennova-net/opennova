@@ -141,7 +141,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
             resolve_piloting_player(world, veh, traits) != nullptr;
     if (!m.net_predicted && !ai_drive && !player_piloted) return;
     if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        // [orig: Entity_UpdateAircraftPhysics @0x49034C reads the row's Yaw,
+        //  unmoved = the spawn form, Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
         m.yaw_seeded = true;
     }
     int32_t px = to_fixed(veh.position.x);

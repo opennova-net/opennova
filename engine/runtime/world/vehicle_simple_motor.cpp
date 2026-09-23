@@ -228,9 +228,12 @@ void VehicleSystem::tick_simple_motor(
 	if (prediction && !m.net_predicted)
 		return;
 	if (!m.yaw_seeded) {
-		m.yaw_bam = bam_heading_from_mission_yaw_deg(e.yaw);
-		m.air_pitch_bam = bam_mul_wrap(e.pitch, 11930464);
-		m.air_roll_bam = bam_mul_wrap(e.roll, 11930464);
+		// The unmoved row's placement angles, as the entry copy reads them.
+		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+		//  Entity_ProcessInfantryPhysics @0x46E133/@0x46E13C/@0x46E14C]
+		m.yaw_bam = spawn_angle_bam(90 - e.yaw);
+		m.air_pitch_bam = spawn_angle_bam(e.pitch);
+		m.air_roll_bam = spawn_angle_bam(e.roll);
 		m.yaw_seeded = true;
 	}
 	stamp_saved_live_pose(e);

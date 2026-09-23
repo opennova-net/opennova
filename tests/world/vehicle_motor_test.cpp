@@ -2061,21 +2061,25 @@ void test_trails_sample_only_in_contact_arms() {
 }
 
 // The slope factor samples the runtime table at (pitch + 0x200000) >> 22 rather
-// than a continuous cosine. [orig: Entity_UpdateTankVehiclePhysics
-//  @0x489CE6..0x489D01; cveh @0x48C1C6..0x48C1D7; cbik @0x485362..0x48537E]
+// than a continuous cosine. A boxless row reads its placement pitch in the
+// spawn form: at -16 degrees that samples entry 979 where -16 x 11930464
+// would sample 978. [orig: Entity_UpdateTankVehiclePhysics
+//  @0x489CE6..0x489D01; cveh @0x48C1C6..0x48C1D7; cbik @0x485362..0x48537E;
+//  Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86]
 void test_slope_factor_samples_quantized_table() {
 	for (const VehicleFamily family :
-			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike }) {
+			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike })
+	for (const int16_t pitch : { int16_t(10), int16_t(-16) }) {
 		Rig r;
 		auto t = buggy_traits();
 		t.family = family;
 		t.player_control = false;
 		auto &m = r.veh().veh;
 		m.yaw_seeded = true;
-		r.veh().pitch = 10;
+		r.veh().pitch = pitch;
 		m.speed = 20000;
 		m.cmd_speed = 20000;
-		const int32_t pitch_bam = 10 * 11930464;
+		const int32_t pitch_bam = spawn_angle_bam(pitch);
 		int32_t c = 0, s = 0;
 		quantized_dir(pitch_bam, c, s);
 		const auto target_for = [](int32_t cos22) {
@@ -2258,7 +2262,9 @@ void test_mover_prologue_stamps_saved_live_pose() {
 	{
 		Rig r;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.veh().yaw = 1;
 		r.veh().pitch = 5;
+		r.veh().roll = -3;
 		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
 			to_fixed(r.veh().position.z) };
 		CHECK(!r.veh().saved_live_valid);
@@ -2266,8 +2272,13 @@ void test_mover_prologue_stamps_saved_live_pose() {
 		CHECK(r.veh().saved_live_valid);
 		for (int axis = 0; axis < 3; ++axis)
 			CHECK(r.veh().saved_live_pos[axis] == entry[axis]);
-		// The stamp copies the BAM attitude the mover starts from.
-		CHECK(r.veh().saved_live_pitch == 5 * 11930464);
+		// The stamp copies the BAM attitude the mover starts from: an unmoved
+		// row's placement angles in the spawn form, ((deg << 16) / 360) << 16.
+		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+		//  Entity_UpdateTankVehiclePhysics @0x488B2A..0x488B3C]
+		CHECK(r.veh().saved_live_yaw == 1061748736);  // 90 - 1 = 89
+		CHECK(r.veh().saved_live_pitch == 59637760);  // 5
+		CHECK(r.veh().saved_live_roll == -35782656);  // -3
 	}
 	{
 		Rig r;

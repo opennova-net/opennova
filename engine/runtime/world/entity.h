@@ -141,7 +141,7 @@ struct Seat {
     uint8_t pose_index = 0;     // `sitexNN`/`ctrlxNN`/`drvrxNN` -> anim_sit + NN
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
-    int16_t yaw_offset = 0;     // gunner facing offset vs the vehicle yaw [orig: @0x43656c]
+    int16_t yaw_offset = 0;     // the seat userpoint's authored facing vs the vehicle yaw, degrees
     // An items.def addeweap* anchor is not a mount-facing convention. Retail
     // builds the child entity's complete orientation from this userpoint's
     // authored direction and live owning bone every update. The flag keeps

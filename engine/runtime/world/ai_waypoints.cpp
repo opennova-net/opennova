@@ -722,7 +722,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     AiBrain &b = ve->brain;
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+        // [orig: Entity_UpdateAircraftPhysics @0x49034C reads the row's Yaw,
+        //  unmoved = the spawn form, Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
         m.yaw_seeded = true;
     }
     m.ai_drive = true;

@@ -2094,6 +2094,14 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+# Unmoved carriers read their placement angles in the spawn form: the motors'
+# lazy seeds, the carrier pose, the emplaced gun frame, seat points and the
+# attach pre-snap (Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6).
+add_executable(vehicle_placement_angles_test world/vehicle_placement_angles_test.cpp)
+target_link_libraries(vehicle_placement_angles_test PRIVATE opennova_runtime)
+target_compile_features(vehicle_placement_angles_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_placement_angles COMMAND vehicle_placement_angles_test)
+
 add_executable(vehicle_followups_test world/vehicle_followups_test.cpp)
 target_link_libraries(vehicle_followups_test PRIVATE opennova_runtime)
 add_test(NAME vehicle_followups COMMAND vehicle_followups_test)

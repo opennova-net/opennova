@@ -190,11 +190,13 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
 }
 
 // Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
-// before the authority applies the relationship. UseGun subtracts its authored
-// offset. Our split local-player body must update target_heading too; otherwise
-// pose_if_mounted immediately restores the pre-attach look and swings the gun/body
-// overlay away from the authored neutral pose.
-// [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg @0x43656c]
+// before the authority applies the relationship. A UseGun seat faces the
+// requester along the gun: the gun's own Yaw less its stored yaw word (+0x322)
+// shifted up; the seat userpoint's facing turns only the carried body frame.
+// Our split local-player body must update target_heading too; otherwise
+// pose_if_mounted immediately restores the pre-attach look.
+// [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg
+//  @0x43655F..0x43656E (the subtract @0x43656c)]
 void test_usegun_attach_presnaps_local_look() {
     World w;
     AiSystem &ai = w.ai;
@@ -212,6 +214,7 @@ void test_usegun_attach_presnaps_local_look() {
     usegun.source_name = "UseGun";
     usegun.yaw_offset = 12;
     gun.seats.push_back(usegun);
+    gun.emplaced_gun_yaw_word = 0x0400; // a previous gunner left it traversed
     const EntityHandle gun_h = w.registry.spawn(1, gun);
 
     Entity player;
@@ -231,9 +234,10 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.look_pitch = 0x12345678;
 
     CHECK(w.vehicles.process_attach(player_h, gun_h, 6));
-    const int16_t expected_yaw = 23; // vehicle yaw 35 - UseGun offset 12
-    const int32_t expected_heading =
-            bam_heading_from_mission_yaw_deg(expected_yaw);
+    const int16_t expected_yaw = 23; // the carried frame: vehicle yaw 35 - UseGun offset 12
+    // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432 less
+    // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+    const int32_t expected_heading = 589037568;
     CHECK(w.registry.get(player_h)->yaw == expected_yaw);
     CHECK(body.heading == expected_heading);
     CHECK(body.inf.target_heading == expected_heading);

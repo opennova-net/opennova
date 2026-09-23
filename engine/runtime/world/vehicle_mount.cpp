@@ -11,6 +11,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
 
@@ -222,34 +223,24 @@ void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
 
 Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
     // Seat points use the carrier's live BAM frame, as collision/render do;
-    // the mission-degree mirrors discard sub-degree flight motion. Unseeded
-    // flat mission objects can use the direct 2D rotate.
+    // the mission-degree mirrors discard sub-degree flight motion. An unmoved
+    // carrier's frame is its placement angles in the spawn form.
     // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50, point @0x4b0d42;
-    //  Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x613f40; Entity_SpawnFromBMSRecord
+    //  @0x40EB42..0x40EBA6]
     const Vec3 &L = local;
-    if (!vehicle.veh.yaw_seeded && vehicle.pitch == 0 && vehicle.roll == 0) {
-        constexpr double kDeg2Rad = io::kRadiansPerDegree;
-        const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
-        const double ca = std::cos(a), sa = std::sin(a);
-        Vec3 p;
-        p.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
-        p.y = vehicle.position.y + static_cast<float>(L.x * sa + L.y * ca);
-        p.z = vehicle.position.z + L.z;
-        return p;
-    }
     const int32_t heading = vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
+            : spawn_angle_bam(90 - vehicle.yaw);
     const int32_t origin[3] = {0, 0, 0};
     const CollisionMatrix m = collision_matrix_from_euler(
             heading,
             vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
-                    : bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch)),
+                    : spawn_angle_bam(vehicle.pitch),
             vehicle.veh.yaw_seeded ? vehicle.veh.air_roll_bam
-                    : bam_from_degrees_wrapped(static_cast<double>(vehicle.roll)), origin);
+                    : spawn_angle_bam(vehicle.roll), origin);
     // seat_local is pre-swizzled ((-y, x, z) over the raw authored ints — a
     // baked-in Rz(90)), while the collision euler matrix with heading
-    // bam(90 - yaw) expects RAW model coordinates: un-swizzle first, so the
-    // flat case reduces bit-for-bit to the legacy -yaw rotate above.
+    // bam(90 - yaw) expects RAW model coordinates: un-swizzle first.
     const int32_t lf[3] = {static_cast<int32_t>(L.y * 65536.0f),
                            static_cast<int32_t>(-L.x * 65536.0f),
                            static_cast<int32_t>(L.z * 65536.0f)};
@@ -262,23 +253,23 @@ Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
     return p;
 }
 
-static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
-    if (seat.attachment_frame)
-        return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
-    if (seat.type == SeatType::Gunner)
-        return static_cast<int16_t>(vehicle.yaw - seat.yaw_offset);
-    return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
-}
-
 void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehicle, const Seat &seat) {
     World &world = world_;
-    const int16_t seat_yaw = mounted_pose_yaw(vehicle, seat);
-    occupant.yaw = seat_yaw;
+    // A UseGun requester faces along the gun: the carrier's own Yaw less its
+    // stored gun yaw word (+0x322) shifted up. Every other seat takes the seat
+    // bone's yaw, the carrier frame turned by the seat offset as
+    // pose_mounted_occupant composes it.
+    // [orig: Entity_RequestVehicleAttach @0x43655F..0x43656E (UseGun),
+    //  @0x4365BF..0x4365C3 (the Entity_GetBoneTransformAndOrientation yaw)]
+    const int32_t carrier = emplaced_gun_frame_heading(vehicle);
+    const int32_t seat_heading = seat.type == SeatType::Gunner && !seat.attachment_frame
+            ? io::bam_sub(carrier, emplaced_word_bam(vehicle.emplaced_gun_yaw_word))
+            : io::bam_sub(carrier, bam_from_degrees_wrapped(seat.yaw_offset));
+    occupant.yaw = static_cast<int16_t>(
+            std::lround(mission_yaw_deg_from_bam_heading(seat_heading)));
     AiEntity *body = world.ai.for_handle(occupant.handle);
     if (body == nullptr) return;
 
-    const int32_t seat_heading =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(seat_yaw));
     body->heading = seat_heading;
     // Retail has one entity Yaw. OpenNova separates the local input-owned look
     // target from the render heading, so both must receive the same attach snap.

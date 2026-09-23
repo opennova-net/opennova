@@ -591,14 +591,16 @@ int main() {
     // ---- mounted seat orientation feeds the carried body while gunner look stays live ----
     // The unmoved gun still holds its placement angles in the spawn form (low half zero):
     // heading ((90 - 37) << 16) / 360 << 16 = 632291328, which the gunner's 11-degree seat
-    // offset turns to 763526440; pitch -12 and roll 17 take the same form.
-    // [orig: seat carry @0x4b654e-0x4b6575; Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
+    // offset turns to 763526440; pitch -12 and roll 17 take the same form. The attach
+    // pre-snap faces the gunner along the gun, the gun's heading less its stored yaw word
+    // (zero here), so the request heading is the gun's own 632291328.
+    // [orig: seat carry @0x4b654e-0x4b6575; Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+    //  Entity_RequestVehicleAttach @0x43655F..0x43656E]
     [] {
         constexpr int32_t kSeatHeading = 763526440;
         constexpr int32_t kSeatPitch = -143130624;
         constexpr int32_t kSeatRoll = 202768384;
-        const int32_t kRequestHeading =
-                world::bam_heading_from_mission_yaw_deg(26.0);
+        constexpr int32_t kRequestHeading = 632291328;
         const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
 
         auto wp = std::make_unique<World>();
@@ -655,8 +657,7 @@ int main() {
         constexpr int32_t kSeatHeading = 763526440;
         constexpr int32_t kSeatPitch = -143130624;
         constexpr int32_t kSeatRoll = 202768384;
-        const int32_t request_heading =
-                world::bam_heading_from_mission_yaw_deg(26.0);
+        constexpr int32_t request_heading = 632291328; // the pre-snap, as above
         const int32_t look_heading = world::bam_heading_from_mission_yaw_deg(137.25);
         constexpr int32_t kLookPitch = 12345678;
 
