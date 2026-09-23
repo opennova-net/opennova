@@ -42,9 +42,15 @@ inline sends lead the NEXT frame's queue.
 The port keeps that split. `Server_TickUpdate` routes the previous entity pass's
 records at its head (`route_entity_pass_records`), runs `World::run_script_pass`
 and its maintenance, builds and queues the 0x0A, then runs
-`World::run_entity_pass` (the entity update, the weapon pump, the tail);
-`World::run_logic_tick` composes the three for the bare local role, a joiner and
-the tests. The live group recount (`EntityPool_RecountLiveByGroup @0x40E8D0`)
+`World::run_entity_pass` (the gated entity update and the tail that advances
+`logic_tick`); `World::run_logic_tick` composes the script and entity passes for
+the bare local role, a joiner and the tests. The weapon-action walk is one pass
+per frame after the weather and the camera, outside the entity-update gate:
+`World::pump_weapon_actions`, which `HostRole` and `LocalRole` call after their
+weather and view legs whatever the phase (pool 0 in slot order, then each
+unoccupied EWEAP row whose slot is still hot; a joiner walks its replica slots
+instead) `[orig: WeaponAction_ProcessAllEntities @0x542690, the call @0x526786]`.
+The live group recount (`EntityPool_RecountLiveByGroup @0x40E8D0`)
 runs from the periodic second only, so the bare local role no longer recounts.
 `World::update_all_entities` walks pool 1 once per row in slot order with each
 row's parent chain first, then the phases retail runs after it (the HeliLift
