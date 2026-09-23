@@ -4066,14 +4066,16 @@ bool check_refused_touch_arms_the_nag() {
 	FrontierHintFixture f(/*with_chain=*/true);
 	f.world.match.player(f.player)->play_ticks = 5000;
 	f.world.logic_tick = 62u * 60u;
+	// The capture leg reads the frame's own tick; the entity pass's tail
+	// advances it afterwards.
 	auto touch = [&f](uint32_t age_ms) {
-		const uint32_t next_tick = f.world.logic_tick + 1;
+		const uint32_t frame_tick = f.world.logic_tick;
 		const uint32_t now_ms =
-				opennova::inmatch::host_milliseconds_for_logic_tick(next_tick);
+				opennova::inmatch::host_milliseconds_for_logic_tick(frame_tick);
 		f.conn().reply.chat_last_ms = age_ms == 0 ? 0 : now_ms - age_ms;
 		f.world.zones.capture.refused_touches.push_back(f.player);
 		opennova::inmatch::Server_TickUpdate(f.ctx);
-		return f.world.logic_tick == next_tick ? now_ms : 0u;
+		return f.world.logic_tick == frame_tick + 1 ? now_ms : 0u;
 	};
 	uint32_t now_ms = touch(0);
 	bool ok = expect(now_ms != 0 && !f.conn().reply.capture_nag_held &&
