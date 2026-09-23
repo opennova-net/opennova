@@ -1553,6 +1553,30 @@ bool decode_entity_remove(const uint8_t *body, size_t len,
 	return consumed == 2;
 }
 
+// S2C 0x3F. The safe wire boundary rejects a short body where the retail
+// guarded reads zero-fill. [orig: NapiNPClientMsg_0x03F @0x42BB20]
+bool decode_objective_notification(const uint8_t *body, size_t len,
+		ObjectiveNotification &out, size_t &consumed) {
+	consumed = 0;
+	out = ObjectiveNotification{};
+	Cursor c{body, body + len, true};
+	out.kind = c.u8();
+	if (out.kind == 0) {
+		out.slot = c.i32();
+		out.is_win = c.i32();
+		out.is_active = c.i32();
+		out.flag = c.u8();
+	} else if (out.kind == 1) {
+		out.team = c.i32();
+		out.key = c.cstr();
+		// The 256-byte stack copy keeps 255 chars [orig: @0x42bbff..0x42bc1c].
+		if (out.key.size() > 255) out.key.resize(255);
+	}
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return true;
+}
+
 // S2C 0x2F flag/carryable state — fixed 19 bytes. Retail's guarded cursor
 // zero-fills a short body; the safe wire boundary rejects it instead.
 // [orig: NapiNPClientMsg_0x02F @0x430E10]

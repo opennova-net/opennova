@@ -412,6 +412,42 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
 
 
+func test_objective_and_relay_effects_post_chat_lines() -> void:
+	# BMS ShowWin/LoseSubgoal's objective notification lands as two chat-feed
+	# lines, the gametext header and the mission directive, and a one-character
+	# directive is dropped (the engine's hud_game_text.h objective_directive).
+	# The S2C 0x3F mission-text relay posts its key's resolved line; an
+	# unresolved key posts nothing.
+	var gametext := RtxtStringFile.new()
+	var misc := gametext.add_section("Misc")
+	gametext.add_entry("STRMISC_NEWOBJECTIVE", "New Objective", misc, Vector2i.ZERO)
+	var mission := RtxtStringFile.new()
+	var win := mission.add_section("WinConditions")
+	mission.add_entry("STRWINDIRECTIVE021", "Take the bridge", win, Vector2i.ZERO)
+	mission.add_entry("STRWINDIRECTIVE022", "x", win, Vector2i.ZERO)
+	mission.add_entry("STRRELAY01", "Reinforcements inbound", win, Vector2i.ZERO)
+	var old_gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
+	var old_mission := Strings.get_table(Strings.TABLE_MISSION)
+	Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
+	Strings.register_table(Strings.TABLE_MISSION, mission)
+	var presenter := GameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([MissionEffect.make("objective", 2, 1, 21)])
+	assert_eq(presenter.pending_chat_line_count(), 2,
+			"the header and the directive each post one line")
+	presenter.apply_mission_effects([MissionEffect.make("objective", 3, 1, 22)])
+	assert_eq(presenter.pending_chat_line_count(), 3,
+			"a one-character directive is dropped; the header still posts")
+	presenter.apply_mission_effects([
+		MissionEffect.make("mission_text_chat", 0, 0, 0, "STRRELAY01"),
+		MissionEffect.make("mission_text_chat", 0, 0, 0, "MISSING"),
+	])
+	assert_eq(presenter.pending_chat_line_count(), 4,
+			"the relayed key resolves; an unresolved key posts nothing")
+	Strings.register_table(Strings.TABLE_GAMETEXT, old_gametext)
+	Strings.register_table(Strings.TABLE_MISSION, old_mission)
+
+
 func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	# consol/pconsol/consol# ride the debug_text kind into the system message
 	# ring (the Triggered Text ring) without replacing the objective line.

@@ -1,6 +1,7 @@
 #include <runtime/mission/event_runtime.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include <base/io/strutil.h>
 #include <runtime/world/world.h>
@@ -602,8 +603,15 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             w.out.effects.push({"text", a.param1, 0, 0, 0, std::string()});
             break;
         // Presentation effects: the engine hands these to the embedder's audio/HUD/overlay.
-        case bms::ActionType::PlayWavList: // play dialog/wav param1 (param2 = always-play flag)
-            w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
+        case bms::ActionType::PlayWavList:
+            // Dialog param1 plays only on a client, and once the round-over
+            // latch holds only when param2 == 1 forces it; a skipped play never
+            // reaches the dialog registry the PLYRDIALOG subs read.
+            // [orig: EventAction_Dispatch case 7 — is_mp_session_peer @0x45443d,
+            //  param2 == 1 @0x45444a, g_spawn_success_gate @0x454450,
+            //  Dialog_PlayByIndex @0x454461]
+            if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended))
+                w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWaypoints:
             // The engine flag the waypoint HUD label + SP cycle key gate on
@@ -618,20 +626,33 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             break;
         case bms::ActionType::ShowWinSubgoal:
             // Set/clear the show-win bit — the RAW slot shift is the original's
-            // (slot 1..8 -> bits 1..8). The "New Objective" toast rides the
-            // effect. The shift count is masked to 5 bits like the x86 shl.
-            // [orig: case 35 @0x4546af — shl @0x4546bd/@0x4546cc, bit
-            //  @0x4546bf/@0x4546d0; HUD_ShowObjectiveNotification @0x4546e2]
+            // (slot 1..8 -> bits 1..8); the shift count is masked to 5 bits
+            // like the x86 shl. Then the "New Objective" notification (win,
+            // relay flag 1) and, for a shown objective, the NEW_GOAL sound at
+            // the local player through the misnamed full-volume play wrapper.
+            // [orig: EventAction_Dispatch case 35 @0x4546af — shl
+            //  @0x4546bd/@0x4546cc, bit @0x4546bf/@0x4546d0; the
+            //  HUD_ShowObjectiveNotification call @0x4546e2; the local-player
+            //  and param2 gates @0x4546e7..0x4546fb, the HUD_DrawDefaultProgressBar
+            //  call @0x45470c with dword_24E0990 (the NEW_GOAL set) and the
+            //  player position; HUD_DrawDefaultProgressBar @0x527e60 wraps
+            //  Sound_Play3DPositional(set, pos, 0, 255)]
             if (a.param2 != 0) w.script.subgoals.show_win |= (1u << (a.param1 & 31));
             else w.script.subgoals.show_win &= ~(1u << (a.param1 & 31));
-            w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
+            w.show_objective_notification(a.param1, 1, a.param2, 1);
+            if (a.param2 != 0) {
+                if (const world::Entity *player = w.registry.get(w.cached.local_player))
+                    w.out.fire_sounds.play_immediate("NEW_GOAL", player->position, 0);
+            }
             break;
         case bms::ActionType::ShowLoseSubgoal:
-            // [orig: case 36 @0x454724 — shl @0x454732/@0x454741, the
-            //  show-lose mirror @0x454734/@0x454745]
+            // The lose mirror: no sound, relay flag 0.
+            // [orig: EventAction_Dispatch case 36 @0x454724 — shl
+            //  @0x454732/@0x454741, the show-lose mirror @0x454734/@0x454745;
+            //  the HUD_ShowObjectiveNotification call @0x454757]
             if (a.param2 != 0) w.script.subgoals.show_lose |= (1u << (a.param1 & 31));
             else w.script.subgoals.show_lose &= ~(1u << (a.param1 & 31));
-            w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
+            w.show_objective_notification(a.param1, 0, a.param2, 0);
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
@@ -659,8 +680,11 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // byte_A763FB = header win_scores; the "Score_AccumulateBandwidth"
             // callee name is a kong misnomer] and the header unknown5[2]-masked
             // team-banner leg [orig: @0x45458d byte_A762D6].
-            // [orig: case 14 @0x454500 — shl @0x454508, guard @0x45450a, set
-            //  @0x45451d, round-running gate @0x45453a, STRWINMSG resolve @0x45456f]
+            // The announcement relays to the joiners as the key with team 1.
+            // [orig: EventAction_Dispatch case 14 @0x454500 — shl @0x454508,
+            //  guard @0x45450a, set @0x45451d, round-running gate @0x45453a,
+            //  the STRWINMSG%03i key @0x454552, its resolve @0x45456f, the
+            //  GameMsg_AddChatLineAndRelay(line, 1, key) call @0x454578]
             const uint32_t bit = 1u << (a.param1 & 31);
             if ((w.script.subgoals.won & bit) != 0) break;
             w.script.subgoals.won |= bit;
@@ -668,20 +692,33 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
                     ? w.script.subgoals.win_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.out.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
+            if (announce != 0) {
+                char key[32];
+                std::snprintf(key, sizeof(key), "STRWINMSG%03d", text_id);
+                w.relay_mission_text_chat(1, key);
+            }
             break;
         }
         case bms::ActionType::SubGoalLost: {
             // No already-set guard (unlike won). The chat line AND the
             // persistent banner ride the same round-running gate; the
             // unknown5[3]-masked team-banner leg is deferred with its win
-            // sibling. [orig: case 15 @0x4545e0 — set @0x4545ea, gate
-            //  @0x4545f0, STRLOSEMSG chat @0x454632 + SetBannerText @0x454647;
-            //  byte_A762D7 leg @0x45465c; the masked shl @0x4545e8]
+            // sibling. The announcement relays to the joiners as the key with
+            // team 0. [orig: EventAction_Dispatch case 15 @0x4545e0 — set
+            //  @0x4545ea, gate @0x4545f0, the STRLOSEMSG%03i key @0x45460c,
+            //  the GameMsg_AddChatLineAndRelay(line, 0, key) call @0x454632,
+            //  the GameMsg_SetBannerText call @0x454647; byte_A762D7 leg
+            //  @0x45465c; the masked shl @0x4545e8]
             w.script.subgoals.lost |= (1u << (a.param1 & 31));
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
                     ? w.script.subgoals.lose_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.out.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
+            if (announce != 0) {
+                char key[32];
+                std::snprintf(key, sizeof(key), "STRLOSEMSG%03d", text_id);
+                w.relay_mission_text_chat(0, key);
+            }
             break;
         }
         case bms::ActionType::GroupResetHasVisited:
@@ -743,17 +780,38 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             cmds.set_group_target_selector(a.param1, world::AiTargetSelector::ExclusiveGroup, a.param2);
             break;
         case bms::ActionType::SpecialSubType:
-            // [orig: EventAction_Dispatch case 28 @0x4548e1 ->
-            //  EventAction_HandleSpecialTypes @0x4535a0] Sub 38 clears the
-            // input-action word (@0x4535c2), so every pending input bit is
-            // dropped. Subs 37 (RenderState_SetLayerVisibilityByIndex
-            // @0x4535d5) and 39 (dword_AE0718 = p1 == 0 @0x4535bc) have no
-            // witnessed consumer here and fall to the unported marker below.
-            if (a.action_sub_type == 38) {
-                w.script.input_action_bits = 0;
-                break;
+            // Three subs; every other one returns without a write.
+            // [orig: EventAction_Dispatch case 28 @0x4548e0 (the
+            //  EventAction_HandleSpecialTypes call @0x4548e1) ->
+            //  EventAction_HandleSpecialTypes @0x4535a0, the fall-out @0x4535b4]
+            switch (a.action_sub_type) {
+                case 37:
+                    // The HUD item flash: timer param1 takes param2 and the HUD
+                    // layer table rebuilds at declutter level 0. The HUD owns the
+                    // 16 timers, their per-frame countdown and the blink, so the
+                    // write rides to it as the "hud_item_flash" effect
+                    // (a = timer, b = value).
+                    // [orig: EventAction_HandleSpecialTypes @0x4535cd — the
+                    //  RenderState_SetLayerVisibilityByIndex call @0x4535d5;
+                    //  RenderState_SetLayerVisibilityByIndex @0x5a3020 — the
+                    //  store @0x5a302a, the CRenderState_SetLayerVisibility(0)
+                    //  call @0x5a3031]
+                    w.out.effects.push({"hud_item_flash", a.param1, a.param2, 0, 0, std::string()});
+                    break;
+                case 38:
+                    // Every pending input bit drops [orig: @0x4535c2].
+                    w.script.input_action_bits = 0;
+                    break;
+                case 39:
+                    // dword_AE0718 = (param1 == 0): a word no code reads (its only
+                    // other references zero it at load), so nothing is kept.
+                    // [orig: @0x4535b6..0x4535bc; EventSystem_FreeAll @0x45336e;
+                    //  EventTrigger_LoadAllData @0x454031]
+                    break;
+                default:
+                    break;
             }
-            [[fallthrough]];
+            break;
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should

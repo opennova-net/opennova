@@ -816,6 +816,34 @@ func apply_mission_effects(effects: Array) -> void:
 				var line := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Misc", key)
 				_endround_banner = line
 				_queue_chat_line(line)
+		elif kind == "objective":
+			# A shown objective's two chat lines (a = slot, b = win, c = the
+			# header text id): the gametext header, then the mission directive.
+			# The keys, the length rule and the client gate are the engine's
+			# (World::show_objective_notification, hud_game_text.h). Both lines ride
+			# the chat ring, as retail's HUD_ShowObjectiveNotification @0x5BA2E0 posts
+			# them through Chat_AddMessageChannel1 @0x4985D0.
+			var header := HudPos.objective_header(Strings.get_table(Strings.TABLE_GAMETEXT))
+			if not header.is_empty():
+				_queue_chat_line(header)
+			var directive := HudPos.objective_directive(
+					Strings.get_table(Strings.TABLE_MISSION), e.b != 0, e.c)
+			if not directive.is_empty():
+				_queue_chat_line(directive)
+		elif kind == "hud_item_flash":
+			# BMS action 28 sub 37: a = the flash timer, b = its value; the
+			# overlay owns the timers, their countdown and the level-0 rebuild.
+			if _game_hud != null:
+				_game_hud.set_item_flash(e.a, e.b)
+		elif kind == "mission_text_chat":
+			# The authority's mission-text chat relay (S2C 0x3F kind 1): the key
+			# resolves in this peer's mission text; an empty line posts nothing. It
+			# rides the chat ring like retail's GameMsg_AddChatLineAndRelay @0x5BA170.
+			var mission_table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
+			if mission_table != null:
+				var relayed := mission_table.get_string(e.text)
+				if not relayed.is_empty():
+					_queue_chat_line(relayed)
 		elif kind == "subgoal_won" or kind == "subgoal_lost":
 			# A subgoal resolved: the mission-text announcement rides the chat
 			# feed (b = the header text id, c = the round-still-running gate);

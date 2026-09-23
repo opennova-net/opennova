@@ -532,6 +532,13 @@ struct SessionRules {
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
+    // The retail is_mp_session_peer bit, the is_client half of the session's
+    // connection mode: clear only on a HostOnly (dedicated) host, where no
+    // dialog plays and no objective line posts. SP, the listen host and a
+    // joiner keep it set. [orig: g_napi_np_ctx +0x64 (server_session.cpp
+    //  stamps it from the mode's is_client bit); readers EventAction_Dispatch
+    //  case 7 @0x45443d and HUD_ShowObjectiveNotification @0x5ba382]
+    bool mp_session_peer = true;
     // The per-tick authority role consulted by World&-only callbacks. The
     // suspension role pick and both post-death blast writers read the same
     // g_napi_np_ctx.is_authority bit in retail
@@ -604,6 +611,23 @@ struct SessionRules {
     bool session_open = false;
 };
 
+// A HUD relay the authority sends the joiners as S2C 0x3F, in the order the
+// sim produced them: kind 0 is an objective notification (slot, is_win,
+// is_active, flag), kind 1 a mission-text chat line (team, key). The host
+// fan drains these.
+// [orig: Server_BroadcastEntityActionPacket @0x5080d0; its producers
+//  HUD_ShowObjectiveNotification @0x5ba2e0 (the call @0x5ba3df) and
+//  GameMsg_AddChatLineAndRelay @0x5ba170 (the call @0x5ba1c3)]
+struct HudRelay {
+    uint8_t kind = 0;
+    int32_t slot = 0;
+    int32_t is_win = 0;
+    int32_t is_active = 0;
+    uint8_t flag = 0;
+    int32_t team = 0;
+    std::string key;
+};
+
 // What the sim produced this tick for someone else to drain: the wire (entity
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
@@ -615,6 +639,8 @@ struct WorldOutbox {
     // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
     using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent>;
     std::vector<EntityNetworkEvent> entity_events;
+    // HUD relays pending the host's S2C 0x3F fan.
+    std::vector<HudRelay> hud_relays;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
@@ -914,6 +940,21 @@ public:
     // producers — the WAC win/lose handlers, the BMS Blue/Red/GreenWin actions, and
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
+
+    // An objective shown or hidden by BMS actions 35/36, or relayed by S2C 0x3F
+    // on a joiner: an active notice posts the two chat lines (the "objective"
+    // presentation effect: a = slot, b = win, c = the header text id) on a
+    // client or outside a session, and the authority relays it to the
+    // joiners. [orig: HUD_ShowObjectiveNotification @0x5ba2e0]
+    void show_objective_notification(int32_t slot, int32_t is_win, int32_t is_active,
+                                     uint8_t flag);
+    // The relay half of a mission-text chat line (the SubGoalWon/SubGoalLost
+    // announcements): the authority in a session sends the joiners the key
+    // and team (S2C 0x3F kind 1) and each resolves the key in its own
+    // mission text. The local line is the caller's presentation effect.
+    // [orig: GameMsg_AddChatLineAndRelay @0x5ba170 — the relay gate
+    //  @0x5ba19f..0x5ba1af]
+    void relay_mission_text_chat(int32_t team, const std::string &key);
 
     // Group population counts for the trigger records over pools 2, 0, 1.
     // Initial: once per mission start, right after the pre pass -- EVERY used

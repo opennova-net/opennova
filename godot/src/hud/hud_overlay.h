@@ -222,6 +222,11 @@ public:
 	// rebuilds the compiler's per-slot visibility here.
 	void set_hud_detail_level(int p_level);
 	int get_hud_detail_level() const;
+	// BMS action 28 sub 37: HUD item flash timer `index` takes `value` and the
+	// layer table rebuilds at declutter level 0 (hud_declutter.h HudItemFlash
+	// / HudDeclutter::apply_level). The timers count down on the ticks
+	// set_player_state carries.
+	void set_item_flash(int p_index, int p_value);
 	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags cycle
 	// @0x4E0561]: bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
@@ -313,6 +318,7 @@ private:
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.
 	opennova::hud::HudDeclutter declutter_;
+	opennova::hud::HudItemFlash item_flash_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
 	// Font glyph pages, one namespace per compiler font slot

@@ -515,6 +515,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.surface_w = w;
 	input.surface_h = h;
 	input.ticks = state.ticks;
+	input.waypoint_flash = state.item_flash[5];
 	input.waypoint_present = state.waypoint.present;
 	input.waypoint_x = state.waypoint.world_x;
 	input.waypoint_y = state.waypoint.world_y;

@@ -1787,6 +1787,31 @@ struct EntityRemove {
 bool decode_entity_remove(const uint8_t *body, size_t len,
 	                      EntityRemove &out, size_t &consumed);
 
+// S2C 0x3F — the authority's HUD relay, two kinds behind a leading byte.
+// Kind 0, the objective notification [i32 slot][i32 is_win][i32 is_active]
+// [u8 flag]: the client re-runs HUD_ShowObjectiveNotification with flag 0,
+// then plays NEW_GOAL at its local player for flag 1. Kind 1, the
+// mission-text chat relay [i32 team][cstr key]: the key resolves in the
+// client's mission text and the line posts when non-empty. The kind-0 arm
+// falls through into the kind-1 reads; a kind-0 body carries no tail, so
+// those guarded reads give team 0 and an empty key, whose lookup posts
+// nothing. Any other kind reads nothing. The key copy stops at 255 chars.
+// [orig: NapiNPClientMsg_0x03F @0x42BB20 — the kind byte @0x42bb53, kind 0
+//  @0x42bb80..0x42bbb9, HUD_ShowObjectiveNotification @0x42bbc2, NEW_GOAL
+//  @0x42bbc7..0x42bbe4, the kind-1 reads @0x42bbec..0x42bc1c and relay
+//  @0x42bc39; sender Server_BroadcastEntityActionPacket @0x5080D0]
+struct ObjectiveNotification {
+	uint8_t kind = 0;
+	int32_t slot = 0;
+	int32_t is_win = 0;
+	int32_t is_active = 0;
+	uint8_t flag = 0;
+	int32_t team = 0;
+	std::string key;
+};
+bool decode_objective_notification(const uint8_t *body, size_t len,
+		ObjectiveNotification &out, size_t &consumed);
+
 // S2C 0x2F — complete live state for flag/carryable objectives. The first
 // relationship is entity+368 occupantEntity (the carrier); the second is
 // entity+40 groundEntity. The flags field is deliberately one byte: retail

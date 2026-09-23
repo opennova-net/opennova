@@ -527,6 +527,53 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 			"the joiner consumed the host's S2C 0x76 class policy over real UDP")
 
 
+func test_joiner_receives_the_host_hud_relays_over_real_udp() -> void:
+	# BMS ShowWinSubgoal and SubGoalLost on the host: the authority relays S2C
+	# 0x3F kind 0 (the objective notification, re-run by the joiner's fold as
+	# the "objective" presentation effect) and kind 1 (the announcement's
+	# mission-text key, posted through "mission_text_chat"). The joiner never
+	# evaluates the mission events itself, so both effects can only come from
+	# the relay. A repeating event re-runs both every processing pass so one
+	# relay lands after the join.
+	var mission := _two_organics()
+	assert_gte(mission.add_event(1, 1, 0), 0)
+	assert_true(mission.add_event_action(0, 35, 0, 2, 1)) # ShowWinSubgoal slot 2, shown
+	assert_true(mission.add_event_action(0, 15, 0, 3)) # SubGoalLost slot 3
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "ObjectiveJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	var objective := false
+	var chat_key := ""
+	for _i in range(400):
+		host.step()
+		joiner.step()
+		for e in joiner.drain_effects():
+			var effect := e as MissionEffect
+			if effect == null:
+				continue
+			if effect.kind == "objective" and effect.a == 2 and effect.b == 1:
+				objective = true
+			elif effect.kind == "mission_text_chat":
+				chat_key = effect.text
+		if objective and not chat_key.is_empty():
+			break
+		OS.delay_msec(2)
+	assert_true(objective, "the joiner re-ran the host objective notification from S2C 0x3F")
+	assert_true(chat_key.begins_with("STRLOSEMSG"),
+			"the joiner received the SubGoalLost key from S2C 0x3F kind 1")
+
+
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()

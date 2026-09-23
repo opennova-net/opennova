@@ -19,6 +19,10 @@ void LocalRole::run_tick(const TickInput &) {
 	// [orig: WacScript_ExecuteBytecode @0x4F58B0 -> NapiNPServer_SendFiltered
 	//  @0x4C87E0 walks an empty connection list]
 	kernel.world.out.script_remote_commands.clear();
+	// The HUD relays (S2C 0x3F) likewise have no connection to reach; the
+	// lines already posted locally. [orig: Server_BroadcastEntityActionPacket
+	//  @0x5080D0 — the NapiNPServer_SendFiltered call @0x508199]
+	kernel.world.out.hud_relays.clear();
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();

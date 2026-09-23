@@ -140,6 +140,12 @@ public:
 			const Ref<RtxtStringFile> &p_gametext, int p_name_id);
 	static String subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
 			int p_header_id);
+	// A shown objective's two chat lines (hud_game_text.h objective_header /
+	// objective_directive): the gametext header and the mission directive
+	// ("" = nothing posts).
+	static String objective_header(const Ref<RtxtStringFile> &p_gametext);
+	static String objective_directive(const Ref<RtxtStringFile> &p_mission, bool p_win,
+			int p_header_id);
 	static String triggered_text(const Ref<RtxtStringFile> &p_mission, int p_text_id);
 	static String weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 			const String &p_weapon_id);

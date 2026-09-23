@@ -95,6 +95,8 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_display_name", "mission", "gametext", "name_id"), &HudPos::waypoint_display_name);
 	ClassDB::bind_static_method("HudPos", D_METHOD("subgoal_message", "mission", "lost", "header_id"), &HudPos::subgoal_message);
+	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
+	ClassDB::bind_static_method("HudPos", D_METHOD("objective_directive", "mission", "win", "header_id"), &HudPos::objective_directive);
 	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
 	ClassDB::bind_static_method("HudPos", D_METHOD("weapon_display_name", "gametext", "weapon_id"), &HudPos::weapon_display_name);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_fallback_image"), &HudPos::loading_fallback_image);
@@ -425,6 +427,16 @@ String HudPos::waypoint_display_name(const Ref<RtxtStringFile> &p_mission,
 String HudPos::subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
 		int p_header_id) {
 	return opennova::to_gd(opennova::hud::subgoal_message(p_lost, p_header_id,
+			game_text_lookup(p_mission)));
+}
+
+String HudPos::objective_header(const Ref<RtxtStringFile> &p_gametext) {
+	return opennova::to_gd(opennova::hud::objective_header(game_text_lookup(p_gametext)));
+}
+
+String HudPos::objective_directive(const Ref<RtxtStringFile> &p_mission, bool p_win,
+		int p_header_id) {
+	return opennova::to_gd(opennova::hud::objective_directive(p_win, p_header_id,
 			game_text_lookup(p_mission)));
 }
 

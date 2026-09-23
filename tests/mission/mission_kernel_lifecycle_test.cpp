@@ -266,6 +266,27 @@ int main() {
 		CHECK(third.world.script.vars.get_mission(2) == 2);
 	}
 
+	// --- the no-session objective relay ------------------------------------------
+	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
+	// released while the local chat effect stays. [orig:
+	//  Server_BroadcastEntityActionPacket @0x5080D0 — the
+	//  NapiNPServer_SendFiltered call @0x508199]
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then set(v1,1) endif\n";
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		kernel.world.show_objective_notification(2, 1, 1, 1);
+		CHECK(kernel.world.out.hud_relays.size() == 1);
+		CHECK(kernel.world.out.effects.count("objective") == 1);
+		tick_no_net(kernel);
+		CHECK(kernel.world.out.hud_relays.empty());
+	}
+
 	// --- the no-terrain path -----------------------------------------------------
 	{
 		std::map<std::string, std::string> files;

@@ -77,6 +77,10 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	kernel.world.rules.no_friendly_fire =
 			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
 	kernel.world.rules.session_open = true;
+	// The is_mp_session_peer bit is the is_client half of the connection
+	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
+	// host. [orig: g_napi_np_ctx +0x64; napi_np_server_ctx.h connection modes]
+	kernel.world.rules.mp_session_peer = serve_and_play;
 }
 
 // The HostClient replica pipeline (recv-fold only, 0x0C suppressed): it folds

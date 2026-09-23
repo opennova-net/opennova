@@ -198,6 +198,13 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	if (!s.declutter_visible[kDeclutterAltGrp] ||
 			!(c.altitude_agl_q16 || c.altitude_q16 || c.vertical_velocity_q16))
 		return;
+	// HUD item flash timer 0 blinks the whole instrument: every draw sits
+	// after the gate, which skips them while the timer is armed and dark.
+	// Timer 1's tail only resets a device state word, not a draw.
+	// [orig: HUD_DrawAltitudeBar @0x59F168..0x59F176 (to @0x59F340); timer 1
+	//  @0x59F340..0x59F356]
+	if (!hud_item_flash_shown(s.item_flash[0]))
+		return;
 	const int altitude = c.altitude_agl_q16 / 21501;
 	const int limited = std::min(altitude, 500);
 	const int bar_height = int(sy(float(l.agl_height), h));

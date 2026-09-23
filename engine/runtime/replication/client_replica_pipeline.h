@@ -249,6 +249,11 @@ public:
 	// before decoding on the authority. [orig: GameMode_DispatchRemoteCommand
 	// @0x4F81E0 — `!is_authority` @0x4f8249]
 	std::vector<ScriptRemoteCommand> drain_script_remote_commands();
+	// S2C 0x3F HUD relays the fold accepted this frame (the objective
+	// notification, kind 0, and the mission-text chat relay, kind 1); the
+	// joiner role replays each against its world.
+	// [orig: NapiNPClientMsg_0x03F @0x42BB20]
+	std::vector<ObjectiveNotification> drain_objective_notifications();
 
 	// Install the items.def-derived per-type classifier — the table the retail client
 	// itself dispatches 0x0A records through (each type's serialize callback, seeded
@@ -328,6 +333,7 @@ private:
 	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
 	void apply_score_delta_sound(const std::vector<uint8_t> &body);
 	void apply_script_remote_command(const std::vector<uint8_t> &body); // 0x23
+	void apply_objective_notification(const std::vector<uint8_t> &body); // 0x3F
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
 	// ClientState::end_round and decodes when the board completes.
 	void apply_end_round_header(const std::vector<uint8_t> &body);
@@ -396,6 +402,7 @@ private:
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
+	std::vector<ObjectiveNotification> pending_objective_notifications_;
 	// Survives row deletion until this pipeline is destroyed.
 	std::unordered_map<uint16_t, uint32_t> spawn_revisions_;
 	std::size_t unknown_tags_ = 0;

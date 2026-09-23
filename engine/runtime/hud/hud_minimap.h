@@ -183,6 +183,9 @@ struct HudMinimapInput {
 	//  g_mapYaw180(0x2723EB0) = 0x80000000]
 	bool flip_180 = false;
 	int ticks = 0;
+	// HUD item flash timer 5, the waypoint state line's blink gate
+	// (hud_declutter.h HudItemFlash) [orig: HUD_DrawMapOverlay @0x5a785b].
+	int32_t waypoint_flash = 0;
 	bool waypoint_present = false;
 	int32_t waypoint_x = 0;
 	int32_t waypoint_y = 0;

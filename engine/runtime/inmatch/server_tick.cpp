@@ -1948,9 +1948,26 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
                     conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, true, 0);
                 }
             }
+            // The HUD relays ride the same 0x90 mask: every active remote
+            // slot, never the local host. [orig:
+            //  Server_BroadcastEntityActionPacket @0x5080D0 — send_mask 90h
+            //  @0x50818f, the NapiNPServer_SendFiltered(0x3F) call @0x508199]
+            for (const world::HudRelay &relay : world.out.hud_relays) {
+                ObjectiveNotification wire;
+                wire.kind = relay.kind;
+                wire.slot = relay.slot;
+                wire.is_win = relay.is_win;
+                wire.is_active = relay.is_active;
+                wire.flag = relay.flag;
+                wire.team = relay.team;
+                wire.key = relay.key;
+                conn.link.transport->host_send(s2c::OBJECTIVE_NOTIFICATION,
+                        encode_objective_notification(wire), true, 0);
+            }
         }
     }
     world.out.entity_events.clear();
+    world.out.hud_relays.clear();
 	// WAC punts are connection descriptions, not gameplay damage or chat.
 	// The original slot wrapper ignores departed/retired slots; the live
 	// connection owner likewise rejects stale allocations and loopback nodes.

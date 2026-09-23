@@ -1137,6 +1137,12 @@ add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
 target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
 add_test(NAME hud_game_text COMMAND hud_game_text_test)
 
+# The HUD item flash BMS action 28 sub 37 arms and the declutter level-0 side
+# path it takes (hud/hud_declutter.h HudItemFlash / apply_level).
+add_executable(hud_item_flash_test hud/hud_item_flash_test.cpp)
+target_link_libraries(hud_item_flash_test PRIVATE opennova_runtime)
+add_test(NAME hud_item_flash COMMAND hud_item_flash_test)
+
 # The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
 # the corner rects, the positioned records, the packed colours, the stance slots and
 # the last-authored static frame; the retail leg reads the shipped hudpos.def.
@@ -2206,6 +2212,17 @@ if(MSVC)
     target_link_options(bms_event_parity_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME bms_event_parity COMMAND bms_event_parity_test)
+
+# The BMS HUD relays: the objective notification (actions 35/36), the
+# SubGoalWon/SubGoalLost announcement relay and the host's S2C 0x3F fan.
+add_executable(bms_hud_relay_test mission/bms_hud_relay_test.cpp)
+target_link_libraries(bms_hud_relay_test PRIVATE opennova_runtime)
+target_include_directories(bms_hud_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bms_hud_relay_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(bms_hud_relay_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME bms_hud_relay COMMAND bms_hud_relay_test)
 
 # The BMS event runtime replayed against the original's instructions: the
 # condition/chain/action/entry/pass witnesses scripts/oracles/

@@ -689,6 +689,9 @@ struct HudFrameState {
 	std::array<bool, kDeclutterSlotCount> declutter_visible =
 			declutter_all_visible();
 	int hud_detail_level = 0;
+	// The HUD item flash timers (hud_declutter.h HudItemFlash) the blinking
+	// items read this frame.
+	std::array<int32_t, HudItemFlash::kCount> item_flash{};
 	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags — cycle
 	// (flags + 1) & 3 @ 0x4E0561]: bit 0 gates the FP gun/viewmodel draw
 	// (consumed device-side where the viewmodel submits), bit 1 gates the

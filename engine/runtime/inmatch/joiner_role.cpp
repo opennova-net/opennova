@@ -2026,6 +2026,29 @@ void JoinerRole::apply_gameplay_events() {
 		}
 	}
 
+	// S2C 0x3F: kind 0 re-runs the objective notification here with relay
+	// flag 0 (off the authority it posts the chat lines and relays nothing),
+	// then NEW_GOAL at the local player for flag 1. Kind 1, and the kind-0
+	// arm's fall-through into the same reads, is the mission-text chat relay:
+	// the key resolves in this peer's mission text and a non-empty line posts
+	// (a kind-0 body has no tail, so its empty key posts nothing).
+	// [orig: NapiNPClientMsg_0x03F @0x42BB20 — HUD_ShowObjectiveNotification
+	//  @0x42bbc2, NEW_GOAL @0x42bbc7..0x42bbe4, MissionText_GetStringByKey
+	//  @0x42bc26 -> GameMsg_AddChatLineAndRelay @0x42bc39 (its line gate
+	//  @0x5ba170..0x5ba18d)]
+	for (const ObjectiveNotification &notice : rt.drain_objective_notifications()) {
+		if (notice.kind == 0) {
+			world.show_objective_notification(notice.slot, notice.is_win, notice.is_active, 0);
+			if (notice.flag == 1) {
+				if (const world::Entity *player = world.registry.get(world.cached.local_player))
+					world.out.fire_sounds.play_immediate("NEW_GOAL", player->position, 0);
+			}
+		}
+		if ((notice.kind == 0 || notice.kind == 1) && !notice.key.empty() &&
+				(world.rules.mp_session_peer || !world.rules.mp_session))
+			world.out.effects.push({"mission_text_chat", notice.team, 0, 0, 0, notice.key});
+	}
+
 	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
 	// normal round spawner so tracers and physical impacts are produced locally;
 	// World::run_logic_tick admits this pool only under the explicit

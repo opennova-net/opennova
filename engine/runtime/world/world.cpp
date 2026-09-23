@@ -365,6 +365,51 @@ void World::process_round_end(int32_t winning_team) {
     out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
 }
 
+void World::show_objective_notification(int32_t slot, int32_t is_win, int32_t is_active,
+                                        uint8_t flag) {
+    // An inactive notice does nothing [orig: HUD_ShowObjectiveNotification
+    //  @0x5ba2f3].
+    if (is_active == 0) return;
+    // The directive keys off the header text id of the slot: WinConditions for
+    // a win notice, LoseConditions otherwise (the header tables cover slots
+    // 1..8; the byte read past them is not modeled).
+    // [orig: byte_A7628B[slot] @0x5ba30e / byte_A76293[slot] @0x5ba343]
+    const bool in_table = slot >= 1 && slot <= 8;
+    const int32_t text_id = !in_table ? 0
+            : is_win != 0 ? script.subgoals.win_text_ids[slot]
+                          : script.subgoals.lose_text_ids[slot];
+    // The two chat lines post on a client or outside a session: the
+    // presentation composes gametext Misc/STRMISC_NEWOBJECTIVE and the
+    // directive (hud_game_text.h objective_directive).
+    // [orig: the gate @0x5ba382/@0x5ba38b; Chat_AddMessageChannel1 @0x5ba3ae
+    //  (STRMISC_NEWOBJECTIVE) and @0x5ba3c2 (the directive)]
+    if (rules.mp_session_peer || !rules.mp_session)
+        out.effects.push({"objective", slot, is_win != 0 ? 1 : 0, text_id, 0, std::string()});
+    // The authority relays it: S2C 0x3F kind 0.
+    // [orig: @0x5ba3ca..0x5ba3df -> Server_BroadcastEntityActionPacket @0x5080d0]
+    if (rules.logic_authority) {
+        HudRelay relay;
+        relay.kind = 0;
+        relay.slot = slot;
+        relay.is_win = is_win;
+        relay.is_active = is_active;
+        relay.flag = flag;
+        out.hud_relays.push_back(std::move(relay));
+    }
+}
+
+void World::relay_mission_text_chat(int32_t team, const std::string &key) {
+    // [orig: GameMsg_AddChatLineAndRelay @0x5ba170 — is_authority @0x5ba19f,
+    //  is_in_session @0x5ba1a8, the Server_BroadcastEntityActionPacket(1, key,
+    //  team) call @0x5ba1c3]
+    if (!rules.logic_authority || !rules.mp_session) return;
+    HudRelay relay;
+    relay.kind = 1;
+    relay.team = team;
+    relay.key = key;
+    out.hud_relays.push_back(std::move(relay));
+}
+
 // The two group recounts walk pools 2, 0 and 1 in that order (the three
 // pools both retail tallies visit); pools 3 and 4 never count.
 static constexpr int kGroupRecountPools[] = {2, 0, 1};
@@ -496,6 +541,7 @@ void World::restore(const Snapshot &s) {
     out.terrain_scorches.reset();
     out.destruction = DestructionEvents{};
     out.entity_events.clear();
+    out.hud_relays.clear();
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is

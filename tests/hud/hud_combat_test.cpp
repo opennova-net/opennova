@@ -108,6 +108,19 @@ static void geometry_and_draw() {
 	CHECK(std::any_of(instruments.quads.begin(), instruments.quads.end(), [](const auto &q) {
 		return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
 	}));
+	// HUD item flash timer 0 (BMS action 28 sub 37) blinks the instrument: an
+	// armed timer in its dark phase skips every draw, its lit phase (bit 0x10)
+	// draws. [orig: HUD_DrawAltitudeBar @0x59F168..0x59F176]
+	const auto agl_bar = [](const HudDrawList &d) {
+		return std::any_of(d.quads.begin(), d.quads.end(), [](const auto &q) {
+			return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
+		});
+	};
+	s.item_flash[0] = 0x20;
+	CHECK(!agl_bar(compiler.compile(s, 1024, 768)));
+	s.item_flash[0] = 0x30;
+	CHECK(agl_bar(compiler.compile(s, 1024, 768)));
+	s.item_flash[0] = 0;
 }
 
 static void mortar_map_and_world_cues() {

@@ -420,6 +420,53 @@ static void test_misvar_wraps_and_subgoal_shift_masks() {
     CHECK(w.script.subgoals.won == (1u << 1));
 }
 
+// PlayWavList plays only on a client, and after the round is over only when
+// param2 == 1 forces it. [orig: EventAction_Dispatch case 7 @0x45443d —
+// @0x45444a, @0x454450]
+static void test_play_wav_list_gate() {
+    World w;
+    w.cached.humans = 1;
+    configure_pools(w);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    sys.dispatch_action_for_test(w, action(bms::ActionType::PlayWavList, 0, 7, 0));
+    CHECK(w.out.effects.count("dialog") == 1);
+    w.process_round_end(1);
+    sys.dispatch_action_for_test(w, action(bms::ActionType::PlayWavList, 0, 8, 0));
+    CHECK(w.out.effects.count("dialog") == 1);
+    sys.dispatch_action_for_test(w, action(bms::ActionType::PlayWavList, 0, 9, 1));
+    CHECK(w.out.effects.count("dialog") == 2);
+    w.rules.mp_session_peer = false;
+    sys.dispatch_action_for_test(w, action(bms::ActionType::PlayWavList, 0, 10, 1));
+    CHECK(w.out.effects.count("dialog") == 2);
+}
+
+// Action 28: sub 37 hands the HUD item flash (timer, value) to the HUD, sub 38
+// clears the input word, sub 39's store has no reader, and every other sub is
+// a no-op; none records a gap. [orig: EventAction_HandleSpecialTypes
+// @0x4535a0 — @0x4535cd, @0x4535c2, @0x4535b6..0x4535bc, @0x4535b4]
+static void test_special_subtypes() {
+    World w;
+    w.cached.humans = 1;
+    configure_pools(w);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    w.script.input_action_bits = 0xFFFFFFFFu;
+    sys.dispatch_action_for_test(w, action(bms::ActionType::SpecialSubType, 37, 3, 5));
+    CHECK(w.out.effects.count("hud_item_flash") == 1);
+    sys.dispatch_action_for_test(w, action(bms::ActionType::SpecialSubType, 39, 0));
+    sys.dispatch_action_for_test(w, action(bms::ActionType::SpecialSubType, 40, 1, 1));
+    CHECK(w.script.input_action_bits == 0xFFFFFFFFu);
+    sys.dispatch_action_for_test(w, action(bms::ActionType::SpecialSubType, 38, 0));
+    CHECK(w.script.input_action_bits == 0);
+    CHECK(w.out.effects.count("unported_action") == 0);
+    CHECK(w.diagnostics.empty());
+}
+
 int main() {
     test_single_alive_reads_the_bms_ref_rows();
     test_01tr_event34_chain_fires_when_the_placed_item_dies();
@@ -428,6 +475,8 @@ int main() {
     test_area_ai_reads_the_resolved_record();
     test_group_zero_and_single_ai_guards();
     test_misvar_wraps_and_subgoal_shift_masks();
+    test_play_wav_list_gate();
+    test_special_subtypes();
     if (failures) {
         std::printf("%d failure(s)\n", failures);
         return 1;

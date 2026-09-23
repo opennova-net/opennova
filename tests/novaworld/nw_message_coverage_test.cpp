@@ -1799,6 +1799,30 @@ int check_S_6D_tracked_player_voice() {
     cover('S', 0x6D);
     return 0;
 }
+// S2C 0x3F — the HUD relay: kind 0 [i32 slot][i32 is_win][i32 is_active]
+// [u8 flag] (14 B), kind 1 [i32 team][cstr key]; a short body is rejected.
+// [orig: NapiNPClientMsg_0x03F @0x42BB20; Server_BroadcastEntityActionPacket
+//  @0x5080D0]
+int check_S_3F_objective_notification() {
+	LE w;
+	w.u8(0); w.u32(3); w.u32(1); w.u32(1); w.u8(1);
+	EXPECT(w.b.size() == 14);
+	ObjectiveNotification n;
+	size_t consumed = 0;
+	EXPECT(decode_objective_notification(w.b.data(), w.b.size(), n, consumed));
+	EXPECT(consumed == 14 && n.kind == 0 && n.slot == 3 && n.is_win == 1 &&
+	       n.is_active == 1 && n.flag == 1 && n.key.empty());
+	EXPECT(!decode_objective_notification(w.b.data(), 13, n, consumed));
+	LE relay;
+	relay.u8(1); relay.u32(2);
+	for (char ch : std::string("STRMSG01")) relay.u8(uint8_t(ch));
+	relay.u8(0);
+	EXPECT(decode_objective_notification(relay.b.data(), relay.b.size(), n, consumed));
+	EXPECT(n.kind == 1 && n.team == 2 && n.key == "STRMSG01" && consumed == relay.b.size());
+	cover('S', 0x3F);
+	return 0;
+}
+
 // S2C 0x3A reads no bytes. [orig: NapiNPClientMsg_0x03A @0x422680]
 int check_S_3A_medic_reviving() {
 	EXPECT(decode_medic_reviving(nullptr, 0));
@@ -1904,6 +1928,7 @@ int main() {
 	if (check_S_5D_destroy_list()) return 1;
 	if (check_C_32_empty_slots_request()) return 1;
 	if (check_S_3A_medic_reviving()) return 1;
+	if (check_S_3F_objective_notification()) return 1;
     if (check_S_6D_tracked_player_voice()) return 1;
     if (check_S_21_explosion_effect()) return 1;
 	if (test_decoded_drift_guard()) return 1;
