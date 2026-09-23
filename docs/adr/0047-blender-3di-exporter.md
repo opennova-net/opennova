@@ -53,7 +53,10 @@ language's copy of the format drifts.
    person layout: one section per bone at its pivot with a hit sphere around the
    vertices it dominates, the bullet faces on the mesh part's section.
 5. **Skinned models follow the retail corpus.** The parts are the armature's
-   bones (hierarchy and pivots, which retail animations pair with by index);
+   bones (hierarchy and pivots, which retail animations pair with by index),
+   then one part per skinned mesh (`01 Mesh<n>`; parent 0, pivot = the mesh
+   object's origin) as the retail exporter wrote bones then mesh objects
+   (FSldr03: 19 bones + part 19; ArmsG: 37 bones + part 37);
    vertices store the bind pose with up to three weights; strips split so no
    bone table exceeds 16 parts; and every strip is owned by the root ROBJ while
    each part keeps the bounds of its own geometry (all 30 surveyed JO
@@ -90,4 +93,6 @@ language's copy of the format drifts.
   byte-identical to one exported from an interactive session, and loaded,
   rendered and flew in retail Joint Operations (2026-09-23, an F-16 on `cpln`);
   a skinned soldier on the retail person rig rendered and animated in retail
-  with `anim_def US01` (2026-09-23).
+  with `anim_def US01`, and a first-person MP5 (`Mp5b_1st`, the 40-part
+  view-model rig) with skinned arms (`ArmsG`) played the stock MP5 clips
+  (2026-09-23).

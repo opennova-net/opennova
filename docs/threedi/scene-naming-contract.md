@@ -23,7 +23,7 @@ classify to the same identity inside one LOD are an error.
 | Attachment | `~PPx attach` | sits under a child part: its parent is part `PP`; `x` (a, b, ...) tells siblings apart |
 | User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z |
 | Light | `LP##` | light `##` (a light object; not a `-colonly` mesh) |
-| Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the parent bone the part parent; `BN##` vertex groups carry the weights |
+| Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the parent bone the part parent; `BN##` vertex groups carry the weights. The skinned mesh is `01 Mesh<n>` and becomes its own part after the bones (pivot = its origin) |
 | Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` |
 
 ## Collision volumes

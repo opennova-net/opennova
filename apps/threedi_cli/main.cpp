@@ -110,6 +110,25 @@ int cmd_info(const char *path, int verbose) {
 					ro.parent_index, ro.num_strips, ro.num_alpha_strips, ro.abs[0], ro.abs[1], ro.abs[2],
 					ro.bounding_radius);
 		}
+		if (verbose > 2) {
+			// Every vertex in mission axes with its owning ROBJ (the ROBJ walk
+			// assigns strips in order) and, when skinned, its first bone.
+			size_t cursor = 0;
+			for (size_t p = 0; p < lod.render_object_count; ++p) {
+				const ThreediRenderObject &ro = lod.render_objects[p];
+				const size_t count = static_cast<size_t>(ro.num_strips + ro.num_alpha_strips);
+				for (size_t s = 0; s < count && cursor < lod.strip_count; ++s, ++cursor) {
+					const ThreediTriangleStrip &st = lod.strips[cursor];
+					for (int i = 0; i < st.num_vertices; ++i) {
+						const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
+						const int bone = st.bone_table_length > 0 && v.bone_indices[0] < st.bone_table_length
+								? st.bone_table[v.bone_indices[0]] : static_cast<int>(p);
+						std::printf("vert lod %zu part %zu strip %zu bone %d  %.5f %.5f %.5f\n", li, p, cursor, bone,
+								v.position[2], -v.position[0], v.position[1]);
+					}
+				}
+			}
+		}
 		if (verbose > 1) {
 			for (size_t s = 0; s < lod.strip_count; ++s) {
 				const ThreediTriangleStrip &st = lod.strips[s];
@@ -127,7 +146,8 @@ int cmd_info(const char *path, int verbose) {
 		}
 		for (size_t a = 0; a < lod.part_animation_count; ++a) {
 			const ThreediPartAnimation &pa = lod.part_animations[a];
-			std::printf("    panm part %u parent %u flags 0x%08x\n", pa.subobject_index, pa.parent_subobject, pa.flags);
+			std::printf("    panm part %u parent %u flags 0x%08x  matrix %u offset %u bind %d\n", pa.subobject_index,
+					pa.parent_subobject, pa.flags, pa.matrix_index, pa.matrix_offset, pa.bind_matrix_index);
 			const ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x,
 					&pa.scale_y, &pa.scale_z, &pa.translation};
 			for (int t = 0; t < 7; ++t) print_track(m, t, *tracks[t]);
@@ -728,7 +748,8 @@ int main(int argc, char **argv) {
 	if (argc < 3) return usage(nullptr);
 	const std::string cmd = argv[1];
 	if (cmd == "info") {
-		const int verbose = argc > 3 && std::strcmp(argv[3], "--planes") == 0 ? 2 : (argc > 3 && std::strcmp(argv[3], "--verbose") == 0 ? 1 : 0);
+		const std::string flag = argc > 3 ? argv[3] : "";
+		const int verbose = flag == "--verts" ? 3 : flag == "--planes" ? 2 : flag == "--verbose" ? 1 : 0;
 		return cmd_info(argv[2], verbose);
 	}
 	if (cmd == "build") {

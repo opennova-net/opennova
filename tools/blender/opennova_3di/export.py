@@ -23,10 +23,13 @@
 #   Material_<i>_<SHADER>  material: export order i, shader tag SHADER.
 #   Armature      a skinned model: one Armature under the LOD root whose
 #                 bones are named BN## (part ##, 1-based; the bone head is the
-#                 pivot, the bone parent the part parent). Its "## Mesh<n>"
-#                 meshes are weighted by BN## vertex groups (at most three
-#                 influences a vertex); strips split so no bone table exceeds
-#                 16 parts. Collision: each bone's section carries a hit
+#                 pivot, the bone parent the part parent). Its "01 Mesh<n>"
+#                 meshes (the root owns skinned strips) are weighted by BN##
+#                 vertex groups (at most three influences a vertex); strips
+#                 split so no bone table exceeds 16 parts. Each skinned mesh
+#                 is appended as its own part after the bones (parent 0,
+#                 pivot = its origin), as retail's exporter wrote bones then
+#                 mesh objects. Collision: each bone's section carries a hit
 #                 sphere around the vertices it dominates, the mesh part's
 #                 section the bullet faces (the retail person layout).
 #   !name         ignored.
@@ -135,6 +138,7 @@ class Lod:
         self.points = []    # (type letter, part index or -1, label, object)
         self.volumes = []   # (type, flags, part index, object)
         self.armature = None  # skinned: the Armature; parts are its bones
+        self.bone_count = 0   # skinned: parts past the bones are the meshes
 
 
 class Exporter:
@@ -271,11 +275,24 @@ class Exporter:
         missing = [i + 1 for i in range(count) if i not in lod.parts]
         if missing:
             raise ExportError(f"{root.name}: parts are not contiguous from PN01 (missing PN{missing[0]:02d})")
+        if lod.armature is not None:
+            # A skinned mesh is "01 Mesh<n>" (the root owns its strips). Each
+            # one becomes its own part after the bones, as the retail
+            # exporter wrote bones first and mesh objects after them: parent
+            # 0, pivot = the mesh object's origin, holding the mesh bounds
+            # and bullet faces (ArmsG: 37 bones + part 37; FSldr03: 19 + 19).
+            if any(index != 0 for index in lod.meshes):
+                raise ExportError(f"{root.name}: a skinned mesh is named '01 Mesh<n>' (the root part)")
+            lod.bone_count = len(lod.parts)
+            skins = sorted(lod.meshes.get(0, []), key=lambda e: e[0])
+            if not skins:
+                raise ExportError(f"{root.name}: no '01 Mesh<n>' skinned mesh")
+            lod.meshes = {}
+            for k, (ordinal, ob) in enumerate(skins):
+                lod.parts[lod.bone_count + k] = ob
+                lod.meshes[lod.bone_count + k] = [(ordinal, ob)]
+            return lod
         for index, meshes in lod.meshes.items():
-            if lod.armature is not None:
-                if index not in lod.parts:
-                    raise ExportError(f"{root.name}: mesh '{index + 1:02d} Mesh…' names a part the armature lacks")
-                continue
             if index not in lod.parts:
                 raise ExportError(f"{root.name}: mesh '{index + 1:02d} Mesh…' has no PN{index + 1:02d}")
             owner = [self.owning_part(ob) for _, ob in meshes]
@@ -295,6 +312,8 @@ class Exporter:
 
     def part_parent(self, lod, index):
         if lod.armature is not None:
+            if index >= lod.bone_count:
+                return 0
             bone = lod.parts[index]
             if bone.parent is None:
                 return 0
@@ -308,6 +327,8 @@ class Exporter:
 
     def part_pivot(self, lod, index):
         if lod.armature is not None:
+            if index >= lod.bone_count:
+                return self.mission(lod.parts[index].matrix_world.translation)
             return self.mission(lod.armature.matrix_world @ lod.parts[index].head_local)
         ob = lod.centers.get(index, lod.parts[index])
         return self.mission(ob.matrix_world.translation)
@@ -443,7 +464,8 @@ class Exporter:
         count = len(lod.parts)
         primary = lod is self.lod0
         for i in range(count):
-            lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # BN{i + 1:02d}")
+            label = f"BN{i + 1:02d}" if i < lod.bone_count else lod.parts[i].name
+            lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # {label}")
             strips = {}
             for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
                 self.skinned_strips(ob, strips, primary)

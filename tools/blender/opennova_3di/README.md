@@ -34,14 +34,29 @@ F16_LOD0              Empty, custom property _lod_index = 0
 F16_LOD1              Empty, _lod_index = 1 (same names; Blender's .001 is ignored)
 ```
 
-A skinned model (a person) replaces the `PN##` empties with one Armature under
-each LOD root whose bones are `BN01`, `BN02`, ... (the bone head is the pivot,
-the bone parent the part parent). Its `## Mesh<n>` meshes carry an Armature
-modifier and `BN##` vertex groups (up to three weights a vertex; the export
-reads the rest pose). To reuse retail animations, match the retail rig: JO's
-people all share one 20-bone rig (`opennova-3di info US01.3di` prints its
-pivots), and animations pair with bones by index. Each bone gets a hit sphere
-around the vertices it dominates; the bullet faces go on the mesh's part.
+A skinned model (a person, first-person arms) replaces the `PN##` empties with
+one Armature under each LOD root whose bones are `BN01`, `BN02`, ... (the bone
+head is the pivot, the bone parent the part parent). The skinned mesh is
+`01 Mesh0` (the root owns skinned strips), with an Armature modifier and
+`BN##` vertex groups (up to three weights a vertex; the export reads the rest
+pose). The exporter appends each skinned mesh as its own part after the bones
+(parent 0, pivot = the mesh object's origin), as the retail exporter wrote
+bones first and mesh objects after them: that part holds the mesh bounds and
+bullet faces. Each bone gets a hit sphere around the vertices it dominates.
+
+To reuse retail animations, match the retail rig, since animations pair with
+parts by index: JO's people share one rig of 19 bones plus the mesh part
+(`opennova-3di info US01.3di` prints its pivots); the first-person arms
+(`ArmsG`) are 37 arm bones plus the mesh part.
+
+A first-person weapon (`gfx1` in weapon.def, e.g. `Mp5b_1st`) is a rigid
+model whose part table IS the view-model rig: parts 01-37 (`PN01`-`PN37`,
+empties with no mesh) reproduce the arm bones exactly, and the weapon's own
+parts follow from `PN38` (the gun body under the right hand, `PN06`), as many
+as the weapon needs. The weapon's `.adm` clips drive those parts by index and
+the separate arms model (the player's Avatars.def `arms` graphic) is skinned
+over the shared arm bones. Its points (`UPS38 MFLASH01`, `UPS38 bullet`,
+`UPS38 bcasing`) sit on the gun body.
 
 Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
 `Material_1_FFP_GLASS`); the first image texture node is exported as a 32-bit
