@@ -55,10 +55,11 @@ public:
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override;
 
     // The post-mission pass: ONE whole-list sweep over the PostMission-flag
-    // entries, called by the embedder exactly once per transition — retail invokes
-    // it from mission teardown and the SP round restart, never periodically
-    // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; callers
-    // Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
+    // entries, run once by the mission teardown after pools 0..2 are destroyed
+    // (MissionKernel::run_post_mission_pass), never periodically (D-EVT-4).
+    // [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; live caller
+    // Game_TeardownMission @0x52266c (the SP restart's call @0x5263ae finds
+    // the list freed)]
     // (The pre pass is the tick()'s TickPhase::PreMission path under the same
     // one-call-per-transition contract [orig: Game_StartMission @0x525b86].)
     void run_post_mission_pass(opennova::world::World &w);

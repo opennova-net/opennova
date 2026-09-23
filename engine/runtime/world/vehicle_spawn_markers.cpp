@@ -84,7 +84,8 @@ void VehicleSystem::build_spawn_markers() {
 	}
 }
 
-// [orig: assign_overlay_spawn_points @0x529E60; every-32 gate @0x51D8CA]
+// [orig: assign_overlay_spawn_points @0x529E60; its every-32 gate is
+//  Server_TickUpdate's `test tick,1Fh` @0x51D8C4]
 void VehicleSystem::tick_spawn_markers() {
 	if (!spawn_markers_enabled_)
 		return;

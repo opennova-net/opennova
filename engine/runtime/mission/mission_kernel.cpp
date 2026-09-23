@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 using namespace opennova::def;
 using namespace opennova::threedi;
@@ -321,10 +322,11 @@ void MissionKernel::register_mission_systems() {
 	if (bringup_net_session_) bringup_net_session_();
 	// The mission systems register in the faithful within-tick order, then
 	// load (each system's on_load). Order: WAC -> BMS -> AI.
-	// [orig: Game_ProcessMainFrame @0x5263f0 calls Server_TickUpdate @0x51d7e0
-	//  (which runs the WAC executor WacScript_AdvanceTick @0x51d8bf first, then
-	//  the BMS event quarter pass @0x51d8f4) BEFORE Entity_UpdateAllEntities
-	//  @0x4c2100 (the AI/motor pass).] AI registers last so it consumes the
+	// [orig: Game_ProcessMainFrame @0x5266b6 (the Server_TickUpdate call, whose
+	//  Server_TickUpdate @0x51d8bf WacScript_AdvanceTick call runs the WAC
+	//  executor first and @0x51d8f4 the BMS event quarter pass) precedes
+	//  Game_ProcessMainFrame @0x52674b (the Entity_UpdateAllEntities call, the
+	//  AI/motor pass).] AI registers last so it consumes the
 	// entity state the scripts mutate this tick; each system carries its own
 	// cadence gate (WAC every 62nd tick, BMS quarters every 16th), so the
 	// registration order only fixes the within-tick sequence.
@@ -809,6 +811,29 @@ void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t c
 	sampler.ctx = &ctx;
 	world.weather.precipitation.update(cam_x, cam_y, cam_z,
 			world.weather.core.scalar_channels.rain_pct_fp, world.env.water_z, sampler);
+}
+
+// The teardown destroys pools 0, 1 and 2 before the authority's PostMission
+// sweep, so the sweep's net-id lookups and pool walks find no row there; the
+// pool-3 markers stay resident. Only the teardown's sweep is live: the SP
+// restart's call runs after its own mission reset freed the event list, so it
+// sweeps nothing and has no port.
+// [orig: Game_TeardownMission — Entity_Destroy over pools 0, 1 and 2
+//  @0x522365..0x5223C8, then the is_authority-gated
+//  EventTrigger_UpdateAllWithFlag4 call @0x522663..0x52266C;
+//  Game_RestartRoundSP @0x5263A0..0x5263AE, whose first call
+//  Game_DestroyAllEntitiesAndReset @0x523604 enters
+//  CAIGroup_HasGuardTaskFromIndex2 (the mission reset, an IDB misnomer), whose
+//  EventSystem_FreeAll call @0x40DBEF zeroes the count @0x453266]
+void MissionKernel::run_post_mission_pass(bool is_authority) {
+	for (int pool = 0; pool <= 2; ++pool) {
+		std::vector<w::EntityHandle> rows;
+		world.registry.for_each_in_pool(pool, [&](const w::Entity &row) {
+			rows.push_back(row.handle);
+		});
+		for (const w::EntityHandle row : rows) world.registry.despawn(row);
+	}
+	if (is_authority) events.run_post_mission_pass(world);
 }
 
 bool MissionKernel::restore_baseline() {

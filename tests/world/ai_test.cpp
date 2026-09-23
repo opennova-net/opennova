@@ -3959,33 +3959,29 @@ int main() {
         CHECK(e.brain.f[AiBrain::kPendState] == 23);
     }
 
-    // ---- locomotion: apply the mover output (advance toward target, clamp, face heading) ----
+    // ---- a brain moves only through its row's physics callback: the decided
+    // speed, target and heading of a brain with no vehicle mover are never
+    // integrated [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53, the +0x1C4
+    // call; g_EntityClassPhysicsTable @0x82ABC8 has no generic brain mover] ----
     {
-        auto sys_heap = std::make_unique<AiSystem>();
-        AiSystem &sys = *sys_heap;
-        sys.loco_scale = 65536; // 1.0 in 16.16: out_speed N -> N world-units / tick
-        int idx = sys.attach(EntityHandle::make(0, 0));
-        AiEntity &e = *sys.at(idx);
-        e.pos[0] = 0; e.pos[1] = 0;
-        e.brain.f[AiBrain::kOutSpeed] = 3;          // 3 units this tick
-        e.brain.f[AiBrain::kWorkPosX] = 100 << 16;  // target X
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        int idx = w.ai.attach(EntityHandle::make(1, 0));
+        AiEntity &e = *w.ai.at(idx);
+        e.pos[0] = 0; e.pos[1] = 0; e.pos[2] = 7 << 16;
+        e.brain.f[AiBrain::kOutSpeed] = 3;
+        e.brain.f[AiBrain::kWorkPosX] = 100 << 16;
         e.brain.f[AiBrain::kWorkPosY] = 0;
-        e.brain.f[AiBrain::kWorkHeading] = 12345;   // BAM heading from the mover
-        sys.apply_locomotion(e);
-        CHECK(e.pos[0] == (3 << 16));   // advanced 3 units toward the target
+        e.brain.f[AiBrain::kWorkHeading] = 12345;
+        const int32_t heading = e.heading;
+        TickContext ctx{};
+        ctx.world = &w;
+        ctx.is_authority = true;
+        w.ai.tick(w, ctx);
+        CHECK(e.pos[0] == 0);
         CHECK(e.pos[1] == 0);
-        CHECK(e.heading == 12345);      // entity now faces the mover heading
-
-        // A large speed arrives exactly at the target (clamp, no overshoot).
-        e.brain.f[AiBrain::kOutSpeed] = 100000;
-        sys.apply_locomotion(e);
-        CHECK(e.pos[0] == (100 << 16));
-
-        // Out-speed 0 (frozen / engaging) leaves the entity put.
-        e.brain.f[AiBrain::kOutSpeed] = 0;
-        e.pos[0] = 42;
-        sys.apply_locomotion(e);
-        CHECK(e.pos[0] == 42);
+        CHECK(e.pos[2] == (7 << 16));
+        CHECK(e.heading == heading);
     }
 
     // ---- slice-1 exit: an NPC rifleman kills the player through the authoritative

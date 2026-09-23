@@ -33,4 +33,10 @@ bool LocalRole::reset_to_baseline(SessionError &error) {
 	return false;
 }
 
+// The bare authority's mission exit: the teardown's pool destruction and the
+// one-shot PostMission sweep [orig: Game_TeardownMission @0x52266C].
+void LocalRole::close() {
+	if (kernel_ != nullptr) kernel_->run_post_mission_pass(/*is_authority=*/true);
+}
+
 } // namespace opennova::inmatch

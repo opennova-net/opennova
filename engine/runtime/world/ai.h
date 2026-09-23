@@ -613,8 +613,8 @@ bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate);
 // [orig: Entity_CalcAverageGroundHeight @0x457230] The entity-def height offsets
 // (def+0x2C alive / def+0x30 dead) modeled as named members — a tracked deviation,
 // those def fields are not yet RE'd (default 0 = origin sits at ground). The stand
-// clearance the movers add on top (brain[131] = ground + 0x50000) is NOT here; it
-// lives in AiSystem::apply_ground_clamp.
+// clearance the movers add on top (brain[131] = ground + 0x50000) is NOT here; each
+// mover adds its own [orig: AI_ProcessMovementStep @0x466db0].
 struct GroundClearance {
     int32_t alive_offset = 0;  // [orig: def+0x2C] added to ground when alive
     int32_t dead_offset = 0;   // [orig: def+0x30] added when dead / flagged
@@ -724,21 +724,8 @@ public:
     bool is_authority = true; // [orig: g_napi_np_ctx.is_authority]
     bool is_in_session = false;
 
-    // Locomotion: apply the mover output (kOutSpeed/kWorkPos*/kWorkHeading) to the entity
-    // transform each tick. The AI brain is byte-exact (P1/P2); the entity-movement physics
-    // (the unanalyzed driver near 0x462120 + collision/terrain) is NOT reversed, so this is a
-    // clean kinematic integrator: turn to the mover heading + advance toward the target. The
-    // AI-speed -> world-units factor lives in that physics; loco_scale models it (a visual
-    // default until the driver is RE'd). Disable to tick AI decisions without moving entities.
-    bool locomotion_enabled = true;
-    int32_t loco_scale = 32768; // out_speed (AI units) * loco_scale = 16.16 world-units / tick
-
-    // Terrain grounding. When `terrain` is wired (Simulation::set_terrain_height_field),
-    // apply_ground_clamp drives the entity's vertical (pos[2], engine Z = up) off the real
-    // terrain sampler each tick so promoted entities hug the ground instead of floating. Null
-    // (the default) leaves Z at the authored spawn value — the headless AI unit tests run
-    // terrain-free. [orig: the movers recompute brain[131] from Entity_CalcAverageGroundHeight
-    // every step; see apply_ground_clamp.]
+    // The mission's terrain field (MissionKernel::wire_terrain). Null (the default) is a
+    // terrain-free rig: the ground samplers report no coverage.
     const terrain::TerrainHeightField *terrain = nullptr;
     GroundClearance ground_clearance{};
     // World-object collision (embedder-wired like `terrain`; null = terrain-only motor).
@@ -746,14 +733,6 @@ public:
     // @0x4c2100 -> Entity_BuildAllProximityLists @0x4c20f0] and the infantry vertical
     // resolve routes through CollisionWorld::resolve_entity (D-INF-3 burn-down).
     CollisionWorld *collision = nullptr;
-    // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
-    // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
-    // NOTE: the INFANTRY motor (tick_infantry — player AND AI) does NOT use this. It settles
-    // pos[2] to ground + the anim frame's capsule_bottom (origin->feet) per the witnessed
-    // collision capsule [orig: movement collision resolver @0x4b2bd0; D-INF-6];
-    // +0x50000 is only the id-3 death-fall mover's vertical target slot. Still used by the
-    // vehicle/SM path (apply_ground_clamp).
-    int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16 (vehicle/SM ground clamp only)
 
     // ---- Infantry motor (org1 soldiers; docs/world/world-wac-ai-re.md §3) ----
     // Root-motion provider; injected like `terrain`. Null = no clips: every state is
@@ -951,20 +930,6 @@ public:
 	void aircraft_combat_tick(AiEntity &e, World &world);
 	int aircraft_movement(AiEntity &e, World &world);
 	bool aircraft_target_in_sight(AiEntity &e, World &world);
-
-	// Apply the mover output to the entity transform (turn to kWorkHeading, advance pos toward
-	// the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
-	void apply_locomotion(AiEntity &e);
-
-    // [orig: AI_ProcessMovementStep @0x466db0 brain[131] = ground + 0x50000 /
-    // AI_UpdateMovementTarget @0x460e40 brain[131] = max(targetZ, ground)] Drive the vertical
-    // off the terrain sampler: ground = calc_average_ground_height(...), then SET kWorkPosZ +
-    // snap the entity's pos[2] to ground + ground_stand_offset. SET (not max) because our lean
-    // waypoint mover (update_waypoint_movement) leaves kWorkPosZ stale, so a max would strand a
-    // floating spawn. No-op when `terrain` is null or the column has no terrain coverage.
-    // `world` enables the MODEL-AWARE tap rays (a brain on a building deck
-    // grounds on the deck); null keeps the terrain-only average.
-    void apply_ground_clamp(AiEntity &e, World *world = nullptr);
 
     // Seat-follow phase for a LIVE mounted occupant. Infantry callers keep running
     // death, perception, combat, and animation around it and suppress only ordinary

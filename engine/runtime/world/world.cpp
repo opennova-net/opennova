@@ -201,7 +201,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
     // prevents a newly converted charge from losing an arm-delay tick and lets
     // claymore shrapnel fly later in its detonation frame [orig:
-    // Entity_UpdatePool1Slot @0x4b8dd0 -> Weapon_UpdateAllProjectiles @0x4ec020].
+    // Entity_UpdateAllEntities — the pool-1 walk's Entity_UpdatePool1Slot
+    // calls @0x4C21B9..0x4C21E9 precede Weapon_UpdateAllProjectiles @0x4C223A].
     // These presentation events describe only the current authoritative tick.
     if (is_authority && gameplay) {
         throwables.events.clear();
@@ -228,8 +229,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // The global weapon-action pump follows the complete entity/system update and
     // precedes projectile stepping. This is where an AI UseGun nextAction write can
     // become a same-frame round.
-    // [orig: Entity_UpdateAllEntities @0x52674b, then
-    //  WeaponAction_ProcessAllEntities @0x526786]
+    // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call
+    //  @0x52674B, then the WeaponAction_ProcessAllEntities call @0x526786]
     // WeaponAction_ProcessAllEntities is after the timer-gated entity update
     // and is itself ungated, so an already-queued action may advance during
     // PreRound even though its spawned projectile cannot move until gameplay.

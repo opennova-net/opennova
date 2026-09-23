@@ -299,6 +299,11 @@ bool HostRole::session_lost(SessionError &error) const {
 //  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
 //  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 void HostRole::close() {
+	// The teardown's head: pools 0..2 go, then the authority's one-shot
+	// PostMission sweep, both ahead of the per-slot 0x25 walk below
+	// [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4 call
+	//  @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
+	if (kernel_ != nullptr) kernel_->run_post_mission_pass(/*is_authority=*/true);
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
 	NapiNPServerCtx &ctx = state.host_owner.ctx;

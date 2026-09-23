@@ -779,11 +779,14 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
 }
 
 void BmsEventSystem::run_post_mission_pass(World &w) {
-    // ONE whole-list sweep over the PostMission-flag entries, called by the embedder
-    // exactly once per transition — never periodically, so an authored post
-    // delay of 1 fires at the transition and larger delays effectively never do
-    // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; one-shot
-    // callers Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
+    // ONE whole-list sweep over the PostMission-flag entries, run once by the
+    // mission teardown (MissionKernel::run_post_mission_pass) — never
+    // periodically, so an authored post delay of 1 fires at the transition and
+    // larger delays effectively never do (D-EVT-4). The SP restart's call
+    // finds the list already freed and sweeps nothing.
+    // [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; live caller
+    //  Game_TeardownMission @0x52266c; Game_RestartRoundSP @0x5263ae runs
+    //  after EventSystem_FreeAll zeroed the count @0x453266]
     const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
     for (ScriptedEvent &se : events_)
         if ((static_cast<uint32_t>(se.event.flags) & post_bit) != 0) update_entry(w, se);

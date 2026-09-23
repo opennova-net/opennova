@@ -281,6 +281,72 @@ int main() {
 		CHECK(kernel.world.logic_tick == tick0 + 2);
 	}
 
+	// --- the teardown's PostMission sweep ------------------------------------------
+	// The authority's mission exit destroys pools 0, 1 and 2 (the pool-3
+	// markers stay), then sweeps the PostMission entries exactly once; nothing
+	// sweeps them while the mission runs. So a trigger naming the pool-1 item
+	// reads it gone while one naming the resident marker still passes.
+	// [orig: Game_TeardownMission — Entity_Destroy over pools 0..2
+	//  @0x522365..0x5223C8, EventTrigger_UpdateAllWithFlag4 @0x52266C]
+	{
+		bms::File m = synthetic_mission();
+		bms::Entity marker{};
+		marker.type = bms::ItemType::Marker;
+		marker.type_id = 44;
+		marker.id = 41;
+		m.markers.push_back(marker);
+		const auto post_event = [](int trigger_index, int trigger_count, int action_index) {
+			bms::Event e{};
+			e.flags = bms::EventFlags::PostMission;
+			e.trigger_index = trigger_index;
+			e.trigger_count = static_cast<uint8_t>(trigger_count);
+			e.action_index = action_index;
+			e.action_count = 1;
+			return e;
+		};
+		const auto alive = [](int ssn) {
+			bms::Trigger t{};
+			t.main_type = bms::TriggerMainType::Single;
+			t.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleAlive);
+			t.param1 = ssn;
+			return t;
+		};
+		const auto increment = [](int var) {
+			bms::Action a{};
+			a.action_type = bms::ActionType::MisvarChange;
+			a.action_sub_type = static_cast<int32_t>(bms::MissionVariableActionSubType::Increment);
+			a.param1 = var;
+			return a;
+		};
+		m.events = {post_event(0, 0, 0), post_event(0, 1, 1), post_event(1, 1, 2)};
+		m.triggers = {alive(21), alive(41)};
+		m.actions = {increment(9), increment(10), increment(11)};
+
+		std::map<std::string, std::string> files;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(m, "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
+		CHECK(kernel.world.registry.by_net_id(41) != nullptr);
+		for (int i = 0; i < 70; ++i) tick_no_net(kernel);
+		CHECK(kernel.world.script.vars.get_mission(9) == 0);
+		CHECK(kernel.world.script.vars.get_mission(10) == 0);
+		CHECK(kernel.world.script.vars.get_mission(11) == 0);
+
+		opennova::inmatch::LocalRole role;
+		role.bind(kernel);
+		role.close();
+		CHECK(kernel.world.script.vars.get_mission(9) == 1);  // no trigger: the sweep ran once
+		CHECK(kernel.world.script.vars.get_mission(10) == 0); // the pool-1 item was destroyed first
+		CHECK(kernel.world.script.vars.get_mission(11) == 1); // the pool-3 marker is still resident
+		CHECK(kernel.world.registry.by_net_id(21) == nullptr);
+		CHECK(kernel.world.registry.by_net_id(31) == nullptr);
+		CHECK(kernel.world.registry.by_net_id(41) != nullptr);
+	}
+
 	if (failures == 0) std::printf("mission_kernel_lifecycle: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

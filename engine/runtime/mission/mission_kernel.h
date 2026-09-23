@@ -249,6 +249,12 @@ public:
 	// Re-capture the baseline from the CURRENT state (the shell's sealed
 	// mission-start point: post-eager-WAC, fully settled play start).
 	void capture_baseline();
+	// The mission teardown's head: destroy every row of pools 0, 1 and 2 (the
+	// pool-3 markers stay), then, on the authority, the one-shot PostMission
+	// event sweep, whose triggers and actions therefore resolve against the
+	// destroyed pools. The session close runs it. The single-player restart
+	// does not: its sweep call finds the event list already freed.
+	void run_post_mission_pass(bool is_authority);
 	// --- the local player ----------------------------------------------------
 	// The by-name weapon install from the retained weapon.def rows. A
 	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`

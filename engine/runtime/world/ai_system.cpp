@@ -605,18 +605,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                 process_infantry_state_machine(e, world, 0);
             // The dead-state tick can destroy the entity and free this brain.
             if (e.brain.f[AiBrain::kOwner] == 0) continue;
-            // Family-motor vehicles retire the generic SM kinematic mover. Ground
-            // families integrate through selector-gated tick_vehicle_motor below;
-            // direct-air families own their CHel/cpln callback regardless of selector.
-            // The SM stays their decision layer (waypoints,
-            // visited bits, states) but the kinematic locomotion model retires for them
-            // [orig: one entity update — the SM never integrates ground vehicles, the
-            // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
-			const bool motor_driven = vt != nullptr;
-			if (locomotion_enabled && !motor_driven && !motor_suspended) {
-				apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
-                apply_ground_clamp(e, &world); // vertical: snap pos[2] onto ground (no-op if unwired)
-			}
+            // The machine only decides; nothing here moves the body. The row's
+            // own +0x1C4 physics callback, resolved from its items.def
+            // move_function, is its one mover: the vehicle movers
+            // (world.vehicles.tick_motors) integrate the brain's outputs, and
+            // every other physics-table row leaves them unintegrated, so a
+            // brain without a vehicle traits row stays where it is.
+            // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the +0x1C4
+            //  call); g_EntityClassPhysicsTable @0x82ABC8]
 		}
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
         // The visit's trailing decrement, every pool-1 visit whether or not the
@@ -1063,79 +1059,6 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     // [orig: def offset: dead path uses def+0x30, else def+0x2C; gated by entityDef != 0.]
     result += clearance.use_dead ? clearance.dead_offset : clearance.alive_offset;
     return result;
-}
-
-// Drive the vertical off the terrain sampler. See the header. Snap model for the un-reversed
-// vertical driver: SET kWorkPosZ + the entity's pos[2] to ground + ground_stand_offset.
-void AiSystem::apply_ground_clamp(AiEntity &e, World *world) {
-    if (terrain == nullptr) return;
-    GroundClearance clearance = ground_clearance;
-    clearance.has_physics = e.has_physics;                    // [orig: entity+368 gate]
-    clearance.use_dead = (e.health <= 0);                     // [orig: health<=0 dead path]
-    constexpr int32_t kSampleRadius = 0x50000;
-    int32_t ground;
-    if (world != nullptr && collision != nullptr && collision->instance_count() != 0) {
-        // The witnessed 5-tap average with MODEL-AWARE rays: each tap is the
-        // ray from the tap column + 1.0u lift, 48u drop, clipped by terrain and
-        // by candidate models, so a brain standing on a building deck grounds
-        // on the deck. Weights/order/clamps are the same as the terrain-only
-        // path below (they are the same function in retail).
-        // [orig: Entity_CalcAverageGroundHeight @0x457230 — the four
-        //  Entity_RaycastGroundHeight(AndObject)(entity, dx, dy, 0x10000,
-        //  0x300000) taps + the doubled centre/max fold]
-        const auto tap = [&](int32_t dx, int32_t dy) {
-            return collision->raycast_ground(*world, e.handle, e.pos, dx, dy,
-                                             0x10000, 0x300000, nullptr);
-        };
-        int32_t max_h = 0;                       // [orig: maxHeight = 0]
-        const int32_t north = tap(0, kSampleRadius);
-        if (north > 0) max_h = north;            // [orig: if (north > 0) max = north]
-        const int32_t south = tap(0, -kSampleRadius);
-        if (south > max_h) max_h = south;
-        const int32_t east = tap(kSampleRadius, 0);
-        if (east > max_h) max_h = east;
-        const int32_t west = tap(-kSampleRadius, 0);
-        if (west > max_h) max_h = west;
-        const int32_t centre = tap(0, 0);
-        if (centre > max_h) max_h = centre;
-        ground = (north + south + east + west + 2 * (centre + 2 * max_h)) / 10;
-        if (ground < centre) ground = centre;    // [orig: clamp >= centre]
-        if (clearance.has_physics && terrain->has_water && terrain->water_y > ground)
-            ground = terrain->water_y;           // [orig: the occupant water clamp]
-        ground += clearance.use_dead ? clearance.dead_offset : clearance.alive_offset;
-    } else {
-        ground = calc_average_ground_height(*terrain, e.pos, kSampleRadius, clearance);
-    }
-    if (ground == INT32_MIN) return;                          // no terrain coverage -> leave Z
-    const int32_t z = ground + ground_stand_offset;           // [orig: brain[131] = ground + 0x50000]
-    e.brain.f[AiBrain::kWorkPosZ] = z;                        // mover output field stays faithful
-    e.pos[2] = z;                                             // snap the entity onto the ground
-}
-
-// Kinematic locomotion over the mover output. The brain decides a target (kWorkPos*), a heading
-// (kWorkHeading, BAM) and a speed (kOutSpeed); here we turn to that heading and advance the entity
-// toward the target by kOutSpeed * loco_scale, clamped so we never overshoot. INTERIM MODEL being
-// replaced: the original routes organics through the infantry motor [orig: Entity_UpdateInfantryAI
-// @ 0x4b9910] (anim-driven root motion; ground vehicles consume this SM's output instead) — see
-// docs/world/world-wac-ai-re.md §3 for the full spec. Out-speed 0 leaves the entity put.
-void AiSystem::apply_locomotion(AiEntity &e) {
-    AiBrain &b = e.brain;
-    int32_t speed = b.f[AiBrain::kOutSpeed]; // brain[128]
-    if (speed <= 0) return;
-    e.heading = b.f[AiBrain::kWorkHeading];  // brain[132] (snap; turn-rate physics deferred)
-    int64_t stepd = static_cast<int64_t>(speed) * loco_scale; // AI units -> 16.16 world delta
-    int64_t dx = static_cast<int64_t>(b.f[AiBrain::kWorkPosX]) - e.pos[0]; // brain[129]
-    int64_t dy = static_cast<int64_t>(b.f[AiBrain::kWorkPosY]) - e.pos[1]; // brain[130]
-    double dist = std::sqrt(static_cast<double>(dx) * static_cast<double>(dx) +
-                            static_cast<double>(dy) * static_cast<double>(dy));
-    if (dist == 0.0 || dist <= static_cast<double>(stepd)) {
-        e.pos[0] = b.f[AiBrain::kWorkPosX]; // arrive (clamp, no overshoot)
-        e.pos[1] = b.f[AiBrain::kWorkPosY];
-    } else {
-        double f = static_cast<double>(stepd) / dist;
-        e.pos[0] += static_cast<int32_t>(static_cast<double>(dx) * f);
-        e.pos[1] += static_cast<int32_t>(static_cast<double>(dy) * f);
-    }
 }
 
 // ----------------------------------------------------------------------------

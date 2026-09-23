@@ -12,7 +12,7 @@ public:
 	RoleKind kind() const override { return RoleKind::SinglePlayer; }
 	void run_tick(const TickInput &input) override;
 	bool reset_to_baseline(SessionError &error) override;
-	void close() override {}
+	void close() override;
 };
 
 } // namespace opennova::inmatch
