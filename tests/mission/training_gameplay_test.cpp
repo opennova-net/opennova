@@ -147,30 +147,60 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
     const EntityHandle player_handle = world.cached.local_player;
     Entity *player = world.registry.get(player_handle);
     FriendlyTagPassContext ctx;
-    ctx.game_type = 0x30020u;
+    ctx.game_type = 0x10020u; // the SP/training game type
     std::vector<FriendlyTagSource> tags;
     collect_friendly_tags(world, *player, tags, ctx);
     CHECK(!tags.empty());
     for (const auto &tag : tags)
         CHECK(world.registry.get(tag.entity)->team == player->team);
+    // 03TR must author a labelable neutral organic for this leg to pin the
+    // drawer's unequal-team rejection.
+    CHECK(player->team != 0);
+    int neutral_organics = 0;
+    world.registry.for_each([&](const Entity &e) {
+        if (e.kind == EntityKind::Organic && (e.flags & kEntityFlagPlayer) == 0 &&
+                e.has_item_def && e.team == 0 && (e.flags & kEntityFlagCarried) == 0)
+            ++neutral_organics;
+    });
+    std::printf("%s 03TR tags: labels=%zu neutral_organics=%d\n",
+            expansion.c_str(), tags.size(), neutral_organics);
+    CHECK(neutral_organics > 0);
 
     // 03TR SSN 41 is the authored minigun Little Bird, with a free ctrlx seat.
     Entity *heli = world.registry.by_net_id(41);
     CHECK(heli != nullptr);
     if (!heli) return;
     CHECK((heli->item_attrib & kItemAttribEweap) != 0);
-    CHECK(!heli->seats.empty());
-    if (heli->seats.empty()) return;
+    const Seat *control_seat = nullptr;
+    for (const Seat &seat : heli->seats)
+        if (seat.type == SeatType::Controller) control_seat = &seat;
+    CHECK(control_seat != nullptr);
+    if (control_seat == nullptr) return;
     const EntityHandle carrier = heli->handle;
     const uint8_t personal_adm = player->equipped_adm_index;
     const WeaponInventory inventory = rig->local.inventory;
-    CHECK(world.vehicles.process_attach(player_handle, carrier, heli->seats[0].bone_index));
-    advance(*rig, 124);
+    CHECK(world.vehicles.process_attach(player_handle, carrier, control_seat->bone_index));
+    // The ctrlx borrow goes through Player_MountWeaponSlot like UseGun: the
+    // outgoing slot's switch action commits the carrier gun, never the attach
+    // itself (the Emplaced minigun shortens that action to one tick).
+    // [orig: @0x494838 -> WeaponAction_SwitchFrom @0x543475]
+    CHECK(!rig->local.weapon.usegun_slot_active);
+    int commit_ticks = 0;
+    while (!rig->local.weapon.usegun_slot_active && commit_ticks < 124) {
+        advance(*rig);
+        ++commit_ticks;
+    }
+    std::printf("%s Little Bird: carrier gun committed after %d ticks\n",
+            expansion.c_str(), commit_ticks);
+    CHECK(commit_ticks >= 1 && commit_ticks < 124);
+    advance(*rig, 124 - commit_ticks);
     CHECK(player->mount_type == SeatType::Controller);
     CHECK(heli->primary_weapon_slot_adm != kAdmSlotNone);
     CHECK(player->equipped_adm_index == heli->primary_weapon_slot_adm);
+    CHECK(heli->primary_weapon_owner == player_handle);
     CHECK(rig->local.weapon.active);
     CHECK(local_weapon_input_block(world, rig->local.weapon) == LocalWeaponInputBlock::kNone);
+    const int32_t clip_before = heli->primary_weapon_slot.clip;
     int shots = 0;
     for (int tick = 0; tick < 62; ++tick) {
         rig->local.set_weapon_input(true, tick == 0, false);
@@ -183,9 +213,12 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
             CHECK(testrig::distance(shot.origin, heli->position) < heli->bound_radius * 2.0f);
         }
     }
-    std::printf("%s Little Bird: shots=%d carrier_adm=%d\n",
-            expansion.c_str(), shots, heli->primary_weapon_slot_adm);
+    std::printf("%s Little Bird: shots=%d carrier_adm=%d clip=%d->%d\n",
+            expansion.c_str(), shots, heli->primary_weapon_slot_adm, clip_before,
+            heli->primary_weapon_slot.clip);
     CHECK(shots > 0);
+    // The pilot spends the carrier's persistent clip, not a personal one.
+    CHECK(heli->primary_weapon_slot.clip < clip_before);
     rig->local.set_weapon_input(false, false, false);
     advance(*rig, 62); // allow the accepted fire action to finish
     int shots_after_release = 0;
@@ -196,7 +229,17 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
     }
     CHECK(shots_after_release == 0);
     CHECK(world.vehicles.detach(player_handle));
-    advance(*rig, 124);
+    // The detach restore is queued the same way, so the personal weapon plays
+    // its draw before it can fire. [orig: Entity_DetachFromVehicle
+    // @0x43562A..0x43565F -> Player_MountWeaponSlot]
+    bool personal_draw = false;
+    for (int tick = 0; tick < 124; ++tick) {
+        advance(*rig);
+        if (!rig->local.weapon.usegun_slot_active &&
+                rig->local.weapon.slot.current == weapon_action::kSwitchTo)
+            personal_draw = true;
+    }
+    CHECK(personal_draw);
     CHECK(player->equipped_adm_index == personal_adm);
     CHECK(!heli->primary_weapon_owner.valid());
     CHECK(rig->local.inventory.equipped_combo == inventory.equipped_combo);

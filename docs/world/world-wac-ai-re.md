@@ -2990,14 +2990,26 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   glass when their energy permits. The table at `@0x82D034` charges Q16
   energy costs `{19:10, 16:4, 15:10, 17:8, 7:4}`. The misleadingly named
   `Entity_ClampKineticEnergy @0x4E9070` subtracts that cost from `v² * mass`
-  and scales velocity, or releases the round if exhausted. Mass is
-  `(grains << 16) / 250` (`@0x4EC6B7`). `Projectile_ProcessDamageOnTarget`
-  returns false for those materials (`@0x4E8233..0x4E8266`), so the entity
-  handler preserves lifetime and clears `outFlag` (`@0x4E98BA`). The earlier
-  `lawr|fgrenade` flag store at `@0x4E969A` is not a bullet-survival gate.
-  Flight resumes next tick from 0x800 Q16 beyond the face
-  (`@0x4EA73F..0x4EA798`), after normal gravity/drag. This also covers vehicle
-  windows, which do not take the building-section break branch.
+  and scales velocity, or releases the round if exhausted. Both square roots
+  are `fild; fsqrt; fistp` under the default round-to-nearest control word
+  (`@0x4E9142..0x4E9169`), and a zero speed root releases the round
+  (`@0x4E916C`). Mass is `(grains << 16) / 250` (`@0x4EC6B7`).
+  `Projectile_ProcessDamageOnTarget` returns 0 for those materials
+  (`@0x4E8233..0x4E8266`) and for a target without an ItemDef
+  (`@0x4E7FCB..0x4E7FD9`); only a 1 zeroes the lifetime (`@0x4E98AA`), so
+  survival is the lifetime alone. `outFlag` is dead: `Projectile_UpdatePhysics`
+  zeroes it (`@0x4EA325`) and never reads it after the call, so the
+  `lawr|fgrenade` store at `@0x4E969A` has no effect. The material, section,
+  impulse and effect block runs only for a def-bearing target
+  (`@0x4E9584..0x4E95BD`): a def-less entity passes the round silently. A
+  visual client's decoded pool-1 wire projection stands for a def-bearing
+  retail entity and takes the block. The handler receives the hit at
+  `t - 0x800` along the tick-start ray, whose direction is
+  `v * (2^32 / |v|)` (`@0x4EA181..0x4EA206`, `@0x4EA603..0x4EA65C`); the
+  arm then adds 0x1000, so flight resumes next tick from `t + 0x800` along
+  that ray (`@0x4EA73F..0x4EA798`), after normal gravity/drag. This also
+  covers vehicle windows, which do not take the building-section break
+  branch.
 - **The runtime arrays** `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0 —
   ex ThreediGp_BuildCollisionModel, renamed (the chunked form is 3DI3)]`: one arena;
   8-B Q8 int16 vertex records, 8-B Q14 normal records keeping the dominate-axis

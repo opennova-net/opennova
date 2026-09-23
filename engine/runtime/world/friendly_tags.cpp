@@ -59,7 +59,8 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
 // ones): never the local player, never a CARRIED entity, only with a
 // resolved item def [orig: @0x5a39df / @0x5a39eb / @0x5a39fb]; team 0 / the
 // local team / the death screen, then `g_GameType || death screen`
-// [orig: @0x5a44c7..0x5a44f8, @0x5a4552..0x5a457d].
+// [orig: @0x5a44c7..0x5a44f8, @0x5a4552..0x5a457d], then the drawer's
+// equal-team test outside the death screen [orig: @0x5a3c6b..0x5a3c95].
 bool entry_bails(const Entity &e, const Entity &local) {
     return friendly_tag_entry_bails(e.handle == local.handle, e.flags,
                                     e.has_item_def);

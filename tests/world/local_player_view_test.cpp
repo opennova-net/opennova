@@ -1494,6 +1494,9 @@ void test_local_weapon_input_block_mirrors_the_pump_gate() {
     CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kSeat);
     lw.w.registry.get(mount)->item_attrib = kItemAttribEweap;
     CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kNone);
+    lw.w.registry.get(mount)->has_item_def = false;
+    CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kSeat);
+    lw.w.registry.get(mount)->has_item_def = true;
     lw.entity().mount_type = SeatType::Driver;
     CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kSeat);
     lw.entity().mount_type = SeatType::Gunner;

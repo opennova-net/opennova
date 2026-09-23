@@ -128,9 +128,6 @@ struct LocalPlayerWeapon {
 
     LocalUseGunSwitch usegun_switch = LocalUseGunSwitch::kNone;
     bool usegun_slot_active = false;
-    // Controller borrows select/restore immediately; UseGun retains its
-    // authored switch actions. The previous seat survives detach until commit.
-    SeatType borrowed_mount_type = SeatType::None;
     EntityHandle usegun_mount{};
     EntityHandle usegun_pending_mount{};
     uint8_t usegun_weapon_adm = 0xFF;
@@ -324,6 +321,10 @@ bool carrier_weapon_world_pose(World &, const Entity &carrier, const WeaponTable
 // [orig: Entity_CalcWeaponFirePosition gunner branch @0x4DC7A0..0x4DC802]
 void usegun_fire_pose(World &, const Entity &gun, const WeaponTableEntry *fired,
                       int32_t clip_before_consume, int32_t out[6]);
+// The ctrlx seat's shot pose: the EWeap carrier's own weapon userpoint.
+// [orig: Entity_CalcWeaponFirePosition @0x4DC803..0x4DC846]
+void controller_fire_pose(World &, Entity &carrier, const WeaponTableEntry *fired,
+                          int32_t clip_before_consume, int32_t out[6]);
 
 // The seat/equip gates the switch walks consume.
 // [orig: the parentSlot {2,3,5} stance gate @ 0x4e0192; the equip-commit

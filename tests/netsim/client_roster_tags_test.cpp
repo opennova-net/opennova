@@ -100,6 +100,11 @@ void test_walk_and_gates() {
 	tags.clear();
 	collect_roster_tags(s, 0x0001, 1, true, 0, tags, {}, nullptr);
 	CHECK(tags.size() == 4);
+	// A team-0 local player keeps only the team-0 row [orig: @0x5a3c6b..0x5a3c95].
+	tags.clear();
+	collect_roster_tags(s, 0x0001, 0, false, 0x30020u, tags, {}, nullptr);
+	CHECK(tags.size() == 1);
+	if (tags.size() == 1) CHECK(tags[0].name == "Neutral");
 	// No def hp -> max 1: any positive health is the full good tier
 	// [orig: `if (!max) max = 1` @0x5a3b95].
 	tags.clear();

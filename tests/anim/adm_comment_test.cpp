@@ -10,12 +10,12 @@ using namespace opennova::adm;
 
 int main(void) {
     const char *test_content =
-        "anim_idle\t\t\"IdleAnim.bad\"\n"
-        "//anim_commented_out\n"
-        "anim_run\t\t\"RunAnim.bad\"\n"
-        "// This is a full line comment\n"
-        "anim_walk\t\t\"WalkAnim.bad\"\n"
-        "anim_jump\t\t\"JumpAnim.bad\"\n";
+        "anim_idle\t\t\"IdleAnim.bad\"\r\n"
+        "//anim_commented_out\r\n"
+        "anim_run\t\t\"RunAnim.bad\"\r\n"
+        "// This is a full line comment\r\n"
+        "anim_walk\t\t\"WalkAnim.bad\"\r\n"
+        "anim_jump\t\t\"JumpAnim.bad\"\r\n";
 
     char temp_path[4096];
     snprintf(temp_path, sizeof(temp_path), "%s/adm_comment_test.adm", test_paths_temp_dir());

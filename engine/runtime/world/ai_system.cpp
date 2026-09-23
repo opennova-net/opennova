@@ -588,25 +588,36 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     deferred_piece_brains_.clear();
 }
 
-// A gunner's link holds while it lives, stays seated as the gunner and still
-// names the mount that names it.
-static bool gunner_holds_mount(const Entity &owner, EntityHandle mount) {
-    return owner.health > 0 && owner.mounted && owner.mount_type == SeatType::Gunner &&
-           owner.mount_target == mount;
+// The seats that borrow the mount's persistent slot: UseGun, and the ctrlx
+// seat of an EWeap carrier. [orig: Entity_AttachToUseGunSlot @0x546B80;
+// Entity_AttachToVehicleSlot @0x49480B..0x494883]
+static bool seat_borrows_mount_slot(const Entity &owner, const Entity &mount) {
+    return owner.mount_type == SeatType::Gunner ||
+           (owner.mount_type == SeatType::Controller &&
+            (mount.item_attrib & kItemAttribEweap) != 0);
+}
+
+// A borrower's link holds while it lives, stays seated in a borrowing seat and
+// still names the mount that names it.
+static bool gunner_holds_mount(const Entity &owner, const Entity &mount) {
+    return owner.health > 0 && owner.mounted && seat_borrows_mount_slot(owner, mount) &&
+           owner.mount_target == mount.handle;
 }
 
 void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
     if (!mount.primary_weapon_owner.valid()) return;
     const Entity *owner = world.registry.get(mount.primary_weapon_owner);
-    if (owner == nullptr || !gunner_holds_mount(*owner, mount.handle))
+    if (owner == nullptr || !gunner_holds_mount(*owner, mount))
         mount.primary_weapon_owner = EntityHandle{};
 }
 
+// Every pool-0 row's weapon slot is pumped, whatever its seat: a borrower's
+// is the mount's. [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
 void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick) {
-    if (!owner.mounted || owner.mount_type != SeatType::Gunner) return;
+    if (!owner.mounted) return;
     Entity *mount = world.registry.get(owner.mount_target);
     if (mount == nullptr || mount->primary_weapon_owner != owner.handle) return;
-    if (!gunner_holds_mount(owner, mount->handle)) {
+    if (!gunner_holds_mount(owner, *mount)) {
         mount->primary_weapon_owner = EntityHandle{};
         return;
     }
@@ -648,7 +659,14 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         //  outright [orig: Server_ClientFiredRound @0x50c1f4]; the m/c fields
         //  anchor the effect legs, not the round.
         int32_t fire[6];
-        usegun_fire_pose(world, *mount, weapon, weapon_events.fired_clip_before_consume, fire);
+        // The ctrlx branch poses the EWeap carrier itself.
+        // [orig: Entity_CalcWeaponFirePosition @0x4DC803..0x4DC846]
+        if (owner.mount_type == SeatType::Controller)
+            controller_fire_pose(world, *mount, weapon,
+                    weapon_events.fired_clip_before_consume, fire);
+        else
+            usegun_fire_pose(world, *mount, weapon,
+                    weapon_events.fired_clip_before_consume, fire);
 		// The fire tail rocks the tank along the gun's point for the slot as
 		// the FSM leaves it: next = RECOIL (the mflash column) and the clip
 		// already spent. [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
