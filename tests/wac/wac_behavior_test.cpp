@@ -2,13 +2,13 @@
 // and assert the observable effects (var math, entity mutation, temporal firing,
 // edge semantics, environment, RNG determinism).
 #include <cstdio>
+#include <optional>
 #include <string>
 
 #include <runtime/wac/compiler.h>
 #include <runtime/mission/event_runtime.h>
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
-#include <formats/wac/parser.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/audio/oneshot_play.h>
@@ -281,9 +281,11 @@ static void test_wac_wave_emits_dialog_wav() {
     run(w, sys, 1);
     CHECK(w.out.effects.count("dialog_wav") == 1);
     CHECK(w.out.effects.count("wave") == 0); // not the unrouted default-case kind
+    // A bare word reaches the string pool upper-cased: the tokenizer folds
+    // every byte above 0x60 down by 0x20. [orig: Script_Compile @0x4F3418..0x4F341D]
     bool carried_filename = false;
     for (const Effect &e : w.out.effects.entries())
-        if (e.kind == "dialog_wav" && e.str == "brief1") carried_filename = true;
+        if (e.kind == "dialog_wav" && e.str == "BRIEF1") carried_filename = true;
     CHECK(carried_filename);
 }
 
@@ -309,6 +311,7 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
 
     CHECK(w.out.effects.count("text") == 3);
     CHECK(w.out.effects.count("debug_text") == 3);
+    // Bare words arrive upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
     bool saw_local_text = false;
     bool saw_peer_text = false;
     bool saw_numbered_text = false;
@@ -316,12 +319,12 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     bool saw_peer_debug = false;
     bool saw_numbered_debug = false;
     for (const Effect &e : w.out.effects.entries()) {
-        saw_local_text |= e.kind == "text" && e.str == "local_text" && e.a == 0;
-        saw_peer_text |= e.kind == "text" && e.str == "peer_text" && e.a == 0;
-        saw_numbered_text |= e.kind == "text" && e.str == "numbered_text" && e.a == 7;
-        saw_local_debug |= e.kind == "debug_text" && e.str == "local_debug" && e.a == 0;
-        saw_peer_debug |= e.kind == "debug_text" && e.str == "peer_debug" && e.a == 0;
-        saw_numbered_debug |= e.kind == "debug_text" && e.str == "numbered_debug" && e.a == 9;
+        saw_local_text |= e.kind == "text" && e.str == "LOCAL_TEXT" && e.a == 0;
+        saw_peer_text |= e.kind == "text" && e.str == "PEER_TEXT" && e.a == 0;
+        saw_numbered_text |= e.kind == "text" && e.str == "NUMBERED_TEXT" && e.a == 7;
+        saw_local_debug |= e.kind == "debug_text" && e.str == "LOCAL_DEBUG" && e.a == 0;
+        saw_peer_debug |= e.kind == "debug_text" && e.str == "PEER_DEBUG" && e.a == 0;
+        saw_numbered_debug |= e.kind == "debug_text" && e.str == "NUMBERED_DEBUG" && e.a == 9;
     }
     CHECK(saw_local_text);
     CHECK(saw_peer_text);
@@ -612,9 +615,10 @@ static void test_runtime_gaps_retain_source_and_restore_boot_evidence() {
     WacSystem sys;
     CompileEnv env;
     env.source_names = {"game.wac", "mission.wac"};
+    // Only a CR counts a line. [orig: Script_Compile @0x4F32F6..0x4F32FF]
     Program program = compile_program({
         "if never then inc(v1) endif\n",
-        "\nif never then inc(v2) endif\n"}, env);
+        "\r\nif never then inc(v2) endif\n"}, env);
     CHECK(program.ok());
     // Corrupt the two zero-argument condition calls after compilation. This
     // exercises missing dispatch without depending on an unfinished feature.
@@ -760,22 +764,30 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
     CHECK(w.script.vars.get_mission(1) == 11); // V1 was not aliased by the wrap
     CHECK(w.script.vars.get_mission(256) == 0); // numeric syntax never reaches declarations
 
+    // A declaration that reads as V# is the V# leg's first: retail refuses it
+    // and, with the VAR mode still set, declares the NEXT token ("VAR").
+    // Every later V256... name is V255 with "V# too big".
+    // [orig: WacScript_ResolveParameter @0x4F2AA4 (the V# leg); Script_Compile
+    // @0x4F3869..0x4F388F (the refusal leaves var_4A0C set)]
     program = compile_source(
             "var v1tail\nvar V256shadow\n"
             "set(v1tail,101) set(V256SHADOW,202) set(v1,11) set(v255,55) "
             "set(v3,V1TAIL) set(v4,v256shadow) "
             "set(v5,v1other) set(v6,v256other)\n", {});
     CHECK(program.ok());
-    CHECK(program.diagnostics.size() == 1);
-    if (!program.diagnostics.empty())
-        CHECK(program.diagnostics[0].message == "V# too big");
+    CHECK(program.diagnostics.size() == 5);
+    if (program.diagnostics.size() == 5) {
+        CHECK(program.diagnostics[0].message == "Variable Name already used");
+        for (size_t i = 1; i < 5; ++i) CHECK(program.diagnostics[i].message == "V# too big");
+    }
     vm.load(program); vm.execute(w);
-    CHECK(w.script.vars.get_mission(256) == 101);
-    CHECK(w.script.vars.get_mission(257) == 202);
-    CHECK(w.script.vars.get_mission(3) == 101); // declared full name wins, case-insensitively
-    CHECK(w.script.vars.get_mission(4) == 202);
+    CHECK(w.script.vars.get_mission(1) == 11);
+    CHECK(w.script.vars.get_mission(255) == 55);
+    CHECK(w.script.vars.get_mission(3) == 11);
+    CHECK(w.script.vars.get_mission(4) == 55);
     CHECK(w.script.vars.get_mission(5) == 11);
     CHECK(w.script.vars.get_mission(6) == 55);
+    CHECK(w.script.vars.get_mission(256) == 0); // the declared "VAR" is never written
 
     program = compile_source("set(v0,71) set(vsuffix,99) set(v,101)\n", {});
     CHECK(program.ok());
@@ -787,6 +799,12 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
     CHECK(w.script.vars.get_mission(0) == 71); // no first digit still means unresolved
 }
 
+// ARRAY is no keyword of this compiler: ARRAY and SPARE are Unknown words,
+// and every `spare` operand takes the scratch dword, which the inner body's
+// inc sets during the one execution that fires it.
+// [orig: Script_Compile @0x4F5284..0x4F52B4 (Unknown), @0x4F3AB2..0x4F3AED
+// (the scratch dword); WacScript_CacheLocalPlayerState @0x4F57B5 (cleared
+// at every entry)]
 static void test_named_event_reset_and_declared_variables() {
     BehaviorWorld w;
     WacSystem sys;
@@ -800,18 +818,19 @@ static void test_named_event_reset_and_declared_variables() {
         "set(v1,counter) set(v2,spare)\n"
         "if true(root) then inc(v4) endif\n", {});
     CHECK(p.ok());
-    CHECK(p.diagnostics.empty());
+    CHECK(p.diagnostics.size() == 6);
+    if (!p.diagnostics.empty()) CHECK(p.diagnostics[0].message == "Unknown 'ARRAY'");
     sys.set_program(std::move(p));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 2);
     CHECK(w.script.vars.get_mission(1) == 1);
-    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
     CHECK(w.script.vars.get_mission(3) == 1);
     CHECK(w.script.vars.get_mission(4) == 1);
     run(w, sys, 1);
     CHECK(w.script.vars.get_mission(1) == 2);
-    CHECK(w.script.vars.get_mission(2) == 2);
+    CHECK(w.script.vars.get_mission(2) == 1);
     CHECK(w.script.vars.get_mission(3) == 1); // reset stops at a sibling
     CHECK(w.script.vars.get_mission(4) == 2);
     CHECK(w.diagnostics.empty());
@@ -981,11 +1000,18 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     brain.inf.wait_cooldown = 99;
 
     WacSystem sys;
+    // ssnname's name is a TextToken: the mission text's entry for the key.
+    // [orig: WacScript_ResolveParameter @0x4F2F96 -> MissionText_GetStringByKeyOrGameText @0x51ECD0]
+    CompileEnv env;
+    env.text_token = [](const std::string &key) -> std::optional<std::string> {
+        if (key == "LONGNAME") return std::string("abcdefghijklmnopqrstuvwxyz0123456789");
+        return std::nullopt;
+    };
     sys.set_program(compile_source(
-        "if never then ssnname(42,\"abcdefghijklmnopqrstuvwxyz0123456789\") "
+        "if never then ssnname(42,TT_LONGNAME) "
         "ssn2ssn(42,77) endif\n"
         "if SSNcritical(42) then inc(v1) endif\n"
-        "if SSNride(77) then inc(v2) endif\n", {}));
+        "if SSNride(77) then inc(v2) endif\n", env));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
@@ -1082,12 +1108,17 @@ static void test_player_group_loops_and_handle_aliases() {
     const int custom = w.registry.intern_group("authored");
     w.registry.set_script_group_members(custom, {blue_ai, second, red_ai});
     CompileEnv env; env.registry = &w.registry;
+    env.text_token = [](const std::string &key) -> std::optional<std::string> {
+        if (key == "VISITED") return std::string("visited");
+        if (key == "ALIASED") return std::string("aliased");
+        return std::nullopt;
+    };
     Program program = compile_source(
         "ploop\n"
         " v0 = auto\n"
         " v1 = v1*10+v0\n"
         " if pisteam(1) then inc(v2) endif\n"
-        " ssnname(v0, \"visited\")\n"
+        " ssnname(v0, TT_VISITED)\n"
         "end\n"
         "v3 = Player\n"
         "gloop G_ai inc(v4) end\n"
@@ -1097,7 +1128,7 @@ static void test_player_group_loops_and_handle_aliases() {
         "gloop G_authored v8 = v8*10+Item end\n"
         "v9 = auto\n"
         "v10 = SSN_500\n"
-        "ssnname(v10, \"aliased\")\n",
+        "ssnname(v10, TT_ALIASED)\n",
         env);
     // `gloop(G_blueai)` is retail's Unknown Group leg: the `(` is the group
     // token, the loop runs over group 0 (empty) and the error is non-fatal
@@ -1124,7 +1155,10 @@ static void test_player_group_loops_and_handle_aliases() {
     CHECK(w.registry.get(excluded)->display_name.empty());
     CHECK(w.registry.get(pool_one)->display_name.empty());
     CHECK(w.diagnostics.empty());
-    CHECK(!compile_source("ploop gloop G_ai inc(v1) end end", env).ok());
+    // A nested loop is retail's first error only; the program still runs.
+    // [orig: Script_Compile @0x4F4AEF..0x4F4B05]
+    const Program nested = compile_source("ploop gloop G_ai inc(v1) end end", env);
+    CHECK(nested.ok() && !nested.diagnostics.empty() && nested.diagnostics[0].message == "No LOOP Nesting!");
 
     // Both rows now share an SSN; a bound variable must still name second.
     w.registry.get(first)->net_id = 800;
@@ -1589,8 +1623,9 @@ static void test_player_values_cache_at_bytecode_entry() {
 // the same token then feeds the next slot, and the tokens left over are
 // statement-level tokens (a value becomes load, anything else Unknown).
 // [orig: WacScript_ResolveParameter @0x4f2a92..0x4f2a9f / @0x4f2a5e /
-//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4f3ab2..0x4f3ae2 -> loc_4F3990
-//  @0x4f3a71, the statement default @0x4f5108 / @0x4f5124 / @0x4f5293;
+//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4F3AB2..0x4F3AED -> the token
+//  loop @0x4F3990 (loc_4F3990), which re-enters the parameter check
+//  @0x4F3A71, the statement default @0x4f5108 / @0x4f5124 / @0x4f5293;
 //  WacScript_CacheLocalPlayerState @0x4f57b5]
 static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     BehaviorWorld w;
@@ -1627,7 +1662,8 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     // signature (Script_SetCompileError's first-error buffer, which only the
     // script debug overlay shows; the program compiles and runs), the slot
     // takes the scratch sink and the SAME token feeds the next slot [orig:
-    // Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71], so neither
+    // Script_Compile @0x4F3AB2..0x4F3AED -> the token loop @0x4F3990
+    // (loc_4F3990), which re-enters the parameter check @0x4F3A71], so neither
     // V0 nor the guarded variable moves. Every diagnostic is non-fatal and the
     // first is the signature; the re-feed logs it once per slot the token
     // fails and the stray tokens add their own, so the count is not pinned.
@@ -1653,7 +1689,7 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     // [orig: Script_Compile @0x4f5293]; nothing is emitted for it.
     bad = compile_source("set(v1,nosuchname)\n", {});
     CHECK(!bad.diagnostics.empty() && bad.diagnostics[0].message == "  set (variable, value)");
-    CHECK(bad.diagnostics.back().message == "Unknown 'nosuchname'");
+    CHECK(bad.diagnostics.back().message == "Unknown 'NOSUCHNAME'"); // the upper-cased token
     // The sink is one shared scratch word. set(nosuchname,6) re-feeds the
     // name into the value slot too (SET scratch,scratch; the 6 is a stray
     // load), so only its own zero ever reaches it and v2 reads 0 on every
@@ -1675,7 +1711,8 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
 // The re-feed's observable outcomes. World is a large object and MSVC sizes a
 // frame for every local at entry, so these fixtures live in their own
 // function rather than beside the named-row ones.
-// [orig: Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71; the
+// [orig: Script_Compile @0x4F3AB2..0x4F3AED -> the token loop @0x4F3990
+//  (loc_4F3990), which re-enters the parameter check @0x4F3A71; the
 //  stray load @0x4f5124 / @0x4f5321..0x4f533d]
 static void test_refed_tokens_and_stray_loads() {
     // The name fills BOTH eq slots with the sink, so EQ is true, and the
@@ -1719,7 +1756,7 @@ static void test_quoted_tokens_outside_text_slots_are_the_null_leg() {
     CHECK(quoted.ok() && quoted.diagnostics.size() == 3);
     CHECK(quoted.diagnostics[0].message == "  eq (number, number)");
     CHECK(quoted.diagnostics[1].message == "  eq (number, number)");
-    CHECK(quoted.diagnostics[2].message == "Unknown '1'");
+    CHECK(quoted.diagnostics[2].message == "Unknown '\"1'"); // the buffer keeps the quote
     BehaviorWorld quoted_world;
     WacVm quoted_vm; quoted_vm.load(quoted); quoted_vm.execute(quoted_world);
     CHECK(quoted_world.script.vars.get_mission(9) == 1);
@@ -1731,7 +1768,7 @@ static void test_quoted_tokens_outside_text_slots_are_the_null_leg() {
     Program quoted_value = compile_source("set(v3,\"5\")\n", {});
     CHECK(quoted_value.ok() && quoted_value.diagnostics.size() == 2);
     CHECK(quoted_value.diagnostics[0].message == "  set (variable, value)");
-    CHECK(quoted_value.diagnostics[1].message == "Unknown '5'");
+    CHECK(quoted_value.diagnostics[1].message == "Unknown '\"5'");
     BehaviorWorld quoted_value_world;
     quoted_value_world.script.vars.set_mission(3, 7);
     WacVm quoted_value_vm; quoted_value_vm.load(quoted_value); quoted_value_vm.execute(quoted_value_world);
@@ -1749,7 +1786,7 @@ static void test_unknown_ifname_token_sinks_to_event_zero() {
         "reset(nosuchevent)\n", {});
     CHECK(unknown_event.ok() && unknown_event.diagnostics.size() == 2);
     CHECK(unknown_event.diagnostics[0].message == "  reset (ifname)");
-    CHECK(unknown_event.diagnostics[1].message == "Unknown 'nosuchevent'");
+    CHECK(unknown_event.diagnostics[1].message == "Unknown 'NOSUCHEVENT'");
     BehaviorWorld reset_world;
     WacVm reset_vm; reset_vm.load(unknown_event);
     for (int i = 0; i < 3; ++i) reset_vm.execute(reset_world);
@@ -1760,8 +1797,9 @@ static void test_unknown_ifname_token_sinks_to_event_zero() {
 // (0 for a name or a quoted token), looks the net id up and keeps the handle,
 // logging "Unknown SSN" on a miss. The port binds at the first execution and
 // asks the compile-time registry, when one is given, the same question.
-// [orig: WacScript_ResolveParameter @0x4f2c94..0x4f2eed; Script_SetCompileError
-//  @0x4f2edf; Script_Compile's token buffer keeps the quote @0x4f3338]
+// [orig: WacScript_ResolveParameter @0x4f2c94..0x4f2eed (the
+//  Script_SetCompileError call @0x4F2EDF); Script_Compile's token buffer
+//  keeps the quote @0x4f3338]
 static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     // No net-id-0 entity: the name binds to 0xFFFF and the compile-time
     // registry logs the miss, non-fatally, ahead of the value-slot signature.
@@ -1810,7 +1848,9 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
 // an AMMO_ token in an Ssn slot is atol'd to net id 0 and looked up, and an
 // SSN_ token in an Ammo slot is the SSN leg's, never AMMO's. Both miss an
 // empty registry with the leg's own "Unknown SSN" and bind silently once the
-// net ids exist.
+// net ids exist. An SSN operand in the Ammo slot is a kinded literal of the
+// wrong type, so the pool also reports "Wrong Parameter".
+// [orig: WacScript_ResolveParameter @0x4F3183..0x4F31C1]
 static void test_ssn_leg_precedes_ammo_leg() {
     BehaviorWorld w;
     CompileEnv env; env.registry = &w.registry;
@@ -1818,9 +1858,12 @@ static void test_ssn_leg_precedes_ammo_leg() {
         "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
         "ammorain(SSN_7)\n", env);
     CHECK(program.ok());
-    CHECK(program.diagnostics.size() == 2);
-    CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
-    CHECK(program.diagnostics[1].message == "Unknown SSN" && !program.diagnostics[1].error);
+    CHECK(program.diagnostics.size() == 3);
+    if (program.diagnostics.size() == 3) {
+        CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
+        CHECK(program.diagnostics[1].message == "Unknown SSN" && !program.diagnostics[1].error);
+        CHECK(program.diagnostics[2].message == "Wrong Parameter" && !program.diagnostics[2].error);
+    }
     BehaviorWorld bound;
     Entity zero; zero.net_id = 0; zero.item_id = 1; zero.alive = true;
     Entity seven; seven.net_id = 7; seven.item_id = 1; seven.alive = true;
@@ -1830,7 +1873,8 @@ static void test_ssn_leg_precedes_ammo_leg() {
     Program bound_program = compile_source(
         "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
         "ammorain(SSN_7)\n", bound_env);
-    CHECK(bound_program.ok() && bound_program.diagnostics.empty());
+    CHECK(bound_program.ok() && bound_program.diagnostics.size() == 1 &&
+            bound_program.diagnostics[0].message == "Wrong Parameter");
 }
 
 static void test_outcome_cache_changes_on_next_execution() {
@@ -1892,19 +1936,20 @@ static void test_bms_event_query_reads_active_during_delay() {
 
 // A boundary keyword followed by an operator (`then -5`) drops an open auto
 // frame whose precedence sits below that operator's WITHOUT emitting its POP
-// and abandons the drain; the same expression before a plain action still
-// pops the AND. Malformed input only. [orig: Script_Compile @0x4f4226..0x4f4231]
+// and abandons the keyword itself; the same expression before a plain action
+// pops the AND and closes the condition. Malformed input only.
+// [orig: Script_Compile @0x4F4F76..0x4F4F81 (the THEN drain's abandon test)]
 static void test_boundary_lookahead_drops_an_outranked_frame() {
-    const auto pops_in_condition = [](const char *source) {
-        const opennova::wac::ParseResult parsed = opennova::wac::parse(source);
-        if (parsed.statements.empty()) return -1;
-        int pops = 0;
-        for (const opennova::wac::Expr &step : parsed.statements[0].cond.kids)
-            if (step.kind == opennova::wac::Expr::Pop) ++pops;
-        return pops;
+    const auto has = [](const std::vector<uint32_t> &code, uint32_t word) {
+        for (const uint32_t w : code) if (w == word) return true;
+        return false;
     };
-    CHECK(pops_in_condition("if never() and 1 + 2 then set(v1,1) endif\n") == 1);
-    CHECK(pops_in_condition("if never() and 1 + 2 then -5 endif\n") == 0);
+    const Program plain = compile_source("if never() and 1 + 2 then set(v1,1) endif\n", CompileEnv{});
+    CHECK(has(plain.code, encode_instr(Op::PopExpr, uint32_t(Op::FoldAnd))));
+    CHECK(has(plain.code, encode_instr(Op::MarkFired, uint32_t(plain.code.size() - 1))));
+    const Program minus = compile_source("if never() and 1 + 2 then -5 endif\n", CompileEnv{});
+    CHECK(!has(minus.code, encode_instr(Op::PopExpr, uint32_t(Op::FoldAnd))));
+    for (const uint32_t w : minus.code) CHECK(instr_op(w) != Op::MarkFired);
 }
 
 int main() {

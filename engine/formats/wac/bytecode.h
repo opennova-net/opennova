@@ -97,6 +97,10 @@ enum class OperandKind : uint8_t {
     Builtin = 4,    // engine value (ticks/health/humans/...)
     EventFired = 5, // named IF's fired flag [orig: dword_C6CE40]
     EntitySsn = 6,  // authored net ID, bound to a packed handle at program startup
+    // A Text/Filename slot's string: the index is the byte offset into
+    // Program::string_pool, the pointer the resolver's string leg returns
+    // into byte_C69A20. [orig: WacScript_ResolveParameter @0x4F2E16]
+    Text = 7,
 };
 
 constexpr uint32_t kOperandKindShift = 28;

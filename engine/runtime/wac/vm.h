@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <formats/wac/command.h>
@@ -97,7 +98,7 @@ private:
 
     int32_t read(opennova::world::World &w, uint32_t ref) const;
     void write(opennova::world::World &w, uint32_t ref, int32_t v);
-    int32_t arg_as_string_index(uint32_t ref) const; // for string-typed operands
+    std::string operand_string(opennova::world::World &w, uint32_t ref, ParamType type) const;
     uint32_t next_rand();
 
     void record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments = nullptr);

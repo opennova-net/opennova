@@ -52,7 +52,8 @@ public:
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the environment's 255-tick startup settle. This does not consume a logic
 	// tick or the normal 62-tick divider.
-	// [orig: call WacScript_ExecuteBytecode @0x4F976B, ++wac_var_ticks @0x4F9770]
+	// [orig: WacScript_InitAndLoad @0x4F91F0 (the WacScript_ExecuteBytecode
+	// call @0x4F976B, the wac_var_ticks increment @0x4F9770)]
     bool execute_initial(opennova::world::World &world);
 
     void tick(opennova::world::World &world,

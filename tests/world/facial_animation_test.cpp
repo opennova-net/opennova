@@ -95,7 +95,7 @@ void test_commands_and_retry() {
 		f.world.restore(baseline);
 	}
 	f.entity(b).health = 0; f.entity(b).has_item_def = false;
-	f.script("ssnface(8,\"DISGUST\") store(v1)\n");
+	f.script("ssnface(8,disgust) store(v1)\n");
 	CHECK(f.world.script.vars.get_mission(1) == 1 && f.slot(b).expression_override == 6);
 	f.entity(b).item_id = 0;
 	f.script("ssnface(8,NORMAL) store(v1)\n");
@@ -106,9 +106,15 @@ void test_commands_and_retry() {
 	f.world.cached.local_player = {};
 	f.script("face(FEAR) store(v1)\n");
 	CHECK(f.world.script.vars.get_mission(1) == 1);
+	// A name the face table lacks, a number or a quoted token (which keeps
+	// its quote) is the first error "Unknown FACE" with face 0; the program
+	// still runs. [orig: WacScript_ResolveParameter @0x4F3015..0x4F305A]
 	wac::CompileEnv env;
-	CHECK(!wac::compile_source("face(1)\n", env).ok());
-	CHECK(!wac::compile_source("ssnface(7,missing)\n", env).ok());
+	for (const char *source : {"face(1)\n", "ssnface(7,missing)\n", "ssnface(7,\"DISGUST\")\n"}) {
+		const wac::Program missing = wac::compile_source(source, env);
+		CHECK(missing.ok() && missing.diagnostics.size() == 1 &&
+				missing.diagnostics[0].message == "Unknown FACE");
+	}
 	CHECK(wac::compile_source("v1=FACE_SMIRK\nface(v1)\n", env).ok());
 }
 

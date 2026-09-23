@@ -12,6 +12,8 @@
 
 #include "common/file_io.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -61,17 +63,28 @@ public:
 	}
 
 	// The embedder's mounted-file source over this directory (the shape the
-	// kernel boot hands the layered load).
+	// kernel boot hands the layered load). Names match case-insensitively, as
+	// the mounted file system does: RUN asks for the upper-cased token.
 	mission::BootFileSource files() const {
 		mission::BootFileSource source;
 		const std::filesystem::path root = path;
-		source.has_file = [root](const std::string &name) {
+		const auto find = [root](const std::string &name) {
 			std::error_code ignored;
-			return std::filesystem::exists(root / name, ignored);
+			for (const auto &entry : std::filesystem::directory_iterator(root, ignored)) {
+				const std::string file = entry.path().filename().string();
+				if (file.size() == name.size() &&
+						std::equal(file.begin(), file.end(), name.begin(), [](char a, char b) {
+							return std::tolower(static_cast<unsigned char>(a)) ==
+									std::tolower(static_cast<unsigned char>(b));
+						}))
+					return entry.path();
+			}
+			return std::filesystem::path();
 		};
-		source.read_file = [root](const std::string &name,
-									  std::vector<uint8_t> &out) {
-			return test_io::read_file((root / name).string(), out);
+		source.has_file = [find](const std::string &name) { return !find(name).empty(); };
+		source.read_file = [find](const std::string &name, std::vector<uint8_t> &out) {
+			const std::filesystem::path file = find(name);
+			return !file.empty() && test_io::read_file(file.string(), out);
 		};
 		return source;
 	}
@@ -116,13 +129,15 @@ void test_absent_layers_are_the_valid_bms_only_mission() {
 	CHECK(error.empty());
 }
 
-void test_retail_two_word_else_if_chain_is_clean_under_strict() {
+void test_retail_two_word_else_if_chain_nests() {
 	// The shipped retail scripts chain alternatives as the two-word
-	// `Else if ... then` closed by the chain's ONE endif (00TRg.wac's form).
-	// It must parse as the chain — diagnostics-free, so the strict host can
-	// boot the training missions, and WITHOUT nesting the second if into the
-	// else branch (nesting would swallow the endif and fold every trailing
-	// statement into the never-taken alternative).
+	// `Else if ... then` closed by ONE endif (00TRg.wac's form). Retail's
+	// compiler reads ELSE and IF as two keywords: the IF opens a block inside
+	// the else branch, the endif closes only that block, the trailing IF lands
+	// inside the never-taken branch too, and the file ends with the first
+	// error "Missing END", which the game runs past.
+	// [orig: Script_Compile @0x4F4566..0x4F4619 (ELSE), @0x4F498F..0x4F4A57
+	// (IF), @0x4F5669..0x4F56A5 (Missing END)]
 	TempResourceRoot root;
 	root.write("sample.wac",
 			"if never then\n"
@@ -138,14 +153,16 @@ void test_retail_two_word_else_if_chain_is_clean_under_strict() {
 	wc::WacSystem wac;
 	std::string error;
 	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
-				  /*strict_diagnostics=*/true, error) ==
+				  /*strict_diagnostics=*/false, error) ==
 			wc::WacLayeredLoadStatus::kLoaded);
 	CHECK(error.empty());
+	CHECK(wac.program().diagnostics.size() == 1 &&
+			wac.program().diagnostics[0].message == "Missing END");
 	world.add_system(&wac);
 	world.load_systems();
 	CHECK(wac.execute_initial(world));
 	CHECK(world.script.vars.get_mission(1) == 1); // the taken then-branch
-	CHECK(world.script.vars.get_mission(2) == 9); // the trailing statement stayed top-level
+	CHECK(world.script.vars.get_mission(2) == 0); // the trailing IF sits in the else branch
 }
 
 void test_strict_mode_blocks_what_the_game_only_warns_on() {
@@ -191,18 +208,19 @@ void test_run_files_share_order_symbols_and_diagnostics() {
     CHECK(world.script.vars.get_mission(2) == 1);
     CHECK(wac.program().source_names.size() == 5);
 
-    root.write("leaf.wac", "run game\n");
-    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
-            false, error) == wc::WacLayeredLoadStatus::kBlocked);
-    CHECK(error.find("RUN nesting") != std::string::npos);
-    root.write("leaf.wac", "if never then run extra endif\n");
-    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
-            false, error) == wc::WacLayeredLoadStatus::kBlocked);
-    CHECK(error.find("inside blocks") != std::string::npos);
-    root.write("leaf.wac", "run missing\n");
-    // Third-level RUN fails its depth gate before attempting any file read.
-    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
-            false, error) == wc::WacLayeredLoadStatus::kBlocked);
+    // A third RUN level and a RUN inside a block are first errors only: the
+    // file is skipped and the compile goes on; the third level fails its
+    // depth gate before any file read. [orig: Script_Compile @0x4F35A5..0x4F35E1]
+    const auto first_error = [&](const char *leaf) {
+        root.write("leaf.wac", leaf);
+        const bool loaded = wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+                false, error) == wc::WacLayeredLoadStatus::kLoaded;
+        const auto &diagnostics = wac.program().diagnostics;
+        return loaded && !diagnostics.empty() ? diagnostics[0].message : std::string();
+    };
+    CHECK(first_error("run game\n") == "A run file can't run more files");
+    CHECK(first_error("if never then run extra endif\n") == "Can't run files inside blocks");
+    CHECK(first_error("run missing\n") == "A run file can't run more files");
 }
 
 } // namespace
@@ -244,7 +262,7 @@ int main() {
 	test_parenthesised_gloop_is_the_unknown_group_leg();
 	test_wac_layers_execute_in_retail_order();
 	test_absent_layers_are_the_valid_bms_only_mission();
-	test_retail_two_word_else_if_chain_is_clean_under_strict();
+	test_retail_two_word_else_if_chain_nests();
 	test_strict_mode_blocks_what_the_game_only_warns_on();
 	std::printf(failures ? "WAC LAYERED LOAD TEST FAILED (%d)\n"
 	                     : "wac layered load test passed\n",

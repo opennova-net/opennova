@@ -100,14 +100,15 @@ void test_host_records_reach_joiner_handlers() {
 	replication::ClientReplicaPipeline view; // a joiner: not the authority recipient
 	CHECK(!view.authority_recipient());
 
+	// Bare words reach the string pool upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
 	run_host(host.world,
 			"ploop\nptext(hello)\nend\n"
 			"text#(numbered,7)\n"
 			"item=" + std::to_string(second.packed) + "\npwave(brief)\n");
 	// The host printed only its own loop visit and the broadcast line; the
 	// targeted pwave never played here.
-	CHECK(host.text_count("hello") == 1);
-	CHECK(host.text_count("numbered", 7) == 1);
+	CHECK(host.text_count("HELLO") == 1);
+	CHECK(host.text_count("NUMBERED", 7) == 1);
 	CHECK(host.kind_count("dialog_wav") == 0);
 	const std::vector<world::ScriptRemoteCommand> &queue = host.world.out.script_remote_commands;
 	CHECK(queue.size() == 4);
@@ -131,8 +132,8 @@ void test_host_records_reach_joiner_handlers() {
 		CHECK(!command.read_error);
 		apply_on_joiner(joiner.world, command);
 	}
-	CHECK(joiner.text_count("hello") == 1);
-	CHECK(joiner.text_count("numbered", 7) == 1);
+	CHECK(joiner.text_count("HELLO") == 1);
+	CHECK(joiner.text_count("NUMBERED", 7) == 1);
 	CHECK(joiner.kind_count("dialog_wav") == 1);
 	// The wire index is the shared handler's first row: text/wave, not
 	// ptext/pwave. [orig: @0x4f5cb5..0x4f5cce]

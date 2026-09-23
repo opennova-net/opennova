@@ -79,18 +79,25 @@ static void test_animation_reaches_motor_and_preserves_pending() {
     // The raw type index, not health or the resolved ItemDef, gates SSNanim.
     f.entity().health = 0;
     f.entity().has_item_def = false;
-    f.script("SSNanim(1,116) store(v2)\n");
+    f.script("SSNanim(1,emote_2) store(v2)\n");
     CHECK(f.world.script.vars.get_mission(2) == 1 && inf.anim_state == 116);
     f.entity().item_id = 0;
-    f.script("SSNanim(1,117) store(v3)\n");
+    f.script("SSNanim(1,emote_3) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(3) == 0 && inf.anim_state == 116);
-    f.script("anim(118) store(v4)\n"); // local command only checks allocation
+    f.script("anim(emote_4) store(v4)\n"); // local command only checks allocation
     CHECK(f.world.script.vars.get_mission(4) == 0 && inf.anim_state == 118);
     CHECK(inf.anim_pending == 149);
+    // Every Anim operand is a state NAME, numbers included: "anim_118" names
+    // nothing, so the slot holds 0 with the first error "Unknown ANIM".
+    // [orig: WacScript_ResolveParameter @0x4F2EF2..0x4F2F91]
     CompileEnv env;
-    CHECK(!compile_source("anim(ANIM_missing_state)\n", env).ok());
+    for (const char *source : {"anim(ANIM_missing_state)\n", "anim(118)\n"}) {
+        const Program missing = compile_source(source, env);
+        CHECK(missing.ok() && missing.diagnostics.size() == 1 &&
+                missing.diagnostics[0].message == "Unknown ANIM");
+    }
     f.world.cached.local_player = {};
-    f.script("anim(119) store(v5)\n");
+    f.script("anim(emote_5) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(5) == 1 && inf.anim_state == 118);
 }
 
@@ -109,7 +116,7 @@ static void test_force_animation_think_cadence_and_retry() {
     CHECK(f.body().inf.anim_state == 115);
     CHECK(f.body().inf.anim_pending == 149); // equality skips the arbiter
     CHECK(f.body().inf.move_mode == 0 && f.body().inf.target_dist == 0);
-    f.script("forceanim(0)\n");
+    f.script("forceanim(reset)\n");
     f.world.restore(baseline);
     CHECK(f.world.script.forced_animation == 115);
     f.world.load_systems();
@@ -117,7 +124,7 @@ static void test_force_animation_think_cadence_and_retry() {
 
     f.body().inf.is_local_player = true;
     f.body().inf.reset_body_animation();
-    f.script("forceanim(115)\n");
+    f.script("forceanim(emote_1)\n");
     f.world.ai.tick_infantry(f.body(), f.world, 12);
     CHECK(f.body().inf.anim_state != 115); // org2 has no forced-state consumer
 

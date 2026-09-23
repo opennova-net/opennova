@@ -2145,6 +2145,14 @@ add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
 
+# The original compiler and VM on synthetic programs: the fixtures are the
+# pinned executable's own listings and states (scripts/oracles/wac_parity.py).
+add_executable(wac_retail_vectors_test wac/wac_retail_vectors_test.cpp)
+target_link_libraries(wac_retail_vectors_test PRIVATE opennova_runtime)
+target_include_directories(wac_retail_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_retail_vectors_test PRIVATE cxx_std_17)
+add_test(NAME wac_retail_vectors COMMAND wac_retail_vectors_test)
+
 # The WAC program surface the retired WacProgram / WacState bindings served
 # (ADR 0043 d10): the compile surface, the layered load, and an installed
 # program's 62-tick execution, pause gate, eager start and restart rewind.

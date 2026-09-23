@@ -280,6 +280,7 @@ static void test_remote_command_classes() {
     // PLOOP visits the member array in reverse: third, second, then local.
     // Each pass reports 1: the targeted class without the call, the local
     // text handler by its own return [orig: Chat_AddSystemMessage @0x4EDB64].
+    // Bare words reach the string pool upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
     f.run("ploop\nptext(hello) store(v1) add(v2,v1)\nend\n");
     CHECK(f.value(1) == 1 && f.value(2) == 3);
     CHECK(f.world.out.effects.count("text") == 1);
@@ -289,7 +290,7 @@ static void test_remote_command_classes() {
         CHECK(queue[1].targeted && queue[1].target == second);
         for (const ScriptRemoteCommand &record : queue) {
             CHECK(record.command_index == wac_command_index("text"));
-            CHECK(record.args.size() == 1 && record.args[0].text == "hello");
+            CHECK(record.args.size() == 1 && record.args[0].text == "HELLO");
         }
     }
     queue.clear();
@@ -298,7 +299,7 @@ static void test_remote_command_classes() {
     CHECK(f.value(3) == 1 && f.world.out.effects.count("text") == 2);
     CHECK(queue.size() == 1 && !queue[0].targeted &&
           queue[0].command_index == wac_command_index("text"));
-    CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "all");
+    CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "ALL");
     queue.clear();
     // The targeted class falls through to the local handler for an
     // unregistered, invalid or local selection.
@@ -317,9 +318,9 @@ static void test_remote_command_classes() {
     if (queue.size() == 2) {
         CHECK(queue[0].targeted && queue[0].target == second);
         CHECK(queue[0].command_index == wac_command_index("wave") &&
-              queue[0].args.size() == 1 && queue[0].args[0].text == "brief2");
+              queue[0].args.size() == 1 && queue[0].args[0].text == "BRIEF2");
         CHECK(queue[1].command_index == wac_command_index("consol") &&
-              queue[1].args.size() == 1 && queue[1].args[0].text == "dbg");
+              queue[1].args.size() == 1 && queue[1].args[0].text == "DBG");
     }
     queue.clear();
     // Ssn and numeric operands travel resolved: the packed handle and the dword.
@@ -328,7 +329,7 @@ static void test_remote_command_classes() {
     if (queue.size() == 2) {
         CHECK(!queue[0].targeted && queue[0].command_index == wac_command_index("hideSSN"));
         CHECK(queue[0].args.size() == 1 && queue[0].args[0].value == second.packed);
-        CHECK(queue[1].args.size() == 2 && queue[1].args[0].text == "numbered" &&
+        CHECK(queue[1].args.size() == 2 && queue[1].args[0].text == "NUMBERED" &&
               queue[1].args[1].value == 7);
     }
     CHECK(f.world.diagnostics.empty());
@@ -388,8 +389,8 @@ static void test_remote_command_fanout_reaches_owner_and_remotes() {
     const std::vector<std::string> owner = texts(f.transport, pop_udp);
     const std::vector<std::string> remote = texts(observer_transport, pop_udp);
     const std::vector<std::string> listen_host = texts(loopback, pop_loop);
-    CHECK(owner.size() == 2 && owner[0] == "owner_only" && owner[1] == "everyone");
-    CHECK(remote.size() == 1 && remote[0] == "everyone");
+    CHECK(owner.size() == 2 && owner[0] == "OWNER_ONLY" && owner[1] == "EVERYONE");
+    CHECK(remote.size() == 1 && remote[0] == "EVERYONE");
     CHECK(listen_host.empty());
     CHECK(f.world.out.effects.count("text") == 1); // the host ran only the broadcast row
 }

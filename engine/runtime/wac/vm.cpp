@@ -193,12 +193,20 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
     }
 }
 
-int32_t WacVm::arg_as_string_index(uint32_t ref) const {
-    if (operand_kind(ref) == OperandKind::Pool) {
-        uint32_t i = operand_index(ref);
-        if (i < prog_->operands.size()) return prog_->operands[i];
+// The string a string-typed parameter hands its handler. Text and Filename
+// are raw slots: the handler reads the bytes at the operand's address, the
+// string-pool copy the resolver made [orig: WacScript_ResolveParameter
+// @0x4F2E16]. A TextToken slot's dword is the text pointer the resolver
+// pooled [orig: @0x4F2FAE], here the index of the program's text token.
+std::string WacVm::operand_string(opennova::world::World &w, uint32_t ref, ParamType type) const {
+    if (type == ParamType::TextToken) {
+        const int32_t token = read(w, ref);
+        return token >= 0 && size_t(token) < prog_->text_tokens.size()
+                ? prog_->text_tokens[size_t(token)].text : std::string();
     }
-    return -1;
+    if (type != ParamType::Text && type != ParamType::Filename) return std::string();
+    if (operand_kind(ref) == OperandKind::Text) return prog_->text_at(operand_index(ref));
+    return std::string();
 }
 
 int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args, int argc, uint32_t instruction) {
@@ -222,10 +230,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
                                           : world::EntityHandle{};
     };
     auto S = [&](int i) -> std::string {
-        if (i >= argc || !args) return std::string();
-        int32_t si = arg_as_string_index(args[i]);
-        if (si >= 0 && si < static_cast<int32_t>(prog_->strings.size())) return prog_->strings[si];
-        return std::string();
+        if (i >= argc || !args || i >= 4) return std::string();
+        return operand_string(w, args[i], def.params[i]);
     };
     EventState &es = events_[(cur_event_ >= 0 && cur_event_ < static_cast<int>(events_.size())) ? cur_event_ : 0];
     auto &cmds = w.commands;
@@ -634,8 +640,7 @@ std::vector<world::ScriptRemoteArg> WacVm::resolve_remote_args(opennova::world::
         world::ScriptRemoteArg &arg = out[static_cast<size_t>(i)];
         const ParamType type = def.params[i];
         if (type == ParamType::Text || type == ParamType::Filename) {
-            const int32_t si = arg_as_string_index(args[i]);
-            if (si >= 0 && si < static_cast<int32_t>(prog_->strings.size())) arg.text = prog_->strings[si];
+            arg.text = operand_string(w, args[i], type);
         } else {
             arg.value = read(w, args[i]);
         }

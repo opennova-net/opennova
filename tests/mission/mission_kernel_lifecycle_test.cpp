@@ -193,8 +193,8 @@ int main() {
 		CHECK(!kernel.boot(options, error));
 		CHECK(!kernel.wac_loaded);
 		CHECK(error.find("failed to compile cleanly") != std::string::npos);
-		CHECK(error.find("unknown command") != std::string::npos);
-		CHECK(error.find("bogus_command") != std::string::npos);
+		// retail's wording, the token upper-cased [orig: Script_Compile @0x4F5284..0x4F52B4]
+		CHECK(error.find("Unknown 'BOGUS_COMMAND'") != std::string::npos);
 	}
 	// No script at all is the valid BMS-only mission under both policies.
 	{
