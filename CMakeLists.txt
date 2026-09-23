@@ -46,6 +46,7 @@ add_subdirectory(apps/novaworld_server)
 add_subdirectory(apps/nw_server)
 add_subdirectory(apps/nw_pp)
 add_subdirectory(apps/extract)
+add_subdirectory(apps/threedi_cli)
 
 enable_testing()
 add_subdirectory(tests)

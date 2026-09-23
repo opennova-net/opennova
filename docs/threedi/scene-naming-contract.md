@@ -1,70 +1,62 @@
 # Scene naming contract
 
-This document preserves the format-neutral names a future GLB/GLTF editor can
-use when converting ordinary scene data to and from 3DI. It is a naming
-contract, not an importer, exporter, Blender schema, or license to depend on
-custom properties.
+The NovaLogic ASE/OED object-naming convention: the scene-object names that
+carry a model's 3DI roles. OED classified them by `classify_name`
+([orig: ConvertToInternal @ 0x4268B3], ported in the retired
+`engine/formats/oed/convert_internal.cpp`); the Blender exporter
+(`tools/blender/opennova_3di`, [ADR 0047](../adr/0047-blender-3di-exporter.md))
+reads them today, and a future GLB/GLTF <-> 3DI seam keeps them.
 
-Names are ASCII and case-stable. Numeric identities are zero-padded to two
-digits. A converter must reject ambiguous DCC deduplication suffixes such as
-`.001`; it must not silently reinterpret them as part identities.
+Names are ASCII. Numeric identities are two digits and 1-based in the name
+(`01` is the first), 0-based inside; `00` parses to -1 (a user point with no
+part). A leading `!` makes an object ignored. Blender's own `.001`
+duplicate suffixes are stripped before classification (object names are
+unique per `.blend`, so LOD1's `PN01` is `PN01.001`); two objects that
+classify to the same identity inside one LOD are an error.
 
 | Scene element | Name form | Meaning |
 | --- | --- | --- |
-| Part | `PN##` | Stable 1-based 3DI subobject identity |
-| Part mesh | `## Mesh<n>` | Mesh `<n>` belonging to part `##` |
-| Part center | `_NN center` | Transform center for part `NN` |
-| Attachment | `~NNx attach` | Named attachment `x` on part `NN` |
-| User point | `UPcNN <label>` | User-point type `c`, part `NN`, optional label |
-| Light | `LP##` | Stable light identity |
-| Bone | `BN##` | Stable bone identity used by joints and weights |
+| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary) |
+| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot |
+| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`) |
+| Part center | `_## center` | part `##`'s transform center (pivot) |
+| Attachment | `~PPx attach` | sits under a child part: its parent is part `PP`; `x` (a, b, ...) tells siblings apart |
+| User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z |
+| Light | `LP##` | light `##` (a light object; not a `-colonly` mesh) |
+| Bone | `BN##` | bone `##` |
+| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` |
 
-Collision and occlusion nodes retain their established two-letter type prefix,
-numeric identity, and the `-colonly` or `-oconly` role suffix (the tables
-below, from the retired `pyopennova/scene_naming.py`). Their complete field
-mapping is intentionally deferred until the GLB editor is designed; names alone
-must not be treated as a lossless encoding for flags, planes, or connected-part
-data.
+## Collision volumes
 
-### Collision volumes
-
-`<TYPE><NN>[<dup>]-colonly`. `NN` is the 1-based zero-padded volume index (a
-negative source index displays as `01`). `<dup>` is a base-26 lowercase suffix
-for the 2nd and later occurrences of an otherwise identical name: 2nd `a`,
-3rd `b`, 27th `z`, 28th `aa`. Unknown numeric types fall back to `CX`.
+`<TYPE>##[<dup>]-colonly`, on the primary LOD. `##` is the **owning part**
+(`classify_name` stores it as the object index; the volume joins that part's
+collision section). `<dup>` is a lowercase suffix for the 2nd and later volumes
+of one type on one part: 2nd `a`, 3rd `b`, ... (the Blackhawk's 35 hull volumes
+are all `CB01...`). The volume is the convex hull of the mesh's vertices.
 
 | Code | Type | Code | Type | Code | Type |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `CB` | 8 | `BB` (blink box) | 14 | `LP` |
-| 2 | `CS` | 9 | `CD` | 15 | (unassigned: `CX`) |
-| 3 | `CC` | 10 | `CT` | 16 | `DH` |
-| 4 | `CL` | 11 | `CM` | 17 | `DM` |
-| 5 | `CV` | 12 | `VK` | 18 | `DL` |
-| 6 | `CA` | 13 | `CF` | 19 | `CP` |
-| 7 | `VC` | | | | |
+| `CB` | 1 | `BB` | 8 (blink box) | `LP` | 14 |
+| `CS` | 2 | `CD` | 9 | `DH` | 16 |
+| `CC` | 3 | `CT` | 10 | `DM` | 17 |
+| `CL` | 4 | `CM` | 11 | `DL` | 18 |
+| `CV` | 5 | `VK` | 12 | `CP` | 19 |
+| `CA` | 6 | `CF` | 13 | | |
+| `VC` | 7 | | | | |
 
-`BB` appends the enabled-flag letters before `NN`, taken from `~flags & 0x3E`
-(a cleared bit means enabled): bit 1 `V`, bit 2 `S`, bit 3 `W`, bit 4 `L`,
-bit 5 `O`, in that order (for example `BBVSO03`; no letters when every bit is
-set). Type 14 shares the `LP` prefix with lights; the `-colonly` suffix is what
-distinguishes the two.
+`BB` takes flag letters before `##`; each clears a bit of `0x3E`: `V` 0x2,
+`S` 0x4, `W` 0x8, `L` 0x10, `O` 0x20 (for example `BBVSO03`). Type 14 shares the
+`LP` prefix with lights; the `-colonly` suffix tells them apart. Runtime
+meanings: docs/world/world-wac-ai-re.md §15.
 
-### Occlusion volumes
+## Occlusion volumes
 
-`<PFX><NN>[-<MM>]-oconly`: type 0 `OB`, 1 `OS`, 2 `OP`, 3 `OP` (type 3 shares
-the `OP` prefix); unknown types fall back to `OX`. `NN` is the parent
-subobject + 1 (negative displays as `01`). Types 2 and 3 with a connecting
-subobject of 0 or more append `-MM` (that subobject + 1). Occlusion names take
-no duplicate suffix.
+`<PFX>##[-<MM>]-occonly`: `OB` 20, `OS` 21, `OP` 22 (reads a connecting
+subobject after `-`: `OP01-02-occonly`), `OH` 23. The Blender exporter refuses
+them by name until they have a scene form.
 
-Material names may remain descriptive, but a future converter may not assume a
-name alone losslessly carries shader codes, texture casing, control registers,
-or animated-texture state. UV sets use `UVMap` for the primary channel and
-`UVMap_Lightmap` for the lightmap channel where those names are available.
+## Bullet faces
 
-Hierarchy, transforms, meshes, materials, skinning, weights, UVs, lights, and
-animation travel as standard scene/GLTF data. Coordinate conversion has one
-owner per direction and happens exactly once. Nova-specific semantics that
-standard GLTF cannot represent require a future, explicit editor decision;
-they must never be recovered from importer-private metadata or custom
-properties.
+The collision faces bullets hit come from one render LOD's part meshes, chosen
+by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed);
+each face's surface type comes from its material.

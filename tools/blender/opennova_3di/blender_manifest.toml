@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "opennova_3di"
+version = "0.1.0"
+name = "OpenNova 3DI Exporter"
+tagline = "Export a Blender scene to a NovaLogic .3di model"
+maintainer = "OpenNova contributors"
+type = "add-on"
+license = ["SPDX:MIT"]
+blender_version_min = "4.2.0"
+platforms = ["windows-x64"]
+
+[permissions]
+files = "Writes the .3di, its textures and the intermediate .o3d scene next to the chosen output"

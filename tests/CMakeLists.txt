@@ -42,6 +42,17 @@ target_link_libraries(threedi_ctrl_catalog_test PRIVATE opennova_formats)
 target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
+# opennova-3di (the Blender exporter's CLI): build the spinner scene, then read
+# the minted model back and check the conversions the CLI owns.
+add_test(NAME threedi_cli_build
+         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
+set_tests_properties(threedi_cli_build PROPERTIES FIXTURES_SETUP threedi_cli_spinner)
+add_executable(threedi_o3d_cli_test threedi/o3d_cli_test.cpp)
+target_link_libraries(threedi_o3d_cli_test PRIVATE opennova_formats)
+add_test(NAME threedi_o3d_cli COMMAND threedi_o3d_cli_test ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
+set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED threedi_cli_spinner)
+
 # PANM unit tests
 foreach(test ctrl decode pose runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)
