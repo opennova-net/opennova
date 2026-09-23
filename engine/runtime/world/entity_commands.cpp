@@ -1510,13 +1510,13 @@ int EntityCommands::set_group_attack_max(int group, int32_t distance_q16) {
 
 namespace {
 
-// The single-target SSN walk the team/group/teleport commands share: first
-// matching row in pool order 0,1,2; SSN 0 never matches [orig: the dcb gate
-// + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag @0x43db30,
-// Entity_SetNetIdByParentRef @0x43d6c0, EventAction_TeleportEntityToSpawn
-// @0x43e005/0x43e0bb/0x43e161]. Our local-player rows deliberately carry
-// net_id 0 (the wire is handle-based), so the resolve_ssn sentinel mapping
-// runs first.
+// The single-target SSN walk the team and group commands share: first
+// matching row in pool order 0,1,2, no item gate; SSN 0 never matches
+// [orig: the dcb gate + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag
+// @0x43db30, Entity_SetNetIdByParentRef @0x43d6c0]. The single teleport walks
+// with its item gate inside (resolve_teleport_target below). Our local-player
+// rows deliberately carry net_id 0 (the wire is handle-based), so the
+// resolve_ssn sentinel mapping runs first.
 EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
     // net-id lookup EntityCommands::resolve_ssn wraps has neither.
@@ -1531,6 +1531,33 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
             if (entity != nullptr && entity->net_id == ssn) return handle;
+        }
+    }
+    return EntityHandle{};
+}
+
+// The single teleport's own target walk: pools 0, 1, 2 in order, the first
+// row holding an ItemTypeIndex whose DcbId matches. The gate sits inside the
+// walk, so a gated row carrying the SSN is passed over for a later match, in
+// the same pool or the next. SSN 0 and the local-player alias follow
+// resolve_ssn_in_pools012 (our player rows carry net_id 0).
+// [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 — pool 0 @0x43E005 (the
+//  +0x1C gate @0x43E02D, the DcbId compare @0x43E033), pool 1 @0x43E0BB
+//  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
+EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
+    if (ssn == 0) return EntityHandle{};
+    if (ssn == EntityCommands::kLocalPlayerSsn) {
+        const Entity *local = world.registry.get(world.cached.local_player);
+        if (local != nullptr && local->item_type_index != 0) return local->handle;
+    }
+    for (int pool : {0, 1, 2}) {
+        const size_t capacity = world.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world.registry.get(handle);
+            if (entity == nullptr || entity->item_type_index == 0) continue;
+            if (entity->net_id == ssn) return handle;
         }
     }
     return EntityHandle{};
@@ -1795,14 +1822,14 @@ bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
 bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
                                             int32_t marker_wp_number) {
     // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0] Marker lookup is
-    // pool 3/type 6088/WP_NUMBER; the target is the first SSN row walking
-    // pools 0,1,2 in order (this walk keeps the item gate @0x43e036).
+    // pool 3/type 6088/WP_NUMBER; the target is the first row walking pools
+    // 0,1,2 in order that holds an ItemTypeIndex and the SSN (the gate is
+    // inside the walk, resolve_teleport_target).
     const Entity *marker = find_teleport_marker(world_, marker_wp_number);
     if (marker == nullptr) return false;
     const Entity marker_copy = *marker;
-    const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
-    Entity *entity = world_.registry.get(handle);
-    if (entity == nullptr || entity->item_type_index == 0) return false;
+    Entity *entity = world_.registry.get(resolve_teleport_target(world_, ssn));
+    if (entity == nullptr) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
     if (world_.collision != nullptr)
         world_.collision->refresh_after_registry_change(world_);

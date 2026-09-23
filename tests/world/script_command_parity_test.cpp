@@ -702,6 +702,46 @@ static void test_player_removal_sweeps_placed_devices() {
     CHECK(w.registry.get(npc_charge) != nullptr);
 }
 
+// BMS SingleTeleport's target walk keeps the ItemTypeIndex gate inside: a
+// gated row carrying the SSN is passed over for the next match, in the same
+// pool or the next, and only gated rows mean no teleport.
+// [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 — the gates @0x43E02D /
+//  @0x43E0DD / @0x43E180 ahead of the DcbId compares @0x43E033 / @0x43E0E3 /
+//  @0x43E186]
+static void test_teleport_walk_gates_inside() {
+    ScriptWorld w;
+    Entity marker;
+    marker.item_id = kParticleEffectMarkerTypeId;
+    marker.has_item_def = true;
+    marker.wp_number = 5;
+    marker.position = {10.0f, 20.0f, 30.0f};
+    w.registry.spawn(3, marker);
+    Entity gated;
+    gated.item_id = 1001;
+    gated.has_item_def = true;
+    gated.item_type_index = 0;
+    gated.position = {1.0f, 1.0f, 1.0f};
+    gated.net_id = 260;
+    const EntityHandle gated_first = w.registry.spawn(0, gated);
+    Entity live = gated;
+    live.item_type_index = 4;
+    const EntityHandle live_second = w.registry.spawn(0, live);
+    CHECK(w.commands.teleport_ssn_to_marker(260, 5));
+    CHECK(w.registry.get(gated_first)->position.x == 1.0f);
+    CHECK(w.registry.get(live_second)->position.x == 10.0f);
+    gated.net_id = 261;
+    const EntityHandle gated_pool0 = w.registry.spawn(0, gated);
+    live.net_id = 261;
+    const EntityHandle live_pool1 = w.registry.spawn(1, live);
+    CHECK(w.commands.teleport_ssn_to_marker(261, 5));
+    CHECK(w.registry.get(gated_pool0)->position.x == 1.0f);
+    CHECK(w.registry.get(live_pool1)->position.x == 10.0f);
+    gated.net_id = 262;
+    const EntityHandle only_gated = w.registry.spawn(2, gated);
+    CHECK(!w.commands.teleport_ssn_to_marker(262, 5));
+    CHECK(w.registry.get(only_gated)->position.x == 1.0f);
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
@@ -722,6 +762,7 @@ int main() {
     test_hold_ssn_cause_bit();
     test_wac_removals_notify_the_joiners();
     test_player_removal_sweeps_placed_devices();
+    test_teleport_walk_gates_inside();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;
