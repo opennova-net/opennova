@@ -17,11 +17,6 @@
 
 namespace opennova::world {
 
-// Max distance (mission units) for mount_best's nearest-emplacement search — the proximity
-// proxy for the occupant-model+144 vehicle link the original resolves through the entity
-// hierarchy. A manned-gun soldier is placed on/next to its gun, so this is generous.
-
-
 // Attached emplacement children are allocated breadth-first after their carrier,
 // so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
 // Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone

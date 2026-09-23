@@ -2728,19 +2728,21 @@ func _present_pose_for_type(sim: Simulation, type_id: int) -> Dictionary:
 
 
 func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
-	# The 00TRg Rebel Base report: AI organics mounted on .50 cals via the BMS
-	# AttachToEmplaced action (case 0x25 -> mount_best) look seated on the host
-	# but SPIN, face the wrong way and FLOAT on a joiner. This drives that exact
-	# path — the host runs the real event runtime; the joiner is retail-faithful
-	# (world from the wire, no local .bms body) — and pins the joiner's presented
-	# gunner row to the host's, frame over frame.
+	# The 00TRg Rebel Base report: AI organics mounted on .50 cals look seated
+	# on the host but SPIN, face the wrong way and FLOAT on a joiner. The host
+	# seats its gunner through the real event runtime (a board order, then the
+	# BMS AttachToEmplaced action, which boards the vehicle the gunner's AI
+	# slot names); the joiner is retail-faithful (world from the wire, no local
+	# .bms body). The test pins the joiner's presented gunner row to the host's,
+	# frame over frame.
 	var root := _native_asset_root()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
 	# would hide any carrier-frame recomposition error on the joiner.
-	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 101419,
-			Vector3(2, 12, 0), Vector3(0, 0, 135)))
+	var gun := mission.add_entity(MissionData.KIND_ITEM, 101419,
+			Vector3(2, 12, 0), Vector3(0, 0, 135))
+	assert_not_null(gun)
 	var gunner := mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(2, 11, 0), Vector3.ZERO)
 	assert_not_null(gunner)
@@ -2751,10 +2753,16 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			Vector3(20, 0, 0), Vector3.ZERO))
 	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(24, 0, 0), Vector3.ZERO))
-	# The unconditional attach event — the same mechanism 00TRg uses to seat its
-	# rebel gunners at mission start.
+	# AttachToEmplaced (action 37) carries only the occupant; it boards the
+	# vehicle the occupant's AI slot already names. Event 0 arms that slot with
+	# the board order (RedirectSingleTo, action 19: command 125, target = the
+	# gun), and the repeating event 1 retries the attach every processing pass
+	# until the board think has cached the gun.
 	assert_gte(mission.add_event(0, 0, 0), 0)
 	assert_true(mission.add_event_action(0,
+			19, 0, gunner_ssn, 125, gun.bms_id))
+	assert_gte(mission.add_event(1, 1, 0), 0)
+	assert_true(mission.add_event_action(1,
 			37, 0, gunner_ssn))
 
 	var fixture_def_root := ResourceRoot.new()

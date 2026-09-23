@@ -123,9 +123,9 @@ private:
     // when the id is missing or the zone box is degenerate (x_min==x_max ||
     // y_min==y_max). Covers Group/Single IsWithinArea (sub 10, param2) and
     // PlayerSatchel (main 7 sub 37, param1); the action sibling covers
-    // AreaAiRed/Blue (types 12/13, param1 — retail also inlines the zone box into
-    // the action params; our runtime resolves boxes at dispatch, so the index
-    // rewrite alone preserves behavior).
+    // AreaAiRed/Blue (types 12/13, param1) and overwrites the index at once with
+    // the zone box: p1 = x_min, p3 = y_min, p4 = x_max, reserved1 = y_max, the
+    // words the dispatch's bounds test and command arguments then read.
     void resolve_zone_refs(opennova::world::World &w);
 
     void update_entry(opennova::world::World &w, ScriptedEvent &se);

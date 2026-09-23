@@ -1,5 +1,5 @@
 // Emplacement / mount (Phase 2) tests: the seat model + EntityCommands mount primitives
-// (mount/mount_best/dismount/find_mounted_on), canonical best-seat selection/attach,
+// (mount/use_boarding_target/dismount/find_mounted_on), canonical best-seat selection/attach,
 // the per-tick AI seat-follow,
 // the BMS AttachToEmplaced action path (emits no unported_action), and snapshot/restore
 // rewinding the mount. [orig chain: EventAction_Dispatch case 0x25 @0x4542e0 ->
@@ -761,25 +761,45 @@ int main() {
         CHECK(ai.at(idx)->inf.anim_state == world::anim_state::kIdleCrouch);
     }
 
-    // ---- BMS AttachToEmplaced: emits no unported_action + mounts via proximity ----
+    // ---- BMS AttachToEmplaced: the occupant boards the vehicle its AI slot
+    // +0x90 (slot[36]) names, however far; an occupant without one boards
+    // nothing, even beside a free gun. Emits no unported_action.
+    // [orig: EventAction_Dispatch case 37 @0x454989 ->
+    //  WacScript_TryMountEntityToVehicle @0x4F70F0] ----
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
-        w.registry.spawn(1, make_gun(200, 1.f, 1.f, 0.f, 0));
-        w.registry.spawn(0, make_soldier(100, 2.f, 1.f, 0.f)); // within kMountRadius
+        Entity far_gun = make_gun(200, 60.f, 60.f, 0.f, 0);
+        far_gun.item_id = 1;
+        Entity near_gun = make_gun(201, 2.f, 2.f, 0.f, 0);
+        near_gun.item_id = 1;
+        w.registry.spawn(1, far_gun);
+        w.registry.spawn(1, near_gun);
+        Entity ordered = make_soldier(100, 1.f, 1.f, 0.f);
+        ordered.item_id = 1;
+        Entity idle = make_soldier(101, 1.f, 2.f, 0.f);
+        idle.item_id = 1;
+        const EntityHandle ordered_h = w.registry.spawn(0, ordered);
+        const EntityHandle idle_h = w.registry.spawn(0, idle);
+        w.ai.attach(ordered_h);
+        w.ai.attach(idle_h);
+        // The ssn2ssn board order arms slot[36] with the far gun.
+        CHECK(w.commands.order_boarding(100, 200));
 
         bms::Event e{};
         e.flags = bms::EventFlags::None;
         e.trigger_count = 0; // unconditional -> fires
         e.action_index = 0;
-        e.action_count = 1;
+        e.action_count = 2;
         bms::Action act{};
         act.action_type = bms::ActionType::AttachToEmplaced;
         act.param1 = 100; // occupant SSN (the only param the action carries)
+        bms::Action idle_act = act;
+        idle_act.param1 = 101;
         mission::BmsEventSystem bms_sys;
-        bms_sys.load({e}, {}, {act});
+        bms_sys.load({e}, {}, {act, idle_act});
         w.add_system(&bms_sys);
         w.load_systems();
         // A normal event's first processing pass is the 16th tick (quarter-list
@@ -788,6 +808,8 @@ int main() {
 
         CHECK(w.out.effects.count("unported_action") == 0);
         CHECK(w.commands.find_mounted_on(200) == 100);
+        CHECK(w.commands.find_mounted_on(201) == 0);
+        CHECK(!w.registry.get(idle_h)->mounted);
     }
 
     // ---- snapshot/restore rewinds the mount (seats ride the registry value-copy) ----

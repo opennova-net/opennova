@@ -83,7 +83,17 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
             if (idx < 0 || area_degenerate(idx)) {
                 a.action_type = static_cast<bms::ActionType>(0); // [orig: @0x4531b1/@0x4531c6]
             } else {
-                a.param1 = idx; // [orig: @0x453183 + the inline box copy @0x45318d..]
+                // The index store is overwritten at once by the zone box, in
+                // the record's own order: p1 = x_min, p3 = y_min, p4 = x_max,
+                // reserved1 = y_max (p2 keeps the authored command argument).
+                // [orig: EventTrigger_ResolveZoneActionRefs @0x453100 — the
+                //  index @0x453183, x_min @0x45318d, y_min @0x453197, x_max
+                //  @0x4531a1, y_max @0x4531ab]
+                const world::Aabb &box = w.registry.area(idx)->bounds;
+                a.param1 = world::to_fixed(box.min.x);
+                a.param3 = world::to_fixed(box.min.y);
+                a.param4 = world::to_fixed(box.max.x);
+                a.reserved1 = world::to_fixed(box.max.y);
             }
         }
     }
@@ -497,19 +507,27 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             break;
         case bms::ActionType::MisvarChange: {
             // [orig: case 5 — writes dword_C6B240[param1]; the shared var store.]
-            int32_t cur = w.script.vars.get_mission(a.param1);
+            // The arithmetic is the dword add/sub, so it wraps at the 32-bit
+            // edge [orig: EventAction_Dispatch case 5 @0x45437e, subs 1..5
+            //  @0x454394..0x454406].
+            const uint32_t cur = static_cast<uint32_t>(w.script.vars.get_mission(a.param1));
+            const uint32_t arg = static_cast<uint32_t>(a.param2);
             switch (static_cast<bms::MissionVariableActionSubType>(a.action_sub_type)) {
                 case bms::MissionVariableActionSubType::Set: w.script.vars.set_mission(a.param1, a.param2); break;
-                case bms::MissionVariableActionSubType::Add: w.script.vars.set_mission(a.param1, cur + a.param2); break;
-                case bms::MissionVariableActionSubType::Subtract: w.script.vars.set_mission(a.param1, cur - a.param2); break;
-                case bms::MissionVariableActionSubType::Increment: w.script.vars.set_mission(a.param1, cur + 1); break;
-                case bms::MissionVariableActionSubType::Decrement: w.script.vars.set_mission(a.param1, cur - 1); break;
+                case bms::MissionVariableActionSubType::Add: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur + arg)); break;
+                case bms::MissionVariableActionSubType::Subtract: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur - arg)); break;
+                case bms::MissionVariableActionSubType::Increment: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur + 1u)); break;
+                case bms::MissionVariableActionSubType::Decrement: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur - 1u)); break;
                 default: break;
             }
             break;
         }
         case bms::ActionType::KillSingle: cmds.kill_ssn(static_cast<uint16_t>(a.param1)); break;
-        case bms::ActionType::VaporizeSingle: cmds.remove_ssn(static_cast<uint16_t>(a.param1)); break;
+        case bms::ActionType::VaporizeSingle:
+            // [orig: EventAction_Dispatch case 22 @0x454828 ->
+            //  find_entity_by_parent_and_dispatch @0x43E210]
+            cmds.remove_bms_ref(a.param1);
+            break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
         case bms::ActionType::RedirectSingleTo:
             // [orig: EventAction_Dispatch case 19 @0x4547CF..0x4547DB ->
@@ -524,7 +542,8 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         // -> Entity_HandleAlertCommand / Entity_HandleAlertStateEvent @0x43dee0 -> Entity_ApplyCommand
         // @0x43ab60; AREA_AI_RED/BLUE apply to a zone's red/blue units. team: blue=1, red=2.]
         case bms::ActionType::ChangeSingleAI:
-            cmds.apply_ai_command(static_cast<uint16_t>(a.param1), a.action_sub_type, a.param2, a.param3, a.param4);
+            // [orig: EventAction_Dispatch case 21 @0x45480f]
+            cmds.apply_bms_single_ai_command(a.param1, a.action_sub_type, a.param2, a.param3, a.param4);
             break;
         case bms::ActionType::ParticleEffectAction:
             // [orig: case 0x1B @0x4542e0 -> EventAction_SpawnParticleEffect (ex sub_4540E0)] param1 selects the authored
@@ -535,10 +554,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             cmds.apply_group_ai_command(a.param1, a.action_sub_type, a.param2, a.param3, a.param4);
             break;
         case bms::ActionType::AreaAiRed:
-            cmds.apply_area_ai_command(a.param1, /*team=*/2, a.action_sub_type, a.param2, a.param3, a.param4);
-            break;
         case bms::ActionType::AreaAiBlue:
-            cmds.apply_area_ai_command(a.param1, /*team=*/1, a.action_sub_type, a.param2, a.param3, a.param4);
+            // The record's words as the zone resolver left them: p1/p3 and
+            // p4/reserved1 hold the zone corners. Red = team 2, blue = 1.
+            // [orig: EventAction_Dispatch cases 12,13 @0x4544e7 ->
+            //  Entity_KillTeamInBounds @0x43D030 — the team pick @0x43d03b..0x43d053]
+            cmds.apply_area_ai_command(a.action_type == bms::ActionType::AreaAiRed ? 2 : 1,
+                    a.action_sub_type, a.param1, a.param2, a.param3, a.param4, a.reserved1);
             break;
         case bms::ActionType::OutputText:
             w.out.effects.push({"text", a.param1, 0, 0, 0, std::string()});
@@ -561,16 +583,18 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::ShowWinSubgoal:
             // Set/clear the show-win bit — the RAW slot shift is the original's
             // (slot 1..8 -> bits 1..8). The "New Objective" toast rides the
-            // effect. [orig: case 35 @0x4546af — bit @0x4546bf/@0x4546d0;
-            //  HUD_ShowObjectiveNotification @0x4546e2]
-            if (a.param2 != 0) w.script.subgoals.show_win |= (1u << a.param1);
-            else w.script.subgoals.show_win &= ~(1u << a.param1);
+            // effect. The shift count is masked to 5 bits like the x86 shl.
+            // [orig: case 35 @0x4546af — shl @0x4546bd/@0x4546cc, bit
+            //  @0x4546bf/@0x4546d0; HUD_ShowObjectiveNotification @0x4546e2]
+            if (a.param2 != 0) w.script.subgoals.show_win |= (1u << (a.param1 & 31));
+            else w.script.subgoals.show_win &= ~(1u << (a.param1 & 31));
             w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
             break;
         case bms::ActionType::ShowLoseSubgoal:
-            // [orig: case 36 @0x454724 — the show-lose mirror @0x454734/@0x454745]
-            if (a.param2 != 0) w.script.subgoals.show_lose |= (1u << a.param1);
-            else w.script.subgoals.show_lose &= ~(1u << a.param1);
+            // [orig: case 36 @0x454724 — shl @0x454732/@0x454741, the
+            //  show-lose mirror @0x454734/@0x454745]
+            if (a.param2 != 0) w.script.subgoals.show_lose |= (1u << (a.param1 & 31));
+            else w.script.subgoals.show_lose &= ~(1u << (a.param1 & 31));
             w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
@@ -599,9 +623,9 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // byte_A763FB = header win_scores; the "Score_AccumulateBandwidth"
             // callee name is a kong misnomer] and the header unknown5[2]-masked
             // team-banner leg [orig: @0x45458d byte_A762D6].
-            // [orig: case 14 @0x454500 — guard @0x45450a, set @0x45451d,
-            //  round-running gate @0x45453a, STRWINMSG resolve @0x45456f]
-            const uint32_t bit = 1u << a.param1;
+            // [orig: case 14 @0x454500 — shl @0x454508, guard @0x45450a, set
+            //  @0x45451d, round-running gate @0x45453a, STRWINMSG resolve @0x45456f]
+            const uint32_t bit = 1u << (a.param1 & 31);
             if ((w.script.subgoals.won & bit) != 0) break;
             w.script.subgoals.won |= bit;
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
@@ -616,8 +640,8 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // unknown5[3]-masked team-banner leg is deferred with its win
             // sibling. [orig: case 15 @0x4545e0 — set @0x4545ea, gate
             //  @0x4545f0, STRLOSEMSG chat @0x454632 + SetBannerText @0x454647;
-            //  byte_A762D7 leg @0x45465c]
-            w.script.subgoals.lost |= (1u << a.param1);
+            //  byte_A762D7 leg @0x45465c; the masked shl @0x4545e8]
+            w.script.subgoals.lost |= (1u << (a.param1 & 31));
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
                     ? w.script.subgoals.lose_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
@@ -642,9 +666,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             }
             break;
         case bms::ActionType::AttachToEmplaced:
-            // [orig: case 0x25 @0x4542e0 -> WacScript_TryMountEntityToVehicle @0x4f70f0.] The action
-            // carries ONLY the occupant SSN (param1); the gun is found implicitly (proximity proxy).
-            cmds.mount_best(static_cast<uint16_t>(a.param1));
+            // The action carries ONLY the occupant SSN (param1); the vehicle is
+            // the one the occupant's AI slot +0x90 already names (a board
+            // order armed it), the same entry as WAC ssnuse.
+            // [orig: EventAction_Dispatch case 37 @0x454989 (the
+            //  EntityPool_FindByNetId call @0x454992) ->
+            //  WacScript_TryMountEntityToVehicle @0x4F70F0]
+            cmds.use_boarding_target(static_cast<uint16_t>(a.param1));
             break;
         case bms::ActionType::Teammates:
             // [orig: EventAction_Dispatch @0x4542E0, case 39]

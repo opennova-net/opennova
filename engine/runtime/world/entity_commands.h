@@ -72,7 +72,14 @@ public:
     // person's staged death clip), then the class event (e, 1, 0) with a cleared
     // hit record; the IDB name is a misnomer. [orig: Entity_ResetWeaponState @0x4F1E40]
     bool wac_kill_ssn(EntityTarget ssn);
+    // The shared destroy (retail Entity_Destroy): no network notification.
     bool remove_ssn(EntityTarget ssn);
+    // The script removal: S2C 0x12 to the joiners, then the shared destroy.
+    // [orig: Server_RemoveEntityAndNotify @0x50a270]
+    bool server_remove_and_notify(EntityTarget ssn);
+    // BMS VaporizeSingle: the first pool 0..3 row carrying the SSN is removed
+    // with the notification. [orig: find_entity_by_parent_and_dispatch @0x43e210]
+    bool remove_bms_ref(int32_t ssn);
     // WAC SSNHP: the health word, the attacker cleared; no gate.
     // [orig: WacCmd_SsnHp @0x4F2100]
     bool set_ssn_hp(EntityTarget ssn, int32_t hp);
@@ -323,11 +330,6 @@ public:
     int fire_ammo_from_ssn(int32_t ammo, EntityTarget source, EntityTarget target);
     int fire_ammo_in_area(int32_t ammo, int32_t area_id);
     int rain_ammo_near_player(int32_t ammo, uint32_t random);
-    // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
-    // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144
-    // hierarchy link. We don't model that link, so the target is the nearest emplacement with a free
-    // seat within kMountRadius (a tracked proximity proxy). Returns false if none.
-    bool mount_best(uint16_t occupant_ssn);
     // [orig: Entity_DetachFromVehicle @0x4355f0] Free the occupant's seat + clear its mount ref.
     bool dismount(EntityTarget occupant_ssn);
     // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
@@ -385,9 +387,18 @@ public:
         kAiFiringAngle = 46,
     };
     bool apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    // BMS ChangeSingleAI: the first pool 0..2 row carrying the SSN.
+    // [orig: Entity_HandleAlertStateEvent @0x43dee0]
+    bool apply_bms_single_ai_command(int32_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    // BMS ChangeGroupAI: pool 2 rows with an AI component, then pools 0 and 1.
+    // [orig: Entity_HandleAlertCommand @0x43cf10]
     int apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4);
-    int apply_area_ai_command(int zone_area_id, int team, int sub_type,
-                              int32_t p2, int32_t p3, int32_t p4);
+    // BMS AreaAiRed/AreaAiBlue over the load-resolved action record: p1/p3
+    // bound X and p4/reserved1 bound Y (the zone resolver stored x_min,
+    // y_min, x_max, y_max there); pool 0 rows of `team` only.
+    // [orig: Entity_KillTeamInBounds @0x43d030]
+    int apply_area_ai_command(int team, int sub_type, int32_t p1, int32_t p2, int32_t p3,
+                              int32_t p4, int32_t reserved1);
 
     World &world() { return world_; }
 

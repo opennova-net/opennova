@@ -21,10 +21,6 @@
 
 namespace opennova::world {
 
-// The mount_best proximity proxy's search radius (a tracked stand-in; the
-// witnessed seat-offer walk is the mount system's).
-static constexpr double kMountRadius = 20.0;
-
 // ----------------------------------------------------------------------------
 // EntityCommands — the shared Entity_* primitive layer.
 // Commands mutate the Entity model directly and locally. The one outbound seam
@@ -35,21 +31,15 @@ static constexpr double kMountRadius = 20.0;
 // ----------------------------------------------------------------------------
 
 // Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
-// triggers/actions) written under the dfx2med authoring convention address the
-// local player as SSN 10000 (10000 + player slot). The kLocalPlayerSsn alias
-// below is a port seam that honours that convention; it is not a retail
-// lookup. Retail JO has no alias: its SSN leg is atol(token) ->
-// EntityPool_FindByNetId @0x4f0a20, which keys on GamePlayerEntity+0x7C
-// (DcbId, low 16 bits; pools 0..3, no netId gate), and the JO player spawn
-// [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] memsets the record and
-// writes only +0x78 (ownerConnectionId) and +0x15c (NetId, the minimap slot
-// id), never DcbId@0x7C or Ssn@0x2e. A retail lookup of 10000 therefore
-// misses every player and the compiler reports "Unknown SSN" unless an
-// authored entity carries that DcbId (docs/net/novaworld-net-re.md, the
-// field-identity grill). Our player entities carry net_id 0 (the wire is
-// handle-based), and this seam resolves the authoring convention in their
+// triggers/actions) address the players as SSN 10000 + player slot. The JO
+// player spawn [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] leaves
+// DcbId@0x7C zero, and the player class init then stamps it with 10000 + the
+// slot byte [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173], the key
+// EntityPool_FindByNetId matches (low 16 bits; pools 0..3, no netId gate).
+// Our player entities carry net_id 0 (the wire is handle-based), so the
+// kLocalPlayerSsn alias below maps SSN 10000 to the local player in their
 // place; MP joiner SSNs (10001+) wait on the net track.
-// [orig: EntityPool_FindByNetId @0x4f0a20; Entity_SpawnFromAnimSlotProperty @0x43c390]
+// [orig: EntityPool_FindByNetId @0x4f0a20]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
     if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
         return world_.cached.local_player;
@@ -330,6 +320,32 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (world_.collision) world_.collision->remove_entity_instance(h);
     world_.registry.despawn(h);
     return true;
+}
+
+bool EntityCommands::server_remove_and_notify(EntityTarget ssn) {
+    const EntityHandle h = resolve_target(ssn);
+    if (world_.registry.get(h) == nullptr) return false;
+    // The removal reaches the joiners first: S2C 0x12 [u16 packed handle]
+    // under send mask 0x90, drained by the host's entity-event fan. A removed
+    // player's placed devices follow through the owner sweep (ThrowableSim
+    // retires a device whose owner row is gone), then the shared destroy.
+    // [orig: Server_RemoveEntityAndNotify @0x50a270 — the 0x12 send @0x50a2ac,
+    //  the player-device sweep call @0x50a2bb, Entity_Destroy @0x50a2c4]
+    world_.out.entity_events.push_back(EntityRemoveEvent{h.packed});
+    return remove_ssn(h);
+}
+
+bool EntityCommands::remove_bms_ref(int32_t ssn) {
+    // SSN 0 and a non-authority peer do nothing; otherwise the first row
+    // carrying the SSN, walking pools 0..3 in slot order, goes through the
+    // notifying removal. An SSN past 16 bits matches no DcbId we carry.
+    // [orig: find_entity_by_parent_and_dispatch @0x43e210 — SSN 0 @0x43e214,
+    //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
+    //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
+    if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
+    const EntityHandle h = resolve_ssn(static_cast<uint16_t>(ssn));
+    if (world_.registry.get(h) == nullptr) return false;
+    return server_remove_and_notify(h);
 }
 
 bool EntityCommands::set_entity_health(EntityHandle h, int32_t hp) {
@@ -1488,10 +1504,15 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
 } // namespace
 
 int EntityCommands::remove_group(int group) {
-    // [orig: Entity_TeleportAllByNetId @0x43D5D0] Despite the shipped
-    // symbol name, action 4 removes every matching row in pools 2,0,1,3.
+    // Despite the shipped symbol name, action 4 removes every matching row in
+    // pools 2,0,1,3 through the notifying removal. Group 0 and a
+    // non-authority peer do nothing, and no live recount follows: the
+    // counts wait for the 62-tick rescan.
+    // [orig: Entity_TeleportAllByNetId @0x43D5D0 — group 0 @0x43d5d5, the
+    //  authority gate @0x43d5dd; Server_RemoveEntityAndNotify per row
+    //  @0x43d615 (pool 2), @0x43d646 (0), @0x43d677 (1), @0x43d6a8 (3)]
     static constexpr int pools[] = {2, 0, 1, 3};
-    if (group == 0) return 0;
+    if (group == 0 || !world_.rules.logic_authority) return 0;
     int removed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1501,15 +1522,8 @@ int EntityCommands::remove_group(int group) {
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr || static_cast<int>(entity->group_id) != group)
                 continue;
-            world_.ai.release(handle); // the row's brain goes with it [orig: Entity_Destroy @0x43e810]
-            world_.registry.despawn(handle);
-            ++removed;
+            if (server_remove_and_notify(handle)) ++removed;
         }
-    }
-    if (removed != 0) {
-        world_.recount_group_live();
-        if (world_.collision != nullptr)
-            world_.collision->refresh_after_registry_change(world_);
     }
     return removed;
 }
@@ -1552,8 +1566,10 @@ bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
 }
 
 int EntityCommands::set_group_team(int group, int32_t team) {
-    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1.
+    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1; group 0 does
+    // nothing [orig: @0x43c685].
     static constexpr int pools[] = {2, 0, 1};
+    if (group == 0) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1576,7 +1592,9 @@ int EntityCommands::set_group_team(int group, int32_t team) {
 int EntityCommands::change_group(int old_group, int new_group) {
     // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows;
     // pools 2 and 1 update all resolved rows, then live counts are rebuilt.
+    // Old group 0 does nothing, not even the recount [orig: @0x43c5b5].
     static constexpr int pools[] = {2, 0, 1};
+    if (old_group == 0) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1777,6 +1795,8 @@ bool EntityCommands::release_boarding_command(EntityTarget occupant_ssn) {
 }
 
 bool EntityCommands::use_boarding_target(EntityTarget occupant) {
+    // WAC ssnuse and BMS action 37 (AttachToEmplaced) share this: the
+    // occupant boards the vehicle its AI slot +0x90 (slot[36]) names.
     // [orig: WacScript_TryMountEntityToVehicle @0x4F70F0]
     const EntityHandle handle = resolve_target(occupant);
     Entity *entity = world_.registry.get(handle);
@@ -1796,28 +1816,6 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     entity->engine_flags &= ~kEntityFlagMounted;
     entity->mount_type = SeatType::None;
     return false;
-}
-
-bool EntityCommands::mount_best(uint16_t occupant_ssn) {
-    // [orig: EventAction_Dispatch case 0x25 @0x4542e0 -> the vehicle is occupant-model+144.]
-    // Proximity proxy: the nearest entity offering a free seat within kMountRadius.
-    EntityHandle oh = resolve_target(occupant_ssn);
-    const Entity *occ = world_.registry.get(oh);
-    if (!occ || occ->mounted) return false;
-    const Vec3 p = occ->position;
-    EntityHandle best;
-    double best_d2 = kMountRadius * kMountRadius + 1.0;
-    world_.registry.for_each([&](const Entity &e) {
-        if (e.handle == oh || e.seats.empty()) return;
-        VehicleSeatSelection selection;
-        if (!find_best_vehicle_seat(world_, e.handle, oh, selection)) return;
-        const double dx = e.position.x - p.x, dy = e.position.y - p.y, dz = e.position.z - p.z;
-        const double d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 <= kMountRadius * kMountRadius && d2 < best_d2) { best_d2 = d2; best = e.handle; }
-    });
-    const Entity *tgt = world_.registry.get(best);
-    if (!tgt) return false;
-    return mount(occupant_ssn, tgt->handle);
 }
 
 bool EntityCommands::dismount(EntityTarget occupant_ssn) {
@@ -2075,69 +2073,95 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
     sys.events.queue(ev);
 }
 
-} // namespace
-
-bool EntityCommands::apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
-    const EntityHandle handle = resolve_target(ssn);
-    Entity *entity = world_.registry.get(handle);
+// One Entity_ApplyCommand over a resolved row: the entity arms first (no
+// aiRuntime gate), then the controller, queued-event and brain halves when
+// the row has an AI component. True when some arm took the command.
+// [orig: Entity_ApplyCommand @0x43ab60]
+bool apply_row_ai_command(World &world, EntityHandle handle, int sub_type, int32_t p2,
+                          int32_t p3, int32_t p4) {
+    Entity *entity = world.registry.get(handle);
     if (entity == nullptr) return false;
-    if (apply_entity_ai_command(world_, *entity, sub_type, p2)) return true;
-    AiEntity *ae = world_.ai.for_handle(handle);
+    if (apply_entity_ai_command(world, *entity, sub_type, p2)) return true;
+    AiEntity *ae = world.ai.for_handle(handle);
     if (ae == nullptr) return false;
-    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-    queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
+    apply_ai_controller_command(world, *entity, *ae, sub_type, p2, p3);
+    queue_ai_brain_event(world.ai, *ae, sub_type, p2);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
 }
 
+} // namespace
+
+bool EntityCommands::apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    return apply_row_ai_command(world_, resolve_target(ssn), sub_type, p2, p3, p4);
+}
+
+bool EntityCommands::apply_bms_single_ai_command(int32_t ssn, int sub_type, int32_t p2,
+                                                 int32_t p3, int32_t p4) {
+    // Sub 0 and SSN 0 do nothing; the first pool 0, 1, 2 row carrying the
+    // SSN takes the command. The alert re-stamp that follows for a
+    // non-player writes the byte Entity_ApplyCommand already wrote.
+    // [orig: Entity_HandleAlertStateEvent @0x43dee0 — sub 0 @0x43deef, SSN 0
+    //  @0x43defc, the pool scans @0x43df20 (0) / @0x43df41 (1) / @0x43df69
+    //  (2), Entity_ApplyCommand @0x43df70, the re-stamp @0x43df78..0x43dfb2]
+    if (sub_type == 0 || ssn <= 0 || ssn > 0xFFFF) return false;
+    return apply_row_ai_command(world_,
+            resolve_ssn_in_pools012(world_, static_cast<uint16_t>(ssn)),
+            sub_type, p2, p3, p4);
+}
+
 int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
-    // The alert-change subs also stamp the per-group alert record the cat-1
-    // triggers read, independent of any AI brains [orig: Entity_HandleAlertCommand
-    // @ 0x43cff7 maps sub 5 -> red, 6 -> green, 22 -> yellow via
-    // TriggerGroup_SetAlertRed/Green/Yellow @ 0x40d630/0x40d5f0/0x40d610].
+    // Sub 0 and group 0 do nothing. Pool 2 rows take the command only with
+    // an AI component; pool 0 and pool 1 rows take it unconditionally, so
+    // the entity arms reach a brainless item but never a pool-3 marker.
+    // [orig: Entity_HandleAlertCommand @0x43cf10 — sub 0 @0x43cf1e, group 0
+    //  @0x43cf2c; pool 2 with the aiRuntime gate @0x43cf57/@0x43cf64, pool 0
+    //  @0x43cf97, pool 1 @0x43cfcd]
+    if (sub_type == 0 || group == 0) return 0;
+    int n = 0;
+    for (int pool : {2, 0, 1}) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr || static_cast<int>(entity->group_id) != group) continue;
+            if (pool == 2 && world_.ai.for_handle(handle) == nullptr) continue;
+            if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
+        }
+    }
+    // After the fan, the alert-change subs stamp the per-group alert record
+    // the cat-1 triggers read [orig: @0x43cfea..0x43d01a — sub 5 -> red, 6 ->
+    // green, 22 -> yellow via TriggerGroup_SetAlertRed/Green/Yellow
+    // @ 0x40d630/0x40d5f0/0x40d610].
     if (group > 0 && group < TriggerRelations::kGroups) {
         if (sub_type == 5) world_.script.relations.group(group).alert = TriggerRelations::kAlertRed;
         else if (sub_type == 6) world_.script.relations.group(group).alert = TriggerRelations::kAlertGreen;
         else if (sub_type == 22) world_.script.relations.group(group).alert = TriggerRelations::kAlertYellow;
     }
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
-    int n = 0;
-    for (EntityHandle h : members) {
-        Entity *entity = world_.registry.get(h);
-        if (entity == nullptr) continue;
-        if (apply_entity_ai_command(world_, *entity, sub_type, p2)) { ++n; continue; }
-        AiEntity *ae = world_.ai.for_handle(h);
-        if (ae != nullptr) {
-                    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
-            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
-            ++n;
-        }
-    }
     return n;
 }
 
-int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_type,
-                                          int32_t p2, int32_t p3, int32_t p4) {
-    // AREA_AI_RED/BLUE: apply to the team's units inside a zone. [target = zone area id,
-    // team filter: blue=1/red=2; the exact BMS zone->area mapping is grill-gated (P5).]
-    const Area *a = world_.registry.area(zone_area_id);
-    if (!a) return 0;
-    std::vector<EntityHandle> in;
-    world_.registry.in_area(a->bounds, in);
+int EntityCommands::apply_area_ai_command(int team, int sub_type, int32_t p1, int32_t p2,
+                                          int32_t p3, int32_t p4, int32_t reserved1) {
+    // Sub 0 does nothing. Pool 0 rows whose signed team byte matches take
+    // the command when X lies in [p1, p3] and Y in [p4, reserved1], no Z
+    // test. The zone resolver stored x_min, y_min, x_max, y_max in those
+    // words, so the tested box pairs the zone's corners across axes, and
+    // Entity_ApplyCommand reads y_min and x_max as its p3/p4.
+    // [orig: Entity_KillTeamInBounds @0x43d030 — sub 0 @0x43d05b, the team
+    //  byte @0x43d099, X @0x43d0a8..0x43d0b5, Y @0x43d0b7..0x43d0c4,
+    //  Entity_ApplyCommand @0x43d0c8]
+    if (sub_type == 0) return 0;
     int n = 0;
-    for (EntityHandle h : in) {
-        Entity *entity = world_.registry.get(h);
-        if (entity == nullptr || entity->team != static_cast<uint8_t>(team)) continue;
-        if (apply_entity_ai_command(world_, *entity, sub_type, p2)) { ++n; continue; }
-        AiEntity *ae = world_.ai.for_handle(h);
-        if (ae != nullptr) {
-                    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
-            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
-            ++n;
-        }
+    const size_t capacity = world_.registry.pool_capacity(0);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
+        const Entity *entity = world_.registry.get(handle);
+        if (entity == nullptr || static_cast<int8_t>(entity->team) != team) continue;
+        const int32_t x = to_fixed(entity->position.x);
+        const int32_t y = to_fixed(entity->position.y);
+        if (x < p1 || x > p3 || y < p4 || y > reserved1) continue;
+        if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
     }
     return n;
 }
