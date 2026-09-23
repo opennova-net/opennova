@@ -1368,8 +1368,9 @@ is folded into the `PF_HELD_WEAPON_ADM` snapshot field: a hidden or unarmed body
 0, which is simultaneously our table's null row and the original's own
 `if (entity->equippedAdmIndex)` precondition. STILL UNPORTED from this callback: AI/NPC bodies
 (an unmounted placed `.bms` soldier's equipped ADM index has no witnessed source: the org1
-mounted request copies its gun's byte into a gunner (§38.3), and the other witnessed writers of
-`entity+0x2B0` are player paths, so that increment is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
+mounted request copies its parent's byte into every mounted rider and the NPC detach zeroes
+it (§38.3), and the other witnessed writers of `entity+0x2B0` are player paths, so that
+increment is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
 projected-size cull `@ 0x4e3d4b`, the mounted-branch correlation of §14.4, and the DEATH
 family's rows in the same 0x80 flag table the hand-frame branch reads. The original guidance
 below still describes the seat taxonomy the port reuses.
@@ -3767,6 +3768,9 @@ record that feeds our `RootMotionFrame`) is consumed on ODD ticks (`tick & 1`)
 | 0x8 | latch `shouldFireSecondary` (fired at the block tail) |
 | 0x10 | FIRE weapon byte `entity+0x35B` from bone `entity+0x367` |
 | 0x20–0x400 | the six SSAudio foley slots (24–29) |
+
+The block has no mount test: a mounted body, gunner included, consumes its own clip's fire
+bits and latch before the mounted request [orig: @0x4BF156, @0x4BF4B3].
 
 The secondary latch fires `entity+0x359` from bone `+0x366` and decrements the
 **magazine word `entity+0x35C`** (the reload trigger, §17.3; reseeded to
@@ -7991,8 +7995,10 @@ Attach saves the prior equipped ADM immediately and equips the parent slot. UseG
 the transient `0xA000` pair but, unlike a generic vehicle-slot attach, does not set
 `Flags & 0x40` [orig: Entity_AttachToUseGunSlot @ 0x546c56-0x546c7c;
 Entity_AttachToVehicleSlot @ 0x494752]. Dismount and the death-detach edge clear parent
-ownership; retail restores the saved slot for a player-class occupant, then clears the
-equipped slot for a non-player NPC [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa].
+ownership; retail restores the saved slot for a player-class occupant, then, for any
+non-player leaving any seat, clears the equipped slot and zeroes its AdmDef byte +0x2B0
+(and +0x160 / +0x298) [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa; the non-player
+leg @ 0x43568D..0x4356AA].
 The persistent parent slot continues to own its own ammo.
 
 Retail first initializes the mount base with the request-time yaw snap described in §23.1. The port
@@ -8184,11 +8190,13 @@ secondary weapon channel's missing-key behavior remains separate.
 
 ### 26.6 Fire request and global action-FSM phase
 
-Let `S = current_tick + 36*net_id`. A mounted gunner considers a fire request only when it
-has a live parent, a non-null target (no health test [orig: @0x4BF4CF..0x4BF4D4];
-the port tested the target's health until 2026-09-22), and an equipped slot;
-`(S & 3) == 0`; the target passes
-`((target.x-target.y+S) & 0x40) == 0`; `dz` is halved before distance; distance is strictly
+Let `S = current_tick + 36*net_id`. Every mounted-live org1 body (parent and health
+captured at the motor head, whatever its seat) makes the request: past a non-null target
+(no health test [orig: @0x4BF4CF..0x4BF4D4]; the port tested the target's health until
+2026-09-22), `(S & 3) == 0` and the stagger `((target.x-target.y+S) & 0x40) == 0` it
+copies the parent's +0x2B0 into its own (@0x4BF4F4..0x4BF4FA; a weaponless parent's is the
+spawn clear's zero), and only a rider with an EquippedSlot (the UseGun swap, or a ctrlx
+rider on an EWeap parent) goes on: `dz` is halved before distance; distance is strictly
 below `AiSlot[15]`; bearing error is below `0x0AAAAAA0` (about 15 degrees); and the slot's
 current action is IDLE. It writes only next action FIRE
 [orig: Entity_UpdateInfantryAI @ 0x4bf4b3-0x4bf59e]. Existing next action, phase,
@@ -12600,9 +12608,26 @@ the ground death's child kill) route the same way.
   for NPC bodies (`infantry_org1_parity`, `test_org1_fire_latch_is_a_pass_local`), and
   `infantry_mounted_fire_pass` copies the byte after the stagger and tests the swapped slot,
   seeding the parent's slot lazily as the stand-in for the parent's own init (`ai`,
-  `test_mounted_request_copies_the_parent_adm_byte`). Carried: the port's detach stores 0xFF
-  where retail stores 0, and the port gates both the request and the org1 fire block
-  (@ 0x4BF15C..0x4BF4B0) on a Gunner seat where retail runs them for every mounted-live body.
+  `test_mounted_request_copies_the_parent_adm_byte`). The fire block (@ 0x4BF15C..0x4BF4B0)
+  has no mount test: its only gates are the odd key (@ 0x4BF156) and a nonzero trigger word
+  (@ 0x4BF15C..0x4BF163), so a mounted gunner fires its own clip's rounds as any other org1
+  body; the request's only mount gates are the mounted-live local and the parent test
+  (@ 0x4BF4C1..0x4BF4C9), with no seat-type test; +0x118 is set by the UseGun attach
+  (@ 0x546C4E) and by a ctrlx attach to an EWeap parent (`Entity_AttachToVehicleSlot`
+  @ 0x494867..0x49489E: +0x118 = &parent+0x474, +0x308 = the old slot, parent+0x498 = the
+  rider), so a sitex or drvrx rider copies the byte and queues nothing. A parent whose def
+  names no weapon never stores its byte (the name test @ 0x5466E1, the AdmDef test
+  @ 0x546704) and keeps the spawn clear's zero (@ 0x40EA1F). The NPC detach zeroes +0x118,
+  +0x2B0, +0x160 and +0x298 for any non-player whatever its seat (`test Flags,100h`
+  @ 0x43568D, the stores @ 0x435696..0x4356AA). Port: the fire pass and the request run for
+  every seat and the detach zeroes the byte (`ai`: `test_mounted_gunner_runs_the_anim_event_fire_block`,
+  `test_mounted_request_runs_for_a_passenger`; `vehicle_mount`:
+  `test_npc_detach_zeroes_the_equipped_byte`). Carried: the ctrlx attach's slot swap on an
+  EWeap parent and the weapon walk's pump of that rider's borrowed slot (+0x118 for every
+  pool-0 row, @ 0x5426AD) are unported for NPC riders, so an NPC ctrlx rider of an EWeap
+  vehicle makes the request but never queues FIRE; and the vehicle AI fire paths' per-shot
+  rewrite of a vehicle's +0x2B0 (`AIEntity_ProcessWeaponFire` @ 0x472F23 and siblings, e.g.
+  @ 0x471837) is not modeled.
 - **The plyr waypoint tail.** `Entity_HandleDamageAndTriggerZones @ 0x407720`
   returns at once for Flags & 2 (@ 0x40772A..0x40772F); every other event reaches its
   tail: the cause-bit clear for events outside {1, 3, 4, 5} (@ 0x407B3B..0x407B4F),
@@ -12656,7 +12681,9 @@ unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
   route and command legs, combat (@ 0x4BBE24), the guard, hold, reaction and
   forced-animation legs, the attachment select (@ 0x4BD273), the selector, the ride link,
   the idle facing and the attention (@ 0x4BD87E..) all wait for the landing, while the
-  recoil, spread and torso tail keeps running. Only past that skip do the
+  recoil, spread and torso tail keeps running (port: `tick_infantry` gates combat, the
+  selection and the attention on `infantry_think`'s result, `infantry_org1_parity`,
+  `test_org1_airborne_body_skips_the_think`). Only past that skip do the
   frame locals initialise and the +0x128 cooldown step down while nonzero, a negative
   value included (@ 0x4BAA7B..0x4BAAB1). The seed shows only while airborne.
 - **The route leg.** Without the has-route flag or with the cooldown running, the

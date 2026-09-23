@@ -2707,7 +2707,8 @@ Server 0x27 (`NapiNPServerMsg_HandleVehicleDetach @ 0x4FC980` → tail @ 0x435D0
 conn must have a player block+cell; `h = wire word0` — **TRUSTED (no anti-spoof, no range
 guard)** in retail; then `Entity_DetachFromVehicle(e, *(e+0x16C))` @ 0x435d40.
 `Entity_DetachFromVehicle @ 0x4355F0`: `MoveOrder &= ~0x300`; parentSlot ∈ {2,3} non-local →
-`EquippedSlot = *(entity+0x308)` restore; `!(Flags & 0x100)` → EquippedSlot = 0;
+`EquippedSlot = *(entity+0x308)` restore; `!(Flags & 0x100)` → EquippedSlot = 0, +0x2B0 = 0,
++0x160 = 0, +0x298 = 0 (@0x435696..0x4356AA), whatever the seat;
 `vehicle+0x170 == entity` → clear it (ATTR_PlayerControl → a running action of the vehicle
 MountSlot (+0x474) cut to 7 ticks, `@0x4356F6..0x4356FF`, and the +0x1CC smoke/burn effect
 emitter released, `@0x435746..0x435759`; both ported in `VehicleSystem::release_primary_occupant`,
