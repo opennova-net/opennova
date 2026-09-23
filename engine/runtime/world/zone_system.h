@@ -11,6 +11,7 @@
 #include <runtime/world/zone_chain.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace opennova::world {
@@ -50,15 +51,33 @@ public:
     // [orig: ZoneSlotChain_BuildFromMission @ 0x4A2DE0, from Game_StartMission @ 0x526126]
     void build_chain_from_mission();
     // ownedMask[team] = OR(1 << zone_number) over that team's registered zone entities.
+    // Its only retail caller is the flip's refresh below, so the cached masks
+    // (GetTeamMask) stay as the last numbered SpawnPoint flip left them.
     // [orig: ZoneSlotChain_RebuildOwnershipMasks @ 0x4A26C0]
     void rebuild_masks();
+    // The numbered flip's mask refresh: save the capturer's ENEMY mask, rebuild
+    // every mask, and report "unchanged" unless the zone's number was absent
+    // from the saved mask or the enemy mask moved.
+    // [orig: ZoneSlotChain_RebuildMasksAndCheckUnchanged @0x4A2B60]
+    bool rebuild_masks_and_check_unchanged(uint8_t capturer_team, const Entity &zone);
+    // The uniform-owner test: in A&S (0x10010) and C&C (0x50010) only, a
+    // non-empty chain whose entries all carry one team returns that team (0
+    // included); every other game type returns nothing.
+    // [orig: ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920]
+    std::optional<uint8_t> winning_team_if_all_owned() const;
+    // A registered entry's zone number and rank; false for an entity outside
+    // the chain. [orig: ZoneSlotChain_GetZoneInfo @0x4A2750]
+    bool zone_info(const Entity &zone, uint8_t &number, uint8_t &rank) const;
+    // The cached owned mask for `team` (0 above team 4).
+    // [orig: ZoneSlotChain_GetTeamMask @0x4A2350]
+    uint32_t team_mask(uint8_t team) const;
     // The AS frontier rule: team may capture zone Z iff Z == assigned_slot[team] and the
     // entity is not already the team's, OR (1<<Z) & owned_mask[team] and not the team's,
     // OR an ADJACENT zone number Z±1 inside the mask is held BY the team (walk the
     // vector; an enemy-held adjacent entity kills that direction). Entities outside the
-    // chain are always capturable. GameType 0x50010 is exempt (handled by the caller —
-    // the chain itself is gametype-agnostic). [orig: ZoneSlotChain_IsZoneCapturableByTeam
-    // @ 0x4A2450]
+    // chain are always capturable, and so is every chain entry in C&C (0x50010).
+    // [orig: ZoneSlotChain_IsZoneCapturableByTeam @ 0x4A2450, the C&C return
+    // @0x4A2476..0x4A2480]
     bool is_capturable(uint8_t team, const Entity &zone) const;
     // First vector entry capturable by `team` -> its zone number; 0 = none. The
     // "go capture zone N" deploy hint (S2C 0x1E event 0x3A) and the auto-deploy key.
@@ -71,7 +90,7 @@ public:
     // The secure latch: every registered zone entity the ENEMY frontier cannot reach
     // snaps to control = 0x10000 (fully secured). Seeds the initial control state at
     // build; the 1 Hz capture loop (slice 2) re-runs it before each control delta.
-    // enemy_of(team): 1 -> 2, else -> 1 [orig: 2 - (team != 1) @ 0x51974a].
+    // enemy_of(team): 1 -> 2, else -> 1 [orig: 2 - (team != 1) @0x519745..0x519757].
     // [orig: Server_UpdateCaptureZoneEntities @ 0x519690 latch @ 0x51975B..0x519764]
     void latch_control();
     // Per-logic-tick consumer of the collision world's exact type-10 Change Team
@@ -100,12 +119,14 @@ public:
     // unnumbered same-team zone qualifies regardless of control; a numbered one
     // qualifies at full control. [orig: Entity_HasAliveEntityOfTeam @0x4FC7B0]
     bool team_has_available_spawn_zone(uint8_t team) const;
-    // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
-    // frontier — enemy-capturable, or carrying the team's frontier number — with
-    // control fully secured (>= 0x10000). Co-op gametypes (game_type & 0x20000) take
-    // the last team-matching UN-numbered spawn entity instead. nullptr = no zone spawn
-    // (the caller falls back to the marker chain). [orig: find_spawn_entity_for_team
-    // @0x4fc810]
+    // The 0xFFFE auto-deploy pick over the sorted SpawnZoneList: the requester
+    // team's own numbered zone that sits ON the frontier — enemy-capturable, or
+    // carrying the frontier number — with control fully secured (>= 0x10000);
+    // when none does, the frontier number steps once in the direction the team's
+    // cached mask continues and the walk retries while the stepped number stays
+    // owned. Objective gametypes (game_type & 0x20000) take the LAST team-matching
+    // UN-numbered list entry instead. nullptr = no zone spawn (the caller falls
+    // back to the marker chain). [orig: find_spawn_entity_for_team @0x4fc810]
     const Entity *find_spawn_zone_for_team(uint8_t team, uint32_t game_type_value) const;
 
 private:

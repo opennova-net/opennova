@@ -538,70 +538,11 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	auto tally_kill = [&](const world::RoundDeath &d) {
-		// Kill tallies — the SP mission-stat buckets (the epilog score screen's count
-		// source) and the WAC bluekills/greenkills builtins. SP only [orig:
-		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
-		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
-		// in-process loopback IS a session), so the retail SP discriminator here is
-		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
-		// Killer == the host/local player -> the by-player buckets
-		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
-		// family [orig: Score_TallyKillByOthers @0x4fd300]. Only the damage-pass
-		// lethal edges call Score_ProcessKillEvent (RoundDeath::kill_event), and it
-		// returns without a killer or when the VICTIM's ItemDef `score` word is
-		// zero, so a Player (no score on any Player definition) never tallies, not
-		// even for a self-kill [orig: killer @0x4FD405, target def @0x4FD41E,
-		// `cmp word ptr [eax+194h], 0` @0x4FD422]. By-player blue/green buckets
-		// take only PERSON victims (ItemDef+0x5C == 3) by the team byte
-		// [orig: victim+354; 0 = green, 1 = blue; @0x4FD1F6 / @0x4FD213]; the
-		// by-others team 1 / team 0 buckets take any victim type
-		// [orig: @0x4FD325..0x4FD366]; any team >= 2 victim tallies as an enemy kill
-		// (the original's infantry/vehicle/aircraft split folds into one count; the
-		// epilog sums the split anyway). Point values (def+404, difficulty-scaled)
-		// and the human-player-victim bucket (victim+534 -> 0xC846A0, unreachable
-		// behind the score gate) are unmodeled — counts only, which is what the WAC
-		// predicates and the epilog columns consume (D-AI-10; world-wac-ai-re §20.4).
-		// Past the gates, scorer event 12 runs in EVERY session, ahead of the SP
-		// test below [orig: the event-12 call @0x4FD438, then `cmp is_in_session,
-		// 0` @0x4FD440].
-		if (d.kill_event && d.killer.valid()) {
-			if (const world::Entity *scored = world.registry.get(d.victim);
-					scored != nullptr && scored->has_item_def && scored->item_score != 0)
-				world.match.record_kill_event(world, d.killer, d.victim);
-		}
-		if (!world.rules.mp_session && d.kill_event && d.killer.valid()) {
-			if (const world::Entity *victim2 = world.registry.get(d.victim);
-					victim2 != nullptr && victim2->has_item_def && victim2->item_score != 0) {
-				bool killer_is_host_player = false;
-				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-					if (c.link.owned_entity.valid() &&
-					    c.link.owned_entity.packed == d.killer_handle &&
-					    c.link.mode == replication::TransportMode::Loopback) {
-						killer_is_host_player = true;
-						break;
-					}
-				}
-				world::MissionKillStats &ks = world.kill_stats;
-				const bool person = victim2->item_type == 3;
-				if (killer_is_host_player) {
-					if (victim2->team == 1) {
-						if (person) ++ks.bluekills_by_player;
-					} else if (victim2->team == 0) {
-						if (person) ++ks.greenkills_by_player;
-					} else {
-						++ks.enemy_kills_by_player;
-					}
-				} else {
-					if (victim2->team == 1) {
-						++ks.team_kills_by_others;
-					} else if (victim2->team == 0) {
-						++ks.friendly_kills_by_others;
-					} else {
-						++ks.enemy_kills_by_others;
-					}
-				}
-			}
-		}
+		// The kill accounting of a damage-pass lethal edge: scorer event 12 in
+		// every session, then the SP tallies behind world.rules.mp_session (our
+		// SP listen server always runs ctx.is_in_session = 1).
+		// [orig: Score_ProcessKillEvent @0x4fd400]
+		world.match.process_kill_event(world, d);
 	};
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
 		// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
@@ -2131,10 +2072,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     non-player identity is zero [orig: Server_ChangeEntityTeam @0x518D70;
 	//     write_entity_handle_packet @0x506AD0];
 	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
-	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); flips
-	//     50/51 (frontier held) or 52/53 (victim =
-	//     the recipient side's NEW frontier), team-filtered; then the 56/57 banner to all
-	//     [orig: GameEvent_FlagCapture @0x50F6F0];
+	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); a
+	//     numbered flip's pair [zone number][rank] 51 to the capturer's team and 50
+	//     to its enemy when the enemy mask held, else 53/52 [zone number][the
+	//     capturer's frontier]; then the 56/57 banner [capturer index] keyed on the
+	//     zone's new owner to all [orig: GameEvent_FlagCapture @0x50F6F0];
 	//   0x53 9 B for ACTIVE unnumbered captures [u16 handle][u8 curTeam][u8 capTeam]
 	//     [u16 progress][u16 limit][u8 rate], and 0x6C [u16 handle][u8 presence]
 	//     when the unique contact rate changes [orig: NetPacket_WriteZoneTimerWindow
@@ -2147,14 +2089,21 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			(world.match.rules().game_type & 0x30000u) != 0) {
 		world::ZoneCaptureEvents ev;
 		world.zones.capture_second_tick(ev);
+		// The capture scoring: a numbered flip's event-24 recipients, an
+		// unnumbered flip's or timed completion's event 14 on the capturer.
+		// [orig: CaptureZone_CheckProximityScoring @0x500C50 — event 24
+		//  @0x500D84, event 14 @0x500DC5]
 		for (const world::ZoneCaptureEvents::Event &event : ev.ordered) {
 			if (const auto *flip =
-						std::get_if<world::ZoneCaptureEvents::Flip>(&event))
+						std::get_if<world::ZoneCaptureEvents::Flip>(&event)) {
 				world.match.record_zone_capture(world, flip->scorers);
-			else if (const auto *completion =
-						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event))
-				world.match.record_zone_capture(
-						world, {completion->capturer});
+				if (flip->takeover)
+					world.match.record_psp_takeover(world, flip->capturer);
+			} else if (const auto *completion =
+						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event)) {
+				if (completion->takeover)
+					world.match.record_psp_takeover(world, completion->capturer);
+			}
 		}
 
 		const world::SpawnZoneRegistry spawn_zones =
@@ -2180,6 +2129,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			const world::Entity *entity =
 					world.registry.get(conn.link.owned_entity);
 			return entity != nullptr ? entity->team : 0;
+		};
+		// Mask 0x180: in-match slots whose team is the filter team.
+		// [orig: NapiNPServer_SendFiltered bits 0x80/0x100]
+		auto send_team = [&](uint8_t team, const std::vector<uint8_t> &body) {
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr ||
+						connection_team(conn) != team)
+					continue;
+				conn.link.transport->host_send(0x1E, body);
+			}
 		};
 
 		// Consume the semantic stream once, in retail callsite order. In
@@ -2276,30 +2235,39 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			}
 			const auto *flip =
 					std::get_if<world::ZoneCaptureEvents::Flip>(&event);
-			if (flip == nullptr || !flip->announce || flip->suppressed) continue;
-			const uint8_t zone_idx = zone_index_of(flip->zone);
-			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-				if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-				const uint8_t team = connection_team(conn);
-				if (team == flip->capturer_team) {
-					conn.link.transport->host_send(
-							0x1E, flip->frontier_changed
-							              ? event_body(53, zone_idx,
-							                           flip->capturer_frontier)
-							              : event_body(51, zone_idx,
-							                           flip->new_team));
-				} else {
-					conn.link.transport->host_send(
-							0x1E, flip->frontier_changed
-							              ? event_body(52, zone_idx,
-							                           flip->loser_frontier)
-							              : event_body(50, zone_idx,
-							                           flip->new_team));
-				}
-				conn.link.transport->host_send(
-						0x1E, event_body(flip->new_team == team ? 56 : 57,
-						                 zone_idx, flip->new_team));
+			if (flip == nullptr || !flip->announce) continue;
+			const uint8_t capturer_idx = pool0_index_byte(flip->capturer.packed);
+			if (!flip->numbered) {
+				// An unnumbered instant flip announces as a completion does.
+				// [orig: GameEvent_FlagCapture @0x50F936..0x50F94B, the send
+				//  @0x50F991]
+				if (flip->new_team == 1 || flip->new_team == 2)
+					send_all(0x1E, event_body(flip->new_team == 1 ? 43 : 44,
+					                          capturer_idx, 0xFF));
+				continue;
 			}
+			// The pair, unless the round is decided or the capturer holds no
+			// slot: the capturer's team, then enemy_of(that team).
+			// [orig: GameEvent_FlagCapture — the decided test @0x50F764, the
+			//  slot @0x50F7BA, the capturer-team filter @0x50F7E1, 51/53
+			//  @0x50F8A5/@0x50F82B, the enemy filter @0x50F851/@0x50F8D9, 50/52
+			//  @0x50F8E9/@0x50F872, the sends @0x50F830/@0x50F8AA/@0x50F907]
+			if (!flip->decided && flip->capturer_is_player) {
+				const uint8_t own_team = flip->capturer_team;
+				const uint8_t enemy_team = own_team == 1 ? 2 : 1;
+				send_team(own_team, flip->unchanged
+						? event_body(51, flip->zone_number, flip->rank)
+						: event_body(53, flip->zone_number, flip->frontier));
+				send_team(enemy_team, flip->unchanged
+						? event_body(50, flip->zone_number, flip->rank)
+						: event_body(52, flip->zone_number, flip->frontier));
+			}
+			// The banner, keyed on the zone's new owner, goes to every in-match
+			// player even once the round is decided.
+			// [orig: @0x50F919..0x50F991]
+			if (flip->new_team == 1 || flip->new_team == 2)
+				send_all(0x1E, event_body(flip->new_team == 2 ? 57 : 56,
+				                          capturer_idx, 0xFF));
 		}
 	}
 

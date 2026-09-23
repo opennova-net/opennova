@@ -13,6 +13,7 @@
 namespace opennova::world {
 
 class World;
+struct RoundDeath;
 
 // score.ini FIELD records use these one-based IDs and retain their byte-sized
 // visibility flag in file order. They are both the match's board schema and the
@@ -113,6 +114,9 @@ struct MatchStats {
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
     static constexpr size_t kTargetsDestroyed = 14;
+    // RecordEvent 15: an unnumbered zone captured (PSPTAKEOVER, FIELD id 13).
+    // [orig: GameEvent_ProcessScoring case 14 @0x52FDFE]
+    static constexpr size_t kPspTakeovers = 16;
     // Kill-cause counters: entity+0x2C bit 0x100 (same-round multi-kill),
     // 0x800 (headshot), 0x400 (knife). [orig: GameEvent_ProcessScoring
     // @0x530076..0x530178 RecordEvent 16/17/18]
@@ -364,9 +368,14 @@ class Match {
                       EntityHandle killer = EntityHandle{},
                       uint32_t cause_flags = 0);
 
-    // Scorer event 12, run by the kill accounting at a damage-pass lethal
-    // edge before the death itself is processed: the victim's `score` word
-    // adds to the killer's field 30 (and its team row in team modes).
+    // The kill accounting a damage-pass lethal edge runs (RoundDeath::
+    // kill_event): with a killer and a victim whose ItemDef `score` word is
+    // nonzero, scorer event 12 in every session, then outside a network
+    // session the single-player tallies world.kill_stats.
+    // [orig: Score_ProcessKillEvent @0x4FD400]
+    void process_kill_event(World &world, const RoundDeath &death);
+    // Scorer event 12: the victim's `score` word adds to the killer's field 30
+    // (and its team row in team modes).
     // [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438)]
     void record_kill_event(const World &world, EntityHandle killer,
                            EntityHandle victim);
@@ -385,10 +394,17 @@ class Match {
     void record_target_destroyed(const World &world, EntityHandle target,
                                  EntityHandle attacker);
 
-    // Capture event 24: numbered zones supply every living same-team Player in
-    // radius; an unnumbered timed completion supplies its retained capturer.
+    // Capture event 24 (LFPTAKEOVER): a numbered zone's flip supplies every
+    // living same-team Player in radius.
+    // [orig: CaptureZone_CheckProximityScoring @0x500C50, the event-24 call
+    // @0x500D84]
     void record_zone_capture(const World &world,
                              const std::vector<EntityHandle> &scorers);
+    // Capture event 14 (PSPTAKEOVER): an unnumbered zone's flip or timed
+    // completion scores its capturer.
+    // [orig: CaptureZone_CheckProximityScoring @0x500C50, the event-14 call
+    // @0x500DC5]
+    void record_psp_takeover(const World &world, EntityHandle capturer);
 
     // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
     // Advance the server-owned match services for one frame. The periodic
@@ -407,7 +423,8 @@ class Match {
     std::vector<MatchGameplayEvent> drain_gameplay_events();
 
     // Returns no value while play continues; value 0 is an actual draw decision.
-    // The all-zones-owned check precedes the game-type switch exactly as retail.
+    // The all-zones-owned check (A&S and C&C only) precedes the game-type
+    // switch exactly as retail.
     std::optional<int32_t> winner_if_finished(const World &world);
 
     // Shared double-run latch used by World::process_round_end.

@@ -3502,10 +3502,13 @@ bool check_timed_capture_host_wire_transaction() {
 			static_cast<uint8_t>(zone_handle.packed),
 			static_cast<uint8_t>(zone_handle.packed >> 8),
 			0, 0, 0, 0};
+	// The start window's owner byte is the team the drain found (2), not the
+	// neutral its 0x50 just applied. [orig: Server_UpdateCaptureZones — state0
+	// @0x53BACD..0x53BADC, the window @0x53BBBA..0x53BC02]
 	const std::vector<uint8_t> expected_start = {
 			static_cast<uint8_t>(zone_handle.packed),
 			static_cast<uint8_t>(zone_handle.packed >> 8),
-			0, 1, 0, 0, 3, 0, 1};
+			2, 1, 0, 0, 3, 0, 1};
 	const std::vector<uint8_t> expected_start_event = {
 			41, 0, 0xFF, 0xFF, 0, 0, 0, 0};
 	if (!expect(start_50.size() == 1 && start_50[0] == expected_start_50 &&
@@ -3556,6 +3559,9 @@ bool check_timed_capture_host_wire_transaction() {
 			1, 0, 0, 0};
 	const std::vector<uint8_t> expected_complete_event = {
 			43, 0, 0xFF, 0xFF, 0, 0, 0, 0};
+	// An unnumbered completion scores PSPTAKEOVER (event 14: field 16, the A&S
+	// value 12), not the numbered LFPTAKEOVER. [orig:
+	// CaptureZone_CheckProximityScoring @0x500CAF -> @0x500DC5; case 14 @0x52FDFE]
 	const auto *scorer = world.match.player(first);
 	return expect(complete_50.size() == 1 &&
 	                      complete_50[0] == expected_complete_50 &&
@@ -3577,9 +3583,159 @@ bool check_timed_capture_host_wire_transaction() {
 	                                           expected_complete_event) &&
 	                      world.registry.get(zone_handle)->team == 1 &&
 	                      scorer != nullptr &&
-	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1 &&
-	                      scorer->stats[opennova::world::MatchStats::kPoints] == 15,
+	                      scorer->stats[opennova::world::MatchStats::kPspTakeovers] == 1 &&
+	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 0 &&
+	                      scorer->stats[opennova::world::MatchStats::kPoints] == 12,
 	              "timed completion emits 0x53/event-43, owns zone, and scores once");
+}
+
+// A numbered SpawnPoint flip's S2C 0x1E events: the capturer's team gets 51
+// [zone number][rank] while the enemy mask held (else 53 [zone number][the
+// capturer's frontier]); enemy_of(capturer team) gets 50 / 52 with the same
+// bytes; any other team gets neither; then every in-match player gets the 56/57
+// banner [capturer pool-0 index][0xFF][0xFF] keyed on the zone's new owner.
+// [orig: GameEvent_FlagCapture @0x50F6F0 — the pair @0x50F7C1..0x50F907, the
+//  banner @0x50F919..0x50F991]
+bool check_numbered_flip_pair_and_banner_wire() {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	opennova::world::CollisionWorld collision;
+	opennova::world::AiSystem &ai = world.ai;
+	world.rules.mp_session = true;
+	world.collision = &collision;
+	ai.collision = &collision;
+	world.add_system(&ai);
+	ctx.world = &world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+
+	auto make_zone = [&](uint8_t number, uint8_t team, opennova::world::Vec3 position) {
+		opennova::world::Entity zone;
+		zone.kind = opennova::world::EntityKind::Item;
+		zone.is_capture_trigger = true;
+		zone.is_spawn_point = true;
+		zone.zone_number = number;
+		zone.zone_radius = 70;
+		zone.team = team;
+		zone.health = 1;
+		zone.alive = true;
+		zone.position = position;
+		zone.yaw = 90; // mission yaw 90 is identity collision placement
+		return world.registry.spawn(1, zone);
+	};
+	make_zone(1, 1, {-2000.0f, 0.0f, 4.0f});
+	const auto target = make_zone(2, 2, {20.0f, 30.0f, 4.0f});
+	make_zone(2, 2, {2000.0f, 0.0f, 4.0f});
+	make_zone(3, 2, {4000.0f, 0.0f, 4.0f});
+	world.zones.build_chain_from_mission();
+
+	opennova::world::CollisionModel model;
+	auto plane = [&](int nx, int ny, int nz, float distance) {
+		opennova::world::CollisionPlane value;
+		value.nx = static_cast<int16_t>(nx);
+		value.ny = static_cast<int16_t>(ny);
+		value.nz = static_cast<int16_t>(nz);
+		value.dist = static_cast<int32_t>(distance * 65536.0f);
+		model.planes.push_back(value);
+	};
+	plane(16384, 0, 0, -70.0f);
+	plane(-16384, 0, 0, -70.0f);
+	plane(0, 16384, 0, -70.0f);
+	plane(0, -16384, 0, -70.0f);
+	plane(0, 0, 16384, -12.0f);
+	plane(0, 0, -16384, 0.0f);
+	opennova::world::CollisionVolume volume;
+	volume.type = opennova::world::bvol_type::kChangeTeamCT;
+	volume.min_x = volume.min_y = -70 * 65536;
+	volume.max_x = volume.max_y = 70 * 65536;
+	volume.min_z = 0;
+	volume.max_z = 12 * 65536;
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+	opennova::world::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	collision.assign_entity(target, collision.add_model(model));
+
+	auto soldier = [&](uint8_t team, int32_t x, int32_t y) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.player_class = 8;
+		entity.team = team;
+		entity.health = 150;
+		entity.alive = true;
+		entity.position = {float(x), float(y), 4.0f};
+		const auto handle = world.registry.spawn(0, entity);
+		opennova::world::AiEntity *body = ai.at(ai.attach(handle));
+		body->inf.active = true;
+		body->net_is_remote_peer = true;
+		body->health = 150;
+		body->team = team;
+		body->pos[0] = x * 65536;
+		body->pos[1] = y * 65536;
+		body->pos[2] = 4 * 65536;
+		return handle;
+	};
+	const auto capturer = soldier(1, 20, 30);
+	const auto enemy = soldier(2, 3000, 0);
+	const auto observer = soldier(3, 3000, 500);
+	world.match.upsert_player({capturer, 0, "Blue", {}});
+	world.match.upsert_player({enemy, 1, "Red", {}});
+	world.match.upsert_player({observer, 2, "Third", {}});
+
+	using Transport = opennova::replication::UdpSessionTransport;
+	std::deque<Transport> transports;
+	for (const auto owned : {capturer, enemy, observer}) {
+		transports.emplace_back(Transport::Role::Host);
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transports.back();
+		conn.link.owned_entity = owned;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	auto events = [](Transport &transport) {
+		std::vector<std::vector<uint8_t>> out;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw)) {
+			if (!raw.empty() && raw.front() == 0x1E)
+				out.emplace_back(raw.begin() + 1, raw.end());
+		}
+		return out;
+	};
+	auto has = [](const std::vector<std::vector<uint8_t>> &list,
+	              const std::vector<uint8_t> &body) {
+		return std::find(list.begin(), list.end(), body) != list.end();
+	};
+
+	opennova::inmatch::Server_TickUpdate(ctx);
+	for (int i = 0; i < 62; ++i) opennova::inmatch::Server_TickUpdate(ctx);
+	const auto to_blue = events(transports[0]);
+	const auto to_red = events(transports[1]);
+	const auto to_third = events(transports[2]);
+	// Team 2 still holds the other number-2 entity, so its mask held: 51/50
+	// carry [zone 2][rank 1] (the first number-2 entity registered).
+	const std::vector<uint8_t> own = {51, 2, 1, 0xFF, 0, 0, 0, 0};
+	const std::vector<uint8_t> foe = {50, 2, 1, 0xFF, 0, 0, 0, 0};
+	const std::vector<uint8_t> banner = {
+			56, static_cast<uint8_t>(capturer.slot()), 0xFF, 0xFF, 0, 0, 0, 0};
+	const auto *scorer = world.match.player(capturer);
+	return expect(world.registry.get(target)->team == 1 && has(to_blue, own) &&
+	                      !has(to_blue, foe) && has(to_red, foe) && !has(to_red, own) &&
+	                      !has(to_third, own) && !has(to_third, foe) &&
+	                      has(to_blue, banner) && has(to_red, banner) &&
+	                      has(to_third, banner) && scorer != nullptr &&
+	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1,
+	              "the numbered flip sends 51/50 to the two teams and the 56 banner to all");
 }
 
 // Retail's S2C 0x40 producer is the general minimap-overlay stream, not an AS
@@ -3879,6 +4035,7 @@ int main() {
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
 	ok = check_timed_capture_host_wire_transaction() && ok;
+	ok = check_numbered_flip_pair_and_banner_wire() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

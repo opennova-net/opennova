@@ -567,34 +567,54 @@ void SpawnWaveList::reset_on_zone_team_change(const World &world,
 
 const Entity *ZoneSystem::find_spawn_zone_for_team(uint8_t team, uint32_t game_type_value) const {
     const World &world = world_;
-    // [orig: find_spawn_entity_for_team @0x4fc810]
-    const Entity *found = nullptr;
+    // [orig: find_spawn_entity_for_team @0x4fc810 — both branches walk the
+    //  sorted SpawnZoneList (SpawnZoneList_GetByIndex @0x43B930)]
+    const SpawnZoneRegistry list = build_spawn_zone_list();
     if (game_type::is_objective(game_type_value)) {
-        // Co-op branch: the LAST team-matching un-numbered spawn entity [orig: @0x4fc834].
-        world.registry.for_each([&](const Entity &e) {
-            const int pool = e.handle.pool();
-            if (pool != 1 && pool != 2) return;
-            if (!e.is_spawn_point) return;
-            if (e.team == team && e.zone_number == 0) found = &e;
-        });
+        // Objective branch: the LAST team-matching un-numbered list entry
+        // [orig: @0x4fc834..0x4fc864].
+        const Entity *found = nullptr;
+        for (const EntityHandle h : list.entries) {
+            const Entity *e = world.registry.get(h);
+            if (e != nullptr && e->team == team && e->zone_number == 0) found = e;
+        }
         return found;
     }
-    // Team branch: an owned zone that is enemy-capturable (the front line) or carries
-    // the team's frontier number, fully secured. [orig: @0x4fc8c3..@0x4fc963 — the
-    // walk runs over the zone registry; the frontier number comes from
-    // ZoneSlotChain_FindFrontierZone]
-    const uint8_t frontier = world.zones.frontier_zone(team);
-    const uint8_t enemy = (team == 1) ? 2 : (team == 2) ? 1 : 0;
-    if (enemy == 0) return nullptr; // [orig: teams other than 1/2 fall out @0x4fc8fc]
-    for (const EntityHandle h : chain.zones) {
-        const Entity *e = world.registry.get(h);
-        if (e == nullptr) continue;
-        if (e->team != team || e->zone_number == 0) continue;
-        const bool enemy_front = world.zones.is_capturable(enemy, *e);
-        const bool at_frontier = frontier != 0 && e->zone_number == frontier;
-        if ((enemy_front || at_frontier) && e->zone_control >= 0x10000) return e;
+    // Team branch: an owned numbered entry that is enemy-capturable (the front
+    // line) or carries the frontier number, fully secured. When the walk finds
+    // none, the frontier number steps once toward the side the team's cached
+    // mask continues on (down first) and the walk retries while the stepped
+    // number stays in that mask.
+    // [orig: the frontier @0x4fc885, ZoneSlotChain_GetTeamMask @0x4fc887, the
+    //  direction @0x4fc88f..0x4fc8bb, the walk @0x4fc8c3..0x4fc935 (the pick
+    //  @0x4fc963), teams other than 1/2 skip every entry @0x4fc8fc, the step
+    //  @0x4fc941..0x4fc952]
+    uint32_t frontier = world.zones.frontier_zone(team);
+    const uint32_t mask = world.zones.team_mask(team);
+    int32_t step = 0;
+    if (frontier > 1 && (mask & (1u << ((frontier - 1) & 31u))) != 0)
+        step = -1;
+    else if ((mask & (1u << ((frontier + 1) & 31u))) != 0)
+        step = 1;
+    for (;;) {
+        for (const EntityHandle h : list.entries) {
+            const Entity *e = world.registry.get(h);
+            if (e == nullptr || e->team != team || e->zone_number == 0) continue;
+            uint8_t enemy = 0;
+            if (team == 1)
+                enemy = 2;
+            else if (team == 2)
+                enemy = 1;
+            else
+                continue;
+            const bool enemy_front = world.zones.is_capturable(enemy, *e);
+            const bool at_frontier = frontier != 0 && e->zone_number == frontier;
+            if ((enemy_front || at_frontier) && e->zone_control >= 0x10000) return e;
+        }
+        if (step == 0) return nullptr;
+        frontier = static_cast<uint32_t>(static_cast<int32_t>(frontier) + step);
+        if (frontier == 0 || (mask & (1u << (frontier & 31u))) == 0) return nullptr;
     }
-    return nullptr;
 }
 
 } // namespace opennova::world

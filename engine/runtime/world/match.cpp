@@ -1093,6 +1093,54 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
 }
 
+// Only the damage-pass lethal edges call Score_ProcessKillEvent
+// (RoundDeath::kill_event), and it returns without a killer or when the
+// VICTIM's ItemDef `score` word is zero, so a Player (no score on any Player
+// definition) never enters it, not even for a self-kill. Scorer event 12 runs
+// in every session; the SP tallies (the epilog score screen's counts and the
+// WAC bluekills/greenkills builtins) only outside one, by the local player
+// when it is the killer, else by others. By-player blue/green buckets take
+// only PERSON victims (ItemDef+0x5C == 3) by the team byte (0 = green, 1 =
+// blue); the by-others team 1 / team 0 buckets take any victim type; any team
+// >= 2 victim tallies as an enemy kill (the original's infantry/vehicle/
+// aircraft split folds into one count; the epilog sums the split anyway).
+// Point values (def+404, difficulty-scaled) and the human-player-victim bucket
+// (victim+534 -> 0xC846A0, unreachable behind the score gate) are unmodeled:
+// counts only, which is what the WAC predicates and the epilog columns consume
+// (D-AI-10; world-wac-ai-re §20.4).
+// [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, target def
+//  @0x4FD41E, `cmp word ptr [eax+194h], 0` @0x4FD422, event 12 @0x4FD438, the
+//  session test @0x4FD440..0x4FD447, `cmp edi, g_local_player_entity` @0x4FD449;
+//  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213);
+//  Score_TallyKillByOthers @0x4FD300 (@0x4FD325..0x4FD366)]
+void Match::process_kill_event(World &world, const RoundDeath &death) {
+    if (!death.kill_event || !death.killer.valid())
+        return;
+    const Entity *victim = world.registry.get(death.victim);
+    if (victim == nullptr || !victim->has_item_def || victim->item_score == 0)
+        return;
+    record_kill_event(world, death.killer, death.victim);
+    if (world.rules.mp_session)
+        return;
+    MissionKillStats &ks = world.kill_stats;
+    const bool person = victim->item_type == 3;
+    if (death.killer == world.cached.local_player) {
+        if (victim->team == 1) {
+            if (person) ++ks.bluekills_by_player;
+        } else if (victim->team == 0) {
+            if (person) ++ks.greenkills_by_player;
+        } else {
+            ++ks.enemy_kills_by_player;
+        }
+    } else if (victim->team == 1) {
+        ++ks.team_kills_by_others;
+    } else if (victim->team == 0) {
+        ++ks.friendly_kills_by_others;
+    } else {
+        ++ks.enemy_kills_by_others;
+    }
+}
+
 // Scorer event 12: the victim's signed `score` word goes to field 30 through
 // RecordEvent 29 (no points) on the killer's slot, and on the killer's team
 // row whenever the team bit resolves one, Player or not.
@@ -1153,18 +1201,34 @@ void Match::record_zone_capture(const World &world,
         return;
     for (const EntityHandle handle : scorers) {
         MatchPlayer *scorer = player(handle);
-        if (scorer == nullptr)
+        if (scorer == nullptr || scorer->spectator)
             continue;
         const Entity *scorer_entity = world.registry.get(handle);
         if (scorer_entity == nullptr)
             continue;
         // CaptureZone_CheckProximityScoring calls scorer event 24 for every
         // alive same-team slot in radius. Event 24 increments raw stats[39]
-        // and applies table[108] = status value 34 to raw stats[29].
-        // [orig: call @0x500D84; case 24 @0x5307C2]
+        // (RecordEvent 38) and applies LFPTAKEOVER (slot 34) to the points.
+        // [orig: call @0x500D84; case 24 @0x52FE60..0x52FEB3]
         add_event(world, *scorer, MatchStats::kZoneTakeovers, score_value(34));
         add_team_event(scorer_entity->team, MatchStats::kZoneTakeovers, score_value(34));
     }
+}
+
+// Scorer event 14: RecordEvent 15 (field 16) plus PSPTAKEOVER (slot 15) on the
+// capturer, team-mirrored. The capture-scoring gates (team games, a
+// registered capturer) are the caller's; the scorer head refuses a spectator.
+// [orig: CaptureZone_CheckProximityScoring @0x500C50, the unnumbered arm's
+//  call @0x500DC5; GameEvent_ProcessScoring case 14 @0x52FDFE..0x52FE51]
+void Match::record_psp_takeover(const World &world, EntityHandle capturer_handle) {
+    if (outcome_.ended)
+        return;
+    MatchPlayer *capturer = player(capturer_handle);
+    const Entity *capturer_entity = world.registry.get(capturer_handle);
+    if (capturer == nullptr || capturer->spectator || capturer_entity == nullptr)
+        return;
+    add_event(world, *capturer, MatchStats::kPspTakeovers, score_value(15));
+    add_team_event(capturer_entity->team, MatchStats::kPspTakeovers, score_value(15));
 }
 
 void Match::update_objective_proximity(const World &world) {
@@ -1625,32 +1689,16 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         return std::nullopt;
     ensure_objective_census(world);
 
-    // The uniform-zone test is first and game-type independent. Empty chains
-    // do not win. [orig: Server_CheckWinConditions @0x51AD8A ->
-    // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920]
-    bool saw_zone = false;
-    bool uniform_zones = true;
-    uint8_t uniform_team = 0;
-    for (const EntityHandle handle : world.zones.chain.zones) {
-        const Entity *zone = world.registry.get(handle);
-        if (zone == nullptr)
-            continue;
-        if (!saw_zone) {
-            saw_zone = true;
-            uniform_team = zone->team;
-        } else if (uniform_team != zone->team) {
-            uniform_zones = false;
-            break;
-        }
-    }
-    if (saw_zone && uniform_zones) {
-        // The helper's success bit is independent of the returned team. A
-        // uniformly neutral chain therefore suppresses every later win arm
-        // without producing a winner. [orig:
-        // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920;
-        // Server_CheckWinConditions @0x51AD8A..0x51ADA3]
-        if (uniform_team != 0)
-            return static_cast<int32_t>(uniform_team);
+    // The uniform-zone test is first; its helper answers only in A&S and C&C,
+    // and an empty chain never wins. The helper's success bit is independent
+    // of the returned team, so a uniformly neutral chain suppresses every later
+    // win arm without producing a winner. [orig: Server_CheckWinConditions
+    // @0x51AD40 (the ZoneSlotChain_GetWinningTeamIfAllOwned call @0x51AD8C,
+    // the zero-team return @0x51AD9A); ZoneSlotChain_GetWinningTeamIfAllOwned
+    // @0x4A2920]
+    if (const std::optional<uint8_t> uniform_team = world.zones.winning_team_if_all_owned()) {
+        if (*uniform_team != 0)
+            return static_cast<int32_t>(*uniform_team);
         return std::nullopt;
     }
 

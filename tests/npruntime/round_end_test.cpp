@@ -901,7 +901,7 @@ void test_coop_script_producers_share_round_wire() {
 	run_case(game_type::kObjectiveCoop, false);
 }
 
-void test_aas_events_use_spawn_registry_index() {
+void test_aas_capture_events_carry_zone_numbers() {
 	w::World world;
 	w::CollisionWorld collision;
 	w::AiSystem &ai = world.ai;
@@ -919,7 +919,8 @@ void test_aas_events_use_spawn_registry_index() {
 	world.registry.get(blue)->net_move_input |= w::Entity::kMoveOrderMoving;
 
 	// A sorted pool-2 spawn object precedes the three pool-1 capture zones. The
-	// target zone is therefore spawn-registry index 2 but zone-chain index 1.
+	// target zone is therefore spawn-registry index 2, zone-chain index 1 and
+	// zone NUMBER 4: the flip pair carries the number, the banner the capturer.
 	w::Entity base_spawn;
 	base_spawn.kind = w::EntityKind::Building;
 	base_spawn.team = 1;
@@ -939,9 +940,9 @@ void test_aas_events_use_spawn_registry_index() {
 		zone.alive = true;
 		return world.registry.spawn(1, zone);
 	};
-	spawn_zone(1, 1, -100.0f);
-	const w::EntityHandle target = spawn_zone(2, 0, 100.0f);
-	spawn_zone(3, 2, 300.0f);
+	spawn_zone(3, 1, -100.0f);
+	const w::EntityHandle target = spawn_zone(4, 0, 100.0f);
+	spawn_zone(5, 2, 300.0f);
 	world.zones.build_chain_from_mission();
 	world.zones.latch_control();
 	const int32_t capture_model = collision.add_model(
@@ -964,17 +965,29 @@ void test_aas_events_use_spawn_registry_index() {
 	// service drains that contact and flips the numbered zone at once.
 	inmatch::Server_TickUpdate(ctx);
 
-	bool saw_capture_event = false;
+	// Blue's own team gets 53 [zone number 4][team 1's new frontier 5] (the
+	// enemy mask never held number 4), then the 56 banner [Blue's pool-0 index].
+	// [orig: GameEvent_FlagCapture @0x50F6F0 — GetZoneInfo @0x50F781, the 53
+	//  build @0x50F82B, the banner @0x50F98C]
+	bool saw_pair = false;
+	bool saw_banner = false;
 	ns::Datagram datagram;
 	while (wire.client_recv(datagram)) {
 		if (datagram.tag != 0x1E || datagram.body.size() != 8) continue;
 		const uint8_t event = datagram.body[0];
-		if (event < 50 || event > 57) continue;
-		saw_capture_event = true;
-		expect(datagram.body[1] == 2,
-				"A&S 0x1E capture actor is the sorted SpawnZoneList index");
+		if (event >= 50 && event <= 53) {
+			saw_pair = true;
+			expect(event == 53 && datagram.body[1] == 4 && datagram.body[2] == 5 &&
+					datagram.body[3] == 0xFF,
+					"A&S 0x1E pair carries the zone number and the frontier");
+		} else if (event == 56 || event == 57) {
+			saw_banner = true;
+			expect(event == 56 && datagram.body[1] == uint8_t(blue.slot()) &&
+					datagram.body[2] == 0xFF && datagram.body[3] == 0xFF,
+					"A&S 0x1E banner carries the capturer's pool-0 index");
+		}
 	}
-	expect(world.registry.get(target)->team == 1 && saw_capture_event,
+	expect(world.registry.get(target)->team == 1 && saw_pair && saw_banner,
 			"A&S authority flips the target and emits its capture event family");
 }
 
@@ -1642,7 +1655,7 @@ int main() {
 	test_demolition_death_routes_score_and_round_wire();
 	test_aas_round_wire();
 	test_coop_script_producers_share_round_wire();
-	test_aas_events_use_spawn_registry_index();
+	test_aas_capture_events_carry_zone_numbers();
 	test_ctf_pickup_and_capture_wire_transaction();
 	test_flag_timeout_wire_transaction();
 
