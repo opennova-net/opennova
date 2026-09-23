@@ -615,11 +615,6 @@ struct SessionRules {
     // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
     // carries it. Defaults clear.
     bool ai_rules_skip_local_player = false;
-    // The retail is_in_session fact: a net session (listen or dedicated) has
-    // been brought up over this world's kernel. The net bring-ups set it; the
-    // bare no-net kernel keeps false. Gates the UseGun null-slot rejection
-    // [orig: Entity_AttachToUseGunSlot @0x546c07].
-    bool session_open = false;
 };
 
 // A HUD relay the authority sends the joiners as S2C 0x3F, in the order the

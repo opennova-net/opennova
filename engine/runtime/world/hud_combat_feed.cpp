@@ -60,8 +60,12 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		const bool client = world.cached.local_player.valid();
 		const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
 		const bool team = s.target_friendly || (target->team != 1 && target->team != 2);
+		// Outside a session every target is a teammate candidate; inside one
+		// only a team game type admits them. Single player is outside.
+		// [orig: HUD_DrawCrosshair -- `cmp g_napi_np_ctx.is_in_session`
+		//  @0x5926C0, `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
 		const bool team_mode =
-				!world.rules.session_open || (world.match.rules().game_type & 0x10000u);
+				!world.rules.mp_session || (world.match.rules().game_type & 0x10000u);
 		s.inset_friendly = target->handle.pool() == 0 && admitted && team && team_mode &&
 				!(mount &&
 						(player->mount_type == SeatType::Controller ||

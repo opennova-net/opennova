@@ -15,6 +15,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_pose.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
@@ -578,6 +579,30 @@ void test_live_pose_provider_and_static_fallback() {
         occupant = Entity{};
         w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
         check_pose(occupant, expected);
+    }
+}
+
+// An unarmed player's USE onto a UseGun seat is refused outside a session:
+// single player, the in-process listen server included, is outside it; in a
+// session the same USE mounts the gun.
+// [orig: Entity_AttachToUseGunSlot @0x546b80 -- `cmp g_napi_np_ctx.is_in_session`
+//  @0x546BF6, the player bit @0x546BFE, the EquippedSlot test @0x546C07;
+//  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
+void test_unarmed_usegun_needs_the_session() {
+    for (const bool mp : {false, true}) {
+        Rig r(2.0f);
+        r.veh().seats[0].type = SeatType::Gunner;
+        r.veh().primary_weapon = "WPN_USEGUN";
+        r.w.tables.weapons.entries.resize(1);
+        r.w.tables.weapons.entries[0].name = "WPN_USEGUN";
+        r.w.tables.weapons.entries[0].valid = true;
+        r.player().flags |= kEntityFlagPlayer;
+        r.player().engine_flags |= kEntityFlagPlayer;
+        r.w.rules.mp_session = mp;
+        LocalPlayer local(r.w);
+        CHECK(!local.weapon.active);
+        CHECK(local.toggle_mount() == mp);
+        CHECK(r.player().mounted == mp);
     }
 }
 
@@ -1567,8 +1592,8 @@ void test_seated_body_claims_its_vehicle() {
 }
 
 // A same-team body standing on a vehicle skips the hold scan outside a
-// session. Single player (the in-process listen server, session_open set) is
-// outside it, so the body's berserk bit reaches the vehicle although a rider
+// session. Single player (the in-process listen server) is outside it, so
+// the body's berserk bit reaches the vehicle although a rider
 // holds it; in a non-co-op session the rider's hold blocks the copy.
 // [orig: Entity_UpdateAllEntities -- `cmp g_napi_np_ctx.is_in_session,0`
 //  @0x4C24EA, `test g_GameType,10000h` @0x4C24F7, the seat words
@@ -1577,7 +1602,6 @@ void test_seated_body_claims_its_vehicle() {
 void test_same_team_hold_scan_follows_the_session() {
     for (const bool mp : {false, true}) {
         Rig r;
-        r.w.rules.session_open = true;
         r.w.rules.mp_session = mp;
         r.veh().item_type = 1;
         r.veh().item_attrib |= kItemAttribPlayerControl;
@@ -3617,6 +3641,7 @@ int main() {
     test_npc_seat_bone_failure_kills_boarders_and_detaches();
     test_entity_pose_seat_bone_lookup();
     test_toggle_nearest_seat();
+    test_unarmed_usegun_needs_the_session();
     test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();

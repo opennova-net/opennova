@@ -1550,7 +1550,7 @@ void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
     MatchRules team;
     team.game_type = 0x10000u; // a team game admits nothing by itself
     lw.w.match.configure(team);
-    lw.w.rules.session_open = true;
+    lw.w.rules.mp_session = true; // in a session
     lw.w.rules.auto_scope_zero = false;
     CHECK(local.request_scope_zero(-1));
     CHECK(local.weapon.slot.scope_zero == 0);

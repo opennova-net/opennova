@@ -378,8 +378,8 @@ void World::update_all_entities(const TickContext &ctx) {
     ai.is_authority = is_authority;
     // The retail is_in_session fact is set for a listen host, a dedicated host
     // and a joiner, never for single player: the SP launch leaves it clear
-    // while it runs the in-process listen server (whose bring-up sets
-    // rules.session_open), so rules.mp_session carries it.
+    // while it runs the in-process listen server, so rules.mp_session carries
+    // it.
     // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission
     //  @0x561AF0 (read back @0x561E73); the death-event arm
     //  EntityAI_ProcessInfantryStateMachine @0x458273]

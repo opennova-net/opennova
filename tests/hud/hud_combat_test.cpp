@@ -337,9 +337,25 @@ static void world_feeds() {
 	world.rules.projectile_authority = false;
 	read();
 	CHECK(!frame.hud_combat.state.target_brackets);
+	// Inside a session only a team game type admits a teammate target: the
+	// same admitted target draws nothing in a non-team type, and its brackets
+	// and friendly inset come back in a team one. Outside a session (single
+	// player) every type admits it.
+	// [orig: HUD_DrawCrosshair -- `cmp g_napi_np_ctx.is_in_session` @0x5926C0,
+	//  `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
 	world.rules.mpattrib = 0x100;
 	read();
-	CHECK(frame.hud_combat.state.target_brackets);
+	CHECK(!frame.hud_combat.state.target_brackets && !frame.hud_combat.state.inset_friendly);
+	MatchRules team;
+	team.game_type = 0x10000u;
+	world.match.configure(team);
+	read();
+	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	world.match.configure(MatchRules{});
+	world.rules.mp_session = false;
+	read();
+	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	world.rules.mp_session = true;
 	world.rules.mpattrib = 0;
 	Entity mount;
 	mount.has_item_def = true;

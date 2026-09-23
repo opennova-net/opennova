@@ -96,13 +96,14 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 }
 
 // [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the CanFire, equipped-slot
-//  and zero-table gates @0x4dbcc3..0x4dbcf7, then the clamp, the click, the
-//  pitch delta and the yaw term]
+//  and zero-table gates @0x4dbcc3..0x4dbcf7, then the clamp (the -1 floor
+//  outside a session, `cmp g_napi_np_ctx.is_in_session` @0x4dbd0c), the click,
+//  the pitch delta and the yaw term]
 bool LocalPlayer::request_scope_zero(int delta) {
     if (!weapon.active || !local_player_can_fire()) return false;
     WeaponSlotState &slot = *active_local_weapon_slot(world_, weapon);
     const int16_t next = weapon_scope_zero_adjust(weapon.def.scope_zero, slot.scope_zero,
-        delta, world_.rules.session_open, world_.rules.auto_scope_zero);
+        delta, world_.rules.mp_session, world_.rules.auto_scope_zero);
     if (next == slot.scope_zero) return false;
     // A changed zero clicks the GF_SCOPE_ZERO interface set (player_present.h
     // carries the witnesses); the shell plays Interface script sounds 2D
@@ -239,10 +240,11 @@ bool LocalPlayer::toggle_mount() {
 	// The null-EquippedSlot rejection belongs to UseGun itself, not the
 	// top-level USE action: an unarmed local player still enters an ordinary
 	// passenger/control seat, and it is an out-of-session-only player gate
-	// (force/script and NAPI authority paths bypass it) [orig:
-	// Entity_AttachToUseGunSlot @0x546b80, reject `!is_in_session &&
-	// Flags&0x100 && !EquippedSlot` @0x546c07].
-	if (!world.rules.session_open && !weapon.active) {
+	// (force/script and NAPI authority paths bypass it); single player is
+	// outside the session [orig: Entity_AttachToUseGunSlot @0x546b80, reject
+	// `!is_in_session && Flags&0x100 && !EquippedSlot` -- `cmp
+	// g_napi_np_ctx.is_in_session` @0x546BF6, the slot test @0x546c07].
+	if (!world.rules.mp_session && !weapon.active) {
 		w::VehicleSeatSelection hit;
 		if (world.vehicles.find_mount_toggle_candidate(*toggle_player, hit) && hit.type == w::SeatType::Gunner)
 			return false;
@@ -277,7 +279,7 @@ bool LocalPlayer::select_numbered_seat(int index) {
 	if (!find_numbered_seat(index, selected)) return false;
 	// The same out-of-session unarmed UseGun rejection toggle_mount carries
 	// [orig: Entity_AttachToUseGunSlot @0x546c07].
-	if (!world_.rules.session_open && !weapon.active && selected.type == w::SeatType::Gunner)
+	if (!world_.rules.mp_session && !weapon.active && selected.type == w::SeatType::Gunner)
 		return false;
 	const w::Entity *carrier = world_.registry.get(selected.vehicle);
 	const bool changed = carrier != nullptr && world_.vehicles.process_attach(

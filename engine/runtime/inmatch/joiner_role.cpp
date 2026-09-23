@@ -736,7 +736,6 @@ void JoinerRole::pump() {
     // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
-    world.rules.session_open = true;
 	world.rules.mpattrib = rt.view().mp_attributes();
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;

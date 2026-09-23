@@ -734,8 +734,8 @@ struct DeathTransitionRootSource final : IRootMotionSource {
 
 // The entity update stamps the retail is_in_session fact from the session
 // rules: a joiner's brain then takes the in-session death arm (the death tick,
-// then the type-20 event), and single player, the in-process listen server
-// with session_open set, stays outside the session.
+// then the type-20 event), and single player, the in-process listen server,
+// stays outside the session.
 // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission @0x561AF0
 //  leaves it clear (read back @0x561E73); EntityAI_ProcessInfantryStateMachine
 //  @0x458273 (the death-event arm)]
@@ -746,7 +746,6 @@ static void test_entity_update_stamps_the_session_fact() {
     ctx.world = &w;
     ctx.is_authority = false;
     w.rules.mp_session = true;
-    w.rules.session_open = true;
     w.update_all_entities(ctx);
     CHECK(w.ai.is_in_session);
     AiEntity &e = *w.ai.at(w.ai.attach(EntityHandle::make(0, 0)));

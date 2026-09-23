@@ -101,7 +101,8 @@ public:
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
-    // out-of-session UseGun rejection (session_open gates it).
+    // out-of-session UseGun rejection (rules.mp_session, the retail
+    // is_in_session fact, gates it).
     bool toggle_mount();
     // Numbered seat keys share the panel's list and their own idle/overheat
     // gate; a joiner uses the query then waits for the authority's reply.

@@ -1098,10 +1098,9 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.runtime->view().set_mp_attributes(mp_attributes);
 	w::World &world = h.kernel->world;
-	if (!expect(!world.rules.session_open && !world.rules.auto_scope_zero,
-			"rules stamp: a bare kernel starts out of session")) return false;
+	if (!expect(!world.rules.auto_scope_zero,
+			"rules stamp: a bare kernel starts without the zero rule")) return false;
 	h.role.run_tick(h.input);
-	if (!expect(world.rules.session_open, "rules stamp: the pump opens the session")) return false;
 	return expect(world.rules.auto_scope_zero == zoom_allowed,
 			"rules stamp: auto_scope_zero follows mpattrib bit 0x10000");
 }
