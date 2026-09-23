@@ -1663,6 +1663,14 @@ add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
 target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
 add_test(NAME infantry_terrain COMMAND infantry_terrain_test)
 
+# The org1 (NPC) motor legs against vectors from executing the retail motor
+# (Entity_UpdateInfantryAI @0x4B9910): the +0xAC vertical quarter-step tail,
+# the even-only climb/ladder/water blocks, and the later org1 parity fixes.
+add_executable(infantry_org1_parity_test world/infantry_org1_parity_test.cpp)
+target_link_libraries(infantry_org1_parity_test PRIVATE opennova_runtime)
+target_compile_features(infantry_org1_parity_test PRIVATE cxx_std_17)
+add_test(NAME infantry_org1_parity COMMAND infantry_org1_parity_test)
+
 add_executable(infantry_attention_test world/infantry_attention_test.cpp)
 target_link_libraries(infantry_attention_test PRIVATE opennova_runtime)
 target_compile_features(infantry_attention_test PRIVATE cxx_std_17)

@@ -1,0 +1,221 @@
+// The org1 (NPC) infantry motor legs against vectors produced by EXECUTING the
+// retail motor. [orig: Entity_UpdateInfantryAI @0x4B9910]
+//
+// The vertical vectors below come from running the retail tail
+// Entity_UpdateInfantryAI 0x4BF5CB..0x4BFC89 under Unicorn on the hash-pinned
+// Jointops.exe (sha256 b9971c82...02fac), with the resolver
+// Entity_MovementCollisionResolver @0x4B2BD0 stubbed to return
+// `z - capsule_bottom - ground`, the same clearance the motor's no-collision
+// fallback computes over the flat test field used here. Everything else in that
+// range (the slide damp, the integrate, gravity, the landing/airborne edges, the
+// ladder and water blocks, and the entity+0xAC quarter-step tail) ran as retail
+// code.
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
+
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <set>
+#include <vector>
+
+using namespace opennova::world;
+using opennova::terrain::TerrainHeightField;
+
+namespace {
+
+int failures = 0;
+#define CHECK(c)                                                                       \
+    do {                                                                               \
+        if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
+    } while (0)
+
+constexpr int32_t fx(double units) { return static_cast<int32_t>(units * 65536.0); }
+
+// A flat 512x512 height field at world height 0.
+struct FlatField {
+    static constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap = std::vector<uint16_t>(kDim * kDim, 0);
+    std::vector<int> sector_grid = std::vector<int>(256, 1);
+    TerrainHeightField field;
+    FlatField() {
+        field.heightmap = heightmap.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+    }
+};
+
+// Idle-only source whose frames stand the capsule bottom 1.0 u under the origin
+// and carry no root translation.
+struct IdleSource : IRootMotionSource {
+    std::set<int> clips{anim_state::kIdle};
+    bool has_clip(int, int id) const override { return clips.count(id) != 0; }
+    int32_t clip_length_ticks(int, int, int) const override { return -1; }
+    bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+        if (clips.count(id) == 0) return false;
+        ++phase;
+        out = RootMotionFrame{};
+        out.capsule_bottom = fx(1);
+        return true;
+    }
+};
+
+// One org1 NPC over the flat field, registry-backed so the water block and the
+// flag word run, driven through the public AiSystem tick.
+struct Org1Rig {
+    FlatField ground;
+    IdleSource source;
+    std::unique_ptr<World> w = std::make_unique<World>();
+    EntityHandle handle;
+
+    Org1Rig() {
+        w->registry.configure_pool(0, 4);
+        Entity body;
+        body.kind = EntityKind::Organic;
+        body.health = 100;
+        body.health_max = 100;
+        body.eye_offset_z = 0x9000; // what the capsule restamp produces for these frames
+        handle = w->registry.spawn(0, body);
+        AiEntity &e = *w->ai.at(w->ai.attach(handle));
+        e.inf.active = true;
+        e.health = 100;
+        e.pos[0] = fx(100);
+        e.pos[1] = fx(100);
+        w->ai.terrain = &ground.field;
+        w->ai.root_motion = &source;
+    }
+    AiEntity &e() { return *w->ai.for_handle(handle); }
+    Entity &entity() { return *w->registry.get(handle); }
+    void airborne() {
+        e().inf.airborne = true;
+        entity().flags |= kEntityFlagInAir;
+    }
+    void tick(uint32_t t) {
+        TickContext ctx;
+        ctx.world = w.get();
+        ctx.is_authority = true;
+        ctx.logic_tick = t;
+        w->logic_tick = t;
+        w->ai.tick(*w, ctx);
+    }
+};
+
+// R3-1: the org1 vertical quarter-step tail. An even key tick keeps a quarter
+// of the Z change since the post-integrate save and stores it in +0xAC; the odd
+// key tick skips gravity/resolve/edges and adds +0xAC again, so a falling NPC
+// moves about vel_z per two ticks. Retail vectors: the body 8.0 u above its
+// capsule floor, at rest, airborne. [orig: Entity_UpdateInfantryAI save
+// @0x4BF6BA, odd skip @0x4BF6A5..0x4BF6B2, tail @0x4BFC65..0x4BFC86]
+void test_org1_fall_takes_the_quarter_step_tail() {
+    Org1Rig rig;
+    rig.e().pos[2] = fx(1) + fx(8);
+    rig.airborne();
+    // retail z after ticks 2, 3, 4, 5 and the +0xAC each stored
+    const int32_t z[] = {589616, 589408, 588992, 588576};
+    const int32_t step[] = {-208, -208, -416, -416};
+    const int32_t vel[] = {-416, -416, -832, -832};
+    for (int i = 0; i < 4; ++i) {
+        rig.tick(2u + static_cast<uint32_t>(i));
+        CHECK(rig.e().pos[2] == z[i]);
+        CHECK(rig.e().inf.z_quarter_step == step[i]);
+        CHECK(rig.e().inf.vel[2] == vel[i]);
+    }
+    // After 60 ticks retail has fallen 2.95 u (the doubled integrate alone
+    // would have dropped 5.9 u).
+    for (uint32_t t = 6; t < 62; ++t) rig.tick(t);
+    CHECK(rig.e().pos[2] == 396384);
+    CHECK(rig.e().inf.vel[2] == -12480);
+    CHECK(rig.e().inf.airborne);
+}
+
+// R3-1: the landing time and the fall damage follow the slower fall. At the
+// default fallmps 13 a retail NPC dropping 4.0 u lands on tick 70 with 49 hp
+// left; the doubled integrate landed it on tick 50 at -10400, under the
+// -13741 threshold, unhurt. [orig: threshold `imul eax,0FFFFFBDFh`
+// @0x4BF839, damage @0x4BF848..0x4BF864; landing re-save @0x4BF808]
+void test_org1_fall_damage_follows_the_retail_fall() {
+    Org1Rig rig;
+    rig.w->script.wac_values.fallmps = 13;
+    rig.e().pos[2] = fx(1) + fx(4);
+    rig.airborne();
+    uint32_t landed = 0;
+    for (uint32_t t = 2; t < 400 && landed == 0; ++t) {
+        rig.tick(t);
+        if (!rig.e().inf.airborne) landed = t;
+    }
+    CHECK(landed == 70);
+    CHECK(rig.e().health == 49);
+    CHECK(rig.e().pos[2] == fx(1)); // the landing lands in full: +0xAC is 0 after it
+    CHECK(rig.e().inf.z_quarter_step == 0);
+    rig.tick(landed + 1);
+    CHECK(rig.e().pos[2] == fx(1));
+}
+
+// R3-1 + R3-3: the org1 water block stores the float target and the shared tail
+// settles it; a body that fell in keeps its stuck vel_z (gravity is skipped while
+// afloat) without sinking under it. Retail vectors: water at 10.0 u, the body at
+// 8.0 u with vel_z -8000 and the in-air bit, at (100, 100), eye height 0x9000.
+// [orig: float target store @0x4BFB84; tail @0x4BFC65..0x4BFC86; odd skip of
+// the water block @0x4BF6B2]
+void test_org1_water_settles_through_the_tail() {
+    Org1Rig rig;
+    rig.w->env.water_z = fx(10);
+    rig.e().pos[2] = fx(8);
+    rig.e().inf.vel[2] = -8000;
+    rig.airborne();
+    struct Row { uint32_t tick; int32_t z; int32_t step; };
+    const Row rows[] = {
+            {2, 552421, 28133}, {3, 580554, 28133}, {4, 594631, 14077},
+            {5, 608708, 14077}, {10, 631627, 1767}, {11, 633394, 1767},
+            {23, 636740, 5},    {24, 636726, -14},  {41, 636002, -56},
+    };
+    size_t row = 0;
+    for (uint32_t t = 2; t <= 41; ++t) {
+        rig.tick(t);
+        if (row < sizeof(rows) / sizeof(rows[0]) && rows[row].tick == t) {
+            CHECK(rig.e().pos[2] == rows[row].z);
+            CHECK(rig.e().inf.z_quarter_step == rows[row].step);
+            ++row;
+        }
+    }
+    CHECK(row == sizeof(rows) / sizeof(rows[0]));
+    CHECK(rig.e().inf.vel[2] == -8416);
+    CHECK((rig.entity().flags & kEntityFlagDrowning) != 0);
+    CHECK(!rig.e().inf.airborne);
+}
+
+// R3-3: the org1 AI-climb chase (Flags 0x80) replaces gravity on EVEN key ticks
+// only; an odd tick moves the body by the stored quarter step and leaves the
+// chase velocity alone. [orig: climb @0x4BF6C1..0x4BF6EA inside the even-tick
+// block; odd skip @0x4BF6A5..0x4BF6B2 -> @0x4BFC80]
+void test_org1_climb_chase_runs_on_even_ticks_only() {
+    Org1Rig rig;
+    rig.e().pos[2] = fx(3);
+    rig.e().inf.move_target[2] = fx(5);
+    rig.entity().flags |= kEntityFlagAiClimb;
+    rig.tick(2);
+    // step = (5u - 3u + 8) >> 4 = 8192; Z += 2 * 8192, then the quarter tail
+    CHECK(rig.e().inf.vel[2] == 8192);
+    CHECK(rig.e().inf.z_quarter_step == (2 * 8192 + 2) >> 2);
+    const int32_t z_even = rig.e().pos[2];
+    CHECK(z_even == fx(3) + 4096);
+    rig.tick(3);
+    CHECK(rig.e().inf.vel[2] == 8192);           // no chase on the odd tick
+    CHECK(rig.e().pos[2] == z_even + 4096);      // only the stored quarter step
+}
+
+} // namespace
+
+int main() {
+    test_org1_fall_takes_the_quarter_step_tail();
+    test_org1_fall_damage_follows_the_retail_fall();
+    test_org1_water_settles_through_the_tail();
+    test_org1_climb_chase_runs_on_even_ticks_only();
+    if (failures) {
+        std::printf("infantry_org1_parity: %d failure(s)\n", failures);
+        return 1;
+    }
+    std::printf("infantry_org1_parity: all passed\n");
+    return 0;
+}

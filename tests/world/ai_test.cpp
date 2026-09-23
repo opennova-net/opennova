@@ -1653,14 +1653,17 @@ static void test_infantry_floats_and_splashes_once() {
     CHECK(!w->out.water_crossings.events[0].airborne);
     CHECK(w->out.water_crossings.events[0].water_z == w->env.water_z);
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
-    // He is being lifted toward the surface, not left on the riverbed.
+    // He is being lifted toward the surface, not left on the riverbed: the block
+    // stores the float target outright; the motor's +0xAC quarter-step tail that
+    // follows it is what paces the settle (infantry_org1_parity). [orig:
+    // Entity_UpdateInfantryAI store @0x4BFB84, tail @0x4BFC65..0x4BFC86]
     CHECK(npc.pos[2] > sank_to);
 
     // Still under, still latched: the host drained the queue and nothing refills it.
     w->out.water_crossings.clear();
     for (int i = 0; i < 8; ++i) ai.infantry_water_block(npc, *w, ent, 0, 2 + i);
     CHECK(w->out.water_crossings.events.empty());
-    // Eight quarter-steps land him at the plane, within the bob's own amplitude.
+    // He sits at the float target, just under the plane within the bob's amplitude.
     const int32_t settled = npc.pos[2] - w->env.water_z;
     CHECK(settled < 0 && settled > -to_fixed(1.0));
     std::printf("  [inf-water] settled %.3f u under the plane\n",

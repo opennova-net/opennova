@@ -463,6 +463,7 @@ struct InfantryState {
         leg_yaw[0] = leg_yaw[1] = heading;
         leg_target[0] = leg_target[1] = heading;
         vel[0] = vel[1] = vel[2] = 0;
+        z_quarter_step = 0; // [orig: Entity_ResetToSpawnState @0x4B967A]
         stance = Stance::kStand;
         stance_sound_state = 0;
         burn_state = 0;
@@ -690,6 +691,13 @@ struct InfantryState {
     int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
+    // The org1 vertical quarter step (entity+0xAC): an even key tick keeps only a
+    // quarter of what gravity, the resolver, the ladder and the water blocks did to
+    // Z since the post-integrate save and stores that quarter here; the odd key tick
+    // skips all of them and adds this value again. [orig: Entity_UpdateInfantryAI
+    // save @0x4BF6BA / landing re-save @0x4BF808, tail @0x4BFC65..0x4BFC7D, odd
+    // re-apply @0x4BFC80; zeroed by Entity_ResetToSpawnState @0x4B967A]
+    int32_t z_quarter_step = 0;
 
     // Debug-card taps (not engine state): this tick's integrated root step and
     // the collision resolver's horizontal correction — the frozen-clump

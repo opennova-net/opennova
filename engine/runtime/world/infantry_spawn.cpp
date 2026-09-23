@@ -195,6 +195,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
             body->net_saved_live_pose[axis] = body->pos[axis];
             body->inf.vel[axis] = 0;
         }
+        body->inf.z_quarter_step = 0; // [orig: @0x4B967A]
         body->heading = heading;
         body->vel_x = body->vel_z = 0;
         body->body_pitch = body->roll = 0;

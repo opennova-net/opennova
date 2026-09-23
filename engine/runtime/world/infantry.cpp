@@ -843,6 +843,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
     inf.leg_target[0] = inf.leg_target[1] = heading;
     inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
+    inf.z_quarter_step = 0; // [orig: Entity_ResetToSpawnState @0x4B967A]
     inf.stance = InfantryState::Stance::kStand;
     // `airborne` stays with the registry word, which no retail respawn writer
     // touches (see InfantryState::reset_for_spawn) [orig: Entity_ResetToSpawnState
@@ -1827,6 +1828,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.dbg_root_dy = wy + inf.vel[1];
     }
 
+    // THE ORG1 ODD KEY TICK. Retail's NPC body runs gravity, the resolver, the
+    // airborne/landing edges, the ladder block and the water block on even key
+    // ticks only; an odd tick jumps straight to the tail and re-applies the
+    // quarter step the last even tick stored, so the body keeps moving between
+    // resolves. [orig: Entity_UpdateInfantryAI outYaw = key & 1 @0x4BF146 /
+    // @0x4BF14F, the skip `cmp [outYaw],0; jnz loc_4BFC80` @0x4BF6A5..0x4BF6B2,
+    // the re-apply @0x4BFC80..0x4BFC86]
+    if (!inf.is_local_player && (key & 1u) != 0) {
+        e.pos[2] = io::bam_add(e.pos[2], inf.z_quarter_step);
+        finish_infantry_tick(e, world);
+        return;
+    }
+    // The even tick's base: Z after the root integrate, before gravity; a
+    // landing snap re-saves it below. [orig: @0x4BF6BA]
+    int32_t org1_saved_z = e.pos[2];
+
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
     // (out[3]) and receives foot clearance from the collision resolver.
     // It lifts only on return <= 0; return > 0xF000 marks airborne; small positive
@@ -1848,25 +1865,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 : 0u;
         const bool gravity_skip =
             (gravity_flags & (kEntityFlagLadderContact | kEntityFlagDrowning)) != 0;
-        // THE ORG1 EVEN-TICK GATE. Retail's NPC infantry runs its whole
-        // gravity + resolver + airborne/landing block on EVEN ticks only: the
-        // think stamps `outYaw.X = tickCounter & 1` (a SpecialVec3 field reused
-        // as a scratch int - a decompiler alias, not a vector) and the block is
-        // entered under `if (!outYaw.X)`.
-        // [orig: Entity_UpdateInfantryAI @0x4b9910 - stamp kong 155519-155523
-        //  `v489 = tickCounter; outYaw.X = v489 & 1;`, gate kong 155809
-        //  `if ( !outYaw.X )`, resolver call kong 155831]
-        // This is WHY the org1 integrate is `pos += 2 * vel` (kong 155830
-        // `entity->Position.Z += 2 * entity->slideDecay;`): the doubling
-        // compensates for running half as often. We carried the doubling but
-        // ran the block EVERY tick, so our NPCs took gravity at twice retail's
-        // rate and resolved twice as often - which changes the equilibrium
-        // standoff against an obstacle and the recovery rate from a contact
-        // (AI-PARITY-CONCEPT 6.15w).
+        // An org1 body reaches this block on EVEN key ticks only (the odd tick
+        // returned above), so its `pos += 2 * vel` runs every second tick. The
+        // quarter-step tail at the end of the block then keeps a quarter of the
+        // even tick's Z change and re-applies it on the odd tick, so a falling
+        // NPC moves about vel_z per two ticks, not 2 * vel_z.
+        // [orig: Entity_UpdateInfantryAI skip @0x4BF6B2; integrate @0x4BF7EC;
+        //  tail @0x4BFC65..0x4BFC86]
         // The org2 (local player) leg keeps its own cadence: it integrates
-        // `pos += vel` once per tick and is NOT gated here.
-        const bool org1_tick_gate_open =
-            inf.is_local_player || (logic_tick & 1u) == 0;
+        // `pos += vel` once per tick and has no quarter-step tail.
         if (inf.is_local_player) {
             if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
             if (tick_entity != nullptr) {
@@ -1892,18 +1899,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         } else if ((gravity_flags & kEntityFlagAiClimb) != 0) {
             // The org1 ladder-climb chase replaces gravity: sixteenth-step Z
             // toward the AI move target, capped 0x4000 up, floor -16384 (half
-            // the fall terminal). The order writer rides the AI-order slice.
+            // the fall terminal), on the even key tick like the gravity it
+            // replaces. The order writer rides the AI-order slice.
             // [orig: @ 0x4bf6d2-0x4bf6e5; floor pick @ 0x4bf6e5 + clamp @ 0x4bf7d4]
             int32_t step = (inf.move_target[2] - e.pos[2] + 8) >> 4;
             if (step > 0x4000) step = 0x4000;
             inf.vel[2] = step;
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;
             e.pos[2] += 2 * inf.vel[2];
-        } else if (org1_tick_gate_open) {
-            // [orig: Entity_UpdateInfantryAI @0x4BF8D4;
-            // kong 155814-155830 — the org1 gravity step and the
-            //  `Position.Z += 2 * slideDecay` integrate, both inside the
-            //  even-tick gate at kong 155809]
+        } else {
+            // [orig: Entity_UpdateInfantryAI gate @0x4BF7B8, step @0x4BF7BF,
+            //  floor @0x4BF7C9..0x4BF7D6, `pos.z += 2 * slideDecay` @0x4BF7E4..0x4BF7EE]
             if (!gravity_skip) inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];
@@ -1918,16 +1924,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
         const int32_t pre_resolve_y = e.pos[1];
         int32_t foot_clearance;
-        if (!org1_tick_gate_open) {
-            // ODD TICK for an NPC body: retail's whole gravity + resolver +
-            // airborne/landing block sits inside the even-tick gate, so no
-            // resolve happens and no edge is evaluated this tick. Report the
-            // clearance the cached ground implies so nothing downstream reads
-            // an uninitialised value; the edges below are skipped with it.
-            // [orig: the `if ( !outYaw.X )` gate at kong 155809 wraps the
-            //  integrate, the resolver call at 155831 and the edges after it]
-            foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
-        } else if (collision != nullptr && collision->instance_count() != 0) {
+        if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
             // the entry gate, the per-tick alignment chase, and the exit push /
             // pitch restore (infantry_ladder.cpp). [orig: the resolver reads
@@ -1970,13 +1967,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             tick_entity != nullptr &&
             ((tick_entity->flags | tick_entity->engine_flags) &
              kEntityFlagLadderContact) != 0;
-        // The airborne / landing edges are the tail of retail's even-tick
-        // block, so an odd NPC tick evaluates neither.
-        // [orig: inside `if ( !outYaw.X )` at kong 155809 — the >61440 airborne
-        //  arm at 155832-155834 and the landing arm after it]
-        if (!org1_tick_gate_open) {
-            // no edge this tick
-        } else if (foot_clearance > kInfantryAirborneGap) {
+        // The airborne / landing edges belong to retail's even-tick block, so
+        // an odd NPC tick (returned above) evaluates neither.
+        // [orig: Entity_UpdateInfantryAI landing @0x4BF7FA, airborne @0x4BF8AE]
+        if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later
@@ -2076,6 +2070,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
             e.pos[2] -= foot_clearance;
+            // org1 re-bases its quarter-step tail on the snapped Z, so a landing
+            // lands in full on this tick. [orig: `mov [esp+117Ch+entity], edx`
+            // @0x4BF808]
+            if (!inf.is_local_player) org1_saved_z = e.pos[2];
             const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
             const bool fall_charges = inf.is_local_player
                     ? inf.vel[2] <= fall_threshold
@@ -2242,8 +2240,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // org1 water (NPC, immediately after the ladder block, same as retail):
         // float on the plane instead of walking along the riverbed, and fan the
         // splash once on entry.
-        if (!inf.is_local_player)
+        if (!inf.is_local_player) {
             infantry_water_block(e, world, tick_entity, frame.capsule_bottom, logic_tick);
+            // The org1 quarter-step tail: of everything gravity, the resolver,
+            // the ladder and the water blocks did to Z since the save, keep a
+            // quarter now and store it for the odd tick's re-apply.
+            // [orig: Entity_UpdateInfantryAI @0x4BFC65..0x4BFC7D `sub ecx,eax;
+            //  add ecx,2; sar ecx,2; mov [esi+0ACh],ecx; mov [esi+0Ch],eax`,
+            //  then the shared add @0x4BFC80..0x4BFC86]
+            inf.z_quarter_step = io::bam_sar(
+                    io::bam_add(io::bam_sub(e.pos[2], org1_saved_z), 2), 2);
+            e.pos[2] = io::bam_add(org1_saved_z, inf.z_quarter_step);
+        }
         // org2 water (the LOCAL player body, immediately after its jump block --
         // the same mover-tail placement retail gives it @0x4b8020).
         else

@@ -12,7 +12,8 @@
 //   * state-commit rules straight off the real flag table (burn 111 = locked 0x004
 //     queues; emote_1 115 = 0x020 yields only to movement-flagged targets),
 //   * kJumpLoop forced forward delta 1024,
-//   * per-tick gravity (org1 -416 + pos += 2*vel; org2 -208 + pos += vel) to terminal
+//   * gravity (org1 -416 + pos += 2*vel on even key ticks through the +0xAC
+//     quarter-step tail; org2 -208 + pos += vel every tick) to terminal
 //     -32768, landing snap + fall damage excess>>4 with the injectable scale
 //     [orig: dword_C6EAE4], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
@@ -702,15 +703,22 @@ void test_org1_ladder_hold_press_and_top_select() {
     CHECK(m->inf.body_heading == rig.collision.last_ladder_frame.yaw);
     CHECK(m->inf.anim_state == anim_state::kClimbUp);         // below anchor-0.75
 
-    // Inside the anchor band the select promotes to climb_top.
+    // The org1 ladder block runs on EVEN key ticks only: an odd tick jumps
+    // past it to the vertical tail. [orig: Entity_UpdateInfantryAI odd skip
+    // @0x4BF6A5..0x4BF6B2 -> @0x4BFC80, past the block @0x4BF907]
     m->pos[2] = fx(2.5);
     run_ticks(rig.ai, rig.world, 1, 2);
+    CHECK(m->inf.anim_state == anim_state::kClimbUp); // odd tick: no select
+
+    // Inside the anchor band the select promotes to climb_top.
+    m->pos[2] = fx(2.5);
+    run_ticks(rig.ai, rig.world, 2, 3);
     CHECK(m->inf.anim_state == anim_state::kClimbTop);
 
     // A live person at the probe point (1.25u along the body heading) with an
     // overlapping Z band holds the climb at climb_idle.
     m->pos[2] = fx(1.5);
-    run_ticks(rig.ai, rig.world, 2, 3); // resettle into climb_up first
+    run_ticks(rig.ai, rig.world, 3, 5); // resettle into climb_up first
     CHECK(m->inf.anim_state == anim_state::kClimbUp);
     Entity blocker;
     blocker.kind = EntityKind::Organic;
@@ -722,15 +730,15 @@ void test_org1_ladder_hold_press_and_top_select() {
     blocker.alive = true;
     rig.world.registry.spawn(0, blocker);
     for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
-    run_ticks(rig.ai, rig.world, 3, 4);
+    run_ticks(rig.ai, rig.world, 5, 7);
     CHECK(m->inf.anim_state == anim_state::kClimbIdle);
 
     // The 0x80 climb order: gravity becomes the capped sixteenth-step Z chase
-    // to the move target. [orig: @ 0x4bf6d2-0x4bf6e5]
+    // to the move target, on the even key tick. [orig: @ 0x4bf6d2-0x4bf6e5]
     pe->flags |= kEntityFlagAiClimb;
     m->inf.move_target[2] = fx(5.0);
     const int32_t z_before = m->pos[2];
-    run_ticks(rig.ai, rig.world, 4, 5);
+    run_ticks(rig.ai, rig.world, 7, 9);
     CHECK(m->pos[2] > z_before);
     CHECK(m->inf.vel[2] <= 0x4000);
 }
@@ -3428,7 +3436,9 @@ void test_infantry_parity_pins_2026_08_28() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(200);
         e->health = 30000;
-        run_ticks(ai, w, 0, 600);
+        // The org1 +0xAC quarter-step tail makes the 150 u drop take ~680
+        // ticks. [orig: Entity_UpdateInfantryAI tail @0x4BFC65..0x4BFC86]
+        run_ticks(ai, w, 0, 900);
         CHECK(e->pos[2] == floor_z);
         CHECK(e->health == 30000);
     }
@@ -5150,11 +5160,14 @@ int main() {
         e->pos[2] = fx(200); // 145u above the floor: reaches terminal velocity
         e->health = 30000;
 
+        // The +0xAC quarter-step tail moves the NPC about vel_z per two ticks,
+        // so the 145 u drop takes ~660 ticks. [orig: Entity_UpdateInfantryAI
+        // tail @0x4BFC65..0x4BFC86]
         int32_t min_vel = 0;
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = true;
-        for (uint32_t t = 0; t < 600; ++t) {
+        for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
             ai.tick(w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
@@ -5216,10 +5229,11 @@ int main() {
         CHECK(e->health == 30000 - ((-landing_vel) >> 4));
     }
 
-    // ---- gravity cadence: BOTH motors fall EVERY tick, asymmetric steps — the NPC
-    //      (org1) at -416 with pos.z += 2*vel, the player (org2) at -208 with
-    //      pos.z += vel. [orig: NPC @0x4bf7bf/@0x4bf7ec; player @0x4b7acf/@0x4b7cef;
-    //      D-INF-10 closed for both legs]
+    // ---- gravity cadence: asymmetric motors — the NPC (org1) steps -416 and
+    //      integrates pos.z += 2*vel on EVEN key ticks, keeping a quarter of the
+    //      change and re-applying it on the odd tick (+0xAC); the player (org2)
+    //      steps -208 with pos.z += vel every tick. [orig: NPC @0x4bf7bf/@0x4bf7ec,
+    //      tail @0x4BFC65..0x4BFC86; player @0x4b7acf/@0x4b7cef]
     {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
@@ -5234,31 +5248,30 @@ int main() {
         ai.at(1)->inf.is_local_player = true;
         ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
 
-        // ORG1 RUNS ITS PHYSICS ON EVEN TICKS ONLY, org2 every tick. The org1
-        // think stamps `outYaw.X = tickCounter & 1` and enters the whole
-        // gravity + integrate + resolver + edge block under `if (!outYaw.X)`;
-        // the `pos.z += 2 * slideDecay` doubling inside it exists BECAUSE the
-        // block runs half as often. The org2 player leg has no such gate and
-        // integrates `pos.z += vel` once per tick.
-        // [orig: stamp @0x4b9910 kong 155519-155523; gate kong 155809; gravity
-        //  step kong 155815; integrate kong 155830. The complementary half is
-        //  already ported: the org1 anim-event sound consumer runs on ODD ticks
-        //  [orig: @0x4bf144-0x4bf156], infantry.cpp emit_slot_sound.]
+        // ORG1 RUNS ITS VERTICAL BLOCK ON EVEN KEY TICKS ONLY, org2 every
+        // tick. The org1 even tick keeps a quarter of its Z change,
+        // (2 * vel + 2) >> 2, and stores it in +0xAC; the odd tick skips
+        // gravity/resolve/edges and adds +0xAC again. The org2 player leg has
+        // no such gate and integrates `pos.z += vel` once per tick.
+        // [orig: outYaw = key & 1 @0x4BF146; odd skip @0x4BF6A5..0x4BF6B2;
+        //  gravity @0x4BF7BF; integrate @0x4BF7EC; tail @0x4BFC65..0x4BFC86]
+        const int32_t npc_z0 = ai.at(0)->pos[2];
         run_ticks(ai, w, 0, 1); // tick 0 EVEN: both fall (100u up, stay airborne)
         CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: the even-tick step
         CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
+        CHECK(ai.at(0)->pos[2] == npc_z0 - 208); // (2 * -416 + 2) >> 2
         const int32_t npc_z = ai.at(0)->pos[2];
         const int32_t ply_z = ai.at(1)->pos[2];
 
-        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 skips entirely, org2 does not
+        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 re-applies +0xAC, org2 falls
         CHECK(ai.at(0)->inf.vel[2] == -416);  // NPC unchanged — no gravity this tick
-        CHECK(ai.at(0)->pos[2] == npc_z);     // NPC unchanged — no integrate either
+        CHECK(ai.at(0)->pos[2] == npc_z - 208); // only the stored quarter step
         CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
         CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208)); // pos.z += vel (org2)
 
         run_ticks(ai, w, 2, 3); // tick 2 EVEN: org1 accumulates and integrates
         CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
-        CHECK(ai.at(0)->pos[2] == npc_z + 2 * (-2 * 416)); // pos.z += 2*vel (org1)
+        CHECK(ai.at(0)->pos[2] == npc_z - 208 - 416); // (2 * -832 + 2) >> 2
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -5312,11 +5325,13 @@ int main() {
         e->pos[2] = fx(200); // dropped well above the floor
 
         // is_authority=false so think/select never retargets the held idle clip; the ground
-        // clamp itself has no authority gate, so the soldier still settles.
+        // clamp itself has no authority gate, so the soldier still settles. The org1 +0xAC
+        // quarter-step tail makes the 149 u drop take ~680 ticks. [orig:
+        // Entity_UpdateInfantryAI tail @0x4BFC65..0x4BFC86]
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = false;
-        for (uint32_t t = 0; t < 600; ++t) {
+        for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
             ai.tick(w, ctx);
         }
@@ -5346,9 +5361,10 @@ int main() {
         // the cadence, so it is phased onto a tick where the block executes.
         run_ticks(ai, w, 0, 1);
 
-        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
-        // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
-        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
+        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step and the +0xAC tail keeps
+        // a quarter of it, but the small positive foot clearance (<= 0xF000) is otherwise left
+        // alone — NOT snapped to the floor, NOT airborne. [orig: tail @0x4BFC65..0x4BFC86]
+        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 208);
         CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
         CHECK(!e->inf.airborne);
     }
