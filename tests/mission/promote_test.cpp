@@ -1064,7 +1064,6 @@ int main() {
     // [orig: Entity_SpawnFromBMSRecord @0x40EBB3..0x40EBB7 -> entity+0x11C].
     CHECK(e0->relmat_id == 5);
     CHECK((e0->slot.f[1] & 0x209) == 0x209);
-    CHECK(e0->see_all);
     CHECK((world.registry.get(world.registry.find_by_net_id(1))->engine_flags &
            0x40u) != 0);
     CHECK((world.registry.get(world.registry.find_by_net_id(1))->flags &

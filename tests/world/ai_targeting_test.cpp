@@ -6,9 +6,12 @@
 #include <cstdio>
 #include <memory>
 
+#include <base/gameprofile/game_type.h>
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/entity_commands.h>
+#include <runtime/world/match.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
@@ -156,9 +159,64 @@ static void test_rounds_mark_their_shooter() {
     CHECK((w.registry.get(gun_h)->engine_flags & kEntityFlagPriorityTarget) != 0);
 }
 
+// R2-11: BERSERK is read live from AiSlot[1] & 0x200, so a scripted ChangeAI
+// Berserk (which writes only the slot word) opens the SM feed to a same-team
+// candidate and turns a same-team kill into an enemy kill.
+// [orig: AI_FindBestTargetB `test dword ptr [eax+4],200h` @0x466FAB,
+//  @0x4670CD, @0x4670E1; Entity_ApplyCommand case 0x10 @0x43AEF6;
+//  GameEvent_PlayerDeath killer gate @0x5170BE..0x5170DA]
+static void test_scripted_berserk_reaches_the_readers() {
+    {
+        Scanner s;
+        World &w = *s.w;
+        s.e().profile.class_priority[1] = 1;
+        const EntityHandle ally = s.spawn_enemy(1, 0, 0);
+        w.registry.get(ally)->team = 1; // the scanner's own team
+        AiTarget found{};
+        CHECK(!w.ai.acquire_target(w, s.e(), found));
+        const EntityHandle self = s.e().handle;
+        CHECK(w.commands.apply_ai_command(self, EntityCommands::kBerserkBit, 1, 0, 0));
+        CHECK(w.ai.acquire_target(w, s.e(), found));
+        CHECK(found.handle == ally);
+        CHECK(w.commands.apply_ai_command(self, EntityCommands::kBerserkBit, 0, 0, 0));
+        CHECK(!w.ai.acquire_target(w, s.e(), found));
+    }
+    {
+        auto owned = std::make_unique<World>();
+        World &w = *owned;
+        w.registry.configure_pool(0, 4);
+        MatchRules rules;
+        rules.game_type = opennova::game_type::kTeamDeathmatch;
+        w.match.configure(rules);
+        const auto spawn_player = [&w](uint8_t slot) {
+            Entity seed{};
+            seed.kind = EntityKind::Organic;
+            seed.alive = true;
+            seed.health = 100;
+            seed.team = 1;
+            seed.flags = kEntityFlagPlayer;
+            seed.engine_flags = kEntityFlagPlayer;
+            const EntityHandle h = w.registry.spawn(0, seed);
+            MatchPlayerIdentity identity;
+            identity.entity = h;
+            identity.slot = slot;
+            w.match.upsert_player(identity);
+            return h;
+        };
+        const EntityHandle killer = spawn_player(0);
+        const EntityHandle victim = spawn_player(1);
+        w.ai.attach(killer);
+        CHECK(w.commands.apply_ai_command(killer, EntityCommands::kBerserkBit, 1, 0, 0));
+        w.match.record_death(w, victim, killer);
+        CHECK(w.match.player(killer)->stats[MatchStats::kTeamKills] == 0);
+        CHECK(w.match.player(killer)->stats[MatchStats::kEnemyKills] == 1);
+    }
+}
+
 int main() {
     test_engage_jitter_keys_on_the_target_brain();
     test_rounds_mark_their_shooter();
+    test_scripted_berserk_reaches_the_readers();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

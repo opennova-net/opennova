@@ -54,7 +54,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
     // only skips the wasted pool walk.
     if (world.match.outcome().ended) return false;
-    if (e.team == 0 && !e.see_all) return acquire_target_from(e, scan_candidates_, out);
+    // BERSERK, read live from the scanner's AiSlot[1] [orig: `test dword ptr
+    // [eax+4],200h` @0x466FAB, @0x4670CD, @0x4670E1].
+    const bool see_all = (e.slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0;
+    if (e.team == 0 && !see_all) return acquire_target_from(e, scan_candidates_, out);
 
     const int32_t prio_packed = e.brain.f[AiBrain::kPriorityTarget];
 
@@ -72,7 +75,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             if (c->health <= 0) continue;                  // [orig: +286 > 0]
             // Team gate [orig: teamless candidates need the attacker's 0x200; same-team
             // skipped unless 0x200].
-            if ((c->team == 0 || c->team == e.team) && !e.see_all) continue;
+            if ((c->team == 0 || c->team == e.team) && !see_all) continue;
             // The class sub-filter [orig: 0x46711f-0x46717e; "parent" there is the
             // candidate's BRAIN (+100), *(brain+4)+16 the profile type word].
             const AiEntity *cand_ai = for_handle(h);
@@ -202,7 +205,8 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         return los_fn != nullptr ? los_fn(los_ctx, c) : c.los_blocked;
     };
     // Entry gate [orig: 0x466f60 head]: teamless scanners need the 0x200 see-all flag.
-    if (e.team == 0 && !e.see_all) return false;
+    const bool see_all = (e.slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0; // [orig: @0x466FAB]
+    if (e.team == 0 && !see_all) return false;
     const int primary_fov = e.profile.fov_primary | 1;     // [orig: (def+75)|1]
     const int secondary_fov = e.profile.fov_secondary | 1; // [orig: (def+67)|1]
     const AiCandidate *best = nullptr;
@@ -215,7 +219,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         if (!(c.visibility <= 16 || (e.profile.flags100 & 8) != 0)) continue;
         if ((c.flags & 0x8000000) != 0) continue;                 // [orig: flags & 0x8000000 -> skip]
         // [orig: team check with self aiSlot+4 & 0x200 see-all]
-        bool team_ok = (c.team != 0 || e.see_all) && (c.team != e.team || e.see_all);
+        bool team_ok = (c.team != 0 || see_all) && (c.team != e.team || see_all);
         if (!team_ok) continue;
 
         int32_t bearing = bearing_bam(c.pos[1] - e.pos[1], c.pos[0] - e.pos[0]);

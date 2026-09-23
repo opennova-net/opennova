@@ -22,7 +22,7 @@
 #include <net/npwire/session_hello.h>
 #include <runtime/replication/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <runtime/world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
+#include <runtime/world/ai.h>                  // AiSlot[1] BERSERK (the team-kill exemption)
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
@@ -137,7 +137,7 @@ PlayerDeathFeed classify_player_death(
 	//  twin @0x5170BE..0x5170DA, branch @0x5170F8..0x517113]
 	auto sees_all = [&world](world::EntityHandle handle) {
 		const world::AiEntity *ai = world.ai.for_handle(handle);
-		return ai != nullptr && ai->see_all;
+		return ai != nullptr && (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) != 0;
 	};
 	if (victim_entity != nullptr && victim_entity->team != 0 &&
 			victim_entity->team == killer_entity->team &&

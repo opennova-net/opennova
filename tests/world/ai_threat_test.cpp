@@ -161,8 +161,8 @@ int main() {
 					pe->health, pe->handle.pool());
 		if (here.ai != nullptr) {
 			const w::AiProfile &pr = here.ai->profile;
-			std::printf("threat: npc see_all=%d profile_type=%d prio=%d authority=%d in_session=%d team=%d slot_class=[%d %d %d %d] class_priority=[%d %d %d %d] fov=%d/%d flags100=0x%x\n",
-					int(here.ai->see_all), pr.type, here.ai->brain.f[w::AiBrain::kPriorityTarget],
+			std::printf("threat: npc berserk=%d profile_type=%d prio=%d authority=%d in_session=%d team=%d slot_class=[%d %d %d %d] class_priority=[%d %d %d %d] fov=%d/%d flags100=0x%x\n",
+					int((here.ai->slot.f[w::AiSlot::kBehaviorFlags] & 0x200) != 0), pr.type, here.ai->brain.f[w::AiBrain::kPriorityTarget],
 					int(rig.world.ai.is_authority), int(rig.world.ai.is_in_session), int(here.ai->team),
 					pr.slot_class[0], pr.slot_class[1], pr.slot_class[2], pr.slot_class[3],
 					pr.class_priority[0], pr.class_priority[1], pr.class_priority[2], pr.class_priority[3],

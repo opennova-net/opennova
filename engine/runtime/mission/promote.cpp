@@ -525,7 +525,6 @@ void init_ai_slot(AiEntity &ae, const bms::Entity &e) {
         if ((attrib & bit) != 0)
             s.f[1] = static_cast<int32_t>(static_cast<uint32_t>(s.f[1]) | behavior);
     }
-    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk)) ae.see_all = true;
     // [orig: slot+48/+52 = (field<<16)/100 — perception2/perfectionist2 are the AI move-speed
     // percentages (engine truth: the editor-era names are misleading)]
     s.f[12] = (e.perception2 << 16) / 100;

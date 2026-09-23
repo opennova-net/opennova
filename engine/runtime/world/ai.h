@@ -485,7 +485,6 @@ struct AiEntity {
     int32_t net_id = 0;        // entity+124 (RelationMatrix_SetBitA key / DcbId)
     uint16_t relmat_id = 0;    // entity+284 (RelationMatrix_SetBitB key)
     uint8_t team = 0;          // entity+354 (team id; 0 = neutral)
-    bool see_all = false;      // entity+104 aiSlot[4] & 0x200 (targets any team)
     // brain[2] is this entity's movement controller. Its +16 phase survives
     // world ticks and advances only through the selected movement callback.
     // [orig: AI_BeginUpdate @0x457B40; world-wac-ai-re.md (D-AI-14)]
