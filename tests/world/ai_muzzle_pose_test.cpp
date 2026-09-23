@@ -54,7 +54,13 @@ int main() {
 	}
 	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	rig.install_weapon("WPN_M4AUTO");
-	for (int t = 0; t < 62; ++t) rig.tick(); // one settled second of posing
+	// Two settled seconds of posing. Some 23 CP01 organics are authored above
+	// any surface the port's collision holds (tree groups, the lumber-mill dome)
+	// and fall to the terrain first, as they do on master; an airborne body
+	// skips its think [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66], so
+	// each holds its idle until it lands, and the quarter-step fall takes most
+	// of two seconds.
+	for (int t = 0; t < 124; ++t) rig.tick();
 	expect(rig.world.pose_provider != nullptr, "the world carries a muzzle pose provider");
 	if (rig.world.pose_provider == nullptr) return 1;
 
