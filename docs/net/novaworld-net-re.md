@@ -8391,8 +8391,8 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   tick after the damage, so an org1 body's dead bit is not set by the host's damage routing
   (only a player body's is). The routine's other callers are the org2 edge (@0x4B4CEA) and the
   console kill (@0x4D29EC, player slots only); no damage path calls it.
-- `Server_UpdatePlayerBreathTimers @ 0x50D770` is the authority's drowning producer despite
-  its old generic name. `Server_TickUpdate` calls it inside the script admission
+- `Server_UpdatePlayerBreathTimers @ 0x50D770` (ex `Server_UpdateEntityIdleTimers`) is the
+  authority's drowning producer. `Server_TickUpdate` calls it inside the script admission
   (`!preround && (humans || !ticks) && !epilog`, @0x51D89F..0x51D8BD), after the WAC tick and
   the spawn-marker pass, only when `tick & 0x1F == 0` (@0x51D8C4..0x51D8D7); the function also
   returns while the pre-round countdown runs (@0x50D773) and while the game is paused

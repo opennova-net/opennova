@@ -266,7 +266,7 @@ callback; `current_tick @0x24c1968` increments once per call):
    - `WacScript_AdvanceTick @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
      on `dword_C6EB28` (script disable), counts `dword_C6EAD4` up to **0x3E (62)**
      (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the mutable
-     clock `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 admitted ticks.
+     clock `wac_var_ticks` (@0x4f81d3). One VM execution per 62 admitted ticks.
    - every 32nd tick (`test tick,1Fh` @0x51D8C4), under the same admission: the
      spawn-marker pass (`assign_overlay_spawn_points`, the call @0x51D8D2) and
      `Server_UpdatePlayerBreathTimers` (the call @0x51D8D7, the drowning producer).
@@ -311,7 +311,7 @@ MissionKernel's single PreMission tick. PostMission events (`flags & 4`) run thr
 resolve against the destroyed pools. The SP restart's call (`Game_RestartRoundSP
 @0x5263AE`) sweeps nothing: its first call `Game_DestroyAllEntitiesAndReset` reaches
 `EventSystem_FreeAll` through the mission reset (`Mission_ResetBmsState
-@0x40DB80`, an IDB misnomer; the call @0x40DBEF), which zeroes `g_EventCount` @0x453266.
+@0x40DB80`; the call @0x40DBEF), which zeroes `g_EventCount` @0x453266.
 The third call site 0x51EA89 lies in an unreferenced chunk (dead). Neither pass is
 periodic (D-EVT-4). Port: `MissionKernel::run_post_mission_pass` (destroys pools 0..2,
 then the authority sweep), run by `HostRole::close` and `LocalRole::close`;
@@ -337,7 +337,7 @@ events in the 116 shipped BMS carry `flags & 4` (flag distribution 0x0 3002, 0x1
 | `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; Simulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
 | `wac_system`: the 62-tick divider lives in WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`); publishes the mutable VM clock and shares admission with BMS; skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
-| `wac/vm`: mutable WAC time base (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
+| `wac/vm`: mutable WAC time base (`time_`, [orig: wac_var_ticks @0xC6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
@@ -503,7 +503,7 @@ Dispatch is a flat sub-type switch (`EventTrigger_EvaluateCondition @0x453620`,
 cat-1 sub-switch @0x45364a). Two data stores back it, both zeroed per mission
 load and save-persisted (`SaveFile_WriteTeamRelationBlocks @0x4aa320` / read
 @0x4a97e0): the group records in the mission reset's memset
-(`Mission_ResetBmsState @0x40DB80`, an IDB misnomer: 0xC00 bytes at
+(`Mission_ResetBmsState @0x40DB80`: 0xC00 bytes at
 0xA33F90, the call @0x40DBAE), the relation matrices and the visited words in
 `EventSystem_FreeAll @0x453210` (called from the same reset @0x40DBEF):
 
@@ -707,7 +707,7 @@ bit flip it.
 | `BmsEventSystem::tick` (pre + normal passes) / `run_post_mission_pass` (post) | `@0x454dc0` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` / `@0x454e00`, run once by `MissionKernel::run_post_mission_pass` from `HostRole::close` / `LocalRole::close` [orig: Game_TeardownMission @0x522350 (the call @0x52266c)] |
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
 | `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
-| `WacVm::time()` | `dword_C6EAD8` |
+| `WacVm::time()` | `wac_var_ticks` (@0xC6EAD8) |
 | `World::logic_tick` | `current_tick @0x24c1968`; `Game_StartMission` zeroes it on every peer past the authority-gated pre pass (`mov tick, ebx` @0x525b9f, gate @0x525b78) and `Game_ProcessMainFrame` adds one before `Entity_UpdateAllEntities` (@0x5265b4, call @0x52674b), so the first mission frame runs at tick 1 on the host and on every client; `MissionKernel::boot` sets `logic_tick = 1` for every role, the post-increment equivalent (2026-09-22, `mission_kernel::test_first_frame_tick_matches_on_host_and_joiner`) |
 | `World::run_logic_tick` system order (`run_script_pass` then `run_entity_pass`, split by the host's server tick around its 0x0A) | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate, then the gated Entity_UpdateAllEntities, the call @0x52674b) |
 | `promote_mission` | `Mission_LoadBMSFile @0x40f4e0` spawn loops |
@@ -1189,8 +1189,8 @@ evaluated in `event_runtime.cpp` since 2026-09-12.
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
 | 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | target WP_NUMBER | — | — | All matching pool-3 ItemDef 6088 markers; entity+692/gen_string effect name, zero direction, store without releasing previous group. Shared typed particle consumer; entity+460 lifetime sharing remains D-PTL-26. |
 | 28 | SpecialSubType | `EventAction_HandleSpecialTypes(block) @0x4535a0`: sub 37 `RenderState_SetLayerVisibilityByIndex(p1, p2)` (the call @0x4535d5), the HUD item flash (§11.6); sub 38 `g_InputActionBits = 0` @0x4535c2; sub 39 `dword_AE0718 = (p1 == 0)` @0x4535bc, a dead store; every other sub returns @0x4535b4. All three ported | sub 37: HUD timer 0..15 (unchecked); sub 39: value | sub 37: timer value (ticks) | — | 37/38/39 (editor marks 28/29 unused) |
-| 30 | GroupOpenDoorAction | `EventAction_OpenGroupDoors(p1)` @0x4541A0 (a misnomer): pools 2 then 1, every row whose commandGroup +0x11C matches and whose +0x1C8 callback is `Entity_ProcessSectionDamageTransition @0x43F370` takes section event 7, the door open (world-wac-ai-re §33.14) | GROUP | — | — | — |
-| 31 | GroupCloseDoorAction | `EventAction_CloseGroupDoors(p1)` @0x454240 (a misnomer): the same walk with section event 8, the door close (@0x454282 / @0x4542C3) | GROUP | — | — | — |
+| 30 | GroupOpenDoorAction | `EventAction_OpenGroupDoors(p1)` @0x4541A0: pools 2 then 1, every row whose commandGroup +0x11C matches and whose +0x1C8 callback is `Entity_ProcessSectionDamageTransition @0x43F370` takes section event 7, the door open (world-wac-ai-re §33.14) | GROUP | — | — | — |
+| 31 | GroupCloseDoorAction | `EventAction_CloseGroupDoors(p1)` @0x454240: the same walk with section event 8, the door close (@0x454282 / @0x4542C3) | GROUP | — | — | — |
 | 32 | GroupResetHasVisited | `EventTrigger_ClearSlotB(p1)` | GROUP | — | — | — |
 | 33 | SingleResetHasVisited | `EventTrigger_ClearSlotA(p1)` | ENTITY | — | — | — |
 | 34 | ResetEvent | `events[p1]` latch clear (§1.5) | **EVENT_REF** | — | — | — |
@@ -1566,8 +1566,8 @@ The three script kills clear different parts of the global hit record
 section, +0x40 the round pointer, +0x44 the round's +0x170 owner), which the
 class callbacks read:
 
-- WAC `killSSN` is its own handler, `WacCmd_KillSsn @0x4F1E40` (an IDB
-  misnomer): the ItemTypeIndex gate (@0x4F1E89), the whole record zeroed
+- WAC `killSSN` is its own handler, `WacCmd_KillSsn @0x4F1E40` (ex
+  `Entity_ResetWeaponState`): the ItemTypeIndex gate (@0x4F1E89), the whole record zeroed
   (@0x4F1E8F..0x4F1E99), Health 0 (@0x4F1EA4), lastAttacker 0 (@0x4F1EAD), a
   person's (def+0x5C == 3) staged clip +0x2C0 cleared (@0x4F1EB7..0x4F1EBD), then
   the class event (e, 1, 0) (@0x4F1EC7..0x4F1ED2).

@@ -421,7 +421,7 @@ path). Seconds multiply by 62 (`imul 62`; 0 -> 1 tick); a timed step is
 
 | WAC | Handler | Writes |
 |---|---|---|
-| `rain(pct, s)` / `snow(pct, s)` | `WacCmd_Rain @ 0x4edf60` / `WacCmd_Snow @ 0x4edfd0` (ex `Env_SetPrecipitationKind`-family) | `Env_RainPctTarget = min((pct << 16) / 100, 0x10000)`, `Env_RainPctStep` = the timed step, `Env_PrecipitationKind @ 0x2c059d0` = 0 / 1 |
+| `rain(pct, s)` / `snow(pct, s)` | `WacCmd_Rain @ 0x4edf60` / `WacCmd_Snow @ 0x4edfd0` (both through `Env_SetPrecipitationKind @ 0x5de8e0`, the calls @ 0x4edfbb / @ 0x4ee02b) | `Env_RainPctTarget = min((pct << 16) / 100, 0x10000)`, `Env_RainPctStep` = the timed step, `Env_PrecipitationKind @ 0x2c059d0` = 0 / 1 |
 | `overcast(pct, s)` | `WacCmd_Overcast @ 0x4ee040` | the same on `Env_OvercastBlendTarget @ 0x26c6898` / step `@ 0x26c68a0` |
 | `fogdist(d)` | `WacCmd_FogDist @ 0x4ee100` | `Env_FogDistTarget = clamp(d << 16, 2 m, Env_FogDistReference)`, `Env_FogDistAccelClamp = |target - current|` |
 | `movefog(d, s)` | `WacCmd_MoveFog @ 0x4ee0a0` | the same target, the timed step as the accel clamp |

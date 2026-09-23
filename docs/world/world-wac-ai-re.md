@@ -36,7 +36,7 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 ### 1.3 Consequence for OpenNova (the reframing verdict)
 The `engine/runtime/world` state-machine and targeting port models the
 AI-vehicle decision layer: the air-class machine (CHel/cpln,
-`EntityAI_ProcessAirStateMachine @ 0x4581B0`, an IDB misnomer) and the ground-class machine
+`EntityAI_ProcessAirStateMachine @ 0x4581B0`) and the ground-class machine
 (cveh/cbot/ctrn, `EntityAI_ProcessGroundStateMachine @ 0x4583C0`). Section 34 corrects the original
 `AI_BeginUpdate @ 0x457B40` controller ownership and class-callback admission.
 The 2026-06-10 routing discovery separated BMS organics from that vehicle
@@ -47,7 +47,7 @@ through `tick_infantry`; section 3 records its mechanics.
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
 0x8153b8` = `{id, fn}` pairs. Ids 0-3 are the HELO_EVADE maneuvers installed only by the
-evade enter `AI_EnterState_HelicopterEvade @ 0x465F60` (a misnomer; id 3 `@ 0x466109`, id 1
+evade enter `AI_EnterState_HelicopterEvade @ 0x465F60` (id 3 `@ 0x466109`, id 1
 `@ 0x466195`, id 0 `@ 0x4661EC`, id 2 `@ 0x46624D`) and chained to id 3 when a phase limit is
 reached (`@ 0x461C9D`, `@ 0x461D1D`, `@ 0x466D93`): id 0 `@ 0x461C30` and id 2 `@ 0x461CB0`
 hold ground + 5 u for 248/434 phase, id 1 `@ 0x466C20` turns +-0x3FFFFFC0 at phase 186 then
@@ -369,7 +369,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
    (`infantry_scan_nearest_threat`), with the LOS `Entity_CheckLineOfSightTerrainAndEntities`.
 9. RESOLVED: `0x461c30`/`0x461cb0` (ids 0/2) are not death movers but the HELO_EVADE
    maneuvers `AI_MoveAircraftEvadeSide` / `AI_MoveAircraftEvadeTurn` (hold ground + 5 u for 248/434
-   phase), installed by the evade enter (`AI_EnterState_HelicopterEvade @ 0x465F60`, a misnomer;
+   phase), installed by the evade enter (`AI_EnterState_HelicopterEvade @ 0x465F60`;
    ids 0/2 @ 0x4661EC / @ 0x46624D); see §1.3.
 10. RESOLVED (§34): the class machines run from `Entity_UpdatePool1Slot @ 0x4B8DD0` (the +0x1C8
     call @ 0x4B8E3C) when the +0x2AC countdown is nonpositive (@ 0x4B8E1B), not from the vehicle
@@ -3414,11 +3414,11 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
 
 ### 16.5 Open follow-ups (this session's unknowns)
 
-4. `AI_TickState_AircraftCombat @ 0x471710` is wired as the **state-8 tick**
-   (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — RESOLVED 2026-09-08: it is
-   the aircraft brain's weapon-fire leg (the IDB name is a misnomer and is kept; the
-   PR #640 alias `AI_UpdateAircraftCombat` never existed in the IDB) — ported in
-   `ai_aircraft.cpp`, vehicle-client-movers-re §26.
+4. `AI_TickState_AircraftCombat @ 0x471710` (ex `Entity_ProcessInfantryWeaponFire`) is wired
+   as the **state-8 tick** (`@ 0x8152bc`, HELO enum range). RESOLVED 2026-09-08: it is the
+   aircraft brain's weapon-fire leg (the PR #640 alias `AI_UpdateAircraftCombat` never
+   existed in the IDB), ported in `ai_aircraft.cpp`, vehicle-client-movers-re §26; the IDB
+   carries the new name since 2026-09-23 (§38.13).
 7. RESOLVED 2026-09-23: `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1`
    classes) is instruction-identical to `AI_FindBestTargetB` except that both arc bytes
    load sign-extended (`movsx` `@ 0x465A8C` / `@ 0x465A9B`), so a HELO arc over 180
@@ -3907,8 +3907,8 @@ walking-fire latch @ 0x4BC8C3..0x4BC946; block 2 lead @ 0x4BCA9D..0x4BCB20, eye
   the 16-tick-old aim point; `infantry::test_aim_lead_uses_the_target_saved_live_pose`.)
 - **Error**: two accuracy params `slot[10]` (used when `aiRef0 == slot[3]` — already
   fired at this target = settled) / `slot[11]` (fresh target), each
-  `err = (119304 · dword_C6EAE8 · acc) >> 5` with `dword_C6EAE8` the difficulty
-  global; two sawtooth phases `err · (32 − ((tick>>2 [+ tick>>9]) & 0x3F))` wander the
+  `err = (119304 · wac_var_accuracyspread · acc) >> 5` with `wac_var_accuracyspread`
+  (@ 0xC6EAE8) the difficulty global; two sawtooth phases `err · (32 − ((tick>>2 [+ tick>>9]) & 0x3F))` wander the
   yaw/pitch solution (±31·err) — the HEADING error is the `(tick>>2)`-only phase and
   the PITCH error the `(tick>>2 + tick>>9)` phase in both aim blocks (block 2
   [orig: @0x4bca03..0x4bca2c] -> +0x2EC [orig: @0x4bcf71] / +0x2D0 [orig:
@@ -4143,8 +4143,8 @@ stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
   exactly double (`step·0x318C631`, ±0x4210842). On every snap the per-type turret
   diagnostic globals get the active yaw/pitch high words (`profile+16` == 2 GROUND →
   `dword_83FEE0/83FEE8`, == 1 HELO → `dword_83FE88/83FE90`) `@ 0x456e33/0x456f9c`.
-- `AI_IsTargetInSight @ 0x456860` is a target-sight check (the IDB name
-  misleads): it reads the brain's target brain[38] (`@ 0x45686A..0x45686D`), returns 0
+- `AI_IsTargetInSight @ 0x456860` (ex `AI_GetSuspensionFirePoint`) is a target-sight
+  check: it reads the brain's target brain[38] (`@ 0x45686A..0x45686D`), returns 0
   without one (`@ 0x456875..0x456881`), then builds the shooter-frame metrics context
   from the entity's pose with the active yaw (`brain[118]`) + `profile+140`. Its callers
   are the two aircraft movers (`@ 0x4616B1` / `@ 0x4616E0`, `@ 0x461A5B` / `@ 0x461B0F`)
@@ -6235,8 +6235,8 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   one "RedirectGroupTo/SingleTo" function cited at its pool-0 store
   `@ 0x43cdb4`):
   - `Entity_SetWaypointByTeam @ 0x43CD20` (BMS RedirectGroupTo from
-    `EventAction_Dispatch @ 0x454315`, and the WAC GtoWP handler at
-    `0x4ED3D0`, an IDB misnomer `WacCmd_GroupToWaypoint`, which calls it
+    `EventAction_Dispatch @ 0x454315`, and the WAC GtoWP handler
+    `WacCmd_GroupToWaypoint @ 0x4ED3D0`, which calls it
     with node -1 `@ 0x4ED3DC` and always returns 1 `@ 0x4ED3E4`): walks pool 0
     then pool 1 matching the signed commandGroup word (`@ 0x43CD6D` /
     `@ 0x43CE7B`), each needing an AI slot. Pool 0 **auto-detaches a mounted
@@ -12084,9 +12084,9 @@ primitives in `entity_commands.cpp`, the hit record in `round_sim.cpp`, the LOS 
 (`server_tick.cpp`, `server_medic.cpp`, `server_idle_timers.cpp`, the roles). Binary
 and IDB as in the preamble. The pass re-read the AI, NPC, WAC and BMS domain in
 eleven slices and ported what differed. Every address below is an instruction head
-inside the named function, re-read read-only in the IDB; names are the IDB's as of
-2026-09-23, and the misnomers among them are listed in §38.13 (no IDB state was
-changed). The older sections that stated the superseded behavior are corrected in
+inside the named function, re-read read-only in the IDB; names are the IDB's after
+the 2026-09-23 rename pass, which §38.13 records (old -> new, with the witness). The
+older sections that stated the superseded behavior are corrected in
 place; this section is the pass's witness map.
 
 Retail-executed vectors back most slices: `movement_brain_parity` (the dispatchers'
@@ -13070,7 +13070,7 @@ language as retail compiles it; the witnesses:
 
 ### 38.7 WAC commands
 
-- **killSSN** is `WacCmd_KillSsn @ 0x4F1E40` (IDB name `WacCmd_KillSsn`): the
+- **killSSN** is `WacCmd_KillSsn @ 0x4F1E40` (ex `Entity_ResetWeaponState`): the
   ItemTypeIndex gate (@ 0x4F1E89), the hit record's memset (@ 0x4F1E8F..0x4F1E99),
   health 0 (@ 0x4F1EA4), lastAttacker 0 (@ 0x4F1EAD), +0x2C0 = 0 when def+0x5C == 3
   (@ 0x4F1EB7..0x4F1EBD), then the class callback (e, 1, 0) (@ 0x4F1EC7..0x4F1ED2). The
@@ -13633,31 +13633,55 @@ No new IDs. The rows this pass closes or narrows (the ledger mirrors them):
 - In other records: D-EVT-3 and D-EVT-4 (the BMS record), D-NET-161 (e) and (g) (the
   net record), D-HUD-6 and D-HUD-18 (the HUD record), and the ADR 0026 d5 amendment.
 
-### 38.13 IDB names that mislead
+### 38.13 IDB renames (2026-09-23)
 
-The names above are the IDB's; these do not describe their functions (renames are
-proposed, not applied):
+The pass proved these IDB names wrong, and the IDB now carries the new ones; every
+record, correspondence row and code cite names the new one. Old -> new, with the witness:
 
-| Address | IDB name (2026-09-23) | What it is |
-|---|---|---|
-| 0x4581B0 | EntityAI_ProcessAirStateMachine | The AIR-class brain machine (CHel, cpln) |
-| 0x4583C0 | EntityAI_ProcessGroundStateMachine | The GROUND-class brain machine (cveh, cbot, ctrn) |
-| 0x465F60 | AI_EnterState_HelicopterEvade | The HELO_EVADE enter (installs movers 0..3) |
-| 0x4613A0 / 0x461870 | AI_CalcGroundVehicleTarget / AI_CalcHelicopterTarget | The helicopter mover (0x10000) / the plane mover (0x10005) |
-| 0x456860 | AI_IsTargetInSight | A target-sight check (reads brain[38]) |
-| 0x471710 | AI_TickState_AircraftCombat | The aircraft combat state's tick |
-| 0x456710 | Entity_UpdateSuspensionBounce | The unreferenced PLAYPARTANIM phase integrator |
-| 0x407310 | OrganicClass_HandleEvent | The org0/org1 class callback |
-| 0x4F1E40 | WacCmd_KillSsn | `WacCmd_KillSsn` |
-| 0x4ED3D0 / 0x4ED550 | WacCmd_GroupToWaypoint / WacCmd_Inc | WAC GtoWP / WAC inc |
-| 0x4F7B30 / 0x4F7AE0 | WacCmd_GroupHp / WacCmd_GroupSpawn | WAC GroupHP / GroupSpawn |
-| 0x4F7C50 / 0x4F7CA0 / 0x4F7CF0 | WacCmd_GroupMin / SetEntityAlertState / SetEntityAIAction | WAC GroupMin / GroupMax / GroupAtt |
-| 0x4F7D40 / 0x4F7DA0 | WacCmd_OpenDoors / WacCmd_CloseDoors | WAC opendoors / closedoors |
-| 0x4F74B0 / 0x4F7570 | WacCmd_SsnCspd / 11ToEntity | WAC ssncspd / ssnpspd |
-| 0x50D770 | Server_UpdatePlayerBreathTimers | The player breath timers |
-| 0x4987F0 | Chat_AddMessageChannel2 | The SYSTEM-ring post |
-| 0x40DB80 | Mission_ResetBmsState | The mission reset |
-| 0x459290 | Entity_WakeContactSolve | The contact-solve wake |
-| 0x24C1948 | g_entity_update_counter | The entity-update counter |
-| 0x4541A0 / 0x454240 | EventAction_OpenGroupDoors / EventAction_CloseGroupDoors | The BMS door open / close walks |
-| 0x5A3020 | RenderState_SetLayerVisibilityByIndex | Arms a HUD item-flash timer |
+| Address | Old IDB name | New IDB name | Witness |
+|---|---|---|---|
+| 0x4581B0 | EntityAI_ProcessInfantryStateMachine | EntityAI_ProcessAirStateMachine | the CHel / cpln class rows (@ 0x8132A0 / @ 0x8133A8, thunk 0x462120) (§38.1) |
+| 0x4583C0 | EntityAI_ProcessVehicleStateMachine | EntityAI_ProcessGroundStateMachine | the cveh / cbot / ctrn class rows (thunks 0x462130 / 0x462140) (§38.1) |
+| 0x465F60 | AI_TransitionToDeath_Infantry | AI_EnterState_HelicopterEvade | state-machine row 10 (@ 0x8152D8); installs the HELO_EVADE movers 0..3 (@ 0x466109 / @ 0x466195 / @ 0x4661EC / @ 0x46624D) |
+| 0x471710 | Entity_ProcessInfantryWeaponFire | AI_TickState_AircraftCombat | its only xref is the state-table slot @ 0x8152BC, after `AI_EnterState_AircraftCombat` |
+| 0x456860 | AI_GetSuspensionFirePoint | AI_IsTargetInSight | reads the brain target brain[38] and answers 0 without one; callers `AI_CalcGroundVehicleTarget`, `AI_CalcHelicopterTarget`, `AIEntity_ProcessWeaponFire` (§38.2) |
+| 0x4F1E40 | Entity_ResetWeaponState | WacCmd_KillSsn | the WAC registry record "killSSN" @ 0x82DB10 (the 44-byte records @ 0x82D290) |
+| 0x4ED3D0 | TextResource_GetMissionString | WacCmd_GroupToWaypoint | registry "GtoWP" @ 0x82D774 |
+| 0x4ED550 | TextResource_LoadMissionText | WacCmd_Inc | registry "inc" @ 0x82DF5C |
+| 0x4F7B30 | WacScript_SetEntityTeamSlot | WacCmd_GroupHp | registry "GroupHP" @ 0x82D8D4 |
+| 0x4F7AE0 | WacScript_SetEntityWaypoint | WacCmd_GroupSpawn | registry "GroupSpawn" @ 0x82D8A8 |
+| 0x4F7C50 | WacScript_SetEntityAITarget | WacCmd_GroupMin | registry "GroupMin" @ 0x82D824 |
+| 0x4F7CA0 | WacScript_SetEntityAlertState | WacCmd_GroupMax | registry "GroupMax" @ 0x82D850 |
+| 0x4F7CF0 | WacScript_SetEntityAIAction | WacCmd_GroupAtt | registry "GroupAtt" @ 0x82D87C |
+| 0x4F7D40 | WacScript_SendWeaponDetachEvent | WacCmd_OpenDoors | registry "opendoors" @ 0x82D900 |
+| 0x4F7DA0 | Entity_SendWeaponEvent8ToPool2 | WacCmd_CloseDoors | registry "closedoors" @ 0x82D92C |
+| 0x4F74B0 | WacScript_SendAIEvent10ToEntity | WacCmd_SsnCspd | registry "ssncspd" @ 0x82DE80 |
+| 0x4F7570 | WacScript_SendAIEvent11ToEntity | WacCmd_SsnPspd | registry "ssnpspd" @ 0x82DE54 |
+| 0x50D770 | Server_UpdateEntityIdleTimers | Server_UpdatePlayerBreathTimers | the per-slot breath samples against `wac_var_breathtime` (§38.9) |
+| 0x4987F0 | Chat_AddDebugMessage | Chat_AddMessageChannel2 | the SYSTEM ring's post (§38.7) |
+| 0x5DE8E0 | sub_5DE8E0 | Env_SetPrecipitationKind | the rain / snow kind store the WAC `rain` / `snow` handlers call |
+| 0x407310 | Entity_HandleDamageTrigger | OrganicClass_HandleEvent | the org0 / org1 class callback (§38.2, §38.3) |
+| 0x459290 | sub_459290 | Entity_WakeContactSolve | callers `sub_43C0C0` and `Entity_UpdateAllEntities` (§38.9) |
+| 0x40DA30 | sub_40DA30 | Score_ComputeSpTimeWeightedAverage | its caller `Cine_ProcessEpilogSequence_Retail` (§38.9) |
+| 0x40DB80 | CAIGroup_HasGuardTaskFromIndex2 | Mission_ResetBmsState | zeroes the BMS header, groups and references, then `Pool_Clear`, `HeliLift_ResetAll` and `EventSystem_FreeAll`; called by the loaders and the teardown |
+| 0x4541A0 | Entity_KillDestructiblesByTeam | EventAction_OpenGroupDoors | BMS row 30: section event 7 over pools 2, 1 (§33.14) |
+| 0x454240 | Entity_KillDestructiblesByOwner | EventAction_CloseGroupDoors | BMS row 31: section event 8 over pools 2, 1 (§33.14) |
+
+The globals: the WAC named values of the table @ 0x82EEF0, `dword_C6EADC` / `dword_C6EAE0` /
+`dword_C6EAE4` / `dword_C60DCC` / `dword_C60DC4` / `dword_C6B23C` -> `wac_var_seatbelt` /
+`wac_var_breathtime` / `wac_var_fallmps` / `wac_var_SquadSSN` / `wac_var_SquadWho` /
+`wac_var_RND` (the convention of `wac_var_humans @ 0xC6EB14`); `dword_24C1948` ->
+`g_entity_update_counter` (its one writer @ 0x4C2639, §38.9); `dword_C84700` ->
+`g_sp_elapsed_update_count` (latched from the counter by `Player_UpdatePerFrame` @ 0x4DE754
+for the SP epilog's score, §38.9).
+
+The code identifiers the same proofs misnamed follow: `process_air_state_machine` /
+`process_ground_state_machine`, `AiEntity::vel_y` (it mirrors a hull's +0x9C Y velocity; an
+organic's velocity is `InfantryState::vel`), `has_occupant` (the +0x170 occupant, the
+water-clamp and alert-edge gate), `update_movement_target` (`AI_UpdateMovementTarget
+@ 0x460E40`) and `Server_UpdatePlayerBreathTimers`.
+
+Still misleading and not renamed: `AI_CalcGroundVehicleTarget @ 0x4613A0` and
+`AI_CalcHelicopterTarget @ 0x461870` are the helicopter mover (0x10000) and the plane mover
+(0x10005); `Entity_UpdateSuspensionBounce @ 0x456710` is the unreferenced PLAYPARTANIM phase
+integrator; `RenderState_SetLayerVisibilityByIndex @ 0x5A3020` arms a HUD item-flash timer.

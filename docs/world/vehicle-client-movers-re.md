@@ -4858,8 +4858,8 @@ The witness map in `ai_aircraft.cpp` records each original state callback.
 [orig: AI_EnterState_AircraftCombat @ 0x466330;
 AI_EnterState_HelicopterEvade @ 0x465F60;
 AI_ProcessVehicleCombatState @ 0x461080;
-AI_TickState_AircraftCombat @ 0x471710 (the IDB name; the aircraft
-brain's weapon-fire leg, wired as the state-8 tick)]
+AI_TickState_AircraftCombat @ 0x471710 (the aircraft brain's weapon-fire
+leg, wired as the state-8 tick)]
 The PR's `AI_UpdateHelicopterCombatMovement` / `AI_UpdateAircraftCombat` names
 did not exist in the IDB (corrected 2026-09-08). Two more misnomers to read
 past: `AI_CalcGroundVehicleTarget @0x4613A0` is the HELICOPTER mover (controller
