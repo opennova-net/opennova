@@ -847,6 +847,14 @@ public:
     void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;
     // One of the NPC's three launch points and the live entity orientation.
     void organic_fire_pose(World &, const AiEntity &, int launch_slot, int32_t out[6]) const;
+    // The weapon fire POSITION and its quality [orig: Entity_GetWeaponFirePosition
+    // @0x43B630]: 1 = a posed point (a UseGun body's EWeap gun point, a person's
+    // position plus CameraOffset, or a modeled entity's def+1351 point), 2 = the
+    // position raised 0.75 u (a model without that point), 3 = the raw position
+    // (no item def or no model). Both retail readers, the target scan and the
+    // single-target validator, take weapon_aim_origin for anything but 1
+    // [orig: Entity_FindTargets @0x53A658..0x53A679; sub_53AFC0 @0x53AFF8..0x53B013].
+    int weapon_fire_position(World &world, const AiEntity &e, int32_t out[3]) const;
 
     // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the
     // fire origins (weapon_fire_origin) or their own witnessed endpoints: the
@@ -1235,6 +1243,14 @@ private:
     // The one LOS body behind line_of_sight_clear / line_of_sight_clear_cached.
     bool line_of_sight_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                                   EntityHandle from, EntityHandle to, bool cached) const;
+    // The gun point of a body on a UseGun seat (+0x168 == 3) of an EWeap
+    // parent (def attrib 0x20), the leg both fire-point readers open with:
+    // the parent's weapon point through its own inline slot, else the
+    // parent's raw pose. False = no such seat; `out` is then untouched.
+    // [orig: Entity_GetAttachmentWorldPosition @0x4B2682..0x4B26B6;
+    //  Entity_GetWeaponFirePosition @0x43B64D..0x43B67D; both call
+    //  Entity_ComputeUserpointWorldTransform @0x545C60 with a NULL slot]
+    bool usegun_gun_point(World &world, const Entity &gunner, int32_t out[6]) const;
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
