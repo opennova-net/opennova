@@ -209,6 +209,16 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			//  @0x52A410, the call @0x51b809 (before Server_RemoveEntityAndNotify @0x51b82e)]
 			ctx.world->zones.spawn_waves.remove_player(owned_entity);
 			ctx.world->vehicles.detach(owned_entity);
+			// The leaver's row goes through Server_RemoveEntityAndNotify, whose
+			// Player arm removes the placed devices the leaver owns, each through
+			// the notifying removal, before the row itself.
+			// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the
+			//  Server_RemoveEntityAndNotify call @0x51B82E; Server_RemoveEntityAndNotify
+			//  @0x50A270 — the Player test @0x50A2B1, the sweep call @0x50A2BB]
+			if (const world::Entity *leaver = ctx.world->registry.get(owned_entity);
+					leaver != nullptr &&
+					((leaver->flags | leaver->engine_flags) & world::kEntityFlagPlayer) != 0)
+				ctx.world->commands.remove_placed_devices_by_owner(owned_entity);
 			// The player's brain (player_spawn attaches one) is freed with the row so
 			// the next pool-0 spawn into this slot starts brainless.
 			ctx.world->ai.release(owned_entity);

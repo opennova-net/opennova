@@ -946,7 +946,8 @@ void test_device_and_owner_handle_reuse() {
     }
 
     // A new entity in the owner's slot neither detonates nor inherits the old
-    // owner's device; the next think removes that orphaned charge.
+    // owner's device, and the orphaned charge stays placed: the visit reads no
+    // owner [orig: Entity_UpdatePool1Slot @0x4B8DD0].
     {
         Rig rig(0);
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
@@ -963,8 +964,8 @@ void test_device_and_owner_handle_reuse() {
         const Entity *device_entity = rig.w.registry.get(device_handle);
         CHECK(device_entity != nullptr && device_entity->health == 5);
         step_devices(rig.w, nullptr, nullptr);
-        CHECK(rig.w.throwables.devices.empty());
-        CHECK(rig.w.registry.get(device_handle) == nullptr);
+        CHECK(rig.w.throwables.devices.size() == 1);
+        CHECK(rig.w.registry.get(device_handle) != nullptr);
         CHECK(rig.w.registry.get(new_owner) != nullptr);
     }
 }
@@ -1324,9 +1325,12 @@ void test_avmine_proximity_is_data_dead() {
     CHECK(saw_kz);
 }
 
-// Owner death removes the devices silently — no detonation
-// [orig: Server_ProcessPlayerDeath -> @ 0x546e00 -> @ 0x50a270].
-void test_owner_death_removes_devices() {
+// The owner's death alone leaves its devices armed: the pool-1 visit reads no
+// owner, and the removal waits for the owner's next deploy (the npruntime
+// placed_device_relay test drives that sweep).
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_RemovePlacedDevicesByOwner
+//  @0x546E00 from Server_ProcessPlayerDeath @0x5178D8]
+void test_owner_death_keeps_devices_armed() {
     Rig rig(0);
     rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);
     rig.tick(160); // place + arm
@@ -1335,9 +1339,9 @@ void test_owner_death_removes_devices() {
     CHECK(owner != nullptr);
     owner->health = 0;
     rig.tick(2);
-    CHECK(rig.w.throwables.devices.empty());
-    CHECK(rig.w.explosions.queue.empty()); // removed, never detonated
-    CHECK(rig.w.throwables.events.removes.size() == 1);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    CHECK(rig.w.explosions.queue.empty());
+    CHECK(rig.w.throwables.events.removes.empty());
 }
 
 // TeamTriggerClaymore host rule: same-team actors trip claymores when set
@@ -1500,7 +1504,7 @@ int main() {
     test_claymore_cone_trigger();
     test_claymore_sector_los_blocks_trigger();
     test_avmine_proximity_is_data_dead();
-    test_owner_death_removes_devices();
+    test_owner_death_keeps_devices_armed();
     test_placed_device_cap_evicts_oldest_armed();
     test_placed_device_cap_claymore_is_four_and_type_scoped();
     test_armed_device_age_keeps_falling();

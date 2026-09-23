@@ -1006,6 +1006,16 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_ProcessPlayerDeath @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
+	// A deploy that is not a medic revive, of a slot that is not a spectator,
+	// removes the devices the player placed in its last life, each through the
+	// notifying removal, after the spawn-state reset and ahead of the loadout.
+	// The devices stay armed from the death until this deploy.
+	// [orig: Server_ProcessPlayerDeath @0x517740 — the revive latch test
+	//  @0x5178C5, the spectator latch test @0x5178CD, the
+	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, ahead of the
+	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
+	if (!revive_deploy && !conn.link.spectator)
+		world.commands.remove_placed_devices_by_owner(player->handle);
 	conn.discard_pre_deploy_uplinks = true;
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;

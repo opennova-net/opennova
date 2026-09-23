@@ -3,7 +3,9 @@
 // in-match remote (never the host loopback); the removal tick broadcasts 0x12.
 
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 
 #include <runtime/inmatch/loopback_channel.h>
@@ -26,6 +28,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -297,10 +300,126 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			"the reliable 0x12 names the exact lifetime removed by authority");
 }
 
+// A pool-1 device row with its PlacedDevice record: the owner's placed ammo.
+w::EntityHandle place_device(w::World &world, w::EntityHandle owner, int32_t ammo_index) {
+	w::Entity row;
+	row.kind = w::EntityKind::Item;
+	row.item_id = kBaseItem;
+	row.has_item_def = true;
+	row.item_type_index = 5;
+	row.health = 10;
+	const w::EntityHandle handle = world.registry.spawn(1, row);
+	w::PlacedDevice device;
+	device.active = true;
+	device.entity = handle;
+	device.entity_spawn_id = world.registry.get(handle)->registry_spawn_id;
+	device.owner = owner;
+	device.owner_spawn_id = world.registry.get(owner)->registry_spawn_id;
+	device.ammo_index = ammo_index;
+	device.think_delay_ticks = 30; // still arming: the visits run no think
+	world.throwables.devices.push_back(device);
+	return handle;
+}
+
+// The S2C 0x12 removals queued for the joiners, in order.
+std::vector<uint16_t> queued_removals(const w::World &world) {
+	std::vector<uint16_t> out;
+	for (const auto &event : world.out.entity_events)
+		if (const auto *removal = std::get_if<w::EntityRemoveEvent>(&event))
+			out.push_back(removal->handle);
+	return out;
+}
+
+// The owner's death leaves its placed devices armed: the pool-1 visit reads no
+// owner. The deploy that follows removes them, each through the notifying
+// removal, unless it is a medic revive or the slot is a spectator; a leaver's
+// teardown removes them too.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Server_ProcessPlayerDeath @0x517740
+//  — the revive latch test @0x5178C5, the spectator latch test @0x5178CD, the
+//  Entity_RemovePlacedDevicesByOwner call @0x5178D8; Server_HandlePlayerDisconnect
+//  @0x51B5C0 — the Server_RemoveEntityAndNotify call @0x51B82E]
+bool run_owner_devices_live_until_the_deploy() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	world.registry.configure_pool(3, 8);
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[0].name = "satchel";
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[1].name = "claymore";
+	world.tables.ammo.entries[1].valid = true;
+	const w::EntityHandle owner = w::spawn_remote_player(world, player_spawn(0xFFF1, 1));
+	if (!expect(owner.valid(), "the owner spawns")) return false;
+	const w::EntityHandle satchel = place_device(world, owner, 0);
+	const w::EntityHandle claymore = place_device(world, owner, 1);
+	inmatch::NapiNPConnection conn =
+			make_conn(3, 1, nullptr, ns::TransportMode::Client, owner, true);
+	inmatch::GameConfig config;
+
+	w::Entity *body = world.registry.get(owner);
+	body->health = 0;
+	body->alive = false;
+	body->flags |= w::kEntityFlagDead;
+	for (w::PlacedDevice &device : world.throwables.devices)
+		world.throwables.update_device(world, device, nullptr, nullptr);
+	world.throwables.compact();
+	if (!expect(world.throwables.devices.size() == 2 && world.registry.get(satchel) != nullptr &&
+			world.registry.get(claymore) != nullptr && world.throwables.events.removes.empty(),
+			"a dead owner's devices stay armed through their visits"))
+		return false;
+
+	conn.reply.revive_pose_valid = true;
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	if (!expect(world.registry.get(satchel) != nullptr && world.registry.get(claymore) != nullptr &&
+			queued_removals(world).empty(),
+			"a medic revive deploy keeps the devices"))
+		return false;
+
+	conn.link.spectator = true;
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	if (!expect(world.registry.get(satchel) != nullptr && queued_removals(world).empty(),
+			"a spectator slot's deploy keeps the devices"))
+		return false;
+	conn.link.spectator = false;
+
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	if (!expect(world.registry.get(satchel) == nullptr && world.registry.get(claymore) == nullptr,
+			"the next deploy removes the devices") ||
+		!expect(queued_removals(world) == (std::vector<uint16_t>{satchel.packed, claymore.packed}),
+			"each removal queues its 0x12, in pool-1 slot order"))
+		return false;
+	for (w::PlacedDevice &device : world.throwables.devices)
+		world.throwables.update_device(world, device, nullptr, nullptr);
+	world.throwables.compact();
+	if (!expect(world.throwables.devices.empty() && world.throwables.events.removes.empty(),
+			"the swept records release silently, with no second removal"))
+		return false;
+
+	// A leaver's teardown sweeps its devices before the row goes.
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	const opennova::PeerAddr leaver_peer{0x0100007Fu, 33101};
+	inmatch::NapiNPConnection leaver =
+			make_conn(7, 1, nullptr, ns::TransportMode::Client, owner, true);
+	leaver.peer = leaver_peer;
+	leaver.phase = inmatch::ConnectionPhase::PlayerAdded;
+	ctx.np_protocol.connection_list.push_back(std::move(leaver));
+	const w::EntityHandle mine = place_device(world, owner, 0);
+	world.out.entity_events.clear();
+	if (!expect(inmatch::drop_connection(ctx, leaver_peer), "the leaver's connection drops"))
+		return false;
+	return expect(world.registry.get(mine) == nullptr && world.registry.get(owner) == nullptr &&
+			queued_removals(world) == (std::vector<uint16_t>{mine.packed}),
+			"the leaver's teardown removes its device with a 0x12 before the row");
+}
+
 } // namespace
 
 int main() {
 	if (!run_placed_device_spawn_and_remove_fanout()) return 1;
+	if (!run_owner_devices_live_until_the_deploy()) return 1;
 	std::puts("placed_device_relay_test: PASS");
 	return 0;
 }

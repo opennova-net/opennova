@@ -1072,20 +1072,17 @@ void ThrowableSim::update_device(World &world, PlacedDevice &d,
                                  CollisionWorld *collision,
                                  const terrain::TerrainHeightField *terrain) {
     if (!d.active) return;
+    // A device row the owner sweep already removed (the deploy leg, a Player
+    // row's notifying removal, the leaver's teardown) just releases its record:
+    // the visit itself never reads the owner, so a dead owner's devices stay
+    // armed until that owner deploys again. [orig: Entity_UpdatePool1Slot
+    //  @0x4B8DD0 reads no owner; the sweeps are Entity_RemovePlacedDevicesByOwner
+    //  @0x546E00, called from Server_ProcessPlayerDeath @0x5178D8 and
+    //  Server_RemoveEntityAndNotify @0x50A2BB]
     Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
     if (e == nullptr) {
         d.active = false;
         return;
-    }
-    // Owner death/leave removes the device silently [orig:
-    // Server_ProcessPlayerDeath @ 0x5178d8 / Server_RemoveEntityAndNotify
-    // @ 0x50a270 -> Entity_RemovePlacedDevicesByOwner @ 0x546e00].
-    {
-        const Entity *owner = entity_for_lifetime(world, d.owner, d.owner_spawn_id);
-        if (owner == nullptr || owner->health <= 0) {
-            remove_device(world, d);
-            return;
-        }
     }
     if (d.think_delay_ticks <= 0) {
         if (collision != nullptr) collision->refresh_blink(world, *e);
