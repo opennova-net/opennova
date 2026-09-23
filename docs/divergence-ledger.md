@@ -530,9 +530,9 @@ evaluation was itself the divergence, replaced by `run_post_mission_pass`; since
 2026-09-23 the post pass has its production caller, `MissionKernel::run_post_mission_pass`
 from `HostRole::close` and `LocalRole::close`, once at teardown after pools 0-2 are
 destroyed `[orig: Game_TeardownMission @0x522350 (the destroys @0x522365..0x5223C8, the
-call @0x52266C)]`; the SP restart's call sweeps nothing, because `Game_RestartRoundSP
-@0x5263A0` first reaches `EventSystem_FreeAll`, which zeroes the event count `@0x453266`,
-and the third site `@0x51EA89` is dead).
+call @0x52266C)]`; the SP restart's call (`@0x5263AE`) sweeps nothing, because
+`Game_RestartRoundSP @0x5263A0` first reaches `EventSystem_FreeAll`, which zeroes the
+event count `@0x453266`, and the third site `@0x51EA89` is dead).
 **D-EVT-5** minted and closed at birth: the BMS second chunk (header +0x246)
 is runtime-opaque — both retail paths `fseek` past it (@0x40f6da/@0x40f756,
 its only xrefs); our reader's parse-and-round-trip is a faithful superset
