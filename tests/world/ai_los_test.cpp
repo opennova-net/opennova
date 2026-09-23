@@ -4,8 +4,9 @@
 // slot (the +0x16C seat mount over the +0x268 carried object,
 // @0x5399BD..0x539A12) and any candidate standing on an endpoint (+0x28,
 // @0x53882F..0x538877); the terrain leg is skipped only when both ENDPOINTS
-// are indoors (@0x53993F..0x53994C). Hand-built box volumes on a flat or
-// ridged field.
+// are indoors (@0x53993F..0x53994C); pool 2 is walked whole
+// (@0x539A16..0x539A30). The script LOS pair's 20 u range split. Hand-built
+// box volumes on a flat or ridged field.
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -87,10 +88,10 @@ struct LosRig {
     CollisionWorld cw;
     Field field;
 
-    explicit LosRig(bool ridge) : field(ridge) {
+    explicit LosRig(bool ridge, int pool2 = 8) : field(ridge) {
         world.registry.configure_pool(0, 8);
         world.registry.configure_pool(1, 8);
-        world.registry.configure_pool(2, 8);
+        world.registry.configure_pool(2, pool2);
         cw.terrain = &field.field;
         world.collision = &cw;
         world.ai.terrain = &field.field;
@@ -109,6 +110,18 @@ struct LosRig {
         seed.position = Vec3{static_cast<float>(x), static_cast<float>(y), 0.0f};
         const EntityHandle h = world.registry.spawn(1, seed);
         cw.assign_entity(h, cw.add_model(box_model(hx, hy, height)));
+        return h;
+    }
+
+    // A pool-2 building facing +X over a shared collision model.
+    EntityHandle spawn_building(double x, double y, int32_t model_id) {
+        Entity seed{};
+        seed.kind = EntityKind::Building;
+        seed.alive = true;
+        seed.yaw = 90;
+        seed.position = Vec3{static_cast<float>(x), static_cast<float>(y), 0.0f};
+        const EntityHandle h = world.registry.spawn(2, seed);
+        cw.assign_entity(h, model_id);
         return h;
     }
 
@@ -213,11 +226,33 @@ static void test_script_los_splits_at_twenty_units() {
     CHECK(cmds.ssn_sees_within(watcher, target, (20 << 16) + 1));
 }
 
+// R2-18: the LOS walks every pool-2 entry; only the proximity table stops
+// counting at 1199. With 1200 authored buildings the last one still blocks,
+// through both the live walk and the replication fan's cached index.
+// [orig: Physics_RaycastTerrainAndSectors pool-2 walk @0x539A16..0x539A30;
+//  the proximity table's `count < 1199` gate @0x4B94CB]
+static void test_los_walks_every_pool_two_building() {
+    auto rig = std::make_unique<LosRig>(false, 1200);
+    const int32_t wall = rig->cw.add_model(box_model(1, 1, 3));
+    for (int i = 0; i < 1199; ++i) // far off the line of sight
+        rig->spawn_building(100.0 + (i % 40) * 5.0, 100.0 + (i / 40) * 5.0, wall);
+    rig->spawn_building(10, 0, wall); // the 1200th, across the ray
+    const EntityHandle a = rig->spawn_person(0, 0, 1);
+    const EntityHandle b = rig->spawn_person(20, 0, 1);
+    rig->rebuild();
+    CHECK(!rig->clear(0, 20, 1.5, a, b));
+    rig->cw.prepare_cached_raycast_queries(rig->world);
+    const int32_t pa[3] = {0, 0, fx(1.5)};
+    const int32_t pb[3] = {fx(20), 0, fx(1.5)};
+    CHECK(!rig->world.ai.line_of_sight_clear_cached(rig->world, pa, pb, a, b));
+}
+
 int main() {
     test_hull_blocks_the_ray_to_its_emplaced_child();
     test_rider_sees_out_of_its_hull_but_not_through_its_children();
     test_indoors_skip_reads_the_endpoints();
     test_script_los_splits_at_twenty_units();
+    test_los_walks_every_pool_two_building();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

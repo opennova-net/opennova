@@ -33,7 +33,7 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
         if (static_cast<uint32_t>(angle_diff) >=
                     static_cast<uint32_t>((secondary_fov | 2) >> 1) ||
             distance > secondary_max || distance > cand_secondary_max)
-            return -1; // [orig: goto LABEL_17 skip] outside both FOV/range gates. -1 (not 0) so the
+            return -1; // [orig: `jnb loc_467097` @0x467261] outside both FOV/range gates. -1 (not 0) so the
                        // caller distinguishes a gate-fail from a legitimate in-gate score of 0 (a
                        // fully-stealthed target), which matters for the priority-bypass ordering.
         angle_score = static_cast<int>((static_cast<uint32_t>(secondary_fov - angle_diff) << 16) /

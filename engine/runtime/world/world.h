@@ -603,9 +603,12 @@ struct SessionRules {
 	// it can supply trigger/reload/scope input and drain presentation events.
 	// Standalone World users keep the default global mounted-slot pump.
 	bool external_local_mounted_weapon_pump = false;
-    // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
-    // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
-    // tracked D-AI-1 residual; defaults clear (SP).
+    // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
+    // class-0 player leg skips the LOCAL player and the weapon validator
+    // rejects every Player target while it is up [orig: `test
+    // dword_24C1930,800h` @0x467141, @0x53A46E]. Input action 123 toggles it
+    // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
+    // carries it. Defaults clear.
     bool ai_rules_skip_local_player = false;
     // The retail is_in_session fact: a net session (listen or dedicated) has
     // been brought up over this world's kernel. The net bring-ups set it; the

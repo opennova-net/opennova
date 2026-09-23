@@ -32,7 +32,7 @@ int32_t AiSystem::prng_step_a() { return static_cast<int32_t>(prng_step(prng_a))
 
 // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3)/still(4)
 // AIEvent by the hull's horizontal speed (the entity record's +0x98/+0x9C pair, see
-// hull_death_speed). Channel 0, entity index, timer 0 (the orig stores fldz to var_C).
+// hull_death_speed). Channel 0, entity index, timer 0 (the original stores fldz).
 void AiSystem::queue_death_event(const World *world, AiEntity &e) {
     const int32_t isp = hull_death_speed(world, e);
     AiEventEntry ev{};
@@ -64,7 +64,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
 
     // One pool leg of the walk: the common perception pre-gates + the class sub-filter,
     // eligible candidates pushed onto the scratch list [orig: the inner while loop
-    // @0x467070-0x4673a7]. The remaining per-candidate gates (flags 2/0x8000000, the
+    // @0x467070..0x4673A3]. The remaining per-candidate gates (flags 2/0x8000000, the
     // +530 refcount saturation, FOV/range caps) live in the scoring core.
     const auto scan_pool = [&](int pool, bool target_vehicles, bool check_player_flag) {
         const size_t cap = world.registry.pool_capacity(pool);
@@ -77,16 +77,16 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
             // Team gate [orig: teamless candidates need the attacker's 0x200; same-team
             // skipped unless 0x200].
             if ((c->team == 0 || c->team == e.team) && !see_all) continue;
-            // The class sub-filter [orig: 0x46711f-0x46717e; "parent" there is the
+            // The class sub-filter [orig: 0x46711F..0x46717B; "parent" there is the
             // candidate's BRAIN (+100), *(brain+4)+16 the profile type word].
             const AiEntity *cand_ai = for_handle(h);
             const bool helo_brained = cand_ai != nullptr && cand_ai->profile.type == 1;
             if (target_vehicles) {
                 if (check_player_flag) {
                     // The class-0 pool-0 leg: Player-flagged only; the LOCAL player is
-                    // excluded under the MP rules bit [orig: flags & 0x100 @0x46714b;
-                    // candidate == g_local_player_entity && dword_24C1930 & 0x800
-                    // @0x467155].
+                    // excluded while the local cheat word's 0x800 bit is up [orig:
+                    // `test ebx,100h` @0x46712D; candidate == g_local_player_entity
+                    // @0x467139 && `test dword_24C1930,800h` @0x467141].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
                     if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
                         continue;
@@ -97,7 +97,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
                 }
             } else {
                 // Classes 1/2: never Player-flagged, never helo-brained
-                // [orig: the else-leg @0x467169-0x46717e].
+                // [orig: the else-leg @0x467165..0x46717B].
                 if ((c->engine_flags & kEntityFlagPlayer) != 0) continue;
                 if (helo_brained) continue;
             }
@@ -168,8 +168,8 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
     }
     // The live feed's lazy LOS probe [orig: Entity_CheckMutualLineOfSight @0x539be0 —
     // fire-origin -> fire-origin, called only at the priority bypass / would-be-best
-    // sites]. Endpoints ride the muzzle seam (weapon_fire_origin); an injected
-    // candidate with no live entity keeps the list's raw pos.
+    // sites]. Both endpoints are weapon_aim_origin (Entity_ComputeWeaponFireOrigin
+    // @0x43B4B0); an injected candidate with no live entity keeps the list's raw pos.
     struct LosCtx {
         AiSystem *sys;
         World *world;
@@ -236,7 +236,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         int dist = dist3d_units(c.pos, e.pos);
 
         // [orig: 0x46722e..0x467291] FOV/range gate FIRST. A candidate outside both gates jumps to
-        // LABEL_17 (next candidate) and never reaches the priority bypass (0x467350) or the best-of
+        // the next-candidate skip @0x467097 and never reaches the priority bypass (0x467350) or the best-of
         // compare. ai_score_target returns -1 on gate-fail.
         int score = ai_score_target(angle_diff, dist, primary_fov, secondary_fov,
                                     e.profile.range_primary, e.profile.range_secondary,
@@ -300,19 +300,12 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
 		}
 	}
 	if (target.valid()) {
-        if (Entity *ne = world.registry.get(target)) {
-            ++ne->ai_target_refcount;
-            ne->ai_target = -1; // scripts read the victim side via relations; id mirror below
-        }
+        if (Entity *ne = world.registry.get(target)) ++ne->ai_target_refcount;
         b.f[AiBrain::kTargetSlot] = static_cast<int32_t>(target.packed) + 1;
         e.slot.f[3] = static_cast<int32_t>(target.packed) + 1; // AiSlot[3] mirror
-        if (Entity *se = world.registry.get(e.handle)) {
-            if (const Entity *ne = world.registry.get(target)) se->ai_target = ne->net_id;
-        }
     } else {
         b.f[AiBrain::kTargetSlot] = 0;
         e.slot.f[3] = 0;
-        if (Entity *se = world.registry.get(e.handle)) se->ai_target = -1;
     }
 }
 
@@ -330,7 +323,6 @@ void AiSystem::clear_entity_references(World &world, EntityHandle removed) {
 					other->slot.f[3] = 0;
 					// These are mirrors of the same organic slot+12 pointer.
 					other->inf.combat_target = {};
-					world.registry.get(other->handle)->ai_target = -1;
 				}
 				return;
 			}
@@ -592,8 +584,8 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
 // + the RoundSim spawn. [orig: WeaponSlot_FireAndSpawnEffects @0x53f440 ->
 // Entity_FireWeaponAndSendPacket @0x42bd80 authority leg -> Server_ClientFiredRound
 // @0x50baa0 (RoundData_AddRound @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0); §5.60.
-// The ammo id rides the ring's adm byte as in the retail fire_cmd; fire sound/muzzle
-// effect (g_ammoDefTable +64/+68) are host-presentation, deferred.]
+// The ammo id rides the ring's adm byte as in the retail fire_cmd; the fire sound and
+// muzzle effect (g_ammoDefTable +64/+68) ride the spawn's FireEvent.]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
@@ -633,16 +625,6 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     return true;
 }
 
-// The SM/turret fire-transform solve — the D-AI-2 core, ported as a structural
-// translation of Entity_ComputeWeaponFireTransform_0 @0x456980 (the record's old
-// 0x455b30 address was a transcription slip). Deviations, each bounded and cited
-// in place: our world model carries no SM muzzle bone lists (brain+224/+292 stay
-// unfilled), so the muzzle always takes the witnessed EMPTY-LIST leg; the solve
-// frame is yaw-only because AiEntity carries no pitch/roll (retail inverts the
-// full entity matrix — level shooters are identical); the §17.2 ctx range legs
-// stay with the acquire-time gates (D-AI-1's ctx model); and the per-type turret
-// CTRL diagnostic globals (dword_83FE88/dword_83FEE0 pairs @0x456E33/0x456F9C)
-// are unported — their consumer is the D-3DI-2 bus.
 // The fire validator's full local-frame metrics, shared by the aircraft
 // movement visibility check and its weapon solver. [orig: sub_53AFC0 @0x53AFC0;
 // Entity_ValidateWeaponTarget @0x53A400; compute_relative_position_metrics @0x545710]
@@ -730,6 +712,14 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	return line_of_sight_clear(world, start, aim, e.handle, target.handle);
 }
 
+// The SM/turret fire-transform solve, a structural translation of
+// Entity_ComputeWeaponFireTransform_0 @0x456980: the muzzle from the block's
+// bone list (filled at spawn by Entity_InitVehicleAI @0x460200's prefix scans;
+// an empty list lifts the pose 2.0u), the validator metrics in the full entity
+// frame with the caller's defer-LOS bit, the compose, the cone gate and the
+// WEAPON_TURRET staging/slew. The per-type turret CTRL diagnostic globals
+// (dword_83FE88/dword_83FEE0 pairs @0x456E33/0x456F9C) are unported; their
+// consumer is the D-3DI-2 bus.
 bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
                                            const AiProfile::WeaponFire &wb, int32_t aim_offset,
                                            bool skip_los, int32_t out[6], bool seeded) {
@@ -892,7 +882,7 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
 // reset the combat timer, set the fire-delay with the exact PRNG jitter (a target with
 // an SM brain guards the jitter by base-delay and uses the inline LCG; a brainless one
 // always jitters via PRNG_Next16), pending = 17, then the targeted quad.
-// The rel_ops trace keeps the recorded shape the tests pin; the APPLY is D-AI-3.
+// apply_engage_relations applies both quads; rel_ops keeps the recorded trace.
 void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool aircraft) {
 	AiBrain &b = e.brain;
 	const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
@@ -934,10 +924,10 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 }
 
 // [orig: AI_HandleCommand @0x465770] Queued ChangeAI dispatcher. Alert, authored
-// state, aim/drive skill, speed, weapons-free, and elevation commands are live;
-// cases 0x0C..0x14 remain explicit deferred arms. Combat event types (1/3/4)
-// are not commands, so the original returns 0 and the event switch proceeds;
-// this faithfully returns false.
+// state, aim/drive skill, speed, the guided-round warning (0x0C), weapons-free and
+// elevation commands are live; 0x0D..0x14 are retail's default arm (`ja
+// def_46579F` @0x465792), which returns 0 so the state's own event handler
+// runs. Combat event types (1/3/4) are not commands either; false for all of them.
 bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &ev) {
     int32_t t = ev.type();
     switch (t) {
@@ -959,8 +949,8 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
                 // auto-comment and our vehicle enum disagree on the 1/2
                 // naming, so neither name is trusted here.
                 // [orig: type 1 -> pend 10 unless cur in {14, 6}
-                //  @0x4657d6..0x4657e6; type 2 -> pend 18 unless cur == 22,
-                //  both behind !(def+0x60 & 2) @0x4657d0/@0x4657f0]
+                //  @0x4657D6..0x4657E3; type 2 -> pend 18 unless cur == 22,
+                //  both behind !(def+0x60 & 2) @0x4657D1/@0x4657F0]
                 if (e.profile.type == 1 && cur != 14 && cur != 6)
                     e.brain.set_pend(10);
                 else if (e.profile.type == 2 && cur != 22)

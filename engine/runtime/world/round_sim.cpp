@@ -271,7 +271,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.waypoint_id = 0;
     piece.wp_number = 0;
     piece.ai_state = 0;
-    piece.ai_target = -1;
     piece.ai_target_refcount = 0;
     piece.ammo_damage_class.clear();
 

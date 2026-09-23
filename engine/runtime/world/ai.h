@@ -949,9 +949,9 @@ public:
 
     // The SM/turret fire-transform solve [orig: Entity_ComputeWeaponFireTransform_0
     // @0x456980 — the D-AI-2 core]. Solves the muzzle origin + aim toward `target`
-    // through one .aip weapon block: origin = entity pos + 2.0u Z (the witnessed
-    // empty-bone-list leg — our world model carries no SM muzzle bone lists;
-    // brain+224/+292 stay unfilled, which retail itself routes to this leg), aim =
+    // through one .aip weapon block: origin = the block's selected muzzle bone
+    // (the brain+224/+292 lists filled at spawn), else entity pos + 2.0u Z (the
+    // empty-list leg), aim =
     // the relative yaw/pitch of the target position in the biased shooter frame,
     // the caller's aim offset (retail passes it through the `distance` global:
     // sweep phase under ATEAM, -3.0u under ATEAM_LOCK), the cone gate, then the

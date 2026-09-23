@@ -3191,7 +3191,6 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
         observer.inf.active = true;
         observer.inf.combat_target = r.veh_h;
         observer.slot.f[3] = r.veh_h.packed + 1;
-        r.w.registry.get(passenger_h)->ai_target = r.veh().net_id;
         CollisionWorld collision;
         r.w.collision = &collision;
         const int model = collision.add_model(CollisionModel{});
@@ -3205,7 +3204,6 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
         CHECK(!r.player().mounted && !r.player().mount_target.valid());
         CHECK(!r.w.registry.get(passenger_h)->mounted);
         CHECK(!observer.inf.combat_target.valid() && observer.slot.f[3] == 0);
-        CHECK(r.w.registry.get(passenger_h)->ai_target == -1);
         CHECK(!collision.has_instance(r.veh_h) && r.w.out.scars.leased_count() == 0);
         CHECK(r.w.out.destruction.effects.size() == 4);
         for (const auto &effect : r.w.out.destruction.effects)

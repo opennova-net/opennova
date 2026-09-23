@@ -3673,7 +3673,7 @@ int main() {
         }
 
         // priority_organics alone: pool 0, the Player-flagged candidate excluded
-        // [orig: case 2 -> pool 0, else-leg flags & 0x100 reject @0x467169].
+        // [orig: case 2 -> pool 0, else-leg `test ebx,100h` reject @0x467165].
         {
             auto w_heap = std::make_unique<World>();
             World &w = *w_heap;
@@ -3703,8 +3703,8 @@ int main() {
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == true);
             CHECK(out.net_id == 0x11);
-            // The MP rules bit excludes the LOCAL player from that leg
-            // [orig: dword_24C1930 & 0x800 @0x467155].
+            // The local cheat word's 0x800 bit excludes the LOCAL player from that leg
+            // [orig: `test dword_24C1930,800h` @0x467141].
             w.cached.local_player = EntityHandle::make(0, 1);
             w.rules.ai_rules_skip_local_player = true;
             AiTarget out2{};

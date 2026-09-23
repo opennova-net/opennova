@@ -2543,14 +2543,14 @@ void test_raycast_clear_table_readiness() {
     const int32_t a[3] = {0, 0, fx(1.0)};
     const int32_t b[3] = {fx(10.0), 0, fx(1.0)};
 
-    auto spawn_blocker = [](World &world, CollisionWorld &cw) {
-        world.registry.configure_pool(2, 4);
+    auto spawn_blocker = [](World &world, CollisionWorld &cw, int pool, EntityKind kind) {
+        world.registry.configure_pool(pool, 4);
         Entity seed;
-        seed.kind = EntityKind::Building;
+        seed.kind = kind;
         seed.position = {5.0f, 0.0f, 0.0f};
         seed.yaw = 90;
         seed.alive = true;
-        const EntityHandle h = world.registry.spawn(2, seed);
+        const EntityHandle h = world.registry.spawn(pool, seed);
         cw.assign_entity(h, cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
         return h;
     };
@@ -2559,20 +2559,33 @@ void test_raycast_clear_table_readiness() {
     {
         World world;
         CollisionWorld cw;
-        CHECK(spawn_blocker(world, cw).valid());
+        CHECK(spawn_blocker(world, cw, 2, EntityKind::Building).valid());
         CHECK(!cw.tick_tables_ready());
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
 
-    // Once an empty table build completed, emptiness is authoritative for that
-    // tick. A later spawn appears only when the next table snapshot is built.
+    // Once a table build completed, the pool-2 pass still reads the pool
+    // itself, so a building spawned after the build blocks at once [orig:
+    // Physics_RaycastTerrainAndSectors @0x539A16..0x539A30].
     {
         World world;
         CollisionWorld cw;
         world.registry.configure_pool(2, 4);
         cw.build_tick_tables(world);
         CHECK(cw.tick_tables_ready());
-        CHECK(spawn_blocker(world, cw).valid());
+        CHECK(spawn_blocker(world, cw, 2, EntityKind::Building).valid());
+        CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
+    }
+
+    // The pool-1 pass reads the per-tick dynamics table: an empty build is
+    // authoritative for that tick, and a later item appears with the next build.
+    {
+        World world;
+        CollisionWorld cw;
+        world.registry.configure_pool(1, 4);
+        cw.build_tick_tables(world);
+        CHECK(cw.tick_tables_ready());
+        CHECK(spawn_blocker(world, cw, 1, EntityKind::Item).valid());
         CHECK(cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
         cw.build_tick_tables(world);
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));

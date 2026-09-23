@@ -472,16 +472,22 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
         return true;
     }
 
-    // Pool passes over the per-tick tables — the same membership the witnessed
-    // pool walk covers (@ 0x539a3a pool 2 then pool 1), without a whole-registry
-    // sweep per ray. Entities absent from the tables (no model AND no bound)
-    // could never block: target_bound returns false for them. Entries spawned
-    // after this tick's table build are missed for at most one 62 Hz tick.
+    // The pool passes in the witnessed order: pool 2, then pool 1 once pool 2
+    // came back clear [orig: `jz loc_53996A` @0x539A3A; the pool-1 walk
+    // @0x539A40..0x539A5A]. Pass 2 reads the per-tick dynamics table rather
+    // than the pool: an entity absent from it (no model AND no bound) could
+    // never block, since target_bound returns false for it, and an item spawned
+    // after this tick's table build is missed for at most one 62 Hz tick.
     if (tick_tables_ready()) {
-        for (const StaticSlot &s : statics_) { // pass 1: pool-2 statics
-            const Entity *e = world.registry.get(s.h);
-            if (e != nullptr && blocked_by(*e)) return false;
-        }
+        // Pass 1 walks every pool-2 entry: the walk reads the pool's own used
+        // count, while the proximity table (statics_) stops counting at 1199
+        // [orig: Physics_RaycastTerrainAndSectors @0x539A16..0x539A30; the
+        // table's `count < 1199` gate @0x4B94CB].
+        bool blocked = false;
+        world.registry.for_each_in_pool(2, [&](const Entity &e) {
+            if (!blocked && blocked_by(e)) blocked = true;
+        });
+        if (blocked) return false;
         for (const DynSlot &d : dynamics_) { // pass 2: dynamics (Item kind)
             if (d.h.pool() == 2) continue; // statics table already covered pool 2
             const Entity *e = world.registry.get(d.h);
@@ -580,7 +586,7 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 			// endpoint entity and both parent slots. The endpoint skip is
 			// unconditional: a USE ray is never blocked by the hull of the
 			// vehicle it targets [orig: raycast_against_entity_pool
-			// @0x538832..0x538859]. The EWeap clause @0x539b85..0x539b99 gates
+			// @0x538832..0x538859]. The EWeap clause @0x539B85..0x539B98 gates
 			// a candidate whose groundEntity (+0x28) IS the endpoint (the gun
 			// standing on it), which the ground skips below already cover.
 			if (source.valid() && ch == source) continue;

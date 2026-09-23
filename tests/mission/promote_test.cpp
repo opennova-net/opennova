@@ -1016,13 +1016,12 @@ int main() {
 
     // organic 0 carries its route + spawn transform; its brain starts in state 0.
     AiEntity *e0 = ai.at(0);
-    // Engage-range UNITS, both conventions pinned together so they cannot drift apart
-    // again: the AI PROFILE takes the BMS value unscaled (world units, i16), while the
-    // SLOT copy is the same value shifted to 16.16. A previous uncited `>> 16` on the
-    // profile side zeroed both ranges for every shipped mission, and ai_score_target
-    // rejects every candidate when the range is 0.
-    CHECK(e0->profile.range_primary == 500);
-    CHECK(e0->profile.range_secondary == 50);
+    // The record's engagement distances are SLOT words, shifted to 16.16; an
+    // unresolved .aip leaves the profile's range words at the memset-0 record's
+    // zero [orig: AIProfile_LoadOrFind @0x45fd80; Entity_SpawnFromBMSRecord slot
+    // fills @0x40ED61..0x40F054].
+    CHECK(e0->profile.range_primary == 0);
+    CHECK(e0->profile.range_secondary == 0);
     CHECK(e0->slot.f[15] == (500 << 16));
     CHECK(e0->slot.f[16] == (50 << 16));
     CHECK(e0 != nullptr);
