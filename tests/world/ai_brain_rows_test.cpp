@@ -91,10 +91,36 @@ void test_ground_rows_read_the_live_hull_words() {
     }
 }
 
+// Every alert-family enter raises the entity's own AiSlot alert byte (+0x88) to
+// red first and unconditionally; the ally wake only adds to it. A lone hull
+// with no ally in range is therefore red after combat, evade and death enters.
+// [orig: AI_EnterState_GroundCombat @0x467665; AI_EnterState_GroundEvade
+//  @0x46741F; AI_TransitionToDeath_Vehicle @0x46696E;
+//  Entity_ProcessVehicleDestruction @0x466B4C; AI_TransitionToDeath_GroundVehicle
+//  @0x467BD8; AI_TransitionToDestroyed_Vehicle @0x467DF1]
+void test_alert_enters_raise_the_own_slot_alert() {
+    for (int32_t state : {int32_t(kAiGroundCombat), int32_t(kAiGroundEvade), 13, 15, 21, 23}) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.health = 100;
+        seed.team = 1;
+        Hull hull(seed);
+        AiEntity &e = *hull.ai;
+        e.team = 1;
+        e.profile.flags96 = 4; // evade routes FLEE -> combat: still the alert family
+        e.slot.bytes()[AiSlot::kAlertByte] = 0;
+        AiThinkCtx ctx = hull.ctx();
+        hull.w.ai.row(state).enter(ctx);
+        CHECK(e.slot.bytes()[AiSlot::kAlertByte] == 2);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2 && e.brain.f[AiBrain::kPrevAlert] == 2);
+    }
+}
+
 } // namespace
 
 int main() {
     test_ground_rows_read_the_live_hull_words();
+    test_alert_enters_raise_the_own_slot_alert();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

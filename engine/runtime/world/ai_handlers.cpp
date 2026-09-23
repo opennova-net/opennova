@@ -262,22 +262,33 @@ void h_combat_event(AiThinkCtx &ctx) {
     }
 }
 
-// [orig: AI_EnterState_GroundCombat @0x467650] state-17 enter: AiSlot+136 = 2, brain
-// alert cur/pend = 2, TriggerGroup_SetAlertRed(commandGroup) [orig: @0x40d630], ally
-// wake at 100 u (0x640000), brain moveStep = 1. (world-wac-ai-re §16.1)
-void h_enter_ground_combat(AiThinkCtx &ctx) {
-    AiEntity &e = *ctx.self;
+// The alert block the combat, evade and death-family enters share: the entity's own
+// AiSlot alert byte (+0x88) goes red first and unconditionally, then the brain alert
+// cur/prev = 2, the command group goes red and same-team allies within 100 u wake
+// (the ally wake re-writes the own slot byte per ally, which changes nothing).
+// [orig: the slot byte at the head of AI_EnterState_GroundCombat @0x467665,
+//  AI_EnterState_GroundEvade @0x46741F, AI_TransitionToDeath_Vehicle @0x46696E,
+//  Entity_ProcessVehicleDestruction @0x466B4C, AI_TransitionToDeath_GroundVehicle
+//  @0x467BD8 and AI_TransitionToDestroyed_Vehicle @0x467DF1; each then calls
+//  TriggerGroup_SetAlertRed @0x40d630 and Entity_AlertNearbyAllies @0x4654B0]
+void alert_block(AiThinkCtx &ctx, AiEntity &e) {
+    e.slot.bytes()[AiSlot::kAlertByte] = 2;
     AiBrain &b = e.brain;
     b.f[AiBrain::kAlert] = 2;
     b.f[AiBrain::kPrevAlert] = 2;
     if (ctx.world != nullptr) {
         if (const Entity *se = ctx.world->registry.get(e.handle))
             ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
-        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
+        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
     }
-    b.f[AiBrain::kStep] = 1;
+}
+
+// [orig: AI_EnterState_GroundCombat @0x467650] state-17 enter: the alert block, then
+// brain moveStep = 1. (world-wac-ai-re §16.1)
+void h_enter_ground_combat(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    alert_block(ctx, e);
+    e.brain.f[AiBrain::kStep] = 1;
 }
 
 // [orig: AI_EnterState_GroundEvade @0x467400] state-18 enter: the same alert block, then
@@ -290,15 +301,7 @@ void h_enter_ground_combat(AiThinkCtx &ctx) {
 void h_enter_ground_evade(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    b.f[AiBrain::kAlert] = 2;
-    b.f[AiBrain::kPrevAlert] = 2;
-    if (ctx.world != nullptr) {
-        if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
-        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
-    }
+    alert_block(ctx, e);
     if ((e.profile.flags96 & 1) != 0) {        // EVADE_FLAGS FOLLOW_WP
         const int32_t next = (b.f[AiBrain::kTargetSlot] != 0) ? kAiGroundCombat
                                                               : kAiGroundFollowWp;
@@ -767,22 +770,6 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     bone = 0;
 }
 
-// The shared alert block every death-family enter runs: alert cur/prev = 2, the command
-// group goes red, allies wake at 100 u, slot move flag 2. [orig: the common head of
-// @0x467650 / @0x467400 / @0x467b20 / @0x467de0]
-void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
-    AiBrain &b = e.brain;
-    b.f[AiBrain::kAlert] = 2;
-    b.f[AiBrain::kPrevAlert] = 2;
-    if (ctx.world != nullptr) {
-        if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
-        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
-    }
-}
-
 // Queue the DESTROY event (type 4) that lands the brain in GROUND_DEAD 23.
 // [orig: the inline queue tails of @0x467b20 / @0x467cd0 — channel 0, timer 0]
 void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
@@ -870,7 +857,7 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 			}
 		}
 	}
-	death_alert_block(ctx, e);
+	alert_block(ctx, e);
 	b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
     if (hull_death_speed(ctx.world, e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
         queue_destroy_event(ctx, e);
@@ -925,7 +912,7 @@ void h_vehicle_dying_event(AiThinkCtx &ctx) {
 void h_enter_vehicle_dead(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    death_alert_block(ctx, e);
+    alert_block(ctx, e);
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
             if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: the Flags&4 gate]
@@ -1123,7 +1110,7 @@ void h_enter_aircraft_dying(AiThinkCtx &ctx) {
 			}
 		}
 	}
-	death_alert_block(ctx, ai);
+	alert_block(ctx, ai);
 	ai.brain.f[AiBrain::kStep] = 16;
 	int32_t ground = INT32_MIN;
 	Entity *entity = ctx.world != nullptr ? ctx.world->registry.get(ai.handle) : nullptr;
@@ -1194,7 +1181,7 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 			ctx.sys->ai_set_target(world, ai, EntityHandle{});
 		}
 	}
-	death_alert_block(ctx, ai);
+	alert_block(ctx, ai);
 	ai.team = 0;
 	ai.brain.f[AiBrain::kStep] = 62;
 }
