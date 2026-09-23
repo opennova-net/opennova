@@ -193,7 +193,7 @@ void test_org1_water_settles_through_the_tail() {
 void test_org1_climb_chase_runs_on_even_ticks_only() {
     Org1Rig rig;
     rig.e().pos[2] = fx(3);
-    rig.e().inf.move_target[2] = fx(5);
+    rig.e().inf.goal_z = fx(5); // the persisted +0x304 the chase reads @0x4BF6C7
     rig.entity().flags |= kEntityFlagAiClimb;
     rig.tick(2);
     // step = (5u - 3u + 8) >> 4 = 8192; Z += 2 * 8192, then the quarter tail
