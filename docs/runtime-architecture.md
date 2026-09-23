@@ -21,6 +21,74 @@ OpenNova keeps that shape. Catch-up is capped at 31 ticks, render reads the
 latest state without interpolation, and WAC/BMS dividers remain inside their
 own systems.
 
+### One logic tick
+
+Retail's `Game_ProcessMainFrame @0x5263F0` runs, in order: `Client_ProcessNetworkFrame`
+(the call `@0x526692`), `Sound_TickPendingSlots` (`@0x526697`), then
+`Server_TickUpdate @0x51D7E0` (the call `@0x5266B6`): its head timers, the
+per-player walk (`@0x51D88B`), the receive pump (`@0x51D895`), the humans count
+(`@0x51D89A`), the WAC tick (`@0x51D8BF`), the every-32 legs (the spawn-marker
+assignment `@0x51D8D2` and the idle timers `@0x51D8D7`), the BMS quarter pass
+(`@0x51D8F4`), the scoreboard legs (`@0x51D90D` / `@0x51D912`), the play-tick and
+scoring walk (`@0x51D960..0x51D98F`), the periodic second (`@0x51DB6D..0x51E1B2`,
+which also recounts the live groups), the per-slot 0x0A (`@0x51E3E4`) and the
+send pump (`@0x51E487`). Then come the gated `Entity_UpdateAllEntities @0x4C2100`
+(the call `@0x52674B`), the tracers (`@0x526758`), the weather (`@0x526774`), the
+camera (`@0x526781`) and the WeaponAction pump (`@0x526786`). A 0x0A therefore
+carries this frame's script and maintenance changes, and the entity update's
+inline sends lead the NEXT frame's queue.
+
+The port keeps that split. `Server_TickUpdate` routes the previous entity pass's
+records at its head (`route_entity_pass_records`), runs `World::run_script_pass`
+and its maintenance, builds and queues the 0x0A, then runs
+`World::run_entity_pass` (the entity update, the weapon pump, the tail);
+`World::run_logic_tick` composes the three for the bare local role, a joiner and
+the tests. The live group recount (`EntityPool_RecountLiveByGroup @0x40E8D0`)
+runs from the periodic second only, so the bare local role no longer recounts.
+`World::update_all_entities` walks pool 1 once per row in slot order with each
+row's parent chain first, then the phases retail runs after it (the HeliLift
+slots, the facial state, precipitation, the death pieces, the timed AI events,
+the projectiles, the explosion queue with the round-hit drain, pool 2, the doors,
+pool 3, the proximity tables and the pool-0 walk); see the vehicle record,
+section 26.1.
+
+The whole entity update is admitted in `Game_ProcessMainFrame @0x5263F0`
+(`@0x526703..0x526742`): a client skips to the second half; a playing host on its
+death screen skips the humans test (`is_mp_session_peer`, `g_death_screen_active`);
+no human and a started script clock skip the update (`wac_var_humans`,
+`wac_var_ticks`); the retained pre-round byte skips it; and in session the
+round-over latch `g_spawn_success_gate` skips it (raised by `Server_ProcessRoundEnd`,
+the S2C 0x1D handler and `Cine_StartPlayback`, cleared at `Game_StartMission`).
+`wac_var_humans` counts pool-0 rows with a definition, Flags 0x100 and not Flags 1
+(`Server_BuildEntitySlotLists @0x4F97A0`, `@0x4F9809` / `@0x4F9815` /
+`@0x4F9820`): a dead player counts, a hidden or not-yet-deployed one does not.
+Port: `World::entity_update_admitted`, with the death-screen exemption stamped by
+`HostRole` (`CachedFrameState::peer_death_screen`). While the epilog screen is up,
+`Entity_UpdateAllEntities` takes its epilog path (`@0x4C211D..0x4C2128` →
+`@0x4C239A`): every pool-1 row copies its pose into savedLivePose, only a row whose
+occupant carries Flags 0x100 is updated, and everything from the HeliLift slots
+through pool 3 is skipped, so no projectile, explosion or death piece moves under
+the MISSION FAILED screen; the pass then joins the proximity tables and the
+pool-0 walk and tail-calls `Cinematic_EpilogUpdate` in place of the entity-update
+counter's add (`@0x4C2624` / `@0x4C2634`).
+
+The round clock is not frozen by the round end: `g_round_time_remaining` is
+decremented in `Game_ProcessMainFrame` (`@0x5265DA..0x526602`) under the authority,
+no pause, no epilog, no pre-round delay and time left only, so it keeps counting
+through the post-round linger. `tick` itself advances only while the in-game
+menu pause flag is clear (`@0x5265A0..0x5265B4`); the tracers and the weather run
+every frame, paused or not, while the camera and the WeaponAction pump do not.
+
+Mission start: `Game_StartMission @0x524360` collects the spawn vehicles and
+builds the spawn-marker list right after the mission load (the
+`build_spawn_marker_budget_list` call `@0x5252C6`), ahead of
+`Entity_InitAllFromModels` (`@0x52567F`), the authority-gated PreMission pass
+(the `EventTrigger_UpdateAllWithFlag2` call `@0x525B86`) and the WAC's first
+execution; `MissionKernel::boot` builds it once the definitions are attached and
+before the organic init. The PostMission pass runs once at teardown
+(`MissionKernel::run_post_mission_pass` from `HostRole::close` and
+`LocalRole::close`; `Game_TeardownMission @0x522350`, the call `@0x52266C`).
+
 ## Live OpenNova path
 
 [ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md) (d3/d9, superseding ADR 0036) splits the frame
@@ -108,8 +176,11 @@ session interface provably does not depend on Godot. The target adds only
 resource resolution, Godot value conversion and the device pipeline; none of
 that leaks into the portable session state machine. The kernel also carries the
 session facts the tooling and the shell flow used to re-derive: `session_open`
-(retail's is_in_session, set by the net bring-ups; it gates the UseGun
-null-slot rejection inside `toggle_mount`), the medic-call cooldown
+(set by every net bring-up, the single-player listen server included, so it is
+not retail's `is_in_session`: the port models that fact as `rules.mp_session`,
+which a listen host, a dedicated host and a joiner set and single player never
+does, and `AiSystem::is_in_session` is stamped from it per entity update), the
+medic-call cooldown
 (`tick_medic_cooldown` / `stamp_medic_request`), the local dead bit
 (`local_player_dead`; a joiner reads its replica through
 `inmatch::ClientRuntime::local_player_dead`), the water plane the occupant clamp
@@ -291,14 +362,15 @@ adapter. `[orig: Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
 Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
 serialize_entity_pool_to_packet @0x503593..0x5035A9;
 NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
-Its winner check implements the universal all-zones-owned rule and
+Its winner check implements the all-zones-owned rule (which answers only in
+A&S and C&C, `ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920`) and
 every retail competitive branch: DM/TDM, KOTH/TKOTH, S&D/A&D, CTF, FlagBall,
 Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
 `World::process_round_end` transaction; the host regression executes WAC
 `Win` for stock Co-op and a BMS `RedWin` event for Objective Co-op before
 checking the common 0x61/0x1D output. `[orig: WacAction_Win @0x4ED4A0;
-EventAction_Dispatch EventAction_Dispatch @0x4542E0, the RedWin case @0x454495; GameEvent_ProcessScoring
-@0x52F550; Entity_MovementCollisionResolver @0x4B2F90..0x4B2FF5;
+EventAction_Dispatch @0x4542E0, the RedWin case @0x454495; GameEvent_ProcessScoring
+@0x52F550; Entity_MovementCollisionResolver @0x4B2F8D..0x4B2FF5;
 GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`
 
