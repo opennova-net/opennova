@@ -663,10 +663,14 @@ uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t 
 		return int32_t((v * v + 0x8000) >> 16);
 	};
 	const int32_t xy = io::bam_add(sq(local[0]), sq(local[1]));
+	// `fild; fsqrt; fistp` under the game's nearest-even control word: the
+	// root rounds, it does not truncate [orig: compute_relative_position_metrics
+	// @0x5457CD..0x5457D3 and @0x5457EC..0x5457F2]. A wrapped (negative) sum
+	// is an invalid fsqrt whose integer indefinite shifts out to zero.
 	const auto root = [](int32_t x) {
 		if (x < 0)
-			return int32_t(0); // x87 invalid conversion <<16 yields zero
-		return int32_t(uint32_t(int32_t(std::sqrt(double(x)))) << 16);
+			return int32_t(0);
+		return int32_t(uint32_t(int32_t(std::nearbyint(std::sqrt(double(x))))) << 16);
 	};
 	std::fill_n(metrics, 6, 0);
 	metrics[0] = root(xy);

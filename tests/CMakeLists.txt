@@ -1590,6 +1590,13 @@ target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
 add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
 
+# compute_relative_position_metrics @0x545710 against original-x86 vectors
+# (scripts/oracles/aim_metrics_parity.py).
+add_executable(aim_metrics_parity_test world/aim_metrics_parity_test.cpp)
+target_link_libraries(aim_metrics_parity_test PRIVATE opennova_runtime)
+target_compile_features(aim_metrics_parity_test PRIVATE cxx_std_17)
+add_test(NAME aim_metrics_parity COMMAND aim_metrics_parity_test)
+
 add_executable(npc_weapons_test world/npc_weapons_test.cpp)
 target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)
 target_include_directories(npc_weapons_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
