@@ -6078,9 +6078,9 @@ thresholds are the def's cos22(maxSlope +0x8F4) and cos22(slipSlope +0x8F8)
 (vehicle-client-movers-re §6), and the severity-3 impact damage, the scrape edge with its
 momentum exchange and the second pass's scaling by the other vehicle's mass share
 (`otherMass/(otherMass+mass)` @ 0x463037-0x46324d / @ 0x47d24a) ride the family solves
-(vehicle-client-movers-re Section 12, 2026-09-07). The SM's kinematic `apply_locomotion`
-RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
-(waypoints, visited bits, states), the motor is the only integrator, matching
+(vehicle-client-movers-re Section 12, 2026-09-07). The SM has no integrator of its own
+(the interim `apply_locomotion` model is deleted, §2): it stays the decision layer
+(waypoints, visited bits, states), and the motor is the only integrator, matching
 the original split.
 
 The live motor now also supplies the two cveh control-register fields for
@@ -8957,7 +8957,10 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   `min(capsule_top - capsule_bottom, 0xD000)`, floored at `0x2000` (the lean
   tilt is the lean channel's term, zero for an unleaning row)
   `[orig: @ 0x4b6984-0x4b6991; floor @ 0x4b68e7]`. The splash/overlay edges
-  ride the cross-cutting sound/FX slice (open for local rows too — §22.5).
+  are the host's: the local motors queue each entry edge and org2's dive edge in
+  `World::out.water_crossings` (`infantry_water.cpp`), which the host fans as S2C 0x34 to
+  the alive players (`route_water_crossings`; retail's `Server_SendOverlayActionToAlive
+  @ 0x50a1b0`, the org1 call @ 0x4bfc40), so a replica row takes the host's 0x34.
   `Env` source: the mission water plane (`World::EnvState.water_z`, 0 = no
   water = channel off with a self-healing `~0x208000` clear).
   **2026-08-24 — the LOCAL motors are ported too** (world/infantry_water.cpp):
