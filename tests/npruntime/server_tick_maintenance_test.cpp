@@ -359,11 +359,16 @@ bool check_deploy_seeds_protection_and_armory_state() {
 			"a deploy outside pre-round leaves the latch clear");
 }
 
-// The WAC humans count walks pool 0: an item-def row with the Player bit that
-// is not hidden counts, a dead one included. A player still waiting to deploy
-// (hidden), an NPC and a def-less player row do not, and no connection is
-// needed. [orig: Server_BuildEntitySlotLists @0x4f97a0 -- the def test
-// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
+// The WAC humans count walks pool 0: a live row with the Player bit that is
+// not hidden counts, a dead one included. A player still waiting to deploy
+// (hidden) and an NPC do not, and no connection is needed. The def test is
+// the walk's allocated-row test: every retail spawn links an items.def row,
+// row 0 when the type has none, so a player whose type items.def lacks (the
+// has_item_def-clear row, and the real spawn over such a table) counts too.
+// [orig: Server_BuildEntitySlotLists @0x4f97a0 -- the def test @0x4F9809,
+// `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1; the link
+// Entity_SpawnFromAnimSlotProperty @0x43C429; the miss
+// ItemList_FindIndexByTypeId @0x49E131]
 bool check_humans_count_the_visible_players() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -385,7 +390,20 @@ bool check_humans_count_the_visible_players() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	inmatch::Server_TickUpdate(ctx);
-	return expect(world.cached.humans == 2, "the humans count takes the two visible players");
+	if (!expect(world.cached.humans == 3,
+			"the humans count takes the three visible players, the def-less one included"))
+		return false;
+	// The traits sweep over an items table without the Player row leaves the
+	// template def-less; the player spawned from it is still a human.
+	world.tables.player.has_item_def = false;
+	const w::EntityHandle joined = w::spawn_remote_player(world, player_spawn(4, 0, 0));
+	const w::Entity *joined_row = world.registry.get(joined);
+	if (!expect(joined_row != nullptr && !joined_row->has_item_def,
+			"the fixture player spawns without a matched items.def row"))
+		return false;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(world.cached.humans == 4,
+			"a player whose type items.def lacks counts as a human");
 }
 
 // The live group recount runs in the server tick's periodic second, ahead of

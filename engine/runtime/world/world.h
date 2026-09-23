@@ -170,9 +170,10 @@ struct CachedFrameState {
     EntityHandle local_player;
     int32_t local_health = 0;
     // The human count — the WAC 'humans' builtin, rebuilt by the host server
-    // tick just before the script pre-pass: every pool-0 row with an item def
-    // and the Player bit (Flags 0x100) that is not hidden (Flags 1: a player
-    // still waiting to deploy is hidden). Doubles in the original as the
+    // tick just before the script pre-pass: every live pool-0 row with the
+    // Player bit (Flags 0x100) that is not hidden (Flags 1: a player still
+    // waiting to deploy is hidden); the item-def test is the allocated-row
+    // test (EntityRegistry::count_humans). Doubles in the original as the
     // empty-server world-run gate (entities/WAC advance while humans > 0 ||
     // ticks == 0). [orig: wac_var_humans @0xC6EB14 — Server_BuildEntitySlotLists
     // @0x4f97a0: zero @0x4f97c6, the def test @0x4F9809, `test eax,100h`

@@ -274,14 +274,21 @@ void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) 
     });
 }
 
+// The def test reads the row's ItemDef pointer, which only a free row lacks:
+// every spawn links &gItemDefs[ItemList_FindIndexByTypeId(type)], and the
+// lookup answers row 0 (retail's Null row) for a type items.def lacks. So the
+// live walk is that test; has_item_def (false for a type without a row) is
+// not, and a player whose type has no row still counts.
 // [orig: Server_BuildEntitySlotLists @0x4f97a0 — zero @0x4f97c6, the def test
-// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
+// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1;
+// the player's link Entity_SpawnFromAnimSlotProperty @0x43C429, the BMS
+// spawn's Entity_SpawnFromBMSRecord @0x40EC07; the miss
+// ItemList_FindIndexByTypeId @0x49E131]
 int32_t EntityRegistry::count_humans() const {
     int32_t humans = 0;
     for_each_in_pool(0, [&humans](const Entity &e) {
         const uint32_t flags = e.flags | e.engine_flags;
-        if (e.has_item_def && (flags & kEntityFlagPlayer) != 0 &&
-                (flags & kEntityFlagCarried) == 0)
+        if ((flags & kEntityFlagPlayer) != 0 && (flags & kEntityFlagCarried) == 0)
             ++humans;
     });
     return humans;
