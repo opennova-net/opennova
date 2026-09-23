@@ -68,7 +68,11 @@ namespace {
 // The synthetic mission has no music context. Restoring ONLY those 16 zero
 // DWORDs to each of the 241 hash samples recovers e33cefc459163b68 exactly;
 // entity, AI, RNG and real script state are unchanged by this digest update.
-constexpr uint64_t kSyntheticDigest = 0x18f8080dd8fcdb68ULL;
+// The AI/script parity pass ports retail's truncating spawn angle,
+// ((deg << 16) / 360) << 16 [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66],
+// in place of deg * 11930464: every spawned heading loses its low 16 bits,
+// which moves the chain from 0x18f8080dd8fcdb68.
+constexpr uint64_t kSyntheticDigest = 0x31938283c4bbc368ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {

@@ -1357,6 +1357,10 @@ void test_org1_death_transaction_is_the_motor_edge() {
 		seed.health = 100;
 		seed.health_max = 100;
 		seed.deathtime_ticks = deathtime_ticks;
+		// A scored NPC person definition (items.def `score`, def+0x194), which
+		// the kill tally requires of its victim [orig: @0x4FD422].
+		seed.has_item_def = true;
+		seed.item_score = 10;
 		seed.position = {static_cast<float>(net_id - 290), 20.0f, 0.0f};
 		const w::EntityHandle h = world.registry.spawn(0, seed);
 		w::AiEntity &body = *world.ai.at(world.ai.attach(h));
@@ -1380,7 +1384,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	const w::EntityHandle shot = spawn_org1(300, 500);
 	world.registry.get(shot)->health = 0;
 	world.registry.get(shot)->last_attacker = host;
-	push_death(world, shot, host);
+	push_kill(world, shot, host);
 	run_ticks(3);
 	expect(entity_death_records(peer_wire, shot) == 1,
 			"org1 kill: one 0x13, raised by the motor edge");
