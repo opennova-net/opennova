@@ -1429,6 +1429,15 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# WAC command bodies and the EntityCommands primitives they reach, pinned against
+# the retail handlers (script kills, hide/hold/disable, HP writers, predicates,
+# return values).
+add_executable(script_command_parity_test world/script_command_parity_test.cpp)
+target_link_libraries(script_command_parity_test PRIVATE opennova_runtime)
+target_include_directories(script_command_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(script_command_parity_test PRIVATE cxx_std_17)
+add_test(NAME script_command_parity COMMAND script_command_parity_test)
+
 # world::inspect (ADR 0042 d5): the entity directory join, the debug-card
 # halves, and the EntityCommands set_entity_health/position both-store writes.
 add_executable(inspect_test world/inspect_test.cpp)

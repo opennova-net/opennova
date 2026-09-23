@@ -418,11 +418,15 @@ int main() {
     {
         World kw;
         kw.registry.configure_pool(0, 8);
+        // Organic rows: the edge that raises the death transaction is the
+        // infantry motor's [orig: @0x4B9D4D / @0x4B4CEA].
         Entity a; a.net_id = 900; a.group_id = 9; a.alive = true; a.health = 150;
+        a.kind = EntityKind::Organic;
         // A prior non-lethal hit's shooter on the victim's +0x178: the script
         // death reports it (GameEvent_PlayerDeath reads the victim's word).
         a.last_attacker = EntityHandle::make(0, 6);
         Entity b; b.net_id = 901; b.group_id = 9; b.alive = true; b.health = 150;
+        b.kind = EntityKind::Organic;
         const EntityHandle ha = kw.registry.spawn(0, a);
         kw.registry.spawn(0, b);
         CHECK(kw.round_sim.deaths.empty());

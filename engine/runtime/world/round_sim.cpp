@@ -1398,7 +1398,10 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     // EVERY hit (lethal or not, damage 0 included) selects the
                     // death anim from the hit bone + attack quadrant into +0x2C0
                     // and tips the body on a torso-stack bone; a later kill
-                    // that stamps nothing (script/WAC) plays this hit's clip.
+                    // that stamps nothing (WAC kill/SSNHP/GroupHP) plays this
+                    // hit's clip, while killSSN and KillSingle clear it first
+                    // [orig: Entity_ResetWeaponState @0x4F1EBD;
+                    // Entity_KillByNetId @0x43DC1B].
                     // The roll, the mask switch, and the anim selector all
                     // consume the SAME hit-record bone (hitRecord[14]);
                     // death_section is our preserved copy of that record field.

@@ -382,7 +382,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "load")) { return A(0); }
 
     // ---- entity actions ----
-    if (ieq(n, "killSSN")) return cmds.kill_ssn(H(0)) ? 1 : 0;
+    // The killSSN handler (IDB misnomer). [orig: Entity_ResetWeaponState @0x4F1E40]
+    if (ieq(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
     if (ieq(n, "removeSSN")) return cmds.remove_ssn(H(0)) ? 1 : 0;
     if (ieq(n, "remove")) { cmds.remove_group(A(0)); return 0; }
     if (ieq(n, "ssnuse")) return cmds.use_boarding_target(H(0));
@@ -460,15 +461,19 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
 
     // ---- group actions ----
-    if (ieq(n, "kill")) return cmds.kill_group(A(0));
+    // Returns 0 [orig: WacCmd_Kill @0x4EDC90, `xor eax,eax` @0x4EDC9D] after the
+    // group walk [orig: Entity_KillAllByNetId @0x43C8E0].
+    if (ieq(n, "kill")) { cmds.kill_group(A(0)); return 0; }
     if (ieq(n, "Gkill") || ieq(n, "Gremove")) {
         const int32_t group = A(0);
         if (group >= 0 && size_t(group) < groups_.size()) {
             for (world::EntityHandle h : groups_[group]) {
                 if (const world::Entity *entity = w.registry.get(h)) {
-                    if (ieq(n, "Gkill")) {
-                        if (entity->item_id != 0) cmds.kill_ssn(h);
-                    } else cmds.remove_ssn(h);
+                    // Gkill runs the killSSN body on every handle (its own
+                    // ItemTypeIndex gate) [orig: WacCmd_GroupKill @0x4F1F40 ->
+                    // @0x4F1F5E]; Gremove removes without a gate.
+                    if (ieq(n, "Gkill")) cmds.wac_kill_ssn(h);
+                    else cmds.remove_ssn(h);
                 }
             }
         }

@@ -64,7 +64,14 @@ public:
     // These arm the existing row's corpse lifecycle; they do not spawn immediately.
     bool set_ssn_respawns(EntityTarget ssn, int32_t count);
     void set_group_respawns(int32_t group, int32_t count);
+    // BMS KillSingle: the first matching row; pool 0 also loses its attacker and
+    // staged death clip; the class event fires phase 1 (pool 3: phase 4).
+    // [orig: Entity_KillByNetId @0x43DBD0]
     bool kill_ssn(EntityTarget ssn);
+    // WAC killSSN: the ItemTypeIndex gate, Health 0, lastAttacker cleared (and a
+    // person's staged death clip), then the class event (e, 1, 0) with a cleared
+    // hit record; the IDB name is a misnomer. [orig: Entity_ResetWeaponState @0x4F1E40]
+    bool wac_kill_ssn(EntityTarget ssn);
     bool remove_ssn(EntityTarget ssn);
     bool set_ssn_hp(EntityTarget ssn, int32_t hp);
     bool add_ssn_hp(EntityTarget ssn, int32_t delta);
@@ -241,7 +248,10 @@ public:
     bool ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn, int32_t distance_q16) const;
 
     // --- group (by group id) ---
-    int kill_group(int group);          // returns members affected
+    // WAC kill / BMS KillGroup: pools 2, 0, 1, every row of the group (dead rows
+    // too): Health 0 and the class event (e, 1, 0); returns the rows visited.
+    // [orig: Entity_KillAllByNetId @0x43C8E0]
+    int kill_group(int group);
     // BMS RedirectGroupTo (event action 1) and WAC GtoWP. `node < 0` selects the
     // nearest node on the list; BMS passes its authored param3. Pool-0 members
     // detach, reset their cooldown/carrier words and seed the turn budget;

@@ -163,17 +163,128 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     return true;
 }
 
+// The organic death transaction's stand-in, defined with the group kill below.
+static void raise_scripted_death(World &world, Entity &e, EntityHandle h);
+
+namespace {
+
+// A row the organic death edge has not yet claimed: the health it held before a
+// script zeroed it, and no dead bit. [orig: the edge guard `Health <= 0 &&
+// (Flags & 2) == 0`, Entity_UpdateInfantryAI @0x4B9C40..0x4B9C51]
+bool script_kill_crosses_edge(const Entity &e) {
+    return e.health > 0 && ((e.flags | e.engine_flags) & kEntityFlagDead) == 0;
+}
+
+// The brain machine an SM-brained item's class event callback runs: CHel/cpln
+// reach the air machine, cveh/cbot/ctrn the vehicle machine; a traits row built
+// without its def falls back to its mover family, and a brain without a traits
+// row keeps the air machine (the AiSystem::tick routing). A null brain returns
+// before any work [orig: EntityAI_ProcessVehicleStateMachine @0x4583CA..0x4583D1].
+// [orig: g_EntityClassEventCallbackTable @0x813000 rows @0x8132a0/@0x8133a8 vs
+//  @0x813378/@0x813390, resolved by EntityDef_InitAllCallbacks @0x4a5aae]
+void run_brain_class_event(World &world, const Entity &e, int event) {
+    AiEntity *ae = world.ai.for_handle(e.handle);
+    if (ae == nullptr) return;
+    const VehicleTraits *vt = world.vehicles.traits.get(e.item_id);
+    bool vehicle_class = false;
+    if (vt != nullptr) {
+        if (vt->brain_class == VehicleBrainClass::Unset)
+            vehicle_class = !vehicle_family_uses_direct_air_mover(vt->family);
+        else
+            vehicle_class = vt->brain_class == VehicleBrainClass::Ground;
+    }
+    if (vehicle_class)
+        world.ai.process_vehicle_state_machine(*ae, world, event);
+    else
+        world.ai.process_infantry_state_machine(*ae, world, event);
+}
+
+// The class event callback a script kill fires, entity+0x1C8(entity, phase, 0),
+// after the kill zeroed the hit record, so every attacker leg sees a null
+// attacker. [orig: Entity_ResetWeaponState @0x4F1EC7..0x4F1ED2; Entity_KillByNetId
+// @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3, phase 4)]
+void script_kill_class_event(World &world, Entity &e, int phase) {
+    if (e.kind == EntityKind::Organic) {
+        const uint32_t flags = e.flags | e.engine_flags;
+        if ((flags & kEntityFlagPlayer) == 0) {
+            // org0/org1: the phase-1 arm puts the victim and its trigger group
+            // on red alert; the null attacker then leaves before the death-anim
+            // and debris legs. Phase 4 only zeroes the health word here.
+            // [orig: Entity_HandleDamageTrigger @0x4073BF..0x4073EA, attacker
+            //  exit @0x40740D; phase-4 arm @0x40733F..0x407358]
+            if (phase != 1) return;
+            if (AiEntity *ae = world.ai.for_handle(e.handle))
+                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
+            world.script.relations.group(e.group_id).alert = TriggerRelations::kAlertRed;
+            return;
+        }
+        // plyr: a body already flagged dead returns at once; phase 1's kill
+        // scoring returns on the null attacker; the health tail stages the
+        // default death clip when none is staged, and a mounted body leaves its
+        // seat on the authority; every event re-arms the think cadence.
+        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return);
+        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null attacker);
+        //  tail @0x407AC5..0x407AE7 (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)),
+        //  @0x407AED..0x407B20 (Entity_DetachFromVehicleIfServer), @0x407B5E]
+        if ((flags & kEntityFlagDead) != 0 || phase != 1) return;
+        if (retail_signed_i16(e.health) <= 0) {
+            if (e.death_anim_state == 0)
+                e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+            if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
+        }
+        e.spawn_phase = 64;
+        return;
+    }
+    if (e.is_ai_capable) {
+        run_brain_class_event(world, e, phase);
+        return;
+    }
+    destruction_notify_item_damage(world, e, phase, {0, 0});
+}
+
+} // namespace
+
 bool EntityCommands::kill_ssn(EntityTarget ssn) {
+    // The BMS KillSingle action: the first matching row, pools 0..3. Pool 0 also
+    // loses its attacker and staged death clip; pools 1/2 fire phase 1 and pool 3
+    // phase 4. No item or dead gate.
+    // [orig: Entity_KillByNetId @0x43DBD0 — pool 0 @0x43DC0E..0x43DC31, pool 1
+    //  @0x43DC5E..0x43DC72, pool 2 @0x43DC9E..0x43DCB2, pool 3 @0x43DCDE..0x43DCF2]
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (!e) return false;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    const int pool = e->handle.pool();
     e->health = 0;
-    if (e->kind != EntityKind::Organic && !e->is_ai_capable) {
-        // Pool 3 uses phase 4; the other pools use phase 1.
-        // [orig: Entity_KillByNetId @0x43DBD0]
-        destruction_notify_item_damage(world_, *e, e->handle.pool() == 3 ? 4 : 1, {0, 0});
-    } else {
-        e->alive = false;
+    if (pool == 0) {
+        e->last_attacker = {};
+        e->death_anim_state = 0;
     }
+    script_kill_class_event(world_, *e, pool == 3 ? 4 : 1);
+    // Edge stand-in (organic death transaction) until the org1/org2 death edge
+    // owns it [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    if (e->kind == EntityKind::Organic && crosses_edge)
+        raise_scripted_death(world_, *e, e->handle);
+    return true;
+}
+
+bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
+    // The WAC killSSN handler (the IDB name is a misnomer).
+    // [orig: Entity_ResetWeaponState @0x4F1E40 — the
+    //  ItemTypeIndex gate @0x4F1E89, the hit record cleared @0x4F1E8F..0x4F1E99,
+    //  Health 0 @0x4F1EA4, lastAttacker 0 @0x4F1EAD, a person's (def+0x5C == 3)
+    //  staged clip +0x2C0 cleared @0x4F1EB7..0x4F1EBD, the class event (e, 1, 0)
+    //  @0x4F1EC7..0x4F1ED2, return 1 @0x4F1ED7]
+    Entity *e = world_.registry.get(resolve_target(ssn));
+    if (e == nullptr || e->item_id == 0) return false;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    e->health = 0;
+    e->last_attacker = {};
+    if (e->item_type == 3) e->death_anim_state = 0;
+    script_kill_class_event(world_, *e, 1);
+    // Edge stand-in (organic death transaction) until the org1/org2 death edge
+    // owns it [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    if (e->kind == EntityKind::Organic && crosses_edge)
+        raise_scripted_death(world_, *e, e->handle);
     return true;
 }
 
@@ -1091,18 +1202,33 @@ static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
 }
 
 int EntityCommands::kill_group(int group) {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    // The WAC `kill` / BMS KillGroup walk: pools 2, 0, 1 in that order, every row
+    // whose signed commandGroup word matches (dead rows included, no item gate):
+    // Health 0 and the class event (e, 1, 0). Unlike KillSingle it keeps the
+    // row's attacker and staged death clip. Returns the rows visited.
+    // [orig: Entity_KillAllByNetId @0x43C8E0 — group 0 exit @0x43C8F2, pool 2
+    //  @0x43C8F8, pool 0 @0x43C946, pool 1 @0x43C996; per row @0x43C917..0x43C93F]
+    if (group == 0) return 0;
     int n = 0;
-    for (EntityHandle h : members) {
-        Entity *e = world_.registry.get(h);
-        if (!e) continue;
-        // Only the LIVING cross the edge — retail's `(Flags & 2) == 0` half. A
-        // group killed twice must not notify twice.
-        if (e->health > 0 && (e->flags & kEntityFlagDead) == 0)
-            raise_scripted_death(world_, *e, h);
-        else { e->alive = false; e->health = 0; }
-        ++n;
+    for (const int pool : {2, 0, 1}) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            if (static_cast<int16_t>(row.group_id) == group) members.push_back(row.handle);
+        });
+        for (EntityHandle h : members) {
+            Entity *e = world_.registry.get(h);
+            if (e == nullptr) continue;
+            const bool crosses_edge = script_kill_crosses_edge(*e);
+            e->health = 0;
+            script_kill_class_event(world_, *e, 1);
+            // Edge stand-in (organic death transaction) until the org1/org2
+            // death edge owns it: only the living cross it, so a group killed
+            // twice notifies once [orig: @0x4B9D4D / @0x4B4CEA ->
+            // Entity_CheckAndProcessDeath @0x51B550].
+            if (e->kind == EntityKind::Organic && crosses_edge)
+                raise_scripted_death(world_, *e, h);
+            ++n;
+        }
     }
     return n;
 }

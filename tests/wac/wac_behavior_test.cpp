@@ -113,8 +113,10 @@ static void test_var_math() {
 
 static void test_ssn_kill() {
     BehaviorWorld w;
-    Entity a; a.net_id = 100; a.alive = true; w.registry.spawn(0, a);
-    Entity b; b.net_id = 200; b.alive = true; w.registry.spawn(0, b);
+    // killSSN refuses a row without an ItemTypeIndex [orig: WacCmd_KillSsn
+    // @0x4F1E89], so both rows carry one.
+    Entity a; a.net_id = 100; a.item_id = 1001; a.alive = true; w.registry.spawn(0, a);
+    Entity b; b.net_id = 200; b.item_id = 1001; b.alive = true; w.registry.spawn(0, b);
 
     WacSystem sys;
     CompileEnv env;
