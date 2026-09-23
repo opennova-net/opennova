@@ -1235,6 +1235,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // The secondary-fire latch is a frame local of the org1 motor, zeroed at its
+    // head: only this pass's combat or 0x8 event bit can set what its fire block
+    // consumes. [orig: Entity_UpdateInfantryAI `mov [esp+var_108C],ebp`
+    //  @0x4B99B8; set @0x4BC93F / @0x4BF39B, tested @0x4BF406]
+    if (npc_body) e.inf.fire_secondary_latch = false;
     // While the SP epilog screen is up the NPC motor does nothing at all.
     // [orig: Entity_UpdateInfantryAI `cmp g_epilog_screen_active,ebp` @0x4B998C,
     //  `jnz loc_4BFC8B` @0x4B99CD]

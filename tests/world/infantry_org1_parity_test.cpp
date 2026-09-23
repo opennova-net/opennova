@@ -52,6 +52,7 @@ struct FlatField {
 // and carry no root translation.
 struct IdleSource : IRootMotionSource {
     std::set<int> clips{anim_state::kIdle};
+    uint32_t events = 0; // the trigger bits every frame carries
     bool has_clip(int, int id) const override { return clips.count(id) != 0; }
     int32_t clip_length_ticks(int, int, int) const override { return -1; }
     bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
@@ -59,6 +60,7 @@ struct IdleSource : IRootMotionSource {
         ++phase;
         out = RootMotionFrame{};
         out.capsule_bottom = fx(1);
+        out.events = events;
         return true;
     }
 };
@@ -637,7 +639,7 @@ void test_org1_round_leaves_along_this_ticks_look() {
     rig.w->tables.ammo.entries[1].max_age_ticks = 100;
     rig.e().pos[2] = fx(1); // on its capsule floor
     rig.e().profile.organic.ammo[1] = 1;
-    rig.e().inf.fire_secondary_latch = true; // the walking-fire latch: every tick
+    rig.source.events = 0x8; // this odd tick's clip event latches the secondary fire
     rig.e().inf.target_heading = 0x10000000;
     rig.e().inf.aim_heading = 0x04000000; // the look chase then holds
     rig.tick(3);
@@ -719,6 +721,24 @@ void test_org1_torso_roll() {
 
 } // namespace
 
+// T7: the secondary-fire latch is a frame local of the org1 motor. A latch left
+// from before this pass is gone at the motor head, so an even tick whose clip
+// carries no fire event fires nothing. [orig: Entity_UpdateInfantryAI
+// `mov [esp+var_108C],ebp` @0x4B99B8; the latch test @0x4BF406]
+void test_org1_fire_latch_is_a_pass_local() {
+    Org1Rig rig;
+    rig.w->tables.ammo.entries.resize(2);
+    rig.w->tables.ammo.entries[1].valid = true;
+    rig.w->tables.ammo.entries[1].velocity = 620;
+    rig.w->tables.ammo.entries[1].max_age_ticks = 100;
+    rig.e().pos[2] = fx(1);
+    rig.e().profile.organic.ammo[1] = 1;
+    rig.e().inf.fire_secondary_latch = true;
+    rig.tick(2);
+    CHECK(rig.w->out.rounds.count == 0);
+    CHECK(!rig.e().inf.fire_secondary_latch);
+}
+
 int main() {
     test_org1_fall_takes_the_quarter_step_tail();
     test_org1_fall_damage_follows_the_retail_fall();
@@ -738,6 +758,7 @@ int main() {
     test_player_waypoint_tail();
     test_org1_edge_reads_the_recorded_round();
     test_org1_round_leaves_along_this_ticks_look();
+    test_org1_fire_latch_is_a_pass_local();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();
     test_org1_torso_roll();
