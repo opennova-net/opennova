@@ -640,13 +640,82 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 // Entity_CheckAndProcessDeath @0x51B58F]
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
+	auto tally_kill = [&](const world::RoundDeath &d) {
+		// Kill tallies — the SP mission-stat buckets (the epilog score screen's count
+		// source) and the WAC bluekills/greenkills builtins. SP only [orig:
+		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
+		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
+		// in-process loopback IS a session), so the retail SP discriminator here is
+		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
+		// Killer == the host/local player -> the by-player buckets
+		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
+		// family [orig: Score_TallyKillByOthers @0x4fd300]. Only the damage-pass
+		// lethal edges call Score_ProcessKillEvent (RoundDeath::kill_event), and it
+		// returns without a killer or when the VICTIM's ItemDef `score` word is
+		// zero, so a Player (no score on any Player definition) never tallies, not
+		// even for a self-kill [orig: killer @0x4FD405, target def @0x4FD41E,
+		// `cmp word ptr [eax+194h], 0` @0x4FD422]. By-player blue/green buckets
+		// take only PERSON victims (ItemDef+0x5C == 3) by the team byte
+		// [orig: victim+354; 0 = green, 1 = blue; @0x4FD1F6 / @0x4FD213]; the
+		// by-others team 1 / team 0 buckets take any victim type
+		// [orig: @0x4FD325..0x4FD366]; any team >= 2 victim tallies as an enemy kill
+		// (the original's infantry/vehicle/aircraft split folds into one count; the
+		// epilog sums the split anyway). Point values (def+404, difficulty-scaled)
+		// and the human-player-victim bucket (victim+534 -> 0xC846A0, unreachable
+		// behind the score gate) are unmodeled — counts only, which is what the WAC
+		// predicates and the epilog columns consume (D-AI-10; world-wac-ai-re §20.4).
+		if (!world.rules.mp_session && d.kill_event && d.killer.valid()) {
+			if (const world::Entity *victim2 = world.registry.get(d.victim);
+					victim2 != nullptr && victim2->has_item_def && victim2->item_score != 0) {
+				bool killer_is_host_player = false;
+				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+					if (c.link.owned_entity.valid() &&
+					    c.link.owned_entity.packed == d.killer_handle &&
+					    c.link.mode == replication::TransportMode::Loopback) {
+						killer_is_host_player = true;
+						break;
+					}
+				}
+				world::MissionKillStats &ks = world.kill_stats;
+				const bool person = victim2->item_type == 3;
+				if (killer_is_host_player) {
+					if (victim2->team == 1) {
+						if (person) ++ks.bluekills_by_player;
+					} else if (victim2->team == 0) {
+						if (person) ++ks.greenkills_by_player;
+					} else {
+						++ks.enemy_kills_by_player;
+					}
+				} else {
+					if (victim2->team == 1) {
+						++ks.team_kills_by_others;
+					} else if (victim2->team == 0) {
+						++ks.friendly_kills_by_others;
+					} else {
+						++ks.enemy_kills_by_others;
+					}
+				}
+			}
+		}
+	};
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
+		// damage-time record for it only tallies and leaves the dead bit to the edge.
+		// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
+		//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
+		if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
+			tally_kill(d);
+			if (world::Entity *victim_entity = world.registry.get(d.victim))
+				victim_entity->alive = false; // health is already <= 0
+			continue;
+		}
 		world::Entity *victim_entity = world.registry.get(d.victim);
 		const world::Entity *killer_entity = world.registry.get(d.killer);
 		const bool victim_is_player = victim_entity != nullptr &&
 				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
-		const bool organic_victim = victim_entity != nullptr &&
-				victim_entity->kind == world::EntityKind::Organic;
+		// An edge record's victim is a person even when its corpse leg removed the row.
+		const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
+				victim_entity->kind == world::EntityKind::Organic);
 		// The revive-window and resend gates read the victim's live entity+44
 		// cause word BEFORE the classifier clears the bit it reports.
 		// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
@@ -681,7 +750,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// the client spawn hook (pose snap + reset). Without this bit the victim never
 		// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
 		// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
-		if (organic_victim) {
+		// An edge record's row carries the edge's own latch (or a respawned life).
+		if (organic_victim && !d.motor_edge) {
 			victim_entity->flags |= 2u;
 			victim_entity->alive = false;
 			// The dead/protection latch is the player leg's alone.
@@ -716,9 +786,10 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			// slot into the anim state and ZERO it before the authority-gated
 			// Entity_CheckAndProcessDeath call, so an edge-driven infantry
 			// death always ships 0 (every 0x13 in the retail capture carries
-			// 0); only the direct third sender ships a live slot. Our death
-			// routing runs in the damage tick, before the next body update's
-			// edge (infantry.cpp) consumes the staged selection, so a person
+			// 0); only the direct third sender ships a live slot. An org1
+			// body's record comes from its own edge, after the consume; a
+			// player body's death routing runs in the damage tick, before the
+			// next body update's edge consumes the staged selection, so a person
 			// victim reports the post-edge zero here rather than the selection
 			// its edge still owns; every other kind ships the slot as stored.
 			// The retail receiver stores the word sign-extended into +0x2C0.
@@ -841,62 +912,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			}
 		}
 
-		// Kill tallies — the SP mission-stat buckets (the epilog score screen's count
-		// source) and the WAC bluekills/greenkills builtins. SP only [orig:
-		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
-		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
-		// in-process loopback IS a session), so the retail SP discriminator here is
-		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
-		// Killer == the host/local player -> the by-player buckets
-		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
-		// family [orig: Score_TallyKillByOthers @0x4fd300]. Only the damage-pass
-		// lethal edges call Score_ProcessKillEvent (RoundDeath::kill_event), and it
-		// returns without a killer or when the VICTIM's ItemDef `score` word is
-		// zero, so a Player (no score on any Player definition) never tallies, not
-		// even for a self-kill [orig: killer @0x4FD405, target def @0x4FD41E,
-		// `cmp word ptr [eax+194h], 0` @0x4FD422]. By-player blue/green buckets
-		// take only PERSON victims (ItemDef+0x5C == 3) by the team byte
-		// [orig: victim+354; 0 = green, 1 = blue; @0x4FD1F6 / @0x4FD213]; the
-		// by-others team 1 / team 0 buckets take any victim type
-		// [orig: @0x4FD325..0x4FD366]; any team >= 2 victim tallies as an enemy kill
-		// (the original's infantry/vehicle/aircraft split folds into one count; the
-		// epilog sums the split anyway). Point values (def+404, difficulty-scaled)
-		// and the human-player-victim bucket (victim+534 -> 0xC846A0, unreachable
-		// behind the score gate) are unmodeled — counts only, which is what the WAC
-		// predicates and the epilog columns consume (D-AI-10; world-wac-ai-re §20.4).
-		if (!world.rules.mp_session && d.kill_event && d.killer.valid()) {
-			if (const world::Entity *victim2 = world.registry.get(d.victim);
-					victim2 != nullptr && victim2->has_item_def && victim2->item_score != 0) {
-				bool killer_is_host_player = false;
-				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-					if (c.link.owned_entity.valid() &&
-					    c.link.owned_entity.packed == d.killer_handle &&
-					    c.link.mode == replication::TransportMode::Loopback) {
-						killer_is_host_player = true;
-						break;
-					}
-				}
-				world::MissionKillStats &ks = world.kill_stats;
-				const bool person = victim2->item_type == 3;
-				if (killer_is_host_player) {
-					if (victim2->team == 1) {
-						if (person) ++ks.bluekills_by_player;
-					} else if (victim2->team == 0) {
-						if (person) ++ks.greenkills_by_player;
-					} else {
-						++ks.enemy_kills_by_player;
-					}
-				} else {
-					if (victim2->team == 1) {
-						++ks.team_kills_by_others;
-					} else if (victim2->team == 0) {
-						++ks.friendly_kills_by_others;
-					} else {
-						++ks.enemy_kills_by_others;
-					}
-				}
-			}
-		}
+		if (!d.motor_edge) tally_kill(d);
 
 		if (victim_connection != nullptr) {
 			// Every player slot gets the same two whole-second counters. A

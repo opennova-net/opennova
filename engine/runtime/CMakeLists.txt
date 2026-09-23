@@ -193,6 +193,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_slope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_force.cpp   # Entity_ApplyCollisionForce: burn state + the four force modes
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp

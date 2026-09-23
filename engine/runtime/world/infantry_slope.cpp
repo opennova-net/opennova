@@ -48,7 +48,12 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     // Dead + in-air takes the corpse-tumble branch instead of the slope pass in both
     // originals (bodyPitch/roll/yaw spin ramps) — unported; the death-fall mover owns
     // the drop today. [orig: org1 @0x4ba0b2-0x4ba107; org2 @0x4b6ccb-0x4b6d90]
-    const bool dead = e.health <= 0;
+    // Org1 reads "dead" off the Flags word its death edge latches, not health.
+    // [orig: `and ecx,2` @0x4BA084]
+    const Entity *slope_entity = world.registry.get(e.handle);
+    const bool dead = !org2 && slope_entity != nullptr
+            ? ((slope_entity->flags | slope_entity->engine_flags) & kEntityFlagDead) != 0
+            : e.health <= 0;
     if (dead && inf.airborne) return;
 
     // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,

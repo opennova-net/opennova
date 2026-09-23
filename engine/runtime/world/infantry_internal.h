@@ -45,6 +45,12 @@ void infantry_attachment_select(AiEntity &, World &, const InfantryAttachmentPos
 bool infantry_attachment_move(AiEntity &, World &, const InfantryAttachmentPose &);
 
 bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent);
+// The once-per-life death edge (infantry_death.cpp). `org1` selects the NPC
+// legs: the drowning clip, the unstaged-hit alert, the death tick, the 0xC0 clear
+// and, on the authority, the edge's own death transaction.
+// [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
+void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
+                         uint32_t logic_tick);
 bool reset_capsule_bottom_state(int state);
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              RootMotionFrame &out);

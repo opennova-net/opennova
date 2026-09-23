@@ -13,6 +13,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/infantry.h> // org1_owns_death_transaction
 #include <runtime/world/vehicle_attach.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
@@ -1220,25 +1221,31 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // never fans deaths from the damage pass: every motor's per-entity update carries
 // the edge `Health <= 0 && (Flags & 2) == 0` and calls Entity_CheckAndProcessDeath
 // there, so ANY writer of zero health — a bullet, or this action — is noticed and
-// notified. The killer rides on the VICTIM (entity+704, read by
-// BuildDeathNotifyPayload), which is why retail's own baseline capture shows its
-// scripted kills as `killerSource=0`: the script never stamps that field. Ours
-// leaves the killer handle unset for the same reason, and the burst matches.
+// notified. The 0x13 payload's second word is the victim's +0x2C0 death-anim slot,
+// which both edges zero before the send, so every edge-driven death ships 0 there
+// (the retail capture's `killerSource=0` on its scripted kills).
 //
-// SHAPE NOTE: raising the death here rather than from a health<=0 sweep in the
-// motor is narrower than the original — a future health-zeroing path would have
-// to remember to do the same. Converging on the sweep is worth doing when the
-// death path is next opened up; it needs the killer moved onto the entity first.
-// [orig: the edge @0x4bfxxx (org1) / @0x4b73xx (org2) -> Entity_CheckAndProcessDeath
-//  @0x51b550 -> BuildDeathNotifyPayload @0x5036e0, send_mask 0x90]
+// An org1 (NPC) victim takes that path in the port too: its own motor death edge
+// raises the transaction from the zeroed health against lastAttacker, and the
+// script records nothing (no damage-time kill tally either: the script kill
+// never reaches Score_ProcessKillEvent). The player bodies (org2) still take
+// their transaction from this record.
+// [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
+//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> BuildDeathNotifyPayload
+//  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
+    if (org1_owns_death_transaction(world, h)) {
+        e.alive = false;
+        e.health = 0;
+        return;
+    }
     RoundDeath d;
     d.victim = h;
     d.victim_handle = h.packed;
     // The victim's +0x178 lastAttacker is the killer GameEvent_PlayerDeath
     // reads [orig: @0x516f6b]; the edge's fallback has already emptied it for
-    // a body nothing ever hit. killer_handle stays at its default: retail's
-    // unstamped entity+704.
+    // a body nothing ever hit. killer_handle stays 0: the script stamps no
+    // shooter.
     d.killer = e.last_attacker;
     d.killer_handle = 0;
     world.round_sim.deaths.push_back(d);

@@ -1294,8 +1294,146 @@ void test_end_round_row_flags_word_is_field_11() {
 			"0x56 row: the sixth word carries field 11 (FLAGSAVE), the fifth field 7 (deaths)");
 }
 
+// The S2C 0x13 records for `victim` a drained channel carried.
+int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
+	int n = 0;
+	ns::Datagram datagram;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag != s2c::ENTITY_DEATH) continue;
+		EntityDeathRecord death;
+		size_t consumed = 0;
+		if (decode_entity_death(datagram.body.data(), datagram.body.size(), death,
+				consumed) && consumed == datagram.body.size() &&
+				death.entity_handle == victim.packed)
+			++n;
+	}
+	return n;
+}
+
+// An org1 (NPC) body's death transaction is its own motor edge's, once per
+// life. A damage-time record only feeds the SP kill tally; the edge raises the
+// one 0x13, a script health write with no record reaches it too, and a
+// scripted kill adds no second one. An edge record still fans after its corpse
+// leg removed the row in the same pass, and never re-latches a row it no
+// longer owns. [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D ->
+// Entity_CheckAndProcessDeath @0x51B550 (0x13 @0x51B58F); Score_ProcessKillEvent
+// @0x4FD400 is called from the damage paths only (@0x4E8133)]
+void test_org1_death_transaction_is_the_motor_edge() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.add_system(&world.ai);
+	w::PlayerSpawn host_spawn;
+	host_spawn.position = {0.0f, 0.0f, 10.0f};
+	host_spawn.team = 1;
+	host_spawn.net_id = 0xFFF0;
+	const w::EntityHandle host = w::spawn_player(world, host_spawn);
+	world.cached.local_player = host;
+	w::PlayerSpawn peer_spawn = host_spawn;
+	peer_spawn.position = {4.0f, 0.0f, 10.0f};
+	peer_spawn.net_id = 0xFFF1;
+	const w::EntityHandle peer = w::spawn_remote_player(world, peer_spawn);
+
+	// The SP listen host is a session: its loopback plus one remote peer that
+	// sees the 0x13 fan (mask 0x90 leaves the loopback out).
+	ns::LoopbackChannel host_loop;
+	ns::LoopbackChannel peer_wire;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 2, &host_loop, ns::TransportMode::Loopback, host, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &peer_wire, ns::TransportMode::Client, peer, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
+
+	auto spawn_org1 = [&](uint16_t net_id, int32_t deathtime_ticks) {
+		w::Entity seed;
+		seed.kind = w::EntityKind::Organic;
+		seed.net_id = net_id;
+		seed.team = 2;
+		seed.group_id = 7;
+		seed.alive = true;
+		seed.health = 100;
+		seed.health_max = 100;
+		seed.deathtime_ticks = deathtime_ticks;
+		seed.position = {static_cast<float>(net_id - 290), 20.0f, 0.0f};
+		const w::EntityHandle h = world.registry.spawn(0, seed);
+		w::AiEntity &body = *world.ai.at(world.ai.attach(h));
+		body.inf.active = true;
+		body.health = 100;
+		body.net_id = net_id;
+		return h;
+	};
+	auto run_ticks = [&](int n) {
+		for (int i = 0; i < n; ++i) inmatch::Server_TickUpdate(ctx);
+	};
+	auto dead_bit = [&](w::EntityHandle h) {
+		const w::Entity *e = world.registry.get(h);
+		return e != nullptr && ((e->flags | e->engine_flags) & w::kEntityFlagDead) != 0;
+	};
+	run_ticks(2);
+	peer_wire.clear();
+
+	// 1. A killing hit's record tallies once; the edge's own record raises the
+	// one 0x13 and latches the dead bit.
+	const w::EntityHandle shot = spawn_org1(300, 500);
+	world.registry.get(shot)->health = 0;
+	world.registry.get(shot)->last_attacker = host;
+	push_death(world, shot, host);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, shot) == 1,
+			"org1 kill: one 0x13, raised by the motor edge");
+	expect(world.kill_stats.enemy_kills_by_player == 1,
+			"org1 kill: the damage-time record tallies once, the edge record never");
+	expect(dead_bit(shot), "org1 kill: the edge latches the dead bit");
+
+	// 2. A script health write raises no record; the edge still sends the 0x13.
+	const w::EntityHandle written = spawn_org1(301, 500);
+	world.commands.set_entity_health(written, 0);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, written) == 1,
+			"org1 health write: the motor edge sends the 0x13");
+	expect(world.kill_stats.enemy_kills_by_player == 1 &&
+			world.kill_stats.enemy_kills_by_others == 0,
+			"org1 health write: no kill tally");
+
+	// 3. A scripted group kill adds no second transaction.
+	const w::EntityHandle scripted = spawn_org1(302, 500);
+	world.commands.kill_group(7);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, scripted) == 1,
+			"org1 scripted kill: exactly one 0x13");
+	expect(world.kill_stats.enemy_kills_by_others == 0, "org1 scripted kill: no kill tally");
+
+	// 4. A corpse its leg removes on the edge pass still fans its 0x13. (No local
+	// player watches it here: an SP corpse in view is held.)
+	const w::EntityHandle gone = spawn_org1(303, 0);
+	world.cached.local_player = {};
+	world.commands.set_entity_health(gone, 0);
+	run_ticks(1);
+	world.cached.local_player = host;
+	expect(world.registry.get(gone) == nullptr, "a zero deathtime corpse leaves on its edge pass");
+	expect(entity_death_records(peer_wire, gone) == 1,
+			"the removed corpse's edge record still sends its 0x13");
+
+	// 5. An edge record whose row lives again (a respawn in the same corpse pass)
+	// leaves the new life's flags alone.
+	const w::EntityHandle reborn = spawn_org1(304, 500);
+	w::RoundDeath edge;
+	edge.victim = reborn;
+	edge.victim_handle = reborn.packed;
+	edge.killer_handle = 0xFFFFu;
+	edge.motor_edge = true;
+	world.round_sim.deaths.push_back(edge);
+	run_ticks(1);
+	expect(!dead_bit(reborn) && world.registry.get(reborn)->alive,
+			"an edge record never re-latches the row it no longer owns");
+}
+
 int main() {
 	test_end_round_row_flags_word_is_field_11();
+	test_org1_death_transaction_is_the_motor_edge();
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;

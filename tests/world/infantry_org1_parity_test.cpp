@@ -10,6 +10,7 @@
 // range (the slide damp, the integrate, gravity, the landing/airborne edges, the
 // ladder and water blocks, and the entity+0xAC quarter-step tail) ran as retail
 // code.
+#include <runtime/audio/sound_profile.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
@@ -205,6 +206,158 @@ void test_org1_climb_chase_runs_on_even_ticks_only() {
     CHECK(rig.e().pos[2] == z_even + 4096);      // only the stored quarter step
 }
 
+// ---- the death edge (R3-2, R3-4, R3-5, R7-11) ----
+
+constexpr char kDeathProfile[] = "begin \"SP_Org1\"\n     sounddeath     T_DEATH\nend\n";
+
+int death_screams(const World &w) {
+    int n = 0;
+    for (const SoundSlotEvent &ev : w.out.slot_sounds)
+        if (ev.slot == opennova::audio::kSlotDeath) ++n;
+    return n;
+}
+
+void arm_death(Org1Rig &rig) {
+    rig.w->tables.sound_profiles.parse(kDeathProfile, sizeof(kDeathProfile) - 1);
+    rig.e().profile.sound_profile =
+            static_cast<int16_t>(rig.w->tables.sound_profiles.index_of("SP_Org1"));
+    rig.source.clips.insert({139, 174, 175, 184});
+    rig.e().pos[2] = fx(1); // on its capsule floor
+    rig.entity().health = 0;
+    rig.entity().deathtime_ticks = 500;
+}
+
+// R3-2: the org1 edge fires once per life, keyed on the dead bit it latches.
+// A corpse the medic drag re-poses as draggee (139, flags 0x002) must not take
+// the edge again: one scream, the corpse timer keeps draining, the staged
+// attacker survives. [orig: Entity_UpdateInfantryAI `cmp [esi+11Eh],bp; jg`
+// @0x4B9C40, `test byte ptr [esi+24h],2; jnz` @0x4B9C4D; dead bit @0x4B9D18]
+void test_org1_dragged_corpse_takes_one_death_edge() {
+    Org1Rig rig;
+    arm_death(rig);
+    const EntityHandle shooter = EntityHandle::make(0, 3);
+    rig.entity().last_attacker = shooter;
+    rig.entity().death_anim_state = 184; // staged by the killing hit
+    rig.tick(2);
+    CHECK(death_screams(*rig.w) == 1);
+    CHECK((rig.entity().flags & kEntityFlagDead) != 0);
+    CHECK(rig.e().inf.anim_state == 184);
+    CHECK(rig.entity().corpse_timer == 499);
+
+    Entity medic;
+    medic.kind = EntityKind::Organic;
+    medic.item_id = 7;
+    medic.health = 100;
+    medic.alive = true;
+    medic.position = {100.0f, 101.0f, 1.0f};
+    const EntityHandle medic_h = rig.w->registry.spawn(0, medic);
+    rig.entity().dragger = medic_h;
+    rig.entity().dragger_spawn_id = rig.w->registry.get(medic_h)->registry_spawn_id;
+    for (uint32_t t = 3; t < 13; ++t) rig.tick(t);
+    CHECK(rig.e().inf.anim_state == 139);           // the draggee pose
+    CHECK(death_screams(*rig.w) == 1);             // no second edge
+    CHECK(rig.entity().corpse_timer == 489);        // drains, never re-seeded
+    CHECK(rig.entity().last_attacker == shooter);   // never cleared again
+}
+
+// R3-4: the edge's own legs. [orig: Entity_UpdateInfantryAI drowning 175
+// @0x4B9CF6..0x4B9D0E; unstaged hit callback @0x4B9CDB..0x4B9CF1 ->
+// Entity_HandleDamageTrigger @0x4073C8..0x4073EA; death tick @0x4B9D24..0x4B9D2F;
+// `and eax,0FFFFFF3Fh` @0x4B9D2A; Entity_CheckAndProcessDeath @0x4B9D4D]
+void test_org1_death_edge_legs() {
+    {   // an unstaged death afloat: death_drown, the hit callback's alert, the
+        // death tick, the 0xC0 clear, and the authority's own transaction
+        Org1Rig rig;
+        arm_death(rig);
+        rig.entity().group_id = 5;
+        rig.entity().cause_flags = 0x900u;
+        rig.entity().flags |= kEntityFlagDrowning | kEntityFlagAiClimb | kEntityFlagMounted;
+        rig.tick(40);
+        CHECK(rig.e().inf.anim_state == anim_state::kDeathDrown);
+        CHECK(rig.e().slot.bytes()[AiSlot::kAlertByte] == 2);
+        CHECK(rig.w->script.relations.group(5).alert == TriggerRelations::kAlertRed);
+        CHECK(rig.entity().death_tick == 40);
+        CHECK((rig.entity().flags & (kEntityFlagAiClimb | kEntityFlagMounted)) == 0);
+        CHECK(!rig.entity().last_attacker.valid());
+        CHECK(rig.w->round_sim.deaths.size() == 1);
+        if (!rig.w->round_sim.deaths.empty()) {
+            const RoundDeath &d = rig.w->round_sim.deaths.back();
+            CHECK(d.motor_edge);
+            CHECK(d.victim == rig.handle);
+            CHECK(d.victim_handle == rig.handle.packed);
+            CHECK(!d.killer.valid());
+            CHECK(d.event_flags == 0x900u);
+        }
+        rig.tick(41);
+        CHECK(rig.w->round_sim.deaths.size() == 1); // once per life
+    }
+    {   // a staged death: no alert, the shooter kept as the transaction's killer,
+        // and no transaction off the authority
+        Org1Rig rig;
+        arm_death(rig);
+        const EntityHandle shooter = EntityHandle::make(0, 3);
+        rig.entity().last_attacker = shooter;
+        rig.entity().death_anim_state = 184;
+        TickContext ctx;
+        ctx.world = rig.w.get();
+        ctx.is_authority = false;
+        ctx.logic_tick = 2;
+        rig.w->ai.tick(*rig.w, ctx);
+        CHECK(rig.e().inf.anim_state == 184);
+        CHECK(rig.e().slot.bytes()[AiSlot::kAlertByte] == 0);
+        CHECK(rig.entity().last_attacker == shooter);
+        CHECK(rig.w->round_sim.deaths.empty());
+    }
+}
+
+// R3-5: a fatal landing credits the body itself and stages the generic
+// selection, so the next edge keeps lastAttacker = self and raises the
+// transaction with the body as its own killer. [orig: `mov [esi+178h],esi`
+// @0x4BF86B, +0x2C0 @0x4BF879; the edge's staged path @0x4B9CCF]
+void test_org1_fatal_fall_credits_itself() {
+    Org1Rig rig;
+    rig.w->script.wac_values.fallmps = 13;
+    rig.entity().deathtime_ticks = 500; // keep the corpse row after the edge
+    rig.e().pos[2] = fx(1) + fx(6);
+    rig.airborne();
+    uint32_t landed = 0;
+    for (uint32_t t = 2; t < 400 && landed == 0; ++t) {
+        rig.tick(t);
+        if (!rig.e().inf.airborne) landed = t;
+    }
+    CHECK(landed != 0);
+    CHECK(rig.entity().health <= 0);
+    CHECK(rig.entity().last_attacker == rig.handle);
+    CHECK(rig.entity().death_anim_state == anim_state::kDeathPungi);
+    CHECK(rig.w->round_sim.deaths.empty()); // no transaction at the landing
+    rig.tick(landed + 1);                   // the edge
+    CHECK(rig.entity().last_attacker == rig.handle);
+    CHECK(rig.w->round_sim.deaths.size() == 1);
+    if (!rig.w->round_sim.deaths.empty()) {
+        CHECK(rig.w->round_sim.deaths.back().motor_edge);
+        CHECK(rig.w->round_sim.deaths.back().killer == rig.handle);
+    }
+}
+
+// R7-11: a corpse stays dead on its dead bit when a script writes health back
+// onto it: the corpse leg keeps draining its timer, the edge does not re-fire
+// and the body is not alive. [orig: corpse leg `test al,2; jz`
+// @0x4B9D55..0x4B9D5A; think gate `test byte ptr [esi+24h],2` @0x4BA98B]
+void test_org1_corpse_stays_dead_on_a_health_write() {
+    Org1Rig rig;
+    arm_death(rig);
+    rig.entity().death_anim_state = 184;
+    rig.tick(2);
+    CHECK(rig.entity().corpse_timer == 499);
+    rig.entity().health = 50; // a script health write on the corpse
+    for (uint32_t t = 3; t < 20; ++t) rig.tick(t);
+    CHECK(rig.entity().corpse_timer == 499 - 17);
+    CHECK(rig.e().inf.anim_state == 184);
+    CHECK((rig.entity().flags & kEntityFlagDead) != 0);
+    CHECK(!rig.entity().alive);
+    CHECK(rig.w->round_sim.deaths.size() == 1); // the one edge transaction
+}
+
 } // namespace
 
 int main() {
@@ -212,6 +365,10 @@ int main() {
     test_org1_fall_damage_follows_the_retail_fall();
     test_org1_water_settles_through_the_tail();
     test_org1_climb_chase_runs_on_even_ticks_only();
+    test_org1_dragged_corpse_takes_one_death_edge();
+    test_org1_death_edge_legs();
+    test_org1_fatal_fall_credits_itself();
+    test_org1_corpse_stays_dead_on_a_health_write();
     if (failures) {
         std::printf("infantry_org1_parity: %d failure(s)\n", failures);
         return 1;

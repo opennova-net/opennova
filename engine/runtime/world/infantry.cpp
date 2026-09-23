@@ -1211,111 +1211,41 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]
     const int32_t tick_start_z = e.pos[2];
 
-    const InfantryAttachmentPose attachment = !inf.is_local_player && e.health > 0
-            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
-
-    // 1. Death edge (once — the 0x82 death-family flag marks an already-posed corpse):
-    // consume the damage-time anim selection, seed the corpse timer, drop any mount.
-    // Then the per-tick corpse block: LeaveCorpse keeps the body forever, otherwise
-    // the timer drains and the corpse despawns — held while the local player can see
-    // it. [orig: Entity_UpdateInfantryAI @0x4b9c40-0x4b9d55 edge, @0x4b9e4d-0x4ba000
-    // persistence]
+    // 1. Death edge, once per life. Org1 keys it on the dead bit its own edge
+    // latches; the player bodies still ride the dead bit the host's damage-time
+    // death routing sets, so they key on the posed death clip (the 0x82 family
+    // flag), as does a rowless test body with no flags word.
+    // [orig: Entity_UpdateInfantryAI `cmp [esi+11Eh],bp; jg` @0x4B9C40,
+    //  `test byte ptr [esi+24h],2; jnz` @0x4B9C4D]
+    const bool org1_body = npc_body && tick_entity != nullptr;
     if (e.health <= 0) {
-        Entity *ent = world.registry.get(e.handle);
-        if (infantry_anim_flags(inf.anim_state) != 0x82u) {
-            // The kill latches the entity dead bit (Flags |= 2) — the compact
-            // state byte carries it unmasked, and the 0x0A priority list reads
-            // it as the recipient's dead-or-spectator gate. Both views of our
-            // split flags field take it; the spawn reset clears them.
-            // [orig: Entity_HandleDeathOnAuthority @0x407CC0 `or Flags, 2`
-            //  @0x407D34; the client death-event apply mirrors it @0x40727E]
-            if (ent != nullptr) {
-                ent->flags |= kEntityFlagDead;
-                ent->engine_flags |= kEntityFlagDead;
-                ent->attach_parent = {};
-            }
-            // A mounted body detaches so the corpse falls with the world, not the
-            // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
-            // the edge also clears Flags 0x40 @0x4b9d2a].
-            if (ent != nullptr && ent->mounted)
-                world.vehicles.detach(e.handle);
-            // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
-            // even for LeaveCorpse items and cancels scripted respawns.
-            const bool silent_cleanup = ent != nullptr && (ent->section_mask & 1u) != 0;
-            if (ent != nullptr) {
-                ent->corpse_timer = static_cast<int32_t>(
-                        uint32_t(ent->deathtime_ticks) - (silent_cleanup ? 61u : 0u));
-                if (silent_cleanup) ent->npc_respawns = 0;
-            }
-            // The death scream. NPC (org1): profile slot 7 (sounddeath), or 8
-            // (SSNightDead) on a night mission — the runtime reads the mission's
-            // EnableNVG attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
-            // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
-            // Player body (org2): the body-model composite set "<prefix>_DEATH"
-            // ("_DEATH_K" at night) from the entity's anim-slot byte — NOT the
-            // profile slots; a bank without the set is the id-0 silence with no
-            // slot fallback. [orig: @0x4b4c4a-0x4b4c6a ->
-            // SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
-            // Entity_PlaySound3D_FullVolume]
-            if (!silent_cleanup && (ent == nullptr || !ent->dismemberment_piece)) {
-                const bool night_death =
-                    (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
-                if (inf.is_local_player) {
-                    SoundSlotEvent scream;
-                    scream.source_handle = e.handle.packed;
-                    scream.pos[0] = e.pos[0];
-                    scream.pos[1] = e.pos[1];
-                    scream.pos[2] = e.pos[2];
-                    scream.slot = static_cast<uint8_t>(
-                            night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
-                    audio::compose_entity_sound_set(
-                            ent != nullptr ? ent->anim_slot : 0,
-                            night_death ? audio::kEntitySoundDeathNight
-                                        : audio::kEntitySoundDeath,
-                            scream.set_name, sizeof(scream.set_name));
-                    world.out.slot_sounds.push_back(scream);
-                } else {
-                    emit_slot_sound(world, e,
-                                    night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                                    e.pos);
-                }
-            }
-            // Consume the kill's selection; none staged -> the generic death
-            // (cause 4 -> 174 death_pungi) AND the attacker slot (+0x178) is
-            // cleared, so a death nothing stamped (script/WAC) reports as
-            // unattributed while one that follows a non-lethal hit keeps that
-            // hit's clip and shooter [orig: @0x4b9cc9 fallback, @0x4b9ceb
-            // lastAttacker = 0, + the deathCallback(entity, 1, 0) dispatch;
-            // the player-body edge's twin @0x4b4c72..0x4b4c8d; consumed +0x2C0
-            // clears @0x4b9d38. The Flags&0x8000 drowning override (175) rides
-            // the unmodeled swim flags.]
-            if (ent != nullptr && ent->death_anim_state == 0)
-                ent->last_attacker = EntityHandle{};
-            int death = (ent != nullptr && ent->death_anim_state != 0)
-                                ? ent->death_anim_state
-                                : compute_death_anim_state(0, 0, death_cause::kGeneric);
-            if (ent != nullptr) ent->death_anim_state = 0;
-            // Stripped embedder .adm sets may lack the selected clip; keep the pre-P1c
-            // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
-            if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
-                const int torso = anim_state::kDeathBulletBase + 4;
-                death = root_motion->has_clip(inf.adm_id, torso) ? torso
-                                                                 : anim_state::kDeathFire;
-            }
-            // The head already sampled this tick's playing channel; death
-            // changes the request for the next update.
-            // [orig: @0x4B9D38; death callback tail @0x4B9D55]
-            inf.request_body_animation(death);
-            inf.move_mode = 0;
-            inf.target_dist = 0;
-            inf.player_moving = false;
-        }
-        if (ent != nullptr && npc_body) {
-            if (infantry_drag_corpse(e, world)) inf.request_body_animation(139);
-            const NpcCorpseStep result = step_npc_corpse(world, *this, *ent);
-            if (result == NpcCorpseStep::Removed) return;
-        }
+        const bool edge_open = org1_body
+                ? ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) == 0
+                : infantry_anim_flags(inf.anim_state) != 0x82u;
+        if (edge_open) infantry_death_edge(*this, e, world, tick_entity, org1_body, logic_tick);
     }
+    // Org1's corpse leg, think and motion gates read that dead bit, not health:
+    // a script that writes health back onto a corpse leaves it dead.
+    // [orig: corpse leg `test al,2; jz` @0x4B9D55..0x4B9D5A; think gate
+    //  `test byte ptr [esi+24h],2; jnz` @0x4BA98B..0x4BA98F]
+    const auto org1_dead_now = [&] {
+        return org1_body &&
+               ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) != 0;
+    };
+    // The per-tick corpse block: LeaveCorpse keeps the body forever, otherwise the
+    // timer drains and the corpse despawns — held while the local player can see
+    // it. [orig: Entity_UpdateInfantryAI @0x4b9e4d-0x4ba000 persistence]
+    if (org1_dead_now()) {
+        if (infantry_drag_corpse(e, world)) inf.request_body_animation(139);
+        const NpcCorpseStep result = step_npc_corpse(world, *this, *tick_entity);
+        if (result == NpcCorpseStep::Removed) return;
+    }
+    // A respawn inside the corpse leg has restored the live flags for the rest
+    // of this pass. [orig: the respawn leg re-enters at @0x4BA066]
+    const bool body_live = org1_body ? !org1_dead_now() : e.health > 0;
+
+    const InfantryAttachmentPose attachment = !inf.is_local_player && body_live
+            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
     // Org1 samples before the think so path_state=1 is visible to this tick's
     // boarding and detour selection. Its replacement motion overrides the
     // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
@@ -1337,7 +1267,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             world.reverb.update(e.pos, building_reverb);
         }
         if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
-    } else if (e.health > 0 && is_authority && (key & 15u) == 0) {
+    } else if (body_live && is_authority && (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
 		// A cached board-any target can upgrade an already seated NPC once
 		// per 64 staggered ticks. Compare slot TYPE, not the userpoint index.
@@ -1403,7 +1333,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
     if (!inf.is_local_player) infantry_ladder_override(e, tick_entity);
 
-    if (!inf.is_local_player && is_authority && e.health > 0 && (key & 15u) == 0) {
+    if (!inf.is_local_player && is_authority && body_live && (key & 15u) == 0) {
         infantry_attachment_select(e, world, attachment);
         if (npc_body && (tick_flags & kEntityFlagDead) == 0)
             infantry_attention_think(*this, e, world, key);
@@ -2007,7 +1937,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                             ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute) != 0
                             ? anim_state::kParachute : anim_state::kJumpLoop;
                     if (inf.anim_state != falling_state) inf.request_body_animation(falling_state);
-                } else if (e.health > 0) {
+                } else if (org1_body ? !org1_dead_now() : e.health > 0) { // [orig: `test al,2` @0x4BF8CD]
                     if (tick_entity && ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute)) {
                         const int falling_state = !root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute)
                                 ? anim_state::kParachute : anim_state::kJumpLoop;
@@ -2077,7 +2007,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
             const bool fall_charges = inf.is_local_player
                     ? inf.vel[2] <= fall_threshold
-                    : inf.airborne && e.health > 0 && inf.vel[2] <= fall_threshold;
+                    : inf.airborne && (org1_body ? !org1_dead_now() : e.health > 0) &&
+                      inf.vel[2] <= fall_threshold;
             // org2's local-player damage feedback: red vignette + camera shake,
             // between the threshold test and the authority/Indestructible tests
             // [orig: @0x4b7d23..0x4b7d2d -> Player_OnDamageReceived @0x4dd880].
@@ -2092,6 +2023,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 int32_t dmg = excess >> 4;
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);
+                // The charge credits the body itself and stages the generic
+                // death selection, so a fatal fall reaches the death edge with
+                // a staged +0x2C0 and lastAttacker = self. [orig: org1
+                // `mov [esi+178h],esi` @0x4BF86B, +0x2C0 @0x4BF879; org2
+                // @0x4B7D7D / @0x4B7D8B]
+                if (tick_entity != nullptr) {
+                    tick_entity->last_attacker = e.handle;
+                    tick_entity->death_anim_state =
+                            compute_death_anim_state(0, 0, death_cause::kGeneric);
+                }
             }
             if (inf.is_local_player) {
                 // org2's arm ends at vel_z = 0 [orig: @0x4b7d91] with NO 0x2000
@@ -2110,8 +2051,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // 0FFFFDFFFh` @0x4bf89f -> `mov [esi+0A0h],ebx` @0x4bf8a6]
                 if (inf.airborne)
                     emit_slot_sound(world, e,
-                                    e.health > 0 ? audio::kSlotFallAlive
-                                                 : audio::kSlotFallDead,
+                                    (org1_body ? !org1_dead_now() : e.health > 0)
+                                            ? audio::kSlotFallAlive
+                                            : audio::kSlotFallDead,
                                     e.pos);
                 inf.airborne = false;
                 if (tick_entity != nullptr) {
@@ -2287,7 +2229,13 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
         // has one Entity store; mirror that result into the registry store consumed by
         // scripts, the HUD, and wire snapshots.
         ent->health = e.health;
-        ent->alive = e.health > 0;
+        // An org1 corpse stays dead on its dead bit even when a script writes
+        // health back onto it. [orig: Entity_UpdateInfantryAI corpse leg
+        // `test al,2` @0x4B9D58]
+        const bool org1_corpse = !inf.is_local_player && !e.net_is_remote_peer &&
+                ((ent->flags | ent->engine_flags) & (kEntityFlagPlayer | kEntityFlagDead)) ==
+                        kEntityFlagDead;
+        ent->alive = e.health > 0 && !org1_corpse;
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
         ent->yaw = static_cast<int16_t>(

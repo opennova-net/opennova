@@ -864,4 +864,14 @@ struct AiEntity;
 void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
                            int16_t health);
 
+class World;
+
+// Whether `victim` is an org1 (NPC) body whose own motor death edge raises its
+// death transaction (the 0x13 + scoring), so the host's damage-time death record
+// for it only feeds the SP kill tally. Player bodies and organics without a live
+// motor keep the damage-time transaction.
+// [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath
+//  @0x51B550; Score_ProcessKillEvent @0x4FD400 from the damage paths only]
+bool org1_owns_death_transaction(const World &world, EntityHandle victim);
+
 } // namespace opennova::world

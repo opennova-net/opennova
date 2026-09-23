@@ -357,6 +357,13 @@ struct RoundDeath {
     // Entity_ApplyVehicleCollisionDamage @0x4E6773, Entity_ApplyWeaponDamage
     // @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
     bool kill_event = false;
+    // Raised by an org1 body's own death edge: the death transaction (0x13 +
+    // scoring against lastAttacker) without the damage-time SP tally. A
+    // damage-time record for such a body only feeds that tally; its edge
+    // raises the transaction. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
+    // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
+    // @0x4FD400 is called only from the damage paths]
+    bool motor_edge = false;
 };
 
 // A medic-kit hit on a downed teammate the kill-zone pass admitted this tick —
