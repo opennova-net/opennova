@@ -2029,8 +2029,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// immediate C2S 0x0E pick, then stages its private bundle on that player's
 	// transport. [orig: SpawnWaveList_Tick @0x52A550 from Server_TickUpdate;
 	// SpawnWaveList_TickEntry @0x52A330]
-	if (ctx.is_in_session && !world.match.outcome().ended &&
-			periodic_second) {
+	// [orig: Server_TickUpdate — the in-session and round-over tests
+	//  @0x51DE3E/@0x51DE58 skip only to @0x51DF50, so the spawn-wave tick
+	//  @0x51DF6E runs every periodic second]
+	if (periodic_second) {
 		for (const world::SpawnWaveRelease &release :
 				world.zones.spawn_waves.tick(world)) {
 			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -2084,9 +2086,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     flips do not emit 0x53 in Server_UpdateCaptureZones @0x53B8F0.
 	// The independent general 0x40 minimap-overlay producer runs above at its
 	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
-	if (ctx.is_in_session && !world.match.outcome().ended &&
-			periodic_second &&
-			(world.match.rules().game_type & 0x30000u) != 0) {
+	// Every periodic second, in every game type and through the post-round
+	// linger. [orig: Server_TickUpdate — the in-session and round-over tests
+	//  @0x51DE3E/@0x51DE58 skip only to @0x51DF50; the calls
+	//  @0x51DF73/@0x51DF7D/@0x51DF87]
+	if (periodic_second) {
 		world::ZoneCaptureEvents ev;
 		world.zones.capture_second_tick(ev);
 		// The capture scoring: a numbered flip's event-24 recipients, an

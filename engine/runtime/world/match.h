@@ -206,10 +206,21 @@ struct MatchPlayer {
     // Server_PlayerAdd @0x51D51C]
     std::array<uint8_t, 17> script_vars{};
     // Player-slot +100567, the live spectator latch. The scorer refuses
-    // every event for a spectator-flagged slot, so the non-team round winner
-    // award skips the row. The authority mirrors its connection latch here.
-    // [orig: GameEvent_ProcessScoring @0x52F6FA]
+    // every event for a spectator-flagged slot, so the round winner awards
+    // skip the row; the proximity pass skips the slot after its mask clear
+    // and the TKOTH holder census never counts it. The authority mirrors its
+    // connection latch here.
+    // [orig: GameEvent_ProcessScoring @0x52F6E5/@0x52F6FA;
+    //  Server_UpdateCaptureZoneProximity @0x508795;
+    //  Game_CountAlivePlayersPerTeam @0x500214]
     bool spectator = false;
+    // Player-slot +89912 bit 0x10, the undeployed (respawn-pending) bit: set
+    // at join when the mission offers deploy zones, cleared by the deploy
+    // leg. Event 25's counter skips a pending slot. The authority mirrors its
+    // connection bit here.
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath
+    //  @0x517791; Server_UpdateCaptureZoneProximity @0x5087A2]
+    bool respawn_pending = false;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -341,8 +352,11 @@ class Match {
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
     // Mirrors the player-slot spectator latch (+100567) onto the roster row.
-    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E74]
+    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E61]
     void set_player_spectator(EntityHandle entity, bool spectator);
+    // Mirrors the player-slot undeployed bit (+89912 & 0x10) onto the row.
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791]
+    void set_player_respawn_pending(EntityHandle entity, bool pending);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player
@@ -477,6 +491,7 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
+    void accumulate_team_scores(const World &world);
     void update_flag_objectives(World &world);
     int32_t team_objective_ticks(const World &world, uint8_t team) const;
 

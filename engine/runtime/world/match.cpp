@@ -452,6 +452,11 @@ void Match::set_player_spectator(EntityHandle entity, bool spectator) {
         row->spectator = spectator;
 }
 
+void Match::set_player_respawn_pending(EntityHandle entity, bool pending) {
+    if (MatchPlayer *row = player(entity))
+        row->respawn_pending = pending;
+}
+
 const MatchPlayer *Match::player(EntityHandle entity) const {
     const auto it = std::find_if(players_.begin(), players_.end(),
                                  [&](const MatchPlayer &p) { return p.identity.entity == entity; });
@@ -1254,17 +1259,26 @@ void Match::update_objective_proximity(const World &world) {
         match_player.objective_proximity_mask = 0;
         if (player_entity == nullptr)
             continue;
+        // A spectator-latched slot is skipped after its mask clear.
+        // [orig: Server_UpdateCaptureZoneProximity `cmp byte ptr [esi+188D7h], 0`
+        //  @0x508795]
+        if (match_player.spectator)
+            continue;
         const bool live = is_live_player(player_entity);
 
         // This counter is independent of capture contact. Retail increments
-        // it for every live, non-respawn-pending player and dispatches event
-        // 25 on exact multiples of status value 36 (values < 1 use 0xffff).
-        // Event 25 updates only the player: raw stat 40 receives the original
-        // status-36 value and points receive status value 35, the one award
-        // that never shares with the +0x170 links (param2 = 1).
-        // [orig: Server_UpdateCaptureZoneProximity @0x5087C9..0x5087F1;
-        // GameEvent_ProcessScoring case 25 @0x530968..0x530990]
-        if (live) {
+        // it for every live, non-respawn-pending player in a network session
+        // and dispatches event 25 on exact multiples of status value 36
+        // (values < 1 use 0xffff). Event 25 updates only the player: raw stat
+        // 40 receives the original status-36 value and points receive status
+        // value 35, the one award that never shares with the +0x170 links
+        // (param2 = 1). world.rules.mp_session carries retail's is_in_session
+        // (the port's SP listen server always runs ctx.is_in_session = 1).
+        // [orig: Server_UpdateCaptureZoneProximity — the pending bit
+        //  @0x5087A2, the dead bit @0x5087AD, the session test @0x5087BC, the
+        //  counter @0x5087C9..0x5087F1; GameEvent_ProcessScoring case 25
+        //  @0x530968..0x530990]
+        if (live && !match_player.respawn_pending && world.rules.mp_session) {
             match_player.periodic_score_ticks =
                 wrap_add(match_player.periodic_score_ticks, 1);
             int32_t scoring_interval = score_value(36);
@@ -1387,16 +1401,20 @@ void Match::update_objective_proximity(const World &world) {
         if (++match_player.capture_period_ticks >= 10)
             match_player.capture_period_ticks = 0;
     }
+}
 
-    // Game_AccumulateTeamScores consumes the freshly rebuilt bit-0 masks. It
-    // runs for every team game, although only TKOTH exposes this hold counter
-    // as a win condition. [orig: Game_CountAlivePlayersPerTeam @0x5001C0;
-    // Game_AccumulateTeamScores @0x508D70]
-    if (team_mode) {
+void Match::accumulate_team_scores(const World &world) {
+    // Game_AccumulateTeamScores consumes the bit-0 masks the proximity pass
+    // last built. It runs for every team game, although only TKOTH exposes
+    // this hold counter as a win condition. [orig: Game_CountAlivePlayersPerTeam
+    // @0x5001C0; Game_AccumulateTeamScores @0x508D70]
+    if ((rules_.game_type & 0x10000u) != 0) {
         std::array<int32_t, 5> holders{};
         for (const MatchPlayer &match_player : players_) {
             const Entity *entity = world.registry.get(match_player.identity.entity);
-            if (!is_live_player(entity) ||
+            // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 — the spectator
+            //  test @0x500214]
+            if (match_player.spectator || !is_live_player(entity) ||
                 (match_player.objective_proximity_mask & 0x01u) == 0 ||
                 entity->team >= holders.size())
                 continue;
@@ -1573,11 +1591,29 @@ void Match::advance_tick(World &world, TickPhase phase) {
     periodic_second_fired_ = periodic_second_timer_ == 0;
     if (periodic_second_fired_)
         periodic_second_timer_ = 62;
-    if (outcome_.ended)
+    if (outcome_.ended) {
+        // Past the round end the proximity pass returns at its head, leaving
+        // the masks as its last pass built them, while the team hold census
+        // after it has no round-over test.
+        // [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only
+        //  to @0x51DF50; the calls @0x51DF50/@0x51DF55;
+        //  Server_UpdateCaptureZoneProximity @0x5086A3]
+        if (periodic_second_fired_)
+            accumulate_team_scores(world);
+        // The round clock has no round-over latch: its decrement is gated on
+        // the authority, the epilog screen and the pre-round timer only, so it
+        // keeps counting through the post-round linger.
+        // [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
+        if (phase == TickPhase::Gameplay && !world.epilog_screen_active() &&
+            remaining_ticks_ > 0)
+            --remaining_ticks_;
         return;
+    }
     ensure_objective_census(world);
-    if (periodic_second_fired_)
+    if (periodic_second_fired_) {
         update_objective_proximity(world);
+        accumulate_team_scores(world);
+    }
     if (phase != TickPhase::Gameplay)
         return;
     update_flag_objectives(world);
@@ -1898,13 +1934,19 @@ bool Match::finish(int32_t winner_team, const World &world) {
     if (outcome_.ended)
         return false;
     outcome_.winner_team = winner_team;
-    // Winner event 21 writes raw field 35 = 2 before the board build; it is an
-    // assignment, so the later eligible-player pass is idempotent.
-    // [orig: calls @0x516565/@0x5167FD; scorer case 21 @0x53073B]
-    if (winner_team != 0) {
+    // Team games: winner event 21 writes raw field 35 = 2 on every in-game
+    // slot of the winning team before the board build. The scorer refuses a
+    // spectator slot and a game type without a score table.
+    // [orig: Server_ProcessRoundEnd @0x5164F0 — the pass @0x516536..0x51658C
+    //  (state 6 @0x51653B, the team bit @0x516541, the winner team
+    //  @0x51655A), the call @0x516565; GameEvent_ProcessScoring — the category
+    //  gate @0x52F617..0x52F640, the spectator test @0x52F6E5, case 21
+    //  @0x52FF1E..0x52FF34]
+    if (winner_team != 0 && (rules_.game_type & 0x10000u) != 0 &&
+        gt::has_score_table(rules_.game_type)) {
         for (MatchPlayer &p : players_) {
             const Entity *entity = world.registry.get(p.identity.entity);
-            if (entity != nullptr && entity->team == winner_team)
+            if (entity != nullptr && !p.spectator && entity->team == winner_team)
                 p.stats[MatchStats::kRoundMarker] = 2;
         }
     }
@@ -1975,28 +2017,33 @@ bool Match::finish(int32_t winner_team, const World &world) {
     // (row 1 reads zero from the memset table when only one row exists),
     // every state-6 slot whose sort key equals row 0's primary receives
     // event 21 -> RecordEvent(34, 2) -> raw field 35 = 2. The scorer refuses
-    // a spectator-flagged slot and a slot without an entity.
+    // a game type without a score table, a spectator-flagged slot and a slot
+    // without an entity.
     // [orig: Server_ProcessRoundEnd — isDrawOrNonTeam @0x5165A3..0x5165C3
     // over dword_24C1AD4/dword_24C1BB8 (rows 0/1 entry+0x40), the compare
     // @0x5167E2..0x5167F2, GameEvent_ProcessScoring(gt, entity, 21, 0, 2)
-    // @0x5167F6..0x5167FD; the memset @0x508F3F; case 21 @0x52FF20..0x52FF34;
-    // the spectator early-out @0x52F6FA; CPlayerStats_RecordEvent case 34
-    // @0x52C8E0]
+    // @0x5167F6..0x5167FD; the memset @0x508F3F; GameEvent_ProcessScoring —
+    // the category gate @0x52F617..0x52F640, the spectator early-out
+    // @0x52F6E5, case 21 @0x52FF1E..0x52FF34; CPlayerStats_RecordEvent case
+    // 34 @0x52C8E0]
     const int32_t row0_primary =
         result_.players.empty() ? 0 : result_.players[0].primary_score;
     const int32_t row1_primary =
         result_.players.size() > 1 ? result_.players[1].primary_score : 0;
-    if (result_.draw || row1_primary == row0_primary)
+    if (result_.draw || row1_primary == row0_primary ||
+        !gt::has_score_table(rules_.game_type))
         return true;
-    for (MatchResultPlayer &row : result_.players) {
+    for (const MatchResultPlayer &row : result_.players) {
         if (row.primary_score != row0_primary)
             continue;
         MatchPlayer *match_player = player(row.identity.entity);
         if (match_player == nullptr || match_player->spectator ||
             world.registry.get(row.identity.entity) == nullptr)
             continue;
+        // The award follows the board build, so the frozen row keeps its
+        // field 35. [orig: Server_ProcessRoundEnd — the board @0x516590,
+        // the award @0x5167F6..0x5167FD]
         match_player->stats[MatchStats::kRoundMarker] = 2;
-        row.stats[MatchStats::kRoundMarker] = 2;
     }
     return true;
 }

@@ -709,6 +709,9 @@ void test_retail_objective_proximity_scoring_events() {
         (*tdm.score_values)[35] = 7;
         (*tdm.score_values)[36] = 3;
         world->match.configure(tdm);
+        // Event 25 runs only in a network session.
+        // [orig: Server_UpdateCaptureZoneProximity @0x5087BC]
+        world->rules.mp_session = true;
         const EntityHandle blue = player(*world, 0, 1, "Blue");
 
         // The independent live-player counter calls event 25 at each status
@@ -1315,8 +1318,12 @@ void test_end_result_freezes_team_hold_timer() {
 // @0x509053/@0x50920E/@0x50926A/@0x5092B2; Server_ProcessRoundEnd
 // @0x5165A3..0x5165C3 and @0x5167E2..0x5167FD; GameEvent_ProcessScoring @0x52F6FA]
 void test_nonteam_board_order_draw_and_winner_marker() {
-    auto marker = [](const MatchResult &result, const char *name) {
-        for (const MatchResultPlayer &row : result.players) {
+    // The non-team award runs after the board freeze, so it is read from the
+    // live roster; the frozen rows keep their field 35.
+    // [orig: Server_ProcessRoundEnd — the board @0x516590, the award
+    //  @0x5167F6..0x5167FD]
+    auto marker = [](const World &world, const char *name) {
+        for (const MatchPlayer &row : world.match.players()) {
             if (row.identity.name == name)
                 return row.stats[MatchStats::kRoundMarker];
         }
@@ -1349,9 +1356,10 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         CHECK(result.players[1].identity.name == "Bee" && result.players[1].primary_score == 1);
         CHECK(result.players[2].identity.name == "Cid" && result.players[2].primary_score == 0);
         CHECK(!result.draw);
-        CHECK(marker(result, "Ace") == 2);
+        CHECK(marker(*world, "Ace") == 2);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 0);
+        CHECK(marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
     }
 
     // (b) Every row tied at zero: a draw, no marker.
@@ -1364,7 +1372,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(result.draw);
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
     }
 
     // (c) A lone row: a draw at zero, a win with any positive score.
@@ -1375,14 +1383,14 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         player(*world, 3, 1, "Solo");
         world->process_round_end(0);
         CHECK(world->match.result().draw);
-        CHECK(marker(world->match.result(), "Solo") == 0);
+        CHECK(marker(*world, "Solo") == 0);
 
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle solo = player(*world, 3, 1, "Solo");
         world->match.player(solo)->stats[MatchStats::kEnemyKills] = 1;
         world->process_round_end(0);
         CHECK(!world->match.result().draw);
-        CHECK(marker(world->match.result(), "Solo") == 2);
+        CHECK(marker(*world, "Solo") == 2);
     }
 
     // (d) Two rows tied at the top over a third: not a draw, but no marker.
@@ -1399,7 +1407,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace" && result.players[1].identity.name == "Bee");
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
     }
 
     // (e) KOTH orders by the hill ticks the primary selects, not points.
@@ -1420,7 +1428,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(result.players[0].identity.name == "Red" && result.players[0].primary_score == 9);
         CHECK(!result.draw);
-        CHECK(marker(result, "Red") == 2 && marker(result, "Solo") == 0);
+        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 0);
     }
 
     // (f) A spectator-flagged top scorer receives no award.
@@ -1436,7 +1444,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace");
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
     }
 }

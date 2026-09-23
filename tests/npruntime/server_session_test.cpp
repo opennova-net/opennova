@@ -3738,6 +3738,137 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	              "the numbered flip sends 51/50 to the two teams and the 56 banner to all");
 }
 
+// The capture transaction runs every periodic second in every game type and
+// through the post-round linger: a DM mission's numbered ChangeTeam zone and
+// an ended TDM round still get the secure pass's 0x6F record.
+// [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only to
+//  @0x51DF50; Server_UpdateCaptureZoneEntities call @0x51DF73]
+bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
+	auto run = [](uint32_t game_type, bool ended) {
+		opennova::inmatch::NapiNPServerCtx ctx;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type;
+		opennova::world::World world;
+		world.rules.mp_session = true;
+		ctx.world = &world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(1, 4);
+		opennova::world::MatchRules rules;
+		rules.game_type = game_type;
+		world.match.configure(rules);
+		opennova::world::Entity zone;
+		zone.kind = opennova::world::EntityKind::Item;
+		zone.is_capture_trigger = true;
+		zone.zone_number = 1;
+		zone.zone_radius = 20;
+		zone.team = 1;
+		zone.health = 1;
+		zone.alive = true;
+		const auto zone_handle = world.registry.spawn(1, zone);
+		world.zones.build_chain_from_mission();
+		opennova::world::Entity body;
+		body.kind = opennova::world::EntityKind::Organic;
+		body.player_class = 8;
+		body.team = 1;
+		body.health = 150;
+		body.alive = true;
+		body.position = {500.0f, 0.0f, 0.0f};
+		const auto player = world.registry.spawn(0, body);
+		world.match.upsert_player({player, 0, "Blue", {}});
+		opennova::replication::UdpSessionTransport transport(
+				opennova::replication::UdpSessionTransport::Role::Host);
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.link.owned_entity = player;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+		if (ended) world.process_round_end(1);
+		opennova::inmatch::Server_TickUpdate(ctx);
+		bool saw_control = false;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw)) {
+			if (raw.size() >= 3 && raw[0] == opennova::s2c::ZONE_TIMER_VALUE &&
+			    raw[1] == static_cast<uint8_t>(zone_handle.packed) &&
+			    raw[2] == static_cast<uint8_t>(zone_handle.packed >> 8))
+				saw_control = true;
+		}
+		return saw_control;
+	};
+	return expect(run(opennova::game_type::kDeathmatch, false),
+	              "a DM mission's numbered zone gets the 0x6F secure record") &&
+	       expect(run(opennova::game_type::kTeamDeathmatch, true),
+	              "the secure pass keeps running after the round ends");
+}
+
+// The roster row mirrors the slot's undeployed bit: the join sets it when the
+// mission offers deploy zones, the deploy leg and a spectator's return to play
+// clear it (entering spectator mode leaves it alone), so event 25's counter
+// skips the slot until the player deploys.
+// [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791;
+//  Server_UpdateCaptureZoneProximity @0x5087A2]
+bool check_roster_mirrors_the_undeployed_bit() {
+	NapiNPServerCtx ctx;
+	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.config.max_players = 4;
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	opennova::world::Entity zone;
+	zone.kind = opennova::world::EntityKind::Building;
+	zone.item_id = 0x0500;
+	zone.is_spawn_point = true;
+	zone.alive = true;
+	zone.team = 1;
+	if (!expect(world.registry.spawn(2, zone).valid(),
+	            "undeployed-bit fixture installs a selectable spawn zone"))
+		return false;
+	ctx.world = &world;
+	opennova::replication::UdpSessionTransport transport_a(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::replication::UdpSessionTransport transport_b(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	for (int i = 0; i < 2; ++i) {
+		opennova::inmatch::NapiNPConnection conn;
+		conn.peer = {0x0100007Fu, static_cast<uint16_t>(34036 + i)};
+		conn.type = 1;
+		conn.connection_id = opennova::inmatch::kFirstJoinerDcb + static_cast<uint32_t>(i);
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = i == 0 ? &transport_a : &transport_b;
+		conn.player_name = i == 0 ? "Deployer" : "Watcher";
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	opennova::inmatch::NapiNPConnection &deployer = ctx.np_protocol.connection_list[0];
+	opennova::inmatch::NapiNPConnection &watcher = ctx.np_protocol.connection_list[1];
+	const opennova::world::EntityHandle a =
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world);
+	const opennova::world::EntityHandle b =
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world);
+	auto pending = [&world](opennova::world::EntityHandle handle) {
+		const opennova::world::MatchPlayer *row = world.match.player(handle);
+		return row != nullptr && row->respawn_pending;
+	};
+	bool ok = expect(a.valid() && b.valid() && deployer.link.respawn_pending &&
+	                         pending(a) && pending(b),
+	                 "the join mirrors the undeployed bit onto the roster row");
+	opennova::inmatch::Server_ReleasePlayerDeployment(
+			ctx.config, deployer, world, opennova::world::EntityHandle{});
+	ok = expect(!deployer.link.respawn_pending && !pending(a),
+	            "the deploy leg clears the roster row's undeployed bit") && ok;
+	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, true);
+	ok = expect(watcher.link.spectator && watcher.link.respawn_pending && pending(b),
+	            "entering spectator mode leaves the undeployed bit alone") && ok;
+	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, false);
+	ok = expect(!watcher.link.respawn_pending && !pending(b),
+	            "a spectator's return to play clears the undeployed bit") && ok;
+	return ok;
+}
+
 // Retail's S2C 0x40 producer is the general minimap-overlay stream, not an AS
 // capture-zone-only packet. 00TRg has no zone chain, yet its retail host sends
 // two initial persistent batches for pool-2 buildings/armories (16 + 8), then
@@ -4036,6 +4167,8 @@ int main() {
 	ok = check_score_ini_drives_session_status_values() && ok;
 	ok = check_timed_capture_host_wire_transaction() && ok;
 	ok = check_numbered_flip_pair_and_banner_wire() && ok;
+	ok = check_capture_pass_runs_in_every_mode_and_after_the_round() && ok;
+	ok = check_roster_mirrors_the_undeployed_bit() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

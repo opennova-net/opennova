@@ -359,6 +359,7 @@ void test_points_share_with_the_link() {
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(1, 16);
     world->match.configure(share);
+    world->rules.mp_session = true; // event 25 needs a network session
     const EntityHandle rider = player(*world, 0, 1);
     const EntityHandle driver = player(*world, 1, 1);
     const EntityHandle enemy = player(*world, 2, 2);
@@ -391,6 +392,161 @@ void test_points_share_with_the_link() {
     CHECK(world->registry.get(hull)->primary_occupant == driver);
 }
 
+// The round clock keeps counting after the round ends (no round-over latch),
+// in the gameplay phase only. [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
+void test_round_clock_runs_through_the_linger() {
+    MatchRules timed = rules(gt::kTeamDeathmatch);
+    timed.game_time_minutes = 1;
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->match.configure(timed);
+    world->rules.mp_session = true;
+    player(*world, 0, 1);
+    world->match.advance_tick(*world);
+    world->process_round_end(1);
+    const int32_t at_end = world->match.remaining_ticks();
+    for (int tick = 0; tick < 10; ++tick)
+        world->match.advance_tick(*world);
+    CHECK(world->match.remaining_ticks() == at_end - 10);
+    world->match.advance_tick(*world, TickPhase::PreRound);
+    CHECK(world->match.remaining_ticks() == at_end - 10);
+}
+
+// The pre-board winner pass is a team-game pass (the team bit), refuses a
+// spectator slot, and leaves non-team games to the post-board award.
+// [orig: Server_ProcessRoundEnd @0x516536..0x51658C (the team bit @0x516541);
+// GameEvent_ProcessScoring @0x52F6E5]
+void test_team_winner_pass_needs_the_team_bit() {
+    {
+        auto world = make_world(gt::kTeamDeathmatch);
+        const EntityHandle blue = player(*world, 0, 1);
+        const EntityHandle watcher = player(*world, 1, 1);
+        world->match.set_player_spectator(watcher, true);
+        world->process_round_end(1);
+        CHECK(world->match.player(blue)->stats[MatchStats::kRoundMarker] == 2);
+        CHECK(world->match.player(watcher)->stats[MatchStats::kRoundMarker] == 0);
+    }
+    {
+        // Every DM Player is team 1; a team-1 result marks only the top score.
+        auto world = make_world(gt::kDeathmatch);
+        const EntityHandle ace = player(*world, 0, 1);
+        const EntityHandle bee = player(*world, 1, 1);
+        world->match.record_death(*world, bee, ace);
+        world->process_round_end(1);
+        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
+        CHECK(world->match.player(bee)->stats[MatchStats::kRoundMarker] == 0);
+    }
+}
+
+// The proximity pass skips a spectator after clearing its mask, and the TKOTH
+// holder census never counts one. [orig: Server_UpdateCaptureZoneProximity
+// @0x508795; Game_CountAlivePlayersPerTeam @0x500214]
+void test_spectators_hold_no_objective() {
+    MatchRules koth = rules(gt::kTeamKingOfTheHill);
+    koth.game_time_minutes = 5;
+    koth.hill_limit_minutes = 99;
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->registry.configure_pool(3, 16);
+    world->match.configure(koth);
+    world->rules.mp_session = true;
+    const EntityHandle watcher = player(*world, 0, 1);
+    world->match.set_player_spectator(watcher, true);
+    Entity hill;
+    hill.kind = EntityKind::Item;
+    hill.item_id = 6006;
+    hill.has_item_def = true;
+    hill.bound_radius = 10.0f;
+    hill.alive = true;
+    world->registry.spawn(3, hill);
+    for (int tick = 0; tick < 3 * 62; ++tick)
+        world->match.advance_tick(*world);
+    CHECK(world->match.player(watcher)->objective_proximity_mask == 0);
+    CHECK(world->match.player(watcher)->stats[MatchStats::kHillTime] == 0);
+    CHECK(world->match.team_primary_score(1) == 0);
+}
+
+// Event 25's counter runs for a live, deployed Player in a network session
+// only: an undeployed (respawn-pending) slot and the SP game skip it.
+// [orig: Server_UpdateCaptureZoneProximity — the pending bit @0x5087A2, the
+//  session test @0x5087BC, the counter @0x5087C9..0x5087F1]
+void test_periodic_score_needs_a_deployed_session_player() {
+    MatchRules periodic = rules(gt::kTeamDeathmatch);
+    (*periodic.score_values)[35] = 7;
+    (*periodic.score_values)[36] = 1;
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->match.configure(periodic);
+    world->rules.mp_session = true;
+    const EntityHandle pending = player(*world, 0, 1);
+    const EntityHandle deployed = player(*world, 1, 1);
+    world->match.set_player_respawn_pending(pending, true);
+    world->match.advance_tick(*world);
+    CHECK(world->match.player(pending)->periodic_score_ticks == 0);
+    CHECK(world->match.player(pending)->stats[MatchStats::kPoints] == 0);
+    CHECK(world->match.player(deployed)->periodic_score_ticks == 1);
+    CHECK(world->match.player(deployed)->stats[MatchStats::kPoints] == 7);
+
+    world->match.set_player_respawn_pending(pending, false);
+    world->rules.mp_session = false;
+    for (int tick = 0; tick < 62; ++tick)
+        world->match.advance_tick(*world);
+    CHECK(world->match.player(pending)->periodic_score_ticks == 0);
+    CHECK(world->match.player(deployed)->periodic_score_ticks == 1);
+}
+
+// Past the round end the proximity pass returns at its head, but the team
+// hold census after it keeps running over the masks the last pass built;
+// it still never counts a spectator slot.
+// [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only to
+//  @0x51DF50, the calls @0x51DF50/@0x51DF55; Server_UpdateCaptureZoneProximity
+//  @0x5086A3; Game_CountAlivePlayersPerTeam @0x500214]
+void test_team_hold_counts_after_the_round() {
+    MatchRules koth = rules(gt::kTeamKingOfTheHill);
+    koth.game_time_minutes = 5;
+    koth.hill_limit_minutes = 99;
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->registry.configure_pool(3, 16);
+    world->match.configure(koth);
+    world->rules.mp_session = true;
+    player(*world, 0, 1);
+    const EntityHandle red = player(*world, 1, 2);
+    Entity hill;
+    hill.kind = EntityKind::Item;
+    hill.item_id = 6006;
+    hill.has_item_def = true;
+    hill.bound_radius = 10.0f;
+    hill.alive = true;
+    world->registry.spawn(3, hill);
+    world->match.advance_tick(*world);
+    CHECK(world->match.team_primary_score(1) == 1);
+    CHECK(world->match.team_primary_score(2) == 1);
+
+    world->process_round_end(1);
+    world->match.set_player_spectator(red, true);
+    for (int tick = 0; tick < 62; ++tick)
+        world->match.advance_tick(*world);
+    CHECK(world->match.team_primary_score(1) == 2);
+    CHECK(world->match.team_primary_score(2) == 0);
+    CHECK(world->match.result().team_hold_ticks[1] == 1);
+}
+
+// A game type without a score table gets no winner award: the scorer's
+// category gate refuses event 21 (FlagMe maps past the table).
+// [orig: GameEvent_ProcessScoring @0x52F617..0x52F640; Server_ProcessRoundEnd
+//  @0x5167F6..0x5167FD]
+void test_winner_award_needs_a_score_table() {
+    auto world = make_world(gt::kFlagMe);
+    const EntityHandle ace = player(*world, 0, 1);
+    player(*world, 1, 1);
+    world->match.player(ace)->stats[MatchStats::kFlagCaptures] = 1;
+    world->process_round_end(0);
+    CHECK(!world->match.result().draw);
+    CHECK(world->match.result().players[0].identity.entity == ace);
+    CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
+}
+
 } // namespace
 
 int main() {
@@ -404,6 +560,12 @@ int main() {
     test_enemy_player_kill_bonuses();
     test_revive_scores_medicsave();
     test_points_share_with_the_link();
+    test_round_clock_runs_through_the_linger();
+    test_team_winner_pass_needs_the_team_bit();
+    test_spectators_hold_no_objective();
+    test_periodic_score_needs_a_deployed_session_player();
+    test_team_hold_counts_after_the_round();
+    test_winner_award_needs_a_score_table();
     if (failures != 0) {
         std::printf("match_scoring_test: %d failure(s)\n", failures);
         return 1;

@@ -1007,7 +1007,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
 	conn.discard_pre_deploy_uplinks = true;
+	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(player->handle, false);
 	conn.link.respawn_delay_seconds = 0;
 	conn.link.spawn_target_hold_seconds = 0;
 	conn.link.respawn_hold_armed = false;

@@ -418,8 +418,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world.match.upsert_player(match_player);
 	// The roster row mirrors the slot's spectator latch (+100567) so the
 	// end-round winner award skips a spectator-flagged top scorer
-	// [orig: Server_PlayerAdd @0x51CD83].
+	// [orig: Server_PlayerAdd @0x51CD83], and its undeployed bit so event 25
+	// skips a pending slot [orig: Server_OnPlayerJoin @0x51A6F2;
+	// Server_UpdateCaptureZoneProximity @0x5087A2].
 	world.match.set_player_spectator(h, conn.link.spectator);
+	world.match.set_player_respawn_pending(h, conn.link.respawn_pending);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -603,6 +606,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	conn.link.spectator = false;
 	world.match.set_player_spectator(conn.link.owned_entity, false);
 	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
 	uint8_t team = conn.spectator_restore_team;
 	if (team == 0) team = 1;
 	conn.assigned_team = team;
