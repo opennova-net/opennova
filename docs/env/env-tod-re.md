@@ -1021,7 +1021,10 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   the tail of a non-epilog `Entity_UpdateAllEntities @0x4C2100` (`@0x4C2639`), so the noise
   and the wave phase advance once per entity update, freeze with it and never run faster
   than 62 Hz. Wave phase `Water_WavePhase = counter × 0x3000000` (`imul` `@0x5C036E`, the
-  store `@ 0x5c0374`).
+  store `@ 0x5c0374`). Port: the pair still regenerates once per rendered water frame, at
+  `World::entity_update_counter`, which `godot/src/world/game_world_frame.cpp` feeds to
+  `Water::set_noise_frame_counter` each render frame (2026-09-23; a `Water` nobody feeds, a
+  preview or a test node, counts its own render frames).
 - **Init tables** (`Water_InitNoiseFieldAndSineLut @ 0x5c01a0`, once from
   `Water_InitSurfaceShaders @ 0x5c19b0` — renamed at REN-4 from the kong misnomer
   `Terrain_InitShaders`; call site `@ 0x5c19f8`): field = 128×128 samples
