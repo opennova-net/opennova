@@ -3040,7 +3040,7 @@ int main() {
 		CHECK(sys.unported_calls == 0); // landing safely handles an absent entity
 	}
 
-	// ---- body-anim slot selection from movement (update_body_anim_slot) ----
+	// ---- body-anim slot names; the class machines select none ----
     {
         // body_anim_adm_key maps slots to the AI .adm key namespace.
         CHECK(streq(body_anim_adm_key(kBodyAnimIdle), "anim_idle"));
@@ -3062,34 +3062,20 @@ int main() {
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
-        // State 20's row is all no-ops, so nothing clobbers kOutSpeed -- isolating the
-        // movement->slot mapping (which keys off kOutSpeed + kAlert, not the state id).
+        // State 20's row is all no-ops. Moving or stopped, alert or not, the
+        // dispatcher's update leg writes no body-anim slot [orig:
+        // EntityAI_ProcessInfantryStateMachine @0x4581B0, the event-0 leg ends in
+        // the +0x2AC re-arm @0x458363 and the commit].
         e.brain.f[AiBrain::kCurState] = kAiGroundReturnToBase;  // 20
         e.brain.f[AiBrain::kPendState] = kAiGroundReturnToBase;
-
-        // Moving, not alert -> walk_forward.
-        e.brain.f[AiBrain::kOutSpeed] = 10;
-        e.brain.f[AiBrain::kAlert] = 0;
-        sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimWalkForward);
-
-        // Moving + alert -> run_forward.
-        e.brain.f[AiBrain::kOutSpeed] = 10;
-        e.brain.f[AiBrain::kAlert] = 2;
-        sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimRunForward);
-
-        // Stopped -> idle.
-        e.brain.f[AiBrain::kOutSpeed] = 0;
-        sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimIdle);
-
-        // Dead -> slot left as-is (present pass hides it); not overwritten to idle.
-        w.registry.get(h)->body_anim_slot = kBodyAnimWalkForward;
-        w.registry.get(h)->alive = false;
-        w.registry.get(h)->health = 0;
-        sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimWalkForward);
+        for (int32_t speed : {10, 0}) {
+            for (int32_t alert : {0, 2}) {
+                e.brain.f[AiBrain::kOutSpeed] = speed;
+                e.brain.f[AiBrain::kAlert] = alert;
+                sys.process_infantry_state_machine(e, w, 0);
+                CHECK(w.registry.get(h)->body_anim_slot == -1);
+            }
+        }
     }
 
     // ======================= P1: GROUND_FOLLOWWP movement =======================

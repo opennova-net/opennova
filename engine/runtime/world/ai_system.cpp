@@ -377,7 +377,7 @@ void process_class_state_machine(
             sys.row(b.f[AiBrain::kCurState]).tick(ctx);
         // A dead-state tick may destroy the entity and free this brain (the retail
         // Server_RemoveEntityAndNotify inside AI_TickState_VehicleDead @0x467ede);
-        // the zeroed slot then has nothing to count, animate or commit.
+        // the zeroed slot then has nothing to count or commit.
         if (b.f[AiBrain::kOwner] == 0)
             return;
         ++b.f[AiBrain::kTick];
@@ -387,9 +387,9 @@ void process_class_state_machine(
         // decrement follows, so the next think lands brain[7] pool-1 visits
         // later [orig: EntityAI_ProcessVehicleStateMachine
         // @0x458561..0x458568; EntityAI_ProcessInfantryStateMachine @0x45835c..0x458363].
+        // Neither machine touches a body-anim selection.
         if (Entity *ent = world.registry.get(e.handle))
             ent->spawn_phase = b.f[AiBrain::kStep];
-        update_body_anim_slot(e, world); // pick walk/idle from state+movement for the present pass
         finish();
         return;
     }

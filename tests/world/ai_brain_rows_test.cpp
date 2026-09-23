@@ -198,6 +198,28 @@ void test_part_anim_rate_uses_the_single_precision_tick() {
     }
 }
 
+// The class dispatchers' update event writes no body-anim selection onto the
+// hull: neither machine has one [orig: EntityAI_ProcessVehicleStateMachine
+// @0x4583C0 and EntityAI_ProcessInfantryStateMachine @0x4581B0, whose event-0
+// legs end in the +0x2AC re-arm @0x458568 / @0x458363 and the commit].
+void test_class_update_leaves_the_body_anim_alone() {
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    seed.alive = true;
+    Hull hull(seed);
+    AiEntity &e = *hull.ai;
+    hull.w.ai.is_authority = true;
+    e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+    e.brain.f[AiBrain::kOutSpeed] = 0x10000; // moving
+    e.brain.f[AiBrain::kAlert] = e.brain.f[AiBrain::kPrevAlert] = 2;
+    hull.record().body_anim_slot = -1;
+    hull.w.ai.process_vehicle_state_machine(e, hull.w, 0);
+    CHECK(hull.record().body_anim_slot == -1);
+    hull.w.ai.process_infantry_state_machine(e, hull.w, 0);
+    CHECK(hull.record().body_anim_slot == -1);
+}
+
 // The profile loader's class-walk order against the retail CRT qsort run on
 // every {0..3}^4 priority tuple plus wrapping keys: the unstable selection
 // shortsort, stored reversed. Only HELO/GROUND profiles load their keys.
@@ -238,6 +260,7 @@ int main() {
     test_evade_flee_leg_turns_about_at_combat_speed();
     test_aircraft_dead_enter_wakes_as_team_zero();
     test_part_anim_rate_uses_the_single_precision_tick();
+    test_class_update_leaves_the_body_anim_alone();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

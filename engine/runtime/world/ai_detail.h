@@ -2,8 +2,8 @@
 
 // Internal to engine/runtime/world's AI TUs — not part of world/ai.h.
 //
-// The handful of free helpers the AI TUs share: the body-anim slot pick, the seat
-// anim lookup, and the BAM/distance/PRNG primitives the handlers and the waypoint
+// The handful of free helpers the AI TUs share: the seat anim lookup, the live
+// hull reads, and the BAM/distance/PRNG primitives the handlers and the waypoint
 // and combat legs all reach for.
 
 #include <runtime/world/ai.h>
@@ -20,25 +20,6 @@ namespace opennova::world {
 class World;
 
 namespace detail {
-
-// Minimal port of Entity_UpdateInfantryAI @0x4b9910's anim selection: pick a body-anim slot
-// from the brain state + movement so 3rd-person NPCs walk/idle instead of sliding at rest.
-// Writes the world Entity's body_anim_slot (what the present snapshot reads). Full fidelity
-// (randomized idle variants, jog/run thresholds, attack/death clips) is a grill follow-up.
-inline void update_body_anim_slot(AiEntity &e, World &world) {
-    Entity *ent = world.registry.get(e.handle);
-    if (ent == nullptr) return;
-    if (!ent->alive || ent->health <= 0) return; // dead: present pass hides it; leave the slot
-    const AiBrain &b = e.brain;
-    const bool moving = b.f[AiBrain::kOutSpeed] > 0;
-    int32_t slot;
-    if (moving) {
-        slot = (b.f[AiBrain::kAlert] >= 2) ? kBodyAnimRunForward : kBodyAnimWalkForward;
-    } else {
-        slot = kBodyAnimIdle;
-    }
-    ent->body_anim_slot = slot;
-}
 
 inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
                                 const IRootMotionSource *root_motion) {
