@@ -2235,6 +2235,9 @@ public:
 	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
+	// The world's entity-update counter (native, unbound): the water noise
+	// pair's frame counter (Water::advance_frame carries the witness).
+	uint32_t entity_update_counter() const { return kernel_->world.entity_update_counter; }
 
 	// The F3 AI window's pushed record (native, unbound): the ONE engine join,
 	// world::inspect::ai_debug_report, as the engine struct with no Variant

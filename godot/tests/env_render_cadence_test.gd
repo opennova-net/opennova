@@ -322,3 +322,40 @@ func test_standalone_water_scroll_is_invariant_across_render_refresh_rates() -> 
 	var expected := _water_fallback_state_after_one_second(62)
 	assert_eq(_water_fallback_state_after_one_second(30), expected)
 	assert_eq(_water_fallback_state_after_one_second(144), expected)
+
+
+# The noise pair's frame counter is the world's entity-update counter once a
+# world feeds it (retail's Water_GenerateNoiseTextures reads that counter), so
+# a world that holds its entity update regenerates the same pair every render
+# frame; a Water nobody feeds counts its own render frames.
+func test_water_noise_counter_follows_the_fed_entity_update_counter() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(160, 90)
+	add_child_autofree(viewport)
+	var env_data := _loaded_env()
+	env_data.set_water_height(14.0)
+	var env := MissionEnvironment.new()
+	env.name = "Env"
+	env.environment_data = env_data
+	viewport.add_child(env)
+	var water := Water.new()
+	water.environment_path = NodePath("../Env")
+	viewport.add_child(water)
+	var camera := Camera3D.new()
+	camera.position = Vector3(20.0, 27.0, -30.0)
+	viewport.add_child(camera)
+	camera.make_current()
+	# The per-frame water pass: visible terrain reaches below the surface.
+	water.set_visible_terrain_bounds(true, 0.0, 20.0)
+	water.set_blink_water_visible(true)
+	water.advance_frame(1.0 / 62.0)
+	water.advance_frame(1.0 / 62.0)
+	assert_eq(water.get_noise_frame_counter(), 2, "an unfed Water counts its render frames")
+	water.set_noise_frame_counter(40)
+	water.advance_frame(1.0 / 62.0)
+	water.advance_frame(1.0 / 62.0)
+	assert_eq(water.get_noise_frame_counter(), 40,
+			"a held entity update keeps the same count across render frames")
+	water.set_noise_frame_counter(41)
+	water.advance_frame(1.0 / 62.0)
+	assert_eq(water.get_noise_frame_counter(), 41, "the next entity update advances the pair")
