@@ -296,8 +296,8 @@ void h_enter_ground_combat(AiThinkCtx &ctx) {
 // @0x467452, `test al,4` @0x467488): FOLLOW_WP (0x1) -> pending 17 when brain[38] holds
 // a target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
 // after enter, so the re-route commits — the witnessed off_815238[4*state] tail call);
-// FLEE (0x4) -> 17; else alive -> the flee waypoint (controller triple
-// {1, 0x7FFFFFFF, 1}, freeze work transform, moveStep 16); dead -> death event 3|4.
+// FLEE (0x4) -> 17; else alive -> flee: turn about at combat speed (controller triple
+// {1, 0x7FFFFFFF, 1}, moveStep 16); dead -> death event 3|4.
 void h_enter_ground_evade(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
@@ -314,14 +314,18 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
         ctx.sys->row(kAiGroundCombat).enter(ctx);
         return;
     }
-    if (hull_health(ctx.world, e) > 0) {       // neither flag, alive: flee waypoint [orig: @0x4674A5]
-        e.patrol_f0 = 1;                       // [orig: controller triple {1, 0x7FFFFFFF, 1}]
+    if (hull_health(ctx.world, e) > 0) {       // neither flag, alive: flee [orig: @0x4674A5]
+        // Turn about and drive at combat speed: the controller triple, the working
+        // heading = entity heading + controller[1], working pitch/roll zeroed, the
+        // mover output at brain[49], step 16; the working position is not written.
+        // [orig: AI_EnterState_GroundEvade @0x46756D..0x4675B1]
+        e.patrol_f0 = 1;
         e.patrol_delta = 0x7FFFFFFF;
         e.patrol_goal = 1;
-        b.f[AiBrain::kWorkPosX] = e.pos[0];    // freeze the work transform at self
-        b.f[AiBrain::kWorkPosY] = e.pos[1];
-        b.f[AiBrain::kWorkPosZ] = e.pos[2];
-        b.f[AiBrain::kWorkHeading] = e.heading;
+        b.f[AiBrain::kWorkHeading] = io::bam_add(e.patrol_delta, e.heading);
+        b.f[AiBrain::kWorkPitch] = 0;
+        b.f[AiBrain::kWorkRoll] = 0;
+        b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
         b.f[AiBrain::kStep] = 16;
         return;
     }

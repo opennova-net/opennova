@@ -118,6 +118,37 @@ void test_alert_enters_raise_the_own_slot_alert() {
     }
 }
 
+// The evade enter's flee leg (alive, EVADE_FLAGS without FOLLOW_WP and FLEE):
+// the controller triple {1, 0x7FFFFFFF, 1}, the working heading turned about
+// (entity heading + controller[1]), working pitch/roll zero, the mover output
+// at combat speed brain[49], step 16. The working position is not written.
+// [orig: AI_EnterState_GroundEvade @0x46756D..0x4675B1]
+void test_evade_flee_leg_turns_about_at_combat_speed() {
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    Hull hull(seed);
+    AiEntity &e = *hull.ai;
+    e.profile.flags96 = 0;
+    e.heading = 0x12345678;
+    e.brain.f[AiBrain::kSpeedA] = 4321;
+    e.brain.f[AiBrain::kWorkPosX] = 7;
+    e.brain.f[AiBrain::kWorkPosY] = 8;
+    e.brain.f[AiBrain::kWorkPosZ] = 9;
+    e.brain.f[AiBrain::kWorkPitch] = 11;
+    e.brain.f[AiBrain::kWorkRoll] = 12;
+    AiThinkCtx ctx = hull.ctx();
+    hull.w.ai.row(kAiGroundEvade).enter(ctx);
+    CHECK(e.patrol_f0 == 1 && e.patrol_delta == 0x7FFFFFFF && e.patrol_goal == 1);
+    CHECK(e.brain.f[AiBrain::kWorkHeading] ==
+          static_cast<int32_t>(0x12345678u + 0x7FFFFFFFu));
+    CHECK(e.brain.f[AiBrain::kWorkPitch] == 0 && e.brain.f[AiBrain::kWorkRoll] == 0);
+    CHECK(e.brain.f[AiBrain::kOutSpeed] == 4321);
+    CHECK(e.brain.f[AiBrain::kStep] == 16);
+    CHECK(e.brain.f[AiBrain::kWorkPosX] == 7 && e.brain.f[AiBrain::kWorkPosY] == 8 &&
+          e.brain.f[AiBrain::kWorkPosZ] == 9);
+}
+
 // The profile loader's class-walk order against the retail CRT qsort run on
 // every {0..3}^4 priority tuple plus wrapping keys: the unstable selection
 // shortsort, stored reversed. Only HELO/GROUND profiles load their keys.
@@ -155,6 +186,7 @@ int main() {
     test_ground_rows_read_the_live_hull_words();
     test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();
+    test_evade_flee_leg_turns_about_at_combat_speed();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }
