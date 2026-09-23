@@ -4851,8 +4851,10 @@ producers:
   table lacks posts nothing there. Any other n is a NO-OP returning 0. Both handlers were undefined
   code before this session (define_func'd).
 - **BMS Blue/Red/GreenWin** (actions 8/9/10) [orig: EventAction_Dispatch
-  @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)`; the call sites
-  check the round-over latch first (our latch lives inside `process_round_end`).
+  @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)` with no gate at
+  the call sites (cases 8/9/10 @ 0x454479 / @ 0x454493 / @ 0x4544AD; the g_spawn_success_gate
+  test @ 0x454450 belongs to case 7's dialog play); the round end's own latch drops a second
+  end [orig: Server_ProcessRoundEnd @ 0x5164f0 (@ 0x5164F6)], as `process_round_end` does.
 - **The SP auto-lose** [orig: Server_CheckWinConditions @ 0x51ad40, SP leg
   @ 0x51ad6f] — the ONLY automatic SP condition: local player dead
   (`Flags & 2`) and the mission does not author `SinglePlayerRespawn`
@@ -4871,12 +4873,16 @@ producers:
 Order of operations: double-run guard on `g_spawn_success_gate @ 0x24c1928`
 [orig: @ 0x516502] → `g_round_winning_team @ 0x24c1924 = winner` [orig: @ 0x516528]
 → the winner-team scoring pass (team games: `GameEvent_ProcessScoring @ 0x52f550`
-per winning-team member, team byte entity+354, gate `g_GameType & 0x10000`)
-[orig: @ 0x516530] → `Server_BuildEndOfRoundScoreboard(1, winner) @ 0x508f30` →
+event 21, field 35 = 2, per state-6 slot whose entity is on the winning team, team byte
+entity+354, gate `g_GameType & 0x10000` @ 0x516541, @ 0x516536..0x51658C, so the frozen
+board carries the marker) [orig: @ 0x516530] → `Server_BuildEndOfRoundScoreboard(1, winner) @ 0x508f30` →
 server tick-phase metrics → phase 4 → **MP-only** `g_endround_linger_timer
 @ 0xc8d820 = 2790` (45 s) [orig: @ 0x5166c4] → per active slot in state 6: slot
 bookkeeping reset, S2C 0x61 round-end marker (4 zero bytes) [orig: @ 0x516790],
-the winner-bonus scoring leg, S2C 0x1D scoreboard header [orig: @ 0x516839],
+the winner-bonus scoring leg (non-team games: event 21 @ 0x5167E2..0x5167FD, AFTER the
+board build, so a non-team winner's end board shows field 35 = 0 and only the live roster
+holds 2; the scorer refuses a spectator slot @ 0x52F6E5 and a game type without a score
+table @ 0x52F617..0x52F640, so a Flag Me round awards nothing), S2C 0x1D scoreboard header [orig: @ 0x516839],
 `CNetPlayer_SetGameState(11)` [orig: @ 0x516846], slot state 6→7
 [orig: @ 0x51685e] → the per-team round-win counters for game types
 0x10000/65537/65540 [orig: @ 0x5168a0] → **the latch** `g_spawn_success_gate = 1`
@@ -4944,10 +4950,21 @@ alias, and the resulting NPC aim heading.
 
 ### 20.4 The kill tallies (`bluekills`/`greenkills` and the epilog buckets)
 
-`Score_ProcessKillEvent @ 0x4fd400` runs per kill from the damage chain
-(`Entity_ApplyWeaponDamage @ 0x4e6bfe/0x4e6fb4`, `Projectile_ProcessDamageOnTarget
-@ 0x4e8133`, vehicle/collision legs), authority-gated, and **outside net sessions
-only** [orig: the `!is_in_session` gate @ 0x4fd447]. Killer == the local player →
+`Score_ProcessKillEvent @ 0x4fd400` runs from exactly five damage-pass lethal edges:
+the run-over (`Entity_MovementCollisionResolver @ 0x4B2BD0`, the call @ 0x4B39E2), the
+knife kill zone (`Entity_ApplyVehicleCollisionDamage @ 0x4E6620`, @ 0x4E6773), the person
+and item blasts (`Entity_ApplyWeaponDamage @ 0x4E6820`, @ 0x4E6BFE / @ 0x4E6FB4) and the
+round (`Projectile_ProcessDamageOnTarget @ 0x4E7FB0`, @ 0x4E8133), never from a death edge
+or a script kill. It returns without a killer (@ 0x4FD405), without a target (@ 0x4FD40E),
+off the authority (@ 0x4FD412) and when the VICTIM's ItemDef is missing or its `score`
+word (def+0x194, the items.def `score` token, `ItemDef_ParseProperty` @ 0x4A0228..0x4A0242)
+is zero (@ 0x4FD41E / @ 0x4FD422); then it runs scorer event 12 (@ 0x4FD438) and, **outside
+net sessions only** [orig: the `!is_in_session` gate @ 0x4fd447], the tallies. No Player
+definition authors `score`, so a Player victim, a self-kill included, never tallies. The
+round's edge reads the PRE-hit health: the kill chain needs the health word > 0 (`movzx
+eax, word [esi+11Eh]; test ax,ax; jle` @ 0x4E80FE), damage >= health (@ 0x4E810A) and
+damage_state == 0 (@ 0x4E8112), and the kill accounting also skips a body already flagged
+dead (`test byte [esi+24h],2` @ 0x4E811F). Killer == the local player →
 `Score_TallyKillByLocalPlayer @ 0x4fd160` (ex-`Score_ProcessDamageEvent`
 misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
 (count @ first addr, score-sum pair at +4):
@@ -4959,12 +4976,15 @@ misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
   difficulty scaling ¾/3⁄2 on `dword_24D2110`).
 - by-others: infantry `@ 0xC846A8`, vehicle `@ 0xC846B0`, heli `@ 0xC846B8`,
   team `@ 0xC846C0`, friendly `@ 0xC846C8`, human-player victims `@ 0xC846A0`
-  (entity+534 flag).
+  (entity+534 flag). The team and friendly buckets take ANY victim type (no person
+  gate, @ 0x4FD325..0x4FD366); the human-player bucket is unreachable behind the victim
+  score gate.
 
 Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
 epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
 Port: `MissionKillStats` intentionally remains the count-only WAC/epilog view,
-tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
+tallied in `route_round_deaths` from the `RoundDeath::kill_event` deaths (set only at the
+five lethal edges) whose victim carries a nonzero `Entity::item_score`; the SP gate is
 `!world.rules.mp_session` because our SP-as-listen-server always runs
 `ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
 42-field player/team records with the signed `score.ini` event values used by
@@ -5079,18 +5099,31 @@ Two load/response-time resolutions the probe forced out:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, or saved-game list (the end-music switch is ported 2026-09-12: the `round_end` effect carries `MusicCtx_SelectEndTrack`'s 1|2 and the gamemus MessageHandler plays the `Missionwin`/`Missionlose` sting through `mus_vm_signal`); (d) `sub_5280B0` music-park remains unported; (e) the SP gate reads `world.rules.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
+| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); their producer set is exact since 2026-09-23 (the five `Score_ProcessKillEvent` edges and the victim `score` gate, which also makes the human bucket unreachable); (b) CLOSED 2026-09-23: events 1 (FIRE on the authority's local pass), 5 (MEDICHEAL), 6 (MEDICSAVE), 12 (the unit score), the NPC-victim path, the Player-arm kill bonuses and the +0x170 share of every points award but event 25 have their producers (§38.10); (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, or saved-game list (the end-music switch is ported 2026-09-12: the `round_end` effect carries `MusicCtx_SelectEndTrack`'s 1|2 and the gamemus MessageHandler plays the `Missionwin`/`Missionlose` sting through `mus_vm_signal`); (d) `sub_5280B0` music-park remains unported; (e) the SP gate reads `world.rules.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; the score producers are ported (2026-09-23); the SP tallies' counts-only shape and the SP presentation remain |
 
 **D-AI-10 update (2026-08-22, superseding the TDM/A&S-only wording above):**
 `world::Match` now implements every branch of `Server_CheckWinConditions
 @0x51AD40`: DM/TDM, solo/team KOTH, S&D/A&D, CTF, FlagBall, Flag Me, A&S/C&C,
-plus the universal all-zones-owned check; co-op remains intentionally
+plus the all-zones-owned check, which answers only in A&S and C&C
+(`ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2921..0x4A294E`), so a uniform chain in
+TDM or co-op neither wins nor suppresses the other arms; co-op remains intentionally
 WAC/BMS-owned. It also owns the recovered per-mode `ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850`
 primary score, flag carry/pickup/save/capture/return transitions, demolition
 target scoring, live 0x16 team projection, and authored objective census.
 Therefore residual (b) no longer applies to these retail game-mode producers.
-The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
-ordinary combat event producer not enumerated here.
+The remaining D-AI-10 scope is SP-only tallies/presentation/music; the ordinary
+combat event producers are ported (§38.10).
+
+The round clock keeps running after the round ends: `g_round_time_remaining`
+decrements in `Game_ProcessMainFrame` (@0x5265DA..0x526602) under the authority, no
+pause, no epilog, no pre-round and time left only, with no round-over latch, so the
+0x0F time field, the lobby info, the HUD timer and the end-round overlay read a moving
+value through the linger. Every periodic-second callee from @0x51DF50 on (the capture
+pass, the team hold timers, the win check, the spawn waves, the zone passes) runs in
+every game type and after the round ends; only the 0x46 resend walk is skipped
+(@0x51DE3E / @0x51DE58), and the proximity pass returns at the round end before its
+mask clear (@0x5086A3), so the objective masks freeze while the team hold timers keep
+counting (§38.10).
 
 The hill hold itself is accumulated by the per-second team pass: a team with at
 least one alive holder in the volume gains one tick, an empty team loses
@@ -5197,8 +5230,8 @@ unported (the SP epilog/respawn flow, D-AI-10 / D-LOADSCR-8); the probe's
    `dword_24C1AD4/BB8/C9C`, decoded by the joiner @ 0x430a70..0x430abb), the draw/tie semantics
    (`world::Match`) and the 0x2B/0x56 requester exchange are ported (§20.8 D-AI-10; ctests
    `npruntime_round_end`, `client_replica_endround`).
-6. `Score_ProcessKillEvent`'s killer `itemDef->score` gate (@ 0x4fd422) is
-   unmodeled — verify whether any SP loadout authors score 0.
+6. RESOLVED 2026-09-23: the `score` gate (@ 0x4fd422) reads the VICTIM's def, not the
+   killer's, and is ported (`Entity::item_score`, `RoundDeath::kill_event`; §20.4).
 
 ### 20.10 IDB write-backs (2026-07-16 session 6, saved)
 
@@ -8963,7 +8996,7 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
    [esp+var_7C]` @ 0x4b395d, `sub ebp, ebx` @ 0x4b3963; the port had used
    pusher minus victim until 2026-09-22), the unsigned shift @ 0x4b39a2..0x4b39a7,
    `+0x178 = pusher occupant` @ 0x4b39d1, Health 0 @ 0x4b39d7,
-   Score_ProcessKillEvent @ 0x4b39e2 (our RoundDeath credits the occupant).
+   the Score_ProcessKillEvent call @ 0x4b39e2 (our RoundDeath credits the occupant).
    PORTED 2026-09-22: a player victim (`Flags & 0x100` @ 0x4b3918) with a set
    damage-disabled word +0x124 (@ 0x4b391f; nonzero only during the 620-tick
    spawn protection or the dead latch, so a deployed live player's word is 0)
