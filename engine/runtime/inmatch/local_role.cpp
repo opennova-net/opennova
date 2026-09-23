@@ -13,6 +13,12 @@ void LocalRole::run_tick(const TickInput &) {
 	kernel.local.view_session_inputs = view_session_inputs_for(
 			nullptr, /*joiner=*/false, kernel.local.local_player_dead());
 	kernel.local.apply_player_input_pre_tick();
+	// The single-player authority runs the server tick too, so its WAC 'humans'
+	// count is rebuilt ahead of the script pass as a host's is: the local player
+	// keeps the world-run gate open.
+	// [orig: Game_ProcessMainFrame @0x5266b4 -> Server_TickUpdate, its
+	//  Server_BuildEntitySlotLists call @0x51d89a]
+	kernel.world.cached.humans = kernel.world.registry.count_humans();
 	kernel.world.run_logic_tick(/*is_authority=*/true, world::TickPhase::Gameplay);
 	// The VM's replicated commands have no connection to reach without a
 	// session; the handler already ran locally, so the tick's queue is released.

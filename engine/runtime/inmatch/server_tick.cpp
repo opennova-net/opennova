@@ -1930,22 +1930,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	}
 
 	// (1b) The WAC 'humans' count, rebuilt each server tick just before the script
-	// pass: every pool-0 row with an item def and the Player bit that is not hidden
-	// (a player waiting to deploy is). The original also uses it as the empty-server
-	// world-run gate (entities/WAC advance while humans > 0 || ticks == 0).
-	// [orig: Server_BuildEntitySlotLists @0x4f97a0 — zero @0x4f97c6, the def test
-	// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1;
-	// called from Server_TickUpdate @0x51d89a before the WAC pre-pass]
-	{
-		int32_t humans = 0;
-		world.registry.for_each_in_pool(0, [&humans](const world::Entity &e) {
-			const uint32_t flags = e.flags | e.engine_flags;
-			if (e.has_item_def && (flags & world::kEntityFlagPlayer) != 0 &&
-					(flags & world::kEntityFlagCarried) == 0)
-				++humans;
-		});
-		world.cached.humans = humans;
-	}
+	// pass. The original also uses it as the empty-server world-run gate
+	// (entities/WAC advance while humans > 0 || ticks == 0).
+	// [orig: Server_BuildEntitySlotLists @0x4f97a0, called from Server_TickUpdate
+	//  @0x51d89a before the WAC pre-pass]
+	world.cached.humans = world.registry.count_humans();
 
 	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
 	// inline in retail's receive dispatch, ahead of the state fan.

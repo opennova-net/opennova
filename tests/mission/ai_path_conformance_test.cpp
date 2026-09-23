@@ -11,7 +11,7 @@
 // seats, items.def traits, the mission terrain, collision, root motion, the
 // WAC layers - ADR 0042 d3), tick the world headless, and report each AI's
 // authored routing inputs next to the distance it actually travelled.
-// Deterministic (no player, no network), unsampled, and seconds instead of
+// Deterministic (the host's own player, no network), unsampled, and seconds instead of
 // minutes. Every one of those boot legs was once omitted by a hand-assembled
 // harness that then measured its own omission (concept 7.4c: seatless
 // carriers that never board, clipless soldiers that never walk, traitless
@@ -65,7 +65,7 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-// The six AI retail walks and we do not, measured on the idle pair. The three
+// The six AI retail walks and we do not, measured on this run. The three
 // listed first spawn at retail's own position, so they are unambiguous.
 const int kStuckClean[] = {42, 43, 51};
 const int kStuckPlaced[] = {7, 13, 50};
@@ -131,17 +131,17 @@ int main(int argc, char **argv) {
 		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
 		                     "or loose under OPENNOVA_JO_ASSETS").c_str());
 	testrig::BootOptions options;
-	options.playable = false;      // the idle pair: no player
+	options.playable = true;       // the host's own player: the one human
 	options.listen_server = false; // the bare no-net tick
 	if (!expect(rig.boot(options, error), (bms_name + " boots through the mission kernel").c_str())) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
 	// Retail holds an empty world still once the WAC clock has started: no
-	// human and ticks != 0 skip the whole entity update. The bare no-net tick
-	// has no server tick to count humans, so the idle pair stands in for one
-	// joined player. [orig: Game_ProcessMainFrame @0x52671C..0x52672A]
-	rig.world.cached.humans = 1;
+	// human and ticks != 0 skip the whole entity update, so the bare tick
+	// counts the host's own player as a single-player authority does.
+	// [orig: Game_ProcessMainFrame @0x52671C..0x52672A; Server_BuildEntitySlotLists
+	//  @0x4f97a0]
 	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION [orig: AnimMap_UpdateEntity
 	// @0x40b5f0]: the kernel registers E_STAND.adm as the default clip set; a
 	// mount without it cannot measure pathing at all.

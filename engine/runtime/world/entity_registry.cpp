@@ -274,6 +274,19 @@ void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) 
     });
 }
 
+// [orig: Server_BuildEntitySlotLists @0x4f97a0 — zero @0x4f97c6, the def test
+// @0x4F9809, `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
+int32_t EntityRegistry::count_humans() const {
+    int32_t humans = 0;
+    for_each_in_pool(0, [&humans](const Entity &e) {
+        const uint32_t flags = e.flags | e.engine_flags;
+        if (e.has_item_def && (flags & kEntityFlagPlayer) != 0 &&
+                (flags & kEntityFlagCarried) == 0)
+            ++humans;
+    });
+    return humans;
+}
+
 size_t EntityRegistry::live_count() const {
     size_t n = 0;
     for (const Pool &p : pools_) n += p.live;
