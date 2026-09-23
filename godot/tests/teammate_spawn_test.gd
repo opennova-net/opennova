@@ -32,7 +32,7 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 		if not String(row[4]).is_empty():
 			definitions += "ai_function %s\nmove_function %s\n" % [row[4], row[4]]
 		definitions += "end\n"
-	var animation := "anim_reset \"BINOC.bad\"\nanim_idle \"BINOC.bad\"\nanim_idle_2 \"BINOC.bad\"\n"
+	var animation := "anim_reset \"BINOC.bad\"\r\nanim_idle \"BINOC.bad\"\r\nanim_idle_2 \"BINOC.bad\"\r\n"
 	var root_dir := WorldFixture.stage_minimal_root("teammate_spawn", false, {
 		"items.def": definitions,
 		"Medic01.adm": animation,
