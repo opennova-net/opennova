@@ -1,5 +1,5 @@
 // Full NPC motor regressions for idle attention and its BMS visibility writes.
-// [orig: Entity_UpdateInfantryAI @0x4BE0D0..0x4BEFF0]
+// [orig: Entity_UpdateInfantryAI @0x4BE0CA..0x4BEFF0]
 #include <base/io/bam.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity_spawn.h>

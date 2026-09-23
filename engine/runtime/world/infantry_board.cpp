@@ -1,4 +1,5 @@
-// Reserved infantry commands and the authored carrier entry walk.
+// Reserved infantry commands, the authored carrier entry walk and the person's
+// ride link.
 // [orig: Entity_UpdateInfantryAI @0x4B9910, Entity_FindBestSeatSlot @0x4351F0,
 // Entity_GetBoneTransformAndOrientation @0x4B0C50, Entity_CanEnterVehicle @0x435480]
 #include <base/io/bam.h>
@@ -216,6 +217,34 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 	self.position = { e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f };
 }
 } // namespace
+
+// [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905; the org2 twin
+//  Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+void infantry_ride_link(World &world, Entity &self) {
+    // The ground's occupant counts when it is another body of the same team
+    // (the team byte compare @0x4BD893..0x4BD89F / @0x4BD8BA..0x4BD8C6).
+    const auto rider_of = [&](const Entity *ground) -> const Entity * {
+        if (ground == nullptr) return nullptr;
+        const Entity *occupant = world.registry.get(ground->primary_occupant);
+        if (occupant == nullptr || occupant->handle == self.handle ||
+                occupant->team != self.team)
+            return nullptr;
+        return occupant;
+    };
+    const Entity *ground = world.registry.get(self.ground_target);
+    const Entity *link = rider_of(ground);
+    if (link == nullptr && ground != nullptr)
+        link = rider_of(world.registry.get(ground->ground_target)); // [orig: @0x4BD8A1..0x4BD8C6]
+    if (link != nullptr) {
+        // [orig: @0x4BD8C8..0x4BD8DE]
+        self.primary_occupant = link->handle;
+        if (self.ride_link_hold < 0xF0) self.ride_link_hold += 4;
+    } else if (self.ride_link_hold > 0) {
+        --self.ride_link_hold; // [orig: @0x4BD8E6..0x4BD8F3]
+    } else {
+        self.primary_occupant = {}; // [orig: @0x4BD8FB]
+    }
+}
 
 // [orig: Entity_UpdateInfantryAI @0x4B9910, attachment prepass before think]
 InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {

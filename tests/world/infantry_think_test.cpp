@@ -4,9 +4,9 @@
 // last link, the no-target search walk, the aim target point and eye, the lead
 // distance, the hold-timer tail, the reload on every path, the retaliation LOS
 // and the persistent aimFlag), the guard family and the holdSSN hold at the
-// combat tail, the think-entry heading restore, and the board walk's arrival,
-// S stage, E-point claim and UseGun ring. Synthetic bodies and clips; no
-// retail data.
+// combat tail, the think-entry heading restore, the board walk's arrival,
+// S stage, E-point claim and UseGun ring, and the post-commit ride link and
+// idle facing fan. Synthetic bodies and clips; no retail data.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -19,6 +19,8 @@
 #include <base/io/bam.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/infantry.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 
@@ -92,6 +94,7 @@ struct Rig {
     Rig(int32_t rx, int32_t ry, int32_t rz, std::set<int> states = {43, 44, 49, 151, 155}) {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
+        w.registry.configure_pool(2, 8);
         clips.states = std::move(states);
         w.ai.root_motion = &clips;
         red_h = make(0, 2, rx, ry, rz);
@@ -131,6 +134,22 @@ struct Rig {
     AiEntity &red() { return *w.ai.for_handle(red_h); }
     Entity &red_entity() { return *w.registry.get(red_h); }
     int think(uint32_t key = kKey) { return w.ai.infantry_combat_think(blue(), w, key); }
+    // One whole AI tick at blue's staggered key (key = tick + 36 * net_id).
+    void tick(uint32_t key) {
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.logic_tick = key - 36u * static_cast<uint32_t>(blue().net_id);
+        ctx.is_authority = true;
+        w.logic_tick = ctx.logic_tick;
+        w.ai.tick(w, ctx);
+    }
+    // An alerted body with no target and no scan idles in idle_2 (44).
+    void alerted_idle() {
+        blue().inf.combat_target = {};
+        blue().slot.f[3] = 0;
+        blue().slot.f[1] |= 1; // blind: no perception scan
+        blue().inf.damage_timer = 40;
+    }
     void kill_red() {
         red_entity().health = 0;
         red_entity().flags |= kEntityFlagDead;
@@ -700,6 +719,146 @@ static void test_use_gun_ring_reads_the_occupant() {
     CHECK(ring(false, true) == 0x10000);
 }
 
+// The ride link: the same-team occupant of the carrier under the body, else of
+// that carrier's own ground entity, held by +0x174 (+4 per think up to 0xF0,
+// one tick spent per think without it, then cleared); an enemy or the body
+// itself never links. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905]
+static void test_ride_link_holds_the_same_team_rider() {
+    Rig r(fx(60), 0, 0);
+    const EntityHandle hull = r.item(900, 1, kItemAttribPlayerControl, 0, 0);
+    const EntityHandle turret = r.item(901, 6, 0, 0, 0);
+    const EntityHandle driver = r.make(2, 1, fx(1), 0, 0);
+    const EntityHandle enemy = r.make(3, 2, fx(2), 0, 0);
+    r.w.registry.get(hull)->primary_occupant = driver;
+    r.blue_entity().ground_target = hull;
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(r.blue_entity().primary_occupant == driver);
+    CHECK(r.blue_entity().ride_link_hold == 4);
+    for (int i = 0; i < 70; ++i) infantry_ride_link(r.w, r.blue_entity());
+    CHECK(r.blue_entity().ride_link_hold == 0xF0);
+    // Off the carrier the hold is spent a tick per think before the link goes.
+    r.blue_entity().ground_target = {};
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(r.blue_entity().ride_link_hold == 0xEF);
+    CHECK(r.blue_entity().primary_occupant == driver);
+    r.blue_entity().ride_link_hold = 1;
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(r.blue_entity().ride_link_hold == 0 && r.blue_entity().primary_occupant == driver);
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(!r.blue_entity().primary_occupant.valid());
+    // One level up: a turret with no occupant standing on the hull.
+    r.w.registry.get(turret)->ground_target = hull;
+    r.blue_entity().ground_target = turret;
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(r.blue_entity().primary_occupant == driver);
+    // An enemy occupant, or the body itself, is no link.
+    r.blue_entity().ride_link_hold = 0;
+    r.blue_entity().primary_occupant = {};
+    r.w.registry.get(hull)->primary_occupant = enemy;
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(!r.blue_entity().primary_occupant.valid());
+    r.w.registry.get(hull)->primary_occupant = r.blue_h;
+    infantry_ride_link(r.w, r.blue_entity());
+    CHECK(!r.blue_entity().primary_occupant.valid());
+}
+
+// The org1 think refreshes the link after its selection commit.
+// [orig: Entity_UpdateInfantryAI @0x4BD87E, after the arbitration @0x4BD837]
+static void test_think_refreshes_the_ride_link() {
+    Rig r(fx(200), 0, 0, {1, 43, 44, 49});
+    const EntityHandle hull = r.item(900, 1, kItemAttribPlayerControl, fx(40), 0);
+    const EntityHandle driver = r.make(2, 1, fx(40), fx(5), 0);
+    r.w.registry.get(hull)->primary_occupant = driver;
+    r.alerted_idle();
+    r.blue_entity().ground_target = hull;
+    r.tick(16);
+    CHECK(r.blue_entity().primary_occupant == driver);
+    CHECK(r.blue_entity().ride_link_hold == 4);
+}
+
+// The org2 twin rides the player body's 16-tick slow pass, right after the
+// weapon-hold commit. [orig: Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+static void test_player_slow_pass_refreshes_the_ride_link() {
+    Rig r(fx(200), 0, 0);
+    const EntityHandle hull = r.item(900, 1, kItemAttribPlayerControl, 0, 0);
+    const EntityHandle driver = r.make(2, 1, fx(1), 0, 0);
+    r.w.registry.get(hull)->primary_occupant = driver;
+    r.blue_entity().ground_target = hull;
+    r.w.ai.infantry_weapon_channel(r.blue(), r.w, 15);
+    CHECK(!r.blue_entity().primary_occupant.valid());
+    r.w.ai.infantry_weapon_channel(r.blue(), r.w, 16);
+    CHECK(r.blue_entity().primary_occupant == driver);
+}
+
+// The idle facing fan turns an alerted idle body away from a teammate it sees
+// close by: the bearing away from the one teammate east is due west.
+// [orig: Entity_UpdateInfantryAI @0x4BD905..0x4BE07A — the walk
+//  @0x4BD990..0x4BDA9D, the clear first probe @0x4BDB8E, the store @0x4BE07A]
+static void test_idle_facing_turns_away_from_a_teammate() {
+    {
+        Rig r(fx(200), 0, 0, {1, 43, 44, 49});
+        r.make(2, 1, fx(1), 0, 0);
+        r.alerted_idle();
+        r.tick(16);
+        CHECK(r.blue().inf.anim_state == anim_state::kIdle2);
+        CHECK(r.blue().inf.target_heading == INT32_MIN);
+    }
+    {
+        // Farther than 3 u planar: no turn.
+        Rig r(fx(200), 0, 0, {1, 43, 44, 49});
+        r.make(2, 1, fx(3.2), 0, 0);
+        r.alerted_idle();
+        r.tick(16);
+        CHECK(r.blue().inf.target_heading == 0);
+    }
+}
+
+// A blocked first probe (3 u along the mean) turns the mean half a turn; the
+// fan's clear probes leave it there. [orig: @0x4BDB75..0x4BDBC6]
+static void test_idle_facing_probes_turn_away_from_a_wall() {
+    Rig r(fx(200), 0, 0, {1, 43, 44, 49});
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, double d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fx(d);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -0.5);
+    plane(-16384, 0, 0, -0.5);
+    plane(0, 16384, 0, -0.5);
+    plane(0, -16384, 0, -0.5);
+    plane(0, 0, 16384, -3.0);
+    plane(0, 0, -16384, 0.0);
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = fx(-0.5);
+    volume.max_x = volume.max_y = fx(0.5);
+    volume.max_z = fx(3.0);
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+    CollisionSection section;
+    section.volume_count = 1;
+    box.sections.push_back(section);
+    Entity wall{};
+    wall.kind = EntityKind::Building;
+    wall.alive = true;
+    wall.yaw = 90;
+    wall.position = {1.5f, 0.0f, 0.0f};
+    const EntityHandle wall_h = r.w.registry.spawn(2, wall);
+    auto collision = std::make_unique<CollisionWorld>();
+    collision->assign_entity(wall_h, collision->add_model(std::move(box)));
+    for (int i = 0; i < 17; ++i) collision->build_tick_tables(r.w);
+    r.w.ai.collision = collision.get();
+    r.alerted_idle();
+    r.tick(16);
+    CHECK(r.blue().inf.anim_state == anim_state::kIdle2);
+    CHECK(r.blue().inf.target_heading == 0x7FFFFF80);
+    r.w.ai.collision = nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -726,6 +885,11 @@ int main() {
     test_board_proposal_reaches_the_selection();
     test_claim_skips_a_pool_zero_target();
     test_use_gun_ring_reads_the_occupant();
+    test_ride_link_holds_the_same_team_rider();
+    test_think_refreshes_the_ride_link();
+    test_player_slow_pass_refreshes_the_ride_link();
+    test_idle_facing_turns_away_from_a_teammate();
+    test_idle_facing_probes_turn_away_from_a_wall();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;

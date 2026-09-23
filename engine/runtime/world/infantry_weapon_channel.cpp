@@ -50,7 +50,8 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
     // Deferred promotion and playback already ran at the motor head through
     // AnimMap_UpdateDualChannels @0x40b8c0, ahead of this gate. Retail's slow pass carries much more than the weapon channel (the
     // slot timer, threat scan, damage and the music gamescript block, @0x4b5d77..
-    // @0x4b637b); this ports the weapon-channel tenant only.
+    // @0x4b637b); this ports the weapon-channel tenant and the ride link that
+    // follows its commit.
     if ((logic_tick & 0xFu) == 0u) {
         // The hold kind is re-read from the ADM table EVERY selection pass, keyed by
         // this entity's OWN equipped index — the original keeps no per-player copy
@@ -66,6 +67,9 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
                 inf.wpn_hold_kind = held->special_hold;
         }
         infantry_weapon_channel_select(e);
+        // The org2 twin of the org1 ride link, right after the hold-state commit.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+        if (Entity *body = world.registry.get(e.handle)) infantry_ride_link(world, *body);
     }
 
 }

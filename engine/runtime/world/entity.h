@@ -939,7 +939,14 @@ struct Entity {
     // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
     //  spawner gate @0x48faad in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70]
+    // On a person the same word is the ride link: the same-team occupant of the
+    // carrier it stands on, held by ride_link_hold below.
     EntityHandle primary_occupant;
+    // A person's ride-link hold (+0x174): +4 per think that finds the link, up
+    // to 0xF0; a think without it spends one tick, and the link clears once the
+    // hold is spent. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905;
+    //  Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+    int32_t ride_link_hold = 0;
     // Target-side mounted skeletal/clip configuration: items.def phrase_set at
     // itemDef+0x86C. Explicit validity keeps absent metadata distinct from the
     // witnessed config 0 branch.

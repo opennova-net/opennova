@@ -883,4 +883,13 @@ class World;
 //  @0x51B550; Score_ProcessKillEvent @0x4FD400 from the damage paths only]
 bool org1_owns_death_transaction(const World &world, EntityHandle victim);
 
+// A person's ride link, refreshed by both organic think blocks: the occupant
+// (+0x170) of the entity it stands on (+0x28), else of that entity's own
+// ground entity, when it is another same-team body, becomes the person's own
+// +0x170 and climbs the +0x174 hold by 4 while under 0xF0; a think without it
+// spends one hold tick and clears the link once the hold is spent. Defined in
+// infantry_board.cpp. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905;
+// Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+void infantry_ride_link(World &world, Entity &self);
+
 } // namespace opennova::world

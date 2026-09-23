@@ -1,12 +1,16 @@
-// NPC attention, independent look, and the idle spotting side effects.
-// [orig: Entity_UpdateInfantryAI @0x4B9910, scan @0x4BE0D0..0x4BE463,
-//  head tracking @0x4BE463..0x4BE7FD, look chase @0x4BEB18..0x4BEFF0]
+// The org1 think's post-commit tail: the ride link, the idle facing fan, the
+// stop fix-up, NPC attention, independent look, and the idle spotting side
+// effects. [orig: Entity_UpdateInfantryAI @0x4B9910, ride link
+//  @0x4BD87E..0x4BD905, idle facing @0x4BD905..0x4BE07A, scan
+//  @0x4BE0CA..0x4BE463, head tracking @0x4BE463..0x4BE7FD, look chase
+//  @0x4BEB18..0x4BEFF0]
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <utility>
 
 #include <base/io/bam.h>
+#include <formats/def/def.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
@@ -39,6 +43,87 @@ int32_t distance_of(int32_t x, int32_t y, int32_t z) {
             std::sqrt(double(x) * x + double(y) * y + double(z) * z)));
 }
 
+// The idle facing fan [orig: Entity_UpdateInfantryAI @0x4BD905..0x4BE07A]. An
+// idle body (cover_idle 163, idle_2 44 or its look 126) on a def without
+// LANDABLE, and without Flags 0x40000, turns away from the same-team pool-0
+// bodies it sees close by and from what blocks it; it writes no move goal.
+void idle_facing(AiSystem &ai, AiEntity &e, World &world, const Entity &self) {
+    InfantryState &inf = e.inf;
+    if (inf.anim_state != anim_state::kCoverIdle && inf.anim_state != anim_state::kIdle2 &&
+            inf.anim_state != anim_state::kIdle2Look)
+        return; // [orig: @0x4BD905..0x4BD91A]
+    if ((self.item_attrib & def::DEF_ITEM_ATTRIB_LANDABLE) != 0 ||
+            ((self.flags | self.engine_flags) & 0x40000u) != 0)
+        return; // [orig: @0x4BD920..0x4BD93B]
+    int32_t pos[3];
+    position_of(ai, self, pos);
+    int32_t mean = 0;
+    int32_t count = 0;
+    // A NOWEAPON def skips the teammate walk and the detour clear
+    // [orig: @0x4BD943..0x4BD956].
+    if ((self.item_attrib & def::DEF_ITEM_ATTRIB_NOWEAPON) == 0) {
+        inf.path_state = 0;
+        // Each teammate within 3.5 u per axis, 1.5 u up or down and 3 u planar,
+        // seen through the entity LOS at height 0x4000, folds its bearing away
+        // from it into a running mean. [orig: the pool-0 walk
+        // @0x4BD990..0x4BDA67; `mean -= (mean - b) / k` @0x4BDA6D..0x4BDA9D]
+        int32_t k = 1;
+        world.registry.for_each_in_pool(0, [&](const Entity &other) {
+            if (other.item_id == 0 ||
+                    ((other.flags | other.engine_flags) & kEntityFlagDead) != 0 ||
+                    other.handle == self.handle || other.team != self.team)
+                return;
+            int32_t at[3];
+            position_of(ai, other, at);
+            const int32_t dx = io::bam_sub(pos[0], at[0]);
+            const int32_t dy = io::bam_sub(pos[1], at[1]);
+            if (io::bam_abs(dx) > 0x38000 || io::bam_abs(dy) > 0x38000 ||
+                    io::bam_abs(io::bam_sub(at[2], pos[2])) > 0x18000 ||
+                    distance_of(dx, dy, 0) > 0x30000 ||
+                    !infantry_entity_los(ai, world, self.handle, other.handle, pos, at, 0x4000,
+                                         false))
+                return;
+            mean = io::bam_sub(mean, io::bam_sub(mean, bearing_to(dx, dy)) / k);
+            ++count;
+            ++k;
+        });
+    }
+    // One probe: `range` out along `angle` (the Q22 trig of dbl_7C3608 /
+    // dbl_7C3600), a quarter unit up, through the self entity LOS.
+    const auto clear = [&](int32_t angle, int32_t range, int32_t height_offset) {
+        const double radians = static_cast<double>(angle) * 1.4629627251502471e-9;
+        const int32_t s = static_cast<int32_t>(std::sin(radians) * 4194304.0);
+        const int32_t c = static_cast<int32_t>(std::cos(radians) * 4194304.0);
+        const int32_t end[3] = {
+            io::bam_add(pos[0], static_cast<int32_t>((static_cast<int64_t>(c) * range) >> 22)),
+            io::bam_add(pos[1], static_cast<int32_t>((static_cast<int64_t>(s) * range) >> 22)),
+            io::bam_add(pos[2], 0x4000)};
+        return infantry_entity_los(ai, world, self.handle, self.handle, pos, end, height_offset,
+                                   false);
+    };
+    // The fan around the mean, fixed before the first probe: +-90, 180, +-45,
+    // +-135 degrees [orig: @0x4BDAA6..0x4BDAF1].
+    const int32_t around[7] = {
+        io::bam_add(mean, 0x3FFFFFC0), io::bam_sub(mean, 0x3FFFFFC0),
+        io::bam_add(mean, 0x7FFFFF80), io::bam_add(mean, 0x1FFFFFE0),
+        io::bam_sub(mean, 0x1FFFFFE0), io::bam_add(mean, 0x5FFFFFA0),
+        io::bam_sub(mean, 0x5FFFFFA0)};
+    // The mean itself, 3 u out at height 0x8000: clear ends the fan; blocked it
+    // turns the mean half a turn [orig: @0x4BDB3C..0x4BDBC6]. Each later probe
+    // (2 u, height 0x4000) found blocked folds its reverse bearing in
+    // [orig: @0x4BDBED..0x4BE071].
+    if (!clear(mean, 0x30000, 0x8000)) {
+        ++count;
+        mean = io::bam_add(mean, 0x7FFFFF80 / count);
+        for (const int32_t angle : around) {
+            if (clear(angle, 0x20000, 0x4000)) continue;
+            ++count;
+            mean = io::bam_add(mean, io::bam_add(io::bam_sub(angle, mean), 0x7FFFFF80) / count);
+        }
+    }
+    if (count != 0) inf.target_heading = mean; // [orig: @0x4BE073..0x4BE07A]
+}
+
 int32_t look_step(int32_t difference, int shift, int32_t positive_threshold,
                   int32_t limit) {
     const int32_t step = io::bam_sar(io::bam_add(difference, 1 << (shift - 1)), shift);
@@ -51,8 +136,12 @@ int32_t look_step(int32_t difference, int shift, int32_t positive_threshold,
 
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key) {
     InfantryState &inf = e.inf;
-    const Entity *self = world.registry.get(e.handle);
-    if (self == nullptr || ai.root_motion == nullptr) return;
+    Entity *body = world.registry.get(e.handle);
+    if (body == nullptr) return;
+    infantry_ride_link(world, *body); // [orig: @0x4BD87E..0x4BD905]
+    idle_facing(ai, e, world, *body); // [orig: @0x4BD905..0x4BE07A]
+    const Entity *self = body;
+    if (ai.root_motion == nullptr) return;
     const auto available = [&](int state) {
         return ai.root_motion->has_clip(inf.adm_id, state);
     };
@@ -61,8 +150,9 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
         world.facials.automatic_expression(*self, kInfantryFacialExpressions[inf.anim_state]);
 
     // The scripted voice speaker rescans at the 32-tick perception phase, not on
-    // every think: the phase word stored at LABEL_373 is re-read by the speaker
-    // arm. [orig: Entity_UpdateInfantryAI phase @0x4BBE4A, gate @0x4BE0CA..0x4BE0E8]
+    // every think: the key & 0x1F word the perception gate stores is re-read by
+    // the speaker arm. [orig: Entity_UpdateInfantryAI phase @0x4BBE4A, gate
+    // @0x4BE0CA..0x4BE0E8]
     const bool speaker = world.script.voice.speaker() == e.handle;
     if ((key & 255u) == 0 || (speaker && (key & 31u) == 0)) {
         const int32_t radius = std::min(e.slot.f[17], 20 * 65536);
