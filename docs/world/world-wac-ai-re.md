@@ -896,12 +896,15 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 
 ### 9.1 Verified chain (AttachToEmplaced, action 37)
 - `EventAction_Dispatch @ 0x4542e0` case 0x25: reads ONLY param1 (the occupant SSN), resolves it via
-  `EntityPool_FindByNetId`, calls `WacScript_TryMountEntityToVehicle`. The gun/vehicle is found
-  IMPLICITLY inside the mount fn.
+  `EntityPool_FindByNetId`, calls `WacScript_TryMountEntityToVehicle` (the WAC ssnuse body). The
+  vehicle is the one the occupant's AI slot +0x90 names (aiRuntime[36], armed by a board order:
+  WAC ssn2ssn or BMS RedirectSingleTo command 125 plus the board think), not a proximity pick
+  [orig: EventAction_Dispatch @ 0x4542e0 (case 37 @ 0x454989; the FindByNetId call @ 0x454992)].
 - `WacScript_TryMountEntityToVehicle @ 0x4f70f0`: validate handle (≠0xFFFF, pool<5, slot<capacity);
-  gate alive/model present; require `occupant-model+144` (a pre-established hierarchy link to the
-  vehicle) and not-already-mounted (`entity->pad8[8] == 0`). Then
-  `seatBone = Entity_FindBestSeatSlot(entity, *(model+144), &outEntity)` (outEntity = the chosen
+  gate alive/model present; require the vehicle the occupant's aiRuntime+0x90 names (entity+0x68 ->
+  +0x90, the board target; the "+144" is that slot word, not a model hierarchy link) and
+  not-already-mounted (`entity->pad8[8] == 0`). Then
+  `seatBone = Entity_FindBestSeatSlot(entity, *(aiRuntime+0x90), &outEntity)` (outEntity = the chosen
   seat-owner, possibly a child) → `Entity_RequestVehicleAttach`. The attach-failure path clears
   `Flags & ~0x40` (the mounted bit).
 - `Entity_FindBestSeatSlot @ 0x4351f0` (CONFIRMED EXACT): sentinel `bestWeight = 65536000`; iterates
@@ -909,8 +912,8 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   (0 = empty); occupant u16 at `vehicle[400+2·slot]` (free if 0xFFFF or == playerHandle). Seat-bone
   NAME classification (bone record stride 48, name at +32): `sitex` → 1 passenger, `ctrlx` → 2
   controller (vehicle entity only), `drvrx` → 5 driver (vehicle entity only), `UseGun` → 3 gunner;
-  else skip. Command/player-class acceptance gate: `model+148 == 123` accepts only passenger
-  (`seatType == 1`); `model+148 == 124` rejects controller (`seatType != 2`); all other values
+  else skip. Command/player-class acceptance gate on the board order aiRuntime+0x94: 123 accepts only
+  passenger (`seatType == 1`); 124 rejects controller (`seatType != 2`); all other values
   accept any classified seat. This corrects the older "124 not-driver" reading.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
@@ -924,7 +927,7 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
 rewinds mounts for free); canonical `find_best_vehicle_seat`, `VehicleSystem::attach_to_seat`, and
 `VehicleSystem::detach` operations plus `EntityCommands::{mount, mount_boarding_command,
-mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0.
+use_boarding_target, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0.
 Wire, command, USE, and mobile-deployment entry points share those relationship operations;
 the former duplicate command-side write/detach blocks were removed. Every attach runs
 `VehicleSystem::presnap_attach_heading` before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
@@ -952,7 +955,7 @@ that pair to the occupant, registry snapshots value-copy it, restore recovers it
 path clears the occupant copy and validity. This is deliberately separate from seat-frame pose state:
 the frame synchronization above supplies body/leg/pitch/roll, while animation's `MountMode` selects
 which witnessed overlay matrix each skeletal class consumes.
-Event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
+Event-runtime case 0x25 → `use_boarding_target(param1)` (the WAC ssnuse port); command-123/124/125 promotion mounts
 already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
 is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
 `anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
@@ -967,9 +970,10 @@ their first body update. Clearing/reloading the animation registry resets the re
 repopulates every live `adm_id`, while Play→Stop restore rewinds both the AI array and resolver mark before
 re-resolving the baseline. `test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose` pins
 the former failure. Deviations (NOT silently absorbed):
-1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
-   link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
-   placed on its gun; wrong if two guns overlap.
+1. **Proximity proxy vs occupant-model+144.** RESOLVED 2026-09-23: the vehicle is the one the
+   occupant's aiRuntime+0x90 board target names, as in retail (`use_boarding_target`, §9.1); the
+   nearest-free-seat proxy (`kMountRadius`) is gone. No shipped mission authors action 37
+   (`mission_mount`).
 2. **Seat specs are binding-fed.** The original reads model seat bones directly (model[605..]); the
    port consumes binding-extracted model userpoints through `ItemSeatSpec`, so callers without model
    metadata still seed no seats.
@@ -9675,8 +9679,10 @@ names, and the difference between the two teleport commands.
 The functions previously labelled fade effects own doors. [orig:
 HeliLift_ResetAll @0x44E870] clears 10,000 records of 24 bytes at 0xA8A418;
 [orig: FadeEffect_AllocateSlot @0x44E890] allocates monotonically until mission
-reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the site
-@0x40F230..0x40F2F4)] seeds Building/Decoration items carrying attrib 0x80. Each
+reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the door-count loop
+@0x40F25D..0x40F2DA: FadeEffect_AllocateSlot @0x40F288, the first slot @0x40F292,
+the def +0x8A0/+0x89C words @0x40F2BB..0x40F2CC)] seeds Building/Decoration items
+carrying attrib 0x80. Each
 record has state, Q16 phase, Q16 step, maximum angle, owner and one-based
 section number. [orig: FadeEffect_UpdateAll @0x44E920] advances opening by
 wrapped dword addition and closing by subtraction, clamps at 65536/0 and enters
@@ -10807,7 +10813,15 @@ separately tracked in D-AI-9.
 | 9 finished | The next pass compacts the complete array suffix and reprocesses the same index |
 
 The patient wiggle multiplies the two cosine phases for pitch and the two sine
-phases for roll; it is not a simple single-frequency tilt. Packed handles retain
+phases for roll; it is not a simple single-frequency tilt. Every lift trig scales
+the angle by dbl_7C3608 = 1.4629627251502471e-09, a hair above the BAM scale
+2*pi/2^32 = 1.4629180792671596e-09, then by 4194304.0 [orig:
+HeliLift_UpdateSlotState @0x451730 (@0x45185C, @0x451979, @0x451C5E);
+HeliLift_SpawnFlyover (@0x4528D8)]: the patient animation, the flyover escort
+offsets and the land hover offsets all use it. The land heading is 0x42000000 -
+trunc(atan2(dy, dx) * -2^31/pi) [orig: fpatan @0x451954; `fmul dbl_7C57B8`
+@0x451956; @0x451961..0x451966; stores @0x451970 / @0x451973], so north reads
+0x82000000. Packed handles retain
 allocation serials so stale operation pointers cannot mutate a later occupant.
 Failed helper allocation rolls back the new helpers before committing AI events
 or touching the patient.
@@ -10815,7 +10829,13 @@ or touching the patient.
 Two limits are witnessed in JO. Direct pickup never assigns its helicopter
 pointer; treatment expiry would dereference null in the original. The port
 records that boundary and finishes the operation without destroying the patient
-or medics (D-TMATE-1). The flyover creates no pilot. The aircraft mover changes
+or medics (D-TMATE-1). A flyover whose helicopter is destroyed before landing
+stalls in arms 4..6 as in retail: the brain read through slot[3]
+(@0x451739..0x451745) is 0 once `Entity_Destroy` memsets the row, arms 4
+(@0x451761) and 5 (@0x4517C6) skip to the patient animation and arm 6
+(@0x45192E) returns. The Return, Ascend and Depart arms (2/7/8) end the operation
+when the helicopter row is gone, where retail keeps measuring against the zeroed
+row (the distance from the origin) until both medics die (D-TMATE-1). The flyover creates no pilot. The aircraft mover changes
 the initial state 0 to 14; queued commands can enter 7, but the no-pilot leg
 parks it again [orig: Entity_UpdateAircraftPhysics @0x490310], [orig:
 Entity_UpdateAircraftPhysics @0x490310 (the site @0x491C5E)]). There is no
@@ -11150,10 +11170,10 @@ ratified with PR #642's merge (ADR 0022 register).
 
 | ID | Ours | Original | Status |
 | --- | --- | --- | --- |
-| D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, proposed PR #642) |
-| D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
-| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only) (§33.32) | PERMANENT (class D, proposed PR #642) |
-| D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
+| D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, ratified with PR #642) |
+| D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, ratified with PR #642) |
+| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment and a failed helper allocation is guarded; a flyover whose helicopter is destroyed stalls in arms 4..6 as in retail, but the Return/Ascend/Depart arms (2/7/8) end the operation when the helicopter row is gone, where retail keeps measuring against the zeroed row until both medics die | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only); a destroyed helicopter's brain reads 0 through slot[3] (@0x451739..0x451745) (§33.32) | PERMANENT (class D, ratified with PR #642) |
+| D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, ratified with PR #642) |
 | D-WAC-4 | FIXED 2026-09-18: night is a writable DWORD; WAC arithmetic and immediate reads preserve it | Env @ 0x26C645C; Environment_ComputeTimeOfDayColors @ 0x57DE40, store @ 0x57DEAE | Only an authored TOD keyframe computation overwrites it. Light selection and snapshots consume the stored value; wac_state and weather_state cover writes and clock ownership. |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
 | D-WAC-6 | The loader installs every program under the game's policy, as retail does; only the strict policy of the dedicated golden host (`wac_layered_load` kBlocked) refuses a literal missing the mounted FX, SOUNDSET or AMMO catalog. A GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0, and an operand an earlier resolver table claims ORs in the dword behind that address as the load finds it (`CompileEnv::load_dword`). Residue: a group index past the group table reads retail's table out of bounds, where the port's GROUP walk treats it as an empty group | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the returns ignored @0x4F94A8 / @0x4F950E / @0x4F9597; the execute @0x4f976b)] keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0 (only the SSN handle keeps 0xFFFF) (§33.15); the GLOOP operand OR [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | FIXED 2026-09-23 (`wac_layered_load`, `wac_retail_vectors`; the out-of-table group index is the bounded residue) |
