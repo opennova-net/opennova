@@ -18,6 +18,7 @@
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
 
 namespace opennova::world {
 
@@ -352,15 +353,52 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
 
 bool EntityCommands::server_remove_and_notify(EntityTarget ssn) {
     const EntityHandle h = resolve_target(ssn);
-    if (world_.registry.get(h) == nullptr) return false;
+    const Entity *entity = world_.registry.get(h);
+    if (entity == nullptr) return false;
     // The removal reaches the joiners first: S2C 0x12 [u16 packed handle]
     // under send mask 0x90, drained by the host's entity-event fan. A removed
-    // player's placed devices follow through the owner sweep (ThrowableSim
-    // retires a device whose owner row is gone), then the shared destroy.
+    // player's placed devices go next, each through this same removal, and
+    // only then the shared destroy.
     // [orig: Server_RemoveEntityAndNotify @0x50a270 — the 0x12 send @0x50a2ac,
-    //  the player-device sweep call @0x50a2bb, Entity_Destroy @0x50a2c4]
+    //  the Player flag test @0x50A2B1, the player-device sweep call @0x50a2bb,
+    //  Entity_Destroy @0x50a2c4]
     world_.out.entity_events.push_back(EntityRemoveEvent{h.packed});
+    if (((entity->flags | entity->engine_flags) & kEntityFlagPlayer) != 0)
+        remove_placed_devices_by_owner(h);
     return remove_ssn(h);
+}
+
+void EntityCommands::remove_placed_devices_by_owner(EntityHandle owner) {
+    // Pool 1 in slot order: a row with an ItemTypeIndex that this owner
+    // placed, whose def is neither PlayerControl (0x40) nor Eweap (0x20) and
+    // whose placed ammo is the satchel, the claymore or the AV mine, goes
+    // through the notifying removal. The placement owner and the placed ammo
+    // live on the row's PlacedDevice record.
+    // [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 — the +0x1C gate
+    //  @0x546E2D, the +0x170 owner compare @0x546E37, the def attrib skips
+    //  @0x546E46 / @0x546E50, the g_ammo_satchel / g_ammo_claymore /
+    //  g_ammo_AV_Mine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
+    //  Server_RemoveEntityAndNotify call @0x546E71 / @0x546E94 / @0x546EBB]
+    const Entity *owner_row = world_.registry.get(owner);
+    if (owner_row == nullptr) return;
+    const uint64_t owner_spawn_id = owner_row->registry_spawn_id;
+    const size_t capacity = world_.registry.pool_capacity(1);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
+        const Entity *row = world_.registry.get(handle);
+        if (row == nullptr || row->item_type_index == 0) continue;
+        const PlacedDevice *device = world_.throwables.device_for(*row);
+        if (device == nullptr || device->owner.packed != owner.packed ||
+                device->owner_spawn_id != owner_spawn_id)
+            continue;
+        if ((row->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0) continue;
+        const AmmoTableEntry *ammo = world_.tables.ammo.by_index(device->ammo_index);
+        if (ammo == nullptr) continue;
+        if (strutil::iequals(ammo->name, "satchel") ||
+                strutil::iequals(ammo->name, "claymore") ||
+                strutil::iequals(ammo->name, "AV_Mine"))
+            server_remove_and_notify(handle);
+    }
 }
 
 bool EntityCommands::remove_bms_ref(int32_t ssn) {

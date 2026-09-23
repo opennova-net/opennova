@@ -451,7 +451,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- entity actions ----
     // The killSSN handler (IDB misnomer). [orig: Entity_ResetWeaponState @0x4F1E40]
     if (ieq(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "removeSSN")) return cmds.remove_ssn(H(0)) ? 1 : 0;
+    // The notifying removal (S2C 0x12, a player's devices, then the destroy).
+    // [orig: WacCmd_RemoveSsn @0x4F1EE0 (the Server_RemoveEntityAndNotify call
+    //  @0x4F1F28), return 1 @0x4F1F30]
+    if (ieq(n, "removeSSN")) return cmds.server_remove_and_notify(H(0)) ? 1 : 0;
     if (ieq(n, "remove")) { cmds.remove_group(A(0)); return 0; }
     if (ieq(n, "ssnuse")) return cmds.use_boarding_target(H(0));
     if (ieq(n, "SSNHP")) return cmds.set_ssn_hp(H(0), A(1)) ? 1 : 0;
@@ -546,7 +549,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
                     // 0 [orig: WacCmd_GroupKill @0x4F1F72; WacCmd_GroupRemove
                     // @0x4F2006].
                     if (ieq(n, "Gkill")) cmds.wac_kill_ssn(h);
-                    else cmds.remove_ssn(h);
+                    else cmds.server_remove_and_notify(h);
                 }
             }
         }

@@ -74,7 +74,8 @@ public:
     bool wac_kill_ssn(EntityTarget ssn);
     // The shared destroy (retail Entity_Destroy): no network notification.
     bool remove_ssn(EntityTarget ssn);
-    // The script removal: S2C 0x12 to the joiners, then the shared destroy.
+    // The script removal: S2C 0x12 to the joiners, a removed player's placed
+    // devices through the same removal, then the shared destroy.
     // [orig: Server_RemoveEntityAndNotify @0x50a270]
     bool server_remove_and_notify(EntityTarget ssn);
     // BMS VaporizeSingle: the first pool 0..3 row carrying the SSN is removed
@@ -406,6 +407,10 @@ public:
     World &world() { return world_; }
 
 private:
+    // The removed player's placed devices, each through server_remove_and_notify.
+    // [orig: Entity_RemovePlacedDevicesByOwner @0x546E00]
+    void remove_placed_devices_by_owner(EntityHandle owner);
+
     World &world_;
 };
 

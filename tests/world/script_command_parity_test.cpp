@@ -4,6 +4,8 @@
 // a small world; the primitives are also driven directly through EntityCommands.
 #include <cstdio>
 #include <string>
+#include <variant>
+#include <vector>
 
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
@@ -588,6 +590,118 @@ static void test_hold_ssn_cause_bit() {
     CHECK(!w.commands.set_ssn_held(bare, true));
 }
 
+namespace {
+
+// The packed handles of the S2C 0x12 removals queued for the joiners, in order.
+std::vector<uint16_t> queued_removals(const World &w) {
+    std::vector<uint16_t> out;
+    for (const auto &event : w.out.entity_events)
+        if (const auto *removal = std::get_if<EntityRemoveEvent>(&event))
+            out.push_back(removal->handle);
+    return out;
+}
+
+// A pool-1 row with the PlacedDevice record a placed charge carries.
+EntityHandle place_device(World &w, EntityHandle owner, int32_t ammo_index,
+                          uint32_t attrib = 0, int32_t item_type_index = 9) {
+    Entity row;
+    row.item_id = 2101;
+    row.has_item_def = true;
+    row.item_type_index = item_type_index;
+    row.item_attrib = attrib;
+    row.health = 10;
+    const EntityHandle h = w.registry.spawn(1, row);
+    PlacedDevice device;
+    device.active = true;
+    device.entity = h;
+    device.entity_spawn_id = w.registry.get(h)->registry_spawn_id;
+    device.owner = owner;
+    device.owner_spawn_id = w.registry.get(owner)->registry_spawn_id;
+    device.ammo_index = ammo_index;
+    w.throwables.devices.push_back(device);
+    return h;
+}
+
+} // namespace
+
+// WAC removeSSN and Gremove remove through Server_RemoveEntityAndNotify: each
+// row queues its S2C 0x12 removal for the joiners, then the shared destroy.
+// removeSSN returns 1 for a resolved SSN, Gremove 0.
+// [orig: WacCmd_RemoveSsn @0x4F1EE0 (the Server_RemoveEntityAndNotify call
+//  @0x4F1F28), return 1 @0x4F1F30; WacCmd_GroupRemove @0x4F1F80 (the call
+//  @0x4F1FF2), return 0 @0x4F2006; Server_RemoveEntityAndNotify @0x50A270 —
+//  the 0x12 send @0x50A2AC]
+static void test_wac_removals_notify_the_joiners() {
+    ScriptWorld w;
+    const EntityHandle single = spawn_npc(w, 240, 37);
+    const EntityHandle first = spawn_npc(w, 241, 37);
+    const EntityHandle second = spawn_npc(w, 242, 37);
+    const EntityHandle keep = spawn_npc(w, 243, 37);
+    w.registry.set_script_group_members(w.registry.intern_group("gone"), {first, second});
+    w.out.entity_events.clear();
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then removeSSN(240) store(v1) set(v2,7) Gremove(G_gone) "
+            "store(v2) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
+    CHECK(w.registry.get(single) == nullptr);
+    CHECK(w.registry.get(first) == nullptr && w.registry.get(second) == nullptr);
+    CHECK(w.registry.get(keep) != nullptr);
+    CHECK(queued_removals(w) ==
+          (std::vector<uint16_t>{single.packed, first.packed, second.packed}));
+}
+
+// A removed PLAYER's placed devices go before its destroy, each through the
+// same notifying removal: the player's 0x12, then every device's. Only pool-1
+// rows with an ItemTypeIndex that this player placed, whose def is neither
+// PlayerControl nor Eweap and whose placed ammo is the satchel, the claymore
+// or the AV mine go; a non-player's removal sweeps nothing.
+// [orig: Server_RemoveEntityAndNotify @0x50A270 — the Player test @0x50A2B1,
+//  the sweep call @0x50A2BB; Entity_RemovePlacedDevicesByOwner @0x546E00 —
+//  the +0x1C gate @0x546E2D, the owner compare @0x546E37, the attrib skips
+//  @0x546E46 / @0x546E50, the ammo compares @0x546E68 / @0x546E8B / @0x546EAE]
+static void test_player_removal_sweeps_placed_devices() {
+    ScriptWorld w;
+    w.tables.ammo.entries.resize(4);
+    const char *names[] = {"satchel", "claymore", "AV_Mine", "grenadehe"};
+    for (int i = 0; i < 4; ++i) {
+        w.tables.ammo.entries[static_cast<size_t>(i)].name = names[i];
+        w.tables.ammo.entries[static_cast<size_t>(i)].valid = true;
+    }
+    Entity body;
+    body.net_id = 250;
+    body.item_id = 1001;
+    body.item_type_index = 5;
+    body.has_item_def = true;
+    body.health = 100;
+    body.engine_flags = kEntityFlagPlayer;
+    const EntityHandle player = w.registry.spawn(0, body);
+    const EntityHandle npc = spawn_npc(w, 251, 38);
+    const EntityHandle satchel = place_device(w, player, 0);
+    const EntityHandle claymore = place_device(w, player, 1);
+    const EntityHandle mine = place_device(w, player, 2);
+    const EntityHandle grenade = place_device(w, player, 3);
+    const EntityHandle eweap = place_device(w, player, 0, kItemAttribEweap);
+    const EntityHandle control = place_device(w, player, 1, kItemAttribPlayerControl);
+    const EntityHandle ungated = place_device(w, player, 2, 0, 0);
+    const EntityHandle npc_charge = place_device(w, npc, 0);
+    w.out.entity_events.clear();
+    CHECK(w.commands.server_remove_and_notify(player));
+    CHECK(queued_removals(w) == (std::vector<uint16_t>{player.packed, satchel.packed,
+                                                        claymore.packed, mine.packed}));
+    CHECK(w.registry.get(player) == nullptr);
+    CHECK(w.registry.get(satchel) == nullptr && w.registry.get(claymore) == nullptr &&
+          w.registry.get(mine) == nullptr);
+    CHECK(w.registry.get(grenade) != nullptr && w.registry.get(eweap) != nullptr &&
+          w.registry.get(control) != nullptr && w.registry.get(ungated) != nullptr);
+    w.out.entity_events.clear();
+    CHECK(w.commands.server_remove_and_notify(npc));
+    CHECK(queued_removals(w) == (std::vector<uint16_t>{npc.packed}));
+    CHECK(w.registry.get(npc_charge) != nullptr);
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
@@ -606,6 +720,8 @@ int main() {
     test_wac_handler_returns();
     test_tod_raw_store_and_signed_day_wrap();
     test_hold_ssn_cause_bit();
+    test_wac_removals_notify_the_joiners();
+    test_player_removal_sweeps_placed_devices();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;
