@@ -339,8 +339,15 @@ void process_class_state_machine(
             b.f[AiBrain::kNoTargetIdle] = 1;
     }
 
+    // The alert edge needs an occupant (entity+0x170, the vehicle's first
+    // claimant) that is not a Player; an empty hull or a player-driven one only
+    // records the alert [orig: EntityAI_ProcessInfantryStateMachine
+    // @0x45820D..0x45823B; EntityAI_ProcessVehicleStateMachine @0x45841A..0x458448].
+    const Entity *self = world.registry.get(e.handle);
+    const Entity *occupant = self != nullptr ? world.registry.get(self->primary_occupant) : nullptr;
     int32_t alert = b.f[AiBrain::kAlert];
-    if (sys.is_authority && e.has_physics && (e.physics_flags & 0x100) == 0 &&
+    if (sys.is_authority && occupant != nullptr &&
+        ((occupant->flags | occupant->engine_flags) & kEntityFlagPlayer) == 0 &&
         b.f[AiBrain::kPrevAlert] != alert) {
         alert = 2;
         if ((e.profile.flags96 & 2) == 0 && b.f[AiBrain::kCurState] != g.alert_hold)

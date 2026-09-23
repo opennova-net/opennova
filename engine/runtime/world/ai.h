@@ -444,7 +444,6 @@ struct AiEntity {
     AiSlot slot;
     AiProfile profile;
     bool has_physics = true;   // entity+368 present
-    uint32_t physics_flags = 0;// entity+368 +36 (bit 0x100 = airborne)
     int32_t pos[3] = {};       // entity+4/+8/+12 (position X/Y/Z, 32-bit fixed)
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20

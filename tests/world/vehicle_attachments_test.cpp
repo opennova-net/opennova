@@ -66,7 +66,6 @@ struct Rig {
         veh_h = w.registry.spawn(1, veh);
         w.vehicles.traits.set(1294, parent_traits(attrib_parent));
         AiEntity &brain = *w.ai.at(w.ai.attach(veh_h));
-        brain.has_physics = false;
         brain.health = 2000;
         brain.brain.f[AiBrain::kCurState] = kAiGroundPretty;
         brain.brain.f[AiBrain::kPendState] = kAiGroundPretty;

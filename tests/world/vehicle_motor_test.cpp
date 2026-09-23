@@ -2590,7 +2590,6 @@ void test_state0_brain_with_ai_driver_holds() {
 	ae.brain.f[AiBrain::kSpeedB] = 16019;
 	ae.profile.type = 2;
 	ae.profile.flags100 = 0x5; // FOLLOW_WP | FLEE — the d_5ton combat_flags
-	ae.has_physics = false;    // retail's entity+368 is null: no alert edge
 	const Vec3 start = r.veh().position;
 	TickContext ctx{};
 	ctx.world = &r.w;

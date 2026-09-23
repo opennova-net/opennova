@@ -2320,19 +2320,44 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 //  - a client commits pend 16 or 21..23 (@0x458579..0x458586; air 7 or 13..15);
 //  - the spawn AIEvent's channel word is bx == 0 (@0x45851a, xor ebx,ebx @0x4583cd;
 //    the air machine stores 9 @0x458312).
+// Both machines take the alert edge only for a hull whose entity+0x170 occupant is
+// present and not a Player (@0x45841A..0x458433; air @0x45820D..0x458226).
 static void test_vehicle_class_state_machine_gates() {
 	auto w_heap = std::make_unique<World>();
 	World &w = *w_heap;
+	w.registry.configure_pool(0, 2);
+	w.registry.configure_pool(1, 1);
+	Entity hull_seed;
+	hull_seed.kind = EntityKind::Item;
+	const EntityHandle hull = w.registry.spawn(1, hull_seed);
+	Entity crew_seed;
+	crew_seed.kind = EntityKind::Organic;
+	const EntityHandle crew = w.registry.spawn(0, crew_seed);
 	auto sys_heap = std::make_unique<AiSystem>();
 	AiSystem &sys = *sys_heap;
-	const int idx = sys.attach(EntityHandle::make(1, 0));
+	const int idx = sys.attach(hull);
 	AiEntity &e = *sys.at(idx);
-	e.has_physics = true;
-	e.physics_flags = 0;
 	e.health = 100;
 
-	// Authority alert edge: GROUND_EVADE from a non-22 state, committed at once ...
+	// An empty hull only records the alert: no evade pend, prev = alert.
 	sys.is_authority = true;
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	e.brain.f[AiBrain::kAlert] = 1;
+	sys.process_vehicle_state_machine(e, w, 2);
+	CHECK(e.brain.f[AiBrain::kPrevAlert] == 1);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
+	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundFollowWp);
+	// A Player claimant (Flags 0x100) gates the edge the same way.
+	w.registry.get(crew)->flags |= kEntityFlagPlayer;
+	w.registry.get(hull)->primary_occupant = crew;
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	sys.process_infantry_state_machine(e, w, 2);
+	CHECK(e.brain.f[AiBrain::kPrevAlert] == 1);
+	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundFollowWp);
+	w.registry.get(crew)->flags &= ~kEntityFlagPlayer; // an NPC crew from here on
+
+	// Authority alert edge: GROUND_EVADE from a non-22 state, committed at once ...
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
@@ -2676,7 +2701,6 @@ void test_vehicle_brain_think_countdown() {
     CollisionWorld cw;
     sys.collision = &cw;
     AiEntity &e = *sys.at(sys.attach(h));
-    e.has_physics = false; // no alert edge
     e.health = 100;
     e.brain.f[AiBrain::kCurState] = kAiGroundPretty;  // row 22: a live tick returns at once
     e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
@@ -2740,7 +2764,6 @@ void test_vehicle_brain_think_countdown() {
     organic.health = 100;
     const EntityHandle oh = w.registry.spawn(0, organic);
     AiEntity &o = *sys.at(sys.attach(oh));
-    o.has_physics = false;
     o.health = 100;
     o.brain.f[AiBrain::kCurState] = kAiGroundPretty;
     o.brain.f[AiBrain::kPendState] = kAiGroundPretty;
@@ -2852,7 +2875,6 @@ int main() {
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.has_physics = false; // avoid the alert-edge forcing pending=10
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp; // 16
         e.brain.f[AiBrain::kPendState] = kAiGroundFormation; // 19 (enter = full_reset_to_idle)
         e.brain.f[AiBrain::kStep] = 999;
@@ -2874,7 +2896,6 @@ int main() {
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.has_physics = false;
         e.brain.f[AiBrain::kAlert] = 5;
         e.brain.f[AiBrain::kPrevAlert] = 5;
         e.brain.f[AiBrain::kCurState] = 0;
@@ -3009,7 +3030,6 @@ int main() {
         AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.has_physics = false;
         e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6 — a still-unported tick row
         e.brain.f[AiBrain::kPendState] = kAiHeloLand;
         TickContext ctx;
@@ -3041,7 +3061,6 @@ int main() {
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
-        e.has_physics = false;
         // State 20's row is all no-ops, so nothing clobbers kOutSpeed -- isolating the
         // movement->slot mapping (which keys off kOutSpeed + kAlert, not the state id).
         e.brain.f[AiBrain::kCurState] = kAiGroundReturnToBase;  // 20
@@ -3722,7 +3741,6 @@ int main() {
         sys.is_in_session = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.has_physics = false;
         e.health = 100;                                    // still "alive" coming in
         e.vel_x = 2000; e.vel_z = 0;                       // crash speed (>= 1057)
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp; // tick = h_ground_followwp_tick
