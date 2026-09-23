@@ -2559,8 +2559,12 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   `entity.Yaw − ftol(atan2(−ny,−nx) · dbl_7C57B8[−2^31/π])` and
   `entity.Pitch − ftol(atan2(nz, ftol(lenXY)) · same)` `[orig:
   @ 0x4ae938-0x4ae9d9]` — and the 0.375u pull-in uses REAL fsin/fcos of
-  `yaw · 2π/2^32` scaled 2^22 truncated, not the quantized dir table `[orig:
-  @ 0x4ae9df-0x4aea30]`; plane[0] is read unguarded even for a 0-plane volume;
+  `yaw · dbl_7C3608` (`fild g_LadderContactYaw; fmul dbl_7C3608` @ 0x4AE9C8..0x4AE9D3;
+  1.4629627251502471e-9 radians per BAM, 30.5 ppm above the exact 2π/2^32, so a 180-degree
+  frame leaves sin = 402/2^22 and its anchor 2 units off Y) scaled 2^22 truncated, not the
+  quantized dir table `[orig: @ 0x4ae9df-0x4aea30]` (port: `collision_detail.h`'s
+  `kRadianPerBam` holds the retail bits since 2026-09-23; `collision`,
+  `test_ladder_entry_gate_snap_and_chase`, `test_ladder_from_above_entry_and_sin_lane`); plane[0] is read unguarded even for a 0-plane volume;
   5 contact-no-force; 6 CA armory volume -> 0x4; 7/12 vehicle-mask solids;
   8 BB blink accumulate
   (buildings, body/eye points only) -> 0x10; 9 CD door activation touch mask on
@@ -12513,6 +12517,13 @@ the ground death's child kill) route the same way.
   588576 after ticks 2..5 with +0xAC -208 / -208 / -416 / -416, and has fallen
   2.95 u after 60 ticks (the doubled integrate alone would give 5.9 u); at fallmps 13
   a 4.0 u fall lands on tick 70 at 49 health. (`infantry_org1_parity`)
+- **Open follow-up: CP01 organics authored above unheld surfaces.** About 23 CP01
+  organics are authored above any surface the port's collision holds (the tree groups, the
+  lumber-mill dome; net 2804 spawns at z 23.38 over terrain 21.19): they are flagged
+  airborne and fall to the terrain on the first even-tick resolve, on master as well, and
+  since an airborne body skips its think (§38.4) each holds its idle until it lands, which
+  the quarter-step fall takes most of two seconds to do (`ai_muzzle_pose` samples after 124
+  ticks for that reason). What holds those organics up in retail is unverified.
 - **The death edge is the NPC death transaction, once per life.** Guard `cmp
   [esi+11Eh],bp; jg` @ 0x4B9C40 and `test byte ptr [esi+24h],2; jnz` @ 0x4B9C4D; the
   edge is the only writer of the org1 dead bit (`or eax,2` @ 0x4B9D18, store

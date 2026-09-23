@@ -106,8 +106,8 @@ roll·pitch·yaw about the float Z/X/Y axes, each factor SKIPPED when its BAM
 is exactly 0, with per-axis quantized trig:
 `c = float(ftol(cos(θ)·2²²))/2²²`, `s = float(ftol(sin(θ)·−2²²))/2²²` — the
 sin sign is baked into the constant (`dbl_7C57B0 = −2²²`), and the angle
-scale `dbl_7C3608 = 0x3E19222D9890E4A8` is NOT exactly 2π/2³² (≈ 2.1 ppm
-above; the port carries the exact bits). The TOC corner refinement's
+scale `dbl_7C3608 = 0x3E19222D9890E4A8` (1.4629627251502471e-9) is NOT exactly 2π/2³²
+(about 30.5 ppm above; the port carries the exact bits). The TOC corner refinement's
 collision-AABB swizzle (`X = −y, Y = z, Z = x` of the mission-axis bounds
 `[orig: @ 0x5c4920-0x5c49c1]`) and `Entity_ComputeBoundingSphere @ 0x5c69a0`
 (center = AABB midpoints, radius = min(√Σhalf², 0x7FFF0000f)) are consistent
