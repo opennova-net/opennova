@@ -128,8 +128,11 @@ void BmsEventSystem::on_load(World &w) {
         resolve_zone_refs(w);
         zone_refs_resolved_ = true;
     }
-    // The sticky relation/visited/group state zeroes once per mission load
-    // [orig: EventSystem_FreeAll @ 0x453210].
+    // The sticky relation/visited/group state zeroes once per mission load:
+    // the matrices and visited words in EventSystem_FreeAll, the group
+    // records (alert, counts, speed) in the mission reset's memset.
+    // [orig: EventSystem_FreeAll @ 0x453210; CAIGroup_HasGuardTaskFromIndex2
+    //  @0x40DB80 (the load reset; the 0xA33F90 x 0xC00 memset @0x40DBAE)]
     w.script.relations.clear();
     // Round init clears both dialog tables the PLYRDIALOG subs read [orig:
     // Game_InitNewRound @0x422741/@0x4227ac -> Dialog_ResetAll @0x44dc90].
@@ -143,10 +146,9 @@ void BmsEventSystem::on_load(World &w) {
     }
     normal_gate_ = 0;
     quarter_cursor_ = 0;
-    // The retail AWOL counter is a persistent global; zeroing here is a
-    // load-time convenience with the same observable behavior (the counter is
-    // re-derived within one quarter cycle either way, and it only grows while
-    // the player is out of bounds). [orig: dword_A89160]
+    // The AWOL counter zeroes at load too: FreeAll's tail jumps into the
+    // counter reset. [orig: dword_A89160; EventSystem_FreeAll @0x453210 — the
+    //  tail jump @0x453375 to `mov g_PlayerAwolCounter, 0` @0x439DB0]
     awol_64tick_count_ = 0;
 }
 
@@ -656,9 +658,10 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
-        // @0x4544af); the call
-        // sites gate on g_spawn_success_gate — process_round_end's own latch covers
-        // that]. The "win" effect stays as the presentation signal.
+        // @0x4544af)]; the round-over gate sits inside the callee [orig:
+        // Server_ProcessRoundEnd @0x5164F6, `cmp g_spawn_success_gate, ebx`],
+        // which process_round_end's own latch ports. The "win" effect stays as
+        // the presentation signal.
         case bms::ActionType::BlueWin:
             w.out.effects.push({"win", 1, 0, 0, 0, std::string()});
             w.process_round_end(1);

@@ -137,7 +137,7 @@ static void test_wac_to_bms_shared_var() {
 // A mission WAC script can tune the global infantry aim spread, and the AI pass
 // consumes the new value. Retail resolves `accuracyspread` through the writable
 // named-value table, then reads that same dword in the sawtooth aim-error formula.
-// [orig: WacScript_ResolveParameter @0x4f2940 -> wac_var_accuracyspread
+// [orig: WacScript_ResolveParameter @0x4f2920 -> wac_var_accuracyspread
 // @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
 static void test_wac_accuracyspread_drives_npc_aim() {
     World w;
