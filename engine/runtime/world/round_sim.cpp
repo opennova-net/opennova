@@ -831,8 +831,7 @@ void record_round_fire(World &world, RoundSim &sim,
 
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z) {
-    return world.env.water_z != 0 &&
-           body_z_q16 + eye_offset_z < world.env.water_z;
+    return io::bam_add(body_z_q16, eye_offset_z) < world.env.water_z;
 }
 
 void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
