@@ -970,6 +970,17 @@ ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
   `VEHICLE_SPECIAL2`. There is **no model-order selection and no engine-name blacklist**. The former
   bridge walked the model's first two CTRL entries and then tried to blacklist collisions, which put
   B50Cal's first phase on `HEAT_GLOW`; D-WPN-31 records that fixed divergence.
+- **Open follow-ups: nonzero-phase coverage and the SPECIAL1 skip.** With the integrator
+  unreferenced, no in-game path writes a nonzero phase (only the savegame restore does, and
+  the port has none), so the collision's and the attachment pose's reading of a nonzero
+  phase (the section ordinal) is exercised by no test: the GUT PLAYPARTANIM cases in
+  `simulation_test.gd` pin the held zero phase, and a ctest that sets the brain phase
+  directly would restore that coverage. With the item's attribute bit 0x1000 set,
+  `HUD_CacheEntityDisplayInfo` skips the SPECIAL1 store (`test dword ptr [edx+54h],1000h`
+  @ 0x4A3E1E, the jump @ 0x4A3E25 over the store to `dword_83FF20` @ 0x4A3E27..0x4A3E2D;
+  SPECIAL2 @ 0x4A3E38 is unconditional), so the global keeps the previous entity's value where
+  the port publishes "unpublished"; that matters only if another entity's presentation reads
+  the bus within the same frame.
 
 ### 8.5 bmsi attribute flags (checkbox dialog)
 Flag label table @ 0x5b1c84 (dfx2med): REFLECTIVE, INDESTRUCTABLE, GUARDING, BLIND, **DEAF**,
@@ -13423,7 +13434,10 @@ world-side facts of the slice:
   which walks the live rows (their used bit is the allocated-row test;
   `npruntime_server_tick_maintenance`, `check_humans_count_the_visible_players`), rebuilt
   by the server tick and by the local role ahead of the script pass, since a single-player
-  game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A).
+  game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A). Open follow-up:
+  the port's `Entity::has_item_def` is false for a live row whose type items.def lacks, where
+  retail's +0x20 points at row 0, so the other consumers that model a +0x20 test (for
+  example `Entity_CountMountedEntities @ 0x435970`) diverge for such rows.
 - **The frame split.** `Game_ProcessMainFrame` runs `Client_ProcessNetworkFrame`
   (@ 0x526692), `Sound_TickPendingSlots` (@ 0x526697), `Server_TickUpdate` (@ 0x5266B6:
   the per-player walk @ 0x51D88B, the receive pump @ 0x51D895, the humans count
