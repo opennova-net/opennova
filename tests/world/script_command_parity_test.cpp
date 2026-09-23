@@ -551,6 +551,34 @@ static void test_tod_raw_store_and_signed_day_wrap() {
     CHECK(w.weather.tod_fixed24 == 1500u * 0x44444u - WeatherState::kTodDayFixed24);
 }
 
+// holdSSN/unholdSSN set and clear bit 0x2000 of the entity+0x2C dword (our
+// cause_flags) behind the ItemTypeIndex gate and leave its other bits; the
+// org1 think reads it. [orig: WacCmd_HoldSsn @0x4F7810 — gate @0x4F7857,
+// `or [eax+2Ch],2000h` @0x4F785D; WacCmd_UnholdSsn @0x4F7870 — gate
+// @0x4F78B7, `and [eax+2Ch],0FFFFDFFFh` @0x4F78BD]
+static void test_hold_ssn_cause_bit() {
+    ScriptWorld w;
+    const EntityHandle npc = spawn_npc(w, 230, 36);
+    Entity itemless;
+    itemless.net_id = 231;
+    const EntityHandle bare = w.registry.spawn(1, itemless);
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then holdSSN(230) store(v1) holdSSN(231) store(v2) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK((w.registry.get(npc)->cause_flags & kCauseFlagScriptHold) != 0);
+    CHECK(w.script.vars.get_mission(2) == 0);                // no ItemTypeIndex
+    CHECK(w.registry.get(bare)->cause_flags == 0);
+    Entity *e = w.registry.get(npc);
+    e->cause_flags = 0x800u | kCauseFlagScriptHold;           // a latched critical hit
+    CHECK(w.commands.set_ssn_held(npc, false));
+    CHECK(e->cause_flags == 0x800u);
+    CHECK(w.commands.set_ssn_held(npc, true));
+    CHECK(e->cause_flags == (0x800u | kCauseFlagScriptHold));
+    CHECK(!w.commands.set_ssn_held(bare, true));
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
@@ -568,6 +596,7 @@ int main() {
     test_group_hp_pools_word_and_return();
     test_wac_handler_returns();
     test_tod_raw_store_and_signed_day_wrap();
+    test_hold_ssn_cause_bit();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;

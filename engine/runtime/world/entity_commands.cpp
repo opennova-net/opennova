@@ -823,9 +823,19 @@ bool EntityCommands::set_ssn_hidden(EntityTarget ssn, bool hidden) {
 }
 
 bool EntityCommands::set_ssn_held(EntityTarget ssn, bool held) {
+    // Bit 0x2000 of the entity+0x2C dword behind the ItemTypeIndex gate; the
+    // org1 think reads it (a held NPC takes move mode 12 at zero distance).
+    // [orig: WacCmd_HoldSsn @0x4F7810 — gate @0x4F7857, `or [eax+2Ch],2000h`
+    //  @0x4F785D; WacCmd_UnholdSsn @0x4F7870 — gate @0x4F78B7, `and
+    //  [eax+2Ch],0FFFFDFFFh` @0x4F78BD; the reader Entity_UpdateInfantryAI
+    //  @0x4BD235]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->held = held;
+    if (e == nullptr || e->item_id == 0) return false;
+    if (held) {
+        e->cause_flags |= kCauseFlagScriptHold;
+    } else {
+        e->cause_flags &= ~kCauseFlagScriptHold;
+    }
     return true;
 }
 

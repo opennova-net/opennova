@@ -290,7 +290,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
 	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
     piece.use_gun_slot_swapped = false;
     piece.hidden = false;
-    piece.held = false;
     piece.last_attacker = EntityHandle{};
     piece.death_blast_center = Vec3{};
     piece.death_tick = 0;

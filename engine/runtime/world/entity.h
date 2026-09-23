@@ -253,6 +253,10 @@ inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disable
                                                                   // gate [orig: WacCmd_DisableSsn @0x4F76DD;
                                                                   //  Entity_UpdateVehiclePhysics @0x48B980;
                                                                   //  Entity_UpdateAircraftPhysics @0x490F1E]
+// The entity+0x2C dword (Entity::cause_flags) bit WAC holdSSN sets and
+// unholdSSN clears; the org1 think holds the NPC in place while it is set.
+// [orig: WacCmd_HoldSsn @0x4F785D; Entity_UpdateInfantryAI @0x4BD235]
+inline constexpr uint32_t kCauseFlagScriptHold = 0x2000;
 
 // The BMS-attribute part of a streamed Flags dword, mapped back onto the
 // record attribute bits the placement traits read (Reflective 1<<23,
@@ -588,6 +592,7 @@ struct Entity {
     // outside {1,3,4,5} (the 64-tick think and the blast) [orig: @0x407b4d..0x407b4f];
     // the consumer clears the bit it reports [orig: GameEvent_PlayerDeath @0x5171ca /
     // @0x5171e8 / @0x517206]. RoundDeath::event_flags snapshots the 0xF00 mask.
+    // Bit 0x2000 (kCauseFlagScriptHold) is the WAC holdSSN latch, outside it.
     uint32_t cause_flags = 0;
     int32_t spawn_heading = 0; // BAM32, entity+0x330 [orig: @0x4B965C]
     uint32_t spawn_flags = 0;  // entity+0x334, excludes dead [orig: @0x4B9662]
@@ -688,7 +693,6 @@ struct Entity {
     uint8_t pre_use_gun_equipped_adm_index = 0xFF;
     bool use_gun_slot_swapped = false;
     bool hidden = false;
-    bool held = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---
     // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed

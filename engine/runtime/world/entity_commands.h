@@ -119,6 +119,8 @@ public:
     bool set_ssn_turn(EntityTarget ssn, int32_t heading_degrees);
     bool teleport_local_to_ssn(EntityTarget ssn);
     bool set_ssn_hidden(EntityTarget ssn, bool hidden);
+    // WAC holdSSN/unholdSSN: cause_flags bit 0x2000 behind the ItemTypeIndex
+    // gate. [orig: WacCmd_HoldSsn @0x4F7810; WacCmd_UnholdSsn @0x4F7870]
     bool set_ssn_held(EntityTarget ssn, bool held);
     bool set_ssn_disabled(EntityTarget ssn, bool disabled);
 

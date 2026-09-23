@@ -54,7 +54,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.health = ent ? ent->health : 0;
 	d.alive = ent ? ent->alive : false;
 	d.hidden = ent ? ent->hidden : false;
-	d.held = ent ? ent->held : false;
+	d.held = ent ? (ent->cause_flags & kCauseFlagScriptHold) != 0 : false;
 	d.disabled = ent ? ((ent->flags | ent->engine_flags) & kEntityFlagScriptDisabled) != 0 : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
