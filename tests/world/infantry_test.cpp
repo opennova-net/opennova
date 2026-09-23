@@ -2131,12 +2131,15 @@ void test_player_weapon_channel_blend_window() {
 }
 
 // The secondary channel's variant ring: a state whose .adm row authors N clips is
-// served head-then-advance on every play, so repeated plays of that state rotate
-// through its clips while the latched wpn_variant follows the SERVED entry
-// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778: node = table[S];
-//  table[S] = node->next; slot+0x44 = node]. Rings are per state, their heads
-// shared by every channel of the .adm (this lone body's primary never plays
-// these states); a single-clip row (or a variant-less provider) always serves 0.
+// served head-then-advance on every play, the head starting on the row's LAST
+// entry and walking back through the file order, so repeated plays of that state
+// rotate through its clips while the latched wpn_variant follows the SERVED entry
+// [orig: AnimMap_RegisterBoneNode @0x40C2D0 points the table at each newly
+//  inserted token @0x40C385; AnimMap_UpdateEntity @0x40B737..0x40B778:
+//  node = table[S]; table[S] = node->next; slot+0x44 = node]. Rings are per
+// state, their heads shared by every channel of the .adm (this lone body's
+// primary never plays these states); a single-clip row (or a variant-less
+// provider) always serves 0.
 void test_player_weapon_channel_variant_ring() {
     struct RingSource : TestSource {
         std::map<int, int> rings;
@@ -2167,8 +2170,8 @@ void test_player_weapon_channel_variant_ring() {
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     CHECK(e->inf.wpn_variant == 0); // idle: single-clip row
 
-    // Three reloads in a row serve ring entries 0, 1, 2 — then wrap to 0.
-    for (int expected : {0, 1, 2, 0}) {
+    // Three reloads in a row serve ring entries 2, 1, 0, then wrap to 2.
+    for (int expected : {2, 1, 0, 2}) {
         e->inf.reload_anim_ticks = 80;
         t = run_to_next_selection(ai, w, t);
     run_ticks(ai, w, t, t + 1); ++t;
@@ -2185,18 +2188,19 @@ void test_player_weapon_channel_variant_ring() {
     }
 
     // Rings are PER STATE: the knife ring is untouched by the reload plays and
-    // starts at 0; the next motor-head update serves the ring after the stamp.
+    // starts on its last entry; the next motor-head update serves the ring after
+    // the stamp.
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
-    CHECK(e->inf.wpn_variant == 0);
+    CHECK(e->inf.wpn_variant == 1);
     // A repeat stamp of the same state mid-clip does NOT re-serve (no transition).
     run_ticks(ai, w, t, t + 3);
     t += 3;
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 0);
-    // Let it finish, then the next knife play serves entry 1, and the one after wraps.
+    CHECK(e->inf.wpn_variant == 1);
+    // Let it finish, then the next knife play serves entry 0, and the one after wraps.
     run_ticks(ai, w, t, t + 31);
     t += 31;
     run_ticks(ai, w, t, t + 16);
@@ -2204,14 +2208,14 @@ void test_player_weapon_channel_variant_ring() {
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 1);
+    CHECK(e->inf.wpn_variant == 0);
     run_ticks(ai, w, t, t + 31);
     t += 31;
     run_ticks(ai, w, t, t + 16);
     t += 16;
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 0);
+    CHECK(e->inf.wpn_variant == 1);
 
     // The outgoing variant is latched too: mid-blend, prev carries the served
     // entry it was playing.
@@ -2223,17 +2227,19 @@ void test_player_weapon_channel_variant_ring() {
     t = run_to_next_selection(ai, w, t);
     run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
-    CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at head 1
+    CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at entry 1
     CHECK(e->inf.wpn_prev == anim_state::kIdle);
     CHECK(e->inf.wpn_prev_variant == 0);
 }
 
 // The variant-ring heads are ONE table per loaded .adm, read by both channels of
 // every body using it: an NPC's channel copy re-inits the secondary (serving the
-// head) before the primary (serving the next entry), a second body of the same
-// .adm continues the walk, a body of another .adm walks its own heads, and a
-// single-clip row serves 0 without touching them.
-// [orig: AnimMap_LinkEntity slot+0x48 = &entry+0x44 @0x40BA77; the re-init
+// head, the row's last entry on a fresh ring) before the primary (serving the
+// entry before it), a second body of the same .adm continues the walk, a body of
+// another .adm walks its own heads, and a single-clip row serves 0 without
+// touching them.
+// [orig: AnimMap_LinkEntity slot+0x48 = &entry+0x44 @0x40BA77; the ring insert
+//  AnimMap_RegisterBoneNode @0x40C37F..0x40C385; the re-init
 //  AnimMap_UpdateEntity @0x40B737..0x40B778; AnimMap_UpdateDualChannels
 //  @0x40B908 before @0x40B94E; the NPC channel copy @0x4B9A28]
 void test_npc_channels_share_the_adm_variant_ring_heads() {
@@ -2269,13 +2275,13 @@ void test_npc_channels_share_the_adm_variant_ring_heads() {
     play(bodies[0], anim_state::kAttack);
     CHECK(bodies[0]->inf.weapon_clip_state() == anim_state::kAttack);
     CHECK(bodies[0]->inf.body_clip_state() == anim_state::kAttack);
-    CHECK(bodies[0]->inf.wpn_variant == 0); // the secondary serves first
+    CHECK(bodies[0]->inf.wpn_variant == 2); // the secondary serves first, the last entry
     CHECK(bodies[0]->inf.anim_variant == 1);
     play(bodies[1], anim_state::kAttack);   // the same .adm continues the walk
-    CHECK(bodies[1]->inf.wpn_variant == 2);
-    CHECK(bodies[1]->inf.anim_variant == 0);
+    CHECK(bodies[1]->inf.wpn_variant == 0);
+    CHECK(bodies[1]->inf.anim_variant == 2);
     play(bodies[2], anim_state::kAttack);   // another .adm walks its own heads
-    CHECK(bodies[2]->inf.wpn_variant == 0);
+    CHECK(bodies[2]->inf.wpn_variant == 2);
     CHECK(bodies[2]->inf.anim_variant == 1);
 
     run_ticks(ai, w, t, t + 12);
@@ -2285,18 +2291,19 @@ void test_npc_channels_share_the_adm_variant_ring_heads() {
     CHECK(bodies[0]->inf.wpn_variant == 0);
     CHECK(bodies[0]->inf.anim_variant == 0);
     CHECK(bodies[0]->inf.anim_prev == anim_state::kAttack);
-    CHECK(bodies[0]->inf.anim_prev_variant == 1); // the outgoing entry is latched
-    CHECK(bodies[0]->inf.wpn_prev_variant == 0);
+    CHECK(bodies[0]->inf.anim_prev_variant == 1); // the outgoing entries are latched
+    CHECK(bodies[0]->inf.wpn_prev_variant == 2);
     play(bodies[0], anim_state::kAttack);   // ...and leaves the ringed heads alone
     CHECK(bodies[0]->inf.wpn_variant == 1);
-    CHECK(bodies[0]->inf.anim_variant == 2);
+    CHECK(bodies[0]->inf.anim_variant == 0);
 }
 
 // The primary channel runs on its served ring entry: the re-init latches the
-// entry the shared heads serve, root motion samples that entry's track, and a
-// deferred request promotes at that entry's own end.
-// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 re-inits the channel from the
-//  served node; the end-flag promotion @0x40B77B]
+// entry the shared heads serve (a fresh ring's last), root motion samples that
+// entry's track, and a deferred request promotes at that entry's own end.
+// [orig: AnimMap_RegisterBoneNode table = node @0x40C385; AnimMap_UpdateEntity
+//  @0x40B737..0x40B778 re-inits the channel from the served node; the end-flag
+//  promotion @0x40B77B]
 void test_primary_channel_runs_on_its_served_ring_entry() {
     struct RingSource : TestSource {
         int variant_count(int, int id) const override {
@@ -2315,7 +2322,6 @@ void test_primary_channel_runs_on_its_served_ring_entry() {
     RingSource src;
     src.clips = {anim_state::kIdle, anim_state::kAttack};
     AnimVariantRings rings;
-    CHECK(rings.serve(&src, 5, anim_state::kAttack) == 0); // another body's play
     InfantryState inf;
     inf.active = true;
     inf.adm_id = 5;

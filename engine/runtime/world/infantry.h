@@ -332,15 +332,21 @@ public:
 // heads per loaded .adm (the AnimMap entry's state-indexed node array), and every
 // AnimMap slot linked to that entry reads it: both channels of every body using
 // the .adm. A channel re-init onto state S plays table[S]'s node and advances
-// table[S] to the node's ring link, so successive plays of S, by any channel of
-// any body sharing the .adm, walk the row's clips in file order (an unauthored
-// state walks the reset row from its own head). A single-clip row always serves
-// its one entry.
+// table[S] to the node's ring link. Registration inserts each token of a row
+// ahead of the head and points the table at it, so the table starts on the
+// row's LAST token and the ring runs backwards through the file order:
+// successive plays of S, by any channel of any body sharing the .adm, serve the
+// row's entries last to first, then wrap to the last again (an unauthored
+// state serves the reset row). A single-clip row always serves its one entry.
+// Entry indices are file order (the variant index every clip source uses).
 // [orig: AnimMap_LoadAdmFile @0x40CC40 reuses the entry by name (the
 //  AnimMap_FindByName call @0x40CD2F, the template slot @0x40CD4F);
 //  AnimMap_RegisterEntity @0x40BB60 links both slots to it through
-//  AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77); the
-//  re-init AnimMap_UpdateEntity @0x40B737..0x40B778]
+//  AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77); the ring
+//  insert AnimMap_RegisterBoneNode @0x40C2D0 (node->next = head @0x40C37F,
+//  tail->next = node @0x40C382, table = node @0x40C385; a first token or the
+//  reset slot self-rings @0x40C38B..0x40C38F); the re-init AnimMap_UpdateEntity
+//  @0x40B737..0x40B778]
 class AnimVariantRings {
 public:
     // The ring entry a re-init of `state` plays, advancing that state's head.
@@ -348,11 +354,13 @@ public:
     int32_t serve(const IRootMotionSource *source, int adm_id, int state) {
         const int count = source != nullptr ? source->variant_count(adm_id, state) : 1;
         if (count <= 1) return 0;
-        int32_t &head = heads_[(static_cast<int64_t>(adm_id) << 32) |
-                               static_cast<uint32_t>(state)];
-        const int32_t served = head % count;
-        head = (served + 1) % count;
-        return served;
+        // Plays of this state so far, modulo the ring: play p serves the entry
+        // p steps back from the last.
+        int32_t &plays = heads_[(static_cast<int64_t>(adm_id) << 32) |
+                                static_cast<uint32_t>(state)];
+        const int32_t step = plays % count;
+        plays = (step + 1) % count;
+        return count - 1 - step;
     }
     void clear() { heads_.clear(); }
 
