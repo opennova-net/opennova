@@ -4973,10 +4973,11 @@ cveh/cbot/ctrn → Ground, else Unset). Only those five rows reach a machine,
 and a placed item takes a brain only when its def carries the AI-class attrib
 0x100000 AND its `ai_function` row is one of them: the AI slot is allocated
 behind the attrib (`Entity_SpawnFromBMSRecord @0x40E9F0`, the gate `test
-[eax+54h],100000h` `@0x40ED4E`, `Entity_AllocateAISlot` `@0x40ED5C`) and the
-brain by the class row's init (`Entity_InitAllFromModels`' pool-1 class-init
-call `@0x40E5B8..0x40E5D8`, reaching `Entity_InitVehicleAI @0x460200` only
-through the five rows' `Entity_InitHelicopterAIFromDef @0x4683C0` /
+[eax+54h],100000h` `@0x40ED4E`, the `Entity_AllocateAISlot @0x40D2C0` call
+`@0x40ED5C`) and the brain by the class row's init (the pool-1 class-init call
+in `Entity_InitAllFromModels @0x40E460`, `@0x40E5B8..0x40E5D8`, reaching
+`Entity_InitVehicleAI @0x460200` only through the five rows'
+`Entity_InitHelicopterAIFromDef @0x4683C0` /
 `Entity_InitVehicleAIFromDef @0x4686C0`). Fixed 2026-09-23 (the former
 D-NET-161 (g)): promotion allocates a brain only on that pair, `rerun_class_init`
 keys on `VehicleTraits::brain_class` alone, and `AiSystem::think_brain` and the
