@@ -79,13 +79,9 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
             ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
             ent->death_tick = logic_tick;
-            // Stripped embedder .adm sets may lack the selected clip; keep the
-            // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
-            if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
-                const int torso = anim_state::kDeathBulletBase + 4;
-                death = root_motion->has_clip(inf.adm_id, torso) ? torso
-                                                                 : anim_state::kDeathFire;
-            }
+            // An unauthored selection plays the slot's registration fill.
+            // [orig: AnimMap_RegisterEntity @0x40BB60; the edge stores the
+            //  selection unchecked @0x4B4CA3]
             inf.request_body_animation(death);
         }
     } else {

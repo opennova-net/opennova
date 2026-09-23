@@ -1645,15 +1645,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         return;
     }
 
-    // 4. Ground resample (every 8 ticks). [orig: dump 319-326, cache entity+676]
-    // The radius-0 leg of the retail sampler is ONE model-aware center probe:
-    // ray from pos + 1.0u lift, 48u drop, clipped by terrain AND candidate
-    // models — a soldier on a building floor grounds on the FLOOR, not the
-    // terrain under it (the frozen-bunker-garrison fix). Without a collision
-    // world (headless tests) the terrain average stands as before.
-    // [orig: Entity_CalcAverageGroundHeight @0x457230 radius==0 ->
-    //  Entity_RaycastGroundHeightAndObject(entity, 0, 0, 0x10000, 0x300000)
-    //  -> raycast_entity_collision @0x413760 (terrain + candidate models)]
+    // 4. The port's ground sample (every 8 ticks). Neither organic motor samples
+    // the ground this way: the movement resolver owns the clearance, and
+    // Entity_CalcAverageGroundHeight is the vehicle/aircraft brains' helper
+    // (entity+0x2A4 is a HUD field). This stand-in gates the vertical block on
+    // having ground at all and is the clearance source when no collision world
+    // is wired (headless embedders); with one, it is a single model-aware
+    // column: a ray from pos + 1.0u, 48u down, clipped by terrain AND candidate
+    // models, so a soldier on a building floor grounds on the FLOOR.
+    // [orig: the ray shape of Entity_RaycastGroundHeightAndObject @0x414320 ->
+    //  raycast_entity_collision @0x413760; the motors' clearance comes from
+    //  Entity_MovementCollisionResolver @0x4B2BD0]
     if (terrain != nullptr && ((key & 7u) == 0 || !inf.ground_cache_valid)) {
         if (collision != nullptr && collision->instance_count() != 0) {
             inf.ground_cache = collision->raycast_ground(

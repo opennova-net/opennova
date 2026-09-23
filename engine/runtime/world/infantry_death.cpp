@@ -100,12 +100,11 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     if (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
         death = anim_state::kDeathDrown;
     if (ent != nullptr) ent->death_anim_state = 0;
-    // Stripped embedder .adm sets may lack the selected clip; keep the pre-P1c
-    // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
-    if (ai.root_motion != nullptr && !ai.root_motion->has_clip(inf.adm_id, death)) {
-        const int torso = anim_state::kDeathBulletBase + 4;
-        death = ai.root_motion->has_clip(inf.adm_id, torso) ? torso : anim_state::kDeathFire;
-    }
+    // An .adm that never authored the selected clip plays the slot's
+    // registration fill (state 0's node), as every unauthored slot does; there
+    // is no substitute death clip. [orig: AnimMap_RegisterEntity @0x40BB60
+    //  fills unauthored slots; the edge stores the selection unchecked
+    //  @0x4B9D06]
     // The head already sampled this tick's playing channel; death
     // changes the request for the next update.
     // [orig: @0x4B9D38; death callback tail @0x4B9D55]

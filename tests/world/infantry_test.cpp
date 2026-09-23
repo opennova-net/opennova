@@ -2392,7 +2392,9 @@ void test_player_weapon_channel_ticks_while_dead() {
     e->inf.pitch_kick_accum = -1000;
 
     run_ticks(ai, w, 1, 2);
-    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    // The unstaged death selects 174 whether or not the .adm authors it (the
+    // slot's registration fill plays). [orig: @0x4B4C72..0x4B4CA3]
+    CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_clip_phase == 5);
     CHECK(e->inf.reload_anim_ticks == 2);
@@ -5168,6 +5170,10 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     }
     {
+        // An .adm without the selected clip keeps the selection: the slot plays
+        // its registration fill, never a substitute death clip.
+        // [orig: AnimMap_RegisterEntity @0x40BB60; the edge's unchecked store
+        //  @0x4B9D06]
         World w;
         AiSystem ai;
         TestSource src;
@@ -5176,7 +5182,7 @@ int main() {
         AiEntity *e = soldier(ai);
         e->health = 0;
         run_ticks(ai, w, 1, 2);
-        CHECK(e->inf.anim_state == anim_state::kDeathBulletBase + 4);
+        CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     }
 
     // ---- kJumpLoop forces forward delta 1024 ----  [orig: dump 4756]
