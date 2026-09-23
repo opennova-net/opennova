@@ -13336,8 +13336,11 @@ world-side facts of the slice:
   a hidden one does not. Its def test (`cmp [esi+20h]` @ 0x4F9809) is the allocated-row
   test: every spawn links an items.def row (the player's store @ 0x43C429), row 0 for a
   type items.def lacks (`ItemList_FindIndexByTypeId @ 0x49E100`, `xor eax,eax`
-  @ 0x49E131), so a player whose type has no items.def row still counts. Port: `World::entity_update_admitted`
-  (the exemption bit is `CachedFrameState::peer_death_screen`).
+  @ 0x49E131), so a player whose type has no items.def row still counts. Port:
+  `World::entity_update_admitted` (the exemption bit is
+  `CachedFrameState::peer_death_screen`); the count is `EntityRegistry::count_humans`,
+  rebuilt by the server tick and by the local role ahead of the script pass, since a
+  single-player game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A).
 - **The frame split.** `Game_ProcessMainFrame` runs `Client_ProcessNetworkFrame`
   (@ 0x526692), `Sound_TickPendingSlots` (@ 0x526697), `Server_TickUpdate` (@ 0x5266B6:
   the per-player walk @ 0x51D88B, the receive pump @ 0x51D895, the humans count
