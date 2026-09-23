@@ -716,7 +716,8 @@ struct RelOpCall { int op; int32_t a; int32_t b; };
 
 // [orig: AI_FindBestTargetB @0x466f60 scoring core] Combined FOV/range/stealth/priority score
 // for a candidate (16.16 fixed point, 64-bit intermediates, +0x8000 rounding). Returns -1 when
-// the candidate is outside both FOV/range gates (the orig's LABEL_17 skip) — distinct from a
+// the candidate is outside both FOV/range gates (the secondary gate @0x467256..0x467280 skips
+// to the next candidate, loc_467097), distinct from a
 // legitimate in-gate score of 0 (a fully-stealthed target), which the caller needs to honor the
 // priority-bypass ordering. `angle_diff` is the folded BAM heading delta in [0,128]; `distance`
 // is ftol2(dist3d) >> 16 (world units). primary/secondary_fov are the profile arc bytes already

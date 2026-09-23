@@ -492,7 +492,8 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     const int32_t step = b.f[AiBrain::kStep];
     b.f[AiBrain::kTickAccum] += step; // [orig: @0x472E37..0x472E3A]
     // The PACKED cooldown pair: one add advances both u16 words (+208/+210) by step,
-    // low-word carry included. [orig: brain[52] += 65537 * deltaTime @0x472E40..0x472E48]
+    // low-word carry included. [orig: brain[52] += 0x10001 * brain[7]: `imul
+    // ecx,10001h` @0x472E42, `add [esi+0D0h],ecx` @0x472E48]
     b.f[AiBrain::kCooldownPair] = static_cast<int32_t>(
         static_cast<uint32_t>(b.f[AiBrain::kCooldownPair]) +
         0x10001u * static_cast<uint32_t>(step));
