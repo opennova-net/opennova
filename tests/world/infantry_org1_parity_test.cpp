@@ -757,6 +757,38 @@ void test_org1_ladder_runs_the_selector_tail() {
     CHECK(rig.e().inf.path_state == 0);
 }
 
+// R4-1: an airborne org1 body without the 0x80 climb order leaves the think at
+// its head: no selection (the flinch keeps wasHit, +0x36A keeps its move mode)
+// and no attention (no ride link to the deck's occupant). With the climb order
+// the same body thinks. [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66 ->
+// loc_4BE7FD; +0x36A @0x4BD356, wasHit @0x4BD6EE, the ride link
+// @0x4BD87E..0x4BD905]
+void test_org1_airborne_body_skips_the_think() {
+    for (const bool climb : {false, true}) {
+        Org1Rig rig;
+        rig.w->registry.configure_pool(1, 4);
+        Entity mate;
+        mate.kind = EntityKind::Organic;
+        mate.health = 100;
+        const EntityHandle mate_handle = rig.w->registry.spawn(0, mate);
+        Entity deck;
+        deck.kind = EntityKind::Item;
+        deck.health = 100;
+        deck.primary_occupant = mate_handle;
+        const EntityHandle deck_handle = rig.w->registry.spawn(1, deck);
+        rig.entity().ground_target = deck_handle;
+        rig.e().pos[2] = fx(1) + fx(8);
+        rig.airborne();
+        if (climb) rig.entity().flags |= kEntityFlagAiClimb;
+        rig.e().inf.was_hit = true;
+        rig.e().inf.prev_move_mode = 3;
+        rig.tick(16);
+        CHECK(rig.e().inf.was_hit == !climb);
+        CHECK(rig.e().inf.prev_move_mode == (climb ? 0 : 3));
+        CHECK((rig.entity().primary_occupant == mate_handle) == climb);
+    }
+}
+
 int main() {
     test_org1_fall_takes_the_quarter_step_tail();
     test_org1_fall_damage_follows_the_retail_fall();
@@ -777,6 +809,7 @@ int main() {
     test_org1_edge_reads_the_recorded_round();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_fire_latch_is_a_pass_local();
+    test_org1_airborne_body_skips_the_think();
     test_org1_ladder_runs_the_selector_tail();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

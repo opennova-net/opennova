@@ -1465,7 +1465,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             world.reverb.update(e.pos, building_reverb);
         }
         if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
-    } else if (body_live && is_authority && (key & 15u) == 0) {
+    }
+    // An airborne body without the climb order leaves the think at its head:
+    // the jump skips combat, the selection, the attachment select, the ride link,
+    // the idle facing and attention; the recoil, spread and torso tail still runs.
+    // [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66 -> loc_4BE7FD; the
+    //  attachment select @0x4BD273, the ride link and attention @0x4BD87E..]
+    bool thought = false;
+    if (!(e.health > 0 && inf.is_local_player) && body_live && is_authority &&
+            (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
 		// A cached board-any target can upgrade an already seated NPC once
 		// per 64 staggered ticks. Compare slot TYPE, not the userpoint index.
@@ -1479,7 +1487,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 					selected.type != tick_entity->mount_type)
 				world.vehicles.attach_to_seat(e.handle, selected);
 		}
-		infantry_think(e, world);
+		thought = infantry_think(e, world);
+	}
+	if (thought) {
         // Combat produces the movement goal and preferred animation before the
         // common detour/gait selector. The complete think is gated at 16 ticks.
         // [orig: Entity_UpdateInfantryAI @0x4BA970; combat @0x4BBE24]
@@ -1521,7 +1531,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
     if (!inf.is_local_player) infantry_ladder_override(e, tick_entity);
 
-    if (!inf.is_local_player && is_authority && body_live && (key & 15u) == 0) {
+    if (thought) {
         infantry_attachment_select(e, world, attachment);
         if (npc_body && (tick_flags & kEntityFlagDead) == 0)
             infantry_attention_think(*this, e, world, key);
