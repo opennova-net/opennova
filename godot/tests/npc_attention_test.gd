@@ -17,11 +17,11 @@ func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("npc_attention", false, {
 		"items.def": FileAccess.get_file_as_string("res://../fixtures/def/items.def"),
 		"US02.adm": (
-			"anim_reset \"BINOC.bad\"\n" +
-			"anim_idle \"BINOC.bad\"\n" +
-			"anim_idle_2 \"BINOC.bad\"\n" +
-			"anim_idle_look \"BINOC.bad\"\n" +
-			"anim_idle_2_look \"BINOC.bad\"\n"),
+			"anim_reset \"BINOC.bad\"\r\n" +
+			"anim_idle \"BINOC.bad\"\r\n" +
+			"anim_idle_2 \"BINOC.bad\"\r\n" +
+			"anim_idle_look \"BINOC.bad\"\r\n" +
+			"anim_idle_2_look \"BINOC.bad\"\r\n"),
 	})
 	staged_dirs.append(root_dir)
 	assert_eq(DirAccess.copy_absolute(clip_path, root_dir.path_join("BINOC.bad")), OK)

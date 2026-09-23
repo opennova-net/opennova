@@ -31,7 +31,7 @@ func _map(text: String) -> void:
 	var file := FileAccess.open(_root_path.path_join("rig.adm"), FileAccess.WRITE)
 	assert_not_null(file)
 	if file != null:
-		file.store_string(text)
+		file.store_string(text.replace("\n", "\r\n"))
 		file.close()
 
 

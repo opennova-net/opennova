@@ -142,10 +142,10 @@ func _write_char_rig(dir: String, graphic: String) -> void:
 	_write_fixture_bytes(dir, "BINOC.bad", FileAccess.get_file_as_bytes(RetailData.fixture(BINOC_REL)))
 	var quote := String.chr(34)
 	TestFs.write_text(self, dir.path_join(graphic + ".adm"),
-			"anim_reset %sBINOC.bad%s\n" % [quote, quote]
-			+ "anim_idle %sBINOC.bad%s\n" % [quote, quote]
-			+ "anim_idle_2 %sBINOC.bad%s\n" % [quote, quote]
-			+ "anim_emplaced %sBINOC.bad%s\n" % [quote, quote])
+			"anim_reset %sBINOC.bad%s\r\n" % [quote, quote]
+			+ "anim_idle %sBINOC.bad%s\r\n" % [quote, quote]
+			+ "anim_idle_2 %sBINOC.bad%s\r\n" % [quote, quote]
+			+ "anim_emplaced %sBINOC.bad%s\r\n" % [quote, quote])
 
 
 # These pose fixtures have no walking clips. Spawn their boarder at the

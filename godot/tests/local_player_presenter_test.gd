@@ -182,7 +182,7 @@ anim_wpn_empty\t"idle.bad"
 anim_wpn_switchto\t"idle.bad"
 anim_wpn_switchfrom\t"idle.bad"
 anim_wpn_switchrank\t"idle.bad"
-""")
+""".replace("\n", "\r\n"))
 	adm.close()
 	return root_dir
 

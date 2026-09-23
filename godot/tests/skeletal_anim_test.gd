@@ -982,13 +982,9 @@ func test_multi_clip_adm_rows_register_variants() -> void:
 		out.close()
 	var adm := FileAccess.open(dir.path_join("variants.adm"), FileAccess.WRITE)
 	assert_not_null(adm)
-	adm.store_string("
-anim_reset				\"idle.bad\"
-"
-		+ "anim_wpn_idle				\"idle.bad\"
-"
-		+ "anim_wpn_reload				\"walk.bad\" \"walk.bad\" \"idle.bad\"
-")
+	adm.store_string("\r\nanim_reset\t\t\t\t\"idle.bad\"\r\n"
+		+ "anim_wpn_idle\t\t\t\t\"idle.bad\"\r\n"
+		+ "anim_wpn_reload\t\t\t\t\"walk.bad\" \"walk.bad\" \"idle.bad\"\r\n")
 	adm.close()
 
 	var sk := SkeletalAnim.new()
@@ -1055,8 +1051,8 @@ func test_stamped_body_channels_pose_their_served_ring_entries() -> void:
 		out.close()
 	var adm := FileAccess.open(dir.path_join("served.adm"), FileAccess.WRITE)
 	assert_not_null(adm)
-	adm.store_string("anim_reset\t\t\t\t\"idle.bad\"\n"
-		+ "anim_walk_forward\t\t\t\"idle.bad\" \"twist.bad\"\n")
+	adm.store_string("anim_reset\t\t\t\t\"idle.bad\"\r\n"
+		+ "anim_walk_forward\t\t\t\"idle.bad\" \"twist.bad\"\r\n")
 	adm.close()
 
 	var sk := SkeletalAnim.new()
