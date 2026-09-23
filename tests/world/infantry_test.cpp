@@ -35,6 +35,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
@@ -2132,9 +2133,10 @@ void test_player_weapon_channel_blend_window() {
 // The secondary channel's variant ring: a state whose .adm row authors N clips is
 // served head-then-advance on every play, so repeated plays of that state rotate
 // through its clips while the latched wpn_variant follows the SERVED entry
-// [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
-//  animState+68 = animEntry]. Rings are per-state and per-entity; a single-clip
-// row (or a variant-less provider) always serves 0.
+// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778: node = table[S];
+//  table[S] = node->next; slot+0x44 = node]. Rings are per state, their heads
+// shared by every channel of the .adm (this lone body's primary never plays
+// these states); a single-clip row (or a variant-less provider) always serves 0.
 void test_player_weapon_channel_variant_ring() {
     struct RingSource : TestSource {
         std::map<int, int> rings;
@@ -2224,6 +2226,123 @@ void test_player_weapon_channel_variant_ring() {
     CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at head 1
     CHECK(e->inf.wpn_prev == anim_state::kIdle);
     CHECK(e->inf.wpn_prev_variant == 0);
+}
+
+// The variant-ring heads are ONE table per loaded .adm, read by both channels of
+// every body using it: an NPC's channel copy re-inits the secondary (serving the
+// head) before the primary (serving the next entry), a second body of the same
+// .adm continues the walk, a body of another .adm walks its own heads, and a
+// single-clip row serves 0 without touching them.
+// [orig: AnimMap_LinkEntity slot+0x48 = &entry+0x44 @0x40BA77; the re-init
+//  AnimMap_UpdateEntity @0x40B737..0x40B778; AnimMap_UpdateDualChannels
+//  @0x40B908 before @0x40B94E; the NPC channel copy @0x4B9A28]
+void test_npc_channels_share_the_adm_variant_ring_heads() {
+    struct RingSource : TestSource {
+        int variant_count(int, int id) const override {
+            return id == anim_state::kAttack ? 3 : 1;
+        }
+    };
+    World w;
+    AiSystem ai;
+    RingSource src;
+    src.clips = {anim_state::kIdle, anim_state::kAttack};
+    ai.root_motion = &src;
+    int index[3] = {};
+    for (int i = 0; i < 3; ++i) index[i] = ai.attach(EntityHandle::make(0, i));
+    AiEntity *bodies[3] = {};
+    const int32_t adm[3] = {7, 7, 8};
+    for (int i = 0; i < 3; ++i) {
+        bodies[i] = ai.at(index[i]); // after every attach: the pool may grow
+        bodies[i]->inf.active = true;
+        bodies[i]->inf.is_local_player = false; // org1: the channel copy
+        bodies[i]->inf.adm_id = adm[i];
+        bodies[i]->health = 100;
+    }
+    run_ticks(ai, w, 1, 3);
+    ai.is_authority = false; // keep each requested primary fixed
+    uint32_t t = 3;
+    const auto play = [&](AiEntity *e, int state) {
+        e->inf.request_body_animation(state);
+        run_ticks(ai, w, t, t + 1);
+        ++t;
+    };
+    play(bodies[0], anim_state::kAttack);
+    CHECK(bodies[0]->inf.weapon_clip_state() == anim_state::kAttack);
+    CHECK(bodies[0]->inf.body_clip_state() == anim_state::kAttack);
+    CHECK(bodies[0]->inf.wpn_variant == 0); // the secondary serves first
+    CHECK(bodies[0]->inf.anim_variant == 1);
+    play(bodies[1], anim_state::kAttack);   // the same .adm continues the walk
+    CHECK(bodies[1]->inf.wpn_variant == 2);
+    CHECK(bodies[1]->inf.anim_variant == 0);
+    play(bodies[2], anim_state::kAttack);   // another .adm walks its own heads
+    CHECK(bodies[2]->inf.wpn_variant == 0);
+    CHECK(bodies[2]->inf.anim_variant == 1);
+
+    run_ticks(ai, w, t, t + 12);
+    t += 12;
+    CHECK(!bodies[0]->inf.body_blend_active());
+    play(bodies[0], anim_state::kIdle);     // a single-clip row serves 0...
+    CHECK(bodies[0]->inf.wpn_variant == 0);
+    CHECK(bodies[0]->inf.anim_variant == 0);
+    CHECK(bodies[0]->inf.anim_prev == anim_state::kAttack);
+    CHECK(bodies[0]->inf.anim_prev_variant == 1); // the outgoing entry is latched
+    CHECK(bodies[0]->inf.wpn_prev_variant == 0);
+    play(bodies[0], anim_state::kAttack);   // ...and leaves the ringed heads alone
+    CHECK(bodies[0]->inf.wpn_variant == 1);
+    CHECK(bodies[0]->inf.anim_variant == 2);
+}
+
+// The primary channel runs on its served ring entry: the re-init latches the
+// entry the shared heads serve, root motion samples that entry's track, and a
+// deferred request promotes at that entry's own end.
+// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 re-inits the channel from the
+//  served node; the end-flag promotion @0x40B77B]
+void test_primary_channel_runs_on_its_served_ring_entry() {
+    struct RingSource : TestSource {
+        int variant_count(int, int id) const override {
+            return id == anim_state::kAttack ? 2 : 1;
+        }
+        int32_t clip_length_ticks(int, int id, int variant) const override {
+            return id == anim_state::kAttack ? (variant == 0 ? 20 : 30) : -1;
+        }
+        bool advance_variant(int adm, int id, int variant, int32_t &phase,
+                             RootMotionFrame &out) override {
+            if (!TestSource::advance(adm, id, phase, out)) return false;
+            if (id == anim_state::kAttack) out.dx = 100 * (variant + 1);
+            return true;
+        }
+    };
+    RingSource src;
+    src.clips = {anim_state::kIdle, anim_state::kAttack};
+    AnimVariantRings rings;
+    CHECK(rings.serve(&src, 5, anim_state::kAttack) == 0); // another body's play
+    InfantryState inf;
+    inf.active = true;
+    inf.adm_id = 5;
+    inf.reset_body_animation(anim_state::kIdle);
+    inf.request_body_animation(anim_state::kAttack);
+    RootMotionFrame frame;
+    CHECK(advance_primary_channel(inf, src, rings, frame));
+    CHECK(inf.body_clip_state() == anim_state::kAttack);
+    CHECK(inf.anim_variant == 1);
+    CHECK(inf.anim_prev == anim_state::kIdle);
+    CHECK(inf.anim_prev_variant == 0);
+    for (int i = 0; i < 11; ++i) advance_primary_channel(inf, src, rings, frame);
+    CHECK(!inf.body_blend_active());
+    CHECK(frame.dx == 200); // entry 1's track, not entry 0's
+
+    // Entry 0 would end at 20 ticks; the served entry runs its own 30.
+    inf.anim_pending = anim_state::kIdle;
+    while (inf.clip_phase < 25) advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.anim_state == anim_state::kAttack);
+    int guard = 0;
+    while (inf.anim_state == anim_state::kAttack && ++guard < 64)
+        advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.clip_phase == 31); // promoted at 30, the old channel advanced once more
+    advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.body_clip_state() == anim_state::kIdle);
+    CHECK(inf.anim_variant == 0);
+    CHECK(inf.anim_prev_variant == 1);
 }
 
 // The hold-pose kind ladder (special_hold 1-8 -> states 50-61, the scoped +1 variants),
@@ -6060,6 +6179,8 @@ int main() {
     test_player_weapon_channel();
     test_player_weapon_channel_blend_window();
     test_player_weapon_channel_variant_ring();
+    test_npc_channels_share_the_adm_variant_ring_heads();
+    test_primary_channel_runs_on_its_served_ring_entry();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
     test_player_arms_dip();

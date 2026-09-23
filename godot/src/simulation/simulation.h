@@ -232,6 +232,8 @@ public:
 		PF_WPN_BLEND_WEIGHT = opennova::world::PF_WPN_BLEND_WEIGHT,
 		PF_WPN_VARIANT = opennova::world::PF_WPN_VARIANT,
 		PF_WPN_SOURCE_VARIANT = opennova::world::PF_WPN_SOURCE_VARIANT,
+		PF_ANIM_VARIANT = opennova::world::PF_ANIM_VARIANT,
+		PF_ANIM_SOURCE_VARIANT = opennova::world::PF_ANIM_SOURCE_VARIANT,
 		PF_HIDDEN = opennova::world::PF_HIDDEN,
 		PF_LOCAL_VIEW_SUPPRESSED = opennova::world::PF_LOCAL_VIEW_SUPPRESSED,
 		PF_ALIVE = opennova::world::PF_ALIVE,
@@ -1457,6 +1459,9 @@ public:
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
 	float get_local_player_anim_blend_weight() const;
+	// The primary channel's served ring entries (target, outgoing).
+	int get_local_player_anim_variant() const;
+	int get_local_player_anim_source_variant() const;
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;

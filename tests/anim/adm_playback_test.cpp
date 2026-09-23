@@ -103,8 +103,8 @@ int main() {
 	TEST_EXPECT(frame.dx == 0 && frame.events == 0 && frame.capsule_bottom == parked_bottom);
 	// Parked channels retain capsule extents while contributing zero velocity.
 	int32_t target_phase = 0;
-	TEST_EXPECT(source.advance_blended(id, anim_state::kReset, phase,
-			anim_state::kIdle, target_phase, 0.5f, frame));
+	TEST_EXPECT(source.advance_blended(id, anim_state::kReset, 0, phase,
+			anim_state::kIdle, 0, target_phase, 0.5f, frame));
 	TEST_EXPECT(std::abs(frame.dx - int32_t((3.0 + 24.0 / 62.0) * 16384.0)) <= 1);
 
 	// An fps of 0 is a channel frozen at frame 0 with live capsule extents, not a
@@ -161,13 +161,14 @@ int main() {
 		inf.anim_pending = anim_state::kWalkForward;
 		inf.clip_phase = wrap - 1;
 		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
 		TEST_EXPECT(source.clip_length_ticks(id, anim_state::kIdle, 0) == wrap);
-		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, local));
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 		TEST_EXPECT(inf.clip_phase == wrap);
 		TEST_EXPECT(local.events == 60 && local.capsule_bottom == parked.capsule_bottom);
 		inf.anim_pending = 0;
 		inf.clip_phase = wrap - 1;
-		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, local));
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 		TEST_EXPECT(local.events == 1 && local.capsule_bottom == wrapped.capsule_bottom);
 	}
 	// The replica channel: a deferral queued behind the looping idle arms its

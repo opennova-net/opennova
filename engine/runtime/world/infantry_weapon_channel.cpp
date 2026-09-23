@@ -17,12 +17,6 @@ namespace opennova::world {
 //  + AnimMap_UpdateDualChannels @0x40b8c0 (advance; deferred promotion at clip end
 //  via AnimMap_UpdateEntity @0x40b77b); witness world-wac-ai-re.md §14.8]
 // ----------------------------------------------------------------------------
-// The target state's ring size for this entity's .adm — 1 when the provider has
-// no variants (headless/test sources) or the row authors a single clip.
-static int weapon_ring_size(const IRootMotionSource *src, int adm_id, int state) {
-    return src != nullptr ? src->variant_count(adm_id, state) : 1;
-}
-
 void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
 
@@ -85,8 +79,11 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
         const bool use_insert = inserted >= 0 && root_motion != nullptr &&
                 root_motion->has_clip(inf.adm_id, inserted);
         const int played = use_insert ? inserted : requested;
-        inf.begin_weapon_transition(played,
-                weapon_ring_size(root_motion, inf.adm_id, played));
+        // The secondary re-init serves from the heads it shares with the primary
+        // and every body of its .adm, ahead of the primary's own re-init.
+        // [orig: AnimMap_UpdateDualChannels @0x40B908 (secondary) before
+        //  @0x40B94E (primary)]
+        inf.begin_weapon_transition(played, anim_rings.serve(root_motion, inf.adm_id, played));
         if (use_insert) {
             inf.wpn_deferred = requested;
             inf.wpn_blend_step = (infantry_anim_flags(requested) & 0x400u) != 0

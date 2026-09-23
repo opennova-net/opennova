@@ -293,16 +293,18 @@ bool AdmRootMotion::advance_armed(int adm_id, int state_id, int variant,
 
 bool AdmRootMotion::advance_blended(
 		int adm_id,
-		int primary_state, int32_t &primary_phase_ticks,
-		int target_state, int32_t &target_phase_ticks,
+		int primary_state, int primary_variant, int32_t &primary_phase_ticks,
+		int target_state, int target_variant, int32_t &target_phase_ticks,
 		float target_weight,
 		opennova::world::RootMotionFrame &out) {
-	const Track *primary = resolve_track(adm_id, primary_state);
-	const Track *target = resolve_track(adm_id, target_state);
+	// Each channel blends its own served ring entry's track.
+	// [orig: AnimChannel_BlendTwoChannels @0x410740 over the two channels' data]
+	const Track *primary = resolve_track(adm_id, primary_state, primary_variant);
+	const Track *target = resolve_track(adm_id, target_state, target_variant);
 	if (primary == nullptr || target == nullptr) {
 		return opennova::world::IRootMotionSource::advance_blended(
-				adm_id, primary_state, primary_phase_ticks,
-				target_state, target_phase_ticks, target_weight, out);
+				adm_id, primary_state, primary_variant, primary_phase_ticks,
+				target_state, target_variant, target_phase_ticks, target_weight, out);
 	}
 
 	++primary_phase_ticks;

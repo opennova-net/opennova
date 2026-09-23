@@ -1469,6 +1469,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			int32_t body_source_selector = -1;
 			int32_t body_source_phase = 0;
 			float body_blend_weight = 1.0f;
+			// Each channel poses its served ring entry (PF_ANIM_VARIANT /
+			// PF_ANIM_SOURCE_VARIANT).
+			int32_t body_variant = 0;
+			int32_t body_source_variant = 0;
 			String body_clip_key;
 			String body_source_clip_key;
 			{
@@ -1482,6 +1486,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					body_selector = anim_state;
 					body_phase = field_i(
 							p, base, Simulation::PF_ANIM_PHASE_TICKS);
+					body_variant = field_i(p, base, Simulation::PF_ANIM_VARIANT);
 					body_clip_key = key;
 					const float target_weight =
 							p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
@@ -1494,6 +1499,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 								Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
 						body_source_clip_key = source_key;
 						body_blend_weight = target_weight;
+						body_source_variant = field_i(
+								p, base, Simulation::PF_ANIM_SOURCE_VARIANT);
 					} else {
 						body_mode = BODY_CLIP_AT;
 					}
@@ -1503,6 +1510,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					body_phase = field_i(
 							p, base,
 							Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
+					body_variant = field_i(
+							p, base, Simulation::PF_ANIM_SOURCE_VARIANT);
 					body_clip_key = source_key;
 				}
 			}
@@ -1522,7 +1531,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					row.body_phase != body_phase ||
 					row.body_source_selector != body_source_selector ||
 					row.body_source_phase != body_source_phase ||
-					row.body_blend_weight != body_blend_weight;
+					row.body_blend_weight != body_blend_weight ||
+					row.body_variant != body_variant ||
+					row.body_source_variant != body_source_variant;
 			const bool force_external_pose =
 					body_dependency_changed &&
 					(body_mode == BODY_CLIP_AT ||
@@ -1531,13 +1542,13 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			if (body_stamp_changed || force_external_pose) {
 				switch (body_mode) {
 					case BODY_CLIP_AT:
-						model->play_body_clip_at(body_clip_key, body_phase);
+						model->play_body_clip_at(body_clip_key, body_phase, body_variant);
 						++stat_body_dispatches_;
 						break;
 					case BODY_BLEND_AT:
 						model->play_body_blend_at(body_source_clip_key,
 								body_source_phase, body_clip_key, body_phase,
-								body_blend_weight);
+								body_blend_weight, body_source_variant, body_variant);
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_AT:
@@ -1554,6 +1565,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				row.body_source_selector = body_source_selector;
 				row.body_source_phase = body_source_phase;
 				row.body_blend_weight = body_blend_weight;
+				row.body_variant = body_variant;
+				row.body_source_variant = body_source_variant;
 				row.body_stamp_valid = true;
 			}
 		} else if ((output_channels_ & OUTPUT_BODY_ANIM) != 0) {

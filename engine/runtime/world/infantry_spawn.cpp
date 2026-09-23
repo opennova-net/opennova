@@ -98,13 +98,14 @@ void initialize_organic_ai(World &world, Entity &entity) {
             state = 67 + parent->emplaced_config;
     }
     // Registration has already started both channels on the ADM reset clip.
-    // The first update transitions from that clip with the normal blend.
-    // [orig: AnimMap_RegisterEntity @0x40BB60 -> AnimMap_UpdateEntity @0x40B5F0]
-    inf.reset_body_animation(0);
-    inf.begin_body_transition(state);
+    // The first update transitions from that clip with the normal blend, the
+    // secondary re-init serving its ring entry before the primary's.
+    // [orig: AnimMap_RegisterEntity @0x40BB60 -> AnimMap_UpdateEntity @0x40B5F0;
+    //  AnimMap_UpdateDualChannels @0x40B908 before @0x40B94E]
     inf.reset_weapon_animation(0);
-    inf.begin_weapon_transition(43, ai.root_motion != nullptr
-            ? ai.root_motion->variant_count(inf.adm_id, 43) : 1);
+    inf.begin_weapon_transition(43, ai.anim_rings.serve(ai.root_motion, inf.adm_id, 43));
+    inf.reset_body_animation(0);
+    inf.begin_body_transition(state, -1, ai.anim_rings.serve(ai.root_motion, inf.adm_id, state));
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
     // net-ID permutation, vertical root motion only, one final ground solve.
@@ -113,7 +114,7 @@ void initialize_organic_ai(World &world, Entity &entity) {
         const auto advance = [&] {
             ai.infantry_weapon_channel_advance(*body);
             if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-            if (advance_primary_channel(inf, *ai.root_motion, frame)) {
+            if (advance_primary_channel(inf, *ai.root_motion, ai.anim_rings, frame)) {
                 if (inf.prev_capsule_bottom != 0)
                     frame.dz = io::bam_sub(frame.capsule_bottom, inf.prev_capsule_bottom);
                 inf.prev_capsule_bottom = frame.capsule_bottom;
@@ -216,13 +217,22 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
         if ((flags & kEntityFlagDead) == 0) {
             const int state = ai.root_motion != nullptr &&
                     ai.root_motion->has_clip(inf.adm_id, 153) ? 153 : 44;
-            inf.begin_body_transition(state);
-            inf.begin_weapon_transition(state);
+            // Both requests take the respawn state; the first dual update
+            // re-inits the secondary, then the primary, each serving its ring
+            // entry. [orig: Entity_ResetToSpawnState +0x2BC @0x4B9708/@0x4B9714,
+            //  +0x2C8 @0x4B972A, AnimMap_UpdateDualChannels @0x4B973D]
+            const auto serve = [&](int played) {
+                return ai.anim_rings.serve(ai.root_motion, inf.adm_id, played);
+            };
+            inf.begin_weapon_transition(
+                    state, state != inf.weapon_clip_state() ? serve(state) : inf.wpn_variant);
+            inf.begin_body_transition(
+                    state, -1, state != inf.body_clip_state() ? serve(state) : inf.anim_variant);
             RootMotionFrame frame{};
             for (int i = 0; i < 12; ++i) {
                 ai.infantry_weapon_channel_advance(*body);
                 if (ai.root_motion != nullptr)
-                    advance_primary_channel(inf, *ai.root_motion, frame);
+                    advance_primary_channel(inf, *ai.root_motion, ai.anim_rings, frame);
             }
             if (ai.collision != nullptr) {
                 const int32_t clearance = ai.collision->resolve_entity(

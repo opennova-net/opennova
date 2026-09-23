@@ -45,7 +45,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     infantry_weapon_channel_advance(e);
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-        have_collision_frame = advance_primary_channel(inf, *root_motion, collision_frame);
+        have_collision_frame =
+                advance_primary_channel(inf, *root_motion, anim_rings, collision_frame);
     } else {
         advance_primary_channel_fallback(inf);
     }

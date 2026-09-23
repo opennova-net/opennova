@@ -157,9 +157,11 @@ void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 
 // Pose a main-body clip at the authoritative infantry motor playhead. IDA's
 // AnimMap phase counts simulation ticks; clip timelines retain retail rounding.
-void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
+// p_variant is the ring entry the channel's re-init served (the simulation's
+// InfantryState::anim_variant): every clip read runs on it.
+void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant) {
 	for (ObjectModel *linked : live_presentation_links()) {
-		linked->play_body_clip_at(p_key, p_phase_ticks);
+		linked->play_body_clip_at(p_key, p_phase_ticks, p_variant);
 	}
 	wake_runtime_frame();
 	const String key = resolve_body_clip_key(p_key);
@@ -170,17 +172,20 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
 	// Repeat-call fast path: the stamp proves this exact (key, tick) pair is
 	// what posed the skeleton last and nothing else dirtied the pose.
 	if (body_phase_stamp_valid_ && anim_external_phase_ && !body_pose_dirty_ &&
-			p_phase_ticks == body_phase_ticks_applied_ && key == anim_key_) {
+			p_phase_ticks == body_phase_ticks_applied_ && key == anim_key_ &&
+			p_variant == anim_variant_) {
 		return;
 	}
 	const String previous_key = anim_key_;
+	const int previous_variant = anim_variant_;
 	const double previous_time = anim_time_;
 	const bool previous_external = anim_external_phase_;
-	const double seconds = clip_phase_seconds(key, p_phase_ticks);
+	const double seconds = clip_phase_seconds(key, p_phase_ticks, p_variant);
 	const bool same_external = previous_external && key == previous_key &&
+			p_variant == previous_variant &&
 			Math::is_equal_approx(previous_time, seconds);
 	anim_key_ = key;
-	anim_variant_ = 0; // stamp-driven body path: variant rings stay on the 3P channel
+	anim_variant_ = p_variant;
 	set_body_playhead(seconds);
 	anim_playing_ = false;
 	anim_external_phase_ = true;
@@ -199,10 +204,12 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
 // this ADM's RESET binding; weight 1 takes the stamped single-channel path.
 void ObjectModel::play_body_blend_at(const String &p_source_key,
 		int p_source_phase_ticks, const String &p_target_key,
-		int p_target_phase_ticks, double p_weight) {
+		int p_target_phase_ticks, double p_weight, int p_source_variant,
+		int p_variant) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_body_blend_at(p_source_key, p_source_phase_ticks,
-				p_target_key, p_target_phase_ticks, p_weight);
+				p_target_key, p_target_phase_ticks, p_weight, p_source_variant,
+				p_variant);
 	}
 	wake_runtime_frame();
 	if (skeletal_.is_null()) {
@@ -214,33 +221,34 @@ void ObjectModel::play_body_blend_at(const String &p_source_key,
 	const bool target_valid = !target_key.is_empty();
 	if (!target_valid) {
 		if (source_valid) {
-			play_body_clip_at(source_key, p_source_phase_ticks);
+			play_body_clip_at(source_key, p_source_phase_ticks, p_source_variant);
 		} else {
 			reset_body_pose();
 		}
 		return;
 	}
 	if (!source_valid || p_weight >= 1.0) {
-		play_body_clip_at(target_key, p_target_phase_ticks);
+		play_body_clip_at(target_key, p_target_phase_ticks, p_variant);
 		return;
 	}
 	pose_body_blend_at_times(source_key,
-			clip_phase_seconds(source_key, p_source_phase_ticks), target_key,
-			clip_phase_seconds(target_key, p_target_phase_ticks),
-			static_cast<float>(p_weight));
+			clip_phase_seconds(source_key, p_source_phase_ticks, p_source_variant),
+			target_key, clip_phase_seconds(target_key, p_target_phase_ticks, p_variant),
+			static_cast<float>(p_weight), p_source_variant, p_variant);
 }
 
 void ObjectModel::pose_body_blend_at_times(const String &p_source_key,
 		double p_source_time, const String &p_target_key, double p_target_time,
-		float p_weight) {
+		float p_weight, int p_source_variant, int p_target_variant) {
 	anim_key_ = p_target_key;
-	anim_variant_ = 0;
+	anim_variant_ = p_target_variant;
 	set_body_playhead(p_target_time);
 	anim_playing_ = false;
 	anim_external_phase_ = true;
 	body_phase_stamp_valid_ = false;
 	body_blend_source_key_ = p_source_key;
 	body_blend_source_time_ = p_source_time;
+	body_blend_source_variant_ = p_source_variant;
 	body_blend_weight_ = CLAMP(p_weight, 0.0f, 1.0f);
 	body_pose_dirty_ = true;
 	advance_body_animation(0.0);
@@ -491,8 +499,9 @@ String ObjectModel::resolve_body_clip_key(const String &p_key) const {
 	return skeletal_->has_clip("anim_reset") ? String("anim_reset") : String();
 }
 
-double ObjectModel::clip_phase_seconds(const String &p_key, int p_phase_ticks) const {
-	return skeletal_->get_clip_phase_seconds(p_key, p_phase_ticks);
+double ObjectModel::clip_phase_seconds(const String &p_key, int p_phase_ticks,
+		int p_variant) const {
+	return skeletal_->get_clip_phase_seconds(p_key, p_phase_ticks, p_variant);
 }
 
 void ObjectModel::clear_body_blend() {
@@ -502,6 +511,7 @@ void ObjectModel::clear_body_blend() {
 	body_blend_source_key_ = String();
 	body_blend_source_time_ = 0.0;
 	body_blend_weight_ = 1.0f;
+	body_blend_source_variant_ = 0;
 }
 
 void ObjectModel::reset_body_pose() {
@@ -772,7 +782,8 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 				overlay_deltas,
 				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
-				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);
+				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_,
+				body_blend_source_variant_, anim_variant_);
 	} else {
 		skeletal_->pose_skeleton_deltas(skeleton_, anim_key_, anim_time_, anim_variant_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,

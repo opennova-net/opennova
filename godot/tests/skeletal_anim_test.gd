@@ -1029,6 +1029,79 @@ anim_reset				\"idle.bad\"
 	DirAccess.remove_absolute(dir)
 
 
+func test_stamped_body_channels_pose_their_served_ring_entries() -> void:
+	# The simulation's channel re-init serves one ring entry per play; the
+	# stamp-driven primary poses that entry for the target and the outgoing
+	# channel alike, with and without the aim overlay composed on top.
+	# [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	var dir := ProjectSettings.globalize_path("res://.godot/skeletal_served_entry_test")
+	if not DirAccess.dir_exists_absolute(dir):
+		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var idle := FileAccess.get_file_as_bytes("res://../fixtures/anim/idle.bad")
+	# A twisted copy: every channel-0 key turned 70 degrees about Y (clear of the
+	# 90-degree quaternion branch boundary), so the two ring entries pose apart
+	# (the committed clips only move the root).
+	var twist := idle.duplicate()
+	var channel: int = twist.decode_u32(0x1C)
+	var rotations: int = twist.decode_u32(channel + 8)
+	var stride: int = twist.decode_u32(0x34)
+	for frame in range(twist.decode_u32(channel)):
+		twist.encode_float(rotations + stride * frame + 4, sin(deg_to_rad(35.0)))
+		twist.encode_float(rotations + stride * frame + 12, cos(deg_to_rad(35.0)))
+	for entry in [["idle.bad", idle], ["twist.bad", twist]]:
+		var out := FileAccess.open(dir.path_join(entry[0]), FileAccess.WRITE)
+		assert_not_null(out)
+		out.store_buffer(entry[1])
+		out.close()
+	var adm := FileAccess.open(dir.path_join("served.adm"), FileAccess.WRITE)
+	assert_not_null(adm)
+	adm.store_string("anim_reset\t\t\t\t\"idle.bad\"\n"
+		+ "anim_walk_forward\t\t\t\"idle.bad\" \"twist.bad\"\n")
+	adm.close()
+
+	var sk := SkeletalAnim.new()
+	var root := ResourceRoot.new()
+	root.set_root_dir(dir)
+	assert_true(sk.load_from_resource_root(root, "served.adm"),
+		"served.adm loads: %s" % sk.get_last_error())
+	assert_eq(sk.get_clip_variant_count("anim_walk_forward"), 2)
+	var key := "anim_walk_forward"
+	var entry0: Array = sk.eval_pose(key, sk.get_clip_phase_seconds(key, 3, 0), 0)
+	var entry1: Array = sk.eval_pose(key, sk.get_clip_phase_seconds(key, 3, 1), 1)
+	var root0: Transform3D = entry0[0]
+	var root1: Transform3D = entry1[0]
+	assert_gt(root1.basis.get_rotation_quaternion().angle_to(
+			root0.basis.get_rotation_quaternion()), 1.0,
+			"the two ring entries pose apart")
+
+	var model = ObjectModel.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.set_object_data(_open(SHED))
+	var skeleton: Skeleton3D = model.get_skeleton()
+	for overlay in [[], [Basis()]]:
+		var context := "overlay" if not overlay.is_empty() else "plain"
+		model.set_aim_overlay(overlay)
+		model.play_body_clip_at(key, 3, 1)
+		assert_eq(model.get_active_body_variant(), 1)
+		_assert_skeleton_pose_matches(skeleton, entry1,
+				"%s: a single channel poses its served entry" % context)
+		model.play_body_clip_at(key, 3, 0)
+		_assert_skeleton_pose_matches(skeleton, entry0,
+				"%s: another entry at the same tick reposes" % context)
+		model.play_body_blend_at(key, 5, key, 2, 0.5, 1, 0)
+		assert_eq(model.get_body_blend_source_variant(), 1)
+		assert_eq(model.get_active_body_variant(), 0)
+		_assert_skeleton_pose_matches(skeleton,
+				sk.eval_pose_blended(key, sk.get_clip_phase_seconds(key, 5, 1),
+						key, sk.get_clip_phase_seconds(key, 2, 0), 0.5, 1, 0),
+				"%s: each blended channel poses its own served entry" % context)
+
+	for name in ["idle.bad", "twist.bad", "served.adm"]:
+		DirAccess.remove_absolute(dir.path_join(name))
+	DirAccess.remove_absolute(dir)
+
+
 # The native pose_skeleton batch (one call per model per frame) must write the
 # exact bone poses the script-side eval_pose loop wrote before it existed —
 # the equivalence seam for the present-pass hot path. Asset-gated: needs the

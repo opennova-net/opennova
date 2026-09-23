@@ -59,10 +59,13 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
 bool reset_capsule_bottom_state(int state);
+// The primary channel's motor-head update; a re-init serves its ring entry from
+// `rings` (AnimVariantRings).
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
-                             RootMotionFrame &out);
+                             AnimVariantRings &rings, RootMotionFrame &out);
 void advance_primary_channel_fallback(InfantryState &inf);
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
-                                       const IRootMotionSource *root_motion);
+                                       const IRootMotionSource *root_motion,
+                                       AnimVariantRings *rings);
 
 } // namespace opennova::world

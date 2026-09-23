@@ -553,15 +553,21 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	const std::string primary_key =
 			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.body_clip_state()));
 	if (primary_key.empty()) return false;
+	// Each primary channel samples its served ring entry, as root motion does.
+	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	const int primary_variant = r_ai->inf.anim_variant;
 	const double primary_seconds =
-			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase);
+			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase, primary_variant);
 	std::string source_key;
 	double source_seconds = 0.0;
+	int source_variant = 0;
 	const bool primary_blend = r_ai->inf.body_blend_active();
 	if (primary_blend) {
 		source_key = resolve_primary_key(
 				opennova::world::infantry_anim_key(r_ai->inf.anim_prev));
-		source_seconds = rig->clip_seconds_at_tick(source_key, r_ai->inf.anim_prev_clip_phase);
+		source_variant = r_ai->inf.anim_prev_variant;
+		source_seconds = rig->clip_seconds_at_tick(
+				source_key, r_ai->inf.anim_prev_clip_phase, source_variant);
 	}
 
 	r_inputs = aim_overlay_inputs_for(*r_ai, *r_entity);
@@ -605,7 +611,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 			source_key, source_seconds, r_ai->inf.anim_blend_weight,
 			deltas, weapon_key, weapon_seconds, r_pose,
 			weapon_prev_key, weapon_prev_seconds, weapon_blend,
-			weapon_variant, weapon_prev_variant);
+			weapon_variant, weapon_prev_variant, primary_variant, source_variant);
 	return true;
 }
 

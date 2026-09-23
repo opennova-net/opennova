@@ -266,6 +266,18 @@ float Simulation::get_local_player_anim_blend_weight() const {
 	return p ? p->inf.anim_blend_weight : 1.0f;
 }
 
+int Simulation::get_local_player_anim_variant() const {
+	if (!kernel_->world.cached.local_player.valid()) return 0;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
+	return p ? p->inf.anim_variant : 0;
+}
+
+int Simulation::get_local_player_anim_source_variant() const {
+	if (!kernel_->world.cached.local_player.valid()) return 0;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
+	return p ? p->inf.anim_prev_variant : 0;
+}
+
 
 // HUD health/team. The original rebuilds these into its per-frame HUD info struct every frame
 // (health ratio at +92 = currentHealth/maxHealth, team byte at +374). We surface the raw values

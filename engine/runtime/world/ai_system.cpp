@@ -899,6 +899,7 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
 
 void AiSystem::capture_spawn_baseline() {
     spawn_baseline_ = entities_;
+    spawn_baseline_rings_ = anim_rings;
     baseline_captured_ = true;
 }
 
@@ -907,7 +908,10 @@ void AiSystem::capture_spawn_baseline() {
 // spawn baseline and drop the transient queues, so a simulate/stop cycle leaves the authored
 // mission clean. The nav table is read-only path data and is left intact.
 void AiSystem::on_load(World &) {
-    if (baseline_captured_) entities_ = spawn_baseline_;
+    if (baseline_captured_) {
+        entities_ = spawn_baseline_;
+        anim_rings = spawn_baseline_rings_;
+    }
     rebuild_handle_index();
     events.clear();
     relmat_calls.clear();

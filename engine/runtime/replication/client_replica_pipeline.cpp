@@ -672,8 +672,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			es.rm_blend_step = 0.0f;
 		}
 		int32_t pphase = es.rm_prev_phase, tphase = es.rm_phase;
-		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, pphase,
-		                           es.rm_state, tphase, es.rm_blend_weight,
+		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, 0, pphase,
+		                           es.rm_state, 0, tphase, es.rm_blend_weight,
 		                           frame);
 		es.rm_prev_phase = pphase;
 		es.rm_phase = tphase;

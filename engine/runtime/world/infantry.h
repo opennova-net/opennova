@@ -288,12 +288,15 @@ public:
         return advance_variant(adm_id, state_id, variant, phase_ticks, out);
     }
     // Advance a stable primary plus the current target and return their blended
-    // output. The default composes already-quantized RootMotionFrames for test and
-    // headless providers. Asset-backed providers may override this to blend raw
-    // track floats before fixed conversion, as retail does.
+    // output, each channel on its own served ring entry. The default composes
+    // already-quantized RootMotionFrames for test and headless providers.
+    // Asset-backed providers may override this to blend raw track floats before
+    // fixed conversion, as retail does.
     virtual bool advance_blended(int adm_id,
-                                 int primary_state, int32_t &primary_phase_ticks,
-                                 int target_state, int32_t &target_phase_ticks,
+                                 int primary_state, int primary_variant,
+                                 int32_t &primary_phase_ticks,
+                                 int target_state, int target_variant,
+                                 int32_t &target_phase_ticks,
                                  float target_weight, RootMotionFrame &out);
     // Clip length for a state's track, in the phase-tick convention advance() uses
     // (simulation ticks), or -1 when the state has no track. The weapon channel's
@@ -304,8 +307,8 @@ public:
     // entry's length is the promotion clock: the state-entry ring rotate re-inits
     // the channel from the served entry, so every later length/keyframe read runs
     // on that clip [orig: table rotate @0x40b740-0x40b749; the channel's own
-    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. The body
-    // channel has no ring and passes variant 0; a provider without rings ignores it.
+    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. Both
+    // channels pass their served entry; a provider without rings ignores it.
     virtual int32_t clip_length_ticks(int adm_id, int state_id, int variant) const = 0;
     // Whether the state's track loops — the channel's own loop bit, seeded from
     // the clip data flags [orig: AnimChannel_InitFromData flag word @0x410577;
@@ -323,6 +326,38 @@ public:
                 ? (phase_ticks / length + 1) * length : length;
     }
 
+};
+
+// The variant-ring heads of every loaded .adm. Retail keeps ONE table of ring
+// heads per loaded .adm (the AnimMap entry's state-indexed node array), and every
+// AnimMap slot linked to that entry reads it: both channels of every body using
+// the .adm. A channel re-init onto state S plays table[S]'s node and advances
+// table[S] to the node's ring link, so successive plays of S, by any channel of
+// any body sharing the .adm, walk the row's clips in file order (an unauthored
+// state walks the reset row from its own head). A single-clip row always serves
+// its one entry.
+// [orig: AnimMap_LoadAdmFile @0x40CC40 reuses the entry by name (the
+//  AnimMap_FindByName call @0x40CD2F, the template slot @0x40CD4F);
+//  AnimMap_RegisterEntity @0x40BB60 links both slots to it through
+//  AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77); the
+//  re-init AnimMap_UpdateEntity @0x40B737..0x40B778]
+class AnimVariantRings {
+public:
+    // The ring entry a re-init of `state` plays, advancing that state's head.
+    // Call only when the channel actually re-inits.
+    int32_t serve(const IRootMotionSource *source, int adm_id, int state) {
+        const int count = source != nullptr ? source->variant_count(adm_id, state) : 1;
+        if (count <= 1) return 0;
+        int32_t &head = heads_[(static_cast<int64_t>(adm_id) << 32) |
+                               static_cast<uint32_t>(state)];
+        const int32_t served = head % count;
+        head = (served + 1) % count;
+        return served;
+    }
+    void clear() { heads_.clear(); }
+
+private:
+    std::unordered_map<int64_t, int32_t> heads_;
 };
 
 struct InfantryState {
@@ -386,6 +421,13 @@ struct InfantryState {
     int32_t anim_prev_clip_phase = 0;
     float anim_blend_weight = 1.0f;
     float anim_blend_step = 0.0f;
+    // The primary channel's served ring entries (AnimVariantRings): the playing
+    // target's and the outgoing channel's. Root motion, the promotion clock and
+    // the drawn clip all run on the served entry.
+    // [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 re-inits the channel from
+    //  the served node; slot+0x44 = the node @0x40B76F]
+    int32_t anim_variant = 0;
+    int32_t anim_prev_variant = 0;
 
     int body_clip_state() const {
         return anim_playing_state >= 0 ? anim_playing_state : anim_state;
@@ -399,8 +441,9 @@ struct InfantryState {
 
     // `blend_key_state` is the state whose flags pick the blend duration when
     // it differs from the played clip (the gait->stance insert); -1 = the
-    // target itself.
-    void begin_body_transition(int target_state, int blend_key_state = -1) {
+    // target itself. `variant` is the ring entry this re-init serves.
+    void begin_body_transition(int target_state, int blend_key_state = -1,
+                               int32_t variant = 0) {
         const int playing = body_clip_state();
         anim_state = target_state;
         anim_playing_state = target_state;
@@ -414,7 +457,9 @@ struct InfantryState {
         if (!body_blend_active()) {
             anim_prev = playing;
             anim_prev_clip_phase = clip_phase;
+            anim_prev_variant = anim_variant;
         }
+        anim_variant = variant;
         anim_pending = 0;
         clip_phase = 0;
         anim_blend_weight = 0.0f;
@@ -447,6 +492,8 @@ struct InfantryState {
         anim_prev_clip_phase = 0;
         anim_blend_weight = 1.0f;
         anim_blend_step = 0.0f;
+        anim_variant = 0;
+        anim_prev_variant = 0;
         last_events = 0;
         prev_capsule_bottom = 0;
     }
@@ -521,11 +568,10 @@ struct InfantryState {
     int32_t wpn_prev_clip_phase = 0;
     float wpn_blend_weight = 1.0f;
     float wpn_blend_step = 0.0f;
-    // The secondary channel's variant-ring cursor. A .adm row may list several
-    // clips; the slot is a circular list served-then-advanced per play, so
-    // repeated plays of one state rotate through its clips.
+    // The secondary channel's served ring entries (AnimVariantRings, the heads
+    // this channel shares with the primary and with every body of its .adm).
     // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token;
-    //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
+    //  AnimMap_UpdateDualChannels @0x40B8C0 runs the same re-init for it]
     int32_t wpn_variant = 0;
     int32_t wpn_prev_variant = 0; // the outgoing clip's served variant
 
@@ -539,12 +585,9 @@ struct InfantryState {
     // Re-init the secondary channel onto `target_state`, keeping the outgoing
     // clip alive for the blend window. Mirrors begin_body_transition: retargeting
     // an in-flight A->B blend keeps A as the stable outgoing and replaces only B.
-    // `ring_size` is the target state's variant count (1 = no ring); the play
-    // serves the ring HEAD as this play's variant and advances the head, so the
-    // latched wpn_variant follows the served entry while the head moves on
-    // [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
-    //  animState+68 = animEntry].
-    void begin_weapon_transition(int target_state, int ring_size = 1) {
+    // `variant` is the ring entry this re-init serves; the latched wpn_variant
+    // follows it while the shared head moves on.
+    void begin_weapon_transition(int target_state, int32_t variant = 0) {
         const int playing = weapon_clip_state();
         wpn_state = target_state;
         wpn_playing_state = target_state;
@@ -560,20 +603,7 @@ struct InfantryState {
                 (infantry_anim_flags(target_state) & 0x400u) != 0
                         ? (1.0f / 15.0f)
                         : 0.1f;
-        wpn_variant = wpn_ring_serve(target_state, ring_size);
-    }
-
-    // The per-state ring HEADS for this entity's secondary channel: the served
-    // index per state, advanced on every play [orig: the per-entity animState
-    // slot array +72 — each slot's list cursor]. Sparse; states never played sit
-    // at head 0. Cleared with the channel.
-    std::unordered_map<int, int32_t> wpn_ring_heads;
-    int32_t wpn_ring_serve(int state, int ring_size) {
-        if (ring_size <= 1) return 0;
-        int32_t &head = wpn_ring_heads[state];
-        const int32_t served = head % ring_size;
-        head = (served + 1) % ring_size;
-        return served;
+        wpn_variant = variant;
     }
 
     void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {
@@ -587,7 +617,6 @@ struct InfantryState {
         wpn_blend_step = 0.0f;
         wpn_variant = 0;
         wpn_prev_variant = 0;
-        wpn_ring_heads.clear();
     }
     // The 3P reload-anim window: 80 ticks, stamped by the reload refill and counted
     // down once per tick; while nonzero the weapon channel wants state 65 reload

@@ -1218,7 +1218,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_weapon_channel_advance(e);
         if (reset_capsule_bottom_state(e.inf.anim_state)) e.inf.prev_capsule_bottom = 0;
         if (root_motion != nullptr)
-            have_clip = advance_primary_channel(e.inf, *root_motion, frame);
+            have_clip = advance_primary_channel(e.inf, *root_motion, anim_rings, frame);
         if (have_clip) {
             if (e.inf.prev_capsule_bottom != 0)
                 frame.dz = frame.capsule_bottom - e.inf.prev_capsule_bottom;

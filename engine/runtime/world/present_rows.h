@@ -83,6 +83,11 @@ enum PresentField : int {
 	PF_WPN_BLEND_WEIGHT,
 	PF_WPN_VARIANT,
 	PF_WPN_SOURCE_VARIANT,
+	// The PRIMARY channel's served ring entries, for the target and the outgoing
+	// PF_ANIM_SOURCE_* channel (0 = first clip; zero-fill is the settled default).
+	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	PF_ANIM_VARIANT,
+	PF_ANIM_SOURCE_VARIANT,
 	PF_HIDDEN, // 1 when the entity is hidden
 	// Local render-only verdict: skip this placed entity's own world model.
 	// Does not mutate Entity.hidden, collision, simulation, or attached actors.

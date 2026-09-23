@@ -60,6 +60,9 @@ class Snapshot:
 					e.get("anim_source_phase", -1))
 			out[b + Simulation.PF_ANIM_BLEND_WEIGHT] = float(
 					e.get("anim_blend_weight", 1.0))
+			out[b + Simulation.PF_ANIM_VARIANT] = float(e.get("anim_variant", 0))
+			out[b + Simulation.PF_ANIM_SOURCE_VARIANT] = float(
+					e.get("anim_source_variant", 0))
 			out[b + Simulation.PF_HIDDEN] = float(e.get("hidden", 0))
 			out[b + Simulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					e.get("local_view_suppressed", 0))
@@ -886,6 +889,43 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 			_clip_time(model, "anim_reset", 20), 0.0001)
 	assert_almost_eq(model.get_body_blend_weight(),
 			0.5, 0.000001)
+
+
+func test_body_stamp_carries_the_served_ring_entries() -> void:
+	# PF_ANIM_VARIANT / PF_ANIM_SOURCE_VARIANT: each channel's served ring entry
+	# reaches the model and joins the retained pose stamp.
+	# [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	var model := _rigged_model()
+	var p := _make_pass(_index_of({ 11: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 11, "anim_state": 43, "anim_phase": 9,
+			"anim_variant": 2 }]
+	_present(p, snap)
+	assert_eq(model.get_active_body_variant(), 2,
+			"the single channel poses its served entry")
+	assert_eq(_stat(p, "body_dispatches"), 1)
+	snap.entities[0]["anim_variant"] = 1
+	_present(p, snap)
+	assert_eq(_stat(p, "body_dispatches"), 2,
+			"the served entry participates in the retained pose stamp")
+	assert_eq(model.get_active_body_variant(), 1)
+
+	snap.entities[0]["anim_source_state"] = 43
+	snap.entities[0]["anim_source_phase"] = 17
+	snap.entities[0]["anim_source_variant"] = 3
+	snap.entities[0]["anim_state"] = 1
+	snap.entities[0]["anim_phase"] = 2
+	snap.entities[0]["anim_blend_weight"] = 0.2
+	_present(p, snap)
+	assert_eq(_stat(p, "body_dispatches"), 3)
+	assert_eq(model.get_body_blend_source_variant(), 3,
+			"the outgoing channel poses its own served entry")
+	assert_eq(model.get_active_body_variant(), 1)
+	snap.entities[0]["anim_source_variant"] = 0
+	_present(p, snap)
+	assert_eq(_stat(p, "body_dispatches"), 4,
+			"the outgoing entry participates in the retained pose stamp")
+	assert_eq(model.get_body_blend_source_variant(), 0)
 
 
 func test_placed_model_applies_snapshot_overlay_in_body_frame() -> void:

@@ -652,6 +652,58 @@ bool test_death_ctrl_register_reaches_present_rows() {
 	return ok;
 }
 
+// The primary channel's served ring entries ride both producers' rows: the
+// target's always, the outgoing channel's only while blending.
+// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+bool test_rows_carry_the_primary_ring_entries() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
+	if (!expect(body != nullptr, "the organic row spawns")) return false;
+	body->kind = w::EntityKind::Organic;
+	w::AiEntity *ae = kernel.world.ai.at(kernel.world.ai.attach(body->handle));
+	ae->inf.active = true;
+	ae->inf.anim_variant = 2; // the playing idle channel's served entry
+	ae->inf.begin_body_transition(w::anim_state::kAttack, -1, 1);
+
+	im::ClientRuntime runtime("PrimaryRingRows");
+	nw::OrganicSpawnBatch batch;
+	batch.records.push_back(organic_record(0x0010u, 0x1410u));
+	batch.entity_count = 1;
+	opennova::replication::ClientReplicaPipeline pipeline;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	runtime.state() = pipeline.state();
+
+	im::PoolPresentLifecycleMap lifecycle;
+	im::PoolPresentLifecycleMap host_lifecycle;
+	std::vector<float> rows;
+	std::vector<float> host_rows;
+	im::DoorPhaseTable doors;
+	const auto build = [&] {
+		im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+		im::build_client_replica_present_rows({ kernel, &runtime, false }, host_lifecycle,
+				host_rows, doors);
+		return expect(rows.size() == w::PF_STRIDE && host_rows.size() == w::PF_STRIDE,
+				"one placed row and one host-loopback row");
+	};
+	if (!build()) return false;
+	bool ok = true;
+	for (const float *r : { row_at(rows, 0), row_at(host_rows, 0) }) {
+		ok = expect(r[w::PF_ANIM_VARIANT] == 1.0f,
+				"the target channel's served entry reaches the row") && ok;
+		ok = expect(r[w::PF_ANIM_SOURCE_VARIANT] == 2.0f,
+				"the outgoing channel's served entry rides the blend") && ok;
+	}
+	ae->inf.anim_blend_weight = 1.0f;
+	ae->inf.anim_blend_step = 0.0f;
+	if (!build()) return false;
+	for (const float *r : { row_at(rows, 0), row_at(host_rows, 0) }) {
+		ok = expect(r[w::PF_ANIM_VARIANT] == 1.0f && r[w::PF_ANIM_SOURCE_VARIANT] == 0.0f,
+				"a settled channel publishes only the target's entry") && ok;
+	}
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_palm_source_and_local_fragment();
@@ -666,6 +718,7 @@ int main() {
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
 	ok = test_joiner_hull_gun_words_follow_the_turret_child() && ok;
+	ok = test_rows_carry_the_primary_ring_entries() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

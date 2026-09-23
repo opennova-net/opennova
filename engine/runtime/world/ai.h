@@ -816,6 +816,9 @@ public:
     // unavailable, the selector idles, and infantry entities stand still (no model fallback —
     // motion comes from clips, as in the original).
     IRootMotionSource *root_motion = nullptr;
+    // The variant-ring heads both channels of every body serve from, one table
+    // per loaded .adm (infantry.h AnimVariantRings). Rewound with the brains.
+    AnimVariantRings anim_rings;
     // (The fall-damage tolerance is the WAC named value World::wac_values.fallmps
     //  [orig: dword_C6EAE4]; the landing leg in infantry.cpp reads it there.)
     int find_target_calls = 0;// coverage: target-acquisition invocations
@@ -1306,6 +1309,7 @@ private:
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
+    AnimVariantRings spawn_baseline_rings_; // the ring heads at the same capture
     std::vector<int> handle_to_ai_index_;
     std::vector<EntityHandle> mounted_weapon_handles_; // global UseGun pump scratch
     std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)

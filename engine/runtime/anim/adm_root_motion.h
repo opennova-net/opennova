@@ -68,8 +68,10 @@ public:
 	bool advance_armed(int adm_id, int state_id, int variant, int32_t &phase_ticks,
 	                   int32_t armed_boundary, opennova::world::RootMotionFrame &out) override;
 	bool advance_blended(int adm_id,
-	                     int primary_state, int32_t &primary_phase_ticks,
-	                     int target_state, int32_t &target_phase_ticks,
+	                     int primary_state, int primary_variant,
+	                     int32_t &primary_phase_ticks,
+	                     int target_state, int target_variant,
+	                     int32_t &target_phase_ticks,
 	                     float target_weight,
 	                     opennova::world::RootMotionFrame &out) override;
 	// The served ring entry's own length — the promotion clock for ringed rows
