@@ -155,7 +155,9 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     AiEntity *ai = world_.ai.for_handle(source);
     if (entity == nullptr || carrier == nullptr || entity->item_id == 0 ||
             carrier->item_id == 0 || ai == nullptr) return false;
-    if (entity->mounted) world_.vehicles.detach(source);
+    // Only the authority detaches [orig: @0x4F73D2..0x4F73DC ->
+    // Entity_DetachFromVehicleIfServer @0x4359D0].
+    if (entity->mounted && world_.ai.is_authority) world_.vehicles.detach(source);
     ai->slot.f[37] = 125;
     ai->slot.f[38] = carrier->net_id;
     ai->slot.f[36] = int32_t(target.packed) + 1; // rebased nullable pointer
@@ -530,7 +532,8 @@ bool EntityCommands::set_ssn_accuracy(EntityTarget ssn, int32_t primary,
 
 bool EntityCommands::set_ssn_guard(EntityTarget ssn, bool guard) {
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr) return false;
+    // [orig: WacCmd_SsnGuard @0x4F71C0 — ItemTypeIndex gate @0x4F7207]
+    if (entity == nullptr || entity->item_id == 0) return false;
     // [orig: WacCmd_SsnGuard @0x4F71C0] Retail writes the one Flags dword;
     // 0x40 is legacy-mirrored, so both views stay coherent here (the
     // vehicle_attach precedent — engine_flags is what the 0x10 static record
@@ -794,7 +797,10 @@ bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
 }
 
 bool EntityCommands::ssn_exists(EntityTarget ssn) const {
-    return world_.registry.get(resolve_target(ssn)) != nullptr;
+    // A resolved row with an ItemTypeIndex. [orig: WacCmd_SsnExists @0x4F1A70
+    // — `cmp [ecx+1Ch],eax; setnz` @0x4F1AB9..0x4F1ABC]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_id != 0;
 }
 
 bool EntityCommands::ssn_alive(EntityTarget ssn) const {
@@ -807,18 +813,32 @@ bool EntityCommands::ssn_dead(EntityTarget ssn) const {
     return e != nullptr && !e->alive;
 }
 
+bool EntityCommands::wac_ssn_dead(EntityTarget ssn) const {
+    // The dead bit of Flags, behind the ItemTypeIndex gate; health is not read.
+    // [orig: WacCmd_SsnDead @0x4F1AC0 — gate @0x4F1B07, `movsx eax,[ecx+24h];
+    //  and eax,2` @0x4F1B0D..0x4F1B11]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_id != 0 &&
+            ((e->flags | e->engine_flags) & kEntityFlagDead) != 0;
+}
+
+bool EntityCommands::wac_ssn_alive(EntityTarget ssn) const {
+    // [orig: WacCmd_SsnAlive @0x4F1B20 — gate @0x4F1B67, `not dl; and eax,2`
+    //  @0x4F1B6D..0x4F1B75]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_id != 0 &&
+            ((e->flags | e->engine_flags) & kEntityFlagDead) == 0;
+}
+
 bool EntityCommands::ssn_wounded(EntityTarget ssn) const {
     const Entity *entity = world_.registry.get(resolve_target(ssn));
     if (entity == nullptr || entity->item_id == 0) return false;
-    // [orig: WacCmd_SsnWounded @0x4F1B80] Health is read unsigned,
-    // while healthMax is arithmetically halved as signed i16 and then compared
-    // in the same unsigned 16-bit domain.
-    const uint16_t health = static_cast<uint16_t>(entity->health);
-    const int16_t health_max = static_cast<int16_t>(entity->health_max);
-    const uint16_t half = static_cast<uint16_t>(
-            static_cast<int16_t>(health_max >> 1));
+    // A SIGNED 16-bit compare of the health word against the arithmetically
+    // halved def healthMax word. [orig: WacCmd_SsnWounded @0x4F1B80 — `sar cx,1`
+    // @0x4F1BD9, `cmp [eax+11Eh],cx` @0x4F1BDC, `setle dl` @0x4F1BE3]
+    const int16_t health = retail_signed_i16(entity->health);
+    const int16_t half = static_cast<int16_t>(retail_signed_i16(entity->health_max) >> 1);
     return health <= half;
-
 }
 bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
     // No death/item gate and no early exit on an out-of-bounds duplicate.
@@ -1628,17 +1648,19 @@ bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
     return true;
 }
 bool EntityCommands::group_alive(int group) const {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
-    for (EntityHandle h : members) {
-        const Entity *e = world_.registry.get(h);
-        if (e && e->alive) return true;
-    }
-    return false;
+    // The trigger group's live count, the same word the BMS group triggers read,
+    // rebuilt by the 62-tick rescan (group 0 forced to zero), not a scan of the
+    // members. [orig: WacCmd_GroupAlive @0x4ED1C0 — `cmp g_TriggerGroupLiveCount
+    //  [g*48],ecx; setnle` @0x4ED1CC..0x4ED1D2; the rescan
+    //  EntityPool_RecountLiveByGroup @0x40E8D0]
+    const TriggerRelations::GroupState *grp = world_.script.relations.group_or_null(group);
+    return grp != nullptr && grp->live_count > 0;
 }
 
 bool EntityCommands::group_dead(int group) const {
-    return !group_alive(group);
+    // [orig: WacCmd_GroupDead @0x4ED1A0 — `setle` @0x4ED1AC..0x4ED1B2]
+    const TriggerRelations::GroupState *grp = world_.script.relations.group_or_null(group);
+    return grp != nullptr && grp->live_count <= 0;
 }
 
 // --- mount / emplacement (AttachToEmplaced) ---
@@ -1695,10 +1717,12 @@ bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTar
 bool EntityCommands::release_boarding_command(EntityTarget occupant_ssn) {
     const EntityHandle oh = resolve_target(occupant_ssn);
     Entity *occ = world_.registry.get(oh);
-    // [orig: the !ItemTypeIndex and !parentEntity rejects] -- a release only applies
-    // to a real item entity that is actually riding something.
-    if (!occ || occ->item_type == 0 || !occ->mounted) return false;
-    dismount(occupant_ssn); // [orig: Entity_DetachFromVehicleIfServer]
+    // The ItemTypeIndex (+0x1C, our item_id) and parentEntity rejects: a
+    // release only applies to a real item entity that is riding something; the
+    // detach is the authority's alone. [orig: WacCmd_SsnRelease @0x4F7420 —
+    // @0x4F7465 / @0x4F746B, Entity_DetachFromVehicleIfServer call @0x4F7475]
+    if (!occ || occ->item_id == 0 || !occ->mounted) return false;
+    if (world_.ai.is_authority) dismount(occupant_ssn);
     if (AiEntity *ae = world_.ai.for_handle(oh)) {
         ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
         ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]

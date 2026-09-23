@@ -289,8 +289,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- group / entity state conditions ----
     if (ieq(n, "groupdead")) return cmds.group_dead(A(0)) ? 1 : 0;
     if (ieq(n, "groupalive")) return cmds.group_alive(A(0)) ? 1 : 0;
-    if (ieq(n, "SSNdead")) return cmds.ssn_dead(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNalive")) return cmds.ssn_alive(H(0)) ? 1 : 0;
+    if (ieq(n, "SSNdead")) return cmds.wac_ssn_dead(H(0)) ? 1 : 0;
+    if (ieq(n, "SSNalive")) return cmds.wac_ssn_alive(H(0)) ? 1 : 0;
     if (ieq(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
     if (ieq(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
     if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand()) : 1;
@@ -453,10 +453,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (!cmds.ssn_exists(ssn)) return 0;
         cmds.apply_ai_command(ssn, ieq(n, "ssncspd") ? 29 : 30,
                               A(1), 0, 0);
-        // Retail reports success for any resolved live entity; only the
-        // AI-event queue is gated on the brain being present
-        // [orig: WacScript_SendAIEvent10ToEntity @0x4F74B0 — return 1
-        //  @0x4f74f9, queue gate @0x4f7508; event-11 twin @0x4F7570].
+        // Retail reports success for any resolved row with an ItemTypeIndex
+        // (ssn_exists); only the AI-event queue is gated on the brain
+        // [orig: WacScript_SendAIEvent10ToEntity @0x4F74B0 — gate @0x4F74FD,
+        //  queue gate @0x4F7508, return 1 @0x4F755A; event-11 twin @0x4F7570].
         return 1;
     }
 

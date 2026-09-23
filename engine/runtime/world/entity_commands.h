@@ -176,11 +176,18 @@ public:
     void set_wind_scale(int32_t value);                    // the `wind` named value
 
     // --- queries ---
+    // WAC SSNexists: a resolved row with an ItemTypeIndex.
+    // [orig: WacCmd_SsnExists @0x4F1A70]
     bool ssn_exists(EntityTarget ssn) const;
+    // The BMS SingleAlive/SingleDestroyed predicates (the `alive` latch).
     bool ssn_alive(EntityTarget ssn) const;
     bool ssn_dead(EntityTarget ssn) const;
-    // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
-    // the signed max-health half reinterpreted as u16.
+    // WAC SSNdead/SSNalive: the Flags dead bit behind the ItemTypeIndex gate.
+    // [orig: WacCmd_SsnDead @0x4F1AC0; WacCmd_SsnAlive @0x4F1B20]
+    bool wac_ssn_dead(EntityTarget ssn) const;
+    bool wac_ssn_alive(EntityTarget ssn) const;
+    // [orig: WacCmd_SsnWounded @0x4F1B80] Signed 16-bit health <= the signed
+    // def healthMax word halved.
     bool ssn_wounded(EntityTarget ssn) const;
     // BMS area predicates: all matching rows in pools 0/1, rather than the
     // general first-match SSN resolver used by bound WAC commands.
@@ -270,8 +277,11 @@ public:
     int set_group_team(int group, int32_t team);
     int change_group(int old_group, int new_group);
     int teleport_group_to_marker(int group, int32_t marker_wp_number);
-    bool group_dead(int group) const;   // true if all members dead/absent
-    bool group_alive(int group) const;  // true if any member alive
+    // WAC groupdead/groupalive: the trigger group's live count (<= 0 / > 0),
+    // the 62-tick rescan's word. [orig: WacCmd_GroupDead @0x4ED1A0;
+    // WacCmd_GroupAlive @0x4ED1C0]
+    bool group_dead(int group) const;
+    bool group_alive(int group) const;
 
     // --- mount / emplacement (AttachToEmplaced) ---
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best

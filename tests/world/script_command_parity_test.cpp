@@ -267,6 +267,107 @@ static void test_disable_ssn_flag_bit() {
     CHECK(((e->flags | e->engine_flags) & kEntityFlagScriptDisabled) == 0);
 }
 
+// groupdead/groupalive read the trigger group's live count, the 62-tick
+// rescan's word (group 0 forced to zero), not an instant scan of the members.
+// [orig: WacCmd_GroupDead @0x4ED1A0 `setle` @0x4ED1B2; WacCmd_GroupAlive
+// @0x4ED1C0 `setnle` @0x4ED1D2; EntityPool_RecountLiveByGroup @0x40E8D0]
+static void test_group_dead_alive_read_live_count() {
+    ScriptWorld w;
+    const EntityHandle a = spawn_npc(w, 160, 20);
+    spawn_npc(w, 161, 20);
+    spawn_npc(w, 162, 0);
+    // Before any rescan the count is zero: dead, although two members live.
+    CHECK(w.commands.group_dead(20) && !w.commands.group_alive(20));
+    w.recount_group_live();
+    CHECK(w.commands.group_alive(20) && !w.commands.group_dead(20));
+    CHECK(w.commands.group_dead(0) && !w.commands.group_alive(0)); // live[0] = 0
+    CHECK(!w.commands.group_dead(64) && !w.commands.group_alive(64));
+    // A kill between rescans leaves the count, and the answer, unchanged.
+    CHECK(w.commands.wac_kill_ssn(a));
+    CHECK(w.commands.group_alive(20));
+    WacSystem sys;
+    CHECK(load_script(w, sys, "if never() then v1=groupalive(20) v2=groupdead(0) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+}
+
+// SSNdead/SSNalive read the Flags dead bit behind the ItemTypeIndex gate, not
+// health: a same-execution kill is not dead yet, a raised corpse stays dead.
+// SSNexists is the same gate. [orig: WacCmd_SsnDead @0x4F1AC0 — gate @0x4F1B07,
+// `and eax,2` @0x4F1B11; WacCmd_SsnAlive @0x4F1B20 — @0x4F1B6D..0x4F1B75;
+// WacCmd_SsnExists @0x4F1AB9]
+static void test_ssn_dead_alive_read_the_flag() {
+    ScriptWorld w;
+    const EntityHandle zeroed = spawn_npc(w, 170, 21, 0);  // health 0, not yet flagged
+    const EntityHandle raised = spawn_npc(w, 171, 21);     // dead bit, health raised
+    Entity *r = w.registry.get(raised);
+    r->engine_flags |= kEntityFlagDead;
+    r->alive = true;
+    Entity itemless;
+    itemless.net_id = 172;
+    w.registry.spawn(1, itemless);
+    (void)zeroed;
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then v1=SSNdead(170) v2=SSNalive(170) v3=SSNdead(171) "
+            "v4=SSNalive(171) v5=SSNalive(172) v6=SSNexists(172) v7=SSNexists(171) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(4) == 0);
+    CHECK(w.script.vars.get_mission(5) == 0);
+    CHECK(w.script.vars.get_mission(6) == 0);
+    CHECK(w.script.vars.get_mission(7) == 1);
+}
+
+// SSNwounded compares the SIGNED health word with the signed healthMax word
+// halved. [orig: WacCmd_SsnWounded @0x4F1B80 — `sar cx,1` @0x4F1BD9,
+// `cmp [eax+11Eh],cx` @0x4F1BDC, `setle dl` @0x4F1BE3]
+static void test_ssn_wounded_signed_compare() {
+    ScriptWorld w;
+    const EntityHandle h = spawn_npc(w, 180, 22);
+    Entity *e = w.registry.get(h);
+    e->health = -5;
+    CHECK(w.commands.ssn_wounded(h));       // unsigned would read 65531
+    e->health = 40000;                      // the word reads -25536
+    CHECK(w.commands.ssn_wounded(h));
+    e->health = 51;
+    CHECK(!w.commands.ssn_wounded(h));
+    e->health = 50;
+    CHECK(w.commands.ssn_wounded(h));
+}
+
+// ssnguard, ssncspd and ssnrelease gate on the ItemTypeIndex (+0x1C, item_id);
+// ssnrelease and ssn2ssn detach only on the authority.
+// [orig: WacCmd_SsnGuard @0x4F7207; WacScript_SendAIEvent10ToEntity @0x4F74FD;
+// WacCmd_SsnRelease @0x4F7465, Entity_DetachFromVehicleIfServer call @0x4F7475;
+// WacCmd_SsnToSsn @0x4F73DC]
+static void test_ssn_item_gates_and_authority_detach() {
+    ScriptWorld w;
+    Entity bare;
+    bare.net_id = 190;
+    const EntityHandle b = w.registry.spawn(0, bare);
+    w.ai.attach(b);
+    CHECK(!w.commands.set_ssn_guard(b, true));
+    CHECK((w.registry.get(b)->engine_flags & kEntityFlagMounted) == 0);
+    WacSystem sys;
+    CHECK(load_script(w, sys, "if never() then ssncspd(190,20) store(v1) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    // A non-person item (def type 0) with an ItemTypeIndex is released.
+    const EntityHandle rider = spawn_npc(w, 191, 23);
+    Entity *occ = w.registry.get(rider);
+    occ->item_type = 0;
+    occ->mounted = true;
+    w.ai.for_handle(rider)->slot.f[37] = 125;
+    w.ai.is_authority = false;
+    CHECK(w.commands.release_boarding_command(rider));
+    CHECK(occ->mounted);                      // a client never detaches
+    CHECK(w.ai.for_handle(rider)->slot.f[37] == 0);
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
@@ -275,6 +376,10 @@ int main() {
     test_gkill_uses_kill_ssn_body();
     test_hide_ssn_flag_bit();
     test_disable_ssn_flag_bit();
+    test_group_dead_alive_read_live_count();
+    test_ssn_dead_alive_read_the_flag();
+    test_ssn_wounded_signed_compare();
+    test_ssn_item_gates_and_authority_detach();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;

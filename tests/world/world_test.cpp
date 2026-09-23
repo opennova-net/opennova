@@ -73,10 +73,17 @@ int main() {
     CHECK(w.commands.ssn_dead(100));
 
     // group fan-out.
-    Entity g1; g1.net_id = 201; g1.group_id = 7; g1.alive = true; w.registry.spawn(0, g1);
-    Entity g2; g2.net_id = 202; g2.group_id = 7; g2.alive = true; w.registry.spawn(0, g2);
+    // groupalive/groupdead read the trigger group's live count, which the
+    // 62-tick rescan rebuilds [orig: WacCmd_GroupAlive @0x4ED1CC;
+    // EntityPool_RecountLiveByGroup @0x40E8D0].
+    Entity g1; g1.net_id = 201; g1.group_id = 7; g1.alive = true; g1.health = 50;
+    w.registry.spawn(0, g1);
+    Entity g2; g2.net_id = 202; g2.group_id = 7; g2.alive = true; g2.health = 50;
+    w.registry.spawn(0, g2);
+    w.recount_group_live();
     CHECK(w.commands.group_alive(7));
     CHECK(w.commands.kill_group(7) == 2);
+    w.recount_group_live();
     CHECK(w.commands.group_dead(7));
 
     // shared var store.
@@ -441,6 +448,7 @@ int main() {
             CHECK(kw.round_sim.deaths[0].killer == EntityHandle::make(0, 6));
             CHECK(!kw.round_sim.deaths[1].killer.valid()); // never hit: unattributed
         }
+        kw.recount_group_live();
         CHECK(kw.commands.group_dead(9));
 
         // Killing an already-dead group must not notify twice: retail's
