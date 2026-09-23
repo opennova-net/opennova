@@ -633,8 +633,35 @@ static int test_out_of_range_values_take_the_sse2_leg() {
     return ok ? 0 : 1;
 }
 
+// "scale" is converted inline: atof's double times 65536, truncated by x87
+// `fistp qword` under round-toward-zero, the low dword kept. A value past
+// int32 wraps, an infinity stores the indefinite's low dword 0, and the
+// double (not a float) is what gets truncated.
+// [orig: ItemDef_ParseProperty @0x49EB00 (the _atof call @0x49F6F9, RC=truncate
+// @0x49F710, `fistp qword` @0x49F728, the store @0x49F736)]
+static int test_scale_keeps_the_low_dword_of_the_fistp() {
+    const char text[] =
+        "begin A\n id 1\n scale 40000\n end\n"
+        "begin B\n id 2\n scale -40000\n end\n"
+        "begin C\n id 3\n scale 123456.789\n end\n"
+        "begin D\n id 4\n scale 32767.99999\n end\n"
+        "begin E\n id 5\n scale 1e400\n end\n";
+    DefItemsFile items{};
+    if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
+            sizeof(text) - 1, &items) != 0 || items.count != 5) return 1;
+    const bool ok = items.entries[0].scale_q16 == -1673527296 &&
+            items.entries[1].scale_q16 == 1673527296 &&
+            items.entries[2].scale_q16 == -499070469 &&
+            items.entries[3].scale_q16 == 2147483647 &&
+            items.entries[4].scale_q16 == 0;
+    if (!ok) fprintf(stderr, "FAIL items.def scale conversion\n");
+    def_free_items(&items);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
     if (test_regional_sound_delays() != 0) return 1;
+    if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
     if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;
 	if (test_vehicle_spawn_lists() != 0)
 		return 1;

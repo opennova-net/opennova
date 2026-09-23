@@ -844,12 +844,17 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 current.husk_swap_at = (float)(parse_float_n(v, vl) * 62.0);
             parsed = 1;
 		} else if (lower_match_key(lower, ll, "scale", 5)) {
-			/* Signed Q16.16, truncating toward zero after the multiply. Retail
-			   temporarily selects x87 RC=truncate before fistp to def+0x1B8.
-			   [orig: ItemDef_ParseProperty @ 0x49f6e0..0x49f73d;
-				multiplier dbl_7C3CC0 = 65536.0] */
+			/* Signed Q16.16: atof's double times 65536, truncated toward zero
+			   by `fistp qword` under a temporary round-toward-zero control
+			   word, the low dword stored to def+0x1B8 (so a value past int32
+			   wraps). [orig: ItemDef_ParseProperty @0x49EB00 (the scale arm
+			   @0x49F6E0..0x49F73D: the _atof call @0x49F6F9, fmul by
+			   dbl_7C3CC0 = 65536.0 @0x49F6FE, RC=truncate @0x49F710, `fistp
+			   qword` @0x49F728, the store @0x49F736)] */
 			size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.scale_q16 = (int)(parse_float_n(v, vl) * 65536.0);
+			char value[128];
+			safe_copy(value, sizeof(value), v, vl);
+            current.scale_q16 = io::retail_fistp_truncate_low_dword(atof(value) * 65536.0);
             parsed = 1;
 		} else if (lower_match_key(lower, ll, "debris_scale", 12)) {
 			size_t vl;
