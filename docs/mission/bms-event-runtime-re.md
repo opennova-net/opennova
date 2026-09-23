@@ -1421,7 +1421,7 @@ actions.
 | 23 `SingleVelocity` | walks its pool-1 lookup path and returns without a state write [orig: sub_43DEA0 @ 0x43DEA0] | explicit retail no-op; no diagnostic |
 | 24 `ChangeSteamAction` | resolves the first SSN/DCB row in pools 0..2 and writes team [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30] | `set_ssn_team` |
 | 25 `SingleChangeGroup` | resolves the first SSN/DCB row in pools 0..2 and rewrites group [orig: Entity_SetNetIdByParentRef @ 0x43D6C0] | `set_ssn_group`, AI mirror, group recount |
-| 26 `SingleTeleportAction` | marker lookup is pool 3 / type 6088 / `WP_NUMBER`; target lookup is the first SSN row in pools 0..2 [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0] | `teleport_ssn_to_marker` |
+| 26 `SingleTeleportAction` | marker lookup is pool 3 / type 6088 / `WP_NUMBER`; the target walk tests the ItemTypeIndex (+0x1C) before the DcbId on every row of pools 0, 1, 2 (@0x43E02D / @0x43E0DD / @0x43E180), so a gated row carrying the SSN is passed over and the walk goes on [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0] | `teleport_ssn_to_marker` (`resolve_teleport_target`; `script_command_parity`, `test_teleport_walk_gates_inside`) |
 
 The two teleport forms deliberately differ:
 
@@ -1616,8 +1616,15 @@ the host fan, then the shared destroy `remove_ssn`); `bms_event_parity`
 (`test_vaporize_notifies_and_destroys`). WAC `removeSSN`
 (`WacCmd_RemoveSsn @0x4F1EE0`, the `Server_RemoveEntityAndNotify` call @0x4F1F28,
 return 1 @0x4F1F30) and `Gremove` (`WacCmd_GroupRemove @0x4F1F80`, the call
-@0x4F1FF2) notify too; their port still calls the bare `remove_ssn` (follow-up,
-npc-script-coverage rows 26/50).
+@0x4F1FF2) notify too, through the same `server_remove_and_notify` (2026-09-23;
+`script_command_parity`, `test_wac_removals_notify_the_joiners`). A removed Player row's
+placed devices go in place, each through the same removal, before the row's destroy
+(`EntityCommands::remove_placed_devices_by_owner`: pool 1 in slot order, the +0x1C gate
+@0x546E2D, the +0x170 owner @0x546E37, the def attrib 0x40 / 0x20 skips @0x546E46 /
+@0x546E50, the satchel, claymore and AV mine ammo @0x546E68 / @0x546E8B / @0x546EAE;
+`test_player_removal_sweeps_placed_devices`), so the joiners see the player's 0x12 and
+then each device's; the one other caller is the deploy after a death
+(`Server_ProcessPlayerDeath`, the call @0x5178D8; world-wac-ai-re §27.7).
 
 ### 11.5 The objective notification and the mission-text chat relay
 

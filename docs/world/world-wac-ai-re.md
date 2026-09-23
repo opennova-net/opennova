@@ -8328,7 +8328,7 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 | Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel, lifetime-head/fuse timing, sound-only first-five-bounces presentation, and pool-only item sweep are live; PRNG/parent-Euler residuals remain | §27.4; D-THROW-2/-4; test_grenade_bounce_and_fuse, test_motor_sweep_ignores_non_pool_domains, test_ballistic_expiry_is_silent |
 | Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate, full placed pose/item/health carry, and pool-only item sweep are live | §27.5; D-THROW-2/-4; test_satchel_places_device, test_motor_sweep_ignores_non_pool_domains |
 | Placed-device think/detonate chain (satchel/claymore/AV mine) | ported core; exact pool-1 order/cadence, wrapped cone angle, and full terrain-plus-sector LOS are live; placed-model collision remains | §27.6; D-THROW-2/-8; device lifecycle/cone tests incl. test_claymore_sector_los_blocks_trigger |
-| Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §27.6; test_owner_death_removes_devices |
+| Owner cleanup (the deploy and leave sweeps) | MATCHING | §27.7; `npruntime_placed_device_relay` run_owner_devices_live_until_the_deploy; `throwables` test_owner_death_keeps_devices_armed; `script_command_parity` test_player_removal_sweeps_placed_devices |
 | items.def class binding (ai_function/move_function) | MATCHING | §27.2; the resolve_item_traits feed |
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
 | Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_presenter.cpp` |
@@ -8777,12 +8777,20 @@ pellets, per pellet the rol4(s+rol11(s))^1 stream draws yaw ∈ base ±
 kz_pieslice and pitch ∈ [base, base+kz_pieslice), no tracer/model/fire-event;
 then shotgun (0x10000) and the ballistic default.
 
-Owner death/leave: `Server_ProcessPlayerDeath @ 0x5178d8` (and the player-
-removal recursion in `Server_RemoveEntityAndNotify @ 0x50a270`, S2C 0x12) →
-`Entity_RemovePlacedDevicesByOwner @ 0x546e00`: the owner's satchels/
-claymores/AV mines are **removed silently, never detonated**. Our port polls
-the owner's health in `ThrowableSim::update_device` (transport-free stand-in for the
-death hook).
+Owner death and leave: a dead owner's placed devices stay armed; neither the pool-1 visit
+(`Entity_UpdatePool1Slot @ 0x4B8DD0`) nor the satchel, claymore and AV mine thinks read the
+owner's liveness. `Entity_RemovePlacedDevicesByOwner @ 0x546e00` removes the owner's
+satchels, claymores and AV mines (each through `Server_RemoveEntityAndNotify @ 0x50a270`,
+S2C 0x12; **never detonated**) at two points only: (a) the deploy that follows a death, in
+`Server_ProcessPlayerDeath` (the call @ 0x5178D8), skipped for a medic revive (@ 0x5178C5)
+and a spectator slot (@ 0x5178CD), ahead of `PlayerSlot_InitWeaponsFromLoadout`
+(@ 0x5178E1); (b) the Player arm of `Server_RemoveEntityAndNotify` (@ 0x50A2BB), which the
+leaver's `Server_HandlePlayerDisconnect` (the call @ 0x51B82E), WAC removeSSN / Gremove and
+BMS Vaporize run. An NPC-owned or orphaned device is never retired by its owner. Port:
+`Server_ReleasePlayerDeployment` runs `EntityCommands::remove_placed_devices_by_owner` at
+the retail position, the leaver's teardown (`teardown_connection`) runs it for a Player row
+before the row is despawned, and `ThrowableSim::update_device` reads no owner (a swept
+record just releases on its next visit).
 
 ### 27.8 Divergence catalog (D-THROW)
 
@@ -13198,9 +13206,8 @@ language as retail compiles it; the witnesses:
   VaporizeGroup (§38.8). Port: the Gkill / Gremove member walk in `vm.cpp`; removeSSN and
   Gremove call `EntityCommands::server_remove_and_notify`, which sweeps a removed player's
   devices in place (`script_command_parity`: `test_wac_removals_notify_the_joiners`,
-  `test_player_removal_sweeps_placed_devices`). Carried: the player-death caller
-  (`Server_ProcessPlayerDeath`, @ 0x5178D8) keeps the port's owner-gone retirement in the
-  throwables tick.
+  `test_player_removal_sweeps_placed_devices`); the deploy after a death runs the same
+  sweep (`Server_ProcessPlayerDeath`, @ 0x5178D8; §27.7).
 - **Carried:** the D-WAC-5 intern order on the S2C 0x23 wire.
 
 ### 38.8 BMS event runtime
