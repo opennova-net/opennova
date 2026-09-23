@@ -2122,10 +2122,10 @@ target_compile_features(root_motion_test PRIVATE cxx_std_17)
 opennova_add_gated_test(root_motion COMMAND root_motion_test)
 
 # WAC scripting. The registry oracle (165-command ISA + 28 param types from the
-# binary) exercises only the language front end (engine/formats/wac); VM behavior
-# (var math, entity mutation, temporal/edge firing, env, authority) and the
-# zero-crash parse over the real shipped .wac corpus compile against the world
-# (dirs via argv, else the dev defaults; absent dirs skip).
+# binary) exercises only the format half (engine/formats/wac); VM behavior (var
+# math, entity mutation, temporal/edge firing, env, authority) and the shipped
+# .wac corpus, compiled to the original compiler's listings, run against the
+# world (dirs via argv, else the dev defaults; absent dirs skip).
 add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
 target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
 target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
