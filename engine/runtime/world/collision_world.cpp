@@ -449,15 +449,12 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world) {
 
     if (tick_tables_ready()) {
         stable_los_candidates_.reserve(statics_.size() + dynamics_.size());
-        // Every pool-2 entry, as raycast_clear_impl walks it: the LOS reads
-        // the pool itself, not the 1199-capped proximity table [orig:
-        // Physics_RaycastTerrainAndSectors @0x539A16..0x539A30].
+        // Every pool-2 entry, then every pool-1 entry, as raycast_clear_impl
+        // walks them: the LOS reads the pools themselves, not the per-tick
+        // proximity tables [orig: Physics_RaycastTerrainAndSectors
+        // @0x539A16..0x539A30, @0x539A40..0x539A5A].
         world.registry.for_each_in_pool(2, append);
-        for (const DynSlot &slot : dynamics_) {
-            if (slot.h.pool() == 2) continue;
-            const Entity *e = world.registry.get(slot.h);
-            if (e != nullptr) append(*e);
-        }
+        world.registry.for_each_in_pool(1, append);
     } else {
         // Match raycast_clear_impl's unticked compatibility membership and
         // order exactly.

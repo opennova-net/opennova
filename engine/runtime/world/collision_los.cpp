@@ -472,28 +472,22 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
         return true;
     }
 
-    // The pool passes in the witnessed order: pool 2, then pool 1 once pool 2
-    // came back clear [orig: `jz loc_53996A` @0x539A3A; the pool-1 walk
-    // @0x539A40..0x539A5A]. Pass 2 reads the per-tick dynamics table rather
-    // than the pool: an entity absent from it (no model AND no bound) could
-    // never block, since target_bound returns false for it, and an item spawned
-    // after this tick's table build is missed for at most one 62 Hz tick.
+    // The pool passes in the witnessed order: every pool-2 entry, then every
+    // pool-1 entry once pool 2 came back clear. Each walk reads the pool's own
+    // used count, not the per-tick proximity tables (whose pool-2 count also
+    // stops at 1199), so an entry spawned after this tick's table build
+    // blocks at once [orig: Physics_RaycastTerrainAndSectors pool 2
+    // @0x539A16..0x539A30, `jz loc_53996A` @0x539A3A, pool 1
+    // @0x539A40..0x539A5A; the table's `count < 1199` gate @0x4B94CB].
     if (tick_tables_ready()) {
-        // Pass 1 walks every pool-2 entry: the walk reads the pool's own used
-        // count, while the proximity table (statics_) stops counting at 1199
-        // [orig: Physics_RaycastTerrainAndSectors @0x539A16..0x539A30; the
-        // table's `count < 1199` gate @0x4B94CB].
         bool blocked = false;
-        world.registry.for_each_in_pool(2, [&](const Entity &e) {
+        const auto walk = [&](const Entity &e) {
             if (!blocked && blocked_by(e)) blocked = true;
-        });
+        };
+        world.registry.for_each_in_pool(2, walk);
         if (blocked) return false;
-        for (const DynSlot &d : dynamics_) { // pass 2: dynamics (Item kind)
-            if (d.h.pool() == 2) continue; // statics table already covered pool 2
-            const Entity *e = world.registry.get(d.h);
-            if (e != nullptr && blocked_by(*e)) return false;
-        }
-        return true;
+        world.registry.for_each_in_pool(1, walk);
+        return !blocked;
     }
     // Un-ticked worlds (headless callers that never ran the per-tick table
     // build) keep the registry sweep so LOS still sees their entities.

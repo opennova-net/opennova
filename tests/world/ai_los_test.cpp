@@ -4,9 +4,9 @@
 // slot (the +0x16C seat mount over the +0x268 carried object,
 // @0x5399BD..0x539A12) and any candidate standing on an endpoint (+0x28,
 // @0x53882F..0x538877); the terrain leg is skipped only when both ENDPOINTS
-// are indoors (@0x53993F..0x53994C); pool 2 is walked whole
-// (@0x539A16..0x539A30). The script LOS pair's 20 u range split. Hand-built
-// box volumes on a flat or ridged field.
+// are indoors (@0x53993F..0x53994C); pools 2 and 1 are walked whole
+// (@0x539A16..0x539A30, @0x539A40..0x539A5A). The script LOS pair's 20 u
+// range split. Hand-built box volumes on a flat or ridged field.
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -212,11 +212,13 @@ static void test_indoors_skip_reads_the_endpoints() {
 static void test_script_los_splits_at_twenty_units() {
     auto rig = std::make_unique<LosRig>(false);
     const EntityHandle watcher = rig->spawn_person(0, 0, 1);
-    rig->at(watcher).item_type_index = 1;
+    rig->at(watcher).item_id = 1001;
+    rig->at(watcher).item_type_index = 1; // the predicates gate on ItemTypeIndex
     rig->at(watcher).yaw = 90; // mission yaw 90 = engine heading 0: faces +X
     const EntityHandle crate = rig->spawn_item(3, 0, 1, 1, 3); // inside the watcher's slice
     rig->at(crate).engine_flags |= 0x8000000u;
     const EntityHandle target = rig->spawn_person(15, 0, 1);
+    rig->at(target).item_id = 1001;
     rig->at(target).item_type_index = 1;
     rig->rebuild();
     EntityCommands &cmds = rig->world.commands;
@@ -247,12 +249,31 @@ static void test_los_walks_every_pool_two_building() {
     CHECK(!rig->world.ai.line_of_sight_clear_cached(rig->world, pa, pb, a, b));
 }
 
+// The pool-1 pass walks the pool itself: an item spawned after this tick's
+// table build blocks the AI LOS at once, through the live walk and a cached
+// index prepared after the spawn.
+// [orig: Physics_RaycastTerrainAndSectors pool-1 walk @0x539A40..0x539A5A]
+static void test_los_walks_pool_one_live() {
+    auto rig = std::make_unique<LosRig>(false);
+    const EntityHandle a = rig->spawn_person(0, 0, 1);
+    const EntityHandle b = rig->spawn_person(20, 0, 1);
+    rig->rebuild();
+    CHECK(rig->clear(0, 20, 1.5, a, b));
+    rig->spawn_item(10, 0, 1, 1, 3); // after the build, across the ray
+    CHECK(!rig->clear(0, 20, 1.5, a, b));
+    rig->cw.prepare_cached_raycast_queries(rig->world);
+    const int32_t pa[3] = {0, 0, fx(1.5)};
+    const int32_t pb[3] = {fx(20), 0, fx(1.5)};
+    CHECK(!rig->world.ai.line_of_sight_clear_cached(rig->world, pa, pb, a, b));
+}
+
 int main() {
     test_hull_blocks_the_ray_to_its_emplaced_child();
     test_rider_sees_out_of_its_hull_but_not_through_its_children();
     test_indoors_skip_reads_the_endpoints();
     test_script_los_splits_at_twenty_units();
     test_los_walks_every_pool_two_building();
+    test_los_walks_pool_one_live();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

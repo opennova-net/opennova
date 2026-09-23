@@ -2564,30 +2564,18 @@ void test_raycast_clear_table_readiness() {
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
 
-    // Once a table build completed, the pool-2 pass still reads the pool
-    // itself, so a building spawned after the build blocks at once [orig:
-    // Physics_RaycastTerrainAndSectors @0x539A16..0x539A30].
-    {
+    // Once a table build completed, both pool passes still read the pools
+    // themselves, so a building or an item spawned after the build blocks at
+    // once [orig: Physics_RaycastTerrainAndSectors pool 2 @0x539A16..0x539A30,
+    // pool 1 @0x539A40..0x539A5A].
+    for (const int pool : {2, 1}) {
         World world;
         CollisionWorld cw;
-        world.registry.configure_pool(2, 4);
+        world.registry.configure_pool(pool, 4);
         cw.build_tick_tables(world);
         CHECK(cw.tick_tables_ready());
-        CHECK(spawn_blocker(world, cw, 2, EntityKind::Building).valid());
-        CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
-    }
-
-    // The pool-1 pass reads the per-tick dynamics table: an empty build is
-    // authoritative for that tick, and a later item appears with the next build.
-    {
-        World world;
-        CollisionWorld cw;
-        world.registry.configure_pool(1, 4);
-        cw.build_tick_tables(world);
-        CHECK(cw.tick_tables_ready());
-        CHECK(spawn_blocker(world, cw, 1, EntityKind::Item).valid());
-        CHECK(cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
-        cw.build_tick_tables(world);
+        CHECK(spawn_blocker(world, cw, pool,
+                            pool == 2 ? EntityKind::Building : EntityKind::Item).valid());
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
 }
