@@ -2599,7 +2599,7 @@ static void test_aircraft_death_lifecycle() {
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	// The initializer stamps savedLivePose. An unchanged pose queues event four.
 	e.veh.slide_z = -500;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(e.veh.slide_z == 0);
 	w.ai.events.process_timed(w.ai, w);
 	CHECK(ai.brain.f[AiBrain::kCurState] == 15 && ai.brain.f[AiBrain::kStep] == 62);
@@ -2618,12 +2618,12 @@ static void test_aircraft_death_lifecycle() {
 	ai.profile.subtype = 1;
 	ai.brain.f[AiBrain::kPrevAlert] = ai.brain.f[AiBrain::kAlert];
 	w.env.water_z = 7 * 65536;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(ai.brain.f[AiBrain::kWorkPosZ] == 7 * 65536);
 	CHECK(ai.brain.f[AiBrain::kWorkPosX] == 10 * 65536);
 	e.health = 0;
 	e.veh.vel_x = 0;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	w.ai.events.process_timed(w.ai, w);
 	CHECK(ai.brain.f[AiBrain::kCurState] == 23);
 }
@@ -2827,13 +2827,13 @@ static void test_aircraft_landing_and_navigation_states() {
 	b.f[AiBrain::kPendState] = 6;
 	w.ai.apply_transition(ai, w);
 	CHECK(b.f[AiBrain::kCurState] == 6 && b.f[AiBrain::kStep] == 8 && b.f[138] == 3000);
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[138] == 3000);
 	e.position.z = 4;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[138] == 2114);
 	e.position.z = -1;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kCurState] == 14 && e.position.z == 0);
 	b.f[AiBrain::kPendState] = 7;
 	w.ai.apply_transition(ai, w);
@@ -2850,16 +2850,16 @@ static void test_aircraft_landing_and_navigation_states() {
 	ai.profile.field216 = 20 * 65536;
 	ai.profile.field220 = 8000;
 	ai.profile.min_agl = 5 * 65536;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 12 * 65536 && b.f[138] == 6000);
 	CHECK(b.f[AiBrain::kOutSpeed] == 1000 && b.f[AiBrain::kWorkPosX] == 100 * 65536);
 	b.f[AiBrain::kUseWaypointZones] = 1;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 30 * 65536);
 	b.f[AiBrain::kUseWaypointZones] = 0;
 	b.f[AiBrain::kPendState] = 11;
 	w.ai.apply_transition(ai, w);
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 20 * 65536 && b.f[138] == 8000);
 	CHECK(b.f[AiBrain::kOutSpeed] == 2000);
 }

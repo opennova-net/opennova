@@ -1464,7 +1464,7 @@ void test_idle_skip_throttle() {
     // tick the caller passes: tick 64 on counter 13 still skips, and counter 64
     // forces the full update (the skip counter restarts).
     // [orig: Entity_MovementCollisionResolver @0x4B2CAF, `test byte ptr
-    //  dword_24C1948,3Fh`]
+    //  g_entity_update_counter,3Fh`]
     {
         Rig crig(box_model(1, 0, 2.0, 2.0, 3.0));
         crig.move_soldier(30.0, 30.0, 0.0);

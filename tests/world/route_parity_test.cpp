@@ -316,7 +316,7 @@ void test_avoid_brake_item_index_gates() {
         // keyed on the entity-update counter, which here differs from the tick.
         // [orig: Entity_UpdateWatercraftPhysics @0x48E712,
         //  Entity_UpdateAircraftPhysics @0x491B2D, Entity_UpdateVehiclePhysics
-        //  @0x48BF26 (the dword_24C1948 reads)]
+        //  @0x48BF26 (the g_entity_update_counter reads)]
         r.w.entity_update_counter = 5;
         const int32_t braked = static_cast<int32_t>(
                 ((static_cast<uint32_t>(r.helo().net_id) +

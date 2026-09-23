@@ -225,7 +225,7 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 // slope (infantry_slope_pass conform leg) and the torso roll chases in turn
 // (fp_roll = torso_roll + lean/4), so a living body visibly flinches and
 // settles back while a corpse tips onto the terrain.
-// [orig: Entity_HandleDamageTrigger gate @0x40755e; +0x05B05B00 @0x407564;
+// [orig: OrganicClass_HandleEvent gate @0x40755e; +0x05B05B00 @0x407564;
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
 //  @0x4078cc / @0x407918]
 void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
@@ -846,7 +846,7 @@ void projectile_apply_person_hit_drag(FixedVec3 &velocity, const AmmoTableEntry 
 void person_class_round_legs(World &world, Entity &victim, const HitRecord &record) {
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(record.round_ammo_index);
     // The clip from the record's section and the round's approach
-    // quadrant, cause 1 [orig: Entity_HandleDamageTrigger quadrant
+    // quadrant, cause 1 [orig: OrganicClass_HandleEvent quadrant
     // @0x407478, Entity_ComputeAnimSlotIndex call @0x407483].
     const Vec3 vel = vec_from_fixed(record.round_vel_q16);
     const int quadrant = death_quadrant_from_round(
@@ -1462,7 +1462,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     hits.push_back(RoundHit{damage_entity, r.owner, damage,
                                             primary_section, secondary_section});
                     if (damage_target_is_person) {
-                        // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
+                        // [orig: OrganicClass_HandleEvent @0x4074BA; twin @0x407822]
                         apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos, r.owner);
                     }
                     if (!damage_target_is_person) {
@@ -1487,12 +1487,12 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     // and tips the body on a torso-stack bone; a later kill
                     // that stamps nothing (WAC kill/SSNHP/GroupHP) plays this
                     // hit's clip, while killSSN and KillSingle clear it first
-                    // [orig: Entity_ResetWeaponState @0x4F1EBD;
+                    // [orig: WacCmd_KillSsn @0x4F1EBD;
                     // Entity_KillByNetId @0x43DC1B].
                     // The roll, the mask switch, and the anim selector all
                     // consume the SAME hit-record bone (hitRecord[14]);
                     // death_section is our preserved copy of that record field.
-                    // [orig: Entity_HandleDamageTrigger @0x407478 quadrant,
+                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant,
                     //  @0x407483 select, @0x40755e / @0x4075f6 gates;
                     //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
                     //  / @0x4078c6]

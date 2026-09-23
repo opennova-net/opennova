@@ -269,7 +269,7 @@ callback; `current_tick @0x24c1968` increments once per call):
      clock `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 admitted ticks.
    - every 32nd tick (`test tick,1Fh` @0x51D8C4), under the same admission: the
      spawn-marker pass (`assign_overlay_spawn_points`, the call @0x51D8D2) and
-     `Server_UpdateEntityIdleTimers` (the call @0x51D8D7, the drowning producer).
+     `Server_UpdatePlayerBreathTimers` (the call @0x51D8D7, the drowning producer).
    - every 16th tick (`++g_quarter_roundrobin_counter > 15`, ex `dword_C8D808`, @0x51D8DC..0x51D8F4): the **normal-event quarter pass**
      `@0x454d50` (kong-misnamed "Entity_SetStateWreckage") — processes ¼ of the event
      list (entries with `(flags & 6) == 0`), cursor `dword_AE06FC` cycling 0..3. Each
@@ -310,7 +310,7 @@ MissionKernel's single PreMission tick. PostMission events (`flags & 4`) run thr
 1 and 2 (`@0x522365..0x5223C8`; the pool-3 markers stay), so their triggers and actions
 resolve against the destroyed pools. The SP restart's call (`Game_RestartRoundSP
 @0x5263AE`) sweeps nothing: its first call `Game_DestroyAllEntitiesAndReset` reaches
-`EventSystem_FreeAll` through the mission reset (`CAIGroup_HasGuardTaskFromIndex2
+`EventSystem_FreeAll` through the mission reset (`Mission_ResetBmsState
 @0x40DB80`, an IDB misnomer; the call @0x40DBEF), which zeroes `g_EventCount` @0x453266.
 The third call site 0x51EA89 lies in an unreferenced chunk (dead). Neither pass is
 periodic (D-EVT-4). Port: `MissionKernel::run_post_mission_pass` (destroys pools 0..2,
@@ -503,7 +503,7 @@ Dispatch is a flat sub-type switch (`EventTrigger_EvaluateCondition @0x453620`,
 cat-1 sub-switch @0x45364a). Two data stores back it, both zeroed per mission
 load and save-persisted (`SaveFile_WriteTeamRelationBlocks @0x4aa320` / read
 @0x4a97e0): the group records in the mission reset's memset
-(`CAIGroup_HasGuardTaskFromIndex2 @0x40DB80`, an IDB misnomer: 0xC00 bytes at
+(`Mission_ResetBmsState @0x40DB80`, an IDB misnomer: 0xC00 bytes at
 0xA33F90, the call @0x40DBAE), the relation matrices and the visited words in
 `EventSystem_FreeAll @0x453210` (called from the same reset @0x40DBEF):
 
@@ -532,7 +532,7 @@ infantry threat scan (`Entity_FindNearestThreat @0x4B0990`, the writes
 `Entity_SpawnProjectile`), the vehicle and helicopter engage handlers
 (`AI_HandleEvent_VehicleWithDamageC @0x466460` from @0x4664E3,
 `AI_HandleEvent_HelicopterCombatD @0x467730` from @0x4677B3) and the aircraft and
-ground fire legs (`Entity_ProcessInfantryWeaponFire @0x471710` from @0x472B67,
+ground fire legs (`AI_TickState_AircraftCombat @0x471710` from @0x472B67,
 `AIEntity_ProcessWeaponFire @0x472E00` from @0x4742E7); **shot** when damage is actually
 processed (`Projectile_ProcessDamageOnTarget @0x4e80ae..0x4e80ef` — skipped
 when the friendly-fire gate @0x4e74f0 discards the damage). Setters
@@ -1189,8 +1189,8 @@ evaluated in `event_runtime.cpp` since 2026-09-12.
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
 | 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | target WP_NUMBER | — | — | All matching pool-3 ItemDef 6088 markers; entity+692/gen_string effect name, zero direction, store without releasing previous group. Shared typed particle consumer; entity+460 lifetime sharing remains D-PTL-26. |
 | 28 | SpecialSubType | `EventAction_HandleSpecialTypes(block) @0x4535a0`: sub 37 `RenderState_SetLayerVisibilityByIndex(p1, p2)` (the call @0x4535d5), the HUD item flash (§11.6); sub 38 `g_InputActionBits = 0` @0x4535c2; sub 39 `dword_AE0718 = (p1 == 0)` @0x4535bc, a dead store; every other sub returns @0x4535b4. All three ported | sub 37: HUD timer 0..15 (unchecked); sub 39: value | sub 37: timer value (ticks) | — | 37/38/39 (editor marks 28/29 unused) |
-| 30 | GroupOpenDoorAction | `Entity_KillDestructiblesByTeam(p1)` @0x4541A0 (a misnomer): pools 2 then 1, every row whose commandGroup +0x11C matches and whose +0x1C8 callback is `Entity_ProcessSectionDamageTransition @0x43F370` takes section event 7, the door open (world-wac-ai-re §33.14) | GROUP | — | — | — |
-| 31 | GroupCloseDoorAction | `Entity_KillDestructiblesByOwner(p1)` @0x454240 (a misnomer): the same walk with section event 8, the door close (@0x454282 / @0x4542C3) | GROUP | — | — | — |
+| 30 | GroupOpenDoorAction | `EventAction_OpenGroupDoors(p1)` @0x4541A0 (a misnomer): pools 2 then 1, every row whose commandGroup +0x11C matches and whose +0x1C8 callback is `Entity_ProcessSectionDamageTransition @0x43F370` takes section event 7, the door open (world-wac-ai-re §33.14) | GROUP | — | — | — |
+| 31 | GroupCloseDoorAction | `EventAction_CloseGroupDoors(p1)` @0x454240 (a misnomer): the same walk with section event 8, the door close (@0x454282 / @0x4542C3) | GROUP | — | — | — |
 | 32 | GroupResetHasVisited | `EventTrigger_ClearSlotB(p1)` | GROUP | — | — | — |
 | 33 | SingleResetHasVisited | `EventTrigger_ClearSlotA(p1)` | ENTITY | — | — | — |
 | 34 | ResetEvent | `events[p1]` latch clear (§1.5) | **EVENT_REF** | — | — | — |
@@ -1566,7 +1566,7 @@ The three script kills clear different parts of the global hit record
 section, +0x40 the round pointer, +0x44 the round's +0x170 owner), which the
 class callbacks read:
 
-- WAC `killSSN` is its own handler, `Entity_ResetWeaponState @0x4F1E40` (an IDB
+- WAC `killSSN` is its own handler, `WacCmd_KillSsn @0x4F1E40` (an IDB
   misnomer): the ItemTypeIndex gate (@0x4F1E89), the whole record zeroed
   (@0x4F1E8F..0x4F1E99), Health 0 (@0x4F1EA4), lastAttacker 0 (@0x4F1EAD), a
   person's (def+0x5C == 3) staged clip +0x2C0 cleared (@0x4F1EB7..0x4F1EBD), then
@@ -1589,7 +1589,7 @@ machines' event 1 copies +0x44 into the queued event, @0x45831E / @0x458524); WA
 @0x4E7921..0x4E7929) start from an empty record. With no round on record
 an org0/org1 body's class callback takes only the phase-1 alert prefix (the AI
 slot alert byte +0x88 = 2 and `TriggerGroup_SetAlertRed(group)`,
-`Entity_HandleDamageTrigger @0x407310`, @0x4073BF..0x4073EA, the exit @0x40740D).
+`OrganicClass_HandleEvent @0x407310`, @0x4073BF..0x4073EA, the exit @0x40740D).
 The organic death transaction (S2C 0x13 and the kill record) comes from the
 body's own death edge on its next motor tick (`Entity_UpdateInfantryAI` @0x4B9D4D;
 the player body @0x4B4CEA), not from the kill. Port: `EntityCommands::kill_ssn`,
@@ -1670,7 +1670,7 @@ through `ClientReplicaPipeline::apply_objective_notification` ->
 is_client bit (a dedicated host clears it). The presenter posts these script chat
 lines (the WAC text/ptext/text# literals, the WAC lose line, the BMS subgoal
 won/lost lines) into the CHAT ring and keeps the triggered text and the console
-lines in the SYSTEM ring (`Chat_AddDebugMessage @0x4987F0`; D-HUD-6). ctests
+lines in the SYSTEM ring (`Chat_AddMessageChannel2 @0x4987F0`; D-HUD-6). ctests
 `bms_hud_relay`, `hud_game_text`, `nw_message_coverage`.
 
 Follow-up (spec only): SubGoalWon also tallies `win_scores[slot] * 100` (the header

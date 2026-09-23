@@ -46,7 +46,7 @@ struct WaterWakeFrame {
 // per completed entity update, so a draw between two updates repeats the
 // scroll; this compile runs once per fixed tick.
 // [orig: create_water_surface_mesh @ 0x5DDEF0; render_water_surface_decal
-//  @ 0x5DE0F0, the dword_24C1948 read @ 0x5DE25A, masked @ 0x5DE26D /
+//  @ 0x5DE0F0, the g_entity_update_counter read @ 0x5DE25A, masked @ 0x5DE26D /
 //  @ 0x5DE27F and stored @ 0x5DE277 / @ 0x5DE284]
 void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
 		uint32_t entity_update_counter, const int32_t camera[3], WaterWakeFrame &out);

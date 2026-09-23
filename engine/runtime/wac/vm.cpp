@@ -449,7 +449,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "load")) { return A(0); }
 
     // ---- entity actions ----
-    // The killSSN handler (IDB misnomer). [orig: Entity_ResetWeaponState @0x4F1E40]
+    // The killSSN handler. [orig: WacCmd_KillSsn @0x4F1E40]
     if (ieq(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
     // The notifying removal (S2C 0x12, a player's devices, then the destroy).
     // [orig: WacCmd_RemoveSsn @0x4F1EE0 (the Server_RemoveEntityAndNotify call
@@ -479,7 +479,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "tele")) return cmds.teleport_local_to_ssn(H(0)) ? 1 : 0;
     if (ieq(n, "forceanim")) {
         // The notice rides the system ring, not the chat ring.
-        // [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddDebugMessage
+        // [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddMessageChannel2
         //  call @0x4F266A), return 0 @0x4F2682]
         w.script.forced_animation = A(0);
         const std::string key = world::infantry_anim_key(A(0));
@@ -527,7 +527,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
                               A(1), 0, 0);
         // Retail reports success for any resolved row with an ItemTypeIndex
         // (ssn_exists); only the AI-event queue is gated on the brain
-        // [orig: WacScript_SendAIEvent10ToEntity @0x4F74B0 — gate @0x4F74FD,
+        // [orig: WacCmd_SsnCspd @0x4F74B0 — gate @0x4F74FD,
         //  queue gate @0x4F7508, return 1 @0x4F755A; event-11 twin @0x4F7570].
         return 1;
     }
@@ -555,8 +555,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         }
         return 0;
     }
-    // Both return 1 whatever they visited [orig: TextResource_GetMissionString
-    // (the GtoWP handler, IDB misnomer) @0x4ED3E4; WacScript_SetEntityTeamSlot
+    // Both return 1 whatever they visited [orig: WacCmd_GroupToWaypoint
+    // (the GtoWP handler) @0x4ED3E4; WacCmd_GroupHp
     // (the GroupHP handler) @0x4F7BD0].
     if (ieq(n, "GtoWP")) { cmds.group_to_waypoint(A(0), A(1)); return 1; }
     if (ieq(n, "GroupHP")) { cmds.set_group_hp(A(0), A(1)); return 1; }

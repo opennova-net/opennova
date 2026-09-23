@@ -787,7 +787,7 @@ included, so it is NOT that fact; two readers still key on it: the friendly-tag 
 (`hud_combat_feed.cpp`, retail `!is_in_session || GameType & 0x10000`) and the out-of-session
 UseGun rejection (`local_player.cpp`; `Entity_AttachToUseGunSlot @0x546c07` rejects in SP, the
 port never does). `AiSystem::is_in_session` is stamped from `mp_session` every entity update (the
-death event's in-session arm, `EntityAI_ProcessInfantryStateMachine @0x458273`).
+death event's in-session arm, `EntityAI_ProcessAirStateMachine @0x458273`).
 
 Reimpl: `HostRole::bring_up_singleplayer` (`engine/runtime/inmatch/host_role.cpp`) builds the SP
 `GameConfig` with SINGLEPLAYERGAME / `mp_attributes = 0x3A06` / `max_players = 1`, mirrored by the
@@ -2148,7 +2148,7 @@ header; the rest is client-side.
 | flags1 | u8 | Write side `[orig: NetPacket_WritePlayerState @ 0x4ff793-0x4ff7dd]`: bit0 = spectator (slot+100567; also ORs entity+36 bit0), **bit1 = RESPAWN-PENDING (slot+89912 & 0x10)** — re-asserted EVERY frame while the recipient is undeployed (also ORs entity+36 bit0 → the record byte13 `0x01`), bit2 = one-shot load hint (entity+44 & 0x1000 && dword_2550850, clears the entity bit). Read side: `0x04`→loadprog `dword_A8235C=10`; **`0x02`→`g_deploy_screen_active @ 0xA860DC` = `(flags1 & 2) != 0` EVERY frame — the deploy screen is HELD open by bit1; one bit1=0 frame closes it** (@ 0x42ff82; D-NET-156); `0x01` EDGES drive `g_death_screen_active @ 0xA860EC` (0→1 opens the death/spectator screen: camera `CameraOffset.Z=0xD000`, and tip 22 plus `dword_24C18F0 = 0xBA` only while the spawn gate `g_spawn_success_gate` (`dword_24C1928`) is clear, a READ @0x42FFD0; 1→0 closes + latches `byte_A85B48 = player.Team`) |
 | flags2 | u8 | low 2 bits select the sub-block AND its ROLE: **0** = weapon/reload/uniform, **1** = server-status/timer, **2** = ENV, **3** = objective (gametype-gated). The retail byte pre-increments and free-runs through all 256 values. Exactly `(flags2 & 0xF) == 8` appends the recipient's mounted-weapon ammo record after the fixed tail: a 2 B `0xFFFF` on-foot sentinel or 6 B handle/clip/reserve body [orig: writer @0x4FFD9A..0x4FFE7B; reader @0x430459..0x430541] |
 | sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32, 11 B | player aim/state → dword_A85B5C… [orig: 0x430054..0x43012E]; the four whole-second landings the DEATH screen reads are FOLDED 2026-08-24 (`ClientState::preround_delay_seconds` @0x430064, `respawn_penalty_seconds` @0x430084, `local_revive_seconds` @0x43009f, `spawn_hold_seconds` @0x4300c3) |
-| sub-block 1 (server-status/timer) | `==1`: 4× u8 + i16, 6 B | `[u8→dword_C6EAE0][u8→dword_C6EAE4][u8→g_serverFps (0xC8FC64)][u8→g_serverCpuPct (0xC8FC68)][i16 timer]`; each u8 is `movzx`-widened from one wire byte; `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: C6EAE0@0x4301a1, C6EAE4@0x4301bc, g_serverFps@0x4301e0, g_serverCpuPct@0x430200, timer@0x430210]. Init defaults [orig: 0x4f638b C6EAE0=20, **C6EAE4=13**, C6EAE8=10]. **`dword_C6EAE4` is the fall-damage tolerance (§5.38d)** — a server that only ever sends sub-block 0 leaves the client's C6EAE4 at 0 → per-frame fall damage [orig: read @0x4b7d0d]. The two named values are the live WAC `breathtime` (`dword_C6EAE0`, script-writable through the named-value row @0x82EFEC) and `fallmps` (`dword_C6EAE4`); the writer sends each as `v > 0xFF ? 0xFF : low byte`, a signed compare [orig: NetPacket_WritePlayerState @0x4FF9DB..0x4FFA0A, @0x4FFA14..0x4FFA48], and the joiner stores both after the authority early-out (@0x43016D; `ClientReplicaState::breathtime`). The i16 timer carries the host's live `g_round_time_remaining` in whole seconds (the read @0x4FFA8D), which keeps counting through the post-round linger (§5.68) |
+| sub-block 1 (server-status/timer) | `==1`: 4× u8 + i16, 6 B | `[u8→wac_var_breathtime][u8→wac_var_fallmps][u8→g_serverFps (0xC8FC64)][u8→g_serverCpuPct (0xC8FC68)][i16 timer]`; each u8 is `movzx`-widened from one wire byte; `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: C6EAE0@0x4301a1, C6EAE4@0x4301bc, g_serverFps@0x4301e0, g_serverCpuPct@0x430200, timer@0x430210]. Init defaults [orig: 0x4f638b C6EAE0=20, **C6EAE4=13**, C6EAE8=10]. **`wac_var_fallmps` is the fall-damage tolerance (§5.38d)** — a server that only ever sends sub-block 0 leaves the client's C6EAE4 at 0 → per-frame fall damage [orig: read @0x4b7d0d]. The two named values are the live WAC `breathtime` (`wac_var_breathtime`, script-writable through the named-value row @0x82EFEC) and `fallmps` (`wac_var_fallmps`); the writer sends each as `v > 0xFF ? 0xFF : low byte`, a signed compare [orig: NetPacket_WritePlayerState @0x4FF9DB..0x4FFA0A, @0x4FFA14..0x4FFA48], and the joiner stores both after the authority early-out (@0x43016D; `ClientReplicaState::breathtime`). The i16 timer carries the host's live `g_round_time_remaining` in whole seconds (the read @0x4FFA8D), which keeps counting through the post-round linger (§5.68) |
 | sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8, 11 B | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, `Env_RainPctTarget=u8<<8`, `Env_OvercastBlendTarget=u8<<8`, precipitation kind u8 (`0=rain`, `1=snow`; raw POD field `env_param`) [orig: 0x430253..0x43034C] |
 | sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | `won, lost, show_win, show_lose` → dword_AC86F4/F0/EC/E8. The gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303D0] |
 | state_flag_byte | u8 | **The recipient's OWN stance echo**: bit 0 (prone)→`dword_B76484`, bit 1 (crouch)→`dword_B76480`, bits 0/1→`g_local_player_entity` MoveOrder (+0x12C) bits 8/9 — re-latched EVERY frame (@ 0x430562/@ 0x430570), so a host that hardcodes 0 force-STANDS a crouched client each frame (witness 2026-07-03; the pre-v32 crouch/prone bug). The authoritative source is the server's per-player stance from C2S 0x1D (dispatch table) — vehicle attach/detach clears it (@ 0x435c54/@ 0x43561e). (The `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
@@ -3977,7 +3977,7 @@ each resolves a `"Canned Msg"`/`STRCNDnn` string via `[orig: GameText_GetString 
 formats it with the resolved killer/victim/aux names via `[orig: HUD_FormatKillEventMessage @
 0x422DA0]` (→ `[orig: Chat_FormatMessage @ 0x422C60]`, `$A`/`$B` token substitution; player names
 from the slot table with `<ch>…<co>` clan-tag colouring), and posts it to the kill feed with a
-colour via `[orig: Chat_AddDebugMessage @ 0x4987F0]`. Objective/zone cases additionally drive
+colour via `[orig: Chat_AddMessageChannel2 @ 0x4987F0]`. Objective/zone cases additionally drive
 `[orig: Sound_PlayInterfaceTriggerSet @ 0x527BE0]`, `HUD_DrawDefaultProgressBar @ 0x527E60`, and
 effect spawns. Cases that resolve both attacker AND victim (4–15, 24, 32–34, 38–39, 45, 49) are
 **kills**; the flag/zone/camp/base cases (19–21, 41–44, 50–60) are **objectives**; the rest are
@@ -5315,7 +5315,7 @@ client-local round-load path above.
 **Landing-impact / fall-damage (the constant-damage root).** After ground/collision resolution
 (`[orig: movement collision resolver @ 0x4b2bd0]`, returns the ground delta) @0x4b7cf4, when
 GROUNDED (delta ≤ 0; `jg` skips otherwise @0x4b7d04) the motor compares vertical velocity `velZ`
-(entity+0xA0) to `dword_C6EAE4 × -1057` (`imul eax,0FFFFFBDFh` @0x4b7d15; `cmp [esi+0A0h],eax; jg` skip
+(entity+0xA0) to `wac_var_fallmps × -1057` (`imul eax,0FFFFFBDFh` @0x4b7d15; `cmp [esi+0A0h],eax; jg` skip
 @0x4b7d1b): if `velZ ≤ threshold` AND `entity == g_local_player_entity` it calls
 `[orig: Player_OnDamageReceived @ 0x4dd880]` @0x4b7d2d — screen-red `dword_B764B4 += 120` (cap 255),
 camera-shake `dword_B764B0 += 10` (cap 255), and (self-attacker) `Radar_AddBlip(…, 255)` = minimap-red. The
@@ -6612,7 +6612,7 @@ functions renamed up: `server_handle_entity_sync`→`Server_HandleEntitySync`,
 prototypes with phantom params; their garbage flowed up as uninitialised `v*` args in
 `Server_TickUpdate` and elsewhere. Two sub-classes, both fixed:
 - *Extra cdecl params, body uses none/fewer:* `Server_BuildEntitySlotLists @0x4f97a0` (was
-  `__thiscall(char*,const char*)`) and `Server_UpdateEntityIdleTimers @0x50d770` (was `(int,int,char)`)
+  `__thiscall(char*,const char*)`) and `Server_UpdatePlayerBreathTimers @0x50d770` (was `(int,int,char)`)
   → `void(void)`; `Server_CheckWinConditions @0x51ad40` `void(void)`; `Server_UpdateBotMovement @0x51b960`
   `void(void)`; `Server_SendEntityStateToPlayer @0x517ba0` `(int playerSlot)`;
   `Server_SendMissionMetrics @0x4fb3a0` `void(void)`; `Server_BroadcastWeaponOverlayUpdate @0x509fc0`
@@ -8391,7 +8391,7 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   tick after the damage, so an org1 body's dead bit is not set by the host's damage routing
   (only a player body's is). The routine's other callers are the org2 edge (@0x4B4CEA) and the
   console kill (@0x4D29EC, player slots only); no damage path calls it.
-- `Server_UpdateEntityIdleTimers @ 0x50D770` is the authority's drowning producer despite
+- `Server_UpdatePlayerBreathTimers @ 0x50D770` is the authority's drowning producer despite
   its old generic name. `Server_TickUpdate` calls it inside the script admission
   (`!preround && (humans || !ticks) && !epilog`, @0x51D89F..0x51D8BD), after the WAC tick and
   the spawn-marker pass, only when `tick & 0x1F == 0` (@0x51D8C4..0x51D8D7); the function also
@@ -8401,7 +8401,7 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   `Position.Z + CameraOffset.Z` (entity +12 plus +0x74) with `Env_WaterHeightFixed`, a raw
   signed compare with no authored-water test (@0x50D7CD..0x50D7D9); a wet sample increments
   playerSlot+460 (@0x50D7DF), a surfaced or dead-flagged (`Flags & 2` only, @0x50D7C3..0x50D7C7)
-  sample clears it. The limit is `4 * breathtime` (`dword_C6EAE0`, the WAC named value: seeded 20
+  sample clears it. The limit is `4 * breathtime` (`wac_var_breathtime`, the WAC named value: seeded 20
   by `WacScript_FreeAll @0x4F6381`, script-writable through the named-value row @0x82EFEC), in 32
   bits, compared signed (@0x50D7E6..0x50D7FB). The first sample past it clears the attacker slot
   +0x178 (@0x50D800), selects death animation cause 5 (`death_drown` 175, @0x50D80A), writes health
@@ -8410,7 +8410,7 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   plays sound 2 or 3 against the 160% split (@0x50D892..0x50D8CB). This is about 41.8 seconds at
   62 Hz at the default 20, because the counter advances once per 32 host ticks, not every tick.
   `GameEvent_PlayerDeath` reads the same limit for its event 26 (`lea ecx,[eax*4]` @0x5172FB).
-  Ported: `Server_UpdateEntityIdleTimers` in `inmatch/server_idle_timers.cpp`, run by
+  Ported: `Server_UpdatePlayerBreathTimers` in `inmatch/server_idle_timers.cpp`, run by
   `world::ServerIdleLegs` between the WAC and BMS passes (`npruntime_round_sim`).
 - `GameEvent_PlayerDeath @ 0x516DD0` [authority-gated at entry]: vehicle detach, clears
   every pool-0 entity's live-target (+92) that references the victim (the §5.9.1 0x40-word
@@ -13890,7 +13890,7 @@ traits), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`), t
 vehicle stuck check (`AI_CheckVehicleStuckState @ 0x465290`), the boat MoveOrder
 analog merge (`@ 0x48DE04-0x48DE7B`) + submerged-driver input cut
 (`@ 0x48DFD3-0x48DFDF`) + `aiComp[135] ← target_ref[127]` mirror (unmodeled slot),
-`EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
+`EntityAI_ProcessGroundStateMachine @ 0x4583c0`'s non-drive states, the engine sound
 state machine, husk/section damage, the ctan/cbik dedicated contact solves (the
 tracked solve `@ 0x47c1c0` client subset landed 2026-08-05 and carries them interim),
 the above-water drive gate, the ground/carrier-follow grounded-on-entity block, and
@@ -13935,7 +13935,7 @@ impact response, traction/slip/pivot (the off-contact and crashed arms re-grille
 `@ 0x48CE02..0x48D003` / `@ 0x48A684..0x48A81F` / `@ 0x4861F6..0x4863D5`), the
 family springs/chassis/lean (bike `Entity_SmoothHeadingToTarget @ 0x45B2C0`, boat
 `Vehicle_UpdateTurretRotation @ 0x45AEA0`), the moving-support follow, the
-vehicle-class brain machine (`EntityAI_ProcessVehicleStateMachine @ 0x4583C0`:
+vehicle-class brain machine (`EntityAI_ProcessGroundStateMachine @ 0x4583C0`:
 client tick gate cur 21/23 `@ 0x458545..0x45854d`, client commit pend 16 or 21..23
 `@ 0x458579..0x458586`, keyed by items.def `ai_function` through
 `g_EntityClassEventCallbackTable @ 0x813000` / `Entity_LookupRenderCallbacks

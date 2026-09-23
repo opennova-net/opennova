@@ -120,7 +120,7 @@ constexpr double seat_hit_bone_damage_multiplier(int32_t hit_bone) {
     return seat_hit_bone_is_critical(hit_bone) ? 6.0 : 1.0;
 }
 
-// Hidden-section mask selected by Entity_HandleDamageTrigger's dismemberment
+// Hidden-section mask selected by OrganicClass_HandleEvent's dismemberment
 // leg: the mask starts as the hit bone's own bit (1 << bone, x86 shl count
 // masking mirrored), then the 13-case switch ORs the linked-section addend on
 // top — bones 1-4 are the torso/head stack, 5-8 sever the whole limb chain
@@ -461,7 +461,7 @@ struct HitRecord {
 // approach quadrant, the ammo's collision force from the round, the
 // torso-stack body roll, the damage reaction, and on the authority the
 // dismemberment cut of a non-player body.
-// [orig: Entity_HandleDamageTrigger @0x40740F..0x4076D5; the plyr twin
+// [orig: OrganicClass_HandleEvent @0x40740F..0x4076D5; the plyr twin
 //  Entity_HandleDamageAndTriggerZones @0x407777..0x407A7C]
 void person_class_round_legs(World &world, Entity &victim, const HitRecord &record);
 

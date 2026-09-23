@@ -95,7 +95,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     // Both templates start with a null entity+368 controller. Neither the
     // clone nor these definition callbacks allocates one (@0x4397C0,
     // @0x4BFCC0, @0x4683C0). The ordinary AiEntity fixture default is true.
-    ai.has_physics = false;
+    ai.has_occupant = false;
     ai.def_attrib = entity.item_attrib;
     ai.slot.f[0] = int32_t(handle.packed) + 1;
     if (profile) {

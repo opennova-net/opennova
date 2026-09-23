@@ -603,7 +603,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		if (ai != nullptr) {
 			ai->team = 0;
 			ai->vel_x = 0;
-			ai->vel_z = 0;
+			ai->vel_y = 0;
 			ai->inf.player_moving = false;
 			ai->inf.vel[0] = ai->inf.vel[1] = ai->inf.vel[2] = 0;
 		}

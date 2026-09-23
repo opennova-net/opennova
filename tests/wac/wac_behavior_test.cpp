@@ -292,7 +292,7 @@ static void test_wac_wave_emits_dialog_wav() {
 
 // Mission text and the console are separate retail rings: text/text# (and
 // their peer-broadcast ptext twin) feed the player chat ring, while
-// consol/consol# and pconsol feed Chat_AddDebugMessage's system ring. The #
+// consol/consol# and pconsol feed Chat_AddMessageChannel2's system ring. The #
 // forms carry the handler's finished "%s %i" line, not a separate number.
 // [orig: Chat_AddFormattedIntMessage @0x4EDB70 (the sprintf call @0x4EDB9E);
 //  WacCmd_ConsolNumber @0x4EDC00 (the sprintf call @0x4EDC2E)]
@@ -339,7 +339,7 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
 
 // forceanim posts its notice ("force anim OFF" / "force anim_<name>") into the
 // system ring with the console lines, not the chat ring, and returns 0.
-// [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddDebugMessage call
+// [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddMessageChannel2 call
 //  @0x4F266A), return 0 @0x4F2682]
 static void test_forceanim_notice_rides_the_system_ring() {
     BehaviorWorld w;

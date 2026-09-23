@@ -446,7 +446,7 @@ struct HudMessageLine {
 	// SYSTEM ring draws THAT value; only the CHAT ring folds a computed alpha
 	// over it [orig: the stored-color read @0x59ae97 vs the chat fold
 	// @0x59adef]. `-1` (0xFFFFFFFF) is the triggered-text default
-	// [orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216].
+	// [orig: Chat_AddMessageChannel2(text, -1, 930) @0x51f216].
 	uint32_t color = 0xFFFFFFFFu;
 };
 
@@ -774,11 +774,11 @@ public:
 	void update_layout(const HudLayout &layout);
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a] and the message ring
-	// [orig: Chat_AddDebugMessage @ 0x4987f0] are compiler state.
+	// [orig: Chat_AddMessageChannel2 @ 0x4987f0] are compiler state.
 	// Mission triggered text — posts into the one system ring with the default
-	// white [orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216].
+	// white [orig: Chat_AddMessageChannel2(text, -1, 930) @0x51f216].
 	void push_message(const std::string &text, int now_ticks);
-	// Post one line to the SYSTEM feed — the ring every Chat_AddDebugMessage
+	// Post one line to the SYSTEM feed — the ring every Chat_AddMessageChannel2
 	// caller shares (kill/objective/medic lines, triggered text, and later the
 	// join/system lines) [orig: the sink @0x4987f0; drawn by the second
 	// HUD_DrawConsoleMessages loop @0x59ad30]. 930-tick life, >= 186-tick

@@ -564,7 +564,7 @@ func test_message_feed_draws_and_expires() -> void:
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 		"A pushed triggered-text line lays out glyph quads through the real .fnt.")
 	await get_tree().process_frame
-	# [orig: Chat_AddDebugMessage 930-tick life] — the line is gone at push+930.
+	# [orig: Chat_AddMessageChannel2 930-tick life] — the line is gone at push+930.
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 		"The 930-tick life expires the line.")

@@ -135,7 +135,7 @@ void World::add_system(ISystem *sys) {
 // the host's player idle timers.
 // [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
 //  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2, the
-//  Server_UpdateEntityIdleTimers call @0x51D8D7]
+//  Server_UpdatePlayerBreathTimers call @0x51D8D7]
 void ServerIdleLegs::tick(World &world, const TickContext &ctx) {
     if (!ctx.is_authority || ctx.phase != TickPhase::Gameplay) return;
     const bool admitted = ctx.script_admitted.has_value()
@@ -164,7 +164,7 @@ void World::load_systems() {
 //  the seated test @0x4C24C7, the same-team skip @0x4C24DC..0x4C2501, the
 //  ten seat words @0x4C2507..0x4C251F, the refNum peer scan
 //  @0x4C2521..0x4C257E, the copy @0x4C258E..0x4C25C7, `test tick,3`
-//  @0x4C25CE and sub_459290 @0x459290 (`or [e+24h],40h; mov [e+3B8h],tick`)]
+//  @0x4C25CE and Entity_WakeContactSolve @0x459290 (`or [e+24h],40h; mov [e+3B8h],tick`)]
 static void claim_standing_vehicle(World &world, const Entity &body) {
     if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0u) return;
     Entity *vehicle = nullptr;
@@ -228,7 +228,7 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
 // runs the epilog cine instead (re-read here, after the walk).
 // [orig: Entity_UpdateAllEntities -- the walk @0x4C2426..0x4C2474, `cmp
 //  g_epilog_screen_active,0` @0x4C2624 (the Cinematic_EpilogUpdate tail
-//  @0x4C2634), `add dword_24C1948,esi` @0x4C2639]
+//  @0x4C2634), `add g_entity_update_counter,esi` @0x4C2639]
 static void finish_entity_update(World &world, const TickContext &ctx, devtools::ProfileLap &lap) {
     // Rebuild the pool-0/1 proximity tables once per tick, ahead of the pool-0
     // walk (the pool-2 statics table rebuilds only on its registry/instance
@@ -382,7 +382,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // it.
     // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission
     //  @0x561AF0 (read back @0x561E73); the death-event arm
-    //  EntityAI_ProcessInfantryStateMachine @0x458273]
+    //  EntityAI_ProcessAirStateMachine @0x458273]
     ai.is_in_session = rules.mp_session;
     if (ai.collision != nullptr)
         ai.collision->local_player = cached.local_player; // blink accumulation target

@@ -196,7 +196,7 @@ struct Connection {
 	// 81 at its default 20) kills the player; GameEvent_PlayerDeath reads the
 	// still-live value to select drowned event 26. A surfaced or dead-flagged
 	// sample clears it.
-	// [orig: playerSlot+460 in Server_UpdateEntityIdleTimers @0x50D770;
+	// [orig: playerSlot+460 in Server_UpdatePlayerBreathTimers @0x50D770;
 	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
 	uint32_t underwater_breath_samples = 0;
 

@@ -62,7 +62,7 @@ void entity_process_falling_death(
 		body->pos[1] = to_fixed(e.position.y);
 		body->pos[2] = to_fixed(e.position.z);
 		body->vel_x = m.vel_x;
-		body->vel_z = m.vel_y;
+		body->vel_y = m.vel_y;
 	}
 }
 

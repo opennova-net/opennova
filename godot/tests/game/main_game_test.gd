@@ -469,7 +469,7 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 func test_script_chat_lines_ride_the_chat_ring() -> void:
 	# WAC text/ptext/text# and the lose line post into the CHAT ring
 	# (Chat_AddMessageChannel1); the BMS triggered text and the console lines
-	# post into the SYSTEM ring (Chat_AddDebugMessage).
+	# post into the SYSTEM ring (Chat_AddMessageChannel2).
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([

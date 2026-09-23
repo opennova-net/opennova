@@ -265,7 +265,7 @@ void test_org1_dragged_corpse_takes_one_death_edge() {
 
 // R3-4: the edge's own legs. [orig: Entity_UpdateInfantryAI drowning 175
 // @0x4B9CF6..0x4B9D0E; unstaged hit callback @0x4B9CDB..0x4B9CF1 ->
-// Entity_HandleDamageTrigger @0x4073C8..0x4073EA; death tick @0x4B9D24..0x4B9D2F;
+// OrganicClass_HandleEvent @0x4073C8..0x4073EA; death tick @0x4B9D24..0x4B9D2F;
 // `and eax,0FFFFFF3Fh` @0x4B9D2A; Entity_CheckAndProcessDeath @0x4B9D4D]
 void test_org1_death_edge_legs() {
     {   // an unstaged death afloat: death_drown, the hit callback's alert, the
@@ -549,7 +549,7 @@ void test_org1_float_reads_this_ticks_eye() {
 // record, so while it still holds a round the callback's round legs replace
 // the generic clip with that round's (its section and approach quadrant)
 // and, on a numbered section, cut the body mid-walk.
-// [orig: Entity_UpdateInfantryAI @0x4B9CDB..0x4B9CF1; Entity_HandleDamageTrigger
+// [orig: Entity_UpdateInfantryAI @0x4B9CDB..0x4B9CF1; OrganicClass_HandleEvent
 // the round test @0x40740D, select @0x407483, the clone @0x40768A]
 void test_org1_edge_reads_the_recorded_round() {
     CHECK(death_quadrant_from_round(bam_heading_from_mission_yaw_deg(90.0), 10.0f, 0.0f) == 2);

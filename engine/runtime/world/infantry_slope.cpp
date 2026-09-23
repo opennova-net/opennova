@@ -115,7 +115,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         //  @0x41430D]
         int32_t p[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy), e.pos[2]};
         GroundClearance clearance = ground_clearance;
-        clearance.has_physics = e.has_physics;
+        clearance.has_occupant = e.has_occupant;
         clearance.use_dead = dead;
         const int32_t h = calc_average_ground_height(*terrain, p, 0, clearance);
         const int32_t ray_end = io::bam_sub(io::bam_add(e.pos[2], 0x4000), 0x20000);

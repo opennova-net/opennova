@@ -459,9 +459,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 													: world::VehicleRenderFamily::None;
 				// The brain machine class is keyed by ai_function through the class
 				// event-callback table (stricmp, 24-byte rows): CHel @0x8132a0 and
-				// the cpln thunk @0x8133a8 -> EntityAI_ProcessInfantryStateMachine
+				// the cpln thunk @0x8133a8 -> EntityAI_ProcessAirStateMachine
 				// @0x4581b0 (the air machine); cveh @0x813378, cbot @0x813390 and
-				// ctrn @0x8133c0 -> EntityAI_ProcessVehicleStateMachine @0x4583c0.
+				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
 				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
 				// @0x407dc0]

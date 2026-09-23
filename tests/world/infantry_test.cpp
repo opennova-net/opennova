@@ -15,7 +15,7 @@
 //   * gravity (org1 -416 + pos += 2*vel on even key ticks through the +0xAC
 //     quarter-step tail; org2 -208 + pos += vel every tick) to terminal
 //     -32768, landing snap + fall damage excess>>4 with the injectable scale
-//     [orig: dword_C6EAE4], the player jump (cooldown 32 / no auto-repeat / prone gate),
+//     [orig: wac_var_fallmps], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
@@ -5363,7 +5363,7 @@ int main() {
     // then the quarter-step tail keeps a quarter of it); landing + fall damage ----
     // [orig: Entity_UpdateInfantryAI gravity @0x4bf7bf, pos @0x4bf7ec, tail
     //  @0x4BFC65..0x4BFC86; damage when vel_z <= -1057*scale @0x4BF839, health -=
-    //  excess >> 4 @0x4BF848..0x4BF864 (dword_C6EAE4 = the fallmps named value)]
+    //  excess >> 4 @0x4BF848..0x4BF864 (wac_var_fallmps = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;

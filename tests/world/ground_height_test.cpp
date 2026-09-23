@@ -105,9 +105,9 @@ int main() {
         wf.has_water = true;
         wf.water_y = fx(50); // 3276800, well above the 417792 ground
         GroundClearance gcw{};
-        gcw.has_physics = true;
+        gcw.has_occupant = true;
         CHECK(calc_average_ground_height(wf, pos, 0x50000, gcw) == fx(50));
-        gcw.has_physics = false; // no physics -> no water clamp
+        gcw.has_occupant = false; // no physics -> no water clamp
         CHECK(calc_average_ground_height(wf, pos, 0x50000, gcw) == 417792);
 
         // invalid field -> INT32_MIN sentinel.

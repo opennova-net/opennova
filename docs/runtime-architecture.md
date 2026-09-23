@@ -203,7 +203,7 @@ session facts the tooling and the shell flow used to re-derive: retail's
 `is_in_session` as `rules.mp_session`, which a listen host, a dedicated host and
 a joiner set and single player never does. The in-session readers key on it,
 among them `AiSystem::is_in_session`, stamped from it per entity update, for the death
-event's in-session arm (`EntityAI_ProcessInfantryStateMachine @0x4581B0`,
+event's in-session arm (`EntityAI_ProcessAirStateMachine @0x4581B0`,
 `@0x458273`), the friendly-tag team mode (`HUD_DrawCrosshair @0x592640`,
 `@0x5926C0..0x5926D0`), the zoom floor outside a session
 (`Player_AdjustWeaponZoomLevel @0x4DBCC0`, `@0x4DBD0C`) and the unarmed UseGun

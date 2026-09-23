@@ -141,7 +141,7 @@ int main() {
         CHECK(first && second && heli);
         if (!first || !second || !heli) return 1;
         CHECK(first->inf.active && second->inf.active && !heli->inf.active);
-        CHECK(!first->has_physics && !second->has_physics && !heli->has_physics);
+        CHECK(!first->has_occupant && !second->has_occupant && !heli->has_occupant);
         CHECK(heli->brain.f[w::AiBrain::kCurState] == 0);
         if (medic_assets) {
             CHECK(first->inf.adm_id >= 0 && second->inf.adm_id >= 0);
@@ -176,7 +176,7 @@ int main() {
         // entity update's pool-0 walk wakes its contact solve every fourth
         // tick. [orig: HeliLift_SpawnFlyover @0x452980/@0x4529BD (the +0x28
         //  stores); Entity_UpdateAllEntities -- the Entity_FindChildByDefType
-        //  call @0x4C2484, `test tick,3` @0x4C25CE -> sub_459290 @0x459290]
+        //  call @0x4C2484, `test tick,3` @0x4C25CE -> Entity_WakeContactSolve @0x459290]
         const w::Entity *hull = rig.world.registry.get(slot.helicopter);
         CHECK(hull && ((hull->flags | hull->engine_flags) & 0x40u) != 0);
         CHECK(hull && hull->veh.contact_wake_tick == ((rig.world.logic_tick - 1u) & ~3u));

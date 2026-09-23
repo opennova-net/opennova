@@ -63,7 +63,7 @@ void test_ground_rows_read_the_live_hull_words() {
     AiEntity &e = *hull.ai;
     e.health = 100; // the stale mirrors say alive and parked
     e.vel_x = 0;
-    e.vel_z = 0;
+    e.vel_y = 0;
     hull.w.ai.is_authority = true;
     AiThinkCtx ctx = hull.ctx();
 
@@ -209,8 +209,8 @@ void test_part_anim_rate_uses_the_single_precision_tick() {
 }
 
 // The class dispatchers' update event writes no body-anim selection onto the
-// hull: neither machine has one [orig: EntityAI_ProcessVehicleStateMachine
-// @0x4583C0 and EntityAI_ProcessInfantryStateMachine @0x4581B0, whose event-0
+// hull: neither machine has one [orig: EntityAI_ProcessGroundStateMachine
+// @0x4583C0 and EntityAI_ProcessAirStateMachine @0x4581B0, whose event-0
 // legs end in the +0x2AC re-arm @0x458568 / @0x458363 and the commit].
 void test_class_update_leaves_the_body_anim_alone() {
     Entity seed;
@@ -224,9 +224,9 @@ void test_class_update_leaves_the_body_anim_alone() {
     e.brain.f[AiBrain::kOutSpeed] = 0x10000; // moving
     e.brain.f[AiBrain::kAlert] = e.brain.f[AiBrain::kPrevAlert] = 2;
     hull.record().body_anim_slot = -1;
-    hull.w.ai.process_vehicle_state_machine(e, hull.w, 0);
+    hull.w.ai.process_ground_state_machine(e, hull.w, 0);
     CHECK(hull.record().body_anim_slot == -1);
-    hull.w.ai.process_infantry_state_machine(e, hull.w, 0);
+    hull.w.ai.process_air_state_machine(e, hull.w, 0);
     CHECK(hull.record().body_anim_slot == -1);
 }
 
@@ -608,8 +608,8 @@ void test_ground_death_kills_children_on_the_hit_record() {
 // and ctrn the vehicle machine. An item with no brain-class row (here: no
 // traits row at all) runs none, whatever brain it carries.
 // [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132A0 ->
-//  EntityAI_ProcessInfantryStateMachine @0x4581B0, cpln @0x8133A8 -> jmp
-//  @0x462120; cveh @0x813378 -> EntityAI_ProcessVehicleStateMachine @0x4583C0,
+//  EntityAI_ProcessAirStateMachine @0x4581B0, cpln @0x8133A8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessGroundStateMachine @0x4583C0,
 //  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140]
 void test_class_event_needs_a_brain_class_row() {
     auto owned = std::make_unique<World>();

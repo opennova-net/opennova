@@ -5,8 +5,8 @@
 // table are ported. See docs/world/world-wac-ai-re.md for the full RE map.
 //
 // IDA anchors (Jointops.exe, imagebase 0x400000):
-//   EntityAI_ProcessInfantryStateMachine @0x4581b0   (the AIR-class dispatcher: CHel/cpln)
-//   EntityAI_ProcessVehicleStateMachine  @0x4583c0   (the ground dispatcher: cveh/cbot/ctrn)
+//   EntityAI_ProcessAirStateMachine @0x4581b0   (the AIR-class dispatcher: CHel/cpln)
+//   EntityAI_ProcessGroundStateMachine  @0x4583c0   (the ground dispatcher: cveh/cbot/ctrn)
 //   AI_BeginUpdate                        @0x457b40   (movement controller row 4, phase limit 496)
 //   AIEvent_QueueEntry                    @0x455da0   (1024 x 5-dword ring)
 //   AIEvent_ProcessTimedEntries           @0x455df0   (timer -= 0.016/frame)
@@ -158,7 +158,7 @@ struct AiBrain {
         // solve. Layout (both): {hdist, ?, dist, yaw, pitch, ?} — yaw at +12/pitch
         // at +16 within the block; the CTRL-global writers read the yaw/pitch high
         // words [orig: staging @0x456D7B brain+0x1E4..0x1F8; active copy @0x456DDC
-        // brain+0x1CC..0x1E0; AI_GetSuspensionFirePoint reads brain[118]].
+        // brain+0x1CC..0x1E0; AI_IsTargetInSight reads brain[118]].
         kActiveBlock = 115,  // brain+0x1CC..0x1E0 (yaw = f[118], pitch = f[119])
         kActiveYaw = 118,    // brain+0x1D8 — the slewed live turret yaw
         kActivePitch = 119,  // brain+0x1DC
@@ -446,7 +446,7 @@ struct AiEntity {
     AiBrain brain;
     AiSlot slot;
     AiProfile profile;
-    bool has_physics = true;   // entity+368 present
+    bool has_occupant = true;  // entity+0x170 (the hull's first claimant) present
     int32_t pos[3] = {};       // entity+4/+8/+12 (position X/Y/Z, 32-bit fixed)
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20
@@ -481,9 +481,9 @@ struct AiEntity {
     int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
     int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
 
-    int32_t vel_x = 0;         // entity+152 (velocityX)
-    int32_t vel_z = 0;         // entity+160 (slideDecay, the vertical velocity); the retail
-                               // +152/+156/+160 triple is InfantryState::vel[3]
+    int32_t vel_x = 0;         // entity+152 (0x98, velocity X)
+    int32_t vel_y = 0;         // entity+156 (0x9C, velocity Y), a hull's mirror; an
+                               // organic's +152/+156/+160 triple is InfantryState::vel[3]
     int16_t health = 100;      // entity+286 (<=0 -> death path)
     int32_t net_id = 0;        // entity+124 (RelationMatrix_SetBitA key / DcbId)
     uint16_t relmat_id = 0;    // entity+284 (RelationMatrix_SetBitB key)
@@ -660,7 +660,7 @@ struct GroundClearance {
     int32_t dead_offset = 0;   // [orig: brain+0x30] added when dead
     bool use_dead = false;     // [orig: (Flags & 2 || health <= 0) && entity+0x34,
                                //  @0x457337..0x45734B]
-    bool has_physics = false;  // [orig: entity+0x170 != 0 @0x45731E] enables the
+    bool has_occupant = false;  // [orig: entity+0x170 != 0 @0x45731E] enables the
                                //  worldY water clamp
 };
 
@@ -668,7 +668,7 @@ struct GroundClearance {
 // 16.16 fixed. `pos` is the entity X/Y/Z (16.16); `sample_radius` is 16.16 (the AI
 // movers pass 0x50000 = 5.0). Samples the bilinear terrain column at center + N/S/E/W:
 //   result = (N + S + E + W + 2*(C + 2*max)) / 10, clamped >= C, then the worldY water
-//   clamp (when has_physics) and the def alive/dead offset.
+//   clamp (when has_occupant) and the def alive/dead offset.
 // Tracked deviation: the original per-tap sampler is the hi-res down-raycast
 // raycast_entity_collision -> Terrain_RaycastHeightmapHiRes_0 @0x60e710; we use the
 // renderer-accurate bilinear column height (the near-vertical raycast's result),
@@ -746,7 +746,7 @@ public:
     // projectile and explosion legs, so the pool-0 walk of the same tick sees
     // the stamps. [orig: the damage callbacks inside Weapon_UpdateAllProjectiles
     //  and Projectile_ProcessExplosionQueue (Entity_UpdateAllEntities @0x4C223A /
-    //  @0x4C223F): Entity_HandleDamageTrigger @0x4073c8..0x4073ea,
+    //  @0x4C223F): OrganicClass_HandleEvent @0x4073c8..0x4073ea,
     //  Entity_OnDamageReceived @0x4af859..0x4af878,
     //  Projectile_ProcessDamageOnTarget @0x4e7fb0]
     void apply_round_hits(World &world);
@@ -822,7 +822,7 @@ public:
     // per loaded .adm (infantry.h AnimVariantRings). Rewound with the brains.
     AnimVariantRings anim_rings;
     // (The fall-damage tolerance is the WAC named value World::wac_values.fallmps
-    //  [orig: dword_C6EAE4]; the landing leg in infantry.cpp reads it there.)
+    //  [orig: wac_var_fallmps]; the landing leg in infantry.cpp reads it there.)
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // diagnostic trace of the applied mover side effects
 
@@ -996,17 +996,17 @@ public:
     // cbot/ctrn thunks @0x462130/@0x462140 the vehicle-class one. Both share one
     // body; they differ only in the alert leg's state pair, the client tick and
     // transition gates, and the kill/damage notification's channel word.
-    // [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event: 0=update,
+    // [orig: EntityAI_ProcessAirStateMachine @0x4581b0] event: 0=update,
     // 1=kill/damage notification, 4=death.
     // (IDB name; it is the AIR-class brain machine: alert -> pend 10 unless cur 14,
     // client ticks cur 13/15, client commits pend 7 or 13..15, notification channel 9.)
-    void process_infantry_state_machine(AiEntity &e, World &world, int event);
-    // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] the ground/boat/train
+    void process_air_state_machine(AiEntity &e, World &world, int event);
+    // [orig: EntityAI_ProcessGroundStateMachine @0x4583c0] the ground/boat/train
     // machine: alert -> pend 18 unless cur 22 (@0x458442..0x458448), client ticks
     // cur 21/23 (@0x458545..0x45854d), client commits pend 16 or 21..23
     // (@0x458579..0x458586), notification channel word 0 (@0x45851a, bx zeroed
     // @0x4583cd).
-    void process_vehicle_state_machine(AiEntity &e, World &world, int event);
+    void process_ground_state_machine(AiEntity &e, World &world, int event);
 
     // The shared pending-state transition (exit current, enter pending, commit).
     void apply_transition(AiEntity &e, World &world);
@@ -1016,7 +1016,7 @@ public:
     // out-speed (kOutSpeed). Applies the per-advance visited marks that BMS
     // SingleAtWaypoint/GroupAtWaypoint consume, and retains a diagnostic trace.
     int update_waypoint_movement(AiEntity &e, World &world);
-	int update_aircraft_waypoint_movement(AiEntity &e, World &world);
+	int update_movement_target(AiEntity &e, World &world);
 	int32_t aircraft_ground_height(World &world, AiEntity &e, int32_t radius);
 	void enter_aircraft_combat(AiEntity &e, World &world);
 	void enter_aircraft_evade(AiEntity &e, World &world);

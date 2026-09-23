@@ -788,7 +788,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		bool set_airborne = false;
 		if (!clear_airborne && world.tables.terrain != nullptr && world.tables.terrain->valid()) {
 			world::GroundClearance clearance = world.ai.ground_clearance;
-			clearance.has_physics = ae->has_physics;
+			clearance.has_occupant = ae->has_occupant;
 			clearance.use_dead = ent->health <= 0;
 			const int32_t ground = world::calc_average_ground_height(
 					*world.tables.terrain, ae->pos, 0, clearance);

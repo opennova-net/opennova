@@ -1370,7 +1370,7 @@ void JoinerRole::apply_authoritative_health() {
 					local_ai->body_pitch = 0;
 					local_ai->health = health;
 					local_ai->vel_x = 0;
-					local_ai->vel_z = 0;
+					local_ai->vel_y = 0;
 					local_ai->net_smooth_target[0] = self->x;
 					local_ai->net_smooth_target[1] = self->y;
 					local_ai->net_smooth_target[2] = self->z;

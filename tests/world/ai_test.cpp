@@ -52,7 +52,7 @@ void test_vehicle_death_rows() {
         AiEntity &e = *sys.at(idx);
         e.team = 1;
         e.health = 0;
-        e.vel_x = 100; e.vel_z = 0; // slow (< 1057): the enter queues the destroy event
+        e.vel_x = 100; e.vel_y = 0; // slow (< 1057): the enter queues the destroy event
         e.brain.f[AiBrain::kCurState] = 21;
 
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
@@ -101,7 +101,7 @@ void test_vehicle_death_rows() {
         int idx = sys.attach(EntityHandle::make(1, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = 21;
-        e.vel_x = 5000; e.vel_z = 0;             // fast
+        e.vel_x = 5000; e.vel_y = 0;             // fast
         e.pos[0] = 100000;                        // far from the (0-init) death pose
         e.net_saved_live_pose[0] = 0;
         e.brain.f[AiBrain::kWorkPitch] = 7;
@@ -737,7 +737,7 @@ struct DeathTransitionRootSource final : IRootMotionSource {
 // then the type-20 event), and single player, the in-process listen server,
 // stays outside the session.
 // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission @0x561AF0
-//  leaves it clear (read back @0x561E73); EntityAI_ProcessInfantryStateMachine
+//  leaves it clear (read back @0x561E73); EntityAI_ProcessAirStateMachine
 //  @0x458273 (the death-event arm)]
 static void test_entity_update_stamps_the_session_fact() {
     auto heap = std::make_unique<World>();
@@ -751,9 +751,9 @@ static void test_entity_update_stamps_the_session_fact() {
     AiEntity &e = *w.ai.at(w.ai.attach(EntityHandle::make(0, 0)));
     e.health = 100;
     e.vel_x = 2000;
-    e.vel_z = 0;
+    e.vel_y = 0;
     e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
-    w.ai.process_infantry_state_machine(e, w, 4);
+    w.ai.process_air_state_machine(e, w, 4);
     CHECK(e.health == 0);
     bool saw_20 = false;
     for (int i = 0; i < w.ai.events.count(); ++i)
@@ -1179,7 +1179,7 @@ static void test_damage_hit_sets_retail_alert_state() {
 
     // The sim/AI seam carries the already-processed hit. Retail's damage callback
     // writes these stamps inline before the next infantry update.
-    // [orig: Entity_HandleDamageTrigger @0x4073db..0x4073ea;
+    // [orig: OrganicClass_HandleEvent @0x4073db..0x4073ea;
     //  Entity_OnDamageReceived @0x4af85b..0x4af878]
     w->round_sim.hits.push_back(RoundHit{npc_h, shooter_h, 10, 1, 1});
 
@@ -2721,8 +2721,8 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 }
 
 // The ground/boat/train brain machine differs from the air machine in three gates
-// and the spawn channel word [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0
-// vs EntityAI_ProcessInfantryStateMachine @0x4581b0]:
+// and the spawn channel word [orig: EntityAI_ProcessGroundStateMachine @0x4583c0
+// vs EntityAI_ProcessAirStateMachine @0x4581b0]:
 //  - the alert edge pends GROUND_EVADE (18) unless cur == GROUND_PRETTY (22)
 //    (@0x458442..0x458448; the air machine pends 10 unless 14 @0x458239..0x45823b);
 //  - a client ticks only cur 21/23 (@0x458545..0x45854d; air 13/15);
@@ -2753,7 +2753,7 @@ static void test_vehicle_class_state_machine_gates() {
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
-	sys.process_vehicle_state_machine(e, w, 2);
+	sys.process_ground_state_machine(e, w, 2);
 	CHECK(e.brain.f[AiBrain::kPrevAlert] == 1);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
 	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundFollowWp);
@@ -2761,7 +2761,7 @@ static void test_vehicle_class_state_machine_gates() {
 	w.registry.get(crew)->flags |= kEntityFlagPlayer;
 	w.registry.get(hull)->primary_occupant = crew;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
-	sys.process_infantry_state_machine(e, w, 2);
+	sys.process_air_state_machine(e, w, 2);
 	CHECK(e.brain.f[AiBrain::kPrevAlert] == 1);
 	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundFollowWp);
 	w.registry.get(crew)->flags &= ~kEntityFlagPlayer; // an NPC crew from here on
@@ -2770,27 +2770,27 @@ static void test_vehicle_class_state_machine_gates() {
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundEvade);
 	// ... and never out of GROUND_PRETTY.
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
 	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundPretty);
 	// The air machine, given the same edge from GROUND_PRETTY, pends HELO_EVADE.
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
 	sys.is_authority = false; // hold the commit so the pend is observable
-	sys.process_infantry_state_machine(e, w, 0);
+	sys.process_air_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundPretty); // no alert leg on a client
 	sys.is_authority = true;
 	e.brain.f[AiBrain::kPrevAlert] = 0;
 	e.brain.f[AiBrain::kAlert] = 1;
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
-	sys.process_infantry_state_machine(e, w, 0);
+	sys.process_air_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiHeloEvade);
 
 	// Client tick gate: GROUND_DYING (21) ticks under the vehicle machine — the
@@ -2800,27 +2800,27 @@ static void test_vehicle_class_state_machine_gates() {
 	e.brain.f[AiBrain::kPrevAlert] = e.brain.f[AiBrain::kAlert];
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = 21;
 	e.vel_x = 0;
-	e.vel_z = 0;
+	e.vel_y = 0;
 	const int queued_before = sys.events.count();
-	sys.process_infantry_state_machine(e, w, 0);
+	sys.process_air_state_machine(e, w, 0);
 	CHECK(sys.events.count() == queued_before);
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(sys.events.count() == queued_before + 1);
 
 	// Client commit gate: 17 holds, 16 and 22 commit; the air machine holds 16.
 	e.brain.f[AiBrain::kCurState] = kAiGroundFormation;
 	e.brain.f[AiBrain::kPendState] = kAiGroundCombat;
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation);
 	e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
 	e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
-	sys.process_vehicle_state_machine(e, w, 0);
+	sys.process_ground_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundPretty);
 	e.brain.f[AiBrain::kCurState] = kAiGroundFormation;
 	e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
-	sys.process_infantry_state_machine(e, w, 0);
+	sys.process_air_state_machine(e, w, 0);
 	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation);
 
 	// Spawn event channel word: 0 for the vehicle machine, 9 for the air one.
@@ -2828,12 +2828,12 @@ static void test_vehicle_class_state_machine_gates() {
 	e.brain.f[AiBrain::kPrevAlert] = e.brain.f[AiBrain::kAlert];
 	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
 	const int n0 = sys.events.count();
-	sys.process_vehicle_state_machine(e, w, 1);
+	sys.process_ground_state_machine(e, w, 1);
 	CHECK(sys.events.count() == n0 + 1);
 	CHECK(sys.events.at(n0).f[0] == 1);
 	CHECK((sys.events.at(n0).f[1] & 0xffff) == 0);
 	CHECK((sys.events.at(n0).f[1] >> 16) == idx);
-	sys.process_infantry_state_machine(e, w, 1);
+	sys.process_air_state_machine(e, w, 1);
 	CHECK(sys.events.count() == n0 + 2);
 	CHECK((sys.events.at(n0 + 1).f[1] & 0xffff) == 9);
 }
@@ -2956,7 +2956,7 @@ struct AircraftRig {
 };
 } // namespace
 
-// The processed-tick fire arc [orig: Entity_ProcessInfantryWeaponFire @0x471710]:
+// The processed-tick fire arc [orig: AI_TickState_AircraftCombat @0x471710]:
 // the limit is the profile's secondary FOV byte read SIGNED (movsx @0x471736),
 // OR 1 at the head, OR 2 at the gate, sar 1, compared UNSIGNED (ja @0x472481)
 // against the folded bearing delta. Out of arc jumps straight to the epilogue
@@ -3094,8 +3094,8 @@ static void test_aircraft_combat_mover_pins() {
 // transition, and every visit subtracts one at its tail — a brain thinks once
 // every brain[7] visits, on the visit after any transition, on clients too.
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0 gate @0x4B8E1B / decrement @0x4B8EA0;
-//  EntityAI_ProcessVehicleStateMachine @0x458568 / @0x4585B4;
-//  EntityAI_ProcessInfantryStateMachine @0x458363 / @0x4583B0]
+//  EntityAI_ProcessGroundStateMachine @0x458568 / @0x4585B4;
+//  EntityAI_ProcessAirStateMachine @0x458363 / @0x4583B0]
 void test_vehicle_brain_think_countdown() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -3321,7 +3321,7 @@ int main() {
         e.brain.f[AiBrain::kStep] = 999;
         int32_t tick_before = e.brain.f[AiBrain::kTick];
 
-        sys.process_infantry_state_machine(e, w, 0);
+        sys.process_air_state_machine(e, w, 0);
 
         CHECK(e.brain.f[AiBrain::kTick] == tick_before + 1); // ++ each update
         CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation); // committed
@@ -3474,7 +3474,7 @@ int main() {
         e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6
         e.brain.f[AiBrain::kPendState] = kAiHeloLand;
         sys.is_authority = true;
-        sys.process_infantry_state_machine(e, w, 0);
+        sys.process_air_state_machine(e, w, 0);
 		CHECK(e.brain.f[AiBrain::kCurState] == kAiHeloLand); // landing safely handles an absent entity
 	}
 
@@ -3502,7 +3502,7 @@ int main() {
         AiEntity &e = *sys.at(idx);
         // State 20's row is all no-ops. Moving or stopped, alert or not, the
         // dispatcher's update leg writes no body-anim slot [orig:
-        // EntityAI_ProcessInfantryStateMachine @0x4581B0, the event-0 leg ends in
+        // EntityAI_ProcessAirStateMachine @0x4581B0, the event-0 leg ends in
         // the +0x2AC re-arm @0x458363 and the commit].
         e.brain.f[AiBrain::kCurState] = kAiGroundReturnToBase;  // 20
         e.brain.f[AiBrain::kPendState] = kAiGroundReturnToBase;
@@ -3510,7 +3510,7 @@ int main() {
             for (int32_t alert : {0, 2}) {
                 e.brain.f[AiBrain::kOutSpeed] = speed;
                 e.brain.f[AiBrain::kAlert] = alert;
-                sys.process_infantry_state_machine(e, w, 0);
+                sys.process_air_state_machine(e, w, 0);
                 CHECK(w.registry.get(h)->body_anim_slot == -1);
             }
         }
@@ -3698,14 +3698,14 @@ int main() {
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
         e.health = 0;
-        e.vel_x = 2000; e.vel_z = 0;  // |v| = 2000 >= 1057 -> crash death (3)
+        e.vel_x = 2000; e.vel_y = 0;  // |v| = 2000 >= 1057 -> crash death (3)
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundFollowWp).tick(ctx);
         CHECK(sys.events.count() == 1);
         CHECK(sys.events.at(0).type() == 3);
         CHECK(sys.events.at(0).entity_index() == idx);
 
-        e.vel_x = 100; e.vel_z = 0;   // |v| = 100 < 1057 -> still death (4)
+        e.vel_x = 100; e.vel_y = 0;   // |v| = 100 < 1057 -> still death (4)
         sys.row(kAiGroundFollowWp).tick(ctx);
         CHECK(sys.events.count() == 2);
         CHECK(sys.events.at(1).type() == 4);
@@ -4165,9 +4165,9 @@ int main() {
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.health = 100;                                    // still "alive" coming in
-        e.vel_x = 2000; e.vel_z = 0;                       // crash speed (>= 1057)
+        e.vel_x = 2000; e.vel_y = 0;                       // crash speed (>= 1057)
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp; // tick = h_ground_followwp_tick
-        sys.process_infantry_state_machine(e, w, 4);
+        sys.process_air_state_machine(e, w, 4);
         CHECK(e.health == 0);                              // zeroed before the tick [orig @0x45827f]
         bool saw_death = false, saw_20 = false;            // death tick (3) + SM's type-20 event
         for (int i = 0; i < sys.events.count(); ++i) {
@@ -4347,7 +4347,7 @@ int main() {
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade;
         e.health = 0;
-        e.vel_x = 2000; e.vel_z = 0;          // >= 1057 -> crash death (3)
+        e.vel_x = 2000; e.vel_y = 0;          // >= 1057 -> crash death (3)
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundEvade).tick(ctx);
         CHECK(sys.events.count() == 1 && sys.events.at(0).type() == 3);
@@ -4550,7 +4550,7 @@ int main() {
         CHECK((w.registry.get(npc_h)->engine_flags & 0x4000u) != 0);
         // The kill staged the bullet death-anim selection on the victim at damage
         // time: torso group (the bone stand-in, D-AI-9) = 184..187 by quadrant, and
-        // the victim's group went alert red. [orig: Entity_HandleDamageTrigger
+        // the victim's group went alert red. [orig: OrganicClass_HandleEvent
         // @0x407478/@0x4073ea; world-wac-ai-re §19]
         const int sel = w.registry.get(player_h)->death_anim_state;
         CHECK(sel >= 184 && sel <= 187);

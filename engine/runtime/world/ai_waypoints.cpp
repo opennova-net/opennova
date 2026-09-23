@@ -312,7 +312,7 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
         if (iabs32(io::bam_sub(io::bam_sub(heading, ang), 0x7FFFFF80)) > 357913920) continue;
         // The brake factor ((id + (counter << 8)) & 0x7FFF) + 0x4000 — keyed
-        // off DcbId and the entity-update counter (dword_24C1948)
+        // off DcbId and the entity-update counter (g_entity_update_counter)
         // [orig: @0x48bf17-0x48bf26; the counter reads in
         //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
         //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
@@ -786,7 +786,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 	// each think (the class init's 0 until an order lands) and the next mover
 	// visit promotes 0 -> 14 -> 7 again: an AI helicopter thinks on every visit,
 	// like the ground legs' 22 -> 16 hand-back [orig:
-	// EntityAI_ProcessInfantryStateMachine @0x458384..0x4583B0].
+	// EntityAI_ProcessAirStateMachine @0x458384..0x4583B0].
 	m.stuck_ticks = 0;
 	if (b.f[AiBrain::kCurState] == 14)
 		b.f[AiBrain::kCurState] = 7;

@@ -62,7 +62,7 @@ void mirror_pose(World &world, Entity &e) {
 		ai->health = e.health;
 		ai->team = e.team;
 		ai->vel_x = e.veh.vel_x;
-		ai->vel_z = e.veh.vel_y;
+		ai->vel_y = e.veh.vel_y;
 	}
 }
 } // namespace
@@ -603,7 +603,7 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 			child_ai->pitch = pitch;
 			child_ai->roll = roll;
 			child_ai->vel_x = child->veh.vel_x; // entity+152
-			child_ai->vel_z = child->veh.vel_y; // entity+156
+			child_ai->vel_y = child->veh.vel_y; // entity+156
 		}
 	}
 }

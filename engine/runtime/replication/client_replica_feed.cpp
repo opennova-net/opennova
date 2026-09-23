@@ -3,7 +3,7 @@
 // a canned "Canned Msg" sentence and posts to the on-screen feed
 // [orig: NapiNPClientMsg_GameEvent -> NetPacket_HandleGameEvent @0x426270 ->
 //  HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60 ->
-//  Chat_AddDebugMessage @0x4987F0].
+//  Chat_AddMessageChannel2 @0x4987F0].
 //
 // This TU folds the WIRE half only: the record, its witnessed classification,
 // and the two conventions a consumer cannot recover on its own —

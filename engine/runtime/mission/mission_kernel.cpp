@@ -832,7 +832,7 @@ void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t c
 //  EventTrigger_UpdateAllWithFlag4 call @0x522663..0x52266C;
 //  Game_RestartRoundSP @0x5263A0..0x5263AE, whose first call
 //  Game_DestroyAllEntitiesAndReset @0x523604 enters
-//  CAIGroup_HasGuardTaskFromIndex2 (the mission reset, an IDB misnomer), whose
+//  Mission_ResetBmsState (the mission reset), whose
 //  EventSystem_FreeAll call @0x40DBEF zeroes the count @0x453266]
 void MissionKernel::run_post_mission_pass(bool is_authority) {
 	for (int pool = 0; pool <= 2; ++pool) {

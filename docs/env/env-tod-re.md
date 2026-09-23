@@ -421,7 +421,7 @@ path). Seconds multiply by 62 (`imul 62`; 0 -> 1 tick); a timed step is
 
 | WAC | Handler | Writes |
 |---|---|---|
-| `rain(pct, s)` / `snow(pct, s)` | `WacCmd_Rain @ 0x4edf60` / `WacCmd_Snow @ 0x4edfd0` (ex `sub_5DE8E0`-family) | `Env_RainPctTarget = min((pct << 16) / 100, 0x10000)`, `Env_RainPctStep` = the timed step, `Env_PrecipitationKind @ 0x2c059d0` = 0 / 1 |
+| `rain(pct, s)` / `snow(pct, s)` | `WacCmd_Rain @ 0x4edf60` / `WacCmd_Snow @ 0x4edfd0` (ex `Env_SetPrecipitationKind`-family) | `Env_RainPctTarget = min((pct << 16) / 100, 0x10000)`, `Env_RainPctStep` = the timed step, `Env_PrecipitationKind @ 0x2c059d0` = 0 / 1 |
 | `overcast(pct, s)` | `WacCmd_Overcast @ 0x4ee040` | the same on `Env_OvercastBlendTarget @ 0x26c6898` / step `@ 0x26c68a0` |
 | `fogdist(d)` | `WacCmd_FogDist @ 0x4ee100` | `Env_FogDistTarget = clamp(d << 16, 2 m, Env_FogDistReference)`, `Env_FogDistAccelClamp = |target - current|` |
 | `movefog(d, s)` | `WacCmd_MoveFog @ 0x4ee0a0` | the same target, the timed step as the accel clamp |
@@ -1016,7 +1016,7 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   the DuDv/normal map — per pixel from the intensity byte,
   `R = wrap8(2·satsub8(c − c_up) + 0x80)`, `G` the same against `c_left`, `B = 0xFF`,
   `A = 0` (the MMX `psubsb/paddsb/paddb 0x008080FF` chain `@ 0x5c07c2..0x5c087d`).
-  Both textures upload every frame. The animation counter is `dword_24C1948` (the read
+  Both textures upload every frame. The animation counter is `g_entity_update_counter` (the read
   `@0x5C0366`), the ENTITY-UPDATE counter, not a render frame counter: its one writer is
   the tail of a non-epilog `Entity_UpdateAllEntities @0x4C2100` (`@0x4C2639`), so the noise
   and the wave phase advance once per entity update, freeze with it and never run faster

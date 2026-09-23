@@ -1559,7 +1559,7 @@ void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
 // busted or spawn-point vehicle keeps its team but is still woken.
 // [orig: Entity_UpdateAllEntities -- Entity_FindChildByDefType @0x4C2484,
 //  the attrib/Flags gates @0x4C2494..0x4C24C1, the seated test @0x4C24C7,
-//  the team copy @0x4C259E..0x4C25A4, `test tick,3` @0x4C25CE -> sub_459290
+//  the team copy @0x4C259E..0x4C25A4, `test tick,3` @0x4C25CE -> Entity_WakeContactSolve
 //  @0x459290]
 void test_seated_body_claims_its_vehicle() {
     for (const bool spawn_point : {false, true}) {
@@ -1727,7 +1727,7 @@ void test_host_crewed_helicopter_rotor_turns() {
 }
 
 // The current-state drive stamp must not consume the pending death callback.
-// [orig: Entity_UpdateVehiclePhysics @0x48AF00; EntityAI_ProcessInfantryStateMachine @0x4581B0]
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00; EntityAI_ProcessAirStateMachine @0x4581B0]
 void test_vehicle_pending_death_survives_drive_tick() {
 	for (const auto family : { VehicleFamily::Ground, VehicleFamily::Watercraft }) {
 		for (bool occupied : { false, true }) {

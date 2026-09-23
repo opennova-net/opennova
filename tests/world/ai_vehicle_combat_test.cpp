@@ -422,13 +422,13 @@ static void test_ateam_lock_replays_the_saved_pose() {
 }
 
 // R2-4: the chase. A planar 16.16 distance against the approach cap; inside
-// it the give-up timer rests only while AI_GetSuspensionFirePoint validates
+// it the give-up timer rests only while AI_IsTargetInSight validates
 // the target (a ridge in the way keeps it running); closer than min_chase
 // the speed matches the target (its SM brain's speed word, else its planar
 // velocity), from min_chase on it is the combat speed; the tail zeroes the
 // work X/Y.
 // [orig: @0x473ABE..0x473C06: `cmp eax,[ecx+4Ch]` @0x473AF3, `cmp
-//  eax,[ebp+0BCh]` @0x473B29, AI_GetSuspensionFirePoint @0x473B36, `cmp
+//  eax,[ebp+0BCh]` @0x473B29, AI_IsTargetInSight @0x473B36, `cmp
 //  edx,[ecx+0B8h]` @0x473B53, brain+0x220 @0x473B72, |vel xy|
 //  @0x473B83..0x473BCE; tail @0x473C14..0x473C50]
 static void test_chase_matches_the_target_inside_min_chase() {
@@ -478,7 +478,7 @@ static void test_chase_matches_the_target_inside_min_chase() {
 // AIEntity_TryAcquireTarget, so a rescan that finds nothing clears brain[38],
 // AiSlot[3] and the refcount there too. The tick still bears on the old
 // pointer (the flee heading here) and the processed fire has no solver target.
-// [orig: Entity_ProcessInfantryWeaponFire @0x471710: TryAcquireTarget call
+// [orig: AI_TickState_AircraftCombat @0x471710: TryAcquireTarget call
 //  @0x472349, `test eax,eax; jz` @0x472351..0x472355, flee heading
 //  `lea ecx,[ebx+7FFFFF80h]` @0x4723DA]
 static void test_aircraft_failed_rescan_drops_the_target() {

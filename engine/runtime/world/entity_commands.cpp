@@ -186,11 +186,11 @@ void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
 // machine, cveh and the cbot/ctrn thunks to the vehicle machine. Every other
 // row's callback is another class's, so an item with no brain-class row (no
 // traits row, or an ai_function outside those five) runs no machine. A null
-// brain returns before any work [orig: EntityAI_ProcessVehicleStateMachine
+// brain returns before any work [orig: EntityAI_ProcessGroundStateMachine
 // @0x4583CA..0x4583D1].
 // [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132a0 ->
-//  EntityAI_ProcessInfantryStateMachine @0x4581B0, cpln @0x8133a8 -> jmp
-//  @0x462120; cveh @0x813378 -> EntityAI_ProcessVehicleStateMachine @0x4583C0,
+//  EntityAI_ProcessAirStateMachine @0x4581B0, cpln @0x8133a8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessGroundStateMachine @0x4583C0,
 //  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140; resolved
 //  by EntityDef_InitAllCallbacks @0x4a5aae]
 void run_brain_class_event(World &world, const Entity &e, int event) {
@@ -199,9 +199,9 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
     const VehicleTraits *vt = world.vehicles.traits.get(e.item_id);
     if (vt == nullptr || vt->brain_class == VehicleBrainClass::Unset) return;
     if (vt->brain_class == VehicleBrainClass::Ground)
-        world.ai.process_vehicle_state_machine(*ae, world, event);
+        world.ai.process_ground_state_machine(*ae, world, event);
     else
-        world.ai.process_infantry_state_machine(*ae, world, event);
+        world.ai.process_air_state_machine(*ae, world, event);
 }
 
 } // namespace
@@ -210,7 +210,7 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 // reading the global hit record as the kill left it: WAC killSSN zeroed it,
 // while the BMS kills cleared only its damage word (and a KillSingle pool-0
 // row or a KillGroup row its owner), so their callbacks still see the last
-// recorded round. [orig: Entity_ResetWeaponState @0x4F1EC7..0x4F1ED2;
+// recorded round. [orig: WacCmd_KillSsn @0x4F1EC7..0x4F1ED2;
 // Entity_KillByNetId @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3,
 // phase 4); Entity_KillAllByNetId @0x43C936..0x43C93F]
 void hit_record_class_event(World &world, Entity &e, int phase) {
@@ -221,7 +221,7 @@ void hit_record_class_event(World &world, Entity &e, int phase) {
             // org0/org1: the phase-1 arm puts the victim and its trigger group
             // on red alert, then runs the round legs while the record holds a
             // round. Phase 4 only zeroes the health word here.
-            // [orig: Entity_HandleDamageTrigger @0x4073BF..0x4073EA, the round
+            // [orig: OrganicClass_HandleEvent @0x4073BF..0x4073EA, the round
             //  test @0x40740D; phase-4 arm @0x40733F..0x407358]
             if (phase != 1) return;
             if (AiEntity *ae = world.ai.for_handle(e.handle))
@@ -300,7 +300,7 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
 
 bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     // The WAC killSSN handler (the IDB name is a misnomer).
-    // [orig: Entity_ResetWeaponState @0x4F1E40 — the
+    // [orig: WacCmd_KillSsn @0x4F1E40 — the
     //  ItemTypeIndex gate @0x4F1E89, the hit record cleared @0x4F1E8F..0x4F1E99,
     //  Health 0 @0x4F1EA4, lastAttacker 0 @0x4F1EAD, a person's (def+0x5C == 3)
     //  staged clip +0x2C0 cleared @0x4F1EB7..0x4F1EBD, the class event (e, 1, 0)
@@ -588,7 +588,7 @@ bool EntityCommands::set_ssn_respawns(EntityTarget ssn, int32_t count) {
 }
 
 void EntityCommands::set_group_respawns(int32_t group, int32_t count) {
-    // [orig: WacScript_SetEntityWaypoint @0x4F7AE0] GroupSpawn's actual body.
+    // [orig: WacCmd_GroupSpawn @0x4F7AE0] GroupSpawn's actual body.
     world_.registry.for_each_in_pool(0, [&](const Entity &row) {
         Entity &entity = *world_.registry.get(row.handle);
         if (static_cast<int16_t>(entity.group_id) == group)
@@ -1473,7 +1473,7 @@ int EntityCommands::set_group_hp(int group, int32_t hp) {
     // Pools 0, 1, 2, every row whose signed commandGroup word matches: the
     // health word and nothing else (no gate, the attacker kept). Returns the
     // rows written. The IDB name of the handler is a misnomer.
-    // [orig: WacScript_SetEntityTeamSlot @0x4F7B30 — pool 0 @0x4F7B30, pool 1
+    // [orig: WacCmd_GroupHp @0x4F7B30 — pool 0 @0x4F7B30, pool 1
     //  @0x4F7B6D, pool 2 @0x4F7B9D, the group match @0x4F7B57, the health word
     //  @0x4F7B64]
     int n = 0;

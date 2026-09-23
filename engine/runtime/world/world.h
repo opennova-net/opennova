@@ -204,9 +204,9 @@ struct WacNamedValues {
     // Global multiplier in the infantry sawtooth aim-error formula.
     // [orig: wac_var_accuracyspread @0xC6EAE8; read @0x4bc5ea]
     int32_t accuracy_spread = kDefaultAccuracySpread;
-    // The fall-damage tolerance `fallmps` [orig: dword_C6EAE4, the named-value row
+    // The fall-damage tolerance `fallmps` [orig: wac_var_fallmps, the named-value row
     // beside accuracyspread]. Seeded 13 at every mission load and teardown [orig:
-    // WacScript_FreeAll @0x4f638b `mov dword_C6EAE4, 0Dh`, called from
+    // WacScript_FreeAll @0x4f638b `mov wac_var_fallmps, 0Dh`, called from
     // GameMode_CreateDefaultDefs @0x4f9061 / Game_TeardownMission @0x5226f0]; the
     // authority writes it into the 0x0A sub-block-1 timer state
     // (NetPacket_WritePlayerState @0x4ffa14, connection_fan.cpp state1) and a joiner
@@ -219,11 +219,11 @@ struct WacNamedValues {
     static constexpr int32_t kDefaultFallmps = 13;
     int32_t fallmps = kDefaultFallmps;
 	// USE cannot change the mounted local player's seat while this is nonzero.
-	// Forced script detaches still apply. [orig: dword_C6EADC @0xC6EADC;
+	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
 	// Two more rows of the named-value table @0x82EEF0. breathtime: the host's
-	// drown limit is four samples per second of it (Server_UpdateEntityIdleTimers
+	// drown limit is four samples per second of it (Server_UpdatePlayerBreathTimers
 	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
 	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
 	// @0x59d70f reads it (that bar is not ported). autogain is the iris
@@ -695,7 +695,7 @@ struct WorldOutbox {
 // The player-slot idle timers (the underwater breath samples) live on the host
 // session's player slots, so the host session installs this seam for its tick;
 // a world without a server session has no idle timers to run.
-// [orig: Server_UpdateEntityIdleTimers @0x50D770]
+// [orig: Server_UpdatePlayerBreathTimers @0x50D770]
 class IEntityIdleTimers {
 public:
     virtual ~IEntityIdleTimers() = default;
@@ -707,7 +707,7 @@ public:
 // player idle timers. The kernel registers it between the two script systems.
 // [orig: Server_TickUpdate — WacScript_AdvanceTick call @0x51D8BF, then
 //  `test tick,1Fh` @0x51D8C4, assign_overlay_spawn_points call @0x51D8D2,
-//  Server_UpdateEntityIdleTimers call @0x51D8D7, then the quarter counter
+//  Server_UpdatePlayerBreathTimers call @0x51D8D7, then the quarter counter
 //  @0x51D8DC]
 class ServerIdleLegs final : public ISystem {
 public:
@@ -860,7 +860,7 @@ public:
     // loads (the embedder carries it into the next kernel). The ground
     // vehicles' ground-link cadence, the vehicle avoid-brake factor, the
     // movement resolver's full-update cadence and the water decal scroll read
-    // it. [orig: dword_24C1948, `add dword_24C1948,esi` in
+    // it. [orig: g_entity_update_counter, `add g_entity_update_counter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
     // The tick process_round_end ran on (the SP epilog gate's reference).
@@ -882,7 +882,7 @@ public:
     // [orig: Server_TickUpdate @0x51d7e0, the gate @0x51d8bd — `if
     //  (!g_preround_delay_timer && (wac_var_humans || !wac_var_ticks) &&
     //  !g_epilog_screen_active)` around the WacScript_AdvanceTick call @0x51d8bf +
-    //  Server_UpdateEntityIdleTimers + EventTrigger_UpdateQuarterRoundRobin
+    //  Server_UpdatePlayerBreathTimers + EventTrigger_UpdateQuarterRoundRobin
     //  @0x454d50]
     bool script_may_advance() const {
         return (cached.humans > 0 || cached.wac_ticks == 0) && !epilog_screen_active();

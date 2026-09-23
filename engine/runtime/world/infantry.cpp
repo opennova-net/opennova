@@ -883,7 +883,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     e.body_pitch = 0;
     e.health = health;
     e.vel_x = 0;
-    e.vel_z = 0;
+    e.vel_y = 0;
     // Nothing is in flight toward the old pose any more; a stale interpolation target
     // would drag a redeployed body back toward where it died.
     e.net_smooth_target[0] = pos[0];
@@ -1750,7 +1750,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 world, e.handle, e.pos, 0, 0, 0x10000, 0x300000, nullptr);
         } else {
             GroundClearance clearance = ground_clearance;
-            clearance.has_physics = e.has_physics;
+            clearance.has_occupant = e.has_occupant;
             clearance.use_dead = (e.health <= 0);
             inf.ground_cache = calc_average_ground_height(*terrain, e.pos, 0, clearance);
         }

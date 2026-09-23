@@ -2491,7 +2491,7 @@ All machines (client incl., every tick): prologue — `savedLivePose` recapture 
 live pose + `bodyHeading/Pitch/Roll` capture `[orig: @ 0x484054..0x484080]`; euler
 matrix build + forward/up extraction `[orig: @ 0x484010..0x484046]`; null-aiComp bail
 to the epilogue `[orig: @ 0x484086]`; AI-state default 22 `[orig: @ 0x48408c]`; ground
-raycast every 8th entity update `(dword_24C1948 & 7) == 0` (the entity-update counter, section 29) →
+raycast every 8th entity update `(g_entity_update_counter & 7) == 0` (the entity-update counter, section 29) →
 `Entity_RaycastGroundHeightAndObject(entity, 0, 0, 0x10000, 0x200000) @ 0x414320`
 `[orig: @ 0x4840a0..0x4840b1]`; death → state 21 `[orig: @ 0x4840c7..0x4840d6]`;
 damage presentation (smoke < healthMax/4 `[orig: @ 0x4841be..0x4841d6]`, fire +
@@ -4092,7 +4092,7 @@ PR #640 review corrections (2026-09-08; IDA read-only, nothing renamed): the
 record's own names were corrected to the IDB's — `Entity_DispatchPhysics_catv`
 → `Entity_DispatchPhysicsUpdate @0x48F010`; `AI_UpdateHelicopterCombatMovement`
 → `AI_ProcessVehicleCombatState @0x461080`; `AI_UpdateAircraftCombat` →
-`Entity_ProcessInfantryWeaponFire @0x471710`; `Entity_Respawn` →
+`AI_TickState_AircraftCombat @0x471710`; `Entity_Respawn` →
 `Entity_RespawnVehicle @0x45FF40` (no `Entity_InitFromItemDef` edge);
 `HUD_CacheEntityDisplayInfo_Helicopter` → `HUD_CacheInfantryDisplayInfo
 @0x48F1A0` (one name, misnomer noted); `Physics_ResolveEntityCollision` →
@@ -4585,7 +4585,7 @@ A second waker sits beside the impulse and the respawn. After each live body's
 the first def-type-1 entity on the body's +0x28 chain
 (`Entity_FindChildByDefType @0x43BEA0`, first match, fewer than 20 hops
 `@0x43BEC0..0x43BEDF`) and, on `tick & 3 == 0` (`@0x4C25CE`), calls
-`sub_459290 @0x459290` (`or [e+24h],40h; mov [e+3B8h],tick`): a vehicle with a
+`Entity_WakeContactSolve @0x459290` (`or [e+24h],40h; mov [e+3B8h],tick`): a vehicle with a
 body standing on it is woken every fourth tick, unconditionally once found.
 Only the team copy in the same block is gated: for a PlayerControl vehicle (def
 attrib 0x40; SpawnPoint 0x40000 excluded) whose Flags carry neither 0x1000 nor
@@ -4856,9 +4856,9 @@ prediction role gates. `ai`, `vehicle_mount` and
 `aircraft_client_motor` pin the live decisions and movement.
 The witness map in `ai_aircraft.cpp` records each original state callback.
 [orig: AI_EnterState_AircraftCombat @ 0x466330;
-AI_TransitionToDeath_Infantry @ 0x465F60;
+AI_EnterState_HelicopterEvade @ 0x465F60;
 AI_ProcessVehicleCombatState @ 0x461080;
-Entity_ProcessInfantryWeaponFire @ 0x471710 (the IDB name; the aircraft
+AI_TickState_AircraftCombat @ 0x471710 (the IDB name; the aircraft
 brain's weapon-fire leg, wired as the state-8 tick)]
 The PR's `AI_UpdateHelicopterCombatMovement` / `AI_UpdateAircraftCombat` names
 did not exist in the IDB (corrected 2026-09-08). Two more misnomers to read
@@ -4870,7 +4870,7 @@ Mover facts re-grilled 2026-09-08 (ported in `ai_aircraft.cpp`, pinned by
 `ai::test_aircraft_combat_mover_pins` / `test_aircraft_fire_arc_gate`): the helo
 mover clears `[127]` at its head `@0x4613ca` and writes `[127] = [45] << 14` at
 LABEL_35 `@0x4616c7` from both within-max_chase arms (only `[40] = 0` is gated on
-`AI_GetSuspensionFirePoint` `@0x4616b1..0x4616bd`; the > min_chase / angle > 0x40
+`AI_IsTargetInSight` `@0x4616b1..0x4616bd`; the > min_chase / angle > 0x40
 arm skips the fire check); its reverse bearing is a second truncated
 atan2(self − target) `@0x461453..0x46149e` folded against the target's Yaw; helo
 ceiling test ground + 819200 `@0x46172c`, plane ground + 3276800 `@0x461b5c`,
@@ -4908,8 +4908,8 @@ corrected 2026-09-22, `emplaced_gun_channel::test_carrier_destruction_resets_chi
 
 ### 26.1 The vehicle-class brain machine, its class key and the brain lifetime
 
-`EntityAI_ProcessVehicleStateMachine @0x4583C0` (cveh/cbot/ctrn) and
-`EntityAI_ProcessInfantryStateMachine @0x4581B0` (CHel/cpln) share one body and
+`EntityAI_ProcessGroundStateMachine @0x4583C0` (cveh/cbot/ctrn) and
+`EntityAI_ProcessAirStateMachine @0x4581B0` (CHel/cpln) share one body and
 differ in exactly four gates: the alert edge pends 18 unless `cur == 22`
 `@0x458442..0x458448` (vs 10 unless 14 `@0x458239..0x45823b`); the client tick
 gate runs the tick table only when authority or `cur` is 21/23
@@ -4952,7 +4952,7 @@ the think visit ahead of the callback; the per-source candidate slices are the
 separate 17-tick `Entity_BuildProximityListsFromPools @0x4B8EB0` rebuild); the earlier
 `vehicle_mount::test_helo_ai_flight` exact-orbit pin (414.44) retired to a
 band with the every-tick think. Ported 2026-09-08 as
-`AiSystem::process_vehicle_state_machine` / `process_infantry_state_machine`
+`AiSystem::process_ground_state_machine` / `process_air_state_machine`
 over one `StateMachineGates` table (`ai::test_vehicle_class_state_machine_gates`).
 
 The class key: `g_EntityClassEventCallbackTable @0x813000`, 41 rows (count
@@ -5243,20 +5243,20 @@ The render side (corrected 2026-09-08): `create_water_surface_mesh @0x5DDEF0`
 builds the 19×9 ring geometry; `render_water_surface_decal @0x5DE0F0` owns the
 draw state — the 0.4 ambient material `@0x5DE202..0x5DE217`, `SetMaterial`
 `@0x5DE232`, `D3DRS_AMBIENT` (139) white `@0x5DE1EC`, `GfxShader_ApplyPassChecked`
-pass 0x100000 `@0x5DE245`, and the first-UV scroll `(dword_24C1948 & 0x1FF) / 512`
-and `(dword_24C1948 & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`; `sub_5DDC90
+pass 0x100000 `@0x5DE245`, and the first-UV scroll `(g_entity_update_counter & 0x1FF) / 512`
+and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`; `sub_5DDC90
 @0x5DDC90` only loads wake5.tga / wakegrad.tga and sets sampler addressing. The
 Godot shader implements that two-texture, unshaded draw through the compiled
 mesh (`provenance.json` cites `render_water_surface_decal` / `sub_5DDC90`).
-The UV scroll counter `dword_24C1948` is the ENTITY-UPDATE counter, not a render
-frame counter: its one writer is `add dword_24C1948,esi` (`@0x4C2639`) at the tail
+The UV scroll counter `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render
+frame counter: its one writer is `add g_entity_update_counter,esi` (`@0x4C2639`) at the tail
 of a non-epilog `Entity_UpdateAllEntities @0x4C2100`, and nothing resets it, so it
 runs one behind `tick` through the process's first mission, holds on a skipped or
 epilog frame and keeps counting across restarts and mission loads. The compile
 reads `World::entity_update_counter`, which advances the same way
 (`water_wake_frame.h/.cpp`; corrected 2026-09-23, the logic tick had stood in).
 The counter's other readers: the ground-link cadence of the ground, light, tank
-and infantry movers (`test byte ptr dword_24C1948,7`, e.g.
+and infantry movers (`test byte ptr g_entity_update_counter,7`, e.g.
 `Entity_UpdateVehiclePhysics @0x48AF00` `@0x48AFB9`,
 `Entity_UpdateLightVehiclePhysics @0x483FE0` `@0x484099`), the avoid-brake
 factors, the movement resolver's full update (`& 0x3F`,
@@ -5567,12 +5567,12 @@ live against brain[132] [orig: AI_UpdatePatrolBehavior, `@0x457DCB..0x457DD4`],
 which the ground/tank mover now mirrors back each motor pass (§10 item 14), and
 `h_vehicle_dying_tick` zeroes the mover's command speed with brain[136]
 [orig: AI_TickState_VehicleDying, `mov [esi+220h], ebx` @0x467D83]. Residual
-noted, not ledgered: `AiEntity::has_physics` (the entity+0x170 occupant
+noted, not ledgered: `AiEntity::has_occupant` (the entity+0x170 occupant
 stand-in) defaults true for promoted vehicles while retail's +0x170 is null
 until a driver boards. Since 2026-09-23 it feeds only the ground sample's water
 clamp: the brain alert edge reads the live occupant (`Entity::primary_occupant`),
 which must be present and not a Player
-(`EntityAI_ProcessInfantryStateMachine @0x4581B0`, the gate
+(`EntityAI_ProcessAirStateMachine @0x4581B0`, the gate
 `@0x45820D..0x45823B`; the vehicle twin `@0x45841A..0x458448`).
 
 D-INF-2 scope (re-scoped 2026-09-23): the `+0x369` path-state byte is ported

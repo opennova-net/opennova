@@ -114,7 +114,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 
 // The friendly-tags cycle 0->1->2->3->0 with its retail toast key (gametext
 // Misc/STRMISC_FRIENDLYTAGS_*) [orig: Input_HandleActionBinding case 30
-// @0x49b573 -> Chat_AddDebugMessage @0x49bc60; the keys @0x49b596 /
+// @0x49b573 -> Chat_AddMessageChannel2 @0x49bc60; the keys @0x49b596 /
 // @0x49b5c1 / @0x49b5d0 / @0x49b5da]. Returns the toast key for the new mode.
 const char *hud_toggles_cycle_friendly_tags(HudToggleState &state);
 const char *friendly_tag_toast_key(FriendlyTagMode mode);

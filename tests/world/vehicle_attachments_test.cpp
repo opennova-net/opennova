@@ -174,7 +174,7 @@ void test_per_tick_follow() {
     AiEntity &child_brain = *r.w.ai.at(r.w.ai.attach(a));
     r.w.vehicles.update_attached_children(veh);
     CHECK(child_brain.pos[0] == (108 << 16) && child_brain.pos[1] == (50 << 16));
-    CHECK(child_brain.vel_x == 123 && child_brain.vel_z == -45);
+    CHECK(child_brain.vel_x == 123 && child_brain.vel_y == -45);
 
     // The motor pass chains the follow after the mover: the children keep
     // their hull-relative offsets through an authority tick.

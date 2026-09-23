@@ -88,7 +88,7 @@ inline int32_t hull_health(const World *world, const AiEntity &e) {
 // pair, the flt_7C19E0 min-clamp, then _ftol2_sse's chop.
 inline int32_t hull_death_speed(const World *world, const AiEntity &e) {
     int32_t vx = e.vel_x;
-    int32_t vy = e.vel_z;
+    int32_t vy = e.vel_y;
     if (world != nullptr) {
         if (const Entity *entity = world->registry.get(e.handle)) {
             vx = entity->veh.vel_x;

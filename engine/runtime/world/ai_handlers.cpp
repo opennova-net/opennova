@@ -475,7 +475,7 @@ static int32_t planar_speed(const AiSystem &sys, const Entity &target) {
 // retail leg order: the stationary RC_FIRE leg, the ATEAM_LOCK replay, the
 // no-target search, the between-tick continuation or turret staging, and the
 // processed tick (retarget, chase, heading gate, processed fire). Its aircraft
-// twin is Entity_ProcessInfantryWeaponFire @0x471710 (aircraft_combat_tick).
+// twin is AI_TickState_AircraftCombat @0x471710 (aircraft_combat_tick).
 void h_ground_combat_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
@@ -558,7 +558,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
             // The stationary leg walks through AI_UpdateMovementTarget, not the
             // waypoint mover [orig: `call AI_UpdateMovementTarget` @0x4730D9].
             if ((p.flags100 & 1) != 0)
-                ctx.sys->update_aircraft_waypoint_movement(e, world);
+                ctx.sys->update_movement_target(e, world);
         }
         return;
     }
@@ -711,7 +711,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     } else {
         // The chase: a planar 16.16 distance against the approach cap (+0x4C);
         // beyond it the >620 give-up; inside it the timer rests only while
-        // AI_GetSuspensionFirePoint @0x456860 validates the target; full combat
+        // AI_IsTargetInSight @0x456860 validates the target; full combat
         // speed at or beyond max_chase (+0xBC) or min_chase (+0xB8), else the
         // target's own speed [orig: @0x473ABE..0x473C06].
         b.f[AiBrain::kWorkHeading] = bearing; // [orig: @0x473AC2]
@@ -1077,7 +1077,7 @@ void h_aircraft_followwp_tick(AiThinkCtx &ctx) {
 	if (acquired)
 		ctx.sys->engage_target(*ctx.world, ai, target, true);
 	else
-		ctx.sys->update_aircraft_waypoint_movement(ai, *ctx.world);
+		ctx.sys->update_movement_target(ai, *ctx.world);
 }
 
 void h_enter_aircraft_combat(AiThinkCtx &ctx) {

@@ -157,7 +157,7 @@ int compute_death_anim_state(int bone_index, int quadrant, int cause);
 
 // The bullet-death attack quadrant: 0 forward / 1 right / 2 back / 3 left, from the
 // victim's engine heading and the killing round's horizontal velocity.
-// [orig: Entity_HandleDamageTrigger @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
+// [orig: OrganicClass_HandleEvent @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
 // - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
 int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 

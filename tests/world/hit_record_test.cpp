@@ -5,7 +5,7 @@
 // recorded round; WAC killSSN zeroes the record first. Items read the record's
 // section, and a brained item's machine its owner word.
 // [orig: Entity_KillByNetId @0x43DBD0; Entity_KillAllByNetId @0x43C8E0;
-//  Entity_ResetWeaponState @0x4F1E40; Entity_HandleDamageTrigger @0x407310]
+//  WacCmd_KillSsn @0x4F1E40; OrganicClass_HandleEvent @0x407310]
 #include <cstdio>
 #include <memory>
 #include <variant>
@@ -102,7 +102,7 @@ int rear_quadrant() {
 // from its section and quadrant, the torso roll, the damage reaction toward
 // its owner and, on the authority, the dismemberment cut.
 // [orig: Entity_KillByNetId +0x44 @0x43DC22, +0x30 @0x43DC27, the callback
-//  @0x43DC2A..0x43DC31; Entity_HandleDamageTrigger @0x40740D..0x4076C9]
+//  @0x43DC2A..0x43DC31; OrganicClass_HandleEvent @0x40740D..0x4076C9]
 static void test_kill_single_runs_the_recorded_round_legs() {
     KillRig rig;
     rig.record_round(3);
@@ -124,7 +124,7 @@ static void test_kill_single_runs_the_recorded_round_legs() {
 }
 
 // WAC killSSN zeroes the whole record before its callback: no round legs.
-// [orig: Entity_ResetWeaponState memset @0x4F1E8F..0x4F1E99, the callback
+// [orig: WacCmd_KillSsn memset @0x4F1E8F..0x4F1E99, the callback
 //  @0x4F1EC7..0x4F1ED2; the round test @0x40740D]
 static void test_wac_kill_ssn_zeroes_the_record() {
     KillRig rig;
@@ -162,7 +162,7 @@ static void test_kill_group_runs_the_round_and_keeps_the_attacker() {
 // [orig: Entity_KillByNetId pool 1 +0x30 only @0x43DC68, the callback
 //  @0x43DC6C..0x43DC72; the gnrc row's callback (row @0x8130C0) reads
 //  hitRecord[14] @0x407073 for its state send @0x40708E;
-//  EntityAI_ProcessInfantryStateMachine `mov ecx,[eax+44h]` @0x45831E]
+//  EntityAI_ProcessAirStateMachine `mov ecx,[eax+44h]` @0x45831E]
 static void test_kill_single_hands_items_the_record() {
     KillRig rig;
     rig.w->rules.mp_session = true;
@@ -201,7 +201,7 @@ static void test_kill_single_hands_items_the_record() {
     // An ai_function CHel row: its class event is the air machine. Without a
     // brain-class row the class event runs no machine.
     // [orig: g_EntityClassEventCallbackTable CHel @0x8132A0 ->
-    //  EntityAI_ProcessInfantryStateMachine @0x4581B0]
+    //  EntityAI_ProcessAirStateMachine @0x4581B0]
     VehicleTraits air;
     air.brain_class = VehicleBrainClass::Air;
     rig.w->vehicles.traits.set(901, air);

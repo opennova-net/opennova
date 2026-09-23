@@ -795,8 +795,8 @@ struct ClientState {
 	// named values the same sub-block-1 timer state carries, zero-extended
 	// from their wire bytes; until the first one lands they hold the
 	// WacScript_FreeAll seeds 20 / 13.
-	// [orig: NapiNPClientMsg_0x00A `mov dword_C6EAE0,edx` @0x4301A1, `mov
-	//  dword_C6EAE4,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
+	// [orig: NapiNPClientMsg_0x00A `mov wac_var_breathtime,edx` @0x4301A1, `mov
+	//  wac_var_fallmps,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
 	std::int32_t breathtime = 20;
 	std::int32_t fallmps = 13;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH

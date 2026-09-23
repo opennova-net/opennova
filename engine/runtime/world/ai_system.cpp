@@ -324,11 +324,11 @@ struct StateMachineGates {
     int32_t commit_hi;
     int32_t notify_channel; // the kill/damage notification AIEvent's channel word
 };
-// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0 — alert @0x458239..0x45823b,
+// [orig: EntityAI_ProcessAirStateMachine @0x4581b0 — alert @0x458239..0x45823b,
 //  tick gate @0x458340..0x458348, commit gate @0x458375..0x458382, notification word 9
 //  @0x458312]
 constexpr StateMachineGates kAirClassGates{14, 10, 13, 15, 7, 12, 15, 9};
-// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0 — alert @0x458442..0x458448,
+// [orig: EntityAI_ProcessGroundStateMachine @0x4583c0 — alert @0x458442..0x458448,
 //  tick gate @0x458545..0x45854d, commit gate @0x458579..0x458586, notification word bx (=0,
 //  xor ebx,ebx @0x4583cd) @0x45851a]
 constexpr StateMachineGates kVehicleClassGates{22, 18, 21, 23, 16, 20, 23, 0};
@@ -339,8 +339,8 @@ void process_class_state_machine(
 
     // The no-target idle latch: a brain with both ammo counts spent, or whose
     // profile resolved no ammo byte in either weapon block, latches idle unless
-    // it carries gunner attachments [orig: EntityAI_ProcessInfantryStateMachine
-    // @0x4581C4..0x4581F4; EntityAI_ProcessVehicleStateMachine @0x4583D7..0x458402:
+    // it carries gunner attachments [orig: EntityAI_ProcessAirStateMachine
+    // @0x4581C4..0x4581F4; EntityAI_ProcessGroundStateMachine @0x4583D7..0x458402:
     // brain+0xD4/+0xD8, profile bytes +0x94/+0xB4, guard brain+0x240].
     if ((b.f[AiBrain::kAmmoA] == 0 && b.f[AiBrain::kAmmoB] == 0) ||
             (e.profile.fire_a.ammo_byte() == 0 && e.profile.fire_b.ammo_byte() == 0)) {
@@ -350,8 +350,8 @@ void process_class_state_machine(
 
     // The alert edge needs an occupant (entity+0x170, the vehicle's first
     // claimant) that is not a Player; an empty hull or a player-driven one only
-    // records the alert [orig: EntityAI_ProcessInfantryStateMachine
-    // @0x45820D..0x45823B; EntityAI_ProcessVehicleStateMachine @0x45841A..0x458448].
+    // records the alert [orig: EntityAI_ProcessAirStateMachine
+    // @0x45820D..0x45823B; EntityAI_ProcessGroundStateMachine @0x45841A..0x458448].
     const Entity *self = world.registry.get(e.handle);
     const Entity *occupant = self != nullptr ? world.registry.get(self->primary_occupant) : nullptr;
     int32_t alert = b.f[AiBrain::kAlert];
@@ -368,8 +368,8 @@ void process_class_state_machine(
     const int ai_index = sys.index_of(e);
 
     // The transition tail: authority applies the pending transition; clients apply
-    // only the class's restricted subset [orig: EntityAI_ProcessInfantryStateMachine
-    // @0x458369..0x4583B0; EntityAI_ProcessVehicleStateMachine @0x45856E..0x4585B4].
+    // only the class's restricted subset [orig: EntityAI_ProcessAirStateMachine
+    // @0x458369..0x4583B0; EntityAI_ProcessGroundStateMachine @0x45856E..0x4585B4].
     const auto client_commits = [&](int32_t pend) {
         return pend == g.commit_single || (pend > g.commit_lo && pend <= g.commit_hi);
     };
@@ -395,8 +395,8 @@ void process_class_state_machine(
         // is re-armed from brain[7] after every event-0 update, on clients too
         // (the tick-table gate above is separate); the visit's own trailing
         // decrement follows, so the next think lands brain[7] pool-1 visits
-        // later [orig: EntityAI_ProcessVehicleStateMachine
-        // @0x458561..0x458568; EntityAI_ProcessInfantryStateMachine @0x45835c..0x458363].
+        // later [orig: EntityAI_ProcessGroundStateMachine
+        // @0x458561..0x458568; EntityAI_ProcessAirStateMachine @0x45835c..0x458363].
         // Neither machine touches a body-anim selection.
         if (Entity *ent = world.registry.get(e.handle))
             ent->spawn_phase = b.f[AiBrain::kStep];
@@ -410,8 +410,8 @@ void process_class_state_machine(
         ev.set_timer(0.0f);
         // The notification payload is the hit record's owner word, as a script
         // kill left it (a KillSingle item row keeps it) [orig:
-        // EntityAI_ProcessInfantryStateMachine `mov ecx,[eax+44h]` @0x45831E,
-        // stored into the event @0x458326; EntityAI_ProcessVehicleStateMachine
+        // EntityAI_ProcessAirStateMachine `mov ecx,[eax+44h]` @0x45831E,
+        // stored into the event @0x458326; EntityAI_ProcessGroundStateMachine
         // @0x458524]. If the notification reaches a ground combat-event handler
         // (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39]
         // (kDamageInfo).
@@ -448,20 +448,20 @@ void process_class_state_machine(
         return;
     }
     // Every other event still reaches the class-specific transition tail.
-    // [orig: EntityAI_ProcessVehicleStateMachine @0x45846D; air @0x458261]
+    // [orig: EntityAI_ProcessGroundStateMachine @0x45846D; air @0x458261]
     finish();
 }
 } // namespace
 
-// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event 0=update, 1=kill/damage
+// [orig: EntityAI_ProcessAirStateMachine @0x4581b0] event 0=update, 1=kill/damage
 // notification, 4=death.
-void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int event) {
+void AiSystem::process_air_state_machine(AiEntity &e, World &world, int event) {
     process_class_state_machine(*this, e, world, event, kAirClassGates);
 }
 
-// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] event 0=update, 1=kill/damage
+// [orig: EntityAI_ProcessGroundStateMachine @0x4583c0] event 0=update, 1=kill/damage
 // notification, 4=death.
-void AiSystem::process_vehicle_state_machine(AiEntity &e, World &world, int event) {
+void AiSystem::process_ground_state_machine(AiEntity &e, World &world, int event) {
     process_class_state_machine(*this, e, world, event, kVehicleClassGates);
 }
 
@@ -475,8 +475,8 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
         b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState];
         // A committed transition zeroes the pool-1 think countdown (entity+684),
         // so the brain thinks again on the very next pool-1 visit — both class
-        // machines share this commit arm [orig: EntityAI_ProcessVehicleStateMachine
-        // @0x4585ae..0x4585b4; EntityAI_ProcessInfantryStateMachine @0x4583b0].
+        // machines share this commit arm [orig: EntityAI_ProcessGroundStateMachine
+        // @0x4585ae..0x4585b4; EntityAI_ProcessAirStateMachine @0x4583b0].
         // The enter handler may have destroyed the entity: re-resolve it.
         if (b.f[AiBrain::kOwner] != 0)
             if (Entity *ent = world.registry.get(e.handle))
@@ -496,7 +496,7 @@ void AiSystem::apply_round_hits(World &world) {
         if (victim->inf.active) {
             // Every ordinary damage callback alerts an NPC and its trigger group,
             // before lethal/nonlethal handling. The player flag skips this AI leg.
-            // [orig: Entity_HandleDamageTrigger @0x4073c8..0x4073ea]
+            // [orig: OrganicClass_HandleEvent @0x4073c8..0x4073ea]
             const Entity *victim_entity = world.registry.get(victim->handle);
             if (victim_entity != nullptr &&
                 (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
@@ -544,9 +544,9 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the +0x1C4 call);
     //  g_EntityClassPhysicsTable @0x82ABC8]
     if (vt->brain_class == VehicleBrainClass::Ground)
-        process_vehicle_state_machine(e, world, 0);
+        process_ground_state_machine(e, world, 0);
     else
-        process_infantry_state_machine(e, world, 0);
+        process_air_state_machine(e, world, 0);
 }
 
 void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
@@ -906,7 +906,7 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
         case 0x20: // AIUSEWPZ [orig: Entity_ApplyCommand case 32 @0x43B154,
                    //  `mov [eax+1B0h],1` @0x43B164]
             // [orig: AI_UpdateMovementTarget reads brain+432 @0x460FC7]
-            // (ported as AiSystem::update_aircraft_waypoint_movement).
+            // (ported as AiSystem::update_movement_target).
             comp.f[AiBrain::kUseWaypointZones] = 1;
             break;
         case 0x21: // AICLEARWPZ [orig: case 33 @0x43B173, the store @0x43B183]
@@ -998,7 +998,7 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     }
 
     // [orig: if (*(entity+368) && (int)worldY > result) result = worldY] water-surface clamp.
-    if (clearance.has_physics && field.has_water && field.water_y > result) {
+    if (clearance.has_occupant && field.has_water && field.water_y > result) {
         result = field.water_y;
     }
     // [orig: the caller's brain+0x30 when dead (@0x45734D), else brain+0x2C (@0x457367),

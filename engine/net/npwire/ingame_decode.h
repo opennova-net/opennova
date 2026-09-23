@@ -910,8 +910,8 @@ struct FrameWeaponBlock {
 // snapshot (client only). [orig: NapiNPClientMsg_0x00A @ 0x430191..0x430235]
 struct FrameTimerBlock {
 	bool     present = false;
-	uint8_t  state0 = 0;        // → dword_C6EAE0  [0x4301A1]
-	uint8_t  state1 = 0;        // → dword_C6EAE4  [0x4301BC]
+	uint8_t  state0 = 0;        // → wac_var_breathtime  [0x4301A1]
+	uint8_t  state1 = 0;        // → wac_var_fallmps  [0x4301BC]
 	uint8_t  state2 = 0;        // → dword_C8FC64  [0x4301E0]
 	uint8_t  state3 = 0;        // → dword_C8FC68  [0x430200]
 	int16_t  timer_seconds = 0; // → dword_24C1958 = 62 × this (62 Hz ticks); <0 ⇒ -1 [0x430235]
@@ -1007,7 +1007,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 // [orig: NetPacket_HandleGameEvent @ 0x426270]. The client resolves the three
 // pool-0 indices to entities, then a ~60-case switch on event_type selects a
 // "Canned Msg"/STRCNDnn string, formats it via HUD_FormatKillEventMessage
-// (@ 0x422DA0) and posts it to the kill feed (Chat_AddDebugMessage); some types
+// (@ 0x422DA0) and posts it to the kill feed (Chat_AddMessageChannel2); some types
 // also trigger a sound / progress-bar / effect. Only processed in-session (except
 // type 48). pos is the event's world map location (handler shifts i16 << 16 → 16.16).
 struct GameEventRecord {

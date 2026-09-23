@@ -35,8 +35,8 @@ struct FrameHeaderState {
 	// [orig: NetPacket_WritePlayerState @0x4FF7C5..0x4FF7D9]. (D-NET-156)
 	uint8_t flags1 = 0;
 	// The live fall-damage tolerance and breath seconds the sub-block-1 timer
-	// state carries (World::wac_values.fallmps = dword_C6EAE4, .breathtime =
-	// dword_C6EAE0): a value above 0xFF crosses as 0xFF, anything else (a
+	// state carries (World::wac_values.fallmps = wac_var_fallmps, .breathtime =
+	// wac_var_breathtime): a value above 0xFF crosses as 0xFF, anything else (a
 	// negative one included, the compares are signed) as its low byte.
 	// [orig: NetPacket_WritePlayerState breathtime @0x4FF9DB..0x4FFA0A,
 	//  fallmps @0x4ffa14..0x4FFA48]
@@ -131,7 +131,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		break;
 	case 1:
 		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's
-		// fall-damage tolerance dword_C6EAE4. Left at its BSS default 0, the body motor's landing check
+		// fall-damage tolerance wac_var_fallmps. Left at its BSS default 0, the body motor's landing check
 		// `velZ <= C6EAE4 * -1057` has threshold 0, so per-frame micro-gravity trips fall damage EVERY
 		// grounded frame -> constant screen-red + shake + minimap-red (Player_OnDamageReceived), though
 		// the player never dies (health loss is authority-gated). The client PERSISTS these between
@@ -139,11 +139,11 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A phase-1 read @0x4301a1-0x4301bc;
 		// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28.]
 		fu.timer.present = true;
-		// dword_C6EAE0 is the breath-seconds named value (20 from
+		// wac_var_breathtime is the breath-seconds named value (20 from
 		// WacScript_FreeAll @0x4F6381; a script may set it), capped to the byte
 		// [orig: @0x4FF9DB..0x4FFA0A]; the host's breath timer reads the same value.
 		fu.timer.state0 = hdr.breathtime;
-		fu.timer.state1 = hdr.fallmps; // dword_C6EAE4 = fallmps, the fall-damage tolerance (0 => constant fall dmg)
+		fu.timer.state1 = hdr.fallmps; // wac_var_fallmps = fallmps, the fall-damage tolerance (0 => constant fall dmg)
 		// g_serverFps / g_serverCpuPct are the host's measured frame statistics
 		// [orig: @0x4FFA62/@0x4FFA7C]; this headless host runs a fixed 62.5 Hz
 		// tick and carries no CPU measurement, so it reports its nominal rate.

@@ -60,7 +60,7 @@ int32_t breath_sample_limit(const world::World &world) {
 			static_cast<uint32_t>(world.script.wac_values.breathtime) * 4u);
 }
 
-void Server_UpdateEntityIdleTimers(NapiNPServerCtx &ctx, world::World &world) {
+void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) {
 	// A running pre-round countdown holds every sample. The second test,
 	// dword_A87050 @0x50D77F, repeats the frame's own gate on the
 	// Server_TickUpdate call (Game_ProcessMainFrame @0x5266AE), so it never
@@ -69,7 +69,7 @@ void Server_UpdateEntityIdleTimers(NapiNPServerCtx &ctx, world::World &world) {
 	const int32_t limit = breath_sample_limit(world);
 	// The surfaced-dive split, 160% of breathtime: `lea edx,[edx+edx*4]; shl
 	// edx,5` then the signed magic divide by 100.
-	// [orig: Server_UpdateEntityIdleTimers @0x50D892..0x50D8AD]
+	// [orig: Server_UpdatePlayerBreathTimers @0x50D892..0x50D8AD]
 	const int32_t gasp_after = static_cast<int32_t>(
 			static_cast<uint32_t>(world.script.wac_values.breathtime) * 160u) / 100;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -94,7 +94,7 @@ void Server_UpdateEntityIdleTimers(NapiNPServerCtx &ctx, world::World &world) {
 		if (world::to_fixed(player->position.z) + player->eye_offset_z >= world.env.water_z) {
 			// Surfacing after more than four samples plays the breath (a dive
 			// no longer than 160% of the breath value) or the gasp composite.
-			// [orig: Server_UpdateEntityIdleTimers @0x50D882..0x50D8CB]
+			// [orig: Server_UpdatePlayerBreathTimers @0x50D882..0x50D8CB]
 			const int32_t prev = static_cast<int32_t>(conn.link.underwater_breath_samples);
 			if (prev > 4 && player->anim_slot != 0) {
 				fan_entity_sound_to_alive(ctx, world, *player,

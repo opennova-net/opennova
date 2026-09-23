@@ -131,7 +131,7 @@ void BmsEventSystem::on_load(World &w) {
     // The sticky relation/visited/group state zeroes once per mission load:
     // the matrices and visited words in EventSystem_FreeAll, the group
     // records (alert, counts, speed) in the mission reset's memset.
-    // [orig: EventSystem_FreeAll @ 0x453210; CAIGroup_HasGuardTaskFromIndex2
+    // [orig: EventSystem_FreeAll @ 0x453210; Mission_ResetBmsState
     //  @0x40DB80 (the load reset; the 0xA33F90 x 0xC00 memset @0x40DBAE)]
     w.script.relations.clear();
     // Round init clears both dialog tables the PLYRDIALOG subs read [orig:

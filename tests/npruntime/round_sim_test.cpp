@@ -511,7 +511,7 @@ bool run_death_feed_classifier_matrix() {
 	// The same +460 counter is produced by the authority every 32 host ticks.
 	// At the first sample beyond 4*20, the eye-under-water predicate kills the
 	// player with the drown animation and routes the same no-killer transaction.
-	// [orig: Server_UpdateEntityIdleTimers @0x50D770, call gate @0x51D8C4;
+	// [orig: Server_UpdatePlayerBreathTimers @0x50D770, call gate @0x51D8C4;
 	// GameEvent_PlayerDeath @0x5172EC..0x51734D]
 	reset();
 	world.logic_tick = 32;
@@ -521,7 +521,7 @@ bool run_death_feed_classifier_matrix() {
 	submerged->eye_offset_z = 0;
 	roster[1].link.underwater_breath_samples = 80;
 	// An earlier hit's kill credit: the drowning clears it, so the death
-	// reports no killer. [orig: Server_UpdateEntityIdleTimers `mov
+	// reports no killer. [orig: Server_UpdatePlayerBreathTimers `mov
 	// [ecx+178h],ebx` @0x50D800]
 	submerged->last_attacker = attacker;
 	inmatch::Server_TickUpdate(ctx);
@@ -539,7 +539,7 @@ bool run_death_feed_classifier_matrix() {
 	}
 
 	// The timer pass holds itself while a pre-round countdown runs.
-	// [orig: Server_UpdateEntityIdleTimers `cmp g_preround_delay_timer,ebx`
+	// [orig: Server_UpdatePlayerBreathTimers `cmp g_preround_delay_timer,ebx`
 	//  @0x50D773]
 	reset();
 	world.env.water_z = 1 << 16;
@@ -548,12 +548,12 @@ bool run_death_feed_classifier_matrix() {
 	submerged->eye_offset_z = 0;
 	roster[1].link.underwater_breath_samples = 5;
 	world.preround_delay_seconds = 3;
-	inmatch::Server_UpdateEntityIdleTimers(ctx, world);
+	inmatch::Server_UpdatePlayerBreathTimers(ctx, world);
 	if (!expect(roster[1].link.underwater_breath_samples == 5,
 	            "a running pre-round countdown holds the breath sample"))
 		return false;
 	world.preround_delay_seconds = 0;
-	inmatch::Server_UpdateEntityIdleTimers(ctx, world);
+	inmatch::Server_UpdatePlayerBreathTimers(ctx, world);
 	if (!expect(roster[1].link.underwater_breath_samples == 6,
 	            "the sample counts once the countdown ends"))
 		return false;
@@ -561,7 +561,7 @@ bool run_death_feed_classifier_matrix() {
 	// The limit is 4 * breathtime, the live named value: a script's
 	// set(breathtime,4) drowns at the 17th sample, and the classifier's
 	// event-26 test reads the same value.
-	// [orig: Server_UpdateEntityIdleTimers @0x50D7E6..0x50D7FB;
+	// [orig: Server_UpdatePlayerBreathTimers @0x50D7E6..0x50D7FB;
 	//  GameEvent_PlayerDeath @0x5172F6..0x51730A]
 	reset();
 	world.logic_tick = 64;
@@ -585,7 +585,7 @@ bool run_death_feed_classifier_matrix() {
 
 	// The sample shares the WAC tick's admission, so the SP lose epilog holds
 	// it like the script. [orig: Server_TickUpdate — the epilog test
-	// @0x51D8B7..0x51D8BD precedes the Server_UpdateEntityIdleTimers call
+	// @0x51D8B7..0x51D8BD precedes the Server_UpdatePlayerBreathTimers call
 	// @0x51D8D7]
 	reset();
 	world.rules.mp_session = false;
@@ -1024,7 +1024,7 @@ bool test_dismemberment_damage_path() {
 // legs — the +0x2C0 selection, the torso-stack body roll, the +0x178 attacker
 // stamp — lethal or not, damage 0 included; only the killing hit's lethal
 // tail (dismemberment, the death record) stays behind the health test.
-// [orig: Entity_HandleDamageTrigger @0x407483 select, @0x40755e..0x407575
+// [orig: OrganicClass_HandleEvent @0x407483 select, @0x40755e..0x407575
 //  roll; Projectile_ProcessDamageOnTarget @0x4e81e7..0x4e81f9 lastAttacker,
 //  callback(entity, 1, 0) @0x4e820e after the authority-gated subtraction]
 bool test_person_hit_presentation_legs_run_on_every_hit() {

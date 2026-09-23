@@ -902,7 +902,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     };
     std::vector<EntityHandle> promoted_item_handles;
     // dword_A77638, zeroed by the mission reset every load runs [orig: the
-    // reset CAIGroup_HasGuardTaskFromIndex2 (an IDB misnomer) @0x40DBD1, called
+    // reset Mission_ResetBmsState @0x40DBD1, called
     // from Mission_LoadBMSFile @0x40F50E]
     uint32_t spawn_phase_counter = 0;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {

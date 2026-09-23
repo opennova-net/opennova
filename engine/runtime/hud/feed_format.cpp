@@ -406,7 +406,7 @@ std::string feed_camp_wpname_key(uint8_t level_index) {
 
 ChatSink chat_channel_sink(int channel) {
 	// [orig: Chat_DispatchToChannel @0x42b910 — case 0 and the default fall
-	//  to Chat_AddDebugMessage @0x42bb0c; 8 -> CMessageQueue_Enqueue @0x42bab8;
+	//  to Chat_AddMessageChannel2 @0x42bb0c; 8 -> CMessageQueue_Enqueue @0x42bab8;
 	//  14 -> Chat_AddMessageChannel3 @0x42bb01; 1..7/9..13 ->
 	//  Chat_AddMessageChannel1; 13 ALSO calls HUD_SetTrackedEntityTarget(sender)
 	//  before posting (Phase W, no site address taken) -- that target write is a

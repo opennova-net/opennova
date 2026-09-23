@@ -17,7 +17,7 @@ Records `{char name[8]; void *fn[4]}` × `g_EntityClassEventCallbackCount @ 0x81
 Consumed by `Entity_LookupRenderCallbacks @ 0x407dc0` (kong misnomer; it resolves *event* callbacks)
 from `EntityDef_InitAllCallbacks @ 0x4a5a70`, storing fn1..fn4 into the item def at dword indices
 [78]/[82]/[83]/[89]. fn1 = the **event callback** `(entity, eventType)` — for organics it is
-`Entity_HandleDamageTrigger @ 0x407310` (types 1=death, 4=reset); for AI-vehicle classes it is the
+`OrganicClass_HandleEvent @ 0x407310` (types 1=death, 4=reset); for AI-vehicle classes it is the
 **brain state machine itself**: `CHel → 0x4581b0` (the air-class machine) and `cveh → 0x4583c0` (the ground-class machine) directly, `cpln → thunk 0x462120` (a jmp to 0x4581b0), `cbot/ctrn → thunks 0x462130/0x462140` (jmps to 0x4583c0).
 The old "driver @0x462120" lead was one of these thunks — a red herring.
 
@@ -36,8 +36,8 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 ### 1.3 Consequence for OpenNova (the reframing verdict)
 The `engine/runtime/world` state-machine and targeting port models the
 AI-vehicle decision layer: the air-class machine (CHel/cpln,
-`EntityAI_ProcessInfantryStateMachine @ 0x4581B0`, an IDB misnomer) and the ground-class machine
-(cveh/cbot/ctrn, `EntityAI_ProcessVehicleStateMachine @ 0x4583C0`). Section 34 corrects the original
+`EntityAI_ProcessAirStateMachine @ 0x4581B0`, an IDB misnomer) and the ground-class machine
+(cveh/cbot/ctrn, `EntityAI_ProcessGroundStateMachine @ 0x4583C0`). Section 34 corrects the original
 `AI_BeginUpdate @ 0x457B40` controller ownership and class-callback admission.
 The 2026-06-10 routing discovery separated BMS organics from that vehicle
 layer: the original uses `Entity_UpdateInfantryAI @ 0x4B9910`, whose locomotion
@@ -47,7 +47,7 @@ through `tick_infantry`; section 3 records its mechanics.
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
 0x8153b8` = `{id, fn}` pairs. Ids 0-3 are the HELO_EVADE maneuvers installed only by the
-evade enter `AI_TransitionToDeath_Infantry @ 0x465F60` (a misnomer; id 3 `@ 0x466109`, id 1
+evade enter `AI_EnterState_HelicopterEvade @ 0x465F60` (a misnomer; id 3 `@ 0x466109`, id 1
 `@ 0x466195`, id 0 `@ 0x4661EC`, id 2 `@ 0x46624D`) and chained to id 3 when a phase limit is
 reached (`@ 0x461C9D`, `@ 0x461D1D`, `@ 0x466D93`): id 0 `@ 0x461C30` and id 2 `@ 0x461CB0`
 hold ground + 5 u for 248/434 phase, id 1 `@ 0x466C20` turns +-0x3FFFFFC0 at phase 186 then
@@ -69,7 +69,7 @@ target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only the saveg
 | `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | per-entity controller phase >496, pend=8/brain[6], +brain[7]; 24 original-executable vectors (section 34) | **MATCHING** (movement-controller row 4) |
 | `AiSystem::update_waypoint_movement` | `AI_UpdateWaypointMovement` | 0x457bd0 | prior grill + re-read | **matching** (vehicle mover) |
 | `ai_waypoint_update_target` | `AIWaypoint_UpdateTarget` | 0x457380 | prior grill; also called by aircraft motor @0x490310 | **matching** |
-| `process_infantry_state_machine` / `process_vehicle_state_machine` | the class machines (`EntityAI_ProcessInfantryStateMachine` / `EntityAI_ProcessVehicleStateMachine`) | 0x4581b0 / 0x4583c0 | event-callback fn1 rows; ctest `movement_brain_parity` (retail-executed dispatcher rows) | **matching**; both names are historical: 0x4581b0 is the AIR-class machine (CHel, and cpln through thunk 0x462120), 0x4583c0 the GROUND-class machine (cveh, and cbot/ctrn through thunks 0x462130/0x462140) |
+| `process_air_state_machine` / `process_ground_state_machine` | the class machines (`EntityAI_ProcessAirStateMachine` / `EntityAI_ProcessGroundStateMachine`) | 0x4581b0 / 0x4583c0 | event-callback fn1 rows; ctest `movement_brain_parity` (retail-executed dispatcher rows) | **matching**; both names are historical: 0x4581b0 is the AIR-class machine (CHel, and cpln through thunk 0x462120), 0x4583c0 the GROUND-class machine (cveh, and cbot/ctrn through thunks 0x462130/0x462140) |
 | `h_ground_followwp_tick` etc. | state 16/17/18 rows | 0x815338+ | prior grill (raw bytes) | **matching** |
 | P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill; candidate FEED + LOS + refcount witnessed 2026-07-16 (§16.2/16.3) | **matching** (scoring core; the feed is ported, D-AI-1 §16.2a; the SM combat states are ported, the state-17 tick in §17.6; D-AI-3 closed 2026-07-16) |
 | `World::update_pool1_slot` (the +0x1C4 mover leg; the interim `AiSystem::apply_locomotion` model is deleted) | `Entity_UpdatePool1Slot` | 0x4b8dd0 | no generic brain integrator: a pool-1 row moves only through its items.def move_function callback (`g_EntityClassPhysicsTable @ 0x82ABC8`); the vehicle and HELO motors are ported per family since PR #640, and [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; §38.9) |
@@ -264,8 +264,8 @@ look chase, and the recoil kick follows the think.
    ticks (half the org2 player's rate for the same vel_z; `infantry_org1_parity`);
    `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
-   **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
-   (`dword_C6EAE4` is the writable named value `fallmps`, seeded 13 by
+   **fall damage** when `vel_z ≤ −1057·wac_var_fallmps`: `health −= (excess)>>4`
+   (`wac_var_fallmps` is the writable named value `fallmps`, seeded 13 by
    `WacScript_FreeAll @ 0x4f638b` at every mission load; ported 2026-08-28 as
    `World::script.wac_values.fallmps`, authority-gated and skipping Indestructible bodies;
    retail has no zero test, so a script that writes `fallmps 0` makes every
@@ -369,7 +369,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
    (`infantry_scan_nearest_threat`), with the LOS `Entity_CheckLineOfSightTerrainAndEntities`.
 9. RESOLVED: `0x461c30`/`0x461cb0` (ids 0/2) are not death movers but the HELO_EVADE
    maneuvers `AI_MoveAircraftEvadeSide` / `AI_MoveAircraftEvadeTurn` (hold ground + 5 u for 248/434
-   phase), installed by the evade enter (`AI_TransitionToDeath_Infantry @ 0x465F60`, a misnomer;
+   phase), installed by the evade enter (`AI_EnterState_HelicopterEvade @ 0x465F60`, a misnomer;
    ids 0/2 @ 0x4661EC / @ 0x46624D); see §1.3.
 10. RESOLVED (§34): the class machines run from `Entity_UpdatePool1Slot @ 0x4B8DD0` (the +0x1C8
     call @ 0x4B8E3C) when the +0x2AC countdown is nonpositive (@ 0x4B8E1B), not from the vehicle
@@ -812,7 +812,7 @@ offset** `[orig: Entity_SpawnFromBMSRecord @ 0x40EB69..0x40EBA6]`.
   `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
   phase counters: it is move-step id 3, the HELO_EVADE hover (§1.3), not a death mover.
 - Dispatcher facts confirmed: the air-class machine `@ 0x4581B0` (IDB
-  `EntityAI_ProcessInfantryStateMachine`; the ground-class twin is `@ 0x4583C0`; 24-row table
+  `EntityAI_ProcessAirStateMachine`; the ground-class twin is `@ 0x4583C0`; 24-row table
   @ 0x815238), event args 0=update / 1=the class callback's kill/damage notification (it queues
   AIEvent {1, channel 9 air / 0 ground, index, 0, the hit record's owner +0x44}, §38.1) / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
   controller row 4 with a per-entity phase limit of 496, not a per-frame admission
@@ -1149,7 +1149,7 @@ floor offsets are the brain's husk/intact floors brain+0x30/+0x2C written by the
 (§10.2, §38.1), and the node-Z gate is brain[108] (profile+0x38); (3) RESOLVED: the snap left
 with the clamp; (4) the water clamp is wired
 (the height field's 16.16 water plane `TerrainHeightField::water_y`, applied when
-`GroundClearance::has_physics`, the entity+0x170 test).
+`GroundClearance::has_occupant`, the entity+0x170 test).
 
 ## 11. Appendix: waypoint slot model (2026-06-07)
 
@@ -3380,7 +3380,7 @@ internals witnessed in §18.5).
   `@ 0x466f60`; the result goes to `Entity_SetAITarget` unconditionally, a null result
   included (`@ 0x4716F0`). Called from both fire ticks (`@ 0x472e00`, `@ 0x471710`).
   brain[42] += 16 on each processed tick (`add [esi+0A8h],ebx` @ 0x472ECD; the aircraft
-  twin @ 0x4717E1 in `Entity_ProcessInfantryWeaponFire @ 0x471710`), ported in both combat ticks.
+  twin @ 0x4717E1 in `AI_TickState_AircraftCombat @ 0x471710`), ported in both combat ticks.
 - `[orig: Entity_AlertNearbyAllies @ 0x4654b0]` (ex "ScanForNearbyEnemies" — misnomer, the
   team compare is EQUAL): pool-1 scan for same-team, alive, non-building entities within
   0x640000 (100 u); sets the caller's own `AiSlot+136 = 2` per ally in range (`@ 0x46558A`)
@@ -3410,11 +3410,11 @@ Also witnessed: `@ 0x472e00`'s callee set includes the relation-matrix writers
 SetDamagedBit`, `EventMatrix_SetSpecialBit`) — the concrete apply-sites for P2's
 recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMovementTarget`
 (it moves while fighting) and `Entity_ComputeWeaponFireTransform_0` /
-`AI_GetSuspensionFirePoint` (aim transforms).
+`AI_IsTargetInSight` (aim transforms).
 
 ### 16.5 Open follow-ups (this session's unknowns)
 
-4. `Entity_ProcessInfantryWeaponFire @ 0x471710` is wired as the **state-8 tick**
+4. `AI_TickState_AircraftCombat @ 0x471710` is wired as the **state-8 tick**
    (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — RESOLVED 2026-09-08: it is
    the aircraft brain's weapon-fire leg (the IDB name is a misnomer and is kept; the
    PR #640 alias `AI_UpdateAircraftCombat` never existed in the IDB) — ported in
@@ -3635,7 +3635,7 @@ bodies receive moveTimer 1. NPCs receive 1/2 for the attacker's same command gro
 error below `0x3FFFFFC0`. Flags&2 blocks the store; zero hit type skips the store.
 The projectile callback invokes this before death dispatch; the blast invokes it
 inside its range/visibility gates before the damage callback's armor rejection.
-[orig: Entity_ApplyCollisionForce @ 0x4AF4A0; Entity_HandleDamageTrigger @ 0x4074BA;
+[orig: Entity_ApplyCollisionForce @ 0x4AF4A0; OrganicClass_HandleEvent @ 0x4074BA;
 Entity_HandleDamageAndTriggerZones @ 0x407822; Projectile_ProcessExplosionQueue
 @ 0x4EB1D2] Retail assumes a valid attacker for the NPC group lookup; ownerless
 embedder events use the ordinary duration.
@@ -3731,7 +3731,7 @@ explosive NEAR-MISS that deals nothing still shakes. Its tail (`wasHit`,
 `damageTimer += 10` below 25, `lastAttacker`, all skipped on self damage)
 `[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain,
 `AiSystem::apply_round_hits`, which the entity update runs right after the explosion queue
-(§38.9). Three call sites: `Entity_HandleDamageTrigger @0x407588` and
+(§38.9). Three call sites: `OrganicClass_HandleEvent @0x407588` and
 `Entity_HandleDamageAndTriggerZones @0x40792b` (the two class damage callbacks,
 unported for the cosmetic half) and `Projectile_ProcessExplosionQueue @0x4eb05c`
 — the OUTER-BAND flinch, taken by any organic (`victim->itemDef->type(+0x5C) == 3`)
@@ -4014,7 +4014,7 @@ AiSlot[3] and the refcount (the caller keeps its old pointer for the bearing onl
 the truncated, clamped planar 16.16 distance against the approach cap `profile+0x4C`
 (`@ 0x473AF3`; beyond it only the > 620 give-up); at or beyond max_chase `profile+0xBC`
 (`@ 0x473B29`) full speed; inside it the give-up timer rests only while
-`AI_GetSuspensionFirePoint @ 0x456860` validates the target (`@ 0x473B36` /
+`AI_IsTargetInSight @ 0x456860` validates the target (`@ 0x473B36` /
 `@ 0x473BE4`), speed = speedA from min_chase `profile+0xB8` on (`@ 0x473B53`), closer
 than that the target's `brain[136]` (entity+0x64 non-null, `@ 0x473B72`) else its
 planar |vel| (+0x98/+0x9C, `@ 0x473B83..0x473BCE`); the common tail clamps the output
@@ -4056,8 +4056,8 @@ bone byte 0 (`@ 0x4741CC..0x4741D6`). `ai_vehicle_combat` pins these legs.
 2. RESOLVED 2026-08-12 → §17.9: `Entity_ComputeWeaponFireTransform_0 @ 0x456980`
    (the old `0x455b30` cite was wrong) witnessed in full and ported (D-AI-2).
 3. RESOLVED 2026-09-23: `brain[48]` is the dispatchers' no-ammo idle latch
-   (`EntityAI_ProcessInfantryStateMachine @ 0x4581C4..0x4581F4`,
-   `EntityAI_ProcessVehicleStateMachine @ 0x4583D7..0x458402`; §38.1), read by the
+   (`EntityAI_ProcessAirStateMachine @ 0x4581C4..0x4581F4`,
+   `EntityAI_ProcessGroundStateMachine @ 0x4583D7..0x458402`; §38.1), read by the
    state-17 tick `@ 0x472EEB` / `@ 0x4730FE` / `@ 0x473309` / `@ 0x473AB1`.
 4. RESOLVED 2026-09-23 (dead): the swap is the player-missile swap and never happens,
    since `sub_545930` is `mov eax,1; retn` (§17.6).
@@ -4102,7 +4102,7 @@ from the entity's live pos/angles; `weaponDefBlock` = the `.aip` block at
 `profile+120`/`+152` (§17.9c); `seed` = the live ammo count (`brain[53]/[54]`);
 `deferLOS` ORs the §17.2 ctx `0x8000` defer-LOS bit (1 at the mobile sites, 0 at
 stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
-@ 0x472e00` + 8 in `Entity_ProcessInfantryWeaponFire @ 0x471710`-family.
+@ 0x472e00` + 8 in `AI_TickState_AircraftCombat @ 0x471710`-family.
 
 - **Head gate** `@ 0x4569b2`: no target (`brain[38]` null) and `!(block+16 & 0x18)`
   → return 0. Bone-flag byte `brain+0x310` cleared `@ 0x4569d5`.
@@ -4143,7 +4143,7 @@ stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
   exactly double (`step·0x318C631`, ±0x4210842). On every snap the per-type turret
   diagnostic globals get the active yaw/pitch high words (`profile+16` == 2 GROUND →
   `dword_83FEE0/83FEE8`, == 1 HELO → `dword_83FE88/83FE90`) `@ 0x456e33/0x456f9c`.
-- `AI_GetSuspensionFirePoint @ 0x456860` is a target-sight check (the IDB name
+- `AI_IsTargetInSight @ 0x456860` is a target-sight check (the IDB name
   misleads): it reads the brain's target brain[38] (`@ 0x45686A..0x45686D`), returns 0
   without one (`@ 0x456875..0x456881`), then builds the shooter-frame metrics context
   from the entity's pose with the active yaw (`brain[118]`) + `profile+140`. Its callers
@@ -4248,7 +4248,7 @@ block but never acquire), and no shipped file resolves a nonzero facing.
 | D-AI-7 | The LOS raycast is ported: the terrain leg with the both-INDOORS skip and the sector leg over the whole of pool 2, then pool 1, each by its used count, with the retail exclusion set (A, B, their parent slots and candidates standing on them; §18.5); the itemDef type-3 person sphere-block, the ray-radius argument (LOS passes 0) and the `@ 0x60c760` sibling's internal delta remain | [orig: Physics_RaycastTerrainAndSectors @ 0x539910 (@ 0x539A16..0x539A5A, @ 0x5399BD..0x539A12, @ 0x53882F..0x538877)] | OPEN (residuals only; `ai_los`, `collision`) |
 | D-AI-8 | Fire-presentation stand-ins: (b) the fire-sound max-range gate runs at play time (the bank's cull) where retail tests it at fire time; (a), (c), (d) and (e) are closed (§18, §25) | [orig: Sound_PlayWithDistanceAttenuation @ 0x528E40 (soundDef+72 @ 0x528ec6)] | OPEN (b only; it differs only when the listener moves during the propagation delay) |
 | D-AI-9 | Remaining infantry death work: the incendiary ammo+72 override and emitter, the head-look reference cleanup, the player redeploy callers' consolidation with the shared organic reset, and the org2 death transaction, which still comes from the host's damage-time route while the org1 edge owns the NPC transaction (§19.3) | [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0 (the edge @ 0x4B4BF1..0x4B4CEA); Entity_CheckAndProcessDeath @ 0x51B550] (§19.2, §33.12, §33.34) | OPEN |
-| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `Entity_HandleDamageTrigger @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; the retreat (moveMode 5) is dead code, the "cover" helper is the ported obstacle detour, and the search movement and the scripted-idle aim override are ported (2026-09-23, §38.4); the target-query residuals stay open; §33.27 implements the idle attention and independent gaze motor, with automatic facial expressions tracked separately in D-INF-5. The 2026-08-28 pass ported the pre_attack 152 reaction, the cover_idle/cover_run 163/164 hit flinch with the think-cadence wasHit consume, the unconditional moveTimer stamp and the no-reaction fall-through into the approach arm, the command-126 and target-ground approach gates (`Entity_CheckGroundHeightAtPosition @ 0x4aff70`), the alerted-idle predicate (49 with a slot[3] target, wasHit not a term), the availability-gated wounded gaits, the same-think waypoint step on a 0 cooldown, and the flt_7C19E0 sqrt clamp on the waypoint distance | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
+| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `OrganicClass_HandleEvent @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; the retreat (moveMode 5) is dead code, the "cover" helper is the ported obstacle detour, and the search movement and the scripted-idle aim override are ported (2026-09-23, §38.4); the target-query residuals stay open; §33.27 implements the idle attention and independent gaze motor, with automatic facial expressions tracked separately in D-INF-5. The 2026-08-28 pass ported the pre_attack 152 reaction, the cover_idle/cover_run 163/164 hit flinch with the think-cadence wasHit consume, the unconditional moveTimer stamp and the no-reaction fall-through into the approach arm, the command-126 and target-ground approach gates (`Entity_CheckGroundHeightAtPosition @ 0x4aff70`), the alerted-idle predicate (49 with a slot[3] target, wasHit not a term), the availability-gated wounded gaits, the same-think waypoint step on a 0 cooldown, and the flt_7C19E0 sqrt clamp on the waypoint distance | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
 
 ## 18. Appendix: fire presentation + the LOS raycast internals (engine-research, 2026-07-16 session 4)
 
@@ -4503,7 +4503,7 @@ scopeup/scopedown`. `g_animStateFlagsTable @ 0x8139E8` rows 200..239 = `0x82`
 7:9, 8:10, 9:5, 10:6, 11:11, 12:12, 13-14:2, 15:8, 16:7, 17:13, 18:14, 19-21:7,
 22-24:8, 25-26:7, 27-28:8, 29-31:1.
 
-### 19.2 The bullet kill selects at DAMAGE time — `Entity_HandleDamageTrigger @ 0x407310` type 1
+### 19.2 The bullet kill selects at DAMAGE time — `OrganicClass_HandleEvent @ 0x407310` type 1
 
 This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFromItemDef
 @ 0x49e550` installs it). Type 1 (the round kill, reading the global hit record
@@ -4736,7 +4736,7 @@ the body's next motor tick (§38.3). Then, in order `[orig: @ 0x4b9c40-0x4b9d55]
 4. consume `+0x2C0` (`@ 0x4B9CC9`): zero → `ComputeAnimSlotIndex(0,0,4)` = 174 (`@ 0x4B9CE5`),
    **`+0x178 lastAttacker = 0`** `[orig: @ 0x4b9ceb; the player-body edge's twin
    @ 0x4b4c72..0x4b4c8d]` and, org1 only, the class callback `deathCallback(entity, 1, 0)`
-   (`@ 0x4B9CF1`): for org0/org1 that is `Entity_HandleDamageTrigger @ 0x407310` event 1, which
+   (`@ 0x4B9CF1`): for org0/org1 that is `OrganicClass_HandleEvent @ 0x407310` event 1, which
    gives a non-player the slot alert byte 2 (`@ 0x4073DB`) and `TriggerGroup_SetAlertRed`
    (`@ 0x4073EA`), then exits when the global hit record's +0x40 is null (`@ 0x40740D`), else
    runs the death-anim and debris legs on the last recorded round (§19.2). So a death nothing
@@ -4812,7 +4812,7 @@ entity origins, as retail does; the former 0.9 u endpoint lift is removed (§33.
 
 Row dwords `@ 0x815388` / `@ 0x8153A8` (enter/tick/exit/event; shared exit
 `nullsub_70 @ 0x457670`). Only the authority runs the full SM; clients run rows
-21/23 too (`EntityAI_ProcessVehicleStateMachine @ 0x4583c0` — wrecks settle
+21/23 too (`EntityAI_ProcessGroundStateMachine @ 0x4583c0` — wrecks settle
 everywhere).
 
 - **enter 21** `AI_TransitionToDeath_GroundVehicle @ 0x467b20`: when not yet husked
@@ -5754,7 +5754,7 @@ comes from the aim cone, which shrinks to 5.0 deg for a seated player (`0x38E38E
 place of the standing `0x3FFFFFC0` @ 0x435d90, both BAM32 look-offset radii): USE swaps only onto
 a free seat the rider is looking at and dismounts when the cone is empty [orig:
 Entity_ToggleVehicleMount @ 0x4369ac..0x4369c7]. The port runs the same cone
-(`find_nearest_free_seat`, `vehicle_attach.cpp`). A WAC-settable global `dword_C6EADC` (reset by
+(`find_nearest_free_seat`, `vehicle_attach.cpp`). A WAC-settable global `wac_var_seatbelt` (reset by
 `WacScript_FreeAll @ 0x4f637b`) blocks the local player's dismount when set.
 
 `Entity_TryEnterNearestVehicle @ 0x4368c0`: the queued Co-op spawn-marker
@@ -5978,8 +5978,8 @@ footprints `r/2 + (r/2)*|cos(yaw - ang)|` of both entities + 1.0 u (the
 (`|Yaw - ang - 0x7FFFFF80| <= 357913920`) multiplies the command speed by
 `((DcbId + (frame << 8)) & 0x7FFF) + 0x4000` >> 16 — a 0.25..0.75 stochastic
 brake per tick, compounding per neighbor (the counter is
-`dword_24C1948`, the ENTITY-UPDATE counter, not a render frame counter: its one writer is
-`add dword_24C1948,esi` @ 0x4C2639 at the tail of a non-epilog update, with no reset, so it runs
+`g_entity_update_counter`, the ENTITY-UPDATE counter, not a render frame counter: its one writer is
+`add g_entity_update_counter,esi` @ 0x4C2639 at the tail of a non-epilog update, with no reset, so it runs
 one behind `tick` through the process's first mission and keeps counting across restarts and
 loads; ported as `World::entity_update_counter`, §38.9). Without it, redirected
 convoys drove full-speed into parked neighbors and the (ported) hull contact
@@ -6236,7 +6236,7 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   `@ 0x43cdb4`):
   - `Entity_SetWaypointByTeam @ 0x43CD20` (BMS RedirectGroupTo from
     `EventAction_Dispatch @ 0x454315`, and the WAC GtoWP handler at
-    `0x4ED3D0`, an IDB misnomer `TextResource_GetMissionString`, which calls it
+    `0x4ED3D0`, an IDB misnomer `WacCmd_GroupToWaypoint`, which calls it
     with node -1 `@ 0x4ED3DC` and always returns 1 `@ 0x4ED3E4`): walks pool 0
     then pool 1 matching the signed commandGroup word (`@ 0x43CD6D` /
     `@ 0x43CE7B`), each needing an AI slot. Pool 0 **auto-detaches a mounted
@@ -7962,7 +7962,7 @@ walk `@ 0x466FAB` / `@ 0x4670CD` / `@ 0x4670E1`; the kill feed's type choice in
 
 An actual hit runs the organic damage callback. For a non-player victim
 (`!(Flags & 0x100)`), it writes AI move/alert byte `+136 = 2` and raises the command group
-to red [orig: Entity_HandleDamageTrigger @ 0x407310; alert block @ 0x4073c8-0x4073ea].
+to red [orig: OrganicClass_HandleEvent @ 0x407310; alert block @ 0x4073c8-0x4073ea].
 The separate receive callback returns immediately for self-damage at `0x4af859`; otherwise
 it sets `wasHit`, adds 10 to the reaction timer when the old value is below 25, and records
 the attacker [orig: Entity_OnDamageReceived @ 0x4af800]. The port mirrors both layers:
@@ -9496,7 +9496,7 @@ SSN, group, or area fan reaches the same entity/controller/brain mutations.
 | `setaccuracy` | writes `max(0, 100-a)` and `max(0, 100-b)` into the two controller error slots in reversed argument order [orig: WacCmd_SetAccuracy @ 0x4F2070] | `set_ssn_accuracy` |
 | `Gsetaccuracy` | the same pair over matching pool-0 AI rows only [orig: WacCmd_GroupSetAccuracy @ 0x4F7BE0] | `set_group_accuracy` |
 | `ssnguard` | toggles entity Flags `0x40` for a resolved row, independent of whether it owns a brain [orig: WacCmd_SsnGuard @ 0x4F71C0] | `set_ssn_guard` |
-| `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
+| `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacCmd_SsnCspd @ 0x4F74B0; WacCmd_SsnPspd @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
 | `Gremove` | removes every member of the WAC named group through `Server_RemoveEntityAndNotify` (S2C 0x12), with no gate, and returns 0 [orig: WacCmd_GroupRemove @ 0x4F1F80 (the Server_RemoveEntityAndNotify call @ 0x4F1FF2, the return @ 0x4F2006)] | the named-group walk in `wac/vm.cpp` calling `EntityCommands::server_remove_and_notify` per member (`script_command_parity`) |
 
 `wac_behavior` compiles and executes these names through the public VM seam; it
@@ -9951,7 +9951,7 @@ multiple rows share one authored SSN. Gkill/Gremove walk named member arrays
 forward; numeric kill shares [orig: Entity_KillAllByNetId @0x43C8E0] with BMS
 KillGroup (pools 2, 0, 1 by the BMS command group, dead rows included, the
 attacker kept; group 0 exits @0x43C8F2). Gkill's per-member helper is the WAC
-killSSN body [orig: Entity_ResetWeaponState @0x4F1E40, which is WacCmd_KillSsn]:
+killSSN body [orig: WacCmd_KillSsn @0x4F1E40, which is WacCmd_KillSsn]:
 it requires a nonzero +0x1C ItemTypeIndex [orig: @0x4f1e89], memsets the global
 hit record (@0x4F1E8F..0x4F1E99), zeroes health and lastAttacker, clears +0x2C0
 for a person and runs the class callback (e, 1, 0) (§38.7); Gremove does not
@@ -10020,7 +10020,7 @@ cleanup, standing/seated distinction and definition-free removal.
 ### 33.12 NPC respawn counts and the shared organic reset (2026-09-08)
 
 Witnesses: WacCmd_SsnSpawn [orig: WacCmd_SsnSpawn @0x4F7A80], GroupSpawn's
-mislabeled WacScript_SetEntityWaypoint [orig: WacScript_SetEntityWaypoint
+mislabeled WacCmd_GroupSpawn [orig: WacCmd_GroupSpawn
 @0x4F7AE0], Entity_ResetToSpawnState [orig: Entity_ResetToSpawnState @0x4B9610],
 Entity_FindNearestTriggerByType [orig: Entity_FindNearestTriggerByType
 @0x407EA0], and the org1 head/corpse block [orig: Entity_UpdateInfantryAI
@@ -10103,9 +10103,9 @@ at some consumers.
 SSNMin/SSNMax/SSNAtt [orig: WacCmd_SsnMin @0x4F2010], [orig: WacCmd_SsnMax
 @0x4F2210], [orig: WacCmd_SsnAtt @0x4F2270] write controller offsets +64/+68/+60
 respectively. They require only a valid entity; a missing controller still
-returns 1. GroupMin/GroupMax/GroupAtt [orig: WacScript_SetEntityAITarget
-@0x4F7C50], [orig: WacScript_SetEntityAlertState @0x4F7CA0], [orig:
-WacScript_SetEntityAIAction @0x4F7CF0] scan pool 0 by signed command group,
+returns 1. GroupMin/GroupMax/GroupAtt [orig: WacCmd_GroupMin
+@0x4F7C50], [orig: WacCmd_GroupMax @0x4F7CA0], [orig:
+WacCmd_GroupAtt @0x4F7CF0] scan pool 0 by signed command group,
 including zero and dead/itemless rows, and always return 1. These now reach the
 existing engagement/sight/attack fields read by infantry combat. The unused
 Entity copies of those three fields were removed. BMS promotion continues to
@@ -10185,10 +10185,10 @@ motion or replay sound. Transitions play the authored set at the unposed COBJ
 pivot transformed by placement, falling back to entity origin. Every callback
 sets static think age to 1920.
 
-WAC OpenDoors/CloseDoors at [orig: WacScript_SendWeaponDetachEvent @0x4F7D40;
-Entity_SendWeaponEvent8ToPool2 @0x4F7DA0] visit pool 2 only, comparing the
+WAC OpenDoors/CloseDoors at [orig: WacCmd_OpenDoors @0x4F7D40;
+WacCmd_CloseDoors @0x4F7DA0] visit pool 2 only, comparing the
 signed command-group word and exact door callback. BMS actions 30/31 at [orig:
-Entity_KillDestructiblesByTeam @0x4541A0; Entity_KillDestructiblesByOwner
+EventAction_OpenGroupDoors @0x4541A0; EventAction_CloseGroupDoors
 @0x454240] visit pool 2 then pool 1. WAC [orig: WacCmd_DoorOpen @0x4F70A0]
 returns the FIRST matching door entity's first slot state==2; a later open door
 cannot override an earlier closed one.
@@ -10271,7 +10271,7 @@ rows is an lvalue [orig: @0x4f2a92..0x4f2a9f]; writes land on ticks (the run
 counter), result (the accumulator @0xC6EB24), humans, bluekills/greenkills,
 breathtime (@0xC6EAE0, seeded 20) and autogain (@0xC6EAFC, seeded 1)
 [orig: WacScript_FreeAll @0x4F6300 (the seeds @0x4f6381; @0x4f6371)] as stored
-words. breathtime's host readers ([orig: Server_UpdateEntityIdleTimers @0x50D770
+words. breathtime's host readers ([orig: Server_UpdatePlayerBreathTimers @0x50D770
 (@0x50d7e6); GameEvent_PlayerDeath @0x516DD0 (@0x5172f6)]), its wire writer
 ([orig: NetPacket_WritePlayerState @0x4FF6B0 (@0x4ff9db)]) and the joiner's
 store ([orig: NapiNPClientMsg_0x00A (@0x4301A1)]) are ported (§38.9), as is
@@ -11840,8 +11840,8 @@ rather than receiving this unrelated controller's speed seed.
 Default event types still reach the dispatchers' transition tail. The ground
 client accepts pending 16 or 21..23; the air client accepts 7 or 13..15. The
 same authority/client guards now apply to those events in the port.
-[orig: EntityAI_ProcessVehicleStateMachine @ 0x4583C0 (default branch
-@ 0x45846D); EntityAI_ProcessInfantryStateMachine @ 0x4581B0 (default branch
+[orig: EntityAI_ProcessGroundStateMachine @ 0x4583C0 (default branch
+@ 0x45846D); EntityAI_ProcessAirStateMachine @ 0x4581B0 (default branch
 @ 0x458261)]
 
 The aircraft mover writes only the current state brain+0x10 (2026-09-22): 0 -> 14
@@ -12133,9 +12133,9 @@ listing by SHA-256) and `mission_event_vectors`
 
 Only five rows of `g_EntityClassEventCallbackTable @ 0x813000` (24-byte rows
 `{tag, fn1..fn4}`) reach a brain machine: CHel @ 0x8132A0 (fn1
-`EntityAI_ProcessInfantryStateMachine @ 0x4581B0`, which is the AIR-class machine),
+`EntityAI_ProcessAirStateMachine @ 0x4581B0`, which is the AIR-class machine),
 cpln @ 0x8133A8 (fn1 @ 0x462120, a jump to it), cveh @ 0x813378 (fn1
-`EntityAI_ProcessVehicleStateMachine @ 0x4583C0`, the GROUND-class machine), cbot
+`EntityAI_ProcessGroundStateMachine @ 0x4583C0`, the GROUND-class machine), cbot
 @ 0x813390 and ctrn @ 0x8133C0 (fn1 @ 0x462130 / @ 0x462140, jumps to it). Every
 other row's fn1 is another class's callback (null @ 0x813000 -> 0x406FF0; ewep
 @ 0x813090 -> `Entity_UpdateChildAttachment @ 0x4409A0`; gnrc @ 0x8130C0 ->
@@ -12196,8 +12196,8 @@ the ground death's child kill) route the same way.
   @ 0x409870` returns 0 for a miss and for the first row). Its readers are the
   ground state-17 tick (§38.2) and the aircraft legs. The armed Little Birds of 00TRd
   (SSN 1065/1066) and 05TR (SSN 680), profile `h_ah6z`, take the armed legs.
-  [orig: EntityAI_ProcessInfantryStateMachine @ 0x4581C4..0x4581F4;
-  EntityAI_ProcessVehicleStateMachine @ 0x4583D7..0x458402]
+  [orig: EntityAI_ProcessAirStateMachine @ 0x4581C4..0x4581F4;
+  EntityAI_ProcessGroundStateMachine @ 0x4583D7..0x458402]
 - **The alert edge.** Authority, then an occupant at entity+0x170 (the first
   claimant, `Entity::primary_occupant`) whose Flags lack 0x100 (Player), then prev !=
   alert; failing any of them records prev = alert with no pending event.
@@ -12335,12 +12335,12 @@ the ground death's child kill) route the same way.
   its result to `Entity_SetAITarget` (@ 0x4716F0), so a rescan that finds nothing
   clears brain[38], AiSlot[3] and the refcount; the caller keeps its old pointer for
   the bearing only (`jz` @ 0x473A41..0x473A45) and the solver reads brain[38] itself
-  (@ 0x4569A4). The aircraft combat tick (`Entity_ProcessInfantryWeaponFire
+  (@ 0x4569A4). The aircraft combat tick (`AI_TickState_AircraftCombat
   @ 0x471710`, the call @ 0x472349, `jz` @ 0x472351..0x472355) drops its target the
   same way. The chase compares the truncated planar 16.16 distance with the approach
   cap profile+0x4C (@ 0x473AF3; beyond it only the > 620 give-up runs); at or beyond
   max_chase profile+0xBC (@ 0x473B29) it runs full speed; inside it the give-up timer
-  rests only while `AI_GetSuspensionFirePoint @ 0x456860` validates the target
+  rests only while `AI_IsTargetInSight @ 0x456860` validates the target
   (@ 0x473B36 / @ 0x473BE4); from min_chase profile+0xB8 on the speed is speedA
   (@ 0x473B53), closer it is the target's brain[136] when it has a brain (@ 0x473B72)
   else its planar |velocity| (+0x98/+0x9C, @ 0x473B83..0x473BCE); the tail clamps to
@@ -12475,7 +12475,7 @@ the ground death's child kill) route the same way.
   @ 0x4B9D1B). An unstaged death (+0x2C0 == 0, @ 0x4B9CC9) takes
   `Entity_ComputeAnimSlotIndex(e, 0, 0, 4)` = 174 (@ 0x4B9CE5), lastAttacker 0
   (@ 0x4B9CEB) and the class callback (e, 1, 0) (@ 0x4B9CF1): for org0/org1 that is
-  `Entity_HandleDamageTrigger @ 0x407310` event 1, which gives a non-player the slot
+  `OrganicClass_HandleEvent @ 0x407310` event 1, which gives a non-player the slot
   alert byte 2 (@ 0x4073DB) and `TriggerGroup_SetAlertRed` (@ 0x4073EA), then exits
   when the hit record's +0x40 is null (@ 0x40740D) and otherwise runs the death-anim
   and debris legs on the last recorded round. Flags & 0x8000 selects death_drown 175
@@ -12858,7 +12858,7 @@ unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
   no count test and no clamp: a route onto an empty list (CP02 items 9/10 on list 26)
   or a start node past the count is kept, and the refresh then holds on count 0.
 - **The movers.** Ids 0..3 of `g_AIMoveStepFnTable @ 0x8153B8` are the HELO_EVADE
-  maneuvers, installed only by the evade enter `AI_TransitionToDeath_Infantry
+  maneuvers, installed only by the evade enter `AI_EnterState_HelicopterEvade
   @ 0x465F60` (id 3 @ 0x466109, id 1 @ 0x466195, id 0 @ 0x4661EC, id 2 @ 0x46624D)
   and chained to id 3 at a phase limit (@ 0x461C9D, @ 0x461D1D, @ 0x466D93): id 0
   (@ 0x461C30) and id 2 (@ 0x461CB0) hold ground + 5 u for 248 / 434 phase; id 1
@@ -13070,7 +13070,7 @@ language as retail compiles it; the witnesses:
 
 ### 38.7 WAC commands
 
-- **killSSN** is `WacCmd_KillSsn @ 0x4F1E40` (IDB name `Entity_ResetWeaponState`): the
+- **killSSN** is `WacCmd_KillSsn @ 0x4F1E40` (IDB name `WacCmd_KillSsn`): the
   ItemTypeIndex gate (@ 0x4F1E89), the hit record's memset (@ 0x4F1E8F..0x4F1E99),
   health 0 (@ 0x4F1EA4), lastAttacker 0 (@ 0x4F1EAD), +0x2C0 = 0 when def+0x5C == 3
   (@ 0x4F1EB7..0x4F1EBD), then the class callback (e, 1, 0) (@ 0x4F1EC7..0x4F1ED2). The
@@ -13093,7 +13093,7 @@ language as retail compiles it; the witnesses:
   (@ 0x4F21C4), floors a negative sum to 0 and returns 1 (@ 0x4F21D7..0x4F21E5), stores
   the signed def healthMax (+0x17C) word for a sum above it and returns 1
   (@ 0x4F21E6..0x4F21FE), otherwise clears lastAttacker (@ 0x4F21FF) and returns 0
-  (@ 0x4F2209). GroupHP (IDB `WacScript_SetEntityTeamSlot`) walks pools 0, 1, 2
+  (@ 0x4F2209). GroupHP (IDB `WacCmd_GroupHp`) walks pools 0, 1, 2
   (@ 0x4F7B30 / @ 0x4F7B6D / @ 0x4F7B9D) for every row whose signed command-group word
   matches (@ 0x4F7B57), writes the health word only (@ 0x4F7B64) and returns 1
   (@ 0x4F7BD0). Only organics raise a death from a zeroed word (their motors' edges,
@@ -13150,7 +13150,7 @@ language as retail compiles it; the witnesses:
   the call @ 0x5BA197). The triggered text (`HUD_DisplayTriggeredText @ 0x51F190`, the
   call @ 0x51F216) and the console lines (consol, pconsol, consol# with its "%s %i"
   sprintf @ 0x4EDC2E in `WacCmd_ConsolNumber @ 0x4EDC00`, forceanim, Help) post into
-  `Chat_AddDebugMessage @ 0x4987F0`, the SYSTEM ring. `WacAction_Lose @ 0x4ED3F0` posts
+  `Chat_AddMessageChannel2 @ 0x4987F0`, the SYSTEM ring. `WacAction_Lose @ 0x4ED3F0` posts
   and relays its Misc key through `GameMsg_AddChatLineAndRelay` with team 0 on both
   branches (@ 0x4ED411, @ 0x4ED477), so the joiners receive S2C 0x3F kind 1 before
   `Server_ProcessRoundEnd`; a joiner resolves the key through
@@ -13294,7 +13294,7 @@ world-side facts of the slice:
 - **The vehicle claim.** After each live body's +0x1C4 update the pool-0 walk finds
   the first def-type-1 entity on the body's +0x28 chain (`Entity_FindChildByDefType
   @ 0x43BEA0`, first match, under 20 hops) and on `tick & 3 == 0` (@ 0x4C25CE) wakes it
-  (`sub_459290 @ 0x459290`: `or [e+24h],40h; mov [e+3B8h],tick`), unconditionally once
+  (`Entity_WakeContactSolve @ 0x459290`: `or [e+24h],40h; mov [e+3B8h],tick`), unconditionally once
   found. The team/Berserk copy needs PlayerControl (def attribute 0x40) and vehicle
   Flags without 0x1000 and 2; a seated body always copies; a same-team body skips the
   hold scan when !is_in_session or GameType & 0x10000; otherwise ten seat words
@@ -13303,15 +13303,15 @@ world-side facts of the slice:
   (@ 0x4C259E..0x4C25C7). The flyover's medics stand on the helicopter
   (`HeliLift_SpawnFlyover` @ 0x452980 / @ 0x4529BD), so it is woken every fourth tick.
   Port: `claim_standing_vehicle`.
-- **The entity-update counter.** dword_24C1948 has one writer, `add
-  dword_24C1948,esi` (@ 0x4C2639) at the tail of a non-epilog update, and no reset, so
+- **The entity-update counter.** g_entity_update_counter has one writer, `add
+  g_entity_update_counter,esi` (@ 0x4C2639) at the tail of a non-epilog update, and no reset, so
   it runs one behind `tick` through the process's first mission, holds on a skipped or
   epilog frame and keeps counting across restarts and loads. Its readers: the ground
-  movers' ground-link gate (`test byte ptr dword_24C1948,7` @ 0x46E178, @ 0x484099,
+  movers' ground-link gate (`test byte ptr g_entity_update_counter,7` @ 0x46E178, @ 0x484099,
   @ 0x486B08, @ 0x488B69, @ 0x48AFB9), the avoid-brake factor (@ 0x46EFC1, @ 0x470C70,
   @ 0x4850CC, @ 0x4879EF, @ 0x489AEF, @ 0x48BF26, @ 0x48E712, @ 0x491B2D), the movement
   resolver's full update (& 0x3F, @ 0x4B2CAF), `Player_UpdatePerFrame` (@ 0x4DE754,
-  latched into dword_C84700 for the SP epilog's time-weighted score, `sub_40DA30`
+  latched into g_sp_elapsed_update_count for the SP epilog's time-weighted score, `Score_ComputeSpTimeWeightedAverage`
   @ 0x40DA8C), the trail wobble (`Projectile_GetTrailAnchorPos` @ 0x4E650B), the
   body-damage figure blink (`HUD_RenderAllOverlays` @ 0x5A83ED), the water noise and
   wave phase (`Water_GenerateNoiseTextures` @ 0x5C0366 / @ 0x5C036E) and the water
@@ -13384,13 +13384,13 @@ world-side facts of the slice:
   local role and a joiner; `World::pump_weapon_actions` is the one weapon-action walk after
   the camera (the frame order `@ 0x52674B` -> `@ 0x526758` -> `@ 0x526774` -> the camera
   `@ 0x526781` when not paused -> `@ 0x526786`), outside the entity-update gate (§26.6).
-- **The breath timers.** `Server_UpdateEntityIdleTimers @ 0x50D770` runs inside the
+- **The breath timers.** `Server_UpdatePlayerBreathTimers @ 0x50D770` runs inside the
   script admission, after the WAC tick and the spawn-marker pass, on `tick & 0x1F ==
   0`, and returns during the pre-round countdown (@ 0x50D773). Per in-match
   non-spectator slot it compares Position.Z + CameraOffset.Z (+0xC plus +0x74) with
   Env_WaterHeightFixed in a raw signed compare (@ 0x50D7CD..0x50D7D9): a wet sample
   increments slot+0x1CC (@ 0x50D7DF), a surfaced sample or the dead bit alone
-  (@ 0x50D7C3..0x50D7C7) clears it. The limit is 4 * breathtime (dword_C6EAE0, the WAC
+  (@ 0x50D7C3..0x50D7C7) clears it. The limit is 4 * breathtime (wac_var_breathtime, the WAC
   named value seeded 20 by `WacScript_FreeAll` @ 0x4F6381 and writable through its row
   @ 0x82EFEC) in 32 bits, compared signed (@ 0x50D7E6..0x50D7F2, `jle` @ 0x50D7FB), with
   warnings at the limit less 12, 36 and 24 (@ 0x50D842..0x50D861). The first sample
@@ -13640,24 +13640,24 @@ proposed, not applied):
 
 | Address | IDB name (2026-09-23) | What it is |
 |---|---|---|
-| 0x4581B0 | EntityAI_ProcessInfantryStateMachine | The AIR-class brain machine (CHel, cpln) |
-| 0x4583C0 | EntityAI_ProcessVehicleStateMachine | The GROUND-class brain machine (cveh, cbot, ctrn) |
-| 0x465F60 | AI_TransitionToDeath_Infantry | The HELO_EVADE enter (installs movers 0..3) |
+| 0x4581B0 | EntityAI_ProcessAirStateMachine | The AIR-class brain machine (CHel, cpln) |
+| 0x4583C0 | EntityAI_ProcessGroundStateMachine | The GROUND-class brain machine (cveh, cbot, ctrn) |
+| 0x465F60 | AI_EnterState_HelicopterEvade | The HELO_EVADE enter (installs movers 0..3) |
 | 0x4613A0 / 0x461870 | AI_CalcGroundVehicleTarget / AI_CalcHelicopterTarget | The helicopter mover (0x10000) / the plane mover (0x10005) |
-| 0x456860 | AI_GetSuspensionFirePoint | A target-sight check (reads brain[38]) |
-| 0x471710 | Entity_ProcessInfantryWeaponFire | The aircraft combat state's tick |
+| 0x456860 | AI_IsTargetInSight | A target-sight check (reads brain[38]) |
+| 0x471710 | AI_TickState_AircraftCombat | The aircraft combat state's tick |
 | 0x456710 | Entity_UpdateSuspensionBounce | The unreferenced PLAYPARTANIM phase integrator |
-| 0x407310 | Entity_HandleDamageTrigger | The org0/org1 class callback |
-| 0x4F1E40 | Entity_ResetWeaponState | `WacCmd_KillSsn` |
-| 0x4ED3D0 / 0x4ED550 | TextResource_GetMissionString / TextResource_LoadMissionText | WAC GtoWP / WAC inc |
-| 0x4F7B30 / 0x4F7AE0 | WacScript_SetEntityTeamSlot / WacScript_SetEntityWaypoint | WAC GroupHP / GroupSpawn |
-| 0x4F7C50 / 0x4F7CA0 / 0x4F7CF0 | WacScript_SetEntityAITarget / SetEntityAlertState / SetEntityAIAction | WAC GroupMin / GroupMax / GroupAtt |
-| 0x4F7D40 / 0x4F7DA0 | WacScript_SendWeaponDetachEvent / Entity_SendWeaponEvent8ToPool2 | WAC opendoors / closedoors |
-| 0x4F74B0 / 0x4F7570 | WacScript_SendAIEvent10ToEntity / 11ToEntity | WAC ssncspd / ssnpspd |
-| 0x50D770 | Server_UpdateEntityIdleTimers | The player breath timers |
-| 0x4987F0 | Chat_AddDebugMessage | The SYSTEM-ring post |
-| 0x40DB80 | CAIGroup_HasGuardTaskFromIndex2 | The mission reset |
-| 0x459290 | sub_459290 | The contact-solve wake |
-| 0x24C1948 | dword_24C1948 | The entity-update counter |
-| 0x4541A0 / 0x454240 | Entity_KillDestructiblesByTeam / Entity_KillDestructiblesByOwner | The BMS door open / close walks |
+| 0x407310 | OrganicClass_HandleEvent | The org0/org1 class callback |
+| 0x4F1E40 | WacCmd_KillSsn | `WacCmd_KillSsn` |
+| 0x4ED3D0 / 0x4ED550 | WacCmd_GroupToWaypoint / WacCmd_Inc | WAC GtoWP / WAC inc |
+| 0x4F7B30 / 0x4F7AE0 | WacCmd_GroupHp / WacCmd_GroupSpawn | WAC GroupHP / GroupSpawn |
+| 0x4F7C50 / 0x4F7CA0 / 0x4F7CF0 | WacCmd_GroupMin / SetEntityAlertState / SetEntityAIAction | WAC GroupMin / GroupMax / GroupAtt |
+| 0x4F7D40 / 0x4F7DA0 | WacCmd_OpenDoors / WacCmd_CloseDoors | WAC opendoors / closedoors |
+| 0x4F74B0 / 0x4F7570 | WacCmd_SsnCspd / 11ToEntity | WAC ssncspd / ssnpspd |
+| 0x50D770 | Server_UpdatePlayerBreathTimers | The player breath timers |
+| 0x4987F0 | Chat_AddMessageChannel2 | The SYSTEM-ring post |
+| 0x40DB80 | Mission_ResetBmsState | The mission reset |
+| 0x459290 | Entity_WakeContactSolve | The contact-solve wake |
+| 0x24C1948 | g_entity_update_counter | The entity-update counter |
+| 0x4541A0 / 0x454240 | EventAction_OpenGroupDoors / EventAction_CloseGroupDoors | The BMS door open / close walks |
 | 0x5A3020 | RenderState_SetLayerVisibilityByIndex | Arms a HUD item-flash timer |

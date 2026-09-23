@@ -53,7 +53,7 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 }
 
 // [orig: AI_UpdateMovementTarget @0x460E40]
-int AiSystem::update_aircraft_waypoint_movement(AiEntity &e, World &world) {
+int AiSystem::update_movement_target(AiEntity &e, World &world) {
 	auto &b = e.brain;
 	const bool patrol = b.f[AiBrain::kCurState] == 7;
 	int32_t speed = b.f[patrol ? AiBrain::kSpeedB : AiBrain::kSpeedA];
@@ -170,7 +170,7 @@ void AiSystem::enter_aircraft_combat(AiEntity &ai, World &world) {
 	b.f[AiBrain::kStep] = 1;
 }
 
-// [orig: AI_TransitionToDeath_Infantry @0x465F60 (aircraft evade enter)]
+// [orig: AI_EnterState_HelicopterEvade @0x465F60 (aircraft evade enter)]
 void AiSystem::enter_aircraft_evade(AiEntity &ai, World &world) {
 	combat_alert(*this, ai, world);
 	auto &b = ai.brain;
@@ -445,7 +445,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 				}
 				// Only the combat-timer reset is gated on the fire point; the
 				// lateral-cyclic word is written on every within-max_chase tick.
-				// [orig: AI_GetSuspensionFirePoint @0x4616b1 -> [40] = 0 @0x4616bd;
+				// [orig: AI_IsTargetInSight @0x4616b1 -> [40] = 0 @0x4616bd;
 				//  LABEL_35 [127] = [45] << 14 @0x4616c7, reached from both arms]
 				if (fire_check && aircraft_target_in_sight(ai, world))
 					b.f[AiBrain::kCombatTimer] = 0;
@@ -486,7 +486,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	b.f[138] = p.field220;
 	return 0;
 }
-// [orig: AI_GetSuspensionFirePoint @0x456860 (weapon visibility check)]
+// [orig: AI_IsTargetInSight @0x456860 (weapon visibility check)]
 bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 	auto &b = ai.brain;
 	const Entity *target = target_entity(world, b.f[AiBrain::kTargetSlot]);
@@ -509,7 +509,7 @@ bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 // Aircraft combat has distinct stationary, locked-burst, continuation and
 // processed-tick fire legs. In particular only primary shots set the fire bit,
 // and a locked burst reuses all six saved relative pose components.
-// [orig: Entity_ProcessInfantryWeaponFire @0x471710 (IDB name; the aircraft/vehicle
+// [orig: AI_TickState_AircraftCombat @0x471710 (IDB name; the aircraft/vehicle
 //  brain's combat-state fire leg, off_81523C[8]); the health<=0 head @0x471748..
 //  0x472ded is h_aircraft_combat_tick's queue_aircraft_death]
 void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
@@ -537,7 +537,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	const auto clear_bone = [&]() { b.bytes()[AiBrain::kBoneFlagByte] = 0; };
 	const auto follow = [&]() {
 		if ((p.flags100 & 1) != 0)
-			update_aircraft_waypoint_movement(ai, world);
+			update_movement_target(ai, world);
 	};
 	const auto weapon = [&](int which) -> const AiProfile::WeaponFire & {
 		return which == 1 ? p.fire_a : p.fire_b;
@@ -674,7 +674,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		else {
 			aircraft_movement(ai, world);
 			AiTarget found{};
-			// [orig: Entity_ProcessInfantryWeaponFire @0x471710 (the AI_FindBestTarget
+			// [orig: AI_TickState_AircraftCombat @0x471710 (the AI_FindBestTarget
 			//  call @0x472B45)]
 			if (acquire_target(world, ai, found, /*variant_a=*/true)) {
 				const Entity *self = world.registry.get(ai.handle),

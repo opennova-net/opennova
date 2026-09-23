@@ -172,7 +172,7 @@ bool ground_at_position(AiSystem &sys, World &world, const Entity &probe, const 
                 world.tables.terrain ? world.tables.terrain : sys.terrain;
         if (field == nullptr || !field->valid()) return true;
         GroundClearance clearance = sys.ground_clearance;
-        clearance.has_physics = occupant_link;
+        clearance.has_occupant = occupant_link;
         clearance.use_dead = false;
         ground = calc_average_ground_height(*field, p, 0, clearance);
         if (ground == INT32_MIN) return true;

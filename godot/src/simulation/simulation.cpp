@@ -155,7 +155,7 @@ void Simulation::reset_world() {
 	// next mission reads slot n at the previous run's value; V# and G# start
 	// at zero per load, ScriptVarStore::carry_declared_from), and the
 	// entity-update counter (process-global and never reset: the next
-	// mission's staggers continue its phase [orig: dword_24C1948, whose one
+	// mission's staggers continue its phase [orig: g_entity_update_counter, whose one
 	// writer is Entity_UpdateAllEntities @0x4C2639]).
 	std::vector<opennova::mission::ItemSeatSpec> kept_seat_specs;
 	std::unordered_map<int32_t, std::string> kept_mounted_graphics;

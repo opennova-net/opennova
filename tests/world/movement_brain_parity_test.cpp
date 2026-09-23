@@ -13,8 +13,8 @@ int failures = 0;
 // Full original dispatchers, including their original reset/enter/exit callbacks,
 // the no-target idle latch (ammo dwords, the profile's resolved weapon ammo bytes,
 // the gunner guard) and the alert edge's entity+0x170 occupant gate.
-// [orig: EntityAI_ProcessInfantryStateMachine @ 0x4581B0;
-// EntityAI_ProcessVehicleStateMachine @ 0x4583C0]
+// [orig: EntityAI_ProcessAirStateMachine @ 0x4581B0;
+// EntityAI_ProcessGroundStateMachine @ 0x4583C0]
 void brain_dispatch_vectors() {
     static const int32_t cases[][20] = {
 #include "fixtures/brain_dispatch_vectors.inc"
@@ -47,8 +47,8 @@ void brain_dispatch_vectors() {
         e.profile.flags96 = static_cast<uint8_t>(v[11]);
         w.registry.get(handle)->spawn_phase = 37;
         w.ai.is_authority = v[1] != 0;
-        if (v[0]) w.ai.process_infantry_state_machine(e, w, v[2]);
-        else w.ai.process_vehicle_state_machine(e, w, v[2]);
+        if (v[0]) w.ai.process_air_state_machine(e, w, v[2]);
+        else w.ai.process_ground_state_machine(e, w, v[2]);
         const int32_t actual[] = {e.brain.f[AiBrain::kCurState], e.brain.f[AiBrain::kPendState],
             e.brain.f[AiBrain::kStep], e.brain.f[AiBrain::kTick], e.brain.f[AiBrain::kAlert],
             e.brain.f[AiBrain::kPrevAlert], w.registry.get(handle)->spawn_phase,

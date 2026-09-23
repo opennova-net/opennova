@@ -70,7 +70,7 @@ public:
     bool kill_ssn(EntityTarget ssn);
     // WAC killSSN: the ItemTypeIndex gate, Health 0, lastAttacker cleared (and a
     // person's staged death clip), then the class event (e, 1, 0) with a cleared
-    // hit record; the IDB name is a misnomer. [orig: Entity_ResetWeaponState @0x4F1E40]
+    // hit record. [orig: WacCmd_KillSsn @0x4F1E40]
     bool wac_kill_ssn(EntityTarget ssn);
     // The shared destroy (retail Entity_Destroy): no network notification.
     bool remove_ssn(EntityTarget ssn);
@@ -285,7 +285,7 @@ public:
     // [orig: Entity_SetWaypointByTeam @0x43CD20, dispatched @0x454315]
     int group_to_waypoint(int group, int32_t wp, int32_t node = -1);
     // WAC GroupHP: pools 0-2, the health word of every matching row; returns the
-    // rows written. [orig: WacScript_SetEntityTeamSlot @0x4F7B30 (IDB misnomer)]
+    // rows written. [orig: WacCmd_GroupHp @0x4F7B30]
     int set_group_hp(int group, int32_t hp);
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);

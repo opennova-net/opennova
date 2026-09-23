@@ -560,7 +560,7 @@ struct Entity {
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
     // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
-    // Entity_HandleDamageTrigger @0x407483]), consumed once by the infantry death
+    // OrganicClass_HandleEvent @0x407483]), consumed once by the infantry death
     // edge into anim_state, then cleared [orig: @0x4b9cc9..0x4b9d38]. 0 = none ->
     // the edge falls back to 174 death_pungi.
     int32_t death_anim_state = 0;
@@ -587,7 +587,7 @@ struct Entity {
     // seeds the 0..15 stagger (World::vehicle_ai_spawn_phase). Item class
     // callbacks read the slot as `class_think_ticks` above.
     // [orig: Entity_UpdatePool1Slot @0x4B8E1B / @0x4B8EA0;
-    //  EntityAI_ProcessVehicleStateMachine @0x458568 / @0x4585B4;
+    //  EntityAI_ProcessGroundStateMachine @0x458568 / @0x4585B4;
     //  Entity_InitVehicleAIFromDef @0x46891C..0x468945]
     int32_t spawn_phase = 0;
     // The kill-cause bits of the retail entity+0x2C dword (bits 8..11), latched at

@@ -1851,7 +1851,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	// [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, the
-	//  WacScript_AdvanceTick call @0x51D8BF, the Server_UpdateEntityIdleTimers
+	//  WacScript_AdvanceTick call @0x51D8BF, the Server_UpdatePlayerBreathTimers
 	//  call @0x51D8D7, the EventTrigger_UpdateQuarterRoundRobin call @0x51D8F4]
 	ServerIdleTimers idle_timers(ctx);
 	world.entity_idle_timers = &idle_timers;

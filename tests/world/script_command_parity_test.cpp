@@ -76,9 +76,9 @@ EntityHandle spawn_npc(World &w, int32_t net_id, uint8_t group, int32_t health =
 // event with a zeroed hit record, which for an NPC is the phase-1 red alert on
 // the victim and its trigger group. The death transaction that follows carries
 // no killer. The handler's IDB name is a misnomer.
-// [orig: Entity_ResetWeaponState @0x4F1E40 — gate @0x4F1E89, lastAttacker
+// [orig: WacCmd_KillSsn @0x4F1E40 — gate @0x4F1E89, lastAttacker
 // @0x4F1EAD, +0x2C0 @0x4F1EB7..0x4F1EBD, callback @0x4F1EC7..0x4F1ED2;
-// Entity_HandleDamageTrigger phase-1 arm @0x4073BF..0x4073EA]
+// OrganicClass_HandleEvent phase-1 arm @0x4073BF..0x4073EA]
 static void test_wac_kill_ssn_clears_and_alerts() {
     ScriptWorld w;
     const EntityHandle npc = spawn_npc(w, 100, 4);
@@ -115,7 +115,7 @@ static void test_wac_kill_ssn_clears_and_alerts() {
 
 // The SM-brained item's class event is its brain machine's event 1: the queued
 // type-1 AIEvent with the hit record's (cleared) owner word.
-// [orig: Entity_ResetWeaponState @0x4F1ED2 -> EntityAI_ProcessVehicleStateMachine
+// [orig: WacCmd_KillSsn @0x4F1ED2 -> EntityAI_ProcessGroundStateMachine
 // @0x4583C0 event-1 arm, queue @0x45851a]
 static void test_wac_kill_ssn_queues_brain_event() {
     ScriptWorld w;
@@ -352,7 +352,7 @@ static void test_ssn_wounded_signed_compare() {
 
 // ssnguard, ssncspd and ssnrelease gate on the ItemTypeIndex (+0x1C, item_type_index);
 // ssnrelease and ssn2ssn detach only on the authority.
-// [orig: WacCmd_SsnGuard @0x4F7207; WacScript_SendAIEvent10ToEntity @0x4F74FD;
+// [orig: WacCmd_SsnGuard @0x4F7207; WacCmd_SsnCspd @0x4F74FD;
 // WacCmd_SsnRelease @0x4F7465, Entity_DetachFromVehicleIfServer call @0x4F7475;
 // WacCmd_SsnToSsn @0x4F73DC]
 static void test_ssn_item_gates_and_authority_detach() {
@@ -466,7 +466,7 @@ static void test_ssn_add_hp_gate_clamp_return() {
 // health word of every matching row, touching nothing else (no attacker, no
 // alive write), and returns 1. A zeroing write keeps the word; only a living
 // organic crosses the death edge. The handler's IDB name is a misnomer.
-// [orig: WacScript_SetEntityTeamSlot @0x4F7B30 — pools @0x4F7B30/@0x4F7B6D/
+// [orig: WacCmd_GroupHp @0x4F7B30 — pools @0x4F7B30/@0x4F7B6D/
 // @0x4F7B9D, the signed group match @0x4F7B57, the word @0x4F7B64, return 1
 // @0x4F7BD0]
 static void test_group_hp_pools_word_and_return() {
@@ -515,7 +515,7 @@ static void test_group_hp_pools_word_and_return() {
 // Env_TriggerLightningFlashA @0x4ED50A; Env_TriggerLightningFlashB @0x4ED51A;
 // Chat_AddSystemMessage @0x4EDB64; Chat_AddFormattedIntMessage @0x4EDBC0;
 // Wac_ConsolDebugMessage @0x4EDBF4; WacCmd_ConsolNumber @0x4EDC50;
-// TextResource_GetMissionString (GtoWP) @0x4ED3E4; WacCmd_GroupSetAccuracy
+// WacCmd_GroupToWaypoint (GtoWP) @0x4ED3E4; WacCmd_GroupSetAccuracy
 // @0x4F7C43]
 static void test_wac_handler_returns() {
     ScriptWorld w;

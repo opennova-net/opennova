@@ -81,11 +81,11 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     if (ent != nullptr && ent->death_anim_state == 0) {
         ent->last_attacker = EntityHandle{};
         // The org1 edge then dispatches its class event callback as a hit
-        // (deathCallback(entity, 1, 0)): Entity_HandleDamageTrigger's hit leg
+        // (deathCallback(entity, 1, 0)): OrganicClass_HandleEvent's hit leg
         // raises a non-player body's slot alert byte to 2 and its trigger group
         // to red, then runs the round legs while the global hit record still
         // holds a round, whose clip replaces the generic one. [orig:
-        // Entity_UpdateInfantryAI @0x4B9CDB..0x4B9CF1; Entity_HandleDamageTrigger
+        // Entity_UpdateInfantryAI @0x4B9CDB..0x4B9CF1; OrganicClass_HandleEvent
         // @0x4073C8..0x4073EA, the round test @0x40740D]
         if (org1) {
             e.slot.bytes()[AiSlot::kAlertByte] = 2;

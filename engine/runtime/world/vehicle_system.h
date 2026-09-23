@@ -148,7 +148,7 @@ public:
     //  - unmounted otherwise (deck standers included) -> the nearest-seat scan;
     //  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.
     // The weapon-busy gate (EquippedSlot currentAction @0x436958) and the WAC no-dismount
-    // global (dword_C6EADC @0x43698b) are the caller's/session's concern (D-AI-11).
+    // global (wac_var_seatbelt @0x43698b) are the caller's/session's concern (D-AI-11).
     // Returns true iff a mount/swap/detach was applied.
     bool player_toggle_mount(EntityHandle player);
     // Host-facing lifecycle for effects that exist only while a vehicle has its single

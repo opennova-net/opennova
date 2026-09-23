@@ -198,7 +198,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
         }
         body->inf.z_quarter_step = 0; // [orig: @0x4B967A]
         body->heading = heading;
-        body->vel_x = body->vel_z = 0;
+        body->vel_x = body->vel_y = 0;
         body->body_pitch = body->roll = 0;
         auto &inf = body->inf;
         inf.body_heading = inf.target_heading = inf.aim_heading = heading;

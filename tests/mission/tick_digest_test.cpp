@@ -138,7 +138,7 @@ void hash_ai(Digest &d, const w::AiEntity &a) {
 	d.value(a.roll);
 	d.value(a.body_pitch);
 	d.value(a.vel_x);
-	d.value(a.vel_z);
+	d.value(a.vel_y);
 	d.value(a.health);
 	d.value(a.team);
 	d.bytes(a.brain.f, sizeof(a.brain.f));

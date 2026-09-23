@@ -85,8 +85,8 @@ RemoteCommandResult run_remote_command(world::World &w, int cmd,
     // text/ptext/text# feed the player chat ring [orig: Chat_AddSystemMessage
     // @0x4EDB50 -> Chat_AddMessageChannel1 @0x4985D0], consol/pconsol/consol#
     // the system ring the BMS triggered text shares [orig: Wac_ConsolDebugMessage
-    // @0x4EDBE0 -> Chat_AddDebugMessage @0x4987F0; HUD_DisplayTriggeredText
-    // @0x51F190 (the Chat_AddDebugMessage call @0x51F216)]: the `text` and
+    // @0x4EDBE0 -> Chat_AddMessageChannel2 @0x4987F0; HUD_DisplayTriggeredText
+    // @0x51F190 (the Chat_AddMessageChannel2 call @0x51F216)]: the `text` and
     // `debug_text` kinds. The # forms format "%s %i" in the handler, so the
     // effect carries the finished line [orig: Chat_AddFormattedIntMessage
     // @0x4EDB70 (the sprintf call @0x4EDB9E); WacCmd_ConsolNumber @0x4EDC00
