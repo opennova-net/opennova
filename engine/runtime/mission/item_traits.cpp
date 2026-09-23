@@ -240,12 +240,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         }
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
-        // (D-NET-147; every golden ASH_I5A building carries both). Resolved defs only — a
+        // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
+        // def's two armor words become the invulnerable 0xFFFF whatever it authored, so
+        // every armor reader sees them: the AI target walk skips the item (a pair of -1
+        // armor words) and the damage gates zero its hits. Resolved defs only — a
         // missing items.def id stays untouched. [orig: Entity_InitFromModel @0x40dc8e:
-        // !itemDef->healthMax -> Flags |= 0x4000000, Health = 1, subType = -1]
+        // !itemDef->healthMax -> Flags |= 0x4000000 @0x40DC8E, def+0x190 / def+0x192 =
+        // 0xFFFF @0x40DC95 / @0x40DC9F, Health = 1 @0x40DCA6, subType = -1 @0x40DCAF;
+        // the armor gate Entity_FindTargets @0x53AC3F..0x53AC59]
         if (hp == 0 && def != nullptr) {
             e->engine_flags |= 0x4000000u;
+            e->health = 1;
             e->sub_type = 0xFF;
+            e->armor_impact = -1;
+            e->armor_kz = -1;
         }
         // Death-presentation timing: deathtime (def+0x890, parse-scaled ticks)
         // seeds the corpse timer at the death edge; LeaveCorpse rides the stamp
@@ -323,8 +331,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.particlefx = def->particlefx.effect;
             t.unit_type = def->unit_type;
             t.kz = def->kz;
-            t.armor_impact = def->armor_impact;
-            t.armor_blast = def->armor_blast;
+            // An hp-0 def's armor words already read 0xFFFF here: its entity's
+            // init overwrote them [orig: Entity_InitFromModel @0x40DC95 / @0x40DC9F].
+            const bool hp_zero = world::retail_signed_i16(def->hp) == 0;
+            t.armor_impact = hp_zero ? -1 : def->armor_impact;
+            t.armor_blast = hp_zero ? -1 : def->armor_blast;
             // The S&D/A&D objective target's same-team blast immunity [orig: the
             // blast applier's same-team gate, jo-c 261654: attacker team == target
             // team && itemDef->attrib & 0x8000 -> return].

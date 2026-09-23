@@ -3534,7 +3534,15 @@ writes as the SM engage block (§16.4) — the infantry-side apply site of D-AI-
   16 ticks (`current_tick − *(+428) <= 16` — lets NPCs shoot fresh bodies); not
   self/platform; **forced-target words** `shooter+332/+334` (DcbId) `+336/+338`
   (relmat) force-include matching candidates; else the team leg (`flags 0x100`: either
-  side's AiSlot `0x200` see-all, or candidate team ≠ 0 and ≠ shooter team).
+  side's AiSlot `0x200` see-all, or candidate team ≠ 0 and ≠ shooter team), then the
+  armor gate: a candidate whose ITEM DEF carries both armor words at 0xFFFF
+  (`def+0x190` and `def+0x192`) is skipped `[orig: @ 0x53AC3F..0x53AC59]`. The
+  forced-target words bypass it. An hp-0 def's init writes that pair whatever the
+  def authored (§ entity flags below), so an indestructible decoration is never a
+  threat: 01TR's team-2 concrete lane dividers (items.def 102289..102291) leave the
+  riflemen at the spawn (SSNs 2, 70, 71) nothing to shoot until the course events
+  hand them targets (`fire_hold_01tr` ctest). The port had skipped that armor write
+  and those riflemen emptied their rifles into the dividers from the first second.
 - `Entity_ValidateWeaponTarget @ 0x53a400`: in-use/alive(/fresh-corpse) again, the
   building filter (`Flags & 0x100` excluded when `dword_24C1930 & 0x800` or
   `g_spawn_success_gate`), shooter forced-target restrict words `+332/+336`, then
@@ -8882,7 +8890,10 @@ BMS `Indestructible(1<<21) -> 0x4000000`, `Reflective(1<<23) -> 0x400`,
 `-> 0x40` (@ 0x40ED9F) and 0x4000 (FlyingOrganic) or 0x20000 `-> 0x80`
 (@ 0x40EE2A, @ 0x40EE70..0x40EE94; §38.1);
 kind Building `-> 0x20000` `[orig: Entity_InitFromModel @ 0x40e105]`;
-items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
+items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`, with Health 1 and subType 0xFF
+on the entity and both def armor words overwritten to 0xFFFF `[orig: Entity_InitFromModel
+@ 0x40DC95 / @ 0x40DC9F, Health @ 0x40DCA6, subType @ 0x40DCAF]`: the target walk's
+armor gate (§17.2) and the damage gates read that pair (`mission_item_traits` ctest).
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|

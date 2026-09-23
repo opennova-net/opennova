@@ -288,6 +288,9 @@ int main() {
     tank->bob = 219;
     tank->flip = 220;
     tank->scale_q16 = 0x18000;
+    tank->armor_impact = 7; // a def with hp keeps its authored armor words
+    tank->armor_blast = 8;
+    tank->armor_kz = 8;
     tank->attrib_parent = 1; // the `Parent` byte (ItemDef+0x548)
     std::strcpy(tank->particlefxw3.effect, "fx_sml_wk");
     std::strcpy(tank->particlefxw3.userpoint, "FX00");
@@ -394,12 +397,19 @@ int main() {
     // def hp 0 => indestructible flags [orig: Entity_InitFromModel @0x40dc8e].
     CHECK((bunker_e->engine_flags & 0x4000000u) != 0);
     CHECK(bunker_e->sub_type == 0xFF);
-    CHECK(bunker_e->health == 100); // hp 0 lifts nothing
+    // hp 0 lifts nothing; the init writes Health 1 [orig: @0x40DCA6].
+    CHECK(bunker_e->health == 1);
     CHECK(bunker_e->music_location == -3); // parsed signed word survives trait promotion
     CHECK(bunker_e->is_capture_trigger);
     CHECK(bunker_e->is_spawn_point);
-    CHECK(bunker_e->armor_impact == 12);
-    CHECK(bunker_e->armor_kz == 34);
+    // The authored 12/34 does not survive: an hp-0 def's two armor words
+    // become the invulnerable 0xFFFF [orig: Entity_InitFromModel @0x40DC95 /
+    // @0x40DC9F], the pair the AI target walk skips [orig: Entity_FindTargets
+    // @0x53AC3F..0x53AC59].
+    CHECK(bunker_e->armor_impact == -1);
+    CHECK(bunker_e->armor_kz == -1);
+    const Entity *tank_armor = w.registry.get(tank_h);
+    CHECK(tank_armor != nullptr && tank_armor->armor_impact == 7 && tank_armor->armor_kz == 8);
     CHECK(bunker_e->deathtime_ticks == 0);
 
     const Entity *unknown_e = w.registry.get(unknown_h);
@@ -419,8 +429,8 @@ int main() {
     if (bt != nullptr) {
         CHECK(bt->unit_type == 5);
         CHECK(bt->kz == 6.5f);
-        CHECK(bt->armor_impact == 12);
-        CHECK(bt->armor_blast == 34);
+        CHECK(bt->armor_impact == -1); // the def words the damage gates read
+        CHECK(bt->armor_blast == -1);
         CHECK(bt->team_protect);
         CHECK(bt->no_die);
         CHECK(bt->static_death);
@@ -443,6 +453,7 @@ int main() {
     CHECK(busht != nullptr && busht->is_decoration);
     const ItemDeathTraits *tankt = w.tables.item_death_traits.get(500);
     CHECK(tankt != nullptr && !tankt->has_husk);
+    CHECK(tankt != nullptr && tankt->armor_impact == 7 && tankt->armor_blast == 8);
 
     // ---- the event/death callback row (D-ITEM-7) ----
     // The fold resolves the ai_function tag the way retail's whole-string
