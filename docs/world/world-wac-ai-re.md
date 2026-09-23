@@ -3344,6 +3344,10 @@ writes as the SM engage block (§16.4) — the infantry-side apply site of D-AI-
   computes the candidate fire origin (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0`) and
   its forward/off-axis distances in the shooter frame
   (`compute_relative_position_metrics @ 0x545710`; off-axis = octagon max+5·min/16).
+  The metrics frame is ctx[0] = the shooter's entity+4 (raw position + euler,
+  `@ 0x4b09d0`, matrix `@ 0x53a67c..0x53a687`; the translation is subtracted
+  `@ 0x545723..0x545735`): range and arc are measured from the raw position,
+  not from the fire position.
   Range legs by ctx flag: `0x2` heat (`ctx[8]` off-axis, `ctx[4]` fwd, needs
   `fwd < heatSig<<16`), `0x1` radar (`ctx[9]/ctx[5]`; passes when `radarSig == 0`
   — every organic), `0x10` visual (`ctx[6]` fwd cap; `0x4` adds the `ctx[7]` off-axis
@@ -3356,10 +3360,21 @@ writes as the SM engage block (§16.4) — the infantry-side apply site of D-AI-
   excluded (0x7FFFFFFF); air-attrib defs (`+84 & 0x40`) with no physics ptr excluded.
   Final: shooter forced-words mismatch → score >>= 2 (4× preference for the forced
   target). Untargetable defs (words `+400/+402` both 0xFFFF) skipped.
-- Bubble-sort descending, then LOS in order: raycast fire-origin → fire-origin
-  (`Physics_RaycastTerrainAndSectors @ 0x539910`, flag 0, TRUE = clear); a shooter with
-  `Flags & 0x800000` retries from a 24576 (0.375 u) forward-nudged start. **First
-  visible wins** (and up to N visible fill the out array; `ctx[11]` = count).
+- Bubble-sort descending, then LOS in order from the shooter's weapon fire position
+  (`Entity_GetWeaponFirePosition @ 0x43b630`; quality != 1 → `Entity_ComputeWeaponFireOrigin
+  @ 0x43b4b0`, `@ 0x53a658..0x53a679`) to the candidate's fire origin
+  (`Entity_ComputeWeaponFireOrigin`, `@ 0x53aed7`) (`Physics_RaycastTerrainAndSectors
+  @ 0x539910`, flag 0, TRUE = clear); a shooter with `Flags & 0x800000` retries from a
+  24576 (0.375 u) forward-nudged start off the same fire position (`@ 0x53ae08..0x53ae8a`).
+  **First visible wins** (and up to N visible fill the out array; `ctx[11]` = count).
+  A UseGun gunner on an EWeap parent therefore scans from its gun's point (§17.9b), outside
+  the hull. The port had cast from the phased, jittered eye, which for a tank gunner sits
+  inside its own hull; the LOS walk skips only the two endpoints, their parents (+0x268,
+  overridden by +0x16C) and candidates whose +0x28 names an endpoint
+  (`raycast_find_collision_entity @ 0x539aba..0x539b10`, `raycast_against_entity_pool
+  @ 0x53882f..0x538877`), so every ray hit the gunner's own hull and 07TR's tank gunners
+  never acquired a target (corrected 2026-09-22; `infantry_scan_nearest_threat`,
+  `ai::test_turret_gunners_scan_from_the_gun_point`).
 
 ### 17.3 Combat behavior — reactions, move modes, cover
 
@@ -3774,10 +3789,9 @@ without firing.
 5. RESOLVED 2026-08-12 → §17.9b: `compute_relative_position_metrics @ 0x545710`
    witnessed in full (the metrics ARE the SM aim solve's angle source).
 6. RESOLVED 2026-08-12 → §17.9b: `Entity_GetWeaponFirePosition @ 0x43b630` (the old
-   `0x53a2e0` cite was off) — quality 1 = def+1351 muzzle bone through the current
-   matrix (persons route the type-3 seat/userpoint legs), quality 2 = pos + 49152
-   (0.75 u) when a model exists but no muzzle bone, quality 3 = raw pos; callers
-   fall back to `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` when quality != 1.
+   `0x53a2e0` cite was off). Its six legs and their quality returns are in §17.9b
+   (ported 2026-09-22); callers fall back to `Entity_ComputeWeaponFireOrigin
+   @ 0x43b4b0` when quality != 1.
 7. The scripted-idle aim leg's `Flags & 0x80000` gate writer (aim-at-player poses).
 8. NEW: the saved continuation-delta blocks' (`brain[182..193]`) consumer (captured
    at every mobile/continuation solve; nothing in the fire pump reads them back).
@@ -3872,6 +3886,29 @@ and the RC_FIRE + PITCHLOCKED_MINUS45 stationary leg behind the guard byte.
 transform), fire position ← `Entity_GetWeaponFirePosition(ctx[1])` (quality != 1 →
 `Entity_ComputeWeaponFireOrigin`), then `Entity_ValidateWeaponTarget(target, ctx,
 &out6, frame, firePos)`; out6 copied to the caller `@ 0x53b047`.
+`Entity_GetWeaponFirePosition @ 0x43b630` has six legs (ported 2026-09-22 as
+`AiSystem::weapon_fire_position`):
+
+- no item def: the raw position, quality 3 (`@ 0x43b638..0x43b63d` →
+  `@ 0x43b7b4..0x43b7c9`);
+- a person on a UseGun seat (parentSlot +0x168 == 3) of an EWeap parent
+  (def+0x54 & 0x20): the parent's gun point through
+  `Entity_ComputeUserpointWorldTransform` with a NULL slot, quality 1
+  (`@ 0x43b64d..0x43b68a`);
+- any other person: position + CameraOffset (+0x6C..+0x74), with no phase or
+  jitter, quality 1 (`@ 0x43b68f..0x43b6b6`);
+- a non-person without a graphic model: raw, quality 3 (`@ 0x43b6b7..0x43b6ec`);
+- the def+1351 (LOOK) userpoint through the +0xB4 matrix, quality 1
+  (`@ 0x43b749..0x43b78c`);
+- else position + 0xC000 (0.75 u), quality 2 (`@ 0x43b78d..0x43b7b3`).
+
+Two readers use it: the threat scan (`Entity_FindTargets @ 0x53a658..0x53a679`,
+our `infantry_scan_nearest_threat`) and this solve wrapper
+(`@ 0x53aff8..0x53b013`, our `weapon_target_metrics`, unchanged for
+non-persons). The UseGun leg is `usegun_gun_point`, shared with the organic fire
+pose: the same gate and the same call as `Entity_GetAttachmentWorldPosition
+@ 0x4b2682..0x4b26b6`. Tests: `ai` (`test_weapon_fire_position_legs`,
+`test_turret_gunners_scan_from_the_gun_point`).
 `compute_relative_position_metrics @ 0x545710`: full digest in §17.9 (the fpatan
 operand order and the `dbl_7C19D8` = 683565275.5764316 = 2³¹/π scale are exact in
 the disasm; the decompiler's tail for out[3] is wrong).
