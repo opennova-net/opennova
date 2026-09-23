@@ -5,6 +5,7 @@
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
 #include <runtime/inmatch/server_medic.h>            // the medic revive and heal transactions
+#include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 
 #include <cstdint>
@@ -48,15 +49,6 @@ uint8_t pool0_index_byte(uint16_t handle) {
 	if (!h.valid() || h.pool() != 0) return 0xFF;
 	const int slot = h.slot();
 	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
-}
-
-// NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
-// includes the listen host and does not inspect entity health; this runtime's
-// completed initial-state burst is the shared representation of that active
-// slot state. [orig: NapiNPServer_SendFiltered @0x4C8874..0x4C8894,
-// @0x4C893E..0x4C8953]
-bool active_player_recipient(const NapiNPConnection &conn) {
-	return is_in_match(conn) && conn.link.transport != nullptr;
 }
 
 uint8_t death_family_variant(world::World &world, uint8_t base) {
@@ -1743,124 +1735,6 @@ void Server_RecalculateAllPlayerKitWeights(
 	}
 }
 
-// Item callbacks' state packets, explosion effects, authoritative removals and
-// the HUD relays, fanned and released.
-static void fan_entity_events(NapiNPServerCtx &ctx, world::World &world) {
-    // Item callbacks' state packets and authoritative removals: mask 0x90
-    // includes active remote slots regardless of health, excluding the local host.
-    // [orig: Server_SendEntityStatePacket @0x509D70;
-    // Server_RemoveEntityAndNotify @0x50A270 -> NapiNPServer_SendFiltered @0x4C87E0]
-    if (ctx.is_in_session) {
-        for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-            if (!active_player_recipient(conn) ||
-                    conn.link.mode == replication::TransportMode::Loopback) continue;
-            for (const auto &event : world.out.entity_events) {
-                if (const auto *state = std::get_if<world::ItemStateEvent>(&event)) {
-                    std::vector<uint8_t> body;
-                    put_u16le(body, state->handle);
-                    put_u16le(body, static_cast<uint16_t>(state->section));
-                    conn.link.transport->host_send(s2c::KILL_SYNC, body, true, 0);
-                } else if (const auto *effect = std::get_if<world::ItemExplosionEvent>(&event)) {
-                    ExplosionEffectRecord record;
-                    record.count = effect->count;
-                    record.source = effect->source;
-                    record.x = effect->position.x;
-                    record.y = effect->position.y;
-                    record.z = effect->position.z;
-                    record.heading = int16_t(uint32_t(effect->heading) >> 16);
-                    conn.link.transport->host_send(s2c::EXPLOSION_EFFECT,
-                            encode_explosion_effect(record), true, 0);
-                } else if (const auto *removal = std::get_if<world::EntityRemoveEvent>(&event)) {
-                    std::vector<uint8_t> body;
-                    put_u16le(body, removal->handle);
-                    conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, true, 0);
-                }
-            }
-            // The HUD relays ride the same 0x90 mask: every active remote
-            // slot, never the local host. [orig:
-            //  Server_BroadcastEntityActionPacket @0x5080D0 — send_mask 90h
-            //  @0x50818f, the NapiNPServer_SendFiltered(0x3F) call @0x508199]
-            for (const world::HudRelay &relay : world.out.hud_relays) {
-                ObjectiveNotification wire;
-                wire.kind = relay.kind;
-                wire.slot = relay.slot;
-                wire.is_win = relay.is_win;
-                wire.is_active = relay.is_active;
-                wire.flag = relay.flag;
-                wire.team = relay.team;
-                wire.key = relay.key;
-                conn.link.transport->host_send(s2c::OBJECTIVE_NOTIFICATION,
-                        encode_objective_notification(wire), true, 0);
-            }
-        }
-    }
-    world.out.entity_events.clear();
-    world.out.hud_relays.clear();
-}
-
-// The water-surface crossings the motor recorded, one S2C 0x34 each.
-static void route_water_crossings(NapiNPServerCtx &ctx, world::World &world) {
-	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
-	// message per crossing the motor recorded this tick. Retail fans the splash
-	// with send_mask 128 (alive players) the moment a hull crosses the plane, so
-	// clients spawn the same effect at the same spot; the queue is drained and
-	// cleared every tick whether or not anyone is listening, because a crossing
-	// is presentation, never simulation state.
-	// [orig: Server_SendOverlayActionToAlive @0x50a1b0, send_mask 128]
-	if (ctx.is_in_session && !world.out.water_crossings.events.empty()) {
-		const std::vector<std::vector<uint8_t>> splashes =
-				replication::build_water_cross_messages(world);
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			if (conn.link.mode == replication::TransportMode::Loopback) continue;
-			bool alive = true;
-			if (conn.link.owned_entity.valid()) {
-				const world::Entity *e = world.registry.get(conn.link.owned_entity);
-				alive = e != nullptr && e->health > 0;
-			}
-			if (!alive) continue; // the mask-128 alive filter
-			for (const std::vector<uint8_t> &body : splashes)
-				conn.link.transport->host_send(s2c::PLAY_SOUND, body,
-				                               /*reliable=*/false);
-		}
-	}
-	world.out.water_crossings.clear();
-}
-
-// The guided-round updates, queued behind the tick's 0x0A so each follows the
-// frame that carried its round's birth.
-static void route_guidance(NapiNPServerCtx &ctx, world::World &world) {
-    // Guidance follows the frame carrying the corresponding fired-round birth.
-    // [orig: Entity_SendEffectPacket @0x445C40, routed serializer @0x4D6240]
-    if (ctx.is_in_session) for (const auto &update : world.round_sim.guided_updates) {
-        for (int group = 1; group <= 6; ++group) {
-            if (!(update.groups & (1u << group))) continue;
-            GuidedRecord record;
-            record.target_slot = update.state.target; record.weapon_type = update.state.phase;
-            record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
-            record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
-            std::vector<uint8_t> body;
-            put_u16le(body, update.shooter); put_u16le(body, update.net_id); body.push_back(uint8_t(group));
-            const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
-            body.insert(body.end(), payload.begin(), payload.end());
-            for (auto &conn : ctx.np_protocol.connection_list)
-                if (active_player_recipient(conn) && conn.link.mode != replication::TransportMode::Loopback)
-                    conn.pending_guidance.push_back(body);
-        }
-    }
-    world.round_sim.guided_updates.clear();
-    for (auto &conn : ctx.np_protocol.connection_list) {
-        if (!ctx.is_in_session || !active_player_recipient(conn)) {
-            conn.pending_guidance.clear();
-            continue;
-        }
-        if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-        for (const auto &body : conn.pending_guidance)
-            conn.link.transport->host_send(0x44, body, true, 0);
-        conn.pending_guidance.clear();
-    }
-}
-
 // The records the entity update produces, routed at the head of the next
 // server tick: retail's entity update sends them inline after that frame's
 // send pump, so they lead the next frame's queue. The placed-device records,
@@ -1872,12 +1746,12 @@ static void route_guidance(NapiNPServerCtx &ctx, world::World &world) {
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
 static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
-	fan_entity_events(ctx, world);
+	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	Server_RouteMedicInteractions(ctx, world);
 	route_match_gameplay_events(ctx, world);
-	route_water_crossings(ctx, world);
+	Server_RouteWaterCrossings(ctx, world);
 }
 
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
@@ -1987,7 +1861,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			                : world::TickPhase::Gameplay);
 	world.run_script_pass(tick);
 	world.entity_idle_timers = nullptr;
-	fan_entity_events(ctx, world);
+	Server_FanEntityEvents(ctx, world);
 	// WAC punts are connection descriptions, not gameplay damage or chat.
 	// The original slot wrapper ignores departed/retired slots; the live
 	// connection owner likewise rejects stale allocations and loopback nodes.
@@ -2516,7 +2390,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
 	}
-	route_guidance(ctx, world);
+	Server_RouteGuidance(ctx, world);
 
 	emit_periodic_rtt(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);

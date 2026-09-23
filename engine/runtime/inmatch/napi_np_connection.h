@@ -712,4 +712,13 @@ inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }
 
+// NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
+// includes the listen host and does not inspect entity health; this runtime's
+// completed initial-state burst is the shared representation of that active
+// slot state. [orig: NapiNPServer_SendFiltered @0x4C8874..0x4C8894,
+// @0x4C893E..0x4C8953]
+inline bool active_player_recipient(const NapiNPConnection &conn) {
+	return is_in_match(conn) && conn.link.transport != nullptr;
+}
+
 } // namespace opennova::inmatch
