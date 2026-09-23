@@ -260,9 +260,8 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // @0x4BB80E / @0x4BB835].
     int selected_state = inf.board_anim >= 0 ? inf.board_anim : 0;
     inf.board_anim = -1;
-    // The think's hasReaction and aim-override frame locals [orig:
-    // Entity_UpdateInfantryAI @0x4B9910 — var_10B8 / var_10B4, zeroed at the
-    // motor head @0x4B99BF / @0x4B99C6].
+    // The think's hasReaction and aim-override frame locals, zeroed at the
+    // motor head [orig: Entity_UpdateInfantryAI @0x4B99BF / @0x4B99C6].
     inf.combat_reaction = false;
     inf.aim_override = false;
     AiSlot &slot = e.slot;
@@ -350,7 +349,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             slot.f[3] = 0;
         }
         // The own priority-target mark decays each scan; firing re-arms it.
-        // [orig: Flags &= ~0x4000 @0x4bbfa4]
+        // [orig: `and dword ptr [esi+24h],0FFFFBFFFh` @0x4BBF88]
         if (self_entity != nullptr) self_entity->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
@@ -424,7 +423,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             }
             // The move timer stamps UNCONDITIONALLY [orig: moveTimer = slot[22]>>4
             // @0x4bc2a6]; a body with no reaction clip then falls into the approach
-            // arm [orig: @0x4bc2ba -> LABEL_471].
+            // arm [orig: @0x4bc2ba, falling into the approach arm @0x4BC2C2].
             inf.combat_move_timer = io::bam_sar(slot.f[22], 4);
             run_approach = !inf.combat_reaction;
         }
@@ -520,7 +519,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     //     attack clips 155-158, emplaced 67-75), target or not: the aim writes,
     //     then the body re-face, the detour-state clear and the mode-7 tail.
     // Both are skipped while the focus entity is the body itself [orig:
-    // @0x4bc53d..0x4bc54f -> LABEL_584, re-tested @0x4bc94c..0x4bc952]; the aim
+    // @0x4bc53d..0x4bc54f -> @0x4BCFF5, re-tested @0x4bc94c..0x4bc952]; the aim
     // heading is re-seated on the target heading ahead of the test
     // [orig: @0x4bc543..0x4bc549]. aimFlag (+0x360) is only ever SET here.
     inf.aim_heading = inf.target_heading;
@@ -574,7 +573,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                     ftol32(std::atan2(double(adz), double(horiz)) * io::kBamPerRadian),
                     err_pitch);
             inf.aim_established = true;
-            inf.aim_override = true; // [orig: var_10B4 = 1 @0x4BC8E0]
+            inf.aim_override = true; // [orig: the override local set @0x4BC8E0]
             // The walking-fire latch: the yaw within ~5 deg of the solution, the
             // eye-to-aim-point (dz sar 1) distance inside the attack range, a
             // NOMOVESHOOT-clear def and the slot[22] cadence. [orig: §17.4,
@@ -706,7 +705,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         inf.aim_heading = candidate; // [orig: @0x4BCEF1 / @0x4bcf75]
         inf.aim_pitch = pitch;       // [orig: @0x4BCF1E / @0x4bcf9d]
         inf.aim_established = true;
-        inf.aim_override = true;     // [orig: var_10B4 = 1 @0x4BCFC2]
+        inf.aim_override = true;     // [orig: the override local set @0x4BCFC2]
         inf.aim_valid = true;        // aimFlag [orig: @0x4bcfb1]
         // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
         // aim drifts far off the target heading (> 262470208, ~22 deg) [orig:
@@ -784,7 +783,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         inf.move_mode = 12;
         inf.target_dist = 0;
     }
-    // A chosen reaction holds the body [orig: `cmp var_10B8,0; jz` ->
+    // A chosen reaction holds the body [orig: the hasReaction test ->
     // moveMode 7, distance 0 @0x4BD245..0x4BD251].
     if (inf.combat_reaction) {
         inf.move_mode = 7;

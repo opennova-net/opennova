@@ -62,7 +62,7 @@ bool named_point(World &world, const Entity &carrier, const char *name, int32_t 
 }
 // Claim the lowest unclaimed E1..En when resolving a new command target.
 // The current command's 123/124 terms are intentional in the retail predicate.
-// [orig: Entity_UpdateInfantryAI @0x4BB0BB..0x4BB269]
+// [orig: Entity_UpdateInfantryAI @0x4BAF9B..0x4BB185]
 void claim_entry(AiEntity &e, World &world, const Entity &target, int32_t command) {
 	int count = 0, point[6] = {};
 	for (int i = 8; i > 0; --i) {

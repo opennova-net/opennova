@@ -512,7 +512,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // Alerted idle: damageTimer or the slot alert byte (NOT wasHit) promotes 43 to the
     // armed idle 49 when the combat pass holds a target in slot[3], else 44.
-    // [orig: LABEL_636 @0x4bd2f0..0x4bd31c]
+    // [orig: Entity_UpdateInfantryAI @0x4bd2f0..0x4bd31c]
     if ((inf.damage_timer != 0 || e.slot.bytes()[AiSlot::kAlertByte] != 0) &&
         target == anim_state::kIdle)
         target = e.slot.f[3] != 0 ? anim_state::kIdle3 : anim_state::kIdle2;
@@ -549,7 +549,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // Hit flinch: a body hit since the last think swaps its idle for cover_idle (163)
     // or its run/jog for cover_run (164) when the adm authors them, and wasHit is
-    // consumed here, on the think cadence. [orig: LABEL_711 @0x4bd6a7..0x4bd6ee]
+    // consumed here, on the think cadence. [orig: Entity_UpdateInfantryAI
+    // @0x4bd6a7..0x4bd6ee]
     if (inf.was_hit) {
         if ((target == anim_state::kIdle || target == anim_state::kIdle2) &&
             has(anim_state::kCoverIdle))
@@ -562,7 +563,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // Wounded gaits at half max-health, substituted only when the adm authors the
     // wounded clip: a jogger without wounded_run stays a jogger.
-    // [orig: LABEL_722 @0x4bd6f5..0x4bd744 — def+380 >> 1; animMap[146]/[145] != *animMap]
+    // [orig: Entity_UpdateInfantryAI @0x4bd6f5..0x4bd744 — def+380 >> 1;
+    //  animMap[146]/[145] != *animMap]
     if (e.health <= static_cast<int16_t>(inf.max_health / 2)) {
         if ((target == anim_state::kRunForward || target == anim_state::kJogForward) &&
             has(anim_state::kWoundedRun))

@@ -49,7 +49,7 @@ void helicopter_approach(int32_t goal[3], int32_t heading, int32_t distance) {
 
 // These identities are assigned by the teammate spawn helpers, not mission names.
 // Far offsets retain the original unoffset distance; only the near legs recompute.
-// [orig: Entity_UpdateInfantryAI @0x4BB62C..0x4BBD87]
+// [orig: Entity_UpdateInfantryAI @0x4BB60E..0x4BBD87]
 void infantry_escort_goal(AiEntity &e, World &world, const Entity &target,
                          int32_t goal[3], int32_t &radius, int32_t &distance) {
     const Entity *self = world.registry.get(e.handle);
