@@ -2028,6 +2028,63 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     CHECK(w->out.rounds.records[1].shooter_handle == late.packed);
 }
 
+// T8: past the four-tick cadence and the spatial stagger the mounted request
+// copies the parent's AdmDef byte into the rider's; an off-cadence pass leaves
+// the rider's byte alone. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA,
+// the cadence @0x4BF4DA, the stagger @0x4BF4E3..0x4BF4EE]
+static void test_mounted_request_copies_the_parent_adm_byte() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity target_seed{};
+    target_seed.kind = EntityKind::Organic;
+    target_seed.team = 2;
+    target_seed.health = 100;
+    target_seed.net_id = 0x21;
+    target_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90;
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    npc.slot.f[15] = 6 << 16;
+    npc.inf.combat_target = target_h;
+    CHECK(w->commands.mount(0x11, 0x31));
+    CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
+    w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
+
+    ai.infantry_mounted_fire_pass(npc, *w, 1, 1); // off the four-tick cadence
+    CHECK(w->registry.get(npc_h)->equipped_adm_index == 7);
+    ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
+    CHECK(w->registry.get(npc_h)->equipped_adm_index == 1);
+}
+
 static void test_mounted_look_traverses_before_fire_request() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -4386,6 +4443,7 @@ int main() {
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_weapon_walk_visits_pool0_in_slot_order();
     test_weapon_walk_pumps_hot_unoccupied_guns();
+    test_mounted_request_copies_the_parent_adm_byte();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();

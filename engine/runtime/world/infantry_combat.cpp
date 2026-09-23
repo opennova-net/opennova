@@ -897,8 +897,11 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
         return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
-    const bool slot_bound = world.vehicles.bind_use_gun_slot(*occ, *mount);
-    if (!inf.combat_target.valid() || !slot_bound) return;
+    // The parent's weapon slot and AdmDef byte exist from its own init in
+    // retail; the port seeds them lazily. [orig: WeaponSlot_InitFromEntityDef
+    //  @0x5466C0]
+    world.vehicles.prepare_weapon_slot(*mount);
+    if (!inf.combat_target.valid()) return;
 
     // The dedicated request runs on its four-tick infantry cadence, then a
     // coordinate/entity stagger admits one 64-tick half-window and rejects the next.
@@ -919,6 +922,12 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;
 
+    // Past the cadence and the stagger the rider takes the parent's AdmDef byte
+    // (retail's parent +0x2B0 is WeaponSlot_InitFromEntityDef's byte, kept here
+    // as primary_weapon_slot_adm). [orig: Entity_UpdateInfantryAI
+    //  @0x4BF4F4..0x4BF4FA; WeaponSlot_InitFromEntityDef @0x546742]
+    occ->equipped_adm_index = mount->primary_weapon_slot_adm;
+
     // UseGun already swapped EquippedSlot to the parent's persistent embedded
     // MountSlot at attach. This request never touches the personal magazine.
     // [orig: Entity_AttachToUseGunSlot @0x546c42..0x546c73]
@@ -937,6 +946,9 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     const double distance = std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz);
     if (distance >= static_cast<double>(e.slot.f[15])) return;
 
+    // The EquippedSlot the attach swapped to the parent's MountSlot must be
+    // there. [orig: `mov edi,[esi+118h]; test edi,edi` @0x4BF564..0x4BF56C]
+    if (!occ->use_gun_slot_swapped) return;
     const int32_t target_heading = bearing_to(dx, dy);
     constexpr int32_t kMountedFireArc = 178956960;
     if (opennova::io::bam_abs(io::bam_sub(target_heading, e.heading)) >= kMountedFireArc) return;
