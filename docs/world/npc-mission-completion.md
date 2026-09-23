@@ -26,12 +26,12 @@ retry and mission transitions are included.
 | --- | --- | --- |
 | Baseline and coverage | Review parity and consumer gaps in the complete routing inventory; cumulative diagnostics and native validation are in place | [Script/brain/motor inventory](npc-script-coverage.md); native/Godot tests |
 | Infantry movement | Remaining water, ladder and parachute behavior | world-wac-ai-re.md; D-INF and D-AI records |
-| Vehicle AI and motors | Remaining carrier spawn-marker localization, ground probes, brain-step consumers and emplacement dispatch | vehicle-client-movers-re.md; D-NET-161 |
-| Perception and combat | Remaining cheat-rule and combat solver behavior, concealment, ray behavior and guided projectile flight | world-wac-ai-re.md sections 16..18 |
+| Vehicle AI and motors | Remaining carrier spawn-marker deck localization and the flare target handle (D-NET-161 (b)/(c)) and emplacement dispatch; the brain-step consumers, the per-tap ground-probe ray kinds and the brain-class gate are ported | vehicle-client-movers-re.md; D-NET-161 |
+| Perception and combat | Remaining concealment (the prone-in-foliage term) and the solver and ray residuals tracked in D-AI-2, D-AI-4, D-AI-6 and D-AI-7; the state-17 fire tick, the LOS exclusion set, the variant-A target search and guided projectile flight (D-NET-64, section 33.35) are ported | world-wac-ai-re.md sections 16..18 |
 | NPC presentation | Held weapons and remaining aim/fire/death presentation | world-wac-ai-re.md; D-WPN-32 |
-| BMS actions | MP POI/live-marker ownership and remaining shared script/native effect-slot consumers | bms-event-runtime-re.md |
-| WAC execution | Complete registered runtime semantics and presentation routing; replace silent effect fallthrough with explicit disposition | formats/wac command registry; runtime/wac VM |
-| Mission lifecycle | Objective feedback, the win path's epilog (00TRa has no win objective), retail's in-game RESTART (`UI_IngameRestartCommand @0x555410` -> `Game_RestartRoundSP`, the SP epilog/respawn flow, D-AI-10 / D-LOADSCR-8) and the playthroughs of the later training and co-op missions; 00TRa's failure, exit and repeat launch are accepted below | MissionKernel, Session and mission-end tests; the `mission_playthrough` probe |
+| BMS actions | MP POI/live-marker ownership (D-EVT-1), remaining shared script/native effect-slot consumers, action 38's light-group consumer (unresolved in retail), the unwired HUD item-flash readers (the compass strip, the tracked-target pointer and the minimap blip gates) and the SubGoalWon score tally's SP epilog consumers; actions 28, 35, 36 and 37 and trigger subs 26/27 are ported | bms-event-runtime-re.md sections 11.5 to 11.7 |
+| WAC execution | The registry rows the routing inventory still marks `verify consumer` and the remaining presentation routing; the compiler is a single-pass port of `Script_Compile @0x4F31F0`, every program installs, and every registry row dispatches explicitly (the unreachable default records a gap; `wac_dispatch_sweep`) | formats/wac command registry; runtime/wac compiler and VM; world-wac-ai-re.md section 33 |
+| Mission lifecycle | The win path's epilog (00TRa has no win objective; 01TR's only BlueWin became reachable when SingleDestroyed began reading the BMS-ref rows, bms-event-runtime-re section 11.2), retail's in-game RESTART (`UI_IngameRestartCommand @0x555410` -> `Game_RestartRoundSP`, the SP epilog/respawn flow, D-AI-10 / D-LOADSCR-8) and the playthroughs of the later training and co-op missions; the objective feedback (the New Objective lines, NEW_GOAL and their S2C 0x3F relay) and the teardown's PostMission sweep are ported; 00TRa's failure, exit and repeat launch are accepted below | MissionKernel, Session and mission-end tests; the `mission_playthrough` probe |
 | Runtime shutdown | A forced SceneTree quit (including `--quit-after`) with streaming music bypasses the orderly, 1000 ms-bounded drain that normal quit performs (Godot shutdown ordering, not an engine divergence) | audio/mus-sbf-re.md Godot playback note; `music_service.gd` `await_playback_stopped` |
 
 ## Evidence rules
@@ -100,11 +100,22 @@ Observed and faithful: the range-arrival dialogs (events 46/47) never play for a
 truck-11 rider because of the flat left-to-right trigger fold retail shares
 ([bms-event-runtime-re.md §1.4](../mission/bms-event-runtime-re.md)).
 
-Two observations from the run that still need a retail witness, not claimed
-as divergences: the round-outcome record read `bluekills` 2 for the one
-person killed (the `lose_flow_00tra` ctest's staged single round reads 1), and
-a seated person's card health does not move while the occupant damage
-accumulates through the cab (the probe counts bursts per firing spot instead).
+Two observations from the run, re-read 2026-09-23 against the scorer (PLAUSIBLE,
+not re-run): the round-outcome record read `bluekills` 2 where the
+`lose_flow_00tra` ctest's staged single round reads 1. The SP tallies count one
+per lethal hit on a scored victim (`Score_ProcessKillEvent` at each damage-pass
+lethal edge, [world-wac-ai-re.md §20.4](world-wac-ai-re.md)). 00TRa authors
+exactly two persons, both blue (net 1 on truck 11, net 1715 on truck 1714 at
+(311,-398)); neither respawns and no BMS kill or win action exists, so
+`bluekills` 2 means both drivers died, the second most likely to stray rounds,
+which retail counts too. The port's only double-stage path, a hit restaging a
+death on a body already below zero health, is closed by the pre-hit health gate
+(`Projectile_ProcessDamageOnTarget @0x4E80FE`). A seated person's card health does
+not move because the probe's card reads the AI copy of the health (the probe
+counts bursts per firing spot instead). A self-kill never trips
+`true(bluekills)` (01TR, 03TR, 04TR and 05TR author the same line): no Player
+definition authors a `score`, so a Player victim never tallies
+(`lose_flow_04tr_self_kill`, `lose_flow_05tr_self_kill`).
 
 Not exercised by this playthrough and still owed: the on-foot tour narration
 (events 13 through 37, zones near the barracks), the second truck's ride
@@ -115,6 +126,6 @@ later mission.
 The registry inventory finds 165 WAC entries: all 165 have explicit VM branches
 and none reach the unsupported-command fallback. This is a dispatch inventory,
 not a parity claim; the per-entry witnesses live in world-wac-ai-re.md section
-33 and the [routing inventory](npc-script-coverage.md), which also lists the 150
+33 and the [routing inventory](npc-script-coverage.md), which also lists the 162
 named BMS trigger/action values, the 24 brain rows and the motor/presentation
 acceptance families.
