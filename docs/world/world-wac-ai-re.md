@@ -4045,6 +4045,22 @@ record a `profile+136/+168` bit-0 (`WEAPON_TURRET`) block re-solves every visit
 firing; a processed tick on which neither weapon fires sets brain[106] = 0 and the
 bone byte 0 (`@ 0x4741CC..0x4741D6`). `ai_vehicle_combat` pins these legs.
 
+Every weapon block that passes its ready test (ammo dword nonzero, cooldown word at or
+above the rate) first stores its ammo byte (profile +148 primary, +180 secondary) into the
+hull's +0x2B0, fired or not, before the pose seed and the solve, and the weapon call reads
+it back as its weapon slot (`movzx eax, byte ptr [edi+2B0h]` @ 0x47301B ->
+`Weapon_FireProcess`). The sixteen stores: ground @ 0x472F23 / @ 0x472FAA (stationary),
+@ 0x47315F / @ 0x473225 (the locked replay), @ 0x473518 / @ 0x4737B4 (the continuation),
+@ 0x473CA8 / @ 0x473D92 (the processed tick); aircraft (`AI_TickState_AircraftCombat
+@ 0x471710`) @ 0x471837 / @ 0x4718BE, @ 0x471A60 / @ 0x471B26, @ 0x471E1D / @ 0x4720BA,
+@ 0x4724AF / @ 0x472599. `AIEntity_ReleaseFlareCountermeasures @ 0x455EF0` saves the byte,
+fires its flares with the FLARE ammo byte (@ 0x455F56) and restores it (@ 0x45610B /
+@ 0x456131), net neutral. A vehicle's +0x2B0 is therefore the byte
+`WeaponSlot_InitFromEntityDef` stored at its spawn (@ 0x546742), overwritten by every
+ready block; the org1 mounted request copies that live byte (§26.6). Port: `SmWeapons::stamp`
+(`ai_handlers.cpp`) and the aircraft combat tick's stamp (`ai_aircraft.cpp`); `ai`
+(`test_sm_fire_stamps_the_hull_adm_byte`, `test_aircraft_fire_stamps_the_hull_adm_byte`).
+
 ### 17.7 Open follow-ups (this session's unknowns)
 
 1. RESOLVED 2026-09-22 for `brain[53]/[54]`: the spawn writer is the vehicle class
@@ -8194,7 +8210,8 @@ Let `S = current_tick + 36*net_id`. Every mounted-live org1 body (parent and hea
 captured at the motor head, whatever its seat) makes the request: past a non-null target
 (no health test [orig: @0x4BF4CF..0x4BF4D4]; the port tested the target's health until
 2026-09-22), `(S & 3) == 0` and the stagger `((target.x-target.y+S) & 0x40) == 0` it
-copies the parent's +0x2B0 into its own (@0x4BF4F4..0x4BF4FA; a weaponless parent's is the
+copies the parent's live +0x2B0 into its own (@0x4BF4F4..0x4BF4FA: the parent weapon slot's
+byte from spawn, then each ready AI block's ammo byte, §17.6; a weaponless parent's is the
 spawn clear's zero), and only a rider with an EquippedSlot (the UseGun swap, or a ctrlx
 rider on an EWeap parent) goes on: `dz` is halved before distance; distance is strictly
 below `AiSlot[15]`; bearing error is below `0x0AAAAAA0` (about 15 degrees); and the slot's
@@ -12550,9 +12567,17 @@ the ground death's child kill) route the same way.
   fire tail, phase-8 resolver and return @ 0x4BF4BB..0x4BF5C6 -> slide decay
   @ 0x4BF5CB..0x4BF61F -> attach move @ 0x4BF625 -> integrate @ 0x4BF684..0x4BF6A2 ->
   odd skip @ 0x4BF6A5. The NPC fire pass runs after the heading and look chase, and
-  the recoil kick after the think. Observation: the mounted-live local is captured
-  before the think, so on a boarding tick retail still runs the ground chase (the
-  port poses the seat after the think).
+  the recoil kick after the think. The mounted-live local (var_1098: a parent +0x16C and
+  Health +0x11E > 0) is captured at the head (@ 0x4B9960..0x4B9985), before the death edge
+  and the think, and tested at the seat block (@ 0x4BE8F0) and at the request and the
+  mounted return (@ 0x4BF4B3). A body that boards inside its pass's think therefore walks on
+  foot to the end of that pass (the ground chase @ 0x4BE8FD..0x4BEBE7, no request, the
+  ordinary mover @ 0x4BF5CB) and is posed from the next pass; a rider that loses its parent
+  mid-pass keeps the local, so the seat block's parent test (@ 0x4BEBEC..0x4BEBF4) skips the
+  pose, there is no ground chase, and only the +-90 degree look clamp about the body
+  (@ 0x4BEF9A..0x4BEFED) runs before the request's parent test sends it to the ordinary
+  mover. Port: `tick_infantry`'s `mounted_live` (`vehicle_mount`: `test_board_pass_stays_on_foot`,
+  `test_board_pass_on_an_attached_gun_stays_on_foot`).
 - **Corpse legs and the torso roll.** The tumble (dead, Flags 0x2000, every eighth
   key tick; @ 0x4BA08D..0x4BA10A): a = (32 - (key & 63)) * 0xFFFFFF, b = (32 -
   (((key sar 6) - key) & 63)) * 0xFFFFFF; +0x2D0 = a + b; +0x2EC = +0x1A8 (before the
@@ -12595,11 +12620,20 @@ the ground death's child kill) route the same way.
   123, 124 or 125 and whose +0x98 board SSN names the parent (or the parent's ground
   entity) gets health 0 and +0x178 = parent+0x178; then every failing rider detaches
   (`Entity_DetachFromVehicleIfServer`, @ 0x4BEEDF) and the tail stores +0x28 = +0x16C
-  (@ 0x4BEEE7..0x4BEEEF). Port: `IPoseProvider::resolve_seat_bone` and the fail arm in
-  `pose_if_mounted`. Carried: ordinary seats still pose from the static seat geometry
-  on success, and on the fail tick retail still runs the shared mounted tail (the
-  carrier-velocity copy zeroed @ 0x4BEF1C..0x4BEF30, the mounted look chase
-  @ 0x4BEF36..0x4BEFF0).
+  (@ 0x4BEEE7..0x4BEEEF). The fail arm (@ 0x4BEE93..0x4BEEE4) then falls into the seat
+  block's common tail (@ 0x4BEEE7..0x4BEF97): +0x28 = +0x16C, the parent's +0x1D0..+0x1DC
+  blink hits copied into the rider's (zeroed without a parent, @ 0x4BEEF4..0x4BEF30), the
+  legs and their targets set to the body heading (@ 0x4BEF36..0x4BEF51) and the mounted look
+  chase (@ 0x4BEF57..0x4BEF97); then the clamp (@ 0x4BEF9A, gated on the parent's config
+  while a parent remains). Port: `IPoseProvider::resolve_seat_bone` and the fail arm in
+  `pose_if_mounted`, which runs the tail's legs and look chase (`vehicle_mount`,
+  `test_seat_bone_failure_runs_the_seat_tail`). Carried: ordinary seats still pose from the
+  static seat geometry on success. Open follow-ups: the tail's +0x1D0..+0x1DC blink-hit
+  copy (@ 0x4BEEF4..0x4BEF30) is unported on every mounted path, success and fail arm
+  alike; and the seat block skips a parent with no ItemDef (@ 0x4BEBFA..0x4BEBFD ->
+  @ 0x4BEF9A: no pose, no seat animation, no look chase, while the request and the mounted
+  return still run), where the port still poses such riders (several def-less test fixtures
+  rely on it).
 - **The secondary-fire latch and the mounted request.** `shouldFireSecondary` is the motor
   frame local var_108C, zeroed with the other locals at the motor head (@ 0x4B999C..0x4B99C6,
   the latch @ 0x4B99B8); only that pass's walking-fire leg (@ 0x4BC93F) or the clip's 0x8
@@ -12633,9 +12667,9 @@ the ground death's child kill) route the same way.
   `test_npc_detach_zeroes_the_equipped_byte`). Carried: the ctrlx attach's slot swap on an
   EWeap parent and the weapon walk's pump of that rider's borrowed slot (+0x118 for every
   pool-0 row, @ 0x5426AD) are unported for NPC riders, so an NPC ctrlx rider of an EWeap
-  vehicle makes the request but never queues FIRE; and the vehicle AI fire paths' per-shot
-  rewrite of a vehicle's +0x2B0 (`AIEntity_ProcessWeaponFire` @ 0x472F23 and siblings, e.g.
-  @ 0x471837) is not modeled.
+  vehicle makes the request but never queues FIRE. The byte the request copies is the
+  parent's live +0x2B0: its weapon slot's byte from spawn, then each ready vehicle AI weapon
+  block's ammo byte (§17.6; `ai`, `test_mounted_request_copies_the_parents_live_byte`).
 - **The plyr waypoint tail.** `Entity_HandleDamageAndTriggerZones @ 0x407720`
   returns at once for Flags & 2 (@ 0x40772A..0x40772F); every other event reaches its
   tail: the cause-bit clear for events outside {1, 3, 4, 5} (@ 0x407B3B..0x407B4F),
