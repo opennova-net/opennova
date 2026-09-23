@@ -13304,8 +13304,10 @@ world-side facts of the slice:
   wave phase (`Water_GenerateNoiseTextures` @ 0x5C0366 / @ 0x5C036E) and the water
   decal (@ 0x5DE25A). The boat and air movers stagger `tick` by 36 * DcbId instead
   (@ 0x48D486..0x48D51F, @ 0x4903A8, @ 0x46FA24 / @ 0x46FA77). Port:
-  `World::entity_update_counter`; the water noise, the HUD blink, the trail anchor and
-  the SP time score do not read it yet.
+  `World::entity_update_counter`, which also clocks the water noise (the Godot shell feeds
+  it to `Water` each render frame; an unfed `Water` counts its own frames,
+  `env_render_cadence_test.gd`); the HUD blink, the trail anchor and the SP time score do
+  not read it yet.
 - **The epilog path.** While g_epilog_screen_active (@ 0xA87054) is set the update
   branches (@ 0x4C211D..0x4C2128) to @ 0x4C239A: every pool-1 row copies +4..+0x18
   into +0x80..+0x94, and only a row whose +0x170 occupant is a Player gets
