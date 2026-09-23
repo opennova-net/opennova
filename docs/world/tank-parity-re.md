@@ -650,8 +650,12 @@ per following list entry, the silhouette takes the bordered texture window
   the 0x0D spawn carries the three dwords whole
   (`serialize_entity_pool_to_packet_0 @ 0x503B37`, `@ 0x503B53`, `@ 0x503B6F`)
   and the 0x18 rebuild truncates their high words (`serialize_object_to_buffer
-  @ 0x505166`, `@ 0x505179`). The host reads a seeded mover's own BAM and keeps
-  the whole-degree mirror only for an unseeded entity.
+  @ 0x505166`, `@ 0x505179`). The host reads a seeded mover's own BAM; for an
+  unseeded entity it sends the placement angles in the spawn form,
+  `((deg << 16) / 360) << 16` with the low half zero (`Entity_SpawnFromBMSRecord
+  @0x40E9F0`, `@0x40EB42..0x40EBA6`; `world::spawn_angle_bam` in
+  `entity_wire_bridge`, the 0x0F load and the pose heading, 2026-09-23), where it
+  had converted the whole-degree mirror continuously (vehicle record section 41).
 - **0x0D parent and target.** The 0x0D parent is the +0x170 occupant
   back-reference, a hull's driver or a gun's gunner (`@ 0x503BC9`, flag
   `@ 0x503BD3`); the target is +0x28, an addeweap child's carrier
