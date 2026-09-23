@@ -1505,20 +1505,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.move_mode = 0;
                 inf.target_dist = 0;
             }
-            // On a ladder the NPC's gait selection is suppressed — the org1
-            // on-ladder block after the resolve owns states 32-35 (the same-tick
-            // overwrite mapping as the player selection skip above). The combat
-            // tail already dropped the move ahead of the guard, hold and reaction
-            // legs [orig: @ 0x4bd18d]; the skipped selection's zero-distance leg
-            // clears the path state [orig: @0x4BD2E9].
-            if (tick_entity != nullptr &&
-                ((tick_entity->flags | tick_entity->engine_flags) &
-                 kEntityFlagLadderContact) != 0) {
-                inf.path_state = 0;
-            }
-		else if (!attachment.parent.valid()) {
-			infantry_select(e, world, combat_state);
-		}
+            // On a ladder the combat tail has dropped the move [orig: the test
+            // @0x4BD187..0x4BD18D, the drop @0x4BD18F..0x4BD194], and the
+            // selector still runs: its zero-distance leg clears the path state,
+            // +0x36A takes the move mode and the flinch consumes wasHit before
+            // the arbiter commits; the org1 ladder block later stores its climb
+            // state over the selection. [orig: @0x4BD2DE..0x4BD2E9, @0x4BD356,
+            //  @0x4BD6EE; the ladder block @0x4BF907..0x4BFAD8]
+            if (!attachment.parent.valid()) infantry_select(e, world, combat_state);
         }
 	}
 

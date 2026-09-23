@@ -739,6 +739,24 @@ void test_org1_fire_latch_is_a_pass_local() {
     CHECK(!rig.e().inf.fire_secondary_latch);
 }
 
+// R4-18: on a ladder the combat tail drops the move and the selector tail still
+// runs: +0x36A takes the dropped move mode, the flinch consumes wasHit and the
+// zero-distance leg clears the path state. [orig: Entity_UpdateInfantryAI the
+// ladder drop @0x4BD187..0x4BD194, the zero-distance leg @0x4BD2DE..0x4BD2E9,
+// +0x36A @0x4BD356, wasHit @0x4BD6EE]
+void test_org1_ladder_runs_the_selector_tail() {
+    Org1Rig rig;
+    rig.e().pos[2] = fx(1);
+    rig.entity().flags |= kEntityFlagLadderContact;
+    rig.e().inf.was_hit = true;
+    rig.e().inf.prev_move_mode = 3;
+    rig.e().inf.path_state = 1;
+    rig.tick(16);
+    CHECK(!rig.e().inf.was_hit);
+    CHECK(rig.e().inf.prev_move_mode == 0);
+    CHECK(rig.e().inf.path_state == 0);
+}
+
 int main() {
     test_org1_fall_takes_the_quarter_step_tail();
     test_org1_fall_damage_follows_the_retail_fall();
@@ -759,6 +777,7 @@ int main() {
     test_org1_edge_reads_the_recorded_round();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_fire_latch_is_a_pass_local();
+    test_org1_ladder_runs_the_selector_tail();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();
     test_org1_torso_roll();
