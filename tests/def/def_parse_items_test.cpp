@@ -69,6 +69,55 @@ static int test_light_transfer(void) {
     return fails;
 }
 
+/* The kill value: `score` is atol of the first value token stored as a signed
+   word at ItemDef+0x194; an item that never authors it keeps 0 (every Player
+   definition), which Score_ProcessKillEvent treats as "no kill accounting".
+   Shipped rows author forms like "score 0 155".
+   [orig: ItemDef_ParseProperty @0x4A0213..0x4A0242; Score_ProcessKillEvent
+   @0x4FD422] */
+static int test_score_word(void) {
+    static const char snippet[] =
+        "begin \"Player #1, Single player\"\n"
+        "  id 105310\n"
+        "  type person\n"
+        "end\n"
+        "begin \"Indonesian Soldier #1 with AK47\"\n"
+        "  id 101798\n"
+        "  type person\n"
+        "  score 10\n"
+        "end\n"
+        "begin \"Two Values\"\n"
+        "  id 3\n"
+        "  SCORE 0 155\n"
+        "end\n"
+        "begin \"Wrapped\"\n"
+        "  id 4\n"
+        "  score 70000\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
+                               &items) != 0 ||
+        items.count != 4) {
+        fprintf(stderr, "FAIL: score snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int fails = 0;
+    if (items.entries[0].score != 0 || items.entries[1].score != 10 ||
+        items.entries[2].score != 0 || items.entries[3].score != 70000 - 0x10000) {
+        fprintf(stderr, "FAIL: score word mismatch: %d %d %d %d\n", items.entries[0].score,
+                items.entries[1].score, items.entries[2].score, items.entries[3].score);
+        ++fails;
+    }
+    if (items.entries[1].raw_lines_count != 0 || items.entries[2].raw_lines_count != 0) {
+        fprintf(stderr, "FAIL: score fell through to raw_lines\n");
+        ++fails;
+    }
+    def_free_items(&items);
+    return fails;
+}
+
 /* Per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00,
    particlefx chain @ 0x4a13ad..0x4a179d]: anchored slots take
    <effect> <userpoint> (particlefxs/particlefxw1/particlefxw2 read an optional
@@ -567,6 +616,9 @@ int main(void) {
 		return 1;
 	}
 	if (test_light_transfer() != 0) {
+        return 1;
+    }
+    if (test_score_word() != 0) {
         return 1;
     }
     if (test_weathervane_minai_default_aip() != 0) {

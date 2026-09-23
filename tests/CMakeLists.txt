@@ -2005,6 +2005,11 @@ target_link_libraries(match_test PRIVATE opennova_runtime)
 target_include_directories(match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(match_test PRIVATE cxx_std_17)
 add_test(NAME match COMMAND match_test)
+add_executable(match_scoring_test world/match_scoring_test.cpp)
+target_link_libraries(match_scoring_test PRIVATE opennova_runtime)
+target_include_directories(match_scoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(match_scoring_test PRIVATE cxx_std_17)
+add_test(NAME match_scoring COMMAND match_scoring_test)
 
 # Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
 # items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
@@ -2932,6 +2937,10 @@ add_executable(lose_flow_test mission/lose_flow_test.cpp)
 target_link_libraries(lose_flow_test PRIVATE opennova_test_rig)
 opennova_add_gated_test(lose_flow_04tr COMMAND lose_flow_test --bms 04TR.bms)
 opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms --victim-team 1)
+# `--self-kill`: the player's own HE blast tallies nothing (no Player definition
+# authors a `score`), so the WAC's bluekills lose never fires on it.
+opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
+opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

@@ -938,10 +938,19 @@ void test_demolition_flag_and_flagball_gameplay() {
     flag_ball.max_score = 2;
     world->match.configure(flag_ball);
     world->match.upsert_player({blue, 0, "Blue"});
+    // The capture's team award is keyed by the captured flag's type: a null
+    // flag awards the capturer alone, and FlagBall's ball (the neutral flag)
+    // scores the capturer's own team row.
+    // [orig: GameEvent_ProcessScoring case 9 @0x52F7CF..0x52F810]
     world->match.record_flag_capture(*world, blue, EntityHandle{});
-    world->match.record_flag_capture(*world, blue, EntityHandle{});
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
+    CHECK(world->match.team_stats(1)[MatchStats::kFlagCaptures] == 0);
+    const EntityHandle ball = objective(*world, 4095, 0);
+    world->match.record_flag_capture(*world, blue, ball);
+    world->match.record_flag_capture(*world, blue, ball);
     const auto flag_ball_winner = world->match.winner_if_finished(*world);
     CHECK(flag_ball_winner.has_value() && *flag_ball_winner == 1);
+    world->registry.despawn(ball);
 
     MatchRules zero_flag_ball;
     zero_flag_ball.game_type = gt::kFlagBall;
@@ -1314,14 +1323,17 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     };
 
     // (a) Points and kills disagree: Ace has 2 kills and 3 suicides (5 points),
-    // Bee 1 kill (8 points). DM orders by kills.
+    // Bee 1 kill (8 points). DM orders by kills. Every non-team Player sits on
+    // team 1, and the kills stay enemy kills: the scorer's team rows exist
+    // only in team modes. [orig: Server_AssignPlayerTeam @0x4FE3EC;
+    // GameEvent_ProcessScoring @0x52F657]
     {
         auto world = std::make_unique<World>();
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
-        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
+        const EntityHandle cid = player(*world, 9, 1, "Cid");
         world->match.record_death(*world, bee, ace);
         world->match.record_death(*world, cid, ace);
         for (int i = 0; i < 3; ++i)
@@ -1347,7 +1359,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Ace");
-        player(*world, 7, 2, "Bee");
+        player(*world, 7, 1, "Bee");
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(result.draw);
@@ -1378,8 +1390,8 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
-        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
+        const EntityHandle cid = player(*world, 9, 1, "Cid");
         world->match.record_death(*world, cid, ace);
         world->match.record_death(*world, cid, bee);
         world->process_round_end(0);
@@ -1399,7 +1411,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         koth.hill_limit_minutes = 99;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 3, 1, "Solo");
-        const EntityHandle red = player(*world, 7, 2, "Red");
+        const EntityHandle red = player(*world, 7, 1, "Red");
         world->match.player(solo)->objective_ticks = 5;
         world->match.player(solo)->stats[MatchStats::kPoints] = 50;
         world->match.player(red)->objective_ticks = 9;
@@ -1416,7 +1428,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
         world->match.record_death(*world, bee, ace);
         world->match.set_player_spectator(ace, true);
         world->process_round_end(0);

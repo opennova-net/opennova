@@ -484,16 +484,65 @@ void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
 	}
 }
 
+// SELF-KILL MODE (`--self-kill`): the local player dies to its own HE grenade
+// blast. No Player definition authors a `score` word, so the kill accounting
+// returns before any tally: bluekills stays 0 and the WAC's
+// `true(bluekills) -> Lose(1)` never fires. 04TR and 05TR author
+// SinglePlayerRespawn, so the death itself ends nothing either.
+// [orig: Entity_ApplyWeaponDamage @0x4E6BFE -> Score_ProcessKillEvent
+//  @0x4FD400, the victim `score` gate @0x4FD422; Server_CheckWinConditions
+//  SP leg @0x51AD68 (Bms_AttribFlags & 0x40)]
+int run_self_kill(testrig::RetailMissionRig &rig) {
+	Run run{rig};
+	const w::EntityHandle player = rig.world.cached.local_player;
+	const int ammo_index = rig.world.tables.ammo.index_of("grenadehe");
+	const w::AmmoTableEntry *ammo = rig.world.tables.ammo.by_index(ammo_index);
+	if (!expect(ammo != nullptr, "the HE grenade ammo row resolves")) return 1;
+	w::Entity *me = rig.world.registry.get(player);
+	if (!expect(me != nullptr && me->alive && me->health > 0, "the player is alive at spawn")) return 1;
+	std::printf("lose-flow: self-kill player team=%d hp=%d score=%d\n", int(me->team), me->health,
+			me->item_score);
+	w::ExplosionEntry blast;
+	blast.pos = me->position;
+	blast.type = ammo->kztype;
+	blast.ammo_index = ammo_index;
+	blast.owner = player;
+	rig.world.explosions.queue_explosion(rig.world, blast);
+	bool died = false;
+	for (int t = 0; t < kTicksPerSecond * 2 && !died; ++t) {
+		run.tick();
+		const w::Entity *body = rig.world.registry.get(player);
+		died = body == nullptr || !body->alive || body->health <= 0;
+	}
+	if (!expect(died, "the player's own blast killed it")) return 1;
+	// Four WAC passes: the script reads the tallies every 62nd tick.
+	run.tick(kTicksPerSecond * 4);
+	const w::MissionKillStats &ks = rig.world.kill_stats;
+	std::printf("lose-flow: self-kill outcome ended=%d bluekills=%d greenkills=%d\n",
+			int(rig.world.match.outcome().ended), ks.bluekills_by_player, ks.greenkills_by_player);
+	expect(ks.bluekills_by_player == 0 && ks.greenkills_by_player == 0 && ks.team_kills_by_others == 0 &&
+					ks.friendly_kills_by_others == 0,
+			"the self-kill tallies nothing");
+	int lose_count = 0;
+	for (const w::Effect &e : run.seen)
+		if (e.kind == "lose") ++lose_count;
+	expect(lose_count == 0, "no WAC Lose fired on the self-kill");
+	expect(!rig.world.match.outcome().ended, "the round is still running (SinglePlayerRespawn)");
+	return failures == 0 ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	std::string bms = "04TR.bms";
 	int victim_team = -1;
 	bool events_only = false;
+	bool self_kill = false;
 	for (int i = 1; i < argc; ++i) {
 		if (std::strcmp(argv[i], "--bms") == 0 && i + 1 < argc) bms = argv[++i];
 		else if (std::strcmp(argv[i], "--victim-team") == 0 && i + 1 < argc) victim_team = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--events") == 0) events_only = true;
+		else if (std::strcmp(argv[i], "--self-kill") == 0) self_kill = true;
 	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
@@ -514,6 +563,11 @@ int main(int argc, char **argv) {
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	if (!expect(!rig.world.match.outcome().ended, "the round has not ended at spawn")) return 1;
 	if (!expect(rig.world.collision != nullptr, "the collision world is up")) return 1;
+	if (self_kill) {
+		const int rc = run_self_kill(rig);
+		if (rc == 0) std::printf("lose_flow %s: the self-kill tallied nothing and ended nothing\n", bms.c_str());
+		return rc;
+	}
 
 	// NPC fire stays LIVE: the chain under test is observed through it, never
 	// with the NPCs disarmed. The scenario invites retaliation (a friendly is

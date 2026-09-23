@@ -632,6 +632,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 d.victim_handle = source.packed;
                 d.killer_handle = p->primary_occupant.valid()
                         ? p->primary_occupant.packed : 0xFFFFu;
+                d.event_flags = ent->cause_flags & 0xF00u;
+                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the
+                // Score_ProcessKillEvent call @0x4B39E2)]
+                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
             // The bump sound follows on every peer, killed or not: the

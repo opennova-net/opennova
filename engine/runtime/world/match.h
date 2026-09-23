@@ -106,6 +106,12 @@ struct MatchStats {
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
     static constexpr size_t kTargetsDestroyed = 14;
+    // Kill-cause counters: entity+0x2C bit 0x100 (same-round multi-kill),
+    // 0x800 (headshot), 0x400 (knife). [orig: GameEvent_ProcessScoring
+    // @0x530076..0x530178 RecordEvent 16/17/18]
+    static constexpr size_t kMultipleKills = 17;
+    static constexpr size_t kHeadshotKills = 18;
+    static constexpr size_t kKnifeKills = 19;
     static constexpr size_t kVictimNearNeutralObjectiveKills = 22;
     static constexpr size_t kAttackerNearNeutralObjectiveKills = 23;
     static constexpr size_t kVictimNearAttackerObjectiveKills = 24;
@@ -326,10 +332,15 @@ class Match {
     int32_t flag_capture_target(const World &world, uint8_t scoring_team);
     int32_t demolition_target(const World &world, uint8_t scoring_team);
 
-    // Retail runs the victim death scorer first, then the killer-victim scorer.
-    // An invalid killer records only the victim leg.
+    // A Player victim takes GameEvent_PlayerDeath's two scorer calls (its own
+    // death, then the killer-victim call); a non-Player person takes
+    // Entity_CheckAndProcessDeath's single killer-victim call. `cause_flags`
+    // is the victim's entity+0x2C cause word as the death edge reads it.
+    // [orig: GameEvent_PlayerDeath @0x516F06 / @0x516FB0;
+    // Entity_CheckAndProcessDeath @0x51B5B3]
     void record_death(World &world, EntityHandle victim,
-                      EntityHandle killer = EntityHandle{});
+                      EntityHandle killer = EntityHandle{},
+                      uint32_t cause_flags = 0);
 
     // Objective scorer cases 9 and 11. The ordinary runtime paths call these
     // from carry contact and death routing; they remain public for script/WAC
@@ -391,8 +402,17 @@ class Match {
     int32_t score_value(size_t status_index) const;
     void add_event(MatchPlayer &player, size_t counter, int32_t points,
                    int32_t raw_delta = 1);
+    // The scorer's team leg: TeamRecords[team] exists only in team modes.
     void add_team_event(uint8_t team, size_t counter, int32_t points,
                         int32_t raw_delta = 1);
+    // A direct TeamRecords row award, ungated by the team bit (the flag
+    // capture's hard-routed rows).
+    void add_team_record_event(uint8_t team, size_t counter, int32_t points,
+                               int32_t raw_delta = 1);
+    // Scorer event 3 without a victim (a Player's own death) and with one.
+    void score_death(World &world, EntityHandle victim);
+    void score_kill(World &world, EntityHandle killer, EntityHandle victim,
+                    uint32_t cause_flags);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);

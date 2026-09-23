@@ -217,6 +217,12 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
             current.music_location = signed_i16_value(parse_int_n(v, vl));
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "score", 5)) {
+            /* atol of the first value token, stored as a signed word
+               [orig: ItemDef_ParseProperty @0x4A0228..0x4A0242] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.score = signed_i16_value(parse_int_n(v, vl));
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "id ", 3)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
             current.id = parse_int_n(v, vl);

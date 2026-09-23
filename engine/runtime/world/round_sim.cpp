@@ -1356,6 +1356,12 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 destruction_notify_item_damage(world, *target, 1,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
             } else {
+                // The lethal edge reads the health word BEFORE this hit's
+                // subtraction: a body already at or below zero never re-enters
+                // the kill chain [orig: Projectile_ProcessDamageOnTarget
+                // @0x4E80F7..0x4E8101 `test ax, ax; jle`, damage >= health
+                // @0x4E810A].
+                const int32_t pre_hit_health = target->health;
                 if (authoritative && damage != 0) {
                     if (shooter != nullptr) {
                         auto &rel = world.script.relations;
@@ -1426,7 +1432,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0)
                             target->spawn_phase = 64;
                     }
-                    if (authoritative && damage != 0 && target->health <= 0) {
+                    if (authoritative && damage != 0 && pre_hit_health > 0 &&
+                        target->health <= 0) {
                         // A lethal player-flag hit counts on the ROUND; past the
                         // first kill the victim takes the same-projectile cause
                         // bit 0x100 before the death is reported.
@@ -1454,10 +1461,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         // cause bits at the death edge [orig: @0x516f4d /
                         // @0x517188..0x517206]; the sim snapshots them here.
                         d.event_flags = target->cause_flags & 0xF00u;
+                        // The kill accounting skips a body already flagged
+                        // dead [orig: `test byte ptr [esi+24h], 2` @0x4E811F
+                        // around Score_ProcessKillEvent @0x4E8133].
+                        d.kill_event = target_not_dead;
                         deaths.push_back(d);
                     }
                 } else if (authoritative && damage != 0) {
-                    if (target->health <= 0) {
+                    if (pre_hit_health > 0 && target->health <= 0) {
                         world.script.relations.group(target->group_id).alert =
                             TriggerRelations::kAlertRed;
 
@@ -1469,6 +1480,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         d.adm_index = r.adm_index;
                         d.ammo_index = r.ammo_index;
                         d.event_flags = target->cause_flags & 0xF00u;
+                        d.kill_event = target_not_dead; // [orig: @0x4E811F]
                         deaths.push_back(d);
                     }
                 } else if (authoritative && target->kind != EntityKind::Organic &&

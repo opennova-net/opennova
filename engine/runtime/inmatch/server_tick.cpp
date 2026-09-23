@@ -672,7 +672,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				: PlayerDeathFeed{};
 		// The authoritative score ledger consumes the same death transaction as
 		// the kill-feed; non-roster actors are ignored by Match.
-		world.match.record_death(world, d.victim, d.killer);
+		world.match.record_death(world, d.victim, d.killer, d.event_flags);
 		// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
 		// victim's OWN client learns of its death from its record byte13 bit 0x02
 		// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
@@ -849,17 +849,24 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
 		// Killer == the host/local player -> the by-player buckets
 		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
-		// family [orig: Score_TallyKillByOthers @0x4fd300]. Blue/green buckets take
-		// only PERSON victims (itemdef class 3 == our Organic kind) by the team byte
-		// [orig: victim+354; 0 = green, 1 = blue]; a blue/green NON-person tallies
-		// nothing (witnessed); any team >= 2 victim tallies as an enemy kill (the
-		// original's infantry/vehicle/aircraft split folds into one count; the epilog
-		// sums the split anyway). Point values (def+404, difficulty-scaled) and the
-		// human-player-victim bucket (victim+534 -> 0xC846A0) are unmodeled — counts
-		// only, which is what the WAC predicates and the epilog columns consume
-		// (D-AI-10; world-wac-ai-re §20.4).
-		if (!world.rules.mp_session) {
-			if (const world::Entity *victim2 = world.registry.get(d.victim)) {
+		// family [orig: Score_TallyKillByOthers @0x4fd300]. Only the damage-pass
+		// lethal edges call Score_ProcessKillEvent (RoundDeath::kill_event), and it
+		// returns without a killer or when the VICTIM's ItemDef `score` word is
+		// zero, so a Player (no score on any Player definition) never tallies, not
+		// even for a self-kill [orig: killer @0x4FD405, target def @0x4FD41E,
+		// `cmp word ptr [eax+194h], 0` @0x4FD422]. By-player blue/green buckets
+		// take only PERSON victims (ItemDef+0x5C == 3) by the team byte
+		// [orig: victim+354; 0 = green, 1 = blue; @0x4FD1F6 / @0x4FD213]; the
+		// by-others team 1 / team 0 buckets take any victim type
+		// [orig: @0x4FD325..0x4FD366]; any team >= 2 victim tallies as an enemy kill
+		// (the original's infantry/vehicle/aircraft split folds into one count; the
+		// epilog sums the split anyway). Point values (def+404, difficulty-scaled)
+		// and the human-player-victim bucket (victim+534 -> 0xC846A0, unreachable
+		// behind the score gate) are unmodeled — counts only, which is what the WAC
+		// predicates and the epilog columns consume (D-AI-10; world-wac-ai-re §20.4).
+		if (!world.rules.mp_session && d.kill_event && d.killer.valid()) {
+			if (const world::Entity *victim2 = world.registry.get(d.victim);
+					victim2 != nullptr && victim2->has_item_def && victim2->item_score != 0) {
 				bool killer_is_host_player = false;
 				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 					if (c.link.owned_entity.valid() &&
@@ -870,7 +877,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 					}
 				}
 				world::MissionKillStats &ks = world.kill_stats;
-				const bool person = victim2->kind == world::EntityKind::Organic;
+				const bool person = victim2->item_type == 3;
 				if (killer_is_host_player) {
 					if (victim2->team == 1) {
 						if (person) ++ks.bluekills_by_player;
@@ -881,9 +888,9 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 					}
 				} else {
 					if (victim2->team == 1) {
-						if (person) ++ks.team_kills_by_others;
+						++ks.team_kills_by_others;
 					} else if (victim2->team == 0) {
-						if (person) ++ks.friendly_kills_by_others;
+						++ks.friendly_kills_by_others;
 					} else {
 						++ks.enemy_kills_by_others;
 					}

@@ -298,6 +298,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // @0x4a5aa9, "Null" for an empty tag)]
 		e->hud_image = def != nullptr ? def->hud_image : "";
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
+        // [orig: Score_ProcessKillEvent @0x4FD400 (the def+0x194 read @0x4FD422)]
+        e->item_score = def != nullptr ? def->score : 0;
         if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             world::ItemDeathTraits t;

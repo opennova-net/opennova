@@ -578,10 +578,13 @@ void test_explosion_resolves_attacker_chain_for_events() {
     for (const RoundHit &hit : w.round_sim.hits)
         if (hit.victim == organic && hit.shooter == live_attacker)
             organic_hit_resolved = true;
+    // Both lethal blast edges run the kill accounting
+    // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
+    // calls @0x4E6BFE person, @0x4E6FB4 item)].
     for (const RoundDeath &death : w.round_sim.deaths) {
-        if (death.victim == organic && death.killer == live_attacker)
+        if (death.victim == organic && death.killer == live_attacker && death.kill_event)
             organic_death_resolved = true;
-        if (death.victim == item && death.killer == live_attacker)
+        if (death.victim == item && death.killer == live_attacker && death.kill_event)
             item_death_resolved = true;
     }
     CHECK(organic_hit_resolved);
@@ -3769,10 +3772,13 @@ void test_knife_kill_zone() {
     CHECK(v->last_attacker == attacker);
     CHECK(v->death_anim_state ==
             compute_death_anim_state(kCollisionDeathBone, 0, kCollisionDeathCause));
+    // The knife edge runs the kill accounting [orig:
+    // Entity_ApplyVehicleCollisionDamage @0x4E6620 (the Score_ProcessKillEvent
+    // call @0x4E6773)].
     bool credited = false;
     for (const RoundDeath &death : w.round_sim.deaths)
         if (death.victim == victim && death.killer == attacker &&
-                death.event_flags == kDamageFlagCollision)
+                death.event_flags == kDamageFlagCollision && death.kill_event)
             credited = true;
     CHECK(credited);
     CHECK(w.registry.get(attacker)->health == 100);

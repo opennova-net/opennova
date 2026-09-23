@@ -65,6 +65,14 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	world.round_sim.deaths.push_back(d);
 }
 
+// A death raised at a damage-pass lethal edge, the only producer of the kill
+// accounting [orig: Score_ProcessKillEvent @0x4FD400 from
+// Projectile_ProcessDamageOnTarget @0x4E8133].
+void push_kill(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
+	push_death(world, victim, killer);
+	world.round_sim.deaths.back().kill_event = true;
+}
+
 w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 		const char *name) {
 	w::Entity e;
@@ -382,9 +390,12 @@ void test_dm_round_wire_named_header() {
 	rules.score_values.emplace();
 	(*rules.score_values)[3] = 10;
 	world.match.configure(rules);
+	// Every non-team Player sits on team 1 [orig: Server_AssignPlayerTeam
+	// @0x4FE3EC]; the kills stay enemy kills because the scorer's team rows
+	// exist only in team modes [orig: GameEvent_ProcessScoring @0x52F657].
 	const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
-	const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
-	const w::EntityHandle cid = match_player(world, 9, 2, "Cid");
+	const w::EntityHandle bee = match_player(world, 7, 1, "Bee");
+	const w::EntityHandle cid = match_player(world, 9, 1, "Cid");
 
 	ns::LoopbackChannel ace_wire;
 	ns::LoopbackChannel cid_wire;
@@ -458,9 +469,11 @@ void test_dm_round_wire_kill_order_and_tie() {
 		(*rules.score_values)[4] = -3;
 		(*rules.score_values)[5] = -2;
 		world.match.configure(rules);
+		// All three on team 1, the retail non-team assignment
+		// [orig: Server_AssignPlayerTeam @0x4FE3EC].
 		const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
-		const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
-		const w::EntityHandle cid = match_player(world, 9, 3, "Cid");
+		const w::EntityHandle bee = match_player(world, 7, 1, "Bee");
+		const w::EntityHandle cid = match_player(world, 9, 1, "Cid");
 		world.match.record_death(world, bee, ace);
 		world.match.record_death(world, cid, ace);
 		for (int i = 0; i < 3; ++i) world.match.record_death(world, ace, ace);
@@ -506,7 +519,7 @@ void test_dm_round_wire_kill_order_and_tie() {
 		(*rules.score_values)[3] = 10;
 		world.match.configure(rules);
 		const w::EntityHandle ace = match_player(world, 7, 1, "Ace");
-		const w::EntityHandle bee = match_player(world, 3, 2, "Bee");
+		const w::EntityHandle bee = match_player(world, 3, 1, "Bee");
 		world.match.record_death(world, bee, ace);
 		world.match.record_death(world, ace, bee);
 		world.process_round_end(0);
@@ -1296,11 +1309,16 @@ int main() {
 	if (!expect(player.valid(), "host player spawned")) return 1;
 	world.cached.local_player = player;
 
+	// Every NPC carries a scored definition (the shipped soldiers author
+	// `score 10`); persons are ItemDef type 3.
 	auto spawn_npc = [&](uint16_t net_id, uint8_t team, w::EntityKind kind) {
 		w::Entity e;
 		e.net_id = net_id;
 		e.team = team;
 		e.kind = kind;
+		e.has_item_def = true;
+		e.item_type = kind == w::EntityKind::Organic ? 3 : 1;
+		e.item_score = 10;
 		e.alive = true;
 		e.health = 100;
 		return world.registry.spawn(0, e);
@@ -1310,6 +1328,10 @@ int main() {
 	const w::EntityHandle red_person = spawn_npc(102, 2, w::EntityKind::Organic);
 	const w::EntityHandle green_item = spawn_npc(103, 0, w::EntityKind::Item);
 	const w::EntityHandle green_person2 = spawn_npc(104, 0, w::EntityKind::Organic);
+	const w::EntityHandle blue_person2 = spawn_npc(105, 1, w::EntityKind::Organic);
+	const w::EntityHandle blue_unscored = spawn_npc(106, 1, w::EntityKind::Organic);
+	world.registry.get(blue_unscored)->item_score = 0;
+	const w::EntityHandle blue_item = spawn_npc(107, 1, w::EntityKind::Item);
 
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
@@ -1325,19 +1347,29 @@ int main() {
 
 	// --- 2. Kill tallies by the local player: green person -> greenkills, blue person
 	// -> bluekills, red person -> enemy; a green NON-person tallies nothing. ---
-	push_death(world, green_person, player);
+	push_kill(world, green_person, player);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.greenkills_by_player == 1, "green person kill -> greenkills");
 	expect(!world.match.outcome().ended, "kill tallies alone never end the round");
 
-	push_death(world, blue_person, player);
-	push_death(world, red_person, player);
-	push_death(world, green_item, player);
+	push_kill(world, blue_person, player);
+	push_kill(world, red_person, player);
+	push_kill(world, green_item, player);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1, "blue person kill -> bluekills");
 	expect(world.kill_stats.enemy_kills_by_player == 1, "team>=2 kill -> enemy bucket");
 	expect(world.kill_stats.greenkills_by_player == 1,
 	       "a green NON-person victim tallies nothing [orig: the def+92==3 gate]");
+
+	// --- 2a. Only Score_ProcessKillEvent tallies: a scripted death (no
+	// damage-pass kill event) and a victim whose ItemDef `score` word is zero
+	// never reach the buckets. [orig: the five callers of Score_ProcessKillEvent
+	// @0x4FD400; the `cmp word ptr [eax+194h], 0` gate @0x4FD422] ---
+	push_death(world, blue_person2, player);
+	push_kill(world, blue_unscored, player);
+	inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.bluekills_by_player == 1,
+	       "a scripted death and a score-0 victim leave bluekills alone");
 
 	// --- 2b. The Show Score census: enemy-unit total at mission start counts
 	// non-player, team >= 2 entities with a non-zero items.def unit-class byte;
@@ -1363,12 +1395,18 @@ int main() {
 		       "defined subgoals = the leading non-zero, non-0xFF run");
 	}
 
-	// --- 3. A kill by someone else lands in the by-others family. ---
-	push_death(world, green_person2, red_person);
+	// --- 3. A kill by someone else lands in the by-others family, whose team-1
+	// and team-0 buckets take any victim type. [orig: Score_TallyKillByOthers
+	// @0x4FD325..0x4FD366] ---
+	push_kill(world, green_person2, red_person);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.friendly_kills_by_others == 1,
 	       "green person killed by an NPC -> friendly_kills_by_others");
 	expect(world.kill_stats.greenkills_by_player == 1, "the by-player bucket is untouched");
+	push_kill(world, blue_item, red_person);
+	inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.team_kills_by_others == 1,
+	       "a blue NON-person killed by an NPC -> team_kills_by_others");
 
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
 	world.tables.mission_attrib_flags = 0x40;
@@ -1377,6 +1415,18 @@ int main() {
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.registry.get(player)->alive, "the player respawned after the timer");
+
+	// --- 4b. The Player's own lethal blast: no Player definition authors a
+	// `score`, so the self-kill tallies nothing (the missions whose WAC reads
+	// bluekills never fail on it). [orig: Score_ProcessKillEvent @0x4FD422] ---
+	push_kill(world, player, player);
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.bluekills_by_player == 1 &&
+	               world.kill_stats.team_kills_by_others == 1,
+	       "the player's self-kill tallies nothing");
+	expect(!world.match.outcome().ended, "the self-kill with SP-respawn never auto-loses");
+	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
+	expect(world.registry.get(player)->alive, "the player respawned after the self-kill");
 
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---

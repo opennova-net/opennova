@@ -2764,6 +2764,80 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     }
 }
 
+// The kill accounting's lethal edge reads the health word BEFORE the hit: a
+// body an unclamped path left below zero is raised back to zero by the clamped
+// hit but restages no death, and a lethal hit on a dead-flagged body stages
+// its death without the kill event. [orig: Projectile_ProcessDamageOnTarget
+// @0x4E80F7..0x4E8101 pre-hit health > 0, @0x4E810A damage >= health,
+// @0x4E811F Flags & 2 skipping Score_ProcessKillEvent @0x4E8133]
+void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 8);
+    Entity s;
+    s.kind = EntityKind::Organic;
+    s.item_type = 3;
+    s.health = 100;
+    const EntityHandle shooter = world.registry.spawn(0, s);
+    auto spawn_victim = [&](int32_t health, uint32_t flags) {
+        Entity t;
+        t.kind = EntityKind::Organic;
+        t.has_item_def = true;
+        t.item_type = 3;
+        t.position = {5.0f, 0.0f, 0.0f};
+        t.health = health;
+        t.flags = flags;
+        t.engine_flags = flags;
+        return world.registry.spawn(0, t);
+    };
+
+    AmmoTableEntry ammo;
+    ammo.name = "ZONE";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    world.tables.ammo.entries.push_back(ammo);
+
+    LiveRound round;
+    round.active = true;
+    round.owner = shooter;
+    round.shooter_handle = shooter.packed;
+    round.ammo_index = 0;
+    round.vel = {10.0f, 0.0f, 0.0f};
+    auto hit_person = [&](EntityHandle h) {
+        ProjectileHit hit;
+        hit.hit_class = ProjectileHitClass::Person;
+        hit.geometry_entity = h;
+        hit.section_index = 1;
+        hit.bone_index = 1;
+        hit.hit_zone = 1;
+        FixedVec3 velocity{10 * 65536, 0, 0};
+        world.round_sim.process_damage_hit(world, round, hit, velocity);
+    };
+
+    const EntityHandle live = spawn_victim(10, 0);
+    hit_person(live);
+    CHECK(world.registry.get(live)->health == 0);
+    CHECK(world.round_sim.deaths.size() == 1);
+    if (world.round_sim.deaths.size() == 1)
+        CHECK(world.round_sim.deaths[0].kill_event);
+
+    world.round_sim.deaths.clear();
+    const EntityHandle below_zero = spawn_victim(-5, 0);
+    hit_person(below_zero);
+    CHECK(world.registry.get(below_zero)->health == 0);
+    CHECK(world.round_sim.deaths.empty());
+
+    world.round_sim.deaths.clear();
+    const EntityHandle flagged = spawn_victim(10, kEntityFlagDead);
+    hit_person(flagged);
+    CHECK(world.registry.get(flagged)->health == 0);
+    CHECK(world.round_sim.deaths.size() == 1);
+    if (world.round_sim.deaths.size() == 1)
+        CHECK(!world.round_sim.deaths[0].kill_event);
+}
+
 // On a non-authority in-session peer the person class callback still fires
 // (with Weapon_CalcImpactDamage's forced zero) on the peer's OWN body — the
 // only person a joiner resolves to a World entity: the hit stages the death
@@ -3139,6 +3213,7 @@ int main() {
     test_move_effect_ballistic_leg_ignores_the_water_plane();
     test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
     test_same_projectile_second_player_kill_latches_0x100();
+    test_kill_event_reads_the_pre_hit_health_and_the_dead_flag();
     test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences();
     if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

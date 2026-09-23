@@ -384,6 +384,10 @@ struct Entity {
 	int32_t virtual_display_camera_q16[3] = {};
 	std::string virtual_display_model; // the cockpit graphic key, lowercased
 	int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
+	// ItemDef+0x194 signed word `score`: the kill value. Zero (every Player
+	// definition) keeps the victim out of the kill accounting entirely.
+	// [orig: Score_ProcessKillEvent @0x4FD422]
+	int32_t item_score = 0;
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
     // The §5.10b wire replication class, resolved from the item's items.def *_function class

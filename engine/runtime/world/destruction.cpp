@@ -387,6 +387,9 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
         d.victim_handle = target.handle.packed;
         d.killer_handle = attacker.packed;
         d.ammo_index = ammo_index;
+        // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
+        // call @0x4E6FB4)]
+        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -452,6 +455,9 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
         d.killer_handle = e.owner.packed;
         d.ammo_index = e.ammo_index;
         d.event_flags = target.cause_flags & 0xF00u;
+        // [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620 (the
+        // Score_ProcessKillEvent call @0x4E6773)]
+        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -581,6 +587,13 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
                 d.victim_handle = target.handle.packed;
                 d.killer_handle = attacker.packed;
                 d.ammo_index = e.ammo_index;
+                // The kill accounting runs here, and the death edge's scorer
+                // reads the cause word as this blast's class callback left it
+                // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the class
+                // callback call @0x4E6B72, the Score_ProcessKillEvent call
+                // @0x4E6BFE)].
+                d.event_flags = target.cause_flags & 0xF00u;
+                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
         }

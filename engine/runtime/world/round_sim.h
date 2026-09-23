@@ -349,6 +349,14 @@ struct RoundDeath {
     // for the host's classifier. The revive window is suppressed by either
     // 0x400 or 0x800.
     uint32_t event_flags = 0;
+    // True only for a death raised at one of the five damage-pass lethal edges
+    // that call Score_ProcessKillEvent (the kill accounting: the single-player
+    // tallies and the unit-score event). Scripted, drowning, carry-limit and
+    // admin deaths never reach it. [orig: Score_ProcessKillEvent @0x4FD400,
+    // callers Entity_MovementCollisionResolver @0x4B39E2,
+    // Entity_ApplyVehicleCollisionDamage @0x4E6773, Entity_ApplyWeaponDamage
+    // @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
+    bool kill_event = false;
 };
 
 // A medic-kit hit on a downed teammate the kill-zone pass admitted this tick —

@@ -5808,9 +5808,13 @@ void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	CHECK(behind != compute_death_anim_state(kRunOverDeathBone, 0, kRunOverDeathCause));
 	CHECK(v != nullptr && v->death_anim_state == behind);
 	CHECK(v != nullptr && v->last_attacker == rig.driver);
+	// The run-over edge runs the kill accounting [orig:
+	// Entity_MovementCollisionResolver @0x4B2BD0 (the Score_ProcessKillEvent
+	// call @0x4B39E2)].
 	bool credited = false;
 	for (const RoundDeath &death : rig.world.round_sim.deaths)
-		if (death.victim == rig.victim && death.killer == rig.driver) credited = true;
+		if (death.victim == rig.victim && death.killer == rig.driver && death.kill_event)
+			credited = true;
 	CHECK(credited);
 	const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
 	CHECK(sounds.size() == 1 && sounds[0].set_name == "V_HULL_BUMP");

@@ -7,7 +7,6 @@
 #include <limits>
 #include <utility>
 
-#include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
@@ -223,12 +222,10 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t g
     }
 }
 
-// Either side of a kill carrying the targets-any-team flag (aiSlot[4] & 0x200)
-// exempts it from the team-kill arm.
-// [orig: GameEvent_PlayerDeath see-all gates @0x51709C..0x5170DA]
-bool ai_sees_all(const World &world, EntityHandle handle) {
-    const AiEntity *ai = world.ai.for_handle(handle);
-    return ai != nullptr && ai->see_all;
+// ItemDef+0x5C == 3, the scorer's person test.
+// [orig: GameEvent_ProcessScoring `cmp dword ptr [eax+5Ch], 3` @0x52FFD1]
+bool is_person(const Entity &entity) {
+    return entity.item_type == 3;
 }
 
 } // namespace
@@ -555,8 +552,20 @@ void Match::add_event(MatchPlayer &player, size_t counter, int32_t points,
         wrap_add(player.stats[MatchStats::kPoints], points);
 }
 
+// The scorer resolves the actor's TeamRecords row only when g_GameType carries
+// the team bit; every team leg tests that pointer. A non-team mode therefore
+// never touches a team row, although its Players all sit on team 1.
+// [orig: GameEvent_ProcessScoring @0x52F657 `test ecx, 10000h; jz`, the
+// other-entity twin @0x52F6A3; Server_AssignPlayerTeam @0x4FE3EC]
 void Match::add_team_event(uint8_t team, size_t counter, int32_t points,
                            int32_t raw_delta) {
+    if ((rules_.game_type & 0x10000u) == 0)
+        return;
+    add_team_record_event(team, counter, points, raw_delta);
+}
+
+void Match::add_team_record_event(uint8_t team, size_t counter, int32_t points,
+                                  int32_t raw_delta) {
     if (!gt::has_score_table(rules_.game_type) || team >= teams_.size())
         return;
     teams_[team][counter] = wrap_add(teams_[team][counter], raw_delta);
@@ -700,22 +709,22 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
         return;
     Entity *flag = world.registry.get(flag_handle);
     add_event(*scorer, MatchStats::kFlagCaptures, score_value(10));
-    uint8_t scoring_team = carrier->team;
-    // CTF's two globals are routed by the FLAG TYPE, not by a caller-supplied
-    // scorer team: red captures advance team 1, blue captures team 2. Valid
-    // bay interactions imply the same team, but keeping the original routing
-    // matters for script-authored/scorer calls and hostile state.
-    // [orig: Server_CheckWinConditions @0x51B0F0; the red/blue counter writes
-    // reached from Server_ProcessScoringAndBroadcast @0x5169C0]
-    if (rules_.game_type == gt::kCaptureTheFlag && flag != nullptr) {
-        if (flag->item_id == kRedFlag)
-            scoring_team = 1;
-        else if (flag->item_id == kBlueFlag)
-            scoring_team = 2;
-    }
-    add_team_event(scoring_team, MatchStats::kFlagCaptures, score_value(10));
     if (flag == nullptr)
         return;
+    // The team leg is routed by the FLAG TYPE in every game type: a captured
+    // blue flag names TeamRecords[2] and a red one TeamRecords[1] directly,
+    // with no team-bit test; only the neutral flag uses the capturer's own
+    // (team-mode) row, and any other objective adds no team award. These rows
+    // are also CTF's two capture counters.
+    // [orig: GameEvent_ProcessScoring case 9 @0x52F7CF..0x52F810 — 4091 ->
+    //  TeamRecords[2] @0x52F7E8, 4093 -> TeamRecords[1] @0x52F7F6, 4095 ->
+    //  the esi row @0x52F808; Server_CheckWinConditions @0x51B0F0]
+    if (flag->item_id == kBlueFlag)
+        add_team_record_event(2, MatchStats::kFlagCaptures, score_value(10));
+    else if (flag->item_id == kRedFlag)
+        add_team_record_event(1, MatchStats::kFlagCaptures, score_value(10));
+    else if (flag->item_id == kNeutralFlag)
+        add_team_event(carrier->team, MatchStats::kFlagCaptures, score_value(10));
     const Vec3 capture_position = flag->position;
     const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
     carrier->mounted_child = EntityHandle{};
@@ -856,7 +865,7 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
 }
 
 void Match::record_death(World &world, EntityHandle victim_handle,
-                         EntityHandle killer_handle) {
+                         EntityHandle killer_handle, uint32_t cause_flags) {
     if (outcome_.ended)
         return;
     drop_carried_object(world, victim_handle);
@@ -867,75 +876,156 @@ void Match::record_death(World &world, EntityHandle victim_handle,
             !victim_entity->objective_death_scored)
         record_target_destroyed(world, victim_handle, killer_handle);
 
+    // A Player's death runs the victim-only scorer call, then the
+    // killer-victim call; a non-Player person's death edge runs the
+    // killer-victim call alone. Nothing else reaches scorer event 3.
+    // [orig: GameEvent_PlayerDeath @0x516F06 / @0x516FB0;
+    // Entity_CheckAndProcessDeath `test dword ptr [esi+24h], 100h` @0x51B555,
+    // the non-Player call @0x51B5B3]
+    if (player(victim_handle) != nullptr) {
+        score_death(world, victim_handle);
+        score_kill(world, killer_handle, victim_handle, cause_flags);
+    } else if (is_person(*victim_entity)) {
+        score_kill(world, killer_handle, victim_handle, cause_flags);
+    }
+}
+
+// Scorer event 3 without an other-entity: the Player's own death, RecordEvent
+// 6 (Deaths) and DEATH points on its slot and, in team modes, its team row.
+// The scorer head refuses a spectator-latched slot.
+// [orig: GameEvent_ProcessScoring @0x52F550 — spectator test @0x52F6E5,
+//  case 3 @0x52FFBB `test edx, edx; jz` -> @0x53074E..0x5307A7]
+void Match::score_death(World &world, EntityHandle victim_handle) {
     MatchPlayer *victim = player(victim_handle);
-    if (victim == nullptr)
+    const Entity *victim_entity = world.registry.get(victim_handle);
+    if (victim == nullptr || victim_entity == nullptr || victim->spectator)
         return;
-
-    const uint8_t victim_team = victim_entity->team;
-    // Event 3's victim-only call reaches scorer event 6: death + table[79]
-    // (status value 5), for both Player and team stats.
-    // [orig: GameEvent_PlayerDeath call @0x516F06; scorer @0x52FD75]
     add_event(*victim, MatchStats::kDeaths, score_value(5));
-    add_team_event(victim_team, MatchStats::kDeaths, score_value(5));
+    add_team_event(victim_entity->team, MatchStats::kDeaths, score_value(5));
+}
 
+// Scorer event 3 with an other-entity (the victim).
+// [orig: GameEvent_ProcessScoring @0x52F550 case 3 @0x52FF43]
+void Match::score_kill(World &world, EntityHandle killer_handle,
+                       EntityHandle victim_handle, uint32_t cause_flags) {
+    // The category gate precedes everything, then the head refuses a
+    // spectator-latched slot on either side.
+    // [orig: @0x52F617..0x52F640; @0x52F6E1..0x52F701]
+    if (!gt::has_score_table(rules_.game_type))
+        return;
     MatchPlayer *killer = player(killer_handle);
-    if (killer == nullptr)
+    MatchPlayer *victim = player(victim_handle);
+    if ((killer != nullptr && killer->spectator) ||
+            (victim != nullptr && victim->spectator))
         return;
     const Entity *killer_entity = world.registry.get(killer_handle);
-    if (killer_entity == nullptr)
+    if (killer == nullptr) {
+        // A non-Player killer (an NPC, a vehicle, an item) credits the Player
+        // on its +0x170 link with half the ENEMYKILL value, a LOGICAL shift,
+        // as a shared-points award.
+        // [orig: @0x52FF43 `test edi, edi; jnz` -> @0x52FF47..0x52FF79
+        //  (`shr edx, 1` @0x52FF76) -> RecordEvent 28 / 27 @0x52F8AA..0x52F8C0]
+        if (killer_entity == nullptr)
+            return;
+        MatchPlayer *link = player(killer_entity->primary_occupant);
+        if (link == nullptr)
+            return;
+        share_experience(world, *link,
+                         static_cast<int32_t>(static_cast<uint32_t>(score_value(3)) >> 1));
+        link->stats[MatchStats::kSharedPointAwards] =
+            wrap_add(link->stats[MatchStats::kSharedPointAwards], 1);
+        return;
+    }
+    const Entity *victim_entity = world.registry.get(victim_handle);
+    if (killer_entity == nullptr || victim_entity == nullptr)
         return;
     const uint8_t killer_team = killer_entity->team;
-    if (killer_handle == victim_handle) {
-        // suicide event 5 + table[78] (status value 4)
-        // [orig: GameEvent_ProcessScoring @0x52FB80]
-        add_event(*killer, MatchStats::kSuicides, score_value(4));
-        add_team_event(killer_team, MatchStats::kSuicides, score_value(4));
-    } else if (killer_team != 0 && killer_team == victim_team &&
-               !ai_sees_all(world, victim_handle) &&
-               !ai_sees_all(world, killer_handle)) {
-        // team kill event 3 + table[76] (status value 2). The see-all
-        // exemption is the caller's arm selection: either side's
-        // targets-any-team flag (aiSlot[4] & 0x200) routes the kill down the
-        // enemy arm instead. [orig: GameEvent_ProcessScoring @0x52FBC7;
-        // arm branch GameEvent_PlayerDeath @0x51709C..0x517113]
-        add_event(*killer, MatchStats::kTeamKills, score_value(2));
-        add_team_event(killer_team, MatchStats::kTeamKills, score_value(2));
-    } else {
-        // enemy-player kill event 4 + table[77] (status value 3)
-        // [orig: GameEvent_ProcessScoring @0x52FC99]
+    const uint8_t victim_team = victim_entity->team;
+    const bool team_mode = (rules_.game_type & 0x10000u) != 0;
+
+    // The entity+0x2C kill-cause counters, each with its own points.
+    // [orig: 0x100 -> RecordEvent 16 + MULTIPLEKILL, 0x800 -> 17 +
+    //  HEADSHOTKILL, 0x400 -> 18 + KNIFEKILL]
+    auto cause_bonuses = [&]() {
+        if ((cause_flags & 0x100u) != 0) {
+            add_event(*killer, MatchStats::kMultipleKills, score_value(16));
+            add_team_event(killer_team, MatchStats::kMultipleKills, score_value(16));
+        }
+        if ((cause_flags & 0x800u) != 0) {
+            add_event(*killer, MatchStats::kHeadshotKills, score_value(17));
+            add_team_event(killer_team, MatchStats::kHeadshotKills, score_value(17));
+        }
+        if ((cause_flags & 0x400u) != 0) {
+            add_event(*killer, MatchStats::kKnifeKills, score_value(18));
+            add_team_event(killer_team, MatchStats::kKnifeKills, score_value(18));
+        }
+    };
+
+    if (victim == nullptr) {
+        // A non-Player person: only an enemy of a different nonzero team
+        // counts, as an ENEMYKILL plus the cause bonuses.
+        // [orig: @0x52FFC3 `cmp [esp+var_C], 0; jnz` -> team tests
+        //  @0x52FFDB..0x52FFF9, RecordEvent 4 + 28 @0x530027 / @0x530039, the
+        //  team mirror @0x53005E / @0x530071, cause legs @0x530076..0x530178]
+        if (killer_team == 0 || victim_team == 0 || killer_team == victim_team)
+            return;
         add_event(*killer, MatchStats::kEnemyKills, score_value(3));
         add_team_event(killer_team, MatchStats::kEnemyKills, score_value(3));
-
-        // The six objective-proximity bonuses are independent tests and may
-        // all fire for one kill. Bit 0 works in solo and team modes; the four
-        // team-relative tests require the team stats rows retail materializes
-        // only when g_GameType carries 0x10000.
-        // [orig: GameEvent_ProcessScoring @0x52F550]
-        const bool team_mode = (rules_.game_type & 0x10000u) != 0;
-        const uint8_t attacker_mask = killer->objective_proximity_mask;
-        const uint8_t victim_mask = victim->objective_proximity_mask;
-        auto bonus = [&](size_t counter, size_t score_index) {
-            add_event(*killer, counter, score_value(score_index));
-            if (team_mode)
-                add_team_event(killer_team, counter, score_value(score_index));
-        };
-        if ((victim_mask & 0x01u) != 0)
-            bonus(MatchStats::kVictimNearNeutralObjectiveKills, 21);
-        if ((attacker_mask & 0x01u) != 0)
-            bonus(MatchStats::kAttackerNearNeutralObjectiveKills, 22);
-        if (team_mode && attacker_mask > 1u && killer_team < 8u &&
-            (attacker_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
-            bonus(MatchStats::kAttackerNearOwnObjectiveKills, 24);
-        if (team_mode && victim_mask > 1u && victim_team < 8u &&
-            (victim_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
-            bonus(MatchStats::kVictimNearOwnObjectiveKills, 25);
-        if (team_mode && attacker_mask > 1u && victim_team < 8u &&
-            (attacker_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
-            bonus(MatchStats::kAttackerNearVictimObjectiveKills, 26);
-        if (team_mode && victim_mask > 1u && killer_team < 8u &&
-            (victim_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
-            bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
+        cause_bonuses();
+        return;
     }
+
+    if (killer_handle == victim_handle) {
+        // Suicide: RecordEvent 5 + SUICIDE. [orig: `cmp ebx, edx` @0x530182,
+        // @0x530186..0x5301D5]
+        add_event(*killer, MatchStats::kSuicides, score_value(4));
+        add_team_event(killer_team, MatchStats::kSuicides, score_value(4));
+        return;
+    }
+    if (team_mode && killer_team == victim_team) {
+        // A team kill is the two actors resolving the SAME TeamRecords row,
+        // which exists only in team modes (team 0 included). There is no
+        // see-all exemption in the scorer: that test belongs to the kill feed.
+        // [orig: @0x5301E4..0x5301EE `test esi, esi` / `test eax, eax` /
+        //  `cmp esi, eax`; RecordEvent 3 + FRIENDLYKILL @0x5301FD..0x530237;
+        //  feed-only see-all @0x5170A6..0x517113]
+        add_event(*killer, MatchStats::kTeamKills, score_value(2));
+        add_team_event(killer_team, MatchStats::kTeamKills, score_value(2));
+        return;
+    }
+
+    // Enemy Player kill: RecordEvent 4 + ENEMYKILL.
+    // [orig: @0x530246..0x5302F9]
+    add_event(*killer, MatchStats::kEnemyKills, score_value(3));
+    add_team_event(killer_team, MatchStats::kEnemyKills, score_value(3));
+
+    // The six objective-proximity bonuses are independent tests and may
+    // all fire for one kill. Bit 0 works in solo and team modes; the four
+    // team-relative tests require the team stats rows retail materializes
+    // only when g_GameType carries 0x10000.
+    // [orig: @0x5304B0..0x530744]
+    const uint8_t attacker_mask = killer->objective_proximity_mask;
+    const uint8_t victim_mask = victim->objective_proximity_mask;
+    auto bonus = [&](size_t counter, size_t score_index) {
+        add_event(*killer, counter, score_value(score_index));
+        add_team_event(killer_team, counter, score_value(score_index));
+    };
+    if ((victim_mask & 0x01u) != 0)
+        bonus(MatchStats::kVictimNearNeutralObjectiveKills, 21);
+    if ((attacker_mask & 0x01u) != 0)
+        bonus(MatchStats::kAttackerNearNeutralObjectiveKills, 22);
+    if (team_mode && attacker_mask > 1u && killer_team < 8u &&
+        (attacker_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+        bonus(MatchStats::kAttackerNearOwnObjectiveKills, 24);
+    if (team_mode && victim_mask > 1u && victim_team < 8u &&
+        (victim_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+        bonus(MatchStats::kVictimNearOwnObjectiveKills, 25);
+    if (team_mode && attacker_mask > 1u && victim_team < 8u &&
+        (attacker_mask & static_cast<uint8_t>(1u << victim_team)) != 0)
+        bonus(MatchStats::kAttackerNearVictimObjectiveKills, 26);
+    if (team_mode && victim_mask > 1u && killer_team < 8u &&
+        (victim_mask & static_cast<uint8_t>(1u << killer_team)) != 0)
+        bonus(MatchStats::kVictimNearAttackerObjectiveKills, 23);
 }
 
 void Match::record_zone_capture(const World &world,

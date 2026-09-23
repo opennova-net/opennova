@@ -302,6 +302,7 @@ int main() {
     std::strcpy(rifle->sound_profile, "SP_Test");
     std::strcpy(rifle->sound_profile_female, "SP_TestFemale");
     rifle->attrib |= DEF_ITEM_ATTRIB_LEAVECORPSE;
+    rifle->score = 10; // the shipped soldiers author `score 10`
     bunker->attrib |= DEF_ITEM_ATTRIB_CHANGETEAM | DEF_ITEM_ATTRIB_SPAWNPOINT |
             DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SD; // S&D = the objective target's team-protect
     bunker->attrib2 |= DEF_ITEM_ATTRIB2_STATICDEATH;
@@ -382,6 +383,10 @@ int main() {
     CHECK(rifle_e->leave_corpse);
     // deathtime 5 authored -> (62*5)+62 parse-scaled ticks ride the def row.
     CHECK(rifle_e->deathtime_ticks == 372);
+    // The victim's kill value rides the entity; the Player def authors none.
+    // [orig: Score_ProcessKillEvent @0x4FD400 (the def+0x194 read @0x4FD422)]
+    CHECK(rifle_e->item_score == 10);
+    CHECK(w.registry.get(player_h) != nullptr && w.registry.get(player_h)->item_score == 0);
 
     const Entity *bunker_e = w.registry.get(bunker_h);
     CHECK(bunker_e != nullptr);
