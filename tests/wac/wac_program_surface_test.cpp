@@ -150,11 +150,15 @@ static void test_installed_program_runs_at_the_62_tick_divider() {
     sys.paused = true;
     tick_n(w, 2 * WacSystem::kTicksPerExecution);
     CHECK(w.script.vars.get_mission(2) == 0); // paused: no executions
-    sys.paused = false;
 
-    // The restart: the system's on_load resets the accumulator + runs.
+    // The restart: the system's on_load resets the accumulator + runs, and
+    // clears the pause gate the way the load zeroes the disable dword.
+    // [orig: WacScript_InitAndLoad @0x4F965F]
     w.load_systems();
     CHECK(sys.runs() == 0);
+    CHECK(!sys.paused);
+    tick_n(w, WacSystem::kTicksPerExecution);
+    CHECK(sys.runs() == 1);
 }
 
 // Mission-start WAC is eager, idempotent per program, consumes no logic

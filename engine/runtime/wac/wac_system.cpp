@@ -8,6 +8,7 @@ void WacSystem::on_load(opennova::world::World &world) {
     accum_ = 0;
     runs_ = 0;
     initial_executed_ = false;
+    paused = false; // [orig: WacScript_InitAndLoad @0x4F965F]
     prepare_tick(world);
     world.script.weapon_input.reset();
     world.script.voice.reset();
@@ -24,6 +25,7 @@ void WacSystem::prepare_tick(opennova::world::World &world) {
 bool WacSystem::execute_initial(opennova::world::World &world) {
     if (!vm_.loaded() || initial_executed_ || runs_ != 0) return false;
     vm_.execute(world);
+    vm_.advance_time(); // [orig: WacScript_InitAndLoad @0x4F9770]
     ++runs_;
     initial_executed_ = true;
     prepare_tick(world);
@@ -44,6 +46,7 @@ void WacSystem::tick(opennova::world::World &world,
     if (++accum_ < kTicksPerExecution) return;
     accum_ = 0;
     vm_.execute(world);
+    vm_.advance_time(); // [orig: WacScript_AdvanceTick @0x4F81D3]
     ++runs_;
     prepare_tick(world);
 }

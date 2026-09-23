@@ -94,12 +94,6 @@ uint32_t WacVm::next_rand() {
     return v;
 }
 
-int32_t WacVm::rand_range(int n) {
-    if (n <= 0) return 0;
-    uint32_t v = next_rand();
-    return static_cast<int32_t>((static_cast<uint32_t>(n) * (v & 0xFFFFu) + 0x8000u) >> 16);
-}
-
 int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
     switch (operand_kind(ref)) {
         case OperandKind::Pool: {
@@ -815,8 +809,15 @@ void WacVm::execute(opennova::world::World &w) {
                     ip = operand;
                     break;
                 }
-                if (op == Op::DoRnd) loop_choices_[loop] = uint8_t(rand_range(int(count)));
-                else {
+                if (op == Op::DoRnd) {
+                    // Every opcode 5 steps the generator, a zero count too;
+                    // the rounded 16-bit scale keeps only its low byte.
+                    // [orig: WacScript_ExecuteBytecode @0x4F5A7E (the step),
+                    //  @0x4F5AB8..0x4F5AC4 (imul, round, shrd), @0x4F5AD0 (the
+                    //  choice byte)]
+                    const uint32_t v = next_rand();
+                    loop_choices_[loop] = uint8_t((count * (v & 0xFFFFu) + 0x8000u) >> 16);
+                } else {
                     if (loop_counters_[loop] >= count) loop_counters_[loop] = 0;
                     loop_choices_[loop] = loop_counters_[loop]++;
                 }
@@ -886,7 +887,6 @@ void WacVm::execute(opennova::world::World &w) {
     // [orig: WacScript_ExecuteBytecode @0x4F61F2 -> counters reset @0x4EE6D0]
     w.script.weapon_input.clear_fire_requests();
     w.script.squad_events.advance_execution();
-    ++time_; // advance the WAC time base after the run [orig: wac_var_ticks @0x4f81d3]
 }
 
 } // namespace opennova::wac

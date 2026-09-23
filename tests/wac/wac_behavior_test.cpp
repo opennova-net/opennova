@@ -1606,7 +1606,10 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     CHECK(program.diagnostics.empty());
     WacVm vm; vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 5);
-    CHECK(vm.time() == 6); // the run counter advances from the written word
+    // A bare bytecode run leaves the written word: only the execution's
+    // callers increment it. [orig: WacScript_AdvanceTick @0x4F81D3;
+    // WacScript_InitAndLoad @0x4F9770]
+    CHECK(vm.time() == 5);
     CHECK(w.script.vars.get_mission(2) == 3 && w.cached.humans == 3);
     CHECK(w.script.vars.get_mission(3) == 7 && w.kill_stats.bluekills_by_player == 7);
     CHECK(w.script.vars.get_mission(4) == 1 && w.kill_stats.greenkills_by_player == 1);

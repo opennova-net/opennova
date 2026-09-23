@@ -58,12 +58,14 @@ public:
     const std::vector<EventState> &events() const { return events_; }
     int32_t accumulator() const { return acc_; }
 
-    // The mutable WAC time word. Each execution increments it (about once per
-    // second), and scripts may also write it through Ticks. Temporal commands
-    // and shared script admission read this same clock, not engine ticks or
-    // diagnostic execution counts. [orig: wac_var_ticks @0xC6EAD8;
-    // WacScript_AdvanceTick increment @0x4F81D3]
+    // The mutable WAC time word. The callers of an execution increment it
+    // (about once per second), never the bytecode run itself, and scripts may
+    // also write it through Ticks. Temporal commands and shared script
+    // admission read this same clock, not engine ticks or diagnostic execution
+    // counts. [orig: wac_var_ticks @0xC6EAD8; WacScript_AdvanceTick @0x4F81D3
+    // and WacScript_InitAndLoad @0x4F9770 increment it after their calls]
     uint32_t time() const { return time_; }
+    void advance_time() { ++time_; }
     // Executed CALL instructions since load(), the unsupported-command ones
     // included: the dispatch sweep's proof that every registry row ran.
     uint64_t dispatch_count() const { return dispatch_count_; }
@@ -97,7 +99,6 @@ private:
     void write(opennova::world::World &w, uint32_t ref, int32_t v);
     int32_t arg_as_string_index(uint32_t ref) const; // for string-typed operands
     uint32_t next_rand();
-    int32_t rand_range(int n);
 
     void record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments = nullptr);
 
