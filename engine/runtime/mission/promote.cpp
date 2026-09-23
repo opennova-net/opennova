@@ -103,6 +103,14 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
         b.f[AiBrain::kSpeedA] = data.ground_combat_speed;
     if (data.has_ground_patrol_speed)
         b.f[AiBrain::kSpeedB] = data.ground_patrol_speed;
+    // The allocator's profile copies, every profile type: aim_skill (+0x1C, parsed
+    // 0..4; the zeroed record's 0 when unauthored) into brain[43], drive_skill into
+    // brain[44], alert into brain[47].
+    // [orig: Entity_InitVehicleAI @0x460294..0x460297, @0x46029D..0x4602A0,
+    //  @0x4602A6..0x4602A9]
+    const int32_t aim_skill = data.aim_skill < 0 ? 0 : data.aim_skill;
+    ae.profile.accuracy = aim_skill;
+    b.f[AiBrain::kAccuracy] = aim_skill;
     b.f[AiBrain::kDriveSkill] = data.drive_skill;
     b.f[AiBrain::kPrevAlert] = data.alert;
     // The §16.2 class walk data: the four class-priority words and the
@@ -186,15 +194,6 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
         // COMBAT_FLAGS is the witnessed flags100 source (ATEAM/
         // ATEAM_LOCK/RC_FIRE ride the SM weapon dispatch).
         ae.profile.flags100 |= static_cast<uint8_t>(data.combat_flags);
-        if (data.aim_skill >= 0) {
-            // PROBABLE, not anchored: aim_skill (+28, clamped 0..4) is
-            // the only 0..4-shaped profile field feeding the (6 -
-            // brain[43]) scatter modulus; the spawn copy site itself
-            // is the same unwitnessed block copy as the ammo counts
-            // (§17.7 item 1, D-AI-2).
-            ae.profile.accuracy = data.aim_skill;
-            b.f[AiBrain::kAccuracy] = data.aim_skill;
-        }
     }
 }
 

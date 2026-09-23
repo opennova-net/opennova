@@ -251,10 +251,33 @@ void test_class_walk_matches_the_retail_qsort() {
           other.profile.slot_class[2] == 2 && other.profile.slot_class[3] == 1);
 }
 
+// The allocator copies the profile's aim_skill word into brain[43] for every
+// profile type: an unauthored aim_skill is the zeroed record's 0, whatever
+// brain[43] held before. [orig: Entity_InitVehicleAI @0x460294..0x460297]
+void test_allocator_copies_aim_skill_unconditionally() {
+    auto owned = std::make_unique<World>();
+    AiEntity ground;
+    ground.brain.f[AiBrain::kAccuracy] = 3;
+    opennova::aip::Profile p;
+    p.type = 2; // no aim_skill line
+    opennova::mission::initialize_ai_profile(ground, p, owned->ai, EntityKind::Item);
+    CHECK(ground.brain.f[AiBrain::kAccuracy] == 0 && ground.profile.accuracy == 0);
+    p.aim_skill = 4;
+    opennova::mission::initialize_ai_profile(ground, p, owned->ai, EntityKind::Item);
+    CHECK(ground.brain.f[AiBrain::kAccuracy] == 4 && ground.profile.accuracy == 4);
+    AiEntity other;
+    other.brain.f[AiBrain::kAccuracy] = 2;
+    opennova::aip::Profile organic;
+    organic.type = 3; // the parser stores no aim_skill for this type
+    opennova::mission::initialize_ai_profile(other, organic, owned->ai, EntityKind::Item);
+    CHECK(other.brain.f[AiBrain::kAccuracy] == 0);
+}
+
 } // namespace
 
 int main() {
     test_ground_rows_read_the_live_hull_words();
+    test_allocator_copies_aim_skill_unconditionally();
     test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();
     test_evade_flee_leg_turns_about_at_combat_speed();
