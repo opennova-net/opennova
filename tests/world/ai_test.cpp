@@ -2327,7 +2327,9 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
 
     CHECK(!w->registry.get(npc_h)->mounted);
     CHECK(!w->registry.get(gun_h)->seats[0].occupant.valid());
-    CHECK(w->registry.get(npc_h)->equipped_adm_index == 0xFF);
+    // The detach zeroes a non-player's AdmDef byte. [orig: Entity_DetachFromVehicle
+    //  @0x43569C]
+    CHECK(w->registry.get(npc_h)->equipped_adm_index == 0);
     CHECK(!w->registry.get(npc_h)->use_gun_slot_swapped);
     CHECK(!w->registry.get(gun_h)->primary_weapon_owner.valid());
     CHECK(npc.inf.anim_state == kSelectedDeath);

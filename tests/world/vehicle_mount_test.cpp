@@ -3461,6 +3461,32 @@ static void test_claimant_detach_cuts_vehicle_slot_action() {
     CHECK(r.veh().primary_weapon_slot.counter == 40);
 }
 
+// A non-player leaving any seat zeroes its AdmDef byte; a player-classified
+// rider keeps its own. [orig: Entity_DetachFromVehicle Flags 0x100 test
+// @0x43568D, EquippedSlot @0x435696, the byte @0x43569C]
+static void test_npc_detach_zeroes_the_equipped_byte() {
+    Rig r;
+    Entity npc;
+    npc.net_id = 40;
+    npc.kind = EntityKind::Organic;
+    npc.position = r.player().position;
+    npc.health = 100;
+    npc.alive = true;
+    const EntityHandle npc_h = r.w.registry.spawn(0, npc);
+    for (const uint8_t bone : {uint8_t{1}, uint8_t{2}}) { // ctrlx00, sitex00
+        CHECK(r.w.vehicles.process_attach(npc_h, r.veh_h, bone));
+        r.w.registry.get(npc_h)->equipped_adm_index = 7;
+        CHECK(r.w.vehicles.detach(npc_h));
+        CHECK(r.w.registry.get(npc_h)->equipped_adm_index == 0);
+    }
+    r.player().flags |= kEntityFlagPlayer;
+    r.player().engine_flags |= kEntityFlagPlayer;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+    r.player().equipped_adm_index = 7;
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.player().equipped_adm_index == 7);
+}
+
 // An NPC's ordinary seat resolves through the carrier's seat bone. When that
 // lookup fails, the authority kills a rider boarding-ordered (123..125) at the
 // carrier or at the carrier's ground link, crediting the carrier's last
@@ -3626,6 +3652,7 @@ static void test_entity_pose_seat_bone_lookup() {
 int main() {
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
+    test_npc_detach_zeroes_the_equipped_byte();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();

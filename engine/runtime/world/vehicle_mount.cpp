@@ -209,16 +209,22 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
                     static_cast<const Entity &>(mount)));
 }
 
-void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
+void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle) {
     if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
         vehicle->primary_weapon_owner = EntityHandle{};
-    if (!occupant.use_gun_slot_swapped) return;
     const bool is_player =
             ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
-    occupant.equipped_adm_index =
-            is_player ? occupant.pre_use_gun_equipped_adm_index : 0xFF;
-    occupant.pre_use_gun_equipped_adm_index = 0xFF;
-    occupant.use_gun_slot_swapped = false;
+    if (occupant.use_gun_slot_swapped) {
+        if (is_player)
+            occupant.equipped_adm_index = occupant.pre_use_gun_equipped_adm_index;
+        occupant.pre_use_gun_equipped_adm_index = 0xFF;
+        occupant.use_gun_slot_swapped = false;
+    }
+    // Then any non-player leaving its parent, whatever the seat, drops its
+    // EquippedSlot and zeroes its AdmDef byte.
+    // [orig: Entity_DetachFromVehicle Flags 0x100 test @0x43568D, EquippedSlot
+    //  @0x435696, the byte @0x43569C]
+    if (!is_player) occupant.equipped_adm_index = 0;
 }
 
 Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {

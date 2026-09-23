@@ -94,11 +94,12 @@ inline bool mount_collapses_right_hand_row(const Entity &entity) {
             (entity.engine_flags & kEntityFlagPlayer) == 0;
 }
 
-// Clear parent ownership; restore a player's personal EquippedSlot and clear an
-// NPC's, matching the post-restore retail player-classifier branch.
+// Clear parent ownership; restore a player's personal EquippedSlot after a
+// UseGun ride and clear any NPC's, whatever its seat, matching the
+// post-restore retail player-classifier branch.
 // [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,
 //  NPC clear @0x435694-0x4356aa]
-void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle);
+void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle);
 
 
 
