@@ -23,8 +23,9 @@ own systems.
 
 ### One logic tick
 
-Retail's `Game_ProcessMainFrame @0x5263F0` runs, in order: `Client_ProcessNetworkFrame`
-(the call `@0x526692`), `Sound_TickPendingSlots` (`@0x526697`), then
+Retail's `Game_ProcessMainFrame @0x5263F0` runs, in order:
+`Client_ProcessNetworkFrame @0x42C180` (the call `@0x526692`),
+`Sound_TickPendingSlots @0x529310` (`@0x526697`), then
 `Server_TickUpdate @0x51D7E0` (the call `@0x5266B6`): its head timers, the
 per-player walk (`@0x51D88B`), the receive pump (`@0x51D895`), the humans count
 (`@0x51D89A`), the WAC tick (`@0x51D8BF`), the every-32 legs (the spawn-marker
@@ -57,19 +58,21 @@ The whole entity update is admitted in `Game_ProcessMainFrame @0x5263F0`
 death screen skips the humans test (`is_mp_session_peer`, `g_death_screen_active`);
 no human and a started script clock skip the update (`wac_var_humans`,
 `wac_var_ticks`); the retained pre-round byte skips it; and in session the
-round-over latch `g_spawn_success_gate` skips it (raised by `Server_ProcessRoundEnd`,
-the S2C 0x1D handler and `Cine_StartPlayback`, cleared at `Game_StartMission`).
+round-over latch `g_spawn_success_gate` skips it (raised by
+`Server_ProcessRoundEnd @0x5164F0`, the S2C 0x1D handler `NapiNPClientMsg_0x01D
+@0x430840` and `Cine_StartPlayback @0x577840`, cleared at
+`Game_StartMission @0x524360`).
 `wac_var_humans` counts pool-0 rows with a definition, Flags 0x100 and not Flags 1
 (`Server_BuildEntitySlotLists @0x4F97A0`, `@0x4F9809` / `@0x4F9815` /
 `@0x4F9820`): a dead player counts, a hidden or not-yet-deployed one does not.
 Port: `World::entity_update_admitted`, with the death-screen exemption stamped by
 `HostRole` (`CachedFrameState::peer_death_screen`). While the epilog screen is up,
-`Entity_UpdateAllEntities` takes its epilog path (`@0x4C211D..0x4C2128` →
+`Entity_UpdateAllEntities @0x4C2100` takes its epilog path (`@0x4C211D..0x4C2128` →
 `@0x4C239A`): every pool-1 row copies its pose into savedLivePose, only a row whose
 occupant carries Flags 0x100 is updated, and everything from the HeliLift slots
 through pool 3 is skipped, so no projectile, explosion or death piece moves under
 the MISSION FAILED screen; the pass then joins the proximity tables and the
-pool-0 walk and tail-calls `Cinematic_EpilogUpdate` in place of the entity-update
+pool-0 walk and tail-calls `Cinematic_EpilogUpdate @0x577950` in place of the entity-update
 counter's add (`@0x4C2624` / `@0x4C2634`).
 
 The round clock is not frozen by the round end: `g_round_time_remaining` is
@@ -81,9 +84,9 @@ every frame, paused or not, while the camera and the WeaponAction pump do not.
 
 Mission start: `Game_StartMission @0x524360` collects the spawn vehicles and
 builds the spawn-marker list right after the mission load (the
-`build_spawn_marker_budget_list` call `@0x5252C6`), ahead of
-`Entity_InitAllFromModels` (`@0x52567F`), the authority-gated PreMission pass
-(the `EventTrigger_UpdateAllWithFlag2` call `@0x525B86`) and the WAC's first
+`build_spawn_marker_budget_list @0x529B40` call `@0x5252C6`), ahead of
+`Entity_InitAllFromModels @0x40E460` (`@0x52567F`), the authority-gated PreMission
+pass (the `EventTrigger_UpdateAllWithFlag2 @0x454DC0` call `@0x525B86`) and the WAC's first
 execution; `MissionKernel::boot` builds it once the definitions are attached and
 before the organic init. The PostMission pass runs once at teardown
 (`MissionKernel::run_post_mission_pass` from `HostRole::close` and
@@ -370,7 +373,7 @@ Flag Me, and A&S/C&C. WAC/BMS co-op win/lose actions enter the same
 `Win` for stock Co-op and a BMS `RedWin` event for Objective Co-op before
 checking the common 0x61/0x1D output. `[orig: WacAction_Win @0x4ED4A0;
 EventAction_Dispatch @0x4542E0, the RedWin case @0x454495; GameEvent_ProcessScoring
-@0x52F550; Entity_MovementCollisionResolver @0x4B2F8D..0x4B2FF5;
+@0x52F550; Entity_MovementCollisionResolver @0x4B2BD0 (@0x4B2F8D..0x4B2FF5);
 GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile
 @0x52D8A0; Server_CheckWinConditions @0x51AD40]`
 

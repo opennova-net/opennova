@@ -176,7 +176,8 @@ index` `@0x40EBFF..0x40EC07`) first; then:
 
 **A type id resolves to its first row.** The loader never merges rows: each
 `begin` allocates the next one (`ItemDef_ParseProperty @0x49eb00`, the
-`ItemDef_AllocateWithDefaults` call `@0x49EBA8`; `gItemCount++` `@0x49E3BE`), so
+`ItemDef_AllocateWithDefaults @0x49e3b0` call `@0x49EBA8`, whose `gItemCount++` is
+`@0x49E3BE`), so
 a later row repeating an id is unreachable through `ItemList_FindIndexByTypeId`,
 on the host (the spawn store above) and on the client (`NapiNPClientMsg_0x00D
 @0x432C40`, the call `@0x4332DA`, which takes `+0x1C`, `+0x20` and the row's

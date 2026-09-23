@@ -102,7 +102,7 @@ appear only where a record says so. Known scales, each owned by its record:
 - The engine logic tick is **62 Hz**: `[orig: Game_ProcessMainFrame @ 0x5263f0]`
   increments `tick @ 0x24c1968` once per call (not while the in-game menu pause
   flag is set, `@0x5265A0..0x5265B4`), before the entity update, and
-  `Game_StartMission` zeroes it on every peer, so the first mission frame runs
+  `Game_StartMission @0x524360` zeroes it on every peer (`@0x525B9F`), so the first mission frame runs
   at tick 1 on the host and on every client
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
 - `dword_24C1948` is the ENTITY-UPDATE counter, not a render frame counter: its

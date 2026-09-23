@@ -678,8 +678,8 @@ The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
    with `[544] ×= 1/8` [@ 0x491862..0x4918aa]; else, landing under that floor,
    `[544] ×= 1/8`, `X/Y += (node − pos) >> 6`, `[524] = ground − 0x2000`
    [@ 0x4918b0..0x4918fc]. The floor's "ground" is the FRESH radius-0 self
-   sample at the current Z (`Entity_CalcAverageGroundHeight` call @ 0x491845,
-   kept in ebp @ 0x491853; the floor `mov eax,[esi]; sar eax,2; add eax,ebp`
+   sample at the current Z (the `Entity_CalcAverageGroundHeight @0x457230` call
+   @ 0x491845, kept in ebp @ 0x491853; the floor `mov eax,[esi]; sar eax,2; add eax,ebp`
    @ 0x491874 and @ 0x4918E2); the cached ground (entity+0x2A4, the 8-tick
    sample taken with Z lowered by brain+0x2C @ 0x4903A8..0x4903EC) feeds only
    the target Z, the climb and the landing target (`[+0x2A4] − 0x2000`
@@ -707,8 +707,8 @@ The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
    **Which state words the mover writes.** The aircraft mover writes only the
    brain's CURRENT state (brain+0x10): 0 → 14 at its head
    (@ 0x490377..0x49037D), 14 → 7 on the AI leg (above), 14 in the parked leg
-   (`mov dword ptr [ebx+10h],0Eh` @ 0x491C66, after
-   `AI_CheckVehicleStuckState` @ 0x491C5E) and 14 in the player leg
+   (`mov dword ptr [ebx+10h],0Eh` @ 0x491C66, after the
+   `AI_CheckVehicleStuckState @0x465290` call @ 0x491C5E) and 14 in the player leg
    (@ 0x490F6A). Its only pending write is the dying request (@ 0x4903A1).
    Parked means no occupant or `Flags & 0x10000002` (@ 0x490F16..0x490F25),
    with no health term. The player leg is a pilot with Flags 0x100
@@ -4812,10 +4812,11 @@ counter `@0x51D8DC..0x51D8F4`); the port runs it in `world::ServerIdleLegs`,
 which the mission kernel registers between the WAC and BMS systems. The list
 itself is built once, at mission start: `Game_StartMission @0x524360` collects
 the spawn vehicles (the per-vehicle `sub_529A80` walk `@0x52527A..0x5252BF`) and
-calls `build_spawn_marker_budget_list` (`@0x5252C6`) right after the mission
-load, ahead of the `Entity_InitAllFromModels` call (`@0x52567F`), the
-authority-gated PreMission pass (the `EventTrigger_UpdateAllWithFlag2` call
-`@0x525B86`) and the WAC's first execution, so a PreMission action or the
+calls `build_spawn_marker_budget_list @0x529B40` (`@0x5252C6`) right after the
+mission load, ahead of the `Entity_InitAllFromModels @0x40E460` call
+(`@0x52567F`), the authority-gated PreMission pass (the
+`EventTrigger_UpdateAllWithFlag2 @0x454DC0` call `@0x525B86`) and the WAC's first
+execution, so a PreMission action or the
 initial script that moves a zone's team does not reorder the markers'
 priorities. The port builds it in `MissionKernel::boot` once the definitions
 are attached (after the items.def traits sweep stamps the zone and marker
@@ -5034,7 +5035,7 @@ zero (`@0x45D65B..0x45D6CA`). The vehicle DYING enter kills that list under the
 same `+1352` byte (`AI_TransitionToDeath_GroundVehicle @0x467B20`, the brain
 gate `@0x467B60`, the byte `@0x467B6E`; the loop `@0x467B90..0x467BCC`): a child
 whose health word +0x11E is above zero (`@0x467B92..0x467B9A`) fetches the
-GLOBAL hit record (`Projectile_GetHitRecord` `@0x467B9C`), takes health 0
+GLOBAL hit record (the `Projectile_GetHitRecord @0x4E7000` call `@0x467B9C`), takes health 0
 (`@0x467BA5`), zeroes the record's damage word +0x30 (`@0x467BAD`) and runs
 `deathCallback(child, 1, 0)` (`@0x467BB0..0x467BBB`). The child's own +0x178
 attacker is never written; the record's section (+0x38), round (+0x40) and owner
@@ -5255,22 +5256,26 @@ epilog frame and keeps counting across restarts and mission loads. The compile
 reads `World::entity_update_counter`, which advances the same way
 (`water_wake_frame.h/.cpp`; corrected 2026-09-23, the logic tick had stood in).
 The counter's other readers: the ground-link cadence of the ground, light, tank
-and infantry movers (`test byte ptr dword_24C1948,7`, e.g. `@0x48AFB9`,
-`@0x484099`), the avoid-brake factors, the movement resolver's full update
-(`& 0x3F`, `@0x4B2CAF`), a trail wobble index, the HUD damage-figure blink and the
-water noise and wave phase (`Water_GenerateNoiseTextures @0x5C0360`, the read
-`@0x5C0366`). The boat and air movers do not read it for their ground link; they
-stagger `tick` by 36 × DcbId (`Entity_UpdateWatercraftPhysics` `@0x48D486..0x48D51F`,
-`Entity_UpdateAircraftPhysics` `@0x4903A8`).
+and infantry movers (`test byte ptr dword_24C1948,7`, e.g.
+`Entity_UpdateVehiclePhysics @0x48AF00` `@0x48AFB9`,
+`Entity_UpdateLightVehiclePhysics @0x483FE0` `@0x484099`), the avoid-brake
+factors, the movement resolver's full update (`& 0x3F`,
+`Entity_MovementCollisionResolver @0x4B2BD0` `@0x4B2CAF`), a trail wobble index,
+the HUD damage-figure blink and the water noise and wave phase
+(`Water_GenerateNoiseTextures @0x5C0360`, the read `@0x5C0366`). The boat and air
+movers do not read it for their ground link; they stagger `tick` by 36 × DcbId
+(`Entity_UpdateWatercraftPhysics @0x48D480` `@0x48D486..0x48D51F`,
+`Entity_UpdateAircraftPhysics @0x490310` `@0x4903A8`).
 
 ## 30. Amphibious mover selection
 
 The catv dispatcher reads the previous tick's afloat flag. An afloat vehicle
 runs the water mover, including its input, sound and trail branches; a beached
 vehicle returns to the ground mover. The input includes the AI driver's leg:
-the dispatcher tests `Flags & 0x8000` (`@0x48F014`) and then calls the whole
-boat mover (`Entity_UpdateWatercraftPhysics` `@0x48F02C`, or the selector-zero
-boat `Entity_ProcessAirVehiclePhysics` `@0x48F035`), so an afloat amphibian's
+the dispatcher (`Entity_DispatchPhysicsUpdate @0x48F010`) tests `Flags & 0x8000`
+(`@0x48F014`) and then calls the whole boat mover (the
+`Entity_UpdateWatercraftPhysics @0x48D480` call `@0x48F02C`, or the selector-zero
+boat's `Entity_ProcessAirVehiclePhysics @0x46FA00` call `@0x48F035`), so an afloat amphibian's
 AI input is the boat staging of §1.12 (the boat turn budget, the 15/30/45
 degree damps, no Δ/8, the slip counter-steer and the ItemTypeIndex-1 brake
 walk). `VehicleSystem::update_motor` swaps the whole traits family before it
@@ -5821,7 +5826,7 @@ EWEAP's frame (the gun's Yaw/Pitch, read `@0x440A58` / `@0x440A51` in
 `Entity_UpdateChildAttachment @0x4409A0`) is likewise its placement in the spawn
 form.
 
-**The aircraft attitude.** `Entity_UpdateAircraftPhysics` copies
+**The aircraft attitude.** `Entity_UpdateAircraftPhysics @0x490310` copies
 Yaw/Pitch/Roll (`[ebp+0Ch]` `@0x49034C`, `[ebp+10h]` `@0x490355`, `[ebp+14h]`
 `@0x49035E`) into savedLivePose +0x8C/+0x90/+0x94 (`@0x490358` / `@0x490361` /
 `@0x49036B`), so an unmoved authority aircraft starts from its placement pitch

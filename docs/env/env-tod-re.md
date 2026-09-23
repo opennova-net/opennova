@@ -155,7 +155,7 @@ weather tick read BEFORE its spring stepped (`WeatherState::overcast_for_tod_q16
 Runs per tick with `curtime + advance` (8.24 hours, wraps at `0x18000000`); no-op when the
 .env snapshot is empty. The wrap is a signed positive modulo on the stored word
 (`@0x57DE51..0x57DE78`, stored `@0x57DE84`): the WAC `TOD` command stores `arg × 0x44444`
-raw into `Env_CurTimeFixed24` (`WacCmd_Tod`, the stores `@0x4EDC74` / `@0x4EDC7A`), so
+raw into `Env_CurTimeFixed24` (`WacCmd_Tod @0x4EDC70`, the stores `@0x4EDC74` / `@0x4EDC7A`), so
 `TOD(-60)` becomes 23:00 at the next weather tick. Hardcoded day-phase windows (16.16 hours): sunrise ramp 05:40→06:20
 with the sun/moon switch at 06:00, sunset ramp 18:25→19:05 with the switch at 18:45, ramp
 width 20 minutes (`21840`); sets `Env_IsNightPhase @ 0x26c645c` and
