@@ -45,6 +45,7 @@ VehicleTraits truck_traits() {
     t.turn_rate = 45 * 192426;
     t.turn_rate2 = 30 * 192426;
     t.player_control = true;
+    t.brain_class = VehicleBrainClass::Ground; // ai_function cveh: the vehicle machine
     return t;
 }
 
@@ -394,7 +395,7 @@ void test_live_pose_provider_and_static_fallback() {
         provider.pose = pose_degrees({31.5f, 32.25f, 33.75f}, 44, 15, -19);
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
 
         const Entity *mounted = w.registry.get(occupant_h);
         MountedPose expected = provider.pose;
@@ -1527,6 +1528,7 @@ void test_host_crewed_helicopter_rotor_turns() {
     Rig r;
     VehicleTraits t = truck_traits();
     t.family = VehicleFamily::Helicopter;
+    t.brain_class = VehicleBrainClass::Air; // ai_function CHel: the air machine
     t.physics = 0; // a CHel def: no ground selector, no ground mover
     r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -1535,16 +1537,16 @@ void test_host_crewed_helicopter_rotor_turns() {
     CHECK(r.veh().primary_occupant == r.player_h);
     TickContext ctx{};
     ctx.is_authority = true;
-    for (int i = 0; i < 3; ++i) r.sys.tick(r.w, ctx);
+    for (int i = 0; i < 3; ++i) r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull);
     CHECK(part_register(r.veh().veh.part_spin.angle) > 0);
     CHECK(r.w.vehicles.detach(r.player_h));
-    r.sys.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo);
     // A joiner never runs the authority pass for it.
     ctx.is_authority = false;
     const int32_t before = r.veh().veh.part_spin.speed;
-    r.sys.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == before);
 }
 
@@ -1572,7 +1574,7 @@ void test_vehicle_pending_death_survives_drive_tick() {
 			TickContext ctx{};
 			ctx.is_authority = true;
 			for (int i = 0; i < 4; ++i) {
-				r.sys.tick(r.w, ctx);
+				r.w.update_all_entities(ctx);
 				++r.w.logic_tick;
 			}
 			CHECK((r.veh().engine_flags & kEntityFlagHusk) != 0);
@@ -2080,10 +2082,7 @@ struct DriveRig {
         CHECK(r.w.vehicles.process_attach(driver, r.veh_h, 1));
     }
     AiEntity &brain() { return *r.sys.for_handle(r.veh_h); }
-    void motor_pass() {
-        opennova::devtools::ProfileLap lap(r.w.profile);
-        r.w.vehicles.tick_motors(true, lap);
-    }
+    void motor_pass() { r.w.vehicles.update_motor(r.veh(), true); }
 };
 
 // Zero health alone does not park: until the dying state's death transforms
@@ -2133,8 +2132,7 @@ void test_submerged_player_driver_takes_the_ai_leg() {
         Entity &pl = r.player();
         pl.eye_offset_z = 65536;
         r.w.env.water_z = to_fixed(pl.position.z) + (2 << 16);
-        opennova::devtools::ProfileLap lap(r.w.profile);
-        r.w.vehicles.tick_motors(true, lap);
+        r.w.vehicles.update_motor(r.veh(), true);
         CHECK(r.sys.for_handle(r.veh_h)->brain.f[AiBrain::kCurState] == 16);
         CHECK(r.veh().veh.cmd_speed == 0);
     }
@@ -2237,6 +2235,7 @@ struct HeloRig {
         r.w.tables.terrain = &field;
         t = truck_traits();
         t.family = VehicleFamily::Helicopter;
+        t.brain_class = VehicleBrainClass::Air; // ai_function CHel: the air machine
         t.physics = 0;
         t.acceleration = 512;
         t.turn_rate = 0x600000;
@@ -2289,7 +2288,7 @@ struct HeloRig {
         TickContext ctx{};
         ctx.is_authority = true;
         for (int i = 0; i < n; ++i) {
-            r.sys.tick(r.w, ctx);
+            r.w.update_all_entities(ctx);
             ++r.w.logic_tick;
         }
     }

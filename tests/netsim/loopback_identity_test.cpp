@@ -1276,7 +1276,6 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	world.tables.terrain = &terrain.field;
 	w::AiSystem &ai = world.ai;
 	ai.terrain = &terrain.field;
-	world.add_system(&ai);
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1394,7 +1393,6 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
-	world.add_system(&ai);
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;

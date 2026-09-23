@@ -9,6 +9,8 @@
 
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/destruction.h>
+#include <runtime/world/mount_controls.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 
@@ -145,6 +147,255 @@ void ServerIdleLegs::tick(World &world, const TickContext &ctx) {
 void World::load_systems() {
     diagnostics.clear();
     for (ISystem *s : systems_) s->on_load(*this);
+    ai.on_load(*this);
+}
+
+void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
+    row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
+    const EntityHandle handle = row.handle;
+    const uint64_t lifetime = row.registry_spawn_id;
+    // Every leg may destroy the row (and a spawn may reuse its slot), so each
+    // leg re-reads the same registry lifetime.
+    auto live = [this, handle, lifetime]() -> Entity * {
+        Entity *e = registry.get(handle);
+        return e != nullptr && e->registry_spawn_id == lifetime ? e : nullptr;
+    };
+    AiEntity *body = ai.for_handle(handle);
+    if (body != nullptr && body->brain.f[AiBrain::kOwner] == 0) body = nullptr;
+    AiEntity *brain = body != nullptr && !body->inf.active ? body : nullptr;
+    // A placed device's row carries its own clock, think and parent-follow
+    // motor (throwables.cpp); the item update callback still follows it.
+    if (ctx.is_authority && body == nullptr) {
+        if (PlacedDevice *device = throwables.device_for(row)) {
+            throwables.update_device(*this, *device, ai.collision, tables.terrain);
+            if (Entity *e = live()) {
+                update_item_destroy_fade(*this, *e);
+                if (e->squib.motor) {
+                    tick_squib(*this, *e);
+                } else {
+                    const float water_z = env.water_z != 0
+                            ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+                    tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+                }
+            }
+            return;
+        }
+    }
+    // The row's class callback and its +0x2AC clock: the brain machine
+    // (Entity::spawn_phase), a minefield (its age) or an item damage callback
+    // (Entity::class_think_ticks). A brain row never takes the item callback.
+    enum class ThinkKind { None, Brain, Minefield, Item };
+    ThinkKind kind = ThinkKind::None;
+    if (brain != nullptr) kind = ThinkKind::Brain;
+    else if (row.minefield.think) kind = row.hidden ? ThinkKind::None : ThinkKind::Minefield;
+    else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
+    // A mounted non-organic brain takes the seat-follow shortcut: no think and
+    // no clock step this visit (its row still runs the motor legs).
+    if (brain != nullptr && !row.motor_suspended && ai.pose_if_mounted(*brain, *this))
+        kind = ThinkKind::None;
+    auto clock_of = [kind](Entity &e) -> int32_t * {
+        switch (kind) {
+        case ThinkKind::Brain: return &e.spawn_phase;
+        case ThinkKind::Minefield: return &e.minefield.age;
+        case ThinkKind::Item: return &e.class_think_ticks;
+        default: return nullptr;
+        }
+    };
+    const int32_t *clock = clock_of(row);
+    // The think visit: the row's own blink/indoors refresh, then the class
+    // callback cb(entity, 0, 0) -- on the PRE-decrement clock.
+    // [orig: Entity_UpdatePool1Slot `cmp [esi+2ACh],0; jg` @0x4B8E1B..0x4B8E22,
+    //  Entity_BuildProximityList @0x4B8E25 (CollisionWorld::refresh_blink),
+    //  `call eax` @0x4B8E3C]
+    if (clock != nullptr && *clock <= 0) {
+        if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);
+        switch (kind) {
+        case ThinkKind::Brain:
+            ai.think_brain(*brain, *this);
+            break;
+        case ThinkKind::Minefield:
+            // [orig: Entity_LandmineThink @ 0x441A40]
+            minefields.think(*this, row);
+            break;
+        case ThinkKind::Item:
+            if (tables.item_death_traits.get(row.item_id) != nullptr)
+                destruction_notify_item_damage(*this, row, 0);
+            break;
+        default:
+            break;
+        }
+    }
+    // The +0x1C4 motor legs: the vehicle mover (a joiner's prediction leg),
+    // the ewep class update, an organic row's body, then the item update
+    // callback (the destroy fade, the squib or the death motion).
+    // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
+    Entity *e = live();
+    if (e == nullptr) return;
+    vehicles.update_motor(*e, ctx.is_authority);
+    if ((e = live()) == nullptr) return;
+    tick_emplaced_weapon_class_update(*this, *e);
+    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
+        ai.update_organic(*body, *this, ctx.logic_tick);
+    if ((e = live()) == nullptr) return;
+    update_item_destroy_fade(*this, *e);
+    if (e->squib.motor) {
+        tick_squib(*this, *e);
+    } else {
+        const float water_z =
+                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+        tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+    }
+    if ((e = live()) == nullptr) return;
+    // A mounted non-organic brain re-poses on its seat after the mover ran.
+    if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0)
+        ai.refresh_mounted_pose(*brain, *this);
+    // The trailing decrement, every visit whether or not the row thought.
+    // [orig: `add [esi+2ACh],-1` @0x4B8EA0]
+    if ((e = live()) == nullptr) return;
+    if (int32_t *step = clock_of(*e); step != nullptr)
+        *step = static_cast<int32_t>(static_cast<uint32_t>(*step) - 1u);
+}
+
+void World::update_all_entities(const TickContext &ctx) {
+    const devtools::ProfileScope pass_scope(profile, devtools::Slot::SIM_WORLD_AI);
+    devtools::ProfileLap lap(profile);
+    const bool is_authority = ctx.is_authority;
+    ai.is_authority = is_authority;
+    if (ai.collision != nullptr)
+        ai.collision->local_player = cached.local_player; // blink accumulation target
+    // These presentation events describe only the current authoritative tick.
+    if (is_authority) throwables.events.clear();
+
+    // The pool-1 walk: the visited byte cleared on every live row, then each
+    // unvisited row in slot order, its ground-entity chain (+0x28, up to three
+    // ancestors) visited first -- a deck rider moves with the carrier's
+    // CURRENT motor delta. The chain is re-read after each visit.
+    // [orig: Entity_UpdateAllEntities -- the clear @0x4C212E..0x4C2156, the
+    //  walk @0x4C2158..0x4C21F1 (the Entity_UpdatePool1Slot calls @0x4C21B9 /
+    //  @0x4C21D0 / @0x4C21E0 / @0x4C21E9)]
+    const size_t pool1 = registry.pool_capacity(1);
+    for (size_t slot = 0; slot < pool1; ++slot)
+        if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            e->pool1_visited = false;
+    auto unvisited_parent = [this](const Entity *e) -> Entity * {
+        if (e == nullptr) return nullptr;
+        Entity *p = registry.get(e->ground_target);
+        return p != nullptr && !p->pool1_visited ? p : nullptr;
+    };
+    for (size_t slot = 0; slot < pool1; ++slot) {
+        const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
+        Entity *row = registry.get(handle);
+        if (row == nullptr || row->pool1_visited) continue;
+        if (Entity *p1 = unvisited_parent(row)) {
+            if (Entity *p2 = unvisited_parent(p1)) {
+                if (Entity *p3 = unvisited_parent(p2)) update_pool1_slot(*p3, ctx);
+                if (Entity *again = registry.get(handle))
+                    if (Entity *p1_now = registry.get(again->ground_target))
+                        if (Entity *p2_now = registry.get(p1_now->ground_target))
+                            update_pool1_slot(*p2_now, ctx);
+            }
+            if (Entity *again = registry.get(handle))
+                if (Entity *p1_now = registry.get(again->ground_target))
+                    update_pool1_slot(*p1_now, ctx);
+        }
+        if ((row = registry.get(handle)) != nullptr) update_pool1_slot(*row, ctx);
+    }
+    throwables.compact();
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    pose_emplacement_attachments(*this);
+    // Static attachment poses can change after AI collision queries. The
+    // projectile/out.destruction half of the tick starts a fresh matrix-view
+    // epoch so it never inherits a pre-attachment target transform.
+    if (collision != nullptr) collision->reset_query_view_cache();
+    lap.mark(devtools::Slot::SIM_WORLD_ATTACHMENTS);
+
+    // [orig: Entity_UpdateAllEntities @0x4C21F6 (HeliLift_UpdateAll), then the
+    //  facial interpolation @0x4C21FB]
+    teammates.tick(*this);
+    facials.tick(*this);
+    lap.mark(devtools::Slot::SIM_AI_REACTIONS);
+    // The precipitation fall: while it rains every drop slot lowers by the
+    // kind's per-tick amount, once per ENTITY update — retail runs it inside
+    // Entity_UpdateAllEntities after the pool-1 walk and before
+    // DeathPiece_TickAll, so it rides the entity update's frame gate (never
+    // the 255-tick weather settle, never the pre-mission pass) and every peer
+    // falls its own drops from the rain current the previous weather tick left
+    // Entity_UpdateAllEntities itself returns before it without a local
+    // player entity (@ 0x4c2110); its epilog-screen path skips it as well.
+    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
+    //  @ 0x4c2214].
+    if (cached.local_player.valid())
+        weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
+                                        weather.precipitation_kind);
+    lap.mark(devtools::Slot::SIM_WORLD_THROWABLES);
+    // Live out.rounds, their explosions and the death pieces step on the host
+    // and on an explicitly configured MP non-authority client. The latter is
+    // the retail tag-2 visual re-sim path; every decoded/predicted round
+    // carries VisualOnly through all consequence sites, so only the host can
+    // mutate gameplay state. Do not infer a client role from is_authority=false
+    // alone -- tests and pre-mission callers use it too. Retail runs these
+    // UNGATED on every peer — the shared per-frame entity update calls them on
+    // clients too, which is how a joiner's 0x13/0x26-triggered death chain
+    // detonates its kz blasts and flies its pieces locally.
+    // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
+    const bool round_host =
+            is_authority || (rules.mp_session && !rules.projectile_authority);
+    // The water plane: env.water_z (16.16, the #265 sound-profile home) —
+    // zero means "no water authored", the same read the wreck gates use
+    // [orig: Env_WaterHeightFixed @0x26c6454].
+    const float water_z =
+            env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+    // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
+    if (round_host) death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
+    // The timed AI events, before this tick's projectiles: a damage event the
+    // reactions queue below dispatches on the next tick.
+    // [orig: Entity_UpdateAllEntities @0x4C2226 (j_AIEvent_ProcessTimedEntries)]
+    ai.events.process_timed(ai, *this);
+    lap.mark(devtools::Slot::SIM_AI_EVENTS);
+    // The weather particles and emitters [orig: @0x4C222B / @0x4C2235].
+    rotor_wash.tick();
+    // The projectiles, then the explosion queue once per frame [orig: the
+    // Weapon_UpdateAllProjectiles call @0x4C223A, the
+    // Projectile_ProcessExplosionQueue call @0x4c223f; the queue drain
+    // Projectile_ProcessExplosionQueue @0x4ead80]: entries the damage
+    // callbacks push (the kz death chain) land next tick, exactly like the
+    // original's post-reset writes.
+    if (round_host) round_sim.tick(*this, tables.terrain, ai.collision);
+    lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
+    if (round_host)
+        explosions.process(*this, ai.collision, tables.terrain, water_z, out.destruction);
+    ai.apply_round_hits(*this);
+    // The pool-2 cohort walk, the doors, the pool-3 cohort walk.
+    // [orig: Entity_UpdateAllEntities @0x4C2244..0x4C2302; FadeEffect_UpdateAll
+    //  @0x4C2307; @0x4C230C..0x4C2398]
+    tick_item_event_pool(*this, 2);
+    doors.tick(*this);
+    tick_item_event_pool(*this, 3);
+    lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
+    // Rebuild the pool-0/1 proximity tables once per tick, ahead of the pool-0
+    // walk (the pool-2 statics table rebuilds only on its registry/instance
+    // edges). Pool-0 person publication does not depend on any entity having a
+    // 3DI collision instance: RoundSim still queries this snapshot on missions
+    // containing only organic entities, so always rebuild the pool tables when
+    // a CollisionWorld is installed.
+    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
+    // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
+    // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
+    // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
+    if (ai.collision != nullptr) ai.collision->build_tick_tables(*this);
+    lap.mark(devtools::Slot::SIM_AI_COLLISION);
+    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
+    // [orig: Entity_UpdateAllEntities @0x4C2426..0x4C2474]
+    const size_t pool0 = registry.pool_capacity(0);
+    for (size_t slot = 0; slot < pool0; ++slot) {
+        const Entity *row = registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+        if (row == nullptr) continue;
+        AiEntity *body = ai.for_handle(row->handle);
+        if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
+            continue;
+        ai.update_organic(*body, *this, ctx.logic_tick);
+    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
 }
 
 void World::run_logic_tick(bool is_authority, TickPhase phase) {
@@ -182,62 +433,27 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
     lap.mark(devtools::Slot::SIM_WORLD_SETUP);
-    // The system loop runs on BOTH the authoritative host and a non-authority client
-    // (the original client also runs a tick): each system self-gates on
-    // ctx.is_authority. WacSystem / BmsEventSystem early-out on a client (scripting is
-    // host-only; the in-match C2S drain is host-only too, owned by Server_TickUpdate, not an
-    // ISystem); AiSystem on a client simulates ONLY the
-    // local player (the §5.38 entity==local-player branch) and leaves every other
-    // entity to the replicated wire state. [orig: the client tick still steps the
-    // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
+    // The script systems (WAC, the every-32 legs, BMS) run on BOTH the
+    // authoritative host and a non-authority client; each self-gates on
+    // ctx.is_authority (scripting is host-only; the in-match C2S drain is
+    // host-only too, owned by Server_TickUpdate, not an ISystem).
     if (phase != TickPhase::PreRound) {
         for (ISystem *s : systems_) {
-			// The AI system's own phases lap onto the SIM_AI_* rows inside its
-			// tick; every other registered system is an authored script.
-			const devtools::ProfileScope system_scope(
-                    profile, s == &ai ? devtools::Slot::SIM_WORLD_AI
-                                     : devtools::Slot::SIM_WORLD_SCRIPTS);
+            const devtools::ProfileScope system_scope(
+                    profile, devtools::Slot::SIM_WORLD_SCRIPTS);
             s->tick(*this, ctx);
         }
-        lap.restart();
-        pose_emplacement_attachments(*this);
-        // Static attachment poses can change after AI collision queries. The
-        // projectile/out.destruction half of the tick starts a fresh matrix-view
-        // epoch so it never inherits a pre-attachment target transform.
-        if (collision != nullptr) collision->reset_query_view_cache();
     }
-    lap.mark(devtools::Slot::SIM_WORLD_ATTACHMENTS);
-    // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
-    // prevents a newly converted charge from losing an arm-delay tick and lets
-    // claymore shrapnel fly later in its detonation frame [orig:
-    // Entity_UpdateAllEntities — the pool-1 walk's Entity_UpdatePool1Slot
-    // calls @0x4C21B9..0x4C21E9 precede Weapon_UpdateAllProjectiles @0x4C223A].
-    // These presentation events describe only the current authoritative tick.
-    if (is_authority && gameplay) {
-        throwables.events.clear();
-        throwables.tick(*this, ai.collision, tables.terrain);
-    }
-    if (gameplay) {
-        tick_item_event_pool(*this, 1);
-        minefields.tick_pool(*this, 1);
-    }
-    // The precipitation fall: while it rains every drop slot lowers by the
-    // kind's per-tick amount, once per ENTITY update — retail runs it inside
-    // Entity_UpdateAllEntities after the pool-1 walk and before
-    // DeathPiece_TickAll, so it rides the entity update's frame gate (never
-    // the 255-tick weather settle, never the pre-mission pass) and every peer
-    // falls its own drops from the rain current the previous weather tick left
-    // Entity_UpdateAllEntities itself returns before it without a local
-    // player entity (@ 0x4c2110); its epilog-screen path skips it as well.
-    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
-    //  @ 0x4c2214].
-    if (gameplay && cached.local_player.valid())
-        weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
-                                        weather.precipitation_kind);
-    lap.mark(devtools::Slot::SIM_WORLD_THROWABLES);
-    // The global weapon-action pump follows the complete entity/system update and
-    // precedes projectile stepping. This is where an AI UseGun nextAction write can
-    // become a same-frame round.
+    // Then the entity update, on every peer: a client steps ONLY its local
+    // player's body (the §5.38 entity==local-player branch) and leaves every
+    // other entity to the replicated wire state. [orig: the client tick still
+    // steps the local player's infantry motor; Server_TickUpdate
+    // @0x51D7E0 / Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
+    // call @0x52674B)]
+    lap.restart();
+    if (gameplay) update_all_entities(ctx);
+    // The global weapon-action pump follows the complete entity update, so a
+    // round a pump fires first moves on the next tick.
     // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call
     //  @0x52674B, then the WeaponAction_ProcessAllEntities call @0x526786]
     // WeaponAction_ProcessAllEntities is after the timer-gated entity update
@@ -248,51 +464,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (phase != TickPhase::PreMission)
         ai.pump_mounted_weapon_slots(*this, logic_tick);
     lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
-    // Live out.rounds step on the host and on an explicitly configured MP
-    // non-authority client. The latter is the retail tag-2 visual re-sim path;
-    // every decoded/predicted round carries VisualOnly through all consequence
-    // sites, so only the host can mutate gameplay state. Do not infer a client
-    // role from is_authority=false alone -- tests and pre-mission callers use it too.
-    // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
-    if (gameplay &&
-        (is_authority || (rules.mp_session && !rules.projectile_authority)))
-        round_sim.tick(*this, tables.terrain, ai.collision);
-    lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
-    if (gameplay &&
-        (is_authority || (rules.mp_session && !rules.projectile_authority))) {
-        // The explosion-queue drain runs once per frame after the projectile
-        // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
-        // damage callbacks push (the kz death chain) land next tick, exactly like
-        // the original's post-reset writes. The death-piece pool advances
-        // first; each item's death motion runs beside its class callback.
-        // [orig: DeathPiece_TickAll @0x57b900].
-        // Retail runs these UNGATED on every peer — the shared per-frame
-        // entity update calls them on clients too, which is how a joiner's
-        // 0x13/0x26-triggered death chain detonates its kz blasts and flies its
-        // pieces locally. The MP visual client (the round pool's predicate
-        // above) therefore drains them as well; its authoritative state keeps
-        // arriving over the wire regardless.
-        // [orig: Entity_UpdateAllEntities @0x4c2100 — the DeathPiece_TickAll
-        //  call @0x4c221c, the Projectile_ProcessExplosionQueue call @0x4c223f, and the
-        //  pool-2/3 update-callback walk, all unconditional]
-        // The water plane: env.water_z (16.16, the #265 sound-profile home) —
-        // zero means "no water authored", the same read the wreck gates use
-        // [orig: Env_WaterHeightFixed @0x26c6454].
-        const float water_z =
-                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
-        death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
-        explosions.process(*this, ai.collision, tables.terrain,
-                           water_z, out.destruction);
-    }
-    if (gameplay) {
-        tick_item_event_pool(*this, 2);
-        minefields.tick_pool(*this, 2);
-        doors.tick(*this); // [orig: Entity_UpdateAllEntities @0x4C2307]
-        tick_item_event_pool(*this, 3);
-        minefields.tick_pool(*this, 3);
-    }
     item_emitters.sync_owners(*this);
-    lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
     // is that client — the pure-client view is D-HUD-16). Position converts to
@@ -316,8 +488,6 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
             recount_group_live();
         }
     }
-	if (gameplay)
-		rotor_wash.tick();
 	++logic_tick; // [orig: tick @0x24c1968 advances once per frame tick]
 	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot

@@ -18,6 +18,25 @@
 using namespace opennova::world;
 
 static int failures = 0;
+
+// One entity-update step of an item row's pool: every pool-1 row's own visit
+// (World::update_pool1_slot), or the pool-2/3 cohort walk.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
+//  @0x4C230C]
+static void step_item_pool(World &w, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
+        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            w.update_pool1_slot(*row, ctx);
+}
+
 #define CHECK(c)                                                                                   \
     do {                                                                                           \
         if (!(c)) {                                                                                \
@@ -927,12 +946,12 @@ void test_demolition_flag_and_flagball_gameplay() {
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
     for (int i = 0; i < 5 * 62; ++i) {
         world->logic_tick = i;
-        tick_item_event_pool(*world, 1);
+        step_item_pool(*world, 1);
         world->match.advance_tick(*world);
     }
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
     world->logic_tick = 5 * 62;
-    tick_item_event_pool(*world, 1);
+    step_item_pool(*world, 1);
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
     world->registry.despawn(timed_flag);
 

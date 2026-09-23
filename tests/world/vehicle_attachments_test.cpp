@@ -178,8 +178,7 @@ void test_per_tick_follow() {
 
     // The motor pass chains the follow after the mover: the children keep
     // their hull-relative offsets through an authority tick.
-    opennova::devtools::ProfileLap lap(r.w.profile);
-    r.w.vehicles.tick_motors(true, lap);
+    r.w.vehicles.update_motor(r.veh(), true);
     CHECK(close_to(r.w.registry.get(a)->position.x - r.veh().position.x, -2.0f, 0.01f));
     CHECK(close_to(r.w.registry.get(b)->position.x - r.veh().position.x, 2.0f, 0.01f));
     CHECK(close_to(r.w.registry.get(a)->position.y - r.veh().position.y, 0.0f, 0.01f));

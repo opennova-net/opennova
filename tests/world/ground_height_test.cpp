@@ -132,7 +132,7 @@ int main() {
         TickContext ctx{};
         ctx.world = &w;
         ctx.is_authority = true;
-        w.ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(e.pos[2] == fx(9999));
         CHECK(e.brain.f[AiBrain::kWorkPosZ] == 0);
     }

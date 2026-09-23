@@ -23,6 +23,25 @@ using namespace opennova::crt;
 using opennova::terrain::TerrainHeightField;
 
 static int failures = 0;
+
+// One entity-update step of an item row's pool: every pool-1 row's own visit
+// (World::update_pool1_slot), or the pool-2/3 cohort walk.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
+//  @0x4C230C]
+static void step_item_pool(World &w, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
+        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            w.update_pool1_slot(*row, ctx);
+}
+
 #define CHECK(c)                                                              \
     do {                                                                      \
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
@@ -2939,7 +2958,7 @@ void test_gnrl_death_is_husk_sound_and_one_effect() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	w.logic_tick = 140;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.empty());
 }
@@ -3006,11 +3025,11 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	// Pool 2 subtracts 8 on its first visit, then runs the expired clock on the next.
 	for (uint32_t t = 200; t < 208; ++t) {
 		w.logic_tick = t;
-		tick_item_event_pool(w, h.pool());
+		step_item_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
 	w.logic_tick = 208;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -3026,7 +3045,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	// Idempotent afterwards: the later think re-arms and the husked notify
 	// meets its gate.
 	w.logic_tick = 240;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.size() == 1);
@@ -3060,7 +3079,7 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	CHECK(count_active_pieces(w) == 3);
 	// Client callbacks run too; the completed husk remains inert.
 	w.logic_tick = 60;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 }
 
@@ -3245,11 +3264,11 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 
 	for (uint32_t t = 300; t < expiry; ++t) {
 		w.logic_tick = t;
-		tick_item_event_pool(w, h.pool());
+		step_item_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
 	w.logic_tick = expiry;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -3266,7 +3285,7 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 	}
 	// No death sound replay and no second detonation.
 	w.logic_tick = 400;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 2);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(count_effect(w, "Effect_AirExp", 0) == 1);

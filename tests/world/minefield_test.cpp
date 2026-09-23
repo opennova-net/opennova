@@ -166,6 +166,26 @@ void quantization_rng_and_reset() {
     CHECK(w.minefields.point(*w.registry.get(q), 1).x == 65536); // cached placement
 }
 
+// One entity-update visit of a minefield row: its own pool-1 visit, or its
+// pool's cohort walk. [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities
+// pool 2 @0x4C2244, pool 3 @0x4C230C]
+void visit_field(World &w, EntityHandle h, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    if (Entity *row = w.registry.get(h)) w.update_pool1_slot(*row, ctx);
+}
+
+// The pool-1 visit thinks on the PRE-decrement clock and steps it once, so the
+// authority's re-arm to 3 thinks every third visit; pools 2/3 step 8/64 on
+// their cohort. [orig: Entity_UpdatePool1Slot `cmp [esi+2ACh],0; jg`
+// @0x4B8E1B, the think @0x4B8E3C, `add [esi+2ACh],-1` @0x4B8EA0;
+// Entity_LandmineThink `mov [ebp+2ACh],eax` @0x441B1A (3 on the authority)]
 void cadence_and_exhaustion() {
     for (int pool = 1; pool < 4; ++pool) {
         auto rig = std::make_unique<Rig>();
@@ -173,21 +193,27 @@ void cadence_and_exhaustion() {
         const auto h = rig->field(pool);
         rig->actor(0, 1);
         auto *field = w.registry.get(h);
-        field->minefield.age = pool == 1 ? 2 : 1;
+        field->minefield.age = 1;
         w.logic_tick = h.slot();
-        w.minefields.tick_pool(w, pool);
+        visit_field(w, h, pool);
         CHECK(field->section_mask == 0);
         CHECK(field->minefield.age == (pool == 1 ? 0 : pool == 2 ? -7 : -63));
-        w.minefields.tick_pool(w, pool);
+        visit_field(w, h, pool);
         CHECK(field->section_mask == 1);
         CHECK(field->minefield.age == (pool == 1 ? 2 : 3));
+        if (pool == 1) {
+            // Re-armed to 3 and stepped once: two quiet visits, then the think.
+            visit_field(w, h, pool);
+            visit_field(w, h, pool);
+            CHECK(field->minefield.age == 0);
+        }
         field->section_mask = 0x3FFE;
         field->minefield.age = 0;
-        w.minefields.tick_pool(w, pool);
+        visit_field(w, h, pool);
         CHECK(w.registry.get(h) != nullptr);
         CHECK(field->section_mask == 0x3FFF);
         field->minefield.age = 0;
-        w.minefields.tick_pool(w, pool);
+        visit_field(w, h, pool);
         CHECK(w.registry.get(h) == nullptr);
     }
 }

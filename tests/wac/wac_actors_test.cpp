@@ -286,7 +286,6 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     f.body().heading = 111; f.body().pitch = 222; f.body().roll = 333;
     f.body().inf.vel[0] = 17; f.body().inf.vel[1] = -21; f.body().inf.vel[2] = 91;
     f.body().inf.jump_cooldown = 7;
-    f.world.add_system(&f.world.ai);
     f.world.ai.capture_spawn_baseline(); // MissionKernel seals both owners
     const auto baseline = f.world.snapshot();
 

@@ -186,9 +186,16 @@ void crowded_brain_tick() {
         constexpr int count = 80;
         w.registry.configure_pool(1, count);
         w.ai.is_authority = authority;
+        // cveh class rows (their event callback is the vehicle machine) with the
+        // +0x1C4 mover suspended, so the visit runs the think alone.
+        VehicleTraits traits;
+        traits.brain_class = VehicleBrainClass::Ground;
+        w.vehicles.traits.set(77, traits);
         for (int i = 0; i < count; ++i) {
             Entity seed;
+            seed.item_id = 77;
             seed.health = 100;
+            seed.motor_suspended = true;
             const auto h = w.registry.spawn(1, seed);
             auto &e = *w.ai.at(w.ai.attach(h));
             e.health = 100;
@@ -201,7 +208,7 @@ void crowded_brain_tick() {
         TickContext ctx{};
         ctx.world = &w;
         ctx.is_authority = authority;
-        w.ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         for (int i = 0; i < count; ++i) {
             const auto &e = *w.ai.at(i);
             CHECK(e.brain.f[AiBrain::kTick] == 1);

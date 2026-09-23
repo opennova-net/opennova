@@ -531,7 +531,7 @@ int main() {
 
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         AiEntity *ae = ai.at(idx);
         CHECK(ae->pos[0] == to_fixed(10.0));
         CHECK(ae->pos[1] == to_fixed(20.0));
@@ -541,19 +541,19 @@ int main() {
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae->pos[0] == to_fixed(30.0));
         CHECK(ae->pos[1] == to_fixed(40.0));
 
         // Even with a locomotion target set, a mounted gunner does NOT path-follow.
         ae->brain.f[AiBrain::kOutSpeed] = 9999;
         ae->brain.f[AiBrain::kWorkPosX] = to_fixed(999.0);
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae->pos[0] == to_fixed(30.0)); // still seated, not moved toward 999
 
         // Vehicle gone -> auto-dismount, occupant resumes normal AI.
         w.registry.despawn(gh);
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(!w.registry.get(sh)->mounted);
     }
 
@@ -579,12 +579,12 @@ int main() {
         CHECK(w.commands.mount(100, 200));
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ai.at(idx)->inf.anim_state == 67); // variant configured, but clip missing -> base
 
         clips.available_state = 70; // emplaced_4 = base 67 + variant 3
         ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ai.at(idx)->inf.anim_state == 70);
     }
 
@@ -742,7 +742,7 @@ int main() {
 
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
 		CHECK(ai.at(idx)->inf.anim_state == 107); // sit_24 selects its stationary driver pose
 	}
 

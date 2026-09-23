@@ -733,11 +733,10 @@ public:
     // deployment resets; bare authoritative worlds need no local view.
     LocalPlayer *local_player_state = nullptr;
     EntityCommands commands;
-    // The AI/motor system: every brain plus the infantry and vehicle motors.
-    // Owned here so the command layer, the sims, the wire and the tools reach
-    // brains without a seam; the kernel registers it after the script systems
-    // (WAC -> idle legs -> BMS -> AI) and wires its collision/terrain/root-motion
-    // links.
+    // The AI/motor system: every brain plus the organic bodies. Owned here so
+    // the command layer, the sims, the wire and the tools reach brains without
+    // a seam; update_all_entities drives it row by row after the script
+    // systems, and the kernel wires its collision/terrain/root-motion links.
     AiSystem ai;
     // The server tick's every-32 legs (ServerIdleLegs above), registered by the
     // kernel between WAC and BMS; the host session installs the idle timers.
@@ -751,7 +750,7 @@ public:
     SessionRules rules;
     WorldOutbox out;
     // The two systems that own their state and their verbs (vehicle_system.h,
-    // zone_system.h); the AI tick runs the vehicle motors, the host tick the
+    // zone_system.h); the entity update runs the vehicle motors, the host tick the
     // zone capture transaction.
     VehicleSystem vehicles;
 	RotorWashSystem rotor_wash;
@@ -925,15 +924,31 @@ public:
     uint32_t team_downed_resend_countdown = 0;
 
     void add_system(ISystem *sys);
-    void load_systems();       // calls on_load for each
+    void load_systems();       // calls on_load for each, then the AI's
 
-    // One frame-clock tick. Gameplay runs every system; PreMission runs only
-    // the authored BMS pre-pass; PreRound advances shared clocks but freezes
-    // WAC/entities/projectiles. The explicit phase replaces the old boolean
-    // pre-mission seam so no caller can mistake a pre-round freeze for a script
-    // initialization pass.
+    // One frame-clock tick. Gameplay runs every system, then the entity
+    // update; PreMission runs only the authored BMS pre-pass; PreRound
+    // advances shared clocks but freezes WAC/entities/projectiles. The
+    // explicit phase replaces the old boolean pre-mission seam so no caller
+    // can mistake a pre-round freeze for a script initialization pass.
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
+
+    // One gameplay tick's entity update, in the retail phase order: the
+    // pool-1 walk (every live row once, in slot order, its ground-entity
+    // chain first), the attachment poses, HeliLift, the faces, the
+    // precipitation fall, the death pieces, the AI timed events, the weather
+    // particles, the projectiles, the explosion queue (then the damage
+    // reactions they stamped), the pool-2 cohort walk, the doors, the pool-3
+    // cohort walk, the proximity tables, then the pool-0 walk in slot order.
+    // [orig: Entity_UpdateAllEntities @0x4C2100]
+    void update_all_entities(const TickContext &ctx);
+    // One pool-1 visit: mark the row visited; while its +0x2AC clock is
+    // expired, refresh its blink state and run its class think (the brain
+    // machine, the minefield or item damage callback; a placed device carries
+    // its own legs); then its +0x1C4 motor legs; then the clock decrement.
+    // [orig: Entity_UpdatePool1Slot @0x4B8DD0]
+    void update_pool1_slot(Entity &row, const TickContext &ctx);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed

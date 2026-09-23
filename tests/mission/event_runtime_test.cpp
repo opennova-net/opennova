@@ -941,8 +941,13 @@ static void test_teammate_triggers() {
         load_probe(sys, make_trigger(bms::TriggerMainType::Teammate, c.sub));
         w.add_system(&sys);
         w.load_systems();
-        w.script.heli_lift_active_count = c.lifts; // inject the query fixture after mission reset
-        tick_n(w, kPass);
+        // Inject the query fixture ahead of each tick's script pass: the entity
+        // update's HeliLift pass republishes its own (empty) slot count.
+        // [orig: HeliLift_UpdateAll @0x451FA0 from Entity_UpdateAllEntities @0x4C21F6]
+        for (int i = 0; i < kPass; ++i) {
+            w.script.heli_lift_active_count = c.lifts;
+            tick_n(w, 1);
+        }
         CHECK((w.script.vars.get_mission(9) == 1) == c.fires);
     }
 }

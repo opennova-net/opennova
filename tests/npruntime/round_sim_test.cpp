@@ -1148,7 +1148,6 @@ int main() {
 		return 1;
 	shooter_body->net_is_remote_peer = true;
 	victim_body->net_is_remote_peer = true;
-	world.add_system(&ai);
 
 	// Armory: adm 5 = a rifle firing TEST_556. Ammo table via the real builder — entry 0
 	// is the file-order null, entry 1 the live round (854 u/s, 62 grains, 3 s, C4 kz —

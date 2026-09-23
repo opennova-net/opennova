@@ -627,11 +627,12 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     CHECK((w.registry.get(single_h)->flags & kEntityFlagMounted) != 0);
     CHECK((w.registry.get(single_h)->engine_flags & kEntityFlagMounted) != 0);
     CHECK(!w.commands.ssn_exists(44));
-    CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 0);
-    CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 0);
-    CHECK(ai.events.count() == 2);
-
-    ai.events.process_timed(ai, w);
+    // The script queued the two speed events and the same frame's entity
+    // update dispatched them. [orig: Server_TickUpdate's WacScript_AdvanceTick
+    //  call @0x51D8BF precedes Game_ProcessMainFrame's Entity_UpdateAllEntities
+    //  call @0x52674B, whose j_AIEvent_ProcessTimedEntries call @0x4C2226
+    //  expires the timer-0 entries]
+    CHECK(ai.events.count() == 0);
     CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 10485);
     CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 5242);
 }
@@ -1056,6 +1057,9 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     CHECK(w.registry.get(sh)->mount_target == ch);
     run(w, sys, 1);
     CHECK(w.script.vars.get_mission(2) == 1);
+    // The predicate reads the dead flag on a seated row; without its body the
+    // entity update leaves the row seated (no death edge detaches or frees it).
+    w.ai.release(sh);
     w.registry.get(sh)->health = 0;
     w.registry.get(sh)->flags |= kEntityFlagDead;
     run(w, sys, 1);

@@ -98,7 +98,7 @@ struct Org1Rig {
         ctx.is_authority = true;
         ctx.logic_tick = t;
         w->logic_tick = t;
-        w->ai.tick(*w, ctx);
+        w->update_all_entities(ctx);
     }
 };
 
@@ -302,7 +302,7 @@ void test_org1_death_edge_legs() {
         ctx.world = rig.w.get();
         ctx.is_authority = false;
         ctx.logic_tick = 2;
-        rig.w->ai.tick(*rig.w, ctx);
+        rig.w->update_all_entities(ctx);
         CHECK(rig.e().inf.anim_state == 184);
         CHECK(rig.e().slot.bytes()[AiSlot::kAlertByte] == 0);
         CHECK(rig.entity().last_attacker == shooter);

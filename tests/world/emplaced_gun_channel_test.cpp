@@ -459,7 +459,6 @@ void test_attached_turret_slews_once_per_world_tick() {
         }
         const int32_t look = bam_sub(kGunHeading, 30 * kBamPerDegree);
         r.look(look, 0);
-        r.w.add_system(&r.w.ai);
         r.w.run_logic_tick(true);
         CHECK(r.gun().emplaced_gun_yaw_word == 0x93);
         CHECK(r.body->heading == look);
@@ -521,7 +520,6 @@ void test_barrel_spin_once_before_weapon_pump() {
     r.gun().emplaced_update = true;
     r.gun().primary_weapon_slot_adm = 0;
     r.gun().primary_weapon_slot.kick = 2;
-    r.w.add_system(&r.w.ai);
     r.w.run_logic_tick(true);
     CHECK(r.gun().primary_weapon_slot.kick == 0);
     CHECK(r.gun().emplaced_spin_ticks == 59);
@@ -621,7 +619,6 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     pr.r.gun().emplacement_parent_spawn_id =
             pr.r.w.registry.get(pr.parent_h)->registry_spawn_id;
     pr.r.w.registry.get(pr.parent_h)->spawn_phase = 1000;
-    pr.r.w.add_system(&pr.r.w.ai);
     pr.r.w.run_logic_tick(true);
     CHECK(pr.r.w.registry.get(pr.r.gun_h) != nullptr);
     if (pr.r.w.registry.get(pr.r.gun_h) == nullptr) return;

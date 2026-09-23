@@ -1913,7 +1913,7 @@ bool run_physicsless_air_dispatches_directly() {
 	ctx.is_authority = false;
 	for (uint32_t tick = 0; tick < 64; ++tick) {
 		ctx.logic_tick = tick;
-		ai.tick(world, ctx);
+		world.update_all_entities(ctx);
 	}
 
 	const float air_motion = std::fabs(air->position.x - air_start.x) +
@@ -1991,7 +1991,7 @@ bool run_client_family_sound_dispatch_scope() {
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = false;
-	ai.tick(world, ctx);
+	world.update_all_entities(ctx);
 
 	bool saw_ground = false;
 	bool saw_water = false;

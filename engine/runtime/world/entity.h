@@ -331,6 +331,14 @@ struct Entity {
     // one after its callback; pool 2/3 positive clocks subtract 8/64 at their
     // matching slot cohort, and expired clocks run without a trailing subtract.
     int32_t class_think_ticks = 0;
+    // The entity update's visited byte (entity+0x163): every pool-1 visit sets
+    // it, and each walk clears it only on the live pool-1 rows, so a
+    // parent-first visit never repeats a row and a parent outside pool 1 is
+    // visited once per lifetime.
+    // [orig: Entity_UpdateAllEntities @0x4C212E..0x4C2156 (the clear), the
+    //  tests @0x4C217F / @0x4C218F / @0x4C219F / @0x4C21AF;
+    //  Entity_UpdatePool1Slot @0x4B8DE1 (the set)]
+    bool pool1_visited = false;
 
     // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
     // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This

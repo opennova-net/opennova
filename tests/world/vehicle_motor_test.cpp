@@ -2594,7 +2594,7 @@ void test_state0_brain_with_ai_driver_holds() {
 	TickContext ctx{};
 	ctx.world = &r.w;
 	ctx.is_authority = true;
-	r.w.ai.tick(r.w, ctx);
+	r.w.update_all_entities(ctx);
 	// One pass: 0 -> 22 at the head, then the AI leg's 22 -> 16 hand-back.
 	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
 	CHECK(ae.brain.f[AiBrain::kOutSpeed] == 0);
@@ -2602,12 +2602,12 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.speed == 0);
 	for (int i = 1; i < 200; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		r.w.ai.tick(r.w, ctx);
+		r.w.update_all_entities(ctx);
 	}
 	const Vec3 late = r.veh().position;
 	for (int i = 200; i < 224; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		r.w.ai.tick(r.w, ctx);
+		r.w.update_all_entities(ctx);
 	}
 	const float moved = std::hypot(r.veh().position.x - start.x, r.veh().position.y - start.y);
 	const float moved_late = std::hypot(r.veh().position.x - late.x, r.veh().position.y - late.y);
@@ -2616,6 +2616,59 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.speed == 0);
 	CHECK(moved_late == 0.0f); // at rest: no sustained drive
 	CHECK(moved == 0.0f); // no invented speed seed or boarding pulse
+}
+
+// A deck rider in a lower pool-1 slot than its carrier rides the carrier's
+// CURRENT motor delta: the pool-1 walk visits a row's ground-entity chain
+// first, so the carrier's mover runs before the rider's in the same pass.
+// [orig: Entity_UpdateAllEntities @0x4C2188..0x4C21E9 (the +0x28 chain; the
+//  Entity_UpdatePool1Slot calls @0x4C21E0 then @0x4C21E9)]
+static void test_rider_below_its_carrier_follows_the_same_pass() {
+    Rig r;
+    const auto traits = buggy_traits();
+    // The carrier moves up to slot 5; the rider takes slot 0 below it, on the
+    // carrier's origin (so a carrier yaw cannot move it sideways).
+    Entity carrier = r.veh();
+    r.w.registry.despawn(r.veh_h);
+    r.veh_h = r.w.registry.spawn_at(EntityHandle::make(1, 5), carrier);
+    CHECK(r.veh_h.valid());
+    Entity rider = carrier;
+    rider.net_id = 201;
+    rider.item_id = 1292;
+    rider.seats.clear();
+    rider.position.z = carrier.position.z + 2.0f;
+    rider.ground_target = r.veh_h;
+    const EntityHandle rider_h = r.w.registry.spawn(1, rider);
+    CHECK(rider_h.slot() == 0);
+    r.w.vehicles.traits.set(carrier.item_id, traits);
+    r.w.vehicles.traits.set(rider.item_id, traits);
+    auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.drv().health;
+    r.w.cached.local_player = r.drv_h;
+    r.w.ai.is_authority = true;
+    r.mount();
+    LocalPlayer local(r.w);
+    local.input.forward = true;
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    float travelled = 0.0f;
+    for (uint32_t t = 1; t <= 40; ++t) {
+        local.apply_player_input_pre_tick();
+        const Vec3 c0 = r.veh().position;
+        const Vec3 p0 = r.w.registry.get(rider_h)->position;
+        ctx.logic_tick = t;
+        r.w.logic_tick = t;
+        r.w.update_all_entities(ctx);
+        const Vec3 c1 = r.veh().position;
+        const Vec3 p1 = r.w.registry.get(rider_h)->position;
+        CHECK(std::fabs((c1.x - c0.x) - (p1.x - p0.x)) < 1e-3f);
+        CHECK(std::fabs((c1.y - c0.y) - (p1.y - p0.y)) < 1e-3f);
+        travelled += std::hypot(c1.x - c0.x, c1.y - c0.y);
+    }
+    CHECK(travelled > 1.0f);
 }
 
 // Input is packed before pool-1 motors; pool-0 body posing follows them.
@@ -2641,18 +2694,19 @@ static void test_local_controls_reach_first_carrier_tick() {
     ctx.world = &r.w;
     ctx.is_authority = true;
     ctx.logic_tick = 1;
-    r.w.ai.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.cmd_speed == traits.player_speed);
     CHECK(r.veh().veh.steer_target_bam == heading);
     local.input.forward = false;
     local.apply_player_input_pre_tick();
     ++ctx.logic_tick;
-    r.w.ai.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too
 }
 
 int main() {
     test_local_controls_reach_first_carrier_tick();
+    test_rider_below_its_carrier_follows_the_same_pass();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_tank_pivot_sound_latch_and_loop();

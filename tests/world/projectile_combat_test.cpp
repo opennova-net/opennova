@@ -2607,7 +2607,7 @@ struct PlayerVictimRig : HeapWorldFixture {
         ctx.is_authority = true;
         for (int i = 0; i < count; ++i) {
             ctx.logic_tick = ++tick;
-            world.ai.tick(world, ctx);
+            world.update_all_entities(ctx);
         }
     }
 };

@@ -472,17 +472,10 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
     }
 }
 
-void AiSystem::tick(World &world, const TickContext &ctx) {
-    // AI does not run during the BMS pre-mission script pass: that invocation only
-    // settles initial scripted state (EventFlags PreMission), it does not step brains.
-    if (ctx.phase != TickPhase::Gameplay) return;
-    // The phases lap onto the SIM_AI_* rows of the world's profile (ADR 0043
-    // d5); an inactive profile reads no clock.
-    devtools::ProfileLap lap(world.profile);
-    is_authority = ctx.is_authority;
-    // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
-    // updates: infantry get wasHit/lastAttacker (consumed by the §17.1 scan + §17.3 hit
-    // reactions), SM brains get the type-1 damage AIEvent (h_combat_event -> evade).
+void AiSystem::apply_round_hits(World &world) {
+    // Infantry get wasHit/lastAttacker (consumed by the §17.1 scan + §17.3 hit
+    // reactions), SM brains get the type-1 damage AIEvent (h_combat_event -> evade),
+    // which the next tick's timed-event pass dispatches.
     // [orig: the damage chain writes the victim entity + queues the event inline —
     // Projectile_ProcessDamageOnTarget @0x4e7fb0; our sim/AI split drains a record.]
     for (const RoundHit &hit : world.round_sim.hits) {
@@ -526,163 +519,55 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         }
     }
     world.round_sim.hits.clear();
-    // [orig: Entity_UpdateAllEntities @0x4C21F6, immediately before faces]
-    world.teammates.tick(world);
-    // Facial interpolation precedes the pool-0 infantry callback walk.
-    // [orig: Entity_UpdateAllEntities @0x4C21FB]
-    world.facials.tick(world);
-    lap.mark(devtools::Slot::SIM_AI_REACTIONS);
-    // Rebuild the pool-0/1 proximity tables once per tick, before any entity update
-    // (the pool-2 statics table rebuilds only on its registry/instance edges).
-    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
-    // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
-    // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
-    // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
-    // Pool-0 person publication does not depend on any entity having a 3DI
-    // collision instance.  RoundSim still queries this snapshot on missions
-    // containing only organic entities, so always rebuild the pool tables when
-    // a CollisionWorld is installed.  Model-backed blink work remains gated on
-    // instance_count below.
-    const bool collision_active = collision != nullptr && collision->instance_count() != 0;
-    if (collision != nullptr) {
-        collision->local_player = world.cached.local_player; // blink accumulation target
-        collision->build_tick_tables(world);
+}
+
+void AiSystem::think_brain(AiEntity &e, World &world) {
+    const Entity *ent = world.registry.get(e.handle);
+    const VehicleTraits *vt =
+            ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
+    if (vt == nullptr || vt->brain_class == VehicleBrainClass::Unset) return;
+    // The machine only decides; nothing here moves the body. The row's own
+    // +0x1C4 physics callback, resolved from its items.def move_function, is
+    // its one mover: the vehicle movers integrate the brain's outputs.
+    // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the +0x1C4 call);
+    //  g_EntityClassPhysicsTable @0x82ABC8]
+    if (vt->brain_class == VehicleBrainClass::Ground)
+        process_vehicle_state_machine(e, world, 0);
+    else
+        process_infantry_state_machine(e, world, 0);
+}
+
+void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
+    const Entity *motor_entity = world.registry.get(e.handle);
+    const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
+    const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
+    if (motor_suspended) return;
+    // Joiners retain seat-follow presentation for wire-owned peers. The
+    // authority continues into the remote org2 animation/collision tail:
+    // mounted contact callbacks remain live while model push is suppressed.
+    if (e.net_is_remote_peer && pose_if_mounted(e, world) && !is_authority)
+        return;
+    // A client-only wire peer has no authority collision tail, so its
+    // blink/indoors presentation state comes from the position-only refresh.
+    // [orig: remote persons
+    // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
+    // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
+    // walk is pool-2 statics on an 8-per-tick stagger, not persons]
+    if (collision != nullptr && collision->instance_count() != 0 &&
+            e.net_is_remote_peer && !is_authority) {
+        if (Entity *ent = world.registry.get(e.handle))
+            collision->refresh_blink(world, *ent);
     }
-    lap.mark(devtools::Slot::SIM_AI_COLLISION);
-    // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
-    // entity==g_local_player branch (line below, no authority guard) motor-sims the
-    // joiner's own player from input, while NPC think/select stays authority-gated. A
-    // header-only join keeps remote organics in ClientState rather than this AI array;
-    // any native non-authority rows from an explicit complete-BMS/debug join just hold
-    // idle. REMOTE presentation reads the host's S2C 0x0A ClientState, so that idle tick
-    // cannot overwrite wire pose. [orig: the client also runs the
-    // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
-    for (int i = 0; i < count(); ++i) {
-        AiEntity &e = *at(i);
-        // A freed AI component (owner word 0) is not an entity's brain any more:
-        // retail reaches brains only through live entities' +100 pointer.
-        if (e.brain.f[AiBrain::kOwner] == 0 || e.inf.active) continue;
-        const devtools::ProfileScope entity_scope(
-                world.profile, devtools::Slot::SIM_AI_OTHER_ENTITIES);
-        const Entity *motor_entity = world.registry.get(e.handle);
-        const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
-        // Non-infantry mounted controllers retain the seat-follow shortcut.
-        if (!motor_suspended && pose_if_mounted(e, world))
-            continue;
-        // The pool-1 visit's think gate: the class event callback (the brain
-        // machine) runs only on the visits where the PRE-decrement entity+684
-        // countdown (Entity::spawn_phase) is <= 0, and the countdown drops by
-        // one on every visit (after the machine's re-arm), so a brain thinks
-        // once every brain[7] visits (16 with the class init's step 16), on the
-        // visit after any committed transition (apply_transition zeroes it),
-        // spread by the class init's 0..15 spawn stagger. The +0x1C4 motor runs
-        // every visit regardless
-        // (world.vehicles.tick_motors below). A brain outside pool 1 has no
-        // pool-1 visit and keeps the every-tick think.
-        // [orig: Entity_UpdatePool1Slot @0x4B8DD0 gate @0x4B8E1B..0x4B8E22, the
-        //  +0x1C8 call @0x4B8E3C, the decrement @0x4B8EA0; the pool-1 walk
-        //  Entity_UpdateAllEntities @0x4C2158..0x4C21F1; the seed
-        //  Entity_InitVehicleAIFromDef @0x468915..0x468945 /
-        //  Entity_InitHelicopterAIFromDef @0x468645..0x468669]
-        // A think visit first refreshes the thinking entity's own blink/indoors
-        // state -- Entity_BuildProximityList @0x4B3DC0 is CollisionWorld::refresh_blink
-        // (the call @0x4B8E25 on the +684 gate alone, ahead of the +0x1C8
-        // callback). The per-source candidate slice is the separate 17-tick
-        // Entity_BuildProximityListsFromPools @0x4B8EB0 rebuild
-        // (collision->build_tick_tables above).
-        Entity *countdown_entity = e.handle.pool() == 1 ? world.registry.get(e.handle) : nullptr;
-        const uint64_t countdown_lifetime =
-                countdown_entity != nullptr ? countdown_entity->registry_spawn_id : 0;
-        const bool think = countdown_entity == nullptr || countdown_entity->spawn_phase <= 0;
-        if (think && countdown_entity != nullptr && collision != nullptr)
-            collision->refresh_blink(world, *countdown_entity);
-        // The class callback has no AI_BeginUpdate admission gate. That leaf
-        // belongs to movement controller row 4 and its per-entity phase.
-        // [orig: Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E53]
-        if (think) {
-            const Entity *ent = world.registry.get(e.handle);
-            const VehicleTraits *vt =
-                    ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
-            // The brain machine is the item's class event callback fn1, keyed by
-            // items.def ai_function: CHel/cpln -> the air machine, cveh/cbot/ctrn ->
-            // the vehicle machine [orig: g_EntityClassEventCallbackTable @0x813000
-            // rows @0x8132a0/@0x8133a8 vs @0x813378/@0x813390/@0x8133c0, resolved
-            // by EntityDef_InitAllCallbacks @0x4a5aae]. A traits row built without
-            // its def (test rigs) falls back to its mover family; a brain with no
-            // traits row keeps the air machine it always ran.
-            bool vehicle_class = false;
-            if (vt != nullptr) {
-                if (vt->brain_class == VehicleBrainClass::Unset)
-                    vehicle_class = !vehicle_family_uses_direct_air_mover(vt->family);
-                else
-                    vehicle_class = vt->brain_class == VehicleBrainClass::Ground;
-            }
-            if (vehicle_class)
-                process_vehicle_state_machine(e, world, 0);
-            else
-                process_infantry_state_machine(e, world, 0);
-            // The dead-state tick can destroy the entity and free this brain.
-            if (e.brain.f[AiBrain::kOwner] == 0) continue;
-            // The machine only decides; nothing here moves the body. The row's
-            // own +0x1C4 physics callback, resolved from its items.def
-            // move_function, is its one mover: the vehicle movers
-            // (world.vehicles.tick_motors) integrate the brain's outputs, and
-            // every other physics-table row leaves them unintegrated, so a
-            // brain without a vehicle traits row stays where it is.
-            // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the +0x1C4
-            //  call); g_EntityClassPhysicsTable @0x82ABC8]
-		}
-        // The visit's trailing decrement, every pool-1 visit whether or not the
-        // brain thought — the think may have destroyed and re-used the slot, so
-        // only the same registry lifetime counts down [orig: `add [esi+2ACh],-1`
-        // @0x4B8EA0 after the motor/emitter/light legs].
-        if (countdown_entity != nullptr) {
-            Entity *live = world.registry.get(e.handle);
-            if (live != nullptr && live->registry_spawn_id == countdown_lifetime)
-                --live->spawn_phase;
-        }
-    }
-    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
-    world.vehicles.tick_motors(is_authority, lap);
-    // The ewep class update runs every tick, occupied or not.
-    // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
-    world.registry.for_each_in_pool(1, [&](const Entity &entity) {
-        tick_emplaced_weapon_class_update(world, *world.registry.get(entity.handle));
-    });
-    // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
-    // motor delta, then resolve contacts against that same pose.
-    // [orig: Entity_UpdateAllEntities @0x4C2158..0x4C21F1 before the
-    // pool-0 callback walk @0x4C2426..0x4C2474]
-    for (int i = 0; i < count(); ++i) {
-        AiEntity &e = *at(i);
-        if (e.brain.f[AiBrain::kOwner] == 0 || !e.inf.active) continue;
-        const Entity *motor_entity = world.registry.get(e.handle);
-        const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
-        const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
-        if (motor_suspended) continue;
-        // Joiners retain seat-follow presentation for wire-owned peers. The
-        // authority continues into the remote org2 animation/collision tail:
-        // mounted contact callbacks remain live while model push is suppressed.
-        if (e.net_is_remote_peer && pose_if_mounted(e, world) && !is_authority)
-            continue;
-        // A client-only wire peer has no authority collision tail, so its
-        // blink/indoors presentation state comes from the position-only refresh.
-        // [orig: remote persons
-        // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
-        // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
-        // walk is pool-2 statics on an 8-per-tick stagger, not persons]
-        if (collision_active && e.net_is_remote_peer && !is_authority) {
-            if (Entity *ent = world.registry.get(e.handle))
-                collision->refresh_blink(world, *ent);
-        }
-        // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
-        // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
-        // Entity_UpdateInfantryAI @0x4b9910]
-        tick_infantry(e, world, ctx.logic_tick);
-    }
-    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
-    events.process_timed(*this, world);
-    lap.mark(devtools::Slot::SIM_AI_EVENTS);
+    // The walk runs on a JOINER (client, !is_authority) too: tick_infantry's
+    // §5.38 entity==g_local_player branch (no authority guard) motor-sims the
+    // joiner's own player from input, while NPC think/select stays
+    // authority-gated. A header-only join keeps remote organics in ClientState
+    // rather than this AI array; any native non-authority rows from an explicit
+    // complete-BMS/debug join just hold idle. REMOTE presentation reads the
+    // host's S2C 0x0A ClientState, so that idle tick cannot overwrite wire pose.
+    // [orig: the client also runs the per-entity AI tick;
+    //  Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
+    tick_infantry(e, world, logic_tick);
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {

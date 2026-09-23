@@ -127,7 +127,6 @@ w::CollisionModel contact_box(int32_t type) {
 void install_collision_system(w::World &world, w::CollisionWorld &collision) {
 	world.collision = &collision;
 	world.ai.collision = &collision;
-	world.add_system(&world.ai);
 }
 
 w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
@@ -1334,7 +1333,6 @@ int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
 void test_org1_death_transaction_is_the_motor_edge() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	world.add_system(&world.ai);
 	w::PlayerSpawn host_spawn;
 	host_spawn.position = {0.0f, 0.0f, 10.0f};
 	host_spawn.team = 1;
@@ -1613,7 +1611,10 @@ int main() {
 	       "a blue NON-person killed by an NPC -> team_kills_by_others");
 
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
+	// Each player death below is a lethal one: the body update re-reads the
+	// health word every tick, so a record over a healthy body would revive it.
 	world.tables.mission_attrib_flags = 0x40;
+	world.registry.get(player)->health = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
@@ -1623,6 +1624,7 @@ int main() {
 	// --- 4b. The Player's own lethal blast: no Player definition authors a
 	// `score`, so the self-kill tallies nothing (the missions whose WAC reads
 	// bluekills never fail on it). [orig: Score_ProcessKillEvent @0x4FD422] ---
+	world.registry.get(player)->health = 0;
 	push_kill(world, player, player);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1 &&
@@ -1635,6 +1637,7 @@ int main() {
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---
 	world.tables.mission_attrib_flags = 0;
+	world.registry.get(player)->health = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");

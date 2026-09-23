@@ -1946,7 +1946,7 @@ bool run_vehicle_drive_authority() {
 	ctx.world = &world;
 	ctx.is_authority = true;
 	ctx.logic_tick = 0;
-	ai.tick(world, ctx);
+	world.update_all_entities(ctx);
 	w::Entity *veh = world.registry.get(vh);
 	player = world.registry.get(ph);
 	driver_ai = ai.for_handle(ph);
@@ -1965,7 +1965,7 @@ bool run_vehicle_drive_authority() {
 	// Complete 62 authority ticks: the vehicle keeps consuming the replicated input.
 	for (int i = 1; i < 62; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		ai.tick(world, ctx);
+		world.update_all_entities(ctx);
 	}
 	veh = world.registry.get(vh);
 	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))

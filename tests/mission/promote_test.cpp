@@ -1179,13 +1179,13 @@ int main() {
     // Boarders spawn ON FOOT and attach through the infantry think's board leg
     // (infantry_board.cpp) — there is no load-time mount shortcut, matching retail.
     // Drive the think for a few 16-tick boundaries to let the order land.
-    auto run_ai = [](AiSystem &a, World &aw, int n) {
+    auto run_ai = [](AiSystem &, World &aw, int n) {
         TickContext c;
         c.world = &aw;
         c.is_authority = true;
         for (int t = 0; t < n; ++t) {
             c.logic_tick = static_cast<uint32_t>(t);
-            a.tick(aw, c);
+            aw.update_all_entities(c);
         }
     };
     {
@@ -1461,7 +1461,7 @@ int main() {
         bool held = false, walked = false;
         for (int t = 0; t < 2600; ++t) {
             ctx.logic_tick = static_cast<uint32_t>(t); // the cadence gates key off this
-            ai.tick(world, ctx);
+            world.update_all_entities(ctx);
             if (e0->slot.f[38] > max_node) max_node = e0->slot.f[38];
             if (e0->inf.wait_cooldown > 0) held = true;
             if (e0->inf.anim_state == anim_state::kWalkForward) walked = true;
@@ -1511,7 +1511,7 @@ int main() {
         bool walked = false;
         for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
             c.logic_tick = static_cast<uint32_t>(t);
-            cai.tick(cw, c);
+            cw.update_all_entities(c);
             if (cai.at(0)->inf.anim_state == anim_state::kWalkForward) walked = true;
         }
         CHECK(walked);                                    // covered the ground on foot
@@ -1570,7 +1570,7 @@ int main() {
 				cut = true;
             }
             c.logic_tick = static_cast<uint32_t>(t);
-            cai.tick(cw, c);
+            cw.update_all_entities(c);
         }
         CHECK(cut);                              // the stall actually happened
         CHECK(occ != nullptr && occ->mounted);   // the latch widened the ring and boarded

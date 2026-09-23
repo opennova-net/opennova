@@ -32,7 +32,7 @@ void run_ticks(World &world, uint32_t from, uint32_t to_excl) {
 	ctx.is_authority = true;
 	for (uint32_t t = from; t < to_excl; ++t) {
 		ctx.logic_tick = t;
-		world.ai.tick(world, ctx);
+		world.update_all_entities(ctx);
 	}
 }
 

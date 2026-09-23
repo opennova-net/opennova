@@ -183,7 +183,7 @@ void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
 // The brain machine an SM-brained item's class event callback runs: CHel/cpln
 // reach the air machine, cveh/cbot/ctrn the vehicle machine; a traits row built
 // without its def falls back to its mover family, and a brain without a traits
-// row keeps the air machine (the AiSystem::tick routing). A null brain returns
+// row keeps the air machine. A null brain returns
 // before any work [orig: EntityAI_ProcessVehicleStateMachine @0x4583CA..0x4583D1].
 // [orig: g_EntityClassEventCallbackTable @0x813000 rows @0x8132a0/@0x8133a8 vs
 //  @0x813378/@0x813390, resolved by EntityDef_InitAllCallbacks @0x4a5aae]

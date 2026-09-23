@@ -346,7 +346,7 @@ void test_infantry_route_walks_around_wall() {
         context.world = &rig.world;
         context.logic_tick = tick;
         context.is_authority = true;
-        ai.tick(rig.world, context);
+        rig.world.update_all_entities(context);
         saw_blockage |= body.inf.path_state == 1;
         saw_detour |= body.inf.path_state == 2;
         if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {

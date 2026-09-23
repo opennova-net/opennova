@@ -2360,6 +2360,11 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	if (!expect(player.valid(), "maintenance peer's player entity spawned"))
 		return false;
 	opennova::world::Entity *player_entity = world.registry.get(player);
+	// The player body's per-tick recoil draw shares the PRNG_Next16 stream the
+	// control seed reads: suspend the body (+0x1C4 held, as AINODEPATH does) so
+	// the stream advances only on the maintenance legs under test.
+	// [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 skips a held +0x1C4]
+	player_entity->motor_suspended = true;
 	player_entity->equipped_adm_index = 0x20;
 	world.tables.weapons.entries.resize(0x21);
 	world.tables.weapons.entries[0x20].valid = true;
@@ -3370,7 +3375,6 @@ bool check_timed_capture_host_wire_transaction() {
 	world.rules.mp_session = true;
 	world.collision = &collision;
 	ai.collision = &collision;
-	world.add_system(&ai);
 	ctx.world = &world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);

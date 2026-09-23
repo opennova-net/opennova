@@ -3296,17 +3296,20 @@ bool run_host_as_client() {
 	decoded_map.y = w::to_fixed(map_entity.position.y);
 	decoded_map.z = w::to_fixed(map_entity.position.z);
 
+	// The frame is built ahead of the tick's entity update, so it anchors on
+	// the pose the host player holds when Server_TickUpdate starts; the body
+	// update may move it afterwards.
+	const w::Vec3 framed = he->position;
 	inmatch::Server_TickUpdate(ctx); // fans a per-frame 0x0A to the host loopback (is_in_match), anchored to hp
 
 	if (!expect(host_view.is_authority(), "host-as-client runtime is authority (no 0x0C)")) return false;
 	std::vector<std::vector<uint8_t>> out = host_view.Client_ProcessNetworkFrame();
 	if (!expect(out.empty(), "host-as-client emits no C2S (is_authority gate)")) return false;
 
-	const w::Entity *he2 = world.registry.get(hp);
 	if (!expect(host_view.state().frames_applied >= 1, "host-as-client folded its own 0x0A")) return false;
-	if (!expect(host_view.state().anchor_x == w::to_fixed(he2->position.x) &&
-	                    host_view.state().anchor_y == w::to_fixed(he2->position.y) &&
-	                    host_view.state().anchor_z == w::to_fixed(he2->position.z),
+	if (!expect(host_view.state().anchor_x == w::to_fixed(framed.x) &&
+	                    host_view.state().anchor_y == w::to_fixed(framed.y) &&
+	                    host_view.state().anchor_z == w::to_fixed(framed.z),
 	            "host-as-client anchor == host player position (D-NET-121: owned_entity, not dvxi5)"))
 		return false;
 	// Explicitly assert it is NOT the dvxi5 fallback (the bug D-NET-121 guards).

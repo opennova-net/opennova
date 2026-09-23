@@ -149,6 +149,15 @@ enum : int {
     kItemAvMine = 368,
 };
 
+// The placed-device rows' pool-1 visit legs (World::update_pool1_slot runs
+// ThrowableSim::update_device from each device row's own visit), then the
+// release of the rows those visits freed.
+void step_devices(World &w, CollisionWorld *collision, const TerrainHeightField *terrain) {
+    for (PlacedDevice &d : w.throwables.devices)
+        w.throwables.update_device(w, d, collision, terrain);
+    w.throwables.compact();
+}
+
 void seed_ammo(World &w) {
     w.tables.ammo.entries.resize(kAmmoCount);
     auto &null_e = w.tables.ammo.entries[kAmmoNull];
@@ -313,7 +322,7 @@ struct Rig {
     void tick(int n) {
         for (int i = 0; i < n; ++i) {
             w.round_sim.tick(w, &flat.field, nullptr);
-            w.throwables.tick(w, nullptr, &flat.field);
+            step_devices(w, nullptr, &flat.field);
         }
     }
 };
@@ -826,7 +835,7 @@ void test_placed_device_pose_and_ballistic_damage() {
     rig.w.round_sim.tick(rig.w, nullptr, &collision);
     entity = rig.w.registry.get(device.entity);
     CHECK(entity != nullptr && entity->health <= 0);
-    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.empty());
     bool saw_boom = false;
     for (const ExplosionEntry &entry : rig.w.explosions.queue)
@@ -855,7 +864,7 @@ void test_parented_device_follows_parent_yaw() {
     stamp_saved_live_pose(*carrier);
     carrier->position = Vec3{20, 30, 3};
     carrier->yaw = 0; // +90 degrees of mission-heading rotation
-    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    step_devices(rig.w, nullptr, nullptr);
     const PlacedDevice &device = rig.w.throwables.devices[0];
     CHECK(std::fabs(device.pos.x - 20.0f) < 1e-4f);
     CHECK(std::fabs(device.pos.y - 31.0f) < 1e-4f);
@@ -893,7 +902,7 @@ void test_parented_device_adopts_parent_pitch() {
     CHECK(carrier != nullptr);
     stamp_saved_live_pose(*carrier);
     carrier->pitch = 45;
-    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.size() == 1);
     const PlacedDevice &device = rig.w.throwables.devices[0];
     // rel yaw is zero, so the device adopts the raw +45-degree pitch delta.
@@ -930,7 +939,7 @@ void test_device_and_owner_handle_reuse() {
         CHECK(replacement == old_handle);
         const uint64_t replacement_id = rig.w.registry.get(replacement)->registry_spawn_id;
         CHECK(replacement_id != old_id);
-        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        step_devices(rig.w, nullptr, nullptr);
         CHECK(rig.w.throwables.devices.empty());
         const Entity *still_live = rig.w.registry.get(replacement);
         CHECK(still_live != nullptr && still_live->registry_spawn_id == replacement_id);
@@ -953,7 +962,7 @@ void test_device_and_owner_handle_reuse() {
         rig.w.throwables.detonate_satchels_by_owner(rig.w, new_owner);
         const Entity *device_entity = rig.w.registry.get(device_handle);
         CHECK(device_entity != nullptr && device_entity->health == 5);
-        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        step_devices(rig.w, nullptr, nullptr);
         CHECK(rig.w.throwables.devices.empty());
         CHECK(rig.w.registry.get(device_handle) == nullptr);
         CHECK(rig.w.registry.get(new_owner) != nullptr);
@@ -976,7 +985,7 @@ void test_parent_handle_reuse_detaches_device() {
     parent_seed.yaw = 0;
     const EntityHandle replacement = rig.w.registry.spawn(1, parent_seed);
     CHECK(replacement == parent);
-    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.size() == 1);
     const PlacedDevice &device = rig.w.throwables.devices[0];
     CHECK(!device.parent.valid());
@@ -1137,10 +1146,10 @@ void test_per_owner_same_item_device_caps() {
         // Age zero becomes -1 before think and keeps decreasing while armed.
         PlacedDevice &aged = rig.w.throwables.devices[0];
         aged.think_delay_ticks = 0;
-        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        step_devices(rig.w, nullptr, nullptr);
         CHECK(!rig.w.throwables.devices.empty());
         CHECK(rig.w.throwables.devices[0].think_delay_ticks == -1);
-        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        step_devices(rig.w, nullptr, nullptr);
         CHECK(rig.w.throwables.devices[0].think_delay_ticks == -2);
     }
 }
@@ -1270,13 +1279,13 @@ void test_claymore_sector_los_blocks_trigger() {
     collision.assign_entity(wall, wall_model,
                             wall_entity != nullptr ? wall_entity->registry_spawn_id : 0);
 
-    rig.w.throwables.tick(rig.w, &collision, &rig.flat.field);
+    step_devices(rig.w, &collision, &rig.flat.field);
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
 
     collision.remove_entity_instance(wall);
     rig.w.registry.despawn(wall);
-    rig.w.throwables.tick(rig.w, &collision, &rig.flat.field);
+    step_devices(rig.w, &collision, &rig.flat.field);
     CHECK(rig.w.throwables.devices.empty());
 }
 
@@ -1452,13 +1461,13 @@ void test_armed_device_age_keeps_falling() {
     CHECK(rig.w.throwables.devices.size() == 1);
     // The tick compacts the vector, so re-fetch the row each step.
     rig.w.throwables.devices[0].think_delay_ticks = 1;
-    rig.w.throwables.tick(rig.w, nullptr, nullptr); // arming: 1 -> 0
+    step_devices(rig.w, nullptr, nullptr); // arming: 1 -> 0
     CHECK(rig.w.throwables.devices.size() == 1 &&
           rig.w.throwables.devices[0].think_delay_ticks == 0);
-    rig.w.throwables.tick(rig.w, nullptr, nullptr); // armed think: 0 -> -1
+    step_devices(rig.w, nullptr, nullptr); // armed think: 0 -> -1
     CHECK(rig.w.throwables.devices.size() == 1 &&
           rig.w.throwables.devices[0].think_delay_ticks == -1);
-    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.size() == 1 &&
           rig.w.throwables.devices[0].think_delay_ticks == -2);
 }

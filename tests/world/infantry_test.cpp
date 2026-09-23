@@ -197,13 +197,34 @@ void route(AiSystem &ai, AiEntity *e, const std::vector<NavEntry> &nodes, int lo
     e->slot.f[38] = 0; // node      [orig: slot+152]
 }
 
+// The organic rigs attach their brains to a rig-owned AiSystem, most without
+// registry rows, so the World's pool-0 walk cannot reach them: they step the
+// organic legs of the entity update directly -- the damage reactions, the
+// proximity tables, each body's +0x1C4 update, the timed AI events.
+// [orig: Entity_UpdateAllEntities @0x4C2100 -- @0x4C2226, @0x4C240A,
+//  the pool-0 walk @0x4C2426..0x4C2474]
+void step_organics(AiSystem &ai, World &w, const TickContext &ctx) {
+    ai.is_authority = ctx.is_authority;
+    ai.apply_round_hits(w);
+    if (ai.collision != nullptr) {
+        ai.collision->local_player = w.cached.local_player;
+        ai.collision->build_tick_tables(w);
+    }
+    for (int i = 0; i < ai.count(); ++i) {
+        AiEntity &e = *ai.at(i);
+        if (e.brain.f[AiBrain::kOwner] != 0 && e.inf.active)
+            ai.update_organic(e, w, ctx.logic_tick);
+    }
+    ai.events.process_timed(ai, w);
+}
+
 void run_ticks(AiSystem &ai, World &w, uint32_t from, uint32_t to_excl) {
     TickContext ctx;
     ctx.world = &w;
     ctx.is_authority = true;
     for (uint32_t t = from; t < to_excl; ++t) {
         ctx.logic_tick = t;
-        ai.tick(w, ctx);
+        step_organics(ai, w, ctx);
     }
 }
 
@@ -3066,7 +3087,7 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
         ctx.is_authority = false; // advance the body without an NPC selection pass
         for (int tick = 1; tick <= static_cast<int>(expected_weights.size()); ++tick) {
             ctx.logic_tick = static_cast<uint32_t>(tick);
-            ai->tick(*w, ctx);
+            step_organics(*ai, *w, ctx);
             CHECK(e->inf.clip_phase == tick);
             CHECK(e->inf.anim_prev_clip_phase == 7 + tick);
             CHECK(e->inf.anim_blend_weight == expected_weights[static_cast<size_t>(tick - 1)]);
@@ -3075,7 +3096,7 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
         // Once weight reaches 1, only the target playhead continues.
         const int blend_ticks = static_cast<int>(expected_weights.size());
         ctx.logic_tick = static_cast<uint32_t>(blend_ticks + 1);
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
         CHECK(e->inf.clip_phase == blend_ticks + 1);
         CHECK(e->inf.anim_prev_clip_phase == 7 + blend_ticks);
         CHECK(e->inf.anim_blend_weight == 1.0f);
@@ -3113,7 +3134,7 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
     ctx.is_authority = false;
     for (uint32_t tick = 1; tick <= 4; ++tick) {
         ctx.logic_tick = tick;
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
     }
     CHECK(e->inf.anim_blend_weight == 0.40000000596046448f);
     CHECK(e->inf.anim_prev == kPrimary);
@@ -3130,7 +3151,7 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
 
     const int32_t x_before = e->pos[0];
     ctx.logic_tick = 5;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
     CHECK(e->pos[0] - x_before == 120); // .9*A(100) + .1*C(300), not .9*B + .1*C
     CHECK(e->inf.anim_prev_clip_phase == 5);
     CHECK(e->inf.clip_phase == 1);
@@ -3176,7 +3197,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     ctx.is_authority = false;
     for (uint32_t tick = 1; tick <= 4; ++tick) {
         ctx.logic_tick = tick;
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
     }
 
     Entity *ent = w->registry.get(handle);
@@ -3185,7 +3206,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     e->health = 0;
     const int32_t kill_x = e->pos[0];
     ctx.logic_tick = 5;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
 
     CHECK(e->pos[0] - kill_x == 150); // the existing A/B blend advances from .4 to .5
     CHECK(e->inf.last_events == 0x2u);
@@ -3198,7 +3219,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
 
     const int32_t blend_x = e->pos[0];
     ctx.logic_tick = 6;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
     CHECK(e->pos[0] - blend_x == 120); // the replacement starts as .9*A + .1*death
     CHECK(e->inf.last_events == 0x4u);
     CHECK(e->inf.anim_prev_clip_phase == 6);
@@ -3462,7 +3483,7 @@ void test_infantry_parity_pins_2026_08_28() {
         ctx.is_authority = false;
         for (uint32_t t = 0; t < 600; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
         }
         CHECK(e->pos[2] == floor_z);
         CHECK(e->health == 30000);
@@ -4034,7 +4055,7 @@ static void test_suspended_callback_preserves_independent_brain() {
     e.brain.f[AiBrain::kPartAnimDir0] = 1;
     e.brain.f[AiBrain::kPartAnimRate0] = 127;
     TickContext ctx; ctx.logic_tick = 1; ctx.is_authority = true;
-    w.ai.tick(w, ctx);
+    w.update_all_entities(ctx);
     // The stored channel holds: retail's sweep integrator
     // (Entity_UpdateSuspensionBounce @0x456710) has no caller, so no tick path
     // advances the phase dword.
@@ -5238,7 +5259,7 @@ int main() {
         ctx.is_authority = true;
         for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
         CHECK(min_vel == kTerminal);
@@ -5286,7 +5307,7 @@ int main() {
         ctx.is_authority = true;
         for (uint32_t t = 0; t < 120; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
         CHECK(e->pos[2] == floor_z);
@@ -5402,7 +5423,7 @@ int main() {
         ctx.is_authority = false;
         for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
         }
 
         CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000

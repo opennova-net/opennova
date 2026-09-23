@@ -2033,7 +2033,7 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
     ctx.world = &f.w;
     ctx.is_authority = true;
     ctx.logic_tick = 0;
-    f.ai.tick(f.w, ctx); // includes the unconditional recoil draw before scoped drift
+    f.w.update_all_entities(ctx); // includes the unconditional recoil draw before scoped drift
     f.player.sync_local_mounted_input_heading();
     CHECK(f.body().heading == -408 && f.body().pitch == -396);
     CHECK(f.player.input.look_heading == -408 && f.player.input.look_pitch == -396);
@@ -2063,7 +2063,7 @@ void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
         ctx.world = &f.w;
         ctx.is_authority = true;
         ctx.logic_tick = 0;
-        f.ai.tick(f.w, ctx);
+        f.w.update_all_entities(ctx);
         f.player.sync_local_mounted_input_heading();
         uint32_t expected_rng = World::kMissionPrng16Seed;
         for (int draw = 0; draw < 3; ++draw)

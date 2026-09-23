@@ -77,7 +77,7 @@ struct Fixture {
         ctx.logic_tick = key - 36u * 8u;
         ctx.is_authority = authority;
         world.logic_tick = ctx.logic_tick;
-        world.ai.tick(world, ctx);
+        world.update_all_entities(ctx);
     }
     bool sees(int ssn = 9) const {
         return world.script.relations.single_single(TriggerRelations::kSees, 8, ssn);

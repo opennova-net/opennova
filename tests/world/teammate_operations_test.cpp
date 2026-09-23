@@ -46,7 +46,6 @@ struct Fixture {
         for (int p = 0; p < 4; ++p) world.registry.configure_pool(p, 64);
         world.teammate_spawner = &factory;
         world.add_system(&events);
-        world.add_system(&world.ai);
         world.load_systems();
         Entity seed; seed.kind = EntityKind::Organic; seed.item_id = 111; seed.net_id = 73;
         seed.position = {10, 20, 3};

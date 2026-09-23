@@ -711,19 +711,44 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags);
 
-// The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
-class AiSystem : public ISystem {
+// The AI subsystem: every brain and the organic bodies on the shared world.
+// World::update_all_entities drives it row by row, inside the one entity pass
+// (the pool-1 visits think the brains, the pool-0 walk runs the bodies).
+class AiSystem {
 public:
     AiSystem();
 
-    const char *name() const override { return "ai"; }
-    void tick(World &world, const TickContext &ctx) override;
-
     // Re-seed every brain to the captured spawn baseline + clear the transient queues.
-    // [Drives World::restore: load_systems() calls on_load on Play->Stop, so the AI
+    // [Drives World::restore: load_systems() calls it on Play->Stop, so the AI
     // rewinds alongside the registry/vars/env the World snapshot restores. No-op until
     // capture_spawn_baseline() has run.]
-    void on_load(World &world) override;
+    void on_load(World &world);
+
+    // The damage chain's inline reaction stamps, drained from this tick's
+    // processed hits: an NPC body gets the alert byte, its group alert and
+    // wasHit / damageTimer / lastAttacker; a state-machine brain gets a
+    // queued damage AIEvent. The entity pass runs it right after the
+    // projectile and explosion legs, so the pool-0 walk of the same tick sees
+    // the stamps. [orig: the damage callbacks inside Weapon_UpdateAllProjectiles
+    //  and Projectile_ProcessExplosionQueue (Entity_UpdateAllEntities @0x4C223A /
+    //  @0x4C223F): Entity_HandleDamageTrigger @0x4073c8..0x4073ea,
+    //  Entity_OnDamageReceived @0x4af859..0x4af878,
+    //  Projectile_ProcessDamageOnTarget @0x4e7fb0]
+    void apply_round_hits(World &world);
+    // A brain row's class event callback on its think visit: the vehicle-class
+    // machine for a cveh/cbot/ctrn row, the air-class machine for a CHel/cpln
+    // row. Any other class row's fn1 is not a brain machine, so a brain whose
+    // row names neither (or that has no traits row) does not think.
+    // [orig: Entity_UpdatePool1Slot @0x4B8E3C (`call [esi+1C8h]`);
+    //  g_EntityClassEventCallbackTable @0x813000 rows @0x8132a0 CHel /
+    //  @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn,
+    //  resolved by EntityDef_InitAllCallbacks @0x4a5aae]
+    void think_brain(AiEntity &e, World &world);
+    // One pool-0 row's +0x1C4 body update: the org1 motor (or the joiner's
+    // presentation leg for a wire-owned peer).
+    // [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 (`call eax`);
+    //  g_EntityClassPhysicsTable row "org1" -> Entity_UpdateInfantryAI @0x4b9910]
+    void update_organic(AiEntity &e, World &world, uint32_t logic_tick);
 
     // Capture the current AI state as the restore baseline. The embedder calls this once at
     // play start (after promote + the pre-mission pass), when it snapshots the World.

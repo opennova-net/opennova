@@ -149,24 +149,6 @@ void MinefieldSystem::think(World &world, Entity &field) {
     }
 }
 
-// [orig: Entity_UpdatePool1Slot @ 0x4B8DD0; Entity_UpdateAllEntities @ 0x4C2100]
-void MinefieldSystem::tick_pool(World &world, int pool) {
-    world.registry.for_each_in_pool(pool, [&](const Entity &row) {
-        const EntityHandle handle = row.handle;
-        Entity *e = world.registry.get(handle);
-        if (!e || e->hidden || !e->minefield.think) return;
-        if (pool == 1) {
-            if (--e->minefield.age <= 0) think(world, *e);
-            if (Entity *live = world.registry.get(handle)) --live->minefield.age;
-        } else {
-            const uint32_t stride = pool == 2 ? 8u : 64u;
-            if ((static_cast<uint32_t>(e->handle.slot()) & (stride - 1)) !=
-                (world.logic_tick & (stride - 1))) return;
-            if (e->minefield.age > 0) e->minefield.age -= static_cast<int32_t>(stride);
-            else think(world, *e);
-        }
-    });
-}
 // [orig: Entity_RenderBoneAttachments @ 0x441660]
 void MinefieldSystem::compile_draws(const World &world, std::vector<MinefieldDraw> &out) const {
     out.clear();

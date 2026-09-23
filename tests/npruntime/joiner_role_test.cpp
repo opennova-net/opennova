@@ -310,7 +310,6 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	Harness h;
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
-	world.add_system(&world.ai);
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
@@ -435,7 +434,6 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		});
 		authority->registry.configure_pool(0, 16);
 		authority->registry.configure_pool(1, 16);
-		authority->add_system(&authority->ai);
 		authority->load_systems();
 		w::Entity peer = *local;
 		peer.mounted = false;
@@ -1029,7 +1027,6 @@ bool run_local_replica_turret_channel() {
  Harness h;
  auto &world = h.kernel->world;
  world.registry.configure_pool(1,4);
- world.add_system(&world.ai);
  world.load_systems();
  h.role.poll_preload();
  constexpr uint16_t self_handle = 5;
@@ -1115,7 +1112,6 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 //  @0x42C3E9 precedes Player_BuildTag0CInputBody @0x42C46F].
 bool run_uplink_carries_same_frame_input() {
 	Harness h;
-	h.kernel->world.add_system(&h.kernel->world.ai);
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,

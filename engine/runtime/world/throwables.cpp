@@ -961,118 +961,147 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     return false;
 }
 
-void ThrowableSim::tick(World &world, CollisionWorld *collision,
-                        const terrain::TerrainHeightField *terrain) {
-    for (PlacedDevice &d : devices) {
-        if (!d.active) continue;
-        Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
-        if (e == nullptr) {
-            d.active = false;
-            continue;
-        }
-        // Owner death/leave removes the device silently [orig:
-        // Server_ProcessPlayerDeath @ 0x5178d8 / Server_RemoveEntityAndNotify
-        // @ 0x50a270 -> Entity_RemovePlacedDevicesByOwner @ 0x546e00].
-        {
-            const Entity *owner = entity_for_lifetime(world, d.owner, d.owner_spawn_id);
-            if (owner == nullptr || owner->health <= 0) {
-                remove_device(world, d);
-                continue;
+PlacedDevice *ThrowableSim::device_for(const Entity &entity) {
+    for (PlacedDevice &d : devices)
+        if (d.active && d.entity == entity.handle &&
+                d.entity_spawn_id == entity.registry_spawn_id)
+            return &d;
+    return nullptr;
+}
+
+void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
+                                CollisionWorld *collision,
+                                const terrain::TerrainHeightField *terrain) {
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(d.ammo_index);
+    if (ammo == nullptr) return;
+    const bool dead = e->health <= 0;
+    switch (d.think) {
+    case ThrowClass::kSatchel: {
+        // [orig: Entity_SatchelThink @ 0x443670 — Health <= 0 only.]
+        if (dead) detonate_device(world, d, "satchelboom");
+        break;
+    }
+    case ThrowClass::kClaymore: {
+        // [orig: Entity_ClaymoreThink @ 0x4438C0 — Health <= 0 or the
+        // person cone; fires the shrapnel fan + the kill zone.]
+        if (dead || enemy_in_cone(world, collision, terrain, d,
+                                  ammo->kz_minradius,
+                                  ammo->kz_pieslice_bam, false)) {
+            const int shrap = world.tables.ammo.index_of("claymoreshrapnel");
+            if (shrap >= 0) {
+                RoundSpawnParams p;
+                p.owner = d.owner;
+                p.shooter_handle = d.owner_handle;
+                p.origin = d.pos;
+                p.dir_yaw_bam = d.yaw_bam;
+                p.dir_pitch_bam = d.pitch_bam;
+                p.ammo_index = shrap;
+                p.shot_seq = d.hit_word;
+                world.round_sim.spawn(world, p);
             }
+            detonate_device(world, d, "claymorekillzone");
         }
-        // Ride the stuck-to parent [orig: the placed motor +452 =
-        // Entity_InterpolateFromParentDelta @ 0x4a8d60, installed by
-        // Entity_ConvertRoundToPlacedEntity @ 0x5455fd].
-        if (d.parent.valid()) {
-            Entity *parent = entity_for_lifetime(world, d.parent, d.parent_spawn_id);
-            if (parent != nullptr) {
-                // The child's own pre-move savedLivePose backup
-                // [orig: @ 0x4a8d7d..0x4a8db4].
-                stamp_saved_live_pose(*e);
-				CarrierMotionPose p;
-				p.pos[0] = to_fixed(d.pos.x);
-				p.pos[1] = to_fixed(d.pos.y);
-                p.pos[2] = to_fixed(d.pos.z);
-                p.yaw_bam = d.yaw_bam;
-                p.pitch_bam = d.pitch_bam;
-                p.roll_bam = d.roll_bam;
-				follow_carrier_motion(*parent, p);
-				d.pos = Vec3{ static_cast<float>(from_fixed(p.pos[0])),
-					static_cast<float>(from_fixed(p.pos[1])),
-					static_cast<float>(from_fixed(p.pos[2])) };
-				d.yaw_bam = p.yaw_bam;
-                d.pitch_bam = p.pitch_bam;
-                d.roll_bam = p.roll_bam;
-                e->position = d.pos;
-                e->yaw = static_cast<int16_t>(
-                        std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
-                e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
-                e->roll = item_angle_degrees_from_bam(d.roll_bam);
-                e->ground_target = d.parent;
-            } else {
-                d.parent = EntityHandle{};
-                d.parent_spawn_id = 0;
-                e->ground_target = EntityHandle{};
-            }
-        }
-        // ARM delay / age: retail gates the think on the PRE-decrement value
-        // (think while <= 0) and then decrements EVERY tick, wrapping like
-        // x86 -- the ever-falling negative value is the oldest-armed
-        // ordering key the device cap reads.
-        // [orig: Entity_UpdatePool1Slot think gate @0x4b8e1b (cmp/jg BEFORE
-        //  the decrement), unconditional dec @0x4b8ea0]
-        const bool arming = d.think_delay_ticks > 0;
-        d.think_delay_ticks = static_cast<int32_t>(
-                static_cast<uint32_t>(d.think_delay_ticks) - 1u);
-        if (arming) continue;
-        const AmmoTableEntry *ammo = world.tables.ammo.by_index(d.ammo_index);
-        if (ammo == nullptr) continue;
-        const bool dead = e->health <= 0;
-        switch (d.think) {
-        case ThrowClass::kSatchel: {
-            // [orig: Entity_SatchelThink @ 0x443670 — Health <= 0 only.]
-            if (dead) detonate_device(world, d, "satchelboom");
-            break;
-        }
-        case ThrowClass::kClaymore: {
-            // [orig: Entity_ClaymoreThink @ 0x4438C0 — Health <= 0 or the
-            // person cone; fires the shrapnel fan + the kill zone.]
-            if (dead || enemy_in_cone(world, collision, terrain, d,
-                                      ammo->kz_minradius,
-                                      ammo->kz_pieslice_bam, false)) {
-                const int shrap = world.tables.ammo.index_of("claymoreshrapnel");
-                if (shrap >= 0) {
-                    RoundSpawnParams p;
-                    p.owner = d.owner;
-                    p.shooter_handle = d.owner_handle;
-                    p.origin = d.pos;
-                    p.dir_yaw_bam = d.yaw_bam;
-                    p.dir_pitch_bam = d.pitch_bam;
-                    p.ammo_index = shrap;
-                    p.shot_seq = d.hit_word;
-                    world.round_sim.spawn(world, p);
-                }
-                detonate_device(world, d, "claymorekillzone");
-            }
-            break;
-        }
-        case ThrowClass::kAVMine: {
-            // [orig: Entity_AVMineThink @ 0x443BB0 — Health <= 0 or the moving
-            // vehicle cone (data-dead in retail JO: pieslice 0).]
-            if (dead || enemy_in_cone(world, collision, terrain, d,
-                                      ammo->kz_minradius,
-                                      ammo->kz_pieslice_bam, true))
-                detonate_device(world, d, "AV_Minekillzone");
-            break;
-        }
-        default:
-            // kNade never places; kLandmine (mission minefield items) stays
-            // unported — D-THROW-6.
-            if (dead) remove_device(world, d);
-            break;
+        break;
+    }
+    case ThrowClass::kAVMine: {
+        // [orig: Entity_AVMineThink @ 0x443BB0 — Health <= 0 or the moving
+        // vehicle cone (data-dead in retail JO: pieslice 0).]
+        if (dead || enemy_in_cone(world, collision, terrain, d,
+                                  ammo->kz_minradius,
+                                  ammo->kz_pieslice_bam, true))
+            detonate_device(world, d, "AV_Minekillzone");
+        break;
+    }
+    default:
+        // kNade never places; kLandmine (mission minefield items) stays
+        // unported — D-THROW-6.
+        if (dead) remove_device(world, d);
+        break;
+    }
+}
+
+void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
+    // Ride the stuck-to parent [orig: the placed motor +452 =
+    // Entity_InterpolateFromParentDelta @ 0x4a8d60, installed by
+    // Entity_ConvertRoundToPlacedEntity @ 0x5455fd].
+    if (d.parent.valid()) {
+        Entity *parent = entity_for_lifetime(world, d.parent, d.parent_spawn_id);
+        if (parent != nullptr) {
+            // The child's own pre-move savedLivePose backup
+            // [orig: @ 0x4a8d7d..0x4a8db4].
+            stamp_saved_live_pose(*e);
+            CarrierMotionPose p;
+            p.pos[0] = to_fixed(d.pos.x);
+            p.pos[1] = to_fixed(d.pos.y);
+            p.pos[2] = to_fixed(d.pos.z);
+            p.yaw_bam = d.yaw_bam;
+            p.pitch_bam = d.pitch_bam;
+            p.roll_bam = d.roll_bam;
+            follow_carrier_motion(*parent, p);
+            d.pos = Vec3{ static_cast<float>(from_fixed(p.pos[0])),
+                static_cast<float>(from_fixed(p.pos[1])),
+                static_cast<float>(from_fixed(p.pos[2])) };
+            d.yaw_bam = p.yaw_bam;
+            d.pitch_bam = p.pitch_bam;
+            d.roll_bam = p.roll_bam;
+            e->position = d.pos;
+            e->yaw = static_cast<int16_t>(
+                    std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
+            e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
+            e->roll = item_angle_degrees_from_bam(d.roll_bam);
+            e->ground_target = d.parent;
+        } else {
+            d.parent = EntityHandle{};
+            d.parent_spawn_id = 0;
+            e->ground_target = EntityHandle{};
         }
     }
-    // compact released slots
+}
+
+// One placed device's pool-1 visit, in Entity_UpdatePool1Slot order: the
+// think while the PRE-decrement age is <= 0 (after the row's own blink
+// refresh), then the +0x1C4 motor (the stuck-to parent follow), then the
+// unconditional decrement, wrapping like x86 -- the ever-falling negative
+// value is the oldest-armed ordering key the device cap reads.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 -- the gate @0x4B8E1B (cmp/jg
+//  before the decrement), Entity_BuildProximityList @0x4B8E25, the +0x1C8
+//  think @0x4B8E3C, the +0x1C4 motor @0x4B8E53, `add [esi+2ACh],-1`
+//  @0x4B8EA0]
+void ThrowableSim::update_device(World &world, PlacedDevice &d,
+                                 CollisionWorld *collision,
+                                 const terrain::TerrainHeightField *terrain) {
+    if (!d.active) return;
+    Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
+    if (e == nullptr) {
+        d.active = false;
+        return;
+    }
+    // Owner death/leave removes the device silently [orig:
+    // Server_ProcessPlayerDeath @ 0x5178d8 / Server_RemoveEntityAndNotify
+    // @ 0x50a270 -> Entity_RemovePlacedDevicesByOwner @ 0x546e00].
+    {
+        const Entity *owner = entity_for_lifetime(world, d.owner, d.owner_spawn_id);
+        if (owner == nullptr || owner->health <= 0) {
+            remove_device(world, d);
+            return;
+        }
+    }
+    if (d.think_delay_ticks <= 0) {
+        if (collision != nullptr) collision->refresh_blink(world, *e);
+        think_device(world, d, e, collision, terrain);
+        if (!d.active) return;
+        e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
+        if (e == nullptr) {
+            d.active = false;
+            return;
+        }
+    }
+    follow_parent(world, d, e);
+    d.think_delay_ticks = static_cast<int32_t>(
+            static_cast<uint32_t>(d.think_delay_ticks) - 1u);
+}
+
+void ThrowableSim::compact() {
     size_t w = 0;
     for (size_t i = 0; i < devices.size(); ++i)
         if (devices[i].active) devices[w++] = devices[i];

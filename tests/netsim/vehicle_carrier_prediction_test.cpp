@@ -145,7 +145,6 @@ bool run_static_carrier_predicts_and_deck_rider_freezes() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
 	world.registry.configure_pool(2, 16);
-	world.add_system(&world.ai);
 	world.load_systems();
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,

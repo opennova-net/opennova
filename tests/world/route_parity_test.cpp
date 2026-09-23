@@ -197,17 +197,15 @@ void test_player_pilot_holds_pretty() {
     r.seat_pilot();
     r.w.vehicles.traits.set(r.helo().item_id, r.traits);
     AiBrain &b = r.brain();
-    devtools::ProfileLap lap(r.w.profile);
-
     b.f[AiBrain::kCurState] = 8; // left in combat by an earlier AI pilot
-    r.w.vehicles.tick_motors(true, lap);
+    r.w.vehicles.update_motor(r.helo(), true);
     CHECK(b.f[AiBrain::kCurState] == 14);
 
     // Eye under the water plane: the AI leg runs and hands PRETTY back.
     r.w.env.water_z = to_fixed(60.0f);
     r.pilot().eye_offset_z = to_fixed(1.5f);
     b.f[AiBrain::kCurState] = 14;
-    r.w.vehicles.tick_motors(true, lap);
+    r.w.vehicles.update_motor(r.helo(), true);
     CHECK(b.f[AiBrain::kCurState] == 7);
 }
 

@@ -761,10 +761,11 @@ void JoinerRole::pump() {
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	mirror_mission_entities();
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
-	// The local mounted body was seat-posed earlier in AiSystem::tick, before
-	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
-	// final same-frame transform so the camera/view never trails its seat by one
-	// mover tick. Remote riders were recomposed in ClientState just above.
+	// The local mounted body was seat-posed earlier in the entity update's
+	// pool-0 walk, before the joiner-only vehicle prediction pass. Re-pose L
+	// against the vehicle's final same-frame transform so the camera/view never
+	// trails its seat by one mover tick. Remote riders were recomposed in
+	// ClientState just above.
 	if (!preround_active && world.cached.local_player.valid()) {
 		if (world::AiEntity *local_ai =
 				world.ai.for_handle(world.cached.local_player)) {

@@ -29,8 +29,8 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
 // so an explosive NEAR-MISS that deals nothing still shakes. `ammo` may be null
 // (retail's `ammoSource != 0` head gate).
 // Its TAIL -- wasHit / damageTimer / lastAttacker on any victim
-// [orig: @0x4af85b..0x4af878] -- is ported on the RoundHit drain in
-// AiSystem::tick, so it is deliberately NOT repeated here.
+// [orig: @0x4af85b..0x4af878] -- is ported on the RoundHit drain,
+// AiSystem::apply_round_hits, so it is deliberately NOT repeated here.
 void entity_on_damage_received(World &world, const Entity &victim,
         const AmmoTableEntry *ammo);
 // Caller owns the body selection cadence: every 4 ticks for player bodies,

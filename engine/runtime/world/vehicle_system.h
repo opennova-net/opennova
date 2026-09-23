@@ -1,5 +1,5 @@
 // The vehicle system: the per-item physics traits the item-traits sweep feeds,
-// the motor pass the AI tick runs, and the seat/mount, motor, contact-solve,
+// the mover leg each pool-1 visit runs, and the seat/mount, motor, contact-solve,
 // suspension, sound and part-anim verbs that reached the world through a
 // `World &` first parameter before ADR 0043 slice E6. Bound to its world at
 // construction (EntityCommands' precedent); every method body still names
@@ -30,16 +30,16 @@ public:
     VehicleSystem &operator=(const VehicleSystem &) = delete;
 
     // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
-    // it — Simulation::resolve_item_traits). The AI tick's vehicle pass runs the
+    // it — Simulation::resolve_item_traits). The pool-1 visit's mover leg runs the
     // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
     // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
     // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
     VehicleTraitsTable traits;
 
-    // The per-tick motor pass, in the AI tick's slot between the entity loop and
-    // the AI event queue: the authority motors, then a joiner's prediction and
-    // sound legs. Marks the SIM_AI_*VEHICLE* profile rows on the caller's lap.
-    void tick_motors(bool is_authority, devtools::ProfileLap &lap);
+    // One pool-1 row's +0x1C4 mover leg, run from its own pool-1 visit
+    // (World::update_all_entities): the authority family mover, or a joiner's
+    // prediction and sound legs. A row without traits has no vehicle mover.
+    void update_motor(Entity &row, bool is_authority);
 	void initialize_mission_vehicles();
 	void build_spawn_markers();
 	void tick_spawn_markers();
@@ -368,8 +368,6 @@ private:
 	std::vector<SpawnMarker> spawn_markers_;
 	std::vector<EntityHandle> spawn_groups_[5];
 	bool spawn_markers_enabled_ = false;
-	std::vector<EntityHandle>
-			pass_handles_; // per-tick scratch for the motor pass (reused, no realloc)
 };
 
 } // namespace opennova::world

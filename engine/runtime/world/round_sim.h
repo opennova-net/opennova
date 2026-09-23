@@ -407,7 +407,7 @@ struct RoundImpact {
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
 
-// A processed (non-zero) damage hit — drained by AiSystem::tick to stamp the victim's
+// A processed (non-zero) damage hit — drained by AiSystem::apply_round_hits to stamp the victim's
 // AI reaction state (wasHit / lastAttacker / the SM damage event). [orig: the damage
 // chain writes the victim entity + queues the AI event inline
 // (Projectile_ProcessDamageOnTarget @ 0x4E7FB0); our sim/AI split records instead.]
@@ -510,8 +510,9 @@ public:
     std::vector<RoundImpact> impacts;
     uint64_t next_impact_order = 1;
 
-    // Processed hits (damage > 0), in tick order — drained by AiSystem::tick before the
-    // per-entity updates (wasHit / lastAttacker / SM damage events).
+    // Processed hits (damage > 0), in tick order — drained by AiSystem::apply_round_hits
+    // right after the explosion queue, before the pool-0 walk (wasHit / lastAttacker /
+    // SM damage events).
     std::vector<RoundHit> hits;
 
     // Fires spawned since the last presentation drain (every spawn records one, the
