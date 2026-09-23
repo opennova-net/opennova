@@ -276,10 +276,10 @@ void LocalPlayerPresenter::set_input_override(const Ref<PlayerMoveIntent> &p_int
 	input_router_.set_input_override(p_intent);
 }
 
-void LocalPlayerPresenter::set_third_person_selected(bool p_selected) {
+void LocalPlayerPresenter::apply_view_action(int p_action) {
 	const Ref<Simulation> pref_sim = sim();
 	if (pref_sim.is_valid()) {
-		pref_sim->set_local_player_third_person_selected(p_selected);
+		pref_sim->apply_local_player_view_action(p_action);
 	}
 	refresh_camera_mode();
 }
@@ -1056,8 +1056,8 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("refresh_viewmodel"), &LocalPlayerPresenter::refresh_viewmodel);
 	ClassDB::bind_method(D_METHOD("viewmodel_generation"), &LocalPlayerPresenter::viewmodel_generation);
 	ClassDB::bind_method(D_METHOD("set_input_override", "intent"), &LocalPlayerPresenter::set_input_override);
-	ClassDB::bind_method(D_METHOD("set_third_person_selected", "selected"),
-			&LocalPlayerPresenter::set_third_person_selected);
+	ClassDB::bind_method(D_METHOD("apply_view_action", "action"),
+			&LocalPlayerPresenter::apply_view_action);
 	ClassDB::bind_method(D_METHOD("set_debug_third_person", "enabled"),
 			&LocalPlayerPresenter::set_debug_third_person);
 	ClassDB::bind_method(D_METHOD("is_debug_third_person"), &LocalPlayerPresenter::is_debug_third_person);

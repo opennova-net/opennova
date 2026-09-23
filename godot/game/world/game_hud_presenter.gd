@@ -912,10 +912,14 @@ func _apply_toggle_events(events: int) -> void:
 		_push_showhud_flags()
 	if events & HudToggles.EVENT_DOTSIZE_CYCLED:
 		cycle_sight_scale()
+	# The view rows in their catalog order, each as its own action (the
+	# engine's player_view_apply_view_action: preference and input bit).
 	if events & HudToggles.EVENT_FIRST_PERSON_SELECTED:
-		_select_third_person(false)
+		_apply_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
+	if events & HudToggles.EVENT_GUN_VIEW_SELECTED:
+		_apply_view_action(Simulation.VIEW_ACTION_WITH_GUN)
 	if events & HudToggles.EVENT_THIRD_PERSON_SELECTED:
-		_select_third_person(true)
+		_apply_view_action(Simulation.VIEW_ACTION_CHASE)
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
@@ -1124,9 +1128,9 @@ func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
 			active, false))
 
 
-func _select_third_person(selected: bool) -> void:
+func _apply_view_action(action: int) -> void:
 	if _player_presenter != null:
-		_player_presenter.set_third_person_selected(selected)
+		_player_presenter.apply_view_action(action)
 
 
 func _apply_fp_gun_visible() -> void:

@@ -86,8 +86,8 @@ inline constexpr uint32_t kShowHudCycled = 0x4;     // restamp the overlay flags
 inline constexpr uint32_t kDotsizeCycled = 0x8;     // the overlay's sight-scale cycle
 inline constexpr uint32_t kObjectivesToggled = 0x10;
 inline constexpr uint32_t kGunBitChanged = 0x20;    // a view action rewrote showhud bit 0
-inline constexpr uint32_t kFirstPersonSelected = 0x40;
-inline constexpr uint32_t kThirdPersonSelected = 0x80;
+inline constexpr uint32_t kFirstPersonSelected = 0x40; // view1st (action 400)
+inline constexpr uint32_t kThirdPersonSelected = 0x80; // viewchase (action 402)
 inline constexpr uint32_t kScoreboardToggled = 0x100;
 inline constexpr uint32_t kMessageLogToggled = 0x200;
 inline constexpr uint32_t kShowScoreToggled = 0x400;
@@ -95,6 +95,8 @@ inline constexpr uint32_t kShowScoreToggled = 0x400;
 // overlay mode beside the windows this state already cleared
 // [orig: g_mapOverlayMode = 0 @0x499395].
 inline constexpr uint32_t kOverlayWindowsCleared = 0x800;
+// viewwithgun (action 401): first person too, but its own input-action bit.
+inline constexpr uint32_t kGunViewSelected = 0x1000;
 } // namespace hud_toggle_event
 
 // One frame's poll: advances every latch, applies the cycles and toggles to

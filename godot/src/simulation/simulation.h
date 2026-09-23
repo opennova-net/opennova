@@ -359,6 +359,13 @@ public:
 		MOUNT_COMMAND_ANY_SEAT = opennova::world::kCommandAttachAnySeat,
 	};
 
+	// The view-action ids the view rows fire (world/player_view.h).
+	enum ViewAction {
+		VIEW_ACTION_FIRST_PERSON = opennova::world::kViewActionFirstPerson,
+		VIEW_ACTION_WITH_GUN = opennova::world::kViewActionWithGun,
+		VIEW_ACTION_CHASE = opennova::world::kViewActionChase,
+	};
+
 	// The equipped-weapon FSM action ids, re-exported with the engine's values
 	// (world/weapon_fsm.h weapon_action carries the witness; assignment from
 	// the engine enum makes drift impossible).
@@ -1516,11 +1523,12 @@ public:
 	// Retail actions 56/57 (default +/-), available even while NVG is off.
 	// Returns the clamped gain in [0,4].
 	int request_local_player_nvg_gain(int p_delta);
-	// The view actions' chase preference (view1st/viewwithgun -> false,
-	// viewchase -> true) (engine: runtime/world/local_player_view.cpp); the
+	// A view action fired (VIEW_ACTION_*: view1st, viewwithgun, viewchase): the
+	// chase preference and, on the authority, the action's BMS input-action
+	// bit (engine: world/player_view.h player_view_apply_view_action); the
 	// camera mode itself is RESOLVED per tick by the arbiter from the
-	// preference and the seat (world/player_view.h player_view_resolve_mode).
-	void set_local_player_third_person_selected(bool p_selected);
+	// preference and the seat (player_view_resolve_mode).
+	void apply_local_player_view_action(int p_action);
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);

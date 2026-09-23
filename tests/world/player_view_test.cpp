@@ -1533,8 +1533,35 @@ void test_camera_shake_chase() {
     }
 }
 
+// The view-action rows: each selects its chase preference and ORs its own
+// BMS input-action bit (view1st 0x4000000, viewwithgun 0x10000000 -- the
+// PlayerCockpitView trigger bit -- viewchase 0x8000000); a null word (off the
+// authority) keeps the preference write; an action without a binding row
+// changes nothing. [orig: Input_HandleActionBinding case 400 @0x49c073
+// (@0x49c07a), case 401 @0x49c0d9 (@0x49c0e0), case 402 @0x49c0f6]
+void test_view_actions_write_their_input_bits() {
+    PlayerViewState v;
+    v.mount.control_seat = true;
+    uint32_t bits = 0;
+    player_view_apply_view_action(v, &bits, kViewActionWithGun);
+    CHECK(bits == 0x10000000u);
+    CHECK(!v.third_person_selected && !v.third_person);
+    player_view_apply_view_action(v, &bits, kViewActionChase);
+    CHECK(bits == (0x10000000u | 0x8000000u));
+    CHECK(v.third_person_selected && v.third_person);
+    player_view_apply_view_action(v, &bits, kViewActionFirstPerson);
+    CHECK(bits == (0x10000000u | 0x8000000u | 0x4000000u));
+    CHECK(!v.third_person_selected);
+    player_view_apply_view_action(v, nullptr, kViewActionChase);
+    CHECK(v.third_person_selected);
+    player_view_apply_view_action(v, &bits, 412);
+    CHECK(bits == (0x10000000u | 0x8000000u | 0x4000000u));
+    CHECK(v.third_person_selected);
+}
+
 int main() {
     test_binocular_sway_axes_and_quantization();
+    test_view_actions_write_their_input_bits();
     test_authored_pose_interp_matches_original_six_lane_traces();
     test_authored_pose_interp_keeps_original_snap_and_completion_rules();
     test_authored_pose_def_promotes_parser_precision_and_wrapping_bam();

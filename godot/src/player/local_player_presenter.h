@@ -113,14 +113,16 @@ public:
 	// Scripted movement (probes, automation, tests): null = poll the bindings.
 	void set_input_override(const Ref<PlayerMoveIntent> &p_intent);
 
-	// The view actions' chase preference -- view1st/viewwithgun (F2/F3)
-	// select first person, viewchase (F4) the chase -- effective only in a
-	// control seat: the sim's arbiter resolves the camera mode every tick from
+	// A view action (Simulation::VIEW_ACTION_*: view1st F2, viewwithgun F3,
+	// viewchase F4): view1st/viewwithgun select first person, viewchase the
+	// chase, and each writes its own BMS input-action bit (engine:
+	// world/player_view.h player_view_apply_view_action). The preference is
+	// effective only in a control seat: the sim's arbiter resolves the camera mode every tick from
 	// the preference and the seat, so on foot the preference changes nothing
 	// visible [orig: g_camera_third_person_selected @0xA860DF; the arbiter
 	// Render_ProcessMainSceneFrame @0x5ca1d2]. GameHudPresenter polls the rows
 	// (it owns the FP-gun bit two of them also write) and calls this.
-	void set_third_person_selected(bool p_selected);
+	void apply_view_action(int p_action);
 	// The debug menu's on-foot third person (the F3 Player page): stock JO
 	// never resolves the chase outside a control seat (net-re §5.39 -- the
 	// per-frame arbiter), so this is the onhook debug patch's affordance,

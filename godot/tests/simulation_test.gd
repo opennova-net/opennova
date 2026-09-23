@@ -5237,19 +5237,25 @@ func test_vehicle_loadout_zone_gates_off_a_bay() -> void:
 			"a free-standing player reads ground team 0 = open")
 
 
-# The view-selection producers of the BMS input-action word (the cat-7 player
-# triggers' LIVE word; Input_HandleActionBinding's viewchase / view1st bits):
-# selecting third person sets 0x8000000, first person 0x4000000. The bits
-# accumulate (only the BMS clear action and the trigger commit rewrite the word).
-func test_third_person_selection_sets_the_input_action_bits() -> void:
+# The view actions' producers of the BMS input-action word (the cat-7 player
+# triggers' LIVE word): viewchase (402) sets 0x8000000, view1st (400)
+# 0x4000000, viewwithgun (401) 0x10000000, the PlayerCockpitView bit. The
+# bits accumulate (only the BMS clear action and the trigger commit rewrite
+# the word); an action without a binding row writes nothing.
+func test_view_actions_set_the_input_action_bits() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_eq(sim.debug_input_action_bits(), 0, "a fresh world carries no input bits")
-	sim.set_local_player_third_person_selected(true)
-	assert_eq(sim.debug_input_action_bits() & 0x8000000, 0x8000000, "viewchase sets 0x8000000")
-	sim.set_local_player_third_person_selected(false)
-	assert_eq(sim.debug_input_action_bits() & 0x4000000, 0x4000000, "view1st sets 0x4000000")
-	assert_eq(sim.debug_input_action_bits() & 0x8000000, 0x8000000,
-			"the earlier bit stays set: producers only OR into the word")
+	sim.apply_local_player_view_action(Simulation.VIEW_ACTION_CHASE)
+	assert_eq(sim.debug_input_action_bits(), 0x8000000, "viewchase sets 0x8000000")
+	sim.apply_local_player_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
+	assert_eq(sim.debug_input_action_bits(), 0x8000000 | 0x4000000,
+			"view1st sets 0x4000000; the earlier bit stays set")
+	sim.apply_local_player_view_action(Simulation.VIEW_ACTION_WITH_GUN)
+	assert_eq(sim.debug_input_action_bits(), 0x8000000 | 0x4000000 | 0x10000000,
+			"viewwithgun sets 0x10000000")
+	sim.apply_local_player_view_action(412)
+	assert_eq(sim.debug_input_action_bits(), 0x8000000 | 0x4000000 | 0x10000000,
+			"an unbound action writes nothing")
 

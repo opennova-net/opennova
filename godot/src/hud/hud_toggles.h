@@ -31,6 +31,7 @@ public:
 		EVENT_MESSAGE_LOG_TOGGLED = opennova::hud::hud_toggle_event::kMessageLogToggled,
 		EVENT_SHOW_SCORE_TOGGLED = opennova::hud::hud_toggle_event::kShowScoreToggled,
 		EVENT_OVERLAY_WINDOWS_CLEARED = opennova::hud::hud_toggle_event::kOverlayWindowsCleared,
+		EVENT_GUN_VIEW_SELECTED = opennova::hud::hud_toggle_event::kGunViewSelected,
 	};
 
 	// One frame's poll over the sampled key states; returns the Event bits.
