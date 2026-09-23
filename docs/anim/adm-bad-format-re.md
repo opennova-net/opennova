@@ -32,7 +32,7 @@ in place.
 
 Line-oriented text; the parser normalizes NUL bytes to newlines, skips `//`
 comments, and considers only rows containing `anim_`. A row's key is the text
-before the first `"`; then EVERY quoted token on the row is a clip variant
+before the first `"`; then every quoted token before the comment is a clip variant
 registered on that one anim slot [orig: `AnimMap_ParseConfigLine @ 0x40cb60`
 registers every token]. The engine serves the variants as a circular ring —
 `AnimMap_PlayAnimBySlot @ 0x40bda0` and `Anim_GetDurationTicks @ 0x53ee10`
@@ -40,6 +40,13 @@ both read the head and advance it — so repeated plays of one slot rotate
 through its clips. The widest shipped row is 6 variants (`anim_cover_idle`
 across the JOX/REVX corpora); the parsed model caps at 8
 (`ADM_MAX_VARIANTS`).
+
+**Inline comments (corrected 2026-09-23).** `AnimMap_ParseConfigLine`
+stops when a token starts with `/` (`@0x40CBD2`). JOTAC's US01 walk rows
+include `"Dt1RunF.bad" // "D4WLK_F.bad"`: the latter is not a variant.
+Loading it selected a slower clip with no footstep bits. The shared parser
+now terminates at comments outside quoted names; `adm_variants` pins the
+grammar and `training_gameplay` checks actual movement and emitted footsteps.
 
 **Ring order and ownership (witnessed 2026-09-23).** A row serves from its
 LAST token back: `AnimMap_RegisterBoneNode @0x40C2D0` inserts each token ahead

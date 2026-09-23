@@ -2264,12 +2264,75 @@ CollisionModel building_pane_face_model(uint8_t material) {
     return m;
 }
 
+// Entity glass consumes energy and the surviving bullet reaches the next
+// obstacle on the next tick. The same material table covers cloth/foliage/
+// flesh/water faces; metal absorbs. [orig: @0x4E9643, @0x4E8233..0x4E8266]
+void test_entity_material_penetration() {
+    for (const uint8_t material : {uint8_t(15), uint8_t(16), uint8_t(17),
+                                  uint8_t(19), uint8_t(7), uint8_t(14)}) {
+        for (const int grains : {68, 1}) {
+            HeapWorldFixture fixture;
+            World &world = fixture.world;
+            world.registry.configure_pool(2, 4);
+            Entity pane;
+            pane.kind = EntityKind::Item;
+            pane.has_item_def = true;
+            pane.item_type = 1; // a vehicle window is not a building section
+            pane.health = 1000;
+            pane.position = {4.0f, 0.0f, 0.0f};
+            const EntityHandle first = world.registry.spawn(2, pane);
+            pane.position.x = 8.0f;
+            const EntityHandle second = world.registry.spawn(2, pane);
+            CollisionWorld collision;
+            const auto place = [&](EntityHandle entity, uint8_t surface, int x) {
+                collision.assign_entity(entity, collision.add_model(knife_person_face_model(surface)));
+                const int32_t pos[3] = {x * 65536, 0, 0};
+                CHECK(collision.publish_entity_section_matrices(entity,
+                        {collision_matrix_from_heading(0, pos)}));
+            };
+            place(first, material, 4);
+            place(second, 14, 8);
+            collision.build_tick_tables(world);
+            world.collision = &collision;
+            AmmoTableEntry ammo;
+            ammo.name = "PENETRATION";
+            ammo.valid = true;
+            ammo.flags = kAmmoFlagNoGravity;
+            ammo.velocity = 620;
+            ammo.max_age_ticks = 20;
+            ammo.weight_in_grains = grains;
+            ammo.max_damage = 25;
+            world.tables.ammo.entries.push_back(ammo);
+            RoundSpawnParams params;
+            params.origin = {0.0f, 0.0f, 1.0f};
+            params.ammo_index = 0;
+            const int slot = world.round_sim.spawn(world, params);
+            CHECK(slot >= 0);
+            if (slot < 0) continue;
+            world.round_sim.tick(world, nullptr, &collision);
+            const bool survives = material != 14 && grains == 68;
+            const LiveRound &round = world.round_sim.rounds[slot];
+            CHECK(round.active == survives);
+            CHECK(world.round_sim.impacts.size() == 1);
+            CHECK(world.registry.get(first)->section_mask == 0);
+            if (survives && round.active) {
+                CHECK(round.pos.x > 4.0f && round.pos.x < 4.1f);
+                CHECK(round.vel.x > 0.0f && round.vel.x < 10.0f);
+                world.round_sim.tick(world, nullptr, &collision);
+                CHECK(!round.active);
+                CHECK(world.round_sim.debug_trail_count == 2);
+                CHECK(world.round_sim.debug_trail[1].entity == second.packed);
+                CHECK(world.registry.get(second)->health < 1000);
+            }
+        }
+    }
+}
+
 // Gunfire through a BUILDING's glass breaks the struck section: face material
 // 15 on a live item-type-5 victim sets 1 << ray[31] in the victim's section
 // mask and plays GLASS_SMASH at the hit point. Any other face material, a
 // non-building item type, or an already-husked victim leaves the mask clear.
-// The pane still stops the round either way: only the lawr/fgrenade
-// pass-through report would let it continue, and that report is unported.
+// Round survival is independently covered by the material-energy tests above.
 // [orig: Projectile_HandleEntityImpact @ 0x4E9390 — `cmp ecx, 0Fh` @0x4e964f,
 //  `test byte ptr [esi+24h], 4` @0x4e9654, `cmp dword ptr [ecx+5Ch], 5`
 //  @0x4e965d, `or [esi+134h], edx` @0x4e9684; the sound through
@@ -3282,6 +3345,7 @@ int main() {
     test_knife_instant_kill_zone_raycast();
     test_bullet_building_material_is_plain_plus_four();
     test_material_15_breaks_the_building_glass_section();
+    test_entity_material_penetration();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
     test_terrain_stop_records_the_round();

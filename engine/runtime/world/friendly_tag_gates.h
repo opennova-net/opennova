@@ -31,11 +31,13 @@ inline bool friendly_tag_entry_bails(bool is_local, uint32_t flags,
 // The pass gates: neutral or the local team, or anyone while the death
 // screen is up [orig: pool-0 @0x5a44c7..0x5a44f8; players @0x5a4552..
 // 0x5a456b]; then `g_GameType || death screen` [orig: @0x5a44e8 / @0x5a456d].
-// The enemy magenta leg is server-granted spectator state
-// (g_enemyTagsVisible, the @0x5a3c7d bail), unported.
+// The drawer then rejects EVERY unequal team, including neutral team 0,
+// outside the death screen unless the spectator enemy-tag grant is active
+// [orig: HUD_DrawEntityLabel @0x5a3c7d..0x5a3c8f]. That grant is currently
+// unported/false; both walks must apply its ordinary-play rejection here.
 inline bool friendly_tag_pass_gates(uint8_t team, uint8_t local_team,
                                     bool death_screen, uint32_t game_type) {
-    if (team != 0 && team != local_team && !death_screen) return false;
+    if (team != local_team && !death_screen) return false;
     if (game_type == 0 && !death_screen) return false;
     return true;
 }

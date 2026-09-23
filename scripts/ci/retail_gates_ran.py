@@ -36,6 +36,7 @@ MUST_RUN = {
         "rtxt_jo_install_sweep", "env_jo_install", "bink_retail", "sbf_jo_install_sweep",
         "mission_ai_path_conformance", "truck_dismount", "ai_threat", "ladder_00tra",
         "truck_rest_00tra", "ai_muzzle_pose", "vehicle_ride_00tra", "defense_00trg",
+        "training_gameplay",
         "lose_flow_04tr", "lose_flow_00tra", "particle_gore_set_catalog", "minefield_retail", "watercraft_02tr",
         # Served by the install (00TRg through revx02) or by the extracted tree.
         "npruntime_authored_payload_00trg",

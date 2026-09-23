@@ -2984,14 +2984,20 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   (`@0x82f9a4`) that `DialogSystem_Init @ 0x527687` fills, so the leg is the
   window-smash sound plus the pane's disappearance. Nothing recomputes
   collision bounds: the item CFAC face walk's only per-section gate is
-  `(boneMatrix+60) & 3 @0x4e4f12`, so a shot-out pane still STOPS ordinary
-  rounds; the mask removes it from the draw and from the person bone-sphere
-  walks. UNPORTED residual: `test dword ptr [ebx+114h], 18000000h @0x4e968a`
-  → `*outFlag = 1 @0x4e969a` — a `lawr|fgrenade` round (the round's ammo-flag
-  copy at +0x114; `DEF_AMMO_FLAG_LAWR` 0x08000000 | `DEF_AMMO_FLAG_FGRENADE`
-  0x10000000, flag table `@0x813500`) reports "continue" and flies on through
-  the hole it just made. RoundSim has no round-continues output, so a rocket
-  stops at the glass.
+  `(boneMatrix+60) & 3 @0x4e4f12`, so a shot-out pane remains ray-visible;
+  the mask removes it from the draw and from the person bone-sphere walks.
+  **Continuation correction, ported 2026-09-23:** ordinary bullets also pass
+  glass when their energy permits. The table at `@0x82D034` charges Q16
+  energy costs `{19:10, 16:4, 15:10, 17:8, 7:4}`. The misleadingly named
+  `Entity_ClampKineticEnergy @0x4E9070` subtracts that cost from `v² * mass`
+  and scales velocity, or releases the round if exhausted. Mass is
+  `(grains << 16) / 250` (`@0x4EC6B7`). `Projectile_ProcessDamageOnTarget`
+  returns false for those materials (`@0x4E8233..0x4E8266`), so the entity
+  handler preserves lifetime and clears `outFlag` (`@0x4E98BA`). The earlier
+  `lawr|fgrenade` flag store at `@0x4E969A` is not a bullet-survival gate.
+  Flight resumes next tick from 0x800 Q16 beyond the face
+  (`@0x4EA73F..0x4EA798`), after normal gravity/drag. This also covers vehicle
+  windows, which do not take the building-section break branch.
 - **The runtime arrays** `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0 —
   ex ThreediGp_BuildCollisionModel, renamed (the chunked form is 3DI3)]`: one arena;
   8-B Q8 int16 vertex records, 8-B Q14 normal records keeping the dominate-axis
@@ -7408,7 +7414,7 @@ the FFI structs.
 |---|---|---|---|
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
-| D-ITEM-3 | Blast half FIXED 2026-09-18: flags/section-center box sweep and one-time glass sound supplement gunfire marking; lawr/fgrenade pass-through remains OPEN @ 0x4E968A..0x4E969A | @ 0x4E6C5E..0x4E6E6B; Entity_PlaySectionBreakSound @ 0x439C00 | destruction covers root translation, box corners, flag filtering and repeated blasts; projectile_combat retains glass behavior. The section table D-COL-2 named is the door table, closed (§33.14). |
+| D-ITEM-3 | FIXED 2026-09-23: blast/shot section marking plus material-energy continuation; the prior lawr/fgrenade-only interpretation was incorrect (§15.8) | @0x4E6C5E..0x4E6E6B; @0x4E9070; @0x4E9390 | destruction covers blast flags and repeated sounds; projectile_combat covers glass survival, energy exhaustion and the next obstruction. |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |

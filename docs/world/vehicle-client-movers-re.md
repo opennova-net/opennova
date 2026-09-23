@@ -5864,3 +5864,26 @@ accessor for an entity's BAM attitude (the seeded yaw, pitch and roll, else the
 spawn form). A joiner row's first yaw seed also goes through the degree mirror
 of the wire heading; seeding the yaw from the decoded BAM heading at
 prediction arming would hold the wire value itself (D-NET-196).
+
+## 42. Armed controller weapons (2026-09-23)
+
+`Entity_AttachToVehicleSlot @0x49480F..0x494883` borrows the carrier's
+persistent weapon slot for an EWeap controller, saves the personal slot, and
+calls `Player_MountWeaponSlot` immediately for the local player (`@0x494838`).
+Detach restores it directly (`@0x43562A..0x43565F`). The control seat therefore
+needs the same persistent slot ownership as UseGun, with immediate selection
+and restoration rather than UseGun's authored switch actions.
+
+`Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF` rejects driver slot 5,
+rejects an unarmed controller slot 2, and uses an armed controller's carrier
+weapon. `Player_CanFireWeapon @0x5CF780` is an optical-view query and cannot
+serve as that general trigger gate. The existing controller muzzle branch
+(`Entity_CalcWeaponFirePosition @0x4DC803..0x4DC846`) then receives the correct
+fired definition. OpenNova now carries that binding through attach, local
+weapon installation, input, persistent ammo, release and detach.
+
+Regressions: native `training_gameplay` mounts the actual 03TR SSN 41 and
+checks carrier-ammo shots, release and personal inventory restoration on the
+base mount and revx02 when installed. `local_player_view` pins armed/unarmed
+controller, driver and gunner trigger admission; GUT `mounted_view_test`
+checks the same Little Bird through the real player presenter.

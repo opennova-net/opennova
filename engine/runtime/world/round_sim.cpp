@@ -2,6 +2,7 @@
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include <runtime/world/round_sim.h>
 #include <base/io/tick_rate.h>
+#include <base/io/fixed.h>
 
 #include <runtime/world/fire_sound.h>
 
@@ -597,7 +598,42 @@ bool impact_is_critical(const Entity &target, int32_t hit_zone,
         : hit_zone_is_critical(hit_zone);
 }
 
-// Armor removes kinetic energy, independently of atmospheric drag.
+// The entity-face material table has its own energy law, in per-tick Q16
+// units. The decompiler's "ClampKineticEnergy" name is misleading: the
+// material cost is SUBTRACTED, and a round unable to pay it is released.
+// [orig: table @0x82D034; Entity_ClampKineticEnergy @0x4E9070..0x4E9200]
+int32_t material_energy_cost(uint8_t material) {
+    switch (material) {
+        case 19: case 15: return 10 * io::kFp16OneInt;
+        case 16: case 7: return 4 * io::kFp16OneInt;
+        case 17: return 8 * io::kFp16OneInt;
+        default: return 0;
+    }
+}
+
+bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
+    if (cost == 0) return true;
+    const int32_t squared = signed_from_u32(
+            uint32_t(retail_q16_mul_rhu(velocity.x, velocity.x)) +
+            uint32_t(retail_q16_mul_rhu(velocity.y, velocity.y)) +
+            uint32_t(retail_q16_mul_rhu(velocity.z, velocity.z)));
+    const int32_t energy = retail_q16_mul_rhu(squared, mass);
+    if (energy <= cost || mass <= 0 || squared <= 0) return false;
+    const int32_t speed = static_cast<int32_t>(std::sqrt(double(squared))) << 8;
+    const int32_t remaining_squared = static_cast<int32_t>(
+            (int64_t(energy - cost) * io::kFp16OneInt) / mass);
+    const int32_t remaining_speed =
+            static_cast<int32_t>(std::sqrt(double(remaining_squared))) << 8;
+    if (speed == 0) return false;
+    const int32_t ratio = static_cast<int32_t>(
+            (int64_t(remaining_speed) * io::kFp16OneInt) / speed);
+    velocity.x = retail_q16_mul_rhu(velocity.x, ratio);
+    velocity.y = retail_q16_mul_rhu(velocity.y, ratio);
+    velocity.z = retail_q16_mul_rhu(velocity.z, ratio);
+    return true;
+}
+
+// Armor removes kinetic energy, independently of the face-material cost.
 // [orig: Projectile_ApplyDragDeceleration @0x4e5cd0]
 void apply_armor_deceleration(FixedVec3 &velocity, const AmmoTableEntry &ammo,
                              int32_t density) {
@@ -1120,6 +1156,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     r.shooter_carrier_handle = params.shooter_carrier_handle;
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
+    r.mass_q16 = signed_from_u32(uint32_t(ammo->weight_in_grains) << 16) / 250;
     r.shot_seq = params.shot_seq;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
@@ -1290,6 +1327,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.shooter_carrier_handle = params.shooter_carrier_handle;
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
+        r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
         r.shot_seq = params.shot_seq;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
@@ -1357,8 +1395,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             : static_cast<int16_t>(-1);
 
         // Projectile_ProcessDamageOnTarget returns before damage calculation when
-        // target->ItemDef is null.  Geometry still consumed the round above, so
-        // the physical impact remains observable even though no hit is recorded.
+        // target->ItemDef is null. The physical impact remains observable even
+        // though no damage hit is recorded; the entity flight arm can continue.
         const bool peer_item_hit = !world.rules.logic_authority &&
                 r.consequence_mode == RoundConsequenceMode::VisualOnly && target &&
                 target->kind != EntityKind::Organic && !target->is_ai_capable;
@@ -1736,6 +1774,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
         FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};
 
+        const FixedVec3 incoming_velocity_q16 = velocity_q16;
+
         // Stock pre-ray water stall: a strictly submerged round below
         // 0.25 units/tick zeroes its lifetime BEFORE the sweep and still flies
         // this tick — retail falls through to the ray and releases the round at
@@ -1884,6 +1924,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const bool entity_impact_handler_leg =
             collision.hit_class == ProjectileHitClass::StaticEntity ||
             collision.hit_class == ProjectileHitClass::DynamicEntity;
+        const int32_t material_cost = material_energy_cost(collision.surface_type);
+        const bool entity_absorbs = target != nullptr && target->has_item_def &&
+                material_cost == 0;
+        bool material_energy_survives = true;
+        if (entity_impact_handler_leg && target != nullptr && target->has_item_def) {
+            material_energy_survives =
+                    subtract_material_energy(velocity_q16, r.mass_q16, material_cost);
+            r.vel = vec_from_fixed(velocity_q16);
+        }
         // A victim already flagged dead drops the whole impact-effect
         // presentation for two face classes: a person body (itemDef+92 == 3)
         // and the flesh material 19 (19 + 4 = the `flesh` effect row). Either
@@ -1939,15 +1988,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     kGlassSmashSound, impact_position, target->bms_id,
                     target->handle.packed);
             target->section_mask |= bit;
-            // UNPORTED: the pass-through report. A `lawr|fgrenade` round
-            // (ammo flags 0x18000000, the round's +0x114 copy) that breaks a
-            // section reports "continue" to the flight loop and keeps flying
-            // through the hole. RoundSim has no round-continues output — an
-            // entity stop always consumes the round below — so the rocket
-            // stops at the glass instead of passing it.
-            // [orig: `test dword ptr [ebx+114h], 18000000h` @0x4e968a ->
-            //  `mov dword ptr [eax], 1` @0x4e969a; DEF_AMMO_FLAG_LAWR 0x08000000
-            //  | DEF_AMMO_FLAG_FGRENADE 0x10000000, the flag table @0x813500]
+            // Survival is the material/remaining-energy decision below, also
+            // for ordinary bullets. The flags test @0x4e968a/outFlag store @0x4e969a
+            // is overwritten by the nonabsorbing damage result @0x4e98ba.
         }
 
 		if (!not_armed && target != nullptr && ammo != nullptr) {
@@ -2182,11 +2225,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     break;
                 case ProjectileHitClass::StaticEntity:
                 case ProjectileHitClass::DynamicEntity: {
-                    const int32_t material = collision.surface_type;
-                    const bool absorbed = target != nullptr && target->has_item_def &&
-                            material != 7 && material != 15 && material != 16 &&
-                            material != 17 && material != 19;
-                    produce = absorbed && ammo->kztype != 0 && armed;
+                    produce = entity_absorbs && ammo->kztype != 0 && armed;
                     break;
                 }
                 case ProjectileHitClass::Person:
@@ -2238,6 +2277,34 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         event.p1 = vec_from_fixed(end_q16);
         event.hit = impact_position;
         push_round_debug(*this, event);
+
+        // The entity handler zeros lifetime only for an absorbed hit or an
+        // exhausted material-energy budget. A survivor starts the next tick
+        // 0x800 Q16 beyond the face, with the common gravity/drag tail applied.
+        // There is no second sweep this tick. [orig: @0x4e98aa..0x4e98ca;
+        // Projectile_UpdatePhysics @0x4ea73f..0x4ea798, @0x4eaa58..0x4eaa69]
+        if (entity_impact_handler_leg && !entity_absorbs && material_energy_survives &&
+                !submerged_stall && !has_dud_replacement) {
+            const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
+            const auto beyond = [&](int32_t hit, int32_t component) {
+                const int32_t direction = magnitude > 0 ? static_cast<int32_t>(
+                        int64_t(component) * io::kFp16OneInt / magnitude) : 0;
+                return hit + retail_q16_mul_rhu(direction, 0x800);
+            };
+            const FixedVec3 next_position{
+                beyond(collision.position_q16.x, incoming_velocity_q16.x),
+                beyond(collision.position_q16.y, incoming_velocity_q16.y),
+                beyond(collision.position_q16.z, incoming_velocity_q16.z)};
+            r.pos = vec_from_fixed(next_position);
+            if (r.guided_family == GuidedFamily::None) {
+                if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+                if (ammo != nullptr)
+                    apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
+                            world.env.water_z, /*surface_normal=*/0);
+            }
+            r.vel = vec_from_fixed(velocity_q16);
+            continue;
+        }
 
         if (r.trail_slot >= 0) {
             trails.append(r.trail_slot, r.pos);
