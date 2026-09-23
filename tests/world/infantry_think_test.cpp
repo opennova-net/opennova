@@ -6,8 +6,8 @@
 // and the persistent aimFlag), the guard family and the holdSSN hold at the
 // combat tail, the think-entry heading restore, the board walk's arrival,
 // S stage, E-point claim and UseGun ring, the post-commit ride link and idle
-// facing fan, the airborne skip, and the selector's swim and run_attack
-// substitutions. Synthetic bodies and clips; no retail data.
+// facing fan, the airborne skip, the route's raw node read, and the selector's
+// swim and run_attack substitutions. Synthetic bodies and clips; no retail data.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -600,6 +600,51 @@ static void test_route_gate_clears_the_entry_stage() {
     }
 }
 
+// The route reads its nodes through the flat record block with no bound and an
+// unchecked pool-3 read: a start node past the count reads the raw slot word
+// there, and a slot no marker filled is a zeroed marker the body walks to (the
+// route is kept), for the current node and the next one alike.
+// [orig: Entity_UpdateInfantryAI @0x4BABFF..0x4BAC19 and @0x4BADCB..0x4BADDF;
+//  Pool_GetEntryUnchecked @0x441FC0]
+static void test_route_reads_the_raw_node_word() {
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        NavEntry past;
+        past.f[0] = 0x8000;
+        past.f[1] = fx(-30);
+        past.f[2] = fx(5);
+        r.w.ai.nav.nodes.push_back(past);      // pool-3 slot 1
+        r.w.ai.nav.channels[1].entries[2] = 1; // the raw word past the count
+        r.blue().slot.f[38] = 2;               // a start node past the count
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().inf.move_mode == 3);
+        CHECK(r.blue().inf.move_target[0] == fx(-30) && r.blue().inf.move_target[1] == fx(5));
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(0, fx(20));
+        r.w.ai.nav.channels[1].entries[0] = 7; // no marker filled pool-3 slot 7
+        r.blue().pos[0] = fx(10);
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().slot.f[35] == 1);
+        CHECK(r.blue().inf.move_mode == 3 && r.blue().inf.target_dist == fx(10));
+        CHECK(r.blue().inf.move_target[0] == 0 && r.blue().inf.move_target[1] == 0 &&
+              r.blue().inf.move_target[2] == 0x4000);
+    }
+    {
+        Rig r(fx(60), 0, 0);
+        r.route(fx(10), 0); // blue arrives on node 0 ...
+        r.blue().pos[0] = fx(10);
+        r.w.ai.nav.channels[1].count = 2;
+        r.w.ai.nav.channels[1].entries[1] = 7; // ... and node 1 names an unfilled slot
+        r.w.ai.infantry_think(r.blue(), r.w);
+        CHECK(r.blue().slot.f[38] == 1);
+        CHECK(r.blue().inf.move_mode == 4 && r.blue().inf.target_dist == fx(10));
+        CHECK(r.blue().inf.move_target[0] == 0 && r.blue().inf.move_target[1] == 0);
+    }
+}
+
 // The board arrival clears Flags 0x40 and the parent slot only when the attach
 // it tried left the body unparented: an arrival that cannot attach keeps a
 // guard. [orig: gate @0x4BBDA6..0x4BBDC8; clear @0x4BBDFA..0x4BBE07]
@@ -1031,6 +1076,7 @@ int main() {
     test_guard_keeps_the_think_entry_heading();
     test_hold_parks_the_body();
     test_route_gate_clears_the_entry_stage();
+    test_route_reads_the_raw_node_word();
     test_board_arrival_clears_the_guard_only_after_an_attach();
     test_s_stage_sets_the_heading_locals_and_the_guard();
     test_board_proposal_reaches_the_selection();

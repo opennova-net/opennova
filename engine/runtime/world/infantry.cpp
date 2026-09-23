@@ -207,10 +207,12 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
         return;
     }
     int32_t node = slot.f[38]; // [orig: slot+152 = node index (BMS wp_number at spawn)]
-    if (node < 0 || node >= nc->count) node = 0; // container-rebase guard
-
-    const NavEntry *mk = nav.entry(nav.entry_index(ch, node));
-    if (mk == nullptr) { slot.f[35] = 0; return; }
+    // The node reads the flat record block with no bound: a start node at or
+    // past the count reads the raw slot word there, and the pool-3 read is
+    // unchecked (a slot no marker filled is a zeroed marker, walked to like
+    // any other). [orig: Entity_UpdateInfantryAI @0x4BABFF..0x4BAC19, the
+    //  Pool_GetEntryUnchecked read of flat[34*ch + 2 + node]]
+    const NavEntry &mk = nav.slot(nav.entry_index(ch, node));
 
     // Distance to the node: 3D with 1.0u vertical slack, target 0.25u above the marker.
     // [orig: dump 1421-1457 — targetZ = marker.z + 0x4000; dz = max(0, |dz| - 0x10000)]
@@ -231,8 +233,8 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
     };
 
     int32_t target[3];
-    int32_t dist = dist_to(*mk, target);
-    int32_t radius = mk->f[0]; // [orig: marker dword[0] = arrival radius]
+    int32_t dist = dist_to(mk, target);
+    int32_t radius = mk.f[0]; // [orig: marker dword[0] = arrival radius]
     // [orig: dump 1462 — at the last node of a one-shot path (gait approach flag)]
     inf.at_final_oneshot = (node >= nc->count - 1) && ((nc->loopflag & 1) != 0);
 
@@ -250,15 +252,15 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
     // Arrived. [orig: dump 1464-1532]
     mark_waypoint_visited(e, world, ch, node);
 
-    if (mk->wait_ticks != 0) {
+    if (mk.wait_ticks != 0) {
         // Face the marker's authored heading and hold: the target heading, the
         // aim heading and the think-entry local all take it. [orig:
         // @0x4BAD1E..0x4BAD48 — +0x1A8 / +0x2EC = marker+16 @0x4BAD29 /
         // @0x4BAD2F, the entry local @0x4BAD41; +0x128 = (wait + 8) >> 4 @0x4BAD48]
-        inf.target_heading = mk->f[4];
-        inf.aim_heading = mk->f[4];
-        entry_heading = mk->f[4];
-        inf.wait_cooldown = (mk->wait_ticks + 8) >> 4;
+        inf.target_heading = mk.f[4];
+        inf.aim_heading = mk.f[4];
+        entry_heading = mk.f[4];
+        inf.wait_cooldown = (mk.wait_ticks + 8) >> 4;
     }
 
     // Advance the node (wrap), honoring the one-shot end. [orig: dump 1479-1532]
@@ -276,12 +278,13 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
     // @0x4badbf].
     if (inf.wait_cooldown != 0) return;
 
-    const NavEntry *next = nav.entry(nav.entry_index(ch, node));
-    if (next == nullptr) return;
-    dist = dist_to(*next, target);
+    // The same unbounded, unchecked read for the next node. [orig:
+    //  Entity_UpdateInfantryAI @0x4BADCB..0x4BADDF]
+    const NavEntry &next = nav.slot(nav.entry_index(ch, node));
+    dist = dist_to(next, target);
     inf.move_mode = 4; // [orig: moveMode = 4 after advancing; dump 1522]
     inf.target_dist = dist;
-    inf.arrival_radius = next->f[0];
+    inf.arrival_radius = next.f[0];
     inf.move_target[0] = target[0];
     inf.move_target[1] = target[1];
     inf.move_target[2] = target[2];
