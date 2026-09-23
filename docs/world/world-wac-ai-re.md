@@ -13339,8 +13339,10 @@ world-side facts of the slice:
   @ 0x49E131), so a player whose type has no items.def row still counts. Port:
   `World::entity_update_admitted` (the exemption bit is
   `CachedFrameState::peer_death_screen`); the count is `EntityRegistry::count_humans`,
-  rebuilt by the server tick and by the local role ahead of the script pass, since a
-  single-player game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A).
+  which walks the live rows (their used bit is the allocated-row test;
+  `npruntime_server_tick_maintenance`, `check_humans_count_the_visible_players`), rebuilt
+  by the server tick and by the local role ahead of the script pass, since a single-player
+  game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A).
 - **The frame split.** `Game_ProcessMainFrame` runs `Client_ProcessNetworkFrame`
   (@ 0x526692), `Sound_TickPendingSlots` (@ 0x526697), `Server_TickUpdate` (@ 0x5266B6:
   the per-player walk @ 0x51D88B, the receive pump @ 0x51D895, the humans count
