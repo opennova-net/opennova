@@ -221,6 +221,42 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
     }
 }
 
+// The entity update's shared tail: the pool-0/1 proximity tables, the pool-0
+// walk, then the update's count -- unless the epilog screen is up, whose tail
+// runs the epilog cine instead (re-read here, after the walk).
+// [orig: Entity_UpdateAllEntities -- the walk @0x4C2426..0x4C2474, `cmp
+//  g_epilog_screen_active,0` @0x4C2624 (the Cinematic_EpilogUpdate tail
+//  @0x4C2634), `add dword_24C1948,esi` @0x4C2639]
+static void finish_entity_update(World &world, const TickContext &ctx, devtools::ProfileLap &lap) {
+    // Rebuild the pool-0/1 proximity tables once per tick, ahead of the pool-0
+    // walk (the pool-2 statics table rebuilds only on its registry/instance
+    // edges). Pool-0 person publication does not depend on any entity having a
+    // 3DI collision instance: RoundSim still queries this snapshot on missions
+    // containing only organic entities, so always rebuild the pool tables when
+    // a CollisionWorld is installed.
+    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
+    // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
+    // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
+    // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
+    if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
+    lap.mark(devtools::Slot::SIM_AI_COLLISION);
+    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
+    const size_t pool0 = world.registry.pool_capacity(0);
+    for (size_t slot = 0; slot < pool0; ++slot) {
+        const Entity *row = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+        if (row == nullptr) continue;
+        AiEntity *body = world.ai.for_handle(row->handle);
+        if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
+            continue;
+        world.ai.update_organic(*body, world, ctx.logic_tick);
+        if (const Entity *live =
+                    world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
+            claim_standing_vehicle(world, *live);
+    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    if (!world.epilog_screen_active()) ++world.entity_update_counter;
+}
+
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
     const EntityHandle handle = row.handle;
@@ -337,6 +373,29 @@ void World::update_all_entities(const TickContext &ctx) {
     // These presentation events describe only the current authoritative tick.
     if (is_authority) throwables.events.clear();
 
+    // The SP epilog screen runs a reduced pass: every pool-1 row's pose is
+    // copied into its saved pose and only a row a player drives (its occupant
+    // carries Flags 0x100) is visited, with no visited clear and no parent
+    // chain; HeliLift through the pool-3 walk is skipped, and the shared tail
+    // follows. [orig: Entity_UpdateAllEntities -- `cmp
+    //  g_epilog_screen_active,0` @0x4C211D (the jnz @0x4C2128), the walk
+    //  @0x4C239A..0x4C2408 (the Entity_UpdatePool1Slot call @0x4C2400)]
+    if (epilog_screen_active()) {
+        const size_t rows = registry.pool_capacity(1);
+        for (size_t slot = 0; slot < rows; ++slot) {
+            Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
+            if (row == nullptr) continue;
+            stamp_saved_live_pose(*row);
+            const Entity *driver = registry.get(row->primary_occupant);
+            if (driver != nullptr &&
+                    ((driver->flags | driver->engine_flags) & kEntityFlagPlayer) != 0)
+                update_pool1_slot(*row, ctx);
+        }
+        lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+        finish_entity_update(*this, ctx, lap);
+        return;
+    }
+
     // The pool-1 walk: the visited byte cleared on every live row, then each
     // unvisited row in slot order, its ground-entity chain (+0x28, up to three
     // ancestors) visited first -- a deck rider moves with the carrier's
@@ -443,33 +502,7 @@ void World::update_all_entities(const TickContext &ctx) {
     doors.tick(*this);
     tick_item_event_pool(*this, 3);
     lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
-    // Rebuild the pool-0/1 proximity tables once per tick, ahead of the pool-0
-    // walk (the pool-2 statics table rebuilds only on its registry/instance
-    // edges). Pool-0 person publication does not depend on any entity having a
-    // 3DI collision instance: RoundSim still queries this snapshot on missions
-    // containing only organic entities, so always rebuild the pool tables when
-    // a CollisionWorld is installed.
-    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
-    // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
-    // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
-    // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
-    if (ai.collision != nullptr) ai.collision->build_tick_tables(*this);
-    lap.mark(devtools::Slot::SIM_AI_COLLISION);
-    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
-    // [orig: Entity_UpdateAllEntities @0x4C2426..0x4C2474]
-    const size_t pool0 = registry.pool_capacity(0);
-    for (size_t slot = 0; slot < pool0; ++slot) {
-        const Entity *row = registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-        if (row == nullptr) continue;
-        AiEntity *body = ai.for_handle(row->handle);
-        if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
-            continue;
-        ai.update_organic(*body, *this, ctx.logic_tick);
-        if (const Entity *live = registry.get(EntityHandle::make(0, static_cast<int>(slot))))
-            claim_standing_vehicle(*this, *live);
-    }
-    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
-    ++entity_update_counter; // [orig: Entity_UpdateAllEntities @0x4C2639]
+    finish_entity_update(*this, ctx, lap);
 }
 
 void World::run_logic_tick(bool is_authority, TickPhase phase) {

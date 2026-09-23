@@ -958,6 +958,9 @@ public:
     // particles, the projectiles, the explosion queue (then the damage
     // reactions they stamped), the pool-2 cohort walk, the doors, the pool-3
     // cohort walk, the proximity tables, then the pool-0 walk in slot order.
+    // On the SP epilog screen only the pool-1 rows a player drives are
+    // visited (every pool-1 row's pose is saved), HeliLift through the pool-3
+    // walk is skipped, and the update is not counted.
     // [orig: Entity_UpdateAllEntities @0x4C2100]
     void update_all_entities(const TickContext &ctx);
     // One pool-1 visit: mark the row visited; while its +0x2AC clock is

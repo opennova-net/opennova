@@ -627,12 +627,47 @@ int main(int argc, char **argv) {
 
 		int shots = 0;
 		bool round_on_victim = false; // one of the player's rounds stopped on the locked victim
+		// The locked victim is down: 0 = the player's kill down to a staged
+		// round, 1 = a stray credit (the test fails), 2 = retarget.
+		const auto settle_victim = [&]() -> int {
+			// Only a kill the host credits to the local player feeds the WAC
+			// (the by-player bucket, drained from the death record on the
+			// listen frame); a victim that fell to live NPC fire lands in the
+			// by-others family instead and is retargeted, never counted
+			// [orig: Score_TallyKillByLocalPlayer @0x4fd160 vs
+			//  Score_TallyKillByOthers @0x4fd300].
+			for (int t = 0; t < kTicksPerSecond && player_tally(target_team) == tally_at_lock; ++t) run.tick();
+			const bool credited = player_tally(target_team) > tally_at_lock;
+			if (credited && round_on_victim) {
+				killed = true;
+				std::printf("lose-flow: KILLED t=%ds team-%d person net=%d down to the staged round\n", run.seconds(),
+						target_team, victim_net_id);
+				return 0;
+			}
+			if (credited) {
+				// A credit without the aimed round on the victim is the stray
+				// dependency this test exists to refuse.
+				expect(false, "the kill credit came from a round that did not stop on the locked victim");
+				return 1;
+			}
+			std::printf("lose-flow: net=%d fell to another shooter (tally unchanged) — retargeting\n", victim_net_id);
+			blacklist.insert(target.packed);
+			return 2;
+		};
 		const int lock_ticks = run.ticks;
 		while (run.seconds() < kMaxMissionSeconds && shots < kShotsPerVictim &&
 				run.ticks - lock_ticks < kSecondsPerVictim * kTicksPerSecond) {
 			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			const w::Entity *tent = rig.world.registry.get(target);
-			if (tai == nullptr || tent == nullptr || !tent->alive || tent->health <= 0) break;
+			if (tai == nullptr || tent == nullptr || !tent->alive || tent->health <= 0) {
+				// A tap that stopped on the victim can land its kill after the
+				// tap's resolve window, between two taps. Settle it here: the
+				// Lose that kill raises puts up the SP epilog screen, whose
+				// reduced entity update steps no projectile, so no later tap
+				// can land. [orig: Entity_UpdateAllEntities @0x4C211D..0x4C2128]
+				if (round_on_victim && settle_victim() == 1) return 1;
+				break;
+			}
 			// Re-verify before every tap (the victim walks); re-stage when the
 			// line of fire no longer holds or the victim left the envelope.
 			if (!victim_torso(rig, *tai, torso)) break;
@@ -663,27 +698,7 @@ int main(int argc, char **argv) {
 					stopped ? unsigned(stop.entity) : 0u, stop.hit.x, stop.hit.y, stop.hit.z, int(on_victim), hp,
 					tent != nullptr ? int(tent->alive) : 0);
 			if (tent == nullptr || !tent->alive || hp <= 0) {
-				// Only a kill the host credits to the local player feeds the WAC
-				// (the by-player bucket, drained from the death record on the
-				// listen frame); a victim that fell to live NPC fire lands in the
-				// by-others family instead and is retargeted, never counted
-				// [orig: Score_TallyKillByLocalPlayer @0x4fd160 vs
-				//  Score_TallyKillByOthers @0x4fd300].
-				for (int t = 0; t < kTicksPerSecond && player_tally(target_team) == tally_at_lock; ++t) run.tick();
-				const bool credited = player_tally(target_team) > tally_at_lock;
-				if (credited && round_on_victim) {
-					killed = true;
-					std::printf("lose-flow: KILLED t=%ds team-%d person net=%d down to the staged round\n", run.seconds(),
-							target_team, victim_net_id);
-				} else if (credited) {
-					// A credit without the aimed round on the victim is the stray
-					// dependency this test exists to refuse.
-					expect(false, "the kill credit came from a round that did not stop on the locked victim");
-					return 1;
-				} else {
-					std::printf("lose-flow: net=%d fell to another shooter (tally unchanged) — retargeting\n", victim_net_id);
-					blacklist.insert(target.packed);
-				}
+				if (settle_victim() == 1) return 1;
 				break;
 			}
 			if (on_victim) std::printf("lose-flow: HIT net=%d survived at hp=%d — firing again\n", victim_net_id, hp);

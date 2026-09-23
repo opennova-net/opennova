@@ -1567,6 +1567,61 @@ void test_seated_body_claims_its_vehicle() {
     }
 }
 
+// The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
+// copied into its saved pose, only the row a player drives is visited, and the
+// update is not counted; the pool-0 walk still runs (it wakes the driven
+// vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
+// [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
+//  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
+void test_epilog_entity_update() {
+    Rig r;
+    r.veh().item_type = 1;
+    r.veh().item_attrib |= kItemAttribPlayerControl;
+    Entity prop;
+    prop.kind = EntityKind::Item;
+    prop.has_item_def = true;
+    prop.item_id = 999;
+    prop.position = {50.0f, 60.0f, 7.0f};
+    prop.health = 100;
+    prop.alive = true;
+    const EntityHandle prop_h = r.w.registry.spawn(1, prop);
+    CHECK(prop_h.valid());
+    r.player().flags |= kEntityFlagPlayer;
+    r.player().engine_flags |= kEntityFlagPlayer;
+    AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.player().health;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1)); // the ctrlx seat
+    CHECK(r.veh().primary_occupant == r.player_h);
+
+    r.w.rules.mp_session = false;
+    CHECK(r.w.match.finish(2, r.w));
+    r.w.round_end_tick = 0;
+    r.w.logic_tick = 8;
+    CHECK(r.w.epilog_screen_active());
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 8;
+    r.w.update_all_entities(ctx);
+    const Entity &kept = *r.w.registry.get(prop_h);
+    CHECK(r.veh().pool1_visited);
+    CHECK(!kept.pool1_visited);
+    CHECK(kept.saved_live_valid);
+    CHECK(kept.saved_live_pos[0] == to_fixed(50.0f));
+    CHECK(kept.saved_live_pos[1] == to_fixed(60.0f));
+    CHECK(kept.saved_live_pos[2] == to_fixed(7.0f));
+    CHECK(((r.veh().flags & 0x40u) != 0) && r.veh().veh.contact_wake_tick == 8);
+    CHECK(r.w.entity_update_counter == 0);
+
+    r.w.rules.mp_session = true;
+    CHECK(!r.w.epilog_screen_active());
+    r.w.update_all_entities(ctx);
+    CHECK(r.w.registry.get(prop_h)->pool1_visited);
+    CHECK(r.w.entity_update_counter == 1);
+}
+
 void test_host_crewed_helicopter_rotor_turns() {
     Rig r;
     VehicleTraits t = truck_traits();
@@ -3339,6 +3394,7 @@ int main() {
 	test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
     test_seated_body_claims_its_vehicle();
+    test_epilog_entity_update();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
