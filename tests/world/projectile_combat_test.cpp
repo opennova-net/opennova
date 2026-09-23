@@ -2265,8 +2265,8 @@ CollisionModel building_pane_face_model(uint8_t material) {
 }
 
 // Entity glass consumes energy and the surviving bullet reaches the next
-// obstacle on the next tick. The same material table covers cloth/foliage/
-// flesh/water faces; metal absorbs. [orig: @0x4E9643, @0x4E8233..0x4E8266]
+// obstacle on the next tick. The same table covers the cloth/foliage/flesh/
+// water entity faces; metal absorbs. [orig: @0x4E9643, @0x4E8233..0x4E8266]
 void test_entity_material_penetration() {
     for (const uint8_t material : {uint8_t(15), uint8_t(16), uint8_t(17),
                                   uint8_t(19), uint8_t(7), uint8_t(14)}) {
@@ -2318,6 +2318,10 @@ void test_entity_material_penetration() {
             if (survives && round.active) {
                 CHECK(round.pos.x > 4.0f && round.pos.x < 4.1f);
                 CHECK(round.vel.x > 0.0f && round.vel.x < 10.0f);
+                // 10 u/tick, mass (68 << 16) / 250, glass cost 10: both square
+                // roots round to nearest (`fistp`), so vx is exactly 521210.
+                // [orig: Entity_ClampKineticEnergy @0x4E9142..0x4E9169]
+                if (material == 15) CHECK(to_fixed(round.vel.x) == 521210);
                 world.round_sim.tick(world, nullptr, &collision);
                 CHECK(!round.active);
                 CHECK(world.round_sim.debug_trail_count == 2);
@@ -2325,6 +2329,64 @@ void test_entity_material_penetration() {
                 CHECK(world.registry.get(second)->health < 1000);
             }
         }
+    }
+}
+
+// A decoded pool-1 wire projection stands for a def-bearing retail client
+// entity, so a visual round takes the same material decision there: an
+// absorbing face stops it, glass charges its energy and lets it on.
+// [orig: Projectile_HandleEntityImpact @0x4E9584..0x4E95BD;
+//  Projectile_ProcessDamageOnTarget @0x4E823F..0x4E8266]
+void test_visual_round_wire_proxy_material_decides_survival() {
+    for (const uint8_t material : {uint8_t(9), uint8_t(15)}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 8);
+        world.registry.configure_pool(1, 8);
+        world.rules.mp_session = true;
+        world.rules.projectile_authority = false;
+        Entity shooter;
+        shooter.kind = EntityKind::Organic;
+        shooter.item_type = 3;
+        const EntityHandle sh = world.registry.spawn(0, shooter);
+        world.cached.local_player = sh;
+
+        CollisionWorld collision;
+        const int32_t model_id = collision.add_model(proxy_face_quad_model(material));
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        // Pitch 90 deg turns the proxy-local z=1 quad into a wall across +x.
+        WireDynamicCollisionProxy proxy;
+        proxy.wire_handle = 0x1002;
+        proxy.model_id = model_id;
+        proxy.position_q16 = FixedVec3{4 * 65536, 0, 0};
+        proxy.pitch_bam = 0x40000000;
+        proxy.bound_radius_q16 = 3 * 65536;
+        collision.replace_wire_collision_proxies({}, {proxy});
+
+        AmmoTableEntry ammo;
+        ammo.name = "VISUAL_GLASS";
+        ammo.valid = true;
+        ammo.flags = kAmmoFlagNoGravity;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 68;
+        ammo.max_damage = 25;
+        world.tables.ammo.entries.push_back(ammo);
+        RoundSpawnParams params;
+        params.owner = sh;
+        params.origin = {0.0f, 0.0f, 0.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params, RoundConsequenceMode::VisualOnly);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        world.round_sim.tick(world, nullptr, &collision);
+        CHECK(world.round_sim.debug_trail_count == 1);
+        CHECK(world.round_sim.debug_trail[0].material == material);
+        const LiveRound &round = world.round_sim.rounds[slot];
+        CHECK(round.active == (material == 15));
+        if (material == 15 && round.active)
+            CHECK(round.vel.x > 0.0f && round.vel.x < 10.0f);
     }
 }
 
@@ -3346,6 +3408,7 @@ int main() {
     test_bullet_building_material_is_plain_plus_four();
     test_material_15_breaks_the_building_glass_section();
     test_entity_material_penetration();
+    test_visual_round_wire_proxy_material_decides_survival();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
     test_terrain_stop_records_the_round();

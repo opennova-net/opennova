@@ -179,10 +179,13 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	if (view.joiner && view.runtime != nullptr && !ctx.rules_no_friendly_tags) {
 		// A joiner's players are decoded rows, not World twins: the roster walk
 		// over ClientState supplies them (replication/client_roster_tags.h).
+		// Both walks compare with the local player's entity Team, not the S2C
+		// latch; spawn_from_self seeds it before any 0x04/0x50 lands
+		// [orig: g_local_player_entity+0x162 @0x5a455c / @0x5a3c71].
 		const int32_t player_hp = w.tables.player.item_hp;
 		replication::collect_roster_tags(view.runtime->state(),
 				view.runtime->has_self_handle() ? view.runtime->self_handle() : 0xFFFFu,
-				view.runtime->assigned_team(), ctx.death_screen, ctx.game_type, out,
+				player->team, ctx.death_screen, ctx.game_type, out,
 				[player_hp](uint16_t) { return player_hp; }, &w);
 	}
 	return true;

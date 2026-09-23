@@ -46,9 +46,9 @@ int main() {
 	for (const char *name : {"idle.bad", "walk.bad", "soldier.adm"})
 		fs::copy_file(animations / name, first.path / name);
 	{
-		std::ofstream map(first.path / "variants.adm");
-		map << "anim_reset \"idle\"\n"
-			   "anim_idle \"walk\" \"walk\" \"idle\" \"missing\"\n";
+		std::ofstream map(first.path / "variants.adm", std::ios::binary);
+		map << "anim_reset \"idle\"\r\n"
+			   "anim_idle \"walk\" \"walk\" \"idle\" \"missing\"\r\n";
 	}
 
 	assets::Model retained_model;

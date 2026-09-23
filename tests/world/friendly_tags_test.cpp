@@ -138,6 +138,14 @@ void test_neutral_organics_do_not_get_friendly_labels() {
     tags.clear();
     collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
     CHECK(tags.size() == 2);
+    // A team-0 local player passes the drawer's equal-team compare for team-0
+    // neutrals and rejects the team-1 organic. [orig: @0x5a3c6b..0x5a3c95]
+    ctx.death_screen = false;
+    w.registry.get(local)->team = 0;
+    tags.clear();
+    collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
+    CHECK(tags.size() == 1);
+    if (tags.size() == 1) CHECK(tags[0].entity == neutral);
 }
 
 } // namespace

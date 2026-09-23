@@ -146,7 +146,6 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (player == nullptr) {
 		w.usegun_switch = LocalUseGunSwitch::kNone;
 		w.usegun_slot_active = false;
-		w.borrowed_mount_type = SeatType::None;
 		w.usegun_mount = EntityHandle{};
 		w.usegun_weapon_adm = 0xFF;
 		w.usegun_pending_mount = EntityHandle{};
@@ -184,7 +183,6 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 			select_parent = false;
 		} else {
 			w.usegun_slot_active = true;
-			w.borrowed_mount_type = player->mount_type;
 			w.usegun_mount = w.usegun_pending_mount;
 			w.usegun_weapon_adm = w.usegun_pending_weapon_adm;
 			next_adm = w.usegun_weapon_adm;
@@ -193,7 +191,6 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 	if (!select_parent) {
 		w.usegun_slot_active = false;
-		w.borrowed_mount_type = SeatType::None;
 		next_adm = w.usegun_saved_adm;
 		next_slot = &w.slot;
 	}
@@ -232,11 +229,14 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
+	// UseGun and an EWeap carrier's ctrlx seat both borrow the carrier's
+	// persistent slot through the same Player_MountWeaponSlot call.
+	// [orig: Entity_AttachToUseGunSlot @0x546C38; Entity_AttachToVehicleSlot
+	//  EWeap gate @0x49480B..0x49480F, call @0x494838]
 	Entity *mounted_parent = player->mounted
 			? world.registry.get(player->mount_target) : nullptr;
-	const bool controller = player->mount_type == SeatType::Controller;
 	if (player->mount_type != SeatType::Gunner &&
-			!(controller && mounted_parent != nullptr &&
+			!(player->mount_type == SeatType::Controller && mounted_parent != nullptr &&
 			  (mounted_parent->item_attrib & kItemAttribEweap) != 0))
 		mounted_parent = nullptr;
 	WeaponSlotState *mounted_slot = mounted_parent != nullptr
@@ -264,11 +264,12 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 				from->category == to->category;
 	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
-        // UseGun's local attach resets before its direct mount; a detach does not
-        // take this leg. The reset includes the binocular clears, so a wire-echoed
-        // attach drops a raised toggle too. [orig: Entity_AttachToUseGunSlot
-        // @0x546B80 -> Player_ResetCameraAndMovementState @0x546ba4]
-		if (!controller) local_player_camera_reset(&world, w, view);
+        // The local attach resets before its mount; a detach does not take this
+        // leg. The reset includes the binocular clears, so a wire-echoed attach
+        // drops a raised toggle too. [orig: Entity_AttachToUseGunSlot @0x546B80
+        // -> Player_ResetCameraAndMovementState @0x546ba4; the ctrlx attach's
+        // local reset @0x4947AE]
+		local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -280,18 +281,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		// The shared helper applied the nonlocal immediate stamp. L retains its
 		// outgoing EquippedSlot until the action handler's commit seam.
 		player->equipped_adm_index = from_adm;
-		if (controller) {
-			// ctrlx directly calls Player_MountWeaponSlot, without a UseGun
-			// SWITCHFROM/SWITCHTO pair. [orig: @0x494838]
-			w.usegun_switch_action = -1;
-			commit_local_usegun_weapon_switch(world, w);
-			// The embedder installs the requested definition when it drains
-			// the event. Do not pump the old personal FSM on the carrier slot.
-			w.active = false;
-		} else {
-			queue_local_usegun_weapon_switch(world, w,
-					same_category(from_adm, target_adm));
-		}
+		queue_local_usegun_weapon_switch(world, w,
+				same_category(from_adm, target_adm));
 	};
 	const auto stage_personal = [&]() {
 		const uint8_t from_adm =
@@ -300,17 +291,10 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		w.usegun_pending_mount = EntityHandle{};
 		w.usegun_pending_weapon_adm = 0xFF;
 		w.usegun_switch = LocalUseGunSwitch::kDetach;
-		if (w.borrowed_mount_type == SeatType::Controller) {
-			// The controller detach restores its saved personal slot directly.
-			// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
-			if (auto *slot = active_local_weapon_slot(world, w)) slot->refire_queued = false;
-			w.usegun_switch_action = -1;
-			commit_local_usegun_weapon_switch(world, w);
-			w.active = false;
-		} else {
-			queue_local_usegun_weapon_switch(world, w,
-					same_category(from_adm, w.usegun_saved_adm));
-		}
+		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot.
+		// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
+		queue_local_usegun_weapon_switch(world, w,
+				same_category(from_adm, w.usegun_saved_adm));
 	};
 
 	if (on_usegun) {
@@ -1269,7 +1253,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			// parentSlot==3 addresses the ENTITY THAT OWNS the selected slot,
 			// not the actor. Wire-header materialization preserves the host's
 			// packed handles, so this path is identical for host and joiner.
-			// [orig: WeaponAction_Reload @0x543108..0x543157]
+			// Every other seat, the armed ctrlx included, addresses the actor
+			// with the borrowed slot's category * 65 + rank.
+			// [orig: WeaponAction_Reload @0x5430DB..0x543103]
 			Entity *mount = world.registry.get(w.usegun_mount);
 			WeaponSlotState *mounted_slot = mount != nullptr
 					? world.vehicles.resolve_mounted_ammo_slot(*mount)
@@ -1291,8 +1277,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					world.tables.weapons.by_index(mounted_adm);
 			if (mounted_slot != nullptr && slot_owner != nullptr &&
 					mounted_def != nullptr) {
+				const Entity *actor = world.registry.get(world.cached.local_player);
+				const bool gunner = actor != nullptr && actor->mount_type == SeatType::Gunner;
 				io.reload.valid = true;
-				io.reload.entity_handle = slot_owner->handle.packed;
+				io.reload.entity_handle = gunner ? slot_owner->handle.packed
+						: !io.is_authority ? io.self_wire_handle
+						: world.cached.local_player.packed;
 				io.reload.reload_param = static_cast<uint16_t>(
 						static_cast<uint16_t>(mounted_def->category) * 65u +
 						static_cast<uint16_t>(mounted_def->rank));

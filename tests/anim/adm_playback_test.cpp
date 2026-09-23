@@ -70,8 +70,8 @@ int main() {
 	write_clip(dir / "slow.bad", 24, true);
 	write_clip(dir / "frozen.bad", 0, true);
 	{
-		std::ofstream adm(dir / "clock.adm");
-		adm << "anim_reset \"once\"\nanim_idle \"slow\"\nanim_walk_forward \"frozen\"\n";
+		std::ofstream adm(dir / "clock.adm", std::ios::binary);
+		adm << "anim_reset \"once\"\r\nanim_idle \"slow\"\r\nanim_walk_forward \"frozen\"\r\n";
 	}
 	opennova::ResourceIndex index;
 	opennova::assets::AssetStore index_assets{&index};

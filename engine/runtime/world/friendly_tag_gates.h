@@ -28,17 +28,24 @@ inline bool friendly_tag_entry_bails(bool is_local, uint32_t flags,
     return false;
 }
 
-// The pass gates: neutral or the local team, or anyone while the death
-// screen is up [orig: pool-0 @0x5a44c7..0x5a44f8; players @0x5a4552..
-// 0x5a456b]; then `g_GameType || death screen` [orig: @0x5a44e8 / @0x5a456d].
-// The drawer then rejects EVERY unequal team, including neutral team 0,
-// outside the death screen unless the spectator enemy-tag grant is active
-// [orig: HUD_DrawEntityLabel @0x5a3c7d..0x5a3c8f]. That grant is currently
-// unported/false; both walks must apply its ordinary-play rejection here.
+// The pass gates, in retail order. The pass admits neutral team 0 or the
+// local team, or anyone while the death screen is up [orig: pool-0
+// @0x5a44c7..0x5a44f8; players @0x5a4552..0x5a456b]; then `g_GameType ||
+// death screen` [orig: @0x5a44e8 / @0x5a456d]. The drawer then compares the
+// entity team with the local player's after its death-screen arm has drawn
+// every team [orig: HUD_DrawEntityLabel death arm @0x5a3c33..0x5a3c3a; team
+// compare @0x5a3c6b..0x5a3c7d]: an unequal team, neutral 0 included, draws
+// magenta only under `g_enemyTagsVisible` and otherwise bails
+// [orig: @0x5a3c7f..0x5a3c95]. The grant's S2C 0x0A edge only rises with the
+// death screen here, whose arm already admits every team; its spectator-mode
+// and action-130 writers are unported, so the drawer's ordinary-play leg is
+// the bail. Magenta outside the death screen can only reach team 0: the pass
+// gate has already dropped a real enemy.
 inline bool friendly_tag_pass_gates(uint8_t team, uint8_t local_team,
                                     bool death_screen, uint32_t game_type) {
-    if (team != local_team && !death_screen) return false;
+    if (team != 0 && team != local_team && !death_screen) return false;
     if (game_type == 0 && !death_screen) return false;
+    if (team != local_team && !death_screen) return false;
     return true;
 }
 

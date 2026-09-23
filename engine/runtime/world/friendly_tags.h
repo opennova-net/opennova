@@ -105,6 +105,8 @@ struct FriendlyTagPassContext {
 //      [orig: @0x5a44b0..0x5a4505, slot = NULL];
 //   2. the player-slot table: every active slot with an entity, the same team
 //      and game-type gates [orig: @0x5a4507..0x5a4597, slot passed].
+// Outside the death screen the drawer keeps only the local team; team 0 is
+// labelled only for a team-0 local player [orig: @0x5a3c6b..0x5a3c95].
 // The drawer's entry bails apply to both: never the local player, never a
 // CARRIED (Flags & 1) entity, only with a resolved item def
 // [orig: @0x5a39df/@0x5a39eb/@0x5a39fb] — a DEAD entity is still labelled

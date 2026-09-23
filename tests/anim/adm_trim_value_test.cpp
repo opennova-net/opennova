@@ -10,9 +10,9 @@ using namespace opennova::adm;
 
 int main(void) {
     const char *test_content =
-        "anim_idle                                \"Dt1IdleA.bad    \"\n"
-        "anim_run\t\t\"RunAnim.bad\"\n"
-        "anim_walk  \"  WalkAnim.bad  \"\n";
+        "anim_idle                                \"Dt1IdleA.bad    \"\r\n"
+        "anim_run\t\t\"RunAnim.bad\"\r\n"
+        "anim_walk  \"  WalkAnim.bad  \"\r\n";
 
     char temp_path[4096];
     snprintf(temp_path, sizeof(temp_path), "%s/adm_trim_test.adm", test_paths_temp_dir());

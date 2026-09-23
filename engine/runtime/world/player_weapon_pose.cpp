@@ -101,6 +101,17 @@ void usegun_fire_pose(World &world, const Entity &gun, const WeaponTableEntry *f
     carrier_weapon_world_pose(world, gun, fired, clip_before_consume, 0, out);
 }
 
+void controller_fire_pose(World &world, Entity &carrier, const WeaponTableEntry *fired,
+                          int32_t clip_before_consume, int32_t out[6]) {
+    // The controller helper poses the EWEAP carrier with its view tilt folded
+    // in, and asks for the point's direction, which turns the reported euler
+    // toward the authored direction.
+    // [orig: Entity_ComputeUserpointTransform @0x4DC83A, outDirection
+    //  @0x4DC829]
+    int32_t direction[3];
+    carrier_weapon_local_pose(world, carrier, fired, clip_before_consume, out, direction);
+}
+
 // [orig: Entity_CheckWeaponSeatFlags @0x540D00 -- an OnlyScoped weapon held by
 //  the local player answers no flag query until g_weaponScopeActive]
 bool local_weapon_seat_flag(const LocalPlayerWeapon &weapon, bool scope_settled, uint32_t mask) {
@@ -130,13 +141,7 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
     }
     if (mount && shooter->mount_type == SeatType::Controller &&
             (mount->item_attrib & kItemAttribEweap) != 0) {
-        // The controller helper poses the EWEAP carrier with its view tilt
-        // folded in, and asks for the point's direction, which turns the
-        // reported euler toward the authored direction.
-        // [orig: Entity_ComputeUserpointTransform @0x4DC83A, outDirection
-        //  @0x4DC829]
-        int32_t direction[3];
-        carrier_weapon_local_pose(world, *mount, fired, clip_before_consume, out, direction);
+        controller_fire_pose(world, *mount, fired, clip_before_consume, out);
         return;
     }
     // On-foot position + CameraOffset and undoubled recoil pitch.

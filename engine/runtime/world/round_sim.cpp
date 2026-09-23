@@ -611,6 +611,15 @@ int32_t material_energy_cost(uint8_t material) {
     }
 }
 
+// `fild; fsqrt; fistp` under the default round-to-nearest control word, then
+// `shl 8`. A negative operand is an invalid fsqrt whose integer-indefinite
+// result shifts to 0. [orig: @0x4E9142..0x4E9150, @0x4E915B..0x4E9169]
+int32_t fistp_sqrt_shl8(int32_t value) {
+    if (value < 0) return 0;
+    const int32_t root = static_cast<int32_t>(std::nearbyint(std::sqrt(double(value))));
+    return signed_from_u32(uint32_t(root) << 8);
+}
+
 bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
     if (cost == 0) return true;
     const int32_t squared = signed_from_u32(
@@ -618,13 +627,12 @@ bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
             uint32_t(retail_q16_mul_rhu(velocity.y, velocity.y)) +
             uint32_t(retail_q16_mul_rhu(velocity.z, velocity.z)));
     const int32_t energy = retail_q16_mul_rhu(squared, mass);
-    if (energy <= cost || mass <= 0 || squared <= 0) return false;
-    const int32_t speed = static_cast<int32_t>(std::sqrt(double(squared))) << 8;
+    if (energy <= cost) return false; // [orig: signed `jle` @0x4E9116]
     const int32_t remaining_squared = static_cast<int32_t>(
             (int64_t(energy - cost) * io::kFp16OneInt) / mass);
-    const int32_t remaining_speed =
-            static_cast<int32_t>(std::sqrt(double(remaining_squared))) << 8;
-    if (speed == 0) return false;
+    const int32_t speed = fistp_sqrt_shl8(squared);
+    const int32_t remaining_speed = fistp_sqrt_shl8(remaining_squared);
+    if (speed == 0) return false; // [orig: `test ecx, ecx; jz` @0x4E916C]
     const int32_t ratio = static_cast<int32_t>(
             (int64_t(remaining_speed) * io::kFp16OneInt) / speed);
     velocity.x = retail_q16_mul_rhu(velocity.x, ratio);
@@ -1924,11 +1932,20 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const bool entity_impact_handler_leg =
             collision.hit_class == ProjectileHitClass::StaticEntity ||
             collision.hit_class == ProjectileHitClass::DynamicEntity;
+        // The handler's material, section, impulse and effect block runs only
+        // for a target with an ItemDef [orig: @0x4E9584..0x4E95BD]. A decoded
+        // pool-1 wire projection has no registry twin, but it stands for a
+        // retail client entity built with its def, so it takes the block too.
+        // A def-less registry entity skips it and its damage call returns 0, so
+        // the round continues silently [orig: @0x4E7FCB..0x4E7FD9].
+        const bool wire_proxy_hit =
+                entity_impact_handler_leg && !collision.geometry_entity.valid();
+        const bool handler_has_def =
+                wire_proxy_hit || (target != nullptr && target->has_item_def);
         const int32_t material_cost = material_energy_cost(collision.surface_type);
-        const bool entity_absorbs = target != nullptr && target->has_item_def &&
-                material_cost == 0;
+        const bool entity_absorbs = handler_has_def && material_cost == 0;
         bool material_energy_survives = true;
-        if (entity_impact_handler_leg && target != nullptr && target->has_item_def) {
+        if (entity_impact_handler_leg && handler_has_def) {
             material_energy_survives =
                     subtract_material_energy(velocity_q16, r.mass_q16, material_cost);
             r.vel = vec_from_fixed(velocity_q16);
@@ -1942,7 +1959,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // [orig: the dead test `test byte ptr [esi+24h], 2` @0x4e95c3,
         //  `cmp dword ptr [eax+5Ch], 3` @0x4e95d0 storing 0 @0x4e95d6,
         //  `cmp ecx, 13h` @0x4e95db storing 0 @0x4e95e0; consumed @0x4e9817]
-        bool entity_effect_suppressed = false;
+        bool entity_effect_suppressed = entity_impact_handler_leg && !handler_has_def;
         if (entity_impact_handler_leg && target != nullptr &&
             (((target->flags & kEntityFlagDead) != 0) ||
              ((target->engine_flags & kEntityFlagDead) != 0)) &&
@@ -1961,8 +1978,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // inmatch/present_rows.cpp) and from the person bone-sphere walks
         // (collision_query.cpp `collision_raycast_person_sections`,
         // collision_trace.cpp), while the item CFAC face walk consults only the
-        // matrix-disabled bit, so a shot-out pane still stops ordinary rounds.
-        // The rocket family is what passes through it, by the report below.
+        // matrix-disabled bit, so a shot-out pane stays ray-visible; whether a
+        // round continues is the material-energy decision above.
         // [orig: the face walk's only per-section gate is `(boneMatrix+60) & 3`
         //  @0x4e4f12 in Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]
         // [orig: `cmp ecx, 0Fh` @0x4e964f, the husk gate `test byte ptr
@@ -1988,20 +2005,23 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     kGlassSmashSound, impact_position, target->bms_id,
                     target->handle.packed);
             target->section_mask |= bit;
-            // Survival is the material/remaining-energy decision below, also
-            // for ordinary bullets. The flags test @0x4e968a/outFlag store @0x4e969a
-            // is overwritten by the nonabsorbing damage result @0x4e98ba.
+            // Survival is the lifetime the material-energy charge and the
+            // damage return leave. The lawr|fgrenade flags test @0x4e968a and
+            // its outFlag store @0x4e969a are dead: Projectile_UpdatePhysics
+            // zeroes outFlag @0x4ea325 and never reads it after the call.
         }
 
-		if (!not_armed && target != nullptr && ammo != nullptr) {
+		if (!not_armed && target != nullptr && handler_has_def && ammo != nullptr) {
 			// The impact helper receives the ray's incoming direction, not
-			// the struck face normal. [orig: Projectile_UpdatePhysics @0x4E9D70,
-			// normalized ray @0x4EA20A, final argument @0x4EA73A]
-			const int32_t magnitude = fixed_magnitude(velocity_q16);
+			// the struck face normal: the tick-start ray, before any material
+			// energy charge. [orig: Projectile_UpdatePhysics @0x4E9D70,
+			// normalized ray @0x4EA181..0x4EA206 into the ray record @0x4EA20A, final
+			// argument @0x4EA71B]
+			const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
 			const int32_t inverse = magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-			const int32_t incoming[3] = { retail_q16_mul_rhu(inverse, velocity_q16.x),
-				retail_q16_mul_rhu(inverse, velocity_q16.y),
-				retail_q16_mul_rhu(inverse, velocity_q16.z) };
+			const int32_t incoming[3] = { retail_q16_mul_rhu(inverse, incoming_velocity_q16.x),
+				retail_q16_mul_rhu(inverse, incoming_velocity_q16.y),
+				retail_q16_mul_rhu(inverse, incoming_velocity_q16.z) };
 			const int32_t hit[3] = { impact_q16.x, impact_q16.y, impact_q16.z };
 			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
 		}
@@ -2056,7 +2076,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // CEffectEmitter_SetOrientationFromDirection @0x5e5d51] and the
         // direction helper emits it around world +Y, so a dirt puff rises out
         // of the ground instead of following the round into it.
-        imp.direction = flight_direction(r.vel);
+        imp.direction = flight_direction(vec_from_fixed(incoming_velocity_q16));
         if (collision.hit_class == ProjectileHitClass::Terrain ||
             collision.hit_class == ProjectileHitClass::Water) {
             imp.direction = Vec3{0.0f, 0.0f, 0.0f};
@@ -2191,7 +2211,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // the hit record and the kind (ammo word +0x76) to
         // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830;
         // the GLASS userpoint leg's residual is recorded in world/impact_scar.h].
-        if (impact_target != nullptr) {
+        if (impact_target != nullptr && !(entity_impact_handler_leg && !handler_has_def)) {
             const AmmoTableEntry *scar_ammo = world.tables.ammo.by_index(impact_ammo_index);
             scar_add_entry(world, collision, *impact_target,
                            scar_ammo != nullptr ? scar_ammo->scar_type : 0);
@@ -2279,22 +2299,26 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         push_round_debug(*this, event);
 
         // The entity handler zeros lifetime only for an absorbed hit or an
-        // exhausted material-energy budget. A survivor starts the next tick
-        // 0x800 Q16 beyond the face, with the common gravity/drag tail applied.
-        // There is no second sweep this tick. [orig: @0x4e98aa..0x4e98ca;
-        // Projectile_UpdatePhysics @0x4ea73f..0x4ea798, @0x4eaa58..0x4eaa69]
+        // exhausted material-energy budget. A survivor's next position is the
+        // tick-start ray point 0x800 Q16 past the hit distance: the handler is
+        // handed t - 0x800 and the arm then adds 0x1000 along the normalized
+        // ray (normDir = v * (2^32 / |v|)). The common gravity/drag tail then
+        // applies; there is no second sweep this tick. [orig: @0x4e98aa..0x4e98ca;
+        // Projectile_UpdatePhysics normDir @0x4EA181..0x4EA206, hit point
+        // @0x4EA603..0x4EA65C, @0x4ea73f..0x4ea798, @0x4eaa58..0x4eaa69]
         if (entity_impact_handler_leg && !entity_absorbs && material_energy_survives &&
                 !submerged_stall && !has_dud_replacement) {
-            const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
-            const auto beyond = [&](int32_t hit, int32_t component) {
-                const int32_t direction = magnitude > 0 ? static_cast<int32_t>(
-                        int64_t(component) * io::kFp16OneInt / magnitude) : 0;
-                return hit + retail_q16_mul_rhu(direction, 0x800);
+            const int32_t inverse =
+                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
+            const int32_t along = collision.distance_q16 + 0x800;
+            const auto beyond = [&](int32_t start, int32_t component) {
+                return start + retail_q16_mul_rhu(along,
+                        retail_q16_mul_rhu(component, inverse));
             };
             const FixedVec3 next_position{
-                beyond(collision.position_q16.x, incoming_velocity_q16.x),
-                beyond(collision.position_q16.y, incoming_velocity_q16.y),
-                beyond(collision.position_q16.z, incoming_velocity_q16.z)};
+                beyond(position_q16.x, incoming_velocity_q16.x),
+                beyond(position_q16.y, incoming_velocity_q16.y),
+                beyond(position_q16.z, incoming_velocity_q16.z)};
             r.pos = vec_from_fixed(next_position);
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
