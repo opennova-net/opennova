@@ -411,7 +411,7 @@ void test_tdm_limit_and_clock_decisions() {
     CHECK(draw.has_value() && *draw == 0);
 
     // Retail returns from the entire TDM arm when score_limit is zero, even at t=0.
-    // [orig: Server_CheckWinConditions @0x51AE47]
+    // [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
     world->match.configure(rules(kTdm, 1, 0));
     for (int i = 0; i < 60 * 62; ++i)
         world->match.advance_tick(*world);
@@ -572,7 +572,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         // With neither kind of capture source in the mission retail skips the
         // capture counters entirely; absence does not mean "outside."
-        // [orig: Server_UpdateCaptureZoneProximity @0x5088F6..0x50890A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x508C33..0x508C45]
         world->match.advance_tick(*world);
         CHECK(state->objective_ticks == 3);
     }
@@ -611,7 +611,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
         // The existence of any numbered capturable entity globally supersedes
         // every type-6006 volume. This player is therefore outside and decays,
         // despite standing in the hill trigger.
-        // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x508C33..0x508C4F]
         world->match.advance_tick(*world);
         CHECK(world->match.player(solo)->objective_ticks == 2);
     }
@@ -769,10 +769,11 @@ void test_retail_zone_and_tkoth_win_quirks() {
         world->registry.spawn(3, hill);
         tick_to_zero(*world);
 
-        // The retail timeout comparison for a unique team-4 lead jumps to
-        // LABEL_95, the team-1 round-end label. Preserve that observable bug;
-        // the earlier hill-limit arm still reports team 4 normally.
-        // [orig: Server_CheckWinConditions @0x51B01A..0x51B040]
+        // The retail timeout comparison for a unique team-4 lead pushes the
+        // team-1 winner. Preserve that observable bug; the earlier hill-limit
+        // arm still reports team 4 normally.
+        // [orig: Server_CheckWinConditions @0x51B07D..0x51B0D6, the team-4
+        // lead's `push 1` @0x51B0D0]
         const auto timeout_winner = world->match.winner_if_finished(*world);
         CHECK(timeout_winner.has_value() && *timeout_winner == 1);
     }

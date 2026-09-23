@@ -251,8 +251,9 @@ void test_spawn_zone_presence_and_zone_info() {
     // The join-time respawn-pending gate: ASH offers deploy-selectable zones
     // [orig: SpawnZoneList_GetCount() > 0 @0x51a6f2 -> stateByte |= 0x10; D-NET-156].
     CHECK(f.w.zones.has_spawn_zone());
-    // The 0x0D packed zone byte = zoneNumber + 32*rank [orig: ZoneSlotChain_GetZoneInfo
-    // @0x503eeb]. The two zone-2 entities share a number: descending rank within it —
+    // The 0x0D packed zone byte = zoneNumber + 32*rank [orig:
+    // serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo call
+    // @0x503EEB)]. The two zone-2 entities share a number: descending rank within it —
     // golden ASH_I5A bunker 0x22 = zone 2 rank 1.
     const Entity *z2a = f.w.registry.get(f.z2a);
     const Entity *z2b = f.w.registry.get(f.z2b);

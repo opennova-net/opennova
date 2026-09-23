@@ -315,7 +315,7 @@ class Match {
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
     // Mirrors the player-slot spectator latch (+100567) onto the roster row.
-    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E76]
+    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E74]
     void set_player_spectator(EntityHandle entity, bool spectator);
     const MatchStats &team_stats(uint8_t team) const;
 

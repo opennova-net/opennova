@@ -17,8 +17,9 @@
 // remote authority Player is net-snapped and does not traverse the local physics
 // resolver, but its retail MoveOrder moving bit still gates the same overlap.
 // This preserves the original collision semantics without a second remote-only
-// objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0,
-// capture callback callsite @0x4B2F90..0x4B2FD0]
+// objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0 — the
+// overlap test @0x4B2F8D..0x4B2FA5 feeding the capture touch
+// @0x4B31DD..0x4B3238]
 #pragma once
 
 #include <cstdint>

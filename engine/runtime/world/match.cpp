@@ -197,9 +197,10 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t g
     // pairs with this exact descending Knuth-gap shell sort. Row order is
     // wire-visible through the recipient index in S2C 0x1D and the top three
     // rows of its non-team form.
-    // [orig: slot scan @0x508F30; Player_ComputeScore @0x509043;
-    // CPairList_AddEntry @0x50905F; CPairList_ShellSortByValue @0x50907F /
-    // @0x526CF0]
+    // [orig: Server_BuildEndOfRoundScoreboard @0x508F30 (the slot scan: the
+    // Player_ComputeScore call @0x509043, the CPairList_AddEntry call
+    // @0x50905F, the CPairList_ShellSortByValue call @0x50907F);
+    // CPairList_ShellSortByValue @0x526CF0]
     std::sort(players.begin(), players.end(),
               [](const MatchResultPlayer &a, const MatchResultPlayer &b) {
                   return a.identity.slot < b.identity.slot;
@@ -850,7 +851,8 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     }
     // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
     // scoring): the FlagDrop-shaped record is the feed-less lane.
-    // [orig: Server_SendDestructibleDeathPacket @0x43aa6b / @0x43ab40]
+    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 (the
+    // Server_SendDestructibleDeathPacket calls @0x43AA6B / @0x43AB40)]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 EntityHandle{},
                                 flag_handle,
@@ -1094,7 +1096,9 @@ void Match::update_objective_proximity(const World &world) {
 
         // Pool-1 flag/objective types use a fixed 20-unit horizontal radius.
         // A carried objective is tested at its owner's live position.
-        // [orig: Server_UpdateCaptureZoneProximity @0x50870D..0x50880A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x5087F4..0x50899B — the
+        //  carrier backref @0x508857..0x5088A6, the 20-unit test
+        //  @0x5088BF..0x508925]
         for (const Entity *objective : proximity_objectives) {
             const Entity *position_source = objective;
             if (const Entity *owner = world.registry.get(objective->primary_occupant))
@@ -1136,7 +1140,7 @@ void Match::update_objective_proximity(const World &world) {
         // A numbered capturable entity anywhere in the mission globally wins
         // source precedence over every type-6006 volume. If neither source
         // family exists, retail skips these counters instead of decaying them.
-        // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x508C33..0x508C4F]
         const bool has_capture_source =
             !capturable_entities.empty() || !hills.empty();
         if (!has_capture_source)
@@ -1365,8 +1369,10 @@ void Match::update_flag_objectives(World &world) {
             continue;
         }
         // An enemy or neutral flag is picked up when the toucher carries
-        // nothing. [orig: LABEL_19 @0x4AD936 -> Entity_TryAttachToVehicle
-        // @0x4AD944, Server_DispatchScoringEvent @0x4AD94B, +0x124 = 0 @0x4AD955]
+        // nothing. [orig: Entity_ProcessWaypointInteraction @0x4AD820 — the
+        // carried-object test @0x4AD936, the Entity_TryAttachToVehicle call
+        // @0x4AD944, the Server_DispatchScoringEvent call @0x4AD94B, +0x124 = 0
+        // @0x4AD955]
         record_flag_pickup(world, contact.source, contact.target);
     }
 }
@@ -1544,7 +1550,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
 
     if (rules_.game_type == gt::kTeamDeathmatch) {
         // A zero score limit returns from the entire TDM arm before clock
-        // expiry. [orig: Server_CheckWinConditions @0x51AE47]
+        // expiry. [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
         if (rules_.score_limit == 0)
             return std::nullopt;
         for (uint8_t team = 0; team < teams_.size(); ++team) {
@@ -1645,7 +1651,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // dword_C8FF08) with the same two award arms, but the clock-zero tail
         // never compares counts: lim2 == 0 -> 2, lim1 == 0 -> 1, else 0 (both
         // limits nonzero is always a draw). [orig: Server_CheckWinConditions
-        // @0x51B1A0..0x51B208 — @0x51B1C6 / @0x51B1E4 / @0x51B1F5 / @0x51B202 /
+        // @0x51B199..0x51B208 — @0x51B1C6 / @0x51B1E4 / @0x51B1F5 / @0x51B202 /
         // @0x51B206]
         const int32_t team1 = teams_[1][MatchStats::kTargetsDestroyed];
         const int32_t team2 = teams_[2][MatchStats::kTargetsDestroyed];
