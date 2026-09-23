@@ -106,9 +106,24 @@ int cmd_info(const char *path, int verbose) {
 		if (!verbose && li > 0) continue;
 		for (size_t p = 0; p < lod.render_object_count; ++p) {
 			const ThreediRenderObject &ro = lod.render_objects[p];
-			std::printf("    part %2zu parent %2d  strips %d+%d  abs(model) %.3f %.3f %.3f  radius %.3f\n", p,
+			std::printf("    part %2zu parent %2d  strips %d+%d  abs(model) %.5f %.5f %.5f  radius %.3f\n", p,
 					ro.parent_index, ro.num_strips, ro.num_alpha_strips, ro.abs[0], ro.abs[1], ro.abs[2],
 					ro.bounding_radius);
+		}
+		if (verbose > 1) {
+			for (size_t s = 0; s < lod.strip_count; ++s) {
+				const ThreediTriangleStrip &st = lod.strips[s];
+				std::printf("    strip %zu mat %d strip %d idx %d+%u verts %d+%d bones[%d]", s, st.material_index,
+						st.is_strip, st.index_offset, st.num_indices, st.start_vertex, st.num_vertices,
+						st.bone_table_length);
+				for (int b = 0; b < st.bone_table_length && b < 16; ++b) std::printf(" %u", st.bone_table[b]);
+				std::printf("\n");
+			}
+			for (size_t p = 0; p < lod.render_object_count; ++p) {
+				const ThreediRenderObject &ro = lod.render_objects[p];
+				std::printf("    robj %zu center %.3f %.3f %.3f rel %.3f %.3f %.3f\n", p, ro.bounding_center[0],
+						ro.bounding_center[1], ro.bounding_center[2], ro.rel[0], ro.rel[1], ro.rel[2]);
+			}
 		}
 		for (size_t a = 0; a < lod.part_animation_count; ++a) {
 			const ThreediPartAnimation &pa = lod.part_animations[a];
@@ -135,6 +150,13 @@ int cmd_info(const char *path, int verbose) {
 			std::printf("    uvgen u %u v %u\n", mt.u_params.style, mt.v_params.style);
 	}
 	for (uint32_t i = 0; i < m.ctrl.count; ++i) std::printf("register %u  %s\n", i, m.ctrl.registers[i].name);
+	std::printf("mtrx %u  occl objects %zu  lights %zu\n", m.mtrx.count, m.occlusion_object_count, m.light_count);
+	if (verbose > 1)
+		for (uint32_t i = 0; i < m.mtrx.count; ++i) {
+			const float *r = m.mtrx.matrices[i].m;
+			std::printf("    mtrx %u  %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f\n", i,
+					r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]);
+		}
 	for (size_t i = 0; i < m.user_point_count; ++i) {
 		const ThreediUserPoint &u = m.user_points[i];
 		std::printf("userpoint %-15s  type %d  part %d  pos(mission) %.3f %.3f %.3f  dir %.3f %.3f %.3f\n", u.name,
@@ -153,8 +175,13 @@ int cmd_info(const char *path, int verbose) {
 				c.object_count, c.vertex_count, c.face_count, c.volume_count, b[0], b[1], b[2], b[3], b[4], b[5]);
 		for (size_t o = 0; o < c.object_count; ++o) {
 			const ThreediCollisionObject &co = c.objects[o];
-			std::printf("    cobj %zu parent %d  verts %d faces %d volumes %d\n", o, co.parent_subobject_index,
+			std::printf("    cobj %zu parent %d  verts %d faces %d volumes %d", o, co.parent_subobject_index,
 					co.num_vertices, co.num_faces, co.num_bounding_volumes);
+			if (verbose)
+				std::printf("  offset %.3f %.3f %.3f  sphere %.3f %.3f %.3f r %.3f", co.offset[0] / 65536.0,
+						co.offset[1] / 65536.0, co.offset[2] / 65536.0, co.med[0] / 65536.0, co.med[1] / 65536.0,
+						co.med[2] / 65536.0, co.radius / 65536.0);
+			std::printf("\n");
 		}
 		if (verbose) {
 			size_t v = 0, f = 0, p = 0;
@@ -265,9 +292,26 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			header = true;
 			continue;
 		}
-		if (key == "v" || key == "t") {
+		if (key == "v" || key == "t" || key == "bones") {
 			if (strip == nullptr) {
 				ps.error("'" + key + "' outside a strip");
+				continue;
+			}
+			if (key == "bones") {
+				// The skinned strip's bone table: the parts its vertices'
+				// local bone indices address (at most 16, STRP bone_table).
+				if (!model.skinned || !strip->vertices.empty()) {
+					ps.error("bones needs a skinned model and must precede the strip's vertices");
+					continue;
+				}
+				int bone = 0;
+				while (in >> bone) {
+					if (bone < 0 || bone > 255 || strip->bone_table.size() >= 16) {
+						ps.error("bones takes at most 16 part indices");
+						break;
+					}
+					strip->bone_table.push_back(static_cast<uint8_t>(bone));
+				}
 				continue;
 			}
 			if (key == "v") {
@@ -280,7 +324,27 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					ps.error("strip exceeds 65535 vertices (u16 indices)");
 					continue;
 				}
-				strip->vertices.push_back(render_vertex(p, n, uv));
+				ThreediVertex vert = render_vertex(p, n, uv);
+				if (model.skinned) {
+					// Three influences: local indices into the strip's bone
+					// table and their weights (the fourth index stays 0).
+					int bi[3];
+					double w[3];
+					if (!(in >> bi[0] >> bi[1] >> bi[2]) || !read_doubles(in, w, 3)) {
+						ps.error("a skinned v needs i0 i1 i2 w0 w1 w2 after the uv");
+						continue;
+					}
+					for (int k = 0; k < 3; ++k) {
+						if (bi[k] < 0 || bi[k] >= static_cast<int>(strip->bone_table.size())) {
+							ps.error("v bone index outside the strip's bone table");
+							break;
+						}
+						vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
+						vert.bone_weights[k] = static_cast<float>(w[k]);
+					}
+					vert.is_skinned = 1;
+				}
+				strip->vertices.push_back(vert);
 			} else {
 				long a, b, c;
 				if (!(in >> a >> b >> c) || a < 0 || b < 0 || c < 0) {
@@ -360,6 +424,13 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			int on = 0;
 			in >> on;
 			model.tangents = on != 0;
+		} else if (key == "skinned") {
+			// GHDR mesh type 2: the parts are the skeleton's bones, strips
+			// carry bone tables and vertices carry weights.
+			int on = 0;
+			in >> on;
+			if (!model.lods.empty()) ps.error("skinned must precede the first lod");
+			model.skinned = on != 0;
 		} else if (key == "register") {
 			std::string name;
 			if (!(in >> name) || name.size() > 23) {
@@ -539,6 +610,17 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 			read_doubles(in, o, 3);
 			cobj = model.add_cobj(parent, ThreediBuildVec3{o[0], o[1], o[2]});
+		} else if (key == "csphere") {
+			// A bone section's hit sphere (retail persons: one per bone).
+			double c[3], r = 0;
+			if (cobj < 0 || !read_doubles(in, c, 3) || !(in >> r) || r < 0) {
+				ps.error("csphere needs an open cobj and cx cy cz radius");
+				continue;
+			}
+			ThreediBuildCollisionObject &o = model.collision[cobj];
+			o.sphere = true;
+			o.sphere_center = ThreediBuildVec3{c[0], c[1], c[2]};
+			o.sphere_radius = r;
 		} else if (key == "cvol") {
 			int type = 0, flags = 0;
 			double b[6];
@@ -582,6 +664,9 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 				verts += s.vertices.size();
 				indices += s.indices.size();
 				if (s.indices.size() > 65535) ps.error("a strip exceeds 65535 indices (u16 STRP count)");
+				if (m.skinned && s.bone_table.empty()) ps.error("a skinned strip has no 'bones' table");
+				for (uint8_t b : s.bone_table)
+					if (b >= lod.parts.size()) ps.error("a strip's bone table names a part the LOD lacks");
 			}
 		for (const ThreediPartAnimation &pa : lod.panm)
 			if (pa.subobject_index >= lod.parts.size())

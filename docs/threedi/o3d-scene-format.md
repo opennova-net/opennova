@@ -23,6 +23,7 @@ Blender add-on (`tools/blender/opennova_3di`) writes it; any other exporter may.
 | --- | --- | --- |
 | `model` | name | GHDR name, at most 15 characters |
 | `tangents` | 0/1 | vertices carry tangent/bitangent (tangent-reading shaders) |
+| `skinned` | 0/1 | GHDR mesh type 2 (before the first `lod`): parts are bones, strips carry bone tables, vertices weights |
 | `register` | NAME | a CTRL register; must be in `threedi_ctrl_catalog.h` |
 | `material` | SHADER | opens a material (shader tag, e.g. `FF_ST_OP`, `FFP_GLASS`) |
 | `texture` | name [slot type flags] | a texture on the open material (16 characters max; slot 1 diffuse) |
@@ -32,7 +33,8 @@ Blender add-on (`tools/blender/opennova_3di`) writes it; any other exporter may.
 | `lod` | threshold [type] | opens a render LOD (projected-radius threshold; 0 = coarsest) |
 | `part` | parent x y z | opens a part in the LOD; parent is an earlier part or itself (root); the pivot |
 | `strip` | material [alpha] | opens a triangle-list strip on the open part |
-| `v` | x y z nx ny nz u v | a strip vertex (at most 65535 per strip) |
+| `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices; before its vertices) |
+| `v` | x y z nx ny nz u v [i0 i1 i2 w0 w1 w2] | a strip vertex (at most 65535 per strip); skinned: three bone-table indices and weights |
 | `t` | a b c | a strip triangle |
 | `panm` | part parent | a part-animation row in the open LOD |
 | `track` | target style REG\|- rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`; rotations in 1/16384 turn, others 8.8; `axis` 1/2/3 for `trans` |
@@ -40,6 +42,7 @@ Blender add-on (`tools/blender/opennova_3di`) writes it; any other exporter may.
 | `cobj` | parent [ox oy oz] | opens collision section i (pairs with LOD0 part i) |
 | `cv` | x y z | a collision vertex |
 | `cf` | a b c [poly_type flags] | a bullet face (poly_type = impact material; the effect row is material + 4) |
+| `csphere` | cx cy cz r | the open section's hit sphere (a skinned model's bone sections) |
 | `cvol` | type flags minx miny minz maxx maxy maxz | an axis-box volume (six planes) |
 | `cvolume` | type flags minx miny minz maxx maxy maxz | a convex volume whose planes follow as `cp` lines |
 | `cp` | nx ny nz d [flags] | a plane of the open `cvolume`: outward normal, `n . p + d == 0` on it; retail flags seams 1 |
@@ -51,7 +54,12 @@ vehicle contact, 19 `CP` player-only, ...; docs/world/world-wac-ai-re.md §15).
 
 The build fails, naming the line, on an unknown record or register, a malformed
 field, an index outside its strip or collision object, a strip over 65535
-vertices or indices, more than 255 parts, more than 8 `sitex` seats, a volume
+vertices or indices, more than 255 parts, a skinned strip without a bone table
+or naming a missing part, more than 8 `sitex` seats, a volume
 with fewer than 4 planes, or a model the writer refuses. The minted bytes are
-read back before the file is written. The ctest fixture is
-`tests/fixtures/threedi/o3d/spinner.o3d`.
+read back before the file is written. The ctest fixtures are
+`tests/fixtures/threedi/o3d/spinner.o3d` and `skinned.o3d`.
+
+A skinned model's strips are all owned by the root ROBJ while each part keeps
+the bounds of the geometry authored on it (the retail layout; the builder
+applies it).

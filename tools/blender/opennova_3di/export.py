@@ -21,6 +21,14 @@
 #                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP) on
 #                 part ##, the convex hull of its vertices.
 #   Material_<i>_<SHADER>  material: export order i, shader tag SHADER.
+#   Armature      a skinned model: one Armature under the LOD root whose
+#                 bones are named BN## (part ##, 1-based; the bone head is the
+#                 pivot, the bone parent the part parent). Its "## Mesh<n>"
+#                 meshes are weighted by BN## vertex groups (at most three
+#                 influences a vertex); strips split so no bone table exceeds
+#                 16 parts. Collision: each bone's section carries a hit
+#                 sphere around the vertices it dominates, the mesh part's
+#                 section the bullet faces (the retail person layout).
 #   !name         ignored.
 # Blender's own `.001` duplicate suffixes are stripped before classification
 # (object names are unique per .blend, so LOD1's PN01 is "PN01.001"); two
@@ -43,6 +51,7 @@ ALPHA_SHADERS = {"FF_ST_AB", "FF_ST_AD", "FF_ST_AB_LUM", "FF_ST_AD_LUM", "FF_MT_
                  "FF_MT_AD_LUM"}
 BLENDER_SUFFIX = re.compile(r"\.\d{3,}$")
 PART_RE = re.compile(r"^PN(\d{2})$")
+BONE_RE = re.compile(r"^BN(\d{2})(?: .*)?$")
 MESH_RE = re.compile(r"^(\d{2}) Mesh(\d+)$")
 CENTER_RE = re.compile(r"^_(\d{2}) center$")
 ATTACH_RE = re.compile(r"^~(\d{2})([a-z]*) attach$")
@@ -125,6 +134,7 @@ class Lod:
         self.attach = {}    # child part index -> parent part index
         self.points = []    # (type letter, part index or -1, label, object)
         self.volumes = []   # (type, flags, part index, object)
+        self.armature = None  # skinned: the Armature; parts are its bones
 
 
 class Exporter:
@@ -138,6 +148,8 @@ class Exporter:
         self.materials = []
         self.material_index = {}
         self.textures = {}
+        self.skinned = False
+        self.bone_points = {}  # skinned LOD0: part -> rest positions it dominates
 
     # --- helpers ------------------------------------------------------------
     def register(self, name):
@@ -183,6 +195,20 @@ class Exporter:
         for ob in descendants(root):
             raw = clean_name(ob.name)
             if raw.startswith("!"):
+                continue
+            if ob.type == "ARMATURE":
+                if lod.armature is not None:
+                    raise ExportError(f"{root.name}: two armatures ({lod.armature.name}, {ob.name})")
+                lod.armature = ob
+                for bone in ob.data.bones:
+                    bm = BONE_RE.match(clean_name(bone.name))
+                    if not bm:
+                        raise ExportError(f"{ob.name}: bone '{bone.name}' is not named BN##")
+                    index = int(bm.group(1)) - 1
+                    if index < 0:
+                        raise ExportError(f"{ob.name}: bones start at BN01")
+                    claim(("part", index), bone)
+                    lod.parts[index] = bone
                 continue
             m = PART_RE.match(raw)
             if m and ob.type == "EMPTY":
@@ -238,12 +264,18 @@ class Exporter:
                     lod.volumes.append((VOLUME_CODES[code], flags, int(nn) - 1, ob))
                 continue
         if not lod.parts:
-            raise ExportError(f"{root.name}: no PN## part empties under the LOD root")
+            raise ExportError(f"{root.name}: no PN## part empties (or BN## armature bones) under the LOD root")
+        if lod.armature is not None and any(getattr(p, "type", None) == "EMPTY" for p in lod.parts.values()):
+            raise ExportError(f"{root.name}: a skinned LOD's parts are its BN## bones, not PN## empties")
         count = max(lod.parts) + 1
         missing = [i + 1 for i in range(count) if i not in lod.parts]
         if missing:
             raise ExportError(f"{root.name}: parts are not contiguous from PN01 (missing PN{missing[0]:02d})")
         for index, meshes in lod.meshes.items():
+            if lod.armature is not None:
+                if index not in lod.parts:
+                    raise ExportError(f"{root.name}: mesh '{index + 1:02d} Mesh…' names a part the armature lacks")
+                continue
             if index not in lod.parts:
                 raise ExportError(f"{root.name}: mesh '{index + 1:02d} Mesh…' has no PN{index + 1:02d}")
             owner = [self.owning_part(ob) for _, ob in meshes]
@@ -262,6 +294,11 @@ class Exporter:
         return None
 
     def part_parent(self, lod, index):
+        if lod.armature is not None:
+            bone = lod.parts[index]
+            if bone.parent is None:
+                return 0
+            return int(BONE_RE.match(clean_name(bone.parent.name)).group(1)) - 1
         if index == 0:
             return 0
         if index in lod.attach:
@@ -270,6 +307,8 @@ class Exporter:
         return above if above is not None else 0
 
     def part_pivot(self, lod, index):
+        if lod.armature is not None:
+            return self.mission(lod.armature.matrix_world @ lod.parts[index].head_local)
         ob = lod.centers.get(index, lod.parts[index])
         return self.mission(ob.matrix_world.translation)
 
@@ -306,7 +345,75 @@ class Exporter:
         finally:
             ev.to_mesh_clear()
 
+    def skinned_strips(self, ob, strips, collect_bones):
+        """A skinned mesh's triangles grouped per material into strips whose
+        bone tables stay within 16 parts. Each corner carries its rest-pose
+        position and up to three (part, weight) influences from BN## groups."""
+        groups = {}
+        for g in ob.vertex_groups:
+            m = BONE_RE.match(clean_name(g.name))
+            if m:
+                groups[g.index] = int(m.group(1)) - 1
+        ev = ob.evaluated_get(self.depsgraph)
+        mesh = ev.to_mesh()
+        try:
+            mesh.calc_loop_triangles()
+            mw = ob.matrix_world
+            nmat = mw.to_3x3().inverted_safe().transposed()
+            normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
+            uv_layer = mesh.uv_layers.active
+            influences = []
+            for v in mesh.vertices:
+                w = sorted(((g.weight, groups[g.group]) for g in v.groups if g.group in groups and g.weight > 1e-4),
+                           reverse=True)[:3]
+                if not w:
+                    raise ExportError(f"{ob.name}: vertex {v.index} has no BN## weight")
+                total = sum(x for x, _ in w)
+                influences.append([(b, x / total) for x, b in w])
+                if collect_bones:
+                    self.bone_points.setdefault(w[0][1], []).append(self.mission(mw @ v.co))
+            per_material = {}
+            for tri in mesh.loop_triangles:
+                slot = tri.material_index
+                mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
+                corners = []
+                for li in tri.loops:
+                    loop = mesh.loops[li]
+                    p = mw @ mesh.vertices[loop.vertex_index].co
+                    n = normals[li].vector if normals is not None else loop.normal
+                    n = (nmat @ n).normalized()
+                    uv = uv_layer.data[li].uv if uv_layer is not None else (0.0, 0.0)
+                    pm, nm = self.mission(p), self.mission(n)
+                    corners.append(((pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], uv[0], 1.0 - uv[1]),
+                                    influences[loop.vertex_index]))
+                per_material.setdefault(self.material_for(mat), []).append(corners)
+            for mi, tris in per_material.items():
+                current = None
+                for corners in tris:
+                    need = {b for _, inf in corners for b, _ in inf}
+                    if current is None or len(current["table"] | need) > 16:
+                        current = {"table": set(), "order": [], "verts": [], "index": {}, "tris": []}
+                        strips.setdefault(mi, []).append(current)
+                    for b in sorted(need - current["table"]):
+                        current["table"].add(b)
+                        current["order"].append(b)
+                    local = {b: i for i, b in enumerate(current["order"])}
+                    ids = []
+                    for vert, inf in corners:
+                        inf3 = (inf + [(inf[0][0], 0.0)] * 3)[:3]
+                        full = vert + tuple(local[b] for b, _ in inf3) + tuple(w for _, w in inf3)
+                        key = tuple(round(x, 5) for x in full)
+                        if key not in current["index"]:
+                            current["index"][key] = len(current["verts"])
+                            current["verts"].append(full)
+                        ids.append(current["index"][key])
+                    current["tris"].append(ids)
+        finally:
+            ev.to_mesh_clear()
+
     def emit_lod(self, lod, lines):
+        if lod.armature is not None:
+            return self.emit_skinned_lod(lod, lines)
         threshold = lod.root.o3d.lod_threshold
         lines.append(f"lod {threshold} gnrc  # {lod.root.name}")
         count = len(lod.parts)
@@ -329,6 +436,32 @@ class Exporter:
             lines.append(f"panm {i} {self.part_parent(lod, i)}")
             for t in lod.parts[i].o3d.tracks:
                 lines.append(self.track_line(t))
+
+    def emit_skinned_lod(self, lod, lines):
+        threshold = lod.root.o3d.lod_threshold
+        lines.append(f"lod {threshold} gnrc  # {lod.root.name}")
+        count = len(lod.parts)
+        primary = lod is self.lod0
+        for i in range(count):
+            lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # BN{i + 1:02d}")
+            strips = {}
+            for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
+                self.skinned_strips(ob, strips, primary)
+            for mi in sorted(strips):
+                mat = self.materials[mi]
+                alpha = 1 if self.shader_of(mat) in ALPHA_SHADERS else 0
+                for s in strips[mi]:
+                    if len(s["verts"]) > 65535:
+                        raise ExportError(f"BN{i + 1:02d}: one strip has more than 65535 vertices")
+                    lines.append(f"strip {mi} {alpha}")
+                    lines.append("bones " + " ".join(str(b) for b in s["order"]))
+                    for v in s["verts"]:
+                        lines.append("v " + fmt(*v[:8]) + " " + " ".join(str(int(x)) for x in v[8:11]) + " " +
+                                     fmt(*(float(x) for x in v[11:14])))
+                    for t in s["tris"]:
+                        lines.append(f"t {t[0]} {t[1]} {t[2]}")
+        for i in range(count):
+            lines.append(f"panm {i} {self.part_parent(lod, i)}")
 
     def track_line(self, t):
         style = int(t.style)
@@ -474,7 +607,22 @@ class Exporter:
             mn, mx, planes = self.hull_planes(ob)
             sections[part]["volumes"].append((vtype, flags, mn, mx, planes))
         for i, s in enumerate(sections):
-            lines.append(f"cobj {self.part_parent(lod0, i)}")
+            if not self.skinned:
+                lines.append(f"cobj {self.part_parent(lod0, i)}")
+            else:
+                # The retail person layout: every section sits at its bone's
+                # pivot; a bone section carries a hit sphere around the
+                # vertices the bone dominates (none: a zero sphere), the mesh
+                # part's section the bullet faces.
+                lines.append(f"cobj {self.part_parent(lod0, i)} " + fmt(*self.part_pivot(lod0, i)))
+                if not s["verts"]:
+                    pts = self.bone_points.get(i, [])
+                    if pts:
+                        c = [(min(p[k] for p in pts) + max(p[k] for p in pts)) * 0.5 for k in range(3)]
+                        r = max(sum((p[k] - c[k]) ** 2 for k in range(3)) ** 0.5 for p in pts)
+                    else:
+                        c, r = [0.0, 0.0, 0.0], 0.0
+                    lines.append("csphere " + fmt(*(float(x) for x in c), float(r)))
             for v in s["verts"]:
                 lines.append("cv " + fmt(*v))
             for (a, b, c), poly in s["faces"]:
@@ -502,6 +650,27 @@ class Exporter:
         self.context.view_layer.update()
         roots = self.lod_roots()
         lods = [self.classify(r, i == 0) for i, r in enumerate(roots)]
+        self.lod0 = lods[0]
+        self.skinned = lods[0].armature is not None
+        if any((l.armature is not None) != self.skinned for l in lods):
+            raise ExportError("every LOD of a skinned model needs its BN## armature")
+        # Skinned meshes are read in the armature's rest pose (the bind pose
+        # the vertices are stored in); the scene's pose is restored after.
+        rest = [(l.armature.data, l.armature.data.pose_position) for l in lods if l.armature is not None]
+        for data, _ in rest:
+            data.pose_position = "REST"
+        if rest:
+            self.context.view_layer.update()
+            self.depsgraph = self.context.evaluated_depsgraph_get()
+        try:
+            return self.emit(name, out_path, out_dir, lods)
+        finally:
+            for data, position in rest:
+                data.pose_position = position
+            if rest:
+                self.context.view_layer.update()
+
+    def emit(self, name, out_path, out_dir, lods):
         bullet_index = self.props.poly_collision_lod
         if bullet_index >= len(lods):
             raise ExportError(f"poly_collision_lod {bullet_index} names no LOD (there are {len(lods)})")
@@ -522,7 +691,8 @@ class Exporter:
                      for l in lod_lines]
         self.emit_materials(material_lines)
 
-        text = ["o3d 1", f"model {name}"] + [f"register {r}" for r in self.registers] + material_lines + \
+        text = ["o3d 1", f"model {name}"] + (["skinned 1"] if self.skinned else []) + \
+            [f"register {r}" for r in self.registers] + material_lines + \
             lod_lines + tail_lines
         o3d_path = os.path.splitext(out_path)[0] + ".o3d"
         with open(o3d_path, "w", newline="\n") as f:

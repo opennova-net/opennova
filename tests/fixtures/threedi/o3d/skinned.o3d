@@ -1,0 +1,33 @@
+o3d 1
+# A three-part skinned fixture (tests/threedi/o3d_cli_test.cpp --skinned):
+# part 0 the root bone, part 1 a child bone, part 2 the mesh part the strip is
+# authored on. The builder moves strip ownership to the root ROBJ and keeps
+# the bounds on part 2 (the retail skinned layout).
+model SKIN
+skinned 1
+material VS_SKBASIC
+texture skin.tga
+lod 128 gnrc
+part 0 0 0 0
+part 0 0 0 1
+part 0 0 0 -1
+strip 0 0
+bones 0 1
+v 1 1 0 0 0 1 0 0 0 1 0 1 0 0
+v -1 1 0 0 0 1 0 1 0 1 0 0.5 0.5 0
+v -1 -1 1 0 0 1 1 1 1 0 0 1 0 0
+v 1 -1 1 0 0 1 1 0 1 0 0 0.75 0.25 0
+t 0 1 2
+t 0 2 3
+panm 0 0
+panm 1 0
+panm 2 0
+cobj 0 0 0 0
+csphere 0 0 0 0.5
+cobj 0 0 0 1
+csphere 0 0 1 0.25
+cobj 0 0 0 -1
+cv 1 1 0
+cv -1 1 0
+cv -1 -1 1
+cf 0 1 2 1

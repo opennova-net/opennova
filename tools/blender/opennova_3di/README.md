@@ -34,6 +34,15 @@ F16_LOD0              Empty, custom property _lod_index = 0
 F16_LOD1              Empty, _lod_index = 1 (same names; Blender's .001 is ignored)
 ```
 
+A skinned model (a person) replaces the `PN##` empties with one Armature under
+each LOD root whose bones are `BN01`, `BN02`, ... (the bone head is the pivot,
+the bone parent the part parent). Its `## Mesh<n>` meshes carry an Armature
+modifier and `BN##` vertex groups (up to three weights a vertex; the export
+reads the rest pose). To reuse retail animations, match the retail rig: JO's
+people all share one 20-bone rig (`opennova-3di info US01.3di` prints its
+pivots), and animations pair with bones by index. Each bone gets a hit sphere
+around the vertices it dominates; the bullet faces go on the mesh's part.
+
 Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
 `Material_1_FFP_GLASS`); the first image texture node is exported as a 32-bit
 TGA (file names at most 15 characters).

@@ -52,6 +52,12 @@ add_executable(threedi_o3d_cli_test threedi/o3d_cli_test.cpp)
 target_link_libraries(threedi_o3d_cli_test PRIVATE opennova_formats)
 add_test(NAME threedi_o3d_cli COMMAND threedi_o3d_cli_test ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
 set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED threedi_cli_spinner)
+add_test(NAME threedi_cli_build_skinned
+         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/skinned.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
+set_tests_properties(threedi_cli_build_skinned PROPERTIES FIXTURES_SETUP threedi_cli_skinned)
+add_test(NAME threedi_o3d_skinned COMMAND threedi_o3d_cli_test --skinned ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
+set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED threedi_cli_skinned)
 
 # PANM unit tests
 foreach(test ctrl decode pose runtime wave)

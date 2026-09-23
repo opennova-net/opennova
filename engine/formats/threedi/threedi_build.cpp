@@ -62,9 +62,26 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 			bool any = false;
 			// Opaque strips first, then alpha strips (the renderer's walk).
+			// A skinned model's strips are all owned by the root ROBJ while
+			// each part keeps the bounds of the geometry authored on it: the
+			// retail skinned layout (every JO mesh_type-2 model, e.g.
+			// FSldr03: ROBJ 0 counts all six strips, ROBJ 19 carries the
+			// mesh bounds); they are emitted after the part walk below.
 			for (int pass = 0; pass < 2; ++pass) {
 				for (const ThreediBuildStrip &strip : part.strips) {
 					if (strip.alpha != (pass == 1)) continue;
+					if (m.skinned) {
+						for (const ThreediVertex &v : strip.vertices) {
+							for (int k = 0; k < 3; ++k) {
+								mn[k] = std::min<double>(mn[k], v.position[k]);
+								mx[k] = std::max<double>(mx[k], v.position[k]);
+							}
+							max_radius = std::max(max_radius, std::sqrt(static_cast<double>(v.position[0]) * v.position[0] +
+									static_cast<double>(v.position[1]) * v.position[1] + static_cast<double>(v.position[2]) * v.position[2]));
+						}
+						any = any || !strip.vertices.empty();
+						continue;
+					}
 					ThreediTriangleStrip rec{};
 					rec.material_index = strip.material;
 					rec.index_offset = static_cast<int32_t>(indices.size());
@@ -117,6 +134,36 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				ro.bounding_radius = static_cast<float>(std::sqrt(r));
 			}
 			parts.push_back(ro);
+		}
+		if (m.skinned && !parts.empty()) {
+			for (int pass = 0; pass < 2; ++pass) {
+				for (size_t pi = 0; pi < src.parts.size(); ++pi) {
+					for (const ThreediBuildStrip &strip : src.parts[pi].strips) {
+						if (strip.alpha != (pass == 1)) continue;
+						ThreediTriangleStrip rec{};
+						rec.material_index = strip.material;
+						rec.index_offset = static_cast<int32_t>(indices.size());
+						rec.num_indices = static_cast<uint16_t>(strip.indices.size());
+						rec.num_triangles = static_cast<uint16_t>(strip.indices.size() / 3);
+						rec.is_strip = 0;
+						rec.start_vertex = static_cast<int32_t>(verts.size());
+						rec.num_vertices = static_cast<int32_t>(strip.vertices.size());
+						if (!strip.bone_table.empty()) {
+							const size_t n = std::min<size_t>(strip.bone_table.size(), sizeof(rec.bone_table));
+							for (size_t b = 0; b < n; ++b) rec.bone_table[b] = strip.bone_table[b];
+							rec.bone_table_length = static_cast<int32_t>(n);
+						} else {
+							rec.bone_table[0] = static_cast<uint8_t>(strip.bone < 0 ? static_cast<int>(pi) : strip.bone);
+							rec.bone_table_length = 1;
+						}
+						verts.insert(verts.end(), strip.vertices.begin(), strip.vertices.end());
+						indices.insert(indices.end(), strip.indices.begin(), strip.indices.end());
+						strips.push_back(rec);
+						if (strip.alpha) ++parts[0].num_alpha_strips;
+						else ++parts[0].num_strips;
+					}
+				}
+			}
 		}
 		const uint32_t vertex_flags = 1u | (m.skinned ? THREEDI_VERTEX_FLAG_SKINNED : 0u) |
 				(m.tangents ? THREEDI_VERTEX_FLAG_TANGENTS : 0u);

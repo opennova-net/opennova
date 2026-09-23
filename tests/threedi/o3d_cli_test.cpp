@@ -38,9 +38,41 @@ static float facing(const ThreediLod &lod, const ThreediTriangleStrip &st, int t
 	return c[0] * v[0]->normal[0] + c[1] * v[0]->normal[1] + c[2] * v[0]->normal[2];
 }
 
+// The skinned fixture (skinned.o3d): the retail skinned layout, bone tables,
+// weights and bone spheres.
+static int check_skinned(const char *path) {
+	Threedi3di3 m{};
+	if (threedi_3di3_read(path, &m) != 0) {
+		std::fprintf(stderr, "cannot read %s\n", path);
+		return 1;
+	}
+	CHECK(m.header.mesh_type == THREEDI_MESH_SKINNED && m.lod_count == 1);
+	const ThreediLod &lod = m.lods[0];
+	CHECK(lod.render_object_count == 3 && lod.strip_count == 1);
+	CHECK((lod.vertices.flags & THREEDI_VERTEX_FLAG_SKINNED) != 0 && (lod.vertices.flags & THREEDI_VERTEX_FLAG_TANGENTS) == 0);
+	// Authored on part 2, owned by the root ROBJ; the bounds stay on part 2.
+	CHECK(lod.render_objects[0].num_strips == 1 && lod.render_objects[2].num_strips == 0);
+	CHECK(lod.render_objects[0].bounding_radius == 0.0f && lod.render_objects[2].bounding_radius > 0.0f);
+	CHECK(lod.strips[0].bone_table_length == 2 && lod.strips[0].bone_table[0] == 0 && lod.strips[0].bone_table[1] == 1);
+	CHECK(lod.vertices.count == 4 && lod.vertices.items[1].bone_indices[1] == 1 &&
+			near(lod.vertices.items[1].bone_weights[0], 0.5f) && near(lod.vertices.items[1].bone_weights[1], 0.5f));
+	for (int t = 0; t < lod.strips[0].num_triangles; ++t) CHECK(facing(lod, lod.strips[0], t) > 0.0f);
+	CHECK(m.collision != nullptr);
+	if (m.collision != nullptr) {
+		const ThreediCollisionModel &c = *m.collision;
+		CHECK(c.object_count == 3 && c.face_count == 1);
+		CHECK(c.objects[0].radius == 0x8000 && c.objects[1].radius == 0x4000 && c.objects[1].med[2] == 0x10000);
+		CHECK(c.objects[2].num_faces == 1 && c.objects[2].offset[2] == -0x10000);
+	}
+	threedi_3di3_free(&m);
+	if (failures == 0) std::printf("o3d_cli_test --skinned: ok\n");
+	return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
+	if (argc == 3 && std::strcmp(argv[1], "--skinned") == 0) return check_skinned(argv[2]);
 	if (argc != 2) {
-		std::fprintf(stderr, "usage: o3d_cli_test <spinner.3di>\n");
+		std::fprintf(stderr, "usage: o3d_cli_test <spinner.3di> | --skinned <skinned.3di>\n");
 		return 2;
 	}
 	Threedi3di3 m{};
