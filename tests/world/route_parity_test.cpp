@@ -4,6 +4,7 @@
 //  - Mission_LoadBMSFile @0x40F4E0: the waypoint block and its normalization
 //  - Entity_UpdateAircraftPhysics @0x490310: the parked/crewed/player legs
 //  - the avoid-brake walks' ItemTypeIndex gates (ground, boat, aircraft)
+//  - the unbounded nav reads, the marker fields by type, the verbatim route seed
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/tick_profile.h>
@@ -322,6 +323,183 @@ void test_avoid_brake_item_index_gates() {
     }
 }
 
+// A mission whose waypoint block exercises the unbounded reads: list 1 counts 34
+// over 32 slots naming marker 1, so its nodes 32 and 33 are list 2's flags and
+// count words (0 and 3); list 3 counts 2 but carries a stray slot word 3 at slot
+// 5; list 4's second node names pool-3 slot 40, which no marker fills. Marker 3
+// sits at x = 300 u, marker 0 at the origin.
+bms::File unbounded_routes_mission() {
+    bms::File m{};
+    for (int i = 0; i < 4; ++i) m.markers.push_back(waypoint_marker((100 * i) << 16, 1 + i));
+    m.waypoint_records.resize(5);
+    bms::WaypointRecord &long_list = m.waypoint_records[1];
+    long_list.flags = bms::WaypointFlags::None;
+    long_list.marker_count = 34;
+    long_list.waypoint_numbers.assign(32, 1u);
+    bms::WaypointRecord &next = m.waypoint_records[2];
+    next.flags = bms::WaypointFlags::None;
+    next.marker_count = 3;
+    next.waypoint_numbers = {2, 2, 2};
+    next.padding.assign(128 - 3 * 4, 0);
+    bms::WaypointRecord &stray = m.waypoint_records[3];
+    stray.flags = bms::WaypointFlags::None;
+    stray.marker_count = 2;
+    stray.waypoint_numbers = {1, 2};
+    stray.padding.assign(128 - 2 * 4, 0);
+    stray.padding[(5 - 2) * 4] = 3; // slot 5 = 3, little-endian
+    bms::WaypointRecord &hole = m.waypoint_records[4];
+    hole.flags = bms::WaypointFlags::None;
+    hole.marker_count = 2;
+    hole.waypoint_numbers = {1, 40};
+    return m;
+}
+
+// The loader keeps each record's raw count and all 32 slot words, and the movers
+// index the block flat with no bound on the node: a count past 32 walks on into
+// the next record's words, a start node past the count reads the raw slot word,
+// and a slot no marker fills resolves to the zeroed pool-3 entry at the origin
+// (radius 0) instead of failing the refresh.
+// [orig: Mission_LoadBMSFile fread(Buffer, 0x88, 0x80) @0x40FB56;
+//  AIWaypoint_UpdateTarget @0x457469..0x457481; Entity_FindNearestTriggerByType
+//  @0x407F0B..0x407F6B; Pool_GetEntryUnchecked @0x441FC0]
+void test_nav_reads_are_unbounded() {
+    const bms::File m = unbounded_routes_mission();
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.ai.is_authority = true;
+    mission::promote_mission(m, w, mission::PromoteOptions{});
+    const NavNodeTable &nav = w.ai.nav;
+    CHECK(nav.channel(1) != nullptr && nav.channel(1)->count == 34);
+    CHECK(nav.entry_index(1, 31) == 1);
+    CHECK(nav.entry_index(1, 32) == 0); // list 2's flags word
+    CHECK(nav.entry_index(1, 33) == 3); // list 2's count word
+    CHECK(nav.entry_index(3, 5) == 3);  // the stray slot word past list 3's count
+    CHECK(nav.entry_index(4, 1) == 40);
+    CHECK(nav.entry_index(4, 34) == 0); // past the block
+
+    w.registry.configure_pool(1, 4);
+    Entity hull{};
+    hull.kind = EntityKind::Item;
+    hull.alive = true;
+    const EntityHandle h = w.registry.spawn(1, hull);
+    AiEntity &ai = *w.ai.at(w.ai.attach(h));
+
+    // Standing on marker 3, the nearest node of list 1 is its node 33.
+    ai.pos[0] = 300 << 16;
+    CHECK(w.ai.nearest_route_node(ai, 1) == 33);
+    // At the origin, list 4's unfilled slot 40 measures zero: node 1.
+    ai.pos[0] = 0;
+    ai.pos[1] = 10 << 16;
+    CHECK(w.ai.nearest_route_node(ai, 4) == 1);
+
+    AiBrain &b = ai.brain;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 1;
+    b.f[AiBrain::kWpNode] = 33;
+    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(b.f[AiBrain::kWpResolved] == 3);
+    CHECK(b.f[AiBrain::kWpNodeVal] == (4 << 16)); // marker 3's wp_distance 4
+    b.f[AiBrain::kWpChannel] = 3;
+    b.f[AiBrain::kWpNode] = 5;
+    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(b.f[AiBrain::kWpResolved] == 3);
+    b.f[AiBrain::kWpChannel] = 4;
+    b.f[AiBrain::kWpNode] = 1;
+    CHECK(ai_waypoint_update_target(b, ai.pos, nav) == 0);
+    CHECK(b.f[AiBrain::kWpResolved] == 40);
+    CHECK(b.f[AiBrain::kWpNodeVal] == 0);
+    CHECK(b.f[AiBrain::kWpExtra] == 0);
+}
+
+// entity+0 is the arrival radius only for the waypoint (6005), KOTH centre (6006)
+// and named-location (2044) markers, and the hold word only for the waypoint:
+// any other marker keeps the spawn memset's zeros. The facing is the spawn angle,
+// ((90 - yaw) << 16) / 360 truncated, then << 16.
+// [orig: Entity_SpawnFromBMSRecord — hold @0x40F066..0x40F08D, radius
+//  @0x40F096..0x40F0A4 / @0x40F157..0x40F16D / @0x40F213..0x40F221, the memset
+//  @0x40EA27, the angle @0x40EB42..0x40EB66]
+void test_marker_fields_follow_the_marker_type() {
+    struct Row { int32_t type_id, wp_distance; int16_t spawns, yaw; int32_t radius, wait, facing; };
+    const Row rows[] = {
+        {6005, 3, 2, 0, 3 << 16, 124, 0x40000000},
+        {6006, 0, 2, 45, 0x8000, 0, 0x20000000},
+        {2044, 4, 5, 200, 4 << 16, 0, -20024 * 65536},
+        {2043, 7, 9, 90, 0, 0, 0},
+        {6001, 5, 3, -90, 0, 0, static_cast<int32_t>(0x80000000u)},
+    };
+    bms::File m{};
+    for (const Row &r : rows) {
+        bms::Entity e = waypoint_marker(0, r.wp_distance);
+        e.type_id = r.type_id;
+        e.spawns = r.spawns;
+        e.yaw = r.yaw;
+        m.markers.push_back(e);
+    }
+    auto wp = std::make_unique<World>();
+    mission::promote_mission(m, *wp, mission::PromoteOptions{});
+    const NavNodeTable &nav = wp->ai.nav;
+    CHECK(nav.nodes.size() == std::size(rows));
+    for (size_t i = 0; i < std::size(rows) && i < nav.nodes.size(); ++i) {
+        const NavEntry &n = nav.nodes[i];
+        if (n.f[0] != rows[i].radius || n.wait_ticks != rows[i].wait ||
+            n.f[4] != rows[i].facing) {
+            std::printf("FAIL %s:%d  marker type %d: radius %d wait %d facing %d\n",
+                        __FILE__, __LINE__, rows[i].type_id, n.f[0], n.wait_ticks, n.f[4]);
+            ++failures;
+        }
+    }
+}
+
+// A vehicle's class init copies the slot's route words into the brain verbatim:
+// no count test and no clamp, so a route onto an empty list or past the count is
+// kept as authored. An organic's heading is the same truncated spawn angle.
+// [orig: Entity_InitVehicleAIFromDef @0x46885E..0x46887F;
+//  Entity_InitHelicopterAIFromDef @0x46852D..0x468552;
+//  Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+void test_route_seed_is_the_slot_words() {
+    constexpr int32_t kTruck = 1294;
+    bms::File m = unbounded_routes_mission();
+    m.waypoint_records.resize(27); // list 26 stays unauthored (count 0)
+    bms::Entity parked{};
+    parked.type = bms::ItemType::Item;
+    parked.type_id = kTruck;
+    parked.waypoint_id = 26;
+    parked.wp_number = 7;
+    m.items.push_back(parked);
+    bms::Entity late{};
+    late.type = bms::ItemType::Item;
+    late.type_id = kTruck;
+    late.waypoint_id = 2;
+    late.wp_number = 9;
+    m.items.push_back(late);
+    bms::Entity soldier{};
+    soldier.type = bms::ItemType::Organic;
+    soldier.type_id = 2072;
+    m.organics.push_back(soldier);
+    mission::PromoteOptions opts;
+    mission::ItemSeatSpec spec;
+    spec.type_id = kTruck;
+    Seat ctrl;
+    ctrl.type = SeatType::Controller;
+    spec.seats.push_back(ctrl);
+    opts.item_seat_specs.push_back(spec);
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.ai.is_authority = true;
+    mission::promote_mission(m, w, opts);
+    const AiEntity *first = w.ai.for_handle(EntityHandle::make(1, 0));
+    const AiEntity *second = w.ai.for_handle(EntityHandle::make(1, 1));
+    CHECK(first != nullptr && second != nullptr);
+    if (first == nullptr || second == nullptr) return;
+    CHECK(first->brain.f[AiBrain::kWpType] == 1);
+    CHECK(first->brain.f[AiBrain::kWpChannel] == 26);
+    CHECK(first->brain.f[AiBrain::kWpNode] == 7);
+    CHECK(second->brain.f[AiBrain::kWpChannel] == 2);
+    CHECK(second->brain.f[AiBrain::kWpNode] == 9);
+    const AiEntity *body = w.ai.for_handle(EntityHandle::make(0, 0));
+    CHECK(body != nullptr && body->heading == 0x40000000);
+}
+
 } // namespace
 
 int main() {
@@ -330,6 +508,9 @@ int main() {
     test_player_pilot_holds_pretty();
     test_item_type_index_is_the_first_row_ordinal();
     test_avoid_brake_item_index_gates();
+    test_nav_reads_are_unbounded();
+    test_marker_fields_follow_the_marker_type();
+    test_route_seed_is_the_slot_words();
     if (failures == 0) std::printf("route_parity: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

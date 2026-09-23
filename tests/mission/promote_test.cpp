@@ -795,6 +795,10 @@ int main() {
     m.markers.push_back(marker(100 << 16, 0, 0));
     m.markers.push_back(marker(200 << 16, 0, 0));
     m.markers.push_back(marker(300 << 16, 0, 0));
+    // Route nodes are "waypoint" markers (items.def 106005): only that type (and
+    // 6006/2044) carries the wp_distance arrival radius [orig:
+    // Entity_SpawnFromBMSRecord `cmp dword ptr [edi],1775h` @0x40F05A].
+    for (bms::Entity &mk : m.markers) mk.type_id = 6005;
 
     bms::WaypointRecord wr{};
     wr.flags = bms::WaypointFlags::None; // loops

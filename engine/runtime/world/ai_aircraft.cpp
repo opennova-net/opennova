@@ -87,7 +87,9 @@ int AiSystem::update_aircraft_waypoint_movement(AiEntity &e, World &world) {
 			speed >>= 1;
 	}
 	const int kind = b.f[AiBrain::kWpType];
-	const NavEntry *node = kind == 1 ? nav.entry(b.f[AiBrain::kWpResolved]) : nullptr;
+	// The resolved node is read through unchecked, like the refresh that set it
+	// [orig: the brain+0x40 node-pointer loads @0x460F99 (X/Y) and @0x460FE5 (Z)].
+	const NavEntry *node = kind == 1 ? &nav.slot(b.f[AiBrain::kWpResolved]) : nullptr;
 	if (node != nullptr) {
 		b.f[AiBrain::kWorkPosX] = node->f[1];
 		b.f[AiBrain::kWorkPosY] = node->f[2];

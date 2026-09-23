@@ -195,7 +195,7 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     int32_t node = slot.f[38]; // [orig: slot+152 = node index (BMS wp_number at spawn)]
     if (node < 0 || node >= nc->count) node = 0; // container-rebase guard
 
-    const NavEntry *mk = nav.entry(nc->entries[node]);
+    const NavEntry *mk = nav.entry(nav.entry_index(ch, node));
     if (mk == nullptr) { slot.f[35] = 0; return; }
 
     // Distance to the node: 3D with 1.0u vertical slack, target 0.25u above the marker.
@@ -259,7 +259,7 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     // @0x4badbf].
     if (inf.wait_cooldown != 0) return;
 
-    const NavEntry *next = nav.entry(nc->entries[node]);
+    const NavEntry *next = nav.entry(nav.entry_index(ch, node));
     if (next == nullptr) return;
     dist = dist_to(*next, target);
     inf.move_mode = 4; // [orig: moveMode = 4 after advancing; dump 1522]

@@ -384,7 +384,9 @@ struct NavEntry {
 };
 
 // One channel record (34 dwords). loopflag bit0 set = terminate at path end (else
-// wrap to node 0). count = node count. entries = pool-3 indices, one per node.
+// wrap to node 0). count = the record's RAW node count: the loader never bounds it
+// (CP19's list 6 counts 39). entries = the record's 32 raw slot words, the pool-3
+// indices of its first 32 nodes and whatever the file carries past the count.
 struct NavChannel {
     int32_t loopflag = 0;     // [orig: Buffer[34*ch]]        bit0 = one-shot
     int32_t count = 0;        // [orig: dword_A71DD4[34*ch]]  node count
@@ -402,9 +404,33 @@ public:
         if (ch < 0 || ch >= static_cast<int>(channels.size())) return nullptr;
         return &channels[ch];
     }
+    // The marker a node index names, or null when no marker sits there (the
+    // inspection views). The movers read slot() instead.
     const NavEntry *entry(int idx) const {
         if (idx < 0 || idx >= static_cast<int>(nodes.size())) return nullptr;
         return &nodes[idx];
+    }
+    // Node `node` of channel `ch`: the word at flat[34*ch + 2 + node] of the record
+    // block, read the way the movers read it, with no bound on the node. A node at
+    // or past 32 (a count over 32, or a start node past the count) reads on into the
+    // following records' words; a word outside the block reads 0.
+    // [orig: AIWaypoint_UpdateTarget `mov edx, Buffer+8[ecx*4]` @0x457476 with
+    //  ecx = node + 34*ch; Entity_FindNearestTriggerByType @0x407F0B..0x407F6B]
+    int32_t entry_index(int ch, int node) const {
+        const int64_t flat = static_cast<int64_t>(ch) * 34 + 2 + node;
+        if (flat < 0 || flat >= static_cast<int64_t>(channels.size()) * 34) return 0;
+        const NavChannel &rec = channels[static_cast<size_t>(flat / 34)];
+        const int word = static_cast<int>(flat % 34);
+        return word == 0 ? rec.loopflag : word == 1 ? rec.count : rec.entries[word - 2];
+    }
+    // The pool-3 slot a node index resolves to, unchecked: a slot no marker filled
+    // is a zeroed pool-3 entry (position 0, radius 0), never "no node".
+    // [orig: Pool_GetEntryUnchecked @0x441FC0 over pool 3, which Pool_Clear
+    //  @0x442060 zeroes at every mission reset]
+    const NavEntry &slot(int idx) const {
+        static const NavEntry kZeroSlot{};
+        if (idx < 0 || idx >= static_cast<int>(nodes.size())) return kZeroSlot;
+        return nodes[static_cast<size_t>(idx)];
     }
 };
 

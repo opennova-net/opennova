@@ -31,23 +31,20 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
         int32_t navMeshId = b.f[AiBrain::kWpChannel];
         const NavChannel *ch = (navMeshId != 0) ? nav.channel(navMeshId) : nullptr;
         if (!ch || ch->count == 0) return -1; // [orig: navMeshId==0 || dword_A71DD4[34*id]==0]
-        // Tracked deviation: the original reads entryIndex[34*navMeshId + node] and
-        // Pool_GetEntryUnchecked(3,idx) UNCHECKED (always returns 0, writes fields). Our
-        // container rebase adds a bounds/null guard that returns -1 only for indices the
-        // original would treat as wild pointers (UB). On valid data (node < count <= 32,
-        // populated pool) it never fires, so resolved values stay byte-identical.
-        int32_t sub = b.f[AiBrain::kWpNode];
-        if (sub < 0 || sub >= 32) return -1;  // entries[] holds 32 nodes max
-        int32_t nodeIdx = ch->entries[sub];   // [orig: entryIndex[34*navMeshId + wp[2]]]
-        const NavEntry *node = nav.entry(nodeIdx);
-        if (!node) return -1;                 // [orig: unchecked Pool_GetEntryUnchecked(3,idx)]
+        // Past the two zero tests nothing is bounded: the node indexes the flat
+        // record block (a node past 31 reads the next record's words) and the
+        // pool-3 slot resolves unchecked, so an index no marker filled is the
+        // zeroed slot at the origin with radius 0 [orig: `mov edx,
+        // Buffer+8[ecx*4]` @0x457476, Pool_GetEntryUnchecked(3, idx) @0x457481].
+        const int32_t nodeIdx = nav.entry_index(navMeshId, b.f[AiBrain::kWpNode]);
+        const NavEntry &node = nav.slot(nodeIdx);
         b.f[AiBrain::kWpResolved] = nodeIdx;  // [orig: waypointData+12 = navEntry]
-        int32_t dx = node->f[1] - pos[0];
-        int32_t dz = node->f[2] - pos[1];
-        int32_t dy = node->f[3] - pos[2];
+        int32_t dx = node.f[1] - pos[0];
+        int32_t dz = node.f[2] - pos[1];
+        int32_t dy = node.f[3] - pos[2];
         wp_dist_bearing(dx, dz, dy, b.f[AiBrain::kWpDistance], b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kWpNodeVal] = node->f[0]; // [orig: *navEntry]
-        b.f[AiBrain::kWpExtra] = node->f[4];   // [orig: navEntry[4]]
+        b.f[AiBrain::kWpNodeVal] = node.f[0]; // [orig: *navEntry]
+        b.f[AiBrain::kWpExtra] = node.f[4];   // [orig: navEntry[4]]
         return 0;
     }
     if (type == 3) { // literal coordinate
@@ -130,9 +127,9 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
                                                  : (timeDelta < moveSpeed * b.f[AiBrain::kStep]);
     if (halve) moveSpeed >>= 1;
 
-    const NavEntry *node = nav.entry(b.f[AiBrain::kWpResolved]); // aiState[16]
-    int32_t nodeX = node ? node->f[1] : 0; // *(waypointPtr+4)
-    int32_t nodeY = node ? node->f[2] : 0; // *(waypointPtr+8)
+    const NavEntry &node = nav.slot(b.f[AiBrain::kWpResolved]); // aiState[16]
+    int32_t nodeX = node.f[1]; // *(waypointPtr+4)
+    int32_t nodeY = node.f[2]; // *(waypointPtr+8)
     int32_t result = b.f[AiBrain::kWpBearing];                   // aiState[21]
     b.f[AiBrain::kWorkPosX] = nodeX;
     b.f[AiBrain::kWorkPitch] = 0;   // aiState[133]
@@ -152,13 +149,17 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
     if (ch == nullptr) return 0;
     int32_t best = 0;
     int32_t best_distance = INT32_MAX;
-    for (int i = 0; i < ch->count && i < 32; ++i) {
-        const NavEntry *node = nav.entry(ch->entries[i]);
-        if (node == nullptr) continue;
+    // The walk runs to the raw count over the flat record block and resolves
+    // every slot unchecked: a count past 32 reads on into the next record's
+    // words, and a slot no marker filled measures to the origin.
+    // [orig: @0x407F0B..0x407F6B — `lea ebx, Buffer+8[34*list]`, one dword per
+    //  node, Pool_GetEntryUnchecked(3, word) @0x407F17, `cmp ebp, count; jl`]
+    for (int i = 0; i < ch->count; ++i) {
+        const NavEntry &node = nav.slot(nav.entry_index(static_cast<int>(list), i));
         uint32_t squared = 0;
         for (int axis = 0; axis < 3; ++axis) {
             const int32_t delta = static_cast<int32_t>(
-                    uint32_t(e.pos[axis]) - uint32_t(node->f[axis + 1])) >> 16;
+                    uint32_t(e.pos[axis]) - uint32_t(node.f[axis + 1])) >> 16;
             squared += uint32_t(delta) * uint32_t(delta);
         }
         const int32_t distance = static_cast<int32_t>(squared);

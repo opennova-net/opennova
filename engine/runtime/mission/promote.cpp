@@ -1,6 +1,7 @@
 // Mission -> world promotion. See mission/promote.h + docs/world/world-wac-ai-re.md.
 #include <runtime/mission/promote.h>
 
+#include <base/io/le.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
@@ -208,9 +209,16 @@ void initialize_vehicle_brain(AiEntity &ae, World &world, int32_t heading) {
 
 namespace {
 
-// degrees -> 32-bit binary angle (the entity-heading unit, entity+16). [orig: AI_HandleCommand
-// command 0x16 @0x4659fa multiplies degrees by 11930464.]
-constexpr int64_t kBamPerDegree = 11930464;
+// A BMS angle in degrees -> the spawned entity's 32-bit binary angle: scaled to a
+// 16-bit turn by a truncating signed divide, then shifted into the high half, so
+// the low 16 bits are always zero (yaw 0 spawns at 0x40000000, not 90 x 11930464 =
+// 0x3FFFFFC0). The heading passes 90 - yaw.
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66 — `(90 - yaw) << 16`, the
+//  0B60B60B7h magic divide by 360, `shl ecx,10h` into entity+0x10]
+int32_t spawn_angle_bam(int32_t deg) {
+    const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(deg) << 16) / 360;
+    return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
+}
 
 // Provisional kind -> g_pool_list index. The exact original mapping matters only for the
 // deferred acquire_target pool scan (P2), not for movement; documented in notes §10.
@@ -333,14 +341,14 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 	AiBrain &b = ae.brain;
 
 	// Geometry (entity+4/+8/+12 = x/y/z, all 16.16; entity+16 heading = BAM). The engine heading is
-    // (90 - yaw) degrees, NOT yaw [orig: Entity_SpawnFromBMSRecord @0x40e9f0 entity+4 =
-    // ((90 - yaw)<<16/360)<<16]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
+    // (90 - yaw) degrees, NOT yaw [orig: Entity_SpawnFromBMSRecord @0x40e9f0 entity+0x10 =
+    // ((90 - yaw)<<16/360)<<16, spawn_angle_bam]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
     // whether parked or moving; the present pass converts engine-heading -> mission yaw for the basis.
     ae.pos[0] = e.x;
     ae.pos[1] = e.y;
     ae.pos[2] = e.z;
-    ae.heading = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
+    ae.heading = spawn_angle_bam(90 - e.yaw);
     ae.team = e.team;
 
     // [orig Entity_InitVehicleAI: brain[4]=brain[5]=brain[6]=0 @0x46028b..0x460291] initial
@@ -421,21 +429,21 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 	// profiles author them zero — the same no-scan outcome, now via the witnessed path.)
 	if (kind == EntityKind::Item) initialize_vehicle_brain(ae, world, ae.heading);
 
-    // Waypoint route words (channel = the entity's waypoint_id). The state stays 0: the
-    // route is consumed only once the brain reaches GROUND_FOLLOWWP / HELO_FOLLOWWP
-    // through the mover's PRETTY promotion and the PlayerControl hand-back (22 -> 16
+    // Waypoint route words, copied verbatim from the slot words init_ai_slot just
+    // stored: no count test and no clamp, so a route onto an empty list or a start
+    // node past the count is kept as authored (the waypoint refresh then finds
+    // nothing on an empty list and holds the hull). The state stays 0: the route is
+    // consumed only once the brain reaches GROUND_FOLLOWWP / HELO_FOLLOWWP through the
+    // mover's PRETTY promotion and the PlayerControl hand-back (22 -> 16
     // @0x48bc16..0x48bc1c, 14 -> 7 @0x49158a..0x491590) or an AISETSTATE command
     // [orig: AI_HandleCommand case 7 @0x46581c -> AIState_SetByEntityType @0x457570].
-    // Id 0 is the reserved no-route id REGARDLESS of the table's slot-0 contents
-    // — retail's positional table simply never authors list 0 and every consumer
-    // 0-gates [orig: AIWaypoint_UpdateTarget @0x457380 navMeshId==0 -> -1]; the
-    // slot half's witnessed seeding is gated the same way (init_ai_slot below).
-    const NavChannel *ch =
-            e.waypoint_id != 0 ? ai.nav.channel(e.waypoint_id) : nullptr;
-    if (ch && ch->count > 0) {
+    // [orig: Entity_InitVehicleAIFromDef `cmp dword ptr [eax+8Ch],0` @0x46885E,
+    //  brain+0x34 = 1, +0x38 = slot+0x94, +0x3C = slot+0x98 @0x468867..0x46887F;
+    //  Entity_InitHelicopterAIFromDef @0x46852D..0x468552]
+    if (ae.slot.f[35] != 0) {
         b.f[AiBrain::kWpType] = 1; // nav-node waypoint
-        b.f[AiBrain::kWpChannel] = e.waypoint_id;
-        b.f[AiBrain::kWpNode] = std::min<int32_t>(e.wp_number, ch->count - 1);
+        b.f[AiBrain::kWpChannel] = ae.slot.f[37];
+        b.f[AiBrain::kWpNode] = ae.slot.f[38];
     }
 }
 
@@ -677,19 +685,30 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             ai.nav.nodes.push_back(n); // preserve the zeroed pool-3 slot's index
             continue;
         }
-        // Arrival radius from the marker's wp_distance, default 0.5u. [orig:
-        // Entity_SpawnFromBMSRecord @0x40e9f0 item 6005: entity dword[0] =
-        // wp_distance ? wp_distance<<16 : 0x8000]
-        n.f[0] = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
+        // Arrival radius (entity+0) from the marker's wp_distance, default 0.5u, for
+        // the three waypoint-distance marker types only: waypoint 6005, KOTH centre
+        // 6006 and named location 2044. Any other marker keeps the spawn memset's 0:
+        // every marker def in the shipped items.def is model-less, so
+        // Entity_InitFromModel never writes entity+0 for one.
+        // [orig: Entity_SpawnFromBMSRecord — `cmp dword ptr [edi],1775h` @0x40F05A
+        //  and the radius @0x40F096..0x40F0A4, 0x1776 @0x40F157..0x40F16D, 0x7FC
+        //  @0x40F213..0x40F221; the memset @0x40EA27; Entity_InitFromModel's
+        //  model-null skip @0x40DCCB..0x40DCD1]
+        if (mk.type_id == 6005 || mk.type_id == 6006 || mk.type_id == 2044)
+            n.f[0] = mk.wp_distance != 0
+                    ? static_cast<int32_t>(static_cast<uint32_t>(mk.wp_distance) << 16)
+                    : opts.arrival_radius;
         n.f[1] = mk.x;                // entity+4
         n.f[2] = mk.y;                // entity+8
         n.f[3] = mk.z;                // entity+12
-        // Facing = the marker's spawn heading (engine frame, like every entity).
-        // [orig: marker+16; the infantry think faces it during a hold]
-        n.f[4] = static_cast<int32_t>(static_cast<int64_t>(90 - mk.yaw) * kBamPerDegree);
-        // Hold time: 62 ticks per movetimer second. [orig: entity[82] = 62 * u16@+62
-        // (bms 'spawns' = .mis movetimer); 0 = no hold]
-        n.wait_ticks = 62 * static_cast<int32_t>(mk.spawns);
+        // Facing = the marker's spawn heading, entity+0x10 (engine frame, like every
+        // entity); the infantry think faces it during a hold.
+        n.f[4] = spawn_angle_bam(90 - mk.yaw);
+        // Hold time, the waypoint marker (6005) only: 62 ticks per movetimer second
+        // from the signed record word (bms 'spawns' = .mis movetimer); 0 = no hold.
+        // [orig: entity+0x148 = 62 * movsx word rec+0x3E @0x40F066..0x40F08D]
+        if (mk.type_id == 6005)
+            n.wait_ticks = 62 * static_cast<int32_t>(mk.spawns);
         ai.nav.nodes.push_back(n);
     }
     r.nav_nodes = static_cast<int>(ai.nav.nodes.size());
@@ -721,11 +740,20 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         //  [eax+4],ebp; jnz; or [eax],ebp` with ebp = 1 from @0x40F971; the XML
         //  loader's twin XML_ParseGroupAction @0x4CC59C..0x4CC5A9].
         if (wr.marker_count == 1) ch.loopflag |= 1;
-        int count = std::min<int>(static_cast<int>(wr.marker_count), 32);
-        count = std::min<int>(count, static_cast<int>(wr.waypoint_numbers.size()));
-        ch.count = count;
-        for (int k = 0; k < count; ++k)
+        // The count and all 32 slot words stay as the file carries them: the block
+        // read bounds neither, so a count past 32 walks on into the next record's
+        // words and a start node past the count reads the raw slot word
+        // (NavNodeTable::entry_index). The bms reader splits the slot region at
+        // min(count, 32) into the node list and the rest.
+        ch.count = static_cast<int32_t>(wr.marker_count);
+        const size_t listed = std::min<size_t>(wr.waypoint_numbers.size(), 32);
+        for (size_t k = 0; k < listed; ++k)
             ch.entries[k] = static_cast<int32_t>(wr.waypoint_numbers[k]);
+        for (size_t k = listed; k < 32; ++k) {
+            const size_t at = (k - listed) * 4;
+            if (at + 4 > wr.padding.size()) break;
+            ch.entries[k] = io::read_s32_le(wr.padding.data() + at);
+        }
         ai.nav.channels.push_back(ch);
     }
     r.nav_channels = static_cast<int>(m.waypoint_records.size());
