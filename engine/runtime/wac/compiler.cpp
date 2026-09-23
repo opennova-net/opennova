@@ -1,4 +1,5 @@
 #include <runtime/wac/compiler.h>
+#include <runtime/wac/retail_ftol.h>
 #include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 
@@ -427,13 +428,9 @@ private:
             if (suffix == 'F') d *= 21501.0;
             else if (suffix == 'M' || type == ParamType::Distance) d *= 65536.0;
             else if (type == ParamType::Hour) d *= 60.0;
-            // _ftol2_sse returns a signed 64-bit truncation; the operand stores
-            // its low word. Invalid conversions yield the indefinite low zero.
-            int32_t value = 0;
-            if (std::isfinite(d) && d >= -9223372036854775808.0 &&
-                    d < 9223372036854775808.0)
-                value = static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(d)));
-            return encode_operand(OperandKind::Pool, push_pool(value));
+            // The SSE2 conversion: out-of-range values store the integer
+            // indefinite. [orig: WacScript_ResolveParameter @0x4F2D8C]
+            return encode_operand(OperandKind::Pool, push_pool(retail_ftol_sse2(d)));
         }
 
         // A token that matches no table, prefix or numeric form, a quoted

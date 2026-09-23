@@ -925,6 +925,14 @@ static void test_auto_parentheses_and_minus_token_context() {
         {"1 + 2 * 3 load(8)", 9},
         {"300 + (2 * 3)", 50}, // saved 300 narrows to a byte
         {"2 ^ (3 ^ 2)", 81}, // POP reverses power operands
+        // The power result converts through _ftol2_sse's SSE2 leg: anything
+        // outside int32 is the integer indefinite, not a low dword.
+        // [orig: WacScript_ExecuteBytecode @0x4F615F; _ftol2_sse @0x76BC15]
+        {"2 ^ 30", 1073741824},
+        {"10 ^ 10", INT32_MIN},
+        {"3 ^ 20", INT32_MIN},
+        {"2 ^ 32", INT32_MIN},
+        {"0 ^ -1", INT32_MIN}, // 1/0 is infinite
     };
     for (const Case &c : accumulator_cases) {
         BehaviorWorld w;
@@ -1349,7 +1357,8 @@ static void test_distance_literals_and_lead_queries() {
             "v13 = SSNnearSSN(101,103,v10)\n"
             "v14 = SSNnearSSN(101,103,3)\n"
             "v15 = SSNnearSSN(101,103,v14)\n"
-            "v16 = 65536M\n", {});
+            "v16 = 65536M\nv17 = 3000000000\nv18 = load(-40000M)\nv19 = 100000F\n"
+            "v20 = 32767.99M\n", {});
     CHECK(program.ok() && program.diagnostics.empty());
     vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0); // equality does not lead
@@ -1363,7 +1372,15 @@ static void test_distance_literals_and_lead_queries() {
     CHECK(w.script.vars.get_mission(12) == 0);
     CHECK(w.script.vars.get_mission(13) == 1);
     CHECK(w.script.vars.get_mission(14) == 1 && w.script.vars.get_mission(15) == 0);
-    CHECK(w.script.vars.get_mission(16) == 0); // low dword of _ftol2_sse
+    // Scaled literals outside int32 store _ftol2_sse's SSE2 integer
+    // indefinite; the CRT initializer selects that leg on every SSE2 CPU.
+    // [orig: WacScript_ResolveParameter @0x4F2D8C; _ftol2_sse @0x76BC15;
+    //  sub_7887AF @0x7887B4]
+    CHECK(w.script.vars.get_mission(16) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(17) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(18) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(19) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(20) == 2147482992); // 32767.99 * 65536 truncates in range
 
     // Wrapped coordinate subtraction precedes the Euclidean length.
     w.registry.get(a)->position = {-32768.0f, 0.0f, 0.0f};

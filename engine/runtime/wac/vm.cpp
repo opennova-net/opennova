@@ -8,6 +8,7 @@
 #include <formats/wac/command.h>
 #include <formats/wac/help.h>
 #include <runtime/wac/remote_command.h>
+#include <runtime/wac/retail_ftol.h>
 #include <runtime/world/world.h>
 
 #include <base/io/strutil.h>
@@ -20,7 +21,8 @@ bool ieq(const char *a, const char *b) { return opennova::strutil::iequals(a, b)
 uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 
 // [orig: Math_PowFloat @0x4F9BA0] binary32 input, exponentiation by
-// squaring, then the VM keeps EAX from the signed 64-bit truncation.
+// squaring, then the VM keeps EAX from the SSE2 conversion.
+// [orig: WacScript_ExecuteBytecode @0x4F615F]
 int32_t power_fold(int32_t base, int32_t exponent) {
     double square = static_cast<float>(base);
     uint32_t magnitude = exponent < 0 ? 0u - uint32_t(exponent) : uint32_t(exponent);
@@ -31,9 +33,7 @@ int32_t power_fold(int32_t base, int32_t exponent) {
         if (magnitude) square *= square;
     } while (magnitude);
     if (exponent < 0) result = 1.0 / result;
-    if (!std::isfinite(result) || result < -9223372036854775808.0 ||
-            result >= 9223372036854775808.0) return 0; // x87 integer indefinite's low dword
-    return int32_t(uint32_t(static_cast<int64_t>(result)));
+    return retail_ftol_sse2(result);
 }
 
 
