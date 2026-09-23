@@ -1516,6 +1516,13 @@ int main() {
         CHECK(walked);                                    // covered the ground on foot
         CHECK(occ != nullptr && occ->mounted);            // arrived and attached
         CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        // The pass that boards ends on foot: the org1 motor keys its seat block
+        // on the mounted-live local its head took, so the next pass poses the
+        // seat. [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985, the seat
+        //  block's test @0x4BE8F0]
+        CHECK(occ != nullptr && occ->position.x != 32.f);
+        c.logic_tick += 1;
+        cw.update_all_entities(c);
         CHECK(occ != nullptr && occ->position.x == 32.f); // posed at the seat point
         cai.root_motion = nullptr;
     }

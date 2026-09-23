@@ -700,19 +700,37 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (npc_mounted_body(e, *occ) && veh->has_item_def && seat.type != SeatType::Gunner &&
             world.pose_provider != nullptr &&
             !world.pose_provider->resolve_seat_bone(world, *veh, seat.bone_index)) {
-        if (!is_authority) return true;
-        const int32_t order = e.slot.f[37];
-        const int32_t target = e.slot.f[38];
-        const Entity *ground = world.registry.get(veh->ground_target);
-        if ((order == kCommandAttachPassengerOnly || order == kCommandAttachSkipController ||
-                    order == kCommandAttachAnySeat) &&
-                (target == veh->net_id || (ground != nullptr && target == ground->net_id))) {
-            occ->health = e.health = 0;
-            occ->last_attacker = veh->last_attacker;
+        if (is_authority) {
+            const int32_t order = e.slot.f[37];
+            const int32_t target = e.slot.f[38];
+            const Entity *ground = world.registry.get(veh->ground_target);
+            if ((order == kCommandAttachPassengerOnly || order == kCommandAttachSkipController ||
+                        order == kCommandAttachAnySeat) &&
+                    (target == veh->net_id || (ground != nullptr && target == ground->net_id))) {
+                occ->health = e.health = 0;
+                occ->last_attacker = veh->last_attacker;
+            }
+            world.vehicles.detach(e.handle);
+            occ->ground_target = {};
         }
-        world.vehicles.detach(e.handle);
-        occ->ground_target = {};
-        return false;
+        // The seat block's tail still runs for the rider it left unposed: the
+        // legs and their targets snap to the body heading and the look takes the
+        // mounted chase. A client keeps the rider, so the +-90 degree look clamp
+        // about the body follows here unless the parent's config widens it; a
+        // detached rider takes that clamp in the motor.
+        // [orig: legs @0x4BEF36..0x4BEF51; look @0x4BEF57..0x4BEF97; clamp
+        //  @0x4BEF9A..0x4BEFED]
+        e.inf.leg_yaw[0] = e.inf.leg_yaw[1] = e.inf.body_heading;
+        e.inf.leg_target[0] = e.inf.leg_target[1] = e.inf.body_heading;
+        infantry_look_tick(e.inf, e.heading, e.pitch, true);
+        if (!occ->mounted) return false;
+        const int cfg = veh->emplaced_config;
+        if (!(veh->emplaced_config_valid && (cfg == 3 || cfg == 4 || cfg == 5 || cfg == 7))) {
+            const int32_t twist = io::bam_sub(e.heading, e.inf.body_heading);
+            if (twist > 0x40000000) e.heading = io::bam_add(e.inf.body_heading, 0x40000000);
+            else if (twist < -0x40000000) e.heading = io::bam_sub(e.inf.body_heading, 0x40000000);
+        }
+        return true;
     }
     // Local input owns LOOK before retail evaluates the parent UseGun bone. Our
     // split AiEntity keeps that input in the infantry latch until the mounted

@@ -1235,6 +1235,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // The org1 mounted-live local, taken at the motor head: a parent and a
+    // positive Health word. A board or a detach later in the pass leaves it as
+    // it was. [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985]
+    const bool mounted_live = npc_body && tick_entity != nullptr &&
+            tick_entity->mounted && tick_entity->health > 0;
     // The secondary-fire latch is a frame local of the org1 motor, zeroed at its
     // head: only this pass's combat or 0x8 event bit can set what its fire block
     // consumes. [orig: Entity_UpdateInfantryAI `mov [esp+var_108C],ebp`
@@ -1552,12 +1557,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // below suppresses only ordinary ground locomotion.
     // [orig: Entity_UpdateInfantryAI @0x4b9910; pose @0x4bec23..0x4bed3f;
     //  dedicated return @0x4bf5c6]
-    const bool mounted = e.health > 0 && pose_if_mounted(e, world);
-    // A live mounted org1 body takes the seat pose; any other chases heading,
-    // legs and look here, ahead of its eye offset and its sound/fire passes.
+    // Org1 keys its seat block on the local its head took, so a body that
+    // boarded in this pass's think walks on foot to its end: no seat pose, no
+    // dedicated request, no mounted return.
+    const bool mounted = npc_body ? mounted_live && pose_if_mounted(e, world)
+                                  : e.health > 0 && pose_if_mounted(e, world);
+    // A body not mounted-live at its head chases heading, legs and look here,
+    // ahead of its eye offset and its sound/fire passes. One that was, but
+    // holds no parent now (it left in this pass, or its seat block dropped
+    // it), takes no chase: only the look's +-90 degree clamp about the body.
     // [orig: Entity_UpdateInfantryAI mounted-live local @0x4B9960..0x4B9985,
-    //  its test @0x4BE8F0]
-    if (npc_body && !mounted) infantry_org1_heading_chase(e, tick_entity, key);
+    //  its test @0x4BE8F0; the seat block's parent test @0x4BEBEC..0x4BEBF4;
+    //  the clamp @0x4BEF9A..0x4BEFED]
+    if (npc_body && !mounted_live) {
+        infantry_org1_heading_chase(e, tick_entity, key);
+    } else if (npc_body && !mounted) {
+        const int32_t twist = io::bam_sub(e.heading, inf.body_heading);
+        if (twist > 0x40000000) e.heading = io::bam_add(inf.body_heading, 0x40000000);
+        else if (twist < -0x40000000) e.heading = io::bam_sub(inf.body_heading, 0x40000000);
+    }
 
     // The lean angle decays every body tick (corpse included — the decay sits before
     // the weapon-channel block in the original) and ramps while a lean key is held;
