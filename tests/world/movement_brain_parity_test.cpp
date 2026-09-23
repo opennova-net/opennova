@@ -10,11 +10,12 @@ namespace {
 int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 
-// Full original dispatchers, including their original reset/enter/exit callbacks.
-// [orig: EntityAI_ProcessInfantryStateMachine @ 0x4581B0;
+// Full original dispatchers, including their original reset/enter/exit callbacks
+// and the no-target idle latch (ammo dwords, the profile's resolved weapon ammo
+// bytes, the gunner guard). [orig: EntityAI_ProcessInfantryStateMachine @ 0x4581B0;
 // EntityAI_ProcessVehicleStateMachine @ 0x4583C0]
 void brain_dispatch_vectors() {
-    static const int32_t cases[][12] = {
+    static const int32_t cases[][18] = {
 #include "fixtures/brain_dispatch_vectors.inc"
     };
     auto world = std::make_unique<World>();
@@ -33,16 +34,23 @@ void brain_dispatch_vectors() {
         e.brain.f[AiBrain::kStep] = 31;
         e.brain.f[AiBrain::kAlert] = 3;
         e.brain.f[AiBrain::kPrevAlert] = 5;
+        e.brain.f[AiBrain::kAmmoA] = v[5];
+        e.brain.f[AiBrain::kAmmoB] = v[6];
+        e.profile.fire_a.ammo_index = v[7]; // the resolved row behind profile+0x94
+        e.profile.fire_b.ammo_index = v[8]; // ... and profile+0xB4
+        e.brain.f[AiBrain::kGuard] = v[9];
         w.registry.get(handle)->spawn_phase = 37;
         w.ai.is_authority = v[1] != 0;
         if (v[0]) w.ai.process_infantry_state_machine(e, w, v[2]);
         else w.ai.process_vehicle_state_machine(e, w, v[2]);
         const int32_t actual[] = {e.brain.f[AiBrain::kCurState], e.brain.f[AiBrain::kPendState],
             e.brain.f[AiBrain::kStep], e.brain.f[AiBrain::kTick], e.brain.f[AiBrain::kAlert],
-            e.brain.f[AiBrain::kPrevAlert], w.registry.get(handle)->spawn_phase};
-        for (int i = 0; i < 7; ++i) if (actual[i] != v[5 + i]) {
-            std::printf("brain air=%d authority=%d event=%d state=%d pending=%d field=%d: %d != %d\n",
-                v[0], v[1], v[2], v[3], v[4], i, actual[i], v[5 + i]);
+            e.brain.f[AiBrain::kPrevAlert], w.registry.get(handle)->spawn_phase,
+            e.brain.f[AiBrain::kNoTargetIdle]};
+        for (int i = 0; i < 8; ++i) if (actual[i] != v[10 + i]) {
+            std::printf("brain air=%d authority=%d event=%d state=%d pending=%d ammo=%d/%d "
+                "weap=%d/%d guard=%d field=%d: %d != %d\n", v[0], v[1], v[2], v[3], v[4],
+                v[5], v[6], v[7], v[8], v[9], i, actual[i], v[10 + i]);
             ++failures;
             break;
         }

@@ -3,7 +3,9 @@
 
 The steering slice executes the original ground/bike motor input and brake branches;
 it stops before steering physics/contact. The brain slice executes the original
-dispatchers with their original no-op/reset callbacks. No engine calls are mocked.
+dispatchers with their original no-op/reset callbacks, including the no-target idle
+latch over the ammo dwords, the profile's weapon ammo bytes and the gunner guard.
+No engine calls are mocked.
 Requires pefile and unicorn; normal native tests use the committed vectors.
 """
 import argparse
@@ -94,7 +96,7 @@ class Machine:
         ]
 
     def brain(self, v):
-        air, authority, event, current, pending = v
+        air, authority, event, current, pending, ammo_a, ammo_b, weap_a, weap_b, guard = v
         self.reset()
         self.wr(0xB5CC28, authority)
         self.wr(VEH + 100, BRAIN, SLOT)
@@ -102,10 +104,17 @@ class Machine:
         self.wr(BRAIN, VEH, DEF)
         self.wr(BRAIN + 16, current, pending, 0, 31)
         self.wr(BRAIN + 184, 3, 5)
+        # The no-target idle latch inputs: the two ammo dwords, the profile's
+        # resolved weapon ammo bytes, and the gunner-attachment guard.
+        self.wr(BRAIN + 0xD4, ammo_a, ammo_b)
+        self.u.mem_write(DEF + 0x94, bytes([weap_a]))
+        self.u.mem_write(DEF + 0xB4, bytes([weap_b]))
+        self.wr(BRAIN + 0x240, guard)
         self.wr(STACK, STOP, VEH, event)
         self.run(0x4581B0 if air else 0x4583C0, STOP)
         assert self.u.reg_read(UC_X86_REG_ESP) == STACK + 4
-        return [self.rd(BRAIN + n) for n in (16, 20, 28, 40, 184, 188)] + [self.rd(VEH + 684)]
+        return [self.rd(BRAIN + n) for n in (16, 20, 28, 40, 184, 188)] + [
+            self.rd(VEH + 684), self.rd(BRAIN + 0xC0)]
 
 
     def recovery(self, v):
@@ -155,7 +164,11 @@ def main():
     brains = []
     for air, authority, event, current, pending in itertools.product(
             (0, 1), (0, 1), (2, 3, 6), (0, 14, 22), (0, 7, 11, 14, 16, 19, 22)):
-        v = [air, authority, event, current, pending]
+        v = [air, authority, event, current, pending, 0, 0, 0, 0, 0]
+        brains.append(v + machine.brain(v))
+    for air, authority, ammo_a, ammo_b, weap_a, weap_b, guard in itertools.product(
+            (0, 1), (0, 1), (0, 5), (0, 5), (0, 3), (0, 3), (0, 1)):
+        v = [air, authority, 2, 0, 0, ammo_a, ammo_b, weap_a, weap_b, guard]
         brains.append(v + machine.brain(v))
     fixture('brain_dispatch_vectors.inc', brains)
 

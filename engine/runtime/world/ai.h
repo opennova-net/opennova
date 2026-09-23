@@ -267,8 +267,6 @@ struct AiProfile {
     // bit5 (&0x20) sweep fire, bit6 (&0x40) burst fire, bit7 (&0x80) stationary fire.
     // [orig: AIEntity_ProcessWeaponFire @0x472e00 mode dispatch; world-wac-ai-re §17.6]
     uint8_t flags100 = 0;
-    bool has_src148 = false; // +148 target-source gate
-    bool has_src180 = false; // +180 target-source gate
     int32_t field216 = 0;  // +216: added into brain working field [131]
 	int32_t patrol_altitude = 0; // profile+204
 	int32_t patrol_climb = 0; // profile+208
@@ -295,7 +293,8 @@ struct AiProfile {
     // ammo_index is the world.tables.ammo row resolved from the authored weapon NAME
     // at the item-traits sweep (-1 = unresolved -> the leg cannot fire), the
     // sibling of the organic seed (Entity_InitOrganicAI @0x4BFCC0). [orig: AIProfile_ParseProperty
-    // "primary_weap" -> AmmoDef_LookupByName -> profile+148 @0x45e0xx]
+    // "primary_weap" -> AmmoDef_LookupByName -> the byte store profile+148 @0x45EF80;
+    // "secondary_weap" -> profile+180 @0x45F27E]
     struct WeaponFire {
         int32_t ammo_cap = 0;     // block+0: brain[53]/[54] spawn seed
         int32_t cone_bam = 0;     // block+8: solve cone half-angle (BAM32)
@@ -304,6 +303,12 @@ struct AiProfile {
         int32_t pitch_bam = 0;    // block+24: pitch bias
         int32_t ammo_index = -1;  // resolved world.tables.ammo row for block+28's name
         std::string ammo_name;    // authored "*_weap" value, pre-resolution
+        // The block+28 byte itself: AmmoDef_LookupByName returns 0 for a miss
+        // and for the null first row, and the parser keeps only its low byte
+        // [orig: AmmoDef_LookupByName @0x409870; AIProfile_ParseProperty @0x45EF80].
+        uint8_t ammo_byte() const {
+            return ammo_index > 0 ? static_cast<uint8_t>(ammo_index) : uint8_t(0);
+        }
     };
     WeaponFire fire_a;
     WeaponFire fire_b;

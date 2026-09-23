@@ -328,8 +328,13 @@ void process_class_state_machine(
         AiSystem &sys, AiEntity &e, World &world, int event, const StateMachineGates &g) {
     AiBrain &b = e.brain;
 
-    // "no target" idle gate.
-    if ((b.f[53] == 0 && b.f[54] == 0) || (!e.profile.has_src148 && !e.profile.has_src180)) {
+    // The no-target idle latch: a brain with both ammo counts spent, or whose
+    // profile resolved no ammo byte in either weapon block, latches idle unless
+    // it carries gunner attachments [orig: EntityAI_ProcessInfantryStateMachine
+    // @0x4581C4..0x4581F4; EntityAI_ProcessVehicleStateMachine @0x4583D7..0x458402:
+    // brain+0xD4/+0xD8, profile bytes +0x94/+0xB4, guard brain+0x240].
+    if ((b.f[AiBrain::kAmmoA] == 0 && b.f[AiBrain::kAmmoB] == 0) ||
+            (e.profile.fire_a.ammo_byte() == 0 && e.profile.fire_b.ammo_byte() == 0)) {
         if (b.f[AiBrain::kGuard] == 0)
             b.f[AiBrain::kNoTargetIdle] = 1;
     }
