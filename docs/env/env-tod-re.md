@@ -153,7 +153,10 @@ weather tick read BEFORE its spring stepped (`WeatherState::overcast_for_tod_q16
 ## Time-of-day compute (`Environment_ComputeTimeOfDayColors @ 0x57de40`)
 
 Runs per tick with `curtime + advance` (8.24 hours, wraps at `0x18000000`); no-op when the
-.env snapshot is empty. Hardcoded day-phase windows (16.16 hours): sunrise ramp 05:40→06:20
+.env snapshot is empty. The wrap is a signed positive modulo on the stored word
+(`@0x57DE51..0x57DE78`, stored `@0x57DE84`): the WAC `TOD` command stores `arg × 0x44444`
+raw into `Env_CurTimeFixed24` (`WacCmd_Tod`, the stores `@0x4EDC74` / `@0x4EDC7A`), so
+`TOD(-60)` becomes 23:00 at the next weather tick. Hardcoded day-phase windows (16.16 hours): sunrise ramp 05:40→06:20
 with the sun/moon switch at 06:00, sunset ramp 18:25→19:05 with the switch at 18:45, ramp
 width 20 minutes (`21840`); sets `Env_IsNightPhase @ 0x26c645c` and
 `Env_DayPhaseBlend @ 0x26c6460`. Segment lookup (`Environment_FindKeyframeSegment @ 0x57dd80`)
@@ -574,7 +577,7 @@ Env_WaterHeightFixed` at most sites. Complete ordered walk:
 | 5 | @ 0x57e4c3–0x57e4db | `Render_SetFogState(0.5, end/65536, type, Env_OvercastBlend/65536)` |
 | 6 | @ 0x57e4ee | `Env_FogEndApplied = end` |
 | 7 | @ 0x57e4f4–0x57e505 | smoothed sky height pushed on change → `Terrain_PushSkyDomeHeightFloat @ 0x610920` → `SkyDome_SetHeightAndRebuild` (dome) |
-| 8 | @ 0x57e512–0x57e538 | if local player && `dword_C6EAFC`: `modulator.target[11] = 0x10101 × compute_ambient_light_along_direction(player)`, then `ColorBlock_SetStepDeltas(modulator, 62)` — exposure reaches the new target in 62 ticks (1 s) |
+| 8 | @ 0x57e50b–0x57e538 | only while `g_local_player_entity` is set (`@0x57E50B..0x57E512`) and `wac_var_autogain` is nonzero (`@0x57E514..0x57E51B`): `modulator.target[11] = 0x10101 × compute_ambient_light_along_direction(player)`, then `ColorBlock_SetStepDeltas(modulator, 62)`, so the exposure reaches the new target in 62 ticks (1 s); otherwise the modulator keeps its last target (the exit `@0x57E53D`). `autogain` is the WAC named value at 0xC6EAFC, seeded 1 by `WacScript_FreeAll @0x4F6371`, so a script that writes 0 freezes the exposure. Ported 2026-09-23: the weather tick samples both conditions into `WeatherState::iris_retarget_enabled`, read by `WeatherRuntime::feed_exposure_target`; a home with no World (previews, fixtures) keeps the gate open |
 
 **Ceiling/floor application points** (the G4 question): (a) the **indoor branch of the
 exposure sample** — `terrain_sector_compute_lighting @ 0x5c7646..0x5c76fe` substitutes
@@ -1013,8 +1016,12 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   the DuDv/normal map — per pixel from the intensity byte,
   `R = wrap8(2·satsub8(c − c_up) + 0x80)`, `G` the same against `c_left`, `B = 0xFF`,
   `A = 0` (the MMX `psubsb/paddsb/paddb 0x008080FF` chain `@ 0x5c07c2..0x5c087d`).
-  Both textures upload every frame. Wave phase `Water_WavePhase = frame_counter ×
-  0x3000000` (`@ 0x5c0374`).
+  Both textures upload every frame. The animation counter is `dword_24C1948` (the read
+  `@0x5C0366`), the ENTITY-UPDATE counter, not a render frame counter: its one writer is
+  the tail of a non-epilog `Entity_UpdateAllEntities @0x4C2100` (`@0x4C2639`), so the noise
+  and the wave phase advance once per entity update, freeze with it and never run faster
+  than 62 Hz. Wave phase `Water_WavePhase = counter × 0x3000000` (`imul` `@0x5C036E`, the
+  store `@ 0x5c0374`).
 - **Init tables** (`Water_InitNoiseFieldAndSineLut @ 0x5c01a0`, once from
   `Water_InitSurfaceShaders @ 0x5c19b0` — renamed at REN-4 from the kong misnomer
   `Terrain_InitShaders`; call site `@ 0x5c19f8`): field = 128×128 samples
