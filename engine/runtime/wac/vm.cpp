@@ -657,8 +657,14 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "lose")) {
         const int32_t team = A(0);
         if (team != 0 && team != 1) return 0;
-        w.out.effects.push({"lose", team, 0, 0, 0,
-                        std::string(team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN")});
+        const std::string key = team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN";
+        w.out.effects.push({"lose", team, 0, 0, 0, key});
+        // The same call relays the key to the peers, with team 0 on both
+        // branches, ahead of the round end [orig: WacAction_Lose @0x4ED3F0 —
+        // the GameMsg_AddChatLineAndRelay calls @0x4ED411 (its team word
+        // pushed @0x4ED3FD) and @0x4ED477 (`push 0` @0x4ED462);
+        // GameMsg_AddChatLineAndRelay's relay gate @0x5BA19F..0x5BA1AF].
+        w.relay_mission_text_chat(0, key);
         w.process_round_end(2);
         return 1;
     }

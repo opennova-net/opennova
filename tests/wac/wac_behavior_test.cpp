@@ -424,6 +424,52 @@ static void test_lose_other_team_noop() {
     CHECK(w.out.effects.count("round_end") == 0);
 }
 
+// Lose posts its line through GameMsg_AddChatLineAndRelay, which relays the
+// Misc key to the peers (S2C 0x3F kind 1) with team 0 on both branches when
+// the authority is in a session. Outside a session nothing relays, and an
+// out-of-range team neither posts nor relays.
+// [orig: WacAction_Lose @0x4ED3F0 — the calls @0x4ED411 / @0x4ED477, the team
+//  words @0x4ED3FD / @0x4ED462; GameMsg_AddChatLineAndRelay @0x5BA170 — the
+//  relay gate @0x5BA19F..0x5BA1AF]
+static void test_lose_relays_its_chat_key() {
+    struct Case {
+        int team;
+        bool session;
+        const char *key; // null: no relay
+    };
+    const Case cases[] = {
+        {0, true, "STRMISC_KILLEDGREEN"},
+        {1, true, "STRMISC_KILLEDBLUE"},
+        {0, false, nullptr},
+        {2, true, nullptr},
+    };
+    for (const Case &c : cases) {
+        BehaviorWorld w;
+        WacSystem sys;
+        CompileEnv env;
+        Program p = compile_source(
+                "if never() then lose(" + std::to_string(c.team) + ") endif\n", env);
+        CHECK(p.ok());
+        sys.set_program(std::move(p));
+        w.add_system(&sys);
+        w.load_systems();
+        w.rules.mp_session = c.session;
+        run(w, sys, 1);
+        const std::vector<HudRelay> &relays = w.out.hud_relays;
+        if (c.key == nullptr) {
+            CHECK(relays.empty());
+            continue;
+        }
+        CHECK(w.out.effects.count("lose") == 1);
+        CHECK(relays.size() == 1);
+        if (relays.size() == 1) {
+            CHECK(relays[0].kind == 1);
+            CHECK(relays[0].team == 0);
+            CHECK(relays[0].key == c.key);
+        }
+    }
+}
+
 // win(team) ends the round straight through, and the outcome builtins
 // (GameOver/WinVar/LoseVar/humans) read the witnessed derivations.
 // [orig: WacAction_Win @0x4ed4a0; the cache derivation @0x4f57bb/c9/cf]
@@ -2063,6 +2109,7 @@ int main() {
     test_authority_gate();
     test_lose_ends_round_with_banner_key();
     test_lose_other_team_noop();
+    test_lose_relays_its_chat_key();
     test_win_and_outcome_builtins();
     test_04tr_outcome_block_greenkills();
     test_wac_spatial_wounded_and_mount_predicates();
