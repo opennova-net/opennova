@@ -38,15 +38,20 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-constexpr int64_t kBamPerDegree = 11930464;
+// An unseeded carrier's angles are its placement angles: `deg << 16`, a
+// truncating signed /360, then << 16, so the low half is zero.
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
+int32_t placement_angle_bam(int32_t degrees) {
+	const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(degrees) << 16) / 360;
+	return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
+}
 
 int32_t carrier_heading_bam(const w::Entity &carrier) {
-	return static_cast<int32_t>(
-			static_cast<int64_t>(90 - carrier.yaw) * kBamPerDegree);
+	return placement_angle_bam(90 - carrier.yaw);
 }
 
 int32_t carrier_axis_bam(int16_t degrees) {
-	return static_cast<int32_t>(static_cast<int64_t>(degrees) * kBamPerDegree);
+	return placement_angle_bam(degrees);
 }
 
 bool drain_built_uplink(w::World &host, w::EntityHandle peer,

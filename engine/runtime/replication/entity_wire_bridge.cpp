@@ -6,6 +6,7 @@
 #include <net/npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
 #include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
 #include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
+#include <runtime/world/angle.h>       // spawn_angle_bam (the placement angle)
 #include <runtime/world/entity.h>      // EntityHandle (pinned below)
 #include <runtime/world/geom.h>        // to_fixed / from_fixed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
@@ -79,17 +80,17 @@ uint8_t player_class_for_wire(const world::Entity &e) {
 	return e.player_class;
 }
 
-constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches snapshot_of)
-
 // Engine-frame heading BAM the wire carries at entity+16 — (90 - mission_yaw) deg, the
-// same convention snapshot_of writes and every spawn decoder reads (D-NET-86).
+// same convention snapshot_of writes and every spawn decoder reads (D-NET-86). The
+// whole-degree mirror is the BMS placement angle, so the dword is the spawn angle
+// retail keeps there, low 16 bits zero (world::spawn_angle_bam).
 int32_t engine_heading_bam(int16_t mission_yaw) {
-	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
+	return world::spawn_angle_bam(90 - mission_yaw);
 }
 
 // Pitch/roll are pure degree-to-BAM axes; only heading has the 90-degree frame inversion.
 int32_t engine_axis_bam(int16_t degrees) {
-	return static_cast<int32_t>(static_cast<int64_t>(degrees) * kBamPerDegree);
+	return world::spawn_angle_bam(degrees);
 }
 
 // The carrier frame a mounted seat-local position is measured against: the one
@@ -138,8 +139,8 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.x = world::to_fixed(e.position.x);
 	s.y = world::to_fixed(e.position.y);
 	s.z = world::to_fixed(e.position.z);
-	// Entity+16 on the wire is a 32-bit engine-frame BAM heading = (90 - mission_yaw) *
-	// kBamPerDegree (D-NET-86 / §5.23/§5.24 — the same convention promote.cpp:87 and ai.cpp
+	// Entity+16 on the wire is a 32-bit engine-frame BAM heading = the spawn angle of
+	// (90 - mission_yaw) (D-NET-86 / §5.23/§5.24 — the same convention promote.cpp and ai.cpp
 	// build from). Entity::yaw is mission yaw in DEGREES, so reconcile our two-store split
 	// (Entity::yaw degrees vs AiEntity::heading BAM) at the wire boundary here: the prior
 	// `yaw << 16` was both the wrong scale (deg*65536, ~182x off) and missing the (90 - yaw)
@@ -723,9 +724,9 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	ent->position.x = static_cast<float>(world::from_fixed(wire_x));
 	ent->position.y = static_cast<float>(world::from_fixed(wire_y));
 	ent->position.z = static_cast<float>(world::from_fixed(wire_z));
-	// BAM32 -> mission yaw degrees: yaw = 90 - bam / kBamPerDegree (the exact inverse of
-	// snapshot_of's `(90 - yaw) * kBamPerDegree`), normalized into [0, 360).
-	constexpr double kBamPerDegree = 11930464.0; // 2^32 / 360 (matches snapshot_of)
+	// BAM32 -> mission yaw degrees: yaw = 90 - bam / kBamPerDegree, rounded (the inverse of
+	// snapshot_of's spawn-angle heading), normalized into [0, 360).
+	constexpr double kBamPerDegree = 11930464.0; // 2^32 / 360
 	const long yaw_deg = std::lround(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
 	ent->yaw = static_cast<int16_t>(((yaw_deg % 360) + 360) % 360);
 

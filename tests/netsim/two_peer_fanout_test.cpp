@@ -1228,7 +1228,7 @@ bool run_0a_player_record_field_sources() {
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
-			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 89, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
 	if (!expect(e != nullptr, "host entity resolvable")) return false;
 	w::AiEntity *ae = ai.for_handle(host_h);
@@ -1254,9 +1254,10 @@ bool run_0a_player_record_field_sources() {
 		if (r.handle == host_h.packed) rec = &r;
 	if (!expect(rec != nullptr, "player record present")) return false;
 
-	// yaw 0 -> engine BAM (90-0)*11930464 = 0x3FFFFFC0: TRUNCATED high byte = 0x3F (rounding
-	// would give 0x40 — the exact bit the witness corrected).
-	if (!expect(rec->player.yaw_byte == 0x3F, "yaw byte is the TRUNCATED high byte")) return false;
+	// yaw 89 -> the placement heading ((90-89) << 16) / 360 << 16 = 0x00B60000: TRUNCATED high
+	// byte = 0x00 (rounding would give 0x01 — the exact bit the witness corrected).
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	if (!expect(rec->player.yaw_byte == 0x00, "yaw byte is the TRUNCATED high byte")) return false;
 	// Live AiEntity pitch 0x1F800000 rounds to high byte 0x20; the
 	// deliberately disagreeing registry pitch above must be ignored.
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
@@ -1671,8 +1672,10 @@ bool run_grounded_uplink_apply_and_echo() {
 	                    nw::network_decompress_fixedpoint(rec->player.pos_z_compressed) == lz,
 	            "record position is the CARRIER-LOCAL offset, not anchor-relative world"))
 		return false;
-	// Local heading hi-byte: yaw 45 -> engine BAM (90-45)*11930464 = 0x1FFFFFE0; carrier BAM 0.
-	if (!expect(rec->player.yaw_byte == 0x1F, "yaw byte is the LOCAL heading's high byte"))
+	// Local heading hi-byte: yaw 45 -> the placement heading ((90-45) << 16) / 360 << 16 =
+	// 0x20000000, the same dword the 0x2000 uplink heading carried; carrier BAM 0.
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	if (!expect(rec->player.yaw_byte == 0x20, "yaw byte is the LOCAL heading's high byte"))
 		return false;
 
 	// (3) The free-standing form is unchanged: a later 0xFFFF uplink returns to world coords.
@@ -1902,7 +1905,9 @@ bool run_vehicle_drive_authority() {
 	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at
 	// 0 degrees. The authority motor must consume the player's LOOK, not the seat yaw.
 	const int32_t requested_driver_heading = w::bam_heading_from_mission_yaw_deg(45.0);
-	constexpr int32_t carrier_heading = 90 * 11930464;
+	// The unseeded carrier heads at its placement angle, ((90 - 0) << 16) / 360 << 16
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
+	constexpr int32_t carrier_heading = 0x40000000;
 	const uint32_t local_heading_bits =
 			static_cast<uint32_t>(requested_driver_heading) -
 			static_cast<uint32_t>(carrier_heading);

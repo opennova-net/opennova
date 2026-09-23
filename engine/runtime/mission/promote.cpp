@@ -3,6 +3,7 @@
 
 #include <base/io/le.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
@@ -226,17 +227,6 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
 }
 
 namespace {
-
-// A BMS angle in degrees -> the spawned entity's 32-bit binary angle: scaled to a
-// 16-bit turn by a truncating signed divide, then shifted into the high half, so
-// the low 16 bits are always zero (yaw 0 spawns at 0x40000000, not 90 x 11930464 =
-// 0x3FFFFFC0). The heading passes 90 - yaw.
-// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66 — `(90 - yaw) << 16`, the
-//  0B60B60B7h magic divide by 360, `shl ecx,10h` into entity+0x10]
-int32_t spawn_angle_bam(int32_t deg) {
-    const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(deg) << 16) / 360;
-    return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
-}
 
 // Kind -> g_pool_list index: the BMS loader places each record list in its own pool.
 // [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1 @0x40f9bb..0x40f9c6, pool 2

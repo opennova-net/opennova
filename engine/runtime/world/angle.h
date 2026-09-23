@@ -7,8 +7,20 @@ namespace opennova::world {
 
 // Retail code uses 32-bit binary angular measure for entity yaw/pitch: one full turn is
 // 2^32 units. Use the full-turn scale here so exact quadrants round-trip cleanly;
-// fixed-integer spawn/promotion paths that were IDA-pinned to 11930464 stay in their own modules.
+// fixed-integer paths that were IDA-pinned to 11930464 stay in their own modules.
 constexpr double kBamFullTurn = 4294967296.0;
+
+// A BMS angle in whole degrees -> the spawned entity's BAM: `deg << 16` in a 32-bit
+// register, a truncating signed divide by 360, then shifted into the high half, so
+// the low 16 bits are always zero (yaw 0 spawns its heading at 0x40000000, where
+// 90 x 11930464 would give 0x3FFFFFC0). The heading passes 90 - yaw; pitch and roll
+// pass their degrees. Every entity angle that is still its placement carries it.
+// [orig: Entity_SpawnFromBMSRecord — heading @0x40EB42..0x40EB66, pitch/roll
+//  @0x40EB69..0x40EBA6, the 0B60B60B7h magic divide]
+inline int32_t spawn_angle_bam(int32_t deg) {
+    const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(deg) << 16) / 360;
+    return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
+}
 constexpr double kBamPerDegree = kBamFullTurn / 360.0;
 constexpr double kDegreesPerBam = 360.0 / kBamFullTurn;
 

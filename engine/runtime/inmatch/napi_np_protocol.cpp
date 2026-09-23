@@ -15,6 +15,7 @@
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h> // spawn_angle_bam
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h> // to_fixed
 #include <runtime/world/spawn_select.h> // SpawnWaveList::remove_player (the disconnect leg)
@@ -403,10 +404,10 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			p.pos_y = world::to_fixed(e->position.y);
 			p.pos_z = world::to_fixed(e->position.z);
 			// Match the wire heading convention the P2 pose / the 0x0C body use: the high 16 bits of
-			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees.
-			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
-			p.heading = static_cast<int16_t>(
-					(static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees. The
+			// spawned player's heading is its start marker's placement angle, so the high half is the
+			// spawn angle's, the one the 0x0F world-state load sends (world::spawn_angle_bam).
+			p.heading = static_cast<int16_t>(world::spawn_angle_bam(90 - e->yaw) >> 16);
 			// The pose event mirrors the same signed BAM32 high word as the C2S 0x0C path. The
 			// authoritative look pitch lives on AiEntity, not world::Entity; retain the zero default
 			// when a non-AI entity is bound. [orig: pose_from_session gss.client_pitch;

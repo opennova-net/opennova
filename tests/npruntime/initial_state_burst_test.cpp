@@ -262,6 +262,15 @@ int main_impl() {
 				"0x0F gameFlags bit1 advertises the target-less spawn restriction")) {
 			return 1;
 		}
+		// The fresh player carries its start marker's placement angles, so the i16
+		// yaw is the spawn angle's high half: yaw 0 -> (90 << 16) / 360 = 0x4000,
+		// where 90 x 11930464 >> 16 would give 0x3FFF.
+		// [orig: NetPacket_WriteWorldStateLoad0x0F `movzx edx, word ptr [ebp+12h]`
+		//  @0x502D6D; Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+		if (!expect(state.yaw == 0x4000 && state.pitch == 0 && state.roll == 0,
+				"0x0F yaw is the placement heading's high half")) {
+			return 1;
+		}
 	}
 
 	{
@@ -430,6 +439,10 @@ int main_impl() {
 					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "PeerSpawned world-path pose pitch == AiEntity BAM32 high word")) return 1;
+					// The spawn marker's yaw 0 placement heading's high half, 0x4000
+					// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
+					if (!expect(ev.pose.heading == 0x4000,
+					            "PeerSpawned world-path pose heading == the placement heading's high half")) return 1;
 					if (spawned_at < 0) spawned_at = seq;
 				}
 				++seq;
