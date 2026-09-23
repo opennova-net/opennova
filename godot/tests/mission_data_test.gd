@@ -90,6 +90,33 @@ func test_item_database_exposes_retail_interior_light_transfer() -> void:
 	DirAccess.remove_absolute(tmp)
 
 
+# A repeated id resolves to its FIRST row, the engine's type-id resolution
+# (mission::find_item_def): the shipped ITEMS.DEF repeats 102044, and every
+# "Map Named Location" marker must not read the later med pack's row.
+func test_item_database_duplicate_id_keeps_first_row() -> void:
+	var tmp := ProjectSettings.globalize_path(
+			"user://duplicate_items_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(
+			"begin \"Map Named Location\"\n"
+			+ "  id 102044\n"
+			+ "  type marker\n"
+			+ "end\n"
+			+ "begin \"Power Up Med Pack Infinite\"\n"
+			+ "  id 102044\n"
+			+ "  type powerup\n"
+			+ "  graphic PwrMed\n"
+			+ "end\n")
+	file.close()
+	var db := ItemDatabase.new()
+	assert_eq(db.load(tmp), OK)
+	assert_eq(db.get_count(), 1, "a duplicate id counts once")
+	assert_eq(db.get_display_name(102044), "Map Named Location", "the first row wins")
+	assert_eq(db.get_graphic(102044), "", "the later row's graphic is never reached")
+	DirAccess.remove_absolute(tmp)
+
+
 
 
 func test_entities_resolve_to_models() -> void:

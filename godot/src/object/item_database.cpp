@@ -75,15 +75,16 @@ void ItemDatabase::release_native_items() {
 }
 
 // Retain the parse (ADR 0028) and index it. The id index walks the rows in
-// file order so a duplicate id resolves to its LAST row; the rows themselves
-// are kept as parsed so the replication catalog can classify duplicates.
+// file order and keeps the FIRST row per id: the engine's type-id resolution
+// (mission::find_item_def, witnessed there) never reaches a later duplicate.
+// The rows themselves stay as parsed.
 void ItemDatabase::adopt_(const DefItemsFile &p_file) {
 	items_file_ = p_file;
 	items_file_loaded_ = true;
 
 	index_.reserve(items_file_.count);
 	for (size_t i = 0; i < items_file_.count; ++i) {
-		index_[items_file_.entries[i].id] = i;
+		index_.emplace(items_file_.entries[i].id, i);
 	}
 
 	// The index is unordered, so callers that enumerate get a stable order only

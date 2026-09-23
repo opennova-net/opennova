@@ -34,9 +34,9 @@ private:
 	// in the destructor.
 	opennova::def::DefItemsFile items_file_ = {};
 	bool items_file_loaded_ = false;
-	// id -> row index into items_file_.entries, assigned in file order so a
-	// duplicate id keeps its LAST row (the public lookup collapses duplicates;
-	// the replication catalog walks the rows and keeps them).
+	// id -> row index into items_file_.entries, built in file order so a
+	// duplicate id keeps its FIRST row (the public lookup collapses duplicates;
+	// the replication catalog walks the rows itself).
 	std::unordered_map<int, size_t> index_;
 	// Every unique id in a stable display order (natural, case-insensitive
 	// display_name, then id), computed once at load so an enumeration is
