@@ -571,7 +571,8 @@ private:
 	// The keyword arms first unwind the paren stack. A frame whose precedence
 	// is below the lookahead's drops without its POP and takes the keyword
 	// with it: retail returns to the tokenizer. True then.
-	// [orig: Script_Compile's drain loops, e.g. @0x4F4200..0x4F426C]
+	// [orig: Script_Compile's drain loops, e.g. @0x4F4200..0x4F426C; the ENTER
+	//  arm's check @0x4F4818..0x4F4823]
 	bool drain_abandons(File &f) {
 		while (f.paren_depth != 0) {
 			--f.paren_depth;

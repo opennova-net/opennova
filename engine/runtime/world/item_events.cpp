@@ -427,7 +427,7 @@ void barrel_event(World &world, Entity &target) {
         target.class_think_ticks = 1920;
     } else {
         world.out.scars.clear_entity(target.handle);
-        mark_class_dead(target);
+        mark_class_dead(target); // [orig: `or [esi+24h],2` @0x407D34]
         target.class_think_ticks = 10;
     }
 }

@@ -929,7 +929,7 @@ void WacVm::execute(opennova::world::World &w) {
                 ip = loop_choices_[loop]-- == 1 ? ip + 2 : operand;
                 break;
             }
-            case Op::GroupIter:
+            case Op::GroupIter: // [orig: WacScript_ExecuteBytecode case 10 @0x4F5B11]
                 group_index = operand;
                 group_remaining = group_index < groups_.size()
                         ? static_cast<int32_t>(groups_[group_index].size()) : 0;
