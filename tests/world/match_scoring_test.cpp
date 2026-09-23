@@ -547,6 +547,34 @@ void test_winner_award_needs_a_score_table() {
     CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
 }
 
+// Scorer event 5: MEDICHEAL (RecordEvent 7, value 6) on the medic and its
+// team row; the scorer refuses it when the medic or the patient is a
+// spectator. [orig: GameEvent_HealPlayer @0x50DE30 (the call @0x50DEA4);
+// GameEvent_ProcessScoring — the spectator tests @0x52F6E5/@0x52F6FA, case 5
+// @0x52FD3A..0x52FD8D]
+void test_heal_scores_medicheal() {
+    MatchRules heal = rules(gt::kTeamDeathmatch);
+    (*heal.score_values)[6] = 4;
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 16);
+    world->match.configure(heal);
+    const EntityHandle medic = player(*world, 0, 1);
+    const EntityHandle patient = player(*world, 1, 1);
+    world->match.record_heal(*world, medic, patient);
+    CHECK(world->match.player(medic)->stats[MatchStats::kMedicHeals] == 1);
+    CHECK(world->match.player(medic)->stats[MatchStats::kPoints] == 4);
+    CHECK(world->match.player(patient)->stats[MatchStats::kMedicHeals] == 0);
+    CHECK(world->match.team_stats(1)[MatchStats::kMedicHeals] == 1);
+    CHECK(world->match.team_stats(1)[MatchStats::kPoints] == 4);
+    world->match.set_player_spectator(patient, true);
+    world->match.record_heal(*world, medic, patient);
+    CHECK(world->match.player(medic)->stats[MatchStats::kMedicHeals] == 1);
+    world->match.set_player_spectator(patient, false);
+    world->match.set_player_spectator(medic, true);
+    world->match.record_heal(*world, medic, patient);
+    CHECK(world->match.team_stats(1)[MatchStats::kMedicHeals] == 1);
+}
+
 } // namespace
 
 int main() {
@@ -566,6 +594,7 @@ int main() {
     test_periodic_score_needs_a_deployed_session_player();
     test_team_hold_counts_after_the_round();
     test_winner_award_needs_a_score_table();
+    test_heal_scores_medicheal();
     if (failures != 0) {
         std::printf("match_scoring_test: %d failure(s)\n", failures);
         return 1;

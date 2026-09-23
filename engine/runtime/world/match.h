@@ -107,6 +107,9 @@ struct MatchStats {
     static constexpr size_t kEnemyKills = 5;
     static constexpr size_t kSuicides = 6;
     static constexpr size_t kDeaths = 7;
+    // RecordEvent 7: a medic's heal (MEDICHEAL); no FIELD id reads it.
+    // [orig: GameEvent_ProcessScoring case 5 @0x52FD3A]
+    static constexpr size_t kMedicHeals = 8;
     // RecordEvent 8: a medic's revive (MEDICSAVE, FIELD id 10).
     // [orig: GameEvent_ProcessScoring case 6 @0x52FCD8]
     static constexpr size_t kMedicSaves = 9;
@@ -399,6 +402,9 @@ class Match {
     // Scorer event 6: a medic revived a downed teammate.
     // [orig: GameEvent_RevivePlayer @0x517CD0 (the event-6 call @0x517DC5)]
     void record_revive(const World &world, EntityHandle medic);
+    // Scorer event 5: a medic healed a hurt teammate.
+    // [orig: GameEvent_HealPlayer @0x50DE30 (the event-5 call @0x50DEA4)]
+    void record_heal(const World &world, EntityHandle medic, EntityHandle patient);
 
     // Objective scorer cases 9 and 11. The ordinary runtime paths call these
     // from carry contact and death routing; they remain public for script/WAC

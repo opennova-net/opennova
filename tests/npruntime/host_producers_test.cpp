@@ -19,6 +19,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_chat.h>
+#include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_net_quality.h>
 #include <runtime/inmatch/server_session.h>
@@ -441,7 +442,8 @@ bool check_medic_revive_transaction() {
 	f.world.match.configure(medic_rules);
 	f.world.match.upsert_player({f.players[1], 2, "P2"});
 	for (auto &t : f.transports) (void)drain(t);
-	f.world.round_sim.medic_revives.push_back(w::MedicRevive{f.players[0], f.players[1]});
+	f.world.round_sim.medic_interactions.push_back(
+			w::MedicInteraction{f.players[0], f.players[1], /*revive=*/true});
 	inmatch::Server_TickUpdate(f.ctx);
 	if (!expect(victim->medic_reviving, "the victim's +0x1E0 latch is set")) return false;
 	// The revive scores the medic's MEDICSAVE [orig: GameEvent_RevivePlayer
@@ -474,6 +476,97 @@ bool check_medic_revive_transaction() {
 	// The other player sees the event too (mask 128).
 	return expect(count_tag(drain(f.transports[1]), s2c::GAME_EVENT) >= 1,
 			"event 38 reaches every active player");
+}
+
+// The heal transaction: a live, hurt teammate's health goes back to its def
+// max, the medic scores MEDICHEAL (event 5) and every active player gets S2C
+// 0x1E event 45 [patient][medic][0xFF][x][y]. A hidden (spectator) medic still
+// restores the health but neither scores nor sends; a medic of another class
+// and a patient without a player slot are refused.
+// [orig: GameEvent_HealPlayer @0x50DE30 — the class @0x50DE58, the victim's
+//  slot @0x50DE66..0x50DE70, the restore @0x50DE77..0x50DE7F, the hide bytes
+//  @0x50DE86..0x50DE96, scoring @0x50DEA4, 0x1E @0x50DEAC..0x50DF02]
+bool check_medic_heal_transaction() {
+	HostFixture f(2, 1);
+	w::Entity *patient = f.world.registry.get(f.players[0]);
+	w::Entity *medic = f.world.registry.get(f.players[1]);
+	medic->team = 1;
+	medic->player_class = 5;
+	patient->has_item_def = true;
+	patient->health_max = 150;
+	patient->health = 40;
+	patient->position = {12.0f, 34.0f, 5.0f};
+	w::MatchRules heal_rules;
+	heal_rules.game_type = 0x10000u; // TDM
+	heal_rules.score_values.emplace();
+	(*heal_rules.score_values)[6] = 3; // MEDICHEAL
+	f.world.match.configure(heal_rules);
+	f.world.match.upsert_player({f.players[0], 1, "P1"});
+	f.world.match.upsert_player({f.players[1], 2, "P2"});
+	auto heal = [&f](w::EntityHandle target) {
+		for (auto &t : f.transports) (void)drain(t);
+		f.world.round_sim.medic_interactions.push_back(
+				w::MedicInteraction{target, f.players[1], /*revive=*/false});
+		inmatch::Server_RouteMedicInteractions(f.ctx, f.world);
+	};
+	auto event45_everywhere = [&f]() {
+		size_t seen = 0;
+		for (auto &t : f.transports)
+			for (const ns::Datagram &d : drain(t))
+				if (d.tag == s2c::GAME_EVENT && !d.body.empty() && d.body[0] == 45) ++seen;
+		return seen;
+	};
+	heal(f.players[0]);
+	bool ok = expect(patient->health == 150, "the heal restores the def max");
+	const w::MatchPlayer *scorer = f.world.match.player(f.players[1]);
+	ok = expect(scorer != nullptr && scorer->stats[w::MatchStats::kMedicHeals] == 1 &&
+	                    scorer->stats[w::MatchStats::kPoints] == 3 &&
+	                    f.world.match.team_stats(1)[w::MatchStats::kMedicHeals] == 1,
+	            "the heal scores event 5 on the medic and its team row") && ok;
+	const std::vector<uint8_t> want = {45, uint8_t(f.players[0].slot()),
+			uint8_t(f.players[1].slot()), 0xFF, 12, 0, 34, 0};
+	bool both = true;
+	for (auto &t : f.transports) {
+		bool saw = false;
+		for (const ns::Datagram &d : drain(t))
+			if (d.tag == s2c::GAME_EVENT && d.body == want) saw = true;
+		both = both && saw;
+	}
+	ok = expect(both, "event 45 [patient][medic][0xFF][x][y] reaches every active player") && ok;
+
+	// A hidden (spectator) medic: the restore runs, the score and the event do not.
+	patient->health = 40;
+	f.conn(1).link.spectator = true;
+	f.world.match.set_player_spectator(f.players[1], true);
+	heal(f.players[0]);
+	ok = expect(patient->health == 150 && event45_everywhere() == 0 &&
+	                    scorer->stats[w::MatchStats::kMedicHeals] == 1,
+	            "a hidden medic restores the health without a score or an event") && ok;
+	f.conn(1).link.spectator = false;
+	f.world.match.set_player_spectator(f.players[1], false);
+
+	// Another class: refused before the restore.
+	patient->health = 40;
+	medic->player_class = 1;
+	heal(f.players[0]);
+	ok = expect(patient->health == 40 && event45_everywhere() == 0,
+	            "a medic of another class is refused") && ok;
+	medic->player_class = 5;
+
+	// A patient without a player slot: refused before the restore.
+	w::Entity bot;
+	bot.kind = w::EntityKind::Organic;
+	bot.has_item_def = true;
+	bot.item_type = 3;
+	bot.team = 1;
+	bot.health = 40;
+	bot.health_max = 150;
+	bot.alive = true;
+	const w::EntityHandle bot_handle = f.world.registry.spawn(0, bot);
+	heal(bot_handle);
+	ok = expect(f.world.registry.get(bot_handle)->health == 40 && event45_everywhere() == 0,
+	            "a patient without a player slot is refused") && ok;
+	return ok;
 }
 
 // --------------------------------------------------------------------------
@@ -700,6 +793,7 @@ int main() {
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_medic_revive_transaction() && ok;
+	ok = check_medic_heal_transaction() && ok;
 	ok = check_session_ping_codec() && ok;
 	ok = check_server_commands() && ok;
 	ok = check_player_enter_hook() && ok;

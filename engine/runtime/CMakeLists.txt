@@ -355,7 +355,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_revive.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp

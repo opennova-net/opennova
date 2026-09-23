@@ -366,14 +366,18 @@ struct RoundDeath {
     bool motor_edge = false;
 };
 
-// A medic-kit hit on a downed teammate the kill-zone pass admitted this tick —
-// drained by the host session, which owns the revive transaction's wire
-// (0x54 / 0x3A / 0x61 / 0x1E ev 38) [orig: Projectile_ProcessExplosionQueue
+// A medic-kit hit on a same-team person the kill-zone pass admitted this tick,
+// in sweep order — drained by the host session, which owns both transactions'
+// wire: a downed target's revive (0x54 / 0x3A / 0x61 / 0x1E ev 38) and a live,
+// hurt target's heal (0x1E ev 45) [orig: Projectile_ProcessExplosionQueue
 // @0x4EADFC routes a kz type 3 with the Medic charattr to
-// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer @0x517CD0].
-struct MedicRevive {
+// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer
+// @0x517CD0 (the call @0x4E67D8) / GameEvent_HealPlayer @0x50DE30 (the call
+// @0x4E6805)].
+struct MedicInteraction {
     EntityHandle victim;
     EntityHandle healer;
+    bool revive = false; // the dead arm; the live arm heals
 };
 
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
@@ -499,9 +503,9 @@ public:
     // Deaths detected by the damage pass, in tick order. The host session drains this
     // every tick (inmatch server tick) and stages the death broadcasts.
     std::vector<RoundDeath> deaths;
-    // Medic revives the kill-zone pass admitted this tick, in tick order; the host
-    // drains them after the deaths (the revive sender is a host transaction).
-    std::vector<MedicRevive> medic_revives;
+    // Medic interactions the kill-zone pass admitted this tick, in tick order; the
+    // host drains them after the deaths (both arms are host transactions).
+    std::vector<MedicInteraction> medic_interactions;
 
     // Impacts resolved this tick, in tick order — drained by the presenting host
     // every frame (the sim stays render-free). Bounded: a headless server never

@@ -4,7 +4,7 @@
 #include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
-#include <runtime/inmatch/server_revive.h>           // the medic revive transaction
+#include <runtime/inmatch/server_medic.h>            // the medic revive and heal transactions
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 
 #include <cstdint>
@@ -1956,10 +1956,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_throwable_events(ctx, world);
 	route_script_remote_commands(ctx, world);
 	route_round_deaths(ctx, world);
-	// The medic revives the kill-zone pass admitted this tick, after the deaths
-	// it also produced [orig: Projectile_ProcessExplosionQueue @0x4EADFC ->
-	// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer @0x517CD0].
-	Server_RouteMedicRevives(ctx, world);
+	// The medic interactions the kill-zone pass admitted this tick, after the
+	// deaths it also produced [orig: Projectile_ProcessExplosionQueue @0x4EADFC ->
+	// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer
+	// @0x517CD0 / GameEvent_HealPlayer @0x50DE30].
+	Server_RouteMedicInteractions(ctx, world);
 	route_match_gameplay_events(ctx, world);
 	release_expired_local_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic

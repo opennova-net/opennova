@@ -1200,6 +1200,25 @@ void Match::record_revive(const World &world, EntityHandle medic_handle) {
     add_team_event(medic_entity->team, MatchStats::kMedicSaves, score_value(7));
 }
 
+// Scorer event 5: the medic's MEDICHEAL (RecordEvent 7 + value 6) on the
+// medic and its team row. The patient rides as the second entity, so the
+// scorer refuses the event when either slot is a spectator.
+// [orig: GameEvent_HealPlayer @0x50DE30 (the GameEvent_ProcessScoring(
+//  g_GameType, healer, 5, victim, 0) call @0x50DEA4); GameEvent_ProcessScoring
+//  — the spectator tests @0x52F6E5/@0x52F6FA, case 5 @0x52FD3A..0x52FD8D]
+void Match::record_heal(const World &world, EntityHandle medic_handle,
+                        EntityHandle patient_handle) {
+    const Entity *medic_entity = world.registry.get(medic_handle);
+    MatchPlayer *medic = player(medic_handle);
+    const MatchPlayer *patient = player(patient_handle);
+    if (medic_entity == nullptr || (medic != nullptr && medic->spectator) ||
+        (patient != nullptr && patient->spectator))
+        return;
+    if (medic != nullptr)
+        add_event(world, *medic, MatchStats::kMedicHeals, score_value(6));
+    add_team_event(medic_entity->team, MatchStats::kMedicHeals, score_value(6));
+}
+
 void Match::record_zone_capture(const World &world,
                                 const std::vector<EntityHandle> &scorers) {
     if (outcome_.ended)

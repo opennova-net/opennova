@@ -3875,6 +3875,64 @@ void test_knife_kill_zone() {
     CHECK(w.registry.get(item)->health == 120);
 }
 
+// The kind-3 (medic kit) kill zone: per same-team person in radius other than
+// the medic, a dead one not already being revived queues a revive and a live
+// one below its def hp queues a heal, in sweep order; a full-health teammate
+// and an enemy queue nothing, and the heal itself is the host's transaction.
+// [orig: Projectile_ProcessExplosionQueue case 3 @0x4EADDD..0x4EADFC;
+//  GameEvent_HandleMedicInteraction @0x4E6790 — gates @0x4E679C..0x4E67BD,
+//  dead arm @0x4E67C2..0x4E67D8, live arm @0x4E67E3..0x4E6805]
+void test_medic_kill_zone_queues_both_arms() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.registry.configure_pool(0, 8);
+    w.tables.ammo.entries.resize(2);
+    AmmoTableEntry &kit = w.tables.ammo.entries[1];
+    kit.name = "MEDKIT";
+    kit.valid = true;
+    kit.kztype = ammo_kz::kMedic;
+    kit.kz_maxradius = 3.0f;
+    w.tables.class_attribute_flags[(5u - 1u) & 0xFu] = MissionTables::kCharAttrMedic;
+    Entity medic_seed;
+    medic_seed.kind = EntityKind::Organic;
+    medic_seed.has_item_def = true;
+    medic_seed.item_type = 3;
+    medic_seed.health = 150;
+    medic_seed.health_max = 150;
+    medic_seed.bound_radius = 0.6f;
+    medic_seed.player_class = 5;
+    medic_seed.team = 1;
+    const EntityHandle medic = w.registry.spawn(0, medic_seed);
+    Entity hurt_seed = medic_seed;
+    hurt_seed.player_class = 1;
+    hurt_seed.health = 40;
+    hurt_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle hurt = w.registry.spawn(0, hurt_seed);
+    Entity whole_seed = hurt_seed;
+    whole_seed.health = 150;
+    w.registry.spawn(0, whole_seed);
+    Entity downed_seed = hurt_seed;
+    downed_seed.health = 0;
+    downed_seed.flags |= kEntityFlagDead;
+    const EntityHandle downed = w.registry.spawn(0, downed_seed);
+    Entity enemy_seed = hurt_seed;
+    enemy_seed.team = 2;
+    w.registry.spawn(0, enemy_seed);
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kMedic;
+    e.ammo_index = 1;
+    e.owner = medic;
+    run_blast(w, e);
+    const std::vector<MedicInteraction> &queued = w.round_sim.medic_interactions;
+    CHECK(queued.size() == 2);
+    CHECK(queued.size() == 2 && queued[0].victim == hurt && !queued[0].revive &&
+          queued[0].healer == medic);
+    CHECK(queued.size() == 2 && queued[1].victim == downed && queued[1].revive &&
+          queued[1].healer == medic);
+    CHECK(w.registry.get(hurt)->health == 40);
+}
+
 int main() {
     test_blast_on_a_crewed_vehicle_scales_by_occupants();
     test_blast_respects_the_damage_disabled_word();
@@ -3941,6 +3999,7 @@ int main() {
     test_round_destroys_item();
     test_building_death_requires_loaded_husk_model();
     test_net_kill_runs_client_side_death_chain();
+    test_medic_kill_zone_queues_both_arms();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
