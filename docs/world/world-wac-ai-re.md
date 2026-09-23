@@ -1367,9 +1367,9 @@ complement of retail's `{2,3,5}` hide set, so a passenger keeps its weapon. The 
 is folded into the `PF_HELD_WEAPON_ADM` snapshot field: a hidden or unarmed body reports index
 0, which is simultaneously our table's null row and the original's own
 `if (entity->equippedAdmIndex)` precondition. STILL UNPORTED from this callback: AI/NPC bodies
-(a placed `.bms` soldier never receives an equipped ADM index and its source in the original
-is UNWITNESSED — every witnessed writer of `entity+0x2B0` is a player path, so that increment
-is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
+(an unmounted placed `.bms` soldier's equipped ADM index has no witnessed source: the org1
+mounted request copies its gun's byte into a gunner (§38.3), and the other witnessed writers of
+`entity+0x2B0` are player paths, so that increment is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
 projected-size cull `@ 0x4e3d4b`, the mounted-branch correlation of §14.4, and the DEATH
 family's rows in the same 0x80 flag table the hand-frame branch reads. The original guidance
 below still describes the seat taxonomy the port reuses.
@@ -12584,6 +12584,25 @@ the ground death's child kill) route the same way.
   on success, and on the fail tick retail still runs the shared mounted tail (the
   carrier-velocity copy zeroed @ 0x4BEF1C..0x4BEF30, the mounted look chase
   @ 0x4BEF36..0x4BEFF0).
+- **The secondary-fire latch and the mounted request.** `shouldFireSecondary` is the motor
+  frame local var_108C, zeroed with the other locals at the motor head (@ 0x4B999C..0x4B99C6,
+  the latch @ 0x4B99B8); only that pass's walking-fire leg (@ 0x4BC93F) or the clip's 0x8
+  event bit (@ 0x4BF39B) sets it, and the fire block tests it once (@ 0x4BF406), so a latch
+  never outlives its pass. The mounted request runs for every mounted-live body (the local
+  @ 0x4BF4B3): past the four-tick cadence (@ 0x4BF4DA) and the spatial stagger
+  (@ 0x4BF4E3..0x4BF4EE) it copies the parent's +0x2B0 into the rider's
+  (@ 0x4BF4F4..0x4BF4FA) ahead of the range test, then tests the rider's EquippedSlot +0x118
+  (@ 0x4BF564..0x4BF56C), which the UseGun attach swapped to the parent's mount slot
+  (&parent+0x2B4, saving +0x308, @ 0x546C42..0x546C4E; the attach writes no +0x2B0). The
+  parent's byte is the AdmDef index `WeaponSlot_InitFromEntityDef @ 0x5466C0` stores at the
+  parent's init (@ 0x546742, the same routine pointing +0x118 at the slot @ 0x54674D), and the
+  NPC detach clears the rider's byte to 0 (@ 0x43569C). Port: the motor head clears the latch
+  for NPC bodies (`infantry_org1_parity`, `test_org1_fire_latch_is_a_pass_local`), and
+  `infantry_mounted_fire_pass` copies the byte after the stagger and tests the swapped slot,
+  seeding the parent's slot lazily as the stand-in for the parent's own init (`ai`,
+  `test_mounted_request_copies_the_parent_adm_byte`). Carried: the port's detach stores 0xFF
+  where retail stores 0, and the port gates both the request and the org1 fire block
+  (@ 0x4BF15C..0x4BF4B0) on a Gunner seat where retail runs them for every mounted-live body.
 - **The plyr waypoint tail.** `Entity_HandleDamageAndTriggerZones @ 0x407720`
   returns at once for Flags & 2 (@ 0x40772A..0x40772F); every other event reaches its
   tail: the cause-bit clear for events outside {1, 3, 4, 5} (@ 0x407B3B..0x407B4F),
@@ -12633,7 +12652,11 @@ unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
   (var_10E4, @ 0x4BA9B4..0x4BA9BA), clears the board cache unless the command is 125,
   runs the 64-tick seat upgrade and seeds aimPitch +0x2D0 = (DcbId << 27) >> 4
   (@ 0x4BAA4B..0x4BAA59). A body with Flags 0x2000 and without the 0x80 climb order
-  skips the rest of the think (@ 0x4BAA57..0x4BAA66 -> @ 0x4BE7FD); only then do the
+  skips the rest of the think (@ 0x4BAA57..0x4BAA66 -> the recoil block @ 0x4BE7FD): the
+  route and command legs, combat (@ 0x4BBE24), the guard, hold, reaction and
+  forced-animation legs, the attachment select (@ 0x4BD273), the selector, the ride link,
+  the idle facing and the attention (@ 0x4BD87E..) all wait for the landing, while the
+  recoil, spread and torso tail keeps running. Only past that skip do the
   frame locals initialise and the +0x128 cooldown step down while nonzero, a negative
   value included (@ 0x4BAA7B..0x4BAAB1). The seed shows only while airborne.
 - **The route leg.** Without the has-route flag or with the cooldown running, the
@@ -12726,7 +12749,12 @@ unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
   the magazine refills from the clipsize low word, clipsize or not
   (@ 0x4BD132..0x4BD17D).
 - **The guard family and the holds.** The combat tail reads Flags once (@ 0x4BD184):
-  0x100000 (ladder) drops the move (@ 0x4BD187..0x4BD194). Flags 0x40: moveMode 0 and
+  0x100000 (ladder) drops the move (@ 0x4BD187..0x4BD194) and falls through into the
+  selector: the zero-distance leg clears the path state (@ 0x4BD2DE..0x4BD2E9), +0x36A
+  takes the move mode (@ 0x4BD356), the flinch consumes wasHit (@ 0x4BD6EE) and the
+  arbiter commits; the org1 ladder block later stores its climb state over the selection
+  (@ 0x4BF907..0x4BFAD8), keeping the arbiter's pending request (port: the selector runs on
+  a ladder too, `test_org1_ladder_runs_the_selector_tail`). Flags 0x40: moveMode 0 and
   distance 0; guard 140 when authored, else Flags &= ~0x40 (@ 0x4BD19B..0x4BD1BB);
   guard_cover 143 when wasHit and 143 is authored (@ 0x4BD1BE..0x4BD1D5); guard_attack
   142 with moveMode 7 when a reaction was chosen and 142 is authored
