@@ -10,7 +10,7 @@
 namespace opennova::world {
 
 enum class RuntimeGapKind : uint8_t {
-    WacCommand, WacOpcode, WacInstructionLimit, BmsAction, AiStateHandler
+    WacCommand, WacOpcode, WacInstructionLimit, BmsAction
 };
 
 struct RuntimeGapSite {

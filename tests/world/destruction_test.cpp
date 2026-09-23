@@ -2840,7 +2840,7 @@ static void test_aircraft_landing_and_navigation_states() {
 	w.ai.apply_transition(ai, w);
 	w.ai.process_infantry_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 20 * 65536 && b.f[138] == 8000);
-	CHECK(b.f[AiBrain::kOutSpeed] == 2000 && w.ai.unported_calls == 0);
+	CHECK(b.f[AiBrain::kOutSpeed] == 2000);
 }
 
 // ---------------------------------------------------------------------------

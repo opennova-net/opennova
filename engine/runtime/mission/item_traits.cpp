@@ -175,7 +175,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->item_type_index = def != nullptr ? static_cast<int32_t>(def - items.entries) : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
-        // [orig: Entity_InitOrganicAI @0x4BFE08, def+0x894]
+        // [orig: Entity_InitOrganicAI @0x4BFE0D, def+0x894]
         if (world::AiEntity *body = world.ai.for_handle(h))
             body->profile.clip_size = def != nullptr ? def->clipsize : 0;
 		e->vehicle_spawn_ids.clear();
@@ -421,11 +421,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// @0x468688].
 				vt.attrib_parent = def->attrib_parent != 0;
 				// The per-frame physics mover is selected exclusively by the
-                // move_function callback resolved into itemDef+0x158. ai_function
-                // selects the event/brain callback and may deliberately differ: the
-                // shipped Dune Buggy is ai_function chel + move_function cveh and
-                // therefore still runs the ground mover. [orig:
-                // EntityDef_LookupPhysicsCallback @0x4a9240; §5.38e movers]
+                // move_function callback resolved into itemDef+0x158; ai_function
+                // selects the event/brain callback through its own lookup (the
+                // brain_class below). [orig: EntityDef_LookupPhysicsCallback
+                // @0x4a9240; §5.38e movers]
                 if (fam == "cbot") {
                     vt.family = world::VehicleFamily::Watercraft;
                 } else if (fam == "chel") {

@@ -133,7 +133,7 @@ inline uint32_t prng_step(uint32_t &s) {
     return s;
 }
 
-// Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x4671a0 fpatan path —
+// Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x46719D fpatan path —
 // atan2(candidate.Y - self.Y, candidate.X - self.X), x87 chop toward zero.] dY/dX follow the
 // mover's convention (atan2(dz, dx)).
 inline int32_t bearing_bam(int32_t dY, int32_t dX) {

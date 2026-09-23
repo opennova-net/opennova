@@ -2141,9 +2141,9 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
     }
     AiEventEntry ev{};
     ev.f[0] = event_type;
-    // Channel 0 for the command-queued events (the combat spawn/death queue
-    // sites stamp 9; this site stamps 0) [orig: event_source = 0 @0x43ac66/
-    // @0x43acd1/@0x43ad41/@0x43b30e].
+    // Channel 0 for the command-queued events (the air machine's kill/damage
+    // notification and both machines' death queue sites stamp 9; this site
+    // stamps 0) [orig: event_source = 0 @0x43ac66/@0x43acd1/@0x43ad41/@0x43b30e].
     ev.f[1] = sys.index_of(ae) << 16;
     ev.set_timer(0.0f);
     ev.f[3] = argument;

@@ -2166,12 +2166,8 @@ static void test_change_ai_command_family() {
                world::kEntityFlagIndestructible) == 0);
     }
     // FIND_AND_USE with no matching model point leaves the prior relation alone.
-    {
-        const int before = ai.unported_calls;
-        dispatch(31, 7);
-        dispatch(41, 12);
-        CHECK(ai.unported_calls == before);
-    }
+    dispatch(31, 7);
+    dispatch(41, 12);
     dispatch(32);
     CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
     dispatch(33);
@@ -2421,7 +2417,6 @@ static void test_bms_target_selectors_and_retail_noops() {
     CHECK(brain.f[world::AiBrain::kPriorityTarget] == 0);
     command(world::EntityCommands::kHudItem, 1);
     command(world::EntityCommands::kTmateStatus, 1);
-    CHECK(w.ai.unported_calls == 0);
 }
 
 int main() {

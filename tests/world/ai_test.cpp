@@ -997,7 +997,6 @@ static void test_guided_round_notification_and_ally_alert_scope() {
     CHECK(self.brain.f[AiBrain::kFireTimer] == 0); // gated, still handled
     event.f[0] = 13;
     CHECK(!ai.ai_handle_command(*w, self, event));
-    CHECK(ai.unported_calls == 0); // retail shared-handler default
 }
 
 static void test_berserk_candidate_is_intentional_team_exception() {
@@ -2210,7 +2209,6 @@ static void test_aircraft_combat_states() {
 	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 10;
 	sys.row(10).enter(ctx);
 	CHECK(b.f[AiBrain::kPendState] == 8);
-	CHECK(sys.unported_calls == 0);
 }
 
 static void test_vehicle_weapon_pose_and_target_cleanup() {
@@ -2611,7 +2609,6 @@ static void test_aircraft_fire_arc_gate() {
 	CHECK(r.w.out.rounds.count == 1);
 	CHECK(b.f[AiBrain::kLastWeapon] == 1);
 	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
-	CHECK(r.sys.unported_calls == 0);
 }
 
 // The two 0x1000x combat movers. IDB names are swapped-looking: AI_CalcGroundVehicleTarget
@@ -3023,7 +3020,7 @@ int main() {
         CHECK(cl.brain.f[AiBrain::kAlert] == 2);
     }
 
-    // ---- not_yet_ported coverage counter via full tick ----
+    // ---- a HELO_LAND tick over an absent entity ----
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
@@ -3031,13 +3028,13 @@ int main() {
         AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6 — a still-unported tick row
+        e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6
         e.brain.f[AiBrain::kPendState] = kAiHeloLand;
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = true;
         sys.tick(w, ctx);
-		CHECK(sys.unported_calls == 0); // landing safely handles an absent entity
+		CHECK(e.brain.f[AiBrain::kCurState] == kAiHeloLand); // landing safely handles an absent entity
 	}
 
 	// ---- body-anim slot names; the class machines select none ----
@@ -3393,10 +3390,8 @@ int main() {
         e.brain.f[AiBrain::kFireTimer] = 50;
         e.brain.f[AiBrain::kStep] = 64;
         e.profile.flags96 = 0x10; // can-fire
-        int before = sys.unported_calls;
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundFollowWp).tick(ctx);
-		CHECK(sys.unported_calls == before); // the countermeasure path is implemented
 		CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= kStep
 	}
 
@@ -3922,9 +3917,7 @@ int main() {
         e.brain.f[AiBrain::kStep] = 64;
         e.patrol_goal = 1;                    // stay in the goal branch (no transition)
         e.brain.f[AiBrain::kWorkHeading] = 0; e.heading = 1000; // no def: prox 0, not arrived
-        int before = sys.unported_calls;
         sys.row(kAiGroundEvade).tick(ctx);
-		CHECK(sys.unported_calls == before); // the countermeasure path is implemented
 		CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= step
 	}
 

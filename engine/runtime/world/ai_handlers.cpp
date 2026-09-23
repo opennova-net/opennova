@@ -80,19 +80,12 @@ const char *ai_state_name(int32_t state) {
 }
 
 // ----------------------------------------------------------------------------
-// Handlers. Trivial ones are byte-exact ports; complex per-state behaviors route
-// to h_not_yet_ported (a visible coverage stub) pending their port phase.
+// Handlers: every row of the retail state table @0x815238 is ported, the empty
+// cells as the shared nullsubs.
 // ----------------------------------------------------------------------------
 namespace {
 
 void h_noop(AiThinkCtx &) {} // [orig: nullsub_69/70/71]
-
-void h_not_yet_ported(AiThinkCtx &ctx) {
-    ++ctx.sys->unported_calls;
-    if (ctx.world != nullptr)
-        ctx.world->diagnostics.record({RuntimeGapKind::AiStateHandler,
-                ctx.self->brain.f[AiBrain::kCurState], 0, -1, int32_t(ctx.self->handle.packed)}, ctx.world->logic_tick);
-}
 
 // [orig: AI_SetStateIdle @0x457f00] brain+28 (=f[7] move step) = 16.
 void h_set_state_idle(AiThinkCtx &ctx) { ctx.self->brain.f[AiBrain::kStep] = 16; }
@@ -928,7 +921,9 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
 			ent->veh.stuck_ticks = 0; // [orig: moveTimer +0x148 = 0 @0x467E22]
 			ent->team = 0; // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
 						   //  and drops out of ordinary target scans]
-			if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
+			// [orig: +0x1AC first write wins: `cmp [esi+1ACh],0` @0x467E5D ..
+			//  `mov [esi+1ACh],eax` @0x467E6B]
+			if (ent->death_tick == 0)
                 ent->death_tick = ctx.world->logic_tick;
         }
 		ctx.sys->clear_entity_references(*ctx.world, e.handle);
@@ -953,7 +948,8 @@ void h_vehicle_dead_event(AiThinkCtx &) {}
 
 // Ground clearance for the aircraft death states: lift 1, search down 48,
 // then the intact/dead model's authored height offset.
-// [orig: @0x4668DA..0x46693C; @0x45791F..0x457972]
+// [orig: AI_TransitionToDeath_Vehicle @0x4668D9..0x46693C; AI_CheckLethalDamage
+//  @0x45791F..0x457970]
 int32_t aircraft_death_ground(World &world, Entity &entity) {
 	const int32_t pos[3] = { to_fixed(entity.position.x), to_fixed(entity.position.y),
 		to_fixed(entity.position.z) };
@@ -1237,7 +1233,6 @@ void h_pretty_event(AiThinkCtx &ctx) {
 // @0x467cd0, event21 = AI_HandleEvent_VehicleDying @0x457f50, enter23 =
 // AI_TransitionToDestroyed_Vehicle @0x467de0, tick23 = AI_TickState_VehicleDead @0x467ea0,
 // event23 = AI_HandleEvent_ConsumeAll @0x458080; the shared exit column is nullsub_70).
-constexpr AiHandler U = h_not_yet_ported;
 constexpr AiHandler _ = h_noop;
 
 const StateRow kTable[kAiStateCount] = {

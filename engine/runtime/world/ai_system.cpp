@@ -314,13 +314,14 @@ struct StateMachineGates {
     int32_t commit_single; // a client commits pending == this ...
     int32_t commit_lo;     // ... or commit_lo < pending <= commit_hi
     int32_t commit_hi;
-    int32_t spawn_channel; // the spawn AIEvent's channel word
+    int32_t notify_channel; // the kill/damage notification AIEvent's channel word
 };
 // [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0 — alert @0x458239..0x45823b,
-//  tick gate @0x458340..0x458348, commit gate @0x458375..0x458382, spawn word 9 @0x458312]
+//  tick gate @0x458340..0x458348, commit gate @0x458375..0x458382, notification word 9
+//  @0x458312]
 constexpr StateMachineGates kAirClassGates{14, 10, 13, 15, 7, 12, 15, 9};
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0 — alert @0x458442..0x458448,
-//  tick gate @0x458545..0x45854d, commit gate @0x458579..0x458586, spawn word bx (=0,
+//  tick gate @0x458545..0x45854d, commit gate @0x458579..0x458586, notification word bx (=0,
 //  xor ebx,ebx @0x4583cd) @0x45851a]
 constexpr StateMachineGates kVehicleClassGates{22, 18, 21, 23, 16, 20, 23, 0};
 
@@ -358,8 +359,9 @@ void process_class_state_machine(
     AiThinkCtx ctx{&sys, &e, &world, nullptr};
     const int ai_index = sys.index_of(e);
 
-    // LABEL_27/28/31: authority applies the pending transition; clients apply only
-    // the class's restricted subset.
+    // The transition tail: authority applies the pending transition; clients apply
+    // only the class's restricted subset [orig: EntityAI_ProcessInfantryStateMachine
+    // @0x458369..0x4583B0; EntityAI_ProcessVehicleStateMachine @0x45856E..0x4585B4].
     const auto client_commits = [&](int32_t pend) {
         return pend == g.commit_single || (pend > g.commit_lo && pend <= g.commit_hi);
     };
@@ -393,15 +395,16 @@ void process_class_state_machine(
         finish();
         return;
     }
-    if (event == 1) { // spawn
+    if (event == 1) { // the kill/damage notification
         AiEventEntry ev{};
         ev.f[0] = 1;
-        ev.f[1] = g.spawn_channel | (ai_index << 16); // channel word | entity index
+        ev.f[1] = g.notify_channel | (ai_index << 16); // channel word | entity index
         ev.set_timer(0.0f);
-        // [orig: ev.f[3] = Projectile_GetHitRecord()[17] @0x458326] spawn payload read from the current
-        // hit record (Projectile_GetHitRecord @0x4e7000 returns the hitRecord global; its field [17] is not
-        // modeled here, so f[3] is left 0). If a spawn event later reaches a ground combat-event
-        // handler (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39] (kDamageInfo).
+        // [orig: ev.f[3] = Projectile_GetHitRecord()[17] @0x458326] the notification payload read from
+        // the current hit record (Projectile_GetHitRecord @0x4e7000 returns the hitRecord global; its
+        // field [17] is not modeled here, so f[3] is left 0). If the notification reaches a ground
+        // combat-event handler (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39]
+        // (kDamageInfo).
         sys.events.queue(ev);
         finish();
         return;
@@ -438,12 +441,14 @@ void process_class_state_machine(
 }
 } // namespace
 
-// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event 0=update,1=spawn,4=death.
+// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event 0=update, 1=kill/damage
+// notification, 4=death.
 void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int event) {
     process_class_state_machine(*this, e, world, event, kAirClassGates);
 }
 
-// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] event 0=update,1=spawn,4=death.
+// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] event 0=update, 1=kill/damage
+// notification, 4=death.
 void AiSystem::process_vehicle_state_machine(AiEntity &e, World &world, int event) {
     process_class_state_machine(*this, e, world, event, kVehicleClassGates);
 }
@@ -734,11 +739,12 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // clip selected before this shot spent its round (a gfx3 def's launch
         // point instead), along that bone's euler; byte 0 or no model copies
         // the parent's raw position/euler.
-        // [orig: WeaponAction_Fire @0x542bf7 -> Entity_CalcWeaponFirePosition
-        //  @0x4dc750 parentSlot 3 (Entity_ComputeUserpointWorldTransform
-        //  @0x4dc7f6; barrel = slot[+0x10] & 3 @0x545D40..0x545D4B, read
-        //  before consume_weapon_ammo @0x542C75); the fire command copies
-        //  out[0..2] and out[3]/out[4] @0x42be84..0x42bef2]. The point is the
+        // [orig: WeaponAction_Fire @0x542B10 (the Entity_CalcWeaponFirePosition
+        //  call @0x542bf7) -> Entity_CalcWeaponFirePosition @0x4dc750 parentSlot 3
+        //  (the Entity_ComputeUserpointWorldTransform call @0x4dc7f6; barrel =
+        //  slot[+0x10] & 3 @0x545D40..0x545D4B, read before the consume_weapon_ammo
+        //  call @0x542C75); the fire command copies out[0..2] and out[3]/out[4]
+        //  @0x42be84..0x42bef2]. The point is the
         //  slot's FIRE field (b): the host's own re-derivation names field 0
         //  outright [orig: Server_ClientFiredRound @0x50c1f4]; the m/c fields
         //  anchor the effect legs, not the round.
@@ -974,12 +980,13 @@ int32_t part_anim_rate_from_seconds(double seconds) {
 // by AiSystem::ai_handle_command.
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     switch (sub_type) {
-        case 0x20: // AIUSEWPZ [orig: @0x43B0E5]
-            // Declared residual: brain+432 has no reader here yet (the
-            // waypoint-zone routing consumer is unported).
+        case 0x20: // AIUSEWPZ [orig: Entity_ApplyCommand case 32 @0x43B154,
+                   //  `mov [eax+1B0h],1` @0x43B164]
+            // [orig: AI_UpdateMovementTarget reads brain+432 @0x460FC7]
+            // (ported as AiSystem::update_aircraft_waypoint_movement).
             comp.f[AiBrain::kUseWaypointZones] = 1;
             break;
-        case 0x21: // AICLEARWPZ [orig: @0x43B0F7]
+        case 0x21: // AICLEARWPZ [orig: case 33 @0x43B173, the store @0x43B183]
             comp.f[AiBrain::kUseWaypointZones] = 0;
             break;
         case 0x22: { // PLAYPARTANIM: p2=ANIMNUM(channel), p3=ANIMPLAYTYPE, p4=ANIMTIME(16.16 s)
@@ -988,7 +995,7 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
             const int play_type = p3;
             if (static_cast<unsigned>(play_type + 1) > 2u) return; // play_type in {-1,0,1}
             const int slot = channel - 1;
-            // rate = (0.016 / seconds) * 65536 phase-units/tick, min 1 —
+            // rate = (0.016f / seconds) * 65536 phase-units/tick, min 1 —
             // shared with the editor-preview binding (see
             // part_anim_rate_from_seconds below for the witnessed FPU shape).
             const double seconds = static_cast<double>(p4) / 65536.0; // base; p4==0 -> 0.0
@@ -1022,7 +1029,6 @@ void AiSystem::on_load(World &) {
     rel_ops.clear();
     target_set_calls.clear();
     scan_candidates_.clear();
-    unported_calls = 0;
     find_target_calls = 0;
     fire_shot_seq = 0;
 }
@@ -1068,7 +1074,8 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     if (clearance.has_physics && field.has_water && field.water_y > result) {
         result = field.water_y;
     }
-    // [orig: def offset: dead path uses def+0x30, else def+0x2C; gated by entityDef != 0.]
+    // [orig: the caller's brain+0x30 when dead (@0x45734D), else brain+0x2C (@0x457367),
+    //  both skipped for a brainless caller (@0x457333).]
     result += clearance.use_dead ? clearance.dead_offset : clearance.alive_offset;
     return result;
 }

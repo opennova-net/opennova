@@ -51,12 +51,12 @@ enum class MissionTextSource { kNone, kMission, kFallback };
 MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out);
 
-// The .aip PARSE lives in engine/formats/aip (aip::parse_profile — the
-// witnessed GROUND-type set; the HELO set is the remaining tracked gap).
-// This resolver keeps the profile walk and the install row: absent keys keep
-// their sentinels (the promote-time brain seed then keeps its stand-ins)
-// [orig: Entity_InitVehicleAIFromDef seeds brain[50]/brain[49]
-//  @0x4688D3/@0x4688C7].
+// The .aip PARSE lives in engine/formats/aip (aip::parse_profile: every
+// GROUND, HELO and ORGANIC key AIProfile_ParseProperty stores). This resolver
+// keeps the profile walk and the install row. An unauthored key is the zeroed
+// record's 0, and the class init copies whatever words sit at the offsets it
+// hard-codes (aip::class_speed_words) [orig: Entity_InitVehicleAIFromDef
+// stores brain[50] @0x4688D3 and brain[49] @0x4688C7].
 
 // The mission's distinct profile-name set, lowercase, in entity order (first
 // occurrence wins), and each profile's parsed .aip row. Each entity's name is

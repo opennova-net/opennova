@@ -1559,7 +1559,6 @@ AiDebugSnapshot ai_snapshot() {
 	channel.followers = 2;
 	snapshot.report.channels.push_back(channel);
 	snapshot.report.counters.brain_count = 7;
-	snapshot.report.counters.unported_calls = 2;
 	return snapshot;
 }
 
@@ -1604,8 +1603,7 @@ void test_ai_window_formats_the_pushed_snapshot() {
 	tools.set_ai_debug(ai_snapshot());
 	CHECK(ai.snapshot_valid(), "the push lands");
 	CHECK(std::strstr(ai.counters_text(), "brains 7") != nullptr &&
-					std::strstr(ai.counters_text(), "events 0") != nullptr &&
-					std::strstr(ai.counters_text(), "unported 2") != nullptr,
+					std::strstr(ai.counters_text(), "events 0") != nullptr,
 			"the counters line carries the system readings");
 	CHECK(ai.group_count() == 1, "one group row");
 	CHECK(std::strstr(ai.group_text(0), "G05") != nullptr &&

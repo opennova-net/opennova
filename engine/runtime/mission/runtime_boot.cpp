@@ -79,9 +79,8 @@ std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
 			if (!files.has_file(file_name)) continue;
 			std::vector<uint8_t> text;
 			if (!files.read_file(file_name, text) || text.empty()) continue;
-			// The parse itself is format knowledge (engine/formats/aip,
-			// partial-port documented there); this resolver owns only the
-			// profile walk and the install row.
+			// The parse itself is format knowledge (engine/formats/aip);
+			// this resolver owns only the profile walk and the install row.
 			aip::Profile parsed = aip::parse_profile(text.data(), text.size());
 			// A file that parsed no witnessed field contributes no row, like
 			// the speeds-only resolver this extends (its dictionary stayed

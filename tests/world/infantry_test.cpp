@@ -4016,7 +4016,6 @@ static void test_find_and_use_attachment_motor() {
     w.registry.get(self)->health = 0;
     w.ai.tick_infantry(e, w, 220);
     CHECK(!w.registry.get(self)->attach_parent.valid());
-    CHECK(w.ai.unported_calls == 0);
     CHECK(w.diagnostics.empty());
 }
 
@@ -4759,7 +4758,6 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     }
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
-    CHECK(w.ai.unported_calls == 0);
 }
 
 // Corpse expiry is the shared destroy: incoming brain references and the

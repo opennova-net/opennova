@@ -1,25 +1,24 @@
 // Entity AI subsystem — byte-exact port of the Jointops.exe infantry/vehicle AI
 // brain (the third ticking system over the shared world, after WAC + BMS events).
 //
-// This is the FOUNDATION pass: the data structures + control skeleton reproduced
-// faithfully from the binary, with the heavy per-state behavior handlers ported
-// incrementally (unported ones route to a visible `not_yet_ported` stub so
-// coverage is explicit). See docs/world/world-wac-ai-re.md for the full RE map.
+// The data structures, the two class dispatchers and every row of the state
+// table are ported. See docs/world/world-wac-ai-re.md for the full RE map.
 //
 // IDA anchors (Jointops.exe, imagebase 0x400000):
-//   EntityAI_ProcessInfantryStateMachine @0x4581b0   (the dispatcher)
+//   EntityAI_ProcessInfantryStateMachine @0x4581b0   (the AIR-class dispatcher: CHel/cpln)
+//   EntityAI_ProcessVehicleStateMachine  @0x4583c0   (the ground dispatcher: cveh/cbot/ctrn)
 //   AI_BeginUpdate                        @0x457b40   (movement controller row 4, phase limit 496)
 //   AIEvent_QueueEntry                    @0x455da0   (1024 x 5-dword ring)
 //   AIEvent_ProcessTimedEntries           @0x455df0   (timer -= 0.016/frame)
 //   state-handler table                   @0x815238   (24 records x {enter,tick,exit,event})
 //   Entity_LookupAIStateName              @0x455cc0   (the authoritative state enum)
 //
-// Tracked deviation (per feedback_ida_algorithmic_fidelity): the original keeps
-// brains in the absolute global array unk_AED380 (812-byte stride), the profile at
-// brain[1] and the per-entity controller at brain[2] as absolute pointers, and the
-// handler dispatch in absolute function-pointer tables. We rebase those to
-// containers (a vector of AiEntity, embedded profile/controller fields, a static
-// StateRow table). Struct bodies are modeled as int32 f[N] + named indices so the
+// Container rebase (a structural translation; no behavior rides on it): the
+// original keeps brains in the absolute global array unk_AED380 (812-byte stride),
+// the profile at brain[1] and the per-entity controller at brain[2] as absolute
+// pointers, and the handler dispatch in absolute function-pointer tables. We rebase
+// those to containers (a vector of AiEntity, embedded profile/controller fields, a
+// static StateRow table). Struct bodies are modeled as int32 f[N] + named indices so the
 // ported handlers index fields exactly as the decompiler does (b.f[4], b.f[5], ...).
 #pragma once
 
@@ -95,7 +94,7 @@ constexpr bool part_anim_phase_active(int32_t code) {
 struct AiBrain {
     int32_t f[203] = {};
 
-    // Named dword indices (confirmed from the decomp; see notes §1/§4).
+    // Named dword indices (confirmed from the decomp; world-wac-ai-re §1/§4).
     enum Idx : int {
         kOwner = 0,        // back-ref to entity (nonzero = slot live)
         kCurState = 4,     // current AI state  [byte +16]
@@ -141,7 +140,8 @@ struct AiBrain {
         kTickAccum = 8,    // accumulates kStep; >=16 -> one processed tick [byte +32]
         kCooldownPair = 52,// PACKED u16 pair (weapon cooldowns A/B): += 0x10001*step per
                            // tick — one add advances both words, low-word carry included
-                           // [orig: brain[52] += 65537*deltaTime @0x472e00; bytes +208/+210]
+                           // [orig: AIEntity_ProcessWeaponFire @0x472e00: brain[52] +=
+                           //  0x10001 * brain[7] @0x472E42..0x472E48; bytes +208/+210]
         kAmmoA = 53,       // primary ammo count [byte +212]
         kAmmoB = 54,       // secondary ammo count [byte +216]
         kBoneCountA = 55,  // primary muzzle bone-list count [byte +220; list at +224]
@@ -313,8 +313,8 @@ struct AiProfile {
     WeaponFire fire_a;
     WeaponFire fire_b;
     int32_t accuracy = 0;         // brain[43] seed: scatter modulus = 6 - accuracy (0..5)
-                                  // [orig: the ai.def copy block seeds brain[43]; source
-                                  // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
+                                  // [orig: the allocator copies profile+0x1C (aim_skill)
+                                  //  into brain[43] @0x460294..0x460297]
     int32_t approach_cap = 0;     // +76: chase range cap (16.16)
     // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4/§33.35) ----
     // The definition callback writes entity+0x358..0x35B as byte ammo IDs in
@@ -630,7 +630,7 @@ bool watercraft_driver_submerged(const World &world, const Entity &occ);
 // p2=channel(1/2), p3=play_type(-1/0/+1), p4=time(16.16 seconds).
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4);
 
-// The PLAYPARTANIM rate from ANIMTIME seconds: (0.016 / seconds) * 65536
+// The PLAYPARTANIM rate from ANIMTIME seconds: (0.016f / seconds) * 65536
 // phase-units/tick with the x87-ftol integer-indefinite on inf/NaN/overflow
 // (zero seconds -> INT_MIN, which the min-1 guard deliberately does NOT
 // promote) [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. Shared by
@@ -646,16 +646,20 @@ int32_t part_anim_rate_from_seconds(double seconds);
 // world runtime never integrates the brain phases.
 bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate);
 
-// [orig: Entity_CalcAverageGroundHeight @0x457230] The entity-def height offsets
-// (def+0x2C alive / def+0x30 dead) modeled as named members — a tracked deviation,
-// those def fields are not yet RE'd (default 0 = origin sits at ground). The stand
-// clearance the movers add on top (brain[131] = ground + 0x50000) is NOT here; each
-// mover adds its own [orig: AI_ProcessMovementStep @0x466db0].
+// [orig: Entity_CalcAverageGroundHeight @0x457230] The two height offsets the
+// caller's brain carries: brain[11] (+0x2C, the class init's CMDL floor) when
+// alive, brain[12] (+0x30) when dead, both skipped for a brainless caller
+// [orig: `add eax,[ebx+30h]` @0x45734D, `add eax,[ebx+2Ch]` @0x457367, the brain
+// test @0x457333]. The stand clearance the movers add on top (brain[131] =
+// ground + 0x50000) is NOT here; each mover adds its own [orig:
+// AI_ProcessMovementStep @0x466db0].
 struct GroundClearance {
-    int32_t alive_offset = 0;  // [orig: def+0x2C] added to ground when alive
-    int32_t dead_offset = 0;   // [orig: def+0x30] added when dead / flagged
-    bool use_dead = false;     // [orig: (entity+36 & 2) || health<=0, gated by entity+52]
-    bool has_physics = false;  // [orig: entity+368 != 0] enables the worldY water clamp
+    int32_t alive_offset = 0;  // [orig: brain+0x2C] added to ground when alive
+    int32_t dead_offset = 0;   // [orig: brain+0x30] added when dead
+    bool use_dead = false;     // [orig: (Flags & 2 || health <= 0) && entity+0x34,
+                               //  @0x457337..0x45734B]
+    bool has_physics = false;  // [orig: entity+0x170 != 0 @0x45731E] enables the
+                               //  worldY water clamp
 };
 
 // [orig: Entity_CalcAverageGroundHeight @0x457230] 5-tap weighted ground height,
@@ -777,7 +781,6 @@ public:
     IRootMotionSource *root_motion = nullptr;
     // (The fall-damage tolerance is the WAC named value World::wac_values.fallmps
     //  [orig: dword_C6EAE4]; the landing leg in infantry.cpp reads it there.)
-    int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // diagnostic trace of the applied mover side effects
 
@@ -930,9 +933,10 @@ public:
 			const AiProfile::WeaponFire &wb, int32_t aim_offset, bool skip_los, int32_t out[6],
 			bool seeded = false);
 
-	// [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
-    // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
-    // returns false and the combat event switch proceeds faithfully.
+	// [orig: AI_HandleCommand @0x465770] The queued ChangeAI command handler: types 6..12,
+    // 21 and 22 carry an arm; 13..20 and every other type (the damage/death/destroy events
+    // 1/3/4 among them) take the default return 0, so this returns false and the caller's
+    // event switch proceeds.
     bool ai_handle_command(World &world, AiEntity &e, const AiEventEntry &ev);
 
     // [orig: AI_BeginUpdate @0x457b40] movement-controller row 4. Copies working
@@ -945,15 +949,17 @@ public:
     // cpln thunk @0x462120 run the air-class machine, the cveh row and the
     // cbot/ctrn thunks @0x462130/@0x462140 the vehicle-class one. Both share one
     // body; they differ only in the alert leg's state pair, the client tick and
-    // transition gates, and the spawn event's channel word.
-    // [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event: 0=update,1=spawn,4=death.
+    // transition gates, and the kill/damage notification's channel word.
+    // [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event: 0=update,
+    // 1=kill/damage notification, 4=death.
     // (IDB name; it is the AIR-class brain machine: alert -> pend 10 unless cur 14,
-    // client ticks cur 13/15, client commits pend 7 or 13..15, spawn channel 9.)
+    // client ticks cur 13/15, client commits pend 7 or 13..15, notification channel 9.)
     void process_infantry_state_machine(AiEntity &e, World &world, int event);
     // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] the ground/boat/train
     // machine: alert -> pend 18 unless cur 22 (@0x458442..0x458448), client ticks
     // cur 21/23 (@0x458545..0x45854d), client commits pend 16 or 21..23
-    // (@0x458579..0x458586), spawn channel word 0 (@0x45851a, bx zeroed @0x4583cd).
+    // (@0x458579..0x458586), notification channel word 0 (@0x45851a, bx zeroed
+    // @0x4583cd).
     void process_vehicle_state_machine(AiEntity &e, World &world, int event);
 
     // The shared pending-state transition (exit current, enter pending, commit).

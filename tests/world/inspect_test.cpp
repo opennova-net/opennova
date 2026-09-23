@@ -332,7 +332,6 @@ int main() {
         world.script.relations.group(5).alert = TriggerRelations::kAlertRed;
         world.script.relations.group(5).initial_count = 4;
         world.script.relations.group(5).live_count = 3;
-        ai.unported_calls = 2;
         ai.find_target_calls = 8;
 
         const inspect::AiDebugReport report =
@@ -383,7 +382,6 @@ int main() {
         CHECK(report.groups[0].live_count == 3);
 
         CHECK(report.counters.brain_count == 3);
-        CHECK(report.counters.unported_calls == 2);
         CHECK(report.counters.find_target_calls == 8);
         CHECK(report.counters.event_count == 0);
 
