@@ -18,6 +18,7 @@ struct DefHudPosFile;  // formats/def/def.h
 // Witness record: docs/interface/hud-re.md.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::hud {
@@ -156,7 +157,7 @@ public:
 	//  reaches it @ 0x59AA06..0x59AA10]
 	void tick(int32_t now);
 	int32_t timer(int index) const {
-		return index >= 0 && index < kCount ? timers_[static_cast<size_t>(index)] : 0;
+		return index >= 0 && index < kCount ? timers_[static_cast<std::size_t>(index)] : 0;
 	}
 	const std::array<int32_t, kCount> &timers() const { return timers_; }
 
