@@ -4571,7 +4571,11 @@ producers:
 - **WAC `lose n`** [orig: WacAction_Lose @ 0x4ed3f0] — n=0 resolves
   `Misc/STRMISC_KILLEDGREEN`, n=1 `Misc/STRMISC_KILLEDBLUE`, each through the
   banner trio (§20.6), then `Server_ProcessRoundEnd(2)` (red wins = the player
-  side loses). Any other n is a NO-OP returning 0. Both handlers were undefined
+  side loses). The chat line relays its Misc key to the joiners with team 0 on
+  both branches (`GameMsg_AddChatLineAndRelay`, the calls @ 0x4ED411 /
+  @ 0x4ED477; S2C 0x3F kind 1) before the round end; a joiner resolves the key
+  through `MissionText_GetStringByKey` (@ 0x42BC26), so a Misc key the mission
+  table lacks posts nothing there. Any other n is a NO-OP returning 0. Both handlers were undefined
   code before this session (define_func'd).
 - **BMS Blue/Red/GreenWin** (actions 8/9/10) [orig: EventAction_Dispatch
   @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)`; the call sites
@@ -8385,13 +8389,16 @@ section consolidates witnesses already scattered through this record (§3, §13,
 §15, §16, §17, §23, §24) and backs the `kEntityFlag*` constants in
 `engine/runtime/world/entity.h` — no new IDA work. Spawn composition:
 BMS `Indestructible(1<<21) -> 0x4000000`, `Reflective(1<<23) -> 0x400`,
-`NoShadow(1<<24) -> 0x1000000` `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]`;
+`NoShadow(1<<24) -> 0x1000000` `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0
+(@ 0x40ED0D / @ 0x40ED1D / @ 0x40ED2E)]`, and inside the AI branch attribute 2
+`-> 0x40` (@ 0x40ED9F) and 0x4000 (FlyingOrganic) or 0x20000 `-> 0x80`
+(@ 0x40EE2A, @ 0x40EE70..0x40EE94; §38.1);
 kind Building `-> 0x20000` `[orig: Entity_InitFromModel @ 0x40e105]`;
 items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
-| 0x1 | `kEntityFlagCarried` | carried object hidden while attached to its carrier (the flag/carryable pickup family); distinct from 0x40, which marks the CARRIER/mounted body | `[orig: Entity_AttachToVehicle @ 0x43C130]`; the Match flag producer (§15.5 D-COL-8 flag leg) |
+| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachToVehicle @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
@@ -8399,28 +8406,29 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 | 0x10 | `kEntityFlagScopeRaised` | weapon scope raised (`g_weaponScopeActive` refresh) | `[orig: test @ 0x4b5deb]`; §13.2 |
 | 0x20 | `kEntityFlagParachute` | parachute deployed (motor ported 2026-09-18, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
 | 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
-| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — plus the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; rides the AI-order slice with the bit's WRITER). The COMMAND writer is ChangeAI sub 23 (runtime-only, no dfx2med token) — NOT sub 17, which is the AI-slot CLIMBER bit 0x400 (§32.2, corrected 2026-09-01) | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae]`; §30 |
+| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor -16384), PORTED §30. The eighth-step x/y chase to +0x2FC/+0x300 is the self-attachment move (attachParent == self) and does not test this bit. Writers: ChangeAI sub 23 (runtime-only, no dfx2med token; NOT sub 17, which is the AI-slot CLIMBER bit 0x400, §32.2) and the BMS attribute fold (FlyingOrganic 0x4000 and attribute 0x20000, §38.1), both ported | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; self-attachment move @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae; Entity_SpawnFromBMSRecord @ 0x40EE2A, @ 0x40EE70..0x40EE94]`; §30 |
 | 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
 | 0x200 | `kEntityFlagQueuedMount` | the queued Co-op spawn-marker mount (named 2026-09-12): set by the no-pick team-2 marker arm together with +364/+384 = the marker's parent; consumed by the first org2 body update (restore +0x28 from +0x180 when null, toggle, clear); the toggle's `Entity_FindBestSeatSlot(groundEntity)` arm keys on it alone, with no scan fallback — a deck stander never has it | `[orig: Server_PositionPlayerForSpawn @ 0x50D442..0x50D45A; Entity_UpdateInfantryPlayerBody @ 0x4B424A..0x4B4272; Entity_TryEnterNearestVehicle @ 0x4368CF..0x436903]`; §23.1; vehicle-client-movers-re §36 |
 | 0x400 | `kEntityFlagReflective` | BMS Reflective trait | `[orig: @ 0x40e9f0]` |
 | 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the critical-hit latch the damage path writes is bit 0x800 of a DIFFERENT dword, `entity+0x2C` (`Entity::cause_flags`, §19.2a) — never this Flags bit |
 | 0x2000 | `kEntityFlagInAir` | airborne / swimming | `[orig: grounded selector @ 0x4b78ab]`; §3, §15.3 |
-| 0x4000 | `kEntityFlagPriorityTarget` | set on every fire; decays per perception scan (the §16.2 x6 scoring flag) AND by the 744-tick host sweep: `g_dirtyflag_clear_timer @0xC8D810` (zeroed per mission by `Nbstat_StartupInit @0x4fde30` <- `Game_StartMission @0x526108`) at the head of `Server_TickUpdate @0x51d82b..0x51d840` fires when zero, `EntityPool_ClearDirtyFlags @0x508E30` strips the bit from every used row of pools 0/1, reload 744 — the only decay for pool-1 shooters and dead rows (ported 2026-09-12, `clear_priority_target_marks`) | `[orig: set @ 0x4bf370; clear @ 0x4bbfa4; sweep @ 0x508e59 / @ 0x508e79]` |
+| 0x4000 | `kEntityFlagPriorityTarget` | the shooter mark: set by the organic fire and by `RoundData_SpawnRound` for every non-silenced ballistic round and the shotgun fan (§38.2); decays per perception scan (the §16.2 x6 scoring flag) AND by the 744-tick host sweep: `g_dirtyflag_clear_timer @0xC8D810` (zeroed per mission by `Nbstat_StartupInit @0x4fde30` <- `Game_StartMission @0x526108`) at the head of `Server_TickUpdate @0x51d82b..0x51d840` fires when zero, `EntityPool_ClearDirtyFlags @0x508E30` strips the bit from every used row of pools 0/1, reload 744 — the only decay for pool-1 shooters and dead rows (ported 2026-09-12, `clear_priority_target_marks`) | `[orig: set @ 0x4bf370; @ 0x4EC842..0x4EC847; @ 0x4EBE61..0x4EBE66; clear @ 0x4BBF88; sweep @ 0x508e59 / @ 0x508e79]` |
 | 0x8000 | `kEntityFlagDrowning` | deep-water FLOAT latch (the "drowning" family — the death-cause consumer maps it to 175): asymmetric-hysteresis submerge, zeroes the vertical root, gates gravity via 0x108000, and hands z to the per-motor float blocks | `[orig: latch @ 0x4b8363 / @ 0x4bfc48; entry @ 0x4b8020 / @ 0x4bfafe]`; §29.1 |
 | 0x20000 | `kEntityFlagBuilding` | kind Building | `[orig: Entity_InitFromModel @ 0x40e105]` |
+| 0x80000 | `kEntityFlagNoEngage` | read by the org1 combat think (the attack-stance aim block and the reaction/approach arm), but no instruction in the binary writes it (OR/MOV-immediate scans over 0x401000..0x795000 and all 22,498 `[reg+24h]` stores), so both reads are dead in retail; the same holds for 0x40000 | `[orig: reads @ 0x4bc958 / @ 0x4bc054]`; §38.4 |
 | 0x100000 | `kEntityFlagLadderContact` | CL/type-4 ladder touch; locks upper-body pose + skips gravity while aligned | `[orig: @ 0x4b3291]`; §14, §15.4 |
 | 0x400000 | `kEntityFlagArmoryZone` | type-6 (CA) volume touch — gates weapon.mnu on action 218 | `[orig: @ 0x4aea45, @ 0x49b848]`; §15.4 |
 | 0x200000 | (unnamed in reimpl; the netsim flags mirror carries it raw) | fully-submerged/dive latch — org2's water block sets it below the float line − 0x2000 (with the dive splash), clears at the surface clamp; both motors clear it with 0x8000 on the not-submerged exit (`~0x208000`) | `[orig: set @ 0x4b81ef; clear @ 0x4b8176; exits @ 0x4b8373 / @ 0x4bfc5c]`; §29.1 |
 | 0x800000 | `kEntityFlagIndoors` | indoors (blink accum bit 2 -> Flags); render + AI retry gates | §4 (render-occlusion-re), §15.4, §17 |
 | 0x1000000 | `kEntityFlagNoShadow` | BMS NoShadow trait | `[orig: @ 0x40e9f0]` |
 | 0x4000000 | `kEntityFlagIndestructible` | BMS Indestructible / hp==0 item | `[orig: @ 0x40e9f0; @ 0x40dc8e]`; §15.3 force skip |
+| 0x10000000 | `kEntityFlagScriptDisabled` | WAC disableSSN / enableSSN; the vehicle motors read it with the dead bit (`Flags & 0x10000002`) as their driver-input gate | `[orig: WacCmd_DisableSsn @ 0x4F7690 (or Flags,10000000h @ 0x4F76DD); enableSSN @ 0x4F773D; Entity_UpdateVehiclePhysics @ 0x48B980; Entity_UpdateAircraftPhysics @ 0x490F1E]`; §38.7 |
 
 Known-but-unnamed bits (witnessed IN USE but the meaning is not pinned — the
 code keeps raw hex at these sites; do not name without a new witness):
 
 | Bit | Where it appears | Note |
 |---|---|---|
-| 0x1 | destruction sweeps skip `engine_flags & 0x1` targets; part of the `0x2000001`/`0x43` composites | reads as an "inactive/exempt" family; unpinned |
 | 0x10000 | `!(Flags & 0x112002)` comment-only gate (§3) | unpinned |
 | 0x2000000 | the `0x2000001` skip composite (collision/throwables/LOS) | unpinned |
 | 0x8000000 | AI combat candidate skip; `0x8000001` composite | unpinned |
@@ -8432,6 +8440,13 @@ raw per the partially-witnessed rule): dismount scrub `~0xA000`
 (`~(Drowning|InAir|Mounted) | Mounted`) `[orig: @ 0x546c56-0x546c7c;
 @ 0x494752-0x494775]`; repulsion exemption `0x43` and skip composites
 `0x2000001`/`0x8000001` stay raw (constituent bits unpinned).
+
+The companion entity+0x2C dword (`Entity::cause_flags`, §19.2a) carries the
+kill-cause bits 0xF00 and the hit feedback 0x1000; its bit 0x2000 is the WAC
+holdSSN latch (`kCauseFlagScriptHold`: `[orig: WacCmd_HoldSsn @ 0x4F7810 (or
+[eax+2Ch],2000h @ 0x4F785D); WacCmd_UnholdSsn @ 0x4F78BD]`), read by the org1
+think's move-mode-12 hold (@ 0x4BD235, §38.4), and the BMS attribute 0x2000000
+sets its bit 0x80 at spawn (@ 0x40ED3B..0x40ED44).
 
 ## 29. The org water/float channel and the deck-ride (D-NET-196 replica tails, 2026-08-06)
 
@@ -9450,9 +9465,14 @@ handles once. The portable VM binds them on first execution, when the World is
 available, and preserves them across runtime capture/restore. Assignments and
 Player/Item/auto aliases keep handles through command dispatch, including when
 multiple rows share one authored SSN. Gkill/Gremove walk named member arrays
-forward; numeric kill still uses the BMS command group. Gkill's per-member
-helper [orig: Entity_ResetWeaponState @0x4F1E40] requires a nonzero +0x1C
-ItemTypeIndex [orig: @0x4f1e89]; Gremove does not. Each member visit of a
+forward; numeric kill shares [orig: Entity_KillAllByNetId @0x43C8E0] with BMS
+KillGroup (pools 2, 0, 1 by the BMS command group, dead rows included, the
+attacker kept; group 0 exits @0x43C8F2). Gkill's per-member helper is the WAC
+killSSN body [orig: Entity_ResetWeaponState @0x4F1E40, which is WacCmd_KillSsn]:
+it requires a nonzero +0x1C ItemTypeIndex [orig: @0x4f1e89], memsets the global
+hit record (@0x4F1E8F..0x4F1E99), zeroes health and lastAttacker, clears +0x2C0
+for a person and runs the class callback (e, 1, 0) (§38.7); Gremove does not
+gate on ItemTypeIndex and ends in Server_RemoveEntityAndNotify. Each member visit of a
 flags-0x10 row (ptext/pwave/pconsol) sends S2C 0x23 to that member's slot and
 returns 1 without the local call when the member is a registered non-local
 player; the local-player visit and unregistered members run locally (§33.39).
@@ -9751,8 +9771,8 @@ bits. The former uint16 storage incorrectly discarded every authored upper word.
 [orig: WacScript_CacheLocalPlayerState @0x4F5780] is called by [orig:
 WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F58F4)], not by the 62.5 Hz
 world tick. Each bytecode execution snapshots signed-word player health and mana
-(the word at entity +0x120, `movsx` @0x4F5827), time of day divided by 279620 into minutes, and the
-current winner flags. Missing players yield zero health/mana and auto's low-word
+(the word at entity +0x120, `movsx` @0x4F5827), time of day divided by
+279620 into minutes, and the current winner flags. Missing players yield zero health/mana and auto's low-word
 handle 0xFFFF; the upper word survives. Writes or gameplay changes during that execution do not refresh the
 other cached values. The next bytecode execution does.
 
@@ -9765,11 +9785,14 @@ rows is an lvalue [orig: @0x4f2a92..0x4f2a9f]; writes land on ticks (the run
 counter), result (the accumulator @0xC6EB24), humans, bluekills/greenkills,
 breathtime (@0xC6EAE0, seeded 20) and autogain (@0xC6EAFC, seeded 1)
 [orig: WacScript_FreeAll @0x4F6300 (the seeds @0x4f6381; @0x4f6371)] as stored
-words whose retail consumers ([orig: HUD_DrawBreathBar @0x59D6F0 (the read
-@0x59d70f); Server_UpdateEntityIdleTimers @0x50D770 (@0x50d7e6);
-GameEvent_PlayerDeath @0x516DD0 (@0x5172f6); NetPacket_WritePlayerState @0x4FF6B0
-(@0x4ff9db); Environment_ApplyFogAndAmbient @0x57E440 (@0x57e514)]) are not yet
-ported. The `night` DWORD is writable (D-WAC-4 fixed 2026-09-18): its row resolves to
+words. breathtime's host readers ([orig: Server_UpdateEntityIdleTimers @0x50D770
+(@0x50d7e6); GameEvent_PlayerDeath @0x516DD0 (@0x5172f6)]), its wire writer
+([orig: NetPacket_WritePlayerState @0x4FF6B0 (@0x4ff9db)]) and the joiner's
+store ([orig: NapiNPClientMsg_0x00A (@0x4301A1)]) are ported (§38.9), as is
+autogain's gate on the iris re-target ([orig: Environment_ApplyFogAndAmbient
+@0x57E440 (@0x57E50B..0x57E51B, exit @0x57E53D)]: the modulator re-targets only
+with a local player and a nonzero autogain; `WeatherState::iris_retarget_enabled`,
+§38.7); [orig: HUD_DrawBreathBar @0x59D6F0 (the read @0x59d70f)] is not. The `night` DWORD is writable (D-WAC-4 fixed 2026-09-18): its row resolves to
 Env @0x26C645C. [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (store @0x57DEAE)]
 rewrites it only when the authored TOD keyframe path runs; immediate WAC reads
 and the light selector observe the retained word. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
