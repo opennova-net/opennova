@@ -84,7 +84,7 @@ that ownership invariant at compile time.
   transition, and immutable result. `tests/world/collision_test.cpp` pins the
   MoveCB/Powerup callback-before-force branch and authority contact stream.
   These branches follow `Entity_MovementCollisionResolver
-  @0x4B2F90..0x4B2FF5`, `Server_CheckWinConditions @0x51AD40`,
+  @0x4B2F8D..0x4B2FF5`, `Server_CheckWinConditions @0x51AD40`,
   `GameEvent_ProcessScoring @0x52F550`, and
   `GameType_CreateDefaultSettings @0x52DD00`. It also preserves Flag Me's
   retail row-12 defect: objective wire transitions remain live, but the

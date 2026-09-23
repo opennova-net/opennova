@@ -100,10 +100,18 @@ appear only where a record says so. Known scales, each owned by its record:
 ### Timing
 
 - The engine logic tick is **62 Hz**: `[orig: Game_ProcessMainFrame @ 0x5263f0]`
-  increments `current_tick @ 0x24c1968` once per call, before the entity update,
-  and `Game_StartMission` zeroes it on every peer, so the first mission frame runs
+  increments `tick @ 0x24c1968` once per call (not while the in-game menu pause
+  flag is set, `@0x5265A0..0x5265B4`), before the entity update, and
+  `Game_StartMission` zeroes it on every peer, so the first mission frame runs
   at tick 1 on the host and on every client
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
+- `dword_24C1948` is the ENTITY-UPDATE counter, not a render frame counter: its
+  one writer is the tail of a non-epilog `Entity_UpdateAllEntities @0x4C2100`
+  (`@0x4C2639`) and nothing resets it, so it runs one behind `tick`, holds on a
+  skipped or epilog frame and keeps counting across missions. The ground-link
+  cadences, the movement resolver's full update, the avoid-brake factors and the
+  water noise read it (`World::entity_update_counter`;
+  [vehicle-client-movers-re.md section 29](world/vehicle-client-movers-re.md)).
 - Dividers are **per system**, inside each system: the WAC VM executes once per
   **62 ticks** (`[orig: WacScript_AdvanceTick @ 0x4f81a0]`, the 0x3E divider — ours is
   `WacSystem::kTicksPerExecution`, `engine/runtime/wac/wac_system.h`); normal BMS
@@ -111,8 +119,12 @@ appear only where a record says so. Known scales, each owned by its record:
   every 64 ticks); the AI/entity motor runs every tick with its own 2/8/16-tick
   stagger (same doc).
 - Authoritative per-tick order: **WAC → BMS events → AI**
-  ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)). How OpenNova's
-  hosts drive that loop is [runtime-architecture.md](runtime-architecture.md).
+  ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)): the script
+  pass runs inside `Server_TickUpdate @0x51D7E0` (the WAC tick `@0x51D8BF`, the
+  BMS quarter pass `@0x51D8F4`) before the gated entity update (`@0x52674B`),
+  and the per-slot 0x0A is sent between them. How OpenNova's hosts drive that
+  loop is [runtime-architecture.md](runtime-architecture.md) ("One logic
+  tick").
 
 The active [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
 uses this shared tick and entity model. Script dispatch coverage and focused
