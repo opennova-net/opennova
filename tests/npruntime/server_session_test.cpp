@@ -3720,11 +3720,25 @@ bool check_numbered_flip_pair_and_banner_wire() {
 		return std::find(list.begin(), list.end(), body) != list.end();
 	};
 
+	// Every slot holds a refused-touch nag; the flip clears them all and stamps
+	// the capturer's +100360 word. [orig: GameEvent_FlagCapture — the clear
+	// @0x50F786..0x50F7B1, the stamp @0x50F90C..0x50F912]
+	for (auto &conn : ctx.np_protocol.connection_list)
+		conn.reply.capture_nag_held = true;
 	opennova::inmatch::Server_TickUpdate(ctx);
 	for (int i = 0; i < 62; ++i) opennova::inmatch::Server_TickUpdate(ctx);
 	const auto to_blue = events(transports[0]);
 	const auto to_red = events(transports[1]);
 	const auto to_third = events(transports[2]);
+	bool holds_cleared = true;
+	for (const auto &conn : ctx.np_protocol.connection_list)
+		holds_cleared = holds_cleared && !conn.reply.capture_nag_held;
+	if (!expect(holds_cleared &&
+	                    ctx.np_protocol.connection_list[0].reply.chat_last_ms != 0 &&
+	                    ctx.np_protocol.connection_list[1].reply.chat_last_ms == 0 &&
+	                    ctx.np_protocol.connection_list[2].reply.chat_last_ms == 0,
+	            "the numbered flip clears every held nag and stamps only the capturer"))
+		return false;
 	// Team 2 still holds the other number-2 entity, so its mask held: 51/50
 	// carry [zone 2][rank 1] (the first number-2 entity registered).
 	const std::vector<uint8_t> own = {51, 2, 1, 0xFF, 0, 0, 0, 0};
@@ -3848,8 +3862,18 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	}
 	opennova::inmatch::NapiNPConnection &deployer = ctx.np_protocol.connection_list[0];
 	opennova::inmatch::NapiNPConnection &watcher = ctx.np_protocol.connection_list[1];
+	// The join sets the frontier-hint bit, clears the nag hold and zeroes the
+	// +100360 stamp; the deploy leg's whole-byte write clears both bits.
+	// [orig: Server_OnPlayerJoin @0x51A6CD, @0x51A6FD, @0x51A730..0x51A73A;
+	//  Server_ProcessPlayerDeath @0x517803]
+	deployer.reply.capture_nag_held = true;
+	deployer.reply.chat_last_ms = 77;
 	const opennova::world::EntityHandle a =
 			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world);
+	if (!expect(deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held &&
+	                    deployer.reply.chat_last_ms == 0,
+	            "the join sets the frontier-hint bit and clears the nag state"))
+		return false;
 	const opennova::world::EntityHandle b =
 			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world);
 	auto pending = [&world](opennova::world::EntityHandle handle) {
@@ -3859,16 +3883,163 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	bool ok = expect(a.valid() && b.valid() && deployer.link.respawn_pending &&
 	                         pending(a) && pending(b),
 	                 "the join mirrors the undeployed bit onto the roster row");
+	deployer.reply.capture_nag_held = true;
 	opennova::inmatch::Server_ReleasePlayerDeployment(
 			ctx.config, deployer, world, opennova::world::EntityHandle{});
 	ok = expect(!deployer.link.respawn_pending && !pending(a),
 	            "the deploy leg clears the roster row's undeployed bit") && ok;
+	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,
+	            "the deploy leg clears the frontier-hint bit and the nag hold") && ok;
 	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, true);
 	ok = expect(watcher.link.spectator && watcher.link.respawn_pending && pending(b),
 	            "entering spectator mode leaves the undeployed bit alone") && ok;
 	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, false);
 	ok = expect(!watcher.link.respawn_pending && !pending(b),
 	            "a spectator's return to play clears the undeployed bit") && ok;
+	return ok;
+}
+
+// A three-zone A&S chain (1 and 2 blue, 3 red) with one in-match blue player:
+// the frontier-hint and refused-touch fixtures.
+struct FrontierHintFixture {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	opennova::world::World world;
+	opennova::replication::UdpSessionTransport transport{
+			opennova::replication::UdpSessionTransport::Role::Host};
+	opennova::world::EntityHandle player;
+
+	explicit FrontierHintFixture(bool with_chain) {
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+		world.rules.mp_session = true;
+		ctx.world = &world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(1, 8);
+		opennova::world::MatchRules rules;
+		rules.game_type = opennova::game_type::kAdvanceAndSecure;
+		world.match.configure(rules);
+		if (with_chain) {
+			const uint8_t teams[3] = {1, 1, 2};
+			for (uint8_t number = 1; number <= 3; ++number) {
+				opennova::world::Entity zone;
+				zone.kind = opennova::world::EntityKind::Item;
+				zone.is_capture_trigger = true;
+				zone.is_spawn_point = true;
+				zone.zone_number = number;
+				zone.zone_radius = 20;
+				zone.team = teams[number - 1];
+				zone.health = 1;
+				zone.alive = true;
+				zone.position = {1000.0f * number, 0.0f, 0.0f};
+				world.registry.spawn(1, zone);
+			}
+			world.zones.build_chain_from_mission();
+		}
+		opennova::world::Entity body;
+		body.kind = opennova::world::EntityKind::Organic;
+		body.player_class = 8;
+		body.team = 1;
+		body.health = 150;
+		body.alive = true;
+		body.position = {-500.0f, 0.0f, 0.0f};
+		player = world.registry.spawn(0, body);
+		world.match.upsert_player({player, 0, "Blue", {}});
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.link.owned_entity = player;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	opennova::inmatch::NapiNPConnection &conn() {
+		return ctx.np_protocol.connection_list.front();
+	}
+	std::vector<std::vector<uint8_t>> hints() {
+		std::vector<std::vector<uint8_t>> out;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw))
+			if (raw.size() >= 2 && raw[0] == 0x1E && raw[1] == 0x3A)
+				out.emplace_back(raw.begin() + 1, raw.end());
+		return out;
+	}
+};
+
+// The per-tick slot pass sends a set frontier-hint bit's S2C 0x1E event 58
+// [own frontier][the enemy's, 0 when the same][0xFF] only once the slot has
+// played 1240 ticks, and clears the bit whether or not it sends (no frontier,
+// no record). [orig: Server_UpdateAllActivePlayerSlots @0x51890C..0x5189A6]
+bool check_frontier_hint_waits_for_the_play_ticks() {
+	FrontierHintFixture f(/*with_chain=*/true);
+	const uint8_t own = f.world.zones.frontier_zone(1);
+	const uint8_t enemy = f.world.zones.frontier_zone(2);
+	if (!expect(own != 0, "the fixture chain gives blue a frontier")) return false;
+	f.conn().reply.frontier_hint_pending = true;
+	f.world.match.player(f.player)->play_ticks = 1239;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	bool ok = expect(f.hints().empty() && f.conn().reply.frontier_hint_pending,
+	                 "a slot short of 1240 play ticks keeps the bit and gets no hint");
+	f.world.match.player(f.player)->play_ticks = 1240;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<uint8_t> want = {
+			0x3A, own, static_cast<uint8_t>(enemy == own ? 0 : enemy), 0xFF, 0, 0, 0, 0};
+	const auto sent = f.hints();
+	ok = expect(sent.size() == 1 && sent[0] == want && !f.conn().reply.frontier_hint_pending,
+	            "the mature slot gets one event-58 hint and the bit clears") && ok;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.hints().empty(), "a cleared bit sends nothing more") && ok;
+
+	FrontierHintFixture bare(/*with_chain=*/false);
+	bare.conn().reply.frontier_hint_pending = true;
+	bare.world.match.player(bare.player)->play_ticks = 1240;
+	opennova::inmatch::Server_TickUpdate(bare.ctx);
+	ok = expect(bare.hints().empty() && !bare.conn().reply.frontier_hint_pending,
+	            "no frontier: the bit clears without a record") && ok;
+	return ok;
+}
+
+// A refused capture touch arms the toucher's nag only while none is held and
+// when its +100360 stamp is set and more than ten seconds old; arming sets both
+// bits and restamps the word, and the next slot pass sends the hint.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — bit 0x08 @0x500C10, the
+//  stamp @0x500C19..0x500C33, the set @0x500C35..0x500C3C]
+bool check_refused_touch_arms_the_nag() {
+	FrontierHintFixture f(/*with_chain=*/true);
+	f.world.match.player(f.player)->play_ticks = 5000;
+	f.world.logic_tick = 62u * 60u;
+	auto touch = [&f](uint32_t age_ms) {
+		const uint32_t next_tick = f.world.logic_tick + 1;
+		const uint32_t now_ms =
+				opennova::inmatch::host_milliseconds_for_logic_tick(next_tick);
+		f.conn().reply.chat_last_ms = age_ms == 0 ? 0 : now_ms - age_ms;
+		f.world.zones.capture.refused_touches.push_back(f.player);
+		opennova::inmatch::Server_TickUpdate(f.ctx);
+		return f.world.logic_tick == next_tick ? now_ms : 0u;
+	};
+	uint32_t now_ms = touch(0);
+	bool ok = expect(now_ms != 0 && !f.conn().reply.capture_nag_held &&
+	                         !f.conn().reply.frontier_hint_pending &&
+	                         f.world.zones.capture.refused_touches.empty(),
+	                 "an unstamped slot is never nagged");
+	now_ms = touch(10000);
+	ok = expect(!f.conn().reply.capture_nag_held && !f.conn().reply.frontier_hint_pending,
+	            "exactly ten seconds is not over the limit") && ok;
+	now_ms = touch(10001);
+	ok = expect(f.conn().reply.capture_nag_held && f.conn().reply.frontier_hint_pending &&
+	                    f.conn().reply.chat_last_ms == now_ms,
+	            "an old stamp arms both bits and restamps the word") && ok;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.hints().size() == 1 && !f.conn().reply.frontier_hint_pending &&
+	                    f.conn().reply.capture_nag_held,
+	            "the next slot pass sends the hint and keeps the hold") && ok;
+	// However old the stamp, a held nag is not re-armed.
+	f.conn().reply.chat_last_ms = 1;
+	f.world.zones.capture.refused_touches.push_back(f.player);
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.conn().reply.chat_last_ms == 1 && !f.conn().reply.frontier_hint_pending,
+	            "a held nag is not re-armed") && ok;
 	return ok;
 }
 
@@ -4172,6 +4343,8 @@ int main() {
 	ok = check_numbered_flip_pair_and_banner_wire() && ok;
 	ok = check_capture_pass_runs_in_every_mode_and_after_the_round() && ok;
 	ok = check_roster_mirrors_the_undeployed_bit() && ok;
+	ok = check_frontier_hint_waits_for_the_play_ticks() && ok;
+	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

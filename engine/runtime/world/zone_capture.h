@@ -55,10 +55,17 @@ struct ZoneCaptureState {
 
     std::vector<Request> requests;
     std::vector<Active> active;
+    // Players whose touch of a numbered zone queued nothing because neither
+    // team can capture it, in contact order; the host arms their slot's nag.
+    // [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the failed
+    //  CaptureCtx_QueueCaptureRequest @0x500BFF..0x500C06, the numbered test
+    //  @0x500C08..0x500C0E]
+    std::vector<EntityHandle> refused_touches;
 
     void clear() {
         requests.clear();
         active.clear();
+        refused_touches.clear();
     }
 };
 

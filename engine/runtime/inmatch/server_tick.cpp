@@ -932,6 +932,52 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
+// The frontier-hint arm of the same walk: a state-6 slot whose bit 0x04 is set
+// and which has played 1240 ticks gets S2C 0x1E event 58 [its team's frontier
+// zone][the enemy's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
+// frontier is 0; either way the bit clears.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6]
+void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
+		const world::Entity *player = world.registry.get(conn.link.owned_entity);
+		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
+		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
+		const uint8_t own = world.zones.frontier_zone(player->team);
+		uint8_t enemy = world.zones.frontier_zone(player->team == 1 ? 2 : 1);
+		if (enemy == own) enemy = 0;
+		if (own != 0 && conn.link.transport != nullptr)
+			conn.link.transport->host_send(s2c::GAME_EVENT,
+					{0x3A, own, enemy, 0xFF, 0, 0, 0, 0});
+		conn.reply.frontier_hint_pending = false;
+	}
+}
+
+// A refused touch arms its slot's nag: not while one is held, and only when the
+// slot's +100360 stamp is set and over ten seconds old; it sets bits
+// 0x04|0x08 and restamps the word.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the slot
+//  @0x500BE4..0x500BF1, bit 0x08 @0x500C10, the stamp @0x500C19..0x500C33, the
+//  set @0x500C35..0x500C3C]
+void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
+	const uint32_t now_ms = host_milliseconds_for_logic_tick(world.logic_tick);
+	for (const world::EntityHandle toucher : world.zones.capture.refused_touches) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!conn.link.owned_entity.valid() || conn.link.owned_entity != toucher)
+				continue;
+			SessionReplyState &reply = conn.reply;
+			if (!reply.capture_nag_held && reply.chat_last_ms != 0 &&
+					now_ms - reply.chat_last_ms > 10000u) {
+				reply.frontier_hint_pending = true;
+				reply.capture_nag_held = true;
+				reply.chat_last_ms = now_ms;
+			}
+			break;
+		}
+	}
+	world.zones.capture.refused_touches.clear();
+}
+
 // EntityPool_ClearDirtyFlags: strip the priority-target mark (Flags 0x4000)
 // from every used row of pools 0 and 1 — no alive/flags test, pools 2..4
 // untouched. Both portable views of the Flags dword carry the bit because
@@ -1704,6 +1750,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Then the spawn-protection arm of the per-player maintenance walk
 	// [orig: Server_UpdateAllActivePlayerSlots @0x518820, called @0x51d88b].
 	tick_spawn_protection(ctx, world);
+	emit_frontier_hints(ctx, world);
 	// The host CNetQuality send window, on its own 62-frame countdown (retail
 	// samples it from the main frame beside this tick).
 	Server_SampleHostNetQuality(ctx);
@@ -1948,8 +1995,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// callsite @0x4B31DD..0x4B3238;
 	// Server_OnPlayerTouchCaptureZone @0x500BA0]
 	if (!preround_active && ctx.is_in_session &&
-			!world.match.outcome().ended)
+			!world.match.outcome().ended) {
 		world.zones.capture_contact_tick();
+		arm_refused_capture_nags(ctx, world);
+	}
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
@@ -2258,6 +2307,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			//  slot @0x50F7BA, the capturer-team filter @0x50F7E1, 51/53
 			//  @0x50F8A5/@0x50F82B, the enemy filter @0x50F851/@0x50F8D9, 50/52
 			//  @0x50F8E9/@0x50F872, the sends @0x50F830/@0x50F8AA/@0x50F907]
+			// Before the pair every slot's refused-touch hold clears; after it
+			// the capturer's +100360 stamp is set.
+			// [orig: GameEvent_FlagCapture — the clear @0x50F786..0x50F7B1, the
+			//  stamp @0x50F90C..0x50F912]
+			if (!flip->decided) {
+				for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+					conn.reply.capture_nag_held = false;
+			}
 			if (!flip->decided && flip->capturer_is_player) {
 				const uint8_t own_team = flip->capturer_team;
 				const uint8_t enemy_team = own_team == 1 ? 2 : 1;
@@ -2267,6 +2324,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				send_team(enemy_team, flip->unchanged
 						? event_body(50, flip->zone_number, flip->rank)
 						: event_body(52, flip->zone_number, flip->frontier));
+				for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+					if (conn.link.owned_entity.valid() &&
+							conn.link.owned_entity == flip->capturer)
+						conn.reply.chat_last_ms =
+								host_milliseconds_for_logic_tick(world.logic_tick);
 			}
 			// The banner, keyed on the zone's new owner, goes to every in-match
 			// player even once the round is decided.

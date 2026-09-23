@@ -848,6 +848,33 @@ void test_spawn_zone_zero_key_uses_retail_pool_address_order() {
 
 } // namespace
 
+// A player touching a numbered zone that neither team can capture (here blue
+// in its own base, zone 1) queues no request and is recorded for the host's
+// refused-touch nag; a touch on a capturable zone queues a request instead.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the failed
+//  CaptureCtx_QueueCaptureRequest @0x500BFF..0x500C06, the numbered test
+//  @0x500C08..0x500C0E]
+void test_refused_touch_is_recorded_for_the_host() {
+    AshFixture f;
+    const Entity *base = f.w.registry.get(f.z1);
+    CHECK(!f.w.zones.is_capturable(1, *base) && !f.w.zones.is_capturable(2, *base));
+    const EntityHandle blue = spawn_soldier(f.w, 1, base->position);
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(f.w.zones.capture.refused_touches.size() == 1 &&
+          f.w.zones.capture.refused_touches[0] == blue);
+    CHECK(events_of<ZoneCaptureEvents::Flip>(ev).empty());
+
+    AshFixture g;
+    const Entity *front = g.w.registry.get(g.z2a);
+    CHECK(g.w.zones.is_capturable(1, *front));
+    spawn_soldier(g.w, 1, front->position);
+    ZoneCaptureEvents ev2;
+    capture_second(g.w, ev2);
+    CHECK(g.w.zones.capture.refused_touches.empty());
+    CHECK(events_of<ZoneCaptureEvents::Flip>(ev2).size() == 1);
+}
+
 int main() {
     test_build_and_masks();
     test_frontier_rule();
@@ -868,6 +895,7 @@ int main() {
     test_farp_enforcement_uses_prior_capture_masks();
     test_spawn_zone_registry();
     test_spawn_zone_zero_key_uses_retail_pool_address_order();
+    test_refused_touch_is_recorded_for_the_host();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

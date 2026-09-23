@@ -201,7 +201,10 @@ void ZoneSystem::capture_contact_tick() {
                 active->presence.push_back(player->handle);
         }
 
-        if (!capture_request_available(world, *zone)) continue;
+        if (!capture_request_available(world, *zone)) {
+            state.refused_touches.push_back(player->handle);
+            continue;
+        }
         const auto duplicate = std::find_if(
                 state.requests.begin(), state.requests.end(),
                 [&](const auto &request) {

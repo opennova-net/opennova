@@ -1021,6 +1021,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// +356 armory cooldown. [orig: Server_ProcessPlayerDeath @0x517803/@0x517812;
 	//  slot+0x164 = 0 @0x517900]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
+	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
+	conn.reply.capture_nag_held = false;
 	conn.link.armory_reuse_seconds = 0;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;

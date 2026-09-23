@@ -372,6 +372,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  (byte = 1, or 3 while g_preround_delay_timer); slot[89] = 0 @0x51a752]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
 	conn.link.armory_reuse_seconds = 0;
+	// SetGameState(10) then sets 0x04 (the frontier hint) and clears 0x08 (the
+	// refused-touch hold); the join also zeroes the +100360 stamp.
+	// [orig: Server_OnPlayerJoin @0x51A6CD, the call @0x51A6FD
+	//  (CNetPlayer_SetGameState @0x4C4213..0x4C421F), @0x51A730..0x51A73A]
+	conn.reply.frontier_hint_pending = true;
+	conn.reply.capture_nag_held = false;
+	conn.reply.chat_last_ms = 0;
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
