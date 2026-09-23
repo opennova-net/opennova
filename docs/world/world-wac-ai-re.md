@@ -13291,8 +13291,9 @@ world-side facts of the slice:
   `Game_StartMission` calls `Player_InitPlayer` (@ 0x525BBC) on every peer, which finds the
   pool-0 row the local connection owns (`Player_FindLocalPlayerEntity @ 0x4E0090`) or dies
   (`Player_FatalPlayerDcbNotFound @ 0x4E17F2`), so a retail dedicated server runs with its
-  own connection's row; the port's dedicated hosts have no local player, so it is not
-  reproduced.
+  own connection's row. The port's dedicated hosts have no local player, so the port keeps
+  the gate only for the precipitation fall (`cached.local_player` before the
+  `Precipitation_FallTick @ 0x5DE8F0` leg, the call @ 0x4C2214).
 - **The admission gate.** `Game_ProcessMainFrame` gates the whole update
   (@ 0x526703..0x526742): a client skips to its second half (`is_authority`
   @ 0x526703); a playing host on its death screen is exempt from the humans test
@@ -13300,9 +13301,12 @@ world-side facts of the slice:
   (wac_var_humans @ 0x52671C) with a started clock (wac_var_ticks @ 0x526724) skips the
   update, as do the retained pre-round byte (dword_A85B64 @ 0x52672C) and a session
   round that has ended (`is_in_session` @ 0x526734 with g_spawn_success_gate
-  @ 0x52673C). wac_var_humans (`Server_BuildEntitySlotLists @ 0x4F97A0`) counts pool-0
-  rows with a def (@ 0x4F9809), Flags 0x100 (@ 0x4F9815) and not Flags 1 (@ 0x4F9820): a
-  dead player counts, a hidden one does not. Port: `World::entity_update_admitted`
+  @ 0x52673C). wac_var_humans (`Server_BuildEntitySlotLists @ 0x4F97A0`) counts live pool-0
+  rows with Flags 0x100 (@ 0x4F9815) and not Flags 1 (@ 0x4F9820): a dead player counts,
+  a hidden one does not. Its def test (`cmp [esi+20h]` @ 0x4F9809) is the allocated-row
+  test: every spawn links an items.def row (the player's store @ 0x43C429), row 0 for a
+  type items.def lacks (`ItemList_FindIndexByTypeId @ 0x49E100`, `xor eax,eax`
+  @ 0x49E131), so a player whose type has no items.def row still counts. Port: `World::entity_update_admitted`
   (the exemption bit is `CachedFrameState::peer_death_screen`).
 - **The frame split.** `Game_ProcessMainFrame` runs `Client_ProcessNetworkFrame`
   (@ 0x526692), `Sound_TickPendingSlots` (@ 0x526697), `Server_TickUpdate` (@ 0x5266B6:
