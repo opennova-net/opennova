@@ -138,6 +138,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             static_cast<int>(world::kPlayerInfantryTypeId) + mission::kItemIdOffset;
     const DefItemDef *player_def = find_item(by_id, player_def_id);
     world.tables.player.has_item_def = player_def != nullptr;
+    world.tables.player.item_type_index =
+            player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
     world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
     world.tables.player.critical_hp =
@@ -500,6 +502,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             continue;
         world::ThrowableClassRow row;
         row.item_id = def_id - mission::kItemIdOffset;
+        row.item_type_index = static_cast<int32_t>(def - items.entries);
         row.think = think;
         row.motor = motor;
         row.health_max = world::retail_signed_i16(def->hp);

@@ -58,6 +58,7 @@ int main() {
     w::Entity item;
     item.kind = w::EntityKind::Item;
     item.has_item_def = true;
+    item.item_type_index = 7; // the def row's ordinal the +0x1C kill gate reads
     item.item_id = 10;
     item.health = 0;
     const auto handle = world.registry.spawn(1, item);

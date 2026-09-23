@@ -242,12 +242,12 @@ public:
     // (mounted_child) is set and the held object's command group == group.
     bool ssn_holding_group(uint16_t ssn, int group) const;
     // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870] Any resolved
-    // (item_id != 0, the retail ItemTypeIndex +0x1C gate) member of
+    // (item_type_index != 0, the retail ItemTypeIndex +0x1C gate) member of
     // holder_group holding an object of held_group; first match wins.
     bool group_holding_group(int holder_group, int held_group) const;
     // [orig: Entity_IsOnTopOfChain @0x4f19a0] target reachable from ssn's
     // groundEntity chain (ground_target) within 3 hops; both entities gated
-    // on item_id != 0.
+    // on item_type_index != 0.
     bool ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) const;
     // Distances use Q16: WAC resolves literals; BMS shifts its whole metres.
     // [orig: Entity_CheckProximity @0x4F14C0] Wrapped center deltas, clamped

@@ -99,6 +99,11 @@ struct ThrowableClassRow {
     int32_t health_max = 0;
     int32_t armor_impact = 0;
     int32_t armor_kz = 0;
+    // The row's items.def ordinal: the placed entity's ItemTypeIndex (+0x1C),
+    // which the clone copies from its type's template entity
+    // [orig: Entity_CloneFromTemplateByType @ 0x4398a0 — the template's +0x1C
+    //  gate @0x4398A5, then the block copy].
+    int32_t item_type_index = 0;
 };
 
 struct ThrowableClassTable {

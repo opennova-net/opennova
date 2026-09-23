@@ -13,6 +13,9 @@ EntityHandle spawn(World &w, int pool, int id, ItemDeathClass cls) {
     Entity e;
     e.item_id = id;
     e.has_item_def = true;
+    // A def row's ordinal: the ItemTypeIndex the item gates read
+    // [orig: Entity_KillBySlotId @0x42BD29; Entity_ClearHealthInBounds @0x509E89].
+    e.item_type_index = 7;
     e.kind = EntityKind::Item;
     const auto h = w.registry.spawn(pool, e);
     ItemDeathTraits t;
@@ -687,6 +690,7 @@ int main() {
     victim.position = {2, 2, 1};
     const auto unnumbered = w.registry.spawn(0, victim); // +0x1C ItemTypeIndex zero: skipped
     victim.item_id = 9;
+    victim.item_type_index = 9;
     const auto person = w.registry.spawn(0, victim);
     victim.damage_state = 1;
     const auto protected_person = w.registry.spawn(0, victim);

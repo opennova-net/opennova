@@ -86,7 +86,7 @@ int EntityCommands::set_group_target_selector(int32_t group, AiTargetSelector fi
 bool EntityCommands::set_ssn_name(EntityTarget ssn, const std::string &name) {
     // [orig: WacCmd_SsnName @0x4F7230] Includes dead items; empty names are ignored.
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0 || name.empty()) return false;
+    if (entity == nullptr || entity->item_type_index == 0 || name.empty()) return false;
     entity->display_name = name.substr(0, 31);
     return true;
 }
@@ -94,7 +94,7 @@ bool EntityCommands::set_ssn_name(EntityTarget ssn, const std::string &name) {
 bool EntityCommands::ssn_critical(EntityTarget ssn) const {
     // [orig: WacCmd_SsnCritical @0x4F1BF0] Signed words, no Flags/alive predicate.
     const Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     const int32_t health = retail_signed_i16(entity->health);
     return health > 0 && health <= retail_signed_i16(entity->critical_hp);
 }
@@ -144,8 +144,8 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     Entity *entity = world_.registry.get(source);
     const Entity *carrier = world_.registry.get(target);
     AiEntity *ai = world_.ai.for_handle(source);
-    if (entity == nullptr || carrier == nullptr || entity->item_id == 0 ||
-            carrier->item_id == 0 || ai == nullptr) return false;
+    if (entity == nullptr || carrier == nullptr || entity->item_type_index == 0 ||
+            carrier->item_type_index == 0 || ai == nullptr) return false;
     // Only the authority detaches [orig: @0x4F73D2..0x4F73DC ->
     // Entity_DetachFromVehicleIfServer @0x4359D0].
     if (entity->mounted && world_.ai.is_authority) world_.vehicles.detach(source);
@@ -284,7 +284,7 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     //  staged clip +0x2C0 cleared @0x4F1EB7..0x4F1EBD, the class event (e, 1, 0)
     //  @0x4F1EC7..0x4F1ED2, return 1 @0x4F1ED7]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     const bool crosses_edge = script_kill_crosses_edge(*e);
     e->health = 0;
     e->last_attacker = {};
@@ -590,7 +590,7 @@ bool EntityCommands::set_ssn_accuracy(EntityTarget ssn, int32_t primary,
 bool EntityCommands::set_ssn_guard(EntityTarget ssn, bool guard) {
     Entity *entity = world_.registry.get(resolve_target(ssn));
     // [orig: WacCmd_SsnGuard @0x4F71C0 — ItemTypeIndex gate @0x4F7207]
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     // [orig: WacCmd_SsnGuard @0x4F71C0] Retail writes the one Flags dword;
     // 0x40 is legacy-mirrored, so both views stay coherent here (the
     // vehicle_attach precedent — engine_flags is what the 0x10 static record
@@ -636,7 +636,7 @@ bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp) {
     //  @0x4F1D2F, the nearest node @0x4F1D52 (no explicit-node form), the brain
     //  gate @0x4F1D66]. No detach, cooldown, carrier or flag write.
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     AiEntity *ae = world_.ai.for_handle(e->handle);
     if (ae == nullptr) return false;
     write_route_slot(world_, *e, *ae, wp, -1);
@@ -734,7 +734,7 @@ bool EntityCommands::set_ssn_anim(EntityTarget ssn, int32_t anim_state) {
     // The +0x1C type index gate does not test health or the +0x20 ItemDef pointer.
     // [orig: WacCmd_SsnAnim @0x4F7630]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     store_script_body_animation(world_, *e, anim_state);
     return true;
 }
@@ -765,7 +765,7 @@ bool EntityCommands::set_ssn_turn(EntityTarget ssn, int32_t heading_degrees) {
     // [orig: WacCmd_SsnTurn @0x4F72B0] The heading argument is converted with
     // two wrapped shifts and signed division, not a full-precision BAM divide.
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     const int32_t numerator = static_cast<int32_t>((90u - uint32_t(heading_degrees)) << 16);
     const int32_t target = static_cast<int32_t>(uint32_t(numerator / 360) << 16);
     if (AiEntity *body = world_.ai.for_handle(entity->handle)) {
@@ -816,7 +816,7 @@ bool EntityCommands::set_ssn_hidden(EntityTarget ssn, bool hidden) {
     //  `or Flags,1` @0x4F779D; WacCmd_UnhideSsn @0x4F77B0 — `and Flags,~1`
     //  @0x4F77FD]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     if (hidden) {
         e->flags |= kEntityFlagCarried;
         e->engine_flags |= kEntityFlagCarried;
@@ -852,7 +852,7 @@ bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
     //  `or Flags,10000000h` @0x4F76DD; WacCmd_EnableSsn @0x4F76F0 — `and
     //  Flags,0EFFFFFFFh` @0x4F773D]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     if (disabled) {
         e->flags |= kEntityFlagScriptDisabled;
         e->engine_flags |= kEntityFlagScriptDisabled;
@@ -867,7 +867,7 @@ bool EntityCommands::ssn_exists(EntityTarget ssn) const {
     // A resolved row with an ItemTypeIndex. [orig: WacCmd_SsnExists @0x4F1A70
     // — `cmp [ecx+1Ch],eax; setnz` @0x4F1AB9..0x4F1ABC]
     const Entity *e = world_.registry.get(resolve_target(ssn));
-    return e != nullptr && e->item_id != 0;
+    return e != nullptr && e->item_type_index != 0;
 }
 
 bool EntityCommands::ssn_alive(EntityTarget ssn) const {
@@ -885,7 +885,7 @@ bool EntityCommands::wac_ssn_dead(EntityTarget ssn) const {
     // [orig: WacCmd_SsnDead @0x4F1AC0 — gate @0x4F1B07, `movsx eax,[ecx+24h];
     //  and eax,2` @0x4F1B0D..0x4F1B11]
     const Entity *e = world_.registry.get(resolve_target(ssn));
-    return e != nullptr && e->item_id != 0 &&
+    return e != nullptr && e->item_type_index != 0 &&
             ((e->flags | e->engine_flags) & kEntityFlagDead) != 0;
 }
 
@@ -893,13 +893,13 @@ bool EntityCommands::wac_ssn_alive(EntityTarget ssn) const {
     // [orig: WacCmd_SsnAlive @0x4F1B20 — gate @0x4F1B67, `not dl; and eax,2`
     //  @0x4F1B6D..0x4F1B75]
     const Entity *e = world_.registry.get(resolve_target(ssn));
-    return e != nullptr && e->item_id != 0 &&
+    return e != nullptr && e->item_type_index != 0 &&
             ((e->flags | e->engine_flags) & kEntityFlagDead) == 0;
 }
 
 bool EntityCommands::ssn_wounded(EntityTarget ssn) const {
     const Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     // A SIGNED 16-bit compare of the health word against the arithmetically
     // halved def healthMax word. [orig: WacCmd_SsnWounded @0x4F1B80 — `sar cx,1`
     // @0x4F1BD9, `cmp [eax+11Eh],cx` @0x4F1BDC, `setle dl` @0x4F1BE3]
@@ -948,7 +948,7 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
                                          bool three_dimensional) const {
     // [orig: WacCmd_SsnArea @0x4F1020; WacCmd_SsnArea3D @0x4F0F60]
     const Entity *entity = world_.registry.get(resolve_target(target));
-    if (entity == nullptr || entity->item_id == 0 ||
+    if (entity == nullptr || entity->item_type_index == 0 ||
             ((entity->flags | entity->engine_flags) & 1u) != 0 || zone_id == 0)
         return false;
     const int index = world_.registry.area_index_by_zone_id(zone_id);
@@ -964,7 +964,7 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
 bool EntityCommands::ssn_at_location(EntityTarget target, int32_t location) const {
     // [orig: WacCmd_SsnLoc @0x4F0E90] A blink hit overrides the box even with ID 0.
     const Entity *entity = world_.registry.get(resolve_target(target));
-    if (entity == nullptr || entity->item_id == 0 ||
+    if (entity == nullptr || entity->item_type_index == 0 ||
             ((entity->flags | entity->engine_flags) & 1u) != 0) return false;
     int32_t value = world_.registry.location_at(entity->position);
     if (entity->blink_hits[0] != 0) {
@@ -1115,7 +1115,7 @@ bool EntityCommands::group_holding_group(int holder_group, int held_group) const
     for (EntityHandle h : members) {
         if (h.pool() != 0) continue;
         const Entity *e = world_.registry.get(h);
-        if (!e || e->item_id == 0) continue;
+        if (!e || e->item_type_index == 0) continue;
         const Entity *held = world_.registry.get(e->mounted_child);
         if (held && held->group_id == held_group) return true;
     }
@@ -1131,7 +1131,7 @@ bool EntityCommands::ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) 
     // dead.
     const Entity *a = world_.registry.get(resolve_target(ssn));
     const Entity *b_probe = world_.registry.get(resolve_target(target_ssn));
-    if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
+    if (!a || !b_probe || a->item_type_index == 0 || b_probe->item_type_index == 0) return false;
     const Entity *hop = carrier_of(world_.registry, *a);
     for (int i = 0; i < 3 && hop != nullptr; ++i) {
         if (hop == b_probe) return true;
@@ -1168,7 +1168,7 @@ bool trigger_pair_distance(const World &w, const EntityCommands &cmds,
                            const Entity *&a, const Entity *&b, int32_t &dist) {
     a = w.registry.get(cmds.resolve_target(ssn_a));
     b = w.registry.get(cmds.resolve_target(ssn_b));
-    if (a == nullptr || b == nullptr || a->item_id == 0 || b->item_id == 0)
+    if (a == nullptr || b == nullptr || a->item_type_index == 0 || b->item_type_index == 0)
         return false;
     dist = script_entity_distance(*a, *b);
     return true;
@@ -1225,7 +1225,7 @@ bool EntityCommands::ssn_leads_target(EntityTarget first, EntityTarget second,
     const Entity *b = world_.registry.get(resolve_target(second));
     const Entity *goal = world_.registry.get(resolve_target(target));
     if (a == nullptr || b == nullptr || goal == nullptr ||
-            a->item_id == 0 || b->item_id == 0 || goal->item_id == 0)
+            a->item_type_index == 0 || b->item_type_index == 0 || goal->item_type_index == 0)
         return false;
     return script_entity_distance(*b, *goal) - script_entity_distance(*a, *goal) > lead_q16;
 }
@@ -1262,7 +1262,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     const Entity *a = world_.registry.get(resolve_target(ssn));
     const Entity *b_ent = world_.registry.get(resolve_target(target_ssn));
     if (a == nullptr || b_ent == nullptr ||
-        a->item_id == 0 || b_ent->item_id == 0)
+        a->item_type_index == 0 || b_ent->item_type_index == 0)
         return false;
     int32_t pa[3];
     los_offset_point(*a, pa);
@@ -1568,7 +1568,7 @@ int EntityCommands::set_group_accuracy(int group, int32_t primary,
         const EntityHandle handle =
                 EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
-        if (entity == nullptr || entity->item_id == 0 ||
+        if (entity == nullptr || entity->item_type_index == 0 ||
             static_cast<int>(entity->group_id) != group)
             continue;
         AiEntity *ae = world_.ai.for_handle(handle);
@@ -1663,7 +1663,7 @@ int EntityCommands::teleport_group_to_marker(int group,
         for (size_t slot = 0; slot < capacity; ++slot) {
             Entity *entity = world_.registry.get(
                     EntityHandle::make(pool, static_cast<int>(slot)));
-            if (entity == nullptr || entity->item_id == 0 ||
+            if (entity == nullptr || entity->item_type_index == 0 ||
                 static_cast<int>(entity->group_id) != group)
                 continue;
             copy_marker_pose(world_, *entity, marker_copy, false);
@@ -1737,7 +1737,7 @@ bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
     const Entity marker_copy = *marker;
     const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
     Entity *entity = world_.registry.get(handle);
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
     if (world_.collision != nullptr)
         world_.collision->refresh_after_registry_change(world_);
@@ -1813,11 +1813,11 @@ bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTar
 bool EntityCommands::release_boarding_command(EntityTarget occupant_ssn) {
     const EntityHandle oh = resolve_target(occupant_ssn);
     Entity *occ = world_.registry.get(oh);
-    // The ItemTypeIndex (+0x1C, our item_id) and parentEntity rejects: a
+    // The ItemTypeIndex (+0x1C, item_type_index) and parentEntity rejects: a
     // release only applies to a real item entity that is riding something; the
     // detach is the authority's alone. [orig: WacCmd_SsnRelease @0x4F7420 —
     // @0x4F7465 / @0x4F746B, Entity_DetachFromVehicleIfServer call @0x4F7475]
-    if (!occ || occ->item_id == 0 || !occ->mounted) return false;
+    if (!occ || occ->item_type_index == 0 || !occ->mounted) return false;
     if (world_.ai.is_authority) dismount(occupant_ssn);
     if (AiEntity *ae = world_.ai.for_handle(oh)) {
         ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
@@ -1833,7 +1833,7 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     const EntityHandle handle = resolve_target(occupant);
     Entity *entity = world_.registry.get(handle);
     AiEntity *ai = world_.ai.for_handle(handle);
-    if (entity == nullptr || entity->item_id == 0 || ai == nullptr ||
+    if (entity == nullptr || entity->item_type_index == 0 || ai == nullptr ||
             ai->slot.f[36] == 0 || entity->mount_target.valid()) return false;
     const EntityHandle target{uint16_t(ai->slot.f[36] - 1)};
     SeatSelectionMode mode = SeatSelectionMode::Any;
@@ -1876,7 +1876,7 @@ const Entity *mount_trigger_ssn(const World &w, const EntityCommands &cmds, Enti
     if (local == nullptr || ((local->flags | local->engine_flags) & 2u) != 0)
         return nullptr;
     const Entity *target = w.registry.get(cmds.resolve_target(ssn));
-    if (target == nullptr || target->item_id == 0) return nullptr;
+    if (target == nullptr || target->item_type_index == 0) return nullptr;
     *local_out = local;
     return target;
 }

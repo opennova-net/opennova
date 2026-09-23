@@ -35,6 +35,7 @@ struct Fixture {
         for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 8);
         Entity e;
         e.net_id = 1; e.item_id = 11; e.has_item_def = true;
+        e.item_type_index = 7; // the def row's ordinal (+0x1C)
         e.kind = EntityKind::Organic; e.item_type = 3; e.health = 100;
         actor = world.registry.spawn(0, e);
         world.cached.local_player = actor;
@@ -81,7 +82,7 @@ static void test_animation_reaches_motor_and_preserves_pending() {
     f.entity().has_item_def = false;
     f.script("SSNanim(1,emote_2) store(v2)\n");
     CHECK(f.world.script.vars.get_mission(2) == 1 && inf.anim_state == 116);
-    f.entity().item_id = 0;
+    f.entity().item_type_index = 0;
     f.script("SSNanim(1,emote_3) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(3) == 0 && inf.anim_state == 116);
     f.script("anim(emote_4) store(v4)\n"); // local command only checks allocation
@@ -208,7 +209,8 @@ static void test_dropflare_reaches_round_sim_and_checks_itemdef() {
     f.script("dropflare(1) store(v2)\n");
     CHECK(f.world.script.vars.get_mission(2) == 0 && f.world.out.rounds.count == 2);
     f.entity().has_item_def = true;
-    f.entity().item_id = 0; // +0x1C is not this command's gate
+    f.entity().item_id = 0;
+    f.entity().item_type_index = 0; // +0x1C is not this command's gate
     f.entity().health = 0;
     f.body().profile.type = 2;
     f.script("dropflare(1) store(v3)\n");
@@ -237,11 +239,11 @@ static void test_turn_reaches_the_motor_and_org2_word() {
     CHECK(f.body().inf.target_heading == -11927552);
     f.script("ssnturn(1,65536)\n");
     CHECK(f.body().inf.target_heading == 0x40000000); // wrapped first shift
-    f.entity().item_id = 0;
+    f.entity().item_type_index = 0;
     f.script("ssnturn(1,90) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(3) == 0);
     CHECK(f.body().inf.target_heading == 0x40000000);
-    f.entity().item_id = 11;
+    f.entity().item_type_index = 7;
 
     for (int player_kind = 0; player_kind < 3; ++player_kind) {
         f.body().inf.is_local_player = player_kind == 0;
@@ -253,7 +255,7 @@ static void test_turn_reaches_the_motor_and_org2_word() {
         CHECK(f.body().inf.target_heading == 0x40000000);
     }
     Entity prop;
-    prop.net_id = 2; prop.item_id = 12; prop.yaw = 17;
+    prop.net_id = 2; prop.item_id = 12; prop.yaw = 17; prop.item_type_index = 7;
     const auto h = f.world.registry.spawn(2, prop);
     f.script("ssnturn(2,0) store(v4)\nssnturn(99,0) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(4) == 1);

@@ -65,6 +65,7 @@ struct Rig {
         veh.kind = EntityKind::Item;
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
         veh.item_id = 1294;
+        veh.item_type_index = 7; // the def row's ordinal, the script gates' +0x1C
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.yaw = 0;
         veh.health = 2000;
@@ -1329,6 +1330,7 @@ void test_bms_mount_predicates() {
     gun.bms_id = 500;
     gun.kind = EntityKind::Item;
     gun.item_id = 1800;
+    gun.item_type_index = 7;
     gun.position = r.veh().position;
     gun.health = 500;
     gun.alive = true;
@@ -2240,6 +2242,7 @@ void test_ground_waits_for_boarders() {
     walker.health = 150;
     walker.alive = true;
     walker.has_item_def = true;
+    walker.item_type_index = 7;
     const EntityHandle wh = r.w.registry.spawn(0, walker);
     r.sys.attach(wh);
     // The real board order (SSNtoSSN) stores the command in the walker's SLOT,

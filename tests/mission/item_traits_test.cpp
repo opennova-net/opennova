@@ -562,6 +562,9 @@ int main() {
         CHECK(frag->think == ThrowClass::kNade);
         CHECK(frag->motor == ThrowClass::kNade);
         CHECK(frag->health_max == 25);
+        // The row's ordinal, the placed device's ItemTypeIndex (S5 Frag is row 8)
+        // [orig: Entity_CloneFromTemplateByType @0x4398A0].
+        CHECK(frag->item_type_index == 8);
     }
     const ThrowableClassRow *mine = w.throwables.classes.get(601);
     CHECK(mine != nullptr);
@@ -579,6 +582,7 @@ int main() {
         CHECK(dup->think == ThrowClass::kClaymore);
         CHECK(dup->motor == ThrowClass::kClaymore);
         CHECK(dup->health_max == 11);
+        CHECK(dup->item_type_index == 10); // "S5 Dup A", the first 100602 row
     }
     const Entity *dup_e = w.registry.get(dup_h);
     CHECK(dup_e != nullptr && dup_e->health_max == 11);

@@ -429,6 +429,9 @@ struct PlayerTemplate {
     // actual presence so a malformed/missing Player definition is not invented for late spawns.
     // [orig: Entity_InitFromItemDef @0x49e550; D-NET-144]
     bool has_item_def = true;
+    // The Player row's items.def ordinal (entity+0x1C ItemTypeIndex); 0 until the
+    // sweep resolves it [orig: Entity_SpawnFromBMSRecord @0x40EBFC].
+    int32_t item_type_index = 0;
     int32_t item_hp = 0;
     int32_t critical_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join

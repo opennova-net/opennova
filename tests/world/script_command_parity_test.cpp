@@ -57,6 +57,7 @@ EntityHandle spawn_npc(World &w, int32_t net_id, uint8_t group, int32_t health =
     e.item_id = 1001;
     e.item_type = 3;
     e.has_item_def = true;
+    e.item_type_index = 7; // the def row's ordinal, the ItemTypeIndex (+0x1C) gates read
     e.group_id = group;
     e.health = health;
     e.health_max = 100;
@@ -120,6 +121,7 @@ static void test_wac_kill_ssn_queues_brain_event() {
     vehicle.net_id = 300;
     vehicle.item_id = 2001;
     vehicle.has_item_def = true;
+    vehicle.item_type_index = 7;
     vehicle.is_ai_capable = true;
     vehicle.health = 400;
     vehicle.alive = true;
@@ -146,7 +148,7 @@ static void test_bms_kill_single_pool0() {
     Entity *victim = w.registry.get(npc);
     victim->last_attacker = shooter;
     victim->death_anim_state = 181;
-    victim->item_id = 0; // no gate on this path
+    victim->item_type_index = 0; // no ItemTypeIndex gate on this path
     CHECK(w.commands.kill_ssn(uint16_t(110)));
     CHECK(victim->health == 0);
     CHECK(!victim->last_attacker.valid());
@@ -255,6 +257,7 @@ static void test_disable_ssn_flag_bit() {
     vehicle.net_id = 150;
     vehicle.item_id = 2001;
     vehicle.has_item_def = true;
+    vehicle.item_type_index = 7;
     const EntityHandle h = w.registry.spawn(1, vehicle);
     WacSystem sys;
     CHECK(load_script(w, sys, "if never() then disableSSN(150) store(v1) endif\n"));
@@ -339,7 +342,7 @@ static void test_ssn_wounded_signed_compare() {
     CHECK(w.commands.ssn_wounded(h));
 }
 
-// ssnguard, ssncspd and ssnrelease gate on the ItemTypeIndex (+0x1C, item_id);
+// ssnguard, ssncspd and ssnrelease gate on the ItemTypeIndex (+0x1C, item_type_index);
 // ssnrelease and ssn2ssn detach only on the authority.
 // [orig: WacCmd_SsnGuard @0x4F7207; WacScript_SendAIEvent10ToEntity @0x4F74FD;
 // WacCmd_SsnRelease @0x4F7465, Entity_DetachFromVehicleIfServer call @0x4F7475;

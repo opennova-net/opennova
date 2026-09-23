@@ -1040,7 +1040,7 @@ static void test_player_mount_trigger_dispatch() {
         veh.health = 1000;
         veh.net_id = 11;
         veh.bms_id = 11;
-        veh.item_id = 1; // Mount predicates require the target's item definition.
+        veh.item_id = 1; veh.item_type_index = 7; // Mount predicates require the target's item definition.
         world::EntityHandle vh = w.registry.spawn(1, veh);
         world::Entity pl{};
         pl.alive = true;
@@ -1667,20 +1667,20 @@ static void test_holding_triggers() {
     holder.net_id = 50;
     holder.alive = true;
     holder.group_id = 2;
-    holder.item_id = 1001;
+    holder.item_id = 1001; holder.item_type_index = 7;
     world::EntityHandle holder_h = w.registry.spawn(0, holder);
     world::Entity item;
     item.net_id = 60;
     item.alive = true;
     item.group_id = 9;
-    item.item_id = 4095;
+    item.item_id = 4095; item.item_type_index = 7;
     world::EntityHandle item_h = w.registry.spawn(1, item);
     // A pool-1 "holder" with the same group: outside the retail pool-0 walk.
     holder.net_id = 51;
     world::EntityHandle wrong_pool_h = w.registry.spawn(1, holder);
     // A pool-0 member with no resolved item (ItemTypeIndex 0): gated out.
     holder.net_id = 52;
-    holder.item_id = 0;
+    holder.item_id = 0; holder.item_type_index = 0;
     world::EntityHandle ungated_h = w.registry.spawn(0, holder);
 
     mission::BmsEventSystem sys;
@@ -1725,7 +1725,7 @@ static void test_single_distance_los_chain() {
     w.registry.configure_pool(0, 8);
     world::Entity org;
     org.alive = true;
-    org.item_id = 1001;
+    org.item_id = 1001; org.item_type_index = 7;
     org.net_id = 70;
     org.position = {0.0f, 0.0f, 0.0f};
     org.yaw = 90; // mission 90 deg = engine BAM 0 = facing +X
@@ -2084,7 +2084,7 @@ static void test_change_ai_command_family() {
 
     world::Entity entity{};
     entity.net_id = 42;
-    entity.item_id = 1001;
+    entity.item_id = 1001; entity.item_type_index = 7;
     entity.alive = true;
     const world::EntityHandle handle = w.registry.spawn(0, entity);
 
@@ -2153,7 +2153,7 @@ static void test_change_ai_command_family() {
     {
         world::Entity building{};
         building.net_id = 43;
-        building.item_id = 2002;
+        building.item_id = 2002; building.item_type_index = 7;
         building.alive = true;
         const world::EntityHandle bh = w.registry.spawn(0, building);
         CHECK(ai.for_handle(bh) == nullptr);
@@ -2237,6 +2237,7 @@ static void test_structural_bms_actions() {
         entity.net_id = ssn;
         entity.item_id = 1001;
         entity.has_item_def = true;
+        entity.item_type_index = 7; // the def row's ordinal the +0x1C walk reads
         entity.group_id = 2;
         entity.team = 1;
         entity.alive = true;

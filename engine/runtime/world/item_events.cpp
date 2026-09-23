@@ -577,7 +577,7 @@ void building_event(World &world, Entity &target) {
             // The +0x1C ItemTypeIndex gate precedes the bounds test in every
             // pool [orig: Entity_ClearHealthInBounds @0x509E89 / @0x509EE9 /
             //  @0x509F55].
-            if (row.item_id == 0) return;
+            if (row.item_type_index == 0) return;
             if (pool == 0 && row.damage_state != 0) return;
             if (pool == 2 && row.has_item_def && row.item_type == 5) return;
             const int32_t p[3] = {int32_t(row.position.x * 65536),
@@ -657,7 +657,8 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
 }
 
 void apply_item_state_event(World &world, Entity &target, int16_t section) {
-    if (target.item_id == 0) return;
+    // [orig: Entity_KillBySlotId `cmp dword ptr [esi+1Ch],0; jz` x42BD29]
+    if (target.item_type_index == 0) return;
     target.health = 0;
     if ((target.engine_flags & kEntityFlagDead) == 0)
         destruction_notify_item_damage(world, target, 4, {section, 0});

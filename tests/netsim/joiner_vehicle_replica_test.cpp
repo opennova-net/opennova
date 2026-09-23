@@ -94,6 +94,7 @@ struct Harness {
 		seed.kind = w::EntityKind::Item;
 		seed.item_id = kTankType;
 		seed.has_item_def = true;
+		seed.item_type_index = 7; // the def row's ordinal the +0x1C kill gate reads
 		seed.item_type = 1;
 		seed.item_attrib = 0x40u;
 		seed.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);

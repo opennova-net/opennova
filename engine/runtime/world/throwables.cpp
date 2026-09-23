@@ -741,6 +741,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.team = round.team;
     seed.item_id = item_id;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
+        seed.item_type_index = row->item_type_index; // the template's +0x1C
         // [orig: Entity_InitFromItemDef @ 0x49e550 — Health/Armor from the def]
         if (row->health_max != 0) {
             seed.health = row->health_max;

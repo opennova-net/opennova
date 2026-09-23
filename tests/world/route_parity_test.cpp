@@ -7,6 +7,7 @@
 //  - the unbounded nav reads, the marker fields by type, the verbatim route seed
 //  - the aircraft parked spin, the flight floor's fresh sample, the ground-link
 //    refresh of every ground sample, the boat slip bearing's truncation
+//  - the script gates on ItemTypeIndex
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/tick_profile.h>
@@ -16,7 +17,9 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
@@ -231,13 +234,18 @@ end
 begin "Flyable again"
   id 100172
 end
+
+begin "Player"
+  id 105305
+end
 )";
     def::DefItemsFile items = {};
     CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
                                       sizeof(kItems) - 1, &items) == 0);
-    CHECK(items.count == 4);
+    CHECK(items.count == 5);
     auto wp = std::make_unique<World>();
     World &w = *wp;
+    w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 8);
     const auto spawn = [&](int32_t item_id) {
         Entity e{};
@@ -260,6 +268,12 @@ end
     // the same first row [orig: ItemList_FindIndexByTypeId @0x49E100].
     CHECK(mission::find_item_def(items, 100172) == &items.entries[1]);
     CHECK(mission::find_item_def(items, 104242) == nullptr);
+    // A player spawned after the sweep carries the Player row's ordinal like its
+    // other cached template traits [orig: Entity_SpawnFromBMSRecord @0x40EBFC].
+    CHECK(w.tables.player.item_type_index == 4);
+    PlayerSpawn player{};
+    const EntityHandle player_h = spawn_player(w, player);
+    CHECK(player_h.valid() && w.registry.get(player_h)->item_type_index == 4);
     def::def_free_items(&items);
 }
 
@@ -708,6 +722,37 @@ void test_boat_slip_bearing_truncates() {
     CHECK(cmd.steer_target_bam == kHeading + (1 << 14));
 }
 
+// The script predicates and handlers gate on ItemTypeIndex (entity+0x1C), not on
+// the type id: an entity whose type has no items.def row (index 0) is absent to
+// them, while any row ordinal admits it.
+// [orig: WacCmd_SsnExists `cmp [ecx+1Ch],eax` @0x4F1AB9; WacCmd_SsnAlive
+//  @0x4F1B67; WacCmd_HideSsn @0x4F7797; Entity_KillBySlotId @0x42BD29;
+//  Entity_ClearHealthInBounds @0x509E89]
+void test_script_gates_read_the_item_type_index() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity crate{};
+    crate.kind = EntityKind::Item;
+    crate.alive = true;
+    crate.health = 50;
+    crate.item_id = 4242; // no items.def row: ItemTypeIndex 0
+    crate.net_id = 77;
+    const EntityHandle h = w.registry.spawn(1, crate);
+    CHECK(!w.commands.ssn_exists(h));
+    CHECK(!w.commands.wac_ssn_alive(h));
+    CHECK(!w.commands.set_ssn_hidden(h, true));
+    apply_item_state_event(w, *w.registry.get(h), 0);
+    CHECK(w.registry.get(h)->health == 50);
+
+    w.registry.get(h)->item_type_index = 5;
+    CHECK(w.commands.ssn_exists(h));
+    CHECK(w.commands.wac_ssn_alive(h));
+    CHECK(w.commands.set_ssn_hidden(h, true));
+    apply_item_state_event(w, *w.registry.get(h), 0);
+    CHECK(w.registry.get(h)->health == 0);
+}
+
 } // namespace
 
 int main() {
@@ -723,6 +768,7 @@ int main() {
     test_flight_floor_is_the_fresh_sample();
     test_ground_samples_refresh_the_link();
     test_boat_slip_bearing_truncates();
+    test_script_gates_read_the_item_type_index();
     if (failures == 0) std::printf("route_parity: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

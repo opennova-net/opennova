@@ -377,6 +377,9 @@ static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
  CHECK(hull != nullptr);
  if (hull == nullptr) return;
  hull->group_id = 7;
+ // No items table in this kernel: stamp the def row's ordinal the teleport's
+ // +0x1C member gate reads [orig: Entity_TeleportTeamToSpawn @0x43D3EE].
+ hull->item_type_index = 7;
  w::VehicleTraits traits;
  traits.player_control = true;
  kernel.world.vehicles.traits.set(hull->item_id,traits);

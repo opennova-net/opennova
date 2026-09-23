@@ -116,8 +116,8 @@ static void test_ssn_kill() {
     BehaviorWorld w;
     // killSSN refuses a row without an ItemTypeIndex [orig: WacCmd_KillSsn
     // @0x4F1E89], so both rows carry one.
-    Entity a; a.net_id = 100; a.item_id = 1001; a.alive = true; w.registry.spawn(0, a);
-    Entity b; b.net_id = 200; b.item_id = 1001; b.alive = true; w.registry.spawn(0, b);
+    Entity a; a.net_id = 100; a.item_id = 1001; a.item_type_index = 7; a.alive = true; w.registry.spawn(0, a);
+    Entity b; b.net_id = 200; b.item_id = 1001; b.item_type_index = 7; b.alive = true; w.registry.spawn(0, b);
 
     WacSystem sys;
     CompileEnv env;
@@ -513,7 +513,7 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
 
     Entity source{};
     source.net_id = 100;
-    source.item_id = 1001;
+    source.item_id = 1001; source.item_type_index = 7;
     source.alive = true;
     source.health = 40;
     source.health_max = 100;
@@ -576,7 +576,7 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
 
     Entity single{};
     single.net_id = 42;
-    single.item_id = 1001;
+    single.item_id = 1001; single.item_type_index = 7;
     single.group_id = 4;
     single.alive = true;
     const EntityHandle single_h = w.registry.spawn(0, single);
@@ -1002,7 +1002,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     w.registry.configure_pool(1, 8);
     Entity soldier;
     soldier.net_id = 42;
-    soldier.item_id = 1001;
+    soldier.item_id = 1001; soldier.item_type_index = 7;
     soldier.item_type = 3;
     soldier.has_item_def = true;
     soldier.health = 20;
@@ -1011,7 +1011,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     const EntityHandle sh = w.registry.spawn(0, soldier);
     Entity carrier;
     carrier.net_id = 77;
-    carrier.item_id = 1002;
+    carrier.item_id = 1002; carrier.item_type_index = 7;
     carrier.item_type = 1;
     carrier.has_item_def = true;
     carrier.item_attrib = kItemAttribPlayerControl;
@@ -1117,7 +1117,7 @@ static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
 static void test_player_group_loops_and_handle_aliases() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
-    Entity seed; seed.item_id = 1001; seed.health = seed.health_max = 100;
+    Entity seed; seed.item_id = 1001; seed.item_type_index = 7; seed.health = seed.health_max = 100;
     seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
     const EntityHandle first = w.registry.spawn(0, seed);
     seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead;
@@ -1210,7 +1210,7 @@ static void test_player_group_loops_and_handle_aliases() {
 
 static void test_named_group_actions_use_member_handles() {
     BehaviorWorld w;
-    Entity e; e.item_id = 1001; e.health = 100; e.net_id = 10; e.group_id = 7;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.health = 100; e.net_id = 10; e.group_id = 7;
     const EntityHandle first = w.registry.spawn(0, e);
     const EntityHandle second = w.registry.spawn(0, e);
     const EntityHandle keep = w.registry.spawn(0, e);
@@ -1231,7 +1231,7 @@ static void test_named_group_actions_use_member_handles() {
 static void test_wac_area_and_location_queries() {
     BehaviorWorld w;
     w.registry.configure_pool(2, 4);
-    Entity e; e.item_id = 1001; e.net_id = 42; e.health = e.health_max = 100;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.net_id = 42; e.health = e.health_max = 100;
     e.flags = kEntityFlagPlayer; e.position = {2, -2, 3};
     const EntityHandle player = w.registry.spawn(0, e);
     w.cached.local_player = player;
@@ -1241,7 +1241,7 @@ static void test_wac_area_and_location_queries() {
     w.registry.register_area("duplicate", duplicate, true, 37);
     w.registry.register_location(duplicate, 8);
     w.registry.register_location(area, 9);
-    e.position = {}; e.item_id = 2001; e.net_id = 100;
+    e.position = {}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
     Program program = compile_source(
@@ -1287,7 +1287,7 @@ static void test_wac_area_and_location_queries() {
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(3) == 0);
     w.restore(baseline);
     CHECK(w.script.wac_values.local_location == -3);
-    w.registry.get(player)->item_id = 0;
+    w.registry.get(player)->item_type_index = 0;
     vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(4) == 0);
     CHECK(w.diagnostics.empty());
@@ -1296,12 +1296,12 @@ static void test_wac_area_and_location_queries() {
 static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 8);
-    Entity e; e.item_id = 1001; e.item_type = 3; e.net_id = 42;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.item_type = 3; e.net_id = 42;
     e.health = e.health_max = 100;
     const EntityHandle rider = w.registry.spawn(0, e);
     w.ai.attach(rider);
     AiEntity &ai = *w.ai.for_handle(rider);
-    e.net_id = 77; e.item_id = 2001; e.item_type = 1;
+    e.net_id = 77; e.item_id = 2001; e.item_type_index = 7; e.item_type = 1;
     e.has_item_def = true; e.item_attrib = kItemAttribPlayerControl;
     e.position = {100, 100, 0};
     Seat driver; driver.type = SeatType::Driver; driver.bone_index = 1;
@@ -1337,7 +1337,7 @@ static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
 static void test_meride_reads_standing_carrier_and_remove_uses_command_group() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
-    Entity e; e.item_id = 1001; e.net_id = 42; e.health = 100;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.net_id = 42; e.health = 100;
     const EntityHandle player = w.registry.spawn(0, e);
     w.cached.local_player = player;
     e.net_id = 77; e.group_id = 7;
@@ -1353,7 +1353,7 @@ static void test_meride_reads_standing_carrier_and_remove_uses_command_group() {
     w.registry.get(player)->mounted = true;
     vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(2) == 1);
-    e.net_id = 78; e.item_id = 0; // removal has no item-definition gate
+    e.net_id = 78; e.item_id = 0; e.item_type_index = 0; // removal has no item-definition gate
     const EntityHandle missing_def = w.registry.spawn(1, e);
     Program removal = compile_source("remove(0) remove(7)", {});
     vm.load(removal); vm.execute(w);
@@ -1399,7 +1399,7 @@ static void test_scripted_respawn_counts_are_not_immediate_spawns() {
 static void test_distance_literals_and_lead_queries() {
     BehaviorWorld w;
     Entity seed;
-    seed.item_id = 1;
+    seed.item_id = 1; seed.item_type_index = 7;
     seed.net_id = 101;
     seed.position = {0.0f, 0.0f, 2.5f};
     seed.yaw = 90;
@@ -1459,7 +1459,7 @@ static void test_distance_literals_and_lead_queries() {
     // Both lengths clamp to 0x7FFF0000 before the lead subtraction.
     CHECK(!w.commands.ssn_leads_target(a, b, goal, 0));
     CHECK(w.commands.ssn_leads_target(a, b, goal, -1));
-    w.registry.get(goal)->item_id = 0;
+    w.registry.get(goal)->item_type_index = 0;
     CHECK(!w.commands.ssn_leads_target(a, b, goal, -1));
     CHECK(w.diagnostics.empty());
 }
@@ -1468,12 +1468,12 @@ static void test_script_ranges_drive_controller_and_perception() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
     Entity seed;
-    seed.item_id = 1; seed.item_type = 3; seed.kind = EntityKind::Organic;
+    seed.item_id = 1; seed.item_type_index = 7; seed.item_type = 3; seed.kind = EntityKind::Organic;
     seed.health = 100; seed.team = 1; seed.group_id = 7; seed.net_id = 101;
     const auto scanner = w.registry.spawn(0, seed);
     seed.team = 2; seed.group_id = 0; seed.net_id = 102; seed.position.x = 5.0f;
     const auto target = w.registry.spawn(0, seed);
-    seed.item_id = 0; seed.health = 0; seed.group_id = 7; seed.net_id = 103;
+    seed.item_id = 0; seed.item_type_index = 0; seed.health = 0; seed.group_id = 7; seed.net_id = 103;
     const auto itemless = w.registry.spawn(0, seed);
     seed.net_id = 104;
     const auto vehicle = w.registry.spawn(1, seed);
@@ -1536,7 +1536,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     Entity seed;
     seed.net_id = 101; seed.position = {-2.0f, -3.0f, 4.0f};
     const auto itemless = w.registry.spawn(0, seed);
-    seed.net_id = 102; seed.item_id = 1; seed.item_type = 3;
+    seed.net_id = 102; seed.item_id = 1; seed.item_type_index = 7; seed.item_type = 3;
     seed.health = 0; seed.alive = false; seed.health_max = 80;
     seed.flags = seed.engine_flags = kEntityFlagDead;
     seed.group_id = 7;
@@ -1602,7 +1602,7 @@ static void test_player_values_cache_at_bytecode_entry() {
     BehaviorWorld w;
     Entity player;
     player.kind = EntityKind::Organic;
-    player.item_id = 1;
+    player.item_id = 1; player.item_type_index = 7;
     player.net_id = 10;
     player.health = 321;
     player.mana = 17;
@@ -1834,7 +1834,7 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     // No net-id-0 entity: the name binds to 0xFFFF and the compile-time
     // registry logs the miss, non-fatally, ahead of the value-slot signature.
     BehaviorWorld w;
-    Entity e; e.net_id = 7; e.item_id = 1; e.alive = true;
+    Entity e; e.net_id = 7; e.item_id = 1; e.item_type_index = 7; e.alive = true;
     w.registry.spawn(0, e);
     CompileEnv env; env.registry = &w.registry;
     Program program = compile_source(
@@ -1854,7 +1854,7 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     CHECK(w.script.vars.get_mission(3) == 0); // a value slot is still the sink
     // A net-id-0 entity is what the name binds to, and the registry is silent.
     BehaviorWorld zero;
-    Entity z; z.net_id = 0; z.item_id = 1; z.alive = true;
+    Entity z; z.net_id = 0; z.item_id = 1; z.item_type_index = 7; z.alive = true;
     zero.registry.spawn(0, z);
     CompileEnv zero_env; zero_env.registry = &zero.registry;
     Program bound = compile_source(
@@ -1895,8 +1895,8 @@ static void test_ssn_leg_precedes_ammo_leg() {
         CHECK(program.diagnostics[2].message == "Wrong Parameter" && !program.diagnostics[2].error);
     }
     BehaviorWorld bound;
-    Entity zero; zero.net_id = 0; zero.item_id = 1; zero.alive = true;
-    Entity seven; seven.net_id = 7; seven.item_id = 1; seven.alive = true;
+    Entity zero; zero.net_id = 0; zero.item_id = 1; zero.item_type_index = 7; zero.alive = true;
+    Entity seven; seven.net_id = 7; seven.item_id = 1; seven.item_type_index = 7; seven.alive = true;
     bound.registry.spawn(0, zero);
     bound.registry.spawn(0, seven);
     CompileEnv bound_env; bound_env.registry = &bound.registry;
