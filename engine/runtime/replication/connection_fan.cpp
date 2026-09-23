@@ -849,7 +849,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		// >> 22 then >> 6 -> 16.16); component convention X=sinYaw*cosPitch,
 		// Y=cosYaw*cosPitch, Z=sinPitch per the round spawners
 		// [orig: Weapon_SpawnSingleProjectile @0x4ebf51 / RoundData_SpawnRound @0x4ec5e9].
-		constexpr double kBamToRad = 1.4629627251502471e-09; // [orig: dbl_7C3608 = 2pi/2^32]
+		constexpr double kBamToRad = 1.4629627251502471e-09; // [orig: dbl_7C3608, 30.5 ppm above 2pi/2^32]
 		constexpr double kTrigScale = io::kQ22One;             // [orig: dbl_7C3600 = 2^22]
 		const double yaw = double(ev.dir_yaw) * kBamToRad;
 		const double pitch = double(ev.dir_pitch) * kBamToRad;

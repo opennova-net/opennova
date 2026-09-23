@@ -880,7 +880,7 @@ public:
         kProjectileHit = 0, // trace_projectile resolved on an entity/person
         kKnifeHit,          // trace_knife_impact resolved
         kMoveContact,       // resolve_entity solid push-out (pass 0)
-        kVehicleHull,       // resolve_vehicle_hull wall-like push
+        kVehicleHull,       // resolve_vehicle_probes wall-like push
         kTerrainHit,        // a trace resolved on terrain (marker only)
         kWaterHit,
         kCount,

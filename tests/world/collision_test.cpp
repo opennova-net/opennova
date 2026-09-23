@@ -1911,12 +1911,15 @@ void test_ladder_entry_gate_snap_and_chase() {
     CHECK((s->flags & kEntityFlagLadderContact) != 0);
     CHECK(rig.cw.last_ladder_frame.valid);
     CHECK(rig.cw.last_ladder_frame.anchor[0] == fx(10.375));
-    CHECK(rig.cw.last_ladder_frame.anchor[1] == fx(10.0));
+    // Retail scales the yaw by its own dbl_7C3608, a hair above 2pi/2^32, so
+    // 180 degrees leaves sin = 402/2^22 and the anchor 2 units off Y
+    // [orig: `fild g_LadderContactYaw; fmul dbl_7C3608` @0x4AE9C8..0x4AE9D3].
+    CHECK(rig.cw.last_ladder_frame.anchor[1] == fx(10.0) - 2);
     CHECK(rig.cw.last_ladder_frame.anchor[2] == fx(3.0));
     CHECK(rig.cw.last_ladder_frame.yaw == static_cast<int32_t>(0x80000000u));
     // Snap + press(−4096 along +X via cos 180°) + chase((4096+32)>>6 = 64).
     CHECK(pos[0] == fx(10.375) - 4096 + 64);
-    CHECK(pos[1] == fx(10.0));
+    CHECK(pos[1] == fx(10.0) - 2);
     CHECK(pos[2] == 20480); // the standing entry bump
     CHECK(lio.body_pitch == rig.cw.last_ladder_frame.pitch);
     CHECK(!lio.restore_active); // the chase disarms the restore latch
@@ -2095,11 +2098,12 @@ void test_ladder_from_above_entry_and_sin_lane() {
                            &ylio.io);
     CHECK((yrig.world.registry.get(yrig.soldier)->flags & kEntityFlagLadderContact) != 0);
     CHECK(yrig.cw.last_ladder_frame.yaw == -0x40000000);
-    CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0));
+    // dbl_7C3608 leaves cos(−90°) = −201/2^22: the anchor sits 2 units off X.
+    CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0) + 2);
     CHECK(yrig.cw.last_ladder_frame.anchor[1] == fx(10.375));
     // The press rides sin(−90°) = −1 on Y; cos ≈ 0 leaves X at the snap.
     CHECK(ypos[1] == fx(10.375) - 4096 + 64);
-    CHECK(ypos[0] == fx(10.0));
+    CHECK(ypos[0] == fx(10.0) + 2);
     CHECK(ypos[2] == 20480);
 }
 
