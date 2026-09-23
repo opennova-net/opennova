@@ -149,6 +149,22 @@ void test_evade_flee_leg_turns_about_at_combat_speed() {
           e.brain.f[AiBrain::kWorkPosZ] == 9);
 }
 
+// PLAYPARTANIM's rate divides the single-precision flt_7C3B40 (0.016f) by the
+// ANIMTIME seconds: ANIMTIME 1 (1/65536 s) is 68719480, not the double's
+// 68719476. Rates from the retail instructions executed for each ANIMTIME.
+// [orig: Entity_ApplyCommand `fdivr ds:flt_7C3B40` @0x43B1D8, ftol @0x43B1EB]
+void test_part_anim_rate_uses_the_single_precision_tick() {
+    const struct { int32_t time; int32_t rate; } cases[] = {
+        {1, 68719480}, {2, 34359740}, {3, 22906493}, {4, 17179870}, {5, 13743896},
+        {8, 8589935}, {10, 6871948}, {20, 3435974}, {65536, 1048}, {131072, 524},
+        {0, static_cast<int32_t>(0x80000000)}};
+    for (const auto &c : cases) {
+        AiBrain b;
+        ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, c.time);
+        CHECK(b.f[AiBrain::kPartAnimRate0] == c.rate);
+    }
+}
+
 // The profile loader's class-walk order against the retail CRT qsort run on
 // every {0..3}^4 priority tuple plus wrapping keys: the unstable selection
 // shortsort, stored reversed. Only HELO/GROUND profiles load their keys.
@@ -187,6 +203,7 @@ int main() {
     test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();
     test_evade_flee_leg_turns_about_at_combat_speed();
+    test_part_anim_rate_uses_the_single_precision_tick();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }

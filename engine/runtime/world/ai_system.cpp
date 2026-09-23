@@ -936,16 +936,18 @@ bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate) {
     return false;
 }
 
-// [flt_7C3310=1/65536, flt_7C3B40=0.016, flt_7C32BC=65536.] The original
-// computes `base` unconditionally, so ANIMTIME==0 -> base 0.0 -> 0.016/0.0 =
-// +inf, and the x87 ftol of infinity is the integer-indefinite 0x80000000
-// (INT_MIN) — nonzero, so the min-1 guard does NOT fire. The updater then
-// applies ordinary wrapping ADD/SUB: from phase zero, zero-time forward
-// alternates INT_MIN/zero without stopping; zero-time reverse clamps back to
-// zero and stops on its first tick. [orig: Entity_ApplyCommand
-// @0x43B1A9..0x43B1F9]
+// [flt_7C3310=1/65536, flt_7C3B40=0.016f, flt_7C32BC=65536.] The dividend is
+// the SINGLE-precision 0.016f (0x3C83126F, 0.01600000075995922) widened by the
+// `fdivr` load, not the double 0.016 — ANIMTIME = 1 (1/65536 s) gives 68719480,
+// where the double gives 68719476. The original computes `base`
+// unconditionally, so ANIMTIME==0 -> base 0.0 -> 0.016f/0.0 = +inf, and the x87
+// ftol of infinity is the integer-indefinite 0x80000000 (INT_MIN) — nonzero,
+// so the min-1 guard does NOT fire. The sweep step then applies ordinary wrapping
+// ADD/SUB: from phase zero, zero-time forward alternates INT_MIN/zero without
+// stopping; zero-time reverse clamps back to zero and stops on its first tick.
+// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9, `fdivr ds:flt_7C3B40` @0x43B1D8]
 int32_t part_anim_rate_from_seconds(double seconds) {
-    const double rate_f = (0.016 / seconds) * 65536.0; // +inf when seconds==0
+    const double rate_f = (static_cast<double>(0.016f) / seconds) * 65536.0; // +inf when seconds==0
     int32_t rate;
     if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
         rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite
