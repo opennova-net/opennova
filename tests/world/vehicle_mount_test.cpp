@@ -1716,9 +1716,10 @@ void test_ai_drive_leg() {
 }
 
 // The pool-1 avoid BRAKE: a neighbor whose footprint ellipse overlaps ours and
-// sits within ~30 deg of dead ahead damps the command speed by the id/frame
-// factor ((id + (tick<<8)) & 0x7FFF) + 0x4000 per tick; a neighbor BEHIND does
-// not [orig: @0x48bd8f-0x48bf26].
+// sits within ~30 deg of dead ahead damps the command speed by the id/counter
+// factor ((id + (counter<<8)) & 0x7FFF) + 0x4000 per tick, the counter being
+// the entity-update counter; a neighbor BEHIND does not
+// [orig: @0x48bd8f-0x48bf26; Entity_UpdateVehiclePhysics @0x48BF26].
 void test_ai_drive_avoid_brake() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
@@ -1775,12 +1776,13 @@ void test_ai_drive_avoid_brake() {
     prop.bound_radius = 3.0f;
     const EntityHandle ph = r.w.registry.spawn(1, prop);
 
+    r.w.entity_update_counter = 5; // differs from the tick (0)
     VehicleDriveCmd cmd1;
     r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
     CHECK(cmd1.ai_drive);
     const int32_t f = static_cast<int32_t>(
             ((static_cast<uint32_t>(r.veh().net_id) +
-              (static_cast<uint32_t>(r.w.logic_tick) << 8)) &
+              (r.w.entity_update_counter << 8)) &
              0x7FFFu) +
             0x4000u);
     const int32_t expect = static_cast<int32_t>(

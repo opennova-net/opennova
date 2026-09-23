@@ -43,16 +43,14 @@ void WaterWakePool::tick() {
 }
 
 // [orig: create_water_surface_mesh @ 0x5DDEF0; render_water_surface_decal @ 0x5DE0F0]
-void compile_water_wakes(const WaterWakePool &pool, int32_t water_height, uint32_t tick,
-		const int32_t camera[3], WaterWakeFrame &out) {
+void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
+		uint32_t entity_update_counter, const int32_t camera[3], WaterWakeFrame &out) {
 	out.clear();
-	// Retail scrolls the first UV by (dword_24C1948 & 0x1FF) / 512 and
-	// (dword_24C1948 & 0x3FF) * -0.01171875 on every render frame
-	// [orig: render_water_surface_decal @ 0x5DE0F0, the scroll @ 0x5DE277..0x5DE2AD];
-	// `tick` is the logic tick standing in for that render-frame counter (see
-	// the header).
-	const float scroll_u = float(tick & 511u) * 0.001953125f;
-	const float scroll_v = float(tick & 1023u) * -0.01171875f;
+	// The first UV scrolls by (counter & 0x1FF) / 512 and (counter & 0x3FF) *
+	// -0.01171875, the counter being the entity-update counter (see the header)
+	// [orig: render_water_surface_decal @ 0x5DE0F0, the scroll @ 0x5DE277..0x5DE2AD].
+	const float scroll_u = float(entity_update_counter & 511u) * 0.001953125f;
+	const float scroll_v = float(entity_update_counter & 1023u) * -0.01171875f;
 	for (const auto &wake : pool.rows()) {
 		if (!wake.active)
 			continue;

@@ -2544,7 +2544,12 @@ void test_vehicle_carrier_follow_and_refresh() {
 	for (int i = 0; i < 17; ++i)
 		collision.build_tick_tables(r.w);
 	stamp_saved_live_pose(parent);
+	// A ground mover refreshes its ground link on every eighth ENTITY UPDATE
+	// (the entity-update counter), not on the tick.
+	// [orig: Entity_UpdateVehiclePhysics @0x48AFB9, `test byte ptr
+	//  dword_24C1948,7`]
 	r.w.logic_tick = 0;
+	r.w.entity_update_counter = 0;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(v.ground_target == parent_h);
 
@@ -2555,6 +2560,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	parent.position.z += 1.0f;
 	parent.veh.yaw_bam = 0x40000000;
 	r.w.logic_tick = 1;
+	r.w.entity_update_counter = 1;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(std::abs(v.position.x - 103.0f) < 0.002f);
 	CHECK(std::abs(v.position.y - 199.0f) < 0.002f);
@@ -2563,7 +2569,8 @@ void test_vehicle_carrier_follow_and_refresh() {
 
 	stamp_saved_live_pose(parent);
 	v.position.x += 100.0f;
-	r.w.logic_tick = 8;
+	r.w.logic_tick = 9;
+	r.w.entity_update_counter = 8;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(!v.ground_target.valid());
 }

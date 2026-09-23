@@ -469,6 +469,7 @@ void World::update_all_entities(const TickContext &ctx) {
             claim_standing_vehicle(*this, *live);
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    ++entity_update_counter; // [orig: Entity_UpdateAllEntities @0x4C2639]
 }
 
 void World::run_logic_tick(bool is_authority, TickPhase phase) {

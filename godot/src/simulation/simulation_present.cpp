@@ -756,5 +756,6 @@ void Simulation::fill_water_wake_frame(
 		opennova::world::to_fixed(-camera.z), opennova::world::to_fixed(camera.y) };
 	const auto &world = kernel_->world;
 	opennova::renderer::compile_water_wakes(
-			world.rotor_wash.water_wakes(), world.env.water_z, world.logic_tick, position, frame);
+			world.rotor_wash.water_wakes(), world.env.water_z, world.entity_update_counter,
+			position, frame);
 }

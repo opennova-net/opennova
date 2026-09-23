@@ -41,13 +41,14 @@ struct WaterWakeFrame {
 
 // Output is the render frame (mission x,z,-y), with the witnessed radial
 // geometry, animated first UV and fixed gradient UV ready for device upload.
-// `tick` drives the first UV's scroll: retail reads dword_24C1948, the render
-// frame counter, on every draw; this compile runs once per fixed tick and is
-// handed the logic tick instead (no display-frame counter reaches the
-// portable renderer).
+// `entity_update_counter` drives the first UV's scroll: every draw reads the
+// entity-update counter (World::entity_update_counter), which advances once
+// per completed entity update, so a draw between two updates repeats the
+// scroll; this compile runs once per fixed tick.
 // [orig: create_water_surface_mesh @ 0x5DDEF0; render_water_surface_decal
-//  @ 0x5DE0F0, the dword_24C1948 reads @ 0x5DE277 / @ 0x5DE284]
-void compile_water_wakes(const WaterWakePool &pool, int32_t water_height, uint32_t tick,
-		const int32_t camera[3], WaterWakeFrame &out);
+//  @ 0x5DE0F0, the dword_24C1948 read @ 0x5DE25A, masked @ 0x5DE26D /
+//  @ 0x5DE27F and stored @ 0x5DE277 / @ 0x5DE284]
+void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
+		uint32_t entity_update_counter, const int32_t camera[3], WaterWakeFrame &out);
 
 } // namespace opennova::renderer

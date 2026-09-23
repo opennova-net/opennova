@@ -1367,11 +1367,15 @@ void test_idle_skip_throttle() {
     int32_t vel[3] = {0, 0, 0};
     int16_t health = 100;
     CollisionWorld::ResolveState state;
-    // Ticks 1..11 (tick & 0x3F != 0, no motion): counter ramps to the skip band.
-    for (uint32_t t = 1; t <= 11; ++t)
+    // Updates 1..11 (entity-update counter & 0x3F != 0, no motion): the skip
+    // counter ramps to the skip band.
+    for (uint32_t t = 1; t <= 11; ++t) {
+        rig.world.entity_update_counter = t;
         rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0,
                               0, false, true, t, 43, 0u, health);
-    // Tick 12: skip path — the caller's gravity displacement is reverted and vel zeroed.
+    }
+    // Update 12: skip path — the caller's gravity displacement is reverted and vel zeroed.
+    rig.world.entity_update_counter = 12;
     vel[2] = -400;
     pos[2] -= 400 * 2; // what the caller's gravity integration just did
     const int32_t sunk = pos[2];
@@ -1394,11 +1398,14 @@ void test_idle_skip_throttle() {
         int32_t pvel[3] = {0, 0, 0};
         int16_t phealth = 100;
         CollisionWorld::ResolveState pstate;
-        for (uint32_t t = 1; t <= 11; ++t) // ramp the counter to the skip band
+        for (uint32_t t = 1; t <= 11; ++t) { // ramp the counter to the skip band
+            prig.world.entity_update_counter = t;
             prig.cw.resolve_entity(prig.world, prig.soldier, pstate, ppos, pvel, pvel[2], 0,
                                    fx(1.8), 0, 0, /*is_player=*/true, true, t, 43, 0u, phealth);
+        }
         const int32_t before_z = ppos[2];
         for (uint32_t t = 12; t <= 21; ++t) { // the 10-tick skip band
+            prig.world.entity_update_counter = t;
             pvel[2] -= 208;      // the org2 per-tick gravity...
             ppos[2] += pvel[2];  // ...and the x1 integrate [orig: @0x4b7acf/@0x4b7cef]
             const int32_t r = prig.cw.resolve_entity(prig.world, prig.soldier, pstate, ppos,
@@ -1408,6 +1415,35 @@ void test_idle_skip_throttle() {
             CHECK(pvel[2] == 0); // the skip zeroes vel_z each tick
         }
         CHECK(ppos[2] == before_z); // net zero — no idle sawtooth
+    }
+
+    // The every-64th full update keys on the entity-update counter, not on the
+    // tick the caller passes: tick 64 on counter 13 still skips, and counter 64
+    // forces the full update (the skip counter restarts).
+    // [orig: Entity_MovementCollisionResolver @0x4B2CAF, `test byte ptr
+    //  dword_24C1948,3Fh`]
+    {
+        Rig crig(box_model(1, 0, 2.0, 2.0, 3.0));
+        crig.move_soldier(30.0, 30.0, 0.0);
+        int32_t cpos[3] = {fx(30.0), fx(30.0), 0};
+        int32_t cvel[3] = {0, 0, 0};
+        int16_t chealth = 100;
+        CollisionWorld::ResolveState cstate;
+        for (uint32_t t = 1; t <= 12; ++t) {
+            crig.world.entity_update_counter = t;
+            crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                                   fx(1.8), 0, 0, false, true, t, 43, 0u, chealth);
+        }
+        const int banded = cstate.skip_counter;
+        CHECK(banded > 10);
+        crig.world.entity_update_counter = 13;
+        crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                               fx(1.8), 0, 0, false, true, /*tick=*/64, 43, 0u, chealth);
+        CHECK(cstate.skip_counter == banded + 1);
+        crig.world.entity_update_counter = 64;
+        crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                               fx(1.8), 0, 0, false, true, /*tick=*/14, 43, 0u, chealth);
+        CHECK(cstate.skip_counter == 0);
     }
 }
 
@@ -2403,6 +2439,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags = kEntityFlagInAir;
         bool ever_skipped = false;
         for (int i = 0; i < 25; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
             int32_t vel_z = -100; // inside the idle band (not < -420)
             rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
                                    fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),
@@ -2415,6 +2452,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags2 = 0;
         ever_skipped = false;
         for (int i = 0; i < 25; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
             int32_t vel_z = -100;
             rig.cw.resolve_replica(rig.world, state2, pos2, vel, vel_z, fx(0.4),
                                    fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),

@@ -125,14 +125,21 @@ int32_t vehicle_ground_height_at(
 	return ground;
 }
 
-// Ground/tank/bike use the entity-update counter; boat/air stagger by DcbId.
-// [orig: @0x48AFB9..0x48AFD6; @0x484099; @0x488B69; @0x48D51F;
-// @0x4903A8..0x4903D8; Entity_RaycastGroundHeightAndObject @0x414320]
+// Ground/tank/bike test the entity-update counter; boat/air stagger the tick
+// by 36 * DcbId.
+// [orig: `test byte ptr dword_24C1948,7` in Entity_UpdateVehiclePhysics
+//  @0x48AFB9..0x48AFD6, Entity_UpdateLightVehiclePhysics @0x484099,
+//  Entity_UpdateTankVehiclePhysics @0x488B69 and Entity_ProcessInfantryPhysics
+//  @0x46E178; the tick + 36 * DcbId stagger in Entity_UpdateWatercraftPhysics
+//  @0x48D51F, Entity_UpdateAircraftPhysics @0x4903A8..0x4903D8 and
+//  Entity_ProcessAirVehiclePhysics @0x46FA24/@0x46FA77;
+//  Entity_RaycastGroundHeightAndObject @0x414320]
 void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTraits &traits) {
 	auto &m = vehicle.veh;
 	const bool air = vehicle_family_uses_direct_air_mover(traits.family);
 	const bool staggered = air || traits.family == VehicleFamily::Watercraft;
-	const uint32_t phase = world.logic_tick + (staggered ? 36u * uint32_t(vehicle.net_id) : 0u);
+	const uint32_t phase = staggered ? world.logic_tick + 36u * uint32_t(vehicle.net_id)
+	                                 : world.entity_update_counter;
 	if ((phase & 7u) != 0 && !(air && m.ground_cache == INT32_MIN))
 		return;
 	const int32_t pos[3] = { to_fixed(vehicle.position.x), to_fixed(vehicle.position.y),

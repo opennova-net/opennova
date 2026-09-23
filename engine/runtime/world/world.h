@@ -856,6 +856,17 @@ public:
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+    // The entity-update counter: the number of completed entity updates. Its
+    // one writer is the tail of a non-epilog update_all_entities, and nothing
+    // resets it, so it runs one behind logic_tick through the process's first
+    // mission, holds still on a frame whose entity update is skipped, and
+    // keeps counting across restores (it is not in the Snapshot) and mission
+    // loads (the embedder carries it into the next kernel). The ground
+    // vehicles' ground-link cadence, the vehicle avoid-brake factor, the
+    // movement resolver's full-update cadence and the water decal scroll read
+    // it. [orig: dword_24C1948, `add dword_24C1948,esi` in
+    //  Entity_UpdateAllEntities @0x4C2639]
+    uint32_t entity_update_counter = 0;
     // The tick process_round_end ran on (the SP epilog gate's reference).
     uint32_t round_end_tick = 0;
 

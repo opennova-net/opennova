@@ -130,6 +130,25 @@ int main() {
     w.run_logic_tick();
     CHECK(w.logic_tick == 1);
 
+    // The entity-update counter counts completed entity updates: a gameplay
+    // tick's update adds one, a pre-round tick (no entity update) adds none,
+    // and a restore keeps it (it is not in the Snapshot).
+    // [orig: dword_24C1948, `add dword_24C1948,esi` in
+    //  Entity_UpdateAllEntities @0x4C2639]
+    {
+        World cw;
+        CHECK(cw.entity_update_counter == 0);
+        cw.run_logic_tick(true);
+        CHECK(cw.logic_tick == 1 && cw.entity_update_counter == 1);
+        cw.run_logic_tick(true, TickPhase::PreRound);
+        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 1);
+        const World::Snapshot snap = cw.snapshot();
+        cw.run_logic_tick(true);
+        CHECK(cw.logic_tick == 3 && cw.entity_update_counter == 2);
+        cw.restore(snap);
+        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 2);
+    }
+
     // Persistent sound intents use a bounded latest-value mailbox. A host with
     // no audio presenter can run indefinitely without accumulating one string-
     // owning row per vehicle per tick; a keyed refresh keeps its producer clock.

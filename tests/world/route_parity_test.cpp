@@ -298,10 +298,15 @@ void test_avoid_brake_item_index_gates() {
         rock.bound_radius = 5.0f;
         rock.veh.yaw_seeded = true;
         r.w.registry.spawn(1, rock);
-        // One brake: ((id + (frame << 8)) & 0x7FFF) + 0x4000 over 65536.
+        // One brake: ((id + (counter << 8)) & 0x7FFF) + 0x4000 over 65536,
+        // keyed on the entity-update counter, which here differs from the tick.
+        // [orig: Entity_UpdateWatercraftPhysics @0x48E712,
+        //  Entity_UpdateAircraftPhysics @0x491B2D, Entity_UpdateVehiclePhysics
+        //  @0x48BF26 (the dword_24C1948 reads)]
+        r.w.entity_update_counter = 5;
         const int32_t braked = static_cast<int32_t>(
                 ((static_cast<uint32_t>(r.helo().net_id) +
-                  (static_cast<uint32_t>(r.w.logic_tick) << 8)) & 0x7FFFu) + 0x4000u);
+                  (r.w.entity_update_counter << 8)) & 0x7FFFu) + 0x4000u);
         int32_t speed = 0;
         if (c.leg == Leg::Air) {
             // Crewed, no route: the forward command is the out-speed straight

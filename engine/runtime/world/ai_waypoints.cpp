@@ -311,12 +311,17 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // Dead-ahead gate: the other within ~30 deg of the nose
         // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
         if (iabs32(io::bam_sub(io::bam_sub(heading, ang), 0x7FFFFF80)) > 357913920) continue;
-        // The brake factor ((id + (frame << 8)) & 0x7FFF) + 0x4000 — keyed
-        // off DcbId + the global frame counter dword_24C1948 (our net id +
-        // logic tick stand in) [orig: @0x48bf17-0x48bf26].
+        // The brake factor ((id + (counter << 8)) & 0x7FFF) + 0x4000 — keyed
+        // off DcbId and the entity-update counter (dword_24C1948)
+        // [orig: @0x48bf17-0x48bf26; the counter reads in
+        //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
+        //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
+        //  Entity_ProcessInfantryPhysics @0x46EFC1, Entity_UpdateWatercraftPhysics
+        //  @0x48E712, Entity_ProcessAirVehiclePhysics @0x470C70 and
+        //  Entity_UpdateAircraftPhysics @0x491B2D].
         const int32_t f = static_cast<int32_t>(
                 ((static_cast<uint32_t>(veh.net_id) +
-                  (static_cast<uint32_t>(world.logic_tick) << 8)) &
+                  (world.entity_update_counter << 8)) &
                  0x7FFFu) +
                 0x4000u);
         cmd_speed = static_cast<int32_t>(
