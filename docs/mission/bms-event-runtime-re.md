@@ -593,7 +593,8 @@ bit flip it.
    pool 3; the group alert stamps follow @0x43CFEA..0x43D01A. Shipped effect:
    01TR event 3 (PreMission) runs ChangeGroupAI(6/7, INDESTRUCTABLE 43, 1) over
    groups of brainless pool-2 crates and barrels (types 1595/4301: no AIData, so
-   no aiRuntime per the spawn gate @0x40ED4E), which retail therefore leaves
+   no aiRuntime per the spawn gate in `Entity_SpawnFromBMSRecord @0x40E9F0`,
+   @0x40ED4E), which retail therefore leaves
    destructible; the earlier port made them indestructible until events 9/11
    (`bms_event_parity`, `test_change_group_ai_fans_pools_2_0_1`). The ChangeAI arms carry a SECOND half beyond the controller byte:
    each ALSO queues the brain `AIEvent {6, level}` → `AI_HandleCommand
