@@ -5,8 +5,9 @@
 // distance, the hold-timer tail, the reload on every path, the retaliation LOS
 // and the persistent aimFlag), the guard family and the holdSSN hold at the
 // combat tail, the think-entry heading restore, the board walk's arrival,
-// S stage, E-point claim and UseGun ring, and the post-commit ride link and
-// idle facing fan. Synthetic bodies and clips; no retail data.
+// S stage, E-point claim and UseGun ring, the post-commit ride link and idle
+// facing fan, the airborne skip, and the selector's swim and run_attack
+// substitutions. Synthetic bodies and clips; no retail data.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -859,6 +860,61 @@ static void test_idle_facing_probes_turn_away_from_a_wall() {
     r.w.ai.collision = nullptr;
 }
 
+// Airborne without the 0x80 climb order, the think seeds aimPitch from the SSN
+// and skips the rest: no cooldown step, no route leg. The climb order exempts
+// the body. [orig: Entity_UpdateInfantryAI @0x4BAA4B..0x4BAA66]
+static void test_airborne_think_skips_after_the_pitch_seed() {
+    Rig r(fx(60), 0, 0);
+    r.route(0, fx(20));
+    r.blue_entity().engine_flags |= kEntityFlagInAir;
+    CHECK(!r.w.ai.infantry_think(r.blue(), r.w));
+    CHECK(r.blue().inf.aim_pitch == io::bam_sar(static_cast<int32_t>(701u << 27), 4));
+    CHECK(r.blue().inf.move_mode == 0);
+    r.blue().inf.wait_cooldown = 3;
+    r.w.ai.infantry_think(r.blue(), r.w);
+    CHECK(r.blue().inf.wait_cooldown == 3);
+    r.blue().inf.wait_cooldown = 0;
+    r.blue_entity().engine_flags |= kEntityFlagAiClimb;
+    CHECK(r.w.ai.infantry_think(r.blue(), r.w));
+    CHECK(r.blue().inf.move_mode == 3);
+}
+
+// Swimming (Flags 0x8000) swaps the gaits, the idles and the close attacks for
+// the swim clips. [orig: Entity_UpdateInfantryAI @0x4BD635..0x4BD6A3]
+static void test_swimming_selects_the_swim_clips() {
+    const auto select = [](bool moving, int proposal) {
+        Rig r(fx(200), 0, 0, {1, 36, 37, 43, 149, 154, 155});
+        r.blue_entity().engine_flags |= kEntityFlagDrowning;
+        if (moving) {
+            r.blue().inf.damage_timer = 5; // alerted: the run gait
+            r.blue().inf.move_mode = 3;
+            r.blue().inf.target_dist = fx(10);
+            r.blue().inf.move_target[0] = fx(10);
+        }
+        r.w.ai.infantry_select(r.blue(), r.w, proposal);
+        return r.blue().inf.anim_state;
+    };
+    CHECK(select(true, 0) == anim_state::kSwimForward);
+    CHECK(select(false, 0) == anim_state::kSwimIdle);
+    CHECK(select(false, anim_state::kAttack) == anim_state::kSwimAttack);
+}
+
+// A combat approach (moveMode 1) runs as run_attack; a route walk keeps the run.
+// [orig: Entity_UpdateInfantryAI @0x4BD748..0x4BD763]
+static void test_combat_approach_runs_as_run_attack() {
+    const auto select = [](int move_mode) {
+        Rig r(fx(200), 0, 0, {1, 43, 149, 167});
+        r.blue().inf.damage_timer = 5;
+        r.blue().inf.move_mode = move_mode;
+        r.blue().inf.target_dist = fx(10);
+        r.blue().inf.move_target[0] = fx(10);
+        r.w.ai.infantry_select(r.blue(), r.w, 0);
+        return r.blue().inf.anim_state;
+    };
+    CHECK(select(1) == anim_state::kRunAttack);
+    CHECK(select(3) == anim_state::kRunForward);
+}
+
 } // namespace
 
 int main() {
@@ -890,6 +946,9 @@ int main() {
     test_player_slow_pass_refreshes_the_ride_link();
     test_idle_facing_turns_away_from_a_teammate();
     test_idle_facing_probes_turn_away_from_a_wall();
+    test_airborne_think_skips_after_the_pitch_seed();
+    test_swimming_selects_the_swim_clips();
+    test_combat_approach_runs_as_run_attack();
     if (failures != 0) {
         std::printf("infantry_think_test: %d FAILED\n", failures);
         return 1;

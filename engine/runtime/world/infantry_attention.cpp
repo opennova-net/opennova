@@ -191,7 +191,11 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
             if (candidate.handle == inf.last_look_target) score -= 12;
             if (candidate.handle == inf.previous_look_target) return;
             score -= 12;
-            if (!ai.line_of_sight_clear(world, eye, point, e.handle, candidate.handle)) return;
+            // The eye-to-eye entity LOS with every type, at height 0 [orig:
+            // Entity_CheckLineOfSightTerrainAndEntities pushes @0x4BE2F1..0x4BE303,
+            // the call @0x4BE307].
+            if (!infantry_entity_los(ai, world, e.handle, candidate.handle, eye, point, 0, true))
+                return;
             if ((flags & kEntityFlagDead) != 0 && inf.damage_timer == 0) {
                 inf.damage_timer = 25;
                 score += 4;

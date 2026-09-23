@@ -2,6 +2,7 @@
 // [orig: Entity_UpdateInfantryAI @0x4BE0CA..0x4BEFF0]
 #include <base/io/bam.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
@@ -267,6 +268,55 @@ static void test_terrain_occludes_spotting() {
     CHECK(!f.sees() && f.body().inf.damage_timer == 0);
 }
 
+// The spotting LOS is the entity LOS with every type at height 0: an item
+// between the eyes hides the candidate even with no terrain wired, where the
+// combat LOS reads clear. [orig: Entity_UpdateInfantryAI @0x4BE2F1..0x4BE311]
+static void test_items_occlude_spotting() {
+    Fixture f;
+    const auto target = f.person({3, 1, 2});
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, float d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fixed(d);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -0.2f);
+    plane(-16384, 0, 0, -0.2f);
+    plane(0, 16384, 0, -0.2f);
+    plane(0, -16384, 0, -0.2f);
+    plane(0, 0, 16384, -4.0f);
+    plane(0, 0, -16384, 0.0f);
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = fixed(-0.2f);
+    volume.max_x = volume.max_y = fixed(0.2f);
+    volume.max_z = fixed(4.0f);
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+    CollisionSection section;
+    section.volume_count = 1;
+    box.sections.push_back(section);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.alive = true;
+    crate.yaw = 90;
+    crate.position = {1.5f, 0.5f, 0.0f};
+    const EntityHandle crate_h = f.world.registry.spawn(1, crate);
+    auto collision = std::make_unique<CollisionWorld>();
+    collision->assign_entity(crate_h, collision->add_model(std::move(box)));
+    for (int i = 0; i < 17; ++i) collision->build_tick_tables(f.world);
+    f.world.ai.collision = collision.get();
+    const int32_t start[3] = {0, 0, fixed(2)}, end[3] = {fixed(3), fixed(1), fixed(2)};
+    CHECK(f.world.ai.line_of_sight_clear(f.world, start, end, f.observer, target));
+    f.tick(512);
+    CHECK(!f.body().inf.head_look_target.valid());
+    CHECK(!f.sees());
+    f.world.ai.collision = nullptr;
+}
+
 static void test_look_does_not_steer_root_motion() {
     Fixture f;
     f.clips.step = 0x4000;
@@ -369,6 +419,7 @@ int main() {
     test_spotting_side_effects_precede_front_arc();
     test_eye_tracking_clip_availability_and_cleanup();
     test_terrain_occludes_spotting();
+    test_items_occlude_spotting();
     test_look_does_not_steer_root_motion();
     test_look_chase_instruction_boundaries();
     test_mounted_attention_respects_vehicle_motion();

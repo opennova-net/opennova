@@ -138,16 +138,13 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 // ----------------------------------------------------------------------------
 // Navigation think (every 16 ticks, authority). [orig: 0x4b9910 dump 1293-1540]
 // ----------------------------------------------------------------------------
-void AiSystem::infantry_think(AiEntity &e, World &world) {
+bool AiSystem::infantry_think(AiEntity &e, World &world) {
     InfantryState &inf = e.inf;
     AiSlot &slot = e.slot;
     // The think-entry target heading, kept in a frame local; only the marker
     // wait and the S stage rewrite it. [orig: Entity_UpdateInfantryAI
     //  @0x4BA9B4..0x4BA9BA; rewrites @0x4BAD41 / @0x4BB7D0]
     int32_t entry_heading = inf.target_heading;
-
-    // The think cooldown (+0x128) steps down while nonzero [orig: @0x4BAA7B..0x4BAAB1].
-    if (inf.wait_cooldown != 0) inf.wait_cooldown = io::bam_sub(inf.wait_cooldown, 1);
 
     inf.move_mode = 0;
     inf.target_dist = 0;
@@ -159,6 +156,18 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     // other think clears it. [orig: @0x4b9910 think head — aiComp[36] = 0
     // unless aiComp[37] == 125]
     if (ch != 125) slot.f[36] = 0;
+    // Every think seeds aimPitch from the SSN; the tracking reset or an aim
+    // producer overwrites it later, so it shows only while airborne. An
+    // airborne body without the 0x80 climb order skips the rest of the think.
+    // [orig: `shl ecx,1Bh; sar ecx,4` @0x4BAA4B..0x4BAA59; the skip
+    //  @0x4BAA57..0x4BAA66]
+    inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(e.net_id) << 27), 4);
+    if (const Entity *self = world.registry.get(e.handle)) {
+        const uint32_t flags = self->flags | self->engine_flags;
+        if ((flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0) return false;
+    }
+    // The think cooldown (+0x128) steps down while nonzero [orig: @0x4BAA7B..0x4BAAB1].
+    if (inf.wait_cooldown != 0) inf.wait_cooldown = io::bam_sub(inf.wait_cooldown, 1);
     // Reserved command range: 123/124/125 Goto-SSN-and-board, 126 goto-group
     // hold, 127 follow the local player — dispatched in infantry_board.cpp,
     // BEFORE the has-route gate like the original (retires the D-INF-2
@@ -172,6 +181,7 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     const Entity *self = world.registry.get(e.handle);
     if (self != nullptr && ((self->flags | self->engine_flags) & kEntityFlagMounted) != 0)
         inf.target_heading = entry_heading;
+    return true;
 }
 
 void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_heading) {
@@ -522,6 +532,21 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         if (has(drag_state)) target = drag_state;
     }
 
+    // Swimming (Flags 0x8000) swaps the gaits, the idles and the two close
+    // attacks for the swim clips [orig: Entity_UpdateInfantryAI
+    // @0x4BD635..0x4BD6A3].
+    if (self != nullptr && ((self->flags | self->engine_flags) & kEntityFlagDrowning) != 0) {
+        if ((target == anim_state::kJogForward || target == anim_state::kRunForward ||
+                target == anim_state::kWalkForward) && has(anim_state::kSwimForward))
+            target = anim_state::kSwimForward;
+        else if ((target == anim_state::kIdle || target == anim_state::kIdle2 ||
+                target == anim_state::kIdle3) && has(anim_state::kSwimIdle))
+            target = anim_state::kSwimIdle;
+        else if ((target == anim_state::kAttack || target == anim_state::kAttack2) &&
+                has(anim_state::kSwimAttack))
+            target = anim_state::kSwimAttack;
+    }
+
     // Hit flinch: a body hit since the last think swaps its idle for cover_idle (163)
     // or its run/jog for cover_run (164) when the adm authors them, and wasHit is
     // consumed here, on the think cadence. [orig: LABEL_711 @0x4bd6a7..0x4bd6ee]
@@ -545,6 +570,12 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         else if (target == anim_state::kWalkForward && has(anim_state::kWoundedWalk))
             target = anim_state::kWoundedWalk;
     }
+
+    // A combat approach (moveMode 1) runs as run_attack (167) [orig:
+    // @0x4BD748..0x4BD763]; the moveMode 5 run_away arm after it
+    // (@0x4BD765..0x4BD780) has no producer.
+    if (inf.move_mode == 1 && target == anim_state::kRunForward && has(anim_state::kRunAttack))
+        target = anim_state::kRunAttack;
 
     // The NPC applies wash before animation arbitration. Unlike the player
     // path, its jog/run can select wash_run. [orig: @0x4BD78D..0x4BD7E6]

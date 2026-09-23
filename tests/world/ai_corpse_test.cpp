@@ -102,8 +102,18 @@ int main() {
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs from weapon.def")) return 1;
 
 	int seconds = 0;
+	// The player is topped up every tick of the mission, the approach included,
+	// and far above one burst: an emplaced gunner that engages the approach can
+	// otherwise kill it inside a single tick, before the next top-up.
+	const auto top_up = [&]() {
+		if (rig.world.cached.local_player.valid())
+			rig.world.commands.set_entity_health(rig.world.cached.local_player, 30000);
+	};
 	const auto mission_second = [&]() {
-		rig.tick(62);
+		for (int t = 0; t < 62; ++t) {
+			top_up();
+			rig.tick();
+		}
 		++seconds;
 	};
 
@@ -196,8 +206,7 @@ int main() {
 			}
 			rig.local.set_weapon_input(true, pressed, false);
 			pressed = false;
-			if (rig.world.cached.local_player.valid())
-				rig.world.commands.set_entity_health(rig.world.cached.local_player, 150);
+			top_up();
 			rig.tick();
 		}
 		++seconds;

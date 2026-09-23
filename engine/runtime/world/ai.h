@@ -1184,7 +1184,11 @@ public:
     void mirror_wire_anim(AiEntity &e, World &world);
     // The 16-tick navigation think: waypoint channel walk (arrival, relmat marks, marker
     // wait + facing, one-shot end), commands 123..127. Writes inf.move_* + target_heading.
-    void infantry_think(AiEntity &e, World &world);
+    // Returns false when the body is airborne (Flags 0x2000 without the 0x80 climb
+    // order): retail then skips the WHOLE rest of the think, combat, selection,
+    // attachment and the post-commit tail included [orig: Entity_UpdateInfantryAI
+    // @0x4BAA57..0x4BAA66 -> loc_4BE7FD].
+    bool infantry_think(AiEntity &e, World &world);
     // Its route leg (channels 1..122): the has-route/cooldown gate and the node walk.
     void infantry_route_think(AiEntity &e, World &world, int32_t &entry_heading);
     // The reserved-command legs of the think (slot+148 = 123..127): the

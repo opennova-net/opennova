@@ -273,6 +273,36 @@ void test_infantry_detour_cache_and_arrival() {
     CHECK(inf.path_state == 0 && inf.detour_target[0] == 0 && inf.detour_target[1] == 0);
 }
 
+// The detour's two rays admit every entity type: a pool-1 item across the -30
+// degree candidate's leg to the goal hands the equal-cost tie to +30 degrees.
+// [orig: ai_find_cover_position @0x4AFAB0, `push 1` @0x4AFD9B / @0x4AFE10]
+void test_infantry_detour_rays_see_items() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0), 100.0, 100.0);
+    rig.world.registry.configure_pool(1, 8);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.position = {6.0f, -0.85f, 0.0f};
+    crate.yaw = 90;
+    crate.alive = true;
+    const EntityHandle crate_h = rig.world.registry.spawn(1, crate);
+    rig.cw.assign_entity(crate_h, rig.cw.add_model(box_model(1, 0, 0.3, 0.3, 3.0)));
+    rig.rebuild();
+    CHECK(rig.cw.candidate_count(rig.soldier) > 0);
+    rig.world.ai.collision = &rig.cw;
+    rig.world.ai.terrain = &rig.field.field;
+    auto &brain = *rig.world.ai.at(rig.world.ai.attach(rig.soldier));
+    auto &inf = brain.inf;
+    inf.move_mode = 3;
+    inf.target_dist = fx(30);
+    inf.move_target[0] = fx(30);
+    inf.path_state = 1;
+    inf.body_heading = 0;
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 2);
+    CHECK(inf.detour_target[1] > fx(0.99) && inf.detour_target[1] < fx(1.01));
+    CHECK(inf.target_heading > 0);
+}
+
 // A destination inside a solid has no second clear leg. State 1 accepts a
 // reachable fallback; state 3 must retain the goal. This uses real collision rays.
 void test_infantry_detour_one_leg_fallback() {
@@ -5903,6 +5933,7 @@ int main() {
     test_resolver_wall_pushout();
     test_infantry_detour_cache_and_arrival();
     test_infantry_detour_one_leg_fallback();
+    test_infantry_detour_rays_see_items();
     test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
