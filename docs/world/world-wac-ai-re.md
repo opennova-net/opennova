@@ -2,7 +2,7 @@
 
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
 Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**, 2026-07-08 (§14 aim overlay), 2026-07-09 (§14.8 weapon-channel producer), 2026-07-16 (§16 ground-AI combat chain — targeting feed + fire convergence), 2026-07-20 (§26 allegiance, damage response, and mounted-weapon parity).
-Scope: `engine/runtime/world` (entity registry, var store, AI), the WAC pipeline (`engine/formats/wac` lexer/parser/command table + `engine/runtime/wac` compiler/VM), the mission-runtime bridge, and the
+Scope: `engine/runtime/world` (entity registry, var store, AI), the WAC pipeline (`engine/formats/wac` bytecode/program/command table + `engine/runtime/wac` compiler/VM), the mission-runtime bridge, and the
 locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
 [ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
 [`docs/runtime-architecture.md`](../runtime-architecture.md) (main loop).
@@ -4630,15 +4630,16 @@ if the SP round was WON copy `dword_24C1960 → dword_24D2500` → round-state i
 ### 20.3 The WAC named-value table (the `bluekills` family)
 
 One static table drives every named engine value WAC scripts resolve:
-**24 records `{char name[16]; u32 param_type; u32 value_ptr}` at `@ 0x82EEF0`,
-count dword at `@ 0x82F130`**, resolved case-insensitively by the third lookup
-leg of `WacScript_ResolveParameter @ 0x4f2940` (`*outType = 1` → pointer).
+**24 records `{char name[19]; u8 param_type @ +0x13; u32 value_ptr @ +0x14}`
+(24 bytes) at `@ 0x82EEF0`, count dword at `@ 0x82F130`**, resolved
+case-insensitively by the third lookup leg of `WacScript_ResolveParameter
+@ 0x4F2920` (`*outType = 1` → pointer).
 Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 
 | name | value | witnessed semantics |
 |---|---|---|
 | result | `@ 0xC6EB24` | the VM accumulator |
-| ticks | `@ 0xC6EAD8` | script executions; +1 per run [orig: WacScript_AdvanceTick @ 0x4f81d3]; seeded 0 at load |
+| ticks | `@ 0xC6EAD8` | script executions; +1 per run, added by the callers after each execution [orig: WacScript_AdvanceTick @ 0x4f81d3; WacScript_InitAndLoad @ 0x4F9770]; seeded 0 at load |
 | GameOver | `@ 0xC6EB0C` | derived `winner != 0` — a green(0) outcome never raises it [orig: cache pre-pass @ 0x4f57bb] |
 | WinVar | `@ 0xC6EB08` | derived `winner == 1` [orig: @ 0x4f57c9] |
 | LoseVar | `@ 0xC6EB04` | derived `winner == 2` [orig: @ 0x4f57cf] |
@@ -4653,7 +4654,7 @@ Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 **Correction:** an earlier session read this table phase-shifted by one record
 (name paired with the FOLLOWING record's value) — that mapping (`autogain →
 0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
-resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
+resolver decompile pins the true anchors (name @ +0, the type byte @ +0x13, value @ +0x14).
 Port: `Builtin` ids 8-13 in `engine/runtime/wac` (`bluekills/greenkills/humans/GameOver/
 WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` /
 `World::match.outcome()`.
@@ -9202,10 +9203,18 @@ script completion and mission playthrough remain open.
 
 ### 33.4 DO sections, expression state and declared names
 
+`engine/runtime/wac/compiler.cpp` is a single-pass structural translation of
+[orig: Script_Compile @0x4F31F0] and [orig: WacScript_ResolveParameter
+@0x4F2920]; the lexical, keyword, frame, parameter, end-of-file, limit and error
+rules it reproduces are listed in §38.6 (`wac_retail_vectors`).
+
 Script_Compile's stores [orig: Script_Compile @0x4f31f0 (the site @0x4F4143)]
 and [orig: @0x4F429D] both emit opcode 4: DOSEQ and DORND therefore cycle their
-NEXT sections in this executable. The VM also implements opcode 5's random
-choice for bytecode which carries it. Each DO owns a byte counter and byte
+NEXT sections in this executable (the two differ only in the block type, 4 and
+5). The VM still implements opcode 5's random choice for bytecode which carries
+it: every opcode 5 steps the generator [orig: WacScript_ExecuteBytecode
+@0x4F58B0 (the step @0x4F5A7E)] before the count is scaled (@0x4F5AB8..0x4F5AC4),
+a zero count included, and stores the choice byte (@0x4F5AD0). Each DO owns a byte counter and byte
 choice; NEXT decrements the choice and enters its section only when the previous
 value was one. Nested DOs retain separate counters. Runtime capture/restore
 includes these bytes.
@@ -9216,11 +9225,12 @@ create no event. Grouped conditions preserve the enclosing accumulator in the
 retail 16-byte expression stack. ADD/SUB/INC/DEC wrap as 32-bit arithmetic; SUB
 and DEC do not clamp at zero.
 
-VAR and ARRAY each declare one scalar address in the second half of the mission
-bank, starting at 0xC6B640. The resolver's direct V# syntax is limited to
-0..255; declared names use the separate 256-slot namespace. ARRAY follows the
-same scalar resolver path in this retail build; it is not an indexed container.
-Names are copied to an 18-character field.
+VAR declares one scalar address in the second half of the mission bank,
+starting at 0xC6B640; CHEAT declares the same way with type 0x19 [orig:
+Script_Compile @0x4F31F0 (the CHEAT arm @0x4F41E9; the type byte
+@0x4F3927..0x4F3950)]. There is no ARRAY, DO or XOR keyword (§38.6). The
+resolver's direct V# syntax is limited to 0..255; declared names use the
+separate 256-slot namespace. Names are copied to an 18-character field.
 
 **D-WAC-9, fixed 2026-09-13:** numbered V references require only a digit
 immediately after V; the remainder is parsed as a decimal prefix by `atol`
@@ -9256,12 +9266,23 @@ editor Stop/Start rewind (`restore_baseline`) restores the whole store from
 the play-start snapshot deliberately; it models no retail reload. ctests
 `world`, `mission_kernel_lifecycle`.
 
+The load itself (2026-09-23): [orig: WacScript_InitAndLoad @0x4F91F0] zeroes
+the script-disable dword dword_C6EB28 (@0x4F965F), so a reload always clears a
+pause. On a non-authoritative peer it compiles no layer (the `is_authority`
+test @0x4F9437 jumps past the three compiles @0x4F944E) and stores the 'zzzz'
+terminator alone (@0x4F95A9); the port's joiner hands `wac_layered_load` an
+empty source. The run counter `ticks` is advanced by the callers after each
+execution ([orig: WacScript_AdvanceTick @0x4F81A0 (the add @0x4F81D3)] and
+InitAndLoad @0x4F9770), not by the VM.
+
 A bracketed IF name resolves to that event's fired flag for value reads and to
 its index for RESET. [orig: WacCmd_Reset @0x4ED300] clears fired, last-fire and
 active state for the event and subsequent deeper events, stopping before a
 sibling or ancestor. RUN compiles mounted files inline into the same program and
 symbol scope. The literal include-depth check admits two nested RUN levels and
-rejects the third; RUN inside a block is an error.
+rejects the third ("A run file can't run more files", @0x4F35CA); RUN inside a
+block reports "Can't run files inside blocks" and a missing file "Unable to run
+file". None of the three is fatal.
 
 WacSystem now honors the shared human-presence gate without advancing its
 62-tick divider during a hold. Eager startup still executes directly. Regression
@@ -9272,8 +9293,9 @@ with the available retail assets on 2026-09-08.
 
 ### 33.5 Cumulative completion diagnostics
 
-World::diagnostics records unsupported WAC commands/opcodes, instruction limits,
-BMS actions, AI commands and state handlers. Each site retains a count,
+World::diagnostics records unsupported WAC commands/opcodes, instruction limits
+and BMS actions. Every ChangeAI arm and every brain state row is carried
+(§38.1), so neither reports a gap. Each site retains a count,
 first/last simulation tick, and latest arguments. WAC sites include the source
 filename, line and bytecode word; BMS sites include authored event/action
 indices. This is implementation evidence, not retail gameplay.
@@ -9289,7 +9311,10 @@ draining, boot-state restoration and a clean mission load.
 [orig: Script_GetOperatorPrecedence @0x4EE540] uses equal precedence for AND/OR,
 then comparisons, addition/subtraction, multiplication/division/modulo, then
 power. Operators at each level associate left. Declared scalar and V#
-assignments now emit opcode 8 stores after evaluating the expression.
+assignments emit opcode 8 stores, flushed at the first non-operator token after
+a value when no operator is pending [orig: Script_Compile @0x4F31F0 (the flush
+@0x4F4019..0x4F404B)]: in `v1 = 1 + 2 * 3` the automatic paren clears the
+pending + and v1 receives 1 (§38.6).
 
 [orig: WacScript_ExecuteBytecode @0x4F58B0] keeps only the low byte of an
 enclosing accumulator on the expression stack. A grouped right operand is folded
@@ -9302,9 +9327,12 @@ therefore survive parsing even around a single command.
 Witnessed examples, covered by wac_behavior: 2+3*4 yields 14; 20-2*3 yields -14;
 (20-2)*3 yields 54; 300+(2*3) yields 50; 2^3^2 yields 64; 2^(3^2) yields 81; 1
 OR 0 AND 0 is false. These are executable quirks. [orig: Math_PowFloat
-@0x4F9BA0] takes a binary32 base, performs integer-power squaring in double
-precision and returns the truncated low dword through the x87 integer
-conversion. ADD/SUB/MUL and variable increments wrap.
+@0x4F9BA0] takes a binary32 base and performs integer-power squaring in double
+precision; the POW fold truncates the result through `_ftol2_sse`'s SSE2 leg
+[orig: WacScript_ExecuteBytecode @0x4F58B0 (the fold @0x4F615F); cvttsd2si
+@0x76BC15, selected by dword_334A444 on every SSE2 processor, set by
+sub_7887AF @0x7887B4], so NaN, infinity and any result outside int32 give
+0x80000000 (10^10, 3^20, 2^31, 2^32 and 0^-1 all yield INT32_MIN). ADD/SUB/MUL and variable increments wrap.
 
 Portable divergence: malformed division by zero or INT_MIN/-1 halts the current
 WAC pass and records a WacOpcode diagnostic with subcode 2, instead of raising
@@ -9560,8 +9588,11 @@ before dispatch [orig: WacScript_ResolveParameter @0x4f2920 (the site
 @0x4F2D7D)], including fractions. An M suffix uses 65536; F uses the exact
 retail factor 21501 (`dbl_7CDE70`). Hour literals multiply by 60. Variables are
 direct references returned before numeric conversion, so a variable passed to a
-distance command is already a raw Q16 word. Numeric conversion truncates to
-signed 64 bits and stores the low dword, as `_ftol2_sse` does. The earlier
+distance command is already a raw Q16 word. Numeric conversion truncates through
+`_ftol2_sse`'s SSE2 leg [orig: WacScript_ResolveParameter @0x4F2920 (the scaled
+literal @0x4F2D8C); cvttsd2si @0x76BC15]: NaN, infinity and any value outside
+int32 give 0x80000000, so 65536M, 3000000000, -40000M and 100000F all yield
+INT32_MIN while 32767.99M gives 2147482992. The earlier
 whole-unit approximation discarded fractions and implicitly rescaled variables
 at some consumers.
 
@@ -9720,7 +9751,7 @@ bits. The former uint16 storage incorrectly discarded every authored upper word.
 [orig: WacScript_CacheLocalPlayerState @0x4F5780] is called by [orig:
 WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F58F4)], not by the 62.5 Hz
 world tick. Each bytecode execution snapshots signed-word player health and mana
-(armor at entity +0x288), time of day divided by 279620 into minutes, and the
+(the word at entity +0x120, `movsx` @0x4F5827), time of day divided by 279620 into minutes, and the
 current winner flags. Missing players yield zero health/mana and auto's low-word
 handle 0xFFFF; the upper word survives. Writes or gameplay changes during that execution do not refresh the
 other cached values. The next bytecode execution does.
@@ -9786,11 +9817,12 @@ FACE_ (21) -> SS_ (19) -> TT_ (20) -> ANIM_ (24) -> SSN_ (11) -> AMMO_ (23) ->
 the 17/18 copy -> numeric, and the port's try_resolve follows it. The replicated-row handler reports a dispatch gap
 (RuntimeGapKind::WacCommand) on both the host and the joiner, and the
 wac_dispatch_sweep ctest pins one dispatch per registry row. An unknown command is a
-non-fatal diagnostic on both sides; the port's HARD errors — an unresolved
-FX/FACE/SOUNDSET/ANIM/AMMO literal and the RUN/LOOP/NEXT structural
-checks — still block the mission's script (`wac_layered_load` kBlocked), where
-retail records the message and runs with the failed slot holding 0/-1/0xFFFF
-(D-WAC-6, §33.38). The GLOOP operand (2026-09-12) is retail-faithful: the
+non-fatal diagnostic on both sides. The loader installs every program, as
+retail does: InitAndLoad ignores the three compiles' returns (@0x4F94A8 /
+@0x4F950E / @0x4F9597) and executes (@0x4F976B), with a failed slot holding 0
+(FACE and ANIM too; only the SSN handle keeps 0xFFFF). Only the strict policy of
+the dedicated golden host (`wac_layered_load` kBlocked) refuses a literal missing
+the mounted FX, SOUNDSET or AMMO catalog (D-WAC-6, §33.38). The GLOOP operand (2026-09-12) is retail-faithful: the
 tokenizer [orig: Script_Compile @0x4f32e0..0x4f3464] splits on the 20-byte
 operator set at 0x7CE2E8 (`{}()[]+-*/|&^%<>=!~`; the strrchr tests @0x4f3370/
 @0x4f3448 make an operator character its own one-char token and end an
@@ -9801,12 +9833,12 @@ in the expectedType-12 leg [orig: @0x4f30a0..0x4f30fc], sets the first-error
 `Unknown Group` and returns the pool slot holding 0 [orig: @0x4f310a], so the
 compiled loop iterates group 0 (empty; VM opcode 0xA @0x4f5b11) and the
 leftover `G_x` `)` are body statements with their diagnostics suppressed. The
-port's parser hands the next token verbatim to the group resolver, the
-compiler emits the non-fatal `Unknown Group` and GroupIter over group 0
-(`gloop G_x` is unchanged); a GLOOP operand an earlier resolver table claims
-(a declared variable, an event, a named value), which retail ORs in as the
-dword behind that address, also takes group 0 with the same non-fatal
-diagnostic (the D-WAC-6 residue for this arm). ctests `wac_behavior`,
+port's compiler takes the same path (the non-fatal `Unknown Group` and
+GroupIter over group 0; `gloop G_x` is unchanged), and a GLOOP operand an
+earlier resolver table claims (a declared variable, an event, a named value)
+ORs in the dword behind that address as the load finds it
+(`CompileEnv::load_dword`), before InitAndLoad's resets (the V bank is cleared
+after the compiles, @0x4F95EE). ctests `wac_behavior`,
 `wac_layered_load`.
 
 [orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
@@ -11090,9 +11122,8 @@ collision_vertical targets then passed.
 
 ### 33.38 Divergence catalog for the section 33 ports
 
-The ledger mirrors these rows; the record owns them. The PERMANENT rows are
-proposed in PR #642 and take effect at its merge (ADR 0022 register); a
-declined entry falls back to an OPEN class-D row.
+The ledger mirrors these rows; the record owns them. The PERMANENT rows were
+ratified with PR #642's merge (ADR 0022 register).
 
 | ID | Ours | Original | Status |
 | --- | --- | --- | --- |
@@ -11102,7 +11133,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-4 | FIXED 2026-09-18: night is a writable DWORD; WAC arithmetic and immediate reads preserve it | Env @ 0x26C645C; Environment_ComputeTimeOfDayColors @ 0x57DE40, store @ 0x57DEAE | Only an authored TOD keyframe computation overwrites it. Light selection and snapshots consume the stored value; wac_state and weather_state cover writes and clock ownership. |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
-| D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
+| D-WAC-6 | The loader installs every program under the game's policy, as retail does; only the strict policy of the dedicated golden host (`wac_layered_load` kBlocked) refuses a literal missing the mounted FX, SOUNDSET or AMMO catalog. A GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0, and an operand an earlier resolver table claims ORs in the dword behind that address as the load finds it (`CompileEnv::load_dword`). Residue: a group index past the group table reads retail's table out of bounds, where the port's GROUP walk treats it as an empty group | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the returns ignored @0x4F94A8 / @0x4F950E / @0x4F9597; the execute @0x4f976b)] keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0 (only the SSN handle keeps 0xFFFF) (§33.15); the GLOOP operand OR [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | FIXED 2026-09-23 (`wac_layered_load`, `wac_retail_vectors`; the out-of-table group index is the bounded residue) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
 | D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot. Portable-input note: an M# index outside the 68-byte portable store (`MUS_GLOBALS_BYTES`) reads zero and drops the write; a compiled program keeps its retired store alive across a context reload (reimpl-defined memory safety) | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0 (unbounded `&globals_0C[index]` @0x672689..0x67268D over the loaded chunk's `globalsBytes_18`, sub_672550 @0x672583); AudioVM_FreeSoundBuffer @0x672E1D / ScriptInstance_Init @0x672F8B (retail frees and reallocates, leaving a dangling compiled pointer); Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
@@ -11123,7 +11154,14 @@ wire index is the FIRST registry row sharing the handler [orig: @0x4f5cb5..0x4f5
 so ptext/pwave/pconsol travel as text 39 / wave 40 / consol 100; the body is a
 u16 index [orig: @0x4f5cf9] followed by one operand per declared ParamType
 [orig: @0x4f5d26..0x4f5dc2]: Text/Filename as a cstring of at most 250 chars
-plus NUL, Ssn as u16, everything else as u32. A 0x10 row resolves its
+plus NUL, Ssn as u16, everything else as u32. Text and Filename are raw slots:
+the call passes the operand's address [orig: @0x4F5F92 (case 5); @0x4F5FA9
+(case 6); @0x4F6012 (case 9)], so a variable, global or pooled operand there
+prints its dword's bytes, least significant first, to the first NUL and on into
+the following words (the numbered, declared and global banks are contiguous
+from 0xC6B240; the pool is one array), and the payload copies the same bytes
+[orig: @0x4F5D71..0x4F5DAB]. The port's model ends at the end of the global bank
+and reads an engine, event or music dword alone. A 0x10 row resolves its
 Player/Item/auto selection through the active player-slot table
 [orig: Entity_ValidatePtr @0x500910]; a registered non-local player gets the
 message with send mask 0x20 to that slot [orig: @0x4f5dd1..0x4f5e8b], the local
