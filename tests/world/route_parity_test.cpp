@@ -5,18 +5,23 @@
 //  - Entity_UpdateAircraftPhysics @0x490310: the parked/crewed/player legs
 //  - the avoid-brake walks' ItemTypeIndex gates (ground, boat, aircraft)
 //  - the unbounded nav reads, the marker fields by type, the verbatim route seed
+//  - the aircraft parked spin, the flight floor's fresh sample, the ground-link
+//    refresh of every ground sample, the boat slip bearing's truncation
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
+#include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -500,6 +505,192 @@ void test_route_seed_is_the_slot_words() {
     CHECK(body != nullptr && body->heading == 0x40000000);
 }
 
+// A flat terrain column `units` high (raw16 = units * 256).
+struct FlatField {
+    static constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap;
+    std::vector<int> sector_grid;
+    terrain::TerrainHeightField field;
+    explicit FlatField(int units)
+        : heightmap(kDim * kDim, static_cast<uint16_t>(units * 256)), sector_grid(256, 1) {
+        field.heightmap = heightmap.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+    }
+};
+
+// An uncrewed hull still airborne more than 2 u over its cached ground (Z less
+// the probe offset) yaws 2886390 BAM per visit and pins the turned heading;
+// grounded, or within 2 u, it holds its yaw.
+// [orig: Entity_UpdateAircraftPhysics `test dword ptr [esi+24h],2000h`
+//  @0x491C09, the 2 u test @0x491C18..0x491C28, `add dword ptr [esi+10h],
+//  0FFD3F50Ah` @0x491C2A, brain+0x210 = Yaw @0x491C54]
+void test_parked_airborne_hull_spins() {
+    struct Case { bool in_air; int32_t z, probe_off; bool spins; };
+    const Case cases[] = {
+        {true, 50 << 16, 0, true},
+        {false, 50 << 16, 0, false},
+        {true, 12 << 16, 0, false},       // exactly 2 u over the ground
+        {true, (12 << 16) + 1, 0, true},
+        {true, (12 << 16) + 1, 1, false}, // the probe offset comes off Z
+    };
+    for (const Case &c : cases) {
+        AirRig r;
+        Entity &helo = r.helo();
+        helo.veh.yaw_bam = 0x10000000;
+        helo.veh.yaw_seeded = true;
+        helo.veh.ground_cache = 10 << 16;
+        helo.veh.air_probe_z_off = c.probe_off;
+        if (c.in_air) helo.flags |= kEntityFlagInAir;
+        r.w.ai.for_handle(r.helo_h)->pos[2] = c.z;
+        r.w.ai.chel_ai_drive(r.w, helo, nullptr, r.traits);
+        const int32_t want = c.spins ? 0x10000000 - 2886390 : 0x10000000;
+        CHECK(helo.veh.yaw_bam == want);
+        CHECK(helo.veh.steer_target_bam == want);
+        CHECK(r.brain().f[AiBrain::kCurState] == 14);
+    }
+}
+
+// The flight block's floor (ground + bound/4) is a FRESH radius-0 sample of the
+// hull's own ground at its current Z; the 8-tick cached ground feeds only tz,
+// the climb and the landing target. Over 10 u terrain with a stale 5 u cache, a
+// hull at 11.5 u with bound 8 u is under its 12 u floor and lands onto the node.
+// [orig: Entity_UpdateAircraftPhysics — the self sample
+//  Entity_CalcAverageGroundHeight @0x491845 into ebp @0x491853, the floor
+//  `sar eax,2; add eax,ebp` @0x491874, the landing leg @0x4918B0..0x4918DA]
+void test_flight_floor_is_the_fresh_sample() {
+    FlatField terrain(10);
+    AirRig r;
+    r.w.tables.terrain = &terrain.field;
+    r.seat_pilot();
+    Entity &helo = r.helo();
+    const int32_t z = (23 << 16) / 2; // 11.5 u
+    helo.position = {100.0f, 20.0f, 11.5f};
+    helo.bound_radius = 8.0f;
+    helo.veh.yaw_bam = 0;
+    helo.veh.yaw_seeded = true;
+    helo.veh.ground_cache = 5 << 16;
+    AiEntity &ai = *r.w.ai.for_handle(r.helo_h);
+    ai.pos[0] = 100 << 16;
+    ai.pos[1] = 20 << 16;
+    ai.pos[2] = z;
+    NavNodeTable &nav = r.w.ai.nav;
+    nav.nodes.resize(1);
+    nav.nodes[0].f[1] = 102 << 16;
+    nav.nodes[0].f[2] = 20 << 16;
+    nav.nodes[0].f[3] = 10 << 16;
+    nav.channels.resize(2);
+    nav.channels[1].count = 1;
+    AiBrain &b = r.brain();
+    b.f[AiBrain::kCurState] = 7;
+    b.f[AiBrain::kWpType] = 1;
+    b.f[AiBrain::kWpChannel] = 1;
+    b.f[AiBrain::kWpNode] = 0;
+    b.f[AiBrain::kOutSpeed] = 65536;
+    r.w.ai.chel_ai_drive(r.w, helo, &r.pilot(), r.traits);
+    CHECK(helo.veh.cmd_speed == 8192);                        // an eighth
+    CHECK(ai.pos[0] == (100 << 16) + ((2 << 16) >> 6));       // a 64th onto the node
+    CHECK(helo.veh.net_alt_target == (5 << 16) - 0x2000);     // parked on the CACHE
+}
+
+// Every Entity_CalcAverageGroundHeight sample refreshes the hull's ground link:
+// the east and centre taps are the AndObject ray kind, which stores its hit
+// entity (null on a miss), so the centre hit is the link that survives.
+// [orig: Entity_CalcAverageGroundHeight taps @0x4572A1 (east) and @0x4572E0
+//  (centre), the radius-0 arm @0x45735D; Entity_RaycastGroundHeightAndObject
+//  `mov [esi+28h],eax` @0x414370]
+void test_ground_samples_refresh_the_link() {
+    FlatField terrain(0);
+    CollisionWorld cw;
+    cw.terrain = &terrain.field;
+    AirRig r;
+    r.w.registry.configure_pool(2, 4);
+    // Pool-2 slot 0 packs to handle 0, the "no hit" value: keep the deck off it.
+    Entity filler{};
+    filler.kind = EntityKind::Marker;
+    r.w.registry.spawn(2, filler);
+    Entity deck{};
+    deck.kind = EntityKind::Building;
+    deck.position = {10.0f, 10.0f, 0.0f};
+    deck.yaw = 90; // engine heading 0
+    deck.alive = true;
+    const EntityHandle deck_h = r.w.registry.spawn(2, deck);
+    // A 3 u high, 4 u square type-1 box.
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, int32_t d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = d;
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -(2 << 16));
+    plane(-16384, 0, 0, -(2 << 16));
+    plane(0, 16384, 0, -(2 << 16));
+    plane(0, -16384, 0, -(2 << 16));
+    plane(0, 0, 16384, -(3 << 16));
+    plane(0, 0, -16384, 0);
+    CollisionVolume v;
+    v.type = 1;
+    v.min_x = v.min_y = -(2 << 16);
+    v.max_x = v.max_y = 2 << 16;
+    v.max_z = 3 << 16;
+    v.plane_count = 6;
+    box.volumes.push_back(v);
+    CollisionSection s;
+    s.volume_count = 1;
+    box.sections.push_back(s);
+    cw.assign_entity(deck_h, cw.add_model(std::move(box)));
+    r.w.ai.collision = &cw;
+
+    Entity &helo = r.helo();
+    helo.has_item_def = true; // a pool-1 candidate source needs its ItemDef
+    helo.position = {10.0f, 10.0f, 5.0f};
+    helo.bound_radius = 1.0f;
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+    AiEntity &ai = *r.w.ai.for_handle(r.helo_h);
+    CHECK(r.w.ai.aircraft_ground_height(r.w, ai, 0) == (3 << 16));
+    CHECK(helo.ground_target == deck_h);
+    helo.ground_target = {};
+    CHECK(r.w.ai.aircraft_ground_height(r.w, ai, 0x10000) == (3 << 16));
+    CHECK(helo.ground_target == deck_h);
+    // Off the deck the centre ray finds terrain only: the link clears.
+    helo.position = {30.0f, 10.0f, 5.0f};
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+    r.w.ai.aircraft_ground_height(r.w, ai, 0);
+    CHECK(!helo.ground_target.valid());
+    r.w.ai.collision = nullptr;
+}
+
+// The boat's slip bearing truncates through _ftol2_sse. Velocity (1.0, 0.188)
+// u/tick puts it at 127271671.84 BAM; with the hull 10431 BAM ahead of the
+// truncated bearing, sin22 is 64 and the counter-steer adds one 1 << 14 step,
+// where the rounded bearing leaves sin22 at 63 and no step.
+// [orig: Entity_UpdateWatercraftPhysics fpatan / fmul dbl_7C19D8 /
+//  `call _ftol2_sse` @0x48E417..0x48E423, fsin @0x48E43B, `shl edx,0Eh`
+//  @0x48E49A]
+void test_boat_slip_bearing_truncates() {
+    AirRig r;
+    r.seat_pilot();
+    Entity &hull = r.helo();
+    constexpr int32_t kHeading = 127271671 + 10431;
+    hull.veh.yaw_bam = kHeading;
+    hull.veh.yaw_seeded = true;
+    hull.veh.vel_x = 65536;
+    hull.veh.vel_y = 12345;
+    AiBrain &b = r.brain();
+    b.f[AiBrain::kCurState] = 16;
+    b.f[AiBrain::kOutSpeed] = 65536;
+    VehicleTraits t;
+    t.water_speed = 65536;
+    t.player_control = true;
+    VehicleDriveCmd cmd;
+    r.w.ai.watercraft_ai_drive(r.w, hull, &r.pilot(), t, cmd);
+    CHECK(cmd.ai_drive);
+    CHECK(cmd.steer_target_bam == kHeading + (1 << 14));
+}
+
 } // namespace
 
 int main() {
@@ -511,6 +702,10 @@ int main() {
     test_nav_reads_are_unbounded();
     test_marker_fields_follow_the_marker_type();
     test_route_seed_is_the_slot_words();
+    test_parked_airborne_hull_spins();
+    test_flight_floor_is_the_fresh_sample();
+    test_ground_samples_refresh_the_link();
+    test_boat_slip_bearing_truncates();
     if (failures == 0) std::printf("route_parity: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

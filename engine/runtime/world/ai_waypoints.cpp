@@ -589,12 +589,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int32_t err = iabs32(heading - b.f[AiBrain::kWpBearing]);
+        const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = (err / denom) << 4;
     }
 
     // Bearing delta clamped to the budget [orig: @0x48E322..0x48E33C].
-    int32_t delta = b.f[AiBrain::kWpBearing] - heading;
+    int32_t delta = io::bam_sub(b.f[AiBrain::kWpBearing], heading);
     const int32_t budget = b.f[AiBrain::kAnimFlag];
     if (delta > budget) delta = budget;
     if (delta < -budget) delta = -budget;
@@ -614,7 +614,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 
     // steer = heading + delta — the boat leg has NO delta/8 term
     // [orig: @0x48E3F0..0x48E3F5].
-    int32_t steer = heading + delta;
+    int32_t steer = io::bam_add(heading, delta);
 
     // Slip counter-steer: steer INTO the hull/velocity mismatch and shed command
     // as the slip grows [orig: @0x48E3FB..0x48E577 — corr = (sin22(Yaw - motion)
@@ -626,9 +626,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
         const int32_t vy = veh.veh.vel_y;
         const double fdx = static_cast<double>(vx);
         const double fdy = static_cast<double>(vy);
-        const int32_t motion = static_cast<int32_t>(
-                std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
-        const int32_t s22 = avoid_sin22(heading - motion);
+        // The motion bearing truncates through _ftol2_sse like every other
+        // bearing; the widened conversion keeps +pi's 0x80000000 word
+        // [orig: fpatan, fmul dbl_7C19D8, `call _ftol2_sse` @0x48E417..0x48E423].
+        const int32_t motion = static_cast<int32_t>(static_cast<uint32_t>(
+                static_cast<int64_t>(std::atan2(fdy, fdx) * 683565275.5764316)));
+        const int32_t s22 = avoid_sin22(io::bam_sub(heading, motion));
         const double dm = std::sqrt(fdx * fdx + fdy * fdy);
         int32_t mag = dm >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dm);
         if (mag > 0x10000) mag = 0x10000; // [orig: the 1.0 u/tick clamp @0x48E476]
@@ -746,6 +749,15 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		// order parked on it [orig: @0x491C31..0x491C58, AI_CheckVehicleStuckState
 		//  @0x491C5E, `mov dword ptr [ebx+10h],0Eh` @0x491C66, Flags &= ~0x80
 		//  @0x491C6D].
+		// An uncrewed hull still airborne more than 2 u over its cached ground
+		// (the probe offset taken off its Z) first yaws 2886390 BAM per visit, about
+		// 15 deg/s, and the heading pin below takes the turned yaw.
+		// [orig: `test dword ptr [esi+24h],2000h` @0x491C09, Z - brain+0x2C -
+		//  ground > 0x20000 @0x491C18..0x491C28, `add dword ptr [esi+10h],
+		//  0FFD3F50Ah` @0x491C2A, brain+0x210 = Yaw @0x491C54]
+		if ((veh.flags & kEntityFlagInAir) != 0 &&
+		    io::bam_sub(io::bam_sub(ve->pos[2], m.air_probe_z_off), ground) > 0x20000)
+			m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
 		m.cmd_speed = 0;
 		m.cmd_lateral_speed = 0;
 		m.steer_target_bam = m.yaw_bam;
@@ -789,7 +801,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int32_t err = iabs32(m.yaw_bam - b.f[AiBrain::kWpBearing]);
+        const int32_t err = iabs32(io::bam_sub(m.yaw_bam, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = 8 * (err / denom);
     }
 
@@ -849,7 +861,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         }
         m.net_climb = climb;
         // The heading error's trig at 2^22 [orig: @0x4917d4..0x491821].
-        const int32_t err = bearing - m.yaw_bam;
+        const int32_t err = io::bam_sub(bearing, m.yaw_bam);
         const int32_t c22 = flight_cos22(err);
         const int32_t s22 = avoid_sin22(err);
         // Beyond 6 u planar, a zero command seeds the 132-scaled cyclic pair
@@ -863,7 +875,13 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         }
         // The two ground samples: the hull's own and the node's
         // [orig: Entity_CalcAverageGroundHeight @0x491845 (self) / @0x491855
-        //  (the node entity)].
+        //  (the node entity)]. The hull's is a FRESH radius-0 sample at its
+        // current Z, and it alone sets the floor both legs test; the 8-tick
+        // cached ground (sampled with the probe offset taken off Z) feeds only
+        // tz, the climb and the landing target [orig: ebp = the self sample
+        // @0x491853, `mov eax,[esi]; sar eax,2; add eax,ebp` @0x491874 and
+        // @0x4918E2].
+        const int32_t self_ground = aircraft_ground_height(world, *ve, 0);
         int32_t node_ground = INT32_MIN;
         if (world.tables.terrain != nullptr) {
             const int32_t npos[3] = {node->f[1], node->f[2], node->f[3]};
@@ -871,7 +889,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
             node_ground = calc_average_ground_height(*world.tables.terrain, npos, 0, clearance);
         }
         const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
-        const int32_t floor = ground + (to_fixed(veh.bound_radius) >> 2);
+        const int32_t floor = self_ground + (to_fixed(veh.bound_radius) >> 2);
         if (node_agl > 0x60000 || dist > 0x60000) {
             // En route (or the node hangs in the air): never below the hull's
             // ground + bound/4 — a low target lifts 16 u above that floor and
@@ -902,7 +920,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         const int32_t budget = b.f[AiBrain::kAnimFlag];
         if (delta > budget) delta = budget;
         if (delta < -budget) delta = -budget;
-        m.steer_target_bam = m.yaw_bam + delta;
+        m.steer_target_bam = io::bam_add(m.yaw_bam, delta);
         // The forward command scales by cos^2 of the heading error — a hull
         // still turning onto its leg creeps [orig: @0x491970..0x49198a].
         const int32_t ac = iabs32(c22);

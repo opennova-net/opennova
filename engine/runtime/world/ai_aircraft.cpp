@@ -20,26 +20,37 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 		to_fixed(entity->position.z) };
 	int32_t ground = INT32_MIN;
 	if (collision != nullptr && collision->instance_count() != 0) {
-		const auto tap = [&](int32_t x, int32_t y) {
+		// Two ray kinds share the probe: the AndObject kind also stores its hit
+		// entity, null on a miss, as the hull's ground link. The east and centre
+		// taps are that kind, so every sample leaves the centre hit as the link
+		// the carrier follow and the brake's carrier exclusion read.
+		// [orig: Entity_RaycastGroundHeight @0x4142C0 north/south/west @0x45725D/
+		//  @0x457281/@0x4572C1; Entity_RaycastGroundHeightAndObject @0x414320
+		//  (`mov [esi+28h],eax` @0x414370) east @0x4572A1, centre @0x4572E0]
+		const auto tap = [&](int32_t x, int32_t y, EntityHandle *link) {
 			return collision->raycast_ground(
-					world, entity->handle, pos, x, y, 65536, 3145728, nullptr);
+					world, entity->handle, pos, x, y, 65536, 3145728, link);
 		};
 		if (radius == 0) {
 			// A zero radius is one centre ray, not five coincident taps: the
 			// weighted average would otherwise return 6c/10 for negative ground.
 			// [orig: the sampleRadius == 0 arm @0x457254 -> single
 			// Entity_RaycastGroundHeightAndObject(0,0,0x10000,3145728) @0x45735d]
-			ground = tap(0, 0);
+			ground = tap(0, 0, &entity->ground_target);
 		} else {
-			const int32_t n = tap(0, radius), s = tap(0, -radius), e = tap(radius, 0),
-						  w = tap(-radius, 0), c = tap(0, 0);
+			const int32_t n = tap(0, radius, nullptr), s = tap(0, -radius, nullptr),
+						  e = tap(radius, 0, &entity->ground_target),
+						  w = tap(-radius, 0, nullptr), c = tap(0, 0, &entity->ground_target);
 			const int32_t top = std::max({ 0, n, s, e, w, c });
 			int32_t sum = io::bam_add(io::bam_add(n, s), io::bam_add(e, w));
 			sum = io::bam_add(sum, io::bam_dbl(io::bam_add(c, io::bam_dbl(top))));
 			ground = std::max(c, sum / 10);
 		}
-	} else if (world.tables.terrain != nullptr)
+	} else if (world.tables.terrain != nullptr) {
 		ground = calc_average_ground_height(*world.tables.terrain, pos, radius, GroundClearance{});
+		// Terrain alone under the taps: the AndObject rays store a null link.
+		entity->ground_target = {};
+	}
 	if (entity->primary_occupant.valid())
 		ground = std::max(ground, world.env.water_z);
 	return ground == INT32_MIN ? ground : io::bam_add(ground, offset);
