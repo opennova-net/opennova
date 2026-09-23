@@ -2341,11 +2341,11 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
         ent->yaw = static_cast<int16_t>(
             std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(e.heading))));
-        // Body-anim slot for the present pass. The infantry motor (player AND AI) bypasses the
-        // brain-state update_body_anim_slot (the ai.cpp dispatch `continue`s before reaching it),
-        // so derive the present-pass BodyAnim slot from the motor's selected clip state here — else
-        // every org1 soldier renders a static T-pose (body_anim_slot stays -1 and _apply_body_anim
-        // no-ops). Leave the slot on death (the present hides / holds the death pose).
+        // Body-anim slot for the present pass. No brain state machine selects a body
+        // animation, so the motor (player AND AI) derives the present-pass BodyAnim slot from
+        // its selected clip state here — else every org1 soldier renders a static T-pose
+        // (body_anim_slot stays -1 and _apply_body_anim no-ops). Leave the slot on death (the
+        // present hides / holds the death pose).
         // [orig: Entity_UpdateInfantryAI @0x4b9910 selects the body anim each tick]
         if (ent->alive && ent->health > 0)
             ent->body_anim_slot = body_anim_slot_from_state(inf.body_clip_state());
