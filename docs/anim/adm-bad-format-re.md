@@ -41,6 +41,43 @@ through its clips. The widest shipped row is 6 variants (`anim_cover_idle`
 across the JOX/REVX corpora); the parsed model caps at 8
 (`ADM_MAX_VARIANTS`).
 
+**Ring order and ownership (witnessed 2026-09-23).** A row serves from its
+LAST token back: `AnimMap_RegisterBoneNode @0x40C2D0` inserts each token ahead
+of the head and points the table at the new node (node->next = head
+`@0x40C37F`, tail->next = node `@0x40C382`, table = node `@0x40C385`; the first
+token and every `anim_reset` token self-ring, `@0x40C38B..0x40C38F`; slot 0's
+backfill of the empty entries `@0x40C39A..0x40C3E2`), so a row `"A" "B" "C"`
+serves C, B, A, C, and so on. The ring heads are ONE table per loaded `.adm`,
+not per entity: `AnimMap_LoadAdmFile @0x40CC40` reuses an already loaded entry
+by name (the `AnimMap_FindByName` call `@0x40CD2F`), and
+`AnimMap_RegisterEntity @0x40BB60` allocates the primary (+0x188) and
+secondary (+0x18C) slots and links both through `AnimMap_LinkEntity @0x40BA10`
+(slot+0x48 = &entry+0x44 `@0x40BA77`), so every channel of every body on that
+`.adm` advances the same heads. Registration starts both channels on table[0]'s
+node without advancing it (`@0x40BC16`, `@0x40BD20`) and fills every unauthored
+entry with table[0]'s node, so an unauthored state serves the reset clip. The
+re-init (`AnimMap_UpdateEntity @0x40B5F0`, `@0x40B737..0x40B778`) takes node =
+table[S], advances table[S] = node->next and inits the channel from the node;
+there is no re-init when the request equals the playing id (`@0x40B645`).
+`AnimMap_UpdateDualChannels @0x40B8C0` runs the secondary (`@0x40B908`) before
+the primary (`@0x40B94E`), so a body whose channels re-init onto one state in
+the same tick gives the secondary the head and the primary the entry after it
+in ring order. Shipped JO body `.adm` files author multi-clip attack and death
+rows but never a multi-clip `anim_reset`. The port's `AiSystem::anim_rings`
+(`AnimVariantRings`, restored with the spawn baseline) serves both channels
+that way (2026-09-23; it had kept per-entity heads served in file order, which
+the CP01 `ai_threat` and `ai_corpse` regressions caught: an org1 body fires on
+its primary channel's clip events). Residuals: the joiner's replica person rows
+keep entry 0 because the wire carries no variant (D-NET-196), and registration
+starts both channels on entry 0 rather than the reset row's current head
+(identical for every retail `.adm`). Follow-up, not yet witnessed on its own
+path: the first-person weapon clip ring (`player_weapon.cpp`
+`weapon_ring_take_length` / `weapon_ring_take_variant`) and the weapon table's
+`auto` duration ring (`weapon_table_build.cpp` `table_clip_seconds`) still serve
+first to last; the viewmodel `.adm` registers through the same
+`AnimMap_RegisterBoneNode`, so retail most likely serves them last to first
+too.
+
 The retired writer emitted the canonical stock shape — `<key>\t\t\t\t"<clip>" "<clip2>"`
 rows, CRLF line ends, one leading blank line, and a `CRLF×3 + NUL` trailer —
 so `.adm` parity is parse-equality over the canonical form, not byte identity
