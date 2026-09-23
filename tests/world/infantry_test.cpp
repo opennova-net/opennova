@@ -3983,7 +3983,12 @@ static void test_suspended_callback_preserves_independent_brain() {
     e.brain.f[AiBrain::kPartAnimRate0] = 127;
     TickContext ctx; ctx.logic_tick = 1; ctx.is_authority = true;
     w.ai.tick(w, ctx);
-    CHECK(e.brain.f[AiBrain::kPartAnimPhase0] == 127);
+    // The stored channel holds: retail's sweep integrator
+    // (Entity_UpdateSuspensionBounce @0x456710) has no caller, so no tick path
+    // advances the phase dword.
+    CHECK(e.brain.f[AiBrain::kPartAnimPhase0] == 0);
+    CHECK(e.brain.f[AiBrain::kPartAnimDir0] == 1);
+    CHECK(e.brain.f[AiBrain::kPartAnimRate0] == 127);
     CHECK(w.registry.get(h)->motor_suspended);
     CHECK(w.commands.apply_ai_command(12, EntityCommands::kAiNodePath, 0, 0, 0));
     CHECK(!w.registry.get(h)->motor_suspended);

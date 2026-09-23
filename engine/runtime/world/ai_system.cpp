@@ -547,10 +547,8 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         const Entity *motor_entity = world.registry.get(e.handle);
         const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
         // Non-infantry mounted controllers retain the seat-follow shortcut.
-        if (!motor_suspended && pose_if_mounted(e, world)) {
-            advance_part_anim(e);
+        if (!motor_suspended && pose_if_mounted(e, world))
             continue;
-        }
         // The pool-1 visit's think gate: the class event callback (the brain
         // machine) runs only on the visits where the PRE-decrement entity+684
         // countdown (Entity::spawn_phase) is <= 0, and the countdown drops by
@@ -614,7 +612,6 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the +0x1C4
             //  call); g_EntityClassPhysicsTable @0x82ABC8]
 		}
-        advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
         // The visit's trailing decrement, every pool-1 visit whether or not the
         // brain thought — the think may have destroyed and re-used the slot, so
         // only the same registry lifetime counts down [orig: `add [esi+2ACh],-1`
@@ -646,10 +643,8 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         // Joiners retain seat-follow presentation for wire-owned peers. The
         // authority continues into the remote org2 animation/collision tail:
         // mounted contact callbacks remain live while model push is suppressed.
-        if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
-            advance_part_anim(e);
-            if (!is_authority) continue;
-        }
+        if (e.net_is_remote_peer && pose_if_mounted(e, world) && !is_authority)
+            continue;
         // A client-only wire peer has no authority collision tail, so its
         // blink/indoors presentation state comes from the position-only refresh.
         // [orig: remote persons
@@ -924,17 +919,6 @@ bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate) {
         return true;
     }
     return false;
-}
-
-void AiSystem::advance_part_anim(AiEntity &e) {
-    AiBrain &b = e.brain;
-    for (int slot = 0; slot < 2; ++slot) {
-        const int32_t dir = b.f[AiBrain::kPartAnimDir0 + slot];
-        const int32_t rate = b.f[AiBrain::kPartAnimRate0 + slot];
-        if (dir == 0) continue;
-        if (part_anim_step(b.f[AiBrain::kPartAnimPhase0 + slot], dir, rate))
-            b.f[AiBrain::kPartAnimDir0 + slot] = 0;
-    }
 }
 
 // [flt_7C3310=1/65536, flt_7C3B40=0.016, flt_7C32BC=65536.] The original

@@ -130,8 +130,9 @@ void ModelControls::release_part(int channel) {
 
 // PLAYPARTANIM's rate from ANIMTIME seconds is the shared world helper
 // [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. The sweep step is
-// world::part_anim_step; the authoritative AI integrates in AiSystem and
-// the presenter supplies its phases through set_part_phase.
+// world::part_anim_step. The world runtime never integrates the brain phases
+// (retail's sweep integrator is unreferenced), so the presenter supplies the
+// held brain phases through set_part_phase.
 void ModelControls::play_part(int channel, int direction, double seconds) {
 	const int ordinal = part_register(channel);
 	if (ordinal < 0 || direction < -1 || direction > 1) return;

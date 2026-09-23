@@ -475,8 +475,10 @@ static void test_pre_mission_pass() {
 }
 
 // A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no embedder
-// effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22; the AI integrator then
-// advances the channel phase. Proves the in-engine action-dispatch path end to end.
+// effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22: it stores the channel
+// direction and rate only. Retail's sweep integrator (Entity_UpdateSuspensionBounce
+// @0x456710) has no caller, so later world ticks hold the phase dword. Proves the
+// in-engine action-dispatch path end to end.
 static void test_playpartanim_mutates_brain() {
     World w;
     w.cached.humans = 1;
@@ -509,11 +511,15 @@ static void test_playpartanim_mutates_brain() {
         // direction = play_type; rate = trunc(0.016/1.0 * 65536) = 1048.
         CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
         CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
-        // The +1 branch advances with wrapping ADD and clamps only a strict
-        // upper overshoot; these first two ticks stay in range.
-        ai.advance_part_anim(*ae);
-        ai.advance_part_anim(*ae);
-        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    }
+    tick_n(w, kPass); // a further pass leaves the stored channel untouched
+    ae = ai.for_handle(h);
+    CHECK(ae != nullptr);
+    if (ae) {
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 0);
     }
     // In-engine mutation, NOT an embedder effect.
     CHECK(w.out.effects.count("unported_action") == 0);
@@ -824,54 +830,41 @@ static void test_event_trigger_reads_window() {
     CHECK(w.out.effects.count("text") == 2);
 }
 
-// PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). Retail then
-// uses wrapping 32-bit ADD/SUB with asymmetric strict clamps.
+// PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). The sweep
+// step (the editor preview's integrator; retail's Entity_UpdateSuspensionBounce
+// has no caller) uses wrapping 32-bit ADD/SUB with asymmetric strict clamps.
 static void test_playpartanim_zero_time_wraps_like_retail() {
     world::AiBrain b;
     world::ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, /*time=*/0);
     CHECK(b.f[world::AiBrain::kPartAnimDir0] == 1);
     CHECK(b.f[world::AiBrain::kPartAnimRate0] == static_cast<int32_t>(0x80000000)); // INT_MIN
-    world::AiSystem ai;
-    world::AiEntity tmp;
-    tmp.brain = b;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] ==
-          static_cast<int32_t>(0x80000000));
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
+    const int32_t zero_time_rate = b.f[world::AiBrain::kPartAnimRate0];
+    int32_t phase = 0;
+    CHECK(!world::part_anim_step(phase, 1, zero_time_rate));
+    CHECK(phase == static_cast<int32_t>(0x80000000));
+    CHECK(!world::part_anim_step(phase, 1, zero_time_rate));
+    CHECK(phase == 0);
 
     world::AiBrain reverse;
     world::ai_apply_command(
             reverse, 0x22, /*channel=*/1, /*play_type=*/-1, /*time=*/0);
-    tmp.brain = reverse;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    CHECK(reverse.f[world::AiBrain::kPartAnimDir0] == -1);
+    phase = 0;
+    CHECK(world::part_anim_step(phase, -1, reverse.f[world::AiBrain::kPartAnimRate0]));
+    CHECK(phase == 0);
 
     // Exact endpoints do not stop; only the following strict overshoot does.
-    world::AiBrain endpoint;
-    endpoint.f[world::AiBrain::kPartAnimDir0] = 1;
-    endpoint.f[world::AiBrain::kPartAnimRate0] = 1048;
-    endpoint.f[world::AiBrain::kPartAnimPhase0] = 0x10000 - 1048;
-    tmp.brain = endpoint;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    phase = 0x10000 - 1048;
+    CHECK(!world::part_anim_step(phase, 1, 1048));
+    CHECK(phase == 0x10000);
+    CHECK(world::part_anim_step(phase, 1, 1048));
+    CHECK(phase == 0x10000);
 
-    endpoint.f[world::AiBrain::kPartAnimDir0] = -1;
-    endpoint.f[world::AiBrain::kPartAnimPhase0] = 1048;
-    tmp.brain = endpoint;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == -1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    phase = 1048;
+    CHECK(!world::part_anim_step(phase, -1, 1048));
+    CHECK(phase == 0);
+    CHECK(world::part_anim_step(phase, -1, 1048));
+    CHECK(phase == 0);
 }
 
 // A trigger record with just a main/sub type and params.

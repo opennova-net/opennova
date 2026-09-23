@@ -76,10 +76,12 @@ const char *ai_state_name(int32_t state);
 
 // ----------------------------------------------------------------------------
 // PLAYPARTANIM phase domain: one full sweep spans 0..0x10000 (16.16 1.0). The
-// integrator clamps the up-sweep AT kPartAnimPhaseOne — landing exactly on it
-// remains active — and the present ACTIVE code is live only while positive and
-// within one phase. [orig: Entity_ApplyCommand case 0x22 @ 0x43B192 writes the
-// channels; integrator Entity_UpdateSuspensionBounce @ 0x456710/@ 0x456740]
+// present ACTIVE code is live only while positive and within one phase. Retail
+// stores only the channel direction and rate [orig: Entity_ApplyCommand case
+// 0x22 @ 0x43B192]; its sweep integrator Entity_UpdateSuspensionBounce
+// @ 0x456710 has no caller, pointer or thunk anywhere in the executable, so a
+// live phase dword holds its value (the editor preview integrates through
+// part_anim_step below).
 // ----------------------------------------------------------------------------
 inline constexpr int32_t kPartAnimPhaseOne = 0x10000;
 constexpr bool part_anim_phase_active(int32_t code) {
@@ -172,8 +174,11 @@ struct AiBrain {
                               //  flags&8 leg adds it to pitch @0x45706A]
         // ---- part-anim channels (vehicle/emplacement parts; PLAYPARTANIM, 2 channels) ----
         // [orig: Entity_ApplyCommand @0x43ab60 case 0x22 writes comp+436 (direction) /
-        // comp+444 (rate). Def defaults: Entity_CopyVehicleDefToAIComp @0x45ddf9 copies
-        // def+764..784 -> comp+436..456, so the phase pair (comp+452/+456) is def-seeded.]
+        // comp+444 (rate). The phase pair (comp+452/+456) starts at the allocator's
+        // zero fill (Entity_InitVehicleAI memset @0x460246); only the savegame
+        // restore writes the channel block again (SaveFile_ApplyEntityRecord
+        // @0x4AC030 -> Entity_CopyVehicleDefToAIComp: rate @0x45DDF9, phase
+        // @0x45DE11); HUD_CacheEntityDisplayInfo @0x4A3E27 publishes it.]
         kPartAnimDir0 = 109,   // comp+436 channel-1 sweep direction (-1/0/+1)
         kPartAnimDir1 = 110,   // comp+440 channel-2 sweep direction
         kPartAnimRate0 = 111,  // comp+444 channel-1 rate (16.16 phase units / tick)
@@ -606,8 +611,9 @@ int32_t part_anim_rate_from_seconds(double seconds);
 // wrapping SUB for every other nonzero direction; only a STRICT upper (>
 // 0x10000) or negative overshoot clamps — landing exactly on an endpoint
 // stays active. Returns true when the sweep finished (the caller clears its
-// direction) [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9].
-// Shared by AiSystem::advance_part_anim and the preview binding.
+// direction) [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9, an
+// unreferenced routine]. Only the editor-preview binding steps with it; the
+// world runtime never integrates the brain phases.
 bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate);
 
 // [orig: Entity_CalcAverageGroundHeight @0x457230] The entity-def height offsets
@@ -1036,13 +1042,6 @@ public:
     //  (Entity_CountMountedEntities @0x435970) -> Health = min(Health,
     //  criticalHp). Undercrewed AI hulls bleed to critical once they move off.
     void apply_min_ai_crew_clamp(World &world, Entity &veh, const VehicleTraits &traits);
-
-    // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
-    // and wrapping SUB for every other nonzero direction. Clamp/stop only on
-    // strict upper/negative overshoot; an exact endpoint remains active.
-    // PLAYPARTANIM writes only direction + rate (ai_apply_command case 0x22).
-    // Runs regardless of the AI budget gate. [orig: integrator @ 0x456710]
-    void advance_part_anim(AiEntity &e);
 
     // ---- Infantry motor [orig: Entity_UpdateInfantryAI @0x4b9910] ----
     // Per-tick update for inf.active entities (replaces the vehicle SM path for them).

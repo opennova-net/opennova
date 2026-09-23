@@ -2303,8 +2303,6 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
     }
 
     mirror_wire_anim(e, world); // wire-anim bytes for the 0x0A player record (D-NET-159)
-
-    advance_part_anim(e); // PANM channels integrate regardless of the motor path
 }
 
 } // namespace opennova::world
