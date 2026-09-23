@@ -76,7 +76,13 @@ player counts, a hidden or not-yet-deployed one does not. Its definition test
 items.def row, row 0 for a type items.def lacks (`ItemList_FindIndexByTypeId
 @0x49E100`, the miss `@0x49E131`).
 Port: `World::entity_update_admitted`, with the death-screen exemption stamped by
-`HostRole` (`CachedFrameState::peer_death_screen`). While the epilog screen is up,
+`HostRole` (`CachedFrameState::peer_death_screen`). The update also returns at its head,
+on every peer, while there is no local player entity (`cmp g_local_player_entity,0`
+`@0x4C2110`, to the epilogue `@0x4C2642`), before the epilog branch: a retail world with no
+local player never runs its entity update even when the frame admits it. A running retail
+mission always has one (`Game_StartMission` calls `Player_InitPlayer` on every peer,
+`@0x525BBC`), the port's dedicated hosts have none, and the port keeps the gate only in
+front of the precipitation fall (world-wac-ai-re §38.9). While the epilog screen is up,
 `Entity_UpdateAllEntities @0x4C2100` takes its epilog path (`@0x4C211D..0x4C2128` →
 `@0x4C239A`): every pool-1 row copies its pose into savedLivePose, only a row whose
 occupant carries Flags 0x100 is updated, and everything from the HeliLift slots
