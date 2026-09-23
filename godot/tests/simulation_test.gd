@@ -205,13 +205,19 @@ func _fast_rope_item_db() -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
+	# The part-anim channels live in an AI brain, which a placed item owns when
+	# its row carries AIData and a brain-class ai_function (the attrib test in
+	# Entity_SpawnFromBMSRecord, then the class init).
 	file.store_string("""begin "Fast Rope Control Fixture"
   id 105006
-  type object
+  type vehicle
   graphic StaticCrate1
   sid fastropectrl
+  ai_function cveh
+  render_function cveh
+  move_function cveh
   hp 50
-  attrib: FastRope
+  attrib: AIData FastRope
 end
 """)
 	file.close()
@@ -4469,36 +4475,68 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
 
 
+# A placed item owns an AI brain when its row carries the AIData attrib and a
+# brain-class ai_function (Entity_SpawnFromBMSRecord's attrib test, then the
+# class init); the part-anim channels live in that brain.
+const PART_ANIM_CARRIER_ROW := """
+begin "Part Anim Carrier"
+  id 105012
+  type vehicle
+  graphic StaticCrate1
+  sid partanimcarrier
+  ai_function cveh
+  render_function cveh
+  move_function cveh
+  attrib: AIData neutral
+  hp 3000
+end
+"""
+
+
 func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
+	# PLAYPARTANIM stores only each channel's direction and rate in the item's
+	# brain (Entity_ApplyCommand's case 34 passes over an item without an AI
+	# slot), and no retail code integrates the phase: the sweep integrator
+	# Entity_UpdateSuspensionBounce has no caller, so the phase keeps the brain
+	# allocator's zero fill and HUD_CacheEntityDisplayInfo publishes that held
+	# value on both channels. The static crate carries no brain condition and
+	# publishes neither channel.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
-			MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+			MissionData.KIND_ITEM, 105012, Vector3.ZERO, Vector3.ZERO)
+	var crate := md.add_entity(
+			MissionData.KIND_ITEM, 105004, Vector3(8, 0, 0), Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
 	assert_gte(md.add_event(0, 0, 0), 0)
 	assert_true(md.add_event_action(0, 21, 34, ssn, 1, 1, 65536))
+	assert_true(md.add_event_action(0, 21, 34, crate.bms_id, 1, 1, 65536))
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	# The crate's controller seat comes from the committed armory model with
-	# its Armory point byte-renamed to ctrlx00 (the fixture def's graphic).
+	# Both graphics are the committed armory model with its Armory point
+	# byte-renamed to ctrlx00 (the fixture defs' graphic).
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/armory.3di"),
 			"Armory", "ctrlx00"))
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
+	var item_db := _item_db_from_text(dir, _fixture_items_text() + PART_ANIM_CARRIER_ROW)
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004, 5012]))
 	assert_true(sim.load_from_mission_data(md))
 	for _tick in range(80):
 		sim.step()
-	assert_gt(_present_field_for_origin(
-			sim, MissionData.KIND_ITEM, placed.index,
-			Simulation.PF_ACTIVE1), 0)
-	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, placed.index, 1), 65536,
-			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
+	assert_true(sim.has_event_fired(0), "the PLAYPARTANIM event ran")
+	for channel in [1, 2]:
+		var active_field: int = Simulation.PF_ACTIVE1 + (channel - 1) * 2
+		assert_eq(_present_field_for_origin(
+				sim, MissionData.KIND_ITEM, placed.index, active_field), 1,
+				"SP/host presentation publishes the brain's channel %d (high word zero)" % channel)
+		assert_eq(_present_phase_for_origin(
+				sim, MissionData.KIND_ITEM, placed.index, channel), 0,
+				"channel %d holds the brain's zero fill after PLAYPARTANIM" % channel)
+		assert_eq(_present_field_for_origin(
+				sim, MissionData.KIND_ITEM, crate.index, active_field), 0,
+				"the brainless crate publishes no channel %d" % channel)
 
 
 func test_present_part_anim_phase_transport_preserves_every_dword_bit() -> void:
@@ -4536,6 +4574,11 @@ func test_present_part_anim_phase_transport_preserves_every_dword_bit() -> void:
 
 
 func test_fast_rope_suppresses_only_special1_publication() -> void:
+	# HUD_CacheEntityDisplayInfo publishes the brain's two part-anim phases;
+	# the FastRope attrib withholds VEHICLE_SPECIAL1 alone. PLAYPARTANIM
+	# stores only the channels' direction and rate, and nothing integrates the
+	# phase (Entity_UpdateSuspensionBounce has no caller), so the published
+	# SPECIAL2 value is the brain's zero fill.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
@@ -4561,6 +4604,7 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	sim.resolve_item_traits(item_db)
 	for _tick in range(80):
 		sim.step()
+	assert_true(sim.has_event_fired(0), "the PLAYPARTANIM event ran")
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, placed.index,
 			Simulation.PF_ACTIVE1), 0,
@@ -4570,17 +4614,20 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 			Simulation.PF_ACTIVE2), 0,
 			"VEHICLE_SPECIAL2 remains unconditionally published")
 	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, placed.index, 2), 65536)
+			sim, MissionData.KIND_ITEM, placed.index, 2), 0,
+			"the published SPECIAL2 phase holds the brain's zero fill")
 	assert_false(sim.get_entity_part_anim_active(0, 1))
 	assert_true(sim.get_entity_part_anim_active(0, 2))
 
 
-func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
-	# The tank with a deterministic VEHICLE_SPECIAL1 track on its real turret
-	# part (the part owning the ewep01 user point); hang the synthetic ewep from
-	# that user point. A rigid parent-local reconstruction stays at the authored
-	# point; the authoritative mounted pose carries it four metres with the live
-	# part.
+func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
+	# The tank with a VEHICLE_SPECIAL1 track on its real turret part (the part
+	# owning the ewep01 user point); hang the synthetic ewep from that user
+	# point and run PLAYPARTANIM on the channel. PLAYPARTANIM stores only the
+	# channel's direction and rate in the carrier's brain, and no retail code
+	# integrates the phase (the sweep integrator Entity_UpdateSuspensionBounce
+	# has no caller), so the track holds the brain's zero fill: the
+	# authoritative mounted pose keeps the child on the resting userpoint.
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			SYN_TANK_SPECIAL1_SLIDE_EWEP01)), OK)
@@ -4636,9 +4683,8 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 
-	# First fold materializes the synthetic row before the scripted animation has
-	# reached its endpoint. Retain that baseline so the assertion cannot pass on
-	# a root-only follow implementation.
+	# The first fold materializes the synthetic row; the later frames must keep
+	# it where it started.
 	sim.step()
 	var stride := sim.get_present_stride()
 	var snapshot := sim.get_present_snapshot()
@@ -4654,9 +4700,13 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_true(initial_position.is_finite(), "synthetic ewep reached the listen client")
 	for _tick in range(79):
 		sim.step()
+	assert_true(sim.has_event_fired(0), "the PLAYPARTANIM event ran")
+	assert_eq(_present_field_for_origin(
+			sim, MissionData.KIND_ITEM, placed.index, Simulation.PF_ACTIVE1), 1,
+			"the carrier's brain publishes its VEHICLE_SPECIAL1 channel")
 	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, placed.index, 1), 65536,
-			"carrier reached the scripted live PANM endpoint")
+			sim, MissionData.KIND_ITEM, placed.index, 1), 0,
+			"PLAYPARTANIM leaves the carrier's phase at the brain's zero fill")
 	snapshot = sim.get_present_snapshot()
 	var final_position := Vector3.INF
 	for record in range(snapshot.size() / stride):
@@ -4667,13 +4717,12 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 					snapshot[base + Simulation.PF_POS_Y],
 					snapshot[base + Simulation.PF_POS_Z])
 			break
-	assert_true(final_position.is_finite(), "animated attachment remains presented")
+	assert_true(final_position.is_finite(), "the attachment remains presented")
 	if initial_position.is_finite() and final_position.is_finite():
-		assert_gt(final_position.distance_to(initial_position), 3.9,
-				"presented attachment follows its animated userpoint, not only the parent root")
-		var expected: Vector3 = anchor_info.position + Vector3(4, 0, 0)
-		assert_lt(final_position.distance_to(expected), 0.002,
-				"host snapshot uses the authoritative mounted child pose")
+		assert_lt(final_position.distance_to(initial_position), 0.002,
+				"the presented attachment holds still: its carrier part never sweeps")
+		assert_lt(final_position.distance_to(anchor_info.position), 0.002,
+				"host snapshot uses the authoritative mounted child pose on the resting userpoint")
 
 	# A zero-health vehicle compact legitimately retires the decoded attachment
 	# subtree. Stop restores the authoritative baseline; its fresh decoded view
@@ -4747,9 +4796,10 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 			FileAccess.get_file_as_bytes(fixture_res_path), "Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
-	_admit_standalone_script_ticks(sim)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	# The human stands inside the F3 hitbox view's range of the item.
+	_spawn_fixture_human(sim, Vector3(0, 0, 20))
 	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
@@ -4757,6 +4807,7 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	var before: PackedVector3Array = (before_rows[0] as HitboxDebugEntity).tris
 	for _tick in range(80):
 		sim.step()
+	assert_true(sim.has_event_fired(0), "the PLAYPARTANIM event ran")
 	var after_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_rows.size(), 1)
 	if after_rows.size() != 1:
@@ -4770,28 +4821,34 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	return moved
 
 
-func test_fast_rope_collision_publishes_special2_but_not_special1() -> void:
+func test_fast_rope_collision_holds_both_special_slides_at_rest() -> void:
+	# The collision CTRL dictionary takes the brain's two part-anim phases, with
+	# FastRope withholding SPECIAL1 alone, and PLAYPARTANIM never moves either:
+	# it stores only the channel's direction and rate, and no retail code
+	# integrates the phase (Entity_UpdateSuspensionBounce has no caller).
 	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL1_SLIDE, 1), 0,
 			"FastRope suppresses SPECIAL1 in authoritative collision evaluation")
-	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL2_SLIDE, 2), 24,
-			"SPECIAL2 remains published through the same collision CTRL dictionary")
+	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL2_SLIDE, 2), 0,
+			"the published SPECIAL2 holds the brain's zero fill, so its slide stays at rest")
 
 
-func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
+func test_register_driven_collision_holds_its_rest_pose_headlessly() -> void:
 	# The armory's COBJ parents are all 0; face counts are [12, 8, 2, 2]
-	# (tests/fixtures/minimal_3di_gen.cpp).
+	# (tests/fixtures/minimal_3di_gen.cpp), and its one register-driven slide
+	# rides VEHICLE_SPECIAL1, the brain's first part-anim phase. PLAYPARTANIM
+	# stores only the channel's direction and rate, and no retail code
+	# integrates the phase (the sweep integrator Entity_UpdateSuspensionBounce
+	# has no caller), so the brain keeps its zero fill and the authoritative
+	# collision holds every section at rest.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
-		MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
+		MissionData.KIND_ITEM, 105012, Vector3.ZERO, Vector3.ZERO)
 	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
 	assert_gte(md.add_event(0, 0, 0), 0)
 	assert_true(md.add_event_action(0, 21, 34, ssn, 1, 1, 65536))
 
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-		'res://../fixtures/def/items.def')), OK)
 	# armory with CTRL 0 named VEHICLE_SPECIAL1 and one register-driven slide
 	# of ordinal 1 (fixtures/README.md).
 	var data := ObjectData.new()
@@ -4806,11 +4863,13 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes(SYN_ARMRY_SPECIAL1_SLIDE), "Armory", "ctrlx00"))
-	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
+	var item_db := _item_db_from_text(dir, _fixture_items_text() + PART_ANIM_CARRIER_ROW)
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5012]))
 	assert_true(sim.load_from_mission_data(md))
-	_admit_standalone_script_ticks(sim)
-	assert_eq(sim.get_entity_count(), 1)
+	assert_eq(sim.get_entity_count(), 1, "the carrier owns the AI brain")
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	# The human stands inside the F3 hitbox view's range of the carrier.
+	_spawn_fixture_human(sim, Vector3(0, 0, 20))
 	var before_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_debug.size(), 1)
 	assert_eq((before_debug[0] as HitboxDebugEntity).face_total, 24)
@@ -4820,26 +4879,18 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	# No present pass/render node: collision reads authoritative AI state.
 	for _tick in range(80):
 		sim.step()
-	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65536)
+	assert_true(sim.has_event_fired(0), "the PLAYPARTANIM event ran")
+	assert_eq(sim.get_entity_part_anim_phase(0, 1), 0,
+			"PLAYPARTANIM leaves the brain's phase at its zero fill")
 	var after_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_debug.size(), 1)
 	var after: PackedVector3Array = (after_debug[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
-	var moved := 0
 	var stayed := 0
-	var partial := 0
 	for i in before.size():
-		var distance := before[i].distance_to(after[i])
-		if distance > 3.99:
-			assert_almost_eq(distance, 4.0, 0.002)
-			moved += 1
-		elif distance < 0.002:
+		if before[i].distance_to(after[i]) < 0.002:
 			stayed += 1
-		else:
-			partial += 1
-	assert_eq(moved, 24, "only ordinal 1 moves")
-	assert_eq(stayed, 48)
-	assert_eq(partial, 0)
+	assert_eq(stayed, 24 * 3, "every section, ordinal 1's slide included, holds its rest pose")
 
 
 func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
