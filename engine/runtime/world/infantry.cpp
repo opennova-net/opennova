@@ -897,6 +897,33 @@ void player_body_class_think(Entity &body) {
     body.spawn_phase = 64;
 }
 
+// See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
+//  channel @0x407B64..0x407B6C, team 1/2 @0x407B72..0x407B80, node count
+//  @0x407B86..0x407B94, the node walk @0x407BA0..0x407C6B (Pool_GetEntryUnchecked
+//  @0x407BBD), the unsigned octagon @0x407BC4..0x407BFB, SetBitB
+//  @0x407C13 / @0x407C35, SetBitA @0x407C49]
+void player_body_waypoint_visits(World &world, const Entity &body) {
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
+    const AiEntity *ai = world.ai.for_handle(body.handle);
+    if (ai == nullptr) return;
+    const int32_t channel = ai->slot.f[37];
+    if (channel == 0 || (body.team != 1 && body.team != 2)) return;
+    const NavChannel *route = world.ai.nav.channel(channel);
+    if (route == nullptr) return;
+    const int32_t count = std::min(route->count, 32);
+    for (int32_t node = 0; node < count; ++node) {
+        const NavEntry *marker = world.ai.nav.entry(route->entries[node]);
+        if (marker == nullptr) continue;
+        const uint32_t radius = static_cast<uint32_t>(marker->f[0]);
+        const uint32_t dx = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[1], ai->pos[0])));
+        const uint32_t dy = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[2], ai->pos[1])));
+        if (dx > radius || dy > radius) continue;
+        const uint32_t reach = dx > dy ? dx + (dy >> 1) : dy + (dx >> 1);
+        if (reach > radius) continue;
+        world.script.relations.mark_waypoint_visited(body.net_id, body.team, channel, node);
+    }
+}
+
 // See the infantry.h contract. [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
 int32_t death_ctrl_register_value(bool dead, int32_t corpse_timer) {
     if (dead && corpse_timer < 248) {
@@ -1273,13 +1300,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // local edge below and remote_player_body_anim's): the plyr class callback
     // fires as event 0 whenever entity+0x2AC is <= 0, and the counter decrements
     // every tick, corpse included (the callback then returns on Flags&2, so a
-    // dead body neither clears its kill-cause bits nor re-arms). The callback
-    // also runs a trigger-zone relation pass (@0x407b64..0x407c5f) that is not
-    // ported here. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
+    // dead body neither clears its kill-cause bits nor re-arms), then its
+    // waypoint tail. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
     //  the edge gate follows @0x4b4bf1]
     if (tick_entity != nullptr && !npc_body &&
         (tick_flags & kEntityFlagPlayer) != 0) {
-        if (tick_entity->spawn_phase <= 0) player_body_class_think(*tick_entity);
+        if (tick_entity->spawn_phase <= 0) {
+            player_body_class_think(*tick_entity);
+            player_body_waypoint_visits(world, *tick_entity);
+        }
         --tick_entity->spawn_phase;
     }
 

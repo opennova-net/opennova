@@ -171,6 +171,16 @@ int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, flo
 //  @0x407b5e / @0x407c71 (spawnPhase = 64)]
 void player_body_class_think(Entity &body);
 
+class World;
+// The plyr class callback's waypoint tail, run on every event it handles for a
+// live body: a team 1 or 2 player whose AI slot carries a route channel
+// (slot+0x94) marks every node of that channel within the node's octagonal
+// radius (the larger axis gap plus half the smaller, each gap and the sum
+// compared unsigned against the marker's radius word) as visited by its team
+// (the relation group row) and by itself (its SSN row).
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B]
+void player_body_waypoint_visits(World &world, const Entity &body);
+
 // The org0 skin bone-callback's DEATH register (CTRL ordinal 6, the corpse fade):
 // a dead body ramps 0xFFFF -> 0 over the 186 ticks its move timer (entity+0x148,
 // Entity::corpse_timer) spends between 248 and 62, then holds 0 for its last 62

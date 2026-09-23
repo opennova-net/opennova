@@ -542,6 +542,57 @@ void test_org1_float_reads_this_ticks_eye() {
     CHECK(rig.e().pos[2] == 552421);
 }
 
+// The plyr class callback's waypoint tail: a team 1/2 player whose AI slot
+// carries a route channel marks every node inside the node's octagonal radius
+// (the larger axis gap plus half the smaller) visited by its team and by its
+// SSN, on the think event and on a script kill's event alike.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B]
+void test_player_waypoint_tail() {
+    auto arm = [](Org1Rig &rig) {
+        rig.e().inf.is_local_player = true;
+        rig.entity().flags |= kEntityFlagPlayer;
+        rig.entity().team = 1;
+        rig.entity().net_id = 7;
+        rig.e().slot.f[37] = 3;
+        NavNodeTable &nav = rig.w->ai.nav;
+        nav.channels.resize(4);
+        nav.channels[3].count = 3;
+        nav.channels[3].entries[0] = 0;
+        nav.channels[3].entries[1] = 1;
+        nav.channels[3].entries[2] = 2;
+        nav.nodes.resize(3);
+        // 0.75 u east, 0.5 u north of the body, radius 1 u: 0.75 + 0.25 is inside
+        nav.nodes[0].f[0] = fx(1);
+        nav.nodes[0].f[1] = fx(100.75);
+        nav.nodes[0].f[2] = fx(100.5);
+        // 0.8 u east, 0.5 u north: inside the square, outside the octagon
+        nav.nodes[1].f[0] = fx(1);
+        nav.nodes[1].f[1] = fx(100.8);
+        nav.nodes[1].f[2] = fx(100.5);
+        nav.nodes[2].f[0] = fx(1);
+        nav.nodes[2].f[1] = fx(150);
+        nav.nodes[2].f[2] = fx(100);
+    };
+    {
+        Org1Rig rig; // the think event (spawn_phase starts at 0)
+        arm(rig);
+        rig.tick(2);
+        const TriggerRelations &rel = rig.w->script.relations;
+        CHECK(rel.single_visited(7, 3, 0) && rel.group_visited(1, 3, 0));
+        CHECK(!rel.single_visited(7, 3, 1) && !rel.group_visited(1, 3, 1));
+        CHECK(!rel.single_visited(7, 3, 2));
+    }
+    {
+        Org1Rig rig; // the script kill's event
+        arm(rig);
+        rig.entity().item_id = 1;
+        CHECK(rig.w->commands.kill_ssn(rig.handle));
+        const TriggerRelations &rel = rig.w->script.relations;
+        CHECK(rel.single_visited(7, 3, 0) && rel.group_visited(1, 3, 0));
+        CHECK(!rel.single_visited(7, 3, 1));
+    }
+}
+
 // ---- the org1 phase order (R3-8) ----
 
 // R3-8: org1 chases its heading and look after the think and BEFORE its fire
@@ -654,6 +705,7 @@ int main() {
     test_org1_afloat_corpse_decays();
     test_org1_airborne_edge_stamp();
     test_org1_float_reads_this_ticks_eye();
+    test_player_waypoint_tail();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

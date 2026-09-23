@@ -156,7 +156,8 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     return true;
 }
 
-// The organic death transaction's stand-in, defined with the group kill below.
+// The player bodies' death transaction stand-in (an org1 body's own edge
+// raises its own), defined with the group kill below.
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h);
 
 namespace {
@@ -236,6 +237,9 @@ void script_kill_class_event(World &world, Entity &e, int phase) {
                 e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
             if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
         }
+        // The callback's shared tail: the waypoint visits between the two
+        // think re-arms. [orig: @0x407B64..0x407C6B]
+        player_body_waypoint_visits(world, e);
         e.spawn_phase = 64;
         return;
     }
@@ -264,8 +268,9 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
         e->death_anim_state = 0;
     }
     script_kill_class_event(world_, *e, pool == 3 ? 4 : 1);
-    // Edge stand-in (organic death transaction) until the org1/org2 death edge
-    // owns it [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    // The organic death transaction: an org1 body's own edge raises it, the
+    // player bodies take this stand-in for theirs
+    // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
     return true;
@@ -285,8 +290,9 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     e->last_attacker = {};
     if (e->item_type == 3) e->death_anim_state = 0;
     script_kill_class_event(world_, *e, 1);
-    // Edge stand-in (organic death transaction) until the org1/org2 death edge
-    // owns it [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    // The organic death transaction: an org1 body's own edge raises it, the
+    // player bodies take this stand-in for theirs
+    // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
     return true;
@@ -1348,10 +1354,10 @@ int EntityCommands::kill_group(int group) {
             const bool crosses_edge = script_kill_crosses_edge(*e);
             e->health = 0;
             script_kill_class_event(world_, *e, 1);
-            // Edge stand-in (organic death transaction) until the org1/org2
-            // death edge owns it: only the living cross it, so a group killed
-            // twice notifies once [orig: @0x4B9D4D / @0x4B4CEA ->
-            // Entity_CheckAndProcessDeath @0x51B550].
+            // The organic death transaction: an org1 body's own edge raises
+            // it, the player bodies take this stand-in; only the living cross
+            // it, so a group killed twice notifies once [orig: @0x4B9D4D /
+            // @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
             if (e->kind == EntityKind::Organic && crosses_edge)
                 raise_scripted_death(world_, *e, h);
             ++n;
