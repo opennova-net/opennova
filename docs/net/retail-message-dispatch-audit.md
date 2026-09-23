@@ -36,6 +36,10 @@ observed before their corresponding fixes.
   the periodic S2C 0x46 quality resend are ported (net-re §8 D-NET-218 lists
   them with their witnesses); C2S 0x40 has its gates but spawns through an
   embedder seam.
+- **2026-09-23:** S2C 0x3F, the authority's HUD relay (the objective
+  notification and the mission-text chat line), is decoded and consumed on both
+  sides: `Server_BroadcastEntityActionPacket @0x5080D0` and
+  `NapiNPClientMsg_0x03F @0x42BB20` (net-re §5.69).
 - **D-NET-174:** authority-local fire still needs the same admission predicate.
   Retail calls it from the authority arm at `@0x42BE3A`; pure joiner prediction
   intentionally has no equivalent gate. Remote C2S admission is covered here.
