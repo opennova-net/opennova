@@ -205,33 +205,44 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 }
 
 // The class event callback a script kill fires, entity+0x1C8(entity, phase, 0),
-// after the kill zeroed the hit record, so every attacker leg sees a null
-// attacker. [orig: Entity_ResetWeaponState @0x4F1EC7..0x4F1ED2; Entity_KillByNetId
-// @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3, phase 4)]
+// reading the global hit record as the kill left it: WAC killSSN zeroed it,
+// while the BMS kills cleared only its damage word (and a KillSingle pool-0
+// row or a KillGroup row its owner), so their callbacks still see the last
+// recorded round. [orig: Entity_ResetWeaponState @0x4F1EC7..0x4F1ED2;
+// Entity_KillByNetId @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3,
+// phase 4); Entity_KillAllByNetId @0x43C936..0x43C93F]
 void script_kill_class_event(World &world, Entity &e, int phase) {
+    const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
         const uint32_t flags = e.flags | e.engine_flags;
         if ((flags & kEntityFlagPlayer) == 0) {
             // org0/org1: the phase-1 arm puts the victim and its trigger group
-            // on red alert; the null attacker then leaves before the death-anim
-            // and debris legs. Phase 4 only zeroes the health word here.
-            // [orig: Entity_HandleDamageTrigger @0x4073BF..0x4073EA, attacker
-            //  exit @0x40740D; phase-4 arm @0x40733F..0x407358]
+            // on red alert, then runs the round legs while the record holds a
+            // round. Phase 4 only zeroes the health word here.
+            // [orig: Entity_HandleDamageTrigger @0x4073BF..0x4073EA, the round
+            //  test @0x40740D; phase-4 arm @0x40733F..0x407358]
             if (phase != 1) return;
             if (AiEntity *ae = world.ai.for_handle(e.handle))
                 ae->slot.bytes()[AiSlot::kAlertByte] = 2;
             world.script.relations.group(e.group_id).alert = TriggerRelations::kAlertRed;
+            if (record.has_round) person_class_round_legs(world, e, record);
             return;
         }
-        // plyr: a body already flagged dead returns at once; phase 1's kill
-        // scoring returns on the null attacker; the health tail stages the
-        // default death clip when none is staged, and a mounted body leaves its
-        // seat on the authority; every event re-arms the think cadence.
-        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return);
-        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null attacker);
-        //  tail @0x407AC5..0x407AE7 (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)),
-        //  @0x407AED..0x407B20 (Entity_DetachFromVehicleIfServer), @0x407B5E]
+        // plyr: a body already flagged dead returns at once. Phase 1 with a
+        // recorded round runs the round legs (its network kill scorer only
+        // reaches GameEvent_ProcessScoring case 2, which the port does not
+        // model, live hits included); with none the scorer returns at once.
+        // The health tail then stages the default death clip when none is
+        // staged, and a mounted body leaves its seat on the authority; every
+        // event re-arms the think cadence.
+        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return),
+        //  the round test @0x4078D8..0x4078DA, legs @0x407777..0x407A7C;
+        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null round);
+        //  GameEvent_ProcessScoring case 2 @0x52FC22; tail @0x407AC5..0x407AE7
+        //  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)), @0x407AED..0x407B20
+        //  (Entity_DetachFromVehicleIfServer), @0x407B5E]
         if ((flags & kEntityFlagDead) != 0 || phase != 1) return;
+        if (record.has_round) person_class_round_legs(world, e, record);
         if (retail_signed_i16(e.health) <= 0) {
             if (e.death_anim_state == 0)
                 e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
@@ -247,7 +258,13 @@ void script_kill_class_event(World &world, Entity &e, int phase) {
         run_brain_class_event(world, e, phase);
         return;
     }
-    destruction_notify_item_damage(world, e, phase, {0, 0});
+    // An item callback reads the record's section, damage and angles.
+    // [orig: hitRecord[14] / [12] / [3..5], e.g. Entity_HandleDeathEvent
+    //  @0x4071EF, Entity_UpdateSectionDamage @0x4406B4,
+    //  WeaponOverlay_HandleDamage @0x53C53B]
+    destruction_notify_item_damage(world, e, phase,
+            {record.section, record.damage, record.round_yaw_bam,
+             record.round_pitch_bam, record.round_roll_bam});
 }
 
 } // namespace
@@ -263,9 +280,14 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
     const bool crosses_edge = script_kill_crosses_edge(*e);
     const int pool = e->handle.pool();
     e->health = 0;
+    // Every pool leg clears the hit record's damage word; only the pool-0 leg
+    // also clears its owner [orig: +0x44 @0x43DC22, +0x30 @0x43DC27 (pool 0);
+    // +0x30 @0x43DC68 (pool 1), @0x43DCA6 (pool 2), @0x43DCE8 (pool 3)].
+    world_.round_sim.hit_record.damage = 0;
     if (pool == 0) {
         e->last_attacker = {};
         e->death_anim_state = 0;
+        world_.round_sim.hit_record.owner = {};
     }
     script_kill_class_event(world_, *e, pool == 3 ? 4 : 1);
     // The organic death transaction: an org1 body's own edge raises it, the
@@ -286,6 +308,7 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (e == nullptr || e->item_type_index == 0) return false;
     const bool crosses_edge = script_kill_crosses_edge(*e);
+    world_.round_sim.hit_record = HitRecord{};
     e->health = 0;
     e->last_attacker = {};
     if (e->item_type == 3) e->death_anim_state = 0;
@@ -1353,6 +1376,11 @@ int EntityCommands::kill_group(int group) {
             if (e == nullptr) continue;
             const bool crosses_edge = script_kill_crosses_edge(*e);
             e->health = 0;
+            // Each row clears the hit record's damage and owner words
+            // [orig: @0x43C930 / @0x43C933 (pool 2), @0x43C980 / @0x43C983
+            //  (pool 0), @0x43C9D0 / @0x43C9D3 (pool 1)].
+            world_.round_sim.hit_record.damage = 0;
+            world_.round_sim.hit_record.owner = {};
             script_kill_class_event(world_, *e, 1);
             // The organic death transaction: an org1 body's own edge raises
             // it, the player bodies take this stand-in; only the living cross

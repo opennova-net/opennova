@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <runtime/world/collision.h>
@@ -1307,7 +1308,18 @@ private:
     //  Entity_ComputeUserpointWorldTransform @0x545C60 with a NULL slot]
     bool usegun_gun_point(World &world, const Entity &gunner, int32_t out[6]) const;
 
+    // Seat a piece's brain: its handle's stale brain released, then the
+    // lowest free slot or a new one.
+    int place_dismemberment_piece(EntityHandle h, AiEntity &&piece);
+
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
+    // A body's own update holds references into entities_, and its org1
+    // death edge's hit callback can clone a dismemberment piece mid-update
+    // (retail's clone lands in fixed pool and AI-block arrays [orig:
+    // Entity_CloneFromTemplateByType @0x4398A0]). Such a piece's brain,
+    // copied at clone time, is seated once that body's update returns.
+    bool defer_piece_brains_ = false;
+    std::vector<std::pair<EntityHandle, AiEntity>> deferred_piece_brains_;
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     AnimVariantRings spawn_baseline_rings_; // the ring heads at the same capture
     std::vector<int> handle_to_ai_index_;

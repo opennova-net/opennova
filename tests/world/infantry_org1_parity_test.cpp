@@ -13,6 +13,7 @@
 #include <runtime/audio/sound_profile.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -542,6 +543,35 @@ void test_org1_float_reads_this_ticks_eye() {
     CHECK(rig.e().pos[2] == 552421);
 }
 
+// R3-4 remainder: the org1 edge's unstaged hit callback reads the global hit
+// record, so while it still holds a round the callback's round legs replace
+// the generic clip with that round's (its section and approach quadrant)
+// and, on a numbered section, cut the body mid-walk.
+// [orig: Entity_UpdateInfantryAI @0x4B9CDB..0x4B9CF1; Entity_HandleDamageTrigger
+// the round test @0x40740D, select @0x407483, the clone @0x40768A]
+void test_org1_edge_reads_the_recorded_round() {
+    CHECK(death_quadrant_from_round(bam_heading_from_mission_yaw_deg(90.0), 10.0f, 0.0f) == 2);
+    for (const int32_t section : {0, 3}) {
+        Org1Rig rig;
+        arm_death(rig);
+        rig.entity().yaw = 90; // engine heading 0: a +X round arrives from behind
+        HitRecord &record = rig.w->round_sim.hit_record;
+        record.has_round = true;
+        record.round_vel_q16 = FixedVec3{10 << 16, 0, 0};
+        record.round_ammo_index = -1; // no ammo row: no force leg
+        record.section = section;
+        rig.tick(40);
+        CHECK(rig.e().inf.anim_state ==
+              compute_death_anim_state(section, 2, death_cause::kBullet));
+        CHECK(rig.w->round_sim.hits.size() == 1);
+        int pieces = 0;
+        rig.w->registry.for_each_in_pool(0, [&](const Entity &e) {
+            if (e.dismemberment_piece) ++pieces;
+        });
+        CHECK(pieces == (section > 0 ? 1 : 0));
+    }
+}
+
 // The plyr class callback's waypoint tail: a team 1/2 player whose AI slot
 // carries a route channel marks every node inside the node's octagonal radius
 // (the larger axis gap plus half the smaller) visited by its team and by its
@@ -706,6 +736,7 @@ int main() {
     test_org1_airborne_edge_stamp();
     test_org1_float_reads_this_ticks_eye();
     test_player_waypoint_tail();
+    test_org1_edge_reads_the_recorded_round();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

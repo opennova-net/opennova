@@ -423,6 +423,46 @@ struct RoundHit {
     int16_t secondary_section = -1;
 };
 
+// The one global hit record the damage passes fill for the class event
+// callbacks [orig: hitRecord @0xB7C620, 80 bytes, Projectile_GetHitRecord
+// @0x4E7000]. Projectile_CopyEntityToHitRecord @0x4E7010 zeroes it and
+// copies the striking round: its position and angles (+0x00..+0x14), its
+// velocity (+0x18..+0x2C), the round itself (+0x40), its owner (+0x44) and
+// its ammo word (+0x4C). An entity hit then stores the damage (+0x30), the
+// struck section (+0x38) and the target (+0x48); a terrain stop leaves them
+// zero. Only the mission start and WAC killSSN zero the whole record; the
+// BMS kills clear the damage word (and the owner for some rows), so every
+// later event-1 callback still reads the LAST recorded round. The callbacks
+// read that round through the +0x40 pointer, and a released round keeps its
+// bytes until the slot allocator's cursor comes back to it 512 allocations
+// later [orig: Projectile_ReleaseEffects @0x4E8280 clears only its effect
+// words; CEntityManager_AllocateSlot's memset @0x4EABC0..0x4EABC8]. LiveRound
+// carries no pool-slot identity, so the round_* fields hold the round as it
+// stood when the record was written.
+struct HitRecord {
+    bool has_round = false;       // +0x40 non-null
+    Vec3 round_pos;               // the round's +0x04..+0x0C
+    FixedVec3 round_vel_q16;      // the round's +0x98..+0xA0
+    int32_t round_yaw_bam = 0;    // +0x0C..+0x14 (hitRecord[3..5])
+    int32_t round_pitch_bam = 0;
+    int32_t round_roll_bam = 0;
+    int32_t round_ammo_index = 0; // the round's +0x26C
+    EntityHandle round_owner;     // the round's +0x170
+    int32_t damage = 0;           // +0x30 (hitRecord[12])
+    int32_t section = 0;          // +0x38 (hitRecord[14])
+    EntityHandle owner;           // +0x44 (hitRecord[17])
+    EntityHandle target;          // +0x48
+};
+
+// The person class callbacks' round legs, run on event 1 while the hit record
+// holds a round: the death clip from the record's section and the round's
+// approach quadrant, the ammo's collision force from the round, the
+// torso-stack body roll, the damage reaction, and on the authority the
+// dismemberment cut of a non-player body.
+// [orig: Entity_HandleDamageTrigger @0x40740F..0x4076D5; the plyr twin
+//  Entity_HandleDamageAndTriggerZones @0x407777..0x407A7C]
+void person_class_round_legs(World &world, Entity &victim, const HitRecord &record);
+
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
 // HOST present layer for the fire sound + muzzle effect (+ the MF-light deferral).
 // [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 presents inline at fire time on
@@ -518,6 +558,9 @@ public:
     // right after the explosion queue, before the pool-0 walk (wasHit / lastAttacker /
     // SM damage events).
     std::vector<RoundHit> hits;
+
+    // The global hit record (see HitRecord).
+    HitRecord hit_record;
 
     // Fires spawned since the last presentation drain (every spawn records one, the
     // local player's included — the present pass self-filters). Drained by the host

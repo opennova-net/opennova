@@ -211,7 +211,6 @@ void AiSystem::release(EntityHandle h) {
 
 int AiSystem::attach_dismemberment_piece(
         EntityHandle h, const AiEntity &source, const int32_t impulse_q16[3]) {
-    release(h);
     AiEntity piece = source;
     piece.handle = h;
     piece.brain = AiBrain{};
@@ -233,6 +232,15 @@ int AiSystem::attach_dismemberment_piece(
     piece.inf.vel[0] += impulse_q16 != nullptr ? impulse_q16[0] : 0;
     piece.inf.vel[1] += impulse_q16 != nullptr ? impulse_q16[1] : 0;
     piece.inf.vel[2] += impulse_q16 != nullptr ? impulse_q16[2] : 0;
+    if (defer_piece_brains_) {
+        deferred_piece_brains_.emplace_back(h, std::move(piece));
+        return -1;
+    }
+    return place_dismemberment_piece(h, std::move(piece));
+}
+
+int AiSystem::place_dismemberment_piece(EntityHandle h, AiEntity &&piece) {
+    release(h);
     int index = -1;
     for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
         if (entities_[i].brain.f[AiBrain::kOwner] == 0) {
@@ -400,11 +408,15 @@ void process_class_state_machine(
         ev.f[0] = 1;
         ev.f[1] = g.notify_channel | (ai_index << 16); // channel word | entity index
         ev.set_timer(0.0f);
-        // [orig: ev.f[3] = Projectile_GetHitRecord()[17] @0x458326] the notification payload read from
-        // the current hit record (Projectile_GetHitRecord @0x4e7000 returns the hitRecord global; its
-        // field [17] is not modeled here, so f[3] is left 0). If the notification reaches a ground
-        // combat-event handler (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39]
+        // The notification payload is the hit record's owner word, as a script
+        // kill left it (a KillSingle item row keeps it) [orig:
+        // EntityAI_ProcessInfantryStateMachine `mov ecx,[eax+44h]` @0x45831E,
+        // stored into the event @0x458326; EntityAI_ProcessVehicleStateMachine
+        // @0x458524]. If the notification reaches a ground combat-event handler
+        // (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39]
         // (kDamageInfo).
+        const EntityHandle owner = world.round_sim.hit_record.owner;
+        ev.f[3] = owner.valid() ? int32_t(owner.packed) + 1 : 0;
         sys.events.queue(ev);
         finish();
         return;
@@ -567,7 +579,13 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // host's S2C 0x0A ClientState, so that idle tick cannot overwrite wire pose.
     // [orig: the client also runs the per-entity AI tick;
     //  Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
+    // A piece its death edge cuts off gets its brain once the update returns.
+    defer_piece_brains_ = true;
     tick_infantry(e, world, logic_tick);
+    defer_piece_brains_ = false;
+    for (auto &deferred : deferred_piece_brains_)
+        place_dismemberment_piece(deferred.first, std::move(deferred.second));
+    deferred_piece_brains_.clear();
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {

@@ -2148,6 +2148,54 @@ void test_terrain_impact_emits_permanent_scorch() {
     CHECK(world.out.terrain_scorches.pending().empty());
 }
 
+// A terrain stop records its round in the global hit record with no damage,
+// section or target. [orig: Projectile_HandleTerrainImpact
+// Projectile_CopyEntityToHitRecord @0x4E9319..0x4E931F, +0x30 / +0x48 zeroed
+// @0x4E9326 / @0x4E932B]
+void test_terrain_stop_records_the_round() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 10.0f};
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+    AmmoTableEntry ammo;
+    ammo.name = "RECORD";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.round_sim.hit_record.damage = 99;
+    world.round_sim.hit_record.section = 5;
+    RoundSpawnParams params;
+    params.owner = owner;
+    params.shooter_handle = owner.packed;
+    params.origin = {10.0f, -20.0f, 2.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{0.0f, 0.0f, -10.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    const HitRecord &record = world.round_sim.hit_record;
+    CHECK(record.has_round);
+    CHECK(record.round_owner == owner && record.owner == owner);
+    CHECK(record.round_ammo_index == 0);
+    CHECK(record.round_vel_q16.z < 0);
+    CHECK(record.damage == 0 && record.section == 0 && !record.target.valid());
+}
+
 // The ordinary BULLET path never remaps a building's CFAC material 1 to the
 // flesh bank: retail's ballistic entity impact passes material + 4
 // unconditionally; the 1 -> 23 remap belongs to the knife's PERSON leg alone.
@@ -2635,6 +2683,22 @@ void test_round_hit_runs_the_player_waypoint_tail() {
     CHECK(v->spawn_phase == 64);
     CHECK(r->world.script.relations.single_visited(7, 3, 0));
     CHECK(r->world.script.relations.group_visited(1, 3, 0));
+}
+
+// A round hit records its round, the damage, the struck section and the
+// target in the global hit record. [orig: Projectile_ProcessDamageOnTarget
+// Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30 @0x4E81C9,
+// +0x38 @0x4E81D2, +0x48 @0x4E81D7]
+void test_round_hit_records_the_round() {
+    auto r = std::make_unique<PlayerVictimRig>();
+    r->fire_and_tick();
+    const HitRecord &record = r->world.round_sim.hit_record;
+    CHECK(record.has_round);
+    CHECK(record.round_owner == r->shooter && record.owner == r->shooter);
+    CHECK(record.round_ammo_index == 0);
+    CHECK(record.damage == 1860);
+    CHECK(record.section == 13);
+    CHECK(record.target == r->victim);
 }
 
 // The kill-cause bits live on the ENTITY (retail +44 bits 8..11), latched at
@@ -3220,6 +3284,7 @@ int main() {
     test_material_15_breaks_the_building_glass_section();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
+    test_terrain_stop_records_the_round();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();
     test_visual_dynamic_proxy_excludes_shooter_self_slot();
@@ -3237,6 +3302,7 @@ int main() {
     test_move_effect_water_release_reads_pre_move_z();
     test_move_effect_ballistic_leg_ignores_the_water_plane();
     test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
+    test_round_hit_records_the_round();
     test_round_hit_runs_the_player_waypoint_tail();
     test_same_projectile_second_player_kill_latches_0x100();
     test_kill_event_reads_the_pre_hit_health_and_the_dead_flag();

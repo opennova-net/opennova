@@ -1607,6 +1607,15 @@ target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_los_test PRIVATE cxx_std_17)
 add_test(NAME ai_los COMMAND ai_los_test)
 
+# The global hit record and the script kills that read it: the BMS kills keep
+# the last recorded round, WAC killSSN zeroes it, items read its section and
+# a brained item's machine its owner word.
+add_executable(hit_record_test world/hit_record_test.cpp)
+target_link_libraries(hit_record_test PRIVATE opennova_runtime)
+target_include_directories(hit_record_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hit_record_test PRIVATE cxx_std_17)
+add_test(NAME hit_record COMMAND hit_record_test)
+
 add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
 target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
