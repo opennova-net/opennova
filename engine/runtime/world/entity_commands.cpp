@@ -796,6 +796,33 @@ bool in_pools_01(EntityHandle h) { return h.valid() && h.pool() <= 1; }
 
 } // namespace
 
+bool EntityCommands::bms_ref_alive(int32_t ssn) const {
+    // SSN 0 reads not alive. Pools 0, 1, 2 are walked in slot order and the
+    // first row whose DcbId equals the SSN answers !(Flags & 2). No matching
+    // row reads not alive: an SSN that was never placed or was rejected at
+    // admission reads DESTROYED to the caller, and so does a removed one,
+    // whose row Entity_Destroy zeroes.
+    // [orig: Entity_IsAliveByBmsRef @0x43e640 — SSN 0 @0x43e644; the flag
+    //  read @0x43e66e..0x43e676; no match @0x43e6dc; Entity_Destroy @0x43ea69]
+    if (ssn == 0) return false;
+    for (int pool = 0; pool <= 2; ++pool) {
+        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr) continue;
+            // The SP listen-host model's socketless local body carries net_id
+            // 0 where retail stamps the player's DcbId 10000 + slot; the same
+            // D-NET-112 alias ssn_in_area applies.
+            // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
+            const bool local_alias = !world_.rules.mp_session && ssn == kLocalPlayerSsn &&
+                    handle == world_.cached.local_player && entity->net_id == 0;
+            if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
+            return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
+        }
+    }
+    return false;
+}
+
 bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
     // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — SSN 0 -> 0 @0x43e787;
     // pools 0-1; aiRuntime (entity+0x68) null -> 0; byte +0x88 == level]

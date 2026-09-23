@@ -191,6 +191,11 @@ public:
     // --- the cat-2 single-state trigger queries (EventTrigger cat 2;
     // bms-event-runtime-re §3b — every helper's RAW sense is POSITIVE, the
     // authored chain-negation bit does the flipping) ---
+    // [orig: Entity_IsAliveByBmsRef @0x43e640] The BMS SingleAlive /
+    // SingleDestroyed read: the first pool 0/1/2 row carrying the SSN answers
+    // with its dead flag; SSN 0 and an SSN no row carries (never placed,
+    // rejected at admission, or removed) read NOT alive.
+    bool bms_ref_alive(int32_t ssn) const;
     // [orig: Entity_IsSsnAtAlertLevel @0x43e780] No AI component (aiRuntime
     // null) -> false; else the per-entity controller alert byte == level
     // (2 red / 1 yellow / 0 green).

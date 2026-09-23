@@ -160,9 +160,16 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // bit = number p3 [orig: 0xAC86F8; record §3a sub 7].
                     return rel.single_visited(t.param1, t.param2, t.param3);
                 case bms::SingleTriggerType::SingleDestroyed:
-                    return cmds.ssn_dead(static_cast<uint16_t>(t.param1));
+                    // The negation of the alive read: an SSN no row carries
+                    // (never placed, rejected, SSN 0, or removed) reads
+                    // DESTROYED. [orig: EventTrigger_EvaluateCondition cat 2
+                    // sub 4 @0x453985 -> Entity_IsAliveByBmsRef, neg/sbb/add
+                    // @0x453991..0x453995]
+                    return !cmds.bms_ref_alive(t.param1);
                 case bms::SingleTriggerType::SingleAlive:
-                    return cmds.ssn_alive(static_cast<uint16_t>(t.param1));
+                    // [orig: EventTrigger_EvaluateCondition cat 2 sub 5
+                    //  @0x45399d -> Entity_IsAliveByBmsRef @0x43e640]
+                    return cmds.bms_ref_alive(t.param1);
                 case bms::SingleTriggerType::SingleIsWithinArea:
                     return cmds.ssn_in_area(t.param1, t.param2);
                 // The 2026-08-13 grill closed the rest of the cat-2 switch

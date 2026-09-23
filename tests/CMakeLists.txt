@@ -2126,6 +2126,17 @@ target_include_directories(event_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(event_runtime_test PRIVATE cxx_std_17)
 add_test(NAME event_runtime_bms COMMAND event_runtime_test)
 
+# BMS event parity: the retail-witnessed trigger/action semantics (bms-event-runtime-re)
+# through the public BmsEventSystem / EntityCommands seams.
+add_executable(bms_event_parity_test mission/bms_event_parity_test.cpp)
+target_link_libraries(bms_event_parity_test PRIVATE opennova_runtime)
+target_include_directories(bms_event_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bms_event_parity_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(bms_event_parity_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME bms_event_parity COMMAND bms_event_parity_test)
+
 # Mission -> world promotion: spawn a parsed mission's entities into the world pools,
 # allocate AI brains per organic, build the waypoint nav table, then tick the AI to prove
 # entities patrol their authored routes (the connective tissue for the live sim).
