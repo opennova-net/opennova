@@ -72,13 +72,13 @@ target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only the saveg
 | `process_infantry_state_machine` / `process_vehicle_state_machine` | the class machines (`EntityAI_ProcessInfantryStateMachine` / `EntityAI_ProcessVehicleStateMachine`) | 0x4581b0 / 0x4583c0 | event-callback fn1 rows; ctest `movement_brain_parity` (retail-executed dispatcher rows) | **matching**; both names are historical: 0x4581b0 is the AIR-class machine (CHel, and cpln through thunk 0x462120), 0x4583c0 the GROUND-class machine (cveh, and cbot/ctrn through thunks 0x462130/0x462140) |
 | `h_ground_followwp_tick` etc. | state 16/17/18 rows | 0x815338+ | prior grill (raw bytes) | **matching** |
 | P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill; candidate FEED + LOS + refcount witnessed 2026-07-16 (§16.2/16.3) | **matching** (scoring core; the feed is ported, D-AI-1 §16.2a; the SM combat states are ported, the state-17 tick in §17.6; D-AI-3 closed 2026-07-16) |
-| `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); the vehicle and HELO motors are ported per family since PR #640 — [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; vehicle record) |
+| `World::update_pool1_slot` (the +0x1C4 mover leg; the interim `AiSystem::apply_locomotion` model is deleted) | `Entity_UpdatePool1Slot` | 0x4b8dd0 | no generic brain integrator: a pool-1 row moves only through its items.def move_function callback (`g_EntityClassPhysicsTable @ 0x82ABC8`); the vehicle and HELO motors are ported per family since PR #640, and [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; §38.9) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; the entity update's pool-0 walk runs the body's +0x1C4 motor through `AiSystem::update_organic` (`World::update_all_entities`) | **matching** |
 | `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in engine/runtime/world/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ the D-INF rows enumerated in §5 (the ledger carries their status) |
 | `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | all 252 entries (body 0-239 + `wpn_*` 240-251; `EOF` 252 is the terminator, §14.8.2) ported in `infantry_tables.cpp` | **matching** |
 | promote `init_ai_slot` (every AI-capable record, vehicles included; 2026-09-22) + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer; the def gate is AI attrib 0x100000 (`@0x40ED4E`), for which the `ai_capable` gate (organics, plus items that author a control seat) stands in | **matching** |
 | `anim::AdmRootMotion` + `anim::ClipTimeline` (engine) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (the playhead clock is `ClipTimeline`, §4 item 16) |
-| `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
+| `calc_average_ground_height` / `AiSystem::aircraft_ground_height` (the `apply_ground_clamp` stand-in is deleted) | `Entity_CalcAverageGroundHeight` | 0x457230 | 5-tap port with the brain's husk/intact floor and the east/centre ground links (§10.2); only the vehicle/aircraft brain helpers call it in retail, so the org1 motor's every-8 sample is the port's own stand-in (§3.1) | **matching** (§38.1, §38.5) |
 | WAC pipeline (`engine/formats/wac` front end + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
 | `VehicleSystem::player_toggle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
 | `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u 3D gate and the aim cone, score `d3 + aim/512`, enemy-occupant reject, LOS before the best compare; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
@@ -502,8 +502,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `pos[2] = ground_cache + frame.capsule_bottom` (`engine/runtime/world/infantry.cpp`). `MissionKernel`
     registers each body's own `.adm` (per-entity `adm_id`, `adm_id_for_runtime_type`) with
     `E_STAND.adm` (`kDefaultInfantryAdm`) as the default, so every
-    motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
-    is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
+    motor-driven soldier resolves a real standing `capsule_bottom`. The former `ground_stand_offset`
+    (0x50000) left with the deleted `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
   - (No D-INF-7 was ever minted — the list keeps session ids, so the numbering jumps
     6 → 8, like the documented D-MUS-1/4/8 gaps.)
@@ -1130,18 +1130,21 @@ ENG-3 B0 grill, full witness in [terrain-re.md](../terrain/terrain-re.md) §Runt
 queries); for a near-vertical down-ray this equals the bilinear heightmap column height.
 
 ### 10.3 The vertical assignment + our port
-Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` sets
-`ground(0x50000) + 0x50000`; `0x460e40` sets `max(nodeZ-or-ground+heightOffset, def[232]+ground)`
-(§7.4). Our lean `AI_UpdateWaypointMovement @ 0x457bd0` port never wrote `brain[131]` — the root cause
-of the floating-AI bug. Shipped: portable `terrain/height_field` (the three `TerrainData`
-samplers lifted verbatim, TerrainData delegates); `world::calc_average_ground_height` (the
-0x457230 math, 16.16); `AiSystem::apply_ground_clamp` SETs `brain[131]` + snaps
-`pos[2] = ground + 0x50000` (SET not max — the lean mover leaves brain[131] stale; a max would strand
-a float); `Simulation::set_terrain_height_field` wired through GameWorld
-and direct test/tooling fixtures. Tracked
-deviations: (1) bilinear column height vs the hi-res along-ray bisection (faithful for grounding);
-(2) GroundClearance def fields (def+0x2C/+0x30, def+216/+232, the aiComp[108] node-Z gate) default 0
-until those def fields are RE'd; (3) pos[2] snaps (no climb-rate physics); (4) the water clamp is wired
+Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` (move-step id 3, the
+HELO_EVADE hover, §1.3) sets `ground(0x50000) + 0x50000`; `0x460e40` (the HELO waypoint mover,
+§7.4) sets `max(nodeZ-or-ground+altitude, ground + profile+0xE8)`. The early port's lean
+`AI_UpdateWaypointMovement @ 0x457bd0` never wrote `brain[131]` (the floating-AI bug); its
+`AiSystem::apply_ground_clamp` stand-in, which SET `brain[131]` and snapped the hull, is deleted
+with the interim locomotion model (2026-09-23): retail has no generic brain integrator, so a
+pool-1 row moves only through its items.def mover (§38.9). Shipped: portable
+`terrain/height_field` (the three `TerrainData` samplers lifted verbatim, TerrainData
+delegates); `world::calc_average_ground_height` and `AiSystem::aircraft_ground_height` (the
+0x457230 math, 16.16, with the ground links of §10.2); `Simulation::set_terrain_height_field`
+wired through GameWorld and direct test/tooling fixtures. Tracked deviations: (1) bilinear
+column height vs the hi-res along-ray bisection (faithful for grounding); (2) RESOLVED: the
+floor offsets are the brain's husk/intact floors brain+0x30/+0x2C written by the class inits
+(§10.2, §38.1), and the node-Z gate is brain[108] (profile+0x38); (3) RESOLVED: the snap left
+with the clamp; (4) the water clamp is wired
 (the height field's 16.16 water plane `TerrainHeightField::water_y`, applied when
 `GroundClearance::has_physics`, the entity+0x170 test).
 
@@ -3722,8 +3725,9 @@ non-zero `kz_damage` word (+46) adds 20 to the camera shake
 `[orig: @0x4af830..0x4af84b]` — that arm sits ahead of any damage gate, so an
 explosive NEAR-MISS that deals nothing still shakes. Its tail (`wasHit`,
 `damageTimer += 10` below 25, `lastAttacker`, all skipped on self damage)
-`[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain in
-`AiSystem::tick`. Three call sites: `Entity_HandleDamageTrigger @0x407588` and
+`[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain,
+`AiSystem::apply_round_hits`, which the entity update runs right after the explosion queue
+(§38.9). Three call sites: `Entity_HandleDamageTrigger @0x407588` and
 `Entity_HandleDamageAndTriggerZones @0x40792b` (the two class damage callbacks,
 unported for the cosmetic half) and `Projectile_ProcessExplosionQueue @0x4eb05c`
 — the OUTER-BAND flinch, taken by any organic (`victim->itemDef->type(+0x5C) == 3`)
@@ -5962,8 +5966,11 @@ footprints `r/2 + (r/2)*|cos(yaw - ang)|` of both entities + 1.0 u (the
 1024-entry cos table `off_849934`); a neighbor within ~30 deg of dead ahead
 (`|Yaw - ang - 0x7FFFFF80| <= 357913920`) multiplies the command speed by
 `((DcbId + (frame << 8)) & 0x7FFF) + 0x4000` >> 16 — a 0.25..0.75 stochastic
-brake per tick, compounding per neighbor (the frame counter is
-`dword_24C1948`; our net id + logic tick stand in). Without it, redirected
+brake per tick, compounding per neighbor (the counter is
+`dword_24C1948`, the ENTITY-UPDATE counter, not a render frame counter: its one writer is
+`add dword_24C1948,esi` @ 0x4C2639 at the tail of a non-epilog update, with no reset, so it runs
+one behind `tick` through the process's first mission and keeps counting across restarts and
+loads; ported as `World::entity_update_counter`, §38.9). Without it, redirected
 convoys drove full-speed into parked neighbors and the (ported) hull contact
 DEFLECTED them off their routes — braking behind obstacles, not deflection, is
 the retail path-follow behavior. ctest `vehicle_mount`
@@ -8176,13 +8183,17 @@ current action is IDLE. It writes only next action FIRE
 counter, heat, and ammo do not participate in this AI-side request gate.
 
 The infantry update does not spawn a round itself. Retail finishes all entity updates, then
-pumps every weapon action slot [orig: Entity_UpdateAllEntities @ 0x52674b;
-WeaponAction_ProcessAllEntities @ 0x526786]. The FIRE action invokes the shared weapon path,
+pumps every weapon action slot [orig: Game_ProcessMainFrame @ 0x5263F0 (the
+Entity_UpdateAllEntities call @ 0x52674B; the WeaponAction_ProcessAllEntities call
+@ 0x526786)], so a pumped round first steps on the next tick. The FIRE action invokes the shared weapon path,
 attributes the shooter to the organic owner, obtains origin from the mount/userpoint, and
 consumes the parent's embedded ammo; a clip size of -1 remains infinite. OpenNova now keeps
 that phase boundary: mounted requests queue during AI update, the parent slot is pumped once
-after world systems and before round simulation, and the resulting authoritative round uses
-the gunner net id with the mount's posed muzzle. An occupied pool-1 parent is not pumped a
+at the end of the entity pass (the round simulation runs inside the entity update, so the
+pumped round steps on the next tick, as in retail), and the resulting authoritative round uses
+the gunner net id with the mount's posed muzzle. Retail's single walk runs after the camera
+(pool 0 in slot order, the local player at its slot, then the pool-1 rows with no occupant and
+EWEAP, @ 0x542690..0x542724); the port pumps the local player separately. An occupied pool-1 parent is not pumped a
 second time.
 
 ### 26.7 Mounted collision and death
@@ -8635,7 +8646,10 @@ nothing. `[orig: PRNG_Next16_B @ 0x6130F0; Precipitation_Reset @ 0x5DF3A0]`
 
 **Contacts and cadence.** Think scans all unspent slots. If all fourteen were
 already spent on entry, it calls `Entity_Destroy @ 0x43E810`, without a kill
-transaction. Otherwise age reloads to 3 on the authority and 1 on a peer.
+transaction. Otherwise age reloads to 3 on the authority and 1 on a peer (@ 0x441B1A); the
+pool-1 clock steps once per visit on its pre-decrement gate (`Entity_UpdatePool1Slot` @ 0x4B8E1B /
+@ 0x4B8EA0), so an authority minefield thinks every third visit (the port had stepped the clock
+twice per visit until 2026-09-23).
 Pool 0 is visited in slot order: nonzero item and clear flags bit 0, with no
 health, allegiance or owner filter. Broad distance is truncated Q16 Euclidean
 distance from current actor position to current field position, at most the
@@ -8738,7 +8752,7 @@ Owner death/leave: `Server_ProcessPlayerDeath @ 0x5178d8` (and the player-
 removal recursion in `Server_RemoveEntityAndNotify @ 0x50a270`, S2C 0x12) →
 `Entity_RemovePlacedDevicesByOwner @ 0x546e00`: the owner's satchels/
 claymores/AV mines are **removed silently, never detonated**. Our port polls
-the owner's health in `ThrowableSim::tick` (transport-free stand-in for the
+the owner's health in `ThrowableSim::update_device` (transport-free stand-in for the
 death hook).
 
 ### 27.8 Divergence catalog (D-THROW)
@@ -11833,7 +11847,7 @@ NPCs chasing their previous helipad waypoints.
 | Component | Verdict | Evidence |
 |---|---|---|
 | Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B5288..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
-| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. This is not a claim that every interleaved world subsystem has identical scheduling. |
+| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. Since 2026-09-23 the whole entity update runs as one pass in the witnessed phase order (§38.9). |
 | Redirect command admission and operand | MATCHING | `Entity_SetWaypointByTeam @0x43CD20` (pool-0 store @0x43CDB4) writes mode/channel/node without looking up a route; only node -1 requests nearest. Both slot and brain mirrors retain command 123's SSN and command 0's stop. The other two writers, `Entity_SetWaypointForTeam @0x43DD00` and `WacCmd_SsnToWp @0x4F1CE0`, are separated since 2026-09-22 (§23.4). |
 
 Local input packing stays ahead of this vehicle pass. `LocalPlayer` publishes
