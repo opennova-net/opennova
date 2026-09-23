@@ -386,6 +386,20 @@ static void test_group_zero_and_single_ai_guards() {
     CHECK(w.commands.change_group(0, 7) == 0);
     CHECK(w.registry.get(ungrouped)->group_id == 0);
 
+    // Neither writer tests the item word: a grouped row without an item def
+    // takes the team and the regroup like any other.
+    // [orig: Entity_SetTeamByNetId @0x43c6ad..0x43c6ba;
+    //  Entity_UpdateNetIdReferences @0x43c61b..0x43c631]
+    world::Entity bare{};
+    bare.net_id = 604;
+    bare.group_id = 4;
+    const world::EntityHandle itemless = w.registry.spawn(0, bare);
+    CHECK(w.registry.get(itemless)->item_id == 0);
+    CHECK(w.commands.set_group_team(4, 2) == 1);
+    CHECK(w.registry.get(itemless)->team == 2);
+    CHECK(w.commands.change_group(4, 6) == 1);
+    CHECK(w.registry.get(itemless)->group_id == 6);
+
     mission::BmsEventSystem sys;
     sys.load({}, {}, {});
     w.add_system(&sys);

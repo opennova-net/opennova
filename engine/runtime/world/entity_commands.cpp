@@ -1591,8 +1591,10 @@ bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
 }
 
 int EntityCommands::set_group_team(int group, int32_t team) {
-    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1; group 0 does
-    // nothing [orig: @0x43c685].
+    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1: every row whose
+    // group word matches takes the team byte, with no item-word or dead
+    // test (the compare @0x43c6ad..0x43c6b8, the store @0x43c6ba); group 0
+    // does nothing [orig: @0x43c685].
     static constexpr int pools[] = {2, 0, 1};
     if (group == 0) return 0;
     int changed = 0;
@@ -1602,8 +1604,7 @@ int EntityCommands::set_group_team(int group, int32_t team) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
-            if (entity == nullptr || entity->item_id == 0 ||
-                static_cast<int>(entity->group_id) != group)
+            if (entity == nullptr || static_cast<int>(entity->group_id) != group)
                 continue;
             entity->team = static_cast<uint8_t>(team);
             if (AiEntity *ae = world_.ai.for_handle(handle))
@@ -1615,9 +1616,10 @@ int EntityCommands::set_group_team(int group, int32_t team) {
 }
 
 int EntityCommands::change_group(int old_group, int new_group) {
-    // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows;
-    // pools 2 and 1 update all resolved rows, then live counts are rebuilt.
-    // Old group 0 does nothing, not even the recount [orig: @0x43c5b5].
+    // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows
+    // (@0x43c628); pools 2 and 1 update every matching row; no pool tests
+    // the item word. Then live counts are rebuilt. Old group 0 does nothing,
+    // not even the recount [orig: @0x43c5b5].
     static constexpr int pools[] = {2, 0, 1};
     if (old_group == 0) return 0;
     int changed = 0;
@@ -1627,8 +1629,7 @@ int EntityCommands::change_group(int old_group, int new_group) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
-            if (entity == nullptr || entity->item_id == 0 ||
-                static_cast<int>(entity->group_id) != old_group)
+            if (entity == nullptr || static_cast<int>(entity->group_id) != old_group)
                 continue;
             if (pool == 0 && (entity->flags & kEntityFlagDead) != 0)
                 continue;
