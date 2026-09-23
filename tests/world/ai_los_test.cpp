@@ -212,12 +212,12 @@ static void test_indoors_skip_reads_the_endpoints() {
 static void test_script_los_splits_at_twenty_units() {
     auto rig = std::make_unique<LosRig>(false);
     const EntityHandle watcher = rig->spawn_person(0, 0, 1);
-    rig->at(watcher).item_id = 1001;
+    rig->at(watcher).item_type_index = 1;
     rig->at(watcher).yaw = 90; // mission yaw 90 = engine heading 0: faces +X
     const EntityHandle crate = rig->spawn_item(3, 0, 1, 1, 3); // inside the watcher's slice
     rig->at(crate).engine_flags |= 0x8000000u;
     const EntityHandle target = rig->spawn_person(15, 0, 1);
-    rig->at(target).item_id = 1001;
+    rig->at(target).item_type_index = 1;
     rig->rebuild();
     EntityCommands &cmds = rig->world.commands;
     CHECK(!cmds.ssn_los_clear_within(watcher, target, 20 << 16));
