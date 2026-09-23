@@ -106,8 +106,11 @@ void test_complete_sequence_and_boundaries() {
     f.world.logic_tick = 16;
     f.air().brain.f[22] = 0; f.tick();
     CHECK(f.slot().state == State::FlyToHover);
-    CHECK(f.world.ai.for_handle(f.patient)->inf.aim_pitch == 0);
-    CHECK(f.world.ai.for_handle(f.patient)->inf.torso_roll != 0);
+    // The patient animation at tick 16, retail values from jo-c's
+    // scripted_lift_oracle (state 4): the angles scale by dbl_7C3608, not the
+    // exact BAM scale. [orig: HeliLift_UpdateSlotState @0x45185c..0x451923]
+    CHECK(f.world.ai.for_handle(f.patient)->inf.aim_pitch == -1565);
+    CHECK(f.world.ai.for_handle(f.patient)->inf.torso_roll == -6434966);
     f.air().brain.f[22] = 40 * 65536; f.tick(); CHECK(f.slot().state == State::FlyToHover);
     f.air().brain.f[22] -= 1; f.tick(); CHECK(f.slot().state == State::Descend);
     CHECK(f.world.ai.events.at(2).f[3] == 20);
@@ -245,6 +248,61 @@ void test_reused_patient_handle_is_not_dereferenced() {
     CHECK(f.world.registry.get(old.handle)->dragger.valid() == false);
     CHECK(f.world.registry.get(old.handle)->corpse_timer == 0);
 }
+// The land state aims the helicopter from the original's heading formula:
+// 0x42000000 minus the truncated atan2 bearing scaled by -2^31/pi, then the
+// hover offsets 30 u along that heading from the goal. Retail vectors from
+// jo-c's scripted_lift_oracle (state 6, the helicopter at the origin, the
+// goal (123456, 234567, 0)): heading slot[7] / brain+0x210, brain+0x44/+0x48.
+// [orig: HeliLift_UpdateSlotState @0x451730 — @0x451954..0x451973 heading,
+//  @0x4519a1..0x4519d7 offsets]
+void test_land_heading_matches_the_original() {
+    struct Case { int32_t px, py; uint32_t heading; int32_t x, y; };
+    const Case cases[] = {
+        {655360, 0, 0x42000000u, 26888, 2198273},        // east
+        {0, 655360, 0x82000000u, -1840265, 138281},      // north
+        {-655360, 0, 0xC2000000u, 219835, -1729150},     // west
+        {0, -655360, 0x02000000u, 2087167, 331040},      // south
+        {655360, 655360, 0x62000000u, -1333411, 1554798}, // north-east
+        {-300000, 900000, 0x8F1BFAE2u, -1709038, -477779},
+    };
+    for (const Case &c : cases) {
+        Fixture f;
+        f.world.registry.get(f.marker)->position = {123456 / 65536.0f, 234567 / 65536.0f, 0.0f};
+        f.action();
+        f.air().brain.f[22] = 4 * 65536;
+        f.tick(); // FlyToHover falls through Descend into Land
+        CHECK(f.slot().state == State::Land);
+        f.move(f.slot().helicopter.handle, 0, 0, 0);
+        f.move(f.patient, c.px, c.py, 0);
+        f.tick();
+        CHECK(uint32_t(f.slot().heading) == c.heading);
+        CHECK(uint32_t(f.air().brain.f[AiBrain::kWorkHeading]) == c.heading);
+        CHECK(f.air().brain.f[17] == c.x);
+        CHECK(f.air().brain.f[18] == c.y);
+    }
+}
+// A flyover whose helicopter is destroyed before landing stalls in its arm:
+// retail reads the brain through the stale slot pointer to the zeroed row,
+// gets 0, and neither the hover arms nor the land arm advance (jo-c's
+// scripted_lift_oracle no_brain cases for states 4..6). The operation stays
+// live, so the teammate triggers keep reading it.
+// [orig: HeliLift_UpdateSlotState @0x451761/@0x4517c6/@0x45192e]
+void test_flyover_with_a_destroyed_helicopter_stalls() {
+    for (bool landed : {false, true}) {
+        Fixture f; f.action();
+        if (landed) {
+            f.air().brain.f[22] = 4 * 65536;
+            f.tick();
+        }
+        const State held = landed ? State::Land : State::FlyToHover;
+        CHECK(f.slot().state == held);
+        f.world.commands.remove_ssn(f.slot().helicopter.handle);
+        for (int i = 0; i < 8; ++i) f.tick();
+        CHECK(f.slot().state == held);
+        CHECK(f.world.teammates.count() == 1 && f.active_trigger(2));
+        CHECK(f.world.registry.get(f.patient) != nullptr);
+    }
+}
 } // namespace
 int main() {
     test_dispatch_and_spawn();
@@ -254,6 +312,8 @@ int main() {
     test_capacity_retry_and_failed_allocation();
     test_pickup_announce_seeds_the_nearest_teammate_at_0x40000000();
     test_reused_patient_handle_is_not_dereferenced();
+    test_land_heading_matches_the_original();
+    test_flyover_with_a_destroyed_helicopter_stalls();
     std::printf("teammate operations: %s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
 }

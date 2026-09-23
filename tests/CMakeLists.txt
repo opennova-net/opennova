@@ -2184,6 +2184,16 @@ if(MSVC)
 endif()
 add_test(NAME bms_event_parity COMMAND bms_event_parity_test)
 
+# The BMS event runtime replayed against the original's instructions: the
+# condition/chain/action/entry/pass witnesses scripts/oracles/
+# mission_event_parity.py captured in the retail PE (mission/fixtures/
+# mission_event_vectors.inc), rebuilt through the raw-record seam.
+add_executable(mission_event_vectors_test mission/mission_event_vectors_test.cpp)
+target_link_libraries(mission_event_vectors_test PRIVATE opennova_runtime)
+target_include_directories(mission_event_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_event_vectors_test PRIVATE cxx_std_17)
+add_test(NAME mission_event_vectors COMMAND mission_event_vectors_test)
+
 # Mission -> world promotion: spawn a parsed mission's entities into the world pools,
 # allocate AI brains per organic, build the waypoint nav table, then tick the AI to prove
 # entities patrol their authored routes (the connective tissue for the live sim).

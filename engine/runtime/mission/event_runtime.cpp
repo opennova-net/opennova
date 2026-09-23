@@ -1,5 +1,7 @@
 #include <runtime/mission/event_runtime.h>
 
+#include <algorithm>
+
 #include <base/io/strutil.h>
 #include <runtime/world/world.h>
 
@@ -32,6 +34,12 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
     for (const bms::Event &e : events) {
         ScriptedEvent se;
         se.event = e;
+        // The 24-byte records load as-is, so the reload words are the high
+        // halves of the file dwords at +12/+16, which carry the authored
+        // value << 22: the value << 6 [orig: event +14 / +18; the raw record
+        // read EventTrigger_LoadAllData @0x453f87].
+        se.repeat_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.reset_after) << 6);
+        se.activate_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.delay) << 6);
         // Resolve trigger/action slices by index+count (EventTrigger_LoadAllData
         // fixes up the relative pointers; here we copy the slices).
         for (int i = 0; i < e.trigger_count; ++i) {
@@ -52,8 +60,17 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
         return a == nullptr || a->bounds.min.x == a->bounds.max.x ||
                a->bounds.min.y == a->bounds.max.y;
     };
+    // Both walks read the event's count byte signed: 128..255 resolve nothing
+    // [orig: the trigger walk @0x453022/@0x4530C8; the action walk
+    //  @0x453127/@0x4531D2].
+    const auto signed_count = [](uint8_t count, size_t slice) {
+        const int n = count < 128 ? count : static_cast<int>(count) - 256;
+        return n <= 0 ? size_t{0} : std::min(static_cast<size_t>(n), slice);
+    };
     for (ScriptedEvent &se : events_) {
-        for (bms::Trigger &t : se.triggers) {
+        const size_t trigger_count = signed_count(se.event.trigger_count, se.triggers.size());
+        for (size_t ti = 0; ti < trigger_count; ++ti) {
+            bms::Trigger &t = se.triggers[ti];
             int32_t *zone_param = nullptr;
             if ((t.main_type == bms::TriggerMainType::Group ||
                  t.main_type == bms::TriggerMainType::Single) &&
@@ -74,7 +91,9 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
                 *zone_param = idx; // [orig: @0x453095]
             }
         }
-        for (bms::Action &a : se.actions) {
+        const size_t action_count = signed_count(se.event.action_count, se.actions.size());
+        for (size_t ai = 0; ai < action_count; ++ai) {
+            bms::Action &a = se.actions[ai];
             if (a.action_type != bms::ActionType::AreaAiRed &&
                 a.action_type != bms::ActionType::AreaAiBlue) {
                 continue;
@@ -117,7 +136,7 @@ void BmsEventSystem::on_load(World &w) {
     // writer; they keep whatever the producers left.
     w.script.dialog.reset();
     for (ScriptedEvent &se : events_) {
-        se.active = false;
+        se.active = 0;
         se.activate_countdown = 0;
         se.repeat_countdown = 0;
     }
@@ -130,7 +149,7 @@ void BmsEventSystem::on_load(World &w) {
     awol_64tick_count_ = 0;
 }
 
-bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
+int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
     auto &cmds = w.commands;
     switch (t.main_type) {
         case bms::TriggerMainType::MissionVariable: {
@@ -301,9 +320,10 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             return false;
         }
         case bms::TriggerMainType::SecondTimeThrough:
-            // Raw read of the session load-parity toggle. [orig: @0x453b24 ->
-            // dword_815174] (D-EVT-3 cat 5)
-            return second_time_through();
+            // Raw read of the session load-parity word, no normalization.
+            // [orig: EventTrigger_EvaluateCondition @0x453b24 -> dword_815174]
+            // (D-EVT-3 cat 5)
+            return g_second_time_through;
         case bms::TriggerMainType::Teammate: {
             switch (static_cast<bms::TeammateTriggerType>(t.sub_type)) {
                 case bms::TeammateTriggerType::TeammateIsEnabled:
@@ -337,13 +357,14 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             };
             switch (static_cast<bms::PlayerTriggerType>(t.sub_type)) {
                 case bms::PlayerTriggerType::PlayerBerserk: {
-                    // The local player's AiSlot behavior word, bit 0x200
-                    // (Berserk). No brain reads false (retail dereferences
-                    // the runtime pointer unchecked). [orig: @0x453b99
+                    // The local player's AiSlot behavior word masked to 0x200
+                    // (Berserk), returned RAW: the chain folds 0x200, so
+                    // NOT-Berserk (xor 1) reads 0x201. No brain reads 0
+                    // (retail dereferences the runtime pointer unchecked).
+                    // [orig: EventTrigger_EvaluateCondition @0x453b85..0x453b99
                     //  g_local_player_entity->aiRuntime[1] & 0x200]
                     const world::AiEntity *ai = w.ai.for_handle(w.cached.local_player);
-                    return ai != nullptr &&
-                           (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) != 0;
+                    return ai != nullptr ? (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) : 0;
                 }
                 // The fixed-mask input subs; the 22-25/28-30 masks have no
                 // setter in the image, so they read false in retail as well.
@@ -364,13 +385,21 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // `1 << (byte @ trigger+12 + 15)`: the low byte of param1 [orig: @0x453cfd]
                     return input_bit(1u << ((static_cast<uint32_t>(static_cast<uint8_t>(t.param1)) + 15u) & 31u));
                 case bms::PlayerTriggerType::PlayerLookByteBit0Clear:
+                    // `(byte_27234FC & 1) == 0`: the byte is hudInfo
+                    // (dword_2723388) +0x174, whose only store in the image
+                    // writes 0, beside the struct memsets and the per-frame
+                    // save/restore copy, so bit 0 never sets: sub 26 is always
+                    // true and sub 27 always false. The byte's other readers
+                    // test bit 0x20 (HUD_DrawLookModeLabel @0x594100) and bits
+                    // 0/0x40 (the lock reticle @0x594580). [orig:
+                    //  EventTrigger_EvaluateCondition @0x453ca5 (sub 26) /
+                    //  @0x453cb6 (sub 27); the store HUD_BuildEntityInfo
+                    //  @0x4b84d9; memsets HUD_RenderAllOverlays @0x5a80b1 and
+                    //  HUD_InitOverlaySystem @0x5a493c; the copy
+                    //  HUD_RenderOverlays @0x5a7c25]
+                    return 1;
                 case bms::PlayerTriggerType::PlayerLookByteBit0Set:
-                    // `(byte_27234FC & 1) == 0` / `!= 0` [orig: @0x453cb5/@0x453cc4].
-                    // The byte's bit-0 writer is not reachable by xref (its
-                    // readers are this pair, HUD_DrawLookModeLabel @0x594100
-                    // bit 0x20 and the lock reticle @0x594580 bits 0/0x40), so
-                    // the pair stays false: the D-EVT-3 residue.
-                    return false;
+                    return 0;
                 case bms::PlayerTriggerType::PlayerDialogDone:
                     // [orig: @0x453d1b Dialog_ExistsByIndex(p1) == 0 -- absent
                     //  from the 16-slot active table]
@@ -433,24 +462,31 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
     }
 }
 
-bool BmsEventSystem::evaluate_chain(World &w, const std::vector<bms::Trigger> &triggers) {
-    // [orig: EventTrigger_EvaluateChain @0x454050.] Each trigger negated by its own bit0; the
-    // join operator (and/or/xor) comes from the PREVIOUS trigger. Empty => true.
-    // Every predicate runs (no short-circuit), so every matched input bit of
-    // the chain toggles in the mirror even when an earlier term already
-    // decided the result. The mirror is seeded from the live word at entry,
-    // before the count test [orig: @0x45405a].
+int32_t BmsEventSystem::evaluate_chain(World &w, const ScriptedEvent &se) {
+    // [orig: EventTrigger_EvaluateChain @0x454050.] Each trigger negated by its own
+    // bit0 (`xor 1`); the join operator (or/xor/else and, bitwise over the raw
+    // ints) comes from the PREVIOUS trigger. Every predicate runs (no
+    // short-circuit), so every matched input bit of the chain toggles in the
+    // mirror even when an earlier term already decided the result. The mirror
+    // is seeded from the live word at entry, before the count test
+    // [orig: @0x45405a]. A zero count byte passes (@0x45405f); otherwise
+    // trigger 0 always runs and the count is read SIGNED for the rest, so
+    // 128..255 evaluate trigger 0 alone (@0x45408c `jle`, @0x4540c7 movsx).
+    // The loop stays within the loaded slice.
     w.script.input_action_mirror = w.script.input_action_bits;
-    if (triggers.empty()) return true;
-    bool acc = evaluate_trigger(w, triggers[0]);
-    if (triggers[0].is_negated()) acc = !acc;
-    for (size_t i = 1; i < triggers.size(); ++i) {
-        bool v = evaluate_trigger(w, triggers[i]);
-        if (triggers[i].is_negated()) v = !v;
-        const bms::Trigger &prev = triggers[i - 1];
-        if (prev.is_or()) acc = acc || v;
-        else if (prev.is_xor()) acc = acc != v;
-        else acc = acc && v;
+    if (se.event.trigger_count == 0 || se.triggers.empty()) return 1;
+    const std::vector<bms::Trigger> &triggers = se.triggers;
+    int32_t acc = evaluate_trigger(w, triggers[0]);
+    if (triggers[0].is_negated()) acc ^= 1; // [orig: @0x454084]
+    const int count = se.event.trigger_count < 128
+            ? se.event.trigger_count : static_cast<int>(se.event.trigger_count) - 256;
+    for (int i = 1; i < count && static_cast<size_t>(i) < triggers.size(); ++i) {
+        int32_t v = evaluate_trigger(w, triggers[static_cast<size_t>(i)]);
+        if (triggers[static_cast<size_t>(i)].is_negated()) v ^= 1; // [orig: @0x4540ac]
+        const bms::Trigger &prev = triggers[static_cast<size_t>(i) - 1];
+        if (prev.is_or()) acc |= v;       // [orig: @0x4540b8]
+        else if (prev.is_xor()) acc ^= v; // [orig: @0x4540c1]
+        else acc &= v;                    // [orig: @0x4540c5]
     }
     return acc;
 }
@@ -755,7 +791,10 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // position in g_Events; events_ mirrors that array order).
     // [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0, called right after
     //  both dispatch loops @0x454cbd/@0x454d25]
-    if (!events_.empty() && &se >= events_.data() && &se < events_.data() + events_.size())
+    // The hook returns at once off the authority [orig: the is_authority test
+    //  @0x452ce0].
+    if (w.rules.logic_authority && !events_.empty() && &se >= events_.data() &&
+            &se < events_.data() + events_.size())
         w.script.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()));
 }
 
@@ -774,22 +813,25 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
         }
         // Falls through: the repeat cooldown ticks in the same call (@0x454d2d).
     } else if (se.repeat_countdown == 0) {
-        if (!se.active) {
-            if (evaluate_chain(w, se.triggers)) {
-                se.active = true; // latched the moment the chain passes (@0x454c7a)
-                const uint16_t delay =
-                    static_cast<uint16_t>(static_cast<uint32_t>(se.event.delay) << 6);
-                if (delay != 0) se.activate_countdown = delay; // arm [orig: +16 = +18]
-                else fire(w, se);                              // no delay: fire now
+        if (se.active == 0) {
+            // Any nonzero raw chain result passes [orig: @0x454c6b].
+            if (evaluate_chain(w, se) != 0) {
+                se.active = 1; // latched the moment the chain passes (@0x454c7a)
+                if (se.activate_reload != 0) {
+                    se.activate_countdown = se.activate_reload; // arm [orig: +16 = +18 @0x454c80]
+                } else {
+                    fire(w, se); // no delay: fire now
+                }
                 if ((static_cast<uint32_t>(se.event.flags) &
                      static_cast<uint32_t>(bms::EventFlags::ResetAfter)) != 0) {
-                    const uint16_t cool =
-                        static_cast<uint16_t>(static_cast<uint32_t>(se.event.reset_after) << 6);
-                    if (cool != 0) {
-                        se.repeat_countdown = cool; // arm cooldown; no decrement this call
+                    if (se.repeat_reload != 0) {
+                        // arm cooldown; no decrement this call [orig: +12 = +14 @0x454cd9]
+                        se.repeat_countdown = se.repeat_reload;
                         return;
                     }
-                    se.active = false; // reset_after == 0: re-evaluable next pass (LABEL_24)
+                    // No reload: re-evaluable next pass [orig:
+                    //  EventTrigger_UpdateEntry @0x454d46].
+                    se.active = 0;
                     return;
                 }
             }
@@ -801,7 +843,7 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
         se.repeat_countdown = static_cast<uint16_t>(nv);
         if (nv <= 0) {
             se.repeat_countdown = 0;
-            se.active = false; // cooldown over -> the chain is evaluated again
+            se.active = 0; // cooldown over -> the chain is evaluated again
         }
     }
 }

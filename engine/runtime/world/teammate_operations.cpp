@@ -23,8 +23,14 @@ int32_t heading(const World &world, const Entity &entity) {
     const AiEntity *ai = world.ai.for_handle(entity.handle);
     return ai ? ai->heading : bam_heading_from_mission_yaw_deg(entity.yaw);
 }
+// The lift code's Q22 sine/cosine: the heading scaled to radians by the
+// image's own constant dbl_7C3608 = 1.4629627251502471e-09 (a hair above
+// 2*pi/2^32, so it is not the exact BAM scale), then x 4194304.0 and ftol.
+// [orig: HeliLift_UpdateSlotState @0x45185c/@0x451979/@0x451c5e and
+//  HeliLift_SpawnFlyover @0x4528d8 (fmul dbl_7C3608), dbl_7C3600 @0x451868/
+//  @0x451983/@0x451c6e/@0x4528f7]
 int32_t trig(int32_t angle, bool sine) {
-    const double rad = angle / io::kBamPerRadian;
+    const double rad = double(angle) * 1.4629627251502471e-09;
     return int32_t((sine ? std::sin(rad) : std::cos(rad)) * 4194304.0);
 }
 int32_t mul22(int32_t a, int32_t b) {
@@ -71,7 +77,9 @@ void waypoint(AiEntity &ai, const std::array<int32_t, 3> &goal) {
     ai.brain.f[20] = 1310720;
 }
 // Both the approach and flyover arms write the patient's aim and torso after
-// the entity update's previous frame. [orig: @0x451829..0x451947, @0x451C4B..0x451D28]
+// the entity update's previous frame. [orig: HeliLift_UpdateSlotState
+// @0x451841..0x451923 (the flyover arms 4/5), @0x451C4B..0x451D28 (the
+// approach arm 0)]
 void animate_patient(World &world, const Entity *patient) {
     if (!patient) return;
     AiEntity *ai = world.ai.for_handle(patient->handle);
@@ -137,7 +145,9 @@ void TeammateOperations::reset(World &world) {
 bool TeammateOperations::start(World &world, int32_t subtype, int32_t patient_ssn,
         int32_t marker_number) {
     // Action 39 has only these two retail arms; subtype 3 is a no-op.
-    // [orig: EventAction_Dispatch @0x454A41]
+    // [orig: EventAction_Dispatch case 39 @0x4549DC..0x454A15 — sub 2 the
+    //  flyover call @0x4549F5, sub 1 the pickup call @0x454A15, any other sub
+    //  the default @0x4549E7]
     if (subtype != 1 && subtype != 2) return false;
     if (count_ == kCapacity) return false;
     EntityLifetime patient, marker;
@@ -237,6 +247,12 @@ void TeammateOperations::update(World &world, Slot &slot) {
     Entity *patient = world.registry.get(slot.patient);
     Entity *first = world.registry.get(slot.first), *second = world.registry.get(slot.second);
     Entity *heli = world.registry.get(slot.helicopter);
+    // A destroyed helicopter leaves retail's slot pointer on the zeroed row,
+    // so the brain read through it is 0: the flyover arms 4/5 skip their
+    // transitions (the patient still animates), the land arm returns, and the
+    // operation waits there for good. The lifetime check reads the same null
+    // brain. [orig: HeliLift_UpdateSlotState @0x451739..0x451745 (the brain
+    //  read), @0x451761/@0x4517c6 (the arm 4/5 gates), @0x45192e (arm 6)]
     AiEntity *air = heli ? world.ai.for_handle(heli->handle) : nullptr;
     const auto orient = [&]() { if (air) air->brain.f[AiBrain::kWorkHeading] = slot.heading; };
     switch (slot.state) {
@@ -309,10 +325,16 @@ void TeammateOperations::update(World &world, Slot &slot) {
         break;
     case State::Land:
         if (air && patient) {
+            // The land heading: 0x42000000 minus the truncated atan2 bearing
+            // scaled by dbl_7C57B8 = -2^31/pi (a NEGATIVE scale, so the
+            // subtraction adds the bearing).
+            // [orig: HeliLift_UpdateSlotState @0x451730 — fpatan @0x451954,
+            //  fmul dbl_7C57B8 @0x451956, ftol @0x45195c, sub from 42000000h
+            //  @0x451961..0x451966, the stores @0x451970/@0x451973]
             const auto p = position(world, *patient), h = position(world, *heli);
             const double bearing = std::atan2(double(io::bam_sub(p[1], h[1])),
-                    double(io::bam_sub(p[0], h[0]))) * io::kBamPerRadian;
-            slot.heading = io::bam_sub(1107296256, int32_t(int64_t(bearing)));
+                    double(io::bam_sub(p[0], h[0]))) * -683565275.5764316;
+            slot.heading = int32_t(0x42000000u - uint32_t(int32_t(bearing)));
             orient();
             air->brain.f[17] = io::bam_add(slot.goal[0], mul22(trig(slot.heading, false), 1966080));
             air->brain.f[18] = io::bam_add(slot.goal[1], mul22(trig(slot.heading, true), 1966080));

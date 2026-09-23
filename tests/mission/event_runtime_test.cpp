@@ -415,7 +415,11 @@ static void test_signed_action_count_immediate_and_delayed() {
     }
 }
 
-static void test_trigger_count_keeps_unsigned_byte_range() {
+// The chain reads the trigger-count byte SIGNED after its zero test: 128..255
+// evaluate trigger 0 alone, so a chain whose later entries would reject it
+// fires on trigger 0. [orig: EventTrigger_EvaluateChain @0x45405f (zero),
+// @0x45408c (`cmp [edi+15h],bl; jle`), @0x4540c7 (movsx loop bound)]
+static void test_trigger_count_is_signed_in_the_chain() {
     for (uint8_t count : {uint8_t{128}, uint8_t{255}}) {
         World w;
         w.cached.humans = 1;
@@ -428,14 +432,14 @@ static void test_trigger_count_keeps_unsigned_byte_range() {
                 bms::MissionVariableTriggerType::MissionVariableIsEqual);
         condition.param1 = 1;
         std::vector<bms::Trigger> triggers(count, condition); // V1 == 0 throughout
-        triggers.back().param2 = 1; // the last unsigned-count entry rejects the chain
+        triggers.back().param2 = 1; // an entry the signed count never reaches
         sys.load({event}, triggers,
                 {misvar(bms::MissionVariableActionSubType::Set, 7, 1)});
         w.add_system(&sys);
         w.load_systems();
         tick_n(w, kPass);
-        CHECK(!sys.is_active(0));
-        CHECK(w.script.vars.get_mission(7) == 0);
+        CHECK(sys.is_active(0));
+        CHECK(w.script.vars.get_mission(7) == 1);
     }
 }
 
@@ -1212,9 +1216,11 @@ static void test_player_input_bit_triggers() {
             w.script.input_action_mirror = 0xFFFFFFFFu;
             CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, sub)));
         }
-        // The look-byte pair stays false (the bit-0 writer is unwitnessed).
-        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 26)));
-        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 27)));
+        // The look byte's bit 0 is never set: its only store writes 0, so sub
+        // 26 reads true and sub 27 false. [orig: EventTrigger_EvaluateCondition
+        // @0x453ca5 / @0x453cb6; HUD_BuildEntityInfo @0x4b84d9]
+        CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 26)) == 1);
+        CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 27)) == 0);
         // BMS action 28 sub 38 zeroes the word [orig: EventAction_HandleSpecialTypes @0x4535c2].
         bms::Action clear{};
         clear.action_type = bms::ActionType::SpecialSubType;
@@ -1245,7 +1251,8 @@ static void test_player_berserk_trigger() {
     w.ai.attach(ph);
     CHECK(!sys.evaluate_trigger_for_test(w, berserk));
     w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] |= 0x200;
-    CHECK(sys.evaluate_trigger_for_test(w, berserk));
+    // The read is the raw masked word, not a normalized bool.
+    CHECK(sys.evaluate_trigger_for_test(w, berserk) == 0x200);
     w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] &= ~0x200;
     CHECK(!sys.evaluate_trigger_for_test(w, berserk));
 }
@@ -2430,7 +2437,7 @@ int main() {
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
     test_signed_action_count_immediate_and_delayed();
-    test_trigger_count_keeps_unsigned_byte_range();
+    test_trigger_count_is_signed_in_the_chain();
     test_repeat_zero_refires_every_pass();
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();
