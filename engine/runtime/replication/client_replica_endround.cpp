@@ -61,6 +61,7 @@ void ClientReplicaPipeline::apply_end_round_header(
 		return;
 	state_.end_round.header = header;
 	state_.end_round.header_known = true;
+	++state_.end_round.header_updates;
 	state_.mark_changed();
 }
 

@@ -666,6 +666,9 @@ struct ClientMinimapState {
 struct ClientEndRoundStats {
 	bool header_known = false;
 	EndRoundHeader header;
+	// One per accepted 0x1D header: the edge a joiner latches its round-over
+	// gate on (header_known stays set). [orig: NapiNPClientMsg_0x01D @0x430840]
+	uint32_t header_updates = 0;
 	// True once a complete board has been decoded at least once. A later
 	// partial chunk does not clear it, so the screen keeps showing the last
 	// complete board while the next one streams in.

@@ -190,6 +190,7 @@ public:
 	void reset_for_runtime_rebuild() {
 		started_ = false;
 		weather_revision_seen_ = 0;
+		end_round_headers_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
 		world_state_revision_seen_ = 0;
@@ -316,6 +317,8 @@ private:
 	uint32_t replica_peer_scratch_tick_ = 0;
 	// The last S2C 0x0A phase-2 ENV revision folded into the weather home.
 	uint32_t weather_revision_seen_ = 0;
+	// The accepted S2C 0x1D headers already latched into the world's Match.
+	uint32_t end_round_headers_seen_ = 0;
 	uint64_t weapon_availability_revision_seen_ = 0;
 
 	// ~1 Hz frozen-session tripwire state.

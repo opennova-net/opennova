@@ -456,6 +456,12 @@ class Match {
 
     // Shared double-run latch used by World::process_round_end.
     bool finish(int32_t winner_team, const World &world);
+    // A client's round-over latch: S2C 0x1D raises the gate the host's round
+    // end raises (the entity update and the target filters read it), with no
+    // scoring pass and no board; the next mission start's fresh Match clears it.
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+    //  @0x430858 under !is_authority; cleared by Game_StartMission @0x524A1F]
+    void latch_round_over() { outcome_.ended = true; }
 
     int32_t primary_score(const MatchStats &stats, int32_t objective_ticks = 0) const;
     int32_t primary_score(const MatchPlayer &player) const;
