@@ -1525,13 +1525,6 @@ void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
     CHECK(roof.primary_weapon_slot.scope_zoom == 1);
 }
 
-// A HOST-crewed helicopter's rotor turns from the authority pass: the helo
-// mover is the unported residual, but retail runs the part-animation
-// accumulator from EVERY mover's tail, the helo mover included, so the pass
-// ticks it for a direct-air row at the point that tail would run — and the
-// HELO_ROTOR register (the angle's high word) advances while crewed, then
-// winds down at the helo machine's 46603/tick after the dismount.
-// [orig: the HELO twin @0x48FA70 from the aircraft mover's tail @0x4905A6]
 // A body claims the vehicle under it after its update: the first vehicle on
 // its ground chain (a seated body re-reads its parent every tick) takes the
 // body's team when it is player-controllable and the body is seated or
@@ -1571,12 +1564,6 @@ void test_seated_body_claims_its_vehicle() {
     }
 }
 
-// The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
-// copied into its saved pose, only the row a player drives is visited, and the
-// update is not counted; the pool-0 walk still runs (it wakes the driven
-// vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
-// [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
-//  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
 // A same-team body standing on a vehicle skips the hold scan outside a
 // session. Single player (the in-process listen server, session_open set) is
 // outside it, so the body's berserk bit reaches the vehicle although a rider
@@ -1625,6 +1612,12 @@ void test_same_team_hold_scan_follows_the_session() {
     }
 }
 
+// The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
+// copied into its saved pose, only the row a player drives is visited, and the
+// update is not counted; the pool-0 walk still runs (it wakes the driven
+// vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
+// [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
+//  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
 void test_epilog_entity_update() {
     Rig r;
     r.veh().item_type = 1;
@@ -1674,6 +1667,13 @@ void test_epilog_entity_update() {
     CHECK(r.w.entity_update_counter == 1);
 }
 
+// A HOST-crewed helicopter's rotor turns from the authority pass: the helo
+// mover is the unported residual, but retail runs the part-animation
+// accumulator from EVERY mover's tail, the helo mover included, so the pass
+// ticks it for a direct-air row at the point that tail would run — and the
+// HELO_ROTOR register (the angle's high word) advances while crewed, then
+// winds down at the helo machine's 46603/tick after the dismount.
+// [orig: the HELO twin @0x48FA70 from the aircraft mover's tail @0x4905A6]
 void test_host_crewed_helicopter_rotor_turns() {
     Rig r;
     VehicleTraits t = truck_traits();

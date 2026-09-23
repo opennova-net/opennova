@@ -731,13 +731,6 @@ struct DeathTransitionRootSource final : IRootMotionSource {
     }
 };
 
-// A round that hits an NPC is drained into its reaction words inside the same
-// entity update, before that update's pool-0 walk: the projectiles and the
-// explosion queue run ahead of the organic bodies, whose damage callbacks
-// stamp the victim inline.
-// [orig: Entity_UpdateAllEntities -- the Weapon_UpdateAllProjectiles call
-//  @0x4C223A and the Projectile_ProcessExplosionQueue call @0x4c223f precede
-//  the pool-0 walk @0x4C2426; Entity_OnDamageReceived @0x4af859..0x4af878]
 // The entity update stamps the retail is_in_session fact from the session
 // rules: a joiner's brain then takes the in-session death arm (the death tick,
 // then the type-20 event), and single player, the in-process listen server
@@ -773,6 +766,13 @@ static void test_entity_update_stamps_the_session_fact() {
     CHECK(!w.ai.is_in_session);
 }
 
+// A round that hits an NPC is drained into its reaction words inside the same
+// entity update, before that update's pool-0 walk: the projectiles and the
+// explosion queue run ahead of the organic bodies, whose damage callbacks
+// stamp the victim inline.
+// [orig: Entity_UpdateAllEntities -- the Weapon_UpdateAllProjectiles call
+//  @0x4C223A and the Projectile_ProcessExplosionQueue call @0x4c223f precede
+//  the pool-0 walk @0x4C2426; Entity_OnDamageReceived @0x4af859..0x4af878]
 static void test_round_hit_reaches_the_same_pass_body_update() {
     auto heap = std::make_unique<World>();
     World &w = *heap;
