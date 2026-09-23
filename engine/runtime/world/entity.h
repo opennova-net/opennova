@@ -246,6 +246,11 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disableSSN; the vehicle motors test it with
+                                                                  // the dead bit (10000002h) as their driver-input
+                                                                  // gate [orig: WacCmd_DisableSsn @0x4F76DD;
+                                                                  //  Entity_UpdateVehiclePhysics @0x48B980;
+                                                                  //  Entity_UpdateAircraftPhysics @0x490F1E]
 
 // The BMS-attribute part of a streamed Flags dword, mapped back onto the
 // record attribute bits the placement traits read (Reflective 1<<23,
@@ -672,7 +677,6 @@ struct Entity {
     bool use_gun_slot_swapped = false;
     bool hidden = false;
     bool held = false;
-    bool disabled = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---
     // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed

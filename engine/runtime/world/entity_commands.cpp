@@ -748,8 +748,22 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
 }
 
 bool EntityCommands::set_ssn_hidden(EntityTarget ssn, bool hidden) {
+    // Flags bit 0, the bit every retail reader keys on (the area/location
+    // tests, the AI target scan, zone capture, the projectile traces, the play
+    // tick counter); `hidden` is its present mirror. Both views of the split
+    // Flags field take it, like the respawn hide.
+    // [orig: WacCmd_HideSsn @0x4F7750 — ItemTypeIndex gate @0x4F7797,
+    //  `or Flags,1` @0x4F779D; WacCmd_UnhideSsn @0x4F77B0 — `and Flags,~1`
+    //  @0x4F77FD]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
+    if (e == nullptr || e->item_id == 0) return false;
+    if (hidden) {
+        e->flags |= kEntityFlagCarried;
+        e->engine_flags |= kEntityFlagCarried;
+    } else {
+        e->flags &= ~kEntityFlagCarried;
+        e->engine_flags &= ~kEntityFlagCarried;
+    }
     e->hidden = hidden;
     return true;
 }
@@ -762,9 +776,20 @@ bool EntityCommands::set_ssn_held(EntityTarget ssn, bool held) {
 }
 
 bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
+    // Flags bit 28: the vehicle motors' driver-input gate reads it together
+    // with the dead bit (vehicle_motor.cpp's `veh.flags & 0x10000002`).
+    // [orig: WacCmd_DisableSsn @0x4F7690 — ItemTypeIndex gate @0x4F76D7,
+    //  `or Flags,10000000h` @0x4F76DD; WacCmd_EnableSsn @0x4F76F0 — `and
+    //  Flags,0EFFFFFFFh` @0x4F773D]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->disabled = disabled;
+    if (e == nullptr || e->item_id == 0) return false;
+    if (disabled) {
+        e->flags |= kEntityFlagScriptDisabled;
+        e->engine_flags |= kEntityFlagScriptDisabled;
+    } else {
+        e->flags &= ~kEntityFlagScriptDisabled;
+        e->engine_flags &= ~kEntityFlagScriptDisabled;
+    }
     return true;
 }
 

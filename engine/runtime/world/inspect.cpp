@@ -55,7 +55,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.alive = ent ? ent->alive : false;
 	d.hidden = ent ? ent->hidden : false;
 	d.held = ent ? ent->held : false;
-	d.disabled = ent ? ent->disabled : false;
+	d.disabled = ent ? ((ent->flags | ent->engine_flags) & kEntityFlagScriptDisabled) != 0 : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
 		if (const VehicleTraits *traits = world.vehicles.traits.get(ent->item_id))

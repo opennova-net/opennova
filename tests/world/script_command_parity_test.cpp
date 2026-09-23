@@ -208,12 +208,73 @@ static void test_gkill_uses_kill_ssn_body() {
     CHECK(w.round_sim.deaths.size() == 1);
 }
 
+// hideSSN/unhideSSN write Flags bit 0, the bit the area/location tests (and the
+// AI target scan, zone capture, traces) key on; a row without an ItemTypeIndex
+// is refused. [orig: WacCmd_HideSsn @0x4F7750 — gate @0x4F7797, `or Flags,1`
+// @0x4F779D; WacCmd_UnhideSsn `and Flags,~1` @0x4F77FD; WacCmd_SsnArea's
+// hidden test @0x4F1081]
+static void test_hide_ssn_flag_bit() {
+    ScriptWorld w;
+    const EntityHandle npc = spawn_npc(w, 140, 13);
+    w.registry.get(npc)->position = {5.0f, 5.0f, 0.0f};
+    const Aabb zone{{0.0f, 0.0f, -10.0f}, {10.0f, 10.0f, 10.0f}};
+    w.registry.register_area("zone", zone, true, 51, zone);
+    Entity itemless;
+    itemless.net_id = 141;
+    const EntityHandle bare = w.registry.spawn(1, itemless);
+    WacSystem sys;
+    CHECK(load_script(w, sys,
+            "if never() then hideSSN(140) v1=SSNarea(140,51) unhideSSN(140) "
+            "v2=SSNarea(140,51) hideSSN(141) store(v3) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 0); // hidden: out of every area test
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK((w.registry.get(npc)->engine_flags & kEntityFlagCarried) == 0);
+    CHECK(!w.registry.get(npc)->hidden);
+    CHECK(w.script.vars.get_mission(3) == 0);
+    CHECK((w.registry.get(bare)->engine_flags & kEntityFlagCarried) == 0);
+    // A respawn-hidden row (bit 0 on both views) is lifted by unhideSSN too.
+    Entity *e = w.registry.get(npc);
+    e->flags |= kEntityFlagCarried;
+    e->engine_flags |= kEntityFlagCarried;
+    e->hidden = true;
+    CHECK(w.commands.set_ssn_hidden(npc, false));
+    CHECK(((e->flags | e->engine_flags) & kEntityFlagCarried) == 0 && !e->hidden);
+    CHECK(w.commands.set_ssn_hidden(npc, true));
+    CHECK((e->flags & kEntityFlagCarried) != 0 && (e->engine_flags & kEntityFlagCarried) != 0);
+}
+
+// disableSSN/enableSSN write Flags bit 28, the bit the vehicle motors test with
+// the dead bit (10000002h) before reading their driver.
+// [orig: WacCmd_DisableSsn @0x4F7690 — gate @0x4F76D7, `or Flags,10000000h`
+// @0x4F76DD; WacCmd_EnableSsn `and Flags,0EFFFFFFFh` @0x4F773D;
+// Entity_UpdateVehiclePhysics @0x48B980]
+static void test_disable_ssn_flag_bit() {
+    ScriptWorld w;
+    Entity vehicle;
+    vehicle.net_id = 150;
+    vehicle.item_id = 2001;
+    vehicle.has_item_def = true;
+    const EntityHandle h = w.registry.spawn(1, vehicle);
+    WacSystem sys;
+    CHECK(load_script(w, sys, "if never() then disableSSN(150) store(v1) endif\n"));
+    run(w, 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    const Entity *e = w.registry.get(h);
+    CHECK((e->flags & kEntityFlagScriptDisabled) != 0);
+    CHECK((e->engine_flags & kEntityFlagScriptDisabled) != 0);
+    CHECK(w.commands.set_ssn_disabled(h, false));
+    CHECK(((e->flags | e->engine_flags) & kEntityFlagScriptDisabled) == 0);
+}
+
 int main() {
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
     test_bms_kill_single_pool0();
     test_kill_group_walk_and_return();
     test_gkill_uses_kill_ssn_body();
+    test_hide_ssn_flag_bit();
+    test_disable_ssn_flag_bit();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);
         return 1;
