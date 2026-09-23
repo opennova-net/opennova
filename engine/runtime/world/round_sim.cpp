@@ -1445,10 +1445,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         AiEntity *victim_body = world.ai.for_handle(target->handle);
                         apply_hit_body_roll(victim_body, death_section, quadrant);
                         // The plyr callback re-arms the player body's 64-tick
-                        // think cadence on every event it handles.
-                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e / @0x407c71]
-                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0)
+                        // think cadence on every event it handles, around its
+                        // waypoint tail.
+                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e /
+                        //  @0x407c71; the tail @0x407B64..0x407C6B]
+                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
                             target->spawn_phase = 64;
+                            player_body_waypoint_visits(world, *target);
+                        }
                     }
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {

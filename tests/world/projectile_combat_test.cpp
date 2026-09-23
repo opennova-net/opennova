@@ -2612,6 +2612,31 @@ struct PlayerVictimRig : HeapWorldFixture {
     }
 };
 
+// The plyr callback's waypoint tail ends a round hit's event too: a team 1/2
+// player whose AI slot carries a route channel marks the node it stands in.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B, reached from
+// Projectile_ProcessDamageOnTarget's event-1 call @0x4E820E]
+void test_round_hit_runs_the_player_waypoint_tail() {
+    auto r = std::make_unique<PlayerVictimRig>();
+    Entity *v = r->victim_entity();
+    v->team = 1;
+    v->net_id = 7;
+    AiEntity *body = r->victim_body();
+    body->slot.f[37] = 3;
+    NavNodeTable &nav = r->world.ai.nav;
+    nav.channels.resize(4);
+    nav.channels[3].count = 1;
+    nav.channels[3].entries[0] = 0;
+    nav.nodes.resize(1);
+    nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
+    nav.nodes[0].f[1] = body->pos[0];
+    nav.nodes[0].f[2] = body->pos[1];
+    r->fire_and_tick();
+    CHECK(v->spawn_phase == 64);
+    CHECK(r->world.script.relations.single_visited(7, 3, 0));
+    CHECK(r->world.script.relations.group_visited(1, 3, 0));
+}
+
 // The kill-cause bits live on the ENTITY (retail +44 bits 8..11), latched at
 // hit time and read at the death edge: a non-lethal head hit marks the next
 // kill critical until the plyr callback's 64-tick think clears it, and every
@@ -3212,6 +3237,7 @@ int main() {
     test_move_effect_water_release_reads_pre_move_z();
     test_move_effect_ballistic_leg_ignores_the_water_plane();
     test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
+    test_round_hit_runs_the_player_waypoint_tail();
     test_same_projectile_second_player_kill_latches_0x100();
     test_kill_event_reads_the_pre_hit_health_and_the_dead_flag();
     test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences();

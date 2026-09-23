@@ -437,10 +437,14 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // deathCallback(target, 3, 0) [orig: @0x4E6752]: the person callbacks
     // take event 3 like the blast's event 2, except that the plyr body keeps
     // its cause bits (3 is in the no-clear set) and only re-arms its think
-    // [orig: Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F,
-    //  @0x407B5E]. The AI reaction rides the RoundHit drain, as for a blast.
+    // before its waypoint tail [orig: Entity_HandleDamageAndTriggerZones
+    //  @0x407B3B..0x407B4F, @0x407B5E, the tail @0x407B64..0x407C6B]. The AI
+    // reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
-    if ((flags & kEntityFlagPlayer) != 0) target.spawn_phase = 64;
+    if ((flags & kEntityFlagPlayer) != 0) {
+        target.spawn_phase = 64;
+        player_body_waypoint_visits(world, target);
+    }
     if (collision_kill_fires(before, target.health)) {
         // The kill event credits the entry's source itself, not the walk
         // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
@@ -565,11 +569,15 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             // That notify is the class callback with event 2: on a live PLAYER
             // body the plyr callback clears the kill-cause bits 8..11 (a
             // latched head-shot bit does not survive a blast, so a blast kill
-            // routes as an ordinary death) and re-arms the 64-tick think
+            // routes as an ordinary death), re-arms the 64-tick think and runs
+            // its waypoint tail
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f dead return;
-            //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm].
-            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
+            //  tail @0x407B64..0x407C6B].
+            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0) {
                 player_body_class_think(target);
+                player_body_waypoint_visits(world, target);
+            }
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake, unless the record's kz type is
             // 3 (the medic heal)

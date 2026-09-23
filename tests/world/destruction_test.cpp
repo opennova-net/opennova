@@ -3801,6 +3801,67 @@ void test_session_peer_without_authority_applies_no_blast() {
     CHECK(w.registry.get(item)->health < 120);
 }
 
+// The plyr callback's waypoint tail ends its blast (event 2) and knife
+// (event 3) events too: a team 1/2 player whose AI slot carries a route
+// channel marks the node it stands in.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B;
+//  Entity_ApplyWeaponDamage's notify @0x4E6B72;
+//  Entity_ApplyVehicleCollisionDamage's notify @0x4E6752]
+void test_player_blast_and_knife_run_the_waypoint_tail() {
+    for (const bool knife : {false, true}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        AmmoTableEntry cut;
+        cut.name = "KNIFE";
+        cut.valid = true;
+        cut.kztype = ammo_kz::kKnife;
+        cut.kz_damage = 150;
+        cut.kz_maxradius = 1.5f;
+        w.tables.ammo.entries.push_back(cut); // index 4
+        w.registry.configure_pool(0, 4);
+        Entity source;
+        source.kind = EntityKind::Organic;
+        source.has_item_def = true;
+        source.item_type = 3;
+        source.health = 100;
+        source.team = 2;
+        const EntityHandle attacker = w.registry.spawn(0, source);
+        Entity player;
+        player.kind = EntityKind::Organic;
+        player.has_item_def = true;
+        player.item_type = 3;
+        player.item_id = 600;
+        player.health = player.health_max = 1000;
+        player.bound_radius = 0.6f;
+        player.team = 1;
+        player.net_id = 7;
+        player.flags = player.engine_flags = kEntityFlagPlayer;
+        player.position = knife ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{5.6f, 0.0f, 0.0f};
+        const EntityHandle body = w.registry.spawn(0, player);
+        AiEntity &ai = *w.ai.at(w.ai.attach(body));
+        ai.pos[0] = to_fixed(player.position.x);
+        ai.slot.f[37] = 3;
+        w.ai.nav.channels.resize(4);
+        w.ai.nav.channels[3].count = 1;
+        w.ai.nav.channels[3].entries[0] = 0;
+        w.ai.nav.nodes.resize(1);
+        w.ai.nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
+        w.ai.nav.nodes[0].f[1] = ai.pos[0];
+        w.ai.nav.nodes[0].f[2] = ai.pos[1];
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.type = knife ? ammo_kz::kKnife : ammo_kz::kStandard;
+        e.ammo_index = knife ? 4 : 1;
+        e.owner = attacker;
+        run_blast(w, e);
+        CHECK(w.registry.get(body)->health < 1000);
+        CHECK(w.registry.get(body)->spawn_phase == 64);
+        CHECK(w.script.relations.single_visited(7, 3, 0));
+        CHECK(w.script.relations.group_visited(1, 3, 0));
+    }
+}
+
 // The kind-1 (knife) kill zone: a live person other than the source inside
 // kz_maxradius takes the full kz_damage as a signed-word subtraction with the
 // knife cause bit, and the kill event credits the source; items are never
@@ -3944,6 +4005,7 @@ int main() {
     test_dead_unattributed_source_credits_no_one();
     test_session_peer_without_authority_applies_no_blast();
     test_knife_kill_zone();
+    test_player_blast_and_knife_run_the_waypoint_tail();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
