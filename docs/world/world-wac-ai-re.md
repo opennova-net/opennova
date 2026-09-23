@@ -5884,11 +5884,9 @@ Port notes (`vehicle_attach.cpp`): `VehicleSystem::player_toggle_mount` +
 `find_nearest_free_seat` + `VehicleSystem::attach_to_seat` over our seat model; the
 witnessed constants verbatim; deviations ledgered as D-AI-11. The engine owner
 is `LocalPlayer::toggle_mount` (the weapon gate reads the ported weapon
-FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`,
-which every host bring-up sets, the SP listen server included, while retail's
-`is_in_session` is 0 in single player and `rules.mp_session` is that fact
-[orig: Entity_AttachToUseGunSlot, the rejection @ 0x546C07], so the port never
-takes that rejection in SP), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
+FSM slot; the out-of-session UseGun rejection reads `rules.mp_session`, the port's model
+of retail's `is_in_session`, which single player leaves clear [orig:
+Entity_AttachToUseGunSlot @ 0x546BF6..0x546C0D]), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
 main_game.gd's USE-ITEM handler
 (armory leg first, faithful order).
 
@@ -8201,13 +8199,22 @@ Entity_UpdateAllEntities call @ 0x52674B; the WeaponAction_ProcessAllEntities ca
 @ 0x526786)], so a pumped round first steps on the next tick. The FIRE action invokes the shared weapon path,
 attributes the shooter to the organic owner, obtains origin from the mount/userpoint, and
 consumes the parent's embedded ammo; a clip size of -1 remains infinite. OpenNova now keeps
-that phase boundary: mounted requests queue during AI update, the parent slot is pumped once
-at the end of the entity pass (the round simulation runs inside the entity update, so the
-pumped round steps on the next tick, as in retail), and the resulting authoritative round uses
-the gunner net id with the mount's posed muzzle. Retail's single walk runs after the camera
-(pool 0 in slot order, the local player at its slot, then the pool-1 rows with no occupant and
-EWEAP, @ 0x542690..0x542724); the port pumps the local player separately. An occupied pool-1 parent is not pumped a
-second time.
+that phase boundary: mounted requests queue during AI update, and the resulting authoritative
+round uses the gunner net id with the mount's posed muzzle. Retail's single walk
+[orig: WeaponAction_ProcessAllEntities @ 0x542690] runs after the camera and outside the
+entity-update gate, so a held entity update still pumps the slots: pool 0 in slot order
+(@ 0x542691..0x5426A6), each live row with a slot pointer (+0x118, @ 0x5426AD / @ 0x5426B9),
+then the pool-1 rows with no occupant (+0x170, @ 0x5426E9), live, with a def carrying EWEAP
+(@ 0x5426F2..0x5426FF) and a hot slot (heat-window end +0x14 nonzero, @ 0x54270E). A UseGun
+gunner's +0x118 is the parent's mount slot, so a manned gun is pumped once, at the gunner's
+pool-0 slot, and an abandoned gun keeps pumping until its heat window closes (@ 0x54125F);
+`WeaponAction_Fire @ 0x542B10` returns at once for a slot with no owner (+0x24,
+@ 0x542B24..0x542B2E). Port: `World::pump_weapon_actions` (the local player's slot through
+`LocalPlayer::pump_local_weapon`, other gunners through `AiSystem::pump_gunner_slot`, then the
+pool-1 leg), run by the roles; a joiner walks its replica slots. Carried: the host clears the
+mount's owner link at detach where retail keeps the slot's +0x24 owner, the AI and pool-1 pumps
+leave the owner-water heat-window gate (`WeaponAction_ProcessFrame` @ 0x541004..0x54101C)
+unfed, and the joiner walks its remote borrowers before the local player's slot.
 
 ### 26.7 Mounted collision and death
 
@@ -12629,7 +12636,13 @@ unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
   walk clears Flags 0xC0000 and the entry stage +0x361 (@ 0x4BAE80..0x4BAE88);
   channel 0 clears the has-route flag like an empty channel (@ 0x4BABDD..0x4BABE5 ->
   @ 0x4BAE75); the node is read from the flat nav words with no guard
-  (@ 0x4BABFF..0x4BAC19, §38.5). Port: `AiSystem::infantry_route_think`.
+  (@ 0x4BABFF..0x4BAC19; the next node after the advance @ 0x4BADCB..0x4BADDF) and resolves
+  through `Pool_GetEntryUnchecked` (@ 0x441FC0), so a start node past the count reads the raw
+  slot word and an unfilled pool-3 slot is a zeroed marker the body walks to: there is no
+  node clamp and no dropped route (§38.5). Every route and command leg except 126 clears
+  Flags 0x40000 | 0x80000 before it runs (`and eax,0FFF3FFFFh`: 127 @ 0x4BAADD, the route leg
+  @ 0x4BABD5 and its exit @ 0x4BAE80, 123..125 @ 0x4BAE94), which is inert since neither bit
+  has a writer. Port: `AiSystem::infantry_route_think`.
 - **Who writes the target heading.** Only the marker wait (@ 0x4BAD29, which also
   writes the aim heading +0x2EC @ 0x4BAD2F), the S stage (@ 0x4BB7CA), the escort
   helper within its radius (@ 0x4BBD75), the guard restore (@ 0x4BBE1E), block 2's
@@ -13088,8 +13101,9 @@ language as retail compiles it; the witnesses:
   its argument (the `Entity_ValidatePtr` call @ 0x4F0E58, `mov ecx,[eax+184h]`
   @ 0x4F0E65, /62 @ 0x4F0E6B..0x4F0E7C). The dword is `Server_TickUpdate`'s
   unsaturated per-tick count for a state-6 slot with a present, unhidden entity
-  (`add [esi+184h],1` @ 0x51D977; §38.9), the same word the control-request age reads.
-  Port: `MatchPlayer::play_ticks`.
+  (`add [esi+184h],1` @ 0x51D977; §38.9), single player included, the same word the
+  control-request age reads. Port: `MatchPlayer::play_ticks` (`advance_play_ticks`, after
+  the script pass and the WAC punts).
 - **autogain** (`wac_var_autogain` @ 0xC6EAFC, seeded 1 by `WacScript_FreeAll`
   @ 0x4F6371) gates the iris exposure re-target: `Environment_ApplyFogAndAmbient`
   re-targets only while g_local_player_entity is set (@ 0x57E50B..0x57E512) and
@@ -13269,8 +13283,12 @@ world-side facts of the slice:
   MISSION FAILED screen, and the tail (@ 0x4C2624) tail-calls `Cinematic_EpilogUpdate`
   (@ 0x4C2634) instead of the counter add. The head also returns while dword_A87050
   (the in-game menu pause) is set (@ 0x4C2103) and while g_local_player_entity is null
-  (@ 0x4C2110); that last return is not reproduced (`Player_InitPlayer` sets the local
-  entity on every peer at every mission start, @ 0x4E17EB).
+  (@ 0x4C2110). That last return never fires in a running retail mission:
+  `Game_StartMission` calls `Player_InitPlayer` (@ 0x525BBC) on every peer, which finds the
+  pool-0 row the local connection owns (`Player_FindLocalPlayerEntity @ 0x4E0090`) or dies
+  (`Player_FatalPlayerDcbNotFound @ 0x4E17F2`), so a retail dedicated server runs with its
+  own connection's row; the port's dedicated hosts have no local player, so it is not
+  reproduced.
 - **The admission gate.** `Game_ProcessMainFrame` gates the whole update
   (@ 0x526703..0x526742): a client skips to its second half (`is_authority`
   @ 0x526703); a playing host on its death screen is exempt from the humans test
@@ -13294,17 +13312,22 @@ world-side facts of the slice:
   (@ 0x526786). So the 0x0A carries this frame's script and maintenance changes, the
   entity update's inline sends lead the next frame's queue, and a round the pump
   starts steps on the next tick. `tick` advances only when not paused
-  (@ 0x5265A0..0x5265B4). The play-tick walk adds 1 to slot+0x184 for an active state-6
-  slot with a present, unhidden entity (@ 0x51D977) and scores event 0x16 for the slot
-  (@ 0x51D98A), with no session, outcome or punt gate. The live group recount
+  (@ 0x5265A0..0x5265B4). The play ticks advance in their own slot walk right after the scoreboard legs
+  (@ 0x51D94B..0x51D9A3): an active (+4 @ 0x51D960), state-6 (+0x20 @ 0x51D966) slot with
+  an entity (@ 0x51D96B) that is not hidden (@ 0x51D971) adds 1 to +0x184 (@ 0x51D977),
+  before the is_in_session test (@ 0x51D9A5), so single player counts too, with no deploy,
+  round or punt gate beyond the slot state (the round end moves the slots to state 7,
+  @ 0x51685E). The same walk scores event 0x16 for every active state-6 slot
+  (@ 0x51D98A); that event only counts the per-weapon and vehicle-use statistics
+  sub-tables (`CPlayerStats_InitWeaponTracking @ 0x52BF60`), which the port does not model,
+  so the call is not ported. The live group recount
   (`EntityPool_RecountLiveByGroup @ 0x40E8D0`) runs from the periodic second only.
   Port: `Server_TickUpdate` routes the previous entity pass's records at its head,
   runs `World::run_script_pass`, its maintenance and the 0x0A, then
   `World::run_entity_pass`; `World::run_logic_tick` composes the three for the bare
-  local role and a joiner. Carried: retail runs one `WeaponAction_ProcessAllEntities`
-  walk after the camera (pool 0 in slot order, then the pool-1 rows with no occupant
-  and EWEAP, @ 0x542690..0x542724), where the port runs the world pump at the end of
-  the entity pass and the local player's separately.
+  local role and a joiner; `World::pump_weapon_actions` is the one weapon-action walk after
+  the camera (the frame order `@ 0x52674B` -> `@ 0x526758` -> `@ 0x526774` -> the camera
+  `@ 0x526781` when not paused -> `@ 0x526786`), outside the entity-update gate (§26.6).
 - **The breath timers.** `Server_UpdateEntityIdleTimers @ 0x50D770` runs inside the
   script admission, after the WAC tick and the spawn-marker pass, on `tick & 0x1F ==
   0`, and returns during the pre-round countdown (@ 0x50D773). Per in-match
@@ -13348,7 +13371,12 @@ world-side facts of the slice:
 - **The session fact.** Retail single player leaves is_in_session 0
   (`SinglePlayer_StartMission @ 0x561AF0`); the port stamps `AiSystem::is_in_session`
   from `rules.mp_session` each update (the death event's in-session arm
-  @ 0x458273), not from `rules.session_open`, which every host bring-up sets. The
+  @ 0x458273); the friendly-tag team mode (`HUD_DrawCrosshair` @ 0x5926C0..0x5926D0), the
+  zoom floor (`Player_AdjustWeaponZoomLevel` @ 0x4DBD0C) and the unarmed UseGun rejection
+  (`Entity_AttachToUseGunSlot` @ 0x546BF6..0x546C0D) read the same fact, and the former
+  `SessionRules::session_open` is gone. A joiner latches the round-over flag from S2C 0x1D
+  (`NapiNPClientMsg_0x01D`: g_spawn_success_gate = 1 @ 0x430858, the linger 0x7FFFFFFF
+  @ 0x430862) before its entity update (`Match::latch_round_over`). The
   HeliLift helicopter's ammo words are the byte-gated copy
   (`Entity_InitHelicopterAIFromDef` @ 0x468555..0x46858D); the shipped H_BHawkN.aip
   authors none.
