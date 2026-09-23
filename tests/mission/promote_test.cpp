@@ -788,7 +788,65 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
     CHECK(world->registry.get(EntityHandle::make(3, 1))->class_think_ticks == 0);
 }
 
+// The BMS AI-attribute fold inside the AI branch (the def carries 0x100000):
+// every authored bit lands on its AiSlot[1] behavior bit or entity Flags bit,
+// and 0x2000000 sets entity+0x2C bit 0x80 outside the branch. A record whose
+// def is not AI-class takes only that outside bit.
+// [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44, the AI gate @0x40ED4E,
+//  the fold @0x40ED92..0x40EE94]
+static void test_bms_ai_attribute_fold() {
+    int failures = 0;
+    bms::File m{};
+    bms::Entity soldier = organic(0, 0, 0, /*team=*/1, /*wp_id=*/0, /*wp_num=*/0);
+    soldier.id = 1;
+    soldier.bmsi_attributes = 0x1u | 0x2u | 0x100u | 0x200u | 0x400u | 0x800u | 0x1000u |
+            0x2000u | 0x4000u | 0x8000u | 0x10000u | 0x40000u | 0x80000u | 0x100000u |
+            0x2000000u;
+    m.organics.push_back(soldier);
+    bms::Entity heli = item(1307, 0, 0, 0);
+    heli.id = 2;
+    heli.bmsi_attributes = 0x20000u; // EngineRunning
+    m.items.push_back(heli);
+    bms::Entity crate = item(900, 10 << 16, 0, 0);
+    crate.id = 3;
+    crate.bmsi_attributes = 0x2u | 0x4000u | 0x2000000u;
+    m.items.push_back(crate);
+    mission::PromoteOptions opts;
+    opts.item_attributes = [](int32_t type) { return type == 1307 ? kItemAttribAIData : 0u; };
+    World world;
+    mission::promote_mission(m, world, opts);
+
+    const Entity *s = world.registry.get(world.registry.find_by_net_id(1));
+    const AiEntity *sai = s != nullptr ? world.ai.for_handle(s->handle) : nullptr;
+    CHECK(s != nullptr && sai != nullptr);
+    if (s == nullptr || sai == nullptr) std::exit(1);
+    CHECK(static_cast<uint32_t>(sai->slot.f[1]) ==
+          (0x1u | 0x2000u | 0x10000u | 0x100u | 0x200u | 0x400u | 0x800u | 0x8000u | 0x8u |
+           0x80000u | 0x100000u | 0x200000u));
+    CHECK((s->flags & kEntityFlagMounted) != 0 && (s->engine_flags & kEntityFlagMounted) != 0);
+    CHECK((s->flags & kEntityFlagAiClimb) != 0 && (s->engine_flags & kEntityFlagAiClimb) != 0);
+    CHECK((s->cause_flags & 0x80u) != 0);
+
+    const Entity *h = world.registry.get(world.registry.find_by_net_id(2));
+    CHECK(h != nullptr);
+    if (h != nullptr) {
+        CHECK((h->flags & 0x80u) != 0);
+        CHECK(h->veh.speed == 0x10000);
+        CHECK(h->veh.part_spin.speed != 0);
+    }
+
+    const Entity *c = world.registry.get(world.registry.find_by_net_id(3));
+    CHECK(c != nullptr);
+    if (c != nullptr) {
+        CHECK(((c->flags | c->engine_flags) & (kEntityFlagMounted | kEntityFlagAiClimb)) == 0);
+        CHECK((c->cause_flags & 0x80u) != 0);
+    }
+    if (failures)
+        std::exit(1);
+}
+
 int main() {
+    test_bms_ai_attribute_fold();
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_admission_zeros_rejected_marker_projections();

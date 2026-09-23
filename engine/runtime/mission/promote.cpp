@@ -298,21 +298,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= kEntityFlagIndestructible;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= kEntityFlagReflective;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= kEntityFlagNoShadow;
-    // An "engine running" vehicle record spawns with its rotor at full speed,
-    // Flags 0x80 up and the ground speed register at 1.0 — a helicopter placed
-    // in flight has its rotor already turning [orig: Entity_SpawnFromBMSRecord
-    // @0x40ee70..0x40ee94 on attrib bit 0x20000: Flags |= 0x80, +0x468 =
-    // 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000].
-    if (kind == EntityKind::Item &&
-        (attrib & static_cast<uint32_t>(BmsiAttributeFlags::EngineRunning)) != 0) {
-        s.flags |= 0x80u;
-        rotor_spawn_full(s.veh.part_spin);
-        s.veh.speed = 0x10000;
-    }
-    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Guarding)) {
-        s.engine_flags |= kEntityFlagMounted;
-        s.flags |= kEntityFlagMounted;
-    }
+    // Attribute 0x2000000 sets bit 0x80 of the entity+0x2C dword, still outside
+    // the AI branch [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44]. The
+    // Guarding / EngineRunning / FlyingOrganic entity bits sit inside the AI
+    // branch (fold_ai_entity_flags).
+    if (attrib & 0x2000000u) s.cause_flags |= 0x80u;
     if (kind == EntityKind::Building) s.engine_flags |= kEntityFlagBuilding;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
@@ -478,6 +468,34 @@ void init_infantry(AiEntity &ae) {
     ae.inf.aim_pitch = ae.pitch;
 }
 
+// The entity-Flags half of the BMS AI-attribute fold, inside the same AI branch
+// as the slot half (the record's def carries the AI-class attrib 0x100000):
+// Guarding (2) -> Flags 0x40, FlyingOrganic (0x4000) -> Flags 0x80 (the org1
+// Z chase that holds an organic at its spawn altitude), EngineRunning
+// (0x20000) -> Flags 0x80 with the rotor at full speed and the speed register
+// at 1.0 (a helicopter placed in flight). The 0x40/0x80 organic bits keep both
+// flag views coherent, like the ChangeAI arms that write them; a hull's engine
+// bit lives in the runtime view the motors toggle.
+// [orig: Entity_SpawnFromBMSRecord @0x40ED9F..0x40EDA5 (2 -> 0x40),
+//  @0x40EE2A..0x40EE33 (0x4000 -> 0x80), @0x40EE70..0x40EE94 (0x20000 ->
+//  Flags |= 0x80, +0x468 = 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000)]
+void fold_ai_entity_flags(Entity &entity, const bms::Entity &e) {
+    const uint32_t attrib = e.bmsi_attributes;
+    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding)) {
+        entity.engine_flags |= kEntityFlagMounted;
+        entity.flags |= kEntityFlagMounted;
+    }
+    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::FlyingOrganic)) {
+        entity.engine_flags |= kEntityFlagAiClimb;
+        entity.flags |= kEntityFlagAiClimb;
+    }
+    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::EngineRunning)) {
+        entity.flags |= 0x80u;
+        rotor_spawn_full(entity.veh.part_spin);
+        entity.veh.speed = 0x10000;
+    }
+}
+
 // Seed the AiSlot from the BMS record. Retail allocates and fills the slot for
 // EVERY record whose def carries the AI-class attrib (0x100000), vehicles
 // included — the vehicle respawn budget (slot[18]) and route restart
@@ -488,17 +506,29 @@ void init_infantry(AiEntity &ae) {
 //  Entity_AllocateAISlot @0x40ED5C; the fills @0x40ED61..0x40F054]
 void init_ai_slot(AiEntity &ae, const bms::Entity &e) {
     AiSlot &s = ae.slot;
-    // The authored AI attributes become AiSlot[1] control bits at spawn. Berserk
-    // is retail's intentional attack-anyone exception to normal team filtering.
-    // [orig: Entity_SpawnFromBMSRecord Blind @0x40ed92..0x40ed9b,
-    //  Berserk @0x40eddd..0x40edea, Coward @0x40ee1a..0x40ee26]
+    // The authored AI attributes fold into the AiSlot[1] behavior word, one
+    // attribute bit to one behavior bit, in retail's order. Berserk (0x200) is
+    // retail's intentional attack-anyone exception to normal team filtering;
+    // 0x400 is the CLIMBER bit the ladder gate reads.
+    // [orig: Entity_SpawnFromBMSRecord — 1 -> 0x1 @0x40ED92..0x40ED9B,
+    //  0x100 -> 0x2000 @0x40EDA9..0x40EDBB, 0x200 -> 0x10000 @0x40EDBE..0x40EDCB,
+    //  0x400 -> 0x100 @0x40EDD2..0x40EDDA, 0x800 -> 0x200 @0x40EDDD..0x40EDEA,
+    //  0x1000 -> 0x400 @0x40EDED..0x40EDF9, 0x2000 -> 0x800 @0x40EDFC..0x40EE04,
+    //  0x8000 -> 0x8000 @0x40EE07..0x40EE13, 0x10000 -> 0x8 @0x40EE1A..0x40EE26,
+    //  0x40000 -> 0x80000 @0x40EE3A..0x40EE4B, 0x80000 -> 0x100000
+    //  @0x40EE4E..0x40EE56, 0x100000 -> 0x200000 @0x40EE5D..0x40EE69]
     const uint32_t attrib = e.bmsi_attributes;
-    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind)) s.f[1] |= 0x1;
-    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk)) {
-        s.f[1] |= 0x200;
-        ae.see_all = true;
+    static constexpr std::pair<uint32_t, uint32_t> kBehaviorFold[] = {
+            {0x1u, 0x1u},           {0x100u, 0x2000u},    {0x200u, 0x10000u},
+            {0x400u, 0x100u},       {0x800u, 0x200u},     {0x1000u, 0x400u},
+            {0x2000u, 0x800u},      {0x8000u, 0x8000u},   {0x10000u, 0x8u},
+            {0x40000u, 0x80000u},   {0x80000u, 0x100000u}, {0x100000u, 0x200000u},
+    };
+    for (const auto &[bit, behavior] : kBehaviorFold) {
+        if ((attrib & bit) != 0)
+            s.f[1] = static_cast<int32_t>(static_cast<uint32_t>(s.f[1]) | behavior);
     }
-    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward)) s.f[1] |= 0x8;
+    if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk)) ae.see_all = true;
     // [orig: slot+48/+52 = (field<<16)/100 — perception2/perfectionist2 are the AI move-speed
     // percentages (engine truth: the editor-era names are misleading)]
     s.f[12] = (e.perception2 << 16) / 100;
@@ -984,6 +1014,14 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             const bool ai_capable =
                     ai_capable_default ||
                     (kind == EntityKind::Item && item_is_drivable(e.type_id));
+            // The AI branch of the spawn: a def carrying the AI-class attrib gets
+            // the attribute fold's entity bits whether or not a brain follows.
+            // [orig: Entity_SpawnFromBMSRecord `test [eax+54h],100000h` @0x40ED4E]
+            const bool ai_class = ai_capable ||
+                    (opts.item_attributes &&
+                     (opts.item_attributes(e.type_id) & kItemAttribAIData) != 0);
+            if (ai_class)
+                if (Entity *spawned = world.registry.get(h)) fold_ai_entity_flags(*spawned, e);
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
                 AiEntity &ae = *ai.at(ai_idx);
