@@ -5265,7 +5265,12 @@ the HUD damage-figure blink and the water noise and wave phase
 (`Water_GenerateNoiseTextures @0x5C0360`, the read `@0x5C0366`). The boat and air
 movers do not read it for their ground link; they stagger `tick` by 36 × DcbId
 (`Entity_UpdateWatercraftPhysics @0x48D480` `@0x48D486..0x48D51F`,
-`Entity_UpdateAircraftPhysics @0x490310` `@0x4903A8`).
+`Entity_UpdateAircraftPhysics @0x490310` `@0x4903A8`). In the port the ground-link
+cadence (`vehicle_refresh_ground_link`), the avoid-brake factor (`ai_waypoints.cpp`),
+the resolver's full update (`collision_resolve.cpp`), the wake scroll above and the
+water noise (`Water::set_noise_frame_counter`, fed each render frame by
+`godot/src/world/game_world_frame.cpp`) read `World::entity_update_counter`; the
+trail wobble and the HUD blink do not yet (world-wac-ai-re section 38).
 
 ## 30. Amphibious mover selection
 
