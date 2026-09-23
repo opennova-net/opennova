@@ -2610,8 +2610,9 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->roll == 0x01000000 - ((0x01000000 + 8) >> 4));
     CHECK(e->inf.vel[0] == 0);
 
-    // A grounded corpse conforms regardless of state; dead + airborne is the
-    // (unported) tumble branch -> the pass leaves everything alone.
+    // A grounded corpse conforms regardless of state; a dead airborne body takes
+    // the tumble instead: at key 0 both ramps are 32 * 0xFFFFFF, no probe and no
+    // slide. [orig: Entity_UpdateInfantryAI @0x4BA08D..0x4BA10A]
     e->health = 0;
     e->body_pitch = 0;
     e->inf.vel[0] = 0;
@@ -2620,8 +2621,14 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->inf.vel[0] == -2048);
     const int32_t at_death = e->body_pitch;
     e->inf.airborne = true;
+    e->roll = 0;
+    e->inf.target_heading = 0;
     ai.infantry_slope_pass(*e, w, 0, 0);
-    CHECK(e->body_pitch == at_death);
+    const int32_t tumble = 32 * 0xFFFFFF;
+    CHECK(e->inf.aim_pitch == tumble + tumble);
+    CHECK(e->body_pitch == at_death + ((tumble - at_death + 4) >> 3));
+    CHECK(e->roll == (tumble + 4) >> 3);
+    CHECK(e->inf.target_heading == tumble >> 2);
     CHECK(e->inf.vel[0] == -2048);
 }
 

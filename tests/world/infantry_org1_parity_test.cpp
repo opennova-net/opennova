@@ -384,6 +384,74 @@ void test_org1_round_leaves_along_this_ticks_look() {
     CHECK(rig.e().inf.body_heading == 0x04000000);
 }
 
+// ---- the corpse slope legs (R3-9) and the torso roll (R3-10) ----
+
+// R3-9a: a dead org1 body in the air tumbles on its eight-tick phase. At key 72,
+// a = (32 - 8) * 0xFFFFFF and b = (32 - (((72 >> 6) - 72) & 63)) * 0xFFFFFF =
+// -25 * 0xFFFFFF. [orig: Entity_UpdateInfantryAI @0x4BA08D..0x4BA10A]
+void test_org1_airborne_corpse_tumbles() {
+    Org1Rig rig;
+    arm_death(rig);
+    rig.entity().death_anim_state = 184;
+    rig.tick(71); // the edge latches the dead bit
+    CHECK((rig.entity().flags & kEntityFlagDead) != 0);
+    rig.e().pos[2] = fx(1) + fx(20);
+    rig.airborne();
+    rig.e().inf.target_heading = 0x1000;
+    rig.e().inf.aim_valid = true;
+    rig.e().body_pitch = 0;
+    rig.e().roll = 0;
+    rig.tick(72);
+    const int32_t a = 24 * 0xFFFFFF;
+    const int32_t b = -25 * 0xFFFFFF;
+    CHECK(rig.e().inf.aim_pitch == a + b);
+    CHECK(rig.e().inf.aim_heading == 0x1000);        // the target before the spin
+    CHECK(rig.e().inf.target_heading == 0x1000 + (b >> 2));
+    CHECK(rig.e().body_pitch == (a + 4) >> 3);
+    CHECK(rig.e().roll == (b + 4) >> 3);
+    CHECK(!rig.e().inf.aim_valid);
+}
+
+// R3-9b: a grounded org1 corpse aims along the slope on its conform pass: aim
+// pitch = the pitch slope (level here), aim heading = the target heading, aim
+// flag clear. [orig: Entity_UpdateInfantryAI @0x4BA301..0x4BA319]
+void test_org1_corpse_aims_along_the_slope() {
+    Org1Rig rig;
+    arm_death(rig);
+    rig.entity().death_anim_state = 184;
+    rig.tick(71);
+    rig.e().inf.target_heading = 0x2000;
+    rig.e().inf.aim_heading = 0x777;
+    rig.e().inf.aim_pitch = 0x123456;
+    rig.e().inf.aim_valid = true;
+    rig.tick(72);
+    CHECK(rig.e().inf.aim_pitch == 0);
+    CHECK(rig.e().inf.aim_heading == 0x2000);
+    CHECK(!rig.e().inf.aim_valid);
+}
+
+// R3-10: org1 computes its own torso roll after the think: a sixteenth-step
+// chase of the slope roll with the lag clamped to +-0x0E38E380, and a
+// thirty-second-step decay in prone idle 48. [orig: Entity_UpdateInfantryAI
+// @0x4BE897..0x4BE8EA]
+void test_org1_torso_roll() {
+    Org1Rig rig;
+    rig.e().pos[2] = fx(1);
+    rig.e().roll = 0x10000000;
+    rig.tick(3); // off the slope phase: the roll holds
+    // (0x10000000 + 8) >> 4 = 0x01000000 lags the roll by more than the clamp
+    CHECK(rig.e().inf.torso_roll == 0x10000000 - 0x0E38E380);
+
+    Org1Rig prone;
+    prone.source.clips.insert(anim_state::kIdleProne);
+    prone.e().pos[2] = fx(1);
+    prone.e().inf.request_body_animation(anim_state::kIdleProne);
+    prone.e().inf.torso_roll = 0x100000;
+    prone.tick(5);
+    CHECK(prone.e().inf.anim_state == anim_state::kIdleProne);
+    CHECK(prone.e().inf.torso_roll == 0x100000 - ((0x100000 + 16) >> 5));
+}
+
 } // namespace
 
 int main() {
@@ -396,6 +464,9 @@ int main() {
     test_org1_fatal_fall_credits_itself();
     test_org1_corpse_stays_dead_on_a_health_write();
     test_org1_round_leaves_along_this_ticks_look();
+    test_org1_airborne_corpse_tumbles();
+    test_org1_corpse_aims_along_the_slope();
+    test_org1_torso_roll();
     if (failures) {
         std::printf("infantry_org1_parity: %d failure(s)\n", failures);
         return 1;

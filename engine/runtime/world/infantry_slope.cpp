@@ -45,16 +45,42 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     const bool org2 = inf.is_local_player;
     if (!org2 && (key & 7u) != 0) return; // org1 runs on the entity's 8-tick phase
 
-    // Dead + in-air takes the corpse-tumble branch instead of the slope pass in both
-    // originals (bodyPitch/roll/yaw spin ramps) — unported; the death-fall mover owns
-    // the drop today. [orig: org1 @0x4BA0B0..0x4BA107; org2 @0x4b6ccb-0x4b6d90]
     // Org1 reads "dead" off the Flags word its death edge latches, not health.
     // [orig: `and ecx,2` @0x4BA084]
     const Entity *slope_entity = world.registry.get(e.handle);
+    const uint32_t slope_flags = slope_entity != nullptr
+            ? (slope_entity->flags | slope_entity->engine_flags) : 0u;
     const bool dead = !org2 && slope_entity != nullptr
-            ? ((slope_entity->flags | slope_entity->engine_flags) & kEntityFlagDead) != 0
+            ? (slope_flags & kEntityFlagDead) != 0
             : e.health <= 0;
-    if (dead && inf.airborne) return;
+    // A dead org1 body in the air tumbles instead: two key-phase ramps a and b
+    // (each (32 - phase) * 0xFFFFFF, phase = key & 63 and ((key >> 6) - key) & 63)
+    // set the aim pitch to a + b and the aim heading to the target heading, pull
+    // body pitch and roll an eighth of the way to a and b, spin the target heading
+    // by b / 4 (the heading chase follows it) and clear the aim flag.
+    // A rowless body reads its airborne mirror for the in-air bit, as `dead`
+    // reads its health. [orig: Entity_UpdateInfantryAI in-air test @0x4BA08D,
+    //  tumble @0x4BA094..0x4BA10A]
+    const bool in_air = slope_entity != nullptr ? (slope_flags & kEntityFlagInAir) != 0
+                                                : inf.airborne;
+    if (!org2 && dead && in_air) {
+        const int32_t k = static_cast<int32_t>(key);
+        const int32_t a = (32 - (k & 63)) * 0xFFFFFF;
+        const int32_t b = (32 - (io::bam_sub(k >> 6, k) & 63)) * 0xFFFFFF;
+        inf.aim_pitch = io::bam_add(b, a);
+        inf.aim_heading = inf.target_heading;
+        e.body_pitch = io::bam_add(
+                e.body_pitch, io::bam_sar(io::bam_add(io::bam_sub(a, e.body_pitch), 4), 3));
+        const int32_t roll = io::bam_add(
+                e.roll, io::bam_sar(io::bam_add(io::bam_sub(b, e.roll), 4), 3));
+        inf.target_heading = io::bam_add(inf.target_heading, io::bam_sar(b, 2));
+        inf.aim_valid = false;
+        e.roll = roll;
+        return;
+    }
+    // The player body's own dead in-air tumble (bodyPitch/roll/yaw spin ramps) is
+    // not ported; the death-fall mover owns its drop. [orig: org2 @0x4b6ccb-0x4b6d90]
+    if (org2 && dead && inf.airborne) return;
 
     // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
@@ -147,10 +173,16 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         inf.vel[1] += slide_x;
     }
 
-    // The conform chase. org1: eighth-step on both fields; dead NPCs also aim along
-    // the slope (aimPitch = slope, aimHeading = targetHeading, aimFlag = 0 on the
-    // 8th tick while Flags & 2 [orig: @0x4ba307..0x4ba319] — not ported here; the
-    // drag block's aimFlag clear lives in infantry_escort.cpp). org2: quarter-step;
+    // A dead org1 body aims along the slope: aim pitch = the pitch slope, aim
+    // heading = the target heading, aim flag clear; its look then settles there.
+    // [orig: Entity_UpdateInfantryAI `test byte ptr [esi+24h],2` @0x4BA301,
+    //  stores @0x4BA307..0x4BA319]
+    if (!org2 && (slope_flags & kEntityFlagDead) != 0) {
+        inf.aim_pitch = pitch_slope;
+        inf.aim_heading = inf.target_heading;
+        inf.aim_valid = false;
+    }
+    // The conform chase. org1: eighth-step on both fields. org2: quarter-step;
     // a corpse additionally tips its LOOK pitch eighth-step, and the roll write is
     // skipped while a combat roll 41/42 plays (the torso-roll ramp owns those ticks).
     // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4]

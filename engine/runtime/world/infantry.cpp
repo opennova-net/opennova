@@ -779,6 +779,26 @@ void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
 // the clamp also snaps the wrapped post-roll value back once the clip ends.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d (decay/skip/chase)
 //  + @0x4b700c-0x4b7025 (the 41/42 ramp)]
+// The org1 torso roll, every tick after the think: prone idle 48 decays it a
+// thirty-second step toward level (the player body's decay is a sixteenth);
+// otherwise it chases the slope roll a sixteenth-step with the lag clamped to
+// roll +-20 deg. There is no 41/42 ramp. [orig: Entity_UpdateInfantryAI
+// `cmp dword ptr [esi+2BCh],30h` @0x4BE897, decay @0x4BE8A6..0x4BE8AC, chase
+// @0x4BE8B0..0x4BE8BD, clamps @0x4BE8C8..0x4BE8EA]
+static void infantry_org1_torso_roll_tick(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    if (inf.anim_state == anim_state::kIdleProne) {
+        inf.torso_roll =
+            io::bam_sub(inf.torso_roll, io::bam_sar(io::bam_add(inf.torso_roll, 16), 5));
+        return;
+    }
+    inf.torso_roll = io::bam_add(
+        inf.torso_roll, io::bam_sar(io::bam_add(io::bam_sub(e.roll, inf.torso_roll), 8), 4));
+    const int32_t delta = io::bam_sub(inf.torso_roll, e.roll);
+    if (delta > 0x0E38E380) inf.torso_roll = io::bam_add(e.roll, 0x0E38E380);
+    if (delta < -0x0E38E380) inf.torso_roll = io::bam_add(e.roll, -0x0E38E380);
+}
+
 void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
     InfantryState &inf = e.inf;
     if (inf.anim_state == anim_state::kIdleProne) {  // [orig: cmp 0x30 @0x4b5d05]
@@ -1428,11 +1448,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // The org1 post-think block, every tick: the recoil kick (its PRNG draw
-    // follows any think) and the spread decay. [orig: Entity_UpdateInfantryAI
-    //  recoil @0x4BE7FD..0x4BE84B, spread @0x4BE84E..0x4BE869]
+    // follows any think), the spread decay and the torso roll.
+    // [orig: Entity_UpdateInfantryAI recoil @0x4BE7FD..0x4BE84B, spread
+    //  @0x4BE84E..0x4BE869, torso roll @0x4BE897..0x4BE8EA]
     if (npc_body) {
         infantry_recoil_tick(inf, e.heading, e.pitch, world.next_prng16());
         infantry_weapon_weight_spread_tick(inf, InfantryWeightSpreadInputs{});
+        infantry_org1_torso_roll_tick(e);
     }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
