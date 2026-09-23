@@ -180,25 +180,24 @@ void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
     e.health = word;
 }
 
-// The brain machine an SM-brained item's class event callback runs: CHel/cpln
-// reach the air machine, cveh/cbot/ctrn the vehicle machine; a traits row built
-// without its def falls back to its mover family, and a brain without a traits
-// row keeps the air machine. A null brain returns
-// before any work [orig: EntityAI_ProcessVehicleStateMachine @0x4583CA..0x4583D1].
-// [orig: g_EntityClassEventCallbackTable @0x813000 rows @0x8132a0/@0x8133a8 vs
-//  @0x813378/@0x813390, resolved by EntityDef_InitAllCallbacks @0x4a5aae]
+// The brain machine an SM-brained item's class event callback runs. Only the
+// five brain-class rows route there: CHel and the cpln thunk to the air
+// machine, cveh and the cbot/ctrn thunks to the vehicle machine. Every other
+// row's callback is another class's, so an item with no brain-class row (no
+// traits row, or an ai_function outside those five) runs no machine. A null
+// brain returns before any work [orig: EntityAI_ProcessVehicleStateMachine
+// @0x4583CA..0x4583D1].
+// [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132a0 ->
+//  EntityAI_ProcessInfantryStateMachine @0x4581B0, cpln @0x8133a8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessVehicleStateMachine @0x4583C0,
+//  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140; resolved
+//  by EntityDef_InitAllCallbacks @0x4a5aae]
 void run_brain_class_event(World &world, const Entity &e, int event) {
     AiEntity *ae = world.ai.for_handle(e.handle);
     if (ae == nullptr) return;
     const VehicleTraits *vt = world.vehicles.traits.get(e.item_id);
-    bool vehicle_class = false;
-    if (vt != nullptr) {
-        if (vt->brain_class == VehicleBrainClass::Unset)
-            vehicle_class = !vehicle_family_uses_direct_air_mover(vt->family);
-        else
-            vehicle_class = vt->brain_class == VehicleBrainClass::Ground;
-    }
-    if (vehicle_class)
+    if (vt == nullptr || vt->brain_class == VehicleBrainClass::Unset) return;
+    if (vt->brain_class == VehicleBrainClass::Ground)
         world.ai.process_vehicle_state_machine(*ae, world, event);
     else
         world.ai.process_infantry_state_machine(*ae, world, event);

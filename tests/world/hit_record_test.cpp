@@ -198,6 +198,13 @@ static void test_kill_single_hands_items_the_record() {
     hull.net_id = 71;
     const EntityHandle brained = rig.w->registry.spawn(1, hull);
     rig.w->ai.attach(brained);
+    // An ai_function CHel row: its class event is the air machine. Without a
+    // brain-class row the class event runs no machine.
+    // [orig: g_EntityClassEventCallbackTable CHel @0x8132A0 ->
+    //  EntityAI_ProcessInfantryStateMachine @0x4581B0]
+    VehicleTraits air;
+    air.brain_class = VehicleBrainClass::Air;
+    rig.w->vehicles.traits.set(901, air);
     CHECK(rig.w->commands.kill_ssn(brained));
     CHECK(rig.w->ai.events.count() == 1);
     if (rig.w->ai.events.count() == 1) {

@@ -127,6 +127,12 @@ static void test_wac_kill_ssn_queues_brain_event() {
     vehicle.alive = true;
     const EntityHandle h = w.registry.spawn(1, vehicle);
     w.ai.attach(h);
+    // An ai_function cveh row routes the class event to the vehicle machine;
+    // without a brain-class row the class event runs no machine
+    // [orig: g_EntityClassEventCallbackTable cveh @0x813378].
+    VehicleTraits ground;
+    ground.brain_class = VehicleBrainClass::Ground;
+    w.vehicles.traits.set(2001, ground);
     CHECK(w.ai.events.count() == 0);
     CHECK(w.commands.wac_kill_ssn(h));
     CHECK(w.registry.get(h)->health == 0);

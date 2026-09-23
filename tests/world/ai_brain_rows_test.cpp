@@ -569,6 +569,9 @@ void test_ground_death_kills_children_on_the_hit_record() {
     vt.attrib_parent = true;
     vt.brain_class = VehicleBrainClass::Ground;
     w.vehicles.traits.set(600, vt);
+    VehicleTraits child_vt; // a cveh child: its class event is the vehicle machine
+    child_vt.brain_class = VehicleBrainClass::Ground;
+    w.vehicles.traits.set(602, child_vt);
     ItemDeathTraits tree;
     tree.death_class = ItemDeathClass::kTree;
     w.tables.item_death_traits.set(601, tree);
@@ -599,6 +602,46 @@ void test_ground_death_kills_children_on_the_hit_record() {
     CHECK(notifications == 1);
 }
 
+
+// A brained item runs a machine from its class event callback only through one
+// of the five brain-class rows: CHel and cpln reach the air machine, cveh, cbot
+// and ctrn the vehicle machine. An item with no brain-class row (here: no
+// traits row at all) runs none, whatever brain it carries.
+// [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132A0 ->
+//  EntityAI_ProcessInfantryStateMachine @0x4581B0, cpln @0x8133A8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessVehicleStateMachine @0x4583C0,
+//  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140]
+void test_class_event_needs_a_brain_class_row() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type_index = 7;
+    seed.is_ai_capable = true;
+    seed.health = 100;
+    seed.alive = true;
+    seed.item_id = 700; // no traits row
+    const EntityHandle bare = w.registry.spawn(1, seed);
+    seed.item_id = 701; // ai_function CHel
+    const EntityHandle heli = w.registry.spawn(1, seed);
+    w.ai.attach(bare);
+    w.ai.attach(heli);
+    VehicleTraits air;
+    air.brain_class = VehicleBrainClass::Air;
+    w.vehicles.traits.set(701, air);
+
+    CHECK(w.commands.wac_kill_ssn(bare));
+    CHECK(w.ai.events.count() == 0);
+    CHECK(w.commands.wac_kill_ssn(heli));
+    CHECK(w.ai.events.count() == 1);
+    if (w.ai.events.count() == 1) {
+        CHECK(w.ai.events.at(0).type() == 1);
+        CHECK(w.ai.events.at(0).entity_index() == w.ai.index_of(*w.ai.for_handle(heli)));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -615,6 +658,7 @@ int main() {
     test_change_ai_slot_arms_without_a_token();
     test_ground_samples_add_the_brain_floors();
     test_ground_death_kills_children_on_the_hit_record();
+    test_class_event_needs_a_brain_class_row();
     std::printf("ai_brain_rows: %d failures\n", failures);
     return failures ? 1 : 0;
 }
