@@ -358,6 +358,32 @@ void test_org1_corpse_stays_dead_on_a_health_write() {
     CHECK(rig.w->round_sim.deaths.size() == 1); // the one edge transaction
 }
 
+// ---- the org1 phase order (R3-8) ----
+
+// R3-8: org1 chases its heading and look after the think and BEFORE its fire
+// pass, so a round leaves along this tick's look, not last tick's.
+// [orig: Entity_UpdateInfantryAI body chase @0x4BE8FD..0x4BE931 and look
+// @0x4BEB18..0x4BEBE7, then the fire block @0x4BF15C..0x4BF4B0]
+void test_org1_round_leaves_along_this_ticks_look() {
+    Org1Rig rig;
+    rig.w->tables.ammo.entries.resize(2);
+    rig.w->tables.ammo.entries[1].valid = true;
+    rig.w->tables.ammo.entries[1].velocity = 620;
+    rig.w->tables.ammo.entries[1].max_age_ticks = 100;
+    rig.e().pos[2] = fx(1); // on its capsule floor
+    rig.e().profile.organic.ammo[1] = 1;
+    rig.e().inf.fire_secondary_latch = true; // the walking-fire latch: every tick
+    rig.e().inf.target_heading = 0x10000000;
+    rig.e().inf.aim_heading = 0x04000000; // the look chase then holds
+    rig.tick(3);
+    CHECK(rig.w->out.rounds.count == 1);
+    if (rig.w->out.rounds.count == 1) {
+        // (0x10000000 - 0 + 2) >> 2 = 0x04000000, inside the +-69273360 clamp
+        CHECK(rig.w->out.rounds.records[0].dir_yaw == 0x04000000);
+    }
+    CHECK(rig.e().inf.body_heading == 0x04000000);
+}
+
 } // namespace
 
 int main() {
@@ -369,6 +395,7 @@ int main() {
     test_org1_death_edge_legs();
     test_org1_fatal_fall_credits_itself();
     test_org1_corpse_stays_dead_on_a_health_write();
+    test_org1_round_leaves_along_this_ticks_look();
     if (failures) {
         std::printf("infantry_org1_parity: %d failure(s)\n", failures);
         return 1;

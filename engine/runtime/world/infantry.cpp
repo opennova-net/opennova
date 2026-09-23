@@ -913,6 +913,79 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
     return true;
 }
 
+// The org1 heading chase, legs and look, for a body that is not riding a seat.
+// Body: quarter-step toward the target heading, clamped +-69273360; the live
+// look moves by the SAME step, preserving its offset from the body. A carried
+// (Flags 0x40) body snaps both legs to the body; any other chases its legs.
+// The look then chases the aim pair. The legs are consumed as the R/L leg-chain
+// bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (section 14).
+// [orig: Entity_UpdateInfantryAI body @0x4BE8FD..0x4BE931, carried snap
+//  @0x4BE934 -> @0x4BEB0C, legs @0x4BE944..0x4BEB0A, look @0x4BEB18..0x4BEBE7]
+static void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
+    InfantryState &inf = e.inf;
+    const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
+    int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
+    if (step > kBodyTurnClamp) step = kBodyTurnClamp;
+    if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
+    inf.body_heading = io::bam_add(inf.body_heading, step);
+    e.heading = io::bam_add(e.heading, step);
+
+    if (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagMounted) != 0) {
+        inf.leg_yaw[0] = inf.body_heading;
+        inf.leg_yaw[1] = inf.body_heading;
+    } else {
+        // A movement state or a def+84&0x200 body takes the WALK path: the right
+        // foot half-snaps to the target, the left pulls a quarter of the
+        // residual, both targets = target, the alternating shuffle while
+        // walking/turning. [orig: selector @0x4be944-0x4be967; walk path
+        // @0x4be9d4-0x4bea0b]
+        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
+            (e.def_attrib & kItemAttribLandable) != 0) {
+            const int32_t tgt = inf.target_heading;
+            inf.leg_yaw[0] = io::bam_add(
+                inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
+            inf.leg_yaw[1] = io::bam_add(
+                inf.leg_yaw[1], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 2));
+            inf.leg_target[0] = tgt;
+            inf.leg_target[1] = tgt;
+        } else {
+            // Idle: re-plant targets toward the MIDPOINT of (body, target),
+            // measured vs the current TARGET, left window 32 ticks behind the
+            // right. [orig: midpoint @0x4be969-0x4be975; L @0x4be977/@0x4be991-0x4be9a7;
+            //  R @0x4be97f/@0x4be9bb-0x4be9cc]
+            const int32_t mid = io::bam_add(
+                inf.target_heading,
+                io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
+            const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
+            if (abs_bam(dl) > kLegReplantMin &&
+                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+                inf.leg_target[1] = mid;
+            const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
+            if (abs_bam(dr) > kLegReplantMin &&
+                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+                inf.leg_target[0] = mid;
+        }
+        for (int leg = 0; leg < 2; ++leg) {
+            // Quarter-step (sixteenth for def+84&0x200 bodies), clamp +-0x5000000
+            // (~7 deg/tick), twist limit +-0x20000000 (45 deg) vs the BODY.
+            // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
+            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
+            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
+                                ? io::bam_sar(io::bam_add(ldiff, 8), 4)
+                                : io::bam_sar(io::bam_add(ldiff, 2), 2);
+            if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
+            if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
+            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
+            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
+            if (twist > kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
+            else if (twist < -kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
+        }
+    }
+    infantry_look_tick(inf, e.heading, e.pitch);
+}
+
 // The org2 local view/leg phase precedes the scoped additions, before later
 // animation selection or ladder movement consumes aim.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B4945..0x4B4BC6;
@@ -1092,7 +1165,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         tick_entity->flags &= ~kEntityFlagQueuedMount;
         tick_entity->engine_flags &= ~kEntityFlagQueuedMount;
     }
-    infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
+    // The player bodies decay recoil and spread at their head; org1 runs the
+    // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
+    //  @0x4BE7FD..0x4BE86F]
+    if (!npc_body) infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
     InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
@@ -1114,7 +1190,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         weight_inputs.weaponweight_fp16 = held->weaponweight_fp16;
         weight_inputs.clipweight_fp16 = held->clipweight_fp16;
     }
-    infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+    if (!npc_body) infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
     // Keep the on-foot view clamp/leg phase before scoped drift. The mounted
     // branch still consumes the same already-drifted look when posing its seat.
     // This phase has no PRNG draws, so recoil/yaw/pitch sampling stays ordered.
@@ -1223,8 +1299,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // of this pass. [orig: the respawn leg re-enters at @0x4BA066]
     const bool body_live = org1_body ? !org1_dead_now() : e.health > 0;
 
+    // Org1's phase order ahead of its think: the slope pass (cadence inside),
+    // the attach sample, then the ground-carrier ride and the gradient.
+    // [orig: Entity_UpdateInfantryAI slope @0x4BA066, attach sample @0x4BA348,
+    //  carrier @0x4BA45D..0x4BA891, gradient @0x4BA896, think @0x4BA970]
+    if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
     const InfantryAttachmentPose attachment = !inf.is_local_player && body_live
             ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
+    if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
     // Org1 samples before the think so path_state=1 is visible to this tick's
     // boarding and detour selection. Its replacement motion overrides the
     // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
@@ -1318,6 +1400,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             infantry_attention_think(*this, e, world, key);
     }
 
+    // The org1 post-think block, every tick: the recoil kick (its PRNG draw
+    // follows any think) and the spread decay. [orig: Entity_UpdateInfantryAI
+    //  recoil @0x4BE7FD..0x4BE84B, spread @0x4BE84E..0x4BE869]
+    if (npc_body) {
+        infantry_recoil_tick(inf, e.heading, e.pitch, world.next_prng16());
+        infantry_weapon_weight_spread_tick(inf, InfantryWeightSpreadInputs{});
+    }
+
     // Mounted pose is a late phase, not an update bypass: death ran first and a
     // living NPC has already perceived, selected, and aimed. The mounted return
     // below suppresses only ordinary ground locomotion.
@@ -1327,6 +1417,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const Entity *mounted_occ = mounted ? world.registry.get(e.handle) : nullptr;
     const bool mounted_gunner =
             mounted_occ != nullptr && mounted_occ->mount_type == SeatType::Gunner;
+    // A live mounted org1 body takes the seat pose; any other chases heading,
+    // legs and look here, ahead of its eye offset and its sound/fire passes.
+    // [orig: Entity_UpdateInfantryAI mounted-live local @0x4B9960..0x4B9985,
+    //  its test @0x4BE8F0]
+    if (npc_body && !mounted) infantry_org1_heading_chase(e, tick_entity, key);
 
     // The lean angle decays every body tick (corpse included — the decay sits before
     // the weapon-channel block in the original) and ramps while a lean key is held;
@@ -1343,7 +1438,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // already advanced at the motor head. [orig: @0x4B41DF before @0x4B5CAB]
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
 
-    infantry_follow_carrier(e, world, frame.capsule_bottom, !npc_body);
+    if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
     // Restamp the camera offset from the current simulated head, after the
     // motor-head channel update and current view/seat/lean pose. The local
@@ -1519,83 +1614,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.ground_cache_valid = true;
     }
 
-    // 5. Heading + leg-chain chase, per motor (D-INF-12 CLOSED 2026-07-16: the org2
-    // write sites to +0x8C/+0x2E4/+0x2E8 are displacement-scanned and byte-read; the
-    // org1 block re-read at the same precision). The legs are consumed as the R/L
-    // leg-chain bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (§14).
+    // 5. The org2 heading/leg chase (org1 chased above, before its fire pass).
     if (inf.is_local_player) {
         // A stale mount can fall back to the ordinary mover during this tick.
         // Valid mounted bodies returned above; ordinary local bodies already
         // ran the view phase ahead of their scoped drift.
         // Raw tick, not the org1 stagger key [orig: @0x4B4147 / @0x4B467A].
         if (!local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
-    } else {
-        // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
-        // toward the target, clamped ±69273360; live look moves by the SAME step,
-        // preserving its offset from the body. [orig: @0x4be8fd-0x4be931]
-        const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
-        int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
-        if (step > kBodyTurnClamp) step = kBodyTurnClamp;
-        if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
-        inf.body_heading = io::bam_add(inf.body_heading, step);
-        e.heading = npc_body ? io::bam_add(e.heading, step) : inf.body_heading;
-
-        // 5b. Legs. The carried (Flags 0x40) body-snap rides the mount slice. A
-        // movement state or a def+84&0x200 body takes the WALK path: the right foot
-        // half-snaps to the target, the left pulls a quarter of the residual, both
-        // targets = target — the alternating shuffle while walking/turning.
-        // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
-        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
-            (e.def_attrib & kItemAttribLandable) != 0) {
-            const int32_t tgt = inf.target_heading;
-            inf.leg_yaw[0] = io::bam_add(
-                inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
-            inf.leg_yaw[1] = io::bam_add(
-                inf.leg_yaw[1], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 2));
-            inf.leg_target[0] = tgt;
-            inf.leg_target[1] = tgt;
-        } else {
-            // Idle: re-plant targets toward the MIDPOINT of (body, target), measured
-            // vs the current TARGET, left window 32 ticks behind the right.
-            // [orig: midpoint @0x4be969-0x4be975; L @0x4be977/@0x4be991-0x4be9a7;
-            //  R @0x4be97f/@0x4be9bb-0x4be9cc]
-            const int32_t mid = io::bam_add(
-                inf.target_heading,
-                io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
-            const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
-            if (abs_bam(dl) > kLegReplantMin &&
-                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
-                inf.leg_target[1] = mid;
-            const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
-            if (abs_bam(dr) > kLegReplantMin &&
-                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
-                inf.leg_target[0] = mid;
-        }
-        for (int leg = 0; leg < 2; ++leg) {
-            // Quarter-step (sixteenth for def+84&0x200 bodies), clamp ±0x5000000
-            // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
-            // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
-            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
-                                ? io::bam_sar(io::bam_add(ldiff, 8), 4)
-                                : io::bam_sar(io::bam_add(ldiff, 2), 2);
-            if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
-            if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
-            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
-            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
-            if (twist > kLegTwistLimit)
-                inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
-            else if (twist < -kLegTwistLimit)
-                inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
-        }
     }
 
-    if (npc_body) infantry_look_tick(inf, e.heading, e.pitch);
-
-    // 6. The slope pass: conform-or-decay body_pitch/roll + the steep-ground slide.
-    // Cadence lives inside (org1 every 8th tick on `key`; org2 decay every tick,
-    // probes every 2nd on the logic tick). [orig: @0x4ba10f block / @0x4b6d95 block]
-    infantry_slope_pass(e, world, logic_tick, key);
+    // 6. The org2 slope pass: conform-or-decay body_pitch/roll + the steep-ground
+    // slide (org1 ran its pass after the corpse leg). Cadence lives inside (org2
+    // decay every tick, probes every 2nd on the logic tick). [orig: @0x4b6d95 block]
+    if (!npc_body) infantry_slope_pass(e, world, logic_tick, key);
 
     // Horizontal slide decay. NPC (org1): (7v+4)>>3 with an abs<=8 deadzone, every state. Player
     // (org2): the selector is Flags & 0x2000 = IN-AIR (entity.h already names it
