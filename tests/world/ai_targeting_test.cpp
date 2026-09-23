@@ -162,10 +162,11 @@ static void test_rounds_mark_their_shooter() {
 
 // R2-11: BERSERK is read live from AiSlot[1] & 0x200, so a scripted ChangeAI
 // Berserk (which writes only the slot word) opens the SM feed to a same-team
-// candidate and turns a same-team kill into an enemy kill.
+// candidate. The kill feed's event type reads the same bit, but the scorer
+// does not: a same-team kill stays a team kill.
 // [orig: AI_FindBestTargetB `test dword ptr [eax+4],200h` @0x466FAB,
 //  @0x4670CD, @0x4670E1; Entity_ApplyCommand case 0x10 @0x43AEF6;
-//  GameEvent_PlayerDeath killer gate @0x5170BE..0x5170DA]
+//  GameEvent_PlayerDeath feed gate @0x5170BE..0x5170DA]
 static void test_scripted_berserk_reaches_the_readers() {
     {
         Scanner s;
@@ -209,8 +210,12 @@ static void test_scripted_berserk_reaches_the_readers() {
         w.ai.attach(killer);
         CHECK(w.commands.apply_ai_command(killer, EntityCommands::kBerserkBit, 1, 0, 0));
         w.match.record_death(w, victim, killer);
-        CHECK(w.match.player(killer)->stats[MatchStats::kTeamKills] == 0);
-        CHECK(w.match.player(killer)->stats[MatchStats::kEnemyKills] == 1);
+        // The scorer itself has no see-all exemption: a same-team kill stays a
+        // team kill; BERSERK only changes the kill feed's event type.
+        // [orig: GameEvent_ProcessScoring @0x5301E4..0x5301EE; the feed-only
+        //  test GameEvent_PlayerDeath @0x5170A6..0x517113]
+        CHECK(w.match.player(killer)->stats[MatchStats::kTeamKills] == 1);
+        CHECK(w.match.player(killer)->stats[MatchStats::kEnemyKills] == 0);
     }
 }
 

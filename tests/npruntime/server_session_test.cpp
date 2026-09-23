@@ -3611,7 +3611,6 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	world.rules.mp_session = true;
 	world.collision = &collision;
 	ai.collision = &collision;
-	world.add_system(&ai);
 	ctx.world = &world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);

@@ -141,7 +141,7 @@ struct Rig {
         ctx.logic_tick = key - 36u * static_cast<uint32_t>(blue().net_id);
         ctx.is_authority = true;
         w.logic_tick = ctx.logic_tick;
-        w.ai.tick(w, ctx);
+        w.update_all_entities(ctx);
     }
     // An alerted body with no target and no scan idles in idle_2 (44).
     void alerted_idle() {

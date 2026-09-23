@@ -120,7 +120,7 @@ void test_team_kill_has_no_see_all_exemption() {
     const EntityHandle ace = player(*world, 0, 1);
     const EntityHandle bee = player(*world, 1, 1);
     AiEntity *body = world->ai.at(world->ai.attach(ace));
-    body->see_all = true;
+    body->slot.f[AiSlot::kBehaviorFlags] |= 0x200; // BERSERK
     world->match.record_death(*world, bee, ace);
     const MatchPlayer *killer = world->match.player(ace);
     CHECK(killer->stats[MatchStats::kTeamKills] == 1);
