@@ -493,6 +493,15 @@ void test_route_seed_is_the_slot_words() {
     ctrl.type = SeatType::Controller;
     spec.seats.push_back(ctrl);
     opts.item_seat_specs.push_back(spec);
+    // A brain exists only for a def with the AI-class attrib and a brain-class
+    // ai_function row [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the class
+    // inits' slot gates @0x46848E / @0x46878D].
+    opts.ai_profile_defaults = [kTruck](int32_t type) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        d.known = type == kTruck;
+        return d;
+    };
+    opts.item_attributes = [kTruck](int32_t type) { return type == kTruck ? kItemAttribAIData : 0u; };
     auto wp = std::make_unique<World>();
     World &w = *wp;
     w.ai.is_authority = true;
