@@ -796,8 +796,10 @@ public:
     int index_of(const AiEntity &e) const; // AI index (= AIEvent entity_index)
 
     // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3) or
-    // still(4) AIEvent by horizontal speed (sqrt(vx^2+vz^2), >=1057 -> 3 else 4; channel 0).
-    void queue_death_event(AiEntity &e);
+    // still(4) AIEvent by the hull's horizontal speed (sqrt over the entity record's
+    // +0x98/+0x9C velocity pair, >=1057 -> 3 else 4; channel 0). `world` resolves that
+    // record; a brain without one reads its own mirrors.
+    void queue_death_event(const World *world, AiEntity &e);
 
     // [orig: AI_FindBestTargetB @0x466f60] the candidate FEED (D-AI-1): the class-driven
     // pool walk — four profile weapon-slot classes (+40+4i), each gated by its class-

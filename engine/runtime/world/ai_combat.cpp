@@ -31,12 +31,10 @@ int AiSystem::index_of(const AiEntity &e) const {
 int32_t AiSystem::prng_step_a() { return static_cast<int32_t>(prng_step(prng_a)); }
 
 // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3)/still(4)
-// AIEvent by horizontal speed. Channel 0, entity index, timer 0 (the orig stores fldz to var_C).
-void AiSystem::queue_death_event(AiEntity &e) {
-    double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
-                          static_cast<double>(e.vel_z) * e.vel_z);
-    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp; // flt_7C19E0 min-clamp
-    int32_t isp = static_cast<int32_t>(sp);
+// AIEvent by the hull's horizontal speed (the entity record's +0x98/+0x9C pair, see
+// hull_death_speed). Channel 0, entity index, timer 0 (the orig stores fldz to var_C).
+void AiSystem::queue_death_event(const World *world, AiEntity &e) {
+    const int32_t isp = hull_death_speed(world, e);
     AiEventEntry ev{};
     ev.f[0] = (isp >= 1057) ? 3 : 4;     // crash/ragdoll vs still death
     ev.f[1] = (index_of(e) << 16);       // channel 0 | entity index

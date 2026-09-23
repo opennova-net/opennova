@@ -163,8 +163,8 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
 
-    if (e.health <= 0) { // [orig: *(int16*)(entity+286) <= 0]
-        ctx.sys->queue_death_event(e);
+    if (hull_health(ctx.world, e) <= 0) { // [orig: `cmp [edi+11Eh],bp` @0x467747]
+        ctx.sys->queue_death_event(ctx.world, e);
         return;
     }
 
@@ -198,8 +198,8 @@ void h_patrol_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
 
-    if (e.health <= 0) { // [orig: *(int16*)(entity+286) <= 0]
-        ctx.sys->queue_death_event(e);
+    if (hull_health(ctx.world, e) <= 0) { // [orig: `cmp [edi+11Eh],bx` @0x457D87]
+        ctx.sys->queue_death_event(ctx.world, e);
         return;
     }
 
@@ -311,7 +311,7 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
         ctx.sys->row(kAiGroundCombat).enter(ctx);
         return;
     }
-    if (e.health > 0) {                        // neither flag, alive: flee waypoint
+    if (hull_health(ctx.world, e) > 0) {       // neither flag, alive: flee waypoint [orig: @0x4674A5]
         e.patrol_f0 = 1;                       // [orig: controller triple {1, 0x7FFFFFFF, 1}]
         e.patrol_delta = 0x7FFFFFFF;
         e.patrol_goal = 1;
@@ -322,7 +322,7 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
         b.f[AiBrain::kStep] = 16;
         return;
     }
-    ctx.sys->queue_death_event(e);             // dead: crash(3)/still(4) by |vel|
+    ctx.sys->queue_death_event(ctx.world, e);  // dead: crash(3)/still(4) by |vel|
 }
 
 // The aim offset every mobile and continuation solve hands the solver through
@@ -477,9 +477,9 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     const AiProfile &p = e.profile;
 
     // The death leg: event 3/4 by horizontal speed [orig: `cmp [edi+11Eh],bx`
-    // @0x472E26 -> @0x4744B8].
-    if (e.health <= 0) {
-        ctx.sys->queue_death_event(e);
+    // @0x472E26 -> @0x4744B8; the +0x9C/+0x98 speed @0x4744B8..0x474508].
+    if (hull_health(&world, e) <= 0) {
+        ctx.sys->queue_death_event(&world, e);
         return;
     }
 
@@ -793,15 +793,6 @@ void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
     ctx.sys->events.queue(ev);
 }
 
-// Horizontal speed with the death-velocity saturation clamp.
-// [orig: the fsqrt + flt_7C19E0 min pattern shared by every death leg]
-int32_t death_speed(const AiEntity &e) {
-    double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
-                          static_cast<double>(e.vel_z) * e.vel_z);
-    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
-    return static_cast<int32_t>(sp);
-}
-
 // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
 // death transforms + net notify when not yet husked (Flags&4), the def+1352 mounted-
 // children kill loop, the alert block, moveStep 16, and — already slow (< 1057) — the
@@ -881,7 +872,7 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 	}
 	death_alert_block(ctx, e);
 	b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
-    if (death_speed(e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
+    if (hull_death_speed(ctx.world, e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
         queue_destroy_event(ctx, e);
 }
 
@@ -897,7 +888,7 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
 			entity_process_falling_death(*ctx.world, *vehicle, ctx.world->tables.terrain,
 					float(from_fixed(ctx.world->env.water_z)));
 	}
-	const bool stopped = death_speed(e) < 1057;
+	const bool stopped = hull_death_speed(ctx.world, e) < 1057; // [orig: @0x467CED..0x467D30]
 	const bool still =
         std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
         std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&

@@ -1605,6 +1605,13 @@ target_link_libraries(aim_metrics_parity_test PRIVATE opennova_runtime)
 target_compile_features(aim_metrics_parity_test PRIVATE cxx_std_17)
 add_test(NAME aim_metrics_parity COMMAND aim_metrics_parity_test)
 
+# The vehicle-brain state rows against their retail witnesses: the live hull
+# words each row reads, the slot and brain words each enter writes.
+add_executable(ai_brain_rows_test world/ai_brain_rows_test.cpp)
+target_link_libraries(ai_brain_rows_test PRIVATE opennova_runtime)
+target_compile_features(ai_brain_rows_test PRIVATE cxx_std_17)
+add_test(NAME ai_brain_rows COMMAND ai_brain_rows_test)
+
 add_executable(npc_weapons_test world/npc_weapons_test.cpp)
 target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)
 target_include_directories(npc_weapons_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

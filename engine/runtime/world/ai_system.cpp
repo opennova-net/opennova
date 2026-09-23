@@ -412,8 +412,11 @@ void process_class_state_machine(
             return;
         }
         if (sys.is_in_session) {
-            e.health = 0; // [orig: *(int16*)(entity+286) = 0 @0x45827f, before the death tick] so the
-                          // dispatched tick takes its death path (not the alive path) on a death event
+            // The entity record's health word is zeroed before the death tick so the
+            // dispatched tick takes its death path on a death event; the mirror
+            // follows [orig: `mov [edi+11Eh],ax` @0x45827F; ground @0x45848B].
+            if (Entity *ent = world.registry.get(e.handle)) ent->health = 0;
+            e.health = 0;
             sys.row(b.f[AiBrain::kCurState]).tick(ctx);
             if (b.f[AiBrain::kOwner] == 0)
                 return;

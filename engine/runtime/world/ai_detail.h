@@ -87,6 +87,37 @@ constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the origin
 // Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]
 constexpr double kDeathSpeedClamp = 2147418112.0;
 
+// The ground rows read the hull's live words off the entity record, not the
+// AiEntity mirrors (only the spawn and bury paths refresh those for a hull):
+// the health word +0x11E and the velocity pair +0x98/+0x9C. A brain without a
+// registry row (a bare AiSystem fixture) keeps its mirrors.
+// [orig: AI_HandleEvent_HelicopterCombatD @0x467747 / @0x467954..0x46795A;
+//  AI_UpdatePatrolBehavior @0x457D87 / @0x457E23..0x457E29;
+//  AI_EnterState_GroundEvade @0x4674A5 / @0x4674B2..0x4674B8;
+//  AI_TransitionToDeath_GroundVehicle @0x467C09..0x467C0F;
+//  AI_TickState_VehicleDying @0x467CED..0x467CF3]
+inline int32_t hull_health(const World *world, const AiEntity &e) {
+    if (world != nullptr)
+        if (const Entity *entity = world->registry.get(e.handle)) return entity->health;
+    return e.health;
+}
+
+// The death legs' horizontal hull speed: fsqrt(vx*vx + vy*vy) over the same
+// pair, the flt_7C19E0 min-clamp, then _ftol2_sse's chop.
+inline int32_t hull_death_speed(const World *world, const AiEntity &e) {
+    int32_t vx = e.vel_x;
+    int32_t vy = e.vel_z;
+    if (world != nullptr) {
+        if (const Entity *entity = world->registry.get(e.handle)) {
+            vx = entity->veh.vel_x;
+            vy = entity->veh.vel_y;
+        }
+    }
+    double sp = std::sqrt(static_cast<double>(vx) * vx + static_cast<double>(vy) * vy);
+    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
+    return static_cast<int32_t>(sp);
+}
+
 // Byte-exact integer abs (cdq/xor/sub idiom; INT_MIN -> INT_MIN like the orig).
 inline int32_t iabs32(int32_t v) {
     int32_t s = v >> 31;
