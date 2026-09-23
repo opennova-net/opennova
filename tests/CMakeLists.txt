@@ -1702,6 +1702,14 @@ target_link_libraries(infantry_attention_test PRIVATE opennova_runtime)
 target_compile_features(infantry_attention_test PRIVATE cxx_std_17)
 add_test(NAME infantry_attention COMMAND infantry_attention_test)
 
+# The org1 think block's combat legs (Entity_UpdateInfantryAI @0x4B9910, the
+# think @0x4BA970..0x4BE7FD): held/dead targets, the no-target search, the aim
+# target and eye, the lead, the hold-timer tail, reload, retaliation LOS.
+add_executable(infantry_think_test world/infantry_think_test.cpp)
+target_link_libraries(infantry_think_test PRIVATE opennova_runtime)
+target_compile_features(infantry_think_test PRIVATE cxx_std_17)
+add_test(NAME infantry_think COMMAND infantry_think_test)
+
 # The infantry slot-sound emissions (footsteps/foley/landing/screams).
 add_executable(slot_sound_test world/slot_sound_test.cpp)
 target_link_libraries(slot_sound_test PRIVATE opennova_runtime)

@@ -24,6 +24,12 @@ bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool p
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: ai_find_cover_position @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);
+// The think's entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities
+// @0x53B130]: the shared collision world, or its terrain leg alone when the
+// embedder wired no model world. Defined in infantry_combat.cpp.
+bool infantry_entity_los(AiSystem &ai, World &world, EntityHandle a, EntityHandle b,
+                         const int32_t start[3], const int32_t end[3], int32_t height_offset,
+                         bool all_types);
 void infantry_escort_goal(AiEntity &, World &, const Entity &target,
                          int32_t goal[3], int32_t &radius, int32_t &distance);
 bool infantry_is_dragger(const AiEntity &, const World &);

@@ -3588,8 +3588,10 @@ void test_pre_attack_wins_when_previously_idle() {
 // [orig: the perception scan @0x4b9910 §17.1 (tick & 0x1F), the candidate walk
 //  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
 
-// A damage alert lasts think steps; animation, root motion and firing continue
-// between them. [orig: authority/key&15 gate before LABEL_373 @0x4BA970]
+// The damage alert decays by one only on a think whose staggered key is a
+// multiple of 64: the thinks at keys 16/32/48 leave it alone. [orig: the think
+// gate @0x4BA970; the key & 0x3F local @0x4BA9D8..0x4BA9DB; the decay
+// @0x4BBE24..0x4BBE38]
 void test_combat_think_uses_sixteen_tick_cadence() {
     World world;
     AiSystem ai;
@@ -3597,9 +3599,9 @@ void test_combat_think_uses_sixteen_tick_cadence() {
     body->inf.damage_timer = 10;
     run_ticks(ai, world, 0, 1);
     CHECK(body->inf.damage_timer == 9);
-    run_ticks(ai, world, 1, 16);
+    run_ticks(ai, world, 1, 64);
     CHECK(body->inf.damage_timer == 9);
-    run_ticks(ai, world, 16, 17);
+    run_ticks(ai, world, 64, 65);
     CHECK(body->inf.damage_timer == 8);
 }
 

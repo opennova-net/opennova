@@ -445,10 +445,12 @@ static void test_aim_origin_takes_the_non_person_leg() {
     w.pose_provider = nullptr;
 }
 
-// The aim source is the rocket launch point, while a person target uses its
-// time-phased eye offset. Its weapon muzzle does not affect the target point.
+// The aim source is the rocket launch point, and a person target is aimed at
+// its led raw Position: the ComputeWeaponFireOrigin eye point both aim blocks
+// compute is never read, and the target's weapon muzzle plays no part either.
 // [orig: Entity_GetAttachmentWorldPosition @0x4B2670 (+0x366);
-// Entity_ComputeWeaponFireOrigin @0x43B4B0]
+// Entity_UpdateInfantryAI @0x4B9910 (the dead Entity_ComputeWeaponFireOrigin
+// calls @0x4BC720 / @0x4BCB23; the aim delta @0x4BC825..0x4BC84E)]
 static void test_aim_solution_uses_muzzle_stamp() {
     struct AttackSource : IRootMotionSource {
         bool has_clip(int, int id) const override {
@@ -532,8 +534,9 @@ static void test_aim_solution_uses_muzzle_stamp() {
     CHECK(npc.inf.aim_valid);
     CHECK(npc.inf.aim_pitch < 0);
 
-    // The target eye is 1 u (or half-height at phase bit 7), so the
-    // solution is level or up. An unrelated weapon point at 99 u is ignored.
+    // A 1 u target eye changes nothing: the target point stays its raw
+    // origin, so the solution still pitches down. An unrelated weapon point at
+    // 99 u is ignored as well.
     w.registry.get(player_h)->eye_offset_z = 65536;
     provider.points[player_h.packed] = {20 << 16, 0, 99 << 16};
     npc.inf.aim_valid = false;
@@ -544,7 +547,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
         if (npc.inf.aim_valid) break;
     }
     CHECK(npc.inf.aim_valid);
-    CHECK(npc.inf.aim_pitch >= 0);
+    CHECK(npc.inf.aim_pitch < 0);
     w.pose_provider = nullptr;
 }
 
@@ -1114,9 +1117,14 @@ static void test_damage_hit_sets_retail_alert_state() {
     ctx.logic_tick = 3;
     ai.tick(*w, ctx);
     CHECK(npc.inf.damage_timer == 34); // callback adds 10; this is not a think tick
-    ctx.logic_tick = 12; // (tick + 36*SSN 0x11) & 15 == 0
+    ctx.logic_tick = 12; // (tick + 36*SSN 0x11) & 15 == 0 but & 63 != 0
     ai.tick(*w, ctx);
-    CHECK(npc.inf.damage_timer == 33); // the next think performs the one decay
+    CHECK(npc.inf.damage_timer == 34); // a think, but not the 64-tick decay
+    ctx.logic_tick = 28; // (tick + 36*SSN 0x11) & 63 == 0
+    ai.tick(*w, ctx);
+    // The alert decays once per 64 staggered ticks [orig: Entity_UpdateInfantryAI
+    // @0x4B9910 (the key & 0x3F local @0x4BA9D8; the decay @0x4BBE24..0x4BBE38)].
+    CHECK(npc.inf.damage_timer == 33);
 }
 
 static void test_remote_player_hit_skips_npc_group_alert() {
@@ -4045,11 +4053,15 @@ int main() {
         npc_seed.position = Vec3{0.0f, 0.0f, 0.0f};
         EntityHandle npc_h = w.registry.spawn(0, npc_seed);
         CHECK(npc_h.valid());
-        // Headless: no models, so the rig's posed launch points are emulated at
-        // chest height (a production world resolves them through
-        // EntityPoseProvider); without a provider both ends are the raw
-        // origins at the feet and every level shot grazes the ground.
+        // Headless: no models, so the rig's posed launch point is emulated at
+        // chest height (a production world resolves it through
+        // EntityPoseProvider). The NPC aims at the player's raw Position, never
+        // its eye point [orig: Entity_UpdateInfantryAI @0x4B9910 (the dead
+        // Entity_ComputeWeaponFireOrigin calls @0x4BC720 / @0x4BCB23)], while
+        // the unposed-person fallback sphere sits 0.9 u above that origin: only
+        // a steep shot crosses it, so the player stands in a pit 40 u below.
         FakeMuzzleProvider provider;
+        w.registry.get(player_h)->position.z = -40.0f;
         w.registry.get(player_h)->eye_offset_z = static_cast<int32_t>(0.9 * 65536.0);
         provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(0.9 * 65536.0)};
         w.pose_provider = &provider;
