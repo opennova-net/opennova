@@ -673,6 +673,86 @@ static void test_sm_turret_fire() {
     }
 }
 
+// Every ready block of the vehicle machine writes its ammo byte into the hull's
+// AdmDef byte ahead of its solve, fired or not: the primary's on a shot, the
+// secondary's when only it is ready, and a slewing turret's while it holds
+// fire. [orig: AIEntity_ProcessWeaponFire processed legs @0x473C9D..0x473CA8 /
+// @0x473D87..0x473D92; the weapon call's read @0x47301B]
+static void test_sm_fire_stamps_the_hull_adm_byte() {
+    struct Rig {
+        std::unique_ptr<World> w = std::make_unique<World>();
+        AiSystem sys;
+        AiEntity *e = nullptr;
+        EntityHandle hull;
+        Rig() {
+            w->registry.configure_pool(0, 8);
+            w->registry.configure_pool(1, 8);
+            w->tables.ammo.entries.resize(3);
+            for (int i = 1; i <= 2; ++i) {
+                w->tables.ammo.entries[static_cast<size_t>(i)].valid = true;
+                w->tables.ammo.entries[static_cast<size_t>(i)].velocity = 620;
+                w->tables.ammo.entries[static_cast<size_t>(i)].max_age_ticks = 100;
+            }
+            Entity shooter{};
+            shooter.alive = true;
+            shooter.health = 100;
+            hull = w->registry.spawn(1, shooter);
+            Entity target{};
+            target.alive = true;
+            target.health = 100;
+            target.position = {100.0f, 0.0f, 0.0f};
+            const EntityHandle tgt_h = w->registry.spawn(0, target);
+            sys.is_authority = true;
+            e = sys.at(sys.attach(hull));
+            e->brain.f[AiBrain::kCurState] = kAiGroundCombat;
+            e->brain.f[AiBrain::kStep] = 16;
+            e->brain.f[AiBrain::kTickAccum] = 16;
+            e->brain.f[AiBrain::kTargetSlot] = tgt_h.packed + 1;
+            e->brain.f[AiBrain::kAmmoA] = 5;
+            e->brain.f[AiBrain::kAmmoB] = 5;
+            e->brain.f[AiBrain::kAccuracy] = 5;
+            e->profile.flags96 = 2;
+            e->profile.fov_secondary = 0xFF;
+            e->profile.fire_interval_a = 1;
+            e->profile.fire_interval_b = 1;
+            e->profile.fire_a.ammo_index = 1;
+            e->profile.fire_a.cone_bam = 0x7FFFFFFF;
+            e->profile.fire_b.ammo_index = 2;
+            e->profile.fire_b.cone_bam = 0x7FFFFFFF;
+            e->profile.approach_cap = 1000 << 16;
+            e->profile.radar_fov_bam = 0x7FFFFFFF;
+        }
+        void tick() {
+            AiThinkCtx ctx{&sys, e, w.get(), nullptr};
+            sys.row(kAiGroundCombat).tick(ctx);
+        }
+        uint8_t byte() const { return w->registry.get(hull)->equipped_adm_index; }
+    };
+    {
+        Rig r;
+        CHECK(r.byte() == kAdmSlotNone);
+        r.tick();
+        CHECK(r.w->out.rounds.count == 1);
+        CHECK(r.byte() == 1);
+    }
+    {
+        Rig r; // only the secondary is ready
+        r.e->brain.f[AiBrain::kAmmoA] = 0;
+        r.tick();
+        CHECK(r.w->out.rounds.count == 1);
+        CHECK(r.byte() == 2);
+    }
+    {
+        Rig r; // a slewing turret: ready, stamped, holding fire
+        r.e->heading = -0x20000000;
+        r.e->profile.fire_a.flags = 0x1 | 0x2;
+        r.e->brain.f[AiBrain::kAmmoB] = 0;
+        r.tick();
+        CHECK(r.w->out.rounds.count == 0);
+        CHECK(r.byte() == 1);
+    }
+}
+
 // Compact attack-animation source for the behavioral regressions below. Retail
 // infantry fires from .bad event bit 0x4, so these drive the actual attack path.
 struct AttackEventSource final : IRootMotionSource {
@@ -2220,6 +2300,60 @@ static void test_mounted_request_runs_for_a_passenger() {
     }
 }
 
+// The rider copies the parent's live AdmDef byte: the ammo byte the parent's own
+// AI fire last wrote there overrides the byte its weapon slot seeded.
+// [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA; AIEntity_ProcessWeaponFire
+//  @0x472F23; WeaponSlot_InitFromEntityDef @0x546742]
+static void test_mounted_request_copies_the_parents_live_byte() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity target_seed{};
+    target_seed.kind = EntityKind::Organic;
+    target_seed.team = 2;
+    target_seed.health = 100;
+    target_seed.net_id = 0x21;
+    target_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90;
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    npc.slot.f[15] = 6 << 16;
+    npc.inf.combat_target = target_h;
+    CHECK(w->commands.mount(0x11, 0x31));
+    CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
+    w->registry.get(gun_h)->equipped_adm_index = 5; // the gun's own AI fire wrote it
+    ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
+    CHECK(w->registry.get(npc_h)->equipped_adm_index == 5);
+}
+
 static void test_mounted_look_traverses_before_fire_request() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -2619,6 +2753,80 @@ static void test_aircraft_combat_states() {
 	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 10;
 	sys.row(10).enter(ctx);
 	CHECK(b.f[AiBrain::kPendState] == 8);
+}
+
+// The aircraft combat tick's ready block writes its ammo byte into the hull's
+// AdmDef byte ahead of its solve, as the ground machine does.
+// [orig: AI_TickState_AircraftCombat processed legs @0x4724A4..0x4724AF /
+//  @0x47258E..0x472599]
+static void test_aircraft_fire_stamps_the_hull_adm_byte() {
+	auto owned = std::make_unique<World>();
+	World &w = *owned;
+	AiSystem &sys = w.ai;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	std::vector<uint16_t> heights(64 * 64, 0);
+	std::vector<int> sectors(256, 1);
+	opennova::terrain::TerrainHeightField terrain;
+	terrain.heightmap = heights.data();
+	terrain.dim = 64;
+	terrain.layout.sector_grid = sectors.data();
+	w.tables.terrain = &terrain;
+	w.tables.ammo.entries.resize(3);
+	for (size_t i = 1; i <= 2; ++i) {
+		w.tables.ammo.entries[i].valid = true;
+		w.tables.ammo.entries[i].velocity = 620;
+		w.tables.ammo.entries[i].max_age_ticks = 100;
+	}
+	Entity hull;
+	hull.health = 500;
+	hull.alive = true;
+	hull.position = { 0, 0, 10 };
+	hull.team = 1;
+	const EntityHandle sh = w.registry.spawn(1, hull);
+	Entity victim;
+	victim.health = 100;
+	victim.alive = true;
+	victim.position = { 100, 0, 10 };
+	victim.team = 2;
+	const EntityHandle th = w.registry.spawn(0, victim);
+	AiEntity &ai = *sys.at(sys.attach(sh));
+	sys.is_authority = true;
+	auto &b = ai.brain;
+	ai.health = 500;
+	ai.pos[2] = 10 << 16;
+	ai.team = 1;
+	ai.profile.type = 1;
+	ai.profile.field220 = 6000;
+	ai.profile.patrol_climb = 3000;
+	ai.profile.field216 = 20 << 16;
+	ai.profile.patrol_altitude = 12 << 16;
+	ai.profile.min_agl = 5 << 16;
+	ai.profile.min_chase = 20 << 16;
+	ai.profile.max_chase = 60 << 16;
+	ai.profile.approach_cap = 1000 << 16;
+	ai.profile.radar_fov_bam = INT32_MAX;
+	ai.profile.fov_secondary = 0x7f;
+	ai.profile.fire_a.ammo_index = 1;
+	ai.profile.fire_a.cone_bam = INT32_MAX;
+	ai.profile.fire_b = ai.profile.fire_a;
+	ai.profile.fire_b.ammo_index = 2;
+	ai.profile.fire_interval_a = ai.profile.fire_interval_b = 1;
+	b.f[AiBrain::kSpeedA] = 2000;
+	b.f[AiBrain::kSpeedB] = 1000;
+	b.f[AiBrain::kFallback] = 7;
+	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 8;
+	AiThinkCtx ctx{ &sys, &ai, &w, nullptr };
+	sys.row(8).enter(ctx);
+	sys.ai_set_target(w, ai, th);
+	b.f[AiBrain::kAmmoA] = 0;
+	b.f[AiBrain::kAmmoB] = 3;
+	b.f[AiBrain::kAccuracy] = 4;
+	b.f[AiBrain::kTickAccum] = 15;
+	CHECK(w.registry.get(sh)->equipped_adm_index == kAdmSlotNone);
+	sys.row(8).tick(ctx);
+	CHECK(w.out.rounds.count == 1 && b.f[AiBrain::kLastWeapon] == 2);
+	CHECK(w.registry.get(sh)->equipped_adm_index == 2);
 }
 
 static void test_vehicle_weapon_pose_and_target_cleanup() {
@@ -4583,6 +4791,9 @@ int main() {
     test_mounted_request_copies_the_parent_adm_byte();
     test_mounted_gunner_runs_the_anim_event_fire_block();
     test_mounted_request_runs_for_a_passenger();
+    test_mounted_request_copies_the_parents_live_byte();
+    test_sm_fire_stamps_the_hull_adm_byte();
+    test_aircraft_fire_stamps_the_hull_adm_byte();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();

@@ -925,16 +925,21 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;
 
-    // Past the cadence and the stagger the rider takes the parent's AdmDef byte
-    // (retail's parent +0x2B0 is WeaponSlot_InitFromEntityDef's byte, kept here
-    // as primary_weapon_slot_adm). A parent whose def names no weapon never
-    // stores one and still holds its spawn clear's zero, not the port's none
-    // sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;
+    // Past the cadence and the stagger the rider takes the parent's live AdmDef
+    // byte (+0x2B0). WeaponSlot_InitFromEntityDef stores the slot's byte there
+    // at the parent's spawn (kept here as primary_weapon_slot_adm, seeded on
+    // first use), and the parent's own AI fire overwrites it with the ammo byte
+    // of every ready block (kept in its equipped_adm_index). A parent that
+    // names no weapon and never fired holds its spawn clear's zero, not the
+    // port's none sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;
     //  WeaponSlot_InitFromEntityDef @0x546742, skipped by the name test
-    //  @0x5466E1 or the def test @0x546704; the clear
+    //  @0x5466E1 or the def test @0x546704; AIEntity_ProcessWeaponFire
+    //  @0x472F23; AI_TickState_AircraftCombat @0x471837; the clear
     //  Entity_SpawnFromBMSRecord @0x40EA1F]
-    occ->equipped_adm_index = mount->primary_weapon_slot_adm != kAdmSlotNone
-            ? mount->primary_weapon_slot_adm : 0;
+    occ->equipped_adm_index = mount->equipped_adm_index != kAdmSlotNone
+            ? mount->equipped_adm_index
+            : mount->primary_weapon_slot_adm != kAdmSlotNone ? mount->primary_weapon_slot_adm
+                                                            : 0;
 
     // UseGun already swapped EquippedSlot to the parent's persistent embedded
     // MountSlot at attach. This request never touches the personal magazine.

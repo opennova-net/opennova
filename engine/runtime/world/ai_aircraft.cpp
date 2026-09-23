@@ -556,6 +556,15 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		return weapon(which).ammo_index >= 0 && ammo(which) != 0 &&
 				cooldown(which) >= uint32_t(interval(which));
 	};
+	// Every ready block first writes its ammo byte into the hull's AdmDef byte
+	// (+0x2B0), fired or not; a rider's mounted request copies it.
+	// [orig: primary @0x47182B..0x471837, secondary @0x4718B2..0x4718BE; the
+	//  locked burst @0x471A60 / @0x471B26, the continuation @0x471E1D /
+	//  @0x4720BA, the processed legs @0x4724AF / @0x472599]
+	const auto stamp = [&](int which) {
+		if (Entity *hull = world.registry.get(ai.handle))
+			hull->equipped_adm_index = weapon(which).ammo_byte();
+	};
 	const auto shoot = [&](int which, const int32_t out[6]) {
 		if (ammo(which) > 0)
 			--ammo(which);
@@ -607,9 +616,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 				bool fired = false;
 				for (int which = 1; which <= 2 && !fired; ++which) {
 					int32_t out[6];
-					if (ready(which) &&
-							solve_weapon_fire_transform(
-									world, ai, target, weapon(which), 0, false, out)) {
+					if (!ready(which))
+						continue;
+					stamp(which);
+					if (solve_weapon_fire_transform(
+								world, ai, target, weapon(which), 0, false, out)) {
 						shoot(which, out);
 						b.f[AiBrain::kLastWeapon] = which;
 						fired = true;
@@ -637,6 +648,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			clear_bone();
 		else if (ammo(which) != 0) {
 			if (ready(which)) {
+				stamp(which);
 				const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
 				int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
 				for (int axis = 0; axis < 6; ++axis)
@@ -705,6 +717,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		if (which == 1 || which == 2) {
 			if (!ready(which))
 				return;
+			stamp(which);
 			int32_t out[6];
 			if (!solve_weapon_fire_transform(
 						world, ai, target, weapon(which), aim_offset(), true, out)) {
@@ -778,9 +791,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		return;
 	for (int which = 1; which <= 2; ++which) {
 		int32_t out[6];
-		if (!ready(which) ||
-				!solve_weapon_fire_transform(
-						world, ai, target, weapon(which), aim_offset(), false, out))
+		if (!ready(which))
+			continue;
+		stamp(which);
+		if (!solve_weapon_fire_transform(
+					world, ai, target, weapon(which), aim_offset(), false, out))
 			continue;
 		save_delta(which, out);
 		if (b.f[AiBrain::kAccuracy] != 4)

@@ -369,6 +369,16 @@ struct SmWeapons {
     // dword, unsigned [orig: `cmp [esi+0D4h],0; jz` @0x472F02..0x472F09,
     // `movzx edx,word [esi+0D0h]; cmp edx,[ebp+7Ch]; jb` @0x472F0B..0x472F15].
     bool ready(int which) const { return ammo(which) != 0 && cooldown(which) >= rate(which); }
+    // Every ready block first writes its ammo byte into the hull's AdmDef byte
+    // (+0x2B0), fired or not: the weapon call reads it back, and a rider's
+    // mounted request copies it. [orig: primary @0x472F17..0x472F23, secondary
+    // @0x472F9E..0x472FAA; the replay @0x47315F / @0x473225, the continuation
+    // @0x473518 / @0x4737B4, the processed legs @0x473CA8 / @0x473D92; the read
+    // `movzx eax,byte ptr [edi+2B0h]` @0x47301B]
+    void stamp(int which) const {
+        if (Entity *hull = ctx.world->registry.get(e.handle))
+            hull->equipped_adm_index = block(which).ammo_byte();
+    }
     void clear_cooldown(int which) const {
         const uint32_t pair = static_cast<uint32_t>(e.brain.f[AiBrain::kCooldownPair]);
         e.brain.f[AiBrain::kCooldownPair] =
@@ -539,7 +549,9 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
                 for (int which = 1; which <= 2 && fired == 0; ++which) {
                     int32_t out[6];
                     weapons.seed(out);
-                    if (!weapons.ready(which) || !weapons.solve(which, 0, false, out)) continue;
+                    if (!weapons.ready(which)) continue;
+                    weapons.stamp(which);
+                    if (!weapons.solve(which, 0, false, out)) continue;
                     weapons.fire(which, out);
                     if (which == 1) bone |= 0x40; // [orig: @0x47306F]
                     weapons.clear_cooldown(which);
@@ -572,6 +584,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         } else if (weapons.ammo(which) != 0) {
             if (weapons.cooldown(which) >= weapons.rate(which)) {
                 // [orig: secondary @0x473142..0x4731DD, primary @0x473208..0x4732AA]
+                weapons.stamp(which);
                 const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
                 int32_t out[6];
                 weapons.seed(out);
@@ -649,6 +662,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
             // gated, with LOS deferred (arg7 = 1) [orig: primary @0x473791..0x47386B,
             // `push 1` @0x473850; secondary @0x4734F2..0x4735C9, `push 1` @0x4735A0].
             if (!weapons.ready(which)) return;
+            weapons.stamp(which);
             int32_t out[6];
             weapons.seed(out);
             if (which == 1) out[4] = 0; // the primary solves from a level pitch [orig: @0x473821]
@@ -765,6 +779,7 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     // @0x473D67..0x473E44 `push 0` @0x473E26, @0x4741BA].
     for (int which = 1; which <= 2; ++which) {
         if (!weapons.ready(which)) continue;
+        weapons.stamp(which);
         int32_t out[6];
         weapons.seed(out);
         if (!weapons.solve(which, sm_aim_offset(e), false, out)) continue;
