@@ -481,6 +481,12 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 	fs::create_directories(root, ec);
 	const std::vector<uint8_t> mount = test_io::read_file(
 			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
+	if (test_io::is_lfs_pointer(mount)) {
+		// A checkout without the LFS fixtures (the net-linux job pulls only
+		// fixtures/novaworld) carries the pointer, not the model.
+		std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+		return;
+	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/NamedMount.3di", mount));
 	static const char kItems[] =
 			"begin \"Named mount\"\n id 100164\n type object\n graphic NamedMount\n hp 100\nend\n";
