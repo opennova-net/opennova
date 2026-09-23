@@ -193,6 +193,11 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			"the conversion tick creates one placed-device lifetime"))
 		return false;
 	const w::PlacedDevice device = world.throwables.devices.front();
+	// The conversion runs in the entity update, which follows the server
+	// tick's send; its 0x59 leads the next tick's queue.
+	// [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call
+	//  @0x52674B follows Server_TickUpdate's send pump @0x51E487]
+	inmatch::Server_TickUpdate(ctx);
 	const std::vector<ns::Datagram> owner_spawn = drain(remote_owner);
 	const std::vector<ns::Datagram> observer_spawn = drain(remote_observer);
 	const std::vector<ns::Datagram> loop_spawn = drain(loopback);
@@ -251,6 +256,8 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			return false;
 		world.throwables.devices.back().think_delay_ticks = -20 + i * 10;
 	}
+	// The two seeds stand for devices already on the wire.
+	world.throwables.events.clear();
 	w::RoundSpawnParams cap_params = params;
 	cap_params.origin = {14.0f, 10.0f, 1.0f / 1024.0f};
 	cap_params.shot_seq = 0x5678;
@@ -258,6 +265,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			"the fourth satchel enters the projectile pool"))
 		return false;
 	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx); // the cap tick's records lead the next queue
 	int active_devices = 0;
 	for (const w::PlacedDevice &candidate : world.throwables.devices)
 		if (candidate.active) ++active_devices;

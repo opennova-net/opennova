@@ -51,10 +51,15 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // in-match connection (`burst.spawned`) that has a transport:
 //   (1) drain its queued C2S 0x0C player uplinks and read-apply each (the SNAP)
 //       [orig: PumpRecvQueues -> DispatchOpcode -> dispatch_entity_packet_callback @0x4D6A80].
-//   (2) advance the simulation one logic tick (World::run_logic_tick: WAC/BMS/AI).
+//   (2) run the world's script pass (World::run_script_pass: the WAC tick, the every-32
+//       legs, the BMS quarter pass), then this tick's own maintenance legs.
 //   (3) fan ONE per-connection-anchored S2C 0x0A frame to each connection
 //       [orig: NapiNPServer_SendFiltered @0x4C87E0 builds once -> SendToConn @0x4c4f20 per node].
-//   (4) flush — implicit: host_send staged the body on each transport (loopback s2c_ / remote
+//   (4) run the world's entity pass (World::run_entity_pass: the gated entity update, the
+//       weapon pump, the tail), whose records lead the next call's queue [orig:
+//       Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674B follows its
+//       Server_TickUpdate call @0x5266B6].
+//   (5) flush — implicit: host_send staged the body on each transport (loopback s2c_ / remote
 //       outbound_, which the owner pops + frames into a 0x83 SESSION via frame_in_match_s2c).
 //       Socket-free here (no UDP in engine/; the owner pumps bytes through the transport).
 //

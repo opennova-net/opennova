@@ -1635,9 +1635,14 @@ void Match::advance_tick(World &world, TickPhase phase) {
     }
     if (phase != TickPhase::Gameplay)
         return;
-    update_flag_objectives(world);
     if (remaining_ticks_ > 0)
         --remaining_ticks_;
+}
+
+void Match::process_movement_contacts(World &world) {
+    if (outcome_.ended)
+        return;
+    update_flag_objectives(world);
 }
 
 std::vector<MatchGameplayEvent> Match::drain_gameplay_events() {

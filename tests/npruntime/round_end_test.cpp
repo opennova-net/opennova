@@ -960,9 +960,13 @@ void test_aas_capture_events_carry_zone_numbers() {
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
-	// The body already stands in the box, so the first-frame one-second
-	// service drains that contact and flips the numbered zone at once.
-	inmatch::Server_TickUpdate(ctx);
+	// The body already stands in the box: the first frame's entity update
+	// records the contact after that frame's one-second service, the next
+	// server tick turns it into a request, and the next one-second service
+	// flips the numbered zone. [orig: Server_TickUpdate — the periodic block
+	//  @0x51DB6D..0x51E1B2 (the Server_UpdateCaptureZones call @0x51DF87)
+	//  precedes Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674B]
+	for (int tick = 0; tick < 63; ++tick) inmatch::Server_TickUpdate(ctx);
 
 	// Blue's own team gets 53 [zone number 4][team 1's new frontier 5] (the
 	// enemy mask never held number 4), then the 56 banner [Blue's pool-0 index].
@@ -1050,6 +1054,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
 	inmatch::Server_TickUpdate(ctx); // contact -> pickup
+	inmatch::Server_TickUpdate(ctx); // the pickup's records lead this queue
 	bool saw_pickup_event = false;
 	bool saw_pickup = false;
 	int pickup_event_order = -1;
@@ -1113,6 +1118,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 
 	move_remote_body(world, ai, blue, bay_position);
 	inmatch::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
+	inmatch::Server_TickUpdate(ctx); // the capture's records lead this queue
 	bool saw_capture_event = false;
 	bool saw_remove = false;
 	bool saw_reset = false;
@@ -1243,6 +1249,7 @@ void test_flag_timeout_wire_transaction() {
 	expect(world.registry.get(flag)->position.x != 5.0f,
 			"the flag stays dropped until the sixth class visit after pickup");
 	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx); // the return's records lead this queue
 
 	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
 		bool saw_event = false;
@@ -1426,7 +1433,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	const w::EntityHandle gone = spawn_org1(303, 0);
 	world.cached.local_player = {};
 	world.commands.set_entity_health(gone, 0);
-	run_ticks(1);
+	run_ticks(2); // the edge pass, then the tick whose queue its record leads
 	world.cached.local_player = host;
 	expect(world.registry.get(gone) == nullptr, "a zero deathtime corpse leaves on its edge pass");
 	expect(entity_death_records(peer_wire, gone) == 1,

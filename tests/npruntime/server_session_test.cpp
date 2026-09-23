@@ -1500,6 +1500,63 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	                   [&](const opennova::PeerAddr &to) { return to == peer; });
 }
 
+// A script's world change reaches the same frame's 0x0A: the server tick builds
+// the per-slot frame behind its script pass and maintenance, and the entity
+// update runs only once the frame is queued. A script pass that moves the
+// recipient moves this frame's anchor.
+// [orig: Server_TickUpdate -- the WacScript_AdvanceTick call @0x51D8BF, the
+//  per-slot block @0x51E3D6..0x51E450; Game_ProcessMainFrame -- the
+//  Entity_UpdateAllEntities call @0x52674B follows the Server_TickUpdate call
+//  @0x5266B6]
+bool check_script_change_reaches_the_same_frame() {
+	struct Teleport final : opennova::world::ISystem {
+		opennova::world::EntityHandle who;
+		const char *name() const override { return "teleport"; }
+		void tick(opennova::world::World &w, const opennova::world::TickContext &) override {
+			if (opennova::world::Entity *e = w.registry.get(who)) e->position.x = 40.0f;
+		}
+	};
+	opennova::replication::LoopbackChannel loopback;
+	NapiNPServerCtx ctx;
+	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
+	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
+	opennova::inmatch::GameConfig config;
+	opennova::inmatch::create_session(
+			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
+	if (!expect(ctx.np_protocol.connection_list.size() == 1,
+	            "same-frame fixture has one host client")) return false;
+	ctx.np_protocol.connection_list.front().burst.spawned = true;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 2);
+	opennova::world::Entity recipient;
+	recipient.kind = opennova::world::EntityKind::Organic;
+	recipient.item_type = 3;
+	recipient.health = 150;
+	recipient.position.x = 10.0f;
+	const opennova::world::EntityHandle recipient_h = world.registry.spawn(0, recipient);
+	auto &link = ctx.np_protocol.connection_list.front().link;
+	link.owned_entity = recipient_h;
+	link.owned_entity_spawn_id = world.registry.get(recipient_h)->registry_spawn_id;
+	Teleport teleport;
+	teleport.who = recipient_h;
+	world.add_system(&teleport);
+	ctx.world = &world;
+	prime_steady_host_quality(ctx);
+	opennova::inmatch::Server_TickUpdate(ctx);
+	opennova::replication::Datagram dg;
+	opennova::FrameUpdate frame;
+	bool decoded = false;
+	while (loopback.client_recv(dg)) {
+		if (dg.tag != opennova::s2c::PER_FRAME_UPDATE) continue;
+		decoded = opennova::decode_frame_update(
+				dg.body.data(), dg.body.size(),
+				[](uint16_t) { return opennova::EntityClass::Player; }, frame,
+				/*is_objective_gametype=*/false, /*authority_recipient=*/true);
+	}
+	return expect(decoded && frame.anchor_x == opennova::world::to_fixed(40.0f),
+	              "the script pass's move reaches this frame's 0x0A anchor");
+}
+
 // The 1300-byte cap belongs to UDP session framing, not the host's type-2
 // in-process presentation channel. Preserve its existing unbounded high-rate
 // frame so a dense listen-server world is not artificially subrated.
@@ -4278,8 +4335,9 @@ bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 			"initial state-6 RTT request has a 62-flush reliable lifetime")) return false;
 	RttSample sample; size_t consumed = 0;
 	if (!expect(decode_rtt_sample(first[0].body.data(), first[0].body.size(), sample, consumed) &&
-			sample.echo_flag == 1 && sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick),
-			"periodic RTT requests carry the host clock and echo flag 1")) return false;
+			sample.echo_flag == 1 &&
+			sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
+			"periodic RTT requests carry the frame's host clock and echo flag 1")) return false;
 	for (int i = 1; i < 62; ++i) { inmatch::Server_TickUpdate(ctx); if (!expect(drain().empty(), "RTT waits 62 ticks")) return false; }
 	peer.s2c_send_holdoff_countdown = 2;
 	inmatch::Server_TickUpdate(ctx);
@@ -4308,6 +4366,7 @@ int main() {
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
+	ok = check_script_change_reaches_the_same_frame() && ok;
 	ok = check_retail_rate_defaults() && ok;
 	ok = check_pre_dictation_holdoff_keeps_initial_settings_open() && ok;
 	ok = check_create_session_brings_up_host() && ok;

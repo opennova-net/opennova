@@ -224,6 +224,17 @@ void advance_initial_periodic_passes(World &world, int passes) {
     }
 }
 
+// One authority frame as the match sees it: the server tick's match service,
+// then the entity update, whose tail consumes the flag and bay touches its
+// movement resolves recorded.
+// [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6
+//  precedes the Entity_UpdateAllEntities call @0x52674B; the resolver's
+//  Entity_ProcessWaypointInteraction call @0x4B2FF5]
+void run_match_frame(World &world) {
+    world.match.advance_tick(world);
+    world.match.process_movement_contacts(world);
+}
+
 void expect_fields(uint32_t game_type,
                    std::initializer_list<std::pair<uint8_t, uint8_t>> expected) {
     const std::vector<MatchScoreField> actual = default_match_score_fields(game_type);
@@ -878,7 +889,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     const EntityHandle blue_bay = objective(*world, 4098, 1, {50.0f, 0.0f, 0.0f});
     contacts.bind(red_flag);
     contacts.bind(blue_bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
 
@@ -887,18 +898,18 @@ void test_demolition_flag_and_flagball_gameplay() {
     // pick up or capture a flag. [orig: Entity_ProcessWaypointInteraction
     // @0x4AD820, caller in Entity_MovementCollisionResolver]
     world->registry.get(blue)->net_move_input |= Entity::kMoveOrderMoving;
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
     contacts.touch(*world, blue, red_flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == red_flag);
     CHECK(world->registry.get(red_flag)->primary_occupant == blue);
     CHECK((world->registry.get(red_flag)->flags & kEntityFlagCarried) != 0);
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 1);
 
     contacts.touch(*world, blue, blue_bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->registry.get(red_flag) == nullptr); // CTF consumes captured flags
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
@@ -935,7 +946,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->tables.item_death_traits.set(4095, flag_traits);
     contacts.bind(timed_flag);
     contacts.touch(*world, blue, timed_flag);
-    world->match.advance_tick(*world); // immediate service + per-tick pickup
+    run_match_frame(*world); // immediate service + per-tick pickup
     CHECK(blue_entity->mounted_child == timed_flag);
     destruction_notify_item_damage(*world, *world->registry.get(timed_flag), 0);
     world->registry.get(timed_flag)->class_think_ticks = 0;
@@ -1011,10 +1022,10 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     contacts.bind(bay);
 
     contacts.touch(*world, carrier, flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == flag);
     contacts.touch(*world, carrier, bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
     CHECK(world->registry.get(flag)->position.x == 0.0f);
@@ -1057,19 +1068,54 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     const EntityHandle inert = objective(*world, 4095, 0, {}, 0);
     contacts.bind(inert);
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib =
         kItemAttribMoveCallback | kItemAttribPowerup;
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib = kItemAttribMoveCallback;
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == inert);
+}
+
+// The entity update's own tail consumes the flag and bay touches its bodies'
+// movement resolves recorded, so the pickup lands in the frame that touched,
+// ahead of the next server tick. The handler returns at once off the
+// authority, so a peer without it picks nothing up.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority test
+//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame runs
+//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6]
+void test_entity_update_consumes_its_movement_contacts() {
+    for (const bool authority : {false, true}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        WaypointContactHarness contacts(*world);
+
+        MatchRules rules;
+        rules.game_type = gt::kFlagBall;
+        world->match.configure(rules);
+        const EntityHandle carrier = player(*world, 0, 1, "Carrier");
+        Entity *carrier_entity = world->registry.get(carrier);
+        carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+        const EntityHandle flag = objective(*world, 4095, 0, {});
+        contacts.bind(flag);
+
+        contacts.touch(*world, carrier, flag);
+        TickContext ctx;
+        ctx.world = world.get();
+        ctx.logic_tick = world->logic_tick;
+        ctx.is_authority = authority;
+        world->update_all_entities(ctx);
+        CHECK((carrier_entity->mounted_child == flag) == authority);
+        CHECK(world->match.player(carrier)->stats[MatchStats::kFlagPickups] ==
+              (authority ? 1 : 0));
+    }
 }
 
 void test_aas_capture_scoring_and_outcomes() {
@@ -1135,10 +1181,10 @@ void test_flagball_four_team_bays_consume_exact_contacts() {
         contacts.bind(bay);
 
         contacts.touch(*world, carrier, flag);
-        world->match.advance_tick(*world);
+        run_match_frame(*world);
         CHECK(carrier_entity->mounted_child == flag);
         contacts.touch(*world, carrier, bay);
-        world->match.advance_tick(*world);
+        run_match_frame(*world);
         CHECK(carrier_entity->mounted_child == EntityHandle{});
         CHECK(world->registry.get(flag) != nullptr);
         CHECK(world->registry.get(flag)->position.x == side.x);
@@ -1181,10 +1227,10 @@ void test_cac_combines_flag_and_zone_objectives() {
     contacts.bind(bay);
 
     contacts.touch(*world, blue, flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(blue_entity->mounted_child == flag);
     contacts.touch(*world, blue, bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(blue_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
     CHECK(world->registry.get(flag)->position.x == 0.0f);
@@ -1513,6 +1559,7 @@ int main() {
     test_target_destroyed_shares_through_both_occupant_links();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
+    test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
     test_cac_combines_flag_and_zone_objectives();

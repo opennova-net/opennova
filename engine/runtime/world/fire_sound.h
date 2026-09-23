@@ -129,12 +129,12 @@ public:
 
     // The per-tick countdown [orig: Sound_TickPendingSlots @ 0x529310:
     // countdown-- reaching zero plays at the RECORDED position]. Runs at the
-    // head of World::run_logic_tick — retail drains after the client network
-    // frame and before Server_TickUpdate / Entity_UpdateAllEntities
-    // [orig: @ 0x526697 in Game_ProcessMainFrame @ 0x5263f0], so client-
-    // received seeds decrement the same tick they arrive; our host processes
-    // wire fire on the same pre-tick boundary, projecting those one countdown
-    // earlier than retail's post-drain server tick.
+    // head of the frame: the host's frame ticks it ahead of its session pump
+    // and World::run_logic_tick at its own head — retail drains after the
+    // client network frame and before Server_TickUpdate (and its receive) /
+    // Entity_UpdateAllEntities [orig: @ 0x526697 in Game_ProcessMainFrame
+    // @ 0x5263f0], so client-received seeds decrement the same tick they
+    // arrive, and a slot the server tick's receive queues starts on the next.
     void tick();
 
     // Drained by the presenting host once per present.

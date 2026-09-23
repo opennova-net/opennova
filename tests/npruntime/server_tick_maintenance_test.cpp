@@ -359,10 +359,6 @@ bool check_deploy_seeds_protection_and_armory_state() {
 			"a deploy outside pre-round leaves the latch clear");
 }
 
-// --------------------------------------------------------------------------
-// The 1 Hz round-robin 0x2F flag refresh.
-// --------------------------------------------------------------------------
-
 // The WAC humans count walks pool 0: an item-def row with the Player bit that
 // is not hidden counts, a dead one included. A player still waiting to deploy
 // (hidden), an NPC and a def-less player row do not, and no connection is
@@ -391,6 +387,103 @@ bool check_humans_count_the_visible_players() {
 	inmatch::Server_TickUpdate(ctx);
 	return expect(world.cached.humans == 2, "the humans count takes the two visible players");
 }
+
+// The live group recount runs in the server tick's periodic second, ahead of
+// the frame's entity update: a round that kills a group member during the
+// periodic frame's entity update is counted only at the next periodic second.
+// [orig: Server_TickUpdate -- the EntityPool_RecountLiveByGroup call @0x51DC02;
+//  Game_ProcessMainFrame -- the Entity_UpdateAllEntities call @0x52674B
+//  follows the Server_TickUpdate call @0x5266B6]
+bool check_recount_precedes_the_entity_update() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.tables.ammo.entries.resize(2);
+	w::AmmoTableEntry &rifle = world.tables.ammo.entries[1];
+	rifle.velocity = 800;
+	rifle.max_age_ticks = 124;
+	rifle.weight_in_grains = 875;
+	rifle.min_damage = 10;
+	rifle.max_damage = 40;
+	rifle.valid = true;
+	w::Entity shooter_seed;
+	shooter_seed.team = 1;
+	const w::EntityHandle shooter = world.registry.spawn(0, shooter_seed);
+	auto spawn_member = [&](float x, uint16_t net_id) {
+		w::Entity seed;
+		seed.kind = w::EntityKind::Organic;
+		seed.has_item_def = true;
+		seed.item_type = 3;
+		seed.team = 2;
+		seed.health = 5;
+		seed.health_max = 100;
+		seed.alive = true;
+		seed.net_id = net_id;
+		seed.group_id = 7;
+		seed.position = {x, 0.0f, 0.0f};
+		const w::EntityHandle h = world.registry.spawn(0, seed);
+		w::AiEntity &body = *world.ai.at(world.ai.attach(h));
+		body.inf.active = true;
+		body.health = 5;
+		body.team = 2;
+		body.net_id = net_id;
+		body.pos[0] = static_cast<int32_t>(x * 65536.0f);
+		return h;
+	};
+	const w::EntityHandle victim = spawn_member(5.0f, 0x21);
+	spawn_member(-200.0f, 0x22);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx); // the first periodic second
+	if (!expect(world.script.relations.group(7).live_count == 2, "both members counted live"))
+		return false;
+	for (int tick = 1; tick < 62; ++tick) inmatch::Server_TickUpdate(ctx);
+	w::RoundSpawnParams shot;
+	shot.owner = shooter;
+	shot.shooter_handle = shooter.packed;
+	shot.origin = {0.0f, 0.0f, 0.9f};
+	shot.ammo_index = 1;
+	if (!expect(world.round_sim.spawn(world, shot) >= 0, "the round enters the pool"))
+		return false;
+	inmatch::Server_TickUpdate(ctx); // the next periodic second; the round kills after it
+	const w::Entity *hit = world.registry.get(victim);
+	if (!expect(hit == nullptr || hit->health <= 0, "the round kills in this frame's entity update") ||
+			!expect(world.script.relations.group(7).live_count == 2,
+					"the periodic recount ran before the kill"))
+		return false;
+	for (int tick = 0; tick < 62; ++tick) inmatch::Server_TickUpdate(ctx);
+	return expect(world.script.relations.group(7).live_count == 1,
+			"the following periodic second counts the kill");
+}
+
+// The pending fire-sound slots count down at the head of the host's frame,
+// ahead of the server tick's receive, so the server tick itself never counts
+// them: a slot queued before it still needs its full countdown afterwards.
+// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call @0x526697
+//  precedes the Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
+bool check_server_tick_leaves_the_pending_sounds() {
+	w::World world;
+	world.registry.configure_pool(0, 2);
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	// 330 units away: (62 * 330 / 330) >> 2 = 15 ticks.
+	world.out.fire_sounds.play_with_distance_delay("CRACK", {330.0f, 0.0f, 0.0f}, 0);
+	if (!expect(world.out.fire_sounds.pending_count() == 1, "the far report waits in a slot"))
+		return false;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx);
+	for (int tick = 0; tick < 14; ++tick) world.out.fire_sounds.tick();
+	if (!expect(world.out.fire_sounds.drain().empty(),
+			"the server tick left the countdown untouched")) return false;
+	world.out.fire_sounds.tick();
+	return expect(world.out.fire_sounds.drain().size() == 1,
+			"the fifteenth frame-head tick plays it");
+}
+
+// --------------------------------------------------------------------------
+// The 1 Hz round-robin 0x2F flag refresh.
+// --------------------------------------------------------------------------
 
 bool check_flag_refresh_round_robin() {
 	w::World world;
@@ -1406,6 +1499,8 @@ int main() {
 	ok = check_deploy_seeds_protection_and_armory_state() && ok;
 	ok = check_flag_refresh_round_robin() && ok;
 	ok = check_humans_count_the_visible_players() && ok;
+	ok = check_recount_precedes_the_entity_update() && ok;
+	ok = check_server_tick_leaves_the_pending_sounds() && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
 	ok = check_team_downed_resend() && ok;

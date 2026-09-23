@@ -236,6 +236,12 @@ void HostRole::run_tick(const TickInput &input) {
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
 	kernel.local.apply_player_input_pre_tick();
+	// The pending fire-sound slots count down ahead of the server tick's
+	// receive, so a slot this frame's C2S queues starts on the next frame.
+	// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call
+	//  @0x526697 precedes the Server_TickUpdate call @0x5266B6 (its receive
+	//  pump @0x51D895)]
+	kernel.world.out.fire_sounds.tick();
 	// The entity-update gate's exemption for a host that also plays: its own
 	// client's death-screen latch, folded at the end of the previous frame as
 	// retail's client receive sets it at the head of this one.

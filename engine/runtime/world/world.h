@@ -812,17 +812,6 @@ public:
     IPoseProvider *pose_provider = nullptr; // non-owning: the embedder's live seat-bone, muzzle
                                             // and userpoint seam; null/false keeps static geometry.
 
-    // 62-tick live-recount divider [orig: the Server_TickUpdate timer word,
-    // reload 0x3E @ 0x51db93]. Public like the other tick state; hosts never
-    // touch it.
-    int group_recount_timer_ = 0;
-
-
-
-
-
-
-
     // The live authoritative rounds — spawned synchronously by the accepted C2S 0x06
     // (the same fire that appends `rounds`), stepped inside run_logic_tick, deaths
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
@@ -972,8 +961,17 @@ public:
     // advances shared clocks but freezes WAC/entities/projectiles. The
     // explicit phase replaces the old boolean pre-mission seam so no caller
     // can mistake a pre-round freeze for a script initialization pass.
+    // run_logic_tick is the whole frame; the host's server tick splits it along
+    // retail's frame: begin_tick, the script pass (Server_TickUpdate's WAC
+    // tick, every-32 legs and BMS quarter pass), its own maintenance and 0x0A,
+    // then the entity pass (Game_ProcessMainFrame's gated entity update, the
+    // weapon pump and the tail that advances logic_tick).
+    // [orig: Game_ProcessMainFrame @0x5263f0]
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
+    TickContext begin_tick(bool is_authority, TickPhase phase);
+    void run_script_pass(const TickContext &ctx);
+    void run_entity_pass(const TickContext &ctx);
 
     // One gameplay tick's entity update, in the retail phase order: the
     // pool-1 walk (every live row once, in slot order, its ground-entity
@@ -1021,8 +1019,8 @@ public:
     // zero, then live copied from it for every group [orig:
     // EntityPool_RecountByType @ 0x40e7e0, sole call Game_StartMission
     // @ 0x525b8b]. Live: a full rescan counting only rows that are not dead
-    // (Flags & 2) and hold health > 0, run on a 62-tick cadence inside the
-    // logic tick and after group reassignment [orig: EntityPool_RecountLiveByGroup
+    // (Flags & 2) and hold health > 0, run by the server tick's periodic
+    // second and after group reassignment [orig: EntityPool_RecountLiveByGroup
     // @ 0x40e8d0; timer @ 0x51db6d, reload 0x3E @ 0x51db93, call @ 0x51dc02].
     void recount_group_initials();
     void recount_group_live();

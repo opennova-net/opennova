@@ -517,9 +517,9 @@ struct NapiNPConnection {
 	uint32_t s2c_send_holdoff_ticks = 0;
 	uint32_t s2c_send_holdoff_countdown = 0;
 	bool s2c_send_boundary_open = true;
-	// This tick's 0x0A, built BEFORE the entity motor and queued after the
-	// maintenance legs: retail's frame is a pre-motor snapshot that still
-	// follows the maintenance sends inside Server_TickUpdate.
+	// This tick's 0x0A, built after the script pass and the maintenance legs
+	// and queued behind their sends, ahead of the entity motor: retail's frame
+	// is the last leg of Server_TickUpdate.
 	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4
 	//  (per-slot 0x0A last, @0x51E3D6..0x51E450), Entity_UpdateAllEntities @0x52674B]
 	std::vector<uint8_t> staged_frame_update;

@@ -254,6 +254,12 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
             claim_standing_vehicle(world, *live);
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    // The flag and bay touches the bodies' movement resolves recorded run
+    // inline in retail's resolver, whose handler returns at once off the
+    // authority; the authority consumes them before the pass ends.
+    // [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority
+    //  test @0x4AD823), its caller @0x4B2FF5]
+    if (ctx.is_authority) world.match.process_movement_contacts(world);
     if (!world.epilog_screen_active()) ++world.entity_update_counter;
 }
 
@@ -513,10 +519,26 @@ void World::update_all_entities(const TickContext &ctx) {
     finish_entity_update(*this, ctx, lap);
 }
 
+// The whole frame: the embedders without a server tick (the bare local
+// role, a joiner) and the tests run it in one call. The pending fire-sound
+// countdown opens it: retail drains the slots after the client network frame
+// (a joiner's receive has already run) and before the server tick's receive,
+// so a slot this frame's C2S queues starts counting on the next frame; the
+// host's frame runs it ahead of its session pump instead.
+// [orig: Game_ProcessMainFrame @0x5263F0 (the Sound_TickPendingSlots call
+//  @0x526697), between the Client_ProcessNetworkFrame call @0x526692 and the
+//  Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
 void World::run_logic_tick(bool is_authority, TickPhase phase) {
-    // The whole tick lands on SIM_SERVER_WORLD for every role (the server
-    // tick, the joiner's local tick and the bare no-net tick alike); the
-    // phases below lap onto the SIM_WORLD_* rows.
+    out.fire_sounds.tick();
+    const TickContext ctx = begin_tick(is_authority, phase);
+    run_script_pass(ctx);
+    run_entity_pass(ctx);
+}
+
+TickContext World::begin_tick(bool is_authority, TickPhase phase) {
+    // Every part of the tick lands on SIM_SERVER_WORLD for every role (the
+    // server tick, the joiner's local tick and the bare no-net tick alike);
+    // the phases below lap onto the SIM_WORLD_* rows.
     const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
     devtools::ProfileLap lap(profile);
     // The WAC player cache refreshes at bytecode entry, not at this tick
@@ -531,16 +553,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // Writes to ticks/humans during WAC take effect on the next admission.
     // [orig: Server_TickUpdate @0x51D8BD..0x51D8F4]
     ctx.script_admitted = script_may_advance();
-    const bool pre_mission = phase == TickPhase::PreMission;
-    const bool gameplay = phase == TickPhase::Gameplay;
     rules.logic_authority = is_authority;
-    // The pending fire-sound countdown, before this tick's spawns: retail
-    // drains after the client network frame (whose receive seeds our embedder
-    // also applies pre-tick) and before the server/entity updates that seed
-    // the rest [orig: Game_ProcessMainFrame @0x5263F0 (the
-    // Sound_TickPendingSlots call @0x526697), between the
-    // Client_ProcessNetworkFrame and Server_TickUpdate calls].
-    out.fire_sounds.tick();
     // The presenting-client identity for the spawn-time tracer style select — stamped
     // before the system loop so out.rounds spawned THIS tick (AI fire, local fire) select
     // against fresh values [orig: g_local_player_entity->Team read @ 0x4ec740].
@@ -548,25 +561,32 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
     lap.mark(devtools::Slot::SIM_WORLD_SETUP);
-    // The script systems (WAC, the every-32 legs, BMS) run on BOTH the
-    // authoritative host and a non-authority client; each self-gates on
-    // ctx.is_authority (scripting is host-only; the in-match C2S drain is
-    // host-only too, owned by Server_TickUpdate, not an ISystem).
-    if (phase != TickPhase::PreRound) {
-        for (ISystem *s : systems_) {
-            const devtools::ProfileScope system_scope(
-                    profile, devtools::Slot::SIM_WORLD_SCRIPTS);
-            s->tick(*this, ctx);
-        }
+    return ctx;
+}
+
+// The script systems (WAC, the every-32 legs, BMS) run on BOTH the
+// authoritative host and a non-authority client; each self-gates on
+// ctx.is_authority (scripting is host-only; the in-match C2S drain is
+// host-only too, owned by Server_TickUpdate, not an ISystem).
+void World::run_script_pass(const TickContext &ctx) {
+    const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
+    if (ctx.phase == TickPhase::PreRound) return;
+    for (ISystem *s : systems_) {
+        const devtools::ProfileScope system_scope(
+                profile, devtools::Slot::SIM_WORLD_SCRIPTS);
+        s->tick(*this, ctx);
     }
-    // Then the entity update, on every peer: a client steps ONLY its local
-    // player's body (the §5.38 entity==local-player branch) and leaves every
-    // other entity to the replicated wire state. [orig: the client tick still
-    // steps the local player's infantry motor; Server_TickUpdate
-    // @0x51D7E0 / Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
-    // call @0x52674B)]
-    lap.restart();
-    if (gameplay && entity_update_admitted(is_authority)) update_all_entities(ctx);
+}
+
+void World::run_entity_pass(const TickContext &ctx) {
+    const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
+    devtools::ProfileLap lap(profile);
+    const bool pre_mission = ctx.phase == TickPhase::PreMission;
+    const bool gameplay = ctx.phase == TickPhase::Gameplay;
+    // The entity update, on every peer, behind the frame's admission gate.
+    // [orig: Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
+    //  call @0x52674B)]
+    if (gameplay && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
     // The global weapon-action pump follows the complete entity update, so a
     // round a pump fires first moves on the next tick.
     // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call
@@ -576,7 +596,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // PreRound even though its spawned projectile cannot move until gameplay.
     // PreMission remains outside the frame pump entirely.
     // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
-    if (phase != TickPhase::PreMission)
+    if (!pre_mission)
         ai.pump_mounted_weapon_slots(*this, logic_tick);
     lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
     item_emitters.sync_owners(*this);
@@ -585,24 +605,16 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // is that client — the pure-client view is D-HUD-16). Position converts to
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
-    if (is_authority && gameplay && !script.waypoints.empty()) {
+    if (ctx.is_authority && gameplay && !script.waypoints.empty()) {
         if (const Entity *lp = registry.get(cached.local_player))
             script.waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
                                    static_cast<int32_t>(lp->position.y * 65536.0f));
     }
-    if (is_authority) {
-        if (pre_mission) {
-            // The one-shot initial group recount, ordered right after the pre
-            // pass [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
-            recount_group_initials();
-        } else if (--group_recount_timer_ <= 0) {
-            // The 62-tick live rescan [orig: Server_TickUpdate timer
-            // @ 0x51db6d, reload 0x3E @ 0x51db93 -> the EntityPool_RecountLiveByGroup
-            // call @ 0x51dc02].
-            group_recount_timer_ = 0x3E;
-            recount_group_live();
-        }
-    }
+    // The one-shot initial group recount, ordered right after the pre pass
+    // [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b]. The live rescan is
+    // the server tick's periodic second (Server_TickUpdate @ 0x51db6d, reload
+    // 0x3E @ 0x51db93 -> the EntityPool_RecountLiveByGroup call @ 0x51dc02).
+    if (ctx.is_authority && pre_mission) recount_group_initials();
 	++logic_tick; // [orig: tick @0x24c1968 advances once per frame tick]
 	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot

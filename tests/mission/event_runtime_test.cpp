@@ -1438,11 +1438,14 @@ static void test_trigger_relations_group_records() {
     CHECK(w.script.relations.group(3).initial_count == 5);
     CHECK(w.script.relations.group(3).live_count == 5);
 
-    // The first gameplay tick rescans (the timer starts at zero, as retail's
-    // round init leaves it): only rows that are not dead and hold health > 0
-    // count [orig: EntityPool_RecountLiveByGroup @0x40e8d0, predicate
-    // @0x40e926/@0x40e96c/@0x40e9b6].
+    // The server tick's first periodic second rescans (its timer starts at
+    // zero, as retail's round init leaves it); this bare world has no server
+    // tick, so the test stands in for it. Only rows that are not dead and hold
+    // health > 0 count [orig: Server_TickUpdate -- the
+    // EntityPool_RecountLiveByGroup call @0x51DC02; EntityPool_RecountLiveByGroup
+    // @0x40e8d0, predicate @0x40e926/@0x40e96c/@0x40e9b6].
     w.run_logic_tick(true);
+    w.recount_group_live();
     CHECK(w.script.relations.group(3).initial_count == 5);
     CHECK(w.script.relations.group(3).live_count == 3);
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 2)));
@@ -1450,12 +1453,15 @@ static void test_trigger_relations_group_records() {
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasMoreUnits, 3, 3)));
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAlive, 3)));
 
-    // A kill reads STALE until the 62-tick live rescan — retail cadence
-    // [orig: timer reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup].
+    // A kill reads STALE until the next periodic second's live rescan —
+    // retail cadence [orig: timer reload 0x3E @ 0x51db93 ->
+    // EntityPool_RecountLiveByGroup]; the ticks alone never rescan.
     bms::Trigger lost = group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 3);
     w.commands.kill_ssn(10);
     CHECK(!sys.evaluate_trigger_for_test(w, lost));
     tick_n(w, 62);
+    CHECK(!sys.evaluate_trigger_for_test(w, lost));
+    w.recount_group_live();
     CHECK(w.script.relations.group(3).live_count == 2);
     CHECK(sys.evaluate_trigger_for_test(w, lost));
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupIntact, 3)));

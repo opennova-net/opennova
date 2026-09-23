@@ -433,6 +433,13 @@ class Match {
     void advance_tick(World &world,
                       TickPhase phase = TickPhase::Gameplay);
 
+    // The movement callbacks the frame's entity update left in the collision
+    // stream (a player touching a flag or a bay): retail runs them inline in
+    // the movement resolver, so the entity update's tail consumes them, ahead
+    // of the next server tick. [orig: Entity_ProcessWaypointInteraction
+    // @0x4AD820, its sole caller @0x4B2FF5 in the movement resolver]
+    void process_movement_contacts(World &world);
+
     // True for the frame on which the shared one-second service fired. The
     // host's Server_TickUpdate consumes this same countdown for its own 1 Hz
     // legs (StartDelay, win conditions, waves, the capture transaction), so

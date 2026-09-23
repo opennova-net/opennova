@@ -27,7 +27,7 @@ void Server_UpdateEntityIdleTimers(NapiNPServerCtx &ctx, world::World &world);
 
 // The session's player slots behind the World's every-32 idle legs
 // (world::ServerIdleLegs): Server_TickUpdate installs one around its
-// run_logic_tick.
+// script pass.
 // [orig: Server_TickUpdate @0x51D7E0 (the Server_UpdateEntityIdleTimers call
 //  @0x51D8D7)]
 class ServerIdleTimers final : public world::IEntityIdleTimers {
