@@ -5608,8 +5608,9 @@ Its side writes `attachParent (+0x184) = self @0x4BB840` and the S position into
 `infantry_attachment_move`. Field split: `+0x2FC/+0x300` has one writer (the S
 stamp) and one reader (the chase) → `InfantryState::self_attach_point`;
 `+0x304` is the goal Z → `InfantryState::goal_z`, written only by a moving
-selection (`@0x4BD3F7`), the S stamp (`@0x4BB852`) and `Entity_InitOrganicAI`
-(`@0x4BFE07`; the player `@0x4B709D`), read by the self-attachment floor
+selection (`@0x4BD3F7`), the S stamp (`@0x4BB852`) and `Entity_InitOrganicAI
+@0x4BFCC0` (`@0x4BFE07`; the player's in `Entity_UpdateInfantryPlayerBody @0x4B40E0`,
+`@0x4B709D`), read by the self-attachment floor
 (`@0x4BF653`) and the AiClimb chase (`@0x4BF6C7`). Retail's goal X/Y are
 per-think frame locals (`move_target`), so a cancelled move (guard, hold,
 ladder, reaction, forced animation) no longer persists its Z (2026-09-23).
