@@ -279,7 +279,9 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 			target = target_entity(world, b.f[AiBrain::kDamageInfo]);
 			if (target == nullptr) {
 				AiTarget found{};
-				if (acquire_target(world, ai, found))
+				// Variant A [orig: AI_ProcessPatrolStep @0x466C20 (the AI_FindBestTarget
+				//  call @0x466CC9); AI_ProcessMovementStep @0x466DB0 (the call @0x466E86)]
+				if (acquire_target(world, ai, found, /*variant_a=*/true))
 					target = world.registry.get(found.handle);
 			}
 			if (target != nullptr)
@@ -676,7 +678,9 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		else {
 			aircraft_movement(ai, world);
 			AiTarget found{};
-			if (acquire_target(world, ai, found)) {
+			// [orig: Entity_ProcessInfantryWeaponFire @0x471710 (the AI_FindBestTarget
+			//  call @0x472B45)]
+			if (acquire_target(world, ai, found, /*variant_a=*/true)) {
 				const Entity *self = world.registry.get(ai.handle),
 							 *other = world.registry.get(found.handle);
 				if (self != nullptr && other != nullptr)
@@ -748,7 +752,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	if (b.f[AiBrain::kRetargetTimer] > 248) {
 		b.f[AiBrain::kRetargetTimer] = 0;
 		AiTarget fresh{};
-		ai_set_target(world, ai, acquire_target(world, ai, fresh) ? fresh.handle : EntityHandle{});
+		// A type-1 profile searches with variant A [orig: AIEntity_TryAcquireTarget
+		// `cmp dword ptr [eax+10h],1` @0x4716D5 (the AI_FindBestTarget call @0x4716DD)].
+		ai_set_target(world, ai,
+				acquire_target(world, ai, fresh, ai.profile.type == 1) ? fresh.handle
+				                                                       : EntityHandle{});
 		target = target_entity(world, b.f[AiBrain::kTargetSlot]);
 		if (target != nullptr)
 			tracked = target;

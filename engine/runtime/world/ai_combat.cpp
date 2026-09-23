@@ -47,7 +47,7 @@ void AiSystem::queue_death_event(const World *world, AiEntity &e) {
 // [orig: AI_FindBestTargetB @0x466f60 — the outer do/while over the four profile
 // weapon-slot classes (+40+4*slot), each gated by its class-priority word (+80+4*class),
 // each selecting pools 0/1/2 with the helo-brain / Player-flag sub-filters.]
-bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
+bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool variant_a) {
     scan_candidates_.clear();
     // Entry gates [orig: 0x466f60 head]. The round-end latch nulls acquisition outright
     // [orig: g_spawn_success_gate @0x24C1928 nonzero -> return null @0x466fba]; the
@@ -57,7 +57,8 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     // BERSERK, read live from the scanner's AiSlot[1] [orig: `test dword ptr
     // [eax+4],200h` @0x466FAB, @0x4670CD, @0x4670E1].
     const bool see_all = (e.slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0;
-    if (e.team == 0 && !see_all) return acquire_target_from(e, scan_candidates_, out);
+    if (e.team == 0 && !see_all)
+        return acquire_target_from(e, scan_candidates_, out, nullptr, nullptr, variant_a);
 
     const int32_t prio_packed = e.brain.f[AiBrain::kPriorityTarget];
 
@@ -189,14 +190,15 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
         return !lc->sys->line_of_sight_clear(*lc->world, sa, sb,
                                              lc->scanner->handle, c.handle);
     };
-    return acquire_target_from(e, scan_candidates_, out, probe, &los_ctx);
+    return acquire_target_from(e, scan_candidates_, out, probe, &los_ctx, variant_a);
 }
 
 // [orig: AI_FindBestTargetB @0x466f60 scoring walk] over an explicit candidate list.
 // Per-candidate perception gates (team, flags, health, self, refcount saturation) then
 // FOV/range/stealth scoring + LOS; the priority target bypasses scoring on clear LOS.
 bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
-                                   AiTarget &out, LosBlockedFn los_fn, void *los_ctx) {
+                                   AiTarget &out, LosBlockedFn los_fn, void *los_ctx,
+                                   bool variant_a) {
     ++find_target_calls;
     // LOS verdict per candidate: the lazy probe when supplied (the live feed), else the
     // preset flag (injected lists). Evaluated ONLY at the priority-bypass / would-be-best
@@ -207,8 +209,14 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
     // Entry gate [orig: 0x466f60 head]: teamless scanners need the 0x200 see-all flag.
     const bool see_all = (e.slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0; // [orig: @0x466FAB]
     if (e.team == 0 && !see_all) return false;
-    const int primary_fov = e.profile.fov_primary | 1;     // [orig: (def+75)|1]
-    const int secondary_fov = e.profile.fov_secondary | 1; // [orig: (def+67)|1]
+    // The arc bytes, zero-extended by B [orig: `movzx eax,byte ptr [ecx+4Bh]`
+    // @0x466FBC, +43h @0x466FCB] and sign-extended by A [orig:
+    // AI_FindBestTarget `movsx` @0x465A8C / @0x465A9B], then OR'd with 1.
+    const int primary_fov =
+            (variant_a ? int(int8_t(e.profile.fov_primary)) : int(e.profile.fov_primary)) | 1;
+    const int secondary_fov =
+            (variant_a ? int(int8_t(e.profile.fov_secondary)) : int(e.profile.fov_secondary)) |
+            1;
     const AiCandidate *best = nullptr;
     int best_score = 0;
     for (const AiCandidate &c : candidates) {
@@ -673,11 +681,20 @@ uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t 
 
 bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
 		const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]) {
+	// A destroyed (Flags & 2) or dead target stays valid for 16 ticks after
+	// its death tick [orig: Entity_ValidateWeaponTarget `test cl,2; jnz`
+	// @0x53A425..0x53A428, health @0x53A42A, the window @0x53A434..0x53A443].
+	const uint32_t target_flags = target.flags | target.engine_flags;
 	if (target.handle == e.handle ||
-			(target.health <= 0 && int32_t(world.logic_tick - target.death_tick) > 16))
+			(((target_flags & kEntityFlagDead) != 0 || target.health <= 0) &&
+					int32_t(world.logic_tick - target.death_tick) > 16))
 		return false;
-	if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0 &&
-			world.match.outcome().ended)
+	// A Player target is out while the local cheat word's 0x800 bit is up
+	// (World::rules.ai_rules_skip_local_player) and once the round has
+	// ended [orig: `test dword_24C1930,800h` @0x53A46E..0x53A478;
+	// g_spawn_success_gate @0x53A482..0x53A489].
+	if ((target_flags & kEntityFlagPlayer) != 0 &&
+			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))
 		return false;
     const Entity *shooter = world.registry.get(e.handle);
     if (shooter != nullptr && !shooter->target_selectors.allows(target.net_id, target.group_id))

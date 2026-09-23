@@ -23,10 +23,16 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags) {
     int angle_score;
-    if (angle_diff >= ((primary_fov | 2) >> 1) || distance > primary_max ||
-        distance > cand_primary_max) {
-        if (angle_diff >= ((secondary_fov | 2) >> 1) || distance > secondary_max ||
-            distance > cand_secondary_max)
+    // The arc tests compare unsigned against the arithmetic half-arc, so a
+    // sign-extended (variant A) arc byte of 0x80 or more admits every bearing
+    // while the unsigned divide below scores it 0 [orig: `or edx,2; sar edx,1;
+    // cmp esi,edx; jnb` @0x467226..0x467230 / @0x46725A..0x467261; variant A
+    // @0x465D16..0x465D20].
+    if (static_cast<uint32_t>(angle_diff) >= static_cast<uint32_t>((primary_fov | 2) >> 1) ||
+        distance > primary_max || distance > cand_primary_max) {
+        if (static_cast<uint32_t>(angle_diff) >=
+                    static_cast<uint32_t>((secondary_fov | 2) >> 1) ||
+            distance > secondary_max || distance > cand_secondary_max)
             return -1; // [orig: goto LABEL_17 skip] outside both FOV/range gates. -1 (not 0) so the
                        // caller distinguishes a gate-fail from a legitimate in-gate score of 0 (a
                        // fully-stealthed target), which matters for the priority-bypass ordering.
@@ -681,8 +687,11 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
     if (b.f[AiBrain::kRetargetTimer] > 248) {
         b.f[AiBrain::kRetargetTimer] = 0;
         AiTarget fresh{};
-        const EntityHandle found =
-                ctx.sys->acquire_target(world, e, fresh) ? fresh.handle : EntityHandle{};
+        // A type-1 profile searches with variant A [orig: AIEntity_TryAcquireTarget
+        // `cmp dword ptr [eax+10h],1` @0x4716D5 (the AI_FindBestTarget call @0x4716DD)].
+        const EntityHandle found = ctx.sys->acquire_target(world, e, fresh, p.type == 1)
+                                           ? fresh.handle
+                                           : EntityHandle{};
         ctx.sys->ai_set_target(world, e, found);
         if (const Entity *next = found.valid() ? world.registry.get(found) : nullptr) tent = next;
     }
@@ -1061,8 +1070,10 @@ void h_aircraft_followwp_tick(AiThinkCtx &ctx) {
 		return;
 	}
 	AiTarget target{};
-	const bool acquired =
-			(ai.profile.flags100 & 2) == 0 && ctx.sys->acquire_target(*ctx.world, ai, target);
+	// Variant A [orig: AI_HandleEvent_VehicleWithDamageC @0x466460 (the
+	// AI_FindBestTarget call @0x46648F)].
+	const bool acquired = (ai.profile.flags100 & 2) == 0 &&
+			ctx.sys->acquire_target(*ctx.world, ai, target, /*variant_a=*/true);
 	aircraft_flare_timer(ctx);
 	if (acquired)
 		ctx.sys->engage_target(*ctx.world, ai, target, true);

@@ -1,8 +1,9 @@
 // The SM target feed and its engage bookkeeping against the retail witnesses:
-// the class walk's candidate facts [orig: AI_FindBestTargetB @0x466F60], the
-// state-16 engage [orig: AI_HandleEvent_HelicopterCombatD @0x467730] and the
-// fired mark every spawned round leaves on its shooter [orig:
-// RoundData_SpawnRound @0x4EC0D0].
+// the class walk's candidate facts [orig: AI_FindBestTargetB @0x466F60] and
+// its variant A [orig: AI_FindBestTarget @0x465A50], the state-16 engage
+// [orig: AI_HandleEvent_HelicopterCombatD @0x467730], the weapon validator's
+// head [orig: Entity_ValidateWeaponTarget @0x53A400] and the fired mark every
+// spawned round leaves on its shooter [orig: RoundData_SpawnRound @0x4EC0D0].
 #include <cstdio>
 #include <memory>
 
@@ -213,10 +214,79 @@ static void test_scripted_berserk_reaches_the_readers() {
     }
 }
 
+// R2-13: the aircraft sites search with AI_FindBestTarget (variant A), which
+// reads both arc bytes signed: a byte of 0x80 or more goes negative, so the
+// unsigned arc gate admits every bearing while the unsigned divide scores 0
+// and the brain never engages. The ground feed (variant B) zero-extends the
+// same byte and takes the candidate. [orig: AI_FindBestTarget `movsx`
+//  @0x465A8C / @0x465A9B against AI_FindBestTargetB `movzx` @0x466FBC /
+//  @0x466FCB; AI_HandleEvent_VehicleWithDamageC @0x466460 (the AI_FindBestTarget
+//  call @0x46648F)]
+static void test_helo_search_reads_the_arc_signed() {
+    for (const bool helo : {false, true}) {
+        Scanner s;
+        World &w = *s.w;
+        AiEntity &e = s.e();
+        e.profile.fov_primary = 0xC0; // a 270 deg arc
+        e.profile.fov_secondary = 0xC0;
+        e.profile.class_priority[1] = 1;
+        e.profile.type = helo ? 1 : 2;
+        const int32_t state = helo ? kAiHeloFollowWp : kAiGroundFollowWp;
+        e.brain.f[AiBrain::kCurState] = state;
+        e.brain.f[AiBrain::kPendState] = state;
+        const EntityHandle target = s.spawn_enemy(1, 0, 0);
+        w.ai.attach(target); // a ground SM brain: class 1 walks it
+        AiThinkCtx ctx{&w.ai, &s.e(), &w, nullptr};
+        w.ai.row(state).tick(ctx);
+        AiBrain &b = s.e().brain;
+        if (helo) {
+            CHECK(b.f[AiBrain::kPendState] == kAiHeloFollowWp);
+            CHECK(b.f[AiBrain::kTargetSlot] == 0);
+        } else {
+            CHECK(b.f[AiBrain::kPendState] == kAiGroundCombat);
+            CHECK(b.f[AiBrain::kTargetSlot] == static_cast<int32_t>(target.packed) + 1);
+        }
+    }
+}
+
+// R2-14: the validator keeps a destroyed (Flags & 2) or dead target for the
+// 16 ticks after its death tick only, and rejects a Player target while the
+// local cheat word's 0x800 bit is up.
+// [orig: Entity_ValidateWeaponTarget `test cl,2; jnz` @0x53A425..0x53A428,
+//  the window @0x53A434..0x53A443; `test dword_24C1930,800h`
+//  @0x53A46E..0x53A478]
+static void test_validator_gates_destroyed_and_cheat_targets() {
+    Scanner s;
+    World &w = *s.w;
+    s.e().profile.radar_fov_bam = INT32_MAX;
+    s.e().profile.approach_cap = 1000 << 16;
+    const EntityHandle t = s.spawn_enemy(1, 0, 0);
+    Entity &target = *w.registry.get(t);
+    const int32_t pose[6] = {};
+    int32_t metrics[6];
+    const auto valid = [&]() {
+        return w.ai.weapon_target_metrics(w, s.e(), target, pose, 0, /*skip_los=*/true, metrics);
+    };
+    w.logic_tick = 100;
+    CHECK(valid());
+    target.engine_flags |= kEntityFlagDead; // destroyed, health still positive
+    target.death_tick = 90;
+    CHECK(valid()); // inside the 16-tick window
+    target.death_tick = 80;
+    CHECK(!valid());
+    target.engine_flags &= ~kEntityFlagDead;
+    target.engine_flags |= kEntityFlagPlayer;
+    CHECK(valid());
+    w.rules.ai_rules_skip_local_player = true;
+    CHECK(!valid());
+}
+
 int main() {
     test_engage_jitter_keys_on_the_target_brain();
     test_rounds_mark_their_shooter();
     test_scripted_berserk_reaches_the_readers();
+    test_helo_search_reads_the_arc_signed();
+    test_validator_gates_destroyed_and_cheat_targets();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

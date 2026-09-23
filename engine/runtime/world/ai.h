@@ -809,8 +809,12 @@ public:
     // pool 1 helo-brained then pool 0 players; 1 = pool 1 non-helo; 2 = pool 0 non-player;
     // 3 = pool 2) — into a scratch list, then the scoring core with the lazy LOS probe.
     // Entry gates: teamless-without-see-all and the round-end latch [orig:
-    // g_spawn_success_gate @0x24C1928] return null.
-    bool acquire_target(World &world, AiEntity &e, AiTarget &out);
+    // g_spawn_success_gate @0x24C1928] return null. `variant_a` runs
+    // AI_FindBestTarget @0x465A50 instead, instruction-identical but for
+    // the two arc bytes read signed (movsx @0x465A8C/0x465A9B against B's
+    // movzx @0x466FBC/0x466FCB): the aircraft sites always, and
+    // AIEntity_TryAcquireTarget for a type-1 (HELO) profile.
+    bool acquire_target(World &world, AiEntity &e, AiTarget &out, bool variant_a = false);
 
     // Lazy LOS seam for the scoring core: null -> each candidate's preset los_blocked
     // (the injected-list tests); the live feed supplies the evaluator so the ray runs
@@ -822,7 +826,7 @@ public:
     // it directly). [orig: AI_FindBestTargetB @0x466f60 scoring walk]
     bool acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
                              AiTarget &out, LosBlockedFn los_fn = nullptr,
-                             void *los_ctx = nullptr);
+                             void *los_ctx = nullptr, bool variant_a = false);
 
     // [orig: the engagement block @0x4677b3..0x4678b2] APPLY the sees+targeted quads to
     // world.relations (D-AI-3 closed) + record the trace, Entity_SetAITarget, reset the
