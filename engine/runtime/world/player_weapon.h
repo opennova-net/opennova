@@ -128,6 +128,9 @@ struct LocalPlayerWeapon {
 
     LocalUseGunSwitch usegun_switch = LocalUseGunSwitch::kNone;
     bool usegun_slot_active = false;
+    // Controller borrows select/restore immediately; UseGun retains its
+    // authored switch actions. The previous seat survives detach until commit.
+    SeatType borrowed_mount_type = SeatType::None;
     EntityHandle usegun_mount{};
     EntityHandle usegun_pending_mount{};
     uint8_t usegun_weapon_adm = 0xFF;

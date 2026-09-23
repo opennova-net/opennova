@@ -120,11 +120,32 @@ void test_viewer_gate() {
     CHECK(friendly_tag_radio_request_viewer(local));
 }
 
+void test_neutral_organics_do_not_get_friendly_labels() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    const EntityHandle local = spawn_organic(w, true, 0);
+    const EntityHandle neutral = spawn_organic(w, false, 0);
+    const EntityHandle ally = spawn_organic(w, false, 0);
+    w.registry.get(neutral)->team = 0;
+    FriendlyTagPassContext ctx;
+    ctx.game_type = 0x30020u;
+    std::vector<FriendlyTagSource> tags;
+    collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
+    CHECK(tags.size() == 1);
+    if (tags.size() == 1) CHECK(tags[0].entity == ally);
+    // The death-screen arm precedes the drawer's unequal-team rejection.
+    ctx.death_screen = true;
+    tags.clear();
+    collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
+    CHECK(tags.size() == 2);
+}
+
 } // namespace
 
 int main() {
     test_tag_fold();
     test_viewer_gate();
+    test_neutral_organics_do_not_get_friendly_labels();
     if (failures == 0) std::printf("friendly_tags_test: ok\n");
     return failures == 0 ? 0 : 1;
 }

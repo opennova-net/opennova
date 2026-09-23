@@ -51,6 +51,24 @@ int main(void) {
 
     adm_free(&adm);
 
+    // JOTAC US01.adm keeps the older walk clip in an inline comment. Quotes
+    // after the comment must never enter the playback/root-motion ring.
+    const char *commented =
+        "anim_walk_forward \"Dt1RunF.bad\" // \"D4WLK_F.bad\"\r\n"
+        "anim_wpn_fire \"first.bad\" \"second.bad\" // \"unused.bad\"\n"
+        "anim_idle \"dir/idle.bad\" // an unmatched quote: \"\n";
+    CHECK(adm_parse_buffer(commented, strlen(commented), &adm) == 0);
+    CHECK(adm.count == 3);
+    if (adm.count == 3) {
+        CHECK(adm.entries[0].variant_count == 1);
+        CHECK(strcmp(adm.entries[0].variants[0], "Dt1RunF.bad") == 0);
+        CHECK(adm.entries[1].variant_count == 2);
+        CHECK(strcmp(adm.entries[1].variants[1], "second.bad") == 0);
+        CHECK(adm.entries[2].variant_count == 1);
+        CHECK(strcmp(adm.entries[2].variants[0], "dir/idle.bad") == 0);
+    }
+    adm_free(&adm);
+
     if (failures == 0) printf("adm_variants_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

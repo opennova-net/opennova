@@ -86,6 +86,24 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
                    isspace((unsigned char)*(trimmed_end - 1)))
                 --trimmed_end;
 
+            // The retail token loop stops at a slash-led comment token. Do
+            // this before looking for keys or quoted variants: JOTAC US01
+            // rows retain older, silent walk clips in trailing comments.
+            // Slashes inside a quoted filename remain part of that filename.
+            // [orig: AnimMap_ParseConfigLine @0x40CBD2]
+            {
+                bool quoted = false;
+                for (const char *s = trimmed_start; s < trimmed_end; ++s) {
+                    if (*s == '"') quoted = !quoted;
+                    else if (!quoted && *s == '/' &&
+                             (s == trimmed_start || isspace((unsigned char)s[-1]) ||
+                              s[-1] == '"')) {
+                        trimmed_end = s;
+                        break;
+                    }
+                }
+            }
+
             // Skip empty
             if (trimmed_start >= trimmed_end) {
                 // Skip \r\n together

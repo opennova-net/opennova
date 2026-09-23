@@ -138,7 +138,12 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
-    if (occ.mount_type == SeatType::Gunner)
+    // Armed ctrlx seats borrow the persistent carrier slot too. Retail mounts
+    // it immediately and saves the personal slot for detach.
+    // [orig: Entity_AttachToVehicleSlot @0x49480F..0x494883]
+    if (occ.mount_type == SeatType::Gunner ||
+            (occ.mount_type == SeatType::Controller &&
+             (veh.item_attrib & kItemAttribEweap) != 0))
         world.vehicles.bind_use_gun_slot(occ, veh);
     world.vehicles.pose_mounted_occupant(occ, veh, veh.seats[seat_idx]);
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the

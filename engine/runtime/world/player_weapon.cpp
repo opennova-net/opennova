@@ -146,6 +146,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (player == nullptr) {
 		w.usegun_switch = LocalUseGunSwitch::kNone;
 		w.usegun_slot_active = false;
+		w.borrowed_mount_type = SeatType::None;
 		w.usegun_mount = EntityHandle{};
 		w.usegun_weapon_adm = 0xFF;
 		w.usegun_pending_mount = EntityHandle{};
@@ -183,6 +184,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 			select_parent = false;
 		} else {
 			w.usegun_slot_active = true;
+			w.borrowed_mount_type = player->mount_type;
 			w.usegun_mount = w.usegun_pending_mount;
 			w.usegun_weapon_adm = w.usegun_pending_weapon_adm;
 			next_adm = w.usegun_weapon_adm;
@@ -191,6 +193,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 	if (!select_parent) {
 		w.usegun_slot_active = false;
+		w.borrowed_mount_type = SeatType::None;
 		next_adm = w.usegun_saved_adm;
 		next_slot = &w.slot;
 	}
@@ -229,10 +232,13 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
-	Entity *mounted_parent =
-			player->mounted && player->mount_type == SeatType::Gunner
-			? world.registry.get(player->mount_target)
-			: nullptr;
+	Entity *mounted_parent = player->mounted
+			? world.registry.get(player->mount_target) : nullptr;
+	const bool controller = player->mount_type == SeatType::Controller;
+	if (player->mount_type != SeatType::Gunner &&
+			!(controller && mounted_parent != nullptr &&
+			  (mounted_parent->item_attrib & kItemAttribEweap) != 0))
+		mounted_parent = nullptr;
 	WeaponSlotState *mounted_slot = mounted_parent != nullptr
 			? world.vehicles.resolve_mounted_ammo_slot(*mounted_parent)
 			: nullptr;
@@ -262,7 +268,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
         // take this leg. The reset includes the binocular clears, so a wire-echoed
         // attach drops a raised toggle too. [orig: Entity_AttachToUseGunSlot
         // @0x546B80 -> Player_ResetCameraAndMovementState @0x546ba4]
-        local_player_camera_reset(&world, w, view);
+		if (!controller) local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -274,8 +280,18 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		// The shared helper applied the nonlocal immediate stamp. L retains its
 		// outgoing EquippedSlot until the action handler's commit seam.
 		player->equipped_adm_index = from_adm;
-		queue_local_usegun_weapon_switch(world, w,
-				same_category(from_adm, target_adm));
+		if (controller) {
+			// ctrlx directly calls Player_MountWeaponSlot, without a UseGun
+			// SWITCHFROM/SWITCHTO pair. [orig: @0x494838]
+			w.usegun_switch_action = -1;
+			commit_local_usegun_weapon_switch(world, w);
+			// The embedder installs the requested definition when it drains
+			// the event. Do not pump the old personal FSM on the carrier slot.
+			w.active = false;
+		} else {
+			queue_local_usegun_weapon_switch(world, w,
+					same_category(from_adm, target_adm));
+		}
 	};
 	const auto stage_personal = [&]() {
 		const uint8_t from_adm =
@@ -284,8 +300,17 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		w.usegun_pending_mount = EntityHandle{};
 		w.usegun_pending_weapon_adm = 0xFF;
 		w.usegun_switch = LocalUseGunSwitch::kDetach;
-		queue_local_usegun_weapon_switch(world, w,
-				same_category(from_adm, w.usegun_saved_adm));
+		if (w.borrowed_mount_type == SeatType::Controller) {
+			// The controller detach restores its saved personal slot directly.
+			// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
+			if (auto *slot = active_local_weapon_slot(world, w)) slot->refire_queued = false;
+			w.usegun_switch_action = -1;
+			commit_local_usegun_weapon_switch(world, w);
+			w.active = false;
+		} else {
+			queue_local_usegun_weapon_switch(world, w,
+					same_category(from_adm, w.usegun_saved_adm));
+		}
 	};
 
 	if (on_usegun) {
@@ -803,7 +828,8 @@ LocalWeaponInputBlock local_weapon_input_block(const World &world,
 	const bool alive = player != nullptr && player->alive && player->health > 0;
 	if (!alive) return LocalWeaponInputBlock::kDead;
 	if (w.usegun_switch != LocalUseGunSwitch::kNone) return LocalWeaponInputBlock::kUseGunSwitch;
-	if (mount_blocks_firing(*player)) return LocalWeaponInputBlock::kSeat;
+	if (mount_blocks_firing(*player, world.registry.get(player->mount_target)))
+		return LocalWeaponInputBlock::kSeat;
 	return LocalWeaponInputBlock::kNone;
 }
 
@@ -891,9 +917,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
         }
     }
 	WeaponFsmInputs in;
-	// The pilot's trigger is dead: retail's fire gate rejects a Controller or
-	// Driver seat before any slot work [orig: Player_CanFireWeapon @0x5cf780].
-	// A gunner seat is deliberately NOT in this set.
+	// The action binding permits an armed controller's borrowed carrier slot.
+	// [orig: Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF]
 	const bool accept_weapon_input =
 			local_weapon_input_block(world, w) == LocalWeaponInputBlock::kNone;
 	in.fire_held = accept_weapon_input && w.fire_held;

@@ -2935,6 +2935,14 @@ renames; IDB saved):
 Applied 2026-08-10 (the D-HUD-20 friendly-tags hunt; auto-name renames at
 anchored confidence; IDB saved):
 
+2026-09-23 correction: the outer pass admits neutral team 0, but the drawer
+then rejects every unequal team when `g_enemyTagsVisible` is false
+(`HUD_DrawEntityLabel @0x5A3C7D..0x5A3C8F`), except in the earlier death-screen
+arm. Applying only the outer gate labelled neutral birds/civilians as allies.
+The shared host/client predicate now includes the ordinary-play drawer gate;
+the server-granted spectator state remains a separate residual. Native
+`friendly_tags`, `client_roster_tags` and `training_gameplay` cover this.
+
 - **Rename** `render_entity_glow_labels @0x5a4480` → `HUD_DrawFriendlyTagsPass`
   (anchored: the STRMISC_FRIENDLYTAGS toast strings + the mode global; the old
   agent-era name was a misnomer — there is no glow here).
