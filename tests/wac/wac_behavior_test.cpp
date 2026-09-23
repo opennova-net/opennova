@@ -2,13 +2,14 @@
 // and assert the observable effects (var math, entity mutation, temporal firing,
 // edge semantics, environment, RNG determinism).
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <runtime/wac/compiler.h>
 #include <runtime/mission/event_runtime.h>
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
-#include <formats/wac/parser.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/audio/oneshot_play.h>
@@ -113,8 +114,10 @@ static void test_var_math() {
 
 static void test_ssn_kill() {
     BehaviorWorld w;
-    Entity a; a.net_id = 100; a.alive = true; w.registry.spawn(0, a);
-    Entity b; b.net_id = 200; b.alive = true; w.registry.spawn(0, b);
+    // killSSN refuses a row without an ItemTypeIndex [orig: WacCmd_KillSsn
+    // @0x4F1E89], so both rows carry one.
+    Entity a; a.net_id = 100; a.item_id = 1001; a.item_type_index = 7; a.alive = true; w.registry.spawn(0, a);
+    Entity b; b.net_id = 200; b.item_id = 1001; b.item_type_index = 7; b.alive = true; w.registry.spawn(0, b);
 
     WacSystem sys;
     CompileEnv env;
@@ -279,16 +282,20 @@ static void test_wac_wave_emits_dialog_wav() {
     run(w, sys, 1);
     CHECK(w.out.effects.count("dialog_wav") == 1);
     CHECK(w.out.effects.count("wave") == 0); // not the unrouted default-case kind
+    // A bare word reaches the string pool upper-cased: the tokenizer folds
+    // every byte above 0x60 down by 0x20. [orig: Script_Compile @0x4F3418..0x4F341D]
     bool carried_filename = false;
     for (const Effect &e : w.out.effects.entries())
-        if (e.kind == "dialog_wav" && e.str == "brief1") carried_filename = true;
+        if (e.kind == "dialog_wav" && e.str == "BRIEF1") carried_filename = true;
     CHECK(carried_filename);
 }
 
-// Mission text and the on-screen debug console are separate retail channels:
-// text/text# (and their peer-broadcast ptext twin) feed the player message
-// presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
-// must remain distinguishable for embedders that deliberately do not present them.
+// Mission text and the console are separate retail rings: text/text# (and
+// their peer-broadcast ptext twin) feed the player chat ring, while
+// consol/consol# and pconsol feed Chat_AddMessageChannel2's system ring. The #
+// forms carry the handler's finished "%s %i" line, not a separate number.
+// [orig: Chat_AddFormattedIntMessage @0x4EDB70 (the sprintf call @0x4EDB9E);
+//  WacCmd_ConsolNumber @0x4EDC00 (the sprintf call @0x4EDC2E)]
 static void test_wac_text_and_console_use_distinct_effect_channels() {
     BehaviorWorld w;
     WacSystem sys;
@@ -307,6 +314,7 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
 
     CHECK(w.out.effects.count("text") == 3);
     CHECK(w.out.effects.count("debug_text") == 3);
+    // Bare words arrive upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
     bool saw_local_text = false;
     bool saw_peer_text = false;
     bool saw_numbered_text = false;
@@ -314,12 +322,12 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     bool saw_peer_debug = false;
     bool saw_numbered_debug = false;
     for (const Effect &e : w.out.effects.entries()) {
-        saw_local_text |= e.kind == "text" && e.str == "local_text" && e.a == 0;
-        saw_peer_text |= e.kind == "text" && e.str == "peer_text" && e.a == 0;
-        saw_numbered_text |= e.kind == "text" && e.str == "numbered_text" && e.a == 7;
-        saw_local_debug |= e.kind == "debug_text" && e.str == "local_debug" && e.a == 0;
-        saw_peer_debug |= e.kind == "debug_text" && e.str == "peer_debug" && e.a == 0;
-        saw_numbered_debug |= e.kind == "debug_text" && e.str == "numbered_debug" && e.a == 9;
+        saw_local_text |= e.kind == "text" && e.str == "LOCAL_TEXT" && e.a == 0;
+        saw_peer_text |= e.kind == "text" && e.str == "PEER_TEXT" && e.a == 0;
+        saw_numbered_text |= e.kind == "text" && e.str == "NUMBERED_TEXT 7" && e.a == 0;
+        saw_local_debug |= e.kind == "debug_text" && e.str == "LOCAL_DEBUG" && e.a == 0;
+        saw_peer_debug |= e.kind == "debug_text" && e.str == "PEER_DEBUG" && e.a == 0;
+        saw_numbered_debug |= e.kind == "debug_text" && e.str == "NUMBERED_DEBUG 9" && e.a == 0;
     }
     CHECK(saw_local_text);
     CHECK(saw_peer_text);
@@ -327,6 +335,29 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     CHECK(saw_local_debug);
     CHECK(saw_peer_debug);
     CHECK(saw_numbered_debug);
+}
+
+// forceanim posts its notice ("force anim OFF" / "force anim_<name>") into the
+// system ring with the console lines, not the chat ring, and returns 0.
+// [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddMessageChannel2 call
+//  @0x4F266A), return 0 @0x4F2682]
+static void test_forceanim_notice_rides_the_system_ring() {
+    BehaviorWorld w;
+    WacSystem sys;
+    CompileEnv env;
+    Program p = compile_source("if never then set(v1,7) forceanim(0) store(v1) endif\n", env);
+    CHECK(p.ok());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.out.effects.count("text") == 0);
+    CHECK(w.out.effects.count("debug_text") == 1);
+    bool saw_notice = false;
+    for (const Effect &e : w.out.effects.entries())
+        saw_notice |= e.kind == "debug_text" && e.str == "force anim OFF";
+    CHECK(saw_notice);
 }
 
 static void test_authority_gate() {
@@ -391,6 +422,52 @@ static void test_lose_other_team_noop() {
     CHECK(!w.match.outcome().ended);
     CHECK(w.out.effects.count("lose") == 0);
     CHECK(w.out.effects.count("round_end") == 0);
+}
+
+// Lose posts its line through GameMsg_AddChatLineAndRelay, which relays the
+// Misc key to the peers (S2C 0x3F kind 1) with team 0 on both branches when
+// the authority is in a session. Outside a session nothing relays, and an
+// out-of-range team neither posts nor relays.
+// [orig: WacAction_Lose @0x4ED3F0 — the calls @0x4ED411 / @0x4ED477, the team
+//  words @0x4ED3FD / @0x4ED462; GameMsg_AddChatLineAndRelay @0x5BA170 — the
+//  relay gate @0x5BA19F..0x5BA1AF]
+static void test_lose_relays_its_chat_key() {
+    struct Case {
+        int team;
+        bool session;
+        const char *key; // null: no relay
+    };
+    const Case cases[] = {
+        {0, true, "STRMISC_KILLEDGREEN"},
+        {1, true, "STRMISC_KILLEDBLUE"},
+        {0, false, nullptr},
+        {2, true, nullptr},
+    };
+    for (const Case &c : cases) {
+        BehaviorWorld w;
+        WacSystem sys;
+        CompileEnv env;
+        Program p = compile_source(
+                "if never() then lose(" + std::to_string(c.team) + ") endif\n", env);
+        CHECK(p.ok());
+        sys.set_program(std::move(p));
+        w.add_system(&sys);
+        w.load_systems();
+        w.rules.mp_session = c.session;
+        run(w, sys, 1);
+        const std::vector<HudRelay> &relays = w.out.hud_relays;
+        if (c.key == nullptr) {
+            CHECK(relays.empty());
+            continue;
+        }
+        CHECK(w.out.effects.count("lose") == 1);
+        CHECK(relays.size() == 1);
+        if (relays.size() == 1) {
+            CHECK(relays[0].kind == 1);
+            CHECK(relays[0].team == 0);
+            CHECK(relays[0].key == c.key);
+        }
+    }
 }
 
 // win(team) ends the round straight through, and the outcome builtins
@@ -482,7 +559,7 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
 
     Entity source{};
     source.net_id = 100;
-    source.item_id = 1001;
+    source.item_id = 1001; source.item_type_index = 7;
     source.alive = true;
     source.health = 40;
     source.health_max = 100;
@@ -545,7 +622,7 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
 
     Entity single{};
     single.net_id = 42;
-    single.item_id = 1001;
+    single.item_id = 1001; single.item_type_index = 7;
     single.group_id = 4;
     single.alive = true;
     const EntityHandle single_h = w.registry.spawn(0, single);
@@ -596,11 +673,12 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     CHECK((w.registry.get(single_h)->flags & kEntityFlagMounted) != 0);
     CHECK((w.registry.get(single_h)->engine_flags & kEntityFlagMounted) != 0);
     CHECK(!w.commands.ssn_exists(44));
-    CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 0);
-    CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 0);
-    CHECK(ai.events.count() == 2);
-
-    ai.events.process_timed(ai, w);
+    // The script queued the two speed events and the same frame's entity
+    // update dispatched them. [orig: Server_TickUpdate's WacScript_AdvanceTick
+    //  call @0x51D8BF precedes Game_ProcessMainFrame's Entity_UpdateAllEntities
+    //  call @0x52674B, whose j_AIEvent_ProcessTimedEntries call @0x4C2226
+    //  expires the timer-0 entries]
+    CHECK(ai.events.count() == 0);
     CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 10485);
     CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 5242);
 }
@@ -610,9 +688,10 @@ static void test_runtime_gaps_retain_source_and_restore_boot_evidence() {
     WacSystem sys;
     CompileEnv env;
     env.source_names = {"game.wac", "mission.wac"};
+    // Only a CR counts a line. [orig: Script_Compile @0x4F32F6..0x4F32FF]
     Program program = compile_program({
         "if never then inc(v1) endif\n",
-        "\nif never then inc(v2) endif\n"}, env);
+        "\r\nif never then inc(v2) endif\n"}, env);
     CHECK(program.ok());
     // Corrupt the two zero-argument condition calls after compilation. This
     // exercises missing dispatch without depending on an unfinished feature.
@@ -758,22 +837,30 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
     CHECK(w.script.vars.get_mission(1) == 11); // V1 was not aliased by the wrap
     CHECK(w.script.vars.get_mission(256) == 0); // numeric syntax never reaches declarations
 
+    // A declaration that reads as V# is the V# leg's first: retail refuses it
+    // and, with the VAR mode still set, declares the NEXT token ("VAR").
+    // Every later V256... name is V255 with "V# too big".
+    // [orig: WacScript_ResolveParameter @0x4F2AA4 (the V# leg); Script_Compile
+    // @0x4F3869..0x4F388F (the refusal leaves var_4A0C set)]
     program = compile_source(
             "var v1tail\nvar V256shadow\n"
             "set(v1tail,101) set(V256SHADOW,202) set(v1,11) set(v255,55) "
             "set(v3,V1TAIL) set(v4,v256shadow) "
             "set(v5,v1other) set(v6,v256other)\n", {});
     CHECK(program.ok());
-    CHECK(program.diagnostics.size() == 1);
-    if (!program.diagnostics.empty())
-        CHECK(program.diagnostics[0].message == "V# too big");
+    CHECK(program.diagnostics.size() == 5);
+    if (program.diagnostics.size() == 5) {
+        CHECK(program.diagnostics[0].message == "Variable Name already used");
+        for (size_t i = 1; i < 5; ++i) CHECK(program.diagnostics[i].message == "V# too big");
+    }
     vm.load(program); vm.execute(w);
-    CHECK(w.script.vars.get_mission(256) == 101);
-    CHECK(w.script.vars.get_mission(257) == 202);
-    CHECK(w.script.vars.get_mission(3) == 101); // declared full name wins, case-insensitively
-    CHECK(w.script.vars.get_mission(4) == 202);
+    CHECK(w.script.vars.get_mission(1) == 11);
+    CHECK(w.script.vars.get_mission(255) == 55);
+    CHECK(w.script.vars.get_mission(3) == 11);
+    CHECK(w.script.vars.get_mission(4) == 55);
     CHECK(w.script.vars.get_mission(5) == 11);
     CHECK(w.script.vars.get_mission(6) == 55);
+    CHECK(w.script.vars.get_mission(256) == 0); // the declared "VAR" is never written
 
     program = compile_source("set(v0,71) set(vsuffix,99) set(v,101)\n", {});
     CHECK(program.ok());
@@ -785,6 +872,12 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
     CHECK(w.script.vars.get_mission(0) == 71); // no first digit still means unresolved
 }
 
+// ARRAY is no keyword of this compiler: ARRAY and SPARE are Unknown words,
+// and every `spare` operand takes the scratch dword, which the inner body's
+// inc sets during the one execution that fires it.
+// [orig: Script_Compile @0x4F5284..0x4F52B4 (Unknown), @0x4F3AB2..0x4F3AED
+// (the scratch dword); WacScript_CacheLocalPlayerState @0x4F57B5 (cleared
+// at every entry)]
 static void test_named_event_reset_and_declared_variables() {
     BehaviorWorld w;
     WacSystem sys;
@@ -798,18 +891,19 @@ static void test_named_event_reset_and_declared_variables() {
         "set(v1,counter) set(v2,spare)\n"
         "if true(root) then inc(v4) endif\n", {});
     CHECK(p.ok());
-    CHECK(p.diagnostics.empty());
+    CHECK(p.diagnostics.size() == 6);
+    if (!p.diagnostics.empty()) CHECK(p.diagnostics[0].message == "Unknown 'ARRAY'");
     sys.set_program(std::move(p));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 2);
     CHECK(w.script.vars.get_mission(1) == 1);
-    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
     CHECK(w.script.vars.get_mission(3) == 1);
     CHECK(w.script.vars.get_mission(4) == 1);
     run(w, sys, 1);
     CHECK(w.script.vars.get_mission(1) == 2);
-    CHECK(w.script.vars.get_mission(2) == 2);
+    CHECK(w.script.vars.get_mission(2) == 1);
     CHECK(w.script.vars.get_mission(3) == 1); // reset stops at a sibling
     CHECK(w.script.vars.get_mission(4) == 2);
     CHECK(w.diagnostics.empty());
@@ -925,6 +1019,14 @@ static void test_auto_parentheses_and_minus_token_context() {
         {"1 + 2 * 3 load(8)", 9},
         {"300 + (2 * 3)", 50}, // saved 300 narrows to a byte
         {"2 ^ (3 ^ 2)", 81}, // POP reverses power operands
+        // The power result converts through _ftol2_sse's SSE2 leg: anything
+        // outside int32 is the integer indefinite, not a low dword.
+        // [orig: WacScript_ExecuteBytecode @0x4F615F; _ftol2_sse @0x76BC15]
+        {"2 ^ 30", 1073741824},
+        {"10 ^ 10", INT32_MIN},
+        {"3 ^ 20", INT32_MIN},
+        {"2 ^ 32", INT32_MIN},
+        {"0 ^ -1", INT32_MIN}, // 1/0 is infinite
     };
     for (const Case &c : accumulator_cases) {
         BehaviorWorld w;
@@ -946,7 +1048,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     w.registry.configure_pool(1, 8);
     Entity soldier;
     soldier.net_id = 42;
-    soldier.item_id = 1001;
+    soldier.item_id = 1001; soldier.item_type_index = 7;
     soldier.item_type = 3;
     soldier.has_item_def = true;
     soldier.health = 20;
@@ -955,7 +1057,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     const EntityHandle sh = w.registry.spawn(0, soldier);
     Entity carrier;
     carrier.net_id = 77;
-    carrier.item_id = 1002;
+    carrier.item_id = 1002; carrier.item_type_index = 7;
     carrier.item_type = 1;
     carrier.has_item_def = true;
     carrier.item_attrib = kItemAttribPlayerControl;
@@ -971,11 +1073,18 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     brain.inf.wait_cooldown = 99;
 
     WacSystem sys;
+    // ssnname's name is a TextToken: the mission text's entry for the key.
+    // [orig: WacScript_ResolveParameter @0x4F2F96 -> MissionText_GetStringByKeyOrGameText @0x51ECD0]
+    CompileEnv env;
+    env.text_token = [](const std::string &key) -> std::optional<std::string> {
+        if (key == "LONGNAME") return std::string("abcdefghijklmnopqrstuvwxyz0123456789");
+        return std::nullopt;
+    };
     sys.set_program(compile_source(
-        "if never then ssnname(42,\"abcdefghijklmnopqrstuvwxyz0123456789\") "
+        "if never then ssnname(42,TT_LONGNAME) "
         "ssn2ssn(42,77) endif\n"
         "if SSNcritical(42) then inc(v1) endif\n"
-        "if SSNride(77) then inc(v2) endif\n", {}));
+        "if SSNride(77) then inc(v2) endif\n", env));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
@@ -988,11 +1097,15 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     CHECK(w.script.vars.get_mission(1) == 1);
     CHECK(w.script.vars.get_mission(2) == 0);
 
-    w.ai.infantry_board_think(brain, w, brain.slot.f[37]);
+    int32_t entry_heading = brain.inf.target_heading;
+    w.ai.infantry_board_think(brain, w, brain.slot.f[37], entry_heading);
     CHECK(w.registry.get(sh)->mounted);
     CHECK(w.registry.get(sh)->mount_target == ch);
     run(w, sys, 1);
     CHECK(w.script.vars.get_mission(2) == 1);
+    // The predicate reads the dead flag on a seated row; without its body the
+    // entity update leaves the row seated (no death edge detaches or frees it).
+    w.ai.release(sh);
     w.registry.get(sh)->health = 0;
     w.registry.get(sh)->flags |= kEntityFlagDead;
     run(w, sys, 1);
@@ -1050,7 +1163,7 @@ static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
 static void test_player_group_loops_and_handle_aliases() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
-    Entity seed; seed.item_id = 1001; seed.health = seed.health_max = 100;
+    Entity seed; seed.item_id = 1001; seed.item_type_index = 7; seed.health = seed.health_max = 100;
     seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
     const EntityHandle first = w.registry.spawn(0, seed);
     seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead;
@@ -1071,12 +1184,17 @@ static void test_player_group_loops_and_handle_aliases() {
     const int custom = w.registry.intern_group("authored");
     w.registry.set_script_group_members(custom, {blue_ai, second, red_ai});
     CompileEnv env; env.registry = &w.registry;
+    env.text_token = [](const std::string &key) -> std::optional<std::string> {
+        if (key == "VISITED") return std::string("visited");
+        if (key == "ALIASED") return std::string("aliased");
+        return std::nullopt;
+    };
     Program program = compile_source(
         "ploop\n"
         " v0 = auto\n"
         " v1 = v1*10+v0\n"
         " if pisteam(1) then inc(v2) endif\n"
-        " ssnname(v0, \"visited\")\n"
+        " ssnname(v0, TT_VISITED)\n"
         "end\n"
         "v3 = Player\n"
         "gloop G_ai inc(v4) end\n"
@@ -1086,7 +1204,7 @@ static void test_player_group_loops_and_handle_aliases() {
         "gloop G_authored v8 = v8*10+Item end\n"
         "v9 = auto\n"
         "v10 = SSN_500\n"
-        "ssnname(v10, \"aliased\")\n",
+        "ssnname(v10, TT_ALIASED)\n",
         env);
     // `gloop(G_blueai)` is retail's Unknown Group leg: the `(` is the group
     // token, the loop runs over group 0 (empty) and the error is non-fatal
@@ -1113,7 +1231,10 @@ static void test_player_group_loops_and_handle_aliases() {
     CHECK(w.registry.get(excluded)->display_name.empty());
     CHECK(w.registry.get(pool_one)->display_name.empty());
     CHECK(w.diagnostics.empty());
-    CHECK(!compile_source("ploop gloop G_ai inc(v1) end end", env).ok());
+    // A nested loop is retail's first error only; the program still runs.
+    // [orig: Script_Compile @0x4F4AEF..0x4F4B05]
+    const Program nested = compile_source("ploop gloop G_ai inc(v1) end end", env);
+    CHECK(nested.ok() && !nested.diagnostics.empty() && nested.diagnostics[0].message == "No LOOP Nesting!");
 
     // Both rows now share an SSN; a bound variable must still name second.
     w.registry.get(first)->net_id = 800;
@@ -1135,7 +1256,7 @@ static void test_player_group_loops_and_handle_aliases() {
 
 static void test_named_group_actions_use_member_handles() {
     BehaviorWorld w;
-    Entity e; e.item_id = 1001; e.health = 100; e.net_id = 10; e.group_id = 7;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.health = 100; e.net_id = 10; e.group_id = 7;
     const EntityHandle first = w.registry.spawn(0, e);
     const EntityHandle second = w.registry.spawn(0, e);
     const EntityHandle keep = w.registry.spawn(0, e);
@@ -1156,7 +1277,7 @@ static void test_named_group_actions_use_member_handles() {
 static void test_wac_area_and_location_queries() {
     BehaviorWorld w;
     w.registry.configure_pool(2, 4);
-    Entity e; e.item_id = 1001; e.net_id = 42; e.health = e.health_max = 100;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.net_id = 42; e.health = e.health_max = 100;
     e.flags = kEntityFlagPlayer; e.position = {2, -2, 3};
     const EntityHandle player = w.registry.spawn(0, e);
     w.cached.local_player = player;
@@ -1166,7 +1287,7 @@ static void test_wac_area_and_location_queries() {
     w.registry.register_area("duplicate", duplicate, true, 37);
     w.registry.register_location(duplicate, 8);
     w.registry.register_location(area, 9);
-    e.position = {}; e.item_id = 2001; e.net_id = 100;
+    e.position = {}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
     Program program = compile_source(
@@ -1212,7 +1333,7 @@ static void test_wac_area_and_location_queries() {
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(3) == 0);
     w.restore(baseline);
     CHECK(w.script.wac_values.local_location == -3);
-    w.registry.get(player)->item_id = 0;
+    w.registry.get(player)->item_type_index = 0;
     vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(4) == 0);
     CHECK(w.diagnostics.empty());
@@ -1221,12 +1342,12 @@ static void test_wac_area_and_location_queries() {
 static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 8);
-    Entity e; e.item_id = 1001; e.item_type = 3; e.net_id = 42;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.item_type = 3; e.net_id = 42;
     e.health = e.health_max = 100;
     const EntityHandle rider = w.registry.spawn(0, e);
     w.ai.attach(rider);
     AiEntity &ai = *w.ai.for_handle(rider);
-    e.net_id = 77; e.item_id = 2001; e.item_type = 1;
+    e.net_id = 77; e.item_id = 2001; e.item_type_index = 7; e.item_type = 1;
     e.has_item_def = true; e.item_attrib = kItemAttribPlayerControl;
     e.position = {100, 100, 0};
     Seat driver; driver.type = SeatType::Driver; driver.bone_index = 1;
@@ -1262,7 +1383,7 @@ static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
 static void test_meride_reads_standing_carrier_and_remove_uses_command_group() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
-    Entity e; e.item_id = 1001; e.net_id = 42; e.health = 100;
+    Entity e; e.item_id = 1001; e.item_type_index = 7; e.net_id = 42; e.health = 100;
     const EntityHandle player = w.registry.spawn(0, e);
     w.cached.local_player = player;
     e.net_id = 77; e.group_id = 7;
@@ -1278,7 +1399,7 @@ static void test_meride_reads_standing_carrier_and_remove_uses_command_group() {
     w.registry.get(player)->mounted = true;
     vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(2) == 1);
-    e.net_id = 78; e.item_id = 0; // removal has no item-definition gate
+    e.net_id = 78; e.item_id = 0; e.item_type_index = 0; // removal has no item-definition gate
     const EntityHandle missing_def = w.registry.spawn(1, e);
     Program removal = compile_source("remove(0) remove(7)", {});
     vm.load(removal); vm.execute(w);
@@ -1324,7 +1445,7 @@ static void test_scripted_respawn_counts_are_not_immediate_spawns() {
 static void test_distance_literals_and_lead_queries() {
     BehaviorWorld w;
     Entity seed;
-    seed.item_id = 1;
+    seed.item_id = 1; seed.item_type_index = 7;
     seed.net_id = 101;
     seed.position = {0.0f, 0.0f, 2.5f};
     seed.yaw = 90;
@@ -1349,7 +1470,8 @@ static void test_distance_literals_and_lead_queries() {
             "v13 = SSNnearSSN(101,103,v10)\n"
             "v14 = SSNnearSSN(101,103,3)\n"
             "v15 = SSNnearSSN(101,103,v14)\n"
-            "v16 = 65536M\n", {});
+            "v16 = 65536M\nv17 = 3000000000\nv18 = load(-40000M)\nv19 = 100000F\n"
+            "v20 = 32767.99M\n", {});
     CHECK(program.ok() && program.diagnostics.empty());
     vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 0); // equality does not lead
@@ -1363,7 +1485,15 @@ static void test_distance_literals_and_lead_queries() {
     CHECK(w.script.vars.get_mission(12) == 0);
     CHECK(w.script.vars.get_mission(13) == 1);
     CHECK(w.script.vars.get_mission(14) == 1 && w.script.vars.get_mission(15) == 0);
-    CHECK(w.script.vars.get_mission(16) == 0); // low dword of _ftol2_sse
+    // Scaled literals outside int32 store _ftol2_sse's SSE2 integer
+    // indefinite; the CRT initializer selects that leg on every SSE2 CPU.
+    // [orig: WacScript_ResolveParameter @0x4F2D8C; _ftol2_sse @0x76BC15;
+    //  sub_7887AF @0x7887B4]
+    CHECK(w.script.vars.get_mission(16) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(17) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(18) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(19) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(20) == 2147482992); // 32767.99 * 65536 truncates in range
 
     // Wrapped coordinate subtraction precedes the Euclidean length.
     w.registry.get(a)->position = {-32768.0f, 0.0f, 0.0f};
@@ -1375,7 +1505,7 @@ static void test_distance_literals_and_lead_queries() {
     // Both lengths clamp to 0x7FFF0000 before the lead subtraction.
     CHECK(!w.commands.ssn_leads_target(a, b, goal, 0));
     CHECK(w.commands.ssn_leads_target(a, b, goal, -1));
-    w.registry.get(goal)->item_id = 0;
+    w.registry.get(goal)->item_type_index = 0;
     CHECK(!w.commands.ssn_leads_target(a, b, goal, -1));
     CHECK(w.diagnostics.empty());
 }
@@ -1384,12 +1514,12 @@ static void test_script_ranges_drive_controller_and_perception() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 4);
     Entity seed;
-    seed.item_id = 1; seed.item_type = 3; seed.kind = EntityKind::Organic;
+    seed.item_id = 1; seed.item_type_index = 7; seed.item_type = 3; seed.kind = EntityKind::Organic;
     seed.health = 100; seed.team = 1; seed.group_id = 7; seed.net_id = 101;
     const auto scanner = w.registry.spawn(0, seed);
     seed.team = 2; seed.group_id = 0; seed.net_id = 102; seed.position.x = 5.0f;
     const auto target = w.registry.spawn(0, seed);
-    seed.item_id = 0; seed.health = 0; seed.group_id = 7; seed.net_id = 103;
+    seed.item_id = 0; seed.item_type_index = 0; seed.health = 0; seed.group_id = 7; seed.net_id = 103;
     const auto itemless = w.registry.spawn(0, seed);
     seed.net_id = 104;
     const auto vehicle = w.registry.spawn(1, seed);
@@ -1452,7 +1582,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     Entity seed;
     seed.net_id = 101; seed.position = {-2.0f, -3.0f, 4.0f};
     const auto itemless = w.registry.spawn(0, seed);
-    seed.net_id = 102; seed.item_id = 1; seed.item_type = 3;
+    seed.net_id = 102; seed.item_id = 1; seed.item_type_index = 7; seed.item_type = 3;
     seed.health = 0; seed.alive = false; seed.health_max = 80;
     seed.flags = seed.engine_flags = kEntityFlagDead;
     seed.group_id = 7;
@@ -1518,7 +1648,7 @@ static void test_player_values_cache_at_bytecode_entry() {
     BehaviorWorld w;
     Entity player;
     player.kind = EntityKind::Organic;
-    player.item_id = 1;
+    player.item_id = 1; player.item_type_index = 7;
     player.net_id = 10;
     player.health = 321;
     player.mana = 17;
@@ -1569,8 +1699,9 @@ static void test_player_values_cache_at_bytecode_entry() {
 // the same token then feeds the next slot, and the tokens left over are
 // statement-level tokens (a value becomes load, anything else Unknown).
 // [orig: WacScript_ResolveParameter @0x4f2a92..0x4f2a9f / @0x4f2a5e /
-//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4f3ab2..0x4f3ae2 -> loc_4F3990
-//  @0x4f3a71, the statement default @0x4f5108 / @0x4f5124 / @0x4f5293;
+//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4F3AB2..0x4F3AED -> the token
+//  loop @0x4F3990 (loc_4F3990), which re-enters the parameter check
+//  @0x4F3A71, the statement default @0x4f5108 / @0x4f5124 / @0x4f5293;
 //  WacScript_CacheLocalPlayerState @0x4f57b5]
 static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     BehaviorWorld w;
@@ -1589,7 +1720,10 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     CHECK(program.diagnostics.empty());
     WacVm vm; vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 5);
-    CHECK(vm.time() == 6); // the run counter advances from the written word
+    // A bare bytecode run leaves the written word: only the execution's
+    // callers increment it. [orig: WacScript_AdvanceTick @0x4F81D3;
+    // WacScript_InitAndLoad @0x4F9770]
+    CHECK(vm.time() == 5);
     CHECK(w.script.vars.get_mission(2) == 3 && w.cached.humans == 3);
     CHECK(w.script.vars.get_mission(3) == 7 && w.kill_stats.bluekills_by_player == 7);
     CHECK(w.script.vars.get_mission(4) == 1 && w.kill_stats.greenkills_by_player == 1);
@@ -1604,7 +1738,8 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     // signature (Script_SetCompileError's first-error buffer, which only the
     // script debug overlay shows; the program compiles and runs), the slot
     // takes the scratch sink and the SAME token feeds the next slot [orig:
-    // Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71], so neither
+    // Script_Compile @0x4F3AB2..0x4F3AED -> the token loop @0x4F3990
+    // (loc_4F3990), which re-enters the parameter check @0x4F3A71], so neither
     // V0 nor the guarded variable moves. Every diagnostic is non-fatal and the
     // first is the signature; the re-feed logs it once per slot the token
     // fails and the stray tokens add their own, so the count is not pinned.
@@ -1630,7 +1765,7 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     // [orig: Script_Compile @0x4f5293]; nothing is emitted for it.
     bad = compile_source("set(v1,nosuchname)\n", {});
     CHECK(!bad.diagnostics.empty() && bad.diagnostics[0].message == "  set (variable, value)");
-    CHECK(bad.diagnostics.back().message == "Unknown 'nosuchname'");
+    CHECK(bad.diagnostics.back().message == "Unknown 'NOSUCHNAME'"); // the upper-cased token
     // The sink is one shared scratch word. set(nosuchname,6) re-feeds the
     // name into the value slot too (SET scratch,scratch; the 6 is a stray
     // load), so only its own zero ever reaches it and v2 reads 0 on every
@@ -1652,7 +1787,8 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
 // The re-feed's observable outcomes. World is a large object and MSVC sizes a
 // frame for every local at entry, so these fixtures live in their own
 // function rather than beside the named-row ones.
-// [orig: Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71; the
+// [orig: Script_Compile @0x4F3AB2..0x4F3AED -> the token loop @0x4F3990
+//  (loc_4F3990), which re-enters the parameter check @0x4F3A71; the
 //  stray load @0x4f5124 / @0x4f5321..0x4f533d]
 static void test_refed_tokens_and_stray_loads() {
     // The name fills BOTH eq slots with the sink, so EQ is true, and the
@@ -1696,7 +1832,7 @@ static void test_quoted_tokens_outside_text_slots_are_the_null_leg() {
     CHECK(quoted.ok() && quoted.diagnostics.size() == 3);
     CHECK(quoted.diagnostics[0].message == "  eq (number, number)");
     CHECK(quoted.diagnostics[1].message == "  eq (number, number)");
-    CHECK(quoted.diagnostics[2].message == "Unknown '1'");
+    CHECK(quoted.diagnostics[2].message == "Unknown '\"1'"); // the buffer keeps the quote
     BehaviorWorld quoted_world;
     WacVm quoted_vm; quoted_vm.load(quoted); quoted_vm.execute(quoted_world);
     CHECK(quoted_world.script.vars.get_mission(9) == 1);
@@ -1708,7 +1844,7 @@ static void test_quoted_tokens_outside_text_slots_are_the_null_leg() {
     Program quoted_value = compile_source("set(v3,\"5\")\n", {});
     CHECK(quoted_value.ok() && quoted_value.diagnostics.size() == 2);
     CHECK(quoted_value.diagnostics[0].message == "  set (variable, value)");
-    CHECK(quoted_value.diagnostics[1].message == "Unknown '5'");
+    CHECK(quoted_value.diagnostics[1].message == "Unknown '\"5'");
     BehaviorWorld quoted_value_world;
     quoted_value_world.script.vars.set_mission(3, 7);
     WacVm quoted_value_vm; quoted_value_vm.load(quoted_value); quoted_value_vm.execute(quoted_value_world);
@@ -1726,7 +1862,7 @@ static void test_unknown_ifname_token_sinks_to_event_zero() {
         "reset(nosuchevent)\n", {});
     CHECK(unknown_event.ok() && unknown_event.diagnostics.size() == 2);
     CHECK(unknown_event.diagnostics[0].message == "  reset (ifname)");
-    CHECK(unknown_event.diagnostics[1].message == "Unknown 'nosuchevent'");
+    CHECK(unknown_event.diagnostics[1].message == "Unknown 'NOSUCHEVENT'");
     BehaviorWorld reset_world;
     WacVm reset_vm; reset_vm.load(unknown_event);
     for (int i = 0; i < 3; ++i) reset_vm.execute(reset_world);
@@ -1737,13 +1873,14 @@ static void test_unknown_ifname_token_sinks_to_event_zero() {
 // (0 for a name or a quoted token), looks the net id up and keeps the handle,
 // logging "Unknown SSN" on a miss. The port binds at the first execution and
 // asks the compile-time registry, when one is given, the same question.
-// [orig: WacScript_ResolveParameter @0x4f2c94..0x4f2eed; Script_SetCompileError
-//  @0x4f2edf; Script_Compile's token buffer keeps the quote @0x4f3338]
+// [orig: WacScript_ResolveParameter @0x4f2c94..0x4f2eed (the
+//  Script_SetCompileError call @0x4F2EDF); Script_Compile's token buffer
+//  keeps the quote @0x4f3338]
 static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     // No net-id-0 entity: the name binds to 0xFFFF and the compile-time
     // registry logs the miss, non-fatally, ahead of the value-slot signature.
     BehaviorWorld w;
-    Entity e; e.net_id = 7; e.item_id = 1; e.alive = true;
+    Entity e; e.net_id = 7; e.item_id = 1; e.item_type_index = 7; e.alive = true;
     w.registry.spawn(0, e);
     CompileEnv env; env.registry = &w.registry;
     Program program = compile_source(
@@ -1763,7 +1900,7 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     CHECK(w.script.vars.get_mission(3) == 0); // a value slot is still the sink
     // A net-id-0 entity is what the name binds to, and the registry is silent.
     BehaviorWorld zero;
-    Entity z; z.net_id = 0; z.item_id = 1; z.alive = true;
+    Entity z; z.net_id = 0; z.item_id = 1; z.item_type_index = 7; z.alive = true;
     zero.registry.spawn(0, z);
     CompileEnv zero_env; zero_env.registry = &zero.registry;
     Program bound = compile_source(
@@ -1787,7 +1924,9 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
 // an AMMO_ token in an Ssn slot is atol'd to net id 0 and looked up, and an
 // SSN_ token in an Ammo slot is the SSN leg's, never AMMO's. Both miss an
 // empty registry with the leg's own "Unknown SSN" and bind silently once the
-// net ids exist.
+// net ids exist. An SSN operand in the Ammo slot is a kinded literal of the
+// wrong type, so the pool also reports "Wrong Parameter".
+// [orig: WacScript_ResolveParameter @0x4F3183..0x4F31C1]
 static void test_ssn_leg_precedes_ammo_leg() {
     BehaviorWorld w;
     CompileEnv env; env.registry = &w.registry;
@@ -1795,19 +1934,23 @@ static void test_ssn_leg_precedes_ammo_leg() {
         "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
         "ammorain(SSN_7)\n", env);
     CHECK(program.ok());
-    CHECK(program.diagnostics.size() == 2);
-    CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
-    CHECK(program.diagnostics[1].message == "Unknown SSN" && !program.diagnostics[1].error);
+    CHECK(program.diagnostics.size() == 3);
+    if (program.diagnostics.size() == 3) {
+        CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
+        CHECK(program.diagnostics[1].message == "Unknown SSN" && !program.diagnostics[1].error);
+        CHECK(program.diagnostics[2].message == "Wrong Parameter" && !program.diagnostics[2].error);
+    }
     BehaviorWorld bound;
-    Entity zero; zero.net_id = 0; zero.item_id = 1; zero.alive = true;
-    Entity seven; seven.net_id = 7; seven.item_id = 1; seven.alive = true;
+    Entity zero; zero.net_id = 0; zero.item_id = 1; zero.item_type_index = 7; zero.alive = true;
+    Entity seven; seven.net_id = 7; seven.item_id = 1; seven.item_type_index = 7; seven.alive = true;
     bound.registry.spawn(0, zero);
     bound.registry.spawn(0, seven);
     CompileEnv bound_env; bound_env.registry = &bound.registry;
     Program bound_program = compile_source(
         "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
         "ammorain(SSN_7)\n", bound_env);
-    CHECK(bound_program.ok() && bound_program.diagnostics.empty());
+    CHECK(bound_program.ok() && bound_program.diagnostics.size() == 1 &&
+            bound_program.diagnostics[0].message == "Wrong Parameter");
 }
 
 static void test_outcome_cache_changes_on_next_execution() {
@@ -1869,19 +2012,52 @@ static void test_bms_event_query_reads_active_during_delay() {
 
 // A boundary keyword followed by an operator (`then -5`) drops an open auto
 // frame whose precedence sits below that operator's WITHOUT emitting its POP
-// and abandons the drain; the same expression before a plain action still
-// pops the AND. Malformed input only. [orig: Script_Compile @0x4f4226..0x4f4231]
+// and abandons the keyword itself; the same expression before a plain action
+// pops the AND and closes the condition. Malformed input only.
+// [orig: Script_Compile @0x4F4F76..0x4F4F81 (the THEN drain's abandon test)]
 static void test_boundary_lookahead_drops_an_outranked_frame() {
-    const auto pops_in_condition = [](const char *source) {
-        const opennova::wac::ParseResult parsed = opennova::wac::parse(source);
-        if (parsed.statements.empty()) return -1;
-        int pops = 0;
-        for (const opennova::wac::Expr &step : parsed.statements[0].cond.kids)
-            if (step.kind == opennova::wac::Expr::Pop) ++pops;
-        return pops;
+    const auto has = [](const std::vector<uint32_t> &code, uint32_t word) {
+        for (const uint32_t w : code) if (w == word) return true;
+        return false;
     };
-    CHECK(pops_in_condition("if never() and 1 + 2 then set(v1,1) endif\n") == 1);
-    CHECK(pops_in_condition("if never() and 1 + 2 then -5 endif\n") == 0);
+    const Program plain = compile_source("if never() and 1 + 2 then set(v1,1) endif\n", CompileEnv{});
+    CHECK(has(plain.code, encode_instr(Op::PopExpr, uint32_t(Op::FoldAnd))));
+    CHECK(has(plain.code, encode_instr(Op::MarkFired, uint32_t(plain.code.size() - 1))));
+    const Program minus = compile_source("if never() and 1 + 2 then -5 endif\n", CompileEnv{});
+    CHECK(!has(minus.code, encode_instr(Op::PopExpr, uint32_t(Op::FoldAnd))));
+    for (const uint32_t w : minus.code) CHECK(instr_op(w) != Op::MarkFired);
+}
+
+// A Text or Filename slot fed a variable, a global or a pooled value hands
+// the handler that dword's ADDRESS: the text is its bytes, least significant
+// first, to the first NUL, running on into the next words of the bank (V255
+// into the first declared slot) or the pool; the S2C 0x23 record copies the
+// same bytes. [orig: WacScript_ExecuteBytecode @0x4F5F92 (case 5), the
+// payload's string copy @0x4F5D71..0x4F5DAB]
+static void test_raw_text_slots_read_the_operand_bytes() {
+    BehaviorWorld w;
+    w.match.configure({});
+    Program program = compile_source(
+        "var first\n"
+        "set(v1, 1145258561) set(v2, 17989)\n" // 0x44434241 "ABCD", 0x4645 "EF"
+        "set(v255, 1094795585) set(first, 66)\n" // 0x41414141, then "B"
+        "set(g7, 67)\n"
+        "text(v1) text(v255) text(g7) text(v9) text(g_humans)\n", {});
+    CHECK(program.ok());
+    WacVm vm; vm.load(program); vm.execute(w);
+    std::vector<std::string> shown;
+    for (const Effect &e : w.out.effects.entries())
+        if (e.kind == "text") shown.push_back(e.str);
+    CHECK(shown.size() == 5);
+    if (shown.size() == 5) {
+        CHECK(shown[0] == "ABCDEF");
+        CHECK(shown[1] == "AAAAB");
+        CHECK(shown[2] == "C");
+        CHECK(shown[3].empty()); // a zero dword is the empty string
+        CHECK(shown[4] == "\x01"); // G_humans pools its group index, 1
+    }
+    const auto &queue = w.out.script_remote_commands;
+    CHECK(queue.size() == 5 && queue[0].args.size() == 1 && queue[0].args[0].text == "ABCDEF");
 }
 
 int main() {
@@ -1909,6 +2085,7 @@ int main() {
     test_arithmetic_assignment_and_retail_expression_order();
     test_auto_parentheses_and_minus_token_context();
     test_boundary_lookahead_drops_an_outranked_frame();
+    test_raw_text_slots_read_the_operand_bytes();
     test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup();
     test_named_event_reset_and_declared_variables();
     test_empty_server_holds_script_divider_after_boot();
@@ -1928,9 +2105,11 @@ int main() {
     test_flash_arms_the_weather_home();
     test_wac_wave_emits_dialog_wav();
     test_wac_text_and_console_use_distinct_effect_channels();
+    test_forceanim_notice_rides_the_system_ring();
     test_authority_gate();
     test_lose_ends_round_with_banner_key();
     test_lose_other_team_noop();
+    test_lose_relays_its_chat_key();
     test_win_and_outcome_builtins();
     test_04tr_outcome_block_greenkills();
     test_wac_spatial_wounded_and_mount_predicates();

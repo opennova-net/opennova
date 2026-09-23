@@ -40,13 +40,15 @@ void blend_root_frame(const RootMotionFrame &previous, const RootMotionFrame &cu
 
 // Reconcile the requested id before checking the OLD channel's end flag.
 // Promoting a pending request does not re-enter initialization in this call.
-// [orig: AnimMap_UpdateEntity @0x40B633..0x40B7C9]
-static void prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source) {
+// [orig: AnimMap_UpdateEntity @0x40B630..0x40B7C9]
+static void prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source,
+                                    AnimVariantRings *rings) {
     if (inf.anim_playing_state < 0) inf.anim_playing_state = inf.anim_state;
     if (inf.anim_state != inf.body_clip_state())
-        begin_body_transition_with_insert(inf, inf.anim_state, source);
+        begin_body_transition_with_insert(inf, inf.anim_state, source, rings);
     if (inf.anim_pending != 0 && source != nullptr) {
-        const int32_t length = source->clip_length_ticks(inf.adm_id, inf.body_clip_state(), 0);
+        const int32_t length = source->clip_length_ticks(
+                inf.adm_id, inf.body_clip_state(), inf.anim_variant);
         if (length >= 0 && inf.clip_phase >= length) {
             inf.anim_state = inf.anim_pending;
             inf.anim_pending = 0;
@@ -59,8 +61,8 @@ bool reset_capsule_bottom_state(int state) {
 }
 
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
-                             RootMotionFrame &out) {
-    prepare_primary_channel(inf, &source);
+                             AnimVariantRings &rings, RootMotionFrame &out) {
+    prepare_primary_channel(inf, &source, &rings);
     out = RootMotionFrame{};
 
     if (!primary_blend_active(inf)) {
@@ -69,10 +71,10 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
         // parked clip end, not the wrapped start
         // [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1].
         const int32_t armed_boundary = inf.anim_pending != 0
-                ? source.clip_length_ticks(inf.adm_id, inf.body_clip_state(), 0)
+                ? source.clip_length_ticks(inf.adm_id, inf.body_clip_state(), inf.anim_variant)
                 : -1;
-        return source.advance_armed(inf.adm_id, inf.body_clip_state(), 0, inf.clip_phase,
-                                    armed_boundary, out);
+        return source.advance_armed(inf.adm_id, inf.body_clip_state(), inf.anim_variant,
+                                    inf.clip_phase, armed_boundary, out);
     }
 
     inf.anim_blend_weight += inf.anim_blend_step;
@@ -81,13 +83,13 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
         inf.anim_blend_step = 0.0f;
     }
     return source.advance_blended(inf.adm_id,
-                                  inf.anim_prev, inf.anim_prev_clip_phase,
-                                  inf.body_clip_state(), inf.clip_phase,
+                                  inf.anim_prev, inf.anim_prev_variant, inf.anim_prev_clip_phase,
+                                  inf.body_clip_state(), inf.anim_variant, inf.clip_phase,
                                   inf.anim_blend_weight, out);
 }
 
 void advance_primary_channel_fallback(InfantryState &inf) {
-    prepare_primary_channel(inf, nullptr);
+    prepare_primary_channel(inf, nullptr, nullptr);
     if (primary_blend_active(inf)) {
         inf.anim_prev_clip_phase = (inf.anim_prev_clip_phase + 1) % 62;
         inf.clip_phase = (inf.clip_phase + 1) % 62;
@@ -101,8 +103,14 @@ void advance_primary_channel_fallback(InfantryState &inf) {
     inf.clip_phase = (inf.clip_phase + 1) % 62;
 }
 
+// The re-init serves the played state's ring entry: the insert's when one
+// replaces the request. [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
-                                              const IRootMotionSource *root_motion) {
+                                       const IRootMotionSource *root_motion,
+                                       AnimVariantRings *rings) {
+    const auto serve = [&](int state) {
+        return rings != nullptr ? rings->serve(root_motion, inf.adm_id, state) : 0;
+    };
     if (inf.anim_pending == 0) {
         const int trans = gait_stance_transition_clip(inf.body_clip_state(), resolved);
         if (trans >= 0 && root_motion != nullptr &&
@@ -110,25 +118,29 @@ void begin_body_transition_with_insert(InfantryState &inf, int resolved,
             // The blend duration comes from the REQUESTED state's flags (15
             // ticks for the crouch/prone walks), not the insert clip's
             // [orig: the +0x2BC flags test @0x40b64b precedes the insert].
-            inf.begin_body_transition(trans, resolved);
+            inf.begin_body_transition(trans, resolved, serve(trans));
             inf.anim_pending = resolved; // deferred to the clip end [orig: @0x40b737]
             return;
         }
     }
     const int pending = inf.anim_pending;
-    inf.begin_body_transition(resolved);
+    inf.begin_body_transition(resolved, -1, serve(resolved));
     inf.anim_pending = pending;
 }
 
 
 bool IRootMotionSource::advance_blended(int adm_id,
-                                        int primary_state, int32_t &primary_phase_ticks,
-                                        int target_state, int32_t &target_phase_ticks,
+                                        int primary_state, int primary_variant,
+                                        int32_t &primary_phase_ticks,
+                                        int target_state, int target_variant,
+                                        int32_t &target_phase_ticks,
                                         float target_weight, RootMotionFrame &out) {
     RootMotionFrame primary;
     RootMotionFrame target;
-    const bool have_target = advance(adm_id, target_state, target_phase_ticks, target);
-    const bool have_primary = advance(adm_id, primary_state, primary_phase_ticks, primary);
+    const bool have_target =
+            advance_variant(adm_id, target_state, target_variant, target_phase_ticks, target);
+    const bool have_primary =
+            advance_variant(adm_id, primary_state, primary_variant, primary_phase_ticks, primary);
 
     if (have_primary && have_target) {
         if (target_weight < 1.0f)

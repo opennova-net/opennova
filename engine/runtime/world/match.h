@@ -13,6 +13,7 @@
 namespace opennova::world {
 
 class World;
+struct RoundDeath;
 
 // score.ini FIELD records use these one-based IDs and retain their byte-sized
 // visibility flag in file order. They are both the match's board schema and the
@@ -98,14 +99,37 @@ std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
 // the former kAssists alias of index 11 was the decoder's column-name guess.
 struct MatchStats {
     static constexpr size_t kFieldCount = 42;
+    // RecordEvent 1: one per accepted round a Player fires (FIELD id 9, and
+    // the shots-per-kill words). [orig: GameEvent_ProcessScoring case 1
+    // @0x52FB2A; CPlayerStats_RecordEvent case 1 @0x52C8FB]
+    static constexpr size_t kShotsFired = 2;
     static constexpr size_t kTeamKills = 4;
     static constexpr size_t kEnemyKills = 5;
     static constexpr size_t kSuicides = 6;
     static constexpr size_t kDeaths = 7;
+    // RecordEvent 7: a medic's heal (MEDICHEAL); no FIELD id reads it.
+    // [orig: GameEvent_ProcessScoring case 5 @0x52FD3A]
+    static constexpr size_t kMedicHeals = 8;
+    // RecordEvent 8: a medic's revive (MEDICSAVE, FIELD id 10).
+    // [orig: GameEvent_ProcessScoring case 6 @0x52FCD8]
+    static constexpr size_t kMedicSaves = 9;
     static constexpr size_t kFlagSaves = 11;
     static constexpr size_t kFlagCaptures = 12;
     static constexpr size_t kFlagPickups = 13;
     static constexpr size_t kTargetsDestroyed = 14;
+    // RecordEvent 15: an unnumbered zone captured (PSPTAKEOVER, FIELD id 13).
+    // [orig: GameEvent_ProcessScoring case 14 @0x52FDFE]
+    static constexpr size_t kPspTakeovers = 16;
+    // Kill-cause counters: entity+0x2C bit 0x100 (same-round multi-kill),
+    // 0x800 (headshot), 0x400 (knife). [orig: GameEvent_ProcessScoring
+    // @0x530076..0x530178 RecordEvent 16/17/18]
+    static constexpr size_t kMultipleKills = 17;
+    static constexpr size_t kHeadshotKills = 18;
+    static constexpr size_t kKnifeKills = 19;
+    // RecordEvent 20: an enemy Player killed while carrying a flag
+    // (FLAGCARRIERKILL, FIELD id 14). [orig: GameEvent_ProcessScoring
+    // @0x530246..0x530277 / @0x5302FE..0x530352]
+    static constexpr size_t kFlagCarrierKills = 21;
     static constexpr size_t kVictimNearNeutralObjectiveKills = 22;
     static constexpr size_t kAttackerNearNeutralObjectiveKills = 23;
     static constexpr size_t kVictimNearAttackerObjectiveKills = 24;
@@ -114,6 +138,11 @@ struct MatchStats {
     static constexpr size_t kAttackerNearVictimObjectiveKills = 27;
     static constexpr size_t kSharedPointAwards = 28;
     static constexpr size_t kPoints = 29;
+    // RecordEvent 29: the sum of the victims' ItemDef `score` words (scorer
+    // event 12, FIELD id 20, the 0x56 row's third word); no points.
+    // [orig: GameEvent_ProcessScoring case 12 @0x52FEC2..0x52FF0F;
+    // CPlayerStats_RecordEvent case 29 @0x52CBB6]
+    static constexpr size_t kUnitScore = 30;
     static constexpr size_t kHillTime = 31;
     static constexpr size_t kHostileZoneTime = 32;
     static constexpr size_t kFriendlyZoneTime = 33;
@@ -168,16 +197,33 @@ struct MatchPlayer {
     // score event 25. It advances for every periodic pass, whether or not the
     // mission contains a capture source. [orig: @0x5087C9..0x5087F1]
     int32_t periodic_score_ticks = 0;
+    // Player-slot +0x184: the server ticks this slot spent in state 6 with its
+    // entity present and not hidden (Flags bit 0), unsaturated and zero at
+    // player-add; WAC onptick reads it in whole seconds.
+    // [orig: Server_TickUpdate `add [esi+184h],1` @0x51D977;
+    //  WacCmd_OnPlayerTick @0x4F0E65]
+    uint32_t play_ticks = 0;
     // WAC pisvar/psetvar address player-slot bytes +392..+408. A new
     // player-add clears them; team changes and death do not.
     // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;
     // Server_PlayerAdd @0x51D51C]
     std::array<uint8_t, 17> script_vars{};
     // Player-slot +100567, the live spectator latch. The scorer refuses
-    // every event for a spectator-flagged slot, so the non-team round winner
-    // award skips the row. The authority mirrors its connection latch here.
-    // [orig: GameEvent_ProcessScoring @0x52F6FA]
+    // every event for a spectator-flagged slot, so the round winner awards
+    // skip the row; the proximity pass skips the slot after its mask clear
+    // and the TKOTH holder census never counts it. The authority mirrors its
+    // connection latch here.
+    // [orig: GameEvent_ProcessScoring @0x52F6E5/@0x52F6FA;
+    //  Server_UpdateCaptureZoneProximity @0x508795;
+    //  Game_CountAlivePlayersPerTeam @0x500214]
     bool spectator = false;
+    // Player-slot +89912 bit 0x10, the undeployed (respawn-pending) bit: set
+    // at join when the mission offers deploy zones, cleared by the deploy
+    // leg. Event 25's counter skips a pending slot. The authority mirrors its
+    // connection bit here.
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath
+    //  @0x517791; Server_UpdateCaptureZoneProximity @0x5087A2]
+    bool respawn_pending = false;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -309,8 +355,11 @@ class Match {
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
     // Mirrors the player-slot spectator latch (+100567) onto the roster row.
-    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E76]
+    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E61]
     void set_player_spectator(EntityHandle entity, bool spectator);
+    // Mirrors the player-slot undeployed bit (+89912 & 0x10) onto the row.
+    // [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791]
+    void set_player_respawn_pending(EntityHandle entity, bool pending);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player
@@ -326,10 +375,36 @@ class Match {
     int32_t flag_capture_target(const World &world, uint8_t scoring_team);
     int32_t demolition_target(const World &world, uint8_t scoring_team);
 
-    // Retail runs the victim death scorer first, then the killer-victim scorer.
-    // An invalid killer records only the victim leg.
+    // A Player victim takes GameEvent_PlayerDeath's two scorer calls (its own
+    // death, then the killer-victim call); a non-Player person takes
+    // Entity_CheckAndProcessDeath's single killer-victim call. `cause_flags`
+    // is the victim's entity+0x2C cause word as the death edge reads it.
+    // [orig: GameEvent_PlayerDeath @0x516F06 / @0x516FB0;
+    // Entity_CheckAndProcessDeath @0x51B5B3]
     void record_death(World &world, EntityHandle victim,
-                      EntityHandle killer = EntityHandle{});
+                      EntityHandle killer = EntityHandle{},
+                      uint32_t cause_flags = 0);
+
+    // The kill accounting a damage-pass lethal edge runs (RoundDeath::
+    // kill_event): with a killer and a victim whose ItemDef `score` word is
+    // nonzero, scorer event 12 in every session, then outside a network
+    // session the single-player tallies world.kill_stats.
+    // [orig: Score_ProcessKillEvent @0x4FD400]
+    void process_kill_event(World &world, const RoundDeath &death);
+    // Scorer event 12: the victim's `score` word adds to the killer's field 30
+    // (and its team row in team modes).
+    // [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438)]
+    void record_kill_event(const World &world, EntityHandle killer,
+                           EntityHandle victim);
+    // Scorer event 1: an accepted non-alt round fired by a Player.
+    // [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727)]
+    void record_shot(const World &world, EntityHandle shooter);
+    // Scorer event 6: a medic revived a downed teammate.
+    // [orig: GameEvent_RevivePlayer @0x517CD0 (the event-6 call @0x517DC5)]
+    void record_revive(const World &world, EntityHandle medic);
+    // Scorer event 5: a medic healed a hurt teammate.
+    // [orig: GameEvent_HealPlayer @0x50DE30 (the event-5 call @0x50DEA4)]
+    void record_heal(const World &world, EntityHandle medic, EntityHandle patient);
 
     // Objective scorer cases 9 and 11. The ordinary runtime paths call these
     // from carry contact and death routing; they remain public for script/WAC
@@ -339,10 +414,17 @@ class Match {
     void record_target_destroyed(const World &world, EntityHandle target,
                                  EntityHandle attacker);
 
-    // Capture event 24: numbered zones supply every living same-team Player in
-    // radius; an unnumbered timed completion supplies its retained capturer.
+    // Capture event 24 (LFPTAKEOVER): a numbered zone's flip supplies every
+    // living same-team Player in radius.
+    // [orig: CaptureZone_CheckProximityScoring @0x500C50, the event-24 call
+    // @0x500D84]
     void record_zone_capture(const World &world,
                              const std::vector<EntityHandle> &scorers);
+    // Capture event 14 (PSPTAKEOVER): an unnumbered zone's flip or timed
+    // completion scores its capturer.
+    // [orig: CaptureZone_CheckProximityScoring @0x500C50, the event-14 call
+    // @0x500DC5]
+    void record_psp_takeover(const World &world, EntityHandle capturer);
 
     // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
     // Advance the server-owned match services for one frame. The periodic
@@ -350,6 +432,13 @@ class Match {
     // retail countdown block; carried-objective motion and round time do not.
     void advance_tick(World &world,
                       TickPhase phase = TickPhase::Gameplay);
+
+    // The movement callbacks the frame's entity update left in the collision
+    // stream (a player touching a flag or a bay): retail runs them inline in
+    // the movement resolver, so the entity update's tail consumes them, ahead
+    // of the next server tick. [orig: Entity_ProcessWaypointInteraction
+    // @0x4AD820, its sole caller @0x4B2FF5 in the movement resolver]
+    void process_movement_contacts(World &world);
 
     // True for the frame on which the shared one-second service fired. The
     // host's Server_TickUpdate consumes this same countdown for its own 1 Hz
@@ -361,11 +450,18 @@ class Match {
     std::vector<MatchGameplayEvent> drain_gameplay_events();
 
     // Returns no value while play continues; value 0 is an actual draw decision.
-    // The all-zones-owned check precedes the game-type switch exactly as retail.
+    // The all-zones-owned check (A&S and C&C only) precedes the game-type
+    // switch exactly as retail.
     std::optional<int32_t> winner_if_finished(const World &world);
 
     // Shared double-run latch used by World::process_round_end.
     bool finish(int32_t winner_team, const World &world);
+    // A client's round-over latch: S2C 0x1D raises the gate the host's round
+    // end raises (the entity update and the target filters read it), with no
+    // scoring pass and no board; the next mission start's fresh Match clears it.
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+    //  @0x430858 under !is_authority; cleared by Game_StartMission @0x524A1F]
+    void latch_round_over() { outcome_.ended = true; }
 
     int32_t primary_score(const MatchStats &stats, int32_t objective_ticks = 0) const;
     int32_t primary_score(const MatchPlayer &player) const;
@@ -389,10 +485,24 @@ class Match {
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
     int32_t score_value(size_t status_index) const;
-    void add_event(MatchPlayer &player, size_t counter, int32_t points,
-                   int32_t raw_delta = 1);
+    // RecordEvent(counter) then the RecordEvent 28 points award, which shares
+    // with the +0x170 links unless `share` is false (scorer event 25 alone).
+    void add_event(const World &world, MatchPlayer &player, size_t counter,
+                   int32_t points, int32_t raw_delta = 1, bool share = true);
+    // A bare RecordEvent 28 award (no counter), on a Player and its team row.
+    void add_points(const World &world, MatchPlayer &player, int32_t points);
+    void add_team_points(uint8_t team, int32_t points);
+    // The scorer's team leg: TeamRecords[team] exists only in team modes.
     void add_team_event(uint8_t team, size_t counter, int32_t points,
                         int32_t raw_delta = 1);
+    // A direct TeamRecords row award, ungated by the team bit (the flag
+    // capture's hard-routed rows).
+    void add_team_record_event(uint8_t team, size_t counter, int32_t points,
+                               int32_t raw_delta = 1);
+    // Scorer event 3 without a victim (a Player's own death) and with one.
+    void score_death(World &world, EntityHandle victim);
+    void score_kill(World &world, EntityHandle killer, EntityHandle victim,
+                    uint32_t cause_flags, bool victim_carried_flag);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
@@ -400,6 +510,7 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
+    void accumulate_team_scores(const World &world);
     void update_flag_objectives(World &world);
     int32_t team_objective_ticks(const World &world, uint8_t team) const;
 

@@ -29,6 +29,15 @@ source-over/additive blend results. D-RMAT-8 is therefore `FIXED`, not a
 structural exception. The superseded register entry was removed below; this
 amendment preserves why the original 2026-07-06 decision changed.
 
+## Amendment (2026-09-23): the merge-ratified original-bug entries
+
+D-VEH-2 (PR #640), D-WAC-1, D-WAC-2, D-WAC-3, D-GRM-1, D-TMATE-1 (PR #642) and
+D-EVT-7 (PR #646) were proposed with ratification at their PR's merge; all three
+PRs merged (2026-09-08, 2026-09-09 and 2026-09-12), so the register below records
+them as ratified. D-TMATE-1's description is restated to the witnessed flyover
+behavior: a destroyed flyover helicopter stalls the operation as retail's does,
+and only the return, ascent and departure arms end it early.
+
 ## Context
 
 OpenNova is a faithful reimplementation — parity, not reinterpretation
@@ -143,35 +152,37 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   re-copied and re-expired forever. Clearing the tail preserves all surviving
   rings and bounds retirement; the saturation regression covers all 128 slots.
   **Proposed in PR #640 (2026-09-07) as the bounded implementation of the
-  existing lifetime contract; requires maintainer ratification at merge — no
-  sign-off has been recorded yet.**
+  existing lifetime contract; ratified by that PR's merge (2026-09-08).**
 
 - **D-WAC-1** — invalid IDIV operands (division by zero, INT_MIN/-1) stop the current WAC
   pass with a diagnostic; retail's `WacScript_ExecuteBytecode @0x4F58B0` executes the x86
   IDIV and faults the process. Malformed mission input must not crash a host.
-  **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge — no
-  sign-off has been recorded yet.**
+  **Proposed in PR #642 (2026-09-09); ratified by that PR's merge (2026-09-09).**
 - **D-WAC-2** — `pisvar`/`psetvar` indices outside the authored 0..16 byte bank return 0
   and write nothing; retail (`WacCmd_PlayerIsVar @0x4F0BD0`, `WacCmd_PlayerSetVar
   @0x4F0CB0`) checks only `index <= 16`, so a negative index reads or writes unrelated
-  player-slot memory. **Proposed in PR #642 (2026-09-09); requires maintainer
-  ratification at merge.**
+  player-slot memory. **Proposed in PR #642 (2026-09-09); ratified by that PR's
+  merge (2026-09-09).**
 - **D-WAC-3** — `weaponfired`/`blockfire` and the fire-request stamp refuse negative weapon
   categories; retail bounds only the high side (`WacCmd_WeaponFired @0x4ED360`,
   `WacCmd_BlockFire @0x4EE140`, `Input_HandleActionBinding_0 @0x4E0420`) and indexes the
   BSS before `dword_C6EA44` / `dword_C6EA6C` for a negative category. **Proposed in PR #642
-  (2026-09-09); requires maintainer ratification at merge.**
+  (2026-09-09); ratified by that PR's merge (2026-09-09).**
 - **D-GRM-1** — the GRM facial-rig parser rejects unsafe indices, excessive row/parameter
   counts, non-finite coordinates and field-overflow names, and treats names as data;
   retail's `FaceAnimConfig_ParseProperty @0x5886A0` writes unbounded indices and
-  sprintf-format names into fixed fields. **Proposed in PR #642 (2026-09-09); requires
-  maintainer ratification at merge.**
-- **D-TMATE-1** — the teammate pickup/flyover operation initializes its helicopter reference
-  before treatment and ends the operation on a failed helper allocation or a destroyed
-  helicopter/teammate entity; retail's `HeliLift_SpawnPickup @0x4525E0` never initializes
-  the pointer that `HeliLift_UpdateSlotState @0x451730` dereferences on treatment expiry
-  (`@0x451e09`; `@0x451e4c`; `HeliLift_UpdateAll @0x451FA0` only compacts the slots and calls it).
-  **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge.**
+  sprintf-format names into fixed fields. **Proposed in PR #642 (2026-09-09); ratified by
+  that PR's merge (2026-09-09).**
+- **D-TMATE-1**: the teammate pickup/flyover operation guards the pickup's never-set
+  helicopter pointer and failed helper allocations; retail's `HeliLift_SpawnPickup
+  @0x4525E0` never initializes the pointer that `HeliLift_UpdateSlotState @0x451730`
+  dereferences on treatment expiry (`@0x451e09`; `@0x451e4c`; `HeliLift_UpdateAll
+  @0x451FA0` only compacts the slots and calls it). A flyover whose helicopter is destroyed
+  before landing stalls in arms 4..6 as retail's does; the port's Return/Ascend/Depart arms
+  (2/7/8) end the operation when the helicopter row is gone, where retail keeps measuring
+  against the zeroed row until both medics die (scope restated 2026-09-23 from the witnessed
+  flyover arms; world/world-wac-ai-re.md section 33.32). **Proposed in PR #642
+  (2026-09-09); ratified by that PR's merge (2026-09-09).**
 - **D-EVT-7** — the BMS loadout-record sanitizer bounds an incomplete tail to empty
   strings and retains oversized typed records; retail's `AIProfile_SanitizeConfigData
   @0x40cfe0` walks three verbatim strings plus the optional fourth field past the chunk
@@ -179,8 +190,7 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   the record and overflowing a fixed temporary is memory corruption whose outcome depends
   on the adjacent bytes; well-formed records never reach the boundary
   (mission/bms-event-runtime-re.md §6.3a). **Proposed in PR #646 (2026-09-11) as a
-  bounded format projection; requires maintainer ratification at merge — no sign-off has
-  been recorded yet.**
+  bounded format projection; ratified by that PR's merge (2026-09-12).**
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not
   reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry

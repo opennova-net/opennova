@@ -75,6 +75,16 @@ std::string waypoint_display_name(int name_id, const GameTextLookup &mission,
 //  + GameMsg_SetBannerText @0x454647]
 std::string subgoal_message(bool lost, int header_id, const GameTextLookup &mission);
 
+// A shown objective's two chat lines: the gametext Misc/STRMISC_NEWOBJECTIVE
+// header ("" when absent) and the mission table's WinConditions/
+// STRWINDIRECTIVE%03i or LoseConditions/STRLOSEDIRECTIVE%03i directive for the
+// header text id, "" when that line is shorter than two characters (it then
+// posts nothing).
+// [orig: HUD_ShowObjectiveNotification @0x5ba2e0 — the directive keys
+//  @0x5ba316/@0x5ba34b, the length drop @0x5ba37b, the header key @0x5ba39b]
+std::string objective_header(const GameTextLookup &gametext);
+std::string objective_directive(bool win, int header_id, const GameTextLookup &mission);
+
 // The mission table's "Triggered Text" line for a text id, read directly (no
 // override-table consult); a miss shows nothing ("").
 // [orig: HUD_DisplayTriggeredText @0x51f190 — key ID%03i]

@@ -1,4 +1,5 @@
-// Reserved infantry commands and the authored carrier entry walk.
+// Reserved infantry commands, the authored carrier entry walk and the person's
+// ride link.
 // [orig: Entity_UpdateInfantryAI @0x4B9910, Entity_FindBestSeatSlot @0x4351F0,
 // Entity_GetBoneTransformAndOrientation @0x4B0C50, Entity_CanEnterVehicle @0x435480]
 #include <base/io/bam.h>
@@ -61,7 +62,7 @@ bool named_point(World &world, const Entity &carrier, const char *name, int32_t 
 }
 // Claim the lowest unclaimed E1..En when resolving a new command target.
 // The current command's 123/124 terms are intentional in the retail predicate.
-// [orig: Entity_UpdateInfantryAI @0x4BB0BB..0x4BB269]
+// [orig: Entity_UpdateInfantryAI @0x4BAF9B..0x4BB185]
 void claim_entry(AiEntity &e, World &world, const Entity &target, int32_t command) {
 	int count = 0, point[6] = {};
 	for (int i = 8; i > 0; --i) {
@@ -95,13 +96,15 @@ void claim_entry(AiEntity &e, World &world, const Entity &target, int32_t comman
 // staged walk. Radii are the original Q16 constants, including 57344/102400.
 // [orig: Entity_UpdateInfantryAI @0x4BB373..0x4BB849]
 void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, int32_t goal[3],
-		int32_t &radius) {
+		int32_t &radius, int32_t &entry_heading) {
 	auto &inf = e.inf;
 	int32_t point[6] = {};
 	const auto copy = [&] { std::copy_n(point, 3, goal); };
 	if (named_point(world, target, "UseGun", point)) {
 		copy();
-		radius = target.primary_weapon_owner.valid() ? 0x30000 : 0x10000;
+		// The ring widens while the gun holds its +0x170 occupant.
+		// [orig: `cmp dword ptr [edx+170h],0` @0x4BB39C]
+		radius = target.primary_occupant.valid() ? 0x30000 : 0x10000;
 		return;
 	}
 	char name[] = { 'E', char('0' + inf.board_entry_slot), 0 };
@@ -144,29 +147,38 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 				std::copy_n(e.pos, 3, goal);
 				radius = 90112;
 				inf.board_entry_stage = 3;
+				// The S yaw lands in the target heading and the think-entry
+				// local; the body yaw itself is not written.
+				// [orig: @0x4BB7CA / @0x4BB7D0]
 				inf.target_heading = yaw;
-				e.heading = yaw;
+				entry_heading = yaw;
 				const int32_t diff =
 						static_cast<int32_t>(uint32_t(yaw) - uint32_t(inf.body_heading));
 				if (std::abs(int64_t(diff)) < 1073741760) {
+					// [orig: `or dword ptr [esi+24h],40h` @0x4BB81C]
 					self.flags |= kEntityFlagMounted;
+					self.engine_flags |= kEntityFlagMounted;
 					// The guard clip (0x8C) is selected only when the body's
 					// anim table maps state 140 to a clip of its own: the record
 					// behind [[entity+0x188]+0x48] is a dword per state and the
 					// test is [rec+0x230] != [rec+0] (0x230 = 4 * 0x8C), which is
-					// the root-motion source's has_clip(kGuard). Retail also
-					// stamps the self-attachment chased by the late movement tail:
-					// the S point X/Y into their own pair (entity+0x2FC/+0x300,
-					// written nowhere else) and its Z into the goal Z (entity+0x304).
+					// the root-motion source's has_clip(kGuard). The state is
+					// stored raw as well as proposed [orig: +0x2BC and the selection
+					// @0x4BB82F..0x4BB835]. Retail also stamps the self-attachment
+					// chased by the late movement tail: the S point X/Y into their
+					// own pair (entity+0x2FC/+0x300, written nowhere else) and its
+					// Z into the goal Z (entity+0x304).
 					// [orig: Entity_UpdateInfantryAI @0x4BB818..0x4BB858; attach
 					//  @0x4BB840, stamp @0x4BB846/0x4BB84C/0x4BB852]
 					self.attach_parent = self.handle;
 					inf.self_attach_point[0] = sx;
 					inf.self_attach_point[1] = sy;
-					inf.move_target[2] = sz;
+					inf.goal_z = sz;
 					const IRootMotionSource *rm = world.ai.root_motion;
-					if (rm == nullptr || rm->has_clip(inf.adm_id, anim_state::kGuard))
+					if (rm != nullptr && rm->has_clip(inf.adm_id, anim_state::kGuard)) {
+						inf.store_body_animation(anim_state::kGuard);
 						inf.board_anim = anim_state::kGuard;
+					}
 				}
 				if (std::abs(int64_t(diff)) < 0x2D82D80) {
 					e.pos[0] = sx;
@@ -205,6 +217,34 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 	self.position = { e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f };
 }
 } // namespace
+
+// [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905; the org2 twin
+//  Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+void infantry_ride_link(World &world, Entity &self) {
+    // The ground's occupant counts when it is another body of the same team
+    // (the team byte compare @0x4BD893..0x4BD89F / @0x4BD8BA..0x4BD8C6).
+    const auto rider_of = [&](const Entity *ground) -> const Entity * {
+        if (ground == nullptr) return nullptr;
+        const Entity *occupant = world.registry.get(ground->primary_occupant);
+        if (occupant == nullptr || occupant->handle == self.handle ||
+                occupant->team != self.team)
+            return nullptr;
+        return occupant;
+    };
+    const Entity *ground = world.registry.get(self.ground_target);
+    const Entity *link = rider_of(ground);
+    if (link == nullptr && ground != nullptr)
+        link = rider_of(world.registry.get(ground->ground_target)); // [orig: @0x4BD8A1..0x4BD8C6]
+    if (link != nullptr) {
+        // [orig: @0x4BD8C8..0x4BD8DE]
+        self.primary_occupant = link->handle;
+        if (self.ride_link_hold < 0xF0) self.ride_link_hold += 4;
+    } else if (self.ride_link_hold > 0) {
+        --self.ride_link_hold; // [orig: @0x4BD8E6..0x4BD8F3]
+    } else {
+        self.primary_occupant = {}; // [orig: @0x4BD8FB]
+    }
+}
 
 // [orig: Entity_UpdateInfantryAI @0x4B9910, attachment prepass before think]
 InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
@@ -255,13 +295,16 @@ void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachm
         inf.path_state = 0;
         self->flags &= ~0x40000u;
         self->engine_flags &= ~0x40000u;
+        // The selector tail still runs for the attachment: it publishes the
+        // move mode to +0x36A and the hit flinch consumes wasHit.
+        // [orig: +0x36A @0x4BD356; the wasHit clear @0x4BD6EE]
+        inf.prev_move_mode = inf.move_mode;
+        inf.was_hit = false;
         commit_body_state(inf, world.ai.infantry_resolve_state(inf.adm_id, 150));
     } else {
         inf.move_mode = 6;
         inf.arrival_radius = 0x10000;
         std::copy_n(pose.point, 3, inf.move_target);
-        inf.target_heading = board_bearing_to(io::bam_sub(pose.point[0], e.pos[0]),
-                                             io::bam_sub(pose.point[1], e.pos[1]));
         world.ai.infantry_select(e, world);
     }
 }
@@ -277,7 +320,7 @@ bool infantry_attachment_move(AiEntity &e, World &world, const InfantryAttachmen
         for (int axis = 0; axis < 2; ++axis)
             e.pos[axis] = io::bam_add(e.pos[axis],
                     io::bam_sar(io::bam_sub(inf.self_attach_point[axis], e.pos[axis]), 3));
-        e.pos[2] = std::max(e.pos[2], inf.move_target[2]);
+        e.pos[2] = std::max(e.pos[2], inf.goal_z);
         return false; // self-attachment still executes the ordinary root/vertical tail
     }
     if (!pose.parent.valid() || self->attach_bone == 0 || pose.distance >= 147456) return false;
@@ -297,16 +340,18 @@ bool infantry_attachment_move(AiEntity &e, World &world, const InfantryAttachmen
     return true; // skips both ordinary root translation and vertical collision
 }
 
-void AiSystem::infantry_command_think(AiEntity &e, World &world) {
+void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_heading) {
     InfantryState &inf = e.inf;
     AiSlot &slot = e.slot;
     const int32_t command = slot.f[37];
 
     if (command == 126) {
-        // GOTO GROUP -> a stationary guard. Retail parks the shared gait select
-        // at moveMode 3 with targetDist == arrivalRadius == 10.0u, which resolves
-        // to no motion; our think contract encodes that outcome as the move_mode 0
-        // the caller's per-think reset already left in place.
+        // GOTO GROUP. Retail sets moveMode 3 with targetDist == arrivalRadius ==
+        // 10.0u but never writes the goal locals, so its moving selection (the
+        // distance alone gates it @0x4BD3DB) detours toward whatever the stack
+        // frame held and walks (the detour's +0x1A8 write @0x4AFF2C). That goal
+        // is undefined memory; the port keeps the body in place (move_mode 0 from
+        // the per-think reset), the D-INF-2 declared divergence.
         // [orig: the ==126 leg @0x4baabd..0x4baacf — moveMode=3, dist=radius=0xA0000]
         return;
     }
@@ -335,14 +380,14 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world) {
         inf.move_target[0] = tgt[0];
         inf.move_target[1] = tgt[1];
         inf.move_target[2] = tgt[2];
-        inf.target_heading = board_bearing_to(tgt[0] - e.pos[0], tgt[1] - e.pos[1]);
         return;
     }
 
-    infantry_board_think(e, world, command);
+    infantry_board_think(e, world, command, entry_heading);
 }
 
-void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) {
+void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
+		int32_t &entry_heading) {
 	auto &inf = e.inf;
 	auto &slot = e.slot;
 	// Cached board target and command dispatch [orig: @0x4BEE93..0x4BEEC6,
@@ -356,41 +401,21 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 		inf.path_state = 0;
 		return;
 	}
-	if (slot.f[36] != int32_t(th.packed) + 1)
+	// A re-resolved target claims an E point only from pools 1..3: the pool-0
+	// scan's hit jumps past the claim. [orig: `jnz loc_4BB187` @0x4BAEF1; the
+	// pool 1..3 scans @0x4BAEF7..0x4BAF95; the claim @0x4BAF9B..0x4BB185]
+	if (slot.f[36] != int32_t(th.packed) + 1 && th.pool() != 0)
 		claim_entry(e, world, *target, command);
 	slot.f[36] = int32_t(th.packed) + 1;
 	if (self->mounted || !target->has_item_def)
 		return;
 	const bool pc = (target->item_attrib & kItemAttribPlayerControl) != 0;
 	const bool entry_type = target->item_type == 1 || target->item_type == 6;
-	if (entry_type && pc && !vehicle_can_enter(world, self, *target)) {
-		if ((target->flags & kEntityFlagDead) != 0 || !target->alive || target->health <= 0) {
-			const double dx = board_to_fixed(self->spawn_position.x) - int64_t(e.pos[0]);
-			const double dy = board_to_fixed(self->spawn_position.y) - int64_t(e.pos[1]);
-			const double dz = (board_to_fixed(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
-			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
-				self->health = e.health = 0;
-				self->last_attacker = target->last_attacker;
-			}
-		}
-		// The live can't-enter arm still runs the common arrival tail: the goal
-		// is the entity's own position with a 125 u ring (0x7D0000), so the
-		// distance is zero and the arrival branch increments a nonzero entry
-		// stage; the attach is skipped by the ring's >= 100 u (0x640000) gate.
-		// [orig: goal = self @0x4BB2CE..0x4BB2E4, radius @0x4BB2D7 -> loc_4BB5A1;
-		//  arrival @0x4BBD87..0x4BBDA0; attach gate @0x4BBDAF; flag clear
-		//  @0x4BBDFA..0x4BBE07]
-		if (inf.board_entry_stage)
-			++inf.board_entry_stage;
-		if (!self->mounted)
-			self->flags &= ~kEntityFlagMounted;
-		return;
-	}
 	int32_t goal[3] = { board_to_fixed(target->position.x), board_to_fixed(target->position.y),
 		board_to_fixed(target->position.z) };
 	// Arrival radius [orig: @0x4BB325..0x4BB34A, 2-unit arm @0x4BB32E].
 	int32_t radius = board_to_fixed(target->bound_radius) + 0x10000;
-	if (entry_type && pc) {
+	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
 		VehicleSeatSelection best;
 		if (find_best_vehicle_seat(world, th, e.handle, best, seat_mode_for_command(command))) {
 			const Entity *carrier = world.registry.get(best.vehicle);
@@ -401,31 +426,67 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 		// it to choose its arrival radius. [orig: @0x4BB325..0x4BB34A]
 		if (inf.path_state == 0)
 			radius = 0x20000;
+	} else if (entry_type && pc) {
+		// The can't-enter arm. A body of a dead carrier more than 8 u from its
+		// spawn dies with the carrier's last attacker and keeps the carrier goal;
+		// otherwise the goal is the body's own position inside a 125 u ring, so
+		// the arrival below runs with the attach gated off by the ring.
+		// [orig: @0x4BB211..0x4BB2AC (kill @0x4BB28F..0x4BB2A4 -> loc_4BB5A1);
+		//  goal = self @0x4BB2B1..0x4BB2C5 and @0x4BB2CE..0x4BB2E4, radius
+		//  0x7D0000 @0x4BB2D7]
+		bool killed = false;
+		if ((target->flags & kEntityFlagDead) != 0 || !target->alive || target->health <= 0) {
+			const double dx = board_to_fixed(self->spawn_position.x) - int64_t(e.pos[0]);
+			const double dy = board_to_fixed(self->spawn_position.y) - int64_t(e.pos[1]);
+			const double dz = (board_to_fixed(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
+			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
+				self->health = e.health = 0;
+				self->last_attacker = target->last_attacker;
+				killed = true;
+			}
+		}
+		if (!killed) {
+			std::copy_n(e.pos, 3, goal);
+			radius = 0x7D0000;
+		}
 	} else if (entry_type) {
-		entry_goal(e, world, *self, *target, goal, radius);
+		entry_goal(e, world, *self, *target, goal, radius, entry_heading);
 	}
+	// The common goal tail: moveMode 3 at the measured distance and the
+	// final-approach local, then the escort legs. [orig: @0x4BB5A1..0x4BB620]
 	int32_t dist = board_dist(e.pos, goal);
+	inf.move_mode = 3;
+	inf.target_dist = dist;
+	inf.at_final_oneshot = true;
     infantry_escort_goal(e, world, *target, goal, radius, dist);
-	// Attach gate and calls [orig: @0x4BBDA6..0x4BBE07; @0x4BBDAF,
-	// @0x4BBDC4, @0x4BBDD4, @0x4BBDF2]; common move tail @0x4BBE11.
 	if (dist < radius) {
+		// The arrival [orig: @0x4BBD87..0x4BBDA0, the moveMode local cleared
+		// @0x4BBD8F]: no move (the common zero-distance selection then clears
+		// path state @0x4BD2E9), and a nonzero entry stage steps on. Only an
+		// unparented body inside a ring under 100 u (@0x4BBDAF) of an EWeap or
+		// PlayerControl target (@0x4BBDC4) tries the seat, and only a body the
+		// attach left unparented drops Flags 0x40 and its parent slot.
+		// [orig: gate @0x4BBDA6..0x4BBDC8; the Entity_FindBestSeatSlot call
+		//  @0x4BBDD4 and the Entity_RequestVehicleAttach call @0x4BBDF2; clear
+		//  @0x4BBDFA..0x4BBE07; then the common move tail @0x4BBE11]
+		inf.move_mode = 0;
+		inf.target_dist = 0;
 		if (inf.board_entry_stage)
 			++inf.board_entry_stage;
-		// Arrival clears a frame local (var_1169 @0x4BBD8F); the common
-		// zero-distance selection subsequently clears path state @0x4BD2E9.
-		if (radius < 0x640000 &&
-				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0)
+		if (!self->mounted && radius < 0x640000 &&
+				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0) {
 			world.commands.mount_boarding_command(self->net_id, ssn, static_cast<uint8_t>(command));
-		if (!self->mounted)
-			self->flags &= ~kEntityFlagMounted;
+			if (!self->mounted) {
+				self->flags &= ~kEntityFlagMounted;
+				self->engine_flags &= ~kEntityFlagMounted;
+				self->mount_type = SeatType::None;
+			}
+		}
 		return;
 	}
-	inf.move_mode = 3;
 	inf.target_dist = dist;
 	inf.arrival_radius = radius;
 	std::copy_n(goal, 3, inf.move_target);
-	inf.at_final_oneshot = true;
-	inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
 }
 
 } // namespace opennova::world

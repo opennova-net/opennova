@@ -7,11 +7,14 @@
 // definition supplies the live-model gate but no KZ source; authored husk
 // names never stand in for the live retail pointer; and the intact model's
 // GLASS userpoint reaches the traits only through retail's exact static
-// model/surface table. Driven by a manual World, the model cache over a loose
-// temp root holding byte-patched copies of the committed synthetic fixtures.
+// model/surface table; the same sweep seeds a vehicle brain's intact and husk
+// floors (brain[11]/[12]). Driven by a manual World, the model cache over a
+// loose temp root holding byte-patched copies of the committed synthetic fixtures.
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,6 +30,7 @@
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
@@ -327,11 +331,89 @@ static void test_retail_glass_model_maps_exact_userpoint_into_death_traits() {
     }
 }
 
+// The class init seeds the vehicle brain's two floors from the models it
+// binds: brain[11] from the intact model's CMDL floor and brain[12] from the
+// husk, both under one class gate: the helicopter family always, the vehicle
+// family unless its profile is a boat (subtype 1). An entity without a brain
+// takes neither. [orig: Entity_InitHelicopterAIFromDef @0x4684E2..0x468527;
+//  Entity_InitVehicleAIFromDef `cmp [edi+14h],ebx` @0x46881C, stores
+//  @0x468836/@0x468858]
+static void test_class_init_seeds_the_brain_floors() {
+    const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
+    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
+    const Items items(text_bytes(
+            "begin \"Floor witness heli\"\n"
+            "  id 105098\n"
+            "  type vehicle\n"
+            "  graphic Floor1\n"
+            "  husk Floor1X\n"
+            "  ai_function chel\n"
+            "  move_function chel\n"
+            "  hp 100\n"
+            "end\n"
+            "begin \"Floor witness boat\"\n"
+            "  id 105097\n"
+            "  type vehicle\n"
+            "  graphic Floor1\n"
+            "  husk Floor1X\n"
+            "  ai_function cbot\n"
+            "  move_function cbot\n"
+            "  hp 100\n"
+            "end\n"));
+    CHECK(!house.empty() && !armory.empty() && items.ok);
+    if (house.empty() || armory.empty() || !items.ok) return;
+    const TempRoot root("floors");
+    root.put("Floor1.3di", house);
+    root.put("Floor1X.3di", armory);
+
+    ResourceIndex index;
+    CHECK(index.scan(root.dir, std::string(), VfsMountMode::LooseOnly));
+    assets::AssetStore models{&index};
+    world::EntityPoseProvider pose;
+    pose.set_assets(&models);
+    CollisionWorld collision;
+    OcclusionWorld occlusion;
+    mission::CollisionResolveState state;
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    Entity e;
+    e.kind = EntityKind::Item;
+    e.health = 100;
+    e.alive = true;
+    e.item_id = 5098;
+    e.bms_id = 1;
+    const EntityHandle heli = w.registry.spawn(1, e);
+    e.item_id = 5097;
+    e.bms_id = 2;
+    const EntityHandle boat = w.registry.spawn(1, e);
+    e.item_id = 5098;
+    e.bms_id = 3;
+    const EntityHandle bare = w.registry.spawn(1, e); // no brain
+    w.ai.attach(heli);
+    w.ai.attach(boat);
+    w.ai.for_handle(boat)->profile.subtype = 1;
+    mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
+    const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
+    CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 3);
+
+    const ItemDeathTraits *t = w.tables.item_death_traits.get(5098);
+    CHECK(t != nullptr && t->husk_model_loaded && t->husk_rest_min_z != 0.0f);
+    if (t == nullptr) return;
+    const AiBrain &hb = w.ai.for_handle(heli)->brain;
+    CHECK(hb.f[AiBrain::kHuskFloor] == to_fixed(std::abs(t->husk_rest_min_z)));
+    CHECK(hb.f[AiBrain::kModelFloor] == w.registry.get(heli)->veh.air_probe_z_off);
+    const AiBrain &bb = w.ai.for_handle(boat)->brain;
+    CHECK(bb.f[AiBrain::kModelFloor] == 0 && bb.f[AiBrain::kHuskFloor] == 0);
+    CHECK(w.ai.for_handle(bare) == nullptr);
+}
+
 int main() {
     test_first_husk_kz_and_dead_points_feed_death_traits();
     test_final_only_husk_supplies_the_gate_but_no_kz_source();
     test_missing_husk_assets_leave_the_live_model_gate_clear();
     test_retail_glass_model_maps_exact_userpoint_into_death_traits();
+    test_class_init_seeds_the_brain_floors();
     if (failures == 0) std::printf("OK: item_death_traits_resolve\n");
     return failures == 0 ? 0 : 1;
 }

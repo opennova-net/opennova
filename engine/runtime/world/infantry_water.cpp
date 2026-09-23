@@ -18,7 +18,7 @@ namespace {
 // The org1 float model (see infantry_water_block). The hysteresis gap and the
 // sink are 16.16 (0.625u and ~0.0187u); the bob shares the sink's magnitude, so
 // a floating body rides between the plane and 0.037u under it — a ripple, not a
-// visible heave. [orig: the 0xA000 entry bias @0x4bfb84, -0x4C9 @0x4bfbf1, the
+// visible heave. [orig: the 0xA000 entry bias @0x4BFAF0..0x4BFAF8, -0x4C9 @0x4BFB7D, the
 // sin amplitude dbl_7C9C28 and the phase pair flt_7C6950 * dbl_7C9BD0]
 // The phase pair is the LITERAL 1/256 * 3.1 (Jointops.exe bytes @0x7C6950 =
 // 0.00390625f, @0x7C9BD0 = 3.1 double) -- not pi/256; corrected 2026-08-23.
@@ -32,10 +32,10 @@ constexpr double kWaterBobPhaseScale = 0.00390625 * 3.1;
 // cleared at the surface clamp and on the not-submerged exit (~0x208000).
 // [orig: set @0x4b81ef; clear @0x4b8176; exit @0x4b8373]
 constexpr uint32_t kEntityFlagDiveLatch = 0x200000u;
-constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4b81d0 `surf - 0x2000`]
-constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4b8124 `+ 112`]
-constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4b80d6 `+ 4096`]
-constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
+constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4B81C2 `surf - 0x2000`]
+constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4B811D `+ 112`]
+constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4B80D4 `+ 4096`]
+constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4B80F3..0x4B810E `2048`]
 
 } // namespace
 
@@ -50,17 +50,20 @@ constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 //
 // While the latch is set, the gravity column is skipped: that is the same
 // kEntityFlagDrowning half of the 0x108000 gate the fall path already reads, so
-// setting the flag here is what stops the body sinking, and the quarter-chase
-// below is what moves it. (The flag's name is ours and is narrower than the bit:
-// retail uses it as the generic afloat latch, not only for drowning.)
+// setting the flag here is what stops the body sinking. The block STORES the
+// float target; the motor's shared quarter-step tail right after it is what
+// moves the body, a quarter of the way from the even tick's pre-gravity Z and
+// the same quarter again on the odd tick (tick_infantry). (The flag's name is
+// ours and is narrower than the bit: retail uses it as the generic afloat
+// latch, not only for drowning.)
 //
-// [orig: Entity_UpdateInfantryAI @0x4bfb84..0x4bfc7a — entry
+// [orig: Entity_UpdateInfantryAI @0x4bfae2..0x4bfc62 — entry
 //  `z - 0xA000*((Flags>>15)&1) + 0xA000 >= water || (Flags & 0x100000)`, the
-//  exit clear `Flags &= 0xFFDF7FFF`, the float target, the splash edge
-//  @0x4bfb87 gated on `(Flags & 0x8000) == 0`, the latch
-//  `(Flags & ~0x2000) | 0x8000` @0x4bfc48 and the quarter-chase tail @0x4bfc65.
-//  The player twin @0x4b8020 carries the same shape plus swim control and a
-//  second, shallower dive edge (Flags 0x200000) — player_water_block below.]
+//  exit clear `Flags &= 0xFFDF7FFF` @0x4bfc5c, the float target stored
+//  @0x4bfb84, the splash edge @0x4bfb87 gated on `(Flags & 0x8000) == 0`, the
+//  latch `(Flags & ~0x2000) | 0x8000` @0x4bfc48; the common tail @0x4bfc65
+//  follows. The player twin @0x4b8020 carries the same shape plus swim control
+//  and a second, shallower dive edge (Flags 0x200000) — player_water_block below.]
 void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
                                     int32_t capsule_bottom, uint32_t logic_tick) {
     if (tick_entity == nullptr) return;
@@ -85,7 +88,9 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
             ((e.pos[1] + e.pos[0]) >> 12) + 4 * static_cast<int32_t>(logic_tick);
     const int32_t bob = static_cast<int32_t>(
             std::sin(static_cast<double>(phase) * kWaterBobPhaseScale) * kWaterBobAmplitude);
-    const int32_t target = water + bob - (tick_entity->eye_offset_z >> 1)
+    // The eye height is this tick's restamp (the motor's +0x74), not last tick's
+    // registry mirror. [orig: `mov ecx,[esi+74h]` @0x4BFB66]
+    const int32_t target = water + bob - (e.inf.eye_offset_z >> 1)
                          - kWaterFloatSink + depth;
 
     // The entry edge, fanned once. Which of the two sounds it takes is the body's
@@ -99,9 +104,9 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     tick_entity->engine_flags &= ~kEntityFlagInAir; // the pair's other half of that clear
     e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
 
-    // The vertical is a QUARTER-step toward the target, not a snap: that is what
-    // makes a body entering water settle over a few ticks instead of popping.
-    e.pos[2] += (target - e.pos[2] + 2) >> 2;
+    // The target is stored outright; the motor's quarter-step tail that follows
+    // this block turns it into the settle. [orig: `mov [esi+0Ch], eax` @0x4bfb84]
+    e.pos[2] = target;
 }
 
 // The org2 (player body) water block -- see the ai.h declaration. Same

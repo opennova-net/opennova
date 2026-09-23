@@ -148,6 +148,29 @@ int main() {
 		expect(rig.mounted_declines == 0, "the native mounted resolver never declined");
 		expect(!rig.mounted_graphics.empty(), "the boot installed native mounted model sources");
 
+		// The retail seat-bone lookup resolves every extracted ordinary seat of
+		// the booted carriers, so the org1 fail arm never fires across the
+		// mission; bone 0 is the lookup's own failure.
+		// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+		std::vector<std::pair<w::EntityHandle, int>> ordinary_seats;
+		rig.world.registry.for_each_in_pool(1, [&](const w::Entity &carrier) {
+			for (const w::Seat &seat : carrier.seats)
+				if (seat.type != w::SeatType::Gunner)
+					ordinary_seats.emplace_back(carrier.handle, seat.bone_index);
+		});
+		int unresolved = 0;
+		for (const auto &[handle, bone] : ordinary_seats) {
+			const w::Entity *carrier = rig.world.registry.get(handle);
+			if (carrier == nullptr || !rig.resolve_seat_bone(rig.world, *carrier, bone)) ++unresolved;
+		}
+		std::printf("native-assets: seat bones: ordinary=%zu unresolved=%d\n", ordinary_seats.size(), unresolved);
+		expect(!ordinary_seats.empty() && unresolved == 0, "every booted ordinary seat resolves its seat bone");
+		if (!ordinary_seats.empty()) {
+			const w::Entity *carrier = rig.world.registry.get(ordinary_seats.front().first);
+			expect(carrier != nullptr && !rig.resolve_seat_bone(rig.world, *carrier, 0),
+					"bone 0 fails the seat-bone lookup");
+		}
+
 		// The mission text: <mission>.bin when it exists, else medmssn.bin.
 		std::vector<uint8_t> legacy_text;
 		if (rig.index.has_file("00TRg.bin")) rig.index.read_file("00TRg.bin", legacy_text);

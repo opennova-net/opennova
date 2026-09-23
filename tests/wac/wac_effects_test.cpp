@@ -81,7 +81,8 @@ static void test_handles_gates_pose_and_restore() {
     Fixture f;
     const auto owner = f.entity(1, 1);
     f.world.logic_tick = 19;
-    f.script("v1=FX_FLASH\nfx2ssn(v1,1) store(v2)\nfx2ssn(\"fLaSh\",1) store(v3)\n");
+    // A bare word reaches the catalog upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
+    f.script("v1=FX_FLASH\nfx2ssn(v1,1) store(v2)\nfx2ssn(fLaSh,1) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
     CHECK(f.world.script.vars.get_mission(2) == 1 && f.world.script.vars.get_mission(3) == 1);
     CHECK(f.world.out.script_effects.size() == 2);
@@ -120,6 +121,9 @@ static void test_handles_gates_pose_and_restore() {
     CHECK(f.world.script.vars.get_mission(7) == 0);
     CHECK(!f.compile_script("fx2ssn(MISSING,1)\n").ok());
     CHECK(!f.compile_script("fx2ssn(1,1)\n").ok()); // a literal FX argument is a name
+    // A quoted token keeps its quote, so it names no effect.
+    // [orig: Script_Compile @0x4F3338; WacScript_ResolveParameter @0x4F305F]
+    CHECK(!f.compile_script("fx2ssn(\"FLASH\",1)\n").ok());
     CHECK(!compile_source("v1=FX_FLASH\n", {}).ok());
 
     Fixture fallback(true);

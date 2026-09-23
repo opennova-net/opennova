@@ -66,7 +66,6 @@ struct Rig {
         veh_h = w.registry.spawn(1, veh);
         w.vehicles.traits.set(1294, parent_traits(attrib_parent));
         AiEntity &brain = *w.ai.at(w.ai.attach(veh_h));
-        brain.has_physics = false;
         brain.health = 2000;
         brain.brain.f[AiBrain::kCurState] = kAiGroundPretty;
         brain.brain.f[AiBrain::kPendState] = kAiGroundPretty;
@@ -175,12 +174,11 @@ void test_per_tick_follow() {
     AiEntity &child_brain = *r.w.ai.at(r.w.ai.attach(a));
     r.w.vehicles.update_attached_children(veh);
     CHECK(child_brain.pos[0] == (108 << 16) && child_brain.pos[1] == (50 << 16));
-    CHECK(child_brain.vel_x == 123 && child_brain.vel_z == -45);
+    CHECK(child_brain.vel_x == 123 && child_brain.vel_y == -45);
 
     // The motor pass chains the follow after the mover: the children keep
     // their hull-relative offsets through an authority tick.
-    opennova::devtools::ProfileLap lap(r.w.profile);
-    r.w.vehicles.tick_motors(true, lap);
+    r.w.vehicles.update_motor(r.veh(), true);
     CHECK(close_to(r.w.registry.get(a)->position.x - r.veh().position.x, -2.0f, 0.01f));
     CHECK(close_to(r.w.registry.get(b)->position.x - r.veh().position.x, 2.0f, 0.01f));
     CHECK(close_to(r.w.registry.get(a)->position.y - r.veh().position.y, 0.0f, 0.01f));

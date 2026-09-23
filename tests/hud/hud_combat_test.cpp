@@ -108,6 +108,19 @@ static void geometry_and_draw() {
 	CHECK(std::any_of(instruments.quads.begin(), instruments.quads.end(), [](const auto &q) {
 		return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
 	}));
+	// HUD item flash timer 0 (BMS action 28 sub 37) blinks the instrument: an
+	// armed timer in its dark phase skips every draw, its lit phase (bit 0x10)
+	// draws. [orig: HUD_DrawAltitudeBar @0x59F168..0x59F176]
+	const auto agl_bar = [](const HudDrawList &d) {
+		return std::any_of(d.quads.begin(), d.quads.end(), [](const auto &q) {
+			return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
+		});
+	};
+	s.item_flash[0] = 0x20;
+	CHECK(!agl_bar(compiler.compile(s, 1024, 768)));
+	s.item_flash[0] = 0x30;
+	CHECK(agl_bar(compiler.compile(s, 1024, 768)));
+	s.item_flash[0] = 0;
 }
 
 static void mortar_map_and_world_cues() {
@@ -324,9 +337,25 @@ static void world_feeds() {
 	world.rules.projectile_authority = false;
 	read();
 	CHECK(!frame.hud_combat.state.target_brackets);
+	// Inside a session only a team game type admits a teammate target: the
+	// same admitted target draws nothing in a non-team type, and its brackets
+	// and friendly inset come back in a team one. Outside a session (single
+	// player) every type admits it.
+	// [orig: HUD_DrawCrosshair -- `cmp g_napi_np_ctx.is_in_session` @0x5926C0,
+	//  `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
 	world.rules.mpattrib = 0x100;
 	read();
-	CHECK(frame.hud_combat.state.target_brackets);
+	CHECK(!frame.hud_combat.state.target_brackets && !frame.hud_combat.state.inset_friendly);
+	MatchRules team;
+	team.game_type = 0x10000u;
+	world.match.configure(team);
+	read();
+	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	world.match.configure(MatchRules{});
+	world.rules.mp_session = false;
+	read();
+	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	world.rules.mp_session = true;
 	world.rules.mpattrib = 0;
 	Entity mount;
 	mount.has_item_def = true;

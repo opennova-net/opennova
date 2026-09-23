@@ -296,8 +296,9 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
             mount->primary_weapon_slot.next == weapon_action::kIdle &&
             mount->primary_weapon_slot.heat_window_end_tick == 111);
     // No world organic exists at wire handle 3. The replica's borrowed slot
-    // still pumps once, and the world AI pass must not clear its owner.
-    r.world.ai.pump_mounted_weapon_slots(r.world, 100);
+    // still pumps once, and the world's weapon walk (a joiner walks its
+    // replica slots instead) must not clear its owner.
+    r.world.pump_weapon_actions();
     CHECK(mount->primary_weapon_owner.packed == 3);
     im::tick_replica_weapon_slots(state, r.world);
     ready = r.drain();

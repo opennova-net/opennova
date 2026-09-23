@@ -106,6 +106,12 @@ public:
 			float p_max_height);
 	void set_blink_water_visible(bool p_visible);
 	bool is_water_pass_active() const;
+	// The world's entity-update counter, the noise pair's frame counter (the
+	// one retail's noise generator reads; witness in advance_frame): a frame
+	// whose world held its entity update regenerates the same pair. A Water
+	// nobody feeds counts its own render frames.
+	void set_noise_frame_counter(uint32_t p_counter);
+	int get_noise_frame_counter() const { return frame_counter_; }
 
 	void build();
 	bool is_built() const { return built_; }
@@ -185,6 +191,7 @@ private:
 	Ref<ImageTexture> noise_color_tex_;
 	Ref<ImageTexture> noise_normal_tex_;
 	int frame_counter_ = 0;
+	bool frame_counter_fed_ = false;
 	opennova::env::ScrollFallback fallback_scroll_;
 };
 

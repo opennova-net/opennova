@@ -1006,8 +1006,20 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_ProcessPlayerDeath @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
+	// A deploy that is not a medic revive, of a slot that is not a spectator,
+	// removes the devices the player placed in its last life, each through the
+	// notifying removal, after the spawn-state reset and ahead of the loadout.
+	// The devices stay armed from the death until this deploy.
+	// [orig: Server_ProcessPlayerDeath @0x517740 — the revive latch test
+	//  @0x5178C5, the spectator latch test @0x5178CD, the
+	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, ahead of the
+	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
+	if (!revive_deploy && !conn.link.spectator)
+		world.commands.remove_placed_devices_by_owner(player->handle);
 	conn.discard_pre_deploy_uplinks = true;
+	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(player->handle, false);
 	conn.link.respawn_delay_seconds = 0;
 	conn.link.spawn_target_hold_seconds = 0;
 	conn.link.respawn_hold_armed = false;
@@ -1019,6 +1031,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// +356 armory cooldown. [orig: Server_ProcessPlayerDeath @0x517803/@0x517812;
 	//  slot+0x164 = 0 @0x517900]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
+	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
+	conn.reply.capture_nag_held = false;
 	conn.link.armory_reuse_seconds = 0;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
@@ -2017,6 +2031,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
 				}
 				shooter->last_fire_target = fire_target;
+				// A primary round re-enters through the adm fire action, whose
+				// local pass scores the shot (scorer event 1) once it clears the
+				// pose checks; alt fire returns through RoundData_AddRound first.
+				// [orig: Server_ClientFiredRound @0x50BAA0 — alt @0x50BB0D, the
+				//  event-1 call @0x50C727]
+				if (!alt_fire) world->match.record_shot(*world, conn.link.owned_entity);
 				// The validated round ends the shooter's spawn protection: an in-session
 				// authority clears entity+292 for a non-spectator slot whose value is
 				// nonzero. A rejected fire never reaches this store. The listen host's own

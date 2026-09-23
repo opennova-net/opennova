@@ -141,7 +141,7 @@ struct Seat {
     uint8_t pose_index = 0;     // `sitexNN`/`ctrlxNN`/`drvrxNN` -> anim_sit + NN
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
-    int16_t yaw_offset = 0;     // gunner facing offset vs the vehicle yaw [orig: @0x43656c]
+    int16_t yaw_offset = 0;     // the seat userpoint's authored facing vs the vehicle yaw, degrees
     // An items.def addeweap* anchor is not a mount-facing convention. Retail
     // builds the child entity's complete orientation from this userpoint's
     // authored direction and live owning bone every update. The flag keeps
@@ -215,7 +215,9 @@ inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_weapon
 inline constexpr uint32_t kEntityFlagParachute = 0x20;        // deployed chute (D-INF-20) [orig: radius leg @0x4b3aac]
 inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-climb chase mode: gravity becomes the
                                                               // sixteenth-step Z chase to the AI move target (floor
-                                                              // -16384); the AI-order writer rides its own slice
+                                                              // -16384); set at spawn by the BMS record's attribute
+                                                              // bits 0x4000 / 0x20000 [orig: Entity_SpawnFromBMSRecord
+                                                              // @0x40EE2A..0x40EE33, @0x40EE70..0x40EE79]
                                                               // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
 inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
@@ -233,7 +235,7 @@ inline constexpr uint32_t kEntityFlagReflective = 0x400;      // BMS Reflective(
 inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800;  // type-11 volume touch
 inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimming [orig: grounded selector @0x4b78ab]
 inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
-                                                              // [orig: @0x4bf370 set; @0x4bbfa4 clear; §16.2 x6 scoring]
+                                                              // [orig: @0x4bf370 set; @0x4BBF88 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
 inline constexpr uint32_t kEntityFlagBuilding = 0x20000;      // [orig: Entity_InitFromModel @0x40e105]
 inline constexpr uint32_t kEntityFlagNoEngage = 0x80000;      // org1 combat think: skips the attack-stance aim
@@ -246,6 +248,15 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disableSSN; the vehicle motors test it with
+                                                                  // the dead bit (10000002h) as their driver-input
+                                                                  // gate [orig: WacCmd_DisableSsn @0x4F76DD;
+                                                                  //  Entity_UpdateVehiclePhysics @0x48B980;
+                                                                  //  Entity_UpdateAircraftPhysics @0x490F1E]
+// The entity+0x2C dword (Entity::cause_flags) bit WAC holdSSN sets and
+// unholdSSN clears; the org1 think holds the NPC in place while it is set.
+// [orig: WacCmd_HoldSsn @0x4F785D; Entity_UpdateInfantryAI @0x4BD235]
+inline constexpr uint32_t kCauseFlagScriptHold = 0x2000;
 
 // The BMS-attribute part of a streamed Flags dword, mapped back onto the
 // record attribute bits the placement traits read (Reflective 1<<23,
@@ -320,6 +331,14 @@ struct Entity {
     // one after its callback; pool 2/3 positive clocks subtract 8/64 at their
     // matching slot cohort, and expired clocks run without a trailing subtract.
     int32_t class_think_ticks = 0;
+    // The entity update's visited byte (entity+0x163): every pool-1 visit sets
+    // it, and each walk clears it only on the live pool-1 rows, so a
+    // parent-first visit never repeats a row and a parent outside pool 1 is
+    // visited once per lifetime.
+    // [orig: Entity_UpdateAllEntities @0x4C212E..0x4C2156 (the clear), the
+    //  tests @0x4C217F / @0x4C218F / @0x4C219F / @0x4C21AF;
+    //  Entity_UpdatePool1Slot @0x4B8DE1 (the set)]
+    bool pool1_visited = false;
 
     // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
     // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
@@ -330,6 +349,12 @@ struct Entity {
 
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
+    // entity+0x1C ItemTypeIndex: the item's ordinal in the items.def load order,
+    // the first row whose type id matches and 0 when none does (the "Null" row is
+    // ordinal 0 too). Stamped by the item-traits sweep.
+    // [orig: Entity_SpawnFromBMSRecord `mov [esi+1Ch],ebp` @0x40EBFC, ebp from
+    //  ItemList_FindIndexByTypeId @0x49E100]
+    int32_t item_type_index = 0;
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
 	bool render_sway = false;
 	uint8_t item_type = 0; // raw ItemDef+0x5C type (1 vehicle, 3 person)
@@ -379,6 +404,10 @@ struct Entity {
 	int32_t virtual_display_camera_q16[3] = {};
 	std::string virtual_display_model; // the cockpit graphic key, lowercased
 	int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
+	// ItemDef+0x194 signed word `score`: the kill value. Zero (every Player
+	// definition) keeps the victim out of the kill accounting entirely.
+	// [orig: Score_ProcessKillEvent @0x4FD422]
+	int32_t item_score = 0;
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
     // The §5.10b wire replication class, resolved from the item's items.def *_function class
@@ -450,7 +479,6 @@ struct Entity {
     AiTargetSelectors target_selectors;
     uint8_t alert_state = 0;  // green/yellow/red
     int32_t ai_state = 0;     // AI component state
-    int32_t ai_target = -1;   // net id of current AI target, -1 = none
     // Targeted-by refcount (entity+530): ++ when an AI acquires this entity, -- (clamp 0)
     // when it retargets/clears. The target scorer reads it as the anti-pile-on saturation
     // gate (<=16) and score decay. [orig: Entity_SetAITarget @0x45d760 maintains it;
@@ -532,7 +560,7 @@ struct Entity {
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
     // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
-    // Entity_HandleDamageTrigger @0x407483]), consumed once by the infantry death
+    // OrganicClass_HandleEvent @0x407483]), consumed once by the infantry death
     // edge into anim_state, then cleared [orig: @0x4b9cc9..0x4b9d38]. 0 = none ->
     // the edge falls back to 174 death_pungi.
     int32_t death_anim_state = 0;
@@ -559,7 +587,7 @@ struct Entity {
     // seeds the 0..15 stagger (World::vehicle_ai_spawn_phase). Item class
     // callbacks read the slot as `class_think_ticks` above.
     // [orig: Entity_UpdatePool1Slot @0x4B8E1B / @0x4B8EA0;
-    //  EntityAI_ProcessVehicleStateMachine @0x458568 / @0x4585B4;
+    //  EntityAI_ProcessGroundStateMachine @0x458568 / @0x4585B4;
     //  Entity_InitVehicleAIFromDef @0x46891C..0x468945]
     int32_t spawn_phase = 0;
     // The kill-cause bits of the retail entity+0x2C dword (bits 8..11), latched at
@@ -571,6 +599,7 @@ struct Entity {
     // outside {1,3,4,5} (the 64-tick think and the blast) [orig: @0x407b4d..0x407b4f];
     // the consumer clears the bit it reports [orig: GameEvent_PlayerDeath @0x5171ca /
     // @0x5171e8 / @0x517206]. RoundDeath::event_flags snapshots the 0xF00 mask.
+    // Bit 0x2000 (kCauseFlagScriptHold) is the WAC holdSSN latch, outside it.
     uint32_t cause_flags = 0;
     int32_t spawn_heading = 0; // BAM32, entity+0x330 [orig: @0x4B965C]
     uint32_t spawn_flags = 0;  // entity+0x334, excludes dead [orig: @0x4B9662]
@@ -671,8 +700,6 @@ struct Entity {
     uint8_t pre_use_gun_equipped_adm_index = 0xFF;
     bool use_gun_slot_swapped = false;
     bool hidden = false;
-    bool held = false;
-    bool disabled = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---
     // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed
@@ -923,7 +950,14 @@ struct Entity {
     // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
     //  spawner gate @0x48faad in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70]
+    // On a person the same word is the ride link: the same-team occupant of the
+    // carrier it stands on, held by ride_link_hold below.
     EntityHandle primary_occupant;
+    // A person's ride-link hold (+0x174): +4 per think that finds the link, up
+    // to 0xF0; a think without it spends one tick, and the link clears once the
+    // hold is spent. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905;
+    //  Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+    int32_t ride_link_hold = 0;
     // Target-side mounted skeletal/clip configuration: items.def phrase_set at
     // itemDef+0x86C. Explicit validity keeps absent metadata distinct from the
     // witnessed config 0 branch.

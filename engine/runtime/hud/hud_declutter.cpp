@@ -137,7 +137,35 @@ int HudDeclutter::cycle_level() {
 	return level_;
 }
 
+void HudDeclutter::apply_level(int level) {
+	rebuild_at(level);
+}
+
 void HudDeclutter::rebuild() {
+	rebuild_at(level_);
+}
+
+void HudItemFlash::set(int index, int32_t value) {
+	// [orig: RenderState_SetLayerVisibilityByIndex @ 0x5A3020 — the store
+	//  @ 0x5A302A]
+	if (index < 0 || index >= kCount) return;
+	timers_[static_cast<size_t>(index)] = value;
+}
+
+void HudItemFlash::tick(int32_t now) {
+	if (now == last_tick_) return;
+	// The x86 `sub` wraps; the clamp compare is signed (`jle`).
+	const int32_t delta = static_cast<int32_t>(
+			static_cast<uint32_t>(now) - static_cast<uint32_t>(last_tick_));
+	last_tick_ = now;
+	for (int32_t &t : timers_) {
+		if (t == 0) continue;
+		t = t > delta ? static_cast<int32_t>(
+				static_cast<uint32_t>(t) - static_cast<uint32_t>(delta)) : 0;
+	}
+}
+
+void HudDeclutter::rebuild_at(int level) {
 	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 — for slot 0..23,
 	//  dword_2723C80[slot] = ((uint8_t)(1 << level) & byte_2723CE0[slot]) != 0]
 	// The shift is x86's `shl edx, cl`, so the count is taken modulo 32, and
@@ -147,7 +175,7 @@ void HudDeclutter::rebuild() {
 	// level 0 again. A negative level lands the same way through cl.
 	// [orig: `shl edx, cl` @0x59B0FB; `mov cl, byte_2723CE0[eax]; and cl, dl`
 	//  @0x59B100..0x59B106]
-	const unsigned shift = static_cast<unsigned>(level_) & 31u;
+	const unsigned shift = static_cast<unsigned>(level) & 31u;
 	const uint8_t bit = static_cast<uint8_t>(1u << shift);
 	for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
 		visible_[static_cast<size_t>(slot)] =

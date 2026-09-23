@@ -301,10 +301,12 @@ bool run() {
 	            "z is the codec's exact reconstruction")) return false;
 
 	// Coarse heading round-trips: the high byte of the 32-bit engine-frame BAM that
-	// snapshot_of builds = (90 - mission_yaw) * kBamPerDegree (entity_wire_bridge.cpp), rounded.
-	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches the bridge)
-	const uint32_t engine_bam = static_cast<uint32_t>(
-			static_cast<int32_t>(static_cast<int64_t>(90 - seed.yaw) * kBamPerDegree));
+	// snapshot_of builds, rounded. The unmoved seed's heading is its placement angle:
+	// ((90 - mission_yaw) << 16) / 360 truncated, then << 16.
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	const int32_t turn16 =
+			static_cast<int32_t>(static_cast<uint32_t>(90 - seed.yaw) << 16) / 360;
+	const uint32_t engine_bam = static_cast<uint32_t>(turn16) << 16;
 	const uint8_t want_yaw = static_cast<uint8_t>((engine_bam + 0x00800000u) >> 24);
 	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
 
@@ -1096,8 +1098,11 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	ns::ClientReplicaPipeline view(classify);
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	const ns::ClientEntityState *decoded_carrier = view.state().find(vh.packed);
-	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178956960 &&
-	                    decoded_carrier->roll_bam == -119304640,
+	// The unseeded carrier sends its placement pitch/roll: (15 << 16) / 360 << 16 and
+	// (-10 << 16) / 360 << 16, truncated [orig: Entity_SpawnFromBMSRecord
+	// @0x40EB69..0x40EBA6].
+	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178913280 &&
+	                    decoded_carrier->roll_bam == -119275520,
 	            "production carrier spawn retains authored pitch and roll")) return false;
 	// The infantry's own spawn-stream row (0x0C in production): a compact 0x0A
 	// never creates one [orig: NapiNPClientMsg_0x00A pre-apply check @0x4307B1..0x4307FA].
@@ -1276,7 +1281,6 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	world.tables.terrain = &terrain.field;
 	w::AiSystem &ai = world.ai;
 	ai.terrain = &terrain.field;
-	world.add_system(&ai);
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1394,7 +1398,6 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
-	world.add_system(&ai);
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;

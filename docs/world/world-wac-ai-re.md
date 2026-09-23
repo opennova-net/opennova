@@ -2,7 +2,7 @@
 
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
 Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**, 2026-07-08 (§14 aim overlay), 2026-07-09 (§14.8 weapon-channel producer), 2026-07-16 (§16 ground-AI combat chain — targeting feed + fire convergence), 2026-07-20 (§26 allegiance, damage response, and mounted-weapon parity).
-Scope: `engine/runtime/world` (entity registry, var store, AI), the WAC pipeline (`engine/formats/wac` lexer/parser/command table + `engine/runtime/wac` compiler/VM), the mission-runtime bridge, and the
+Scope: `engine/runtime/world` (entity registry, var store, AI), the WAC pipeline (`engine/formats/wac` bytecode/program/command table + `engine/runtime/wac` compiler/VM), the mission-runtime bridge, and the
 locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
 [ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
 [`docs/runtime-architecture.md`](../runtime-architecture.md) (main loop).
@@ -17,8 +17,8 @@ Records `{char name[8]; void *fn[4]}` × `g_EntityClassEventCallbackCount @ 0x81
 Consumed by `Entity_LookupRenderCallbacks @ 0x407dc0` (kong misnomer; it resolves *event* callbacks)
 from `EntityDef_InitAllCallbacks @ 0x4a5a70`, storing fn1..fn4 into the item def at dword indices
 [78]/[82]/[83]/[89]. fn1 = the **event callback** `(entity, eventType)` — for organics it is
-`Entity_HandleDamageTrigger @ 0x407310` (types 1=death, 4=reset); for AI-vehicle classes it is the
-**brain state machine itself**: `CHel → 0x4581b0` directly, `cbot/cpln/ctrn → thunks 0x462120/30/40`.
+`OrganicClass_HandleEvent @ 0x407310` (types 1=death, 4=reset); for AI-vehicle classes it is the
+**brain state machine itself**: `CHel → 0x4581b0` (the air-class machine) and `cveh → 0x4583c0` (the ground-class machine) directly, `cpln → thunk 0x462120` (a jmp to 0x4581b0), `cbot/ctrn → thunks 0x462130/0x462140` (jmps to 0x4583c0).
 The old "driver @0x462120" lead was one of these thunks — a red herring.
 
 ### 1.2 Physics/motor table — `g_EntityClassPhysicsTable @ 0x82abc8`
@@ -35,7 +35,9 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 
 ### 1.3 Consequence for OpenNova (the reframing verdict)
 The `engine/runtime/world` state-machine and targeting port models the
-AI-vehicle decision layer (cveh/cbot/ctrn). Section 34 corrects the original
+AI-vehicle decision layer: the air-class machine (CHel/cpln,
+`EntityAI_ProcessAirStateMachine @ 0x4581B0`) and the ground-class machine
+(cveh/cbot/ctrn, `EntityAI_ProcessGroundStateMachine @ 0x4583C0`). Section 34 corrects the original
 `AI_BeginUpdate @ 0x457B40` controller ownership and class-callback admission.
 The 2026-06-10 routing discovery separated BMS organics from that vehicle
 layer: the original uses `Entity_UpdateInfantryAI @ 0x4B9910`, whose locomotion
@@ -44,10 +46,20 @@ through `tick_infantry`; section 3 records its mechanics.
 
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
-0x8153b8` = `{id, fn}` pairs: ids 0–4 step movers (id4 = `AI_BeginUpdate` = the alive step;
-ids 0–3 = directional death movers incl. `AI_ProcessMovementStep @ 0x466db0` = death-fall:
-controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = ground+0x50000,
-180° flip when grounded, pitch rate brain[45]<<14), ids 0x10000–0x10005 target-calc fns.
+0x8153b8` = `{id, fn}` pairs. Ids 0-3 are the HELO_EVADE maneuvers installed only by the
+evade enter `AI_EnterState_HelicopterEvade @ 0x465F60` (id 3 `@ 0x466109`, id 1
+`@ 0x466195`, id 0 `@ 0x4661EC`, id 2 `@ 0x46624D`) and chained to id 3 when a phase limit is
+reached (`@ 0x461C9D`, `@ 0x461D1D`, `@ 0x466D93`): id 0 `@ 0x461C30` and id 2 `@ 0x461CB0`
+hold ground + 5 u for 248/434 phase, id 1 `@ 0x466C20` turns +-0x3FFFFFC0 at phase 186 then
+faces the target (speed A) until 372, id 3 `@ 0x466DB0` hovers in place (work X/Y = pos,
+Z = ground(0x50000) + 5 u, heading = Yaw + 0x7FFFFFFF, or Yaw with brain[127] = brain[45] << 14
+when brain[48] is set) until 744, then pending 8 (or brain[6]) at the end or past 372 with a
+target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only the savegame restore
+(`Entity_CopyVehicleDefToAIComp @ 0x45DE53`) can select it. The combat enter
+`AI_EnterState_AircraftCombat @ 0x466330` installs 0x10005 (`AI_CalcHelicopterTarget
+@ 0x461870`, the PLANE mover) for profile subtype 2 (`@ 0x466386`), else 0x10000
+(`AI_CalcGroundVehicleTarget @ 0x4613A0`, the HELICOPTER mover; `@ 0x466391`); ids
+0x10001..0x10004 are `return 0` stubs (`@ 0x457B00..0x457B30`).
 `brain[2]` = per-entity 32-byte controller; controller[0] points at the current pair.
 
 ## 2. Correspondence map (engine/runtime/world ↔ Jointops.exe)
@@ -57,22 +69,22 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | per-entity controller phase >496, pend=8/brain[6], +brain[7]; 24 original-executable vectors (section 34) | **MATCHING** (movement-controller row 4) |
 | `AiSystem::update_waypoint_movement` | `AI_UpdateWaypointMovement` | 0x457bd0 | prior grill + re-read | **matching** (vehicle mover) |
 | `ai_waypoint_update_target` | `AIWaypoint_UpdateTarget` | 0x457380 | prior grill; also called by aircraft motor @0x490310 | **matching** |
-| `process_infantry_state_machine` | SM dispatcher (vehicle classes) | 0x4581b0 | event-callback fn1 rows | **matching**; name is now known to be historical — it is the AI-VEHICLE SM |
+| `process_air_state_machine` / `process_ground_state_machine` | the class machines (`EntityAI_ProcessAirStateMachine` / `EntityAI_ProcessGroundStateMachine`) | 0x4581b0 / 0x4583c0 | event-callback fn1 rows; ctest `movement_brain_parity` (retail-executed dispatcher rows) | **matching**; both names are historical: 0x4581b0 is the AIR-class machine (CHel, and cpln through thunk 0x462120), 0x4583c0 the GROUND-class machine (cveh, and cbot/ctrn through thunks 0x462130/0x462140) |
 | `h_ground_followwp_tick` etc. | state 16/17/18 rows | 0x815338+ | prior grill (raw bytes) | **matching** |
-| P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill; candidate FEED + LOS + refcount witnessed 2026-07-16 (§16.2/16.3) | **matching** (scoring core; the feed port is D-AI-1, the SM combat states D-AI-2/3) |
-| `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); the vehicle and HELO motors are ported per family since PR #640 — [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; vehicle record) |
-| organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
-| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in engine/runtime/world/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
-| `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | body entries index-verified vs IDB; full table is 253 entries — body 0–239 + `wpn_*` 240–251 + `EOF` 252 (§14.8.2) | **matching** (body slice) |
+| P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill; candidate FEED + LOS + refcount witnessed 2026-07-16 (§16.2/16.3) | **matching** (scoring core; the feed is ported, D-AI-1 §16.2a; the SM combat states are ported, the state-17 tick in §17.6; D-AI-3 closed 2026-07-16) |
+| `World::update_pool1_slot` (the +0x1C4 mover leg; the interim `AiSystem::apply_locomotion` model is deleted) | `Entity_UpdatePool1Slot` | 0x4b8dd0 | no generic brain integrator: a pool-1 row moves only through its items.def move_function callback (`g_EntityClassPhysicsTable @ 0x82ABC8`); the vehicle and HELO motors are ported per family since PR #640, and [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; §38.9) |
+| organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; the entity update's pool-0 walk runs the body's +0x1C4 motor through `AiSystem::update_organic` (`World::update_all_entities`) | **matching** |
+| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in engine/runtime/world/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ the D-INF rows enumerated in §5 (the ledger carries their status) |
+| `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | all 252 entries (body 0-239 + `wpn_*` 240-251; `EOF` 252 is the terminator, §14.8.2) ported in `infantry_tables.cpp` | **matching** |
 | promote `init_ai_slot` (every AI-capable record, vehicles included; 2026-09-22) + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer; the def gate is AI attrib 0x100000 (`@0x40ED4E`), for which the `ai_capable` gate (organics, plus items that author a control seat) stands in | **matching** |
-| `InfantryRootMotion` (engine binding) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
-| `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
-| WAC pipeline (`engine/formats/wac` front end + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
+| `anim::AdmRootMotion` + `anim::ClipTimeline` (engine) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (the playhead clock is `ClipTimeline`, §4 item 16) |
+| `calc_average_ground_height` / `AiSystem::aircraft_ground_height` (the `apply_ground_clamp` stand-in is deleted) | `Entity_CalcAverageGroundHeight` | 0x457230 | 5-tap port with the brain's husk/intact floor and the east/centre ground links (§10.2); only the vehicle/aircraft brain helpers call it in retail, so the org1 motor's every-8 sample is the port's own stand-in (§3.1) | **matching** (§38.1, §38.5) |
+| WAC pipeline (`engine/formats/wac` bytecode/program/command table + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
 | `VehicleSystem::player_toggle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
-| `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u gate, score `horiz + d3/512`, enemy-occupant reject, LOS-last; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
+| `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u 3D gate and the aim cone, score `d3 + aim/512`, enemy-occupant reject, LOS before the best compare; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
 | `find_best_vehicle_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 exact root/ground-child walk and weights (ctrl 0x2000 < gun 0x20000 < root sitex 0x200000 < child sitex 0x2000000) | **matching** (canonical world operation; D-AI-11 g closed) |
-| `VehicleSystem::presnap_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
-| `Simulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
+| `VehicleSystem::presnap_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = gun.Yaw − (the gun's stored yaw word +0x322 << 16), other seats the bone yaw); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
+| `LocalPlayer::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
 | live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic-seat rider poses and the full matrix basis remain open; the USE scan and the attach labels pose every seat kind at its live bone, 2026-09-22, §23.1) |
 | joiner S2C 0x13/0x26 death fold (`ClientReplicaPipeline::apply_entity_death` → `destruction_notify_item_damage(…, 4)`) | `NapiNPClientMsg_EntityDeath` / `Entity_KillBySlotId` | 0x42eb50 / 0x42bce0 | §24.3 client fold; ctest `npruntime_entity_lifecycle_net` + `destruction` net-kill case | **matching** for destructible victims (D-NET-208; organic 0x13 death-anim + local-player camera legs deferred) |
 | `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
@@ -89,8 +101,11 @@ Everything below was decompiled and read this session (pseudocode dumps:
 
 ### 3.1 Cadences (all gates on `current_tick + 36*net_id` stagger)
 - Motor + anim + integration: **every tick**.
-- Ground resample: every **8** ticks (`entity+676` cache; subtract `brain[11]` stand offset first).
-- Slope slide/lean: every **8** ticks. Gravity/ground resolve: every **2** ticks.
+- Ground resample: none in retail's org1 motor (`Entity_CalcAverageGroundHeight @ 0x457230` has no
+  organic caller; `+0x2A4` is read by `HUD_BuildEntityInfo @ 0x4B86F1`); the port's every-8-tick
+  `entity+676` sample is its own stand-in (the vertical-block gate, headless clearance).
+- Slope slide/lean: every **8** ticks. Gravity/ground resolve: every **2** ticks (even key ticks;
+  the odd tick re-applies the stored quarter step, §3.5 item 3).
 - AI think (nav/commands): every **16** ticks, authority only.
 - Perception scan: every **32** ticks (phase `(tick>>5)&3`); health regen + drowning: every 64.
 
@@ -169,7 +184,7 @@ Everything below was decompiled and read this session (pseudocode dumps:
   — picked by `Entity_ComputeAnimSlotIndex(entity, boneSection, relativeDirection, cause)`,
   quadrant `(heading − atan2BAM(roundVel) − 0x60000000) >> 30`; **240–251 the `wpn_*` FP viewmodel
   states**. Full decode + the bone→group table: §19.1/§19.2.
-- **Per-state flag table `g_animStateFlagsTable`** (≥190 dwords; extracted, embed in port as generated table):
+- **Per-state flag table `g_animStateFlagsTable`** (≥190 dwords; 252 entries, ported in `infantry_tables.cpp`):
   observed semantics — bit0 = movement state (client re-derives from velocity; auto-rebase to idle 43),
   bit1 = low-to-ground → slope-slide/drift participates (prone 0x603, dragger), bit2 = scripted/locked,
   bit10 (0x400) = slow blend (15 ticks vs 10), 0x80 weapon-pose, 0x10 sit/scripted-idle, 0x20 emote;
@@ -178,7 +193,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
 - `AnimMap_UpdateDualChannels @ 0x40b8c0` (secondary then primary channel; entity+392/396 active
   handles, +696/700/708/712 channel state) → `AnimMap_UpdateEntity @ 0x40b5f0`:
   pending-state compare, **stance-transition interposition** (149/1/9/10→19 via 172("0xAC"); →11 via
-  169; 2→12 via 171; 8→18 via 170), **variant ring** (`table[id] = entry->next @ +36` each play),
+  169; 2→12 via 171; 8→18 via 170), **variant ring** (`table[id] = entry->next @ +36` each play; one ring-head table per loaded
+  `.adm`, shared by both channels of every body on it, and a row starts on its LAST token and
+  steps back through the file order, §38.3),
   `AnimChannel_InitFromParams(channel, clip@entry+32, blendDur 10|15, flag887, 4096)`,
   advance (blended) playback, then **root-motion keyframe eval** (PINNED 2026-06-10, disasm
   0x40b82f..0x40b8a3 + real-clip grill `tests/anim/root_motion_test.cpp`): the keyframe record IS
@@ -208,14 +225,17 @@ Everything below was decompiled and read this session (pseudocode dumps:
   The same source/target playheads and weight now drive the body pose before the
   weapon-mask and aim-overlay composition
   `[orig: AnimChannel_BlendTwoChannels @ 0x410740]`, including authoritative organic
-  collision. The **secondary weapon channel's own state-change blend remains open**
-  under D-INF-1; its mask composition is live, but its transitions still switch
-  immediately.
+  collision. The secondary weapon channel's own state-change blend landed
+  2026-08-17 (D-INF-1 closed): `InfantryState::begin_weapon_transition` re-inits it
+  through the same shared body (§14.8.7).
 
 ### 3.5 Integration (per tick, the motor core)
+The motor's full phase order is witnessed in §38.3: the NPC fire pass runs after the heading and
+look chase, and the recoil kick follows the think.
+
 1. Rotate the already blended primary-channel root delta by heading:
-   `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = π/2^31,
-   dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
+   `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = 1.4629627251502471e-09, a hair above
+   π/2^31, §38.8; dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
    State 31 (jump_loop) forces fwd = 1024.
 2. **`pos.xy += rotated_delta + vel(entity[38..39])`; `pos.z += vertical_delta`.**
    Flag 0x8000 (drowning) zeroes vertical; 0x100000 (CL ladder contact) zeroes
@@ -230,16 +250,22 @@ Everything below was decompiled and read this session (pseudocode dumps:
    idle bottom—the cross-clip delta that caused the visible position snap. The same
    ordering is used for authoritative NPC/local-player bodies and wire-owned remote
    player bodies.
-3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
-   byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
+3. Every EVEN key tick for org1 (corrected 2026-09-23, §38.3: outYaw = key & 1 `@ 0x4BF146`,
+   and an odd key tick jumps from `@ 0x4BF6A5..0x4BF6B2` to `@ 0x4BFC80`, skipping gravity, the
+   climb chase, the resolver, the landing/airborne edges and the ladder and water blocks, and
+   re-applies only the stored quarter step +0xAC; the org2 player body runs its gravity every
+   tick, §22.2): **gravity `vel_z(entity[40]) −= 416`** skipped while
    `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; the
    `Flags 0x80` org1 CLIMB mode replaces gravity with the 1/16-step chase to the
    AI move-target Z `entity[193]`/+0x304, cap 0x4000, floor −16384 — §30);
-   `pos.z += 2·vel_z`;
+   `pos.z += 2·vel_z`, then the vertical quarter-step tail `@ 0x4BFC65..0x4BFC7D` stores
+   +0xAC = (Z - saved + 2) >> 2 and Z = saved + that quarter, where saved is the post-integrate
+   Z (`@ 0x4BF6BA`) or the landing-snapped Z (`@ 0x4BF808`), so the body moves about vel_z per two
+   ticks (half the org2 player's rate for the same vel_z; `infantry_org1_parity`);
    `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
-   **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
-   (`dword_C6EAE4` is the writable named value `fallmps`, seeded 13 by
+   **fall damage** when `vel_z ≤ −1057·wac_var_fallmps`: `health −= (excess)>>4`
+   (`wac_var_fallmps` is the writable named value `fallmps`, seeded 13 by
    `WacScript_FreeAll @ 0x4f638b` at every mission load; ported 2026-08-28 as
    `World::script.wac_values.fallmps`, authority-gated and skipping Indestructible bodies;
    retail has no zero test, so a script that writes `fallmps 0` makes every
@@ -255,13 +281,19 @@ Everything below was decompiled and read this session (pseudocode dumps:
    Non-conforming bodies take the DECAY [orig: `@0x4ba133`]: `bodyPitch(+0x90)` and
    `Roll(+0x18)` ease to level 1/16-step — a live standing/crouched soldier neither
    slope-leans nor slope-slides (the slide impulse only exists inside the conform branch;
-   dead+airborne diverts to the corpse tumble `@0x4ba0b2` instead). Conforming: 4 probes
+   dead+airborne diverts to the corpse tumble instead, ported 2026-09-23: every 8th key tick
+   `@ 0x4BA08D..0x4BA10A`, a = (32 - (key & 63)) * 0xFFFFFF, b = (32 - (((key sar 6) - key) & 63))
+   * 0xFFFFFF, +0x2D0 = a + b, +0x2EC = +0x1A8, +0x90 and +0x18 chase a and b at eighth-step,
+   +0x1A8 += b >> 2, +0x360 = 0; the slope pass shifts in 32 bits before its clamp
+   `@ 0x4BA1C9..0x4BA1E8` / `@ 0x4BA225..0x4BA244`). Conforming: 4 probes
    `Entity_RaycastGroundHeight(entity, ±dir·22528>>22 …, 0x4000, 0x20000)` ahead/behind (pitch slope ×2^14)
    and left/right at quarter offset (roll slope ×2^16), clamp ±656175520; if |slope| >
    572662272: **slide** `vel ∓= dir·2^11>>22`; then `bodyPitch(+0x90)` and `Roll(+0x18)`
    chase the slopes at eighth-step [orig: `@0x4ba320`]; a dead NPC also aims along the
    slope (`+0x2D0 = pitchSlope`, `+0x2EC = targetHeading(+0x1A8)`, byte `+0x360 = 0`
-   [orig: `@0x4ba301-0x4ba319`]). The **org2 player leg** (`Entity_UpdateInfantryPlayerBody`) carries the
+   [orig: `@0x4ba301-0x4ba319`], ported 2026-09-23); the dead conform needs `!(Flags & 0x10A000)`
+   (org1 `@ 0x4BA12C`, org2 `@ 0x4B6DB6`), and `Entity_RaycastGroundHeight` returns the clipped
+   ray end (a miss returns z + 0x4000 - 0x20000), never a sentinel. The **org2 player leg** (`Entity_UpdateInfantryPlayerBody`) carries the
    SAME selector every tick [orig: `@0x4b6d95`] with the decay every tick [orig: `@0x4b6dbd`],
    but probes/chases only every 2nd tick (hold between) [orig: `test tick,1 @0x4b6de4`] and
    differs in kind: slopes are TRUE angles `ftol(atan2(dh, separation)·2^32/2π)`
@@ -281,7 +313,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
    -> raycast_entity_collision @ 0x413760; org1 probes @ 0x4BA1A8,
    org2 probes @ 0x4B6E41]
 5. Inter-entity separation + 8-direction avoidance raycasts + combat maneuver modes
-   (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
+   (1/2/5/7/8/12) — decoded and ported: the move modes in §17.3, the goal-directed obstacle detour
+   (`ai_find_cover_position @ 0x4afab0`, `infantry_detour.cpp`) in §33.16/§33.36, and the idle facing
+   fan (`idle_facing`, `infantry_attention.cpp`).
    The swim/float details are done: §29.1 (both motors, byte-witnessed). Avoidance
    (negative result, 2026-06-10): patrol walking has **no peer/obstacle steering** in
    `0x4b9910`. The probe fans are (a) a peer-cohesion *facing* average for combat idles
@@ -303,30 +337,49 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   vehicle classes stay on the SM (correct per §1).
 - **Root-motion source injected** (mirrors the terrain `TerrainHeightField` injection):
   `engine/runtime/world` defines the per-state clip-velocity interface; the real impl evaluates `.bad`
-  root tracks via `engine/runtime/anim` and lives with the binding (Simulation) + an env-gated
+  root tracks via `engine/runtime/anim` (`anim::AdmRootMotion`, owned by `MissionKernel`) + an env-gated
   real-assets ctest; unit tests inject synthetic velocities. State→clip resolution uses the
-  `off_8135F0` names through `.adm` (engine/runtime/anim) — the exact original data path.
-- Tables (`off_8135F0` names, `g_animStateFlagsTable` flags) land as generated C++ tables (wac-style).
+  `g_animStateNameTable` (ex `off_8135F0`) names through `.adm` (engine/runtime/anim) — the exact original data path.
+- Tables (`g_animStateNameTable` (ex `off_8135F0`) names, `g_animStateFlagsTable` flags) are ported as C++ tables in `infantry_tables.cpp` (all 252 entries).
 - Anim-state selection + commit rules per moveMode are ported (walk/run/jog/turn/wounded +
   lock/emote queueing; dump lines 3000–3700). The 147-availability rule is a post-commit
   force `147 → 43 idle` (dump 4084), **not** a gait fallback — the port is aligned to that.
+  The org1 selector arbitrates the raw selection, 147 included (@0x4BD837..0x4BD874), and the
+  post-commit fix-up turns +0x2BC == 147 into 43 when the anim map has no 147 row
+  (@0x4BE080..0x4BE09A); because 147 carries the movement flag (0x1) and 43 does not, an
+  exit-gated current state (0x20, states 115..124) commits the stop at once (§38.4).
 
 ## 4. Open items (tracked, addressed)
-3. **Swim**: no swim locomotion in the unread regions beyond the known state overlays
+3. **Swim** (RESOLVED: the water/float channel and the swim selection are witnessed and
+   ported in both motors, §29.1): no swim locomotion in the unread regions beyond the known state overlays
    (36/37/154 selection + wash 27–29); swimming physics lives in the resolver (item 5,
    water flags at entity+36). The airborne overlay decoded: flags 0x2000/0x20 set + 0x40
    clear → force parachute 47, fallback jump_loop 31 (dump 3679–3692).
-4. `Entity_RaycastGroundHeight @ 0x4142c0` (0x59 bytes — ground probe at offset; exact param semantics 0x4000/0x20000).
-5. `movement collision resolver @ 0x4b2bd0` internals (0x11e3 — ground/water/BVOL
+4. RESOLVED: `Entity_RaycastGroundHeight @ 0x4142c0` (0x59 bytes) takes (entity, dx, dy, zUp,
+   zDrop), casts from `{x+dx, y+dy, z+zUp}` down to `z+zUp-zDrop` through
+   `raycast_entity_collision @ 0x413760` and returns the clipped ray end (a miss returns
+   `z+zUp-zDrop`, never a sentinel); the slope probes pass zUp 0x4000, zDrop 0x20000
+   (§3.5 item 4, `CollisionWorld::raycast_ground`).
+5. RESOLVED (§15.3): `Entity_MovementCollisionResolver @ 0x4b2bd0` internals (0x11e3 — ground/water/BVOL
    resolver). Type-4 bookkeeping was initially decoded under the incorrect platform reading;
    the manual pins CL as ladder, and the entry/chase/exit semantics landed with the
    D-COL-5 port 2026-08-15 (§30).
-7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `Entity_CheckLineOfSightTerrainAndEntities`.
-9. Death move-step movers `0x461c30`/`0x461cb0` (ids 0/2) — define + decode.
-10. Vehicle-SM per-tick invocation site (event-callback path is confirmed; the tick-mode caller for
-    vehicles not yet pinned — likely inside `Entity_UpdateVehiclePhysics`).
-11. The 62-frame divider + spawn-event `f[3] = Projectile_GetHitRecord()[17]` re-checks (carried from the plan).
-12. **Command-path bodies decoded** (dump 1545–2330, rides the command-source phase / D-INF-2):
+7. RESOLVED: the perception scan is `Entity_FindNearestThreat @ 0x4b0990` (ex the kong
+   misnomer `Entity_SpawnProjectile`; §17.2), ported in `infantry_combat.cpp`
+   (`infantry_scan_nearest_threat`), with the LOS `Entity_CheckLineOfSightTerrainAndEntities`.
+9. RESOLVED: `0x461c30`/`0x461cb0` (ids 0/2) are not death movers but the HELO_EVADE
+   maneuvers `AI_MoveAircraftEvadeSide` / `AI_MoveAircraftEvadeTurn` (hold ground + 5 u for 248/434
+   phase), installed by the evade enter (`AI_EnterState_HelicopterEvade @ 0x465F60`;
+   ids 0/2 @ 0x4661EC / @ 0x46624D); see §1.3.
+10. RESOLVED (§34): the class machines run from `Entity_UpdatePool1Slot @ 0x4B8DD0` (the +0x1C8
+    call @ 0x4B8E3C) when the +0x2AC countdown is nonpositive (@ 0x4B8E1B), not from the vehicle
+    motor.
+11. RESOLVED: the 62-tick divider is the WAC cadence (§33.4); the event-1 `f[3]` is
+    HitRecord[17] (+0x44), the round's +0x170 owner (`Projectile_CopyEntityToHitRecord
+    @ 0x4E7010`), queued by the class machines' kill/damage notification (@ 0x45831E air /
+    @ 0x458524 ground; §38.1).
+12. **Command-path bodies decoded** (RESOLVED: ported; §23.4 carries the boarding chain,
+    §33.31 the escort offsets) (dump 1545–2330, rides the command-source phase / D-INF-2):
     move-to-entity orders resolve the target by net-id across pools 0–3; vehicle boarding is a
     staged bone walk (count free `E1..E8` entry bones, claim a slot via entity+866 cross-checked
     against other soldiers' claims, then approach `E`→`S`/`G`→`H` stages via entity+865 with stop
@@ -360,16 +413,20 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by the target item definition's `phrase_set @+0x86c`); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
-    (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
+    (entity+24 of the vehicle, ±71582784) and speed (+668). entity+24 (+0x18) is the hull's roll BAM,
+    compared signed (`@ 0x4B65D0` / `@ 0x4BEE3D`): a hull placed at roll 180 holds 0x80000000 in the
+    spawn form and selects sit_24_right (110), where 180 x 11930464 = 0x7FFFFF80 would pick
+    sit_24_left (109). Port status: `UseGun`/gunner seats
     select `anim_emplaced` 67 plus the production-extracted config variant when that clip exists;
     non-gunner seats use the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`).
     Config presence is explicit, so unknown does not alias authored config 0. UseGun root position
-    now follows its live control-posed parent userpoint. Remaining gaps are the driver-lean 107–110
-    overlay and true per-tick bone follow for non-UseGun `sitex`/`ctrlx`/`drvrx` seats (see §9.2).
-16. **Playhead rate**: channel time is normalized [0,1) advanced by a per-clip dt seeded at
-    `AnimChannel_InitFromParams` (the literal 4096 param) — the exact dt derivation (sim-tick →
-    clip-frame rate, blend-window advance) is unpinned; the IRootMotionSource seam owns phase
-    policy, so this only matters for byte-exact playback timing.
+    now follows its live control-posed parent userpoint. The driver lean 107..110 is ported
+    (`mounted_anim_state_for_seat`, `ai_detail.h`); the remaining gap is true per-tick bone follow
+    for non-UseGun `sitex`/`ctrlx`/`drvrx` seats (see §9.2).
+16. **Playhead rate** (RESOLVED): channel time is normalized [0,1) and advances once per update by a
+    per-clip float delta `fps / 62 / frames`, stored by `AnimChannel_InitFromData @ 0x410560` (@ 0x4105BA)
+    and added by `AnimChannel_AdvancePlayback @ 0x40B140` (@ 0x40B156, the >= 1.0 compare @ 0x40B15E);
+    ported as `anim::ClipTimeline` (`engine/runtime/anim/clip_timeline.cpp`).
 
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
@@ -405,20 +462,23 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     control-posed parent userpoint. PR #640 (re-grilled 2026-09-08) ported the staged E/G/S/H
     walk-to-seat, 126/127, child-seat traversal, the non-UseGun full-basis follow, the can't-enter
     arm and driver lean 107..110 (vehicle-client-movers-re §36). Remaining (the ledger row carries
-    the addresses): the scripted organic escort offsets 11000/12000/12001; self-referential drag reversal (the collision-to-detour consumer is
-    implemented in section 33.16 and the general terrain-gradient producer in section 33.36); the S-point side
-    writes `+0x184` / `+0x2FC..+0x304` `@0x4BB840..0x4BB852` (no reader witnessed).
+    the addresses): command 126's uninitialized goal read (§33.16; the port keeps a 126 body
+    in place, and no shipped organic authors 126 or 127). The escort offsets (§33.31), the drag
+    reversal and the detour (§33.16/§33.36) are ported; the S stamp's goal Z +0x304
+    (`@0x4BB852`) is `InfantryState::goal_z`, read by the self-attachment floor (`@0x4BF653`)
+    and the AiClimb chase (`@0x4BF6C7`); the former "malformed state 3" clause is unreachable.
     Driver-lean thresholds are verified in section 33.16.
   - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
-    ground probes, triggers, and landing. Water/swim transitions remain; CL climb locomotion
+    ground probes, triggers, and landing. The water/float channel is ported in both motors (§29.1; its residuals are the submerged scope
+    auto-untoggle `@0x4b8304` and the swim forward speed, the ledger row); CL climb locomotion
     LANDED with the **D-COL-5** port 2026-08-15 (§30). The vertical capsule-bottom settle is **D-INF-6**
     (`movement collision resolver @ 0x4b2bd0`); horizontal slide velocity zeroes on contact.
   - **D-INF-4** — **CLOSED 2026-07-05**: the generator is witnessed and ported —
     `Math_BuildSinTable @ 0x613050` builds ONE 1281-entry sin table at 2^22 by an
     ACCUMULATING x87 loop (`angle += dbl_7DF578 = 0.006135923151542565` per entry,
     `_ftol2_sse` truncation, end bound `0x31C0FC4`); the cos consumer reads the same
-    table +256 entries (`off_849934 = outMillis + 0x400`). Ported structurally in
-    `infantry.cpp quantized_dir` (double accumulation is integer-identical to the
+    table +256 entries (`off_849934 = outMillis + 0x400`). Ported structurally as
+    `DirTable`/`quantized_dir` (`engine/runtime/world/dir_table.h`) (double accumulation is integer-identical to the
     prior closed form for every entry — pinned in `infantry` ctest with landmark
     values 0 / 4194304 / 0 / −4194304; any residual x87-extended vs SSE2-double
     low-bit difference is the D-3DI-1 substrate class).
@@ -440,12 +500,13 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     TARGET slot, **NOT** the live `pos[2]` — applying it to the render Z floated soldiers ~1 body
     (the regression this entry corrects; the earlier feet-origin/no-offset reading is REFUTED —
     dropping the term sinks them waist-deep). Our port: `RootMotionFrame` carries absolute
-    `capsule_bottom`/`capsule_top` (godot `InfantryRootMotion` emits them from the `.bad` bottom/top
+    `capsule_bottom`/`capsule_top` (`anim::AdmRootMotion` emits them from the `.bad` bottom/top
     tracks); `tick_infantry` — player AND AI, the player via `InfantryState::is_local_player` — floors
-    `pos[2] = ground_cache + frame.capsule_bottom` (`engine/runtime/world/infantry.cpp`). The shared
-    `ai_->root_motion` is loaded from `E_STAND.adm` at mission load (`godot/src/mission/mission_root.cpp`), so every
-    motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
-    is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
+    `pos[2] = ground_cache + frame.capsule_bottom` (`engine/runtime/world/infantry.cpp`). `MissionKernel`
+    registers each body's own `.adm` (per-entity `adm_id`, `adm_id_for_runtime_type`) with
+    `E_STAND.adm` (`kDefaultInfantryAdm`) as the default, so every
+    motor-driven soldier resolves a real standing `capsule_bottom`. The former `ground_stand_offset`
+    (0x50000) left with the deleted `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
   - (No D-INF-7 was ever minted — the list keeps session ids, so the numbering jumps
     6 → 8, like the documented D-MUS-1/4/8 gaps.)
@@ -485,8 +546,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     the parachute motor (2026-09-18, D-INF-20). Pinned by the airborne-steer case in `tests/world/infantry_test.cpp`
     (steer-before-decay ordering, the axis split off the heading high word, the no-input arm).
   - **D-INF-10** per-tick gravity, asymmetric by motor — **CLOSED for both legs 2026-07-16
-    (§22)**. Neither infantry mover gates the vertical step on tick parity. The NPC (org1)
-    falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
+    (§22)**. The player (org2) does not gate the vertical step on tick parity; the NPC
+    (org1) does (corrected 2026-09-23, §38.3): on even key ticks it falls `vel_z -= 416` then
+    `pos.z += 2·vel_z`, and its quarter-step tail keeps a quarter of the Z change and
+    re-applies it on the odd tick, so the body moves about vel_z per two ticks [orig:
     `Entity_UpdateInfantryAI @0x4bf7bf` (`add … 0xFFFFFE60`) / `@0x4bf7ec` (`add edx,edx`; `add
     [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once,
     folded into the root-dz store) [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf`
@@ -502,8 +565,9 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `engine/runtime/anim/aim_overlay`, the leg-chase sim fields, the shared present snapshot result,
     and `SkeletalAnim.eval_pose_overlay`; the original local bend was verified in-play
     via the retired `bend_capture_probe.gd`; today `local_player_look` + `game_capture_bundle`, docs/mcp.md). REMAINING (row stays open, partial):
-    NPC/remote upper-body weapon-channel threading (rides D-INF-1), attachment matrices, and the
-    pitchBlend/pitchKickAccum/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
+    the attachment matrices (the ledger row carries the rest). The NPC/remote weapon-channel
+    threading landed with D-INF-1 (2026-08-17), and `aim_overlay_inputs_for`
+    (`world/pose_inputs.h`) feeds the pitchBlend/pitchKickAccum/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
     @ 0x4b1290]`, witness §14.
   - **D-INF-12** player (org2) chase sources approximated by org1 math — **CLOSED
     2026-07-16 (§22)**: the org2 writes to +0x8C/+0x2E4/+0x2E8 were displacement-scanned
@@ -519,10 +583,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     torso twist is (yaw − midpoint), which is why small aim moves twist the torso without
     moving the feet. Ported in `tick_infantry` step 5 (player leg); pinned by the rewritten
     `test_player_body_chase_and_legs` / `test_player_body_chase_crosses_the_bam_seam`.
-    Residual branches ride their slices: parachute (Flags 0x20) sixteenth-step body chase
-    [orig: `@0x4b494d`] (D-INF-20), the carried/ladder ±0x55555500 (120°) yaw clamp
-    [orig: `@0x4b4afb-0x4b4b5f`] and generic non-UseGun seat-bone follow
-    [orig: `@0x4b654e`] (D-INF-2 / mount). UseGun root-position follow is separately matched
+    The parachute (Flags 0x20) sixteenth-step body chase
+    [orig: `@0x4b494d`] and the ladder/chute ±0x55555500 (120°) yaw clamp
+    [orig: `@0x4b4afb-0x4b4b5f`] are ported (`infantry_local_view_tick`,
+    `infantry_ladder_view_clamp`); the carried clamp and the generic non-UseGun seat-bone follow
+    [orig: `@0x4b654e`] ride the mount (D-INF-2). UseGun root-position follow is separately matched
     through `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`.
   - **D-INF-16 (FIXED 2026-09-10)** the run promotion's band term IS live: `entity+0x37C` is
     the LOADOUT WEIGHT the S2C 0x5A apply stores — `NapiNPClientMsg_HandleWeaponLoadoutSync
@@ -597,10 +662,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     tip). Ported as `AiSystem::infantry_slope_pass` with both legs; `AiEntity.body_pitch`
     (+0x90) added and fed to the §14 overlay body-pitch term; `AiEntity.def_attrib`
     carries the `def+84 & 0x200` selector leg (binding wiring deferred — JO infantry defs
-    leave it clear). Residuals: the dead+airborne corpse TUMBLE branch [orig: `@0x4ba0b2` /
-    `@0x4b6ccb`] unported (the pass holds instead); the dead leg's `Flags & 0x10A000`
-    swim/parachute exclusion unmodeled (rides D-INF-17's flag legs); org1 cadence uses the
-    port's entity-salted `key` (net_id-staggered) where the original uses the global tick.
+    leave it clear). Residuals: the org1 corpse tumble (`@ 0x4BA08D..0x4BA10A`), the dead slope aim and
+    the dead conform's `!(Flags & 0x10A000)` gate (org1 `@ 0x4BA12C`, org2 `@ 0x4B6DB6`) are
+    ported (2026-09-23, §38.3), and org1's cadence key is tick + 36 * netId in both engines
+    (`@ 0x4B9948..0x4B9953`); the player body's own tumble (`@ 0x4B6CCB..0x4B6D90`) stays
+    unported.
     Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
     / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
     `tests/world/infantry_test.cpp`.
@@ -613,28 +679,29 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `@0x4bf8d4-0x4bf8f7`]; the org2 heading model
     sixteenth-chases the yaw + snaps the leg targets while set [orig: `@0x4b494d-0x4b496c`];
     gravity skips while drowning/platform but NOT while parachuting — the descent physics
-    live in the `@0x4b7b18+` swim/parachute block (unread). A second waiting consumer since
+    live in the `@0x4b7b18+` swim/parachute block (ported 2026-09-18, `parachute_tick`,
+    `parachute.cpp`). A second waiting consumer since
     2026-08-26: the airborne steer's DOUBLED chute arm [orig: `@0x4b7920..0x4b793d`]
     (D-INF-9 entry). The earlier claim that no ported path can set this flag was too
     broad: `client_replica_lifecycle` retains the raw flags from an incoming original
     full-spawn 0x18 record for players and infantry; `coop_marker_pose`,
     `apply_spawn_point_latches` and the single-teleport branch already copy a preexisting
     marker bit (`[orig: EventAction_TeleportEntityToSpawn @0x43E0A0 (test) / @0x43E0A5 (store), pool-0 targets only]`). Fresh BMS seed promotion does
-    not author a chute attribute, and our server's `player_wire_flags` still emits only
-    player/own/dead bits, so those copy paths do not prove a fresh local mission starts
-    with a chute. The current-state render consumer is **FIXED 2026-09-13 (D-RORD-12)**:
+    not author a chute attribute, and our server's `player_wire_flags` now carries the
+    chute bit (`entity_wire_bridge.cpp`), but those copy paths do not prove a fresh local
+    mission starts with a chute. The current-state render consumer is **FIXED 2026-09-13 (D-RORD-12)**:
     `PF_PARACHUTE_DEPLOYED` reaches both presenters, and the person projection substitutes
     the type-185 model header radius (`[orig: Entity_PreloadSpecialItems @ 0x43C220;
     collect_visible_entities_for_terrain @ 0x5C8DF3..0x5C8E21]`). Native
     `netsim_present_rows` covers received player/infantry records and authority flags;
     GUT `object_projection_lod_test` covers live set/clear and unscaled parachute radius.
-    Deployment, descent/steer/animation behavior, initial marker authoring and our own
-    server's flag publication remain open.
+    Deployment, descent, steer and animation are ported (2026-09-18) and our server
+    publishes the flag; fresh marker authoring and a live canopy/leg comparison remain open.
   - **D-INF-21** the "!Poof!" ghost mode is deliberately unported: `g_localPlayerPoofMode
     @ 0xA82298` (renamed this session, ex `dword_A82298`) is toggled by a net-message
-    handler that debug-prints `!Poof!` [orig: `@0x42d450` — the IDB's
-    `NetPacket_HandleWeaponSwitch` name is a misnomer for this 0x70-byte body, rename
-    proposed] and, while set, the local player's horizontal root-motion integrate runs at
+    handler that debug-prints `!Poof!` [orig: `@0x42d450` — the handler is
+    `NetMsg_HandlePoofToggle` (ex the `NetPacket_HandleWeaponSwitch` misnomer), a 0x70-byte
+    body] and, while set, the local player's horizontal root-motion integrate runs at
     2× [orig: `@0x4b7c8d-0x4b7cb7`]. Normal play (mode 0) takes the same 1× integrate as
     org1 [orig: `@0x4b7cbf-0x4b7cd9`], which is what the port implements — a dev/admin
     feature, not a gameplay path. (The handler is renamed `NetMsg_HandlePoofToggle`,
@@ -647,18 +714,20 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     [orig: `AnimMap_UpdateEntity @0x40b662..0x40b737`; promotion `@0x40b795/@0x40b7c3`].
     Surfaced by the S11 grill (2026-08-07), which landed the replica-side twin first
     (D-NET-209, netsim `row_root_motion_tick`); the authority port runs the insert in
-    `commit_body_state`'s direct-commit branch and both clip-end promotion sites, and
+    `begin_body_transition_with_insert` (`infantry_animation.cpp`), where the motor-head channel
+    update re-inits the body channel (§36.1), and
     the pair map is the shared `world::gait_stance_transition_clip` (`infantry.h`)
     consumed by BOTH channels so they cannot drift. Guarded by
     `test_gait_stance_transition_insert` (pair map, insert + clip-end promotion,
     crouch twin, no-clip direct commit) and the unchanged netsim arbitration suite.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
-- **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
-  **MATCHING** — record layout, scales (32768/65536), fence-post lerp, vertical-delta and event
-  semantics pinned by disasm + the real-clip grill; the exact playhead dt derivation is open
-  item 16 (the injection seam owns phase policy).
-- **AI vehicle decision layer** (SM states 16–18, budget gate, waypoint mover, P1/P2 combat):
+- **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` to engine `anim::AdmRootMotion`):
+  **MATCHING**: record layout, scales (32768/65536), fence-post lerp, vertical-delta and event
+  semantics pinned by disasm + the real-clip grill; the playhead clock is `anim::ClipTimeline`
+  (§4 item 16, resolved).
+- **AI vehicle decision layer** (SM states 16–18, waypoint mover, P1/P2 combat; the budget gate was an invented stand-in,
+  removed with D-AI-14, §34):
   **MATCHING** as before — those verdicts stand; it no longer drives organics. The vehicle
   and HELO motors that were `not_yet_ported` stubs at this pass are ported per family since
   PR #640 (vehicle-client-movers-re.md §11–§38; the residuals are D-NET-161).
@@ -706,8 +775,10 @@ Jointops.exe retail unless marked `dfx2med.exe` (the DFX2 mission editor, imageb
   `initialize_vehicle_brain` that the dynamic teammate spawn already used.
 
 ### 7.2 Heading convention — RESOLVED: engine heading = 90 − yaw
-Spawn writes `entityData[4] = (90 − bmsYawDeg) · kBamPerDegree` (`kBamPerDegree = 11930464 = 2^32/360`),
-so the **engine heading is `90 − yaw`**, not yaw (closes the long-open "90-yaw vs 180-yaw" item). The
+Spawn writes `entityData[4] = ((int32)((90 − bmsYawDeg) << 16) / 360) << 16` through the 0B60B60B7h
+signed divide, truncating toward zero `[orig: Entity_SpawnFromBMSRecord @ 0x40EB42..0x40EB66]`
+(corrected 2026-09-23 from `(90 − yaw) · 11930464`: the low 16 bits are always 0, so yaw 0 spawns
+at 0x40000000, not 0x3FFFFFC0; port `world::spawn_angle_bam`), so the **engine heading is `90 − yaw`**, not yaw (closes the long-open "90-yaw vs 180-yaw" item). The
 waypoint mover writes `kWorkHeading = atan2(dY, dX)` — an ENGINE-frame bearing.
 
 **The bug this exposed:** our brain heading was inconsistent between parked and moving — the spawn seed
@@ -716,29 +787,34 @@ stored mission-frame yaw while the mover stored engine-frame bearing, and the pr
 and faced east: a direction-dependent error, not a constant offset.
 
 **Fix (shipped):** store `heading` in the ENGINE frame everywhere, matching the original — seed
-`(90 − yaw) · kBamPerDegree` (promote), mount pose `(90 − occ.yaw)`, and convert back once at the
+the spawn form (`world::spawn_angle_bam`, promote), mount pose `(90 − occ.yaw)`, and convert back once at the
 present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot basis
 (`MissionObjectPlacer.bms_to_godot_basis`) already applies the faithful `RotY(90 − v)` plus a
 `RotY(90)` .3di model-forward correction (net `RotY(180 − v)`) where `v` is the MISSION yaw — the
 `90 − yaw` belongs in the basis builder, never doubled into the seed.
 
 ### 7.3 Pitch/roll spawn scaling
-`entityData[5]/[6] = deg · 2^32/360` — same BAM scaling as heading, **no 90 offset**.
+`entityData[5]/[6] = ((deg << 16) / 360) << 16`, the same spawn form as heading with **no 90
+offset** `[orig: Entity_SpawnFromBMSRecord @ 0x40EB69..0x40EBA6]`.
 
-### 7.4 Movement-step layer (the fuller ground mover — port deferred)
-- `AI_UpdateMovementTarget @ 0x460e40` is the REAL ground waypoint mover (vs our lean
-  `AI_UpdateWaypointMovement @ 0x457bd0` port): calls `AIWaypoint_UpdateTarget`, advances the node with
-  the same loop/one-shot logic we ported, sets X/Y from the node (mode 1 bone / mode 3 literal), and
-  drives the VERTICAL: `brain[131] = nodeZ` when `aiComp[108]` (= profile+14, set in
-  `Entity_InitVehicleAI`), else ground via `Entity_CalcAverageGroundHeight(e, 0x200000)` plus the def
-  heightOffset (`def[20]==2` selects the raw offset), floored at `def[232] + ground`
-  (= `max(targetZ, ground)`); then heading = bearing + near-target speed halving.
+### 7.4 Movement-step layer (the HELO waypoint mover and the move-step table)
+- `AI_UpdateMovementTarget @ 0x460e40` is the HELO waypoint mover (the state 7/8 speed and the HELO
+  profile altitude/climb fields `@ 0x460E4A..0x460E74`); its callers are the state-7 tick `@ 0x4666C1`,
+  the state-8 tick `@ 0x4723AC` / `@ 0x472A0E` / `@ 0x472A9C` and the ground state-17 RC_FIRE arm
+  `@ 0x4730D9`, all ported. It calls `AIWaypoint_UpdateTarget`, advances the node with the same
+  loop/one-shot logic, sets X/Y from the node (mode 1 bone / mode 3 literal), and drives the VERTICAL:
+  `brain[131] = nodeZ` when brain[108] (= profile+0x38 USE_WAYPOINT_Z, copied by
+  `Entity_InitVehicleAI @ 0x4602AF`) is set, else ground via
+  `Entity_CalcAverageGroundHeight(e, 0x200000)` plus the altitude (profile+0x14 (subtype) == 2, PLANE,
+  selects the raw altitude), floored at ground + profile+0xE8 (min_agl) (= `max(targetZ, ground)`);
+  then heading = bearing + near-target speed halving. It reads the AIUSEWPZ latch brain+432 `@ 0x460FC7`.
 - `AI_ProcessMovementStep @ 0x466db0` pins X/Y to the current pos, sets
   `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
-  phase counters. This session labeled it "the vehicle mover" — **superseded by §1.3**, which
-  identified it as a directional **death-fall mover** (move-step ids 0–3); the mechanics stand.
-- Dispatcher facts confirmed: SM dispatcher `@ 0x4581B0` (24-row table @ 0x815238),
-  event args 0=update / 1=spawn / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
+  phase counters: it is move-step id 3, the HELO_EVADE hover (§1.3), not a death mover.
+- Dispatcher facts confirmed: the air-class machine `@ 0x4581B0` (IDB
+  `EntityAI_ProcessAirStateMachine`; the ground-class twin is `@ 0x4583C0`; 24-row table
+  @ 0x815238), event args 0=update / 1=the class callback's kill/damage notification (it queues
+  AIEvent {1, channel 9 air / 0 ground, index, 0, the hit record's owner +0x44}, §38.1) / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
   controller row 4 with a per-entity phase limit of 496, not a per-frame admission
   budget (corrected in section 34). The callback thunks for `cbot/cpln/ctrn` resolve
   the earlier driver lead near @ 0x462120.
@@ -838,7 +914,7 @@ brain `AIEvent {6, level}`; both halves PORTED 2026-08-15, semantics in the bms 
 ### 8.3 ANIMNUM is a part-anim CHANNEL, not an animation name/index
 **Durable warning:** `Entity_ApplyCommand` case 0x22 validates ANIMNUM ∈ {1,2} — it selects one of two
 model part-anim channels (slot = channel − 1); any other value is a no-op. The animation content is the
-model's PANM. Do NOT wire ANIMNUM to `off_8135F0` — that is the separate infantry full-body table
+model's PANM. Do NOT wire ANIMNUM to `g_animStateNameTable` (ex `off_8135F0`) — that is the separate infantry full-body table
 (§3.4, AI-state-driven via `Script_ForceAnimation @ 0x4f2610` / `Entity_UpdateInfantryAI @ 0x4b9910`).
 The former ONED Object workspace exposed ANIMNUM as a plain "Part #" raw int;
 ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
@@ -851,17 +927,27 @@ ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
   62.5 Hz tick** before truncation. Because the integer rate is truncated and the clamp is strict,
   a nominal one-second sweep reaches `0x10000` on tick 63 and stops on the following overshoot.
   Constants verified
-  IEEE-754 LE: `flt_7C3310 = 1/65536`, `flt_7C3B40 = 0.016 (= 1/62.5)`, `flt_7C32BC = 65536`.
+  IEEE-754 LE: `flt_7C3310 = 1/65536`, `flt_7C3B40 = 0.016f` (0x3C83126F, 0.01600000075995922;
+  the division uses the float, `fdivr` @ 0x43B1D8, so small ANIMTIME rates exceed the double-0.016
+  value by up to 4: ANIMTIME 1 -> 68719480, 3 -> 22906493, 65536 -> 1048, 0 -> INT_MIN),
+  `flt_7C32BC = 65536`.
 - Writes ONLY direction + rate — it never resets the phase. PLAYPARTANIM is **velocity control from
   the current position** ("start moving part c at this speed/dir; play_type 0 = halt"), not
   reset-and-sweep.
-- Channel defaults come from the object/vehicle def (`Entity_CopyVehicleDefToAIComp @ 0x45ddf9`:
-  def+764..784 → comp+436..456) — objects can ship an idle part-anim (radar-dish spin).
+- The channel block (comp+436..456) is written again only by the savegame restore:
+  `SaveFile_ApplyEntityRecord @ 0x4AC030` calls `Entity_CopyVehicleDefToAIComp` (the saved record's
+  +764..784 → comp+436..456; rate store `@ 0x45DDF9`, phase stores `@ 0x45DE11`/`@ 0x45DE1D`). It is
+  not a def seed: a fresh brain starts from the allocator's zero fill (`Entity_InitVehicleAI` memset
+  `@ 0x460246`).
 - It never calls AnimMap: the part system (turret yaw / barrel pitch / dish) is DISTINCT from the
   infantry full-body ADM/BAD system.
-- **The integrator, and the CTRL separation (witnessed 2026-07-22).** The per-tick integrator is
-  `Entity_UpdateSuspensionBounce @ 0x456710` — an IDA misnomer for its first half. Per channel it reads
-  the direction `comp[109]/comp[110]` and the rate `comp[111]/comp[112]`. Direction `+1` performs a
+- **The integrator, and the CTRL separation (witnessed 2026-07-22).**
+  `Entity_UpdateSuspensionBounce @ 0x456710` is the sweep integrator's body, and it is UNREFERENCED:
+  no call, jump, thunk or data pointer reaches it anywhere in the executable (xrefs, raw pointer and
+  rel32 scans, 2026-09-23). Live retail therefore never advances comp[113]/comp[114]: PLAYPARTANIM
+  changes only the stored direction and rate, and the published SPECIAL1/2 phases hold their value
+  (zero unless a savegame restored one). Its name is an IDA misnomer for its first half. Per
+  channel it reads the direction `comp[109]/comp[110]` and the rate `comp[111]/comp[112]`. Direction `+1` performs a
   wrapping 32-bit ADD into `comp[113]/comp[114]` and clamps/stops only when the signed result is
   strictly greater than `0x10000`; every other nonzero direction performs wrapping SUB and
   clamps/stops only when the signed result is negative. Landing exactly on either endpoint therefore
@@ -870,38 +956,57 @@ ADR 0037 removed that UI. The runtime contract remains the raw integer channel.
   clamps to zero and stops on its first tick `[orig: @0x456740..0x4567A9]`.
   The phases are stored separately from the ordinary named-CTRL target/current banks, but they are
   **published onto the global CTRL bus before presentation**. `[orig: HUD_CacheEntityDisplayInfo
-  @ 0x4A3E18..0x4A3E38]` maps `comp[113]` to `VEHICLE_SPECIAL1` (global ordinal 71) only when the
+  @ 0x4A3E16..0x4A3E38]` maps `comp[113]` to `VEHICLE_SPECIAL1` (global ordinal 71) only when the
   item's attribute bit `0x1000` is clear, and maps `comp[114]` to `VEHICLE_SPECIAL2` (ordinal 72)
   unconditionally. This is the missing second stage behind the earlier, incorrect conclusion that
   PLAYPARTANIM never reaches a named register.
 - Port contract (`ObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → part
-  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the retained
-  integrator uses the same truncated rate, fixed 16 ms ticks, wrapping ADD/SUB, and strict
-  overshoot rules as the authority runtime. Ordinary values occupy `0..0x10000`, but wrapped signed
+  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the editor
+  preview (`ModelControls`) is the only integrator, with the same truncated rate, fixed 16 ms ticks,
+  wrapping ADD/SUB and strict overshoot rules; the world runtime never integrates the brain phases
+  (`AiSystem::advance_part_anim` is deleted). Ordinary values occupy `0..0x10000`, but wrapped signed
   dwords are preserved rather than normalized. Velocity starts from the CURRENT value. Channel 1 targets
   `VEHICLE_SPECIAL1` subject to the item-attribute `0x1000` gate, and channel 2 targets
   `VEHICLE_SPECIAL2`. There is **no model-order selection and no engine-name blacklist**. The former
   bridge walked the model's first two CTRL entries and then tried to blacklist collisions, which put
   B50Cal's first phase on `HEAT_GLOW`; D-WPN-31 records that fixed divergence.
+- **Open follow-ups: nonzero-phase coverage and the SPECIAL1 skip.** With the integrator
+  unreferenced, no in-game path writes a nonzero phase (only the savegame restore does, and
+  the port has none), so the collision's and the attachment pose's reading of a nonzero
+  phase (the section ordinal) is exercised by no test: the GUT PLAYPARTANIM cases in
+  `simulation_test.gd` pin the held zero phase, and a ctest that sets the brain phase
+  directly would restore that coverage. With the item's attribute bit 0x1000 set,
+  `HUD_CacheEntityDisplayInfo` skips the SPECIAL1 store (`test dword ptr [edx+54h],1000h`
+  @ 0x4A3E1E, the jump @ 0x4A3E25 over the store to `dword_83FF20` @ 0x4A3E27..0x4A3E2D;
+  SPECIAL2 @ 0x4A3E38 is unconditional), so the global keeps the previous entity's value where
+  the port publishes "unpublished"; that matters only if another entity's presentation reads
+  the bus within the same frame.
 
 ### 8.5 bmsi attribute flags (checkbox dialog)
 Flag label table @ 0x5b1c84 (dfx2med): REFLECTIVE, INDESTRUCTABLE, GUARDING, BLIND, **DEAF**,
 **IGNORE_FOOTSTEPS**, NAVIGATION_WAYPT, MULTIPLAYER. Confirmed bit positions (our
-`BmsiAttributeFlags`): Blind=0, Guarding=1, Multiplayer=6, Indestructible=21, NavigationWaypoint=22,
+`BmsiAttributeFlags`): Blind=0, Guarding=1, SinglePlayerOnly=6, MultiplayerOnly=7, Indestructible=21, NavigationWaypoint=22,
 Reflective=23. **OPEN:** DEAF/IGNORE_FOOTSTEPS bit positions need the dialog's CheckDlgButton
 load/save handlers (deep in the 0x4ffd-byte `Med_ObjectPropertiesDialog`); until decoded the editor
-preserves unknown bits verbatim (merge-on-write), like event flags.
+preserves unknown bits verbatim (merge-on-write), like event flags. The runtime side is complete:
+`Entity_SpawnFromBMSRecord` folds every AI-branch bit of the record's attribute dword into the AI
+slot's behavior word and the entity Flags (the full table is §38.1); bits 0x100, 0x200, 0x400,
+0x2000, 0x8000, 0x80000 and 0x100000 have no editor names in `bms.h` (their ChangeAI twins are subs
+3, 4, 14, 18, 20, 25 and 19).
 
 ## 9. Appendix: mount/emplacement mechanics (2026-06-08)
 
 ### 9.1 Verified chain (AttachToEmplaced, action 37)
 - `EventAction_Dispatch @ 0x4542e0` case 0x25: reads ONLY param1 (the occupant SSN), resolves it via
-  `EntityPool_FindByNetId`, calls `WacScript_TryMountEntityToVehicle`. The gun/vehicle is found
-  IMPLICITLY inside the mount fn.
+  `EntityPool_FindByNetId`, calls `WacScript_TryMountEntityToVehicle` (the WAC ssnuse body). The
+  vehicle is the one the occupant's AI slot +0x90 names (aiRuntime[36], armed by a board order:
+  WAC ssn2ssn or BMS RedirectSingleTo command 125 plus the board think), not a proximity pick
+  [orig: EventAction_Dispatch @ 0x4542e0 (case 37 @ 0x454989; the FindByNetId call @ 0x454992)].
 - `WacScript_TryMountEntityToVehicle @ 0x4f70f0`: validate handle (≠0xFFFF, pool<5, slot<capacity);
-  gate alive/model present; require `occupant-model+144` (a pre-established hierarchy link to the
-  vehicle) and not-already-mounted (`entity->pad8[8] == 0`). Then
-  `seatBone = Entity_FindBestSeatSlot(entity, *(model+144), &outEntity)` (outEntity = the chosen
+  gate alive/model present; require the vehicle the occupant's aiRuntime+0x90 names (entity+0x68 ->
+  +0x90, the board target; the "+144" is that slot word, not a model hierarchy link) and
+  not-already-mounted (`entity->pad8[8] == 0`). Then
+  `seatBone = Entity_FindBestSeatSlot(entity, *(aiRuntime+0x90), &outEntity)` (outEntity = the chosen
   seat-owner, possibly a child) → `Entity_RequestVehicleAttach`. The attach-failure path clears
   `Flags & ~0x40` (the mounted bit).
 - `Entity_FindBestSeatSlot @ 0x4351f0` (CONFIRMED EXACT): sentinel `bestWeight = 65536000`; iterates
@@ -909,8 +1014,8 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   (0 = empty); occupant u16 at `vehicle[400+2·slot]` (free if 0xFFFF or == playerHandle). Seat-bone
   NAME classification (bone record stride 48, name at +32): `sitex` → 1 passenger, `ctrlx` → 2
   controller (vehicle entity only), `drvrx` → 5 driver (vehicle entity only), `UseGun` → 3 gunner;
-  else skip. Command/player-class acceptance gate: `model+148 == 123` accepts only passenger
-  (`seatType == 1`); `model+148 == 124` rejects controller (`seatType != 2`); all other values
+  else skip. Command/player-class acceptance gate on the board order aiRuntime+0x94: 123 accepts only
+  passenger (`seatType == 1`); 124 rejects controller (`seatType != 2`); all other values
   accept any classified seat. This corrects the older "124 not-driver" reading.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
@@ -924,21 +1029,22 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
 rewinds mounts for free); canonical `find_best_vehicle_seat`, `VehicleSystem::attach_to_seat`, and
 `VehicleSystem::detach` operations plus `EntityCommands::{mount, mount_boarding_command,
-mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0.
+use_boarding_target, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0.
 Wire, command, USE, and mobile-deployment entry points share those relationship operations;
 the former duplicate command-side write/detach blocks were removed. Every attach runs
 `VehicleSystem::presnap_attach_heading` before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
 occupant's `AiEntity.heading`; for the local player it also initializes
-`InfantryState.target_heading`. `Simulation` owns an additional binding-only
-`PlayerInput.look_heading` latch that retail does not need because its input and entity yaw are one
+`InfantryState.target_heading`. `LocalPlayer` owns an additional input-side
+`look_heading` latch that retail does not need because its input and entity yaw are one
 state. `sync_local_mounted_input_heading` mirrors the snapped local target into that latch immediately
 after a successful mount toggle and after local/host logic ticks, before the next
-`apply_player_input_pre_tick` can restore the pre-attach look. Both layers are yaw-only; pitch remains
-player-owned and deliberately untouched. The joiner now queues C2S 0x26/0x27 without local prediction;
+`apply_player_input_pre_tick` can restore the pre-attach look. The sync also mirrors a sim-written look
+pitch (the emplaced gun's occupant pitch store `@ 0x4412b3`); otherwise pitch stays player-owned. The joiner now queues C2S 0x26/0x27 without local prediction;
 the host validates the relationship and the requester applies it only after the S2C 0x0A carrier/bone
 echo. The same heading synchronization then runs on that authoritative attach/detach edge.
 `pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
-yaw_offset); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
+yaw_offset, the carried body frame; the attach-time pre-snap is gun.Yaw minus the gun's stored
+yaw word +0x322 << 16, §23.1); `AiSystem::pose_if_mounted` captures that seat frame before the local LOOK mirror mutates
 `Entity.yaw`, synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`,
 and roll, then skips SM + locomotion and auto-dismounts when the vehicle is gone. Remote
 `AiEntity.heading` stays in the seat frame; the local `heading`/`pitch` remain the full-precision
@@ -952,7 +1058,7 @@ that pair to the occupant, registry snapshots value-copy it, restore recovers it
 path clears the occupant copy and validity. This is deliberately separate from seat-frame pose state:
 the frame synchronization above supplies body/leg/pitch/roll, while animation's `MountMode` selects
 which witnessed overlay matrix each skeletal class consumes.
-Event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
+Event-runtime case 0x25 → `use_boarding_target(param1)` (the WAC ssnuse port); command-123/124/125 promotion mounts
 already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
 is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
 `anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
@@ -967,27 +1073,33 @@ their first body update. Clearing/reloading the animation registry resets the re
 repopulates every live `adm_id`, while Play→Stop restore rewinds both the AI array and resolver mark before
 re-resolving the baseline. `test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose` pins
 the former failure. Deviations (NOT silently absorbed):
-1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
-   link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
-   placed on its gun; wrong if two guns overlap.
-2. **Seat specs are binding-fed.** The original reads model seat bones directly (model[605..]); the
-   port consumes binding-extracted model userpoints through `ItemSeatSpec`, so callers without model
-   metadata still seed no seats.
-3. **Child-entity seat traversal** deferred (single-entity seats only).
+1. **Proximity proxy vs occupant-model+144.** RESOLVED 2026-09-23: the vehicle is the one the
+   occupant's aiRuntime+0x90 board target names, as in retail (`use_boarding_target`, §9.1); the
+   nearest-free-seat proxy (`kMountRadius`) is gone. No shipped mission authors action 37
+   (`mission_mount`).
+2. **Seat specs are extracted at mission start.** The original reads model seat bones directly
+   (model[605..]); the port builds `ItemSeatSpec` in the engine from the items.def rows and the
+   native model parses (`mission/seat_spec_extract.cpp`, the seat typing of
+   `Entity_GetBoneSlotType @ 0x434ed0`), so callers without model metadata still seed no seats.
+3. **Child-entity seat traversal** RESOLVED: ported (the root/ground-child walk of
+   `find_best_vehicle_seat`, §23.1).
 4. **Mounted-pose variants.** `UseGun` consumes the target definition's production-parsed
    `phrase_set` (including valid zero), and non-gunners consume numbered `sit_N`. The sit_24
-   driver-lean 107–110 variants remain open.
+   driver-lean 107..110 variants are ported (`mounted_anim_state_for_seat`, `ai_detail.h`).
 5. **Generic seat-local pose stand-in** — UseGun root position now follows the owning part's live
    control-posed userpoint, but non-UseGun seats still use binding-fed `seat_local`/`yaw_offset` rather
    than the true per-tick `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` result. The full UseGun
    matrix basis is also not claimed. These residuals remain distinct from the matching request-time
-   yaw pre-snap.
+   yaw pre-snap. The unseeded carrier frame is the spawn form (2026-09-23), and every seat point
+   goes through the fixed-point euler matrix (`Math_BuildFixedPointMatrixFromEulerAngles
+   @ 0x613f40`), the same one a moved carrier uses; the flat unseeded 2D rotate is gone.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
 ### 10.1 The BMS↔Godot convention lives in GDScript (and the godot-cpp Basis trap)
-Mission frame is Z-up; the Godot side is Y-up. The conversion is single-sourced in GDScript
-(`MissionObjectPlacer` statics, used by both present + placer): basis =
+Mission frame is Z-up; the Godot side is Y-up. The conversion is single-sourced in the engine
+(`mission::bms_to_presentation_basis`, `engine/runtime/mission/placement_traits.h`;
+`MissionObjectPlacer.bms_to_godot_basis` is its bound face): basis =
 `Basis(UP, 90−yaw) · Basis(BACK, −pitch) · Basis(RIGHT, roll) · Basis(UP, 90)` (engine heading +
 .3di model-forward correction; see §7.2 for the 90−yaw truth).
 
@@ -1009,8 +1121,11 @@ longer an open product divergence.
 - N/S taps at (0, ±r), E/W at (±r, 0), C at center; `max` = highest positive tap (C included);
 - `result = (N + S + E + W + 2·(C + 2·max)) / 10`, floored at C;
 - water clamp: `if (*(entity+368) && worldY > result) result = worldY` (worldY @ 0x26C6454);
-- def offset: `result += dead ? def+0x30 : def+0x2C`, where
-  `dead = ((entity+36 & 2) || entity+286 <= 0) && entity+52`;
+- floor offset: `result += brain ? (dead ? brain+0x30 : brain+0x2C) : 0`, the caller's
+  brain[12] husk floor or brain[11] intact floor (written only by the class inits and the
+  savegame restore, §38.1), where `dead = ((entity+36 & 2) || entity+286 <= 0) && entity+52`
+  [orig: the brain test @ 0x457333; the dead test @ 0x457337..0x45734B; `add eax,[ebx+30h]`
+  @ 0x45734D; `add eax,[ebx+2Ch]` @ 0x457367];
 - radius 0 path: center tap only.
 
 **Decompile-lossiness warning (durable):** the per-tap samplers `Entity_RaycastGroundHeight` / `Entity_RaycastGroundHeightAndObject` decompile
@@ -1018,7 +1133,10 @@ as if they ignore the dx/dy offsets and return a flat field — WRONG. Disasm + 
 show each builds `pos = {x+dx, y+dy, z + 0x10000 − 0x300000}` (a ray from z+1.0 down to z−47.0) and
 calls `raycast_entity_collision @ 0x413760`, which writes the sampled ground height back into `pos.z`
 (returned in eax) — the 5 taps DO sample 5 distinct columns. `Entity_RaycastGroundHeightAndObject` additionally stores the
-raycast collision-object at record+40. The real sampler is
+raycast collision-object at record+40 (`mov [esi+28h],eax` `@ 0x414370`); the average uses it for
+the east and centre taps (`@ 0x4572A1` / `@ 0x4572E0`) and the radius-0 arm (`@ 0x45735D`), the
+plain kind for north, south and west (`@ 0x45725D` / `@ 0x457281` / `@ 0x4572C1`), so the centre
+hit (null on a miss) is the ground link that survives each sample. The real sampler is
 `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`: a LoRes pass, then back/forward step + 8-iteration
 bisection refine (the per-step terrain samples are `Terrain_SampleHeightBilinear @ 0x6067b0` —
 that callee sat IDB-mistyped as a `void()` "null_stub" so decompiles elided it; retyped at the
@@ -1026,19 +1144,23 @@ ENG-3 B0 grill, full witness in [terrain-re.md](../terrain/terrain-re.md) §Runt
 queries); for a near-vertical down-ray this equals the bilinear heightmap column height.
 
 ### 10.3 The vertical assignment + our port
-Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` sets
-`ground(0x50000) + 0x50000`; `0x460e40` sets `max(nodeZ-or-ground+heightOffset, def[232]+ground)`
-(§7.4). Our lean `AI_UpdateWaypointMovement @ 0x457bd0` port never wrote `brain[131]` — the root cause
-of the floating-AI bug. Shipped: portable `terrain/height_field` (the three `TerrainData`
-samplers lifted verbatim, TerrainData delegates); `world::calc_average_ground_height` (the
-0x457230 math, 16.16); `AiSystem::apply_ground_clamp` SETs `brain[131]` + snaps
-`pos[2] = ground + 0x50000` (SET not max — the lean mover leaves brain[131] stale; a max would strand
-a float); `Simulation::set_terrain_height_field` wired through GameWorld
-and direct test/tooling fixtures. Tracked
-deviations: (1) bilinear column height vs the hi-res along-ray bisection (faithful for grounding);
-(2) GroundClearance def fields (def+0x2C/+0x30, def+216/+232, the aiComp[108] node-Z gate) default 0
-until those def fields are RE'd; (3) pos[2] snaps (no climb-rate physics); (4) water clamp wired off
-in the binding (water_height units vs the 16.16 worldY unverified; sampler + calc support it).
+Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` (move-step id 3, the
+HELO_EVADE hover, §1.3) sets `ground(0x50000) + 0x50000`; `0x460e40` (the HELO waypoint mover,
+§7.4) sets `max(nodeZ-or-ground+altitude, ground + profile+0xE8)`. The early port's lean
+`AI_UpdateWaypointMovement @ 0x457bd0` never wrote `brain[131]` (the floating-AI bug); its
+`AiSystem::apply_ground_clamp` stand-in, which SET `brain[131]` and snapped the hull, is deleted
+with the interim locomotion model (2026-09-23): retail has no generic brain integrator, so a
+pool-1 row moves only through its items.def mover (§38.9). Shipped: portable
+`terrain/height_field` (the three `TerrainData` samplers lifted verbatim, TerrainData
+delegates); `world::calc_average_ground_height` and `AiSystem::aircraft_ground_height` (the
+0x457230 math, 16.16, with the ground links of §10.2); `Simulation::set_terrain_height_field`
+wired through GameWorld and direct test/tooling fixtures. Tracked deviations: (1) bilinear
+column height vs the hi-res along-ray bisection (faithful for grounding); (2) RESOLVED: the
+floor offsets are the brain's husk/intact floors brain+0x30/+0x2C written by the class inits
+(§10.2, §38.1), and the node-Z gate is brain[108] (profile+0x38); (3) RESOLVED: the snap left
+with the clamp; (4) the water clamp is wired
+(the height field's 16.16 water plane `TerrainHeightField::water_y`, applied when
+`GroundClearance::has_occupant`, the entity+0x170 test).
 
 ## 11. Appendix: waypoint slot model (2026-06-07)
 
@@ -1074,8 +1196,29 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   (no markers)". Cross-validated on `00TRa.bms` (env JOX): organic SSN 1 = List 125 / Number 11
   (= DTruck1, `id 101294`), SSN 1715 = List 125 / Number 1714 (= DTruck2, `id 101420`) — both
   "Goto SSN (any) → board the adjacent 5-ton truck". This is the root cause of the OpenNova "two
-  friendly soldiers float in a crouched idle pose" bug in 00TRa: the reimpl never honors the 123–127
-  command channels (**D-INF-2**), so the soldiers idle on the terrain instead of riding their carrier.
+  friendly soldiers float in a crouched idle pose" bug in 00TRa: the reimpl then did not honor the 123–127
+  command channels (**D-INF-2**), so the soldiers idled on the terrain instead of riding their
+  carrier; the channels are honored since PR #640 (the staged board walk, §23.4) and the 00TRa
+  soldiers board their trucks (ctest `vehicle_ride_00tra`).
+- **The runtime nav table** (witnessed and ported 2026-09-22, §38.5). A record whose count is
+  exactly 1 is one-shot whatever its authored flags (`cmp [eax+4],ebp; jnz; or [eax],ebp` with
+  ebp = 1 `@ 0x40F971`, over the 128 records `@ 0x40FB72..0x40FBB2`; the XML loader does the same
+  `@ 0x4CC59C..0x4CC5A9`); shipped redirects onto such lists are 04TR actions 138/139/140 (lists
+  42/43/44) and CP01/02/04/05/06/08/11/12/15. Nodes are read as the flat word 34 * channel + 2 +
+  node of the 128-record block with no bound on the node (`AIWaypoint_UpdateTarget`,
+  `mov edx, Buffer+8[ecx*4]` `@ 0x457476`; `Entity_FindNearestTriggerByType @ 0x407F0B..0x407F6B`,
+  bounded only by the raw count), and resolve through `Pool_GetEntryUnchecked(3, idx) @ 0x441FC0`:
+  a slot no marker fills is the zeroed pool-3 entry (`Pool_Clear @ 0x442060`), position 0 and
+  radius 0. A count past 32 therefore walks into the next record's words (CP19 list 6, count 39,
+  reads list 7's zero words as marker 0), a start node past the count reads the raw slot word
+  (00TRf SSN 1166, CP07 SSN 2019, the CP15 organics), and in 00TRf, CP15 and CP19 marker 0 is a
+  type-2043 Map Centerpoint with radius 0, so a body routed onto it never arrives. The arrival
+  radius (entity+0 = wp_distance << 16, 0x8000 when 0) is written only for marker types 6005
+  (`@ 0x40F096..0x40F0A4`), 6006 (`@ 0x40F157..0x40F16D`) and 2044 (`@ 0x40F213..0x40F221`); every
+  other marker keeps the spawn memset's 0 (`@ 0x40EA27`); the hold word entity+0x148 = 62 * the
+  record's signed word +0x3E is 6005-only (`@ 0x40F066..0x40F08D`). The class inits copy the slot's
+  route words into the brain verbatim, with no count test and no clamp (§38.5). Port:
+  `NavNodeTable::entry_index` / `NavNodeTable::slot` in `promote.cpp` (`route_parity`).
 
 ## 12. Appendix: entity placement — Ground userpoint (dfx2med.exe)
 
@@ -1235,9 +1378,10 @@ complement of retail's `{2,3,5}` hide set, so a passenger keeps its weapon. The 
 is folded into the `PF_HELD_WEAPON_ADM` snapshot field: a hidden or unarmed body reports index
 0, which is simultaneously our table's null row and the original's own
 `if (entity->equippedAdmIndex)` precondition. STILL UNPORTED from this callback: AI/NPC bodies
-(a placed `.bms` soldier never receives an equipped ADM index and its source in the original
-is UNWITNESSED — every witnessed writer of `entity+0x2B0` is a player path, so that increment
-is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
+(an unmounted placed `.bms` soldier's equipped ADM index has no witnessed source: the org1
+mounted request copies its parent's byte into every mounted rider and the NPC detach zeroes
+it (§38.3), and the other witnessed writers of `entity+0x2B0` are player paths, so that
+increment is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
 projected-size cull `@ 0x4e3d4b`, the mounted-branch correlation of §14.4, and the DEATH
 family's rows in the same 0x80 flag table the hand-frame branch reads. The original guidance
 below still describes the seat taxonomy the port reuses.
@@ -1277,8 +1421,9 @@ DEATH-controlled material/PANM. Port status: the DEATH value function is
 `death_state_test`) and the present row carries it per authoritative organic
 row (`PF_DEATH_CTRL`, `inmatch/present_rows.cpp`, 2026-09-12: the dead flag +
 corpse timer; wire-only joiner rows and non-organics publish the live 0xFFFF;
-`netsim_present_rows` ctest); the shell presenter's write into the model's
-DEATH CTRL register is the remaining step. TALK is not portable until the
+`netsim_present_rows` ctest); the shell presenter writes it into the model's
+DEATH CTRL register on every organic submission (`EntityPresenter`,
+`godot/src/simulation/entity_presenter.cpp`). TALK is not portable until the
 mixer output-level tap exists — the D-INF-11 `g_audioOutLevel` residual (§14.3);
 it is not faked from a talking flag.
 
@@ -1340,7 +1485,7 @@ bone 0 takes the `default`) — the disasm is the truth.
 | 7,11,17 | BN08/12/18 R thigh/calf/foot | yaw = `+0x2d4` (R leg chase), pitch = bodyPitch |
 | 8,12,18 | BN09/13/19 L thigh/calf/foot | yaw = `+0x2d8` (L leg chase), pitch = bodyPitch |
 | 13 | BN14 Neck | = BN03's matrix on foot; = FULL aim when seated (driver looks around) |
-| 14 | BN15 Head | full aim: yaw = aim, pitch = aim (+ local-player kick, §14.3), roll = torsoRoll + lean/2 |
+| 14 | BN15 Head | full aim: yaw = aim, pitch = aim (+ the speaking entity's loudness kick, §14.3), roll = torsoRoll + lean/2 |
 | 16 | BN17 R Hand | stow-hide rule (§14.1.5), else the arm matrix |
 | ≥19 | accessories | body matrix (default) |
 
@@ -1353,7 +1498,9 @@ chase yaws.
 - **Aim-state gate**: `g_animStateFlagsTable[animStateId] & 0x40` selects the bend branch. Prone
   states (0x603) and rolls/deaths lack 0x40 → no-bend branch: all body bones take the body matrix;
   arms get aim pitch + pitchKickAccum/4 + 2·pitchBlend (skipped when `Flags & 0x100000`); head keeps
-  full aim. Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
+  full aim. The org1 motor computes its own torso roll (`@ 0x4BE897..0x4BE8EA`: state 48 decays
+  t -= (t + 16) >> 5, otherwise t += (roll - t + 8) >> 4 clamped to roll +-0x0E38E380, with
+  no 41/42 ramp; §38.3). Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
   owns the whole body during combat rolls.
 - **Mounted config source and validity**: the gunner block reads the **target entity's item
   definition** dword `+0x86c` at `@0x4b1884`. Its producer is the items.def `phrase_set` branch in
@@ -1380,8 +1527,11 @@ chase yaws.
   Gunner legs keep the unconditional leg-chain matrices. Configs 3/5/7 are the fully body-locked
   witnessed upper skeleton; config 6 differs only at the head. Config 0 and the other-nonzero row are
   distinct counter-lean recipes; there is no collision-specific mounted recipe.
-- **Local player**: when `entity == dword_C6EC38` (the view/local entity global; identity from
-  reads — HUD self-label skip, audio listener), head/aim pitch gets
+- **Speaking entity** (not the local player): when `entity == g_voicePlaybackEntity @ 0xC6EC38`
+  (the entity whose positional scripted voice is playing: stamped by
+  `Audio_StartEntityPlayback @ 0x4ECD90` @ 0x4ECE03, cleared by `Wac_PlayScriptedVoiceWave
+  @ 0x4ED610` @ 0x4ED650; the HUD label pulse and the TALK register read the same word, §13.6),
+  head/aim pitch gets
   `+ (g_audioOutLevel << 17)` `[orig: @ 0x4b17f0]`. **RESOLVED (2026-07-09)**:
   `g_audioOutLevel @ 0x3346FA8` is the software audio mixer's smoothed OUTPUT POWER
   meter — every 0x400 mixed samples the mixer loop takes its block amplitude
@@ -1389,9 +1539,8 @@ chase yaws.
   (`(prev+new)/2` into `g_audioOutLevelStage1 @ 0x3346FA4`, then again into
   `g_audioOutLevel`) `[orig: the mixer loop @ 0x7bef3e..0x7bef55, function-less blob;
   zeroed by AudioMixer_Init @ 0x7bd405; the MMX blend routine ptr @ 0x3346F9C]`. The
-  "recoil twitch" on fire is literally the game's LOUDNESS kicking the POV body's
-  head/aim pitch — own gunfire being the loudest nearby source. There is no dedicated
-  rifle recoil body anim. Porting it needs an audio-output level tap in the reimpl mixer
+  term nods a talking body's head with the mixer loudness while its voice plays; it is not a
+  recoil twitch (the body's rifle recoil is the separate pitchBlend +0x380 term). Porting it needs an audio-output level tap in the reimpl mixer
   (deferred; the overlay input carries the term).
 - **Rigid defs**: `itemDef->attrib & 0x200` → every overlay = body matrix (no aim skeleton).
 
@@ -1490,7 +1639,7 @@ and a `.3di` vertex reaches our model node through the ADR 0007 `(−x, y, z)` f
 relation is `bms_to_godot_basis == swap ∘ Mᵀ ∘ flipX` — two reflections, hence a proper rotation,
 and `swap ∘ flipX` factored out IS the trailing `Ry(+90°)`. Expanded, that is
 `Ry(heading) · Rz(pitch) · Rx(roll) · Ry(+90°)`: `MissionObjectPlacer.bms_to_godot_basis` term for
-term. **The GDScript basis is a faithful image of the original builder.** Pinned executably by
+term. **The shared basis (`mission::bms_to_presentation_basis`) is a faithful image of the original builder.** Pinned executably by
 `present_held_weapon_test.gd::test_bms_basis_matches_the_original_placement_matrix`, which rebuilds
 the original's quantized-trig row-vector matrix and compares all three model axes over five angle
 triples — including two with pitch, yaw AND roll all non-zero, the case a roll-free live sample can
@@ -1540,8 +1689,11 @@ parses do disagree, and only the former may be used for a runtime ADM index.
   2026-07-09**: the audio mixer's output power meter, renamed `g_audioOutLevel` — full
   verdict in §14.3's local-player bullet. Remaining: the Godot-side port needs a mixer
   output-level tap (the overlay carries the term, fed 0).
-- `dword_C6EC38` (view/local entity): reads witnessed only; no direct writer xref (register-based
-  store suspected). Name-proposal held until a writer is pinned.
+- ~~`dword_C6EC38` (view/local entity): reads witnessed only~~ **RESOLVED**:
+  `g_voicePlaybackEntity @ 0xC6EC38` is the speaking entity; writers
+  `Audio_StartEntityPlayback @ 0x4ECD90` (@ 0x4ECE03), `Audio_StartAmbientSoundForPlayer
+  @ 0x4ECE30` (@ 0x4ECE9F), `Audio_UpdateAmbientStream @ 0x4ED9C0` (@ 0x4EDA0E); cleared by
+  `Wac_PlayScriptedVoiceWave @ 0x4ED610` (@ 0x4ED650).
 - The InfantryAI leg-chase excerpt re-verify (the session's sub-investigation was cut by a spend
   limit after confirming the §3.1 36-tick re-plant stagger applies per DcbId): the §3.3 math rows
   predate this session and stand; the relabel is anchored by the bone-overlay consumers.
@@ -1606,7 +1758,7 @@ every tick, so a driver arrives in this leg without any camera key; net-re
 
 The local controller train remains, and mounted selection is now an animation-owned shared seam:
 
-- **Blends + bone map**: `engine/runtime/anim/{include/anim,src}/aim_overlay.{h,cpp}` — exact int32 BAM
+- **Blends + bone map**: `engine/runtime/anim/aim_overlay.{h,cpp}` — exact int32 BAM
   blends of the on-foot aim/non-aim branches, the full §14.3 mounted table, the BN##→class map,
   and the pose compose
   (`apply_aim_overlay`: FK → per-class world delta → back to parent-locals; with parent-local
@@ -1627,11 +1779,12 @@ The local controller train remains, and mounted selection is now an animation-ow
   high-water; Play→Stop restore likewise rewinds the AI array and resolver mark, even when the restored
   entry count equals the prior count.
 - **Sim**: `InfantryState.leg_yaw/leg_target` + the §3.3 chase/re-plant/twist-limit tick in
-  `engine/runtime/world/infantry.cpp`; the local player's `body_heading` now CHASES the aim
-  (quarter-step, clamped) while render yaw stays mouse-instant — the aim/body split the
-  overlay renders. `tests/world/infantry_test.cpp::test_player_body_chase_and_legs`.
-- **One selector, four consumers**: `Simulation` is the production adapter from
-  `AiEntity` + mounted `Entity` state to `AimOverlayInputs`; it calls
+  `engine/runtime/world/infantry.cpp`; the local player (org2) has no body chase: its legs chase the
+  mouse-instant yaw at a quarter step (clamped) and `body_heading` is their midpoint (§22.1,
+  D-INF-12), the aim/body split the overlay renders. `tests/world/infantry_test.cpp::test_player_body_chase_and_legs`.
+- **One selector, four consumers**: `world::aim_overlay_inputs_for` (`world/pose_inputs.h`) is the production
+  adapter from `AiEntity` + mounted `Entity` state to `AimOverlayInputs`; the present rows
+  (`inmatch/present_rows.cpp`) and the pose provider (`world/entity_pose.cpp`) call
   `compute_aim_overlay_angles` for authoritative collision and local pose export. The present snapshot
   packs the resulting body frame and nine absolute overlay angles. `MissionPresentPass` and
   `EntityPresenter` share the result adapter that converts those packed angles to body-relative Godot
@@ -1678,11 +1831,10 @@ live beside that zero-row check.
 The focused gate also reruns the rotated mounted-enemy, CXLT, and F3
 cutoff/cadence/dense-batching regressions before the maturity ratchet and full CI matrix.
 
-Remaining under this row: NPC/remote secondary weapon-channel pose composition; weapon/sight/muzzle
-attachment matrices; and the pitchBlend / lean / torsoRoll
-sources (terms carried, fed 0; pitchKickAccum now carries the PORTED arms-dip feed —
-§14.8.5/§14.8.7 — its other producers, the idle look-at and the audio pitch kick,
-stay open). The upper-body weapon channel's producer is witnessed and FULLY ported for
+Remaining under this row: the weapon/sight/muzzle attachment matrices. The pitchBlend (the
++0x380 recoil accumulator), lean and torsoRoll sources are fed (`aim_overlay_inputs_for`,
+`world/pose_inputs.h`); pitchKickAccum carries the ported arms-dip feed (§14.8.5/§14.8.7), and its
+other producers, the idle look-at and the audio pitch kick, stay open. The upper-body weapon channel's producer is witnessed and FULLY ported for
 the local player (§14.8, 2026-07-09 sessions 1–2). Player-motor approximations are
 ledgered as **D-INF-12**.
 
@@ -1697,8 +1849,9 @@ entry comments on `0x4b1290` (the bone map), `0x4b25c0` (case table off-by-one),
 `0x5ca1d2` (mode arbiter), `0x4b4942` (vehicle-3P pitch halving). **Applied 2026-07-16**
 (repo hygiene pass): `output_matrix @ 0xA890C0 → g_camera_anchor_z`, `world_x_1616 @
 0xA890EC → g_spectator_cam_x`, `outPos @ 0xA89110 → g_camera_lerp_from_x`, `outMillis @
-0x31BFBC0 → g_bam_sin_table_q22`. Still held (struct members, needs struct tooling):
-`torsoYaw/torsoPitch → legChaseYawR/L`, `headLookYaw/headLookPitch → legTargetYawR/L`.
+0x31BFBC0 → g_bam_sin_table_q22`. Applied since (the `GamePlayerEntity` type):
+`legChaseYawR/L` (+0x2D4/+0x2D8, ex `torsoYaw/torsoPitch`) and `legReplantYawR/L`
+(+0x2E4/+0x2E8, ex `headLookYaw/headLookPitch`).
 
 ## 14.8 Appendix: the upper-body weapon channel — producer half (engine-research, 2026-07-09)
 
@@ -1766,8 +1919,8 @@ the entity's channels.
 
 ### 14.8.4 The body producer — secondary-state selection @ 0x4b5dad
 
-`Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (org2; org1 has its own writer @ 0x4b9a28,
-unwitnessed) selects the desired secondary state on the **16-tick slow pass** — NOT each
+`Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (org2; org1 mirrors its primary current/pending
+into the secondary request at the motor head @ 0x4b9a14..0x4b9a2e, ported, §36.1) selects the desired secondary state on the **16-tick slow pass** — NOT each
 tick, as this section claimed until 2026-07-26. The gate is `(current_tick & 0xF) == 0`
 `[orig: key stored @0x4b4e79, tested @0x4b5d71]`, keyed on the RAW tick (unstaggered,
 unlike the org1 `logic_tick + 36*net_id` idiom), and it covers far more than this ladder:
@@ -1839,8 +1992,8 @@ anim_javelin_scoped`, `anim_binoculars`, `anim_reload/reload2`,
 (Eindo/FSldr/pilots/ESTAND) carry `anim_reload` only; the Cindo family not even that.
 With the original's RESET backfill (§14.8.1), an AI body in a hold state plays the
 reset pose. The primary body path now mirrors that backfill for local, NPC, remote,
-render, and posed-collision sampling; the secondary weapon-channel fallback remains a
-separate follow-up.
+render, and posed-collision sampling; the secondary weapon channel takes the same
+RESET backfill since 2026-08-17 (D-INF-1 closed).
 
 ### 14.8.5 The reload window and the FSM sync
 
@@ -1897,7 +2050,7 @@ reading it as one is precisely what made a first re-measurement call the branch 
 
 ### 14.8.7 Port status (2026-07-09, this train — local player) and follow-ups
 
-Landed: the secondary channel's state machine in `engine/runtime/world/infantry.cpp`
+Landed: the secondary channel's state machine in `engine/runtime/world/infantry_weapon_channel.cpp`
 (`AiSystem::infantry_weapon_channel` — the per-tick selection with the rifle-mirror
 default, the 80-tick reload window → state 65, the locked/emote defer rule, the
 clip-end deferred promotion via the new `IRootMotionSource::clip_length_ticks`, and the
@@ -1928,7 +2081,7 @@ the scoped +1 variants, the scoped rifle-mirror coercion to 49, binoculars 64
 (the `binoculars_raised` input exists and is tested; the shell input toggle is deferred
 until a binoculars item exists), reload 65 / reload2 66 by kind==2 — plus the exact
 +0x371 arms-dip block (dip-before-ease, double decrement) feeding
-`InfantryState.head_look_decay` into the §14 overlay's `head_look_decay` term, seeded
+`InfantryState.pitch_kick_accum` into the §14 overlay's `pitch_kick_accum` term, seeded
 20 on a weapon-switch mount edge. ctest `infantry` (`test_player_weapon_hold_kinds`,
 `test_player_weapon_attack_stamp`, `test_player_arms_dip` + the original
 `test_player_weapon_channel`). Live-verified (the `infantry` ctest's retail
@@ -1967,12 +2120,15 @@ shared advance onto AI bodies:**
    `anim_skeletal_clips_weapon_channel` ctest over the reference set's BINOC.bad rig
    with a clip SYNTHESIZED in-test (one mask bone and one leg bone turned 90°) — the
    healthy-export trap makes a real-retail-only fixture pass for the wrong reason.
-3. **Per-entity BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks
-   per state (every quoted token on the row, file order) and `IRootMotionSource` gained
+3. **BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks
+   per state (every quoted token on the row; retail keeps one ring-head table per loaded
+   `.adm`, shared by both channels of every body on it, and serves a row LAST token first,
+   stepping back through the file order, §38.3; the body channels are served that way from
+   `AiSystem::anim_rings`) and `IRootMotionSource` gained
    `variant_count` / `advance_variant` (defaulted, so headless/test providers are
    unchanged) `[orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode
    @0x40c2d0]`. The secondary channel serves head-then-advance per play through
-   `InfantryState::wpn_ring_serve` (per-state heads, the `animState+72` cursor analog)
+   the per-.adm ring heads (the `animState+72` cursor analog)
    and latches the served entry as `wpn_variant` (the `+68` latch), which rides the
    weapon view (`body_anim_variant`), the present row (`PF_WPN_VARIANT /
    PF_WPN_SOURCE_VARIANT`), and both composition seams
@@ -1994,7 +2150,8 @@ shared advance onto AI bodies:**
    writer at 0x4B9A14..0x4B9A48 copies current and pending primary state into
    the secondary on every visible motor pass, before authority/interpolation
    and think. It has no equipped-ADM dependency. Both channels retain their
-   own phases, blends and variant rings; secondary root motion is discarded.
+   own phases and blends over the shared per-.adm ring heads; secondary root motion is
+   discarded.
    Section 33.19 records the implementation and regression replacing the
    former D-INF-24 assumption.
 
@@ -2009,10 +2166,10 @@ index 65, "wpn_idle" at 241 = §5.62's global slot 241, `AnimMap_FindSlotByName`
 Entry/line comments: `0x53f830` (FP-channel correction), `0x541720` (+0x372 stamp),
 `0x40b8c0` (state pairs + swap protocol), `0x4b5dad` (selection block), `0x542bcb` /
 `0x42f79d` (attack stamps), `0x4b14a7` (mask gate), `0x4b21b0` (wobble gate),
-`0x8135f0` (table layout). **Proposed, NOT applied** (curated-name policy):
-`GamePlayerEntity.prevAnimStateId(+0x2C8) → animStateIdWpn`,
-`pad_2c4(+0x2C4) → animStateDeferredWpn`, `+0x370/371/372 →
-prevHeldAdmIndex/armsDipTicks/reloadAnimTicks`.
+`0x8135f0` (table layout). **Applied since** (the names now in the IDB):
+`GamePlayerEntity.weaponHoldStateId` (+0x2C8, ex `prevAnimStateId`),
+`weaponHoldStatePending` (+0x2C4, ex `pad_2c4`) and
+`prevHeldAdmIndex/armsDipTicks/reloadAnimTicks` (+0x370/371/372).
 
 Session 2 (2026-07-09, saved): renamed `byte_B76539 → g_binocularsToggle`,
 `byte_B7653A → g_binocularsRaised`, `dword_3346FA4 → g_audioOutLevelStage1`,
@@ -2293,10 +2450,10 @@ No IDB edits were made for this slice.
 
 The runtime consumers of the `.3di` collision block (CDTA: CMDL/BVOL/BPLN/COBJ —
 format landed in [3di-gp-format-re.md](../threedi/3di-gp-format-re.md), previously
-"no downstream consumer traced"). Ported as `engine/runtime/world/collision.{h,cpp}`
-(`CollisionWorld` + the query set), consumed by the infantry motor's vertical
-resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the binding sweep
-`Simulation::resolve_collision_instances`. Evidence ctest: `collision`
+"no downstream consumer traced"). Ported as `engine/runtime/world/collision.h` and the
+`collision_*.cpp` units (`CollisionWorld` + the query set), consumed by the infantry motor's vertical
+resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the mission sweep
+`mission::resolve_collision_instances` (run by `MissionKernel`). Evidence ctest: `collision`
 (tests/world/collision_test.cpp). All addresses: retail `Jointops.exe`
 (`Jointops.exe.kong.i64`, imagebase 0x400000). The 2026-07-11 full re-grill
 (the collision extraction slice) walked every ported function against fresh
@@ -2339,7 +2496,9 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   On-disk BVOL types are ALREADY the runtime types — the remap switch cited in the
   format record is the ModSuperOed writer side, not a JO load step.
 - **Transforms.** Per-section 16-dword fixed matrices from the model callback
-  (`model+168`; collision header at `model+176`, ready gate dword`[32]`): row-major
+  (`model+168`; collision header at `model+176`, ready gate dword`[32]`, the CMDL
+  bounding-volume count: `Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0`, the +0x80 store
+  `@ 0x5B3D70`): row-major
   3x4, Q22 rotation rows with `+0x200000` rounding, world 16.16 translation at
   `[3]/[7]/[11]`, `[15]` bit 0 = section disabled. The callback contract is
   strictly ordinal: `callback_matrix[i]` transforms `COBJ[i]`. The ray walk
@@ -2400,8 +2559,12 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   `entity.Yaw − ftol(atan2(−ny,−nx) · dbl_7C57B8[−2^31/π])` and
   `entity.Pitch − ftol(atan2(nz, ftol(lenXY)) · same)` `[orig:
   @ 0x4ae938-0x4ae9d9]` — and the 0.375u pull-in uses REAL fsin/fcos of
-  `yaw · 2π/2^32` scaled 2^22 truncated, not the quantized dir table `[orig:
-  @ 0x4ae9df-0x4aea30]`; plane[0] is read unguarded even for a 0-plane volume;
+  `yaw · dbl_7C3608` (`fild g_LadderContactYaw; fmul dbl_7C3608` @ 0x4AE9C8..0x4AE9D3;
+  1.4629627251502471e-9 radians per BAM, 30.5 ppm above the exact 2π/2^32, so a 180-degree
+  frame leaves sin = 402/2^22 and its anchor 2 units off Y) scaled 2^22 truncated, not the
+  quantized dir table `[orig: @ 0x4ae9df-0x4aea30]` (port: `collision_detail.h`'s
+  `kRadianPerBam` holds the retail bits since 2026-09-23; `collision`,
+  `test_ladder_entry_gate_snap_and_chase`, `test_ladder_from_above_entry_and_sin_lane`); plane[0] is read unguarded even for a 0-plane volume;
   5 contact-no-force; 6 CA armory volume -> 0x4; 7/12 vehicle-mask solids;
   8 BB blink accumulate
   (buildings, body/eye points only) -> 0x10; 9 CD door activation touch mask on
@@ -2545,7 +2708,8 @@ D-INF-10/§22):
    exists; sliceless entities keep the refresh-stamped quad). When a push was
    applied and the push direction roughly opposes targetHeading (atan2 gates
    ~8°/~15°), a "blocked" latch is set at `entity pad_368[1]` (`@ 0x4b378a-
-   0x4b37bb` — AI-steering consumer unmapped; D-COL-8).
+   0x4b37bb`; its consumer is the goal-directed detour `ai_find_cover_position @ 0x4afab0`,
+   §33.16, ported as `InfantryState::path_state`).
 6. **Run-over kill**: pushed by a moving vehicle (itemDef type 1) of another team
    (or MoveOrder 0x200) with push > 10160 on both axes -> Health 0 +
    `Score_ProcessKillEvent @ 0x4fd400` + death anim via
@@ -2626,7 +2790,7 @@ the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
 | 6 (`CA`) | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848`; manual §1.1.3.4 |
 | 7 (`VC`) | vehicle-collision solid, selected by vehicle mask 8 | `@ 0x4ae558`; manual §1.1.3.4 |
 | 8 (`BB`) | blink box — blink accumulate (buildings), indoors bit | `@ 0x4aea68`; manual §§1.1.3.2/1.1.3.4 |
-| 9 (`CD`) | door / door-like moving-part activation — bit per touched section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31) — equal to `si & 31` while the bone map is unmodeled (D-COL-2); retail then invokes the target callback | `@ 0x4aeb0f-0x4aeb22`; manual §§1.1.3.4/1.2.2.9 |
+| 9 (`CD`) | door / door-like moving-part activation — bit per touched section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31); the bone map is modeled (`Entity::door_first_bone` from first_door, the query uses `si − door_first_bone`, §33.14); retail then invokes the target callback | `@ 0x4aeb0f-0x4aeb22`; manual §§1.1.3.4/1.2.2.9 |
 | 10 (`CT`) | Change Team Box touch; downstream capture/team-change request | `@ 0x4aeb7b`, `@ 0x4b31e3`; manual §1.1.3.4 |
 | 11 | vehicle-loadout volume — Flags 0x800, gates vehicle.mnu | `@ 0x4aeb92`, `@ 0x49b858` |
 | 12 | masked volume (mask 0x10) | `@ 0x4ae568` |
@@ -2648,12 +2812,13 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `world::IPoseProvider` (the collision-section leg); `Simulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `simulation_test.gd`, `panm_clock_test.gd`, `mission_presentation_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones now use the separately ported per-entity current-pose path (§15.8b), not Generic PANM |
+| D-COL-2 | FIXED 2026-09-09 (§33.14; reconciled 2026-09-23): the skipped sections are door sections. itemDef +0x890/+0x891 are num_doors/first_door, the door records are the table at 0xA8A418, the CD mask bits are relative to first_door (`Entity::door_first_bone`), and non-player queries skip opening or open door sections while player-class queries keep the animated collision | `Entity_ComputeBoneCollisionForce @ 0x4AE150` (@ 0x4AEB0F); `Entity_MovementCollisionResolver @ 0x4B2BD0` (the event-6 call @ 0x4B3505); `ItemDef_ParseProperty @ 0x49EB00` (@ 0x49F748..0x49F980) | the old reading (a destroyed or animated section table) was wrong; `collision` and `doors` pin the door skip |
 | D-COL-3 | **FIXED 2026-08-23:** production models consume GHDR+24's exact Q16 gpm[5]; `items.def scale` parses by the retail `atof × 65536` truncation and feeds visual matrices, collision matrices/inverses, bbox midpoint, movement/proximity, projectile local/wire proxies, and shadow entity bounds. The collision-block gate suppresses the whole bound/center stamp, the base bound is scaled with the signed `+0x8000` multiply before the signed max against the unscaled first husk, then receives +0x1000. Typed wire rows use the same `ResolvedCollisionShape`; the 1u replica compatibility radius and out-param shape API are deleted. | entity+0 boundRadius = max(scale × exact model gpm[5], first-husk gpm[5]) + 0x1000, stamped only when the model carries collision data; bbox center and matrix use the same effective scale [orig: `Entity_InitFromModel @ 0x40dc30`] | native parser/FFI/model/collision/replica/projectile regressions plus GUT wire-pose coverage pin the cutover; only headerless in-memory model fixtures derive a fallback radius |
 | D-COL-4 | NARROWED 2026-08-23: the eye test point is the org1 at-rest CameraOffset stand-in built in `collision_resolve.cpp` when the caller carries no offset (h = max(top - bottom, 0x9000), Z = h, lean at rest so X = Y = 0) | eye point = pos + the entity's +0x74 CameraOffset, written by the think before the resolver call (org1 `@0x4b9910` kong 155519-155521; lateral = (3*(h*sin(lean)))>>2 rotated by Yaw) | residual: the live-lean CameraOffset vs the at-rest stand-in; head and eye no longer share a column (the 00TRg wave-3 convoy pin, probe diff 2026-08-23) |
-| D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the AI move-order WRITER (aiRuntime 0x400 entry orders, `attachParent==self` + `+0x2FC/+0x300` X/Y direct-move chase, MoveOrder 0x100/0x200 AI bump variants) rides the AI-order slice — the org1 legs are dormant until it lands; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; the authority now resolves a snapshot-owned remote player's collision tail, but `remote_player_body_anim` does not yet apply org2's every-tick climb-state override (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
+| D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the order writers are ported (ChangeAI subs 17/23 and the BMS attribute fold, the CLIMBER bit at `Entity_SpawnFromBMSRecord @ 0x40EDED..0x40EDF9`, §38.1; the `+0x2FC/+0x300` X/Y chase is the self-attachment move, not an order leg), and the MoveOrder 0x100/0x200 AI bump variants remain; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; the authority now resolves a snapshot-owned remote player's collision tail, but `remote_player_body_anim` does not yet apply org2's every-tick climb-state override (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
 | D-COL-6 | **FIXED 2026-08-23:** authority pass-0 type-10 contacts are published as exact source/trigger pairs by `CollisionWorld::resolve_entity`; snapshot-owned remote org2 bodies run the same collision tail; `ZoneSystem::capture_contact_tick` drains the stream into request/presence state with no MoveOrder or radius fallback | `Entity_ComputeBoneCollisionForce @0x4AE150` sets 0x200 at `@0x4AEB7B`; resolver callback gate `@0x4B31DD..0x4B3238`; `Server_OnPlayerTouchCaptureZone @0x500BA0` | Pinned by `collision_test` (authority/dedupe), `infantry_test` (stationary remote body producer), and `zone_chain_test` (authored narrow CT box vs broad gameplay radius) |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined — PERMANENT 2026-08-29 (ADR 0022 register) |
-| D-COL-8 | walk-over-body sound (`@ 0x4b30da`; the run-over kill, its player exemption, quadrant and bump sound are ported, step 6 and §29.3) / non-flag attrib-1 waypoint branches + the attrib-2 collision callback / the blocked-push AI latch (pad_368[1]) not ported; the shared ItemDef branch order and the exact attrib-1 flag-family contact producer are ported (2026-08-23); the resolver's player predicate is the class bit (`Flags & 0x100`) at every physics leg for local and remote bodies alike, the local-entity compare reserved for the side-writes (2026-08-24) | steps 4/5/6 above | Door contacts and their shared motor/pose path are ported in section 33.14; the remaining contacts need their Score/net, sound and destruction owners |
+| D-COL-8 | walk-over-body sound (`@ 0x4b30da`; the run-over kill, its player exemption, quadrant and bump sound are ported, step 6 and §29.3) / non-flag attrib-1 waypoint branches + the attrib-2 collision callback not ported (the blocked-push AI latch pad_368[1] is ported as `InfantryState::path_state`, §33.16); the shared ItemDef branch order and the exact attrib-1 flag-family contact producer are ported (2026-08-23); the resolver's player predicate is the class bit (`Flags & 0x100`) at every physics leg for local and remote bodies alike, the local-entity compare reserved for the side-writes (2026-08-24) | steps 4/5/6 above | Door contacts and their shared motor/pose path are ported in section 33.14; the remaining contacts need their Score/net, sound and destruction owners |
 | D-COL-9 | mounted-organic cadence and force suppression PORTED 2026-07-20: a live mounted source calls the resolver every eight salted ticks and still processes contact/flag callbacks, but skips model push accumulation when it has a live modeled parent or `Flags & 0x40`; the MoveOrder-0x100 bump and the `+0x2c` bit-4 pitch-restore latch landed with the ladder slice (§30) | `[orig: Entity_UpdateInfantryAI @ 0x4bf5a5-0x4bf5c6]`; `[orig: movement collision resolver @ 0x4b2be0-0x4b2d3f]`; force gates `@ 0x4b3045-0x4b30af` / `@ 0x4b3658-0x4b36b9` | mounted contact phase is live and no longer receives ordinary mover push; the step-up/auxiliary tails landed with the D-COL-5 port (§30) |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `ObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
 | D-COL-11 | FIXED 2026-09-18: pre-move projectile BB probe suppresses terrain while indoors | Projectile_UpdatePhysics @ 0x4E9D70 / terrain gate @ 0x4EA2F0 | projectile_combat tests crossing the same terrain inside a building BB and outside it |
@@ -2664,7 +2829,8 @@ the ladder locomotion tail landed with the D-COL-5 port 2026-08-15 (§30), and
 the swim transitions landed 2026-08-24 (#566 — §29.1 + `world/infantry_water.cpp`,
 states 36-40 through the 8-case jumptable `@ 0x4b7411`); the remaining D-INF-3
 tail is the submerged scope auto-untoggle and the forward-speed question
-(ledger row). The former swim-damping entry was actually airborne collision
+(ledger row). The climb-order writer is the BMS attribute fold (§38.1), and the
+org1 float settle rides the org1 motor's vertical quarter-step tail (§38.3). The former swim-damping entry was actually airborne collision
 response and is now implemented (section 33.37).
 
 ### 15.6 The armory / loadout-zone flow (cross-record pointer)
@@ -2887,8 +3053,9 @@ Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0]`, and a JOX data probe
 (Chair03X/Cbunker1: every COBJ's CVRT run centroid lands ON its header offset)
 proves the vertex runs are MODEL-space — so the shared entity matrix per
 section is structurally right for the nonanimated `BoneCallback_Simple` path,
-and our IR consumption
-(`collision_model_from_ir`, disk `dominate_axis` word kept) is faithful.
+and our model consumption
+(`collision_model_from_3di` over `threedi::ThreediCollisionModel`, disk `dominate_axis` word
+kept) is faithful.
 
 CXLT is collision metadata, not a per-COBJ additive transform. Retail keeps it
 at collision +0x70/+0x74, while `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0`
@@ -3097,8 +3264,8 @@ and `@ 0x4e78d0` (the drag-table generator).
 Slice-1 witness pass for the mission-playability track: how AI acquires live targets and
 fires. Two layers share one primitive set: the 24-row **AI-vehicle SM** (§1.3 — cveh/cbot/
 ctrn/emplacements) carries combat as states 17/18; **organic infantry** carries it inside
-`Entity_UpdateInfantryAI @ 0x4b9910`'s combat pass (§3.5 item 5 — witness target still open,
-item 7). Everything below is decompile/disasm-witnessed at anchored confidence unless marked.
+`Entity_UpdateInfantryAI @ 0x4b9910`'s combat pass (witnessed in §17; the §4
+item 7 scan is `Entity_FindNearestThreat @ 0x4b0990`). Everything below is decompile/disasm-witnessed at anchored confidence unless marked.
 
 ### 16.1 Dispatch rows 16/17/18 decoded (raw dwords @ 0x815338..0x815367)
 
@@ -3112,16 +3279,20 @@ The fire routine IS the state-17 tick. Corrections to prior session notes: `0x46
 `0x467400` are the combat/evade **enters**, not "death-transition enters"; the IDB had
 `0x467400` spanning three glued functions (boundary-fixed this session, §16.6).
 
-- **Combat enter** `[orig: AI_EnterState_GroundCombat @ 0x467650]`: `AiSlot+136 = 2`; brain
+- **Combat enter** `[orig: AI_EnterState_GroundCombat @ 0x467650]`: `AiSlot+136 = 2`, written
+  first and unconditionally (`@ 0x467665`), so a lone hull is red for SingleAtRedAlert
+  (`Entity_IsSsnAtAlertLevel @ 0x43E780`); brain
   alert cur/pend (`+184/+188`) = 2; `TriggerGroup_SetAlertRed(entity+284)`;
   `Entity_AlertNearbyAllies(entity, 0x640000)`; brain moveStep (`+28`) = 1.
-- **Evade enter** `[orig: AI_EnterState_GroundEvade @ 0x467400]`: same alert block + ally
-  wake, then routes by the .aip EVADE_FLAGS word (`profile+96`): FOLLOW_WP (0x1,
+- **Evade enter** `[orig: AI_EnterState_GroundEvade @ 0x467400]`: same alert block (its own
+  slot byte first, `@ 0x46741F`) + ally wake, then routes by the .aip EVADE_FLAGS word (`profile+96`): FOLLOW_WP (0x1,
   `test al,1` `@ 0x467452`) → pending 17 if brain[38]
   (target) else 16, tail-calling that state's enter via `off_815238[4*state]`; FLEE (0x4,
-  `test al,4` `@ 0x467488`) → 17; else alive (`health@+286 > 0`) → flee waypoint
-  (controller triple `{1, 0x7FFFFFFF, 1}`, work pos/heading, moveStep 16); dead →
-  `AIEvent_QueueEntry` type 3 (|vel| ≥ 1057) else type 4. (Corrected 2026-09-22: the bits
+  `test al,4` `@ 0x467488`) → 17; else alive (the entity's live `health@+286 > 0`,
+  `@ 0x4674A5`) → flee: turn about at combat speed (controller triple `{1, 0x7FFFFFFF, 1}`,
+  brain[132] = heading + 0x7FFFFFFF, brain[133]/[134] = 0, brain[128] = brain[49], moveStep 16; the
+  work position is not written) `@ 0x46756D..0x4675B1`; dead → `AIEvent_QueueEntry` type 3
+  (|vel| of the entity record's +0x98/+0x9C ≥ 1057, `@ 0x4674B2..0x4674B8`) else type 4. (Corrected 2026-09-22: the bits
   were earlier read as organic/tracked/wheeled; `aip.h` names them.)
 - **Evade event** `[orig: AI_HandleEvent_GroundEvade @ 0x4675c0]`: `AI_HandleCommand` first;
   evt 1 damage → brain[39] = evt[3], pending 18 unless pending/current is 21 or `profile+96`
@@ -3132,7 +3303,7 @@ The fire routine IS the state-17 tick. Corrections to prior session notes: `0x46
 P2 ported the scoring core over an injected candidate list; the feed — the class-driven
 pool walk over `g_pool_list @ 0xA892E0` — is witnessed and PORTED 2026-08-13
 (`AiSystem::acquire_target`, `engine/runtime/world/ai_combat.cpp`; ctests `ai`,
-`promote`). Outer loop = the profile's four weapon-slot class slots (`profile+40+4*i`,
+`mission_promote`). Outer loop = the profile's four weapon-slot class slots (`profile+40+4*i`,
 each holding a class id 0..3), each class gated by its priority word (`+80+4*class`,
 zero → skip via `LABEL_73`), each selecting pools + sub-filter legs
 (the sub-filter reads corrected 2026-08-13 from the full decompile — the earlier
@@ -3159,7 +3330,7 @@ refcount-decay, each stage 16.16 with `+0x8000` rounding (as ported); range base
 `0x640000/dist`. **LOS runs last, only for a would-be best**:
 `Entity_CheckMutualLineOfSight @ 0x539be0` = `Entity_ComputeWeaponFireOrigin @ 0x43b4b0`
 × 2 + `Physics_RaycastTerrainAndSectors @ 0x539910` (terrain + sector raycast, flag 0;
-internals = open item, §16.5).
+internals witnessed in §18.5).
 
 ### 16.2a The class walk's data supply (witnessed 2026-08-13, ported with the feed)
 
@@ -3168,11 +3339,13 @@ internals = open item, §16.5).
   count `dword_AED37C`), the name copied in, `File_ParseASCIIFile` runs
   `AIProfile_ParseProperty @ 0x45de70` over the `.aip`, then the four class ids
   {0,1,2,3} are qsorted by their priority words (`CompareFunction @ 0x455d90` =
-  `a[1] - b[1]`, ascending; MSVC qsort insertion-sorts ≤ 8 entries — stable) and stored
-  REVERSED into `+40/+44/+48/+52` `@ 0x45fed9-0x45ff04` — the walk runs
+  `a[1] - b[1]`, ascending, through the CRT `_qsort @ 0x76D6A0`, the call `@ 0x45FECA`; for
+  four entries it runs its selection shortsort, which is NOT stable, so equal keys come out in
+  shortsort order) and stored REVERSED into `+40/+44/+48/+52` `@ 0x45fed9-0x45ff04`: the walk runs
   priority-DESCENDING. The sort keys load only for `profile+16` (type) ∈ {1 HELO,
-  2 GROUND} `@ 0x45fe7f/0x45fe9a`; other types keep all-zero keys → tie order
-  {3,2,1,0}. **A missing `.aip` therefore leaves an all-zero record: zero priorities
+  2 GROUND} `@ 0x45fe7f/0x45fe9a`; other types keep all-zero keys, and four equal keys
+  walk {0, 3, 2, 1} (194 of the 256 {0..3}^4 key tuples walk differently from a stable
+  sort; `ai_brain_rows` executes all of them). **A missing `.aip` therefore leaves an all-zero record: zero priorities
   gate every class off, and the brain acquires nothing — witnessed retail behavior for
   unresolved profiles** (the shipped drivable transports author `priority_* 0`
   explicitly, same outcome).
@@ -3193,17 +3366,22 @@ internals = open item, §16.5).
   EntityPool_GetPtrFromHandle(record+476)`, beside `+152 = handle(record+480)`
   `@ 0x45dbb3-0x45dbc5`) and the release/clear walkers (`Entity_ClearAllReferences
   @ 0x4656bd`-family nulls). A flat-displacement sweep of every `[reg+94h]` store
-  found NO live gameplay producer — an indexed-store writer may exist unswept
-  (open follow-up below). The consumer is ported (packed+1 rebase in
-  `AiBrain::kPriorityTarget`); with no producer the slot stays null, as today.
+  found no gameplay store because the live producer is `Entity_FindByNetId
+  @ 0x4655B0` behind ChangeAI 44 (TARGETSSN), which leaves only 0 behind (below).
+  The consumer is ported (packed+1 rebase in `AiBrain::kPriorityTarget`); the slot
+  therefore stays null in practice.
   (The `Entity_SetWaypointByTeam @ 0x43cd20` `+0x94` writes are the CONTROLLER
   struct at `entity+0x68` — waypoint type/index at controller `+0x8C..+0x98` —
   not the brain; the two structs were disambiguated this session.)
-- **Open follow-ups**: the brain[37] live producer (indexed-store sweep; check the
-  WAC `ai` command family); the `dword_24C1930` bit `0x800` writer (an MP-rules
-  word — the reimpl seam `World::rules.ai_rules_skip_local_player` defaults clear and the
-  net wire into it is pending); variant A `AI_FindBestTarget @ 0x465a50` remains
-  unwitnessed (§16.5 item 7).
+- **Follow-ups, RESOLVED 2026-09-23.** The brain[37] producer is ChangeAI 44
+  (`Entity_ApplyCommand` case 44 `@ 0x43B136..0x43B13B`) -> `Entity_FindByNetId(brain,
+  ssn) @ 0x4655B0` writing brain+0x94, where only 0 survives: the unconditional clear
+  (`@ 0x465654`) runs after the pool-1/2 stores and a live pool-0 match returns before
+  storing (`@ 0x4655E9`). `dword_24C1930` is the local debug/cheat word, not an MP
+  rule: 0x800 toggles on input action 123 (`@ 0x4E07A4`; catalog row 123 is empty and
+  unbound), 0x100 through `@ 0x4DC9C0`, 0x400 through action 74, zeroed by
+  `Game_StartMission` (`@ 0x525B25`); no net wire exists or is needed. Variant A
+  `AI_FindBestTarget @ 0x465a50` is witnessed (§16.5 item 7).
 
 ### 16.3 Target bookkeeping
 
@@ -3213,17 +3391,22 @@ internals = open item, §16.5).
   refuted. Target ptr lands in brain[38] (`+152`) AND `AiSlot[3]` (`+12`).
 - `[orig: AIEntity_TryAcquireTarget @ 0x4716b0]` — retarget cadence: brain[42] (`+168`)
   must exceed **248 ticks** (~4 s), reset to 0 on scan; `profile+16 == 1` selects
-  `AI_FindBestTarget @ 0x465a50` (variant A, unwitnessed) else `@ 0x466f60`; result →
-  `Entity_SetAITarget`. Called from both fire ticks (`@ 0x472e00`, `@ 0x471710`).
-  brain[42]'s incrementer is unwitnessed (open, §16.5).
+  `AI_FindBestTarget @ 0x465a50` (variant A, witnessed: identical to B except its arc
+  bytes load sign-extended, §38.2; `cmp dword ptr [eax+10h],1` `@ 0x4716D5`) else
+  `@ 0x466f60`; the result goes to `Entity_SetAITarget` unconditionally, a null result
+  included (`@ 0x4716F0`). Called from both fire ticks (`@ 0x472e00`, `@ 0x471710`).
+  brain[42] += 16 on each processed tick (`add [esi+0A8h],ebx` @ 0x472ECD; the aircraft
+  twin @ 0x4717E1 in `AI_TickState_AircraftCombat @ 0x471710`), ported in both combat ticks.
 - `[orig: Entity_AlertNearbyAllies @ 0x4654b0]` (ex "ScanForNearbyEnemies" — misnomer, the
   team compare is EQUAL): pool-1 scan for same-team, alive, non-building entities within
-  0x640000 (100 u); sets own `AiSlot+136 = 2` and each ally's brain alert (`+184`) = 2.
+  0x640000 (100 u); sets the caller's own `AiSlot+136 = 2` per ally in range (`@ 0x46558A`)
+  and each ally's brain alert (`+184`) = 2 (`@ 0x465597`). The alert-family enters write
+  their own byte first in any case (§16.1, §38.1).
 
 ### 16.4 The fire chain converges with the player path
 
-State-17 tick `[orig: AIEntity_ProcessWeaponFire @ 0x472e00]` (5965 B, cc 133 — full body
-digest pending, §16.5; curated IDB comments give: cooldowns `+208/+210` vs `def+124` rate,
+State-17 tick `[orig: AIEntity_ProcessWeaponFire @ 0x472e00]` (5965 B, cc 133; the full body
+digest is §17.6; curated IDB comments give: cooldowns `+208/+210` vs `def+124` rate,
 ammo `+212/+216`, `def+100` mode flags 0x80 stationary / 0x40 burst / 0x20 sweep, PRNG
 scatter `mod (6 − accuracy)`, sweep wrap −196608) calls per shot:
 
@@ -3243,16 +3426,19 @@ Also witnessed: `@ 0x472e00`'s callee set includes the relation-matrix writers
 SetDamagedBit`, `EventMatrix_SetSpecialBit`) — the concrete apply-sites for P2's
 recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMovementTarget`
 (it moves while fighting) and `Entity_ComputeWeaponFireTransform_0` /
-`AI_GetSuspensionFirePoint` (aim transforms).
+`AI_IsTargetInSight` (aim transforms).
 
 ### 16.5 Open follow-ups (this session's unknowns)
 
-4. `Entity_ProcessInfantryWeaponFire @ 0x471710` is wired as the **state-8 tick**
-   (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — RESOLVED 2026-09-08: it is
-   the aircraft brain's weapon-fire leg (the IDB name is a misnomer and is kept; the
-   PR #640 alias `AI_UpdateAircraftCombat` never existed in the IDB) — ported in
-   `ai_aircraft.cpp`, vehicle-client-movers-re §26.
-7. `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1` classes).
+4. `AI_TickState_AircraftCombat @ 0x471710` (ex `Entity_ProcessInfantryWeaponFire`) is wired
+   as the **state-8 tick** (`@ 0x8152bc`, HELO enum range). RESOLVED 2026-09-08: it is the
+   aircraft brain's weapon-fire leg (the PR #640 alias `AI_UpdateAircraftCombat` never
+   existed in the IDB), ported in `ai_aircraft.cpp`, vehicle-client-movers-re §26; the IDB
+   carries the new name since 2026-09-23 (§38.13).
+7. RESOLVED 2026-09-23: `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1`
+   classes) is instruction-identical to `AI_FindBestTargetB` except that both arc bytes
+   load sign-extended (`movsx` `@ 0x465A8C` / `@ 0x465A9B`), so a HELO arc over 180
+   degrees never acquires; its five call sites use it (§38.2, `ai_targeting`).
 
 ### 16.6 IDB write-backs (2026-07-16, saved)
 
@@ -3277,7 +3463,7 @@ seeds in §3.2 (`slot[15]/[16]/[17]` = max/min-engagement/max-attack ranges ×65
 `slot[10]/[11]` = `100−w_accuracy2/1`, `slot[22]` = 62×advancetimer, byte `+136` = alert).
 
 PORT (same day): the infantry pass = `AiSystem::infantry_combat_think` /
-`infantry_fire_pass` (`engine/runtime/world/infantry.cpp`), the feed =
+`infantry_fire_pass` (`engine/runtime/world/infantry_combat.cpp`), the feed =
 `AiSystem::acquire_target` + `infantry_scan_nearest_threat`, the relation apply =
 `apply_engage_relations` / `ai_set_target`, the SM rows = `h_enter_ground_combat` /
 `h_enter_ground_evade` / `h_ground_combat_tick` (`engine/runtime/world/ai_handlers.cpp`), AI fire →
@@ -3295,14 +3481,17 @@ Runs when `tick & 0x1F == 0` (the per-entity staggered tick, §3.1):
   `(tick>>5) & 3`: phase 0 → full base, phases 1/3 → `min(base, 0x60000)` (6 u),
   phase 2 → `max(base/2, min(base, 6u))`. Full-range scans thus run every ~128 ticks
   (~2 s); near scans every 32.
-- **Teamless override**: `slot[1] & 8` → the entity scans AS team 2 while teamless
-  (byte +354 swapped around the call).
+- **Teamless override**: a coward (`slot[1] & 8`) with team 0 scans AS team 2: the think
+  writes 2 into the team byte +354 for the `Entity_FindNearestThreat` call and restores it
+  [orig: @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
 - The scan itself = `Entity_FindNearestThreat @ 0x4b0990` (ex kong
   "Entity_SpawnProjectile" — §17.2) with the staged range.
 - **Fallback**: no hit AND (phase 0 or no current target) → `entity->lastAttacker`
-  becomes the target if its team differs, `slot[1] & 1` is clear, and
-  `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130` (ex `sub_53B130`; terrain LOS
-  `@ 0x53b080` + entity-collision raycast `@ 0x539a70`, returns 1 = clear) passes.
+  becomes the target if its team differs, `slot[1] & 1` is clear (there is no health
+  test), and `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130` (ex `sub_53B130`; terrain
+  LOS `@ 0x53b080` + entity-collision raycast `@ 0x539a70`, returns 1 = clear) passes, called
+  as (self, attacker, &self.Position, &attacker.Position, heightOffset 0, allTypes 0): feet
+  to feet, with buildings the only entity blockers [orig: @0x4BBEEF..0x4BBF24].
   `lastAttacker` is consumed + cleared every scan — retaliation has a 32-tick memory.
   A no-hit scan on phases 1-3 re-commits the held slot[3] target instead
   (`mov edi,[ecx+0Ch]; test edi,edi; jnz` [orig: @0x4bbee4..0x4bbeed]); only a
@@ -3310,11 +3499,19 @@ Runs when `tick & 0x1F == 0` (the per-entity staggered tick, §3.1):
   fallback and the clear [orig: @0x4bbf7c..0x4bbf85] (ported 2026-09-09: the port
   cleared the target on every miss, so a target between the 6 u near scan and
   the sight range flickered every other scan).
-- **Commit**: `aimPoint = target pos`, `aiFocus = target`, `damageTimer += 12` (cap ~27,
-  −1/tick — stays alerted while seeing a target), `slot[3] = target` (same field the SM
+- **Commit**: `aimPoint = target pos`, `aiFocus = target`, `damageTimer += 12` while it is below 15
+  (so at most 26) [orig: @0x4BBF4B..0x4BBF65], decaying by one only on a think whose
+  staggered key has key & 63 == 0, i.e. once per 64 ticks [orig: Entity_UpdateInfantryAI
+  @0x4BA9D8 (`and eax,3Fh`); the decay @0x4BBE24..0x4BBE38], `slot[3] = target` (same field the SM
   layer uses, §16.3), same-target tick counter `+0x33C` increments (reset on switch),
   and `Flags &= ~0x4000` — the own priority-target mark DECAYS each scan and is
   re-armed by firing (§17.4), so recent shooters score ×6 to everyone (§16.2).
+  The mark has two writers: the organic fire (`@ 0x4BF370`) and `RoundData_SpawnRound`'s
+  tail for every non-silenced ballistic round (`test byte ptr [edi],8; jnz; or dword
+  ptr [ebp+24h],4000h` `@ 0x4EC842..0x4EC847`) plus the shotgun fan
+  (`Weapon_SpawnProjectileBurstWithSpread` `@ 0x4EBE61..0x4EBE66`), so players carry the
+  weight too and a silenced round leaves no mark; the clear is `and dword ptr
+  [esi+24h],0FFFFBFFFh` (`@ 0x4BBF88`).
 
 ### 17.2 The feed — `Entity_FindNearestThreat @ 0x4b0990` → `Entity_FindTargets @ 0x53a610`
 
@@ -3337,7 +3534,15 @@ writes as the SM engage block (§16.4) — the infantry-side apply site of D-AI-
   16 ticks (`current_tick − *(+428) <= 16` — lets NPCs shoot fresh bodies); not
   self/platform; **forced-target words** `shooter+332/+334` (DcbId) `+336/+338`
   (relmat) force-include matching candidates; else the team leg (`flags 0x100`: either
-  side's AiSlot `0x200` see-all, or candidate team ≠ 0 and ≠ shooter team).
+  side's AiSlot `0x200` see-all, or candidate team ≠ 0 and ≠ shooter team), then the
+  armor gate: a candidate whose ITEM DEF carries both armor words at 0xFFFF
+  (`def+0x190` and `def+0x192`) is skipped `[orig: @ 0x53AC3F..0x53AC59]`. The
+  forced-target words bypass it. An hp-0 def's init writes that pair whatever the
+  def authored (§ entity flags below), so an indestructible decoration is never a
+  threat: 01TR's team-2 concrete lane dividers (items.def 102289..102291) leave the
+  riflemen at the spawn (SSNs 2, 70, 71) nothing to shoot until the course events
+  hand them targets (`fire_hold_01tr` ctest). The port had skipped that armor write
+  and those riflemen emptied their rifles into the dividers from the first second.
 - `Entity_ValidateWeaponTarget @ 0x53a400`: in-use/alive(/fresh-corpse) again, the
   building filter (`Flags & 0x100` excluded when `dword_24C1930 & 0x800` or
   `g_spawn_success_gate`), shooter forced-target restrict words `+332/+336`, then
@@ -3383,25 +3588,60 @@ With a live target (`slot[3]`) and `dist < slot[15]` (attack range) and no hold 
 clip — `animMap[state] != animMap[0]`): 155 `attack`, 165 `cover_attack` when `wasHit`,
 158 `attack_4` when `health <= healthMax/2`, 157 `attack_3` under 9 u, 156 `attack_2`
 + 166 `cover_attack_2` under 3 u, 152 `pre_attack` when prev moveMode ∈ {0,3,4}, 151
-`post_attack` when the target is dead within 3 u (clears `aiFocus`). A reaction arms
+`post_attack` when the target is dead within 3 u (clears `aiFocus`), the last link of the
+in-range, moveTimer == 0 reaction chain, not a separate pre-check [orig: @0x4BC269..0x4BC297];
+the held dead target stays in slot[3] until a phase-0 miss (phases 1-3 re-commit it,
+@0x4BBEE4..0x4BBEED). A reaction arms
 `moveTimer = slot[22]>>4` (the hold between reactions; decrements faster under 10 u/3 u
 or in anim 49). No reaction available → approach: `slot[16] < slot[17]` and command
 ≠ 126 and `dist > slot[16]` and the target position has ground → **moveMode 1** (move
-to target, arrive 10 u) else anim 49 + **moveMode 7** (hold). Beyond `slot[15]` with
-`damageTimer` and a stale focus: dead focus swaps to corpse-watch; else **moveMode 2**
-(move to `aimPoint` = last known, arrive 2 u) or anim 44 + **moveMode 8** (scan idle).
-Other modes: 5 = flee (prev-mode latch, 20 u at 10 u arrival, anims 43/167/168
-`run_attack`/`run_away`), 6 = board-approach (attach point, arrive 1 u → anim 150
-`hold_rope`), 12 = deep water, 33/44/55/66 = the no-cover arrived variants.
-`ai_find_cover_position @ 0x4afab0` filters every move target (fail → the per-mode
-fallback anim); `aiRef2 == self` = the retreat sentinel (bodyHeading flipped 180° —
+to target, arrive 10 u) else anim 49 + **moveMode 7** (hold). With no target (slot[3] == 0) [orig: @0x4BC34B..0x4BC4BE]:
+with damageTimer and aiFocus set (and slot[16] < slot[17]) a dead focus with a 151 clip
+re-seats aimPoint on the corpse (no clip clears the focus); then **moveMode 2** to
+aimPoint, arriving at 2 u, when the truncated (dz >> 1) distance is unsigned-above 0x20000
+and `Entity_CheckGroundHeightAtPosition(&aimPoint, self)` holds, else anim 44 (151 plus a
+focus clear over a corpse) with **moveMode 8** (scan idle); damageTimer or focus zero clears
+aiFocus. The common hold-timer tail runs on every path [orig: @0x4BC4C4..0x4BC537]: `if (t)
+t--`, and for a body without the coward bit (slot+4 & 8) one more tick in idle_3 (49) and
+one each under 3 u and 10 u of the target, the no-target distance being 1000 u (0x3E80000
+@0x4BAA88).
+Other modes: 5 = flee is unreachable (its only producer, the latch @0x4BD0FA..0x4BD109,
+needs +0x36A == 5, and the only +0x36A writer @0x4BD356 stores the collapsed move mode; 168
+`run_away` @0x4BD765..0x4BD780 and the 43 swap @0x4BD49C are dead with it), 6 =
+board-approach (attach point, arrive 1 u → anim 150 `hold_rope`), 12 = the WAC holdSSN hold
+(entity +0x2C bit 0x2000, set by `WacCmd_HoldSsn @0x4F785D`, cleared by `WacCmd_UnholdSsn
+@0x4F78BD`). `ai_find_cover_position @ 0x4afab0` always returns 1 (@0x4AFF3F), so the
+failure switch @0x4BD4F2 with its four extra calls and the 33/44/55/66 variants are dead; it
+is the goal-directed obstacle detour (§33.16); `aiRef2 == self` = the retreat sentinel (bodyHeading flipped 180° —
 walks backwards facing the enemy). Turn-in-place: |targetHeading − bodyHeading| > ~45°
 → anim 147 `stop`, > ~30° → anim 1. Gait: moveMode 2/3 arrival-graded 148/1/149;
-damaged/alerted idle 43 → 49 (armed) / 44. Reload: `def clipsize != 0` and magazine
-word ≤ 0 and anim 65 available → **anim 65 `reload`** (moveMode 0); while 65 plays the
-magazine refills to `clipsize`. Burn states `+0x368[0]` 1–4 → anims 111–114 `burn*`
-with `moveTimer` countdown. `Flags & 0x40` → the guard family (140 `guard`, 143
-`guard_cover` on roll, 142 `guard_attack` on reaction; leaving → 144 `guard_leave`).
+damaged/alerted idle 43 → 49 (armed) / 44. Reload runs on every path after the aim blocks:
+with a def clipsize, a 65 clip and the signed magazine word ≤ 0 it selects **anim 65
+`reload`** with moveMode 0 and distance 0, even when 65 is already current; whenever the
+current state (captured @0x4BCFF5) is 65 the magazine refills from the clipsize low word,
+clipsize or not [orig: Entity_UpdateInfantryAI @0x4BD132..0x4BD17D]. Burn states `+0x368[0]` 1–4 → anims 111–114 `burn*`
+with `moveTimer` countdown. The combat tail, after the reload leg, reads Flags once (@0x4BD184):
+Flags 0x100000 (ladder) drops the move (moveMode 0, distance 0, @0x4BD187..0x4BD194).
+Flags 0x40: moveMode 0 and distance 0; guard (140) when authored, else Flags &= ~0x40
+(@0x4BD19B..0x4BD1BB); guard_cover (143) when wasHit (captured at think entry
+@0x4BA9A2/@0x4BA9C1) and 143 is authored (@0x4BD1BE..0x4BD1D5); guard_attack (142) with
+moveMode 7 when a reaction was chosen and 142 is authored (@0x4BD1D9..0x4BD1F8). Without
+0x40, a current 140..143 with guard_leave (144) authored leaves through 144 with no move
+(@0x4BD1FA..0x4BD231). Then the holdSSN hold (moveMode 12, @0x4BD235..0x4BD240), the
+reaction hold (moveMode 7, @0x4BD245..0x4BD251) and the forced animation
+(@0x4BD256..0x4BD271). `g_animStateNameTable @0x8135F0` names 142/143/144 guard_attack,
+guard_cover and guard_leave. The think writes targetHeading only at the marker wait
+(@0x4BAD29), the S stage (@0x4BB7CA), the escort helper within its radius (@0x4BBD75), the
+guard restore (@0x4BBE1E), block 2's re-face (@0x4BCFCF), the scripted idle's re-face
+(@0x4BD0E1), the attachment within 1 u (@0x4BD2AC), the dragger turn (@0x4BD5BF) and, for a
+moving selection, the detour (@0x4AFF2C); the nav, approach, follow and board legs write
+only the goal. Every nav and command leg ends in the common move tail @0x4BBE11, where a
+Flags 0x40 body gets targetHeading = the entry heading captured at think entry
+(@0x4BA9B4..0x4BA9BA), which only the marker wait (@0x4BAD41) and the S stage (@0x4BB7D0)
+rewrite. Under Flags 0x8000 the selector swaps jog/run/walk (148/149/1) for swim_forward
+37, the idles 43/44/49 for swim_idle 36 and attack/attack_2 for swim_attack 154, each when
+authored (@0x4BD635..0x4BD6A3); after the wounded gaits a moveMode 1 body in run_forward
+takes run_attack 167 when authored (@0x4BD748..0x4BD763). The full think witness is §38.4.
 Swim/wash/wounded overlays as §3.5; anims 27–29 `wash_*` when
 `Terrain_FindNearestAmbientSoundSource(pos, 15u)` hits. Anim commit uses the §3.4
 flag-table arbitration (bit 2 locked → pending; bit 5 + target not bit 0 → pending).
@@ -3419,7 +3659,7 @@ bodies receive moveTimer 1. NPCs receive 1/2 for the attacker's same command gro
 error below `0x3FFFFFC0`. Flags&2 blocks the store; zero hit type skips the store.
 The projectile callback invokes this before death dispatch; the blast invokes it
 inside its range/visibility gates before the damage callback's armor rejection.
-[orig: Entity_ApplyCollisionForce @ 0x4AF4A0; Entity_HandleDamageTrigger @ 0x4074BA;
+[orig: Entity_ApplyCollisionForce @ 0x4AF4A0; OrganicClass_HandleEvent @ 0x4074BA;
 Entity_HandleDamageAndTriggerZones @ 0x407822; Projectile_ProcessExplosionQueue
 @ 0x4EB1D2] Retail assumes a valid attacker for the NPC group lookup; ownerless
 embedder events use the ordinary duration.
@@ -3493,7 +3733,7 @@ player:
 | call site | extra gate | ported |
 |---|---|---|
 | `Entity_ApplyWeaponDamage @0x4e6b77..0x4e6b8a` (after the `deathCallback(entity,2,0)` notify @0x4e6b72) | the damage record's kz type `+0x18 != 3` (not the medic heal); args `(record+0x20, record)` | yes — `destruction.cpp`, the person path of `entity_apply_weapon_damage` |
-| `Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b` | `!(victim.Flags & 2)` (alive) AND `damage > 5`; args `(projectile owner, owner+4)` | not yet (`round_sim.cpp`) |
+| `Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b` | `!(victim.Flags & 2)` (alive) AND `damage > 5`; args `(projectile owner, owner+4)` | yes (`round_sim.cpp`, the round hit leg) |
 | `Projectile_ProcessExplosionQueue @0x4eb2b6..0x4eb2df` | `victim.Flags & 0x100` (Player) && `!(Flags & 2)` && `victim+0x124 == 0` && local && `record+0x18 != 3` | yes — `destruction.cpp`, the pool-0 sweep ahead of the damage callback |
 | `Entity_UpdateInfantryPlayerBody @0x4b61e8..0x4b61f5` (org1) | reached on org1's health-adjust DEATH leg only (`Health <= 0` and `!(Flags & 2)`, after the fall death-anim stage and the class callback) | no — our unified infantry motor has no separate org1 death leg to hang it on |
 | `Entity_UpdateInfantryPlayerBody @0x4b7d23..0x4b7d2d` (org2 fall damage) | the landing threshold alone, AHEAD of the authority and Indestructible tests, so a joiner's own body flashes on a hard landing it never charges | yes — `infantry.cpp`, the landing leg |
@@ -3513,8 +3753,9 @@ non-zero `kz_damage` word (+46) adds 20 to the camera shake
 `[orig: @0x4af830..0x4af84b]` — that arm sits ahead of any damage gate, so an
 explosive NEAR-MISS that deals nothing still shakes. Its tail (`wasHit`,
 `damageTimer += 10` below 25, `lastAttacker`, all skipped on self damage)
-`[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain in
-`AiSystem::tick`. Three call sites: `Entity_HandleDamageTrigger @0x407588` and
+`[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain,
+`AiSystem::apply_round_hits`, which the entity update runs right after the explosion queue
+(§38.9). Three call sites: `OrganicClass_HandleEvent @0x407588` and
 `Entity_HandleDamageAndTriggerZones @0x40792b` (the two class damage callbacks,
 unported for the cosmetic half) and `Projectile_ProcessExplosionQueue @0x4eb05c`
 — the OUTER-BAND flinch, taken by any organic (`victim->itemDef->type(+0x5C) == 3`)
@@ -3550,6 +3791,9 @@ record that feeds our `RootMotionFrame`) is consumed on ODD ticks (`tick & 1`)
 | 0x8 | latch `shouldFireSecondary` (fired at the block tail) |
 | 0x10 | FIRE weapon byte `entity+0x35B` from bone `entity+0x367` |
 | 0x20–0x400 | the six SSAudio foley slots (24–29) |
+
+The block has no mount test: a mounted body, gunner included, consumes its own clip's fire
+bits and latch before the mounted request [orig: @0x4BF156, @0x4BF4B3].
 
 The secondary latch fires `entity+0x359` from bone `+0x366` and decrements the
 **magazine word `entity+0x35C`** (the reload trigger, §17.3; reseeded to
@@ -3602,7 +3846,7 @@ stance sound dispatch @ 0x4B703D..0x4B709D; sound globals @ 0x24E09D0,
 
 The trigger word's SOUND consumers, fully witnessed in both bodies and ported
 (`AiSystem::infantry_anim_sound_pass` / `emit_slot_sound` -> `World::out.slot_sounds`
--> `Simulation::drain_slot_sounds` -> `fire_present_pass._drain_slot_sounds`;
+-> `Simulation::drain_slot_sounds` -> `FirePresenter::present_slot_sounds`;
 ctest `slot_sound`). The slot table and its SndProf.def source are the audio
 record's §sound-profile ([lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md),
 D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
@@ -3634,11 +3878,11 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   flag clears. Runs for corpses (a thrown body lands with 15).
 - **Death scream** (the org1 death edge `@ 0x4b9ca3-0x4b9cc1`): slot 8
   `SSNightDead` when `Bms_AttribFlags & 0x100000` else 7 `sounddeath` — the
-  bit is the mission **EnableNVG** attribute (engine/runtime/mission `AttribFlags`; the
+  bit is the mission **EnableNVG** attribute (`bms::AttribFlags`, engine/formats/mission/bms.h; the
   §19.7 "what authors 0x100000" open item closes: the dfx2med encoder writes
   it as the NVG checkbox, and the runtime reuses it as the night gate). The
-  `byte+0x134`-bit0 silent-cleanup variant skips the scream (unchanged,
-  D-AI-9). The org2 player edge instead plays the BODY-MODEL composite
+  `byte+0x134`-bit0 silent-cleanup variant skips the scream (ported in
+  `infantry_death_edge`, `infantry_death.cpp`). The org2 player edge instead plays the BODY-MODEL composite
   `SoundProfile_FindByEntityAndType(entity, night ? 5 : 0)` name
   `@ 0x4b4c4a-0x4b4c6a` — `"%s_%s"` of `Entity_GetBodyModelPrefix @ 0x5280F0`
   (the anim-slot byte +0x374 -> `BM1`..`BM6`/`BF1`/`BF2`/`RM2`/`RF1`, 0 -> 1 ->
@@ -3658,20 +3902,28 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   `FreeFall` refires while `vel_z < -0x3000`, vel floor -0x8000. Both plays
   gate on the `smoothTargetPos - savedLivePose` delta being zero (`var_10A8`
   `@ 0x4b42c1-0x4b42cd`) — net-pulled remote bodies stay silent, matching our
-  net-peer motor skip. Ported: the freefall leg (the chute flag is unmodeled;
-  chute 41-43 + the brake ride the parachute slice); the accumulator pair's
-  consumer is unwalked (likely the canopy flap visual).
+  net-peer motor skip. Ported: the freefall leg and, with the chute motor
+  (2026-09-18, D-INF-20; `parachute_tick`, `parachute.cpp`), the chute edge 41/42, the flap 43,
+  the brake and the accumulator pair; the pair's visual consumer is unwalked (likely the canopy
+  flap).
 
 ### 17.5 The aim model — lead, error, concealment
 
 Recomputed for the stationary leg (anim-state flag `& 0x10`) and the moving leg
-(flag `& 8`, seat ≠ 2/5) `[orig: @ 0x4bd0xx–0x4be5xx region]`:
+(flag `& 8`, seat ≠ 2/5) `[orig: Entity_UpdateInfantryAI @ 0x4B9910: block 1 from its gates @ 0x4BC560 to the
+walking-fire latch @ 0x4BC8C3..0x4BC946; block 2 lead @ 0x4BCA9D..0x4BCB20, eye
+@ 0x4BCB7B..0x4BCD0C]`:
 
 - **Lead**: `lead = fwd_dist / 0x81074 + 1` (≈ per 8 u) →
   `aimPoint = target + lead · (target − target.savedLivePose)` (the previous-tick
-  position delta = per-tick velocity; vertical lead halved). Target chest point via
-  `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` (muzzle bone `def+1350` transformed by
-  the entity matrix; seat-3 occupants get the tick-jittered bone-offset variant).
+  position delta = per-tick velocity). The lead distance is the full 3-D distance (dz not
+  halved), truncated, over 528500 through the 0x7EFAD919 reciprocal [orig:
+  @0x4BC697..0x4BC71D; @0x4BCA9D..0x4BCB20]. The target point is the led raw Position
+  itself: the `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` calls in both blocks
+  (@0x4BC720, @0x4BCB23) are dead (their output is never read). The eye is the +0x366
+  muzzle when the led point is more than 3 u away horizontally, else X/Y a quarter of the
+  way from the body origin to the muzzle and Z the muzzle's [orig: block 1
+  @0x4BC7C8..0x4BC825, block 2 @0x4BCB7B..0x4BCD0C].
   Ported 2026-09-22: every body stamps savedLivePose at mover entry (org1
   `Entity_UpdateInfantryAI @ 0x4b9a53..0x4b9a6e`, org2
   `Entity_UpdateInfantryPlayerBody @ 0x4b4187..0x4b419c`); both blocks read it with
@@ -3682,8 +3934,8 @@ Recomputed for the stationary leg (anim-state flag `& 0x10`) and the moving leg
   the 16-tick-old aim point; `infantry::test_aim_lead_uses_the_target_saved_live_pose`.)
 - **Error**: two accuracy params `slot[10]` (used when `aiRef0 == slot[3]` — already
   fired at this target = settled) / `slot[11]` (fresh target), each
-  `err = (119304 · dword_C6EAE8 · acc) >> 5` with `dword_C6EAE8` the difficulty
-  global; two sawtooth phases `err · (32 − ((tick>>2 [+ tick>>9]) & 0x3F))` wander the
+  `err = (119304 · wac_var_accuracyspread · acc) >> 5` with `wac_var_accuracyspread`
+  (@ 0xC6EAE8) the difficulty global; two sawtooth phases `err · (32 − ((tick>>2 [+ tick>>9]) & 0x3F))` wander the
   yaw/pitch solution (±31·err) — the HEADING error is the `(tick>>2)`-only phase and
   the PITCH error the `(tick>>2 + tick>>9)` phase in both aim blocks (block 2
   [orig: @0x4bca03..0x4bca2c] -> +0x2EC [orig: @0x4bcf71] / +0x2D0 [orig:
@@ -3701,8 +3953,20 @@ Recomputed for the stationary leg (anim-state flag `& 0x10`) and the moving leg
   anim (flag & 2) AND on foliage (`Foliage_SampleFoliageMapMask @ 0x606620`) adds
   +40 to BOTH accuracy params — hard to hit while prone in grass.
 - Body re-faces the aim when it drifts > ~22° (262470208 BAM); mounted `parentSlot 3`
-  rotates the solution into the parent frame; scripted idles 130–136 with
-  `aiFocus == self` aim at the local player (the pose-track leg).
+  rotates the solution into the parent frame. A scripted idle (current +0x2BC in 130..136)
+  with a local player aims at the player's Position: heading = trunc(atan2(dy, dx) *
+  2^31/pi), pitch = trunc(atan2(dz, trunc(hypot(dx, dy))) * 2^31/pi) with no clamp on the
+  planar length, aimFlag 0, override 1, targetHeading re-faced when the aim is more than
+  0x1FFFFFE0 off, then moveMode 0, distance 0 and +0x369 = 0 [orig: @0x4BCFF5..0x4BD0F4];
+  there is no aiFocus term. aimFlag +0x360 is set only by the combat think (@0x4BC894,
+  @0x4BCFB1) and cleared by the scripted idle (@0x4BD0C3), head tracking (@0x4BE665), the
+  drag (@0x4B9E30), the corpse leg and the reset. Block 1 skips a MISSILE-attribute body
+  (itemDef attrib 0x400) and a controller or driver seat (parentSlot 2/5)
+  [orig: @0x4BC560..0x4BC582], and its walking-fire latch needs NOMOVESHOOT (def attrib 4)
+  clear and measures the eye-to-aim distance with dz halved [orig: @0x4BC8C3..0x4BC946].
+  Block 2 runs with or without a target; a carried body with no target re-seats the aim
+  point every 256 staggered ticks, 100 u along the carrier yaw plus 32 ticks of its own
+  displacement [orig: @0x4BCBEB..0x4BCCC1].
 - The recoil/flinch jitter decays per §4 item 14 (`entity[224]/[225]`, PRNG-signed).
 
 ### 17.6 The state-17 tick digest — `AIEntity_ProcessWeaponFire @ 0x472e00` (D-AI-2 body)
@@ -3724,41 +3988,71 @@ delay), `brain[42] += 16` (the §16.3 retarget timer — its incrementer), and w
   secondary = `+180/+156`/word +210/`brain[54]`/`brain[72]/brain+292`/`profile+152`.
   Each shot: `Entity_ComputeWeaponFireTransform_0 @ 0x456980` (CORRECTED — the old
   `0x455b30` cite was a transcription slip; full digest §17.9) solves the fire pose
-  (arg 7 = the ctx 0x8000 defer-LOS bit, 0 at the stationary/continuation sites, 1
-  at the mobile sites — NOT a track-only switch) → `Weapon_FireProcess @ 0x53f5b0`
+  (arg 7 = the ctx 0x8000 defer-LOS bit, not a track-only switch: 0, LOS checked, at the
+  stationary RC_FIRE solves (`push 0` `@ 0x472F45` / `@ 0x472FCC`) and at the processed-tick
+  fire (`push 0` `@ 0x473D3C` / `@ 0x473E26`, solves `@ 0x473D57` / `@ 0x473E44`); 1, LOS
+  deferred, at the between-tick brain[106] continuation (`push 1` `@ 0x473850` /
+  `@ 0x4735A0`, solves `@ 0x47386B` / `@ 0x4735C9`) and at the WEAPON_TURRET staging
+  (`push 1` `@ 0x47337E`, solve `@ 0x4733A4`; secondary `@ 0x473488`)) → `Weapon_FireProcess @ 0x53f5b0`
   → ammo−−, cooldown word = 0, `brain[106]` = which (1/2), bone-flag byte 784 |=
-  0x40 `@ 0x47306f`. Not aligned ≥ 620 → pending = fallback. Every processed tick
+  0x40 `@ 0x47306f`. Weapons free zeroes the give-up timer brain[40] every visit
+  (`mov [esi+0A0h],0` `@ 0x472EF2`) and fires unless the no-ammo latch brain[48] is set
+  (`@ 0x472EEB`): primary then secondary; neither fired → bone byte 0 and brain[106] = 0
+  (`@ 0x47308B..0x473092`). Weapons held: bone byte 0 and brain[40] ≥ 620 → pending =
+  fallback (`cmp [esi+0A0h],26Ch; jl` `@ 0x47309E..0x4730AF`). Every processed tick
   `Entity_SetAITarget(entity, 0)` (stationary mode keeps no brain[38] target — so in
   practice only the WEAPON_PITCHLOCKED* solver legs, which need no target, fire) and
   `profile+100 & 1` → `AI_UpdateMovementTarget @ 0x460e40`.
 - **0x40 burst** (.aip `ATEAM_LOCK`): `brain[181]` = the window (armed to 1 by each
-  targeted shot, +step while ≤ 186, else 0). CORRECTED 2026-08-12: the between-ticks
-  `brain[106]` continuation sites (`@ 0x473d57` primary / `@ 0x473e44` secondary) DO
-  re-solve — same solver, arg 7 = 0 (LOS on), fresh aim offset, then scatter — the
-  old "re-fires the saved solution without re-solving" gloss was wrong. The saved
-  deltas `brain[182..187]` (primary) / `[188..193]` (secondary) = out-transform minus
-  entity pos/angles, captured at each mobile/continuation solve `@ 0x4735f9..0x47363a`
-  (their consumer is elsewhere — presentation/suspension, unwalked).
+  targeted shot, +step while ≤ 186, else 0). CORRECTED 2026-09-23: `@ 0x473D57` / `@ 0x473E44`
+  are the PROCESSED-tick fire; the between-tick continuation solves at `@ 0x47386B`
+  (primary) / `@ 0x4735C9` (secondary) with arg 7 = 1. The locked burst: while brain[181]
+  is armed, the leg `@ 0x4730E9..0x4732D9` refires brain[106]'s weapon at the hull pose
+  plus its saved deltas (all six components, no solve, no scatter; primary
+  `@ 0x473208..0x4732AA`, secondary `@ 0x473142..0x4731DD`); held past a quarter of the
+  PRIMARY rate the bone byte clears (`@ 0x4732B5..0x4732C3`); brain[48] holds it
+  (`@ 0x4730FE`). The saved deltas `brain[182..187]` (primary) / `[188..193]`
+  (secondary) = out-transform minus entity pos/angles are captured only under
+  ATEAM_LOCK, at every staging, continuation and processed solve (e.g.
+  `@ 0x4733AC..0x4733FA` staging, `@ 0x4735EC..0x47363A` secondary continuation,
+  `@ 0x473F47..0x473F95` processed primary); their consumer is that replay.
 - **0x20 sweep**: each shot `brain[180] += 10918` (1/6 u), passed as the transform's
-  lateral bias; on > 196608 (3.0) reset to −196608 AND `brain[38] = 0` (drop target →
-  rescan) — the strafing-MG walk.
+  lateral bias; on > 196608 (3.0) reset to −196608 AND `brain[38] = 0` per SHOT at every mobile
+  site (`@ 0x473737`, `@ 0x4739DA`, `@ 0x474093`, `@ 0x474175`), a direct write: AiSlot[3]
+  and the target refcount keep the old target (the strafing-MG walk).
 
 No target (`brain[38]` null): `brain[180] = −196608`, movement flag 1 → waypoint walk,
 flag 4 → hold heading; else the **search sweep** (workHeading = yaw ± 0x3FFFFFC0 by
 `brain[40]` phases ≤124 / >434, speed = `brain[50]`) and `AI_FindBestTargetB
 @ 0x466f60` → on found: the 8 relation ops in the §16.4 order, `Entity_SetAITarget`,
-`brain[40] = 0`, `brain[41] = profile+104` (+ `LCG_31BFBB8 % 62` when nonzero — NOTE:
-this site jitters both controller-branches alike, unlike the state-16 engage's A/B
-split, §16.4) → return; none + `brain[40] > 620` → SetAITarget(0), pending = fallback.
-Target dead → SetAITarget(0). Fire leg (processed ticks or `brain[48]` — a forced-
-process flag, writer unwitnessed): `brain[41]` nonzero → move only;
-`AIEntity_TryAcquireTarget @ 0x4716b0` may retarget; chase = approach cap
-`profile+76`, min range `+188`, match the target's speed inside `+184` (target
-`brain[136]` or |velocity|), give-up > 620 beyond the cap; **fire gate** = folded
+`brain[40] = 0`, `brain[41] = profile+104` (+ `LCG_31BFBB8 % 62` when nonzero; NOTE:
+this site jitters brained and brainless targets alike, unlike the state-16 engage,
+which keys on the target's SM brain pointer: `cmp [ebx+64h],ebp; jz`
+`@ 0x4677EA..0x4677EF` in `AI_HandleEvent_HelicopterCombatD @ 0x467730`, brained ->
+the guarded LCG `@ 0x467803..0x467866`, brainless -> `PRNG_Next16 % 62`) → return; none + `brain[40] > 620` → SetAITarget(0), pending = fallback.
+Target dead → SetAITarget(0). Fire leg (processed ticks, or every visit while `brain[48]` is set: the
+dispatchers' no-ammo latch, §38.1, forces the processed leg `@ 0x473309` and turns
+the chase into the half-turn heading, `@ 0x473AB1` -> `lea eax,[ebx+7FFFFF80h]`
+`@ 0x473C08`): `brain[41]` nonzero → move only;
+`AIEntity_TryAcquireTarget @ 0x4716b0` always hands its scan result to
+`Entity_SetAITarget` (`@ 0x4716F0`), so a rescan that finds nothing clears brain[38],
+AiSlot[3] and the refcount (the caller keeps its old pointer for the bearing only,
+`jz` `@ 0x473A41..0x473A45`; the solver reads brain[38] itself, `@ 0x4569A4`); chase =
+the truncated, clamped planar 16.16 distance against the approach cap `profile+0x4C`
+(`@ 0x473AF3`; beyond it only the > 620 give-up); at or beyond max_chase `profile+0xBC`
+(`@ 0x473B29`) full speed; inside it the give-up timer rests only while
+`AI_IsTargetInSight @ 0x456860` validates the target (`@ 0x473B36` /
+`@ 0x473BE4`), speed = speedA from min_chase `profile+0xB8` on (`@ 0x473B53`), closer
+than that the target's `brain[136]` (entity+0x64 non-null, `@ 0x473B72`) else its
+planar |vel| (+0x98/+0x9C, `@ 0x473B83..0x473BCE`); the common tail clamps the output
+speed to [0, speedA] and zeroes brain[129]/[130]/[133]/[134]/[138]
+(`@ 0x473C14..0x473C50`); **fire gate** = folded
 |targetHeading − yaw| ≤ `((profile+67 | 1) | 2) >> 1` (the secondary-FOV arc — byte
 +67 is the top byte of the +64 `view_fov` BAM dword, §17.9c); weapon select as
-stationary (+ the anti-building swap: target `Flags & 0x100` → `byte_AE076E/F` via
-`sub_545930`, §17.7 item 4); solve with the aim offset passed through the
+stationary (+ the dead player-missile swap: target `Flags & 0x100`
+AND `Team_IsPlayerTeam(ammo byte)` (a missile-ammo set, AE0768..AE076D) →
+`byte_AE076E/F` only if `sub_545930` returns 0 or 2; `sub_545930` is `mov eax,1;
+retn`, so the swap never happens); solve with the aim offset passed through the
 `distance` global `@ 0xB21F8C` (written at every mobile/continuation site
 `@ 0x473367..0x47337e`: `0x20` ATEAM → `brain[180]`, `0x40` ATEAM_LOCK → −196608
 (−3.0 u), else 0) then **scatter** `@ 0x473640..0x473716`: two `dword_31BFBB8`
@@ -3767,9 +4061,28 @@ rol-LCG draws (`x' = rol(rol(x,11)+x,4) ^ 1`, value = low u16), each
 `brain[43]` = accuracy 0–5), the scaled value's parity picks the sign (odd adds,
 even subtracts), applied to yaw then pitch → `Weapon_FireProcess`. Between
 processed ticks the `brain[106]` continuation keeps the volley running
-cooldown-gated through the same solver (§17.6 burst bullet), and
-`profile+136/+168` bit 0 (`WEAPON_TURRET`) stages/refreshes the turret solution
-without firing.
+cooldown-gated through the same solver (§17.6 burst bullet; the primary's pre-seeded
+pitch is zeroed first, `mov [esp+40h+var_8],ebx` `@ 0x473821`), and with no volley on
+record a `profile+136/+168` bit-0 (`WEAPON_TURRET`) block re-solves every visit
+(primary `@ 0x47332D`, secondary `@ 0x47340E`), so its turret slews per visit without
+firing; a processed tick on which neither weapon fires sets brain[106] = 0 and the
+bone byte 0 (`@ 0x4741CC..0x4741D6`). `ai_vehicle_combat` pins these legs.
+
+Every weapon block that passes its ready test (ammo dword nonzero, cooldown word at or
+above the rate) first stores its ammo byte (profile +148 primary, +180 secondary) into the
+hull's +0x2B0, fired or not, before the pose seed and the solve, and the weapon call reads
+it back as its weapon slot (`movzx eax, byte ptr [edi+2B0h]` @ 0x47301B ->
+`Weapon_FireProcess`). The sixteen stores: ground @ 0x472F23 / @ 0x472FAA (stationary),
+@ 0x47315F / @ 0x473225 (the locked replay), @ 0x473518 / @ 0x4737B4 (the continuation),
+@ 0x473CA8 / @ 0x473D92 (the processed tick); aircraft (`AI_TickState_AircraftCombat
+@ 0x471710`) @ 0x471837 / @ 0x4718BE, @ 0x471A60 / @ 0x471B26, @ 0x471E1D / @ 0x4720BA,
+@ 0x4724AF / @ 0x472599. `AIEntity_ReleaseFlareCountermeasures @ 0x455EF0` saves the byte,
+fires its flares with the FLARE ammo byte (@ 0x455F56) and restores it (@ 0x45610B /
+@ 0x456131), net neutral. A vehicle's +0x2B0 is therefore the byte
+`WeaponSlot_InitFromEntityDef` stored at its spawn (@ 0x546742), overwritten by every
+ready block; the org1 mounted request copies that live byte (§26.6). Port: `SmWeapons::stamp`
+(`ai_handlers.cpp`) and the aircraft combat tick's stamp (`ai_aircraft.cpp`); `ai`
+(`test_sm_fire_stamps_the_hull_adm_byte`, `test_aircraft_fire_stamps_the_hull_adm_byte`).
 
 ### 17.7 Open follow-ups (this session's unknowns)
 
@@ -3779,22 +4092,30 @@ without firing.
    (profile +0x94/+0xB4): a block whose ammo resolves to a non-null row seeds its
    capacity, else 0. Ported in `mission::resolve_ai_weapons` (item_traits.cpp),
    with promote's capacities standing in until that sweep (`mission_item_traits`).
-   Still open: `brain[43]` (accuracy; the 0..4-clamped `aim_skill` at profile+28 is
-   the PROBABLE source); the class init does not write +0xAC, and the only found
-   +785/+0x311 writers are the command and the savegame restore.
+   `brain[43]` is WITNESSED (2026-09-23): `Entity_InitVehicleAI` copies the
+   0..4-clamped `aim_skill` profile+0x1C into brain+0xAC for every profile
+   (`@ 0x460294..0x460297`, §38.1); the only found +785/+0x311 writers are the command
+   and the savegame restore.
 2. RESOLVED 2026-08-12 → §17.9: `Entity_ComputeWeaponFireTransform_0 @ 0x456980`
    (the old `0x455b30` cite was wrong) witnessed in full and ported (D-AI-2).
-3. `brain[48]` (the forced-process flag read by the state-17 tick) writer.
-4. The anti-building weapon swap (`sub_545930` + `byte_AE076E/F` selection).
+3. RESOLVED 2026-09-23: `brain[48]` is the dispatchers' no-ammo idle latch
+   (`EntityAI_ProcessAirStateMachine @ 0x4581C4..0x4581F4`,
+   `EntityAI_ProcessGroundStateMachine @ 0x4583D7..0x458402`; §38.1), read by the
+   state-17 tick `@ 0x472EEB` / `@ 0x4730FE` / `@ 0x473309` / `@ 0x473AB1`.
+4. RESOLVED 2026-09-23 (dead): the swap is the player-missile swap and never happens,
+   since `sub_545930` is `mov eax,1; retn` (§17.6).
 5. RESOLVED 2026-08-12 → §17.9b: `compute_relative_position_metrics @ 0x545710`
    witnessed in full (the metrics ARE the SM aim solve's angle source).
 6. RESOLVED 2026-08-12 → §17.9b: `Entity_GetWeaponFirePosition @ 0x43b630` (the old
    `0x53a2e0` cite was off). Its six legs and their quality returns are in §17.9b
    (ported 2026-09-22); callers fall back to `Entity_ComputeWeaponFireOrigin
    @ 0x43b4b0` when quality != 1.
-7. The scripted-idle aim leg's `Flags & 0x80000` gate writer (aim-at-player poses).
-8. NEW: the saved continuation-delta blocks' (`brain[182..193]`) consumer (captured
-   at every mobile/continuation solve; nothing in the fire pump reads them back).
+7. RESOLVED 2026-09-23: there is no such gate or writer; entity Flags 0x40000/0x80000
+   have no writer in the binary, and the scripted-idle watch (130..136) has no Flags
+   term (§38.4).
+8. RESOLVED 2026-09-23: the saved deltas are captured only under ATEAM_LOCK and
+   consumed by the ATEAM_LOCK replay (`@ 0x47310B..0x4732B3` ground,
+   `@ 0x471A24..0x471BA4` air; §17.6).
 9. NEW: `Weapon_FireProcess @ 0x53f5b0`'s composition of the out-transform with the
    weapon mount/bone rest frame — with an authored nonzero `primary_facing` the
    solver's world compose alone lands at (bearing − bias); whether the spawn re-adds
@@ -3812,8 +4133,8 @@ Entry/site comments: `@ 0xA2ED08` (trigger-bit map), `@ 0x4b0990` (two callers �
 (full digest), `@ 0x53a610` (ctx layout), `@ 0x43b4b0` (fire origin), `@ 0x4bbecc`
 (perception scan), `@ 0x4bf31d` (anim-event fire block), `@ 0x4b97b5` (magazine
 reseed), `@ 0x4418a5` (+0x2B4/+0x2B8 hardpoint ammo), `@ 0x53f440` (AI fire entry).
-Rename proposal pending maintainer OK (curated name): `Entity_ComputeWeaponFirePositions
-@ 0x455ef0` → `AIEntity_ReleaseFlareCountermeasures`.
+Rename applied (2026-07-16): `AIEntity_ReleaseFlareCountermeasures @ 0x455ef0`
+(ex `Entity_ComputeWeaponFirePositions`).
 
 ### 17.9 The SM/turret fire-transform solver — `Entity_ComputeWeaponFireTransform_0 @ 0x456980` (engine-research 2026-08-12; the D-AI-2 core, PORTED)
 
@@ -3824,7 +4145,7 @@ from the entity's live pos/angles; `weaponDefBlock` = the `.aip` block at
 `profile+120`/`+152` (§17.9c); `seed` = the live ammo count (`brain[53]/[54]`);
 `deferLOS` ORs the §17.2 ctx `0x8000` defer-LOS bit (1 at the mobile sites, 0 at
 stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
-@ 0x472e00` + 8 in `Entity_ProcessInfantryWeaponFire @ 0x471710`-family.
+@ 0x472e00` + 8 in `AI_TickState_AircraftCombat @ 0x471710`-family.
 
 - **Head gate** `@ 0x4569b2`: no target (`brain[38]` null) and `!(block+16 & 0x18)`
   → return 0. Bone-flag byte `brain+0x310` cleared `@ 0x4569d5`.
@@ -3865,18 +4186,23 @@ stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
   exactly double (`step·0x318C631`, ±0x4210842). On every snap the per-type turret
   diagnostic globals get the active yaw/pitch high words (`profile+16` == 2 GROUND →
   `dword_83FEE0/83FEE8`, == 1 HELO → `dword_83FE88/83FE90`) `@ 0x456e33/0x456f9c`.
-- `AI_GetSuspensionFirePoint @ 0x456860` reads the active yaw (`brain[118]`) +
-  `profile+140` for the suspension fire point — the D-AI-2 adjacency consumer.
+- `AI_IsTargetInSight @ 0x456860` (ex `AI_GetSuspensionFirePoint`) is a target-sight
+  check: it reads the brain's target brain[38] (`@ 0x45686A..0x45686D`), returns 0
+  without one (`@ 0x456875..0x456881`), then builds the shooter-frame metrics context
+  from the entity's pose with the active yaw (`brain[118]`) + `profile+140`. Its callers
+  are the two aircraft movers (`@ 0x4616B1` / `@ 0x4616E0`, `@ 0x461A5B` / `@ 0x461B0F`)
+  and the state-17 chase (`@ 0x473B36` / `@ 0x473BE4`); port
+  `aircraft_target_in_sight`.
 
 **PORT** (2026-08-12): `AiSystem::solve_weapon_fire_transform`
 (engine/runtime/world/ai_combat.cpp) + the three `h_ground_combat_tick` fire legs
 (stationary/continuation/mobile, ai_handlers.cpp `sm_weapon_fire`) + the WAC AI
-commands 0x15/0x16 (`ai_handle_command`). Bounded deviations, cited at the port
-sites: no SM muzzle bone lists in the world model (the empty-list leg always runs —
-muzzle = pos + 2.0 u Z; the bone-list/current-pose refine rides the skeletal-pose
-seam like D-AI-6), the solve frame is yaw-only (AiEntity carries no pitch/roll —
-level shooters identical), the §17.2 ctx range legs stay with the acquire-time
-gates, and the CTRL diagnostic globals are unported (D-3DI-2 owns the bus). The
+commands 0x15/0x16 (`ai_handle_command`). The bone lists are filled at spawn
+(`Entity_InitVehicleAI`'s prefix scans `@ 0x4603A6..0x460414`: prim/bullet01/bullet02 to
+the primary list, sec/bullet02 to the secondary, flare to the flare list), the solve
+uses the full entity frame (pitch and roll), and the validator ctx legs apply
+(`weapon_target_metrics`); the CTRL diagnostic globals remain unported (D-3DI-2 owns
+the bus). The
 `ai` ctest `test_sm_turret_fire` pins the mobile solve/fire, the SLOW slew hold,
 and the RC_FIRE + PITCHLOCKED_MINUS45 stationary leg behind the guard byte.
 
@@ -3911,13 +4237,24 @@ pose: the same gate and the same call as `Entity_GetAttachmentWorldPosition
 `test_turret_gunners_scan_from_the_gun_point`).
 `compute_relative_position_metrics @ 0x545710`: full digest in §17.9 (the fpatan
 operand order and the `dbl_7C19D8` = 683565275.5764316 = 2³¹/π scale are exact in
-the disasm; the decompiler's tail for out[3] is wrong).
+the disasm; the decompiler's tail for out[3] is wrong). Both distances are `fild;
+fsqrt; fistp` (`@ 0x5457CD..0x5457D3`, `@ 0x5457EC..0x5457F2`) under the game's
+nearest-even control word, so they are ROUNDED to whole units (the squares are
+already whole units squared: `sar 8; imul; add 8000h; shrd 10h`), a wrapped
+(negative) sum giving 0; the two angles truncate (`_ftol2_sse`).
+`aim_metrics_parity` executes 120 cases (`scripts/oracles/aim_metrics_parity.py`).
+`Entity_ValidateWeaponTarget @ 0x53A400`'s head keeps a destroyed (Flags & 2) or
+health <= 0 target only while tick - death tick (+0x1AC) <= 16
+(`@ 0x53A425..0x53A443`), and rejects a Player target while dword_24C1930 & 0x800
+is up (`@ 0x53A46E..0x53A478`) or once g_spawn_success_gate is set
+(`@ 0x53A482..0x53A489`) (`ai_targeting`).
 
 ### 17.9c The .aip GROUND property set — `AIProfile_ParseProperty @ 0x45de70` (witnessed 2026-08-12)
 
 Dispatch is gated on the profile `type` (+16: HELO 1 / GROUND 2 / ORGANIC 3);
 ORGANIC returns before any key dispatch (organic .aip files carry data for
-NOTHING; their keys are dead), and the HELO set remains unwitnessed. GROUND keys
+NOTHING; their keys are dead); the HELO set is witnessed in §23.3 (the 2026-08-25
+addendum). GROUND keys
 (offset ← conversion): `rank`→+60 atol; `default_state`→+24
 (`AIState_LookupByName`); `view_fov`→+64 and `radar_fov`→+72 (atof ×
 `dbl_7C6E18` = 11930464.0, deg→BAM32, x87-chopped — profile bytes +67/+75 read by
@@ -3930,7 +4267,8 @@ class-enable words, closing D-AI-1's data-supply witness); `react_time`→+104 a
 +112 (atof × dbl_7C6AC0); `primary/secondary_ammo`→+120/+152 (atol);
 `primary/secondary_weap`→ byte +148/+180 (`AmmoDef_LookupByName`);
 `primary/secondary_facing`→+140/+172 and `_pitch`→+144/+176 (deg→BAM32);
-`min/max_chase_dist`→+188/+184 (atof × 65536); `patrol/combat_speed`→+192/+196
+`min_chase_dist`→+0xB8 (184, `@ 0x45F58D`) and `max_chase_dist`→+0xBC (188,
+`@ 0x45F5CF`) (atof × 65536); `patrol/combat_speed`→+192/+196
 (the D-AI-11 pair). Flag token loops: `primary/secondary_flags`→+136/+168 —
 `WEAPON_TURRET` 0x1, `WEAPON_SLOW` 0x2, `WEAPON_FAST` 0x4, `WEAPON_PITCHLOCKED`
 0x8, `WEAPON_PITCHLOCKED_MINUS45` 0x10; `EVADE_FLAGS`→+96 / `COMBAT_FLAGS`→+100 —
@@ -3943,11 +4281,17 @@ loaded table at the item-traits sweep). Corpus notes (JOX): all four GROUND
 transports author `primary_weap AI_STINGER` with priorities 0 (they carry an armed
 block but never acquire), and no shipped file resolves a nonzero facing.
 
-### 17.10 Divergences (the ledger's D-AI-4 row, owned here since 2026-08-25)
+### 17.10 Divergences (the ledger's D-AI-1, D-AI-2, D-AI-4 and D-AI-6..D-AI-9 rows)
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `Entity_HandleDamageTrigger @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; remaining retreat/cover/movement and aim-override producers stay open; §33.27 implements the idle attention and independent gaze motor, with automatic facial expressions tracked separately in D-INF-5. The 2026-08-28 pass ported the pre_attack 152 reaction, the cover_idle/cover_run 163/164 hit flinch with the think-cadence wasHit consume, the unconditional moveTimer stamp and the no-reaction fall-through into the approach arm, the command-126 and target-ground approach gates (`Entity_CheckGroundHeightAtPosition @ 0x4aff70`), the alerted-idle predicate (49 with a slot[3] target, wasHit not a term), the availability-gated wounded gaits, the same-think waypoint step on a 0 cooldown, and the flt_7C19E0 sqrt clamp on the waypoint distance | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
+| D-AI-1 | FIXED 2026-09-23: the class-driven target walk is ported whole: the class feed and its priorities (§16.2, §16.2a), the brain[37] priority target (ChangeAI 44 TARGETSSN, where only 0 survives the producer's unconditional clear), and variant A for the HELO profiles (§16.5 item 7); an unresolved `.aip` is the memset-0 record, speeds included | [orig: AI_FindBestTargetB @ 0x466F60; AI_FindBestTarget @ 0x465A50 (`movsx` @ 0x465A8C / @ 0x465A9B); Entity_FindByNetId @ 0x4655B0 (the clear @ 0x465654); AIProfile_LoadOrFind @ 0x45FD80 (the memset @ 0x45FE09)] | FIXED (`ai`, `ai_brain_rows`, `ai_targeting`, `mission_promote`); the dword_24C1930 0x800 bit is a local debug word and the 0x0A handler only reads g_spawn_success_gate, so neither is a residual (§16.2a) |
+| D-AI-2 | The vehicle/SM brain and command consumers are ported: the SM muzzle bone lists, the full solve frame, the HELO profile keys, the target-sight check, the ATEAM_LOCK replay of the saved deltas and the aim-skill seed (§17.6, §17.9, §38.2); the CTRL diagnostic globals (D-3DI-2) and the `Weapon_FireProcess` mount-frame composition remain | [orig: AIEntity_ProcessWeaponFire @ 0x472E00 (@ 0x4730E9..0x4732D9); Entity_ComputeWeaponFireTransform_0 @ 0x456980; Entity_InitVehicleAI @ 0x460200 (@ 0x4603A6..0x460414, @ 0x460294..0x460297); Weapon_FireProcess @ 0x53F5B0] | OPEN (narrowed 2026-09-23 to the CTRL globals and the mount-frame composition; `ai_vehicle_combat`) |
+| D-AI-6 | The combat-origin and aim consumers are ported: the near-target eye mix, the led raw Position as the target point (the `Entity_ComputeWeaponFireOrigin` results in the aim blocks are never read), the scripted-idle aim override, the SM bone-list consumers, the organic lead from savedLivePose and the threat scan's LOS start (§17.2, §17.5, §33.35); the weapon-def userpoint (+0x333) and the person +0x4D8 cluster, the ItemDef+0x144 pre-evaluation hook and the prone-in-foliage penalty remain | [orig: Entity_UpdateInfantryAI @ 0x4B9910 (@ 0x4BC7B1..0x4BC825, @ 0x4BCB7B..0x4BCD0C; the dead calls @ 0x4BC720 / @ 0x4BCB23); Entity_GetWeaponFirePosition @ 0x43B630; Foliage_SampleFoliageMapMask @ 0x606620] (§21.4) | OPEN (narrowed 2026-09-23; `infantry_think`, `ai`) |
+| D-AI-7 | The LOS raycast is ported: the terrain leg with the both-INDOORS skip and the sector leg over the whole of pool 2, then pool 1, each by its used count, with the retail exclusion set (A, B, their parent slots and candidates standing on them; §18.5); the itemDef type-3 person sphere-block, the ray-radius argument (LOS passes 0) and the `@ 0x60c760` sibling's internal delta remain | [orig: Physics_RaycastTerrainAndSectors @ 0x539910 (@ 0x539A16..0x539A5A, @ 0x5399BD..0x539A12, @ 0x53882F..0x538877)] | OPEN (residuals only; `ai_los`, `collision`) |
+| D-AI-8 | Fire-presentation stand-ins: (b) the fire-sound max-range gate runs at play time (the bank's cull) where retail tests it at fire time; (a), (c), (d) and (e) are closed (§18, §25) | [orig: Sound_PlayWithDistanceAttenuation @ 0x528E40 (soundDef+72 @ 0x528ec6)] | OPEN (b only; it differs only when the listener moves during the propagation delay) |
+| D-AI-9 | Remaining infantry death work: the incendiary ammo+72 override and emitter, the head-look reference cleanup, the player redeploy callers' consolidation with the shared organic reset, and the org2 death transaction, which still comes from the host's damage-time route while the org1 edge owns the NPC transaction (§19.3) | [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0 (the edge @ 0x4B4BF1..0x4B4CEA); Entity_CheckAndProcessDeath @ 0x51B550] (§19.2, §33.12, §33.34) | OPEN |
+| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `OrganicClass_HandleEvent @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; the retreat (moveMode 5) is dead code, the "cover" helper is the ported obstacle detour, and the search movement and the scripted-idle aim override are ported (2026-09-23, §38.4); the target-query residuals stay open; §33.27 implements the idle attention and independent gaze motor, with automatic facial expressions tracked separately in D-INF-5. The 2026-08-28 pass ported the pre_attack 152 reaction, the cover_idle/cover_run 163/164 hit flinch with the think-cadence wasHit consume, the unconditional moveTimer stamp and the no-reaction fall-through into the approach arm, the command-126 and target-ground approach gates (`Entity_CheckGroundHeightAtPosition @ 0x4aff70`), the alerted-idle predicate (49 with a slot[3] target, wasHit not a term), the availability-gated wounded gaits, the same-think waypoint step on a 0 cooldown, and the flt_7C19E0 sqrt clamp on the waypoint distance | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
 
 ## 18. Appendix: fire presentation + the LOS raycast internals (engine-research, 2026-07-16 session 4)
 
@@ -3966,15 +4310,15 @@ spawn, the original's fire-time moment; the shell stamps the camera listener via
 `Simulation::set_sound_listener` and plays `drain_fire_sounds()` rows); the
 binding drains = `Simulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
-replaced by the witnessed trail channels, §24); the EFFECT presentation =
-`godot/src/simulation/fire_presenter.{h,cpp}` (muzzle effect + the §24 tracer
+replaced by the witnessed trail channels, §25); the EFFECT presentation =
+`godot/src/simulation/fire_presenter.{h,cpp}` (muzzle effect + the §25 tracer
 ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`engine/runtime/world/collision_los.cpp`) behind
-`AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
+`AiSystem::line_of_sight_clear`. Pins: the `def_parse_ammo` ctest (token fields), the
 `npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent + the trail
 channels), the `fire_sound` ctest (gate/formula/pool/arm-split sounds), the
 `collision` ctest (`test_raycast_clear_los`), and the
-`ai_threat_probe` in-game stats gate.
+`ai_threat` ctest (the retail-mission port of the former `ai_threat_probe`).
 
 ### 18.1 The ammo-def presentation fields — parse + resolve
 
@@ -3995,7 +4339,7 @@ friendly / +0x14 enemy item ids, resolved through the item list with the parse
 warnings `"couldn't find ammodef frndlyTrcrID"` / `"... type_id"`
 `[orig: @ 0x40a5f8-0x40a68d]` — PARSED 2026-07-18 (`frndlyTrcrID`/`foeTrcrID` in
 engine/formats/def, raw type ids in the ammo table; the model leg itself rides D-AI-12d,
-§24.4). Our port stores names/ids instead of resolved pointers/handles and
+§25.4). Our port stores names/ids instead of resolved pointers/handles and
 resolves in the reimpl at use time — same case-insensitive namespaces (the bank's
 soundsets, the effect world's interned .ptl names, the item list).
 
@@ -4087,9 +4431,9 @@ over `g_TracerEmitterPool @ 0x2BF5270`, channel init `CEffectChannel_Init
 @ 0x5db130`) into round+0x2B4; the round's visible MODEL is the +0x10/+0x14 item
 graphic via `Entity_InitFromItemDef @ 0x49e550`; a per-round glow light lands in
 round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit (`dword_24D1E34 &
-1`, net-re §6.8 mp_attributes 0x001) kills the visual unless forcetracer.
+1`, net-re §6.4 mp_attributes 0x001) kills the visual unless forcetracer.
 **Non-tracer rounds get `graphicModel` (+0x30) zeroed — invisible in flight**
-`[orig: @ 0x4ec900]`. Port (fully witnessed + rebuilt 2026-07-18, §24):
+`[orig: @ 0x4ec900]`. Port (fully witnessed + rebuilt 2026-07-18, §25):
 `LiveRound.tracer/team/trail_slot` + the witnessed per-SLOT cadence byte
 (retail `weaponSlot+0x80`; D-AI-8a CLOSED 2026-08-12 — the local player's fire
 passes its active `WeaponSlotState::tracer_shot_counter` through
@@ -4107,8 +4451,8 @@ Returns TRUE = CLEAR. Arg 5 is a RAY RADIUS (not a flag): the terrain leg lowers
 both endpoint Z by it (thick-ray conservative) and the sector leg inflates every
 bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`).
 
-1. **Terrain leg** `[orig: @ 0x53993d-0x539968]`: skipped when BOTH entities carry
-   `Flags & 0x800000` INDOORS (the heightmap has no interiors — indoor-to-indoor
+1. **Terrain leg** `[orig: @ 0x53993d-0x539968]`: skipped when BOTH endpoint entities
+   (A and B themselves, `@ 0x53993F..0x53994C`) carry `Flags & 0x800000` INDOORS (the heightmap has no interiors — indoor-to-indoor
    sight would false-block); the null-entity variant instead skips it when either
    ENDPOINT is below terrain (`Terrain_GetHeightAtPosition @ 0x606720`). Otherwise
    `Terrain_RaycastHeightmapHiRes @ 0x60c760` (null out-hit) — hit → BLOCKED.
@@ -4120,11 +4464,14 @@ bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`
    16.16 direction, per-axis min/max box, length; segments < 16 raw (1/4096 u)
    return CLEAR without walking.
 3. **Sector leg** `[orig: raycast_against_entity_pool @ 0x538720; pool 2 statics
-   then pool 1 dynamics @ 0x539a3a]` per entity: in-use (+0x28) with a collision
+   then pool 1 dynamics @ 0x539a3a]`, each walked by its POOL's used count (pool 2
+   `@ 0x539A16..0x539A30`, not the proximity table, whose count stops at 1199; pool 1
+   `@ 0x539A40..0x539A5A` once pool 2 came back clear), per entity: in-use (+0x28) with a collision
    block (`graphicModel+176`, husk model +52 substituted when `Flags & 4`
    destroyed); skip `Flags & 1`, skip `Flags & 0x8000000` (unless the include
-   flag), skip entityA/B, their collision handles (entity +364/+616 → ctx[19]/[20])
-   and entities whose +0x28 owner-link equals A/B; bound-sphere broad phase
+   flag), skip entityA/B and their PARENT slots ctx[19]/[20] (the +0x16C seat mount, else the
+   +0x268 carried object; `@ 0x5399BD..0x539A12`) and candidates whose +0x28
+   groundEntity is A or B (`@ 0x53882F..0x538877`; the parents' riders are NOT skipped); bound-sphere broad phase
    (segment box + unclamped closest-approach projection, the shared @ 0x4139a4
    block); **itemDef type 3 (person)** = bound-sphere-only BLOCK with a same-team
    < 3.0 u exemption (ray end clamps to the person) `[orig: @ 0x5389b1-0x538a10]`;
@@ -4136,16 +4483,17 @@ bound test by it; LOS callers pass 0 (`Entity_CheckMutualLineOfSight @ 0x539be0`
    blocked either way `[orig: miss_result = 0 @ 0x5390e6]`.
 
 Port: `CollisionWorld::raycast_clear` (terrain leg + the two-pass registry walk +
-the owner-link exclusion + the `ray_line_distance` broad phase +
-`collision_raycast_model`), first-hit early-out (boolean-equivalent). Residuals in
-D-AI-7: the husk-model swap (no husk collision instances yet) and the type-3
+the A/B/parentA/parentB exclusion set, whose parent slots the AI LOS fills through
+`los_walker_parent`, + the `ray_line_distance` broad phase +
+`collision_raycast_model`), first-hit early-out (boolean-equivalent). The husk-model swap closed 2026-07-17 (§24.6). Residuals in
+D-AI-7: the type-3
 person case (person-kind residents of the walked pools don't exist in our world —
 organics are pool 0, unwalked, matching retail residency).
 
 ### 18.6 IDB write-backs (2026-07-16 session 4, saved)
 
 Renames (anchored, ex auto-names): `Sound_TickPendingSlots @ 0x529310` (ex
-`Sound_TickPendingSlots`), `Entity_UpdateMuzzleGlowEffect @ 0x56c960` (ex `sub_56C960`),
+`sub_529310`), `Entity_UpdateMuzzleGlowEffect @ 0x56c960` (ex `sub_56C960`),
 `g_SoundSpeedFixed @ 0x24d6660` (ex `dword_24D6660`). Entry comments:
 `@ 0x528e40` (the inverted "dedicated server only" gloss corrected — the gate is
 the is_client bit, TRUE in SP; delay formula + speed global), `@ 0x527c30`
@@ -4167,15 +4515,16 @@ local player cannot see it), and the AI-vehicle layer runs its own two-row death
 PORT (same day, worktree play): the selector + the full 252-entry state tables =
 `engine/runtime/world` (`compute_death_anim_state`, `death_quadrant_from_round`,
 `kInfantryAnimNames/Flags`); the kill-time selection = `world::RoundSim::tick` (the
-organic-kill leg); the death-edge consume + the corpse block = `AiSystem::tick_infantry`
-(`engine/runtime/world/infantry.cpp`); rows 21/23 = `ai.cpp` (`h_enter_vehicle_dying`,
+organic-kill leg); the death-edge consume = `infantry_death_edge` (`engine/runtime/world/infantry_death.cpp`) and the
+corpse block in `AiSystem::tick_infantry` (`engine/runtime/world/infantry.cpp`); rows 21/23 =
+`ai_handlers.cpp` (`h_enter_vehicle_dying`,
 `h_vehicle_dying_tick/event`, `h_enter_vehicle_dead`, `h_vehicle_dead_tick/event`);
-`deathtime` parse = `engine/formats/def`; the def traits stamp = `Simulation::
+`deathtime` parse = `engine/formats/def`; the def traits stamp = `mission::
 resolve_item_traits` (`leave_corpse`, `deathtime_ticks`); presentation =
 the native `EntityPresenter` (`godot/src/simulation/entity_presenter.cpp`;
 dead ORGANICS stay visible; the sim ends the corpse via `Entity::hidden`). Pins: the `infantry` ctest (selector matrix, consume, countdown/
 despawn, LeaveCorpse, the watch retry), the `ai` ctest (rows 21/23, the integration
-kill's selection + group alert), the `def` items test.
+kill's selection + group alert), the `def_parse_items` ctest.
 
 ### 19.1 The selector — `Entity_ComputeAnimSlotIndex @ 0x43a690` and the REAL table size
 
@@ -4197,7 +4546,7 @@ scopeup/scopedown`. `g_animStateFlagsTable @ 0x8139E8` rows 200..239 = `0x82`
 7:9, 8:10, 9:5, 10:6, 11:11, 12:12, 13-14:2, 15:8, 16:7, 17:13, 18:14, 19-21:7,
 22-24:8, 25-26:7, 27-28:8, 29-31:1.
 
-### 19.2 The bullet kill selects at DAMAGE time — `Entity_HandleDamageTrigger @ 0x407310` type 1
+### 19.2 The bullet kill selects at DAMAGE time — `OrganicClass_HandleEvent @ 0x407310` type 1
 
 This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFromItemDef
 @ 0x49e550` installs it). Type 1 (the round kill, reading the global hit record
@@ -4242,6 +4591,13 @@ This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFrom
 - Type 4 = reset/re-kill: health = 0 + re-select from the hit record. Any other
   type (the damage appliers call mode 2) → `entity+0x148 = 62` (a 1 s
   recently-damaged hold on the same field the corpse timer reuses).
+
+The global hit record (80 bytes at 0xB7C620) and its writers are §38.2. After any
+round has hit anything, a BMS KillSingle or KillGroup of a person runs these legs on
+the LAST recorded round (its section, approach quadrant, ammo force and owner), and
+the org1 death edge's unstaged callback does the same for an NPC whose health a
+script zeroed; WAC killSSN memsets the record first (`@ 0x4F1E8F..0x4F1E99`) and a
+fresh mission starts it zeroed (`hit_record`).
 
 The explosive path (`Entity_ApplyWeaponDamage @ 0x4e6820` person leg `@ 0x4e6a01`)
 selects inline instead: bone hardcoded 1 (torso), quadrant from the IMPACT-to-victim
@@ -4366,16 +4722,21 @@ it reports — `0x100` → 32 `[orig: @ 0x517188..0x5171ca]`, `0x800` → 10 + r
 Lifetime: the plyr class callback clears bits 8..11 on every event outside
 `{1, 3, 4, 5}` — the body update's think (event 0) and the blast applier's
 notify (event 2) `[orig: @ 0x407b4d..0x407b4f]` — and re-arms `spawnPhase = 64`
-on every invocation past its dead return `[orig: @ 0x407b5e, @ 0x407c71]`.
+on every invocation past its dead return `[orig: @ 0x407b5e, @ 0x407c71]`; between the two
+re-arms it walks the body's waypoint list (`@ 0x407B64..0x407C6B`: the slot's +0x94 channel,
+team 1 or 2, each pool-3 node within its radius by the octagonal |dx|,|dy| test
+`@ 0x407BE1..0x407BF9`, then the group and single visited bits `@ 0x407C13` / `@ 0x407C35` /
+`@ 0x407C49`), ported as `player_body_waypoint_visits` and called from the player think, the
+script kills, the round hit (`@ 0x4E820E`), the blast (`@ 0x4E6B72`) and the knife kill zone
+(`@ 0x4E6752`) (§38.3).
 `Entity_UpdateInfantryPlayerBody` fires the callback as event 0 whenever
 `spawnPhase <= 0` and decrements it every tick, corpse included, immediately
 before its death edge `[orig: @ 0x4b4bc9..0x4b4be9, edge gate @ 0x4b4bf1]`. Net: a
 non-lethal head hit latches for up to 64 body ticks (each hit restarting the
 window) and the NEXT lethal hit of any kind reports critical with no revive
 window; conversely a critical kill landing on the tick the think fires reports
-standard (retail runs projectiles before that pool-0 body update; our AI tick
-precedes the round sim, so that 1-in-64 edge stays divergent — tick order, not
-a new row).
+standard (retail runs projectiles before that pool-0 body update, and since 2026-09-23 so does
+the port's one-pass entity update, §38.9).
 
 Port: `Entity::cause_flags` (the +0x2C bits 8..11), `LiveRound::player_kills`
 (+688), `player_body_class_think` (the event-0 clear + re-arm) run by
@@ -4389,9 +4750,9 @@ death producer (round, run-over, blast, scripted) reports the latched cause
 without a snapshot of its own; the suicide/AI-killer/team-kill branches return
 before the ladder and leave the bits latched, as retail does.
 `RoundDeath::event_flags` still mirrors `cause_flags & 0xF00` at the round-sim
-and drown producers but has no consumer left and is due for retirement. Not yet
-mirrored: the blast (event 2) clear/re-arm in the explosion applier, and the
-+0x2C state across a respawn (unwitnessed). Pinned by `projectile_combat_test`
+and drown producers but has no consumer left and is due for retirement. The blast
+(event 2) clear/re-arm is mirrored in the explosion applier (`destruction.cpp`); the
++0x2C state across a respawn stays unwitnessed. Pinned by `projectile_combat_test`
 (`test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence`,
 `test_same_projectile_second_player_kill_latches_0x100`), `death_state_test`,
 and `npruntime_server_tick_maintenance`
@@ -4400,39 +4761,59 @@ read, the reported-bit-only clear, the untouched suicide branch).
 
 ### 19.3 The infantry death edge — `Entity_UpdateInfantryAI @ 0x4b9c40` (health ≤ 0, once)
 
-Guards: word `entity+0x11E > 0` skips the edge (writer unwalked); `Flags & 2`
-already-dead skips. Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
+Guards: the health word `entity+0x11E > 0` skips the edge (`cmp [esi+11Eh],bp; jg` `@ 0x4B9C40`);
+`Flags & 2` already-dead skips (`@ 0x4B9C4D`; both to the corpse leg `@ 0x4B9D55`). The edge is
+the ONLY writer of the org1 dead bit (`or eax,2` `@ 0x4B9D18`, store `@ 0x4B9D1B`), so it runs
+once per life: a damage or script death only drives the health word, and the edge latches on
+the body's next motor tick (§38.3). Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
 
 1. mounted (`entity+0x16C`) → `Entity_DetachFromVehicleIfServer @ 0x4359d0` — the
    corpse drops out of its seat; the edge tail also clears `Flags & 0xC0`.
-2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1`
-   variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
+2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1` (bit 0 of the
+   section mask) variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
    scream (a silent-cleanup mode; the bit's writer is unwalked).
 3. the death scream: `Entity_PlaySound3D_FullVolume(Entity_GetProfileSlotSound(
    entity, slot))`, slot 8 `SSNightDead` when `Bms_AttribFlags & 0x100000`
    (EnableNVG = night) else 7 `sounddeath` — the def's resolved sound-profile
    table, not ammo sounds. PORTED 2026-07-17 (§17.4b).
-4. consume `+0x2C0`: zero → `ComputeAnimSlotIndex(0,0,4)` = 174, **`+0x178
-   lastAttacker = 0`** `[orig: @ 0x4b9ceb; the player-body edge's twin
-   @ 0x4b4c72..0x4b4c8d]` + dispatch `deathCallback(entity, 1, 0)` (org1 only) —
-   so a death nothing stamped reports unattributed (`GameEvent_PlayerDeath` treats
-   a null `+0x178` as self: revive 0, events 22/23/26 `[orig: @ 0x5172e6..0x51732a]`)
-   while one that follows a non-lethal hit keeps that hit's clip and shooter
-   (PORTED 2026-09-12, `tick_infantry`; the script deaths -- `kill_player`'s
-   unstamped killer and `raise_scripted_death` -- report `+0x178` as their
-   killer; the remote-player edge in `infantry_remote_anim.cpp` has no `+0x2C0`
-   consume yet, so its attacker-clear twin is the open half); then
-   **animState `+0x2BC` = the selection**
-   (drowning `Flags & 0x8000` overrides to 175), pending `+0x2B8` = 0, `Flags |= 2`,
-   death tick stamp `+0x1AC = current_tick`, `+0x2C0` = 0 (consumed), authority →
-   `Entity_CheckAndProcessDeath @ 0x51b550` (the §5.60 net/scoring router).
+4. consume `+0x2C0` (`@ 0x4B9CC9`): zero → `ComputeAnimSlotIndex(0,0,4)` = 174 (`@ 0x4B9CE5`),
+   **`+0x178 lastAttacker = 0`** `[orig: @ 0x4b9ceb; the player-body edge's twin
+   @ 0x4b4c72..0x4b4c8d]` and, org1 only, the class callback `deathCallback(entity, 1, 0)`
+   (`@ 0x4B9CF1`): for org0/org1 that is `OrganicClass_HandleEvent @ 0x407310` event 1, which
+   gives a non-player the slot alert byte 2 (`@ 0x4073DB`) and `TriggerGroup_SetAlertRed`
+   (`@ 0x4073EA`), then exits when the global hit record's +0x40 is null (`@ 0x40740D`), else
+   runs the death-anim and debris legs on the last recorded round (§19.2). So a death nothing
+   stamped reports unattributed (`GameEvent_PlayerDeath` treats a null `+0x178` as self: revive
+   0, events 22/23/26 `[orig: @ 0x5172e6..0x51732a]`) while one that follows a non-lethal hit
+   keeps that hit's clip and shooter; the remote-player edge (`infantry_remote_anim.cpp`)
+   consumes `+0x2C0` the same way. Then **animState `+0x2BC` = the selection** (`@ 0x4B9D06`,
+   stored unchecked, so an unauthored selection plays the slot's registration fill; drowning
+   `Flags & 0x8000` overrides to 175 `@ 0x4B9D0E`), `Flags |= 2`, pending `+0x2B8` = 0
+   (`@ 0x4B9D1E`), death tick `+0x1AC = tick` (`@ 0x4B9D24` / `@ 0x4B9D2F`), `Flags &= ~0xC0`
+   (`@ 0x4B9D2A`), `+0x2C0` = 0 (consumed, `@ 0x4B9D38`), `+0x184` = 0 (`@ 0x4B9D3E`), and on
+   the authority (`@ 0x4B9D44`) `Entity_CheckAndProcessDeath @ 0x51b550` (the call
+   `@ 0x4B9D4D`, the §5.60 net/scoring router): a Player goes to `GameEvent_PlayerDeath`; any
+   other body sends S2C 0x13 (mask 0x90, `BuildDeathNotifyPayload @ 0x5036E0` [u16
+   handle][u16 +0x2C0], 0 for every edge death) and scores `GameEvent_ProcessScoring(gameType,
+   +0x178, 3, e, 0)` (`@ 0x51B5B3`). Its only callers are the two body edges and the console
+   KillPlayer (`@ 0x4D29EC`); `Entity_HandleDeathOnAuthority @ 0x407CC0` is the barrel
+   callback, not an organic path. The org1 edge is therefore the NPC death transaction (port:
+   `infantry_death_edge` / `org1_owns_death_transaction`, `infantry_death.cpp`): a damage-time
+   death of an org1 body only tallies, and a script death records nothing for it. A fatal
+   fall stages `+0x178 = self` and the generic clip first (org1 `@ 0x4BF86B` / `@ 0x4BF879`;
+   org2 `@ 0x4B7D7D` / `@ 0x4B7D8B`). The player-body edge mirrors these legs without the
+   class callback (`@ 0x4B4BF1..0x4B4CEA`); its transaction still comes from the host's
+   damage-time route (D-AI-9).
 
 The death clips are non-looping — the anim channel clamps at the last frame, so the
 corpse holds its pose (the port's `InfantryRootMotion` documents the same clamp).
 
 ### 19.4 Corpse persistence — the dead leg `@ 0x4b9e4d-0x4ba000`
 
-Per dead tick, after the weapon/drag block:
+The corpse leg runs while the dead bit is set (`mov eax,[esi+24h]; test al,2; jz`
+`@ 0x4B9D55..0x4B9D5A`), not on health, as do the think gate (`@ 0x4BA98B`) and the slope
+pass (`@ 0x4BA084`): a script health write on a corpse leaves it dead. Per dead tick, after
+the weapon/drag block:
 
 - **LeaveCorpse** (`attrib & 0x400000`) && `!(byte +0x134 & 1)` → skip everything:
   the corpse never expires.
@@ -4441,7 +4822,7 @@ Per dead tick, after the weapon/drag block:
   spawn the decay effect attached at the corpse (persons author none; vehicles do).
 - at 0: respawn tickets `word +0x35E > 0` → the NPC-respawn path (spawn pose
   `+0x318`, a `+0x354`-linked same-team gate that can set `Flags |= 1` hidden)
-  — unported, mission NPCs author none. Else: in SP (`!is_in_session`) with no
+  is ported (§33.12). Else: in SP (`!is_in_session`) with no
   decay effect, raycast corpse→local player (`Physics_RaycastTerrainAndSectors`,
   entity origins); CLEAR = the player can SEE the corpse → `+0x148 = 62` and retry
   next second `[orig: @ 0x4b9f83]`. Blocked/MP → `Entity_Destroy @ 0x43e810`.
@@ -4450,13 +4831,11 @@ Bonus decode: the `entity+0x350` branch above this block is the MEDIC-DRAG follo
 a linked dragger's hand-bone world delta moves the corpse each tick and forces anim
 139 `draggee` `[orig: @ 0x4b9d9c-0x4b9e41]`.
 
-The port maps despawn to `Entity::hidden` (our registry keeps the slot; the health
-store already gates every consumer) and runs the watch-check whenever a local player
-exists — our SP listen-server equivalence for the retail `!is_in_session` gate; the
-watch ray lifts both endpoints 0.9 u explicitly at the call site (since 2026-08-13
-`line_of_sight_clear` takes exact endpoints), standing in for the entity-origin ray
-(the feet-ray false-block on the heightfield leg; deliberately NOT the muzzle seam —
-a corpse has no live pose). Both are D-AI-9 residual notes.
+The port maps despawn to `Entity::hidden` (our registry keeps the slot; the dead bit
+already gates every consumer) and runs the watch-check only outside a network session (the retail `!is_in_session`
+gate: `AiSystem::is_in_session`, stamped from the session fact, plus `rules.mp_session`) from the
+entity origins, as retail does; the former 0.9 u endpoint lift is removed (§33.12;
+`player_watches`, `infantry_spawn.cpp`).
 
 ### 19.5 The def side — `deathtime`, `particledeath`
 
@@ -4476,7 +4855,7 @@ a corpse has no live pose). Both are D-AI-9 residual notes.
 
 Row dwords `@ 0x815388` / `@ 0x8153A8` (enter/tick/exit/event; shared exit
 `nullsub_70 @ 0x457670`). Only the authority runs the full SM; clients run rows
-21/23 too (`EntityAI_ProcessVehicleStateMachine @ 0x4583c0` — wrecks settle
+21/23 too (`EntityAI_ProcessGroundStateMachine @ 0x4583c0` — wrecks settle
 everywhere).
 
 - **enter 21** `AI_TransitionToDeath_GroundVehicle @ 0x467b20`: when not yet husked
@@ -4485,21 +4864,29 @@ everywhere).
   `Entity_InitDeathSounds @ 0x4939b0`) + authority-in-session S2C 0x26; `def+1352`
   (the items.def attrib `Parent` byte, ItemDef+0x548) → kill each entry of the
   brain's +576/+580 gunner-attachment list (the same-refNum pool-1 peers
-  `Entity_SetupGunnerAttachments @ 0x468100` collected; `+286 > 0` → health 0 +
-  child `deathCallback(child, 1, 0)` `@ 0x467b6e..0x467bbb`); the
-  §16.1 alert block (alert 2/2, group red, ally wake 100 u); `moveStep = 16`;
-  already slow (horizontal |vel| < 1057) → queue AIEvent **4** now.
+  `Entity_SetupGunnerAttachments @ 0x468100` collected; the loop `@ 0x467B90..0x467BCC`
+  gives a child whose health word +0x11E is positive (`@ 0x467B92..0x467B9A`)
+  `Projectile_GetHitRecord()` (`@ 0x467B9C`), health 0 (`@ 0x467BA5`), the record's damage word
+  +0x30 cleared (`@ 0x467BAD`) and `deathCallback(child, 1, 0)` (`@ 0x467BB0..0x467BBB`); the
+  child's +0x178 is not written and the record's section, round and owner stay the last hit's);
+  its own slot byte first (`@ 0x467BD8`), then the §16.1 alert block (alert 2/2, group red, ally
+  wake 100 u); `moveStep = 16`; already slow (the horizontal |vel| of the entity record's
+  +0x98/+0x9C < 1057, `@ 0x467C09..0x467C0F`) → queue AIEvent **4** now, so a hull killed at speed
+  reaches the tick.
 - **tick 21** `AI_TickState_VehicleDying @ 0x467cd0` (ex kong `AI_CheckVehicleStuck`):
-  `Entity_ProcessFallingDeathPhysics @ 0x461d30` settle; |vel| < 1057 OR static vs
+  `Entity_ProcessFallingDeathPhysics @ 0x461d30` settle; |vel| (the record's +0x98/+0x9C,
+  `@ 0x467CED..0x467CF3`) < 1057 OR static vs
   savedLivePose (< 1024 per axis) → queue event 4; still moving → zero work
   pitch/roll (`ai[133]/[134]`), the commanded speed (`ai[136]`), the mover output
   (`ai[128]`).
 - **event 21** `AI_HandleEvent_VehicleDying @ 0x457f50` (ex `AI_HandleRetreatEvent`):
   ONLY type 4 lands → pending 23.
-- **enter 23** `AI_TransitionToDestroyed_Vehicle @ 0x467de0`: the alert block;
+- **enter 23** `AI_TransitionToDestroyed_Vehicle @ 0x467de0`: its own slot byte first
+  (`@ 0x467DF1`), then the alert block;
   `entity+0x148 = 0` (wrecks never run the corpse countdown) and `entity+0x162
   team byte = 0` (a wreck goes teamless and drops out of target scans); death
-  transforms + 0x26 when not yet husked; death tick `+0x1AC` (first write wins);
+  transforms + 0x26 when not yet husked; death tick `+0x1AC` (first write wins: `cmp [esi+1ACh],0` `@ 0x467E5D` ..
+  `mov [esi+1ACh],eax` `@ 0x467E6B`);
   `Entity_ClearAllReferences @ 0x465670` + `Entity_SetAITarget(0)`; `moveStep = 62`.
 - **tick 23** `AI_TickState_VehicleDead @ 0x467ea0` (ex
   `Entity_ProcessMountedInfantryFrame` misnomer): keep settling; `itemDef attrib &
@@ -4516,24 +4903,29 @@ everywhere).
 (`Entity_InitFromItemDef` +52/+56), which is how a wreck LOOKS destroyed. The
 port's shared production-mode destruction pass walks installed death callbacks
 in pools 1/2, including AI-capable entities, so the rows 21/23 settle is live;
-the row-handler `unported_calls` counters remain diagnostic. The def+1352
+every state row is carried (the `unported_calls` counter is gone). The def+1352
 child-kill loop is ported over the real +576/+580 list (2026-09-12,
 `h_enter_vehicle_dying` under `VehicleTraits::attrib_parent`;
 vehicle-client-movers-re §26.2 — the list is built by
 `VehicleSystem::setup_gunner_attachments` from the `Parent` token and the
 `agun` points, both fed since 2026-09-12); the earlier addeweap-children stand-in kill
 stays beside it until `destruction_test` moves its pin. The attrib-0x40
-wreck-respawn watcher remains a visible stub (D-AI-9). The organic infantry edge queues NO SM death event (organics never run
+wreck-respawn watcher is ported (`VehicleSystem::tick_dead`, `Entity_RespawnVehicle @ 0x45FF40`
+in `vehicle_lifecycle.cpp`). The organic infantry edge queues NO SM death event (organics never run
 the cveh SM tick; our earlier bring-up event is removed).
 
 ### 19.7 Open follow-ups (this session's unknowns)
 
-1. `entity+0x11E` (the death-edge skip word) and `byte +0x134` bit 0 (the silent
-   cleanup) — writers unwalked.
-2. The drowning source (`Flags & 0x8000` → 175) rides the unmodeled swim flags.
+1. RESOLVED for `entity+0x11E`: it is the health word (the damage appliers, the script
+   health writers and the fatal fall write it; §38.3, §38.7). `byte +0x134` bit 0 (the silent
+   cleanup, bit 0 of the section mask) stays unwalked.
+2. RESOLVED 2026-09-23: the drowning source is the float latch `Flags & 0x8000` (§29.1);
+   the org1 edge (`@ 0x4B9D0E`) and both player-body edges (`@ 0x4B4C93..0x4B4CAB`) take 175
+   from it.
 3. The player edge (`Entity_UpdateInfantryPlayerBody @ 0x4b4c72/0x4b61c6/0x4b7d83`
    sites) shares the same consume; the player-death PRESENTATION (death camera,
-   respawn flow) is the P2b slice.
+   respawn flow) is the P2b slice; its death camera is ported (camera mode 4,
+   `world/death_camera.cpp`, net-re §5.39).
 
 ### 19.8 IDB write-backs (2026-07-16 session 5, saved)
 
@@ -4551,7 +4943,8 @@ The P2 playability slice: how a mission DECIDES it is over, what the server does
 at round end, and what the SP player then SEES. Port surfaces:
 `engine/runtime/wac/vm.cpp` (win/lose + the outcome builtins),
 `engine/runtime/mission/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
-`engine/runtime/world/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
+`engine/runtime/world/world.cpp` (`World::process_round_end`),
+`engine/runtime/world/entity_commands.cpp` (`EntityCommands::resolve_ssn`),
 `engine/runtime/inmatch/server_tick.cpp` (kill tallies, `humans`, the win-condition
 check, the respawn hold), `godot/game/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
@@ -4571,18 +4964,24 @@ producers:
 - **WAC `lose n`** [orig: WacAction_Lose @ 0x4ed3f0] — n=0 resolves
   `Misc/STRMISC_KILLEDGREEN`, n=1 `Misc/STRMISC_KILLEDBLUE`, each through the
   banner trio (§20.6), then `Server_ProcessRoundEnd(2)` (red wins = the player
-  side loses). Any other n is a NO-OP returning 0. Both handlers were undefined
+  side loses). The chat line relays its Misc key to the joiners with team 0 on
+  both branches (`GameMsg_AddChatLineAndRelay`, the calls @ 0x4ED411 /
+  @ 0x4ED477; S2C 0x3F kind 1) before the round end; a joiner resolves the key
+  through `MissionText_GetStringByKey` (@ 0x42BC26), so a Misc key the mission
+  table lacks posts nothing there. Any other n is a NO-OP returning 0. Both handlers were undefined
   code before this session (define_func'd).
 - **BMS Blue/Red/GreenWin** (actions 8/9/10) [orig: EventAction_Dispatch
-  @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)`; the call sites
-  check the round-over latch first (our latch lives inside `process_round_end`).
+  @ 0x45447b/0x454495/0x4544af] — `Server_ProcessRoundEnd(1/2/0)` with no gate at
+  the call sites (cases 8/9/10 @ 0x454479 / @ 0x454493 / @ 0x4544AD; the g_spawn_success_gate
+  test @ 0x454450 belongs to case 7's dialog play); the round end's own latch drops a second
+  end [orig: Server_ProcessRoundEnd @ 0x5164f0 (@ 0x5164F6)], as `process_round_end` does.
 - **The SP auto-lose** [orig: Server_CheckWinConditions @ 0x51ad40, SP leg
   @ 0x51ad6f] — the ONLY automatic SP condition: local player dead
   (`Flags & 2`) and the mission does not author `SinglePlayerRespawn`
   (`Bms_AttribFlags & 0x40`) → `Server_ProcessRoundEnd(2)`. Runs at 1 Hz from
   the periodic-second block [orig: @ 0x51df5a]; the latch no-ops it
   [orig: @ 0x51ad4a]. Every other SP outcome comes from the script producers.
-- **MP legs** (unported, net track): the zone-ownership sweep
+- **MP legs** (ported: `world::Match`, §20.8 D-AI-10): the zone-ownership sweep
   (`ZoneSlotChain_GetWinningTeamIfAllOwned @ 0x4a2920`) and per-game-type
   score/time/kill-limit checks over the team stat blocks (game types 0,
   0x10000, 65537, 65540, 65538/589826, 65544, 8, 65552/327696); admin
@@ -4594,12 +4993,16 @@ producers:
 Order of operations: double-run guard on `g_spawn_success_gate @ 0x24c1928`
 [orig: @ 0x516502] → `g_round_winning_team @ 0x24c1924 = winner` [orig: @ 0x516528]
 → the winner-team scoring pass (team games: `GameEvent_ProcessScoring @ 0x52f550`
-per winning-team member, team byte entity+354, gate `g_GameType & 0x10000`)
-[orig: @ 0x516530] → `Server_BuildEndOfRoundScoreboard(1, winner) @ 0x508f30` →
+event 21, field 35 = 2, per state-6 slot whose entity is on the winning team, team byte
+entity+354, gate `g_GameType & 0x10000` @ 0x516541, @ 0x516536..0x51658C, so the frozen
+board carries the marker) [orig: @ 0x516530] → `Server_BuildEndOfRoundScoreboard(1, winner) @ 0x508f30` →
 server tick-phase metrics → phase 4 → **MP-only** `g_endround_linger_timer
 @ 0xc8d820 = 2790` (45 s) [orig: @ 0x5166c4] → per active slot in state 6: slot
 bookkeeping reset, S2C 0x61 round-end marker (4 zero bytes) [orig: @ 0x516790],
-the winner-bonus scoring leg, S2C 0x1D scoreboard header [orig: @ 0x516839],
+the winner-bonus scoring leg (non-team games: event 21 @ 0x5167E2..0x5167FD, AFTER the
+board build, so a non-team winner's end board shows field 35 = 0 and only the live roster
+holds 2; the scorer refuses a spectator slot @ 0x52F6E5 and a game type without a score
+table @ 0x52F617..0x52F640, so a Flag Me round awards nothing), S2C 0x1D scoreboard header [orig: @ 0x516839],
 `CNetPlayer_SetGameState(11)` [orig: @ 0x516846], slot state 6→7
 [orig: @ 0x51685e] → the per-team round-win counters for game types
 0x10000/65537/65540 [orig: @ 0x5168a0] → **the latch** `g_spawn_success_gate = 1`
@@ -4615,8 +5018,9 @@ surfaces the SP tail as the `round_end` shell effect: `a` = the winner, `b` =
 the end track `MusicCtx_SelectEndTrack` receives (1 win / 2 lose), which the
 shell's SP consumer feeds to the gamemus VM's restart frame (`mus_vm_signal`;
 mus-sbf-re.md "The MessageHandler restart frame") after the cine starts; the
-scoring pass, the scoreboard block, and every wire leg are cited stubs (net
-track).
+scoring pass (`world::Match`), the scoreboard block (`Server_BuildEndOfRoundScoreboard
+@ 0x508F30`) and the wire legs are ported (`inmatch/end_round_protocol.cpp`; ctests
+`npruntime_round_end`, `end_round_overlay`).
 
 The gate CLEARS at `Game_StartMission @ 0x524a1f` and the client GameReset
 handler [orig: NapiNPClientMsg_GameReset @ 0x422849]; `Cine_StartPlayback` also
@@ -4630,15 +5034,16 @@ if the SP round was WON copy `dword_24C1960 → dword_24D2500` → round-state i
 ### 20.3 The WAC named-value table (the `bluekills` family)
 
 One static table drives every named engine value WAC scripts resolve:
-**24 records `{char name[16]; u32 param_type; u32 value_ptr}` at `@ 0x82EEF0`,
-count dword at `@ 0x82F130`**, resolved case-insensitively by the third lookup
-leg of `WacScript_ResolveParameter @ 0x4f2940` (`*outType = 1` → pointer).
+**24 records `{char name[19]; u8 param_type @ +0x13; u32 value_ptr @ +0x14}`
+(24 bytes) at `@ 0x82EEF0`, count dword at `@ 0x82F130`**, resolved
+case-insensitively by the third lookup leg of `WacScript_ResolveParameter
+@ 0x4F2920` (`*outType = 1` → pointer).
 Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 
 | name | value | witnessed semantics |
 |---|---|---|
 | result | `@ 0xC6EB24` | the VM accumulator |
-| ticks | `@ 0xC6EAD8` | script executions; +1 per run [orig: WacScript_AdvanceTick @ 0x4f81d3]; seeded 0 at load |
+| ticks | `@ 0xC6EAD8` | script executions; +1 per run, added by the callers after each execution [orig: WacScript_AdvanceTick @ 0x4f81d3; WacScript_InitAndLoad @ 0x4F9770]; seeded 0 at load |
 | GameOver | `@ 0xC6EB0C` | derived `winner != 0` — a green(0) outcome never raises it [orig: cache pre-pass @ 0x4f57bb] |
 | WinVar | `@ 0xC6EB08` | derived `winner == 1` [orig: @ 0x4f57c9] |
 | LoseVar | `@ 0xC6EB04` | derived `winner == 2` [orig: @ 0x4f57cf] |
@@ -4653,8 +5058,8 @@ Param types seen: 2 = int var, 9 = time (CurTOD), 0xB = entity handle.
 **Correction:** an earlier session read this table phase-shifted by one record
 (name paired with the FOLLOWING record's value) — that mapping (`autogain →
 0xC6EAE8`, `bluekills → 0xC6EAF8`, `GameOver → 0xC6EAD8`, ...) was wrong; the
-resolver decompile pins the true anchors (name @ +0, type @ +0x10, value @ +0x14).
-Port: `Builtin` ids 8-13 in `engine/runtime/wac` (`bluekills/greenkills/humans/GameOver/
+resolver decompile pins the true anchors (name @ +0, the type byte @ +0x13, value @ +0x14).
+Port: `Builtin` ids 8-13 (`engine/formats/wac/bytecode.h`: `bluekills/greenkills/humans/GameOver/
 WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` /
 `World::match.outcome()`.
 The writable `accuracyspread` row is also ported: case-insensitive compilation
@@ -4665,10 +5070,21 @@ alias, and the resulting NPC aim heading.
 
 ### 20.4 The kill tallies (`bluekills`/`greenkills` and the epilog buckets)
 
-`Score_ProcessKillEvent @ 0x4fd400` runs per kill from the damage chain
-(`Entity_ApplyWeaponDamage @ 0x4e6bfe/0x4e6fb4`, `Projectile_ProcessDamageOnTarget
-@ 0x4e8133`, vehicle/collision legs), authority-gated, and **outside net sessions
-only** [orig: the `!is_in_session` gate @ 0x4fd447]. Killer == the local player →
+`Score_ProcessKillEvent @ 0x4fd400` runs from exactly five damage-pass lethal edges:
+the run-over (`Entity_MovementCollisionResolver @ 0x4B2BD0`, the call @ 0x4B39E2), the
+knife kill zone (`Entity_ApplyVehicleCollisionDamage @ 0x4E6620`, @ 0x4E6773), the person
+and item blasts (`Entity_ApplyWeaponDamage @ 0x4E6820`, @ 0x4E6BFE / @ 0x4E6FB4) and the
+round (`Projectile_ProcessDamageOnTarget @ 0x4E7FB0`, @ 0x4E8133), never from a death edge
+or a script kill. It returns without a killer (@ 0x4FD405), without a target (@ 0x4FD40E),
+off the authority (@ 0x4FD412) and when the VICTIM's ItemDef is missing or its `score`
+word (def+0x194, the items.def `score` token, `ItemDef_ParseProperty` @ 0x4A0228..0x4A0242)
+is zero (@ 0x4FD41E / @ 0x4FD422); then it runs scorer event 12 (@ 0x4FD438) and, **outside
+net sessions only** [orig: the `!is_in_session` gate @ 0x4fd447], the tallies. No Player
+definition authors `score`, so a Player victim, a self-kill included, never tallies. The
+round's edge reads the PRE-hit health: the kill chain needs the health word > 0 (`movzx
+eax, word [esi+11Eh]; test ax,ax; jle` @ 0x4E80FE), damage >= health (@ 0x4E810A) and
+damage_state == 0 (@ 0x4E8112), and the kill accounting also skips a body already flagged
+dead (`test byte [esi+24h],2` @ 0x4E811F). Killer == the local player →
 `Score_TallyKillByLocalPlayer @ 0x4fd160` (ex-`Score_ProcessDamageEvent`
 misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
 (count @ first addr, score-sum pair at +4):
@@ -4680,12 +5096,15 @@ misnomer); anyone else → `Score_TallyKillByOthers @ 0x4fd300`. Bucket family
   difficulty scaling ¾/3⁄2 on `dword_24D2110`).
 - by-others: infantry `@ 0xC846A8`, vehicle `@ 0xC846B0`, heli `@ 0xC846B8`,
   team `@ 0xC846C0`, friendly `@ 0xC846C8`, human-player victims `@ 0xC846A0`
-  (entity+534 flag).
+  (entity+534 flag). The team and friendly buckets take ANY victim type (no person
+  gate, @ 0x4FD325..0x4FD366); the human-player bucket is unreachable behind the victim
+  score gate.
 
 Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
 epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
 Port: `MissionKillStats` intentionally remains the count-only WAC/epilog view,
-tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
+tallied in `route_round_deaths` from the `RoundDeath::kill_event` deaths (set only at the
+five lethal edges) whose victim carries a nonzero `Entity::item_score`; the SP gate is
 `!world.rules.mp_session` because our SP-as-listen-server always runs
 `ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
 42-field player/team records with the signed `score.ini` event values used by
@@ -4780,7 +5199,8 @@ resolved from gametext.bin).
 Two load/response-time resolutions the probe forced out:
 
 1. **The player SSN**: mission scripts address the local player as SSN 10000
-   (retail player entities carry 10000+slot as their net id, so
+   (retail player entities carry 10000+slot as their net id, stamped by the player class
+   init `PlayerClass_InitEntity @ 0x4B1060` @ 0x4B1149..0x4B1173, so
    `EntityPool_FindByNetId @ 0x4f0a20` resolves them like any SSN). Our player
    entities deliberately carry `net_id 0` (the wire is handle-based), so
    `EntityCommands::resolve_ssn` restores the mapping at the script seam
@@ -4799,18 +5219,31 @@ Two load/response-time resolutions the probe forced out:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, or saved-game list (the end-music switch is ported 2026-09-12: the `round_end` effect carries `MusicCtx_SelectEndTrack`'s 1|2 and the gamemus MessageHandler plays the `Missionwin`/`Missionlose` sting through `mus_vm_signal`); (d) `sub_5280B0` music-park remains unported; (e) the SP gate reads `world.rules.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
+| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); their producer set is exact since 2026-09-23 (the five `Score_ProcessKillEvent` edges and the victim `score` gate, which also makes the human bucket unreachable); (b) CLOSED 2026-09-23: events 1 (FIRE on the authority's local pass), 5 (MEDICHEAL), 6 (MEDICSAVE), 12 (the unit score), the NPC-victim path, the Player-arm kill bonuses and the +0x170 share of every points award but event 25 have their producers (§38.10); (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, or saved-game list (the end-music switch is ported 2026-09-12: the `round_end` effect carries `MusicCtx_SelectEndTrack`'s 1|2 and the gamemus MessageHandler plays the `Missionwin`/`Missionlose` sting through `mus_vm_signal`); (d) `sub_5280B0` music-park remains unported; (e) the SP gate reads `world.rules.mp_session`, the port's model of retail's `is_in_session` (our SP listen server's `ctx.is_in_session` is 1); (f) the scorer's HIT event (case 2, `@0x52FC22`) for live hits and the proximity pass's hidden-selector generic score callbacks are not modeled | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; the score producers are ported (2026-09-23); the SP tally shape, HIT scoring and the SP presentation remain |
 
 **D-AI-10 update (2026-08-22, superseding the TDM/A&S-only wording above):**
 `world::Match` now implements every branch of `Server_CheckWinConditions
 @0x51AD40`: DM/TDM, solo/team KOTH, S&D/A&D, CTF, FlagBall, Flag Me, A&S/C&C,
-plus the universal all-zones-owned check; co-op remains intentionally
+plus the all-zones-owned check, which answers only in A&S and C&C
+(`ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2921..0x4A294E`), so a uniform chain in
+TDM or co-op neither wins nor suppresses the other arms; co-op remains intentionally
 WAC/BMS-owned. It also owns the recovered per-mode `ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850`
 primary score, flag carry/pickup/save/capture/return transitions, demolition
 target scoring, live 0x16 team projection, and authored objective census.
 Therefore residual (b) no longer applies to these retail game-mode producers.
-The remaining D-AI-10 scope is SP-only tallies/presentation/music and any
-ordinary combat event producer not enumerated here.
+The remaining D-AI-10 scope is SP-only tallies/presentation/music; the ordinary
+combat event producers are ported (§38.10).
+
+The round clock keeps running after the round ends: `g_round_time_remaining`
+decrements in `Game_ProcessMainFrame` (@0x5265DA..0x526602) under the authority, no
+pause, no epilog, no pre-round and time left only, with no round-over latch, so the
+0x0F time field, the lobby info, the HUD timer and the end-round overlay read a moving
+value through the linger. Every periodic-second callee from @0x51DF50 on (the capture
+pass, the team hold timers, the win check, the spawn waves, the zone passes) runs in
+every game type and after the round ends; only the 0x46 resend walk is skipped
+(@0x51DE3E / @0x51DE58), and the proximity pass returns at the round end before its
+mask clear (@0x5086A3), so the objective masks freeze while the team hold timers keep
+counting (§38.10).
 
 The hill hold itself is accumulated by the per-second team pass: a team with at
 least one alive holder in the volume gains one tick, an empty team loses
@@ -4900,22 +5333,25 @@ unported (the SP epilog/respawn flow, D-AI-10 / D-LOADSCR-8); the probe's
 
 ### 20.9 Open follow-ups
 
-1. `mana` (entity+0x120, cached `@ 0x4f582e`) — the field's true semantics
-   (IDB gloss "Armor") and its writers are unwalked.
-2. The end-music selector reader (the `@ 0x3245B08` byte through the stream
-   context `@ 0x3245AE8`) and `sub_5280B0`'s parked global (`@ 0x24D20CC`,
-   IDB gloss "g_SoundVolumeOption" — suspect) are unwalked.
+1. `mana` (entity+0x120, the IDB's `Armor` word; read signed @ 0x4f5827 and cached into
+   `wac_var_mana` @ 0x4f582e): the player class init seeds it from def+0x17E
+   (`PlayerClass_InitEntity @ 0x4B1060`, @ 0x4B1133..0x4B113D); its other writers and true
+   semantics are unwalked.
+2. The end-music selector reader is RESOLVED (`sub_672E50 @ 0x672e95..0x672ec1` consumes the
+   `@ 0x3245B08` byte, §20.6); `sub_5280B0`'s parked global (`@ 0x24D20CC`,
+   IDB gloss "g_SoundVolumeOption", suspect) is unwalked.
 3. The win epilog's extraction-point source (`@ 0x2696FD8/0x2696FDC`) — who
    stamps it (the `.cne`? the mission?) is unwalked; our stand-in skips the
    flyaway entirely.
-4. WAC named vars as WRITE targets (`set(health, ...)` — the original resolver
-   returns pointers, so any table name is an lvalue): our builtins are
-   read-only; extend `WacVm::write` when a mission needs it.
-5. The 0x1D non-team MP string form + `dword_24C1AD4/BB8/C9C` values, the
-   draw/tie semantics (`byte_24CFDB0` beyond the equal-scores case), and the
-   0x2B ack are net-track items.
-6. `Score_ProcessKillEvent`'s killer `itemDef->score` gate (@ 0x4fd422) is
-   unmodeled — verify whether any SP loadout authors score 0.
+4. RESOLVED: WAC named vars as WRITE targets (`set(health, ...)`: the original resolver
+   returns pointers, so any table name is an lvalue): `WacVm::write` writes every `Builtin`
+   (`engine/runtime/wac/vm.cpp`).
+5. RESOLVED: the 0x1D non-team MP string form (the three named players and scores
+   `dword_24C1AD4/BB8/C9C`, decoded by the joiner @ 0x430a70..0x430abb), the draw/tie semantics
+   (`world::Match`) and the 0x2B/0x56 requester exchange are ported (§20.8 D-AI-10; ctests
+   `npruntime_round_end`, `client_replica_endround`).
+6. RESOLVED 2026-09-23: the `score` gate (@ 0x4fd422) reads the VICTIM's def, not the
+   killer's, and is ported (`Entity::item_score`, `RoundDeath::kill_event`; §20.4).
 
 ### 20.10 IDB write-backs (2026-07-16 session 6, saved)
 
@@ -4978,7 +5414,7 @@ USERPOINT through the animated skeleton.
   entity+0x365 firing weapon +0x358; bit 0x10 → +0x367/+0x35B; the secondary latch →
   +0x366/+0x359) and the combat-pass aim anchor (+0x366). A mounted occupant whose
   vehicle def carries attrib 0x20 delegates to `Entity_ComputeUserpointWorldTransform
-  @ 0x545c60` (the VEHICLE's userpoint — D-AI-2 adjacency, unwalked).
+  @ 0x545c60` (the VEHICLE's userpoint; walked and ported for UseGun shots, §21.3).
 
 ### 21.2 The model userpoint table + the authored-name resolution
 
@@ -5038,7 +5474,7 @@ on demand. The port does the same (2026-08-26; the present-pass push and its sta
 - Consumers share `AiSystem::weapon_fire_origin(World&, ...)`: the fire pass spawns rounds
   from it, the LOS endpoints ray between two of them, the aim solution reads it for the EYE
   and the target point. `pump_mounted_weapon_slots` fires a UseGun shot from the
-  EMPLACEMENT's posed FIRE point (`weapon_userpoint_byte(mount, 0, 0)` — the fire tick
+  EMPLACEMENT's posed FIRE point through `usegun_fire_pose` (`player_weapon_pose.cpp`) (`weapon_userpoint_byte(mount, 0, 0)` — the fire tick
   reaches `@ 0x545c60` with currentAction FIRE / nextAction 0, so the `@ 0x545d17..0x545d3f`
   select yields field b, and `Server_ClientFiredRound @ 0x50c1f4` names field 0 outright; the
   m/c fields anchor the effect legs) ALONG THAT BONE'S EULER — retail's
@@ -5049,10 +5485,11 @@ on demand. The port does the same (2026-08-26; the present-pass push and its sta
 Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fire_origin_fallback_chain`,
 the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
 `world::IPoseProvider`); the `ai_muzzle_pose` ctest (`tests/world/ai_muzzle_pose_test.cpp`,
-gated on `OPENNOVA_JO_DIR`) reads the same provider
-through the entity card (`world::inspect` `muzzle_valid` / `muzzle`) and A/Bs it against the presented
-skeleton's `ObjectModel.get_muzzle_world_position()`: CP01 2026-08-26 PASS, 92/102 infantry in
-the rifle envelope, the sim point within 1e-5 u of the node's for the in-range bodies. That A/B
+gated on `OPENNOVA_JO_DIR`) asks the same provider
+(`IPoseProvider::resolve_muzzle_pose`) for every CP01 foot NPC's launch point on its own posed
+skeleton and requires the rifle envelope; the 2026-08-26 in-game A/B of the retired probe against
+the presented skeleton's `ObjectModel.get_muzzle_world_position()` measured 92/102 infantry in the
+rifle envelope, the sim point within 1e-5 u of the node's for the in-range bodies. That A/B
 caught the skeletal leg feeding the userpoint in the render-swizzled frame (0.5 u low, ~90°
 off) — the fixed matrix chain works in the native model frame and retail transforms the raw
 record position (`@ 0x4b272e..0x4b2743`); both legs now use the raw 16.16 record.
@@ -5061,7 +5498,9 @@ record position (`@ 0x4b272e..0x4b2743`); both legs now use the raw 16.16 record
 
 D-AI-6 (ledger): the fire origin is exact in-sim at fire time for persons with a rig and for
 UseGun shots. The aim/LOS origin (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0`) is
-`AiSystem::weapon_aim_origin` at both mutual-LOS ends and the aim TARGET point: its
+`AiSystem::weapon_aim_origin` at both mutual-LOS ends (the org1 aim blocks aim at the led raw
+Position instead: their `Entity_ComputeWeaponFireOrigin` calls @ 0x4BC720 / @ 0x4BCB23 are
+dead, §38.4): its
 non-person leg is ported 2026-08-26 (the def TARGET userpoint def+1350 — resolved from the
 hardcoded name at `Entity_InitFromModel @ 0x40dd04` into `Entity::target_userpoint_byte` —
 through the placement matrix `@ 0x43b5d4..0x43b5f6`, else the collision-bbox center
@@ -5073,8 +5512,8 @@ Residuals: the weapon-def userpoint (`+0x333 <- weaponDef+856`) and person
 `ItemDef+0x144` pre-evaluation hook (the BoneCallback pair from `BoneCallback_LookupByTag
 @ 0x4e32b0`) is unwalked — our equivalent is the inline CTRL publish; (e) retail's vehicle
 part pose reads the render clock for flag-2 spinners, ours the logic clock (the documented
-PANM seam); (f) the SM bone-list filler (`Entity_InitVehicleAI @ 0x4603ba..0x460414`) rides
-D-AI-2.
+PANM seam); (f) the SM bone-list filler (`Entity_InitVehicleAI @ 0x4603a6..0x460414`, the three
+bounded prefix scans) is ported in `mission/collision_resolve.cpp`.
 
 ### 21.5 Witness map: the userpoint chain (grill 2026-08-26)
 
@@ -5152,7 +5591,7 @@ the gravity-cadence case, and the player-jump case in
 | Finding | Witness |
 |---|---|
 | Parachute (Flags 0x20): bodyHeading(+0x8C) sixteenth-steps toward the render yaw(+0x10) `(yaw−body+8)>>4`, both leg re-plant targets snap to the result | `[orig: @ 0x4b494d-0x4b496c]` |
-| Any of Flags 0x100060 (parachute/carried/ladder): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `g_LocalPlayerLookYaw` (ex `dword_B75FCC`, renamed 2026-08-15) moves with it, legs snap to the body. The LADDER leg is PORTED (§30 — the sim writes the view, the embedder's mouse accumulator inherits it through the post-tick write-back); the parachute/carried legs and their exemptions ride those slices | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
+| Any of Flags 0x100060 (parachute/carried/ladder): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `g_LocalPlayerLookYaw` (ex `dword_B75FCC`, renamed 2026-08-15) moves with it, legs snap to the body. The LADDER and PARACHUTE legs are PORTED (§30; the sim writes the view, the embedder's mouse accumulator inherits it through the post-tick write-back; the chute leg with the 2026-09-18 chute motor, `infantry_ladder_view_clamp`); the carried leg and the exemptions ride the mount slice | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
 | ON FOOT — movement state (flag-table bit 0): both leg targets = the yaw EVERY tick | `[orig: @ 0x4b4984 → @ 0x4b49dd/@ 0x4b49e3]` |
 | ON FOOT — idle: per-leg re-plant, drift measured vs the CURRENT LEG YAW (org1 measures vs the target), 5°/30° hysteresis, 64-tick windows staggered 32 apart (L `(tick−32)&0x3F`, R `tick&0x3F` via ebp set at function head) | `[orig: L @ 0x4b4993/@ 0x4b49ad-0x4b49bc; R @ 0x4b499b/@ 0x4b49d0-0x4b49e3; ebp @ 0x4b4680]` |
 | Leg chase: quarter-step `(Δ+2)>>2`, rate clamp ±0x3000000 (~4.2°/tick — 3/5 the org1 0x5000000), twist limit ±0x30000000 (67.5°) measured vs the YAW (org1: ±0x20000000 vs the body); no def+84&0x200 1/16 variant in the org2 block | `[orig: R @ 0x4b49e9-0x4b4a43; L @ 0x4b4a49-0x4b4aa9]` |
@@ -5166,7 +5605,7 @@ the gravity-cadence case, and the player-jump case in
 | Finding | Witness |
 |---|---|
 | org2 gravity: `vel_z −= 208` EVERY tick, skipped while Flags 0x108000 (ladder/drowning); terminal clamp −32768; `pos.z += vel_z + root_dz` in ONE store (ours splits the two adds, same net) | `[orig: gate @ 0x4b7ac8; step @ 0x4b7acf; clamp @ 0x4b7c77; pos @ 0x4b7cef]` |
-| org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z` | `[orig: @ 0x4bf7b8-0x4bf7ee]` |
+| org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z`, on even key ticks only, then the quarter-step tail (§38.3) | `[orig: @ 0x4bf7b8-0x4bf7ee; odd skip @ 0x4BF6A5..0x4BF6B2; tail @ 0x4BFC65..0x4BFC86]` |
 | The horizontal integrate is 1× (rotated root delta + vel) for BOTH motors in normal play; the org2 local-player 2× branch is gated on `g_localPlayerPoofMode` — see D-INF-21 | `[orig: org1 @ 0x4bf684-0x4bf6a2; org2 1× @ 0x4b7cbf-0x4b7cd9; 2× gate @ 0x4b7c8d]` |
 | Jump cooldown lives in the REUSED +0x1A8 slot (org1's targetHeading): clamp [0,32], >1 counts down, parks at 1 while the jump key (MoveOrder bit 5) is held, key release → 0 — no auto-repeat on a held key | `[orig: @ 0x4b7de0-0x4b7e15; release edge @ 0x4b7e78-0x4b7e82]` |
 | Jump gates: cooldown 0 + key held + not prone (the cached prone local, also the freelook-pitch-halving and lean-skip selector) + `!(Flags & 0x1A002)` (in-air/dead/the water pair) + not carried (0x40) | `[orig: @ 0x4b7e8c-0x4b7ebd]` |
@@ -5195,7 +5634,15 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 - Mounted pose phase captures seat yaw/pitch/roll before the local look rewrite,
   synchronizes `body_heading`, both `leg_yaw`/`leg_target` chains, `body_pitch`, and roll,
   and keeps the remote seat heading separate from the local player's full-precision look.
-  The non-cardinal yaw path retains the witnessed `(90 - yaw) * 11930464` integer convention.
+  An unseeded carrier's angles are its placement's spawn form, ((deg << 16) / 360) << 16
+  [orig: Entity_SpawnFromBMSRecord @ 0x40EB42..0x40EBA6], and the seat offset composes in BAM as for
+  a seeded carrier (`pose_mounted_occupant`, 2026-09-23). The org1 motor writes +0x28 = +0x16C at
+  its head (`@ 0x4B9A0D..0x4B9A11`), so the deck ride (`@ 0x4BA45D`) runs for riders: the look and
+  aim adoption is skipped for an ISTURRET parent or a target on another carrier
+  (`@ 0x4BA812..0x4BA840`), while body, target, legs, pitch and roll always take the delta
+  (`@ 0x4BA861..0x4BA88E`); the mounted block scrubs the flags (`@ 0x4BEC03`) and vel_z
+  (`@ 0x4BEC15`), and a seat whose bone does not resolve kills a boarding rider and detaches it
+  (§38.3).
 - Player heading/legs rewritten to the §22.1 model (was the org1 approximation);
   NPC legs corrected to the midpoint re-plant value, staggered windows, and the
   walk half-snap path (§3.3).
@@ -5238,8 +5685,9 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
    no airborne gate — the wire does not carry the peer's in-air flag to the
    host today; rides the D-NET-159 anim-byte work.
-4. Landing sounds (slots 15/16), the fast-fall slot 0x2C, and the jump/land
-   effect legs — sound slice.
+4. Landing sounds (slots 15/16) and the fast-fall slot 0x2C are ported (§17.4b; the
+   free-fall play rides the chute motor, D-INF-20); the jump/land effect legs stay with the sound
+   slice.
 5. org2's tick counter identity (`var_10BC` vs the org1 `tick + 36·net_id`
    stagger) is unverified — only the window PHASE depends on it; ours uses the
    entity-salted key for both motors.
@@ -5273,9 +5721,9 @@ Armory", 04TR "Training: Base Defense") not progress? Witnessed end to end:
 the USE-ITEM mount chain, the BMS Player mount triggers, the three drive
 classes inside the vehicle physics, the AI boarding machinery, and the player
 deploy group stamp. Ported same session: `engine/runtime/world/vehicle_attach.cpp`
-(the toggle + scan), the four trigger predicates (`world.cpp` +
+(the toggle + scan), the four trigger predicates (`entity_commands.cpp` +
 `event_runtime.cpp`), the vehicle motor's parked/AI-driver staging
-(`ai.cpp::vehicle_ai_drive` + `vehicle_motor.cpp`), `player_spawn.cpp`
+(`ai_waypoints.cpp::vehicle_ai_drive` + `vehicle_motor.cpp`), `player_spawn.cpp`
 (group 1). Evidence: ctest `vehicle_mount` (9 blocks: toggle/deck/swap/enemy-gate/predicates/
 AI-drive/redirect+speed/drive-mirror/group-stamp), in-game
 the `vehicle_ride_00tra` ctest (formerly `vehicle_ride_probe.gd`) on retail 00TRa — PASS: toggle-mount into the
@@ -5329,12 +5777,13 @@ reaches no binding row (Knife on a bare 1 stays silent) and the release runs no
 mount toggle. This is the "SHIFT or CTRL key and the corresponding number key"
 of the retail Readme: Shift is USE, the chord above; Ctrl+digit are the seat
 rows below. The shipped KeyChart prints only the Ctrl form. Port:
-`PlayerInputRouter::sample_use_item` (the frame latch, the previous-frame copy,
-the consumed flag, the digit arm over Godot's physical key state, the release
-edge -> `Simulation::local_player_toggle_mount`) and `event_row_edge` (a digit
-row fires nothing while the hold is live); the shell keeps only the armory
-arm of the press and marks the hold consumed for its own Shift+F6 pick chord
-(`LocalPlayerPresenter::consume_use_hold`, the `dword_24C18E4` stand-in).
+`PlayerActions::sample_use` (`engine/runtime/controls/player_actions.cpp`: the frame latch,
+the previous-frame copy, the consumed flag, the digit arm, and the release edge's
+`ToggleMount` request, which `PlayerInputRouter` forwards to
+`Simulation::local_player_toggle_mount`) and the event-row pass of `PlayerActions::poll` (a VK
+digit row fires nothing while the hold is live); the shell keeps only the armory arm of the
+press and marks the hold consumed for its own Shift+F6 pick chord
+(`PlayerActions::consume_use_hold`, the `dword_24C18E4` stand-in).
 
 `Entity_ToggleVehicleMount @ 0x436950`: gated on the equipped weapon action
 (`!EquippedSlot || currentAction < 2 || currentAction == 5 ||
@@ -5342,14 +5791,13 @@ slot.nextAction == 11` — idle/emptyidle/dry-click/pending-overheat pass);
 unmounted -> `Entity_TryEnterNearestVehicle @ 0x4368c0`; mounted -> a fresh
 `Entity_FindNearestSeatOrArmory` hit re-enters (seat SWAP), else
 `Entity_SendDetachPacket @ 0x435510` (wire 0x27; the authority applies through
-the same server leg). NOTE the dismount mechanism: from INSIDE a multi-seat
-vehicle the scan's other-seat candidates are killed by the vehicle's OWN hull
-(the LOS leg walks pool-1 collision models) — that is why the use key EXITS in
-retail rather than cycling seats. Our pool-1 vehicles carry no collision
-instances yet, so the own-hull occlusion is modeled as a candidate skip of the
-CURRENT mount vehicle — same observable (USE exits; a different vehicle in
-reach still swaps); the ray-accurate form lands with the vehicle-collision
-slice (D-AI-11 j). A WAC-settable global `dword_C6EADC` (reset by
+the same server leg). NOTE the dismount mechanism: the seat LOS excludes the candidate
+vehicle (an emplaced gun resolves through its carrier), so the own hull never occludes; the exit
+comes from the aim cone, which shrinks to 5.0 deg for a seated player (`0x38E38E0` @ 0x435d9a in
+place of the standing `0x3FFFFFC0` @ 0x435d90, both BAM32 look-offset radii): USE swaps only onto
+a free seat the rider is looking at and dismounts when the cone is empty [orig:
+Entity_ToggleVehicleMount @ 0x4369ac..0x4369c7]. The port runs the same cone
+(`find_nearest_free_seat`, `vehicle_attach.cpp`). A WAC-settable global `wac_var_seatbelt` (reset by
 `WacScript_FreeAll @ 0x4f637b`) blocks the local player's dismount when set.
 
 `Entity_TryEnterNearestVehicle @ 0x4368c0`: the queued Co-op spawn-marker
@@ -5359,8 +5807,10 @@ its one writer is `Server_PositionPlayerForSpawn @ 0x50D44D`) ->
 no seat, `return 0` (`@ 0x436903`, no scan); else the proximity scan
 (corrected 2026-09-12; vehicle-client-movers-re §36). Either result feeds
 `Entity_RequestVehicleAttach @ 0x4364A0` — which pre-snaps the requester yaw
-from the seat bone (UseGun seats: `vehicle->Yaw - (HIWORD(SpawnOrigin.Z) << 16)`;
-others: the bone euler yaw), then applies directly on the authority
+from the seat bone (UseGun seats: gun.Yaw − (the gun's stored yaw word +0x322 << 16),
+`@ 0x43655F..0x43656E`, so the requester faces along the gun's current traverse; others: the bone
+euler yaw, `@ 0x4365BF..0x4365C3`; the seat userpoint's authored facing `Seat::yaw_offset` turns
+only the carried body frame), then applies directly on the authority
 (`Entity_ProcessVehicleAttach`) or queues C2S 0x26.
 
 OpenNova now performs that snap before either in-process attach relationship is written. Because the
@@ -5385,12 +5835,13 @@ case-insensitive whole name [orig: Entity_GetBoneSlotType @ 0x434ED0, `_stricmp`
 @ 0x434F6E]; occupancy
 `mountHandles[slot] == 0xFFFF`): the posed bone world position vs the player
 eye (`Position + CameraOffset`, +0.1875 u bias) must sit within **4.0 u
-horizontal** (0x40000) and the 3D cap (0x3FFFFFC0 unmounted / 0x38E38E0 = 910.2 u
-while seat-swapping); after the reach (`@ 0x436113`) and cone (`@ 0x43611F`)
+in 3D** (0x40000) and inside the aim cone: the point's yaw/pitch offset from the view (each
+clamped to +100 deg) has magnitude at most 0x3FFFFFC0 (just under 90 deg) standing or
+0x38E38E0 (5.0 deg) seated; after the reach (`@ 0x436113`) and cone (`@ 0x43611F`)
 gates, the LOS call (`@ 0x436183`) precedes the best-score compare
 (`@ 0x43618F`) [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130;
 retail order ported 2026-09-22]; score =
-`horiz + (dist3d >> 9)`, lowest wins. The posed bone position comes from
+`dist3d + (aim >> 9)`, lowest wins [orig: @ 0x43610c..0x436111]. The posed bone position comes from
 `build_bone_attachment_matrix` for every seat kind (kinds `@ 0x435F6C..0x435FDF`,
 call `@ 0x435FFA`), which runs the carrier's render-class CTRL callback
 (def+0x144, `@ 0x56C6DC..0x56C6F3`) and then its PANM/bones; the attach labels
@@ -5399,8 +5850,8 @@ scores and labels every kind at its live bone through the attachment-frame
 form (2026-09-22, `vehicle_mount::test_use_scan_poses_every_seat_kind_live`;
 non-gunner seats had scored at their rest point); the rider pose for
 non-gunner seats is unchanged. The armory leg (attrib 0x80000, bone
-prefix "armory", seatType 4) shares the math. Angle terms are computed and
-capped but feed nothing measurable (vestigial).
+prefix "armory", seatType 4) shares the math. The angle terms are the aim cone and
+the score's aim/512 term.
 
 `Entity_FindBestSeatSlot @ 0x4351f0` (deck/board pick): walks the vehicle +
 carried children (child qualifies when it IS the vehicle or its groundEntity
@@ -5418,7 +5869,7 @@ rows on the same digits fire from the fallback pass, which runs for a key
 event only when the first pass matched nothing (a pass-1 hit fires and skips
 it @ 0x49d437), so Ctrl+1 fires seat1 alone and a bare 1 fires Knife alone.
 The two therefore never collide and retail needs no mount-state split between
-them. `BindingSet::pressed_key` is that rule in poll form (ctest `controls`);
+them. `BindingSet::pressed_key` is that rule in poll form (ctest `controls_unit`);
 `ControlsModel::is_token_pressed` samples through it. The list starts
 with the control seat, then attached gun children, then passenger slots 0..7.
 It is independent of USRP/vector order and HUD texture availability. A
@@ -5443,8 +5894,8 @@ Entity_ProcessVehicleAttach @ 0x435BA9..0x435BB1]
 `find_numbered_vehicle_seat` over the same `build_vehicle_panel_slots` list as
 the overlay. `select_numbered_seat` applies the authority path;
 `JoinerRole::queue_numbered_seat` submits C2S 0x26 with the joiner's wire H.
-`PlayerInputRouter` samples the configurable seat bindings on down edges,
-retaining raw key latches across inactive UI frames; `BindingSet` seeds the
+`PlayerActions::poll` samples the configurable seat bindings (the `seat*` rows) on down edges,
+retaining raw key latches across inactive UI frames, and `PlayerInputRouter` forwards the requests; `BindingSet` seeds the
 catalog's Ctrl modifier, so the digit rows reach the weapon walk unchanged and
 a control seat's refusal stays the engine's `parentSlot` 2/3/5 gate
 (`weapon_switch_to_handle`) [orig: Player_SwitchToWeaponByHandle @ 0x4e0192].
@@ -5457,7 +5908,7 @@ neither marker nor digit.
 | Numbered seat query and weapon gate | MATCHING (behavioral proof) | `vehicle_panel_feed`: driver/gun/passenger order, gun-child re-root, bounds, human/AI/unresolved occupancy, missing control bone, idle/dry/reload/overheat and missing-weapon gates |
 | Joiner numbered-seat request and confirmation | MATCHING (behavioral proof) | `inmatch_joiner_role`: passenger first in vector, key-1 index selects driver bone, framed 0x26 uses H rather than L, body waits for echo, then forward drives the carrier and emits moving 0x0C |
 | Godot binding and input sampling | shell binding / not grillable | thin `Simulation::local_player_select_seat` role dispatch; real keyboard retail-host verification recorded in net-re section 5.10 |
-| USE-hold digit chord and mount-toggle release edge | MATCHING (structural port) | `PlayerInputRouter::sample_use_item` mirrors the three globals and the special-key arm; the row-level rule is pinned by ctest `controls` and GUT `controls_model_test`; no headless fixture yet drives the router over a mounted player, so the chord is verified by reading, not by a test |
+| USE-hold digit chord and mount-toggle release edge | MATCHING (structural port) | `PlayerActions::sample_use` mirrors the three globals and the special-key arm; ctest `player_actions` drives the chord, the swallowed digit rows and the release edge's `ToggleMount` request, and `controls_unit` pins the row-level rule |
 
 A live retail-host/OpenNova-joiner run on `00TRa.bms` established the pre-port
 failure: while seated in the transport truck's passenger position, key 1
@@ -5473,11 +5924,12 @@ and the key-1 call site `@ 0x4E0B81`; corrected the AI-displacement interpretati
 additively, renamed no symbols, and saved the IDB.
 
 Port notes (`vehicle_attach.cpp`): `VehicleSystem::player_toggle_mount` +
-`find_nearest_free_seat` + `attach_to_seat_index` over our seat model; the
+`find_nearest_free_seat` + `VehicleSystem::attach_to_seat` over our seat model; the
 witnessed constants verbatim; deviations ledgered as D-AI-11. The engine owner
 is `LocalPlayer::toggle_mount` (the weapon gate reads the ported weapon
-FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`
-fact), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
+FSM slot; the out-of-session UseGun rejection reads `rules.mp_session`, the port's model
+of retail's `is_in_session`, which single player leaves clear [orig:
+Entity_AttachToUseGunSlot @ 0x546BF6..0x546C0D]), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
 main_game.gd's USE-ITEM handler
 (armory leg first, faithful order).
 
@@ -5556,8 +6008,8 @@ Port: legs 1 and 3 land as `AiSystem::vehicle_ai_drive` (the brain state
 stamps + the steer/speed math; the motor consumes a `VehicleDriveCmd`) +
 `VehicleSystem::tick_motor`'s AI branch; leg 2's SM freeze lands in the staging block
 (a player controller stamps state 22 like the parked leg — the mover never
-advances under a human driver; our cur/pend SPLIT means both fields take every
-stamp, the original has one state word).
+advances under a human driver; the stamps write only the current-state
+word `kCurState` (brain+0x10) and leave the pending word alone, as retail does).
 
 The avoid BRAKE (witnessed in full + ported 2026-07-18 — the 00TRa
 trucks-off-path fix): per pool-1 neighbor, reach = both bounds + 1.0 u with a
@@ -5568,8 +6020,11 @@ footprints `r/2 + (r/2)*|cos(yaw - ang)|` of both entities + 1.0 u (the
 1024-entry cos table `off_849934`); a neighbor within ~30 deg of dead ahead
 (`|Yaw - ang - 0x7FFFFF80| <= 357913920`) multiplies the command speed by
 `((DcbId + (frame << 8)) & 0x7FFF) + 0x4000` >> 16 — a 0.25..0.75 stochastic
-brake per tick, compounding per neighbor (the frame counter is
-`dword_24C1948`; our net id + logic tick stand in). Without it, redirected
+brake per tick, compounding per neighbor (the counter is
+`g_entity_update_counter`, the ENTITY-UPDATE counter, not a render frame counter: its one writer is
+`add g_entity_update_counter,esi` @ 0x4C2639 at the tail of a non-epilog update, with no reset, so it runs
+one behind `tick` through the process's first mission and keeps counting across restarts and
+loads; ported as `World::entity_update_counter`, §38.9). Without it, redirected
 convoys drove full-speed into parked neighbors and the (ported) hull contact
 DEFLECTED them off their routes — braking behind obstacles, not deflection, is
 the retail path-follow behavior. ctest `vehicle_mount`
@@ -5582,7 +6037,9 @@ through `_ftol2_sse` at `0x48BE86`, then reads each footprint cosine from
 at `0x48BE98..0x48BEA0`, self index/load at `0x48BEC9..0x48BEDB`. The shared
 `vehicle_avoid_brake` now uses `quantized_dir` for both reads and truncates the
 bearing while preserving its wrapped half-turn word. The ground and boat callers
-retain the same ordered pool scan, compounded brake factor and carrier exclusions.
+retain the same ordered pool scan, compounded brake factor and carrier exclusions; only the
+walk gate differs (ground skips ItemTypeIndex 0, boat and aircraft admit ItemTypeIndex 1 only,
+§31.3).
 The adjacent boat slip FSIN and aircraft steering FSIN/FCOS are full-angle x87
 operations; their computations remain separate (`0x48E43D`, `0x4917DB/0x4917E6`).
 
@@ -5653,20 +6110,21 @@ chain; ctest `collision`
 (`test_vehicle_hull_skips_mounted_child_ground_chain` — 1-hop and 2-hop
 children produce no contact, an unrelated other hull's gun still pushes).
 Ported: pool-1 candidate slices (+6.0 u [orig: @ 0x4b902f]) +
-`CollisionWorld::resolve_vehicle_hull` (one mid-hull point, radius 1.5 u,
-wall-class-only, mask 8, the witnessed child-chain skip) + the motor's
+`CollisionWorld::resolve_vehicle_probes` (`collision_vehicle.cpp`: one model query per
+authored wheel/hull probe at its radius, mask 8 or 24 by attrib2 bit 7, the three-hop child-chain
+skip, the crush stamp and the graded bands [orig: Entity_CheckCollisionState @ 0x462A30, entity
+half @ 0x462DFB..0x4632CC]) + the motor's
 push/decay leg; ctest `vehicle_mount`
 (`test_vehicle_hull_stops_at_building` — a driving truck grinds to a stop at
-a wall square). Deferred (D-NET-161): the mask-24 attrib2 leg (attrib2 is not
-fed to the sim), the per-wheel point array/radii, the
-v84/v85 slope-threshold derivation (caller locals, unwitnessed), the graded
-bands, the crush leg, the severity-3 damage block, the second averaged pass
-with its pushable-other mass-ratio force split (`otherMass/(otherMass+mass)`
-@ 0x463037-0x46324d / @ 0x47d24a). the SM's kinematic `apply_locomotion`
-RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
-(waypoints, visited bits, states), the motor is the only integrator, matching
-the original split. Deferrals stay under D-NET-161 (updated in
-[novaworld-net-re.md](../net/novaworld-net-re.md)).
+a wall square). The legs once deferred here are ported: the soft and hard
+thresholds are the def's cos22(maxSlope +0x8F4) and cos22(slipSlope +0x8F8)
+(vehicle-client-movers-re §6), and the severity-3 impact damage, the scrape edge with its
+momentum exchange and the second pass's scaling by the other vehicle's mass share
+(`otherMass/(otherMass+mass)` @ 0x463037-0x46324d / @ 0x47d24a) ride the family solves
+(vehicle-client-movers-re Section 12, 2026-09-07). The SM has no integrator of its own
+(the interim `apply_locomotion` model is deleted, §2): it stays the decision layer
+(waypoints, visited bits, states), and the motor is the only integrator, matching
+the original split.
 
 The live motor now also supplies the two cveh control-register fields for
 which OpenNova owns exact sources. `VEHICLE_STEERING` zero-extends the high
@@ -5713,8 +6171,8 @@ kept every vehicle parked:
    core, sank 1–3 u below the waterline at load (gravity, no buoyancy, no
    wheel solve) and never integrated drive. The cbot authority half is now
    witnessed and ported (`tick_watercraft_motor` +
-   `AiSystem::watercraft_ai_drive`, family-dispatched in the AiSystem
-   authority pass) — see
+   `AiSystem::watercraft_ai_drive`, family-dispatched in the per-row motor
+   leg `VehicleSystem::update_motor`) — see
    [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §1.12.
 
 Retail-faithful quirk left in place: 00TRg's event 21 redirects group 7
@@ -5729,13 +6187,23 @@ patrol handler @ 0x45E6DF..0x45E717] — and the vehicle spawn init seeds
 with the profile resolved from the slot's ai_textfile (def-level fallback
 itemDef+0x8B8, then `"helo1"`) [orig: `Entity_InitVehicleAIFromDef
 @ 0x4686C0` — the seeds @ 0x4688C7/@ 0x4688D3]. The port:
-`PromoteOptions::ai_profile_speeds` (raw values, keyed by ai_textfile;
+`PromoteOptions::ai_profiles` (raw values, keyed by ai_textfile;
 scale applied at the brain seed in `init_brain`), resolved natively by
-`mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp, driven by `boot_mission`) inside `MissionKernel::boot` (S9, ADR
+`mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp) inside `MissionKernel::boot` (S9, ADR
 0028; the former shell `AiProfileSpeeds.build` reader + the
 `set_ai_profile_speeds` seam are deleted). d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
 `mission_promote` ctest. PR #640 completes the remaining vehicle profile consumers,
 including initial state, priorities, weapon blocks and aircraft flight fields.
+
+Those seeds are the VEHICLE init's (2026-09-23, §38.1): the class init is keyed on
+the item's ai_function row, not the profile type. `Entity_InitHelicopterAIFromDef
+@ 0x4683C0` (CHel/cpln) seeds brain[49] = profile+0xD4 and brain[50] = profile+0xC8
+(`@ 0x468597..0x4685A9`), where the HELO parse keeps combat_speed and patrol_speed,
+while `Entity_InitVehicleAIFromDef` reads +0xC4/+0xC0. A cross-typed profile
+therefore feeds the aliased words (a GROUND profile under the helicopter init gives
+radio_delay/turn_rate; a HELO profile under the vehicle init gives
+hunt_limit/hunt_flags), and an unresolved `.aip` is the memset-0 record, so its
+speeds are 0.
 
 **The profile-NAME fallbacks, witnessed + ported 2026-08-25 (post-merge tidy
 #553–#573).** A placed vehicle with no ai_textfile never runs profile-less in
@@ -5745,8 +6213,8 @@ machine, init) routes `chel`/`cpln` to `Entity_InitHelicopterAIFromDef
 (the `cbot`/`cpln`/`ctrn` rows through the thunks `@0x474560`/`@0x474550`/
 `@0x474570`), and each init resolves the name in arms — the helicopter
 family: the record's +0x9C ai_textfile when non-empty (`sprintf("%s.aip")`
-@0x4684ae), else the literal `"helo1.aip"` @0x4684c9 (the BMS-spawn twin
-`Entity_InitHelicopterAI @0x461F00` has the same pair @0x461f35/@0x461f50);
+@0x4684ae), else the literal `"helo1.aip"` @0x4684c9 (the unreferenced
+`Entity_InitHelicopterAI @0x461F00` carries the same pair @0x461f35/@0x461f50);
 the vehicle family: the ai_textfile @0x4687a3, else the def's `default_aip`
 (+0x8B8) @0x4687c1, else `"helo1"` @0x4687d3, then
 `Path_ReplaceOrAppendExtension(".aip")` @0x4687f4. The consequence that
@@ -5756,9 +6224,9 @@ Blackhawk's rotor turns in retail only because helo1.aip is type HELO — and
 the port, resolving names from the ai_textfile alone, left that brain type 0
 and the rotor still. Ported as `mission::ai_profile_name_for` (shared by the
 boot resolver, which now loads the fallback files too, and the promote's brain
-seed) with the class answer supplied per items.def type id by the embedder
-(`PromoteOptions::ai_profile_defaults`; the Simulation reads `ai_function` +
-`default_aip` from its ItemDatabase). Pinned by `runtime_boot::run_aip_fallback`,
+seed) with the class answer supplied per items.def type id by the mission kernel
+(`PromoteOptions::ai_profile_defaults` from `MissionKernel::ai_profile_defaults_fn`, which reads
+the items.def `ai_function` + `default_aip`). Pinned by `mission_runtime_boot` (`run_aip_fallback`),
 `mission_promote::test_nameless_vehicle_takes_the_retail_default_profile`, and
 the asset-gated GUT `vehicle_emplacement_alignment_test::
 test_real_blackhawk_rotor_register_spins_while_crewed` (the register that
@@ -5783,7 +6251,7 @@ the +0x20 clamp 0..4 with `aim_skill`. The GROUND branch converts its speed
 pair the same way `@ 0x45e6df/@ 0x45e72d` (+0xC0/+0xC4); the port keeps that
 pair raw because its consumer (the brain seed) applies the identical scale.
 The authority aircraft brain and client motor now consume these HELO rows
-(PR #640); `runtime_boot` pins every conversion and the aircraft AI and
+(PR #640); `mission_runtime_boot` pins every conversion and the aircraft AI and
 client-motor tests cover their runtime behavior.
 
 ### 23.4 The AI boarding chain (ported; completed in PR #640)
@@ -5810,8 +6278,8 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   one "RedirectGroupTo/SingleTo" function cited at its pool-0 store
   `@ 0x43cdb4`):
   - `Entity_SetWaypointByTeam @ 0x43CD20` (BMS RedirectGroupTo from
-    `EventAction_Dispatch @ 0x454315`, and the WAC GtoWP handler at
-    `0x4ED3D0`, an IDB misnomer `TextResource_GetMissionString`, which calls it
+    `EventAction_Dispatch @ 0x454315`, and the WAC GtoWP handler
+    `WacCmd_GroupToWaypoint @ 0x4ED3D0`, which calls it
     with node -1 `@ 0x4ED3DC` and always returns 1 `@ 0x4ED3E4`): walks pool 0
     then pool 1 matching the signed commandGroup word (`@ 0x43CD6D` /
     `@ 0x43CE7B`), each needing an AI slot. Pool 0 **auto-detaches a mounted
@@ -5873,8 +6341,8 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   [@ 0x4bb100..0x4bb17a], the 64-tick seated re-upgrade [@ 0x4ba9d8..0x4baa41:
   `(tickKey & 0x3F) == 0`, mounted, `Entity_FindBestSeatSlot`,
   `Entity_GetBoneSlotType != +0x168`, re-attach], the can't-enter fallbacks,
-  and `Entity_CanEnterVehicle @ 0x435480`'s internal gates. Only the scripted
-  organic escort offsets 11000/12000/12001 remain on D-INF-2.
+  and `Entity_CanEnterVehicle @ 0x435480`'s internal gates. The scripted
+  organic escort offsets 11000/12000/12001 are ported in §33.31 (`infantry_escort.cpp`).
 
 Ported same session (the second wave, after the 00TRa probe forced them out):
 
@@ -5906,8 +6374,9 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   AI_HandleCommand @ 0x465770 cases 0xA/0xB].
 - **Vehicle brains**: known drivable classes consume the resolved profile's
   initial state, speeds, perception priorities, weapon blocks and aircraft
-  flight fields. Initial current, pending and fallback state come from
-  profile +24 (`Entity_InitVehicleAI @ 0x460200`); transport zero-priority
+  flight fields. Initial current, pending and fallback state are 0:
+  `Entity_InitVehicleAI @ 0x460200` reads them back from the zeroed brain (`mov ebx,[esi+18h]`
+  `@ 0x46024B`, stores `@ 0x46028B..0x460291`), and the first mover tick promotes 0 -> PRETTY; transport zero-priority
   profiles suppress acquisition through the class-priority test. Pure-gunner
   parents use the mounted organic's perception and weapon slot.
 
@@ -5916,7 +6385,7 @@ E/G/S/H entry stages, live eye and hull queries, carried-gun occupancy,
 WAC seatbelt, full admission gates, facing-push arrival radius and the
 64-tick seat upgrade. See [vehicle-client-movers-re section 36](vehicle-client-movers-re.md#36-boarding-use-scans-and-authored-ai-state)
 for the current witness and validation map. The scripted organic escort
-identities 11000/12000/12001 remain in the separate D-INF-2 infantry scope.
+identities 11000/12000/12001 are ported in §33.31.
 
 
 ### 23.4a Live evidence: the 00TRa instructor ride (2026-09-12)
@@ -6010,14 +6479,13 @@ vehicle-client-movers-re.md §7.4; the vehicle-pass facts:
 - Ordinals 46 and 47 are BOTH `HIWORD(+0x464)` `[orig: Entity_CacheVehicleHUDStats
   @0x492aca/@0x492ad7]` — one accumulator. The wheel phase is `+0x2B8 +=
   |+0x46C| + (+0x29C << 13)` per tick `[orig: @0x48c4c5..0x48c4f4]`; the slip
-  term rides D-NET-161 (0 in the port). The BMS record's `attrib_flags &
+  term `|+0x46C|` is ported (`vehicle_wheel_traction_tick`, `vehicle_traction.cpp`). The BMS record's `attrib_flags &
   0x20000` ("engine running at spawn") seeds `Flags |= 0x80; +0x468 = 186413;
   +0x460 = 214748352; +0x29C = 0x10000` `[orig: Entity_SpawnFromBMSRecord
   @0x40ee70..0x40ee94]`.
 - **Port**: `engine/runtime/world/vehicle_part_anim.{h,cpp}` (the two arms,
-  called at every mover tail and — for the host's helicopters, whose mover is
-  the unported HELO movement physics — from the authority pass at the missing
-  tail site), `vehicle_ctrl_registers` publishing rotor/tail_rotor/wheels
+  called at every mover tail, the aircraft mover's included
+  (`vehicle_motor_air.cpp`; a predicted joiner row advances it in `VehicleSystem::update_motor`)), `vehicle_ctrl_registers` publishing rotor/tail_rotor/wheels
   beside steering/speed, `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
   `ObjectModel::set_ctrl_override` (the present applier's ctrl leg grew from
   18 to 21 fields, append-only). Pinned by ctest `vehicle_part_anim` and GUT
@@ -6940,12 +7408,12 @@ the FFI structs.
 |---|---|---|---|
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
-| D-ITEM-3 | Blast half FIXED 2026-09-18: flags/section-center box sweep and one-time glass sound supplement gunfire marking; lawr/fgrenade pass-through remains OPEN @ 0x4E968A..0x4E969A | @ 0x4E6C5E..0x4E6E6B; Entity_PlaySectionBreakSound @ 0x439C00 | destruction covers root translation, box corners, flag filtering and repeated blasts; projectile_combat retains glass behavior. Wider destroyed/animated collision tables remain D-COL-2. |
+| D-ITEM-3 | Blast half FIXED 2026-09-18: flags/section-center box sweep and one-time glass sound supplement gunfire marking; lawr/fgrenade pass-through remains OPEN @ 0x4E968A..0x4E969A | @ 0x4E6C5E..0x4E6E6B; Entity_PlaySectionBreakSound @ 0x439C00 | destruction covers root translation, box corners, flag filtering and repeated blasts; projectile_combat retains glass behavior. The section table D-COL-2 named is the door table, closed (§33.14). |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
-| D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), the medic (type 3) queue leg's alive heal (`GameEvent_HealPlayer @ 0x50de30`), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
+| D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
-| D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
+| D-ITEM-8 | FIXED (§24.3a): the crane/water-tower special death (the "scrane" pairing and the crane callback `@ 0x43fc70`), `Entity_ProcessCraneDestruction @ 0x43eee0`, the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are ported (`item_events.cpp`) | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
@@ -6998,7 +7466,7 @@ by-pool ring selection, the section-local transform), `Scar_GetEntityCache
 router), `Terrain_SpawnSurfaceEffectsAtUserPoints @0x5cea90` (the 24-row
 table), `Scar_DrawBatches (ex Terrain_RenderFoliageBatches) @0x5ccd10` (the scar drawer),
 `Entity_UpdatePartSpinAccumulator @0x4928b0` (the profile-type gate),
-`Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70` (the HELO twin),
+`Entity_UpdateHeloRotorSpin @0x48fa70` (ex `entity_update_damage_accumulator_and_shadow`; the HELO twin),
 `Entity_CacheVehicleHUDStats @0x4929b0` (46 = 47), `Entity_UpdateVehiclePhysics
 @0x48af00` (the wheel phase), `Entity_SpawnFromBMSRecord @0x40e9f0` (the
 0x20000 seed), `ThirdPersonCamera_Update @0x437af0` / `Camera_ComputeThirdPersonView
@@ -7123,8 +7591,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   in the order `C−A−B (0,0)`, `C+A−B (1,0)`, `C−A+B (0,1)`, `C+A−B (1,0)`,
   `C+A+B (1,1)`, `C−A+B (0,1)` in `Env_TerrainLightCombined | FF000000`,
   appended per texture via `Terrain_ParseSectorTypeCallback @0x5cf390`. The
-  drawer `Scar_DrawBatches @0x5ccd10` (a misnomer; proposed
-  `Scar_DrawBatches`; caller `Terrain_RenderSceneWithReflection @0x5c9658`
+  drawer `Scar_DrawBatches @0x5ccd10` (ex `Terrain_RenderFoliageBatches`, renamed; caller `Terrain_RenderSceneWithReflection @0x5c9658`
   after the lit sector entities): `CD3DDevice_SetFogAndBlendMode(dev, 0)` (the
   fog COLOUR select — scene fog colour; it never touches a blend state),
   identity world, vertex shader 0, FVF 0x142, the 1000-vertex dynamic VB
@@ -7239,8 +7706,9 @@ block (color ramp + width curve). The same pool renders rocket/AT4/grenade smoke
 trails and the NVG IR laser. All addresses retail `Jointops.exe` (imagebase
 0x400000, IDB `Jointops.exe.kong.i64`). Port (same session): the point rings =
 `engine/runtime/world` `tracer_trails.{h,cpp}` (`TracerTrailPool`, fed by `RoundSim`), the
-styles + ribbons = `fire_presenter.cpp`; pinned by the `npruntime_round_sim`
-ctest section 7 and the `fire_present_pass_test.gd` ribbon tests.
+styles + ribbons = `engine/runtime/renderer/tracer_frame.{h,cpp}` (compiled and uploaded by
+`FirePresenter`, `fire_presenter.cpp`); pinned by the `npruntime_round_sim` ctest section 7 and the
+`renderer_tracer_frame` ctest.
 
 ### 25.1 The pool — `g_TracerEmitterPool @ 0x2BF5270`
 
@@ -7382,13 +7850,13 @@ FrameFX leg]`. The normal-pass geometry:
 | Trail channel lifecycle (alloc/append/drain/free) | MATCHING | `TracerTrailPool` [orig cites inline]; `npruntime_round_sim` section 7 |
 | Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
 | Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |
-| Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `fire_presenter.cpp` (the transcribed style tables); caps in `tracer_trails.h` |
-| Ribbon geometry (pairs, facing, widths, ramp index) | MATCHING (structural; min-width proj divisor approximated 0.0012/u) | `_append_channel_ribbon`; `fire_present_pass_test.gd` |
+| Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `tracer_frame.cpp` (the transcribed style tables); caps in `tracer_trails.h` |
+| Ribbon geometry (pairs, facing, widths, ramp index) | MATCHING (structural; min-width proj divisor approximated 0.0012/u) | `tracer_frame.cpp` ribbon build; ctest `renderer_tracer_frame` |
 | Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_presenter.cpp` |
 | B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
 | Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
 | Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_presenter.cpp`; D-AI-12d |
-| light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::get_round_glow_rows` → `EffectLightDirector.sync_round_glows`) | D-AI-12e (closed leg) |
+| light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::fill_round_glows` → `EffectLightDirector::sync_round_glows`) | D-AI-12e (closed leg) |
 | NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
 
 ### 25.6 Divergences
@@ -7496,7 +7964,7 @@ would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe
 | mounted aim, request gates, action-FSM fire, muzzle, and shooter ownership | **MATCHING** (behavioral proof) | §26.5-§26.6; `ai` and `npruntime_weapon_table` ctests |
 | late-spawn player body-ADM binding + configured UseGun pose | **MATCHING** (behavioral proof) | §26.5b; asset-backed `simulation_test.gd` |
 | live UseGun root position | **MATCHING** relationship/root-position core | §23.5/§26.5a; asset-gated 00TRc E50triB GUT; joiner authoritative relationship confirmation landed; generic-seat rider poses and full matrix basis remain open (the USE scan and labels pose every seat kind at its live bone, 2026-09-22) |
-| mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
+| mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9's step-up/auxiliary tails landed with the ladder slice (§30) |
 | mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
 | automatic ADM-derived action duration in the runtime table builder | **MATCHING** | §26.8; D-WPN-26 fixed; `npruntime_weapon_table` |
 
@@ -7528,13 +7996,16 @@ the scanner or the candidate carries `AiSlot[1] & 0x200`
 [orig: Entity_FindTargets @ 0x53a7ea-0x53a824]. That bit is the Berserk spawn mapping in
 §26.2, not an unrelated host-side `see_all` switch. The infantry feed now reads this slot
 bit directly, so a normal allied pair never engages or fires while authored Berserk actors
-retain retail's attack-anyone behavior.
+retain retail's attack-anyone behavior. Every consumer reads the bit live (the SM class
+walk `@ 0x466FAB` / `@ 0x4670CD` / `@ 0x4670E1`; the kill feed's type choice in
+`GameEvent_PlayerDeath @ 0x51709C..0x5170DA`), so a scripted ChangeAI Berserk (case 0x10
+`@ 0x43AEF6`) takes effect at once; the former `AiEntity::see_all` spawn copy is gone.
 
 ### 26.4 Damage wakes AI; near misses do not
 
 An actual hit runs the organic damage callback. For a non-player victim
 (`!(Flags & 0x100)`), it writes AI move/alert byte `+136 = 2` and raises the command group
-to red [orig: Entity_HandleDamageTrigger @ 0x407310; alert block @ 0x4073c8-0x4073ea].
+to red [orig: OrganicClass_HandleEvent @ 0x407310; alert block @ 0x4073c8-0x4073ea].
 The separate receive callback returns immediately for self-damage at `0x4af859`; otherwise
 it sets `wasHit`, adds 10 to the reaction timer when the old value is below 25, and records
 the attacker [orig: Entity_OnDamageReceived @ 0x4af800]. The port mirrors both layers:
@@ -7563,8 +8034,10 @@ Attach saves the prior equipped ADM immediately and equips the parent slot. UseG
 the transient `0xA000` pair but, unlike a generic vehicle-slot attach, does not set
 `Flags & 0x40` [orig: Entity_AttachToUseGunSlot @ 0x546c56-0x546c7c;
 Entity_AttachToVehicleSlot @ 0x494752]. Dismount and the death-detach edge clear parent
-ownership; retail restores the saved slot for a player-class occupant, then clears the
-equipped slot for a non-player NPC [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa].
+ownership; retail restores the saved slot for a player-class occupant, then, for any
+non-player leaving any seat, clears the equipped slot and zeroes its AdmDef byte +0x2B0
+(and +0x160 / +0x298) [orig: Entity_DetachFromVehicle @ 0x435671-0x4356aa; the non-player
+leg @ 0x43568D..0x4356AA].
 The persistent parent slot continues to own its own ammo.
 
 Retail first initializes the mount base with the request-time yaw snap described in §23.1. The port
@@ -7756,25 +8229,41 @@ secondary weapon channel's missing-key behavior remains separate.
 
 ### 26.6 Fire request and global action-FSM phase
 
-Let `S = current_tick + 36*net_id`. A mounted gunner considers a fire request only when it
-has a live parent, a non-null target (no health test [orig: @0x4BF4CF..0x4BF4D4];
-the port tested the target's health until 2026-09-22), and an equipped slot;
-`(S & 3) == 0`; the target passes
-`((target.x-target.y+S) & 0x40) == 0`; `dz` is halved before distance; distance is strictly
+Let `S = current_tick + 36*net_id`. Every mounted-live org1 body (parent and health
+captured at the motor head, whatever its seat) makes the request: past a non-null target
+(no health test [orig: @0x4BF4CF..0x4BF4D4]; the port tested the target's health until
+2026-09-22), `(S & 3) == 0` and the stagger `((target.x-target.y+S) & 0x40) == 0` it
+copies the parent's live +0x2B0 into its own (@0x4BF4F4..0x4BF4FA: the parent weapon slot's
+byte from spawn, then each ready AI block's ammo byte, §17.6; a weaponless parent's is the
+spawn clear's zero), and only a rider with an EquippedSlot (the UseGun swap, or a ctrlx
+rider on an EWeap parent) goes on: `dz` is halved before distance; distance is strictly
 below `AiSlot[15]`; bearing error is below `0x0AAAAAA0` (about 15 degrees); and the slot's
 current action is IDLE. It writes only next action FIRE
 [orig: Entity_UpdateInfantryAI @ 0x4bf4b3-0x4bf59e]. Existing next action, phase,
 counter, heat, and ammo do not participate in this AI-side request gate.
 
 The infantry update does not spawn a round itself. Retail finishes all entity updates, then
-pumps every weapon action slot [orig: Entity_UpdateAllEntities @ 0x52674b;
-WeaponAction_ProcessAllEntities @ 0x526786]. The FIRE action invokes the shared weapon path,
+pumps every weapon action slot [orig: Game_ProcessMainFrame @ 0x5263F0 (the
+Entity_UpdateAllEntities call @ 0x52674B; the WeaponAction_ProcessAllEntities call
+@ 0x526786)], so a pumped round first steps on the next tick. The FIRE action invokes the shared weapon path,
 attributes the shooter to the organic owner, obtains origin from the mount/userpoint, and
 consumes the parent's embedded ammo; a clip size of -1 remains infinite. OpenNova now keeps
-that phase boundary: mounted requests queue during AI update, the parent slot is pumped once
-after world systems and before round simulation, and the resulting authoritative round uses
-the gunner net id with the mount's posed muzzle. An occupied pool-1 parent is not pumped a
-second time.
+that phase boundary: mounted requests queue during AI update, and the resulting authoritative
+round uses the gunner net id with the mount's posed muzzle. Retail's single walk
+[orig: WeaponAction_ProcessAllEntities @ 0x542690] runs after the camera and outside the
+entity-update gate, so a held entity update still pumps the slots: pool 0 in slot order
+(@ 0x542691..0x5426A6), each live row with a slot pointer (+0x118, @ 0x5426AD / @ 0x5426B9),
+then the pool-1 rows with no occupant (+0x170, @ 0x5426E9), live, with a def carrying EWEAP
+(@ 0x5426F2..0x5426FF) and a hot slot (heat-window end +0x14 nonzero, @ 0x54270E). A UseGun
+gunner's +0x118 is the parent's mount slot, so a manned gun is pumped once, at the gunner's
+pool-0 slot, and an abandoned gun keeps pumping until its heat window closes (@ 0x54125F);
+`WeaponAction_Fire @ 0x542B10` returns at once for a slot with no owner (+0x24,
+@ 0x542B24..0x542B2E). Port: `World::pump_weapon_actions` (the local player's slot through
+`LocalPlayer::pump_local_weapon`, other gunners through `AiSystem::pump_gunner_slot`, then the
+pool-1 leg), run by the roles; a joiner walks its replica slots. Carried: the host clears the
+mount's owner link at detach where retail keeps the slot's +0x24 owner, the AI and pool-1 pumps
+leave the owner-water heat-window gate (`WeaponAction_ProcessFrame` @ 0x541004..0x54101C)
+unfed, and the joiner walks its remote borrowers before the local player's slot.
 
 ### 26.7 Mounted collision and death
 
@@ -7784,8 +8273,9 @@ After mounted combat/animation work, the live branch runs the movement resolver 
 parent from its candidates. Instead, `savedPosY` suppresses accumulated model push for a
 source with a live modeled parent or `Flags & 0x40`, while contact classification and
 callbacks still run [orig: movement collision resolver @ 0x4b2be0-0x4b2d3f; force gates
-@ 0x4b3045-0x4b30af and @ 0x4b3658-0x4b36b9]. This core is now ported; D-COL-9 retains
-only its specialized step-up/auxiliary tails. In particular, a UseGun occupant reaches
+@ 0x4b3045-0x4b30af and @ 0x4b3658-0x4b36b9]. This core is ported, and D-COL-9's
+step-up/auxiliary tails (the MoveOrder-0x100 bump and the `+0x2c` bit-4 pitch-restore latch)
+landed with the ladder slice (§30). In particular, a UseGun occupant reaches
 this suppression through its live modeled parent, not through the generic `0x40` flag.
 
 When health crosses to dead, the live mounted gate stops applying. The infantry death edge
@@ -7878,7 +8368,7 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 | Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel, lifetime-head/fuse timing, sound-only first-five-bounces presentation, and pool-only item sweep are live; PRNG/parent-Euler residuals remain | §27.4; D-THROW-2/-4; test_grenade_bounce_and_fuse, test_motor_sweep_ignores_non_pool_domains, test_ballistic_expiry_is_silent |
 | Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate, full placed pose/item/health carry, and pool-only item sweep are live | §27.5; D-THROW-2/-4; test_satchel_places_device, test_motor_sweep_ignores_non_pool_domains |
 | Placed-device think/detonate chain (satchel/claymore/AV mine) | ported core; exact pool-1 order/cadence, wrapped cone angle, and full terrain-plus-sector LOS are live; placed-model collision remains | §27.6; D-THROW-2/-8; device lifecycle/cone tests incl. test_claymore_sector_los_blocks_trigger |
-| Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §27.6; test_owner_death_removes_devices |
+| Owner cleanup (the deploy and leave sweeps) | MATCHING | §27.7; `npruntime_placed_device_relay` run_owner_devices_live_until_the_deploy; `throwables` test_owner_death_keeps_devices_armed; `script_command_parity` test_player_removal_sweeps_placed_devices |
 | items.def class binding (ai_function/move_function) | MATCHING | §27.2; the resolve_item_traits feed |
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
 | Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_presenter.cpp` |
@@ -8125,7 +8615,7 @@ an armed device's age keeps wrapping negative). The clone kept the round's un-ag
 +684 (noage), so **the leftover ammo max_age IS the arm delay** (satchel/
 claymore 1 s). Ported devices are pool 1 and therefore decrement exactly once
 per tick; the pool-2 every-8 / pool-3 every-64 cadence belongs to other item
-pools (including the unported `lndm` scope), not these devices
+pools, not these devices (the mission `lndm` minefields, ported in §27.6a, are pool-1 rows as well)
 `[orig: Entity_UpdateAllEntities @ 0x4c2100 loops @ 0x4c2288 / @ 0x4c2340]`.
 The production world walks this pool-1 device pass before projectiles, so a
 newly converted charge does not lose an arm-delay tick and shrapnel spawned by
@@ -8225,7 +8715,10 @@ nothing. `[orig: PRNG_Next16_B @ 0x6130F0; Precipitation_Reset @ 0x5DF3A0]`
 
 **Contacts and cadence.** Think scans all unspent slots. If all fourteen were
 already spent on entry, it calls `Entity_Destroy @ 0x43E810`, without a kill
-transaction. Otherwise age reloads to 3 on the authority and 1 on a peer.
+transaction. Otherwise age reloads to 3 on the authority and 1 on a peer (@ 0x441B1A); the
+pool-1 clock steps once per visit on its pre-decrement gate (`Entity_UpdatePool1Slot` @ 0x4B8E1B /
+@ 0x4B8EA0), so an authority minefield thinks every third visit (the port had stepped the clock
+twice per visit until 2026-09-23).
 Pool 0 is visited in slot order: nonzero item and clear flags bit 0, with no
 health, allegiance or owner filter. Broad distance is truncated Q16 Euclidean
 distance from current actor position to current field position, at most the
@@ -8324,12 +8817,20 @@ pellets, per pellet the rol4(s+rol11(s))^1 stream draws yaw ∈ base ±
 kz_pieslice and pitch ∈ [base, base+kz_pieslice), no tracer/model/fire-event;
 then shotgun (0x10000) and the ballistic default.
 
-Owner death/leave: `Server_ProcessPlayerDeath @ 0x5178d8` (and the player-
-removal recursion in `Server_RemoveEntityAndNotify @ 0x50a270`, S2C 0x12) →
-`Entity_RemovePlacedDevicesByOwner @ 0x546e00`: the owner's satchels/
-claymores/AV mines are **removed silently, never detonated**. Our port polls
-the owner's health in `ThrowableSim::tick` (transport-free stand-in for the
-death hook).
+Owner death and leave: a dead owner's placed devices stay armed; neither the pool-1 visit
+(`Entity_UpdatePool1Slot @ 0x4B8DD0`) nor the satchel, claymore and AV mine thinks read the
+owner's liveness. `Entity_RemovePlacedDevicesByOwner @ 0x546e00` removes the owner's
+satchels, claymores and AV mines (each through `Server_RemoveEntityAndNotify @ 0x50a270`,
+S2C 0x12; **never detonated**) at two points only: (a) the deploy that follows a death, in
+`Server_ProcessPlayerDeath` (the call @ 0x5178D8), skipped for a medic revive (@ 0x5178C5)
+and a spectator slot (@ 0x5178CD), ahead of `PlayerSlot_InitWeaponsFromLoadout`
+(@ 0x5178E1); (b) the Player arm of `Server_RemoveEntityAndNotify` (@ 0x50A2BB), which the
+leaver's `Server_HandlePlayerDisconnect` (the call @ 0x51B82E), WAC removeSSN / Gremove and
+BMS Vaporize run. An NPC-owned or orphaned device is never retired by its owner. Port:
+`Server_ReleasePlayerDeployment` runs `EntityCommands::remove_placed_devices_by_owner` at
+the retail position, the leaver's teardown (`teardown_connection`) runs it for a Player row
+before the row is despawned, and `ThrowableSim::update_device` reads no owner (a swept
+record just releases on its next visit).
 
 ### 27.8 Divergence catalog (D-THROW)
 
@@ -8338,7 +8839,7 @@ death hook).
 | D-THROW-1 | CLOSED 2026-08-12: `ProjectileTrace` carries terrain/water/person walk gates and `motor_item_sweep` disables all three, so excluded domains never enter nearest-hit arbitration | pools 2/1 broad+face walk only (`Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667`) | `collision_test::test_projectile_trace_domain_switches_preserve_farther_pool_hit` walks water → terrain → person → pool-1 as gates close; `throwables::test_motor_sweep_ignores_non_pool_domains` pins the live motor reaching the farther item in all three masking cases |
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) — PERMANENT 2026-08-29 (ADR 0022 register; the D-NET-115 ratification applied to the throwable family) |
 | D-THROW-3 | CLOSED 2026-07-22: device LOS uses the shared full terrain-plus-sector query, excluding the device and candidate (`CollisionWorld::raycast_clear`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | `test_claymore_sector_los_blocks_trigger` pins a type-1 building wall blocking the cone and removal exposing the same target |
-| D-THROW-4 | CLOSED 2026-08-12: `throwable_stick_pose` is the exact orient port — the normal rotated into the yaw-local frame by the transposed yaw-only Q22 matrix (+0x200000 rounding), pitch = bias + bam(atan2(z,y)) − 0x40000000, roll = bias + bam(atan2(z,x)) − 0x40000000, yaw KEPT (satchel pitch bias 0xC0000040, claymore 0 — the callers pass the entity's own +0x10); `parent_delta_follow` is the exact full-Euler follow shared by the round motors and the placed-device ride, reading the parent's `saved_live_*` channel (netsim `row_deck_ride` ports the inlined org twins of the same math) | `Entity_OrientToSurfaceNormal @ 0x445fa0` (via `Math_BuildFixedPointRotationMatrixYXZ @ 0x615400` yaw-only + `Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0` + `Math_TransformPointFixedPoint22 @ 0x412e90`, atan2 scale dbl_7C57B8 = −2^31/π); `Entity_InterpolateFromParentDelta @ 0x4a8d60` (code calls from all four round motors @ 0x44443b/0x444e8b/0x4475d1/0x44861f; installed as the placed motor +452 @ 0x5455fd) | `throwables::test_stick_pose_exact` pins the four pose legs; `test_parented_device_adopts_parent_pitch` pins the out-of-plane orbit + pitch adoption. Residue: a parent that never stamps `saved_live_*` (statics — faithful zero delta; joiner wire-materialized rows lack the stamp, tracked with device-on-decoded-vehicle under D-THROW-7/D-WPN-8). The double-trig port carries the established ±2 BAM LSB envelope |
+| D-THROW-4 | CLOSED 2026-08-12: `throwable_stick_pose` is the exact orient port — the normal rotated into the yaw-local frame by the transposed yaw-only Q22 matrix (+0x200000 rounding), pitch = bias + bam(atan2(z,y)) − 0x40000000, roll = bias + bam(atan2(z,x)) − 0x40000000, yaw KEPT (satchel pitch bias 0xC0000040, claymore 0 — the callers pass the entity's own +0x10); `follow_carrier_motion` (`carrier_motion.h`) is the exact full-Euler follow shared by the round motors and the placed-device ride, reading the parent's `saved_live_*` channel (netsim `row_deck_ride` ports the inlined org twins of the same math) | `Entity_OrientToSurfaceNormal @ 0x445fa0` (via `Math_BuildFixedPointRotationMatrixYXZ @ 0x615400` yaw-only + `Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0` + `Math_TransformPointFixedPoint22 @ 0x412e90`, atan2 scale dbl_7C57B8 = −2^31/π); `Entity_InterpolateFromParentDelta @ 0x4a8d60` (code calls from all four round motors @ 0x44443b/0x444e8b/0x4475d1/0x44861f; installed as the placed motor +452 @ 0x5455fd) | `throwables::test_stick_pose_exact` pins the four pose legs; `test_parented_device_adopts_parent_pitch` pins the out-of-plane orbit + pitch adoption. Residue: a parent that never stamps `saved_live_*` (statics — faithful zero delta; joiner wire-materialized rows lack the stamp, tracked with device-on-decoded-vehicle under D-THROW-7/D-WPN-8). The double-trig port carries the established ±2 BAM LSB envelope |
 | D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (now `HudFrameCompiler::element_power`, originally `game_hud.gd _draw_power_bar` — the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | CLOSED 2026-09-04: mission `lndm` init, contact, cadence, ammo/ceasefire, replica lifetime and marker rendering are ported | §27.6a; `Entity_InitHardpoints @ 0x4417D0`, `Entity_LandmineThink @ 0x441A40`, `Entity_RenderBoneAttachments @ 0x441660` | Retail `00TRd` has 98 fields and `CP09` has 74; native, replica, retail damage/reset and GUT marker/LOD regressions pin the full slice |
 | D-THROW-7 | CLOSED 2026-08-15: authoritative conversion/removal events encode exact S2C 0x59/0x12 records and fan reliably to in-match remotes while skipping host loopback; joiners validate both, select the base/friendly/enemy item from owner/local teams plus MP attribute 0x8000, preserve same-type updates as one lifetime, attach the structural parent, materialize at the exact pool-1 wire handle, and retire it on 0x12. Recorded residual — the client-side REST GAP: retail keeps the non-authority resting round alive 248 ticks and its 0x59 handler copies the client's own resting round into the placed row, so the device never blinks out; ours removes the visual round at rest and shows nothing until the 0x59 arrives | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | `nw_ingame_encode`, `netsim_client_world_materializer`, `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, `npruntime_placed_device_relay`, and `throwables` |
@@ -8384,13 +8885,19 @@ section consolidates witnesses already scattered through this record (§3, §13,
 §15, §16, §17, §23, §24) and backs the `kEntityFlag*` constants in
 `engine/runtime/world/entity.h` — no new IDA work. Spawn composition:
 BMS `Indestructible(1<<21) -> 0x4000000`, `Reflective(1<<23) -> 0x400`,
-`NoShadow(1<<24) -> 0x1000000` `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]`;
+`NoShadow(1<<24) -> 0x1000000` `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0
+(@ 0x40ED0D / @ 0x40ED1D / @ 0x40ED2E)]`, and inside the AI branch attribute 2
+`-> 0x40` (@ 0x40ED9F) and 0x4000 (FlyingOrganic) or 0x20000 `-> 0x80`
+(@ 0x40EE2A, @ 0x40EE70..0x40EE94; §38.1);
 kind Building `-> 0x20000` `[orig: Entity_InitFromModel @ 0x40e105]`;
-items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
+items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`, with Health 1 and subType 0xFF
+on the entity and both def armor words overwritten to 0xFFFF `[orig: Entity_InitFromModel
+@ 0x40DC95 / @ 0x40DC9F, Health @ 0x40DCA6, subType @ 0x40DCAF]`: the target walk's
+armor gate (§17.2) and the damage gates read that pair (`mission_item_traits` ctest).
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
-| 0x1 | `kEntityFlagCarried` | carried object hidden while attached to its carrier (the flag/carryable pickup family); distinct from 0x40, which marks the CARRIER/mounted body | `[orig: Entity_AttachToVehicle @ 0x43C130]`; the Match flag producer (§15.5 D-COL-8 flag leg) |
+| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachToVehicle @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
@@ -8398,28 +8905,29 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 | 0x10 | `kEntityFlagScopeRaised` | weapon scope raised (`g_weaponScopeActive` refresh) | `[orig: test @ 0x4b5deb]`; §13.2 |
 | 0x20 | `kEntityFlagParachute` | parachute deployed (motor ported 2026-09-18, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
 | 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
-| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — plus the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; rides the AI-order slice with the bit's WRITER). The COMMAND writer is ChangeAI sub 23 (runtime-only, no dfx2med token) — NOT sub 17, which is the AI-slot CLIMBER bit 0x400 (§32.2, corrected 2026-09-01) | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae]`; §30 |
+| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor -16384), PORTED §30. The eighth-step x/y chase to +0x2FC/+0x300 is the self-attachment move (attachParent == self) and does not test this bit. Writers: ChangeAI sub 23 (runtime-only, no dfx2med token; NOT sub 17, which is the AI-slot CLIMBER bit 0x400, §32.2) and the BMS attribute fold (FlyingOrganic 0x4000 and attribute 0x20000, §38.1), both ported | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; self-attachment move @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae; Entity_SpawnFromBMSRecord @ 0x40EE2A, @ 0x40EE70..0x40EE94]`; §30 |
 | 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
 | 0x200 | `kEntityFlagQueuedMount` | the queued Co-op spawn-marker mount (named 2026-09-12): set by the no-pick team-2 marker arm together with +364/+384 = the marker's parent; consumed by the first org2 body update (restore +0x28 from +0x180 when null, toggle, clear); the toggle's `Entity_FindBestSeatSlot(groundEntity)` arm keys on it alone, with no scan fallback — a deck stander never has it | `[orig: Server_PositionPlayerForSpawn @ 0x50D442..0x50D45A; Entity_UpdateInfantryPlayerBody @ 0x4B424A..0x4B4272; Entity_TryEnterNearestVehicle @ 0x4368CF..0x436903]`; §23.1; vehicle-client-movers-re §36 |
 | 0x400 | `kEntityFlagReflective` | BMS Reflective trait | `[orig: @ 0x40e9f0]` |
 | 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the critical-hit latch the damage path writes is bit 0x800 of a DIFFERENT dword, `entity+0x2C` (`Entity::cause_flags`, §19.2a) — never this Flags bit |
 | 0x2000 | `kEntityFlagInAir` | airborne / swimming | `[orig: grounded selector @ 0x4b78ab]`; §3, §15.3 |
-| 0x4000 | `kEntityFlagPriorityTarget` | set on every fire; decays per perception scan (the §16.2 x6 scoring flag) AND by the 744-tick host sweep: `g_dirtyflag_clear_timer @0xC8D810` (zeroed per mission by `Nbstat_StartupInit @0x4fde30` <- `Game_StartMission @0x526108`) at the head of `Server_TickUpdate @0x51d82b..0x51d840` fires when zero, `EntityPool_ClearDirtyFlags @0x508E30` strips the bit from every used row of pools 0/1, reload 744 — the only decay for pool-1 shooters and dead rows (ported 2026-09-12, `clear_priority_target_marks`) | `[orig: set @ 0x4bf370; clear @ 0x4bbfa4; sweep @ 0x508e59 / @ 0x508e79]` |
+| 0x4000 | `kEntityFlagPriorityTarget` | the shooter mark: set by the organic fire and by `RoundData_SpawnRound` for every non-silenced ballistic round and the shotgun fan (§38.2); decays per perception scan (the §16.2 x6 scoring flag) AND by the 744-tick host sweep: `g_dirtyflag_clear_timer @0xC8D810` (zeroed per mission by `Nbstat_StartupInit @0x4fde30` <- `Game_StartMission @0x526108`) at the head of `Server_TickUpdate @0x51d82b..0x51d840` fires when zero, `EntityPool_ClearDirtyFlags @0x508E30` strips the bit from every used row of pools 0/1, reload 744 — the only decay for pool-1 shooters and dead rows (ported 2026-09-12, `clear_priority_target_marks`) | `[orig: set @ 0x4bf370; @ 0x4EC842..0x4EC847; @ 0x4EBE61..0x4EBE66; clear @ 0x4BBF88; sweep @ 0x508e59 / @ 0x508e79]` |
 | 0x8000 | `kEntityFlagDrowning` | deep-water FLOAT latch (the "drowning" family — the death-cause consumer maps it to 175): asymmetric-hysteresis submerge, zeroes the vertical root, gates gravity via 0x108000, and hands z to the per-motor float blocks | `[orig: latch @ 0x4b8363 / @ 0x4bfc48; entry @ 0x4b8020 / @ 0x4bfafe]`; §29.1 |
 | 0x20000 | `kEntityFlagBuilding` | kind Building | `[orig: Entity_InitFromModel @ 0x40e105]` |
+| 0x80000 | `kEntityFlagNoEngage` | read by the org1 combat think (the attack-stance aim block and the reaction/approach arm), but no instruction in the binary writes it (OR/MOV-immediate scans over 0x401000..0x795000 and all 22,498 `[reg+24h]` stores), so both reads are dead in retail; the same holds for 0x40000 | `[orig: reads @ 0x4bc958 / @ 0x4bc054]`; §38.4 |
 | 0x100000 | `kEntityFlagLadderContact` | CL/type-4 ladder touch; locks upper-body pose + skips gravity while aligned | `[orig: @ 0x4b3291]`; §14, §15.4 |
 | 0x400000 | `kEntityFlagArmoryZone` | type-6 (CA) volume touch — gates weapon.mnu on action 218 | `[orig: @ 0x4aea45, @ 0x49b848]`; §15.4 |
 | 0x200000 | (unnamed in reimpl; the netsim flags mirror carries it raw) | fully-submerged/dive latch — org2's water block sets it below the float line − 0x2000 (with the dive splash), clears at the surface clamp; both motors clear it with 0x8000 on the not-submerged exit (`~0x208000`) | `[orig: set @ 0x4b81ef; clear @ 0x4b8176; exits @ 0x4b8373 / @ 0x4bfc5c]`; §29.1 |
 | 0x800000 | `kEntityFlagIndoors` | indoors (blink accum bit 2 -> Flags); render + AI retry gates | §4 (render-occlusion-re), §15.4, §17 |
 | 0x1000000 | `kEntityFlagNoShadow` | BMS NoShadow trait | `[orig: @ 0x40e9f0]` |
 | 0x4000000 | `kEntityFlagIndestructible` | BMS Indestructible / hp==0 item | `[orig: @ 0x40e9f0; @ 0x40dc8e]`; §15.3 force skip |
+| 0x10000000 | `kEntityFlagScriptDisabled` | WAC disableSSN / enableSSN; the vehicle motors read it with the dead bit (`Flags & 0x10000002`) as their driver-input gate | `[orig: WacCmd_DisableSsn @ 0x4F7690 (or Flags,10000000h @ 0x4F76DD); enableSSN @ 0x4F773D; Entity_UpdateVehiclePhysics @ 0x48B980; Entity_UpdateAircraftPhysics @ 0x490F1E]`; §38.7 |
 
 Known-but-unnamed bits (witnessed IN USE but the meaning is not pinned — the
 code keeps raw hex at these sites; do not name without a new witness):
 
 | Bit | Where it appears | Note |
 |---|---|---|
-| 0x1 | destruction sweeps skip `engine_flags & 0x1` targets; part of the `0x2000001`/`0x43` composites | reads as an "inactive/exempt" family; unpinned |
 | 0x10000 | `!(Flags & 0x112002)` comment-only gate (§3) | unpinned |
 | 0x2000000 | the `0x2000001` skip composite (collision/throwables/LOS) | unpinned |
 | 0x8000000 | AI combat candidate skip; `0x8000001` composite | unpinned |
@@ -8432,6 +8940,13 @@ raw per the partially-witnessed rule): dismount scrub `~0xA000`
 @ 0x494752-0x494775]`; repulsion exemption `0x43` and skip composites
 `0x2000001`/`0x8000001` stay raw (constituent bits unpinned).
 
+The companion entity+0x2C dword (`Entity::cause_flags`, §19.2a) carries the
+kill-cause bits 0xF00 and the hit feedback 0x1000; its bit 0x2000 is the WAC
+holdSSN latch (`kCauseFlagScriptHold`: `[orig: WacCmd_HoldSsn @ 0x4F7810 (or
+[eax+2Ch],2000h @ 0x4F785D); WacCmd_UnholdSsn @ 0x4F78BD]`), read by the org1
+think's move-mode-12 hold (@ 0x4BD235, §38.4), and the BMS attribute 0x2000000
+sets its bit 0x80 at spawn (@ 0x40ED3B..0x40ED44).
+
 ## 29. The org water/float channel and the deck-ride (D-NET-196 replica tails, 2026-08-06)
 
 The two mover blocks the replica-infantry tails needed, witnessed end to end
@@ -8440,8 +8955,9 @@ in both org movers. Ported for DECODED rows in
 `row_deck_ride`, the root suppressions and gravity gate in
 `row_root_motion_tick`) with the resolver-side flags channel in
 `engine/runtime/world/collision_resolve.cpp` (`resolve_replica` `entity_flags`).
-The LOCAL infantry motor's water block remains unported (D-INF-3) — this
-section is its witness when that slice runs.
+The LOCAL motors' water blocks are ported too (`infantry_water_block` /
+`player_water_block`, `infantry_water.cpp`, 2026-08-24; D-INF-3 keeps only its listed water
+residuals).
 
 ### 29.1 The water/float channel (`Flags 0x8000` + the dive bit `0x200000`)
 
@@ -8473,11 +8989,14 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   same block (`@ 0x4b8304-0x4b8360`, presentation-only).
 - **org1 (NPC) — the snap form** `[orig: @ 0x4bfb16-0x4bfc86]`: float target
   `water + bob - height(+0x74)/2 - 0x4C9 + min(capsule_bottom, 0)` with the
-  bob for EVERY row (no local gate), then the tail rewrites
-  `pos.z = z_saved + (target - z_saved + 2) >> 2` where `z_saved` is the
-  POST-INTEGRATE z captured before gravity `[orig: the save @ 0x4bf6ba; the
-  quarter-step tail through `+0xAC` @ 0x4bfc65-0x4bfc86]` — gravity's and the
-  resolver's z contributions are DISCARDED while afloat. org1 never sets the
+  bob for EVERY row (no local gate), reading the eye height +0x74 restamped
+  this tick (`@ 0x4BFB66`, `@ 0x4BF14C`); the water block stores the target
+  (`@ 0x4BFB84`), and the org1 motor's GENERAL vertical tail, which runs on every
+  even key tick afloat or not, settles it: Z = saved + ((Z - saved + 2) >> 2),
+  that quarter stored in +0xAC and re-applied on the odd key tick (`@ 0x4BFC80`),
+  where saved is the post-integrate Z (`@ 0x4BF6BA`) or the landing-snapped Z
+  (`@ 0x4BF808`) `[orig: the tail @ 0x4BFC65..0x4BFC86]`. The block runs on even key
+  ticks only (the odd tick skips to `@ 0x4BFC80`). org1 never sets the
   dive bit (clears it on exit only).
 - **Motion couplings**: `0x8000` suppresses the vertical root channel and
   `0x100000` the horizontal pair — BOTH motors store true ZEROS (CORRECTED
@@ -8497,7 +9016,10 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   `min(capsule_top - capsule_bottom, 0xD000)`, floored at `0x2000` (the lean
   tilt is the lean channel's term, zero for an unleaning row)
   `[orig: @ 0x4b6984-0x4b6991; floor @ 0x4b68e7]`. The splash/overlay edges
-  ride the cross-cutting sound/FX slice (open for local rows too — §22.5).
+  are the host's: the local motors queue each entry edge and org2's dive edge in
+  `World::out.water_crossings` (`infantry_water.cpp`), which the host fans as S2C 0x34 to
+  the alive players (`route_water_crossings`; retail's `Server_SendOverlayActionToAlive
+  @ 0x50a1b0`, the org1 call @ 0x4bfc40), so a replica row takes the host's 0x34.
   `Env` source: the mission water plane (`World::EnvState.water_z`, 0 = no
   water = channel off with a self-healing `~0x208000` clear).
   **2026-08-24 — the LOCAL motors are ported too** (world/infantry_water.cpp):
@@ -8606,7 +9128,8 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
 
 ### 29.3 Follow-ups
 
-1. The local infantry motor's water block stays D-INF-3 scope. The ladder
+1. The local motors' water blocks are ported (2026-08-24, `infantry_water.cpp`; D-INF-3
+   keeps its listed water residuals). The ladder
    half of this item LANDED 2026-08-15 (§30): the `Flags 0x80` Z-chase
    gravity variant is ported (its x/y `attachParent==self` leg rides the
    AI-order slice with the bit's writer), and the `@ 0x4b7fa8-0x4b8019` push
@@ -8621,7 +9144,7 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
    0x27B0 both sides, team/FF gates, authority-only, death anim cause 2 by
    approach quadrant, killer = carrier occupant +0x170, groundEntity-riders
    exempt) is witnessed for the D-NET-161/00TRg authority arc — not a
-   client-subset item. PORTED 2026-09-01 into `CollisionWorld::resolve_movement`
+   client-subset item. PORTED 2026-09-01 into `CollisionWorld::resolve_entity`
    with the gates in `vehicle_collision_damage.h`: the pusher is the last
    pass-0 force candidate [orig: the var_80 store @ 0x4b30a9]; the vehicle test
    `itemDef+0x5C == 1` @ 0x4b37dc, the victim's +0x28 ride exemption @ 0x4b37e8,
@@ -8635,7 +9158,7 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
    [esp+var_7C]` @ 0x4b395d, `sub ebp, ebx` @ 0x4b3963; the port had used
    pusher minus victim until 2026-09-22), the unsigned shift @ 0x4b39a2..0x4b39a7,
    `+0x178 = pusher occupant` @ 0x4b39d1, Health 0 @ 0x4b39d7,
-   Score_ProcessKillEvent @ 0x4b39e2 (our RoundDeath credits the occupant).
+   the Score_ProcessKillEvent call @ 0x4b39e2 (our RoundDeath credits the occupant).
    PORTED 2026-09-22: a player victim (`Flags & 0x100` @ 0x4b3918) with a set
    damage-disabled word +0x124 (@ 0x4b391f; nonzero only during the 620-tick
    spawn protection or the dead latch, so a deployed live player's word is 0)
@@ -8664,8 +9187,8 @@ consumer census is closed: exactly four functions touch the
 `engine/runtime/world/infantry_ladder.cpp` (the climb block + exits + the org1
 legs + the view clamp; `infantry.cpp` defers to it),
 `engine/runtime/world/pose_inputs.h` (the arms lock), and the view
-write-back seam in `godot/src/simulation/simulation_player.cpp`
-(`sync_local_mounted_input_heading`).
+write-back seam `LocalPlayer::sync_local_mounted_input_heading`
+(`engine/runtime/world/local_player.cpp`).
 
 ### 30.1 Verdicts
 
@@ -8673,7 +9196,7 @@ write-back seam in `godot/src/simulation/simulation_player.cpp`
 |---|---|---|
 | Resolver CL legs (entry gate, snap/bump, recontact, chase, exit + pitch restore) | MATCHING | 4 `collision` ctest cases (`test_ladder_entry_gate_snap_and_chase`, `test_ladder_recontact_inflated_and_relatch`, `test_ladder_exit_push_and_pitch_restore`, `test_ladder_class_bit_climber_remote_and_local`); 20+ inline citations. The resolver's player predicate is the class bit at every physics leg `@ 0x4b2cd9 / @ 0x4b2f7c / @ 0x4b3271 / @ 0x4b33aa / @ 0x4b3c78`; only the pitch restore `@ 0x4b3cdc / @ 0x4b3cfe` (and the `g_LocalPlayerLookYaw` / blink mirrors) test the local entity — the remote twin eases its heading and takes the exit push without arming the restore (2026-08-24) |
 | org2 climb block (states 32–34, dismounts, jump-off, bottom exit, gravity/root gates, view clamp) | MATCHING | 2 `infantry` ctest cases (`test_player_ladder_climb_cycle`, `test_player_ladder_bottom_exit_and_jump_off`) |
-| org1 on-ladder legs (congestion hold, press, 33/35 select, the `0x80` Z chase) | MATCHING (dormant in game until the AI-order writer lands) | `infantry` ctest `test_org1_ladder_hold_press_and_top_select` |
+| org1 on-ladder legs (congestion hold, press, 33/35 select, the `0x80` Z chase) | MATCHING (the order writers, ChangeAI subs 17/23 and the BMS attribute fold, are ported: §38.1) | `infantry` ctest `test_org1_ladder_hold_press_and_top_select` |
 | The arms lock (`Flags 0x100000` → aim overlay bypass) | MATCHING (read-only grill) | `@ 0x4b1cf1` anchors the bit as the LADDER latch; wired via `pose_inputs.h` |
 
 ### 30.2 The witnessed machine
@@ -8749,10 +9272,9 @@ zeroes it at resolver entry, a skip-tick micro-residual), then 33
 (or when the 35 clip is unavailable) else 35 `climb_top`. The
 `Flags 0x80` = `kEntityFlagAiClimb` order mode replaces gravity with the
 sixteenth-step Z chase to the AI move target `+0x304` (cap 0x4000, floor
-−16384, `@ 0x4bf6c1-0x4bf6e5`); its eighth-step x/y chase to
-`+0x2FC/+0x300` is gated on `attachParent == self` (`@ 0x4bf651-0x4bf664`)
-— the AI direct-move mover that rides the order slice with the bit's
-writer. NPC gait selection is suppressed while latched
+−16384, `@ 0x4bf6c1-0x4bf6e5`); the eighth-step x/y chase to
+`+0x2FC/+0x300` (`@ 0x4bf651-0x4bf664`) is the self-attachment move
+(`attachParent == self`), which does not test this bit. NPC gait selection is suppressed while latched
 (`@ 0x4bd18d`).
 
 **The view write-back seam**: retail's mouse accumulators
@@ -8760,15 +9282,16 @@ writer. NPC gait selection is suppressed while latched
 Yaw/Pitch) are our host input record — any sim-side view write (the chase,
 the clamp, the pitch restore, the mount snap) mirrors back post-tick so the
 next pre-tick input write cannot undo it
-(`Simulation::sync_local_mounted_input_heading`).
+(`LocalPlayer::sync_local_mounted_input_heading`).
 
 ### 30.3 Follow-ups
 
-1. The AI move-order WRITER — what sets `aiRuntime[1] & 0x400`,
-   `kEntityFlagAiClimb`, `attachParent = self`, and the `+0x2FC..+0x304`
-   move target (AI pathing onto ladders/rooftops) — rides the AI-order
-   slice; the org1 legs here are live in tests via the latch and dormant in
-   game until it lands.
+1. RESOLVED 2026-09-23 for the order bits: `aiRuntime[1] & 0x400` is written by
+   ChangeAI sub 17 and the BMS attribute 0x1000 (CLIMBER,
+   `Entity_SpawnFromBMSRecord @ 0x40EDED..0x40EDF9`), and `kEntityFlagAiClimb` by
+   ChangeAI sub 23 and the attributes 0x4000 (FlyingOrganic, `@ 0x40EE2A`) and
+   0x20000 (`@ 0x40EE70..0x40EE94`), all ported (§38.1); the goal Z +0x304 writers
+   are §38.4.
 2. The authority now runs the shared collision tail for snapshot-owned remote
    players, including CL latching. `remote_player_body_anim` still lacks org2's
    every-tick climb-state override, so a remote climber can show gait states —
@@ -8942,8 +9465,10 @@ The brake's pool-walk gate skipped a neighbour whose bound radius was <= 0,
 cited to `@0x48bdd9`. Retail's gate there reads **`entity+0x1C`, which is
 `ItemTypeIndex`** (offset derived by walking `GamePlayerEntity` and validated
 against four known anchors on the way: Yaw `0x10`, itemDef `0x20`, Flags
-`0x24`, groundEntity `0x28`), stamped at spawn as `defIndex`
-`[orig: Entity_SpawnFromBMSRecord @0x40E9F0]`. The occupancy half of retail's
+`0x24`, groundEntity `0x28`), stamped at spawn by `mov [esi+1Ch],ebp`
+`[orig: Entity_SpawnFromBMSRecord @0x40EBFC]` from `ItemList_FindIndexByTypeId @0x49E100`: the
+items.def load-order ordinal of the FIRST row carrying the type id, 0 when no row does (each
+`begin` allocates the next row, `ItemDef_ParseProperty @0x49EBA8`, gItemCount++ `@0x49E3BE`). The occupancy half of retail's
 walk is already covered by our registry returning null for an unused slot, so
 the radius test was an additional gate with no counterpart in the original.
 
@@ -8952,6 +9477,20 @@ mission the radius test skipped nothing and never disagreed with the
 item-type test, so the fix is a no-op here and the rig's output is
 byte-identical across it. Ported regardless: an unwitnessed gate is a defect
 even when it is inert, and the next mission need not be so forgiving.
+
+The gate differs by family (corrected 2026-09-22). The ground forms skip index 0 only
+(`cmp dword ptr [edi+1Ch],0; jz`: `Entity_UpdateVehiclePhysics @0x48BDD9`,
+`Entity_UpdateTankVehiclePhysics @0x4899A2`, `Entity_UpdateLightVehiclePhysics @0x484F7F`,
+`Entity_UpdateMountedInfantryMovement @0x4878A2`, `Entity_ProcessInfantryPhysics @0x46EE70`);
+the boat and aircraft forms load ecx = 1 for the walk's count decrement and compare the index
+against the same register (`mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`:
+`Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5`, `Entity_ProcessAirVehiclePhysics
+@0x470B08/@0x470B23`, `Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6`), so they brake ONLY
+behind ItemTypeIndex 1, the second items.def row ("Flyable Ka-52", id 100172, in the shipped
+file): in practice a retail boat or aircraft never brakes for another hull. The port had used
+`item_id != 0` for all three walks; `Entity::item_type_index` now carries the real ordinal
+(stamped by the items.def traits sweep, `mission::resolve_item_traits`) and
+`vehicle_avoid_brake` takes the family's gate (`route_parity`).
 
 ### 31.4 Fixed pool slots and placement admission
 
@@ -8970,14 +9509,18 @@ remap. `mission_promote` pins both admitted records and untouched slot holes;
 
 ### 31.5 What this leaves
 
-Every consumer of the nav channel is witnessed faithful, so if the outcome
-differs, what differs is what they consume. The remaining unaudited surface is
-the `NavChannel`/`NavEntry` data itself: node positions, the per-channel count
-and loop flag, and in particular the arrival threshold `node->f[0]`, which
-becomes `aiState[23]` and gates BOTH the node advance and the arrival halve. A
-wrong threshold has exactly this bug's signature, because it is compared
-against a per-entity distance and therefore fires at a different moment for
-each vehicle depending on where that vehicle is.
+The NavChannel/NavEntry data was audited 2026-09-22: node positions are the
+marker record's +0x10/+0x14/+0x18; the arrival threshold f[0] is the marker's
+entity+0 = wp_distance << 16 (0x8000 when 0), written only for marker types
+6005/6006/2044 (`Entity_SpawnFromBMSRecord @0x40F096..0x40F0A4` /
+`@0x40F15F..0x40F16D` / `@0x40F213..0x40F221`) and never overwritten for the
+model-less waypoint def (`Entity_InitFromModel` skips the radius block
+`@0x40DCCB..0x40DCD1`); every shipped route node (11,235 across 115 missions) is a
+type-6005 marker with a nonzero wp_distance. The one normalization the loader
+applies is the single-node one-shot OR (`Mission_LoadBMSFile @0x40FB72..0x40FBB2`,
+§11), ported 2026-09-22. 00TRg's convoy lists have count <= 32 and flags 1, so the
+residual this section chased is not in the nav data; the convoy has not been
+re-measured since D-AI-13.
 
 ### 31.6 Method notes worth keeping
 
@@ -9012,8 +9555,8 @@ SSN, group, or area fan reaches the same entity/controller/brain mutations.
 | `setaccuracy` | writes `max(0, 100-a)` and `max(0, 100-b)` into the two controller error slots in reversed argument order [orig: WacCmd_SetAccuracy @ 0x4F2070] | `set_ssn_accuracy` |
 | `Gsetaccuracy` | the same pair over matching pool-0 AI rows only [orig: WacCmd_GroupSetAccuracy @ 0x4F7BE0] | `set_group_accuracy` |
 | `ssnguard` | toggles entity Flags `0x40` for a resolved row, independent of whether it owns a brain [orig: WacCmd_SsnGuard @ 0x4F71C0] | `set_ssn_guard` |
-| `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
-| `Gremove` | removes matching rows through the same group-removal primitive as BMS action 4 [orig: WacCmd_GroupRemove @ 0x4F1F80; Entity_TeleportAllByNetId @ 0x43D5D0] | `remove_group`, including group recount and collision refresh |
+| `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacCmd_SsnCspd @ 0x4F74B0; WacCmd_SsnPspd @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
+| `Gremove` | removes every member of the WAC named group through `Server_RemoveEntityAndNotify` (S2C 0x12), with no gate, and returns 0 [orig: WacCmd_GroupRemove @ 0x4F1F80 (the Server_RemoveEntityAndNotify call @ 0x4F1FF2, the return @ 0x4F2006)] | the named-group walk in `wac/vm.cpp` calling `EntityCommands::server_remove_and_notify` per member (`script_command_parity`) |
 
 `wac_behavior` compiles and executes these names through the public VM seam; it
 pins the inclusive-distance boundary, wounded threshold, driver/gunner switch,
@@ -9053,14 +9596,27 @@ The synchronous arms now carried are (per-case addresses re-witnessed
   [orig: aiRuntime+4 & 0x400 @ 0x4B326A, Entity_MovementCollisionResolver];
   `make_ladder_resolve_io` feeds `LadderResolveIO::ai_wants_climb` from it
   (the AI move-order arm of that test, var_60 @ 0x4B3257, stays unported).
-  Authored subs the port omits (31, 37, 39, 40, 44) bump
-  `AiSystem::unported_calls` rather than vanish.
-- subs 32/33 set/clear the brain's use-waypoint-zones latch, and sub 34 retains
+  Every arm is carried (2026-09-23, §38.1): subs 1, 3, 4, 7, 9..14, 18..20, 24 and
+  25 have no editor token and dispatch by number, writing the slot words (+0x20,
+  +0x30, +0x38, +0x48, +0x4C, +0x54, +0x84) and bits (0x100, 0x800, 0x2000, 0x8000,
+  0x10000, 0x80000, 0x100000, 0x200000) the BMS attribute fold also seeds; 31
+  (FIND_AND_USE) and 40 (AINODEPATH) are §33.8; 44 (TARGETSSN) writes brain+0x94
+  through `Entity_FindByNetId @ 0x4655B0`, where only 0 survives (§38.2); 35..39 and
+  out-of-range subs are the switch's default (`@ 0x43B336`). The slot arms gate on
+  the AI slot (+0x68); every brain arm (the queued alert events, DRIVESKILL,
+  AIMSKILL, AISETSTATE, COMBATSPEED, PATROLSPEED, START_FIRING, FIRING_ANGLE,
+  TARGETSSN, AIUSEWPZ/AICLEARWPZ and PLAYPARTANIM) gates on the vehicle brain
+  (+0x64) and falls to the default without one, so an organic target takes only
+  the slot arms.
+- subs 32/33 set/clear the brain's use-waypoint-zones latch (case 32 `@ 0x43B154`,
+  `mov [eax+1B0h],1` `@ 0x43B164`; case 33 `@ 0x43B173`, store `@ 0x43B183`), read by
+  `AI_UpdateMovementTarget` (`@ 0x460FC7`), and sub 34 retains
   the already-ported PLAYPARTANIM channel/rate write [orig: Entity_ApplyCommand
   @ 0x43AB60].
 - The command-queued events stamp channel 0 (retail's `event_source = 0`
-  [orig: @ 0x43AC66/@ 0x43ACD1/@ 0x43AD41/@ 0x43B30E]); the combat spawn/death
-  queue sites stamp 9 — the two families differ on purpose.
+  [orig: @ 0x43AC66/@ 0x43ACD1/@ 0x43AD41/@ 0x43B30E]); the class machines'
+  kill/damage (event 1) and death queue sites stamp 9 on the air machine and 0 on
+  the ground machine (§38.1), so the families differ on purpose.
 
 The queued arms now carried are:
 
@@ -9089,8 +9645,10 @@ the entity/controller side effects.
 
 **D-AI-2 update:** the former residual “WAC `ai` command queue parsed, no
 producer” is fixed by the shared `EntityCommands` queue producer and the
-`AI_HandleCommand` cases above. D-AI-2 remains OPEN for its existing turret,
-HELO-profile, suspension-fire-point, CTRL, and mount-frame residuals. The
+`AI_HandleCommand` cases above. D-AI-2 remains OPEN for its CTRL diagnostic
+globals and the mount-frame composition; the turret staging, the HELO profile keys,
+the target-sight check, the bone lists, the full solve frame and the saved-delta
+replay are ported (§17.6, §17.9, §38.2). The
 command consumers, including FIND_AND_USE and AINODEPATH, are documented
 with their witnesses and regression coverage in section 33.
 
@@ -9202,10 +9760,18 @@ script completion and mission playthrough remain open.
 
 ### 33.4 DO sections, expression state and declared names
 
+`engine/runtime/wac/compiler.cpp` is a single-pass structural translation of
+[orig: Script_Compile @0x4F31F0] and [orig: WacScript_ResolveParameter
+@0x4F2920]; the lexical, keyword, frame, parameter, end-of-file, limit and error
+rules it reproduces are listed in §38.6 (`wac_retail_vectors`).
+
 Script_Compile's stores [orig: Script_Compile @0x4f31f0 (the site @0x4F4143)]
 and [orig: @0x4F429D] both emit opcode 4: DOSEQ and DORND therefore cycle their
-NEXT sections in this executable. The VM also implements opcode 5's random
-choice for bytecode which carries it. Each DO owns a byte counter and byte
+NEXT sections in this executable (the two differ only in the block type, 4 and
+5). The VM still implements opcode 5's random choice for bytecode which carries
+it: every opcode 5 steps the generator [orig: WacScript_ExecuteBytecode
+@0x4F58B0 (the step @0x4F5A7E)] before the count is scaled (@0x4F5AB8..0x4F5AC4),
+a zero count included, and stores the choice byte (@0x4F5AD0). Each DO owns a byte counter and byte
 choice; NEXT decrements the choice and enters its section only when the previous
 value was one. Nested DOs retain separate counters. Runtime capture/restore
 includes these bytes.
@@ -9216,11 +9782,12 @@ create no event. Grouped conditions preserve the enclosing accumulator in the
 retail 16-byte expression stack. ADD/SUB/INC/DEC wrap as 32-bit arithmetic; SUB
 and DEC do not clamp at zero.
 
-VAR and ARRAY each declare one scalar address in the second half of the mission
-bank, starting at 0xC6B640. The resolver's direct V# syntax is limited to
-0..255; declared names use the separate 256-slot namespace. ARRAY follows the
-same scalar resolver path in this retail build; it is not an indexed container.
-Names are copied to an 18-character field.
+VAR declares one scalar address in the second half of the mission bank,
+starting at 0xC6B640; CHEAT declares the same way with type 0x19 [orig:
+Script_Compile @0x4F31F0 (the CHEAT arm @0x4F41E9; the type byte
+@0x4F3927..0x4F3950)]. There is no ARRAY, DO or XOR keyword (§38.6). The
+resolver's direct V# syntax is limited to 0..255; declared names use the
+separate 256-slot namespace. Names are copied to an 18-character field.
 
 **D-WAC-9, fixed 2026-09-13:** numbered V references require only a digit
 immediately after V; the remainder is parsed as a decimal prefix by `atol`
@@ -9256,12 +9823,23 @@ editor Stop/Start rewind (`restore_baseline`) restores the whole store from
 the play-start snapshot deliberately; it models no retail reload. ctests
 `world`, `mission_kernel_lifecycle`.
 
+The load itself (2026-09-23): [orig: WacScript_InitAndLoad @0x4F91F0] zeroes
+the script-disable dword dword_C6EB28 (@0x4F965F), so a reload always clears a
+pause. On a non-authoritative peer it compiles no layer (the `is_authority`
+test @0x4F9437 jumps past the three compiles @0x4F944E) and stores the 'zzzz'
+terminator alone (@0x4F95A9); the port's joiner hands `wac_layered_load` an
+empty source. The run counter `ticks` is advanced by the callers after each
+execution ([orig: WacScript_AdvanceTick @0x4F81A0 (the add @0x4F81D3)] and
+InitAndLoad @0x4F9770), not by the VM.
+
 A bracketed IF name resolves to that event's fired flag for value reads and to
 its index for RESET. [orig: WacCmd_Reset @0x4ED300] clears fired, last-fire and
 active state for the event and subsequent deeper events, stopping before a
 sibling or ancestor. RUN compiles mounted files inline into the same program and
 symbol scope. The literal include-depth check admits two nested RUN levels and
-rejects the third; RUN inside a block is an error.
+rejects the third ("A run file can't run more files", @0x4F35CA); RUN inside a
+block reports "Can't run files inside blocks" and a missing file "Unable to run
+file". None of the three is fatal.
 
 WacSystem now honors the shared human-presence gate without advancing its
 62-tick divider during a hold. Eager startup still executes directly. Regression
@@ -9272,8 +9850,9 @@ with the available retail assets on 2026-09-08.
 
 ### 33.5 Cumulative completion diagnostics
 
-World::diagnostics records unsupported WAC commands/opcodes, instruction limits,
-BMS actions, AI commands and state handlers. Each site retains a count,
+World::diagnostics records unsupported WAC commands/opcodes, instruction limits
+and BMS actions. Every ChangeAI arm and every brain state row is carried
+(§38.1), so neither reports a gap. Each site retains a count,
 first/last simulation tick, and latest arguments. WAC sites include the source
 filename, line and bytecode word; BMS sites include authored event/action
 indices. This is implementation evidence, not retail gameplay.
@@ -9289,7 +9868,10 @@ draining, boot-state restoration and a clean mission load.
 [orig: Script_GetOperatorPrecedence @0x4EE540] uses equal precedence for AND/OR,
 then comparisons, addition/subtraction, multiplication/division/modulo, then
 power. Operators at each level associate left. Declared scalar and V#
-assignments now emit opcode 8 stores after evaluating the expression.
+assignments emit opcode 8 stores, flushed at the first non-operator token after
+a value when no operator is pending [orig: Script_Compile @0x4F31F0 (the flush
+@0x4F4019..0x4F404B)]: in `v1 = 1 + 2 * 3` the automatic paren clears the
+pending + and v1 receives 1 (§38.6).
 
 [orig: WacScript_ExecuteBytecode @0x4F58B0] keeps only the low byte of an
 enclosing accumulator on the expression stack. A grouped right operand is folded
@@ -9302,9 +9884,12 @@ therefore survive parsing even around a single command.
 Witnessed examples, covered by wac_behavior: 2+3*4 yields 14; 20-2*3 yields -14;
 (20-2)*3 yields 54; 300+(2*3) yields 50; 2^3^2 yields 64; 2^(3^2) yields 81; 1
 OR 0 AND 0 is false. These are executable quirks. [orig: Math_PowFloat
-@0x4F9BA0] takes a binary32 base, performs integer-power squaring in double
-precision and returns the truncated low dword through the x87 integer
-conversion. ADD/SUB/MUL and variable increments wrap.
+@0x4F9BA0] takes a binary32 base and performs integer-power squaring in double
+precision; the POW fold truncates the result through `_ftol2_sse`'s SSE2 leg
+[orig: WacScript_ExecuteBytecode @0x4F58B0 (the fold @0x4F615F); cvttsd2si
+@0x76BC15, selected by dword_334A444 on every SSE2 processor, set by
+sub_7887AF @0x7887B4], so NaN, infinity and any result outside int32 give
+0x80000000 (10^10, 3^20, 2^31, 2^32 and 0^-1 all yield INT32_MIN). ADD/SUB/MUL and variable increments wrap.
 
 Portable divergence: malformed division by zero or INT_MIN/-1 halts the current
 WAC pass and records a WacOpcode diagnostic with subcode 2, instead of raising
@@ -9422,9 +10007,14 @@ handles once. The portable VM binds them on first execution, when the World is
 available, and preserves them across runtime capture/restore. Assignments and
 Player/Item/auto aliases keep handles through command dispatch, including when
 multiple rows share one authored SSN. Gkill/Gremove walk named member arrays
-forward; numeric kill still uses the BMS command group. Gkill's per-member
-helper [orig: Entity_ResetWeaponState @0x4F1E40] requires a nonzero +0x1C
-ItemTypeIndex [orig: @0x4f1e89]; Gremove does not. Each member visit of a
+forward; numeric kill shares [orig: Entity_KillAllByNetId @0x43C8E0] with BMS
+KillGroup (pools 2, 0, 1 by the BMS command group, dead rows included, the
+attacker kept; group 0 exits @0x43C8F2). Gkill's per-member helper is the WAC
+killSSN body [orig: WacCmd_KillSsn @0x4F1E40, which is WacCmd_KillSsn]:
+it requires a nonzero +0x1C ItemTypeIndex [orig: @0x4f1e89], memsets the global
+hit record (@0x4F1E8F..0x4F1E99), zeroes health and lastAttacker, clears +0x2C0
+for a person and runs the class callback (e, 1, 0) (§38.7); Gremove does not
+gate on ItemTypeIndex and ends in Server_RemoveEntityAndNotify. Each member visit of a
 flags-0x10 row (ptext/pwave/pconsol) sends S2C 0x23 to that member's slot and
 returns 1 without the local call when the member is a registered non-local
 player; the local-player visit and unregistered members run locally (§33.39).
@@ -9476,7 +10066,9 @@ parentSlot. An already-mounted actor returns before changing the cache.
 
 [orig: WacCmd_Remove @0x4EDCA0] dispatches the existing command-group removal
 walk [orig: Entity_TeleportAllByNetId @0x43D5D0]: nonzero group, pool order
-2/0/1/3, all matching rows, no item-definition gate. This differs from Gremove's
+2/0/1/3, all matching rows, no item-definition gate; on the authority only, each
+row ends in `Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12, then the destroy),
+with no recount and no proximity rebuild (§38.8). This differs from Gremove's
 named member list.
 
 Regression coverage covers zone IDs distinct from array indices, first-record
@@ -9487,7 +10079,7 @@ cleanup, standing/seated distinction and definition-free removal.
 ### 33.12 NPC respawn counts and the shared organic reset (2026-09-08)
 
 Witnesses: WacCmd_SsnSpawn [orig: WacCmd_SsnSpawn @0x4F7A80], GroupSpawn's
-mislabeled WacScript_SetEntityWaypoint [orig: WacScript_SetEntityWaypoint
+mislabeled WacCmd_GroupSpawn [orig: WacCmd_GroupSpawn
 @0x4F7AE0], Entity_ResetToSpawnState [orig: Entity_ResetToSpawnState @0x4B9610],
 Entity_FindNearestTriggerByType [orig: Entity_FindNearestTriggerByType
 @0x407EA0], and the org1 head/corpse block [orig: Entity_UpdateInfantryAI
@@ -9538,11 +10130,10 @@ hide/release, silent LeaveCorpse cleanup, effect ownership, health/magazine
 restoration, incoming-reference cleanup and nearest-node ties. They are focused
 runtime evidence, not accepted mission playthroughs.
 
-Open boundaries: the initial org1 extended spawn-state/link producer still needs
-a complete load-path witness; promotion's existing spawn_position seed remains
-while scripted/BMS reset producers are implemented. The headLookTarget and
-medic-drag references belong to the still-open idle/drag consumers; the full
-player redeploy callers still contain their earlier reset/snap sequence. The
+Open boundaries: the initial org1 extended spawn-state/link producer is implemented
+(§33.34, `initialize_organic_ai`), and the headLookTarget and medic-drag consumers are ported
+(§33.27, §33.31); the full player redeploy callers still contain their earlier reset/snap
+sequence. The
 shared session-rule mapping and unresolved effect-resource behavior retain their
 existing owner-record limitations.
 
@@ -9560,17 +10151,20 @@ before dispatch [orig: WacScript_ResolveParameter @0x4f2920 (the site
 @0x4F2D7D)], including fractions. An M suffix uses 65536; F uses the exact
 retail factor 21501 (`dbl_7CDE70`). Hour literals multiply by 60. Variables are
 direct references returned before numeric conversion, so a variable passed to a
-distance command is already a raw Q16 word. Numeric conversion truncates to
-signed 64 bits and stores the low dword, as `_ftol2_sse` does. The earlier
+distance command is already a raw Q16 word. Numeric conversion truncates through
+`_ftol2_sse`'s SSE2 leg [orig: WacScript_ResolveParameter @0x4F2920 (the scaled
+literal @0x4F2D8C); cvttsd2si @0x76BC15]: NaN, infinity and any value outside
+int32 give 0x80000000, so 65536M, 3000000000, -40000M and 100000F all yield
+INT32_MIN while 32767.99M gives 2147482992. The earlier
 whole-unit approximation discarded fractions and implicitly rescaled variables
 at some consumers.
 
 SSNMin/SSNMax/SSNAtt [orig: WacCmd_SsnMin @0x4F2010], [orig: WacCmd_SsnMax
 @0x4F2210], [orig: WacCmd_SsnAtt @0x4F2270] write controller offsets +64/+68/+60
 respectively. They require only a valid entity; a missing controller still
-returns 1. GroupMin/GroupMax/GroupAtt [orig: WacScript_SetEntityAITarget
-@0x4F7C50], [orig: WacScript_SetEntityAlertState @0x4F7CA0], [orig:
-WacScript_SetEntityAIAction @0x4F7CF0] scan pool 0 by signed command group,
+returns 1. GroupMin/GroupMax/GroupAtt [orig: WacCmd_GroupMin
+@0x4F7C50], [orig: WacCmd_GroupMax @0x4F7CA0], [orig:
+WacCmd_GroupAtt @0x4F7CF0] scan pool 0 by signed command group,
 including zero and dead/itemless rows, and always return 1. These now reach the
 existing engagement/sight/attack fields read by infantry combat. The unused
 Entity copies of those three fields were removed. BMS promotion continues to
@@ -9624,8 +10218,10 @@ names, and the difference between the two teleport commands.
 The functions previously labelled fade effects own doors. [orig:
 HeliLift_ResetAll @0x44E870] clears 10,000 records of 24 bytes at 0xA8A418;
 [orig: FadeEffect_AllocateSlot @0x44E890] allocates monotonically until mission
-reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the site
-@0x40F230..0x40F2F4)] seeds Building/Decoration items carrying attrib 0x80. Each
+reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the door-count loop
+@0x40F25D..0x40F2DA: FadeEffect_AllocateSlot @0x40F288, the first slot @0x40F292,
+the def +0x8A0/+0x89C words @0x40F2BB..0x40F2CC)] seeds Building/Decoration items
+carrying attrib 0x80. Each
 record has state, Q16 phase, Q16 step, maximum angle, owner and one-based
 section number. [orig: FadeEffect_UpdateAll @0x44E920] advances opening by
 wrapped dword addition and closing by subtraction, clamps at 65536/0 and enters
@@ -9648,10 +10244,10 @@ motion or replay sound. Transitions play the authored set at the unposed COBJ
 pivot transformed by placement, falling back to entity origin. Every callback
 sets static think age to 1920.
 
-WAC OpenDoors/CloseDoors at [orig: WacScript_SendWeaponDetachEvent @0x4F7D40;
-Entity_SendWeaponEvent8ToPool2 @0x4F7DA0] visit pool 2 only, comparing the
+WAC OpenDoors/CloseDoors at [orig: WacCmd_OpenDoors @0x4F7D40;
+WacCmd_CloseDoors @0x4F7DA0] visit pool 2 only, comparing the
 signed command-group word and exact door callback. BMS actions 30/31 at [orig:
-Entity_KillDestructiblesByTeam @0x4541A0; Entity_KillDestructiblesByOwner
+EventAction_OpenGroupDoors @0x4541A0; EventAction_CloseGroupDoors
 @0x454240] visit pool 2 then pool 1. WAC [orig: WacCmd_DoorOpen @0x4F70A0]
 returns the FIRST matching door entity's first slot state==2; a later open door
 cannot override an earlier closed one.
@@ -9720,8 +10316,8 @@ bits. The former uint16 storage incorrectly discarded every authored upper word.
 [orig: WacScript_CacheLocalPlayerState @0x4F5780] is called by [orig:
 WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F58F4)], not by the 62.5 Hz
 world tick. Each bytecode execution snapshots signed-word player health and mana
-(armor at entity +0x288), time of day divided by 279620 into minutes, and the
-current winner flags. Missing players yield zero health/mana and auto's low-word
+(the word at entity +0x120, `movsx` @0x4F5827), time of day divided by
+279620 into minutes, and the current winner flags. Missing players yield zero health/mana and auto's low-word
 handle 0xFFFF; the upper word survives. Writes or gameplay changes during that execution do not refresh the
 other cached values. The next bytecode execution does.
 
@@ -9734,11 +10330,14 @@ rows is an lvalue [orig: @0x4f2a92..0x4f2a9f]; writes land on ticks (the run
 counter), result (the accumulator @0xC6EB24), humans, bluekills/greenkills,
 breathtime (@0xC6EAE0, seeded 20) and autogain (@0xC6EAFC, seeded 1)
 [orig: WacScript_FreeAll @0x4F6300 (the seeds @0x4f6381; @0x4f6371)] as stored
-words whose retail consumers ([orig: HUD_DrawBreathBar @0x59D6F0 (the read
-@0x59d70f); Server_UpdateEntityIdleTimers @0x50D770 (@0x50d7e6);
-GameEvent_PlayerDeath @0x516DD0 (@0x5172f6); NetPacket_WritePlayerState @0x4FF6B0
-(@0x4ff9db); Environment_ApplyFogAndAmbient @0x57E440 (@0x57e514)]) are not yet
-ported. The `night` DWORD is writable (D-WAC-4 fixed 2026-09-18): its row resolves to
+words. breathtime's host readers ([orig: Server_UpdatePlayerBreathTimers @0x50D770
+(@0x50d7e6); GameEvent_PlayerDeath @0x516DD0 (@0x5172f6)]), its wire writer
+([orig: NetPacket_WritePlayerState @0x4FF6B0 (@0x4ff9db)]) and the joiner's
+store ([orig: NapiNPClientMsg_0x00A (@0x4301A1)]) are ported (§38.9), as is
+autogain's gate on the iris re-target ([orig: Environment_ApplyFogAndAmbient
+@0x57E440 (@0x57E50B..0x57E51B, exit @0x57E53D)]: the modulator re-targets only
+with a local player and a nonzero autogain; `WeatherState::iris_retarget_enabled`,
+§38.7); [orig: HUD_DrawBreathBar @0x59D6F0 (the read @0x59d70f)] is not. The `night` DWORD is writable (D-WAC-4 fixed 2026-09-18): its row resolves to
 Env @0x26C645C. [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (store @0x57DEAE)]
 rewrites it only when the authored TOD keyframe path runs; immediate WAC reads
 and the light selector observe the retained word. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
@@ -9771,11 +10370,12 @@ quote @0x4f3338), looked up as a net id and stored in the SSN pool, with
 WacScript_ResolveParameter @0x4f2920 (the leg @0x4f2c94..0x4f2eed; the error
 @0x4f2edf)]; the port binds the pool entry at first execution and raises the
 same non-fatal diagnostic from the compile-time registry. The 10000 player
-alias that `EntityCommands::resolve_ssn` honours is a port seam resting on the
-dfx2med authoring convention, not a retail lookup: [orig: EntityPool_FindByNetId
-@0x4f0a20] keys on DcbId (entity+0x7C), which the JO player spawn leaves 0
-([orig: Entity_SpawnFromAnimSlotProperty @0x43c390] writes only
-ownerConnectionId +0x78 and the minimap NetId +0x15C). A quoted token outside a
+alias that `EntityCommands::resolve_ssn` honours stands in for a retail stamp: [orig:
+EntityPool_FindByNetId @0x4f0a20] keys on DcbId (entity+0x7C), which the JO player spawn leaves 0
+([orig: Entity_SpawnFromAnimSlotProperty @0x43c390] writes only ownerConnectionId +0x78 and the
+minimap NetId +0x15C) and the player class init then stamps with the slot plus 10000 ([orig:
+PlayerClass_InitEntity @0x4B1060, @0x4B1149..0x4B1173]); the port's players carry net id 0, so
+the alias maps SSN 10000 to the local player. A quoted token outside a
 Text/Filename/TextToken slot is the NULL leg too: the tokenizer keeps the
 opening quote [orig: @0x4f3338] and only the type-17/18 copy consumes it
 [orig: @0x4f2ce9..0x4f2e1c], so the numeric test rejects it [orig: @0x4f2d01 ->
@@ -9786,11 +10386,12 @@ FACE_ (21) -> SS_ (19) -> TT_ (20) -> ANIM_ (24) -> SSN_ (11) -> AMMO_ (23) ->
 the 17/18 copy -> numeric, and the port's try_resolve follows it. The replicated-row handler reports a dispatch gap
 (RuntimeGapKind::WacCommand) on both the host and the joiner, and the
 wac_dispatch_sweep ctest pins one dispatch per registry row. An unknown command is a
-non-fatal diagnostic on both sides; the port's HARD errors — an unresolved
-FX/FACE/SOUNDSET/ANIM/AMMO literal and the RUN/LOOP/NEXT structural
-checks — still block the mission's script (`wac_layered_load` kBlocked), where
-retail records the message and runs with the failed slot holding 0/-1/0xFFFF
-(D-WAC-6, §33.38). The GLOOP operand (2026-09-12) is retail-faithful: the
+non-fatal diagnostic on both sides. The loader installs every program, as
+retail does: InitAndLoad ignores the three compiles' returns (@0x4F94A8 /
+@0x4F950E / @0x4F9597) and executes (@0x4F976B), with a failed slot holding 0
+(FACE and ANIM too; only the SSN handle keeps 0xFFFF). Only the strict policy of
+the dedicated golden host (`wac_layered_load` kBlocked) refuses a literal missing
+the mounted FX, SOUNDSET or AMMO catalog (D-WAC-6, §33.38). The GLOOP operand (2026-09-12) is retail-faithful: the
 tokenizer [orig: Script_Compile @0x4f32e0..0x4f3464] splits on the 20-byte
 operator set at 0x7CE2E8 (`{}()[]+-*/|&^%<>=!~`; the strrchr tests @0x4f3370/
 @0x4f3448 make an operator character its own one-char token and end an
@@ -9801,12 +10402,12 @@ in the expectedType-12 leg [orig: @0x4f30a0..0x4f30fc], sets the first-error
 `Unknown Group` and returns the pool slot holding 0 [orig: @0x4f310a], so the
 compiled loop iterates group 0 (empty; VM opcode 0xA @0x4f5b11) and the
 leftover `G_x` `)` are body statements with their diagnostics suppressed. The
-port's parser hands the next token verbatim to the group resolver, the
-compiler emits the non-fatal `Unknown Group` and GroupIter over group 0
-(`gloop G_x` is unchanged); a GLOOP operand an earlier resolver table claims
-(a declared variable, an event, a named value), which retail ORs in as the
-dword behind that address, also takes group 0 with the same non-fatal
-diagnostic (the D-WAC-6 residue for this arm). ctests `wac_behavior`,
+port's compiler takes the same path (the non-fatal `Unknown Group` and
+GroupIter over group 0; `gloop G_x` is unchanged), and a GLOOP operand an
+earlier resolver table claims (a declared variable, an event, a named value)
+ORs in the dword behind that address as the load finds it
+(`CompileEnv::load_dword`), before InitAndLoad's resets (the V bank is cleared
+after the compiles, @0x4F95EE). ctests `wac_behavior`,
 `wac_layered_load`.
 
 [orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
@@ -9913,15 +10514,35 @@ caller uses that fresh local, [orig: CAIPath_FindPath @0x409580 (the site
 @0x408d30 (the site @0x408E47)] exits backtracking without emitting a node.
 GetCurrentNode therefore cannot replace the goal, even with a loaded AIN3. The
 portable detour preserves that effective zero-node behavior rather than
-inventing graph navigation. The helper always returns 1, making its caller's
-failure-mode ladder unreachable.
+inventing graph navigation. The helper always returns 1 (@0x4AFF3F), making its caller's
+failure-mode ladder unreachable. Its per-ring height gate rejects |candGround + 0x7000 -
+(startGround + 0x6000)| > ring << 16 [orig: @0x4AFD6D..0x4AFD8E]; the distance step is 10
++ 5 per unit of radius [orig: @0x4AFCBF; @0x4AFE74]; both LOS legs pass allTypes 1 [orig:
+@0x4AFD9B; @0x4AFE10], so every entity type in the listener's slice blocks, not only
+buildings. Of its four cdecl arguments the fourth is never read and the third (the +0x36A
+snapshot equals the current move mode) gates only FindPath (@0x4AFB88) and the start-ground
+probe (@0x4AFB26..0x4AFB2F); the unimproved cache is the goal with z + 0x2000 (@0x4AFB0B /
+@0x4AFB5D); the helper writes the target heading +0x1A8 (@0x4AFF2C). Every +0x369 writer
+stores 0, 1 or 2 (0x4AFEA8, 0x4AFF06, 0x4B37BB, 0x4BA94E, 0x4BCFDB, 0x4BD0EE, 0x4BD2E9,
+0x4BD349, 0x4BD956).
 
 The entire organic think is gated by key & 15 at [orig: Entity_UpdateInfantryAI
 @0x4b9910 (the site @0x4BA970)] and authority [orig: Entity_UpdateInfantryAI
 @0x4b9910 (the site @0x4BA97E)]. Combat follows navigation inside that gate;
 perception adds its key & 31 test [orig: Entity_UpdateInfantryAI @0x4b9910 (the
-site @0x4BBE47)]. Damage alert and movement timers therefore decay on think
-steps, and combat supplies its movement goal and proposed animation before the
+site @0x4BBE47)]. After its gate (key & 15, authority, Flags & 2, the anim slot +0x188) the think
+captures wasHit (@0x4BA9A2 / @0x4BA9C1) and the entry heading (@0x4BA9B4..0x4BA9BA),
+clears the board cache unless the command is 125, runs the 64-tick seat upgrade and
+seeds aimPitch +0x2D0 = (DcbId << 27) >> 4 (@0x4BAA4B..0x4BAA59); a body with Flags
+0x2000 and without the 0x80 climb order then skips the rest of the think
+(@0x4BAA57..0x4BAA66 -> @0x4BE7FD), and only then do the frame locals initialise and
+the +0x128 cooldown step down while nonzero, a negative value included
+(@0x4BAA7B..0x4BAAB1). Without the has-route flag or with the cooldown running, the
+route walk clears Flags 0xC0000 and the entry stage +0x361 (@0x4BAE80..0x4BAE88), and
+channel 0 clears the has-route flag like an empty channel (@0x4BABDD..0x4BABE5 ->
+@0x4BAE75) (§38.4). The move timer therefore decays on think steps and the
+damage alert once per 64 staggered ticks (a think whose key has key & 63 == 0,
+@0x4BA9D8; §17.1), and combat supplies its movement goal and proposed animation before the
 common detour/gait selector. The previous implementation ran combat every tick
 after selection, consuming wasHit too early and overwriting the newly selected
 movement direction. Combat now returns its proposed animation and the common
@@ -9953,11 +10574,12 @@ stale-pointer asymmetry and permits meaningful distance assertions. Temporary
 diagnosis traces were removed.
 
 The general terrain-gradient detour producer is implemented in section 33.36.
-Open D-INF-2 residuals include self-referential drag reversal, the documented
-escort/S-point details, and deterministic handling of malformed state 3.
-Retail's same-mode state-3 search reads an uninitialized stack start height; no
-state-3 producer was witnessed, so the portable path uses a ground probe instead
-of emulating undefined memory.
+D-INF-2's remaining scope is command 126 (goto group), which sets moveMode 3 with
+targetDist == arrivalRadius == 0xA0000 (@0x4BAABD..0x4BAACF) and never writes the goal
+locals; the selector's moving test is the distance alone (@0x4BD3DB), so the detour steers
+at whatever the stack frame held and the body walks. The port keeps a 126 body in place
+(the undefined goal is not reproducible); no shipped organic authors 126 or 127. The
+former "malformed state 3" clause is unreachable: every +0x369 writer stores 0, 1 or 2.
 
 ### 33.17 WAC fire requests and category blocks
 
@@ -10023,7 +10645,7 @@ The voice fixture covers synchronous returns/readiness, failed replacement,
 exact filenames, obsolete completion, positional movement/range, radio anchors,
 dead speakers and retry. Extension/playback validation follows separately.
 
-D-SND-5 still tracks sound/sound2tgt and talking-portrait presentation. AOA1
+D-SND-5 now tracks only the talking-portrait presentation (sound/sound2tgt are implemented). AOA1
 decoding is implemented in section 33.20. Spatial panning, option quantization
 and audio-device details remain in the existing D-SND-8 scope. No headless
 timed-completion substitute has been invented: a host that presents voice must
@@ -10079,7 +10701,8 @@ The org1 secondary writer is now witnessed and implemented: [orig:
 Entity_UpdateInfantryAI @0x4b9910 (the site @0x4B9A14..0x4B9A48)] copies primary
 current +0x2BC to secondary +0x2C8 and primary pending +0x2B8 to secondary
 pending +0x2C4 at the motor head before the authority/interpolation gate and
-think. Each channel retains its own phase, blend and variant ring. The secondary
+think. Each channel retains its own phase and blend; the variant ring heads are per
+`.adm` and shared by both channels (§38.3). The secondary
 advances first and contributes no root motion. No equipped-ADM lookup
 participates in this writer; the earlier D-INF-24 dependency on finding such a
 source was incorrect. The player hold-pose/reload-window selector remains
@@ -10351,9 +10974,14 @@ the local-player rule bit 0x800 are its candidate gates. It does not require
 health or an ItemDef pointer. The distance clamp is an upper bound: flt_7C19E0 =
 2147418112.0f (bits 0x4EFFFE00). The unsigned (radius - distance) >> 16
 closeness term admits the retail diagonal-underflow score. The remaining score
-is speaker/friendly +8, local player +2, nearby facing-me +4, last look -12,
-exclusion of the previous look, baseline -12 and the SSN/tick phase term. LOS
-uses the exact eye endpoints.
+is speaker/friendly +8, local player +2, nearby facing-me +4 (the look-back cone reads the candidate's
+entity+0x10 heading, strict < 11C71C60h [orig: @0x4BE2C3; @0x4BE2D0], as does the
+head-tracking twin @0x4BE6BE / @0x4BE6CB; for a body without a brain of its own
+the port reads its placement heading in the spawn form), last look -12,
+exclusion of the previous look, baseline -12 and the SSN/tick phase term. The spotting LOS is
+`Entity_CheckLineOfSightTerrainAndEntities(self, candidate, &selfEye, &candEye, 0, 1)`
+[orig: @0x4BE2F1..0x4BE311] (terrain plus the observer's proximity-slice collision
+raycast with allTypes 1), not the combat LOS.
 
 After LOS, a dead body can raise damageTimer to 25; an enemy can set
 raw-position aimPoint, aiFocus and timer 10 unless the Blind/retaliation bit
@@ -10406,6 +11034,14 @@ expressions are the §33.30 automatic slot (D-INF-5 closed 2026-09-09).
 
 Its assertion now checks the authored seat body heading and the independent look
 arc separately.
+
+The think's post-commit tail carries two more legs (2026-09-23, §38.4): the ride link
+[orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905; the org2 twin
+Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C], the only producer of a person's
++0x170 (the scorer's rider share, the kill record's aux byte and the 0x0D parent field
+read it; `world::infantry_ride_link`), and the idle facing fan [orig:
+@0x4BD905..0x4BE07A], which turns a cover_idle, idle_2 or look body away from the
+same-team neighbours it can see and writes no move goal (`idle_facing`).
 
 ### 33.28 WAC player-slot commands and raw experience accounting
 
@@ -10695,7 +11331,7 @@ retail CP01 ai_muzzle_pose test also pass; the latter now checks live head/hand
 anchors on each resolving foot NPC.
 
 The drag block's aimFlag clear is `InfantryState::aim_valid` in the port
-[orig: @0x4B9E30], its pending clear [orig: @0x4B9E41]. Still unported sibling:
+[orig: @0x4B9E30], its pending clear [orig: @0x4B9E41]. Its sibling, ported 2026-09-23 (§38.3):
 the grounded-corpse slope-conform aim writes (aimPitch = slope, aimHeading =
 targetHeading, aimFlag = 0 on every 8th tick while Flags & 2)
 [orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA307..0x4BA319)].
@@ -10722,21 +11358,30 @@ The factory shares profile, seat/attachment, trait, weapon, model, collision and
 ADM resolution with placed entities. Its single-entity trait and weapon folds
 preserve other NPCs' magazine state and capture zones. The helicopter uses the
 CHel definition callback [orig: Entity_InitHelicopterAIFromDef @0x4683C0], not
-the different initialization [orig: Entity_InitHelicopterAI @0x461F00]. The
+the different, unreferenced initialization [orig: Entity_InitHelicopterAI @0x461F00]. The
 generic allocator [orig: Entity_InitVehicleAI @0x460200] restores zero
 current/pending/fallback states after profile loading. These templates have no
-entity+368 controller; the native helper now preserves that absence instead of
+entity+0x170 occupant (the vehicle's first claimant; the flyover creates no pilot); the native helper now preserves that absence instead of
 inheriting AiEntity's test-fixture default.
 
 The helicopter starts 600 units along world X and 80 above the marker, with
 heading 2147483520, hover height 35, radius 20, and queued commands 7/5 and
-11/120. The medic offset uses the original quarter-unit heading offset, minus
+11/120. That heading is `HeliLift_SpawnFlyover`'s literal 0x7FFFFF80
+[orig: @0x4527E7], held exactly: `Entity_SpawnHelicopter` copies the spawn
+x/y/z/yaw into the template (@0x452209..0x45224C) and zeroes pitch and roll
+(ebx = 0 @0x4521B5, stores @0x452253 / @0x45225A); the port's spawner seeds
+`veh.yaw_bam` from the request heading with zero pitch and roll (2026-09-23). The
+flyover medic heading 0x3FFFFFC0 is that seed minus 3FFFFFC0h (@0x452948); the
+pickup medics spawn on the marker's own transform [orig: HeliLift_SpawnPickup
+@0x4525E0 (`lea ebp,[eax+4]` @0x45262E, into both Entity_SpawnFromItemDef calls
+@0x452650 / @0x4526A5)], so their heading is the marker's placement heading in
+the spawn form. The medic offset uses the original quarter-unit heading offset, minus
 one-eighth on XY and 1.5 on Z; the second is another quarter unit along both XY
 axes. Their initial slots, team, orders, corpse timers, heading and
 animation-state seeds follow [orig: Entity_SpawnHelicopter @0x4521A0;
 Entity_SpawnFromItemDef @0x452390]. Each gets its own mounted ADM rather than an
-assumed generic medic animation. General organic initialization/warmup remains
-separately tracked in D-AI-9.
+assumed generic medic animation. General organic initialization and warmup are
+implemented in §33.34.
 
 | State | Native consumer |
 | --- | --- |
@@ -10752,7 +11397,15 @@ separately tracked in D-AI-9.
 | 9 finished | The next pass compacts the complete array suffix and reprocesses the same index |
 
 The patient wiggle multiplies the two cosine phases for pitch and the two sine
-phases for roll; it is not a simple single-frequency tilt. Packed handles retain
+phases for roll; it is not a simple single-frequency tilt. Every lift trig scales
+the angle by dbl_7C3608 = 1.4629627251502471e-09, a hair above the BAM scale
+2*pi/2^32 = 1.4629180792671596e-09, then by 4194304.0 [orig:
+HeliLift_UpdateSlotState @0x451730 (@0x45185C, @0x451979, @0x451C5E);
+HeliLift_SpawnFlyover (@0x4528D8)]: the patient animation, the flyover escort
+offsets and the land hover offsets all use it. The land heading is 0x42000000 -
+trunc(atan2(dy, dx) * -2^31/pi) [orig: fpatan @0x451954; `fmul dbl_7C57B8`
+@0x451956; @0x451961..0x451966; stores @0x451970 / @0x451973], so north reads
+0x82000000. Packed handles retain
 allocation serials so stale operation pointers cannot mutate a later occupant.
 Failed helper allocation rolls back the new helpers before committing AI events
 or touching the patient.
@@ -10760,7 +11413,13 @@ or touching the patient.
 Two limits are witnessed in JO. Direct pickup never assigns its helicopter
 pointer; treatment expiry would dereference null in the original. The port
 records that boundary and finishes the operation without destroying the patient
-or medics (D-TMATE-1). The flyover creates no pilot. The aircraft mover changes
+or medics (D-TMATE-1). A flyover whose helicopter is destroyed before landing
+stalls in arms 4..6 as in retail: the brain read through slot[3]
+(@0x451739..0x451745) is 0 once `Entity_Destroy` memsets the row, arms 4
+(@0x451761) and 5 (@0x4517C6) skip to the patient animation and arm 6
+(@0x45192E) returns. The Return, Ascend and Depart arms (2/7/8) end the operation
+when the helicopter row is gone, where retail keeps measuring against the zeroed
+row (the distance from the origin) until both medics die (D-TMATE-1). The flyover creates no pilot. The aircraft mover changes
 the initial state 0 to 14; queued commands can enter 7, but the no-pilot leg
 parks it again [orig: Entity_UpdateAircraftPhysics @0x490310], [orig:
 Entity_UpdateAircraftPhysics @0x490310 (the site @0x491C5E)]). There is no
@@ -10825,8 +11484,8 @@ half-height admission, equal-distance selection, owner removal, missing clips,
 wounded/attack precedence, different NPC/player pending-state ordering,
 unchanged-pose phase preservation and the swim override. Spawn-time selection
 [orig: Entity_InitOrganicAI @0x4BFCC0] and its [orig:
-Entity_WarmUpOrganicAnimation @0x4B8B20] dual-channel warmup remain part of the
-general organic initialization work in D-AI-9.
+Entity_WarmUpOrganicAnimation @0x4B8B20] dual-channel warmup are implemented in §33.34
+(`initialize_organic_ai`, `infantry_spawn.cpp`).
 
 ### 33.34 Organic initialization and mission startup (2026-09-09)
 
@@ -10930,8 +11589,8 @@ site, validates the registry lifetime, and takes the live fixed-point motor
 position. Organic fire enters RoundSim::fire_npc_ammo, the shared
 WeaponSlot_FireAndSpawnEffects port: session authority gates the whole entry;
 cease-fire suppresses the round while preserving launch presentation. The
-advanced-ammo store is preserved, but guided missile flight is still a separate
-unported consumer.
+advanced-ammo store is preserved, and a guided advanced round flies through the shared
+`RoundSim::init_guided` (`guided_round.cpp`).
 
 [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0] uses a person's CameraOffset as
 the target/LOS endpoint. Phase is the unsigned sum of the actual logic tick and
@@ -10995,13 +11654,12 @@ other clears sit at [orig: @0x4BD2E9] (no goal), [orig: @0x4BD349] and [orig:
 @0x4BD956]. The block-2 tail `if (moveMode != 1 && moveMode != 5) { moveMode =
 7; targetDist = 0; }` [orig: @0x4BCFD5..0x4BCFF5] is ported with the gate
 (`infantry_combat.cpp`; no anim state carries both 0x8 and 0x10 in the flag
-table @0x8139e8). Still unported: block 2's no-target arm [orig:
-@0x4BCA95 -> @0x4BCBEB..0x4BCCC1] (the carried body's savedLivePose aim point,
-then the retained-point solve into the same tail), block 1's itemDef attrib
-0x400 [orig: @0x4BC560] and parentSlot 2/5 [orig: @0x4BC570..0x4BC582] skips,
-the Flags 0x80000 read at the reaction/approach arm [orig: @0x4BC054] and that
-flag's writer, and the hold-timer decay's `slot+4 & 8` gate with the extra
-state-49 decrement [orig: @0x4bc4db..0x4bc4f7]. The replacement pair
+table @0x8139e8). The former residuals are ported or refuted (2026-09-23, §38.4): block 2's no-target
+arm [orig: @0x4BCA95 -> @0x4BCBEB..0x4BCCC1] (the carried body's re-seated aim point),
+block 1's itemDef attrib 0x400 [orig: @0x4BC560] and parentSlot 2/5 [orig:
+@0x4BC570..0x4BC582] skips and the hold-timer tail's coward gate with the extra
+state-49 decrement [orig: @0x4bc4db..0x4bc4f7] are ported; the Flags 0x80000 read at the
+reaction/approach arm [orig: @0x4BC054] is dead, since no instruction writes that bit. The replacement pair
 later rotates by body heading [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
 @0x4BF001)]; it is not added as world-space velocity and does not replace the
 clip's vertical lane. The response also runs on clients. The path state reaches
@@ -11058,7 +11716,8 @@ stamped flag.
 
 The org2 landing order is retail's: resolver -> the clearance<=0 arm (snap;
 fall damage gated on the threshold, the local red flash
-[orig: Player_OnDamageReceived @0x4b7d2b (unmodeled)], authority and
+[orig: the Player_OnDamageReceived call @0x4b7d2b, ported with the landing leg in
+`infantry.cpp`], authority and
 Indestructible only, no 0x2000 and no dead test, which are org1's [orig:
 @0x4bf812; @0x4bf843]; vel_z = 0) [orig: Entity_UpdateInfantryPlayerBody
 @0x4b40e0 (the arm @0x4b7d0a..0x4b7d91)] -> the Flags read [orig: @0x4b7d9f] ->
@@ -11090,23 +11749,22 @@ collision_vertical targets then passed.
 
 ### 33.38 Divergence catalog for the section 33 ports
 
-The ledger mirrors these rows; the record owns them. The PERMANENT rows are
-proposed in PR #642 and take effect at its merge (ADR 0022 register); a
-declined entry falls back to an OPEN class-D row.
+The ledger mirrors these rows; the record owns them. The PERMANENT rows were
+ratified by the merge of PR #642 (2026-09-09; ADR 0022 register).
 
 | ID | Ours | Original | Status |
 | --- | --- | --- | --- |
-| D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, proposed PR #642) |
-| D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
-| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only) (§33.32) | PERMANENT (class D, proposed PR #642) |
-| D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
+| D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, ratified with PR #642) |
+| D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, ratified with PR #642) |
+| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment and a failed helper allocation is guarded; a flyover whose helicopter is destroyed stalls in arms 4..6 as in retail, but the Return/Ascend/Depart arms (2/7/8) end the operation when the helicopter row is gone, where retail keeps measuring against the zeroed row until both medics die | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only); a destroyed helicopter's brain reads 0 through slot[3] (@0x451739..0x451745) (§33.32) | PERMANENT (class D, ratified with PR #642) |
+| D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, ratified with PR #642) |
 | D-WAC-4 | FIXED 2026-09-18: night is a writable DWORD; WAC arithmetic and immediate reads preserve it | Env @ 0x26C645C; Environment_ComputeTimeOfDayColors @ 0x57DE40, store @ 0x57DEAE | Only an authored TOD keyframe computation overwrites it. Light selection and snapshots consume the stored value; wac_state and weather_state cover writes and clock ownership. |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
-| D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
+| D-WAC-6 | The loader installs every program under the game's policy, as retail does; only the strict policy of the dedicated golden host (`wac_layered_load` kBlocked) refuses a literal missing the mounted FX, SOUNDSET or AMMO catalog. A GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0, and an operand an earlier resolver table claims ORs in the dword behind that address as the load finds it (`CompileEnv::load_dword`). Residue: a group index past the group table reads retail's table out of bounds, where the port's GROUP walk treats it as an empty group | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the returns ignored @0x4F94A8 / @0x4F950E / @0x4F9597; the execute @0x4f976b)] keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0 (only the SSN handle keeps 0xFFFF) (§33.15); the GLOOP operand OR [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | FIXED 2026-09-23 (`wac_layered_load`, `wac_retail_vectors`; the out-of-table group index is the bounded residue) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
 | D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot. Portable-input note: an M# index outside the 68-byte portable store (`MUS_GLOBALS_BYTES`) reads zero and drops the write; a compiled program keeps its retired store alive across a context reload (reimpl-defined memory safety) | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0 (unbounded `&globals_0C[index]` @0x672689..0x67268D over the loaded chunk's `globalsBytes_18`, sub_672550 @0x672583); AudioVM_FreeSoundBuffer @0x672E1D / ScriptInstance_Init @0x672F8B (retail frees and reallocates, leaving a dangling compiled pointer); Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
-| D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
+| D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0CA..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
 
@@ -11123,7 +11781,14 @@ wire index is the FIRST registry row sharing the handler [orig: @0x4f5cb5..0x4f5
 so ptext/pwave/pconsol travel as text 39 / wave 40 / consol 100; the body is a
 u16 index [orig: @0x4f5cf9] followed by one operand per declared ParamType
 [orig: @0x4f5d26..0x4f5dc2]: Text/Filename as a cstring of at most 250 chars
-plus NUL, Ssn as u16, everything else as u32. A 0x10 row resolves its
+plus NUL, Ssn as u16, everything else as u32. Text and Filename are raw slots:
+the call passes the operand's address [orig: @0x4F5F92 (case 5); @0x4F5FA9
+(case 6); @0x4F6012 (case 9)], so a variable, global or pooled operand there
+prints its dword's bytes, least significant first, to the first NUL and on into
+the following words (the numbered, declared and global banks are contiguous
+from 0xC6B240; the pool is one array), and the payload copies the same bytes
+[orig: @0x4F5D71..0x4F5DAB]. The port's model ends at the end of the global bank
+and reads an engine, event or music dword alone. A 0x10 row resolves its
 Player/Item/auto selection through the active player-slot table
 [orig: Entity_ValidatePtr @0x500910]; a registered non-local player gets the
 message with send mask 0x20 to that slot [orig: @0x4f5dd1..0x4f5e8b], the local
@@ -11185,8 +11850,8 @@ consumption, 0x300/0x200 canopy growth, closed-canopy decay, +0x29C braking belo
 doubled forward air steering and the shared view clamp consume deployment.
 Snapshot-owned players retain vertical descent state while their position stays
 uplink-owned; replica players brake from the transmitted flag. Full spawn and
-compact wire projections include 0x20. `infantry`, `npruntime_client_runtime`
-and `replication` cover the surrounding paths.
+compact wire projections include 0x20. `infantry` and
+`npruntime_client_runtime` cover the surrounding paths.
 [orig: Entity_UpdateInfantryPlayerBody @ 0x4B7AD9..0x4B7C8D;
 air steering @ 0x4B7920..0x4B793D]
 
@@ -11195,8 +11860,8 @@ callback's first matrix and the inclusive explosion box. A box corner outside
 the sphere still qualifies; repeated marks do not replay GLASS_SMASH. The mask
 write does not itself rebuild collision geometry. Indoor projectiles probe BB
 state at their pre-move point; leaving the BB restores the terrain branch.
-`destruction` and `projectile_combat` pin these boundaries. D-COL-2's separate
-animated/destroyed-section table is not claimed fixed by this marking change.
+`destruction` and `projectile_combat` pin these boundaries. The section table
+D-COL-2 named is the door table (§33.14), closed as D-COL-2.
 
 The full scope, original executable hashes, regeneration commands and live-test
 limits are in [the validation report](../jo-c-validation-2026-09-18.md).
@@ -11234,9 +11899,20 @@ rather than receiving this unrelated controller's speed seed.
 Default event types still reach the dispatchers' transition tail. The ground
 client accepts pending 16 or 21..23; the air client accepts 7 or 13..15. The
 same authority/client guards now apply to those events in the port.
-[orig: EntityAI_ProcessVehicleStateMachine @ 0x4583C0 (default branch
-@ 0x45846D); EntityAI_ProcessInfantryStateMachine @ 0x4581B0 (default branch
+[orig: EntityAI_ProcessGroundStateMachine @ 0x4583C0 (default branch
+@ 0x45846D); EntityAI_ProcessAirStateMachine @ 0x4581B0 (default branch
 @ 0x458261)]
+
+The aircraft mover writes only the current state brain+0x10 (2026-09-22): 0 -> 14
+at its head (@ 0x490377..0x49037D), 14 -> 7 on the AI leg (@ 0x49158A..0x491590),
+14 in the parked leg (@ 0x491C66, after `AI_CheckVehicleStuckState` @ 0x491C5E)
+and 14 in the player leg (@ 0x490F6A); its only pending write is the dying request
+(@ 0x4903A1) [orig: Entity_UpdateAircraftPhysics @ 0x490310]. Parked means no
+occupant or Flags & 0x10000002 (@ 0x490F16..0x490F25), with no health term. With
+the class init's pending 0 the air dispatcher commits 0 after every think
+(@ 0x458384..0x4583B0, the countdown zeroed), so an AI helicopter thinks on every
+pool-1 visit like the ground brains, whose legs already stamped the current word
+only (`route_parity`).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
@@ -11256,7 +11932,7 @@ NPCs chasing their previous helipad waypoints.
 | Component | Verdict | Evidence |
 |---|---|---|
 | Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B5288..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
-| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. This is not a claim that every interleaved world subsystem has identical scheduling. |
+| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. Since 2026-09-23 the whole entity update runs as one pass in the witnessed phase order (§38.9). |
 | Redirect command admission and operand | MATCHING | `Entity_SetWaypointByTeam @0x43CD20` (pool-0 store @0x43CDB4) writes mode/channel/node without looking up a route; only node -1 requests nearest. Both slot and brain mirrors retain command 123's SSN and command 0's stop. The other two writers, `Entity_SetWaypointForTeam @0x43DD00` and `WacCmd_SsnToWp @0x4F1CE0`, are separated since 2026-09-22 (§23.4). |
 
 Local input packing stays ahead of this vehicle pass. `LocalPlayer` publishes
@@ -11453,3 +12129,1663 @@ D-INF-27 record link; no names or types were changed.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-INF-27 | FIXED: seated positions use live carrier attitude; `MountedPose` and all body, gun, camera/control and presentation consumers preserve full BAM32 angles. That was not yet true of the mounted first-person camera, which read the rider's whole-degree Roll mirror while its troop leg read the carrier's pitch/roll mirrors; the camera's Roll word (`@ 0x437D86`, carried `@ 0x54656F`) and the troop callback's carrier pitch/roll (`@ 0x4DC732..0x4DC741`) joined these consumers in the PR #671 fix round (2026-09-22), together with the no-skeleton EWEAP copy's +0x94 pitch add (`@ 0x545F48..0x545F4E`). | Userpoint transform @ 0x4B0D42; angle stores @ 0x4B0D81 / @ 0x4B0DB1 / @ 0x4B0DBB; body/LOOK split @ 0x546620..0x546664. | PR #663 removes the reproduced 03TR minigun camera snapping and seated cabin jitter caused by whole-degree quantization; `local_player_view` (`test_seat_bone_pose_rider_legs`) pins the camera legs. |
+
+## 38. AI, NPC and script parity pass (2026-09-23)
+
+Implementation: `engine/runtime/world` (the brain rows and dispatchers in
+`ai_system.cpp` / `ai_handlers.cpp` / `ai_combat.cpp` / `ai_aircraft.cpp` /
+`ai_waypoints.cpp`, the org1 motor and think in `infantry*.cpp`, the script
+primitives in `entity_commands.cpp`, the hit record in `round_sim.cpp`, the LOS in
+`collision_los.cpp`, the entity update in `world.cpp`, the match in `match.cpp` /
+`zone_capture.cpp` / `zone_chain.cpp`), `engine/runtime/mission` (`promote.cpp`,
+`event_runtime.cpp`, `mission_kernel.cpp`, `item_traits.cpp`), `engine/runtime/wac`
+(`compiler.cpp`, `vm.cpp`, `wac_layered_load.cpp`) and `engine/runtime/inmatch`
+(`server_tick.cpp`, `server_medic.cpp`, `server_idle_timers.cpp`, the roles). Binary
+and IDB as in the preamble. The pass re-read the AI, NPC, WAC and BMS domain in
+eleven slices and ported what differed. Every address below is an instruction head
+inside the named function, re-read read-only in the IDB; names are the IDB's after
+the 2026-09-23 rename pass, which §38.13 records (old -> new, with the witness). The
+older sections that stated the superseded behavior are corrected in
+place; this section is the pass's witness map.
+
+Retail-executed vectors back most slices: `movement_brain_parity` (the dispatchers'
+idle latch and alert edge), `ai_brain_rows` (the class-walk sort through the CRT
+`_qsort`), `aim_metrics_parity`
+(`scripts/oracles/aim_metrics_parity.py`, 120 cases), `infantry_org1_parity` (the
+org1 vertical tail run under Unicorn), `wac_retail_vectors`
+(`scripts/oracles/wac_parity.py`: the original compiler over 269 synthetic sources
+and the original VM over 20 programs; `wac_corpus` compares every shipped script's
+listing by SHA-256) and `mission_event_vectors`
+(`scripts/oracles/mission_event_parity.py`, 479 event-runtime cases).
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Brain class routing, idle latch, alert edge, event 1 | MATCHING (behavioral proof) | `movement_brain_parity`: 128 idle-latch and 36 alert rows executed on the retail dispatchers; `ai_brain_rows`: only the five brain-class rows run a machine (§38.1) |
+| Brain class walk order | MATCHING (behavioral proof) | `ai_brain_rows`: 262 class-walk rows through the CRT `_qsort` shortsort |
+| Brain allocation, class inits, AI-attribute fold, aim skill copy, husk floors | MATCHING (read-only grill) | `ai_brain_rows`, `mission_promote` |
+| ChangeAI arms (slot gate, brain gate) | MATCHING (read-only grill) | `ai_brain_rows` (`test_change_ai_slot_arms_without_a_token`, `test_change_ai_brain_arms_need_the_vehicle_brain`) |
+| PLAYPARTANIM | MATCHING (read-only grill) | The phase integrator has no caller in retail; the rate divides by the single-precision tick (`ai_brain_rows`) |
+| State-17 ground combat tick | MATCHING (read-only grill) | Structural port in the retail leg order; `ai_vehicle_combat`: processed/continuation LOS defer, failed rescan, WEAPON_TURRET staging, no-ammo latch, ATEAM_LOCK replay |
+| Relative-position metrics | MATCHING (behavioral proof) | `aim_metrics_parity` |
+| Target search variant A, validator head, Berserk read live, shooter mark | MATCHING (read-only grill) | `ai_targeting` |
+| AI and script LOS (exclusion set, pool walks, range split) | MATCHING (read-only grill) | `ai_los`, `script_command_parity` |
+| Global hit record and the script kills that read it | MATCHING (read-only grill), LiveRound slot identity carried | `hit_record` |
+| Org1 vertical tail, odd-tick skip, phase order | MATCHING (behavioral proof) | `infantry_org1_parity` |
+| Org1 death edge as the NPC death transaction | MATCHING (read-only grill); org2 transaction carried (D-AI-9) | `infantry_org1_parity`, `death_state`, `ai_corpse`, `ai_threat` |
+| Org1 corpse tumble, dead slope aim, torso roll, mounted rider, seat-bone fail arm | MATCHING (read-only grill) | `infantry_org1_parity`, `infantry`, `vehicle_mount` |
+| Animation variant rings (per .adm, last token first) | MATCHING (read-only grill) for org1 bodies; replica rows and the first-person weapon rings carried | `infantry`, `ai_threat`, `ai_corpse` |
+| Org1 think (head, perception, combat legs, guard family, board walk, selector, ride link, idle facing) | MATCHING (read-only grill); D-INF-2 re-scoped | `infantry_think`, `infantry_attention`, `infantry_escort` |
+| Nav table, route seed, spawn angles, ItemTypeIndex, first-row item ids | MATCHING (read-only grill) | `route_parity`, `vehicle_placement_angles`, `mission_promote`, `mission_item_traits` |
+| Aircraft AI leg (state words, parked spin, flight floor, ground links) | MATCHING (read-only grill) | `route_parity`, `aircraft_client_motor`, `vehicle_motor` |
+| WAC compiler and operand resolver | MATCHING (behavioral proof) | `wac_retail_vectors`, `wac_corpus` (asset-gated); fuzzed to 7080 sources with no divergence |
+| WAC load policy, clock, pause, opcode 5, raw text slots, ftol leg | MATCHING (read-only grill) | `wac_retail_vectors`, `wac_layered_load`, `wac_program_surface` |
+| WAC command bodies (kills, hide/disable/hold, health writers, predicates, returns, onptick, autogain, chat rings) | MATCHING (read-only grill) | `script_command_parity`, `wac_behavior`, `wac_players`, `environment_state` |
+| BMS event runtime (conditions, chain fold, actions, relays, view bits) | MATCHING (behavioral proof) | `mission_event_vectors`, `bms_event_parity`, `bms_hud_relay`, `player_view`, `teammate_operations` |
+| BMS SetLightState consumer | unlanded (consumer unresolved) | §38.8 |
+| Entity update pass, frame split, admission gate, epilog path | MATCHING (read-only grill) | `world`, `tick_digest`, `mission_kernel_lifecycle`, `npruntime_server_tick_maintenance`, `lose_flow_00tra` |
+| Breath timers, PostMission pass, spawn-marker order | MATCHING (read-only grill) | `npruntime_round_sim`, `mission_kernel_lifecycle`, `event_runtime_bms` |
+| Kill tallies and the scorer (team rows, NPC victims, unit score, FIRE, bonuses, medic, rider share) | MATCHING (read-only grill); SP tallies stay counts-only (D-AI-10) | `match_scoring`, `lose_flow_04tr_self_kill`, `lose_flow_05tr_self_kill` |
+| Capture transaction, flip events, chain edges, auto-deploy, refused-touch nag | MATCHING (read-only grill) | `zone_capture_parity`, `zone_chain`, `match` |
+| Records (citations, reverse links, stale statements) | corrected in place | §38.11 |
+
+### 38.1 Brain: class routing, class inits and ChangeAI
+
+Only five rows of `g_EntityClassEventCallbackTable @ 0x813000` (24-byte rows
+`{tag, fn1..fn4}`) reach a brain machine: CHel @ 0x8132A0 (fn1
+`EntityAI_ProcessAirStateMachine @ 0x4581B0`, which is the AIR-class machine),
+cpln @ 0x8133A8 (fn1 @ 0x462120, a jump to it), cveh @ 0x813378 (fn1
+`EntityAI_ProcessGroundStateMachine @ 0x4583C0`, the GROUND-class machine), cbot
+@ 0x813390 and ctrn @ 0x8133C0 (fn1 @ 0x462130 / @ 0x462140, jumps to it). Every
+other row's fn1 is another class's callback (null @ 0x813000 -> 0x406FF0; ewep
+@ 0x813090 -> `Entity_UpdateChildAttachment @ 0x4409A0`; gnrc @ 0x8130C0 ->
+0x407020). There is no fallback machine for a brain behind any other row. Port:
+`AiSystem::think_brain` (event 0) and `run_brain_class_event` (the script kills and
+the ground death's child kill) route the same way.
+
+- **Brain allocation.** A placed item takes a brain only when its def carries the
+  AI-class attribute 0x100000 (`test [eax+54h],100000h` @ 0x40ED4E, then
+  `Entity_AllocateAISlot` @ 0x40ED5C) and its ai_function row is one of the five
+  (the pool-1 class-init call in `Entity_InitAllFromModels`, @ 0x40E5B8..0x40E5D8).
+  Only `Entity_InitHelicopterAIFromDef @ 0x4683C0` (CHel/cpln) and
+  `Entity_InitVehicleAIFromDef @ 0x4686C0` (cveh/cbot/ctrn) reach
+  `Entity_InitVehicleAI @ 0x460200` (slot gates @ 0x46848E / @ 0x46878D);
+  `Entity_InitHelicopterAI @ 0x461F00` and its thunk 0x462110 have no caller.
+  [orig: Entity_SpawnFromBMSRecord @ 0x40ED4E; Entity_InitAllFromModels
+  @ 0x40E5B8..0x40E5D8]
+- **Class inits keyed on the item class.** The helicopter init writes brain[11]
+  always (@ 0x4684E2..0x4684F7), brain[49] = profile+0xD4 and brain[50] =
+  profile+0xC8 (@ 0x468597..0x4685A9), brain[51] = ((rolLCG & 0xFFFF) % 20) << 16
+  (@ 0x4685ED..0x46863F) and step 16 (@ 0x468645). The vehicle init writes
+  brain[11]/[12] only when the profile subtype is not 1 (`cmp [edi+14h],ebx`
+  @ 0x46881C, store @ 0x468836), brain[49] = profile+0xC4 and brain[50] =
+  profile+0xC0 (@ 0x4688C1..0x4688D3), and draws no brain[51]. The parser stores
+  GROUND patrol_speed +0xC0 (@ 0x45E70B), combat_speed +0xC4 (@ 0x45F677),
+  turn_rate +0xC8 (@ 0x45E7C4), radio_delay +0xD4 (@ 0x45E871), and HELO hunt_flags
+  +0xC0 (@ 0x45F5F6), hunt_limit +0xC4 (@ 0x45F677), patrol_speed +0xC8 (@ 0x45F70D),
+  combat_speed +0xD4 (@ 0x45F7DD). The family is the ai_function row, so a
+  cross-typed profile feeds the aliased words (a GROUND profile under the helicopter
+  init gives radio_delay/turn_rate). `AIProfile_LoadOrFind` memsets the record
+  (@ 0x45FE09): every unauthored field, and a missing `.aip`, reads 0.
+  [orig: Entity_InitHelicopterAIFromDef @ 0x4683C0; Entity_InitVehicleAIFromDef
+  @ 0x4686C0; AIProfile_ParseProperty @ 0x45DE70]
+- **Aim skill and route seed.** `Entity_InitVehicleAI` copies profile+0x1C ->
+  brain+0xAC (@ 0x460294..0x460297), +0x20 -> +0xB0 (@ 0x46029D..0x4602A0), +0x24 ->
+  +0xBC (@ 0x4602A6..0x4602A9) and +0x38 -> +0x1B0 (@ 0x4602AF..0x4602B2) for every
+  profile, and reads the current, pending and fallback states back from the zeroed
+  brain (`mov ebx,[esi+18h]` @ 0x46024B, stores @ 0x46028B..0x460291), so all three
+  start at 0. The route seed is §38.5.
+- **Husk floors.** brain[11] (+0x2C) = |intact CMDL floor| and brain[12] (+0x30) =
+  |husk section-0 floor| (the husk model's +0xB0 -> +0x6C -> +0x54 word that
+  `Entity_ProcessFallingDeathPhysics` reads @ 0x461E3A..0x461E4B). Writers: the class
+  inits (helicopter @ 0x4684E2..0x468527; vehicle @ 0x46881C..0x468858 unless
+  subtype 1), the dead `Entity_InitHelicopterAI` (@ 0x461F89 / @ 0x461FAB) and the
+  savegame restore (`Entity_CopyVehicleDefToAIComp` @ 0x45DB7A / @ 0x45DB84). Every
+  AI ground sample adds `brain ? (((Flags & 2) || health <= 0) && entity+0x34 ?
+  brain+0x30 : brain+0x2C) : 0`: `Entity_CalcAverageGroundHeight`
+  @ 0x457333..0x457367 and the inline copies in `AI_InitDeathState`
+  @ 0x4576E8..0x457705, `AI_InitGroundHeight` @ 0x45780D..0x45782C,
+  `AI_CheckLethalDamage` @ 0x457950..0x45796D, `AI_TransitionToDeath_Vehicle`
+  @ 0x46691B..0x466939 / @ 0x4669CE..0x4669EC and `Entity_ProcessVehicleDestruction`
+  @ 0x466AEE..0x466B0D. A wreck whose health a script restored still takes the husk
+  floor (the Flags & 2 arm); a huskFinal-only definition takes the intact floor.
+- **The idle latch.** Both dispatchers set brain[48] (+0xC0) = 1 iff
+  ((brain+0xD4 == 0 && brain+0xD8 == 0) || (profile byte +0x94 == 0 && profile byte
+  +0xB4 == 0)) && brain+0x240 == 0. The profile bytes are the ammo indices the parser
+  resolves (primary @ 0x45EF80, secondary @ 0x45F27E; `AmmoDef_LookupByName
+  @ 0x409870` returns 0 for a miss and for the first row). Its readers are the
+  ground state-17 tick (§38.2) and the aircraft legs. The armed Little Birds of 00TRd
+  (SSN 1065/1066) and 05TR (SSN 680), profile `h_ah6z`, take the armed legs.
+  [orig: EntityAI_ProcessAirStateMachine @ 0x4581C4..0x4581F4;
+  EntityAI_ProcessGroundStateMachine @ 0x4583D7..0x458402]
+- **The alert edge.** Authority, then an occupant at entity+0x170 (the first
+  claimant, `Entity::primary_occupant`) whose Flags lack 0x100 (Player), then prev !=
+  alert; failing any of them records prev = alert with no pending event.
+  [orig: @ 0x45820D..0x45823B air; @ 0x45841A..0x458448 ground]
+- **Event 1 and the transition tails.** Event 1 of both machines is the class
+  callback's kill/damage notification: it queues AIEvent {1, channel 9 (air) / 0
+  (ground), index, 0, the hit record's owner +0x44} (@ 0x45831E / @ 0x458524). Its
+  callers: the projectile hit @ 0x4E820E, the kill-by-netid pair @ 0x43C936 /
+  @ 0x43DC2A, `WacCmd_KillSsn` @ 0x4F1ECD and the ground death's child kill
+  @ 0x467BB5. Neither dispatcher selects a body animation: the event-0 legs end at
+  the +0x2AC re-arm (@ 0x458363 / @ 0x458568) and the commit tails
+  (@ 0x458369..0x4583B0 air, @ 0x45856E..0x4585B4 ground).
+- **Live hull words.** The ground rows read the entity record's health word +0x11E
+  and its velocity pair +0x98/+0x9C, never brain copies: `AI_HandleEvent_HelicopterCombatD`
+  (health @ 0x467747, death speed @ 0x467954..0x46795A, type pick `cmp eax,421h`
+  @ 0x4679A4), `AI_UpdatePatrolBehavior` (@ 0x457D87, @ 0x457E23..0x457E29,
+  @ 0x457E6F), `AI_EnterState_GroundEvade` (@ 0x4674A5, @ 0x4674B2..0x4674B8,
+  @ 0x4674FE), `AI_TransitionToDeath_GroundVehicle` (@ 0x467C09..0x467C0F,
+  @ 0x467C4C), `AI_TickState_VehicleDying` (@ 0x467CED..0x467CF3, @ 0x467D30) and
+  `AIEntity_ProcessWeaponFire` (@ 0x472E26, @ 0x4744B8..0x4744BE, @ 0x474508). The
+  dispatchers' client death leg zeroes the health word first (@ 0x45827F air,
+  @ 0x45848B ground). A hull killed at speed therefore reaches the state-21 dying tick.
+- **Alert-family enters.** Each writes its own slot byte +0x88 = 2 first, before
+  `TriggerGroup_SetAlertRed` / `Entity_AlertNearbyAllies`:
+  `AI_EnterState_GroundCombat` @ 0x467665, `AI_EnterState_GroundEvade` @ 0x46741F,
+  `AI_TransitionToDeath_Vehicle` @ 0x46696E, `Entity_ProcessVehicleDestruction`
+  @ 0x466B4C, `AI_TransitionToDeath_GroundVehicle` @ 0x467BD8,
+  `AI_TransitionToDestroyed_Vehicle` @ 0x467DF1. `Entity_AlertNearbyAllies
+  @ 0x4654B0` also rewrites the caller's byte per ally in range (@ 0x46558A). A lone
+  hull entering combat, evade or death is therefore red for SingleAtRedAlert
+  (`Entity_IsSsnAtAlertLevel @ 0x43E780`). The aircraft dead enter clears the team
+  byte first (`mov byte ptr [esi+162h],0` @ 0x466A9F), so its ally wake compares
+  team 0.
+- **The class walk.** `AIProfile_LoadOrFind @ 0x45FD80` always builds four
+  {index, key} pairs (@ 0x45FE53..0x45FEBA; keys load for types 1/2 only, jump tables
+  @ 0x45FF14 / @ 0x45FF24), sorts them with the CRT `_qsort @ 0x76D6A0` (the call
+  @ 0x45FECA, `CompareFunction @ 0x455D90` = a[1] - b[1], wrapping) and stores the
+  indices reversed (@ 0x45FED9..0x45FF04). For four entries `_qsort` runs its
+  selection shortsort (max-to-the-end passes with a strict `> 0` compare), which is
+  not stable: 194 of the 256 {0..3}^4 key tuples walk differently from a stable sort,
+  and four equal keys (a missing `.aip` included) walk {0, 3, 2, 1}.
+- **The evade flee.** `AI_EnterState_GroundEvade` @ 0x46756D..0x4675B1 turns the
+  hull about at combat speed: controller {1, 0x7FFFFFFF, 1}, brain[132] = heading +
+  0x7FFFFFFF, brain[133] = brain[134] = 0, brain[128] = brain[49], brain[7] = 16; the
+  work position is not written.
+- **The ground death's child kill.** `AI_TransitionToDeath_GroundVehicle @ 0x467B20`
+  (brain gate @ 0x467B60, def +0x548 byte @ 0x467B6E) walks the children at
+  brain+0x248 + 8i below brain+0x240 (@ 0x467B90..0x467BCC): a child with a positive
+  health word (@ 0x467B92..0x467B9A) gets `Projectile_GetHitRecord()` (@ 0x467B9C),
+  health 0 (@ 0x467BA5), the record's damage word +0x30 cleared (@ 0x467BAD) and its
+  callback (child, 1, 0) (@ 0x467BB0..0x467BBB). The child's +0x178 is not written;
+  the record's section, round and owner stay as the last hit left them.
+- **ChangeAI.** `Entity_ApplyCommand @ 0x43AB60` dispatches subs 1..46 through
+  `jpt_43AB78`; 35..39 and out-of-range subs take the default @ 0x43B336. The slot
+  arms gate on the AI slot (+0x68): case 1 slot+0x20 = p2 (@ 0x43AB7F, store
+  @ 0x43AB92); 3 bit 0x2000 (@ 0x43ABC2); 4 bit 0x10000 (@ 0x43ABF1); 7 slot+0x84 =
+  (p2 << 16) / 360 (@ 0x43AD5C, store @ 0x43AD85); 9 slot+0x30 = (p2 << 16) / 100
+  (@ 0x43ADCE, store @ 0x43ADF5); 10/11/12 slot+0x48/+0x4C/+0x54 = p2 * 62
+  (@ 0x43ADFD / @ 0x43AE21 / @ 0x43AE45); 13 slot+0x38 = (p2 << 8) / 360
+  (@ 0x43AE69, store @ 0x43AE92); 14 bit 0x100 (@ 0x43AE9A); 18 bit 0x800
+  (@ 0x43AF50); 19 bit 0x200000 (@ 0x43AF7F); 20 bit 0x8000 (@ 0x43B03A); 24 bit
+  0x80000 (@ 0x43B00B); 25 bit 0x100000 (@ 0x43AFDC). The divides are signed and
+  truncate toward zero; the multiplies wrap. Every brain arm gates on the vehicle
+  brain (+0x64) and falls to the default without one: the queued alert events (red
+  @ 0x43AC34, yellow @ 0x43AC94 behind its own slot gate @ 0x43AC87, green
+  @ 0x43AD04), DRIVESKILL @ 0x43B0A0, AIMSKILL @ 0x43B0BE, AISETSTATE @ 0x43B0DC,
+  COMBATSPEED @ 0x43B0FA, PATROLSPEED @ 0x43B118, START_FIRING @ 0x43B2C4,
+  FIRING_ANGLE @ 0x43B2DB, TARGETSSN (case 44 @ 0x43B136..0x43B13B, then
+  `Entity_FindByNetId @ 0x4655B0` writes brain+0x94), AIUSEWPZ (case 32 @ 0x43B154,
+  `mov [eax+1B0h],1` @ 0x43B164), AICLEARWPZ (case 33 @ 0x43B173, store @ 0x43B183)
+  and PLAYPARTANIM (@ 0x43B1C1, after its channel check). An organic carries the slot
+  and no brain, so only the slot arms apply to it. The slot words and bits these
+  arms write are the ones the BMS attribute fold seeds (below). DRIVESKILL's
+  brain+0xB0 is stored and never read by gameplay code.
+- **PLAYPARTANIM.** Case 0x22 stores only the direction (comp+436) and the rate
+  (comp+444) (@ 0x43B192, stores @ 0x43B1DE / @ 0x43B1F9). The rate divides by the
+  single-precision `flt_7C3B40` = 0.016f (0x3C83126F; `fdivr` @ 0x43B1D8), scales
+  (@ 0x43B1E5) and truncates (`_ftol2_sse` @ 0x43B1EB): ANIMTIME 1 -> 68719480,
+  3 -> 22906493, 65536 -> 1048, 0 -> INT_MIN. The integrator
+  `Entity_UpdateSuspensionBounce @ 0x456710` has no call, jump, thunk or data
+  pointer anywhere in the image (xrefs, raw pointer and rel32 scans), so the phases
+  comp+452/+456 hold the allocator's zero (`Entity_InitVehicleAI` memset @ 0x460246)
+  unless the savegame restore wrote them (`SaveFile_ApplyEntityRecord @ 0x4AC030` ->
+  `Entity_CopyVehicleDefToAIComp`, @ 0x45DDF9 / @ 0x45DE11 / @ 0x45DE1D), and
+  `HUD_CacheEntityDisplayInfo` publishes the held value (@ 0x4A3E16..0x4A3E38). The
+  world tick integrates nothing; the editor preview (`ModelControls`) is the only
+  integrator.
+- **The BMS AI-attribute fold.** `Entity_SpawnFromBMSRecord` folds the record's
+  attribute dword before and inside the AI branch. Outside it: 0x200000 -> Flags
+  0x4000000 (@ 0x40ED0D), 0x800000 -> Flags 0x400 (@ 0x40ED1D), 0x1000000 -> Flags
+  0x1000000 (@ 0x40ED2E), 0x2000000 -> entity+0x2C |= 0x80 (@ 0x40ED3B..0x40ED44).
+  Inside it (after the gate @ 0x40ED4E): 1 -> slot[1] 0x1 (@ 0x40ED92), 2 -> Flags
+  0x40 (@ 0x40ED9F), and into slot[1]: 0x100 -> 0x2000, 0x200 -> 0x10000, 0x400 ->
+  0x100, 0x800 -> 0x200, 0x1000 -> 0x400 (CLIMBER, @ 0x40EDED), 0x2000 -> 0x800,
+  0x8000 -> 0x8000, 0x10000 -> 0x8, 0x40000 -> 0x80000, 0x80000 -> 0x100000,
+  0x100000 -> 0x200000; 0x4000 -> Flags 0x80 (FlyingOrganic, @ 0x40EE2A); 0x20000 ->
+  Flags 0x80 plus +0x468 = 0x2D82D, +0x460 = 0xCCCCCC0 and +0x29C = 0x10000
+  (@ 0x40EE70..0x40EE94). 67 shipped organics (00TRf, 03TR, ASH_G3D, ASR_G6a,
+  TDH_G3D, TKH_G3D) author FlyingOrganic and hold their altitude. Port:
+  `init_ai_slot` in `promote.cpp`.
+
+### 38.2 Combat: the state-17 tick, targeting, LOS and the hit record
+
+- **The state-17 tick** (`AIEntity_ProcessWeaponFire @ 0x472E00`, §17.6) runs its
+  legs in this order. The cooldown adds `0x10001 * brain[7]` (`imul ecx,10001h`
+  @ 0x472E42, `add [esi+0D0h],ecx` @ 0x472E48). Weapons free zeroes the give-up
+  timer brain[40] every visit (@ 0x472EF2) and fires unless the no-ammo latch
+  brain[48] is set (@ 0x472EEB): primary, then secondary; neither fired leaves the
+  bone byte 0 and brain[106] = 0 (@ 0x47308B..0x473092). Weapons held: bone byte 0
+  and brain[40] >= 620 set pending = fallback (@ 0x47309E..0x4730AF). The stationary
+  RC_FIRE arm moves through `AI_UpdateMovementTarget` (the call @ 0x4730D9). Under
+  ATEAM_LOCK (flags100 & 0x40) the leg @ 0x4730E9..0x4732D9 refires brain[106]'s
+  weapon at the hull pose plus the saved deltas while brain[181] is armed (all six
+  components, no solve, no scatter; primary @ 0x473208..0x4732AA, secondary
+  @ 0x473142..0x4731DD); held past a quarter of the primary rate the bone byte clears
+  (@ 0x4732B5..0x4732C3), and brain[48] holds it (@ 0x4730FE). The deltas
+  brain[182..193] are captured only under ATEAM_LOCK, at every staging, continuation
+  and processed solve (e.g. @ 0x4733AC..0x4733FA, @ 0x4735EC..0x47363A,
+  @ 0x473F47..0x473F95). brain[48] also forces the processed leg on every visit
+  (@ 0x473309) and turns the chase into the half-turn heading (@ 0x473AB1 ->
+  `lea eax,[ebx+7FFFFF80h]` @ 0x473C08).
+- **The LOS-defer argument** (the ctx 0x8000 bit, the solver's arg 7) is 0 at the
+  stationary RC_FIRE solves (`push 0` @ 0x472F45 / @ 0x472FCC) and at the processed
+  fire (@ 0x473D3C / @ 0x473E26, solves @ 0x473D57 / @ 0x473E44), and 1 at the
+  between-tick brain[106] continuation (@ 0x473850 / @ 0x4735A0, solves @ 0x47386B /
+  @ 0x4735C9) and at the WEAPON_TURRET staging (@ 0x47337E, solve @ 0x4733A4;
+  secondary @ 0x473488). The continuation zeroes the primary's pre-seeded pitch first
+  (@ 0x473821); with no volley on record a WEAPON_TURRET block re-solves every visit
+  (primary @ 0x47332D, secondary @ 0x47340E), so its turret slews per visit; a
+  processed tick on which neither weapon fires sets brain[106] = 0 and the bone byte
+  0 (@ 0x4741CC..0x4741D6). The sweep (0x20) steps brain[180] per shot at every
+  mobile site (@ 0x473737, @ 0x4739DA, @ 0x474093, @ 0x474175) and its reset writes
+  brain[38] = 0 directly: AiSlot[3] and the target refcount keep the old target.
+- **The rescan and the chase.** `AIEntity_TryAcquireTarget @ 0x4716B0` always hands
+  its result to `Entity_SetAITarget` (@ 0x4716F0), so a rescan that finds nothing
+  clears brain[38], AiSlot[3] and the refcount; the caller keeps its old pointer for
+  the bearing only (`jz` @ 0x473A41..0x473A45) and the solver reads brain[38] itself
+  (@ 0x4569A4). The aircraft combat tick (`AI_TickState_AircraftCombat
+  @ 0x471710`, the call @ 0x472349, `jz` @ 0x472351..0x472355) drops its target the
+  same way. The chase compares the truncated planar 16.16 distance with the approach
+  cap profile+0x4C (@ 0x473AF3; beyond it only the > 620 give-up runs); at or beyond
+  max_chase profile+0xBC (@ 0x473B29) it runs full speed; inside it the give-up timer
+  rests only while `AI_IsTargetInSight @ 0x456860` validates the target
+  (@ 0x473B36 / @ 0x473BE4); from min_chase profile+0xB8 on the speed is speedA
+  (@ 0x473B53), closer it is the target's brain[136] when it has a brain (@ 0x473B72)
+  else its planar |velocity| (+0x98/+0x9C, @ 0x473B83..0x473BCE); the tail clamps to
+  [0, speedA] and zeroes brain[129]/[130]/[133]/[134]/[138] (@ 0x473C14..0x473C50).
+- **The dead missile swap.** A Player target (Flags & 0x100) and a missile ammo byte
+  (`Team_IsPlayerTeam`, AE0768..AE076D) swap to byte_AE076E/F only when
+  `sub_545930` returns 0 or 2; `sub_545930` is `mov eax,1; retn`, so the swap never
+  happens. The per-shot ammo-byte stamp into entity+0x2B0 before each solve
+  (@ 0x472F17..0x472F23) is not reproduced: the port hands the same byte to the
+  round, and brains carry no weapon-table adm index, so the round sees the same byte.
+- **Relative-position metrics.** `compute_relative_position_metrics @ 0x545710`
+  takes both distances through `fild; fsqrt; fistp` under the game's round-to-nearest
+  control word (@ 0x5457CD..0x5457D3, @ 0x5457EC..0x5457F2): whole units, rounded; a
+  wrapped (negative) sum gives 0. The two angles truncate (`_ftol2_sse`).
+- **The engage jitter** keys on the target's brain pointer (`cmp [ebx+64h],ebp; jz`
+  @ 0x4677EA..0x4677EF in `AI_HandleEvent_HelicopterCombatD @ 0x467730`): a brained
+  target takes the guarded dword_31BFBB8 LCG (@ 0x467803..0x467866), a brainless one
+  `PRNG_Next16 % 62`. The group key entity+0x11C (`AiEntity::relmat_id`) is the
+  record's command group, sign-extended (`movsx eax,byte ptr [edi+4Eh]`
+  @ 0x40EBB3..0x40EBB7), not the SSN.
+- **Target search variant A.** `AI_FindBestTarget @ 0x465A50` is
+  instruction-identical to `AI_FindBestTargetB @ 0x466F60` except that both arc
+  bytes load sign-extended (`movsx` @ 0x465A8C / @ 0x465A9B against `movzx`
+  @ 0x466FBC / @ 0x466FCB). The arc gates compare unsigned (@ 0x465D16..0x465D20;
+  B @ 0x467226..0x467230), so an arc byte >= 0x80 admits every bearing while the
+  unsigned divide scores it 0: a HELO profile with an arc over 180 degrees never
+  acquires. Its callers: the aircraft FOLLOWWP tick @ 0x46648F, the two aircraft
+  movers @ 0x466CC9 / @ 0x466E86, the aircraft combat tick @ 0x472B45 and
+  `AIEntity_TryAcquireTarget` for profile type 1 (`cmp dword ptr [eax+10h],1`
+  @ 0x4716D5 -> A @ 0x4716DD, else B @ 0x4716E4).
+- **Berserk is read live** from AiSlot[1] & 0x200 at every consumer (@ 0x466FAB,
+  @ 0x4670CD, @ 0x4670E1; the kill feed's type choice in `GameEvent_PlayerDeath`
+  @ 0x51709C..0x5170DA), so a ChangeAI Berserk (case 0x10 @ 0x43AEF6, writes
+  @ 0x43AF07 / @ 0x43AF14) takes effect at once. The non-team game-type grant
+  (@ 0x43C54F) and the joiner PlayerSync (@ 0x431615) are unported writers of the
+  bit; the occupant-to-vehicle copy is §38.9.
+- **The shooter mark** (Flags 0x4000, the x6 scan weight @ 0x4672A9) has two
+  writers: the organic fire (@ 0x4BF370) and `RoundData_SpawnRound`'s tail for every
+  non-silenced ballistic round (`test byte ptr [edi],8; jnz; or dword ptr
+  [ebp+24h],4000h` @ 0x4EC842..0x4EC847, before the recoil), plus the shotgun fan
+  (`Weapon_SpawnProjectileBurstWithSpread` @ 0x4EBE61..0x4EBE66). The instant kill
+  zone, detonator, designator and claymore legs return before any mark. Players carry
+  the weight too; a silenced round leaves no mark.
+- **The validator head.** `Entity_ValidateWeaponTarget @ 0x53A400` keeps a target
+  that is destroyed (Flags & 2) or at health <= 0 only while tick - death tick
+  (+0x1AC) <= 16 (@ 0x53A425..0x53A443), and rejects a Player target while
+  dword_24C1930 & 0x800 is up (@ 0x53A46E..0x53A478) or once g_spawn_success_gate is
+  set (@ 0x53A482..0x53A489). dword_24C1930 is the local debug word: 0x800 toggles on
+  input action 123 (@ 0x4E07A4; catalog row 123 is empty and unbound), 0x100 through
+  @ 0x4DC9C0, 0x400 through action 74, zeroed by `Game_StartMission` (@ 0x525B25).
+  g_spawn_success_gate's writers are the client's GameReset handler
+  (`NapiNPClientMsg_GameReset`, which sets it @ 0x422849), S2C 0x1D (@ 0x430858),
+  the round end (@ 0x5168E4), the mission start clear (@ 0x524A1F) and
+  `Cine_StartPlayback` (@ 0x577848); the 0x0A handler only reads it (@ 0x42FFD0).
+- **Target bookkeeping.** `Entity_SetAITarget @ 0x45D760` writes brain[38],
+  AiSlot[3] and the two refcounts only. The TARGETSSN producer (ChangeAI 44,
+  `Entity_FindByNetId @ 0x4655B0`) leaves only 0 behind: its unconditional clear
+  (@ 0x465654) runs after the pool-1/2 stores, and a live pool-0 match returns
+  before storing (@ 0x4655E9). `AI_HandleCommand @ 0x465770` ports case 0x0C (the
+  guided-round warning, @ 0x465906..0x4659A6); 0x0D..0x14 are the switch's default
+  (`ja` @ 0x465792), which returns 0 so the state's own handler runs. The profile
+  range words come from the resolved `.aip` (or the zeroed record); the record's
+  engagement distances live in the slot (+60/+64). The solver's bone lists are
+  filled at spawn by `Entity_InitVehicleAI`'s prefix scans (prim/bullet01/bullet02,
+  sec/bullet02, flare; @ 0x4603A6..0x460414) and the solve uses the full entity frame.
+- **The LOS exclusion set.** `Physics_RaycastTerrainAndSectors @ 0x539910` skips
+  entities A and B, their parent slots ctx[19]/[20] (the +0x16C seat mount, else the
+  +0x268 carried object; @ 0x5399BD..0x539A12) and candidates whose +0x28 ground
+  entity is A or B (@ 0x53882F..0x538877); the riders of the parents are not skipped.
+  The both-flagged 0x800000 skip tests A and B themselves (@ 0x53993F..0x53994C). The
+  pool-2 pass walks the pool's used count (@ 0x539A16..0x539A30), not the proximity
+  table, whose count stops at 1199 (`Entity_BuildAllProximityLists @ 0x4B9430`,
+  @ 0x4B94CB); pool 1 is walked by its own used count once pool 2 came back clear
+  (`jz` @ 0x539A3A, @ 0x539A40..0x539A5A). TKX_C1A, ASR_G8a, ASH_C1A and ASB_G14a
+  author exactly 1200 buildings, so their last building blocks too.
+- **The script LOS split.** `Entity_CheckLineOfSightInRange @ 0x4F15E0` and
+  `Entity_CheckLineOfSight @ 0x4F17C0` branch on the authored range (`cmp
+  ecx,140000h; jg` @ 0x4F1769..0x4F1773 / @ 0x4F1919..0x4F191F): up to 20 u they call
+  `Entity_CheckLineOfSightTerrainAndEntities(A, B, start, end, 0, 1)` (@ 0x4F1785 /
+  @ 0x4F1931), beyond it `Physics_RaycastTerrainAndSectors(A, B, start, end, 0)`
+  (@ 0x4F17A7 / @ 0x4F1953). Port: `script_los_clear` in `entity_commands.cpp`.
+- **The global hit record** (80 bytes @ 0xB7C620, `Projectile_GetHitRecord
+  @ 0x4E7000`; `Projectile_CopyEntityToHitRecord @ 0x4E7010` fills it): +0x00..+0x14
+  the round's position and angles, +0x18..+0x2C its velocity block, +0x30 damage,
+  +0x38 section, +0x40 the round, +0x44 the round's owner (+0x170), +0x48 the target,
+  +0x4C the round's ammo word (+0x1BA). Writers: `Projectile_ProcessDamageOnTarget`
+  @ 0x4E81BA..0x4E81D7 (rounds; squibs through the call @ 0x4496CF; vehicle wrecks
+  through @ 0x445936), `Projectile_HandleTerrainImpact` @ 0x4E9319..0x4E932B, the
+  mission-start memset (`Projectile_InitDragTable` @ 0x4E7921..0x4E7929), WAC
+  killSSN's memset (@ 0x4F1E8F..0x4F1E99), BMS KillSingle (+0x30 on every pool leg,
+  +0x44 on pool 0 only: @ 0x43DC22, @ 0x43DC27, @ 0x43DC68, @ 0x43DCA6, @ 0x43DCE8),
+  BMS KillGroup (+0x30 and +0x44 per row: @ 0x43C930 / @ 0x43C933, @ 0x43C980 /
+  @ 0x43C983, @ 0x43C9D0 / @ 0x43C9D3) and the ground death's child kill (+0x30,
+  @ 0x467BAD). Readers: the org and plyr callbacks' event-1 legs (+0x40, +0x38), the
+  org callback's event 4 (@ 0x407351..0x4073B1), the item callbacks (+0x38, +0x30,
+  +0x0C..+0x14) and the brain machines' event 1 (+0x44). So after any round has hit
+  anything, a BMS KillSingle or KillGroup of a person runs the round legs of the last
+  recorded round (its section, approach quadrant, ammo force, and its owner as the
+  reaction attacker), and the org1 edge's unstaged callback does the same for an NPC
+  whose health a script zeroed; WAC killSSN and a fresh mission do not. Port:
+  `RoundSim::hit_record` (`HitRecord`). Carried: `LiveRound` has no pool-slot
+  identity, so the record copies the round's fields at the write, where retail reads
+  the slot through +0x40 and a released round's bytes survive until
+  `CEntityManager_AllocateSlot @ 0x4EAAD0` reuses the slot (memset
+  @ 0x4EABC0..0x4EABC8); the +72 burn emitter and the 173 clip stay D-ITEM-6; the plyr
+  leg's `GameEvent_ProcessScoring` case 2 (@ 0x52FC22, the hit statistics) is not
+  modeled.
+- **The plyr waypoint tail** (§38.3) also ends the round hit's event-1 call
+  (@ 0x4E820E), the blast's notify (`Entity_ApplyWeaponDamage`, @ 0x4E6B72) and the
+  knife kill zone's notify (`Entity_ApplyVehicleCollisionDamage`, @ 0x4E6752).
+
+### 38.3 Org1 motion: vertical tail, death edge, phase order, rings and seats
+
+- **The vertical quarter-step tail.** `Entity_UpdateInfantryAI @ 0x4B9910` keeps
+  outYaw = key & 1 (`and eax,1` @ 0x4BF146, store @ 0x4BF14F; key = tick +
+  36 * netId). On an odd key tick the motor jumps from @ 0x4BF6A5..0x4BF6B2 to
+  @ 0x4BFC80, skipping gravity and the climb chase, the resolver, the landing and
+  airborne edges, the org1 ladder block (@ 0x4BF907) and the water block
+  (@ 0x4BFAE2), and only adds +0xAC to Z (@ 0x4BFC80..0x4BFC86). On an even key tick
+  Z is saved after the root integrate (@ 0x4BF6BA) or re-saved after a landing snap
+  (@ 0x4BF808), and the tail @ 0x4BFC65..0x4BFC7D stores +0xAC = (Z - saved + 2) >> 2
+  and Z = saved before the same add. Both water legs reach the tail: it is general,
+  not water-only, and the water block stores the float target (@ 0x4BFB84) for the
+  tail to settle. +0xAC is zeroed only by `Entity_ResetToSpawnState` (@ 0x4B967A).
+  Retail-executed: a body falling from rest reaches z 589616 / 589408 / 588992 /
+  588576 after ticks 2..5 with +0xAC -208 / -208 / -416 / -416, and has fallen
+  2.95 u after 60 ticks (the doubled integrate alone would give 5.9 u); at fallmps 13
+  a 4.0 u fall lands on tick 70 at 49 health. (`infantry_org1_parity`)
+- **Open follow-up: CP01 organics authored above unheld surfaces.** About 23 CP01
+  organics are authored above any surface the port's collision holds (the tree groups, the
+  lumber-mill dome; net 2804 spawns at z 23.38 over terrain 21.19): they are flagged
+  airborne and fall to the terrain on the first even-tick resolve, on master as well, and
+  since an airborne body skips its think (§38.4) each holds its idle until it lands, which
+  the quarter-step fall takes most of two seconds to do (`ai_muzzle_pose` samples after 124
+  ticks for that reason). What holds those organics up in retail is unverified.
+- **The death edge is the NPC death transaction, once per life.** Guard `cmp
+  [esi+11Eh],bp; jg` @ 0x4B9C40 and `test byte ptr [esi+24h],2; jnz` @ 0x4B9C4D; the
+  edge is the only writer of the org1 dead bit (`or eax,2` @ 0x4B9D18, store
+  @ 0x4B9D1B). An unstaged death (+0x2C0 == 0, @ 0x4B9CC9) takes
+  `Entity_ComputeAnimSlotIndex(e, 0, 0, 4)` = 174 (@ 0x4B9CE5), lastAttacker 0
+  (@ 0x4B9CEB) and the class callback (e, 1, 0) (@ 0x4B9CF1): for org0/org1 that is
+  `OrganicClass_HandleEvent @ 0x407310` event 1, which gives a non-player the slot
+  alert byte 2 (@ 0x4073DB) and `TriggerGroup_SetAlertRed` (@ 0x4073EA), then exits
+  when the hit record's +0x40 is null (@ 0x40740D) and otherwise runs the death-anim
+  and debris legs on the last recorded round. Flags & 0x8000 selects death_drown 175
+  (@ 0x4B9D0E), else +0x2BC = +0x2C0 (@ 0x4B9D06); then +0x2B8 = 0 (@ 0x4B9D1E), the
+  death tick +0x1AC (@ 0x4B9D24 / @ 0x4B9D2F), Flags &= ~0xC0 (@ 0x4B9D2A, store
+  @ 0x4B9D35), +0x2C0 = 0 (@ 0x4B9D38) and +0x184 = 0 (@ 0x4B9D3E). On the authority
+  (@ 0x4B9D44) the edge calls `Entity_CheckAndProcessDeath @ 0x51B550` (@ 0x4B9D4D):
+  a Player goes to `GameEvent_PlayerDeath`; anything else sends S2C 0x13 with mask
+  0x90 (`BuildDeathNotifyPayload @ 0x5036E0`, [u16 handle][u16 +0x2C0], 0 for every
+  edge death; @ 0x51B58F) and scores `GameEvent_ProcessScoring(gameType, +0x178, 3,
+  e, 0)` (@ 0x51B5B3). Its only callers are the org2 edge (@ 0x4B4CEA), the org1 edge
+  (@ 0x4B9D4D) and the console KillPlayer (@ 0x4D29EC); no damage path calls it. The
+  kill tally `Score_ProcessKillEvent @ 0x4FD400` is the damage paths' (§38.10), never
+  the edge's or a script kill's. `Entity_HandleDeathOnAuthority @ 0x407CC0` is the
+  barrel (brrl, row @ 0x813060) callback, not an organic path. Port:
+  `infantry_death_edge` / `org1_owns_death_transaction` (`infantry_death.cpp`); a
+  damage-time death of an org1 body only tallies. Carried: the org2 transaction still
+  comes from the host's damage-time route (D-AI-9).
+- **Dead-bit readers.** The corpse leg (`test al,2; jz` @ 0x4B9D55..0x4B9D5A), the
+  think gate (@ 0x4BA98B), the slope pass (@ 0x4BA084), the airborne animation gate
+  (@ 0x4BF8CD) and the fall-thump pick (@ 0x4BF87F) read Flags & 2, not health: a
+  script health write on a corpse leaves it dead, and a fatal fall's own landing still
+  reads alive (the edge latches on the next tick). A fatal fall stages +0x178 = self
+  and the generic clip (org1 @ 0x4BF86B / @ 0x4BF879; org2 @ 0x4B7D7D / @ 0x4B7D8B).
+  AINODEPATH swaps +0x1C4 for nullsub_28 (`Entity_ApplyCommand` case 40
+  @ 0x43B235) and the pool-0 walk skips nullsub callbacks (@ 0x4C2460..0x4C2472), so a
+  motor-suspended NPC's edge waits for its motor. A dismemberment clone runs the org1
+  motor with health 0 and no dead bit, so its own edge raises its death.
+- **The player-body twin.** `Entity_UpdateInfantryPlayerBody`'s edge
+  (@ 0x4B4BF1..0x4B4CEA) detaches (@ 0x4B4C08..0x4B4C11), runs the silent cleanup
+  (@ 0x4B4C19) and the "_DEATH"/"_DEATH_K" set (@ 0x4B4C4A), stages 174 and
+  lastAttacker 0 when unstaged (@ 0x4B4C72..0x4B4C8D; no class callback), picks 175
+  under Flags & 0x8000 (@ 0x4B4C93..0x4B4CAB), sets Flags |= 2 (@ 0x4B4CB5),
+  +0x2B8 = 0, the death tick (@ 0x4B4CC1..0x4B4CCC), &= ~0xC0 (@ 0x4B4CC7),
+  +0x2C0 = 0 (@ 0x4B4CD5), +0x184 = 0 (@ 0x4B4CDB) and calls
+  `Entity_CheckAndProcessDeath` on the authority (@ 0x4B4CEA). Both player-body edges
+  in the port carry the 175 pick, the death tick and the 0xC0 clear.
+- **The phase order.** Head (key @ 0x4B9948..0x4B9953; the mounted-live local =
+  (+0x16C != 0 && health > 0) @ 0x4B9960..0x4B9985; the epilog gate
+  @ 0x4B998C..0x4B99CD, which returns from the whole motor; respawn unhide
+  @ 0x4B99DB; Flags & 1 exit @ 0x4B9A03; +0x28 = +0x16C @ 0x4B9A0D..0x4B9A11; channel
+  copy @ 0x4B9A14..0x4B9A48 and advance @ 0x4B9A48; saved pose
+  @ 0x4B9A53..0x4B9A6E) -> death edge @ 0x4B9C40..0x4B9D55 -> corpse leg
+  @ 0x4B9D55..0x4BA05F -> slope pass @ 0x4BA066..0x4BA346 (key & 7 kept @ 0x4BA072
+  for the mounted tail's resolver gate) -> attach sample @ 0x4BA348 -> deck ride
+  @ 0x4BA45D..0x4BA891 -> gradient @ 0x4BA896 -> think @ 0x4BA970..0x4BE7FD -> recoil
+  @ 0x4BE7FD..0x4BE84B (the one `PRNG_Next16` call @ 0x4BE82D), spread decay
+  @ 0x4BE84E..0x4BE869, +0xB0 lean decay @ 0x4BE86F, +0x36C arms-dip ease
+  @ 0x4BE883, torso roll @ 0x4BE897..0x4BE8EA -> mounted-live test @ 0x4BE8F0 (not
+  mounted: body chase @ 0x4BE8FD..0x4BE931, carried leg snap @ 0x4BE934, legs
+  @ 0x4BE944..0x4BEB0A, look chase @ 0x4BEB18..0x4BEBE7; mounted: the seat block
+  @ 0x4BEBEC..0x4BEF97) -> the +-90 degree look/body clamp @ 0x4BEF9A..0x4BEFED
+  (skipped for seat configs 3/4/5/7) -> root rotation @ 0x4BEFF0..0x4BF074
+  (jump_loop 31 forces 0x400 @ 0x4BEFF9) -> eye offset @ 0x4BF078..0x4BF14C ->
+  outYaw @ 0x4BF146 -> sound and fire consume (odd) @ 0x4BF15C..0x4BF4B0 -> mounted
+  fire tail, phase-8 resolver and return @ 0x4BF4BB..0x4BF5C6 -> slide decay
+  @ 0x4BF5CB..0x4BF61F -> attach move @ 0x4BF625 -> integrate @ 0x4BF684..0x4BF6A2 ->
+  odd skip @ 0x4BF6A5. The NPC fire pass runs after the heading and look chase, and
+  the recoil kick after the think. The mounted-live local (var_1098: a parent +0x16C and
+  Health +0x11E > 0) is captured at the head (@ 0x4B9960..0x4B9985), before the death edge
+  and the think, and tested at the seat block (@ 0x4BE8F0) and at the request and the
+  mounted return (@ 0x4BF4B3). A body that boards inside its pass's think therefore walks on
+  foot to the end of that pass (the ground chase @ 0x4BE8FD..0x4BEBE7, no request, the
+  ordinary mover @ 0x4BF5CB) and is posed from the next pass; a rider that loses its parent
+  mid-pass keeps the local, so the seat block's parent test (@ 0x4BEBEC..0x4BEBF4) skips the
+  pose, there is no ground chase, and only the +-90 degree look clamp about the body
+  (@ 0x4BEF9A..0x4BEFED) runs before the request's parent test sends it to the ordinary
+  mover. Port: `tick_infantry`'s `mounted_live` (`vehicle_mount`: `test_board_pass_stays_on_foot`,
+  `test_board_pass_on_an_attached_gun_stays_on_foot`).
+- **Corpse legs and the torso roll.** The tumble (dead, Flags 0x2000, every eighth
+  key tick; @ 0x4BA08D..0x4BA10A): a = (32 - (key & 63)) * 0xFFFFFF, b = (32 -
+  (((key sar 6) - key) & 63)) * 0xFFFFFF; +0x2D0 = a + b; +0x2EC = +0x1A8 (before the
+  spin); +0x90 += (a - +0x90 + 4) >> 3; +0x18 += (b - +0x18 + 4) >> 3; +0x1A8 +=
+  b >> 2; +0x360 = 0; then the attach sample. The dead slope aim (@ 0x4BA301..0x4BA319)
+  sets +0x2D0 = the pitch slope, +0x2EC = +0x1A8 and +0x360 = 0. The torso roll
+  (@ 0x4BE897..0x4BE8EA): state 48 decays t -= (t + 16) >> 5, otherwise t +=
+  (roll - t + 8) >> 4 clamped to roll +-0x0E38E380; there is no 41/42 ramp (that is
+  org2's). The slope pass shifts in 32 bits before its clamp (@ 0x4BA1C9..0x4BA1E8,
+  @ 0x4BA225..0x4BA244); the dead conform needs !(Flags & 0x10A000) (org1 @ 0x4BA12C,
+  org2 @ 0x4B6DB6); `Entity_RaycastGroundHeight @ 0x4142C0` returns the clipped ray
+  end (a miss returns z + 0x4000 - 0x20000), never a sentinel. The airborne edge
+  stamps nothing when carried, 47 under a chute when authored, else 31 when
+  authored, else nothing (@ 0x4BF8D4..0x4BF8F7); a plain fall never stamps. The float
+  target reads +0x74 (@ 0x4BFB66), restamped this tick (@ 0x4BF14C). An unauthored
+  death selection plays the slot's registration fill (`AnimMap_RegisterEntity
+  @ 0x40BB60`), since both edges store the selection unchecked (@ 0x4B9D06,
+  @ 0x4B4CA3). Not ported: the player body's own tumble (@ 0x4B6CCB..0x4B6D90).
+- **The mounted rider.** +0x28 = +0x16C at the head, so the deck ride
+  (@ 0x4BA45D) runs for riders; the look and aim adoption (+0x10, +0x2EC += dyaw,
+  +0x2D0 += dpitch; @ 0x4BA842..0x4BA852) is skipped when the parent's def has
+  ISTURRET 0x1000 (@ 0x4BA812..0x4BA82A) or the combat target rides another carrier
+  (@ 0x4BA82C..0x4BA840); body, target, legs, pitch and roll always take the delta
+  (@ 0x4BA861..0x4BA88E). The mounted block scrubs the flags (`and [esi+24h],
+  0FF8F57DFh` @ 0x4BEC03) and vel_z (@ 0x4BEC15) behind its parent/def gates
+  (@ 0x4BEBEC..0x4BEBFD). `Entity_CalcAverageGroundHeight @ 0x457230` has no organic
+  caller; the port's org1 eight-tick ground sample is its own stand-in.
+- **The seat-bone fail arm.** The mounted block branches on the seat type (+0x168 ==
+  3 @ 0x4BEC1B): a UseGun seat attaches through `Entity_AttachToBoneAndUpdateTransform`
+  (@ 0x4BEC23); any other seat asks `Entity_GetBoneTransformAndOrientation(parent, 0,
+  rider byte +0x157, ...)` (@ 0x4BED72) and tests the answer (@ 0x4BED7A..0x4BED7C).
+  `Entity_GetBoneTransformAndOrientation @ 0x4B0C50` answers 0 when the entity has
+  no model (the husk +0x34 while Flags & 4, else +0x30; @ 0x4B0C59..0x4B0C74), the
+  bone index is 0 with no name (@ 0x4B0C79..0x4B0C83) or past the userpoint count
+  model+0xBC (@ 0x4B0CCA..0x4B0CD0), model+0xB0 is null or its dword [32] is 0
+  (@ 0x4B0CFF..0x4B0D10; that dword is the CMDL bounding-volume count,
+  `Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0`, the store @ 0x5B3D70), or the
+  model+0xA8 matrix callback returns null (@ 0x4B0D1C..0x4B0D25). The fail arm
+  (@ 0x4BEE93..0x4BEED8): on the authority, a rider whose slot +0x94 board order is
+  123, 124 or 125 and whose +0x98 board SSN names the parent (or the parent's ground
+  entity) gets health 0 and +0x178 = parent+0x178; then every failing rider detaches
+  (`Entity_DetachFromVehicleIfServer`, @ 0x4BEEDF) and the tail stores +0x28 = +0x16C
+  (@ 0x4BEEE7..0x4BEEEF). The fail arm (@ 0x4BEE93..0x4BEEE4) then falls into the seat
+  block's common tail (@ 0x4BEEE7..0x4BEF97): +0x28 = +0x16C, the parent's +0x1D0..+0x1DC
+  blink hits copied into the rider's (zeroed without a parent, @ 0x4BEEF4..0x4BEF30), the
+  legs and their targets set to the body heading (@ 0x4BEF36..0x4BEF51) and the mounted look
+  chase (@ 0x4BEF57..0x4BEF97); then the clamp (@ 0x4BEF9A, gated on the parent's config
+  while a parent remains). Port: `IPoseProvider::resolve_seat_bone` and the fail arm in
+  `pose_if_mounted`, which runs the tail's legs and look chase (`vehicle_mount`,
+  `test_seat_bone_failure_runs_the_seat_tail`). Carried: ordinary seats still pose from the
+  static seat geometry on success. Open follow-ups: the tail's +0x1D0..+0x1DC blink-hit
+  copy (@ 0x4BEEF4..0x4BEF30) is unported on every mounted path, success and fail arm
+  alike; and the seat block skips a parent with no ItemDef (@ 0x4BEBFA..0x4BEBFD ->
+  @ 0x4BEF9A: no pose, no seat animation, no look chase, while the request and the mounted
+  return still run), where the port still poses such riders (several def-less test fixtures
+  rely on it).
+- **The secondary-fire latch and the mounted request.** `shouldFireSecondary` is the motor
+  frame local var_108C, zeroed with the other locals at the motor head (@ 0x4B999C..0x4B99C6,
+  the latch @ 0x4B99B8); only that pass's walking-fire leg (@ 0x4BC93F) or the clip's 0x8
+  event bit (@ 0x4BF39B) sets it, and the fire block tests it once (@ 0x4BF406), so a latch
+  never outlives its pass. The mounted request runs for every mounted-live body (the local
+  @ 0x4BF4B3): past the four-tick cadence (@ 0x4BF4DA) and the spatial stagger
+  (@ 0x4BF4E3..0x4BF4EE) it copies the parent's +0x2B0 into the rider's
+  (@ 0x4BF4F4..0x4BF4FA) ahead of the range test, then tests the rider's EquippedSlot +0x118
+  (@ 0x4BF564..0x4BF56C), which the UseGun attach swapped to the parent's mount slot
+  (&parent+0x2B4, saving +0x308, @ 0x546C42..0x546C4E; the attach writes no +0x2B0). The
+  parent's byte is the AdmDef index `WeaponSlot_InitFromEntityDef @ 0x5466C0` stores at the
+  parent's init (@ 0x546742, the same routine pointing +0x118 at the slot @ 0x54674D), and the
+  NPC detach clears the rider's byte to 0 (@ 0x43569C). Port: the motor head clears the latch
+  for NPC bodies (`infantry_org1_parity`, `test_org1_fire_latch_is_a_pass_local`), and
+  `infantry_mounted_fire_pass` copies the byte after the stagger and tests the swapped slot,
+  seeding the parent's slot lazily as the stand-in for the parent's own init (`ai`,
+  `test_mounted_request_copies_the_parent_adm_byte`). The fire block (@ 0x4BF15C..0x4BF4B0)
+  has no mount test: its only gates are the odd key (@ 0x4BF156) and a nonzero trigger word
+  (@ 0x4BF15C..0x4BF163), so a mounted gunner fires its own clip's rounds as any other org1
+  body; the request's only mount gates are the mounted-live local and the parent test
+  (@ 0x4BF4C1..0x4BF4C9), with no seat-type test; +0x118 is set by the UseGun attach
+  (@ 0x546C4E) and by a ctrlx attach to an EWeap parent (`Entity_AttachToVehicleSlot`
+  @ 0x494867..0x49489E: +0x118 = &parent+0x474, +0x308 = the old slot, parent+0x498 = the
+  rider), so a sitex or drvrx rider copies the byte and queues nothing. A parent whose def
+  names no weapon never stores its byte (the name test @ 0x5466E1, the AdmDef test
+  @ 0x546704) and keeps the spawn clear's zero (@ 0x40EA1F). The NPC detach zeroes +0x118,
+  +0x2B0, +0x160 and +0x298 for any non-player whatever its seat (`test Flags,100h`
+  @ 0x43568D, the stores @ 0x435696..0x4356AA). Port: the fire pass and the request run for
+  every seat and the detach zeroes the byte (`ai`: `test_mounted_gunner_runs_the_anim_event_fire_block`,
+  `test_mounted_request_runs_for_a_passenger`; `vehicle_mount`:
+  `test_npc_detach_zeroes_the_equipped_byte`). Carried: the ctrlx attach's slot swap on an
+  EWeap parent and the weapon walk's pump of that rider's borrowed slot (+0x118 for every
+  pool-0 row, @ 0x5426AD) are unported for NPC riders, so an NPC ctrlx rider of an EWeap
+  vehicle makes the request but never queues FIRE. The byte the request copies is the
+  parent's live +0x2B0: its weapon slot's byte from spawn, then each ready vehicle AI weapon
+  block's ammo byte (§17.6; `ai`, `test_mounted_request_copies_the_parents_live_byte`).
+- **The plyr waypoint tail.** `Entity_HandleDamageAndTriggerZones @ 0x407720`
+  returns at once for Flags & 2 (@ 0x40772A..0x40772F); every other event reaches its
+  tail: the cause-bit clear for events outside {1, 3, 4, 5} (@ 0x407B3B..0x407B4F),
+  +0x2AC = 0x40 (@ 0x407B5E), the waypoint walk (@ 0x407B64..0x407C6B) and +0x2AC =
+  0x40 again (@ 0x407C71). The walk reads channel = slot +0x94 (@ 0x407B64; 0 skips),
+  needs team byte 1 or 2 (@ 0x407B72..0x407B80), takes the node count from the
+  channel record (@ 0x407B86..0x407B94), and per node the pool-3 marker
+  (`Pool_GetEntryUnchecked(3, entry)` @ 0x407BBD) with r = its dword 0: skip when
+  |dx| > r or |dy| > r (unsigned, @ 0x407BE1..0x407BE7), d = max + min / 2
+  (@ 0x407BE9..0x407BF7), skip when d > r (@ 0x407BF9), else set the group bit
+  (`RelationMatrix_SetBitB`, @ 0x407C13 team 1 / @ 0x407C35 team 2) and the single
+  bit (`RelationMatrix_SetBitA`, @ 0x407C49). Port: `player_body_waypoint_visits`,
+  called from the player think, the script kills, the round hit, the blast and the
+  knife kill zone.
+- **The animation variant rings.** Retail keeps one table of ring heads per loaded
+  `.adm`, shared by both channels of every body on it: `AnimMap_LoadAdmFile
+  @ 0x40CC40` reuses a loaded entry by name (@ 0x40CD2F, template slot @ 0x40CD4F),
+  and `AnimMap_RegisterEntity @ 0x40BB60` links the primary (+0x188) and secondary
+  (+0x18C) slots through `AnimMap_LinkEntity @ 0x40BA10` (slot+0x48 = &entry+0x44,
+  @ 0x40BA77). Registration starts both channels on table[0]'s node (@ 0x40BC16,
+  @ 0x40BD20) and fills every unauthored entry with it (@ 0x40BC24..0x40BC81,
+  @ 0x40BD2E). `AnimMap_RegisterBoneNode @ 0x40C2D0` inserts each token of a row
+  ahead of the head (node->next = head @ 0x40C37F, tail->next = node @ 0x40C382,
+  table = node @ 0x40C385; the first token and every anim_reset token self-ring
+  @ 0x40C38B..0x40C38F; slot 0's backfill @ 0x40C39A..0x40C3E2), so a row starts on
+  its LAST token and each play steps back through the file order: "A" "B" "C" serves
+  C, B, A, C. The re-init (`AnimMap_UpdateEntity` @ 0x40B737..0x40B778) takes node =
+  table[S], advances table[S] = node->next and inits the channel from node+0x20; a
+  request equal to the playing id does not re-init (@ 0x40B645).
+  `AnimMap_UpdateDualChannels @ 0x40B8C0` runs the secondary (@ 0x40B908) before the
+  primary (@ 0x40B94E), so the secondary serves the head and the primary the next
+  entry. `Entity_ResetToSpawnState @ 0x4B9610` writes both requests (@ 0x4B9708 /
+  @ 0x4B9714, @ 0x4B972A) and runs the update (@ 0x4B973D). Port:
+  `AiSystem::anim_rings` (`AnimVariantRings`) serves both channels in that order.
+  Carried: joiner replica rows keep entry 0 (the wire carries no variant), and the
+  first-person weapon clip ring and the weapon table's `auto` duration ring still
+  serve first to last although the viewmodel `.adm` registers through the same
+  inserter.
+
+### 38.4 Org1 think: perception, combat legs, guard family, walks, selector
+
+All addresses in this subsection are in `Entity_UpdateInfantryAI @ 0x4B9910`
+unless named otherwise; the think spans @ 0x4BA970..0x4BE7FD.
+
+- **The head.** After its gate (key & 15, authority, Flags & 2, the anim slot
+  +0x188) the think captures wasHit (@ 0x4BA9A2 / @ 0x4BA9C1) and the entry heading
+  (var_10E4, @ 0x4BA9B4..0x4BA9BA), clears the board cache unless the command is 125,
+  runs the 64-tick seat upgrade and seeds aimPitch +0x2D0 = (DcbId << 27) >> 4
+  (@ 0x4BAA4B..0x4BAA59). A body with Flags 0x2000 and without the 0x80 climb order
+  skips the rest of the think (@ 0x4BAA57..0x4BAA66 -> the recoil block @ 0x4BE7FD): the
+  route and command legs, combat (@ 0x4BBE24), the guard, hold, reaction and
+  forced-animation legs, the attachment select (@ 0x4BD273), the selector, the ride link,
+  the idle facing and the attention (@ 0x4BD87E..) all wait for the landing, while the
+  recoil, spread and torso tail keeps running (port: `tick_infantry` gates combat, the
+  selection and the attention on `infantry_think`'s result, `infantry_org1_parity`,
+  `test_org1_airborne_body_skips_the_think`). Only past that skip do the
+  frame locals initialise and the +0x128 cooldown step down while nonzero, a negative
+  value included (@ 0x4BAA7B..0x4BAAB1). The seed shows only while airborne.
+- **The route leg.** Without the has-route flag or with the cooldown running, the
+  walk clears Flags 0xC0000 and the entry stage +0x361 (@ 0x4BAE80..0x4BAE88);
+  channel 0 clears the has-route flag like an empty channel (@ 0x4BABDD..0x4BABE5 ->
+  @ 0x4BAE75); the node is read from the flat nav words with no guard
+  (@ 0x4BABFF..0x4BAC19; the next node after the advance @ 0x4BADCB..0x4BADDF) and resolves
+  through `Pool_GetEntryUnchecked` (@ 0x441FC0), so a start node past the count reads the raw
+  slot word and an unfilled pool-3 slot is a zeroed marker the body walks to: there is no
+  node clamp and no dropped route (§38.5). Every route and command leg except 126 clears
+  Flags 0x40000 | 0x80000 before it runs (`and eax,0FFF3FFFFh`: 127 @ 0x4BAADD, the route leg
+  @ 0x4BABD5 and its exit @ 0x4BAE80, 123..125 @ 0x4BAE94), which is inert since neither bit
+  has a writer. Port: `AiSystem::infantry_route_think`.
+- **Who writes the target heading.** Only the marker wait (@ 0x4BAD29, which also
+  writes the aim heading +0x2EC @ 0x4BAD2F), the S stage (@ 0x4BB7CA), the escort
+  helper within its radius (@ 0x4BBD75), the guard restore (@ 0x4BBE1E), block 2's
+  re-face (@ 0x4BCFCF), the scripted idle's re-face (@ 0x4BD0E1), the attachment
+  within 1 u (@ 0x4BD2AC), the dragger turn (@ 0x4BD5BF) and, for a moving selection,
+  the detour (@ 0x4AFF2C). The nav, approach, follow and board legs write only the
+  goal. Every nav and command leg ends in the common move tail @ 0x4BBE11: a Flags
+  0x40 body gets targetHeading = var_10E4, which only the marker wait (@ 0x4BAD41)
+  and the S stage (@ 0x4BB7D0) rewrite.
+- **The board walk.** The S stage writes targetHeading and var_10E4 (@ 0x4BB7CA /
+  @ 0x4BB7D0) and never the body yaw; with a 140 clip it stores +0x2BC = 140 raw and
+  proposes 140 (@ 0x4BB82F..0x4BB835), and sets Flags |= 0x40 (@ 0x4BB81C). The
+  arrival (@ 0x4BBD87..0x4BBDA0) zeroes the move locals and steps a nonzero stage;
+  only an unparented body in a ring under 0x640000 of an EWeap or PlayerControl
+  target tries the seat (@ 0x4BBDA6..0x4BBDC8; the `FindBestSeatSlot` call
+  @ 0x4BBDD4, the `RequestVehicleAttach` call @ 0x4BBDF2), and only then does a still
+  unparented body clear Flags 0x40 and its parent slot (@ 0x4BBDFA..0x4BBE07); the
+  can't-enter arm (goal self, radius 0x7D0000) never clears the guard flag. A dead
+  carrier more than 8 u from the body's spawn kills the body and leaves the carrier
+  as the goal (@ 0x4BB28F..0x4BB2AC). The E-point claim runs only when the re-resolved
+  target is found in pools 1..3 (the pool-0 hit jumps past it, @ 0x4BAEF1). The
+  UseGun ring is 3 u while the gun's +0x170 occupant is set, else 1 u (@ 0x4BB39C).
+  The command legs' proposals (147 / 140; @ 0x4BB72A, @ 0x4BB80E, @ 0x4BB835) are the
+  combat think's starting selection; a burn stage without its clip leaves the body
+  standing (@ 0x4BBFAF, @ 0x4BBFD3, @ 0x4BBFF7, @ 0x4BC01B). The goal Z +0x304
+  (`InfantryState::goal_z`) is written only by a moving selection (@ 0x4BD3F7), the S
+  stamp (@ 0x4BB852) and `Entity_InitOrganicAI` (@ 0x4BFE07), and read by the
+  self-attachment floor (@ 0x4BF653) and the AiClimb chase (@ 0x4BF6C7).
+- **Perception.** damageTimer += 12 while it is below 15 (so at most 26;
+  @ 0x4BBF4B..0x4BBF65), and decays by one only on a think whose key has key & 63 ==
+  0 (@ 0x4BA9D8, decay @ 0x4BBE24..0x4BBE38). The lastAttacker fallback has no health
+  test; its LOS is `Entity_CheckLineOfSightTerrainAndEntities(self, attacker,
+  &self.Position, &attacker.Position, 0, 0)`, feet to feet with buildings the only
+  entity blockers (@ 0x4BBEEF..0x4BBF24). A coward (AiSlot[1] & 8) with team 0 scans as
+  team 2: the think writes 2 into the team byte for the `Entity_FindNearestThreat`
+  call and restores it (@ 0x4BBEB5..0x4BBEC3, @ 0x4BBED8). The shooter-mark clear is
+  `and dword ptr [esi+24h],0FFFFBFFFh` (@ 0x4BBF88). The spotting LOS of the
+  attention pass is `Entity_CheckLineOfSightTerrainAndEntities(self, candidate,
+  &selfEye, &candEye, 0, 1)` (@ 0x4BE2F1..0x4BE311), not the combat LOS.
+- **The combat legs.** The held target stays in slot[3], dead or not, until a phase-0
+  miss (phases 1-3 re-commit it, @ 0x4BBEE4..0x4BBEED); post_attack 151 is the last
+  link of the in-range, moveTimer == 0 reaction chain (@ 0x4BC269..0x4BC297). The
+  no-target branch (slot[3] == 0, @ 0x4BC34B..0x4BC4BE): with damageTimer and aiFocus
+  set (and slot[16] < slot[17]) a dead focus with a 151 clip re-seats aimPoint on the
+  corpse; then moveMode 2 to aimPoint with arrival 2 u when the truncated (dz >> 1)
+  distance is unsigned-above 0x20000 and `Entity_CheckGroundHeightAtPosition` holds,
+  else idle 44 with moveMode 8; damageTimer or focus zero clears aiFocus. The hold
+  timer tail runs on every path (@ 0x4BC4C4..0x4BC537): `if (t) t--`, and for a body
+  without the coward bit one more tick in idle_3 (49) and one each under 3 u and 10 u
+  of the target (no target reads 1000 u, 0x3E80000 @ 0x4BAA88).
+- **The aim.** The aim target is the led raw Position: the
+  `Entity_ComputeWeaponFireOrigin` calls in both blocks (@ 0x4BC720, @ 0x4BCB23) are
+  dead (their output is never read). The eye is the +0x366 muzzle when the led point
+  is more than 3 u away horizontally, else X/Y a quarter of the way from the body
+  origin to the muzzle and Z the muzzle's (block 1 @ 0x4BC7C8..0x4BC825, block 2
+  @ 0x4BCB7B..0x4BCD0C). The lead distance is the full 3-D distance, truncated, over
+  528500 through the 0x7EFAD919 reciprocal (@ 0x4BC697..0x4BC71D,
+  @ 0x4BCA9D..0x4BCB20). aimFlag +0x360 is set only by the combat think (@ 0x4BC894,
+  @ 0x4BCFB1) and cleared by the scripted idle (@ 0x4BD0C3), head tracking
+  (@ 0x4BE665), the drag (@ 0x4B9E30), the corpse leg and the reset. Block 1 skips a
+  MISSILE-attribute body (0x400) and a controller or driver seat (parent slot 2/5;
+  @ 0x4BC560..0x4BC582), and its walking-fire latch needs NOMOVESHOOT (def attribute
+  4) clear and measures the eye-to-aim distance with dz halved (@ 0x4BC8C3..0x4BC946).
+  Block 2 runs with or without a target; a carried body without one re-seats the aim
+  point every 256 staggered ticks, 100 u along the carrier yaw plus 32 ticks of its
+  own displacement (@ 0x4BCBEB..0x4BCCC1).
+- **The scripted idle watch.** A body whose current +0x2BC is in 130..136 with a
+  local player aims at the player's Position: heading = trunc(atan2(dy, dx) *
+  2^31/pi), pitch = trunc(atan2(dz, trunc(hypot(dx, dy))) * 2^31/pi) with no clamp on
+  the planar length, aimFlag 0, override 1, targetHeading re-faced when the aim is
+  more than 0x1FFFFFE0 off, then moveMode 0, distance 0 and +0x369 = 0
+  (@ 0x4BCFF5..0x4BD0F4). There is no aiFocus term and no Flags 0x80000 gate: entity
+  Flags 0x40000/0x80000 have no writer in the binary.
+- **The reload** runs on every path after the aim blocks: with a def clipsize, a 65
+  clip and the signed magazine word <= 0 it selects 65 with moveMode 0 and distance
+  0, even when 65 is current; whenever the current state (captured @ 0x4BCFF5) is 65
+  the magazine refills from the clipsize low word, clipsize or not
+  (@ 0x4BD132..0x4BD17D).
+- **The guard family and the holds.** The combat tail reads Flags once (@ 0x4BD184):
+  0x100000 (ladder) drops the move (@ 0x4BD187..0x4BD194) and falls through into the
+  selector: the zero-distance leg clears the path state (@ 0x4BD2DE..0x4BD2E9), +0x36A
+  takes the move mode (@ 0x4BD356), the flinch consumes wasHit (@ 0x4BD6EE) and the
+  arbiter commits; the org1 ladder block later stores its climb state over the selection
+  (@ 0x4BF907..0x4BFAD8), keeping the arbiter's pending request (port: the selector runs on
+  a ladder too, `test_org1_ladder_runs_the_selector_tail`). Flags 0x40: moveMode 0 and
+  distance 0; guard 140 when authored, else Flags &= ~0x40 (@ 0x4BD19B..0x4BD1BB);
+  guard_cover 143 when wasHit and 143 is authored (@ 0x4BD1BE..0x4BD1D5); guard_attack
+  142 with moveMode 7 when a reaction was chosen and 142 is authored
+  (@ 0x4BD1D9..0x4BD1F8). Without 0x40, a current 140..143 with guard_leave 144
+  authored leaves through 144 with no move (@ 0x4BD1FA..0x4BD231). Then the holdSSN
+  hold (+0x2C bit 0x2000 -> moveMode 12, @ 0x4BD235..0x4BD240), the reaction hold
+  (moveMode 7, @ 0x4BD245..0x4BD251) and the forced animation (@ 0x4BD256..0x4BD271).
+  `g_animStateNameTable @ 0x8135F0` names 142/143/144 guard_attack, guard_cover and
+  guard_leave. moveMode 5 (flee) is unreachable: its only producer, the latch
+  @ 0x4BD0FA..0x4BD109, needs +0x36A == 5, and the only +0x36A writer (@ 0x4BD356)
+  stores the collapsed move mode; run_away 168 (@ 0x4BD765..0x4BD780) and the 43
+  swap (@ 0x4BD49C) are dead with it.
+- **The selector.** Under Flags 0x8000 it swaps jog/run/walk (148/149/1) for
+  swim_forward 37, the idles 43/44/49 for swim_idle 36 and attack/attack_2 (155/156)
+  for swim_attack 154, each when authored (@ 0x4BD635..0x4BD6A3); after the wounded
+  gaits a moveMode 1 body in run_forward takes run_attack 167 when authored
+  (@ 0x4BD748..0x4BD763). Inside the moving branch, before the alerted idle, dragger,
+  swim, flinch, wounded, run_attack and wash substitutions, a jog 148 without a clip
+  becomes 149, a run 149 without a clip becomes 148 when authored,
+  else walk 1 (@ 0x4BD5C5..0x4BD61D); walk itself commits without an availability
+  test, and retail commits an unauthored walk, idle_2 or idle_3 raw and plays the
+  anim map's slot-0 row for it (the port still resolves those three to 43 at the
+  commit). The attachment within reach (@ 0x4BD2A0..0x4BD2D9) falls into the common
+  selector tail (+0x36A = moveMode @ 0x4BD356, the flinch's wasHit clear
+  @ 0x4BD6EE), then 150 is arbitrated. The selector arbitrates the raw selection, 147
+  included (@ 0x4BD837..0x4BD874); the post-commit fix-up turns +0x2BC == 147 into 43
+  when the anim map has no 147 row (@ 0x4BE080..0x4BE09A). Because 147 carries the
+  movement flag (0x1) and 43 does not, an exit-gated current state (0x20, states
+  115..124) commits the stop at once.
+- **The obstacle detour** (`ai_find_cover_position @ 0x4AFAB0`, §33.16) always
+  returns 1 (@ 0x4AFF3F), so the failure switch (@ 0x4BD4F2) and its four calls are
+  dead. Its per-ring height gate rejects |candGround + 0x7000 - (startGround +
+  0x6000)| > ring << 16 (@ 0x4AFD6D..0x4AFD8E); ring cost is 10 + 5 per unit, radius
+  2..15 (@ 0x4AFCBF, @ 0x4AFE74); both LOS legs pass allTypes 1 (@ 0x4AFD9B,
+  @ 0x4AFE10); of its four cdecl arguments the fourth is never read and the third
+  (the +0x36A snapshot equals the current move mode) gates only FindPath
+  (@ 0x4AFB88) and the start-ground probe (@ 0x4AFB26..0x4AFB2F); the unimproved
+  cache is the goal with z + 0x2000 (@ 0x4AFB0B / @ 0x4AFB5D); it writes +0x1A8
+  (@ 0x4AFF2C). Every +0x369 writer stores 0, 1 or 2 (0x4AFEA8, 0x4AFF06, 0x4B37BB,
+  0x4BA94E, 0x4BCFDB, 0x4BD0EE, 0x4BD2E9, 0x4BD349, 0x4BD956).
+- **Command 126 (goto group)** sets moveMode 3 with targetDist == arrivalRadius ==
+  0xA0000 (@ 0x4BAABD..0x4BAACF) and never writes the goal locals; the selector's
+  moving test is the distance alone (@ 0x4BD3DB), so the detour steers at whatever
+  the stack frame held and the body walks. No shipped organic authors 126 or 127
+  (863 / 289 / 61 author 125 / 124 / 123). This is D-INF-2's remaining scope.
+- **The ride link** (@ 0x4BD87E..0x4BD905): the occupant (+0x170) of the entity the
+  body stands on (+0x28), else of that entity's own +0x28, when it is another body of
+  the same team byte, is stored in the body's +0x170, and the +0x174 hold climbs by 4
+  while below 0xF0; a think without it spends one hold tick, and a spent hold clears
+  +0x170. The org2 body runs the same block on its 16-tick slow pass
+  (`Entity_UpdateInfantryPlayerBody` @ 0x4B5EA9..0x4B5F2C). It is the only producer
+  of a person's +0x170, which the scorer's rider share, the kill record's aux byte
+  and the 0x0D parent field read. Port: `world::infantry_ride_link`.
+- **The idle facing fan** (@ 0x4BD905..0x4BE07A): a body whose committed state is
+  cover_idle 163, idle_2 44 or its look 126, on a def without LANDABLE (0x200) and
+  without Flags 0x40000, clears +0x369 unless the def is NOWEAPON (0x1000000,
+  @ 0x4BD956) and walks pool 0 for same-team, not-dead bodies within 3.5 u per axis,
+  1.5 u vertically and 3 u planar that `Entity_CheckLineOfSightTerrainAndEntities(self,
+  other, &self.Position, &other.Position, 0x4000, 0)` sees, keeping the running mean
+  `mean -= (mean - b) / k` of the bearings from them to the body
+  (@ 0x4BD990..0x4BDA9D). It then probes around the mean: the mean itself 3 u out at
+  heightOffset 0x8000 (a clear probe ends the fan, a blocked one adds 0x7FFFFF80 /
+  count), then mean +-90, +180, +-45 and +-135 degrees 2 u out at 0x4000, each blocked
+  probe adding (h - mean + 0x7FFFFF80) / count; every probe end is 0.25 u above the
+  Position and the ray is the self entity LOS with allTypes 0
+  (@ 0x4BDAA6..0x4BE071). A fan that counted anything stores targetHeading = mean
+  (@ 0x4BE073..0x4BE07A); it writes no move goal. Port: `idle_facing`
+  (`infantry_attention.cpp`).
+
+### 38.5 Routes: nav words, movers, aircraft legs, item indices and spawn angles
+
+- **The nav table.** A route node's position is its marker's +0x10/+0x14/+0x18; its
+  arrival radius (entity+0) = wp_distance << 16, 0x8000 when 0, is written only for
+  marker types 6005 (@ 0x40F05A, radius @ 0x40F096..0x40F0A4), 6006
+  (@ 0x40F157..0x40F16D) and 2044 (@ 0x40F213..0x40F221). Every other marker keeps
+  the spawn memset's 0 (@ 0x40EA27): every marker def in the shipped items.def is
+  model-less, and `Entity_InitFromModel` skips its radius write for a null model
+  (@ 0x40DCCB..0x40DCD1; the skipped write is @ 0x40E076, and it runs after the spawn
+  block because `Entity_InitAllFromModels @ 0x40E460` follows `Mission_LoadBMSFile`).
+  The hold word entity+0x148 = 62 * the record's signed word +0x3E is 6005-only
+  (@ 0x40F066..0x40F08D). A record whose count is exactly 1 is one-shot whatever its
+  authored flags (`cmp [eax+4],ebp; jnz; or [eax],ebp` with ebp = 1 @ 0x40F971 over
+  the 128 records @ 0x40FB72..0x40FBB2; the XML loader does the same
+  @ 0x4CC59C..0x4CC5A9). Nodes are read as the flat word 34 * channel + 2 + node of
+  the 128-record block with no bound on the node (`AIWaypoint_UpdateTarget`,
+  `mov edx, Buffer+8[ecx*4]` @ 0x457476; `Entity_FindNearestTriggerByType`
+  @ 0x407F0B..0x407F6B, bounded only by the raw count), and the index resolves through
+  `Pool_GetEntryUnchecked(3, idx) @ 0x441FC0`: a slot no marker fills is the zeroed
+  pool-3 entry (`Pool_Clear @ 0x442060`), position 0 and radius 0, never "no node". So
+  a count past 32 walks into the next record's words (CP19 list 6, count 39, reads
+  list 7's zero words as marker 0 for nodes 32..38), a start node past the count reads
+  the raw slot word (00TRf SSN 1166, CP07 SSN 2019, the CP15 organics), and in 00TRf,
+  CP15 and CP19 marker 0 is a type-2043 Map Centerpoint with radius 0, so a body
+  routed onto it never arrives. Every shipped route node (11,235 across 115 missions)
+  is a 6005 marker with a nonzero wp_distance. Port: `NavNodeTable::entry_index` and
+  `NavNodeTable::slot` in `promote.cpp`; the infantry route reads them unguarded.
+- **The route seed.** The class inits copy the slot's route words verbatim when
+  slot+0x8C is set: brain+0x34 = 1, +0x38 = slot+0x94, +0x3C = slot+0x98
+  (`Entity_InitVehicleAIFromDef`, `cmp dword ptr [eax+8Ch],0` @ 0x46885E, stores
+  @ 0x468867..0x46887F; `Entity_InitHelicopterAIFromDef` @ 0x46852D..0x468552), with
+  no count test and no clamp: a route onto an empty list (CP02 items 9/10 on list 26)
+  or a start node past the count is kept, and the refresh then holds on count 0.
+- **The movers.** Ids 0..3 of `g_AIMoveStepFnTable @ 0x8153B8` are the HELO_EVADE
+  maneuvers, installed only by the evade enter `AI_EnterState_HelicopterEvade
+  @ 0x465F60` (id 3 @ 0x466109, id 1 @ 0x466195, id 0 @ 0x4661EC, id 2 @ 0x46624D)
+  and chained to id 3 at a phase limit (@ 0x461C9D, @ 0x461D1D, @ 0x466D93): id 0
+  (@ 0x461C30) and id 2 (@ 0x461CB0) hold ground + 5 u for 248 / 434 phase; id 1
+  (@ 0x466C20) turns +-0x3FFFFFC0 at phase 186, then faces the target at speed A until
+  372; id 3 (@ 0x466DB0) hovers in place (work X/Y = position, Z = ground(0x50000) +
+  5 u, heading = Yaw + 0x7FFFFFFF, or Yaw with brain[127] = brain[45] << 14 when
+  brain[48] is set) until 744, and requests pending 8 (or brain[6]) at the end or past
+  372 with a target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only
+  the savegame restore can select it (`Entity_CopyVehicleDefToAIComp` @ 0x45DE53).
+  The combat enter `AI_EnterState_AircraftCombat @ 0x466330` installs 0x10005
+  (`AI_CalcHelicopterTarget @ 0x461870`, the PLANE mover) for profile subtype 2
+  (@ 0x466386), else 0x10000 (`AI_CalcGroundVehicleTarget @ 0x4613A0`, the
+  HELICOPTER mover; @ 0x466391); 0x10001..0x10004 are `return 0` stubs
+  (@ 0x457B00..0x457B30). `AI_UpdateMovementTarget @ 0x460E40` is the HELO waypoint
+  mover (the state 7/8 speed and the HELO altitude and climb fields,
+  @ 0x460E4A..0x460E74); its callers are the state-7 tick @ 0x4666C1, the state-8
+  tick @ 0x4723AC / @ 0x472A0E / @ 0x472A9C and the ground state-17 RC_FIRE arm
+  @ 0x4730D9. It takes the node Z when brain[108] (profile+0x38 USE_WAYPOINT_Z,
+  copied @ 0x4602AF) is set, the raw altitude for profile subtype 2 (PLANE), and
+  floors at ground + profile+0xE8 (min_agl).
+- **The aircraft AI leg.** `Entity_UpdateAircraftPhysics @ 0x490310` writes only the
+  current state brain+0x10: 0 -> 14 at its head (@ 0x490377..0x49037D), 14 -> 7 on the
+  AI leg (@ 0x49158A..0x491590), 14 in the parked leg (@ 0x491C66, after
+  `AI_CheckVehicleStuckState` @ 0x491C5E) and 14 in the player leg (@ 0x490F6A); its
+  only pending write is the dying request (@ 0x4903A1). Parked means no occupant or
+  Flags & 0x10000002 (@ 0x490F16..0x490F25), with no health term. The player leg
+  (occupant Flags & 0x100 @ 0x490F36, eye above the water @ 0x490F3F..0x490F4B) stamps
+  14 every visit; a submerged player pilot takes the AI leg. With the class init's
+  pending 0 the air dispatcher commits 0 after every think (@ 0x458384..0x4583B0),
+  so an AI helicopter thinks on every pool-1 visit. A parked hull that is airborne
+  (Flags & 0x2000, @ 0x491C09) more than 2 u over its cached ground with the probe
+  offset taken off Z (@ 0x491C18..0x491C28) yaws `add dword ptr [esi+10h],0FFD3F50Ah`
+  (-2886390 BAM, about 15 degrees a second; @ 0x491C2A) and its heading pin brain+0x210
+  takes the turned yaw (@ 0x491C54); the burning spiral (@ 0x49048E) is separate. The
+  flight floor comes from a fresh radius-0 self sample at the current Z (the
+  `Entity_CalcAverageGroundHeight` call @ 0x491845, kept in ebp @ 0x491853; floors
+  @ 0x491874 / @ 0x4918E2); the cached ground (entity+0x2A4, the eight-tick sample
+  taken with Z lowered by brain+0x2C, @ 0x4903A8..0x4903EC) feeds only the target Z,
+  the climb and the landing target (@ 0x4918C6..0x4918DA).
+- **Ground links.** `Entity_CalcAverageGroundHeight @ 0x457230` passes the ground link
+  to its east and centre taps (`Entity_RaycastGroundHeightAndObject @ 0x414320`,
+  `mov [esi+28h],eax` @ 0x414370; taps @ 0x4572A1 / @ 0x4572E0) and to the radius-0
+  arm (@ 0x45735D); north, south and west are the plain kind
+  (`Entity_RaycastGroundHeight @ 0x4142C0`; @ 0x45725D / @ 0x457281 / @ 0x4572C1). The
+  centre hit, null on a miss, is the link that survives each sample.
+- **ItemTypeIndex and the avoid brakes.** entity+0x1C is the items.def load-order
+  ordinal of the first row carrying the type id, 0 when none does
+  (`Entity_SpawnFromBMSRecord`, `mov [esi+1Ch],ebp` @ 0x40EBFC, from
+  `ItemList_FindIndexByTypeId @ 0x49E100`). The ground forms of the avoid brake skip
+  index 0 only (`Entity_UpdateVehiclePhysics` @ 0x48BDD9,
+  `Entity_UpdateTankVehiclePhysics` @ 0x4899A2, `Entity_UpdateLightVehiclePhysics`
+  @ 0x484F7F, `Entity_UpdateMountedInfantryMovement` @ 0x4878A2,
+  `Entity_ProcessInfantryPhysics` @ 0x46EE70); the boat and aircraft forms compare
+  against the ecx = 1 their count decrement loads (`Entity_UpdateWatercraftPhysics`
+  @ 0x48E5AA / @ 0x48E5C5, `Entity_ProcessAirVehiclePhysics` @ 0x470B08 / @ 0x470B23,
+  `Entity_UpdateAircraftPhysics` @ 0x4919D1 / @ 0x4919E6), so they brake only behind
+  ItemTypeIndex 1, the second items.def row ("Flyable Ka-52", id 100172): in
+  practice a retail boat or aircraft never brakes for another hull. The script
+  predicates and walks test the same +0x1C word, not the type id (for example
+  `WacCmd_SsnName` @ 0x4F7279, `Entity_IsOnTopOfChain` @ 0x4F1A35 / @ 0x4F1A3B,
+  `TriggerGroup_AnyMemberHoldingItemGroup` @ 0x43C89F, `Entity_KillBySlotId`
+  @ 0x42BD29); `Entity_SetTeamByNetId @ 0x43C680`, `Entity_UpdateNetIdReferences
+  @ 0x43C5B0` and `Entity_IsSsnHoldingItemGroup @ 0x43E2F0` test no item word. Port:
+  `Entity::item_type_index`.
+- **Duplicate item ids.** `ItemList_FindIndexByTypeId` scans from row 0 and returns
+  the first hit (`cmp [ecx],esi; jz` @ 0x49E120..0x49E122), and the entity's ItemDef
+  is gItemDefs + index (@ 0x40EBFF..0x40EC07); the loader never merges rows (each
+  `begin` allocates, gItemCount++ @ 0x49E3BE). The client resolves a received type
+  the same way (`NapiNPClientMsg_0x00D`, @ 0x4332DA, @ 0x4332DF..0x43331A). The
+  shipped ITEMS.DEF repeats 100508 (rows 97/98), 100415 (460/461), 100439 (485/486)
+  and 102044 (row 980 "Map Named Location" marker, row 1126 "Power Up Med Pack
+  Infinite"). Port: every def lookup resolves first-wins (ADR 0026 d5 as amended).
+- **Spawn angles.** entity+0x10 Yaw = ((int32)((90 - yaw) << 16) / 360) << 16
+  through the 0B60B60B7h signed divide (truncation toward zero, @ 0x40EB42..0x40EB66);
+  pitch +0x14 and roll +0x18 the same without the 90 (@ 0x40EB69..0x40EBA6). The low
+  16 bits are always 0: yaw 0 spawns at 0x40000000, not 90 * 11930464 = 0x3FFFFFC0,
+  and an unmoved entity's 0x0F yaw word is 0x4000
+  (`NetPacket_WriteWorldStateLoad0x0F`, @ 0x502D6D). Every mover's entry copy reads the
+  row's angles as they stand (@ 0x488B2A..0x488B3C, @ 0x48AF7A..0x48AF8C,
+  @ 0x48405A..0x48406C, @ 0x46E133..0x46E14C, @ 0x49034C..0x49035E; @ 0x48D4B2 /
+  @ 0x48D4BB / @ 0x48D4CB), so an unmoved row starts from its placement in that form,
+  pitch and roll included. `Entity_SpawnHelicopter` copies the spawn yaw and zeroes
+  pitch and roll (@ 0x452209..0x45224C, @ 0x4521B5, @ 0x452253 / @ 0x45225A), so the
+  flyover helicopter holds `HeliLift_SpawnFlyover`'s literal 0x7FFFFF80 (@ 0x4527E7).
+  `Entity_RequestVehicleAttach` pre-snaps a UseGun requester to gun.Yaw - (the gun's
+  stored yaw word +0x322 << 16) (@ 0x43655F..0x43656E), so it faces along the gun's
+  current traverse; every other seat takes the bone yaw (@ 0x4365BF..0x4365C3). Port:
+  `world::spawn_angle_bam`. Carried: about thirty other readers still convert a
+  placed entity's degree mirror continuously (one BAM-attitude accessor is the
+  follow-up), and a joiner row's first yaw seed goes through the degree mirror of the
+  wire heading.
+- **Small arithmetic.** The boat's slip counter-steer truncates its motion angle
+  (fpatan @ 0x48E417, `_ftol2_sse` @ 0x48E423). `Entity_SetMoveSpeedKPH @ 0x43A960`
+  stores 16.16 units per second at group row +0x2C (dword_A33FBC, stride 0x30); the
+  store @ 0x43A9A5 is the only instruction that touches that word, so it is
+  write-only (the group table is otherwise only memset @ 0x40DBA9 and saved
+  @ 0x4A9E91 / @ 0x4AAB58). An amphibian afloat runs the whole boat mover
+  (`Entity_DispatchPhysicsUpdate @ 0x48F010`, @ 0x48F014..0x48F035), its AI staging
+  included.
+
+### 38.6 WAC language: Script_Compile and the operand resolver
+
+`engine/runtime/wac/compiler.cpp` is a single-pass structural translation of
+`Script_Compile @ 0x4F31F0` and `WacScript_ResolveParameter @ 0x4F2920` (the
+`ScriptCompiler`); the former AST front end is gone. §33.4 and §33.5 carry the
+language as retail compiles it; the witnesses:
+
+- **Tokens.** Only CR counts a line (@ 0x4F32F6..0x4F32FF); blanks are every byte
+  <= 0x20 and ','; ';' and '//' comment to the next CR (@ 0x4F54BA..0x4F54D9), so an
+  LF-only file's comment swallows the rest of the file; a lone '/' divides. Words fold
+  every byte above 0x60 down by 0x20 (@ 0x4F3418..0x4F341D), end at a blank, ';', ','
+  or an operator byte and keep 64 bytes (the next byte is consumed and dropped); every
+  other byte above 0x20 is a word byte. A quoted string keeps its opening quote,
+  folds no case, ends at the closing quote or a control byte, and keeps 63 content
+  bytes. The operator set is "{}()[]+-*/|&^%<>=!~" (@ 0x7CE2E8) with the pairs <= >=
+  <> != ~= == || &&; a '-' with an operator or parameter pending begins a negative
+  literal.
+- **Keywords** match on their first four bytes (THENCE is THEN, ELSEWHERE is ELSE,
+  ELSIE is ELSEIF, every ENDD/ENDI/ENDL/ENDP word is END; "ELSEIF" alone is renamed
+  @ 0x4F34C9). There is no ARRAY, DO or XOR keyword; CHEAT declares like VAR with type
+  0x19 (@ 0x4F41E9, the type byte @ 0x4F3927..0x4F3950). ELSE IF (two words) is ELSE
+  plus a nested IF, so the endif closes only the inner block: the shipped 00TRc/d/e/g/h,
+  02TR, 04TR and 05TR end with "Missing END" because of it. `enif` is no keyword
+  (ASY_I6A's storm sequence never runs in retail).
+- **Operators and frames.** THEN/ENTER/LEAVE do not clear a pending operator (`and
+  then` folds the body's first call with AND). A keyword whose lookahead operator
+  outranks an open automatic frame drops that frame without its POP and drops the
+  keyword itself (the drain loops, e.g. @ 0x4F4F76..0x4F4F81 for THEN): `if never()
+  and then` in ASR_G8A, TDR_G8A, TKR_G8A and TDR_G12A loses its THEN and runs the
+  KillSSN calls inside the condition. An assignment flushes its STORE at the first
+  non-operator token after a value when no operator is pending (@ 0x4F4019..0x4F404B):
+  in `v1 = 1 + 2 * 3` the automatic paren clears the pending + and v1 receives 1.
+- **Parameters and declarations.** A refused parameter token takes the scratch dword
+  and is re-fed to the next slot (@ 0x4F3AB2..0x4F3AED); leftovers are statement
+  tokens (a value becomes a load, anything else "Unknown 'TOKEN'"), and a call
+  missing parameters consumes the following tokens across lines (CP14's `killssn()`
+  eats the ENDIF). Declaring a name that already resolves is refused and leaves the
+  VAR mode set, so the next token is declared (@ 0x4F3869..0x4F388F). RUN takes the
+  next token as the file, replacing the extension from the first '.' with ".wac"
+  (`Path_ReplaceOrAppendExtension @ 0x53C780`); inside a block it reports "Can't run
+  files inside blocks", at a third nesting level "A run file can't run more files"
+  (@ 0x4F35CA), and "Unable to run file" for a missing file; none is fatal.
+- **End of file and limits.** At the end pending parameters take the scratch dword,
+  the paren stack drains (an outranked frame is skipped), a pending assignment stores,
+  and open blocks report "Missing END" with the innermost block's line, their branches
+  and jumps pointing at the end (no loop jump-back, no DO section count). Limits: 16
+  parens ("Paren nesting too deep"; an automatic frame past 15 still writes into the
+  neighbouring token buffer and flag arrays, which the port reproduces), 0x400 events
+  and DO blocks, 256 declarations, 512 pool values (the 512th distinct value reuses
+  slot 511), 0x1000 string bytes and 0x47A0 output bytes ("Over Compile Buffersize"
+  ends the file). Errors are "%s (%d) %s" with the file name; retail keeps only the
+  first (`Script_SetCompileError @ 0x4EE7C0`), clears it before the load's compiles
+  (@ 0x4F926A), and only `Debug_DrawScriptState` shows it (@ 0x4F652A).
+- **Operand resolution.** The legs run in this order: declarations, IF names (NULL
+  for a Variable slot, the index for an IfName slot, else the fired dword), the 24
+  named values, M#/V#/G# (V/G >= 256 report "V# too big" / "G# too big" and take index
+  255), NULL for a Variable slot, then G_ (12), FX_ (22), FACE_ (21), SS_ (19), TT_
+  (20), ANIM_ (24; every token, numbers too, looked up as "anim_" + name), SSN_ (11;
+  atol, a 16-bit net id, never NULL), AMMO_ (23; the name, then "ammo_" + name), the
+  Text/Filename string copy, then the number leg (F x21501, M or Distance x65536,
+  "h:m" as kind 9 in minutes, an Hour slot x60), else NULL. Every catalog miss stores
+  0 (FACE and ANIM too); only the SSN handle keeps 0xFFFF. The pool reports "Wrong
+  Parameter" when a kinded value (6, 9, 11, 12, 19..24, 26) lands in a slot of another
+  type other than Value (@ 0x4F3183..0x4F31C1). The CRT atof accepts a D exponent and
+  no hexadecimal or infinity form (`__strgtold12_l` @ 0x77A0D8..0x77A0EE); atol
+  saturates. A text token resolves through `MissionText_GetStringByKeyOrGameText
+  @ 0x51ECD0`, which never answers NULL (a missing key returns one shared "",
+  @ 0x51ED2A), so "Unknown TextTool Token" is dead code; `ssnname(x, "quoted")` looks
+  up the key `"quoted` and names nothing (`WacCmd_SsnName @ 0x4F7230` ignores "").
+- **The ftol leg.** The scaled literal (`WacScript_ResolveParameter` @ 0x4F2D8C) and
+  the POW fold (`WacScript_ExecuteBytecode` @ 0x4F615F, after `Math_PowFloat
+  @ 0x4F9BA0`) truncate through `_ftol2_sse`'s cvttsd2si leg (@ 0x76BC15), which the
+  CRT flag dword_334A444 selects on every SSE2 processor (set by `sub_7887AF`
+  @ 0x7887B4): NaN, infinity and any truncation outside int32 give 0x80000000.
+  65536M, 3000000000, -40000M, 100000F, 10^10, 3^20, 2^31, 2^32 and 0^-1 all yield
+  INT32_MIN; 32767.99M gives 2147482992. Open question: the x87 multiply before the
+  ftol runs at whatever precision control the game holds at mission load; the
+  witnesses ran at 64-bit precision.
+- **The load.** `WacScript_InitAndLoad` ignores the three compiles' results
+  (@ 0x4F94A8 / @ 0x4F950E / @ 0x4F9597) and executes (@ 0x4F976B): a script never
+  blocks. A non-authoritative load compiles no layer (`is_authority` @ 0x4F9437,
+  the jump past the compiles @ 0x4F944E) and stores the 'zzzz' terminator alone
+  (@ 0x4F95A9). The load zeroes the script-disable dword dword_C6EB28 (@ 0x4F965F), so
+  a reload clears a pause; the V bank is cleared after the compiles (@ 0x4F95EE), and
+  the GLOOP operand ORs the dword behind its address as the load finds it
+  (@ 0x4F365D..0x4F3693). `wac_var_ticks` is advanced by the callers after each call
+  (`WacScript_AdvanceTick` @ 0x4F81D3, `WacScript_InitAndLoad` @ 0x4F9770), not by
+  `WacScript_ExecuteBytecode`. Every opcode 5 steps the generator (@ 0x4F5A7E) before
+  the count is scaled (@ 0x4F5AB8..0x4F5AC4), a zero count included, and stores the
+  choice byte (@ 0x4F5AD0); the retail compiler never emits opcode 5 (DORND compiles
+  to opcode 4 like DOSEQ, block type 5 against 4). `ExecuteBytecode` zeroes the DO
+  counter dword_C60DFC at entry (@ 0x4F5905) and the load never resets it, so a later
+  mission's DO ids continue from the last one executed (visible only as "Out of DO
+  space").
+- **Raw text slots.** Text and Filename slots pass the operand's address
+  (`WacScript_ExecuteBytecode` @ 0x4F5F92 case 5, @ 0x4F5FA9 case 6, @ 0x4F6012
+  case 9): a variable, global or pooled operand there prints its dword's bytes, least
+  significant first, to the first NUL and on into the following words (the numbered,
+  declared and global banks are contiguous from 0xC6B240; the pool is one array); the
+  S2C 0x23 payload copies the same bytes (@ 0x4F5D71..0x4F5DAB). The port's model ends
+  at the end of the global bank and reads an engine, event or music dword alone.
+- **Bounded residue.** Past limits no shipped script approaches, retail corrupts its
+  own compile state through heap addresses and the port bounds instead: more than 64
+  ELSE/ELSEIF/NEXT jumps in one block (the jump list overruns the 0x120-byte block
+  record; the port keeps every jump), more than 63 nested blocks (block 64 overlaps
+  the paren-frame arrays; the port grows its stack), and the 1025th IF/ELSEIF (its
+  depth byte lands past the 0x400-byte table; the port drops the byte and treats
+  event 0x400 as out of range).
+
+### 38.7 WAC commands
+
+- **killSSN** is `WacCmd_KillSsn @ 0x4F1E40` (ex `Entity_ResetWeaponState`): the
+  ItemTypeIndex gate (@ 0x4F1E89), the hit record's memset (@ 0x4F1E8F..0x4F1E99),
+  health 0 (@ 0x4F1EA4), lastAttacker 0 (@ 0x4F1EAD), +0x2C0 = 0 when def+0x5C == 3
+  (@ 0x4F1EB7..0x4F1EBD), then the class callback (e, 1, 0) (@ 0x4F1EC7..0x4F1ED2). The
+  callback sees no attacker: an org NPC gets the phase-1 alert (the slot byte 2 and
+  `TriggerGroup_SetAlertRed`, @ 0x4073BF..0x4073EA, exit @ 0x40740D); a plyr body
+  stages `Entity_ComputeAnimSlotIndex(e, 0, 0, 1)` when +0x2C0 is empty
+  (@ 0x407AC5..0x407AE7), detaches on the authority (@ 0x407AED..0x407B20) and sets
+  +0x2AC = 64 (@ 0x407B5E); a brained item runs its machine's event 1. `Gkill` runs the
+  same body per handle (@ 0x4F1F5E). WAC `kill` and BMS KillGroup share
+  `Entity_KillAllByNetId @ 0x43C8E0`: group 0 exits (@ 0x43C8F2); pools 2, 0, 1
+  (@ 0x43C8F8 / @ 0x43C946 / @ 0x43C996); every row of the group, dead rows included,
+  gets health 0 and the class event (e, 1, 0) (@ 0x43C917..0x43C93F) with its attacker
+  kept; WAC kill returns 0 (@ 0x4EDC9D). BMS KillSingle is `Entity_KillByNetId
+  @ 0x43DBD0` (pool 0 also zeroes lastAttacker @ 0x43DC15 and +0x2C0 @ 0x43DC1B; pools
+  0..2 fire phase 1, pool 3 phase 4 @ 0x43DCE6). The hit-record clears are §38.2.
+- **Health writers.** SSNHP stores the 16-bit health word with no gate past the
+  resolve (`mov [eax+11Eh],dx` @ 0x4F214C), clears lastAttacker (@ 0x4F2153) and
+  returns 1 (@ 0x4F215D); it never writes an alive latch, so a corpse stays a corpse.
+  SSNADDHP gates on the ItemDef pointer +0x20 (@ 0x4F21B8..0x4F21BD), adds in 16 bits
+  (@ 0x4F21C4), floors a negative sum to 0 and returns 1 (@ 0x4F21D7..0x4F21E5), stores
+  the signed def healthMax (+0x17C) word for a sum above it and returns 1
+  (@ 0x4F21E6..0x4F21FE), otherwise clears lastAttacker (@ 0x4F21FF) and returns 0
+  (@ 0x4F2209). GroupHP (IDB `WacCmd_GroupHp`) walks pools 0, 1, 2
+  (@ 0x4F7B30 / @ 0x4F7B6D / @ 0x4F7B9D) for every row whose signed command-group word
+  matches (@ 0x4F7B57), writes the health word only (@ 0x4F7B64) and returns 1
+  (@ 0x4F7BD0). Only organics raise a death from a zeroed word (their motors' edges,
+  @ 0x4B9D4D / @ 0x4B4CEA); the written word is kept, negative included, and a
+  non-organic row just holds it. The shipped scripts write only positive values.
+- **Flags and holds.** hideSSN sets Flags bit 0 (`WacCmd_HideSsn @ 0x4F7750`: gate
+  @ 0x4F7797, `or Flags,1` @ 0x4F779D; unhideSSN `and Flags,~1` @ 0x4F77FD), read by
+  the area and location tests (`WacCmd_SsnArea` @ 0x4F1081), the AI target scan, zone
+  capture and the traces. disableSSN sets 0x10000000 (`WacCmd_DisableSsn @ 0x4F7690`:
+  gate @ 0x4F76D7, `or Flags,10000000h` @ 0x4F76DD; enableSSN @ 0x4F773D), read with the
+  dead bit as Flags & 0x10000002 by the vehicle motors before the driver
+  (`Entity_UpdateVehiclePhysics` @ 0x48B980, `Entity_UpdateAircraftPhysics`
+  @ 0x490F1E). holdSSN sets bit 0x2000 of the entity+0x2C dword (`WacCmd_HoldSsn
+  @ 0x4F7810`: gate @ 0x4F7857, `or [eax+2Ch],2000h` @ 0x4F785D; `WacCmd_UnholdSsn`
+  @ 0x4F78BD), read by the org1 think's move-mode-12 hold (@ 0x4BD235, §38.4).
+- **Predicates.** groupdead/groupalive read the 62-tick live count
+  (`EntityPool_RecountLiveByGroup @ 0x40E8D0`; `setle` @ 0x4ED1AC..0x4ED1B2, `setnle`
+  @ 0x4ED1CC..0x4ED1D2), so a kill between rescans does not flip them. SSNexists,
+  SSNdead and SSNalive gate on ItemTypeIndex (@ 0x4F1AB9 / @ 0x4F1B07 / @ 0x4F1B67)
+  and the last two read Flags bit 1 (@ 0x4F1B0D..0x4F1B11 / @ 0x4F1B6D..0x4F1B75), not
+  health. SSNwounded is a signed word compare against half the def health (`sar
+  cx,1` @ 0x4F1BD9, `cmp [eax+11Eh],cx` @ 0x4F1BDC, `setle` @ 0x4F1BE3), so a negative
+  health word reads wounded. ssnguard (@ 0x4F7207), ssnrelease (@ 0x4F7465; its detach
+  is `Entity_DetachFromVehicleIfServer`, the call @ 0x4F7475, authority only) and
+  ssnpspd/ssncspd (@ 0x4F74FD, success return @ 0x4F755A) gate on ItemTypeIndex; the
+  speed commands queue their AI event 10/11 only when the vehicle brain +0x64 is set
+  (@ 0x4F7503..0x4F7508); ssn2ssn detaches through the same function (the call
+  @ 0x4F73DC).
+- **Returns and time of day.** GtoWP (@ 0x4ED3E4), Gsetaccuracy (@ 0x4F7C43), TOD
+  (@ 0x4EDC7F), quake (@ 0x4ED4CE), flash (@ 0x4ED50A), farflash (@ 0x4ED51A), win
+  (@ 0x4ED4AD), text (@ 0x4EDB64), text# (@ 0x4EDBC0), consol (@ 0x4EDBF4) and consol#
+  (@ 0x4EDC50) return 1. `WacCmd_Tod` stores `arg * 0x44444` raw into Env_CurTimeFixed24
+  (@ 0x4EDC74 / @ 0x4EDC7A); the day wraps in the weather tick on the signed word
+  (`Environment_ComputeTimeOfDayColors` @ 0x57DE51..0x57DE78, stored @ 0x57DE84), a
+  positive modulo: TOD(-60) is 23:00.
+- **onptick** compares the selected player's slot dword +0x184 in whole seconds with
+  its argument (the `Entity_ValidatePtr` call @ 0x4F0E58, `mov ecx,[eax+184h]`
+  @ 0x4F0E65, /62 @ 0x4F0E6B..0x4F0E7C). The dword is `Server_TickUpdate`'s
+  unsaturated per-tick count for a state-6 slot with a present, unhidden entity
+  (`add [esi+184h],1` @ 0x51D977; §38.9), single player included, the same word the
+  control-request age reads. Port: `MatchPlayer::play_ticks` (`advance_play_ticks`, after
+  the script pass and the WAC punts).
+- **autogain** (`wac_var_autogain` @ 0xC6EAFC, seeded 1 by `WacScript_FreeAll`
+  @ 0x4F6371) gates the iris exposure re-target: `Environment_ApplyFogAndAmbient`
+  re-targets only while g_local_player_entity is set (@ 0x57E50B..0x57E512) and
+  autogain is nonzero (@ 0x57E514..0x57E51B), else keeps its last target (exit
+  @ 0x57E53D). Port: `WeatherState::iris_retarget_enabled`, read by
+  `WeatherRuntime::feed_exposure_target`. breathtime is §38.9.
+- **Chat rings.** WAC text, ptext and text# post into the CHAT ring
+  (`Chat_AddSystemMessage @ 0x4EDB50` -> `Chat_AddMessageChannel1 @ 0x4985D0`, the call
+  @ 0x4EDB5C with color -1 and the 930-tick timer; text# through
+  `Chat_AddFormattedIntMessage @ 0x4EDB70`, its "%s %i" sprintf @ 0x4EDB9E), as do the
+  WAC lose line and the BMS subgoal lines (`GameMsg_AddChatLineAndRelay @ 0x5BA170`,
+  the call @ 0x5BA197). The triggered text (`HUD_DisplayTriggeredText @ 0x51F190`, the
+  call @ 0x51F216) and the console lines (consol, pconsol, consol# with its "%s %i"
+  sprintf @ 0x4EDC2E in `WacCmd_ConsolNumber @ 0x4EDC00`, forceanim, Help) post into
+  `Chat_AddMessageChannel2 @ 0x4987F0`, the SYSTEM ring. `WacAction_Lose @ 0x4ED3F0` posts
+  and relays its Misc key through `GameMsg_AddChatLineAndRelay` with team 0 on both
+  branches (@ 0x4ED411, @ 0x4ED477), so the joiners receive S2C 0x3F kind 1 before
+  `Server_ProcessRoundEnd`; a joiner resolves the key through
+  `MissionText_GetStringByKey` (@ 0x42BC26), so a Misc key the mission table lacks posts
+  nothing there. `WacAction_Win @ 0x4ED4A0` posts no line.
+- **Group walks and removal.** `WacCmd_GroupKill @ 0x4F1F40` and `WacCmd_GroupRemove
+  @ 0x4F1F80` walk a WAC script group (the dword_C6EC40/44 rows of 0x2C) and call the
+  killSSN body or `Server_RemoveEntityAndNotify` per member (the call @ 0x4F1FF2, return 0
+  @ 0x4F2006); `WacCmd_RemoveSsn @ 0x4F1EE0` removes one SSN the same way (the call
+  @ 0x4F1F28, return 1 @ 0x4F1F30). `Server_RemoveEntityAndNotify @ 0x50A270` sends S2C
+  0x12 under mask 0x90 (@ 0x50A2AC), removes a Player row's placed devices
+  (`Entity_RemovePlacedDevicesByOwner @ 0x546E00`, the call @ 0x50A2BB: pool 1 in slot
+  order, the +0x1C gate @ 0x546E2D, the +0x170 owner @ 0x546E37, the def attrib 0x40 / 0x20
+  skips @ 0x546E46 / @ 0x546E50, the satchel, claymore and AV mine ammo @ 0x546E68 /
+  @ 0x546E8B / @ 0x546EAE, each through the same removal) and then destroys the row
+  (@ 0x50A2C4), so the joiners see the player's 0x12 and each device's before the destroy.
+  WAC `remove` (`WacCmd_Remove @ 0x4EDCA0`) shares `Entity_TeleportAllByNetId` with BMS
+  VaporizeGroup (§38.8). Port: the Gkill / Gremove member walk in `vm.cpp`; removeSSN and
+  Gremove call `EntityCommands::server_remove_and_notify`, which sweeps a removed player's
+  devices in place (`script_command_parity`: `test_wac_removals_notify_the_joiners`,
+  `test_player_removal_sweeps_placed_devices`); the deploy after a death runs the same
+  sweep (`Server_ProcessPlayerDeath`, @ 0x5178D8; §27.7).
+- **Carried:** the D-WAC-5 intern order on the S2C 0x23 wire.
+
+### 38.8 BMS event runtime
+
+The full event-runtime witness is `docs/mission/bms-event-runtime-re.md`; the
+world-side facts of the slice:
+
+- **SingleAlive / SingleDestroyed** read `Entity_IsAliveByBmsRef @ 0x43E640` (cat 2
+  subs 4/5 @ 0x453985 / @ 0x45399D): SSN 0 answers 0 (@ 0x43E644); pools 0/1/2 compare
+  the full +0x7C dword and need !(Flags & 2) (@ 0x43E66E..0x43E676); no match answers 0
+  (@ 0x43E6DC). An SSN no pool 0/1/2 row carries (never placed, rejected, a pool-3
+  marker, or removed: `Entity_Destroy` memsets the row @ 0x43EA69) reads not alive, so
+  SingleDestroyed is true for it. 01TR's event 34 (SingleDestroyed(101) and
+  SingleDestroyed(102), SSN 101 unplaced) therefore fires, which makes its only
+  BlueWin reachable. Port: `EntityCommands::bms_ref_alive`.
+- **Group fans and removals.** ChangeGroupAI (`Entity_HandleAlertCommand @ 0x43CF10`)
+  returns for sub 0 (@ 0x43CF1E) and group 0 (@ 0x43CF2C), then fans pool 2 only to
+  rows with an AI slot (`cmp [eax+68h],0` @ 0x43CF64), pools 0 and 1 ungated
+  (@ 0x43CF97 / @ 0x43CFCD), pool 3 never. VaporizeSingle and VaporizeGroup notify:
+  `find_entity_by_parent_and_dispatch @ 0x43E210` and `Entity_TeleportAllByNetId
+  @ 0x43D5D0` (authority only; pools 2, 0, 1, 3) end in `Server_RemoveEntityAndNotify
+  @ 0x50A270` (mask 0x90, S2C 0x12 [u16 handle] @ 0x50A2AC, the player's placed
+  devices @ 0x50A2BB, `Entity_Destroy` @ 0x50A2C4), with no recount and no proximity
+  rebuild. Port: `EntityCommands::server_remove_and_notify`. The group team and
+  regroup writers (`Entity_SetTeamByNetId @ 0x43C680`, `Entity_UpdateNetIdReferences
+  @ 0x43C5B0`) return for group 0 (@ 0x43C685 / @ 0x43C5B5) and test no item word.
+- **AttachToEmplaced** (action 37, `EventAction_Dispatch` case 37 @ 0x454989, the
+  `EntityPool_FindByNetId` call @ 0x454992) calls `WacScript_TryMountEntityToVehicle
+  @ 0x4F70F0`, the WAC ssnuse body: the vehicle is the one the occupant's AI slot
+  +0x90 names (armed by a board order), not a proximity pick (§9.1). Port:
+  `EntityCommands::use_boarding_target`. No shipped mission authors action 37.
+- **AreaAiRed / AreaAiBlue.** `EventTrigger_ResolveZoneActionRefs @ 0x453100` rewrites
+  the action's words from the zone bounds (@ 0x45318D..0x4531AB) and
+  `Entity_KillTeamInBounds @ 0x43D030` tests pool 0 only, X against [+0x0C, +0x14] and
+  Y against [+0x18, +0x1C] with no Z (@ 0x43D0A8..0x43D0C4) before
+  `Entity_ApplyCommand` (@ 0x43D0C8), so the corners pair across the axes.
+- **Chain arithmetic.** The trigger-count byte +0x15 is signed in the chain
+  (`EventTrigger_EvaluateChain @ 0x454050`: zero test @ 0x45405F, `jle` @ 0x45408C,
+  `movsx` bound @ 0x4540C7), so 128..255 evaluate trigger 0 alone. Conditions return
+  raw ints (cat 7 sub 18 returns AiSlot[1] & 0x200 @ 0x453B85..0x453B99) and the chain
+  folds them raw (negation is `xor 1` @ 0x454084 / @ 0x4540AC), so NOT-Berserk reads
+  0x201. Player subs 26/27 read hudInfo +0x174, whose only store writes 0
+  (`HUD_BuildEntityInfo` @ 0x4B84D9): sub 26 is always true, sub 27 always false.
+  MisvarChange adds and subtracts in dwords and wraps.
+- **HeliLift.** Every lift trig scales the angle by dbl_7C3608 =
+  1.4629627251502471e-09 (a hair above the BAM scale 2*pi/2^32 =
+  1.4629180792671596e-09), then by 4194304.0 (@ 0x45185C, @ 0x451979, @ 0x451C5E,
+  `HeliLift_SpawnFlyover` @ 0x4528D8). The land heading is 0x42000000 -
+  trunc(atan2(dy, dx) * -2^31/pi) (fpatan @ 0x451954, `fmul dbl_7C57B8` @ 0x451956,
+  @ 0x451961..0x451966, stores @ 0x451970 / @ 0x451973). A flyover whose helicopter is
+  destroyed before landing stalls in arms 4..6 (the brain read through slot[3]
+  @ 0x451739..0x451745 is 0 once `Entity_Destroy` memsets the row; arms 4 @ 0x451761
+  and 5 @ 0x4517C6 skip to the patient animation, arm 6 @ 0x45192E returns).
+- **The objective notification** (actions 35/36, `EventAction_Dispatch` @ 0x4546AF /
+  @ 0x454724): `HUD_ShowObjectiveNotification @ 0x5BA2E0` posts two chat-channel-1
+  lines (the Misc STRMISC_NEWOBJECTIVE header and the WIN/LOSE directive text; a
+  directive of one byte or less drops, @ 0x5BA37B) under `is_mp_session_peer ||
+  !is_in_session`, and on the authority relays S2C 0x3F kind 0 (`Server_BroadcastEntityActionPacket
+  @ 0x5080D0`, [i32 slot][i32 isWin][i32 isActive][u8 flag], mask 0x90); action 35
+  also plays NEW_GOAL (@ 0x45470C). SubGoalWon/SubGoalLost relay their STRWINMSG /
+  STRLOSEMSG key as kind 1 (`GameMsg_AddChatLineAndRelay`, the calls @ 0x454578 /
+  @ 0x454632). Port: `World::show_objective_notification`,
+  `World::relay_mission_text_chat` and the `HudRelay` queue.
+- **PlayWavList** (case 7) plays only on a client (@ 0x45443D), and once
+  g_spawn_success_gate is set only when param2 == 1 forces it
+  (@ 0x45444A / @ 0x454450). **Action 28** sub 37 is the HUD item flash
+  (`RenderState_SetLayerVisibilityByIndex @ 0x5A3020` stores p2 into the timer p1
+  @ 0x5A302A and rebuilds the layer table at declutter 0), sub 39 is a dead store
+  (@ 0x4535B6..0x4535BC). **SetLightState** (case 38 @ 0x4549BC) writes the four
+  light-group channels (`sub_5A8C80`, dword_272ED88[p1 <= 3] = p2 ? 0x10000 : 0
+  @ 0x5A8C97), copied each frame by `sub_5A9F70` into the render-submit words from
+  0x83FDF0 (@ 0x5A9F92..0x5A9FB4); their consumer is unresolved and unported (no
+  shipped mission uses it).
+- **View actions.** `Input_HandleActionBinding` sets 0x4000000 for 400
+  (@ 0x49C073..0x49C07A), 0x10000000 for 401 (@ 0x49C0D9..0x49C0E0) and 0x8000000 for
+  402 (@ 0x49C0F6); 412 (@ 0x49C090) and 405..410 have no binding row, so their bits
+  never set in retail and `Input_ProcessFrame`'s `&= ~0x50` (@ 0x49D52B) clears bits
+  nothing sets. PlayerCockpitView (0x10000000, @ 0x453C69) therefore fires only for
+  viewwithgun. Port: `player_view_apply_view_action` and
+  `Simulation::apply_local_player_view_action`.
+- **Carried:** the SubGoalWon score tally (`Score_TallySubGoalWon @ 0x4FD100`) and the
+  parser strictness of `engine/formats/mission/bms.cpp` (no shipped mission carries
+  the values it rejects).
+
+### 38.9 Tick and lifecycle: the entity update as one pass
+
+- **One pass, pool 1 row by row.** `Entity_UpdateAllEntities @ 0x4C2100` clears
+  +0x163 on the live pool-1 rows (@ 0x4C212E..0x4C2156), then walks pool 1 in slot
+  order (base/used/stride @ 0x4C2158..0x4C216A), skipping visited rows (@ 0x4C217F):
+  an unvisited row's +0x28 chain is visited parent first (the third link
+  @ 0x4C21A8..0x4C21B9 after the unvisited tests @ 0x4C2188..0x4C21A6, then the
+  second @ 0x4C21C1..0x4C21D0 and the first @ 0x4C21D8..0x4C21E0 without a visited
+  test), then the row itself (@ 0x4C21E9). `Entity_UpdatePool1Slot @ 0x4B8DD0` sets
+  +0x163 = 1 (@ 0x4B8DE1) before its live test (@ 0x4B8DE8), steps the +0x144
+  countdown (@ 0x4B8DEE..0x4B8E19), runs the class callback +0x1C8 behind `cmp
+  [esi+2ACh],0; jg` (gate @ 0x4B8E1B; proximity @ 0x4B8E25; null test @ 0x4B8E33,
+  call @ 0x4B8E3C), the +0x1C4 mover every visit (skipping the nullsubs,
+  @ 0x4B8E41..0x4B8E53), the emitter (@ 0x4B8E76) and the light (@ 0x4B8E98), and
+  ends with `add [esi+2ACh],-1` (@ 0x4B8EA0). After the walk: `HeliLift_UpdateAll`
+  (@ 0x4C21F6), the facials (`sub_580000`, @ 0x4C21FB), `Precipitation_FallTick`
+  (@ 0x4C2214), `DeathPiece_TickAll` (@ 0x4C221C), `sub_590950` (@ 0x4C2221), the timed
+  AI events (@ 0x4C2226), `sub_5DDE10` (@ 0x4C222B), `Cinematic_EpilogUpdate`
+  (@ 0x4C2230), `WeatherParticle_UpdateAllEmitters` (@ 0x4C2235),
+  `Weapon_UpdateAllProjectiles` (@ 0x4C223A), `Projectile_ProcessExplosionQueue`
+  (@ 0x4C223F), pool 2 (@ 0x4C2244..0x4C2302), `FadeEffect_UpdateAll` (@ 0x4C2307),
+  pool 3 (@ 0x4C230C..0x4C2398), `Entity_BuildProximityLists_Pool01` (@ 0x4C240A), the
+  slices (@ 0x4C240F..0x4C2418) and the pool-0 walk (@ 0x4C2426..0x4C261F), which calls
+  only +0x1C4. There is no generic brain integrator: a pool-1 row moves only through
+  its +0x1C4 callback from `g_EntityClassPhysicsTable @ 0x82ABC8` (12-byte rows
+  {name[8], fn}; the vehicle movers chel @ 0x490310, cpln @ 0x45D6F0, cveh @ 0x48EFC0,
+  ctank @ 0x48F000, cbike @ 0x48EFF0, cbot @ 0x48EF90, catv @ 0x48F010, ctrn
+  @ 0x48F060; no lndm row). `Entity_LandmineThink @ 0x441A40` re-arms +0x2AC =
+  authority ? 3 : 1 (@ 0x441B1A), so an authority minefield thinks every third visit.
+  Port: `World::update_all_entities` and `World::update_pool1_slot`, with
+  `VehicleSystem::update_motor`, `AiSystem::think_brain` and `AiSystem::update_organic`
+  as the per-row legs; the damage reactions (`AiSystem::apply_round_hits`) run right
+  after the explosion queue, before the pool-0 walk.
+- **The vehicle claim.** After each live body's +0x1C4 update the pool-0 walk finds
+  the first def-type-1 entity on the body's +0x28 chain (`Entity_FindChildByDefType
+  @ 0x43BEA0`, first match, under 20 hops) and on `tick & 3 == 0` (@ 0x4C25CE) wakes it
+  (`Entity_WakeContactSolve @ 0x459290`: `or [e+24h],40h; mov [e+3B8h],tick`), unconditionally once
+  found. The team/Berserk copy needs PlayerControl (def attribute 0x40) and vehicle
+  Flags without 0x1000 and 2; a seated body always copies; a same-team body skips the
+  hold scan when !is_in_session or GameType & 0x10000; otherwise ten seat words
+  (+0x190, != 0xFFFF) or a refNum (+0x215) peer hold the vehicle and block the copy.
+  The copy writes +0x162 and syncs slot+4 bit 0x200 when both +0x68 slots exist
+  (@ 0x4C259E..0x4C25C7). The flyover's medics stand on the helicopter
+  (`HeliLift_SpawnFlyover` @ 0x452980 / @ 0x4529BD), so it is woken every fourth tick.
+  Port: `claim_standing_vehicle`.
+- **The entity-update counter.** g_entity_update_counter has one writer, `add
+  g_entity_update_counter,esi` (@ 0x4C2639) at the tail of a non-epilog update, and no reset, so
+  it runs one behind `tick` through the process's first mission, holds on a skipped or
+  epilog frame and keeps counting across restarts and loads. Its readers: the ground
+  movers' ground-link gate (`test byte ptr g_entity_update_counter,7` @ 0x46E178, @ 0x484099,
+  @ 0x486B08, @ 0x488B69, @ 0x48AFB9), the avoid-brake factor (@ 0x46EFC1, @ 0x470C70,
+  @ 0x4850CC, @ 0x4879EF, @ 0x489AEF, @ 0x48BF26, @ 0x48E712, @ 0x491B2D), the movement
+  resolver's full update (& 0x3F, @ 0x4B2CAF), `Player_UpdatePerFrame` (@ 0x4DE754,
+  latched into g_sp_elapsed_update_count for the SP epilog's time-weighted score, `Score_ComputeSpTimeWeightedAverage`
+  @ 0x40DA8C), the trail wobble (`Projectile_GetTrailAnchorPos` @ 0x4E650B), the
+  body-damage figure blink (`HUD_RenderAllOverlays` @ 0x5A83ED), the water noise and
+  wave phase (`Water_GenerateNoiseTextures` @ 0x5C0366 / @ 0x5C036E) and the water
+  decal (@ 0x5DE25A). The boat and air movers stagger `tick` by 36 * DcbId instead
+  (@ 0x48D486..0x48D51F, @ 0x4903A8, @ 0x46FA24 / @ 0x46FA77). Port:
+  `World::entity_update_counter`, which also clocks the water noise (the Godot shell feeds
+  it to `Water` each render frame; an unfed `Water` counts its own frames,
+  `env_render_cadence_test.gd`); the HUD blink, the trail anchor and the SP time score do
+  not read it yet.
+- **The epilog path.** While g_epilog_screen_active (@ 0xA87054) is set the update
+  branches (@ 0x4C211D..0x4C2128) to @ 0x4C239A: every pool-1 row copies +4..+0x18
+  into +0x80..+0x94, and only a row whose +0x170 occupant is a Player gets
+  `Entity_UpdatePool1Slot` (@ 0x4C2400), without the visited clear or the chain; then
+  the proximity tables (@ 0x4C240A) and the pool-0 walk. Everything from HeliLift
+  through pool 3 is skipped, so no projectile, explosion or death piece moves under the
+  MISSION FAILED screen, and the tail (@ 0x4C2624) tail-calls `Cinematic_EpilogUpdate`
+  (@ 0x4C2634) instead of the counter add. The head also returns while dword_A87050
+  (the in-game menu pause) is set (@ 0x4C2103) and while g_local_player_entity is null
+  (@ 0x4C2110). That last return never fires in a running retail mission:
+  `Game_StartMission` calls `Player_InitPlayer` (@ 0x525BBC) on every peer, which finds the
+  pool-0 row the local connection owns (`Player_FindLocalPlayerEntity @ 0x4E0090`) or dies
+  (`Player_FatalPlayerDcbNotFound @ 0x4E17F2`), so a retail dedicated server runs with its
+  own connection's row. The port's dedicated hosts have no local player, so the port keeps
+  the gate only for the precipitation fall (`cached.local_player` before the
+  `Precipitation_FallTick @ 0x5DE8F0` leg, the call @ 0x4C2214).
+- **The admission gate.** `Game_ProcessMainFrame` gates the whole update
+  (@ 0x526703..0x526742): a client skips to its second half (`is_authority`
+  @ 0x526703); a playing host on its death screen is exempt from the humans test
+  (`is_mp_session_peer` @ 0x52670B, g_death_screen_active @ 0x526713); no human
+  (wac_var_humans @ 0x52671C) with a started clock (wac_var_ticks @ 0x526724) skips the
+  update, as do the retained pre-round byte (dword_A85B64 @ 0x52672C) and a session
+  round that has ended (`is_in_session` @ 0x526734 with g_spawn_success_gate
+  @ 0x52673C). wac_var_humans (`Server_BuildEntitySlotLists @ 0x4F97A0`) counts live pool-0
+  rows with Flags 0x100 (@ 0x4F9815) and not Flags 1 (@ 0x4F9820): a dead player counts,
+  a hidden one does not. Its def test (`cmp [esi+20h]` @ 0x4F9809) is the allocated-row
+  test: every spawn links an items.def row (the player's store @ 0x43C429), row 0 for a
+  type items.def lacks (`ItemList_FindIndexByTypeId @ 0x49E100`, `xor eax,eax`
+  @ 0x49E131), so a player whose type has no items.def row still counts. Port:
+  `World::entity_update_admitted` (the exemption bit is
+  `CachedFrameState::peer_death_screen`); the count is `EntityRegistry::count_humans`,
+  which walks the live rows (their used bit is the allocated-row test;
+  `npruntime_server_tick_maintenance`, `check_humans_count_the_visible_players`), rebuilt
+  by the server tick and by the local role ahead of the script pass, since a single-player
+  game runs `Server_TickUpdate` as its own authority (the count @ 0x51D89A). Open follow-up:
+  the port's `Entity::has_item_def` is false for a live row whose type items.def lacks, where
+  retail's +0x20 points at row 0, so the other consumers that model a +0x20 test (for
+  example `Entity_CountMountedEntities @ 0x435970`) diverge for such rows.
+- **The frame split.** `Game_ProcessMainFrame` runs `Client_ProcessNetworkFrame`
+  (@ 0x526692), `Sound_TickPendingSlots` (@ 0x526697), `Server_TickUpdate` (@ 0x5266B6:
+  the per-player walk @ 0x51D88B, the receive pump @ 0x51D895, the humans count
+  @ 0x51D89A, the WAC tick @ 0x51D8BF, the every-32 legs @ 0x51D8D2 / @ 0x51D8D7 behind
+  `test byte ptr tick,1Fh` @ 0x51D8C4, the BMS quarter pass @ 0x51D8F4, the scoreboard
+  legs @ 0x51D90D / @ 0x51D912, the play-tick and scoring walk @ 0x51D960..0x51D98F,
+  the periodic second @ 0x51DB6D..0x51E1B2, the per-slot 0x0A @ 0x51E3E4, the send pump
+  @ 0x51E487), then the gated entity update (@ 0x52674B), the tracers (@ 0x526758),
+  the weather (@ 0x526774), the camera (@ 0x526781) and the WeaponAction pump
+  (@ 0x526786). So the 0x0A carries this frame's script and maintenance changes, the
+  entity update's inline sends lead the next frame's queue, and a round the pump
+  starts steps on the next tick. `tick` advances only when not paused
+  (@ 0x5265A0..0x5265B4). The play ticks advance in their own slot walk right after the scoreboard legs
+  (@ 0x51D94B..0x51D9A3): an active (+4 @ 0x51D960), state-6 (+0x20 @ 0x51D966) slot with
+  an entity (@ 0x51D96B) that is not hidden (@ 0x51D971) adds 1 to +0x184 (@ 0x51D977),
+  before the is_in_session test (@ 0x51D9A5), so single player counts too, with no deploy,
+  round or punt gate beyond the slot state (the round end moves the slots to state 7,
+  @ 0x51685E). The same walk scores event 0x16 for every active state-6 slot
+  (@ 0x51D98A); that event only counts the per-weapon and vehicle-use statistics
+  sub-tables (`CPlayerStats_InitWeaponTracking @ 0x52BF60`), which the port does not model,
+  so the call is not ported. The live group recount
+  (`EntityPool_RecountLiveByGroup @ 0x40E8D0`) runs from the periodic second only.
+  Port: `Server_TickUpdate` routes the previous entity pass's records at its head,
+  runs `World::run_script_pass`, its maintenance and the 0x0A, then
+  `World::run_entity_pass`; `World::run_logic_tick` composes the three for the bare
+  local role and a joiner; `World::pump_weapon_actions` is the one weapon-action walk after
+  the camera (the frame order `@ 0x52674B` -> `@ 0x526758` -> `@ 0x526774` -> the camera
+  `@ 0x526781` when not paused -> `@ 0x526786`), outside the entity-update gate (§26.6).
+- **The breath timers.** `Server_UpdatePlayerBreathTimers @ 0x50D770` runs inside the
+  script admission, after the WAC tick and the spawn-marker pass, on `tick & 0x1F ==
+  0`, and returns during the pre-round countdown (@ 0x50D773). Per in-match
+  non-spectator slot it compares Position.Z + CameraOffset.Z (+0xC plus +0x74) with
+  Env_WaterHeightFixed in a raw signed compare (@ 0x50D7CD..0x50D7D9): a wet sample
+  increments slot+0x1CC (@ 0x50D7DF), a surfaced sample or the dead bit alone
+  (@ 0x50D7C3..0x50D7C7) clears it. The limit is 4 * breathtime (wac_var_breathtime, the WAC
+  named value seeded 20 by `WacScript_FreeAll` @ 0x4F6381 and writable through its row
+  @ 0x82EFEC) in 32 bits, compared signed (@ 0x50D7E6..0x50D7F2, `jle` @ 0x50D7FB), with
+  warnings at the limit less 12, 36 and 24 (@ 0x50D842..0x50D861). The first sample
+  past it clears +0x178 (@ 0x50D800), selects cause 5 (death_drown 175, @ 0x50D80A),
+  writes health -1 (@ 0x50D819) and calls the +0x1C8 callback (@ 0x50D838); surfacing
+  after more than four samples splits breathtime * 160 / 100 (@ 0x50D892..0x50D8AD) for
+  the gasp sound. `GameEvent_PlayerDeath`'s event 26 reads the same value (@ 0x5172FB /
+  @ 0x517302). The wire sends breathtime and fallmps as `v > 255 ? 0xFF : low byte`,
+  signed (`NetPacket_WritePlayerState` @ 0x4FF9DB..0x4FFA0A, @ 0x4FFA14..0x4FFA48), and
+  the joiner stores both (`NapiNPClientMsg_0x00A` @ 0x4301A1 / @ 0x4301BC). Port:
+  `inmatch/server_idle_timers.cpp`, run by `world::ServerIdleLegs`.
+  `HUD_DrawBreathBar @ 0x59D6F0` is not ported.
+- **Spawn markers.** The respawn-marker assignment runs in the every-32 leg after the
+  WAC tick and before the idle timers and the BMS quarter pass (@ 0x51D8D2). The
+  vehicle spawn-marker list is built right after the mission load
+  (`Game_StartMission`: the per-vehicle walk @ 0x52527A..0x5252BF,
+  `build_spawn_marker_budget_list` @ 0x5252C6), ahead of `Entity_InitAllFromModels`
+  (@ 0x52567F), the authority-gated PreMission pass (@ 0x525B86) and the WAC's first
+  run, so a PreMission action that moves a zone's team does not reorder the markers.
+  Port: `MissionKernel::boot`. Carried: the local player spawns before the PreMission
+  pass (retail's `Player_InitPlayer` runs after it), and gunner attachments bind after
+  the class inits.
+- **The PostMission pass.** `Game_TeardownMission @ 0x522350` destroys pools 0, 1 and
+  2 (@ 0x522365..0x5223C8; the pool-3 markers stay), then on the authority runs
+  `EventTrigger_UpdateAllWithFlag4` (gate @ 0x522663, call @ 0x52266C), latches the
+  winner (@ 0x522671) and resets the player slots (@ 0x52269B); the mission reset
+  (0x40DB80) follows later (@ 0x522736). `Game_RestartRoundSP @ 0x5263A0` first calls
+  `Game_DestroyAllEntitiesAndReset` (0x5235C0), whose mission reset (@ 0x523604)
+  reaches `EventSystem_FreeAll` (@ 0x40DBEF) and zeroes g_EventCount (@ 0x453266), so
+  its own flag-4 call (@ 0x5263AE) sweeps nothing. The third call site (@ 0x51EA89)
+  lies in an unreferenced chunk. No shipped event carries flags & 4 (0 of 3,075).
+  Port: `MissionKernel::run_post_mission_pass`, run by `HostRole::close` and
+  `LocalRole::close`.
+- **The session fact.** Retail single player leaves is_in_session 0
+  (`SinglePlayer_StartMission @ 0x561AF0`); the port stamps `AiSystem::is_in_session`
+  from `rules.mp_session` each update (the death event's in-session arm
+  @ 0x458273); the friendly-tag team mode (`HUD_DrawCrosshair` @ 0x5926C0..0x5926D0), the
+  zoom floor (`Player_AdjustWeaponZoomLevel` @ 0x4DBD0C) and the unarmed UseGun rejection
+  (`Entity_AttachToUseGunSlot` @ 0x546BF6..0x546C0D) read the same fact, and the former
+  `SessionRules::session_open` is gone. A joiner latches the round-over flag from S2C 0x1D
+  (`NapiNPClientMsg_0x01D`: g_spawn_success_gate = 1 @ 0x430858, the linger 0x7FFFFFFF
+  @ 0x430862) before its entity update (`Match::latch_round_over`). The
+  HeliLift helicopter's ammo words are the byte-gated copy
+  (`Entity_InitHelicopterAIFromDef` @ 0x468555..0x46858D); the shipped H_BHawkN.aip
+  authors none.
+
+### 38.10 Match: kill tallies, the scorer, capture zones and the round clock
+
+- **The kill tallies.** `Score_ProcessKillEvent @ 0x4FD400` runs from exactly five
+  damage-pass lethal edges: the run-over (`Entity_MovementCollisionResolver
+  @ 0x4B2BD0`, the call @ 0x4B39E2), the knife kill zone
+  (`Entity_ApplyVehicleCollisionDamage @ 0x4E6620`, @ 0x4E6773), the person and item
+  blasts (`Entity_ApplyWeaponDamage @ 0x4E6820`, @ 0x4E6BFE / @ 0x4E6FB4) and the round
+  (`Projectile_ProcessDamageOnTarget @ 0x4E7FB0`, @ 0x4E8133). It returns without a
+  killer (@ 0x4FD405), without a target (@ 0x4FD40E), off the authority (@ 0x4FD412) and
+  when the VICTIM's def is missing or its `score` word (def+0x194, the items.def `score`
+  token, `ItemDef_ParseProperty` @ 0x4A0228..0x4A0242) is zero (@ 0x4FD41E /
+  @ 0x4FD422); then it runs scorer event 12 (@ 0x4FD438) and, only outside net
+  sessions (@ 0x4FD447), the SP tallies. No Player def authors `score`, so a Player
+  victim, a self-kill included, never tallies. The team (@ 0xC846C0) and friendly
+  (@ 0xC846C8) buckets take any victim type (@ 0x4FD325..0x4FD366). The round's edge
+  needs the pre-hit health word > 0 (`test ax,ax; jle` @ 0x4E80FE), damage >= health
+  (@ 0x4E810A) and damage_state == 0 (@ 0x4E8112), and skips a body already dead
+  (@ 0x4E811F). Port: `RoundDeath::kill_event` and `Entity::item_score`.
+- **Team rows.** `GameEvent_ProcessScoring @ 0x52F550` resolves the actor's and the
+  other entity's TeamRecords rows only when g_GameType carries 0x10000 (@ 0x52F657 /
+  @ 0x52F6A3), and every team leg tests that row. Non-team modes put every Player on
+  team 1 (`Server_AssignPlayerTeam` @ 0x4FE3EC) and never touch a row, so a DM kill is
+  an enemy kill. The team-kill test asks whether both actors resolve the same row
+  (@ 0x5301E4..0x5301EE); the see-all bit belongs only to the kill feed's 0x1E type
+  (`GameEvent_PlayerDeath` @ 0x5170A6..0x517113), never to scoring. The flag capture
+  (case 9 @ 0x52F7CF..0x52F810) names its team row by the flag type in every game type
+  (4091 blue -> TeamRecords[2] @ 0x52F7E8, 4093 red -> [1] @ 0x52F7F6; the neutral
+  4095 takes the capturer's own row @ 0x52F808). The case-3 arms are the suicide
+  @ 0x530182..0x5301D5, the team kill @ 0x5301E4..0x530237, the enemy kill
+  @ 0x530246..0x5302F9 and the victim-only death @ 0x53074E..0x5307A7.
+- **NPC victims and non-Player killers.** `Entity_CheckAndProcessDeath`'s scorer call
+  (@ 0x51B5B3, killer = victim+0x178) scores a non-Player person
+  (@ 0x52FFC3..0x530178): the victim def type must be 3; a team-0 killer, a team-0
+  victim or equal teams score nothing; otherwise RecordEvent 4 and ENEMYKILL with the
+  team mirror, then MULTIPLEKILL, HEADSHOTKILL and KNIFEKILL from the victim's +0x2C
+  cause bits 0x100, 0x800 and 0x400. A non-Player killer credits the Player on its
+  +0x170 link with `(uint32)ENEMYKILL >> 1` (`shr edx,1` @ 0x52FF76) as a RecordEvent
+  28 award plus RecordEvent 27 (@ 0x52FF43..0x52FF79).
+- **Unit score, shots and bonuses.** Case 12 (@ 0x52FEC2..0x52FF0F) sends the victim
+  def's signed score word to field 30 through RecordEvent 29 on the killer's slot and
+  team row; only `Score_ProcessKillEvent` calls it (@ 0x4FD438), in every session.
+  Case 1 (FIRE) comes only from `Server_ClientFiredRound` (@ 0x50C727), on the local
+  pass after the pose and distance checks; alt fire (@ 0x50BB0D) and slot-less (NPC)
+  shooters return before it. The enemy-Player arm (@ 0x530246..0x5304AB) awards
+  ENEMYKILL, FLAGCARRIERKILL (the victim's +0x268 carried object is a 4091/4093/4095
+  flag, read before the drop), MULTIPLEKILL, HEADSHOTKILL, KNIFEKILL and
+  ENEMYSNIPERKILL (points only, victim class +0x294 == 6), each with its team mirror,
+  then the six zone bonuses (@ 0x5304B0).
+- **The medic kit.** `GameEvent_RevivePlayer @ 0x517CD0` scores MEDICSAVE (event 6) on
+  the medic (@ 0x517DC5) behind the medic-class gate `cmp dword ptr [ebp+294h],5`
+  (@ 0x517D07; the gates run @ 0x517D07..0x517D44). `GameEvent_HandleMedicInteraction
+  @ 0x4E6790` routes a live target (@ 0x4E67C2) whose signed health is below
+  `Entity_GetMaxHealthWithDifficulty @ 0x43B8A0` (@ 0x4E67E3..0x4E67F5) to
+  `GameEvent_HealPlayer @ 0x50DE30` on the authority (the call @ 0x4E6805). The heal
+  needs the victim's def (@ 0x50DE35) and active slot (@ 0x50DE66..0x50DE70) and a
+  healer slot (@ 0x50DE46..0x50DE52) of class 5 (@ 0x50DE58); it fills the victim's
+  health (@ 0x50DE77..0x50DE7F), then, while the healer slot's hide bytes are clear
+  (@ 0x50DE86..0x50DE96), scores MEDICHEAL (event 5, @ 0x50DEA4; case 5
+  @ 0x52FD3A..0x52FD8D) and sends S2C 0x1E event 45 (@ 0x50DEAC..0x50DF02). Port:
+  `Server_RouteMedicInteractions` (`inmatch/server_medic.cpp`), both arms.
+- **The rider share.** `CPlayerStats_RecordEvent` case 28 (@ 0x52CAF8..0x52CBB3):
+  every points award passes param2 = 0 and shares half with the recipient's +0x170
+  link (recursively) and a quarter with the link's link, each with a RecordEvent 27
+  count; only case 25 passes 1 (@ 0x530989). `GameEvent_PlayerDeath` clears every live
+  pool-0 AI body's +0x170 that names the dead Player (@ 0x516E07..0x516E45). The link's
+  producer is the ride link (§38.4).
+- **The secure pass and the control delta.** The secure pass (@ 0x5196A0..0x51973F)
+  walks every live numbered 0x20000 entity of pools 1 then 2 in pool order, not the
+  chain vector: when `IsZoneCapturableByTeam(enemy_of(team))` is false (enemy_of
+  @ 0x519745..0x519757; a neutral zone asks team 1) it latches control = 0x10000
+  (@ 0x519764), reads `before` after the latch (@ 0x519775) and always runs the delta,
+  whose 0x6F field is the delta's low word (`movzx ebx,ax` @ 0x51978C). The control
+  delta counts every active state-6 slot whose body is neither carried nor dead, by
+  slot team (@ 0x501173..0x5011A2); in radius a same-team body adds presence and the
+  friendlies byte, any other body adds the enemies byte and subtracts presence only
+  when its team may capture (@ 0x50121D..0x501248); it sizes by the zone team
+  (@ 0x5012AC..0x5012D7), stores the base speed as a float (@ 0x50133C), applies the
+  lead reduction (@ 0x5013AB..0x50142A), divides by the number of entries sharing a
+  zone number (@ 0x501441..0x501448), and takes delta = ftol(65536 / (speed /
+  presence)) (@ 0x501452..0x50145C) with no speed guard (speed 0 gives 0x80000000,
+  which the clamp turns into control 0).
+- **Flips and the timed engine.** A numbered zone's flip (`GameEvent_FlagCapture`,
+  def 0x40000 @ 0x50F712) rebuilds the masks (`ZoneSlotChain_RebuildMasksAndCheckUnchanged
+  @ 0x4A2B60`, the chain's only rebuild besides the mission build) and, unless the
+  match is decided (@ 0x50F764) and when the capturer holds a slot (@ 0x50F7BA), sends
+  51 [zone number][rank] or 53 [zone number][frontier] to the capturer's team, then 50
+  or 52 to the enemy team only (@ 0x50F7C1..0x50F907); the 56/57 banner is one
+  broadcast keyed on the zone's new team and is sent even when the match is decided
+  (@ 0x50F919..0x50F991); an unnumbered flag sends 43/44. The timed engine's restart
+  window sends progress 0 and limit 0 (@ 0x53BA07 / @ 0x53BA09); the unnumbered START's
+  window carries the zone's team as the drain found it (@ 0x53BACD..0x53BADC); a
+  completion scores PSPTAKEOVER (event 14). FARP enforcement forces from the live owned
+  masks (@ 0x51960A / @ 0x519618). `CaptureZone_CheckProximityScoring @ 0x500C50`
+  gates on the session, the team bit, a capturer and an owned zone
+  (@ 0x500C74..0x500CA2): a numbered zone scores LFPTAKEOVER (event 24) on every live
+  same-team body in radius, an unnumbered one PSPTAKEOVER on the capturer alone
+  (@ 0x500DC5).
+- **The chain edges and auto-deploy.** `ZoneSlotChain_AddZoneEntity` refuses zone
+  numbers above 30 (@ 0x4A2D90); `ZoneSlotChain_IsZoneCapturableByTeam` is true for
+  every entry in Conquer and Control (0x50010, @ 0x4A2476..0x4A2480);
+  `ZoneSlotChain_GetWinningTeamIfAllOwned` answers only in A&S (0x10010) and C&C
+  (@ 0x4A2921..0x4A294E), so a uniform chain in TDM or co-op neither wins nor
+  suppresses the other win arms. Auto-deploy (`find_spawn_entity_for_team
+  @ 0x4FC810`) walks the sorted SpawnZoneList: objective types take the last
+  team-matching unnumbered entry; team types take the first owned numbered entry that
+  is enemy-capturable or carries the frontier number with control >= 1.0, and failing
+  that the frontier steps once toward the side the team's mask continues
+  (@ 0x4FC88F..0x4FC8BB) and the walk retries while the stepped number stays in the
+  mask (@ 0x4FC941..0x4FC952).
+- **The refused-touch nag.** `Server_OnPlayerTouchCaptureZone @ 0x500BA0` arms it for
+  a request `CaptureCtx_QueueCaptureRequest` refuses on a numbered zone (@ 0x53B7D1)
+  when the slot byte's bit 0x08 is clear and its +100360 stamp is nonzero and more than
+  10000 ms old (@ 0x500C10..0x500C33): bits 0x0C set and the stamp rewritten
+  (@ 0x500C35..0x500C3C). `Server_UpdateAllActivePlayerSlots @ 0x518820` then sends that
+  player S2C 0x1E event 58 (own frontier, enemy frontier or 0, 0xFF; mask 0xA0) once
+  bit 0x04 is set and the play-tick counter +0x184 >= 1240, and clears 0x04
+  (@ 0x51890C..0x5189A6). The +100360 word doubles as the chat throttle (@ 0x5137FF),
+  is stamped by a numbered flip for the capturer (@ 0x50F90C..0x50F912) and is zeroed at
+  the join (@ 0x51A6CD).
+- **The round clock and the periodic gates.** The round time decrements in
+  `Game_ProcessMainFrame` (@ 0x5265DA..0x526602) under the authority, no pause, no
+  epilog, no pre-round and time left: there is no round-over latch, so the clock runs
+  through the post-round linger. `Server_ProcessRoundEnd`'s winner marker (event 21,
+  field 35 = 2) goes to every state-6 slot on the winning team before the board build in
+  team games (@ 0x516536..0x51658C, the team bit @ 0x516541, the build call
+  @ 0x516590) and after it in non-team games (@ 0x5167E2..0x5167FD), so a non-team
+  winner's end board shows 0; the scorer refuses a spectator slot (@ 0x52F6E5) and a
+  game type without a score table (@ 0x52F617..0x52F640). In the periodic second the
+  in-session (@ 0x51DE3E) and round-over (@ 0x51DE58) tests skip only the 0x46 resend
+  walk: every callee from @ 0x51DF50 on runs every second, in every game type and after
+  the round ends (the capture proximity pass, `Game_AccumulateTeamScores` @ 0x51DF55,
+  the win and violation checks, `SpawnWaveList_Tick` @ 0x51DF6E, the zone entities
+  @ 0x51DF73, `Server_EnforceZoneEntityTeams` @ 0x51DF7D, `Server_UpdateCaptureZones`
+  @ 0x51DF87). The proximity pass returns at a round end (@ 0x5086A3) before its mask
+  clear (@ 0x50872E), so the objective masks freeze while `Game_AccumulateTeamScores`
+  keeps counting over them; `Server_CheckWinConditions` has its own round-over test
+  (@ 0x51AD43). Event 25's counter needs the slot deployed (@ 0x5087A2), the body alive
+  (@ 0x5087AD) and a session (@ 0x5087BC). `Game_CountAlivePlayersPerTeam @ 0x5001C0`
+  counts state-6, non-spectator slots with a live body and mask bit 0 by the slot's
+  team byte (@ 0x500214, @ 0x50022F, @ 0x500235).
+
+### 38.11 Records
+
+The records slice checked every `[orig:]` cite of the domain against the IDB and the
+code, the IDB's reverse links, and the four domain records with the ledger and
+correspondence rows. The citation defects it found (about a hundred mid-instruction
+cites, 47 `Callee @callsite` forms, Hex-Rays `LABEL_nnn` / `var_` tokens and
+placeholder addresses) were corrected in the owning code, each commit naming the
+addresses `cite_census.py` dropped; the cite forms are those of `docs/README.md`
+(inner sites as `Func @ 0xFUNC (the call @ 0xSITE)` or a bare site, never
+`Callee @ callsite`). The implementing-file links of 56 IDB functions moved with the
+code; `docs/correspondence.md` names the new homes. The stale statements it listed in
+this record were corrected in place in the sections that carried them, with the facts
+of §38.1..§38.10. Refuted leads, kept so they are not re-opened: no domain cite names
+an address outside its named function (the defects were mid-instruction,
+wrong-instruction, placeholder and cite-form); brain+432 (AIUSEWPZ) has a reader in
+both engines (`AI_UpdateMovementTarget`, @ 0x460FC7, §7.4). Checked and matching: the
+brain state table equals `npc-script-coverage.md`'s brain table row for row; the 165
+WAC rows dispatch explicitly (`wac_dispatch_sweep`); the org1 Flags-0x80 Z chase
+(@ 0x4BF6C1..0x4BF6E5) and the +0x304 spawn seed (@ 0x4BFE04..0x4BFE07); the
+`EventAction_Dispatch` callee map (@ 0x4542E0..0x454B31) against the BMS record's §7.5.
+
+### 38.12 Divergence dispositions
+
+No new IDs. The rows this pass closes or narrows (the ledger mirrors them):
+
+- D-AI-1 (§17.10): the brain[37] producer (TARGETSSN, §38.2), the
+  dword_24C1930 "MP rule" (a local debug word), the death/spectator entry gate (the
+  0x0A handler only reads g_spawn_success_gate) and variant A (ported) leave the
+  residuals; an unresolved `.aip` is the zeroed record for the speeds too.
+- D-AI-2 (§17.6, §32.3): the saved-delta consumer (the ATEAM_LOCK replay), the
+  bone-list selection and the full solve frame are ported.
+- D-AI-4 (§17.10): the retreat (dead code), cover (the detour) and search
+  movement are ported, as is the scripted-idle aim override.
+- D-AI-6 (§17.10): the near-target origin mix and the bone-list consumers are
+  ported; the target point is the led raw Position.
+- D-AI-7 (§17.10): the LOS exclusion set and the pool walks are retail's (§38.2).
+- D-COL-2 (§15.5): closed; the section table it named is the door table (§33.14).
+- D-ITEM-8 (§24.7): marked FIXED to match its 2026-09-11 port.
+- D-AI-10 (§20.8): every scorer producer the row waited for is ported; the SP
+  tallies' counts-only shape remains.
+- D-INF-2 (§5): re-scoped from the unreachable "malformed state 3" to command
+  126's uninitialized goal read (§38.4); the goal Z is `InfantryState::goal_z`.
+- D-INF-3 (§15.5): the climb-order writer is the BMS attribute fold (§38.1).
+- D-COL-5 (§15.5): the same writer; its closure cite is
+  `Entity_SpawnFromBMSRecord` @ 0x40EDED..0x40EDF9.
+- D-WAC-6 (§33.38): a script never blocks; the strict policy refuses only a
+  literal missing the mounted FX, SOUNDSET or AMMO catalog.
+- D-TMATE-1 (§33.38): the flyover arms stall like retail; the remaining scope is
+  the Return/Ascend/Depart arms.
+- D-ITEM-6 (§24.7) and D-AI-9 (§17.10): the medic heal leg is ported; the burn
+  emitter and 173 clip, the wreck and slot-kill hit-record writes, the is_ai_capable
+  class-callback stand-in, and the org2 death transaction are carried.
+- In other records: D-EVT-3 and D-EVT-4 (the BMS record), D-NET-161 (e) and (g) (the
+  net record), D-HUD-6 and D-HUD-18 (the HUD record), and the ADR 0026 d5 amendment.
+
+### 38.13 IDB renames (2026-09-23)
+
+The pass proved these IDB names wrong, and the IDB now carries the new ones; every
+record, correspondence row and code cite names the new one. Old -> new, with the witness:
+
+| Address | Old IDB name | New IDB name | Witness |
+|---|---|---|---|
+| 0x4581B0 | EntityAI_ProcessInfantryStateMachine | EntityAI_ProcessAirStateMachine | the CHel / cpln class rows (@ 0x8132A0 / @ 0x8133A8, thunk 0x462120) (§38.1) |
+| 0x4583C0 | EntityAI_ProcessVehicleStateMachine | EntityAI_ProcessGroundStateMachine | the cveh / cbot / ctrn class rows (thunks 0x462130 / 0x462140) (§38.1) |
+| 0x465F60 | AI_TransitionToDeath_Infantry | AI_EnterState_HelicopterEvade | state-machine row 10 (@ 0x8152D8); installs the HELO_EVADE movers 0..3 (@ 0x466109 / @ 0x466195 / @ 0x4661EC / @ 0x46624D) |
+| 0x471710 | Entity_ProcessInfantryWeaponFire | AI_TickState_AircraftCombat | its only xref is the state-table slot @ 0x8152BC, after `AI_EnterState_AircraftCombat` |
+| 0x456860 | AI_GetSuspensionFirePoint | AI_IsTargetInSight | reads the brain target brain[38] and answers 0 without one; callers `AI_CalcGroundVehicleTarget`, `AI_CalcHelicopterTarget`, `AIEntity_ProcessWeaponFire` (§38.2) |
+| 0x4F1E40 | Entity_ResetWeaponState | WacCmd_KillSsn | the WAC registry record "killSSN" @ 0x82DB10 (the 44-byte records @ 0x82D290) |
+| 0x4ED3D0 | TextResource_GetMissionString | WacCmd_GroupToWaypoint | registry "GtoWP" @ 0x82D774 |
+| 0x4ED550 | TextResource_LoadMissionText | WacCmd_Inc | registry "inc" @ 0x82DF5C |
+| 0x4F7B30 | WacScript_SetEntityTeamSlot | WacCmd_GroupHp | registry "GroupHP" @ 0x82D8D4 |
+| 0x4F7AE0 | WacScript_SetEntityWaypoint | WacCmd_GroupSpawn | registry "GroupSpawn" @ 0x82D8A8 |
+| 0x4F7C50 | WacScript_SetEntityAITarget | WacCmd_GroupMin | registry "GroupMin" @ 0x82D824 |
+| 0x4F7CA0 | WacScript_SetEntityAlertState | WacCmd_GroupMax | registry "GroupMax" @ 0x82D850 |
+| 0x4F7CF0 | WacScript_SetEntityAIAction | WacCmd_GroupAtt | registry "GroupAtt" @ 0x82D87C |
+| 0x4F7D40 | WacScript_SendWeaponDetachEvent | WacCmd_OpenDoors | registry "opendoors" @ 0x82D900 |
+| 0x4F7DA0 | Entity_SendWeaponEvent8ToPool2 | WacCmd_CloseDoors | registry "closedoors" @ 0x82D92C |
+| 0x4F74B0 | WacScript_SendAIEvent10ToEntity | WacCmd_SsnCspd | registry "ssncspd" @ 0x82DE80 |
+| 0x4F7570 | WacScript_SendAIEvent11ToEntity | WacCmd_SsnPspd | registry "ssnpspd" @ 0x82DE54 |
+| 0x50D770 | Server_UpdateEntityIdleTimers | Server_UpdatePlayerBreathTimers | the per-slot breath samples against `wac_var_breathtime` (§38.9) |
+| 0x4987F0 | Chat_AddDebugMessage | Chat_AddMessageChannel2 | the SYSTEM ring's post (§38.7) |
+| 0x5DE8E0 | sub_5DE8E0 | Env_SetPrecipitationKind | the rain / snow kind store the WAC `rain` / `snow` handlers call |
+| 0x407310 | Entity_HandleDamageTrigger | OrganicClass_HandleEvent | the org0 / org1 class callback (§38.2, §38.3) |
+| 0x459290 | sub_459290 | Entity_WakeContactSolve | callers `sub_43C0C0` and `Entity_UpdateAllEntities` (§38.9) |
+| 0x40DA30 | sub_40DA30 | Score_ComputeSpTimeWeightedAverage | its caller `Cine_ProcessEpilogSequence_Retail` (§38.9) |
+| 0x40DB80 | CAIGroup_HasGuardTaskFromIndex2 | Mission_ResetBmsState | zeroes the BMS header, groups and references, then `Pool_Clear`, `HeliLift_ResetAll` and `EventSystem_FreeAll`; called by the loaders and the teardown |
+| 0x4541A0 | Entity_KillDestructiblesByTeam | EventAction_OpenGroupDoors | BMS row 30: section event 7 over pools 2, 1 (§33.14) |
+| 0x454240 | Entity_KillDestructiblesByOwner | EventAction_CloseGroupDoors | BMS row 31: section event 8 over pools 2, 1 (§33.14) |
+
+The globals: the WAC named values of the table @ 0x82EEF0, `dword_C6EADC` / `dword_C6EAE0` /
+`dword_C6EAE4` / `dword_C60DCC` / `dword_C60DC4` / `dword_C6B23C` -> `wac_var_seatbelt` /
+`wac_var_breathtime` / `wac_var_fallmps` / `wac_var_SquadSSN` / `wac_var_SquadWho` /
+`wac_var_RND` (the convention of `wac_var_humans @ 0xC6EB14`); `dword_24C1948` ->
+`g_entity_update_counter` (its one writer @ 0x4C2639, §38.9); `dword_C84700` ->
+`g_sp_elapsed_update_count` (latched from the counter by `Player_UpdatePerFrame` @ 0x4DE754
+for the SP epilog's score, §38.9).
+
+The code identifiers the same proofs misnamed follow: `process_air_state_machine` /
+`process_ground_state_machine`, `AiEntity::vel_y` (it mirrors a hull's +0x9C Y velocity; an
+organic's velocity is `InfantryState::vel`), `has_occupant` (the +0x170 occupant, the
+water-clamp and alert-edge gate), `update_movement_target` (`AI_UpdateMovementTarget
+@ 0x460E40`) and `Server_UpdatePlayerBreathTimers`.
+
+Still misleading and not renamed: `AI_CalcGroundVehicleTarget @ 0x4613A0` and
+`AI_CalcHelicopterTarget @ 0x461870` are the helicopter mover (0x10000) and the plane mover
+(0x10005); `Entity_UpdateSuspensionBounce @ 0x456710` is the unreferenced PLAYPARTANIM phase
+integrator; `RenderState_SetLayerVisibilityByIndex @ 0x5A3020` arms a HUD item-flash timer.

@@ -1137,6 +1137,12 @@ add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
 target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
 add_test(NAME hud_game_text COMMAND hud_game_text_test)
 
+# The HUD item flash BMS action 28 sub 37 arms and the declutter level-0 side
+# path it takes (hud/hud_declutter.h HudItemFlash / apply_level).
+add_executable(hud_item_flash_test hud/hud_item_flash_test.cpp)
+target_link_libraries(hud_item_flash_test PRIVATE opennova_runtime)
+add_test(NAME hud_item_flash COMMAND hud_item_flash_test)
+
 # The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
 # the corner rects, the positioned records, the packed colours, the stance slots and
 # the last-authored static frame; the retail leg reads the shipped hudpos.def.
@@ -1429,6 +1435,15 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# WAC command bodies and the EntityCommands primitives they reach, pinned against
+# the retail handlers (script kills, hide/hold/disable, HP writers, predicates,
+# return values).
+add_executable(script_command_parity_test world/script_command_parity_test.cpp)
+target_link_libraries(script_command_parity_test PRIVATE opennova_runtime)
+target_include_directories(script_command_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(script_command_parity_test PRIVATE cxx_std_17)
+add_test(NAME script_command_parity COMMAND script_command_parity_test)
+
 # world::inspect (ADR 0042 d5): the entity directory join, the debug-card
 # halves, and the EntityCommands set_entity_health/position both-store writes.
 add_executable(inspect_test world/inspect_test.cpp)
@@ -1566,10 +1581,59 @@ target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_test PRIVATE cxx_std_17)
 add_test(NAME ai COMMAND ai_test)
 
+# The vehicle brain's combat ticks through their dispatch rows: the state-17
+# GROUND_COMBAT tick (AIEntity_ProcessWeaponFire @0x472E00) leg by leg, the
+# processed/continuation LOS split, the rescan clear, turret staging, the
+# no-ammo latch, RC_FIRE, the ATEAM sweep, the ATEAM_LOCK replay, the chase.
+add_executable(ai_vehicle_combat_test world/ai_vehicle_combat_test.cpp)
+target_link_libraries(ai_vehicle_combat_test PRIVATE opennova_runtime)
+target_include_directories(ai_vehicle_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_vehicle_combat_test PRIVATE cxx_std_17)
+add_test(NAME ai_vehicle_combat COMMAND ai_vehicle_combat_test)
+
+# The SM target feed (AI_FindBestTargetB @0x466F60) and the engage bookkeeping
+# against their retail witnesses.
+add_executable(ai_targeting_test world/ai_targeting_test.cpp)
+target_link_libraries(ai_targeting_test PRIVATE opennova_runtime)
+target_include_directories(ai_targeting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_targeting_test PRIVATE cxx_std_17)
+add_test(NAME ai_targeting COMMAND ai_targeting_test)
+
+# The AI line of sight's exclusion set and indoors skip
+# (Physics_RaycastTerrainAndSectors @0x539910) and the script LOS split.
+add_executable(ai_los_test world/ai_los_test.cpp)
+target_link_libraries(ai_los_test PRIVATE opennova_runtime)
+target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_los_test PRIVATE cxx_std_17)
+add_test(NAME ai_los COMMAND ai_los_test)
+
+# The global hit record and the script kills that read it: the BMS kills keep
+# the last recorded round, WAC killSSN zeroes it, items read its section and
+# a brained item's machine its owner word.
+add_executable(hit_record_test world/hit_record_test.cpp)
+target_link_libraries(hit_record_test PRIVATE opennova_runtime)
+target_include_directories(hit_record_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hit_record_test PRIVATE cxx_std_17)
+add_test(NAME hit_record COMMAND hit_record_test)
+
 add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
 target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
 add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
+
+# compute_relative_position_metrics @0x545710 against original-x86 vectors
+# (scripts/oracles/aim_metrics_parity.py).
+add_executable(aim_metrics_parity_test world/aim_metrics_parity_test.cpp)
+target_link_libraries(aim_metrics_parity_test PRIVATE opennova_runtime)
+target_compile_features(aim_metrics_parity_test PRIVATE cxx_std_17)
+add_test(NAME aim_metrics_parity COMMAND aim_metrics_parity_test)
+
+# The vehicle-brain state rows against their retail witnesses: the live hull
+# words each row reads, the slot and brain words each enter writes.
+add_executable(ai_brain_rows_test world/ai_brain_rows_test.cpp)
+target_link_libraries(ai_brain_rows_test PRIVATE opennova_runtime)
+target_compile_features(ai_brain_rows_test PRIVATE cxx_std_17)
+add_test(NAME ai_brain_rows COMMAND ai_brain_rows_test)
 
 add_executable(npc_weapons_test world/npc_weapons_test.cpp)
 target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)
@@ -1663,10 +1727,26 @@ add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
 target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
 add_test(NAME infantry_terrain COMMAND infantry_terrain_test)
 
+# The org1 (NPC) motor legs against vectors from executing the retail motor
+# (Entity_UpdateInfantryAI @0x4B9910): the +0xAC vertical quarter-step tail,
+# the even-only climb/ladder/water blocks, and the later org1 parity fixes.
+add_executable(infantry_org1_parity_test world/infantry_org1_parity_test.cpp)
+target_link_libraries(infantry_org1_parity_test PRIVATE opennova_runtime)
+target_compile_features(infantry_org1_parity_test PRIVATE cxx_std_17)
+add_test(NAME infantry_org1_parity COMMAND infantry_org1_parity_test)
+
 add_executable(infantry_attention_test world/infantry_attention_test.cpp)
 target_link_libraries(infantry_attention_test PRIVATE opennova_runtime)
 target_compile_features(infantry_attention_test PRIVATE cxx_std_17)
 add_test(NAME infantry_attention COMMAND infantry_attention_test)
+
+# The org1 think block's combat legs (Entity_UpdateInfantryAI @0x4B9910, the
+# think @0x4BA970..0x4BE7FD): held/dead targets, the no-target search, the aim
+# target and eye, the lead, the hold-timer tail, reload, retaliation LOS.
+add_executable(infantry_think_test world/infantry_think_test.cpp)
+target_link_libraries(infantry_think_test PRIVATE opennova_runtime)
+target_compile_features(infantry_think_test PRIVATE cxx_std_17)
+add_test(NAME infantry_think COMMAND infantry_think_test)
 
 # The infantry slot-sound emissions (footsteps/foley/landing/screams).
 add_executable(slot_sound_test world/slot_sound_test.cpp)
@@ -1979,6 +2059,11 @@ target_link_libraries(zone_chain_test PRIVATE opennova_runtime)
 target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zone_chain_test PRIVATE cxx_std_17)
 add_test(NAME zone_chain COMMAND zone_chain_test)
+add_executable(zone_capture_parity_test world/zone_capture_parity_test.cpp)
+target_link_libraries(zone_capture_parity_test PRIVATE opennova_runtime)
+target_include_directories(zone_capture_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(zone_capture_parity_test PRIVATE cxx_std_17)
+add_test(NAME zone_capture_parity COMMAND zone_capture_parity_test)
 
 # The authoritative multiplayer rules/stats domain shared by TDM and A&S, with
 # Co-op pinned to the existing WAC/BMS outcome path. [orig:
@@ -1988,6 +2073,11 @@ target_link_libraries(match_test PRIVATE opennova_runtime)
 target_include_directories(match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(match_test PRIVATE cxx_std_17)
 add_test(NAME match COMMAND match_test)
+add_executable(match_scoring_test world/match_scoring_test.cpp)
+target_link_libraries(match_scoring_test PRIVATE opennova_runtime)
+target_include_directories(match_scoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(match_scoring_test PRIVATE cxx_std_17)
+add_test(NAME match_scoring COMMAND match_scoring_test)
 
 # Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
 # items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
@@ -2013,6 +2103,14 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+# Unmoved carriers read their placement angles in the spawn form: the motors'
+# lazy seeds, the carrier pose, the emplaced gun frame, seat points and the
+# attach pre-snap (Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6).
+add_executable(vehicle_placement_angles_test world/vehicle_placement_angles_test.cpp)
+target_link_libraries(vehicle_placement_angles_test PRIVATE opennova_runtime)
+target_compile_features(vehicle_placement_angles_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_placement_angles COMMAND vehicle_placement_angles_test)
+
 add_executable(vehicle_followups_test world/vehicle_followups_test.cpp)
 target_link_libraries(vehicle_followups_test PRIVATE opennova_runtime)
 add_test(NAME vehicle_followups COMMAND vehicle_followups_test)
@@ -2033,6 +2131,15 @@ target_include_directories(vehicle_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_mount_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_mount COMMAND vehicle_mount_test)
 
+# AI route parity: the BMS loader's nav table (Mission_LoadBMSFile @0x40F4E0), the
+# aircraft AI leg's state words and the player pilot's PRETTY hold
+# (Entity_UpdateAircraftPhysics @0x490310).
+add_executable(route_parity_test world/route_parity_test.cpp)
+target_link_libraries(route_parity_test PRIVATE opennova_runtime)
+target_include_directories(route_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(route_parity_test PRIVATE cxx_std_17)
+add_test(NAME route_parity COMMAND route_parity_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).
@@ -2043,10 +2150,10 @@ target_compile_features(root_motion_test PRIVATE cxx_std_17)
 opennova_add_gated_test(root_motion COMMAND root_motion_test)
 
 # WAC scripting. The registry oracle (165-command ISA + 28 param types from the
-# binary) exercises only the language front end (engine/formats/wac); VM behavior
-# (var math, entity mutation, temporal/edge firing, env, authority) and the
-# zero-crash parse over the real shipped .wac corpus compile against the world
-# (dirs via argv, else the dev defaults; absent dirs skip).
+# binary) exercises only the format half (engine/formats/wac); VM behavior (var
+# math, entity mutation, temporal/edge firing, env, authority) and the shipped
+# .wac corpus, compiled to the original compiler's listings, run against the
+# world (dirs via argv, else the dev defaults; absent dirs skip).
 add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
 target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
 target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2073,6 +2180,14 @@ add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
+
+# The original compiler and VM on synthetic programs: the fixtures are the
+# pinned executable's own listings and states (scripts/oracles/wac_parity.py).
+add_executable(wac_retail_vectors_test wac/wac_retail_vectors_test.cpp)
+target_link_libraries(wac_retail_vectors_test PRIVATE opennova_runtime)
+target_include_directories(wac_retail_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_retail_vectors_test PRIVATE cxx_std_17)
+add_test(NAME wac_retail_vectors COMMAND wac_retail_vectors_test)
 
 # The WAC program surface the retired WacProgram / WacState bindings served
 # (ADR 0043 d10): the compile surface, the layered load, and an installed
@@ -2108,6 +2223,38 @@ target_link_libraries(event_runtime_test PRIVATE opennova_runtime)
 target_include_directories(event_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(event_runtime_test PRIVATE cxx_std_17)
 add_test(NAME event_runtime_bms COMMAND event_runtime_test)
+
+# BMS event parity: the retail-witnessed trigger/action semantics (bms-event-runtime-re)
+# through the public BmsEventSystem / EntityCommands seams.
+add_executable(bms_event_parity_test mission/bms_event_parity_test.cpp)
+target_link_libraries(bms_event_parity_test PRIVATE opennova_runtime)
+target_include_directories(bms_event_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bms_event_parity_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(bms_event_parity_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME bms_event_parity COMMAND bms_event_parity_test)
+
+# The BMS HUD relays: the objective notification (actions 35/36), the
+# SubGoalWon/SubGoalLost announcement relay and the host's S2C 0x3F fan.
+add_executable(bms_hud_relay_test mission/bms_hud_relay_test.cpp)
+target_link_libraries(bms_hud_relay_test PRIVATE opennova_runtime)
+target_include_directories(bms_hud_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(bms_hud_relay_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(bms_hud_relay_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME bms_hud_relay COMMAND bms_hud_relay_test)
+
+# The BMS event runtime replayed against the original's instructions: the
+# condition/chain/action/entry/pass witnesses scripts/oracles/
+# mission_event_parity.py captured in the retail PE (mission/fixtures/
+# mission_event_vectors.inc), rebuilt through the raw-record seam.
+add_executable(mission_event_vectors_test mission/mission_event_vectors_test.cpp)
+target_link_libraries(mission_event_vectors_test PRIVATE opennova_runtime)
+target_include_directories(mission_event_vectors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_event_vectors_test PRIVATE cxx_std_17)
+add_test(NAME mission_event_vectors COMMAND mission_event_vectors_test)
 
 # Mission -> world promotion: spawn a parsed mission's entities into the world pools,
 # allocate AI brains per organic, build the waypoint nav table, then tick the AI to prove
@@ -2878,7 +3025,7 @@ foreach(port
         world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/buggy_01tr
+        mission/native_assets_00trg mission/buggy_01tr mission/fire_hold_01tr
         mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
@@ -2895,6 +3042,10 @@ add_executable(lose_flow_test mission/lose_flow_test.cpp)
 target_link_libraries(lose_flow_test PRIVATE opennova_test_rig)
 opennova_add_gated_test(lose_flow_04tr COMMAND lose_flow_test --bms 04TR.bms)
 opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms --victim-team 1)
+# `--self-kill`: the player's own HE blast tallies nothing (no Player definition
+# authors a `score`), so the WAC's bluekills lose never fires on it.
+opennova_add_gated_test(lose_flow_04tr_self_kill COMMAND lose_flow_test --bms 04TR.bms --self-kill)
+opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05TR.bms --self-kill)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

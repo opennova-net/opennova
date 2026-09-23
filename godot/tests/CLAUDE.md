@@ -47,6 +47,13 @@
 - A new `class_name` (a fixture, a production class) is invisible to a headless GUT run
   until `"$GODOT_BIN" --headless --path godot --import` refreshes the class cache; the
   symptom is "Could not find base class" and a silently dropped script.
+- A fixture whose world must run holds a human: a playable load, the listen host's own
+  player, or `spawn_local_player` (`simulation_test.gd`'s `_spawn_fixture_human`). Once the
+  WAC clock starts, retail's frame gate holds the entity update of a world with no human
+  (world-wac-ai-re §38.9), and a `set(ticks,-1)` WAC write opens only the script admission.
+  A staged items.def override must lead its file (a type id resolves to its first row), and
+  a placed item's brain, part-anim channels and AI card need the items table before the load
+  (the brain test is read at spawn).
 - Every 3DI model the suite loads is synthetic: `fixtures/threedi/synth/*.3di` are
   minted by `tests/fixtures/minimal_3di_gen.cpp` through the engine's parity writer
   (eleven base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material

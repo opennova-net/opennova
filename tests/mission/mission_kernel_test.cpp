@@ -7,13 +7,21 @@
 // the local role's tick advances the logic clock, the teleport/health seams round-trip
 // through both stores, and the CanFire verdict answers over the spawned
 // player. The retail-path legs stay in tests/common/retail_mission_files.
+#include <base/resource_index/resource_index.h>
+#include <formats/def/def.h>
+#include <formats/wac/bytecode.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include "common/boot_file_source.h"
+#include "common/file_io.h"
+#include "common/test_paths.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -127,13 +135,43 @@ static void run_boot_trace_gates() {
 	}
 }
 
+// Only the authority compiles the mission's WAC layers: a joiner's load skips
+// all three compiles and installs the bare terminator.
+// [orig: WacScript_InitAndLoad @0x4F9437 (the authority test), @0x4F944E,
+//  @0x4F95A9]
+static void test_joiner_installs_only_the_wac_terminator() {
+	for (bool joiner : {false, true}) {
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then inc(v1) endif\n";
+		bms::File m{};
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		ms::MissionKernel kernel;
+		kernel.open_document(std::move(m), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.joiner = joiner;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.wac.vm().loaded());
+		CHECK(kernel.wac_loaded == !joiner);
+		if (joiner) {
+			CHECK(kernel.wac.program().code.size() == 1);
+			CHECK(kernel.wac.program().code[0] == wac::kProgramTerminator);
+			CHECK(kernel.wac.program().event_count == 0);
+		} else {
+			CHECK(kernel.wac.program().event_count == 1);
+		}
+	}
+}
+
 // Every peer starts the mission on the same frame clock: retail zeroes `tick`
 // on the host and on each client alike, past the authority-only pre pass, and
 // advances it ahead of every frame's entity update, so the first frame runs at
 // tick 1 whether or not this peer ran the pre pass.
 // [orig: Game_StartMission `mov tick, ebx` (ebx = 0) @0x525B9F, the
 //  is_authority gate @0x525B78; Game_ProcessMainFrame `add tick, ebx`
-//  @0x5265B4 ahead of Entity_UpdateAllEntities @0x52674B]
+//  @0x5265B4 ahead of the Entity_UpdateAllEntities call @0x52674B]
 static void test_first_frame_tick_matches_on_host_and_joiner() {
 	for (bool joiner : {false, true}) {
 		bms::File mission{};
@@ -346,6 +384,9 @@ static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
  CHECK(hull != nullptr);
  if (hull == nullptr) return;
  hull->group_id = 7;
+ // No items table in this kernel: stamp the def row's ordinal the teleport's
+ // +0x1C member gate reads [orig: Entity_TeleportTeamToSpawn @0x43D3EE].
+ hull->item_type_index = 7;
  w::VehicleTraits traits;
  traits.player_control = true;
  kernel.world.vehicles.traits.set(hull->item_id,traits);
@@ -422,8 +463,101 @@ static void test_initial_wac_binds_the_preopened_music_context() {
     }
 }
 
+// A kernel-hosted world answers the named-point queries from the carrier's
+// model through its collision pose, so the AI entry walk reaches the model's
+// UseGun point by name. No seat table carries the point here (E/G/S/H points
+// never are seats), so the seat-scan fallback alone left the goal on the
+// target's origin. The same kernel answers the last-match, userpoint-pivot and
+// section-pivot queries from that model.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50 by name, reached from
+//  the entry walk Entity_UpdateInfantryAI @0x4BB373..0x4BB849;
+//  Entity_FindAttachBone @0x4B9580; Entity_ComputeWeaponFireTransform_0
+//  @0x456980; Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
+static void test_board_walk_reaches_a_kernel_named_point() {
+	namespace fs = std::filesystem;
+	const std::string root = std::string(test_paths_temp_dir()) + "/opennova_kernel_named_points";
+	std::error_code ec;
+	fs::remove_all(root, ec);
+	fs::create_directories(root, ec);
+	const std::vector<uint8_t> mount = test_io::read_file(
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
+	if (test_io::is_lfs_pointer(mount)) {
+		// A checkout without the LFS fixtures (the net-linux job pulls only
+		// fixtures/novaworld) carries the pointer, not the model.
+		std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+		return;
+	}
+	CHECK(!mount.empty() && test_io::write_file(root + "/NamedMount.3di", mount));
+	static const char kItems[] =
+			"begin \"Named mount\"\n id 100164\n type object\n graphic NamedMount\n hp 100\nend\n";
+	def::DefItemsFile items{};
+	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+			sizeof(kItems) - 1, &items) == 0);
+	{
+		ResourceIndex index;
+		CHECK(index.scan(root, std::string(), VfsMountMode::LooseOnly));
+		assets::AssetStore store{&index};
+		std::map<std::string, std::string> files;
+		bms::File m{};
+		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
+		m.items[0].id = 21;
+		m.organics.push_back(organic(20 << 16, 20 << 16, 0, /*team=*/1));
+		m.organics[0].id = 31;
+		ms::MissionKernel kernel;
+		kernel.set_items_table(&items);
+		kernel.set_assets(&store);
+		kernel.open_document(std::move(m), "named", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.wac = false;
+		options.terrain = false;
+		options.seat_specs = false; // no seat carries the point: only its name reaches it
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		w::World &world = kernel.world;
+		const w::Entity *carrier = world.registry.by_net_id(21);
+		const w::Entity *npc = world.registry.by_net_id(31);
+		CHECK(carrier != nullptr && npc != nullptr && world.pose_provider == &kernel);
+		if (carrier == nullptr || npc == nullptr || world.pose_provider == nullptr) {
+			def::def_free_items(&items);
+			return;
+		}
+		CHECK(carrier->seats.empty());
+		// The four queries reach the model through the kernel.
+		w::IPoseProvider &pose = *world.pose_provider;
+		int32_t named[6] = {}, direct[6] = {};
+		CHECK(pose.resolve_named_transform(world, carrier->handle, "USEGUN", named));
+		CHECK(kernel.collision_pose.resolve_named_transform(world, carrier->handle, "Usegun", direct));
+		CHECK(std::equal(named, named + 6, direct));
+		CHECK(direct[0] != (10 << 16) || direct[1] != (20 << 16)); // off the origin
+		CHECK(pose.last_named_userpoint(world, carrier->handle, "usegun") == 6);
+		int32_t pivot[3] = {}, pivot_direct[3] = {};
+		CHECK(pose.resolve_userpoint_pivot(world, carrier->handle, 6, pivot));
+		CHECK(kernel.collision_pose.resolve_userpoint_pivot(world, carrier->handle, 6, pivot_direct));
+		CHECK(std::equal(pivot, pivot + 3, pivot_direct));
+		int32_t section[3] = {}, section_direct[3] = {};
+		CHECK(pose.resolve_section_pivot(world, carrier->handle, 2, section));
+		CHECK(kernel.collision_pose.resolve_section_pivot(world, carrier->handle, 2, section_direct));
+		CHECK(std::equal(section, section + 3, section_direct));
+		// The any-seat board order walks to the named point on the 1-unit ring.
+		w::AiEntity *body = world.ai.for_handle(npc->handle);
+		if (body == nullptr) body = world.ai.at(world.ai.attach(npc->handle));
+		body->inf.active = true;
+		body->slot.f[37] = 125;
+		body->slot.f[38] = 21;
+		int32_t entry_heading = 0;
+		world.ai.infantry_board_think(*body, world, 125, entry_heading);
+		CHECK(body->inf.move_target[0] == direct[0] && body->inf.move_target[1] == direct[1] &&
+				body->inf.move_target[2] == direct[2]);
+		CHECK(body->inf.arrival_radius == 0x10000);
+	}
+	def::def_free_items(&items);
+	fs::remove_all(root, ec);
+}
+
 int main() {
     test_first_frame_tick_matches_on_host_and_joiner();
+    test_joiner_installs_only_the_wac_terminator();
     test_initial_wac_binds_the_preopened_music_context();
     test_empty_wac_clock_and_baseline_gate();
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
@@ -431,6 +565,7 @@ int main() {
 	test_numbered_vars_reset_after_premission_before_initial_wac();
 	test_initial_wac_waits_for_the_weather_owner_once();
 	test_restart_cancel_keeps_the_personal_slot_zoom();
+	test_board_walk_reaches_a_kernel_named_point();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
 	std::map<std::string, std::string> files;
@@ -496,7 +631,7 @@ int main() {
 	// differ. Observing the view between composes reads the last composed
 	// view and advances nothing, so two observations agree and leave the
 	// filters where the frames left them
-	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d;
+	// [orig: @ 0x4de590; the Camera_ComputeThirdPersonView calls @ 0x526781 / @ 0x5ca34d;
 	//  the only other callers @ 0x5c9841 (the Inset scene) / @ 0x52b082].
 	kernel.local.view.shake.counter = 10;
 	tick_no_net(kernel);

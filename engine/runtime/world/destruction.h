@@ -550,10 +550,10 @@ void apply_item_state_event(World &world, Entity &target, int16_t section);
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
 
-// The per-pool cb(entity, 0, 0) clock: pool 1 every tick and trailing -1,
-// pool 2 at slot&7 with positive-clock -8, pool 3 at slot&63 with -64.
-// Both peers run class callbacks; each callback owns its authority gates.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2100]
+// The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
+// -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback. Both
+// peers run class callbacks; each callback owns its authority gates. Pool 1 is
+// World::update_pool1_slot. [orig: Entity_UpdateAllEntities @0x4C2100]
 void tick_item_event_pool(World &world, int pool);
 
 // The tree-class destruction [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +

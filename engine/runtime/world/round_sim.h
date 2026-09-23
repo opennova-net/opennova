@@ -120,7 +120,7 @@ constexpr double seat_hit_bone_damage_multiplier(int32_t hit_bone) {
     return seat_hit_bone_is_critical(hit_bone) ? 6.0 : 1.0;
 }
 
-// Hidden-section mask selected by Entity_HandleDamageTrigger's dismemberment
+// Hidden-section mask selected by OrganicClass_HandleEvent's dismemberment
 // leg: the mask starts as the hit bone's own bit (1 << bone, x86 shl count
 // masking mirrored), then the 13-case switch ORs the linked-section addend on
 // top — bones 1-4 are the torso/head stack, 5-8 sever the whole limb chain
@@ -173,10 +173,12 @@ struct RoundSourceState {
 
 // The witnessed below-water EYE projection, shared by the round-source
 // classifier and the shell's aimed-shot/HUD-crosshair gates so they cannot
-// drift: Position.Z plus the per-tick eye offset (entity+0x74), strictly
-// below the water plane; env.water_z == 0 (no authored water) is never
-// below. [orig: RoundData_SpawnRound stance leg @0x4ec2de..0x4ec2ea; the
-// recoil x4 legs @0x4ec34e..0x4ec35a / @0x4ec879..0x4ec885]
+// drift: Position.Z plus the per-tick eye offset (entity+0x74), a wrapping
+// add, strictly below the water plane in a raw signed compare. Neither site
+// tests for an unauthored plane, so with no water (the plane at 0) an eye
+// below Z 0 is below it. [orig: RoundData_SpawnRound stance leg
+// @0x4ec2de..0x4ec2ea; the recoil x4 legs @0x4ec34e..0x4ec35a /
+// @0x4ec879..0x4ec885; HUD_DrawCrosshair @0x592B59..0x592B65]
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z);
 
@@ -349,16 +351,35 @@ struct RoundDeath {
     // for the host's classifier. The revive window is suppressed by either
     // 0x400 or 0x800.
     uint32_t event_flags = 0;
+    // True only for a death raised at one of the five damage-pass lethal edges
+    // that call Score_ProcessKillEvent (the kill accounting: the single-player
+    // tallies and the unit-score event). Scripted, drowning, carry-limit and
+    // admin deaths never reach it. [orig: Score_ProcessKillEvent @0x4FD400,
+    // callers Entity_MovementCollisionResolver @0x4B39E2,
+    // Entity_ApplyVehicleCollisionDamage @0x4E6773, Entity_ApplyWeaponDamage
+    // @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
+    bool kill_event = false;
+    // Raised by an org1 body's own death edge: the death transaction (0x13 +
+    // scoring against lastAttacker) without the damage-time SP tally. A
+    // damage-time record for such a body only feeds that tally; its edge
+    // raises the transaction. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
+    // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
+    // @0x4FD400 is called only from the damage paths]
+    bool motor_edge = false;
 };
 
-// A medic-kit hit on a downed teammate the kill-zone pass admitted this tick —
-// drained by the host session, which owns the revive transaction's wire
-// (0x54 / 0x3A / 0x61 / 0x1E ev 38) [orig: Projectile_ProcessExplosionQueue
+// A medic-kit hit on a same-team person the kill-zone pass admitted this tick,
+// in sweep order — drained by the host session, which owns both transactions'
+// wire: a downed target's revive (0x54 / 0x3A / 0x61 / 0x1E ev 38) and a live,
+// hurt target's heal (0x1E ev 45) [orig: Projectile_ProcessExplosionQueue
 // @0x4EADFC routes a kz type 3 with the Medic charattr to
-// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer @0x517CD0].
-struct MedicRevive {
+// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer
+// @0x517CD0 (the call @0x4E67D8) / GameEvent_HealPlayer @0x50DE30 (the call
+// @0x4E6805)].
+struct MedicInteraction {
     EntityHandle victim;
     EntityHandle healer;
+    bool revive = false; // the dead arm; the live arm heals
 };
 
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
@@ -392,7 +413,7 @@ struct RoundImpact {
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
 
-// A processed (non-zero) damage hit — drained by AiSystem::tick to stamp the victim's
+// A processed (non-zero) damage hit — drained by AiSystem::apply_round_hits to stamp the victim's
 // AI reaction state (wasHit / lastAttacker / the SM damage event). [orig: the damage
 // chain writes the victim entity + queues the AI event inline
 // (Projectile_ProcessDamageOnTarget @ 0x4E7FB0); our sim/AI split records instead.]
@@ -403,6 +424,46 @@ struct RoundHit {
     int16_t primary_section = -1;
     int16_t secondary_section = -1;
 };
+
+// The one global hit record the damage passes fill for the class event
+// callbacks [orig: hitRecord @0xB7C620, 80 bytes, Projectile_GetHitRecord
+// @0x4E7000]. Projectile_CopyEntityToHitRecord @0x4E7010 zeroes it and
+// copies the striking round: its position and angles (+0x00..+0x14), its
+// velocity (+0x18..+0x2C), the round itself (+0x40), its owner (+0x44) and
+// its ammo word (+0x4C). An entity hit then stores the damage (+0x30), the
+// struck section (+0x38) and the target (+0x48); a terrain stop leaves them
+// zero. Only the mission start and WAC killSSN zero the whole record; the
+// BMS kills clear the damage word (and the owner for some rows), so every
+// later event-1 callback still reads the LAST recorded round. The callbacks
+// read that round through the +0x40 pointer, and a released round keeps its
+// bytes until the slot allocator's cursor comes back to it 512 allocations
+// later [orig: Projectile_ReleaseEffects @0x4E8280 clears only its effect
+// words; CEntityManager_AllocateSlot's memset @0x4EABC0..0x4EABC8]. LiveRound
+// carries no pool-slot identity, so the round_* fields hold the round as it
+// stood when the record was written.
+struct HitRecord {
+    bool has_round = false;       // +0x40 non-null
+    Vec3 round_pos;               // the round's +0x04..+0x0C
+    FixedVec3 round_vel_q16;      // the round's +0x98..+0xA0
+    int32_t round_yaw_bam = 0;    // +0x0C..+0x14 (hitRecord[3..5])
+    int32_t round_pitch_bam = 0;
+    int32_t round_roll_bam = 0;
+    int32_t round_ammo_index = 0; // the round's +0x26C
+    EntityHandle round_owner;     // the round's +0x170
+    int32_t damage = 0;           // +0x30 (hitRecord[12])
+    int32_t section = 0;          // +0x38 (hitRecord[14])
+    EntityHandle owner;           // +0x44 (hitRecord[17])
+    EntityHandle target;          // +0x48
+};
+
+// The person class callbacks' round legs, run on event 1 while the hit record
+// holds a round: the death clip from the record's section and the round's
+// approach quadrant, the ammo's collision force from the round, the
+// torso-stack body roll, the damage reaction, and on the authority the
+// dismemberment cut of a non-player body.
+// [orig: OrganicClass_HandleEvent @0x40740F..0x4076D5; the plyr twin
+//  Entity_HandleDamageAndTriggerZones @0x407777..0x407A7C]
+void person_class_round_legs(World &world, Entity &victim, const HitRecord &record);
 
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
 // HOST present layer for the fire sound + muzzle effect (+ the MF-light deferral).
@@ -484,9 +545,9 @@ public:
     // Deaths detected by the damage pass, in tick order. The host session drains this
     // every tick (inmatch server tick) and stages the death broadcasts.
     std::vector<RoundDeath> deaths;
-    // Medic revives the kill-zone pass admitted this tick, in tick order; the host
-    // drains them after the deaths (the revive sender is a host transaction).
-    std::vector<MedicRevive> medic_revives;
+    // Medic interactions the kill-zone pass admitted this tick, in tick order; the
+    // host drains them after the deaths (both arms are host transactions).
+    std::vector<MedicInteraction> medic_interactions;
 
     // Impacts resolved this tick, in tick order — drained by the presenting host
     // every frame (the sim stays render-free). Bounded: a headless server never
@@ -495,9 +556,13 @@ public:
     std::vector<RoundImpact> impacts;
     uint64_t next_impact_order = 1;
 
-    // Processed hits (damage > 0), in tick order — drained by AiSystem::tick before the
-    // per-entity updates (wasHit / lastAttacker / SM damage events).
+    // Processed hits (damage > 0), in tick order — drained by AiSystem::apply_round_hits
+    // right after the explosion queue, before the pool-0 walk (wasHit / lastAttacker /
+    // SM damage events).
     std::vector<RoundHit> hits;
+
+    // The global hit record (see HitRecord).
+    HitRecord hit_record;
 
     // Fires spawned since the last presentation drain (every spawn records one, the
     // local player's included — the present pass self-filters). Drained by the host

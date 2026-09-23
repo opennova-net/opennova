@@ -93,7 +93,7 @@ const char kProfiles[] =
 struct Rig {
     Field field;
     World world;
-    AiSystem ai;
+    AiSystem &ai = world.ai;
     TestSource src;
     AiEntity *e = nullptr;
 
@@ -125,7 +125,7 @@ struct Rig {
         ctx.is_authority = authority;
         for (uint32_t t = from; t < to_excl; ++t) {
             ctx.logic_tick = t;
-            ai.tick(world, ctx);
+            world.update_all_entities(ctx);
         }
     }
 
@@ -150,6 +150,39 @@ void test_npc_feet_odd_ticks_only() {
     }
     rig.run(2, 3); // tick 2 (even) — nothing again
     CHECK(rig.take().empty());
+}
+
+// The pool-0 walk runs the bodies in slot order, whatever order their brains
+// were attached in: the body whose brain holds the lower AI index but sits in
+// the higher slot updates second, so its footstep lands second.
+// [orig: Entity_UpdateAllEntities @0x4C2426..0x4C245C (the g_pool_list[0]
+//  base/used/stride walk)]
+void test_bodies_update_in_slot_order() {
+    Rig rig;
+    const EntityHandle a = rig.e->handle; // slot 0
+    const AiEntity config = *rig.e;
+    const EntityHandle b = rig.world.registry.spawn(0, *rig.world.registry.get(a)); // slot 1
+    rig.ai.release(a);
+    (void)rig.ai.attach(b); // the freed index 0
+    (void)rig.ai.attach(a); // a new index 1 (the array may move: re-read both)
+    AiEntity *ea = rig.ai.for_handle(a);
+    AiEntity *eb = rig.ai.for_handle(b);
+    for (AiEntity *e : {ea, eb}) {
+        e->inf.active = true;
+        e->health = 100;
+        e->profile.sound_profile = config.profile.sound_profile;
+        e->pos[2] = fx(0.0);
+        e->inf.anim_state = anim_state::kIdle;
+    }
+    CHECK(rig.ai.index_of(*eb) < rig.ai.index_of(*ea));
+    rig.src.events = 0x1; // left foot every frame
+    rig.run(1, 2);        // odd tick: both NPC feet
+    const auto evs = rig.take();
+    CHECK(evs.size() == 2);
+    if (evs.size() == 2) {
+        CHECK(evs[0].source_handle == a.packed);
+        CHECK(evs[1].source_handle == b.packed);
+    }
 }
 
 void test_player_feet_even_ticks_only() {
@@ -568,6 +601,7 @@ void test_surface_tile_resolvers() {
 
 int main() {
     test_npc_feet_odd_ticks_only();
+    test_bodies_update_in_slot_order();
     test_player_feet_even_ticks_only();
     test_player_female_profile_selection();
     test_foot_dip_water_and_surface_picks();

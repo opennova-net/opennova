@@ -382,7 +382,6 @@ struct AiGroupRow {
 struct AiSystemCounters {
 	int32_t brain_count = 0;
 	int32_t event_count = 0;
-	int32_t unported_calls = 0;
     uint64_t runtime_gap_calls = 0;
     uint32_t runtime_gap_sites = 0;
 	int32_t rel_ops = 0;

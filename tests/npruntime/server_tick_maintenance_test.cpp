@@ -359,6 +359,146 @@ bool check_deploy_seeds_protection_and_armory_state() {
 			"a deploy outside pre-round leaves the latch clear");
 }
 
+// The WAC humans count walks pool 0: a live row with the Player bit that is
+// not hidden counts, a dead one included. A player still waiting to deploy
+// (hidden) and an NPC do not, and no connection is needed. The def test is
+// the walk's allocated-row test: every retail spawn links an items.def row,
+// row 0 when the type has none, so a player whose type items.def lacks (the
+// has_item_def-clear row, and the real spawn over such a table) counts too.
+// [orig: Server_BuildEntitySlotLists @0x4f97a0 -- the def test @0x4F9809,
+// `test eax,100h` @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1; the link
+// Entity_SpawnFromAnimSlotProperty @0x43C429; the miss
+// ItemList_FindIndexByTypeId @0x49E131]
+bool check_humans_count_the_visible_players() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	auto spawn = [&](bool def, uint32_t flags) {
+		w::Entity e;
+		e.kind = w::EntityKind::Organic;
+		e.has_item_def = def;
+		e.engine_flags = flags;
+		e.alive = true;
+		e.health = 100;
+		world.registry.spawn(0, e);
+	};
+	spawn(true, w::kEntityFlagPlayer);
+	spawn(true, w::kEntityFlagPlayer | w::kEntityFlagCarried);
+	spawn(true, 0);
+	spawn(false, w::kEntityFlagPlayer);
+	spawn(true, w::kEntityFlagPlayer | w::kEntityFlagDead);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.cached.humans == 3,
+			"the humans count takes the three visible players, the def-less one included"))
+		return false;
+	// The traits sweep over an items table without the Player row leaves the
+	// template def-less; the player spawned from it is still a human.
+	world.tables.player.has_item_def = false;
+	const w::EntityHandle joined = w::spawn_remote_player(world, player_spawn(4, 0, 0));
+	const w::Entity *joined_row = world.registry.get(joined);
+	if (!expect(joined_row != nullptr && !joined_row->has_item_def,
+			"the fixture player spawns without a matched items.def row"))
+		return false;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(world.cached.humans == 4,
+			"a player whose type items.def lacks counts as a human");
+}
+
+// The live group recount runs in the server tick's periodic second, ahead of
+// the frame's entity update: a round that kills a group member during the
+// periodic frame's entity update is counted only at the next periodic second.
+// [orig: Server_TickUpdate -- the EntityPool_RecountLiveByGroup call @0x51DC02;
+//  Game_ProcessMainFrame -- the Entity_UpdateAllEntities call @0x52674B
+//  follows the Server_TickUpdate call @0x5266B6]
+bool check_recount_precedes_the_entity_update() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.tables.ammo.entries.resize(2);
+	w::AmmoTableEntry &rifle = world.tables.ammo.entries[1];
+	rifle.velocity = 800;
+	rifle.max_age_ticks = 124;
+	rifle.weight_in_grains = 875;
+	rifle.min_damage = 10;
+	rifle.max_damage = 40;
+	rifle.valid = true;
+	w::Entity shooter_seed;
+	shooter_seed.team = 1;
+	const w::EntityHandle shooter = world.registry.spawn(0, shooter_seed);
+	auto spawn_member = [&](float x, uint16_t net_id) {
+		w::Entity seed;
+		seed.kind = w::EntityKind::Organic;
+		seed.has_item_def = true;
+		seed.item_type = 3;
+		seed.team = 2;
+		seed.health = 5;
+		seed.health_max = 100;
+		seed.alive = true;
+		seed.net_id = net_id;
+		seed.group_id = 7;
+		seed.position = {x, 0.0f, 0.0f};
+		const w::EntityHandle h = world.registry.spawn(0, seed);
+		w::AiEntity &body = *world.ai.at(world.ai.attach(h));
+		body.inf.active = true;
+		body.health = 5;
+		body.team = 2;
+		body.net_id = net_id;
+		body.pos[0] = static_cast<int32_t>(x * 65536.0f);
+		return h;
+	};
+	const w::EntityHandle victim = spawn_member(5.0f, 0x21);
+	spawn_member(-200.0f, 0x22);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx); // the first periodic second
+	if (!expect(world.script.relations.group(7).live_count == 2, "both members counted live"))
+		return false;
+	for (int tick = 1; tick < 62; ++tick) inmatch::Server_TickUpdate(ctx);
+	w::RoundSpawnParams shot;
+	shot.owner = shooter;
+	shot.shooter_handle = shooter.packed;
+	shot.origin = {0.0f, 0.0f, 0.9f};
+	shot.ammo_index = 1;
+	if (!expect(world.round_sim.spawn(world, shot) >= 0, "the round enters the pool"))
+		return false;
+	inmatch::Server_TickUpdate(ctx); // the next periodic second; the round kills after it
+	const w::Entity *hit = world.registry.get(victim);
+	if (!expect(hit == nullptr || hit->health <= 0, "the round kills in this frame's entity update") ||
+			!expect(world.script.relations.group(7).live_count == 2,
+					"the periodic recount ran before the kill"))
+		return false;
+	for (int tick = 0; tick < 62; ++tick) inmatch::Server_TickUpdate(ctx);
+	return expect(world.script.relations.group(7).live_count == 1,
+			"the following periodic second counts the kill");
+}
+
+// The pending fire-sound slots count down at the head of the host's frame,
+// ahead of the server tick's receive, so the server tick itself never counts
+// them: a slot queued before it still needs its full countdown afterwards.
+// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call @0x526697
+//  precedes the Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
+bool check_server_tick_leaves_the_pending_sounds() {
+	w::World world;
+	world.registry.configure_pool(0, 2);
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	// 330 units away: (62 * 330 / 330) >> 2 = 15 ticks.
+	world.out.fire_sounds.play_with_distance_delay("CRACK", {330.0f, 0.0f, 0.0f}, 0);
+	if (!expect(world.out.fire_sounds.pending_count() == 1, "the far report waits in a slot"))
+		return false;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	inmatch::Server_TickUpdate(ctx);
+	for (int tick = 0; tick < 14; ++tick) world.out.fire_sounds.tick();
+	if (!expect(world.out.fire_sounds.drain().empty(),
+			"the server tick left the countdown untouched")) return false;
+	world.out.fire_sounds.tick();
+	return expect(world.out.fire_sounds.drain().size() == 1,
+			"the fifteenth frame-head tick plays it");
+}
+
 // --------------------------------------------------------------------------
 // The 1 Hz round-robin 0x2F flag refresh.
 // --------------------------------------------------------------------------
@@ -1281,6 +1421,54 @@ bool check_shared_loaded_ammo_fire_and_reload() {
             "the other weapon sees the reload without rewriting either private clip");
 }
 
+// A validated primary round scores one FIRE event (field 2 plus the FIRE
+// value); a rejected round and an alt-fire round score nothing.
+// [orig: Server_ClientFiredRound @0x50BAA0 — the alt return @0x50BB0D, the
+//  event-1 call @0x50C727]
+bool check_validated_fire_scores_one_shot() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	rules.score_values.emplace();
+	(*rules.score_values)[0] = 3; // FIRE
+	world.match.configure(rules);
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
+	const w::EntityHandle other = w::spawn_remote_player(world, player_spawn(1, 0, 0));
+	world.match.upsert_player({shooter, 3, "Shooter"});
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	roster.push_back(make_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	uint32_t client_tick = conn.tick_seed;
+	auto dispatch_fire = [&](std::vector<uint8_t> body) {
+		std::vector<ProtocolMessage> msgs;
+		msgs.push_back(make_protocol_message(c2s::FIRED_ROUND, std::move(body)));
+		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+	};
+	const w::MatchPlayer *row = world.match.player(shooter);
+	dispatch_fire(fire_body(conn, other.packed, 5, client_tick)); // spoofed: rejected
+	if (!expect(row->stats[w::MatchStats::kShotsFired] == 0, "a rejected round scores no shot"))
+		return false;
+	dispatch_fire(fire_body(conn, shooter.packed, 5, client_tick));
+	if (!expect(world.out.rounds.count == 1 && row->stats[w::MatchStats::kShotsFired] == 1 &&
+					row->stats[w::MatchStats::kPoints] == 3 &&
+					world.match.team_stats(1)[w::MatchStats::kShotsFired] == 1,
+			"the validated round scores one FIRE event"))
+		return false;
+	ClientFiredRound alt;
+	alt.current_tick = ++client_tick;
+	alt.shooter_handle = shooter.packed;
+	alt.target_handle = 0xFFFF;
+	alt.adm_index = 5;
+	alt.fire_flags = 0x23; // bit 0: alt fire
+	dispatch_fire(encode_client_fired_round(alt));
+	return expect(world.out.rounds.count == 2 && row->stats[w::MatchStats::kShotsFired] == 1,
+			"an alt-fire round is appended without a FIRE event");
+}
+
 bool check_guidance_waits_for_spawn_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
@@ -1322,11 +1510,15 @@ bool check_guidance_waits_for_spawn_frame() {
 
 int main() {
 	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
+	ok = check_validated_fire_scores_one_shot() && ok;
 	ok = check_spawn_protection_seeded_at_creation() && ok;
 	ok = check_spawn_protection_countdown_and_gates() && ok;
 	ok = check_spawn_protection_cleared_by_validated_fire() && ok;
 	ok = check_deploy_seeds_protection_and_armory_state() && ok;
 	ok = check_flag_refresh_round_robin() && ok;
+	ok = check_humans_count_the_visible_players() && ok;
+	ok = check_recount_precedes_the_entity_update() && ok;
+	ok = check_server_tick_leaves_the_pending_sounds() && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
 	ok = check_team_downed_resend() && ok;

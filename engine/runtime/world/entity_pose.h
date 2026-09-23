@@ -156,6 +156,8 @@ public:
 			int32_t out[6], int32_t out_direction[3]) override;
 	bool resolve_named_transform(
 			world::World &, world::EntityHandle, const char *name, int32_t out[6]) override;
+	bool resolve_seat_bone(world::World &world, const world::Entity &carrier,
+			int bone_index) override;
 	int last_named_userpoint(world::World &, world::EntityHandle, const char *) override;
 
 private:

@@ -95,7 +95,7 @@ void test_commands_and_retry() {
 		f.world.restore(baseline);
 	}
 	f.entity(b).health = 0; f.entity(b).has_item_def = false;
-	f.script("ssnface(8,\"DISGUST\") store(v1)\n");
+	f.script("ssnface(8,disgust) store(v1)\n");
 	CHECK(f.world.script.vars.get_mission(1) == 1 && f.slot(b).expression_override == 6);
 	f.entity(b).item_id = 0;
 	f.script("ssnface(8,NORMAL) store(v1)\n");
@@ -106,9 +106,15 @@ void test_commands_and_retry() {
 	f.world.cached.local_player = {};
 	f.script("face(FEAR) store(v1)\n");
 	CHECK(f.world.script.vars.get_mission(1) == 1);
+	// A name the face table lacks, a number or a quoted token (which keeps
+	// its quote) is the first error "Unknown FACE" with face 0; the program
+	// still runs. [orig: WacScript_ResolveParameter @0x4F3015..0x4F305A]
 	wac::CompileEnv env;
-	CHECK(!wac::compile_source("face(1)\n", env).ok());
-	CHECK(!wac::compile_source("ssnface(7,missing)\n", env).ok());
+	for (const char *source : {"face(1)\n", "ssnface(7,missing)\n", "ssnface(7,\"DISGUST\")\n"}) {
+		const wac::Program missing = wac::compile_source(source, env);
+		CHECK(missing.ok() && missing.diagnostics.size() == 1 &&
+				missing.diagnostics[0].message == "Unknown FACE");
+	}
 	CHECK(wac::compile_source("v1=FACE_SMIRK\nface(v1)\n", env).ok());
 }
 
@@ -227,6 +233,26 @@ void test_automatic_expression() {
 	CHECK(f.slot(h).automatic == 8); // animation table entry 140
 }
 
+// A looked-at body without a brain of its own faces back from its placement
+// heading, the spawn form of 90 - yaw: at yaw -112 the look-back cone edge falls
+// between that and 202 x 11930464. [orig: Entity_SpawnFromBMSRecord
+//  @0x40EB42..0x40EB66; Entity_UpdateInfantryAI @0x4BE6BE (the tracking's target
+//  heading read), cone @0x4BE6CB]
+void test_look_back_uses_the_placement_heading() {
+	Fixture f;
+	const auto h = f.spawn(1), target = f.spawn(2, 1.5f);
+	f.world.ai.attach(h);
+	auto &body = *f.world.ai.for_handle(h);
+	body.inf.active = true; body.inf.adm_id = 1; body.health = 100;
+	body.inf.anim_state = 140; body.inf.body_heading = 0;
+	body.inf.head_look_target = target;
+	f.entity(target).position.y = -5668.0f / 65536.0f;
+	f.entity(target).yaw = -112;
+	f.world.ai.root_motion = &f.motion;
+	infantry_attention_think(f.world.ai, body, f.world, 0x80);
+	CHECK(f.slot(h).automatic == 6);
+}
+
 } // namespace
 
 int main() {
@@ -235,5 +261,6 @@ int main() {
 	test_mesh_and_texture_schedule();
 	test_slot_lifetime_and_capacity();
 	test_automatic_expression();
+	test_look_back_uses_the_placement_heading();
 	return failures ? 1 : 0;
 }

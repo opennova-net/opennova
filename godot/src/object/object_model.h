@@ -473,6 +473,9 @@ private:
 	String body_blend_source_key_;
 	double body_blend_source_time_ = 0.0;
 	float body_blend_weight_ = 1.0f;
+	// The outgoing primary channel's served ring entry (anim_variant_ is the
+	// target's), as the simulation's AnimVariantRings served it.
+	int body_blend_source_variant_ = 0;
 	int last_slot_resolved_ = -1;
 	String last_slot_key_;
 
@@ -573,10 +576,11 @@ private:
 			int p_target_phase_ticks);
 	bool promote_remote_body_pending_if_due();
 	void pose_body_blend_at_times(const String &p_source_key, double p_source_time,
-			const String &p_target_key, double p_target_time, float p_weight);
+			const String &p_target_key, double p_target_time, float p_weight,
+			int p_source_variant = 0, int p_target_variant = 0);
 	void set_body_playhead(double p_seconds);
 	String resolve_body_clip_key(const String &p_key) const;
-	double clip_phase_seconds(const String &p_key, int p_phase_ticks) const;
+	double clip_phase_seconds(const String &p_key, int p_phase_ticks, int p_variant = 0) const;
 	void clear_body_blend();
 	void reset_body_pose();
 	String resolve_anim_channel_register(int p_slot) const;
@@ -901,9 +905,11 @@ public:
 	void play_body_clip_variant_at_tick(const String &p_key, int p_variant, int p_ticks);
 	void play_body_clip_variant_at_time(const String &p_key, int p_variant,
 			double p_seconds);
-	void play_body_clip_at(const String &p_key, int p_phase_ticks);
+	// p_variant / p_source_variant: each channel's served ring entry.
+	void play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant = 0);
 	void play_body_blend_at(const String &p_source_key, int p_source_phase_ticks,
-			const String &p_target_key, int p_target_phase_ticks, double p_weight);
+			const String &p_target_key, int p_target_phase_ticks, double p_weight,
+			int p_source_variant = 0, int p_variant = 0);
 	void play_body_clip_seeded(const String &p_key, int p_phase_ticks);
 	bool apply_remote_body_state(int p_state_id, const String &p_key, int p_flags,
 			int p_phase_ticks = -1);
@@ -912,6 +918,7 @@ public:
 	bool remote_body_needs_fixed_tick() const;
 	void stop_body_clip();
 	String get_active_body_clip() const { return anim_key_; }
+	int get_active_body_variant() const { return anim_variant_; }
 	void play_body_anim(int p_slot);
 	void play_body_anim_at(int p_slot, int p_phase_ticks);
 	int64_t get_animation_time_ms() const { return anim_time_ms_; }
@@ -946,11 +953,13 @@ public:
 	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
 	// The active two-channel blend — presentation-state read-back: whether a
 	// second channel is blending (a single channel poses the body otherwise),
-	// its source clip key, its playhead in seconds and the blend weight.
+	// its source clip key, its playhead in seconds, the blend weight and its
+	// served ring entry.
 	bool has_body_blend() const;
 	String get_body_blend_source_key() const { return body_blend_source_key_; }
 	float get_body_blend_source_time() const { return static_cast<float>(body_blend_source_time_); }
 	float get_body_blend_weight() const { return body_blend_weight_; }
+	int get_body_blend_source_variant() const { return body_blend_source_variant_; }
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).

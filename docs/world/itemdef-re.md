@@ -22,6 +22,8 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | --- | --- | --- |
 | `ItemDef` struct layout (2780 B) | **MATCHING (read-only grill)** | 142 members named from the parser/dumper/allocator/resolver/loader; field offsets witnessed by `ItemDef_ParseProperty @0x49eb00`, `ItemDef_DumpToFile @0x49e250`, `ItemDef_AllocateWithDefaults @0x49e3b0`, `ItemDef_ResolveAllResources @0x49e5f0`, `EntityDef_LoadModelsAndCallbacks @0x439f50` |
 | `ItemDef → GamePlayerEntity` copy | **MATCHING** | `Entity_InitFromItemDef @0x49e550` decompiles field-for-field clean (callbacks/models/health/armor/timer) |
+| Type-id resolution and `ItemTypeIndex` | **MATCHING** (2026-09-23; was last-wins) | `ItemList_FindIndexByTypeId @0x49e100` first match, stored at `@0x40EBFC`; ctests `mission_item_traits`, `route_parity`, `netsim_item_replication_catalog`; GUT `mission_data_test.gd` |
+| Scaled numeric keys (`_ftol2_sse`, `scale`) | **MATCHING** (2026-09-23) | the SSE2 `cvttsd2si` leg and the inline `fistp qword` for `scale` (witness map below); ctests `def_parse_items`, `doors` |
 | `type` enum (`ItemDef+0x5c`) | **MATCHING** (was DIVERGENT; fixed **D-ITEMDEF-1** 2026-07-05) | `engine/formats/def` `item_type_from_string` now returns the witnessed engine values (named `DefItemType`); pinned by `tests/def/def_parse_item_type_test.cpp` |
 | `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`engine/formats/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
 | `phrase_set` (`+0x86c`) | **documented + parsed with presence** | `ItemDef_ParseProperty @0x49eb00`: `_stricmp("phrase_set") @0x49f9de`, `atol @0x49f9f0`, store to the 0xADC-stride item at `@0x49fa0a`; mounted bone selection reads the target definition dword at `Entity_BuildBoneTransformMatrices @0x4b1884`. `DefItemDef` retains a separate validity bit because authored zero is meaningful |
@@ -31,8 +33,10 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 
 - `gItemDefs @ 0xB46250` — `ItemDef[]`, stride **2780** (0xADC).
 - `gItemCount @ 0xB46254` — populated count.
-- `ItemList_FindIndexByTypeId @ 0x49e100` — linear scan matching `.id`
-  (`ItemDef+0x50`) → array index; the index is what lands in `entity+28`.
+- `ItemList_FindIndexByTypeId @ 0x49e100` — linear scan from row 0 matching
+  `.id` (`ItemDef+0x50`) → array index; it returns on the FIRST hit
+  (`cmp [ecx],esi; jz` `@0x49E120..0x49E122`) and 0 when no row carries the id.
+  The index is what lands in `entity+28` (`ItemTypeIndex`).
 
 ## Witness map
 
@@ -48,6 +52,22 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
   this field from the **mounted target's definition** at
   `Entity_BuildBoneTransformMatrices @0x4b1884`; it is the skeletal overlay
   config as well as the `emplaced_N` family selector, not collision metadata.
+- Its **scaled numeric keys** convert through `_ftol2_sse`: `sqb_rate`,
+  `sqb_distance`, `sqb_error` (the calls `@0x49F093`, `@0x49F0DC`,
+  `@0x49F125`), `open_rate` / `max_angle` (`@0x49F91E`, `@0x49F96D`),
+  `destroy_timing` (`@0x49EE7E` / `@0x49EEA5` / `@0x49EECF`),
+  `particletesttime` (`@0x49FAD1`) and the four regional shots
+  (`@0x49FC79..0x49FE5C`). The shipped game takes that helper's SSE2 leg: the
+  CRT flag `dword_334A444`, set by `sub_7887AF @0x7887AF` (the store
+  `@0x7887B4`) on every SSE2 processor, selects the `cvttsd2si` path
+  (`_ftol2_sse`, the leg `@0x76BC15`), so a NaN, an infinity (`open_rate 0`,
+  `sqb_rate 0`) or any truncation outside int32 (`max_angle` above 180) stores
+  `0x80000000`. `scale` is the one inline conversion: `atof` (`@0x49F6F9`) times
+  65536 (`fmul dbl_7C3CC0` `@0x49F6FE`), round-toward-zero (`or eax,0C00h`
+  `@0x49F710`), `fistp qword` (`@0x49F728`) and the low dword stored to
+  `+0x1B8` (`@0x49F736`): a value past int32 wraps and an infinity stores 0.
+  Ported 2026-09-23 (`io::retail_fistp_truncate_low_dword` for `scale`, the
+  shared SSE2 ftol helper for the rest; ctests `def_parse_items`, `doors`).
 - **`ItemDef_DumpToFile @ 0x49e250`** — debug dump; the cleanest field↔name
   pairs: `type_id` `+0x50`, `attrib` `+0x54`, `attrib2` `+0x58`, `type`
   `+0x5c`, `graphicName` `+0x60`, `huskName` `+0x70`, `shadowName` `+0xa0`,
@@ -113,9 +133,9 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x17c/0x17e | `healthMax`/`armorMax` | i16 | `hp` / `armor`(=`mana`) → entity (§6.8) |
 | 0x180/0x182/0x184 | `criticalHp`/`criticalDrain`/`nonCriticalRegen` | i16 | |
 | 0x188 | `damageReducPp` | float | `damage_reduc_pp` |
-| 0x194/0x196/0x198 | `score`/`unitType`/`kz` | i16/i16/float | |
+| 0x194/0x196/0x198 | `score`/`unitType`/`kz` | i16/i16/float | `score` (`ItemDef_ParseProperty @0x49eb00`, the key `@0x4A0228..0x4A0242`) is read off the VICTIM's definition: `Score_ProcessKillEvent @0x4FD400` returns when the victim's ItemDef is missing or its `score` word is zero (`@0x4FD41E` / `@0x4FD422`), and scorer event 12 books the signed word as the unit score (world-wac-ai-re §20.4). No Player definition authors `score`, so a Player victim never tallies; the port carries it as `Entity::item_score` |
 | 0x1a4–0x1ac | `destroyTiming0..2` | i32 | `destroy_timing` → entity `destroyTimer` |
-| 0x1b0/0x1b2/0x1b8/0x1bc | `reverb`/`music`/`scale`/`debrisScale` | i16/i16/float/float | |
+| 0x1b0/0x1b2/0x1b8/0x1bc | `reverb`/`music`/`scale`/`debrisScale` | i16/i16/i32/float | `scale` is Q16: `atof` × 65536 through the inline `fistp qword` (witness map above) |
 | 0x218 | `lightTransfer` | float | |
 | 0x25c–0x266 | `seatMask`/`seatBoneIndex[8]`/`controlBone`/`useGunBone` | u8 | resolved from model bone user-points |
 | 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
@@ -138,7 +158,10 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 ## `ItemDef → GamePlayerEntity` copy (`Entity_InitFromItemDef @ 0x49e550`)
 
 The caller sets `entity->ItemTypeIndex` (`+28`, from
-`ItemList_FindIndexByTypeId`) first; then:
+`ItemList_FindIndexByTypeId`: the first-match row ordinal, 0 when no row
+matches; the store is `mov [esi+1Ch],ebp` in `Entity_SpawnFromBMSRecord
+@0x40E9F0` (the site `@0x40EBFC`), and the ItemDef pointer is `gItemDefs +
+index` `@0x40EBFF..0x40EC07`) first; then:
 
 | ItemDef field | → GamePlayerEntity field (offset) |
 |---|---|
@@ -150,6 +173,37 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
 | `healthMax` (0x17c) | `Health` (+0x11e) |
 | `armorMax` (0x17e) | `Armor` (+0x120) |
 | `initCallback` (0x148) | tail-called as `cb(entity)` if non-null and not `Entity_InitFromItemDef` itself |
+
+**A type id resolves to its first row.** The loader never merges rows: each
+`begin` allocates the next one (`ItemDef_ParseProperty @0x49eb00`, the
+`ItemDef_AllocateWithDefaults @0x49e3b0` call `@0x49EBA8`, whose `gItemCount++` is
+`@0x49E3BE`), so
+a later row repeating an id is unreachable through `ItemList_FindIndexByTypeId`,
+on the host (the spawn store above) and on the client (`NapiNPClientMsg_0x00D
+@0x432C40`, the call `@0x4332DA`, which takes `+0x1C`, `+0x20` and the row's
+callbacks from that index `@0x4332DF..0x43331A`). The shipped `ITEMS.DEF`
+repeats four ids: 100508 (rows 97/98, identical LFP tower poles), 100415 (rows
+460/461, the 15- and 30-count mosquito effects), 100439 (rows 485/486, the Heavy
+then the Light ground-layer fog mist) and 102044 (row 980, the "Map Named
+Location" marker; row 1126, the "Power Up Med Pack Infinite" powerup). Every
+port lookup by type id resolves first-wins since 2026-09-23: the items.def
+traits sweep and `find_item_def` (`mission/item_traits.cpp`,
+`mission/collision_resolve.h`), the facial table, the replication catalog
+([ADR 0026](../adr/0026-one-client-replica-pipeline.md) decision 5), the Godot
+`ItemDatabase` and `nw_pp`. They had resolved last-wins (the catalog failed
+closed), which gave every 102044 marker the med pack's traits and every 100439
+fog layer the Light row.
+
+`Entity::item_type_index` carries the ordinal itself: the traits sweep stamps
+it, the player template and the throwable class rows seed it for their spawns,
+and a placed device copies its template's `+0x1C` as
+`Entity_CloneFromTemplateByType @0x4398A0` does (the template gate
+`@0x4398A5`). The retail ItemTypeIndex gates (`cmp [reg+1Ch],0`) read it: the
+WAC entity handlers, the script trigger, proximity and line-of-sight predicates
+and the teleport walks (world-wac-ai-re §32), which had tested the type id as a
+stand-in. The two differ only for an entity whose type id has no row. The boat
+and aircraft avoid brakes compare the ordinal against 1
+([vehicle record](vehicle-client-movers-re.md) §1.12, step 8, and §1.13).
 
 ## Enums (witnessed in `ItemDef_ParseProperty`)
 

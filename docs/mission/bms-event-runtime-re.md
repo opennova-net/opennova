@@ -5,13 +5,16 @@ Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`),
 promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
 (`engine/runtime/mission/mission_kernel.cpp` (`finish_load`), `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
-**Verdict: MATCHING**, with the tracked deviations below, including the malformed-loadout boundary D-EVT-7 (proposed PERMANENT, class D, pending ratification). Every behavioral
+**Verdict: MATCHING**, with the tracked deviations below, including the malformed-loadout boundary D-EVT-7 (PERMANENT, class D). Every behavioral
 claim in this record is tied to a retail witness; addresses are cited inline.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Placement admission (2026-09-11) | MATCHING (read-only grill) | `Entity_SpawnFromBMSRecord @ 0x40e9f0`; `mission_promote`, `mission_kernel`, `mission_bms`; section 6.4a |
-| Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail boundary D-EVT-7 (proposed PERMANENT class D) | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
+| Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail boundary D-EVT-7 (PERMANENT, class D) | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
+| Event timers, trigger chain and conditions (2026-09-23) | MATCHING (retail-executed vectors) | `EventTrigger_UpdateEntry @ 0x454c30`, `EventTrigger_EvaluateChain @ 0x454050`, `EventTrigger_EvaluateCondition @ 0x453620`; 479 retail vectors in `mission_event_vectors` (`scripts/oracles/mission_event_parity.py`), `event_runtime_bms`, `bms_event_parity`; sections 1.2 to 1.4, 7.4 |
+| Action dispatch (2026-09-23) | MATCHING, except action 38's consumer (unresolved, section 7.5) | `EventAction_Dispatch @ 0x4542e0`; `bms_event_parity`, `bms_hud_relay`, `mission_mount`, `hud_item_flash`, `script_command_parity`; sections 1.5, 7.5, 10 |
+| PreMission / PostMission passes (2026-09-23) | MATCHING | `Game_StartMission @ 0x524360` (the call @ 0x525b86), `Game_TeardownMission @ 0x522350` (the call @ 0x52266c); `mission_kernel_lifecycle`, `event_runtime_bms`, `mission_event_vectors`; section 1.6, D-EVT-4 |
 
 ## 1. The original system
 
@@ -32,7 +35,7 @@ event record IS the runtime record:
 | +16 | u16 | live activation-delay countdown (0 on disk) |
 | +18 | u16 | activation-delay reload = authored_value << 6 |
 | +20 | u8  | active latch |
-| +21 | u8  | trigger count |
+| +21 | u8  | raw trigger count; the chain and the trigger zone resolver read it signed (§1.3) |
 | +22 | u8  | raw action count; dispatch reads signed i8 |
 | +23 | u8  | reserved |
 
@@ -54,6 +57,15 @@ event record IS the runtime record:
   value is tested as SIGNED int16 (@0x454cef/@0x454d40). Reload values ≥ 513<<6 wrap
   negative on the first decrement and expire immediately. Replicated, and pinned by
   `test_activation_delay_signed_wrap`.
+- The 24-byte record loads as-is `[orig: EventTrigger_LoadAllData @0x453f87]`, so the
+  runtime record keeps the +14/+18 reload words and the +20 latch byte whole
+  (`ScriptedEvent::repeat_reload` / `activate_reload` / `active`). The retail vectors
+  (`mission_event_vectors`, section 11.1) load raw words through
+  `BmsEventSystem::event_for_test`, including reload words that are not multiples of
+  64. Follow-up for the format owner: the parser rejects flag bits outside 0x37, a
+  nonzero +20 latch or +23 pad and a nonzero trigger `unknown7`, and keeps only the top
+  10 bits of the +12/+16 dwords, where retail loads all of those as-is; none of the 115
+  shipped missions carries such values.
 
 **D-EVT-9 FIXED (2026-09-13): signed action-count dispatch.** The event's
 on-disk `+22` byte remains unsigned in the format model and in bounded slice
@@ -63,25 +75,40 @@ uses the corresponding `0x454D01/0x454D04` and `0x454D13` instructions. Counts
 1..127 execute that many actions; 0 and 128..255 execute none. The input-word
 consume precedes the count test, and `EventTrigger_MarkLinkedSpawnPoints` follows
 the loop even when no actions ran (`0x454CBD` / `0x454D25`). Active latching,
-activation delay and repeat cooldown follow their normal paths. This signed
-interpretation does not apply to the separate trigger-count byte at `+21`.
+activation delay and repeat cooldown follow their normal paths. The trigger-count
+byte `+21` is read the same way by the chain: after the zero test (`0x45405F`)
+trigger 0 always runs, then `cmp [edi+15h],bl; jle` (`0x45408C`) and the `movsx`
+loop bound (`0x4540C7`) make 128..255 evaluate trigger 0 alone; both zone resolvers
+skip such events (`0x453022`, `0x453127`) [orig: EventTrigger_EvaluateChain
+@0x454050; EventTrigger_ResolveZoneTriggerRefs @0x453000;
+EventTrigger_ResolveZoneActionRefs @0x453100].
 
 `BmsEventSystem::fire` now performs the signed interpretation at its shared
 immediate/delayed dispatch boundary, retaining the portable action-slice bounds.
-`event_runtime` exercises 0/1/127/128/255 through public World ticks in both paths,
+`event_runtime_bms` exercises 0/1/127/128/255 through public World ticks in both paths,
 checking action effects, input consumption, latch/cooldown state and linked
 waypoint completion. It also covers a truncated 127-action slice without unsafe
-reads and unsigned 128/255-trigger chains whose final condition rejects firing.
+reads and the signed trigger count (`test_trigger_count_is_signed_in_the_chain`);
+the retail vectors in `mission_event_vectors` execute trigger counts 2, 127, 128, 200
+and 255 in the original chain.
 The original instruction body is retained in jo-c's
 `app/reconstruction_mission_logic_native.inc` (`0x454C30..0x454D4D`, byte-span
 SHA-256 `028dc37d3ad6066cf960eb0a82cd960f7824ae728012a4112be394280c48abb0`)
 and was cross-checked read-only against the Jointops.exe IDB instructions.
 
-### 1.3 Trigger chain — `@0x454050` (was sub_454050; rename proposed §5)
+### 1.3 Trigger chain: `EventTrigger_EvaluateChain @0x454050`
 
 Zero triggers → true. Each trigger's own flag bit0 negates its result; the join
 operator between the accumulated value and trigger *i* comes from trigger *i−1*'s
 flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-equivalent.
+The fold is bitwise over the evaluators' RAW ints: negation is `xor 1` (@0x454084 for
+trigger 0, @0x4540AC after), the joins are `or` / `xor` / `and` (@0x4540B8 / @0x4540C1 /
+@0x4540C5), and `EventTrigger_UpdateEntry` passes any nonzero result (`test eax,eax`
+@0x454C6B). Two evaluators answer more than 0/1: cat 7 sub 18 returns the Berserk bit as
+0x200 (@0x453B85..0x453B99) and cat 5 returns `g_EventLoadParity` (ex `dword_815174`) raw (@0x453B24). So
+NOT-Berserk reads 0x201 (true), Berserk AND a true trigger reads 0, and Berserk XOR a
+true trigger reads 0x201. The trigger count is signed (§1.2): 128..255 evaluate
+trigger 0 alone.
 
 ### 1.4 Condition categories — `EventTrigger_EvaluateCondition @0x453620`
 
@@ -90,10 +117,10 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
   **cat 3 = event-fired** (@0x453a75: `entry[+20] && entry[+16 word] == 0` — the live
   latch window, NOT a sticky bit), cat 4 = mission variable (`dword_C6B240[param1]`
   ==/</>/<=/>= param2 — ours matches case-for-case), cat 5 = a global toggle
-  (`dword_815174`, XOR'd 1 on every `EventTrigger_LoadAllData` — unmodeled, D-EVT-3),
-  cat 6 = network/session state, cat 7 = input/gameplay checks.
-- The kong comment "3=dialog" on 0x453620 is wrong (it reads the event table); comment
-  fix proposed in §5.
+  (`g_EventLoadParity`, ex `dword_815174`, XOR'd 1 on every `EventTrigger_LoadAllData`, returned raw; ported,
+  D-EVT-3), cat 6 = network/session state, cat 7 = input/gameplay checks.
+- The kong comment "3=dialog" on 0x453620 is wrong (it reads the event table); the
+  comment fix is listed in §9.2 and the IDB function comment still reads "3=dialog".
 - Cat-7 input triggers consume bits transactionally: `g_InputActionBits (dword_B3B738)`
   is mirrored into `dword_AE06F8` at chain-eval entry (@0x45405a, before the
   trigger-count test), bit-toggled on match (@0x453bab; the shared leg @0x453ba5
@@ -104,30 +131,44 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
   one bit toggle it back. **PORTED 2026-09-12** (`world.script.input_action_bits`
   / `input_action_mirror`; `evaluate_chain` seeds, `fire` commits). The cat-7
   table @0x453b7e: 18 = local player's AiSlot behavior word & 0x200 (Berserk,
-  @0x453b99); masks 19:0x4000000 20:0x8000000 21:0x10000000 22:0x400 23:0x800
+  @0x453b99), returned raw as 0x200 (the chain folds it bitwise, §1.3); masks
+  19:0x4000000 20:0x8000000 21:0x10000000 22:0x400 23:0x800
   24:0x1000 25:0x2000 28:0x20000000 29:0x4000 30:0x8000, 32:`1 << p1` (@0x453ceb),
   33:`1 << (byte@trigger+12 + 15)` (@0x453cfd); 26/27 = `(byte_27234FC & 1) == 0 / != 0`
-  (@0x453cb5/@0x453cc4); 34 = `Dialog_ExistsByIndex(p1) == 0` (@0x453d1b); 35 =
+  (sub 26 `movzx; not; and 1` @0x453CA5, sub 27 @0x453CB6); 34 =
+  `Dialog_ExistsByIndex(p1) == 0` (@0x453d1b); 35 =
   `sub_44E220(p1)` (@0x453d20); 36 AWOL; 37 = `EventTrigger_AnySatchelInArea`
-  (@0x453bc8); 38-41 the mount subs. The word's ONLY setters are
-  `Input_HandleActionBinding` cases 400 (|= 0x4000000 view1st), 401
-  (|= 0x10000000 viewwithgun), 402 (|= 0x8000000 viewchase), 412 (the toggle:
-  third person set -> clear it, set cockpit; else clear cockpit, set third
-  person), 405/406 (|= 0x10/0x40 orbit yaw), 407/408 (|= 0x100/0x4 orbit
-  pitch), 409/410 (|= 0x80/0x200 chase zoom) @0x49c073..0x49c253,
-  `Input_ProcessFrame` @0x49d52b (`&= ~0x50` every frame), BMS action 28 sub 38
-  (`= 0`, `EventAction_HandleSpecialTypes @0x4535c2`) and the two commits; the
+  (@0x453bc8); 38-41 the mount subs. The word's only live setters are
+  `Input_HandleActionBinding` (jump table @0x49BD22) cases 400 (view1st: the
+  FP-gun bit clear, |= 0x4000000 @0x49C07A, preference 0), 401 (viewwithgun: the
+  FP-gun bit set, |= 0x10000000 @0x49C0E0, preference 0) and 402 (viewchase:
+  |= 0x8000000, preference 1, case @0x49C0F6), BMS action 28 sub 38 (`= 0`,
+  `EventAction_HandleSpecialTypes @0x4535c2`) and the two commits. The switch also
+  carries case 412 (@0x49C090, the FP -> 3P -> cockpit cycle over
+  0x8000000/0x10000000) and 405-410 (@0x49C10C.., the orbit/zoom bits 0x10, 0x40,
+  0x100, 0x4, 0x80, 0x200), but the binding table has no row for any of them (its
+  view rows are 107/108/109: view1st F2, viewwithgun F3, viewchase F4), so no key
+  reaches them in retail and those bits never set; `Input_ProcessFrame`'s
+  `&= ~0x50` @0x49d52b clears bits nothing sets. The
   0x400/0x800/0x1000/0x2000/0x4000/0x8000/0x20000000 masks (subs 22-25/28-30)
-  therefore read false in retail as well. Producers on our side: the view
-  selection seam (`Simulation::set_local_player_third_person_selected`,
-  authority only: viewchase |= 0x8000000 / view1st |= 0x4000000; it cannot
-  tell viewwithgun 401 or the 412 toggle apart from the selection they resolve
-  to; GUT `simulation_test.gd`); the orbit/zoom sites (405-410) are not wired
-  yet (the word is per-kernel state, where retail's BSS word persists across
-  loads until consumed). **Residue (D-EVT-3):**
-  subs 26/27 stay false -- `byte_27234FC` bit 0 has no writer reachable by xref
-  (readers: the pair, `HUD_DrawLookModeLabel @0x594100` bit 0x20, the lock
-  reticle @0x594580 bits 0/0x40).
+  therefore read false in retail as well. Producer on our side (PORTED
+  2026-09-23): `Simulation::apply_local_player_view_action` over the engine's
+  `player_view_apply_view_action` (`world/player_view.h`, `kViewAction*` ids;
+  authority only, a joiner passes no word) writes the preference and the action's
+  own bit for 400/401/402; `HudToggles` reports viewwithgun as its own event
+  (`kGunViewSelected`); GUT `simulation_test.gd`
+  (`test_view_actions_set_the_input_action_bits`). Before 2026-09-23 both
+  first-person rows wrote 0x4000000, so a PlayerCockpitView trigger never fired; no
+  shipped mission reads cat-7 subs 19..33 (the corpus uses 35..41 only). The word
+  is per-kernel state, where retail's BSS word persists across loads until
+  consumed. Subs 26/27 read hudInfo (`dword_2723388`) +0x174 (`byte_27234FC`),
+  whose only store writes 0 (`mov byte ptr [esi+174h],0`, `HUD_BuildEntityInfo
+  @0x4B84D9`; the struct memsets `HUD_RenderAllOverlays @0x5A80B1` and
+  `HUD_InitOverlaySystem @0x5A493C`; the per-frame save/restore copy
+  `HUD_RenderOverlays @0x5A7C25`), so bit 0 never sets: sub 26 is always true and
+  sub 27 always false (the byte's other readers test bit 0x20,
+  `HUD_DrawLookModeLabel @0x594100`, and bits 0/0x40, the lock reticle
+  @0x594580). **PORTED 2026-09-23** as the two constants.
 - Sub 34/35 read the dialog registry of `Dialog_Register @0x44d980` (called from
   `Dialog_PlayByIndex @0x527ae0` -> `Dialog_PlayByName @0x44d9f0` only when
   "dlg%03i" exists in the loaded bank): the name is appended to the history
@@ -154,10 +195,6 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
   `g_ammo_satchel` and whose position +4/+8/+12 satisfies the inclusive
   compares -> 1. **PORTED 2026-09-12** over `ThrowableSim::devices` (the placed
   satchels), their registry rows and the registered area bounds.
-||||||| a460d0c6c
-  is mirrored into `dword_AE06F8` at chain-eval entry (@0x45405a), bit-toggled on match
-  (@0x453bab), and committed back before action dispatch (@0x454c8b/@0x454cfa).
-  Unmodeled (input categories return false), D-EVT-3.
 - The chain fold is FLAT and left-to-right (`EventTrigger_EvaluateChain @0x454050`,
   re-read 2026-09-12): the accumulator takes `|=` / `^=` / `&=` with the operator
   bits of the PREVIOUS trigger (`@0x4540b6..0x4540c5`), no precedence and no
@@ -174,15 +211,26 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
 ### 1.5 Action dispatch — `EventAction_Dispatch @0x4542e0`
 
 Verified case map (ours matches): case 5 MisvarChange sub 1..5 = Set/Add/Sub/Inc/Dec on
-`dword_C6B240`; cases 8/9/0xA = Blue/Red/Green win via `Server_ProcessRoundEnd(1/2/0)`;
-case 7 PlayWavList gated `(param2==1 || !dedicated)`; cases 3/0x15 = the AI-change
-family (`Entity_HandleAlertCommand`/`Entity_HandleAlertStateEvent @0x43dee0`);
+`dword_C6B240`, the add/sub being dword ops that wrap (@0x4543B7/@0x4543D4/@0x4543EE/
+@0x454409); cases 8/9/0xA = Blue/Red/Green win via `Server_ProcessRoundEnd(1/2/0)` with
+no gate at the call sites (@0x45447B/@0x454495/@0x4544AF): the round-over latch sits
+inside the callee (`cmp g_spawn_success_gate, ebx` @0x5164F6), which drops a second
+end; case 7 PlayWavList plays only where `is_mp_session_peer` is set (@0x45443D: every
+playing peer, single player included; a dedicated host clears it), and once the
+round-over / cinematic latch `g_spawn_success_gate` is set only when param2 == 1 forces
+it (@0x45444A/@0x454450, `Dialog_PlayByIndex` @0x454461). That latch is raised by the
+round end (`Server_ProcessRoundEnd @0x5168E4`) and by the SP lose cinematic the round
+end starts (`Cine_StartPlayback @0x577848`), so `world::Match`'s round-over latch
+carries it; a skipped play never reaches the dialog registry the PLYRDIALOG subs read.
+Cases 3/0x15 = the AI-change family (`Entity_HandleAlertCommand`/`Entity_HandleAlertStateEvent @0x43dee0`);
 **case 0x22 ResetEvent clears ONLY the +20 latch (@0x454974)** — live countdowns keep
 ticking; case 0x25 AttachToEmplaced = `EntityPool_FindByNetId(param1)` →
 `WacScript_TryMountEntityToVehicle @0x4f70f0`.
 
 The structural cases 0, 4, 11, 16..18, and 23..26 are now live with their
-pool/flag distinctions; §10 is the implementation and regression map.
+pool/flag distinctions; §10 is the implementation and regression map. The
+2026-09-23 action witnesses (the objective notification and its relays, the HUD
+item flash, the light-group channels, the script kills and removals) are in §11.
 
 On every dispatch the original also activates linked spawn points:
 `EventTrigger_MarkLinkedSpawnPoints @0x452ce0` (renamed 2026-08-15, ex the kong
@@ -190,7 +238,9 @@ misnomer "EventTrigger_NotifyEntityDeath") computes the FIRED EVENT's
 own index (`(entry - g_Events)/24`), scans the spawn-point table (`dword_B76570`,
 count `dword_B76568`) for records whose word +528 references that event, sets their
 pending byte +536 (backward-chaining via byte +535), then `SpawnPoint_SkipBlocked
-@0x4de310`. The SP route form is implemented by WaypointTrack; the MP POI/spectate reuse remains D-EVT-1.
+@0x4de310`. It runs on the authority only: the function returns at once on a client
+(`cmp is_authority,0` @0x452CE0), which the retail vectors exposed (§11.1); the port's
+`BmsEventSystem::fire` applies the same gate. The SP route form is implemented by WaypointTrack; the MP POI/spectate reuse remains D-EVT-1.
 
 ### 1.6 Cadence — the fixed-timestep outer loop and per-system dividers
 
@@ -216,14 +266,22 @@ callback; `current_tick @0x24c1968` increments once per call):
    - `WacScript_AdvanceTick @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
      on `dword_C6EB28` (script disable), counts `dword_C6EAD4` up to **0x3E (62)**
      (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the mutable
-     clock `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 admitted ticks.
-   - every 16th tick (`++dword_C8D808 > 15`): the **normal-event quarter pass**
+     clock `wac_var_ticks` (@0x4f81d3). One VM execution per 62 admitted ticks.
+   - every 32nd tick (`test tick,1Fh` @0x51D8C4), under the same admission: the
+     spawn-marker pass (`assign_overlay_spawn_points`, the call @0x51D8D2) and
+     `Server_UpdatePlayerBreathTimers` (the call @0x51D8D7, the drowning producer).
+   - every 16th tick (`++g_quarter_roundrobin_counter > 15`, ex `dword_C8D808`, @0x51D8DC..0x51D8F4): the **normal-event quarter pass**
      `@0x454d50` (kong-misnamed "Entity_SetStateWreckage") — processes ¼ of the event
      list (entries with `(flags & 6) == 0`), cursor `dword_AE06FC` cycling 0..3. Each
      normal event is therefore evaluated once per **64 ticks**, which is exactly the
      64-unit timer quantum: one authored delay unit amortizes to 64 ticks ≈ 1.02 s.
-2. `Entity_UpdateAllEntities @0x4c2100` — the AI/entity motor pass, every tick (the
-   infantry motor's 2/8/16-tick stagger lives inside it).
+2. `Entity_UpdateAllEntities @0x4c2100`: the AI/entity motor pass, every tick that
+   passes the frame's own admission gate (`Game_ProcessMainFrame @0x526703..0x526742`:
+   the authority skips it when no human is present and the WAC clock has started,
+   unless its own playing peer sits on the death screen; every peer skips it while the
+   retained pre-round byte `dword_A85B64` is set and, in a session, once the round-over
+   latch `g_spawn_success_gate` is up) (the infantry motor's 2/8/16-tick stagger lives
+   inside it).
 
 So the authoritative order is **WAC → BMS events → AI**, each with its own divider.
 The WAC and BMS stages share one admission decision at `0x51D8BD`: no pre-round
@@ -244,10 +302,22 @@ an extra gameplay tick to observe the clock. The VM runtime snapshot contains
 that clock once; the world cache is a derived projection.
 
 PreMission events (`flags & 2`) run via `EventTrigger_UpdateAllWithFlag2 @0x454dc0`
-(whole list per call) from the mission-start context (call site 0x525b86); PostMission
-events (`flags & 4`) via `UpdateAllWithFlag4 @0x454e00` from the debrief/video contexts
-(0x51ea89 / 0x52266c / 0x5263ae). The per-call frequency of those two contexts is not
-yet witnessed (D-EVT-4).
+(whole list per call) once per mission start: the sole caller is `Game_StartMission`,
+the authority-gated call @0x525b86, before `tick = 0` @0x525b9f; the port is
+MissionKernel's single PreMission tick. PostMission events (`flags & 4`) run through
+`UpdateAllWithFlag4 @0x454e00` exactly once per mission, from `Game_TeardownMission
+@0x52266C` (authority only, the gate @0x522663), after the teardown destroyed pools 0,
+1 and 2 (`@0x522365..0x5223C8`; the pool-3 markers stay), so their triggers and actions
+resolve against the destroyed pools. The SP restart's call (`Game_RestartRoundSP
+@0x5263AE`) sweeps nothing: its first call `Game_DestroyAllEntitiesAndReset` reaches
+`EventSystem_FreeAll` through the mission reset (`Mission_ResetBmsState
+@0x40DB80`; the call @0x40DBEF), which zeroes `g_EventCount` @0x453266.
+The third call site 0x51EA89 lies in an unreferenced chunk (dead). Neither pass is
+periodic (D-EVT-4). Port: `MissionKernel::run_post_mission_pass` (destroys pools 0..2,
+then the authority sweep), run by `HostRole::close` and `LocalRole::close`;
+`mission_kernel_lifecycle` pins the order and the single sweep. Corpus: 0 of the 3,075
+events in the 116 shipped BMS carry `flags & 4` (flag distribution 0x0 3002, 0x1 32,
+0x2 39, 0x10 1, 0x20 1).
 
 ### 1.7 Promotion — `Mission_LoadBMSFile @0x40f4e0` / `Entity_SpawnFromBMSRecord @0x40e9f0`
 
@@ -267,7 +337,7 @@ yet witnessed (D-EVT-4).
 | `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; Simulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
 | `wac_system`: the 62-tick divider lives in WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`); publishes the mutable VM clock and shares admission with BMS; skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
-| `wac/vm`: mutable WAC time base (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
+| `wac/vm`: mutable WAC time base (`time_`, [orig: wac_var_ticks @0xC6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
@@ -300,8 +370,10 @@ the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
 ONED's Run OpenNova loose action launches the standalone game against the
 selected loose assets. The portable `engine/runtime/world` per-tick
 motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
-wrong. Pinned by `mission_presentation_test.gd`
-(`test_session_frame_*`, `test_distance_per_real_second_is_frame_rate_independent`).
+wrong. Pinned by `godot/tests/mission_root_test.gd`
+(`test_session_frame_*`, `test_distance_per_real_second_is_frame_rate_independent`),
+`tests/world/tick_accumulator_test.cpp` (ctest `tick_accumulator`) and
+`tests/frame/inmatch_session_test.cpp` (ctest `inmatch_session`).
 
 ## 2b. The tick-mode enum retired (2026-07-14)
 
@@ -371,7 +443,9 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   `mounted_child` producers are now live through `world::Match`, including
   pickup, death/drop, save, capture/reset/removal, and the S2C 0x2F/0x12
   replica folds; ordinary non-flag carryables and savegame restore remain with
-  their owning systems. **Residual:** the sub-45 facing cone reads entity yaw, exact only for
+  their owning systems. The sub-44/45 script LOS runs retail's walker split on the
+  authored range (≤ 20 u entity-aware, above it terrain/sectors; PORTED 2026-09-23,
+  §3b item 5). **Residual:** the sub-45 facing cone reads entity yaw, exact only for
   entities whose yaw our sim advances. (The
   acquisition/fire-time SEES+TARGETED quads LANDED 2026-07-16 with D-AI-3 —
   `AiSystem::apply_engage_relations`, live at the state-16/17 engage and
@@ -380,9 +454,16 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   Berserk read (18), the input-bit family (19-25, 28-30, 32, 33) with the
   mirror seed at chain entry and the commit at both fire sites, the dialog
   registry pair (34/35), the satchel-in-area scan (37); the never-set masks
-  22-25/28-30 read false as in retail. The ONE residue of this row: subs 26/27
-  (`byte_27234FC` bit 0, writer unwitnessed) stay false. Cat 5 "SecondTimeThrough" = the raw session load-parity word
-  (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
+  22-25/28-30 read false as in retail. The view actions write their own bits (400
+  -> 0x4000000, 401 -> 0x10000000, 402 -> 0x8000000, `Input_HandleActionBinding
+  @0x49AD40` cases @0x49C073/@0x49C0D9/@0x49C0F6) through
+  `Simulation::apply_local_player_view_action` (2026-09-23); 412 and 405..410 have
+  no binding-table row, so their bits never set in retail either. Subs 26/27 are constant true/false: the
+  look byte's bit 0 is never set, its only store writing 0 (§1.4; PORTED
+  2026-09-23), which closes the cat-7 part of this row; the row stays OPEN for
+  the holding pair's generic carry/save producers and the sub-45 yaw residual
+  above. Cat 5 "SecondTimeThrough" = the raw session load-parity word
+  (`g_EventLoadParity`, ex `dword_815174`: static image value 1, XOR'd once per BMS load at the end of
   `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session
   load reads 0, restart 1; save-persisted @0x4acee1/@0x4ad1ab, unported: no
   save system). Cat 6 "net" is really the Teammate category: sub 1
@@ -392,15 +473,20 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   indistinguishable in retail — both read `dword_AC4F40 != 0` (the heli-lift
   active count, @0x453b42 → getter @0x451720, a FLIRT false-positive named
   `__uncaught_exception`).
-- **D-EVT-4 — pre/post pass cadence: FIXED 2026-07-05 (witness settled).**
+- **D-EVT-4 — pre/post pass cadence: FIXED 2026-07-05 (witness settled; callers
+  landed 2026-09-23).**
   One-shot per transition, never periodic: pre has exactly one call site
-  (`Game_StartMission @0x525b86`, authority-gated, before `current_tick = 0`
-  @0x525b9f); post is called once from `Game_TeardownMission @0x52266c` and
-  the SP round-restart routine @0x5263a0 (kong-misnamed "Game_PlayVideoFile";
-  a third xref @0x51ea89 sits in an unreachable dead blob). Our earlier
-  per-phase-tick evaluation was itself a divergence; the port now exposes
-  `run_post_mission_pass()` as the binding's one-shot and documents the
-  one-pre-call contract (Simulation delivers exactly one).
+  (`Game_StartMission @0x524360`, the call @0x525b86, authority-gated, before
+  `tick = 0` @0x525b9f); post is called once from `Game_TeardownMission
+  @0x522350` (the call @0x52266c), after
+  the teardown destroyed pools 0..2, and from `Game_RestartRoundSP @0x5263a0`
+  (ex the kong misnomer "Game_PlayVideoFile"), whose call @0x5263ae sweeps
+  nothing because the round restart's mission reset already freed the event
+  list; a third xref @0x51ea89 sits in an unreachable dead blob (§1.6). Our
+  earlier per-phase-tick evaluation was itself a divergence. The pre pass is
+  MissionKernel's single PreMission tick; the post pass is
+  `MissionKernel::run_post_mission_pass`, run by `HostRole::close` and
+  `LocalRole::close` (`mission_kernel_lifecycle`).
 - **D-EVT-5 — the BMS second chunk (header +0x246) is runtime-opaque.**
   Witnessed: `Mission_LoadBMSFile` fseeks past it on BOTH paths (in-session
   @0x40f6da–0x40f6ef, SP @0x40f756–0x40f76b); its only two data xrefs are
@@ -415,8 +501,11 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
 
 Dispatch is a flat sub-type switch (`EventTrigger_EvaluateCondition @0x453620`,
 cat-1 sub-switch @0x45364a). Two data stores back it, both zeroed per mission
-load by `EventSystem_FreeAll @0x453210` and save-persisted
-(`SaveFile_WriteTeamRelationBlocks @0x4aa320` / read @0x4a97e0):
+load and save-persisted (`SaveFile_WriteTeamRelationBlocks @0x4aa320` / read
+@0x4a97e0): the group records in the mission reset's memset
+(`Mission_ResetBmsState @0x40DB80`: 0xC00 bytes at
+0xA33F90, the call @0x40DBAE), the relation matrices and the visited words in
+`EventSystem_FreeAll @0x453210` (called from the same reset @0x40DBEF):
 
 **Per-group state — 48 B × 64 groups** (key = entity commandGroup +0x11C;
 group 0 forced to count 0):
@@ -436,10 +525,15 @@ SSN; group key = commandGroup):
 | targeted (sub 2/15) | `0xAC82E8` | `0xAC78E8` | `0xAC6CE8` | `0xAC58E8` |
 | shot (sub 13/17) | `0xAC80E8` | `0xAC74E8` | `0xAC68E8` | `0xAC50E8` |
 
-Write events (authority-gated): **sees** at AI target acquisition
-(`Entity_UpdateInfantryAI @0x4be41a..0x4be45b`; vehicle @0x466460, helicopter
-@0x467730); **sees + targeted** at weapon fire (`Entity_SpawnProjectile
-@0x4b0a6f..0x4b0ae2`; @0x471710, @0x472e00); **shot** when damage is actually
+Write events (authority-gated): **sees** at the infantry target acquisition
+(`Entity_UpdateInfantryAI @0x4be41a..0x4be45b`); **sees + targeted** in the
+infantry threat scan (`Entity_FindNearestThreat @0x4B0990`, the writes
+@0x4b0a6f..0x4b0ae2; the kong name there was the misnomer
+`Entity_SpawnProjectile`), the vehicle and helicopter engage handlers
+(`AI_HandleEvent_VehicleWithDamageC @0x466460` from @0x4664E3,
+`AI_HandleEvent_HelicopterCombatD @0x467730` from @0x4677B3) and the aircraft and
+ground fire legs (`AI_TickState_AircraftCombat @0x471710` from @0x472B67,
+`AIEntity_ProcessWeaponFire @0x472E00` from @0x4742E7); **shot** when damage is actually
 processed (`Projectile_ProcessDamageOnTarget @0x4e80ae..0x4e80ef` — skipped
 when the friendly-fire gate @0x4e74f0 discards the damage). Setters
 bound-check rows (<0x80; e.g. @0x452b60, @0x452bf0); the trigger-side tests
@@ -471,7 +565,9 @@ not a "type word"; corrected by the 2026-08-13 grill, §3b).
 Closes every unwitnessed cat-2 sub. The full cat-2 switch (@0x4537f8, the
 Single mirror of @0x45364a) was decompiled end to end: subs 1/2/13/15/16/17 =
 the S-family matrix tests (§3a, keyed by raw SSN), 4/5 = `Entity_IsAliveByBmsRef
-@ 0x43e640` (already ported), 7 = visited-A, 10 = the zone test, and the rest
+@ 0x43e640` (ported as `EntityCommands::bms_ref_alive` since 2026-09-23; the
+earlier port read the general SSN resolver over pools 0..3, false for a missing
+row, §11.2), 7 = visited-A, 10 = the zone test, and the rest
 below. Sub 8 is ABSENT from the jump table (default → false). **No case
 negates its helper — each raw helper result IS the trigger truth**; the
 negated flavor of our enum names (`SingleFartherThan`, `SingleHasNoLOS`,
@@ -489,17 +585,31 @@ bit flip it.
    @ 0x40eea4`, the authored alert), the ChangeAI command arms
    (`Entity_ApplyCommand @ 0x43ab60`: case 5 → 2 @0x43ac2d, case 22 → 1
    @0x43ac8d, case 6 → 0 @0x43acfd; reached per-SSN from ChangeSingleAI and
-   fanned per-member over pools 2/0/1 by commandGroup from ChangeGroupAI
-   `Entity_HandleAlertCommand @ 0x43cff7`, which then also stamps the group
-   record). The ChangeAI arms carry a SECOND half beyond the controller byte:
+   fanned per-member by commandGroup from ChangeGroupAI
+   `Entity_HandleAlertCommand @0x43CF10`: sub 0 (@0x43CF1E) and group 0
+   (@0x43CF2C) return first; then pool 2 (the movsx group word @0x43CF57), whose
+   rows take the command only when they carry an aiRuntime (`cmp [eax+68h],0`
+   @0x43CF64), then pools 0 (@0x43CF97) and 1 (@0x43CFCD) with no gate, never
+   pool 3; the group alert stamps follow @0x43CFEA..0x43D01A. Shipped effect:
+   01TR event 3 (PreMission) runs ChangeGroupAI(6/7, INDESTRUCTABLE 43, 1) over
+   groups of brainless pool-2 crates and barrels (types 1595/4301: no AIData, so
+   no aiRuntime per the spawn gate in `Entity_SpawnFromBMSRecord @0x40E9F0`,
+   @0x40ED4E), which retail therefore leaves
+   destructible; the earlier port made them indestructible until events 9/11
+   (`bms_event_parity`, `test_change_group_ai_fans_pools_2_0_1`). The ChangeAI arms carry a SECOND half beyond the controller byte:
    each ALSO queues the brain `AIEvent {6, level}` → `AI_HandleCommand
    @ 0x465770` case 6, whose dispatch clamps the level 0..2, FORCES the
    stored level to 2 on any change (@0x4657cd), pushes pend state 10
    (ai-def type 1, current state not in {14, 6}) / pend state 18 (type 2,
    current != 22) — both behind `!(profile+96 & 2)` — then stores
-   kPrevAlert+kAlert (@0x465803/@0x465809). PORTED 2026-08-15, both halves;
-   commands reach brains through the state rows that route events (16/17/18)
-   — the other rows' event handlers remain unported stand-ins. Other +0x88
+   kPrevAlert+kAlert (@0x465803/@0x465809). PORTED 2026-08-15, both halves.
+   Every queued-event arm gates on the vehicle brain (entity+0x64) and falls to
+   the default without one (red @0x43AC34 after its slot byte, yellow @0x43AC94,
+   green @0x43AD04), so an organic, which carries the slot and no brain, takes
+   the slot byte alone (world-wac-ai-re §32.2). Every non-default brain row
+   carries its event handler: commands route through `h_aircraft_event` (rows
+   6/7/8/10/11), `h_pretty_event` (14/22) and `h_combat_event` (16..19)
+   ([coverage brain table](../world/npc-script-coverage.md#brain-handler-table)). Other +0x88
    writers: the alert-state event handler (`Entity_HandleAlertStateEvent
    @ 0x43dee0`: 2/0/1 @0x43df8e/0x43dfa1/0x43dfb2), damage triggers → 2
    (@0x4073db, @0x40775e), `Entity_AlertNearbyAllies @ 0x46558a` → 2, the AI
@@ -576,26 +686,35 @@ bit flip it.
      `|int32(-yaw - int(atan2(dy, dx) * -(2^31/pi)))| <= 0x15555540` (±30.0°,
      int32 wrap = shortest arc; yaw = entity +0x10, the binary-angle heading;
      dy/dx = the offset-point deltas; scale `dbl_7C57B8 = -(2^31/pi)`).
+   - The walker split is on the AUTHORED range, in both functions
+     (`cmp ecx,140000h; jg` @0x4F1769..0x4F1773 in sub 44, @0x4F1919..0x4F191F in
+     sub 45): ≤ 20 u calls `Entity_CheckLineOfSightTerrainAndEntities(A, B, start,
+     end, 0, allTypes 1)` (@0x4F1785 / @0x4F1931), above it
+     `Physics_RaycastTerrainAndSectors(A, B, start, end, 0)` (@0x4F17A7 /
+     @0x4F1953). PORTED 2026-09-23 as `script_los_clear` (`world/entity_commands.cpp`,
+     `EntityCommands::ssn_los_clear_within` / `ssn_sees_within`; ctest `ai_los`,
+     `test_script_los_splits_at_twenty_units`); the earlier port took the AI LOS
+     (the terrain/sector query) for every range.
 
 ## 4. Correspondence map
 
 | ours | original |
 |---|---|
 | `BmsEventSystem::update_entry` | `EventTrigger_UpdateEntry @0x454c30` |
-| `BmsEventSystem::evaluate_chain` | `@0x454050` |
+| `BmsEventSystem::evaluate_chain` | `EventTrigger_EvaluateChain @0x454050` |
 | `BmsEventSystem::evaluate_trigger` | `EventTrigger_EvaluateCondition @0x453620` |
 | `BmsEventSystem::dispatch_action` | `EventAction_Dispatch @0x4542e0` |
-| `BmsEventSystem::tick` (pre/post/normal passes) | `@0x454dc0` / `@0x454e00` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` |
+| `BmsEventSystem::tick` (pre + normal passes) / `run_post_mission_pass` (post) | `@0x454dc0` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` / `@0x454e00`, run once by `MissionKernel::run_post_mission_pass` from `HostRole::close` / `LocalRole::close` [orig: Game_TeardownMission @0x522350 (the call @0x52266c)] |
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
 | `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
-| `WacVm::time()` | `dword_C6EAD8` |
+| `WacVm::time()` | `wac_var_ticks` (@0xC6EAD8) |
 | `World::logic_tick` | `current_tick @0x24c1968`; `Game_StartMission` zeroes it on every peer past the authority-gated pre pass (`mov tick, ebx` @0x525b9f, gate @0x525b78) and `Game_ProcessMainFrame` adds one before `Entity_UpdateAllEntities` (@0x5265b4, call @0x52674b), so the first mission frame runs at tick 1 on the host and on every client; `MissionKernel::boot` sets `logic_tick = 1` for every role, the post-increment equivalent (2026-09-22, `mission_kernel::test_first_frame_tick_matches_on_host_and_joiner`) |
-| `World::run_logic_tick` system order | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate → Entity_UpdateAllEntities) |
+| `World::run_logic_tick` system order (`run_script_pass` then `run_entity_pass`, split by the host's server tick around its 0x0A) | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate, then the gated Entity_UpdateAllEntities, the call @0x52674b) |
 | `promote_mission` | `Mission_LoadBMSFile @0x40f4e0` spawn loops |
 | `Entity.net_id` | entity +124 ← record dword +8 (`@0x40e9f0`) |
 | `EntityRegistry::find_by_net_id` | `EntityPool_FindByNetId @0x4f0a20` |
 
-## 5. Proposed IDA write-backs (NOT applied — IDB writes were declined this session; apply after review)
+## 5. Proposed IDA write-backs (2026-06-10 proposals; superseded by §9, which records how each landed)
 
 Renames (dry-run validated 13/13):
 - `sub_454050` → `EventTrigger_EvaluateChain` (anchored)
@@ -645,7 +764,7 @@ fixture value 0x13.
 |---|---|---|---|
 | 1 | header | 0x268 (616) | staging buffer `byte_A761D0`; all `*_A76xxx` globals = header fields |
 | 2 | weapon loadout | header +0x242 bytes | SP: fread → `AIProfile_SanitizeConfigData` rewrites the len; MP: fseek past |
-| 3 | second chunk | header +0x246 bytes | **always fseek past** (SP and MP). Our parser never consumes it — latent divergence; round-trips only while the value is 0 (fixture: 0) |
+| 3 | second chunk | header +0x246 bytes | **always fseek past** (SP and MP). Our parser models it as the editor's item-availability list and round-trips it (`bms.cpp`, the `secondary_chunk_len` read); the runtime never reads it (D-EVT-5) |
 | 4 | items | count@+0xA4 × 0xAC | spawn → pool 1 |
 | 5 | buildings | count@+0xA8 × 0xAC | spawn → pool 2 |
 | 6 | markers | count@+0xAC × 0xAC | spawn → pool 3 |
@@ -672,7 +791,7 @@ Fixed counts (groups 64, layers 32, waypoints 128) match our
 | +0x240 | area-trigger count (`word_A76410`) | `area_trigger_count` | 0 |
 | +0x242 | weapon-loadout chunk len (`word_A76412`) | `weapon_loadout_chunk_len` | 136 |
 | +0x244 | NOT a chunk length (never used as a seek) | `bonus_expiration` | 10 |
-| +0x246 | second-chunk len (`word_A76416`, always seeked past) | `unknown8` | 0 |
+| +0x246 | second-chunk len (`word_A76416`, always seeked past) | `secondary_chunk_len` | 0 |
 
 ### 6.3a Loadout sanitizer (2026-09-11)
 
@@ -697,7 +816,7 @@ bytes or its overflowing 2048-byte temporary buffer. The three shipped chunks
 in ASP_G8a, ASR_C2A and TKR_G3A with broken separators now retain the witnessed
 record order instead of searching for embedded weapon names. Canonical reparse
 is stable across all 116 locally available missions; this is not a byte-equality
-claim for malformed input. **D-EVT-7 (proposed PERMANENT, class D: a never-reproduce of retail's out-of-buffer reads, pending maintainer ratification)** records that boundary: bounded
+claim for malformed input. **D-EVT-7 (PERMANENT, class D: a never-reproduce of retail's out-of-buffer reads; ratified by the merge of PR #646, 2026-09-12; ADR 0022 register)** records that boundary: bounded
 missing-string reads and preservation of oversized typed records differ from
 retail's out-of-buffer reads and final 2048-byte copy cap. No unsafe retail
 execution behavior is claimed by the parser tests.
@@ -717,7 +836,7 @@ AI/runtime semantics below are doc refinements, not parser changes.
 | +28 | dword | wp-distance / nav-radius / powerup-radius (`<<16`) per special type; **low word doubles as health** — dual-use |
 | +48 | wp_number | → aiData+152 (path index) |
 | +52/+54 | accuracy words | aiData+40/+44 = 100 − value |
-| +56/+58/+60 | yaw/pitch/roll | int16 degrees; heading = (90 − yaw)·65536/360, pitch/roll used directly |
+| +56/+58/+60 | yaw/pitch/roll | int16 degrees; entity +0x10 yaw = `((int32)((90 − yaw) << 16) / 360) << 16` (the `0B60B60B7h` magic signed divide, truncating toward zero, @0x40EB42..0x40EB66), pitch +0x14 and roll +0x18 the same without the 90 offset (@0x40EB69..0x40EBA6); the low 16 bits are always 0, so yaw 0 spawns at 0x40000000, not 90 × 11930464 = 0x3FFFFFC0 |
 | +73 | team | values 3/4 skipped when `dword_24D2150 != 4` |
 | +74/+75 | no_more_than / no_less_than | attrs 0x20 / 0x10 |
 | +76/+77 | two signed-byte AI params | our `unk19` i16 lumps both — round-trip-safe |
@@ -774,9 +893,10 @@ Server_InitNewRoundState @ 0x51c8e0]
   (minX,minY,minZ,maxX,maxY,maxZ) in natural X/Y/Z order (no Y/Z swap); per-axis swap
   when min > max. Retail disk is already canonical; **do NOT add the swap to the
   parser** (would break round-trip on a min>max file) — canonicalize when authoring.
-- **Area triggers**: fixture count is 0, so our 32-byte AreaTrigger layout and its Y/Z
-  swap remain inferred, UNTESTED by the corpus. (Zone-index addressing is confirmed
-  separately — §7.3.)
+- **Area triggers**: the 32-byte AreaTrigger layout is witnessed, per-axis
+  interleaved with no Y/Z swap (`id, x_min, x_max, y_min, y_max, z_min, z_max,
+  flags`; `parse_area_trigger` cites `Entity_IsTeamInTriggerBounds @0x43c75c`), and
+  zone-index addressing is confirmed separately (§7.2a, §7.3).
 - **Count clamps** (`BMS_LoadAndValidateHeader @0x40e326` and `@0x40f5b5`):
   items/buildings 0x4B0 (1200), markers 0x300 (768), organics 0x100 (256). Over-limit
   shows a warning dialog (fatal if dismissed) then continues — warn-not-reject. Our
@@ -786,7 +906,8 @@ Server_InitNewRoundState @ 0x51c8e0]
 
 Spawn-grid math reads (X@16, Y@20) as the horizontal plane and Z@24 as vertical; grid
 `X = (x>>18)+512`, `Y = 512−(y>>18)` (Y inverted). Confirms our `(x, z, −y)` import
-transform. Engine heading = **90 − yaw**, with pitch/roll stored direct. The
+transform. Engine heading = **90 − yaw**, with pitch/roll taking no offset (all three
+in the spawn form of §6.4). The
 retail matrix builder applies those as
 `Rz(90−yaw)·Ry(−pitch)·Rx(roll)`. Conjugating through `(x,z,−y)` and the
 model-forward correction gives the resolved Godot basis
@@ -931,13 +1052,24 @@ Two mission-start resolvers walk every event's triggers/actions right after
   reads TRUE, retail behavior).
 - `EventTrigger_ResolveZoneActionRefs @0x453100` (ex `resolve_weapon_slot_triggers`):
   the same for actions 12/13 AreaAiRed/Blue (param1), additionally inlining the
-  zone box into the action params (+12 x_min, +20 y_min, +24 x_max, +28 y_max);
-  dangling refs zero the action_type.
+  zone box into the action params (+12 x_min, +20 y_min, +24 x_max, +28 y_max: the
+  index store @0x453183, then x_min (zone +4) @0x45318D, y_min (zone +0xC)
+  @0x453197, x_max (zone +8) @0x4531A1, y_max (zone +0x10) @0x4531AB);
+  dangling or degenerate refs zero the action_type (@0x4531C6 / @0x4531B1).
+  The dispatch `Entity_KillTeamInBounds @0x43D030` (action 12 -> team 2, 13 ->
+  team 1 @0x43D03B..0x43D053; sub 0 returns @0x43D05B) walks pool 0 only, matches the
+  movsx team byte +0x162 (@0x43D099) and tests X (+4) against [+0x0C, +0x14]
+  (@0x43D0A8..0x43D0B5) and Y (+8) against [+0x18, +0x1C] (@0x43D0B7..0x43D0C4),
+  no Z: the tested box is X in [x_min, y_min] and Y in [x_max, y_max], the zone's
+  corners paired across axes. `Entity_ApplyCommand(action, e)` (@0x43D0C8) then
+  reads the command's p3/p4 as y_min/x_max. Unused in the shipped corpus.
 
 Port: `BmsEventSystem::resolve_zone_refs` (one-shot per `load()`, run from
 `on_load`; areas carry their authored id via `EntityRegistry::register_area`).
-Our area-AI dispatch resolves boxes at dispatch time, so the index rewrite alone
-preserves behavior (the inline copy is a noted non-port). Discovered via the
+The port writes the box into the action exactly as retail does (p1 = x_min,
+p3 = y_min, p4 = x_max, reserved1 = y_max, from the area's bounds via `to_fixed`),
+and the dispatch (`EntityCommands::apply_area_ai_command`) tests those words
+(`bms_event_parity`, `test_area_ai_reads_the_resolved_record`). Discovered via the
 04TR.bms probe: its negated `SingleIsWithinArea(10000, zone 6)` out-of-bounds
 watchdog fired RedWin at spawn while the refs were treated as indices. Editor
 consequence stands: deleting a zone whose id others reference dangles them —
@@ -950,43 +1082,43 @@ now with the witnessed neuter semantics rather than an OOB read.
 
 | sub | name | engine test | p1 | p2 | p3 | conf |
 |---|---|---|---|---|---|---|
-| 1 | GroupSeesGroup | `EventMatrix_TestSpecialBit(p1,p2)` | GROUP | GROUP | — | med |
-| 2 | GroupHasTargetedGroup | `TeamMatrix_TestAllied(p1,p2)` | GROUP | GROUP | — | med |
+| 1 | GroupSeesGroup | `EventMatrix_TestSpecialBit(p1,p2)`: `g_SeesMatrixGG` (§3a) | GROUP | GROUP | — | high |
+| 2 | GroupHasTargetedGroup | `TeamMatrix_TestAllied(p1,p2)`: `g_TargetedMatrixGG` (§3a) | GROUP | GROUP | — | high |
 | 3 | GroupAtRedAlert | `alert[p1]==2` | GROUP | — | — | high |
 | 4 | GroupDestroyed | `count[p1]==0` | GROUP | — | — | high |
 | 5 | GroupAlive | `count[p1]>0` | GROUP | — | — | high |
 | 6 | GroupHasLostMoreUnits | `(init[p1]-count[p1])>=p2` | GROUP | COUNT | — | high |
-| 7 | GroupAtWaypoint | `RelationMatrix_TestBitB(p1,p2,p3)` | GROUP | GROUP/? | BIT/wp | low |
+| 7 | GroupAtWaypoint | `RelationMatrix_TestBitB(p1,p2,p3)`: visited-B `g_WaypointVisitedByGroup` (§3a) | GROUP | WAYPOINT_LIST | WAYPOINT_NUMBER (bit) | high |
 | 9 | GroupIntact | `init[p1]==count[p1]` | GROUP | — | — | high |
 | 10 | GroupIsWithinArea | bounds, zone=`[p2]`, team=p1 | GROUP | **ZONE_REF (index)** | — | high |
 | 11 | GroupHoldingGroup | `TriggerGroup_AnyMemberHoldingItemGroup(p1,p2) @ 0x43c870` — pool-0 member of group p1 with mountedChild->commandGroup == p2 (§3b) | GROUP | GROUP | — | high |
 | 12 | GroupHasMoreUnits | `count[p1]>=p2` | GROUP | COUNT | — | high |
-| 13 | GroupHasShotGroup | `TeamMatrix_TestCanSee(p1,p2)` | GROUP | GROUP | — | med |
+| 13 | GroupHasShotGroup | `TeamMatrix_TestCanSee(p1,p2)`: `g_ShotMatrixGG` (§3a) | GROUP | GROUP | — | high |
 | 14 | GroupAtYellowAlert | `alert[p1]==1` | GROUP | — | — | high |
-| 15 | GroupHasTargetedSingle | `EntityMatrix_TestDamagedBit(p1,p2)` | GROUP | GROUP/ENTITY? | — | low |
-| 16 | GroupSeesSingle | `EntityMatrix_TestProximityBit(p1,p2)` | GROUP | GROUP/ENTITY? | — | low |
-| 17 | GroupHasShotSingle | `EntityMatrix_TestVisibilityBit(p1,p2)` | GROUP | GROUP/ENTITY? | — | low |
+| 15 | GroupHasTargetedSingle | `EntityMatrix_TestDamagedBit(p1,p2)`: `g_TargetedMatrixGS` (§3a) | GROUP | ENTITY (raw SSN) | — | high |
+| 16 | GroupSeesSingle | `EntityMatrix_TestProximityBit(p1,p2)`: `g_SeesMatrixGS` (§3a) | GROUP | ENTITY (raw SSN) | — | high |
+| 17 | GroupHasShotSingle | `EntityMatrix_TestVisibilityBit(p1,p2)`: `g_ShotMatrixGS` (§3a) | GROUP | ENTITY (raw SSN) | — | high |
 
 **main_type 2 = Single** (entity by BMS/net id).
 
 | sub | name | engine test | p1 | p2 | p3 | conf |
 |---|---|---|---|---|---|---|
-| 1 | SingleSeesGroup | `TeamMatrix_TestEnemyBit(p1,p2)` | ENTITY/team | GROUP | — | low |
-| 2 | SingleHasTargetedGroup | `TeamMatrix_TestDead(p1,p2)` | ENTITY/team | GROUP | — | low |
+| 1 | SingleSeesGroup | `TeamMatrix_TestEnemyBit(p1,p2)`: `g_SeesMatrixSG` (§3a) | ENTITY (raw SSN) | GROUP | — | high |
+| 2 | SingleHasTargetedGroup | `TeamMatrix_TestDead(p1,p2)`: `g_TargetedMatrixSG` (§3a) | ENTITY (raw SSN) | GROUP | — | high |
 | 3 | SingleAtRedAlert | `Entity_IsSsnAtAlertLevel(p1,2) @ 0x43e780` — aiRuntime+0x88 == 2 (§3b) | ENTITY | — | — | high |
-| 4 | SingleDestroyed | `!Entity_IsAliveByBmsRef(p1)` @0x453995 | ENTITY | — | — | high |
-| 5 | SingleAlive | `Entity_IsAliveByBmsRef(p1)` @0x4539a1 | ENTITY | — | — | high |
+| 4 | SingleDestroyed | `!Entity_IsAliveByBmsRef(p1)` (cat 2 sub 4 @0x453985, the neg/sbb/add @0x453991..0x453995): an SSN no pool 0/1/2 row carries (never placed, rejected at admission, SSN 0, a pool-3 marker, or removed: `Entity_Destroy` zeroes the row) reads NOT alive, so SingleDestroyed is TRUE for it (§11.2) | ENTITY | — | — | high |
+| 5 | SingleAlive | `Entity_IsAliveByBmsRef(p1)` (sub 5 @0x45399D): SSN 0 is false (@0x43E644); pools 0/1/2, the full-dword +0x7C compare, alive = `!(Flags & 2)` (@0x43E66E..0x43E676); no row reads 0 (@0x43E6DC) | ENTITY | — | — | high |
 | 6 | SingleHasLostMoreUnits | `Entity_HasDamageCapacity(p1,p2) @ 0x43e3d0` — `health <= max - p2` (§3b) | ENTITY | HP LOST | — | high |
-| 7 | SingleAtWaypoint | `RelationMatrix_TestBitA(p1,p2,p3)` | ENTITY/team | ? | BIT | low |
+| 7 | SingleAtWaypoint | `RelationMatrix_TestBitA(p1,p2,p3)`: visited-A `g_WaypointVisitedBySingle` (§3a) | ENTITY (raw SSN) | WAYPOINT_LIST | WAYPOINT_NUMBER (bit) | high |
 | 9 | SingleIntact | `Entity_HasFullHealth(p1) @ 0x43e470` — `health >= max` (§3b) | ENTITY | — | — | high |
 | 10 | SingleIsWithinArea | bounds, bmsRef=p1, zone=`[p2]` | ENTITY | **ZONE_REF (index)** | — | high |
 | 11 | SingleHoldingGroup | `Entity_IsSsnHoldingItemGroup(p1,p2) @ 0x43e2f0` — mountedChild(+0x268)->commandGroup == p2 (§3b) | ENTITY | GROUP | — | high |
 | 12 | SingleHasMoreUnits | `Entity_HasHealthAboveThreshold(p1,p2) @ 0x43e350` — `health >= p2` (§3b) | ENTITY | HP | — | high |
-| 13 | SingleHasShotGroup | `TeamMatrix_TestAlive(p1,p2)` | ENTITY/team | GROUP | — | low |
+| 13 | SingleHasShotGroup | `TeamMatrix_TestAlive(p1,p2)`: `g_ShotMatrixSG` (§3a) | ENTITY (raw SSN) | GROUP | — | high |
 | 14 | SingleAtYellowAlert | `Entity_IsSsnAtAlertLevel(p1,1) @ 0x43e780` — aiRuntime+0x88 == 1 (§3b) | ENTITY | — | — | high |
-| 15 | SingleHasTargetedSingle | `TeamMatrix_TestSpottedBy(p1,p2)` | ENTITY | ENTITY | — | low |
-| 16 | SingleSeesSingle | `TeamMatrix_TestEnemy(p1,p2)` | ENTITY | ENTITY | — | low |
-| 17 | SingleHasShotSingle | `TeamMatrix_TestAttackedBy(p1,p2)` | ENTITY | ENTITY | — | low |
+| 15 | SingleHasTargetedSingle | `TeamMatrix_TestSpottedBy(p1,p2)`: `g_TargetedMatrixSS` (§3a) | ENTITY (raw SSN) | ENTITY (raw SSN) | — | high |
+| 16 | SingleSeesSingle | `TeamMatrix_TestEnemy(p1,p2)`: `g_SeesMatrixSS` (§3a) | ENTITY (raw SSN) | ENTITY (raw SSN) | — | high |
+| 17 | SingleHasShotSingle | `TeamMatrix_TestAttackedBy(p1,p2)`: `g_ShotMatrixSS` (§3a) | ENTITY (raw SSN) | ENTITY (raw SSN) | — | high |
 | 42 | SingleOnTopOf | `Entity_IsOnTopOfChain(hA,hB) @ 0x4f19a0` — groundEntity(+0x28) chain ≤3 hops (§3b) | ENTITY | ENTITY | — | high |
 | 43 | SingleFartherThan | `Entity_CheckProximity(hA,hB,p3<<16) @ 0x4f14c0` — RAW true iff dist <= p3 (§3b) | ENTITY | ENTITY | **DISTANCE_M** | high |
 | 44 | SingleHasNoLOS | `Entity_CheckLineOfSightInRange(hA,hB,p3<<16) @ 0x4f15e0` — RAW true iff in range AND ray clear (§3b) | ENTITY | ENTITY | DISTANCE_M | high |
@@ -1005,7 +1137,7 @@ index, param2 = compare value. Operators (IDA truth): sub 1 `==`, 2 `<`, **3 `>`
 `bms.h` now carries IsGreaterThan=3 / IsLessThanOrEqual=4, vindicated by dfx2med
 (§8.2).
 
-**main_type 5 = SecondTimeThrough**: returns the global `dword_815174` (§1.4 cat 5).
+**main_type 5 = SecondTimeThrough**: returns the global `g_EventLoadParity` (ex `dword_815174`) raw (§1.4 cat 5).
 No params. **main_type 6 = Teammate**: sub1 IsEnabled (`!in_session & flag`), sub2
 MedicAssisting, sub3 Evacuating. No params.
 
@@ -1013,10 +1145,10 @@ MedicAssisting, sub3 Evacuating. No params.
 
 | sub | name | engine | p1 |
 |---|---|---|---|
-| 18 | PlayerBerserk | local player's AiSlot behavior word & 0x200 (@0x453b99) | — |
-| 19/20/21 | FirstPerson/ThirdPerson/Cockpit | view bits 0x4000000/0x8000000/0x10000000 in `dword_B3B738`, consumed through the mirror (§1.4) | — |
+| 18 | PlayerBerserk | local player's AiSlot behavior word & 0x200, returned raw (@0x453B85..0x453B99): the chain folds 0x200, so NOT-Berserk reads 0x201 (true), Berserk AND true reads 0 and Berserk XOR true reads 0x201 (§1.3) | — |
+| 19/20/21 | FirstPerson/ThirdPerson/Cockpit | view bits 0x4000000/0x8000000/0x10000000 in `g_InputActionBits` (0xB3B738), set by the view actions 400 view1st / 402 viewchase / 401 viewwithgun and consumed through the mirror (§1.4) | — |
 | 22/23/24/25 | PlayerInputBit10/11/12/13 | bits 0x400/0x800/0x1000/0x2000: no setter in the image, false in retail | — |
-| 26/27 | PlayerLookByteBit0Clear/Set | `(byte_27234FC & 1) == 0` / `!= 0`: writer unwitnessed, false here (D-EVT-3 residue) | — |
+| 26/27 | PlayerLookByteBit0Clear/Set | `(byte_27234FC & 1) == 0` / `!= 0` (@0x453CA5 / @0x453CB6): sub 26 true, sub 27 false: the byte's only store writes 0 (`HUD_BuildEntityInfo @0x4B8440` (the store @0x4B84D9), §1.4) | — |
 | 28/29/30 | PlayerInputBit29/14/15 | bits 0x20000000/0x4000/0x8000: no setter, false in retail | — |
 | 32 | PlayerInputBitIndex | `1 << p1` (shift count masked to 5 bits) | BIT index |
 | 33 | PlayerInputBitIndexPlus15 | `1 << (byte@12 + 15)` (the low byte of p1) | BIT index |
@@ -1034,47 +1166,48 @@ evaluated in `event_runtime.cpp` since 2026-09-12.
 | type | name | engine call | p1 | p2 | p3 | sub_type |
 |---|---|---|---|---|---|---|
 | 1 | RedirectGroupTo | `Entity_SetWaypointByTeam(p1,p2,p3)` | GROUP | wp-type | WAYPOINT (−1=nearest) | — |
-| 2 | KillGroup | `Entity_KillAllByNetId(p1)` | GROUP | — | — | — |
-| 3 | ChangeGroupAI | `Entity_HandleAlertCommand(block)` | GROUP | value | — | AI sub-type (§8.2) |
-| 4 | VaporizeGroup | `Entity_TeleportAllByNetId(p1)` | GROUP | — | — | — |
+| 2 | KillGroup | `Entity_KillAllByNetId(p1)` @0x43C8E0: group 0 exits (@0x43C8F2); pools 2, 0, 1 (@0x43C8F8/@0x43C946/@0x43C996), every row of the group, dead rows included, no item gate: Health 0, the hit record's damage +0x30 and owner +0x44 cleared, the class event (e, 1, 0) (@0x43C917..0x43C93F); the row's attacker and staged clip stay. WAC `kill` shares the walk (§11.3) | GROUP | — | — | — |
+| 3 | ChangeGroupAI | `Entity_HandleAlertCommand(block)` @0x43CF10: sub 0 / group 0 no-op; pools 2 (aiRuntime rows only), 0, 1, never 3; then the group alert stamps (§3b item 1) | GROUP | value | — | AI sub-type (§8.2) |
+| 4 | VaporizeGroup | `Entity_TeleportAllByNetId(p1)` @0x43D5D0 (a misnomer: it removes) -> `Server_RemoveEntityAndNotify @0x50A270` per row of pools 2, 0, 1, 3 (S2C 0x12, then `Entity_Destroy`); group 0 and a non-authority peer return first (§10, §11.4) | GROUP | — | — | — |
 | 5 | MisvarChange | `dword_C6B240[p1] op p2` | MISSION_VAR | value | — | 1=Set 2=Add 3=Sub 4=Inc 5=Dec |
 | 6 | OutputText | `HUD_DisplayTriggeredText(p1)` | TEXT id | — | — | — |
-| 7 | PlayWavList | `Dialog_PlayByIndex(p1)` gated p2 | DIALOG/wav | BOOL (1=always) | — | — |
+| 7 | PlayWavList | `Dialog_PlayByIndex(p1)` where `is_mp_session_peer` is set (@0x45443D), and after the round-over / cinematic latch only when p2 == 1 (@0x45444A/@0x454450; §1.5) | DIALOG/wav | BOOL (1=always) | — | — |
 | 8/9/10 | Blue/Red/GreenWin | `Server_ProcessRoundEnd(1/2/0)` — the shared round-end entry (the WAC win/lose handlers call the same; full decode + the SP end presentation in [world-wac-ai-re §20](../world/world-wac-ai-re.md)) | — | — | — | — |
-| 11 | GroupVelocity | `Entity_SetMoveSpeedKPH(p1,p2)` | GROUP | SPEED_KPH | — | — |
-| 12/13 | AreaAiRed/Blue | `Entity_KillTeamInBounds(block)` | AREA_ID | — | — | AI sub-type |
-| 14/15 | SubGoalWon/Lost | win/lose subgoal p1 | SUBGOAL 1..8 | — | — | — |
+| 11 | GroupVelocity | `Entity_SetMoveSpeedKPH(p1,p2)`: stores the group-row +0x2C word, which retail never reads (§10) | GROUP | SPEED_KPH | — | — |
+| 12/13 | AreaAiRed/Blue | `Entity_KillTeamInBounds(block)` @0x43D030: pool 0, team 2 / 1, the load-inlined box (§7.3) | AREA_ID (rewritten to x_min at load) | value | (overwritten: y_min; p4 overwritten: x_max) | AI sub-type |
+| 14/15 | SubGoalWon/Lost | win/lose subgoal p1; inside the round-running gate the `STRWINMSG%03i` / `STRLOSEMSG%03i` chat line through `GameMsg_AddChatLineAndRelay` (team 1 / team 0, the key relayed as S2C 0x3F kind 1; the calls @0x454578 / @0x454632, §11.5) | SUBGOAL 1..8 | — | — | — |
 | 16 | ChangeGTeamAction | `Entity_SetTeamByNetId(p1,p2)` | GROUP/ENTITY | TEAM {0,1,2} | — | — |
 | 17 | ChangeGroupAction | `Entity_UpdateNetIdReferences(p1,p2)` | GROUP | GROUP | — | — |
 | 18 | GroupTeleportAction | `Entity_TeleportTeamToSpawn(p1)` | GROUP | teleport-target | — | — |
 | 19 | RedirectSingleTo | `Entity_SetWaypointForTeam(p1,p2,p3)` | ENTITY | wp-type | WAYPOINT | — |
-| 20 | KillSingle | `Entity_KillByNetId(p1)` | ENTITY | — | — | — |
-| 21 | ChangeSingleAI | `Entity_HandleAlertStateEvent(block)` | ENTITY | value | — | AI sub-type |
-| 22 | VaporizeSingle | `find_entity_by_parent_and_dispatch(p1)` | ENTITY | — | — | — |
+| 20 | KillSingle | `Entity_KillByNetId(p1)` @0x43DBD0: the first matching row of pools 0..3, no item or dead gate: Health 0; pool 0 also zeroes lastAttacker (@0x43DC15) and the staged clip +0x2C0 (@0x43DC1B); the hit record's damage +0x30 is cleared on every pool leg and its owner +0x44 on pool 0 only; pools 0..2 fire the class event with phase 1, pool 3 with phase 4 (@0x43DCE6) (§11.3) | ENTITY | — | — | — |
+| 21 | ChangeSingleAI | `Entity_HandleAlertStateEvent(block)` @0x43DEE0: sub 0 (@0x43DEEF) and SSN 0 (@0x43DEFC) no-op; the first full-dword match in pools 0, 1, 2 (@0x43DF20/@0x43DF41/@0x43DF69) takes `Entity_ApplyCommand` (@0x43DF70), then a non-player's alert byte is re-stamped (@0x43DF78..0x43DFB2) | ENTITY | value | — | AI sub-type |
+| 22 | VaporizeSingle | `find_entity_by_parent_and_dispatch(p1)` @0x43E210: SSN 0 (@0x43E214) and a non-authority peer (@0x43E21C) return; the first full-dword +0x7C match in pools 0..3 tail-jumps to `Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12, then `Entity_Destroy`; §11.4) | ENTITY | — | — | — |
 | 23 | SingleVelocity | `sub_43DEA0(p1)` — witnessed retail no-op | ENTITY | SPEED_KPH | — | — |
 | 24 | ChangeSteamAction | `Entity_FindByDCBAndSetFlag(p1)` | ENTITY | TEAM {0,1,2} | — | — |
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
 | 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | target WP_NUMBER | — | — | All matching pool-3 ItemDef 6088 markers; entity+692/gen_string effect name, zero direction, store without releasing previous group. Shared typed particle consumer; entity+460 lifetime sharing remains D-PTL-26. |
-| 28 | SpecialSubType | `EventAction_HandleSpecialTypes(block) @0x4535a0`: sub 37 `RenderState_SetLayerVisibilityByIndex(block, p1)` @0x4535d5, sub 38 `g_InputActionBits = 0` @0x4535c2 (ported), sub 39 `dword_AE0718 = (p1 == 0)` @0x4535bc | sub 37/39: value | — | — | 37/38/39 (editor marks 28/29 unused) |
-| 30 | GroupOpenDoorAction | `Entity_KillDestructiblesByTeam(p1)` (dmg-transition 7) | GROUP/team | — | — | — |
-| 31 | GroupCloseDoorAction | `Entity_KillDestructiblesByOwner(p1)` | owner ref | — | — | — |
+| 28 | SpecialSubType | `EventAction_HandleSpecialTypes(block) @0x4535a0`: sub 37 `RenderState_SetLayerVisibilityByIndex(p1, p2)` (the call @0x4535d5), the HUD item flash (§11.6); sub 38 `g_InputActionBits = 0` @0x4535c2; sub 39 `dword_AE0718 = (p1 == 0)` @0x4535bc, a dead store; every other sub returns @0x4535b4. All three ported | sub 37: HUD timer 0..15 (unchecked); sub 39: value | sub 37: timer value (ticks) | — | 37/38/39 (editor marks 28/29 unused) |
+| 30 | GroupOpenDoorAction | `EventAction_OpenGroupDoors(p1)` @0x4541A0: pools 2 then 1, every row whose commandGroup +0x11C matches and whose +0x1C8 callback is `Entity_ProcessSectionDamageTransition @0x43F370` takes section event 7, the door open (world-wac-ai-re §33.14) | GROUP | — | — | — |
+| 31 | GroupCloseDoorAction | `EventAction_CloseGroupDoors(p1)` @0x454240: the same walk with section event 8, the door close (@0x454282 / @0x4542C3) | GROUP | — | — | — |
 | 32 | GroupResetHasVisited | `EventTrigger_ClearSlotB(p1)` | GROUP | — | — | — |
 | 33 | SingleResetHasVisited | `EventTrigger_ClearSlotA(p1)` | ENTITY | — | — | — |
 | 34 | ResetEvent | `events[p1]` latch clear (§1.5) | **EVENT_REF** | — | — | — |
-| 35 | ShowWinSubgoal | `dword_AC86EC` bit p1 + HUD notif | SUBGOAL 1..8 | BOOL show/hide | — | — |
-| 36 | ShowLoseSubgoal | same via `dword_AC86E8` | SUBGOAL 1..8 | BOOL | — | — |
-| 37 | AttachToEmplaced | `FindByNetId(p1)` → mount (§1.5 case 0x25) | ENTITY | — | — | — |
-| 38 | SetLightState | `sub_5A8C80(p1,p2)` | id | state | — | — |
+| 35 | ShowWinSubgoal | `dword_AC86EC` bit p1 (the count masked to 5 bits, `shl cl` @0x4546BD/@0x4546CC) + `HUD_ShowObjectiveNotification(slot, 1, p2, 1)` (the call @0x4546E2: the New Objective and directive chat lines, the S2C 0x3F kind-0 relay) + the NEW_GOAL sound at the local player when p2 (@0x4546E7..0x45470C) (§11.5) | SUBGOAL 1..8 | BOOL show/hide | — | — |
+| 36 | ShowLoseSubgoal | same via `dword_AC86E8` (`shl cl` @0x454732/@0x454741) + `HUD_ShowObjectiveNotification(slot, 0, p2, 0)` (the call @0x454757); no sound (§11.5) | SUBGOAL 1..8 | BOOL | — | — |
+| 37 | AttachToEmplaced | `FindByNetId(p1)` (the call @0x454992) -> `WacScript_TryMountEntityToVehicle @0x4F70F0`, which boards the vehicle the occupant's AI slot +0x90 (aiRuntime[36]) names, armed by a board order (WAC ssn2ssn, BMS RedirectSingleTo onto command 125); the WAC ssnuse row runs the same function. Ported as `EntityCommands::use_boarding_target` (`mission_mount`); no shipped mission authors it (0 of 115) | ENTITY | — | — | — |
+| 38 | SetLightState | `sub_5A8C80(p1,p2)` @0x5A8C80: `(unsigned)p1 <= 3` (@0x5A8C84), then the light-group channel `dword_272ED88[p1] = p2 ? 0x10000 : 0` (@0x5A8C97); consumer unresolved (§11.7) | channel 0..3 | on/off | — | — |
 | 39 | Teammates | sub1 `HeliLift_SpawnPickup(p1,p2)`, sub2 `…Flyover` | p1 | p2 | — | 1=pickup 2=flyover 3=evac-AT |
 | 40 | ShowWaypoints | `Game_SetShowWaypoints(p1)` | bool | — | — | — |
 | 41 | ExecuteWac | not dispatched here (WAC subsystem; no-op in this dispatcher) | — | — | — | — |
 | 42–49 | Ssn/GroupTarget{Ssn,Group}{Pri,Exc} | `Entity_Set{Alert,Action,Waypoint,Target,Weapon}*(p1,p2)` | ENTITY/GROUP | target | — | — |
 
 Types 42–49: the helper names (`SetAlert/SetAction/SetWaypoint/SetTarget/SetWeapon
-ByNetId/ByBmsRef`) are shared and do not map 1:1 onto the enum's `*Pri/Exc` names —
-per-value semantics **uncertain**; the editor offers pickers with a
-"semantics unverified" note rather than asserting a meaning.
+ByNetId/ByBmsRef`) are shared and do not map 1:1 onto the enum's `*Pri/Exc` names.
+Their semantics are witnessed: they write the four target-policy words
++332/+334/+336/+338 (the SSN/group preference and exclusion selectors), ported with
+their infantry/weapon consumers (§10.1, world-wac-ai-re §33.2).
 
 ## 8. Appendix: dfx2med editor cross-checks
 
@@ -1220,29 +1353,30 @@ underwater grill, same session).
 Status: **applied 2026-07-16** (repo hygiene pass, maintainer's apply-the-held-IDB-updates
 call) with three dispositions: `0x452ce0` and `0x4f81a0` had already been renamed by later
 sessions to sharper names (`EventTrigger_MarkLinkedSpawnPoints`, `WacScript_AdvanceTick`) —
-those two proposals below are superseded; `dword_815174` no longer exists as a standalone
-symbol (re-adjudicate at the next event grill). Every other row landed in
-`Jointops.exe.kong.i64`. This is the formal record of §5 with the orig→reimpl
-correspondence made explicit.
+those two proposals below are superseded; the 0x815174 word carries the IDB name
+`g_EventLoadParity` (re-read 2026-09-23), so its proposal is superseded too. Every other row landed in
+`Jointops.exe.kong.i64` (the §9.1 status column). This is the formal record of §5 with the orig→reimpl
+correspondence made explicit. The §9.2 comment clarifications are not all applied:
+the 0x453620 function comment still reads "3=dialog".
 
 ### 9.1 Renames
 
-| addr | current | proposed | confidence |
-|---|---|---|---|
-| 0x454050 | sub_454050 | EventTrigger_EvaluateChain | anchored |
-| 0x454d50 | EventTrigger_UpdateQuarterRoundRobin | (applied) | **APPLIED 2026-06-25** (was kong-misnomer `Entity_SetStateWreckage`) |
-| 0x452ce0 | EventTrigger_MarkLinkedSpawnPoints | (applied) | **APPLIED 2026-08-15** (ex kong misnomer `EventTrigger_NotifyEntityDeath`; arg is the EVENT entry, not an entity) |
-| 0x4f81a0 | WacScript_AdvanceTick | WacScript_TickEvery62 | anchored |
-| 0xae0704 | trigger | g_Events | anchored |
-| 0xae0700 | dword_AE0700 | g_EventCount | anchored |
-| 0xae070c | dword_AE070C | g_EventTriggers | anchored |
-| 0xae0708 | dword_AE0708 | g_EventTriggerCount | anchored |
-| 0xae0714 | dword_AE0714 | g_EventActions | anchored |
-| 0xae0710 | dword_AE0710 | g_EventActionCount | anchored |
-| 0xae06fc | dword_AE06FC | g_EventQuarterCursor | anchored |
-| 0x815174 | dword_815174 | g_EventSpecialToggle | anchored (cat-5 condition; XOR'd each LoadAllData) |
-| 0xb3b738 | dword_B3B738 | g_InputActionBits | probable (written by Input_HandleActionBinding; cat-7 bit tests) |
-| 0xae06f8 | dword_AE06F8 | g_EventInputBitsMirror | probable (transactional copy around event eval/dispatch) |
+| addr | name at the 2026-06-10 grill | proposed | confidence | status (IDB re-read 2026-09-23) |
+|---|---|---|---|---|
+| 0x454050 | sub_454050 | EventTrigger_EvaluateChain | anchored | applied |
+| 0x454d50 | EventTrigger_UpdateQuarterRoundRobin | (applied) | **APPLIED 2026-06-25** (was kong-misnomer `Entity_SetStateWreckage`) | applied |
+| 0x452ce0 | EventTrigger_MarkLinkedSpawnPoints | (applied) | **APPLIED 2026-08-15** (ex kong misnomer `EventTrigger_NotifyEntityDeath`; arg is the EVENT entry, not an entity) | applied |
+| 0x4f81a0 | WacScript_AdvanceTick | WacScript_TickEvery62 | anchored | superseded: the IDB keeps `WacScript_AdvanceTick` |
+| 0xae0704 | trigger | g_Events | anchored | applied |
+| 0xae0700 | dword_AE0700 | g_EventCount | anchored | applied |
+| 0xae070c | dword_AE070C | g_EventTriggers | anchored | applied |
+| 0xae0708 | dword_AE0708 | g_EventTriggerCount | anchored | applied |
+| 0xae0714 | dword_AE0714 | g_EventActions | anchored | applied |
+| 0xae0710 | dword_AE0710 | g_EventActionCount | anchored | applied |
+| 0xae06fc | dword_AE06FC | g_EventQuarterCursor | anchored | applied |
+| 0x815174 | dword_815174 | g_EventSpecialToggle | anchored (cat-5 condition; XOR'd each LoadAllData) | superseded: the IDB names it `g_EventLoadParity` |
+| 0xb3b738 | dword_B3B738 | g_InputActionBits | probable (written by Input_HandleActionBinding; cat-7 bit tests) | applied |
+| 0xae06f8 | dword_AE06F8 | g_EventInputBitsMirror | probable (transactional copy around event eval/dispatch) | applied |
 
 ### 9.2 Comment clarifications
 
@@ -1259,10 +1393,10 @@ correspondence made explicit.
 | orig | reimpl |
 |---|---|
 | `EventTrigger_UpdateEntry @0x454c30` | `engine/runtime/mission/event_runtime.cpp` |
-| `@0x454050` (chain eval) | `engine/runtime/mission/event_runtime.cpp` |
+| `EventTrigger_EvaluateChain @0x454050` | `engine/runtime/mission/event_runtime.cpp` |
 | `EventTrigger_EvaluateCondition @0x453620` | `engine/runtime/mission/event_runtime.cpp` |
 | `EventAction_Dispatch @0x4542e0` | `engine/runtime/mission/event_runtime.cpp` |
-| `@0x454d50` (quarter pass) | `engine/runtime/mission/event_runtime.cpp` |
+| `EventTrigger_UpdateQuarterRoundRobin @0x454d50` (quarter pass) | `engine/runtime/mission/event_runtime.cpp` |
 | `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/wac_system.cpp` |
 | `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/promote.cpp` |
 | `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/promote.cpp` |
@@ -1279,15 +1413,15 @@ actions.
 | action | Witnessed retail behavior | OpenNova landing |
 |---|---|---|
 | 0 `Null` | no-op switch arm [orig: EventAction_Dispatch @ 0x4542E0] | explicit no-op; no diagnostic |
-| 4 `VaporizeGroup` | despite its curated callee name, removes matching nonempty rows while walking pools 2, 0, 1, 3 [orig: Entity_TeleportAllByNetId @ 0x43D5D0] | `EntityCommands::remove_group`; then live-count recount + collision refresh |
-| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` — 16.16 units per SECOND (kph × 1000/3600) [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_sec` |
-| 16 `ChangeGTeamAction` | scans pools 2, 0, 1 and rewrites team on every matching group row [orig: Entity_SetTeamByNetId @ 0x43C680] | `set_group_team`, including the live `AiEntity::team` mirror |
-| 17 `ChangeGroupAction` | scans pools 2, 0, 1; pool 0 skips dead rows, pools 2/1 do not; rebuilds group counts [orig: Entity_UpdateNetIdReferences @ 0x43C5B0] | `change_group`, including the AI relation-matrix id mirror |
+| 4 `VaporizeGroup` | despite its curated callee name, removes matching nonempty rows while walking pools 2, 0, 1, 3, each through `Server_RemoveEntityAndNotify` (S2C 0x12 to the joiners, then `Entity_Destroy`); group 0 (@0x43D5D5) and a non-authority peer (@0x43D5DD) return first; no recount and no proximity rebuild follow [orig: Entity_TeleportAllByNetId @ 0x43D5D0; the removal calls @0x43D615 (pool 2), @0x43D646 (0), @0x43D677 (1), @0x43D6A8 (3)] | `EntityCommands::remove_group` -> `server_remove_and_notify` per row (the 0x12 through the host's entity-event fan, then the shared destroy `remove_ssn`); the counts wait for the periodic live rescan (§11.4) |
+| 11 `GroupVelocity` | stores group speed at group-row +0x2C (`dword_A33FBC` = 0xA33F90 + 0x2C, stride 0x30) using the two truncating integer divisions `(256000*kph/60 << 8)/60`: 16.16 units per SECOND (kph × 1000/3600). Write-only in retail: the store @0x43A9A5 is the only instruction that touches that word; the whole 0xC00-byte group table is otherwise only zeroed by the mission reset (@0x40DBAE) and dumped by the savegame writers (@0x4A9E91 / @0x4AAB58) [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_sec` (stored, no reader, as in retail) |
+| 16 `ChangeGTeamAction` | group 0 returns first (@0x43C685); scans pools 2, 0, 1 and rewrites the team byte +0x162 (@0x43C6BA) on every row whose `movsx` group word +0x11C matches (@0x43C6AD..0x43C6B8), with no item, used or dead test [orig: Entity_SetTeamByNetId @ 0x43C680] | `set_group_team`, including the live `AiEntity::team` mirror |
+| 17 `ChangeGroupAction` | group 0 returns first, skipping the recount too (@0x43C5B5); scans pools 2, 0, 1 with no item gate; pool 0 skips dead rows (`Flags & 2` @0x43C628), pools 2/1 do not; then tail-jumps to the live recount (`EntityPool_RecountLiveByGroup`, @0x43C671) [orig: Entity_UpdateNetIdReferences @ 0x43C5B0] | `change_group`, including the AI relation-matrix id mirror |
 | 18 `GroupTeleportAction` | finds the first pool-3 type-6088 marker whose `WP_NUMBER` equals param2, then teleports group members in pools 0, 1, 2 [orig: Entity_TeleportTeamToSpawn @ 0x43D390] | `teleport_group_to_marker` |
 | 23 `SingleVelocity` | walks its pool-1 lookup path and returns without a state write [orig: sub_43DEA0 @ 0x43DEA0] | explicit retail no-op; no diagnostic |
 | 24 `ChangeSteamAction` | resolves the first SSN/DCB row in pools 0..2 and writes team [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30] | `set_ssn_team` |
 | 25 `SingleChangeGroup` | resolves the first SSN/DCB row in pools 0..2 and rewrites group [orig: Entity_SetNetIdByParentRef @ 0x43D6C0] | `set_ssn_group`, AI mirror, group recount |
-| 26 `SingleTeleportAction` | marker lookup is pool 3 / type 6088 / `WP_NUMBER`; target lookup is the first SSN row in pools 0..2 [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0] | `teleport_ssn_to_marker` |
+| 26 `SingleTeleportAction` | marker lookup is pool 3 / type 6088 / `WP_NUMBER`; the target walk tests the ItemTypeIndex (+0x1C) before the DcbId on every row of pools 0, 1, 2 (@0x43E02D / @0x43E0DD / @0x43E180), so a gated row carrying the SSN is passed over and the walk goes on [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0] | `teleport_ssn_to_marker` (`resolve_teleport_target`; `script_command_parity`, `test_teleport_walk_gates_inside`) |
 
 The two teleport forms deliberately differ:
 
@@ -1314,7 +1448,10 @@ refresh collision/proximity once after the complete fan, not once per member.
 The single-target SSN commands (24/25/26) resolve by walking pools 0, 1, 2 in
 order — retail's own sequential DcbId scans, first match wins, `dcb_id != 0`
 gated, with NO item gate on the team/group writers (the teleport walk keeps
-its item gate @ 0x43E036) [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30 —
+its item gate, `cmp dword ptr [esi+1Ch],0` @0x43E02D inside the SSN walk, so an
+ItemTypeIndex-0 row is skipped before the SSN compare; the port resolves the first
+SSN row and then applies the gate, which differs only when such a row shadows a
+later row with the same SSN) [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30 —
 team byte entity+354 @ 0x43DB63; Entity_SetNetIdByParentRef @ 0x43D6C0 —
 commandGroup word entity+284 @ 0x43D6F4]. The 2026-09-01 re-grill replaced the
 earlier resolve-then-reject shape, which could miss when a pool-3 row shadowed
@@ -1348,7 +1485,8 @@ Entity_SetAlertByNetId @0x43D7F0; Entity_SetTargetByNetId @0x43D770]` (the
 curated names are misleading: they write the +332/+334/+336/+338 target-policy
 words, world-wac-ai-re section 33.2), and 41 `ExecuteWac` has no retail case
 arm. The default arm of the dispatcher is diagnostic-only for unauthored action
-types.
+types (every sub of action 28, 37 and 39 included, stays inside its own case
+since 2026-09-23, §11.6).
 
 The 2026-09-08 pass implements actions 42..49 through the four target-policy
 words and their infantry/weapon consumers. Action 41 `ExecuteWac` has no
@@ -1374,3 +1512,231 @@ needs event or collision ticks installs an authored `set(ticks,-1)` program.
 `simulation_test.gd` covers the empty startup blocking events and the authored
 clock write admitting both schedulers; the live GameWorld startup path is
 covered by the music-director integration tests.
+
+## 11. Action and condition parity (grill-ida + port, 2026-09-23)
+
+The corrections of this pass sit in place in §1 to §10; this section holds the
+new witnesses that are too long for a table cell.
+
+### 11.1 Retail-executed vectors
+
+`scripts/oracles/mission_event_parity.py` executes synthetic record sets in the
+retail PE under Unicorn (the executable is SHA-pinned; check mode by default,
+`--write` rewrites the fixture): the condition evaluator, the chain fold, the
+action dispatch, the entry scheduler and the quarter/pre/post passes (jo-c's
+mission-event probes), plus the signed trigger count, the raw Berserk fold, the
+SingleDestroyed/SingleAlive row walk and the authority-gated linked-spawn marks.
+No event, action, timer or input predicate is mocked. The fixture
+`tests/mission/fixtures/mission_event_vectors.inc` holds 479 cases (jo-c's 430
+and 49 extended). `mission_event_vectors` rebuilds each record set in a World,
+loads the raw 24-byte runtime words through `BmsEventSystem::event_for_test`,
+runs the same root and compares every snapshot word. The vectors exposed the
+linked-spawn authority gate (§1.5) and the signed trigger count (§1.2).
+[orig: EventTrigger_EvaluateCondition @0x453620; EventTrigger_EvaluateChain
+@0x454050; EventAction_Dispatch @0x4542E0; EventTrigger_UpdateEntry @0x454C30;
+the passes @0x454D50 / @0x454DC0 / @0x454E00; Entity_IsAliveByBmsRef @0x43E640;
+EventTrigger_MarkLinkedSpawnPoints @0x452CE0]
+
+### 11.2 SingleDestroyed / SingleAlive read the BMS-ref rows
+
+`Entity_IsAliveByBmsRef @0x43E640` answers 0 for SSN 0 (@0x43E644), walks pools
+0, 1 and 2 with a full-dword compare of +0x7C, answers `!(Flags & 2)` for the
+first match (@0x43E66E..0x43E676) and 0 when no row matches (@0x43E6DC); a
+removed row is gone because `Entity_Destroy` zeroes it (@0x43EA69). Sub 5 is that
+read (@0x45399D) and sub 4 its negation (@0x453985, the neg/sbb/add
+@0x453991..0x453995), so an SSN no pool 0/1/2 row carries (never placed, rejected
+at admission, SSN 0, a pool-3 marker, or removed) reads DESTROYED. The earlier
+port read the general SSN resolver (pools 0..3, false for a missing row). The
+shipped effect: 01TR event 34 (SingleDestroyed(101) AND SingleDestroyed(102) ->
+SubGoalWon(6)) never fired because SSN 101 is not placed, so the mission's only
+BlueWin (event 38, gated on Event(34)) was unreachable; 05TR E48/E54/E61..E63/
+E74..E76, CP09 E4..E7, CP05 E82/E115, CP08 E127, CP12 E84, TKH_C1B E1/E3, 04TR
+E125 and 00TRb E25/E30/E36/E37/E40 fire at mission start in retail for the same
+reason. Port: `EntityCommands::bms_ref_alive`; `bms_event_parity`
+(`test_single_alive_reads_the_bms_ref_rows`,
+`test_01tr_event34_chain_fires_when_the_placed_item_dies`) and the retail
+vectors. The WAC `SSNdead` / `SSNalive` commands are separate handlers
+(@0x4F1AC0 / @0x4F1B20, the Flags bit-1 read behind the ItemTypeIndex gate;
+npc-script-coverage rows 12/13).
+
+### 11.3 The script kills and the global hit record
+
+The three script kills clear different parts of the global hit record
+(`Projectile_GetHitRecord @0x4E7000`: 80 bytes @0xB7C620, +0x30 damage, +0x38
+section, +0x40 the round pointer, +0x44 the round's +0x170 owner), which the
+class callbacks read:
+
+- WAC `killSSN` is its own handler, `WacCmd_KillSsn @0x4F1E40` (ex
+  `Entity_ResetWeaponState`): the ItemTypeIndex gate (@0x4F1E89), the whole record zeroed
+  (@0x4F1E8F..0x4F1E99), Health 0 (@0x4F1EA4), lastAttacker 0 (@0x4F1EAD), a
+  person's (def+0x5C == 3) staged clip +0x2C0 cleared (@0x4F1EB7..0x4F1EBD), then
+  the class event (e, 1, 0) (@0x4F1EC7..0x4F1ED2).
+- BMS KillSingle (`Entity_KillByNetId @0x43DBD0`, §7.5 row 20) clears the damage
+  word on every pool leg (@0x43DC27, @0x43DC68, @0x43DCA6, @0x43DCE8) and the
+  owner only on pool 0 (@0x43DC22).
+- BMS KillGroup and WAC `kill` (`WacCmd_Kill @0x4EDC90`, returning 0 @0x4EDC9D)
+  share `Entity_KillAllByNetId @0x43C8E0` (§7.5 row 2), which clears the damage
+  and owner words per row (@0x43C930 / @0x43C933 pool 2, @0x43C980 / @0x43C983
+  pool 0, @0x43C9D0 / @0x43C9D3 pool 1).
+
+So after any round has hit anything, a KillSingle or KillGroup of a person runs
+the round legs of the LAST recorded round through +0x40 (its section, approach
+quadrant and ammo force, the round's owner as the reaction attacker; the authority
+cuts a non-player body on a section above 0), and a KillSingle item row keeps
++0x44, so a brained item's machine is notified with the last round's owner (the
+machines' event 1 copies +0x44 into the queued event, @0x45831E / @0x458524); WAC
+`killSSN` and a fresh mission (`Projectile_InitDragTable`'s memset
+@0x4E7921..0x4E7929) start from an empty record. With no round on record
+an org0/org1 body's class callback takes only the phase-1 alert prefix (the AI
+slot alert byte +0x88 = 2 and `TriggerGroup_SetAlertRed(group)`,
+`OrganicClass_HandleEvent @0x407310`, @0x4073BF..0x4073EA, the exit @0x40740D).
+The organic death transaction (S2C 0x13 and the kill record) comes from the
+body's own death edge on its next motor tick (`Entity_UpdateInfantryAI` @0x4B9D4D;
+the player body @0x4B4CEA), not from the kill. Port: `EntityCommands::kill_ssn`,
+`kill_group` and `wac_kill_ssn` over the modeled record
+(`World::round_sim.hit_record`, `hit_record_class_event`); `script_command_parity`,
+`bms_event_parity`. Port limit: a live round has no pool-slot identity, so the
+record copies the round's fields at the write, where retail reads the slot through
++0x40 until the round allocator reuses it.
+
+### 11.4 The removal actions notify the joiners
+
+VaporizeSingle and VaporizeGroup remove through `Server_RemoveEntityAndNotify
+@0x50A270`: send mask 0x90 and S2C 0x12 `[u16 handle]` (@0x50A2AC), a player's
+(Flags & 0x100) placed devices through `Entity_RemovePlacedDevicesByOwner`
+(@0x50A2BB), then `Entity_Destroy` (@0x50A2C4). The single form
+(`find_entity_by_parent_and_dispatch @0x43E210`: SSN 0 @0x43E214, the authority
+gate @0x43E21C, the first full-dword match in pools 0..3 @0x43E249 / @0x43E279 /
+@0x43E2A9 / @0x43E2D9, then a tail jump) and the group form
+(`Entity_TeleportAllByNetId @0x43D5D0`, §10) both return at once off the
+authority. WAC `remove` (`WacCmd_Remove @0x4EDCA0`, the call @0x4EDCA5) shares the
+group walk. Port: `EntityCommands::remove_bms_ref` / `remove_group` ->
+`server_remove_and_notify` (the 0x12 queued on the world's entity-event outbox for
+the host fan, then the shared destroy `remove_ssn`); `bms_event_parity`
+(`test_vaporize_notifies_and_destroys`). WAC `removeSSN`
+(`WacCmd_RemoveSsn @0x4F1EE0`, the `Server_RemoveEntityAndNotify` call @0x4F1F28,
+return 1 @0x4F1F30) and `Gremove` (`WacCmd_GroupRemove @0x4F1F80`, the call
+@0x4F1FF2) notify too, through the same `server_remove_and_notify` (2026-09-23;
+`script_command_parity`, `test_wac_removals_notify_the_joiners`). A removed Player row's
+placed devices go in place, each through the same removal, before the row's destroy
+(`EntityCommands::remove_placed_devices_by_owner`: pool 1 in slot order, the +0x1C gate
+@0x546E2D, the +0x170 owner @0x546E37, the def attrib 0x40 / 0x20 skips @0x546E46 /
+@0x546E50, the satchel, claymore and AV mine ammo @0x546E68 / @0x546E8B / @0x546EAE;
+`test_player_removal_sweeps_placed_devices`), so the joiners see the player's 0x12 and
+then each device's; the one other caller is the deploy after a death
+(`Server_ProcessPlayerDeath`, the call @0x5178D8; world-wac-ai-re §27.7).
+
+### 11.5 The objective notification and the mission-text chat relay
+
+`HUD_ShowObjectiveNotification @0x5BA2E0 (slot, isWin, isActive, flag)` returns
+for an inactive notice (@0x5BA2F3). The directive key is
+`WinConditions/STRWINDIRECTIVE%03i` of the header's win text id
+`byte_A7628B[slot]` (@0x5BA30E..0x5BA32B) or `LoseConditions/STRLOSEDIRECTIVE%03i`
+of `byte_A76293[slot]` (@0x5BA343..0x5BA360), through `MissionText_GetString2
+@0x51EC50` (a miss gives ""); a directive of at most one character drops the
+notice (@0x5BA37B). Under `is_mp_session_peer || !is_in_session`
+(@0x5BA382 / @0x5BA38B) it posts two lines into the CHAT ring
+(`Chat_AddMessageChannel1 @0x4985D0`): gametext `Misc/STRMISC_NEWOBJECTIVE`
+(color -1, 0x3A2 = 930 ticks, @0x5BA3AE), then the directive (@0x5BA3C2). There is
+no separate toast widget. On the authority it relays the notice
+(@0x5BA3CA..0x5BA3DF) as `Server_BroadcastEntityActionPacket(0, 0, slot, isWin,
+isActive, flag)`: S2C 0x3F kind 0 ([novaworld-net-re §5.69](../net/novaworld-net-re.md#569-s2c-0x3f-the-hud-relay-objective-notification-and-mission-text-chat-2026-09-23)).
+Action 35 calls it with (slot, 1, p2, 1) and then, when a local player exists and
+p2 is set, plays the NEW_GOAL registry set (`dword_24E0990`) at the player through
+`HUD_DrawDefaultProgressBar @0x527E60`, a misnamed `Sound_Play3DPositional(set,
+pos, 0, 255)` wrapper (@0x4546E7..0x45470C). Action 36 calls it with
+(slot, 0, p2, 0) and plays nothing (@0x454757).
+
+The kind-1 producer is `GameMsg_AddChatLineAndRelay @0x5BA170 (line, team, key)`:
+it posts a non-empty line into the CHAT ring (`Chat_AddMessageChannel1(line, -1,
+930)`, the call @0x5BA197) under the same `is_mp_session_peer || !is_in_session`
+gate (@0x5BA170..0x5BA18D), and on the in-session authority (`is_authority`
+@0x5BA19F, `is_in_session` @0x5BA1A8) relays the KEY as
+`Server_BroadcastEntityActionPacket(1, key, team)` (@0x5BA1C3). Its five retail
+callers: EventAction_Dispatch case 14 SubGoalWon (the `STRWINMSG%03i` key of
+`byte_A7628B[slot]` @0x454552, team 1, the call @0x454578) and case 15
+SubGoalLost (`STRLOSEMSG%03i` of `byte_A76293[slot]` @0x45460C, team 0, the call
+@0x454632), both inside the round-running gate; `WacAction_Lose @0x4ED3F0` on both
+branches (@0x4ED411 and @0x4ED477, team 0 on both); and the client 0x3F handler
+(`NapiNPClientMsg_0x03F`, @0x42BC39, post only). The relayed team is payload only:
+no reader filters on it. `MissionText_GetStringByKey @0x51EC90` returns "" (never
+null) for a missing key, so a miss posts nothing. `WacAction_Win @0x4ED4A0` posts
+no line.
+
+Port (2026-09-23): `World::show_objective_notification` (the "objective"
+presentation effect: a = slot, b = win, c = the header text id; `hud_game_text.h`
+`objective_header` / `objective_directive`) and `World::relay_mission_text_chat`
+(the kind-1 relay gate), called by actions 35/36, the SubGoalWon/SubGoalLost cases
+and the WAC `lose` handler. ONE ordered queue, `WorldOutbox::hud_relays`
+(`world::HudRelay`, both kinds), is fanned by the host's server tick as S2C 0x3F
+under the 0x90 recipient rule (every active remote slot, never the local host) and
+drained without a send by the local role outside a session; the joiner folds it
+through `ClientReplicaPipeline::apply_objective_notification` ->
+`JoinerRole::apply_gameplay_events`, and kind 1 posts through the
+"mission_text_chat" effect. `SessionRules::mp_session_peer` carries the
+is_client bit (a dedicated host clears it). The presenter posts these script chat
+lines (the WAC text/ptext/text# literals, the WAC lose line, the BMS subgoal
+won/lost lines) into the CHAT ring and keeps the triggered text and the console
+lines in the SYSTEM ring (`Chat_AddMessageChannel2 @0x4987F0`; D-HUD-6). ctests
+`bms_hud_relay`, `hud_game_text`, `nw_message_coverage`.
+
+Follow-up (spec only): SubGoalWon also tallies `win_scores[slot] * 100` (the header
+byte `byte_A763FB[slot]`, @0x454526) through `Score_TallySubGoalWon @0x4FD100`: on
+an authority outside a session `g_subgoals_won_count` (0xC846D0) increments and
+`g_subgoal_bonus_score` (0xC846D4) adds the value scaled by the difficulty
+`dword_24D2110` (-1: (3v) >> 2; 1: (3v) >> 1; else v). Its consumers, the SP
+epilog and `HUD_DrawEndRoundStatistics`, are unported (the D-HUD-18 residual).
+
+### 11.6 Action 28 sub 37: the HUD item flash
+
+`EventAction_HandleSpecialTypes @0x4535A0` sub 37 (@0x4535CD) calls
+`RenderState_SetLayerVisibilityByIndex @0x5A3020` (a misnomer):
+`dword_2723CF8[p1] = p2` (@0x5A302A, the index unchecked), then
+`CRenderState_SetLayerVisibility(0)` (@0x5A3031) rebuilds the HUD layer table at
+declutter level 0 without writing the stored level. Sub 38 zeroes the input word
+(@0x4535C2). Sub 39 stores `p1 == 0` to `dword_AE0718` (@0x4535B6..0x4535BC),
+whose only other references are the load zeroings (`EventSystem_FreeAll`
+@0x45336E, `EventTrigger_LoadAllData` @0x454031): a dead store. Every other sub
+returns (@0x4535B4).
+
+The 16 timers tick in `sub_59A9E0 @0x59A9E0`, called from `HUD_RenderAllOverlays`
+(@0x5A80FB) with the current tick: each nonzero timer drops by the tick delta
+since the last HUD frame, clamped at 0. The compare is signed (`jle` @0x59AA08)
+and the last-tick static `dword_2723EA8` is never reset (only sub_59A9E0 touches
+it), so a clock that restarts lower grows an armed timer. Readers:
+`HUD_DrawAltitudeBar` [0] @0x59F168 (every draw of the instrument sits after this
+gate, so the whole bar blinks) and [1] @0x59F340 (its tail only calls
+`sub_6770F0(0)`, a setter of `g_GfxDeviceState+0x24`, not a draw);
+`HUD_DrawCompassStrip` [5] @0x595CAC and [14] @0x5958D0; `HUD_DrawMapOverlay`
+[14] @0x5A77FE (the tracked-target pointer) and [5] @0x5A785B (the waypoint state
+line), both drawing only when the timer is 0 or has bit 0x10; `draw_minimap_blip`
+[12] @0x597E0A (0xFF204080 blips), [13] @0x597E29 (0xFF802020 blips), [15]
+@0x597E45 (class 5), [10] @0x597E65 (class 3) and [11] @0x597E84 (class 0), each
+SKIPPING the blip while the timer has bit 0x10.
+
+Port (2026-09-23): the engine emits the "hud_item_flash" effect (a = timer,
+b = value); the presenter hands it to `HudOverlay.set_item_flash`
+(`HudItemFlash::set` plus `HudDeclutter::apply_level(0)`, the stored level
+untouched), and the HUD ticks the timers on the logic tick each HUD frame
+(`engine/runtime/hud/hud_declutter.h`; ctest `hud_item_flash`). Wired consumers:
+[5] the spinmap waypoint state line (`engine/runtime/hud/hud_minimap.cpp`) and [0]
+the altitude bar (`engine/runtime/hud/hud_combat.cpp`). Not wired (follow-up): [1]
+(no draw), the compass strip's [5]/[14] (the element is unported), the
+tracked-target pointer [14] (no tracked-target source in the runtime), and the
+`draw_minimap_blip` gates, which key on the blip color argument (0xFF204080 ->
+[12], 0xFF802020 -> [13]) and the class argument (5 -> [15], 3 -> [10], 0 -> [11])
+and need those two arguments mapped onto `HudMinimapMarker` first.
+
+### 11.7 Action 38: the light-group channels (consumer unresolved)
+
+Case 38 (@0x4549BC) calls `sub_5A8C80 @0x5A8C80`: `(unsigned)p1 <= 3`
+(@0x5A8C84), then `dword_272ED88[p1] = p2 ? 0x10000 : 0` (@0x5A8C97).
+`sub_5A9F70 @0x5A9F70` copies the four words each frame into
+`dword_83FDF0` / `dword_83FDF8` / `dword_83FE00` / `dword_83FE08`
+(@0x5A9F92..0x5A9FB4, every other dword after `Render_SubmitAlpha16 @0x83FDE8`);
+`CEffectWorld_GetViewPosition @0x5A8CA0` (a misnomer) and `sub_5A8CD0 @0x5A8CD0`
+copy the four words out and in (a save/restore pair);
+`EffectWorld_ResetPoolAndInitLighting` (@0x5AB8C2) and `sub_60FD70` (its chunk
+@0x5AB93E) also touch 0x272ED88. The four copied words have no direct reader: the
+consumer reads the block indirectly and xrefs do not resolve it. The port emits a
+"set_light" effect that nothing consumes. Unused in the shipped corpus.

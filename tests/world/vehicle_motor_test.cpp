@@ -2061,21 +2061,25 @@ void test_trails_sample_only_in_contact_arms() {
 }
 
 // The slope factor samples the runtime table at (pitch + 0x200000) >> 22 rather
-// than a continuous cosine. [orig: Entity_UpdateTankVehiclePhysics
-//  @0x489CE6..0x489D01; cveh @0x48C1C6..0x48C1D7; cbik @0x485362..0x48537E]
+// than a continuous cosine. A boxless row reads its placement pitch in the
+// spawn form: at -16 degrees that samples entry 979 where -16 x 11930464
+// would sample 978. [orig: Entity_UpdateTankVehiclePhysics
+//  @0x489CE6..0x489D01; cveh @0x48C1C6..0x48C1D7; cbik @0x485362..0x48537E;
+//  Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86]
 void test_slope_factor_samples_quantized_table() {
 	for (const VehicleFamily family :
-			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike }) {
+			{ VehicleFamily::Tank, VehicleFamily::Ground, VehicleFamily::Bike })
+	for (const int16_t pitch : { int16_t(10), int16_t(-16) }) {
 		Rig r;
 		auto t = buggy_traits();
 		t.family = family;
 		t.player_control = false;
 		auto &m = r.veh().veh;
 		m.yaw_seeded = true;
-		r.veh().pitch = 10;
+		r.veh().pitch = pitch;
 		m.speed = 20000;
 		m.cmd_speed = 20000;
-		const int32_t pitch_bam = 10 * 11930464;
+		const int32_t pitch_bam = spawn_angle_bam(pitch);
 		int32_t c = 0, s = 0;
 		quantized_dir(pitch_bam, c, s);
 		const auto target_for = [](int32_t cos22) {
@@ -2258,7 +2262,9 @@ void test_mover_prologue_stamps_saved_live_pose() {
 	{
 		Rig r;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.veh().yaw = 1;
 		r.veh().pitch = 5;
+		r.veh().roll = -3;
 		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
 			to_fixed(r.veh().position.z) };
 		CHECK(!r.veh().saved_live_valid);
@@ -2266,8 +2272,13 @@ void test_mover_prologue_stamps_saved_live_pose() {
 		CHECK(r.veh().saved_live_valid);
 		for (int axis = 0; axis < 3; ++axis)
 			CHECK(r.veh().saved_live_pos[axis] == entry[axis]);
-		// The stamp copies the BAM attitude the mover starts from.
-		CHECK(r.veh().saved_live_pitch == 5 * 11930464);
+		// The stamp copies the BAM attitude the mover starts from: an unmoved
+		// row's placement angles in the spawn form, ((deg << 16) / 360) << 16.
+		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+		//  Entity_UpdateTankVehiclePhysics @0x488B2A..0x488B3C]
+		CHECK(r.veh().saved_live_yaw == 1061748736);  // 90 - 1 = 89
+		CHECK(r.veh().saved_live_pitch == 59637760);  // 5
+		CHECK(r.veh().saved_live_roll == -35782656);  // -3
 	}
 	{
 		Rig r;
@@ -2544,7 +2555,12 @@ void test_vehicle_carrier_follow_and_refresh() {
 	for (int i = 0; i < 17; ++i)
 		collision.build_tick_tables(r.w);
 	stamp_saved_live_pose(parent);
+	// A ground mover refreshes its ground link on every eighth ENTITY UPDATE
+	// (the entity-update counter), not on the tick.
+	// [orig: Entity_UpdateVehiclePhysics @0x48AFB9, `test byte ptr
+	//  g_entity_update_counter,7`]
 	r.w.logic_tick = 0;
+	r.w.entity_update_counter = 0;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(v.ground_target == parent_h);
 
@@ -2555,6 +2571,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	parent.position.z += 1.0f;
 	parent.veh.yaw_bam = 0x40000000;
 	r.w.logic_tick = 1;
+	r.w.entity_update_counter = 1;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(std::abs(v.position.x - 103.0f) < 0.002f);
 	CHECK(std::abs(v.position.y - 199.0f) < 0.002f);
@@ -2563,7 +2580,8 @@ void test_vehicle_carrier_follow_and_refresh() {
 
 	stamp_saved_live_pose(parent);
 	v.position.x += 100.0f;
-	r.w.logic_tick = 8;
+	r.w.logic_tick = 9;
+	r.w.entity_update_counter = 8;
 	r.w.vehicles.tick_motor(v, t);
 	CHECK(!v.ground_target.valid());
 }
@@ -2590,12 +2608,11 @@ void test_state0_brain_with_ai_driver_holds() {
 	ae.brain.f[AiBrain::kSpeedB] = 16019;
 	ae.profile.type = 2;
 	ae.profile.flags100 = 0x5; // FOLLOW_WP | FLEE — the d_5ton combat_flags
-	ae.has_physics = false;    // retail's entity+368 is null: no alert edge
 	const Vec3 start = r.veh().position;
 	TickContext ctx{};
 	ctx.world = &r.w;
 	ctx.is_authority = true;
-	r.w.ai.tick(r.w, ctx);
+	r.w.update_all_entities(ctx);
 	// One pass: 0 -> 22 at the head, then the AI leg's 22 -> 16 hand-back.
 	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
 	CHECK(ae.brain.f[AiBrain::kOutSpeed] == 0);
@@ -2603,12 +2620,12 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.speed == 0);
 	for (int i = 1; i < 200; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		r.w.ai.tick(r.w, ctx);
+		r.w.update_all_entities(ctx);
 	}
 	const Vec3 late = r.veh().position;
 	for (int i = 200; i < 224; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		r.w.ai.tick(r.w, ctx);
+		r.w.update_all_entities(ctx);
 	}
 	const float moved = std::hypot(r.veh().position.x - start.x, r.veh().position.y - start.y);
 	const float moved_late = std::hypot(r.veh().position.x - late.x, r.veh().position.y - late.y);
@@ -2617,6 +2634,59 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.speed == 0);
 	CHECK(moved_late == 0.0f); // at rest: no sustained drive
 	CHECK(moved == 0.0f); // no invented speed seed or boarding pulse
+}
+
+// A deck rider in a lower pool-1 slot than its carrier rides the carrier's
+// CURRENT motor delta: the pool-1 walk visits a row's ground-entity chain
+// first, so the carrier's mover runs before the rider's in the same pass.
+// [orig: Entity_UpdateAllEntities @0x4C2188..0x4C21E9 (the +0x28 chain; the
+//  Entity_UpdatePool1Slot calls @0x4C21E0 then @0x4C21E9)]
+static void test_rider_below_its_carrier_follows_the_same_pass() {
+    Rig r;
+    const auto traits = buggy_traits();
+    // The carrier moves up to slot 5; the rider takes slot 0 below it, on the
+    // carrier's origin (so a carrier yaw cannot move it sideways).
+    Entity carrier = r.veh();
+    r.w.registry.despawn(r.veh_h);
+    r.veh_h = r.w.registry.spawn_at(EntityHandle::make(1, 5), carrier);
+    CHECK(r.veh_h.valid());
+    Entity rider = carrier;
+    rider.net_id = 201;
+    rider.item_id = 1292;
+    rider.seats.clear();
+    rider.position.z = carrier.position.z + 2.0f;
+    rider.ground_target = r.veh_h;
+    const EntityHandle rider_h = r.w.registry.spawn(1, rider);
+    CHECK(rider_h.slot() == 0);
+    r.w.vehicles.traits.set(carrier.item_id, traits);
+    r.w.vehicles.traits.set(rider.item_id, traits);
+    auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.drv().health;
+    r.w.cached.local_player = r.drv_h;
+    r.w.ai.is_authority = true;
+    r.mount();
+    LocalPlayer local(r.w);
+    local.input.forward = true;
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    float travelled = 0.0f;
+    for (uint32_t t = 1; t <= 40; ++t) {
+        local.apply_player_input_pre_tick();
+        const Vec3 c0 = r.veh().position;
+        const Vec3 p0 = r.w.registry.get(rider_h)->position;
+        ctx.logic_tick = t;
+        r.w.logic_tick = t;
+        r.w.update_all_entities(ctx);
+        const Vec3 c1 = r.veh().position;
+        const Vec3 p1 = r.w.registry.get(rider_h)->position;
+        CHECK(std::fabs((c1.x - c0.x) - (p1.x - p0.x)) < 1e-3f);
+        CHECK(std::fabs((c1.y - c0.y) - (p1.y - p0.y)) < 1e-3f);
+        travelled += std::hypot(c1.x - c0.x, c1.y - c0.y);
+    }
+    CHECK(travelled > 1.0f);
 }
 
 // Input is packed before pool-1 motors; pool-0 body posing follows them.
@@ -2642,18 +2712,19 @@ static void test_local_controls_reach_first_carrier_tick() {
     ctx.world = &r.w;
     ctx.is_authority = true;
     ctx.logic_tick = 1;
-    r.w.ai.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.cmd_speed == traits.player_speed);
     CHECK(r.veh().veh.steer_target_bam == heading);
     local.input.forward = false;
     local.apply_player_input_pre_tick();
     ++ctx.logic_tick;
-    r.w.ai.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too
 }
 
 int main() {
     test_local_controls_reach_first_carrier_tick();
+    test_rider_below_its_carrier_follows_the_same_pass();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_tank_pivot_sound_latch_and_loop();

@@ -200,7 +200,11 @@ bool run_retail_corpus_tokens() {
 	              "not a fail-closed Unknown");
 }
 
-bool run_duplicate_ids_fail_closed() {
+// A repeated id resolves to its FIRST definition on both keys, the row retail's
+// type-id lookup returns on the host and in the client's entity creation; the
+// repeats are still diagnosed. [orig: ItemList_FindIndexByTypeId @0x49E100;
+// NapiNPClientMsg_0x00D @0x4332DA]
+bool run_duplicate_ids_resolve_first() {
 	ns::ItemReplicationDefinition first;
 	first.definition_id = 101000;
 	first.ai_function = "org1";
@@ -210,20 +214,24 @@ bool run_duplicate_ids_fail_closed() {
 	second.move_function = "cveh";
 	const ns::ItemReplicationCatalog catalog =
 			ns::ItemReplicationCatalog::from_definitions({first, second});
+	const ns::ItemReplicationProfile *by_id = catalog.by_definition_id(101000);
+	const ns::ItemReplicationProfile *by_wire = catalog.by_wire_type(1000);
 	return expect(!catalog.valid() && catalog.issues().size() == 2,
 	                      "duplicate definition and wire ids are diagnosed") &&
-			expect(catalog.by_definition_id(101000) == nullptr &&
-			                      catalog.by_wire_type(1000) == nullptr &&
-			                      catalog.resolve_wire_entity_class(1000).has_value() &&
-			                      *catalog.resolve_wire_entity_class(1000) == EntityClass::Unknown,
-			              "duplicate wire codec remains present and fails closed");
+			expect(by_id != nullptr && by_id->callbacks.ai_function == "org1" &&
+			                      by_wire == by_id,
+			              "both keys resolve to the first definition") &&
+			expect(catalog.resolve_wire_entity_class(1000).has_value() &&
+			                      *catalog.resolve_wire_entity_class(1000) ==
+			                              EntityClass::Infantry,
+			              "the first definition's record width is the wire class");
 }
 
 } // namespace
 
 int main() {
 	const bool ok = run_items_def_catalog() && run_retail_corpus_tokens() &&
-			run_duplicate_ids_fail_closed();
+			run_duplicate_ids_resolve_first();
 	if (ok) std::printf("item_replication_catalog: OK\n");
 	return ok ? 0 : 1;
 }

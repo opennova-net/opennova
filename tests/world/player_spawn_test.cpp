@@ -323,7 +323,7 @@ int main() {
             ctx.world = &w;
             ctx.logic_tick = static_cast<uint32_t>(i);
             ctx.is_authority = true;
-            ai.tick(w, ctx);
+            w.update_all_entities(ctx);
         }
 
         CHECK(ae.pos[0] != x0 || ae.pos[1] != y0); // moved
@@ -358,7 +358,7 @@ int main() {
         ctx.world = &w;
         ctx.logic_tick = 0;
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
 
         CHECK(ae.inf.anim_state == anim_state::kWalkForward + 6);
         CHECK(ae.inf.body_heading == 0x30000000);
@@ -369,7 +369,7 @@ int main() {
 
         ctx.logic_tick = 1;
         submit_player_input(ae, in);
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae.inf.body_heading == 0x2D000000);
         CHECK(ae.pos[0] == -2017);
         CHECK(ae.pos[1] == 835);
@@ -400,7 +400,7 @@ int main() {
         ctx.world = &w;
         ctx.logic_tick = 0;
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         const Entity *e = w.registry.get(h);
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[0])) - e->position.x) < 0.01f);
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
@@ -422,7 +422,7 @@ int main() {
         ctx.world = &w;
         ctx.logic_tick = 0;
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae.heading == 0x20000000); // instant look yaw, not quarter-stepped toward target
         CHECK(ae.pitch == 0x08000000);   // look pitch applied (slope lean overridden)
     }

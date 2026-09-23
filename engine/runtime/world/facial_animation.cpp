@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <numeric>
+#include <unordered_set>
 #include <utility>
 
 namespace opennova::world {
@@ -131,8 +132,12 @@ void FacialSystem::configure(World &world, const ResourceIndex *index,
 		});
 	}
 	model_names_.clear();
+	// A type id resolves to its FIRST row; a later row repeating the id is never
+	// an entity's def. [orig: ItemList_FindIndexByTypeId @0x49E100]
+	std::unordered_set<int32_t> resolved_ids;
 	for (size_t i = 0; i < items.count; ++i) {
 		const auto &row = items.entries[i];
+		if (!resolved_ids.insert(row.id).second) continue;
 		if (row.type == def::DEF_ITEM_TYPE_PERSON && row.graphic[0])
 			model_names_[row.id - 100000] = grm_name(row.graphic);
 	}

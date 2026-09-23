@@ -71,7 +71,6 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		kernel->world.registry.configure_pool(1, 16);
 		role.bind(*kernel);
-		kernel->world.add_system(&kernel->world.ai);
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
 		role.create_runtime("TankJoiner", inmatch::JoinRole::Player, "", "");
@@ -95,6 +94,7 @@ struct Harness {
 		seed.kind = w::EntityKind::Item;
 		seed.item_id = kTankType;
 		seed.has_item_def = true;
+		seed.item_type_index = 7; // the def row's ordinal the +0x1C kill gate reads
 		seed.item_type = 1;
 		seed.item_attrib = 0x40u;
 		seed.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);

@@ -71,8 +71,11 @@ The modulator's target is the iris sample replicated to gray
 (`0x10101 × gain`) and chased over 62 ticks: `ColorBlock_SetStepDeltas
 @ 0x57d940` sets each channel's max step to
 `|target_byte<<20 + frames/2 − current| / frames`
-`[orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538]` — retail
-re-targets every render pass, i.e. every tick. `compute_ambient_light_along_direction
+`[orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538]`. Retail
+re-targets on every render pass (so every tick) while a local player exists and
+the WAC `autogain` value is nonzero (`@0x57E50B..0x57E51B`; seeded 1, so the gate
+is open unless a script writes 0), else the modulator keeps its last target
+(env-tod-re, the fog-and-ambient walk row 8; ported 2026-09-23). `compute_ambient_light_along_direction
 @ 0x5c7a00` produces the gain (fully pinned 2026-07-18, ported at the marched-iris
 slice):
 

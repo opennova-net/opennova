@@ -106,8 +106,9 @@ ScriptVoiceChannel::Frame ScriptVoiceChannel::frame(World &world, Vec3 listener)
         const int32_t dz = static_cast<int32_t>(uint32_t(to_fixed(anchor->position.z)) -
                 uint32_t(to_fixed(listener.z)));
         const double length = std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz);
-        // [orig: Audio_UpdateAmbientStream @0x4EDA9D] Same Q16 distance
-        // saturation as the common spatial-audio path.
+        // [orig: Audio_UpdateAmbientStream — fsqrt @0x4EDAB2, the flt_7C19E0
+        // saturation @0x4EDAB4..0x4EDAC9] Same Q16 distance saturation as the
+        // common spatial-audio path.
         distance = length > 2147418112.0 ? 2147418112 : static_cast<int32_t>(length);
     }
     // User voice volume remains on the host's Voice bus. The channel's selected

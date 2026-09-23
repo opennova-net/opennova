@@ -1,5 +1,5 @@
 // Emplacement / mount (Phase 2) tests: the seat model + EntityCommands mount primitives
-// (mount/mount_best/dismount/find_mounted_on), canonical best-seat selection/attach,
+// (mount/use_boarding_target/dismount/find_mounted_on), canonical best-seat selection/attach,
 // the per-tick AI seat-follow,
 // the BMS AttachToEmplaced action path (emits no unported_action), and snapshot/restore
 // rewinding the mount. [orig chain: EventAction_Dispatch case 0x25 @0x4542e0 ->
@@ -531,7 +531,7 @@ int main() {
 
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         AiEntity *ae = ai.at(idx);
         CHECK(ae->pos[0] == to_fixed(10.0));
         CHECK(ae->pos[1] == to_fixed(20.0));
@@ -541,19 +541,19 @@ int main() {
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae->pos[0] == to_fixed(30.0));
         CHECK(ae->pos[1] == to_fixed(40.0));
 
         // Even with a locomotion target set, a mounted gunner does NOT path-follow.
         ae->brain.f[AiBrain::kOutSpeed] = 9999;
         ae->brain.f[AiBrain::kWorkPosX] = to_fixed(999.0);
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ae->pos[0] == to_fixed(30.0)); // still seated, not moved toward 999
 
         // Vehicle gone -> auto-dismount, occupant resumes normal AI.
         w.registry.despawn(gh);
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(!w.registry.get(sh)->mounted);
     }
 
@@ -579,26 +579,28 @@ int main() {
         CHECK(w.commands.mount(100, 200));
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ai.at(idx)->inf.anim_state == 67); // variant configured, but clip missing -> base
 
         clips.available_state = 70; // emplaced_4 = base 67 + variant 3
         ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
         CHECK(ai.at(idx)->inf.anim_state == 70);
     }
 
     // ---- mounted seat orientation feeds the carried body while gunner look stays live ----
-    // The seat is authored in mission degrees, while every AiEntity yaw field is engine BAM:
-    // heading = (90 - mission yaw) * 11930464. For a gunner, 37 - 11 = 26 degrees,
-    // so the witnessed integer convention produces (90 - 26) * 11930464 = 763549696.
-    // [orig: seat carry @0x4b654e-0x4b6575; heading multiplier @0x4659fa]
+    // The unmoved gun still holds its placement angles in the spawn form (low half zero):
+    // heading ((90 - 37) << 16) / 360 << 16 = 632291328, which the gunner's 11-degree seat
+    // offset turns to 763526440; pitch -12 and roll 17 take the same form. The attach
+    // pre-snap faces the gunner along the gun, the gun's heading less its stored yaw word
+    // (zero here), so the request heading is the gun's own 632291328.
+    // [orig: seat carry @0x4b654e-0x4b6575; Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+    //  Entity_RequestVehicleAttach @0x43655F..0x43656E]
     [] {
-        constexpr int32_t kSeatHeading = 763549696;
-        constexpr int32_t kSeatPitch = -143165577;
-        constexpr int32_t kSeatRoll = 202817900;
-        const int32_t kRequestHeading =
-                world::bam_heading_from_mission_yaw_deg(26.0);
+        constexpr int32_t kSeatHeading = 763526440;
+        constexpr int32_t kSeatPitch = -143130624;
+        constexpr int32_t kSeatRoll = 202768384;
+        constexpr int32_t kRequestHeading = 632291328;
         const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
 
         auto wp = std::make_unique<World>();
@@ -652,11 +654,10 @@ int main() {
     // The AiEntity camera mirrors retain the full-precision look heading/pitch; the body,
     // both leg chains, body pitch, and roll remain attached to the seat.
     [] {
-        constexpr int32_t kSeatHeading = 763549696;
-        constexpr int32_t kSeatPitch = -143165577;
-        constexpr int32_t kSeatRoll = 202817900;
-        const int32_t request_heading =
-                world::bam_heading_from_mission_yaw_deg(26.0);
+        constexpr int32_t kSeatHeading = 763526440;
+        constexpr int32_t kSeatPitch = -143130624;
+        constexpr int32_t kSeatRoll = 202768384;
+        constexpr int32_t request_heading = 632291328; // the pre-snap, as above
         const int32_t look_heading = world::bam_heading_from_mission_yaw_deg(137.25);
         constexpr int32_t kLookPitch = 12345678;
 
@@ -742,7 +743,7 @@ int main() {
 
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
 		CHECK(ai.at(idx)->inf.anim_state == 107); // sit_24 selects its stationary driver pose
 	}
 
@@ -761,25 +762,45 @@ int main() {
         CHECK(ai.at(idx)->inf.anim_state == world::anim_state::kIdleCrouch);
     }
 
-    // ---- BMS AttachToEmplaced: emits no unported_action + mounts via proximity ----
+    // ---- BMS AttachToEmplaced: the occupant boards the vehicle its AI slot
+    // +0x90 (slot[36]) names, however far; an occupant without one boards
+    // nothing, even beside a free gun. Emits no unported_action.
+    // [orig: EventAction_Dispatch case 37 @0x454989 ->
+    //  WacScript_TryMountEntityToVehicle @0x4F70F0] ----
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
-        w.registry.spawn(1, make_gun(200, 1.f, 1.f, 0.f, 0));
-        w.registry.spawn(0, make_soldier(100, 2.f, 1.f, 0.f)); // within kMountRadius
+        Entity far_gun = make_gun(200, 60.f, 60.f, 0.f, 0);
+        far_gun.item_type_index = 1;
+        Entity near_gun = make_gun(201, 2.f, 2.f, 0.f, 0);
+        near_gun.item_type_index = 1;
+        w.registry.spawn(1, far_gun);
+        w.registry.spawn(1, near_gun);
+        Entity ordered = make_soldier(100, 1.f, 1.f, 0.f);
+        ordered.item_type_index = 1;
+        Entity idle = make_soldier(101, 1.f, 2.f, 0.f);
+        idle.item_type_index = 1;
+        const EntityHandle ordered_h = w.registry.spawn(0, ordered);
+        const EntityHandle idle_h = w.registry.spawn(0, idle);
+        w.ai.attach(ordered_h);
+        w.ai.attach(idle_h);
+        // The ssn2ssn board order arms slot[36] with the far gun.
+        CHECK(w.commands.order_boarding(100, 200));
 
         bms::Event e{};
         e.flags = bms::EventFlags::None;
         e.trigger_count = 0; // unconditional -> fires
         e.action_index = 0;
-        e.action_count = 1;
+        e.action_count = 2;
         bms::Action act{};
         act.action_type = bms::ActionType::AttachToEmplaced;
         act.param1 = 100; // occupant SSN (the only param the action carries)
+        bms::Action idle_act = act;
+        idle_act.param1 = 101;
         mission::BmsEventSystem bms_sys;
-        bms_sys.load({e}, {}, {act});
+        bms_sys.load({e}, {}, {act, idle_act});
         w.add_system(&bms_sys);
         w.load_systems();
         // A normal event's first processing pass is the 16th tick (quarter-list
@@ -788,6 +809,8 @@ int main() {
 
         CHECK(w.out.effects.count("unported_action") == 0);
         CHECK(w.commands.find_mounted_on(200) == 100);
+        CHECK(w.commands.find_mounted_on(201) == 0);
+        CHECK(!w.registry.get(idle_h)->mounted);
     }
 
     // ---- snapshot/restore rewinds the mount (seats ride the registry value-copy) ----

@@ -3,7 +3,7 @@
 // byte, healthMax lift + retail i16 wrap, armor, AS zone attribs, corpse
 // timing), the per-item death-trait and 21-field vehicle-trait tables
 // (distinct sentinels per field so a transposition cannot pass), the
-// throwable class scan with last-wins duplicate ids, and the organic ammo
+// throwable class scan with first-wins duplicate ids, and the organic ammo
 // seed (§33.35). Parser token semantics are def's own tests; exotic fields are stamped
 // post-parse so this file pins only the FOLD's mapping.
 #include <formats/def/def.h>
@@ -228,13 +228,13 @@ const char kProfiles[] =
     "     SSLFootGND     T_DIRT_L_F\n"
     "end\n";
 
-// LAST entry with the id — the same row the fold's last-wins index resolves,
-// so post-parse stamps land on the row the fold will read.
+// FIRST entry with the id — the row the fold resolves, so post-parse stamps
+// land on the row the fold will read [orig: ItemList_FindIndexByTypeId
+// @0x49E100 returns the first match].
 DefItemDef *entry_for(DefItemsFile &f, int id) {
-    DefItemDef *found = nullptr;
     for (size_t i = 0; i < f.count; ++i)
-        if (f.entries[i].id == id) found = &f.entries[i];
-    return found;
+        if (f.entries[i].id == id) return &f.entries[i];
+    return nullptr;
 }
 
 EntityHandle spawn(World &w, int pool, uint16_t item_id, EntityKind kind) {
@@ -288,6 +288,9 @@ int main() {
     tank->bob = 219;
     tank->flip = 220;
     tank->scale_q16 = 0x18000;
+    tank->armor_impact = 7; // a def with hp keeps its authored armor words
+    tank->armor_blast = 8;
+    tank->armor_kz = 8;
     tank->attrib_parent = 1; // the `Parent` byte (ItemDef+0x548)
     std::strcpy(tank->particlefxw3.effect, "fx_sml_wk");
     std::strcpy(tank->particlefxw3.userpoint, "FX00");
@@ -302,6 +305,7 @@ int main() {
     std::strcpy(rifle->sound_profile, "SP_Test");
     std::strcpy(rifle->sound_profile_female, "SP_TestFemale");
     rifle->attrib |= DEF_ITEM_ATTRIB_LEAVECORPSE;
+    rifle->score = 10; // the shipped soldiers author `score 10`
     bunker->attrib |= DEF_ITEM_ATTRIB_CHANGETEAM | DEF_ITEM_ATTRIB_SPAWNPOINT |
             DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SD; // S&D = the objective target's team-protect
     bunker->attrib2 |= DEF_ITEM_ATTRIB2_STATICDEATH;
@@ -329,6 +333,7 @@ int main() {
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
     const EntityHandle truck_h = spawn(w, 1, 503, EntityKind::Item);
+    const EntityHandle dup_h = spawn(w, 1, 602, EntityKind::Item); // "S5 Dup A" then "S5 Dup B"
     const EntityHandle rifle_h = spawn(w, 0, 510, EntityKind::Organic);
     const EntityHandle player_h = spawn(w, 0, 5305, EntityKind::Organic);
     const EntityHandle bunker_h = spawn(w, 2, 520, EntityKind::Building);
@@ -382,18 +387,29 @@ int main() {
     CHECK(rifle_e->leave_corpse);
     // deathtime 5 authored -> (62*5)+62 parse-scaled ticks ride the def row.
     CHECK(rifle_e->deathtime_ticks == 372);
+    // The victim's kill value rides the entity; the Player def authors none.
+    // [orig: Score_ProcessKillEvent @0x4FD400 (the def+0x194 read @0x4FD422)]
+    CHECK(rifle_e->item_score == 10);
+    CHECK(w.registry.get(player_h) != nullptr && w.registry.get(player_h)->item_score == 0);
 
     const Entity *bunker_e = w.registry.get(bunker_h);
     CHECK(bunker_e != nullptr);
     // def hp 0 => indestructible flags [orig: Entity_InitFromModel @0x40dc8e].
     CHECK((bunker_e->engine_flags & 0x4000000u) != 0);
     CHECK(bunker_e->sub_type == 0xFF);
-    CHECK(bunker_e->health == 100); // hp 0 lifts nothing
+    // hp 0 lifts nothing; the init writes Health 1 [orig: @0x40DCA6].
+    CHECK(bunker_e->health == 1);
     CHECK(bunker_e->music_location == -3); // parsed signed word survives trait promotion
     CHECK(bunker_e->is_capture_trigger);
     CHECK(bunker_e->is_spawn_point);
-    CHECK(bunker_e->armor_impact == 12);
-    CHECK(bunker_e->armor_kz == 34);
+    // The authored 12/34 does not survive: an hp-0 def's two armor words
+    // become the invulnerable 0xFFFF [orig: Entity_InitFromModel @0x40DC95 /
+    // @0x40DC9F], the pair the AI target walk skips [orig: Entity_FindTargets
+    // @0x53AC3F..0x53AC59].
+    CHECK(bunker_e->armor_impact == -1);
+    CHECK(bunker_e->armor_kz == -1);
+    const Entity *tank_armor = w.registry.get(tank_h);
+    CHECK(tank_armor != nullptr && tank_armor->armor_impact == 7 && tank_armor->armor_kz == 8);
     CHECK(bunker_e->deathtime_ticks == 0);
 
     const Entity *unknown_e = w.registry.get(unknown_h);
@@ -413,8 +429,8 @@ int main() {
     if (bt != nullptr) {
         CHECK(bt->unit_type == 5);
         CHECK(bt->kz == 6.5f);
-        CHECK(bt->armor_impact == 12);
-        CHECK(bt->armor_blast == 34);
+        CHECK(bt->armor_impact == -1); // the def words the damage gates read
+        CHECK(bt->armor_blast == -1);
         CHECK(bt->team_protect);
         CHECK(bt->no_die);
         CHECK(bt->static_death);
@@ -437,6 +453,7 @@ int main() {
     CHECK(busht != nullptr && busht->is_decoration);
     const ItemDeathTraits *tankt = w.tables.item_death_traits.get(500);
     CHECK(tankt != nullptr && !tankt->has_husk);
+    CHECK(tankt != nullptr && tankt->armor_impact == 7 && tankt->armor_blast == 8);
 
     // ---- the event/death callback row (D-ITEM-7) ----
     // The fold resolves the ai_function tag the way retail's whole-string
@@ -556,6 +573,9 @@ int main() {
         CHECK(frag->think == ThrowClass::kNade);
         CHECK(frag->motor == ThrowClass::kNade);
         CHECK(frag->health_max == 25);
+        // The row's ordinal, the placed device's ItemTypeIndex (S5 Frag is row 8)
+        // [orig: Entity_CloneFromTemplateByType @0x4398A0].
+        CHECK(frag->item_type_index == 8);
     }
     const ThrowableClassRow *mine = w.throwables.classes.get(601);
     CHECK(mine != nullptr);
@@ -563,13 +583,22 @@ int main() {
         CHECK(mine->think == ThrowClass::kAVMine);
         CHECK(mine->motor == ThrowClass::kSatchel);
     }
-    // Duplicate definition ids resolve last-wins (the later nade block).
+    // A duplicate definition id resolves to its FIRST row (the earlier clym
+    // block), for the class tables and for a placed entity alike: the later
+    // row is never reached. [orig: ItemList_FindIndexByTypeId @0x49E100 —
+    // `cmp [ecx],esi; jz` @0x49E120..0x49E122 returns the first hit]
     const ThrowableClassRow *dup = w.throwables.classes.get(602);
     CHECK(dup != nullptr);
     if (dup != nullptr) {
-        CHECK(dup->think == ThrowClass::kNade);
-        CHECK(dup->health_max == 12);
+        CHECK(dup->think == ThrowClass::kClaymore);
+        CHECK(dup->motor == ThrowClass::kClaymore);
+        CHECK(dup->health_max == 11);
+        CHECK(dup->item_type_index == 10); // "S5 Dup A", the first 100602 row
     }
+    const Entity *dup_e = w.registry.get(dup_h);
+    CHECK(dup_e != nullptr && dup_e->health_max == 11);
+    CHECK(dup_e != nullptr &&
+          dup_e->item_type_index == static_cast<int32_t>(entry_for(file, 100602) - file.entries));
     CHECK(w.throwables.classes.get(500) == nullptr);
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.

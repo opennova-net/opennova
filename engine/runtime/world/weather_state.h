@@ -140,6 +140,15 @@ struct WeatherState {
     int32_t fog_reference_q16 = 1024 << 16; // Env_FogDistReference @ 0x26c68a8
     uint32_t lightning_color = 0x00FFFFFFu; // Env_LightningColor @ 0x26c646c
     int32_t color_fade_ticks = 0;          // Env_ColorFadeTicks (ex frameCount @ 0xc60dd0)
+    // The iris exposure re-target gate the render pass tests every frame: a
+    // local player entity and the WAC `autogain` named value nonzero. The
+    // simulation samples both at each weather tick, which follows that tick's
+    // script pass; a home without a World keeps it open. Closed, the
+    // modulator keeps chasing its last target.
+    // [orig: Environment_ApplyFogAndAmbient @0x57E50B `mov eax,
+    //  g_local_player_entity` / `jz` @0x57E512, `cmp wac_var_autogain,0`
+    //  @0x57E514 / `jz` @0x57E51B]
+    bool iris_retarget_enabled = true;
     // The overcast blend the TOD color compute reads THIS tick — retail runs
     // Environment_ComputeTimeOfDayColors before the overcast spring steps
     // [orig: @ 0x57e9c7 vs @ 0x57ef62], so the cross-fade lags the spring by

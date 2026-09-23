@@ -493,7 +493,7 @@ bool VehicleSystem::detach(EntityHandle player) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
-    vehicle_release_use_gun_slot(*occ, veh);
+    vehicle_release_equipped_slot(*occ, veh);
     occ->flags &= ~kEntityFlagMounted;          // [orig: Flags &= ~0x40]
     occ->engine_flags &= ~kEntityFlagMounted;
     occ->mount_target = EntityHandle{}; // [orig: +0x16C = 0]

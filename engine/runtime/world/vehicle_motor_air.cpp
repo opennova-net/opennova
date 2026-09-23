@@ -141,7 +141,16 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
             resolve_piloting_player(world, veh, traits) != nullptr;
     if (!m.net_predicted && !ai_drive && !player_piloted) return;
     if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        // The entry copy reads the row's Yaw/Pitch/Roll as they stand: an
+        // unmoved row's placement angles in the spawn form. A predicted row's
+        // arming already landed the replicated pitch/roll, so only the yaw.
+        // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E;
+        //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
+        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        if (!m.net_predicted) {
+            m.air_pitch_bam = spawn_angle_bam(veh.pitch);
+            m.air_roll_bam = spawn_angle_bam(veh.roll);
+        }
         m.yaw_seeded = true;
     }
     int32_t px = to_fixed(veh.position.x);

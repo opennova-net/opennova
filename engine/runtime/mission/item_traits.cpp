@@ -69,18 +69,20 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
     }
 }
 
-// Last-wins by-id view over the parsed file: duplicate definition ids
-// overwrite earlier rows — the same load-order semantics the binding's
-// id-keyed item map exposed (operator[] assignment per entry). The net
-// catalog separately RETAINS duplicates so it can classify them ambiguous and
-// fail closed; that policy lives with the injected wire-class supplier, not
-// here.
+// The by-id view over the parsed file: an id resolves to its FIRST row in
+// load order. Every retail lookup of a type id is the linear scan from row 0
+// that returns the first match, and the entity's ItemDef is the row at that
+// index, so a later row repeating an id is never reached (the shipped ITEMS.DEF
+// repeats 102044: "Map Named Location" first, "Power Up Med Pack Infinite"
+// later). [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp [ecx],esi; jz`
+// @0x49E120..0x49E122 returns the first hit; Entity_SpawnFromBMSRecord
+// ItemTypeIndex @0x40EBFC, ItemDef = gItemDefs + index @0x40EBFF..0x40EC07]
 std::unordered_map<int, const DefItemDef *> index_items(
         const DefItemsFile &items) {
     std::unordered_map<int, const DefItemDef *> by_id;
     by_id.reserve(items.count);
     for (size_t i = 0; i < items.count; ++i)
-        by_id[items.entries[i].id] = &items.entries[i];
+        by_id.emplace(items.entries[i].id, &items.entries[i]);
     return by_id;
 }
 
@@ -136,6 +138,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             static_cast<int>(world::kPlayerInfantryTypeId) + mission::kItemIdOffset;
     const DefItemDef *player_def = find_item(by_id, player_def_id);
     world.tables.player.has_item_def = player_def != nullptr;
+    world.tables.player.item_type_index =
+            player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
     world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
     world.tables.player.critical_hp =
@@ -165,9 +169,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
+        // The resolved row's load-order ordinal, 0 when no row matches (the
+        // "Null" row is ordinal 0 too): each `begin` appends the next row.
+        // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC; the
+        //  `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the row,
+        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount]
+        e->item_type_index = def != nullptr ? static_cast<int32_t>(def - items.entries) : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
-        // [orig: Entity_InitOrganicAI @0x4BFE08, def+0x894]
+        // [orig: Entity_InitOrganicAI @0x4BFE0D, def+0x894]
         if (world::AiEntity *body = world.ai.for_handle(h))
             body->profile.clip_size = def != nullptr ? def->clipsize : 0;
 		e->vehicle_spawn_ids.clear();
@@ -203,8 +213,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const uint32_t attrib = def != nullptr ? def->attrib : 0u;
         world::stamp_item_attrib(*e, attrib, def != nullptr ? def->attrib2 : 0u);
         // The injected catalog supplies both the authoritative host stamp and
-        // the decoded-client record width. Missing/ambiguous definitions fail
-        // closed as Unknown (0).
+        // the decoded-client record width. A missing or unresolved definition
+        // fails closed as Unknown (0).
         e->net_class_code = wire_class ? wire_class(def_id) : 0;
         // items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
         const int hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
@@ -230,12 +240,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         }
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
-        // (D-NET-147; every golden ASH_I5A building carries both). Resolved defs only — a
+        // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
+        // def's two armor words become the invulnerable 0xFFFF whatever it authored, so
+        // every armor reader sees them: the AI target walk skips the item (a pair of -1
+        // armor words) and the damage gates zero its hits. Resolved defs only — a
         // missing items.def id stays untouched. [orig: Entity_InitFromModel @0x40dc8e:
-        // !itemDef->healthMax -> Flags |= 0x4000000, Health = 1, subType = -1]
+        // !itemDef->healthMax -> Flags |= 0x4000000 @0x40DC8E, def+0x190 / def+0x192 =
+        // 0xFFFF @0x40DC95 / @0x40DC9F, Health = 1 @0x40DCA6, subType = -1 @0x40DCAF;
+        // the armor gate Entity_FindTargets @0x53AC3F..0x53AC59]
         if (hp == 0 && def != nullptr) {
             e->engine_flags |= 0x4000000u;
+            e->health = 1;
             e->sub_type = 0xFF;
+            e->armor_impact = -1;
+            e->armor_kz = -1;
         }
         // Death-presentation timing: deathtime (def+0x890, parse-scaled ticks)
         // seeds the corpse timer at the death edge; LeaveCorpse rides the stamp
@@ -298,6 +316,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // @0x4a5aa9, "Null" for an empty tag)]
 		e->hud_image = def != nullptr ? def->hud_image : "";
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
+        // [orig: Score_ProcessKillEvent @0x4FD400 (the def+0x194 read @0x4FD422)]
+        e->item_score = def != nullptr ? def->score : 0;
         if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             world::ItemDeathTraits t;
@@ -311,8 +331,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.particlefx = def->particlefx.effect;
             t.unit_type = def->unit_type;
             t.kz = def->kz;
-            t.armor_impact = def->armor_impact;
-            t.armor_blast = def->armor_blast;
+            // An hp-0 def's armor words already read 0xFFFF here: its entity's
+            // init overwrote them [orig: Entity_InitFromModel @0x40DC95 / @0x40DC9F].
+            const bool hp_zero = world::retail_signed_i16(def->hp) == 0;
+            t.armor_impact = hp_zero ? -1 : def->armor_impact;
+            t.armor_blast = hp_zero ? -1 : def->armor_blast;
             // The S&D/A&D objective target's same-team blast immunity [orig: the
             // blast applier's same-team gate, jo-c 261654: attacker team == target
             // team && itemDef->attrib & 0x8000 -> return].
@@ -411,11 +434,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// @0x468688].
 				vt.attrib_parent = def->attrib_parent != 0;
 				// The per-frame physics mover is selected exclusively by the
-                // move_function callback resolved into itemDef+0x158. ai_function
-                // selects the event/brain callback and may deliberately differ: the
-                // shipped Dune Buggy is ai_function chel + move_function cveh and
-                // therefore still runs the ground mover. [orig:
-                // EntityDef_LookupPhysicsCallback @0x4a9240; §5.38e movers]
+                // move_function callback resolved into itemDef+0x158; ai_function
+                // selects the event/brain callback through its own lookup (the
+                // brain_class below). [orig: EntityDef_LookupPhysicsCallback
+                // @0x4a9240; §5.38e movers]
                 if (fam == "cbot") {
                     vt.family = world::VehicleFamily::Watercraft;
                 } else if (fam == "chel") {
@@ -448,9 +470,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 													: world::VehicleRenderFamily::None;
 				// The brain machine class is keyed by ai_function through the class
 				// event-callback table (stricmp, 24-byte rows): CHel @0x8132a0 and
-				// the cpln thunk @0x8133a8 -> EntityAI_ProcessInfantryStateMachine
+				// the cpln thunk @0x8133a8 -> EntityAI_ProcessAirStateMachine
 				// @0x4581b0 (the air machine); cveh @0x813378, cbot @0x813390 and
-				// ctrn @0x8133c0 -> EntityAI_ProcessVehicleStateMachine @0x4583c0.
+				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
 				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
 				// @0x407dc0]
@@ -491,6 +513,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             continue;
         world::ThrowableClassRow row;
         row.item_id = def_id - mission::kItemIdOffset;
+        row.item_type_index = static_cast<int32_t>(def - items.entries);
         row.think = think;
         row.motor = motor;
         row.health_max = world::retail_signed_i16(def->hp);
@@ -534,6 +557,9 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
         for (size_t i = 0; i < items.count; ++i) {
             const DefItemDef &def = items.entries[i];
             if (def.id < mission::kItemIdOffset) continue;
+            // A later row repeating an id is never the def its type resolves to
+            // [orig: ItemList_FindIndexByTypeId @0x49E100, first match].
+            if (find_item(by_id, def.id) != &def) continue;
             audio::OrganicSoundProfile op;
             if (def.sound_profile[0] != '\0')
                 op.primary = static_cast<int16_t>(

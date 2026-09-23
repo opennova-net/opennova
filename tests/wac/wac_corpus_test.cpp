@@ -1,122 +1,104 @@
-// WAC corpus test: lex + parse + compile EVERY shipped .wac file with zero
-// crashes. Directories come from argv, else the documented retail gates;
-// without either the test reports Skipped (docs/asset-gated-tests.md).
+// Every shipped .wac script against the original compiler. For each source,
+// fixtures/wac_retail_corpus_vectors.inc holds the SHA-256 of the listing
+// Script_Compile @0x4F31F0 writes of it with every catalog empty (effects,
+// sound sets, ammo, mission text; the seven default groups), written by
+// scripts/oracles/wac_parity.py; the port compiles the same file the same way
+// and must write the same listing. Only hashes are committed. Directories
+// come from argv, else OPENNOVA_JO_ASSETS; without either the test reports
+// Skipped (docs/asset-gated-tests.md).
 #include <algorithm>
-#include <cstdlib>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
-#include <formats/wac/bytecode.h>
 #include <runtime/wac/compiler.h>
-#include <runtime/wac/wac_layered_load.h>
-#include <runtime/audio/oneshot_play.h>
-#include <runtime/world/ammo_table_build.h>
-#include <runtime/particle/effect_catalog_names.h>
-#include <base/resource_index/resource_index.h>
-#include <runtime/mission/runtime_boot.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
+#include "common/sha256.h"
+#include "wac_listing.h"
 
 namespace fs = std::filesystem;
 using namespace opennova::wac;
 
-static bool is_wac(const fs::path &p) {
-    std::string ext = p.extension().string();
-    for (char &c : ext) c = static_cast<char>(std::tolower((unsigned char)c));
-    return ext == ".wac";
+namespace {
+
+struct CorpusVector {
+	const char *source_sha256;
+	const char *listing_sha256;
+};
+const CorpusVector kCorpus[] = {
+#include "fixtures/wac_retail_corpus_vectors.inc"
+};
+
+std::string upper(std::string text) {
+	for (char &c : text) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+	return text;
 }
 
+std::string sha256(const std::string &bytes) {
+	return testhash::sha256_hex(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
-    std::vector<std::string> dirs;
-    for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
-    if (dirs.empty()) {
-        // The machine corpus root comes from the documented gate
-        // (docs/asset-gated-tests.md): the extracted asset tree carries the
-        // shipped .wac scripts beside their missions.
-        if (const std::string assets = retail::assets(); !assets.empty())
-            dirs.push_back(assets);
-    }
-    if (dirs.empty())
-        return retail::skip("OPENNOVA_JO_ASSETS (the extracted tree's retail .wac scripts)");
+	std::vector<std::string> dirs;
+	for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
+	if (dirs.empty()) {
+		if (const std::string assets = retail::assets(); !assets.empty()) dirs.push_back(assets);
+	}
+	if (dirs.empty()) return retail::skip("OPENNOVA_JO_ASSETS (the extracted tree's retail .wac scripts)");
 
-    int files = 0;
-    int hard_errors = 0;
-    int total_warnings = 0;
-    std::vector<std::string> unknown_examples;
-    std::vector<std::string> error_examples;
+	std::map<std::string, std::string> scripts; // upper-case file name -> path, for RUN
+	for (const std::string &dir : dirs) {
+		std::error_code ec;
+		if (!fs::is_directory(dir, ec)) continue;
+		for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator();
+				it.increment(ec)) {
+			if (ec) break;
+			if (!it->is_regular_file(ec) || upper(it->path().extension().string()) != ".WAC") continue;
+			scripts.emplace(upper(it->path().filename().string()), it->path().string());
+		}
+	}
+	if (scripts.empty()) return retail::skip("no .wac scripts under the corpus directories");
 
-    for (const std::string &d : dirs) {
-        std::error_code ec;
-        if (!fs::exists(d, ec) || !fs::is_directory(d, ec)) {
-            std::printf("skip (absent): %s\n", d.c_str());
-            continue;
-        }
-        opennova::world::AmmoTable ammo;
-        opennova::def::DefAmmoFile parsed = {};
-        const std::string ammo_path = (fs::path(d) / "ammo.def").string();
-        if (opennova::def::def_parse_ammo(ammo_path.c_str(), &parsed) == 0) {
-            ammo = opennova::world::build_ammo_table(parsed);
-            opennova::def::def_free_ammo(&parsed);
-        }
-        opennova::ResourceIndex index;
-        index.scan(d);
-        const auto mounted = opennova::mission::boot_files_from_index(index);
-        // The kernel's compile-time catalog: the mounted .ptl set plus the
-        // regional table, names only.
-        opennova::particle::EffectCatalogNames effects;
-        opennova::wac::load_script_effect_catalog(mounted, effects);
-        for (auto it = fs::recursive_directory_iterator(d, ec);
-             it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) break;
-            if (!it->is_regular_file(ec) || !is_wac(it->path())) continue;
-            ++files;
-            std::string src = test_io::read_file_text(it->path().string());
-            CompileEnv env;
-            env.ammo = &ammo;
-            env.effects = &effects;
-            opennova::audio::SoundSetIndex sounds;
-            load_script_sound_sets(mounted, it->path().stem().string(), sounds);
-            env.sounds = &sounds;
-            Program prog = compile_source(src, env); // must not crash
-            int errs = prog.error_count();
-            hard_errors += errs;
-            for (const Diagnostic &dg : prog.diagnostics) {
-                if (dg.error && error_examples.size() < 16)
-                    error_examples.push_back(it->path().filename().string() + ":" +
-                            std::to_string(dg.line) + ": " + dg.message);
-                if (!dg.error) {
-                    ++total_warnings;
-                    // Unknown commands and the resolver's action-signature
-                    // diagnostics (an argument retail sinks into its scratch
-                    // word) are the shipped scripts' known blemishes.
-                    if (unknown_examples.size() < 8 &&
-                        (dg.message.rfind("unknown command", 0) == 0 ||
-                         dg.message.rfind("  ", 0) == 0)) {
-                        unknown_examples.push_back(it->path().filename().string() + ": " + dg.message);
-                    }
-                }
-            }
-            // sanity: every file produces a terminated program.
-            if (prog.code.empty() || prog.code.back() != kProgramTerminator) {
-                std::printf("FAIL: %s produced no terminated program\n",
-                            it->path().filename().string().c_str());
-                ++hard_errors;
-            }
-        }
-    }
-
-    std::printf("corpus: %d files, %d hard errors, %d warnings\n", files, hard_errors, total_warnings);
-    for (const std::string &u : unknown_examples) std::printf("  warn: %s\n", u.c_str());
-    for (const std::string &e : error_examples) std::printf("  error: %s\n", e.c_str());
-
-    // Pass criteria: no crash (reaching here), no hard compile errors. Unknown-
-    // command warnings are allowed (older games extend the keyword set).
-    if (hard_errors != 0) {
-        std::printf("CORPUS TEST FAILED\n");
-        return 1;
-    }
-    std::printf("corpus test passed\n");
-    return 0;
+	int compared = 0;
+	int unwitnessed = 0;
+	int failed = 0;
+	for (const auto &[name, path] : scripts) {
+		const std::string source = test_io::read_file_text(path);
+		const std::string source_hash = sha256(source);
+		const auto vector = std::find_if(std::begin(kCorpus), std::end(kCorpus),
+				[&](const CorpusVector &v) { return source_hash == v.source_sha256; });
+		if (vector == std::end(kCorpus)) {
+			std::printf("  no original listing for %s (%s)\n", name.c_str(), source_hash.c_str());
+			++unwitnessed;
+			continue;
+		}
+		CompileEnv env;
+		env.source_names = {"script.wac"};
+		env.load_source = [&scripts](const std::string &file, std::string &text) {
+			const auto found = scripts.find(upper(file));
+			if (found == scripts.end()) return false;
+			text = test_io::read_file_text(found->second);
+			return true;
+		};
+		const Program program = compile_source(source, env);
+		++compared;
+		if (sha256(wac_listing::document(program)) != vector->listing_sha256) {
+			std::printf("FAIL %s: the listing differs from the original compiler's\n", name.c_str());
+			++failed;
+		}
+	}
+	std::printf("corpus: %d scripts compared, %d without an original listing\n", compared, unwitnessed);
+	if (compared == 0) return retail::skip("no corpus script has an original listing");
+	if (failed != 0) {
+		std::printf("CORPUS TEST FAILED (%d)\n", failed);
+		return 1;
+	}
+	std::printf("corpus test passed\n");
+	return 0;
 }

@@ -137,7 +137,7 @@ static void test_wac_to_bms_shared_var() {
 // A mission WAC script can tune the global infantry aim spread, and the AI pass
 // consumes the new value. Retail resolves `accuracyspread` through the writable
 // named-value table, then reads that same dword in the sawtooth aim-error formula.
-// [orig: WacScript_ResolveParameter @0x4f2940 -> wac_var_accuracyspread
+// [orig: WacScript_ResolveParameter @0x4f2920 -> wac_var_accuracyspread
 // @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
 static void test_wac_accuracyspread_drives_npc_aim() {
     World w;
@@ -415,7 +415,11 @@ static void test_signed_action_count_immediate_and_delayed() {
     }
 }
 
-static void test_trigger_count_keeps_unsigned_byte_range() {
+// The chain reads the trigger-count byte SIGNED after its zero test: 128..255
+// evaluate trigger 0 alone, so a chain whose later entries would reject it
+// fires on trigger 0. [orig: EventTrigger_EvaluateChain @0x45405f (zero),
+// @0x45408c (`cmp [edi+15h],bl; jle`), @0x4540c7 (movsx loop bound)]
+static void test_trigger_count_is_signed_in_the_chain() {
     for (uint8_t count : {uint8_t{128}, uint8_t{255}}) {
         World w;
         w.cached.humans = 1;
@@ -428,19 +432,21 @@ static void test_trigger_count_keeps_unsigned_byte_range() {
                 bms::MissionVariableTriggerType::MissionVariableIsEqual);
         condition.param1 = 1;
         std::vector<bms::Trigger> triggers(count, condition); // V1 == 0 throughout
-        triggers.back().param2 = 1; // the last unsigned-count entry rejects the chain
+        triggers.back().param2 = 1; // an entry the signed count never reaches
         sys.load({event}, triggers,
                 {misvar(bms::MissionVariableActionSubType::Set, 7, 1)});
         w.add_system(&sys);
         w.load_systems();
         tick_n(w, kPass);
-        CHECK(!sys.is_active(0));
-        CHECK(w.script.vars.get_mission(7) == 0);
+        CHECK(sys.is_active(0));
+        CHECK(w.script.vars.get_mission(7) == 1);
     }
 }
 
 // reset_after == 0: a repeat event re-fires on EVERY processing pass while its chain
-// holds [orig: the LABEL_24 path clears +20 in the same call].
+// holds: the zero reload word clears the +20 latch in the same call
+// [orig: EventTrigger_UpdateEntry @0x454C30 — the ResetAfter test @0x454CC5, the
+//  zero-reload jump @0x454CD5 to the latch clear @0x454D46].
 static void test_repeat_zero_refires_every_pass() {
     World w;
     w.cached.humans = 1;
@@ -475,8 +481,10 @@ static void test_pre_mission_pass() {
 }
 
 // A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no embedder
-// effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22; the AI integrator then
-// advances the channel phase. Proves the in-engine action-dispatch path end to end.
+// effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22: it stores the channel
+// direction and rate only. Retail's sweep integrator (Entity_UpdateSuspensionBounce
+// @0x456710) has no caller, so later world ticks hold the phase dword. Proves the
+// in-engine action-dispatch path end to end.
 static void test_playpartanim_mutates_brain() {
     World w;
     w.cached.humans = 1;
@@ -509,11 +517,15 @@ static void test_playpartanim_mutates_brain() {
         // direction = play_type; rate = trunc(0.016/1.0 * 65536) = 1048.
         CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
         CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
-        // The +1 branch advances with wrapping ADD and clamps only a strict
-        // upper overshoot; these first two ticks stay in range.
-        ai.advance_part_anim(*ae);
-        ai.advance_part_anim(*ae);
-        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    }
+    tick_n(w, kPass); // a further pass leaves the stored channel untouched
+    ae = ai.for_handle(h);
+    CHECK(ae != nullptr);
+    if (ae) {
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
+        CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 0);
     }
     // In-engine mutation, NOT an embedder effect.
     CHECK(w.out.effects.count("unported_action") == 0);
@@ -824,54 +836,41 @@ static void test_event_trigger_reads_window() {
     CHECK(w.out.effects.count("text") == 2);
 }
 
-// PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). Retail then
-// uses wrapping 32-bit ADD/SUB with asymmetric strict clamps.
+// PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). The sweep
+// step (the editor preview's integrator; retail's Entity_UpdateSuspensionBounce
+// has no caller) uses wrapping 32-bit ADD/SUB with asymmetric strict clamps.
 static void test_playpartanim_zero_time_wraps_like_retail() {
     world::AiBrain b;
     world::ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, /*time=*/0);
     CHECK(b.f[world::AiBrain::kPartAnimDir0] == 1);
     CHECK(b.f[world::AiBrain::kPartAnimRate0] == static_cast<int32_t>(0x80000000)); // INT_MIN
-    world::AiSystem ai;
-    world::AiEntity tmp;
-    tmp.brain = b;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] ==
-          static_cast<int32_t>(0x80000000));
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
+    const int32_t zero_time_rate = b.f[world::AiBrain::kPartAnimRate0];
+    int32_t phase = 0;
+    CHECK(!world::part_anim_step(phase, 1, zero_time_rate));
+    CHECK(phase == static_cast<int32_t>(0x80000000));
+    CHECK(!world::part_anim_step(phase, 1, zero_time_rate));
+    CHECK(phase == 0);
 
     world::AiBrain reverse;
     world::ai_apply_command(
             reverse, 0x22, /*channel=*/1, /*play_type=*/-1, /*time=*/0);
-    tmp.brain = reverse;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    CHECK(reverse.f[world::AiBrain::kPartAnimDir0] == -1);
+    phase = 0;
+    CHECK(world::part_anim_step(phase, -1, reverse.f[world::AiBrain::kPartAnimRate0]));
+    CHECK(phase == 0);
 
     // Exact endpoints do not stop; only the following strict overshoot does.
-    world::AiBrain endpoint;
-    endpoint.f[world::AiBrain::kPartAnimDir0] = 1;
-    endpoint.f[world::AiBrain::kPartAnimRate0] = 1048;
-    endpoint.f[world::AiBrain::kPartAnimPhase0] = 0x10000 - 1048;
-    tmp.brain = endpoint;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    phase = 0x10000 - 1048;
+    CHECK(!world::part_anim_step(phase, 1, 1048));
+    CHECK(phase == 0x10000);
+    CHECK(world::part_anim_step(phase, 1, 1048));
+    CHECK(phase == 0x10000);
 
-    endpoint.f[world::AiBrain::kPartAnimDir0] = -1;
-    endpoint.f[world::AiBrain::kPartAnimPhase0] = 1048;
-    tmp.brain = endpoint;
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == -1);
-    ai.advance_part_anim(tmp);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
-    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+    phase = 1048;
+    CHECK(!world::part_anim_step(phase, -1, 1048));
+    CHECK(phase == 0);
+    CHECK(world::part_anim_step(phase, -1, 1048));
+    CHECK(phase == 0);
 }
 
 // A trigger record with just a main/sub type and params.
@@ -942,8 +941,13 @@ static void test_teammate_triggers() {
         load_probe(sys, make_trigger(bms::TriggerMainType::Teammate, c.sub));
         w.add_system(&sys);
         w.load_systems();
-        w.script.heli_lift_active_count = c.lifts; // inject the query fixture after mission reset
-        tick_n(w, kPass);
+        // Inject the query fixture ahead of each tick's script pass: the entity
+        // update's HeliLift pass republishes its own (empty) slot count.
+        // [orig: HeliLift_UpdateAll @0x451FA0 from Entity_UpdateAllEntities @0x4C21F6]
+        for (int i = 0; i < kPass; ++i) {
+            w.script.heli_lift_active_count = c.lifts;
+            tick_n(w, 1);
+        }
         CHECK((w.script.vars.get_mission(9) == 1) == c.fires);
     }
 }
@@ -1036,7 +1040,7 @@ static void test_player_mount_trigger_dispatch() {
         veh.health = 1000;
         veh.net_id = 11;
         veh.bms_id = 11;
-        veh.item_id = 1; // Mount predicates require the target's item definition.
+        veh.item_id = 1; veh.item_type_index = 7; // Mount predicates require the target's item definition.
         world::EntityHandle vh = w.registry.spawn(1, veh);
         world::Entity pl{};
         pl.alive = true;
@@ -1219,9 +1223,11 @@ static void test_player_input_bit_triggers() {
             w.script.input_action_mirror = 0xFFFFFFFFu;
             CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, sub)));
         }
-        // The look-byte pair stays false (the bit-0 writer is unwitnessed).
-        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 26)));
-        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 27)));
+        // The look byte's bit 0 is never set: its only store writes 0, so sub
+        // 26 reads true and sub 27 false. [orig: EventTrigger_EvaluateCondition
+        // @0x453ca5 / @0x453cb6; HUD_BuildEntityInfo @0x4b84d9]
+        CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 26)) == 1);
+        CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 27)) == 0);
         // BMS action 28 sub 38 zeroes the word [orig: EventAction_HandleSpecialTypes @0x4535c2].
         bms::Action clear{};
         clear.action_type = bms::ActionType::SpecialSubType;
@@ -1252,7 +1258,8 @@ static void test_player_berserk_trigger() {
     w.ai.attach(ph);
     CHECK(!sys.evaluate_trigger_for_test(w, berserk));
     w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] |= 0x200;
-    CHECK(sys.evaluate_trigger_for_test(w, berserk));
+    // The read is the raw masked word, not a normalized bool.
+    CHECK(sys.evaluate_trigger_for_test(w, berserk) == 0x200);
     w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] &= ~0x200;
     CHECK(!sys.evaluate_trigger_for_test(w, berserk));
 }
@@ -1431,11 +1438,14 @@ static void test_trigger_relations_group_records() {
     CHECK(w.script.relations.group(3).initial_count == 5);
     CHECK(w.script.relations.group(3).live_count == 5);
 
-    // The first gameplay tick rescans (the timer starts at zero, as retail's
-    // round init leaves it): only rows that are not dead and hold health > 0
-    // count [orig: EntityPool_RecountLiveByGroup @0x40e8d0, predicate
-    // @0x40e926/@0x40e96c/@0x40e9b6].
+    // The server tick's first periodic second rescans (its timer starts at
+    // zero, as retail's round init leaves it); this bare world has no server
+    // tick, so the test stands in for it. Only rows that are not dead and hold
+    // health > 0 count [orig: Server_TickUpdate -- the
+    // EntityPool_RecountLiveByGroup call @0x51DC02; EntityPool_RecountLiveByGroup
+    // @0x40e8d0, predicate @0x40e926/@0x40e96c/@0x40e9b6].
     w.run_logic_tick(true);
+    w.recount_group_live();
     CHECK(w.script.relations.group(3).initial_count == 5);
     CHECK(w.script.relations.group(3).live_count == 3);
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 2)));
@@ -1443,12 +1453,15 @@ static void test_trigger_relations_group_records() {
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasMoreUnits, 3, 3)));
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAlive, 3)));
 
-    // A kill reads STALE until the 62-tick live rescan — retail cadence
-    // [orig: timer reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup].
+    // A kill reads STALE until the next periodic second's live rescan —
+    // retail cadence [orig: timer reload 0x3E @ 0x51db93 ->
+    // EntityPool_RecountLiveByGroup]; the ticks alone never rescan.
     bms::Trigger lost = group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 3);
     w.commands.kill_ssn(10);
     CHECK(!sys.evaluate_trigger_for_test(w, lost));
     tick_n(w, 62);
+    CHECK(!sys.evaluate_trigger_for_test(w, lost));
+    w.recount_group_live();
     CHECK(w.script.relations.group(3).live_count == 2);
     CHECK(sys.evaluate_trigger_for_test(w, lost));
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupIntact, 3)));
@@ -1592,11 +1605,13 @@ static void test_single_health_triggers() {
     org.alive = true;
     org.health = 100;
     org.health_max = 100;
+    org.has_item_def = true; // resolved def: SSNADDHP's ItemDef gate passes
     w.registry.spawn(0, org);
     org.net_id = 44; // a pool-2 sibling: outside the retail scan set
     w.registry.spawn(2, org);
     org.net_id = 45; // unresolved def: health_max 0
     org.health_max = 0;
+    org.has_item_def = false;
     w.registry.spawn(0, org);
 
     mission::BmsEventSystem sys;
@@ -1658,20 +1673,20 @@ static void test_holding_triggers() {
     holder.net_id = 50;
     holder.alive = true;
     holder.group_id = 2;
-    holder.item_id = 1001;
+    holder.item_id = 1001; holder.item_type_index = 7;
     world::EntityHandle holder_h = w.registry.spawn(0, holder);
     world::Entity item;
     item.net_id = 60;
     item.alive = true;
     item.group_id = 9;
-    item.item_id = 4095;
+    item.item_id = 4095; item.item_type_index = 7;
     world::EntityHandle item_h = w.registry.spawn(1, item);
     // A pool-1 "holder" with the same group: outside the retail pool-0 walk.
     holder.net_id = 51;
     world::EntityHandle wrong_pool_h = w.registry.spawn(1, holder);
     // A pool-0 member with no resolved item (ItemTypeIndex 0): gated out.
     holder.net_id = 52;
-    holder.item_id = 0;
+    holder.item_id = 0; holder.item_type_index = 0;
     world::EntityHandle ungated_h = w.registry.spawn(0, holder);
 
     mission::BmsEventSystem sys;
@@ -1716,7 +1731,7 @@ static void test_single_distance_los_chain() {
     w.registry.configure_pool(0, 8);
     world::Entity org;
     org.alive = true;
-    org.item_id = 1001;
+    org.item_id = 1001; org.item_type_index = 7;
     org.net_id = 70;
     org.position = {0.0f, 0.0f, 0.0f};
     org.yaw = 90; // mission 90 deg = engine BAM 0 = facing +X
@@ -2075,7 +2090,7 @@ static void test_change_ai_command_family() {
 
     world::Entity entity{};
     entity.net_id = 42;
-    entity.item_id = 1001;
+    entity.item_id = 1001; entity.item_type_index = 7;
     entity.alive = true;
     const world::EntityHandle handle = w.registry.spawn(0, entity);
 
@@ -2144,7 +2159,7 @@ static void test_change_ai_command_family() {
     {
         world::Entity building{};
         building.net_id = 43;
-        building.item_id = 2002;
+        building.item_id = 2002; building.item_type_index = 7;
         building.alive = true;
         const world::EntityHandle bh = w.registry.spawn(0, building);
         CHECK(ai.for_handle(bh) == nullptr);
@@ -2162,12 +2177,8 @@ static void test_change_ai_command_family() {
                world::kEntityFlagIndestructible) == 0);
     }
     // FIND_AND_USE with no matching model point leaves the prior relation alone.
-    {
-        const int before = ai.unported_calls;
-        dispatch(31, 7);
-        dispatch(41, 12);
-        CHECK(ai.unported_calls == before);
-    }
+    dispatch(31, 7);
+    dispatch(41, 12);
     dispatch(32);
     CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
     dispatch(33);
@@ -2232,6 +2243,7 @@ static void test_structural_bms_actions() {
         entity.net_id = ssn;
         entity.item_id = 1001;
         entity.has_item_def = true;
+        entity.item_type_index = 7; // the def row's ordinal the +0x1C walk reads
         entity.group_id = 2;
         entity.team = 1;
         entity.alive = true;
@@ -2417,7 +2429,6 @@ static void test_bms_target_selectors_and_retail_noops() {
     CHECK(brain.f[world::AiBrain::kPriorityTarget] == 0);
     command(world::EntityCommands::kHudItem, 1);
     command(world::EntityCommands::kTmateStatus, 1);
-    CHECK(w.ai.unported_calls == 0);
 }
 
 int main() {
@@ -2435,7 +2446,7 @@ int main() {
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
     test_signed_action_count_immediate_and_delayed();
-    test_trigger_count_keeps_unsigned_byte_range();
+    test_trigger_count_is_signed_in_the_chain();
     test_repeat_zero_refires_every_pass();
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();

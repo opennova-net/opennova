@@ -54,12 +54,18 @@ int main() {
 	}
 	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	rig.install_weapon("WPN_M4AUTO");
-	for (int t = 0; t < 62; ++t) rig.tick(); // one settled second of posing
+	// Two settled seconds of posing. Some 23 CP01 organics are authored above
+	// any surface the port's collision holds (tree groups, the lumber-mill dome)
+	// and fall to the terrain first, as they do on master; an airborne body
+	// skips its think [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66], so
+	// each holds its idle until it lands, and the quarter-step fall takes most
+	// of two seconds.
+	for (int t = 0; t < 124; ++t) rig.tick();
 	expect(rig.world.pose_provider != nullptr, "the world carries a muzzle pose provider");
 	if (rig.world.pose_provider == nullptr) return 1;
 
 	// --- Every live foot NPC resolves a muzzle inside the rifle envelope.
-	int persons = 0, stamped = 0, good = 0, misses = 0, head_height = 0;
+	int persons = 0, stamped = 0, good = 0, misses = 0, head_height = 0, guards = 0;
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
 		const w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active) continue;
@@ -118,22 +124,28 @@ int main() {
 		const float up = fx(out[2]) - origin.z;
 		const float horiz = std::hypot(fx(out[0]) - origin.x, fx(out[1]) - origin.y);
 		const bool in_envelope = up > 0.0f && up < 0.8f && horiz > 0.1f && horiz < 2.0f;
+		// A guard (Flags 0x40; CP01 authors 49 Guarding organics) holds its post in
+		// the guard family with the rifle lowered, below the standing envelope.
+		// [orig: Entity_UpdateInfantryAI @0x4BD196..0x4BD231]
+		const bool guard_pose = e->inf.anim_state >= 140 && e->inf.anim_state <= 144;
 		if (stamped <= 8 || (!in_envelope && misses < 8))
 			std::printf("muzzle: net=%d team=%d up=%.2f horiz=%.2f pos=(%.1f, %.1f, %.1f) anim=%d%s\n",
 					int(ent->net_id), int(e->team), up, horiz, origin.x, origin.y, origin.z,
 					e->inf.anim_state, in_envelope ? "" : " (outside the rifle envelope)");
-		if (in_envelope) ++good;
+		if (guard_pose) ++guards;
+		else if (in_envelope) ++good;
 		else ++misses;
 		if (up > 0.82f && horiz < 0.05f) ++head_height;
 	}
-	std::printf("muzzle: %d foot NPCs, %d resolved, %d in the rifle envelope, %d at head height\n",
-			persons, stamped, good, head_height);
+	std::printf("muzzle: %d foot NPCs, %d resolved, %d guards, %d in the rifle envelope, "
+			"%d at head height\n", persons, stamped, guards, good, head_height);
 	expect(persons > 0, "CP01 carries foot NPCs");
 	expect(stamped > 0, "at least one NPC resolved a muzzle (the provider is registered)");
 	expect(head_height == 0, "no muzzle sits at the head-height fallback point");
 	// Crouched/prone bodies and the odd mid-transition pose sit outside the
-	// standing rifle envelope; the CP01 walk lands ~9 in 10 inside it.
-	expect(good * 5 >= stamped * 4, "at least four in five stamped muzzles land in the rifle envelope");
+	// standing rifle envelope; the rest of CP01 lands ~9 in 10 inside it.
+	expect(good * 5 >= (stamped - guards) * 4,
+			"at least four in five stamped non-guard muzzles land in the rifle envelope");
 
 	// --- The player's own rig: US01's head and hand pivots, and the held model.
 	const w::Entity *pe = rig.local.player();

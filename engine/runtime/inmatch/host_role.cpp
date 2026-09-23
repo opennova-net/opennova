@@ -76,7 +76,10 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 			(config.mp_attributes & GameConfig::kMpAttribAutoScopeZero) != 0;
 	kernel.world.rules.no_friendly_fire =
 			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
-	kernel.world.rules.session_open = true;
+	// The is_mp_session_peer bit is the is_client half of the connection
+	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
+	// host. [orig: g_napi_np_ctx +0x64; napi_np_server_ctx.h connection modes]
+	kernel.world.rules.mp_session_peer = serve_and_play;
 }
 
 // The HostClient replica pipeline (recv-fold only, 0x0C suppressed): it folds
@@ -232,6 +235,19 @@ void HostRole::run_tick(const TickInput &input) {
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
 	kernel.local.apply_player_input_pre_tick();
+	// The pending fire-sound slots count down ahead of the server tick's
+	// receive, so a slot this frame's C2S queues starts on the next frame.
+	// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call
+	//  @0x526697 precedes the Server_TickUpdate call @0x5266B6 (its receive
+	//  pump @0x51D895)]
+	kernel.world.out.fire_sounds.tick();
+	// The entity-update gate's exemption for a host that also plays: its own
+	// client's death-screen latch, folded at the end of the previous frame as
+	// retail's client receive sets it at the head of this one.
+	// [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
+	//  `cmp g_death_screen_active,0` @0x526713]
+	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
+			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
     if (local_round_reset_seen_ != kernel.local.round_reset_revision) {
@@ -242,7 +258,12 @@ void HostRole::run_tick(const TickInput &input) {
 	// Game_ProcessMainFrame @ 0x52674b -> @ 0x526774]; the next frame's 0x0A
 	// fan projects the advanced weather.
 	kernel.tick_weather();
-	kernel.local.run_local_player_post_tick();
+	kernel.local.run_local_view_tick();
+	// The frame's one weapon-action walk follows the camera compose: the
+	// local player's slot pumps at its own pool-0 slot, the gunners around it.
+	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
+	//  the WeaponAction_ProcessAllEntities call @0x526786]
+	kernel.world.pump_weapon_actions();
 	kernel.resolve_new_infantry_adm_ids();
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	// The pump's wire-facing reload outcome relays onto the loopback so the
@@ -299,6 +320,11 @@ bool HostRole::session_lost(SessionError &error) const {
 //  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
 //  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 void HostRole::close() {
+	// The teardown's head: pools 0..2 go, then the authority's one-shot
+	// PostMission sweep, both ahead of the per-slot 0x25 walk below
+	// [orig: Game_TeardownMission — EventTrigger_UpdateAllWithFlag4 call
+	//  @0x52266C precedes Server_DisconnectAndResetAllPlayerSlots @0x52269B].
+	if (kernel_ != nullptr) kernel_->run_post_mission_pass(/*is_authority=*/true);
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
 	NapiNPServerCtx &ctx = state.host_owner.ctx;

@@ -17,10 +17,12 @@
 // remote authority Player is net-snapped and does not traverse the local physics
 // resolver, but its retail MoveOrder moving bit still gates the same overlap.
 // This preserves the original collision semantics without a second remote-only
-// objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0,
-// capture callback callsite @0x4B2F90..0x4B2FD0]
+// objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0 — the
+// overlap test @0x4B2F8D..0x4B2FA5 feeding the capture touch
+// @0x4B31DD..0x4B3238]
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <variant>
 #include <vector>
@@ -53,10 +55,17 @@ struct ZoneCaptureState {
 
     std::vector<Request> requests;
     std::vector<Active> active;
+    // Players whose touch of a numbered zone queued nothing because neither
+    // team can capture it, in contact order; the host arms their slot's nag.
+    // [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the failed
+    //  CaptureCtx_QueueCaptureRequest @0x500BFF..0x500C06, the numbered test
+    //  @0x500C08..0x500C0E]
+    std::vector<EntityHandle> refused_touches;
 
     void clear() {
         requests.clear();
         active.clear();
+        refused_touches.clear();
     }
 };
 
@@ -93,11 +102,10 @@ struct ZoneCaptureEvents {
         uint16_t net_id = 0;
         uint8_t anim_slot = 0;
     };
-    // A numbered-zone INSTANT flip [orig: the queue drain @0x53B8F0 — numbered zones
-    // flip immediately: team change (via neutral when previously owned), control = 0,
-    // GameEvent_FlagCapture]. frontier_changed selects the 0x1E pair: 50/51 when the
-    // frontier masks held, 52/53 carrying each side's NEW frontier number; a 56/57
-    // banner keyed on the new owning team follows either way [orig: @0x50F6F0].
+    // An INSTANT flip (a numbered zone, or any zone under a zero capture
+    // duration): team change (via neutral when previously owned), the capture
+    // scoring, control = 0, then GameEvent_FlagCapture.
+    // [orig: Server_UpdateCaptureZones @0x53BC46..0x53BC94]
     struct Flip {
         EntityHandle zone;
         // Exact Player whose eligible touch queued the capture. Stable pool
@@ -105,18 +113,29 @@ struct ZoneCaptureEvents {
         // [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 passes the Player to
         // Server_UpdateCaptureZones @0x53B8F0 / GameEvent_FlagCapture @0x50F6F0]
         EntityHandle capturer;
-        // Every living teammate in the numbered zone when it flips receives
-        // scorer event 24; this can include more Players than `capturer`.
-        // [orig: CaptureZone_CheckProximityScoring @0x500C50, call @0x53BC94]
+        // A numbered zone's scorer event 24 recipients: every live roster
+        // Player of the capturer's team inside the zone radius. An unnumbered
+        // zone scores event 14 on the capturer instead (`takeover`). Both only
+        // in team games, for a registered capturer, on an owned zone.
+        // [orig: CaptureZone_CheckProximityScoring @0x500C50, the call @0x53BC72]
         std::vector<EntityHandle> scorers;
+        bool takeover = false;
         uint8_t old_team = 0;
-        uint8_t new_team = 0;
-        uint8_t capturer_team = 0;  // the team whose presence drove the flip
-        bool frontier_changed = false;
-        uint8_t capturer_frontier = 0; // FindFrontierZone AFTER the flip
-        uint8_t loser_frontier = 0;
-        bool suppressed = false; // match decided (one team owns every zone)
-        bool announce = false;   // ItemDefAttrib 0x40000 event gate
+        uint8_t new_team = 0;       // the owner after the flip (the banner key)
+        uint8_t capturer_team = 0;  // the capturer's entity team (the pair's filter)
+        bool numbered = false;
+        bool announce = false;      // ItemDefAttrib 0x40000 event gate [orig: @0x50F70B]
+        // A numbered flip's S2C 0x1E pair, sent unless the match is decided or
+        // the capturer is no registered Player: to the capturer's team, 51
+        // [zone][rank] when the enemy mask held (`unchanged`) else 53
+        // [zone][frontier]; to enemy_of(capturer team), 50 / 52 with the same
+        // bytes. [orig: GameEvent_FlagCapture @0x50F737..0x50F912]
+        bool decided = false;
+        bool capturer_is_player = false;
+        bool unchanged = false;
+        uint8_t zone_number = 0;
+        uint8_t rank = 0;
+        uint8_t frontier = 0;       // FindFrontierZone(capturer team) after the rebuild
     };
     // Exact S2C 0x53 body for a timed unnumbered capture. Retail emits one at
     // start/restart and after every active 1 Hz advance, including completion.
@@ -152,6 +171,10 @@ struct ZoneCaptureEvents {
         EntityHandle capturer;
         uint8_t new_team = 0;
         bool announce = false; // ItemDefAttrib 0x40000 event gate
+        // The completion's capture scoring: event 14 on the capturer (the zone
+        // is unnumbered), under the same gates as a flip's.
+        // [orig: CaptureZone_CheckProximityScoring @0x500C50, the call @0x53BA7D]
+        bool takeover = false;
     };
     // A single sequence is load-bearing wire state. Retail sends directly from
     // each mutation callsite; parallel per-kind buckets lose neutral/new pairs
@@ -165,23 +188,30 @@ struct ZoneCaptureEvents {
     }
 };
 
+// The inputs calculate_capture_zone_control_delta reads once its player census
+// is done: the signed presence, the zone's owner, the in-game census by team,
+// the capture speed setting, the sorted SpawnZoneList's numbered ownership
+// counts and this zone's shared-number count, and the round clock.
+// [orig: calculate_capture_zone_control_delta @0x501120]
 struct ZoneCaptureDeltaInput {
-    int presence = 0;
-    int capturing_side_players = 0;
-    int total_players = 0;
-    int speed_setting = -1;
-    int shared_zone_entities = 1;
-    int capturing_side_zones = 0;
-    int opposing_side_zones = 0;
-    int numbered_spawn_zones = 0;
-    int32_t remaining_ticks = -1;
-    uint32_t game_time_minutes = 0;
+    int presence = 0;                  // same-team minus capturable others in radius
+    uint8_t zone_team = 0;             // entity+354
+    std::array<int, 5> team_players{}; // in-game Players by team
+    int speed_setting = -1;            // g_capture_speed_setting
+    int spawn_zone_count = 0;          // SpawnZoneList_GetCount()
+    int team1_zones = 0;               // numbered list entries owned by team 1
+    int team2_zones = 0;               // numbered list entries owned by team 2
+    int numbered_zones = 0;            // numbered list entries
+    int shared_zone_entities = 0;      // numbered entries carrying this zone's number
+    int32_t remaining_ticks = -1;      // g_round_time_remaining
+    uint32_t game_time_minutes = 0;    // g_respawn_time (SET GameTime)
 };
 
 // The complete control-delta formula [orig:
-// calculate_capture_zone_control_delta @0x501120]: presence, player-count
-// shaping, the late-round ownership-leader acceleration, shared-zone division,
-// and minimum signed delta. Exposed as one input value for exact formula pins.
+// calculate_capture_zone_control_delta @0x501120]: the capturing side, its
+// player-count shaping, the late-round acceleration for the side holding more
+// numbered zones, the shared-number division, the x87 conversion, and the
+// minimum signed delta. Exposed as one input value for exact formula pins.
 int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
 
 

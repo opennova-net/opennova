@@ -294,8 +294,22 @@ struct SessionReplyState {
 	bool spectator_convert_pending = false;
 	int16_t spectator_convert_killer = -1;
 	// Host ms of this player's last accepted chat (the 1000 ms per-sender
-	// throttle; 0 = never). [orig: slot+100360, NapiNPServer_HandleChatMessage @0x5137FF]
+	// throttle; 0 = never). The same slot word is the refused-capture-touch
+	// nag's stamp: a numbered flip stamps the capturer's and the join zeroes it.
+	// [orig: slot+100360, NapiNPServer_HandleChatMessage @0x5137FF;
+	//  GameEvent_FlagCapture @0x50F912; Server_OnPlayerJoin @0x51A6CD]
 	uint32_t chat_last_ms = 0;
+	// Two bits of the player-slot state byte (+89912). 0x04 asks the per-tick
+	// slot pass for the S2C 0x1E event 58 frontier hint once the slot has
+	// played 1240 ticks; 0x08 holds off a second refused-touch nag until a
+	// numbered flip clears it on every slot. The join sets 0x04 and clears 0x08,
+	// a refused touch sets both, the deploy leg's whole-byte write clears both.
+	// [orig: CNetPlayer_SetGameState @0x4C4213..0x4C421F; Server_OnPlayerJoin
+	//  @0x51A730..0x51A73A; Server_OnPlayerTouchCaptureZone @0x500C35;
+	//  GameEvent_FlagCapture @0x50F7A0; Server_ProcessPlayerDeath @0x517803;
+	//  Server_UpdateAllActivePlayerSlots @0x5189A6]
+	bool frontier_hint_pending = false; // bit 0x04
+	bool capture_nag_held = false;      // bit 0x08
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
@@ -503,9 +517,9 @@ struct NapiNPConnection {
 	uint32_t s2c_send_holdoff_ticks = 0;
 	uint32_t s2c_send_holdoff_countdown = 0;
 	bool s2c_send_boundary_open = true;
-	// This tick's 0x0A, built BEFORE the entity motor and queued after the
-	// maintenance legs: retail's frame is a pre-motor snapshot that still
-	// follows the maintenance sends inside Server_TickUpdate.
+	// This tick's 0x0A, built after the script pass and the maintenance legs
+	// and queued behind their sends, ahead of the entity motor: retail's frame
+	// is the last leg of Server_TickUpdate.
 	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4
 	//  (per-slot 0x0A last, @0x51E3D6..0x51E450), Entity_UpdateAllEntities @0x52674B]
 	std::vector<uint8_t> staged_frame_update;
@@ -696,6 +710,15 @@ inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
 // @0x517BF5..0x517C13; the outer filtered fan is NapiNPServer_SendFiltered @0x4C87E0]
 inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
+}
+
+// NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
+// includes the listen host and does not inspect entity health; this runtime's
+// completed initial-state burst is the shared representation of that active
+// slot state. [orig: NapiNPServer_SendFiltered @0x4C8874..0x4C8894,
+// @0x4C893E..0x4C8953]
+inline bool active_player_recipient(const NapiNPConnection &conn) {
+	return is_in_match(conn) && conn.link.transport != nullptr;
 }
 
 } // namespace opennova::inmatch

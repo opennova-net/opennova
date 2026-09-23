@@ -76,9 +76,12 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	// The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 	// viewchase F4): first person clears the FP-gun bit, gun view sets it, and
-	// both select first person; chase selects the chase preference. None of
-	// them moves the camera by itself — the sim's arbiter resolves the mode
-	// from the preference and the seat (stock JO has no on-foot third person).
+	// both select first person; chase selects the chase preference. Each row
+	// reports its own event: the three actions write different BMS
+	// input-action bits (world/player_view.h player_view_apply_view_action).
+	// None of them moves the camera by itself — the sim's arbiter resolves the
+	// mode from the preference and the seat (stock JO has no on-foot third
+	// person).
 	// The 412 cycle and the 405-410 orbit actions have no catalog row and are
 	// unreachable from a key. [orig: Input_HandleActionBinding cases 400
 	// @0x49c073, 401 @0x49c0d9, 402 @0x49c0f6; the records @0x8186CC /
@@ -91,7 +94,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	if (s.viewwithgun.step(k.viewwithgun, k.active, k.chorded)) {
 		s.showhud_flags |= kShowHudFlagGun;
-		events |= kGunBitChanged | kFirstPersonSelected;
+		events |= kGunBitChanged | kGunViewSelected;
 	}
 	if (s.viewchase.step(k.viewchase, k.active, k.chorded)) events |= kThirdPersonSelected;
 	// The Tab player list TOGGLES the panel-visible flag — retail keeps the

@@ -128,12 +128,9 @@ int16_t death_angle_degrees_from_bam(int32_t bam) {
 void seed_piece_physics_angles(Entity &entity) {
     Entity::VehicleMotorState &motion = entity.veh;
     if (motion.yaw_seeded) return;
-    motion.yaw_bam =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(entity.yaw));
-    motion.air_pitch_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(static_cast<int32_t>(entity.pitch)) * 11930464u);
-    motion.air_roll_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(static_cast<int32_t>(entity.roll)) * 11930464u);
+    motion.yaw_bam = spawn_angle_bam(90 - entity.yaw);
+    motion.air_pitch_bam = spawn_angle_bam(entity.pitch);
+    motion.air_roll_bam = spawn_angle_bam(entity.roll);
     motion.yaw_seeded = true;
 }
 
@@ -387,6 +384,9 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
         d.victim_handle = target.handle.packed;
         d.killer_handle = attacker.packed;
         d.ammo_index = ammo_index;
+        // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
+        // call @0x4E6FB4)]
+        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -437,10 +437,14 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // deathCallback(target, 3, 0) [orig: @0x4E6752]: the person callbacks
     // take event 3 like the blast's event 2, except that the plyr body keeps
     // its cause bits (3 is in the no-clear set) and only re-arms its think
-    // [orig: Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F,
-    //  @0x407B5E]. The AI reaction rides the RoundHit drain, as for a blast.
+    // before its waypoint tail [orig: Entity_HandleDamageAndTriggerZones
+    //  @0x407B3B..0x407B4F, @0x407B5E, the tail @0x407B64..0x407C6B]. The AI
+    // reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
-    if ((flags & kEntityFlagPlayer) != 0) target.spawn_phase = 64;
+    if ((flags & kEntityFlagPlayer) != 0) {
+        target.spawn_phase = 64;
+        player_body_waypoint_visits(world, target);
+    }
     if (collision_kill_fires(before, target.health)) {
         // The kill event credits the entry's source itself, not the walk
         // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
@@ -452,6 +456,9 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
         d.killer_handle = e.owner.packed;
         d.ammo_index = e.ammo_index;
         d.event_flags = target.cause_flags & 0xF00u;
+        // [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620 (the
+        // Score_ProcessKillEvent call @0x4E6773)]
+        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
@@ -562,11 +569,15 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             // That notify is the class callback with event 2: on a live PLAYER
             // body the plyr callback clears the kill-cause bits 8..11 (a
             // latched head-shot bit does not survive a blast, so a blast kill
-            // routes as an ordinary death) and re-arms the 64-tick think
+            // routes as an ordinary death), re-arms the 64-tick think and runs
+            // its waypoint tail
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f dead return;
-            //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm].
-            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
+            //  tail @0x407B64..0x407C6B].
+            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0) {
                 player_body_class_think(target);
+                player_body_waypoint_visits(world, target);
+            }
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake, unless the record's kz type is
             // 3 (the medic heal)
@@ -581,6 +592,13 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
                 d.victim_handle = target.handle.packed;
                 d.killer_handle = attacker.packed;
                 d.ammo_index = e.ammo_index;
+                // The kill accounting runs here, and the death edge's scorer
+                // reads the cause word as this blast's class callback left it
+                // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the class
+                // callback call @0x4E6B72, the Score_ProcessKillEvent call
+                // @0x4E6BFE)].
+                d.event_flags = target.cause_flags & 0xF00u;
+                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
         }
@@ -730,13 +748,19 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         if (e.type == ammo_kz::kMedic) {
             // The kz-type-3 callback is GameEvent_HandleMedicInteraction only
             // when the owner's class carries the Medic charattr (AnimMap slot
-            // bit 8) [orig: @0x4EADF0..0x4EADFC]. Per organic in the blast
-            // radius (the ordinary pool-0 sweep shape): a person that is not
-            // the healer, a live healer, the same team; a DEAD target that is
-            // not already being revived is revived (the alive-and-hurt heal,
-            // GameEvent_HealPlayer @0x50DE30, is unported).
+            // bit 8) [orig: Projectile_ProcessExplosionQueue case 3
+            // @0x4EADDD..0x4EADFC, the charattr test @0x4EADEA..0x4EADF4]. Per
+            // organic in the blast radius (the ordinary pool-0 sweep shape): a
+            // person that is not the healer, a live healer, the same team; a
+            // DEAD target that is not already being revived is revived, a live
+            // one below its max health is healed. The max is the def hp: the
+            // difficulty scaling touches only the local player outside a
+            // network session, where GameEvent_HealPlayer never finds the
+            // second player slot it needs.
             // [orig: GameEvent_HandleMedicInteraction @0x4E6790 — gates
-            //  @0x4E679C..0x4E67BD, dead arm @0x4E67C2..0x4E67D8]
+            //  @0x4E679C..0x4E67BD, dead arm @0x4E67C2..0x4E67D8, live arm
+            //  @0x4E67E3..0x4E6805; Entity_GetMaxHealthWithDifficulty @0x43B8A0,
+            //  the session and local-player tests @0x43B8AD..0x43B8C6]
             const Entity *healer = world.registry.get(e.owner);
             if (healer == nullptr ||
                     !world.tables.class_has_attribute(healer->player_class,
@@ -753,8 +777,14 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 const Vec3 d = vec_sub(t->position, e.pos);
                 const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
                 if (vec_len(d) - bound > medic_radius) continue;
-                if ((t->flags & kEntityFlagDead) == 0u || t->medic_reviving) continue;
-                world.round_sim.medic_revives.push_back(MedicRevive{t->handle, healer->handle});
+                if ((t->flags & kEntityFlagDead) != 0u) {
+                    if (t->medic_reviving) continue;
+                    world.round_sim.medic_interactions.push_back(
+                            MedicInteraction{t->handle, healer->handle, /*revive=*/true});
+                } else if (retail_signed_i16(t->health) < retail_signed_i16(t->health_max)) {
+                    world.round_sim.medic_interactions.push_back(
+                            MedicInteraction{t->handle, healer->handle, /*revive=*/false});
+                }
             }
             continue;
         }

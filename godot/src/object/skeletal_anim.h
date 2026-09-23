@@ -147,6 +147,8 @@ public:
 	// local joint even when overlay inputs are unavailable and this falls back to
 	// the sampled pose. Collision adapts that verdict to its final-row convention.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
+	// p_variant / p_source_variant / p_target_variant: the primary channels'
+	// served ring entries.
 	Array eval_pose_overlay_deltas(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
@@ -154,7 +156,7 @@ public:
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
+			int p_wpn_prev_variant = 0, int p_variant = 0) const;
 	Array eval_pose_blended_overlay_deltas(const String &p_source_key,
 			double p_source_playhead_seconds, const String &p_target_key,
 			double p_target_playhead_seconds, float p_weight,
@@ -165,7 +167,8 @@ public:
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
+			int p_wpn_prev_variant = 0, int p_source_variant = 0,
+			int p_target_variant = 0) const;
 
 	// The whole per-frame body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
@@ -225,7 +228,8 @@ public:
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
+			int p_wpn_prev_variant = 0, int p_source_variant = 0,
+			int p_target_variant = 0) const;
 
 	SkeletalAnim() = default;
 };

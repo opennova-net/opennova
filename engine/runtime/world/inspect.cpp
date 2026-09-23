@@ -54,8 +54,8 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.health = ent ? ent->health : 0;
 	d.alive = ent ? ent->alive : false;
 	d.hidden = ent ? ent->hidden : false;
-	d.held = ent ? ent->held : false;
-	d.disabled = ent ? ent->disabled : false;
+	d.held = ent ? (ent->cause_flags & kCauseFlagScriptHold) != 0 : false;
+	d.disabled = ent ? ((ent->flags | ent->engine_flags) & kEntityFlagScriptDisabled) != 0 : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
 		if (const VehicleTraits *traits = world.vehicles.traits.get(ent->item_id))
@@ -624,7 +624,6 @@ AiDebugReport ai_debug_report(World &world) {
 
 	report.counters.brain_count = ai.count();
 	report.counters.event_count = ai.events.count();
-	report.counters.unported_calls = ai.unported_calls;
     report.counters.runtime_gap_calls = world.diagnostics.total_calls();
     report.counters.runtime_gap_sites = static_cast<uint32_t>(world.diagnostics.gaps().size());
     report.runtime_gaps = world.diagnostics.gaps();

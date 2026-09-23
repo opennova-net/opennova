@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 using namespace opennova::def;
 using namespace opennova::threedi;
@@ -52,11 +53,11 @@ MissionKernel::MissionKernel() : local(world) {
 	world.teammate_spawner = this;
 	world.item_piece_spawner = this;
 	occlusion.bind_focal_wind_random(&world.prng16_c_state);
-	// The kernel pumps the local player's slot itself (run_local_player_post_tick
-	// with the live trigger/reload/scope inputs), so the world's global local.weapon
-	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
-	// per frame [orig: one WeaponAction_ProcessAllEntities walk @0x542690].
-	world.rules.external_local_mounted_weapon_pump = true;
+	// The world's weapon-action walk pumps the local player's slot (its own or
+	// the UseGun parent slot it borrowed) through this LocalPlayer, with the
+	// live trigger/reload/scope inputs, at L's own pool-0 slot; the AI pump
+	// never advances it as well [orig: one WeaponAction_ProcessAllEntities
+	// walk @0x542690].
 	world.profile = &profile;
 }
 
@@ -319,18 +320,21 @@ void MissionKernel::register_mission_systems() {
 	// sits inside the load (inmatch::HostRole::bring_up_singleplayer)
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
-	// The mission systems register in the faithful within-tick order, then
-	// load (each system's on_load). Order: WAC -> BMS -> AI.
-	// [orig: Game_ProcessMainFrame @0x5263f0 calls Server_TickUpdate @0x51d7e0
-	//  (which runs the WAC executor WacScript_AdvanceTick @0x51d8bf first, then
-	//  the BMS event quarter pass @0x51d8f4) BEFORE Entity_UpdateAllEntities
-	//  @0x4c2100 (the AI/motor pass).] AI registers last so it consumes the
-	// entity state the scripts mutate this tick; each system carries its own
-	// cadence gate (WAC every 62nd tick, BMS quarters every 16th), so the
-	// registration order only fixes the within-tick sequence.
+	// The mission's script systems register in the faithful within-tick
+	// order, then load (each system's on_load, then the AI's). Order: WAC ->
+	// the every-32 idle legs -> BMS; the World's entity update follows them
+	// every tick, so it consumes the entity state the scripts mutate.
+	// [orig: Game_ProcessMainFrame @0x5266b6 (the Server_TickUpdate call, whose
+	//  Server_TickUpdate @0x51d8bf WacScript_AdvanceTick call runs the WAC
+	//  executor first, @0x51d8d2/@0x51d8d7 the every-32 spawn-marker and
+	//  idle-timer calls next and @0x51d8f4 the BMS event quarter pass) precedes
+	//  Game_ProcessMainFrame @0x52674b (the Entity_UpdateAllEntities call).]
+	// Each system carries its own cadence gate (WAC every 62nd tick, the idle
+	// legs every 32nd, BMS quarters every 16th), so the registration order
+	// only fixes the within-tick sequence.
 	world.add_system(&wac);
+	world.add_system(&world.server_idle_legs);
 	world.add_system(&events);
-	world.add_system(&world.ai);
 	world.load_systems();
 
 }
@@ -580,7 +584,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		(void)install_infantry_anim(options.infantry_adm);
 	}
 	// The script compiler's SOUNDSET and FX name catalogs, from the mounted
-	// banks and effect documents [orig: WacScript_ResolveParameter @0x4F2940
+	// banks and effect documents [orig: WacScript_ResolveParameter @0x4F2920
 	// binds both against the loaded tables; CEffectWorld_InternEffectHandle
 	// @0x5F7310]. Independent of the wac gate: a compile that arrives after
 	// the boot (Simulation::compile_and_set_wac) binds the same names.
@@ -614,19 +618,19 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("wac");
 		wac_loaded = false;
 		std::string wac_error;
-		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
+		// A non-authoritative load compiles no layer: it installs only the
+		// terminator. [orig: WacScript_InitAndLoad @0x4F9437 (the authority
+		// test), @0x4F944E (jz past the three compiles), @0x4F95A9 ('zzzz')]
+		const mission::BootFileSource no_layers{};
+		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac,
+				world.rules.projectile_authority ? files_ : no_layers,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
-		if (status == wac::WacLayeredLoadStatus::kBlocked) {
-			if (options.wac_strict_diagnostics) {
-				wac_blocked_error = std::move(wac_error);
-			} else {
-				io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
-						wac_error.c_str());
-			}
-		} else {
+				&world, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
+		// Only strict mode refuses a program; the game's policy always installs.
+		if (status == wac::WacLayeredLoadStatus::kBlocked)
+			wac_blocked_error = std::move(wac_error);
+		else
 			wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
-		}
 	}
 	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
 	// net-re §5.2b) — after load (the spawn needs the AI system wired). A
@@ -690,6 +694,14 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		error = wac_blocked_error;
 		return false;
 	}
+	// The vehicle spawn-marker list is built from the mission as loaded, once
+	// the definitions are attached and ahead of the class inits, the
+	// PreMission pass and the WAC's initial execution.
+	// [orig: Game_StartMission — the per-vehicle sub_529A80 walk
+	//  @0x52527A..0x5252BF and the build_spawn_marker_budget_list call
+	//  @0x5252C6 precede the Entity_InitAllFromModels call @0x52567F and the
+	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
+	world.vehicles.build_spawn_markers();
 	// Definition callbacks finish before the pre-mission event pass. In
 	// particular, NPCs need their own ADM, ammunition and collision bindings.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0]
@@ -708,8 +720,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// of its entity update, so the first frame runs at tick 1 on the host and
 	// on every client alike [orig: Game_StartMission `mov tick, ebx` (ebx = 0)
 	// @0x525B9F, past the is_authority-gated pre pass @0x525B78..0x525B90;
-	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of
-	// Entity_UpdateAllEntities @0x52674B]. World::run_logic_tick advances its
+	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
+	// Entity_UpdateAllEntities call @0x52674B]. World::run_logic_tick advances its
 	// clock after the tick, so the same first frame starts from 1 here; a
 	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
 	// tick out of phase.
@@ -756,7 +768,6 @@ bool MissionKernel::complete_mission_start() {
 	world.weather.mission_start_init();
 	for (int i = 0; i < 255; ++i) tick_weather();
 	w::count_mission_units(world);
-	world.vehicles.build_spawn_markers();
 	if (world.rules.projectile_authority)
 		world.vehicles.initialize_mission_vehicles();
 	capture_baseline();
@@ -809,6 +820,29 @@ void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t c
 	sampler.ctx = &ctx;
 	world.weather.precipitation.update(cam_x, cam_y, cam_z,
 			world.weather.core.scalar_channels.rain_pct_fp, world.env.water_z, sampler);
+}
+
+// The teardown destroys pools 0, 1 and 2 before the authority's PostMission
+// sweep, so the sweep's net-id lookups and pool walks find no row there; the
+// pool-3 markers stay resident. Only the teardown's sweep is live: the SP
+// restart's call runs after its own mission reset freed the event list, so it
+// sweeps nothing and has no port.
+// [orig: Game_TeardownMission — Entity_Destroy over pools 0, 1 and 2
+//  @0x522365..0x5223C8, then the is_authority-gated
+//  EventTrigger_UpdateAllWithFlag4 call @0x522663..0x52266C;
+//  Game_RestartRoundSP @0x5263A0..0x5263AE, whose first call
+//  Game_DestroyAllEntitiesAndReset @0x523604 enters
+//  Mission_ResetBmsState (the mission reset), whose
+//  EventSystem_FreeAll call @0x40DBEF zeroes the count @0x453266]
+void MissionKernel::run_post_mission_pass(bool is_authority) {
+	for (int pool = 0; pool <= 2; ++pool) {
+		std::vector<w::EntityHandle> rows;
+		world.registry.for_each_in_pool(pool, [&](const w::Entity &row) {
+			rows.push_back(row.handle);
+		});
+		for (const w::EntityHandle row : rows) world.registry.despawn(row);
+	}
+	if (is_authority) events.run_post_mission_pass(world);
 }
 
 bool MissionKernel::restore_baseline() {
@@ -869,9 +903,11 @@ bool MissionKernel::restore_baseline() {
 	}
 	// Retail's SP restart re-runs Game_StartMission [orig: Game_RestartRoundSP
 	// @0x5263DB -> Game_StartMission @0x524360]. There the player re-init's weapon
-	// switch resets the FOV target to 80 [orig: Player_InitPlayer @0x525BBC ->
-	// Player_SwitchToWeaponByHandle @0x4E19A1 -> Player_ResetCameraAndMovementState
-	// @0x4DE202] BEFORE Environment_SnapStateToTargets @0x525CAE re-seeds it from
+	// switch resets the FOV target to 80 [orig: Game_StartMission's
+	// Player_InitPlayer call @0x525BBC -> Player_InitPlayer's
+	// Player_SwitchToWeaponByHandle call @0x4E19A1 ->
+	// Player_ResetCameraAndMovementState @0x4DE202] BEFORE the
+	// Environment_SnapStateToTargets call @0x525CAE re-seeds it from
 	// the .env default (@0x57D2BB) and the WacScript_InitAndLoad call @0x525CB3 re-applies
 	// the script's fov (WacCmd_Fov @0x4EDEA7), so the post-restart target is the
 	// authored value. The sealed baseline already holds that post-init target:
@@ -1049,6 +1085,14 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	return resolved;
 }
 
+// Without a mounted store there is no model data: the static seat stands.
+bool MissionKernel::resolve_seat_bone(w::World &p_world, const w::Entity &carrier,
+		int bone_index) {
+	if (&p_world != &world || !assets().has_source()) return true;
+	ensure_collision_instance(p_world, carrier.handle);
+	return collision_pose.resolve_seat_bone(p_world, carrier, bone_index);
+}
+
 // --- world::IPoseProvider: muzzles / userpoints (the sim pose) ---------------
 
 bool MissionKernel::resolve_skeletal_anchor(w::World &p_world, w::EntityHandle entity,
@@ -1083,6 +1127,26 @@ bool MissionKernel::resolve_userpoint_frame(w::World &p_world, w::EntityHandle e
 bool MissionKernel::resolve_userpoint_rigid(w::World &p_world, w::EntityHandle entity,
 		int userpoint_index, int32_t out[3]) {
 	return collision_pose.resolve_userpoint_rigid(p_world, entity, userpoint_index, out);
+}
+
+bool MissionKernel::resolve_named_transform(w::World &p_world, w::EntityHandle entity,
+		const char *name, int32_t out[6]) {
+	return collision_pose.resolve_named_transform(p_world, entity, name, out);
+}
+
+int MissionKernel::last_named_userpoint(w::World &p_world, w::EntityHandle entity,
+		const char *name) {
+	return collision_pose.last_named_userpoint(p_world, entity, name);
+}
+
+bool MissionKernel::resolve_userpoint_pivot(w::World &p_world, w::EntityHandle entity,
+		int userpoint_index, int32_t out[3]) {
+	return collision_pose.resolve_userpoint_pivot(p_world, entity, userpoint_index, out);
+}
+
+bool MissionKernel::resolve_section_pivot(w::World &p_world, w::EntityHandle entity,
+		int part, int32_t out[3]) {
+	return collision_pose.resolve_section_pivot(p_world, entity, part, out);
 }
 
 // --- world::IPoseProvider: collision sections --------------------------------

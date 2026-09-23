@@ -86,8 +86,8 @@ inline constexpr uint32_t kShowHudCycled = 0x4;     // restamp the overlay flags
 inline constexpr uint32_t kDotsizeCycled = 0x8;     // the overlay's sight-scale cycle
 inline constexpr uint32_t kObjectivesToggled = 0x10;
 inline constexpr uint32_t kGunBitChanged = 0x20;    // a view action rewrote showhud bit 0
-inline constexpr uint32_t kFirstPersonSelected = 0x40;
-inline constexpr uint32_t kThirdPersonSelected = 0x80;
+inline constexpr uint32_t kFirstPersonSelected = 0x40; // view1st (action 400)
+inline constexpr uint32_t kThirdPersonSelected = 0x80; // viewchase (action 402)
 inline constexpr uint32_t kScoreboardToggled = 0x100;
 inline constexpr uint32_t kMessageLogToggled = 0x200;
 inline constexpr uint32_t kShowScoreToggled = 0x400;
@@ -95,6 +95,8 @@ inline constexpr uint32_t kShowScoreToggled = 0x400;
 // overlay mode beside the windows this state already cleared
 // [orig: g_mapOverlayMode = 0 @0x499395].
 inline constexpr uint32_t kOverlayWindowsCleared = 0x800;
+// viewwithgun (action 401): first person too, but its own input-action bit.
+inline constexpr uint32_t kGunViewSelected = 0x1000;
 } // namespace hud_toggle_event
 
 // One frame's poll: advances every latch, applies the cycles and toggles to
@@ -112,7 +114,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 
 // The friendly-tags cycle 0->1->2->3->0 with its retail toast key (gametext
 // Misc/STRMISC_FRIENDLYTAGS_*) [orig: Input_HandleActionBinding case 30
-// @0x49b573 -> Chat_AddDebugMessage @0x49bc60; the keys @0x49b596 /
+// @0x49b573 -> Chat_AddMessageChannel2 @0x49bc60; the keys @0x49b596 /
 // @0x49b5c1 / @0x49b5d0 / @0x49b5da]. Returns the toast key for the new mode.
 const char *hud_toggles_cycle_friendly_tags(HudToggleState &state);
 const char *friendly_tag_toast_key(FriendlyTagMode mode);

@@ -13,6 +13,9 @@ EntityHandle spawn(World &w, int pool, int id, ItemDeathClass cls) {
     Entity e;
     e.item_id = id;
     e.has_item_def = true;
+    // A def row's ordinal: the ItemTypeIndex the item gates read
+    // [orig: Entity_KillBySlotId @0x42BD29; Entity_ClearHealthInBounds @0x509E89].
+    e.item_type_index = 7;
     e.kind = EntityKind::Item;
     const auto h = w.registry.spawn(pool, e);
     ItemDeathTraits t;
@@ -612,6 +615,24 @@ int test_class_scoring_and_explosion_draws() {
     return 0;
 }
 
+// One entity-update step of an item row's pool: every pool-1 row's own visit
+// (World::update_pool1_slot), or the pool-2/3 cohort walk.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
+//  @0x4C230C]
+static void step_item_pool(World &w, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
+        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            w.update_pool1_slot(*row, ctx);
+}
+
 int main() {
     if (test_destroy_phases_and_ambient() || test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
@@ -630,7 +651,7 @@ int main() {
     const auto p3 = spawn(w, 3, 3, ItemDeathClass::kElevator);
     for (uint32_t t = 0; t <= 128; ++t) {
         w.logic_tick = t;
-        for (int p = 1; p <= 3; ++p) tick_item_event_pool(w, p);
+        for (int p = 1; p <= 3; ++p) step_item_pool(w, p);
         if (t == 0) {
             CHECK(w.registry.get(p1)->class_think_ticks == 61);
             CHECK(w.registry.get(p2)->class_think_ticks == 62);
@@ -650,7 +671,7 @@ int main() {
     CHECK((w.registry.get(barrel)->engine_flags & kEntityFlagHusk) == 0);
     for (uint32_t t = 0; t <= 10; ++t) {
         w.logic_tick = t;
-        tick_item_event_pool(w, 1);
+        step_item_pool(w, 1);
         if (t < 10) CHECK(w.registry.get(barrel) != nullptr);
     }
     CHECK(w.registry.get(barrel) == nullptr);
@@ -669,6 +690,7 @@ int main() {
     victim.position = {2, 2, 1};
     const auto unnumbered = w.registry.spawn(0, victim); // +0x1C ItemTypeIndex zero: skipped
     victim.item_id = 9;
+    victim.item_type_index = 9;
     const auto person = w.registry.spawn(0, victim);
     victim.damage_state = 1;
     const auto protected_person = w.registry.spawn(0, victim);

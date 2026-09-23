@@ -49,8 +49,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 
     // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
     // state's table bit 0 is set, moving, sliding, displaced > 200, airborne
-    // (Flags 0x2000), or every 64th tick; otherwise counter 0..10 full, 11..20
-    // skip (revert the caller's gravity integration + zero vel_z).]
+    // (Flags 0x2000), or every 64th entity update; otherwise counter 0..10
+    // full, 11..20 skip (revert the caller's gravity integration + zero vel_z).]
     bool full_update = false;
     if ((anim_state_flags & 1u) != 0) full_update = true; // [orig: @ 0x4b2c1e]
     if (vel_xy[0] != 0 || vel_xy[1] != 0) full_update = true;
@@ -63,7 +63,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         full_update = true; // [orig: @ 0x4b2ca6]
     // The replica row's flags mirror serves the same discriminant.
     if (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagInAir) != 0) full_update = true;
-    if ((tick & 0x3Fu) == 0) full_update = true;
+    // The cadence reads the entity-update counter, not the tick.
+    // [orig: Entity_MovementCollisionResolver @0x4B2CAF]
+    if ((world.entity_update_counter & 0x3Fu) == 0) full_update = true;
     if (!full_update) {
         if (state.skip_counter <= 10) {
             ++state.skip_counter;
@@ -632,6 +634,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 d.victim_handle = source.packed;
                 d.killer_handle = p->primary_occupant.valid()
                         ? p->primary_occupant.packed : 0xFFFFu;
+                d.event_flags = ent->cause_flags & 0xF00u;
+                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the
+                // Score_ProcessKillEvent call @0x4B39E2)]
+                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
             // The bump sound follows on every peer, killed or not: the

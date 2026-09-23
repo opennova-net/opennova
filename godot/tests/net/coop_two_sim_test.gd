@@ -527,6 +527,53 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 			"the joiner consumed the host's S2C 0x76 class policy over real UDP")
 
 
+func test_joiner_receives_the_host_hud_relays_over_real_udp() -> void:
+	# BMS ShowWinSubgoal and SubGoalLost on the host: the authority relays S2C
+	# 0x3F kind 0 (the objective notification, re-run by the joiner's fold as
+	# the "objective" presentation effect) and kind 1 (the announcement's
+	# mission-text key, posted through "mission_text_chat"). The joiner never
+	# evaluates the mission events itself, so both effects can only come from
+	# the relay. A repeating event re-runs both every processing pass so one
+	# relay lands after the join.
+	var mission := _two_organics()
+	assert_gte(mission.add_event(1, 1, 0), 0)
+	assert_true(mission.add_event_action(0, 35, 0, 2, 1)) # ShowWinSubgoal slot 2, shown
+	assert_true(mission.add_event_action(0, 15, 0, 3)) # SubGoalLost slot 3
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "ObjectiveJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	var objective := false
+	var chat_key := ""
+	for _i in range(400):
+		host.step()
+		joiner.step()
+		for e in joiner.drain_effects():
+			var effect := e as MissionEffect
+			if effect == null:
+				continue
+			if effect.kind == "objective" and effect.a == 2 and effect.b == 1:
+				objective = true
+			elif effect.kind == "mission_text_chat":
+				chat_key = effect.text
+		if objective and not chat_key.is_empty():
+			break
+		OS.delay_msec(2)
+	assert_true(objective, "the joiner re-ran the host objective notification from S2C 0x3F")
+	assert_true(chat_key.begins_with("STRLOSEMSG"),
+			"the joiner received the SubGoalLost key from S2C 0x3F kind 1")
+
+
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()
@@ -1653,12 +1700,20 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				joiner_snapshot[joiner_base + Simulation.PF_ROLL_DEG],
 				host_snapshot[host_base + Simulation.PF_ROLL_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle roll")
+	# The physics family is the item's def trait, so it is read from the
+	# placed row's own card. A placed item owns an AI brain only when its row
+	# carries the AI-class attrib AND a brain-class ai_function at spawn
+	# (Entity_SpawnFromBMSRecord's AIData test, then the class init), and
+	# this fixture resolves its items after the load, so the buggy is not an
+	# AI-pool row.
 	var family := -1
-	for ai_index in range(host.get_entity_count()):
-		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
-		if card.get_item_id() == 1291:
-			family = card.get_vehicle_family()
-			break
+	if not host_record.is_empty():
+		var host_rows: PackedFloat32Array = host_record["snapshot"]
+		var buggy_card: EntityCard = host.entity_card(
+				int(host_rows[int(host_record["base"]) + Simulation.PF_WIRE_HANDLE]))
+		if buggy_card != null:
+			assert_eq(buggy_card.get_item_id(), 1291, "the presented row is the placed buggy")
+			family = buggy_card.get_vehicle_family()
 	assert_eq(family, 0,
 			"the ai_function chel / move_function cveh Dune Buggy uses Ground physics")
 
@@ -2728,19 +2783,21 @@ func _present_pose_for_type(sim: Simulation, type_id: int) -> Dictionary:
 
 
 func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
-	# The 00TRg Rebel Base report: AI organics mounted on .50 cals via the BMS
-	# AttachToEmplaced action (case 0x25 -> mount_best) look seated on the host
-	# but SPIN, face the wrong way and FLOAT on a joiner. This drives that exact
-	# path — the host runs the real event runtime; the joiner is retail-faithful
-	# (world from the wire, no local .bms body) — and pins the joiner's presented
-	# gunner row to the host's, frame over frame.
+	# The 00TRg Rebel Base report: AI organics mounted on .50 cals look seated
+	# on the host but SPIN, face the wrong way and FLOAT on a joiner. The host
+	# seats its gunner through the real event runtime (a board order, then the
+	# BMS AttachToEmplaced action, which boards the vehicle the gunner's AI
+	# slot names); the joiner is retail-faithful (world from the wire, no local
+	# .bms body). The test pins the joiner's presented gunner row to the host's,
+	# frame over frame.
 	var root := _native_asset_root()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
 	# would hide any carrier-frame recomposition error on the joiner.
-	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 101419,
-			Vector3(2, 12, 0), Vector3(0, 0, 135)))
+	var gun := mission.add_entity(MissionData.KIND_ITEM, 101419,
+			Vector3(2, 12, 0), Vector3(0, 0, 135))
+	assert_not_null(gun)
 	var gunner := mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(2, 11, 0), Vector3.ZERO)
 	assert_not_null(gunner)
@@ -2751,10 +2808,16 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			Vector3(20, 0, 0), Vector3.ZERO))
 	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(24, 0, 0), Vector3.ZERO))
-	# The unconditional attach event — the same mechanism 00TRg uses to seat its
-	# rebel gunners at mission start.
+	# AttachToEmplaced (action 37) carries only the occupant; it boards the
+	# vehicle the occupant's AI slot already names. Event 0 arms that slot with
+	# the board order (RedirectSingleTo, action 19: command 125, target = the
+	# gun), and the repeating event 1 retries the attach every processing pass
+	# until the board think has cached the gun.
 	assert_gte(mission.add_event(0, 0, 0), 0)
 	assert_true(mission.add_event_action(0,
+			19, 0, gunner_ssn, 125, gun.bms_id))
+	assert_gte(mission.add_event(1, 1, 0), 0)
+	assert_true(mission.add_event_action(1,
 			37, 0, gunner_ssn))
 
 	var fixture_def_root := ResourceRoot.new()

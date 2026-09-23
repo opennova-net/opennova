@@ -459,7 +459,6 @@ void test_attached_turret_slews_once_per_world_tick() {
         }
         const int32_t look = bam_sub(kGunHeading, 30 * kBamPerDegree);
         r.look(look, 0);
-        r.w.add_system(&r.w.ai);
         r.w.run_logic_tick(true);
         CHECK(r.gun().emplaced_gun_yaw_word == 0x93);
         CHECK(r.body->heading == look);
@@ -510,7 +509,7 @@ void test_barrel_spin_tail_and_class_gate() {
     CHECK(r.gun().emplaced_spin_phase == 57992); // holds final angle
 }
 
-// The class tail consumes kick before the global weapon pump decays it again.
+// The class tail consumes kick before the frame's weapon walk decays it again.
 // A reversed order loses this spin step; a second entity update doubles it.
 void test_barrel_spin_once_before_weapon_pump() {
     Rig r(true, true);
@@ -521,8 +520,8 @@ void test_barrel_spin_once_before_weapon_pump() {
     r.gun().emplaced_update = true;
     r.gun().primary_weapon_slot_adm = 0;
     r.gun().primary_weapon_slot.kick = 2;
-    r.w.add_system(&r.w.ai);
     r.w.run_logic_tick(true);
+    r.w.pump_weapon_actions();
     CHECK(r.gun().primary_weapon_slot.kick == 0);
     CHECK(r.gun().emplaced_spin_ticks == 59);
     CHECK(r.gun().emplaced_spin_phase == 1888);
@@ -530,6 +529,7 @@ void test_barrel_spin_once_before_weapon_pump() {
     CHECK(emplaced_weapon_controls_for(r.w, r.gun(), controls));
     CHECK(controls.spin == 1888);
     r.w.run_logic_tick(true);
+    r.w.pump_weapon_actions();
     CHECK(r.gun().emplaced_spin_ticks == 58);
     CHECK(r.gun().emplaced_spin_phase == 3744);
 }
@@ -621,7 +621,6 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     pr.r.gun().emplacement_parent_spawn_id =
             pr.r.w.registry.get(pr.parent_h)->registry_spawn_id;
     pr.r.w.registry.get(pr.parent_h)->spawn_phase = 1000;
-    pr.r.w.add_system(&pr.r.w.ai);
     pr.r.w.run_logic_tick(true);
     CHECK(pr.r.w.registry.get(pr.r.gun_h) != nullptr);
     if (pr.r.w.registry.get(pr.r.gun_h) == nullptr) return;

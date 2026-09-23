@@ -516,6 +516,23 @@ void player_view_resolve_mode(PlayerViewState &v);
 //  @ 0x49c0ea / @ 0x49c100]
 void player_view_set_third_person_selected(PlayerViewState &v, bool selected);
 
+// The three view-action ids the binding table's view rows fire.
+inline constexpr int kViewActionFirstPerson = 400; // view1st, F2
+inline constexpr int kViewActionWithGun = 401;     // viewwithgun, F3
+inline constexpr int kViewActionChase = 402;       // viewchase, F4
+
+// A view-action row fired: its chase preference (as above) and its own BMS
+// input-action bit ORed into `input_action_bits`, the live word the cat-7
+// player triggers read (view1st -> PlayerFirstPerson 0x4000000, viewwithgun
+// -> PlayerCockpitView 0x10000000, viewchase -> PlayerThirdPerson
+// 0x8000000). Pass nullptr off the authority, which never evaluates the
+// .bms. Any other action changes nothing: the 412 cycle and the 405-410
+// orbit/zoom cases have no binding-table row, so no key reaches them.
+// [orig: Input_HandleActionBinding case 400 @0x49c073 (the bit @0x49c07a),
+//  case 401 @0x49c0d9 (the bit @0x49c0e0), case 402 @0x49c0f6]
+void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
+                                   int action);
+
 // One 62.5 Hz tick: resolve the camera mode, step the six-lane scope-camera
 // interp toward its target and promote the settled byte on the tick its
 // active latch drops [orig: Player_UpdatePerFrame -- the step runs only

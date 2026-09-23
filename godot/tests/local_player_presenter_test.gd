@@ -106,12 +106,14 @@ func _stage_root() -> String:
 			root_dir.path_join("weapon.def")), OK)
 	# The player's third-person avatar: items.def person row 105310 (the placer's
 	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.
-	var items := FileAccess.open(root_dir.path_join("items.def"), FileAccess.READ_WRITE)
+	# The minimal pack already authors a 105310 row (graphic US01), and a type
+	# id resolves to its FIRST row (retail's ItemList_FindIndexByTypeId stops
+	# at the first match), so the staged row leads the file.
+	var items_path := root_dir.path_join("items.def")
+	var base_items := FileAccess.get_file_as_string(items_path)
+	var items := FileAccess.open(items_path, FileAccess.WRITE)
 	assert_not_null(items, "staged items.def is writable")
-	items.seek_end()
-	items.store_string("""
-
-begin "Player Character"
+	items.store_string("""begin "Player Character"
   id 105310
   type person
   graphic person
@@ -119,7 +121,8 @@ begin "Player Character"
   anim_def soldier
   hp 100
 end
-""")
+
+""" + base_items)
 	items.close()
 	# The player's character registry: retail's ONLY first-person arms source is
 	# the selected combo's arms part (weapon.def gfx1a is a discarded token), so

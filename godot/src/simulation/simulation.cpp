@@ -153,16 +153,21 @@ void Simulation::reset_world() {
 	// the declared half of the script's mission-variable bank (the retail bank is process-global and
 	// no load path zeroes the compiler-declared slots, so a restart or the
 	// next mission reads slot n at the previous run's value; V# and G# start
-	// at zero per load, ScriptVarStore::carry_declared_from).
+	// at zero per load, ScriptVarStore::carry_declared_from), and the
+	// entity-update counter (process-global and never reset: the next
+	// mission's staggers continue its phase [orig: g_entity_update_counter, whose one
+	// writer is Entity_UpdateAllEntities @0x4C2639]).
 	std::vector<opennova::mission::ItemSeatSpec> kept_seat_specs;
 	std::unordered_map<int32_t, std::string> kept_mounted_graphics;
 	opennova::world::PlayerLookSettings kept_look_settings;
 	opennova::world::ScriptVarStore kept_script_vars;
+	uint32_t kept_entity_update_counter = 0;
 	if (kernel_ != nullptr) {
 		kept_seat_specs = std::move(kernel_->seat_specs);
 		kept_mounted_graphics = std::move(kernel_->mounted_graphics);
 		kept_look_settings = kernel_->local.look_settings;
 		kept_script_vars = kernel_->world.script.vars;
+		kept_entity_update_counter = kernel_->world.entity_update_counter;
 	}
 	auto next_kernel = std::make_unique<opennova::mission::MissionKernel>();
 	if (kernel_ != nullptr)
@@ -173,6 +178,7 @@ void Simulation::reset_world() {
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
 	kernel_->local.look_settings = kept_look_settings;
 	kernel_->world.script.vars.carry_declared_from(kept_script_vars);
+	kernel_->world.entity_update_counter = kept_entity_update_counter;
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);

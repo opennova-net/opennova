@@ -11,42 +11,49 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 	Entity *entity = world.registry.get(ai.handle);
 	if (entity == nullptr)
 		return INT32_MIN;
-	int32_t offset = entity->veh.air_probe_z_off;
-	if (entity->health <= 0 || ((entity->flags | entity->engine_flags) & 2) != 0)
-		if (const auto *t = world.tables.item_death_traits.get(entity->item_id))
-			if (t->husk_model_loaded)
-				offset = to_fixed(std::abs(t->husk_rest_min_z));
+	const int32_t offset = brain_ground_offset(world, *entity);
 	int32_t pos[3] = { to_fixed(entity->position.x), to_fixed(entity->position.y),
 		to_fixed(entity->position.z) };
 	int32_t ground = INT32_MIN;
 	if (collision != nullptr && collision->instance_count() != 0) {
-		const auto tap = [&](int32_t x, int32_t y) {
+		// Two ray kinds share the probe: the AndObject kind also stores its hit
+		// entity, null on a miss, as the hull's ground link. The east and centre
+		// taps are that kind, so every sample leaves the centre hit as the link
+		// the carrier follow and the brake's carrier exclusion read.
+		// [orig: Entity_RaycastGroundHeight @0x4142C0 north/south/west @0x45725D/
+		//  @0x457281/@0x4572C1; Entity_RaycastGroundHeightAndObject @0x414320
+		//  (`mov [esi+28h],eax` @0x414370) east @0x4572A1, centre @0x4572E0]
+		const auto tap = [&](int32_t x, int32_t y, EntityHandle *link) {
 			return collision->raycast_ground(
-					world, entity->handle, pos, x, y, 65536, 3145728, nullptr);
+					world, entity->handle, pos, x, y, 65536, 3145728, link);
 		};
 		if (radius == 0) {
 			// A zero radius is one centre ray, not five coincident taps: the
 			// weighted average would otherwise return 6c/10 for negative ground.
 			// [orig: the sampleRadius == 0 arm @0x457254 -> single
 			// Entity_RaycastGroundHeightAndObject(0,0,0x10000,3145728) @0x45735d]
-			ground = tap(0, 0);
+			ground = tap(0, 0, &entity->ground_target);
 		} else {
-			const int32_t n = tap(0, radius), s = tap(0, -radius), e = tap(radius, 0),
-						  w = tap(-radius, 0), c = tap(0, 0);
+			const int32_t n = tap(0, radius, nullptr), s = tap(0, -radius, nullptr),
+						  e = tap(radius, 0, &entity->ground_target),
+						  w = tap(-radius, 0, nullptr), c = tap(0, 0, &entity->ground_target);
 			const int32_t top = std::max({ 0, n, s, e, w, c });
 			int32_t sum = io::bam_add(io::bam_add(n, s), io::bam_add(e, w));
 			sum = io::bam_add(sum, io::bam_dbl(io::bam_add(c, io::bam_dbl(top))));
 			ground = std::max(c, sum / 10);
 		}
-	} else if (world.tables.terrain != nullptr)
+	} else if (world.tables.terrain != nullptr) {
 		ground = calc_average_ground_height(*world.tables.terrain, pos, radius, GroundClearance{});
+		// Terrain alone under the taps: the AndObject rays store a null link.
+		entity->ground_target = {};
+	}
 	if (entity->primary_occupant.valid())
 		ground = std::max(ground, world.env.water_z);
 	return ground == INT32_MIN ? ground : io::bam_add(ground, offset);
 }
 
 // [orig: AI_UpdateMovementTarget @0x460E40]
-int AiSystem::update_aircraft_waypoint_movement(AiEntity &e, World &world) {
+int AiSystem::update_movement_target(AiEntity &e, World &world) {
 	auto &b = e.brain;
 	const bool patrol = b.f[AiBrain::kCurState] == 7;
 	int32_t speed = b.f[patrol ? AiBrain::kSpeedB : AiBrain::kSpeedA];
@@ -87,7 +94,9 @@ int AiSystem::update_aircraft_waypoint_movement(AiEntity &e, World &world) {
 			speed >>= 1;
 	}
 	const int kind = b.f[AiBrain::kWpType];
-	const NavEntry *node = kind == 1 ? nav.entry(b.f[AiBrain::kWpResolved]) : nullptr;
+	// The resolved node is read through unchecked, like the refresh that set it
+	// [orig: the brain+0x40 node-pointer loads @0x460F99 (X/Y) and @0x460FE5 (Z)].
+	const NavEntry *node = kind == 1 ? &nav.slot(b.f[AiBrain::kWpResolved]) : nullptr;
 	if (node != nullptr) {
 		b.f[AiBrain::kWorkPosX] = node->f[1];
 		b.f[AiBrain::kWorkPosY] = node->f[2];
@@ -161,7 +170,7 @@ void AiSystem::enter_aircraft_combat(AiEntity &ai, World &world) {
 	b.f[AiBrain::kStep] = 1;
 }
 
-// [orig: AI_TransitionToDeath_Infantry @0x465F60 (aircraft evade enter)]
+// [orig: AI_EnterState_HelicopterEvade @0x465F60 (aircraft evade enter)]
 void AiSystem::enter_aircraft_evade(AiEntity &ai, World &world) {
 	combat_alert(*this, ai, world);
 	auto &b = ai.brain;
@@ -266,7 +275,9 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 			target = target_entity(world, b.f[AiBrain::kDamageInfo]);
 			if (target == nullptr) {
 				AiTarget found{};
-				if (acquire_target(world, ai, found))
+				// Variant A [orig: AI_ProcessPatrolStep @0x466C20 (the AI_FindBestTarget
+				//  call @0x466CC9); AI_ProcessMovementStep @0x466DB0 (the call @0x466E86)]
+				if (acquire_target(world, ai, found, /*variant_a=*/true))
 					target = world.registry.get(found.handle);
 			}
 			if (target != nullptr)
@@ -434,7 +445,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 				}
 				// Only the combat-timer reset is gated on the fire point; the
 				// lateral-cyclic word is written on every within-max_chase tick.
-				// [orig: AI_GetSuspensionFirePoint @0x4616b1 -> [40] = 0 @0x4616bd;
+				// [orig: AI_IsTargetInSight @0x4616b1 -> [40] = 0 @0x4616bd;
 				//  LABEL_35 [127] = [45] << 14 @0x4616c7, reached from both arms]
 				if (fire_check && aircraft_target_in_sight(ai, world))
 					b.f[AiBrain::kCombatTimer] = 0;
@@ -475,7 +486,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	b.f[138] = p.field220;
 	return 0;
 }
-// [orig: AI_GetSuspensionFirePoint @0x456860 (weapon visibility check)]
+// [orig: AI_IsTargetInSight @0x456860 (weapon visibility check)]
 bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 	auto &b = ai.brain;
 	const Entity *target = target_entity(world, b.f[AiBrain::kTargetSlot]);
@@ -498,7 +509,7 @@ bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 // Aircraft combat has distinct stationary, locked-burst, continuation and
 // processed-tick fire legs. In particular only primary shots set the fire bit,
 // and a locked burst reuses all six saved relative pose components.
-// [orig: Entity_ProcessInfantryWeaponFire @0x471710 (IDB name; the aircraft/vehicle
+// [orig: AI_TickState_AircraftCombat @0x471710 (IDB name; the aircraft/vehicle
 //  brain's combat-state fire leg, off_81523C[8]); the health<=0 head @0x471748..
 //  0x472ded is h_aircraft_combat_tick's queue_aircraft_death]
 void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
@@ -526,7 +537,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	const auto clear_bone = [&]() { b.bytes()[AiBrain::kBoneFlagByte] = 0; };
 	const auto follow = [&]() {
 		if ((p.flags100 & 1) != 0)
-			update_aircraft_waypoint_movement(ai, world);
+			update_movement_target(ai, world);
 	};
 	const auto weapon = [&](int which) -> const AiProfile::WeaponFire & {
 		return which == 1 ? p.fire_a : p.fire_b;
@@ -544,6 +555,15 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	const auto ready = [&](int which) {
 		return weapon(which).ammo_index >= 0 && ammo(which) != 0 &&
 				cooldown(which) >= uint32_t(interval(which));
+	};
+	// Every ready block first writes its ammo byte into the hull's AdmDef byte
+	// (+0x2B0), fired or not; a rider's mounted request copies it.
+	// [orig: primary @0x47182B..0x471837, secondary @0x4718B2..0x4718BE; the
+	//  locked burst @0x471A60 / @0x471B26, the continuation @0x471E1D /
+	//  @0x4720BA, the processed legs @0x4724AF / @0x472599]
+	const auto stamp = [&](int which) {
+		if (Entity *hull = world.registry.get(ai.handle))
+			hull->equipped_adm_index = weapon(which).ammo_byte();
 	};
 	const auto shoot = [&](int which, const int32_t out[6]) {
 		if (ammo(which) > 0)
@@ -596,9 +616,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 				bool fired = false;
 				for (int which = 1; which <= 2 && !fired; ++which) {
 					int32_t out[6];
-					if (ready(which) &&
-							solve_weapon_fire_transform(
-									world, ai, target, weapon(which), 0, false, out)) {
+					if (!ready(which))
+						continue;
+					stamp(which);
+					if (solve_weapon_fire_transform(
+								world, ai, target, weapon(which), 0, false, out)) {
 						shoot(which, out);
 						b.f[AiBrain::kLastWeapon] = which;
 						fired = true;
@@ -626,6 +648,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			clear_bone();
 		else if (ammo(which) != 0) {
 			if (ready(which)) {
+				stamp(which);
 				const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
 				int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
 				for (int axis = 0; axis < 6; ++axis)
@@ -663,7 +686,9 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		else {
 			aircraft_movement(ai, world);
 			AiTarget found{};
-			if (acquire_target(world, ai, found)) {
+			// [orig: AI_TickState_AircraftCombat @0x471710 (the AI_FindBestTarget
+			//  call @0x472B45)]
+			if (acquire_target(world, ai, found, /*variant_a=*/true)) {
 				const Entity *self = world.registry.get(ai.handle),
 							 *other = world.registry.get(found.handle);
 				if (self != nullptr && other != nullptr)
@@ -692,6 +717,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		if (which == 1 || which == 2) {
 			if (!ready(which))
 				return;
+			stamp(which);
 			int32_t out[6];
 			if (!solve_weapon_fire_transform(
 						world, ai, target, weapon(which), aim_offset(), true, out)) {
@@ -726,16 +752,25 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		follow();
 		return;
 	}
+	// Every rescan feeds its result to Entity_SetAITarget, so a scan that finds
+	// nothing clears brain[38]; the bearing keeps the old pointer while the
+	// solves below read brain[38] [orig: AIEntity_TryAcquireTarget @0x4716B0
+	// (`call Entity_SetAITarget` @0x4716F0); caller `test eax,eax; jz`
+	// @0x472351..0x472355].
+	const Entity *tracked = target;
 	if (b.f[AiBrain::kRetargetTimer] > 248) {
 		b.f[AiBrain::kRetargetTimer] = 0;
 		AiTarget fresh{};
-		if (acquire_target(world, ai, fresh))
-			ai_set_target(world, ai, fresh.handle);
+		// A type-1 profile searches with variant A [orig: AIEntity_TryAcquireTarget
+		// `cmp dword ptr [eax+10h],1` @0x4716D5 (the AI_FindBestTarget call @0x4716DD)].
+		ai_set_target(world, ai,
+				acquire_target(world, ai, fresh, ai.profile.type == 1) ? fresh.handle
+				                                                       : EntityHandle{});
 		target = target_entity(world, b.f[AiBrain::kTargetSlot]);
-		if (target == nullptr)
-			return;
+		if (target != nullptr)
+			tracked = target;
 	}
-	const int32_t bearing = target_heading(ai, *target);
+	const int32_t bearing = target_heading(ai, *tracked);
 	if ((p.flags100 & 1) != 0)
 		follow();
 	else if ((p.flags100 & 4) != 0 || b.f[AiBrain::kNoTargetIdle] != 0)
@@ -756,9 +791,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		return;
 	for (int which = 1; which <= 2; ++which) {
 		int32_t out[6];
-		if (!ready(which) ||
-				!solve_weapon_fire_transform(
-						world, ai, target, weapon(which), aim_offset(), false, out))
+		if (!ready(which))
+			continue;
+		stamp(which);
+		if (!solve_weapon_fire_transform(
+					world, ai, target, weapon(which), aim_offset(), false, out))
 			continue;
 		save_delta(which, out);
 		if (b.f[AiBrain::kAccuracy] != 4)

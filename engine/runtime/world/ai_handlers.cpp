@@ -23,11 +23,17 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags) {
     int angle_score;
-    if (angle_diff >= ((primary_fov | 2) >> 1) || distance > primary_max ||
-        distance > cand_primary_max) {
-        if (angle_diff >= ((secondary_fov | 2) >> 1) || distance > secondary_max ||
-            distance > cand_secondary_max)
-            return -1; // [orig: goto LABEL_17 skip] outside both FOV/range gates. -1 (not 0) so the
+    // The arc tests compare unsigned against the arithmetic half-arc, so a
+    // sign-extended (variant A) arc byte of 0x80 or more admits every bearing
+    // while the unsigned divide below scores it 0 [orig: `or edx,2; sar edx,1;
+    // cmp esi,edx; jnb` @0x467226..0x467230 / @0x46725A..0x467261; variant A
+    // @0x465D16..0x465D20].
+    if (static_cast<uint32_t>(angle_diff) >= static_cast<uint32_t>((primary_fov | 2) >> 1) ||
+        distance > primary_max || distance > cand_primary_max) {
+        if (static_cast<uint32_t>(angle_diff) >=
+                    static_cast<uint32_t>((secondary_fov | 2) >> 1) ||
+            distance > secondary_max || distance > cand_secondary_max)
+            return -1; // [orig: `jnb loc_467097` @0x467261] outside both FOV/range gates. -1 (not 0) so the
                        // caller distinguishes a gate-fail from a legitimate in-gate score of 0 (a
                        // fully-stealthed target), which matters for the priority-bypass ordering.
         angle_score = static_cast<int>((static_cast<uint32_t>(secondary_fov - angle_diff) << 16) /
@@ -80,19 +86,12 @@ const char *ai_state_name(int32_t state) {
 }
 
 // ----------------------------------------------------------------------------
-// Handlers. Trivial ones are byte-exact ports; complex per-state behaviors route
-// to h_not_yet_ported (a visible coverage stub) pending their port phase.
+// Handlers: every row of the retail state table @0x815238 is ported, the empty
+// cells as the shared nullsubs.
 // ----------------------------------------------------------------------------
 namespace {
 
 void h_noop(AiThinkCtx &) {} // [orig: nullsub_69/70/71]
-
-void h_not_yet_ported(AiThinkCtx &ctx) {
-    ++ctx.sys->unported_calls;
-    if (ctx.world != nullptr)
-        ctx.world->diagnostics.record({RuntimeGapKind::AiStateHandler,
-                ctx.self->brain.f[AiBrain::kCurState], 0, -1, int32_t(ctx.self->handle.packed)}, ctx.world->logic_tick);
-}
 
 // [orig: AI_SetStateIdle @0x457f00] brain+28 (=f[7] move step) = 16.
 void h_set_state_idle(AiThinkCtx &ctx) { ctx.self->brain.f[AiBrain::kStep] = 16; }
@@ -163,8 +162,8 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
 
-    if (e.health <= 0) { // [orig: *(int16*)(entity+286) <= 0]
-        ctx.sys->queue_death_event(e);
+    if (hull_health(ctx.world, e) <= 0) { // [orig: `cmp [edi+11Eh],bp` @0x467747]
+        ctx.sys->queue_death_event(ctx.world, e);
         return;
     }
 
@@ -198,8 +197,8 @@ void h_patrol_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
 
-    if (e.health <= 0) { // [orig: *(int16*)(entity+286) <= 0]
-        ctx.sys->queue_death_event(e);
+    if (hull_health(ctx.world, e) <= 0) { // [orig: `cmp [edi+11Eh],bx` @0x457D87]
+        ctx.sys->queue_death_event(ctx.world, e);
         return;
     }
 
@@ -262,33 +261,17 @@ void h_combat_event(AiThinkCtx &ctx) {
     }
 }
 
-// [orig: AI_EnterState_GroundCombat @0x467650] state-17 enter: AiSlot+136 = 2, brain
-// alert cur/pend = 2, TriggerGroup_SetAlertRed(commandGroup) [orig: @0x40d630], ally
-// wake at 100 u (0x640000), brain moveStep = 1. (world-wac-ai-re §16.1)
-void h_enter_ground_combat(AiThinkCtx &ctx) {
-    AiEntity &e = *ctx.self;
-    AiBrain &b = e.brain;
-    b.f[AiBrain::kAlert] = 2;
-    b.f[AiBrain::kPrevAlert] = 2;
-    if (ctx.world != nullptr) {
-        if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
-        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
-    }
-    b.f[AiBrain::kStep] = 1;
-}
-
-// [orig: AI_EnterState_GroundEvade @0x467400] state-18 enter: the same alert block, then
-// route by the profile's EVADE_FLAGS (profile+96, aip.h token names; `test al,1`
-// @0x467452, `test al,4` @0x467488): FOLLOW_WP (0x1) -> pending 17 when brain[38] holds
-// a target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
-// after enter, so the re-route commits — the witnessed off_815238[4*state] tail call);
-// FLEE (0x4) -> 17; else alive -> the flee waypoint (controller triple
-// {1, 0x7FFFFFFF, 1}, freeze work transform, moveStep 16); dead -> death event 3|4.
-void h_enter_ground_evade(AiThinkCtx &ctx) {
-    AiEntity &e = *ctx.self;
+// The alert block the combat, evade and death-family enters share: the entity's own
+// AiSlot alert byte (+0x88) goes red first and unconditionally, then the brain alert
+// cur/prev = 2, the command group goes red and same-team allies within 100 u wake
+// (the ally wake re-writes the own slot byte per ally, which changes nothing).
+// [orig: the slot byte at the head of AI_EnterState_GroundCombat @0x467665,
+//  AI_EnterState_GroundEvade @0x46741F, AI_TransitionToDeath_Vehicle @0x46696E,
+//  Entity_ProcessVehicleDestruction @0x466B4C, AI_TransitionToDeath_GroundVehicle
+//  @0x467BD8 and AI_TransitionToDestroyed_Vehicle @0x467DF1; each then calls
+//  TriggerGroup_SetAlertRed @0x40d630 and Entity_AlertNearbyAllies @0x4654B0]
+void alert_block(AiThinkCtx &ctx, AiEntity &e) {
+    e.slot.bytes()[AiSlot::kAlertByte] = 2;
     AiBrain &b = e.brain;
     b.f[AiBrain::kAlert] = 2;
     b.f[AiBrain::kPrevAlert] = 2;
@@ -296,9 +279,28 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
         if (const Entity *se = ctx.world->registry.get(e.handle))
             ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
     }
+}
+
+// [orig: AI_EnterState_GroundCombat @0x467650] state-17 enter: the alert block, then
+// brain moveStep = 1. (world-wac-ai-re §16.1)
+void h_enter_ground_combat(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    alert_block(ctx, e);
+    e.brain.f[AiBrain::kStep] = 1;
+}
+
+// [orig: AI_EnterState_GroundEvade @0x467400] state-18 enter: the same alert block, then
+// route by the profile's EVADE_FLAGS (profile+96, aip.h token names; `test al,1`
+// @0x467452, `test al,4` @0x467488): FOLLOW_WP (0x1) -> pending 17 when brain[38] holds
+// a target else 16, TAIL-CALLING that state's enter (apply_transition re-reads kPendState
+// after enter, so the re-route commits — the witnessed off_815238[4*state] tail call);
+// FLEE (0x4) -> 17; else alive -> flee: turn about at combat speed (controller triple
+// {1, 0x7FFFFFFF, 1}, moveStep 16); dead -> death event 3|4.
+void h_enter_ground_evade(AiThinkCtx &ctx) {
+    AiEntity &e = *ctx.self;
+    AiBrain &b = e.brain;
+    alert_block(ctx, e);
     if ((e.profile.flags96 & 1) != 0) {        // EVADE_FLAGS FOLLOW_WP
         const int32_t next = (b.f[AiBrain::kTargetSlot] != 0) ? kAiGroundCombat
                                                               : kAiGroundFollowWp;
@@ -311,180 +313,310 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
         ctx.sys->row(kAiGroundCombat).enter(ctx);
         return;
     }
-    if (e.health > 0) {                        // neither flag, alive: flee waypoint
-        e.patrol_f0 = 1;                       // [orig: controller triple {1, 0x7FFFFFFF, 1}]
+    if (hull_health(ctx.world, e) > 0) {       // neither flag, alive: flee [orig: @0x4674A5]
+        // Turn about and drive at combat speed: the controller triple, the working
+        // heading = entity heading + controller[1], working pitch/roll zeroed, the
+        // mover output at brain[49], step 16; the working position is not written.
+        // [orig: AI_EnterState_GroundEvade @0x46756D..0x4675B1]
+        e.patrol_f0 = 1;
         e.patrol_delta = 0x7FFFFFFF;
         e.patrol_goal = 1;
-        b.f[AiBrain::kWorkPosX] = e.pos[0];    // freeze the work transform at self
-        b.f[AiBrain::kWorkPosY] = e.pos[1];
-        b.f[AiBrain::kWorkPosZ] = e.pos[2];
-        b.f[AiBrain::kWorkHeading] = e.heading;
+        b.f[AiBrain::kWorkHeading] = io::bam_add(e.patrol_delta, e.heading);
+        b.f[AiBrain::kWorkPitch] = 0;
+        b.f[AiBrain::kWorkRoll] = 0;
+        b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
         b.f[AiBrain::kStep] = 16;
         return;
     }
-    ctx.sys->queue_death_event(e);             // dead: crash(3)/still(4) by |vel|
+    ctx.sys->queue_death_event(ctx.world, e);  // dead: crash(3)/still(4) by |vel|
 }
 
-// The per-site aim offset retail passes to the solver through the `distance`
-// global [orig: @0x473367..0x47337E, repeated at every mobile/continuation
-// site — ATEAM (0x20) rides the sweep phase, ATEAM_LOCK (0x40) a fixed -3.0u,
-// else 0].
+// The aim offset every mobile and continuation solve hands the solver through
+// the `distance` global: the sweep phase under ATEAM (0x20), a fixed -3.0u
+// under ATEAM_LOCK (0x40), else 0 [orig: AIEntity_ProcessWeaponFire
+// @0x473364..0x473380, repeated ahead of each mobile/continuation solve].
 static int32_t sm_aim_offset(const AiEntity &e) {
     if ((e.profile.flags100 & 0x20) != 0) return e.brain.f[AiBrain::kSweepPhase];
     if ((e.profile.flags100 & 0x40) != 0) return static_cast<int32_t>(0xFFFD0000u);
     return 0;
 }
 
-// One SM weapon chain — the per-weapon block repeated at the eight
-// AIEntity_ProcessWeaponFire solver sites [orig: stationary @0x472F6E/0x472FF8,
-// mobile @0x4733A4/0x473488/0x4735C9/0x47386B, continuation @0x473D57/0x473E44]:
-// ammo + cooldown gate, solve, the two-draw scatter (mobile/continuation only),
-// fire through the authoritative round path, then ammo--/cooldown-reset/
-// last-weapon/bone-flag bookkeeping (§17.6).
-static bool sm_weapon_fire(AiThinkCtx &ctx, AiEntity &e, int which, const Entity *tent,
-                           int32_t aim_offset, bool skip_los, bool scatter) {
-    AiBrain &b = e.brain;
-    World &world = *ctx.world;
-    const AiProfile::WeaponFire &wb = (which == 1) ? e.profile.fire_a : e.profile.fire_b;
-    const int32_t interval =
-            (which == 1) ? e.profile.fire_interval_a : e.profile.fire_interval_b;
-    const int ammo_idx = (which == 1) ? AiBrain::kAmmoA : AiBrain::kAmmoB;
-    if (wb.ammo_index < 0) return false; // unarmed block (no "*_weap" resolved)
-    if (b.f[ammo_idx] == 0) return false; // [orig: the ammo dword gate @0x472F7E]
-    // The packed cooldown words: low u16 = primary (+208), high = secondary
-    // (+210), vs the .aip rate [orig: @0x472F0B cmp word +208, profile+124].
-    const uint32_t pair = static_cast<uint32_t>(b.f[AiBrain::kCooldownPair]);
-    const uint32_t cd = (which == 1) ? (pair & 0xFFFFu) : (pair >> 16);
-    if (static_cast<int32_t>(cd) < interval) return false;
+// One AIEntity_ProcessWeaponFire weapon block. which == 1 is the primary (the
+// profile+0x78 def block, ammo brain[53], cooldown word +0xD0 against the
+// +0x7C rate, saved deltas +0x2D8), 2 the secondary (+0x98, brain[54], word
+// +0xD2 against +0x9C, deltas +0x2F0) [orig: primary @0x472F02..0x472F6E,
+// secondary @0x472F7E..0x472FF8, the same pair at every other site].
+struct SmWeapons {
+    AiThinkCtx &ctx;
+    AiEntity &e;
 
-    int32_t out[6];
-    if (!ctx.sys->solve_weapon_fire_transform(world, e, tent, wb, aim_offset, skip_los, out))
-        return false;
-
-    if (scatter) {
-        // Saved continuation deltas, captured before the scatter draws
-        // [orig: @0x4735F9..0x47363A — out minus entity pos/angles; primary
-        // +0x2D8, secondary +0x2F0].
-        const int base = (which == 1) ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
-        b.f[base + 0] = out[0] - e.pos[0];
-        b.f[base + 1] = out[1] - e.pos[1];
-        b.f[base + 2] = out[2] - e.pos[2];
-        b.f[base + 3] = out[3] - e.heading;
-        b.f[base + 4] = out[4];
-        b.f[base + 5] = out[5];
-        // Two draws of the shared rotate-LCG, yaw then pitch: mag = (u16 %
-        // (6 - brain[43])) scaled by 8947848.0f (~0.75 deg BAM); odd scaled
-        // value adds, even subtracts [orig: @0x473640..0x473716 —
-        // dword_31BFBB8 rol-LCG, flt_7C6F60, the &0x80000001 parity fold].
-        const int32_t mod = 6 - b.f[AiBrain::kAccuracy];
-        for (int angle = 3; angle <= 4 && mod > 0; ++angle) {
+    const AiProfile::WeaponFire &block(int which) const {
+        return which == 1 ? e.profile.fire_a : e.profile.fire_b;
+    }
+    int32_t &ammo(int which) const {
+        return e.brain.f[which == 1 ? AiBrain::kAmmoA : AiBrain::kAmmoB];
+    }
+    // The packed cooldown pair: low u16 = primary (+0xD0), high = secondary (+0xD2).
+    uint32_t cooldown(int which) const {
+        const uint32_t pair = static_cast<uint32_t>(e.brain.f[AiBrain::kCooldownPair]);
+        return which == 1 ? (pair & 0xFFFFu) : (pair >> 16);
+    }
+    uint32_t rate(int which) const {
+        return static_cast<uint32_t>(which == 1 ? e.profile.fire_interval_a
+                                                : e.profile.fire_interval_b);
+    }
+    // The ammo dword, then the zero-extended cooldown word against the rate
+    // dword, unsigned [orig: `cmp [esi+0D4h],0; jz` @0x472F02..0x472F09,
+    // `movzx edx,word [esi+0D0h]; cmp edx,[ebp+7Ch]; jb` @0x472F0B..0x472F15].
+    bool ready(int which) const { return ammo(which) != 0 && cooldown(which) >= rate(which); }
+    // Every ready block first writes its ammo byte into the hull's AdmDef byte
+    // (+0x2B0), fired or not: the weapon call reads it back, and a rider's
+    // mounted request copies it. [orig: primary @0x472F17..0x472F23, secondary
+    // @0x472F9E..0x472FAA; the replay @0x47315F / @0x473225, the continuation
+    // @0x473518 / @0x4737B4, the processed legs @0x473CA8 / @0x473D92; the read
+    // `movzx eax,byte ptr [edi+2B0h]` @0x47301B]
+    void stamp(int which) const {
+        if (Entity *hull = ctx.world->registry.get(e.handle))
+            hull->equipped_adm_index = block(which).ammo_byte();
+    }
+    void clear_cooldown(int which) const {
+        const uint32_t pair = static_cast<uint32_t>(e.brain.f[AiBrain::kCooldownPair]);
+        e.brain.f[AiBrain::kCooldownPair] =
+                static_cast<int32_t>(which == 1 ? (pair & 0xFFFF0000u) : (pair & 0x0000FFFFu));
+    }
+    // The pre-seed every site copies into the out block: entity Position and
+    // Yaw/Pitch/Roll [orig: @0x472F1D..0x472F4B].
+    void seed(int32_t out[6]) const {
+        out[0] = e.pos[0];
+        out[1] = e.pos[1];
+        out[2] = e.pos[2];
+        out[3] = e.heading;
+        out[4] = e.pitch;
+        out[5] = e.roll;
+    }
+    // The solver reads the target from brain[38] itself [orig:
+    // Entity_ComputeWeaponFireTransform_0 `mov edi,[esi+98h]` @0x4569A4].
+    const Entity *target() const {
+        const int32_t packed = e.brain.f[AiBrain::kTargetSlot];
+        return packed != 0 ? ctx.world->registry.get(
+                                     EntityHandle{static_cast<uint16_t>(packed - 1)})
+                           : nullptr;
+    }
+    bool solve(int which, int32_t aim_offset, bool defer_los, int32_t out[6]) const {
+        return ctx.sys->solve_weapon_fire_transform(*ctx.world, e, target(), block(which),
+                                                    aim_offset, defer_los, out,
+                                                    /*seeded=*/true);
+    }
+    // Weapon_FireProcess with the block's ammo byte, after the ammo decrement
+    // that runs only on a positive count [orig: RC_FIRE primary
+    // @0x473046..0x473067, secondary @0x473008..0x473029].
+    void fire(int which, const int32_t out[6]) const {
+        if (ammo(which) > 0) --ammo(which);
+        (void)ctx.sys->fire_ai_round(*ctx.world, e, out, out[3], out[4], block(which).ammo_index);
+    }
+    // Under ATEAM_LOCK the solved pose is kept relative to the hull for the
+    // locked burst [orig: primary @0x473F47..0x473F95, secondary
+    // @0x473E67..0x473EB5].
+    void save_delta(int which, const int32_t out[6]) const {
+        if ((e.profile.flags100 & 0x40) == 0) return;
+        const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
+        int32_t pose[6];
+        seed(pose);
+        for (int axis = 0; axis < 6; ++axis)
+            e.brain.f[base + axis] = io::bam_sub(out[axis], pose[axis]);
+    }
+    // Two draws of the dword_31BFBB8 rol-LCG, yaw then pitch: (u16 % (6 -
+    // brain[43])) * 8947848.0f truncated, added when odd, subtracted when
+    // even [orig: secondary continuation @0x473640..0x473716, processed
+    // primary @0x473F9B..0x474072; flt_7C6F60; the 0x80000001 parity fold].
+    void scatter(int32_t out[6]) const {
+        const int32_t mod = 6 - e.brain.f[AiBrain::kAccuracy];
+        if (mod == 0) return;
+        for (int angle = 3; angle <= 4; ++angle) {
             const uint16_t draw = static_cast<uint16_t>(ctx.sys->prng_step_a());
             const int32_t scaled = static_cast<int32_t>(
                     static_cast<double>(static_cast<int32_t>(draw) % mod) * 8947848.0f);
-            if ((scaled & 1) != 0)
-                out[angle] += scaled;
-            else
-                out[angle] -= scaled;
+            out[angle] = (scaled & 1) != 0 ? io::bam_add(out[angle], scaled)
+                                           : io::bam_sub(out[angle], scaled);
         }
     }
+    // A mobile or continuation shot after its solve: deltas, scatter, fire,
+    // then the ATEAM sweep steps 1/6u and past +3.0u wraps to -3.0u dropping
+    // brain[38] by a direct write (AiSlot[3] and the refcount keep the old
+    // target), else ATEAM_LOCK re-arms the burst window; only the primary
+    // marks the bone byte; the cooldown word clears [orig: primary
+    // @0x473F34..0x4740D6, secondary @0x473E54..0x4741B1; sweep/lock
+    // @0x47408F..0x4740C3].
+    void shoot_mobile(int which, int32_t out[6]) const {
+        AiBrain &b = e.brain;
+        save_delta(which, out);
+        scatter(out);
+        fire(which, out);
+        if ((e.profile.flags100 & 0x20) != 0) {
+            b.f[AiBrain::kSweepPhase] = io::bam_add(b.f[AiBrain::kSweepPhase], 0x2AA6);
+            if (b.f[AiBrain::kSweepPhase] > 0x30000) {
+                b.f[AiBrain::kSweepPhase] = static_cast<int32_t>(0xFFFD0000u);
+                b.f[AiBrain::kTargetSlot] = 0;
+            }
+        } else if ((e.profile.flags100 & 0x40) != 0) {
+            b.f[AiBrain::kBurstWindow] = 1;
+        }
+        if (which == 1) b.bytes()[AiBrain::kBoneFlagByte] |= 0x40;
+        clear_cooldown(which);
+    }
+};
 
-    if (!ctx.sys->fire_ai_round(world, e, out, out[3], out[4], wb.ammo_index))
-        return false;
-
-    // Fire bookkeeping [orig: §17.6 — ammo--, cooldown word = 0, brain[106] =
-    // which, bone-flag |= 0x40 @0x47306F; the burst window arms on fire].
-    if (b.f[ammo_idx] > 0) --b.f[ammo_idx]; // [orig: @0x473008 dec only when > 0]
-    b.f[AiBrain::kCooldownPair] = static_cast<int32_t>(
-            (which == 1) ? (pair & 0xFFFF0000u) : (pair & 0x0000FFFFu));
-    b.f[AiBrain::kLastWeapon] = which;
-    b.bytes()[AiBrain::kBoneFlagByte] |= 0x40;
-    if ((e.profile.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] == 0)
-        b.f[AiBrain::kBurstWindow] = 1;
-    return true;
+// The chase leg's match speed for a target without an SM brain: its planar
+// velocity (entity +0x98/+0x9C) magnitude, clamped and truncated
+// [orig: @0x473B83..0x473BCE].
+static int32_t planar_speed(const AiSystem &sys, const Entity &target) {
+    int32_t vx = target.veh.vel_x, vy = target.veh.vel_y;
+    if (const AiEntity *body = sys.for_handle(target.handle); body && body->inf.active) {
+        vx = body->inf.vel[0];
+        vy = body->inf.vel[1];
+    }
+    double m = std::sqrt(static_cast<double>(vx) * vx + static_cast<double>(vy) * vy);
+    if (m > kDeathSpeedClamp) m = kDeathSpeedClamp;
+    return static_cast<int32_t>(m);
 }
 
-// [orig: AIEntity_ProcessWeaponFire @0x472e00] the state-17 GROUND_COMBAT tick — the
-// vehicle/emplacement fire+combat routine (full digest world-wac-ai-re §17.6). The
-// fire-transform solver is ported (solve_weapon_fire_transform — Entity_
-// ComputeWeaponFireTransform_0 @0x456980), so SM vehicles and emplacements spawn
-// rounds through the same authoritative path as infantry. Riflemen still fire
-// through the infantry pass (§17.4).
+// [orig: AIEntity_ProcessWeaponFire @0x472E00] the state-17 GROUND_COMBAT tick,
+// the vehicle/emplacement fire and chase routine (world-wac-ai-re §17.6) in the
+// retail leg order: the stationary RC_FIRE leg, the ATEAM_LOCK replay, the
+// no-target search, the between-tick continuation or turret staging, and the
+// processed tick (retarget, chase, heading gate, processed fire). Its aircraft
+// twin is AI_TickState_AircraftCombat @0x471710 (aircraft_combat_tick).
 void h_ground_combat_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
     World &world = *ctx.world;
+    const AiProfile &p = e.profile;
 
-    if (e.health <= 0) { // [orig: the death leg — event 3/4 by horizontal speed]
-        ctx.sys->queue_death_event(e);
+    // The death leg: event 3/4 by horizontal speed [orig: `cmp [edi+11Eh],bx`
+    // @0x472E26 -> @0x4744B8; the +0x9C/+0x98 speed @0x4744B8..0x474508].
+    if (hull_health(&world, e) <= 0) {
+        ctx.sys->queue_death_event(&world, e);
         return;
     }
 
     const int32_t step = b.f[AiBrain::kStep];
+    b.f[AiBrain::kTickAccum] += step; // [orig: @0x472E37..0x472E3A]
     // The PACKED cooldown pair: one add advances both u16 words (+208/+210) by step,
-    // low-word carry included. [orig: brain[52] += 65537 * deltaTime]
+    // low-word carry included. [orig: brain[52] += 0x10001 * brain[7]: `imul
+    // ecx,10001h` @0x472E42, `add [esi+0D0h],ecx` @0x472E48]
     b.f[AiBrain::kCooldownPair] = static_cast<int32_t>(
         static_cast<uint32_t>(b.f[AiBrain::kCooldownPair]) +
         0x10001u * static_cast<uint32_t>(step));
-    b.f[AiBrain::kTickAccum] += step;
-    // The burst window: += step while armed and <= 186, else reset. [orig: brain[181]]
-    if ((e.profile.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] != 0 &&
+    // The burst window: += step while armed and <= 186, else reset.
+    // [orig: brain[181] @0x472E4E..0x472E70]
+    if ((p.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] != 0 &&
         static_cast<uint32_t>(b.f[AiBrain::kBurstWindow]) <= 0xBAu)
         b.f[AiBrain::kBurstWindow] += step;
     else
         b.f[AiBrain::kBurstWindow] = 0;
 
+    // One processed tick per accumulated 16 [orig: @0x472E76..0x472ECD].
     bool processed = false;
-    if (b.f[AiBrain::kTickAccum] >= 16) { // one processed tick per accumulated 16
+    if (b.f[AiBrain::kTickAccum] >= 16) {
         b.f[AiBrain::kCombatTimer] += 16;
         b.f[AiBrain::kTickAccum] = 0;
         processed = true;
-        if ((e.profile.flags96 & 0x10) != 0 && b.f[AiBrain::kFireTimer] > 0)
-			if (Entity *vehicle = ctx.world->registry.get(e.handle))
-				ctx.world->vehicles.release_flares(*vehicle);
+        if ((p.flags96 & 0x10) != 0 && b.f[AiBrain::kFireTimer] > 0)
+			if (Entity *vehicle = world.registry.get(e.handle))
+				world.vehicles.release_flares(*vehicle);
 		b.f[AiBrain::kFireTimer] = std::max(0, b.f[AiBrain::kFireTimer] - 16);
 		b.f[AiBrain::kFireDelay] = std::max(0, b.f[AiBrain::kFireDelay] - 16);
         b.f[AiBrain::kRetargetTimer] += 16; // the §16.3 retarget cadence incrementer
     }
 
-    const int32_t tgt_packed = b.f[AiBrain::kTargetSlot];
-    Entity *tent = (tgt_packed != 0)
-                       ? world.registry.get(EntityHandle{static_cast<uint16_t>(tgt_packed - 1)})
-                       : nullptr;
+    const SmWeapons weapons{ctx, e};
+    uint8_t &bone = b.bytes()[AiBrain::kBoneFlagByte];
+    // brain[48], the dispatcher's no-ammo latch, forces the processed leg every
+    // tick, holds the stationary guns and the replay, and turns the chase into
+    // the half-turn heading [orig: brain+0xC0 @0x472EEB, @0x4730FE, @0x473309,
+    // @0x473AB1].
+    const bool no_ammo = b.f[AiBrain::kNoTargetIdle] != 0;
 
-    // Stationary mode (RC_FIRE, profile+100 & 0x80): fire only while the
-    // commanded weapons-free byte is set [orig: @0x472EDE cmp brain+0x311 —
-    // written by the WAC AI command, case 0x15]. The per-processed-tick
-    // SetAITarget(0) below means the solver usually holds no target here, so
-    // in practice only the WEAPON_PITCHLOCKED* legs fire (artillery at the
-    // commanded elevation). No scatter on this path (the LCG draws appear only
-    // at the mobile/continuation sites).
-    if ((e.profile.flags100 & 0x80) != 0) {
-        if (b.bytes()[AiBrain::kGuardFireByte] != 0) {
-            if (!sm_weapon_fire(ctx, e, 1, tent, 0, false, false) &&
-                !sm_weapon_fire(ctx, e, 2, tent, 0, false, false))
-                b.bytes()[AiBrain::kBoneFlagByte] = 0; // both held [orig: @0x47308B]
+    // RC_FIRE, the stationary leg [orig: `test al,al; jns` @0x472ED3..0x472ED8].
+    if ((p.flags100 & 0x80) != 0) {
+        if (b.bytes()[AiBrain::kGuardFireByte] != 0) { // [orig: @0x472EDE]
+            // Weapons free keeps the give-up timer at zero [orig: @0x472EF2].
+            b.f[AiBrain::kCombatTimer] = 0;
+            if (!no_ammo) {
+                // Primary, then secondary: no aim offset, LOS checked, no scatter
+                // [orig: solves @0x472F6E / @0x472FF8, `push 0` @0x472F45 / @0x472FCC].
+                int fired = 0;
+                for (int which = 1; which <= 2 && fired == 0; ++which) {
+                    int32_t out[6];
+                    weapons.seed(out);
+                    if (!weapons.ready(which)) continue;
+                    weapons.stamp(which);
+                    if (!weapons.solve(which, 0, false, out)) continue;
+                    weapons.fire(which, out);
+                    if (which == 1) bone |= 0x40; // [orig: @0x47306F]
+                    weapons.clear_cooldown(which);
+                    fired = which; // [orig: brain[106] @0x47303A / @0x47307F]
+                }
+                b.f[AiBrain::kLastWeapon] = fired;
+                if (fired == 0) bone = 0; // [orig: @0x47308B..0x473092]
+            }
+        } else {
+            bone = 0; // [orig: @0x4730A8]
+            if (b.f[AiBrain::kCombatTimer] >= 620)
+                b.set_pend(b.f[AiBrain::kFallback]); // [orig: `jl` @0x47309E..0x4730B4]
         }
-        if (b.f[AiBrain::kCombatTimer] > 620)
-            b.set_pend(b.f[AiBrain::kFallback]); // [orig: pending = fallback past 620]
         if (processed) {
-            ctx.sys->ai_set_target(world, e, EntityHandle{}); // [orig: SetAITarget(0)/tick]
-			if ((e.profile.flags100 & 1) != 0)
-				ctx.sys->update_waypoint_movement(e, world);
-		}
-		return;
+            ctx.sys->ai_set_target(world, e, EntityHandle{}); // [orig: @0x4730C5]
+            // The stationary leg walks through AI_UpdateMovementTarget, not the
+            // waypoint mover [orig: `call AI_UpdateMovementTarget` @0x4730D9].
+            if ((p.flags100 & 1) != 0)
+                ctx.sys->update_movement_target(e, world);
+        }
+        return;
     }
 
-    if (tent == nullptr) { // no target: sweep-search + acquire [orig: the brain[38]==0 leg]
-        b.f[AiBrain::kSweepPhase] = -196608;
-        b.f[AiBrain::kWorkPosX] = e.pos[0]; // [orig: brain[129]/[130] = 0 — work-relative;
-        b.f[AiBrain::kWorkPosY] = e.pos[1]; //  rebase freezes the absolute work pos instead]
-        if ((e.profile.flags100 & 1) != 0) {
-            ctx.sys->update_waypoint_movement(e, *ctx.world); // moves while searching
-        } else if ((e.profile.flags100 & 4) != 0) {
-            b.f[AiBrain::kWorkHeading] = e.heading; // hold heading
+    // ATEAM_LOCK: the locked burst refires the saved relative pose without a
+    // solve or scatter [orig: @0x4730E9..0x4732D9].
+    if ((p.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] != 0) {
+        const int which = b.f[AiBrain::kLastWeapon];
+        if (no_ammo || (which != 1 && which != 2)) {
+            bone = 0; // [orig: @0x4730FE / @0x47311D -> @0x4732C3]
+        } else if (weapons.ammo(which) != 0) {
+            if (weapons.cooldown(which) >= weapons.rate(which)) {
+                // [orig: secondary @0x473142..0x4731DD, primary @0x473208..0x4732AA]
+                weapons.stamp(which);
+                const int base = which == 1 ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
+                int32_t out[6];
+                weapons.seed(out);
+                for (int axis = 0; axis < 6; ++axis)
+                    out[axis] = io::bam_add(out[axis], b.f[base + axis]);
+                weapons.fire(which, out);
+                if (which == 1) bone |= 0x40; // [orig: @0x4732A3]
+                weapons.clear_cooldown(which);
+            } else {
+                // Held more than a quarter of the PRIMARY rate: the bone byte
+                // clears, for either weapon [orig: @0x4732B5..0x4732C3].
+                const uint32_t rate_a = weapons.rate(1);
+                if (weapons.cooldown(which) >= rate_a - (rate_a >> 2)) bone = 0;
+            }
+        }
+        if (processed && (p.flags100 & 1) != 0)
+            ctx.sys->update_waypoint_movement(e, world); // [orig: @0x4732CA -> @0x4741ED]
+        return;
+    }
+
+    const Entity *tent = weapons.target(); // [orig: @0x4732DE]
+    if (tent == nullptr) { // no target: search [orig: @0x4732EC -> @0x47420F]
+        b.f[AiBrain::kSweepPhase] = -196608;    // [orig: @0x47420F]
+        b.f[AiBrain::kWorkPosX] = 0;            // [orig: @0x474219]
+        b.f[AiBrain::kWorkPosY] = 0;            // [orig: @0x47421F]
+        if ((p.flags100 & 1) != 0) {
+            ctx.sys->update_waypoint_movement(e, world); // [orig: @0x47422E]
+        } else if ((p.flags100 & 4) != 0) {
+            b.f[AiBrain::kWorkHeading] = e.heading; // [orig: @0x47425F..0x474266]
         } else {
-            // The turret search sweep: yaw +- ~90 deg by the no-target timer phase.
-            // [orig: <=124 or >434 -> yaw + 1073741760; else yaw]
+            // The turret search sweep: yaw + ~90 deg outside the no-target timer's
+            // 125..434 window [orig: @0x47426E..0x4742BF].
             const int32_t t = b.f[AiBrain::kCombatTimer];
             b.f[AiBrain::kWorkHeading] =
                 (t <= 124 || t > 434) ? e.heading + 1073741760 : e.heading;
@@ -492,9 +624,9 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
             b.f[AiBrain::kWorkRoll] = 0;
             b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedB];
             AiTarget found{};
-            if (ctx.sys->acquire_target(world, e, found)) {
-                // This site's engage: both branches jitter via the inline LCG, guarded by
-                // base-delay != 0 (unlike the state-16 engage's A/B split — §17.6 NOTE).
+            if (ctx.sys->acquire_target(world, e, found)) { // [orig: @0x4742C5]
+                // This site's engage: both target-brain branches jitter via the
+                // inline LCG guarded by base-delay != 0 [orig: @0x47431E..0x4744B7].
                 const Entity *se = world.registry.get(e.handle);
                 const Entity *te = found.handle.valid() ? world.registry.get(found.handle)
                                                         : nullptr;
@@ -503,123 +635,161 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
                 ctx.sys->ai_set_target(world, e, found.handle);
                 ctx.sys->target_set_calls.push_back(found.net_id);
                 b.f[AiBrain::kCombatTimer] = 0;
-                b.f[AiBrain::kFireDelay] = e.profile.field104;
-                if (e.profile.field104 != 0)
+                b.f[AiBrain::kFireDelay] = p.field104;
+                if (p.field104 != 0)
                     b.f[AiBrain::kFireDelay] += static_cast<int32_t>(
                         static_cast<uint16_t>(ctx.sys->prng_step_a()) % 62);
                 return;
             }
         }
-        if (b.f[AiBrain::kCombatTimer] > 620) { // give up -> fallback state
+        if (b.f[AiBrain::kCombatTimer] > 620) { // give up [orig: @0x474236..0x474256]
             ctx.sys->ai_set_target(world, e, EntityHandle{});
             b.set_pend(b.f[AiBrain::kFallback]);
         }
         return;
     }
 
-    if (tent->health <= 0) { // target dead -> clear [orig: SetAITarget(0), return]
+    if (tent->health <= 0) { // target dead [orig: @0x4732F2 -> @0x4741FD]
         ctx.sys->ai_set_target(world, e, EntityHandle{});
         return;
     }
 
-    if (!processed) {
-        // Continuation volleys between processed ticks: the last-fired weapon
-        // keeps the volley running, cooldown-gated, re-solved WITH LOS (those
-        // sites pass arg7 = 0) and with a fresh aim offset [orig: the
-        // @0x473D57 (primary) / @0x473E44 (secondary) sites; brain[106] routes
-        // which]. Only sub-16-tick rates ever pass the cooldown gate here.
-        const int32_t which = b.f[AiBrain::kLastWeapon];
-        if (which == 1 || which == 2)
-            (void)sm_weapon_fire(ctx, e, static_cast<int>(which), tent, sm_aim_offset(e),
-                                 /*skip_los=*/false, /*scatter=*/true);
+    // Between processed ticks [orig: @0x4732FF / @0x473309].
+    if (!processed && !no_ammo) {
+        const int which = b.f[AiBrain::kLastWeapon]; // [orig: @0x473315]
+        if (which == 1 || which == 2) {
+            // The continuation keeps the last weapon's volley going, cooldown
+            // gated, with LOS deferred (arg7 = 1) [orig: primary @0x473791..0x47386B,
+            // `push 1` @0x473850; secondary @0x4734F2..0x4735C9, `push 1` @0x4735A0].
+            if (!weapons.ready(which)) return;
+            weapons.stamp(which);
+            int32_t out[6];
+            weapons.seed(out);
+            if (which == 1) out[4] = 0; // the primary solves from a level pitch [orig: @0x473821]
+            if (!weapons.solve(which, sm_aim_offset(e), true, out)) {
+                bone = 0; // [orig: @0x473875 -> @0x4734E4]
+                return;
+            }
+            weapons.shoot_mobile(which, out);
+            return;
+        }
+        // No volley on record: a WEAPON_TURRET block re-solves every tick so its
+        // turret slews, primary first, else the secondary, else nothing; no fire
+        // [orig: @0x47332D `test byte [ebp+88h],1` -> @0x4733A4, deltas
+        // @0x4733AC..0x4733FA, `mov [esi+310h],bl` @0x473402; @0x47340E
+        // `test byte [ebp+0A8h],1` -> @0x473488..0x4734E6].
+        const int slot = (p.fire_a.flags & 1) != 0 ? 1 : (p.fire_b.flags & 1) != 0 ? 2 : 0;
+        if (slot == 0) return;
+        int32_t out[6];
+        weapons.seed(out);
+        (void)weapons.solve(slot, sm_aim_offset(e), true, out);
+        weapons.save_delta(slot, out);
+        bone = 0;
         return;
     }
 
-    if (b.f[AiBrain::kFireDelay] != 0) { // the engage fire delay: move only
-        if ((e.profile.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e, *ctx.world);
+    // The processed tick (or the no-ammo latch). The engage fire delay holds
+    // everything but the waypoint walk [orig: @0x473A2C -> @0x4741E3..0x4741ED].
+    if (b.f[AiBrain::kFireDelay] != 0) {
+        if ((p.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e, world);
         return;
     }
 
-    // Retarget cadence [orig: AIEntity_TryAcquireTarget @0x4716b0 — brain[42] > 248].
+    // The retarget cadence: every rescan feeds Entity_SetAITarget, so a scan
+    // that finds nothing clears brain[38]; this tick still bears on the old
+    // target [orig: AIEntity_TryAcquireTarget @0x4716B0, `call Entity_SetAITarget`
+    // @0x4716F0 unconditional; caller `jz` @0x473A41..0x473A45].
     if (b.f[AiBrain::kRetargetTimer] > 248) {
         b.f[AiBrain::kRetargetTimer] = 0;
         AiTarget fresh{};
-        if (ctx.sys->acquire_target(world, e, fresh) && fresh.handle.valid()) {
-            ctx.sys->ai_set_target(world, e, fresh.handle);
-            tent = world.registry.get(fresh.handle);
-            if (tent == nullptr) return;
-        }
+        // A type-1 profile searches with variant A [orig: AIEntity_TryAcquireTarget
+        // `cmp dword ptr [eax+10h],1` @0x4716D5 (the AI_FindBestTarget call @0x4716DD)].
+        const EntityHandle found = ctx.sys->acquire_target(world, e, fresh, p.type == 1)
+                                           ? fresh.handle
+                                           : EntityHandle{};
+        ctx.sys->ai_set_target(world, e, found);
+        if (const Entity *next = found.valid() ? world.registry.get(found) : nullptr) tent = next;
     }
 
-    // Chase movement [orig: the mobile leg]: face the target; within the approach cap
-    // chase at speedA (min range / match-speed refinements ride the solver witness);
-    // beyond it for > 620 ticks, give up to the fallback state.
+    // Bearing to the tracked target, truncated [orig: @0x473A49..0x473A90].
     const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * 65536.0f),
                              static_cast<int32_t>(tent->position.y * 65536.0f),
                              static_cast<int32_t>(tent->position.z * 65536.0f)};
-    const int32_t bearing = bearing_bam(tpos[1] - e.pos[1], tpos[0] - e.pos[0]);
-    if ((e.profile.flags100 & 1) != 0) {
-        ctx.sys->update_waypoint_movement(e, *ctx.world);
-    } else if ((e.profile.flags100 & 4) != 0) {
-        b.f[AiBrain::kWorkHeading] = bearing + 2147483520; // [orig: +0x7FFFFF80 half-turn]
+    const int32_t dy = io::bam_sub(tpos[1], e.pos[1]);
+    const int32_t dx = io::bam_sub(tpos[0], e.pos[0]);
+    const int32_t bearing = bearing_bam(dy, dx);
+    if ((p.flags100 & 1) != 0) {
+        ctx.sys->update_waypoint_movement(e, world); // [orig: @0x473A9C]
+    } else if ((p.flags100 & 4) != 0 || no_ammo) {
+        b.f[AiBrain::kWorkHeading] = bearing + 2147483520; // [orig: @0x473C08 +0x7FFFFF80]
     } else {
-        b.f[AiBrain::kWorkHeading] = bearing;
-        const int32_t dist = dist3d_units(tpos, e.pos);
-        const int32_t cap_units = e.profile.approach_cap >> 16;
-        if (cap_units > 0 && dist > cap_units) {
-            if (b.f[AiBrain::kCombatTimer] > 620) {
+        // The chase: a planar 16.16 distance against the approach cap (+0x4C);
+        // beyond it the >620 give-up; inside it the timer rests only while
+        // AI_IsTargetInSight @0x456860 validates the target; full combat
+        // speed at or beyond max_chase (+0xBC) or min_chase (+0xB8), else the
+        // target's own speed [orig: @0x473ABE..0x473C06].
+        b.f[AiBrain::kWorkHeading] = bearing; // [orig: @0x473AC2]
+        double planar = std::sqrt(static_cast<double>(dx) * dx + static_cast<double>(dy) * dy);
+        if (planar > kDeathSpeedClamp) planar = kDeathSpeedClamp;
+        const int32_t dist = static_cast<int32_t>(planar); // [orig: @0x473AEB]
+        if (dist > p.approach_cap) { // [orig: @0x473AF3]
+            if (b.f[AiBrain::kCombatTimer] > 620) { // [orig: @0x473AFC..0x473B15]
                 b.set_pend(b.f[AiBrain::kFallback]);
                 ctx.sys->ai_set_target(world, e, EntityHandle{});
                 return;
             }
+        } else if (dist >= p.max_chase) { // [orig: @0x473B29 -> @0x473BE4]
+            if (ctx.sys->aircraft_target_in_sight(e, world)) b.f[AiBrain::kCombatTimer] = 0;
+            b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA]; // [orig: @0x473BFA]
         } else {
-            b.f[AiBrain::kCombatTimer] = 0; // in range: the give-up timer rests
+            if (ctx.sys->aircraft_target_in_sight(e, world)) // [orig: @0x473B36..0x473B42]
+                b.f[AiBrain::kCombatTimer] = 0;
+            if (dist >= p.min_chase) { // [orig: @0x473B53 -> @0x473BD6]
+                b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
+            } else if (const AiEntity *other = ctx.sys->for_handle(tent->handle);
+                       other != nullptr && !other->inf.active) {
+                b.f[AiBrain::kOutSpeed] = other->brain.f[136]; // [orig: @0x473B72]
+            } else {
+                b.f[AiBrain::kOutSpeed] = planar_speed(*ctx.sys, *tent);
+            }
         }
-        b.f[AiBrain::kWorkPosX] = tpos[0];
-        b.f[AiBrain::kWorkPosY] = tpos[1];
+    }
+    // The common tail: speed clamped to [0, speedA]; the work X/Y, pitch, roll
+    // and brain[138] zeroed (the vehicle movers read only +0x200/+0x210)
+    // [orig: @0x473C14..0x473C50].
+    if (b.f[AiBrain::kOutSpeed] < 0)
+        b.f[AiBrain::kOutSpeed] = 0;
+    else if (b.f[AiBrain::kOutSpeed] > b.f[AiBrain::kSpeedA])
         b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
-    }
+    b.f[AiBrain::kWorkPosX] = 0;
+    b.f[AiBrain::kWorkPosY] = 0;
+    b.f[AiBrain::kWorkPitch] = 0;
+    b.f[AiBrain::kWorkRoll] = 0;
+    b.f[138] = 0;
 
-    // The sweep advance (ATEAM, per processed tick with a live target): phase
-    // += 10918 until +3.0u, then reset to -3.0u and drop the target
-    // [orig: §17.6 sweep — brain[180] += 10918, > 196608 -> -196608 + clear].
-    if ((e.profile.flags100 & 0x20) != 0) {
-        b.f[AiBrain::kSweepPhase] += 10918;
-        if (b.f[AiBrain::kSweepPhase] > 196608) {
-            b.f[AiBrain::kSweepPhase] = -196608;
-            ctx.sys->ai_set_target(world, e, EntityHandle{});
-            return;
-        }
-    }
-
-    // The fire gate + weapon legs [orig: heading delta <= (profile+67|1|2)>>1
-    // folded to 1/256 turns, then the per-weapon ammo/cooldown/solve/scatter
-    // chain — the mobile sites solve with LOS deferred (arg7 = 1)].
-    const uint32_t hd = static_cast<uint32_t>(bearing - e.heading) >> 24;
+    // The heading gate: the bearing delta folded to 1/256 turns against the
+    // secondary FOV byte [orig: `movzx` @0x472E1F; @0x473C56..0x473C7B `ja`].
+    const uint32_t hd = static_cast<uint32_t>(io::bam_sub(bearing, e.heading)) >> 24;
     const uint32_t folded = hd >= 0x80 ? 256 - hd : hd;
-    if (folded <= static_cast<uint32_t>(((e.profile.fov_secondary | 1) | 2) >> 1)) {
-        if (!sm_weapon_fire(ctx, e, 1, tent, sm_aim_offset(e), /*skip_los=*/true,
-                            /*scatter=*/true) &&
-            !sm_weapon_fire(ctx, e, 2, tent, sm_aim_offset(e), /*skip_los=*/true,
-                            /*scatter=*/true))
-            b.bytes()[AiBrain::kBoneFlagByte] = 0; // both held [orig: @0x473402]
-    }
-}
+    if (folded > static_cast<uint32_t>(((p.fov_secondary | 1) | 2) >> 1)) return;
 
-// The shared alert block every death-family enter runs: alert cur/prev = 2, the command
-// group goes red, allies wake at 100 u, slot move flag 2. [orig: the common head of
-// @0x467650 / @0x467400 / @0x467b20 / @0x467de0]
-void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
-    AiBrain &b = e.brain;
-    b.f[AiBrain::kAlert] = 2;
-    b.f[AiBrain::kPrevAlert] = 2;
-    if (ctx.world != nullptr) {
-        if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
-        ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
-    } else {
-        e.slot.bytes()[AiSlot::kAlertByte] = 2;
+    // The processed fire: primary, else secondary, each solved WITH LOS (arg7 =
+    // 0), scattered and fired; brain[106] records the weapon [orig: primary
+    // @0x473C81..0x473D57 `push 0` @0x473D3C, @0x4740DF; secondary
+    // @0x473D67..0x473E44 `push 0` @0x473E26, @0x4741BA].
+    for (int which = 1; which <= 2; ++which) {
+        if (!weapons.ready(which)) continue;
+        weapons.stamp(which);
+        int32_t out[6];
+        weapons.seed(out);
+        if (!weapons.solve(which, sm_aim_offset(e), false, out)) continue;
+        weapons.shoot_mobile(which, out);
+        b.f[AiBrain::kLastWeapon] = which;
+        return;
     }
+    // Neither weapon fired: no volley to continue [orig: @0x4741CC..0x4741D6].
+    b.f[AiBrain::kLastWeapon] = 0;
+    bone = 0;
 }
 
 // Queue the DESTROY event (type 4) that lands the brain in GROUND_DEAD 23.
@@ -630,15 +800,6 @@ void queue_destroy_event(AiThinkCtx &ctx, AiEntity &e) {
     ev.f[1] = (ctx.sys->index_of(e) << 16);
     ev.set_timer(0.0f);
     ctx.sys->events.queue(ev);
-}
-
-// Horizontal speed with the death-velocity saturation clamp.
-// [orig: the fsqrt + flt_7C19E0 min pattern shared by every death leg]
-int32_t death_speed(const AiEntity &e) {
-    double sp = std::sqrt(static_cast<double>(e.vel_x) * e.vel_x +
-                          static_cast<double>(e.vel_z) * e.vel_z);
-    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
-    return static_cast<int32_t>(sp);
 }
 
 // [orig: AI_TransitionToDeath_GroundVehicle @0x467b20] state-21 (vehicle DYING) enter:
@@ -666,11 +827,14 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
         }
     }
 	// The `Parent` (ItemDef+0x548) gate over the brain's +576/+580 gunner-attachment
-	// list the class init built (VehicleSystem::setup_gunner_attachments): every
-	// live child's health word is zeroed and its class death callback runs with
-	// phase 1, on clients too [orig: AI_TransitionToDeath_GroundVehicle
-	// @0x467B6E (the +1352 byte) .. @0x467BBB (child deathCallback(child, 1, 0));
-	// the +286 > 0 gate @0x467B9A, the hit-record attacker clear @0x467BAD].
+	// list the class init built (VehicleSystem::setup_gunner_attachments): for every
+	// live child the global hit record's damage word is cleared, the child's
+	// health word is zeroed and its class event callback runs with phase 1 on
+	// that record, on clients too. The child's attacker (+0x178) is left alone.
+	// [orig: AI_TransitionToDeath_GroundVehicle @0x467B6E (the +1352 byte); the
+	//  loop @0x467B90..0x467BCC: the +286 > 0 gate @0x467B92..0x467B9A,
+	//  Projectile_GetHitRecord @0x467B9C, health 0 @0x467BA5, the record's +0x30
+	//  cleared @0x467BAD, child+0x1C8(child, 1, 0) @0x467BB0..0x467BBB]
 	if (ctx.world != nullptr) {
 		World &world = *ctx.world;
 		const Entity *parent = world.registry.get(e.handle);
@@ -685,10 +849,10 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 				Entity *child = world.registry.get(EntityHandle{ static_cast<uint16_t>(word - 1) });
 				if (child == nullptr || child->health <= 0) continue;
 				child->health = 0;
-				child->last_attacker = {};
 				if (AiEntity *brain = world.ai.for_handle(child->handle))
 					brain->health = 0;
-				destruction_notify_item_damage(world, *child, 1);
+				world.round_sim.hit_record.damage = 0;
+				hit_record_class_event(world, *child, 1);
 			}
 		}
 	}
@@ -718,9 +882,9 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 			}
 		}
 	}
-	death_alert_block(ctx, e);
+	alert_block(ctx, e);
 	b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
-    if (death_speed(e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
+    if (hull_death_speed(ctx.world, e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
         queue_destroy_event(ctx, e);
 }
 
@@ -736,7 +900,7 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
 			entity_process_falling_death(*ctx.world, *vehicle, ctx.world->tables.terrain,
 					float(from_fixed(ctx.world->env.water_z)));
 	}
-	const bool stopped = death_speed(e) < 1057;
+	const bool stopped = hull_death_speed(ctx.world, e) < 1057; // [orig: @0x467CED..0x467D30]
 	const bool still =
         std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
         std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&
@@ -773,7 +937,7 @@ void h_vehicle_dying_event(AiThinkCtx &ctx) {
 void h_enter_vehicle_dead(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    death_alert_block(ctx, e);
+    alert_block(ctx, e);
     if (ctx.world != nullptr) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
             if ((ent->engine_flags & kEntityFlagHusk) == 0) { // [orig: the Flags&4 gate]
@@ -785,7 +949,9 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
 			ent->veh.stuck_ticks = 0; // [orig: moveTimer +0x148 = 0 @0x467E22]
 			ent->team = 0; // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
 						   //  and drops out of ordinary target scans]
-			if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
+			// [orig: +0x1AC first write wins: `cmp [esi+1ACh],0` @0x467E5D ..
+			//  `mov [esi+1ACh],eax` @0x467E6B]
+			if (ent->death_tick == 0)
                 ent->death_tick = ctx.world->logic_tick;
         }
 		ctx.sys->clear_entity_references(*ctx.world, e.handle);
@@ -809,8 +975,9 @@ void h_vehicle_dead_tick(AiThinkCtx &ctx) {
 void h_vehicle_dead_event(AiThinkCtx &) {}
 
 // Ground clearance for the aircraft death states: lift 1, search down 48,
-// then the intact/dead model's authored height offset.
-// [orig: @0x4668DA..0x46693C; @0x45791F..0x457972]
+// then the brain's intact/husk floor (brain_ground_offset).
+// [orig: AI_TransitionToDeath_Vehicle @0x4668D9..0x46693C; AI_CheckLethalDamage
+//  @0x45791F..0x457970]
 int32_t aircraft_death_ground(World &world, Entity &entity) {
 	const int32_t pos[3] = { to_fixed(entity.position.x), to_fixed(entity.position.y),
 		to_fixed(entity.position.z) };
@@ -822,12 +989,7 @@ int32_t aircraft_death_ground(World &world, Entity &entity) {
 		ground = calc_average_ground_height(*world.tables.terrain, pos, 0, GroundClearance{});
 	if (entity.primary_occupant.valid())
 		ground = std::max(ground, world.env.water_z);
-	int32_t offset = entity.veh.air_probe_z_off;
-	if (entity.health <= 0 || ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0)
-		if (const auto *t = world.tables.item_death_traits.get(entity.item_id))
-			if (t->husk_model_loaded)
-				offset = to_fixed(std::abs(t->husk_rest_min_z));
-	return ground == INT32_MIN ? ground : io::bam_add(ground, offset);
+	return ground == INT32_MIN ? ground : io::bam_add(ground, brain_ground_offset(world, entity));
 }
 
 // [orig: AI_InitDeathState @0x457690; AI_InitGroundHeight @0x4577D0]
@@ -922,13 +1084,15 @@ void h_aircraft_followwp_tick(AiThinkCtx &ctx) {
 		return;
 	}
 	AiTarget target{};
-	const bool acquired =
-			(ai.profile.flags100 & 2) == 0 && ctx.sys->acquire_target(*ctx.world, ai, target);
+	// Variant A [orig: AI_HandleEvent_VehicleWithDamageC @0x466460 (the
+	// AI_FindBestTarget call @0x46648F)].
+	const bool acquired = (ai.profile.flags100 & 2) == 0 &&
+			ctx.sys->acquire_target(*ctx.world, ai, target, /*variant_a=*/true);
 	aircraft_flare_timer(ctx);
 	if (acquired)
 		ctx.sys->engage_target(*ctx.world, ai, target, true);
 	else
-		ctx.sys->update_aircraft_waypoint_movement(ai, *ctx.world);
+		ctx.sys->update_movement_target(ai, *ctx.world);
 }
 
 void h_enter_aircraft_combat(AiThinkCtx &ctx) {
@@ -971,7 +1135,7 @@ void h_enter_aircraft_dying(AiThinkCtx &ctx) {
 			}
 		}
 	}
-	death_alert_block(ctx, ai);
+	alert_block(ctx, ai);
 	ai.brain.f[AiBrain::kStep] = 16;
 	int32_t ground = INT32_MIN;
 	Entity *entity = ctx.world != nullptr ? ctx.world->registry.get(ai.handle) : nullptr;
@@ -1010,6 +1174,10 @@ void h_aircraft_dying_tick(AiThinkCtx &ctx) {
 // [orig: Entity_ProcessVehicleDestruction @0x466A80]
 void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 	auto &ai = *ctx.self;
+	// The team byte clears at the head, so the ally wake below compares team 0
+	// [orig: `mov byte ptr [esi+162h],0` @0x466A9F ahead of
+	//  Entity_AlertNearbyAllies @0x466B77].
+	ai.team = 0;
 	if (ctx.world != nullptr) {
 		World &world = *ctx.world;
 		if (Entity *entity = world.registry.get(ai.handle)) {
@@ -1042,8 +1210,7 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 			ctx.sys->ai_set_target(world, ai, EntityHandle{});
 		}
 	}
-	death_alert_block(ctx, ai);
-	ai.team = 0;
+	alert_block(ctx, ai);
 	ai.brain.f[AiBrain::kStep] = 62;
 }
 
@@ -1091,7 +1258,6 @@ void h_pretty_event(AiThinkCtx &ctx) {
 // @0x467cd0, event21 = AI_HandleEvent_VehicleDying @0x457f50, enter23 =
 // AI_TransitionToDestroyed_Vehicle @0x467de0, tick23 = AI_TickState_VehicleDead @0x467ea0,
 // event23 = AI_HandleEvent_ConsumeAll @0x458080; the shared exit column is nullsub_70).
-constexpr AiHandler U = h_not_yet_ported;
 constexpr AiHandler _ = h_noop;
 
 const StateRow kTable[kAiStateCount] = {

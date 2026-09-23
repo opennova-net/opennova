@@ -232,6 +232,8 @@ public:
 		PF_WPN_BLEND_WEIGHT = opennova::world::PF_WPN_BLEND_WEIGHT,
 		PF_WPN_VARIANT = opennova::world::PF_WPN_VARIANT,
 		PF_WPN_SOURCE_VARIANT = opennova::world::PF_WPN_SOURCE_VARIANT,
+		PF_ANIM_VARIANT = opennova::world::PF_ANIM_VARIANT,
+		PF_ANIM_SOURCE_VARIANT = opennova::world::PF_ANIM_SOURCE_VARIANT,
 		PF_HIDDEN = opennova::world::PF_HIDDEN,
 		PF_LOCAL_VIEW_SUPPRESSED = opennova::world::PF_LOCAL_VIEW_SUPPRESSED,
 		PF_ALIVE = opennova::world::PF_ALIVE,
@@ -357,6 +359,13 @@ public:
 		MOUNT_COMMAND_PASSENGER_ONLY = opennova::world::kCommandAttachPassengerOnly,
 		MOUNT_COMMAND_SKIP_CONTROLLER = opennova::world::kCommandAttachSkipController,
 		MOUNT_COMMAND_ANY_SEAT = opennova::world::kCommandAttachAnySeat,
+	};
+
+	// The view-action ids the view rows fire (world/player_view.h).
+	enum ViewAction {
+		VIEW_ACTION_FIRST_PERSON = opennova::world::kViewActionFirstPerson,
+		VIEW_ACTION_WITH_GUN = opennova::world::kViewActionWithGun,
+		VIEW_ACTION_CHASE = opennova::world::kViewActionChase,
 	};
 
 	// The equipped-weapon FSM action ids, re-exported with the engine's values
@@ -1450,6 +1459,9 @@ public:
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
 	float get_local_player_anim_blend_weight() const;
+	// The primary channel's served ring entries (target, outgoing).
+	int get_local_player_anim_variant() const;
+	int get_local_player_anim_source_variant() const;
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
@@ -1516,11 +1528,12 @@ public:
 	// Retail actions 56/57 (default +/-), available even while NVG is off.
 	// Returns the clamped gain in [0,4].
 	int request_local_player_nvg_gain(int p_delta);
-	// The view actions' chase preference (view1st/viewwithgun -> false,
-	// viewchase -> true) (engine: runtime/world/local_player_view.cpp); the
+	// A view action fired (VIEW_ACTION_*: view1st, viewwithgun, viewchase): the
+	// chase preference and, on the authority, the action's BMS input-action
+	// bit (engine: world/player_view.h player_view_apply_view_action); the
 	// camera mode itself is RESOLVED per tick by the arbiter from the
-	// preference and the seat (world/player_view.h player_view_resolve_mode).
-	void set_local_player_third_person_selected(bool p_selected);
+	// preference and the seat (player_view_resolve_mode).
+	void apply_local_player_view_action(int p_action);
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);
@@ -2222,6 +2235,9 @@ public:
 	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
+	// The world's entity-update counter (native, unbound): the water noise
+	// pair's frame counter (Water::advance_frame carries the witness).
+	uint32_t entity_update_counter() const { return kernel_->world.entity_update_counter; }
 
 	// The F3 AI window's pushed record (native, unbound): the ONE engine join,
 	// world::inspect::ai_debug_report, as the engine struct with no Variant

@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <formats/mus/mus.h>
+#include <formats/wac/bytecode.h>
 #include <memory>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
@@ -100,6 +101,23 @@ static void test_random_named_result_and_wide_signed_product() {
     f.run("v12=RND\n");
     CHECK(f.value(12) == 62355);
     CHECK(f.world.diagnostics.empty());
+}
+
+// Opcode 5 (never emitted by the retail compiler, which writes DORND as
+// opcode 4) steps the generator even for a zero section count: the rounded
+// product is 0, the first section runs, and the seed has still advanced.
+// [orig: WacScript_ExecuteBytecode @0x4F5A7E (the step), @0x4F5AD0 (the
+//  choice byte)]
+static void test_opcode5_steps_the_generator_for_a_zero_count() {
+    Fixture f;
+    Program program;
+    program.code = {encode_instr(Op::DoRnd, 2), 0u, kProgramTerminator};
+    program.loop_count = 1;
+    WacVm vm;
+    vm.load(program);
+    vm.execute(f.world);
+    CHECK(vm.capture_runtime_state().rng_seed == 0x66666624u); // one step from 0x12333333
+    CHECK(vm.capture_runtime_state().loop_choices[0] == 0);
 }
 
 static void test_music_closed_stream_is_a_witnessed_success() {
@@ -262,6 +280,7 @@ int main() {
     test_squad_selection_clear_and_retry();
     test_squad_ttl_is_per_execution_and_exports_are_mutable();
     test_random_named_result_and_wide_signed_product();
+    test_opcode5_steps_the_generator_for_a_zero_count();
     test_music_closed_stream_is_a_witnessed_success();
     std::printf("wac_state: %d failures\n", failures);
     return failures ? 1 : 0;

@@ -23,6 +23,25 @@ using namespace opennova::crt;
 using opennova::terrain::TerrainHeightField;
 
 static int failures = 0;
+
+// One entity-update step of an item row's pool: every pool-1 row's own visit
+// (World::update_pool1_slot), or the pool-2/3 cohort walk.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
+//  @0x4C230C]
+static void step_item_pool(World &w, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
+        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            w.update_pool1_slot(*row, ctx);
+}
+
 #define CHECK(c)                                                              \
     do {                                                                      \
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
@@ -578,10 +597,13 @@ void test_explosion_resolves_attacker_chain_for_events() {
     for (const RoundHit &hit : w.round_sim.hits)
         if (hit.victim == organic && hit.shooter == live_attacker)
             organic_hit_resolved = true;
+    // Both lethal blast edges run the kill accounting
+    // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
+    // calls @0x4E6BFE person, @0x4E6FB4 item)].
     for (const RoundDeath &death : w.round_sim.deaths) {
-        if (death.victim == organic && death.killer == live_attacker)
+        if (death.victim == organic && death.killer == live_attacker && death.kill_event)
             organic_death_resolved = true;
-        if (death.victim == item && death.killer == live_attacker)
+        if (death.victim == item && death.killer == live_attacker && death.kill_event)
             item_death_resolved = true;
     }
     CHECK(organic_hit_resolved);
@@ -1394,8 +1416,10 @@ void test_specialized_piece_physics_callback() {
 
     DestructionRng expected_rng = w.destruction_rng;
     const uint16_t angle_roll = expected_rng.next16();
-    const int32_t initial_pitch = 10 * 11930464;
-    const int32_t initial_roll = -3 * 11930464;
+    // The piece still holds its placement angles, the spawn form (low half
+    // zero). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+    const int32_t initial_pitch = 119275520; // ((10 << 16) / 360) << 16
+    const int32_t initial_roll = -35782656;  // ((-3 << 16) / 360) << 16
     const int32_t expected_pitch = (angle_roll & 1u) != 0
             ? initial_pitch + 0x00100000
             : initial_pitch;
@@ -2575,7 +2599,7 @@ static void test_aircraft_death_lifecycle() {
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	// The initializer stamps savedLivePose. An unchanged pose queues event four.
 	e.veh.slide_z = -500;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(e.veh.slide_z == 0);
 	w.ai.events.process_timed(w.ai, w);
 	CHECK(ai.brain.f[AiBrain::kCurState] == 15 && ai.brain.f[AiBrain::kStep] == 62);
@@ -2594,12 +2618,12 @@ static void test_aircraft_death_lifecycle() {
 	ai.profile.subtype = 1;
 	ai.brain.f[AiBrain::kPrevAlert] = ai.brain.f[AiBrain::kAlert];
 	w.env.water_z = 7 * 65536;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(ai.brain.f[AiBrain::kWorkPosZ] == 7 * 65536);
 	CHECK(ai.brain.f[AiBrain::kWorkPosX] == 10 * 65536);
 	e.health = 0;
 	e.veh.vel_x = 0;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	w.ai.events.process_timed(w.ai, w);
 	CHECK(ai.brain.f[AiBrain::kCurState] == 23);
 }
@@ -2634,6 +2658,70 @@ static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 	CHECK(e.veh.air_roll_rate == 7211964);
 	CHECK(e.veh.air_pitch_rate == -1789569);
 	CHECK(w.destruction_rng.state == 0x20028091u);
+}
+
+// The spawn-marker pass is one of the server tick's every-32 legs: it runs
+// after the WAC tick under the same script admission, so an empty host with a
+// live WAC clock holds it, and only ticks on a 32 boundary run it.
+// [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
+//  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2]
+static void test_spawn_markers_ride_the_script_admission() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 4);
+	w.registry.configure_pool(3, 8);
+	w.add_system(&w.server_idle_legs);
+	Entity seed;
+	seed.has_item_def = true;
+	seed.item_type = 5;
+	seed.item_attrib = 0x60000;
+	seed.zone_control = 65536;
+	seed.zone_number = 1;
+	seed.team = 1;
+	seed.position = { 10, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed.zone_number = 2;
+	seed.team = 2;
+	seed.position = { 20, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 4;
+	seed.item_attrib2 = 4;
+	seed.vehicle_spawn_ids = { 100042 };
+	seed.zone_number = 1;
+	seed.position = { 10, 0, 3 };
+	(void)w.registry.spawn(3, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 1;
+	seed.item_id = 42;
+	seed.vehicle_spawn_team = 1;
+	seed.team = 1;
+	seed.bound_radius = 2;
+	seed.position = { 100, 100, 0 };
+	const auto vh = w.registry.spawn(1, seed);
+	Entity &v = *w.registry.get(vh);
+	w.vehicles.capture_spawn_pose(v);
+	w.vehicles.build_spawn_markers();
+	v.engine_flags = 6;
+	v.veh.stuck_ticks = 1;
+
+	// No human while the WAC clock is live: the leg is held.
+	w.cached.humans = 0;
+	w.cached.wac_ticks = 1;
+	w.logic_tick = 32;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 100 * 65536);
+	// A human admits it on the next 32 boundary, not in between.
+	w.cached.humans = 1;
+	w.logic_tick = 33;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 100 * 65536);
+	w.logic_tick = 64;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536 && v.veh.spawn_pose[2] == 3 * 65536);
 }
 
 // Captured AS zones select a category-compatible marker in team frontier order.
@@ -2739,13 +2827,13 @@ static void test_aircraft_landing_and_navigation_states() {
 	b.f[AiBrain::kPendState] = 6;
 	w.ai.apply_transition(ai, w);
 	CHECK(b.f[AiBrain::kCurState] == 6 && b.f[AiBrain::kStep] == 8 && b.f[138] == 3000);
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[138] == 3000);
 	e.position.z = 4;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[138] == 2114);
 	e.position.z = -1;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kCurState] == 14 && e.position.z == 0);
 	b.f[AiBrain::kPendState] = 7;
 	w.ai.apply_transition(ai, w);
@@ -2762,18 +2850,18 @@ static void test_aircraft_landing_and_navigation_states() {
 	ai.profile.field216 = 20 * 65536;
 	ai.profile.field220 = 8000;
 	ai.profile.min_agl = 5 * 65536;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 12 * 65536 && b.f[138] == 6000);
 	CHECK(b.f[AiBrain::kOutSpeed] == 1000 && b.f[AiBrain::kWorkPosX] == 100 * 65536);
 	b.f[AiBrain::kUseWaypointZones] = 1;
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 30 * 65536);
 	b.f[AiBrain::kUseWaypointZones] = 0;
 	b.f[AiBrain::kPendState] = 11;
 	w.ai.apply_transition(ai, w);
-	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.process_air_state_machine(ai, w, 0);
 	CHECK(b.f[AiBrain::kWorkPosZ] == 20 * 65536 && b.f[138] == 8000);
-	CHECK(b.f[AiBrain::kOutSpeed] == 2000 && w.ai.unported_calls == 0);
+	CHECK(b.f[AiBrain::kOutSpeed] == 2000);
 }
 
 // ---------------------------------------------------------------------------
@@ -2872,7 +2960,7 @@ void test_gnrl_death_is_husk_sound_and_one_effect() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	w.logic_tick = 140;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.empty());
 }
@@ -2939,11 +3027,11 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	// Pool 2 subtracts 8 on its first visit, then runs the expired clock on the next.
 	for (uint32_t t = 200; t < 208; ++t) {
 		w.logic_tick = t;
-		tick_item_event_pool(w, h.pool());
+		step_item_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
 	w.logic_tick = 208;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -2959,7 +3047,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	// Idempotent afterwards: the later think re-arms and the husked notify
 	// meets its gate.
 	w.logic_tick = 240;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.size() == 1);
@@ -2993,7 +3081,7 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	CHECK(count_active_pieces(w) == 3);
 	// Client callbacks run too; the completed husk remains inert.
 	w.logic_tick = 60;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 }
 
@@ -3178,11 +3266,11 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 
 	for (uint32_t t = 300; t < expiry; ++t) {
 		w.logic_tick = t;
-		tick_item_event_pool(w, h.pool());
+		step_item_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
 	w.logic_tick = expiry;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -3199,7 +3287,7 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 	}
 	// No death sound replay and no second detonation.
 	w.logic_tick = 400;
-	tick_item_event_pool(w, h.pool());
+	step_item_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 2);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(count_effect(w, "Effect_AirExp", 0) == 1);
@@ -3713,6 +3801,67 @@ void test_session_peer_without_authority_applies_no_blast() {
     CHECK(w.registry.get(item)->health < 120);
 }
 
+// The plyr callback's waypoint tail ends its blast (event 2) and knife
+// (event 3) events too: a team 1/2 player whose AI slot carries a route
+// channel marks the node it stands in.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B;
+//  Entity_ApplyWeaponDamage's notify @0x4E6B72;
+//  Entity_ApplyVehicleCollisionDamage's notify @0x4E6752]
+void test_player_blast_and_knife_run_the_waypoint_tail() {
+    for (const bool knife : {false, true}) {
+        auto storage = std::make_unique<World>();
+        World &w = *storage;
+        seed_ammo(w);
+        AmmoTableEntry cut;
+        cut.name = "KNIFE";
+        cut.valid = true;
+        cut.kztype = ammo_kz::kKnife;
+        cut.kz_damage = 150;
+        cut.kz_maxradius = 1.5f;
+        w.tables.ammo.entries.push_back(cut); // index 4
+        w.registry.configure_pool(0, 4);
+        Entity source;
+        source.kind = EntityKind::Organic;
+        source.has_item_def = true;
+        source.item_type = 3;
+        source.health = 100;
+        source.team = 2;
+        const EntityHandle attacker = w.registry.spawn(0, source);
+        Entity player;
+        player.kind = EntityKind::Organic;
+        player.has_item_def = true;
+        player.item_type = 3;
+        player.item_id = 600;
+        player.health = player.health_max = 1000;
+        player.bound_radius = 0.6f;
+        player.team = 1;
+        player.net_id = 7;
+        player.flags = player.engine_flags = kEntityFlagPlayer;
+        player.position = knife ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{5.6f, 0.0f, 0.0f};
+        const EntityHandle body = w.registry.spawn(0, player);
+        AiEntity &ai = *w.ai.at(w.ai.attach(body));
+        ai.pos[0] = to_fixed(player.position.x);
+        ai.slot.f[37] = 3;
+        w.ai.nav.channels.resize(4);
+        w.ai.nav.channels[3].count = 1;
+        w.ai.nav.channels[3].entries[0] = 0;
+        w.ai.nav.nodes.resize(1);
+        w.ai.nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
+        w.ai.nav.nodes[0].f[1] = ai.pos[0];
+        w.ai.nav.nodes[0].f[2] = ai.pos[1];
+        ExplosionEntry e;
+        e.pos = Vec3{};
+        e.type = knife ? ammo_kz::kKnife : ammo_kz::kStandard;
+        e.ammo_index = knife ? 4 : 1;
+        e.owner = attacker;
+        run_blast(w, e);
+        CHECK(w.registry.get(body)->health < 1000);
+        CHECK(w.registry.get(body)->spawn_phase == 64);
+        CHECK(w.script.relations.single_visited(7, 3, 0));
+        CHECK(w.script.relations.group_visited(1, 3, 0));
+    }
+}
+
 // The kind-1 (knife) kill zone: a live person other than the source inside
 // kz_maxradius takes the full kz_damage as a signed-word subtraction with the
 // knife cause bit, and the kill event credits the source; items are never
@@ -3769,10 +3918,13 @@ void test_knife_kill_zone() {
     CHECK(v->last_attacker == attacker);
     CHECK(v->death_anim_state ==
             compute_death_anim_state(kCollisionDeathBone, 0, kCollisionDeathCause));
+    // The knife edge runs the kill accounting [orig:
+    // Entity_ApplyVehicleCollisionDamage @0x4E6620 (the Score_ProcessKillEvent
+    // call @0x4E6773)].
     bool credited = false;
     for (const RoundDeath &death : w.round_sim.deaths)
         if (death.victim == victim && death.killer == attacker &&
-                death.event_flags == kDamageFlagCollision)
+                death.event_flags == kDamageFlagCollision && death.kill_event)
             credited = true;
     CHECK(credited);
     CHECK(w.registry.get(attacker)->health == 100);
@@ -3782,6 +3934,64 @@ void test_knife_kill_zone() {
     run_blast(w, e);
     CHECK(w.registry.get(far_victim)->health == -50);
     CHECK(w.registry.get(item)->health == 120);
+}
+
+// The kind-3 (medic kit) kill zone: per same-team person in radius other than
+// the medic, a dead one not already being revived queues a revive and a live
+// one below its def hp queues a heal, in sweep order; a full-health teammate
+// and an enemy queue nothing, and the heal itself is the host's transaction.
+// [orig: Projectile_ProcessExplosionQueue case 3 @0x4EADDD..0x4EADFC;
+//  GameEvent_HandleMedicInteraction @0x4E6790 — gates @0x4E679C..0x4E67BD,
+//  dead arm @0x4E67C2..0x4E67D8, live arm @0x4E67E3..0x4E6805]
+void test_medic_kill_zone_queues_both_arms() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.registry.configure_pool(0, 8);
+    w.tables.ammo.entries.resize(2);
+    AmmoTableEntry &kit = w.tables.ammo.entries[1];
+    kit.name = "MEDKIT";
+    kit.valid = true;
+    kit.kztype = ammo_kz::kMedic;
+    kit.kz_maxradius = 3.0f;
+    w.tables.class_attribute_flags[(5u - 1u) & 0xFu] = MissionTables::kCharAttrMedic;
+    Entity medic_seed;
+    medic_seed.kind = EntityKind::Organic;
+    medic_seed.has_item_def = true;
+    medic_seed.item_type = 3;
+    medic_seed.health = 150;
+    medic_seed.health_max = 150;
+    medic_seed.bound_radius = 0.6f;
+    medic_seed.player_class = 5;
+    medic_seed.team = 1;
+    const EntityHandle medic = w.registry.spawn(0, medic_seed);
+    Entity hurt_seed = medic_seed;
+    hurt_seed.player_class = 1;
+    hurt_seed.health = 40;
+    hurt_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+    const EntityHandle hurt = w.registry.spawn(0, hurt_seed);
+    Entity whole_seed = hurt_seed;
+    whole_seed.health = 150;
+    w.registry.spawn(0, whole_seed);
+    Entity downed_seed = hurt_seed;
+    downed_seed.health = 0;
+    downed_seed.flags |= kEntityFlagDead;
+    const EntityHandle downed = w.registry.spawn(0, downed_seed);
+    Entity enemy_seed = hurt_seed;
+    enemy_seed.team = 2;
+    w.registry.spawn(0, enemy_seed);
+    ExplosionEntry e;
+    e.pos = Vec3{};
+    e.type = ammo_kz::kMedic;
+    e.ammo_index = 1;
+    e.owner = medic;
+    run_blast(w, e);
+    const std::vector<MedicInteraction> &queued = w.round_sim.medic_interactions;
+    CHECK(queued.size() == 2);
+    CHECK(queued.size() == 2 && queued[0].victim == hurt && !queued[0].revive &&
+          queued[0].healer == medic);
+    CHECK(queued.size() == 2 && queued[1].victim == downed && queued[1].revive &&
+          queued[1].healer == medic);
+    CHECK(w.registry.get(hurt)->health == 40);
 }
 
 int main() {
@@ -3795,6 +4005,7 @@ int main() {
     test_dead_unattributed_source_credits_no_one();
     test_session_peer_without_authority_applies_no_blast();
     test_knife_kill_zone();
+    test_player_blast_and_knife_run_the_waypoint_tail();
     test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
@@ -3810,6 +4021,7 @@ int main() {
 	test_death_effect_banks_and_water_crossings();
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();
+	test_spawn_markers_ride_the_script_admission();
 	test_aircraft_death_lifecycle();
 	test_aircraft_death_spin_rates_roll_in_retail_order();
 	test_vehicle_death_kills_authored_children();
@@ -3849,6 +4061,7 @@ int main() {
     test_round_destroys_item();
     test_building_death_requires_loaded_husk_model();
     test_net_kill_runs_client_side_death_chain();
+    test_medic_kill_zone_queues_both_arms();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -25,6 +25,26 @@ void ClientReplicaPipeline::apply_script_remote_command(
 	pending_script_remote_commands_.push_back(std::move(command));
 }
 
+// The S2C 0x3F HUD relay leg: the authority's objective notifications and
+// mission-text chat lines, queued for the joiner role to replay against its
+// world. [orig: NapiNPClientMsg_0x03F @0x42BB20]
+void ClientReplicaPipeline::apply_objective_notification(
+		const std::vector<uint8_t> &body) {
+	ObjectiveNotification notice;
+	size_t consumed = 0;
+	if (!decode_objective_notification(body.data(), body.size(), notice, consumed)) {
+		++malformed_bodies_;
+		return;
+	}
+	pending_objective_notifications_.push_back(std::move(notice));
+}
+
+std::vector<ObjectiveNotification> ClientReplicaPipeline::drain_objective_notifications() {
+	std::vector<ObjectiveNotification> out;
+	out.swap(pending_objective_notifications_);
+	return out;
+}
+
 std::vector<ScriptRemoteCommand> ClientReplicaPipeline::drain_script_remote_commands() {
 	std::vector<ScriptRemoteCommand> out;
 	out.swap(pending_script_remote_commands_);

@@ -402,6 +402,10 @@ std::vector<uint8_t> encode_player_downed_state(
 std::vector<uint8_t> encode_deployed_item_spawn(const DeployedItemSpawn &spawn);
 std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal);
 
+// S2C 0x3F — kind 0 is 14 bytes, kind 1 carries the key with its NUL.
+// [orig: Server_BroadcastEntityActionPacket @0x5080D0]
+std::vector<uint8_t> encode_objective_notification(const ObjectiveNotification &notice);
+
 // S2C 0x2F — exact 19-byte objective/carryable state record.
 // [orig: serialize_entity_with_parent_and_target @0x505810]
 std::vector<uint8_t> encode_objective_entity_state(

@@ -278,8 +278,11 @@ static void test_remote_command_classes() {
         f.world.registry.get(handle)->engine_flags |= kEntityFlagPlayer; // the humans group
     std::vector<ScriptRemoteCommand> &queue = f.world.out.script_remote_commands;
     // PLOOP visits the member array in reverse: third, second, then local.
+    // Each pass reports 1: the targeted class without the call, the local
+    // text handler by its own return [orig: Chat_AddSystemMessage @0x4EDB64].
+    // Bare words reach the string pool upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
     f.run("ploop\nptext(hello) store(v1) add(v2,v1)\nend\n");
-    CHECK(f.value(1) == 0 && f.value(2) == 2);
+    CHECK(f.value(1) == 1 && f.value(2) == 3);
     CHECK(f.world.out.effects.count("text") == 1);
     CHECK(queue.size() == 2);
     if (queue.size() == 2) {
@@ -287,22 +290,22 @@ static void test_remote_command_classes() {
         CHECK(queue[1].targeted && queue[1].target == second);
         for (const ScriptRemoteCommand &record : queue) {
             CHECK(record.command_index == wac_command_index("text"));
-            CHECK(record.args.size() == 1 && record.args[0].text == "hello");
+            CHECK(record.args.size() == 1 && record.args[0].text == "HELLO");
         }
     }
     queue.clear();
     // A broadcast row: one record, and the local handler still runs.
     f.run("text(all) store(v3)\n");
-    CHECK(f.value(3) == 0 && f.world.out.effects.count("text") == 2);
+    CHECK(f.value(3) == 1 && f.world.out.effects.count("text") == 2);
     CHECK(queue.size() == 1 && !queue[0].targeted &&
           queue[0].command_index == wac_command_index("text"));
-    CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "all");
+    CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "ALL");
     queue.clear();
     // The targeted class falls through to the local handler for an
     // unregistered, invalid or local selection.
     f.run(f.select(npc) + "ptext(npc) store(v4)\nitem=65535\nptext(none) store(v5)\n" +
           f.select(local) + "pwave(brief)\n");
-    CHECK(f.value(4) == 0 && f.value(5) == 0);
+    CHECK(f.value(4) == 1 && f.value(5) == 1);
     CHECK(f.world.out.effects.count("text") == 4);
     CHECK(f.world.out.effects.count("dialog_wav") == 1);
     CHECK(queue.empty());
@@ -315,9 +318,9 @@ static void test_remote_command_classes() {
     if (queue.size() == 2) {
         CHECK(queue[0].targeted && queue[0].target == second);
         CHECK(queue[0].command_index == wac_command_index("wave") &&
-              queue[0].args.size() == 1 && queue[0].args[0].text == "brief2");
+              queue[0].args.size() == 1 && queue[0].args[0].text == "BRIEF2");
         CHECK(queue[1].command_index == wac_command_index("consol") &&
-              queue[1].args.size() == 1 && queue[1].args[0].text == "dbg");
+              queue[1].args.size() == 1 && queue[1].args[0].text == "DBG");
     }
     queue.clear();
     // Ssn and numeric operands travel resolved: the packed handle and the dword.
@@ -326,7 +329,7 @@ static void test_remote_command_classes() {
     if (queue.size() == 2) {
         CHECK(!queue[0].targeted && queue[0].command_index == wac_command_index("hideSSN"));
         CHECK(queue[0].args.size() == 1 && queue[0].args[0].value == second.packed);
-        CHECK(queue[1].args.size() == 2 && queue[1].args[0].text == "numbered" &&
+        CHECK(queue[1].args.size() == 2 && queue[1].args[0].text == "NUMBERED" &&
               queue[1].args[1].value == 7);
     }
     CHECK(f.world.diagnostics.empty());
@@ -386,10 +389,60 @@ static void test_remote_command_fanout_reaches_owner_and_remotes() {
     const std::vector<std::string> owner = texts(f.transport, pop_udp);
     const std::vector<std::string> remote = texts(observer_transport, pop_udp);
     const std::vector<std::string> listen_host = texts(loopback, pop_loop);
-    CHECK(owner.size() == 2 && owner[0] == "owner_only" && owner[1] == "everyone");
-    CHECK(remote.size() == 1 && remote[0] == "everyone");
+    CHECK(owner.size() == 2 && owner[0] == "OWNER_ONLY" && owner[1] == "EVERYONE");
+    CHECK(remote.size() == 1 && remote[0] == "EVERYONE");
     CHECK(listen_host.empty());
     CHECK(f.world.out.effects.count("text") == 1); // the host ran only the broadcast row
+}
+
+// onptick compares the selected player's slot play-tick dword, in whole
+// seconds, with its argument; it is not the VM clock. The server tick advances
+// that dword once per tick for an in-match slot whose entity is present and not
+// hidden, without the 1860-tick saturation of the control-request age, and
+// with no session or deploy gate: a pending deploy with a visible body and a
+// closed session keep counting. The round end's slot state 7 stops it.
+// [orig: WacCmd_OnPlayerTick @0x4F0E10 — the Entity_ValidatePtr call @0x4F0E58,
+//  `mov ecx,[eax+184h]` @0x4F0E65, /62 @0x4F0E6B..0x4F0E7C; Server_TickUpdate
+//  @0x51D960..0x51D977 (`add [esi+184h],1` @0x51D977), the is_in_session test
+//  after it @0x51D9A5; Server_ProcessRoundEnd's state 6 -> 7 @0x51685E]
+static void test_onptick_reads_the_slot_play_ticks() {
+    HostFixture f;
+    MatchPlayer *slot = f.world.match.player(f.actor);
+    CHECK(slot != nullptr && slot->play_ticks == 0);
+    if (slot == nullptr) return;
+    for (int i = 0; i < 124; ++i) nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 124);
+    f.run(f.select(f.actor) + "onptick(2) store(v1)\nonptick(1) store(v2)\nontick(0) store(v3)\n");
+    CHECK(f.value(1) == 1 && f.value(2) == 0 && f.value(3) == 1);
+    // A hidden body (Flags bit 0) pauses the count; a pending deploy with a
+    // visible body does not, nor does a closed session.
+    f.world.registry.get(f.actor)->flags |= kEntityFlagCarried;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 124);
+    f.world.registry.get(f.actor)->flags &= ~kEntityFlagCarried;
+    f.ctx.np_protocol.connection_list.front().link.respawn_pending = true;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 125);
+    f.ctx.np_protocol.connection_list.front().link.respawn_pending = false;
+    f.ctx.is_in_session = 0;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 126);
+    f.ctx.is_in_session = 1;
+    // No saturation past the control-request gate.
+    slot->play_ticks = 1860u * 3u;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == 1860u * 3u + 1u);
+    f.run(f.select(f.actor) + "onptick(90) store(v4)\n");
+    CHECK(f.value(4) == 1);
+    // An entity without an active slot, and no selection, read 0.
+    const auto npc = f.spawn(12, 1, false);
+    f.run(f.select(npc) + "onptick(0) store(v5)\nitem=65535\nonptick(0) store(v6)\n");
+    CHECK(f.value(5) == 0 && f.value(6) == 0);
+    // The round end moves the slot to state 7: the count stops.
+    f.world.process_round_end(1);
+    const uint32_t at_end = slot->play_ticks;
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(slot->play_ticks == at_end);
 }
 
 int main() {
@@ -400,6 +453,7 @@ int main() {
     test_punt_retry_local_and_stale_slot_guards();
     test_remote_command_classes();
     test_remote_command_fanout_reaches_owner_and_remotes();
+    test_onptick_reads_the_slot_play_ticks();
     std::printf("wac_players: %d failures\n", failures);
     return failures ? 1 : 0;
 }

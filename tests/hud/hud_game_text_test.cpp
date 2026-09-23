@@ -38,6 +38,9 @@ int main() {
 			{ "WinConditions/STRWINMSG007", "Objective secured" },
 			{ "LoseConditions/STRLOSEMSG007", "Objective lost" },
 			{ "Triggered Text/ID012", "Proceed to the beach" },
+			{ "WinConditions/STRWINDIRECTIVE003", "Take the bridge" },
+			{ "LoseConditions/STRLOSEDIRECTIVE003", "Do not lose the convoy" },
+			{ "WinConditions/STRWINDIRECTIVE004", "x" },
 	});
 	const GameTextLookup gametext = table_of({
 			{ "WPNames/STRWPNAMEDEFAULT", "Waypoint" },
@@ -47,6 +50,7 @@ int main() {
 			{ "Canned Msg/STRCND_FULLYCAMPED_BLUE", "Blue holds %s" },
 			{ "WPNames/STRWPNAME005", "Hilltop" },
 			{ "Client/STRCLI01", "Unknown" },
+			{ "Misc/STRMISC_NEWOBJECTIVE", "New Objective" },
 	});
 	const GameTextLookup empty = table_of({});
 
@@ -63,6 +67,16 @@ int main() {
 	CHECK(subgoal_message(false, 7, mission) == "Objective secured");
 	CHECK(subgoal_message(true, 7, mission) == "Objective lost");
 	CHECK(subgoal_message(false, 8, mission).empty());
+
+	// A shown objective: the gametext header and the directive by section; a
+	// directive shorter than two characters (or missing) posts nothing.
+	// [orig: HUD_ShowObjectiveNotification @0x5ba2e0 — @0x5ba37b the drop]
+	CHECK(objective_header(gametext) == "New Objective");
+	CHECK(objective_header(empty).empty());
+	CHECK(objective_directive(true, 3, mission) == "Take the bridge");
+	CHECK(objective_directive(false, 3, mission) == "Do not lose the convoy");
+	CHECK(objective_directive(true, 4, mission).empty());
+	CHECK(objective_directive(true, 5, mission).empty());
 
 	// Triggered text keys ID%03d; a miss shows nothing.
 	CHECK(triggered_text(12, mission) == "Proceed to the beach");

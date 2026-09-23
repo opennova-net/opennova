@@ -424,7 +424,11 @@ size_t load_items_def(const char *path) {
 	for (size_t i = 0; i < items.count; ++i) {
 		const DefItemDef &it = items.entries[i];
 		const int wire_id = it.id - 100000;
-		if (wire_id >= 0 && wire_id < 0x10000) {
+		// A wire type resolves to its FIRST items.def row; a later row repeating
+		// the id is never reached [orig: ItemList_FindIndexByTypeId @0x49E100,
+		// called by NapiNPClientMsg_0x00D @0x4332DA].
+		if (wire_id >= 0 && wire_id < 0x10000 &&
+				g_item_names.find(wire_id) == g_item_names.end()) {
 			g_item_names[wire_id] = it.display_name;
 			// §5.10b: the engine reads ItemDef+356 to dispatch the per-entity
 			// network-serialize callback; that field is seeded from one of the

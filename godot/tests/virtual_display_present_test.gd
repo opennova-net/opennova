@@ -413,7 +413,7 @@ func test_installed_m1a1_driver_view_swaps_the_hull_for_its_cockpit() -> void:
 	var hull_handle := fixture.hull.get_wire_handle()
 
 	# First person: the engine frame swaps the driven hull for its display.
-	_installed_presenter.set_third_person_selected(false)
+	_installed_presenter.apply_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
 	_frames(fixture, 2)
 	var view := fixture.world.local_player_view()
 	assert_false(view.third_person)
@@ -484,11 +484,11 @@ func test_installed_m1a1_driver_view_swaps_the_hull_for_its_cockpit() -> void:
 	assert_eq(entities.virtual_display_node(), display, "one model for the whole drive")
 
 	# The chase camera draws the hull again; first person swaps back.
-	_installed_presenter.set_third_person_selected(true)
+	_installed_presenter.apply_view_action(Simulation.VIEW_ACTION_CHASE)
 	_frames(fixture, 2)
 	assert_false(display.visible, "the chase camera draws no cockpit")
 	assert_true(hull_node.visible, "...and the hull again")
-	_installed_presenter.set_third_person_selected(false)
+	_installed_presenter.apply_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
 	_frames(fixture, 2)
 	assert_true(display.visible)
 	assert_false(hull_node.visible)
@@ -527,7 +527,7 @@ func test_installed_m1a1_display_ends_when_the_driver_gives_up_the_claim() -> vo
 	var fixture := _board_installed_m1a1()
 	if fixture == null:
 		return
-	_installed_presenter.set_third_person_selected(false)
+	_installed_presenter.apply_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
 	_frames(fixture, 2)
 	var hull_node := fixture.entities.resolve_present_handle(fixture.hull.get_wire_handle())
 	var display := fixture.entities.virtual_display_node()

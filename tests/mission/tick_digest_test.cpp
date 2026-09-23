@@ -68,7 +68,29 @@ namespace {
 // The synthetic mission has no music context. Restoring ONLY those 16 zero
 // DWORDs to each of the 241 hash samples recovers e33cefc459163b68 exactly;
 // entity, AI, RNG and real script state are unchanged by this digest update.
-constexpr uint64_t kSyntheticDigest = 0x18f8080dd8fcdb68ULL;
+// The AI/script parity pass ports retail's truncating spawn angle,
+// ((deg << 16) / 360) << 16 [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66],
+// in place of deg * 11930464: every spawned heading loses its low 16 bits,
+// which moves the chain from 0x18f8080dd8fcdb68.
+// The same pass keys the brain class init on the item class, not the profile
+// type [orig: Entity_InitHelicopterAIFromDef @0x4683C0 / Entity_InitVehicleAIFromDef
+// @0x4686C0], and drops the invented default speed of 20: organic brains no
+// longer carry it in brain[49]/[50], which moves the chain from 0x31938283c4bbc368
+// (bisected to that one commit; the brain stream reproduced the old value by
+// restoring only the default speed).
+// The pass then ports the entity-update admission: an authority with no human
+// in the world and a WAC clock past its first run skips the whole entity update
+// [orig: Game_ProcessMainFrame @0x526703..0x526742]. The synthetic mission runs
+// WAC with no human, so its world holds after the first tick, which moves the
+// chain from 0xe8c5a2c197da3de8 (the commit before it still gives that value).
+// A held world covers almost nothing, so the chain now counts one human, as a
+// played mission has: the WAC tick and the entity update run every tick
+// again, which moves the chain from 0xe5830c6fd01c9439.
+// The org1 think head then seeds the aim pitch from the SSN on every think and
+// skips an airborne body's think [orig: Entity_UpdateInfantryAI
+// @0x4BAA4B..0x4BAA66], which moves the chain from 0xc35a881f8f092209
+// (reverting that one commit restores it).
+constexpr uint64_t kSyntheticDigest = 0xa22209beb52b4e4fULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -116,7 +138,7 @@ void hash_ai(Digest &d, const w::AiEntity &a) {
 	d.value(a.roll);
 	d.value(a.body_pitch);
 	d.value(a.vel_x);
-	d.value(a.vel_z);
+	d.value(a.vel_y);
 	d.value(a.health);
 	d.value(a.team);
 	d.bytes(a.brain.f, sizeof(a.brain.f));
@@ -167,8 +189,9 @@ bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
 
 using test_boot::source_over;
 
-// Two opposing squads plus a few items, and a WAC layer whose boot writes
-// are part of the chain. There are no humans, so later WAC passes are gated.
+// Two opposing squads plus a few items, and a WAC layer whose writes are part
+// of the chain. The kernel's own player is the one human the bare tick
+// counts, so neither the WAC tick nor the entity update holds.
 bms::File synthetic_mission() {
 	bms::File m{};
 	int32_t next_id = 20;

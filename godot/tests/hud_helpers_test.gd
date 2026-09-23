@@ -119,7 +119,7 @@ func test_fade_alphas() -> void:
 
 
 func test_message_expiry_policy() -> void:
-	# [orig: Chat_AddDebugMessage @0x4987f0 — 930-tick life @0x51f216, the
+	# [orig: Chat_AddMessageChannel2 @0x4987f0 — 930-tick life @0x51f216, the
 	# >=186-tick expiry stagger vs the previous line @0x49894e]. The live ring
 	# is HudOverlay compiler state; the policy math pins here.
 	assert_eq(HudPos.message_expire_tick(0, 0, false), 930)

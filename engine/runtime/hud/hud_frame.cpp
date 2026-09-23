@@ -224,13 +224,13 @@ void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
 	// Mission triggered text posts into the ONE system ring with the default
 	// white — retail routes it through the same sink as every 0x1E line
 	// [orig: HUD_DisplayTriggeredText @ 0x51f190 ->
-	// Chat_AddDebugMessage(text, -1, 930) @ 0x51f216].
+	// Chat_AddMessageChannel2(text, -1, 930) @ 0x51f216].
 	push_feed_line(text, 0xFFFFFFFFu, now_ticks);
 }
 
 void HudFrameCompiler::push_feed_line(const std::string &text, uint32_t argb,
 		int now_ticks) {
-	// The SYSTEM ring sink [orig: Chat_AddDebugMessage @ 0x4987f0 — 930-tick
+	// The SYSTEM ring sink [orig: Chat_AddMessageChannel2 @ 0x4987f0 — 930-tick
 	// life, >= 186-tick stagger, 119-char slots]. The caller's packed color is
 	// stored RAW and drawn as stored [orig: the second HUD_DrawConsoleMessages
 	// loop passes the stored dword @0x59ae97].
@@ -515,6 +515,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.surface_w = w;
 	input.surface_h = h;
 	input.ticks = state.ticks;
+	input.waypoint_flash = state.item_flash[5];
 	input.waypoint_present = state.waypoint.present;
 	input.waypoint_x = state.waypoint.world_x;
 	input.waypoint_y = state.waypoint.world_y;
@@ -1524,7 +1525,7 @@ void HudFrameCompiler::element_objective_line(const HudFrameState &state,
 
 void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		float h) {
-	// THE SYSTEM MESSAGE FEED — the one ring every Chat_AddDebugMessage line
+	// THE SYSTEM MESSAGE FEED — the one ring every Chat_AddMessageChannel2 line
 	// lands in: the 0x1E kill/objective/medic lines AND mission triggered
 	// text [orig: HUD_DisplayTriggeredText @0x51f190 posts @0x51f216 into the
 	// same sink]. Drawn by the second HUD_DrawConsoleMessages loop

@@ -1,4 +1,5 @@
 #include <runtime/world/infantry_internal.h>
+#include <formats/def/def.h>
 #include <runtime/world/carrier_motion.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -8,11 +9,19 @@
 
 namespace opennova::world {
 // [orig: org1 Entity_UpdateInfantryAI @0x4BA45D..0x4BA891;
-// org2 Entity_UpdateInfantryPlayerBody @0x4B52A0..0x4B5726]
+// org2 Entity_UpdateInfantryPlayerBody @0x4B529F..0x4B5726]
 static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, bool player_body) {
     Entity *self = world.registry.get(e.handle);
-    // Seat posing owns mounted bodies; only the free-standing delta was missing.
-    if (self == nullptr || self->mounted) return;
+    if (self == nullptr) return;
+    // A player body's seat posing owns it while mounted. An org1 rider rides its
+    // parent: the motor head points groundEntity (+0x28) at the parent (+0x16C),
+    // so the deck ride below turns its look and aim with the carrier before the
+    // seat pose overwrites its position and body frame.
+    // [orig: Entity_UpdateInfantryAI @0x4B9A0D..0x4B9A11]
+    if (self->mounted) {
+        if (player_body) return;
+        self->ground_target = self->mount_target;
+    }
     const Entity *carrier = world.registry.get(self->ground_target);
     if (carrier == nullptr || !carrier->saved_live_valid) return;
     int32_t pos[3], yaw, pitch, roll;
@@ -51,10 +60,16 @@ static void follow_ground_carrier(AiEntity &e, World &world, int32_t bottom, boo
     }
     e.body_pitch = io::bam_add(e.body_pitch, dpitch);
     e.roll = io::bam_add(e.roll, p.roll_bam);
-    // An NPC looking at a target on another carrier keeps its world aim.
-    // Body/leg adoption and physical transport still occur. [orig: @0x4BA82C]
+    // An NPC looking at a target on another carrier keeps its world aim, and a
+    // rider of a turret parent (def+0x58 & 0x1000) leaves its look to the
+    // turret. Body/leg adoption and physical transport still occur.
+    // [orig: turret gate @0x4BA812..0x4BA82A; target gate @0x4BA82C]
+    const Entity *parent = self->mounted ? world.registry.get(self->mount_target) : nullptr;
+    const bool turret_parent = !player_body && parent != nullptr && parent->has_item_def &&
+            (parent->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0;
     const Entity *target = world.registry.get(inf.combat_target);
-    if (player_body || target == nullptr || target->ground_target == self->ground_target) {
+    if (!turret_parent &&
+        (player_body || target == nullptr || target->ground_target == self->ground_target)) {
         e.heading = p.yaw_bam;
         inf.aim_pitch = io::bam_add(inf.aim_pitch, dpitch);
         if (!player_body) inf.aim_heading = io::bam_add(inf.aim_heading, dyaw);

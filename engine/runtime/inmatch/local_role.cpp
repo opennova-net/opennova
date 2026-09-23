@@ -13,16 +13,31 @@ void LocalRole::run_tick(const TickInput &) {
 	kernel.local.view_session_inputs = view_session_inputs_for(
 			nullptr, /*joiner=*/false, kernel.local.local_player_dead());
 	kernel.local.apply_player_input_pre_tick();
+	// The single-player authority runs the server tick too, so its WAC 'humans'
+	// count is rebuilt ahead of the script pass as a host's is: the local player
+	// keeps the world-run gate open.
+	// [orig: Game_ProcessMainFrame @0x5266b4 -> Server_TickUpdate, its
+	//  Server_BuildEntitySlotLists call @0x51d89a]
+	kernel.world.cached.humans = kernel.world.registry.count_humans();
 	kernel.world.run_logic_tick(/*is_authority=*/true, world::TickPhase::Gameplay);
 	// The VM's replicated commands have no connection to reach without a
 	// session; the handler already ran locally, so the tick's queue is released.
 	// [orig: WacScript_ExecuteBytecode @0x4F58B0 -> NapiNPServer_SendFiltered
 	//  @0x4C87E0 walks an empty connection list]
 	kernel.world.out.script_remote_commands.clear();
+	// The HUD relays (S2C 0x3F) likewise have no connection to reach; the
+	// lines already posted locally. [orig: Server_BroadcastEntityActionPacket
+	//  @0x5080D0 — the NapiNPServer_SendFiltered call @0x508199]
+	kernel.world.out.hud_relays.clear();
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();
-	kernel.local.run_local_player_post_tick();
+	kernel.local.run_local_view_tick();
+	// The frame's one weapon-action walk follows the camera compose: the
+	// local player's slot pumps at its own pool-0 slot, the gunners around it.
+	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
+	//  the WeaponAction_ProcessAllEntities call @0x526786]
+	kernel.world.pump_weapon_actions();
 	kernel.resolve_new_infantry_adm_ids();
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 }
@@ -31,6 +46,12 @@ bool LocalRole::reset_to_baseline(SessionError &error) {
 	if (kernel_->restore_baseline()) return true;
 	error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
 	return false;
+}
+
+// The bare authority's mission exit: the teardown's pool destruction and the
+// one-shot PostMission sweep [orig: Game_TeardownMission @0x52266C].
+void LocalRole::close() {
+	if (kernel_ != nullptr) kernel_->run_post_mission_pass(/*is_authority=*/true);
 }
 
 } // namespace opennova::inmatch

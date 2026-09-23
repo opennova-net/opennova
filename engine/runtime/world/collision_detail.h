@@ -27,8 +27,10 @@ constexpr double kBamPerRadian = 683565275.5764316;
 // leg multiplies its atan2 results by (the target-relative subtraction then
 // yields target + atan*BAM).]
 constexpr double kNegBamPerRadian = -683565275.5764316;
-// [orig: dbl_7C3608 = 2*pi/2^32 — radians per BAM32]
-constexpr double kRadianPerBam = 1.4629180792671596e-9;
+// Retail's x87 radians-per-BAM32 double, verbatim: 30.5 ppm off the exact
+// 2*pi/2^32 (io::kRadiansPerBam), and the value the ladder trig multiplies by.
+// [orig: dbl_7C3608 = 1.4629627251502471e-9; `fmul ds:dbl_7C3608` @0x4AE9D3]
+constexpr double kRadianPerBam = 1.4629627251502471e-9;
 // [orig: flt_7C19E0 = 2147418112.0 — every sqrt is min-clamped to this before
 // _ftol2_sse so the int cast can't overflow]
 constexpr double kFtolClamp = 2147418112.0;

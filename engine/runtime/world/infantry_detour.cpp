@@ -57,8 +57,11 @@ void infantry_detour(AiSystem &ai, AiEntity &e, World &world) {
                     io::bam_add(start[0], dx), io::bam_add(start[1], dy),
                     io::bam_add(query.raycast_ground(world, e.handle, e.pos, dx, dy,
                                                      65536, 131072, nullptr), 28672)};
+                // Both rays admit every entity type [orig: `push 1` @0x4AFD9B /
+                // @0x4AFE10].
                 if (io::bam_abs(io::bam_sub(candidate[2], start[2])) > (radius << 16) ||
-                        !query.entity_los_clear(world, e.handle, ignore, start, candidate, 8192))
+                        !query.entity_los_clear(world, e.handle, ignore, start, candidate, 8192,
+                                                true))
                     continue;
                 if (candidate[2] < world.env.water_z) score += 195;
                 if (score >= best) continue;
@@ -66,7 +69,7 @@ void infantry_detour(AiSystem &ai, AiEntity &e, World &world) {
                     best = score + 390;
                     std::copy_n(candidate, 3, next);
                 }
-                if (query.entity_los_clear(world, e.handle, ignore, candidate, goal, 8192)) {
+                if (query.entity_los_clear(world, e.handle, ignore, candidate, goal, 8192, true)) {
                     best = score;
                     std::copy_n(candidate, 3, next);
                 }

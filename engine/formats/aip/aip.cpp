@@ -41,8 +41,10 @@ int32_t units_fixed(const std::string &s) {
 // per tick, atof * 1000.0 (dbl_7C6BD0) * 4.444444444444444e-06 (dbl_7C6BC8) *
 // 65536.0 (dbl_7C3CC0); a climb is atof * 0.016 (dbl_7C6A80) * 65536.0. Both
 // chop through _ftol2_sse. The GROUND branch converts its speeds the same way
-// @0x45e6df/@0x45e72d (+0xC0/+0xC4); that pair stays raw here because its
-// consumer, the brain seed, applies the identical x65536/225 scale.
+// @0x45e6df/@0x45e72d (+0xC0/+0xC4; the patrol leg's fmul chain and ftol
+// @0x45E6E8..0x45E6FD) into ground_patrol_speed / ground_combat_speed; the raw
+// patrol_speed / combat_speed integers stay alongside as the resolver's
+// parsed-anything probe.
 int32_t speed_fixed(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * 1000.0 * 4.444444444444444e-06 * 65536.0);
 }
@@ -114,8 +116,8 @@ bool apply_weapon_key(WeaponBlock &w, const std::string &key, const std::string 
 
 Profile parse_profile(const uint8_t *text, size_t size) {
     // Line-oriented tokenizer (spaces/tabs/CR), keys case-insensitive.
-    // Dispatch is gated on the active `type` exactly like retail: GROUND (2)
-    // accepts the witnessed set, ORGANIC (3) nothing, HELO (1) unported.
+    // Dispatch is gated on the active `type` exactly like retail: HELO (1) and
+    // GROUND (2) accept their key sets, ORGANIC (3) nothing.
     // [orig: AIProfile_ParseProperty @ 0x45de70]
     Profile prof;
     const char *p = reinterpret_cast<const char *>(text);
@@ -280,6 +282,28 @@ Profile parse_profile(const uint8_t *text, size_t size) {
 			(void)apply_weapon_key(prof.secondary, key, "secondary", rtoks);
 	}
     return prof;
+}
+
+ClassSpeeds class_speed_words(const Profile &profile, bool helicopter_init) {
+    ClassSpeeds out;
+    if (profile.type == 1) {
+        if (helicopter_init) {
+            out.speed_a = profile.helo_combat_speed;                    // +0xD4
+            out.speed_b = profile.helo_patrol_speed;                    // +0xC8
+        } else {
+            out.speed_a = profile.hunt_limit;                           // +0xC4
+            out.speed_b = static_cast<int32_t>(profile.hunt_flags);     // +0xC0
+        }
+    } else if (profile.type == 2) {
+        if (helicopter_init) {
+            out.speed_a = profile.radio_delay;                          // +0xD4
+            out.speed_b = profile.turn_rate_bam_tick;                   // +0xC8
+        } else {
+            out.speed_a = profile.ground_combat_speed;                  // +0xC4
+            out.speed_b = profile.ground_patrol_speed;                  // +0xC0
+        }
+    }
+    return out;
 }
 
 }  // namespace opennova::aip

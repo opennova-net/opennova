@@ -193,6 +193,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_slope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_force.cpp   # Entity_ApplyCollisionForce: burn state + the four force modes
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp
@@ -349,11 +350,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_revive.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp

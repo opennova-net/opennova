@@ -99,6 +99,11 @@ struct ThrowableClassRow {
     int32_t health_max = 0;
     int32_t armor_impact = 0;
     int32_t armor_kz = 0;
+    // The row's items.def ordinal: the placed entity's ItemTypeIndex (+0x1C),
+    // which the clone copies from its type's template entity
+    // [orig: Entity_CloneFromTemplateByType @ 0x4398a0 — the template's +0x1C
+    //  gate @0x4398A5, then the block copy].
+    int32_t item_type_index = 0;
 };
 
 struct ThrowableClassTable {
@@ -207,10 +212,16 @@ public:
     uint32_t fan_prng_state = 0x2B0749C1u;
     uint16_t fan_prng();
 
-    // One 62 Hz think pass over the placed devices [orig: Entity_UpdatePool1Slot
-    // @ 0x4b8dd0 — arm-delay countdown, then think every tick].
-    void tick(World &world, CollisionWorld *collision,
-              const terrain::TerrainHeightField *terrain);
+    // The active device placed as `entity` (same registry lifetime), else null:
+    // the placed-device row's class on its pool-1 visit.
+    PlacedDevice *device_for(const Entity &entity);
+    // One placed device's pool-1 visit legs: the arm-delay/age gate, the think,
+    // the stuck-to parent follow, the decrement [orig: Entity_UpdatePool1Slot
+    // @ 0x4b8dd0]. World::update_all_entities runs it from the device row's
+    // own visit; compact() drops the rows the visits released.
+    void update_device(World &world, PlacedDevice &device, CollisionWorld *collision,
+                       const terrain::TerrainHeightField *terrain);
+    void compact();
 
     // Rest-conversion: the satchel/claymore round becomes a placed device + a
     // registry entity [orig: the authority rest leg of the schl/clym motors ->
@@ -237,6 +248,10 @@ private:
     void detonate_device(World &world, PlacedDevice &device,
                          const char *boom_ammo_name);
     void remove_device(World &world, PlacedDevice &device);
+    void think_device(World &world, PlacedDevice &device, Entity *entity,
+                      CollisionWorld *collision,
+                      const terrain::TerrainHeightField *terrain);
+    void follow_parent(World &world, PlacedDevice &device, Entity *entity);
     bool enemy_in_cone(World &world, CollisionWorld *collision,
                        const terrain::TerrainHeightField *terrain,
                        const PlacedDevice &device, float max_range_units,

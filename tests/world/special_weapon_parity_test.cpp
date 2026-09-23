@@ -432,7 +432,38 @@ void guided_rounds_track_the_target_aim_origin() {
     }
 }
 }
+// The authority's own local round runs Server_ClientFiredRound's local pass,
+// which scores one FIRE event (field 2 plus the FIRE value) for the shooter's
+// slot; a joiner's predicted round scores nothing.
+// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 (the authority's
+//  Server_ClientFiredRound call @0x42BF34); Server_ClientFiredRound @0x50BAA0
+//  (the event-1 call @0x50C727)]
+void authority_local_fire_scores_one_shot() {
+    for (const bool authority : {true, false}) {
+        Rig r;
+        MatchRules rules;
+        rules.game_type = 0x10000u; // TDM
+        rules.score_values.emplace();
+        (*rules.score_values)[0] = 2; // FIRE
+        r.world.match.configure(rules);
+        r.world.match.upsert_player({r.shooter, 0, "Local"});
+        local_weapon_set_input(r.local.weapon, r.local.view, true, true, false);
+        LocalWeaponPumpIO io;
+        io.view = &r.local.view;
+        io.is_authority = authority;
+        io.self_wire_handle = r.shooter.packed;
+        local_weapon_pump_tick(r.world, r.local.weapon, io);
+        // The authority appends its own ring record; a joiner reports its
+        // predicted round for the C2S 0x06 wire instead.
+        CHECK(authority ? r.world.out.rounds.count == 1 : io.fired.valid);
+        const MatchPlayer *row = r.world.match.player(r.shooter);
+        CHECK(row != nullptr && row->stats[MatchStats::kShotsFired] == (authority ? 1 : 0));
+        CHECK(row != nullptr && row->stats[MatchStats::kPoints] == (authority ? 2 : 0));
+    }
+}
+
 int main() {
+    authority_local_fire_scores_one_shot();
     mortar_elevation_is_independent_of_view_pitch();
     mortar_elevation_survives_rebake_and_ignores_look_keys();
     designator_fire_uses_the_measured_position();

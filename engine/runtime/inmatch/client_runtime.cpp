@@ -401,6 +401,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_game_events();
 	view_.drain_weapon_reloads();
 	view_.drain_script_remote_commands();
+	view_.drain_objective_notifications();
 	view_.drain_effect_commands();
 	view_.set_game_type(0);
 	view_.set_mp_session(true); // a joiner is in-session by definition
@@ -626,6 +627,10 @@ std::vector<replication::ClientGameEvent> ClientRuntime::drain_game_events() {
 
 std::vector<ScriptRemoteCommand> ClientRuntime::drain_script_remote_commands() {
 	return view_.drain_script_remote_commands();
+}
+
+std::vector<ObjectiveNotification> ClientRuntime::drain_objective_notifications() {
+	return view_.drain_objective_notifications();
 }
 
 std::vector<WeaponReload> ClientRuntime::drain_reload_notifications() {

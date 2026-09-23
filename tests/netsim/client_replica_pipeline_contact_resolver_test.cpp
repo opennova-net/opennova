@@ -49,7 +49,7 @@ struct StillSource final : public opennova::world::IRootMotionSource {
 		out.capsule_top = 0x1C000;
 		return true;
 	}
-	bool advance_blended(int, int, int32_t &pphase, int, int32_t &tphase, float,
+	bool advance_blended(int, int, int, int32_t &pphase, int, int, int32_t &tphase, float,
 	                     opennova::world::RootMotionFrame &out) override {
 		pphase += 1024;
 		tphase += 1024;

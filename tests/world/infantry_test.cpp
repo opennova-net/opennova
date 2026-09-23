@@ -12,9 +12,10 @@
 //   * state-commit rules straight off the real flag table (burn 111 = locked 0x004
 //     queues; emote_1 115 = 0x020 yields only to movement-flagged targets),
 //   * kJumpLoop forced forward delta 1024,
-//   * per-tick gravity (org1 -416 + pos += 2*vel; org2 -208 + pos += vel) to terminal
+//   * gravity (org1 -416 + pos += 2*vel on even key ticks through the +0xAC
+//     quarter-step tail; org2 -208 + pos += vel every tick) to terminal
 //     -32768, landing snap + fall damage excess>>4 with the injectable scale
-//     [orig: dword_C6EAE4], the player jump (cooldown 32 / no auto-repeat / prone gate),
+//     [orig: wac_var_fallmps], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
@@ -34,6 +35,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
@@ -196,13 +198,34 @@ void route(AiSystem &ai, AiEntity *e, const std::vector<NavEntry> &nodes, int lo
     e->slot.f[38] = 0; // node      [orig: slot+152]
 }
 
+// The organic rigs attach their brains to a rig-owned AiSystem, most without
+// registry rows, so the World's pool-0 walk cannot reach them: they step the
+// organic legs of the entity update directly -- the damage reactions, the
+// proximity tables, each body's +0x1C4 update, the timed AI events.
+// [orig: Entity_UpdateAllEntities @0x4C2100 -- @0x4C2226, @0x4C240A,
+//  the pool-0 walk @0x4C2426..0x4C2474]
+void step_organics(AiSystem &ai, World &w, const TickContext &ctx) {
+    ai.is_authority = ctx.is_authority;
+    ai.apply_round_hits(w);
+    if (ai.collision != nullptr) {
+        ai.collision->local_player = w.cached.local_player;
+        ai.collision->build_tick_tables(w);
+    }
+    for (int i = 0; i < ai.count(); ++i) {
+        AiEntity &e = *ai.at(i);
+        if (e.brain.f[AiBrain::kOwner] != 0 && e.inf.active)
+            ai.update_organic(e, w, ctx.logic_tick);
+    }
+    ai.events.process_timed(ai, w);
+}
+
 void run_ticks(AiSystem &ai, World &w, uint32_t from, uint32_t to_excl) {
     TickContext ctx;
     ctx.world = &w;
     ctx.is_authority = true;
     for (uint32_t t = from; t < to_excl; ++t) {
         ctx.logic_tick = t;
-        ai.tick(w, ctx);
+        step_organics(ai, w, ctx);
     }
 }
 
@@ -702,15 +725,22 @@ void test_org1_ladder_hold_press_and_top_select() {
     CHECK(m->inf.body_heading == rig.collision.last_ladder_frame.yaw);
     CHECK(m->inf.anim_state == anim_state::kClimbUp);         // below anchor-0.75
 
-    // Inside the anchor band the select promotes to climb_top.
+    // The org1 ladder block runs on EVEN key ticks only: an odd tick jumps
+    // past it to the vertical tail. [orig: Entity_UpdateInfantryAI odd skip
+    // @0x4BF6A5..0x4BF6B2 -> @0x4BFC80, past the block @0x4BF907]
     m->pos[2] = fx(2.5);
     run_ticks(rig.ai, rig.world, 1, 2);
+    CHECK(m->inf.anim_state == anim_state::kClimbUp); // odd tick: no select
+
+    // Inside the anchor band the select promotes to climb_top.
+    m->pos[2] = fx(2.5);
+    run_ticks(rig.ai, rig.world, 2, 3);
     CHECK(m->inf.anim_state == anim_state::kClimbTop);
 
     // A live person at the probe point (1.25u along the body heading) with an
     // overlapping Z band holds the climb at climb_idle.
     m->pos[2] = fx(1.5);
-    run_ticks(rig.ai, rig.world, 2, 3); // resettle into climb_up first
+    run_ticks(rig.ai, rig.world, 3, 5); // resettle into climb_up first
     CHECK(m->inf.anim_state == anim_state::kClimbUp);
     Entity blocker;
     blocker.kind = EntityKind::Organic;
@@ -722,15 +752,16 @@ void test_org1_ladder_hold_press_and_top_select() {
     blocker.alive = true;
     rig.world.registry.spawn(0, blocker);
     for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
-    run_ticks(rig.ai, rig.world, 3, 4);
+    run_ticks(rig.ai, rig.world, 5, 7);
     CHECK(m->inf.anim_state == anim_state::kClimbIdle);
 
     // The 0x80 climb order: gravity becomes the capped sixteenth-step Z chase
-    // to the move target. [orig: @ 0x4bf6d2-0x4bf6e5]
+    // to the persisted goal Z (+0x304), on the even key tick. [orig: @ 0x4bf6d2-0x4bf6e5;
+    // the read @0x4BF6C7]
     pe->flags |= kEntityFlagAiClimb;
-    m->inf.move_target[2] = fx(5.0);
+    m->inf.goal_z = fx(5.0);
     const int32_t z_before = m->pos[2];
-    run_ticks(rig.ai, rig.world, 4, 5);
+    run_ticks(rig.ai, rig.world, 7, 9);
     CHECK(m->pos[2] > z_before);
     CHECK(m->inf.vel[2] <= 0x4000);
 }
@@ -972,7 +1003,7 @@ void test_remote_player_body_anim() {
 // A stance-change message can be dispatched before the same frame's extended player
 // uplink.  The authority jump gate reads the reconstructed MoveOrder word directly;
 // it must not wait for the fourth-tick locomotion-selection cadence to observe prone.
-// [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
+// [orig: MoveOrder&0x100 -> the prone local @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
 void test_remote_player_same_tick_prone_jump_is_rejected() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -1008,7 +1039,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
 // An airborne wire peer can have cooldown zero (for example, a ledge fall or a peer
 // first observed after launch); press/release/repress while still airborne must not
 // manufacture jump_start records.  Once grounded, a fresh press may launch normally.
-// [orig: `test Flags,1A002h` @0x4b7ea0; in-air bit 0x2000]
+// [orig: `test Flags,1A002h` @0x4B7EA4; in-air bit 0x2000]
 void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -1054,7 +1085,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
 // Preserve the rest of retail's jump eligibility mask on the authority copy.  These
 // flags are live world state, independent of the remote movement-input byte: dead,
 // in-air/swimming, both water bits, and carried bodies all reject a jump stamp.
-// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4b7ea0-0x4b7ebd]
+// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4B7EA4..0x4B7EBD]
 void test_remote_player_jump_respects_world_state_flag_gates() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -2100,11 +2131,15 @@ void test_player_weapon_channel_blend_window() {
 }
 
 // The secondary channel's variant ring: a state whose .adm row authors N clips is
-// served head-then-advance on every play, so repeated plays of that state rotate
-// through its clips while the latched wpn_variant follows the SERVED entry
-// [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
-//  animState+68 = animEntry]. Rings are per-state and per-entity; a single-clip
-// row (or a variant-less provider) always serves 0.
+// served head-then-advance on every play, the head starting on the row's LAST
+// entry and walking back through the file order, so repeated plays of that state
+// rotate through its clips while the latched wpn_variant follows the SERVED entry
+// [orig: AnimMap_RegisterBoneNode @0x40C2D0 points the table at each newly
+//  inserted token @0x40C385; AnimMap_UpdateEntity @0x40B737..0x40B778:
+//  node = table[S]; table[S] = node->next; slot+0x44 = node]. Rings are per
+// state, their heads shared by every channel of the .adm (this lone body's
+// primary never plays these states); a single-clip row (or a variant-less
+// provider) always serves 0.
 void test_player_weapon_channel_variant_ring() {
     struct RingSource : TestSource {
         std::map<int, int> rings;
@@ -2135,8 +2170,8 @@ void test_player_weapon_channel_variant_ring() {
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     CHECK(e->inf.wpn_variant == 0); // idle: single-clip row
 
-    // Three reloads in a row serve ring entries 0, 1, 2 — then wrap to 0.
-    for (int expected : {0, 1, 2, 0}) {
+    // Three reloads in a row serve ring entries 2, 1, 0, then wrap to 2.
+    for (int expected : {2, 1, 0, 2}) {
         e->inf.reload_anim_ticks = 80;
         t = run_to_next_selection(ai, w, t);
     run_ticks(ai, w, t, t + 1); ++t;
@@ -2153,18 +2188,19 @@ void test_player_weapon_channel_variant_ring() {
     }
 
     // Rings are PER STATE: the knife ring is untouched by the reload plays and
-    // starts at 0; the next motor-head update serves the ring after the stamp.
+    // starts on its last entry; the next motor-head update serves the ring after
+    // the stamp.
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
-    CHECK(e->inf.wpn_variant == 0);
+    CHECK(e->inf.wpn_variant == 1);
     // A repeat stamp of the same state mid-clip does NOT re-serve (no transition).
     run_ticks(ai, w, t, t + 3);
     t += 3;
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 0);
-    // Let it finish, then the next knife play serves entry 1, and the one after wraps.
+    CHECK(e->inf.wpn_variant == 1);
+    // Let it finish, then the next knife play serves entry 0, and the one after wraps.
     run_ticks(ai, w, t, t + 31);
     t += 31;
     run_ticks(ai, w, t, t + 16);
@@ -2172,14 +2208,14 @@ void test_player_weapon_channel_variant_ring() {
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 1);
+    CHECK(e->inf.wpn_variant == 0);
     run_ticks(ai, w, t, t + 31);
     t += 31;
     run_ticks(ai, w, t, t + 16);
     t += 16;
     infantry_weapon_attack_stamp(e->inf, 1);
     run_ticks(ai, w, t, t + 1); ++t;
-    CHECK(e->inf.wpn_variant == 0);
+    CHECK(e->inf.wpn_variant == 1);
 
     // The outgoing variant is latched too: mid-blend, prev carries the served
     // entry it was playing.
@@ -2191,9 +2227,128 @@ void test_player_weapon_channel_variant_ring() {
     t = run_to_next_selection(ai, w, t);
     run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
-    CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at head 1
+    CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at entry 1
     CHECK(e->inf.wpn_prev == anim_state::kIdle);
     CHECK(e->inf.wpn_prev_variant == 0);
+}
+
+// The variant-ring heads are ONE table per loaded .adm, read by both channels of
+// every body using it: an NPC's channel copy re-inits the secondary (serving the
+// head, the row's last entry on a fresh ring) before the primary (serving the
+// entry before it), a second body of the same .adm continues the walk, a body of
+// another .adm walks its own heads, and a single-clip row serves 0 without
+// touching them.
+// [orig: AnimMap_LinkEntity slot+0x48 = &entry+0x44 @0x40BA77; the ring insert
+//  AnimMap_RegisterBoneNode @0x40C37F..0x40C385; the re-init
+//  AnimMap_UpdateEntity @0x40B737..0x40B778; AnimMap_UpdateDualChannels
+//  @0x40B908 before @0x40B94E; the NPC channel copy @0x4B9A28]
+void test_npc_channels_share_the_adm_variant_ring_heads() {
+    struct RingSource : TestSource {
+        int variant_count(int, int id) const override {
+            return id == anim_state::kAttack ? 3 : 1;
+        }
+    };
+    World w;
+    AiSystem ai;
+    RingSource src;
+    src.clips = {anim_state::kIdle, anim_state::kAttack};
+    ai.root_motion = &src;
+    int index[3] = {};
+    for (int i = 0; i < 3; ++i) index[i] = ai.attach(EntityHandle::make(0, i));
+    AiEntity *bodies[3] = {};
+    const int32_t adm[3] = {7, 7, 8};
+    for (int i = 0; i < 3; ++i) {
+        bodies[i] = ai.at(index[i]); // after every attach: the pool may grow
+        bodies[i]->inf.active = true;
+        bodies[i]->inf.is_local_player = false; // org1: the channel copy
+        bodies[i]->inf.adm_id = adm[i];
+        bodies[i]->health = 100;
+    }
+    run_ticks(ai, w, 1, 3);
+    ai.is_authority = false; // keep each requested primary fixed
+    uint32_t t = 3;
+    const auto play = [&](AiEntity *e, int state) {
+        e->inf.request_body_animation(state);
+        run_ticks(ai, w, t, t + 1);
+        ++t;
+    };
+    play(bodies[0], anim_state::kAttack);
+    CHECK(bodies[0]->inf.weapon_clip_state() == anim_state::kAttack);
+    CHECK(bodies[0]->inf.body_clip_state() == anim_state::kAttack);
+    CHECK(bodies[0]->inf.wpn_variant == 2); // the secondary serves first, the last entry
+    CHECK(bodies[0]->inf.anim_variant == 1);
+    play(bodies[1], anim_state::kAttack);   // the same .adm continues the walk
+    CHECK(bodies[1]->inf.wpn_variant == 0);
+    CHECK(bodies[1]->inf.anim_variant == 2);
+    play(bodies[2], anim_state::kAttack);   // another .adm walks its own heads
+    CHECK(bodies[2]->inf.wpn_variant == 2);
+    CHECK(bodies[2]->inf.anim_variant == 1);
+
+    run_ticks(ai, w, t, t + 12);
+    t += 12;
+    CHECK(!bodies[0]->inf.body_blend_active());
+    play(bodies[0], anim_state::kIdle);     // a single-clip row serves 0...
+    CHECK(bodies[0]->inf.wpn_variant == 0);
+    CHECK(bodies[0]->inf.anim_variant == 0);
+    CHECK(bodies[0]->inf.anim_prev == anim_state::kAttack);
+    CHECK(bodies[0]->inf.anim_prev_variant == 1); // the outgoing entries are latched
+    CHECK(bodies[0]->inf.wpn_prev_variant == 2);
+    play(bodies[0], anim_state::kAttack);   // ...and leaves the ringed heads alone
+    CHECK(bodies[0]->inf.wpn_variant == 1);
+    CHECK(bodies[0]->inf.anim_variant == 0);
+}
+
+// The primary channel runs on its served ring entry: the re-init latches the
+// entry the shared heads serve (a fresh ring's last), root motion samples that
+// entry's track, and a deferred request promotes at that entry's own end.
+// [orig: AnimMap_RegisterBoneNode table = node @0x40C385; AnimMap_UpdateEntity
+//  @0x40B737..0x40B778 re-inits the channel from the served node; the end-flag
+//  promotion @0x40B77B]
+void test_primary_channel_runs_on_its_served_ring_entry() {
+    struct RingSource : TestSource {
+        int variant_count(int, int id) const override {
+            return id == anim_state::kAttack ? 2 : 1;
+        }
+        int32_t clip_length_ticks(int, int id, int variant) const override {
+            return id == anim_state::kAttack ? (variant == 0 ? 20 : 30) : -1;
+        }
+        bool advance_variant(int adm, int id, int variant, int32_t &phase,
+                             RootMotionFrame &out) override {
+            if (!TestSource::advance(adm, id, phase, out)) return false;
+            if (id == anim_state::kAttack) out.dx = 100 * (variant + 1);
+            return true;
+        }
+    };
+    RingSource src;
+    src.clips = {anim_state::kIdle, anim_state::kAttack};
+    AnimVariantRings rings;
+    InfantryState inf;
+    inf.active = true;
+    inf.adm_id = 5;
+    inf.reset_body_animation(anim_state::kIdle);
+    inf.request_body_animation(anim_state::kAttack);
+    RootMotionFrame frame;
+    CHECK(advance_primary_channel(inf, src, rings, frame));
+    CHECK(inf.body_clip_state() == anim_state::kAttack);
+    CHECK(inf.anim_variant == 1);
+    CHECK(inf.anim_prev == anim_state::kIdle);
+    CHECK(inf.anim_prev_variant == 0);
+    for (int i = 0; i < 11; ++i) advance_primary_channel(inf, src, rings, frame);
+    CHECK(!inf.body_blend_active());
+    CHECK(frame.dx == 200); // entry 1's track, not entry 0's
+
+    // Entry 0 would end at 20 ticks; the served entry runs its own 30.
+    inf.anim_pending = anim_state::kIdle;
+    while (inf.clip_phase < 25) advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.anim_state == anim_state::kAttack);
+    int guard = 0;
+    while (inf.anim_state == anim_state::kAttack && ++guard < 64)
+        advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.clip_phase == 31); // promoted at 30, the old channel advanced once more
+    advance_primary_channel(inf, src, rings, frame);
+    CHECK(inf.body_clip_state() == anim_state::kIdle);
+    CHECK(inf.anim_variant == 0);
+    CHECK(inf.anim_prev_variant == 1);
 }
 
 // The hold-pose kind ladder (special_hold 1-8 -> states 50-61, the scoped +1 variants),
@@ -2383,7 +2538,9 @@ void test_player_weapon_channel_ticks_while_dead() {
     e->inf.pitch_kick_accum = -1000;
 
     run_ticks(ai, w, 1, 2);
-    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    // The unstaged death selects 174 whether or not the .adm authors it (the
+    // slot's registration fill plays). [orig: @0x4B4C72..0x4B4CA3]
+    CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_clip_phase == 5);
     CHECK(e->inf.reload_anim_ticks == 2);
@@ -2562,7 +2719,7 @@ void test_slope_prone_body_conforms_org2() {
 
 // The org1 leg + the selector, unit-driven through the pass itself (the NPC think/
 // select churn would otherwise rewrite the anim state before the pass sees it).
-// [orig: selector @0x4ba10f; chase @0x4ba320; decay @0x4ba133; slide @0x4ba24c]
+// [orig: selector @0x4ba10f; chase @0x4ba320; decay @0x4ba133; slide @0x4BA249]
 void test_slope_pass_org1_selector_and_chase() {
     // Gradient 1 u/u (the steep 45-deg dune of the slide test).
     Field ramp([](int x) {
@@ -2601,8 +2758,9 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->roll == 0x01000000 - ((0x01000000 + 8) >> 4));
     CHECK(e->inf.vel[0] == 0);
 
-    // A grounded corpse conforms regardless of state; dead + airborne is the
-    // (unported) tumble branch -> the pass leaves everything alone.
+    // A grounded corpse conforms regardless of state; a dead airborne body takes
+    // the tumble instead: at key 0 both ramps are 32 * 0xFFFFFF, no probe and no
+    // slide. [orig: Entity_UpdateInfantryAI @0x4BA08D..0x4BA10A]
     e->health = 0;
     e->body_pitch = 0;
     e->inf.vel[0] = 0;
@@ -2611,9 +2769,55 @@ void test_slope_pass_org1_selector_and_chase() {
     CHECK(e->inf.vel[0] == -2048);
     const int32_t at_death = e->body_pitch;
     e->inf.airborne = true;
+    e->roll = 0;
+    e->inf.target_heading = 0;
     ai.infantry_slope_pass(*e, w, 0, 0);
-    CHECK(e->body_pitch == at_death);
+    const int32_t tumble = 32 * 0xFFFFFF;
+    CHECK(e->inf.aim_pitch == tumble + tumble);
+    CHECK(e->body_pitch == at_death + ((tumble - at_death + 4) >> 3));
+    CHECK(e->roll == (tumble + 4) >> 3);
+    CHECK(e->inf.target_heading == tumble >> 2);
     CHECK(e->inf.vel[0] == -2048);
+}
+
+// The org1 slopes shift the 32-bit height difference in 32 bits before the
+// clamp: a lateral step of 0.6875 u (a 4 u/u ramp across the 0.171875 u probe
+// pair) wraps the <<16 and flips the roll's sign; a probe that finds no ground
+// returns the ray's end, so the pass still runs. [orig: Entity_UpdateInfantryAI
+// `sub ecx,eax; shl ecx,10h` @0x4BA225..0x4BA227; Entity_RaycastGroundHeight
+// @0x4142C0 returns the clipped end @0x41430D]
+void test_slope_pass_org1_wraps_its_32_bit_slopes() {
+    Field steep([](int x) { // 4 u per u along X
+        int v = x * 1024;
+        return static_cast<uint16_t>(v > 65535 ? 65535 : v);
+    });
+    {
+        World w;
+        AiSystem ai;
+        ai.terrain = &steep.field;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->heading = 0x40000000; // facing +Y: the lateral probe pair runs along X
+        e->pos[0] = fx(20);
+        e->pos[1] = fx(20);
+        e->pos[2] = fx(80) + fx(0.5); // both lateral columns inside the 2 u ray
+        e->inf.anim_state = anim_state::kWalkProneForward; // conform
+        ai.infantry_slope_pass(*e, w, 0, 0);
+        // left - right = -0xB000: <<16 wraps to +0x50000000, clamped to +656175520
+        CHECK(e->roll == (656175520 + 4) >> 3);
+    }
+    {
+        World w;
+        AiSystem ai;
+        TerrainHeightField no_ground; // no height field: every probe misses
+        ai.terrain = &no_ground;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kWalkProneForward;
+        e->body_pitch = 0x01000000;
+        ai.infantry_slope_pass(*e, w, 0, 0);
+        CHECK(e->body_pitch == 0x01000000 + ((0 - 0x01000000 + 4) >> 3));
+    }
 }
 
 } // namespace
@@ -2667,7 +2871,8 @@ void test_death_presentation() {
     }
 
     // ---- corpse persistence: countdown -> despawn (no local player = no watcher) ----
-    // [orig: @0x4b9e6a decrement / Entity_Destroy @0x4b9f93; our despawn = hidden]
+    // [orig: Entity_UpdateInfantryAI @0x4B9910: decrement @0x4b9e6a, the Entity_Destroy
+    //  call @0x4B9F93; our despawn = hidden]
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
@@ -3007,7 +3212,7 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
         ctx.is_authority = false; // advance the body without an NPC selection pass
         for (int tick = 1; tick <= static_cast<int>(expected_weights.size()); ++tick) {
             ctx.logic_tick = static_cast<uint32_t>(tick);
-            ai->tick(*w, ctx);
+            step_organics(*ai, *w, ctx);
             CHECK(e->inf.clip_phase == tick);
             CHECK(e->inf.anim_prev_clip_phase == 7 + tick);
             CHECK(e->inf.anim_blend_weight == expected_weights[static_cast<size_t>(tick - 1)]);
@@ -3016,7 +3221,7 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
         // Once weight reaches 1, only the target playhead continues.
         const int blend_ticks = static_cast<int>(expected_weights.size());
         ctx.logic_tick = static_cast<uint32_t>(blend_ticks + 1);
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
         CHECK(e->inf.clip_phase == blend_ticks + 1);
         CHECK(e->inf.anim_prev_clip_phase == 7 + blend_ticks);
         CHECK(e->inf.anim_blend_weight == 1.0f);
@@ -3054,7 +3259,7 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
     ctx.is_authority = false;
     for (uint32_t tick = 1; tick <= 4; ++tick) {
         ctx.logic_tick = tick;
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
     }
     CHECK(e->inf.anim_blend_weight == 0.40000000596046448f);
     CHECK(e->inf.anim_prev == kPrimary);
@@ -3071,7 +3276,7 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
 
     const int32_t x_before = e->pos[0];
     ctx.logic_tick = 5;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
     CHECK(e->pos[0] - x_before == 120); // .9*A(100) + .1*C(300), not .9*B + .1*C
     CHECK(e->inf.anim_prev_clip_phase == 5);
     CHECK(e->inf.clip_phase == 1);
@@ -3092,7 +3297,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     // An authored person (`deathtime 30`, parse-scaled to 30*62 + 62 ticks
     // [orig: ItemDef_ParseProperty @0x49fa6c-0x49faa0 -> def+0x890; the death edge
     //  copies it to entity+0x148 @0x4b9c97]). A def-less row keeps 0, and the edge
-    // tick's persistence block then destroys the row (Entity_Destroy @0x4b9f93)
+    // tick's persistence block then destroys the row (the Entity_Destroy call @0x4B9F93)
     // before the death clip is ever staged, which this test is not about.
     seed.deathtime_ticks = 30 * 62 + 62;
     const EntityHandle handle = w->registry.spawn(0, seed);
@@ -3117,7 +3322,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     ctx.is_authority = false;
     for (uint32_t tick = 1; tick <= 4; ++tick) {
         ctx.logic_tick = tick;
-        ai->tick(*w, ctx);
+        step_organics(*ai, *w, ctx);
     }
 
     Entity *ent = w->registry.get(handle);
@@ -3126,7 +3331,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     e->health = 0;
     const int32_t kill_x = e->pos[0];
     ctx.logic_tick = 5;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
 
     CHECK(e->pos[0] - kill_x == 150); // the existing A/B blend advances from .4 to .5
     CHECK(e->inf.last_events == 0x2u);
@@ -3139,7 +3344,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
 
     const int32_t blend_x = e->pos[0];
     ctx.logic_tick = 6;
-    ai->tick(*w, ctx);
+    step_organics(*ai, *w, ctx);
     CHECK(e->pos[0] - blend_x == 120); // the replacement starts as .9*A + .1*death
     CHECK(e->inf.last_events == 0x4u);
     CHECK(e->inf.anim_prev_clip_phase == 6);
@@ -3403,7 +3608,7 @@ void test_infantry_parity_pins_2026_08_28() {
         ctx.is_authority = false;
         for (uint32_t t = 0; t < 600; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
         }
         CHECK(e->pos[2] == floor_z);
         CHECK(e->health == 30000);
@@ -3428,7 +3633,9 @@ void test_infantry_parity_pins_2026_08_28() {
         e->pos[1] = fx(100);
         e->pos[2] = fx(200);
         e->health = 30000;
-        run_ticks(ai, w, 0, 600);
+        // The org1 +0xAC quarter-step tail makes the 150 u drop take ~680
+        // ticks. [orig: Entity_UpdateInfantryAI tail @0x4BFC65..0x4BFC86]
+        run_ticks(ai, w, 0, 900);
         CHECK(e->pos[2] == floor_z);
         CHECK(e->health == 30000);
     }
@@ -3578,8 +3785,10 @@ void test_pre_attack_wins_when_previously_idle() {
 // [orig: the perception scan @0x4b9910 §17.1 (tick & 0x1F), the candidate walk
 //  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
 
-// A damage alert lasts think steps; animation, root motion and firing continue
-// between them. [orig: authority/key&15 gate before LABEL_373 @0x4BA970]
+// The damage alert decays by one only on a think whose staggered key is a
+// multiple of 64: the thinks at keys 16/32/48 leave it alone. [orig: the think
+// gate @0x4BA970; the key & 0x3F local @0x4BA9D8..0x4BA9DB; the decay
+// @0x4BBE24..0x4BBE38]
 void test_combat_think_uses_sixteen_tick_cadence() {
     World world;
     AiSystem ai;
@@ -3587,9 +3796,9 @@ void test_combat_think_uses_sixteen_tick_cadence() {
     body->inf.damage_timer = 10;
     run_ticks(ai, world, 0, 1);
     CHECK(body->inf.damage_timer == 9);
-    run_ticks(ai, world, 1, 16);
+    run_ticks(ai, world, 1, 64);
     CHECK(body->inf.damage_timer == 9);
-    run_ticks(ai, world, 16, 17);
+    run_ticks(ai, world, 64, 65);
     CHECK(body->inf.damage_timer == 8);
 }
 
@@ -3955,7 +4164,6 @@ static void test_find_and_use_attachment_motor() {
     w.registry.get(self)->health = 0;
     w.ai.tick_infantry(e, w, 220);
     CHECK(!w.registry.get(self)->attach_parent.valid());
-    CHECK(w.ai.unported_calls == 0);
     CHECK(w.diagnostics.empty());
 }
 
@@ -3972,8 +4180,13 @@ static void test_suspended_callback_preserves_independent_brain() {
     e.brain.f[AiBrain::kPartAnimDir0] = 1;
     e.brain.f[AiBrain::kPartAnimRate0] = 127;
     TickContext ctx; ctx.logic_tick = 1; ctx.is_authority = true;
-    w.ai.tick(w, ctx);
-    CHECK(e.brain.f[AiBrain::kPartAnimPhase0] == 127);
+    w.update_all_entities(ctx);
+    // The stored channel holds: retail's sweep integrator
+    // (Entity_UpdateSuspensionBounce @0x456710) has no caller, so no tick path
+    // advances the phase dword.
+    CHECK(e.brain.f[AiBrain::kPartAnimPhase0] == 0);
+    CHECK(e.brain.f[AiBrain::kPartAnimDir0] == 1);
+    CHECK(e.brain.f[AiBrain::kPartAnimRate0] == 127);
     CHECK(w.registry.get(h)->motor_suspended);
     CHECK(w.commands.apply_ai_command(12, EntityCommands::kAiNodePath, 0, 0, 0));
     CHECK(!w.registry.get(h)->motor_suspended);
@@ -4363,10 +4576,13 @@ static void test_walking_aim_gates_on_the_body_cone() {
     const int32_t err_heading = static_cast<int32_t>(err_unit * (32 - 4));
     const int32_t err_pitch = static_cast<int32_t>(err_unit * (32 - 7));
     {
-        // Due east: the candidate (bearing 0 + the error) sits on the body.
+        // Due east: the candidate (bearing 0 + the error) sits on the body. The
+        // approach arm writes only the goal; the stale target heading stays for
+        // the moving selection's detour to replace [orig: the approach
+        // @0x4BC2F5..0x4BC316; ai_find_cover_position +0x1A8 @0x4AFF2C].
         Rig r(2 * 65536, 0);
         r.think();
-        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0);
+        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0x20000000);
         CHECK(r.blue->inf.aim_valid);
         CHECK(r.blue->inf.aim_heading == opennova::io::bam_add(err_heading, err_heading));
         CHECK(r.blue->inf.aim_pitch == err_pitch);
@@ -4595,9 +4811,13 @@ static void test_short_phase_scan_miss_keeps_the_held_target() {
 }
 
 // The self-attachment chase pulls toward the stamped S point, which no other
-// think path rewrites, while the same think's combat approach keeps retargeting
-// the movement goal. [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664;
-//  the approach arm @0x4BC2F5..0x4BC316 writes frame locals and the goal Z only]
+// think path rewrites. The stamp also raises Flags 0x40, so the guard family
+// drops the same think's combat approach and holds the body in guard (140):
+// the approach arm only wrote frame locals, and a cancelled move never
+// persists its goal Z, so the chase floors Z at the stamped S Z.
+// [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664; the approach
+//  arm @0x4BC2F5..0x4BC316 writes frame locals; guard @0x4BD196..0x4BD1BB;
+//  +0x304 only on a moving selection @0x4bd3f7]
 static void test_self_attachment_chases_the_s_point_through_a_combat_approach() {
     struct EntryPoints : IPoseProvider {
         EntityHandle carrier;
@@ -4662,14 +4882,15 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     self->slot.f[38] = 77;
     // net 200: thinks on tick % 16 == 0. Stage 0 -> E arrival (tick 0), S arrival
     // (tick 16), the stamp (tick 32) while the body faces the enemy 67.5 deg off
-    // the S yaw: attached, not yet converged. The approach runs in the same think.
+    // the S yaw: attached, not yet converged. The approach runs in the same think
+    // and the guard legs drop it.
     run_ticks(w.ai, w, 0, 33);
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.self_attach_point[0] == fx(30) && self->inf.self_attach_point[1] == fx(30));
-    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
-    // The approach goal Z is the enemy's Z [orig: rayEnd.Z @0x4bc302 ->
-    // entity+0x304 @0x4bd3f7]; the chase floors the body there.
-    CHECK(self->inf.move_target[2] == fx(2));
+    CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
+    // The approach's goal Z (the enemy's, rayEnd.Z @0x4bc302) never reaches
+    // +0x304: the stamp's S Z stays the floor.
+    CHECK(self->inf.goal_z == 0);
     CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
     // Knock the body 8 u east of the S point. Every tick between thinks the
     // chase pulls X/Y an eighth of the way back [orig: @0x4bf636..0x4bf65f] and
@@ -4683,18 +4904,18 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         run_ticks(w.ai, w, tick, tick + 1);
         CHECK(self->pos[0] == expected);
         CHECK(self->pos[1] == fx(30));
-        CHECK(self->pos[2] >= fx(2));
+        CHECK(self->pos[2] == 0);
         x = self->pos[0];
     }
     CHECK(w.registry.get(handle)->attach_parent == handle);
-    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
-    CHECK(w.ai.unported_calls == 0);
+    CHECK(self->inf.move_mode == 0 && self->inf.anim_state == anim_state::kGuard);
 }
 
 // Corpse expiry is the shared destroy: incoming brain references and the
-// shared-ring scars the body wrote go with the row. [orig: @0x4B9F93 ->
-//  Entity_Destroy @0x43E810: Scar_ClearEntriesByEntity @0x43E8E4,
-//  Entity_ClearAllReferences @0x43E921 over the pool-1 brains' +148/+156]
+// shared-ring scars the body wrote go with the row. [orig: Entity_UpdateInfantryAI
+//  @0x4B9910 (the Entity_Destroy call @0x4B9F93) -> Entity_Destroy @0x43E810 (the
+//  Scar_ClearEntriesByEntity call @0x43E8E4, the Entity_ClearAllReferences call
+//  @0x43E921 over the pool-1 brains' +148/+156)]
 static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     NpcRespawnRig r;
     World &w = *r.storage;
@@ -4801,6 +5022,7 @@ int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
     test_slope_pass_org1_selector_and_chase();
+    test_slope_pass_org1_wraps_its_32_bit_slopes();
     // ---- body heading: quarter-step toward the target, clamped ±69273360/tick ----
     // [orig: 0x4b9910 dump 4600-4611 — step = (diff + 2) >> 2, clamp]
     {
@@ -5097,6 +5319,10 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     }
     {
+        // An .adm without the selected clip keeps the selection: the slot plays
+        // its registration fill, never a substitute death clip.
+        // [orig: AnimMap_RegisterEntity @0x40BB60; the edge's unchecked store
+        //  @0x4B9D06]
         World w;
         AiSystem ai;
         TestSource src;
@@ -5105,7 +5331,7 @@ int main() {
         AiEntity *e = soldier(ai);
         e->health = 0;
         run_ticks(ai, w, 1, 2);
-        CHECK(e->inf.anim_state == anim_state::kDeathBulletBase + 4);
+        CHECK(e->inf.anim_state == anim_state::kDeathPungi);
     }
 
     // ---- kJumpLoop forces forward delta 1024 ----  [orig: dump 4756]
@@ -5133,9 +5359,11 @@ int main() {
         CHECK(e->pos[0] == 0);
     }
 
-    // ---- gravity: -416 every 2 ticks to terminal -32768; landing + fall damage ----
-    // [orig: dump 5088-5173 — pos.z += 2*vel_z; damage when vel_z <= -1057*scale,
-    //  health -= excess >> 4 (dword_C6EAE4 = the fallmps named value)]
+    // ---- gravity: -416 per even key tick to terminal -32768 (pos.z += 2*vel_z,
+    // then the quarter-step tail keeps a quarter of it); landing + fall damage ----
+    // [orig: Entity_UpdateInfantryAI gravity @0x4bf7bf, pos @0x4bf7ec, tail
+    //  @0x4BFC65..0x4BFC86; damage when vel_z <= -1057*scale @0x4BF839, health -=
+    //  excess >> 4 @0x4BF848..0x4BF864 (wac_var_fallmps = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;
@@ -5150,13 +5378,16 @@ int main() {
         e->pos[2] = fx(200); // 145u above the floor: reaches terminal velocity
         e->health = 30000;
 
+        // The +0xAC quarter-step tail moves the NPC about vel_z per two ticks,
+        // so the 145 u drop takes ~660 ticks. [orig: Entity_UpdateInfantryAI
+        // tail @0x4BFC65..0x4BFC86]
         int32_t min_vel = 0;
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = true;
-        for (uint32_t t = 0; t < 600; ++t) {
+        for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
         CHECK(min_vel == kTerminal);
@@ -5204,7 +5435,7 @@ int main() {
         ctx.is_authority = true;
         for (uint32_t t = 0; t < 120; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
             if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
         }
         CHECK(e->pos[2] == floor_z);
@@ -5216,10 +5447,11 @@ int main() {
         CHECK(e->health == 30000 - ((-landing_vel) >> 4));
     }
 
-    // ---- gravity cadence: BOTH motors fall EVERY tick, asymmetric steps — the NPC
-    //      (org1) at -416 with pos.z += 2*vel, the player (org2) at -208 with
-    //      pos.z += vel. [orig: NPC @0x4bf7bf/@0x4bf7ec; player @0x4b7acf/@0x4b7cef;
-    //      D-INF-10 closed for both legs]
+    // ---- gravity cadence: asymmetric motors — the NPC (org1) steps -416 and
+    //      integrates pos.z += 2*vel on EVEN key ticks, keeping a quarter of the
+    //      change and re-applying it on the odd tick (+0xAC); the player (org2)
+    //      steps -208 with pos.z += vel every tick. [orig: NPC @0x4bf7bf/@0x4bf7ec,
+    //      tail @0x4BFC65..0x4BFC86; player @0x4b7acf/@0x4b7cef]
     {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
@@ -5234,31 +5466,30 @@ int main() {
         ai.at(1)->inf.is_local_player = true;
         ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
 
-        // ORG1 RUNS ITS PHYSICS ON EVEN TICKS ONLY, org2 every tick. The org1
-        // think stamps `outYaw.X = tickCounter & 1` and enters the whole
-        // gravity + integrate + resolver + edge block under `if (!outYaw.X)`;
-        // the `pos.z += 2 * slideDecay` doubling inside it exists BECAUSE the
-        // block runs half as often. The org2 player leg has no such gate and
-        // integrates `pos.z += vel` once per tick.
-        // [orig: stamp @0x4b9910 kong 155519-155523; gate kong 155809; gravity
-        //  step kong 155815; integrate kong 155830. The complementary half is
-        //  already ported: the org1 anim-event sound consumer runs on ODD ticks
-        //  [orig: @0x4bf144-0x4bf156], infantry.cpp emit_slot_sound.]
+        // ORG1 RUNS ITS VERTICAL BLOCK ON EVEN KEY TICKS ONLY, org2 every
+        // tick. The org1 even tick keeps a quarter of its Z change,
+        // (2 * vel + 2) >> 2, and stores it in +0xAC; the odd tick skips
+        // gravity/resolve/edges and adds +0xAC again. The org2 player leg has
+        // no such gate and integrates `pos.z += vel` once per tick.
+        // [orig: outYaw = key & 1 @0x4BF146; odd skip @0x4BF6A5..0x4BF6B2;
+        //  gravity @0x4BF7BF; integrate @0x4BF7EC; tail @0x4BFC65..0x4BFC86]
+        const int32_t npc_z0 = ai.at(0)->pos[2];
         run_ticks(ai, w, 0, 1); // tick 0 EVEN: both fall (100u up, stay airborne)
         CHECK(ai.at(0)->inf.vel[2] == -416); // NPC: the even-tick step
         CHECK(ai.at(1)->inf.vel[2] == -208); // player: the org2 half-step, same tick
+        CHECK(ai.at(0)->pos[2] == npc_z0 - 208); // (2 * -416 + 2) >> 2
         const int32_t npc_z = ai.at(0)->pos[2];
         const int32_t ply_z = ai.at(1)->pos[2];
 
-        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 skips entirely, org2 does not
+        run_ticks(ai, w, 1, 2); // tick 1 ODD: org1 re-applies +0xAC, org2 falls
         CHECK(ai.at(0)->inf.vel[2] == -416);  // NPC unchanged — no gravity this tick
-        CHECK(ai.at(0)->pos[2] == npc_z);     // NPC unchanged — no integrate either
+        CHECK(ai.at(0)->pos[2] == npc_z - 208); // only the stored quarter step
         CHECK(ai.at(1)->inf.vel[2] == -2 * 208);
         CHECK(ai.at(1)->pos[2] == ply_z + (-2 * 208)); // pos.z += vel (org2)
 
         run_ticks(ai, w, 2, 3); // tick 2 EVEN: org1 accumulates and integrates
         CHECK(ai.at(0)->inf.vel[2] == -2 * 416);
-        CHECK(ai.at(0)->pos[2] == npc_z + 2 * (-2 * 416)); // pos.z += 2*vel (org1)
+        CHECK(ai.at(0)->pos[2] == npc_z - 208 - 416); // (2 * -832 + 2) >> 2
     }
 
     // ---- slope pass through the motor: a live STANDING soldier holds steep ground —
@@ -5312,13 +5543,15 @@ int main() {
         e->pos[2] = fx(200); // dropped well above the floor
 
         // is_authority=false so think/select never retargets the held idle clip; the ground
-        // clamp itself has no authority gate, so the soldier still settles.
+        // clamp itself has no authority gate, so the soldier still settles. The org1 +0xAC
+        // quarter-step tail makes the 149 u drop take ~680 ticks. [orig:
+        // Entity_UpdateInfantryAI tail @0x4BFC65..0x4BFC86]
         TickContext ctx;
         ctx.world = &w;
         ctx.is_authority = false;
-        for (uint32_t t = 0; t < 600; ++t) {
+        for (uint32_t t = 0; t < 900; ++t) {
             ctx.logic_tick = t;
-            ai.tick(w, ctx);
+            step_organics(ai, w, ctx);
         }
 
         CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000
@@ -5346,9 +5579,10 @@ int main() {
         // the cadence, so it is phased onto a tick where the block executes.
         run_ticks(ai, w, 0, 1);
 
-        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
-        // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
-        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
+        // The even-tick NPC gravity (D-INF-10) steps pos.z down one step and the +0xAC tail keeps
+        // a quarter of it, but the small positive foot clearance (<= 0xF000) is otherwise left
+        // alone — NOT snapped to the floor, NOT airborne. [orig: tail @0x4BFC65..0x4BFC86]
+        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 208);
         CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
         CHECK(!e->inf.airborne);
     }
@@ -5778,7 +6012,7 @@ int main() {
         run_ticks(ai, w, 100, 101);           // release edge
         CHECK(e->inf.jump_cooldown == 0);
 
-        // Prone bodies never jump. [orig: the var_10AC gate @0x4b7e99]
+        // Prone bodies never jump. [orig: the prone-local gate @0x4b7e99]
         e->inf.stance = InfantryState::Stance::kProne;
         e->inf.jump_requested = true;
         run_ticks(ai, w, 101, 102);
@@ -5954,6 +6188,8 @@ int main() {
     test_player_weapon_channel();
     test_player_weapon_channel_blend_window();
     test_player_weapon_channel_variant_ring();
+    test_npc_channels_share_the_adm_variant_ring_heads();
+    test_primary_channel_runs_on_its_served_ring_entry();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
     test_player_arms_dip();

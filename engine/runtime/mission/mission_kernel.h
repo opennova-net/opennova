@@ -71,10 +71,10 @@ struct KernelBootOptions {
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
-	// EVERY WAC diagnostic is fatal and fails the boot (the dedicated golden
-	// host's policy — running a partial script is a known wire-parity
-	// failure). false = the game's lenient policy: only a compile FAILURE
-	// blocks, and a blocked program merely disables scripts with a warning.
+	// A WAC literal that misses the mounted FX, SOUNDSET or AMMO catalog fails
+	// the boot (the dedicated golden host's policy: the port's catalogs are
+	// where a compile could part from retail's). false = the game's policy,
+	// retail's: the program always installs with its first error recorded.
 	// Feeds wac_layered_load's strict_diagnostics flag.
 	bool wac_strict_diagnostics = false;
 	bool collision = true;
@@ -214,7 +214,7 @@ public:
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:
 	// Environment_UpdateWeatherTick @ 0x57e9b0 from Game_ProcessMainFrame
-	// @ 0x526774, after Entity_UpdateAllEntities @ 0x52674b]: the world's sim
+	// @ 0x526774, after the Entity_UpdateAllEntities call @ 0x52674b]: the world's sim
 	// legs, the thunder one-shots into world.out.weather_sounds, the local quake
 	// shake arm, then the installed render owner's color legs. Every embedder
 	// tick (the no-net tick, the listen frame, the joiner frame, the dedicated
@@ -249,6 +249,12 @@ public:
 	// Re-capture the baseline from the CURRENT state (the shell's sealed
 	// mission-start point: post-eager-WAC, fully settled play start).
 	void capture_baseline();
+	// The mission teardown's head: destroy every row of pools 0, 1 and 2 (the
+	// pool-3 markers stay), then, on the authority, the one-shot PostMission
+	// event sweep, whose triggers and actions therefore resolve against the
+	// destroyed pools. The session close runs it. The single-player restart
+	// does not: its sweep call finds the event list already freed.
+	void run_post_mission_pass(bool is_authority);
 	// --- the local player ----------------------------------------------------
 	// The by-name weapon install from the retained weapon.def rows. A
 	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`
@@ -404,6 +410,8 @@ public:
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
 	bool resolve_mounted_pose(world::World &w, const world::Entity &carrier,
 			const world::Seat &seat, world::MountedPose &out) override;
+	bool resolve_seat_bone(world::World &w, const world::Entity &carrier,
+			int bone_index) override;
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
 	bool build_section_matrices(world::World &w, world::EntityHandle entity,
 			int32_t model_id, const world::CollisionMatrix &entity_world,
@@ -422,6 +430,14 @@ public:
 			int32_t out_direction[3]) override;
 	bool resolve_userpoint_rigid(world::World &w, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
+	bool resolve_named_transform(world::World &w, world::EntityHandle entity,
+			const char *name, int32_t out[6]) override;
+	int last_named_userpoint(world::World &w, world::EntityHandle entity,
+			const char *name) override;
+	bool resolve_userpoint_pivot(world::World &w, world::EntityHandle entity,
+			int userpoint_index, int32_t out[3]) override;
+	bool resolve_section_pivot(world::World &w, world::EntityHandle entity,
+			int part, int32_t out[3]) override;
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;

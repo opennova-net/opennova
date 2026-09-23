@@ -3,7 +3,7 @@
 // Holds the entity registry, the shared variable store, environment + effect
 // state, the cached per-tick transient state, the entity-command primitive layer
 // (the shared Entity_* operations), and the tick service that drives registered
-// systems (WAC VM, BMS event evaluator, future GDScript) at the authoritative
+// systems (WAC VM, BMS event evaluator) at the authoritative
 // logic-tick cadence. Editor and runtime drive the SAME World; the editor just
 // owns the clock (and can pause/step/snapshot).
 #pragma once
@@ -169,23 +169,33 @@ struct CachedFrameState {
     uint8_t sound_listener_view_flags = 6; // startup; camera 0 -> 2, other -> 4 [orig: @0x43924A]
     EntityHandle local_player;
     int32_t local_health = 0;
-    // Active human player slot count — the WAC 'humans' builtin, rebuilt by the host
-    // server tick just before the script pre-pass. Doubles in the original as the
-    // empty-dedicated-server world-run gate (entities/WAC advance while humans > 0
-    // || ticks == 0); an SP host always counts its own player. [orig: wac_var_humans
-    // @0xC6EB14 — Server_BuildEntitySlotLists @0x4f97a0: zero @0x4f97c6, +1 per
-    // active human slot @0x4f98b1]
+    // The human count — the WAC 'humans' builtin, rebuilt by the host server
+    // tick just before the script pre-pass: every live pool-0 row with the
+    // Player bit (Flags 0x100) that is not hidden (Flags 1: a player still
+    // waiting to deploy is hidden); the item-def test is the allocated-row
+    // test (EntityRegistry::count_humans). Doubles in the original as the
+    // empty-server world-run gate (entities/WAC advance while humans > 0 ||
+    // ticks == 0). [orig: wac_var_humans @0xC6EB14 — Server_BuildEntitySlotLists
+    // @0x4f97a0: zero @0x4f97c6, the def test @0x4F9809, `test eax,100h`
+    // @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
     int32_t humans = 0;
     // Derived view of the VM's mutable clock, published before admission and
     // after execution/restore. Only the VM clock is serialized; this projection
     // lets the world gate read retail's shared word. [orig: wac_var_ticks @0xC6EAD8]
     int32_t wac_ticks = 0;
+    // A host that also plays (the listen host and single player,
+    // is_mp_session_peer) whose own player is on the death screen: the
+    // entity-update gate skips its empty-world hold. The host role stamps it
+    // each frame from its local client's death-screen latch.
+    // [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
+    //  `cmp g_death_screen_active,0` @0x526713]
+    bool peer_death_screen = false;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value
 // table. This is distinct from V#/G#/M#: named values are direct pointers into
 // engine state, so consumers such as infantry AI observe WAC writes immediately.
-// [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2940]
+// [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2920]
 struct WacNamedValues {
     // Seeded 10 at every mission load and teardown [orig: WacScript_FreeAll @0x4f6395
     // `mov wac_var_accuracyspread, 0Ah`, called from GameMode_CreateDefaultDefs @0x4f9061
@@ -194,14 +204,15 @@ struct WacNamedValues {
     // Global multiplier in the infantry sawtooth aim-error formula.
     // [orig: wac_var_accuracyspread @0xC6EAE8; read @0x4bc5ea]
     int32_t accuracy_spread = kDefaultAccuracySpread;
-    // The fall-damage tolerance `fallmps` [orig: dword_C6EAE4, the named-value row
+    // The fall-damage tolerance `fallmps` [orig: wac_var_fallmps, the named-value row
     // beside accuracyspread]. Seeded 13 at every mission load and teardown [orig:
-    // WacScript_FreeAll @0x4f638b `mov dword_C6EAE4, 0Dh`, called from
+    // WacScript_FreeAll @0x4f638b `mov wac_var_fallmps, 0Dh`, called from
     // GameMode_CreateDefaultDefs @0x4f9061 / Game_TeardownMission @0x5226f0]; the
     // authority writes it into the 0x0A sub-block-1 timer state
     // (NetPacket_WritePlayerState @0x4ffa14, connection_fan.cpp state1) and a joiner
-    // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc) for its local
-    // red-flash only, since the landing damage itself is authority-gated. Damage when
+    // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc, the replica's
+    // ClientReplicaState::fallmps); retail's joiner reads it only for its local
+    // landing red flash, since the landing damage itself is authority-gated. Damage when
     // landing with vel_z <= -1057*fallmps: health -= excess>>4 [orig: @0x4bf839 /
     // @0x4b7d13]. There is no zero test: 0 damages EVERY landing by
     // (-vel_z)>>4 (a WAC can write it; no shipped script does).
@@ -211,12 +222,14 @@ struct WacNamedValues {
 	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
-	// Two more rows of the named-value table @0x82EEF0 whose consumers are not
-	// yet ported: breathtime (read by HUD_DrawBreathBar @0x59d70f,
-	// Server_UpdateEntityIdleTimers @0x50d7e6, GameEvent_PlayerDeath @0x5172f6,
-	// the 0x0A player-state wire @0x4ff9db/@0x4301a1) and autogain (read by
-	// Environment_ApplyFogAndAmbient @0x57e514). Both seeded by
-	// WacScript_FreeAll [orig: @0x4f6381 = 20; @0x4f6371 = 1].
+	// Two more rows of the named-value table @0x82EEF0. breathtime: the host's
+	// drown limit is four samples per second of it (Server_UpdatePlayerBreathTimers
+	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
+	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
+	// @0x59d70f reads it (that bar is not ported). autogain is the iris
+	// re-target switch (Environment_ApplyFogAndAmbient @0x57E514, sampled into
+	// WeatherState::iris_retarget_enabled). Both seeded by WacScript_FreeAll
+	// [orig: @0x4f6381 = 20; @0x4f6371 = 1].
 	int32_t breathtime = 20;
 	int32_t autogain = 1;
     // location() reads this cached player-body result, not a named-table row.
@@ -426,6 +439,9 @@ struct PlayerTemplate {
     // actual presence so a malformed/missing Player definition is not invented for late spawns.
     // [orig: Entity_InitFromItemDef @0x49e550; D-NET-144]
     bool has_item_def = true;
+    // The Player row's items.def ordinal (entity+0x1C ItemTypeIndex); 0 until the
+    // sweep resolves it [orig: Entity_SpawnFromBMSRecord @0x40EBFC].
+    int32_t item_type_index = 0;
     int32_t item_hp = 0;
     int32_t critical_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join
@@ -529,6 +545,13 @@ struct SessionRules {
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
+    // The retail is_mp_session_peer bit, the is_client half of the session's
+    // connection mode: clear only on a HostOnly (dedicated) host, where no
+    // dialog plays and no objective line posts. SP, the listen host and a
+    // joiner keep it set. [orig: g_napi_np_ctx +0x64 (server_session.cpp
+    //  stamps it from the mode's is_client bit); readers EventAction_Dispatch
+    //  case 7 @0x45443d and HUD_ShowObjectiveNotification @0x5ba382]
+    bool mp_session_peer = true;
     // The per-tick authority role consulted by World&-only callbacks. The
     // suspension role pick and both post-death blast writers read the same
     // g_napi_np_ctx.is_authority bit in retail
@@ -586,19 +609,30 @@ struct SessionRules {
     bool destroy_buildings = false;
 	// [orig: dword_24D1E38, initially -1; AI_TickState_VehicleDead @0x467EE9]
 	bool vehicle_respawns = true;
-	// An embedder may own the local player's borrowed UseGun slot so
-	// it can supply trigger/reload/scope input and drain presentation events.
-	// Standalone World users keep the default global mounted-slot pump.
-	bool external_local_mounted_weapon_pump = false;
-    // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
-    // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
-    // tracked D-AI-1 residual; defaults clear (SP).
+    // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
+    // class-0 player leg skips the LOCAL player and the weapon validator
+    // rejects every Player target while it is up [orig: `test
+    // dword_24C1930,800h` @0x467141, @0x53A46E]. Input action 123 toggles it
+    // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
+    // carries it. Defaults clear.
     bool ai_rules_skip_local_player = false;
-    // The retail is_in_session fact: a net session (listen or dedicated) has
-    // been brought up over this world's kernel. The net bring-ups set it; the
-    // bare no-net kernel keeps false. Gates the UseGun null-slot rejection
-    // [orig: Entity_AttachToUseGunSlot @0x546c07].
-    bool session_open = false;
+};
+
+// A HUD relay the authority sends the joiners as S2C 0x3F, in the order the
+// sim produced them: kind 0 is an objective notification (slot, is_win,
+// is_active, flag), kind 1 a mission-text chat line (team, key). The host
+// fan drains these.
+// [orig: Server_BroadcastEntityActionPacket @0x5080d0; its producers
+//  HUD_ShowObjectiveNotification @0x5ba2e0 (the call @0x5ba3df) and
+//  GameMsg_AddChatLineAndRelay @0x5ba170 (the call @0x5ba1c3)]
+struct HudRelay {
+    uint8_t kind = 0;
+    int32_t slot = 0;
+    int32_t is_win = 0;
+    int32_t is_active = 0;
+    uint8_t flag = 0;
+    int32_t team = 0;
+    std::string key;
 };
 
 // What the sim produced this tick for someone else to drain: the wire (entity
@@ -612,6 +646,8 @@ struct WorldOutbox {
     // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
     using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent>;
     std::vector<EntityNetworkEvent> entity_events;
+    // HUD relays pending the host's S2C 0x3F fan.
+    std::vector<HudRelay> hud_relays;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
@@ -656,6 +692,29 @@ struct WorldOutbox {
     FireSoundQueue fire_sounds;
 };
 
+// The player-slot idle timers (the underwater breath samples) live on the host
+// session's player slots, so the host session installs this seam for its tick;
+// a world without a server session has no idle timers to run.
+// [orig: Server_UpdatePlayerBreathTimers @0x50D770]
+class IEntityIdleTimers {
+public:
+    virtual ~IEntityIdleTimers() = default;
+    virtual void update_entity_idle_timers(World &world) = 0;
+};
+
+// Server_TickUpdate's every-32 legs, inside the one script admission, between
+// the WAC tick and the BMS quarter pass: the vehicle spawn markers, then the
+// player idle timers. The kernel registers it between the two script systems.
+// [orig: Server_TickUpdate — WacScript_AdvanceTick call @0x51D8BF, then
+//  `test tick,1Fh` @0x51D8C4, assign_overlay_spawn_points call @0x51D8D2,
+//  Server_UpdatePlayerBreathTimers call @0x51D8D7, then the quarter counter
+//  @0x51D8DC]
+class ServerIdleLegs final : public ISystem {
+public:
+    const char *name() const override { return "server_idle_legs"; }
+    void tick(World &world, const TickContext &ctx) override;
+};
+
 class World {
 public:
     World();
@@ -681,11 +740,15 @@ public:
     // deployment resets; bare authoritative worlds need no local view.
     LocalPlayer *local_player_state = nullptr;
     EntityCommands commands;
-    // The AI/motor system: every brain plus the infantry and vehicle motors.
-    // Owned here so the command layer, the sims, the wire and the tools reach
-    // brains without a seam; the kernel registers it as the third ISystem
-    // (WAC -> BMS -> AI) and wires its collision/terrain/root-motion links.
+    // The AI/motor system: every brain plus the organic bodies. Owned here so
+    // the command layer, the sims, the wire and the tools reach brains without
+    // a seam; update_all_entities drives it row by row after the script
+    // systems, and the kernel wires its collision/terrain/root-motion links.
     AiSystem ai;
+    // The server tick's every-32 legs (ServerIdleLegs above), registered by the
+    // kernel between WAC and BMS; the host session installs the idle timers.
+    ServerIdleLegs server_idle_legs;
+    IEntityIdleTimers *entity_idle_timers = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
@@ -694,7 +757,7 @@ public:
     SessionRules rules;
     WorldOutbox out;
     // The two systems that own their state and their verbs (vehicle_system.h,
-    // zone_system.h); the AI tick runs the vehicle motors, the host tick the
+    // zone_system.h); the entity update runs the vehicle motors, the host tick the
     // zone capture transaction.
     VehicleSystem vehicles;
 	RotorWashSystem rotor_wash;
@@ -741,17 +804,6 @@ public:
     IPoseProvider *pose_provider = nullptr; // non-owning: the embedder's live seat-bone, muzzle
                                             // and userpoint seam; null/false keeps static geometry.
 
-    // 62-tick live-recount divider [orig: the Server_TickUpdate timer word,
-    // reload 0x3E @ 0x51db93]. Public like the other tick state; hosts never
-    // touch it.
-    int group_recount_timer_ = 0;
-
-
-
-
-
-
-
     // The live authoritative rounds — spawned synchronously by the accepted C2S 0x06
     // (the same fire that appends `rounds`), stepped inside run_logic_tick, deaths
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
@@ -795,11 +847,22 @@ public:
 
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
-    // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
+    // [orig: tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
     //  Per-system cadences divide it: the WAC VM executes every 62nd tick
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+    // The entity-update counter: the number of completed entity updates. Its
+    // one writer is the tail of a non-epilog update_all_entities, and nothing
+    // resets it, so it runs one behind logic_tick through the process's first
+    // mission, holds still on a frame whose entity update is skipped, and
+    // keeps counting across restores (it is not in the Snapshot) and mission
+    // loads (the embedder carries it into the next kernel). The ground
+    // vehicles' ground-link cadence, the vehicle avoid-brake factor, the
+    // movement resolver's full-update cadence and the water decal scroll read
+    // it. [orig: g_entity_update_counter, `add g_entity_update_counter,esi` in
+    //  Entity_UpdateAllEntities @0x4C2639]
+    uint32_t entity_update_counter = 0;
     // The tick process_round_end ran on (the SP epilog gate's reference).
     uint32_t round_end_tick = 0;
 
@@ -818,11 +881,26 @@ public:
     // is epilog_screen_active() below.
     // [orig: Server_TickUpdate @0x51d7e0, the gate @0x51d8bd — `if
     //  (!g_preround_delay_timer && (wac_var_humans || !wac_var_ticks) &&
-    //  !g_epilog_screen_active)` around WacScript_AdvanceTick @0x51d8bf +
-    //  Server_UpdateEntityIdleTimers + EventTrigger_UpdateQuarterRoundRobin
+    //  !g_epilog_screen_active)` around the WacScript_AdvanceTick call @0x51d8bf +
+    //  Server_UpdatePlayerBreathTimers + EventTrigger_UpdateQuarterRoundRobin
     //  @0x454d50]
     bool script_may_advance() const {
         return (cached.humans > 0 || cached.wac_ticks == 0) && !epilog_screen_active();
+    }
+    // Game_ProcessMainFrame's gate over the whole entity update. On the
+    // authority an empty world (no human, a started WAC clock) holds still,
+    // unless a playing host's own player is on the death screen; in a session
+    // the ended round holds every peer still (the round-over latch the round
+    // end raises). The pre-round byte half is the PreRound tick phase.
+    // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
+    //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
+    //  is_in_session` @0x526734, `cmp g_spawn_success_gate` @0x52673C;
+    //  the latch writer Server_ProcessRoundEnd @0x5168E4]
+    bool entity_update_admitted(bool is_authority) const {
+        if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&
+                cached.wac_ticks != 0)
+            return false;
+        return !(rules.mp_session && match.outcome().ended);
     }
     // The SP end-of-round screen's gate over the script tick. A single-player
     // round that ends against the player (`Server_ProcessRoundEnd` with any
@@ -868,15 +946,57 @@ public:
     uint32_t team_downed_resend_countdown = 0;
 
     void add_system(ISystem *sys);
-    void load_systems();       // calls on_load for each
+    void load_systems();       // calls on_load for each, then the AI's
 
-    // One frame-clock tick. Gameplay runs every system; PreMission runs only
-    // the authored BMS pre-pass; PreRound advances shared clocks but freezes
-    // WAC/entities/projectiles. The explicit phase replaces the old boolean
-    // pre-mission seam so no caller can mistake a pre-round freeze for a script
-    // initialization pass.
+    // One frame-clock tick. Gameplay runs every system, then the entity
+    // update; PreMission runs only the authored BMS pre-pass; PreRound
+    // advances shared clocks but freezes WAC/entities/projectiles. The
+    // explicit phase replaces the old boolean pre-mission seam so no caller
+    // can mistake a pre-round freeze for a script initialization pass.
+    // run_logic_tick is the script and entity half of the frame; the host's
+    // server tick splits it along retail's frame: begin_tick, the script pass
+    // (Server_TickUpdate's WAC tick, every-32 legs and BMS quarter pass), its
+    // own maintenance and 0x0A, then the entity pass (Game_ProcessMainFrame's
+    // gated entity update and the tail that advances logic_tick). The weapon
+    // actions follow later in the frame (pump_weapon_actions).
+    // [orig: Game_ProcessMainFrame @0x5263f0]
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
+    TickContext begin_tick(bool is_authority, TickPhase phase);
+    void run_script_pass(const TickContext &ctx);
+    void run_entity_pass(const TickContext &ctx);
+    // The frame's one weapon-action walk, after the weather tick and the
+    // camera compose: every pool-0 row in slot order (the local player's slot
+    // through the installed LocalPlayer's pump, a UseGun gunner's borrowed
+    // parent slot through the AI pump), then each unoccupied EWEAP pool-1 row
+    // whose slot is still hot. Every host and the bare local role run it once
+    // per frame after their weather and view legs, whatever the phase; a
+    // joiner walks its replica slots instead. It reads the frame's own tick,
+    // one behind logic_tick once the entity pass's tail has run.
+    // [orig: Game_ProcessMainFrame -- Environment_UpdateWeatherTick @0x526774,
+    //  Camera_ComputeThirdPersonView @0x526781, then the
+    //  WeaponAction_ProcessAllEntities call @0x526786;
+    //  WeaponAction_ProcessAllEntities @0x542690..0x542724]
+    void pump_weapon_actions();
+
+    // One gameplay tick's entity update, in the retail phase order: the
+    // pool-1 walk (every live row once, in slot order, its ground-entity
+    // chain first), the attachment poses, HeliLift, the faces, the
+    // precipitation fall, the death pieces, the AI timed events, the weather
+    // particles, the projectiles, the explosion queue (then the damage
+    // reactions they stamped), the pool-2 cohort walk, the doors, the pool-3
+    // cohort walk, the proximity tables, then the pool-0 walk in slot order.
+    // On the SP epilog screen only the pool-1 rows a player drives are
+    // visited (every pool-1 row's pose is saved), HeliLift through the pool-3
+    // walk is skipped, and the update is not counted.
+    // [orig: Entity_UpdateAllEntities @0x4C2100]
+    void update_all_entities(const TickContext &ctx);
+    // One pool-1 visit: mark the row visited; while its +0x2AC clock is
+    // expired, refresh its blink state and run its class think (the brain
+    // machine, the minefield or item damage callback; a placed device carries
+    // its own legs); then its +0x1C4 motor legs; then the clock decrement.
+    // [orig: Entity_UpdatePool1Slot @0x4B8DD0]
+    void update_pool1_slot(Entity &row, const TickContext &ctx);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed
@@ -884,14 +1004,29 @@ public:
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
 
+    // An objective shown or hidden by BMS actions 35/36, or relayed by S2C 0x3F
+    // on a joiner: an active notice posts the two chat lines (the "objective"
+    // presentation effect: a = slot, b = win, c = the header text id) on a
+    // client or outside a session, and the authority relays it to the
+    // joiners. [orig: HUD_ShowObjectiveNotification @0x5ba2e0]
+    void show_objective_notification(int32_t slot, int32_t is_win, int32_t is_active,
+                                     uint8_t flag);
+    // The relay half of a mission-text chat line (the SubGoalWon/SubGoalLost
+    // announcements): the authority in a session sends the joiners the key
+    // and team (S2C 0x3F kind 1) and each resolves the key in its own
+    // mission text. The local line is the caller's presentation effect.
+    // [orig: GameMsg_AddChatLineAndRelay @0x5ba170 — the relay gate
+    //  @0x5ba19f..0x5ba1af]
+    void relay_mission_text_chat(int32_t team, const std::string &key);
+
     // Group population counts for the trigger records over pools 2, 0, 1.
     // Initial: once per mission start, right after the pre pass -- EVERY used
     // row tallied by its group id with no dead/health test, group 0 forced to
     // zero, then live copied from it for every group [orig:
     // EntityPool_RecountByType @ 0x40e7e0, sole call Game_StartMission
     // @ 0x525b8b]. Live: a full rescan counting only rows that are not dead
-    // (Flags & 2) and hold health > 0, run on a 62-tick cadence inside the
-    // logic tick and after group reassignment [orig: EntityPool_RecountLiveByGroup
+    // (Flags & 2) and hold health > 0, run by the server tick's periodic
+    // second and after group reassignment [orig: EntityPool_RecountLiveByGroup
     // @ 0x40e8d0; timer @ 0x51db6d, reload 0x3E @ 0x51db93, call @ 0x51dc02].
     void recount_group_initials();
     void recount_group_live();

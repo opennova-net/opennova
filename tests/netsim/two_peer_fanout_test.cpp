@@ -534,6 +534,11 @@ bool run_0a_subblock_phase_cycle() {
 	// The phase-0 writer truncates the seconds dword to its low wire byte.
 	// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
 	world.preround_delay_seconds = 0x123u;
+	// A script's breathtime above 0xFF crosses the phase-1 byte as 0xFF, and
+	// a negative fallmps crosses as its low byte (the compares are signed).
+	// [orig: NetPacket_WritePlayerState @0x4FF9DB..0x4FFA0A, @0x4FFA14..0x4FFA48]
+	world.script.wac_values.breathtime = 0x123;
+	world.script.wac_values.fallmps = -3;
 
 	// One full low-nibble cycle. Retail pre-increments, so the first flags2 is 1.
 	for (int i = 1; i <= 16; ++i) {
@@ -547,8 +552,10 @@ bool run_0a_subblock_phase_cycle() {
 		if (!expect(fu.flags2 == static_cast<uint8_t>(i), "flags2 free-runs from 1 through 16"))
 			return false;
 		if ((i & 3u) == 1) {
-			if (!expect(fu.timer.present && fu.timer.state1 == 13,
-			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
+			if (!expect(fu.timer.present && fu.timer.state1 == 0xFD,
+			            "phase 1 carries the live fallmps as its low byte")) return false;
+			if (!expect(fu.timer.state0 == 0xFF,
+			            "phase 1 carries the live breathtime, capped at 0xFF")) return false;
 			// A running pre-round countdown gates the clock to -1
 			// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca].
 			if (!expect(fu.timer.timer_seconds == -1,
@@ -557,6 +564,10 @@ bool run_0a_subblock_phase_cycle() {
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == -1,
 			            "client fold keeps the untimed -1")) return false;
+			// The joiner stores both bytes zero-extended.
+			// [orig: NapiNPClientMsg_0x00A @0x4301A1 / @0x4301BC]
+			if (!expect(fold.state().breathtime == 0xFF && fold.state().fallmps == 0xFD,
+			            "client fold mirrors the breathtime and fallmps bytes")) return false;
 		} else if ((i & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
 			if (!expect(fu.weapon.preround_timer == 0x23,
@@ -1217,7 +1228,7 @@ bool run_0a_player_record_field_sources() {
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
-			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 89, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
 	if (!expect(e != nullptr, "host entity resolvable")) return false;
 	w::AiEntity *ae = ai.for_handle(host_h);
@@ -1243,9 +1254,10 @@ bool run_0a_player_record_field_sources() {
 		if (r.handle == host_h.packed) rec = &r;
 	if (!expect(rec != nullptr, "player record present")) return false;
 
-	// yaw 0 -> engine BAM (90-0)*11930464 = 0x3FFFFFC0: TRUNCATED high byte = 0x3F (rounding
-	// would give 0x40 — the exact bit the witness corrected).
-	if (!expect(rec->player.yaw_byte == 0x3F, "yaw byte is the TRUNCATED high byte")) return false;
+	// yaw 89 -> the placement heading ((90-89) << 16) / 360 << 16 = 0x00B60000: TRUNCATED high
+	// byte = 0x00 (rounding would give 0x01 — the exact bit the witness corrected).
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	if (!expect(rec->player.yaw_byte == 0x00, "yaw byte is the TRUNCATED high byte")) return false;
 	// Live AiEntity pitch 0x1F800000 rounds to high byte 0x20; the
 	// deliberately disagreeing registry pitch above must be ignored.
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
@@ -1660,8 +1672,10 @@ bool run_grounded_uplink_apply_and_echo() {
 	                    nw::network_decompress_fixedpoint(rec->player.pos_z_compressed) == lz,
 	            "record position is the CARRIER-LOCAL offset, not anchor-relative world"))
 		return false;
-	// Local heading hi-byte: yaw 45 -> engine BAM (90-45)*11930464 = 0x1FFFFFE0; carrier BAM 0.
-	if (!expect(rec->player.yaw_byte == 0x1F, "yaw byte is the LOCAL heading's high byte"))
+	// Local heading hi-byte: yaw 45 -> the placement heading ((90-45) << 16) / 360 << 16 =
+	// 0x20000000, the same dword the 0x2000 uplink heading carried; carrier BAM 0.
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	if (!expect(rec->player.yaw_byte == 0x20, "yaw byte is the LOCAL heading's high byte"))
 		return false;
 
 	// (3) The free-standing form is unchanged: a later 0xFFFF uplink returns to world coords.
@@ -1891,7 +1905,9 @@ bool run_vehicle_drive_authority() {
 	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at
 	// 0 degrees. The authority motor must consume the player's LOOK, not the seat yaw.
 	const int32_t requested_driver_heading = w::bam_heading_from_mission_yaw_deg(45.0);
-	constexpr int32_t carrier_heading = 90 * 11930464;
+	// The unseeded carrier heads at its placement angle, ((90 - 0) << 16) / 360 << 16
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
+	constexpr int32_t carrier_heading = 0x40000000;
 	const uint32_t local_heading_bits =
 			static_cast<uint32_t>(requested_driver_heading) -
 			static_cast<uint32_t>(carrier_heading);
@@ -1935,7 +1951,7 @@ bool run_vehicle_drive_authority() {
 	ctx.world = &world;
 	ctx.is_authority = true;
 	ctx.logic_tick = 0;
-	ai.tick(world, ctx);
+	world.update_all_entities(ctx);
 	w::Entity *veh = world.registry.get(vh);
 	player = world.registry.get(ph);
 	driver_ai = ai.for_handle(ph);
@@ -1954,7 +1970,7 @@ bool run_vehicle_drive_authority() {
 	// Complete 62 authority ticks: the vehicle keeps consuming the replicated input.
 	for (int i = 1; i < 62; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
-		ai.tick(world, ctx);
+		world.update_all_entities(ctx);
 	}
 	veh = world.registry.get(vh);
 	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))

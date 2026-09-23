@@ -102,8 +102,8 @@ int main() {
     int32_t pa = -1, pb = -1;
     RootMotionFrame blended{};
     TEST_EXPECT(source.advance_blended(0,
-            opennova::world::anim_state::kReset, pa,
-            opennova::world::anim_state::kReset, pb, 0.0f, blended));
+            opennova::world::anim_state::kReset, 0, pa,
+            opennova::world::anim_state::kReset, 0, pb, 0.0f, blended));
     TEST_EXPECT(blended.dx == frame.dx);
     TEST_EXPECT(blended.capsule_bottom == bottom0);
     TEST_EXPECT(blended.capsule_top == top0);

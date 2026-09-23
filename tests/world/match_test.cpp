@@ -18,6 +18,25 @@
 using namespace opennova::world;
 
 static int failures = 0;
+
+// One entity-update step of an item row's pool: every pool-1 row's own visit
+// (World::update_pool1_slot), or the pool-2/3 cohort walk.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
+//  @0x4C230C]
+static void step_item_pool(World &w, int pool) {
+    if (pool != 1) {
+        tick_item_event_pool(w, pool);
+        return;
+    }
+    TickContext ctx;
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = w.logic_tick;
+    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
+        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
+            w.update_pool1_slot(*row, ctx);
+}
+
 #define CHECK(c)                                                                                   \
     do {                                                                                           \
         if (!(c)) {                                                                                \
@@ -203,6 +222,17 @@ void advance_initial_periodic_passes(World &world, int passes) {
         for (int tick = 0; tick < 62; ++tick)
             world.match.advance_tick(world);
     }
+}
+
+// One authority frame as the match sees it: the server tick's match service,
+// then the entity update, whose tail consumes the flag and bay touches its
+// movement resolves recorded.
+// [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6
+//  precedes the Entity_UpdateAllEntities call @0x52674B; the resolver's
+//  Entity_ProcessWaypointInteraction call @0x4B2FF5]
+void run_match_frame(World &world) {
+    world.match.advance_tick(world);
+    world.match.process_movement_contacts(world);
 }
 
 void expect_fields(uint32_t game_type,
@@ -411,7 +441,7 @@ void test_tdm_limit_and_clock_decisions() {
     CHECK(draw.has_value() && *draw == 0);
 
     // Retail returns from the entire TDM arm when score_limit is zero, even at t=0.
-    // [orig: Server_CheckWinConditions @0x51AE47]
+    // [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
     world->match.configure(rules(kTdm, 1, 0));
     for (int i = 0; i < 60 * 62; ++i)
         world->match.advance_tick(*world);
@@ -572,7 +602,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
         // With neither kind of capture source in the mission retail skips the
         // capture counters entirely; absence does not mean "outside."
-        // [orig: Server_UpdateCaptureZoneProximity @0x5088F6..0x50890A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x508C33..0x508C45]
         world->match.advance_tick(*world);
         CHECK(state->objective_ticks == 3);
     }
@@ -611,7 +641,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
         // The existence of any numbered capturable entity globally supersedes
         // every type-6006 volume. This player is therefore outside and decays,
         // despite standing in the hill trigger.
-        // [orig: Server_UpdateCaptureZoneProximity @0x508869..0x50890A]
+        // [orig: Server_UpdateCaptureZoneProximity @0x508C33..0x508C4F]
         world->match.advance_tick(*world);
         CHECK(world->match.player(solo)->objective_ticks == 2);
     }
@@ -709,6 +739,9 @@ void test_retail_objective_proximity_scoring_events() {
         (*tdm.score_values)[35] = 7;
         (*tdm.score_values)[36] = 3;
         world->match.configure(tdm);
+        // Event 25 runs only in a network session.
+        // [orig: Server_UpdateCaptureZoneProximity @0x5087BC]
+        world->rules.mp_session = true;
         const EntityHandle blue = player(*world, 0, 1, "Blue");
 
         // The independent live-player counter calls event 25 at each status
@@ -769,10 +802,11 @@ void test_retail_zone_and_tkoth_win_quirks() {
         world->registry.spawn(3, hill);
         tick_to_zero(*world);
 
-        // The retail timeout comparison for a unique team-4 lead jumps to
-        // LABEL_95, the team-1 round-end label. Preserve that observable bug;
-        // the earlier hill-limit arm still reports team 4 normally.
-        // [orig: Server_CheckWinConditions @0x51B01A..0x51B040]
+        // The retail timeout comparison for a unique team-4 lead pushes the
+        // team-1 winner. Preserve that observable bug; the earlier hill-limit
+        // arm still reports team 4 normally.
+        // [orig: Server_CheckWinConditions @0x51B07D..0x51B0D6, the team-4
+        // lead's `push 1` @0x51B0D0]
         const auto timeout_winner = world->match.winner_if_finished(*world);
         CHECK(timeout_winner.has_value() && *timeout_winner == 1);
     }
@@ -855,7 +889,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     const EntityHandle blue_bay = objective(*world, 4098, 1, {50.0f, 0.0f, 0.0f});
     contacts.bind(red_flag);
     contacts.bind(blue_bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
 
@@ -864,18 +898,18 @@ void test_demolition_flag_and_flagball_gameplay() {
     // pick up or capture a flag. [orig: Entity_ProcessWaypointInteraction
     // @0x4AD820, caller in Entity_MovementCollisionResolver]
     world->registry.get(blue)->net_move_input |= Entity::kMoveOrderMoving;
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 0);
     contacts.touch(*world, blue, red_flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == red_flag);
     CHECK(world->registry.get(red_flag)->primary_occupant == blue);
     CHECK((world->registry.get(red_flag)->flags & kEntityFlagCarried) != 0);
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagPickups] == 1);
 
     contacts.touch(*world, blue, blue_bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(world->registry.get(blue)->mounted_child == EntityHandle{});
     CHECK(world->registry.get(red_flag) == nullptr); // CTF consumes captured flags
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
@@ -912,7 +946,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->tables.item_death_traits.set(4095, flag_traits);
     contacts.bind(timed_flag);
     contacts.touch(*world, blue, timed_flag);
-    world->match.advance_tick(*world); // immediate service + per-tick pickup
+    run_match_frame(*world); // immediate service + per-tick pickup
     CHECK(blue_entity->mounted_child == timed_flag);
     destruction_notify_item_damage(*world, *world->registry.get(timed_flag), 0);
     world->registry.get(timed_flag)->class_think_ticks = 0;
@@ -923,12 +957,12 @@ void test_demolition_flag_and_flagball_gameplay() {
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
     for (int i = 0; i < 5 * 62; ++i) {
         world->logic_tick = i;
-        tick_item_event_pool(*world, 1);
+        step_item_pool(*world, 1);
         world->match.advance_tick(*world);
     }
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
     world->logic_tick = 5 * 62;
-    tick_item_event_pool(*world, 1);
+    step_item_pool(*world, 1);
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
     world->registry.despawn(timed_flag);
 
@@ -938,10 +972,19 @@ void test_demolition_flag_and_flagball_gameplay() {
     flag_ball.max_score = 2;
     world->match.configure(flag_ball);
     world->match.upsert_player({blue, 0, "Blue"});
+    // The capture's team award is keyed by the captured flag's type: a null
+    // flag awards the capturer alone, and FlagBall's ball (the neutral flag)
+    // scores the capturer's own team row.
+    // [orig: GameEvent_ProcessScoring case 9 @0x52F7CF..0x52F810]
     world->match.record_flag_capture(*world, blue, EntityHandle{});
-    world->match.record_flag_capture(*world, blue, EntityHandle{});
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagCaptures] == 1);
+    CHECK(world->match.team_stats(1)[MatchStats::kFlagCaptures] == 0);
+    const EntityHandle ball = objective(*world, 4095, 0);
+    world->match.record_flag_capture(*world, blue, ball);
+    world->match.record_flag_capture(*world, blue, ball);
     const auto flag_ball_winner = world->match.winner_if_finished(*world);
     CHECK(flag_ball_winner.has_value() && *flag_ball_winner == 1);
+    world->registry.despawn(ball);
 
     MatchRules zero_flag_ball;
     zero_flag_ball.game_type = gt::kFlagBall;
@@ -979,10 +1022,10 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     contacts.bind(bay);
 
     contacts.touch(*world, carrier, flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == flag);
     contacts.touch(*world, carrier, bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
     CHECK(world->registry.get(flag)->position.x == 0.0f);
@@ -1025,19 +1068,54 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     const EntityHandle inert = objective(*world, 4095, 0, {}, 0);
     contacts.bind(inert);
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib =
         kItemAttribMoveCallback | kItemAttribPowerup;
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == EntityHandle{});
 
     world->registry.get(inert)->item_attrib = kItemAttribMoveCallback;
     contacts.touch(*world, carrier, inert);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(carrier_entity->mounted_child == inert);
+}
+
+// The entity update's own tail consumes the flag and bay touches its bodies'
+// movement resolves recorded, so the pickup lands in the frame that touched,
+// ahead of the next server tick. The handler returns at once off the
+// authority, so a peer without it picks nothing up.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority test
+//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame runs
+//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6]
+void test_entity_update_consumes_its_movement_contacts() {
+    for (const bool authority : {false, true}) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        WaypointContactHarness contacts(*world);
+
+        MatchRules rules;
+        rules.game_type = gt::kFlagBall;
+        world->match.configure(rules);
+        const EntityHandle carrier = player(*world, 0, 1, "Carrier");
+        Entity *carrier_entity = world->registry.get(carrier);
+        carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+        const EntityHandle flag = objective(*world, 4095, 0, {});
+        contacts.bind(flag);
+
+        contacts.touch(*world, carrier, flag);
+        TickContext ctx;
+        ctx.world = world.get();
+        ctx.logic_tick = world->logic_tick;
+        ctx.is_authority = authority;
+        world->update_all_entities(ctx);
+        CHECK((carrier_entity->mounted_child == flag) == authority);
+        CHECK(world->match.player(carrier)->stats[MatchStats::kFlagPickups] ==
+              (authority ? 1 : 0));
+    }
 }
 
 void test_aas_capture_scoring_and_outcomes() {
@@ -1103,10 +1181,10 @@ void test_flagball_four_team_bays_consume_exact_contacts() {
         contacts.bind(bay);
 
         contacts.touch(*world, carrier, flag);
-        world->match.advance_tick(*world);
+        run_match_frame(*world);
         CHECK(carrier_entity->mounted_child == flag);
         contacts.touch(*world, carrier, bay);
-        world->match.advance_tick(*world);
+        run_match_frame(*world);
         CHECK(carrier_entity->mounted_child == EntityHandle{});
         CHECK(world->registry.get(flag) != nullptr);
         CHECK(world->registry.get(flag)->position.x == side.x);
@@ -1149,10 +1227,10 @@ void test_cac_combines_flag_and_zone_objectives() {
     contacts.bind(bay);
 
     contacts.touch(*world, blue, flag);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(blue_entity->mounted_child == flag);
     contacts.touch(*world, blue, bay);
-    world->match.advance_tick(*world);
+    run_match_frame(*world);
     CHECK(blue_entity->mounted_child == EntityHandle{});
     CHECK(world->registry.get(flag) != nullptr);
     CHECK(world->registry.get(flag)->position.x == 0.0f);
@@ -1305,8 +1383,12 @@ void test_end_result_freezes_team_hold_timer() {
 // @0x509053/@0x50920E/@0x50926A/@0x5092B2; Server_ProcessRoundEnd
 // @0x5165A3..0x5165C3 and @0x5167E2..0x5167FD; GameEvent_ProcessScoring @0x52F6FA]
 void test_nonteam_board_order_draw_and_winner_marker() {
-    auto marker = [](const MatchResult &result, const char *name) {
-        for (const MatchResultPlayer &row : result.players) {
+    // The non-team award runs after the board freeze, so it is read from the
+    // live roster; the frozen rows keep their field 35.
+    // [orig: Server_ProcessRoundEnd — the board @0x516590, the award
+    //  @0x5167F6..0x5167FD]
+    auto marker = [](const World &world, const char *name) {
+        for (const MatchPlayer &row : world.match.players()) {
             if (row.identity.name == name)
                 return row.stats[MatchStats::kRoundMarker];
         }
@@ -1314,14 +1396,17 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     };
 
     // (a) Points and kills disagree: Ace has 2 kills and 3 suicides (5 points),
-    // Bee 1 kill (8 points). DM orders by kills.
+    // Bee 1 kill (8 points). DM orders by kills. Every non-team Player sits on
+    // team 1, and the kills stay enemy kills: the scorer's team rows exist
+    // only in team modes. [orig: Server_AssignPlayerTeam @0x4FE3EC;
+    // GameEvent_ProcessScoring @0x52F657]
     {
         auto world = std::make_unique<World>();
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
-        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
+        const EntityHandle cid = player(*world, 9, 1, "Cid");
         world->match.record_death(*world, bee, ace);
         world->match.record_death(*world, cid, ace);
         for (int i = 0; i < 3; ++i)
@@ -1336,9 +1421,10 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         CHECK(result.players[1].identity.name == "Bee" && result.players[1].primary_score == 1);
         CHECK(result.players[2].identity.name == "Cid" && result.players[2].primary_score == 0);
         CHECK(!result.draw);
-        CHECK(marker(result, "Ace") == 2);
+        CHECK(marker(*world, "Ace") == 2);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 0);
+        CHECK(marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
     }
 
     // (b) Every row tied at zero: a draw, no marker.
@@ -1347,11 +1433,11 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Ace");
-        player(*world, 7, 2, "Bee");
+        player(*world, 7, 1, "Bee");
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(result.draw);
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
     }
 
     // (c) A lone row: a draw at zero, a win with any positive score.
@@ -1362,14 +1448,14 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         player(*world, 3, 1, "Solo");
         world->process_round_end(0);
         CHECK(world->match.result().draw);
-        CHECK(marker(world->match.result(), "Solo") == 0);
+        CHECK(marker(*world, "Solo") == 0);
 
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle solo = player(*world, 3, 1, "Solo");
         world->match.player(solo)->stats[MatchStats::kEnemyKills] = 1;
         world->process_round_end(0);
         CHECK(!world->match.result().draw);
-        CHECK(marker(world->match.result(), "Solo") == 2);
+        CHECK(marker(*world, "Solo") == 2);
     }
 
     // (d) Two rows tied at the top over a third: not a draw, but no marker.
@@ -1378,15 +1464,15 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
-        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
+        const EntityHandle cid = player(*world, 9, 1, "Cid");
         world->match.record_death(*world, cid, ace);
         world->match.record_death(*world, cid, bee);
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace" && result.players[1].identity.name == "Bee");
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
     }
 
     // (e) KOTH orders by the hill ticks the primary selects, not points.
@@ -1399,7 +1485,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         koth.hill_limit_minutes = 99;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 3, 1, "Solo");
-        const EntityHandle red = player(*world, 7, 2, "Red");
+        const EntityHandle red = player(*world, 7, 1, "Red");
         world->match.player(solo)->objective_ticks = 5;
         world->match.player(solo)->stats[MatchStats::kPoints] = 50;
         world->match.player(red)->objective_ticks = 9;
@@ -1407,7 +1493,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(result.players[0].identity.name == "Red" && result.players[0].primary_score == 9);
         CHECK(!result.draw);
-        CHECK(marker(result, "Red") == 2 && marker(result, "Solo") == 0);
+        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 0);
     }
 
     // (f) A spectator-flagged top scorer receives no award.
@@ -1416,14 +1502,14 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
-        const EntityHandle bee = player(*world, 7, 2, "Bee");
+        const EntityHandle bee = player(*world, 7, 1, "Bee");
         world->match.record_death(*world, bee, ace);
         world->match.set_player_spectator(ace, true);
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace");
-        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
     }
 }
@@ -1473,6 +1559,7 @@ int main() {
     test_target_destroyed_shares_through_both_occupant_links();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
+    test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
     test_cac_combines_flag_and_zone_objectives();

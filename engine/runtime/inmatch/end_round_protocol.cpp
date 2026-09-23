@@ -23,7 +23,7 @@ int16_t scoreboard_ratio(const world::MatchStats &stats) {
 	if (denominator == 0) return -1;
 	// 32-bit `raw[2] << 16` exactly as the board builder computes it.
 	const int32_t numerator =
-			static_cast<int32_t>(static_cast<uint32_t>(stats[2]) << 16);
+			static_cast<int32_t>(static_cast<uint32_t>(stats[world::MatchStats::kShotsFired]) << 16);
 	return wire_i16(numerator / denominator);
 }
 
@@ -72,7 +72,7 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 		// [orig: Server_BuildEndOfRoundScoreboard @0x508F30]
 		row.kills = wire_i16(player.primary_score);
 		row.deaths = wire_i16(player.stats[world::MatchStats::kPoints]);
-		row.assists = wire_i16(player.stats[30]);
+		row.assists = wire_i16(player.stats[world::MatchStats::kUnitScore]);
 		row.score = wire_i16(player.stats[world::MatchStats::kEnemyKills]);
 		row.captures = wire_i16(player.stats[world::MatchStats::kDeaths]);
 		row.flags = wire_i16(player.stats[world::MatchStats::kFlagSaves]); // raw11 = FLAGSAVE

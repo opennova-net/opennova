@@ -65,6 +65,14 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	world.round_sim.deaths.push_back(d);
 }
 
+// A death raised at a damage-pass lethal edge, the only producer of the kill
+// accounting [orig: Score_ProcessKillEvent @0x4FD400 from
+// Projectile_ProcessDamageOnTarget @0x4E8133].
+void push_kill(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
+	push_death(world, victim, killer);
+	world.round_sim.deaths.back().kill_event = true;
+}
+
 w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
 		const char *name) {
 	w::Entity e;
@@ -119,7 +127,6 @@ w::CollisionModel contact_box(int32_t type) {
 void install_collision_system(w::World &world, w::CollisionWorld &collision) {
 	world.collision = &collision;
 	world.ai.collision = &collision;
-	world.add_system(&world.ai);
 }
 
 w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
@@ -382,9 +389,12 @@ void test_dm_round_wire_named_header() {
 	rules.score_values.emplace();
 	(*rules.score_values)[3] = 10;
 	world.match.configure(rules);
+	// Every non-team Player sits on team 1 [orig: Server_AssignPlayerTeam
+	// @0x4FE3EC]; the kills stay enemy kills because the scorer's team rows
+	// exist only in team modes [orig: GameEvent_ProcessScoring @0x52F657].
 	const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
-	const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
-	const w::EntityHandle cid = match_player(world, 9, 2, "Cid");
+	const w::EntityHandle bee = match_player(world, 7, 1, "Bee");
+	const w::EntityHandle cid = match_player(world, 9, 1, "Cid");
 
 	ns::LoopbackChannel ace_wire;
 	ns::LoopbackChannel cid_wire;
@@ -458,9 +468,11 @@ void test_dm_round_wire_kill_order_and_tie() {
 		(*rules.score_values)[4] = -3;
 		(*rules.score_values)[5] = -2;
 		world.match.configure(rules);
+		// All three on team 1, the retail non-team assignment
+		// [orig: Server_AssignPlayerTeam @0x4FE3EC].
 		const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
-		const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
-		const w::EntityHandle cid = match_player(world, 9, 3, "Cid");
+		const w::EntityHandle bee = match_player(world, 7, 1, "Bee");
+		const w::EntityHandle cid = match_player(world, 9, 1, "Cid");
 		world.match.record_death(world, bee, ace);
 		world.match.record_death(world, cid, ace);
 		for (int i = 0; i < 3; ++i) world.match.record_death(world, ace, ace);
@@ -506,7 +518,7 @@ void test_dm_round_wire_kill_order_and_tie() {
 		(*rules.score_values)[3] = 10;
 		world.match.configure(rules);
 		const w::EntityHandle ace = match_player(world, 7, 1, "Ace");
-		const w::EntityHandle bee = match_player(world, 3, 2, "Bee");
+		const w::EntityHandle bee = match_player(world, 3, 1, "Bee");
 		world.match.record_death(world, bee, ace);
 		world.match.record_death(world, ace, bee);
 		world.process_round_end(0);
@@ -888,7 +900,7 @@ void test_coop_script_producers_share_round_wire() {
 	run_case(game_type::kObjectiveCoop, false);
 }
 
-void test_aas_events_use_spawn_registry_index() {
+void test_aas_capture_events_carry_zone_numbers() {
 	w::World world;
 	w::CollisionWorld collision;
 	w::AiSystem &ai = world.ai;
@@ -906,7 +918,8 @@ void test_aas_events_use_spawn_registry_index() {
 	world.registry.get(blue)->net_move_input |= w::Entity::kMoveOrderMoving;
 
 	// A sorted pool-2 spawn object precedes the three pool-1 capture zones. The
-	// target zone is therefore spawn-registry index 2 but zone-chain index 1.
+	// target zone is therefore spawn-registry index 2, zone-chain index 1 and
+	// zone NUMBER 4: the flip pair carries the number, the banner the capturer.
 	w::Entity base_spawn;
 	base_spawn.kind = w::EntityKind::Building;
 	base_spawn.team = 1;
@@ -926,9 +939,9 @@ void test_aas_events_use_spawn_registry_index() {
 		zone.alive = true;
 		return world.registry.spawn(1, zone);
 	};
-	spawn_zone(1, 1, -100.0f);
-	const w::EntityHandle target = spawn_zone(2, 0, 100.0f);
-	spawn_zone(3, 2, 300.0f);
+	spawn_zone(3, 1, -100.0f);
+	const w::EntityHandle target = spawn_zone(4, 0, 100.0f);
+	spawn_zone(5, 2, 300.0f);
 	world.zones.build_chain_from_mission();
 	world.zones.latch_control();
 	const int32_t capture_model = collision.add_model(
@@ -947,21 +960,37 @@ void test_aas_events_use_spawn_registry_index() {
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
-	// The body already stands in the box, so the first-frame one-second
-	// service drains that contact and flips the numbered zone at once.
-	inmatch::Server_TickUpdate(ctx);
+	// The body already stands in the box: the first frame's entity update
+	// records the contact after that frame's one-second service, the next
+	// server tick turns it into a request, and the next one-second service
+	// flips the numbered zone. [orig: Server_TickUpdate — the periodic block
+	//  @0x51DB6D..0x51E1B2 (the Server_UpdateCaptureZones call @0x51DF87)
+	//  precedes Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674B]
+	for (int tick = 0; tick < 63; ++tick) inmatch::Server_TickUpdate(ctx);
 
-	bool saw_capture_event = false;
+	// Blue's own team gets 53 [zone number 4][team 1's new frontier 5] (the
+	// enemy mask never held number 4), then the 56 banner [Blue's pool-0 index].
+	// [orig: GameEvent_FlagCapture @0x50F6F0 — GetZoneInfo @0x50F781, the 53
+	//  build @0x50F82B, the banner @0x50F98C]
+	bool saw_pair = false;
+	bool saw_banner = false;
 	ns::Datagram datagram;
 	while (wire.client_recv(datagram)) {
 		if (datagram.tag != 0x1E || datagram.body.size() != 8) continue;
 		const uint8_t event = datagram.body[0];
-		if (event < 50 || event > 57) continue;
-		saw_capture_event = true;
-		expect(datagram.body[1] == 2,
-				"A&S 0x1E capture actor is the sorted SpawnZoneList index");
+		if (event >= 50 && event <= 53) {
+			saw_pair = true;
+			expect(event == 53 && datagram.body[1] == 4 && datagram.body[2] == 5 &&
+					datagram.body[3] == 0xFF,
+					"A&S 0x1E pair carries the zone number and the frontier");
+		} else if (event == 56 || event == 57) {
+			saw_banner = true;
+			expect(event == 56 && datagram.body[1] == uint8_t(blue.slot()) &&
+					datagram.body[2] == 0xFF && datagram.body[3] == 0xFF,
+					"A&S 0x1E banner carries the capturer's pool-0 index");
+		}
 	}
-	expect(world.registry.get(target)->team == 1 && saw_capture_event,
+	expect(world.registry.get(target)->team == 1 && saw_pair && saw_banner,
 			"A&S authority flips the target and emits its capture event family");
 }
 
@@ -1025,6 +1054,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
 	inmatch::Server_TickUpdate(ctx); // contact -> pickup
+	inmatch::Server_TickUpdate(ctx); // the pickup's records lead this queue
 	bool saw_pickup_event = false;
 	bool saw_pickup = false;
 	int pickup_event_order = -1;
@@ -1088,6 +1118,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 
 	move_remote_body(world, ai, blue, bay_position);
 	inmatch::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
+	inmatch::Server_TickUpdate(ctx); // the capture's records lead this queue
 	bool saw_capture_event = false;
 	bool saw_remove = false;
 	bool saw_reset = false;
@@ -1218,6 +1249,7 @@ void test_flag_timeout_wire_transaction() {
 	expect(world.registry.get(flag)->position.x != 5.0f,
 			"the flag stays dropped until the sixth class visit after pickup");
 	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx); // the return's records lead this queue
 
 	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
 		bool saw_event = false;
@@ -1281,8 +1313,198 @@ void test_end_round_row_flags_word_is_field_11() {
 			"0x56 row: the sixth word carries field 11 (FLAGSAVE), the fifth field 7 (deaths)");
 }
 
+// The S2C 0x13 records for `victim` a drained channel carried.
+int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
+	int n = 0;
+	ns::Datagram datagram;
+	while (wire.client_recv(datagram)) {
+		if (datagram.tag != s2c::ENTITY_DEATH) continue;
+		EntityDeathRecord death;
+		size_t consumed = 0;
+		if (decode_entity_death(datagram.body.data(), datagram.body.size(), death,
+				consumed) && consumed == datagram.body.size() &&
+				death.entity_handle == victim.packed)
+			++n;
+	}
+	return n;
+}
+
+// An org1 (NPC) body's death transaction is its own motor edge's, once per
+// life. A damage-time record only feeds the SP kill tally; the edge raises the
+// one 0x13, a script health write with no record reaches it too, and a
+// scripted kill adds no second one. An edge record still fans after its corpse
+// leg removed the row in the same pass, and never re-latches a row it no
+// longer owns. [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D ->
+// Entity_CheckAndProcessDeath @0x51B550 (0x13 @0x51B58F); Score_ProcessKillEvent
+// @0x4FD400 is called from the damage paths only (@0x4E8133)]
+void test_org1_death_transaction_is_the_motor_edge() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	w::PlayerSpawn host_spawn;
+	host_spawn.position = {0.0f, 0.0f, 10.0f};
+	host_spawn.team = 1;
+	host_spawn.net_id = 0xFFF0;
+	const w::EntityHandle host = w::spawn_player(world, host_spawn);
+	world.cached.local_player = host;
+	w::PlayerSpawn peer_spawn = host_spawn;
+	peer_spawn.position = {4.0f, 0.0f, 10.0f};
+	peer_spawn.net_id = 0xFFF1;
+	const w::EntityHandle peer = w::spawn_remote_player(world, peer_spawn);
+
+	// The SP listen host is a session: its loopback plus one remote peer that
+	// sees the 0x13 fan (mask 0x90 leaves the loopback out).
+	ns::LoopbackChannel host_loop;
+	ns::LoopbackChannel peer_wire;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 2, &host_loop, ns::TransportMode::Loopback, host, true));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(2, 1, &peer_wire, ns::TransportMode::Client, peer, true));
+	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
+
+	auto spawn_org1 = [&](uint16_t net_id, int32_t deathtime_ticks) {
+		w::Entity seed;
+		seed.kind = w::EntityKind::Organic;
+		seed.net_id = net_id;
+		seed.team = 2;
+		seed.group_id = 7;
+		seed.alive = true;
+		seed.health = 100;
+		seed.health_max = 100;
+		seed.deathtime_ticks = deathtime_ticks;
+		// A scored NPC person definition (items.def `score`, def+0x194), which
+		// the kill tally requires of its victim [orig: @0x4FD422].
+		seed.has_item_def = true;
+		seed.item_score = 10;
+		seed.position = {static_cast<float>(net_id - 290), 20.0f, 0.0f};
+		const w::EntityHandle h = world.registry.spawn(0, seed);
+		w::AiEntity &body = *world.ai.at(world.ai.attach(h));
+		body.inf.active = true;
+		body.health = 100;
+		body.net_id = net_id;
+		return h;
+	};
+	auto run_ticks = [&](int n) {
+		for (int i = 0; i < n; ++i) inmatch::Server_TickUpdate(ctx);
+	};
+	auto dead_bit = [&](w::EntityHandle h) {
+		const w::Entity *e = world.registry.get(h);
+		return e != nullptr && ((e->flags | e->engine_flags) & w::kEntityFlagDead) != 0;
+	};
+	run_ticks(2);
+	peer_wire.clear();
+
+	// 1. A killing hit's record tallies once; the edge's own record raises the
+	// one 0x13 and latches the dead bit.
+	const w::EntityHandle shot = spawn_org1(300, 500);
+	world.registry.get(shot)->health = 0;
+	world.registry.get(shot)->last_attacker = host;
+	push_kill(world, shot, host);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, shot) == 1,
+			"org1 kill: one 0x13, raised by the motor edge");
+	expect(world.kill_stats.enemy_kills_by_player == 1,
+			"org1 kill: the damage-time record tallies once, the edge record never");
+	expect(dead_bit(shot), "org1 kill: the edge latches the dead bit");
+
+	// 2. A script health write raises no record; the edge still sends the 0x13.
+	const w::EntityHandle written = spawn_org1(301, 500);
+	world.commands.set_entity_health(written, 0);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, written) == 1,
+			"org1 health write: the motor edge sends the 0x13");
+	expect(world.kill_stats.enemy_kills_by_player == 1 &&
+			world.kill_stats.enemy_kills_by_others == 0,
+			"org1 health write: no kill tally");
+
+	// 3. A scripted group kill adds no second transaction.
+	const w::EntityHandle scripted = spawn_org1(302, 500);
+	world.commands.kill_group(7);
+	run_ticks(3);
+	expect(entity_death_records(peer_wire, scripted) == 1,
+			"org1 scripted kill: exactly one 0x13");
+	expect(world.kill_stats.enemy_kills_by_others == 0, "org1 scripted kill: no kill tally");
+
+	// 4. A corpse its leg removes on the edge pass still fans its 0x13. (No local
+	// player watches it here: an SP corpse in view is held.)
+	const w::EntityHandle gone = spawn_org1(303, 0);
+	world.cached.local_player = {};
+	world.commands.set_entity_health(gone, 0);
+	run_ticks(2); // the edge pass, then the tick whose queue its record leads
+	world.cached.local_player = host;
+	expect(world.registry.get(gone) == nullptr, "a zero deathtime corpse leaves on its edge pass");
+	expect(entity_death_records(peer_wire, gone) == 1,
+			"the removed corpse's edge record still sends its 0x13");
+
+	// 5. An edge record whose row lives again (a respawn in the same corpse pass)
+	// leaves the new life's flags alone.
+	const w::EntityHandle reborn = spawn_org1(304, 500);
+	w::RoundDeath edge;
+	edge.victim = reborn;
+	edge.victim_handle = reborn.packed;
+	edge.killer_handle = 0xFFFFu;
+	edge.motor_edge = true;
+	world.round_sim.deaths.push_back(edge);
+	run_ticks(1);
+	expect(!dead_bit(reborn) && world.registry.get(reborn)->alive,
+			"an edge record never re-latches the row it no longer owns");
+}
+
+// Scorer event 12 rides the kill accounting in every session: a lethal-edge
+// kill of a scored victim adds its `score` word to the killer's field 30, the
+// 0x56 row's third word; a death with no kill event adds nothing.
+// [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438, ahead
+// of the session test @0x4FD440); Server_BuildEndOfRoundScoreboard @0x508F30]
+void test_kill_event_unit_score_rides_every_session() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.rules.mp_session = true;
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	world.match.configure(rules);
+	const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
+	w::Entity npc;
+	npc.kind = w::EntityKind::Organic;
+	npc.has_item_def = true;
+	npc.item_type = 3;
+	npc.item_score = 25;
+	npc.team = 2;
+	npc.alive = true;
+	npc.health = 100;
+	const w::EntityHandle scored = world.registry.spawn(0, npc);
+	const w::EntityHandle scripted = world.registry.spawn(0, npc);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = rules.game_type;
+	inmatch::Server_TickUpdate(ctx);
+	push_kill(world, scored, ace);
+	push_death(world, scripted, ace);
+	inmatch::Server_TickUpdate(ctx);
+	const w::MatchPlayer *row = world.match.player(ace);
+	expect(row != nullptr && row->stats[w::MatchStats::kUnitScore] == 25 &&
+			row->stats[w::MatchStats::kEnemyKills] == 2 &&
+			world.match.team_stats(1)[w::MatchStats::kUnitScore] == 25,
+			"only the kill event adds the victim's score to field 30");
+	expect(world.kill_stats.enemy_kills_by_player == 0 &&
+			world.kill_stats.enemy_kills_by_others == 0,
+			"the session skips the SP tallies");
+	world.process_round_end(1);
+	const EndRoundStats board = inmatch::build_end_round_stats(world.match.result());
+	expect(board.players.size() == 1 && board.players[0].assists == 25,
+			"the 0x56 row's third word carries field 30");
+}
+
 int main() {
 	test_end_round_row_flags_word_is_field_11();
+	test_org1_death_transaction_is_the_motor_edge();
+	test_kill_event_unit_score_rides_every_session();
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
@@ -1296,11 +1518,16 @@ int main() {
 	if (!expect(player.valid(), "host player spawned")) return 1;
 	world.cached.local_player = player;
 
+	// Every NPC carries a scored definition (the shipped soldiers author
+	// `score 10`); persons are ItemDef type 3.
 	auto spawn_npc = [&](uint16_t net_id, uint8_t team, w::EntityKind kind) {
 		w::Entity e;
 		e.net_id = net_id;
 		e.team = team;
 		e.kind = kind;
+		e.has_item_def = true;
+		e.item_type = kind == w::EntityKind::Organic ? 3 : 1;
+		e.item_score = 10;
 		e.alive = true;
 		e.health = 100;
 		return world.registry.spawn(0, e);
@@ -1310,6 +1537,10 @@ int main() {
 	const w::EntityHandle red_person = spawn_npc(102, 2, w::EntityKind::Organic);
 	const w::EntityHandle green_item = spawn_npc(103, 0, w::EntityKind::Item);
 	const w::EntityHandle green_person2 = spawn_npc(104, 0, w::EntityKind::Organic);
+	const w::EntityHandle blue_person2 = spawn_npc(105, 1, w::EntityKind::Organic);
+	const w::EntityHandle blue_unscored = spawn_npc(106, 1, w::EntityKind::Organic);
+	world.registry.get(blue_unscored)->item_score = 0;
+	const w::EntityHandle blue_item = spawn_npc(107, 1, w::EntityKind::Item);
 
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
@@ -1325,19 +1556,29 @@ int main() {
 
 	// --- 2. Kill tallies by the local player: green person -> greenkills, blue person
 	// -> bluekills, red person -> enemy; a green NON-person tallies nothing. ---
-	push_death(world, green_person, player);
+	push_kill(world, green_person, player);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.greenkills_by_player == 1, "green person kill -> greenkills");
 	expect(!world.match.outcome().ended, "kill tallies alone never end the round");
 
-	push_death(world, blue_person, player);
-	push_death(world, red_person, player);
-	push_death(world, green_item, player);
+	push_kill(world, blue_person, player);
+	push_kill(world, red_person, player);
+	push_kill(world, green_item, player);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1, "blue person kill -> bluekills");
 	expect(world.kill_stats.enemy_kills_by_player == 1, "team>=2 kill -> enemy bucket");
 	expect(world.kill_stats.greenkills_by_player == 1,
 	       "a green NON-person victim tallies nothing [orig: the def+92==3 gate]");
+
+	// --- 2a. Only Score_ProcessKillEvent tallies: a scripted death (no
+	// damage-pass kill event) and a victim whose ItemDef `score` word is zero
+	// never reach the buckets. [orig: the five callers of Score_ProcessKillEvent
+	// @0x4FD400; the `cmp word ptr [eax+194h], 0` gate @0x4FD422] ---
+	push_death(world, blue_person2, player);
+	push_kill(world, blue_unscored, player);
+	inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.bluekills_by_player == 1,
+	       "a scripted death and a score-0 victim leave bluekills alone");
 
 	// --- 2b. The Show Score census: enemy-unit total at mission start counts
 	// non-player, team >= 2 entities with a non-zero items.def unit-class byte;
@@ -1363,24 +1604,47 @@ int main() {
 		       "defined subgoals = the leading non-zero, non-0xFF run");
 	}
 
-	// --- 3. A kill by someone else lands in the by-others family. ---
-	push_death(world, green_person2, red_person);
+	// --- 3. A kill by someone else lands in the by-others family, whose team-1
+	// and team-0 buckets take any victim type. [orig: Score_TallyKillByOthers
+	// @0x4FD325..0x4FD366] ---
+	push_kill(world, green_person2, red_person);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.friendly_kills_by_others == 1,
 	       "green person killed by an NPC -> friendly_kills_by_others");
 	expect(world.kill_stats.greenkills_by_player == 1, "the by-player bucket is untouched");
+	push_kill(world, blue_item, red_person);
+	inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.team_kills_by_others == 1,
+	       "a blue NON-person killed by an NPC -> team_kills_by_others");
 
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
+	// Each player death below is a lethal one: the body update re-reads the
+	// health word every tick, so a record over a healthy body would revive it.
 	world.tables.mission_attrib_flags = 0x40;
+	world.registry.get(player)->health = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.registry.get(player)->alive, "the player respawned after the timer");
 
+	// --- 4b. The Player's own lethal blast: no Player definition authors a
+	// `score`, so the self-kill tallies nothing (the missions whose WAC reads
+	// bluekills never fail on it). [orig: Score_ProcessKillEvent @0x4FD422] ---
+	world.registry.get(player)->health = 0;
+	push_kill(world, player, player);
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
+	expect(world.kill_stats.bluekills_by_player == 1 &&
+	               world.kill_stats.team_kills_by_others == 1,
+	       "the player's self-kill tallies nothing");
+	expect(!world.match.outcome().ended, "the self-kill with SP-respawn never auto-loses");
+	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
+	expect(world.registry.get(player)->alive, "the player respawned after the self-kill");
+
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---
 	world.tables.mission_attrib_flags = 0;
+	world.registry.get(player)->health = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");
@@ -1401,7 +1665,7 @@ int main() {
 	test_demolition_death_routes_score_and_round_wire();
 	test_aas_round_wire();
 	test_coop_script_producers_share_round_wire();
-	test_aas_events_use_spawn_registry_index();
+	test_aas_capture_events_carry_zone_numbers();
 	test_ctf_pickup_and_capture_wire_transaction();
 	test_flag_timeout_wire_transaction();
 

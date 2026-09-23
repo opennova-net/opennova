@@ -9,6 +9,7 @@
 #include <base/io/fixed.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
@@ -18,7 +19,7 @@ namespace opennova::world {
 // ----------------------------------------------------------------------------
 // The infantry combat pass. [orig: Entity_UpdateInfantryAI @0x4b9910; witness
 // docs/world/world-wac-ai-re.md §17.1-17.5 (D-AI-4).] Perception every 32 ticks,
-// behavior + aim per authority tick, fire on the .bad anim-event triggers.
+// behavior + aim per think, fire on the .bad anim-event triggers.
 // ----------------------------------------------------------------------------
 
 namespace {
@@ -31,8 +32,12 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     const Entity *self = world.registry.get(e.handle);
     if (self == nullptr || (e.slot.f[1] & 1) != 0) return {};
     const bool scanner_berserk = (e.slot.f[1] & 0x200) != 0;
+    // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
+    // the team byte around the scan [orig: Entity_UpdateInfantryAI
+    // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
+    const uint8_t team = (e.team == 0 && (e.slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
     // [orig: scanner-team setup @0x4B0A02]
-    if (e.team == 0 && !scanner_berserk) return {};
+    if (team == 0 && !scanner_berserk) return {};
     const uint32_t self_flags = self->flags | self->engine_flags;
     int32_t radius = std::min(range >> 1, 0x280000); // [orig: @0x4B09A1]
     if ((self_flags & 0x40) != 0) radius = 0;
@@ -65,7 +70,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const AiEntity *candidate_ai = sys.for_handle(h);
             const bool candidate_berserk = candidate_ai != nullptr && (candidate_ai->slot.f[1] & 0x200) != 0;
             if (!selected && !scanner_berserk && !candidate_berserk &&
-                    (c->team == 0 || c->team == e.team)) continue;
+                    (c->team == 0 || c->team == team)) continue;
             if (!self->target_selectors.allows(c->net_id, c->group_id)) continue;
             // Pool 2's explicitly selected targets bypass the armor-pair gate.
             // [orig: @0x53A878, @0x53AA86, @0x53AC3F]
@@ -129,386 +134,539 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     return {};
 }
 
+// The low dword of the x87 _ftol2 chop: an out-of-range double wraps through
+// the 64-bit result instead of C++'s undefined narrowing.
+int32_t ftol32(double value) {
+    return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
+}
+
+// sqrt over wrapping Q16 deltas under the flt_7C19E0 upper clamp, chopped
+// (the _ftol2 and the RC=chop fistp sites both truncate).
+int32_t clamped_distance(int32_t dx, int32_t dy, int32_t dz) {
+    return static_cast<int32_t>(std::min(
+            std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz), 2147418112.0));
+}
+
+// The registry Position in the Q16 lanes the target's savedLivePose stamp uses
+// (vehicle_motor.h carrier_pose_fixed).
+void registry_position(const Entity &entity, int32_t out[3]) {
+    out[0] = static_cast<int32_t>(entity.position.x * io::kFp16One);
+    out[1] = static_cast<int32_t>(entity.position.y * io::kFp16One);
+    out[2] = static_cast<int32_t>(entity.position.z * io::kFp16One);
+}
+
+// [orig: Entity_CheckGroundHeightAtPosition @0x4AFF70] The PROBE entity's own
+// radius-0 ground at a foreign point: the model-aware centre probe of
+// Entity_CalcAverageGroundHeight @0x457230 with that function's +0x170 water
+// clamp (@0x45731E..0x457331; persons carry no +0x64 brain offsets), refused
+// on the water plane, else the point no more than 3 u above the ground.
+bool ground_at_position(AiSystem &sys, World &world, const Entity &probe, const int32_t p[3]) {
+    const bool occupant_link = probe.primary_occupant.valid();
+    int32_t ground;
+    if (sys.collision != nullptr && sys.collision->instance_count() != 0) {
+        ground = sys.collision->raycast_ground(world, probe.handle, p, 0, 0, 0x10000, 0x300000,
+                                               nullptr);
+        if (occupant_link && world.env.water_z > ground) ground = world.env.water_z;
+    } else {
+        const terrain::TerrainHeightField *field =
+                world.tables.terrain ? world.tables.terrain : sys.terrain;
+        if (field == nullptr || !field->valid()) return true;
+        GroundClearance clearance = sys.ground_clearance;
+        clearance.has_occupant = occupant_link;
+        clearance.use_dead = false;
+        ground = calc_average_ground_height(*field, p, 0, clearance);
+        if (ground == INT32_MIN) return true;
+    }
+    if (ground == world.env.water_z) return false;     // [orig: @0x4AFFB7..0x4AFFC2]
+    return io::bam_sub(p[2], ground) <= 0x30000;        // [orig: @0x4AFFC9..0x4AFFD9]
+}
+
+// The aim blocks' sawtooth error unit and its two phases, in the 32-bit
+// registers retail computes them in: `imul reg,wac_var_accuracyspread; imul
+// reg,1D208h; sar reg,5` [orig: block 1 @0x4bc5ea..0x4bc60e; block 2
+// @0x4bc9ce..0x4bc9f2], then (32 - phase) * err with the HEADING phase
+// (key>>2)&63 [orig: block 1 `and ebp,3Fh` @0x4bc630 -> [esp+60h] @0x4bc669;
+// block 2 @0x4bca03..0x4bca11] and the PITCH phase ((key>>9)+(key>>2))&63
+// [orig: block 1 @0x4bc61e..0x4bc62d -> [esp+20h] @0x4bc64a; block 2
+// @0x4bca14..0x4bca2c].
+void aim_error(int32_t accuracy, int32_t spread, uint32_t key, int32_t &heading_error,
+               int32_t &pitch_error) {
+    const int32_t unit = io::bam_sar(static_cast<int32_t>(
+            static_cast<uint32_t>(accuracy) * static_cast<uint32_t>(spread) * 0x1D208u), 5);
+    const int32_t heading_phase = static_cast<int32_t>((key >> 2) & 0x3Fu);
+    const int32_t pitch_phase = static_cast<int32_t>(((key >> 9) + (key >> 2)) & 0x3Fu);
+    heading_error = static_cast<int32_t>(static_cast<uint32_t>(32 - heading_phase) *
+                                         static_cast<uint32_t>(unit));
+    pitch_error = static_cast<int32_t>(static_cast<uint32_t>(32 - pitch_phase) *
+                                       static_cast<uint32_t>(unit));
+}
+
+// Both aim blocks' eye: the +0x366 launch point, except that a led point within
+// 3 u of the body (planar) moves the eye only a quarter of the way from the body
+// origin to that point on X/Y [orig: block 1 @0x4BC7B1..0x4BC825 (clamped h);
+// block 2 @0x4BCB7B..0x4BCD0C (unclamped h)].
+void aim_eye(const int32_t body[3], const int32_t muzzle[3], const int32_t aim[3], bool clamp,
+             int32_t eye[3]) {
+    const double hx = double(io::bam_sub(aim[0], body[0]));
+    const double hy = double(io::bam_sub(aim[1], body[1]));
+    double h = std::sqrt(hx * hx + hy * hy);
+    if (clamp) h = std::min(h, 2147418112.0);
+    if (ftol32(h) > 0x30000) {
+        std::copy_n(muzzle, 3, eye);
+        return;
+    }
+    eye[0] = io::bam_add(body[0], io::bam_sar(io::bam_sub(muzzle[0], body[0]), 2));
+    eye[1] = io::bam_add(body[1], io::bam_sar(io::bam_sub(muzzle[1], body[1]), 2));
+    eye[2] = muzzle[2];
+}
+
+// The Q16 Position of a body: the motor's own lane when it has one.
+void body_position(const AiSystem &sys, const Entity &entity, int32_t out[3]) {
+    if (const AiEntity *body = sys.for_handle(entity.handle)) {
+        std::copy_n(body->pos, 3, out);
+        return;
+    }
+    registry_position(entity, out);
+}
+
+// The target lead both blocks store as the aimPoint: the target's own last-tick
+// displacement (Position minus its savedLivePose) times dist/528500 + 1, the
+// vertical at half that, over the FULL 3-D distance chopped by fistp; the
+// ComputeWeaponFireOrigin result both blocks compute next is never read.
+// [orig: block 1 @0x4BC697..0x4BC798 (the dead call @0x4BC720); block 2
+//  @0x4BCA9D..0x4BCB69 (the dead call @0x4BCB23); `mov eax,7EFAD919h; mul ecx;
+//  shr edx,12h; add 1` = the /528500 reciprocal]
+void lead_target(const Entity &target, const int32_t target_pos[3], const int32_t body[3],
+                 int32_t aim_point[3]) {
+    const uint32_t distance = static_cast<uint32_t>(clamped_distance(
+            io::bam_sub(target_pos[0], body[0]), io::bam_sub(target_pos[1], body[1]),
+            io::bam_sub(target_pos[2], body[2])));
+    const uint32_t lead = distance / 528500u + 1u;
+    const int32_t *saved = target.saved_live_valid ? target.saved_live_pos : target_pos;
+    for (int axis = 0; axis < 3; ++axis) {
+        const uint32_t scale = axis == 2 ? (lead >> 1) : lead;
+        aim_point[axis] = io::bam_add(target_pos[axis], static_cast<int32_t>(
+                static_cast<uint32_t>(io::bam_sub(target_pos[axis], saved[axis])) * scale));
+    }
+}
+
 } // namespace
+
+// The entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities @0x53B130]
+// over the shared collision world, or its terrain leg alone when the embedder
+// wired no model world.
+bool infantry_entity_los(AiSystem &ai, World &world, EntityHandle a, EntityHandle b,
+                         const int32_t start[3], const int32_t end[3], int32_t height_offset,
+                         bool all_types) {
+    if (ai.collision != nullptr)
+        return ai.collision->entity_los_clear(world, a, b, start, end, height_offset, all_types);
+    CollisionWorld terrain_query;
+    terrain_query.terrain = world.tables.terrain ? world.tables.terrain : ai.terrain;
+    return terrain_query.entity_los_clear(world, a, b, start, end, height_offset, all_types);
+}
 
 int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     InfantryState &inf = e.inf;
-    int selected_state = 0;
+    // The selected-state local carries on from the command legs: their 147 /
+    // 140 proposal is what the combat legs override or keep [orig: seeded 43
+    // @0x4BAA90 (our 0 = the selector's 43), board writes @0x4BB72A /
+    // @0x4BB80E / @0x4BB835].
+    int selected_state = inf.board_anim >= 0 ? inf.board_anim : 0;
+    inf.board_anim = -1;
+    // The think's hasReaction and aim-override frame locals, zeroed at the
+    // motor head [orig: Entity_UpdateInfantryAI @0x4B99BF / @0x4B99C6].
     inf.combat_reaction = false;
     inf.aim_override = false;
     AiSlot &slot = e.slot;
+    Entity *self_entity = world.registry.get(e.handle);
     auto avail = [&](int s) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
     };
 
-    // damageTimer decays once per 16-tick think. [orig: LABEL_373 @0x4BBE24]
-    if (inf.damage_timer > 0) --inf.damage_timer;
+    // damageTimer decays only on a think whose staggered key is a multiple of
+    // 64, not on every think [orig: the key & 0x3F local
+    // @0x4BA9D8..0x4BA9DB; the decay @0x4BBE24..0x4BBE38].
+    if ((key & 63u) == 0 && inf.damage_timer != 0)
+        inf.damage_timer = io::bam_sub(inf.damage_timer, 1);
 
     // --- Perception (every 32 ticks). [orig: tick & 0x1F == 0; §17.1] ---
     if ((key & 0x1Fu) == 0) {
         int32_t range = slot.f[17]; // sight range, 16.16 [orig: slot+68]
         const bool calm = inf.damage_timer == 0 &&
                           slot.bytes()[AiSlot::kAlertByte] == 0 && !inf.was_hit;
-        if (calm) range >>= 1; // calm NPCs see half as far
+        if (calm) range = io::bam_sar(range, 1); // calm NPCs see half as far
         // The 4-phase range schedule by (tick>>5)&3: full / 6u / half / 6u.
         const uint32_t phase = (key >> 5) & 3u;
         int32_t staged = std::min(range, 0x60000);
         if (phase == 0) staged = range;
-        else if (phase == 2) staged = std::max(range >> 1, std::min(range, 0x60000));
+        else if (phase == 2) staged = std::max(io::bam_sar(range, 1), std::min(range, 0x60000));
 
         EntityHandle found = infantry_scan_nearest_threat(*this, world, e, staged);
         const bool scan_hit = found.valid();
 
-        // A short-phase miss KEEPS the held target: on phases 1-3 the empty
-        // result re-commits slot[3] itself [orig: `test ebp,ebp; jz` @0x4bbee0
-        // ..0x4bbee2 sends only phase 0 to the fallback; `mov edi,[ecx+0Ch];
-        // test edi,edi; jnz loc_4BBF2A` @0x4bbee4..0x4bbeed carries the held
-        // target into the commit]. Only a phase-0 miss, or a body holding no
-        // target, reaches the fallback and the clear [orig: @0x4bbf7c..0x4bbf85].
+        // A short-phase miss KEEPS the held target, dead or alive: on phases 1-3
+        // the empty result re-commits slot[3] itself [orig: `test ebp,ebp; jz`
+        // @0x4bbee0..0x4bbee2 sends only phase 0 to the fallback; `mov
+        // edi,[ecx+0Ch]; test edi,edi; jnz loc_4BBF2A` @0x4bbee4..0x4bbeed carries
+        // the held target into the commit]. Only a phase-0 miss, or a body holding
+        // no target, reaches the fallback and the clear [orig: @0x4bbf7c..0x4bbf85].
         if (!found.valid() && phase != 0 && inf.combat_target.valid())
             found = inf.combat_target;
 
-        // Fallback: the last attacker, enemy + LOS-gated; consumed + cleared every scan.
-        // [orig: @0x4bbf20-era block — slot+4 & 1 suppresses retaliation]
+        // Fallback: the last attacker, consumed + cleared every scan. There is no
+        // health test: a different team byte, the blind bit clear and a clear
+        // origin-to-origin entity LOS at height 0 with allTypes 0 admit it.
+        // [orig: @0x4BBEEF..0x4BBF24 — pushes @0x4BBF0A..0x4BBF16, the call
+        //  @0x4BBF18, its result test @0x4bbf20]
         if (!found.valid() && (phase == 0 || !inf.combat_target.valid()) &&
             inf.last_attacker.valid() && (slot.f[1] & 1) == 0) {
             if (const Entity *att = world.registry.get(inf.last_attacker)) {
-                if (att->health > 0 && att->team != e.team) {
-                    // The mutual-LOS aim-origin endpoints stand in here too —
-                    // @0x53b130's own endpoint recipe is unwitnessed.
-                    int32_t sa[3];
-                    weapon_aim_origin(world, e, sa);
-                    int32_t sb[3];
-                    weapon_aim_origin(world, *att, sb);
-                    if (line_of_sight_clear(world, sa, sb, e.handle, inf.last_attacker))
+                if (att->team != e.team) {
+                    int32_t att_pos[3];
+                    registry_position(*att, att_pos);
+                    if (infantry_entity_los(*this, world, e.handle, inf.last_attacker, e.pos,
+                                            att_pos, 0, false))
                         found = inf.last_attacker;
                 }
             }
         }
         inf.last_attacker = EntityHandle{};
 
-        if (found.valid()) {
-            const Entity *t = world.registry.get(found);
-            if (t != nullptr) {
-                // The scan hit seeds the aimPoint (+0x30C..+0x314) with the
-                // target's Position [orig: @0x4BBF36..0x4BBF54]; the lead reads
-                // the target's own savedLivePose, never this word.
-                inf.aim_point[0] = static_cast<int32_t>(t->position.x * io::kFp16One);
-                inf.aim_point[1] = static_cast<int32_t>(t->position.y * io::kFp16One);
-                inf.aim_point[2] = static_cast<int32_t>(t->position.z * io::kFp16One);
-                inf.ai_focus = found;
-                if (inf.damage_timer < 15) inf.damage_timer += 12; // stay alerted on sight
-                if (inf.combat_target == found) ++inf.same_target_ticks;
-                else inf.same_target_ticks = 0;
-                inf.combat_target = found;
-                slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
-                                                                    // [orig: @0x4bbf83 —
-                                                                    // no refcount here]
-                // The authority relation quads ride the scan HIT alone [orig: the
-                // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2 --
-                // inside the scan, so neither the re-committed held target nor
-                // the lastAttacker fallback reaches it].
-                if (is_authority && scan_hit) {
-                    if (const Entity *se = world.registry.get(e.handle))
-                        apply_engage_relations(world, *se, *t);
-                }
-            }
+        // A destroyed entity has no pointer left to commit: the shared destroy
+        // clears every organic slot[3] that still names it [orig:
+        // Entity_ClearAllReferences @0x465670 (the +0x68 slot+0x0C clears
+        // @0x4656DB..0x4656E7 / @0x465751..0x46575D)].
+        const Entity *t = found.valid() ? world.registry.get(found) : nullptr;
+        if (t != nullptr) {
+            // The scan hit seeds the aimPoint (+0x30C..+0x314) with the
+            // target's Position [orig: @0x4BBF36..0x4BBF54]; the lead reads
+            // the target's own savedLivePose, never this word.
+            registry_position(*t, inf.aim_point);
+            inf.ai_focus = found;
+            if (inf.damage_timer < 15) inf.damage_timer += 12; // stay alerted on sight
+            if (inf.combat_target == found) ++inf.same_target_ticks;
+            else inf.same_target_ticks = 0;
+            inf.combat_target = found;
+            slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
+                                                                // [orig: @0x4BBF85 —
+                                                                // no refcount here]
+            // The authority relation quads ride the scan HIT alone [orig: the
+            // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2 --
+            // inside the scan, so neither the re-committed held target nor
+            // the lastAttacker fallback reaches it].
+            if (is_authority && scan_hit && self_entity != nullptr)
+                apply_engage_relations(world, *self_entity, *t);
         } else {
             inf.same_target_ticks = 0;
             inf.combat_target = EntityHandle{};
             slot.f[3] = 0;
         }
         // The own priority-target mark decays each scan; firing re-arms it.
-        // [orig: Flags &= ~0x4000 @0x4bbfa4]
-        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~kEntityFlagPriorityTarget;
+        // [orig: `and dword ptr [esi+24h],0FFFFBFFFh` @0x4BBF88]
+        if (self_entity != nullptr) self_entity->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
-    // [orig: @0x4BBF8F..0x4BC047] The nonzero burn branch skips the
-    // ENTIRE behavior/aim/gait block, reaching animation arbitration at LABEL_754.
+    // [orig: @0x4BBF8F..0x4BC047] The nonzero burn branch skips the ENTIRE
+    // behavior/aim/gait block, reaching the arbitration head [orig:
+    // Entity_UpdateInfantryAI @0x4BD7FD, the `jnz` @0x4BC04E].
+    // A stage without its clip leaves the proposal standing [orig: the local is
+    // written only under the clip tests @0x4BBFAF / @0x4BBFD3 / @0x4BBFF7 /
+    // @0x4BC01B].
     if (inf.burn_state != 0) {
-        selected_state = select_infantry_burn(inf, root_motion, false, key);
+        const int burn = select_infantry_burn(inf, root_motion, false, key);
+        if (burn != 0) selected_state = burn;
         if (inf.burn_state != 0) return selected_state;
     }
 
-    // Behavior and aim share the 16-tick think gate. [orig: §17.3/§17.5]
-    Entity *tent =
+    // The held slot[3] target, alive or a fresh corpse: a dead target stays
+    // held until a phase-0 perception miss, so the reaction chain and both aim
+    // blocks keep working it (post_attack is that chain's last link).
+    const Entity *tent =
         inf.combat_target.valid() ? world.registry.get(inf.combat_target) : nullptr;
-    if (tent != nullptr && tent->health <= 0) {
-        // Target died: play post_attack when close + clear. [orig: anim 151 + focus clear]
-        const int64_t ddx = static_cast<int64_t>(tent->position.x * io::kFp16One) - e.pos[0];
-        const int64_t ddy = static_cast<int64_t>(tent->position.y * io::kFp16One) - e.pos[1];
-        if (ddx * ddx + ddy * ddy < static_cast<int64_t>(196608) * 196608 &&
-            avail(anim_state::kPostAttack)) {
-            selected_state = anim_state::kPostAttack;
-            inf.combat_reaction = true;
-            inf.move_mode = 7;
-            inf.target_dist = 0;
-            inf.ai_focus = EntityHandle{};
-        }
+    if (tent == nullptr && inf.combat_target.valid()) {
+        // Destroyed since the scan [orig: Entity_ClearAllReferences @0x465670].
         inf.combat_target = EntityHandle{};
         slot.f[3] = 0;
-        tent = nullptr;
     }
-    if (tent == nullptr) {
-        if (inf.combat_move_timer > 0) --inf.combat_move_timer;
-        inf.aim_valid = false;
-        // Unported here: the attack-stance aim block's no-target arm. Its gate
-        // [orig: @0x4bc94c..0x4bc973] carries no target term; with slot+12 empty
-        // the block skips the lead [orig: @0x4bca95 -> @0x4bcbeb], re-seats the
-        // aim point from savedLivePose for a carried body on tick byte 32
-        // [orig: @0x4bcbeb..0x4bccc1], solves toward the retained aim point and
-        // runs the same tail [orig: @0x4bcfa3..0x4bcff5].
-        return selected_state;
-    }
-
-    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * io::kFp16One),
-                             static_cast<int32_t>(tent->position.y * io::kFp16One),
-                             static_cast<int32_t>(tent->position.z * io::kFp16One)};
-    // The witnessed distance metric: sqrt(dx^2 + dy^2 + (dz/2)^2), 16.16.
-    // [orig: outPitch[0] = dZ >> 1 into the fsqrt chain @0x4bd0xx]
-    const double fdx = static_cast<double>(tpos[0]) - e.pos[0];
-    const double fdy = static_cast<double>(tpos[1]) - e.pos[1];
-    const double fdz = (static_cast<double>(tpos[2]) - e.pos[2]) * 0.5;
-    const int32_t dist16 = static_cast<int32_t>(
-        std::min(std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz), 2147418112.0));
-
-    // THE APPROACH / HOLD ARM. Retail runs this when the enemy is NOT inside
-    // attack range, or while the move timer is still up:
-    //
-    //     v7 = enemyDist < slot[15];
-    //     if ( !v7 || entity->moveTimer ) {
-    //         if ( slot[16] < slot[17] && cmd != 126 ) {
-    //             if ( enemyDist > slot[16] && Entity_CheckGroundHeightAtPosition(...) )
-    //                  { moveMode = 1; targetDist = enemyDist; arrivalRadius = 655360; }
-    //             else if ( animMap[49] != *animMap )
-    //                  { targetAnimState = 49; moveMode = 7; targetDist = 0; } } }
-    //
-    // [orig: Entity_UpdateInfantryAI @0x4b9910 ~2496-2530, which sits BEFORE the
-    //  reaction block at ~2530 so the reactions override the anim last.]
-    //
-    // This arm was previously nested INSIDE the in-attack-range branch as a
-    // fallback for "no reaction clip available", which inverted its meaning: an AI
-    // whose enemy was out of attack range did nothing at all, so our infantry never
-    // closed the distance and stood where they spawned. The two blocks are mutually
-    // exclusive by construction -- this one needs (!in_range || timer > 0), the
-    // reaction block needs (in_range && timer <= 0) -- so exactly one runs per think
-    // and neither can overwrite the other's committed body state.
-    //
-    // The target-column ground gate [orig: Entity_CheckGroundHeightAtPosition
-    // @0x4aff70 -- CalcAverageGroundHeight at the target position (radius 0); true
-    // when the column is not the water surface and target.z - ground <= 3.0 u].
-    auto ground_reachable = [&](const int32_t p[3]) -> bool {
-        if (terrain == nullptr || !terrain->valid()) return true;
-        GroundClearance clearance = ground_clearance;
-        clearance.has_physics = true; // [orig: the target's entity+368 physics block]
-        clearance.use_dead = false;
-        const int32_t ground = calc_average_ground_height(*terrain, p, 0, clearance);
-        if (ground == INT32_MIN) return true;
-        if (terrain->has_water && ground == terrain->water_y) return false;
-        return p[2] - ground <= 196608;
-    };
-
-    const bool in_attack_range = dist16 < slot.f[15];
-    bool run_approach = !in_attack_range || inf.combat_move_timer > 0;
-
-    if (!run_approach) { // inside attack range, hold timer expired
-        // The combat reactions ARE the attack anims, availability-gated in the witnessed
-        // order (each later hit overrides). The reaction flag re-derives only when this
-        // region runs [orig: hasCombatReaction is the region's per-think local -> +875].
-        inf.combat_reaction = false;
-        int reaction = 0;
-        if (avail(anim_state::kAttack)) reaction = anim_state::kAttack;              // 155
-        if (inf.was_hit && avail(anim_state::kCoverAttack)) reaction = anim_state::kCoverAttack; // 165
-        if (e.health <= static_cast<int16_t>(inf.max_health / 2) &&
-            avail(anim_state::kAttack4)) reaction = anim_state::kAttack4;            // 158
-        if (dist16 < 589824 && avail(anim_state::kAttack3)) reaction = anim_state::kAttack3; // 157, 9u
-        if (dist16 < 196608) {                                                       // 3 u
-            if (avail(anim_state::kAttack2)) reaction = anim_state::kAttack2;        // 156
-            if (inf.was_hit && avail(anim_state::kCoverAttack2))
-                reaction = anim_state::kCoverAttack2;                                // 166
+    // The target-distance local: 1000 u until a target is measured [orig: outDy
+    // seeded @0x4BAA88].
+    int32_t target_distance = 0x3E80000;
+    int32_t tpos[3] = {};
+    if (tent != nullptr) {
+        registry_position(*tent, tpos);
+        // The witnessed distance metric: sqrt(dx^2 + dy^2 + (dz sar 1)^2), 16.16.
+        // [orig: @0x4BC0E1..0x4BC141]
+        target_distance = clamped_distance(io::bam_sub(tpos[0], e.pos[0]),
+                                           io::bam_sub(tpos[1], e.pos[1]),
+                                           io::bam_sar(io::bam_sub(tpos[2], e.pos[2]), 1));
+        // THE REACTION CHAIN: inside attack range with the hold timer run out.
+        // The combat reactions ARE the attack anims, availability-gated in the
+        // witnessed order (each later hit overrides), post_attack last.
+        // [orig: `cmp eax,[ecx+3Ch]; jge` @0x4BC13E; `cmp [esi+148h],0; jnz`
+        //  @0x4BC14B; the chain @0x4BC158..0x4BC297]
+        bool run_approach = target_distance >= slot.f[15] || inf.combat_move_timer != 0;
+        if (!run_approach) {
+            const auto react = [&](int state) {
+                selected_state = state;
+                inf.combat_reaction = true;
+            };
+            if (avail(anim_state::kAttack)) react(anim_state::kAttack);                // 155
+            if (inf.was_hit && avail(anim_state::kCoverAttack))
+                react(anim_state::kCoverAttack);                                        // 165
+            if (e.health <= static_cast<int16_t>(inf.max_health / 2) &&
+                avail(anim_state::kAttack4)) react(anim_state::kAttack4);             // 158
+            if (target_distance < 589824 && avail(anim_state::kAttack3))
+                react(anim_state::kAttack3);                                            // 157, 9u
+            if (target_distance < 196608) {                                             // 3 u
+                if (avail(anim_state::kAttack2)) react(anim_state::kAttack2);          // 156
+                if (inf.was_hit && avail(anim_state::kCoverAttack2))
+                    react(anim_state::kCoverAttack2);                                   // 166
+            }
+            // pre_attack (152) wins over every attack clip when the previous think's
+            // move mode was idle (0) or route walking (3/4) [orig: @0x4bc23c..0x4bc25e].
+            if ((inf.prev_move_mode == 0 || inf.prev_move_mode == 3 || inf.prev_move_mode == 4) &&
+                avail(anim_state::kPreAttack))
+                react(anim_state::kPreAttack);
+            // A dead target within 3 u plays post_attack and drops the focus
+            // [orig: `cmp word [ebp+11Eh],0; jg` @0x4BC269..0x4BC297].
+            if (retail_signed_i16(tent->health) <= 0 && target_distance < 196608 &&
+                avail(anim_state::kPostAttack)) {
+                react(anim_state::kPostAttack);
+                inf.ai_focus = EntityHandle{};
+            }
+            // The move timer stamps UNCONDITIONALLY [orig: moveTimer = slot[22]>>4
+            // @0x4bc2a6]; a body with no reaction clip then falls into the approach
+            // arm [orig: @0x4bc2ba, falling into the approach arm @0x4BC2C2].
+            inf.combat_move_timer = io::bam_sar(slot.f[22], 4);
+            run_approach = !inf.combat_reaction;
         }
-        // pre_attack (152) wins over every attack clip when the previous think's
-        // move mode was idle (0) or route walking (3/4) [orig: @0x4bc23c..0x4bc25e].
-        if ((inf.prev_move_mode == 0 || inf.prev_move_mode == 3 || inf.prev_move_mode == 4) &&
-            avail(anim_state::kPreAttack))
-            reaction = anim_state::kPreAttack;
-        // The move timer stamps UNCONDITIONALLY [orig: moveTimer = slot[22]>>4
-        // @0x4bc2a6]; a body with no reaction clip then falls into the approach
-        // arm [orig: @0x4bc2ba -> LABEL_471].
-        inf.combat_move_timer = slot.f[22] >> 4;
-        if (reaction != 0) {
-            inf.combat_reaction = true;
-            inf.move_mode = 7; // hold + fight
-            inf.target_dist = 0;
-            selected_state = reaction;
-        } else {
-            run_approach = true;
-        }
-    }
-
-    if (run_approach) {
-        // A hold-position command (126) never approaches [orig: slot+148 != 126
-        // @0x4bc2c5]; the target column must be reachable ground [orig: @0x4bc2e3].
-        if (slot.f[16] < slot.f[17] && slot.f[37] != 126) {
-            if (dist16 > slot.f[16] && ground_reachable(tpos)) {
+        // THE APPROACH / HOLD ARM, when the enemy is out of attack range, the
+        // hold timer is still up, or no reaction clip exists. A hold-position
+        // command (126) never approaches [orig: slot+148 != 126 @0x4bc2c5]; the
+        // target column must be reachable ground under the TARGET's own probe
+        // [orig: `cmp edi,eax; jle` @0x4bc2e3, then `push ebp; push ebx; call
+        //  Entity_CheckGroundHeightAtPosition` @0x4BC2E7..0x4BC2E9].
+        // [orig: @0x4BC2C2..0x4BC346]
+        if (run_approach && slot.f[16] < slot.f[17] && slot.f[37] != 126) {
+            if (target_distance > slot.f[16] && ground_at_position(*this, world, *tent, tpos)) {
                 inf.move_mode = 1;
-                inf.target_dist = dist16;
+                inf.target_dist = target_distance;
                 inf.arrival_radius = 655360;
                 inf.move_target[0] = tpos[0];
                 inf.move_target[1] = tpos[1];
                 inf.move_target[2] = tpos[2];
-                inf.target_heading =
-                        bearing_to(tpos[0] - e.pos[0], tpos[1] - e.pos[1]);
             } else if (avail(anim_state::kIdle3)) {
                 inf.move_mode = 7;
                 inf.target_dist = 0;
                 selected_state = anim_state::kIdle3;
             }
         }
-    }
-
-    // The reload override: empty magazine + a clipsize + the reload clip -> anim 65;
-    // while 65 plays the magazine refills. [orig: @0x4bc7xx — targetAnimState = 65,
-    // moveMode 0; playing 65 -> word +0x35C = clipsize]
-    if (e.profile.clip_size > 0) {
-        if (inf.anim_state == anim_state::kReload) {
-            inf.magazine = static_cast<int16_t>(e.profile.clip_size);
-        } else if (inf.magazine <= 0 && avail(anim_state::kReload)) {
-            inf.move_mode = 0;
-            inf.target_dist = 0;
-            selected_state = anim_state::kReload;
+    } else {
+        // THE NO-TARGET ARM: a still-alerted body with a focus walks to the last
+        // aim point (the last sighting or spotted position), watches a dead focus
+        // with post_attack, and otherwise scans in place with idle_2.
+        // [orig: @0x4BC34B..0x4BC4BE]
+        const Entity *focus = inf.ai_focus.valid() ? world.registry.get(inf.ai_focus) : nullptr;
+        if (inf.damage_timer == 0 || focus == nullptr) {
+            inf.ai_focus = EntityHandle{}; // [orig: @0x4BC4BE]
+        } else if (slot.f[16] < slot.f[17]) {
+            if (focus->handle != e.handle && retail_signed_i16(focus->health) <= 0) {
+                // A dead focus: watch the corpse when post_attack exists, else
+                // drop it [orig: @0x4BC37E..0x4BC3A8].
+                if (avail(anim_state::kPostAttack)) {
+                    registry_position(*focus, inf.aim_point);
+                } else {
+                    inf.ai_focus = EntityHandle{};
+                    focus = nullptr;
+                }
+            }
+            // The (dz sar 1) distance to the aim point, fistp-chopped, compared
+            // UNSIGNED against 2 u [orig: @0x4BC3AE..0x4BC438 — `jbe`].
+            const int32_t distance = clamped_distance(
+                    io::bam_sub(inf.aim_point[0], e.pos[0]),
+                    io::bam_sub(inf.aim_point[1], e.pos[1]),
+                    io::bam_sar(io::bam_sub(inf.aim_point[2], e.pos[2]), 1));
+            if (static_cast<uint32_t>(distance) > 0x20000u && self_entity != nullptr &&
+                ground_at_position(*this, world, *self_entity, inf.aim_point)) {
+                // [orig: @0x4BC448..0x4BC469]
+                inf.move_mode = 2;
+                inf.target_dist = distance;
+                inf.arrival_radius = 0x20000;
+                std::copy_n(inf.aim_point, 3, inf.move_target);
+            } else {
+                // [orig: @0x4BC46F..0x4BC4B4]
+                selected_state = anim_state::kIdle2;
+                if (focus != nullptr && focus->handle != e.handle &&
+                    retail_signed_i16(focus->health) <= 0 && avail(anim_state::kPostAttack)) {
+                    selected_state = anim_state::kPostAttack;
+                    inf.ai_focus = EntityHandle{};
+                }
+                inf.move_mode = 8;
+                inf.target_dist = 0;
+            }
         }
     }
 
-    // Hold-timer decay, faster when the enemy is close. [orig: LABEL_499]
-    if (inf.combat_move_timer > 0) {
-        --inf.combat_move_timer;
-        if (dist16 < 196608 && inf.combat_move_timer > 0) --inf.combat_move_timer;
-        if (dist16 < 655360 && inf.combat_move_timer > 0) --inf.combat_move_timer;
+    // The hold-timer tail, on every path: one tick, and for a non-coward body
+    // an extra one in idle_3 and one each under 3 u / 10 u of the target (the
+    // 1000 u no-target distance never qualifies). [orig: @0x4BC4C4..0x4BC537]
+    if (inf.combat_move_timer != 0) inf.combat_move_timer = io::bam_sub(inf.combat_move_timer, 1);
+    if ((slot.f[1] & 8) == 0) {
+        if (inf.anim_state == anim_state::kIdle3 && inf.combat_move_timer != 0)
+            inf.combat_move_timer = io::bam_sub(inf.combat_move_timer, 1);
+        if (target_distance < 196608 && inf.combat_move_timer != 0)
+            inf.combat_move_timer = io::bam_sub(inf.combat_move_timer, 1);
+        if (target_distance < 655360 && inf.combat_move_timer != 0)
+            inf.combat_move_timer = io::bam_sub(inf.combat_move_timer, 1);
     }
 
     // --- The aim solution. [orig: §17.5 — lead + sawtooth error] ---
     // Retail runs TWO aim blocks over the same lead + sawtooth math, keyed by the
     // anim's g_animStateFlagsTable bits @0x8139e8 (no state carries both):
     //   block 1 [orig: @0x4bc555..0x4bc948] on a flag-0x8 anim (the walks, the
-    //     plain idles 43/44): the aim writes, aimFlag @0x4bc894 and the
-    //     walking-fire latch; it never writes the detour byte +0x369;
+    //     plain idles 43/44) with a target: the aim writes, aimFlag @0x4bc894
+    //     and the walking-fire latch; it never writes the detour byte +0x369;
     //   block 2 [orig: @0x4bc94c..0x4bcff5] on a flag-0x10 anim (idle3 49, the
-    //     attack clips 155-158, emplaced 67-75): the aim writes, then the body
-    //     re-face, the detour-state clear and the mode-7 tail.
+    //     attack clips 155-158, emplaced 67-75), target or not: the aim writes,
+    //     then the body re-face, the detour-state clear and the mode-7 tail.
     // Both are skipped while the focus entity is the body itself [orig:
-    // @0x4bc53d..0x4bc54f -> LABEL_584, re-tested @0x4bc94c..0x4bc952]; the aim
+    // @0x4bc53d..0x4bc54f -> @0x4BCFF5, re-tested @0x4bc94c..0x4bc952]; the aim
     // heading is re-seated on the target heading ahead of the test
-    // [orig: @0x4bc543..0x4bc549].
+    // [orig: @0x4bc543..0x4bc549]. aimFlag (+0x360) is only ever SET here.
     inf.aim_heading = inf.target_heading;
     const bool focus_is_self = inf.ai_focus == e.handle;
     const uint32_t sflags = infantry_anim_flags(inf.anim_state);
-    // Block 1's gate [orig: @0x4bc555..0x4bc596]: the target (slot+12, held
-    // above) and flag 0x8. Its itemDef attrib 0x400 skip [orig: @0x4bc560..0x4bc56a]
-    // and its parentSlot 2/5 skip [orig: @0x4bc570..0x4bc582] are unported.
-    const bool moving_fire = !focus_is_self && (sflags & 0x8u) != 0;
-    // Block 2's gate [orig: @0x4bc94c..0x4bc973]: not self-focused, Flags
-    // 0x80000 clear [orig: @0x4bc958], flag 0x10 [orig: @0x4bc96b]. It has no
-    // target term; the no-target arm is named at the return above.
-    const Entity *self_entity = world.registry.get(e.handle);
     const uint32_t self_flags = self_entity != nullptr
             ? (self_entity->flags | self_entity->engine_flags) : 0u;
+    const int32_t spread = world.script.wac_values.accuracy_spread;
+    // Block 1's gate [orig: @0x4bc555..0x4bc596]: the target (slot+12), flag
+    // 0x8, and it skips a MISSILE-attrib body and a controller/driver seat
+    // [orig: itemDef attrib 0x400 @0x4bc560..0x4bc56a; parentSlot 2/5
+    // @0x4BC570..0x4BC582].
+    const bool control_seat = self_entity != nullptr && self_entity->mounted &&
+            is_vehicle_control_seat(self_entity->mount_type);
+    const bool block_one = !focus_is_self && tent != nullptr && (sflags & 0x8u) != 0 &&
+            (self_entity == nullptr || (self_entity->item_attrib & 0x400u) == 0) &&
+            !control_seat;
+    if (block_one) {
+        // [orig: accuracy pick @0x4BC5DB..0x4BC5FE — slot+0x28 when aiRef0 is the
+        //  held target, slot+0x2C otherwise]
+        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
+        int32_t err_heading = 0, err_pitch = 0;
+        aim_error(acc, spread, key, err_heading, err_pitch);
+        int32_t muzzle[6];
+        organic_fire_pose(world, e, 1, muzzle); // [orig: @0x4BC692, launch byte +0x366]
+        lead_target(*tent, tpos, e.pos, inf.aim_point);
+        int32_t eye[3];
+        aim_eye(e.pos, muzzle, inf.aim_point, true, eye);
+        const int32_t adx = io::bam_sub(inf.aim_point[0], eye[0]);
+        const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
+        const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
+        // The heading candidate: the chopped bearing [orig: @0x4BC832..0x4BC85C,
+        // dbl_7C57B8 negated] plus the heading error [orig: `mov ecx,[esp+60h];
+        // sub ecx,eax` @0x4bc861..0x4bc865].
+        const int32_t candidate = io::bam_add(
+                ftol32(std::atan2(double(ady), double(adx)) * io::kBamPerRadian), err_heading);
+        // The body cone: the candidate must lie within ~85 deg of the BODY heading
+        // (+0x8C) or the block writes nothing -- no aim, no aimFlag, no latch
+        // [orig: `sub eax,[esi+8Ch]` @0x4bc869, cdq/xor/sub, `cmp eax,3C71C6E0h;
+        //  jge 0x4bc948` @0x4bc874..0x4bc879].
+        if (io::bam_abs(io::bam_sub(candidate, inf.body_heading)) < 0x3c71c6e0) {
+            // Inside the cone the heading lands with the heading error added a
+            // SECOND time: retail re-reads [esp+60h] into the `lea ebp,[ecx+edx]`
+            // that stores +0x2EC [orig: @0x4bc883..0x4bc88e]; aimFlag @0x4bc894.
+            inf.aim_heading = io::bam_add(candidate, err_heading);
+            inf.aim_valid = true;
+            // The elevation over the truncated, UNCLAMPED planar length
+            // [orig: @0x4BC89B..0x4BC8BE]; the pitch store @0x4bc8da.
+            const int32_t horiz = ftol32(std::sqrt(double(adx) * adx + double(ady) * ady));
+            inf.aim_pitch = io::bam_add(
+                    ftol32(std::atan2(double(adz), double(horiz)) * io::kBamPerRadian),
+                    err_pitch);
+            inf.aim_established = true;
+            inf.aim_override = true; // [orig: the override local set @0x4BC8E0]
+            // The walking-fire latch: the yaw within ~5 deg of the solution, the
+            // eye-to-aim-point (dz sar 1) distance inside the attack range, a
+            // NOMOVESHOOT-clear def and the slot[22] cadence. [orig: §17.4,
+            // @0x4bc8c3..0x4bc946 — the def attrib 4 test @0x4BC930;
+            // shouldFireSecondary = 1; moveTimer = slot[22] >> 4]
+            const int32_t latch_distance = clamped_distance(adx, ady, io::bam_sar(adz, 1));
+            if (io::bam_abs(io::bam_sub(inf.aim_heading, e.heading)) < 59652320 &&
+                inf.combat_move_timer < io::bam_sar(slot.f[22], 5) &&
+                latch_distance < slot.f[15] &&
+                (self_entity == nullptr || (self_entity->item_attrib & 0x4u) == 0)) {
+                inf.combat_move_timer = io::bam_sar(slot.f[22], 4);
+                inf.fire_secondary_latch = true;
+            }
+        }
+    }
+    // Block 2's gate [orig: @0x4bc94c..0x4bc973]: not self-focused, Flags
+    // 0x80000 clear [orig: @0x4bc958], flag 0x10 [orig: @0x4bc96b]. It has no
+    // target term.
     const bool attack_stance = !focus_is_self &&
             (self_flags & kEntityFlagNoEngage) == 0 && (sflags & 0x10u) != 0;
-    if (!moving_fire && !attack_stance) {
-        inf.aim_valid = false;
-        return selected_state;
-    }
-    // Block 2 re-arms the hold timer for a teamless (slot+4 & 8) body ahead of
-    // its aim writes. [orig: @0x4bca44..0x4bca76]
-    if (attack_stance && (slot.f[1] & 8) != 0) inf.combat_move_timer = slot.f[22] >> 4;
-    // Lead the target by its OWN last-tick displacement: target Position minus
-    // its savedLivePose (+0x80..+0x88, which every mover stamps at its head),
-    // times lead = dist/0x81074 + 1 (a reciprocal multiply), the vertical by
-    // lead >> 1, all wrapping 32-bit; the led point is stored as the entity
-    // aimPoint (+0x30C..+0x314). A target never stamped leads by zero.
-    // [orig: block 1 @0x4BC6FB..0x4BC798 (`sub ecx,[edi+80h]` @0x4BC72A);
-    //  block 2 @0x4BCAFE..0x4BCB69 (`sub ecx,[ebp+80h]` @0x4BCB2D)]
-    const int32_t lead = dist16 / 0x81074 + 1;
-    const int32_t *saved = tent->saved_live_valid ? tent->saved_live_pos : tpos;
-    const auto lead_axis = [](int32_t now, int32_t before, int32_t scale) {
-        return opennova::io::bam_add(now, static_cast<int32_t>(
-                static_cast<uint32_t>(opennova::io::bam_sub(now, before)) *
-                static_cast<uint32_t>(scale)));
-    };
-    int32_t led[3];
-    led[0] = lead_axis(tpos[0], saved[0], lead);
-    led[1] = lead_axis(tpos[1], saved[1], lead);
-    led[2] = lead_axis(tpos[2], saved[2], lead >> 1); // vertical lead halved
-    inf.aim_point[0] = led[0];
-    inf.aim_point[1] = led[1];
-    inf.aim_point[2] = led[2];
-
-    // The sawtooth aim error: accuracy A when this target was already fired at
-    // (aiRef0 == target), else B; scaled by the difficulty global [orig: err =
-    // (119304 * dword_C6EAE8 * acc) >> 5 -- block 1 @0x4bc5ea..0x4bc60e, block 2
-    // @0x4bc9ce..0x4bc9f2]. Two phases of the think key, both blocks computing
-    // both: the HEADING error rides the (key>>2)-only phase [orig: block 1
-    // `and ebp,3Fh` @0x4bc630 -> [esp+60h] @0x4bc669; block 2 @0x4bca03..0x4bca11
-    // -> ebx], the PITCH error the (key>>2 + key>>9) phase [orig: block 1
-    // @0x4bc61e..0x4bc62d -> [esp+20h] @0x4bc64a; block 2 @0x4bca14..0x4bca2c ->
-    // [esp+20h]]. The prone-in-foliage +40 concealment term needs the
-    // foliage-mask seam -- D-AI-6.
-    const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
-    const int64_t err_unit =
-        (static_cast<int64_t>(119304) * world.script.wac_values.accuracy_spread * acc) >> 5;
-    const int32_t err_heading = static_cast<int32_t>(
-        err_unit * (32 - static_cast<int32_t>((key >> 2) & 0x3Fu)));
-    const int32_t err_pitch = static_cast<int32_t>(
-        err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
-
-    // The aim EYE rides the muzzle seam — retail's combat-pass aim anchor IS
-    // the posed launch bone [orig: Entity_GetAttachmentWorldPosition @0x4b2670
-    // on bone +0x366, §21.1]; a row without a resolvable point keeps the raw
-    // entity origin (retail's copy @0x4b2767). The horizontal eye components
-    // shift with the pose too, as retail's do.
-    int32_t eye[6];
-    organic_fire_pose(world, e, 1, eye);
-    // The aim TARGET point is the target's aim origin, not its ground origin
-    // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
-    // @0x43b4b0]. The lead is computed over the raw positions above; the origin
-    // offset is added on top.
-    int32_t t_origin[3];
-    weapon_aim_origin(world, *tent, t_origin);
-    // The aim delta in wrapping 32-bit integers, as both blocks store it.
-    const int32_t adx = opennova::io::bam_sub(
-            opennova::io::bam_add(led[0], opennova::io::bam_sub(t_origin[0], tpos[0])), eye[0]);
-    const int32_t ady = opennova::io::bam_sub(
-            opennova::io::bam_add(led[1], opennova::io::bam_sub(t_origin[1], tpos[1])), eye[1]);
-    const int32_t adz = opennova::io::bam_sub(
-            opennova::io::bam_add(led[2], opennova::io::bam_sub(t_origin[2], tpos[2])), eye[2]);
-    // Bearing = truncated fpatan(dy, dx) in BAM; elevation = truncated fpatan(dz,
-    // h) where h is the horizontal length already TRUNCATED to an integer (block
-    // 2 clamps it to 2147418112.0 first).
-    // [orig: block 1 @0x4BC832..0x4BC85C / @0x4BC89B..0x4BC8BE; block 2's world
-    //  arm @0x4BCF2D..0x4BCF92]
-    const auto solve_bearing_elevation = [](int32_t dx, int32_t dy, int32_t dz,
-            int32_t &bearing_out, int32_t &elevation_out) {
-        const double fdx = static_cast<double>(dx);
-        const double fdy = static_cast<double>(dy);
-        const int32_t horiz = static_cast<int32_t>(
-                std::min(std::sqrt(fdx * fdx + fdy * fdy), 2147418112.0));
-        bearing_out = bearing_to(dx, dy);
-        elevation_out = static_cast<int32_t>(
-                std::atan2(static_cast<double>(dz), static_cast<double>(horiz)) *
-                opennova::io::kBamPerRadian);
-    };
-    int32_t bearing = 0;
-    int32_t elevation = 0;
-    solve_bearing_elevation(adx, ady, adz, bearing, elevation);
-    // The heading candidate: bearing + the heading error [orig: block 1
-    // `mov ecx,[esp+60h]; sub ecx,eax` @0x4bc861..0x4bc865; block 2 `sub ebx,eax`
-    // @0x4bcf71]; the pitch: elevation + the pitch error [orig: block 1
-    // @0x4bc8cd..0x4bc8da; block 2 @0x4bcf97..0x4bcf9d].
-    int32_t candidate = opennova::io::bam_add(bearing, err_heading);
-    int32_t pitch = opennova::io::bam_add(elevation, err_pitch);
-
     if (attack_stance) {
+        // [orig: accuracy pick @0x4BC9C3..0x4BC9E2 — against the held slot[3],
+        //  null without a target]
+        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
+        int32_t err_heading = 0, err_pitch = 0;
+        aim_error(acc, spread, key, err_heading, err_pitch);
+        // Block 2 re-arms the hold timer for a coward (slot+4 & 8) body ahead of
+        // its aim writes. [orig: @0x4bca44..0x4bca76]
+        if ((slot.f[1] & 8) != 0) inf.combat_move_timer = io::bam_sar(slot.f[22], 4);
+        int32_t muzzle[6];
+        organic_fire_pose(world, e, 1, muzzle); // [orig: @0x4BCA8D]
+        const Entity *parent_ride = self_entity != nullptr && self_entity->mounted
+                ? world.registry.get(self_entity->mount_target) : nullptr;
+        if (tent != nullptr) {
+            lead_target(*tent, tpos, e.pos, inf.aim_point);
+        } else if (parent_ride != nullptr && (key & 0xFFu) == 0x20u) {
+            // The no-target arm of a carried body, once per 256 staggered ticks:
+            // the aim point re-seats 100 u along the carrier's yaw from the body's
+            // own savedLivePose, plus 32 ticks of its own displacement.
+            // [orig: @0x4BCA95 -> @0x4BCBEB..0x4BCCC1 (Q22 trig through dbl_7C3608 /
+            //  dbl_7C3600; `shl 5` @0x4BCC6D/@0x4BCC96/@0x4BCCB6)]
+            int32_t parent_pos[3];
+            int32_t parent_yaw = 0, parent_pitch = 0, parent_roll = 0;
+            carrier_pose_fixed(*parent_ride, parent_pos, parent_yaw, parent_pitch, parent_roll);
+            const int32_t *saved = self_entity->saved_live_valid ? self_entity->saved_live_pos
+                                                                 : e.pos;
+            const double angle = static_cast<double>(parent_yaw) * 1.4629627251502471e-9;
+            const int32_t s = static_cast<int32_t>(std::sin(angle) * 4194304.0);
+            const int32_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
+            const auto shl5 = [](int32_t v) {
+                return static_cast<int32_t>(static_cast<uint32_t>(v) << 5);
+            };
+            inf.aim_point[0] = io::bam_add(saved[0], io::bam_add(
+                    static_cast<int32_t>((static_cast<int64_t>(c) * 0x640000) >> 22),
+                    shl5(io::bam_sub(e.pos[0], saved[0]))));
+            inf.aim_point[1] = io::bam_add(saved[1], io::bam_add(
+                    static_cast<int32_t>((static_cast<int64_t>(s) * 0x640000) >> 22),
+                    shl5(io::bam_sub(e.pos[1], saved[1]))));
+            inf.aim_point[2] = io::bam_add(saved[2], shl5(io::bam_sub(e.pos[2], saved[2])));
+        }
+        int32_t eye[3];
+        aim_eye(e.pos, muzzle, inf.aim_point, false, eye);
+        const int32_t adx = io::bam_sub(inf.aim_point[0], eye[0]);
+        const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
+        const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
+        // Bearing = chopped fpatan(dy, dx) in BAM; elevation = chopped fpatan(dz,
+        // h) where h is the horizontal length clamped to 2147418112.0 and
+        // TRUNCATED to an integer first. [orig: the world arm @0x4BCF2D..0x4BCF92]
+        const auto solve_bearing_elevation = [](int32_t dx, int32_t dy, int32_t dz,
+                int32_t &bearing_out, int32_t &elevation_out) {
+            const double fdx = static_cast<double>(dx);
+            const double fdy = static_cast<double>(dy);
+            const int32_t horiz = ftol32(std::min(std::sqrt(fdx * fdx + fdy * fdy), 2147418112.0));
+            bearing_out = ftol32(std::atan2(fdy, fdx) * io::kBamPerRadian);
+            elevation_out = ftol32(std::atan2(static_cast<double>(dz),
+                                              static_cast<double>(horiz)) * io::kBamPerRadian);
+        };
+        int32_t bearing = 0;
+        int32_t elevation = 0;
+        solve_bearing_elevation(adx, ady, adz, bearing, elevation);
+        int32_t candidate = io::bam_add(bearing, err_heading); // [orig: `sub ebx,eax` @0x4bcf71]
+        int32_t pitch = io::bam_add(elevation, err_pitch);     // [orig: @0x4bcf97..0x4bcf9d]
         // A UseGun body (parentSlot 3) with a parent solves in the PARENT's
         // frame: the delta rotates through the parent's yaw, pitch and roll
         // (22-bit cosines, negated sines, the Entity_TransformWorldToLocal
@@ -543,69 +701,130 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                           cr = cos22(parent_roll);
             const int32_t sy = neg_sin22(parent_yaw), sp = neg_sin22(parent_pitch),
                           sr = neg_sin22(parent_roll);
-            const int32_t x1 = opennova::io::bam_sub(mul22(cy, adx), mul22(sy, ady));
-            const int32_t y1 = opennova::io::bam_add(mul22(sy, adx), mul22(cy, ady));
-            const int32_t x2 = opennova::io::bam_sub(mul22(cp, x1), mul22(sp, adz));
-            const int32_t z1 = opennova::io::bam_add(mul22(sp, x1), mul22(cp, adz));
-            const int32_t y2 = opennova::io::bam_sub(mul22(cr, y1), mul22(sr, z1));
-            const int32_t z2 = opennova::io::bam_add(mul22(sr, y1), mul22(cr, z1)); // [orig: @0x4BCEA8]
+            const int32_t x1 = io::bam_sub(mul22(cy, adx), mul22(sy, ady));
+            const int32_t y1 = io::bam_add(mul22(sy, adx), mul22(cy, ady));
+            const int32_t x2 = io::bam_sub(mul22(cp, x1), mul22(sp, adz));
+            const int32_t z1 = io::bam_add(mul22(sp, x1), mul22(cp, adz));
+            const int32_t y2 = io::bam_sub(mul22(cr, y1), mul22(sr, z1));
+            const int32_t z2 = io::bam_add(mul22(sr, y1), mul22(cr, z1)); // [orig: @0x4BCEA8]
             solve_bearing_elevation(x2, y2, z2, bearing, elevation);
-            candidate = opennova::io::bam_add( // [orig: `add ebx,[edi+10h]` @0x4BCEEE]
-                    opennova::io::bam_add(bearing, err_heading), parent_yaw);
-            pitch = opennova::io::bam_add( // [orig: `add eax,[edi+14h]` @0x4BCF1B]
-                    opennova::io::bam_add(elevation, err_pitch), parent_pitch);
+            candidate = io::bam_add( // [orig: `add ebx,[edi+10h]` @0x4BCEEE]
+                    io::bam_add(bearing, err_heading), parent_yaw);
+            pitch = io::bam_add( // [orig: `add eax,[edi+14h]` @0x4BCF1B]
+                    io::bam_add(elevation, err_pitch), parent_pitch);
         }
         inf.aim_heading = candidate; // [orig: @0x4BCEF1 / @0x4bcf75]
         inf.aim_pitch = pitch;       // [orig: @0x4BCF1E / @0x4bcf9d]
         inf.aim_established = true;
-        inf.aim_override = true;
+        inf.aim_override = true;     // [orig: the override local set @0x4BCFC2]
         inf.aim_valid = true;        // aimFlag [orig: @0x4bcfb1]
         // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
-        // aim drifts far off the body (> 262470208, ~22 deg) [orig:
+        // aim drifts far off the target heading (> 262470208, ~22 deg) [orig:
         // @0x4bcfa3..0x4bcfcf]; the detour-state clear, whether or not the
         // re-face fired, ahead of the selector's ai_find_cover_position calls
-        // [orig: @0x4bcfdb; the calls @0x4bd490..0x4bd5a4]: an attack-stance
-        // body walks straight at its enemy, never at a cached side-step point;
-        // then the hold: every move mode but the combat approach (1) and 5
-        // collapses to 7 with a zero goal distance [orig: @0x4bcfd5..0x4bcff5 —
-        // `cmp al, 5` @0x4bcfd9 and `cmp al, 1` @0x4bcfe4, the decompiler folds
-        // the 5 test].
-        if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
+        // [orig: @0x4bcfdb; the calls @0x4bd490..0x4bd5a4]; then the hold:
+        // every move mode but the combat approach (1) and 5 collapses to 7 with
+        // a zero goal distance [orig: @0x4bcfd5..0x4bcff5 — `cmp al, 5`
+        // @0x4bcfd9 and `cmp al, 1` @0x4bcfe4].
+        if (io::bam_abs(io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
             inf.target_heading = inf.aim_heading;
         inf.path_state = 0;
         if (inf.move_mode != 1 && inf.move_mode != 5) {
             inf.move_mode = 7;
             inf.target_dist = 0;
         }
-        return selected_state;
     }
 
-    // Block 1's body cone: the candidate must lie within ~85 deg of the BODY
-    // heading (+0x8C) or the block writes nothing -- no aim, no aimFlag, no
-    // latch -- and falls on the fstp pair straight into block 2's gate [orig:
-    // `sub eax,[esi+8Ch]` @0x4bc869, cdq/xor/sub, `cmp eax,3C71C6E0h; jge
-    // 0x4bc948` @0x4bc874..0x4bc879]. The aim heading keeps the re-seat above.
-    if (opennova::io::bam_abs(opennova::io::bam_sub(candidate, inf.body_heading)) >= 0x3c71c6e0) {
-        inf.aim_valid = false;
-        return selected_state;
+    // A scripted idle (130..136) watches the local player: the aim heading and
+    // pitch toward its Position (the planar length truncated, no clamp), aimFlag
+    // down and the override up, the body re-faced past 45 degrees, no move and
+    // the detour cleared. [orig: @0x4BCFF5..0x4BD0F4]
+    if (inf.anim_state >= 130 && inf.anim_state <= 136) {
+        if (const Entity *player = world.registry.get(world.cached.local_player)) {
+            int32_t at[3];
+            body_position(*this, *player, at);
+            const int32_t dx = io::bam_sub(at[0], e.pos[0]);
+            const int32_t dy = io::bam_sub(at[1], e.pos[1]);
+            const int32_t dz = io::bam_sub(at[2], e.pos[2]);
+            const int32_t heading =
+                    ftol32(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
+            const int32_t planar = ftol32(std::sqrt(double(dx) * dx + double(dy) * dy));
+            inf.aim_heading = heading;
+            inf.aim_pitch = ftol32(std::atan2(double(dz), double(planar)) * io::kBamPerRadian);
+            inf.aim_valid = false;
+            inf.aim_override = true;
+            if (io::bam_abs(io::bam_sub(heading, inf.target_heading)) > 0x1FFFFFE0)
+                inf.target_heading = heading;
+            inf.move_mode = 0;
+            inf.target_dist = 0;
+            inf.path_state = 0;
+        }
     }
-    // Inside the cone the heading lands with the heading error added a SECOND
-    // time: retail re-reads [esp+60h] into the `lea ebp,[ecx+edx]` that stores
-    // +0x2EC [orig: @0x4bc883..0x4bc88e]; aimFlag @0x4bc894; the pitch @0x4bc8da.
-    inf.aim_heading = opennova::io::bam_add(candidate, err_heading);
-    inf.aim_valid = true;
-    inf.aim_pitch = pitch;
-    inf.aim_established = true;
-    inf.aim_override = true;
 
-    // Block 1's walking-fire latch: muzzle within ~5 deg of the solution, inside
-    // the attack range, on the slot[22] cadence. [orig: §17.4, @0x4bc8fa..0x4bc946 —
-    // shouldFireSecondary = 1; moveTimer = slot[22] >> 4; the itemDef attrib 4
-    // gate @0x4bc930 unmodeled]
-    if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, e.heading)) < 59652320 &&
-        dist16 < slot.f[15] && inf.combat_move_timer < (slot.f[22] >> 5)) {
-        inf.combat_move_timer = slot.f[22] >> 4;
-        inf.fire_secondary_latch = true;
+    // The reload override on every path, after the aim blocks: a def clipsize,
+    // the reload clip and a signed magazine word at or below zero select 65 with
+    // no movement; whenever the CURRENT state is 65 the word refills from the
+    // clipsize (its low word), clipsize or not.
+    // [orig: @0x4BD132..0x4BD17D — the current state re-read @0x4BCFF5]
+    if (e.profile.clip_size != 0 && avail(anim_state::kReload) && inf.magazine <= 0) {
+        selected_state = anim_state::kReload;
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+    }
+    if (inf.anim_state == anim_state::kReload)
+        inf.magazine = static_cast<int16_t>(static_cast<uint16_t>(e.profile.clip_size));
+
+    // One Flags read feeds the ladder and guard legs [orig: `mov ecx,[esi+24h]`
+    // @0x4BD184]. On a ladder the move is dropped [orig: Flags 0x100000
+    // @0x4BD187..0x4BD194].
+    const uint32_t tail_flags = self_entity != nullptr
+            ? (self_entity->flags | self_entity->engine_flags) : 0u;
+    if ((tail_flags & kEntityFlagLadderContact) != 0) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+    }
+    // The guard family [orig: @0x4BD196..0x4BD231]. A Flags 0x40 body holds in
+    // place in guard (140); without the clip the flag drops [orig:
+    // @0x4BD19B..0x4BD1BB]. A hit since the last think (the wasHit byte the
+    // think captured at entry @0x4BA9A2 / @0x4BA9C1) takes guard_cover (143)
+    // [orig: @0x4BD1BE..0x4BD1D5]; a chosen reaction takes guard_attack (142)
+    // with moveMode 7 [orig: @0x4BD1D9..0x4BD1F8]. Off guard, a current
+    // 140..143 leaves through guard_leave (144) with no move [orig:
+    // @0x4BD1FA..0x4BD231].
+    if ((tail_flags & kEntityFlagMounted) != 0) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+        if (avail(anim_state::kGuard)) {
+            selected_state = anim_state::kGuard;
+        } else if (self_entity != nullptr) {
+            self_entity->flags &= ~kEntityFlagMounted;
+            self_entity->engine_flags &= ~kEntityFlagMounted;
+        }
+        if (inf.was_hit && avail(anim_state::kGuardCover)) selected_state = anim_state::kGuardCover;
+        if (inf.combat_reaction && avail(anim_state::kGuardAttack)) {
+            selected_state = anim_state::kGuardAttack;
+            inf.move_mode = 7;
+        }
+    } else if (avail(anim_state::kGuardLeave) &&
+               (inf.anim_state == anim_state::kGuardCover || inf.anim_state == anim_state::kGuard ||
+                inf.anim_state == anim_state::kGuardLook ||
+                inf.anim_state == anim_state::kGuardAttack)) {
+        inf.move_mode = 0;
+        inf.target_dist = 0;
+        selected_state = anim_state::kGuardLeave;
+    }
+    // The WAC holdSSN hold (+0x2C bit 0x2000) parks the body in moveMode 12
+    // [orig: @0x4BD235..0x4BD240; set/clear by WacCmd_HoldSsn @0x4F785D /
+    // WacCmd_UnholdSsn @0x4F78BD].
+    if (self_entity != nullptr && (self_entity->cause_flags & 0x2000u) != 0) {
+        inf.move_mode = 12;
+        inf.target_dist = 0;
+    }
+    // A chosen reaction holds the body [orig: the hasReaction test ->
+    // moveMode 7, distance 0 @0x4BD245..0x4BD251].
+    if (inf.combat_reaction) {
+        inf.move_mode = 7;
+        inf.target_dist = 0;
     }
     return selected_state;
 }
@@ -617,8 +836,9 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     const auto shoot = [&](uint8_t id, const int32_t pose[6]) {
         if (entity) entity->equipped_adm_index = id;
         if (id == 0) return;
-        // WeaponSlot_FireAndSpawnEffects owns this session gate. The
-        // caller's marks and magazine decrement still occur on a client.
+        // WeaponSlot_FireAndSpawnEffects owns this session gate; the pass
+        // itself runs on the authority only (tick_infantry's gate), so the
+        // marks and the magazine decrement are authority work too.
         // [orig: @0x53F440, @0x4BF345..0x4BF4AD]
         if (!is_in_session || is_authority) {
             if (inf.aim_established) ++inf.dbg_fires_aimed; else ++inf.dbg_fires_body;
@@ -672,13 +892,19 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
                                           uint32_t logic_tick, uint32_t key) {
     (void)logic_tick;
     InfantryState &inf = e.inf;
+    // Every mounted-live body makes the request, whatever its seat: only the
+    // EquippedSlot test below tells a UseGun rider from a passenger.
+    // [orig: Entity_UpdateInfantryAI mounted-live test @0x4BF4B3, the parent
+    //  test @0x4BF4C1..0x4BF4C9]
     Entity *occ = world.registry.get(e.handle);
-    if (occ == nullptr || !occ->mounted || occ->mount_type != SeatType::Gunner)
-        return;
+    if (occ == nullptr || !occ->mounted) return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
-    const bool slot_bound = world.vehicles.bind_use_gun_slot(*occ, *mount);
-    if (!inf.combat_target.valid() || !slot_bound) return;
+    // The parent's weapon slot and AdmDef byte exist from its own init in
+    // retail; the port seeds them lazily. [orig: WeaponSlot_InitFromEntityDef
+    //  @0x5466C0]
+    world.vehicles.prepare_weapon_slot(*mount);
+    if (!inf.combat_target.valid()) return;
 
     // The dedicated request runs on its four-tick infantry cadence, then a
     // coordinate/entity stagger admits one 64-tick half-window and rejects the next.
@@ -699,6 +925,22 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;
 
+    // Past the cadence and the stagger the rider takes the parent's live AdmDef
+    // byte (+0x2B0). WeaponSlot_InitFromEntityDef stores the slot's byte there
+    // at the parent's spawn (kept here as primary_weapon_slot_adm, seeded on
+    // first use), and the parent's own AI fire overwrites it with the ammo byte
+    // of every ready block (kept in its equipped_adm_index). A parent that
+    // names no weapon and never fired holds its spawn clear's zero, not the
+    // port's none sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;
+    //  WeaponSlot_InitFromEntityDef @0x546742, skipped by the name test
+    //  @0x5466E1 or the def test @0x546704; AIEntity_ProcessWeaponFire
+    //  @0x472F23; AI_TickState_AircraftCombat @0x471837; the clear
+    //  Entity_SpawnFromBMSRecord @0x40EA1F]
+    occ->equipped_adm_index = mount->equipped_adm_index != kAdmSlotNone
+            ? mount->equipped_adm_index
+            : mount->primary_weapon_slot_adm != kAdmSlotNone ? mount->primary_weapon_slot_adm
+                                                            : 0;
+
     // UseGun already swapped EquippedSlot to the parent's persistent embedded
     // MountSlot at attach. This request never touches the personal magazine.
     // [orig: Entity_AttachToUseGunSlot @0x546c42..0x546c73]
@@ -717,6 +959,9 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     const double distance = std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz);
     if (distance >= static_cast<double>(e.slot.f[15])) return;
 
+    // The EquippedSlot the attach swapped to the parent's MountSlot must be
+    // there. [orig: `mov edi,[esi+118h]; test edi,edi` @0x4BF564..0x4BF56C]
+    if (!occ->use_gun_slot_swapped) return;
     const int32_t target_heading = bearing_to(dx, dy);
     constexpr int32_t kMountedFireArc = 178956960;
     if (opennova::io::bam_abs(io::bam_sub(target_heading, e.heading)) >= kMountedFireArc) return;

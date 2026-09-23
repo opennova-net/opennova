@@ -368,10 +368,11 @@ int main() {
         CHECK(r.found && approx(r.position.x, 100.0f));
     }
 
-    // --- CRenderState_GetFieldByIndex(team, 6) = team field 7 (Deaths)
+    // --- CPlayerStats_GetFieldPlusOne(team, 6) = team field 7 (Deaths)
     //     suppresses the primary marker in solo, team and Co-op families
     //     after the team's first death, leaving the fallback.
-    // [orig: CRenderState_GetFieldByIndex(..., 6) @0x50D1DB]
+    // [orig: Server_PositionPlayerForSpawn @0x50D1DB (the
+    // CPlayerStats_GetFieldPlusOne(..., 6) call)]
     {
         auto w_storage = std::make_unique<World>();
         World &w = *w_storage;
@@ -408,6 +409,37 @@ int main() {
         r = resolve_player_spawn_pose(
             solo, EntityHandle{}, EntityHandle{}, 0, 0, 0x00000u);
         CHECK(r.found && approx(r.position.x, 25.0f));
+    }
+
+    // --- Deathmatch: every Player sits on team 1, but the scorer writes no
+    //     team row without the team bit, so a DM death never retires the 6095
+    //     primary markers.
+    // [orig: Server_AssignPlayerTeam @0x4FE3EC; GameEvent_ProcessScoring
+    // @0x52F657 team-row gate; Server_PositionPlayerForSpawn @0x50D1DB]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(3, 8);
+        MatchRules rules;
+        rules.game_type = 0x00000u;
+        w.match.configure(rules);
+        const EntityHandle ace = spawn_body(w, {}, true, true, 1);
+        const EntityHandle bee = spawn_body(w, {}, true, true, 1);
+        MatchPlayerIdentity identity;
+        identity.entity = ace;
+        w.match.upsert_player(identity);
+        identity.entity = bee;
+        identity.slot = 1;
+        w.match.upsert_player(identity);
+        w.match.record_death(w, bee, ace);
+        w.match.record_death(w, ace);
+        CHECK(w.match.team_stats(1)[MatchStats::kDeaths] == 0);
+        spawn_marker(w, 6095, {-25.0f, 0.0f, 0.0f});
+        spawn_marker(w, 6002, {25.0f, 0.0f, 0.0f});
+        const SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x00000u);
+        CHECK(r.found && approx(r.position.x, -25.0f));
     }
 
     // --- Every known retail code word reaches one of the three witnessed

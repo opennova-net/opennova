@@ -1500,6 +1500,63 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	                   [&](const opennova::PeerAddr &to) { return to == peer; });
 }
 
+// A script's world change reaches the same frame's 0x0A: the server tick builds
+// the per-slot frame behind its script pass and maintenance, and the entity
+// update runs only once the frame is queued. A script pass that moves the
+// recipient moves this frame's anchor.
+// [orig: Server_TickUpdate -- the WacScript_AdvanceTick call @0x51D8BF, the
+//  per-slot block @0x51E3D6..0x51E450; Game_ProcessMainFrame -- the
+//  Entity_UpdateAllEntities call @0x52674B follows the Server_TickUpdate call
+//  @0x5266B6]
+bool check_script_change_reaches_the_same_frame() {
+	struct Teleport final : opennova::world::ISystem {
+		opennova::world::EntityHandle who;
+		const char *name() const override { return "teleport"; }
+		void tick(opennova::world::World &w, const opennova::world::TickContext &) override {
+			if (opennova::world::Entity *e = w.registry.get(who)) e->position.x = 40.0f;
+		}
+	};
+	opennova::replication::LoopbackChannel loopback;
+	NapiNPServerCtx ctx;
+	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
+	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
+	opennova::inmatch::GameConfig config;
+	opennova::inmatch::create_session(
+			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
+	if (!expect(ctx.np_protocol.connection_list.size() == 1,
+	            "same-frame fixture has one host client")) return false;
+	ctx.np_protocol.connection_list.front().burst.spawned = true;
+	opennova::world::World world;
+	world.registry.configure_pool(0, 2);
+	opennova::world::Entity recipient;
+	recipient.kind = opennova::world::EntityKind::Organic;
+	recipient.item_type = 3;
+	recipient.health = 150;
+	recipient.position.x = 10.0f;
+	const opennova::world::EntityHandle recipient_h = world.registry.spawn(0, recipient);
+	auto &link = ctx.np_protocol.connection_list.front().link;
+	link.owned_entity = recipient_h;
+	link.owned_entity_spawn_id = world.registry.get(recipient_h)->registry_spawn_id;
+	Teleport teleport;
+	teleport.who = recipient_h;
+	world.add_system(&teleport);
+	ctx.world = &world;
+	prime_steady_host_quality(ctx);
+	opennova::inmatch::Server_TickUpdate(ctx);
+	opennova::replication::Datagram dg;
+	opennova::FrameUpdate frame;
+	bool decoded = false;
+	while (loopback.client_recv(dg)) {
+		if (dg.tag != opennova::s2c::PER_FRAME_UPDATE) continue;
+		decoded = opennova::decode_frame_update(
+				dg.body.data(), dg.body.size(),
+				[](uint16_t) { return opennova::EntityClass::Player; }, frame,
+				/*is_objective_gametype=*/false, /*authority_recipient=*/true);
+	}
+	return expect(decoded && frame.anchor_x == opennova::world::to_fixed(40.0f),
+	              "the script pass's move reaches this frame's 0x0A anchor");
+}
+
 // The 1300-byte cap belongs to UDP session framing, not the host's type-2
 // in-process presentation channel. Preserve its existing unbounded high-rate
 // frame so a dense listen-server world is not artificially subrated.
@@ -2360,6 +2417,11 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	if (!expect(player.valid(), "maintenance peer's player entity spawned"))
 		return false;
 	opennova::world::Entity *player_entity = world.registry.get(player);
+	// The player body's per-tick recoil draw shares the PRNG_Next16 stream the
+	// control seed reads: suspend the body (+0x1C4 held, as AINODEPATH does) so
+	// the stream advances only on the maintenance legs under test.
+	// [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 skips a held +0x1C4]
+	player_entity->motor_suspended = true;
 	player_entity->equipped_adm_index = 0x20;
 	world.tables.weapons.entries.resize(0x21);
 	world.tables.weapons.entries[0x20].valid = true;
@@ -3370,7 +3432,6 @@ bool check_timed_capture_host_wire_transaction() {
 	world.rules.mp_session = true;
 	world.collision = &collision;
 	ai.collision = &collision;
-	world.add_system(&ai);
 	ctx.world = &world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -3502,10 +3563,13 @@ bool check_timed_capture_host_wire_transaction() {
 			static_cast<uint8_t>(zone_handle.packed),
 			static_cast<uint8_t>(zone_handle.packed >> 8),
 			0, 0, 0, 0};
+	// The start window's owner byte is the team the drain found (2), not the
+	// neutral its 0x50 just applied. [orig: Server_UpdateCaptureZones — state0
+	// @0x53BACD..0x53BADC, the window @0x53BBBA..0x53BC02]
 	const std::vector<uint8_t> expected_start = {
 			static_cast<uint8_t>(zone_handle.packed),
 			static_cast<uint8_t>(zone_handle.packed >> 8),
-			0, 1, 0, 0, 3, 0, 1};
+			2, 1, 0, 0, 3, 0, 1};
 	const std::vector<uint8_t> expected_start_event = {
 			41, 0, 0xFF, 0xFF, 0, 0, 0, 0};
 	if (!expect(start_50.size() == 1 && start_50[0] == expected_start_50 &&
@@ -3556,6 +3620,9 @@ bool check_timed_capture_host_wire_transaction() {
 			1, 0, 0, 0};
 	const std::vector<uint8_t> expected_complete_event = {
 			43, 0, 0xFF, 0xFF, 0, 0, 0, 0};
+	// An unnumbered completion scores PSPTAKEOVER (event 14: field 16, the A&S
+	// value 12), not the numbered LFPTAKEOVER. [orig:
+	// CaptureZone_CheckProximityScoring @0x500CAF -> @0x500DC5; case 14 @0x52FDFE]
 	const auto *scorer = world.match.player(first);
 	return expect(complete_50.size() == 1 &&
 	                      complete_50[0] == expected_complete_50 &&
@@ -3577,9 +3644,462 @@ bool check_timed_capture_host_wire_transaction() {
 	                                           expected_complete_event) &&
 	                      world.registry.get(zone_handle)->team == 1 &&
 	                      scorer != nullptr &&
-	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1 &&
-	                      scorer->stats[opennova::world::MatchStats::kPoints] == 15,
+	                      scorer->stats[opennova::world::MatchStats::kPspTakeovers] == 1 &&
+	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 0 &&
+	                      scorer->stats[opennova::world::MatchStats::kPoints] == 12,
 	              "timed completion emits 0x53/event-43, owns zone, and scores once");
+}
+
+// A numbered SpawnPoint flip's S2C 0x1E events: the capturer's team gets 51
+// [zone number][rank] while the enemy mask held (else 53 [zone number][the
+// capturer's frontier]); enemy_of(capturer team) gets 50 / 52 with the same
+// bytes; any other team gets neither; then every in-match player gets the 56/57
+// banner [capturer pool-0 index][0xFF][0xFF] keyed on the zone's new owner.
+// [orig: GameEvent_FlagCapture @0x50F6F0 — the pair @0x50F7C1..0x50F907, the
+//  banner @0x50F919..0x50F991]
+bool check_numbered_flip_pair_and_banner_wire() {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	opennova::world::CollisionWorld collision;
+	opennova::world::AiSystem &ai = world.ai;
+	world.rules.mp_session = true;
+	world.collision = &collision;
+	ai.collision = &collision;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+
+	auto make_zone = [&](uint8_t number, uint8_t team, opennova::world::Vec3 position) {
+		opennova::world::Entity zone;
+		zone.kind = opennova::world::EntityKind::Item;
+		zone.is_capture_trigger = true;
+		zone.is_spawn_point = true;
+		zone.zone_number = number;
+		zone.zone_radius = 70;
+		zone.team = team;
+		zone.health = 1;
+		zone.alive = true;
+		zone.position = position;
+		zone.yaw = 90; // mission yaw 90 is identity collision placement
+		return world.registry.spawn(1, zone);
+	};
+	make_zone(1, 1, {-2000.0f, 0.0f, 4.0f});
+	const auto target = make_zone(2, 2, {20.0f, 30.0f, 4.0f});
+	make_zone(2, 2, {2000.0f, 0.0f, 4.0f});
+	make_zone(3, 2, {4000.0f, 0.0f, 4.0f});
+	world.zones.build_chain_from_mission();
+
+	opennova::world::CollisionModel model;
+	auto plane = [&](int nx, int ny, int nz, float distance) {
+		opennova::world::CollisionPlane value;
+		value.nx = static_cast<int16_t>(nx);
+		value.ny = static_cast<int16_t>(ny);
+		value.nz = static_cast<int16_t>(nz);
+		value.dist = static_cast<int32_t>(distance * 65536.0f);
+		model.planes.push_back(value);
+	};
+	plane(16384, 0, 0, -70.0f);
+	plane(-16384, 0, 0, -70.0f);
+	plane(0, 16384, 0, -70.0f);
+	plane(0, -16384, 0, -70.0f);
+	plane(0, 0, 16384, -12.0f);
+	plane(0, 0, -16384, 0.0f);
+	opennova::world::CollisionVolume volume;
+	volume.type = opennova::world::bvol_type::kChangeTeamCT;
+	volume.min_x = volume.min_y = -70 * 65536;
+	volume.max_x = volume.max_y = 70 * 65536;
+	volume.min_z = 0;
+	volume.max_z = 12 * 65536;
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+	opennova::world::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	collision.assign_entity(target, collision.add_model(model));
+
+	auto soldier = [&](uint8_t team, int32_t x, int32_t y) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.player_class = 8;
+		entity.team = team;
+		entity.health = 150;
+		entity.alive = true;
+		entity.position = {float(x), float(y), 4.0f};
+		const auto handle = world.registry.spawn(0, entity);
+		opennova::world::AiEntity *body = ai.at(ai.attach(handle));
+		body->inf.active = true;
+		body->net_is_remote_peer = true;
+		body->health = 150;
+		body->team = team;
+		body->pos[0] = x * 65536;
+		body->pos[1] = y * 65536;
+		body->pos[2] = 4 * 65536;
+		return handle;
+	};
+	const auto capturer = soldier(1, 20, 30);
+	const auto enemy = soldier(2, 3000, 0);
+	const auto observer = soldier(3, 3000, 500);
+	world.match.upsert_player({capturer, 0, "Blue", {}});
+	world.match.upsert_player({enemy, 1, "Red", {}});
+	world.match.upsert_player({observer, 2, "Third", {}});
+
+	using Transport = opennova::replication::UdpSessionTransport;
+	std::deque<Transport> transports;
+	for (const auto owned : {capturer, enemy, observer}) {
+		transports.emplace_back(Transport::Role::Host);
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transports.back();
+		conn.link.owned_entity = owned;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	auto events = [](Transport &transport) {
+		std::vector<std::vector<uint8_t>> out;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw)) {
+			if (!raw.empty() && raw.front() == 0x1E)
+				out.emplace_back(raw.begin() + 1, raw.end());
+		}
+		return out;
+	};
+	auto has = [](const std::vector<std::vector<uint8_t>> &list,
+	              const std::vector<uint8_t> &body) {
+		return std::find(list.begin(), list.end(), body) != list.end();
+	};
+
+	// Every slot holds a refused-touch nag; the flip clears them all and stamps
+	// the capturer's +100360 word. [orig: GameEvent_FlagCapture — the clear
+	// @0x50F786..0x50F7B1, the stamp @0x50F90C..0x50F912]
+	for (auto &conn : ctx.np_protocol.connection_list)
+		conn.reply.capture_nag_held = true;
+	opennova::inmatch::Server_TickUpdate(ctx);
+	for (int i = 0; i < 62; ++i) opennova::inmatch::Server_TickUpdate(ctx);
+	const auto to_blue = events(transports[0]);
+	const auto to_red = events(transports[1]);
+	const auto to_third = events(transports[2]);
+	bool holds_cleared = true;
+	for (const auto &conn : ctx.np_protocol.connection_list)
+		holds_cleared = holds_cleared && !conn.reply.capture_nag_held;
+	if (!expect(holds_cleared &&
+	                    ctx.np_protocol.connection_list[0].reply.chat_last_ms != 0 &&
+	                    ctx.np_protocol.connection_list[1].reply.chat_last_ms == 0 &&
+	                    ctx.np_protocol.connection_list[2].reply.chat_last_ms == 0,
+	            "the numbered flip clears every held nag and stamps only the capturer"))
+		return false;
+	// Team 2 still holds the other number-2 entity, so its mask held: 51/50
+	// carry [zone 2][rank 1] (the first number-2 entity registered).
+	const std::vector<uint8_t> own = {51, 2, 1, 0xFF, 0, 0, 0, 0};
+	const std::vector<uint8_t> foe = {50, 2, 1, 0xFF, 0, 0, 0, 0};
+	const std::vector<uint8_t> banner = {
+			56, static_cast<uint8_t>(capturer.slot()), 0xFF, 0xFF, 0, 0, 0, 0};
+	const auto *scorer = world.match.player(capturer);
+	return expect(world.registry.get(target)->team == 1 && has(to_blue, own) &&
+	                      !has(to_blue, foe) && has(to_red, foe) && !has(to_red, own) &&
+	                      !has(to_third, own) && !has(to_third, foe) &&
+	                      has(to_blue, banner) && has(to_red, banner) &&
+	                      has(to_third, banner) && scorer != nullptr &&
+	                      scorer->stats[opennova::world::MatchStats::kZoneTakeovers] == 1,
+	              "the numbered flip sends 51/50 to the two teams and the 56 banner to all");
+}
+
+// The capture transaction runs every periodic second in every game type and
+// through the post-round linger: a DM mission's numbered ChangeTeam zone and
+// an ended TDM round still get the secure pass's 0x6F record.
+// [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only to
+//  @0x51DF50; Server_UpdateCaptureZoneEntities call @0x51DF73]
+bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
+	auto run = [](uint32_t game_type, bool ended) {
+		opennova::inmatch::NapiNPServerCtx ctx;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type;
+		opennova::world::World world;
+		world.rules.mp_session = true;
+		ctx.world = &world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(1, 4);
+		opennova::world::MatchRules rules;
+		rules.game_type = game_type;
+		world.match.configure(rules);
+		opennova::world::Entity zone;
+		zone.kind = opennova::world::EntityKind::Item;
+		zone.is_capture_trigger = true;
+		zone.zone_number = 1;
+		zone.zone_radius = 20;
+		zone.team = 1;
+		zone.health = 1;
+		zone.alive = true;
+		const auto zone_handle = world.registry.spawn(1, zone);
+		world.zones.build_chain_from_mission();
+		opennova::world::Entity body;
+		body.kind = opennova::world::EntityKind::Organic;
+		body.player_class = 8;
+		body.team = 1;
+		body.health = 150;
+		body.alive = true;
+		body.position = {500.0f, 0.0f, 0.0f};
+		const auto player = world.registry.spawn(0, body);
+		world.match.upsert_player({player, 0, "Blue", {}});
+		opennova::replication::UdpSessionTransport transport(
+				opennova::replication::UdpSessionTransport::Role::Host);
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.link.owned_entity = player;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+		if (ended) world.process_round_end(1);
+		opennova::inmatch::Server_TickUpdate(ctx);
+		bool saw_control = false;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw)) {
+			if (raw.size() >= 3 && raw[0] == opennova::s2c::ZONE_TIMER_VALUE &&
+			    raw[1] == static_cast<uint8_t>(zone_handle.packed) &&
+			    raw[2] == static_cast<uint8_t>(zone_handle.packed >> 8))
+				saw_control = true;
+		}
+		return saw_control;
+	};
+	return expect(run(opennova::game_type::kDeathmatch, false),
+	              "a DM mission's numbered zone gets the 0x6F secure record") &&
+	       expect(run(opennova::game_type::kTeamDeathmatch, true),
+	              "the secure pass keeps running after the round ends");
+}
+
+// The roster row mirrors the slot's undeployed bit: the join sets it when the
+// mission offers deploy zones, the deploy leg and a spectator's return to play
+// clear it (entering spectator mode leaves it alone), so event 25's counter
+// skips the slot until the player deploys.
+// [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791;
+//  Server_UpdateCaptureZoneProximity @0x5087A2]
+bool check_roster_mirrors_the_undeployed_bit() {
+	NapiNPServerCtx ctx;
+	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.config.max_players = 4;
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	opennova::world::Entity zone;
+	zone.kind = opennova::world::EntityKind::Building;
+	zone.item_id = 0x0500;
+	zone.is_spawn_point = true;
+	zone.alive = true;
+	zone.team = 1;
+	if (!expect(world.registry.spawn(2, zone).valid(),
+	            "undeployed-bit fixture installs a selectable spawn zone"))
+		return false;
+	ctx.world = &world;
+	opennova::replication::UdpSessionTransport transport_a(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::replication::UdpSessionTransport transport_b(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	for (int i = 0; i < 2; ++i) {
+		opennova::inmatch::NapiNPConnection conn;
+		conn.peer = {0x0100007Fu, static_cast<uint16_t>(34036 + i)};
+		conn.type = 1;
+		conn.connection_id = opennova::inmatch::kFirstJoinerDcb + static_cast<uint32_t>(i);
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = i == 0 ? &transport_a : &transport_b;
+		conn.player_name = i == 0 ? "Deployer" : "Watcher";
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	opennova::inmatch::NapiNPConnection &deployer = ctx.np_protocol.connection_list[0];
+	opennova::inmatch::NapiNPConnection &watcher = ctx.np_protocol.connection_list[1];
+	// The join sets the frontier-hint bit, clears the nag hold and zeroes the
+	// +100360 stamp; the deploy leg's whole-byte write clears both bits.
+	// [orig: Server_OnPlayerJoin @0x51A6CD, @0x51A6FD, @0x51A730..0x51A73A;
+	//  Server_ProcessPlayerDeath @0x517803]
+	deployer.reply.capture_nag_held = true;
+	deployer.reply.chat_last_ms = 77;
+	const opennova::world::EntityHandle a =
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, deployer, world);
+	if (!expect(deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held &&
+	                    deployer.reply.chat_last_ms == 0,
+	            "the join sets the frontier-hint bit and clears the nag state"))
+		return false;
+	const opennova::world::EntityHandle b =
+			opennova::inmatch::Server_BuildPlayerInfoAndAdd(ctx, watcher, world);
+	auto pending = [&world](opennova::world::EntityHandle handle) {
+		const opennova::world::MatchPlayer *row = world.match.player(handle);
+		return row != nullptr && row->respawn_pending;
+	};
+	bool ok = expect(a.valid() && b.valid() && deployer.link.respawn_pending &&
+	                         pending(a) && pending(b),
+	                 "the join mirrors the undeployed bit onto the roster row");
+	deployer.reply.capture_nag_held = true;
+	opennova::inmatch::Server_ReleasePlayerDeployment(
+			ctx.config, deployer, world, opennova::world::EntityHandle{});
+	ok = expect(!deployer.link.respawn_pending && !pending(a),
+	            "the deploy leg clears the roster row's undeployed bit") && ok;
+	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,
+	            "the deploy leg clears the frontier-hint bit and the nag hold") && ok;
+	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, true);
+	ok = expect(watcher.link.spectator && watcher.link.respawn_pending && pending(b),
+	            "entering spectator mode leaves the undeployed bit alone") && ok;
+	opennova::inmatch::Server_SetPlayerSpectator(ctx, watcher, world, false);
+	ok = expect(!watcher.link.respawn_pending && !pending(b),
+	            "a spectator's return to play clears the undeployed bit") && ok;
+	return ok;
+}
+
+// A three-zone A&S chain (1 and 2 blue, 3 red) with one in-match blue player:
+// the frontier-hint and refused-touch fixtures.
+struct FrontierHintFixture {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	opennova::world::World world;
+	opennova::replication::UdpSessionTransport transport{
+			opennova::replication::UdpSessionTransport::Role::Host};
+	opennova::world::EntityHandle player;
+
+	explicit FrontierHintFixture(bool with_chain) {
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+		world.rules.mp_session = true;
+		ctx.world = &world;
+		world.registry.configure_pool(0, 4);
+		world.registry.configure_pool(1, 8);
+		opennova::world::MatchRules rules;
+		rules.game_type = opennova::game_type::kAdvanceAndSecure;
+		world.match.configure(rules);
+		if (with_chain) {
+			const uint8_t teams[3] = {1, 1, 2};
+			for (uint8_t number = 1; number <= 3; ++number) {
+				opennova::world::Entity zone;
+				zone.kind = opennova::world::EntityKind::Item;
+				zone.is_capture_trigger = true;
+				zone.is_spawn_point = true;
+				zone.zone_number = number;
+				zone.zone_radius = 20;
+				zone.team = teams[number - 1];
+				zone.health = 1;
+				zone.alive = true;
+				zone.position = {1000.0f * number, 0.0f, 0.0f};
+				world.registry.spawn(1, zone);
+			}
+			world.zones.build_chain_from_mission();
+		}
+		opennova::world::Entity body;
+		body.kind = opennova::world::EntityKind::Organic;
+		body.player_class = 8;
+		body.team = 1;
+		body.health = 150;
+		body.alive = true;
+		body.position = {-500.0f, 0.0f, 0.0f};
+		player = world.registry.spawn(0, body);
+		world.match.upsert_player({player, 0, "Blue", {}});
+		opennova::inmatch::NapiNPConnection conn;
+		conn.type = 1;
+		conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = opennova::replication::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.link.owned_entity = player;
+		ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+	opennova::inmatch::NapiNPConnection &conn() {
+		return ctx.np_protocol.connection_list.front();
+	}
+	std::vector<std::vector<uint8_t>> hints() {
+		std::vector<std::vector<uint8_t>> out;
+		std::vector<uint8_t> raw;
+		while (transport.pop_outbound(raw))
+			if (raw.size() >= 2 && raw[0] == 0x1E && raw[1] == 0x3A)
+				out.emplace_back(raw.begin() + 1, raw.end());
+		return out;
+	}
+};
+
+// The per-tick slot pass sends a set frontier-hint bit's S2C 0x1E event 58
+// [own frontier][the enemy's, 0 when the same][0xFF] only once the slot has
+// played 1240 ticks, and clears the bit whether or not it sends (no frontier,
+// no record). [orig: Server_UpdateAllActivePlayerSlots @0x51890C..0x5189A6]
+bool check_frontier_hint_waits_for_the_play_ticks() {
+	FrontierHintFixture f(/*with_chain=*/true);
+	const uint8_t own = f.world.zones.frontier_zone(1);
+	const uint8_t enemy = f.world.zones.frontier_zone(2);
+	if (!expect(own != 0, "the fixture chain gives blue a frontier")) return false;
+	f.conn().reply.frontier_hint_pending = true;
+	f.world.match.player(f.player)->play_ticks = 1239;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	bool ok = expect(f.hints().empty() && f.conn().reply.frontier_hint_pending,
+	                 "a slot short of 1240 play ticks keeps the bit and gets no hint");
+	f.world.match.player(f.player)->play_ticks = 1240;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<uint8_t> want = {
+			0x3A, own, static_cast<uint8_t>(enemy == own ? 0 : enemy), 0xFF, 0, 0, 0, 0};
+	const auto sent = f.hints();
+	ok = expect(sent.size() == 1 && sent[0] == want && !f.conn().reply.frontier_hint_pending,
+	            "the mature slot gets one event-58 hint and the bit clears") && ok;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.hints().empty(), "a cleared bit sends nothing more") && ok;
+
+	FrontierHintFixture bare(/*with_chain=*/false);
+	bare.conn().reply.frontier_hint_pending = true;
+	bare.world.match.player(bare.player)->play_ticks = 1240;
+	opennova::inmatch::Server_TickUpdate(bare.ctx);
+	ok = expect(bare.hints().empty() && !bare.conn().reply.frontier_hint_pending,
+	            "no frontier: the bit clears without a record") && ok;
+	return ok;
+}
+
+// A refused capture touch arms the toucher's nag only while none is held and
+// when its +100360 stamp is set and more than ten seconds old; arming sets both
+// bits and restamps the word, and the next slot pass sends the hint.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — bit 0x08 @0x500C10, the
+//  stamp @0x500C19..0x500C33, the set @0x500C35..0x500C3C]
+bool check_refused_touch_arms_the_nag() {
+	FrontierHintFixture f(/*with_chain=*/true);
+	f.world.match.player(f.player)->play_ticks = 5000;
+	f.world.logic_tick = 62u * 60u;
+	// The capture leg reads the frame's own tick; the entity pass's tail
+	// advances it afterwards.
+	auto touch = [&f](uint32_t age_ms) {
+		const uint32_t frame_tick = f.world.logic_tick;
+		const uint32_t now_ms =
+				opennova::inmatch::host_milliseconds_for_logic_tick(frame_tick);
+		f.conn().reply.chat_last_ms = age_ms == 0 ? 0 : now_ms - age_ms;
+		f.world.zones.capture.refused_touches.push_back(f.player);
+		opennova::inmatch::Server_TickUpdate(f.ctx);
+		return f.world.logic_tick == frame_tick + 1 ? now_ms : 0u;
+	};
+	uint32_t now_ms = touch(0);
+	bool ok = expect(now_ms != 0 && !f.conn().reply.capture_nag_held &&
+	                         !f.conn().reply.frontier_hint_pending &&
+	                         f.world.zones.capture.refused_touches.empty(),
+	                 "an unstamped slot is never nagged");
+	now_ms = touch(10000);
+	ok = expect(!f.conn().reply.capture_nag_held && !f.conn().reply.frontier_hint_pending,
+	            "exactly ten seconds is not over the limit") && ok;
+	now_ms = touch(10001);
+	ok = expect(f.conn().reply.capture_nag_held && f.conn().reply.frontier_hint_pending &&
+	                    f.conn().reply.chat_last_ms == now_ms,
+	            "an old stamp arms both bits and restamps the word") && ok;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.hints().size() == 1 && !f.conn().reply.frontier_hint_pending &&
+	                    f.conn().reply.capture_nag_held,
+	            "the next slot pass sends the hint and keeps the hold") && ok;
+	// However old the stamp, a held nag is not re-armed.
+	f.conn().reply.chat_last_ms = 1;
+	f.world.zones.capture.refused_touches.push_back(f.player);
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(f.conn().reply.chat_last_ms == 1 && !f.conn().reply.frontier_hint_pending,
+	            "a held nag is not re-armed") && ok;
+	return ok;
 }
 
 // Retail's S2C 0x40 producer is the general minimap-overlay stream, not an AS
@@ -3817,8 +4337,9 @@ bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 			"initial state-6 RTT request has a 62-flush reliable lifetime")) return false;
 	RttSample sample; size_t consumed = 0;
 	if (!expect(decode_rtt_sample(first[0].body.data(), first[0].body.size(), sample, consumed) &&
-			sample.echo_flag == 1 && sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick),
-			"periodic RTT requests carry the host clock and echo flag 1")) return false;
+			sample.echo_flag == 1 &&
+			sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
+			"periodic RTT requests carry the frame's host clock and echo flag 1")) return false;
 	for (int i = 1; i < 62; ++i) { inmatch::Server_TickUpdate(ctx); if (!expect(drain().empty(), "RTT waits 62 ticks")) return false; }
 	peer.s2c_send_holdoff_countdown = 2;
 	inmatch::Server_TickUpdate(ctx);
@@ -3847,6 +4368,7 @@ int main() {
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
+	ok = check_script_change_reaches_the_same_frame() && ok;
 	ok = check_retail_rate_defaults() && ok;
 	ok = check_pre_dictation_holdoff_keeps_initial_settings_open() && ok;
 	ok = check_create_session_brings_up_host() && ok;
@@ -3879,6 +4401,11 @@ int main() {
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;
 	ok = check_timed_capture_host_wire_transaction() && ok;
+	ok = check_numbered_flip_pair_and_banner_wire() && ok;
+	ok = check_capture_pass_runs_in_every_mode_and_after_the_round() && ok;
+	ok = check_roster_mirrors_the_undeployed_bit() && ok;
+	ok = check_frontier_hint_waits_for_the_play_ticks() && ok;
+	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

@@ -70,33 +70,12 @@ constexpr int32_t kTerminalVelZ = -32768;
 // [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
 // mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
 constexpr int32_t kJumpImpulseVelZ = 0x1600;
-// The org1 float model (see infantry_water_block). The hysteresis gap and the
-// sink are 16.16 (0.625u and ~0.0187u); the bob shares the sink's magnitude, so
-// a floating body rides between the plane and 0.037u under it — a ripple, not a
-// visible heave. [orig: the 0xA000 entry bias @0x4bfb84, -0x4C9 @0x4bfbf1, the
-// sin amplitude dbl_7C9C28 and the phase pair flt_7C6950 * dbl_7C9BD0]
-// The phase pair is the LITERAL 1/256 * 3.1 (Jointops.exe bytes @0x7C6950 =
-// 0.00390625f, @0x7C9BD0 = 3.1 double) -- not pi/256; corrected 2026-08-23.
-// The org2 (player) arm reads the NEGATED amplitude dbl_7C9BC8 = -1224.0 and
-// subtracts it (kong 149040-149047), so both motors bob in the same phase.
-constexpr int32_t kWaterFloatHysteresis = 0xA000;
-constexpr int32_t kWaterFloatSink = 1225;
-constexpr double kWaterBobAmplitude = 1224.0;
-constexpr double kWaterBobPhaseScale = 0.00390625 * 3.1;
-// org2 dive bit: fully-submerged latch, set below the surface line - 0x2000,
-// cleared at the surface clamp and on the not-submerged exit (~0x208000).
-// [orig: set @0x4b81ef; clear @0x4b8176; exit @0x4b8373]
-constexpr uint32_t kEntityFlagDiveLatch = 0x200000u;
-constexpr int32_t kWaterDiveDepth = 0x2000;       // [orig: @0x4b81d0 `surf - 0x2000`]
-constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4b8124 `+ 112`]
-constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4b80d6 `+ 4096`]
-constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 // The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
 // drowning/water (0x8000), and the terrain-gradient slide bit (0x10000).
 // Carried (0x40) is tested separately immediately afterward. The reimpl keeps
 // flags in two mirrors plus a typed mounted relation, so collapse those carriers
 // at the one shared local/remote eligibility seam.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b7ea0-0x4b7ebd]
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B7EA4..0x4B7EBD]
 constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
 // [orig: turn-in-place gates; dump 2940-2952]
 constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
@@ -159,12 +138,13 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 // ----------------------------------------------------------------------------
 // Navigation think (every 16 ticks, authority). [orig: 0x4b9910 dump 1293-1540]
 // ----------------------------------------------------------------------------
-void AiSystem::infantry_think(AiEntity &e, World &world) {
+bool AiSystem::infantry_think(AiEntity &e, World &world) {
     InfantryState &inf = e.inf;
     AiSlot &slot = e.slot;
-
-    // [orig: entity[74] decremented once per think; dump 1338]
-    if (inf.wait_cooldown > 0) --inf.wait_cooldown;
+    // The think-entry target heading, kept in a frame local; only the marker
+    // wait and the S stage rewrite it. [orig: Entity_UpdateInfantryAI
+    //  @0x4BA9B4..0x4BA9BA; rewrites @0x4BAD41 / @0x4BB7D0]
+    int32_t entry_heading = inf.target_heading;
 
     inf.move_mode = 0;
     inf.target_dist = 0;
@@ -176,16 +156,50 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     // other think clears it. [orig: @0x4b9910 think head — aiComp[36] = 0
     // unless aiComp[37] == 125]
     if (ch != 125) slot.f[36] = 0;
+    // Every think seeds aimPitch from the SSN; the tracking reset or an aim
+    // producer overwrites it later, so it shows only while airborne. An
+    // airborne body without the 0x80 climb order skips the rest of the think.
+    // [orig: `shl ecx,1Bh; sar ecx,4` @0x4BAA4B..0x4BAA59; the skip
+    //  @0x4BAA57..0x4BAA66]
+    inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(e.net_id) << 27), 4);
+    if (const Entity *self = world.registry.get(e.handle)) {
+        const uint32_t flags = self->flags | self->engine_flags;
+        if ((flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0) return false;
+    }
+    // The think cooldown (+0x128) steps down while nonzero [orig: @0x4BAA7B..0x4BAAB1].
+    if (inf.wait_cooldown != 0) inf.wait_cooldown = io::bam_sub(inf.wait_cooldown, 1);
     // Reserved command range: 123/124/125 Goto-SSN-and-board, 126 goto-group
     // hold, 127 follow the local player — dispatched in infantry_board.cpp,
     // BEFORE the has-route gate like the original (retires the D-INF-2
     // early-return). [orig: the @0x4b9910 command dispatch on aiComp+148]
-    if (ch >= 123 && ch <= 127) {
-        infantry_command_think(e, world);
+    if (ch >= 123 && ch <= 127)
+        infantry_command_think(e, world, entry_heading);
+    else
+        infantry_route_think(e, world, entry_heading);
+    // Every leg ends in the common move tail: a Flags 0x40 (guard) body keeps
+    // the think-entry heading. [orig: @0x4BBE11..0x4BBE1E]
+    const Entity *self = world.registry.get(e.handle);
+    if (self != nullptr && ((self->flags | self->engine_flags) & kEntityFlagMounted) != 0)
+        inf.target_heading = entry_heading;
+    return true;
+}
+
+void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_heading) {
+    InfantryState &inf = e.inf;
+    AiSlot &slot = e.slot;
+    const int32_t ch = slot.f[37];
+    // Without the has-route flag (slot+140), or while the cooldown holds, the
+    // walk clears the entry-stage byte +0x361 [orig: @0x4BABBD..0x4BABCF ->
+    // @0x4BAE80..0x4BAE88]; channel 0 clears the has-route flag like an empty
+    // channel [orig: @0x4BABDD..0x4BABE5 -> @0x4BAE75].
+    if (slot.f[35] == 0 || inf.wait_cooldown != 0) {
+        inf.board_entry_stage = 0;
         return;
     }
-    // [orig: dump 1409 — needs the has-route flag (slot+140) and no hold cooldown]
-    if (ch == 0 || slot.f[35] == 0 || inf.wait_cooldown > 0) return;
+    if (ch == 0) {
+        slot.f[35] = 0;
+        return;
+    }
 
     const NavChannel *nc = nav.channel(ch);
     if (nc == nullptr || nc->count == 0) { // [orig: dword_A71DD4[34*ch]==0 -> clear order]
@@ -193,10 +207,12 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
         return;
     }
     int32_t node = slot.f[38]; // [orig: slot+152 = node index (BMS wp_number at spawn)]
-    if (node < 0 || node >= nc->count) node = 0; // container-rebase guard
-
-    const NavEntry *mk = nav.entry(nc->entries[node]);
-    if (mk == nullptr) { slot.f[35] = 0; return; }
+    // The node reads the flat record block with no bound: a start node at or
+    // past the count reads the raw slot word there, and the pool-3 read is
+    // unchecked (a slot no marker filled is a zeroed marker, walked to like
+    // any other). [orig: Entity_UpdateInfantryAI @0x4BABFF..0x4BAC19, the
+    //  Pool_GetEntryUnchecked read of flat[34*ch + 2 + node]]
+    const NavEntry &mk = nav.slot(nav.entry_index(ch, node));
 
     // Distance to the node: 3D with 1.0u vertical slack, target 0.25u above the marker.
     // [orig: dump 1421-1457 — targetZ = marker.z + 0x4000; dz = max(0, |dz| - 0x10000)]
@@ -217,8 +233,8 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     };
 
     int32_t target[3];
-    int32_t dist = dist_to(*mk, target);
-    int32_t radius = mk->f[0]; // [orig: marker dword[0] = arrival radius]
+    int32_t dist = dist_to(mk, target);
+    int32_t radius = mk.f[0]; // [orig: marker dword[0] = arrival radius]
     // [orig: dump 1462 — at the last node of a one-shot path (gait approach flag)]
     inf.at_final_oneshot = (node >= nc->count - 1) && ((nc->loopflag & 1) != 0);
 
@@ -230,18 +246,21 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
         inf.move_target[0] = target[0];
         inf.move_target[1] = target[1];
         inf.move_target[2] = target[2];
-        inf.target_heading = bearing_to(target[0] - e.pos[0], target[1] - e.pos[1]);
         return;
     }
 
     // Arrived. [orig: dump 1464-1532]
     mark_waypoint_visited(e, world, ch, node);
 
-    if (mk->wait_ticks != 0) {
-        // Face the marker's authored heading and hold. [orig: dump 1468-1477 —
-        // entity[106] = marker+16; entity[74] = (wait + 8) >> 4 think-ticks]
-        inf.target_heading = mk->f[4];
-        inf.wait_cooldown = (mk->wait_ticks + 8) >> 4;
+    if (mk.wait_ticks != 0) {
+        // Face the marker's authored heading and hold: the target heading, the
+        // aim heading and the think-entry local all take it. [orig:
+        // @0x4BAD1E..0x4BAD48 — +0x1A8 / +0x2EC = marker+16 @0x4BAD29 /
+        // @0x4BAD2F, the entry local @0x4BAD41; +0x128 = (wait + 8) >> 4 @0x4BAD48]
+        inf.target_heading = mk.f[4];
+        inf.aim_heading = mk.f[4];
+        entry_heading = mk.f[4];
+        inf.wait_cooldown = (mk.wait_ticks + 8) >> 4;
     }
 
     // Advance the node (wrap), honoring the one-shot end. [orig: dump 1479-1532]
@@ -259,16 +278,16 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     // @0x4badbf].
     if (inf.wait_cooldown != 0) return;
 
-    const NavEntry *next = nav.entry(nc->entries[node]);
-    if (next == nullptr) return;
-    dist = dist_to(*next, target);
+    // The same unbounded, unchecked read for the next node. [orig:
+    //  Entity_UpdateInfantryAI @0x4BADCB..0x4BADDF]
+    const NavEntry &next = nav.slot(nav.entry_index(ch, node));
+    dist = dist_to(next, target);
     inf.move_mode = 4; // [orig: moveMode = 4 after advancing; dump 1522]
     inf.target_dist = dist;
-    inf.arrival_radius = next->f[0];
+    inf.arrival_radius = next.f[0];
     inf.move_target[0] = target[0];
     inf.move_target[1] = target[1];
     inf.move_target[2] = target[2];
-    inf.target_heading = bearing_to(target[0] - e.pos[0], target[1] - e.pos[1]);
 }
 
 // ----------------------------------------------------------------------------
@@ -293,11 +312,11 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
         //  adm authors them [orig: @0x4bd70f..0x4bd73f], so the base gait survives.)
         case anim_state::kStop:
             // [orig: Entity_UpdateInfantryAI @0x4b9910 post-pass, kong 154811:
-            //  animStateId == 147 && animMap[147] == animMap[0] -> 43]. Retail
-            // converts AFTER the commit, at the end of the same think with no
-            // observer in between; resolving before the commit is a declared
-            // placement adaptation. Data-driven per body: 29 of the 219 retail
-            // .adms author anim_stop and play 147; Eindo_R.adm does not.
+            //  animStateId == 147 && animMap[147] == animMap[0] -> 43]. The
+            // org1 selector commits 147 raw and the think's post-commit fix-up
+            // converts it; the other callers resolve it here. Data-driven per
+            // body: 29 of the 219 retail .adms author anim_stop and play 147;
+            // Eindo_R.adm does not.
             break;
         case anim_state::kIdle2:
         case anim_state::kIdle3:
@@ -455,6 +474,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
     const bool dragging = infantry_is_dragger(e, world);
     if (moving) {
+        // Only a moving selection persists the goal Z [orig: @0x4BD3F7].
+        inf.goal_z = inf.move_target[2];
         // A dragger searches and compares turn error while facing away from
         // its travel goal. Restore body heading after the gait choice below.
         // [orig: @0x4BD468, @0x4BD5B1]
@@ -490,9 +511,20 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
     };
 
+    // Still inside the moving branch, ahead of every substitution below, the
+    // jog/run pair falls back: a missing jog runs, a missing run jogs, else
+    // walks. [orig: Entity_UpdateInfantryAI @0x4BD5C5..0x4BD61D]
+    if (moving) {
+        if (target == anim_state::kJogForward && !has(anim_state::kJogForward))
+            target = anim_state::kRunForward;
+        if (target == anim_state::kRunForward && !has(anim_state::kRunForward))
+            target = has(anim_state::kJogForward) ? anim_state::kJogForward
+                                                   : anim_state::kWalkForward;
+    }
+
     // Alerted idle: damageTimer or the slot alert byte (NOT wasHit) promotes 43 to the
     // armed idle 49 when the combat pass holds a target in slot[3], else 44.
-    // [orig: LABEL_636 @0x4bd2f0..0x4bd31c]
+    // [orig: Entity_UpdateInfantryAI @0x4bd2f0..0x4bd31c]
     if ((inf.damage_timer != 0 || e.slot.bytes()[AiSlot::kAlertByte] != 0) &&
         target == anim_state::kIdle)
         target = e.slot.f[3] != 0 ? anim_state::kIdle3 : anim_state::kIdle2;
@@ -512,9 +544,25 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         if (has(drag_state)) target = drag_state;
     }
 
+    // Swimming (Flags 0x8000) swaps the gaits, the idles and the two close
+    // attacks for the swim clips [orig: Entity_UpdateInfantryAI
+    // @0x4BD635..0x4BD6A3].
+    if (self != nullptr && ((self->flags | self->engine_flags) & kEntityFlagDrowning) != 0) {
+        if ((target == anim_state::kJogForward || target == anim_state::kRunForward ||
+                target == anim_state::kWalkForward) && has(anim_state::kSwimForward))
+            target = anim_state::kSwimForward;
+        else if ((target == anim_state::kIdle || target == anim_state::kIdle2 ||
+                target == anim_state::kIdle3) && has(anim_state::kSwimIdle))
+            target = anim_state::kSwimIdle;
+        else if ((target == anim_state::kAttack || target == anim_state::kAttack2) &&
+                has(anim_state::kSwimAttack))
+            target = anim_state::kSwimAttack;
+    }
+
     // Hit flinch: a body hit since the last think swaps its idle for cover_idle (163)
     // or its run/jog for cover_run (164) when the adm authors them, and wasHit is
-    // consumed here, on the think cadence. [orig: LABEL_711 @0x4bd6a7..0x4bd6ee]
+    // consumed here, on the think cadence. [orig: Entity_UpdateInfantryAI
+    // @0x4bd6a7..0x4bd6ee]
     if (inf.was_hit) {
         if ((target == anim_state::kIdle || target == anim_state::kIdle2) &&
             has(anim_state::kCoverIdle))
@@ -527,7 +575,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // Wounded gaits at half max-health, substituted only when the adm authors the
     // wounded clip: a jogger without wounded_run stays a jogger.
-    // [orig: LABEL_722 @0x4bd6f5..0x4bd744 — def+380 >> 1; animMap[146]/[145] != *animMap]
+    // [orig: Entity_UpdateInfantryAI @0x4bd6f5..0x4bd744 — def+380 >> 1;
+    //  animMap[146]/[145] != *animMap]
     if (e.health <= static_cast<int16_t>(inf.max_health / 2)) {
         if ((target == anim_state::kRunForward || target == anim_state::kJogForward) &&
             has(anim_state::kWoundedRun))
@@ -535,6 +584,12 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
         else if (target == anim_state::kWalkForward && has(anim_state::kWoundedWalk))
             target = anim_state::kWoundedWalk;
     }
+
+    // A combat approach (moveMode 1) runs as run_attack (167) [orig:
+    // @0x4BD748..0x4BD763]; the moveMode 5 run_away arm after it
+    // (@0x4BD765..0x4BD780) has no producer.
+    if (inf.move_mode == 1 && target == anim_state::kRunForward && has(anim_state::kRunAttack))
+        target = anim_state::kRunAttack;
 
     // The NPC applies wash before animation arbitration. Unlike the player
     // path, its jog/run can select wash_run. [orig: @0x4BD78D..0x4BD7E6]
@@ -552,9 +607,12 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     // A forced state stays numerically selected even if the ADM aliases that
     // slot to RESET. The ordinary gait fallbacks still apply to a later override.
     // [orig: raw forced store @0x4BD266, common arbitration @0x4B9910]
-    const int resolved = world.script.forced_animation != 0 &&
-            target == world.script.forced_animation ? target :
-            infantry_resolve_state(inf.adm_id, target);
+    // A stop (147) is arbitrated raw as well: the post-commit fix-up turns an
+    // unauthored stop into 43 after the commit [orig: the arbitration
+    // @0x4BD837..0x4BD874 on the raw selection; the fix-up @0x4BE080..0x4BE09A].
+    const bool raw = target == anim_state::kStop ||
+            (world.script.forced_animation != 0 && target == world.script.forced_animation);
+    const int resolved = raw ? target : infantry_resolve_state(inf.adm_id, target);
     commit_body_state(inf, resolved);
 }
 
@@ -624,7 +682,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
         uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     // Burn selection bypasses the ordinary movement/swim/lean selector, including
-    // the pass that clears the timer. [orig: Entity_UpdateInfantryPlayerBody @0x4B70D9..0x4B717E -> LABEL_654]
+    // the pass that clears the timer. [orig: Entity_UpdateInfantryPlayerBody @0x4B70D9..0x4B717E -> @0x4B729D]
     if (inf.burn_state != 0) {
         const int target = select_infantry_burn(inf, root_motion, true, logic_tick);
         commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
@@ -637,7 +695,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
 
     // No in-air branch here: the original SKIPS this selection while airborne
     // (@0x4b70b8) — the jump block stamps 30/31 and the fall edge stamps 31 (47
-    // parachute rides the unmodeled Flags 0x20) directly [orig: @0x4b7ef2/@0x4b7e5c].
+    // under a deployed chute, Flags 0x20) directly [orig: @0x4b7ef2/@0x4B7E61].
     int target;
     if (inf.player_moving) {
         inf.idle_counter = 0;                        // [orig: @0x4b719b]
@@ -744,8 +802,8 @@ void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
     inf.lean_angle =
         io::bam_sub(inf.lean_angle, io::bam_sar(io::bam_add(inf.lean_angle, 8), 4));
     if (e.health <= 0) return;                      // [orig: the Flags&2 gate legs]
-    // The ladder latch blocks the ramp (hands on the rungs); the parachute half
-    // of the same mask rides D-INF-20. [orig: (Flags & 0x100020) gate @0x4b7dad]
+    // The ladder latch (hands on the rungs) and a deployed chute block the ramp.
+    // [orig: (Flags & 0x100020) gate @0x4b7dad]
     if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) != 0)
         return;
     // The prone skip reads prone_local = the latch AND none of Flags 0x10A000
@@ -769,6 +827,26 @@ void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
 // the clamp also snaps the wrapped post-roll value back once the clip ends.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d (decay/skip/chase)
 //  + @0x4b700c-0x4b7025 (the 41/42 ramp)]
+// The org1 torso roll, every tick after the think: prone idle 48 decays it a
+// thirty-second step toward level (the player body's decay is a sixteenth);
+// otherwise it chases the slope roll a sixteenth-step with the lag clamped to
+// roll +-20 deg. There is no 41/42 ramp. [orig: Entity_UpdateInfantryAI
+// `cmp dword ptr [esi+2BCh],30h` @0x4BE897, decay @0x4BE8A6..0x4BE8AC, chase
+// @0x4BE8B0..0x4BE8BD, clamps @0x4BE8C8..0x4BE8EA]
+static void infantry_org1_torso_roll_tick(AiEntity &e) {
+    InfantryState &inf = e.inf;
+    if (inf.anim_state == anim_state::kIdleProne) {
+        inf.torso_roll =
+            io::bam_sub(inf.torso_roll, io::bam_sar(io::bam_add(inf.torso_roll, 16), 5));
+        return;
+    }
+    inf.torso_roll = io::bam_add(
+        inf.torso_roll, io::bam_sar(io::bam_add(io::bam_sub(e.roll, inf.torso_roll), 8), 4));
+    const int32_t delta = io::bam_sub(inf.torso_roll, e.roll);
+    if (delta > 0x0E38E380) inf.torso_roll = io::bam_add(e.roll, 0x0E38E380);
+    if (delta < -0x0E38E380) inf.torso_roll = io::bam_add(e.roll, -0x0E38E380);
+}
+
 void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
     InfantryState &inf = e.inf;
     if (inf.anim_state == anim_state::kIdleProne) {  // [orig: cmp 0x30 @0x4b5d05]
@@ -805,7 +883,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     e.body_pitch = 0;
     e.health = health;
     e.vel_x = 0;
-    e.vel_z = 0;
+    e.vel_y = 0;
     // Nothing is in flight toward the old pose any more; a stale interpolation target
     // would drag a redeployed body back toward where it died.
     e.net_smooth_target[0] = pos[0];
@@ -843,6 +921,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
     inf.leg_target[0] = inf.leg_target[1] = heading;
     inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
+    inf.z_quarter_step = 0; // [orig: Entity_ResetToSpawnState @0x4B967A]
     inf.stance = InfantryState::Stance::kStand;
     // `airborne` stays with the registry word, which no retail respawn writer
     // touches (see InfantryState::reset_for_spawn) [orig: Entity_ResetToSpawnState
@@ -864,6 +943,33 @@ void player_body_class_think(Entity &body) {
     if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
     body.cause_flags &= ~0xF00u;
     body.spawn_phase = 64;
+}
+
+// See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
+//  channel @0x407B64..0x407B6C, team 1/2 @0x407B72..0x407B80, node count
+//  @0x407B86..0x407B94, the node walk @0x407BA0..0x407C6B (Pool_GetEntryUnchecked
+//  @0x407BBD), the unsigned octagon @0x407BC4..0x407BFB, SetBitB
+//  @0x407C13 / @0x407C35, SetBitA @0x407C49]
+void player_body_waypoint_visits(World &world, const Entity &body) {
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
+    const AiEntity *ai = world.ai.for_handle(body.handle);
+    if (ai == nullptr) return;
+    const int32_t channel = ai->slot.f[37];
+    if (channel == 0 || (body.team != 1 && body.team != 2)) return;
+    const NavChannel *route = world.ai.nav.channel(channel);
+    if (route == nullptr) return;
+    const int32_t count = std::min(route->count, 32);
+    for (int32_t node = 0; node < count; ++node) {
+        const NavEntry *marker = world.ai.nav.entry(route->entries[node]);
+        if (marker == nullptr) continue;
+        const uint32_t radius = static_cast<uint32_t>(marker->f[0]);
+        const uint32_t dx = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[1], ai->pos[0])));
+        const uint32_t dy = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[2], ai->pos[1])));
+        if (dx > radius || dy > radius) continue;
+        const uint32_t reach = dx > dy ? dx + (dy >> 1) : dy + (dx >> 1);
+        if (reach > radius) continue;
+        world.script.relations.mark_waypoint_visited(body.net_id, body.team, channel, node);
+    }
 }
 
 // See the infantry.h contract. [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
@@ -900,7 +1006,7 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
             (entity->mounted || entity->ground_target.valid());
     // Org1's carrier branch bypasses the gradient without touching Flags
     // 0x10000 after the deck rotation. Org2 clears the bit for a carrier.
-    // [orig: carrier @0x4BA85B; exit @0x4BA891]
+    // [orig: carrier @0x4BA85A; exit @0x4BA891]
     if (npc && carried) return false;
     const uint32_t flags = entity != nullptr ? entity->flags | entity->engine_flags : 0u;
     terrain::TerrainHeightGradient gradient;
@@ -933,6 +1039,79 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
     return true;
 }
 
+// The org1 heading chase, legs and look, for a body that is not riding a seat.
+// Body: quarter-step toward the target heading, clamped +-69273360; the live
+// look moves by the SAME step, preserving its offset from the body. A carried
+// (Flags 0x40) body snaps both legs to the body; any other chases its legs.
+// The look then chases the aim pair. The legs are consumed as the R/L leg-chain
+// bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (section 14).
+// [orig: Entity_UpdateInfantryAI body @0x4BE8FD..0x4BE931, carried snap
+//  @0x4BE934 -> @0x4BEB0C, legs @0x4BE944..0x4BEB0A, look @0x4BEB18..0x4BEBE7]
+static void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
+    InfantryState &inf = e.inf;
+    const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
+    int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
+    if (step > kBodyTurnClamp) step = kBodyTurnClamp;
+    if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
+    inf.body_heading = io::bam_add(inf.body_heading, step);
+    e.heading = io::bam_add(e.heading, step);
+
+    if (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagMounted) != 0) {
+        inf.leg_yaw[0] = inf.body_heading;
+        inf.leg_yaw[1] = inf.body_heading;
+    } else {
+        // A movement state or a def+84&0x200 body takes the WALK path: the right
+        // foot half-snaps to the target, the left pulls a quarter of the
+        // residual, both targets = target, the alternating shuffle while
+        // walking/turning. [orig: selector @0x4be944-0x4be967; walk path
+        // @0x4be9d4-0x4bea0b]
+        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
+            (e.def_attrib & kItemAttribLandable) != 0) {
+            const int32_t tgt = inf.target_heading;
+            inf.leg_yaw[0] = io::bam_add(
+                inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
+            inf.leg_yaw[1] = io::bam_add(
+                inf.leg_yaw[1], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 2));
+            inf.leg_target[0] = tgt;
+            inf.leg_target[1] = tgt;
+        } else {
+            // Idle: re-plant targets toward the MIDPOINT of (body, target),
+            // measured vs the current TARGET, left window 32 ticks behind the
+            // right. [orig: midpoint @0x4be969-0x4be975; L @0x4be977/@0x4be991-0x4be9a7;
+            //  R @0x4be97f/@0x4be9bb-0x4be9cc]
+            const int32_t mid = io::bam_add(
+                inf.target_heading,
+                io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
+            const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
+            if (abs_bam(dl) > kLegReplantMin &&
+                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+                inf.leg_target[1] = mid;
+            const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
+            if (abs_bam(dr) > kLegReplantMin &&
+                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+                inf.leg_target[0] = mid;
+        }
+        for (int leg = 0; leg < 2; ++leg) {
+            // Quarter-step (sixteenth for def+84&0x200 bodies), clamp +-0x5000000
+            // (~7 deg/tick), twist limit +-0x20000000 (45 deg) vs the BODY.
+            // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
+            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
+            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
+                                ? io::bam_sar(io::bam_add(ldiff, 8), 4)
+                                : io::bam_sar(io::bam_add(ldiff, 2), 2);
+            if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
+            if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
+            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
+            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
+            if (twist > kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
+            else if (twist < -kLegTwistLimit)
+                inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
+        }
+    }
+    infantry_look_tick(inf, e.heading, e.pitch);
+}
+
 // The org2 local view/leg phase precedes the scoped additions, before later
 // animation selection or ladder movement consumes aim.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B4945..0x4B4BC6;
@@ -944,8 +1123,8 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
     // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
     // the body heading is written as their midpoint — the legs lead, the body
     // follows, and the §14 torso twist is (yaw − leg midpoint). The parachute
-    // (Flags 0x20) sixteenth-step body chase @0x4b494d and the seat-bone
-    // follow @0x4b654e ride the parachute/mount slices.
+    // (Flags 0x20) sixteenth-step body chase @0x4b494d runs first, below; the
+    // seat-bone follow @0x4b654e is the mounted pose (ai_system.cpp).
     //
     // While latched on a ladder the view yaw is clamped to ±120° of the
     // body heading (infantry_ladder.cpp). [orig: gate @ 0x4b4978; clamp
@@ -1056,6 +1235,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
             (tick_entity == nullptr ||
              ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    // The org1 mounted-live local, taken at the motor head: a parent and a
+    // positive Health word. A board or a detach later in the pass leaves it as
+    // it was. [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985]
+    const bool mounted_live = npc_body && tick_entity != nullptr &&
+            tick_entity->mounted && tick_entity->health > 0;
+    // The secondary-fire latch is a frame local of the org1 motor, zeroed at its
+    // head: only this pass's combat or 0x8 event bit can set what its fire block
+    // consumes. [orig: Entity_UpdateInfantryAI `mov [esp+var_108C],ebp`
+    //  @0x4B99B8; set @0x4BC93F / @0x4BF39B, tested @0x4BF406]
+    if (npc_body) e.inf.fire_secondary_latch = false;
+    // While the SP epilog screen is up the NPC motor does nothing at all.
+    // [orig: Entity_UpdateInfantryAI `cmp g_epilog_screen_active,ebp` @0x4B998C,
+    //  `jnz loc_4BFC8B` @0x4B99CD]
+    if (npc_body && world.epilog_screen_active()) return;
     if (tick_entity != nullptr && npc_body) {
         npc_respawn_unhide(world, *this, *tick_entity);
         if (((tick_entity->flags | tick_entity->engine_flags) & 1u) != 0) return;
@@ -1083,7 +1276,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_weapon_channel_advance(e);
         if (reset_capsule_bottom_state(e.inf.anim_state)) e.inf.prev_capsule_bottom = 0;
         if (root_motion != nullptr)
-            have_clip = advance_primary_channel(e.inf, *root_motion, frame);
+            have_clip = advance_primary_channel(e.inf, *root_motion, anim_rings, frame);
         if (have_clip) {
             if (e.inf.prev_capsule_bottom != 0)
                 frame.dz = frame.capsule_bottom - e.inf.prev_capsule_bottom;
@@ -1112,7 +1305,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         tick_entity->flags &= ~kEntityFlagQueuedMount;
         tick_entity->engine_flags &= ~kEntityFlagQueuedMount;
     }
-    infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
+    // The player bodies decay recoil and spread at their head; org1 runs the
+    // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
+    //  @0x4BE7FD..0x4BE86F]
+    if (!npc_body) infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
     InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
@@ -1134,7 +1330,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         weight_inputs.weaponweight_fp16 = held->weaponweight_fp16;
         weight_inputs.clipweight_fp16 = held->clipweight_fp16;
     }
-    infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+    if (!npc_body) infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
     // Keep the on-foot view clamp/leg phase before scoped drift. The mounted
     // branch still consumes the same already-drifted look when posing its seat.
     // This phase has no PRNG draws, so recoil/yaw/pitch sampling stays ordered.
@@ -1162,13 +1358,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // local edge below and remote_player_body_anim's): the plyr class callback
     // fires as event 0 whenever entity+0x2AC is <= 0, and the counter decrements
     // every tick, corpse included (the callback then returns on Flags&2, so a
-    // dead body neither clears its kill-cause bits nor re-arms). The callback
-    // also runs a trigger-zone relation pass (@0x407b64..0x407c5f) that is not
-    // ported here. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
+    // dead body neither clears its kill-cause bits nor re-arms), then its
+    // waypoint tail. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
     //  the edge gate follows @0x4b4bf1]
     if (tick_entity != nullptr && !npc_body &&
         (tick_flags & kEntityFlagPlayer) != 0) {
-        if (tick_entity->spawn_phase <= 0) player_body_class_think(*tick_entity);
+        if (tick_entity->spawn_phase <= 0) {
+            player_body_class_think(*tick_entity);
+            player_body_waypoint_visits(world, *tick_entity);
+        }
         --tick_entity->spawn_phase;
     }
 
@@ -1210,111 +1408,47 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: savedLivePose captured @ 0x4b4190-0x4b419c; entry read @ 0x4b327d]
     const int32_t tick_start_z = e.pos[2];
 
-    const InfantryAttachmentPose attachment = !inf.is_local_player && e.health > 0
-            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
-
-    // 1. Death edge (once — the 0x82 death-family flag marks an already-posed corpse):
-    // consume the damage-time anim selection, seed the corpse timer, drop any mount.
-    // Then the per-tick corpse block: LeaveCorpse keeps the body forever, otherwise
-    // the timer drains and the corpse despawns — held while the local player can see
-    // it. [orig: Entity_UpdateInfantryAI @0x4b9c40-0x4b9d55 edge, @0x4b9e4d-0x4ba000
-    // persistence]
+    // 1. Death edge, once per life. Org1 keys it on the dead bit its own edge
+    // latches; the player bodies still ride the dead bit the host's damage-time
+    // death routing sets, so they key on the posed death clip (the 0x82 family
+    // flag), as does a rowless test body with no flags word.
+    // [orig: Entity_UpdateInfantryAI `cmp [esi+11Eh],bp; jg` @0x4B9C40,
+    //  `test byte ptr [esi+24h],2; jnz` @0x4B9C4D]
+    const bool org1_body = npc_body && tick_entity != nullptr;
     if (e.health <= 0) {
-        Entity *ent = world.registry.get(e.handle);
-        if (infantry_anim_flags(inf.anim_state) != 0x82u) {
-            // The kill latches the entity dead bit (Flags |= 2) — the compact
-            // state byte carries it unmasked, and the 0x0A priority list reads
-            // it as the recipient's dead-or-spectator gate. Both views of our
-            // split flags field take it; the spawn reset clears them.
-            // [orig: Entity_HandleDeathOnAuthority @0x407CC0 `or Flags, 2`
-            //  @0x407D34; the client death-event apply mirrors it @0x40727E]
-            if (ent != nullptr) {
-                ent->flags |= kEntityFlagDead;
-                ent->engine_flags |= kEntityFlagDead;
-                ent->attach_parent = {};
-            }
-            // A mounted body detaches so the corpse falls with the world, not the
-            // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
-            // the edge also clears Flags 0x40 @0x4b9d2a].
-            if (ent != nullptr && ent->mounted)
-                world.vehicles.detach(e.handle);
-            // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
-            // even for LeaveCorpse items and cancels scripted respawns.
-            const bool silent_cleanup = ent != nullptr && (ent->section_mask & 1u) != 0;
-            if (ent != nullptr) {
-                ent->corpse_timer = static_cast<int32_t>(
-                        uint32_t(ent->deathtime_ticks) - (silent_cleanup ? 61u : 0u));
-                if (silent_cleanup) ent->npc_respawns = 0;
-            }
-            // The death scream. NPC (org1): profile slot 7 (sounddeath), or 8
-            // (SSNightDead) on a night mission — the runtime reads the mission's
-            // EnableNVG attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
-            // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
-            // Player body (org2): the body-model composite set "<prefix>_DEATH"
-            // ("_DEATH_K" at night) from the entity's anim-slot byte — NOT the
-            // profile slots; a bank without the set is the id-0 silence with no
-            // slot fallback. [orig: @0x4b4c4a-0x4b4c6a ->
-            // SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
-            // Entity_PlaySound3D_FullVolume]
-            if (!silent_cleanup && (ent == nullptr || !ent->dismemberment_piece)) {
-                const bool night_death =
-                    (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
-                if (inf.is_local_player) {
-                    SoundSlotEvent scream;
-                    scream.source_handle = e.handle.packed;
-                    scream.pos[0] = e.pos[0];
-                    scream.pos[1] = e.pos[1];
-                    scream.pos[2] = e.pos[2];
-                    scream.slot = static_cast<uint8_t>(
-                            night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
-                    audio::compose_entity_sound_set(
-                            ent != nullptr ? ent->anim_slot : 0,
-                            night_death ? audio::kEntitySoundDeathNight
-                                        : audio::kEntitySoundDeath,
-                            scream.set_name, sizeof(scream.set_name));
-                    world.out.slot_sounds.push_back(scream);
-                } else {
-                    emit_slot_sound(world, e,
-                                    night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                                    e.pos);
-                }
-            }
-            // Consume the kill's selection; none staged -> the generic death
-            // (cause 4 -> 174 death_pungi) AND the attacker slot (+0x178) is
-            // cleared, so a death nothing stamped (script/WAC) reports as
-            // unattributed while one that follows a non-lethal hit keeps that
-            // hit's clip and shooter [orig: @0x4b9cc9 fallback, @0x4b9ceb
-            // lastAttacker = 0, + the deathCallback(entity, 1, 0) dispatch;
-            // the player-body edge's twin @0x4b4c72..0x4b4c8d; consumed +0x2C0
-            // clears @0x4b9d38. The Flags&0x8000 drowning override (175) rides
-            // the unmodeled swim flags.]
-            if (ent != nullptr && ent->death_anim_state == 0)
-                ent->last_attacker = EntityHandle{};
-            int death = (ent != nullptr && ent->death_anim_state != 0)
-                                ? ent->death_anim_state
-                                : compute_death_anim_state(0, 0, death_cause::kGeneric);
-            if (ent != nullptr) ent->death_anim_state = 0;
-            // Stripped embedder .adm sets may lack the selected clip; keep the pre-P1c
-            // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
-            if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
-                const int torso = anim_state::kDeathBulletBase + 4;
-                death = root_motion->has_clip(inf.adm_id, torso) ? torso
-                                                                 : anim_state::kDeathFire;
-            }
-            // The head already sampled this tick's playing channel; death
-            // changes the request for the next update.
-            // [orig: @0x4B9D38; death callback tail @0x4B9D55]
-            inf.request_body_animation(death);
-            inf.move_mode = 0;
-            inf.target_dist = 0;
-            inf.player_moving = false;
-        }
-        if (ent != nullptr && npc_body) {
-            if (infantry_drag_corpse(e, world)) inf.request_body_animation(139);
-            const NpcCorpseStep result = step_npc_corpse(world, *this, *ent);
-            if (result == NpcCorpseStep::Removed) return;
-        }
+        const bool edge_open = org1_body
+                ? ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) == 0
+                : infantry_anim_flags(inf.anim_state) != 0x82u;
+        if (edge_open) infantry_death_edge(*this, e, world, tick_entity, org1_body, logic_tick);
     }
+    // Org1's corpse leg, think and motion gates read that dead bit, not health:
+    // a script that writes health back onto a corpse leaves it dead.
+    // [orig: corpse leg `test al,2; jz` @0x4B9D55..0x4B9D5A; think gate
+    //  `test byte ptr [esi+24h],2; jnz` @0x4BA98B..0x4BA98F]
+    const auto org1_dead_now = [&] {
+        return org1_body &&
+               ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) != 0;
+    };
+    // The per-tick corpse block: LeaveCorpse keeps the body forever, otherwise the
+    // timer drains and the corpse despawns — held while the local player can see
+    // it. [orig: Entity_UpdateInfantryAI @0x4b9e4d-0x4ba000 persistence]
+    if (org1_dead_now()) {
+        if (infantry_drag_corpse(e, world)) inf.request_body_animation(139);
+        const NpcCorpseStep result = step_npc_corpse(world, *this, *tick_entity);
+        if (result == NpcCorpseStep::Removed) return;
+    }
+    // A respawn inside the corpse leg has restored the live flags for the rest
+    // of this pass. [orig: the respawn leg re-enters at @0x4BA066]
+    const bool body_live = org1_body ? !org1_dead_now() : e.health > 0;
+
+    // Org1's phase order ahead of its think: the slope pass (cadence inside),
+    // the attach sample, then the ground-carrier ride and the gradient.
+    // [orig: Entity_UpdateInfantryAI slope @0x4BA066, attach sample @0x4BA348,
+    //  carrier @0x4BA45D..0x4BA891, gradient @0x4BA896, think @0x4BA970]
+    if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
+    const InfantryAttachmentPose attachment = !inf.is_local_player && body_live
+            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
+    if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
     // Org1 samples before the think so path_state=1 is visible to this tick's
     // boarding and detour selection. Its replacement motion overrides the
     // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
@@ -1336,7 +1470,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             world.reverb.update(e.pos, building_reverb);
         }
         if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
-    } else if (e.health > 0 && is_authority && (key & 15u) == 0) {
+    }
+    // An airborne body without the climb order leaves the think at its head:
+    // the jump skips combat, the selection, the attachment select, the ride link,
+    // the idle facing and attention; the recoil, spread and torso tail still runs.
+    // [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66 -> loc_4BE7FD; the
+    //  attachment select @0x4BD273, the ride link and attention @0x4BD87E..]
+    bool thought = false;
+    if (!(e.health > 0 && inf.is_local_player) && body_live && is_authority &&
+            (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
 		// A cached board-any target can upgrade an already seated NPC once
 		// per 64 staggered ticks. Compare slot TYPE, not the userpoint index.
@@ -1350,7 +1492,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 					selected.type != tick_entity->mount_type)
 				world.vehicles.attach_to_seat(e.handle, selected);
 		}
-		infantry_think(e, world);
+		thought = infantry_think(e, world);
+	}
+	if (thought) {
         // Combat produces the movement goal and preferred animation before the
         // common detour/gait selector. The complete think is gated at 16 ticks.
         // [orig: Entity_UpdateInfantryAI @0x4BA970; combat @0x4BBE24]
@@ -1362,7 +1506,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         if (inf.burn_state != 0) {
             // The live burn branch reaches the common arbiter directly.
-            // [orig: Entity_UpdateInfantryAI @0x4B9910, LABEL_754]
+            // [orig: Entity_UpdateInfantryAI @0x4BC047..0x4BC04E -> @0x4BD7FD]
             const int target = combat_state > 0 ? combat_state : anim_state::kIdle;
             commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
         } else {
@@ -1376,24 +1520,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.move_mode = 0;
                 inf.target_dist = 0;
             }
-            // On a ladder the NPC's gait selection is suppressed — the org1
-            // on-ladder block after the resolve owns states 32-35 (the same-tick
-            // overwrite mapping as the player selection skip above; retail also
-            // zeroes a speed local our selector has no carrier for).
-            // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
-            if (tick_entity != nullptr &&
-                ((tick_entity->flags | tick_entity->engine_flags) &
-                 kEntityFlagLadderContact) != 0) {
-                inf.move_mode = 0;
-                inf.target_dist = 0;
-                inf.path_state = 0;
-            }
-		else if (!attachment.parent.valid()) {
-			infantry_select(e, world, combat_state);
-			if (inf.board_anim >= 0 && inf.move_mode == 0 &&
-					(tick_entity == nullptr || !tick_entity->mounted))
-				inf.request_body_animation(inf.board_anim);
-		}
+            // On a ladder the combat tail has dropped the move [orig: the test
+            // @0x4BD187..0x4BD18D, the drop @0x4BD18F..0x4BD194], and the
+            // selector still runs: its zero-distance leg clears the path state,
+            // +0x36A takes the move mode and the flinch consumes wasHit before
+            // the arbiter commits; the org1 ladder block later stores its climb
+            // state over the selection. [orig: @0x4BD2DE..0x4BD2E9, @0x4BD356,
+            //  @0x4BD6EE; the ladder block @0x4BF907..0x4BFAD8]
+            if (!attachment.parent.valid()) infantry_select(e, world, combat_state);
         }
 	}
 
@@ -1402,10 +1536,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
     if (!inf.is_local_player) infantry_ladder_override(e, tick_entity);
 
-    if (!inf.is_local_player && is_authority && e.health > 0 && (key & 15u) == 0) {
+    if (thought) {
         infantry_attachment_select(e, world, attachment);
         if (npc_body && (tick_flags & kEntityFlagDead) == 0)
             infantry_attention_think(*this, e, world, key);
+    }
+
+    // The org1 post-think block, every tick: the recoil kick (its PRNG draw
+    // follows any think), the spread decay and the torso roll.
+    // [orig: Entity_UpdateInfantryAI recoil @0x4BE7FD..0x4BE84B, spread
+    //  @0x4BE84E..0x4BE869, torso roll @0x4BE897..0x4BE8EA]
+    if (npc_body) {
+        infantry_recoil_tick(inf, e.heading, e.pitch, world.next_prng16());
+        infantry_weapon_weight_spread_tick(inf, InfantryWeightSpreadInputs{});
+        infantry_org1_torso_roll_tick(e);
     }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
@@ -1413,10 +1557,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // below suppresses only ordinary ground locomotion.
     // [orig: Entity_UpdateInfantryAI @0x4b9910; pose @0x4bec23..0x4bed3f;
     //  dedicated return @0x4bf5c6]
-    const bool mounted = e.health > 0 && pose_if_mounted(e, world);
-    const Entity *mounted_occ = mounted ? world.registry.get(e.handle) : nullptr;
-    const bool mounted_gunner =
-            mounted_occ != nullptr && mounted_occ->mount_type == SeatType::Gunner;
+    // Org1 keys its seat block on the local its head took, so a body that
+    // boarded in this pass's think walks on foot to its end: no seat pose, no
+    // dedicated request, no mounted return.
+    const bool mounted = npc_body ? mounted_live && pose_if_mounted(e, world)
+                                  : e.health > 0 && pose_if_mounted(e, world);
+    // A body not mounted-live at its head chases heading, legs and look here,
+    // ahead of its eye offset and its sound/fire passes. One that was, but
+    // holds no parent now (it left in this pass, or its seat block dropped
+    // it), takes no chase: only the look's +-90 degree clamp about the body.
+    // [orig: Entity_UpdateInfantryAI mounted-live local @0x4B9960..0x4B9985,
+    //  its test @0x4BE8F0; the seat block's parent test @0x4BEBEC..0x4BEBF4;
+    //  the clamp @0x4BEF9A..0x4BEFED]
+    if (npc_body && !mounted_live) {
+        infantry_org1_heading_chase(e, tick_entity, key);
+    } else if (npc_body && !mounted) {
+        const int32_t twist = io::bam_sub(e.heading, inf.body_heading);
+        if (twist > 0x40000000) e.heading = io::bam_add(inf.body_heading, 0x40000000);
+        else if (twist < -0x40000000) e.heading = io::bam_sub(inf.body_heading, 0x40000000);
+    }
 
     // The lean angle decays every body tick (corpse included — the decay sits before
     // the weapon-channel block in the original) and ramps while a lean key is held;
@@ -1433,13 +1592,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // already advanced at the motor head. [orig: @0x4B41DF before @0x4B5CAB]
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
 
-    infantry_follow_carrier(e, world, frame.capsule_bottom, !npc_body);
+    if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
     // Restamp the camera offset from the current simulated head, after the
     // motor-head channel update and current view/seat/lean pose. The local
     // on-foot path terrain-floors the absolute eye; the mounted path does not.
     // The capsule fallback retains the org1/org2 extent and lean formulas.
-    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66D0;
+    // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
     //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8;
     //  org1 @0x4BF078..0x4BF14C]
     if (have_clip) {
@@ -1549,13 +1708,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     infantry_anim_sound_pass(e, world, logic_tick, frame.capsule_bottom);
     // The fire pass: consume the fresh trigger bits + the walking-fire latch into
     // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
-    // after the anim advance refreshed g_animEventTriggerBits; §17.4]
-    if (!inf.is_local_player && is_authority && e.health > 0 && !mounted_gunner)
+    // after the anim advance refreshed g_animEventTriggerBits; §17.4] Nothing
+    // between the odd-tick gate and the dedicated request tests the seat: a
+    // mounted body fires its own anim events too, and every mounted body,
+    // whatever its seat, then makes the request.
+    // [orig: Entity_UpdateInfantryAI odd-tick gate @0x4BF156, the request's
+    //  mounted-live test @0x4BF4B3]
+    if (!inf.is_local_player && is_authority && e.health > 0) {
         infantry_fire_pass(e, world, logic_tick);
-    if (!inf.is_local_player && is_authority && e.health > 0 && mounted_gunner)
-        infantry_mounted_fire_pass(e, world, logic_tick, key);
+        if (mounted) infantry_mounted_fire_pass(e, world, logic_tick, key);
+    }
 
-    // Retail exits the ordinary mover immediately after the dedicated UseGun
+    // Retail exits the ordinary mover immediately after the dedicated mounted
     // request. Seat pose already supplied the transform; animation, wire state,
     // and part channels remain live.
     // [orig: mounted fire tail @0x4bf4bb..0x4bf5c6]
@@ -1587,105 +1751,43 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         return;
     }
 
-    // 4. Ground resample (every 8 ticks). [orig: dump 319-326, cache entity+676]
-    // The radius-0 leg of the retail sampler is ONE model-aware center probe:
-    // ray from pos + 1.0u lift, 48u drop, clipped by terrain AND candidate
-    // models — a soldier on a building floor grounds on the FLOOR, not the
-    // terrain under it (the frozen-bunker-garrison fix). Without a collision
-    // world (headless tests) the terrain average stands as before.
-    // [orig: Entity_CalcAverageGroundHeight @0x457230 radius==0 ->
-    //  Entity_RaycastGroundHeightAndObject(entity, 0, 0, 0x10000, 0x300000)
-    //  -> raycast_entity_collision @0x413760 (terrain + candidate models)]
+    // 4. The port's ground sample (every 8 ticks). Neither organic motor samples
+    // the ground this way: the movement resolver owns the clearance, and
+    // Entity_CalcAverageGroundHeight is the vehicle/aircraft brains' helper
+    // (entity+0x2A4 is a HUD field). This stand-in gates the vertical block on
+    // having ground at all and is the clearance source when no collision world
+    // is wired (headless embedders); with one, it is a single model-aware
+    // column: a ray from pos + 1.0u, 48u down, clipped by terrain AND candidate
+    // models, so a soldier on a building floor grounds on the FLOOR.
+    // [orig: the ray shape of Entity_RaycastGroundHeightAndObject @0x414320 ->
+    //  raycast_entity_collision @0x413760; the motors' clearance comes from
+    //  Entity_MovementCollisionResolver @0x4B2BD0]
     if (terrain != nullptr && ((key & 7u) == 0 || !inf.ground_cache_valid)) {
         if (collision != nullptr && collision->instance_count() != 0) {
             inf.ground_cache = collision->raycast_ground(
                 world, e.handle, e.pos, 0, 0, 0x10000, 0x300000, nullptr);
         } else {
             GroundClearance clearance = ground_clearance;
-            clearance.has_physics = e.has_physics;
+            clearance.has_occupant = e.has_occupant;
             clearance.use_dead = (e.health <= 0);
             inf.ground_cache = calc_average_ground_height(*terrain, e.pos, 0, clearance);
         }
         inf.ground_cache_valid = true;
     }
 
-    // 5. Heading + leg-chain chase, per motor (D-INF-12 CLOSED 2026-07-16: the org2
-    // write sites to +0x8C/+0x2E4/+0x2E8 are displacement-scanned and byte-read; the
-    // org1 block re-read at the same precision). The legs are consumed as the R/L
-    // leg-chain bone yaw by Entity_BuildBoneTransformMatrices @0x4b1290 (§14).
+    // 5. The org2 heading/leg chase (org1 chased above, before its fire pass).
     if (inf.is_local_player) {
         // A stale mount can fall back to the ordinary mover during this tick.
         // Valid mounted bodies returned above; ordinary local bodies already
         // ran the view phase ahead of their scoped drift.
         // Raw tick, not the org1 stagger key [orig: @0x4B4147 / @0x4B467A].
         if (!local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
-    } else {
-        // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
-        // toward the target, clamped ±69273360; live look moves by the SAME step,
-        // preserving its offset from the body. [orig: @0x4be8fd-0x4be931]
-        const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
-        int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
-        if (step > kBodyTurnClamp) step = kBodyTurnClamp;
-        if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
-        inf.body_heading = io::bam_add(inf.body_heading, step);
-        e.heading = npc_body ? io::bam_add(e.heading, step) : inf.body_heading;
-
-        // 5b. Legs. The carried (Flags 0x40) body-snap rides the mount slice. A
-        // movement state or a def+84&0x200 body takes the WALK path: the right foot
-        // half-snaps to the target, the left pulls a quarter of the residual, both
-        // targets = target — the alternating shuffle while walking/turning.
-        // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
-        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
-            (e.def_attrib & kItemAttribLandable) != 0) {
-            const int32_t tgt = inf.target_heading;
-            inf.leg_yaw[0] = io::bam_add(
-                inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
-            inf.leg_yaw[1] = io::bam_add(
-                inf.leg_yaw[1], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 2));
-            inf.leg_target[0] = tgt;
-            inf.leg_target[1] = tgt;
-        } else {
-            // Idle: re-plant targets toward the MIDPOINT of (body, target), measured
-            // vs the current TARGET, left window 32 ticks behind the right.
-            // [orig: midpoint @0x4be969-0x4be975; L @0x4be977/@0x4be991-0x4be9a7;
-            //  R @0x4be97f/@0x4be9bb-0x4be9cc]
-            const int32_t mid = io::bam_add(
-                inf.target_heading,
-                io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
-            const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
-            if (abs_bam(dl) > kLegReplantMin &&
-                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
-                inf.leg_target[1] = mid;
-            const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
-            if (abs_bam(dr) > kLegReplantMin &&
-                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
-                inf.leg_target[0] = mid;
-        }
-        for (int leg = 0; leg < 2; ++leg) {
-            // Quarter-step (sixteenth for def+84&0x200 bodies), clamp ±0x5000000
-            // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
-            // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
-            const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
-                                ? io::bam_sar(io::bam_add(ldiff, 8), 4)
-                                : io::bam_sar(io::bam_add(ldiff, 2), 2);
-            if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
-            if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
-            inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
-            const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
-            if (twist > kLegTwistLimit)
-                inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
-            else if (twist < -kLegTwistLimit)
-                inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
-        }
     }
 
-    if (npc_body) infantry_look_tick(inf, e.heading, e.pitch);
-
-    // 6. The slope pass: conform-or-decay body_pitch/roll + the steep-ground slide.
-    // Cadence lives inside (org1 every 8th tick on `key`; org2 decay every tick,
-    // probes every 2nd on the logic tick). [orig: @0x4ba10f block / @0x4b6d95 block]
-    infantry_slope_pass(e, world, logic_tick, key);
+    // 6. The org2 slope pass: conform-or-decay body_pitch/roll + the steep-ground
+    // slide (org1 ran its pass after the corpse leg). Cadence lives inside (org2
+    // decay every tick, probes every 2nd on the logic tick). [orig: @0x4b6d95 block]
+    if (!npc_body) infantry_slope_pass(e, world, logic_tick, key);
 
     // Horizontal slide decay. NPC (org1): (7v+4)>>3 with an abs<=8 deadzone, every state. Player
     // (org2): the selector is Flags & 0x2000 = IN-AIR (entity.h already names it
@@ -1716,9 +1818,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // float -64.0 (fcos/fsin, fmul flt_7C9BD8, _ftol2_sse — no narrowing
         // before the multiply) [orig: @0x4b78e5..0x4b790f; flt_7C9BD8 =
         // C2800000]. The DOUBLED arm (Flags&0x20 chute deployed,
-        // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) is
-        // unreachable until the parachute state lands (D-INF-20) and stays
-        // unported -- declared, not bridged.
+        // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) adds
+        // the same term again.
         if (inf.player_moving) {
             const double angle =
                     static_cast<double>(static_cast<int16_t>(e.heading >> 16)) *
@@ -1827,6 +1928,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.dbg_root_dy = wy + inf.vel[1];
     }
 
+    // THE ORG1 ODD KEY TICK. Retail's NPC body runs gravity, the resolver, the
+    // airborne/landing edges, the ladder block and the water block on even key
+    // ticks only; an odd tick jumps straight to the tail and re-applies the
+    // quarter step the last even tick stored, so the body keeps moving between
+    // resolves. [orig: Entity_UpdateInfantryAI outYaw = key & 1 @0x4BF146 /
+    // @0x4BF14F, the skip `cmp [outYaw],0; jnz loc_4BFC80` @0x4BF6A5..0x4BF6B2,
+    // the re-apply @0x4BFC80..0x4BFC86]
+    if (!inf.is_local_player && (key & 1u) != 0) {
+        e.pos[2] = io::bam_add(e.pos[2], inf.z_quarter_step);
+        finish_infantry_tick(e, world);
+        return;
+    }
+    // The even tick's base: Z after the root integrate, before gravity; a
+    // landing snap re-saves it below. [orig: @0x4BF6BA]
+    int32_t org1_saved_z = e.pos[2];
+
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
     // (out[3]) and receives foot clearance from the collision resolver.
     // It lifts only on return <= 0; return > 0xF000 marks airborne; small positive
@@ -1848,25 +1965,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 : 0u;
         const bool gravity_skip =
             (gravity_flags & (kEntityFlagLadderContact | kEntityFlagDrowning)) != 0;
-        // THE ORG1 EVEN-TICK GATE. Retail's NPC infantry runs its whole
-        // gravity + resolver + airborne/landing block on EVEN ticks only: the
-        // think stamps `outYaw.X = tickCounter & 1` (a SpecialVec3 field reused
-        // as a scratch int - a decompiler alias, not a vector) and the block is
-        // entered under `if (!outYaw.X)`.
-        // [orig: Entity_UpdateInfantryAI @0x4b9910 - stamp kong 155519-155523
-        //  `v489 = tickCounter; outYaw.X = v489 & 1;`, gate kong 155809
-        //  `if ( !outYaw.X )`, resolver call kong 155831]
-        // This is WHY the org1 integrate is `pos += 2 * vel` (kong 155830
-        // `entity->Position.Z += 2 * entity->slideDecay;`): the doubling
-        // compensates for running half as often. We carried the doubling but
-        // ran the block EVERY tick, so our NPCs took gravity at twice retail's
-        // rate and resolved twice as often - which changes the equilibrium
-        // standoff against an obstacle and the recovery rate from a contact
-        // (AI-PARITY-CONCEPT 6.15w).
+        // An org1 body reaches this block on EVEN key ticks only (the odd tick
+        // returned above), so its `pos += 2 * vel` runs every second tick. The
+        // quarter-step tail at the end of the block then keeps a quarter of the
+        // even tick's Z change and re-applies it on the odd tick, so a falling
+        // NPC moves about vel_z per two ticks, not 2 * vel_z.
+        // [orig: Entity_UpdateInfantryAI skip @0x4BF6B2; integrate @0x4BF7EC;
+        //  tail @0x4BFC65..0x4BFC86]
         // The org2 (local player) leg keeps its own cadence: it integrates
-        // `pos += vel` once per tick and is NOT gated here.
-        const bool org1_tick_gate_open =
-            inf.is_local_player || (logic_tick & 1u) == 0;
+        // `pos += vel` once per tick and has no quarter-step tail.
         if (inf.is_local_player) {
             if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
             if (tick_entity != nullptr) {
@@ -1892,18 +1999,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         } else if ((gravity_flags & kEntityFlagAiClimb) != 0) {
             // The org1 ladder-climb chase replaces gravity: sixteenth-step Z
             // toward the AI move target, capped 0x4000 up, floor -16384 (half
-            // the fall terminal). The order writer rides the AI-order slice.
+            // the fall terminal), on the even key tick like the gravity it
+            // replaces. The order writer rides the AI-order slice.
             // [orig: @ 0x4bf6d2-0x4bf6e5; floor pick @ 0x4bf6e5 + clamp @ 0x4bf7d4]
-            int32_t step = (inf.move_target[2] - e.pos[2] + 8) >> 4;
+            int32_t step = (inf.goal_z - e.pos[2] + 8) >> 4;
             if (step > 0x4000) step = 0x4000;
             inf.vel[2] = step;
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;
             e.pos[2] += 2 * inf.vel[2];
-        } else if (org1_tick_gate_open) {
-            // [orig: Entity_UpdateInfantryAI @0x4BF8D4;
-            // kong 155814-155830 — the org1 gravity step and the
-            //  `Position.Z += 2 * slideDecay` integrate, both inside the
-            //  even-tick gate at kong 155809]
+        } else {
+            // [orig: Entity_UpdateInfantryAI gate @0x4BF7B8, step @0x4BF7BF,
+            //  floor @0x4BF7C9..0x4BF7D6, `pos.z += 2 * slideDecay` @0x4BF7E4..0x4BF7EE]
             if (!gravity_skip) inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];
@@ -1918,16 +2024,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
         const int32_t pre_resolve_y = e.pos[1];
         int32_t foot_clearance;
-        if (!org1_tick_gate_open) {
-            // ODD TICK for an NPC body: retail's whole gravity + resolver +
-            // airborne/landing block sits inside the even-tick gate, so no
-            // resolve happens and no edge is evaluated this tick. Report the
-            // clearance the cached ground implies so nothing downstream reads
-            // an uninitialised value; the edges below are skipped with it.
-            // [orig: the `if ( !outYaw.X )` gate at kong 155809 wraps the
-            //  integrate, the resolver call at 155831 and the edges after it]
-            foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
-        } else if (collision != nullptr && collision->instance_count() != 0) {
+        if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
             // the entry gate, the per-tick alignment chase, and the exit push /
             // pitch restore (infantry_ladder.cpp). [orig: the resolver reads
@@ -1970,13 +2067,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             tick_entity != nullptr &&
             ((tick_entity->flags | tick_entity->engine_flags) &
              kEntityFlagLadderContact) != 0;
-        // The airborne / landing edges are the tail of retail's even-tick
-        // block, so an odd NPC tick evaluates neither.
-        // [orig: inside `if ( !outYaw.X )` at kong 155809 — the >61440 airborne
-        //  arm at 155832-155834 and the landing arm after it]
-        if (!org1_tick_gate_open) {
-            // no edge this tick
-        } else if (foot_clearance > kInfantryAirborneGap) {
+        // The airborne / landing edges belong to retail's even-tick block, so
+        // an odd NPC tick (returned above) evaluates neither.
+        // [orig: Entity_UpdateInfantryAI landing @0x4BF7FA, airborne @0x4BF8AE]
+        if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later
@@ -2013,11 +2107,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                             ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute) != 0
                             ? anim_state::kParachute : anim_state::kJumpLoop;
                     if (inf.anim_state != falling_state) inf.request_body_animation(falling_state);
-                } else if (e.health > 0) {
-                    if (tick_entity && ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute)) {
-                        const int falling_state = !root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute)
-                                ? anim_state::kParachute : anim_state::kJumpLoop;
-                        inf.request_body_animation(falling_state);
+                } else if (org1_body ? !org1_dead_now() : e.health > 0) { // [orig: `test al,2` @0x4BF8CD]
+                    // A carried body takes no stamp; a parachutist takes 47, or 31
+                    // when only that clip is authored, or keeps its clip.
+                    // [orig: `test al,40h` @0x4BF8D4, `test al,20h` @0x4BF8D8,
+                    //  47 @0x4BF8DC..0x4BF8E6, 31 @0x4BF8F2..0x4BF8F7]
+                    const uint32_t edge_flags = tick_entity != nullptr
+                            ? (tick_entity->flags | tick_entity->engine_flags) : 0u;
+                    if ((edge_flags & kEntityFlagMounted) == 0 &&
+                            (edge_flags & kEntityFlagParachute) != 0) {
+                        if (!root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute))
+                            inf.request_body_animation(anim_state::kParachute);
+                        else if (root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop))
+                            inf.request_body_animation(anim_state::kJumpLoop);
                     }
                     inf.anim_pending = 0; // [orig: @0x4bf901]
                 }
@@ -2076,10 +2178,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
             e.pos[2] -= foot_clearance;
+            // org1 re-bases its quarter-step tail on the snapped Z, so a landing
+            // lands in full on this tick. [orig: `mov [esp+117Ch+entity], edx`
+            // @0x4BF808]
+            if (!inf.is_local_player) org1_saved_z = e.pos[2];
             const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
             const bool fall_charges = inf.is_local_player
                     ? inf.vel[2] <= fall_threshold
-                    : inf.airborne && e.health > 0 && inf.vel[2] <= fall_threshold;
+                    : inf.airborne && (org1_body ? !org1_dead_now() : e.health > 0) &&
+                      inf.vel[2] <= fall_threshold;
             // org2's local-player damage feedback: red vignette + camera shake,
             // between the threshold test and the authority/Indestructible tests
             // [orig: @0x4b7d23..0x4b7d2d -> Player_OnDamageReceived @0x4dd880].
@@ -2094,6 +2201,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 int32_t dmg = excess >> 4;
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);
+                // The charge credits the body itself and stages the generic
+                // death selection, so a fatal fall reaches the death edge with
+                // a staged +0x2C0 and lastAttacker = self. [orig: org1
+                // `mov [esi+178h],esi` @0x4BF86B, +0x2C0 @0x4BF879; org2
+                // @0x4B7D7D / @0x4B7D8B]
+                if (tick_entity != nullptr) {
+                    tick_entity->last_attacker = e.handle;
+                    tick_entity->death_anim_state =
+                            compute_death_anim_state(0, 0, death_cause::kGeneric);
+                }
             }
             if (inf.is_local_player) {
                 // org2's arm ends at vel_z = 0 [orig: @0x4b7d91] with NO 0x2000
@@ -2112,8 +2229,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // 0FFFFDFFFh` @0x4bf89f -> `mov [esi+0A0h],ebx` @0x4bf8a6]
                 if (inf.airborne)
                     emit_slot_sound(world, e,
-                                    e.health > 0 ? audio::kSlotFallAlive
-                                                 : audio::kSlotFallDead,
+                                    (org1_body ? !org1_dead_now() : e.health > 0)
+                                            ? audio::kSlotFallAlive
+                                            : audio::kSlotFallDead,
                                     e.pos);
                 inf.airborne = false;
                 if (tick_entity != nullptr) {
@@ -2132,7 +2250,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // counts down, held-at-1 until the key releases (no auto-repeat while held),
         // jump only from 0 [orig: maintenance @0x4b7de0-0x4b7e15, release edge
         // @0x4b7e78-0x4b7e82]. Gates [orig: @0x4b7e8c-0x4b7ebd]: cooldown 0, not
-        // prone (the var_10AC selection local), !(Flags & 0x1A002) — in-air, dead,
+        // prone (the selection's prone local @0x4B417D/@0x4B4183), !(Flags & 0x1A002) — in-air, dead,
         // and the water pair (unmodeled) — the key held (MoveOrder bit 5), not
         // carried (0x40). The flag carriers are modeled even though the swimming
         // transition producer remains D-INF-3. The impulse: 3/4 of the rotated root step into
@@ -2191,7 +2309,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
             inf.jump_requested = false;
             // The not-jumping tail [orig: @0x4b7f71..0x4b8019]: a gate failed and
-            // the resolver clearance is <= 0 (`cmp var_10FC,0; jg 0x4b8020`
+            // the resolver clearance is <= 0 (the clearance local's `jg 0x4b8020`
             // @0x4b7f71..0x4b7f76).
             if (!jump_gates_open && foot_clearance <= 0) {
                 // The landing on the word's OWN bit: retail re-tests the Flags
@@ -2242,8 +2360,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // org1 water (NPC, immediately after the ladder block, same as retail):
         // float on the plane instead of walking along the riverbed, and fan the
         // splash once on entry.
-        if (!inf.is_local_player)
+        if (!inf.is_local_player) {
             infantry_water_block(e, world, tick_entity, frame.capsule_bottom, logic_tick);
+            // The org1 quarter-step tail: of everything gravity, the resolver,
+            // the ladder and the water blocks did to Z since the save, keep a
+            // quarter now and store it for the odd tick's re-apply.
+            // [orig: Entity_UpdateInfantryAI @0x4BFC65..0x4BFC7D `sub ecx,eax;
+            //  add ecx,2; sar ecx,2; mov [esi+0ACh],ecx; mov [esi+0Ch],eax`,
+            //  then the shared add @0x4BFC80..0x4BFC86]
+            inf.z_quarter_step = io::bam_sar(
+                    io::bam_add(io::bam_sub(e.pos[2], org1_saved_z), 2), 2);
+            e.pos[2] = io::bam_add(org1_saved_z, inf.z_quarter_step);
+        }
         // org2 water (the LOCAL player body, immediately after its jump block --
         // the same mover-tail placement retail gives it @0x4b8020).
         else
@@ -2279,24 +2407,28 @@ void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {
         // has one Entity store; mirror that result into the registry store consumed by
         // scripts, the HUD, and wire snapshots.
         ent->health = e.health;
-        ent->alive = e.health > 0;
+        // An org1 corpse stays dead on its dead bit even when a script writes
+        // health back onto it. [orig: Entity_UpdateInfantryAI corpse leg
+        // `test al,2` @0x4B9D58]
+        const bool org1_corpse = !inf.is_local_player && !e.net_is_remote_peer &&
+                ((ent->flags | ent->engine_flags) & (kEntityFlagPlayer | kEntityFlagDead)) ==
+                        kEntityFlagDead;
+        ent->alive = e.health > 0 && !org1_corpse;
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
         ent->yaw = static_cast<int16_t>(
             std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(e.heading))));
-        // Body-anim slot for the present pass. The infantry motor (player AND AI) bypasses the
-        // brain-state update_body_anim_slot (the ai.cpp dispatch `continue`s before reaching it),
-        // so derive the present-pass BodyAnim slot from the motor's selected clip state here — else
-        // every org1 soldier renders a static T-pose (body_anim_slot stays -1 and _apply_body_anim
-        // no-ops). Leave the slot on death (the present hides / holds the death pose).
+        // Body-anim slot for the present pass. No brain state machine selects a body
+        // animation, so the motor (player AND AI) derives the present-pass BodyAnim slot from
+        // its selected clip state here — else every org1 soldier renders a static T-pose
+        // (body_anim_slot stays -1 and _apply_body_anim no-ops). Leave the slot on death (the
+        // present hides / holds the death pose).
         // [orig: Entity_UpdateInfantryAI @0x4b9910 selects the body anim each tick]
         if (ent->alive && ent->health > 0)
             ent->body_anim_slot = body_anim_slot_from_state(inf.body_clip_state());
     }
 
     mirror_wire_anim(e, world); // wire-anim bytes for the 0x0A player record (D-NET-159)
-
-    advance_part_anim(e); // PANM channels integrate regardless of the motor path
 }
 
 } // namespace opennova::world

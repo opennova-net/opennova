@@ -24,13 +24,20 @@ bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool p
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: ai_find_cover_position @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);
+// The think's entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities
+// @0x53B130]: the shared collision world, or its terrain leg alone when the
+// embedder wired no model world. Defined in infantry_combat.cpp.
+bool infantry_entity_los(AiSystem &ai, World &world, EntityHandle a, EntityHandle b,
+                         const int32_t start[3], const int32_t end[3], int32_t height_offset,
+                         bool all_types);
 void infantry_escort_goal(AiEntity &, World &, const Entity &target,
                          int32_t goal[3], int32_t &radius, int32_t &distance);
 bool infantry_is_dragger(const AiEntity &, const World &);
 bool infantry_drag_corpse(AiEntity &, World &);
-// Called after the authority's 16-tick selection; scan every 256 ticks, or every 32
-// while the entity is the scripted voice speaker.
-// [orig: Entity_UpdateInfantryAI @0x4BE0D0..0x4BE7FD]
+// The think's post-commit tail, called after the authority's 16-tick selection:
+// the ride link, the idle facing fan, the stop fix-up, facials and attention
+// (scan every 256 ticks, or every 32 while the entity is the scripted voice
+// speaker). [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
 
 // Per-tick attachment sample, resolved before think and consumed before root motion.
@@ -45,11 +52,20 @@ void infantry_attachment_select(AiEntity &, World &, const InfantryAttachmentPos
 bool infantry_attachment_move(AiEntity &, World &, const InfantryAttachmentPose &);
 
 bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent);
+// The once-per-life death edge (infantry_death.cpp). `org1` selects the NPC
+// legs: the drowning clip, the unstaged-hit alert, the death tick, the 0xC0 clear
+// and, on the authority, the edge's own death transaction.
+// [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
+void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
+                         uint32_t logic_tick);
 bool reset_capsule_bottom_state(int state);
+// The primary channel's motor-head update; a re-init serves its ring entry from
+// `rings` (AnimVariantRings).
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
-                             RootMotionFrame &out);
+                             AnimVariantRings &rings, RootMotionFrame &out);
 void advance_primary_channel_fallback(InfantryState &inf);
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
-                                       const IRootMotionSource *root_motion);
+                                       const IRootMotionSource *root_motion,
+                                       AnimVariantRings *rings);
 
 } // namespace opennova::world

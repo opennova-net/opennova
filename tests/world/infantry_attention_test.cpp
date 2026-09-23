@@ -1,7 +1,8 @@
 // Full NPC motor regressions for idle attention and its BMS visibility writes.
-// [orig: Entity_UpdateInfantryAI @0x4BE0D0..0x4BEFF0]
+// [orig: Entity_UpdateInfantryAI @0x4BE0CA..0x4BEFF0]
 #include <base/io/bam.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
@@ -77,7 +78,7 @@ struct Fixture {
         ctx.logic_tick = key - 36u * 8u;
         ctx.is_authority = authority;
         world.logic_tick = ctx.logic_tick;
-        world.ai.tick(world, ctx);
+        world.update_all_entities(ctx);
     }
     bool sees(int ssn = 9) const {
         return world.script.relations.single_single(TriggerRelations::kSees, 8, ssn);
@@ -174,6 +175,21 @@ static void test_candidate_filters_and_unsigned_diagonal_score() {
     }
 }
 
+// A candidate without a brain of its own looks back from its placement heading,
+// the spawn form of 90 - yaw (low half zero). At yaw -112 the 25-degree cone
+// edge falls between that and the continuous conversion, and the +4 is all that
+// admits this teamless candidate: (14 u - 1.5 u) >> 16 = 12, minus 12, plus 0.
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66; Entity_UpdateInfantryAI
+//  @0x4BE2C3 (the scan's candidate heading read), cone @0x4BE2D0]
+static void test_candidate_look_back_uses_the_placement_heading() {
+    Fixture f;
+    f.body().slot.f[17] = fixed(14);
+    const auto target = f.person({1.5f, -5156.0f / 65536.0f, 2}, 10, 3, 0);
+    f.world.registry.get(target)->yaw = -112;
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == target);
+}
+
 static void test_spotting_side_effects_precede_front_arc() {
     Fixture corpse;
     const auto dead = corpse.person({-3, 1, 2}, 9, 3, 2);
@@ -250,6 +266,55 @@ static void test_terrain_occludes_spotting() {
     CHECK(!f.world.ai.line_of_sight_clear(f.world, start, end, f.observer, target));
     f.tick(512);
     CHECK(!f.sees() && f.body().inf.damage_timer == 0);
+}
+
+// The spotting LOS is the entity LOS with every type at height 0: an item
+// between the eyes hides the candidate even with no terrain wired, where the
+// combat LOS reads clear. [orig: Entity_UpdateInfantryAI @0x4BE2F1..0x4BE311]
+static void test_items_occlude_spotting() {
+    Fixture f;
+    const auto target = f.person({3, 1, 2});
+    CollisionModel box;
+    const auto plane = [&](int nx, int ny, int nz, float d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fixed(d);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -0.2f);
+    plane(-16384, 0, 0, -0.2f);
+    plane(0, 16384, 0, -0.2f);
+    plane(0, -16384, 0, -0.2f);
+    plane(0, 0, 16384, -4.0f);
+    plane(0, 0, -16384, 0.0f);
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = volume.min_y = fixed(-0.2f);
+    volume.max_x = volume.max_y = fixed(0.2f);
+    volume.max_z = fixed(4.0f);
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+    CollisionSection section;
+    section.volume_count = 1;
+    box.sections.push_back(section);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.alive = true;
+    crate.yaw = 90;
+    crate.position = {1.5f, 0.5f, 0.0f};
+    const EntityHandle crate_h = f.world.registry.spawn(1, crate);
+    auto collision = std::make_unique<CollisionWorld>();
+    collision->assign_entity(crate_h, collision->add_model(std::move(box)));
+    for (int i = 0; i < 17; ++i) collision->build_tick_tables(f.world);
+    f.world.ai.collision = collision.get();
+    const int32_t start[3] = {0, 0, fixed(2)}, end[3] = {fixed(3), fixed(1), fixed(2)};
+    CHECK(f.world.ai.line_of_sight_clear(f.world, start, end, f.observer, target));
+    f.tick(512);
+    CHECK(!f.body().inf.head_look_target.valid());
+    CHECK(!f.sees());
+    f.world.ai.collision = nullptr;
 }
 
 static void test_look_does_not_steer_root_motion() {
@@ -350,9 +415,11 @@ int main() {
     test_idle_scan_relations_and_history();
     test_speaker_identity_and_authority();
     test_candidate_filters_and_unsigned_diagonal_score();
+    test_candidate_look_back_uses_the_placement_heading();
     test_spotting_side_effects_precede_front_arc();
     test_eye_tracking_clip_availability_and_cleanup();
     test_terrain_occludes_spotting();
+    test_items_occlude_spotting();
     test_look_does_not_steer_root_motion();
     test_look_chase_instruction_boundaries();
     test_mounted_attention_respects_vehicle_motion();

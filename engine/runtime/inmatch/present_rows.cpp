@@ -496,11 +496,13 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			if (ae && ae->inf.active) {
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+				r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
 				if (ae->inf.body_blend_active()) {
 					r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
 					r[PF_ANIM_SOURCE_PHASE_TICKS] =
 							static_cast<float>(ae->inf.anim_prev_clip_phase);
 					r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
+					r[PF_ANIM_SOURCE_VARIANT] = static_cast<float>(ae->inf.anim_prev_variant);
 				}
 				// The upper-body weapon channel this body derived for itself —
 				// for the host's OWN player and for every wire peer alike, since
@@ -794,11 +796,13 @@ static void write_world_present_row(const PresentRowsContext &context,
 	if (!ae->inf.active) return;
 	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+	r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
 	if (ae->inf.body_blend_active()) {
 		r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
 		r[PF_ANIM_SOURCE_PHASE_TICKS] =
 				static_cast<float>(ae->inf.anim_prev_clip_phase);
 		r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
+		r[PF_ANIM_SOURCE_VARIANT] = static_cast<float>(ae->inf.anim_prev_variant);
 	}
 	// The upper-body weapon channel this body derived for itself; the gate
 	// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a

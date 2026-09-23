@@ -372,6 +372,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  (byte = 1, or 3 while g_preround_delay_timer); slot[89] = 0 @0x51a752]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
 	conn.link.armory_reuse_seconds = 0;
+	// SetGameState(10) then sets 0x04 (the frontier hint) and clears 0x08 (the
+	// refused-touch hold); the join also zeroes the +100360 stamp.
+	// [orig: Server_OnPlayerJoin @0x51A6CD, the call @0x51A6FD
+	//  (CNetPlayer_SetGameState @0x4C4213..0x4C421F), @0x51A730..0x51A73A]
+	conn.reply.frontier_hint_pending = true;
+	conn.reply.capture_nag_held = false;
+	conn.reply.chat_last_ms = 0;
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
@@ -418,8 +425,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world.match.upsert_player(match_player);
 	// The roster row mirrors the slot's spectator latch (+100567) so the
 	// end-round winner award skips a spectator-flagged top scorer
-	// [orig: Server_PlayerAdd @0x51CD83].
+	// [orig: Server_PlayerAdd @0x51CD83], and its undeployed bit so event 25
+	// skips a pending slot [orig: Server_OnPlayerJoin @0x51A6F2;
+	// Server_UpdateCaptureZoneProximity @0x5087A2].
 	world.match.set_player_spectator(h, conn.link.spectator);
+	world.match.set_player_respawn_pending(h, conn.link.respawn_pending);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -593,7 +603,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		if (ai != nullptr) {
 			ai->team = 0;
 			ai->vel_x = 0;
-			ai->vel_z = 0;
+			ai->vel_y = 0;
 			ai->inf.player_moving = false;
 			ai->inf.vel[0] = ai->inf.vel[1] = ai->inf.vel[2] = 0;
 		}
@@ -603,6 +613,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	conn.link.spectator = false;
 	world.match.set_player_spectator(conn.link.owned_entity, false);
 	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
 	uint8_t team = conn.spectator_restore_team;
 	if (team == 0) team = 1;
 	conn.assigned_team = team;

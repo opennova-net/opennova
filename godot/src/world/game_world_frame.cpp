@@ -673,6 +673,7 @@ void GameWorld::render_water_frame() {
 	}
 	Ref<Simulation> sim = get_sim();
 	water_->set_blink_water_visible(sim.is_valid() && sim->occlusion_water_visible());
+	if (sim.is_valid()) water_->set_noise_frame_counter(sim->entity_update_counter());
 	water_->advance_frame(frame_delta_);
 }
 

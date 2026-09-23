@@ -417,12 +417,17 @@ The currently hosted writer-value families are:
 
 - PLAYPARTANIM channel 1 publishes `VEHICLE_SPECIAL1` (71) only when item
   attribute `0x1000` is clear; channel 2 always publishes
-  `VEHICLE_SPECIAL2` (72). The integrator uses wrapping signed-dword ADD/SUB
-  and clamps only on strict upper/negative overshoot; ordinary sweeps retain
-  the exact `0x10000` endpoint, while zero-time states can leave that range.
-  This is a fixed semantic mapping, not a walk over model
-  CTRL order `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator
-  @ 0x456710; HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38]`.
+  `VEHICLE_SPECIAL2` (72). The integrator body (`Entity_UpdateSuspensionBounce
+  @0x456710`: wrapping signed-dword ADD/SUB, clamps only on strict
+  upper/negative overshoot) has no caller, jump, thunk or data pointer anywhere
+  in the image (2026-09-23), so live retail never advances the two phases:
+  PLAYPARTANIM stores only the direction and rate, and the published values
+  hold (zero unless a savegame restored them, `SaveFile_ApplyEntityRecord
+  @0x4ABB00`, the call `@0x4AC030` to `Entity_CopyVehicleDefToAIComp
+  @0x45DB30`). The editor preview is the only integrator; the world runtime
+  no longer integrates them. This is a fixed semantic mapping, not a walk
+  over model CTRL order `[orig: Entity_ApplyCommand @ 0x43AB60 (case 0x22
+  @ 0x43B192); HUD_CacheEntityDisplayInfo @ 0x4A3D90 (@ 0x4A3E16..0x4A3E38)]`.
 - `HEAT_GLOW` (54) is live: the 'ewep' render class's CTRL callback
   `HUD_CacheWeaponSlotInfo @ 0x440930` writes it at `0x440969`/`0x440991`
   before every render, userpoint transform and attachment frame of the gun,

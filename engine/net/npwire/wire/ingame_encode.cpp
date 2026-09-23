@@ -1063,6 +1063,26 @@ std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal) {
 	return out;
 }
 
+// [orig: Server_BroadcastEntityActionPacket @0x5080D0 — the kind byte
+//  @0x5080e1; kind 0 packs slot and is_win @0x508151/@0x508160, is_active
+//  @0x50815b and the flag @0x508166; kind 1 packs the team @0x5080fd and the
+//  key with its NUL @0x508134..0x50813e]
+std::vector<uint8_t> encode_objective_notification(const ObjectiveNotification &notice) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(notice.kind);
+	if (notice.kind == 0) {
+		w.u32(static_cast<uint32_t>(notice.slot));
+		w.u32(static_cast<uint32_t>(notice.is_win));
+		w.u32(static_cast<uint32_t>(notice.is_active));
+		w.u8(notice.flag);
+	} else if (notice.kind == 1) {
+		w.u32(static_cast<uint32_t>(notice.team));
+		w.cstr(notice.key);
+	}
+	return out;
+}
+
 // [orig: serialize_entity_with_parent_and_target @0x505810]
 std::vector<uint8_t> encode_objective_entity_state(
 		const ObjectiveEntityState &state) {

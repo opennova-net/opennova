@@ -106,8 +106,8 @@ roll·pitch·yaw about the float Z/X/Y axes, each factor SKIPPED when its BAM
 is exactly 0, with per-axis quantized trig:
 `c = float(ftol(cos(θ)·2²²))/2²²`, `s = float(ftol(sin(θ)·−2²²))/2²²` — the
 sin sign is baked into the constant (`dbl_7C57B0 = −2²²`), and the angle
-scale `dbl_7C3608 = 0x3E19222D9890E4A8` is NOT exactly 2π/2³² (≈ 2.1 ppm
-above; the port carries the exact bits). The TOC corner refinement's
+scale `dbl_7C3608 = 0x3E19222D9890E4A8` (1.4629627251502471e-9) is NOT exactly 2π/2³²
+(about 30.5 ppm above; the port carries the exact bits). The TOC corner refinement's
 collision-AABB swizzle (`X = −y, Y = z, Z = x` of the mission-axis bounds
 `[orig: @ 0x5c4920-0x5c49c1]`) and `Entity_ComputeBoundingSphere @ 0x5c69a0`
 (center = AABB midpoints, radius = min(√Σhalf², 0x7FFF0000f)) are consistent
@@ -311,7 +311,8 @@ only). Bits 0x10/0x20 have no witnessed frame consumer.
 `[orig: Terrain_RenderSectorModels @ 0x5c5d30]` per visible building:
 `mask = g_BuildingSectionVisMask[pool2]`; bits ≥ `itemDef+2193` and
 ≥ `itemDef+2194` are forced visible (blink sections occupy the low bone
-indices; the §15 destruction bone map sits above) `[orig: @ 0x5c5d7c-0x5c5da8]`;
+indices; the door sections sit above, +2193 being the first door section,
+world-wac-ai-re §33.14) `[orig: @ 0x5c5d7c-0x5c5da8]`;
 the per-draw hidden mask is `g_HiddenSectionMask @ 0xB7965C = ~mask`.
 Buildings whose batch entry carries the open-portal flag draw **two passes** —
 exterior only (all interior bits hidden), then interiors (bit 0 hidden) —
@@ -387,7 +388,7 @@ deliberate ones (standing rule 2 — a divergence gets its ledger row at birth).
 | D-OCC-6 | OPEN (witness detail) | `Render_TerrainScene @ 0x610c80` receives the outdoors flag as arg 0; its consumption inside (frameless-callee arg pattern) is unwitnessed. |
 | D-OCC-7 | CLOSED-BY-DECISION (2026-07-17) | Only the GPM-path occlusion loader is witnessed; the 3DI3-path loader in Jointops was never located. The port promotes the 3DI3-parsed OCCL tables (identical disk family) into the witnessed 60 B runtime shape; the GPM/GP runtime path is deliberately unsupported (project decision: no `threedi_gp` runtime or ONED support). |
 | D-OCC-8 | OPEN (suffix-consumer reconciliation) | Super OED Manual v1.1 officially defines BB plus `W`/`S`/`V` as preserving water/sky/voxels; exporter reconstruction also accepts `L`/`O` and clears bits from initial 0x3E. Runtime consumption is separately witnessed: bit 0x2 indoors, 0x4 the D-OCC-1 state, 0x8 water suppress, 0x10/0x20 no frame consumer. Reconcile the author-facing sky/voxel split with those consumer bits; `L`/`O` expansions remain unverified. |
-| D-OCC-9 | WITNESSED-READY-DEFERRED (latent — awaiting D-COL-2) + NEEDS-RE (the load-time source) | The forced-visible def bytes (`itemDef+2193/+2194`, the destruction bone-map bases) are wired through `OcclusionWorld::EntityDefBits` but default 0 — the destruction system is unmodeled (D-COL-2), and their load-time source is unwitnessed. Identical behavior for buildings without destruction bones (retail skips zero bytes too). |
+| D-OCC-9 | WITNESSED-READY-DEFERRED (feed the door bone map) + NEEDS-RE (the +0x892 writer) | The forced-visible def bytes (`itemDef+2193/+2194` = +0x891/+0x892, read `@0x5C5D7C` / `@0x5C5D95` in `Terrain_RenderSectorModels @0x5C5D30`) are wired through `OcclusionWorld::EntityDefBits` but default 0. Re-scoped 2026-09-23: +0x891 is not a destruction bone map but the door bone map's first door section, the `first_door` key's byte of the deathtime dword (world-wac-ai-re §33.14; the former dependency D-COL-2 closed as the door table), which the port already stamps as `Entity::door_first_bone` but does not feed to the occlusion bits; the +0x892 writer is unwitnessed. Identical behavior for buildings without door sections (retail skips zero bytes too). |
 | D-OCC-10 | PERMANENT (register 2026-08-30, class C) | `Terrain_SortSectorCacheByDistance @ 0x5c4410` is not ported: it orders retail draw calls/slot iteration only; the mask/TOC results are order-independent per candidate, and Godot owns draw order. |
 | D-OCC-11 | PERMANENT (register 2026-08-30, class D — reimpl safety) | Cap semantics: retail's wedge builder writes past 64 planes into adjacent stack after printing "too many planes" (and the viewthru bank writes unguarded, erroring only after 512/2048) — the port clamps the wedge at 64 and guards the viewthru bank like the window bank. Divergence only in the overflow regime where retail corrupts its own memory. Scratch caps (128 edge words / 64 polygon verts / 128 front-face planes) sized above any witnessed record. |
 | D-OCC-12 | OPEN (bounded stand-in; PERMANENT candidate — tabled 2026-08-30) | View culling: the reimpl builds 5 frustum planes (near + 4 sides, inward normals, render float space) from its camera and tests bound spheres against them + a Q22 forward-row depth cull vs the fog distance — standing in for `Viewport_TransformAndClipPoint @ 0x4115e0`'s project-and-clip (same culling intent; the retail projector's screen-space epsilon behavior is not replicated). The traversal consumes the same reimpl planes where retail passes `g_CameraFrustumPlanes5`. |

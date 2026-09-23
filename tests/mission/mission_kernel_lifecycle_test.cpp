@@ -3,15 +3,17 @@
 // before open, an unmountable root), the play-start baseline the embedders
 // seal after the spawn (capture_baseline / restore_baseline rewind the
 // registry, the local player's position and health, the logic clock and the
-// event latches), the strict-vs-lenient WAC diagnostic policy (a program
-// that compiles with a warning loads under the game's policy and refuses the
-// boot under the dedicated host's), and the no-terrain path (no field, no
+// event latches), the strict-vs-lenient WAC diagnostic policy (retail's own
+// first errors load under both, a literal the mounted catalogs miss refuses
+// the dedicated host's boot), and the no-terrain path (no field, no
 // grounding, the teleport seams still work).
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
+#include <formats/def/def.h>
 
 #include "common/boot_file_source.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -86,6 +88,65 @@ static void tick_no_net(opennova::mission::MissionKernel &kernel) {
 // and MSVC does not reliably overlap main()'s block-scoped locals, so stack
 // kernels overflow the 1 MB default stack (STATUS_STACK_OVERFLOW in main).
 int main() {
+	// --- the spawn-marker list is built before the PreMission pass ------------
+	// A PreMission action that hands the lowest zone to team 2 does not reorder
+	// the markers: the list was built with that zone on team 1, where a
+	// marker's priority is its own zone number.
+	// [orig: Game_StartMission — the build_spawn_marker_budget_list call
+	//  @0x5252C6 precedes the EventTrigger_UpdateAllWithFlag2 call @0x525B86;
+	//  build_spawn_marker_budget_list @0x529B40]
+	{
+		std::array<def::DefItemDef, 2> rows{};
+		rows[0].id = ms::kItemIdOffset + 900;
+		rows[0].type = 5;
+		rows[0].attrib = 0x60000u;
+		rows[0].hp = 100;
+		rows[1].id = ms::kItemIdOffset + 901;
+		rows[1].type = 4;
+		rows[1].attrib2 = 4u;
+		rows[1].hp = 100;
+		def::DefItemsFile items{rows.data(), rows.size()};
+		bms::File m{};
+		bms::Entity low = item(/*type_id=*/900, 10 << 16, 0, 0);
+		low.id = 50;
+		low.team = 1;
+		low.lfp_group = 1;
+		bms::Entity high = item(/*type_id=*/900, 20 << 16, 0, 0);
+		high.id = 51;
+		high.team = 2;
+		high.lfp_group = 2;
+		m.items = {low, high};
+		bms::Entity marker{};
+		marker.type = bms::ItemType::Marker;
+		marker.type_id = 901;
+		marker.id = 52;
+		marker.lfp_group = 2;
+		marker.x = 20 << 16;
+		m.markers = {marker};
+		bms::Event event{};
+		event.flags = bms::EventFlags::PreMission;
+		event.action_index = 0;
+		event.action_count = 1;
+		bms::Action action{};
+		action.action_type = bms::ActionType::ChangeSteamAction;
+		action.param1 = 50;
+		action.param2 = 2;
+		m.events = {event};
+		m.actions = {action};
+		std::map<std::string, std::string> files;
+		auto kernel = std::make_unique<ms::MissionKernel>();
+		kernel->open_document(std::move(m), "synth", source_over(&files));
+		kernel->set_items_table(&items);
+		ms::KernelBootOptions options;
+		options.playable = false;
+		std::string error;
+		CHECK(kernel->boot(options, error));
+		const w::Entity *zone = kernel->world.registry.get(w::EntityHandle::make(1, 0));
+		const w::Entity *placed = kernel->world.registry.get(w::EntityHandle::make(3, 0));
+		CHECK(zone != nullptr && zone->team == 2); // the PreMission action ran
+		CHECK(placed != nullptr && placed->vehicle_spawn_priority == 2);
+	}
+
 	// --- the ordering guards ---------------------------------------------------
 	{
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
@@ -165,9 +226,8 @@ int main() {
 	}
 
 	// --- the WAC diagnostic policy ---------------------------------------------
-	// An unknown command is a compiler WARNING (older games extend the
-	// keyword set): the program compiles, so the game's lenient policy loads
-	// it and the dedicated host's strict policy refuses the boot.
+	// An unknown command is retail's first error "Unknown '...'" and the
+	// program runs anyway, so the game's policy loads it.
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
@@ -181,6 +241,8 @@ int main() {
 		CHECK(kernel.wac_loaded);
 		CHECK(kernel.wac.vm().loaded());
 	}
+	// Strict mode loads retail's own first errors and refuses only a literal
+	// the mounted catalogs miss (no .ptl here, so every FX name misses).
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
@@ -190,11 +252,23 @@ int main() {
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
 		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.wac_loaded);
+		CHECK(!kernel.wac.program().diagnostics.empty() &&
+				kernel.wac.program().diagnostics[0].message == "Unknown 'BOGUS_COMMAND'");
+	}
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then fx2tgt(nosuch_effect, 1) endif\n";
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.wac_strict_diagnostics = true;
+		std::string error;
 		CHECK(!kernel.boot(options, error));
 		CHECK(!kernel.wac_loaded);
-		CHECK(error.find("failed to compile cleanly") != std::string::npos);
-		CHECK(error.find("unknown command") != std::string::npos);
-		CHECK(error.find("bogus_command") != std::string::npos);
+		CHECK(error.find("Unknown FX") != std::string::npos);
 	}
 	// No script at all is the valid BMS-only mission under both policies.
 	{
@@ -253,6 +327,27 @@ int main() {
 		CHECK(third.world.script.vars.get_mission(2) == 2);
 	}
 
+	// --- the no-session objective relay ------------------------------------------
+	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
+	// released while the local chat effect stays. [orig:
+	//  Server_BroadcastEntityActionPacket @0x5080D0 — the
+	//  NapiNPServer_SendFiltered call @0x508199]
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "if never() then set(v1,1) endif\n";
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		kernel.world.show_objective_notification(2, 1, 1, 1);
+		CHECK(kernel.world.out.hud_relays.size() == 1);
+		CHECK(kernel.world.out.effects.count("objective") == 1);
+		tick_no_net(kernel);
+		CHECK(kernel.world.out.hud_relays.empty());
+	}
+
 	// --- the no-terrain path -----------------------------------------------------
 	{
 		std::map<std::string, std::string> files;
@@ -279,6 +374,76 @@ int main() {
 		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[2] == 9 << 16);
 		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == tick0 + 2);
+	}
+
+	// --- the teardown's PostMission sweep ------------------------------------------
+	// The authority's mission exit destroys pools 0, 1 and 2 (the pool-3
+	// markers stay), then sweeps the PostMission entries exactly once; nothing
+	// sweeps them while the mission runs. So a SingleAlive trigger naming the
+	// pool-1 item reads it gone, and one naming the resident pool-3 marker
+	// fails too, because that row walk never covers pool 3.
+	// [orig: Game_TeardownMission — Entity_Destroy over pools 0..2
+	//  @0x522365..0x5223C8, EventTrigger_UpdateAllWithFlag4 @0x52266C]
+	{
+		bms::File m = synthetic_mission();
+		bms::Entity marker{};
+		marker.type = bms::ItemType::Marker;
+		marker.type_id = 44;
+		marker.id = 41;
+		m.markers.push_back(marker);
+		const auto post_event = [](int trigger_index, int trigger_count, int action_index) {
+			bms::Event e{};
+			e.flags = bms::EventFlags::PostMission;
+			e.trigger_index = trigger_index;
+			e.trigger_count = static_cast<uint8_t>(trigger_count);
+			e.action_index = action_index;
+			e.action_count = 1;
+			return e;
+		};
+		const auto alive = [](int ssn) {
+			bms::Trigger t{};
+			t.main_type = bms::TriggerMainType::Single;
+			t.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleAlive);
+			t.param1 = ssn;
+			return t;
+		};
+		const auto increment = [](int var) {
+			bms::Action a{};
+			a.action_type = bms::ActionType::MisvarChange;
+			a.action_sub_type = static_cast<int32_t>(bms::MissionVariableActionSubType::Increment);
+			a.param1 = var;
+			return a;
+		};
+		m.events = {post_event(0, 0, 0), post_event(0, 1, 1), post_event(1, 1, 2)};
+		m.triggers = {alive(21), alive(41)};
+		m.actions = {increment(9), increment(10), increment(11)};
+
+		std::map<std::string, std::string> files;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(m, "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
+		CHECK(kernel.world.registry.by_net_id(41) != nullptr);
+		for (int i = 0; i < 70; ++i) tick_no_net(kernel);
+		CHECK(kernel.world.script.vars.get_mission(9) == 0);
+		CHECK(kernel.world.script.vars.get_mission(10) == 0);
+		CHECK(kernel.world.script.vars.get_mission(11) == 0);
+
+		opennova::inmatch::LocalRole role;
+		role.bind(kernel);
+		role.close();
+		CHECK(kernel.world.script.vars.get_mission(9) == 1);  // no trigger: the sweep ran once
+		CHECK(kernel.world.script.vars.get_mission(10) == 0); // the pool-1 item was destroyed first
+		// The pool-3 marker is still resident (checked below), but SingleAlive
+		// never sees pool 3: its row walk covers pools 0, 1 and 2 only.
+		// [orig: Entity_IsAliveByBmsRef @0x43E640]
+		CHECK(kernel.world.script.vars.get_mission(11) == 0);
+		CHECK(kernel.world.registry.by_net_id(21) == nullptr);
+		CHECK(kernel.world.registry.by_net_id(31) == nullptr);
+		CHECK(kernel.world.registry.by_net_id(41) != nullptr);
 	}
 
 	if (failures == 0) std::printf("mission_kernel_lifecycle: all checks passed\n");

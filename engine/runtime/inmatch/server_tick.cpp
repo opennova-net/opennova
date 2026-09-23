@@ -1,9 +1,11 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/end_round_protocol.h>
+#include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
-#include <runtime/inmatch/server_revive.h>           // the medic revive transaction
+#include <runtime/inmatch/server_medic.h>            // the medic revive and heal transactions
+#include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 
 #include <cstdint>
@@ -21,12 +23,10 @@
 #include <net/npwire/session_hello.h>
 #include <runtime/replication/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <runtime/audio/sound_profile.h>            // compose_entity_sound_set (the drowning composites)
-#include <runtime/world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
+#include <runtime/world/ai.h>                  // AiSlot[1] BERSERK (the team-kill exemption)
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
-#include <runtime/world/infantry.h>            // drown death animation selection
 #include <runtime/world/local_player.h>        // the listen host's live inventory (kit weight)
 #include <runtime/world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <runtime/world/spawn_select.h>         // sorted SpawnZoneList index for capture events
@@ -51,15 +51,6 @@ uint8_t pool0_index_byte(uint16_t handle) {
 	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
 }
 
-// NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
-// includes the listen host and does not inspect entity health; this runtime's
-// completed initial-state burst is the shared representation of that active
-// slot state. [orig: NapiNPServer_SendFiltered @0x4C8874..0x4C8894,
-// @0x4C893E..0x4C8953]
-bool active_player_recipient(const NapiNPConnection &conn) {
-	return is_in_match(conn) && conn.link.transport != nullptr;
-}
-
 uint8_t death_family_variant(world::World &world, uint8_t base) {
 	return static_cast<uint8_t>(
 			base + ((3u * uint32_t(world.next_prng16())) >> 16));
@@ -79,9 +70,6 @@ struct PlayerDeathFeed {
 	uint8_t victim = 0;
 	uint8_t aux = 0;
 };
-
-constexpr uint32_t kRetailBreathSeconds = 20;
-constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
 
 // Classify the one S2C 0x1E record before Match drops the victim's carried
 // objective. The original reads the LIVE entity+44 cause word (Entity::
@@ -111,7 +99,8 @@ PlayerDeathFeed classify_player_death(
 		if (victim_entity != nullptr) victim_entity->cause_flags &= ~bit;
 	};
 	if (killer_entity == nullptr) {
-		if (underwater_breath_samples > kBreathSampleLimit) {
+		// [orig: `cmp [edi+1CCh],ecx; jle` @0x517302]
+		if (static_cast<int32_t>(underwater_breath_samples) > breath_sample_limit(world)) {
 			out.event_type = 26;
 		} else if ((cause & 0x200u) != 0u) {
 			out.event_type = 23;
@@ -140,7 +129,7 @@ PlayerDeathFeed classify_player_death(
 	//  twin @0x5170BE..0x5170DA, branch @0x5170F8..0x517113]
 	auto sees_all = [&world](world::EntityHandle handle) {
 		const world::AiEntity *ai = world.ai.for_handle(handle);
-		return ai != nullptr && ai->see_all;
+		return ai != nullptr && (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) != 0;
 	};
 	if (victim_entity != nullptr && victim_entity->team != 0 &&
 			victim_entity->team == killer_entity->team &&
@@ -180,106 +169,6 @@ PlayerDeathFeed classify_player_death(
 	out.victim = victim_index;
 	out.aux = pool0_index_byte(killer_entity->primary_occupant.packed);
 	return out;
-}
-
-// Retail samples breath every 32 authority ticks, not every frame. While an
-// active living player's eye is strictly below the authored water plane,
-// playerSlot+460 increments; sample 81 selects death_drown and runs the ordinary
-// no-killer death transaction. Dry or dead players clear the counter. The
-// breath global is initialized to 20 and has no other writer in the retail
-// image, so keep it a local invariant rather than another configuration seam.
-// [orig: Server_TickUpdate gate @0x51D8C4..0x51D8D7;
-// Server_UpdateEntityIdleTimers @0x50D770;
-// WacScript_FreeAll initializes dword_C6EAE0=20 @0x4F6381]
-// Server_SendOverlayActionToAlive with the entity's composite for `type`: the
-// S2C 0x34 sound at the entity's position to every ALIVE in-match player
-// (mask 128); the listen host's own copy rides the local slot-sound route.
-// [orig: SoundProfile_FindByEntityAndType @0x528180 ->
-//  Server_SendOverlayActionToAlive @0x50A1B0]
-void fan_entity_sound_to_alive(NapiNPServerCtx &ctx, world::World &world,
-		const world::Entity &source, int type) {
-	char set_name[24] = {};
-	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
-	if (set_name[0] == 0) return;
-	PlaySoundCommand cmd;
-	cmd.flag = 1;
-	cmd.sound_name = set_name;
-	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(source.position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(source.position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(source.position.z) >> 16);
-	const std::vector<uint8_t> body = encode_play_sound(cmd);
-	for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-		if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-				!candidate.link.owned_entity.valid())
-			continue;
-		const world::Entity *listener = world.registry.get(candidate.link.owned_entity);
-		if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
-		if (candidate.link.mode == replication::TransportMode::Loopback) {
-			world::SoundSlotEvent local;
-			local.source_handle = source.handle.packed;
-			local.pos[0] = world::to_fixed(source.position.x);
-			local.pos[1] = world::to_fixed(source.position.y);
-			local.pos[2] = world::to_fixed(source.position.z);
-			local.slot = 0;
-			std::memcpy(local.set_name, set_name, sizeof(set_name));
-			world.out.slot_sounds.push_back(local);
-			continue;
-		}
-		candidate.link.transport->host_send(s2c::PLAY_SOUND, body, /*reliable=*/false);
-	}
-}
-
-void tick_player_breath(NapiNPServerCtx &ctx, world::World &world) {
-	if ((world.logic_tick & 0x1Fu) != 0u) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
-		// A spectator slot never samples [orig: !slot+100567 @0x50D7BB].
-		if (conn.link.spectator) continue;
-		world::Entity *player = world.registry.get(conn.link.owned_entity);
-		if (player == nullptr || !player->alive || player->health <= 0 ||
-				(player->flags & world::kEntityFlagDead) != 0u) {
-			conn.link.underwater_breath_samples = 0;
-			continue;
-		}
-
-		// The one underwater-eye predicate (no authored water is never below).
-		if (!world::entity_eye_below_water(world,
-					world::to_fixed(player->position.z), player->eye_offset_z)) {
-			// Surfacing after more than four samples plays the breath (a dive
-			// no longer than 160% of the breath value) or the gasp composite.
-			// [orig: Server_UpdateEntityIdleTimers @0x50D882..0x50D8CB]
-			const uint32_t prev = conn.link.underwater_breath_samples;
-			if (prev > 4u && player->anim_slot != 0) {
-				fan_entity_sound_to_alive(ctx, world, *player,
-						prev <= 160u * kRetailBreathSeconds / 100u
-								? audio::kEntitySoundSurfaceBreath
-								: audio::kEntitySoundSurfaceGasp);
-			}
-			conn.link.underwater_breath_samples = 0;
-			continue;
-		}
-
-		if (++conn.link.underwater_breath_samples <= kBreathSampleLimit) {
-			// Three warnings ahead of the kill, 36 / 24 / 12 samples before it
-			// [orig: @0x50D861..0x50D878: the WATER_GAG composite].
-			const uint32_t samples = conn.link.underwater_breath_samples;
-			if ((samples == kBreathSampleLimit - 36u || samples == kBreathSampleLimit - 24u ||
-					samples == kBreathSampleLimit - 12u) && player->anim_slot != 0)
-				fan_entity_sound_to_alive(ctx, world, *player, audio::kEntitySoundWaterGag);
-			continue;
-		}
-		player->death_anim_state = world::compute_death_anim_state(
-				0, 0, world::death_cause::kDrown);
-		player->health = -1;
-		world::RoundDeath death;
-		death.victim = player->handle;
-		death.victim_handle = player->handle.packed;
-		// The snapshot every RoundDeath producer stamps; the host classifier
-		// itself reads the live entity word (see classify_player_death).
-		death.event_flags = player->cause_flags & 0xF00u;
-		world.round_sim.deaths.push_back(death);
-	}
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
@@ -455,7 +344,7 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 // the 0x59 spawn/update and the preceding-to-destroy 0x12 removal record.
 // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59;
 // Server_RemoveEntityAndNotify @0x50A270 -> S2C 0x12]
-void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
+static void send_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 	if (!ctx.is_in_session) return;
 	auto fan_remote = [&](uint8_t tag, const std::vector<uint8_t> &body) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -500,6 +389,13 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 		removal.entity_handle = event.entity;
 		fan_remote(s2c::ENTITY_REMOVE, encode_entity_remove(removal));
 	}
+}
+
+// The routed records are released: a frame whose entity update is held
+// produces none and must not re-send the last one's.
+void route_throwable_events(NapiNPServerCtx &ctx, world::World &world) {
+	send_throwable_events(ctx, world);
+	world.throwables.events.clear();
 }
 
 // Send the WAC commands the VM replicated this tick as S2C 0x23. A targeted
@@ -640,13 +536,31 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 // Entity_CheckAndProcessDeath @0x51B58F]
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
+	auto tally_kill = [&](const world::RoundDeath &d) {
+		// The kill accounting of a damage-pass lethal edge: scorer event 12 in
+		// every session, then the SP tallies behind world.rules.mp_session (our
+		// SP listen server always runs ctx.is_in_session = 1).
+		// [orig: Score_ProcessKillEvent @0x4fd400]
+		world.match.process_kill_event(world, d);
+	};
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
+		// damage-time record for it only tallies and leaves the dead bit to the edge.
+		// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
+		//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
+		if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
+			tally_kill(d);
+			if (world::Entity *victim_entity = world.registry.get(d.victim))
+				victim_entity->alive = false; // health is already <= 0
+			continue;
+		}
 		world::Entity *victim_entity = world.registry.get(d.victim);
 		const world::Entity *killer_entity = world.registry.get(d.killer);
 		const bool victim_is_player = victim_entity != nullptr &&
 				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
-		const bool organic_victim = victim_entity != nullptr &&
-				victim_entity->kind == world::EntityKind::Organic;
+		// An edge record's victim is a person even when its corpse leg removed the row.
+		const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
+				victim_entity->kind == world::EntityKind::Organic);
 		// The revive-window and resend gates read the victim's live entity+44
 		// cause word BEFORE the classifier clears the bit it reports.
 		// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
@@ -672,7 +586,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				: PlayerDeathFeed{};
 		// The authoritative score ledger consumes the same death transaction as
 		// the kill-feed; non-roster actors are ignored by Match.
-		world.match.record_death(world, d.victim, d.killer);
+		world.match.record_death(world, d.victim, d.killer, d.event_flags);
 		// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
 		// victim's OWN client learns of its death from its record byte13 bit 0x02
 		// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
@@ -681,7 +595,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// the client spawn hook (pose snap + reset). Without this bit the victim never
 		// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
 		// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
-		if (organic_victim) {
+		// An edge record's row carries the edge's own latch (or a respawned life).
+		if (organic_victim && !d.motor_edge) {
 			victim_entity->flags |= 2u;
 			victim_entity->alive = false;
 			// The dead/protection latch is the player leg's alone.
@@ -716,9 +631,10 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			// slot into the anim state and ZERO it before the authority-gated
 			// Entity_CheckAndProcessDeath call, so an edge-driven infantry
 			// death always ships 0 (every 0x13 in the retail capture carries
-			// 0); only the direct third sender ships a live slot. Our death
-			// routing runs in the damage tick, before the next body update's
-			// edge (infantry.cpp) consumes the staged selection, so a person
+			// 0); only the direct third sender ships a live slot. An org1
+			// body's record comes from its own edge, after the consume; a
+			// player body's death routing runs in the damage tick, before the
+			// next body update's edge consumes the staged selection, so a person
 			// victim reports the post-edge zero here rather than the selection
 			// its edge still owns; every other kind ships the slot as stored.
 			// The retail receiver stores the word sign-extended into +0x2C0.
@@ -841,55 +757,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			}
 		}
 
-		// Kill tallies — the SP mission-stat buckets (the epilog score screen's count
-		// source) and the WAC bluekills/greenkills builtins. SP only [orig:
-		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
-		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
-		// in-process loopback IS a session), so the retail SP discriminator here is
-		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
-		// Killer == the host/local player -> the by-player buckets
-		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
-		// family [orig: Score_TallyKillByOthers @0x4fd300]. Blue/green buckets take
-		// only PERSON victims (itemdef class 3 == our Organic kind) by the team byte
-		// [orig: victim+354; 0 = green, 1 = blue]; a blue/green NON-person tallies
-		// nothing (witnessed); any team >= 2 victim tallies as an enemy kill (the
-		// original's infantry/vehicle/aircraft split folds into one count; the epilog
-		// sums the split anyway). Point values (def+404, difficulty-scaled) and the
-		// human-player-victim bucket (victim+534 -> 0xC846A0) are unmodeled — counts
-		// only, which is what the WAC predicates and the epilog columns consume
-		// (D-AI-10; world-wac-ai-re §20.4).
-		if (!world.rules.mp_session) {
-			if (const world::Entity *victim2 = world.registry.get(d.victim)) {
-				bool killer_is_host_player = false;
-				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-					if (c.link.owned_entity.valid() &&
-					    c.link.owned_entity.packed == d.killer_handle &&
-					    c.link.mode == replication::TransportMode::Loopback) {
-						killer_is_host_player = true;
-						break;
-					}
-				}
-				world::MissionKillStats &ks = world.kill_stats;
-				const bool person = victim2->kind == world::EntityKind::Organic;
-				if (killer_is_host_player) {
-					if (victim2->team == 1) {
-						if (person) ++ks.bluekills_by_player;
-					} else if (victim2->team == 0) {
-						if (person) ++ks.greenkills_by_player;
-					} else {
-						++ks.enemy_kills_by_player;
-					}
-				} else {
-					if (victim2->team == 1) {
-						if (person) ++ks.team_kills_by_others;
-					} else if (victim2->team == 0) {
-						if (person) ++ks.friendly_kills_by_others;
-					} else {
-						++ks.enemy_kills_by_others;
-					}
-				}
-			}
-		}
+		if (!d.motor_edge) tally_kill(d);
 
 		if (victim_connection != nullptr) {
 			// Every player slot gets the same two whole-second counters. A
@@ -1061,6 +929,52 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 			player->damage_state = 0;
 		}
 	}
+}
+
+// The frontier-hint arm of the same walk: a state-6 slot whose bit 0x04 is set
+// and which has played 1240 ticks gets S2C 0x1E event 58 [its team's frontier
+// zone][the enemy's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
+// frontier is 0; either way the bit clears.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6]
+void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
+		const world::Entity *player = world.registry.get(conn.link.owned_entity);
+		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
+		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
+		const uint8_t own = world.zones.frontier_zone(player->team);
+		uint8_t enemy = world.zones.frontier_zone(player->team == 1 ? 2 : 1);
+		if (enemy == own) enemy = 0;
+		if (own != 0 && conn.link.transport != nullptr)
+			conn.link.transport->host_send(s2c::GAME_EVENT,
+					{0x3A, own, enemy, 0xFF, 0, 0, 0, 0});
+		conn.reply.frontier_hint_pending = false;
+	}
+}
+
+// A refused touch arms its slot's nag: not while one is held, and only when the
+// slot's +100360 stamp is set and over ten seconds old; it sets bits
+// 0x04|0x08 and restamps the word.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the slot
+//  @0x500BE4..0x500BF1, bit 0x08 @0x500C10, the stamp @0x500C19..0x500C33, the
+//  set @0x500C35..0x500C3C]
+void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
+	const uint32_t now_ms = host_milliseconds_for_logic_tick(world.logic_tick);
+	for (const world::EntityHandle toucher : world.zones.capture.refused_touches) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!conn.link.owned_entity.valid() || conn.link.owned_entity != toucher)
+				continue;
+			SessionReplyState &reply = conn.reply;
+			if (!reply.capture_nag_held && reply.chat_last_ms != 0 &&
+					now_ms - reply.chat_last_ms > 10000u) {
+				reply.frontier_hint_pending = true;
+				reply.capture_nag_held = true;
+				reply.chat_last_ms = now_ms;
+			}
+			break;
+		}
+	}
+	world.zones.capture.refused_touches.clear();
 }
 
 // EntityPool_ClearDirtyFlags: strip the priority-target mark (Flags 0x4000)
@@ -1677,6 +1591,37 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 	}
 }
 
+// The play-tick walk after the script pass: every active slot in state 6
+// whose entity is present and not hidden (Flags bit 0) adds one to its play
+// ticks, the unsaturated slot dword WAC onptick reads in whole seconds. No
+// session, deploy or punt gate: it runs before the is_in_session test, so
+// single player counts too. The same walk then calls
+// GameEvent_ProcessScoring(g_GameType, entity, 0x16, 0, 0) for each such slot,
+// whose case 22 only stamps the slot's stats entity word and counts the
+// per-weapon and per-vehicle use sub-tables (CPlayerStats_RecordEvent 35/36,
+// the CPlayerStats_InitWeaponTracking arrays); the port models neither, so
+// that call is not ported.
+// [orig: Server_TickUpdate @0x51D94B..0x51D9A3 -- the active byte @0x51D960,
+//  state 6 @0x51D966, the entity @0x51D96B..0x51D96F, `test byte ptr
+//  [eax+24h],1` @0x51D971, `add [esi+184h],1` @0x51D977, the scorer call
+//  @0x51D98A; the is_in_session test @0x51D9A5; GameEvent_ProcessScoring
+//  case 22 @0x52F550]
+void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world) {
+	// The round end moves every state-6 slot to state 7, which the walk then
+	// skips; Match's outcome gate stands for that transition here, as it does
+	// for the rest of the slot-state-7 stop (announce_round_end).
+	// [orig: Server_ProcessRoundEnd -- the slot state 6 -> 7 store @0x51685E]
+	if (world.match.outcome().ended) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn)) continue;
+		const world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr || ((player->flags | player->engine_flags) & 1u) != 0)
+			continue;
+		if (world::MatchPlayer *slot = world.match.player(player->handle))
+			++slot->play_ticks;
+	}
+}
+
 } // namespace
 
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
@@ -1790,6 +1735,25 @@ void Server_RecalculateAllPlayerKitWeights(
 	}
 }
 
+// The records the entity update produces, routed at the head of the next
+// server tick: retail's entity update sends them inline after that frame's
+// send pump, so they lead the next frame's queue. The placed-device records,
+// the deaths and their tallies, the medic interactions the kill-zone pass
+// admitted (after the deaths it also produced), the match's gameplay events and
+// the water crossings. (The guidance waits behind this tick's 0x0A.)
+// [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call @0x52674B
+//  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
+//  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
+//  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
+static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
+	Server_FanEntityEvents(ctx, world);
+	route_throwable_events(ctx, world);
+	route_round_deaths(ctx, world);
+	Server_RouteMedicInteractions(ctx, world);
+	route_match_gameplay_events(ctx, world);
+	Server_RouteWaterCrossings(ctx, world);
+}
+
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
@@ -1799,9 +1763,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// C2S drain + sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
 	world::World &world = *ctx.world;
+	// The previous frame's entity update sent inline, so its records lead
+	// this frame's queue, ahead of every message this tick produces.
+	route_entity_pass_records(ctx, world);
 	// The phases lap onto the SIM_SERVER_* / SIM_MATCH / SIM_REPLICATION_*
-	// rows of the world's profile (ADR 0043 d5); the logic tick attributes
-	// its own SIM_WORLD_* rows inside run_logic_tick.
+	// rows of the world's profile (ADR 0043 d5); the script and entity passes
+	// attribute their own SIM_WORLD_* rows.
 	devtools::ProfileLap lap(world.profile);
 	const bool round_was_announced = ctx.round_end_announced;
 	// Snapshot the phase at frame entry. Retail decrements the timer later on
@@ -1829,6 +1796,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Then the spawn-protection arm of the per-player maintenance walk
 	// [orig: Server_UpdateAllActivePlayerSlots @0x518820, called @0x51d88b].
 	tick_spawn_protection(ctx, world);
+	emit_frontier_hints(ctx, world);
 	// The host CNetQuality send window, on its own 62-frame countdown (retail
 	// samples it from the main frame beside this tick).
 	Server_SampleHostNetQuality(ctx);
@@ -1860,161 +1828,40 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		replication::drain_connection_c2s(world, conn.link);
 	}
 
-	// (1b) The WAC 'humans' count: active human player slots, rebuilt each server tick
-	// just before the script pass — the original also uses it as the empty-dedicated-
-	// server world-run gate (entities/WAC advance while humans > 0 || ticks == 0); an
-	// SP host always counts its own loopback player. [orig: Server_BuildEntitySlotLists
-	// @0x4f97a0 — zero @0x4f97c6, +1 per active human slot @0x4f98b1; called from
-	// Server_TickUpdate @0x51d89a before the WAC pre-pass]
-	{
-		int32_t humans = 0;
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			// Entity ownership stands in for the original's slot-state-6 check —
-			// the SP host's loopback owns its player from the spawn on, while its
-			// in-match phase flag rides the burst bookkeeping.
-			if (conn.link.owned_entity.valid()) ++humans;
-		}
-		world.cached.humans = humans;
-	}
+	// (1b) The WAC 'humans' count, rebuilt each server tick just before the script
+	// pass. The original also uses it as the empty-server world-run gate
+	// (entities/WAC advance while humans > 0 || ticks == 0).
+	// [orig: Server_BuildEntitySlotLists @0x4f97a0, called from Server_TickUpdate
+	//  @0x51d89a before the WAC pre-pass]
+	world.cached.humans = world.registry.count_humans();
 
-	// The sampled breath state belongs to the authoritative player slot and
-	// runs at the same pre-entity-update point as retail. Its caller is skipped
-	// during pre-round just like the rest of Server_UpdateEntityIdleTimers.
-	// [orig: Server_TickUpdate @0x51D8C4..0x51D8D7;
-	// Server_UpdateEntityIdleTimers gate @0x50D773]
-	if (!preround_active) tick_player_breath(ctx, world);
 	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
 	// inline in retail's receive dispatch, ahead of the state fan.
 	Server_ProcessSpectatorRespawnRequests(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_INPUT);
 
-	// (1c) serialize BEFORE the motor — SESSION-ONLY [D-NET-120]: the original's per-frame
-	// replicate/broadcast blocks are each gated on is_in_session (+0x58) inside Server_TickUpdate
-	// (@0x51d9ab..0x51e3f3), while the C2S recv pump above is not — so a World kept alive past
-	// match-end (is_in_session 0, world non-null) keeps ticking but stops fanning ghost 0x0A frames.
-	// The per-slot 0x0A send is the LAST leg of Server_TickUpdate, and Game_ProcessMainFrame runs
-	// Entity_UpdateAllEntities only after Server_TickUpdate returns (Server_TickUpdate itself advances
-	// the WAC script, never the entity motor): every 0x0A is a pre-motor snapshot of the previous
-	// frame's final world state, one motor step behind what this tick is about to produce.
-	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4 sends its 0x0A
-	//  (the @0x51E3D6..0x51E450 per-slot block), Entity_UpdateAllEntities follows @0x52674B]
-	// Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every in-match
-	// connection [orig: NapiNPServer_SendFiltered @0x4C87E0 once, SendToConn per node].
-	// [D-NET-122 RESOLVED at P5] This fan uses the shared is_in_match(conn) predicate (was an inline
-	// burst.spawned). The host's own type-2 loopback now satisfies it once its §5.2a burst completes,
-	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
-	// starved (the gap the legacy net-ISystem emit filled by emitting to every transport-bearing
-	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
-	// Server_BuildPlayerInfoAndAdd). An absent, freed, or lifetime-stale owner
-	// emits nothing and cannot advance per-recipient frame state.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
-	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
-	if (ctx.is_in_session && !world.match.outcome().ended) {
-		// The priority build runs only for recipients that take entity records:
-		// the listen host's own player gets the header-only frame and never
-		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips
-		// Server_BuildEntityPriorityList for g_local_player_entity]. Type-1 peers
-		// take one only at their open send boundary (see the fan below).
-		bool any_record_recipient = false;
-		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn)) continue;
-			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			if (world.cached.local_player.valid() &&
-					conn.link.owned_entity == world.cached.local_player)
-				continue;
-			any_record_recipient = true;
-			break;
-		}
-		std::vector<GameEntitySnapshot> ents;
-		if (any_record_recipient) {
-			// The previous tick's movement/destruction is settled. Replication LOS
-			// can retain each target's final section matrices across every entity
-			// and recipient; never inherit a view built while the motor is moving.
-			{
-				const devtools::ProfileScope prep_scope(
-						world.profile, devtools::Slot::SIM_REPLICATION_QUERY_PREP);
-				if (world.collision != nullptr)
-					world.collision->prepare_cached_raycast_queries(world);
-			}
-			const devtools::ProfileScope snapshot_scope(
-					world.profile, devtools::Slot::SIM_REPLICATION_SNAPSHOT);
-			ents = replication::snapshot_world(world);
-			// Stamp owner-hidden rows: a spectator connection's own player entity
-			// is admitted only to its owner's list (the JO reduction of the
-			// slot+97536 hide byte — see replication_model.h owner_hidden)
-			// [orig: Server_BuildEntityPriorityList @0x50e6fd].
-			for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) {
-				if (!oc.link.spectator || !oc.link.owned_entity.valid()) continue;
-				for (GameEntitySnapshot &es : ents) {
-					if (es.wire_handle == oc.link.owned_entity.packed) {
-						es.owner_hidden = true;
-						break;
-					}
-				}
-			}
-		}
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn)) continue;
-			// The host's type-2 loopback is an in-process seam and remains
-			// full-rate (its own player takes the header-only frame inside the
-			// fan). Type-1 peers receive one fresh 0x0A only when their
-			// configured S2C send boundary opens; queuing all intervening
-			// snapshots would burst stale frames at that boundary.
-			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			const devtools::ProfileScope fan_scope(
-					world.profile, devtools::Slot::SIM_REPLICATION_FAN);
-			conn.link.receive_silence_ms = conn.receive_inactive_ms;
-			// Built here, queued at step (3): the frame's CONTENT is the pre-motor
-			// world, its place in the datagram stays behind the maintenance legs.
-			conn.frame_update_staged = replication::build_connection_s2c(
-					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
-					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0);
-		}
-	}
-	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 
-	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
-	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the
+	// (2) The script pass: the WAC tick, the every-32 legs (the spawn markers and
+	// this session's breath samples) and the BMS quarter pass, under one
+	// admission (the pre-round phase and the SP epilog hold them). The entity
+	// update is the frame's next leg after retail's server tick: it runs at
+	// step (4), after this frame's 0x0A is queued.
+	// [D-NET-123] Server_TickUpdate OWNS this tick — the inverse of the legacy seam, where the
 	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
-	world.run_logic_tick(
+	// [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, the
+	//  WacScript_AdvanceTick call @0x51D8BF, the Server_UpdatePlayerBreathTimers
+	//  call @0x51D8D7, the EventTrigger_UpdateQuarterRoundRobin call @0x51D8F4]
+	ServerIdleTimers idle_timers(ctx);
+	world.entity_idle_timers = &idle_timers;
+	const world::TickContext tick = world.begin_tick(
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
-    // Item callbacks' state packets and authoritative removals: mask 0x90
-    // includes active remote slots regardless of health, excluding the local host.
-    // [orig: Server_SendEntityStatePacket @0x509D70;
-    // Server_RemoveEntityAndNotify @0x50A270 -> NapiNPServer_SendFiltered @0x4C87E0]
-    if (ctx.is_in_session) {
-        for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-            if (!active_player_recipient(conn) ||
-                    conn.link.mode == replication::TransportMode::Loopback) continue;
-            for (const auto &event : world.out.entity_events) {
-                if (const auto *state = std::get_if<world::ItemStateEvent>(&event)) {
-                    std::vector<uint8_t> body;
-                    put_u16le(body, state->handle);
-                    put_u16le(body, static_cast<uint16_t>(state->section));
-                    conn.link.transport->host_send(s2c::KILL_SYNC, body, true, 0);
-                } else if (const auto *effect = std::get_if<world::ItemExplosionEvent>(&event)) {
-                    ExplosionEffectRecord record;
-                    record.count = effect->count;
-                    record.source = effect->source;
-                    record.x = effect->position.x;
-                    record.y = effect->position.y;
-                    record.z = effect->position.z;
-                    record.heading = int16_t(uint32_t(effect->heading) >> 16);
-                    conn.link.transport->host_send(s2c::EXPLOSION_EFFECT,
-                            encode_explosion_effect(record), true, 0);
-                } else if (const auto *removal = std::get_if<world::EntityRemoveEvent>(&event)) {
-                    std::vector<uint8_t> body;
-                    put_u16le(body, removal->handle);
-                    conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, true, 0);
-                }
-            }
-        }
-    }
-    world.out.entity_events.clear();
+	world.run_script_pass(tick);
+	world.entity_idle_timers = nullptr;
+	Server_FanEntityEvents(ctx, world);
 	// WAC punts are connection descriptions, not gameplay damage or chat.
 	// The original slot wrapper ignores departed/retired slots; the live
 	// connection owner likewise rejects stale allocations and loopback nodes.
@@ -2040,6 +1887,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			break;
 		}
 	}
+	advance_play_ticks(ctx, world);
 	lap.restart();
 	world.match.advance_tick(
 			world,
@@ -2053,19 +1901,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// callsite @0x4B31DD..0x4B3238;
 	// Server_OnPlayerTouchCaptureZone @0x500BA0]
 	if (!preround_active && ctx.is_in_session &&
-			!world.match.outcome().ended)
+			!world.match.outcome().ended) {
 		world.zones.capture_contact_tick();
+		arm_refused_capture_nags(ctx, world);
+	}
 
-	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
-	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
-	// health byte carries the same-frame damage regardless).
-	route_throwable_events(ctx, world);
+	// (2b) Death routing + respawn release — the deaths the script pass raised get
+	// their broadcasts staged before this frame's 0x0A fan (§5.60); the entity
+	// pass's were routed at the head of this call.
 	route_script_remote_commands(ctx, world);
 	route_round_deaths(ctx, world);
-	// The medic revives the kill-zone pass admitted this tick, after the deaths
-	// it also produced [orig: Projectile_ProcessExplosionQueue @0x4EADFC ->
-	// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer @0x517CD0].
-	Server_RouteMedicRevives(ctx, world);
 	route_match_gameplay_events(ctx, world);
 	release_expired_local_respawns(ctx, world);
 	// Retail drains an already-ended round here, before its periodic automatic
@@ -2109,6 +1954,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// boundary) [orig: @0x51DBF3 CNapiNetwork_CheckPlayerTimeouts, @0x51DBFD
 	// CNapiServer_ProcessPendingPlayerSpawns].
 	if (periodic_second) Server_CheckPlayerTimeouts(ctx);
+	// The live group recount, the periodic block's third callee (the pending
+	// spawns between them ride tick_connections on this boundary).
+	// [orig: Server_TickUpdate — the EntityPool_RecountLiveByGroup call @0x51DC02]
+	if (periodic_second) world.recount_group_live();
 	// The 1 Hz 0x46 quality resend walk sits after the periodic block's
 	// admission callees and ahead of the capture/win pass
 	// [orig: Server_TickUpdate @0x51DE79..0x51DF4A, before @0x51DF50].
@@ -2135,8 +1984,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// immediate C2S 0x0E pick, then stages its private bundle on that player's
 	// transport. [orig: SpawnWaveList_Tick @0x52A550 from Server_TickUpdate;
 	// SpawnWaveList_TickEntry @0x52A330]
-	if (ctx.is_in_session && !world.match.outcome().ended &&
-			periodic_second) {
+	// [orig: Server_TickUpdate — the in-session and round-over tests
+	//  @0x51DE3E/@0x51DE58 skip only to @0x51DF50, so the spawn-wave tick
+	//  @0x51DF6E runs every periodic second]
+	if (periodic_second) {
 		for (const world::SpawnWaveRelease &release :
 				world.zones.spawn_waves.tick(world)) {
 			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -2178,10 +2029,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     non-player identity is zero [orig: Server_ChangeEntityTeam @0x518D70;
 	//     write_entity_handle_packet @0x506AD0];
 	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
-	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); flips
-	//     50/51 (frontier held) or 52/53 (victim =
-	//     the recipient side's NEW frontier), team-filtered; then the 56/57 banner to all
-	//     [orig: GameEvent_FlagCapture @0x50F6F0];
+	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); a
+	//     numbered flip's pair [zone number][rank] 51 to the capturer's team and 50
+	//     to its enemy when the enemy mask held, else 53/52 [zone number][the
+	//     capturer's frontier]; then the 56/57 banner [capturer index] keyed on the
+	//     zone's new owner to all [orig: GameEvent_FlagCapture @0x50F6F0];
 	//   0x53 9 B for ACTIVE unnumbered captures [u16 handle][u8 curTeam][u8 capTeam]
 	//     [u16 progress][u16 limit][u8 rate], and 0x6C [u16 handle][u8 presence]
 	//     when the unique contact rate changes [orig: NetPacket_WriteZoneTimerWindow
@@ -2189,19 +2041,28 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//     flips do not emit 0x53 in Server_UpdateCaptureZones @0x53B8F0.
 	// The independent general 0x40 minimap-overlay producer runs above at its
 	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
-	if (ctx.is_in_session && !world.match.outcome().ended &&
-			periodic_second &&
-			(world.match.rules().game_type & 0x30000u) != 0) {
+	// Every periodic second, in every game type and through the post-round
+	// linger. [orig: Server_TickUpdate — the in-session and round-over tests
+	//  @0x51DE3E/@0x51DE58 skip only to @0x51DF50; the calls
+	//  @0x51DF73/@0x51DF7D/@0x51DF87]
+	if (periodic_second) {
 		world::ZoneCaptureEvents ev;
 		world.zones.capture_second_tick(ev);
+		// The capture scoring: a numbered flip's event-24 recipients, an
+		// unnumbered flip's or timed completion's event 14 on the capturer.
+		// [orig: CaptureZone_CheckProximityScoring @0x500C50 — event 24
+		//  @0x500D84, event 14 @0x500DC5]
 		for (const world::ZoneCaptureEvents::Event &event : ev.ordered) {
 			if (const auto *flip =
-						std::get_if<world::ZoneCaptureEvents::Flip>(&event))
+						std::get_if<world::ZoneCaptureEvents::Flip>(&event)) {
 				world.match.record_zone_capture(world, flip->scorers);
-			else if (const auto *completion =
-						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event))
-				world.match.record_zone_capture(
-						world, {completion->capturer});
+				if (flip->takeover)
+					world.match.record_psp_takeover(world, flip->capturer);
+			} else if (const auto *completion =
+						std::get_if<world::ZoneCaptureEvents::TimedCompletion>(&event)) {
+				if (completion->takeover)
+					world.match.record_psp_takeover(world, completion->capturer);
+			}
 		}
 
 		const world::SpawnZoneRegistry spawn_zones =
@@ -2227,6 +2088,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			const world::Entity *entity =
 					world.registry.get(conn.link.owned_entity);
 			return entity != nullptr ? entity->team : 0;
+		};
+		// Mask 0x180: in-match slots whose team is the filter team.
+		// [orig: NapiNPServer_SendFiltered bits 0x80/0x100]
+		auto send_team = [&](uint8_t team, const std::vector<uint8_t> &body) {
+			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+				if (!is_in_match(conn) || conn.link.transport == nullptr ||
+						connection_team(conn) != team)
+					continue;
+				conn.link.transport->host_send(0x1E, body);
+			}
 		};
 
 		// Consume the semantic stream once, in retail callsite order. In
@@ -2323,30 +2194,52 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			}
 			const auto *flip =
 					std::get_if<world::ZoneCaptureEvents::Flip>(&event);
-			if (flip == nullptr || !flip->announce || flip->suppressed) continue;
-			const uint8_t zone_idx = zone_index_of(flip->zone);
-			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-				if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-				const uint8_t team = connection_team(conn);
-				if (team == flip->capturer_team) {
-					conn.link.transport->host_send(
-							0x1E, flip->frontier_changed
-							              ? event_body(53, zone_idx,
-							                           flip->capturer_frontier)
-							              : event_body(51, zone_idx,
-							                           flip->new_team));
-				} else {
-					conn.link.transport->host_send(
-							0x1E, flip->frontier_changed
-							              ? event_body(52, zone_idx,
-							                           flip->loser_frontier)
-							              : event_body(50, zone_idx,
-							                           flip->new_team));
-				}
-				conn.link.transport->host_send(
-						0x1E, event_body(flip->new_team == team ? 56 : 57,
-						                 zone_idx, flip->new_team));
+			if (flip == nullptr || !flip->announce) continue;
+			const uint8_t capturer_idx = pool0_index_byte(flip->capturer.packed);
+			if (!flip->numbered) {
+				// An unnumbered instant flip announces as a completion does.
+				// [orig: GameEvent_FlagCapture @0x50F936..0x50F94B, the send
+				//  @0x50F991]
+				if (flip->new_team == 1 || flip->new_team == 2)
+					send_all(0x1E, event_body(flip->new_team == 1 ? 43 : 44,
+					                          capturer_idx, 0xFF));
+				continue;
 			}
+			// The pair, unless the round is decided or the capturer holds no
+			// slot: the capturer's team, then enemy_of(that team).
+			// [orig: GameEvent_FlagCapture — the decided test @0x50F764, the
+			//  slot @0x50F7BA, the capturer-team filter @0x50F7E1, 51/53
+			//  @0x50F8A5/@0x50F82B, the enemy filter @0x50F851/@0x50F8D9, 50/52
+			//  @0x50F8E9/@0x50F872, the sends @0x50F830/@0x50F8AA/@0x50F907]
+			// Before the pair every slot's refused-touch hold clears; after it
+			// the capturer's +100360 stamp is set.
+			// [orig: GameEvent_FlagCapture — the clear @0x50F786..0x50F7B1, the
+			//  stamp @0x50F90C..0x50F912]
+			if (!flip->decided) {
+				for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+					conn.reply.capture_nag_held = false;
+			}
+			if (!flip->decided && flip->capturer_is_player) {
+				const uint8_t own_team = flip->capturer_team;
+				const uint8_t enemy_team = own_team == 1 ? 2 : 1;
+				send_team(own_team, flip->unchanged
+						? event_body(51, flip->zone_number, flip->rank)
+						: event_body(53, flip->zone_number, flip->frontier));
+				send_team(enemy_team, flip->unchanged
+						? event_body(50, flip->zone_number, flip->rank)
+						: event_body(52, flip->zone_number, flip->frontier));
+				for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+					if (conn.link.owned_entity.valid() &&
+							conn.link.owned_entity == flip->capturer)
+						conn.reply.chat_last_ms =
+								host_milliseconds_for_logic_tick(world.logic_tick);
+			}
+			// The banner, keyed on the zone's new owner, goes to every in-match
+			// player even once the round is decided.
+			// [orig: @0x50F919..0x50F991]
+			if (flip->new_team == 1 || flip->new_team == 2)
+				send_all(0x1E, event_body(flip->new_team == 2 ? 57 : 56,
+				                          capturer_idx, 0xFF));
 		}
 	}
 
@@ -2383,39 +2276,94 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_TickUpdate @0x51E2D0..0x51E378].
 	emit_team_downed_resend(ctx, world);
 
-	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
-	// message per crossing the motor recorded this tick. Retail fans the splash
-	// with send_mask 128 (alive players) the moment a hull crosses the plane, so
-	// clients spawn the same effect at the same spot; the queue is drained and
-	// cleared every tick whether or not anyone is listening, because a crossing
-	// is presentation, never simulation state.
-	// [orig: Server_SendOverlayActionToAlive @0x50a1b0, send_mask 128]
-	if (ctx.is_in_session && !world.out.water_crossings.events.empty()) {
-		const std::vector<std::vector<uint8_t>> splashes =
-				replication::build_water_cross_messages(world);
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
-			if (conn.link.mode == replication::TransportMode::Loopback) continue;
-			bool alive = true;
-			if (conn.link.owned_entity.valid()) {
-				const world::Entity *e = world.registry.get(conn.link.owned_entity);
-				alive = e != nullptr && e->health > 0;
-			}
-			if (!alive) continue; // the mask-128 alive filter
-			for (const std::vector<uint8_t> &body : splashes)
-				conn.link.transport->host_send(s2c::PLAY_SOUND, body,
-				                               /*reliable=*/false);
-		}
-	}
-	world.out.water_crossings.clear();
 	lap.mark(devtools::Slot::SIM_SERVER_RULES);
 
-	// (3) Queue the 0x0A frames built BEFORE the entity motor at step (1c):
-	// retail's Server_TickUpdate ends with its per-slot send, behind the
-	// maintenance legs above (the capture-witnessed [0x16][0x31][0x79][..][0x0A]
-	// datagram order), and Game_ProcessMainFrame only then runs
-	// Entity_UpdateAllEntities, so every 0x0A is a pre-motor snapshot of the
-	// previous frame's final world state.
+	// (3) The per-slot 0x0A: built from the world as the script pass and every
+	// maintenance leg above left it, and queued behind their messages (the
+	// capture-witnessed [0x16][0x31][0x79][..][0x0A] datagram order). The
+	// entity update runs only after this at step (4), so every 0x0A precedes
+	// this frame's motor step. SESSION-ONLY [D-NET-120]: the original's
+	// per-frame replicate/broadcast blocks are each gated on is_in_session
+	// (+0x58) inside Server_TickUpdate (@0x51d9ab..0x51e3f3), while the C2S recv
+	// pump above is not — so a World kept alive past match-end (is_in_session
+	// 0, world non-null) keeps ticking but stops fanning ghost 0x0A frames.
+	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate (gated by the
+	//  jnz @0x5266B4) sends its 0x0A (the @0x51E3D6..0x51E450 per-slot block),
+	//  Entity_UpdateAllEntities follows @0x52674B]
+	// Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every in-match
+	// connection [orig: NapiNPServer_SendFiltered @0x4C87E0 once, SendToConn per node].
+	// [D-NET-122 RESOLVED at P5] This fan uses the shared is_in_match(conn) predicate (was an inline
+	// burst.spawned). The host's own type-2 loopback now satisfies it once its §5.2a burst completes,
+	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
+	// starved (the gap the legacy net-ISystem emit filled by emitting to every transport-bearing
+	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
+	// Server_BuildPlayerInfoAndAdd). An absent, freed, or lifetime-stale owner
+	// emits nothing and cannot advance per-recipient frame state.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
+	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
+	if (ctx.is_in_session && !world.match.outcome().ended) {
+		// The priority build runs only for recipients that take entity records:
+		// the listen host's own player gets the header-only frame and never
+		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips
+		// Server_BuildEntityPriorityList for g_local_player_entity]. Type-1 peers
+		// take one only at their open send boundary (see the fan below).
+		bool any_record_recipient = false;
+		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn)) continue;
+			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
+			if (world.cached.local_player.valid() &&
+					conn.link.owned_entity == world.cached.local_player)
+				continue;
+			any_record_recipient = true;
+			break;
+		}
+		std::vector<GameEntitySnapshot> ents;
+		if (any_record_recipient) {
+			// The previous tick's movement/destruction is settled. Replication LOS
+			// can retain each target's final section matrices across every entity
+			// and recipient; never inherit a view built while the motor is moving.
+			{
+				const devtools::ProfileScope prep_scope(
+						world.profile, devtools::Slot::SIM_REPLICATION_QUERY_PREP);
+				if (world.collision != nullptr)
+					world.collision->prepare_cached_raycast_queries(world);
+			}
+			const devtools::ProfileScope snapshot_scope(
+					world.profile, devtools::Slot::SIM_REPLICATION_SNAPSHOT);
+			ents = replication::snapshot_world(world);
+			// Stamp owner-hidden rows: a spectator connection's own player entity
+			// is admitted only to its owner's list (the JO reduction of the
+			// slot+97536 hide byte — see replication_model.h owner_hidden)
+			// [orig: Server_BuildEntityPriorityList @0x50e6fd].
+			for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) {
+				if (!oc.link.spectator || !oc.link.owned_entity.valid()) continue;
+				for (GameEntitySnapshot &es : ents) {
+					if (es.wire_handle == oc.link.owned_entity.packed) {
+						es.owner_hidden = true;
+						break;
+					}
+				}
+			}
+		}
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn)) continue;
+			// The host's type-2 loopback is an in-process seam and remains
+			// full-rate (its own player takes the header-only frame inside the
+			// fan). Type-1 peers receive one fresh 0x0A only when their
+			// configured S2C send boundary opens; queuing all intervening
+			// snapshots would burst stale frames at that boundary.
+			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
+			const devtools::ProfileScope fan_scope(
+					world.profile, devtools::Slot::SIM_REPLICATION_FAN);
+			conn.link.receive_silence_ms = conn.receive_inactive_ms;
+			// Built here and queued just below: the frame's CONTENT is the world
+			// after the script pass and the maintenance, before the motor step.
+			conn.frame_update_staged = replication::build_connection_s2c(
+					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
+					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0);
+		}
+	}
+	// Queue the frames just built, retail's per-slot send.
 	// [orig: Server_TickUpdate per-slot block @0x51E3D6..0x51E450]
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!conn.frame_update_staged) continue;
@@ -2441,40 +2389,22 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
-	}    // Guidance follows the frame carrying the corresponding fired-round birth.
-    // [orig: Entity_SendEffectPacket @0x445C40, routed serializer @0x4D6240]
-    if (ctx.is_in_session) for (const auto &update : world.round_sim.guided_updates) {
-        for (int group = 1; group <= 6; ++group) {
-            if (!(update.groups & (1u << group))) continue;
-            GuidedRecord record;
-            record.target_slot = update.state.target; record.weapon_type = update.state.phase;
-            record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
-            record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
-            std::vector<uint8_t> body;
-            put_u16le(body, update.shooter); put_u16le(body, update.net_id); body.push_back(uint8_t(group));
-            const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
-            body.insert(body.end(), payload.begin(), payload.end());
-            for (auto &conn : ctx.np_protocol.connection_list)
-                if (active_player_recipient(conn) && conn.link.mode != replication::TransportMode::Loopback)
-                    conn.pending_guidance.push_back(body);
-        }
-    }
-    world.round_sim.guided_updates.clear();
-    for (auto &conn : ctx.np_protocol.connection_list) {
-        if (!ctx.is_in_session || !active_player_recipient(conn)) {
-            conn.pending_guidance.clear();
-            continue;
-        }
-        if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-        for (const auto &body : conn.pending_guidance)
-            conn.link.transport->host_send(0x44, body, true, 0);
-        conn.pending_guidance.clear();
-    }
+	}
+	Server_RouteGuidance(ctx, world);
 
 	emit_periodic_rtt(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 
-	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
+	// (4) The entity pass: Game_ProcessMainFrame runs the gated entity update
+	// once Server_TickUpdate has sent this frame's 0x0A, then the weapon pump
+	// and the frame's tail. Its inline sends reach the wire in the next frame,
+	// routed at the head of the next call.
+	// [orig: Game_ProcessMainFrame — the Server_TickUpdate call @0x5266B6, the
+	//  entity gate @0x526703..0x526742, the Entity_UpdateAllEntities call
+	//  @0x52674B]
+	world.run_entity_pass(tick);
+
+	// (5) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
 	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +
 	// framed into a 0x83 SESSION by the owner (frame_in_match_s2c). No socket I/O in engine/.
 }

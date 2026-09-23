@@ -3,8 +3,8 @@
 //     bodies, now shared) over a synthetic X-ramp atlas,
 //   * calc_average_ground_height (Entity_CalcAverageGroundHeight @0x457230): the 5-tap
 //     weighted average, the >= center clamp, and the worldY water clamp, by hand math,
-//   * AiSystem grounding: apply_ground_clamp drives pos[2] off the terrain, the AI tick
-//     wires it in, and a null field leaves Z untouched.
+//   * the AI tick never grounds a brain by itself: a brain with no vehicle mover keeps
+//     its Z over a wired terrain field (only the row's own mover writes the vertical).
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
@@ -105,9 +105,9 @@ int main() {
         wf.has_water = true;
         wf.water_y = fx(50); // 3276800, well above the 417792 ground
         GroundClearance gcw{};
-        gcw.has_physics = true;
+        gcw.has_occupant = true;
         CHECK(calc_average_ground_height(wf, pos, 0x50000, gcw) == fx(50));
-        gcw.has_physics = false; // no physics -> no water clamp
+        gcw.has_occupant = false; // no physics -> no water clamp
         CHECK(calc_average_ground_height(wf, pos, 0x50000, gcw) == 417792);
 
         // invalid field -> INT32_MIN sentinel.
@@ -115,55 +115,26 @@ int main() {
         CHECK(calc_average_ground_height(bad, pos, 0x50000, gc) == INT32_MIN);
     }
 
-    // ---- AiSystem::apply_ground_clamp drives pos[2] = ground + stand_offset ----
-    {
-        AiSystem sys;
-        sys.terrain = &f;
-        int idx = sys.attach(EntityHandle::make(0, 0));
-        AiEntity &e = *sys.at(idx);
-        e.pos[0] = fx(100);
-        e.pos[1] = 0;
-        e.pos[2] = fx(9999); // start floating
-        sys.apply_ground_clamp(e);
-        // ground 417792 + stand 0x50000 (327680) = 745472.
-        CHECK(e.pos[2] == 745472);
-        CHECK(e.brain.f[AiBrain::kWorkPosZ] == 745472);
-
-        // Slope-tracking: a different column gives a different grounded Z.
-        e.pos[0] = fx(300);
-        e.pos[2] = 0;
-        sys.apply_ground_clamp(e);
-        CHECK(e.pos[2] > 745472); // x=300 is higher up the ramp than x=100
-    }
-
-    // ---- null terrain leaves Z untouched ----
-    {
-        AiSystem sys; // terrain == nullptr (default)
-        int idx = sys.attach(EntityHandle::make(0, 0));
-        AiEntity &e = *sys.at(idx);
-        e.pos[2] = fx(1234);
-        sys.apply_ground_clamp(e);
-        CHECK(e.pos[2] == fx(1234)); // unchanged
-    }
-
-    // ---- the AI tick wires grounding (apply_ground_clamp runs last, so it's authoritative) ----
+    // ---- the AI tick never grounds a brain: only the row's own mover (a vehicle
+    // family's physics callback) writes its vertical, so a brain with no vehicle
+    // mover keeps its Z over a wired terrain field [orig: Entity_UpdatePool1Slot
+    // @0x4B8E41..0x4B8E53, the +0x1C4 call; the +0x50000 stand clearance is the
+    // movers' own, AI_ProcessMovementStep @0x466E19] ----
     {
         World w;
-        AiSystem sys;
-        sys.terrain = &f;
-        int idx = sys.attach(EntityHandle::make(0, 0));
-        AiEntity &e = *sys.at(idx);
+        w.ai.terrain = &f;
+        int idx = w.ai.attach(EntityHandle::make(1, 0));
+        AiEntity &e = *w.ai.at(idx);
         e.brain.f[AiBrain::kCurState] = 0; // benign default state (nullsub handlers)
         e.pos[0] = fx(200);
         e.pos[1] = 0;
         e.pos[2] = fx(9999); // floating
         TickContext ctx{};
+        ctx.world = &w;
         ctx.is_authority = true;
-        sys.tick(w, ctx);
-        // ground at x=200: center/N/S 12.5u(819200), E(205)=839680, W(195)=798720, max=839680.
-        // result=(819200*3? no: N+S+E+W=819200+819200+839680+798720)=3276800; +2*(819200+2*839680)=4997120
-        //   => 8273920/10 = 827392; +327680 = 1155072.
-        CHECK(e.pos[2] == 1155072);
+        w.update_all_entities(ctx);
+        CHECK(e.pos[2] == fx(9999));
+        CHECK(e.brain.f[AiBrain::kWorkPosZ] == 0);
     }
 
     if (failures == 0) std::printf("ground_height_test: OK\n");

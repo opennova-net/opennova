@@ -64,12 +64,12 @@ void CollisionResolveState::clear() {
 }
 
 const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
-	// Last-wins over duplicate definition ids — the same load-order overwrite
-	// the id-keyed item map exposed (see mission item_traits).
-	const DefItemDef *found = nullptr;
+	// The first row carrying the id, scanning from row 0: a later duplicate is
+	// never reached. [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp
+	//  [ecx],esi; jz` @0x49E120..0x49E122 returns on the first hit]
 	for (size_t i = 0; i < items.count; ++i)
-		if (items.entries[i].id == item_id) found = &items.entries[i];
-	return found;
+		if (items.entries[i].id == item_id) return &items.entries[i];
+	return nullptr;
 }
 
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
@@ -508,18 +508,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 				}
-				// brain[11] is the CMDL floor's absolute value.
-				// [orig: Entity_InitHelicopterAIFromDef @0x4683C0]
+				// brain[11] is the CMDL floor's absolute value. The class init
+				// writes it: the helicopter family always, the vehicle family
+				// unless the loaded profile is a boat (subtype 1), whatever the
+				// profile's type. [orig: Entity_InitHelicopterAIFromDef
+				//  @0x4684E2..0x4684F7; Entity_InitVehicleAIFromDef `cmp [edi+14h],
+				//  ebx` @0x46881C, store @0x468836]
 				const world::AiEntity *vehicle_ai = world.ai.for_handle(e->handle);
 				if (vehicle_ai != nullptr &&
-						(vehicle_ai->profile.type == 1 ||
-								(vehicle_ai->profile.type == 2 &&
+						(vt->brain_class == world::VehicleBrainClass::Air ||
+								(vt->brain_class == world::VehicleBrainClass::Ground &&
 										vehicle_ai->profile.subtype != 1))) {
 					e->veh.air_probe_z_off =
 							static_cast<int32_t>(vt->box_z_lo < 0 ? 0u - uint32_t(vt->box_z_lo)
 																  : uint32_t(vt->box_z_lo));
 					if (world::AiEntity *ai = world.ai.for_handle(e->handle))
-						ai->brain.f[11] = e->veh.air_probe_z_off;
+						ai->brain.f[world::AiBrain::kModelFloor] = e->veh.air_probe_z_off;
 				}
 			}
 		}
@@ -772,7 +776,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				hs = state.husk_pieces_by_graphic.emplace(
 						piece_key, std::move(info)).first;
-				// Piece bound = the husk model's CMDL sphere [orig: Entity_InitFromModel @0x40dced..0x40de16]
+				// Piece bound = the husk model's CMDL sphere [orig: Entity_InitFromModel @0x40dceb..0x40de16]
 				if (piece_m3 != nullptr) {
 					const int32_t piece_bound_q16 =
 							world::model_bound_radius_q16_from_3di(*piece_m3);
@@ -805,6 +809,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					t->husk_section_centers = info.centers;
 				t->husk_rest_min_z = info.rest_min_z;
 				t->husk_rest_max_z = info.rest_max_z;
+				// brain[12] is the husk floor's absolute value, read from the
+				// husk (the final one when it loaded, else the first) by the class
+				// init under brain[11]'s gate: the helicopter family always, the
+				// vehicle family unless the profile is a boat (subtype 1).
+				// [orig: Entity_InitHelicopterAIFromDef @0x4684FA..0x468527;
+				//  Entity_InitVehicleAIFromDef @0x468839..0x468858]
+				const world::VehicleTraits *husk_vt =
+						h.pool() == 1 ? world.vehicles.traits.get(e->item_id) : nullptr;
+				world::AiEntity *husk_ai = world.ai.for_handle(e->handle);
+				if (husk_vt != nullptr && husk_ai != nullptr && !husk_ai->inf.active &&
+						t->husk_model_loaded &&
+						(husk_vt->brain_class == world::VehicleBrainClass::Air ||
+								(husk_vt->brain_class == world::VehicleBrainClass::Ground &&
+										husk_ai->profile.subtype != 1)))
+					husk_ai->brain.f[world::AiBrain::kHuskFloor] =
+							world::to_fixed(std::abs(t->husk_rest_min_z));
 			}
 			// Only entity+52's FIRST husk model joins this signed max. A
 			// huskFinal-only definition has no substitute operand here.

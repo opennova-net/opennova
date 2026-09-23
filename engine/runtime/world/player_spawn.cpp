@@ -47,6 +47,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
     seed.has_item_def = world.tables.player.has_item_def;
+    seed.item_type_index = world.tables.player.item_type_index;
     seed.item_type = world.tables.player.item_type;
     seed.item_attrib = world.tables.player.item_attrib;
     seed.armor_impact = retail_signed_i16(world.tables.player.armor_impact);
@@ -78,7 +79,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.flags = 2u | 0x100u;   // movement gate + player classifier in the live/wire mirror
     // Both local and remote player bodies carry the retail player classifier. The
     // damage trigger uses this bit—not local ownership—to bypass NPC move/group alerts.
-    // [orig: Entity_HandleDamageTrigger test victim Flags,100h @0x4073c8]
+    // [orig: OrganicClass_HandleEvent test victim Flags,100h @0x4073c8]
     seed.engine_flags |= kEntityFlagPlayer;
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
     // 0x0C organic-spawn carries it so the client self-matches its own player. [orig: Server_PlayerAdd

@@ -1,5 +1,6 @@
 // Test parsing items.def — spot-check "dbuggy1" and "Player #1" entries, plus
 // the per-item particle-effect keys over an inline snippet.
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,6 +64,55 @@ static int test_light_transfer(void) {
         items.entries[2].raw_lines_count != 0 ||
         items.entries[3].raw_lines_count != 0) {
         fprintf(stderr, "FAIL: light_transfer fell through to raw_lines\n");
+        ++fails;
+    }
+    def_free_items(&items);
+    return fails;
+}
+
+/* The kill value: `score` is atol of the first value token stored as a signed
+   word at ItemDef+0x194; an item that never authors it keeps 0 (every Player
+   definition), which Score_ProcessKillEvent treats as "no kill accounting".
+   Shipped rows author forms like "score 0 155".
+   [orig: ItemDef_ParseProperty @0x4A0213..0x4A0242; Score_ProcessKillEvent
+   @0x4FD422] */
+static int test_score_word(void) {
+    static const char snippet[] =
+        "begin \"Player #1, Single player\"\n"
+        "  id 105310\n"
+        "  type person\n"
+        "end\n"
+        "begin \"Indonesian Soldier #1 with AK47\"\n"
+        "  id 101798\n"
+        "  type person\n"
+        "  score 10\n"
+        "end\n"
+        "begin \"Two Values\"\n"
+        "  id 3\n"
+        "  SCORE 0 155\n"
+        "end\n"
+        "begin \"Wrapped\"\n"
+        "  id 4\n"
+        "  score 70000\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
+                               &items) != 0 ||
+        items.count != 4) {
+        fprintf(stderr, "FAIL: score snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int fails = 0;
+    if (items.entries[0].score != 0 || items.entries[1].score != 10 ||
+        items.entries[2].score != 0 || items.entries[3].score != 70000 - 0x10000) {
+        fprintf(stderr, "FAIL: score word mismatch: %d %d %d %d\n", items.entries[0].score,
+                items.entries[1].score, items.entries[2].score, items.entries[3].score);
+        ++fails;
+    }
+    if (items.entries[1].raw_lines_count != 0 || items.entries[2].raw_lines_count != 0) {
+        fprintf(stderr, "FAIL: score fell through to raw_lines\n");
         ++fails;
     }
     def_free_items(&items);
@@ -559,14 +609,69 @@ static int test_regional_sound_delays() {
     return ok ? 0 : 1;
 }
 
+// Every scaled items.def value goes through _ftol2_sse, and the shipped game
+// takes its SSE2 leg: an infinity or a truncation outside int32 is the integer
+// indefinite 0x80000000, not the low dword of a 64-bit truncation.
+// [orig: ItemDef_ParseProperty @0x49EB00 (the _ftol2_sse calls @0x49F96D for
+// max_angle, @0x49F093 for sqb_rate, @0x49EE7E / @0x49EEA5 / @0x49EECF for
+// destroy_timing, @0x49FCA3 for the dawnshot delay); _ftol2_sse @0x76BC15]
+static int test_out_of_range_values_take_the_sse2_leg() {
+    const char text[] =
+        "begin Door\n id 1\n max_angle 270\n sqb_rate 0\n end\n"
+        "begin Timed\n id 2\n destroy_timing 40000000 -40000000 1\n dawnshot Bird 1 40000000\n end\n";
+    DefItemsFile items{};
+    if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
+            sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
+    const auto &door = items.entries[0];
+    const auto &timed = items.entries[1];
+    const bool ok = door.door_max_angle_bam == INT32_MIN && door.deathtime_ticks == INT32_MIN &&
+            timed.destroy_timing_ticks[0] == INT32_MIN && timed.destroy_timing_ticks[1] == INT32_MIN &&
+            timed.destroy_timing_ticks[2] == 62 &&
+            timed.shot_delay_ticks[0][0] == 62 && timed.shot_delay_ticks[0][1] == INT32_MIN;
+    if (!ok) fprintf(stderr, "FAIL out-of-range items.def conversions\n");
+    def_free_items(&items);
+    return ok ? 0 : 1;
+}
+
+// "scale" is converted inline: atof's double times 65536, truncated by x87
+// `fistp qword` under round-toward-zero, the low dword kept. A value past
+// int32 wraps, an infinity stores the indefinite's low dword 0, and the
+// double (not a float) is what gets truncated.
+// [orig: ItemDef_ParseProperty @0x49EB00 (the _atof call @0x49F6F9, RC=truncate
+// @0x49F710, `fistp qword` @0x49F728, the store @0x49F736)]
+static int test_scale_keeps_the_low_dword_of_the_fistp() {
+    const char text[] =
+        "begin A\n id 1\n scale 40000\n end\n"
+        "begin B\n id 2\n scale -40000\n end\n"
+        "begin C\n id 3\n scale 123456.789\n end\n"
+        "begin D\n id 4\n scale 32767.99999\n end\n"
+        "begin E\n id 5\n scale 1e400\n end\n";
+    DefItemsFile items{};
+    if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
+            sizeof(text) - 1, &items) != 0 || items.count != 5) return 1;
+    const bool ok = items.entries[0].scale_q16 == -1673527296 &&
+            items.entries[1].scale_q16 == 1673527296 &&
+            items.entries[2].scale_q16 == -499070469 &&
+            items.entries[3].scale_q16 == 2147483647 &&
+            items.entries[4].scale_q16 == 0;
+    if (!ok) fprintf(stderr, "FAIL items.def scale conversion\n");
+    def_free_items(&items);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
     if (test_regional_sound_delays() != 0) return 1;
+    if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
+    if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;
 	if (test_vehicle_spawn_lists() != 0)
 		return 1;
 	if (test_item_def_allocator_defaults() != 0) {
 		return 1;
 	}
 	if (test_light_transfer() != 0) {
+        return 1;
+    }
+    if (test_score_word() != 0) {
         return 1;
     }
     if (test_weathervane_minai_default_aip() != 0) {

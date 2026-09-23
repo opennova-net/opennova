@@ -71,6 +71,17 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     const int index = world.ai.attach(handle);
     mission::resolve_item_traits(world, *table, item_wire_class_, handle);
     Entity &entity = *world.registry.get(handle);
+    // The helicopter takes the request's transform verbatim: its BAM heading
+    // (the flyover's 0x7FFFFF80) with zero pitch and roll, never a rounding
+    // through the degree mirror. [orig: Entity_SpawnHelicopter @0x452209..0x45224C
+    //  (x/y/z/yaw from spawnPos), @0x452253/@0x45225A (pitch/roll = ebx = 0,
+    //  @0x4521B5); HeliLift_SpawnFlyover @0x4527E7]
+    if (request.helicopter) {
+        entity.veh.yaw_seeded = true;
+        entity.veh.yaw_bam = request.heading;
+        entity.veh.air_pitch_bam = 0;
+        entity.veh.air_roll_bam = 0;
+    }
     AiEntity &ai = *world.ai.at(index);
     std::copy_n(request.pos, 3, ai.pos);
     std::copy_n(request.pos, 3, ai.net_saved_live_pose);
@@ -84,19 +95,20 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     // Both templates start with a null entity+368 controller. Neither the
     // clone nor these definition callbacks allocates one (@0x4397C0,
     // @0x4BFCC0, @0x4683C0). The ordinary AiEntity fixture default is true.
-    ai.has_physics = false;
+    ai.has_occupant = false;
     ai.def_attrib = entity.item_attrib;
     ai.slot.f[0] = int32_t(handle.packed) + 1;
     if (profile) {
-        // CHel's definition callback is @0x4683C0 (the separate @0x461F00
-        // respawn init has different flags/slide writes). Its generic allocator
-        // starts all three state words at zero and lands the constant block
-        // (the shared initialize_vehicle_brain); the callback then writes the
-        // move step before calling the enter handler
+        // CHel's definition callback is @0x4683C0. Its generic allocator starts
+        // all three state words at zero and lands the constant block (the shared
+        // initialize_vehicle_brain); the callback then writes the helicopter
+        // speed words and patrol offset (initialize_class_brain) and the move
+        // step before calling the enter handler
         // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 — the @0x460200 call
         //  @0x4684bf/@0x4684cf, `[brain+1Ch] = 10h` @0x468645].
-        initialize_ai_profile(ai, *profile, world.ai, world::EntityKind::Item);
+        initialize_ai_profile(ai, *profile);
         initialize_vehicle_brain(ai, world, request.heading);
+        initialize_class_brain(ai, profile, /*helicopter_init=*/true, world.ai);
         ai.brain.f[AiBrain::kStep] = 16;
         std::memcpy(ai.slot.bytes() + 156, "H_BHawkN", 8);
         world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;
@@ -122,11 +134,11 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         ai.inf.adm_id = adm_id;
         world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
     }
+    // The weapon resolve also lands the helicopter class init's ammo copy: a
+    // block's count seeds its brain word only when the block resolved a
+    // nonzero ammo byte, so the null first row seeds nothing.
+    // [orig: Entity_InitHelicopterAIFromDef @0x468555..0x46858D]
     mission::resolve_ai_weapons(world, *table, handle, &assets());
-    if (profile) {
-        ai.brain.f[AiBrain::kAmmoA] = ai.profile.fire_a.ammo_index >= 0 ? profile->primary.ammo : 0;
-        ai.brain.f[AiBrain::kAmmoB] = ai.profile.fire_b.ammo_index >= 0 ? profile->secondary.ammo : 0;
-    }
     ensure_collision_instance(world, handle);
     if (!profile) initialize_organic_ai(world, entity);
     if (profile) {

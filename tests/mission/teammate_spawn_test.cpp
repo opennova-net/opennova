@@ -1,9 +1,15 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include <runtime/world/teammate_operations.h>
+#include <runtime/world/vehicle_motor.h>
+#include <formats/aip/aip.h>
+#include <formats/def/def.h>
+#include <runtime/mission/mission_kernel.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
 using namespace opennova;
@@ -11,8 +17,91 @@ namespace w = opennova::world;
 namespace {
 int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %d: %s\n", __LINE__, #c); ++failures; } } while (0)
+// The helicopter's class init copies a weapon block's ammo count into the
+// brain only when the block resolved a nonzero ammo byte: the null first ammo
+// row resolves to byte 0 and seeds nothing.
+// [orig: Entity_InitHelicopterAIFromDef @0x468555..0x46858D (`cmp byte ptr
+//  [eax+94h],0`, `cmp byte ptr [eax+0B4h],0`); AmmoDef_LookupByName @0x409870]
+void test_helicopter_ammo_seed_needs_a_resolved_byte() {
+    std::array<def::DefItemDef, 1> rows{};
+    rows[0].id = mission::kItemIdOffset + 1281;
+    rows[0].type = 1;
+    rows[0].attrib = w::kItemAttribAIData;
+    rows[0].hp = 100;
+    std::strcpy(rows[0].ai_function, "CHel");
+    def::DefItemsFile items{rows.data(), rows.size()};
+    auto kernel = std::make_unique<mission::MissionKernel>();
+    kernel->set_items_table(&items);
+    kernel->world.registry.configure_pool(0, 8);
+    kernel->world.registry.configure_pool(1, 8);
+    kernel->world.tables.ammo.entries.resize(2);
+    kernel->world.tables.ammo.entries[0].name = "AT_NULL";
+    kernel->world.tables.ammo.entries[0].valid = true;
+    kernel->world.tables.ammo.entries[1].name = "50CAL";
+    kernel->world.tables.ammo.entries[1].valid = true;
+    static const char kProfile[] =
+            "type HELO\nprimary_weap 50CAL\nprimary_ammo 5\n"
+            "secondary_weap AT_NULL\nsecondary_ammo 7\n";
+    kernel->ai_profiles.push_back({"h_bhawkn",
+            aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
+                    sizeof(kProfile) - 1)});
+    w::TeammateSpawn request;
+    request.item_type = 1281;
+    request.ssn = 11000;
+    request.helicopter = true;
+    const w::EntityHandle heli = kernel->spawn_teammate(request);
+    CHECK(heli.valid());
+    const w::AiEntity *ai = kernel->world.ai.for_handle(heli);
+    CHECK(ai != nullptr);
+    if (ai == nullptr) return;
+    CHECK(ai->brain.f[w::AiBrain::kAmmoA] == 5);
+    CHECK(ai->brain.f[w::AiBrain::kAmmoB] == 0);
+}
+// The flyover helicopter takes its spawn transform verbatim: heading
+// 0x7FFFFF80, zero pitch and roll. Its first AI flight pass must read that
+// heading, not the degree mirror's 270 rounded back to 0x80000000.
+// [orig: HeliLift_SpawnFlyover @0x4527E7 (the heading); Entity_SpawnHelicopter
+//  @0x452209..0x45224C (x/y/z/yaw from spawnPos), @0x452253/@0x45225A (pitch/roll 0)]
+void test_flyover_helicopter_keeps_its_spawn_heading() {
+    std::array<def::DefItemDef, 1> rows{};
+    rows[0].id = mission::kItemIdOffset + 1281;
+    rows[0].type = 1;
+    rows[0].attrib = w::kItemAttribAIData;
+    rows[0].hp = 100;
+    std::strcpy(rows[0].ai_function, "CHel");
+    def::DefItemsFile items{rows.data(), rows.size()};
+    auto kernel = std::make_unique<mission::MissionKernel>();
+    kernel->set_items_table(&items);
+    kernel->world.registry.configure_pool(0, 8);
+    kernel->world.registry.configure_pool(1, 8);
+    static const char kProfile[] = "type HELO\n";
+    kernel->ai_profiles.push_back({"h_bhawkn",
+            aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
+                    sizeof(kProfile) - 1)});
+    w::TeammateSpawn request;
+    request.item_type = 1281;
+    request.ssn = 11000;
+    request.heading = 2147483520; // 0x7FFFFF80
+    request.helicopter = true;
+    const w::EntityHandle heli = kernel->spawn_teammate(request);
+    w::Entity *hull = kernel->world.registry.get(heli);
+    CHECK(hull != nullptr);
+    if (hull == nullptr) return;
+    int32_t pos[3], yaw = 0, pitch = 1, roll = 1;
+    w::carrier_pose_fixed(*hull, pos, yaw, pitch, roll);
+    CHECK(yaw == 2147483520 && pitch == 0 && roll == 0);
+    kernel->world.ai.chel_ai_drive(kernel->world, *hull, nullptr, w::VehicleTraits{});
+    CHECK(hull->veh.yaw_bam == 2147483520);
+    CHECK(hull->veh.air_pitch_bam == 0 && hull->veh.air_roll_bam == 0);
+}
 }
 int main() {
+    test_helicopter_ammo_seed_needs_a_resolved_byte();
+    test_flyover_helicopter_keeps_its_spawn_heading();
+    if (failures) {
+        std::printf("retail teammate factory: FAIL\n");
+        return 1;
+    }
     RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (CP01 and the teammate DEF/AIP assets)");
     auto owned = std::make_unique<testrig::RetailMissionRig>();
     auto &rig = *owned;
@@ -52,7 +141,7 @@ int main() {
         CHECK(first && second && heli);
         if (!first || !second || !heli) return 1;
         CHECK(first->inf.active && second->inf.active && !heli->inf.active);
-        CHECK(!first->has_physics && !second->has_physics && !heli->has_physics);
+        CHECK(!first->has_occupant && !second->has_occupant && !heli->has_occupant);
         CHECK(heli->brain.f[w::AiBrain::kCurState] == 0);
         if (medic_assets) {
             CHECK(first->inf.adm_id >= 0 && second->inf.adm_id >= 0);
@@ -83,7 +172,14 @@ int main() {
         CHECK(traits && !traits->player_control);
         const int expected_state = attempt == 0 ? 7 : 14;
         CHECK(heli && heli->brain.f[w::AiBrain::kCurState] == expected_state);
-        CHECK(heli && heli->pos[0] == initial_x);
+        // The two medics stand on the helicopter (their ground link), so the
+        // entity update's pool-0 walk wakes its contact solve every fourth
+        // tick. [orig: HeliLift_SpawnFlyover @0x452980/@0x4529BD (the +0x28
+        //  stores); Entity_UpdateAllEntities -- the Entity_FindChildByDefType
+        //  call @0x4C2484, `test tick,3` @0x4C25CE -> Entity_WakeContactSolve @0x459290]
+        const w::Entity *hull = rig.world.registry.get(slot.helicopter);
+        CHECK(hull && ((hull->flags | hull->engine_flags) & 0x40u) != 0);
+        CHECK(hull && hull->veh.contact_wake_tick == ((rig.world.logic_tick - 1u) & ~3u));
         CHECK(rig.world.teammates.at(0)->state == w::TeammateOperations::State::FlyToHover);
         w::EntityHandle existing;
         for (int i = 0; i < rig.world.ai.count(); ++i) {

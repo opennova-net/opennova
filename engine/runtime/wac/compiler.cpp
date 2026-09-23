@@ -1,775 +1,1316 @@
 #include <runtime/wac/compiler.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 
-#include <cctype>
-#include <cmath>
-#include <cstddef>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
-#include <formats/wac/lexer.h>
-#include <formats/wac/parser.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/ammo_table.h>
-#include <runtime/world/var_store.h>
 
 #include <base/io/strutil.h>
 
 namespace opennova::wac {
 namespace {
 
-bool ieq(std::string_view a, const char *b) { return opennova::strutil::iequals(a, b); }
+bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
-// The 24-row named-value table @0x82EEF0 (count 0x18 @0x82F130), walked with
-// stricmp by WacScript_ResolveParameter's third lookup leg.
-int builtin_id(const std::string &name) {
-    if (ieq(name, "ticks")) return static_cast<int>(Builtin::Ticks);
-    if (ieq(name, "result")) return static_cast<int>(Builtin::Result);
-    if (ieq(name, "SquadSSN")) return static_cast<int>(Builtin::SquadSSN);
-    if (ieq(name, "SquadWho")) return static_cast<int>(Builtin::SquadWho);
-    if (ieq(name, "RND")) return static_cast<int>(Builtin::RandomResult);
-    if (ieq(name, "auto") || ieq(name, "player") || ieq(name, "item")) return static_cast<int>(Builtin::AutoItem);
-    if (ieq(name, "health")) return static_cast<int>(Builtin::Health);
-    if (ieq(name, "wind")) return static_cast<int>(Builtin::Wind);
-    if (ieq(name, "mana")) return static_cast<int>(Builtin::Mana);
-    if (ieq(name, "CurTOD")) return static_cast<int>(Builtin::CurTOD);
-    if (ieq(name, "breathtime")) return static_cast<int>(Builtin::Breathtime);
-    if (ieq(name, "autogain")) return static_cast<int>(Builtin::Autogain);
-    // Round-outcome names from the named-value table @0x82EEF0 (case-insensitive,
-    // like every entry — the resolver walks the table with stricmp).
-    if (ieq(name, "bluekills")) return static_cast<int>(Builtin::Bluekills);
-    if (ieq(name, "greenkills")) return static_cast<int>(Builtin::Greenkills);
-    if (ieq(name, "humans")) return static_cast<int>(Builtin::Humans);
-    if (ieq(name, "GameOver")) return static_cast<int>(Builtin::GameOver);
-    if (ieq(name, "WinVar")) return static_cast<int>(Builtin::WinVar);
-    if (ieq(name, "LoseVar")) return static_cast<int>(Builtin::LoseVar);
-    if (ieq(name, "accuracyspread")) return static_cast<int>(Builtin::AccuracySpread);
-    if (ieq(name, "fallmps")) return static_cast<int>(Builtin::Fallmps);
-	if (ieq(name, "seatbelt"))
-		return static_cast<int>(Builtin::Seatbelt);
-	if (ieq(name, "night")) return static_cast<int>(Builtin::Night);
-    return -1;
+constexpr uint32_t hash4(char a, char b, char c, char d) {
+	return (uint32_t(uint8_t(a)) << 24) | (uint32_t(uint8_t(b)) << 16) |
+			(uint32_t(uint8_t(c)) << 8) | uint32_t(uint8_t(d));
 }
 
-void stamp_source(Expr &expr, uint32_t source) {
-    expr.call.source_index = source;
-    for (Expr &child : expr.kids) stamp_source(child, source);
+// A token's hash is its first four bytes padded with ';', big-endian.
+constexpr uint32_t kHashUnset = hash4(';', ';', ';', ';');
+constexpr uint32_t kHashLParen = hash4('(', ';', ';', ';');
+constexpr uint32_t kHashRParen = hash4(')', ';', ';', ';');
+constexpr uint32_t kHashAssign = hash4('=', ';', ';', ';');
+constexpr uint32_t kHashBang = hash4('!', ';', ';', ';');
+constexpr uint32_t kHashNot = hash4('N', 'O', 'T', ';');
+constexpr uint32_t kHashIf = hash4('I', 'F', ';', ';');
+constexpr uint32_t kHashThen = hash4('T', 'H', 'E', 'N');
+constexpr uint32_t kHashElse = hash4('E', 'L', 'S', 'E');
+constexpr uint32_t kHashElseIf = hash4('E', 'L', 'S', 'I');
+constexpr uint32_t kHashEnd = hash4('E', 'N', 'D', ';');
+constexpr uint32_t kHashEnter = hash4('E', 'N', 'T', 'E');
+constexpr uint32_t kHashLeave = hash4('L', 'E', 'A', 'V');
+constexpr uint32_t kHashDoSeq = hash4('D', 'O', 'S', 'E');
+constexpr uint32_t kHashDoRnd = hash4('D', 'O', 'R', 'N');
+constexpr uint32_t kHashNext = hash4('N', 'E', 'X', 'T');
+constexpr uint32_t kHashGloop = hash4('G', 'L', 'O', 'O');
+constexpr uint32_t kHashPloop = hash4('P', 'L', 'O', 'O');
+constexpr uint32_t kHashCheat = hash4('C', 'H', 'E', 'A');
+constexpr uint32_t kHashVar = hash4('V', 'A', 'R', ';');
+constexpr uint32_t kHashRun = hash4('R', 'U', 'N', ';');
+constexpr uint32_t kHashOpenBracket = hash4('[', ';', ';', ';');
+constexpr uint32_t kHashCloseBracket = hash4(']', ';', ';', ';');
+
+// END, and every word starting ENDD, ENDI, ENDL or ENDP (ENDDO, ENDIF,
+// ENDLOOP...). [orig: Script_Compile @0x4F4065 (END;), the switch
+// @0x4F461E..0x4F4634 (cases 0/5/8/12 -> @0x4F463B)]
+bool is_end_hash(uint32_t h) {
+	return h == kHashEnd || h == hash4('E', 'N', 'D', 'D') || h == hash4('E', 'N', 'D', 'I') ||
+			h == hash4('E', 'N', 'D', 'L') || h == hash4('E', 'N', 'D', 'P');
 }
 
-void stamp_source(Stmt &stmt, uint32_t source) {
-    stmt.call.source_index = source;
-    stamp_source(stmt.cond, source);
-    for (Stmt &child : stmt.body) stamp_source(child, source);
-    for (ElseIf &branch : stmt.elifs) {
-        stamp_source(branch.cond, source);
-        for (Stmt &child : branch.body) stamp_source(child, source);
-    }
-    for (Stmt &child : stmt.else_body) stamp_source(child, source);
-    for (auto &body : stmt.next_bodies) for (Stmt &child : body) stamp_source(child, source);
+// [orig: Script_GetOperatorPrecedence @0x4EE540] 18 {hash, level} rows.
+uint8_t operator_precedence(uint32_t h) {
+	struct Row { uint32_t hash; uint8_t level; };
+	static constexpr Row kRows[] = {
+		{hash4('A', 'N', 'D', ';'), 1}, {hash4('&', '&', ';', ';'), 1},
+		{hash4('O', 'R', ';', ';'), 1}, {hash4('|', '|', ';', ';'), 1},
+		{hash4('=', '=', ';', ';'), 2}, {hash4('!', '=', ';', ';'), 2},
+		{hash4('~', '=', ';', ';'), 2}, {hash4('<', '>', ';', ';'), 2},
+		{hash4('<', ';', ';', ';'), 2}, {hash4('>', ';', ';', ';'), 2},
+		{hash4('<', '=', ';', ';'), 2}, {hash4('>', '=', ';', ';'), 2},
+		{hash4('+', ';', ';', ';'), 3}, {hash4('-', ';', ';', ';'), 3},
+		{hash4('*', ';', ';', ';'), 4}, {hash4('/', ';', ';', ';'), 4},
+		{hash4('%', ';', ';', ';'), 4}, {hash4('^', ';', ';', ';'), 5},
+	};
+	for (const Row &row : kRows)
+		if (row.hash == h) return row.level;
+	return 0;
 }
 
-class Compiler {
+// The binary operators: the fold opcode each sets pending, and the error a
+// second pending operator or a pending NOT reports.
+// [orig: Script_Compile @0x4F3B02..0x4F4013, @0x4F538C..0x4F53C2]
+struct BinaryOperator { uint32_t hash; uint8_t fold; const char *unexpected; };
+constexpr BinaryOperator kBinaryOperators[] = {
+	{hash4('!', '=', ';', ';'), 0x18, "Unexpected !="},
+	{hash4('%', ';', ';', ';'), 0x15, "Unexpected %"},
+	{hash4('*', ';', ';', ';'), 0x13, "Unexpected *"},
+	{hash4('&', '&', ';', ';'), 0x0F, "Unexpected &&"},
+	{hash4('+', ';', ';', ';'), 0x11, "Unexpected +"},
+	{hash4('/', ';', ';', ';'), 0x14, "Unexpected /"},
+	{hash4('-', ';', ';', ';'), 0x12, "Unexpected -"},
+	{hash4('<', ';', ';', ';'), 0x19, "Unexpected <"},
+	{hash4('<', '=', ';', ';'), 0x1B, "Unexpected <="},
+	{hash4('<', '>', ';', ';'), 0x18, "Unexpected <>"},
+	{hash4('>', ';', ';', ';'), 0x1A, "Unexpected >"},
+	{hash4('=', '=', ';', ';'), 0x17, "Unexpected =="},
+	{hash4('>', '=', ';', ';'), 0x1C, "Unexpected >="},
+	{hash4('A', 'N', 'D', ';'), 0x0F, "Unexpected AND"},
+	{hash4('^', ';', ';', ';'), 0x16, "Unexpected ^"},
+	{hash4('O', 'R', ';', ';'), 0x10, "Unexpected OR"},
+	{hash4('|', '|', ';', ';'), 0x10, "Unexpected ||"},
+	{hash4('~', '=', ';', ';'), 0x18, "Unexpected ~="},
+};
+
+// The 24 named-value rows @0x82EEF0 (count 0x18 @0x82F130); Player, Item and
+// auto share one dword.
+struct NamedValue { const char *name; Builtin id; };
+constexpr NamedValue kNamedValues[] = {
+	{"result", Builtin::Result}, {"ticks", Builtin::Ticks}, {"GameOver", Builtin::GameOver},
+	{"WinVar", Builtin::WinVar}, {"LoseVar", Builtin::LoseVar}, {"SquadSSN", Builtin::SquadSSN},
+	{"SquadWho", Builtin::SquadWho}, {"night", Builtin::Night}, {"seatbelt", Builtin::Seatbelt},
+	{"wind", Builtin::Wind}, {"breathtime", Builtin::Breathtime}, {"fallmps", Builtin::Fallmps},
+	{"accuracyspread", Builtin::AccuracySpread}, {"autogain", Builtin::Autogain},
+	{"health", Builtin::Health}, {"mana", Builtin::Mana}, {"bluekills", Builtin::Bluekills},
+	{"greenkills", Builtin::Greenkills}, {"humans", Builtin::Humans}, {"RND", Builtin::RandomResult},
+	{"Player", Builtin::AutoItem}, {"Item", Builtin::AutoItem}, {"auto", Builtin::AutoItem},
+	{"CurTOD", Builtin::CurTOD},
+};
+
+// The CRT atol the resolver calls: strtol base 10, saturating.
+// [orig: _atol @0x76AB0A -> strtol @0x76B2D9]
+int32_t crt_atol(const char *s) {
+	while (*s == ' ' || (*s >= '\t' && *s <= '\r')) ++s;
+	bool negative = false;
+	if (*s == '+' || *s == '-') negative = *s++ == '-';
+	int64_t value = 0;
+	while (*s >= '0' && *s <= '9') {
+		value = value * 10 + (*s++ - '0');
+		if (value > 0x80000000LL) value = 0x80000000LL;
+	}
+	if (negative) value = -value;
+	if (value > INT32_MAX) return INT32_MAX;
+	if (value < INT32_MIN) return INT32_MIN;
+	return static_cast<int32_t>(value);
+}
+
+// The CRT atof: blanks, a sign, digits with an optional fraction, then an
+// exponent the CRT also accepts after D or d. No hexadecimal, infinity or
+// NaN forms. [orig: _atof @0x76B6A1 -> __strgtold12_l @0x779FBE, the
+// exponent markers @0x77A0D8..0x77A0EE]
+double crt_atof(const char *s) {
+	while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') ++s;
+	std::string number;
+	if (*s == '+' || *s == '-') number.push_back(*s++);
+	bool digits = false;
+	while (*s >= '0' && *s <= '9') { number.push_back(*s++); digits = true; }
+	if (*s == '.') {
+		number.push_back(*s++);
+		while (*s >= '0' && *s <= '9') { number.push_back(*s++); digits = true; }
+	}
+	if (!digits) return 0.0;
+	if (*s == 'e' || *s == 'E' || *s == 'd' || *s == 'D') {
+		const char *exponent = s + 1;
+		std::string suffix = "e";
+		if (*exponent == '+' || *exponent == '-') suffix.push_back(*exponent++);
+		if (*exponent >= '0' && *exponent <= '9') {
+			while (*exponent >= '0' && *exponent <= '9') suffix.push_back(*exponent++);
+			number += suffix;
+		}
+	}
+	return std::strtod(number.c_str(), nullptr);
+}
+
+constexpr size_t kTokenMax = 64;             // [orig: `cmp edi, 40h` @0x4F335A / @0x4F3457]
+constexpr int kValuePoolSlots = 0x200;       // [orig: `cmp ecx, 200h` @0x4F313F]
+constexpr size_t kStringPoolClamp = 0x100F;  // [orig: `cmp eax, 100Fh` @0x4F2DC5]
+constexpr size_t kStringPoolLimit = 0x1000;  // [orig: `cmp eax, 1000h` @0x4F2DF5]
+constexpr size_t kOutputBytes = 0x47A0;      // [orig: WacScript_InitAndLoad @0x4F93FC]
+constexpr int kEventSpace = 0x400;           // [orig: `cmp eax, 400h` @0x4F4A06]
+constexpr uint32_t kDoSpace = 0x400;         // [orig: `cmp ecx, 400h` @0x4F417E]
+constexpr size_t kParenFrames = 16;          // [orig: `cmp esi, 10h` @0x4F39DE / @0x4F543E]
+constexpr int kDeclarationSpace = 0x100;     // [orig: `cmp dword_C60E14, 100h` @0x4F3812]
+
+// Script_Compile's paren frames, token buffer and operator set are
+// neighbouring stack arrays: a frame index past 15 lands in the next array
+// over, as it does in retail. One byte block keeps that layout.
+// [orig: Script_Compile frame: var_1BC (+0x4894, the 16 frame precedences),
+// String1 (+0x48A4, 72 bytes), var_164 (+0x48EC, the 16 frame operators),
+// var_154 (+0x48FC, the 16 automatic flags), Str (+0x490C, the operator set
+// copied @0x4F320F), dest (+0x4920, zeroed @0x4F3282), buffer (+0x494C)]
+constexpr size_t kPrecAt = 0x00;
+constexpr size_t kTokenAt = 0x10;
+constexpr size_t kOpnegAt = 0x58;
+constexpr size_t kAutoAt = 0x68;
+constexpr size_t kOpSetAt = 0x78;
+constexpr size_t kLocalsSize = 0xB8;
+constexpr char kOperatorSet[] = "{}()[]+-*/|&^%<>=!~"; // [orig: @0x7CE2E8, 20 bytes]
+
+// An IF/DO/LOOP nesting level. [orig: Script_Compile's 0x120-byte block
+// records @var_49BC: type +0, start line +4, DO id +8, loop jump-back word
+// +0xC, jump count +0x10, the jump words +0x14, the pending branch word
+// +0x114, the DO section count +0x118, the DO parameter word +0x11C]
+struct Block {
+	int type = 0; // 1 condition, 2 THEN, 3 ELSE/NEXT, 4 DOSEQ, 5 DORND, 9 LOOP, 0xB ENTER, 0xC LEAVE
+	int line = 0;
+	uint32_t loop_id = 0;
+	int64_t loop_back = -1;
+	std::vector<size_t> jumps;
+	int64_t pending_branch = -1;
+	uint32_t sections = 0;
+	int64_t do_param = -1;
+};
+
+// A VAR (type 1) or CHEAT (type 0x19) name. [orig: byte_C68218, 24-byte rows]
+struct Declaration {
+	std::string name;
+	uint8_t type = 1;
+};
+
+// A resolved operand word and, for a catalog-bound pool value, its symbol.
+struct Operand {
+	uint32_t ref = 0;
+	std::string symbol;
+};
+
+class ScriptCompiler {
 public:
-    explicit Compiler(const CompileEnv &env) : env_(env) {
-        prog_.music_globals = env.music_globals;
-        prog_.source_names = env.source_names;
-        if (prog_.source_names.empty()) prog_.source_names.emplace_back();
-    }
+	explicit ScriptCompiler(const CompileEnv &env) : env_(env) {
+		prog_.music_globals = env.music_globals;
+		prog_.source_names = env.source_names;
+		if (prog_.source_names.empty()) prog_.source_names.emplace_back();
+	}
 
-    Program compile(const std::vector<Stmt> &stmts) {
-        for (const Stmt &s : stmts) {
-            compile_top(s);
-        }
-        prog_.code.push_back(kProgramTerminator);
-        prog_.event_count = event_counter_;
-        // Retain the mounted table's existing handles too: a replacement
-        // script may consume an FX handle already held in a mission variable.
-        if (env_.effects) prog_.effect_names = env_.effects->interned_names();
-        if (env_.sounds) prog_.sound_names = env_.sounds->names();
-        return std::move(prog_);
-    }
+	// [orig: Script_Compile @0x4F31F0] One file appended to the shared buffer.
+	void compile_file(uint32_t source, std::string_view text) {
+		File f;
+		f.source = source;
+		f.text.assign(text.begin(), text.end());
+		f.end = text.size();
+		f.text.push_back('\0');
+		std::memcpy(&f.locals[kOpSetAt], kOperatorSet, sizeof(kOperatorSet));
+		run(f);
+	}
+
+	Program finish() {
+		prog_.code.push_back(kProgramTerminator); // [orig: WacScript_InitAndLoad @0x4F95A9]
+		prog_.event_count = event_count_;
+		prog_.event_depths.resize(size_t(event_count_));
+		prog_.loop_count = do_counter_;
+		prog_.operands.resize(size_t(pool_high_));
+		// Retain the mounted table's existing handles too: a replacement
+		// script may consume an FX handle already held in a mission variable.
+		if (env_.effects) prog_.effect_names = env_.effects->interned_names();
+		if (env_.sounds) prog_.sound_names = env_.sounds->names();
+		return std::move(prog_);
+	}
 
 private:
-    const CompileEnv &env_;
-    Program prog_;
-    int event_counter_ = 0;
-    int include_depth_ = 0;
-    int group_loop_depth_ = 0;
-    std::vector<std::string> variables_;
-    std::vector<std::string> event_names_;
+	struct File {
+		uint32_t source = 0;
+		std::string text;
+		size_t end = 0;
+		size_t cursor = 0;             // var_4A18
+		int line = 1;                  // lineNum: CR alone counts
+		uint8_t last = 0;              // bl, the last byte the tokenizer read
+		size_t token_length = 0;       // paramLen
+		uint32_t token_hash = 0;       // edi
+		size_t lookahead_cursor = 0;   // var_4A08
+		int lookahead_line = 1;        // var_49EC
+		uint32_t operator_hash = kHashUnset;
+		uint8_t lookahead_prec = 0;    // var_4A2D
+		uint8_t pending_op = 0;        // var_4A3E
+		uint8_t pending_prec = 0;      // var_4A3D
+		uint8_t negate = 0;            // var_4A36: 0x80
+		uint8_t push = 0;              // var_4A35: 0x40
+		std::array<uint8_t, kLocalsSize> locals{};
+		size_t paren_depth = 0;        // esi
+		int params_pending = 0;        // var_4A1C
+		std::array<int, 4> expected{}; // expectedType[], the last parameter first
+		int action = 0;                // actionIndex
+		bool in_condition = false;     // var_4A20
+		int decl_mode = 0;             // var_4A0C: 1 VAR, 2 CHEAT, 3 IF name
+		bool run_pending = false;      // var_49FC
+		int64_t gloop_patch = -1;      // var_49F8
+		int loop_nesting = 0;          // var_4A10
+		std::optional<uint32_t> assign_target; // var_4A04
+		bool emitted_since_assign = false;     // var_49F4
+		std::vector<Block> blocks = std::vector<Block>(1); // depth 0 is never opened
+		size_t depth = 0;              // var_4A28
+	};
 
-    void warn(int line, const std::string &msg) {
-        prog_.diagnostics.push_back(Diagnostic{line, 0, msg, false});
-    }
+	const CompileEnv &env_;
+	Program prog_;
+	std::vector<std::string> event_names_;   // [orig: byte_C61E18, 24-byte rows]
+	std::vector<bool> event_named_;          // the row's fired-dword pointer is set
+	int event_count_ = 0;                    // [orig: dword_C60E04]
+	std::vector<Declaration> declarations_;  // [orig: byte_C68218, count dword_C60E14]
+	uint32_t do_counter_ = 0;                // [orig: dword_C60DFC]
+	int run_depth_ = 0;                      // [orig: dword_C6EB20]
+	int pool_count_ = 1;                     // [orig: dword_C69A1C; slot 0 holds 0]
+	int pool_high_ = 1;
+	size_t string_length_ = 0;               // [orig: dword_C69A18]
+	int text_miss_ = -1;                     // the shared "" a missing key answers
 
-    size_t emit(uint32_t word) {
-        prog_.code.push_back(word);
-        return prog_.code.size() - 1;
-    }
-    void patch_target(size_t instr_pos, size_t target_index) {
-        uint32_t w = prog_.code[instr_pos];
-        w = (w & ~kOperand24Mask) | (static_cast<uint32_t>(target_index) & kOperand24Mask);
-        prog_.code[instr_pos] = w;
-    }
+	// ---- output ----
 
-    int push_pool(int32_t value) {
-        for (size_t i = 0; i < prog_.operands.size(); ++i) {
-            if (prog_.operands[i] == value) return static_cast<int>(i);
-        }
-        prog_.operands.push_back(value);
-        return static_cast<int>(prog_.operands.size() - 1);
-    }
-    int intern_string(const std::string &s) {
-        for (size_t i = 0; i < prog_.strings.size(); ++i) {
-            if (prog_.strings[i] == s) return static_cast<int>(i);
-        }
-        prog_.strings.push_back(s);
-        return static_cast<int>(prog_.strings.size() - 1);
-    }
+	size_t emit(uint32_t word) {
+		prog_.code.push_back(word);
+		return prog_.code.size() - 1;
+	}
+	uint32_t here() const { return static_cast<uint32_t>(prog_.code.size()); }
+	void or_word(int64_t at, uint32_t value) {
+		if (at >= 0 && size_t(at) < prog_.code.size()) prog_.code[size_t(at)] |= value;
+	}
+	void emit_operand(const Operand &operand) {
+		if (!operand.symbol.empty()) prog_.operand_symbols.push_back({here(), operand.symbol});
+		emit(operand.ref);
+	}
 
-    // [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
-    static std::string action_signature(const CommandDef &def) {
-        std::string text = "  ";
-        text += def.name;
-        text += " (";
-        for (int i = 0; i < 4; ++i) {
-            if (def.params[i] == ParamType::Null) continue;
-            if (i) text += ", ";
-            text += param_type_name(def.params[i]);
-        }
-        text += ")";
-        return text;
-    }
+	// Retail keeps the first error only ("%s (%d) %s" into byte_C6EB30,
+	// Script_SetCompileError @0x4EE7C0); every one is kept here, in order.
+	void error(const File &f, int line, std::string message, bool catalog_miss = false) {
+		prog_.diagnostics.push_back(Diagnostic{line, 0, std::move(message), catalog_miss, f.source});
+	}
 
-    // [orig: Script_Compile @0x4F3AB2..0x4F3AE2] An argument the resolver
-    // returns NULL for logs the command's signature as the compile error
-    // (Script_SetCompileError @0x4EE7C0, a first-error buffer only the script
-    // debug overlay @0x4f652a and the console @0x4f6d3f read) and its operand
-    // slot points at the shared scratch dword &dword_C6EAEC (Builtin::Scratch,
-    // zeroed at every bytecode entry). Compilation continues and
-    // WacScript_InitAndLoad runs the program regardless [orig: @0x4f926a
-    // clears the buffer, @0x4f976b executes], so the diagnostic is not
-    // fatal: the lenient loader keeps the script. V0 is never an implicit
-    // target.
-    uint32_t unresolved_argument(const CommandDef *def, int line) {
-        prog_.diagnostics.push_back({line, 0,
-                def != nullptr ? action_signature(*def) : std::string("unresolved variable"), false});
-        return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
-    }
+	// [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
+	static std::string action_signature(int index) {
+		const CommandDef &def = wac_commands()[index];
+		std::string text = "  ";
+		text += def.name;
+		text += " (";
+		for (int i = 0; i < 4; ++i) {
+			if (def.params[i] == ParamType::Null) continue;
+			if (i) text += ", ";
+			text += param_type_name(def.params[i]);
+		}
+		text += ")";
+		return text;
+	}
 
-    // Resolve an argument to an operand reference word, or the scratch sink
-    // plus the signature diagnostic when the resolver's answer is NULL.
-    uint32_t resolve(const Arg &arg, ParamType type, int line, const CommandDef *def = nullptr) {
-        if (const std::optional<uint32_t> ref = try_resolve(arg, type, line)) return *ref;
-        return unresolved_argument(def, line);
-    }
+	// ---- the token buffer and the paren frames ----
 
-    // [orig: WacScript_ResolveParameter @0x4f2920, the SSN leg
-    //  @0x4f2c94..0x4f2eed] The SSN leg takes every token an Ssn slot receives
-    // (expectedType 11) and every SSN_-prefixed token: atol (0 for a name, or
-    // a quoted token, whose buffer keeps its quote @0x4f3338) ->
-    // EntityPool_FindByNetId; a 0xFFFF miss logs "Unknown SSN"
-    // (Script_SetCompileError @0x4f2edf) and the handle still lands in the
-    // operand pool, so an Ssn slot is never the NULL leg. The port binds the
-    // net id when the VM first meets its world (WacVm::execute) and asks the
-    // compile-time registry, when the embedder passes one, the question
-    // retail's pool answered. The kLocalPlayerSsn (10000) exemption is a
-    // port seam, not a retail rule: retail's leg has no alias, and
-    // EntityPool_FindByNetId @0x4f0a20 keys on GamePlayerEntity+0x7C (DcbId),
-    // which the JO player spawn [orig: Entity_SpawnFromAnimSlotProperty
-    // @0x43c390] leaves at 0, so retail reports Unknown SSN for 10000 unless
-    // an authored entity carries that DcbId. The exemption mirrors
-    // EntityCommands::resolve_ssn, which honours the dfx2med authoring
-    // convention (the local player is SSN 10000) that mission scripts are
-    // written against.
-    uint32_t ssn_operand(int32_t net, int line) {
-        if (env_.registry != nullptr && uint16_t(net) != world::EntityCommands::kLocalPlayerSsn &&
-                !env_.registry->find_by_net_id(uint16_t(net)).valid())
-            warn(line, "Unknown SSN");
-        return encode_operand(OperandKind::EntitySsn, push_pool(net));
-    }
+	static uint8_t at(const File &f, size_t i) {
+		return i < f.text.size() ? static_cast<uint8_t>(f.text[i]) : 0;
+	}
+	static const char *token(const File &f) {
+		return reinterpret_cast<const char *>(&f.locals[kTokenAt]);
+	}
+	static std::string_view token_view(const File &f) {
+		return std::string_view(token(f), std::strlen(token(f)));
+	}
+	// strrchr over the operator-set copy. [orig: @0x4F3370 / @0x4F3448 / @0x4F3513]
+	static bool in_operator_set(const File &f, uint8_t c) {
+		for (size_t i = kOpSetAt; i < f.locals.size(); ++i) {
+			if (f.locals[i] == c) return true;
+			if (f.locals[i] == 0) return false;
+		}
+		return false;
+	}
+	static uint8_t &frame_prec(File &f, size_t i) { return f.locals[slot(kPrecAt + i)]; }
+	static uint8_t &frame_opneg(File &f, size_t i) { return f.locals[slot(kOpnegAt + i)]; }
+	static uint8_t &frame_auto(File &f, size_t i) { return f.locals[slot(kAutoAt + i)]; }
+	static size_t slot(size_t i) { return i < kLocalsSize ? i : kLocalsSize - 1; }
 
-    // The resolver proper; std::nullopt is retail's NULL return. Retail's
-    // token buffer keeps a quoted token's opening quote [orig: Script_Compile
-    // @0x4f3338] and uppercases a bare one [orig: @0x4f3418..0x4f341d], so
-    // every stricmp, prefix and first-character test misses a quoted token:
-    // only a slot's type-gated leg consumes one, and a slot with no such leg
-    // (Number, Value, Distance, Hour, ...) reaches the numeric test, which
-    // the quote fails into the NULL return [orig: @0x4f2d01 -> @0x4f2a62].
-    // `bare` is that quote gate.
-    // [orig: WacScript_ResolveParameter @0x4f2920]
-    std::optional<uint32_t> try_resolve(const Arg &arg, ParamType type, int line) {
-        const std::string &t = arg.text;
-        const bool bare = !arg.is_string;
+	// The two-character operators <=, >=, <>, !=, ~=, ==, ||, &&.
+	// [orig: Script_Compile @0x4F3397..0x4F3401; the lookahead @0x4F3532..0x4F357A]
+	static bool operator_pair(uint8_t first, uint8_t second) {
+		if ((first == '<' || first == '>') && second == '=') return true;
+		if (first == '<') return second == '>';
+		if (first == '!' || first == '~') return second == '=';
+		if (first == '=' || first == '|' || first == '&') return second == first;
+		return false;
+	}
 
-        // Table 0: the declared variables, the second half of the shared
-        // mission bank. ARRAY follows the same scalar address path in this
-        // retail compiler. [orig: Script_Compile @0x4F31F0; the resolver's
-        // first table @0x4f2970..0x4f2a3c]
-        for (size_t i = 0; bare && i < variables_.size(); ++i) {
-            if (ieq(t, variables_[i].c_str()))
-                return encode_operand(OperandKind::MissionVar, uint32_t(i + 256));
-        }
-        // Table 1: the event names. An IfName slot takes the index as a pool
-        // value [orig: @0x4f2a6c]; expectedType 27 is NULL [orig: @0x4f2a5e];
-        // every other slot reads the fired dword [orig: @0x4f2a8a]. A miss
-        // falls through to every leg below [orig: @0x4f29c2 -> loc_4F29C4],
-        // so an IfName token naming no event is whatever those make of it,
-        // and a bare name ends in the NULL return.
-        for (size_t i = 0; bare && i < event_names_.size(); ++i) {
-            if (!event_names_[i].empty() && ieq(t, event_names_[i].c_str())) {
-                if (type == ParamType::IfName)
-                    return encode_operand(OperandKind::Pool, push_pool(int32_t(i)));
-                if (type == ParamType::Variable) return std::nullopt;
-                return encode_operand(OperandKind::EventFired, uint32_t(i));
-            }
-        }
-        // Table 2: the named engine values (health/ticks/humans/...). Every
-        // row of the table @0x82EEF0 resolves to its mutable dword regardless
-        // of the expected type [orig: @0x4f2a92..0x4f2a9f], so each is an
-        // lvalue for expectedType 27 too; a write to a cached row lands on
-        // the cached word until the next bytecode execution refreshes it.
-        if (bare) {
-            const int named_value = builtin_id(t);
-            if (named_value >= 0)
-                return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(named_value));
-        }
+	// [orig: Script_Compile @0x4F3327..0x4F34C9]
+	void tokenize(File &f, uint8_t first) {
+		uint8_t *t = &f.locals[kTokenAt];
+		size_t length = 0;
+		uint8_t bl = first;
+		if (bl == '"') {
+			// The buffer keeps the opening quote and no case change; the
+			// string ends at the closing quote (consumed), a control byte
+			// (kept for the main loop) or 64 bytes (the next byte is
+			// consumed and dropped). [orig: @0x4F3330..0x4F335F]
+			while (f.cursor < f.end) {
+				t[length] = bl;
+				bl = at(f, f.cursor);
+				++length;
+				if (bl == '"') { ++f.cursor; break; }
+				if (bl < ' ') break;
+				++f.cursor;
+				if (length >= kTokenMax) break;
+			}
+		} else if (in_operator_set(f, bl) && !(bl == '-' && (f.pending_op != 0 || f.params_pending != 0))) {
+			// A '-' with an operator or a parameter pending starts a word.
+			// [orig: @0x4F3380..0x4F3395]
+			t[0] = bl;
+			length = 1;
+			const uint8_t next = at(f, f.cursor);
+			if (operator_pair(bl, next)) {
+				t[1] = next;
+				length = 2;
+				++f.cursor;
+			}
+		} else {
+			// Every byte above 0x60 folds down by 0x20; a word ends at a
+			// blank, ';', ',' or an operator byte, or after 64 bytes (the
+			// next byte is consumed and dropped). [orig: @0x4F3412..0x4F345A]
+			while (f.cursor <= f.end) {
+				if (bl > 0x60) bl = static_cast<uint8_t>(bl - 0x20);
+				t[length] = bl;
+				bl = at(f, f.cursor);
+				++length;
+				if (bl <= ' ' || bl == ';' || bl == ',' || in_operator_set(f, bl)) break;
+				++f.cursor;
+				if (length >= kTokenMax) break;
+			}
+		}
+		f.last = bl;
+		f.token_length = length;
+		// ';' padding, the first four bytes hashed as signed chars, then the
+		// terminator; ELSEIF alone is renamed so ELSE keeps its own hash.
+		// [orig: @0x4F3464..0x4F34C9]
+		t[length] = ';';
+		t[length + 1] = ';';
+		t[length + 2] = ';';
+		uint32_t h = static_cast<uint32_t>(int32_t(int8_t(t[0])));
+		for (size_t i = 1; i < 4; ++i) h = (h << 8) + static_cast<uint32_t>(int32_t(int8_t(t[i])));
+		t[length] = 0;
+		f.token_hash = ieq(token_view(f), "ELSEIF") ? kHashElseIf : h;
+	}
 
-        // M# music, V# mission, G# global: a letter then a digit, in retail's
-        // order [orig: @0x4f29f8 (M), @0x4f2aa7 (V), @0x4f2b0e (G)].
-        if (bare && !t.empty() && (t[0] == 'M' || t[0] == 'm') && t.size() > 1 &&
-            std::isdigit(static_cast<unsigned char>(t[1]))) {
-            int idx = std::atoi(t.c_str() + 1);
-            // The resolver stores a direct context-global pointer, or the shared
-            // scratch address if no context exists at compile time.
-            // [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34]
-            return env_.music_globals ? encode_operand(OperandKind::MusicVar, idx)
-                                      : encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
-        }
-        // Only the first character after V must be a digit. atol consumes its
-        // decimal prefix; declared names above still take precedence. Retail's
-        // 32-bit CRT atol saturates an overlong suffix to LONG_MAX/LONG_MIN, so
-        // the >= 256 clamp still lands on V255: parse wide and clamp to the
-        // int32 range first so an LP64 host cannot wrap it to a small index.
-        // [orig: @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4]
-        if (bare && t.size() > 1 && (t[0] == 'V' || t[0] == 'v') &&
-                std::isdigit(static_cast<unsigned char>(t[1]))) {
-            long long wide = std::strtoll(t.c_str() + 1, nullptr, 10);
-            if (wide > INT32_MAX) wide = INT32_MAX;
-            if (wide < INT32_MIN) wide = INT32_MIN;
-            int32_t idx = static_cast<int32_t>(wide);
-            if (idx >= 256) { warn(line, "V# too big"); idx = 255; }
-            return encode_operand(OperandKind::MissionVar, idx);
-        }
-        if (bare && !t.empty() && (t[0] == 'G' || t[0] == 'g') && t.size() > 1 &&
-            std::isdigit(static_cast<unsigned char>(t[1]))) {
-            int idx = std::atoi(t.c_str() + 1);
-            if (idx >= world::ScriptVarStore::kGlobalVars) { warn(line, "G# too big"); idx = world::ScriptVarStore::kGlobalVars - 1; }
-            return encode_operand(OperandKind::GlobalVar, idx);
-        }
+	// The operator after the token, for the auto-paren, drain and '=' tests.
+	// [orig: Script_Compile @0x4F34CE..0x4F3596]
+	void lookahead(File &f) {
+		int line = f.line;
+		size_t i = f.cursor;
+		uint8_t bl = f.last;
+		f.operator_hash = kHashUnset;
+		while (i < f.end) {
+			bl = at(f, i++);
+			if (bl == '\r') { ++line; continue; }
+			if (bl <= ' ' || bl == ',') continue;
+			break;
+		}
+		f.last = bl;
+		f.lookahead_cursor = i;
+		f.lookahead_line = line;
+		if (!in_operator_set(f, bl)) return;
+		if (bl == '-' && (f.pending_op != 0 || f.params_pending != 0)) return;
+		uint8_t second = at(f, f.lookahead_cursor);
+		if (operator_pair(bl, second)) ++f.lookahead_cursor;
+		else second = ';';
+		f.operator_hash = ((uint32_t(bl) << 8) + second) << 16;
+		f.operator_hash += 0x3B3B;
+	}
 
-        // Anything else is NULL for expectedType 27 [orig: @0x4f2b7e], the
-        // compile error + scratch-sink pair.
-        if (type == ParamType::Variable) return std::nullopt;
+	// ---- the per-file loop ----
 
-        // From here the legs run in retail's order, each taken by its prefix
-        // (never on a quoted token) or by the slot's expected type: G_/12
-        // @0x4f2b8d, FX_/22 @0x4f2bb4, FACE_/21 @0x4f2be7, SS_/19 @0x4f2c0e,
-        // TT_/20 @0x4f2c34, ANIM_/24 @0x4f2c6a, SSN_/11 @0x4f2c94, AMMO_/23
-        // @0x4f2cc5, the 17/18 string copy @0x4f2ce9, then the numeric test
-        // @0x4f2d01.
+	void run(File &f) {
+		for (;;) {
+			// [orig: Script_Compile @0x4F32E0..0x4F3321]
+			if (f.cursor >= f.end) {
+				finish_file(f);
+				return;
+			}
+			const uint8_t c = at(f, f.cursor++);
+			f.last = c;
+			if (c == '\r') {
+				++f.line;
+				continue;
+			}
+			if (c <= ' ' || c == ',') continue;
+			if (c == ';' || (c == '/' && at(f, f.cursor) == '/')) {
+				// A comment runs to the next CR, which the loop then counts.
+				// [orig: @0x4F54BA..0x4F54D9]
+				while (f.cursor < f.end && at(f, f.cursor) != '\r') ++f.cursor;
+				continue;
+			}
+			tokenize(f, c);
+			lookahead(f);
+			if (!take_by_mode(f)) continue;
+			if (!process(f)) return;
+		}
+	}
 
-        // [orig: WacScript_ResolveParameter @0x4F2940] Named WAC groups
-        // never select entities by their BMS commandGroup field.
-        const bool group_prefix = bare && opennova::strutil::starts_with_icase(t, "G_");
-        if (group_prefix || type == ParamType::Group) {
-            const std::string_view name = group_prefix ? std::string_view(t).substr(2) : t;
-            int group = env_.registry ? env_.registry->script_group_index(name)
-                    : world::EntityRegistry::default_script_group_index(name);
-            // The miss is retail's first-error 'Unknown Group' with the pool
-            // slot holding 0 [orig: @0x4f30fc -> @0x4f310a].
-            if (group < 0) { warn(line, "Unknown Group '" + std::string(name) + "'"); group = 0; }
-            return encode_operand(OperandKind::Pool, push_pool(group));
-        }
+	// A pending RUN, the GLOOP operand and the declaration modes take the
+	// token before anything else; false when one consumed it.
+	// [orig: Script_Compile @0x4F359A..0x4F3964]
+	bool take_by_mode(File &f) {
+		if (f.run_pending) {
+			if (f.depth != 0) {
+				error(f, f.line, "Can't run files inside blocks");
+			} else if (run_depth_ > 1) {
+				error(f, f.line, "A run file can't run more files");
+			} else {
+				++run_depth_;
+				const bool loaded = run_file(run_path(f));
+				--run_depth_;
+				if (!loaded) error(f, f.line, "Unable to run file");
+			}
+			f.run_pending = false;
+			return false;
+		}
+		if (f.gloop_patch >= 0) {
+			// The resolved address's dword ORs into the GROUP word; the
+			// group slot type always resolves. [orig: @0x4F365D..0x4F369D]
+			int out_type = 0;
+			const std::optional<Operand> group = resolve(f, int(ParamType::Group), out_type);
+			or_word(f.gloop_patch, group ? compile_time_dword(group->ref) : 0u);
+			f.gloop_patch = -1;
+			return false;
+		}
+		if (f.decl_mode == 1 || f.decl_mode == 2) {
+			// A refused name leaves the mode set for the next token.
+			// [orig: @0x4F3812..0x4F3964]
+			if (int(declarations_.size()) >= kDeclarationSpace) {
+				error(f, f.line, "Over Variable Buffersize");
+				return false;
+			}
+			int out_type = 0;
+			if (resolve(f, int(ParamType::Null), out_type)) {
+				error(f, f.line, "Variable Name already used");
+				return false;
+			}
+			declarations_.push_back({std::string(token_view(f).substr(0, 18)),
+					static_cast<uint8_t>(f.decl_mode == 2 ? 0x19 : 1)});
+			f.decl_mode = 0;
+			return false;
+		}
+		if (f.decl_mode == 3) {
+			// [orig: @0x4F36C0..0x4F380D]
+			if (event_count_ == 0) {
+				error(f, f.line, "[ifname] without IF");
+				return false;
+			}
+			if (!event_names_[size_t(event_count_ - 1)].empty()) {
+				error(f, f.line, "If already named");
+				return false;
+			}
+			int out_type = 0;
+			if (resolve(f, int(ParamType::Null), out_type)) {
+				error(f, f.line, "IF Name already used");
+				return false;
+			}
+			event_names_[size_t(event_count_ - 1)] = std::string(token_view(f).substr(0, 18));
+			event_named_[size_t(event_count_ - 1)] = true;
+			f.decl_mode = 0;
+			return false;
+		}
+		return true;
+	}
 
-        // [orig: WacScript_ResolveParameter @0x4F2940 -> @0x5F7310]
-        // FX literals, including numeric-looking names, bind at compile time.
-        // Variable operands were resolved above and carry the actual handle.
-        const bool fx_prefix = bare && opennova::strutil::starts_with_icase(t, "FX_");
-        if (fx_prefix || type == ParamType::Fx) {
-            const std::string name = fx_prefix ? t.substr(3) : t;
-            const particle::EffectHandle handle = env_.effects ? env_.effects->intern(name)
-                                                               : particle::EffectHandle{};
-            if (!handle) {
-                prog_.diagnostics.push_back({line, 0, "unknown FX '" + t + "'", true});
-            }
-            return encode_operand(OperandKind::Pool, push_pool(int32_t(handle.value)));
-        }
+	// [orig: Path_ReplaceOrAppendExtension @0x53C780] Everything from the
+	// FIRST '.' becomes ".wac"; without a dot ".wac" is appended.
+	static std::string run_path(const File &f) {
+		std::string path(token_view(f));
+		const size_t dot = path.find('.');
+		if (dot != std::string::npos) path.resize(dot);
+		return path + ".wac";
+	}
 
-        // FACE literals bind to the nine expression rows. Variables above
-        // carry already-resolved values; numeric-looking literals still name
-        // expressions and report Unknown FACE.
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimState_FindByName @0x5800B0]
-        const bool face_prefix = bare && opennova::strutil::starts_with_icase(t, "FACE_");
-        if (face_prefix || type == ParamType::Face) {
-            const int index = world::facial_expression_index(face_prefix ? t.substr(5) : t);
-            if (index < 0)
-                prog_.diagnostics.push_back({line, 0, "unknown FACE '" + t + "'", true});
-            return encode_operand(OperandKind::Pool, push_pool(index));
-        }
+	// [orig: Script_LoadAndCompileFile @0x4EE660] A nested compile with its
+	// own locals, appending to the same buffer; false only when no file loads.
+	bool run_file(const std::string &path) {
+		std::string text;
+		if (!env_.load_source || !env_.load_source(path, text)) return false;
+		const uint32_t source = static_cast<uint32_t>(prog_.source_names.size());
+		prog_.source_names.push_back(path);
+		compile_file(source, text);
+		return true;
+	}
 
-        // [orig: WacScript_ResolveParameter @0x4F2940, expectedType 19]
-        // SOUNDSET is an asset reference; variables carry the resolved handle,
-        // and numeric literals name sets rather than bypassing resolution.
-        const bool sound_prefix = bare && opennova::strutil::starts_with_icase(t, "SS_");
-        if (sound_prefix || type == ParamType::SoundSet) {
-            const std::string name = sound_prefix ? t.substr(3) : t;
-            int32_t handle = 0;
-            if (env_.sounds) {
-                const auto &names = env_.sounds->names();
-                for (size_t i = 0; i < names.size(); ++i)
-                    if (ieq(name, names[i].c_str())) { handle = int32_t(i + 1); break; }
-            }
-            if (handle == 0)
-                prog_.diagnostics.push_back({line, 0, "unknown SOUNDSET '" + t + "'", true});
-            return encode_operand(OperandKind::Pool, push_pool(handle));
-        }
+	// The keyword arms first unwind the paren stack. A frame whose precedence
+	// is below the lookahead's drops without its POP and takes the keyword
+	// with it: retail returns to the tokenizer. True then.
+	// [orig: Script_Compile's drain loops, e.g. @0x4F4200..0x4F426C; the ENTER
+	//  arm's check @0x4F4818..0x4F4823]
+	bool drain_abandons(File &f) {
+		while (f.paren_depth != 0) {
+			--f.paren_depth;
+			if (frame_auto(f, f.paren_depth) == 0) error(f, f.line, "Open Paren");
+			if (f.lookahead_prec > frame_prec(f, f.paren_depth)) return true;
+			emit(0x07000000u + frame_opneg(f, f.paren_depth));
+			f.push = f.pending_op = f.pending_prec = f.negate = 0;
+		}
+		return false;
+	}
 
-        // Text-tool tokens -> string pool. Retail stores the mission-text
-        // pointer the key resolves to [orig: @0x4f2f9e]; the port keeps the
-        // key and resolves the text at execution.
-        if ((bare && opennova::strutil::starts_with_icase(t, "TT_")) || type == ParamType::TextToken) {
-            int si = intern_string(t);
-            return encode_operand(OperandKind::Pool, push_pool(si));
-        }
+	void emit_store(const File &f) {
+		emit(0x08000000u);
+		emit(*f.assign_target);
+	}
 
-        // Animation symbols resolve to the retail numeric state table, even
-        // when used as an ordinary value. They are not string-pool indices.
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimMap_FindSlotByName]
-        const bool anim_prefix = bare && opennova::strutil::starts_with_icase(t, "ANIM_");
-        const bool numeric = bare && !t.empty() &&
-                (std::isdigit(static_cast<unsigned char>(t[0])) ||
-                 t[0] == '-' || t[0] == '+' || t[0] == '.');
-        if (anim_prefix || (type == ParamType::Anim && !numeric)) {
-            const std::string name = anim_prefix ? t.substr(5) : t;
-            for (int state = 0; state < world::kInfantryAnimStateCount; ++state)
-                if (ieq(name, world::kInfantryAnimNames[state]))
-                    return encode_operand(OperandKind::Pool, push_pool(state));
-            prog_.diagnostics.push_back({line, 0, "unknown animation '" + t + "'", true});
-            return encode_operand(OperandKind::Pool, push_pool(-1));
-        }
+	// [orig: Script_Compile @0x4F3969..0x4F5439] One token past the modes;
+	// false only on the output overflow, which ends the file.
+	bool process(File &f) {
+		for (;;) {
+			// [orig: @0x4F3990 (loc_4F3990)]
+			if (prog_.code.size() * 4 > kOutputBytes) {
+				error(f, f.line, "Over Compile Buffersize"); // [orig: @0x4F55E1]
+				return false;
+			}
+			f.lookahead_prec = operator_precedence(f.operator_hash);
+			// A pending operator facing a higher-precedence lookahead opens an
+			// automatic paren and marks the next call to push the accumulator.
+			// [orig: @0x4F39B2..0x4F3A4F]
+			if (f.params_pending == 0 && f.push == 0 && f.pending_op != 0 &&
+					f.lookahead_prec != 0 && f.lookahead_prec > f.pending_prec) {
+				if (f.paren_depth >= kParenFrames) error(f, f.line, "Auto Paren nesting too deep");
+				frame_opneg(f, f.paren_depth) = static_cast<uint8_t>(f.negate + f.pending_op);
+				frame_prec(f, f.paren_depth) = f.pending_prec;
+				frame_auto(f, f.paren_depth) = 1;
+				++f.paren_depth;
+				f.pending_op = f.pending_prec = f.negate = 0;
+				f.push = 0x40;
+			}
+			const uint32_t h = f.token_hash;
+			if (h == kHashLParen) {
+				open_paren(f);
+				return true;
+			}
+			if (h == kHashRParen) {
+				close_paren(f);
+				return true;
+			}
+			if (f.params_pending != 0) {
+				// A refused token takes the scratch dword and feeds the next
+				// slot. [orig: @0x4F3A71..0x4F3AFD, the scratch @0x4F3AE2, the
+				// jump back to loc_4F3990 @0x4F3AED]
+				--f.params_pending;
+				int out_type = 0;
+				const std::optional<Operand> param =
+						resolve(f, f.expected[size_t(f.params_pending)], out_type);
+				if (!param) {
+					error(f, f.line, action_signature(f.action));
+					emit(encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch)));
+					continue;
+				}
+				emit_operand(*param);
+				return true;
+			}
+			if (h == kHashBang || h == kHashNot) {
+				// [orig: @0x4F3B7F..0x4F3BA0, @0x4F3F1A]
+				if (f.negate != 0) error(f, f.line, "Unexpected NOT");
+				else f.negate = 0x80;
+				return true;
+			}
+			for (const BinaryOperator &op : kBinaryOperators) {
+				if (op.hash != h) continue;
+				if (f.pending_op != 0 || f.negate != 0) {
+					error(f, f.line, op.unexpected);
+				} else {
+					f.pending_op = op.fold;
+					f.pending_prec = operator_precedence(h);
+				}
+				return true;
+			}
+			// Any other token first stores a finished assignment.
+			// [orig: @0x4F4019..0x4F404B]
+			if (f.assign_target && f.emitted_since_assign && f.pending_op == 0) {
+				emit_store(f);
+				f.assign_target.reset();
+			}
+			if (!keyword(f, h)) value_or_call(f);
+			return true;
+		}
+	}
 
-        // Entity SSN constants bind once when the VM first receives its World;
-        // subsequent reads and variable aliases carry the packed entity handle.
-        // The leg sits after the ANIM test and before the AMMO one, as in
-        // retail [orig: @0x4f2c94..0x4f2ca4 precedes @0x4f2cc5]: an AMMO_
-        // token in an Ssn slot is atol'd (0) and looked up, and an SSN_ token
-        // in an Ammo slot is this leg's. A quoted token reads 0.
-        const bool ssn_prefix = bare && opennova::strutil::starts_with_icase(t, "SSN_");
-        if (ssn_prefix || type == ParamType::Ssn) {
-            int32_t net = bare ? std::atoi(t.c_str() + (ssn_prefix ? 4 : 0)) : 0;
-            return ssn_operand(net, line);
-        }
+	// [orig: Script_Compile @0x4F543E..0x4F54B5]
+	void open_paren(File &f) {
+		if (f.paren_depth >= kParenFrames) {
+			error(f, f.line, "Paren nesting too deep");
+			return;
+		}
+		if (f.params_pending != 0) f.pending_op = f.pending_prec = f.negate = 0;
+		const uint8_t opneg = static_cast<uint8_t>(f.negate + f.pending_op);
+		frame_opneg(f, f.paren_depth) = opneg;
+		frame_prec(f, f.paren_depth) = f.pending_prec;
+		frame_auto(f, f.paren_depth) = 0;
+		++f.paren_depth;
+		if (opneg == 0) return;
+		f.pending_op = f.pending_prec = f.negate = 0;
+		f.push = 0x40;
+	}
 
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AmmoDef_LookupByName]
-        // AMMO_ is a type prefix. The value is the ammo.def table index,
-        // including when stored in a variable before a later fire command.
-        // The null row (index zero) is not a successful name resolution.
-        const bool ammo_prefix = bare && opennova::strutil::starts_with_icase(t, "AMMO_");
-        if (ammo_prefix || type == ParamType::Ammo) {
-            const std::string name = ammo_prefix ? t.substr(5) : t;
-            int index = env_.ammo ? env_.ammo->index_of(name.c_str()) : -1;
-            if (index <= 0 && env_.ammo)
-                index = env_.ammo->index_of(("ammo_" + name).c_str());
-            if (index <= 0) {
-                prog_.diagnostics.push_back({line, 0, "unknown AMMO '" + t + "'", true});
-                index = 0;
-            }
-            return encode_operand(OperandKind::Pool, push_pool(index));
-        }
+	// [orig: Script_Compile @0x4F53C7..0x4F5439] A frame with an operator
+	// either pops it into the accumulator or, facing a stronger lookahead,
+	// stays as an automatic frame.
+	void close_paren(File &f) {
+		if (f.paren_depth == 0) {
+			error(f, f.line, "Unexpected )");
+			return;
+		}
+		const uint8_t opneg = frame_opneg(f, f.paren_depth - 1);
+		--f.paren_depth;
+		if (opneg == 0) return;
+		if (f.lookahead_prec > frame_prec(f, f.paren_depth)) {
+			frame_auto(f, f.paren_depth) = 1;
+			++f.paren_depth;
+			return;
+		}
+		emit(0x07000000u + opneg);
+		f.push = f.pending_op = f.pending_prec = f.negate = 0;
+	}
 
-        // Text / Filename slots take the token, quoted or bare, as a
-        // string-pool operand [orig: @0x4f2ce9..0x4f2e1c, expectedType 17/18;
-        // the copy skips the opening quote @0x4f2db4]. No other slot does: a
-        // quoted token anywhere else reaches the numeric test below and is
-        // NULL there.
-        if (type == ParamType::Text || type == ParamType::Filename) {
-            int si = intern_string(t);
-            return encode_operand(OperandKind::Pool, push_pool(si));
-        }
+	Block &block(File &f) {
+		if (f.blocks.size() <= f.depth) f.blocks.resize(f.depth + 1);
+		return f.blocks[f.depth];
+	}
 
-        // HH:MM time literal.
-        if (bare && t.find(':') != std::string::npos && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '-')) {
-            int colon = static_cast<int>(t.find(':'));
-            int h = std::atoi(t.substr(0, colon).c_str());
-            int m = std::atoi(t.c_str() + colon + 1);
-            int32_t v = h * 60 + m;
-            return encode_operand(OperandKind::Pool, push_pool(v));
-        }
+	// IF and ELSEIF open an event: its depth byte, the EVENT word and the
+	// condition state. [orig: Script_Compile @0x4F49EA..0x4F4A57 (IF),
+	// @0x4F4481..0x4F44EE (ELSEIF)]
+	void open_event(File &f, size_t depth) {
+		if (event_count_ < kEventSpace) {
+			event_names_.resize(size_t(event_count_) + 1);
+			event_named_.resize(size_t(event_count_) + 1);
+			prog_.event_depths.resize(size_t(event_count_) + 1);
+			prog_.event_depths[size_t(event_count_)] = static_cast<uint8_t>(depth);
+		}
+		emit(0x01000000u + static_cast<uint32_t>(event_count_));
+		f.in_condition = true;
+		f.pending_op = f.pending_prec = f.negate = f.push = 0;
+		if (event_count_ >= kEventSpace) {
+			error(f, f.line, "Out of IF space");
+			return;
+		}
+		++event_count_;
+		if (event_count_ == kEventSpace) error(f, f.line, "Out of IF space");
+	}
 
-        // [orig: WacScript_ResolveParameter @0x4F2D0A..0x4F2D8C]
-        // FogDist/MoveFog dispatches also use this resolver.
-        // [orig: Script_Compile @0x4F4167 / @0x4F42C5]
-        // Distance literals and M suffixes use Q16; F uses the retail 21501
-        // factor. Named variables returned above already contain raw words
-        // and are never rescaled at a distance-typed call site.
-        if (bare && !t.empty() && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.' || t[0] == '-')) {
-            double d = std::atof(t.c_str());
-            const int suffix = std::toupper(static_cast<unsigned char>(t.back()));
-            if (suffix == 'F') d *= 21501.0;
-            else if (suffix == 'M' || type == ParamType::Distance) d *= 65536.0;
-            else if (type == ParamType::Hour) d *= 60.0;
-            // _ftol2_sse returns a signed 64-bit truncation; the operand stores
-            // its low word. Invalid conversions yield the indefinite low zero.
-            int32_t value = 0;
-            if (std::isfinite(d) && d >= -9223372036854775808.0 &&
-                    d < 9223372036854775808.0)
-                value = static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(d)));
-            return encode_operand(OperandKind::Pool, push_pool(value));
-        }
+	// THEN / ENTER / LEAVE close the condition with their branch word.
+	// [orig: Script_Compile @0x4F4FC0..0x4F5032 (THEN), @0x4F4861..0x4F48D3
+	// (ENTER), @0x4F4C00..0x4F4C72 (LEAVE)]
+	void close_condition(File &f, int type, uint32_t word, const char *without_if, const char *after_not) {
+		if (!f.in_condition) {
+			error(f, f.line, without_if);
+			return;
+		}
+		if (f.negate != 0) {
+			error(f, f.line, after_not);
+			f.negate = 0;
+		}
+		Block &b = block(f);
+		b.pending_branch = static_cast<int64_t>(emit(word));
+		b.type = type;
+		f.in_condition = false;
+		b.loop_back = -1;
+	}
 
-        // A token that matches no table, prefix or numeric form, a quoted
-        // token outside a Text/Filename slot among them, resolves to NULL
-        // [orig: @0x4f2d01 -> @0x4f2a62], the compile error + scratch-sink
-        // pair.
-        return std::nullopt;
-    }
+	// DOSEQ and DORND both emit opcode 4; only the block type differs.
+	// [orig: Script_Compile @0x4F4134..0x4F41E4 (DORND, type 5),
+	// @0x4F428E..0x4F433D (DOSEQ, type 4)]
+	void open_do(File &f, int type, const char *unexpected) {
+		if (f.in_condition) {
+			error(f, f.line, unexpected);
+			return;
+		}
+		++f.depth;
+		Block &b = block(f);
+		b.pending_branch = static_cast<int64_t>(emit(0x04000000u));
+		b.do_param = static_cast<int64_t>(emit(do_counter_ << 16));
+		b.sections = 1;
+		b.jumps.clear();
+		b.line = f.line;
+		b.type = type;
+		b.loop_id = do_counter_;
+		b.loop_back = -1;
+		if (do_counter_ >= kDoSpace) {
+			error(f, f.line, "Out of DO space");
+			return;
+		}
+		++do_counter_;
+		if (do_counter_ == kDoSpace) error(f, f.line, "Out of DO space");
+	}
 
-    void emit_call_word(int idx, Op fold, bool negate, const Call &call) {
-        prog_.instruction_sources.push_back({static_cast<uint32_t>(prog_.code.size()), call.source_index, call.line});
-        emit(encode_call(static_cast<uint16_t>(idx), fold, /*push=*/false, negate));
-    }
+	// [orig: Script_Compile @0x4F4ACF..0x4F4B80 (GLOOP), @0x4F4D02..0x4F4DAF (PLOOP)]
+	void open_loop(File &f, bool gloop) {
+		if (f.in_condition) {
+			error(f, f.line, gloop ? "Unexpected GLOOP" : "Unexpected PLOOP");
+			return;
+		}
+		if (f.loop_nesting != 0) error(f, f.line, "No LOOP Nesting!");
+		const size_t group = emit(gloop ? 0x0A000000u : 0x0A000001u);
+		if (gloop) f.gloop_patch = static_cast<int64_t>(group);
+		++f.depth;
+		Block &b = block(f);
+		b.pending_branch = static_cast<int64_t>(emit(0x09000000u));
+		b.loop_back = b.pending_branch;
+		++f.loop_nesting;
+		b.do_param = -1;
+		b.sections = 0;
+		b.loop_id = 0;
+		b.jumps.clear();
+		b.line = f.line;
+		b.type = 9;
+	}
 
-    // Emit a single command call (condition leaf or action). `fold` controls how
-    // the return value combines into the accumulator (Assign for the first term).
-    void emit_call(Call call, Op fold, bool negate) {
-        if (call.name == "$operand") {
-            // Bare values preserve their dword for arithmetic and comparison.
-            call.name = "load";
-        }
-        int idx = wac_command_index(call.name);
-        if (idx < 0) {
-            warn(call.line, "unknown command '" + call.name + "'");
-            return;
-        }
-        const CommandDef &def = wac_commands()[idx];
-        emit_call_word(idx, fold, negate, call);
-        // Retail's argument loop owns ONE token buffer. A token the resolver
-        // binds fills the slot and the tokenizer reads the next token
-        // [orig: Script_Compile @0x4f3af2..0x4f3afd -> loc_4F32E0]; a token it
-        // returns NULL for fills the slot with the scratch sink and re-enters
-        // the loop with the SAME token [orig: @0x4f3ab2..0x4f3aed ->
-        // loc_4F3990], which the next slot's expected type re-classifies
-        // [orig: @0x4f3a71..0x4f3aaa]. The source cursor and the slot index
-        // therefore move apart, and the tokens left once the slots are full
-        // are statement-level tokens [orig: @0x4f3a76 -> loc_4F3B02].
-        size_t cursor = 0;
-        for (int slot = 0; slot < def.argc; ++slot) {
-            if (cursor >= call.args.size()) {
-                emit(encode_operand(OperandKind::Pool, push_pool(0)));
-                continue;
-            }
-            const std::optional<uint32_t> ref = try_resolve(call.args[cursor], def.params[slot], call.line);
-            if (ref) {
-                emit(*ref);
-                ++cursor;
-            } else {
-                emit(unresolved_argument(&def, call.line));
-            }
-        }
-        stray_arguments(call, cursor);
-    }
+	// The END family closes ONE block: the loop jump-back, the DO section
+	// count, then the pending branch and every jump point past the end.
+	// [orig: Script_Compile @0x4F46AF..0x4F47E9]
+	void close_block(File &f) {
+		if (f.in_condition) {
+			error(f, f.line, "END inside IF");
+			return;
+		}
+		if (f.depth == 0 || (block(f).pending_branch < 0 && block(f).jumps.empty())) {
+			error(f, f.line, "Unexpected END");
+			return;
+		}
+		Block &b = block(f);
+		if (b.loop_back >= 0) {
+			emit(0x03000000u + static_cast<uint32_t>(b.loop_back));
+			b.loop_back = -1;
+		}
+		if (b.do_param >= 0) {
+			or_word(b.do_param, b.sections);
+			b.do_param = -1;
+			b.sections = 0;
+		}
+		if (b.pending_branch >= 0) {
+			or_word(b.pending_branch, here());
+			b.pending_branch = -1;
+		}
+		for (size_t i = b.jumps.size(); i-- > 0;) or_word(int64_t(b.jumps[i]), here());
+		b.jumps.clear();
+		if (b.type == 9) --f.loop_nesting;
+		--f.depth;
+		b.type = 0;
+	}
 
-    // The statement-level classification of the tokens left over once a
-    // call's slots are full [orig: Script_Compile's keyword default]: the
-    // token is resolved as a bare value with expectedType 1
-    // (@0x4f50f5..0x4f5108) and, with no `=` following (@0x4f511a), rewritten
-    // to `load` (@0x4f5124..0x4f5136), whose CALL word takes the already
-    // cleared operator state, an assign of the accumulator
-    // (@0x4f5321..0x4f533d), and the value as its inline operand (@0x4f533f);
-    // a token that is NULL there walks the action table (@0x4f5252..0x4f5282)
-    // and starts a new call fed by the tokens after it; a token matching
-    // nothing is the first-error "Unknown '<token>'" (@0x4f5293) and the
-    // tokenizer moves on with nothing emitted (@0x4f52b4). A quoted token
-    // keeps its quote in retail's buffer (@0x4f3338), so nothing matches it.
-    void stray_arguments(const Call &call, size_t cursor) {
-        while (cursor < call.args.size()) {
-            const Arg &arg = call.args[cursor++];
-            if (!arg.is_string) {
-                if (const std::optional<uint32_t> ref = try_resolve(arg, ParamType::Value, call.line)) {
-                    emit_call_word(wac_command_index("load"), Op::Call, false, call);
-                    emit(*ref);
-                    continue;
-                }
-                if (wac_command_index(arg.text) >= 0) {
-                    Call rest;
-                    rest.name = arg.text;
-                    rest.args.assign(call.args.begin() + static_cast<std::ptrdiff_t>(cursor), call.args.end());
-                    rest.line = call.line;
-                    rest.source_index = call.source_index;
-                    emit_call(std::move(rest), Op::Call, false);
-                    return;
-                }
-            }
-            warn(call.line, "Unknown '" + arg.text + "'");
-        }
-    }
+	// ELSE and ELSEIF need a THEN/ENTER/LEAVE block: its branch lands past
+	// the JUMP they emit for the END to patch. [orig: Script_Compile
+	// @0x4F43CF..0x4F447B (ELSEIF), @0x4F4566..0x4F4619 (ELSE)]
+	bool open_alternative(File &f, bool elseif) {
+		if (f.in_condition) {
+			error(f, f.line, elseif ? "Unexpected ELSEIF" : "Unexpected ELSE");
+			return false;
+		}
+		Block &b = block(f);
+		if (b.type != 2 && b.type != 0xB && b.type != 0xC) {
+			error(f, f.line, elseif ? "ELSEIF without THEN/ENTER/LEAVE" : "ELSE without THEN/ENTER/LEAVE");
+			return false;
+		}
+		or_word(b.pending_branch, here() + 1);
+		b.type = elseif ? 1 : 3;
+		b.pending_branch = -1;
+		b.jumps.push_back(emit(0x03000000u));
+		return true;
+	}
 
-    static Op expression_fold(const Expr &e) {
-        if (e.op == "and" || e.op == "&&") return Op::FoldAnd;
-        if (e.op == "or" || e.op == "||") return Op::FoldOr;
-        if (e.op == "xor" || e.op == "!=" || e.op == "<>" || e.op == "~=") return Op::FoldNe;
-        if (e.op == "+") return Op::FoldAdd;
-        if (e.op == "-") return Op::FoldSub;
-        if (e.op == "*") return Op::FoldMul;
-        if (e.op == "/") return Op::FoldDiv;
-        if (e.op == "%") return Op::FoldMod;
-        if (e.op == "^") return Op::FoldPow;
-        if (e.op == "==") return Op::FoldEq;
-        if (e.op == "<") return Op::FoldLt;
-        if (e.op == ">") return Op::FoldGt;
-        if (e.op == "<=") return Op::FoldLe;
-        if (e.op == ">=") return Op::FoldGe;
-        return Op::Call;
-    }
+	// NEXT starts the following DO section. [orig: Script_Compile @0x4F4E2F..0x4F4EFF]
+	void next_section(File &f) {
+		if (f.in_condition) {
+			error(f, f.line, "Unexpected NEXT");
+			return;
+		}
+		Block &b = block(f);
+		if (b.sections == 0) {
+			error(f, f.line, "NEXT without DO");
+			return;
+		}
+		or_word(b.pending_branch, here() + 1);
+		b.jumps.push_back(emit(0x03000000u));
+		b.type = 3;
+		b.pending_branch = static_cast<int64_t>(emit(0x06000000u));
+		emit(b.loop_id);
+		++b.sections;
+	}
 
-    void compile_cond(const Expr &e, Op = Op::Call) {
-        if (e.kind == Expr::Sequence) {
-            for (const Expr &step : e.kids) compile_cond(step);
-        } else if (e.kind == Expr::Store) {
-            emit(encode_instr(Op::StoreVar, 0));
-            emit(resolve(e.call.args[0], ParamType::Variable, e.call.line));
-        } else if (e.kind == Expr::Pop) {
-            // [orig: Script_Compile @0x4F31F0; VM @0x4F5BDF]
-            // Pop folds the saved BYTE into the new result, reversing the
-            // operands of subtraction/division/comparison. NOT negates it.
-            emit(encode_instr(Op::PopExpr, static_cast<uint32_t>(expression_fold(e)) | (e.negate ? 0x80u : 0)));
-        } else {
-            const size_t first = prog_.code.size();
-            emit_call(e.call, expression_fold(e), e.negate);
-            if (e.push && first < prog_.code.size()) prog_.code[first] |= kPushBit;
-        }
-    }
+	// [orig: Script_Compile @0x4F4053..0x4F50E7] True when the token is a keyword.
+	bool keyword(File &f, uint32_t h) {
+		if (h == kHashCheat) {
+			f.decl_mode = 2;
+			return true;
+		}
+		if (h == kHashVar) {
+			f.decl_mode = 1;
+			return true;
+		}
+		if (h == kHashRun) {
+			f.run_pending = true;
+			return true;
+		}
+		if (h == kHashCloseBracket) return true;
+		const bool drains = h == kHashIf || h == kHashThen || h == kHashElse || h == kHashElseIf ||
+				is_end_hash(h) || h == kHashEnter || h == kHashLeave || h == kHashDoSeq ||
+				h == kHashDoRnd || h == kHashNext || h == kHashGloop || h == kHashPloop ||
+				h == kHashOpenBracket;
+		if (!drains) return false;
+		if (drain_abandons(f)) return true;
+		if (h == kHashIf) {
+			// The new block's type waits for THEN. [orig: @0x4F498F..0x4F4A57]
+			if (f.in_condition) {
+				error(f, f.line, "Unexpected IF");
+				return true;
+			}
+			++f.depth;
+			Block &b = block(f);
+			b.do_param = -1;
+			b.sections = 0;
+			b.jumps.clear();
+			b.pending_branch = -1;
+			b.loop_id = 0;
+			b.line = f.line;
+			open_event(f, f.depth);
+		} else if (h == kHashThen) {
+			close_condition(f, 2, 0x02000000u, "THEN without IF", "THEN after NOT");
+		} else if (h == kHashEnter) {
+			close_condition(f, 0xB, 0x0B000000u, "ENTER without IF", "ENTER after NOT");
+		} else if (h == kHashLeave) {
+			close_condition(f, 0xC, 0x0C000000u, "LEAVE without IF", "LEAVE after NOT");
+		} else if (h == kHashElse) {
+			open_alternative(f, false);
+		} else if (h == kHashElseIf) {
+			if (open_alternative(f, true)) open_event(f, f.depth);
+		} else if (is_end_hash(h)) {
+			close_block(f);
+		} else if (h == kHashDoSeq) {
+			open_do(f, 4, "Unexpected DOSEQ");
+		} else if (h == kHashDoRnd) {
+			open_do(f, 5, "Unexpected DORND");
+		} else if (h == kHashNext) {
+			next_section(f);
+		} else if (h == kHashGloop) {
+			open_loop(f, true);
+		} else if (h == kHashPloop) {
+			open_loop(f, false);
+		} else {
+			// [orig: @0x4F50AF..0x4F50D6]
+			if (!f.in_condition) error(f, f.line, "[ifname] without IF");
+			else f.decl_mode = 3;
+		}
+		return true;
+	}
 
-    void declare_variable(const Stmt &s) {
-        const std::string name = s.call.name.substr(0, 18);
-        bool used = builtin_id(name) >= 0;
-        for (const auto &existing : variables_) used |= ieq(existing, name.c_str());
-        for (const auto &existing : event_names_) used |= ieq(existing, name.c_str());
-        if (used || variables_.size() >= 256) {
-            warn(s.call.line, used ? "variable name already used" : "out of variable space");
-            return;
-        }
-        variables_.push_back(name);
-    }
+	// [orig: Script_Compile @0x4F50EB..0x4F5387] A value becomes `load value`;
+	// an lvalue before '=' starts an assignment; any other token must name a
+	// command, whose parameters the following tokens fill.
+	void value_or_call(File &f) {
+		int out_type = 0;
+		const std::optional<Operand> value = resolve(f, int(ParamType::Value), out_type);
+		const bool assign_next = f.operator_hash == kHashAssign;
+		if (value && !assign_next) {
+			std::memcpy(&f.locals[kTokenAt], "load", 5); // [orig: @0x4F5124..0x4F5136]
+		}
+		if (out_type != 0 && value && assign_next) {
+			// [orig: @0x4F513D..0x4F524D]
+			if (f.paren_depth != 0) {
+				if (drain_abandons(f)) return;
+			} else if (f.pending_op != 0) {
+				error(f, f.line, "Unexpected =");
+			}
+			if (f.assign_target) {
+				if (f.emitted_since_assign) emit_store(f);
+				else error(f, f.line, "Variable not set");
+			}
+			f.cursor = f.lookahead_cursor;
+			f.line = f.lookahead_line;
+			f.assign_target = value->ref;
+			f.emitted_since_assign = false;
+			return;
+		}
+		// [orig: @0x4F5252..0x4F52B4] The command walk, stricmp over the table.
+		const int index = wac_command_index(token_view(f));
+		if (index < 0) {
+			error(f, f.line, "Unknown '" + std::string(token_view(f)) + "'");
+			return;
+		}
+		const CommandDef &def = wac_commands()[index];
+		f.params_pending = 0;
+		for (int param = 3; param >= 0; --param) {
+			if (def.params[param] == ParamType::Null) continue;
+			f.expected[size_t(f.params_pending++)] = int(def.params[param]);
+		}
+		f.action = index;
+		prog_.instruction_sources.push_back({here(), f.source, f.line});
+		emit((static_cast<uint32_t>(f.negate + f.push + f.pending_op) << 24) + static_cast<uint32_t>(index));
+		if (value && !assign_next) {
+			emit_operand(*value);
+			--f.params_pending;
+		}
+		f.pending_op = f.pending_prec = f.negate = f.push = 0;
+		f.emitted_since_assign = true;
+	}
 
-    void compile_run(const Stmt &s) {
-        // The literal counter admits two include levels; the third reports
-        // "A run file can't run more files". [orig: Script_Compile @0x4F31F0]
-        if (include_depth_ > 1) {
-            prog_.diagnostics.push_back({s.call.line, 0, "RUN nesting limit exceeded", true});
-            return;
-        }
-        std::string name = s.call.name;
-        const size_t dot = name.find_last_of('.');
-        if (dot != std::string::npos) name.resize(dot);
-        name += ".wac";
-        std::string source;
-        if (!env_.load_source || !env_.load_source(name, source)) {
-            prog_.diagnostics.push_back({s.call.line, 0, "unable to RUN '" + name + "'", true});
-            return;
-        }
-        const uint32_t source_index = uint32_t(prog_.source_names.size());
-        prog_.source_names.push_back(name);
-        ParseResult parsed = parse(source);
-        prog_.diagnostics.insert(prog_.diagnostics.end(), parsed.diagnostics.begin(), parsed.diagnostics.end());
-        ++include_depth_;
-        for (Stmt &child : parsed.statements) {
-            stamp_source(child, source_index);
-            compile_top(child);
-        }
-        --include_depth_;
-    }
+	// [orig: Script_Compile @0x4F54DE..0x4F5734] Missing parameters take the
+	// scratch dword; the paren stack drains (an abandoned frame is skipped
+	// and the drain goes on); a pending assignment stores; open blocks report
+	// "Missing END" and point their branches and jumps at the end, with no
+	// loop jump-back and no DO section count.
+	void finish_file(File &f) {
+		while (f.params_pending != 0) {
+			error(f, f.line, action_signature(f.action));
+			emit(encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch)));
+			--f.params_pending;
+		}
+		while (f.paren_depth != 0) {
+			--f.paren_depth;
+			if (frame_auto(f, f.paren_depth) == 0) error(f, f.line, "Open Paren");
+			if (f.lookahead_prec > frame_prec(f, f.paren_depth)) continue;
+			emit(0x07000000u + frame_opneg(f, f.paren_depth));
+			f.push = f.pending_op = f.pending_prec = f.negate = 0;
+		}
+		if (f.assign_target) {
+			if (f.emitted_since_assign) emit_store(f);
+			else error(f, f.line, "Variable not set");
+		}
+		if (f.depth != 0) error(f, block(f).line, "Missing END");
+		for (; f.depth > 0; --f.depth) {
+			Block &b = block(f);
+			if (b.pending_branch >= 0) {
+				or_word(b.pending_branch, here());
+				b.pending_branch = -1;
+			}
+			for (size_t i = b.jumps.size(); i-- > 0;) or_word(int64_t(b.jumps[i]), here());
+			b.jumps.clear();
+		}
+	}
 
-    void compile_top(const Stmt &s) {
-        if (s.kind == Stmt::If) {
-            compile_if(s);
-        } else if (s.kind == Stmt::Action) {
-            emit_call(s.call, Op::Call, false);
-        } else if (s.kind == Stmt::Block) {
-            compile_block(s, -1, 1);
-        } else if (s.kind == Stmt::Declaration) {
-            declare_variable(s);
-        } else if (s.kind == Stmt::Run) {
-            compile_run(s);
-        } else if (s.kind == Stmt::Assignment || s.kind == Stmt::Expression) {
-            compile_cond(s.cond, Op::Call);
-        }
-    }
+	// ---- WacScript_ResolveParameter ----
 
-    // Compile each IF/ELSEIF as its own event. Retail leaves the most recently
-    // entered event current after nested bodies; END does not restore a parent.
-    void compile_if(const Stmt &s, uint16_t depth = 1) {
-        int e = event_counter_++;
-        event_names_.push_back(s.event_name.substr(0, 18));
-        prog_.event_depths.push_back(depth);
-        emit(encode_instr(Op::EnterEvent, static_cast<uint32_t>(e)));
-        compile_cond(s.cond, Op::Call); // accumulator = condition
-        // THEN runs every true evaluation; ENTER/LEAVE run on edges.
-        // [orig: Script_Compile @0x4F31F0; ExecuteBytecode @0x4F58B0]
-        const Op branch = s.mode == IfMode::Enter ? Op::AndChain
-                : s.mode == IfMode::Leave ? Op::OrChain : Op::MarkFired;
-        size_t andchain = emit(encode_instr(branch, 0));
-        compile_body(s.body, e, depth);
-        bool has_else_chain = !s.elifs.empty() || s.has_else;
-        if (has_else_chain) {
-            size_t jmp = emit(encode_instr(Op::Jump, 0));
-            patch_target(andchain, prog_.code.size()); // L_else
-            compile_else_chain(s, e);
-            patch_target(jmp, prog_.code.size());       // L_end
-        } else {
-            patch_target(andchain, prog_.code.size());  // L_end
-        }
-    }
+	// [orig: WacScript_ResolveParameter @0x4F3115..0x4F31C4] Pool a value:
+	// the probe goes into the next slot, equal values share the first slot
+	// holding them, the 512th distinct value reports and reuses slot 511,
+	// and a kinded literal in a slot of another type reports "Wrong Parameter".
+	uint32_t pool(File &f, int32_t value, int kind, int expected) {
+		if (int(prog_.operands.size()) <= pool_count_) prog_.operands.resize(size_t(pool_count_) + 1, 0);
+		prog_.operands[size_t(pool_count_)] = value;
+		int slot = 0;
+		while (prog_.operands[size_t(slot)] != value) ++slot;
+		if (slot == pool_count_) ++pool_count_;
+		if (pool_count_ >= kValuePoolSlots) {
+			error(f, f.line, "Out of num space");
+			--pool_count_;
+		}
+		if (slot + 1 > pool_high_) pool_high_ = slot + 1;
+		if (kind != 0 && expected != int(ParamType::Value) && expected != kind)
+			error(f, f.line, "Wrong Parameter");
+		return static_cast<uint32_t>(slot);
+	}
 
-    void compile_body(const std::vector<Stmt> &body, int parent_event, uint16_t depth) {
-        for (const Stmt &st : body) {
-            if (st.kind == Stmt::Action) {
-                emit_call(st.call, Op::Call, false);
-            } else if (st.kind == Stmt::If) {
-                compile_if(st, depth + 1);
-            } else if (st.kind == Stmt::Block) {
-                compile_block(st, parent_event, depth + 1);
-            } else if (st.kind == Stmt::Declaration || st.kind == Stmt::Assignment || st.kind == Stmt::Expression) {
-                compile_top(st);
-            } else if (st.kind == Stmt::Run) {
-                prog_.diagnostics.push_back({st.call.line, 0, "RUN is not allowed inside blocks", true});
-            }
-        }
-    }
+	Operand pooled(File &f, int32_t value, int kind, int expected, std::string symbol = {}) {
+		return Operand{encode_operand(OperandKind::Pool, pool(f, value, kind, expected)), std::move(symbol)};
+	}
 
-    void compile_block(const Stmt &s, int parent_event, uint16_t depth) {
-        if (s.block_kind == "ploop" || s.block_kind == "gloop") {
-            if (group_loop_depth_ != 0) {
-                prog_.diagnostics.push_back({s.call.line, 0, "No LOOP Nesting!", true});
-                return;
-            }
-            if (!s.next_bodies.empty())
-                prog_.diagnostics.push_back({s.call.line, 0, "NEXT requires a DO block", true});
-            uint32_t group = 1;
-            if (s.block_kind == "gloop") {
-                // The operand resolves with expectedType 12: a token naming no
-                // group is the non-fatal first-error 'Unknown Group' and the
-                // pool slot holding 0, so the loop selects record 0 (the empty
-                // group) and the script still runs. A token an earlier resolver
-                // table claims (a declared variable, an event, a named value)
-                // is ORed in as the dword behind that address at compile time;
-                // the port takes group 0 for it, under D-WAC-6.
-                // [orig: WacScript_ResolveParameter group leg @0x4f30a0..0x4f30fc
-                //  -> pool slot 0 @0x4f310a; the `or [gloopPatch], [eax]`
-                //  @0x4f368a..0x4f3693; VM opcode 0xA @0x4f5b11 selects record 0]
-                const uint32_t ref = resolve(s.block_argument, ParamType::Group, s.call.line);
-                if (operand_kind(ref) == OperandKind::Pool) {
-                    group = static_cast<uint32_t>(prog_.operands[operand_index(ref)]);
-                } else {
-                    warn(s.call.line, "Unknown Group '" + s.block_argument.text + "'");
-                    group = 0;
-                }
-            }
-            // [orig: Script_Compile @0x4F31F0; PLOOP/GLOOP emit 0xA then 9]
-            emit(encode_instr(Op::GroupIter, group));
-            const size_t next = emit(encode_instr(Op::LocalPlayer, 0));
-            ++group_loop_depth_;
-            compile_body(s.body, parent_event, depth);
-            --group_loop_depth_;
-            emit(encode_instr(Op::Jump, static_cast<uint32_t>(next)));
-            patch_target(next, prog_.code.size());
-            return;
-        }
-        if (s.block_kind != "doseq" && s.block_kind != "dornd") {
-            warn(0, "unsupported block '" + s.block_kind + "'");
-            return;
-        }
-        // BOTH spellings emit opcode 4 in this retail compiler, including
-        // DORND. Opcode 5 exists in the VM but is not emitted by this arm.
-        // [orig: Script_Compile stores @0x4F4143 / @0x4F429D]
-        const uint32_t loop = prog_.loop_count++;
-        size_t branch = emit(encode_instr(Op::DoSeq, 0));
-        emit((loop << 16) | uint16_t(s.next_bodies.size() + 1));
-        compile_body(s.body, parent_event, depth);
-        std::vector<size_t> ends;
-        for (const auto &alternative : s.next_bodies) {
-            ends.push_back(emit(encode_instr(Op::Jump, 0)));
-            patch_target(branch, prog_.code.size());
-            branch = emit(encode_instr(Op::NextDo, 0));
-            emit(loop);
-            compile_body(alternative, parent_event, depth);
-        }
-        patch_target(branch, prog_.code.size());
-        for (size_t end : ends) patch_target(end, prog_.code.size());
-    }
+	// [orig: WacScript_ResolveParameter @0x4F2DA3..0x4F2E1C] The Text and
+	// Filename slots copy the token, past a leading quote, into the string
+	// pool; writes clamp at byte 0x100F, and a pool reaching 0x1000 bytes
+	// reports. Copies are never shared.
+	Operand pool_string(File &f) {
+		const char *s = token(f);
+		if (*s == '"') ++s;
+		std::string &strings = prog_.string_pool;
+		const size_t start = string_length_;
+		auto put = [&](char c) {
+			if (strings.size() <= string_length_) strings.resize(string_length_ + 1, '\0');
+			strings[string_length_] = c;
+			if (string_length_ < kStringPoolClamp) ++string_length_;
+		};
+		for (; *s != '\0'; ++s) put(*s);
+		put('\0');
+		if (string_length_ >= kStringPoolLimit) error(f, f.line, "Out of string space");
+		return Operand{encode_operand(OperandKind::Text, static_cast<uint32_t>(start)), {}};
+	}
 
-    void compile_else_chain(const Stmt &s, int parent_event) {
-        if (!s.elifs.empty()) {
-            // Desugar: first elseif becomes an IF whose else is the remaining chain.
-            Stmt syn;
-            syn.kind = Stmt::If;
-            syn.event_name = s.elifs[0].event_name;
-            syn.cond = s.elifs[0].cond;
-            syn.mode = s.elifs[0].mode;
-            syn.body = s.elifs[0].body;
-            syn.elifs.assign(s.elifs.begin() + 1, s.elifs.end());
-            syn.else_body = s.else_body;
-            syn.has_else = s.has_else;
-            compile_if(syn, prog_.event_depths[parent_event]);
-        } else if (s.has_else) {
-            compile_body(s.else_body, parent_event, prog_.event_depths[parent_event]);
-        }
-    }
+	// A TextToken key's text: a found key keeps its own entry, and every
+	// missing key shares the one "" string the lookup answers with.
+	// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0, the "" @0x51ED2A]
+	int32_t text_token(const std::string &key, std::string &symbol) {
+		std::optional<std::string> text;
+		if (env_.text_token) text = env_.text_token(key);
+		if (!text) {
+			symbol = "TT:";
+			if (text_miss_ < 0) {
+				text_miss_ = static_cast<int32_t>(prog_.text_tokens.size());
+				prog_.text_tokens.push_back({std::string(), std::string()});
+			}
+			return text_miss_;
+		}
+		symbol = "TT:" + key;
+		for (size_t i = 0; i < prog_.text_tokens.size(); ++i)
+			if (int32_t(i) != text_miss_ && prog_.text_tokens[i].key == key) return int32_t(i);
+		prog_.text_tokens.push_back({key, *text});
+		return static_cast<int32_t>(prog_.text_tokens.size() - 1);
+	}
+
+	// The resolver; nullopt is retail's NULL. `out_type` is 1 for the
+	// declared, named-value and M/V/G legs (the assignable ones).
+	// [orig: WacScript_ResolveParameter @0x4F2920]
+	std::optional<Operand> resolve(File &f, int expected, int &out_type) {
+		out_type = 0;
+		const char *s = token(f);
+		const std::string_view name = token_view(f);
+		// The last token byte; before an empty token it is the byte ahead of
+		// the buffer. [orig: @0x4F2953]
+		const char last = static_cast<char>(f.locals[kTokenAt + f.token_length - 1]);
+		// Table 0, the declared names. [orig: @0x4F2960..0x4F2993 -> @0x4F2A39]
+		for (size_t i = 0; i < declarations_.size(); ++i) {
+			if (!ieq(declarations_[i].name, name)) continue;
+			out_type = 1;
+			return Operand{encode_operand(OperandKind::MissionVar, static_cast<uint32_t>(256 + i)), {}};
+		}
+		// Table 1, the IF names: NULL for a Variable slot, the event index
+		// for an IfName slot, else the fired dword. [orig: @0x4F2995..0x4F29C2
+		// -> @0x4F2A4E..0x4F2A8A]
+		for (int i = 0; i < event_count_; ++i) {
+			if (!ieq(event_names_[size_t(i)], name)) continue;
+			if (expected == int(ParamType::Variable)) return std::nullopt;
+			if (expected == int(ParamType::IfName)) return pooled(f, i, int(ParamType::IfName), expected);
+			if (!event_named_[size_t(i)]) return std::nullopt;
+			return Operand{encode_operand(OperandKind::EventFired, static_cast<uint32_t>(i)), {}};
+		}
+		// Table 2, the named values. [orig: @0x4F29C4..0x4F29F1 -> @0x4F2A8F]
+		for (const NamedValue &row : kNamedValues) {
+			if (!ieq(row.name, name)) continue;
+			out_type = 1;
+			return Operand{encode_operand(OperandKind::Builtin, static_cast<uint32_t>(row.id)), {}};
+		}
+		const bool digit_next = s[0] != '\0' && s[1] >= '0' && s[1] <= '9';
+		if (s[0] == 'M' && digit_next) {
+			// A music-context dword, else the scratch dword. [orig: @0x4F29F3..0x4F2A34]
+			out_type = 1;
+			const int32_t index = crt_atol(s + 1);
+			if (!env_.music_globals)
+				return Operand{encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch)), {}};
+			return Operand{encode_operand(OperandKind::MusicVar, static_cast<uint32_t>(index)), {}};
+		}
+		if (s[0] == 'V' && digit_next) {
+			// [orig: @0x4F2AA4..0x4F2B06]
+			int32_t index = crt_atol(s + 1);
+			if (index >= 256) {
+				error(f, f.line, "V# too big");
+				index = 255;
+			}
+			out_type = 1;
+			return Operand{encode_operand(OperandKind::MissionVar, static_cast<uint32_t>(index)), {}};
+		}
+		if (s[0] == 'G' && digit_next) {
+			// [orig: @0x4F2B0B..0x4F2B6D]
+			int32_t index = crt_atol(s + 1);
+			if (index >= 256) {
+				error(f, f.line, "G# too big");
+				index = 255;
+			}
+			out_type = 1;
+			return Operand{encode_operand(OperandKind::GlobalVar, static_cast<uint32_t>(index)), {}};
+		}
+		if (expected == int(ParamType::Variable)) return std::nullopt; // [orig: @0x4F2B7B]
+
+		// The prefix legs, each also taken by its slot type; the name is what
+		// follows the prefix. [orig: @0x4F2B84..0x4F2CE9]
+		auto prefix = [&](const char *p) {
+			const size_t n = std::strlen(p);
+			return std::strncmp(s, p, n) == 0 ? n : size_t(0);
+		};
+		if (const size_t p = prefix("G_"); p || expected == int(ParamType::Group)) {
+			// [orig: @0x4F30A0..0x4F3104] An unknown group stores 0.
+			const std::string_view group_name = name.substr(p);
+			int group = env_.registry ? env_.registry->script_group_index(group_name)
+					: world::EntityRegistry::default_script_group_index(group_name);
+			if (group < 0) {
+				error(f, f.line, "Unknown Group");
+				group = 0;
+			}
+			return pooled(f, group, int(ParamType::Group), expected);
+		}
+		if (const size_t p = prefix("FX_"); p || expected == int(ParamType::Fx)) {
+			// [orig: @0x4F305F..0x4F30FC -> CEffectWorld_InternEffectHandle @0x5F7310]
+			const std::string effect(name.substr(p));
+			const particle::EffectHandle handle = env_.effects ? env_.effects->intern(effect)
+					: particle::EffectHandle{};
+			if (!handle) {
+				error(f, f.line, "Unknown FX", true);
+				return pooled(f, 0, int(ParamType::Fx), expected);
+			}
+			return pooled(f, int32_t(handle.value), int(ParamType::Fx), expected, "FX:" + effect);
+		}
+		if (const size_t p = prefix("FACE_"); p || expected == int(ParamType::Face)) {
+			// [orig: @0x4F3015..0x4F305A -> AnimState_FindByName @0x5800B0]
+			int index = world::facial_expression_index(std::string(name.substr(p)));
+			if (index < 0) {
+				error(f, f.line, "Unknown FACE");
+				index = 0;
+			}
+			return pooled(f, index, int(ParamType::Face), expected);
+		}
+		if (const size_t p = prefix("SS_"); p || expected == int(ParamType::SoundSet)) {
+			// [orig: @0x4F2FDA..0x4F3010 -> SoundBank_FindSetByNameAnyBank @0x5274F0]
+			const std::string set(name.substr(p));
+			int32_t handle = 0;
+			if (env_.sounds) {
+				const std::vector<std::string> &names = env_.sounds->names();
+				for (size_t i = 0; i < names.size(); ++i) {
+					if (ieq(set, names[i])) {
+						handle = int32_t(i + 1);
+						break;
+					}
+				}
+			}
+			if (handle == 0) {
+				error(f, f.line, "Unknown SOUNDSET", true);
+				return pooled(f, 0, int(ParamType::SoundSet), expected);
+			}
+			return pooled(f, handle, int(ParamType::SoundSet), expected, "SS:" + set);
+		}
+		if (const size_t p = prefix("TT_"); p || expected == int(ParamType::TextToken)) {
+			// The lookup answers "" for a missing key, so the leg's "Unknown
+			// TextTool Token" never fires. [orig: @0x4F2F96..0x4F2FD5 ->
+			// MissionText_GetStringByKeyOrGameText @0x51ECD0]
+			std::string symbol;
+			const int32_t index = text_token(std::string(name.substr(p)), symbol);
+			return pooled(f, index, int(ParamType::TextToken), expected, symbol);
+		}
+		if (const size_t p = prefix("ANIM_"); p || expected == int(ParamType::Anim)) {
+			// Every token in an Anim slot, a number too, is looked up as
+			// "anim_" + name, compared past its first five bytes.
+			// [orig: @0x4F2EF2..0x4F2F91 -> AnimMap_FindSlotByName @0x40CFA0]
+			const std::string_view anim = name.substr(p);
+			int index = -1;
+			for (int state = 0; state < world::kInfantryAnimStateCount; ++state) {
+				if (ieq(anim, world::kInfantryAnimNames[state])) {
+					index = state;
+					break;
+				}
+			}
+			if (index < 0) {
+				error(f, f.line, "Unknown ANIM");
+				index = 0;
+			}
+			return pooled(f, index, int(ParamType::Anim), expected);
+		}
+		if (const size_t p = prefix("SSN_"); p || expected == int(ParamType::Ssn)) {
+			// atol (0 for a name or a quoted token) then the 16-bit net-id
+			// lookup; the leg never answers NULL. The port binds the net id
+			// when the VM first meets its world, and the embedder's registry
+			// answers the "Unknown SSN" question the pooled handle answered.
+			// The 10000 player alias is EntityCommands::resolve_ssn's
+			// authoring seam, not a retail lookup. [orig: @0x4F2E97..0x4F2EED
+			// -> EntityPool_FindByNetId @0x4F0A20, the 16-bit key @0x4F0A3A]
+			const int32_t net = crt_atol(s + p) & 0xFFFF;
+			if (env_.registry != nullptr && uint16_t(net) != world::EntityCommands::kLocalPlayerSsn &&
+					!env_.registry->find_by_net_id(uint16_t(net)).valid())
+				error(f, f.line, "Unknown SSN");
+			return Operand{encode_operand(OperandKind::EntitySsn, pool(f, net, int(ParamType::Ssn), expected)), {}};
+		}
+		if (const size_t p = prefix("AMMO_"); p || expected == int(ParamType::Ammo)) {
+			// The name, then "ammo_" + name; row 0 is a miss too.
+			// [orig: @0x4F2E21..0x4F2E92 -> AmmoDef_LookupByName @0x409870]
+			std::string ammo(name.substr(p));
+			int index = env_.ammo ? env_.ammo->index_of(ammo.c_str()) : -1;
+			if (index <= 0 && env_.ammo) {
+				ammo = "ammo_" + ammo;
+				index = env_.ammo->index_of(ammo.c_str());
+			}
+			if (index <= 0) {
+				error(f, f.line, "Unknown AMMO", true);
+				return pooled(f, 0, int(ParamType::Ammo), expected);
+			}
+			return pooled(f, index, int(ParamType::Ammo), expected, "AMMO:" + ammo);
+		}
+		if (expected == int(ParamType::Text) || expected == int(ParamType::Filename)) return pool_string(f);
+
+		// The number leg, a digit, '-' or '.' first. An F suffix scales by
+		// 21501, an M suffix or a Distance slot by 65536; else a ':' makes
+		// minutes plus hours times 60, and an Hour slot scales by 60.
+		// [orig: @0x4F2CEF..0x4F2D9E]
+		if (!((s[0] >= '0' && s[0] <= '9') || s[0] == '-' || s[0] == '.')) return std::nullopt;
+		double value = crt_atof(s);
+		const size_t colon = std::strcspn(s, ":"); // StrCSpnIA
+		int kind = 0;
+		if (last == 'F') {
+			value *= 21501.0;
+			kind = int(ParamType::Distance);
+		} else if (last == 'M' || expected == int(ParamType::Distance)) {
+			value *= 65536.0;
+			kind = int(ParamType::Distance);
+		} else if (colon != f.token_length) {
+			const double minutes = crt_atof(s + colon + 1);
+			const double hours = value * 60.0;
+			value = minutes + hours;
+			kind = int(ParamType::Hour);
+		} else if (expected == int(ParamType::Hour)) {
+			value *= 60.0;
+		}
+		// [orig: WacScript_ResolveParameter @0x4F2920 (the _ftol2_sse call @0x4F2D8C)]
+		return pooled(f, io::retail_ftol_sse2(value), kind, expected);
+	}
+
+	// The dword a resolved address holds during the compile: a pool slot's
+	// value, else what the embedder's variable banks, events and engine
+	// words hold before the load resets them. [orig: `mov ecx, [eax]`
+	// @0x4F368A]
+	uint32_t compile_time_dword(uint32_t ref) const {
+		if (operand_kind(ref) == OperandKind::Pool)
+			return operand_index(ref) < prog_.operands.size()
+					? static_cast<uint32_t>(prog_.operands[operand_index(ref)]) : 0u;
+		return env_.load_dword ? env_.load_dword(ref) : 0u;
+	}
 };
 
 } // namespace
 
-Program compile(const std::vector<Stmt> &statements, const CompileEnv &env) {
-    Compiler c(env);
-    return c.compile(statements);
-}
-
 Program compile_source(std::string_view source, const CompileEnv &env) {
-    ParseResult pr = parse(source);
-    Program prog = compile(pr.statements, env);
-    // Prepend parse diagnostics.
-    prog.diagnostics.insert(prog.diagnostics.begin(), pr.diagnostics.begin(),
-                            pr.diagnostics.end());
-    return prog;
+	ScriptCompiler compiler(env);
+	compiler.compile_file(0, source);
+	return compiler.finish();
 }
 
 Program compile_program(const std::vector<std::string> &sources, const CompileEnv &env) {
-    std::vector<Stmt> all;
-    std::vector<Diagnostic> parse_diags;
-    uint32_t source_index = 0;
-    for (const std::string &src : sources) {
-        ParseResult pr = parse(src);
-        for (Stmt &s : pr.statements) {
-            stamp_source(s, source_index);
-            all.push_back(std::move(s));
-        }
-        ++source_index;
-        for (Diagnostic &d : pr.diagnostics) parse_diags.push_back(std::move(d));
-    }
-    CompileEnv source_env = env;
-    source_env.source_names.resize(sources.size());
-    Program prog = compile(all, source_env);
-    prog.diagnostics.insert(prog.diagnostics.begin(), parse_diags.begin(), parse_diags.end());
-    return prog;
+	CompileEnv source_env = env;
+	source_env.source_names.resize(sources.size());
+	ScriptCompiler compiler(source_env);
+	for (size_t i = 0; i < sources.size(); ++i) compiler.compile_file(static_cast<uint32_t>(i), sources[i]);
+	return compiler.finish();
 }
 
 } // namespace opennova::wac

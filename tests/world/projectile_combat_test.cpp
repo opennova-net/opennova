@@ -2148,6 +2148,54 @@ void test_terrain_impact_emits_permanent_scorch() {
     CHECK(world.out.terrain_scorches.pending().empty());
 }
 
+// A terrain stop records its round in the global hit record with no damage,
+// section or target. [orig: Projectile_HandleTerrainImpact
+// Projectile_CopyEntityToHitRecord @0x4E9319..0x4E931F, +0x30 / +0x48 zeroed
+// @0x4E9326 / @0x4E932B]
+void test_terrain_stop_records_the_round() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 10.0f};
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+    AmmoTableEntry ammo;
+    ammo.name = "RECORD";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.round_sim.hit_record.damage = 99;
+    world.round_sim.hit_record.section = 5;
+    RoundSpawnParams params;
+    params.owner = owner;
+    params.shooter_handle = owner.packed;
+    params.origin = {10.0f, -20.0f, 2.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{0.0f, 0.0f, -10.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    const HitRecord &record = world.round_sim.hit_record;
+    CHECK(record.has_round);
+    CHECK(record.round_owner == owner && record.owner == owner);
+    CHECK(record.round_ammo_index == 0);
+    CHECK(record.round_vel_q16.z < 0);
+    CHECK(record.damage == 0 && record.section == 0 && !record.target.valid());
+}
+
 // The ordinary BULLET path never remaps a building's CFAC material 1 to the
 // flesh bank: retail's ballistic entity impact passes material + 4
 // unconditionally; the 1 -> 23 remap belongs to the knife's PERSON leg alone.
@@ -2607,10 +2655,51 @@ struct PlayerVictimRig : HeapWorldFixture {
         ctx.is_authority = true;
         for (int i = 0; i < count; ++i) {
             ctx.logic_tick = ++tick;
-            world.ai.tick(world, ctx);
+            world.update_all_entities(ctx);
         }
     }
 };
+
+// The plyr callback's waypoint tail ends a round hit's event too: a team 1/2
+// player whose AI slot carries a route channel marks the node it stands in.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B, reached from
+// Projectile_ProcessDamageOnTarget's event-1 call @0x4E820E]
+void test_round_hit_runs_the_player_waypoint_tail() {
+    auto r = std::make_unique<PlayerVictimRig>();
+    Entity *v = r->victim_entity();
+    v->team = 1;
+    v->net_id = 7;
+    AiEntity *body = r->victim_body();
+    body->slot.f[37] = 3;
+    NavNodeTable &nav = r->world.ai.nav;
+    nav.channels.resize(4);
+    nav.channels[3].count = 1;
+    nav.channels[3].entries[0] = 0;
+    nav.nodes.resize(1);
+    nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
+    nav.nodes[0].f[1] = body->pos[0];
+    nav.nodes[0].f[2] = body->pos[1];
+    r->fire_and_tick();
+    CHECK(v->spawn_phase == 64);
+    CHECK(r->world.script.relations.single_visited(7, 3, 0));
+    CHECK(r->world.script.relations.group_visited(1, 3, 0));
+}
+
+// A round hit records its round, the damage, the struck section and the
+// target in the global hit record. [orig: Projectile_ProcessDamageOnTarget
+// Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30 @0x4E81C9,
+// +0x38 @0x4E81D2, +0x48 @0x4E81D7]
+void test_round_hit_records_the_round() {
+    auto r = std::make_unique<PlayerVictimRig>();
+    r->fire_and_tick();
+    const HitRecord &record = r->world.round_sim.hit_record;
+    CHECK(record.has_round);
+    CHECK(record.round_owner == r->shooter && record.owner == r->shooter);
+    CHECK(record.round_ammo_index == 0);
+    CHECK(record.damage == 1860);
+    CHECK(record.section == 13);
+    CHECK(record.target == r->victim);
+}
 
 // The kill-cause bits live on the ENTITY (retail +44 bits 8..11), latched at
 // hit time and read at the death edge: a non-lethal head hit marks the next
@@ -2762,6 +2851,80 @@ void test_same_projectile_second_player_kill_latches_0x100() {
         CHECK((world.round_sim.deaths[0].event_flags & 0x100u) == 0);
         CHECK((world.round_sim.deaths[1].event_flags & 0x100u) != 0);
     }
+}
+
+// The kill accounting's lethal edge reads the health word BEFORE the hit: a
+// body an unclamped path left below zero is raised back to zero by the clamped
+// hit but restages no death, and a lethal hit on a dead-flagged body stages
+// its death without the kill event. [orig: Projectile_ProcessDamageOnTarget
+// @0x4E80F7..0x4E8101 pre-hit health > 0, @0x4E810A damage >= health,
+// @0x4E811F Flags & 2 skipping Score_ProcessKillEvent @0x4E8133]
+void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 8);
+    Entity s;
+    s.kind = EntityKind::Organic;
+    s.item_type = 3;
+    s.health = 100;
+    const EntityHandle shooter = world.registry.spawn(0, s);
+    auto spawn_victim = [&](int32_t health, uint32_t flags) {
+        Entity t;
+        t.kind = EntityKind::Organic;
+        t.has_item_def = true;
+        t.item_type = 3;
+        t.position = {5.0f, 0.0f, 0.0f};
+        t.health = health;
+        t.flags = flags;
+        t.engine_flags = flags;
+        return world.registry.spawn(0, t);
+    };
+
+    AmmoTableEntry ammo;
+    ammo.name = "ZONE";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    world.tables.ammo.entries.push_back(ammo);
+
+    LiveRound round;
+    round.active = true;
+    round.owner = shooter;
+    round.shooter_handle = shooter.packed;
+    round.ammo_index = 0;
+    round.vel = {10.0f, 0.0f, 0.0f};
+    auto hit_person = [&](EntityHandle h) {
+        ProjectileHit hit;
+        hit.hit_class = ProjectileHitClass::Person;
+        hit.geometry_entity = h;
+        hit.section_index = 1;
+        hit.bone_index = 1;
+        hit.hit_zone = 1;
+        FixedVec3 velocity{10 * 65536, 0, 0};
+        world.round_sim.process_damage_hit(world, round, hit, velocity);
+    };
+
+    const EntityHandle live = spawn_victim(10, 0);
+    hit_person(live);
+    CHECK(world.registry.get(live)->health == 0);
+    CHECK(world.round_sim.deaths.size() == 1);
+    if (world.round_sim.deaths.size() == 1)
+        CHECK(world.round_sim.deaths[0].kill_event);
+
+    world.round_sim.deaths.clear();
+    const EntityHandle below_zero = spawn_victim(-5, 0);
+    hit_person(below_zero);
+    CHECK(world.registry.get(below_zero)->health == 0);
+    CHECK(world.round_sim.deaths.empty());
+
+    world.round_sim.deaths.clear();
+    const EntityHandle flagged = spawn_victim(10, kEntityFlagDead);
+    hit_person(flagged);
+    CHECK(world.registry.get(flagged)->health == 0);
+    CHECK(world.round_sim.deaths.size() == 1);
+    if (world.round_sim.deaths.size() == 1)
+        CHECK(!world.round_sim.deaths[0].kill_event);
 }
 
 // On a non-authority in-session peer the person class callback still fires
@@ -3121,6 +3284,7 @@ int main() {
     test_material_15_breaks_the_building_glass_section();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
+    test_terrain_stop_records_the_round();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();
     test_visual_dynamic_proxy_excludes_shooter_self_slot();
@@ -3138,7 +3302,10 @@ int main() {
     test_move_effect_water_release_reads_pre_move_z();
     test_move_effect_ballistic_leg_ignores_the_water_plane();
     test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
+    test_round_hit_records_the_round();
+    test_round_hit_runs_the_player_waypoint_tail();
     test_same_projectile_second_player_kill_latches_0x100();
+    test_kill_event_reads_the_pre_hit_health_and_the_dead_flag();
     test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences();
     if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

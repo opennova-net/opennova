@@ -448,6 +448,8 @@ private:
 		int32_t body_source_selector = -1;
 		int32_t body_source_phase = 0;
 		float body_blend_weight = 1.0f;
+		int32_t body_variant = 0;
+		int32_t body_source_variant = 0;
 	};
 
 	struct WireRow {

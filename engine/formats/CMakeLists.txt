@@ -115,18 +115,16 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_tsd.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_io.cpp
-    # wac — the WAC scripting language front end: lexer, parser/AST, the command
-    # table (names + param types), and the compiled Program model. The compiler
+    # wac — the WAC scripting language's command table (names + param types),
+    # bytecode encoding and compiled Program model. The single-pass compiler
     # (binds names/vars against the live world) and the VM are engine/runtime/wac.
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/help.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/lexer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/parser.cpp
 )
 
 # engine/ is the one public include root (ADR 0040): <formats/<domain>/file.h>.
-# wac's front end lives here as <formats/wac/...>; the compiler/VM are
+# wac's format half lives here as <formats/wac/...>; the compiler/VM are
 # <runtime/wac/...> — the group in the path keeps the two apart.
 target_include_directories(opennova_formats
     PUBLIC

@@ -404,8 +404,9 @@ LocalWeaponInputBlock local_weapon_input_block(const World &world,
 // A short reason for each block, "" for kNone.
 const char *local_weapon_input_block_name(LocalWeaponInputBlock block);
 
-// One 62.5 Hz pump of the local player's slot, after the world logic tick
-// (the world's own pump skips L — external_local_mounted_weapon_pump).
+// One 62.5 Hz pump of the local player's slot: the local player's visit in
+// the world's weapon-action walk (LocalPlayer::pump_local_weapon; the AI pump
+// never advances L's slot as well).
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                             LocalWeaponPumpIO &io);
 

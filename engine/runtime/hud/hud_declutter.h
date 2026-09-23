@@ -11,13 +11,14 @@ struct DefHudPosFile;  // formats/def/def.h
 //  @ 0x24D20BC (cfg int "hud_detail", parse @ 0x550339, default 0 @ 0x54d3d8,
 //  apply @ 0x55154d, saved @ 0x54c80d); rebuild
 //  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
-// Unported residual: the WAC/mission event action (type 37) force-applies
-// level 0 through a side path WITHOUT touching the global [orig:
-//  RenderState_SetLayerVisibilityByIndex @ 0x5A3020, flash-timer array
-//  dword_2723CF8] — tracked, not modeled here.
+// BMS action 28 sub 37 (the HUD item flash, HudItemFlash below) rebuilds the
+// table at level 0 through a side path WITHOUT touching the stored level
+// (HudDeclutter::apply_level) [orig: RenderState_SetLayerVisibilityByIndex
+//  @ 0x5A3020 -> CRenderState_SetLayerVisibility(0) @ 0x5A3031].
 // Witness record: docs/interface/hud-re.md.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::hud {
@@ -121,12 +122,55 @@ public:
 		return visible_;
 	}
 
+	// The table rebuilt at `level` while the stored level stays: the HUD item
+	// flash forces level 0 this way, and the next mask or level change
+	// rebuilds at the stored level again.
+	// [orig: RenderState_SetLayerVisibilityByIndex @ 0x5A3020 ->
+	//  CRenderState_SetLayerVisibility(0) @ 0x5A3031]
+	void apply_level(int level);
+
 private:
 	void rebuild();
+	void rebuild_at(int level);
 
 	std::array<uint8_t, kDeclutterSlotCount> masks_;
 	std::array<bool, kDeclutterSlotCount> visible_;
 	int level_ = 0;
 };
+
+// The 16 HUD item flash timers BMS action 28 sub 37 arms (timer index =
+// param1, value = param2): each nonzero timer drops by the logic-tick delta
+// between HUD frames, clamped at 0, and the items it drives blink on its bit
+// 0x10. Retail leaves the index unchecked; an index outside 0..15 lands on
+// the neighbouring HUD globals and is not modeled (the write is dropped).
+// [orig: the timers dword_2723CF8..dword_2723D34; the write
+//  RenderState_SetLayerVisibilityByIndex @ 0x5A3020 (@ 0x5A302A); the tick
+//  sub_59A9E0 @ 0x59A9E0, called per HUD frame with the current tick from
+//  HUD_RenderAllOverlays @ 0x5A80FB]
+class HudItemFlash {
+public:
+	static constexpr int kCount = 16;
+
+	void set(int index, int32_t value);
+	// [orig: sub_59A9E0 @ 0x59A9E0 — the same tick returns @ 0x59A9EC; the
+	//  delta @ 0x59A9F0; each nonzero timer minus the delta, 0 when the delta
+	//  reaches it @ 0x59AA06..0x59AA10]
+	void tick(int32_t now);
+	int32_t timer(int index) const {
+		return index >= 0 && index < kCount ? timers_[static_cast<std::size_t>(index)] : 0;
+	}
+	const std::array<int32_t, kCount> &timers() const { return timers_; }
+
+private:
+	std::array<int32_t, kCount> timers_{};
+	int32_t last_tick_ = 0;
+};
+
+// The map overlay and compass gate: an idle timer or its lit phase draws.
+// [orig: HUD_DrawMapOverlay @ 0x5A785B / @ 0x5A77FE — `jz draw; test al,10h;
+//  jz skip`]
+inline bool hud_item_flash_shown(int32_t timer) {
+	return timer == 0 || (timer & 0x10) != 0;
+}
 
 } // namespace opennova::hud

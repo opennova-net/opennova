@@ -64,10 +64,34 @@ public:
     // These arm the existing row's corpse lifecycle; they do not spawn immediately.
     bool set_ssn_respawns(EntityTarget ssn, int32_t count);
     void set_group_respawns(int32_t group, int32_t count);
+    // BMS KillSingle: the first matching row; pool 0 also loses its attacker and
+    // staged death clip; the class event fires phase 1 (pool 3: phase 4).
+    // [orig: Entity_KillByNetId @0x43DBD0]
     bool kill_ssn(EntityTarget ssn);
+    // WAC killSSN: the ItemTypeIndex gate, Health 0, lastAttacker cleared (and a
+    // person's staged death clip), then the class event (e, 1, 0) with a cleared
+    // hit record. [orig: WacCmd_KillSsn @0x4F1E40]
+    bool wac_kill_ssn(EntityTarget ssn);
+    // The shared destroy (retail Entity_Destroy): no network notification.
     bool remove_ssn(EntityTarget ssn);
+    // The script removal: S2C 0x12 to the joiners, a removed player's placed
+    // devices through the same removal, then the shared destroy.
+    // [orig: Server_RemoveEntityAndNotify @0x50a270]
+    bool server_remove_and_notify(EntityTarget ssn);
+    // The placed devices a player owns, each through server_remove_and_notify:
+    // the Player-row removal above, the deploy leg and the leaver's teardown
+    // run it. [orig: Entity_RemovePlacedDevicesByOwner @0x546E00]
+    void remove_placed_devices_by_owner(EntityHandle owner);
+    // BMS VaporizeSingle: the first pool 0..3 row carrying the SSN is removed
+    // with the notification. [orig: find_entity_by_parent_and_dispatch @0x43e210]
+    bool remove_bms_ref(int32_t ssn);
+    // WAC SSNHP: the health word, the attacker cleared; no gate.
+    // [orig: WacCmd_SsnHp @0x4F2100]
     bool set_ssn_hp(EntityTarget ssn, int32_t hp);
-    bool add_ssn_hp(EntityTarget ssn, int32_t delta);
+    // WAC SSNADDHP: the ItemDef gate, the 16-bit add floored at 0 and capped at
+    // the def healthMax (each returns 1); an unclamped add clears the attacker
+    // and returns 0. [orig: WacCmd_SsnAddHp @0x4F2170]
+    int32_t add_ssn_hp(EntityTarget ssn, int32_t delta);
     // WAC accuracy writes the controller-slot error pair as max(0, 100-value).
     // [orig: WacCmd_SetAccuracy @0x4F2070]
     bool set_ssn_accuracy(EntityTarget ssn, int32_t primary, int32_t secondary);
@@ -100,6 +124,8 @@ public:
     bool set_ssn_turn(EntityTarget ssn, int32_t heading_degrees);
     bool teleport_local_to_ssn(EntityTarget ssn);
     bool set_ssn_hidden(EntityTarget ssn, bool hidden);
+    // WAC holdSSN/unholdSSN: cause_flags bit 0x2000 behind the ItemTypeIndex
+    // gate. [orig: WacCmd_HoldSsn @0x4F7810; WacCmd_UnholdSsn @0x4F7870]
     bool set_ssn_held(EntityTarget ssn, bool held);
     bool set_ssn_disabled(EntityTarget ssn, bool disabled);
 
@@ -169,11 +195,18 @@ public:
     void set_wind_scale(int32_t value);                    // the `wind` named value
 
     // --- queries ---
+    // WAC SSNexists: a resolved row with an ItemTypeIndex.
+    // [orig: WacCmd_SsnExists @0x4F1A70]
     bool ssn_exists(EntityTarget ssn) const;
+    // The BMS SingleAlive/SingleDestroyed predicates (the `alive` latch).
     bool ssn_alive(EntityTarget ssn) const;
     bool ssn_dead(EntityTarget ssn) const;
-    // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
-    // the signed max-health half reinterpreted as u16.
+    // WAC SSNdead/SSNalive: the Flags dead bit behind the ItemTypeIndex gate.
+    // [orig: WacCmd_SsnDead @0x4F1AC0; WacCmd_SsnAlive @0x4F1B20]
+    bool wac_ssn_dead(EntityTarget ssn) const;
+    bool wac_ssn_alive(EntityTarget ssn) const;
+    // [orig: WacCmd_SsnWounded @0x4F1B80] Signed 16-bit health <= the signed
+    // def healthMax word halved.
     bool ssn_wounded(EntityTarget ssn) const;
     // BMS area predicates: all matching rows in pools 0/1, rather than the
     // general first-match SSN resolver used by bound WAC commands.
@@ -191,6 +224,11 @@ public:
     // --- the cat-2 single-state trigger queries (EventTrigger cat 2;
     // bms-event-runtime-re §3b — every helper's RAW sense is POSITIVE, the
     // authored chain-negation bit does the flipping) ---
+    // [orig: Entity_IsAliveByBmsRef @0x43e640] The BMS SingleAlive /
+    // SingleDestroyed read: the first pool 0/1/2 row carrying the SSN answers
+    // with its dead flag; SSN 0 and an SSN no row carries (never placed,
+    // rejected at admission, or removed) read NOT alive.
+    bool bms_ref_alive(int32_t ssn) const;
     // [orig: Entity_IsSsnAtAlertLevel @0x43e780] No AI component (aiRuntime
     // null) -> false; else the per-entity controller alert byte == level
     // (2 red / 1 yellow / 0 green).
@@ -209,12 +247,12 @@ public:
     // (mounted_child) is set and the held object's command group == group.
     bool ssn_holding_group(uint16_t ssn, int group) const;
     // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870] Any resolved
-    // (item_id != 0, the retail ItemTypeIndex +0x1C gate) member of
+    // (item_type_index != 0, the retail ItemTypeIndex +0x1C gate) member of
     // holder_group holding an object of held_group; first match wins.
     bool group_holding_group(int holder_group, int held_group) const;
     // [orig: Entity_IsOnTopOfChain @0x4f19a0] target reachable from ssn's
     // groundEntity chain (ground_target) within 3 hops; both entities gated
-    // on item_id != 0.
+    // on item_type_index != 0.
     bool ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) const;
     // Distances use Q16: WAC resolves literals; BMS shifts its whole metres.
     // [orig: Entity_CheckProximity @0x4F14C0] Wrapped center deltas, clamped
@@ -236,13 +274,18 @@ public:
     bool ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn, int32_t distance_q16) const;
 
     // --- group (by group id) ---
-    int kill_group(int group);          // returns members affected
+    // WAC kill / BMS KillGroup: pools 2, 0, 1, every row of the group (dead rows
+    // too): Health 0 and the class event (e, 1, 0); returns the rows visited.
+    // [orig: Entity_KillAllByNetId @0x43C8E0]
+    int kill_group(int group);
     // BMS RedirectGroupTo (event action 1) and WAC GtoWP. `node < 0` selects the
     // nearest node on the list; BMS passes its authored param3. Pool-0 members
     // detach, reset their cooldown/carrier words and seed the turn budget;
     // pool-1 members only take the slot and brain words.
     // [orig: Entity_SetWaypointByTeam @0x43CD20, dispatched @0x454315]
     int group_to_waypoint(int group, int32_t wp, int32_t node = -1);
+    // WAC GroupHP: pools 0-2, the health word of every matching row; returns the
+    // rows written. [orig: WacCmd_GroupHp @0x4F7B30]
     int set_group_hp(int group, int32_t hp);
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);
@@ -255,8 +298,11 @@ public:
     int set_group_team(int group, int32_t team);
     int change_group(int old_group, int new_group);
     int teleport_group_to_marker(int group, int32_t marker_wp_number);
-    bool group_dead(int group) const;   // true if all members dead/absent
-    bool group_alive(int group) const;  // true if any member alive
+    // WAC groupdead/groupalive: the trigger group's live count (<= 0 / > 0),
+    // the 62-tick rescan's word. [orig: WacCmd_GroupDead @0x4ED1A0;
+    // WacCmd_GroupAlive @0x4ED1C0]
+    bool group_dead(int group) const;
+    bool group_alive(int group) const;
 
     // --- mount / emplacement (AttachToEmplaced) ---
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
@@ -291,11 +337,6 @@ public:
     int fire_ammo_from_ssn(int32_t ammo, EntityTarget source, EntityTarget target);
     int fire_ammo_in_area(int32_t ammo, int32_t area_id);
     int rain_ammo_near_player(int32_t ammo, uint32_t random);
-    // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
-    // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144
-    // hierarchy link. We don't model that link, so the target is the nearest emplacement with a free
-    // seat within kMountRadius (a tracked proximity proxy). Returns false if none.
-    bool mount_best(uint16_t occupant_ssn);
     // [orig: Entity_DetachFromVehicle @0x4355f0] Free the occupant's seat + clear its mount ref.
     bool dismount(EntityTarget occupant_ssn);
     // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
@@ -323,8 +364,9 @@ public:
     // (e.g. PLAYPARTANIM: p2=channel, p3=play_type, p4=time). No-op (returns false / 0)
     // when there is no AI system or no brain for the target.
     // The ChangeAI action's sub-type ids, the dfx2med token names
-    // [orig: Entity_ApplyCommand @0x43ab60's switch]. Subs the port does not
-    // carry are reported by cumulative mission diagnostics.
+    // [orig: Entity_ApplyCommand @0x43ab60's switch]. Every arm of the switch is
+    // carried; subs 1, 3, 4, 7, 9..14, 18..20, 24 and 25 have no editor token and
+    // are dispatched by number; 35..39 are the switch's default (no arm).
     enum ChangeAiSub : int {
         kGuardBit = 2,
         kRedAlert = 5,
@@ -353,14 +395,31 @@ public:
         kAiFiringAngle = 46,
     };
     bool apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    // BMS ChangeSingleAI: the first pool 0..2 row carrying the SSN.
+    // [orig: Entity_HandleAlertStateEvent @0x43dee0]
+    bool apply_bms_single_ai_command(int32_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    // BMS ChangeGroupAI: pool 2 rows with an AI component, then pools 0 and 1.
+    // [orig: Entity_HandleAlertCommand @0x43cf10]
     int apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4);
-    int apply_area_ai_command(int zone_area_id, int team, int sub_type,
-                              int32_t p2, int32_t p3, int32_t p4);
+    // BMS AreaAiRed/AreaAiBlue over the load-resolved action record: p1/p3
+    // bound X and p4/reserved1 bound Y (the zone resolver stored x_min,
+    // y_min, x_max, y_max there); pool 0 rows of `team` only.
+    // [orig: Entity_KillTeamInBounds @0x43d030]
+    int apply_area_ai_command(int team, int sub_type, int32_t p1, int32_t p2, int32_t p3,
+                              int32_t p4, int32_t reserved1);
 
     World &world() { return world_; }
 
 private:
     World &world_;
 };
+
+// The class event callback entity+0x1C8(entity, phase, 0), reading the global
+// hit record as its caller left it: the person callbacks for an organic, the
+// brain machine for an AI-data item, the item death class otherwise. The
+// script kills and the vehicle death's child kill fire it.
+// [orig: g_EntityClassEventCallbackTable @0x813000, resolved per def by
+//  EntityDef_InitAllCallbacks @0x4a5aae]
+void hit_record_class_event(World &world, Entity &e, int phase);
 
 } // namespace opennova::world

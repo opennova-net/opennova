@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_medic_cross.h>
 #include <base/io/bam.h>
@@ -1151,7 +1152,10 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			waypoint_nub_frame = 2;
 		}
 	}
-	if (input.waypoint_present && (flags & 0x100u)) {
+	// The state line blinks with HUD item flash timer 5: idle or lit phase
+	// draws. [orig: HUD_DrawMapOverlay @0x5a785b..0x5a7866]
+	if (input.waypoint_present && (flags & 0x100u) &&
+			hud_item_flash_shown(input.waypoint_flash)) {
 		float wx = 0.0f, wy = 0.0f;
 		view_project(view, input, input.waypoint_x, input.waypoint_y, wx, wy);
 		const float dx = wx - view.center_x;

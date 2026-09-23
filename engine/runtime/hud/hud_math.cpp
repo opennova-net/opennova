@@ -96,7 +96,7 @@ int health_color_band_fp16(int32_t ratio_fp16) {
 	return 2;
 }
 
-// [orig: Chat_AddDebugMessage @0x4987f0 — @0x51f216 life, @0x49894e stagger]
+// [orig: Chat_AddMessageChannel2 @0x4987f0 — @0x51f216 life, @0x49894e stagger]
 int message_expire_tick(int now_ticks, int prev_expire, bool has_prev) {
 	const int expire = now_ticks + kMessageLifeTicks;
 	if (!has_prev) return expire;

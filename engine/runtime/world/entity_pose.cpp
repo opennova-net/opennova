@@ -293,6 +293,29 @@ bool EntityPoseProvider::resolve_named_transform(
 	return false;
 }
 
+// The model is the husk's while the husk bit is set and one is attached, else
+// the intact model; the collision block's gate dword is its CMDL bounding-volume
+// count. [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50: model
+//  @0x4B0C59..0x4B0C74, bone 0 @0x4B0C79..0x4B0C83, count @0x4B0CCA..0x4B0CD0,
+//  model+0xB0 and its dword [32] @0x4B0CFF..0x4B0D10 (the CMDL bounding-volume
+//  count Threedi_BuildCollisionModelFromChunks copies @0x5B3D51/@0x5B3D70)]
+bool EntityPoseProvider::resolve_seat_bone(world::World &world,
+		const world::Entity &carrier, int bone_index) {
+	if (world.collision == nullptr) return true; // no model data
+	if (bone_index == 0) return false;
+	int32_t model_id = world.collision->entity_model_id(carrier.handle);
+	const int32_t husk_id = world.collision->entity_husk_model_id(carrier.handle);
+	if ((carrier.engine_flags & world::kEntityFlagHusk) != 0 && husk_id >= 0)
+		model_id = husk_id;
+	const auto found = userpoint_models_.find(model_id);
+	if (found == userpoint_models_.end() || found->second == nullptr) return false;
+	const Threedi3di3 &model = *found->second;
+	if (bone_index < 0 || static_cast<size_t>(bone_index) > model.user_point_count)
+		return false;
+	return model.collision != nullptr &&
+			model.collision->model_data.num_bounding_volumes != 0;
+}
+
 // [orig: Entity_FindAttachBone @0x4B9580, last case-insensitive match]
 int EntityPoseProvider::last_named_userpoint(
 		world::World &world, world::EntityHandle entity, const char *name) {
@@ -553,15 +576,21 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	const std::string primary_key =
 			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.body_clip_state()));
 	if (primary_key.empty()) return false;
+	// Each primary channel samples its served ring entry, as root motion does.
+	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	const int primary_variant = r_ai->inf.anim_variant;
 	const double primary_seconds =
-			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase);
+			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase, primary_variant);
 	std::string source_key;
 	double source_seconds = 0.0;
+	int source_variant = 0;
 	const bool primary_blend = r_ai->inf.body_blend_active();
 	if (primary_blend) {
 		source_key = resolve_primary_key(
 				opennova::world::infantry_anim_key(r_ai->inf.anim_prev));
-		source_seconds = rig->clip_seconds_at_tick(source_key, r_ai->inf.anim_prev_clip_phase);
+		source_variant = r_ai->inf.anim_prev_variant;
+		source_seconds = rig->clip_seconds_at_tick(
+				source_key, r_ai->inf.anim_prev_clip_phase, source_variant);
 	}
 
 	r_inputs = aim_overlay_inputs_for(*r_ai, *r_entity);
@@ -605,7 +634,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 			source_key, source_seconds, r_ai->inf.anim_blend_weight,
 			deltas, weapon_key, weapon_seconds, r_pose,
 			weapon_prev_key, weapon_prev_seconds, weapon_blend,
-			weapon_variant, weapon_prev_variant);
+			weapon_variant, weapon_prev_variant, primary_variant, source_variant);
 	return true;
 }
 

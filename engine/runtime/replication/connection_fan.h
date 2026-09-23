@@ -23,8 +23,8 @@ namespace opennova::replication {
 // drain/emit implementation (ADR 0011 / inmatch ROADMAP P4). Faithful frame order
 // [orig: Game_ProcessMainFrame @ 0x5263f0]:
 //
-//   input -> drain_connection_c2s (C2S) -> World::run_logic_tick (WAC/BMS/AI)
-//         -> emit_connection_s2c (S2C) -> present
+//   input -> drain_connection_c2s (C2S) -> World::run_script_pass (WAC/BMS)
+//         -> emit_connection_s2c (S2C) -> World::run_entity_pass (entities) -> present
 //
 // The host's own client is a transport-mode-1 LoopbackChannel connection; a remote LAN peer is a
 // UdpSessionTransport connection of the same shape.
@@ -89,9 +89,9 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
-// The host tick builds each recipient's frame BEFORE the entity motor (retail's
-// 0x0A is a pre-motor snapshot) and sends it after the maintenance legs, which
-// precede the 0x0A inside retail's Server_TickUpdate.
+// The host tick builds and sends each recipient's frame after its script pass
+// and maintenance legs and before the entity motor, as retail's
+// Server_TickUpdate ends with the per-slot 0x0A.
 // [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4, whose
 //  last leg is the per-slot 0x0A @0x51E3D6..0x51E450, then
 //  Entity_UpdateAllEntities @0x52674B]

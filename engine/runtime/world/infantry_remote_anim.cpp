@@ -45,7 +45,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     infantry_weapon_channel_advance(e);
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-        have_collision_frame = advance_primary_channel(inf, *root_motion, collision_frame);
+        have_collision_frame =
+                advance_primary_channel(inf, *root_motion, anim_rings, collision_frame);
     } else {
         advance_primary_channel_fallback(inf);
     }
@@ -56,10 +57,13 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // nothing staged plays the generic 174 death_pungi AND clears the
         // attacker slot (+0x178), so a death nothing stamped reports as
         // unattributed while one that follows a non-lethal hit keeps that hit's
-        // clip and shooter. (The Flags&0x8000 drowning override (175) rides the
-        // unmodeled swim flags.) [orig: Entity_UpdateInfantryPlayerBody
-        //  @0x4b4c72 test, @0x4b4c7f compute(0, 0, 4) into +0x2C0,
-        //  @0x4b4c8d lastAttacker = 0; consumed +0x2C0 clears @0x4b4cd5]
+        // clip and shooter. A body that dies afloat takes death_drown 175 over
+        // the selection; the edge stamps the death tick and drops Flags 0xC0.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c72 test, @0x4b4c7f
+        //  compute(0, 0, 4) into +0x2C0, @0x4b4c8d lastAttacker = 0; the
+        //  Flags&0x8000 pick @0x4B4C93..0x4B4CAB; death tick
+        //  @0x4B4CC1..0x4B4CCC, `and eax,0FFFFFF3Fh` @0x4B4CC7; consumed
+        //  +0x2C0 clears @0x4b4cd5]
         // Relationship teardown is independent of animation state. A peer can
         // already be in a death-class clip when a late/replayed state restores a
         // mount, and that must not leave the seat claim or compact carrier alive.
@@ -70,14 +74,15 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             int death = ent->death_anim_state != 0
                                 ? ent->death_anim_state
                                 : compute_death_anim_state(0, 0, death_cause::kGeneric);
+            if (((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
+                death = anim_state::kDeathDrown;
             ent->death_anim_state = 0;
-            // Stripped embedder .adm sets may lack the selected clip; keep the
-            // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
-            if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
-                const int torso = anim_state::kDeathBulletBase + 4;
-                death = root_motion->has_clip(inf.adm_id, torso) ? torso
-                                                                 : anim_state::kDeathFire;
-            }
+            ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            ent->death_tick = logic_tick;
+            // An unauthored selection plays the slot's registration fill.
+            // [orig: AnimMap_RegisterEntity @0x40BB60; the edge stores the
+            //  selection unchecked @0x4B4CA3]
             inf.request_body_animation(death);
         }
     } else {
@@ -97,7 +102,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // Stance-change (0x1D) and the extended movement uplink (0x0C) can arrive in
         // the same network pump.  The jump block is per-tick and reads the CURRENT
         // MoveOrder prone bit; the fourth-tick locomotion selector below is not an
-        // eligibility cache. [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181;
+        // eligibility cache. [orig: MoveOrder&0x100 -> the prone local @0x4b4165-0x4b4181;
         // prone gate @0x4b7e99]
         const bool replicated_prone = (ent->net_stance_bits & 0x1u) != 0;
         const bool jump_state_blocked = player_jump_world_state_blocked(inf, ent);

@@ -427,7 +427,7 @@ void barrel_event(World &world, Entity &target) {
         target.class_think_ticks = 1920;
     } else {
         world.out.scars.clear_entity(target.handle);
-        mark_class_dead(target);
+        mark_class_dead(target); // [orig: `or [esi+24h],2` @0x407D34]
         target.class_think_ticks = 10;
     }
 }
@@ -577,7 +577,7 @@ void building_event(World &world, Entity &target) {
             // The +0x1C ItemTypeIndex gate precedes the bounds test in every
             // pool [orig: Entity_ClearHealthInBounds @0x509E89 / @0x509EE9 /
             //  @0x509F55].
-            if (row.item_id == 0) return;
+            if (row.item_type_index == 0) return;
             if (pool == 0 && row.damage_state != 0) return;
             if (pool == 2 && row.has_item_def && row.item_type == 5) return;
             const int32_t p[3] = {int32_t(row.position.x * 65536),
@@ -657,7 +657,8 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
 }
 
 void apply_item_state_event(World &world, Entity &target, int16_t section) {
-    if (target.item_id == 0) return;
+    // [orig: Entity_KillBySlotId `cmp dword ptr [esi+1Ch],0; jz` x42BD29]
+    if (target.item_type_index == 0) return;
     target.health = 0;
     if ((target.engine_flags & kEntityFlagDead) == 0)
         destruction_notify_item_damage(world, target, 4, {section, 0});
@@ -796,16 +797,23 @@ bool tick_item_class_motion(World &world, Entity &entity,
     return true;
 }
 
-// [orig: pool 1 @0x4B8E1B/@0x4B8EA0 (Entity_UpdatePool1Slot @0x4B8DD0, every
-// tick); pools 2/3 in Entity_UpdateAllEntities: the slot cohort tick&7 /
-// tick&0x3F (@0x4C225A / @0x4C2322), the +0x2AC clock @0x4C2291/@0x4C2369 with
-// its decrement by eight @0x4C22C9 / by 64 @0x4C2382, and the entity+0x1C4
-// update callback INSIDE the same 8-/64-stepped walk, the call eax @0x4C22E7 /
-// @0x4C2393 (the pool-2 emitter update @0x4C22FA follows it), so wreck motion
-// advances once per cohort visit, never per tick]
+// The pool-2/3 cohort walks of the entity update: each row on its slot cohort
+// (tick&7 / tick&0x3F) runs its class callback when its +0x2AC clock is
+// expired, else steps the clock by the stride (a pool-2 item without a
+// callback reloads 62 instead), then its +0x1C4 update callback -- so wreck
+// motion advances once per cohort visit, never per tick. A minefield row's
+// callback is its minefield think. Pool 1 is the per-row visit
+// (World::update_pool1_slot).
+// [orig: Entity_UpdateAllEntities -- pool 2 @0x4C2244..0x4C2302: the cohort
+//  @0x4C225A, the clock @0x4C2291, the callback @0x4C22B3, the 62 reload
+//  @0x4C22BA, the -8 @0x4C22C6..0x4C22C9, the update callback `call eax`
+//  @0x4C22E7 (the pool-2 emitter update @0x4C22FA follows it); pool 3
+//  @0x4C230C..0x4C2398: the cohort @0x4C2322, the clock @0x4C2369, the
+//  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
+//  @0x4C2393]
 void tick_item_event_pool(World &world, int pool) {
-    if (pool < 1 || pool > 3) return;
-    const uint32_t stride = pool == 1 ? 1u : pool == 2 ? 8u : 64u;
+    if (pool < 2 || pool > 3) return;
+    const uint32_t stride = pool == 2 ? 8u : 64u;
     const float water_z = world.env.water_z != 0 ? world.env.water_z / 65536.0f : -1.0e9f;
     const size_t cap = world.registry.pool_capacity(pool);
     for (size_t slot = 0; slot < cap; ++slot) {
@@ -814,29 +822,33 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr) continue;
         const uint64_t lifetime = entity->registry_spawn_id;
         const bool cohort = (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
-        const bool event_visit = !entity->is_ai_capable && !entity->minefield.think && cohort;
-        if (event_visit) {
+        if (cohort && entity->minefield.think) {
+            // [orig: Entity_LandmineThink @ 0x441A40 on the same cohort clock]
+            if (!entity->hidden) {
+                if (entity->minefield.age > 0)
+                    entity->minefield.age -= static_cast<int32_t>(stride);
+                else
+                    world.minefields.think(world, *entity);
+            }
+        } else if (cohort && !entity->is_ai_capable) {
             if (entity->class_think_ticks <= 0) {
                 if (pool == 2 && world.ai.collision != nullptr)
                     world.ai.collision->refresh_blink(world, *entity);
                 const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity->item_id);
                 if (traits != nullptr) destruction_notify_item_damage(world, *entity, 0);
                 else if (pool == 2) entity->class_think_ticks = 62;
-            } else if (pool != 1) {
+            } else {
                 entity->class_think_ticks = io::bam_sub(entity->class_think_ticks, int32_t(stride));
             }
         }
         entity = world.registry.get(handle);
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
-        if (event_visit && pool == 1)
-            entity->class_think_ticks = io::bam_sub(entity->class_think_ticks, 1);
         // The renderer recomputes the fade timers every frame it draws a
         // husked entity, independent of the update cohort; the presenter
         // reads the sim's copy [orig: render_sector_entity @0x5C4200].
         update_item_destroy_fade(world, *entity);
-        // The update callback: every tick in pool 1, the pure slot cohort in
-        // pools 2/3 [orig: @0x4C22E7 / @0x4C2393].
-        if (pool != 1 && !cohort) continue;
+        // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
+        if (!cohort) continue;
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;

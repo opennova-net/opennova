@@ -196,9 +196,12 @@ void test_capture_progression() {
 void test_auto_deploy_pick() {
     AshFixture f;
     // 0xFFFE auto-deploy (AS 0x10010): team 1's zone 1 is NOT on team 2's frontier and
-    // carries number 1 != frontier 2 -> no zone auto-pick (falls back to base markers).
-    // [orig: find_spawn_entity_for_team @0x4fc810 -> requestedHandle -1 on miss]
-    CHECK(f.w.zones.find_spawn_zone_for_team(1, 0x10010u) == nullptr);
+    // carries number 1 != frontier 2, so the first walk misses; the frontier then
+    // steps down to 1 (team 1's mask holds number 1) and the retry picks the secured
+    // zone 1. [orig: find_spawn_entity_for_team @0x4fc810 — the direction
+    // @0x4fc88f..0x4fc8bb, the step @0x4fc941..0x4fc952]
+    const Entity *base = f.w.zones.find_spawn_zone_for_team(1, 0x10010u);
+    CHECK(base != nullptr && base->zone_number == 1);
     // Take zone 2 for team 1 (secured): now zone 2 IS on team 2's frontier -> the front line.
     Entity *z2a = f.w.registry.get(f.z2a);
     Entity *z2b = f.w.registry.get(f.z2b);
@@ -209,9 +212,15 @@ void test_auto_deploy_pick() {
     f.w.zones.rebuild_masks();
     const Entity *pick = f.w.zones.find_spawn_zone_for_team(1, 0x10010u);
     CHECK(pick != nullptr && pick->zone_number == 2);
-    // Contested (control < 1.0) removes it again [orig: @0x4fc92c entity+540 >= 0x10000].
+    // Contested (control < 1.0) removes it again [orig: @0x4fc92c entity+540 >= 0x10000];
+    // the frontier (3) then steps down through the owned numbers 2 and 1 to the
+    // secured zone 1.
     z2a->zone_control = 0x8000;
     z2b->zone_control = 0x8000;
+    const Entity *rear = f.w.zones.find_spawn_zone_for_team(1, 0x10010u);
+    CHECK(rear != nullptr && rear->zone_number == 1);
+    // With the base unsecured too, every owned step misses.
+    f.w.registry.get(f.z1)->zone_control = 0x8000;
     CHECK(f.w.zones.find_spawn_zone_for_team(1, 0x10010u) == nullptr);
 }
 
@@ -251,8 +260,9 @@ void test_spawn_zone_presence_and_zone_info() {
     // The join-time respawn-pending gate: ASH offers deploy-selectable zones
     // [orig: SpawnZoneList_GetCount() > 0 @0x51a6f2 -> stateByte |= 0x10; D-NET-156].
     CHECK(f.w.zones.has_spawn_zone());
-    // The 0x0D packed zone byte = zoneNumber + 32*rank [orig: ZoneSlotChain_GetZoneInfo
-    // @0x503eeb]. The two zone-2 entities share a number: descending rank within it —
+    // The 0x0D packed zone byte = zoneNumber + 32*rank [orig:
+    // serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo call
+    // @0x503EEB)]. The two zone-2 entities share a number: descending rank within it —
     // golden ASH_I5A bunker 0x22 = zone 2 rank 1.
     const Entity *z2a = f.w.registry.get(f.z2a);
     const Entity *z2b = f.w.registry.get(f.z2b);
@@ -278,7 +288,12 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     e.health = 150;
     e.alive = true;
     e.net_move_input = Entity::kMoveOrderMoving;
-    return w.registry.spawn(0, e);
+    const EntityHandle handle = w.registry.spawn(0, e);
+    // The capture census and scoring walk the player slots.
+    // [orig: calculate_capture_zone_control_delta @0x501120;
+    // CaptureZone_CheckProximityScoring @0x500C50]
+    w.match.upsert_player({handle, static_cast<uint8_t>(handle.slot()), "Soldier"});
+    return handle;
 }
 
 void capture_second(World &w, ZoneCaptureEvents &events) {
@@ -319,49 +334,63 @@ std::vector<T> events_of(const ZoneCaptureEvents &events) {
 
 // The control-delta formula pins [orig: calculate_capture_zone_control_delta @0x501120].
 void test_control_delta_formula() {
-    auto delta = [](int presence, int side_players, int total_players, int speed_setting,
-                    int shared_n) {
+    // A team-1 zone; `team1`/`team2` are the in-game census.
+    auto delta = [](int presence, int team1, int team2, int speed_setting,
+                    int shared_n, uint8_t zone_team = 1) {
         ZoneCaptureDeltaInput input;
         input.presence = presence;
-        input.capturing_side_players = side_players;
-        input.total_players = total_players;
+        input.zone_team = zone_team;
+        input.team_players = {0, team1, team2, 0, 0};
         input.speed_setting = speed_setting;
+        input.spawn_zone_count = shared_n > 1 ? 1 : 0;
         input.shared_zone_entities = shared_n;
         return zone_capture_control_delta(input);
     };
-    // 1 attacker, 3-per-team server (6 total, no small-server boost), fallback base 12:
+    // 1 owner, 3-per-team server (6 total, no small-server boost), fallback base 12:
     // speed = 3*12 = 36 -> delta = 65536/36 = 1820 (secure in ~36 s at 1 Hz).
-    CHECK(delta(1, 3, 6, -1, 1) == 65536 / 36);
+    CHECK(delta(1, 3, 3, -1, 1) == 65536 / 36);
     // Small-server boost: 1v1 (2 total) -> teamSize = 1 + (6-2)/2 = 3 -> speed 36.
-    CHECK(delta(1, 1, 2, -1, 1) == 65536 / 36);
+    CHECK(delta(1, 1, 1, -1, 1) == 65536 / 36);
     // Retail's configured default, speed setting 1, selects base 24; negative
     // presence mirrors the sign. [orig: Config_SetDefaults @0x54D030]
-    CHECK(delta(-2, 3, 6, 1, 1) == -(2 * 65536) / (3 * 24));
+    CHECK(delta(-2, 3, 3, 1, 1) == -(2 * 65536) / (3 * 24));
     // A zone number shared by 2 entities halves the speed (doubles the rate).
-    CHECK(delta(1, 3, 6, -1, 2) == 65536 / 18);
+    CHECK(delta(1, 3, 3, -1, 2) == 65536 / 18);
     // Minimum magnitude 1.
     CHECK(delta(1, 200, 200, 2, 1) >= 1);
-    CHECK(delta(0, 3, 6, -1, 1) == 0);
+    CHECK(delta(0, 3, 3, -1, 1) == 0);
+    // The sizing side follows the presence sign and the zone's 1/2 owner, not
+    // the attacking team: a falling team-1 zone sizes by team 2, a falling
+    // team-2 zone by team 1, and a rising neutral zone by team 2.
+    // [orig: @0x5012AC..0x5012D7]
+    CHECK(delta(-1, 9, 3, -1, 1, 1) == -(65536 / 36));
+    CHECK(delta(-1, 3, 9, -1, 1, 2) == -(65536 / 36));
+    CHECK(delta(1, 9, 3, -1, 1, 0) == 65536 / 36);
+    // No speed guard: an empty sizing side on a full server divides by zero,
+    // and the x87 conversion yields the integer indefinite.
+    // [orig: `fdivr` @0x501456, _ftol2_sse @0x50145C]
+    CHECK(delta(1, 6, 0, -1, 1, 0) == static_cast<int32_t>(0x80000000u));
 
     ZoneCaptureDeltaInput endgame;
     endgame.presence = 1;
-    endgame.capturing_side_players = 10;
-    endgame.total_players = 20;
-    endgame.capturing_side_zones = 3;
-    endgame.opposing_side_zones = 1;
-    endgame.numbered_spawn_zones = 4;
+    endgame.zone_team = 1;
+    endgame.team_players = {0, 10, 10, 0, 0};
+    endgame.spawn_zone_count = 4;
+    endgame.team1_zones = 3;
+    endgame.team2_zones = 1;
+    endgame.numbered_zones = 4;
     endgame.game_time_minutes = 10;
     endgame.remaining_ticks = 0;
     // In the last half of a timed round, the side already holding more numbered
     // spawn zones gets up to a 50% speed-denominator reduction. Here
-    // 120 - (120 * 2/4 * 1/2) = 90.
-    // [orig: calculate_capture_zone_control_delta @0x501120]
+    // 120 - trunc(120 * 2/4 * 1/2) = 90.
+    // [orig: calculate_capture_zone_control_delta @0x5013AB..0x50142A]
     CHECK(zone_capture_control_delta(endgame) == 65536 / 90);
-    endgame.capturing_side_zones = 1;
-    endgame.opposing_side_zones = 3;
+    endgame.team1_zones = 1;
+    endgame.team2_zones = 3;
     CHECK(zone_capture_control_delta(endgame) == 65536 / 120);
-    endgame.capturing_side_zones = 3;
-    endgame.opposing_side_zones = 1;
+    endgame.team1_zones = 3;
+    endgame.team2_zones = 1;
     endgame.remaining_ticks = 5 * 60 * 62; // halfway: the late-round factor is zero
     CHECK(zone_capture_control_delta(endgame) == 65536 / 120);
 }
@@ -391,7 +420,14 @@ void test_capture_loop_flip_and_secure() {
         CHECK(flips[0].capturer_team == 1);
         CHECK(flips[0].capturer == s1);     // scoring follows the actual touching Player
         CHECK(flips[0].scorers.size() == 1 && flips[0].scorers[0] == s1);
-        CHECK(!flips[0].suppressed);
+        // GameEvent_FlagCapture's numbered pair inputs: z2a's zone number and
+        // chain rank, a neutral zone never in the enemy mask (changed), and
+        // team 1's frontier after the refresh. [orig: GameEvent_FlagCapture
+        // @0x50F737..0x50F912]
+        CHECK(flips[0].numbered && flips[0].announce);
+        CHECK(!flips[0].decided && flips[0].capturer_is_player);
+        CHECK(!flips[0].unchanged);
+        CHECK(flips[0].zone_number == 2);
     }
     CHECK(z2a->team == 1);
     CHECK(z2a->zone_control == 0);            // the new owner must SECURE it
@@ -519,7 +555,10 @@ void test_unnumbered_timed_capture_and_presence() {
     CHECK(start_windows.size() == 1);
     if (!start_windows.empty()) {
         CHECK(start_windows[0].zone == zone);
-        CHECK(start_windows[0].current_team == 0);
+        // The start window carries the owner as the drain found it (team 2),
+        // not the neutral it just applied. [orig: state0 @0x53BADC, the window
+        // @0x53BBBE..0x53BC02]
+        CHECK(start_windows[0].current_team == 2);
         CHECK(start_windows[0].capturing_team == 1);
         CHECK(start_windows[0].progress == 0);
         CHECK(start_windows[0].limit == 3);
@@ -559,7 +598,8 @@ void test_unnumbered_timed_capture_and_presence() {
 // Contact is produced by the movement resolver's authored CT shape even when
 // MoveOrder is idle. Opposing requests in one drain contest and cancel rather
 // than selecting pool order. [orig: movement callsite @0x4B31DD..0x4B3238;
-// conflicting-request leg @0x53BBEE..0x53BC15]
+// Server_UpdateCaptureZones @0x53B8F0 — the conflicting-request walk
+// @0x53BAFB..0x53BB1C, the drop @0x53BC1A]
 void test_capture_contact_has_no_move_gate_and_contests() {
     const Vec3 pos{20.0f, 30.0f, 4.0f};
     {
@@ -720,6 +760,15 @@ void test_farp_enforcement_uses_prior_capture_masks() {
         CHECK(changes[1].entity == f.z2a && changes[1].team == 1);
     }
 
+    // The masks are the live wholly-owned ones: zone 2's other entity is still
+    // neutral, so number 2 is nobody's and the FARP stays neutral.
+    // [orig: Server_EnforceZoneEntityTeams @0x519600 — ZoneSlotChain_GetOwnedZoneMask
+    //  @0x51960A / @0x519618]
+    capture_second(f.w, ev);
+    CHECK(f.w.registry.get(farp_handle)->team == 0);
+    CHECK(events_of<ZoneCaptureEvents::TeamChange>(ev).empty());
+
+    f.w.registry.get(f.z2b)->team = 1;
     capture_second(f.w, ev);
     CHECK(f.w.registry.get(farp_handle)->team == 1);
     changes = events_of<ZoneCaptureEvents::TeamChange>(ev);
@@ -799,6 +848,33 @@ void test_spawn_zone_zero_key_uses_retail_pool_address_order() {
 
 } // namespace
 
+// A player touching a numbered zone that neither team can capture (here blue
+// in its own base, zone 1) queues no request and is recorded for the host's
+// refused-touch nag; a touch on a capturable zone queues a request instead.
+// [orig: Server_OnPlayerTouchCaptureZone @0x500BA0 — the failed
+//  CaptureCtx_QueueCaptureRequest @0x500BFF..0x500C06, the numbered test
+//  @0x500C08..0x500C0E]
+void test_refused_touch_is_recorded_for_the_host() {
+    AshFixture f;
+    const Entity *base = f.w.registry.get(f.z1);
+    CHECK(!f.w.zones.is_capturable(1, *base) && !f.w.zones.is_capturable(2, *base));
+    const EntityHandle blue = spawn_soldier(f.w, 1, base->position);
+    ZoneCaptureEvents ev;
+    capture_second(f.w, ev);
+    CHECK(f.w.zones.capture.refused_touches.size() == 1 &&
+          f.w.zones.capture.refused_touches[0] == blue);
+    CHECK(events_of<ZoneCaptureEvents::Flip>(ev).empty());
+
+    AshFixture g;
+    const Entity *front = g.w.registry.get(g.z2a);
+    CHECK(g.w.zones.is_capturable(1, *front));
+    spawn_soldier(g.w, 1, front->position);
+    ZoneCaptureEvents ev2;
+    capture_second(g.w, ev2);
+    CHECK(g.w.zones.capture.refused_touches.empty());
+    CHECK(events_of<ZoneCaptureEvents::Flip>(ev2).size() == 1);
+}
+
 int main() {
     test_build_and_masks();
     test_frontier_rule();
@@ -819,6 +895,7 @@ int main() {
     test_farp_enforcement_uses_prior_capture_masks();
     test_spawn_zone_registry();
     test_spawn_zone_zero_key_uses_retail_pool_address_order();
+    test_refused_touch_is_recorded_for_the_host();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

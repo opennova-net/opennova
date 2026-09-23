@@ -262,6 +262,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::SCRIPT_REMOTE_COMMAND: // the host VM's replicated WAC command
 		apply_script_remote_command(body);
 		break;
+	case s2c::OBJECTIVE_NOTIFICATION: // the authority's HUD relay (0x3F)
+		apply_objective_notification(body);
+		break;
 	default:
 		// Game-start scalars and other non-entity tags this reducer
 		// does not model.

@@ -75,31 +75,42 @@ RemoteCommandResult run_remote_command(world::World &w, int cmd,
     if (ieq(n, "enableSSN")) return {true, cmds.set_ssn_disabled(H(0), false) ? 1 : 0};
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
-    if (ieq(n, "quake")) { cmds.quake(A(0)); return {true, 0}; }
-    if (ieq(n, "flash")) { cmds.lightning_flash(); return {true, 0}; }
-    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return {true, 0}; }
+    // All three return 1 [orig: WacCmd_Quake @0x4ED4CE; Env_TriggerLightningFlashA
+    // @0x4ED50A; Env_TriggerLightningFlashB @0x4ED51A].
+    if (ieq(n, "quake")) { cmds.quake(A(0)); return {true, 1}; }
+    if (ieq(n, "flash")) { cmds.lightning_flash(); return {true, 1}; }
+    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return {true, 1}; }
 
-    // ---- player text / debug console ----
-    // text/ptext feed the player message channel [orig: WAC text @ 0x4EDB50
-    // -> Chat_AddMessageChannel1 @ 0x4985D0], while consol/pconsol feed the
-    // distinct on-screen debug channel [orig: @ 0x4EDBE0 ->
-    // Chat_AddDebugMessage]. Keep them separate so game hosts can present
-    // mission text without leaking authored debug output into the HUD.
+    // ---- player text / console ----
+    // text/ptext/text# feed the player chat ring [orig: Chat_AddSystemMessage
+    // @0x4EDB50 -> Chat_AddMessageChannel1 @0x4985D0], consol/pconsol/consol#
+    // the system ring the BMS triggered text shares [orig: Wac_ConsolDebugMessage
+    // @0x4EDBE0 -> Chat_AddMessageChannel2 @0x4987F0; HUD_DisplayTriggeredText
+    // @0x51F190 (the Chat_AddMessageChannel2 call @0x51F216)]: the `text` and
+    // `debug_text` kinds. The # forms format "%s %i" in the handler, so the
+    // effect carries the finished line [orig: Chat_AddFormattedIntMessage
+    // @0x4EDB70 (the sprintf call @0x4EDB9E); WacCmd_ConsolNumber @0x4EDC00
+    // (the sprintf call @0x4EDC2E)]. Every one returns 1 [orig:
+    // Chat_AddSystemMessage @0x4EDB64; Chat_AddFormattedIntMessage @0x4EDBC0;
+    // Wac_ConsolDebugMessage @0x4EDBF4; WacCmd_ConsolNumber @0x4EDC50].
+    auto with_number = [&](size_t text, size_t number) {
+        return S(text) + " " + std::to_string(A(number));
+    };
     if (ieq(n, "text") || ieq(n, "ptext")) {
         w.out.effects.push({"text", 0, 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
     if (ieq(n, "consol") || ieq(n, "pconsol")) {
         w.out.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
-        return {true, 0};
+        return {true, 1};
     }
     if (ieq(n, "text#")) {
-        w.out.effects.push({"text", A(1), 0, 0, 0, S(0)});
-        return {true, 0};
+        w.out.effects.push({"text", 0, 0, 0, 0, with_number(0, 1)});
+        return {true, 1};
     }
     if (ieq(n, "consol#")) {
-        w.out.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
-        return {true, 0};
+        w.out.effects.push({"debug_text", 0, 0, 0, 0, with_number(0, 1)});
+        return {true, 1};
     }
 
     // A dedicated, mission-owned voice channel with synchronous asset resolution

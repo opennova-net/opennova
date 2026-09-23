@@ -310,7 +310,6 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	Harness h;
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
-	world.add_system(&world.ai);
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
@@ -435,7 +434,6 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		});
 		authority->registry.configure_pool(0, 16);
 		authority->registry.configure_pool(1, 16);
-		authority->add_system(&authority->ai);
 		authority->load_systems();
 		w::Entity peer = *local;
 		peer.mounted = false;
@@ -1029,7 +1027,6 @@ bool run_local_replica_turret_channel() {
  Harness h;
  auto &world = h.kernel->world;
  world.registry.configure_pool(1,4);
- world.add_system(&world.ai);
  world.load_systems();
  h.role.poll_preload();
  constexpr uint16_t self_handle = 5;
@@ -1101,12 +1098,44 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.runtime->view().set_mp_attributes(mp_attributes);
 	w::World &world = h.kernel->world;
-	if (!expect(!world.rules.session_open && !world.rules.auto_scope_zero,
-			"rules stamp: a bare kernel starts out of session")) return false;
+	if (!expect(!world.rules.auto_scope_zero,
+			"rules stamp: a bare kernel starts without the zero rule")) return false;
 	h.role.run_tick(h.input);
-	if (!expect(world.rules.session_open, "rules stamp: the pump opens the session")) return false;
 	return expect(world.rules.auto_scope_zero == zoom_allowed,
 			"rules stamp: auto_scope_zero follows mpattrib bit 0x10000");
+}
+
+// A folded S2C 0x1D latches the joiner's round-over gate, so the frame that
+// folds it holds its entity update, as retail's client does.
+// [orig: NapiNPClientMsg_0x01D @0x430858 (`mov g_spawn_success_gate,1`);
+//  Game_ProcessMainFrame -- the is_in_session / g_spawn_success_gate tests
+//  @0x526734..0x526742 ahead of the Entity_UpdateAllEntities call @0x52674B]
+bool run_end_round_header_holds_the_entity_update() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	w::World &world = h.kernel->world;
+	world.rules.mp_session = true; // the joiner kernel boot's stamp
+	h.role.run_tick(h.input);
+	const uint32_t counted = world.entity_update_counter;
+	h.role.run_tick(h.input);
+	if (!expect(world.entity_update_counter == counted + 1,
+			"end round: the round's frames run the entity update")) return false;
+	if (!expect(!world.match.outcome().ended, "end round: no latch before the header"))
+		return false;
+	h.role.runtime->view().set_game_type(0x10000u);
+	EndRoundHeader header;
+	header.winner_team = 1;
+	h.role.runtime->view().apply(s2c::END_ROUND_HEADER,
+			encode_end_round_header(header, /*non_team_form=*/false));
+	if (!expect(h.role.runtime->state().end_round.header_known,
+			"end round: the header folded")) return false;
+	h.role.run_tick(h.input);
+	if (!expect(world.match.outcome().ended, "end round: the header latches the round over"))
+		return false;
+	return expect(world.entity_update_counter == counted + 1,
+			"end round: the latched frame holds the entity update");
 }
 
 // The frame input packs onto L BEFORE the client net frame builds the C2S
@@ -1115,7 +1144,6 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 //  @0x42C3E9 precedes Player_BuildTag0CInputBody @0x42C46F].
 bool run_uplink_carries_same_frame_input() {
 	Harness h;
-	h.kernel->world.add_system(&h.kernel->world.ai);
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -1265,6 +1293,7 @@ int main() {
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	ok &= run_uplink_carries_same_frame_input();
+	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_proxy_rendezvous_pump();
 	if (!ok) return 1;

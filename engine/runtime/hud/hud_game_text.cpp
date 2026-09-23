@@ -28,6 +28,19 @@ std::string subgoal_message(bool lost, int header_id, const GameTextLookup &miss
 	return game_text(mission, lost ? "LoseConditions" : "WinConditions", key, "");
 }
 
+std::string objective_header(const GameTextLookup &gametext) {
+	return game_text(gametext, "Misc", "STRMISC_NEWOBJECTIVE", "");
+}
+
+std::string objective_directive(bool win, int header_id, const GameTextLookup &mission) {
+	char key[32];
+	std::snprintf(key, sizeof(key), win ? "STRWINDIRECTIVE%03d" : "STRLOSEDIRECTIVE%03d",
+			header_id);
+	std::string line = game_text(mission, win ? "WinConditions" : "LoseConditions", key, "");
+	if (line.size() <= 1) line.clear();
+	return line;
+}
+
 std::string triggered_text(int text_id, const GameTextLookup &mission) {
 	char key[32];
 	std::snprintf(key, sizeof(key), "ID%03d", text_id);

@@ -37,7 +37,7 @@ const char *game_event_strcnd_key(uint8_t event_type);
 // THE FEED LINE POLICY — how one S2C 0x1E game event becomes the sentence and
 // the color retail posts to its message feed
 // [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
-//  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0].
+//  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddMessageChannel2 @0x4987F0].
 //
 // The strings themselves are the game's own: every line is a "Canned Msg"
 // template out of gametext with `$A`/`$B` substituted, never text we compose.
@@ -106,7 +106,7 @@ std::string feed_format_line(const std::string &tmpl, const std::string &attacke
 // @0x42b910 — the 0..0xE switch @0x42b95d/@0x42ba17; every colour is a
 // g_hudColorTable entry written by HUD_InitTeamColorTable @0x51f245..0x51f2b3].
 enum class ChatSink : uint8_t {
-	System = 0,   // Chat_AddDebugMessage — the SYSTEM ring [orig: @0x42bb0c]
+	System = 0,   // Chat_AddMessageChannel2 — the SYSTEM ring [orig: @0x42bb0c]
 	Chat = 1,     // Chat_AddMessageChannel1 — the CHAT ring
 	Queue = 2,    // channel 8: CMessageQueue_Enqueue @0x42bab8 (not a ring)
 	Channel3 = 3, // channel 14: Chat_AddMessageChannel3 @0x42bb01 (unported ring)

@@ -3,7 +3,9 @@
 
 The steering slice executes the original ground/bike motor input and brake branches;
 it stops before steering physics/contact. The brain slice executes the original
-dispatchers with their original no-op/reset callbacks. No engine calls are mocked.
+dispatchers with their original no-op/reset callbacks, including the no-target idle
+latch over the ammo dwords, the profile's weapon ammo bytes and the gunner guard,
+and the alert edge's occupant/Player gate. No engine calls are mocked.
 Requires pefile and unicorn; normal native tests use the committed vectors.
 """
 import argparse
@@ -94,7 +96,8 @@ class Machine:
         ]
 
     def brain(self, v):
-        air, authority, event, current, pending = v
+        (air, authority, event, current, pending, ammo_a, ammo_b, weap_a, weap_b, guard,
+         occupant, flags96) = v
         self.reset()
         self.wr(0xB5CC28, authority)
         self.wr(VEH + 100, BRAIN, SLOT)
@@ -102,10 +105,23 @@ class Machine:
         self.wr(BRAIN, VEH, DEF)
         self.wr(BRAIN + 16, current, pending, 0, 31)
         self.wr(BRAIN + 184, 3, 5)
+        # The no-target idle latch inputs: the two ammo dwords, the profile's
+        # resolved weapon ammo bytes, and the gunner-attachment guard.
+        self.wr(BRAIN + 0xD4, ammo_a, ammo_b)
+        self.u.mem_write(DEF + 0x94, bytes([weap_a]))
+        self.u.mem_write(DEF + 0xB4, bytes([weap_b]))
+        self.wr(BRAIN + 0x240, guard)
+        # The alert-edge inputs: the entity+0x170 occupant (1 an NPC, 2 a Player
+        # with Flags 0x100) and the profile's +0x60 flags (bit 2 holds the pend).
+        if occupant:
+            self.wr(VEH + 0x170, DRIVER)
+            self.wr(DRIVER + 0x24, 0x100 if occupant == 2 else 0)
+        self.wr(DEF + 0x60, flags96)
         self.wr(STACK, STOP, VEH, event)
         self.run(0x4581B0 if air else 0x4583C0, STOP)
         assert self.u.reg_read(UC_X86_REG_ESP) == STACK + 4
-        return [self.rd(BRAIN + n) for n in (16, 20, 28, 40, 184, 188)] + [self.rd(VEH + 684)]
+        return [self.rd(BRAIN + n) for n in (16, 20, 28, 40, 184, 188)] + [
+            self.rd(VEH + 684), self.rd(BRAIN + 0xC0)]
 
 
     def recovery(self, v):
@@ -124,6 +140,17 @@ class Machine:
         return [self.u.reg_read(UC_X86_REG_EAX), self.rd(SLOT + 16), self.rd(BRAIN + 20)] + [
             self.rd(BRAIN + n * 4) for n in (128, 131, 132, 133, 134, 138)
         ]
+
+    def class_walk(self, keys):
+        # The profile loader's four {class index, priority key} pairs through the
+        # CRT qsort with CompareFunction, read back in the loader's reversed store
+        # order (+0x28 = the last pair ... +0x34 = the first).
+        self.reset()
+        for i, key in enumerate(keys):
+            self.wr(BRAIN + 8 * i, i, key)
+        self.wr(STACK, STOP, BRAIN, 4, 8, 0x455D90)
+        self.run(0x76D6A0, STOP)
+        return [self.rd(BRAIN + 8 * i) for i in (3, 2, 1, 0)]
 
 
 def main():
@@ -155,7 +182,18 @@ def main():
     brains = []
     for air, authority, event, current, pending in itertools.product(
             (0, 1), (0, 1), (2, 3, 6), (0, 14, 22), (0, 7, 11, 14, 16, 19, 22)):
-        v = [air, authority, event, current, pending]
+        v = [air, authority, event, current, pending, 0, 0, 0, 0, 0, 0, 0]
+        brains.append(v + machine.brain(v))
+    for air, authority, ammo_a, ammo_b, weap_a, weap_b, guard in itertools.product(
+            (0, 1), (0, 1), (0, 5), (0, 5), (0, 3), (0, 3), (0, 1)):
+        v = [air, authority, 2, 0, 0, ammo_a, ammo_b, weap_a, weap_b, guard, 0, 0]
+        brains.append(v + machine.brain(v))
+    # The alert edge without a committed transition: the hold state or the
+    # profile's +0x60 bit 2 keeps the pend, so prev records the gate's verdict.
+    for air, authority, occupant, (held, flags96) in itertools.product(
+            (0, 1), (0, 1), (0, 1, 2), ((1, 0), (0, 2), (1, 2))):
+        current = (14 if air else 22) if held else 0
+        v = [air, authority, 2, current, current, 0, 0, 0, 0, 0, occupant, flags96]
         brains.append(v + machine.brain(v))
     fixture('brain_dispatch_vectors.inc', brains)
 
@@ -164,6 +202,14 @@ def main():
         v = [phase, step, flags]
         recovery.append(v + machine.recovery(v))
     fixture('aircraft_recovery_vectors.inc', recovery)
+
+    walks = []
+    extra = [(0x7FFFFFFF, -1, 0, 5), (-0x80000000, 0x7FFFFFFF, 1, 1), (-5, -5, 10, -5),
+             (200, 10, 100, 0), (10, 200, 100, 0), (1000000, -1000000, 3, 3)]
+    for keys in list(itertools.product((0, 1, 2, 3), repeat=4)) + extra:
+        v = list(keys)
+        walks.append(v + machine.class_walk(v))
+    fixture('ai_class_walk_vectors.inc', walks)
 
 
 if __name__ == '__main__':

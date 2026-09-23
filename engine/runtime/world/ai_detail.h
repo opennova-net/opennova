@@ -2,11 +2,12 @@
 
 // Internal to engine/runtime/world's AI TUs — not part of world/ai.h.
 //
-// The handful of free helpers the AI TUs share: the body-anim slot pick, the seat
-// anim lookup, and the BAM/distance/PRNG primitives the handlers and the waypoint
+// The handful of free helpers the AI TUs share: the seat anim lookup, the live
+// hull reads, and the BAM/distance/PRNG primitives the handlers and the waypoint
 // and combat legs all reach for.
 
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -20,25 +21,6 @@ namespace opennova::world {
 class World;
 
 namespace detail {
-
-// Minimal port of Entity_UpdateInfantryAI @0x4b9910's anim selection: pick a body-anim slot
-// from the brain state + movement so 3rd-person NPCs walk/idle instead of sliding at rest.
-// Writes the world Entity's body_anim_slot (what the present snapshot reads). Full fidelity
-// (randomized idle variants, jog/run thresholds, attack/death clips) is a grill follow-up.
-inline void update_body_anim_slot(AiEntity &e, World &world) {
-    Entity *ent = world.registry.get(e.handle);
-    if (ent == nullptr) return;
-    if (!ent->alive || ent->health <= 0) return; // dead: present pass hides it; leave the slot
-    const AiBrain &b = e.brain;
-    const bool moving = b.f[AiBrain::kOutSpeed] > 0;
-    int32_t slot;
-    if (moving) {
-        slot = (b.f[AiBrain::kAlert] >= 2) ? kBodyAnimRunForward : kBodyAnimWalkForward;
-    } else {
-        slot = kBodyAnimIdle;
-    }
-    ent->body_anim_slot = slot;
-}
 
 inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
                                 const IRootMotionSource *root_motion) {
@@ -62,7 +44,7 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	int state = anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
 	if (state == 100) {
 		const int32_t roll = target.veh.yaw_seeded ? target.veh.air_roll_bam
-												   : int32_t(int64_t(target.roll) * 11930464);
+												   : spawn_angle_bam(target.roll);
 		if (roll < -71582784)
 			state = 110;
 		if (roll > 71582784)
@@ -80,12 +62,43 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / (2*pi)
 
-// mission yaw degrees -> 32-bit binary angle (entity+16). [orig: AI_HandleCommand cmd 0x16
-// @0x4659fa; matches promote.cpp's seed.] Used to mirror a posed mount transform into the brain.
+// Whole degrees -> 32-bit binary angle by the original's multiplier, used for the commanded
+// elevation (brain+0x314) only. [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
 constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the original multiplier
 
 // Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]
 constexpr double kDeathSpeedClamp = 2147418112.0;
+
+// The ground rows read the hull's live words off the entity record, not the
+// AiEntity mirrors (only the spawn and bury paths refresh those for a hull):
+// the health word +0x11E and the velocity pair +0x98/+0x9C. A brain without a
+// registry row (a bare AiSystem fixture) keeps its mirrors.
+// [orig: AI_HandleEvent_HelicopterCombatD @0x467747 / @0x467954..0x46795A;
+//  AI_UpdatePatrolBehavior @0x457D87 / @0x457E23..0x457E29;
+//  AI_EnterState_GroundEvade @0x4674A5 / @0x4674B2..0x4674B8;
+//  AI_TransitionToDeath_GroundVehicle @0x467C09..0x467C0F;
+//  AI_TickState_VehicleDying @0x467CED..0x467CF3]
+inline int32_t hull_health(const World *world, const AiEntity &e) {
+    if (world != nullptr)
+        if (const Entity *entity = world->registry.get(e.handle)) return entity->health;
+    return e.health;
+}
+
+// The death legs' horizontal hull speed: fsqrt(vx*vx + vy*vy) over the same
+// pair, the flt_7C19E0 min-clamp, then _ftol2_sse's chop.
+inline int32_t hull_death_speed(const World *world, const AiEntity &e) {
+    int32_t vx = e.vel_x;
+    int32_t vy = e.vel_y;
+    if (world != nullptr) {
+        if (const Entity *entity = world->registry.get(e.handle)) {
+            vx = entity->veh.vel_x;
+            vy = entity->veh.vel_y;
+        }
+    }
+    double sp = std::sqrt(static_cast<double>(vx) * vx + static_cast<double>(vy) * vy);
+    if (sp > kDeathSpeedClamp) sp = kDeathSpeedClamp;
+    return static_cast<int32_t>(sp);
+}
 
 // Byte-exact integer abs (cdq/xor/sub idiom; INT_MIN -> INT_MIN like the orig).
 inline int32_t iabs32(int32_t v) {
@@ -121,7 +134,7 @@ inline uint32_t prng_step(uint32_t &s) {
     return s;
 }
 
-// Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x4671a0 fpatan path —
+// Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x46719D fpatan path —
 // atan2(candidate.Y - self.Y, candidate.X - self.X), x87 chop toward zero.] dY/dX follow the
 // mover's convention (atan2(dz, dx)).
 inline int32_t bearing_bam(int32_t dY, int32_t dX) {

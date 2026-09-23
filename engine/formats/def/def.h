@@ -912,6 +912,11 @@ typedef struct DefItemDef {
        WAC location ID. [orig: ItemDef_ParseProperty @0x49EB00] */
     int music_location;
     int mana; /* signed word +0x17E [orig: ItemDef_ParseProperty @0x49EB00] */
+    /* 'score' -> signed word +0x194, the kill value: a victim whose word is 0
+       (every Player definition) never enters the kill accounting.
+       [orig: ItemDef_ParseProperty @0x4A0213..0x4A0242;
+       Score_ProcessKillEvent @0x4FD422] */
+    int score;
     /* Door fields appended for ABI stability. num_doors/first_door alias the
        low two bytes of deathtime_ticks; door_dir aliases clipsize.
        [orig: ItemDef_ParseProperty @0x49F748..0x49F980] */

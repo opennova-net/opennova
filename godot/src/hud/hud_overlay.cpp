@@ -215,6 +215,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("get_hud_detail_level"),
 			&HudOverlay::get_hud_detail_level);
+	ClassDB::bind_method(D_METHOD("set_item_flash", "index", "value"),
+			&HudOverlay::set_item_flash);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
     ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &HudOverlay::set_aspect_mode);
@@ -723,6 +725,10 @@ void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,
 		float p_fov_deg) {
 	state_.ticks = p_ticks;
+	// The HUD item flash countdown runs once per HUD frame on the logic
+	// tick (hud_declutter.h HudItemFlash::tick).
+	item_flash_.tick(p_ticks);
+	state_.item_flash = item_flash_.timers();
 	state_.health_fraction = p_health_fraction;
 	state_.stance = p_stance;
 	state_.fov_deg = p_fov_deg;
@@ -1189,6 +1195,16 @@ void HudOverlay::set_hud_detail_level(int p_level) {
 
 int HudOverlay::get_hud_detail_level() const {
 	return declutter_.level();
+}
+
+void HudOverlay::set_item_flash(int p_index, int p_value) {
+	// The timer store, then the level-0 layer rebuild that leaves the stored
+	// level alone (hud_declutter.h HudItemFlash::set / apply_level).
+	item_flash_.set(p_index, p_value);
+	state_.item_flash = item_flash_.timers();
+	declutter_.apply_level(0);
+	state_.declutter_visible = declutter_.visible();
+	queue_redraw();
 }
 
 void HudOverlay::set_showhud_flags(int p_flags) {

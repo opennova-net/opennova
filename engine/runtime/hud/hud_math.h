@@ -86,7 +86,7 @@ int health_color_band_fp16(int32_t ratio_fp16);
 
 // ---------------------------------------------------------------------------
 // The message feed's tick policy [orig: HUD_DisplayTriggeredText @0x51f190 ->
-// Chat_AddDebugMessage @0x4987f0 — 930-tick life @0x51f216, the >=186-tick
+// Chat_AddMessageChannel2 @0x4987f0 — 930-tick life @0x51f216, the >=186-tick
 // expiry stagger vs the previous line @0x49894e].
 
 inline constexpr int kMessageLifeTicks = 930;

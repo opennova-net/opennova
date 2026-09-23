@@ -62,7 +62,7 @@ void mirror_pose(World &world, Entity &e) {
 		ai->health = e.health;
 		ai->team = e.team;
 		ai->vel_x = e.veh.vel_x;
-		ai->vel_z = e.veh.vel_y;
+		ai->vel_y = e.veh.vel_y;
 	}
 }
 } // namespace
@@ -174,8 +174,10 @@ void VehicleSystem::initialize_mission_vehicles() {
 // the brain already allocated: vehicle rows (cveh/cbot/ctrn) run
 // Entity_InitVehicleAIFromDef, CHel/cpln Entity_InitHelicopterAIFromDef; the two
 // differ in their speed words (kept as AiProfile::class_speed_a/b) and the
-// helicopter's patrol-offset draw. The model-range words brain+0x2C/+0x30 carry
-// no ported consumer and are not modeled.
+// helicopter's patrol-offset draw. Only a brain-class row allocates a brain
+// (promote's item_has_brain), so the row is always known here. The model-range
+// words brain+0x2C/+0x30 come from the same models the first init read, so the
+// re-run leaves them as they are.
 // [orig: Entity_LookupRenderCallbacks @0x407E33..0x407E36 binds the row's fn2;
 //  Entity_InitVehicleAIFromDef @0x4686C0 (stamp @0x4686D3..0x468703, slot gate
 //  @0x46878D, re-seed @0x46885B..0x468964); Entity_InitHelicopterAIFromDef
@@ -187,10 +189,7 @@ bool VehicleSystem::rerun_class_init(Entity &e) {
 	stamp_saved_live_pose(e);
 	AiBrain &b = ai->brain;
 	const VehicleTraits *t = traits.get(e.item_id);
-	const bool helicopter = t != nullptr &&
-			(t->brain_class == VehicleBrainClass::Air ||
-					(t->brain_class == VehicleBrainClass::Unset &&
-							vehicle_family_uses_direct_air_mover(t->family)));
+	const bool helicopter = t != nullptr && t->brain_class == VehicleBrainClass::Air;
 	// The authored route from the slot [orig: @0x46885B..0x46887F; helo
 	// @0x46852A..0x468552].
 	if (ai->slot.f[35] != 0) {
@@ -604,7 +603,7 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 			child_ai->pitch = pitch;
 			child_ai->roll = roll;
 			child_ai->vel_x = child->veh.vel_x; // entity+152
-			child_ai->vel_z = child->veh.vel_y; // entity+156
+			child_ai->vel_y = child->veh.vel_y; // entity+156
 		}
 	}
 }

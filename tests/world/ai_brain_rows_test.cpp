@@ -1,0 +1,664 @@
+// The vehicle-brain state rows against their retail witnesses: what each ground
+// and aircraft row reads off the entity record and writes into the brain and slot.
+// Driven through the public row table (AiSystem::row), the class dispatchers and
+// the ChangeAI command seam (EntityCommands::apply_ai_command).
+#include <algorithm>
+#include <cstdio>
+#include <iterator>
+#include <memory>
+#include <variant>
+#include <vector>
+
+#include <formats/aip/aip.h>
+#include <runtime/mission/promote.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/destruction.h>
+#include <runtime/world/entity_commands.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/vehicle_motor_detail.h>
+#include <runtime/world/world.h>
+
+using namespace opennova::world;
+
+namespace {
+
+int failures = 0;
+#define CHECK(c)                                                              \
+    do {                                                                      \
+        if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
+    } while (0)
+
+// One pool-1 hull with a brain; the registry record carries the live words.
+struct Hull {
+    std::unique_ptr<World> owned = std::make_unique<World>();
+    World &w = *owned;
+    EntityHandle handle;
+    AiEntity *ai = nullptr;
+
+    explicit Hull(const Entity &seed) {
+        w.registry.configure_pool(1, 2);
+        handle = w.registry.spawn(1, seed);
+        ai = w.ai.at(w.ai.attach(handle));
+        ai->brain.f[AiBrain::kOwner] = 1;
+    }
+    Entity &record() { return *w.registry.get(handle); }
+    AiThinkCtx ctx() { return AiThinkCtx{&w.ai, ai, &w, nullptr}; }
+};
+
+// The ground rows read the hull's live entity words, never the AiEntity mirrors:
+// the health word +0x11E and the velocity pair +0x98/+0x9C.
+// [orig: AI_HandleEvent_HelicopterCombatD @0x467747 / @0x467954..0x46795A;
+//  AI_UpdatePatrolBehavior @0x457D87 / @0x457E23..0x457E29;
+//  AI_EnterState_GroundEvade @0x4674A5 / @0x4674B2..0x4674B8;
+//  AI_TransitionToDeath_GroundVehicle @0x467C09..0x467C0F;
+//  AI_TickState_VehicleDying @0x467CED..0x467CF3]
+void test_ground_rows_read_the_live_hull_words() {
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 0;       // the record says dead ...
+    seed.veh.vel_x = 3000; // ... and still moving: |(3000, 4000)| = 5000 >= 1057
+    seed.veh.vel_y = 4000;
+    Hull hull(seed);
+    AiEntity &e = *hull.ai;
+    e.health = 100; // the stale mirrors say alive and parked
+    e.vel_x = 0;
+    e.vel_y = 0;
+    hull.w.ai.is_authority = true;
+    AiThinkCtx ctx = hull.ctx();
+
+    // Rows 16/19 (follow-waypoint) and 18 (evade) tick the death leg: a crash (3).
+    for (int32_t state : {kAiGroundFollowWp, kAiGroundEvade, kAiGroundFormation}) {
+        const int before = hull.w.ai.events.count();
+        hull.w.ai.row(state).tick(ctx);
+        CHECK(hull.w.ai.events.count() == before + 1);
+        if (hull.w.ai.events.count() == before + 1) CHECK(hull.w.ai.events.at(before).f[0] == 3);
+    }
+    // The evade enter's dead leg (no FOLLOW_WP / FLEE flag) queues the same crash.
+    {
+        e.profile.flags96 = 0;
+        const int before = hull.w.ai.events.count();
+        hull.w.ai.row(kAiGroundEvade).enter(ctx);
+        CHECK(hull.w.ai.events.count() == before + 1);
+        if (hull.w.ai.events.count() == before + 1) CHECK(hull.w.ai.events.at(before).f[0] == 3);
+    }
+    // The dying enter and tick hold a moving hull in state 21: no destroy event
+    // while the record's speed is >= 1057, whatever the mirrors say.
+    {
+        e.net_saved_live_pose[0] = e.pos[0] + 0x10000; // not "still" for the dying tick
+        const int before = hull.w.ai.events.count();
+        hull.w.ai.row(21).enter(ctx);
+        CHECK(hull.w.ai.events.count() == before);
+        e.net_saved_live_pose[0] = e.pos[0] + 0x10000;
+        hull.w.ai.row(21).tick(ctx);
+        CHECK(hull.w.ai.events.count() == before);
+    }
+    // A live record takes the alive legs even when the mirror reads dead.
+    {
+        hull.record().health = 100;
+        e.health = 0;
+        const int before = hull.w.ai.events.count();
+        hull.w.ai.row(kAiGroundEvade).tick(ctx);
+        CHECK(hull.w.ai.events.count() == before);
+    }
+}
+
+// Every alert-family enter raises the entity's own AiSlot alert byte (+0x88) to
+// red first and unconditionally; the ally wake only adds to it. A lone hull
+// with no ally in range is therefore red after combat, evade and death enters.
+// [orig: AI_EnterState_GroundCombat @0x467665; AI_EnterState_GroundEvade
+//  @0x46741F; AI_TransitionToDeath_Vehicle @0x46696E;
+//  Entity_ProcessVehicleDestruction @0x466B4C; AI_TransitionToDeath_GroundVehicle
+//  @0x467BD8; AI_TransitionToDestroyed_Vehicle @0x467DF1]
+void test_alert_enters_raise_the_own_slot_alert() {
+    for (int32_t state : {int32_t(kAiGroundCombat), int32_t(kAiGroundEvade), 13, 15, 21, 23}) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.health = 100;
+        seed.team = 1;
+        Hull hull(seed);
+        AiEntity &e = *hull.ai;
+        e.team = 1;
+        e.profile.flags96 = 4; // evade routes FLEE -> combat: still the alert family
+        e.slot.bytes()[AiSlot::kAlertByte] = 0;
+        AiThinkCtx ctx = hull.ctx();
+        hull.w.ai.row(state).enter(ctx);
+        CHECK(e.slot.bytes()[AiSlot::kAlertByte] == 2);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2 && e.brain.f[AiBrain::kPrevAlert] == 2);
+    }
+}
+
+// The evade enter's flee leg (alive, EVADE_FLAGS without FOLLOW_WP and FLEE):
+// the controller triple {1, 0x7FFFFFFF, 1}, the working heading turned about
+// (entity heading + controller[1]), working pitch/roll zero, the mover output
+// at combat speed brain[49], step 16. The working position is not written.
+// [orig: AI_EnterState_GroundEvade @0x46756D..0x4675B1]
+void test_evade_flee_leg_turns_about_at_combat_speed() {
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    Hull hull(seed);
+    AiEntity &e = *hull.ai;
+    e.profile.flags96 = 0;
+    e.heading = 0x12345678;
+    e.brain.f[AiBrain::kSpeedA] = 4321;
+    e.brain.f[AiBrain::kWorkPosX] = 7;
+    e.brain.f[AiBrain::kWorkPosY] = 8;
+    e.brain.f[AiBrain::kWorkPosZ] = 9;
+    e.brain.f[AiBrain::kWorkPitch] = 11;
+    e.brain.f[AiBrain::kWorkRoll] = 12;
+    AiThinkCtx ctx = hull.ctx();
+    hull.w.ai.row(kAiGroundEvade).enter(ctx);
+    CHECK(e.patrol_f0 == 1 && e.patrol_delta == 0x7FFFFFFF && e.patrol_goal == 1);
+    CHECK(e.brain.f[AiBrain::kWorkHeading] ==
+          static_cast<int32_t>(0x12345678u + 0x7FFFFFFFu));
+    CHECK(e.brain.f[AiBrain::kWorkPitch] == 0 && e.brain.f[AiBrain::kWorkRoll] == 0);
+    CHECK(e.brain.f[AiBrain::kOutSpeed] == 4321);
+    CHECK(e.brain.f[AiBrain::kStep] == 16);
+    CHECK(e.brain.f[AiBrain::kWorkPosX] == 7 && e.brain.f[AiBrain::kWorkPosY] == 8 &&
+          e.brain.f[AiBrain::kWorkPosZ] == 9);
+}
+
+// The aircraft dead enter clears the team byte at its head, before the ally wake
+// compares it: the wake reaches team-0 hulls, not the former teammates.
+// [orig: Entity_ProcessVehicleDestruction `mov byte ptr [esi+162h],0` @0x466A9F,
+//  Entity_AlertNearbyAllies @0x466B77]
+void test_aircraft_dead_enter_wakes_as_team_zero() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    const auto spawn_hull = [&](uint8_t team, float x) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 1307;
+        seed.health = 100;
+        seed.team = team;
+        seed.position = {x, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(1, seed);
+        AiEntity &ai = *w.ai.at(w.ai.attach(h));
+        ai.brain.f[AiBrain::kOwner] = 1;
+        ai.team = team;
+        ai.pos[0] = static_cast<int32_t>(x * 65536.0f);
+        return h;
+    };
+    const EntityHandle dead = spawn_hull(1, 0.0f);
+    const EntityHandle mate = spawn_hull(1, 10.0f);
+    const EntityHandle other = spawn_hull(0, 20.0f);
+    AiEntity &e = *w.ai.for_handle(dead);
+    AiThinkCtx ctx{&w.ai, &e, &w, nullptr};
+    w.ai.row(15).enter(ctx);
+    CHECK(e.team == 0);
+    CHECK(w.ai.for_handle(mate)->brain.f[AiBrain::kAlert] == 0);
+    CHECK(w.ai.for_handle(other)->brain.f[AiBrain::kAlert] == 2);
+}
+
+// PLAYPARTANIM's rate divides the single-precision flt_7C3B40 (0.016f) by the
+// ANIMTIME seconds: ANIMTIME 1 (1/65536 s) is 68719480, not the double's
+// 68719476. Rates from the retail instructions executed for each ANIMTIME.
+// [orig: Entity_ApplyCommand `fdivr ds:flt_7C3B40` @0x43B1D8, ftol @0x43B1EB]
+void test_part_anim_rate_uses_the_single_precision_tick() {
+    const struct { int32_t time; int32_t rate; } cases[] = {
+        {1, 68719480}, {2, 34359740}, {3, 22906493}, {4, 17179870}, {5, 13743896},
+        {8, 8589935}, {10, 6871948}, {20, 3435974}, {65536, 1048}, {131072, 524},
+        {0, static_cast<int32_t>(0x80000000)}};
+    for (const auto &c : cases) {
+        AiBrain b;
+        ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, c.time);
+        CHECK(b.f[AiBrain::kPartAnimRate0] == c.rate);
+    }
+}
+
+// The class dispatchers' update event writes no body-anim selection onto the
+// hull: neither machine has one [orig: EntityAI_ProcessGroundStateMachine
+// @0x4583C0 and EntityAI_ProcessAirStateMachine @0x4581B0, whose event-0
+// legs end in the +0x2AC re-arm @0x458568 / @0x458363 and the commit].
+void test_class_update_leaves_the_body_anim_alone() {
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    seed.alive = true;
+    Hull hull(seed);
+    AiEntity &e = *hull.ai;
+    hull.w.ai.is_authority = true;
+    e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+    e.brain.f[AiBrain::kOutSpeed] = 0x10000; // moving
+    e.brain.f[AiBrain::kAlert] = e.brain.f[AiBrain::kPrevAlert] = 2;
+    hull.record().body_anim_slot = -1;
+    hull.w.ai.process_ground_state_machine(e, hull.w, 0);
+    CHECK(hull.record().body_anim_slot == -1);
+    hull.w.ai.process_air_state_machine(e, hull.w, 0);
+    CHECK(hull.record().body_anim_slot == -1);
+}
+
+// The profile loader's class-walk order against the retail CRT qsort run on
+// every {0..3}^4 priority tuple plus wrapping keys: the unstable selection
+// shortsort, stored reversed. Only HELO/GROUND profiles load their keys.
+// [orig: AIProfile_LoadOrFind `call _qsort` @0x45FECA -> _qsort @0x76D6A0,
+//  CompareFunction @0x455D90]
+void test_class_walk_matches_the_retail_qsort() {
+    static const int32_t cases[][8] = {
+#include "fixtures/ai_class_walk_vectors.inc"
+    };
+    auto owned = std::make_unique<World>();
+    for (const auto &v : cases) {
+        AiEntity ae;
+        opennova::aip::Profile p;
+        p.type = 2;
+        p.priority_air = v[0];
+        p.priority_ground = v[1];
+        p.priority_organics = v[2];
+        p.priority_decorations = v[3];
+        opennova::mission::initialize_ai_profile(ae, p);
+        for (int i = 0; i < 4; ++i) CHECK(ae.profile.slot_class[i] == v[4 + i]);
+    }
+    // Any other profile type sorts four zero keys, whatever it authored.
+    AiEntity other;
+    opennova::aip::Profile organic;
+    organic.type = 3;
+    organic.priority_air = 7;
+    opennova::mission::initialize_ai_profile(other, organic);
+    CHECK(other.profile.slot_class[0] == 0 && other.profile.slot_class[1] == 3 &&
+          other.profile.slot_class[2] == 2 && other.profile.slot_class[3] == 1);
+}
+
+// The allocator copies the profile's aim_skill word into brain[43] for every
+// profile type: an unauthored aim_skill is the zeroed record's 0, whatever
+// brain[43] held before. [orig: Entity_InitVehicleAI @0x460294..0x460297]
+void test_allocator_copies_aim_skill_unconditionally() {
+    auto owned = std::make_unique<World>();
+    AiEntity ground;
+    ground.brain.f[AiBrain::kAccuracy] = 3;
+    opennova::aip::Profile p;
+    p.type = 2; // no aim_skill line
+    opennova::mission::initialize_ai_profile(ground, p);
+    CHECK(ground.brain.f[AiBrain::kAccuracy] == 0 && ground.profile.accuracy == 0);
+    p.aim_skill = 4;
+    opennova::mission::initialize_ai_profile(ground, p);
+    CHECK(ground.brain.f[AiBrain::kAccuracy] == 4 && ground.profile.accuracy == 4);
+    AiEntity other;
+    other.brain.f[AiBrain::kAccuracy] = 2;
+    opennova::aip::Profile organic;
+    organic.type = 3; // the parser stores no aim_skill for this type
+    opennova::mission::initialize_ai_profile(other, organic);
+    CHECK(other.brain.f[AiBrain::kAccuracy] == 0);
+}
+
+// The class init reads brain[49]/[50] at its own profile offsets, keyed on the
+// item's ai_function family, not the profile type: the helicopter init reads
+// +0xD4/+0xC8 (a GROUND profile stores radio_delay/turn_rate there), the vehicle
+// init +0xC4/+0xC0 (a HELO profile stores hunt_limit/hunt_flags there); the
+// helicopter init always draws its patrol offset, profile or not; a missing
+// profile is the zeroed record (no stand-in speed); the parsed words are taken
+// as stored (an authored negative climb stays negative).
+// [orig: Entity_InitHelicopterAIFromDef @0x468597..0x4685A9, draw
+//  @0x4685ED..0x46863F; Entity_InitVehicleAIFromDef @0x4688C1..0x4688D3]
+void test_class_init_keys_on_the_item_class() {
+    opennova::aip::Profile ground;
+    ground.type = 2;
+    ground.ground_combat_speed = 43690;
+    ground.ground_patrol_speed = 20388;
+    ground.radio_delay = 7;
+    ground.turn_rate_bam_tick = 9;
+    opennova::aip::Profile helo;
+    helo.type = 1;
+    helo.helo_combat_speed = 5000;
+    helo.helo_patrol_speed = 3000;
+    helo.hunt_limit = 125;
+    helo.hunt_flags = 1;
+    helo.helo_patrol_climb = -100;
+
+    auto owned = std::make_unique<World>();
+    AiSystem &ai = owned->ai;
+    const auto words = [&](const opennova::aip::Profile *p, bool helicopter) {
+        AiEntity e;
+        opennova::mission::initialize_class_brain(e, p, helicopter, ai);
+        return std::make_pair(e.brain.f[AiBrain::kSpeedA], e.brain.f[AiBrain::kSpeedB]);
+    };
+    CHECK(words(&ground, false) == std::make_pair(43690, 20388));
+    CHECK(words(&ground, true) == std::make_pair(7, 9));
+    CHECK(words(&helo, true) == std::make_pair(5000, 3000));
+    CHECK(words(&helo, false) == std::make_pair(125, 1));
+    CHECK(words(nullptr, false) == std::make_pair(0, 0));
+
+    // The helicopter draw runs whatever the profile; the vehicle init never draws.
+    const uint32_t before = ai.prng_a;
+    AiEntity heli;
+    opennova::mission::initialize_class_brain(heli, &ground, true, ai);
+    CHECK(ai.prng_a != before);
+    CHECK(heli.brain.f[51] >= 0 && heli.brain.f[51] < (20 << 16));
+    const uint32_t after = ai.prng_a;
+    AiEntity truck;
+    opennova::mission::initialize_class_brain(truck, &helo, false, ai);
+    CHECK(ai.prng_a == after && truck.brain.f[51] == 0);
+
+    AiEntity climber;
+    opennova::mission::initialize_ai_profile(climber, helo);
+    CHECK(climber.profile.patrol_climb == -100);
+}
+
+
+// The brain half of ChangeAI needs the vehicle brain at entity+0x64: an organic
+// target (it carries only the AI slot at +0x68) takes its slot arm but queues
+// no AI event, and PLAYPARTANIM, AIUSEWPZ and TARGETSSN leave its brain words
+// alone; a vehicle target takes every arm.
+// [orig: Entity_ApplyCommand @0x43AB60, the +0x64 gates @0x43AC34 (red alert,
+//  after the slot byte), @0x43B0A0 (DRIVESKILL), @0x43B136 (TARGETSSN),
+//  @0x43B158 (AIUSEWPZ), @0x43B1C1 (PLAYPARTANIM)]
+void test_change_ai_brain_arms_need_the_vehicle_brain() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 2);
+    w.registry.configure_pool(1, 2);
+    Entity person;
+    person.net_id = 42;
+    person.kind = EntityKind::Organic;
+    const EntityHandle org = w.registry.spawn(0, person);
+    Entity hull;
+    hull.net_id = 43;
+    hull.kind = EntityKind::Item;
+    const EntityHandle veh = w.registry.spawn(1, hull);
+    w.ai.attach(org);
+    w.ai.attach(veh);
+    AiEntity &o = *w.ai.for_handle(org);
+    AiEntity &v = *w.ai.for_handle(veh);
+    o.inf.active = true;
+    o.brain.f[AiBrain::kPriorityTarget] = 5;
+    v.brain.f[AiBrain::kPriorityTarget] = 5;
+
+    const int before = w.ai.events.count();
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kRedAlert, 0, 0, 0));
+    CHECK(o.slot.bytes()[AiSlot::kAlertByte] == 2);
+    CHECK(w.ai.events.count() == before);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kRedAlert, 0, 0, 0));
+    CHECK(v.slot.bytes()[AiSlot::kAlertByte] == 2);
+    CHECK(w.ai.events.count() == before + 1);
+    if (w.ai.events.count() == before + 1)
+        CHECK(w.ai.events.at(before).f[0] == 6 && w.ai.events.at(before).f[3] == 2);
+
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kDriveSkill, 3, 0, 0));
+    CHECK(w.ai.events.count() == before + 1);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kDriveSkill, 3, 0, 0));
+    CHECK(w.ai.events.count() == before + 2);
+
+    CHECK(w.commands.apply_ai_command(42, 0x22, 1, 1, 0x10000));
+    CHECK(o.brain.f[AiBrain::kPartAnimDir0] == 0 && o.brain.f[AiBrain::kPartAnimRate0] == 0);
+    CHECK(w.commands.apply_ai_command(43, 0x22, 1, 1, 0x10000));
+    CHECK(v.brain.f[AiBrain::kPartAnimDir0] == 1 && v.brain.f[AiBrain::kPartAnimRate0] == 1048);
+
+    CHECK(w.commands.apply_ai_command(42, 0x20, 0, 0, 0));
+    CHECK(o.brain.f[AiBrain::kUseWaypointZones] == 0);
+    CHECK(w.commands.apply_ai_command(43, 0x20, 0, 0, 0));
+    CHECK(v.brain.f[AiBrain::kUseWaypointZones] == 1);
+
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kTargetSsn, 0, 0, 0));
+    CHECK(o.brain.f[AiBrain::kPriorityTarget] == 5);
+    CHECK(w.commands.apply_ai_command(43, EntityCommands::kTargetSsn, 0, 0, 0));
+    CHECK(v.brain.f[AiBrain::kPriorityTarget] == 0);
+}
+
+// The ChangeAI subs with no editor token write the target's AI slot: word
+// stores in the original's signed wrapping int32 arithmetic (the divides are
+// the compiler's magic-number signed divides), and behavior bits set by a
+// nonzero p2 and cleared by zero. Subs 35..39 are the switch's default and
+// write nothing. Expected words from the retail instruction sequences.
+// [orig: Entity_ApplyCommand @0x43AB60 cases 1 @0x43AB7F, 3 @0x43ABC2,
+//  4 @0x43ABF1, 7 @0x43AD5C, 9 @0x43ADCE, 10 @0x43ADFD, 11 @0x43AE21,
+//  12 @0x43AE45, 13 @0x43AE69, 14 @0x43AE9A, 18 @0x43AF50, 19 @0x43AF7F,
+//  20 @0x43B03A, 24 @0x43B00B, 25 @0x43AFDC; the default @0x43B336]
+void test_change_ai_slot_arms_without_a_token() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 1);
+    Entity person;
+    person.net_id = 42;
+    person.kind = EntityKind::Organic;
+    const EntityHandle org = w.registry.spawn(0, person);
+    w.ai.attach(org);
+    AiEntity &o = *w.ai.for_handle(org);
+    o.inf.active = true;
+    AiSlot &s = o.slot;
+    const auto cmd = [&](int sub, int32_t p2) {
+        return w.commands.apply_ai_command(42, sub, p2, 0, 0);
+    };
+
+    CHECK(cmd(1, 77) && s.f[8] == 77);
+    CHECK(cmd(7, 90) && s.f[33] == 16384);
+    CHECK(cmd(7, -90) && s.f[33] == -16384);
+    CHECK(cmd(7, 0x8000) && s.f[33] == -5965232);
+    CHECK(cmd(9, 50) && s.f[12] == 32768);
+    CHECK(cmd(9, -1) && s.f[12] == -655);
+    CHECK(cmd(10, 3) && s.f[18] == 186);
+    CHECK(cmd(11, -2) && s.f[19] == -124);
+    CHECK(cmd(12, 0x7FFFFFFF) && s.f[21] == -62);
+    CHECK(cmd(13, 180) && s.f[14] == 128);
+    CHECK(cmd(13, 1) && s.f[14] == 0);
+
+    const struct { int sub; uint32_t bit; } bits[] = {{3, 0x2000u}, {4, 0x10000u},
+            {14, 0x100u}, {18, 0x800u}, {19, 0x200000u}, {20, 0x8000u},
+            {24, 0x80000u}, {25, 0x100000u}};
+    for (const auto &b : bits) {
+        s.f[AiSlot::kBehaviorFlags] = 0;
+        CHECK(cmd(b.sub, 5) && static_cast<uint32_t>(s.f[AiSlot::kBehaviorFlags]) == b.bit);
+        s.f[AiSlot::kBehaviorFlags] = -1;
+        CHECK(cmd(b.sub, 0) && static_cast<uint32_t>(s.f[AiSlot::kBehaviorFlags]) == ~b.bit);
+    }
+
+    const AiSlot slot_before = s;
+    const AiBrain brain_before = o.brain;
+    const int events_before = w.ai.events.count();
+    for (int sub = 35; sub <= 39; ++sub) CHECK(cmd(sub, 1));
+    CHECK(std::equal(std::begin(s.f), std::end(s.f), std::begin(slot_before.f)));
+    CHECK(std::equal(std::begin(o.brain.f), std::end(o.brain.f), std::begin(brain_before.f)));
+    CHECK(w.ai.events.count() == events_before);
+}
+
+
+// A flat terrain column at height 0 for the aircraft ground samples.
+struct FlatField {
+    static constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap;
+    std::vector<int> sector_grid;
+    opennova::terrain::TerrainHeightField field;
+    FlatField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+        field.heightmap = heightmap.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+        field.layout.origin_x = 0;
+        field.layout.origin_y = 0;
+    }
+};
+
+// Every AI ground sample ends with the brain's floor word: the husk floor
+// brain[12] when the entity is dead (Flags & 2 or health <= 0) and carries a
+// first husk model (entity+0x34), else the intact floor brain[11]. The husk
+// traits never stand in for the brain word at sample time. Driven through the
+// HELO_LAND enter's work Z and the aircraft mover's ground sample.
+// [orig: AI_InitDeathState @0x4576E8..0x457705; Entity_CalcAverageGroundHeight
+//  @0x457333..0x457367; Entity_UpdateAircraftPhysics @0x490310 (the
+//  Entity_CalcAverageGroundHeight call @0x4909F6)]
+void test_ground_samples_add_the_brain_floors() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    FlatField flat;
+    w.tables.terrain = &flat.field;
+    w.env.water_z = INT32_MIN;
+    w.registry.configure_pool(1, 2);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 500;
+    seed.health = 100;
+    seed.alive = true;
+    seed.position = {10, 10, 10};
+    const EntityHandle h = w.registry.spawn(1, seed);
+    w.ai.attach(h);
+    AiEntity &ai = *w.ai.for_handle(h);
+    ai.brain.f[AiBrain::kOwner] = 1;
+    ai.brain.f[AiBrain::kModelFloor] = 0x20000;
+    ai.brain.f[AiBrain::kHuskFloor] = 0x30000;
+    Entity &e = *w.registry.get(h);
+    e.veh.air_probe_z_off = 0x20000; // the class init writes both from one floor
+    ItemDeathTraits traits;
+    traits.has_husk = true;
+    traits.husk_model_loaded = true;
+    traits.primary_husk_loaded = true;
+    traits.husk_rest_min_z = -5.0f;
+    w.tables.item_death_traits.set(500, traits);
+    AiThinkCtx ctx{&w.ai, &ai, &w, nullptr};
+    const auto land_z = [&]() {
+        w.ai.row(kAiHeloLand).enter(ctx);
+        return ai.brain.f[AiBrain::kWorkPosZ];
+    };
+    VehicleTraits air;
+    air.family = VehicleFamily::Helicopter;
+    const int32_t pos[3] = {10 << 16, 10 << 16, 10 << 16};
+
+    CHECK(land_z() == 0x20000);
+    e.health = 0;
+    CHECK(land_z() == 0x30000);
+    // Flags & 2 alone takes the husk floor, in the row and in the mover sample.
+    e.health = 100;
+    e.flags |= kEntityFlagDead;
+    e.engine_flags |= kEntityFlagDead;
+    CHECK(land_z() == 0x30000);
+    CHECK(detail::vehicle_ground_height_at(w, e, air, pos) == 0x30000);
+    // A huskFinal-only definition leaves entity+0x34 null: the intact floor.
+    traits.primary_husk_loaded = false;
+    w.tables.item_death_traits.set(500, traits);
+    CHECK(land_z() == 0x20000);
+    CHECK(detail::vehicle_ground_height_at(w, e, air, pos) == 0x20000);
+}
+
+
+// The ground death enter kills the brain's live gunner-attachment children on
+// the global hit record: for each, the record's damage word is cleared (its
+// section and round stay), the child's health zeroed and its class event
+// callback run with phase 1 on that record, so an item child's death leg sends
+// the record's section and a brained child's machine takes event 1. The
+// child's attacker (+0x178) stays.
+// [orig: AI_TransitionToDeath_GroundVehicle @0x467B90..0x467BCC: health 0
+//  @0x467BA5, the record's +0x30 cleared @0x467BAD, child+0x1C8(child, 1, 0)
+//  @0x467BB0..0x467BBB]
+void test_ground_death_kills_children_on_the_hit_record() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    w.rules.logic_authority = true;
+    w.rules.mp_session = true;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.alive = true;
+    seed.item_id = 600;
+    seed.health = 0;
+    const EntityHandle hull = w.registry.spawn(1, seed);
+    seed.item_id = 601;
+    seed.health = 50;
+    seed.last_attacker = hull;
+    const EntityHandle item_child = w.registry.spawn(1, seed);
+    seed.item_id = 602;
+    seed.is_ai_capable = true;
+    const EntityHandle brain_child = w.registry.spawn(1, seed);
+    w.ai.attach(hull);
+    w.ai.attach(brain_child);
+    AiEntity &ai = *w.ai.for_handle(hull);
+    ai.brain.f[AiBrain::kOwner] = 1;
+    ai.brain.f[AiBrain::kAttachCount] = 2;
+    ai.brain.f[AiBrain::kAttachSlots + 1] = int32_t(item_child.packed) + 1;
+    ai.brain.f[AiBrain::kAttachSlots + 3] = int32_t(brain_child.packed) + 1;
+    w.ai.for_handle(brain_child)->brain.f[AiBrain::kOwner] = 1;
+    VehicleTraits vt;
+    vt.attrib_parent = true;
+    vt.brain_class = VehicleBrainClass::Ground;
+    w.vehicles.traits.set(600, vt);
+    VehicleTraits child_vt; // a cveh child: its class event is the vehicle machine
+    child_vt.brain_class = VehicleBrainClass::Ground;
+    w.vehicles.traits.set(602, child_vt);
+    ItemDeathTraits tree;
+    tree.death_class = ItemDeathClass::kTree;
+    w.tables.item_death_traits.set(601, tree);
+    HitRecord &record = w.round_sim.hit_record;
+    record.damage = 77;
+    record.section = 5;
+    AiThinkCtx ctx{&w.ai, &ai, &w, nullptr};
+    w.ai.row(21).enter(ctx); // GROUND_DYING
+
+    const Entity &child = *w.registry.get(item_child);
+    CHECK(child.health == 0);
+    CHECK(child.last_attacker == hull);
+    CHECK(record.damage == 0 && record.section == 5);
+    int child_sends = 0;
+    for (const auto &event : w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == item_child.packed) {
+                ++child_sends;
+                CHECK(state->section == 5);
+            }
+    CHECK(child_sends == 1);
+    CHECK(w.registry.get(brain_child)->health == 0);
+    const int child_index = w.ai.index_of(*w.ai.for_handle(brain_child));
+    int notifications = 0;
+    for (int i = 0; i < w.ai.events.count(); ++i)
+        if (w.ai.events.at(i).f[0] == 1 && w.ai.events.at(i).entity_index() == child_index)
+            ++notifications;
+    CHECK(notifications == 1);
+}
+
+
+// A brained item runs a machine from its class event callback only through one
+// of the five brain-class rows: CHel and cpln reach the air machine, cveh, cbot
+// and ctrn the vehicle machine. An item with no brain-class row (here: no
+// traits row at all) runs none, whatever brain it carries.
+// [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132A0 ->
+//  EntityAI_ProcessAirStateMachine @0x4581B0, cpln @0x8133A8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessGroundStateMachine @0x4583C0,
+//  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140]
+void test_class_event_needs_a_brain_class_row() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type_index = 7;
+    seed.is_ai_capable = true;
+    seed.health = 100;
+    seed.alive = true;
+    seed.item_id = 700; // no traits row
+    const EntityHandle bare = w.registry.spawn(1, seed);
+    seed.item_id = 701; // ai_function CHel
+    const EntityHandle heli = w.registry.spawn(1, seed);
+    w.ai.attach(bare);
+    w.ai.attach(heli);
+    VehicleTraits air;
+    air.brain_class = VehicleBrainClass::Air;
+    w.vehicles.traits.set(701, air);
+
+    CHECK(w.commands.wac_kill_ssn(bare));
+    CHECK(w.ai.events.count() == 0);
+    CHECK(w.commands.wac_kill_ssn(heli));
+    CHECK(w.ai.events.count() == 1);
+    if (w.ai.events.count() == 1) {
+        CHECK(w.ai.events.at(0).type() == 1);
+        CHECK(w.ai.events.at(0).entity_index() == w.ai.index_of(*w.ai.for_handle(heli)));
+    }
+}
+
+} // namespace
+
+int main() {
+    test_ground_rows_read_the_live_hull_words();
+    test_class_init_keys_on_the_item_class();
+    test_allocator_copies_aim_skill_unconditionally();
+    test_class_walk_matches_the_retail_qsort();
+    test_alert_enters_raise_the_own_slot_alert();
+    test_evade_flee_leg_turns_about_at_combat_speed();
+    test_aircraft_dead_enter_wakes_as_team_zero();
+    test_part_anim_rate_uses_the_single_precision_tick();
+    test_class_update_leaves_the_body_anim_alone();
+    test_change_ai_brain_arms_need_the_vehicle_brain();
+    test_change_ai_slot_arms_without_a_token();
+    test_ground_samples_add_the_brain_floors();
+    test_ground_death_kills_children_on_the_hit_record();
+    test_class_event_needs_a_brain_class_row();
+    std::printf("ai_brain_rows: %d failures\n", failures);
+    return failures ? 1 : 0;
+}

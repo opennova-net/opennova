@@ -13,16 +13,14 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/infantry.h> // org1_owns_death_transaction
 #include <runtime/world/vehicle_attach.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
 
 namespace opennova::world {
-
-// The mount_best proximity proxy's search radius (a tracked stand-in; the
-// witnessed seat-offer walk is the mount system's).
-static constexpr double kMountRadius = 20.0;
 
 // ----------------------------------------------------------------------------
 // EntityCommands — the shared Entity_* primitive layer.
@@ -34,21 +32,15 @@ static constexpr double kMountRadius = 20.0;
 // ----------------------------------------------------------------------------
 
 // Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
-// triggers/actions) written under the dfx2med authoring convention address the
-// local player as SSN 10000 (10000 + player slot). The kLocalPlayerSsn alias
-// below is a port seam that honours that convention; it is not a retail
-// lookup. Retail JO has no alias: its SSN leg is atol(token) ->
-// EntityPool_FindByNetId @0x4f0a20, which keys on GamePlayerEntity+0x7C
-// (DcbId, low 16 bits; pools 0..3, no netId gate), and the JO player spawn
-// [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] memsets the record and
-// writes only +0x78 (ownerConnectionId) and +0x15c (NetId, the minimap slot
-// id), never DcbId@0x7C or Ssn@0x2e. A retail lookup of 10000 therefore
-// misses every player and the compiler reports "Unknown SSN" unless an
-// authored entity carries that DcbId (docs/net/novaworld-net-re.md, the
-// field-identity grill). Our player entities carry net_id 0 (the wire is
-// handle-based), and this seam resolves the authoring convention in their
+// triggers/actions) address the players as SSN 10000 + player slot. The JO
+// player spawn [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] leaves
+// DcbId@0x7C zero, and the player class init then stamps it with 10000 + the
+// slot byte [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173], the key
+// EntityPool_FindByNetId matches (low 16 bits; pools 0..3, no netId gate).
+// Our player entities carry net_id 0 (the wire is handle-based), so the
+// kLocalPlayerSsn alias below maps SSN 10000 to the local player in their
 // place; MP joiner SSNs (10001+) wait on the net track.
-// [orig: EntityPool_FindByNetId @0x4f0a20; Entity_SpawnFromAnimSlotProperty @0x43c390]
+// [orig: EntityPool_FindByNetId @0x4f0a20]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
     if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
         return world_.cached.local_player;
@@ -95,7 +87,7 @@ int EntityCommands::set_group_target_selector(int32_t group, AiTargetSelector fi
 bool EntityCommands::set_ssn_name(EntityTarget ssn, const std::string &name) {
     // [orig: WacCmd_SsnName @0x4F7230] Includes dead items; empty names are ignored.
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0 || name.empty()) return false;
+    if (entity == nullptr || entity->item_type_index == 0 || name.empty()) return false;
     entity->display_name = name.substr(0, 31);
     return true;
 }
@@ -103,7 +95,7 @@ bool EntityCommands::set_ssn_name(EntityTarget ssn, const std::string &name) {
 bool EntityCommands::ssn_critical(EntityTarget ssn) const {
     // [orig: WacCmd_SsnCritical @0x4F1BF0] Signed words, no Flags/alive predicate.
     const Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     const int32_t health = retail_signed_i16(entity->health);
     return health > 0 && health <= retail_signed_i16(entity->critical_hp);
 }
@@ -153,9 +145,11 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     Entity *entity = world_.registry.get(source);
     const Entity *carrier = world_.registry.get(target);
     AiEntity *ai = world_.ai.for_handle(source);
-    if (entity == nullptr || carrier == nullptr || entity->item_id == 0 ||
-            carrier->item_id == 0 || ai == nullptr) return false;
-    if (entity->mounted) world_.vehicles.detach(source);
+    if (entity == nullptr || carrier == nullptr || entity->item_type_index == 0 ||
+            carrier->item_type_index == 0 || ai == nullptr) return false;
+    // Only the authority detaches [orig: @0x4F73D2..0x4F73DC ->
+    // Entity_DetachFromVehicleIfServer @0x4359D0].
+    if (entity->mounted && world_.ai.is_authority) world_.vehicles.detach(source);
     ai->slot.f[37] = 125;
     ai->slot.f[38] = carrier->net_id;
     ai->slot.f[36] = int32_t(target.packed) + 1; // rebased nullable pointer
@@ -163,17 +157,167 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     return true;
 }
 
+// The player bodies' death transaction stand-in (an org1 body's own edge
+// raises its own), defined with the group kill below.
+static void raise_scripted_death(World &world, Entity &e, EntityHandle h);
+
+namespace {
+
+// A row the organic death edge has not yet claimed: the health it held before a
+// script zeroed it, and no dead bit. [orig: the edge guard `Health <= 0 &&
+// (Flags & 2) == 0`, Entity_UpdateInfantryAI @0x4B9C40..0x4B9C51]
+bool script_kill_crosses_edge(const Entity &e) {
+    return e.health > 0 && ((e.flags | e.engine_flags) & kEntityFlagDead) == 0;
+}
+
+// Edge stand-in (organic death transaction) after a script health write, until
+// the org1/org2 death edge owns it: a living organic the write took to zero or
+// below crosses the edge once; the written health word is kept.
+// [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550]
+void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
+    if (e.kind != EntityKind::Organic || !crosses_edge || e.health > 0) return;
+    const int32_t word = e.health;
+    raise_scripted_death(world, e, e.handle);
+    e.health = word;
+}
+
+// The brain machine an SM-brained item's class event callback runs. Only the
+// five brain-class rows route there: CHel and the cpln thunk to the air
+// machine, cveh and the cbot/ctrn thunks to the vehicle machine. Every other
+// row's callback is another class's, so an item with no brain-class row (no
+// traits row, or an ai_function outside those five) runs no machine. A null
+// brain returns before any work [orig: EntityAI_ProcessGroundStateMachine
+// @0x4583CA..0x4583D1].
+// [orig: g_EntityClassEventCallbackTable @0x813000: CHel @0x8132a0 ->
+//  EntityAI_ProcessAirStateMachine @0x4581B0, cpln @0x8133a8 -> jmp
+//  @0x462120; cveh @0x813378 -> EntityAI_ProcessGroundStateMachine @0x4583C0,
+//  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140; resolved
+//  by EntityDef_InitAllCallbacks @0x4a5aae]
+void run_brain_class_event(World &world, const Entity &e, int event) {
+    AiEntity *ae = world.ai.for_handle(e.handle);
+    if (ae == nullptr) return;
+    const VehicleTraits *vt = world.vehicles.traits.get(e.item_id);
+    if (vt == nullptr || vt->brain_class == VehicleBrainClass::Unset) return;
+    if (vt->brain_class == VehicleBrainClass::Ground)
+        world.ai.process_ground_state_machine(*ae, world, event);
+    else
+        world.ai.process_air_state_machine(*ae, world, event);
+}
+
+} // namespace
+
+// The class event callback a script kill fires, entity+0x1C8(entity, phase, 0),
+// reading the global hit record as the kill left it: WAC killSSN zeroed it,
+// while the BMS kills cleared only its damage word (and a KillSingle pool-0
+// row or a KillGroup row its owner), so their callbacks still see the last
+// recorded round. [orig: WacCmd_KillSsn @0x4F1EC7..0x4F1ED2;
+// Entity_KillByNetId @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3,
+// phase 4); Entity_KillAllByNetId @0x43C936..0x43C93F]
+void hit_record_class_event(World &world, Entity &e, int phase) {
+    const HitRecord &record = world.round_sim.hit_record;
+    if (e.kind == EntityKind::Organic) {
+        const uint32_t flags = e.flags | e.engine_flags;
+        if ((flags & kEntityFlagPlayer) == 0) {
+            // org0/org1: the phase-1 arm puts the victim and its trigger group
+            // on red alert, then runs the round legs while the record holds a
+            // round. Phase 4 only zeroes the health word here.
+            // [orig: OrganicClass_HandleEvent @0x4073BF..0x4073EA, the round
+            //  test @0x40740D; phase-4 arm @0x40733F..0x407358]
+            if (phase != 1) return;
+            if (AiEntity *ae = world.ai.for_handle(e.handle))
+                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
+            world.script.relations.group(e.group_id).alert = TriggerRelations::kAlertRed;
+            if (record.has_round) person_class_round_legs(world, e, record);
+            return;
+        }
+        // plyr: a body already flagged dead returns at once. Phase 1 with a
+        // recorded round runs the round legs (its network kill scorer only
+        // reaches GameEvent_ProcessScoring case 2, which the port does not
+        // model, live hits included); with none the scorer returns at once.
+        // The health tail then stages the default death clip when none is
+        // staged, and a mounted body leaves its seat on the authority; every
+        // event re-arms the think cadence.
+        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return),
+        //  the round test @0x4078D8..0x4078DA, legs @0x407777..0x407A7C;
+        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null round);
+        //  GameEvent_ProcessScoring case 2 @0x52FC22; tail @0x407AC5..0x407AE7
+        //  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)), @0x407AED..0x407B20
+        //  (Entity_DetachFromVehicleIfServer), @0x407B5E]
+        if ((flags & kEntityFlagDead) != 0 || phase != 1) return;
+        if (record.has_round) person_class_round_legs(world, e, record);
+        if (retail_signed_i16(e.health) <= 0) {
+            if (e.death_anim_state == 0)
+                e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+            if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
+        }
+        // The callback's shared tail: the waypoint visits between the two
+        // think re-arms. [orig: @0x407B64..0x407C6B]
+        player_body_waypoint_visits(world, e);
+        e.spawn_phase = 64;
+        return;
+    }
+    if (e.is_ai_capable) {
+        run_brain_class_event(world, e, phase);
+        return;
+    }
+    // An item callback reads the record's section, damage and angles.
+    // [orig: hitRecord[14] / [12] / [3..5], e.g. Entity_HandleDeathEvent
+    //  @0x4071EF, Entity_UpdateSectionDamage @0x4406B4,
+    //  WeaponOverlay_HandleDamage @0x53C53B]
+    destruction_notify_item_damage(world, e, phase,
+            {record.section, record.damage, record.round_yaw_bam,
+             record.round_pitch_bam, record.round_roll_bam});
+}
+
 bool EntityCommands::kill_ssn(EntityTarget ssn) {
+    // The BMS KillSingle action: the first matching row, pools 0..3. Pool 0 also
+    // loses its attacker and staged death clip; pools 1/2 fire phase 1 and pool 3
+    // phase 4. No item or dead gate.
+    // [orig: Entity_KillByNetId @0x43DBD0 — pool 0 @0x43DC0E..0x43DC31, pool 1
+    //  @0x43DC5E..0x43DC72, pool 2 @0x43DC9E..0x43DCB2, pool 3 @0x43DCDE..0x43DCF2]
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (!e) return false;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    const int pool = e->handle.pool();
     e->health = 0;
-    if (e->kind != EntityKind::Organic && !e->is_ai_capable) {
-        // Pool 3 uses phase 4; the other pools use phase 1.
-        // [orig: Entity_KillByNetId @0x43DBD0]
-        destruction_notify_item_damage(world_, *e, e->handle.pool() == 3 ? 4 : 1, {0, 0});
-    } else {
-        e->alive = false;
+    // Every pool leg clears the hit record's damage word; only the pool-0 leg
+    // also clears its owner [orig: +0x44 @0x43DC22, +0x30 @0x43DC27 (pool 0);
+    // +0x30 @0x43DC68 (pool 1), @0x43DCA6 (pool 2), @0x43DCE8 (pool 3)].
+    world_.round_sim.hit_record.damage = 0;
+    if (pool == 0) {
+        e->last_attacker = {};
+        e->death_anim_state = 0;
+        world_.round_sim.hit_record.owner = {};
     }
+    hit_record_class_event(world_, *e, pool == 3 ? 4 : 1);
+    // The organic death transaction: an org1 body's own edge raises it, the
+    // player bodies take this stand-in for theirs
+    // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    if (e->kind == EntityKind::Organic && crosses_edge)
+        raise_scripted_death(world_, *e, e->handle);
+    return true;
+}
+
+bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
+    // The WAC killSSN handler (the IDB name is a misnomer).
+    // [orig: WacCmd_KillSsn @0x4F1E40 — the
+    //  ItemTypeIndex gate @0x4F1E89, the hit record cleared @0x4F1E8F..0x4F1E99,
+    //  Health 0 @0x4F1EA4, lastAttacker 0 @0x4F1EAD, a person's (def+0x5C == 3)
+    //  staged clip +0x2C0 cleared @0x4F1EB7..0x4F1EBD, the class event (e, 1, 0)
+    //  @0x4F1EC7..0x4F1ED2, return 1 @0x4F1ED7]
+    Entity *e = world_.registry.get(resolve_target(ssn));
+    if (e == nullptr || e->item_type_index == 0) return false;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    world_.round_sim.hit_record = HitRecord{};
+    e->health = 0;
+    e->last_attacker = {};
+    if (e->item_type == 3) e->death_anim_state = 0;
+    hit_record_class_event(world_, *e, 1);
+    // The organic death transaction: an org1 body's own edge raises it, the
+    // player bodies take this stand-in for theirs
+    // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+    if (e->kind == EntityKind::Organic && crosses_edge)
+        raise_scripted_death(world_, *e, e->handle);
     return true;
 }
 
@@ -205,6 +349,69 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (world_.collision) world_.collision->remove_entity_instance(h);
     world_.registry.despawn(h);
     return true;
+}
+
+bool EntityCommands::server_remove_and_notify(EntityTarget ssn) {
+    const EntityHandle h = resolve_target(ssn);
+    const Entity *entity = world_.registry.get(h);
+    if (entity == nullptr) return false;
+    // The removal reaches the joiners first: S2C 0x12 [u16 packed handle]
+    // under send mask 0x90, drained by the host's entity-event fan. A removed
+    // player's placed devices go next, each through this same removal, and
+    // only then the shared destroy.
+    // [orig: Server_RemoveEntityAndNotify @0x50a270 — the 0x12 send @0x50a2ac,
+    //  the Player flag test @0x50A2B1, the player-device sweep call @0x50a2bb,
+    //  Entity_Destroy @0x50a2c4]
+    world_.out.entity_events.push_back(EntityRemoveEvent{h.packed});
+    if (((entity->flags | entity->engine_flags) & kEntityFlagPlayer) != 0)
+        remove_placed_devices_by_owner(h);
+    return remove_ssn(h);
+}
+
+void EntityCommands::remove_placed_devices_by_owner(EntityHandle owner) {
+    // Pool 1 in slot order: a row with an ItemTypeIndex that this owner
+    // placed, whose def is neither PlayerControl (0x40) nor Eweap (0x20) and
+    // whose placed ammo is the satchel, the claymore or the AV mine, goes
+    // through the notifying removal. The placement owner and the placed ammo
+    // live on the row's PlacedDevice record.
+    // [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 — the +0x1C gate
+    //  @0x546E2D, the +0x170 owner compare @0x546E37, the def attrib skips
+    //  @0x546E46 / @0x546E50, the g_ammo_satchel / g_ammo_claymore /
+    //  g_ammo_AV_Mine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
+    //  Server_RemoveEntityAndNotify call @0x546E71 / @0x546E94 / @0x546EBB]
+    const Entity *owner_row = world_.registry.get(owner);
+    if (owner_row == nullptr) return;
+    const uint64_t owner_spawn_id = owner_row->registry_spawn_id;
+    const size_t capacity = world_.registry.pool_capacity(1);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
+        const Entity *row = world_.registry.get(handle);
+        if (row == nullptr || row->item_type_index == 0) continue;
+        const PlacedDevice *device = world_.throwables.device_for(*row);
+        if (device == nullptr || device->owner.packed != owner.packed ||
+                device->owner_spawn_id != owner_spawn_id)
+            continue;
+        if ((row->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0) continue;
+        const AmmoTableEntry *ammo = world_.tables.ammo.by_index(device->ammo_index);
+        if (ammo == nullptr) continue;
+        if (strutil::iequals(ammo->name, "satchel") ||
+                strutil::iequals(ammo->name, "claymore") ||
+                strutil::iequals(ammo->name, "AV_Mine"))
+            server_remove_and_notify(handle);
+    }
+}
+
+bool EntityCommands::remove_bms_ref(int32_t ssn) {
+    // SSN 0 and a non-authority peer do nothing; otherwise the first row
+    // carrying the SSN, walking pools 0..3 in slot order, goes through the
+    // notifying removal. An SSN past 16 bits matches no DcbId we carry.
+    // [orig: find_entity_by_parent_and_dispatch @0x43e210 — SSN 0 @0x43e214,
+    //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
+    //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
+    if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
+    const EntityHandle h = resolve_ssn(static_cast<uint16_t>(ssn));
+    if (world_.registry.get(h) == nullptr) return false;
+    return server_remove_and_notify(h);
 }
 
 bool EntityCommands::set_entity_health(EntityHandle h, int32_t hp) {
@@ -381,7 +588,7 @@ bool EntityCommands::set_ssn_respawns(EntityTarget ssn, int32_t count) {
 }
 
 void EntityCommands::set_group_respawns(int32_t group, int32_t count) {
-    // [orig: WacScript_SetEntityWaypoint @0x4F7AE0] GroupSpawn's actual body.
+    // [orig: WacCmd_GroupSpawn @0x4F7AE0] GroupSpawn's actual body.
     world_.registry.for_each_in_pool(0, [&](const Entity &row) {
         Entity &entity = *world_.registry.get(row.handle);
         if (static_cast<int16_t>(entity.group_id) == group)
@@ -390,20 +597,43 @@ void EntityCommands::set_group_respawns(int32_t group, int32_t count) {
 }
 
 bool EntityCommands::set_ssn_hp(EntityTarget ssn, int32_t hp) {
+    // No gate past the resolve: the health word, then the attacker cleared.
+    // [orig: WacCmd_SsnHp @0x4F2100 — `mov [eax+11Eh],dx` @0x4F214C,
+    //  `mov [eax+178h],0` @0x4F2153, return 1 @0x4F215D]
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (!e) return false;
-    e->health = hp;
-    e->alive = hp > 0;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    e->health = retail_signed_i16(hp);
+    e->last_attacker = {};
+    script_health_edge_stand_in(world_, *e, crosses_edge);
     return true;
 }
 
-bool EntityCommands::add_ssn_hp(EntityTarget ssn, int32_t delta) {
+int32_t EntityCommands::add_ssn_hp(EntityTarget ssn, int32_t delta) {
+    // The ItemDef pointer gates it (not the ItemTypeIndex); the 16-bit add
+    // floors at 0 and caps at the def healthMax word, each returning 1 with the
+    // attacker kept; an unclamped add clears the attacker and returns 0.
+    // [orig: WacCmd_SsnAddHp @0x4F2170 — gate @0x4F21B8..0x4F21BD, `add
+    //  [eax+11Eh],cx` @0x4F21C4, floor @0x4F21D7..0x4F21E5, cap
+    //  @0x4F21E6..0x4F21FE, lastAttacker 0 @0x4F21FF, return 0 @0x4F2209]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->health += delta;
-    if (e->health < 0) e->health = 0;
-    e->alive = e->health > 0;
-    return true;
+    if (e == nullptr || !e->has_item_def) return 0;
+    const bool crosses_edge = script_kill_crosses_edge(*e);
+    const int32_t sum = retail_signed_i16(static_cast<int64_t>(e->health) + delta);
+    const int32_t cap = retail_signed_i16(e->health_max);
+    int32_t result = 0;
+    if (sum < 0) {
+        e->health = 0;
+        result = 1;
+    } else if (sum > cap) {
+        e->health = cap;
+        result = 1;
+    } else {
+        e->health = sum;
+        e->last_attacker = {};
+    }
+    script_health_edge_stand_in(world_, *e, crosses_edge);
+    return result;
 }
 
 bool EntityCommands::set_ssn_accuracy(EntityTarget ssn, int32_t primary,
@@ -419,7 +649,8 @@ bool EntityCommands::set_ssn_accuracy(EntityTarget ssn, int32_t primary,
 
 bool EntityCommands::set_ssn_guard(EntityTarget ssn, bool guard) {
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr) return false;
+    // [orig: WacCmd_SsnGuard @0x4F71C0 — ItemTypeIndex gate @0x4F7207]
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     // [orig: WacCmd_SsnGuard @0x4F71C0] Retail writes the one Flags dword;
     // 0x40 is legacy-mirrored, so both views stay coherent here (the
     // vehicle_attach precedent — engine_flags is what the 0x10 static record
@@ -465,7 +696,7 @@ bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp) {
     //  @0x4F1D2F, the nearest node @0x4F1D52 (no explicit-node form), the brain
     //  gate @0x4F1D66]. No detach, cooldown, carrier or flag write.
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     AiEntity *ae = world_.ai.for_handle(e->handle);
     if (ae == nullptr) return false;
     write_route_slot(world_, *e, *ae, wp, -1);
@@ -563,7 +794,7 @@ bool EntityCommands::set_ssn_anim(EntityTarget ssn, int32_t anim_state) {
     // The +0x1C type index gate does not test health or the +0x20 ItemDef pointer.
     // [orig: WacCmd_SsnAnim @0x4F7630]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (e == nullptr || e->item_id == 0) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
     store_script_body_animation(world_, *e, anim_state);
     return true;
 }
@@ -594,7 +825,7 @@ bool EntityCommands::set_ssn_turn(EntityTarget ssn, int32_t heading_degrees) {
     // [orig: WacCmd_SsnTurn @0x4F72B0] The heading argument is converted with
     // two wrapped shifts and signed division, not a full-precision BAM divide.
     Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr || entity->item_type_index == 0) return false;
     const int32_t numerator = static_cast<int32_t>((90u - uint32_t(heading_degrees)) << 16);
     const int32_t target = static_cast<int32_t>(uint32_t(numerator / 360) << 16);
     if (AiEntity *body = world_.ai.for_handle(entity->handle)) {
@@ -637,28 +868,66 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
 }
 
 bool EntityCommands::set_ssn_hidden(EntityTarget ssn, bool hidden) {
+    // Flags bit 0, the bit every retail reader keys on (the area/location
+    // tests, the AI target scan, zone capture, the projectile traces, the play
+    // tick counter); `hidden` is its present mirror. Both views of the split
+    // Flags field take it, like the respawn hide.
+    // [orig: WacCmd_HideSsn @0x4F7750 — ItemTypeIndex gate @0x4F7797,
+    //  `or Flags,1` @0x4F779D; WacCmd_UnhideSsn @0x4F77B0 — `and Flags,~1`
+    //  @0x4F77FD]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
+    if (e == nullptr || e->item_type_index == 0) return false;
+    if (hidden) {
+        e->flags |= kEntityFlagCarried;
+        e->engine_flags |= kEntityFlagCarried;
+    } else {
+        e->flags &= ~kEntityFlagCarried;
+        e->engine_flags &= ~kEntityFlagCarried;
+    }
     e->hidden = hidden;
     return true;
 }
 
 bool EntityCommands::set_ssn_held(EntityTarget ssn, bool held) {
+    // Bit 0x2000 of the entity+0x2C dword behind the ItemTypeIndex gate; the
+    // org1 think reads it (a held NPC takes move mode 12 at zero distance).
+    // [orig: WacCmd_HoldSsn @0x4F7810 — gate @0x4F7857, `or [eax+2Ch],2000h`
+    //  @0x4F785D; WacCmd_UnholdSsn @0x4F7870 — gate @0x4F78B7, `and
+    //  [eax+2Ch],0FFFFDFFFh` @0x4F78BD; the reader Entity_UpdateInfantryAI
+    //  @0x4BD235]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->held = held;
+    if (e == nullptr || e->item_id == 0) return false;
+    if (held) {
+        e->cause_flags |= kCauseFlagScriptHold;
+    } else {
+        e->cause_flags &= ~kCauseFlagScriptHold;
+    }
     return true;
 }
 
 bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
+    // Flags bit 28: the vehicle motors' driver-input gate reads it together
+    // with the dead bit (vehicle_motor.cpp's `veh.flags & 0x10000002`).
+    // [orig: WacCmd_DisableSsn @0x4F7690 — ItemTypeIndex gate @0x4F76D7,
+    //  `or Flags,10000000h` @0x4F76DD; WacCmd_EnableSsn @0x4F76F0 — `and
+    //  Flags,0EFFFFFFFh` @0x4F773D]
     Entity *e = world_.registry.get(resolve_target(ssn));
-    if (!e) return false;
-    e->disabled = disabled;
+    if (e == nullptr || e->item_type_index == 0) return false;
+    if (disabled) {
+        e->flags |= kEntityFlagScriptDisabled;
+        e->engine_flags |= kEntityFlagScriptDisabled;
+    } else {
+        e->flags &= ~kEntityFlagScriptDisabled;
+        e->engine_flags &= ~kEntityFlagScriptDisabled;
+    }
     return true;
 }
 
 bool EntityCommands::ssn_exists(EntityTarget ssn) const {
-    return world_.registry.get(resolve_target(ssn)) != nullptr;
+    // A resolved row with an ItemTypeIndex. [orig: WacCmd_SsnExists @0x4F1A70
+    // — `cmp [ecx+1Ch],eax; setnz` @0x4F1AB9..0x4F1ABC]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_type_index != 0;
 }
 
 bool EntityCommands::ssn_alive(EntityTarget ssn) const {
@@ -671,18 +940,32 @@ bool EntityCommands::ssn_dead(EntityTarget ssn) const {
     return e != nullptr && !e->alive;
 }
 
+bool EntityCommands::wac_ssn_dead(EntityTarget ssn) const {
+    // The dead bit of Flags, behind the ItemTypeIndex gate; health is not read.
+    // [orig: WacCmd_SsnDead @0x4F1AC0 — gate @0x4F1B07, `movsx eax,[ecx+24h];
+    //  and eax,2` @0x4F1B0D..0x4F1B11]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_type_index != 0 &&
+            ((e->flags | e->engine_flags) & kEntityFlagDead) != 0;
+}
+
+bool EntityCommands::wac_ssn_alive(EntityTarget ssn) const {
+    // [orig: WacCmd_SsnAlive @0x4F1B20 — gate @0x4F1B67, `not dl; and eax,2`
+    //  @0x4F1B6D..0x4F1B75]
+    const Entity *e = world_.registry.get(resolve_target(ssn));
+    return e != nullptr && e->item_type_index != 0 &&
+            ((e->flags | e->engine_flags) & kEntityFlagDead) == 0;
+}
+
 bool EntityCommands::ssn_wounded(EntityTarget ssn) const {
     const Entity *entity = world_.registry.get(resolve_target(ssn));
-    if (entity == nullptr || entity->item_id == 0) return false;
-    // [orig: WacCmd_SsnWounded @0x4F1B80] Health is read unsigned,
-    // while healthMax is arithmetically halved as signed i16 and then compared
-    // in the same unsigned 16-bit domain.
-    const uint16_t health = static_cast<uint16_t>(entity->health);
-    const int16_t health_max = static_cast<int16_t>(entity->health_max);
-    const uint16_t half = static_cast<uint16_t>(
-            static_cast<int16_t>(health_max >> 1));
+    if (entity == nullptr || entity->item_type_index == 0) return false;
+    // A SIGNED 16-bit compare of the health word against the arithmetically
+    // halved def healthMax word. [orig: WacCmd_SsnWounded @0x4F1B80 — `sar cx,1`
+    // @0x4F1BD9, `cmp [eax+11Eh],cx` @0x4F1BDC, `setle dl` @0x4F1BE3]
+    const int16_t health = retail_signed_i16(entity->health);
+    const int16_t half = static_cast<int16_t>(retail_signed_i16(entity->health_max) >> 1);
     return health <= half;
-
 }
 bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
     // No death/item gate and no early exit on an out-of-bounds duplicate.
@@ -725,7 +1008,7 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
                                          bool three_dimensional) const {
     // [orig: WacCmd_SsnArea @0x4F1020; WacCmd_SsnArea3D @0x4F0F60]
     const Entity *entity = world_.registry.get(resolve_target(target));
-    if (entity == nullptr || entity->item_id == 0 ||
+    if (entity == nullptr || entity->item_type_index == 0 ||
             ((entity->flags | entity->engine_flags) & 1u) != 0 || zone_id == 0)
         return false;
     const int index = world_.registry.area_index_by_zone_id(zone_id);
@@ -741,7 +1024,7 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
 bool EntityCommands::ssn_at_location(EntityTarget target, int32_t location) const {
     // [orig: WacCmd_SsnLoc @0x4F0E90] A blink hit overrides the box even with ID 0.
     const Entity *entity = world_.registry.get(resolve_target(target));
-    if (entity == nullptr || entity->item_id == 0 ||
+    if (entity == nullptr || entity->item_type_index == 0 ||
             ((entity->flags | entity->engine_flags) & 1u) != 0) return false;
     int32_t value = world_.registry.location_at(entity->position);
     if (entity->blink_hits[0] != 0) {
@@ -795,6 +1078,33 @@ namespace {
 bool in_pools_01(EntityHandle h) { return h.valid() && h.pool() <= 1; }
 
 } // namespace
+
+bool EntityCommands::bms_ref_alive(int32_t ssn) const {
+    // SSN 0 reads not alive. Pools 0, 1, 2 are walked in slot order and the
+    // first row whose DcbId equals the SSN answers !(Flags & 2). No matching
+    // row reads not alive: an SSN that was never placed or was rejected at
+    // admission reads DESTROYED to the caller, and so does a removed one,
+    // whose row Entity_Destroy zeroes.
+    // [orig: Entity_IsAliveByBmsRef @0x43e640 — SSN 0 @0x43e644; the flag
+    //  read @0x43e66e..0x43e676; no match @0x43e6dc; Entity_Destroy @0x43ea69]
+    if (ssn == 0) return false;
+    for (int pool = 0; pool <= 2; ++pool) {
+        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr) continue;
+            // The SP listen-host model's socketless local body carries net_id
+            // 0 where retail stamps the player's DcbId 10000 + slot; the same
+            // D-NET-112 alias ssn_in_area applies.
+            // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
+            const bool local_alias = !world_.rules.mp_session && ssn == kLocalPlayerSsn &&
+                    handle == world_.cached.local_player && entity->net_id == 0;
+            if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
+            return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
+        }
+    }
+    return false;
+}
 
 bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
     // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — SSN 0 -> 0 @0x43e787;
@@ -865,7 +1175,7 @@ bool EntityCommands::group_holding_group(int holder_group, int held_group) const
     for (EntityHandle h : members) {
         if (h.pool() != 0) continue;
         const Entity *e = world_.registry.get(h);
-        if (!e || e->item_id == 0) continue;
+        if (!e || e->item_type_index == 0) continue;
         const Entity *held = world_.registry.get(e->mounted_child);
         if (held && held->group_id == held_group) return true;
     }
@@ -881,7 +1191,7 @@ bool EntityCommands::ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) 
     // dead.
     const Entity *a = world_.registry.get(resolve_target(ssn));
     const Entity *b_probe = world_.registry.get(resolve_target(target_ssn));
-    if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
+    if (!a || !b_probe || a->item_type_index == 0 || b_probe->item_type_index == 0) return false;
     const Entity *hop = carrier_of(world_.registry, *a);
     for (int i = 0; i < 3 && hop != nullptr; ++i) {
         if (hop == b_probe) return true;
@@ -918,7 +1228,7 @@ bool trigger_pair_distance(const World &w, const EntityCommands &cmds,
                            const Entity *&a, const Entity *&b, int32_t &dist) {
     a = w.registry.get(cmds.resolve_target(ssn_a));
     b = w.registry.get(cmds.resolve_target(ssn_b));
-    if (a == nullptr || b == nullptr || a->item_id == 0 || b->item_id == 0)
+    if (a == nullptr || b == nullptr || a->item_type_index == 0 || b->item_type_index == 0)
         return false;
     dist = script_entity_distance(*a, *b);
     return true;
@@ -950,6 +1260,22 @@ void los_offset_point(const Entity &e, int32_t out[3]) {
     out[2] = static_cast<int32_t>(uint32_t(to_fixed(e.position.z)) + uint32_t(to_fixed(e.bbox_center.z)));
 }
 
+// The script LOS pair's ray. An authored range of at most 20 u takes the
+// entity-aware walker over the first entity's proximity slice with every type
+// admitted (flagged items and non-buildings block); a longer one takes the
+// terrain-and-sectors query the AI LOS ports. Without a collision world the
+// AI LOS's terrain leg alone stands in. [orig: Entity_CheckLineOfSightInRange
+// `cmp ecx,140000h; jg` @0x4F1769..0x4F1773 -> `push 1` (allTypes) @0x4F1775,
+// Entity_CheckLineOfSightTerrainAndEntities @0x4F1785 /
+// Physics_RaycastTerrainAndSectors @0x4F17A7; Entity_CheckLineOfSight
+// @0x4F1919..0x4F1953]
+bool script_los_clear(World &world, const int32_t pa[3], const int32_t pb[3],
+                      EntityHandle a, EntityHandle b, int32_t distance_q16) {
+    if (distance_q16 <= 0x140000 && world.collision != nullptr)
+        return world.collision->entity_los_clear(world, a, b, pa, pb, 0, /*all_types=*/true);
+    return world.ai.line_of_sight_clear(world, pa, pb, a, b);
+}
+
 } // namespace
 
 bool EntityCommands::ssn_leads_target(EntityTarget first, EntityTarget second,
@@ -959,7 +1285,7 @@ bool EntityCommands::ssn_leads_target(EntityTarget first, EntityTarget second,
     const Entity *b = world_.registry.get(resolve_target(second));
     const Entity *goal = world_.registry.get(resolve_target(target));
     if (a == nullptr || b == nullptr || goal == nullptr ||
-            a->item_id == 0 || b->item_id == 0 || goal->item_id == 0)
+            a->item_type_index == 0 || b->item_type_index == 0 || goal->item_type_index == 0)
         return false;
     return script_entity_distance(*b, *goal) - script_entity_distance(*a, *goal) > lead_q16;
 }
@@ -969,8 +1295,7 @@ bool EntityCommands::ssn_los_clear_within(EntityTarget ssn, EntityTarget target_
     // [orig: Entity_CheckLineOfSightInRange @0x4f15e0 — center distance gate,
     // then a radius-0 ray between the +0x1FC bbox-center offset points;
     // <= 20 u uses the entity-aware walker @0x53b130, above it
-    // terrain/sectors @0x539910. Our port rays through the one modeled LOS
-    // seam (that walker split stays a tracked stand-in, §3b).]
+    // terrain/sectors @0x539910 (script_los_clear).]
     const Entity *a = nullptr;
     const Entity *b = nullptr;
     int32_t dist = 0;
@@ -983,8 +1308,8 @@ bool EntityCommands::ssn_los_clear_within(EntityTarget ssn, EntityTarget target_
     los_offset_point(*b, pb);
     const CollisionWorld::RayDebugScope ray_scope(
             world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-    return world_.ai.line_of_sight_clear(world_, pa, pb,
-                                          resolve_target(ssn), resolve_target(target_ssn));
+    return script_los_clear(world_, pa, pb, resolve_target(ssn), resolve_target(target_ssn),
+                            distance_q16);
 }
 
 bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
@@ -997,7 +1322,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     const Entity *a = world_.registry.get(resolve_target(ssn));
     const Entity *b_ent = world_.registry.get(resolve_target(target_ssn));
     if (a == nullptr || b_ent == nullptr ||
-        a->item_id == 0 || b_ent->item_id == 0)
+        a->item_type_index == 0 || b_ent->item_type_index == 0)
         return false;
     int32_t pa[3];
     los_offset_point(*a, pa);
@@ -1008,8 +1333,8 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     const double fdy = static_cast<int32_t>(uint32_t(pb[1]) - uint32_t(pa[1]));
     const CollisionWorld::RayDebugScope ray_scope(
             world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-    if (!world_.ai.line_of_sight_clear(world_, pa, pb, resolve_target(ssn),
-                                        resolve_target(target_ssn)))
+    if (!script_los_clear(world_, pa, pb, resolve_target(ssn), resolve_target(target_ssn),
+                          distance_q16))
         return false;
     // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
     // -(2^31/pi); the sign folds out under the cdq-abs below, but the
@@ -1037,25 +1362,31 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // never fans deaths from the damage pass: every motor's per-entity update carries
 // the edge `Health <= 0 && (Flags & 2) == 0` and calls Entity_CheckAndProcessDeath
 // there, so ANY writer of zero health — a bullet, or this action — is noticed and
-// notified. The killer rides on the VICTIM (entity+704, read by
-// BuildDeathNotifyPayload), which is why retail's own baseline capture shows its
-// scripted kills as `killerSource=0`: the script never stamps that field. Ours
-// leaves the killer handle unset for the same reason, and the burst matches.
+// notified. The 0x13 payload's second word is the victim's +0x2C0 death-anim slot,
+// which both edges zero before the send, so every edge-driven death ships 0 there
+// (the retail capture's `killerSource=0` on its scripted kills).
 //
-// SHAPE NOTE: raising the death here rather than from a health<=0 sweep in the
-// motor is narrower than the original — a future health-zeroing path would have
-// to remember to do the same. Converging on the sweep is worth doing when the
-// death path is next opened up; it needs the killer moved onto the entity first.
-// [orig: the edge @0x4bfxxx (org1) / @0x4b73xx (org2) -> Entity_CheckAndProcessDeath
-//  @0x51b550 -> BuildDeathNotifyPayload @0x5036e0, send_mask 0x90]
+// An org1 (NPC) victim takes that path in the port too: its own motor death edge
+// raises the transaction from the zeroed health against lastAttacker, and the
+// script records nothing (no damage-time kill tally either: the script kill
+// never reaches Score_ProcessKillEvent). The player bodies (org2) still take
+// their transaction from this record.
+// [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
+//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> BuildDeathNotifyPayload
+//  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
+    if (org1_owns_death_transaction(world, h)) {
+        e.alive = false;
+        e.health = 0;
+        return;
+    }
     RoundDeath d;
     d.victim = h;
     d.victim_handle = h.packed;
     // The victim's +0x178 lastAttacker is the killer GameEvent_PlayerDeath
     // reads [orig: @0x516f6b]; the edge's fallback has already emptied it for
-    // a body nothing ever hit. killer_handle stays at its default: retail's
-    // unstamped entity+704.
+    // a body nothing ever hit. killer_handle stays 0: the script stamps no
+    // shooter.
     d.killer = e.last_attacker;
     d.killer_handle = 0;
     world.round_sim.deaths.push_back(d);
@@ -1064,18 +1395,38 @@ static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
 }
 
 int EntityCommands::kill_group(int group) {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    // The WAC `kill` / BMS KillGroup walk: pools 2, 0, 1 in that order, every row
+    // whose signed commandGroup word matches (dead rows included, no item gate):
+    // Health 0 and the class event (e, 1, 0). Unlike KillSingle it keeps the
+    // row's attacker and staged death clip. Returns the rows visited.
+    // [orig: Entity_KillAllByNetId @0x43C8E0 — group 0 exit @0x43C8F2, pool 2
+    //  @0x43C8F8, pool 0 @0x43C946, pool 1 @0x43C996; per row @0x43C917..0x43C93F]
+    if (group == 0) return 0;
     int n = 0;
-    for (EntityHandle h : members) {
-        Entity *e = world_.registry.get(h);
-        if (!e) continue;
-        // Only the LIVING cross the edge — retail's `(Flags & 2) == 0` half. A
-        // group killed twice must not notify twice.
-        if (e->health > 0 && (e->flags & kEntityFlagDead) == 0)
-            raise_scripted_death(world_, *e, h);
-        else { e->alive = false; e->health = 0; }
-        ++n;
+    for (const int pool : {2, 0, 1}) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            if (static_cast<int16_t>(row.group_id) == group) members.push_back(row.handle);
+        });
+        for (EntityHandle h : members) {
+            Entity *e = world_.registry.get(h);
+            if (e == nullptr) continue;
+            const bool crosses_edge = script_kill_crosses_edge(*e);
+            e->health = 0;
+            // Each row clears the hit record's damage and owner words
+            // [orig: @0x43C930 / @0x43C933 (pool 2), @0x43C980 / @0x43C983
+            //  (pool 0), @0x43C9D0 / @0x43C9D3 (pool 1)].
+            world_.round_sim.hit_record.damage = 0;
+            world_.round_sim.hit_record.owner = {};
+            hit_record_class_event(world_, *e, 1);
+            // The organic death transaction: an org1 body's own edge raises
+            // it, the player bodies take this stand-in; only the living cross
+            // it, so a group killed twice notifies once [orig: @0x4B9D4D /
+            // @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
+            if (e->kind == EntityKind::Organic && crosses_edge)
+                raise_scripted_death(world_, *e, h);
+            ++n;
+        }
     }
     return n;
 }
@@ -1119,23 +1470,28 @@ int EntityCommands::group_to_waypoint(int group, int32_t wp, int32_t node) {
 }
 
 int EntityCommands::set_group_hp(int group, int32_t hp) {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
+    // Pools 0, 1, 2, every row whose signed commandGroup word matches: the
+    // health word and nothing else (no gate, the attacker kept). Returns the
+    // rows written. The IDB name of the handler is a misnomer.
+    // [orig: WacCmd_GroupHp @0x4F7B30 — pool 0 @0x4F7B30, pool 1
+    //  @0x4F7B6D, pool 2 @0x4F7B9D, the group match @0x4F7B57, the health word
+    //  @0x4F7B64]
     int n = 0;
-    for (EntityHandle h : members) {
-        Entity *e = world_.registry.get(h);
-        if (!e) continue;
-        // Setting a group to zero health is a kill by another name, and retail's
-        // motor edge cannot tell the two apart — it only sees the zero. Same
-        // notify, same unstamped killer.
-        if (hp <= 0 && e->health > 0 && (e->flags & kEntityFlagDead) == 0) {
-            raise_scripted_death(world_, *e, h);
+    for (const int pool : {0, 1, 2}) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            if (static_cast<int16_t>(row.group_id) == group) members.push_back(row.handle);
+        });
+        for (EntityHandle h : members) {
+            Entity *e = world_.registry.get(h);
+            if (e == nullptr) continue;
+            // A zeroing write is a kill by another name: retail's motor edge
+            // only sees the zero, with the same unstamped killer.
+            const bool crosses_edge = script_kill_crosses_edge(*e);
+            e->health = retail_signed_i16(hp);
+            script_health_edge_stand_in(world_, *e, crosses_edge);
             ++n;
-            continue;
         }
-        e->health = hp;
-        e->alive = hp > 0;
-        ++n;
     }
     return n;
 }
@@ -1154,13 +1510,13 @@ int EntityCommands::set_group_attack_max(int group, int32_t distance_q16) {
 
 namespace {
 
-// The single-target SSN walk the team/group/teleport commands share: first
-// matching row in pool order 0,1,2; SSN 0 never matches [orig: the dcb gate
-// + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag @0x43db30,
-// Entity_SetNetIdByParentRef @0x43d6c0, EventAction_TeleportEntityToSpawn
-// @0x43e005/0x43e0bb/0x43e161]. Our local-player rows deliberately carry
-// net_id 0 (the wire is handle-based), so the resolve_ssn sentinel mapping
-// runs first.
+// The single-target SSN walk the team and group commands share: first
+// matching row in pool order 0,1,2, no item gate; SSN 0 never matches
+// [orig: the dcb gate + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag
+// @0x43db30, Entity_SetNetIdByParentRef @0x43d6c0]. The single teleport walks
+// with its item gate inside (resolve_teleport_target below). Our local-player
+// rows deliberately carry net_id 0 (the wire is handle-based), so the
+// resolve_ssn sentinel mapping runs first.
 EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
     // net-id lookup EntityCommands::resolve_ssn wraps has neither.
@@ -1175,6 +1531,33 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
             if (entity != nullptr && entity->net_id == ssn) return handle;
+        }
+    }
+    return EntityHandle{};
+}
+
+// The single teleport's own target walk: pools 0, 1, 2 in order, the first
+// row holding an ItemTypeIndex whose DcbId matches. The gate sits inside the
+// walk, so a gated row carrying the SSN is passed over for a later match, in
+// the same pool or the next. SSN 0 and the local-player alias follow
+// resolve_ssn_in_pools012 (our player rows carry net_id 0).
+// [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 — pool 0 @0x43E005 (the
+//  +0x1C gate @0x43E02D, the DcbId compare @0x43E033), pool 1 @0x43E0BB
+//  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
+EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
+    if (ssn == 0) return EntityHandle{};
+    if (ssn == EntityCommands::kLocalPlayerSsn) {
+        const Entity *local = world.registry.get(world.cached.local_player);
+        if (local != nullptr && local->item_type_index != 0) return local->handle;
+    }
+    for (int pool : {0, 1, 2}) {
+        const size_t capacity = world.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world.registry.get(handle);
+            if (entity == nullptr || entity->item_type_index == 0) continue;
+            if (entity->net_id == ssn) return handle;
         }
     }
     return EntityHandle{};
@@ -1244,10 +1627,15 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
 } // namespace
 
 int EntityCommands::remove_group(int group) {
-    // [orig: Entity_TeleportAllByNetId @0x43D5D0] Despite the shipped
-    // symbol name, action 4 removes every matching row in pools 2,0,1,3.
+    // Despite the shipped symbol name, action 4 removes every matching row in
+    // pools 2,0,1,3 through the notifying removal. Group 0 and a
+    // non-authority peer do nothing, and no live recount follows: the
+    // counts wait for the 62-tick rescan.
+    // [orig: Entity_TeleportAllByNetId @0x43D5D0 — group 0 @0x43d5d5, the
+    //  authority gate @0x43d5dd; Server_RemoveEntityAndNotify per row
+    //  @0x43d615 (pool 2), @0x43d646 (0), @0x43d677 (1), @0x43d6a8 (3)]
     static constexpr int pools[] = {2, 0, 1, 3};
-    if (group == 0) return 0;
+    if (group == 0 || !world_.rules.logic_authority) return 0;
     int removed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1257,15 +1645,8 @@ int EntityCommands::remove_group(int group) {
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr || static_cast<int>(entity->group_id) != group)
                 continue;
-            world_.ai.release(handle); // the row's brain goes with it [orig: Entity_Destroy @0x43e810]
-            world_.registry.despawn(handle);
-            ++removed;
+            if (server_remove_and_notify(handle)) ++removed;
         }
-    }
-    if (removed != 0) {
-        world_.recount_group_live();
-        if (world_.collision != nullptr)
-            world_.collision->refresh_after_registry_change(world_);
     }
     return removed;
 }
@@ -1279,7 +1660,7 @@ int EntityCommands::set_group_accuracy(int group, int32_t primary,
         const EntityHandle handle =
                 EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
-        if (entity == nullptr || entity->item_id == 0 ||
+        if (entity == nullptr || entity->item_type_index == 0 ||
             static_cast<int>(entity->group_id) != group)
             continue;
         AiEntity *ae = world_.ai.for_handle(handle);
@@ -1308,8 +1689,12 @@ bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
 }
 
 int EntityCommands::set_group_team(int group, int32_t team) {
-    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1.
+    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1: every row whose
+    // group word matches takes the team byte, with no item-word or dead
+    // test (the compare @0x43c6ad..0x43c6b8, the store @0x43c6ba); group 0
+    // does nothing [orig: @0x43c685].
     static constexpr int pools[] = {2, 0, 1};
+    if (group == 0) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1317,8 +1702,7 @@ int EntityCommands::set_group_team(int group, int32_t team) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
-            if (entity == nullptr || entity->item_id == 0 ||
-                static_cast<int>(entity->group_id) != group)
+            if (entity == nullptr || static_cast<int>(entity->group_id) != group)
                 continue;
             entity->team = static_cast<uint8_t>(team);
             if (AiEntity *ae = world_.ai.for_handle(handle))
@@ -1330,9 +1714,12 @@ int EntityCommands::set_group_team(int group, int32_t team) {
 }
 
 int EntityCommands::change_group(int old_group, int new_group) {
-    // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows;
-    // pools 2 and 1 update all resolved rows, then live counts are rebuilt.
+    // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows
+    // (@0x43c628); pools 2 and 1 update every matching row; no pool tests
+    // the item word. Then live counts are rebuilt. Old group 0 does nothing,
+    // not even the recount [orig: @0x43c5b5].
     static constexpr int pools[] = {2, 0, 1};
+    if (old_group == 0) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1340,8 +1727,7 @@ int EntityCommands::change_group(int old_group, int new_group) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
-            if (entity == nullptr || entity->item_id == 0 ||
-                static_cast<int>(entity->group_id) != old_group)
+            if (entity == nullptr || static_cast<int>(entity->group_id) != old_group)
                 continue;
             if (pool == 0 && (entity->flags & kEntityFlagDead) != 0)
                 continue;
@@ -1369,7 +1755,7 @@ int EntityCommands::teleport_group_to_marker(int group,
         for (size_t slot = 0; slot < capacity; ++slot) {
             Entity *entity = world_.registry.get(
                     EntityHandle::make(pool, static_cast<int>(slot)));
-            if (entity == nullptr || entity->item_id == 0 ||
+            if (entity == nullptr || entity->item_type_index == 0 ||
                 static_cast<int>(entity->group_id) != group)
                 continue;
             copy_marker_pose(world_, *entity, marker_copy, false);
@@ -1436,31 +1822,33 @@ bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
 bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
                                             int32_t marker_wp_number) {
     // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0] Marker lookup is
-    // pool 3/type 6088/WP_NUMBER; the target is the first SSN row walking
-    // pools 0,1,2 in order (this walk keeps the item gate @0x43e036).
+    // pool 3/type 6088/WP_NUMBER; the target is the first row walking pools
+    // 0,1,2 in order that holds an ItemTypeIndex and the SSN (the gate is
+    // inside the walk, resolve_teleport_target).
     const Entity *marker = find_teleport_marker(world_, marker_wp_number);
     if (marker == nullptr) return false;
     const Entity marker_copy = *marker;
-    const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
-    Entity *entity = world_.registry.get(handle);
-    if (entity == nullptr || entity->item_id == 0) return false;
+    Entity *entity = world_.registry.get(resolve_teleport_target(world_, ssn));
+    if (entity == nullptr) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
     if (world_.collision != nullptr)
         world_.collision->refresh_after_registry_change(world_);
     return true;
 }
 bool EntityCommands::group_alive(int group) const {
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
-    for (EntityHandle h : members) {
-        const Entity *e = world_.registry.get(h);
-        if (e && e->alive) return true;
-    }
-    return false;
+    // The trigger group's live count, the same word the BMS group triggers read,
+    // rebuilt by the 62-tick rescan (group 0 forced to zero), not a scan of the
+    // members. [orig: WacCmd_GroupAlive @0x4ED1C0 — `cmp g_TriggerGroupLiveCount
+    //  [g*48],ecx; setnle` @0x4ED1CC..0x4ED1D2; the rescan
+    //  EntityPool_RecountLiveByGroup @0x40E8D0]
+    const TriggerRelations::GroupState *grp = world_.script.relations.group_or_null(group);
+    return grp != nullptr && grp->live_count > 0;
 }
 
 bool EntityCommands::group_dead(int group) const {
-    return !group_alive(group);
+    // [orig: WacCmd_GroupDead @0x4ED1A0 — `setle` @0x4ED1AC..0x4ED1B2]
+    const TriggerRelations::GroupState *grp = world_.script.relations.group_or_null(group);
+    return grp != nullptr && grp->live_count <= 0;
 }
 
 // --- mount / emplacement (AttachToEmplaced) ---
@@ -1517,10 +1905,12 @@ bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTar
 bool EntityCommands::release_boarding_command(EntityTarget occupant_ssn) {
     const EntityHandle oh = resolve_target(occupant_ssn);
     Entity *occ = world_.registry.get(oh);
-    // [orig: the !ItemTypeIndex and !parentEntity rejects] -- a release only applies
-    // to a real item entity that is actually riding something.
-    if (!occ || occ->item_type == 0 || !occ->mounted) return false;
-    dismount(occupant_ssn); // [orig: Entity_DetachFromVehicleIfServer]
+    // The ItemTypeIndex (+0x1C, item_type_index) and parentEntity rejects: a
+    // release only applies to a real item entity that is riding something; the
+    // detach is the authority's alone. [orig: WacCmd_SsnRelease @0x4F7420 —
+    // @0x4F7465 / @0x4F746B, Entity_DetachFromVehicleIfServer call @0x4F7475]
+    if (!occ || occ->item_type_index == 0 || !occ->mounted) return false;
+    if (world_.ai.is_authority) dismount(occupant_ssn);
     if (AiEntity *ae = world_.ai.for_handle(oh)) {
         ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
         ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]
@@ -1529,11 +1919,13 @@ bool EntityCommands::release_boarding_command(EntityTarget occupant_ssn) {
 }
 
 bool EntityCommands::use_boarding_target(EntityTarget occupant) {
+    // WAC ssnuse and BMS action 37 (AttachToEmplaced) share this: the
+    // occupant boards the vehicle its AI slot +0x90 (slot[36]) names.
     // [orig: WacScript_TryMountEntityToVehicle @0x4F70F0]
     const EntityHandle handle = resolve_target(occupant);
     Entity *entity = world_.registry.get(handle);
     AiEntity *ai = world_.ai.for_handle(handle);
-    if (entity == nullptr || entity->item_id == 0 || ai == nullptr ||
+    if (entity == nullptr || entity->item_type_index == 0 || ai == nullptr ||
             ai->slot.f[36] == 0 || entity->mount_target.valid()) return false;
     const EntityHandle target{uint16_t(ai->slot.f[36] - 1)};
     SeatSelectionMode mode = SeatSelectionMode::Any;
@@ -1548,28 +1940,6 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     entity->engine_flags &= ~kEntityFlagMounted;
     entity->mount_type = SeatType::None;
     return false;
-}
-
-bool EntityCommands::mount_best(uint16_t occupant_ssn) {
-    // [orig: EventAction_Dispatch case 0x25 @0x4542e0 -> the vehicle is occupant-model+144.]
-    // Proximity proxy: the nearest entity offering a free seat within kMountRadius.
-    EntityHandle oh = resolve_target(occupant_ssn);
-    const Entity *occ = world_.registry.get(oh);
-    if (!occ || occ->mounted) return false;
-    const Vec3 p = occ->position;
-    EntityHandle best;
-    double best_d2 = kMountRadius * kMountRadius + 1.0;
-    world_.registry.for_each([&](const Entity &e) {
-        if (e.handle == oh || e.seats.empty()) return;
-        VehicleSeatSelection selection;
-        if (!find_best_vehicle_seat(world_, e.handle, oh, selection)) return;
-        const double dx = e.position.x - p.x, dy = e.position.y - p.y, dz = e.position.z - p.z;
-        const double d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 <= kMountRadius * kMountRadius && d2 < best_d2) { best_d2 = d2; best = e.handle; }
-    });
-    const Entity *tgt = world_.registry.get(best);
-    if (!tgt) return false;
-    return mount(occupant_ssn, tgt->handle);
 }
 
 bool EntityCommands::dismount(EntityTarget occupant_ssn) {
@@ -1598,7 +1968,7 @@ const Entity *mount_trigger_ssn(const World &w, const EntityCommands &cmds, Enti
     if (local == nullptr || ((local->flags | local->engine_flags) & 2u) != 0)
         return nullptr;
     const Entity *target = w.registry.get(cmds.resolve_target(ssn));
-    if (target == nullptr || target->item_id == 0) return nullptr;
+    if (target == nullptr || target->item_type_index == 0) return nullptr;
     *local_out = local;
     return target;
 }
@@ -1674,9 +2044,12 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
             // No switch arms in this binary. [orig: Entity_ApplyCommand @0x43AB60]
             break;
         case EntityCommands::kTargetSsn: {
-            // The helper writes brain+148. Its live pool-0 match returns
-            // before storing; all other paths clear the old priority pointer.
-            // [orig: Entity_ApplyCommand @0x43AB60 -> Entity_FindByNetId @0x4655B0]
+            // The helper writes brain+148, so the arm needs the vehicle brain
+            // (an organic has none). Its live pool-0 match returns before
+            // storing; all other paths clear the old priority pointer.
+            // [orig: Entity_ApplyCommand @0x43AB60 case 44, the +0x64 gate
+            //  @0x43B136..0x43B13B -> Entity_FindByNetId @0x4655B0]
+            if (ae.inf.active) break;
             if (p2 != 0) {
                 bool preserve = false;
                 for (size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
@@ -1747,7 +2120,55 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
             ae.slot.f[AiSlot::kSightRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
             break;
-        default: break;
+        // The slot arms with no editor token: each gates on the AI slot (+0x68),
+        // which every AiEntity carries, and writes one slot word or behavior bit.
+        // The arithmetic is the signed wrapping int32 of the original.
+        case 1: // slot+0x20 = p2 [orig: case 1 @0x43AB7F, store @0x43AB92]
+            ae.slot.f[8] = p2;
+            break;
+        case 3: // [orig: case 3 @0x43ABC2 — bit 0x2000 @0x43ABD7/@0x43ABE4]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x2000u, p2 != 0);
+            break;
+        case 4: // [orig: case 4 @0x43ABF1 — bit 0x10000 @0x43AC06/@0x43AC13]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x10000u, p2 != 0);
+            break;
+        case 7: // slot+0x84 = (p2 << 16) / 360 [orig: case 7 @0x43AD5C, store @0x43AD85]
+            ae.slot.f[33] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 16) / 360;
+            break;
+        case 9: // slot+0x30 = (p2 << 16) / 100 [orig: case 9 @0x43ADCE, store @0x43ADF5]
+            ae.slot.f[12] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 16) / 100;
+            break;
+        case 10: // slot+0x48 = p2 * 62 [orig: case 10 @0x43ADFD, store @0x43AE19]
+            ae.slot.f[18] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 11: // slot+0x4C = p2 * 62 [orig: case 11 @0x43AE21, store @0x43AE3D]
+            ae.slot.f[19] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 12: // slot+0x54 = p2 * 62 [orig: case 12 @0x43AE45, store @0x43AE61]
+            ae.slot.f[21] = static_cast<int32_t>(static_cast<uint32_t>(p2) * 62u);
+            break;
+        case 13: // slot+0x38 = (p2 << 8) / 360 [orig: case 13 @0x43AE69, store @0x43AE92]
+            ae.slot.f[14] = static_cast<int32_t>(static_cast<uint32_t>(p2) << 8) / 360;
+            break;
+        case 14: // [orig: case 14 @0x43AE9A — bit 0x100 @0x43AEAF/@0x43AEBC]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x100u, p2 != 0);
+            break;
+        case 18: // [orig: case 18 @0x43AF50 — bit 0x800 @0x43AF65/@0x43AF72]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x800u, p2 != 0);
+            break;
+        case 19: // [orig: case 19 @0x43AF7F — bit 0x200000 @0x43AF94/@0x43AFA1]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200000u, p2 != 0);
+            break;
+        case 20: // [orig: case 20 @0x43B03A — bit 0x8000 @0x43B04F/@0x43B05C]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x8000u, p2 != 0);
+            break;
+        case 24: // [orig: case 24 @0x43B00B — bit 0x80000 @0x43B020/@0x43B02D]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x80000u, p2 != 0);
+            break;
+        case 25: // [orig: case 25 @0x43AFDC — bit 0x100000 @0x43AFF1/@0x43AFFE]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x100000u, p2 != 0);
+            break;
+        default: break; // cases 35..39 are the switch's default [orig: @0x43B336]
     }
 }
 
@@ -1818,78 +2239,119 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
     }
     AiEventEntry ev{};
     ev.f[0] = event_type;
-    // Channel 0 for the command-queued events (the combat spawn/death queue
-    // sites stamp 9; this site stamps 0) [orig: event_source = 0 @0x43ac66/
-    // @0x43acd1/@0x43ad41/@0x43b30e].
+    // Channel 0 for the command-queued events (the air machine's kill/damage
+    // notification and both machines' death queue sites stamp 9; this site
+    // stamps 0) [orig: event_source = 0 @0x43ac66/@0x43acd1/@0x43ad41/@0x43b30e].
     ev.f[1] = sys.index_of(ae) << 16;
     ev.set_timer(0.0f);
     ev.f[3] = argument;
     sys.events.queue(ev);
 }
 
-} // namespace
+// The brain half of Entity_ApplyCommand: every queued-event arm and the direct
+// brain arms (AIUSEWPZ/AICLEARWPZ/PLAYPARTANIM) first require the vehicle brain
+// at entity+0x64. An organic carries only the AI slot, so its slot arms apply
+// and these do not (TARGETSSN's arm carries the same gate). [orig:
+//  Entity_ApplyCommand, the `mov eax,[reg+64h]` gate per arm: the alerts
+//  @0x43AC34 (red, after the slot byte), @0x43AC94 (yellow), @0x43AD04 (green);
+//  DRIVESKILL @0x43B0A0, AIMSKILL @0x43B0BE, AISETSTATE @0x43B0DC, COMBATSPEED
+//  @0x43B0FA, PATROLSPEED @0x43B118, START_FIRING @0x43B2C4, FIRING_ANGLE
+//  @0x43B2DB; AIUSEWPZ @0x43B158, AICLEARWPZ @0x43B177, PLAYPARTANIM @0x43B1C1]
+void apply_ai_brain_arms(World &world, AiEntity &ae, int sub_type, int32_t p2, int32_t p3,
+                         int32_t p4) {
+    if (ae.inf.active) return;
+    queue_ai_brain_event(world.ai, ae, sub_type, p2);
+    ai_apply_command(ae.brain, sub_type, p2, p3, p4);
+}
 
-bool EntityCommands::apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
-    const EntityHandle handle = resolve_target(ssn);
-    Entity *entity = world_.registry.get(handle);
+// One Entity_ApplyCommand over a resolved row: the entity arms first (no
+// aiRuntime gate), then the controller, queued-event and brain halves when
+// the row has an AI component. True when some arm took the command.
+// [orig: Entity_ApplyCommand @0x43ab60]
+bool apply_row_ai_command(World &world, EntityHandle handle, int sub_type, int32_t p2,
+                          int32_t p3, int32_t p4) {
+    Entity *entity = world.registry.get(handle);
     if (entity == nullptr) return false;
-    if (apply_entity_ai_command(world_, *entity, sub_type, p2)) return true;
-    AiEntity *ae = world_.ai.for_handle(handle);
+    if (apply_entity_ai_command(world, *entity, sub_type, p2)) return true;
+    AiEntity *ae = world.ai.for_handle(handle);
     if (ae == nullptr) return false;
-    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-    queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
-    ai_apply_command(ae->brain, sub_type, p2, p3, p4);
+    apply_ai_controller_command(world, *entity, *ae, sub_type, p2, p3);
+    apply_ai_brain_arms(world, *ae, sub_type, p2, p3, p4);
     return true;
 }
 
+} // namespace
+
+bool EntityCommands::apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    return apply_row_ai_command(world_, resolve_target(ssn), sub_type, p2, p3, p4);
+}
+
+bool EntityCommands::apply_bms_single_ai_command(int32_t ssn, int sub_type, int32_t p2,
+                                                 int32_t p3, int32_t p4) {
+    // Sub 0 and SSN 0 do nothing; the first pool 0, 1, 2 row carrying the
+    // SSN takes the command. The alert re-stamp that follows for a
+    // non-player writes the byte Entity_ApplyCommand already wrote.
+    // [orig: Entity_HandleAlertStateEvent @0x43dee0 — sub 0 @0x43deef, SSN 0
+    //  @0x43defc, the pool scans @0x43df20 (0) / @0x43df41 (1) / @0x43df69
+    //  (2), Entity_ApplyCommand @0x43df70, the re-stamp @0x43df78..0x43dfb2]
+    if (sub_type == 0 || ssn <= 0 || ssn > 0xFFFF) return false;
+    return apply_row_ai_command(world_,
+            resolve_ssn_in_pools012(world_, static_cast<uint16_t>(ssn)),
+            sub_type, p2, p3, p4);
+}
+
 int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
-    // The alert-change subs also stamp the per-group alert record the cat-1
-    // triggers read, independent of any AI brains [orig: Entity_HandleAlertCommand
-    // @ 0x43cff7 maps sub 5 -> red, 6 -> green, 22 -> yellow via
-    // TriggerGroup_SetAlertRed/Green/Yellow @ 0x40d630/0x40d5f0/0x40d610].
+    // Sub 0 and group 0 do nothing. Pool 2 rows take the command only with
+    // an AI component; pool 0 and pool 1 rows take it unconditionally, so
+    // the entity arms reach a brainless item but never a pool-3 marker.
+    // [orig: Entity_HandleAlertCommand @0x43cf10 — sub 0 @0x43cf1e, group 0
+    //  @0x43cf2c; pool 2 with the aiRuntime gate @0x43cf57/@0x43cf64, pool 0
+    //  @0x43cf97, pool 1 @0x43cfcd]
+    if (sub_type == 0 || group == 0) return 0;
+    int n = 0;
+    for (int pool : {2, 0, 1}) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr || static_cast<int>(entity->group_id) != group) continue;
+            if (pool == 2 && world_.ai.for_handle(handle) == nullptr) continue;
+            if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
+        }
+    }
+    // After the fan, the alert-change subs stamp the per-group alert record
+    // the cat-1 triggers read [orig: @0x43cfea..0x43d01a — sub 5 -> red, 6 ->
+    // green, 22 -> yellow via TriggerGroup_SetAlertRed/Green/Yellow
+    // @ 0x40d630/0x40d5f0/0x40d610].
     if (group > 0 && group < TriggerRelations::kGroups) {
         if (sub_type == 5) world_.script.relations.group(group).alert = TriggerRelations::kAlertRed;
         else if (sub_type == 6) world_.script.relations.group(group).alert = TriggerRelations::kAlertGreen;
         else if (sub_type == 22) world_.script.relations.group(group).alert = TriggerRelations::kAlertYellow;
     }
-    std::vector<EntityHandle> members;
-    world_.registry.by_group(static_cast<uint8_t>(group), members);
-    int n = 0;
-    for (EntityHandle h : members) {
-        Entity *entity = world_.registry.get(h);
-        if (entity == nullptr) continue;
-        if (apply_entity_ai_command(world_, *entity, sub_type, p2)) { ++n; continue; }
-        AiEntity *ae = world_.ai.for_handle(h);
-        if (ae != nullptr) {
-                    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
-            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
-            ++n;
-        }
-    }
     return n;
 }
 
-int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_type,
-                                          int32_t p2, int32_t p3, int32_t p4) {
-    // AREA_AI_RED/BLUE: apply to the team's units inside a zone. [target = zone area id,
-    // team filter: blue=1/red=2; the exact BMS zone->area mapping is grill-gated (P5).]
-    const Area *a = world_.registry.area(zone_area_id);
-    if (!a) return 0;
-    std::vector<EntityHandle> in;
-    world_.registry.in_area(a->bounds, in);
+int EntityCommands::apply_area_ai_command(int team, int sub_type, int32_t p1, int32_t p2,
+                                          int32_t p3, int32_t p4, int32_t reserved1) {
+    // Sub 0 does nothing. Pool 0 rows whose signed team byte matches take
+    // the command when X lies in [p1, p3] and Y in [p4, reserved1], no Z
+    // test. The zone resolver stored x_min, y_min, x_max, y_max in those
+    // words, so the tested box pairs the zone's corners across axes, and
+    // Entity_ApplyCommand reads y_min and x_max as its p3/p4.
+    // [orig: Entity_KillTeamInBounds @0x43d030 — sub 0 @0x43d05b, the team
+    //  byte @0x43d099, X @0x43d0a8..0x43d0b5, Y @0x43d0b7..0x43d0c4,
+    //  Entity_ApplyCommand @0x43d0c8]
+    if (sub_type == 0) return 0;
     int n = 0;
-    for (EntityHandle h : in) {
-        Entity *entity = world_.registry.get(h);
-        if (entity == nullptr || entity->team != static_cast<uint8_t>(team)) continue;
-        if (apply_entity_ai_command(world_, *entity, sub_type, p2)) { ++n; continue; }
-        AiEntity *ae = world_.ai.for_handle(h);
-        if (ae != nullptr) {
-                    apply_ai_controller_command(world_, *entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
-            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
-            ++n;
-        }
+    const size_t capacity = world_.registry.pool_capacity(0);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
+        const Entity *entity = world_.registry.get(handle);
+        if (entity == nullptr || static_cast<int8_t>(entity->team) != team) continue;
+        const int32_t x = to_fixed(entity->position.x);
+        const int32_t y = to_fixed(entity->position.y);
+        if (x < p1 || x > p3 || y < p4 || y > reserved1) continue;
+        if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
     }
     return n;
 }

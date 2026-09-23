@@ -666,6 +666,9 @@ struct ClientMinimapState {
 struct ClientEndRoundStats {
 	bool header_known = false;
 	EndRoundHeader header;
+	// One per accepted 0x1D header: the edge a joiner latches its round-over
+	// gate on (header_known stays set). [orig: NapiNPClientMsg_0x01D @0x430840]
+	uint32_t header_updates = 0;
 	// True once a complete board has been decoded at least once. A later
 	// partial chunk does not clear it, so the screen keeps showing the last
 	// complete board while the next one streams in.
@@ -788,6 +791,14 @@ struct ClientState {
 	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
 	//  @0x524A89]
 	std::int32_t round_time_remaining_ticks = -1;
+	// The authority's breath seconds and fall-damage tolerance, the two WAC
+	// named values the same sub-block-1 timer state carries, zero-extended
+	// from their wire bytes; until the first one lands they hold the
+	// WacScript_FreeAll seeds 20 / 13.
+	// [orig: NapiNPClientMsg_0x00A `mov wac_var_breathtime,edx` @0x4301A1, `mov
+	//  wac_var_fallmps,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
+	std::int32_t breathtime = 20;
+	std::int32_t fallmps = 13;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
 	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
 	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f

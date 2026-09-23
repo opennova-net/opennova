@@ -42,6 +42,16 @@ public:
 			const Seat &, MountedPose &) {
 		return false;
 	}
+	// The ordinary-seat lookup on the carrier's model by 1-based bone
+	// (userpoint) index. False exactly where retail's lookup fails: no model
+	// (the husk's while the husk bit is set and one is attached, else the
+	// intact model), bone 0 or past the model's bone count, or no collision
+	// block with bounding volumes behind the model. A provider without the
+	// carrier's model data answers true: the static seat geometry stands.
+	// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+	virtual bool resolve_seat_bone(World &, const Entity & /*carrier*/, int /*bone_index*/) {
+		return true;
+	}
 
 	// --- muzzles / userpoints ------------------------------------------------
 	// A person's launch userpoint on its posed skeleton (16.16 world).

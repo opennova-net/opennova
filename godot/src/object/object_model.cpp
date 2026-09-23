@@ -1971,12 +1971,13 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("play_body_clip_variant_at_time", "key", "variant", "seconds"),
 			&ObjectModel::play_body_clip_variant_at_time);
-	ClassDB::bind_method(D_METHOD("play_body_clip_at", "key", "phase_ticks"),
-			&ObjectModel::play_body_clip_at);
+	ClassDB::bind_method(D_METHOD("play_body_clip_at", "key", "phase_ticks", "variant"),
+			&ObjectModel::play_body_clip_at, DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("play_body_blend_at", "source_key", "source_phase_ticks",
-					"target_key", "target_phase_ticks", "weight"),
-			&ObjectModel::play_body_blend_at);
+					"target_key", "target_phase_ticks", "weight", "source_variant",
+					"variant"),
+			&ObjectModel::play_body_blend_at, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_body_clip_seeded", "key", "phase_ticks"),
 			&ObjectModel::play_body_clip_seeded);
 	ClassDB::bind_method(
@@ -1991,6 +1992,8 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop_body_clip"), &ObjectModel::stop_body_clip);
 	ClassDB::bind_method(D_METHOD("get_active_body_clip"),
 			&ObjectModel::get_active_body_clip);
+	ClassDB::bind_method(D_METHOD("get_active_body_variant"),
+			&ObjectModel::get_active_body_variant);
 	ClassDB::bind_method(D_METHOD("play_body_anim", "slot"), &ObjectModel::play_body_anim);
 	ClassDB::bind_method(D_METHOD("get_animation_time_ms"),
 			&ObjectModel::get_animation_time_ms);
@@ -2035,6 +2038,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_body_blend_source_time);
 	ClassDB::bind_method(D_METHOD("get_body_blend_weight"),
 			&ObjectModel::get_body_blend_weight);
+	ClassDB::bind_method(D_METHOD("get_body_blend_source_variant"),
+			&ObjectModel::get_body_blend_source_variant);
 	ClassDB::bind_method(D_METHOD("advance_body_animation", "delta", "write_pose"),
 			&ObjectModel::advance_body_animation, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),

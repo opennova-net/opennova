@@ -8,6 +8,7 @@
 #include <formats/wac/command.h>
 #include <formats/wac/help.h>
 #include <runtime/wac/remote_command.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/world.h>
 
 #include <base/io/strutil.h>
@@ -20,7 +21,8 @@ bool ieq(const char *a, const char *b) { return opennova::strutil::iequals(a, b)
 uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 
 // [orig: Math_PowFloat @0x4F9BA0] binary32 input, exponentiation by
-// squaring, then the VM keeps EAX from the signed 64-bit truncation.
+// squaring, then the VM keeps EAX from the SSE2 conversion.
+// [orig: WacScript_ExecuteBytecode @0x4F615F]
 int32_t power_fold(int32_t base, int32_t exponent) {
     double square = static_cast<float>(base);
     uint32_t magnitude = exponent < 0 ? 0u - uint32_t(exponent) : uint32_t(exponent);
@@ -31,9 +33,7 @@ int32_t power_fold(int32_t base, int32_t exponent) {
         if (magnitude) square *= square;
     } while (magnitude);
     if (exponent < 0) result = 1.0 / result;
-    if (!std::isfinite(result) || result < -9223372036854775808.0 ||
-            result >= 9223372036854775808.0) return 0; // x87 integer indefinite's low dword
-    return int32_t(uint32_t(static_cast<int64_t>(result)));
+    return io::retail_ftol_sse2(result);
 }
 
 
@@ -92,12 +92,6 @@ uint32_t WacVm::next_rand() {
     v += static_cast<uint32_t>(static_cast<int32_t>(v) >> 31) & 0x1ABB09u;
     rng_seed_ = v;
     return v;
-}
-
-int32_t WacVm::rand_range(int n) {
-    if (n <= 0) return 0;
-    uint32_t v = next_rand();
-    return static_cast<int32_t>((static_cast<uint32_t>(n) * (v & 0xFFFFu) + 0x8000u) >> 16);
 }
 
 int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
@@ -199,12 +193,70 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
     }
 }
 
-int32_t WacVm::arg_as_string_index(uint32_t ref) const {
-    if (operand_kind(ref) == OperandKind::Pool) {
-        uint32_t i = operand_index(ref);
-        if (i < prog_->operands.size()) return prog_->operands[i];
+int32_t WacVm::current_value(opennova::world::World &w, uint32_t ref) const {
+    switch (operand_kind(ref)) {
+        case OperandKind::MissionVar:
+        case OperandKind::GlobalVar:
+        case OperandKind::EventFired:
+        case OperandKind::Builtin:
+            return read(w, ref);
+        default:
+            return 0;
     }
-    return -1;
+}
+
+// The string a string-typed parameter hands its handler. Text and Filename
+// are raw slots: the call passes the operand's ADDRESS and the handler reads
+// the bytes there [orig: WacScript_ExecuteBytecode @0x4F5F92 (case 5),
+// @0x4F5FA9 (case 6), @0x4F6012 (case 9)]. A string operand is the
+// string-pool copy the resolver made [orig: WacScript_ResolveParameter
+// @0x4F2E16]; any other operand is a dword whose bytes run, least
+// significant first, up to the first NUL, on into the words stored after it:
+// the numbered, declared and global banks sit end to end, and the value pool
+// is one array. The model ends where those blocks end (the IF-tick array
+// follows the globals), and an engine, event or music dword stands alone.
+// A TextToken slot's dword is the text pointer the resolver pooled
+// [orig: @0x4F2FAE], here the index of the program's text token.
+std::string WacVm::operand_string(opennova::world::World &w, uint32_t ref, ParamType type) const {
+    if (type == ParamType::TextToken) {
+        const int32_t token = read(w, ref);
+        return token >= 0 && size_t(token) < prog_->text_tokens.size()
+                ? prog_->text_tokens[size_t(token)].text : std::string();
+    }
+    if (type != ParamType::Text && type != ParamType::Filename) return std::string();
+    const uint32_t index = operand_index(ref);
+    if (operand_kind(ref) == OperandKind::Text) return prog_->text_at(index);
+    std::string text;
+    // False once the dword held a NUL: the string ended inside it.
+    const auto append = [&text](int32_t word) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            const char byte = static_cast<char>((uint32_t(word) >> shift) & 0xFFu);
+            if (byte == '\0') return false;
+            text += byte;
+        }
+        return true;
+    };
+    const auto &vars = w.script.vars;
+    switch (operand_kind(ref)) {
+        case OperandKind::MissionVar: {
+            int i = static_cast<int>(index);
+            while (i < world::ScriptVarStore::kMissionVars && append(vars.get_mission(i))) ++i;
+            if (i < world::ScriptVarStore::kMissionVars) break;
+            for (int g = 0; g < world::ScriptVarStore::kGlobalVars && append(vars.get_global(g)); ++g) {}
+            break;
+        }
+        case OperandKind::GlobalVar:
+            for (int g = static_cast<int>(index); g < world::ScriptVarStore::kGlobalVars &&
+                    append(vars.get_global(g)); ++g) {}
+            break;
+        case OperandKind::Pool:
+            for (size_t i = index; i < prog_->operands.size() && append(prog_->operands[i]); ++i) {}
+            break;
+        default:
+            append(read(w, ref));
+            break;
+    }
+    return text;
 }
 
 int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args, int argc, uint32_t instruction) {
@@ -228,10 +280,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
                                           : world::EntityHandle{};
     };
     auto S = [&](int i) -> std::string {
-        if (i >= argc || !args) return std::string();
-        int32_t si = arg_as_string_index(args[i]);
-        if (si >= 0 && si < static_cast<int32_t>(prog_->strings.size())) return prog_->strings[si];
-        return std::string();
+        if (i >= argc || !args || i >= 4) return std::string();
+        return operand_string(w, args[i], def.params[i]);
     };
     EventState &es = events_[(cur_event_ >= 0 && cur_event_ < static_cast<int>(events_.size())) ? cur_event_ : 0];
     auto &cmds = w.commands;
@@ -265,7 +315,18 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // [orig: WacCmd_Past @0x4ED010; WacCmd_Before @0x4ED030]
     if (ieq(n, "past")) return static_cast<int32_t>(time_ - uint32_t(A(0))) >= 0;
     if (ieq(n, "before")) return static_cast<int32_t>(time_ - uint32_t(A(0))) < 0;
-    if (ieq(n, "ontick") || ieq(n, "onptick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
+    if (ieq(n, "ontick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
+    if (ieq(n, "onptick")) {
+        // The selected player's slot play-tick dword in whole seconds (a
+        // truncating signed /62); an entity without an active slot reads 0.
+        // [orig: WacCmd_OnPlayerTick @0x4F0E10 — the Entity_ValidatePtr call
+        //  @0x4F0E58, `mov ecx,[eax+184h]` @0x4F0E65, /62 @0x4F0E6B..0x4F0E7C,
+        //  the compare @0x4F0E7E..0x4F0E86]
+        const world::EntityHandle handle{static_cast<uint16_t>(auto_item_)};
+        const world::MatchPlayer *player = w.match.player(handle);
+        if (w.registry.get(handle) == nullptr || player == nullptr) return 0;
+        return static_cast<int32_t>(player->play_ticks) / 62 == A(0) ? 1 : 0;
+    }
     if (ieq(n, "elapse")) {
         // An event which has never fired is immediately eligible.
         // [orig: WacCmd_Elapse @0x4ECEF0]
@@ -295,8 +356,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- group / entity state conditions ----
     if (ieq(n, "groupdead")) return cmds.group_dead(A(0)) ? 1 : 0;
     if (ieq(n, "groupalive")) return cmds.group_alive(A(0)) ? 1 : 0;
-    if (ieq(n, "SSNdead")) return cmds.ssn_dead(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNalive")) return cmds.ssn_alive(H(0)) ? 1 : 0;
+    if (ieq(n, "SSNdead")) return cmds.wac_ssn_dead(H(0)) ? 1 : 0;
+    if (ieq(n, "SSNalive")) return cmds.wac_ssn_alive(H(0)) ? 1 : 0;
     if (ieq(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
     if (ieq(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
     if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand()) : 1;
@@ -388,12 +449,16 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "load")) { return A(0); }
 
     // ---- entity actions ----
-    if (ieq(n, "killSSN")) return cmds.kill_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "removeSSN")) return cmds.remove_ssn(H(0)) ? 1 : 0;
+    // The killSSN handler. [orig: WacCmd_KillSsn @0x4F1E40]
+    if (ieq(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
+    // The notifying removal (S2C 0x12, a player's devices, then the destroy).
+    // [orig: WacCmd_RemoveSsn @0x4F1EE0 (the Server_RemoveEntityAndNotify call
+    //  @0x4F1F28), return 1 @0x4F1F30]
+    if (ieq(n, "removeSSN")) return cmds.server_remove_and_notify(H(0)) ? 1 : 0;
     if (ieq(n, "remove")) { cmds.remove_group(A(0)); return 0; }
     if (ieq(n, "ssnuse")) return cmds.use_boarding_target(H(0));
     if (ieq(n, "SSNHP")) return cmds.set_ssn_hp(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)) ? 1 : 0;
+    if (ieq(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)); // 1 only when clamped
     if (ieq(n, "SSNtoWP")) return cmds.set_ssn_waypoint(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "SSNMin")) return cmds.set_ssn_engage_min(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "SSNMax")) return cmds.set_ssn_engage_max(H(0), A(1)) ? 1 : 0;
@@ -413,12 +478,14 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "ssnturn")) return cmds.set_ssn_turn(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "tele")) return cmds.teleport_local_to_ssn(H(0)) ? 1 : 0;
     if (ieq(n, "forceanim")) {
-        // [orig: Script_ForceAnimation @0x4F2610]
+        // The notice rides the system ring, not the chat ring.
+        // [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddMessageChannel2
+        //  call @0x4F266A), return 0 @0x4F2682]
         w.script.forced_animation = A(0);
         const std::string key = world::infantry_anim_key(A(0));
         const std::string message = A(0) == 0 ? "force anim OFF" :
                 "force " + (key.empty() ? std::to_string(A(0)) : key);
-        w.out.effects.push({"text", 0, 0, 0, 0, message});
+        w.out.effects.push({"debug_text", 0, 0, 0, 0, message});
         return 0;
     }
     if (ieq(n, "dropflare")) {
@@ -458,30 +525,41 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (!cmds.ssn_exists(ssn)) return 0;
         cmds.apply_ai_command(ssn, ieq(n, "ssncspd") ? 29 : 30,
                               A(1), 0, 0);
-        // Retail reports success for any resolved live entity; only the
-        // AI-event queue is gated on the brain being present
-        // [orig: WacScript_SendAIEvent10ToEntity @0x4F74B0 — return 1
-        //  @0x4f74f9, queue gate @0x4f7508; event-11 twin @0x4F7570].
+        // Retail reports success for any resolved row with an ItemTypeIndex
+        // (ssn_exists); only the AI-event queue is gated on the brain
+        // [orig: WacCmd_SsnCspd @0x4F74B0 — gate @0x4F74FD,
+        //  queue gate @0x4F7508, return 1 @0x4F755A; event-11 twin @0x4F7570].
         return 1;
     }
 
     // ---- group actions ----
-    if (ieq(n, "kill")) return cmds.kill_group(A(0));
+    // Returns 0 [orig: WacCmd_Kill @0x4EDC90, `xor eax,eax` @0x4EDC9D] after the
+    // group walk [orig: Entity_KillAllByNetId @0x43C8E0].
+    if (ieq(n, "kill")) { cmds.kill_group(A(0)); return 0; }
     if (ieq(n, "Gkill") || ieq(n, "Gremove")) {
         const int32_t group = A(0);
         if (group >= 0 && size_t(group) < groups_.size()) {
             for (world::EntityHandle h : groups_[group]) {
                 if (const world::Entity *entity = w.registry.get(h)) {
-                    if (ieq(n, "Gkill")) {
-                        if (entity->item_id != 0) cmds.kill_ssn(h);
-                    } else cmds.remove_ssn(h);
+                    // Gkill runs the killSSN body on every handle (its own
+                    // ItemTypeIndex gate) [orig: WacCmd_GroupKill @0x4F1F40
+                    // (the killSSN body call @0x4F1F5E)]; Gremove removes without
+                    // a gate [orig: WacCmd_GroupRemove @0x4F1F80 (the
+                    // Server_RemoveEntityAndNotify call @0x4F1FF2)]. Both return
+                    // 0 [orig: WacCmd_GroupKill @0x4F1F72; WacCmd_GroupRemove
+                    // @0x4F2006].
+                    if (ieq(n, "Gkill")) cmds.wac_kill_ssn(h);
+                    else cmds.server_remove_and_notify(h);
                 }
             }
         }
         return 0;
     }
-    if (ieq(n, "GtoWP")) return cmds.group_to_waypoint(A(0), A(1));
-    if (ieq(n, "GroupHP")) return cmds.set_group_hp(A(0), A(1));
+    // Both return 1 whatever they visited [orig: WacCmd_GroupToWaypoint
+    // (the GtoWP handler) @0x4ED3E4; WacCmd_GroupHp
+    // (the GroupHP handler) @0x4F7BD0].
+    if (ieq(n, "GtoWP")) { cmds.group_to_waypoint(A(0), A(1)); return 1; }
+    if (ieq(n, "GroupHP")) { cmds.set_group_hp(A(0), A(1)); return 1; }
     if (ieq(n, "GroupMin")) return cmds.set_group_engage_min(A(0), A(1));
     if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
     if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
@@ -523,8 +601,11 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "ppunt") || ieq(n, "pkillpunt"))
         return w.match.request_player_punt(w, world::EntityHandle{static_cast<uint16_t>(auto_item_)},
                                            ieq(n, "pkillpunt"));
-    if (ieq(n, "Gsetaccuracy"))
-        return cmds.set_group_accuracy(A(0), A(1), A(2));
+    if (ieq(n, "Gsetaccuracy")) {
+        // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0 — return 1 @0x4F7C43]
+        cmds.set_group_accuracy(A(0), A(1), A(2));
+        return 1;
+    }
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
     if (ieq(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }
@@ -536,7 +617,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
     if (ieq(n, "fov")) { cmds.set_fov(A(0)); return 0; }
     if (ieq(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
-    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 0; }
+    // [orig: WacCmd_Tod @0x4EDC70 — return 1 @0x4EDC7F]
+    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 1; }
     if (ieq(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
     if (ieq(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
     // The handlers pack three independent operands, retaining carries between
@@ -561,7 +643,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "win")) {
         w.out.effects.push({"win", A(0), 0, 0, 0, std::string()});
         w.process_round_end(A(0));
-        return 0;
+        return 1; // [orig: WacAction_Win @0x4ED4AD]
     }
     // [orig: WacAction_Lose @0x4ed3f0 — team 0 resolves Misc/STRMISC_KILLEDGREEN,
     // team 1 Misc/STRMISC_KILLEDBLUE, each through the banner trio
@@ -571,12 +653,21 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // Any other team id is a NO-OP returning 0. The banner trio is embedder
     // presentation — the effect carries the gametext key, the embedder resolves it
     // against the 'Misc' section; the banners persist until the next round start
-    // (cleared by the round-start HUD reset @0x5b71b0).]
+    // (cleared by the round-start HUD reset @0x5b71b0).] The chat line lands in
+    // the CHAT ring in raw white, not with the triggered text [orig:
+    // GameMsg_AddChatLineAndRelay @0x5BA170 (the Chat_AddMessageChannel1(line,
+    // -1, 930) call @0x5BA197)].
     if (ieq(n, "lose")) {
         const int32_t team = A(0);
         if (team != 0 && team != 1) return 0;
-        w.out.effects.push({"lose", team, 0, 0, 0,
-                        std::string(team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN")});
+        const std::string key = team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN";
+        w.out.effects.push({"lose", team, 0, 0, 0, key});
+        // The same call relays the key to the peers, with team 0 on both
+        // branches, ahead of the round end [orig: WacAction_Lose @0x4ED3F0 —
+        // the GameMsg_AddChatLineAndRelay calls @0x4ED411 (its team word
+        // pushed @0x4ED3FD) and @0x4ED477 (`push 0` @0x4ED462);
+        // GameMsg_AddChatLineAndRelay's relay gate @0x5BA19F..0x5BA1AF].
+        w.relay_mission_text_chat(0, key);
         w.process_round_end(2);
         return 1;
     }
@@ -628,8 +719,7 @@ std::vector<world::ScriptRemoteArg> WacVm::resolve_remote_args(opennova::world::
         world::ScriptRemoteArg &arg = out[static_cast<size_t>(i)];
         const ParamType type = def.params[i];
         if (type == ParamType::Text || type == ParamType::Filename) {
-            const int32_t si = arg_as_string_index(args[i]);
-            if (si >= 0 && si < static_cast<int32_t>(prog_->strings.size())) arg.text = prog_->strings[si];
+            arg.text = operand_string(w, args[i], type);
         } else {
             arg.value = read(w, args[i]);
         }
@@ -815,8 +905,15 @@ void WacVm::execute(opennova::world::World &w) {
                     ip = operand;
                     break;
                 }
-                if (op == Op::DoRnd) loop_choices_[loop] = uint8_t(rand_range(int(count)));
-                else {
+                if (op == Op::DoRnd) {
+                    // Every opcode 5 steps the generator, a zero count too;
+                    // the rounded 16-bit scale keeps only its low byte.
+                    // [orig: WacScript_ExecuteBytecode @0x4F5A7E (the step),
+                    //  @0x4F5AB8..0x4F5AC4 (imul, round, shrd), @0x4F5AD0 (the
+                    //  choice byte)]
+                    const uint32_t v = next_rand();
+                    loop_choices_[loop] = uint8_t((count * (v & 0xFFFFu) + 0x8000u) >> 16);
+                } else {
                     if (loop_counters_[loop] >= count) loop_counters_[loop] = 0;
                     loop_choices_[loop] = loop_counters_[loop]++;
                 }
@@ -835,7 +932,7 @@ void WacVm::execute(opennova::world::World &w) {
                 ip = loop_choices_[loop]-- == 1 ? ip + 2 : operand;
                 break;
             }
-            case Op::GroupIter:
+            case Op::GroupIter: // [orig: WacScript_ExecuteBytecode case 10 @0x4F5B11]
                 group_index = operand;
                 group_remaining = group_index < groups_.size()
                         ? static_cast<int32_t>(groups_[group_index].size()) : 0;
@@ -886,7 +983,6 @@ void WacVm::execute(opennova::world::World &w) {
     // [orig: WacScript_ExecuteBytecode @0x4F61F2 -> counters reset @0x4EE6D0]
     w.script.weapon_input.clear_fire_requests();
     w.script.squad_events.advance_execution();
-    ++time_; // advance the WAC time base after the run [orig: wac_var_ticks @0x4f81d3]
 }
 
 } // namespace opennova::wac

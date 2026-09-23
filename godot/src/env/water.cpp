@@ -86,6 +86,10 @@ void Water::_bind_methods() {
 			&Water::set_visible_terrain_bounds);
 	ClassDB::bind_method(D_METHOD("set_blink_water_visible", "visible"),
 			&Water::set_blink_water_visible);
+	ClassDB::bind_method(D_METHOD("set_noise_frame_counter", "counter"),
+			&Water::set_noise_frame_counter);
+	ClassDB::bind_method(D_METHOD("get_noise_frame_counter"),
+			&Water::get_noise_frame_counter);
 	ClassDB::bind_method(D_METHOD("is_water_pass_active"),
 			&Water::is_water_pass_active);
 
@@ -284,6 +288,11 @@ bool Water::is_water_pass_active() const {
 
 void Water::set_blink_water_visible(bool p_visible) {
 	blink_water_visible_ = p_visible;
+}
+
+void Water::set_noise_frame_counter(uint32_t p_counter) {
+	frame_counter_ = static_cast<int>(p_counter);
+	frame_counter_fed_ = true;
 }
 
 void Water::_sync_render_activity() {
@@ -613,9 +622,12 @@ void Water::advance_frame(double p_delta) {
 	// prerender.
 	_update_reflection_camera(view_cam);
 
-	// Regenerate the animated noise pair once per rendered water frame;
-	// unlike the fixed-62 Hz weather clock, this is explicitly render-driven.
-	frame_counter_ += 1;
+	// Regenerate the animated noise pair once per rendered water frame, at
+	// the world's entity-update count when one is fed (set_noise_frame_counter),
+	// else at this Water's own render-frame count.
+	// [orig: render_water_surface @0x5c3326 -> Water_GenerateNoiseTextures
+	//  @0x5C0360, its counter @0x5C0366]
+	if (!frame_counter_fed_) frame_counter_ += 1;
 	water_core_->update(frame_counter_);
 	const int size = water_core_->get_texture_size();
 	noise_color_img_->set_data(size, size, false, Image::FORMAT_RGBA8,

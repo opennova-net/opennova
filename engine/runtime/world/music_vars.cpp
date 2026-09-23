@@ -17,9 +17,10 @@ namespace opennova::world {
 // Witnessed-but-unpumped seams (the shipped gamemus reads none of them --
 // docs/audio/mus-sbf-re.md (D-MUS-VARPUMP)): Var2 view pitch (the original
 // writes raw engine angle units, unwitnessed conversion), Var5/Var6 threat
-// distance / threat-targets-me (Entity_FindNearestThreat @ 0x4b0990
-// unported), Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode
-// ids not yet mapped to our sessions).
+// distance / threat-targets-me (Entity_FindNearestThreat @0x4B0990 is ported
+// for the org1 think, infantry_combat.cpp; the org2 pump that would feed these
+// two from the local player's body is not), Var3/Var4 (low-confidence), Var8
+// game type (retail scoring-mode ids not yet mapped to our sessions).
 std::array<MusicVarWrite, 2> game_music_var_writes(const World &world) {
 	int team = 0;
 	if (world.cached.local_player.valid()) {

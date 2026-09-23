@@ -9,46 +9,33 @@
 
 namespace opennova::world {
 
-// The per-tick motor pass, in the AI tick's slot between the entity loop and the
-// AI event queue [orig: the per-class tick from Entity_UpdateAllEntities].
-void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
+// One pool-1 row's +0x1C4 mover leg, run from the row's own pool-1 visit
+// (World::update_all_entities): every row with vehicle traits (the items.def
+// class callback, including selector zero) runs its family's drive core on
+// the authority -- ground/bike through the cveh core, watercraft through the
+// cbot mover, CHel/cpln through the shared aircraft mover -- consuming a
+// mounted ctrl/drvr player's replicated input. A joiner's copies are
+// wire-posed; its leg is the client prediction/presentation subset.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 -> the class row's mover:
+//  Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
+//  @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
+//  authority drive gates @0x48b0ff / @0x48DF8C]
+void VehicleSystem::update_motor(Entity &row, bool is_authority) {
     World &world = world_;
-	// Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
-	// class callback, including selector zero) runs its family's drive core — ground/bike
-	// through the cveh core, watercraft through the cbot mover — consuming a
-	// mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
-	// here: a joiner's local copies are wire-posed (the vehicle compact record
-	// read side), and the driver's client-side prediction leg is the retail
-	// client's concern, not this host loop's.
-	// [orig: the per-class tick from Entity_UpdateAllEntities ->
-	// Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
-	// @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
-	// authority drive gates @0x48b0ff / @0x48DF8C]
-	if (is_authority && !this->traits.empty()) {
-        devtools::ProfileLap vehicle_lap(world.profile);
-        pass_handles_.clear();
-        world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = this->traits.get(e.item_id);
-			// Ground/water callbacks choose their motor by selector. CHel/cpln rows
-			// are admitted regardless of that ground selector — they branch to the shared
-			// aircraft mover below, never through tick_vehicle_motor.
-			if (traits == nullptr) return;
-            pass_handles_.push_back(e.handle);
-        });
-        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_SCAN);
-        for (const EntityHandle h : pass_handles_) {
-            Entity *veh = world.registry.get(h);
-            if (veh == nullptr || veh->motor_suspended) continue;
+    const EntityHandle h = row.handle;
+    Entity *veh = &row;
+    if (veh->motor_suspended || this->traits.get(veh->item_id) == nullptr) return;
+    if (is_authority) {
 			// The installed death callback replaces +0x1C4's live mover.
 			// The AI death-state callback at +0x1C8 can also run this tick.
 			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
 			if (veh->death_motion != DeathMotionMode::None)
-				continue;
+				return;
 			if (!veh->veh.spawn_pose_valid)
 				capture_spawn_pose(*veh);
 			const VehicleTraits *traits = this->traits.get(veh->item_id);
 			if (traits == nullptr)
-				continue;
+				return;
 			// catv's callback switches the entire mover (including input,
 			// sound and trails) using the previous tick's afloat flag.
 			// [orig: Entity_DispatchPhysicsUpdate @ 0x48F010]
@@ -94,9 +81,20 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     Entity *actrl = world.vehicles.resolve_controller(*veh);
                     const bool actrl_alive = actrl != nullptr && actrl->alive &&
                                              actrl->health > 0;
+                    // A player pilot whose eye sits at or below the water plane
+                    // loses the stick to the AI leg, as in the staged families.
+                    // [orig: Entity_UpdateAircraftPhysics `test [ebp+24h],100h`
+                    //  @0x490F36, the eye test @0x490F3F..0x490F4B]
                     const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
-                                         actrl->player_class != 0;
+                                         actrl->player_class != 0 &&
+                                         !watercraft_driver_submerged(world, *actrl);
                     if (aplayer) {
+                        // The player leg parks the brain at PRETTY every visit, so
+                        // an AI state left from an earlier pilot stops running.
+                        // [orig: Entity_UpdateAircraftPhysics `mov dword ptr
+                        //  [ebx+10h],0Eh` @0x490F6A]
+                        if (AiEntity *brain = world.ai.for_handle(h))
+                            brain->brain.f[AiBrain::kCurState] = 14;
                         // A PLAYER pilot still runs the shared mover: retail has
                         // ONE aircraft function, and its occupant-input block
                         // (our stage_air_vehicle_input) stages the same
@@ -147,7 +145,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 							? veh->veh.yaw_bam
 							: bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
 				}
-				continue;
+				return;
             }
             // Stage the drive input class the motor will consume: a live PLAYER controller
             // keeps the occupant leg; an AI controller (or none) routes through the brain
@@ -219,47 +217,27 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                 ve->brain.f[136] = veh->veh.cmd_speed;
                 ve->brain.f[137] = veh->veh.steer_ramp_bam;
             }
-        }
-        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_MOTORS);
-        // Non-organic mounted controllers ran in the preceding brain pass.
-        // Organic seats now pose once, in the following infantry motor pass.
-        for (int i = 0; i < world.ai.count(); ++i) {
-            AiEntity &e = *world.ai.at(i);
-            if (!e.inf.active) world.ai.refresh_mounted_pose(e, world);
-        }
-        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_RIDERS);
+        return;
     }
-    lap.mark(devtools::Slot::SIM_AI_AUTH_VEHICLES);
     // A joiner does not integrate its replicated pool-1 vehicle copies here, but
     // retail still executes the per-entity ground callback's presentation leg on
-    // clients. Evaluate sound from the current wire/local state after the authority
-    // motor pass, leaving position, heading, and motor accumulators untouched.
-    // Collision contact is authority-physics state and therefore unavailable on
-    // this path; an explicit replicated collision bit can replace `false` later.
+    // clients. Evaluate sound from the current wire/local state, leaving
+    // position, heading, and motor accumulators untouched. Collision contact is
+    // authority-physics state and therefore unavailable on this path; an
+    // explicit replicated collision bit can replace `false` later.
     // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
     // @0x48d181..0x48d1c4]
-    if (!is_authority && !this->traits.empty()) {
-        pass_handles_.clear();
-        world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = this->traits.get(e.item_id);
-            if (traits == nullptr) return;
-            // Ground/water/bike rows retain their selector gate. CHel/cpln
-            // dispatch directly and therefore remain eligible at physics=0.
-            pass_handles_.push_back(e.handle);
-        });
-        for (const EntityHandle h : pass_handles_) {
-            Entity *veh = world.registry.get(h);
-            if (veh == nullptr || veh->motor_suspended) continue;
+    {
 			// The installed death callback replaces +0x1C4's live mover.
 			// The AI death-state callback at +0x1C8 can also run this tick.
 			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
 			if (veh->death_motion != DeathMotionMode::None)
-				continue;
+				return;
 			if (!veh->veh.spawn_pose_valid)
 				capture_spawn_pose(*veh);
 			const VehicleTraits *traits = this->traits.get(veh->item_id);
 			if (traits == nullptr)
-				continue;
+				return;
 			// catv's callback switches the entire mover (including input,
 			// sound and trails) using the previous tick's afloat flag.
 			// [orig: Entity_DispatchPhysicsUpdate @ 0x48F010]
@@ -307,7 +285,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                 // crash-settle-gated yaw with the airborne quarter-rate)
                 // [orig: @0x483FE0 / @0x488AB0 vs @0x48AF00].
                 world.vehicles.ground_client_tick(*veh, *traits);
-                continue;
+                return;
             }
             // The shared aircraft mover has no movement-sound call. In retail,
             // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
@@ -315,13 +293,11 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
             // thunk calls it. Physicsless air rows are newly eligible above, so
             // keep them out of the ground-sound presentation tail in every
             // prediction/death state.
-            if (vehicle_family_uses_direct_air_mover(traits->family)) continue;
+            if (vehicle_family_uses_direct_air_mover(traits->family)) return;
             world.vehicles.update_ground_sound(*veh, *traits,
                                         /*wrecked=*/veh->health <= 0,
                                         /*collided=*/false);
-        }
     }
-    lap.mark(devtools::Slot::SIM_AI_CLIENT_VEHICLES);
 }
 
 } // namespace opennova::world

@@ -74,7 +74,8 @@ struct Fixture {
         auto &b = body(from);
         b.inf.move_mode = 0; b.inf.target_dist = 0;
         b.slot.f[37] = 125; b.slot.f[38] = entity(to).net_id;
-        world.ai.infantry_board_think(b, world, 125);
+        int32_t entry_heading = b.inf.target_heading;
+        world.ai.infantry_board_think(b, world, 125, entry_heading);
     }
     void drag(EntityHandle corpse, EntityHandle medic) {
         entity(medic).dragger = medic;

@@ -73,10 +73,17 @@ int main() {
     CHECK(w.commands.ssn_dead(100));
 
     // group fan-out.
-    Entity g1; g1.net_id = 201; g1.group_id = 7; g1.alive = true; w.registry.spawn(0, g1);
-    Entity g2; g2.net_id = 202; g2.group_id = 7; g2.alive = true; w.registry.spawn(0, g2);
+    // groupalive/groupdead read the trigger group's live count, which the
+    // 62-tick rescan rebuilds [orig: WacCmd_GroupAlive @0x4ED1CC;
+    // EntityPool_RecountLiveByGroup @0x40E8D0].
+    Entity g1; g1.net_id = 201; g1.group_id = 7; g1.alive = true; g1.health = 50;
+    w.registry.spawn(0, g1);
+    Entity g2; g2.net_id = 202; g2.group_id = 7; g2.alive = true; g2.health = 50;
+    w.registry.spawn(0, g2);
+    w.recount_group_live();
     CHECK(w.commands.group_alive(7));
     CHECK(w.commands.kill_group(7) == 2);
+    w.recount_group_live();
     CHECK(w.commands.group_dead(7));
 
     // shared var store.
@@ -122,6 +129,51 @@ int main() {
     // wac_behavior_test.)
     w.run_logic_tick();
     CHECK(w.logic_tick == 1);
+
+    // The entity-update counter counts completed entity updates: a gameplay
+    // tick's update adds one, a pre-round tick (no entity update) adds none,
+    // and a restore keeps it (it is not in the Snapshot).
+    // [orig: g_entity_update_counter, `add g_entity_update_counter,esi` in
+    //  Entity_UpdateAllEntities @0x4C2639]
+    {
+        World cw;
+        CHECK(cw.entity_update_counter == 0);
+        cw.run_logic_tick(true);
+        CHECK(cw.logic_tick == 1 && cw.entity_update_counter == 1);
+        cw.run_logic_tick(true, TickPhase::PreRound);
+        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 1);
+        const World::Snapshot snap = cw.snapshot();
+        cw.run_logic_tick(true);
+        CHECK(cw.logic_tick == 3 && cw.entity_update_counter == 2);
+        cw.restore(snap);
+        CHECK(cw.logic_tick == 2 && cw.entity_update_counter == 2);
+    }
+
+    // The entity update's admission: an authority with no human and a started
+    // WAC clock holds the whole update (the counter stands), a playing host
+    // whose own player is on the death screen is exempt, a non-authority peer
+    // never takes the humans test, and a session's ended round holds every peer.
+    // [orig: Game_ProcessMainFrame @0x526703..0x526742]
+    {
+        World gw;
+        gw.cached.wac_ticks = 5;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 0);
+        gw.cached.peer_death_screen = true;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 1);
+        gw.cached.peer_death_screen = false;
+        gw.run_logic_tick(false);
+        CHECK(gw.entity_update_counter == 2);
+        gw.cached.humans = 1;
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 3);
+        gw.rules.mp_session = true;
+        CHECK(gw.match.finish(2, gw));
+        gw.run_logic_tick(false);
+        gw.run_logic_tick(true);
+        CHECK(gw.entity_update_counter == 3);
+    }
 
     // Persistent sound intents use a bounded latest-value mailbox. A host with
     // no audio presenter can run indefinitely without accumulating one string-
@@ -418,11 +470,15 @@ int main() {
     {
         World kw;
         kw.registry.configure_pool(0, 8);
+        // Organic rows: the edge that raises the death transaction is the
+        // infantry motor's [orig: @0x4B9D4D / @0x4B4CEA].
         Entity a; a.net_id = 900; a.group_id = 9; a.alive = true; a.health = 150;
+        a.kind = EntityKind::Organic;
         // A prior non-lethal hit's shooter on the victim's +0x178: the script
         // death reports it (GameEvent_PlayerDeath reads the victim's word).
         a.last_attacker = EntityHandle::make(0, 6);
         Entity b; b.net_id = 901; b.group_id = 9; b.alive = true; b.health = 150;
+        b.kind = EntityKind::Organic;
         const EntityHandle ha = kw.registry.spawn(0, a);
         kw.registry.spawn(0, b);
         CHECK(kw.round_sim.deaths.empty());
@@ -437,6 +493,7 @@ int main() {
             CHECK(kw.round_sim.deaths[0].killer == EntityHandle::make(0, 6));
             CHECK(!kw.round_sim.deaths[1].killer.valid()); // never hit: unattributed
         }
+        kw.recount_group_live();
         CHECK(kw.commands.group_dead(9));
 
         // Killing an already-dead group must not notify twice: retail's
@@ -448,6 +505,7 @@ int main() {
         // Zeroing a group's health is the same edge by another name - the motor
         // only ever sees the zero.
         Entity c; c.net_id = 902; c.group_id = 11; c.alive = true; c.health = 150;
+        c.kind = EntityKind::Organic;
         kw.registry.spawn(0, c);
         kw.commands.set_group_hp(11, 0);
         CHECK(kw.round_sim.deaths.size() == 1);
@@ -456,6 +514,7 @@ int main() {
         // A non-lethal set stays silent.
         kw.round_sim.deaths.clear();
         Entity d; d.net_id = 903; d.group_id = 12; d.alive = true; d.health = 150;
+        d.kind = EntityKind::Organic;
         kw.registry.spawn(0, d);
         kw.commands.set_group_hp(12, 75);
         CHECK(kw.round_sim.deaths.empty());

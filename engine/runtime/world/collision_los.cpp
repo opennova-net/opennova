@@ -325,9 +325,17 @@ bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay
 
 } // namespace
 
+EntityHandle los_walker_parent(const Entity *e, bool parent_cleared) {
+    if (e == nullptr) return EntityHandle{};
+    if (parent_cleared) return e->mounted_child;
+    return e->mount_target.valid() ? e->mount_target : e->mounted_child;
+}
+
 bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
-                                   EntityHandle exclude_a, EntityHandle exclude_b) {
-    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, false);
+                                   EntityHandle exclude_a, EntityHandle exclude_b,
+                                   EntityHandle parent_a, EntityHandle parent_b) {
+    const bool clear =
+            raycast_clear_impl(world, a, b, exclude_a, exclude_b, parent_a, parent_b, false);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
                          nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
@@ -337,8 +345,10 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
 
 bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle exclude_a,
-                                          EntityHandle exclude_b) {
-    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, true);
+                                          EntityHandle exclude_b, EntityHandle parent_a,
+                                          EntityHandle parent_b) {
+    const bool clear =
+            raycast_clear_impl(world, a, b, exclude_a, exclude_b, parent_a, parent_b, true);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
                          nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
@@ -348,7 +358,8 @@ bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
 
 bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle exclude_a,
-                                        EntityHandle exclude_b,
+                                        EntityHandle exclude_b, EntityHandle parent_a,
+                                        EntityHandle parent_b,
                                         bool cache_target_views) {
     // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
@@ -399,17 +410,20 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 
     // Per candidate [orig: the @ 0x538720 walk]: in-use with a collision model,
     // skip flags & 1 (@ 0x538792), skip engine_flags & 0x8000000 (@ 0x5387b4),
-    // skip the excluded entities and anything standing on them (the +0x28
-    // owner-link pair test @ 0x538836-0x538877), bound-sphere broad phase (the
-    // segment box + line-distance fold of @ 0x5387c4-0x5389a4), then the TYPE-1
-    // volume convex clip (the shared @ 0x413060 core). A hit blocks — the
-    // original keeps walking to clip the nearest point; the boolean result is
+    // skip the four excluded entities A, B, parentA, parentB and anything
+    // standing on A or B (+0x28) [orig: @0x53882F..0x538877], bound-sphere broad
+    // phase (the segment box + line-distance fold of @ 0x5387c4-0x5389a4), then
+    // the TYPE-1 volume convex clip (the shared @ 0x413060 core). A hit blocks —
+    // the original keeps walking to clip the nearest point; the boolean result is
     // identical (@ 0x5390e6 miss_result = 0).
     auto blocked_by_bound = [&](const Entity &e, const int32_t bp[3],
                                 int32_t br) -> bool {
         if ((e.flags & 1u) != 0) return false;
         if ((e.engine_flags & 0x8000000u) != 0) return false;
         if (e.handle == exclude_a || e.handle == exclude_b) return false;
+        if ((parent_a.valid() && e.handle == parent_a) ||
+            (parent_b.valid() && e.handle == parent_b))
+            return false;
         if (e.ground_target.valid() &&
             (e.ground_target == exclude_a || e.ground_target == exclude_b))
             return false;
@@ -458,22 +472,22 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
         return true;
     }
 
-    // Pool passes over the per-tick tables — the same membership the witnessed
-    // pool walk covers (@ 0x539a3a pool 2 then pool 1), without a whole-registry
-    // sweep per ray. Entities absent from the tables (no model AND no bound)
-    // could never block: target_bound returns false for them. Entries spawned
-    // after this tick's table build are missed for at most one 62 Hz tick.
+    // The pool passes in the witnessed order: every pool-2 entry, then every
+    // pool-1 entry once pool 2 came back clear. Each walk reads the pool's own
+    // used count, not the per-tick proximity tables (whose pool-2 count also
+    // stops at 1199), so an entry spawned after this tick's table build
+    // blocks at once [orig: Physics_RaycastTerrainAndSectors pool 2
+    // @0x539A16..0x539A30, `jz loc_53996A` @0x539A3A, pool 1
+    // @0x539A40..0x539A5A; the table's `count < 1199` gate @0x4B94CB].
     if (tick_tables_ready()) {
-        for (const StaticSlot &s : statics_) { // pass 1: pool-2 statics
-            const Entity *e = world.registry.get(s.h);
-            if (e != nullptr && blocked_by(*e)) return false;
-        }
-        for (const DynSlot &d : dynamics_) { // pass 2: dynamics (Item kind)
-            if (d.h.pool() == 2) continue; // statics table already covered pool 2
-            const Entity *e = world.registry.get(d.h);
-            if (e != nullptr && blocked_by(*e)) return false;
-        }
-        return true;
+        bool blocked = false;
+        const auto walk = [&](const Entity &e) {
+            if (!blocked && blocked_by(e)) blocked = true;
+        };
+        world.registry.for_each_in_pool(2, walk);
+        if (blocked) return false;
+        world.registry.for_each_in_pool(1, walk);
+        return !blocked;
     }
     // Un-ticked worlds (headless callers that never ran the per-tick table
     // build) keep the registry sweep so LOS still sees their entities.
@@ -501,13 +515,8 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
     // The blast sweep nulls the query entity's parentEntity for the call
     // (`mov [edi+16Ch], 0` @0x4eb158, restored @0x4eb16c), so its slot holds
     // only the mountedChild there.
-    const auto walker_parent = [](const Entity *e, bool parent_cleared) -> EntityHandle {
-        if (e == nullptr) return EntityHandle{};
-        if (parent_cleared) return e->mounted_child;
-        return e->mount_target.valid() ? e->mount_target : e->mounted_child;
-    };
-    const EntityHandle parent_a = walker_parent(le, query_parent_cleared);
-    const EntityHandle parent_b = walker_parent(se, false);
+    const EntityHandle parent_a = los_walker_parent(le, query_parent_cleared);
+    const EntityHandle parent_b = los_walker_parent(se);
 
     // --- Terrain leg. [orig: Physics_CheckTerrainLineOfSight @ 0x53b080] ---
     bool terrain_clear = false;
@@ -571,7 +580,7 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 			// endpoint entity and both parent slots. The endpoint skip is
 			// unconditional: a USE ray is never blocked by the hull of the
 			// vehicle it targets [orig: raycast_against_entity_pool
-			// @0x538832..0x538859]. The EWeap clause @0x539b85..0x539b99 gates
+			// @0x538832..0x538859]. The EWeap clause @0x539B85..0x539B98 gates
 			// a candidate whose groundEntity (+0x28) IS the endpoint (the gun
 			// standing on it), which the ground skips below already cover.
 			if (source.valid() && ch == source) continue;

@@ -37,6 +37,12 @@ var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
 # than it can ever present (net spectators may never acquire a local-player HUD).
 const MAX_PENDING_HUD_MESSAGES := 40
+# The script chat lines post into the CHAT ring with color -1 (raw white): WAC
+# text/ptext/text# through Chat_AddSystemMessage, the WAC lose line and the BMS
+# subgoal won/lost lines through GameMsg_AddChatLineAndRelay, all into
+# Chat_AddMessageChannel1 (the witnesses sit with their engine producers:
+# wac/remote_command.cpp, wac/vm.cpp, hud/hud_frame.h push_chat_line).
+const SCRIPT_CHAT_ARGB := -1
 
 # HudOverlay, built on the first frame a mission has a local player
 # (ensure_game_hud(); the GUT files build the real one over a staged root).
@@ -60,15 +66,18 @@ var _pending_hud_messages: Array[PendingHudMessage] = []
 
 
 ## One queued HUD message: literal text, or a mission-table triggered-text id
-## when the text is empty.
+## when the text is empty. A `chat` line posts into the CHAT ring; every other
+## message posts into the SYSTEM ring.
 class PendingHudMessage:
 	extends RefCounted
 	var text: String
 	var text_id: int
+	var chat: bool
 
-	func _init(p_text: String, p_text_id: int) -> void:
+	func _init(p_text: String, p_text_id: int, p_chat := false) -> void:
 		text = p_text
 		text_id = p_text_id
+		chat = p_chat
 # The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
 # MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
@@ -765,11 +774,13 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
-# {kind, a..d, str}: WAC text/ptext carries a literal in `str`, while BMS
-# OutputText carries a nonzero Triggered-Text id in `a`. consol/pconsol uses the
-# distinct `debug_text` kind and remains off the player-facing feed. Queue both
-# forms because PreMission effects can arrive before the lazy HUD and its mission
-# table exist. Public with hud_objective_line() as the ADR 0018 read seam.
+# {kind, a..d, str}: WAC text/ptext/text# carries a literal in `str` and posts
+# into the CHAT ring, while BMS OutputText carries a nonzero Triggered-Text id in
+# `a` and posts into the SYSTEM ring. consol/pconsol/consol# and forceanim use
+# the `debug_text` kind: the SYSTEM ring too, without touching the objective
+# line. The lose and subgoal lines are CHAT ring lines. Queue every form because
+# PreMission effects can arrive before the lazy HUD and its mission table exist.
+# Public with hud_objective_line() as the ADR 0018 read seam.
 func apply_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
@@ -783,11 +794,15 @@ func apply_mission_effects(effects: Array) -> void:
 			var t := e.text
 			if not t.is_empty():
 				_hud_objective = t
-				_queue_hud_message(t, 0)
+				_queue_chat_line(t)
 			else:
 				var text_id := e.a
 				if text_id != 0:
 					_queue_hud_message("", text_id)
+		elif kind == "debug_text":
+			var line := e.text
+			if not line.is_empty():
+				_queue_hud_message(line, 0)
 		elif kind == "lose":
 			# The WAC Lose banner trio [orig: WacAction_Lose @0x4ed3f0 ->
 			# GameMsg_AddChatLineAndRelay @0x5ba170 (the chat-feed line; the KEY rides
@@ -800,7 +815,35 @@ func apply_mission_effects(effects: Array) -> void:
 			if not key.is_empty():
 				var line := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Misc", key)
 				_endround_banner = line
-				_queue_hud_message(line, 0)
+				_queue_chat_line(line)
+		elif kind == "objective":
+			# A shown objective's two chat lines (a = slot, b = win, c = the
+			# header text id): the gametext header, then the mission directive.
+			# The keys, the length rule and the client gate are the engine's
+			# (World::show_objective_notification, hud_game_text.h). Both lines ride
+			# the chat ring, as retail's HUD_ShowObjectiveNotification @0x5BA2E0 posts
+			# them through Chat_AddMessageChannel1 @0x4985D0.
+			var header := HudPos.objective_header(Strings.get_table(Strings.TABLE_GAMETEXT))
+			if not header.is_empty():
+				_queue_chat_line(header)
+			var directive := HudPos.objective_directive(
+					Strings.get_table(Strings.TABLE_MISSION), e.b != 0, e.c)
+			if not directive.is_empty():
+				_queue_chat_line(directive)
+		elif kind == "hud_item_flash":
+			# BMS action 28 sub 37: a = the flash timer, b = its value; the
+			# overlay owns the timers, their countdown and the level-0 rebuild.
+			if _game_hud != null:
+				_game_hud.set_item_flash(e.a, e.b)
+		elif kind == "mission_text_chat":
+			# The authority's mission-text chat relay (S2C 0x3F kind 1): the key
+			# resolves in this peer's mission text; an empty line posts nothing. It
+			# rides the chat ring like retail's GameMsg_AddChatLineAndRelay @0x5BA170.
+			var mission_table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
+			if mission_table != null:
+				var relayed := mission_table.get_string(e.text)
+				if not relayed.is_empty():
+					_queue_chat_line(relayed)
 		elif kind == "subgoal_won" or kind == "subgoal_lost":
 			# A subgoal resolved: the mission-text announcement rides the chat
 			# feed (b = the header text id, c = the round-still-running gate);
@@ -813,7 +856,7 @@ func apply_mission_effects(effects: Array) -> void:
 				if not line.is_empty():
 					if lost:
 						_endround_banner = line
-					_queue_hud_message(line, 0)
+					_queue_chat_line(line)
 
 
 func hud_objective_line() -> String:
@@ -869,10 +912,14 @@ func _apply_toggle_events(events: int) -> void:
 		_push_showhud_flags()
 	if events & HudToggles.EVENT_DOTSIZE_CYCLED:
 		cycle_sight_scale()
+	# The view rows in their catalog order, each as its own action (the
+	# engine's player_view_apply_view_action: preference and input bit).
 	if events & HudToggles.EVENT_FIRST_PERSON_SELECTED:
-		_select_third_person(false)
+		_apply_view_action(Simulation.VIEW_ACTION_FIRST_PERSON)
+	if events & HudToggles.EVENT_GUN_VIEW_SELECTED:
+		_apply_view_action(Simulation.VIEW_ACTION_WITH_GUN)
 	if events & HudToggles.EVENT_THIRD_PERSON_SELECTED:
-		_select_third_person(true)
+		_apply_view_action(Simulation.VIEW_ACTION_CHASE)
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
@@ -1081,9 +1128,9 @@ func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
 			active, false))
 
 
-func _select_third_person(selected: bool) -> void:
+func _apply_view_action(action: int) -> void:
 	if _player_presenter != null:
-		_player_presenter.set_third_person_selected(selected)
+		_player_presenter.apply_view_action(action)
 
 
 func _apply_fp_gun_visible() -> void:
@@ -1109,8 +1156,23 @@ func pending_hud_message_count() -> int:
 	return _pending_hud_messages.size()
 
 
+## How many of those pending messages are CHAT ring lines (the same seam).
+func pending_chat_line_count() -> int:
+	var count := 0
+	for pending in _pending_hud_messages:
+		if pending.chat:
+			count += 1
+	return count
+
+
 func _queue_hud_message(text: String, text_id: int) -> void:
 	_pending_hud_messages.append(PendingHudMessage.new(text, text_id))
+	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
+		_pending_hud_messages.pop_front()
+
+
+func _queue_chat_line(text: String) -> void:
+	_pending_hud_messages.append(PendingHudMessage.new(text, 0, true))
 	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
 		_pending_hud_messages.pop_front()
 
@@ -1145,7 +1207,9 @@ func _flush_pending_hud_messages() -> void:
 	if _game_hud == null:
 		return
 	for pending in _pending_hud_messages:
-		if not pending.text.is_empty():
+		if pending.chat:
+			_game_hud.push_chat_line(pending.text, SCRIPT_CHAT_ARGB)
+		elif not pending.text.is_empty():
 			_game_hud.push_message(pending.text)
 		else:
 			_show_triggered_text(pending.text_id)

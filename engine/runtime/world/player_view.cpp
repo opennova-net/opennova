@@ -145,6 +145,20 @@ void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
     player_view_resolve_mode(v);
 }
 
+void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
+                                   int action) {
+    uint32_t bit = 0;
+    bool chase = false;
+    switch (action) {
+        case kViewActionFirstPerson: bit = 0x4000000u; break;
+        case kViewActionWithGun: bit = 0x10000000u; break;
+        case kViewActionChase: bit = 0x8000000u; chase = true; break;
+        default: return;
+    }
+    if (input_action_bits != nullptr) *input_action_bits |= bit;
+    player_view_set_third_person_selected(v, chase);
+}
+
 namespace {
 
 // CNetPlayerInterp_Setup(&g_fpCameraInterp, steps, idle_source, target) on

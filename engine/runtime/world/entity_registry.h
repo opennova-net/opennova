@@ -101,6 +101,11 @@ public:
     int script_group_index(std::string_view name) const;
     void set_script_group_members(int group, const std::vector<EntityHandle> &members);
     void script_groups(std::vector<std::vector<EntityHandle>> &out) const;
+    // The WAC 'humans' count the same walk rebuilds: every live pool-0 row
+    // with the Player bit that is not hidden (a player waiting to deploy is).
+    // Retail's item-def test is its allocated-row test, so a player whose type
+    // has no items.def row counts. [orig: Server_BuildEntitySlotLists @0x4f97a0]
+    int32_t count_humans() const;
 
     size_t live_count() const;
     // Monotonic spawn serial: differs whenever any entity has spawned since a

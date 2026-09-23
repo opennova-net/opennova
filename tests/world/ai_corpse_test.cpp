@@ -52,7 +52,19 @@ struct Nearest {
 	float distance = 1e30f;
 };
 
-Nearest nearest_npc(testrig::RetailMissionRig &rig) {
+// Whether the local player's eye sees the NPC 0.5 u above its origin.
+bool player_sees(testrig::RetailMissionRig &rig, const w::AiEntity &npc) {
+	const w::Entity *player = rig.world.registry.get(rig.world.cached.local_player);
+	if (player == nullptr || rig.world.collision == nullptr) return false;
+	const w::Vec3 eye = w::player_eye_position(*player);
+	const int32_t from[3] = {w::to_fixed(eye.x), w::to_fixed(eye.y), w::to_fixed(eye.z)};
+	const int32_t to[3] = {npc.pos[0], npc.pos[1], npc.pos[2] + w::to_fixed(0.5f)};
+	return rig.world.collision->raycast_clear(
+			rig.world, from, to, rig.world.cached.local_player, npc.handle);
+}
+
+// The nearest live foot NPC, or with `visible` the nearest one the player sees.
+Nearest nearest_npc(testrig::RetailMissionRig &rig, bool visible = false) {
 	Nearest best;
 	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
@@ -62,6 +74,7 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 		if (ent == nullptr || !ent->alive || ent->mounted) continue;
 		const float d = testrig::distance(testrig::ai_position(*e), player);
 		if (d < 0.5f) continue;
+		if (visible && (d >= best.distance || !player_sees(rig, *e))) continue;
 		if (d < best.distance) {
 			best.distance = d;
 			best.ai = e;
@@ -89,8 +102,18 @@ int main() {
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs from weapon.def")) return 1;
 
 	int seconds = 0;
+	// The player is topped up every tick of the mission, the approach included,
+	// and far above one burst: an emplaced gunner that engages the approach can
+	// otherwise kill it inside a single tick, before the next top-up.
+	const auto top_up = [&]() {
+		if (rig.world.cached.local_player.valid())
+			rig.world.commands.set_entity_health(rig.world.cached.local_player, 30000);
+	};
 	const auto mission_second = [&]() {
-		rig.tick(62);
+		for (int t = 0; t < 62; ++t) {
+			top_up();
+			rig.tick();
+		}
 		++seconds;
 	};
 
@@ -106,7 +129,13 @@ int main() {
 			w::Vec3 to = testrig::ai_position(*npc.ai);
 			to.z = me.z;
 			rig.local.aim_at(me, to);
-			if (npc.distance <= kFireDistance) {
+			// The scripted guard hold below pins the target where it stands, and a
+			// guard holds its post in the guard family with no approach [orig:
+			// Entity_UpdateInfantryAI @0x4BD196..0x4BD231]: lock only a body the
+			// player can see, never one on a ledge above the approach.
+			const Nearest seen = npc.distance <= kFireDistance ? nearest_npc(rig, true) : Nearest{};
+			if (seen.ai != nullptr && seen.distance <= kFireDistance) {
+				const Nearest &npc = seen;
 				target = npc.ai->handle;
 				std::printf("corpse: target lock net=%d hp=%d at %.1fu deathtime=%d leave_corpse=%d\n",
 						int(npc.entity->net_id), int(npc.ai->health), npc.distance,
@@ -177,8 +206,7 @@ int main() {
 			}
 			rig.local.set_weapon_input(true, pressed, false);
 			pressed = false;
-			if (rig.world.cached.local_player.valid())
-				rig.world.commands.set_entity_health(rig.world.cached.local_player, 150);
+			top_up();
 			rig.tick();
 		}
 		++seconds;

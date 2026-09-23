@@ -9,6 +9,7 @@
 // movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/local_role.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -423,6 +424,94 @@ int main() {
         inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {});
         CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
     }
+
+	// --- the frame's weapon-action walk pumps the NPC gunners ----------------
+	// Every role frame runs the walk after its weather and view legs, so an NPC
+	// gunner's queued FIRE on its emplacement leaves as a round within the
+	// frame: on the listen host, on a dedicated host (no local player) and in
+	// the bare local role alike. The entity pass itself no longer pumps.
+	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
+	//  then the WeaponAction_ProcessAllEntities call @0x526786;
+	//  WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9]
+	for (const int frame_kind : {0, 1, 2}) {
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto host_storage = std::make_unique<inmatch::HostRole>();
+		auto local_storage = std::make_unique<inmatch::LocalRole>();
+		inmatch::Role &role = frame_kind == 2
+				? static_cast<inmatch::Role &>(*local_storage)
+				: static_cast<inmatch::Role &>(*host_storage);
+		role.bind(kernel);
+		kernel.open_document(synthetic_mission(), "gunner_walk", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		if (frame_kind == 0) {
+			options.bringup_net_session = [&] { host_storage->bring_up_singleplayer(); };
+		} else if (frame_kind == 1) {
+			options.playable = false;
+			options.mp_session = true;
+			options.bringup_net_session = [&] {
+				inmatch::HostConfig cfg;
+				cfg.config.server_name = "gunner_walk";
+				cfg.config.max_players = 4;
+				cfg.config.game_type = options.game_type;
+				cfg.socket_mode = inmatch::SocketMode::Lan;
+				host_storage->bring_up_dedicated(cfg);
+			};
+		}
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		auto &world = kernel.world;
+		w::EntityHandle npc;
+		for (size_t slot = 0; slot < world.registry.pool_capacity(0) && !npc.valid(); ++slot) {
+			const w::Entity *row =
+					world.registry.get(w::EntityHandle::make(0, static_cast<int>(slot)));
+			if (row != nullptr && row->handle != world.cached.local_player &&
+					world.ai.for_handle(row->handle) != nullptr)
+				npc = row->handle;
+		}
+		CHECK(npc.valid());
+		if (!npc.valid()) return 1;
+		world.tables.ammo.entries.resize(2);
+		world.tables.ammo.entries[1].velocity = 800;
+		world.tables.ammo.entries[1].max_age_ticks = 124;
+		world.tables.ammo.entries[1].min_damage = 10;
+		world.tables.ammo.entries[1].max_damage = 40;
+		world.tables.ammo.entries[1].valid = true;
+		w::WeaponTableEntry def;
+		def.name = "WPN_WALK_TEST";
+		def.valid = true;
+		def.ammo_index = 1;
+		def.clipsize = -1;
+		def.action_fsm.clip_capacity = -1;
+		for (int action = 0; action < w::weapon_action::kCount; ++action)
+			def.action_fsm.actions[action].id = action;
+		world.tables.weapons.entries.push_back(def);
+		w::Entity gun;
+		gun.kind = w::EntityKind::Item;
+		gun.has_item_def = true;
+		gun.item_type = 6;
+		gun.item_attrib = w::kItemAttribEweap;
+		gun.primary_weapon = "WPN_WALK_TEST";
+		w::Seat seat;
+		seat.type = w::SeatType::Gunner;
+		seat.bone_index = 1;
+		gun.seats.push_back(seat);
+		const auto gun_handle = world.registry.spawn(1, gun);
+		CHECK(gun_handle.valid());
+		if (!gun_handle.valid()) return 1;
+		CHECK(world.vehicles.process_attach(npc, gun_handle, 1));
+		w::Entity &live_gun = *world.registry.get(gun_handle);
+		CHECK(live_gun.primary_weapon_owner == npc);
+		live_gun.primary_weapon_slot.next = w::weapon_action::kFire;
+		const int rounds_before = world.out.rounds.count;
+		role.run_tick(tick_input(0));
+		CHECK(live_gun.primary_weapon_slot.current == w::weapon_action::kFire);
+		CHECK(world.out.rounds.count == rounds_before + 1);
+		const int32_t last = (world.out.rounds.cursor + w::RoundRing::kCapacity - 1) %
+				w::RoundRing::kCapacity;
+		CHECK(world.out.rounds.records[static_cast<size_t>(last)].shooter_handle == npc.packed);
+	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");
 	return failures == 0 ? 0 : 1;

@@ -9,8 +9,9 @@
 // Grounding (Jointops.exe): the AI-brain allocation + init mirrors Entity_InitVehicleAI
 // @0x460200 (the generic AI initializer: scan unk_AED380 for a free 812-byte slot,
 // profile-by-name, a PER-ENTITY 32-byte scheduler at unk_B1FF80+32*slot, initial state 0,
-// spawn-transform copy). The nav table mirrors the waypoint populator XML_ParseGroupAction
-// @0x4cc450 (34-dword channel records over pool-3 marker nodes). See
+// spawn-transform copy). The nav table mirrors the BMS loader's waypoint block
+// (Mission_LoadBMSFile @0x40FB56: 34-dword channel records over pool-3 marker nodes;
+// XML_ParseGroupAction @0x4cc450 fills the same records for non-.bms missions). See
 // docs/world/world-wac-ai-re.md for the RE map + the tracked deviations below.
 #pragma once
 
@@ -102,10 +103,6 @@ struct PromoteOptions {
     // (0.5u); an authored wp_distance is used directly (<<16).]
     int32_t arrival_radius = 0x8000;
 
-    // AiBrain kSpeedA/kSpeedB (the per-node mover speed) when the real profile speed is
-    // unmodeled. Nonzero so routed entities visibly advance once locomotion (step 2) lands.
-    int32_t default_speed = 20;
-
     // Modeled seat metadata, keyed by the raw BMS type_id. The original derives these from
     // model userpoints/seat bones in Entity_FindBestSeatSlot @0x4351f0; hosts that load models
     // pass the extracted seat list here before promotion.
@@ -113,15 +110,12 @@ struct PromoteOptions {
 
     // The parsed .aip profiles, keyed by the BMS ai_textfile (name2, ASCII
     // case-insensitive, no extension). The parse (engine/formats/aip) carries
-    // the witnessed GROUND-type set — speeds stay raw authored values; the
-    // brain seed applies the x65536/225 scale (1000 x 1/225000 x 65536,
-    // truncated). Hosts that can read loose/PFF .aip files pass rows here
-    // before promotion; entities whose profile is absent keep the
-    // default_speed stand-in.
-    // [orig: AIProfile_ParseProperty @0x45de70 ("patrol_speed" -> profile+0xC0,
-    //  "combat_speed" -> profile+0xC4, the GROUND weapon blocks +120/+152);
-    //  Entity_InitVehicleAIFromDef seeds brain[49] = profile+0xC4 and
-    //  brain[50] = profile+0xC0 @0x4688C7/@0x4688D3, profile name = the slot
+    // the HELO and GROUND key sets with retail's parsed values. Hosts that can
+    // read loose/PFF .aip files pass rows here before promotion; a brain whose
+    // profile is absent runs on retail's zeroed record (speeds 0).
+    // [orig: AIProfile_ParseProperty @0x45de70; AIProfile_LoadOrFind @0x45FD80
+    //  memsets the record before the parse; the class inits read brain[49]/[50]
+    //  from their own offsets (aip::class_speed_words), profile name = the slot
     //  ai_textfile, def-level fallback itemDef+0x8B8, then "helo1"]
     struct AiProfileRow {
         std::string profile; // ai_textfile, lowercase
@@ -132,10 +126,8 @@ struct PromoteOptions {
     // Retail resolves a placed vehicle's profile NAME in three arms, and every
     // arm ends in a profile — a nameless vehicle never runs without one:
     //   * the helicopter AI-init family takes the record's ai_textfile, else
-    //     "helo1" [orig: Entity_InitHelicopterAI @0x461F00 — the +0x9C test
-    //      @0x461f2b, sprintf("%s.aip") @0x461f35, the "helo1.aip" arm @0x461f50;
-    //      Entity_InitHelicopterAIFromDef @0x4683C0, the same pair @0x4684a4/
-    //      @0x4684c9];
+    //     "helo1" [orig: Entity_InitHelicopterAIFromDef @0x4683C0 — the +0x9C
+    //      test @0x4684a4, the "helo1.aip" arm @0x4684c9];
     //   * the vehicle AI-init family takes the ai_textfile, else the item def's
     //     own default_aip (+0x8B8), else "helo1" [orig: Entity_InitVehicleAIFromDef
     //      @0x4686C0 — @0x4687a3 record name, @0x4687c1 def+0x8B8, @0x4687d3 "helo1",
@@ -178,14 +170,22 @@ std::string ai_profile_name_for(
         const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &defaults);
 
 // Shared spawn initialization; used by mission promotion and the BMS helper factory.
-// The profile copy: speeds, the flight/targeting fields, the class walk and the
-// GROUND weapon blocks. The parsed default_state (profile+0x18) is deliberately
+// The profile copy: the allocator's copies (aim/drive skill, alert), the
+// flight/targeting fields, the class walk and the weapon blocks. The parsed default_state (profile+0x18) is deliberately
 // NOT consumed — retail writes it at parse time and never reads it; every
 // vehicle-family brain starts in state 0 (initialize_vehicle_brain) and the
 // first family mover tick promotes it to PRETTY
 // [orig: AIProfile_ParseProperty @0x45ebf4 the only +0x18 store; no reader].
-void initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile,
-        world::AiSystem &ai, world::EntityKind kind);
+void initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile);
+// A placed or spawned item's class init, after the generic allocator: the speed
+// words brain[49]/[50] from the class's own profile offsets (the zeroed record's 0
+// when `profile` is null) and, for the helicopter family, the patrol-offset draw.
+// The family is the item's ai_function row (CHel/cpln vs cveh/cbot/ctrn), not
+// the profile type. [orig: Entity_InitHelicopterAIFromDef @0x4683C0 (speeds
+// @0x468597..0x4685A9, draw @0x4685ED..0x46863F); Entity_InitVehicleAIFromDef
+// @0x4686C0 (speeds @0x4688C1..0x4688D3)]
+void initialize_class_brain(world::AiEntity &entity, const aip::Profile *profile,
+        bool helicopter_init, world::AiSystem &ai);
 // The generic AI allocator's own brain seeds, shared by the BMS promote and the
 // teammate factory so a placed and a dynamically spawned vehicle brain start
 // identically: the three state words are the memset's zero read back, and the

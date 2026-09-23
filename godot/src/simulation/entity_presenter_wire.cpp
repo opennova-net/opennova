@@ -1078,13 +1078,19 @@ void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 						: String();
 				const float blend_weight =
 						p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
+				// Each channel poses its served ring entry (PF_ANIM_VARIANT /
+				// PF_ANIM_SOURCE_VARIANT).
+				const int32_t variant =
+						wfield_i(p, base, Simulation::PF_ANIM_VARIANT);
 				if (!source_key.is_empty() && blend_weight < 1.0f) {
 					model->play_body_blend_at(source_key,
 							wfield_i(p, base,
 									Simulation::PF_ANIM_SOURCE_PHASE_TICKS),
-							key, anim_phase, blend_weight);
+							key, anim_phase, blend_weight,
+							wfield_i(p, base, Simulation::PF_ANIM_SOURCE_VARIANT),
+							variant);
 				} else {
-					model->play_body_clip_at(key, anim_phase);
+					model->play_body_clip_at(key, anim_phase, variant);
 				}
 				return;
 			}
@@ -1100,7 +1106,8 @@ void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 			if (!source_key.is_empty()) {
 				model->play_body_clip_at(source_key,
 						wfield_i(p, base,
-								Simulation::PF_ANIM_SOURCE_PHASE_TICKS));
+								Simulation::PF_ANIM_SOURCE_PHASE_TICKS),
+						wfield_i(p, base, Simulation::PF_ANIM_SOURCE_VARIANT));
 				return;
 			}
 		}

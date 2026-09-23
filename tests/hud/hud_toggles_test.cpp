@@ -99,14 +99,15 @@ void test_showhud_goals_dotsize_and_view_actions() {
 	k.dotsize = false;
 	k.goals = false;
 	hud_toggles_poll(s, k);
-	// view1st clears the gun bit and selects first person; viewwithgun sets it.
+	// view1st clears the gun bit and selects first person; viewwithgun sets it
+	// and reports its own row (its input-action bit differs).
 	s.showhud_flags = 3;
 	k.view1st = true;
 	CHECK(hud_toggles_poll(s, k) == (kGunBitChanged | kFirstPersonSelected));
 	CHECK(s.showhud_flags == 2);
 	k.view1st = false;
 	k.viewwithgun = true;
-	CHECK(hud_toggles_poll(s, k) == (kGunBitChanged | kFirstPersonSelected));
+	CHECK(hud_toggles_poll(s, k) == (kGunBitChanged | kGunViewSelected));
 	CHECK(s.showhud_flags == 3);
 	k.viewwithgun = false;
 	k.viewchase = true;

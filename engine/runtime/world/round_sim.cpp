@@ -5,6 +5,8 @@
 
 #include <runtime/world/fire_sound.h>
 
+#include <formats/def/def.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -223,7 +225,7 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 // slope (infantry_slope_pass conform leg) and the torso roll chases in turn
 // (fp_roll = torso_roll + lean/4), so a living body visibly flinches and
 // settles back while a corpse tips onto the terrain.
-// [orig: Entity_HandleDamageTrigger gate @0x40755e; +0x05B05B00 @0x407564;
+// [orig: OrganicClass_HandleEvent gate @0x40755e; +0x05B05B00 @0x407564;
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
 //  @0x4078cc / @0x407918]
 void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
@@ -269,7 +271,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.waypoint_id = 0;
     piece.wp_number = 0;
     piece.ai_state = 0;
-    piece.ai_target = -1;
     piece.ai_target_refcount = 0;
     piece.ammo_damage_class.clear();
 
@@ -290,8 +291,6 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
 	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
     piece.use_gun_slot_swapped = false;
     piece.hidden = false;
-    piece.held = false;
-    piece.disabled = false;
     piece.last_attacker = EntityHandle{};
     piece.death_blast_center = Vec3{};
     piece.death_tick = 0;
@@ -495,6 +494,24 @@ Vec3 vec_from_fixed(const FixedVec3 &v) {
     return Vec3{static_cast<float>(from_fixed(v.x)),
                 static_cast<float>(from_fixed(v.y)),
                 static_cast<float>(from_fixed(v.z))};
+}
+
+// The record zeroed, then the striking round copied in.
+// [orig: Projectile_CopyEntityToHitRecord @0x4E7010: memset
+//  @0x4E7015..0x4E701A, position and angles @0x4E7023..0x4E7043, velocity
+//  @0x4E7046..0x4E7079, the round @0x4E707C, its owner @0x4E707F..0x4E7085]
+void copy_round_to_hit_record(HitRecord &record, const LiveRound &r,
+                              const FixedVec3 &velocity_q16) {
+    record = HitRecord{};
+    record.has_round = true;
+    record.round_pos = r.pos;
+    record.round_vel_q16 = velocity_q16;
+    record.round_yaw_bam = r.yaw_bam;
+    record.round_pitch_bam = r.pitch_bam;
+    record.round_roll_bam = r.roll_bam;
+    record.round_ammo_index = r.ammo_index;
+    record.round_owner = r.owner;
+    record.owner = r.owner;
 }
 
 // `surface_normal` is Entity_ApplyDragAndBounceForce's third argument: 0 for
@@ -749,6 +766,15 @@ RoundSourceState resolve_round_source(World &world,
     return source;
 }
 
+// A spawned round that is not SILENCED (ammo flag 8) marks its shooter with
+// Flags 0x4000, the SM scan's x6 priority weight until a perception scan
+// clears it; both Flags views carry the bit.
+void mark_round_shooter(Entity *shooter, const AmmoTableEntry &ammo) {
+    if (shooter == nullptr || (ammo.flags & def::DEF_AMMO_FLAG_SILENCED) != 0) return;
+    shooter->flags |= kEntityFlagPriorityTarget;
+    shooter->engine_flags |= kEntityFlagPriorityTarget;
+}
+
 void apply_round_recoil(const AmmoTableEntry &ammo,
                         const RoundSourceState &source) {
     if (!source.person_with_item_def || source.recoil_pitch == nullptr) return;
@@ -805,8 +831,7 @@ void record_round_fire(World &world, RoundSim &sim,
 
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z) {
-    return world.env.water_z != 0 &&
-           body_z_q16 + eye_offset_z < world.env.water_z;
+    return io::bam_add(body_z_q16, eye_offset_z) < world.env.water_z;
 }
 
 void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
@@ -816,6 +841,40 @@ void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 
 void projectile_apply_person_hit_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo) {
     apply_aerodynamic_drag(velocity, ammo, 0, 0, kPersonHitDragSurface);
+}
+
+void person_class_round_legs(World &world, Entity &victim, const HitRecord &record) {
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(record.round_ammo_index);
+    // The clip from the record's section and the round's approach
+    // quadrant, cause 1 [orig: OrganicClass_HandleEvent quadrant
+    // @0x407478, Entity_ComputeAnimSlotIndex call @0x407483].
+    const Vec3 vel = vec_from_fixed(record.round_vel_q16);
+    const int quadrant = death_quadrant_from_round(
+            bam_heading_from_mission_yaw_deg(victim.yaw), vel.x, vel.y);
+    victim.death_anim_state =
+            compute_death_anim_state(record.section, quadrant, death_cause::kBullet);
+    // The ammo's burn/force pair from the round's position, crediting its
+    // owner [orig: Entity_ApplyCollisionForce call @0x4074BA]. The ammo's
+    // burn emitter and its 173 clip (ammo dword +72) stay with D-ITEM-6,
+    // whose field source is unwitnessed [orig: @0x4074C7..0x40754A,
+    // @0x4076D3..0x4076D5].
+    if (ammo != nullptr)
+        apply_collision_force(world, victim, ammo->secondary_anim, ammo->kz_physics,
+                              record.round_pos, record.round_owner);
+    const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
+    // [orig: the torso-stack roll @0x40755E..0x407575]
+    if (!dead) apply_hit_body_roll(world.ai.for_handle(victim.handle), record.section, quadrant);
+    // Entity_OnDamageReceived(victim, ammo, owner): the local head here, the
+    // AI tail on the RoundHit drain [orig: the call @0x407588].
+    entity_on_damage_received(world, victim, ammo);
+    world.round_sim.hits.push_back(RoundHit{victim.handle, record.round_owner, 0});
+    // The authority cuts a non-player body on a numbered section.
+    // [orig: the gates @0x407598..0x4075F0, the clone @0x40768A..0x4076C9]
+    if (world.ai.is_authority && record.section > 0 && !dead &&
+            ((victim.flags | victim.engine_flags) & kEntityFlagPlayer) == 0)
+        try_spawn_dismemberment_piece(world, victim, record.round_vel_q16,
+                                      record.section, victim.death_anim_state,
+                                      /*was_alive=*/true);
 }
 
 void RoundSim::reset() noexcept {
@@ -834,6 +893,9 @@ void RoundSim::reset() noexcept {
 	trails.reset(); // [orig: the pool memset in CEffectEmitterPool_ResetAndBuildStyles
 	                //  @ 0x5db3b0, run from Game_StartMission]
 	remote_visual_tracer_counters_.clear();
+	// [orig: Projectile_InitDragTable's memset @0x4E7921..0x4E7929, run from
+	//  Game_StartMission @0x525729]
+	hit_record = HitRecord{};
 }
 
 void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
@@ -1160,6 +1222,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
     record_round_fire(world, *this, params);
     ++active_count;
+    // The shooter's fired mark precedes the recoil in the spawn tail [orig:
+    // RoundData_SpawnRound `test byte ptr [edi],8; jnz; or dword ptr
+    // [ebp+24h],4000h` @0x4EC842..0x4EC847].
+    mark_round_shooter(owner_ent, *ammo);
     // Same-shot ERROR used the old accumulator above. Recoil becomes visible
     // immediately but affects only later shots.
     // [orig: RoundData_SpawnRound @0x4EC8A3]
@@ -1240,6 +1306,11 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         if (first_slot < 0) first_slot = slot;
         ++active_count;
     }
+    // The shotgun fan marks its shooter after the pellets; the claymore fan
+    // does not [orig: Weapon_SpawnProjectileBurstWithSpread `test byte ptr
+    // [edi],8; jnz; or dword ptr [ebp+24h],4000h` @0x4EBE61..0x4EBE66;
+    // Weapon_SpawnProjectileBurst @0x4EB900 has no such write].
+    if (shotgun_spread) mark_round_shooter(owner_ent, ammo);
     return first_slot;
 }
 
@@ -1350,6 +1421,16 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             //  Player_OnDamageReceived @0x4dd880].
             if (target_not_dead && target->handle == world.cached.local_player && damage > 5)
                 player_on_damage_received(world);
+            // The record every event-1 callback reads, on both peers: this
+            // round, the damage, the struck section and the target.
+            // [orig: Projectile_ProcessDamageOnTarget
+            //  Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30
+            //  @0x4E81C9, +0x38 @0x4E81D2, +0x48 @0x4E81D7]
+            copy_round_to_hit_record(hit_record, r, velocity_q16);
+            hit_record.damage = damage;
+            hit_record.section =
+                    person_collision ? primary_section : collision.section_index;
+            hit_record.target = damage_entity;
             if (!authoritative && !peer_person_hit) {
                 // The hit callback executes on both peers; only the health
                 // subtraction and gameplay kill fan below require authority.
@@ -1357,6 +1438,12 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 destruction_notify_item_damage(world, *target, 1,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
             } else {
+                // The lethal edge reads the health word BEFORE this hit's
+                // subtraction: a body already at or below zero never re-enters
+                // the kill chain [orig: Projectile_ProcessDamageOnTarget
+                // @0x4E80F7..0x4E8101 `test ax, ax; jle`, damage >= health
+                // @0x4E810A].
+                const int32_t pre_hit_health = target->health;
                 if (authoritative && damage != 0) {
                     if (shooter != nullptr) {
                         auto &rel = world.script.relations;
@@ -1375,7 +1462,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     hits.push_back(RoundHit{damage_entity, r.owner, damage,
                                             primary_section, secondary_section});
                     if (damage_target_is_person) {
-                        // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
+                        // [orig: OrganicClass_HandleEvent @0x4074BA; twin @0x407822]
                         apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos, r.owner);
                     }
                     if (!damage_target_is_person) {
@@ -1398,11 +1485,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     // EVERY hit (lethal or not, damage 0 included) selects the
                     // death anim from the hit bone + attack quadrant into +0x2C0
                     // and tips the body on a torso-stack bone; a later kill
-                    // that stamps nothing (script/WAC) plays this hit's clip.
+                    // that stamps nothing (WAC kill/SSNHP/GroupHP) plays this
+                    // hit's clip, while killSSN and KillSingle clear it first
+                    // [orig: WacCmd_KillSsn @0x4F1EBD;
+                    // Entity_KillByNetId @0x43DC1B].
                     // The roll, the mask switch, and the anim selector all
                     // consume the SAME hit-record bone (hitRecord[14]);
                     // death_section is our preserved copy of that record field.
-                    // [orig: Entity_HandleDamageTrigger @0x407478 quadrant,
+                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant,
                     //  @0x407483 select, @0x40755e / @0x4075f6 gates;
                     //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
                     //  / @0x4078c6]
@@ -1419,12 +1509,17 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         AiEntity *victim_body = world.ai.for_handle(target->handle);
                         apply_hit_body_roll(victim_body, death_section, quadrant);
                         // The plyr callback re-arms the player body's 64-tick
-                        // think cadence on every event it handles.
-                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e / @0x407c71]
-                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0)
+                        // think cadence on every event it handles, around its
+                        // waypoint tail.
+                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e /
+                        //  @0x407c71; the tail @0x407B64..0x407C6B]
+                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
                             target->spawn_phase = 64;
+                            player_body_waypoint_visits(world, *target);
+                        }
                     }
-                    if (authoritative && damage != 0 && target->health <= 0) {
+                    if (authoritative && damage != 0 && pre_hit_health > 0 &&
+                        target->health <= 0) {
                         // A lethal player-flag hit counts on the ROUND; past the
                         // first kill the victim takes the same-projectile cause
                         // bit 0x100 before the death is reported.
@@ -1452,10 +1547,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         // cause bits at the death edge [orig: @0x516f4d /
                         // @0x517188..0x517206]; the sim snapshots them here.
                         d.event_flags = target->cause_flags & 0xF00u;
+                        // The kill accounting skips a body already flagged
+                        // dead [orig: `test byte ptr [esi+24h], 2` @0x4E811F
+                        // around Score_ProcessKillEvent @0x4E8133].
+                        d.kill_event = target_not_dead;
                         deaths.push_back(d);
                     }
                 } else if (authoritative && damage != 0) {
-                    if (target->health <= 0) {
+                    if (pre_hit_health > 0 && target->health <= 0) {
                         world.script.relations.group(target->group_id).alert =
                             TriggerRelations::kAlertRed;
 
@@ -1467,6 +1566,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         d.adm_index = r.adm_index;
                         d.ammo_index = r.ammo_index;
                         d.event_flags = target->cause_flags & 0xF00u;
+                        d.kill_event = target_not_dead; // [orig: @0x4E811F]
                         deaths.push_back(d);
                     }
                 } else if (authoritative && target->kind != EntityKind::Organic &&
@@ -1941,6 +2041,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
             imp.effect_tag =
                 (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
+            // The terrain handler records the round with no damage, section
+            // or target [orig: Projectile_HandleTerrainImpact
+            // @0x4E9319..0x4E932B].
+            copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = 11;
         } else if (person_collision) {

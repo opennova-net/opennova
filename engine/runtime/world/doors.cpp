@@ -7,7 +7,10 @@
 
 namespace opennova::world {
 
-// [orig: Entity_SpawnFromBMSRecord @0x40F230..0x40F2F4]
+// [orig: Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA — the door-count loop
+//  over FadeEffect_AllocateSlot @0x40F288, the first slot to the entity
+//  @0x40F292, the def +0x8A0 / +0x89C words into the slot
+//  @0x40F2BB..0x40F2CC]
 void DoorSystem::initialize(Entity &entity, int32_t step, int32_t max_angle) {
     if (entity.door_initialized) return;
     entity.door_initialized = true;

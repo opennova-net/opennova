@@ -35,6 +35,7 @@ struct Fixture {
         for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 8);
         Entity e;
         e.net_id = 1; e.item_id = 11; e.has_item_def = true;
+        e.item_type_index = 7; // the def row's ordinal (+0x1C)
         e.kind = EntityKind::Organic; e.item_type = 3; e.health = 100;
         actor = world.registry.spawn(0, e);
         world.cached.local_player = actor;
@@ -79,18 +80,25 @@ static void test_animation_reaches_motor_and_preserves_pending() {
     // The raw type index, not health or the resolved ItemDef, gates SSNanim.
     f.entity().health = 0;
     f.entity().has_item_def = false;
-    f.script("SSNanim(1,116) store(v2)\n");
+    f.script("SSNanim(1,emote_2) store(v2)\n");
     CHECK(f.world.script.vars.get_mission(2) == 1 && inf.anim_state == 116);
-    f.entity().item_id = 0;
-    f.script("SSNanim(1,117) store(v3)\n");
+    f.entity().item_type_index = 0;
+    f.script("SSNanim(1,emote_3) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(3) == 0 && inf.anim_state == 116);
-    f.script("anim(118) store(v4)\n"); // local command only checks allocation
+    f.script("anim(emote_4) store(v4)\n"); // local command only checks allocation
     CHECK(f.world.script.vars.get_mission(4) == 0 && inf.anim_state == 118);
     CHECK(inf.anim_pending == 149);
+    // Every Anim operand is a state NAME, numbers included: "anim_118" names
+    // nothing, so the slot holds 0 with the first error "Unknown ANIM".
+    // [orig: WacScript_ResolveParameter @0x4F2EF2..0x4F2F91]
     CompileEnv env;
-    CHECK(!compile_source("anim(ANIM_missing_state)\n", env).ok());
+    for (const char *source : {"anim(ANIM_missing_state)\n", "anim(118)\n"}) {
+        const Program missing = compile_source(source, env);
+        CHECK(missing.ok() && missing.diagnostics.size() == 1 &&
+                missing.diagnostics[0].message == "Unknown ANIM");
+    }
     f.world.cached.local_player = {};
-    f.script("anim(119) store(v5)\n");
+    f.script("anim(emote_5) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(5) == 1 && inf.anim_state == 118);
 }
 
@@ -109,7 +117,7 @@ static void test_force_animation_think_cadence_and_retry() {
     CHECK(f.body().inf.anim_state == 115);
     CHECK(f.body().inf.anim_pending == 149); // equality skips the arbiter
     CHECK(f.body().inf.move_mode == 0 && f.body().inf.target_dist == 0);
-    f.script("forceanim(0)\n");
+    f.script("forceanim(reset)\n");
     f.world.restore(baseline);
     CHECK(f.world.script.forced_animation == 115);
     f.world.load_systems();
@@ -117,7 +125,7 @@ static void test_force_animation_think_cadence_and_retry() {
 
     f.body().inf.is_local_player = true;
     f.body().inf.reset_body_animation();
-    f.script("forceanim(115)\n");
+    f.script("forceanim(emote_1)\n");
     f.world.ai.tick_infantry(f.body(), f.world, 12);
     CHECK(f.body().inf.anim_state != 115); // org2 has no forced-state consumer
 
@@ -201,7 +209,8 @@ static void test_dropflare_reaches_round_sim_and_checks_itemdef() {
     f.script("dropflare(1) store(v2)\n");
     CHECK(f.world.script.vars.get_mission(2) == 0 && f.world.out.rounds.count == 2);
     f.entity().has_item_def = true;
-    f.entity().item_id = 0; // +0x1C is not this command's gate
+    f.entity().item_id = 0;
+    f.entity().item_type_index = 0; // +0x1C is not this command's gate
     f.entity().health = 0;
     f.body().profile.type = 2;
     f.script("dropflare(1) store(v3)\n");
@@ -230,11 +239,11 @@ static void test_turn_reaches_the_motor_and_org2_word() {
     CHECK(f.body().inf.target_heading == -11927552);
     f.script("ssnturn(1,65536)\n");
     CHECK(f.body().inf.target_heading == 0x40000000); // wrapped first shift
-    f.entity().item_id = 0;
+    f.entity().item_type_index = 0;
     f.script("ssnturn(1,90) store(v3)\n");
     CHECK(f.world.script.vars.get_mission(3) == 0);
     CHECK(f.body().inf.target_heading == 0x40000000);
-    f.entity().item_id = 11;
+    f.entity().item_type_index = 7;
 
     for (int player_kind = 0; player_kind < 3; ++player_kind) {
         f.body().inf.is_local_player = player_kind == 0;
@@ -246,7 +255,7 @@ static void test_turn_reaches_the_motor_and_org2_word() {
         CHECK(f.body().inf.target_heading == 0x40000000);
     }
     Entity prop;
-    prop.net_id = 2; prop.item_id = 12; prop.yaw = 17;
+    prop.net_id = 2; prop.item_id = 12; prop.yaw = 17; prop.item_type_index = 7;
     const auto h = f.world.registry.spawn(2, prop);
     f.script("ssnturn(2,0) store(v4)\nssnturn(99,0) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(4) == 1);
@@ -279,7 +288,6 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     f.body().heading = 111; f.body().pitch = 222; f.body().roll = 333;
     f.body().inf.vel[0] = 17; f.body().inf.vel[1] = -21; f.body().inf.vel[2] = 91;
     f.body().inf.jump_cooldown = 7;
-    f.world.add_system(&f.world.ai);
     f.world.ai.capture_spawn_baseline(); // MissionKernel seals both owners
     const auto baseline = f.world.snapshot();
 

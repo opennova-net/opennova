@@ -481,8 +481,7 @@ bool run_non_drivable_hover_seed() {
 		brain->brain.f[w::AiBrain::kWorkPosZ] = w::to_fixed(60);
 		brain->brain.f[137] = w::to_fixed(25);
 		r.world.vehicles.traits.set(heli->item_id, r.traits);
-		opennova::devtools::ProfileLap lap(r.world.profile);
-		r.world.vehicles.tick_motors(true, lap);
+		r.world.vehicles.update_motor(*heli, true);
 		ok &= expect(heli->veh.net_climb == (player_control ? 0 : w::to_fixed(25)),
 				"only a drivable aircraft without a pilot clears collective");
 		ok &= expect(heli->veh.net_alt_target == (player_control ? w::to_fixed(40) - 0x4000 : w::to_fixed(65)),

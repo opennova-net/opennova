@@ -18,6 +18,7 @@
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
 #include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <runtime/world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
@@ -186,16 +187,18 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			py = world::to_fixed(e->position.y);
 			pz = world::to_fixed(e->position.z);
 			// §5.29 wire yaw is an i16 the client <<16 to a 16.16 BAM = the high half of the engine-frame
-			// heading (90 - mission_yaw); matches snapshot_of / pose_for_conn (D-NET-86).
-			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
-			yaw = static_cast<int16_t>((static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			// heading (90 - mission_yaw); matches snapshot_of / pose_for_conn (D-NET-86). The fresh
+			// player's angles are its start marker's placement angles, so the high halves are the
+			// spawn angles' (world::spawn_angle_bam, low half zero) [orig:
+			// NetPacket_WriteWorldStateLoad0x0F `movzx edx, word ptr [ebp+12h]` @0x502D6D].
+			yaw = static_cast<int16_t>(world::spawn_angle_bam(90 - e->yaw) >> 16);
 			// Pitch/roll are pure degree-to-BAM axes (no frame inversion); the
 			// wire carries their 16.16 high words and the retail joiner applies
 			// them straight onto its local entity (<<16) at every 0x0F.
 			// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D80 (pitch hi)
 			//  / @0x502D9A (roll hi); NapiNPClientMsg_0x00F @0x42E3E9/@0x42E3F2]
-			pitch = static_cast<int16_t>((static_cast<int64_t>(e->pitch) * kBamPerDegree) >> 16);
-			roll = static_cast<int16_t>((static_cast<int64_t>(e->roll) * kBamPerDegree) >> 16);
+			pitch = static_cast<int16_t>(world::spawn_angle_bam(e->pitch) >> 16);
+			roll = static_cast<int16_t>(world::spawn_angle_bam(e->roll) >> 16);
 			recipient_team = e->team;
 		}
 	}

@@ -101,6 +101,9 @@ enum : int {
     kDraggerWalk = 138,
     kGuard = 140,
     kGuardLook = 141,
+    kGuardAttack = 142, // [orig: g_animStateNameTable @0x8135F0 142..144 =
+    kGuardCover = 143,  //  guard_attack / guard_cover / guard_leave]
+    kGuardLeave = 144,
     kWoundedWalk = 145,
     kWoundedRun = 146,
     kStop = 147,
@@ -154,7 +157,7 @@ int compute_death_anim_state(int bone_index, int quadrant, int cause);
 
 // The bullet-death attack quadrant: 0 forward / 1 right / 2 back / 3 left, from the
 // victim's engine heading and the killing round's horizontal velocity.
-// [orig: Entity_HandleDamageTrigger @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
+// [orig: OrganicClass_HandleEvent @0x407478 — (yaw - atan2BAM(vel.y, vel.x)
 // - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
 int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
@@ -167,6 +170,16 @@ int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, flo
 //  @0x407b4d..0x407b4f (damageType not in {4,1,3,5} -> +0x2C &= 0xFFFFF0FF);
 //  @0x407b5e / @0x407c71 (spawnPhase = 64)]
 void player_body_class_think(Entity &body);
+
+class World;
+// The plyr class callback's waypoint tail, run on every event it handles for a
+// live body: a team 1 or 2 player whose AI slot carries a route channel
+// (slot+0x94) marks every node of that channel within the node's octagonal
+// radius (the larger axis gap plus half the smaller, each gap and the sum
+// compared unsigned against the marker's radius word) as visited by its team
+// (the relation group row) and by itself (its SSN row).
+// [orig: Entity_HandleDamageAndTriggerZones @0x407B64..0x407C6B]
+void player_body_waypoint_visits(World &world, const Entity &body);
 
 // The org0 skin bone-callback's DEATH register (CTRL ordinal 6, the corpse fade):
 // a dead body ramps 0xFFFF -> 0 over the 186 ticks its move timer (entity+0x148,
@@ -228,7 +241,7 @@ inline int gait_stance_transition_clip(int current, int target) {
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
 // [orig: g_animStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
-// @0x4EC252..0x4EC27A]
+// @0x4EC251..0x4EC27A]
 inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
 inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
 
@@ -275,12 +288,15 @@ public:
         return advance_variant(adm_id, state_id, variant, phase_ticks, out);
     }
     // Advance a stable primary plus the current target and return their blended
-    // output. The default composes already-quantized RootMotionFrames for test and
-    // headless providers. Asset-backed providers may override this to blend raw
-    // track floats before fixed conversion, as retail does.
+    // output, each channel on its own served ring entry. The default composes
+    // already-quantized RootMotionFrames for test and headless providers.
+    // Asset-backed providers may override this to blend raw track floats before
+    // fixed conversion, as retail does.
     virtual bool advance_blended(int adm_id,
-                                 int primary_state, int32_t &primary_phase_ticks,
-                                 int target_state, int32_t &target_phase_ticks,
+                                 int primary_state, int primary_variant,
+                                 int32_t &primary_phase_ticks,
+                                 int target_state, int target_variant,
+                                 int32_t &target_phase_ticks,
                                  float target_weight, RootMotionFrame &out);
     // Clip length for a state's track, in the phase-tick convention advance() uses
     // (simulation ticks), or -1 when the state has no track. The weapon channel's
@@ -291,8 +307,8 @@ public:
     // entry's length is the promotion clock: the state-entry ring rotate re-inits
     // the channel from the served entry, so every later length/keyframe read runs
     // on that clip [orig: table rotate @0x40b740-0x40b749; the channel's own
-    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. The body
-    // channel has no ring and passes variant 0; a provider without rings ignores it.
+    // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. Both
+    // channels pass their served entry; a provider without rings ignores it.
     virtual int32_t clip_length_ticks(int adm_id, int state_id, int variant) const = 0;
     // Whether the state's track loops — the channel's own loop bit, seeded from
     // the clip data flags [orig: AnimChannel_InitFromData flag word @0x410577;
@@ -310,6 +326,46 @@ public:
                 ? (phase_ticks / length + 1) * length : length;
     }
 
+};
+
+// The variant-ring heads of every loaded .adm. Retail keeps ONE table of ring
+// heads per loaded .adm (the AnimMap entry's state-indexed node array), and every
+// AnimMap slot linked to that entry reads it: both channels of every body using
+// the .adm. A channel re-init onto state S plays table[S]'s node and advances
+// table[S] to the node's ring link. Registration inserts each token of a row
+// ahead of the head and points the table at it, so the table starts on the
+// row's LAST token and the ring runs backwards through the file order:
+// successive plays of S, by any channel of any body sharing the .adm, serve the
+// row's entries last to first, then wrap to the last again (an unauthored
+// state serves the reset row). A single-clip row always serves its one entry.
+// Entry indices are file order (the variant index every clip source uses).
+// [orig: AnimMap_LoadAdmFile @0x40CC40 reuses the entry by name (the
+//  AnimMap_FindByName call @0x40CD2F, the template slot @0x40CD4F);
+//  AnimMap_RegisterEntity @0x40BB60 links both slots to it through
+//  AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77); the ring
+//  insert AnimMap_RegisterBoneNode @0x40C2D0 (node->next = head @0x40C37F,
+//  tail->next = node @0x40C382, table = node @0x40C385; a first token or the
+//  reset slot self-rings @0x40C38B..0x40C38F); the re-init AnimMap_UpdateEntity
+//  @0x40B737..0x40B778]
+class AnimVariantRings {
+public:
+    // The ring entry a re-init of `state` plays, advancing that state's head.
+    // Call only when the channel actually re-inits.
+    int32_t serve(const IRootMotionSource *source, int adm_id, int state) {
+        const int count = source != nullptr ? source->variant_count(adm_id, state) : 1;
+        if (count <= 1) return 0;
+        // Plays of this state so far, modulo the ring: play p serves the entry
+        // p steps back from the last.
+        int32_t &plays = heads_[(static_cast<int64_t>(adm_id) << 32) |
+                                static_cast<uint32_t>(state)];
+        const int32_t step = plays % count;
+        plays = (step + 1) % count;
+        return count - 1 - step;
+    }
+    void clear() { heads_.clear(); }
+
+private:
+    std::unordered_map<int64_t, int32_t> heads_;
 };
 
 struct InfantryState {
@@ -330,9 +386,15 @@ struct InfantryState {
     int move_mode = 0;
     int32_t target_dist = 0;
     int32_t arrival_radius = 0;
-    // The goal. Retail persists only its Z (entity+0x304, every moving selection
-    // @0x4BD3F7 and the S stamp @0x4BB852); the X/Y are per-think frame locals.
+    // The think's goal: per-think frame locals (rayEnd) the legs write and the
+    // selector and detour read.
     int32_t move_target[3] = {};
+    // The goal Z retail persists (entity+0x304): written only by a moving
+    // selection, the S stamp and the organic init, read by the self-attachment
+    // floor and the AiClimb chase. A move a later leg cancels never reaches it.
+    // [orig: Entity_UpdateInfantryAI @0x4BD3F7 / @0x4BB852, reads @0x4BF653 /
+    //  @0x4BF6C7; Entity_InitOrganicAI @0x4BFE07]
+    int32_t goal_z = 0;
     // The authored S point the self-attachment chase pulls toward while
     // attach_parent == self. Written only by the S stamp, read only by the chase.
     // [orig: entity+0x2FC/+0x300; stamp @0x4BB846/0x4BB84C, chase @0x4BF636/0x4BF63C]
@@ -356,7 +418,7 @@ struct InfantryState {
     // The request is entity+0x2BC; the playing id is AnimMap slot+0x3C.
     // Body selection only writes the request. The next motor-head update
     // commits it and advances the corresponding playheads together.
-    // [orig: AnimMap_UpdateEntity @0x40B633..0x40B779]
+    // [orig: AnimMap_UpdateEntity @0x40B630..0x40B778]
     int anim_playing_state = -1;
     int32_t clip_phase = 0;
     // The primary AnimMap keeps both playheads alive while it cross-fades state
@@ -367,6 +429,13 @@ struct InfantryState {
     int32_t anim_prev_clip_phase = 0;
     float anim_blend_weight = 1.0f;
     float anim_blend_step = 0.0f;
+    // The primary channel's served ring entries (AnimVariantRings): the playing
+    // target's and the outgoing channel's. Root motion, the promotion clock and
+    // the drawn clip all run on the served entry.
+    // [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 re-inits the channel from
+    //  the served node; slot+0x44 = the node @0x40B76F]
+    int32_t anim_variant = 0;
+    int32_t anim_prev_variant = 0;
 
     int body_clip_state() const {
         return anim_playing_state >= 0 ? anim_playing_state : anim_state;
@@ -380,8 +449,9 @@ struct InfantryState {
 
     // `blend_key_state` is the state whose flags pick the blend duration when
     // it differs from the played clip (the gait->stance insert); -1 = the
-    // target itself.
-    void begin_body_transition(int target_state, int blend_key_state = -1) {
+    // target itself. `variant` is the ring entry this re-init serves.
+    void begin_body_transition(int target_state, int blend_key_state = -1,
+                               int32_t variant = 0) {
         const int playing = body_clip_state();
         anim_state = target_state;
         anim_playing_state = target_state;
@@ -395,7 +465,9 @@ struct InfantryState {
         if (!body_blend_active()) {
             anim_prev = playing;
             anim_prev_clip_phase = clip_phase;
+            anim_prev_variant = anim_variant;
         }
+        anim_variant = variant;
         anim_pending = 0;
         clip_phase = 0;
         anim_blend_weight = 0.0f;
@@ -428,6 +500,8 @@ struct InfantryState {
         anim_prev_clip_phase = 0;
         anim_blend_weight = 1.0f;
         anim_blend_step = 0.0f;
+        anim_variant = 0;
+        anim_prev_variant = 0;
         last_events = 0;
         prev_capsule_bottom = 0;
     }
@@ -463,6 +537,7 @@ struct InfantryState {
         leg_yaw[0] = leg_yaw[1] = heading;
         leg_target[0] = leg_target[1] = heading;
         vel[0] = vel[1] = vel[2] = 0;
+        z_quarter_step = 0; // [orig: Entity_ResetToSpawnState @0x4B967A]
         stance = Stance::kStand;
         stance_sound_state = 0;
         burn_state = 0;
@@ -501,11 +576,10 @@ struct InfantryState {
     int32_t wpn_prev_clip_phase = 0;
     float wpn_blend_weight = 1.0f;
     float wpn_blend_step = 0.0f;
-    // The secondary channel's variant-ring cursor. A .adm row may list several
-    // clips; the slot is a circular list served-then-advanced per play, so
-    // repeated plays of one state rotate through its clips.
+    // The secondary channel's served ring entries (AnimVariantRings, the heads
+    // this channel shares with the primary and with every body of its .adm).
     // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token;
-    //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
+    //  AnimMap_UpdateDualChannels @0x40B8C0 runs the same re-init for it]
     int32_t wpn_variant = 0;
     int32_t wpn_prev_variant = 0; // the outgoing clip's served variant
 
@@ -519,12 +593,9 @@ struct InfantryState {
     // Re-init the secondary channel onto `target_state`, keeping the outgoing
     // clip alive for the blend window. Mirrors begin_body_transition: retargeting
     // an in-flight A->B blend keeps A as the stable outgoing and replaces only B.
-    // `ring_size` is the target state's variant count (1 = no ring); the play
-    // serves the ring HEAD as this play's variant and advances the head, so the
-    // latched wpn_variant follows the served entry while the head moves on
-    // [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
-    //  animState+68 = animEntry].
-    void begin_weapon_transition(int target_state, int ring_size = 1) {
+    // `variant` is the ring entry this re-init serves; the latched wpn_variant
+    // follows it while the shared head moves on.
+    void begin_weapon_transition(int target_state, int32_t variant = 0) {
         const int playing = weapon_clip_state();
         wpn_state = target_state;
         wpn_playing_state = target_state;
@@ -540,20 +611,7 @@ struct InfantryState {
                 (infantry_anim_flags(target_state) & 0x400u) != 0
                         ? (1.0f / 15.0f)
                         : 0.1f;
-        wpn_variant = wpn_ring_serve(target_state, ring_size);
-    }
-
-    // The per-state ring HEADS for this entity's secondary channel: the served
-    // index per state, advanced on every play [orig: the per-entity animState
-    // slot array +72 — each slot's list cursor]. Sparse; states never played sit
-    // at head 0. Cleared with the channel.
-    std::unordered_map<int, int32_t> wpn_ring_heads;
-    int32_t wpn_ring_serve(int state, int ring_size) {
-        if (ring_size <= 1) return 0;
-        int32_t &head = wpn_ring_heads[state];
-        const int32_t served = head % ring_size;
-        head = (served + 1) % ring_size;
-        return served;
+        wpn_variant = variant;
     }
 
     void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {
@@ -567,7 +625,6 @@ struct InfantryState {
         wpn_blend_step = 0.0f;
         wpn_variant = 0;
         wpn_prev_variant = 0;
-        wpn_ring_heads.clear();
     }
     // The 3P reload-anim window: 80 ticks, stamped by the reload refill and counted
     // down once per tick; while nonzero the weapon channel wants state 65 reload
@@ -588,7 +645,7 @@ struct InfantryState {
     // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
     // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_weaponScopeActive,
     // Flags|8 from g_binocularsRaised (the case-26 input toggle @ 0x4e064c, forced
-    // off when dead / spawn-gated / inputFlags&0x1E; no host binoculars input yet)].
+    // off when dead / spawn-gated / inputFlags&0x1E)].
     bool scope_raised = false;
     bool binoculars_raised = false;
     // The arms-dip feed (entity+0x371 byte / +0x36C pitch-kick term): while the
@@ -690,6 +747,13 @@ struct InfantryState {
     int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
     int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
+    // The org1 vertical quarter step (entity+0xAC): an even key tick keeps only a
+    // quarter of what gravity, the resolver, the ladder and the water blocks did to
+    // Z since the post-integrate save and stores that quarter here; the odd key tick
+    // skips all of them and adds this value again. [orig: Entity_UpdateInfantryAI
+    // save @0x4BF6BA / landing re-save @0x4BF808, tail @0x4BFC65..0x4BFC7D, odd
+    // re-apply @0x4BFC80; zeroed by Entity_ResetToSpawnState @0x4B967A]
+    int32_t z_quarter_step = 0;
 
     // Debug-card taps (not engine state): this tick's integrated root step and
     // the collision resolver's horizontal correction — the frozen-clump
@@ -855,5 +919,24 @@ struct AiEntity;
 //  clears is @0x4b9714]
 void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
                            int16_t health);
+
+class World;
+
+// Whether `victim` is an org1 (NPC) body whose own motor death edge raises its
+// death transaction (the 0x13 + scoring), so the host's damage-time death record
+// for it only feeds the SP kill tally. Player bodies and organics without a live
+// motor keep the damage-time transaction.
+// [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath
+//  @0x51B550; Score_ProcessKillEvent @0x4FD400 from the damage paths only]
+bool org1_owns_death_transaction(const World &world, EntityHandle victim);
+
+// A person's ride link, refreshed by both organic think blocks: the occupant
+// (+0x170) of the entity it stands on (+0x28), else of that entity's own
+// ground entity, when it is another same-team body, becomes the person's own
+// +0x170 and climbs the +0x174 hold by 4 while under 0xF0; a think without it
+// spends one hold tick and clears the link once the hold is spent. Defined in
+// infantry_board.cpp. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905;
+// Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
+void infantry_ride_link(World &world, Entity &self);
 
 } // namespace opennova::world

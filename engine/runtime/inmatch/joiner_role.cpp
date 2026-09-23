@@ -729,6 +729,15 @@ void JoinerRole::pump() {
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
 	apply_weather_sample();
+	// A folded S2C 0x1D raises this client's round-over gate before the
+	// frame's entity update, which the gate then holds; a fresh runtime (a
+	// reset counter) latches nothing.
+	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+	//  @0x430858; Game_ProcessMainFrame -- the is_in_session /
+	//  g_spawn_success_gate tests @0x526734..0x526742]
+	const uint32_t end_round_headers = rt.state().end_round.header_updates;
+	if (end_round_headers > end_round_headers_seen_) world.match.latch_round_over();
+	end_round_headers_seen_ = end_round_headers;
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
 	const bool preround_active = world.preround_delay_seconds != 0;
@@ -736,7 +745,6 @@ void JoinerRole::pump() {
     // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
-    world.rules.session_open = true;
 	world.rules.mpattrib = rt.view().mp_attributes();
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
@@ -761,10 +769,11 @@ void JoinerRole::pump() {
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	mirror_mission_entities();
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
-	// The local mounted body was seat-posed earlier in AiSystem::tick, before
-	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
-	// final same-frame transform so the camera/view never trails its seat by one
-	// mover tick. Remote riders were recomposed in ClientState just above.
+	// The local mounted body was seat-posed earlier in the entity update's
+	// pool-0 walk, before the joiner-only vehicle prediction pass. Re-pose L
+	// against the vehicle's final same-frame transform so the camera/view never
+	// trails its seat by one mover tick. Remote riders were recomposed in
+	// ClientState just above.
 	if (!preround_active && world.cached.local_player.valid()) {
 		if (world::AiEntity *local_ai =
 				world.ai.for_handle(world.cached.local_player)) {
@@ -1361,7 +1370,7 @@ void JoinerRole::apply_authoritative_health() {
 					local_ai->body_pitch = 0;
 					local_ai->health = health;
 					local_ai->vel_x = 0;
-					local_ai->vel_z = 0;
+					local_ai->vel_y = 0;
 					local_ai->net_smooth_target[0] = self->x;
 					local_ai->net_smooth_target[1] = self->y;
 					local_ai->net_smooth_target[2] = self->z;
@@ -2024,6 +2033,29 @@ void JoinerRole::apply_gameplay_events() {
 				world.diagnostics.record({world::RuntimeGapKind::WacCommand,
 						command.command_index, 0, -1, -1}, world.logic_tick);
 		}
+	}
+
+	// S2C 0x3F: kind 0 re-runs the objective notification here with relay
+	// flag 0 (off the authority it posts the chat lines and relays nothing),
+	// then NEW_GOAL at the local player for flag 1. Kind 1, and the kind-0
+	// arm's fall-through into the same reads, is the mission-text chat relay:
+	// the key resolves in this peer's mission text and a non-empty line posts
+	// (a kind-0 body has no tail, so its empty key posts nothing).
+	// [orig: NapiNPClientMsg_0x03F @0x42BB20 — HUD_ShowObjectiveNotification
+	//  @0x42bbc2, NEW_GOAL @0x42bbc7..0x42bbe4, MissionText_GetStringByKey
+	//  @0x42bc26 -> GameMsg_AddChatLineAndRelay @0x42bc39 (its line gate
+	//  @0x5ba170..0x5ba18d)]
+	for (const ObjectiveNotification &notice : rt.drain_objective_notifications()) {
+		if (notice.kind == 0) {
+			world.show_objective_notification(notice.slot, notice.is_win, notice.is_active, 0);
+			if (notice.flag == 1) {
+				if (const world::Entity *player = world.registry.get(world.cached.local_player))
+					world.out.fire_sounds.play_immediate("NEW_GOAL", player->position, 0);
+			}
+		}
+		if ((notice.kind == 0 || notice.kind == 1) && !notice.key.empty() &&
+				(world.rules.mp_session_peer || !world.rules.mp_session))
+			world.out.effects.push({"mission_text_chat", notice.team, 0, 0, 0, notice.key});
 	}
 
 	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the

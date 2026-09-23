@@ -240,7 +240,10 @@ void Simulation::_bind_methods() {
 			&Simulation::request_local_player_nvg_toggle);
 	ClassDB::bind_method(D_METHOD("request_local_player_nvg_gain", "delta"),
 			&Simulation::request_local_player_nvg_gain);
-	ClassDB::bind_method(D_METHOD("set_local_player_third_person_selected", "selected"), &Simulation::set_local_player_third_person_selected);
+	ClassDB::bind_method(D_METHOD("apply_local_player_view_action", "action"), &Simulation::apply_local_player_view_action);
+	BIND_CONSTANT(VIEW_ACTION_FIRST_PERSON);
+	BIND_CONSTANT(VIEW_ACTION_WITH_GUN);
+	BIND_CONSTANT(VIEW_ACTION_CHASE);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
 	ClassDB::bind_method(D_METHOD("present_local_player_view"), &Simulation::present_local_player_view);
@@ -509,6 +512,8 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_WPN_BLEND_WEIGHT);
 	BIND_ENUM_CONSTANT(PF_WPN_VARIANT);
 	BIND_ENUM_CONSTANT(PF_WPN_SOURCE_VARIANT);
+	BIND_ENUM_CONSTANT(PF_ANIM_VARIANT);
+	BIND_ENUM_CONSTANT(PF_ANIM_SOURCE_VARIANT);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
 	BIND_ENUM_CONSTANT(PF_LOCAL_VIEW_SUPPRESSED);
 	BIND_ENUM_CONSTANT(PF_ALIVE);

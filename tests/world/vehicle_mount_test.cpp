@@ -13,6 +13,9 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/entity_pose.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
@@ -21,6 +24,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -45,6 +49,7 @@ VehicleTraits truck_traits() {
     t.turn_rate = 45 * 192426;
     t.turn_rate2 = 30 * 192426;
     t.player_control = true;
+    t.brain_class = VehicleBrainClass::Ground; // ai_function cveh: the vehicle machine
     return t;
 }
 
@@ -64,6 +69,7 @@ struct Rig {
         veh.kind = EntityKind::Item;
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
         veh.item_id = 1294;
+        veh.item_type_index = 7; // the def row's ordinal, the script gates' +0x1C
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.yaw = 0;
         veh.health = 2000;
@@ -188,11 +194,13 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
 }
 
 // Entity_RequestVehicleAttach pre-snaps the requester's Yaw to the chosen seat
-// before the authority applies the relationship. UseGun subtracts its authored
-// offset. Our split local-player body must update target_heading too; otherwise
-// pose_if_mounted immediately restores the pre-attach look and swings the gun/body
-// overlay away from the authored neutral pose.
-// [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg @0x43656c]
+// before the authority applies the relationship. A UseGun seat faces the
+// requester along the gun: the gun's own Yaw less its stored yaw word (+0x322)
+// shifted up; the seat userpoint's facing turns only the carried body frame.
+// Our split local-player body must update target_heading too; otherwise
+// pose_if_mounted immediately restores the pre-attach look.
+// [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg
+//  @0x43655F..0x43656E (the subtract @0x43656c)]
 void test_usegun_attach_presnaps_local_look() {
     World w;
     AiSystem &ai = w.ai;
@@ -210,6 +218,7 @@ void test_usegun_attach_presnaps_local_look() {
     usegun.source_name = "UseGun";
     usegun.yaw_offset = 12;
     gun.seats.push_back(usegun);
+    gun.emplaced_gun_yaw_word = 0x0400; // a previous gunner left it traversed
     const EntityHandle gun_h = w.registry.spawn(1, gun);
 
     Entity player;
@@ -229,9 +238,10 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.look_pitch = 0x12345678;
 
     CHECK(w.vehicles.process_attach(player_h, gun_h, 6));
-    const int16_t expected_yaw = 23; // vehicle yaw 35 - UseGun offset 12
-    const int32_t expected_heading =
-            bam_heading_from_mission_yaw_deg(expected_yaw);
+    const int16_t expected_yaw = 23; // the carried frame: vehicle yaw 35 - UseGun offset 12
+    // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432 less
+    // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+    const int32_t expected_heading = 589037568;
     CHECK(w.registry.get(player_h)->yaw == expected_yaw);
     CHECK(body.heading == expected_heading);
     CHECK(body.inf.target_heading == expected_heading);
@@ -239,7 +249,9 @@ void test_usegun_attach_presnaps_local_look() {
 
     CHECK(ai.pose_if_mounted(body, w));
     CHECK(body.heading == expected_heading);
-    CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
+    // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432, turned by the
+    // 12-degree seat offset. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+    CHECK(body.inf.body_heading == 799312009);
 }
 
 // A remote player's LOOK is still independent in either vehicle-control seat.
@@ -290,7 +302,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         CHECK(body.heading == look_heading);
         CHECK(body.pitch == look_pitch);
         CHECK(w.registry.get(player_h)->yaw == 45);
-        CHECK(body.inf.body_heading == 90 * 11930464);
+        CHECK(body.inf.body_heading == 0x40000000); // yaw 0: the spawn form of 90
 
         Entity *live_vehicle = w.registry.get(vehicle_h);
         live_vehicle->position = {40.0f, 50.0f, 60.0f};
@@ -299,7 +311,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         CHECK(body.heading == look_heading);
         CHECK(body.pitch == look_pitch);
         CHECK(w.registry.get(player_h)->yaw == 45);
-        CHECK(body.inf.body_heading == 70 * 11930464);
+        CHECK(body.inf.body_heading == 835125248); // ((70 << 16) / 360) << 16
         const Entity *mounted = w.registry.get(player_h);
         CHECK(body.pos[0] == to_fixed(mounted->position.x));
         CHECK(body.pos[1] == to_fixed(mounted->position.y));
@@ -394,7 +406,7 @@ void test_live_pose_provider_and_static_fallback() {
         provider.pose = pose_degrees({31.5f, 32.25f, 33.75f}, 44, 15, -19);
         TickContext ctx{};
         ctx.is_authority = true;
-        ai.tick(w, ctx);
+        w.update_all_entities(ctx);
 
         const Entity *mounted = w.registry.get(occupant_h);
         MountedPose expected = provider.pose;
@@ -568,6 +580,30 @@ void test_live_pose_provider_and_static_fallback() {
         occupant = Entity{};
         w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
         check_pose(occupant, expected);
+    }
+}
+
+// An unarmed player's USE onto a UseGun seat is refused outside a session:
+// single player, the in-process listen server included, is outside it; in a
+// session the same USE mounts the gun.
+// [orig: Entity_AttachToUseGunSlot @0x546b80 -- `cmp g_napi_np_ctx.is_in_session`
+//  @0x546BF6, the player bit @0x546BFE, the EquippedSlot test @0x546C07;
+//  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
+void test_unarmed_usegun_needs_the_session() {
+    for (const bool mp : {false, true}) {
+        Rig r(2.0f);
+        r.veh().seats[0].type = SeatType::Gunner;
+        r.veh().primary_weapon = "WPN_USEGUN";
+        r.w.tables.weapons.entries.resize(1);
+        r.w.tables.weapons.entries[0].name = "WPN_USEGUN";
+        r.w.tables.weapons.entries[0].valid = true;
+        r.player().flags |= kEntityFlagPlayer;
+        r.player().engine_flags |= kEntityFlagPlayer;
+        r.w.rules.mp_session = mp;
+        LocalPlayer local(r.w);
+        CHECK(!local.weapon.active);
+        CHECK(local.toggle_mount() == mp);
+        CHECK(r.player().mounted == mp);
     }
 }
 
@@ -1328,6 +1364,7 @@ void test_bms_mount_predicates() {
     gun.bms_id = 500;
     gun.kind = EntityKind::Item;
     gun.item_id = 1800;
+    gun.item_type_index = 7;
     gun.position = r.veh().position;
     gun.health = 500;
     gun.alive = true;
@@ -1516,6 +1553,147 @@ void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
     CHECK(roof.primary_weapon_slot.scope_zoom == 1);
 }
 
+// A body claims the vehicle under it after its update: the first vehicle on
+// its ground chain (a seated body re-reads its parent every tick) takes the
+// body's team when it is player-controllable and the body is seated or
+// nobody holds it; every fourth tick the vehicle's contact solve is woken. A
+// busted or spawn-point vehicle keeps its team but is still woken.
+// [orig: Entity_UpdateAllEntities -- Entity_FindChildByDefType @0x4C2484,
+//  the attrib/Flags gates @0x4C2494..0x4C24C1, the seated test @0x4C24C7,
+//  the team copy @0x4C259E..0x4C25A4, `test tick,3` @0x4C25CE -> Entity_WakeContactSolve
+//  @0x459290]
+void test_seated_body_claims_its_vehicle() {
+    for (const bool spawn_point : {false, true}) {
+        Rig r;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        if (spawn_point) r.veh().item_attrib |= kItemAttribSpawnPoint;
+        r.veh().team = 2;
+        r.player().team = 1;
+        AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        for (uint32_t t = 1; t <= 4; ++t) {
+            ctx.logic_tick = t;
+            r.w.logic_tick = t;
+            r.w.update_all_entities(ctx);
+            CHECK(r.player().ground_target == r.veh_h);
+            CHECK(r.veh().team == (spawn_point ? 2 : 1));
+            // Only tick 4 of these wakes the vehicle.
+            CHECK(((r.veh().flags & 0x40u) != 0) == (t == 4));
+        }
+        CHECK(r.veh().veh.contact_wake_tick == 4);
+    }
+}
+
+// A same-team body standing on a vehicle skips the hold scan outside a
+// session. Single player (the in-process listen server) is outside it, so
+// the body's berserk bit reaches the vehicle although a rider
+// holds it; in a non-co-op session the rider's hold blocks the copy.
+// [orig: Entity_UpdateAllEntities -- `cmp g_napi_np_ctx.is_in_session,0`
+//  @0x4C24EA, `test g_GameType,10000h` @0x4C24F7, the seat words
+//  @0x4C2507..0x4C251F, the berserk sync @0x4C25B8..0x4C25C7;
+//  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
+void test_same_team_hold_scan_follows_the_session() {
+    for (const bool mp : {false, true}) {
+        Rig r;
+        r.w.rules.mp_session = mp;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        r.veh().team = 1;
+        r.player().team = 1;
+        Entity rider;
+        rider.kind = EntityKind::Organic;
+        rider.item_id = 2072;
+        rider.health = 150;
+        rider.alive = true;
+        rider.team = 1;
+        const EntityHandle rider_h = r.w.registry.spawn(0, rider);
+        CHECK(r.w.vehicles.process_attach(rider_h, r.veh_h, 2)); // the sitex seat
+        r.sys.attach(r.veh_h);
+        r.sys.attach(r.player_h);
+        AiEntity &body = *r.sys.for_handle(r.player_h);
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        body.slot.f[AiSlot::kBehaviorFlags] |= 0x200;
+        r.player().ground_target = r.veh_h; // standing on it, not seated
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        ctx.logic_tick = 1;
+        r.w.logic_tick = 1;
+        r.w.update_all_entities(ctx);
+        const AiEntity *vehicle_brain = r.sys.for_handle(r.veh_h);
+        CHECK(vehicle_brain != nullptr);
+        if (vehicle_brain == nullptr) continue;
+        const bool copied = (vehicle_brain->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0;
+        CHECK(copied == !mp);
+    }
+}
+
+// The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
+// copied into its saved pose, only the row a player drives is visited, and the
+// update is not counted; the pool-0 walk still runs (it wakes the driven
+// vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
+// [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
+//  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
+void test_epilog_entity_update() {
+    Rig r;
+    r.veh().item_type = 1;
+    r.veh().item_attrib |= kItemAttribPlayerControl;
+    Entity prop;
+    prop.kind = EntityKind::Item;
+    prop.has_item_def = true;
+    prop.item_id = 999;
+    prop.position = {50.0f, 60.0f, 7.0f};
+    prop.health = 100;
+    prop.alive = true;
+    const EntityHandle prop_h = r.w.registry.spawn(1, prop);
+    CHECK(prop_h.valid());
+    r.player().flags |= kEntityFlagPlayer;
+    r.player().engine_flags |= kEntityFlagPlayer;
+    AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.player().health;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1)); // the ctrlx seat
+    CHECK(r.veh().primary_occupant == r.player_h);
+
+    r.w.rules.mp_session = false;
+    CHECK(r.w.match.finish(2, r.w));
+    r.w.round_end_tick = 0;
+    r.w.logic_tick = 8;
+    CHECK(r.w.epilog_screen_active());
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 8;
+    r.w.update_all_entities(ctx);
+    const Entity &kept = *r.w.registry.get(prop_h);
+    CHECK(r.veh().pool1_visited);
+    CHECK(!kept.pool1_visited);
+    CHECK(kept.saved_live_valid);
+    CHECK(kept.saved_live_pos[0] == to_fixed(50.0f));
+    CHECK(kept.saved_live_pos[1] == to_fixed(60.0f));
+    CHECK(kept.saved_live_pos[2] == to_fixed(7.0f));
+    CHECK(((r.veh().flags & 0x40u) != 0) && r.veh().veh.contact_wake_tick == 8);
+    CHECK(r.w.entity_update_counter == 0);
+
+    r.w.rules.mp_session = true;
+    CHECK(!r.w.epilog_screen_active());
+    r.w.update_all_entities(ctx);
+    CHECK(r.w.registry.get(prop_h)->pool1_visited);
+    CHECK(r.w.entity_update_counter == 1);
+}
+
 // A HOST-crewed helicopter's rotor turns from the authority pass: the helo
 // mover is the unported residual, but retail runs the part-animation
 // accumulator from EVERY mover's tail, the helo mover included, so the pass
@@ -1527,6 +1705,7 @@ void test_host_crewed_helicopter_rotor_turns() {
     Rig r;
     VehicleTraits t = truck_traits();
     t.family = VehicleFamily::Helicopter;
+    t.brain_class = VehicleBrainClass::Air; // ai_function CHel: the air machine
     t.physics = 0; // a CHel def: no ground selector, no ground mover
     r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -1535,21 +1714,21 @@ void test_host_crewed_helicopter_rotor_turns() {
     CHECK(r.veh().primary_occupant == r.player_h);
     TickContext ctx{};
     ctx.is_authority = true;
-    for (int i = 0; i < 3; ++i) r.sys.tick(r.w, ctx);
+    for (int i = 0; i < 3; ++i) r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull);
     CHECK(part_register(r.veh().veh.part_spin.angle) > 0);
     CHECK(r.w.vehicles.detach(r.player_h));
-    r.sys.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo);
     // A joiner never runs the authority pass for it.
     ctx.is_authority = false;
     const int32_t before = r.veh().veh.part_spin.speed;
-    r.sys.tick(r.w, ctx);
+    r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.part_spin.speed == before);
 }
 
 // The current-state drive stamp must not consume the pending death callback.
-// [orig: Entity_UpdateVehiclePhysics @0x48AF00; EntityAI_ProcessInfantryStateMachine @0x4581B0]
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00; EntityAI_ProcessAirStateMachine @0x4581B0]
 void test_vehicle_pending_death_survives_drive_tick() {
 	for (const auto family : { VehicleFamily::Ground, VehicleFamily::Watercraft }) {
 		for (bool occupied : { false, true }) {
@@ -1572,7 +1751,7 @@ void test_vehicle_pending_death_survives_drive_tick() {
 			TickContext ctx{};
 			ctx.is_authority = true;
 			for (int i = 0; i < 4; ++i) {
-				r.sys.tick(r.w, ctx);
+				r.w.update_all_entities(ctx);
 				++r.w.logic_tick;
 			}
 			CHECK((r.veh().engine_flags & kEntityFlagHusk) != 0);
@@ -1675,9 +1854,10 @@ void test_ai_drive_leg() {
 }
 
 // The pool-1 avoid BRAKE: a neighbor whose footprint ellipse overlaps ours and
-// sits within ~30 deg of dead ahead damps the command speed by the id/frame
-// factor ((id + (tick<<8)) & 0x7FFF) + 0x4000 per tick; a neighbor BEHIND does
-// not [orig: @0x48bd8f-0x48bf26].
+// sits within ~30 deg of dead ahead damps the command speed by the id/counter
+// factor ((id + (counter<<8)) & 0x7FFF) + 0x4000 per tick, the counter being
+// the entity-update counter; a neighbor BEHIND does not
+// [orig: @0x48bd8f-0x48bf26; Entity_UpdateVehiclePhysics @0x48BF26].
 void test_ai_drive_avoid_brake() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
@@ -1723,20 +1903,24 @@ void test_ai_drive_avoid_brake() {
     CHECK(cmd0.ai_drive);
     CHECK(cmd0.cmd_speed > 0);
 
-    // A parked prop dead AHEAD (+x), footprints overlapping.
+    // A parked prop dead AHEAD (+x), footprints overlapping. The ground walk
+    // admits any nonzero ItemTypeIndex [orig: Entity_UpdateVehiclePhysics
+    // `cmp dword ptr [edi+1Ch],0` @0x48BDD9].
     Entity prop;
     prop.kind = EntityKind::Item;
     prop.item_id = 999;
+    prop.item_type_index = 7;
     prop.position = Vec3{104.0f, 200.0f, 10.0f};
     prop.bound_radius = 3.0f;
     const EntityHandle ph = r.w.registry.spawn(1, prop);
 
+    r.w.entity_update_counter = 5; // differs from the tick (0)
     VehicleDriveCmd cmd1;
     r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
     CHECK(cmd1.ai_drive);
     const int32_t f = static_cast<int32_t>(
             ((static_cast<uint32_t>(r.veh().net_id) +
-              (static_cast<uint32_t>(r.w.logic_tick) << 8)) &
+              (r.w.entity_update_counter << 8)) &
              0x7FFFu) +
             0x4000u);
     const int32_t expect = static_cast<int32_t>(
@@ -1806,9 +1990,13 @@ void test_ai_drive_avoid_quantized_footprints() {
             return command.cmd_speed;
         };
         CHECK(speed() == 65536);
+        // ItemTypeIndex 1 passes both walks: the ground walk skips index 0, the
+        // boat walk admits index 1 only [orig: Entity_UpdateVehiclePhysics
+        // @0x48BDD9; Entity_UpdateWatercraftPhysics @0x48E5C5].
         Entity obstacle;
         obstacle.kind = EntityKind::Item;
         obstacle.item_id = 999;
+        obstacle.item_type_index = 1;
         obstacle.bound_radius = 5.0f;
         obstacle.veh.yaw_seeded = true;
         const EntityHandle other = r.w.registry.spawn(1, obstacle);
@@ -2073,10 +2261,7 @@ struct DriveRig {
         CHECK(r.w.vehicles.process_attach(driver, r.veh_h, 1));
     }
     AiEntity &brain() { return *r.sys.for_handle(r.veh_h); }
-    void motor_pass() {
-        opennova::devtools::ProfileLap lap(r.w.profile);
-        r.w.vehicles.tick_motors(true, lap);
-    }
+    void motor_pass() { r.w.vehicles.update_motor(r.veh(), true); }
 };
 
 // Zero health alone does not park: until the dying state's death transforms
@@ -2126,8 +2311,7 @@ void test_submerged_player_driver_takes_the_ai_leg() {
         Entity &pl = r.player();
         pl.eye_offset_z = 65536;
         r.w.env.water_z = to_fixed(pl.position.z) + (2 << 16);
-        opennova::devtools::ProfileLap lap(r.w.profile);
-        r.w.vehicles.tick_motors(true, lap);
+        r.w.vehicles.update_motor(r.veh(), true);
         CHECK(r.sys.for_handle(r.veh_h)->brain.f[AiBrain::kCurState] == 16);
         CHECK(r.veh().veh.cmd_speed == 0);
     }
@@ -2194,6 +2378,7 @@ void test_ground_waits_for_boarders() {
     walker.health = 150;
     walker.alive = true;
     walker.has_item_def = true;
+    walker.item_type_index = 7;
     const EntityHandle wh = r.w.registry.spawn(0, walker);
     r.sys.attach(wh);
     // The real board order (SSNtoSSN) stores the command in the walker's SLOT,
@@ -2230,6 +2415,7 @@ struct HeloRig {
         r.w.tables.terrain = &field;
         t = truck_traits();
         t.family = VehicleFamily::Helicopter;
+        t.brain_class = VehicleBrainClass::Air; // ai_function CHel: the air machine
         t.physics = 0;
         t.acceleration = 512;
         t.turn_rate = 0x600000;
@@ -2282,7 +2468,7 @@ struct HeloRig {
         TickContext ctx{};
         ctx.is_authority = true;
         for (int i = 0; i < n; ++i) {
-            r.sys.tick(r.w, ctx);
+            r.w.update_all_entities(ctx);
             ++r.w.logic_tick;
         }
     }
@@ -2619,6 +2805,17 @@ void test_driver_animation() {
 			CHECK(body.inf.anim_state == c.state);
 			CHECK(body.inf.anim_pending == 0);
 		}
+		// An unseeded hull reads its placement roll in the spawn form: 180 degrees is
+		// 0x80000000, below -6 degrees (sit_24_right); 180 x 11930464 = 0x7FFFFF80
+		// would pick sit_24_left.
+		// [orig: Entity_SpawnFromBMSRecord @0x40EB89..0x40EBA6; the roll cmps
+		//  Entity_UpdateInfantryPlayerBody @0x4B65D0 / Entity_UpdateInfantryAI @0x4BEE3D]
+		r.veh().veh.yaw_seeded = false;
+		r.veh().roll = 180;
+		r.veh().veh.speed = 200;
+		CHECK(r.sys.pose_if_mounted(body, r.w));
+		CHECK(body.inf.anim_state == 110);
+		r.veh().veh.yaw_seeded = true;
 		r.veh().seats[0].pose_index = 23;
 		r.veh().veh.speed = 0;
 		CHECK(r.sys.pose_if_mounted(body, r.w));
@@ -3141,7 +3338,6 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
         observer.inf.active = true;
         observer.inf.combat_target = r.veh_h;
         observer.slot.f[3] = r.veh_h.packed + 1;
-        r.w.registry.get(passenger_h)->ai_target = r.veh().net_id;
         CollisionWorld collision;
         r.w.collision = &collision;
         const int model = collision.add_model(CollisionModel{});
@@ -3155,7 +3351,6 @@ static void test_script_remove_releases_carrier_and_occupant_ownership() {
         CHECK(!r.player().mounted && !r.player().mount_target.valid());
         CHECK(!r.w.registry.get(passenger_h)->mounted);
         CHECK(!observer.inf.combat_target.valid() && observer.slot.f[3] == 0);
-        CHECK(r.w.registry.get(passenger_h)->ai_target == -1);
         CHECK(!collision.has_instance(r.veh_h) && r.w.out.scars.leased_count() == 0);
         CHECK(r.w.out.destruction.effects.size() == 4);
         for (const auto &effect : r.w.out.destruction.effects)
@@ -3267,9 +3462,361 @@ static void test_claimant_detach_cuts_vehicle_slot_action() {
     CHECK(r.veh().primary_weapon_slot.counter == 40);
 }
 
+// A non-player leaving any seat zeroes its AdmDef byte; a player-classified
+// rider keeps its own. [orig: Entity_DetachFromVehicle Flags 0x100 test
+// @0x43568D, EquippedSlot @0x435696, the byte @0x43569C]
+static void test_npc_detach_zeroes_the_equipped_byte() {
+    Rig r;
+    Entity npc;
+    npc.net_id = 40;
+    npc.kind = EntityKind::Organic;
+    npc.position = r.player().position;
+    npc.health = 100;
+    npc.alive = true;
+    const EntityHandle npc_h = r.w.registry.spawn(0, npc);
+    for (const uint8_t bone : {uint8_t{1}, uint8_t{2}}) { // ctrlx00, sitex00
+        CHECK(r.w.vehicles.process_attach(npc_h, r.veh_h, bone));
+        r.w.registry.get(npc_h)->equipped_adm_index = 7;
+        CHECK(r.w.vehicles.detach(npc_h));
+        CHECK(r.w.registry.get(npc_h)->equipped_adm_index == 0);
+    }
+    r.player().flags |= kEntityFlagPlayer;
+    r.player().engine_flags |= kEntityFlagPlayer;
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+    r.player().equipped_adm_index = 7;
+    CHECK(r.w.vehicles.detach(r.player_h));
+    CHECK(r.player().equipped_adm_index == 7);
+}
+
+// A body that boards in its own pass's think ends that pass on foot: the org1
+// motor keys its seat block on the mounted-live local its head took, so the
+// seat pose waits for the next pass. [orig: Entity_UpdateInfantryAI
+// mounted-live local @0x4B9960..0x4B9985, its test @0x4BE8F0, the request's
+// test @0x4BF4B3]
+static void test_board_pass_stays_on_foot() {
+    Rig r;
+    r.w.cached.local_player = {};
+    r.veh().item_type = 1;
+    r.veh().item_attrib = kItemAttribPlayerControl;
+    r.veh().spawn_position = r.veh().position; // at its spawn anchor: enterable
+    r.player().net_id = 88; // key = tick + 36 * 88: tick 16 thinks
+    AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+    body.inf.active = true;
+    body.net_id = 88;
+    body.health = 150;
+    body.slot.f[37] = kCommandAttachAnySeat;
+    body.slot.f[38] = 11;
+    VehicleSeatSelection best;
+    CHECK(find_best_vehicle_seat(r.w, r.veh_h, r.player_h, best));
+    const Vec3 seat = entity_local_point_world(
+            r.veh(), r.veh().seats[static_cast<size_t>(best.seat_index)].seat_local);
+    // One unit off the seat point, inside the two-unit arrival ring.
+    const int32_t start[3] = {to_fixed(seat.x + 1.0f), to_fixed(seat.y), to_fixed(seat.z)};
+    std::copy_n(start, 3, body.pos);
+    r.player().position = {seat.x + 1.0f, seat.y, seat.z};
+    r.sys.is_authority = true;
+    r.sys.tick_infantry(body, r.w, 16);
+    CHECK(r.player().mounted);
+    CHECK(body.pos[0] == start[0] && body.pos[1] == start[1]);
+    r.sys.tick_infantry(body, r.w, 17);
+    CHECK(std::abs(body.pos[0] - to_fixed(seat.x)) <= 2);
+    CHECK(std::abs(body.pos[1] - to_fixed(seat.y)) <= 2);
+}
+
+// A rider its seat-bone lookup drops still runs the seat block's tail: its
+// legs snap to the body and its look takes the mounted chase, then the +-90
+// degree clamp about the body; it takes no ground chase. A client keeps the
+// rider and clamps inside the seat block. [orig: Entity_UpdateInfantryAI legs
+// @0x4BEF36..0x4BEF51, look @0x4BEF57..0x4BEF97, clamp @0x4BEF9A..0x4BEFED; the
+// ground chase @0x4BE8FD..0x4BEBE7 sits behind the mounted-live test @0x4BE8F0]
+static void test_seat_bone_failure_runs_the_seat_tail() {
+    struct NoSeatBone final : IPoseProvider {
+        bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
+    };
+    for (const bool authority : {true, false}) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        NoSeatBone provider;
+        w.pose_provider = &provider;
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        vehicle.has_item_def = true;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        seat.bone_index = 7;
+        seat.source_name = "sitex00";
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+        AiEntity *body = w.ai.at(w.ai.attach(occupant_h));
+        body->net_id = 100;
+        body->health = 100;
+        body->inf.active = true;
+        CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
+        body->inf.body_heading = 0x10000000;
+        body->inf.target_heading = 0x30000000; // a ground chase would turn the body
+        body->inf.leg_yaw[0] = body->inf.leg_yaw[1] = 0;
+        body->inf.leg_target[0] = body->inf.leg_target[1] = 0;
+        body->heading = 0x4F000000;
+        body->pitch = 0;
+        body->inf.aim_heading = 0x7F000000;
+        body->inf.aim_pitch = 0x00800000;
+        body->inf.aim_valid = true;
+        w.ai.is_authority = authority;
+        w.ai.tick_infantry(*body, w, 1);
+        CHECK(w.registry.get(occupant_h)->mounted == !authority);
+        CHECK(body->inf.body_heading == 0x10000000);
+        CHECK(body->inf.leg_yaw[0] == 0x10000000 && body->inf.leg_yaw[1] == 0x10000000);
+        CHECK(body->inf.leg_target[0] == 0x10000000 && body->inf.leg_target[1] == 0x10000000);
+        // The mounted look step (+0x02000000), then the clamp 90 degrees off the body.
+        CHECK(body->heading == 0x50000000);
+        CHECK(body->pitch == 0x00100000);
+    }
+}
+
+// Through the whole entity update: the pool-1 walk and the attached-child
+// refresh run ahead of the pool-0 bodies, so a body that boards an attached gun
+// in its pass's think ends the update where it walked, and the next update
+// seats it. [orig: Entity_UpdateInfantryAI mounted-live local
+// @0x4B9960..0x4B9985; Entity_UpdateAllEntities, the pool-1 walk
+// @0x4C2158..0x4C21F1 ahead of the pool-0 walk @0x4C2426]
+static void test_board_pass_on_an_attached_gun_stays_on_foot() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity carrier;
+    carrier.net_id = 30;
+    carrier.kind = EntityKind::Item;
+    carrier.has_item_def = true;
+    carrier.health = 100;
+    carrier.alive = true;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier);
+    Entity gun;
+    gun.net_id = 31;
+    gun.kind = EntityKind::Item;
+    gun.has_item_def = true;
+    gun.item_type = 6;
+    gun.item_attrib = kItemAttribEweap;
+    gun.health = 100;
+    gun.alive = true;
+    gun.position = {20.0f, 0.0f, 0.0f};
+    gun.emplacement_parent = carrier_h;
+    gun.emplacement_parent_spawn_id = w.registry.get(carrier_h)->registry_spawn_id;
+    gun.ground_target = carrier_h;
+    Seat seat;
+    seat.type = SeatType::Gunner;
+    seat.bone_index = 1;
+    seat.source_name = "UseGun";
+    seat.seat_local = {1.0f, 0.0f, 1.0f};
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w.registry.spawn(1, gun);
+    const Vec3 point = entity_local_point_world(*w.registry.get(gun_h), seat.seat_local);
+    Entity soldier;
+    soldier.net_id = 88; // key = tick + 36 * 88: tick 16 thinks
+    soldier.kind = EntityKind::Organic;
+    soldier.health = 100;
+    soldier.alive = true;
+    soldier.position = {point.x + 0.5f, point.y, point.z};
+    const EntityHandle soldier_h = w.registry.spawn(0, soldier);
+    AiEntity &body = *w.ai.at(w.ai.attach(soldier_h));
+    body.inf.active = true;
+    body.net_id = 88;
+    body.health = 100;
+    body.slot.f[37] = kCommandAttachAnySeat;
+    body.slot.f[38] = 31;
+    const int32_t start[3] = {to_fixed(point.x + 0.5f), to_fixed(point.y), to_fixed(point.z)};
+    std::copy_n(start, 3, body.pos);
+    TickContext ctx{};
+    ctx.world = &w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 16;
+    w.update_all_entities(ctx);
+    CHECK(w.registry.get(soldier_h)->mounted);
+    CHECK(w.registry.get(soldier_h)->mount_target == gun_h);
+    CHECK(body.pos[0] == start[0] && body.pos[1] == start[1]);
+    ctx.logic_tick = 17;
+    w.update_all_entities(ctx);
+    CHECK(std::abs(body.pos[0] - to_fixed(point.x)) <= 2);
+}
+
+// An NPC's ordinary seat resolves through the carrier's seat bone. When that
+// lookup fails, the authority kills a rider boarding-ordered (123..125) at the
+// carrier or at the carrier's ground link, crediting the carrier's last
+// attacker, and detaches every such rider; a client keeps it seated. The
+// UseGun seat and a def-less carrier never ask.
+// [orig: Entity_UpdateInfantryAI @0x4BED72..0x4BED7C, @0x4BEE93..0x4BEEE4]
+static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
+    struct SeatBoneProvider final : IPoseProvider {
+        bool resolves = false;
+        int queries = 0;
+        int last_bone = -1;
+        bool resolve_seat_bone(World &, const Entity &, int bone_index) override {
+            ++queries;
+            last_bone = bone_index;
+            return resolves;
+        }
+    };
+    struct Outcome {
+        bool killed = false;
+        bool credited = false;
+        bool detached = false;
+        int queries = 0;
+        int bone = -1;
+    };
+    const auto run = [](int32_t order, int32_t target_ssn, bool authority, SeatType type,
+                        bool resolves, bool item_def) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+        SeatBoneProvider provider;
+        provider.resolves = resolves;
+        w.pose_provider = &provider;
+        Entity attacker;
+        attacker.net_id = 400;
+        attacker.kind = EntityKind::Organic;
+        attacker.health = 100;
+        attacker.alive = true;
+        const EntityHandle attacker_h = w.registry.spawn(0, attacker);
+        Entity deck;
+        deck.net_id = 300;
+        deck.kind = EntityKind::Item;
+        deck.health = 100;
+        deck.alive = true;
+        const EntityHandle deck_h = w.registry.spawn(1, deck);
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        vehicle.has_item_def = item_def;
+        vehicle.ground_target = deck_h;
+        vehicle.last_attacker = attacker_h;
+        Seat seat;
+        seat.type = type;
+        seat.bone_index = 7;
+        seat.source_name = type == SeatType::Gunner ? "UseGun" : "sitex00";
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+        Entity occupant;
+        occupant.net_id = 100;
+        occupant.kind = EntityKind::Organic;
+        occupant.health = 100;
+        occupant.alive = true;
+        const EntityHandle occupant_h = w.registry.spawn(0, occupant);
+        AiEntity *body = w.ai.at(w.ai.attach(occupant_h));
+        body->net_id = 100;
+        body->health = 100;
+        body->inf.active = true;
+        body->slot.f[37] = order;
+        body->slot.f[38] = target_ssn;
+        CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
+        w.ai.is_authority = authority;
+        w.ai.tick_infantry(*body, w, 1);
+        const Entity *occ = w.registry.get(occupant_h);
+        Outcome out;
+        out.killed = occ->health == 0 && body->health == 0;
+        out.credited = occ->last_attacker == attacker_h;
+        out.detached = !occ->mounted && !occ->ground_target.valid();
+        out.queries = provider.queries;
+        out.bone = provider.last_bone;
+        return out;
+    };
+
+    // A board order at the carrier: killed with the carrier's credit, detached.
+    Outcome o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, false, true);
+    CHECK(o.queries == 1 && o.bone == 7);
+    CHECK(o.killed && o.credited && o.detached);
+    // At the carrier's ground link, and each of the three board orders.
+    o = run(kCommandAttachSkipController, 300, true, SeatType::Passenger, false, true);
+    CHECK(o.killed && o.credited && o.detached);
+    o = run(kCommandAttachAnySeat, 200, true, SeatType::Driver, false, true);
+    CHECK(o.killed && o.credited && o.detached);
+    // No board order, or one aimed elsewhere: detached alive.
+    o = run(0, 200, true, SeatType::Passenger, false, true);
+    CHECK(!o.killed && !o.credited && o.detached);
+    o = run(kCommandAttachPassengerOnly, 999, true, SeatType::Passenger, false, true);
+    CHECK(!o.killed && o.detached);
+    // A client neither kills nor detaches.
+    o = run(kCommandAttachPassengerOnly, 200, false, SeatType::Passenger, false, true);
+    CHECK(!o.killed && !o.detached);
+    // A resolving bone keeps the rider seated.
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, true, true);
+    CHECK(o.queries == 1 && !o.killed && !o.detached);
+    // The UseGun seat and a def-less carrier never ask.
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Gunner, false, true);
+    CHECK(o.queries == 0 && !o.killed && !o.detached);
+    o = run(kCommandAttachPassengerOnly, 200, true, SeatType::Passenger, false, false);
+    CHECK(o.queries == 0 && !o.killed && !o.detached);
+}
+
+// The model-aware provider answers the lookup from the carrier's attached
+// model: bone 0 and a bone past the model's userpoint count fail, a model
+// without bounding volumes fails, the husk bit swaps in the husk model when
+// one is attached, a carrier without a model fails, and a world without
+// collision has no model data to decline with.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+static void test_entity_pose_seat_bone_lookup() {
+    World w;
+    w.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w.collision = &collision;
+    EntityPoseProvider poses;
+    opennova::threedi::ThreediUserPoint points[3] = {};
+    opennova::threedi::ThreediCollisionModel block = {};
+    block.model_data.num_bounding_volumes = 1;
+    opennova::threedi::Threedi3di3 intact = {};
+    intact.user_points = points;
+    intact.user_point_count = 3;
+    intact.collision = &block;
+    opennova::threedi::Threedi3di3 husk = intact;
+    husk.user_point_count = 1;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.net_id = 5;
+    const EntityHandle carrier_h = w.registry.spawn(1, seed);
+    seed.net_id = 6;
+    const EntityHandle bare_h = w.registry.spawn(1, seed);
+    const int32_t intact_id = collision.add_model(CollisionModel{});
+    const int32_t husk_id = collision.add_model(CollisionModel{});
+    collision.assign_entity(carrier_h, intact_id);
+    collision.assign_entity_husk(carrier_h, husk_id);
+    poses.register_userpoint_model(intact_id,
+            std::make_shared<opennova::threedi::Threedi3di3>(intact));
+    poses.register_userpoint_model(husk_id,
+            std::make_shared<opennova::threedi::Threedi3di3>(husk));
+    Entity &carrier = *w.registry.get(carrier_h);
+    CHECK(poses.resolve_seat_bone(w, carrier, 1));
+    CHECK(poses.resolve_seat_bone(w, carrier, 3));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 0));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 4));
+    carrier.engine_flags |= kEntityFlagHusk;
+    CHECK(poses.resolve_seat_bone(w, carrier, 1));
+    CHECK(!poses.resolve_seat_bone(w, carrier, 3)); // the husk authors one bone
+    carrier.engine_flags &= ~kEntityFlagHusk;
+    block.model_data.num_bounding_volumes = 0;
+    CHECK(!poses.resolve_seat_bone(w, carrier, 1));
+    block.model_data.num_bounding_volumes = 1;
+    CHECK(!poses.resolve_seat_bone(w, *w.registry.get(bare_h), 1));
+    w.collision = nullptr;
+    CHECK(poses.resolve_seat_bone(w, *w.registry.get(bare_h), 1));
+}
+
 int main() {
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
+    test_npc_detach_zeroes_the_equipped_byte();
+    test_board_pass_stays_on_foot();
+    test_seat_bone_failure_runs_the_seat_tail();
+    test_board_pass_on_an_attached_gun_stays_on_foot();
     test_use_scan_and_label_follow_live_seat_pose();
     test_seat_and_emplacement_keep_subdegree_carrier_pose();
     test_script_remove_releases_carrier_and_occupant_ownership();
@@ -3277,9 +3824,15 @@ int main() {
 	test_seat_frame_matches_collision_frame();
 	test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
+    test_seated_body_claims_its_vehicle();
+    test_epilog_entity_update();
+    test_same_team_hold_scan_follows_the_session();
     test_remote_player_control_seat_preserves_wire_look();
     test_live_pose_provider_and_static_fallback();
+    test_npc_seat_bone_failure_kills_boarders_and_detaches();
+    test_entity_pose_seat_bone_lookup();
     test_toggle_nearest_seat();
+    test_unarmed_usegun_needs_the_session();
     test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();

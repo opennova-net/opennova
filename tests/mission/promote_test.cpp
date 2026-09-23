@@ -33,6 +33,29 @@ static void stamp_fixture_carrier_defs(World &world) {
 	});
 }
 
+// The two embedder answers a placed item needs for a vehicle brain: a brain-class
+// ai_function row (CHel/cpln or cveh/cbot/ctrn) and the AI-class def attrib
+// 0x100000 [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the class inits
+// Entity_InitHelicopterAIFromDef @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0].
+static void brain_class_items(mission::PromoteOptions &options, std::vector<int32_t> types,
+                              bool helicopter = false) {
+    options.ai_profile_defaults = [types, helicopter](int32_t type) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        for (int32_t t : types) {
+            if (t == type) {
+                d.known = true;
+                d.helicopter_init = helicopter;
+            }
+        }
+        return d;
+    };
+    options.item_attributes = [types](int32_t type) {
+        for (int32_t t : types)
+            if (t == type) return kItemAttribAIData;
+        return 0u;
+    };
+}
+
 static bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id,
                            int32_t wp_num) {
     bms::Entity e{};
@@ -463,6 +486,9 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
         }
         return d;
     };
+    // Every row here is an AI-class def (attrib 0x100000); the crate row has no
+    // brain class, so it still takes no brain.
+    opts.item_attributes = [](int32_t) { return kItemAttribAIData; };
     const auto entity = [](int32_t type_id, const char *name2) {
         bms::Entity e{};
         e.type = bms::ItemType::Item;
@@ -596,13 +622,19 @@ static void test_vehicle_records_seed_the_ai_slot() {
     ctrl.type = SeatType::Controller;
     spec.seats.push_back(ctrl);
     opts.item_seat_specs.push_back(spec);
+    brain_class_items(opts, {kTruckType});
     World world;
     world.ai.is_authority = true;
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
+    if (world.ai.at(0) == nullptr) std::exit(1);
     const AiEntity &ai = *world.ai.at(0);
     CHECK(ai.slot.f[18] == 62 * 3);
     CHECK(ai.slot.f[35] == 1 && ai.slot.f[37] == 4 && ai.slot.f[38] == 2);
+    // No .aip loaded: the loader still sorts the zeroed record's four keys
+    // through the CRT qsort's shortsort [orig: AIProfile_LoadOrFind @0x45FECA].
+    CHECK(ai.profile.slot_class[0] == 0 && ai.profile.slot_class[1] == 3 &&
+          ai.profile.slot_class[2] == 2 && ai.profile.slot_class[3] == 1);
     VehicleTraits t;
     t.player_control = true;
     t.physics = 1;
@@ -784,7 +816,99 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
     CHECK(world->registry.get(EntityHandle::make(3, 1))->class_think_ticks == 0);
 }
 
+// The BMS AI-attribute fold inside the AI branch (the def carries 0x100000):
+// every authored bit lands on its AiSlot[1] behavior bit or entity Flags bit,
+// and 0x2000000 sets entity+0x2C bit 0x80 outside the branch. A record whose
+// def is not AI-class takes only that outside bit.
+// [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44, the AI gate @0x40ED4E,
+//  the fold @0x40ED92..0x40EE94]
+static void test_bms_ai_attribute_fold() {
+    int failures = 0;
+    bms::File m{};
+    bms::Entity soldier = organic(0, 0, 0, /*team=*/1, /*wp_id=*/0, /*wp_num=*/0);
+    soldier.id = 1;
+    soldier.bmsi_attributes = 0x1u | 0x2u | 0x100u | 0x200u | 0x400u | 0x800u | 0x1000u |
+            0x2000u | 0x4000u | 0x8000u | 0x10000u | 0x40000u | 0x80000u | 0x100000u |
+            0x2000000u;
+    m.organics.push_back(soldier);
+    bms::Entity heli = item(1307, 0, 0, 0);
+    heli.id = 2;
+    heli.bmsi_attributes = 0x20000u; // EngineRunning
+    m.items.push_back(heli);
+    bms::Entity crate = item(900, 10 << 16, 0, 0);
+    crate.id = 3;
+    crate.bmsi_attributes = 0x2u | 0x4000u | 0x2000000u;
+    m.items.push_back(crate);
+    mission::PromoteOptions opts;
+    opts.item_attributes = [](int32_t type) { return type == 1307 ? kItemAttribAIData : 0u; };
+    World world;
+    mission::promote_mission(m, world, opts);
+
+    const Entity *s = world.registry.get(world.registry.find_by_net_id(1));
+    const AiEntity *sai = s != nullptr ? world.ai.for_handle(s->handle) : nullptr;
+    CHECK(s != nullptr && sai != nullptr);
+    if (s == nullptr || sai == nullptr) std::exit(1);
+    CHECK(static_cast<uint32_t>(sai->slot.f[1]) ==
+          (0x1u | 0x2000u | 0x10000u | 0x100u | 0x200u | 0x400u | 0x800u | 0x8000u | 0x8u |
+           0x80000u | 0x100000u | 0x200000u));
+    CHECK((s->flags & kEntityFlagMounted) != 0 && (s->engine_flags & kEntityFlagMounted) != 0);
+    CHECK((s->flags & kEntityFlagAiClimb) != 0 && (s->engine_flags & kEntityFlagAiClimb) != 0);
+    CHECK((s->cause_flags & 0x80u) != 0);
+
+    const Entity *h = world.registry.get(world.registry.find_by_net_id(2));
+    CHECK(h != nullptr);
+    if (h != nullptr) {
+        CHECK((h->flags & 0x80u) != 0);
+        CHECK(h->veh.speed == 0x10000);
+        CHECK(h->veh.part_spin.speed != 0);
+    }
+
+    const Entity *c = world.registry.get(world.registry.find_by_net_id(3));
+    CHECK(c != nullptr);
+    if (c != nullptr) {
+        CHECK(((c->flags | c->engine_flags) & (kEntityFlagMounted | kEntityFlagAiClimb)) == 0);
+        CHECK((c->cause_flags & 0x80u) != 0);
+    }
+    if (failures)
+        std::exit(1);
+}
+
+// A placed item takes a vehicle brain exactly when its def carries the AI-class
+// attrib AND its ai_function row is a brain class; authoring a control seat is
+// not the test. [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the pool-1 class init
+// Entity_InitAllFromModels @0x40E5B8..0x40E5D8]
+static void test_item_brain_follows_class_and_attrib() {
+    int failures = 0;
+    bms::File m{};
+    m.items.push_back(item(1237, 0, 0, 0));        // cveh row + attrib: a brain, no seats
+    m.items.push_back(item(1300, 20 << 16, 0, 0)); // a control seat, no brain row
+    m.items.push_back(item(1301, 40 << 16, 0, 0)); // a brain row without the attrib
+    mission::PromoteOptions opts;
+    mission::ItemSeatSpec spec;
+    spec.type_id = 1300;
+    Seat ctrl;
+    ctrl.type = SeatType::Controller;
+    spec.seats.push_back(ctrl);
+    opts.item_seat_specs.push_back(spec);
+    opts.ai_profile_defaults = [](int32_t type) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        d.known = type == 1237 || type == 1301;
+        return d;
+    };
+    opts.item_attributes = [](int32_t type) { return type == 1237 ? kItemAttribAIData : 0u; };
+    World world;
+    const mission::PromoteResult r = mission::promote_mission(m, world, opts);
+    CHECK(r.brains == 1);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 0)) != nullptr);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 1)) == nullptr);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 2)) == nullptr);
+    if (failures)
+        std::exit(1);
+}
+
 int main() {
+    test_item_brain_follows_class_and_attrib();
+    test_bms_ai_attribute_fold();
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_admission_zeros_rejected_marker_projections();
@@ -795,6 +919,10 @@ int main() {
     m.markers.push_back(marker(100 << 16, 0, 0));
     m.markers.push_back(marker(200 << 16, 0, 0));
     m.markers.push_back(marker(300 << 16, 0, 0));
+    // Route nodes are "waypoint" markers (items.def 106005): only that type (and
+    // 6006/2044) carries the wp_distance arrival radius [orig:
+    // Entity_SpawnFromBMSRecord `cmp dword ptr [edi],1775h` @0x40F05A].
+    for (bms::Entity &mk : m.markers) mk.type_id = 6005;
 
     bms::WaypointRecord wr{};
     wr.flags = bms::WaypointFlags::None; // loops
@@ -815,9 +943,9 @@ int main() {
     // waypoint_id is 1-based (channel 0 = the AI "no route" sentinel); these patrol channel 1.
     m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1, /*wp_num=*/0));
     m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1, /*wp_num=*/0));
-    // Organic 1 authors an ai_textfile whose .aip speeds the embedder resolved —
-    // its brain seeds the profile speeds at the witnessed x65536/225 scale while
-    // organic 0 keeps the default_speed stand-in.
+    // Organic 1 authors an ai_textfile whose .aip the embedder resolved: its
+    // profile fields and class walk seed; an organic runs no vehicle class init,
+    // so neither organic takes brain speed words.
     std::memcpy(m.organics[1].name2, "d_zode", 7);
     m.organics[0].bmsi_attributes =
             static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
@@ -835,6 +963,7 @@ int main() {
     // @0x40e9f0 -> entity+124 = record dword @+8]
     m.organics[0].id = 1;
     m.organics[1].id = 2;
+    m.organics[0].group_id = 5;
     m.buildings[0].id = 3;
     m.markers[0].id = 10;
     m.markers[1].id = 11;
@@ -846,12 +975,8 @@ int main() {
 
     mission::PromoteOptions opts;
     opts.arrival_radius = 1000;
-    opts.default_speed = 20;
     mission::PromoteOptions::AiProfileRow zode;
     zode.profile = "d_zode";
-    // ASYMMETRIC on purpose (h_ah6b_z.aip-shaped): the witnessed seeding is
-    // CROSSED — brain[49]=kSpeedA <- +0xC4 combat, brain[50]=kSpeedB <- +0xC0
-    // patrol — and a symmetric pair cannot detect a swapped wiring.
     zode.data.patrol_speed = 70;
     zode.data.combat_speed = 150;
     // Class-walk data (D-AI-1): distinct priorities pin the +40..+52 sort —
@@ -891,13 +1016,12 @@ int main() {
 
     // organic 0 carries its route + spawn transform; its brain starts in state 0.
     AiEntity *e0 = ai.at(0);
-    // Engage-range UNITS, both conventions pinned together so they cannot drift apart
-    // again: the AI PROFILE takes the BMS value unscaled (world units, i16), while the
-    // SLOT copy is the same value shifted to 16.16. A previous uncited `>> 16` on the
-    // profile side zeroed both ranges for every shipped mission, and ai_score_target
-    // rejects every candidate when the range is 0.
-    CHECK(e0->profile.range_primary == 500);
-    CHECK(e0->profile.range_secondary == 50);
+    // The record's engagement distances are SLOT words, shifted to 16.16; an
+    // unresolved .aip leaves the profile's range words at the memset-0 record's
+    // zero [orig: AIProfile_LoadOrFind @0x45fd80; Entity_SpawnFromBMSRecord slot
+    // fills @0x40ED61..0x40F054].
+    CHECK(e0->profile.range_primary == 0);
+    CHECK(e0->profile.range_secondary == 0);
     CHECK(e0->slot.f[15] == (500 << 16));
     CHECK(e0->slot.f[16] == (50 << 16));
     CHECK(e0 != nullptr);
@@ -908,16 +1032,14 @@ int main() {
     CHECK(e0->brain.f[AiBrain::kWpType] == 1);
     CHECK(e0->brain.f[AiBrain::kWpChannel] == 1); // 1-based channel
     CHECK(e0->brain.f[AiBrain::kWpNode] == 0);
-    CHECK(e0->brain.f[AiBrain::kSpeedB] == 20);
+    CHECK(e0->brain.f[AiBrain::kSpeedB] == 0); // no class init, no stand-in speed
     CHECK(e0->team == 1);
 
-    // Organic 1's ai_textfile resolved a profile: the CROSSED seeding —
-    // kSpeedA <- combat 150 -> 150*65536/225 = 43690, kSpeedB <- patrol 70 ->
-    // 70*65536/225 = 20388 [orig: Entity_InitVehicleAIFromDef @0x4688C7/@0x4688D3].
+    // Organic 1's ai_textfile resolved a profile; the speed words stay a vehicle
+    // class init's (ai_brain_rows pins the crossed +0xC4/+0xC0 seeding).
     AiEntity *e1 = ai.at(1);
     CHECK(e1 != nullptr);
-    CHECK(e1->brain.f[AiBrain::kSpeedB] == 20388);
-    CHECK(e1->brain.f[AiBrain::kSpeedA] == 43690);
+    CHECK(e1->brain.f[AiBrain::kSpeedA] == 0 && e1->brain.f[AiBrain::kSpeedB] == 0);
     // The class-walk seed (D-AI-1): priorities copied verbatim; the +40..+52
     // order sorts priority-descending for the keyed GROUND type — 200 ground,
     // 100 organics, 10 air, 0 decorations [orig: AIProfile_LoadOrFind @0x45fd80].
@@ -930,14 +1052,17 @@ int main() {
     CHECK(e1->profile.slot_class[1] == 2); // organics
     CHECK(e1->profile.slot_class[2] == 0); // air
     CHECK(e1->profile.slot_class[3] == 3); // decorations last
-    // Organic 0 resolved no profile: retail's memset-0 record — zero priorities,
-    // tie order {3,2,1,0} (insertion-stable ascending, stored reversed).
+    // Organic 0 resolved no profile and owns no vehicle brain, so nothing sorts
+    // its walk: zero priorities, the untouched default order. (A profile-less
+    // VEHICLE brain sorts the zeroed record's keys to {0,3,2,1}: ai_brain_rows.)
     CHECK(e0->profile.class_priority[1] == 0);
     CHECK(e0->profile.slot_class[0] == 3);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
+    // The relation group key is the record's command group, not its SSN
+    // [orig: Entity_SpawnFromBMSRecord @0x40EBB3..0x40EBB7 -> entity+0x11C].
+    CHECK(e0->relmat_id == 5);
     CHECK((e0->slot.f[1] & 0x209) == 0x209);
-    CHECK(e0->see_all);
     CHECK((world.registry.get(world.registry.find_by_net_id(1))->engine_flags &
            0x40u) != 0);
     CHECK((world.registry.get(world.registry.find_by_net_id(1))->flags &
@@ -1053,13 +1178,13 @@ int main() {
     // Boarders spawn ON FOOT and attach through the infantry think's board leg
     // (infantry_board.cpp) — there is no load-time mount shortcut, matching retail.
     // Drive the think for a few 16-tick boundaries to let the order land.
-    auto run_ai = [](AiSystem &a, World &aw, int n) {
+    auto run_ai = [](AiSystem &, World &aw, int n) {
         TickContext c;
         c.world = &aw;
         c.is_authority = true;
         for (int t = 0; t < n; ++t) {
             c.logic_tick = static_cast<uint32_t>(t);
-            a.tick(aw, c);
+            aw.update_all_entities(c);
         }
     };
     {
@@ -1335,7 +1460,7 @@ int main() {
         bool held = false, walked = false;
         for (int t = 0; t < 2600; ++t) {
             ctx.logic_tick = static_cast<uint32_t>(t); // the cadence gates key off this
-            ai.tick(world, ctx);
+            world.update_all_entities(ctx);
             if (e0->slot.f[38] > max_node) max_node = e0->slot.f[38];
             if (e0->inf.wait_cooldown > 0) held = true;
             if (e0->inf.anim_state == anim_state::kWalkForward) walked = true;
@@ -1385,12 +1510,19 @@ int main() {
         bool walked = false;
         for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
             c.logic_tick = static_cast<uint32_t>(t);
-            cai.tick(cw, c);
+            cw.update_all_entities(c);
             if (cai.at(0)->inf.anim_state == anim_state::kWalkForward) walked = true;
         }
         CHECK(walked);                                    // covered the ground on foot
         CHECK(occ != nullptr && occ->mounted);            // arrived and attached
         CHECK(occ != nullptr && occ->mount_type == SeatType::Passenger);
+        // The pass that boards ends on foot: the org1 motor keys its seat block
+        // on the mounted-live local its head took, so the next pass poses the
+        // seat. [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985, the seat
+        //  block's test @0x4BE8F0]
+        CHECK(occ != nullptr && occ->position.x != 32.f);
+        c.logic_tick += 1;
+        cw.update_all_entities(c);
         CHECK(occ != nullptr && occ->position.x == 32.f); // posed at the seat point
         cai.root_motion = nullptr;
     }
@@ -1444,7 +1576,7 @@ int main() {
 				cut = true;
             }
             c.logic_tick = static_cast<uint32_t>(t);
-            cai.tick(cw, c);
+            cw.update_all_entities(c);
         }
         CHECK(cut);                              // the stall actually happened
         CHECK(occ != nullptr && occ->mounted);   // the latch widened the ring and boarded

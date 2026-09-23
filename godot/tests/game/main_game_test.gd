@@ -412,18 +412,76 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
 
 
+func test_objective_and_relay_effects_post_chat_lines() -> void:
+	# BMS ShowWin/LoseSubgoal's objective notification lands as two chat-feed
+	# lines, the gametext header and the mission directive, and a one-character
+	# directive is dropped (the engine's hud_game_text.h objective_directive).
+	# The S2C 0x3F mission-text relay posts its key's resolved line; an
+	# unresolved key posts nothing.
+	var gametext := RtxtStringFile.new()
+	var misc := gametext.add_section("Misc")
+	gametext.add_entry("STRMISC_NEWOBJECTIVE", "New Objective", misc, Vector2i.ZERO)
+	var mission := RtxtStringFile.new()
+	var win := mission.add_section("WinConditions")
+	mission.add_entry("STRWINDIRECTIVE021", "Take the bridge", win, Vector2i.ZERO)
+	mission.add_entry("STRWINDIRECTIVE022", "x", win, Vector2i.ZERO)
+	mission.add_entry("STRRELAY01", "Reinforcements inbound", win, Vector2i.ZERO)
+	var old_gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
+	var old_mission := Strings.get_table(Strings.TABLE_MISSION)
+	Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
+	Strings.register_table(Strings.TABLE_MISSION, mission)
+	var presenter := GameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([MissionEffect.make("objective", 2, 1, 21)])
+	assert_eq(presenter.pending_chat_line_count(), 2,
+			"the header and the directive each post one line")
+	presenter.apply_mission_effects([MissionEffect.make("objective", 3, 1, 22)])
+	assert_eq(presenter.pending_chat_line_count(), 3,
+			"a one-character directive is dropped; the header still posts")
+	presenter.apply_mission_effects([
+		MissionEffect.make("mission_text_chat", 0, 0, 0, "STRRELAY01"),
+		MissionEffect.make("mission_text_chat", 0, 0, 0, "MISSING"),
+	])
+	assert_eq(presenter.pending_chat_line_count(), 4,
+			"the relayed key resolves; an unresolved key posts nothing")
+	Strings.register_table(Strings.TABLE_GAMETEXT, old_gametext)
+	Strings.register_table(Strings.TABLE_MISSION, old_mission)
+
+
 func test_console_debug_text_does_not_reach_hud_objective() -> void:
-	# consol/pconsol ride the distinct debug_text channel. The game does not yet
-	# present an on-screen debug console, so these effects remain intentionally
-	# unrouted instead of replacing player-facing mission text.
+	# consol/pconsol/consol# ride the debug_text kind into the system message
+	# ring (the Triggered Text ring) without replacing the objective line.
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		MissionEffect.make("text", 0, 0, 0, "Hold this position"),
 		MissionEffect.make("debug_text", 0, 0, 0, "trigger 17 entered"),
+		MissionEffect.make("debug_text"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Hold this position",
-		"debug_text stays off the player-facing HUD mission-text channel")
+		"debug_text stays off the objective line")
+	assert_eq(presenter.pending_hud_message_count(), 2,
+		"the text line and the non-empty debug_text line queue for the rings")
+	assert_eq(presenter.pending_chat_line_count(), 1,
+		"the text line rides the CHAT ring, the debug_text line the SYSTEM ring")
+
+
+func test_script_chat_lines_ride_the_chat_ring() -> void:
+	# WAC text/ptext/text# and the lose line post into the CHAT ring
+	# (Chat_AddMessageChannel1); the BMS triggered text and the console lines
+	# post into the SYSTEM ring (Chat_AddMessageChannel2).
+	var presenter := GameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([
+		MissionEffect.make("text", 0, 0, 0, "Proceed to the beach"),
+		MissionEffect.make("text", 7),
+		MissionEffect.make("debug_text", 0, 0, 0, "Current Objective: Weapons Cache"),
+		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
+	])
+	assert_eq(presenter.pending_hud_message_count(), 4,
+		"every line queues until the HUD mounts")
+	assert_eq(presenter.pending_chat_line_count(), 2,
+		"the WAC text line and the lose line are CHAT ring lines")
 
 
 func test_lose_effect_sets_endround_banner_and_message() -> void:
@@ -441,6 +499,8 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 			"the lose banner resolves (or marks) the Misc gametext key")
 	assert_eq(presenter.pending_hud_message_count(), 1,
 			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
+	assert_eq(presenter.pending_chat_line_count(), 1,
+			"that line rides the CHAT ring")
 	presenter.teardown()
 	assert_eq(presenter.endround_banner_line(), "",
 			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")

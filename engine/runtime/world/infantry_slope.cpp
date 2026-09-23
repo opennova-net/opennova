@@ -45,18 +45,51 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     const bool org2 = inf.is_local_player;
     if (!org2 && (key & 7u) != 0) return; // org1 runs on the entity's 8-tick phase
 
-    // Dead + in-air takes the corpse-tumble branch instead of the slope pass in both
-    // originals (bodyPitch/roll/yaw spin ramps) — unported; the death-fall mover owns
-    // the drop today. [orig: org1 @0x4ba0b2-0x4ba107; org2 @0x4b6ccb-0x4b6d90]
-    const bool dead = e.health <= 0;
-    if (dead && inf.airborne) return;
+    // Org1 reads "dead" off the Flags word its death edge latches, not health.
+    // [orig: `and ecx,2` @0x4BA084]
+    const Entity *slope_entity = world.registry.get(e.handle);
+    const uint32_t slope_flags = slope_entity != nullptr
+            ? (slope_entity->flags | slope_entity->engine_flags) : 0u;
+    const bool dead = !org2 && slope_entity != nullptr
+            ? (slope_flags & kEntityFlagDead) != 0
+            : e.health <= 0;
+    // A dead org1 body in the air tumbles instead: two key-phase ramps a and b
+    // (each (32 - phase) * 0xFFFFFF, phase = key & 63 and ((key >> 6) - key) & 63)
+    // set the aim pitch to a + b and the aim heading to the target heading, pull
+    // body pitch and roll an eighth of the way to a and b, spin the target heading
+    // by b / 4 (the heading chase follows it) and clear the aim flag.
+    // A rowless body reads its airborne mirror for the in-air bit, as `dead`
+    // reads its health. [orig: Entity_UpdateInfantryAI in-air test @0x4BA08D,
+    //  tumble @0x4BA094..0x4BA10A]
+    const bool in_air = slope_entity != nullptr ? (slope_flags & kEntityFlagInAir) != 0
+                                                : inf.airborne;
+    if (!org2 && dead && in_air) {
+        const int32_t k = static_cast<int32_t>(key);
+        const int32_t a = (32 - (k & 63)) * 0xFFFFFF;
+        const int32_t b = (32 - (io::bam_sub(k >> 6, k) & 63)) * 0xFFFFFF;
+        inf.aim_pitch = io::bam_add(b, a);
+        inf.aim_heading = inf.target_heading;
+        e.body_pitch = io::bam_add(
+                e.body_pitch, io::bam_sar(io::bam_add(io::bam_sub(a, e.body_pitch), 4), 3));
+        const int32_t roll = io::bam_add(
+                e.roll, io::bam_sar(io::bam_add(io::bam_sub(b, e.roll), 4), 3));
+        inf.target_heading = io::bam_add(inf.target_heading, io::bam_sar(b, 2));
+        inf.aim_valid = false;
+        e.roll = roll;
+        return;
+    }
+    // The player body's own dead in-air tumble (bodyPitch/roll/yaw spin ramps) is
+    // not ported; the death-fall mover owns its drop. [orig: org2 @0x4b6ccb-0x4b6d90]
+    if (org2 && dead && inf.airborne) return;
 
     // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
-    // draggers 137-139), or a grounded corpse. The original's dead leg also requires
-    // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
+    // draggers 137-139), or a corpse that is neither in the air, afloat nor on a
+    // ladder (Flags 0x10A000). [orig: org1 dead leg `test eax,10A000h`
+    //  @0x4BA12C; org2 @0x4B6DB6]
     const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
-                         (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
+                         (infantry_anim_flags(inf.anim_state) & 2u) != 0 ||
+                         (dead && (slope_flags & 0x10A000u) == 0);
     if (!conform) {
         // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
         // [orig: @0x4ba133-0x4ba152 / @0x4b6dbd-0x4b6ddc]
@@ -75,12 +108,18 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         if (collision != nullptr)
             return collision->raycast_ground(world, e.handle, e.pos, dx, dy,
                                              0x4000, 0x20000, nullptr);
-        // The bare terrain-only embedder has no collision world.
+        // The bare terrain-only embedder has no collision world: the terrain
+        // column stands in for the ray, and a miss (off the field, or a floor
+        // below the ray's reach) returns the ray's end, as the probe does.
+        // [orig: Entity_RaycastGroundHeight @0x4142C0 returns the clipped end
+        //  @0x41430D]
         int32_t p[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy), e.pos[2]};
         GroundClearance clearance = ground_clearance;
-        clearance.has_physics = e.has_physics;
+        clearance.has_occupant = e.has_occupant;
         clearance.use_dead = dead;
-        return calc_average_ground_height(*terrain, p, 0, clearance);
+        const int32_t h = calc_average_ground_height(*terrain, p, 0, clearance);
+        const int32_t ray_end = io::bam_sub(io::bam_add(e.pos[2], 0x4000), 0x20000);
+        return h == INT32_MIN || h < ray_end ? ray_end : h;
     };
 
     int32_t c, s;
@@ -93,9 +132,6 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     const int32_t lx = -(fy >> 2), ly = fx >> 2;
     const int32_t h_left = probe(lx, ly);
     const int32_t h_right = probe(-lx, -ly);
-    if (h_ahead == INT32_MIN || h_behind == INT32_MIN || h_left == INT32_MIN ||
-        h_right == INT32_MIN)
-        return; // off the height field
 
     int32_t pitch_slope, roll_slope, threshold;
     if (org2) {
@@ -109,21 +145,23 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
             kBamPerRadian);
         threshold = dead ? kSlideThreshold : kSlideThresholdLive; // [orig: @0x4b6ee5]
     } else {
-        // Small-angle approximation, clamped. [orig: @0x4ba1cd <<14 / @0x4ba22b <<16]
-        pitch_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_ahead) - h_behind) << 14,
-                              -kSlopeClamp),
-            kSlopeClamp));
-        roll_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_left) - h_right) << 16,
-                              -kSlopeClamp),
-            kSlopeClamp));
+        // Small-angle approximation: the 32-bit difference shifted in 32 bits
+        // (a drop of 2 u or more wraps the <<14, 0.5 u the <<16), then the
+        // signed clamp. [orig: `sub ebp,eax; shl ebp,0Eh` @0x4BA1C9..0x4BA1CB,
+        //  clamp @0x4BA1D1..0x4BA1E8; `sub ecx,eax; shl ecx,10h`
+        //  @0x4BA225..0x4BA227, clamp @0x4BA22D..0x4BA244]
+        pitch_slope = std::clamp(static_cast<int32_t>(
+                static_cast<uint32_t>(io::bam_sub(h_ahead, h_behind)) << 14),
+                -kSlopeClamp, kSlopeClamp);
+        roll_slope = std::clamp(static_cast<int32_t>(
+                static_cast<uint32_t>(io::bam_sub(h_left, h_right)) << 16),
+                -kSlopeClamp, kSlopeClamp);
         threshold = kSlideThreshold;
     }
 
     // Slide on steep ground: velocity gains dir<<11>>22 (org1, per 8-tick pass) or
     // dir<<9>>22 (org2, per 2-tick pass), along/against the facing for pitch and
-    // perpendicular for roll. [orig: @0x4ba24c-0x4ba2fe <<11; @0x4b6f01-0x4b6fa3 <<9]
+    // perpendicular for roll. [orig: @0x4BA249..0x4BA2FB <<11; @0x4b6f01-0x4b6fa3 <<9]
     const int shift = org2 ? 9 : 11;
     const int32_t slide_x = static_cast<int32_t>((static_cast<int64_t>(c) << shift) >> 22);
     const int32_t slide_y = static_cast<int32_t>((static_cast<int64_t>(s) << shift) >> 22);
@@ -142,10 +180,16 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         inf.vel[1] += slide_x;
     }
 
-    // The conform chase. org1: eighth-step on both fields; dead NPCs also aim along
-    // the slope (aimPitch = slope, aimHeading = targetHeading, aimFlag = 0 on the
-    // 8th tick while Flags & 2 [orig: @0x4ba307..0x4ba319] — not ported here; the
-    // drag block's aimFlag clear lives in infantry_escort.cpp). org2: quarter-step;
+    // A dead org1 body aims along the slope: aim pitch = the pitch slope, aim
+    // heading = the target heading, aim flag clear; its look then settles there.
+    // [orig: Entity_UpdateInfantryAI `test byte ptr [esi+24h],2` @0x4BA301,
+    //  stores @0x4BA307..0x4BA319]
+    if (!org2 && (slope_flags & kEntityFlagDead) != 0) {
+        inf.aim_pitch = pitch_slope;
+        inf.aim_heading = inf.target_heading;
+        inf.aim_valid = false;
+    }
+    // The conform chase. org1: eighth-step on both fields. org2: quarter-step;
     // a corpse additionally tips its LOOK pitch eighth-step, and the roll write is
     // skipped while a combat roll 41/42 plays (the torso-roll ramp owns those ticks).
     // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4]

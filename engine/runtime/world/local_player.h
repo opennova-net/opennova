@@ -101,7 +101,8 @@ public:
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
-    // out-of-session UseGun rejection (session_open gates it).
+    // out-of-session UseGun rejection (rules.mp_session, the retail
+    // is_in_session fact, gates it).
     bool toggle_mount();
     // Numbered seat keys share the panel's list and their own idle/overheat
     // gate; a joiner uses the query then waits for the authority's reply.
@@ -159,9 +160,15 @@ public:
     // Preserve the retail process-global oscillators across a kernel replacement.
     // Other local input, weapon and view state still belongs to the new mission.
     void carry_scoped_aim_drift_from(const LocalPlayer &previous);
-    // The post-tick local pumps in retail order: the sim-wrote-the-view fold,
-    // the per-frame view promoter, then the equipped-slot FSM pump.
-    void run_local_player_post_tick();
+    // The post-tick local view in retail order: the sim-wrote-the-view fold,
+    // then the per-frame view promoter and the camera compose.
+    void run_local_view_tick();
+    // The equipped-slot FSM pump: the local player's visit in the world's
+    // weapon-action walk (World::pump_weapon_actions calls it at the local
+    // player's own pool-0 slot), after run_local_view_tick.
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 -> WeaponAction_ProcessFrame
+    //  @0x540E60 for g_local_player_entity's slot]
+    void pump_local_weapon();
     // One 62.5 Hz tick of the view state over view_session_inputs, then the
     // aim acquisition and the quantum's camera compose, before the weapon
     // pump (the order the world tick keeps: retail's Player_UpdatePerFrame

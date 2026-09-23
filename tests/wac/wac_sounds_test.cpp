@@ -62,7 +62,11 @@ static void test_sound_handles_raw_operands_and_retry() {
     }
     const auto baseline = f.world.snapshot();
     f.world.out.script_sounds.clear();
-    f.script("sound(\"ToNe\",3F,64)\n");
+    // A bare word reaches the sound banks upper-cased; a quoted one keeps its
+    // quote and names no set. [orig: Script_Compile @0x4F3418..0x4F341D,
+    // @0x4F3338; WacScript_ResolveParameter @0x4F2FDA]
+    CHECK(!f.compile("sound(\"TONE\",1,0)\n").ok());
+    f.script("sound(ToNe,3F,64)\n");
     CHECK(f.world.out.script_sounds.size() == 1);
     CHECK(f.world.out.script_sounds[0].distance_q16 == 3 * 21501);
     f.world.restore(baseline);

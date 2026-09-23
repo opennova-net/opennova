@@ -28,6 +28,21 @@ int32_t wrap_abs(int32_t v) noexcept {
     return v < 0 ? static_cast<int32_t>(0u - static_cast<uint32_t>(v)) : v;
 }
 
+// The day wrap of the advanced clock, taken on the SIGNED word: a time
+// outside [0, day) (a raw WAC TOD store, a negative minute) folds back into
+// it. [orig: Environment_ComputeTimeOfDayColors @0x57DE40 — the range test
+// @0x57DE51..0x57DE5B, the signed remainder @0x57DE5D..0x57DE74, the
+// negative fix-up @0x57DE78, the store @0x57DE84]
+uint32_t wrap_tod_day(uint32_t fixed24) noexcept {
+    constexpr int32_t day = static_cast<int32_t>(WeatherState::kTodDayFixed24);
+    int32_t t = static_cast<int32_t>(fixed24);
+    if (t < 0 || t >= day) {
+        t %= day;
+        if (t < 0) t += day;
+    }
+    return static_cast<uint32_t>(t);
+}
+
 // abs32(target + (ticks >> 1) - current) / ticks — the transition step every
 // timed weather command installs: wrapping 32-bit adds, then the SIGNED
 // divide, so a negative tick count installs a negative step exactly as the
@@ -258,9 +273,10 @@ void WeatherState::command_quake(int32_t seconds) {
 }
 
 void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
-    // [orig: WacCmd_Tod @ 0x4edc70] minute-of-day * 0x44444 into the 8.24
-    // accumulator.
-    tod_fixed24 = (static_cast<uint32_t>(minute_of_day) * 0x44444u) % kTodDayFixed24;
+    // minute-of-day * 0x44444 into the 8.24 accumulator, raw: the weather
+    // tick wraps it into the day. [orig: WacCmd_Tod @0x4EDC70 — `imul
+    // eax,44444h` @0x4EDC74, the store @0x4EDC7A]
+    tod_fixed24 = static_cast<uint32_t>(minute_of_day) * 0x44444u;
     bump_command();
 }
 
@@ -351,10 +367,16 @@ void WeatherState::set_wind_scale(int32_t value) {
 
 void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
     events = WeatherTickEvents{};
+    // The render pass's iris re-target gate, sampled from its two globals
+    // [orig: Environment_ApplyFogAndAmbient @0x57E50B..0x57E51B].
+    if (world != nullptr) {
+        iris_retarget_enabled = world->registry.get(world->cached.local_player) != nullptr &&
+                world->script.wac_values.autogain != 0;
+    }
     // The clock: the TOD colors compute at curtime + advance, i.e. at the
-    // advanced clock [orig: @ 0x57e9c7]; the 310-tick minute counter
-    // [orig: @ 0x57e9da..0x57e9ef].
-    tod_fixed24 = (tod_fixed24 + tod_advance_per_tick) % kTodDayFixed24;
+    // advanced clock [orig: @ 0x57e9c7], which they wrap into the day and
+    // store; the 310-tick minute counter [orig: @ 0x57e9da..0x57e9ef].
+    tod_fixed24 = wrap_tod_day(tod_fixed24 + tod_advance_per_tick);
     compute_night_phase();
     if (--tod_minute_tickdown < 0) {
         tod_minute_tickdown = kTodMinuteTicks;

@@ -133,6 +133,11 @@ int32_t CollisionWorld::entity_model_id(EntityHandle h) const {
     return it == instances_.end() ? -1 : it->second.model_id;
 }
 
+int32_t CollisionWorld::entity_husk_model_id(EntityHandle h) const {
+    const auto it = instances_.find(h.packed);
+    return it == instances_.end() ? -1 : it->second.husk_model_id;
+}
+
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
     auto it = candidates_.find(h.packed);
     return it == candidates_.end() ? 0 : it->second.count;
@@ -449,15 +454,12 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world) {
 
     if (tick_tables_ready()) {
         stable_los_candidates_.reserve(statics_.size() + dynamics_.size());
-        for (const StaticSlot &slot : statics_) {
-            const Entity *e = world.registry.get(slot.h);
-            if (e != nullptr) append(*e);
-        }
-        for (const DynSlot &slot : dynamics_) {
-            if (slot.h.pool() == 2) continue;
-            const Entity *e = world.registry.get(slot.h);
-            if (e != nullptr) append(*e);
-        }
+        // Every pool-2 entry, then every pool-1 entry, as raycast_clear_impl
+        // walks them: the LOS reads the pools themselves, not the per-tick
+        // proximity tables [orig: Physics_RaycastTerrainAndSectors
+        // @0x539A16..0x539A30, @0x539A40..0x539A5A].
+        world.registry.for_each_in_pool(2, append);
+        world.registry.for_each_in_pool(1, append);
     } else {
         // Match raycast_clear_impl's unticked compatibility membership and
         // order exactly.

@@ -58,12 +58,18 @@ int main() {
     w::Entity item;
     item.kind = w::EntityKind::Item;
     item.has_item_def = true;
+    item.item_type_index = 7; // the def row's ordinal the +0x1C kill gate reads
     item.item_id = 10;
     item.health = 0;
     const auto handle = world.registry.spawn(1, item);
     w::ItemDeathTraits traits;
     traits.death_class = w::ItemDeathClass::kGnrl;
     world.tables.item_death_traits.set(10, traits);
+    // The item's death callback runs in the entity update, after the server
+    // tick's send; its state packet leads the next tick's queue.
+    // [orig: Game_ProcessMainFrame -- the Entity_UpdateAllEntities call
+    //  @0x52674B follows Server_TickUpdate's send pump @0x51E487]
+    inmatch::Server_TickUpdate(ctx);
     inmatch::Server_TickUpdate(ctx);
     const std::vector<uint8_t> expected = {uint8_t(handle.packed), uint8_t(handle.packed >> 8), 0, 0};
     CHECK(take(alive_wire, s2c::KILL_SYNC) == std::vector<std::vector<uint8_t>>{expected});
@@ -87,6 +93,7 @@ int main() {
     world.tables.item_death_traits.set(11, traits);
     for (int tick = 0; tick <= 10; ++tick) inmatch::Server_TickUpdate(ctx);
     CHECK(world.registry.get(barrel) == nullptr);
+    inmatch::Server_TickUpdate(ctx); // the removal's records lead the next queue
     const std::vector<uint8_t> removed = {uint8_t(barrel.packed), uint8_t(barrel.packed >> 8)};
     std::vector<ns::Datagram> packets;
     ns::Datagram packet;

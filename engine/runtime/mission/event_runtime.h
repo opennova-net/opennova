@@ -22,22 +22,29 @@
 namespace opennova::mission {
 
 // One runtime event = a BMS Event plus its resolved trigger/action slices and the
-// runtime fields the original keeps in the 24-byte event record.
+// runtime words the original keeps in the 24-byte event record.
 struct ScriptedEvent {
     bms::Event event{};
+    // Bounded raw-byte slices. The chain, the dispatch and the zone resolvers
+    // read both counts SIGNED: 128..255 evaluate trigger 0 only, run no
+    // actions and resolve no zone refs. [orig: EventTrigger_EvaluateChain
+    //  @0x45405F/@0x45408C/@0x4540C7; the dispatch @0x454C92/@0x454D01; the
+    //  resolvers @0x453022/@0x4530C8 and @0x453127/@0x4531D2]
     std::vector<bms::Trigger> triggers;
-    // Bounded raw-byte slice; dispatch separately sign-extends event.action_count.
-    // Trigger counts keep the full unsigned range. [orig: @0x454C92/@0x454D01]
     std::vector<bms::Action> actions;
-    // Live timer words. Units: the on-disk reload values are authored_value << 6,
-    // decremented 64 per processing pass — for normal events (processed once per
-    // 64 ticks) one authored unit amortizes to 64 ticks (~1.02 s at 62 Hz).
-    uint16_t activate_countdown = 0; // delay before actions run [orig: event +16]
-    uint16_t repeat_countdown = 0;   // re-arm cooldown for repeat events [orig: event +12]
-    // Active latch: set the moment the chain passes, cleared when the repeat
-    // cooldown expires (or by a ResetEvent action). For fire-once events this IS
-    // the has-fired state. [orig: event byte +20]
-    bool active = false;
+    // Live timer words and their reloads. Units: a reload is the authored value
+    // << 6, and a live word drops 64 per processing pass, so for normal events
+    // (processed once per 64 ticks) one authored unit amortizes to 64 ticks
+    // (~1.02 s at 62 Hz). [orig: event +12 repeat countdown, +14 its reload,
+    //  +16 activation countdown, +18 its reload]
+    uint16_t repeat_countdown = 0;
+    uint16_t repeat_reload = 0;
+    uint16_t activate_countdown = 0;
+    uint16_t activate_reload = 0;
+    // Active latch byte: set the moment the chain passes, cleared when the
+    // repeat cooldown expires (or by a ResetEvent action). For fire-once events
+    // this IS the has-fired state. [orig: event byte +20]
+    uint8_t active = 0;
 };
 
 class BmsEventSystem : public opennova::world::ISystem, public opennova::world::IScriptEventQuery {
@@ -55,10 +62,11 @@ public:
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override;
 
     // The post-mission pass: ONE whole-list sweep over the PostMission-flag
-    // entries, called by the embedder exactly once per transition — retail invokes
-    // it from mission teardown and the SP round restart, never periodically
-    // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; callers
-    // Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
+    // entries, run once by the mission teardown after pools 0..2 are destroyed
+    // (MissionKernel::run_post_mission_pass), never periodically (D-EVT-4).
+    // [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; live caller
+    // Game_TeardownMission @0x52266c (the SP restart's call @0x5263ae finds
+    // the list freed)]
     // (The pre pass is the tick()'s TickPhase::PreMission path under the same
     // one-call-per-transition contract [orig: Game_StartMission @0x525b86].)
     void run_post_mission_pass(opennova::world::World &w);
@@ -96,14 +104,21 @@ public:
 
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
-    // Test seams over the private evaluator/dispatcher (public API for the
-    // ctest suite; no behavior of their own).
-    bool evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
+    // Test seams over the private evaluator/dispatcher and the raw 24-byte
+    // record words (public API for the ctest suite; no behavior of their own).
+    int32_t evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
         return evaluate_trigger(w, t);
+    }
+    int32_t evaluate_chain_for_test(opennova::world::World &w, size_t index) {
+        return evaluate_chain(w, events_[index]);
+    }
+    void update_entry_for_test(opennova::world::World &w, size_t index) {
+        update_entry(w, events_[index]);
     }
     void dispatch_action_for_test(opennova::world::World &w, const bms::Action &a) {
         dispatch_action(w, a);
     }
+    ScriptedEvent &event_for_test(size_t index) { return events_[index]; }
 
 private:
     std::vector<ScriptedEvent> events_;
@@ -122,15 +137,19 @@ private:
     // when the id is missing or the zone box is degenerate (x_min==x_max ||
     // y_min==y_max). Covers Group/Single IsWithinArea (sub 10, param2) and
     // PlayerSatchel (main 7 sub 37, param1); the action sibling covers
-    // AreaAiRed/Blue (types 12/13, param1 — retail also inlines the zone box into
-    // the action params; our runtime resolves boxes at dispatch, so the index
-    // rewrite alone preserves behavior).
+    // AreaAiRed/Blue (types 12/13, param1) and overwrites the index at once with
+    // the zone box: p1 = x_min, p3 = y_min, p4 = x_max, reserved1 = y_max, the
+    // words the dispatch's bounds test and command arguments then read.
     void resolve_zone_refs(opennova::world::World &w);
 
     void update_entry(opennova::world::World &w, ScriptedEvent &se);
     void fire(opennova::world::World &w, ScriptedEvent &se);
-    bool evaluate_chain(opennova::world::World &w, const std::vector<bms::Trigger> &triggers);
-    bool evaluate_trigger(opennova::world::World &w, const bms::Trigger &t);
+    // Both return the original's raw ints: every evaluator answers 0/1 except
+    // the Berserk read (the 0x200 bit) and the load-parity word, and the chain
+    // folds them bitwise. [orig: EventTrigger_EvaluateCondition @0x453620;
+    //  EventTrigger_EvaluateChain @0x454050]
+    int32_t evaluate_chain(opennova::world::World &w, const ScriptedEvent &se);
+    int32_t evaluate_trigger(opennova::world::World &w, const bms::Trigger &t);
     void dispatch_action(opennova::world::World &w, const bms::Action &a, int32_t event = -1, int32_t action = -1);
 };
 

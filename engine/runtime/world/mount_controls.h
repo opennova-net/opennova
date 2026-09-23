@@ -204,17 +204,19 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 
 // The emplacement's own frame — retail's entity Yaw/Pitch of the ewep (+0x10 /
 // +0x14). A vehicle motor preserves sub-degree parent yaw in BAM; a static
-// EWEAP uses its mission-yaw field. Attached EWEAPs retain the bone's full
-// pitch in the same BAM attitude fields as their carrier.
+// EWEAP holds its placement angles in the spawn form. Attached EWEAPs retain
+// the bone's full pitch in the same BAM attitude fields as their carrier.
+// [orig: Entity_UpdateChildAttachment @0x440A51/@0x440A58; Entity_SpawnFromBMSRecord
+//  @0x40EB42..0x40EB86]
 inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 	return mount.veh.yaw_seeded
 			? mount.veh.yaw_bam
-			: bam_heading_from_mission_yaw_deg(static_cast<double>(mount.yaw));
+			: spawn_angle_bam(90 - mount.yaw);
 }
 
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
 	return mount.veh.yaw_seeded ? mount.veh.air_pitch_bam
-			: bam_from_degrees_wrapped(static_cast<double>(mount.pitch));
+			: spawn_angle_bam(mount.pitch);
 }
 
 // A stored word back to the BAM32 the IsTurret leg integrates: the raw 16

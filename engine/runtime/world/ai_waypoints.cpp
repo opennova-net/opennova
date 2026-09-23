@@ -31,23 +31,20 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
         int32_t navMeshId = b.f[AiBrain::kWpChannel];
         const NavChannel *ch = (navMeshId != 0) ? nav.channel(navMeshId) : nullptr;
         if (!ch || ch->count == 0) return -1; // [orig: navMeshId==0 || dword_A71DD4[34*id]==0]
-        // Tracked deviation: the original reads entryIndex[34*navMeshId + node] and
-        // Pool_GetEntryUnchecked(3,idx) UNCHECKED (always returns 0, writes fields). Our
-        // container rebase adds a bounds/null guard that returns -1 only for indices the
-        // original would treat as wild pointers (UB). On valid data (node < count <= 32,
-        // populated pool) it never fires, so resolved values stay byte-identical.
-        int32_t sub = b.f[AiBrain::kWpNode];
-        if (sub < 0 || sub >= 32) return -1;  // entries[] holds 32 nodes max
-        int32_t nodeIdx = ch->entries[sub];   // [orig: entryIndex[34*navMeshId + wp[2]]]
-        const NavEntry *node = nav.entry(nodeIdx);
-        if (!node) return -1;                 // [orig: unchecked Pool_GetEntryUnchecked(3,idx)]
+        // Past the two zero tests nothing is bounded: the node indexes the flat
+        // record block (a node past 31 reads the next record's words) and the
+        // pool-3 slot resolves unchecked, so an index no marker filled is the
+        // zeroed slot at the origin with radius 0 [orig: `mov edx,
+        // Buffer+8[ecx*4]` @0x457476, Pool_GetEntryUnchecked(3, idx) @0x457481].
+        const int32_t nodeIdx = nav.entry_index(navMeshId, b.f[AiBrain::kWpNode]);
+        const NavEntry &node = nav.slot(nodeIdx);
         b.f[AiBrain::kWpResolved] = nodeIdx;  // [orig: waypointData+12 = navEntry]
-        int32_t dx = node->f[1] - pos[0];
-        int32_t dz = node->f[2] - pos[1];
-        int32_t dy = node->f[3] - pos[2];
+        int32_t dx = node.f[1] - pos[0];
+        int32_t dz = node.f[2] - pos[1];
+        int32_t dy = node.f[3] - pos[2];
         wp_dist_bearing(dx, dz, dy, b.f[AiBrain::kWpDistance], b.f[AiBrain::kWpBearing]);
-        b.f[AiBrain::kWpNodeVal] = node->f[0]; // [orig: *navEntry]
-        b.f[AiBrain::kWpExtra] = node->f[4];   // [orig: navEntry[4]]
+        b.f[AiBrain::kWpNodeVal] = node.f[0]; // [orig: *navEntry]
+        b.f[AiBrain::kWpExtra] = node.f[4];   // [orig: navEntry[4]]
         return 0;
     }
     if (type == 3) { // literal coordinate
@@ -130,9 +127,9 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
                                                  : (timeDelta < moveSpeed * b.f[AiBrain::kStep]);
     if (halve) moveSpeed >>= 1;
 
-    const NavEntry *node = nav.entry(b.f[AiBrain::kWpResolved]); // aiState[16]
-    int32_t nodeX = node ? node->f[1] : 0; // *(waypointPtr+4)
-    int32_t nodeY = node ? node->f[2] : 0; // *(waypointPtr+8)
+    const NavEntry &node = nav.slot(b.f[AiBrain::kWpResolved]); // aiState[16]
+    int32_t nodeX = node.f[1]; // *(waypointPtr+4)
+    int32_t nodeY = node.f[2]; // *(waypointPtr+8)
     int32_t result = b.f[AiBrain::kWpBearing];                   // aiState[21]
     b.f[AiBrain::kWorkPosX] = nodeX;
     b.f[AiBrain::kWorkPitch] = 0;   // aiState[133]
@@ -152,13 +149,17 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
     if (ch == nullptr) return 0;
     int32_t best = 0;
     int32_t best_distance = INT32_MAX;
-    for (int i = 0; i < ch->count && i < 32; ++i) {
-        const NavEntry *node = nav.entry(ch->entries[i]);
-        if (node == nullptr) continue;
+    // The walk runs to the raw count over the flat record block and resolves
+    // every slot unchecked: a count past 32 reads on into the next record's
+    // words, and a slot no marker filled measures to the origin.
+    // [orig: @0x407F0B..0x407F6B — `lea ebx, Buffer+8[34*list]`, one dword per
+    //  node, Pool_GetEntryUnchecked(3, word) @0x407F17, `cmp ebp, count; jl`]
+    for (int i = 0; i < ch->count; ++i) {
+        const NavEntry &node = nav.slot(nav.entry_index(static_cast<int>(list), i));
         uint32_t squared = 0;
         for (int axis = 0; axis < 3; ++axis) {
             const int32_t delta = static_cast<int32_t>(
-                    uint32_t(e.pos[axis]) - uint32_t(node->f[axis + 1])) >> 16;
+                    uint32_t(e.pos[axis]) - uint32_t(node.f[axis + 1])) >> 16;
             squared += uint32_t(delta) * uint32_t(delta);
         }
         const int32_t distance = static_cast<int32_t>(squared);
@@ -219,16 +220,32 @@ static int32_t avoid_sin22(int32_t bam) {
     return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
-// The pool-1 avoid BRAKE, shared by the ground and cbot AI-driver legs — the
-// two sites are instruction-identical (footprint ellipse, dead-ahead cone,
-// id/frame-keyed factor) [orig: ground @0x48bd8f-0x48bf26; cbot
-// @0x48E577..0x48E756]: for every pool-1 neighbor whose heading-aware footprint
-// ellipse overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead,
-// the command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
+// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
+// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
+// load 1 into ecx for the walk's decrement and compare the index against that
+// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
+// items.def row).
+// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
+//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
+//  Entity_UpdateLightVehiclePhysics @0x484F7F, Entity_ProcessInfantryPhysics
+//  @0x46EE70; boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`
+//  — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
+//  Entity_ProcessAirVehiclePhysics @0x470B08/@0x470B23,
+//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
+enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
+
+// The pool-1 avoid BRAKE, shared by the ground, cbot and aircraft AI legs: the
+// sites are instruction-identical (footprint ellipse, dead-ahead cone,
+// id/frame-keyed factor) apart from the walk gate above [orig: ground
+// @0x48bd8f-0x48bf26; cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
+// @0x4919A4..0x491B67]:
+// for every admitted pool-1 neighbor whose heading-aware footprint ellipse
+// overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead, the
+// command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
 // tick — vehicles brake behind obstacles; deflecting off them through the hull
 // contact was never the retail path-follow behavior.
 static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
-                                   int32_t cmd_speed) {
+                                   int32_t cmd_speed, AvoidBrakeWalk walk) {
     const int32_t self_bound = to_fixed(veh.bound_radius);
     const int32_t sx = to_fixed(veh.position.x);
     const int32_t sy = to_fixed(veh.position.y);
@@ -239,13 +256,14 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
         // The pool walk's live gate is an ITEM-TYPE test, not a radius test:
-        // retail reads entity+0x1C and skips the slot when it is zero.
-        // entity+0x1C is ItemTypeIndex, stamped at spawn as `defIndex`
-        // [orig: the gate @0x48bdd9 `*(_DWORD *)(base + 28) == 0`;
-        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40E9F0].
+        // retail reads entity+0x1C (ItemTypeIndex) and applies the family's
+        // AvoidBrakeWalk rule [orig: the gates listed at AvoidBrakeWalk;
+        //  ItemTypeIndex written at Entity_SpawnFromBMSRecord @0x40EBFC].
         // (The occupancy half of retail's walk is our null check above:
         //  EntityRegistry::get returns nullptr for an unused slot.)
-        if (o->item_id == 0) continue;
+        if (walk == AvoidBrakeWalk::SkipIndexZero ? o->item_type_index == 0
+                                                  : o->item_type_index != 1)
+            continue;
         const int32_t ob = to_fixed(o->bound_radius);
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
         const int32_t dx = sx - to_fixed(o->position.x);
@@ -293,12 +311,17 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // Dead-ahead gate: the other within ~30 deg of the nose
         // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
         if (iabs32(io::bam_sub(io::bam_sub(heading, ang), 0x7FFFFF80)) > 357913920) continue;
-        // The brake factor ((id + (frame << 8)) & 0x7FFF) + 0x4000 — keyed
-        // off DcbId + the global frame counter dword_24C1948 (our net id +
-        // logic tick stand in) [orig: @0x48bf17-0x48bf26].
+        // The brake factor ((id + (counter << 8)) & 0x7FFF) + 0x4000 — keyed
+        // off DcbId and the entity-update counter (g_entity_update_counter)
+        // [orig: @0x48bf17-0x48bf26; the counter reads in
+        //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
+        //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
+        //  Entity_ProcessInfantryPhysics @0x46EFC1, Entity_UpdateWatercraftPhysics
+        //  @0x48E712, Entity_ProcessAirVehiclePhysics @0x470C70 and
+        //  Entity_UpdateAircraftPhysics @0x491B2D].
         const int32_t f = static_cast<int32_t>(
                 ((static_cast<uint32_t>(veh.net_id) +
-                  (static_cast<uint32_t>(world.logic_tick) << 8)) &
+                  (world.entity_update_counter << 8)) &
                  0x7FFFu) +
                 0x4000u);
         cmd_speed = static_cast<int32_t>(
@@ -499,8 +522,10 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     }
 
     // The pool-1 avoid BRAKE [orig: @0x48bd8f-0x48bf26; ctan @0x489958..0x489B33] —
-    // shared with the cbot leg (vehicle_avoid_brake above).
-    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed);
+    // shared with the cbot leg (vehicle_avoid_brake above); the ground walk skips
+    // ItemTypeIndex 0 only.
+    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed,
+                                    AvoidBrakeWalk::SkipIndexZero);
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     // [orig: @0x48bd7f; ctan @0x489948..0x489952]
@@ -569,12 +594,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int32_t err = iabs32(heading - b.f[AiBrain::kWpBearing]);
+        const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = (err / denom) << 4;
     }
 
     // Bearing delta clamped to the budget [orig: @0x48E322..0x48E33C].
-    int32_t delta = b.f[AiBrain::kWpBearing] - heading;
+    int32_t delta = io::bam_sub(b.f[AiBrain::kWpBearing], heading);
     const int32_t budget = b.f[AiBrain::kAnimFlag];
     if (delta > budget) delta = budget;
     if (delta < -budget) delta = -budget;
@@ -594,7 +619,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 
     // steer = heading + delta — the boat leg has NO delta/8 term
     // [orig: @0x48E3F0..0x48E3F5].
-    int32_t steer = heading + delta;
+    int32_t steer = io::bam_add(heading, delta);
 
     // Slip counter-steer: steer INTO the hull/velocity mismatch and shed command
     // as the slip grows [orig: @0x48E3FB..0x48E577 — corr = (sin22(Yaw - motion)
@@ -606,9 +631,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
         const int32_t vy = veh.veh.vel_y;
         const double fdx = static_cast<double>(vx);
         const double fdy = static_cast<double>(vy);
-        const int32_t motion = static_cast<int32_t>(
-                std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
-        const int32_t s22 = avoid_sin22(heading - motion);
+        // The motion bearing truncates through _ftol2_sse like every other
+        // bearing; the widened conversion keeps +pi's 0x80000000 word
+        // [orig: fpatan, fmul dbl_7C19D8, `call _ftol2_sse` @0x48E417..0x48E423].
+        const int32_t motion = static_cast<int32_t>(static_cast<uint32_t>(
+                static_cast<int64_t>(std::atan2(fdy, fdx) * 683565275.5764316)));
+        const int32_t s22 = avoid_sin22(io::bam_sub(heading, motion));
         const double dm = std::sqrt(fdx * fdx + fdy * fdy);
         int32_t mag = dm >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dm);
         if (mag > 0x10000) mag = 0x10000; // [orig: the 1.0 u/tick clamp @0x48E476]
@@ -628,9 +656,10 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
             cmd_speed = static_cast<int32_t>((16384LL * cmd_speed + 0x8000) >> 16);
     }
 
-    // The pool-1 avoid BRAKE — the cbot copy of the ground block
-    // [orig: @0x48E577..0x48E756].
-    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed);
+    // The pool-1 avoid BRAKE — the cbot copy of the ground block, walking only
+    // ItemTypeIndex 1 [orig: @0x48E577..0x48E756, the gate @0x48E5C5].
+    cmd_speed = vehicle_avoid_brake(world, veh, heading, cmd_speed,
+                                    AvoidBrakeWalk::OnlyIndexOne);
 
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
@@ -693,7 +722,12 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     AiBrain &b = ve->brain;
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+        // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E read
+        //  the row's Yaw/Pitch/Roll, unmoved = the spawn form,
+        //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
+        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
+        m.air_roll_bam = spawn_angle_bam(veh.roll);
         m.yaw_seeded = true;
     }
     m.ai_drive = true;
@@ -714,36 +748,48 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 
 	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
 
-	const bool wrecked = veh.health <= 0 || !veh.alive ||
-                         (veh.flags & kEntityFlagDead) != 0;
-    const bool crewed =
-            controller != nullptr && controller->alive && controller->health > 0;
-    if (!crewed || wrecked) {
-        // Parked. [orig: the no-pilot/dead block — thrust slots zeroed, altitude
-        // pinned below ground (collective off), AI_CheckVehicleStuckState
-        // @0x491c5e, state 14, engine flag cleared; our shared parked stamp is
-        // 22 like the ground movers' player/parked leg]
-		if (!wrecked) {
-			b.f[AiBrain::kCurState] = 14;
-			b.f[AiBrain::kPendState] = 14;
-		}
+	// Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: no hull
+	// or pilot health term. A dead pilot has already left the seat through the
+	// infantry death edge's detach (the caller hands a dead controller in as
+	// null). [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25]
+	if (controller == nullptr || ((veh.flags | veh.engine_flags) & 0x10000002u) != 0) {
+		// Parked: both thrust registers and the climb zeroed, the altitude target
+		// pinned 0x4000 under the ground (collective off), the stuck escalation,
+		// then PRETTY on the CURRENT state word only; the pending word keeps any
+		// order parked on it [orig: @0x491C31..0x491C58, AI_CheckVehicleStuckState
+		//  @0x491C5E, `mov dword ptr [ebx+10h],0Eh` @0x491C66, Flags &= ~0x80
+		//  @0x491C6D].
+		// An uncrewed hull still airborne more than 2 u over its cached ground
+		// (the probe offset taken off its Z) first yaws 2886390 BAM per visit, about
+		// 15 deg/s, and the heading pin below takes the turned yaw.
+		// [orig: `test dword ptr [esi+24h],2000h` @0x491C09, Z - brain+0x2C -
+		//  ground > 0x20000 @0x491C18..0x491C28, `add dword ptr [esi+10h],
+		//  0FFD3F50Ah` @0x491C2A, brain+0x210 = Yaw @0x491C54]
+		if ((veh.flags & kEntityFlagInAir) != 0 &&
+		    io::bam_sub(io::bam_sub(ve->pos[2], m.air_probe_z_off), ground) > 0x20000)
+			m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
 		m.cmd_speed = 0;
 		m.cmd_lateral_speed = 0;
-        m.steer_target_bam = m.yaw_bam;
-        m.net_alt_target = ground - 0x4000;
-        m.net_climb = 0;
-        m.net_engine_on = false;
-        check_vehicle_stuck(world, veh);
-        return;
-    }
-
-    // Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`],
-    // parked -> FOLLOWWP [orig: `if (brain[16] == 14) brain[16] = 7`].
-    m.stuck_ticks = 0;
-	if (b.f[AiBrain::kCurState] == 14) {
-		b.f[AiBrain::kCurState] = 7;
-		b.f[AiBrain::kPendState] = 7;
+		m.steer_target_bam = m.yaw_bam;
+		m.net_alt_target = ground - 0x4000;
+		m.net_climb = 0;
+		check_vehicle_stuck(world, veh);
+		b.f[AiBrain::kCurState] = 14;
+		m.net_engine_on = false;
+		return;
 	}
+
+	// Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`
+	// @0x490F30], and PRETTY hands back to FOLLOWWP on the CURRENT word only
+	// [orig: `cmp [ebx+10h],0Eh; jnz; mov [ebx+10h],7` @0x49158A..0x491590]. The
+	// pending word is left alone, so the machine commits whatever it holds after
+	// each think (the class init's 0 until an order lands) and the next mover
+	// visit promotes 0 -> 14 -> 7 again: an AI helicopter thinks on every visit,
+	// like the ground legs' 22 -> 16 hand-back [orig:
+	// EntityAI_ProcessAirStateMachine @0x458384..0x4583B0].
+	m.stuck_ticks = 0;
+	if (b.f[AiBrain::kCurState] == 14)
+		b.f[AiBrain::kCurState] = 7;
 	m.net_engine_on = true;
 	// The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
     // `itemDef+0x8D8 > 1`, Entity_IsBoneInProximity @0x4915c2,
@@ -765,7 +811,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
         ai_waypoint_update_target(b, ve->pos, nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
-        const int32_t err = iabs32(m.yaw_bam - b.f[AiBrain::kWpBearing]);
+        const int32_t err = iabs32(io::bam_sub(m.yaw_bam, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = 8 * (err / denom);
     }
 
@@ -825,7 +871,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         }
         m.net_climb = climb;
         // The heading error's trig at 2^22 [orig: @0x4917d4..0x491821].
-        const int32_t err = bearing - m.yaw_bam;
+        const int32_t err = io::bam_sub(bearing, m.yaw_bam);
         const int32_t c22 = flight_cos22(err);
         const int32_t s22 = avoid_sin22(err);
         // Beyond 6 u planar, a zero command seeds the 132-scaled cyclic pair
@@ -839,7 +885,13 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         }
         // The two ground samples: the hull's own and the node's
         // [orig: Entity_CalcAverageGroundHeight @0x491845 (self) / @0x491855
-        //  (the node entity)].
+        //  (the node entity)]. The hull's is a FRESH radius-0 sample at its
+        // current Z, and it alone sets the floor both legs test; the 8-tick
+        // cached ground (sampled with the probe offset taken off Z) feeds only
+        // tz, the climb and the landing target [orig: ebp = the self sample
+        // @0x491853, `mov eax,[esi]; sar eax,2; add eax,ebp` @0x491874 and
+        // @0x4918E2].
+        const int32_t self_ground = aircraft_ground_height(world, *ve, 0);
         int32_t node_ground = INT32_MIN;
         if (world.tables.terrain != nullptr) {
             const int32_t npos[3] = {node->f[1], node->f[2], node->f[3]};
@@ -847,7 +899,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
             node_ground = calc_average_ground_height(*world.tables.terrain, npos, 0, clearance);
         }
         const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
-        const int32_t floor = ground + (to_fixed(veh.bound_radius) >> 2);
+        const int32_t floor = self_ground + (to_fixed(veh.bound_radius) >> 2);
         if (node_agl > 0x60000 || dist > 0x60000) {
             // En route (or the node hangs in the air): never below the hull's
             // ground + bound/4 — a low target lifts 16 u above that floor and
@@ -878,7 +930,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         const int32_t budget = b.f[AiBrain::kAnimFlag];
         if (delta > budget) delta = budget;
         if (delta < -budget) delta = -budget;
-        m.steer_target_bam = m.yaw_bam + delta;
+        m.steer_target_bam = io::bam_add(m.yaw_bam, delta);
         // The forward command scales by cos^2 of the heading error — a hull
         // still turning onto its leg creeps [orig: @0x491970..0x49198a].
         const int32_t ac = iabs32(c22);
@@ -888,8 +940,10 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 
 	// The pool-1 separation damp on the forward command [orig: @0x4919fc..0x491b67
 	// — the same footprint ellipse, dead-ahead cone and id/frame factor as the
-	// ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`].
-	m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed);
+	// ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`
+	// @0x4919E6].
+	m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed,
+	                                  AvoidBrakeWalk::OnlyIndexOne);
 
     // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
     // live, unmounted body is still walking over to board it: heading pinned to

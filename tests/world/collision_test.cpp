@@ -273,6 +273,36 @@ void test_infantry_detour_cache_and_arrival() {
     CHECK(inf.path_state == 0 && inf.detour_target[0] == 0 && inf.detour_target[1] == 0);
 }
 
+// The detour's two rays admit every entity type: a pool-1 item across the -30
+// degree candidate's leg to the goal hands the equal-cost tie to +30 degrees.
+// [orig: ai_find_cover_position @0x4AFAB0, `push 1` @0x4AFD9B / @0x4AFE10]
+void test_infantry_detour_rays_see_items() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0), 100.0, 100.0);
+    rig.world.registry.configure_pool(1, 8);
+    Entity crate;
+    crate.kind = EntityKind::Item;
+    crate.position = {6.0f, -0.85f, 0.0f};
+    crate.yaw = 90;
+    crate.alive = true;
+    const EntityHandle crate_h = rig.world.registry.spawn(1, crate);
+    rig.cw.assign_entity(crate_h, rig.cw.add_model(box_model(1, 0, 0.3, 0.3, 3.0)));
+    rig.rebuild();
+    CHECK(rig.cw.candidate_count(rig.soldier) > 0);
+    rig.world.ai.collision = &rig.cw;
+    rig.world.ai.terrain = &rig.field.field;
+    auto &brain = *rig.world.ai.at(rig.world.ai.attach(rig.soldier));
+    auto &inf = brain.inf;
+    inf.move_mode = 3;
+    inf.target_dist = fx(30);
+    inf.move_target[0] = fx(30);
+    inf.path_state = 1;
+    inf.body_heading = 0;
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 2);
+    CHECK(inf.detour_target[1] > fx(0.99) && inf.detour_target[1] < fx(1.01));
+    CHECK(inf.target_heading > 0);
+}
+
 // A destination inside a solid has no second clear leg. State 1 accepts a
 // reachable fallback; state 3 must retain the goal. This uses real collision rays.
 void test_infantry_detour_one_leg_fallback() {
@@ -301,6 +331,13 @@ void test_infantry_detour_one_leg_fallback() {
 
 // A normal route walker must consume a real collision-produced state and get
 // around the wall through its root-motion motor, without staging a detour point.
+// The walker stands on the field: the resolver's ground probe clips against the
+// terrain for any source that is not indoors [orig: raycast_entity_collision
+// @0x41377E..0x413791], so a walker on a heightfield never goes airborne and
+// its think is not held by the airborne skip [orig: Entity_UpdateInfantryAI
+// @0x4BAA57..0x4BAA66]. The entity pass re-syncs the collision world's terrain
+// from world.tables.terrain every tick (RoundSim::tick), so the rig wires that
+// one field into the tables too, as MissionKernel::wire_terrain does.
 void test_infantry_route_walks_around_wall() {
     struct WalkingSource : IRootMotionSource {
         bool has_clip(int, int) const override { return true; }
@@ -317,6 +354,7 @@ void test_infantry_route_walks_around_wall() {
     } source;
     Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
     rig.move_soldier(14.0, 10.0, 0.0);
+    rig.world.tables.terrain = &rig.field.field;
     auto &ai = rig.world.ai;
     ai.collision = &rig.cw;
     ai.terrain = &rig.field.field;
@@ -341,19 +379,24 @@ void test_infantry_route_walks_around_wall() {
     bool saw_blockage = false;
     bool saw_detour = false;
     bool arrived = false;
+    bool grounded = true;
     for (uint32_t tick = 0; tick < 1200; ++tick) {
         TickContext context;
         context.world = &rig.world;
         context.logic_tick = tick;
         context.is_authority = true;
-        ai.tick(rig.world, context);
+        rig.world.update_all_entities(context);
         saw_blockage |= body.inf.path_state == 1;
         saw_detour |= body.inf.path_state == 2;
+        const Entity *walker = rig.world.registry.get(rig.soldier);
+        grounded &= walker != nullptr &&
+                ((walker->flags | walker->engine_flags) & kEntityFlagInAir) == 0;
         if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {
             arrived = true;
             break;
         }
     }
+    CHECK(grounded);
     CHECK(saw_blockage && saw_detour);
     CHECK(arrived);
 }
@@ -1367,11 +1410,15 @@ void test_idle_skip_throttle() {
     int32_t vel[3] = {0, 0, 0};
     int16_t health = 100;
     CollisionWorld::ResolveState state;
-    // Ticks 1..11 (tick & 0x3F != 0, no motion): counter ramps to the skip band.
-    for (uint32_t t = 1; t <= 11; ++t)
+    // Updates 1..11 (entity-update counter & 0x3F != 0, no motion): the skip
+    // counter ramps to the skip band.
+    for (uint32_t t = 1; t <= 11; ++t) {
+        rig.world.entity_update_counter = t;
         rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0,
                               0, false, true, t, 43, 0u, health);
-    // Tick 12: skip path — the caller's gravity displacement is reverted and vel zeroed.
+    }
+    // Update 12: skip path — the caller's gravity displacement is reverted and vel zeroed.
+    rig.world.entity_update_counter = 12;
     vel[2] = -400;
     pos[2] -= 400 * 2; // what the caller's gravity integration just did
     const int32_t sunk = pos[2];
@@ -1394,11 +1441,14 @@ void test_idle_skip_throttle() {
         int32_t pvel[3] = {0, 0, 0};
         int16_t phealth = 100;
         CollisionWorld::ResolveState pstate;
-        for (uint32_t t = 1; t <= 11; ++t) // ramp the counter to the skip band
+        for (uint32_t t = 1; t <= 11; ++t) { // ramp the counter to the skip band
+            prig.world.entity_update_counter = t;
             prig.cw.resolve_entity(prig.world, prig.soldier, pstate, ppos, pvel, pvel[2], 0,
                                    fx(1.8), 0, 0, /*is_player=*/true, true, t, 43, 0u, phealth);
+        }
         const int32_t before_z = ppos[2];
         for (uint32_t t = 12; t <= 21; ++t) { // the 10-tick skip band
+            prig.world.entity_update_counter = t;
             pvel[2] -= 208;      // the org2 per-tick gravity...
             ppos[2] += pvel[2];  // ...and the x1 integrate [orig: @0x4b7acf/@0x4b7cef]
             const int32_t r = prig.cw.resolve_entity(prig.world, prig.soldier, pstate, ppos,
@@ -1408,6 +1458,35 @@ void test_idle_skip_throttle() {
             CHECK(pvel[2] == 0); // the skip zeroes vel_z each tick
         }
         CHECK(ppos[2] == before_z); // net zero — no idle sawtooth
+    }
+
+    // The every-64th full update keys on the entity-update counter, not on the
+    // tick the caller passes: tick 64 on counter 13 still skips, and counter 64
+    // forces the full update (the skip counter restarts).
+    // [orig: Entity_MovementCollisionResolver @0x4B2CAF, `test byte ptr
+    //  g_entity_update_counter,3Fh`]
+    {
+        Rig crig(box_model(1, 0, 2.0, 2.0, 3.0));
+        crig.move_soldier(30.0, 30.0, 0.0);
+        int32_t cpos[3] = {fx(30.0), fx(30.0), 0};
+        int32_t cvel[3] = {0, 0, 0};
+        int16_t chealth = 100;
+        CollisionWorld::ResolveState cstate;
+        for (uint32_t t = 1; t <= 12; ++t) {
+            crig.world.entity_update_counter = t;
+            crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                                   fx(1.8), 0, 0, false, true, t, 43, 0u, chealth);
+        }
+        const int banded = cstate.skip_counter;
+        CHECK(banded > 10);
+        crig.world.entity_update_counter = 13;
+        crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                               fx(1.8), 0, 0, false, true, /*tick=*/64, 43, 0u, chealth);
+        CHECK(cstate.skip_counter == banded + 1);
+        crig.world.entity_update_counter = 64;
+        crig.cw.resolve_entity(crig.world, crig.soldier, cstate, cpos, cvel, cvel[2], 0,
+                               fx(1.8), 0, 0, false, true, /*tick=*/14, 43, 0u, chealth);
+        CHECK(cstate.skip_counter == 0);
     }
 }
 
@@ -1832,12 +1911,15 @@ void test_ladder_entry_gate_snap_and_chase() {
     CHECK((s->flags & kEntityFlagLadderContact) != 0);
     CHECK(rig.cw.last_ladder_frame.valid);
     CHECK(rig.cw.last_ladder_frame.anchor[0] == fx(10.375));
-    CHECK(rig.cw.last_ladder_frame.anchor[1] == fx(10.0));
+    // Retail scales the yaw by its own dbl_7C3608, a hair above 2pi/2^32, so
+    // 180 degrees leaves sin = 402/2^22 and the anchor 2 units off Y
+    // [orig: `fild g_LadderContactYaw; fmul dbl_7C3608` @0x4AE9C8..0x4AE9D3].
+    CHECK(rig.cw.last_ladder_frame.anchor[1] == fx(10.0) - 2);
     CHECK(rig.cw.last_ladder_frame.anchor[2] == fx(3.0));
     CHECK(rig.cw.last_ladder_frame.yaw == static_cast<int32_t>(0x80000000u));
     // Snap + press(−4096 along +X via cos 180°) + chase((4096+32)>>6 = 64).
     CHECK(pos[0] == fx(10.375) - 4096 + 64);
-    CHECK(pos[1] == fx(10.0));
+    CHECK(pos[1] == fx(10.0) - 2);
     CHECK(pos[2] == 20480); // the standing entry bump
     CHECK(lio.body_pitch == rig.cw.last_ladder_frame.pitch);
     CHECK(!lio.restore_active); // the chase disarms the restore latch
@@ -2016,11 +2098,12 @@ void test_ladder_from_above_entry_and_sin_lane() {
                            &ylio.io);
     CHECK((yrig.world.registry.get(yrig.soldier)->flags & kEntityFlagLadderContact) != 0);
     CHECK(yrig.cw.last_ladder_frame.yaw == -0x40000000);
-    CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0));
+    // dbl_7C3608 leaves cos(−90°) = −201/2^22: the anchor sits 2 units off X.
+    CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0) + 2);
     CHECK(yrig.cw.last_ladder_frame.anchor[1] == fx(10.375));
     // The press rides sin(−90°) = −1 on Y; cos ≈ 0 leaves X at the snap.
     CHECK(ypos[1] == fx(10.375) - 4096 + 64);
-    CHECK(ypos[0] == fx(10.0));
+    CHECK(ypos[0] == fx(10.0) + 2);
     CHECK(ypos[2] == 20480);
 }
 
@@ -2403,6 +2486,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags = kEntityFlagInAir;
         bool ever_skipped = false;
         for (int i = 0; i < 25; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
             int32_t vel_z = -100; // inside the idle band (not < -420)
             rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
                                    fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),
@@ -2415,6 +2499,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags2 = 0;
         ever_skipped = false;
         for (int i = 0; i < 25; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
             int32_t vel_z = -100;
             rig.cw.resolve_replica(rig.world, state2, pos2, vel, vel_z, fx(0.4),
                                    fx(1.8), fx(1.0), true, static_cast<uint32_t>(i + 1),
@@ -2505,14 +2590,14 @@ void test_raycast_clear_table_readiness() {
     const int32_t a[3] = {0, 0, fx(1.0)};
     const int32_t b[3] = {fx(10.0), 0, fx(1.0)};
 
-    auto spawn_blocker = [](World &world, CollisionWorld &cw) {
-        world.registry.configure_pool(2, 4);
+    auto spawn_blocker = [](World &world, CollisionWorld &cw, int pool, EntityKind kind) {
+        world.registry.configure_pool(pool, 4);
         Entity seed;
-        seed.kind = EntityKind::Building;
+        seed.kind = kind;
         seed.position = {5.0f, 0.0f, 0.0f};
         seed.yaw = 90;
         seed.alive = true;
-        const EntityHandle h = world.registry.spawn(2, seed);
+        const EntityHandle h = world.registry.spawn(pool, seed);
         cw.assign_entity(h, cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
         return h;
     };
@@ -2521,22 +2606,23 @@ void test_raycast_clear_table_readiness() {
     {
         World world;
         CollisionWorld cw;
-        CHECK(spawn_blocker(world, cw).valid());
+        CHECK(spawn_blocker(world, cw, 2, EntityKind::Building).valid());
         CHECK(!cw.tick_tables_ready());
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
 
-    // Once an empty table build completed, emptiness is authoritative for that
-    // tick. A later spawn appears only when the next table snapshot is built.
-    {
+    // Once a table build completed, both pool passes still read the pools
+    // themselves, so a building or an item spawned after the build blocks at
+    // once [orig: Physics_RaycastTerrainAndSectors pool 2 @0x539A16..0x539A30,
+    // pool 1 @0x539A40..0x539A5A].
+    for (const int pool : {2, 1}) {
         World world;
         CollisionWorld cw;
-        world.registry.configure_pool(2, 4);
+        world.registry.configure_pool(pool, 4);
         cw.build_tick_tables(world);
         CHECK(cw.tick_tables_ready());
-        CHECK(spawn_blocker(world, cw).valid());
-        CHECK(cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
-        cw.build_tick_tables(world);
+        CHECK(spawn_blocker(world, cw, pool,
+                            pool == 2 ? EntityKind::Building : EntityKind::Item).valid());
         CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
     }
 }
@@ -5808,9 +5894,13 @@ void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	CHECK(behind != compute_death_anim_state(kRunOverDeathBone, 0, kRunOverDeathCause));
 	CHECK(v != nullptr && v->death_anim_state == behind);
 	CHECK(v != nullptr && v->last_attacker == rig.driver);
+	// The run-over edge runs the kill accounting [orig:
+	// Entity_MovementCollisionResolver @0x4B2BD0 (the Score_ProcessKillEvent
+	// call @0x4B39E2)].
 	bool credited = false;
 	for (const RoundDeath &death : rig.world.round_sim.deaths)
-		if (death.victim == rig.victim && death.killer == rig.driver) credited = true;
+		if (death.victim == rig.victim && death.killer == rig.driver && death.kill_event)
+			credited = true;
 	CHECK(credited);
 	const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
 	CHECK(sounds.size() == 1 && sounds[0].set_name == "V_HULL_BUMP");
@@ -5860,6 +5950,7 @@ int main() {
     test_resolver_wall_pushout();
     test_infantry_detour_cache_and_arrival();
     test_infantry_detour_one_leg_fallback();
+    test_infantry_detour_rays_see_items();
     test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
     test_mounted_resolver_keeps_touch_without_parent_pushout();

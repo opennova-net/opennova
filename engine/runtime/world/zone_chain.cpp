@@ -3,6 +3,7 @@
 // retail ZoneSlotChain_* cluster (ex-"CWeaponSlotManager", inline @ 0x24D1EBC).
 #include <runtime/world/zone_chain.h>
 
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -82,13 +83,15 @@ void ZoneSystem::build_chain_from_mission() {
 
     // Zone-entity sweeps: alive, numbered, capture-trigger (ItemDefAttrib 0x20000
     // "ChangeTeam") entities from pool 1 then pool 2 — the registration ORDER is the
-    // frontier walk order. [orig: @ 0x4A2E5E (pool 1) / @ 0x4A2EA2 (pool 2); the
-    // alive gate is !(entity+36 & 1)]
+    // frontier walk order. The add itself refuses a zone number above 30.
+    // [orig: @ 0x4A2E5E (pool 1) / @ 0x4A2EA2 (pool 2); the alive gate is
+    //  !(entity+36 & 1); ZoneSlotChain_AddZoneEntity `cmp al, 1Eh; ja` @0x4A2D90]
     for (const int pool : {1, 2}) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != pool) return;
             if (e.zone_number == 0 || !e.is_capture_trigger || !e.alive) return;
-            if (!chain_contains(chain, e.handle)) chain.zones.push_back(e.handle);
+            if (chain_contains(chain, e.handle) || e.zone_number > 30) return;
+            chain.zones.push_back(e.handle);
         });
     }
 
@@ -101,6 +104,9 @@ bool ZoneSystem::is_capturable(uint8_t team, const Entity &zone) const {
     // [orig: ZoneSlotChain_IsZoneCapturableByTeam @ 0x4A2450]
     // Not in the chain -> always capturable [orig: !ContainsEntity -> return 1].
     if (!chain_contains(chain, zone.handle)) return true;
+    // C&C: every chain zone is capturable by every team.
+    // [orig: `cmp g_GameType, 50010h; jz` @0x4A2476..0x4A2480]
+    if (world.match.rules().game_type == game_type::kConquerAndControl) return true;
 
     const uint32_t mask = team < ZoneChain::kTeamCount ? chain.owned_mask[team] : 0;
     const int32_t assigned =
@@ -132,6 +138,56 @@ bool ZoneSystem::is_capturable(uint8_t team, const Entity &zone) const {
         if (prev_slot == 0 && next_slot == 0) return false;
     }
     return true;
+}
+
+bool ZoneSystem::rebuild_masks_and_check_unchanged(uint8_t capturer_team,
+                                                   const Entity &zone) {
+    // [orig: ZoneSlotChain_RebuildMasksAndCheckUnchanged @0x4A2B60 — the enemy
+    //  tier `2 - (team != 1)` @0x4A2B6D, the saved mask @0x4A2B78, the rebuild
+    //  @0x4A2B7F, the zone-number test @0x4A2BAB, the compare @0x4A2BAD]
+    const uint8_t enemy = capturer_team == 1 ? 2 : 1;
+    const uint32_t saved = chain.owned_mask[enemy];
+    rebuild_masks();
+    uint8_t number = 0;
+    uint8_t rank = 0;
+    if (zone_info(zone, number, rank) && ((1u << (number & 31u)) & saved) == 0)
+        return false;
+    return saved == chain.owned_mask[enemy];
+}
+
+std::optional<uint8_t> ZoneSystem::winning_team_if_all_owned() const {
+    const World &world = world_;
+    // [orig: ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920 — the empty and
+    //  game-type gates @0x4A2921..0x4A294E, the first team @0x4A2970, the
+    //  mismatch return @0x4A29C1, the uniform return @0x4A29CB]
+    const uint32_t game_type_value = world.match.rules().game_type;
+    if (chain.zones.empty() || (game_type_value != game_type::kAdvanceAndSecure &&
+                                game_type_value != game_type::kConquerAndControl))
+        return std::nullopt;
+    const Entity *first = world.registry.get(chain.zones.front());
+    const uint8_t team = first != nullptr ? first->team : 0;
+    for (const EntityHandle h : chain.zones) {
+        const Entity *e = world.registry.get(h);
+        if (e != nullptr && e->team != team) return std::nullopt;
+    }
+    return team;
+}
+
+bool ZoneSystem::zone_info(const Entity &zone, uint8_t &number, uint8_t &rank) const {
+    // [orig: ZoneSlotChain_GetZoneInfo @0x4A2750 — the entry match @0x4A27AA,
+    //  the zone number @0x4A27C1, the rank byte]
+    for (size_t i = 0; i < chain.zones.size(); ++i) {
+        if (chain.zones[i] != zone.handle) continue;
+        number = zone.zone_number;
+        rank = i < chain.ranks.size() ? chain.ranks[i] : 0;
+        return true;
+    }
+    return false;
+}
+
+uint32_t ZoneSystem::team_mask(uint8_t team) const {
+    // [orig: ZoneSlotChain_GetTeamMask @0x4A2350]
+    return team < ZoneChain::kTeamCount ? chain.owned_mask[team] : 0;
 }
 
 uint8_t ZoneSystem::frontier_zone(uint8_t team) const {
@@ -175,7 +231,8 @@ void ZoneSystem::latch_control() {
 }
 
 uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone) {
-    // [orig: ZoneSlotChain_GetZoneInfo @0x503eeb — the registered entry's zoneNumber +
+    // [orig: serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo
+    //  call @0x503EEB) — the registered entry's zoneNumber +
     //  32 * rank; rank parallels chain.zones (ZoneSlotChain_AssignZoneRanks @0x4A27F0).
     //  An unregistered numbered entity carries rank 0 (bare zone number).]
     uint8_t rank = 0;
