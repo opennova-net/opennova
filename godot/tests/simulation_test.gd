@@ -182,6 +182,22 @@ func _native_asset_root(sim: Simulation, dir: String) -> ResourceRoot:
 	return root
 
 
+# Retail runs the entity update only while its world holds a human: on the
+# authority, Game_ProcessMainFrame skips Entity_UpdateAllEntities once the WAC
+# clock has started and Server_BuildEntitySlotLists counted no visible player,
+# and Entity_UpdateAllEntities itself returns while there is no local player
+# entity. A single-player world always has its player, so a fixture built
+# without one stands its local player in the world: far from the entities
+# under test unless the test places it.
+const FIXTURE_HUMAN_POSITION := Vector3(0, 0, 2000)
+
+
+func _spawn_fixture_human(sim: Simulation,
+		position: Vector3 = FIXTURE_HUMAN_POSITION, team: int = 1) -> void:
+	assert_true(sim.spawn_local_player(position, 0.0, team),
+			"the fixture's local player is the human that keeps the world running")
+
+
 func _fast_rope_item_db() -> ItemDatabase:
 	var path := ProjectSettings.globalize_path(
 			"res://.godot/ctrl_fast_rope_items.def")
@@ -558,6 +574,8 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	assert_false(sim.is_runtime_profiling_enabled(),
 			"retail/default play does not own the profiling clocks")
 	sim.build_demo_mission()
+	# The entity update's phases are sampled only while it runs.
+	_spawn_fixture_human(sim)
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
@@ -2440,6 +2458,7 @@ func test_entities_walk_their_route() -> void:
 	# set they hold and stand; with one they walk the route.
 	var sim := Simulation.new()
 	sim.build_demo_mission()
+	_spawn_fixture_human(sim)
 	var start: Vector3 = sim.get_entity_position(0)
 	for _i in range(20):
 		sim.step()
@@ -2985,6 +3004,9 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
+	# The local player stands beside the carrier from the start: it is also
+	# the human the entity update needs to run the boarding think.
+	_spawn_fixture_human(sim, Vector3(12, 0, 0))
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries before reading the mounted state.
@@ -2993,7 +3015,6 @@ end
 		sim.step()
 	assert_true(sim.entity_card_by_net_id(soldier.bms_id).is_mounted(),
 			"label fixture must occupy its controller seat")
-	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	var texts := _attach_label_texts(sim)
 	assert_eq(texts.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
 	assert_eq(texts[0] if texts.size() == 1 else "", "!sit", "the free sitex remains")
@@ -3958,6 +3979,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
 	sim.resolve_item_traits(item_db)
+	_spawn_fixture_human(sim)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries before reading the mounted state.
@@ -4892,7 +4914,9 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	assert_true(before_by_section.has(14), "head COBJ/bone is present")
 
 	# No presentation node or Skeleton3D is involved: advancing authoritative
-	# clip_phase must move the CollisionWorld/F3 matrices directly.
+	# clip_phase must move the CollisionWorld/F3 matrices directly. The human
+	# stands behind the soldier inside the F3 person view's 80-unit range.
+	_spawn_fixture_human(sim, Vector3(10, 0, 60))
 	for _tick in 2:
 		sim.step()
 	var after: Array = sim.get_hitbox_debug().organics
