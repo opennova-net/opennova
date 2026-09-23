@@ -387,6 +387,72 @@ void test_player_body_death_edge_legs() {
     CHECK((remote.entity().flags & kEntityFlagMounted) == 0);
 }
 
+// R3-23: an NPC rider's mounted leg scrubs Flags with 0xFF8F57DF (the chute,
+// in-air, afloat, ladder and dive bits) and stops its vertical velocity every
+// tick. [orig: Entity_UpdateInfantryAI @0x4BEC03..0x4BEC15]
+void test_org1_rider_scrubs_its_fall_flags() {
+    Org1Rig rig;
+    rig.w->registry.configure_pool(1, 4);
+    Entity hull;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.position = {100.0f, 100.0f, 0.0f};
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    hull.seats.push_back(seat);
+    const EntityHandle hull_handle = rig.w->registry.spawn(1, hull);
+    Entity &body = rig.entity();
+    body.mounted = true;
+    body.mount_target = hull_handle;
+    body.mount_seat = 0;
+    body.mount_type = SeatType::Passenger;
+    const uint32_t scrubbed = 0x0070A820u; // ~0xFF8F57DF
+    body.flags |= scrubbed;
+    rig.e().inf.vel[2] = -5000;
+    rig.e().inf.airborne = true;
+    rig.tick(3);
+    CHECK((rig.entity().flags & scrubbed) == 0);
+    CHECK(rig.e().inf.vel[2] == 0);
+    CHECK(!rig.e().inf.airborne);
+    CHECK(rig.entity().mounted);
+}
+
+// R3-12: a mounted org1 rider takes its parent's deck ride too (the motor head
+// points groundEntity at the parent), so its look and aim turn with the
+// carrier before the seat pose; a turret parent (def+0x58 & 0x1000) keeps
+// them. [orig: Entity_UpdateInfantryAI @0x4B9A0D..0x4B9A11, the ride
+// @0x4BA45D..0x4BA891, the turret gate @0x4BA812..0x4BA82A]
+void test_org1_rider_turns_with_its_carrier() {
+    for (const bool turret : {false, true}) {
+        Org1Rig rig;
+        rig.w->registry.configure_pool(1, 4);
+        Entity hull;
+        hull.has_item_def = true;
+        hull.item_type = 1;
+        hull.position = {100.0f, 100.0f, 0.0f};
+        hull.veh.yaw_seeded = true;
+        hull.veh.yaw_bam = 0x01000000; // this tick's yaw; last tick's was 0
+        hull.saved_live_valid = true;
+        hull.saved_live_pos[0] = fx(100);
+        hull.saved_live_pos[1] = fx(100);
+        if (turret) hull.item_attrib2 = 0x1000u;
+        Seat seat;
+        seat.type = SeatType::Passenger;
+        hull.seats.push_back(seat);
+        const EntityHandle hull_handle = rig.w->registry.spawn(1, hull);
+        Entity &body = rig.entity();
+        body.mounted = true;
+        body.mount_target = hull_handle;
+        body.mount_seat = 0;
+        body.mount_type = SeatType::Passenger;
+        rig.tick(3);
+        const int32_t turned = turret ? 0 : 0x01000000;
+        CHECK(rig.e().inf.aim_heading == turned);
+        CHECK(rig.e().heading == turned);
+        CHECK(rig.entity().ground_target == hull_handle);
+    }
+}
+
 // ---- the org1 phase order (R3-8) ----
 
 // R3-8: org1 chases its heading and look after the think and BEFORE its fire
@@ -493,6 +559,8 @@ int main() {
     test_org1_fatal_fall_credits_itself();
     test_org1_corpse_stays_dead_on_a_health_write();
     test_player_body_death_edge_legs();
+    test_org1_rider_scrubs_its_fall_flags();
+    test_org1_rider_turns_with_its_carrier();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

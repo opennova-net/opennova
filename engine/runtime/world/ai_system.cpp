@@ -767,6 +767,17 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
+    // An NPC rider of a parent with an item def scrubs the chute/in-air/afloat/
+    // ladder/dive/armory bits and stops its vertical velocity every tick (the
+    // in-air bit's motor mirror goes with it). [orig: Entity_UpdateInfantryAI
+    //  parent def gate @0x4BEBFA..0x4BEBFD, `and dword ptr [esi+24h],0FF8F57DFh`
+    //  @0x4BEC03, `mov [esi+0A0h],ebx` @0x4BEC15]
+    if (npc_mounted_body(e, *occ) && veh->has_item_def) {
+        occ->flags &= 0xFF8F57DFu;
+        occ->engine_flags &= 0xFF8F57DFu;
+        e.inf.vel[2] = 0;
+        e.inf.airborne = false;
+    }
     // Both organic movers refresh groundEntity from parentEntity before the
     // mounted branch. PLYRONSSN follows this link through a turret to its hull
     // (07TR's boarding gate); retaining the pre-boarding contact stalls it.
