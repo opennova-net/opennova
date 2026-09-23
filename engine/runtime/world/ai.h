@@ -1162,11 +1162,21 @@ public:
     // [orig: Entity_AttachToUseGunSlot @0x546b80; request @0x4bf4bb..0x4bf59e.]
     void infantry_mounted_fire_pass(AiEntity &e, World &world, uint32_t logic_tick,
                                     uint32_t key);
-    // The post-entity global action pump for occupied emplacement MountSlots. The
-    // infantry request above only writes next=FIRE; this phase advances the authored
-    // weapon FSM and emits the round with the NPC gunner as owner.
-    // [orig: frame order @0x52674b/@0x526786; WeaponAction_ProcessAllEntities @0x542690.]
-    void pump_mounted_weapon_slots(World &world, uint32_t logic_tick);
+    // One pool-0 row's visit in the frame's weapon-action walk
+    // (World::pump_weapon_actions): a UseGun gunner (an NPC or a remote player)
+    // pumps the parent MountSlot it borrowed. The infantry request above only
+    // writes next=FIRE; this visit advances the authored weapon FSM and emits
+    // the round with the gunner as owner. A gunner that has died drops its
+    // link instead.
+    // [orig: WeaponAction_ProcessAllEntities pool-0 walk @0x5426A6..0x5426C9
+    //  (the gunner's +0x118 is the parent's MountSlot) ->
+    //  WeaponAction_ProcessFrame @0x540E60]
+    void pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick);
+    // The port's mount->gunner link (Entity::primary_weapon_owner) has no
+    // retail twin: retail's borrow lives on the gunner's own +0x118 and ends
+    // with it. A link whose gunner is gone, dead, reseated or on another mount
+    // is dropped when the walk reaches the mount's pool-1 row.
+    void release_stale_gunner_link(World &world, Entity &mount);
     // Reconcile the split AiEntity/registry stores, wire animation, and part channels
     // at either the mounted return or the ordinary end of the infantry tick.
     void finish_infantry_tick(AiEntity &e, World &world);
@@ -1328,7 +1338,6 @@ private:
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     AnimVariantRings spawn_baseline_rings_; // the ring heads at the same capture
     std::vector<int> handle_to_ai_index_;
-    std::vector<EntityHandle> mounted_weapon_handles_; // global UseGun pump scratch
     std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)
     bool baseline_captured_ = false;
 };

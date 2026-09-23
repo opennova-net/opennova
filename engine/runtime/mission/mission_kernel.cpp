@@ -53,11 +53,11 @@ MissionKernel::MissionKernel() : local(world) {
 	world.teammate_spawner = this;
 	world.item_piece_spawner = this;
 	occlusion.bind_focal_wind_random(&world.prng16_c_state);
-	// The kernel pumps the local player's slot itself (run_local_player_post_tick
-	// with the live trigger/reload/scope inputs), so the world's global local.weapon
-	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
-	// per frame [orig: one WeaponAction_ProcessAllEntities walk @0x542690].
-	world.rules.external_local_mounted_weapon_pump = true;
+	// The world's weapon-action walk pumps the local player's slot (its own or
+	// the UseGun parent slot it borrowed) through this LocalPlayer, with the
+	// live trigger/reload/scope inputs, at L's own pool-0 slot; the AI pump
+	// never advances it as well [orig: one WeaponAction_ProcessAllEntities
+	// walk @0x542690].
 	world.profile = &profile;
 }
 

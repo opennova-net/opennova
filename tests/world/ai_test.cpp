@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/body_anim.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 
@@ -1311,12 +1312,14 @@ static void test_mounted_gunner_acquires_and_fires() {
     bool acquired = false;
     bool fired = false;
     for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
-        // Exercise the production phase order: entity AI queues FIRE, the global
-        // action pump consumes it, then the projectile pass steps the new round.
+        // Exercise the production phase order: entity AI queues FIRE, the
+        // frame's weapon walk consumes it, then the next projectile pass steps
+        // the new round.
         // [orig: Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674b and
         //  WeaponAction_ProcessAllEntities call @0x526786; Weapon_UpdateAllProjectiles
         //  @0x4ec020]
         w->run_logic_tick(true);
+        w->pump_weapon_actions();
         acquired = acquired || npc.inf.combat_target == enemy_h;
         if (!fired && w->out.rounds.count > 0) {
             fired = true;
@@ -1427,6 +1430,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         bool fired = false;
         for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
             w->run_logic_tick(true);
+            w->pump_weapon_actions(); // the frame's weapon walk
             fired = w->out.rounds.count > 0;
         }
         CHECK(fired);
@@ -1682,6 +1686,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         bool fired = false;
         for (uint32_t tick = 0; tick < 1000 && !fired; ++tick) {
             w->run_logic_tick(true);
+            w->pump_weapon_actions(); // the frame's weapon walk
             acquired = acquired || npc.inf.combat_target == enemy_h;
             fired = fired || w->out.rounds.count > 0;
         }
@@ -1867,11 +1872,12 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     provider.userpoints[gun_live->handle.packed] =
             {0x12345, -0x23456, 0x34567, 0x40000000, static_cast<int32_t>(0xFF000000u), 0};
     w->pose_provider = &provider;
-    // Merely caching an owner as local cannot disable the standalone World's
-    // global slot pump. Only an adapter that explicitly supplies its own pump
-    // may take ownership.
+    // Merely caching an owner as local cannot hand its slot to a local pump:
+    // with no LocalPlayer installed the frame's weapon walk pumps it through
+    // the AI. The walk reads the frame's own tick, one behind logic_tick.
     w->cached.local_player = npc_h;
-    ai.pump_mounted_weapon_slots(*w, 0);
+    w->logic_tick = 1;
+    w->pump_weapon_actions();
     CHECK(w->out.rounds.count == 1);
     CHECK(w->out.rounds.records[0].shooter_handle == npc_h.packed);
     CHECK(w->out.rounds.records[0].origin_x == 0x12345);
@@ -1893,13 +1899,19 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     gun_live->primary_weapon_slot = WeaponSlotState{};
     ai.infantry_mounted_fire_pass(npc, *w, 64, 64);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kIdle);
-    ai.pump_mounted_weapon_slots(*w, 64);
+    w->logic_tick = 65;
+    w->pump_weapon_actions();
     CHECK(w->out.rounds.count == before);
 
+    // An installed LocalPlayer owns the local player's slot: the walk hands it
+    // to that pump (here an unarmed one) and the AI never advances it too.
     gun_live->primary_weapon_slot = WeaponSlotState{};
     gun_live->primary_weapon_slot.next = weapon_action::kFire;
-    w->rules.external_local_mounted_weapon_pump = true;
-    ai.pump_mounted_weapon_slots(*w, 68);
+    LocalPlayer local(*w);
+    w->local_player_state = &local;
+    w->logic_tick = 69;
+    w->pump_weapon_actions();
+    w->local_player_state = nullptr;
     CHECK(w->out.rounds.count == before);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
 
@@ -1911,6 +1923,110 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     gun_live->primary_weapon_slot = WeaponSlotState{};
     ai.infantry_mounted_fire_pass(npc, *w, 0, 0);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
+}
+
+// The walk's pool-1 leg pumps an unoccupied EWEAP row's own slot only while
+// its heat window is open: the kick decays and a lapsed window closes, and a
+// row with an occupant, a non-EWEAP row or a cold slot is left alone.
+// [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the occupant
+//  test @0x5426E9, the EWEAP bit @0x5426FF, the window @0x54270E;
+//  WeaponAction_ProcessFrame -- the kick decay @0x541262..0x54129B, the
+//  window close @0x54125F]
+static void test_weapon_walk_pumps_hot_unoccupied_guns() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    w->registry.configure_pool(1, 8);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+    w->ai.is_authority = true;
+    const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window) {
+        Entity gun{};
+        gun.kind = EntityKind::Item;
+        gun.has_item_def = true;
+        gun.item_attrib = attrib;
+        gun.primary_weapon_slot_adm = 1;
+        gun.primary_weapon_slot.kick = 3;
+        gun.primary_weapon_slot.heat_window_end_tick = window;
+        if (occupied) gun.primary_occupant = EntityHandle::make(0, 3);
+        return w->registry.spawn(1, gun);
+    };
+    const EntityHandle hot = spawn_gun(kItemAttribEweap, false, 50);
+    const EntityHandle manned = spawn_gun(kItemAttribEweap, true, 50);
+    const EntityHandle plain = spawn_gun(0, false, 50);
+    const EntityHandle cold = spawn_gun(kItemAttribEweap, false, 0);
+    w->logic_tick = 11; // the frame's own tick is 10, inside the window
+    w->pump_weapon_actions();
+    CHECK(w->registry.get(hot)->primary_weapon_slot.kick == 2);
+    CHECK(w->registry.get(hot)->primary_weapon_slot.heat_window_end_tick == 50);
+    CHECK(w->registry.get(manned)->primary_weapon_slot.kick == 3);
+    CHECK(w->registry.get(plain)->primary_weapon_slot.kick == 3);
+    CHECK(w->registry.get(cold)->primary_weapon_slot.kick == 3);
+    // The window lapses: that visit closes it, and the gun drops out of the walk.
+    w->logic_tick = 51;
+    w->pump_weapon_actions();
+    CHECK(w->registry.get(hot)->primary_weapon_slot.heat_window_end_tick == 0);
+    CHECK(w->registry.get(hot)->primary_weapon_slot.kick == 1);
+    w->logic_tick = 52;
+    w->pump_weapon_actions();
+    CHECK(w->registry.get(hot)->primary_weapon_slot.kick == 1);
+    CHECK(w->out.rounds.count == 0);
+}
+
+// The frame's weapon walk visits pool 0 in slot order, each gunner pumping the
+// parent slot it borrowed, whatever order the mounts sit in pool 1: the gunner
+// in pool-0 slot 0 fires first although its gun is the later pool-1 row.
+// [orig: WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9 (pool 0 first, in
+//  slot order), then @0x5426CB..0x54271E (pool 1)]
+static void test_weapon_walk_visits_pool0_in_slot_order() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    const auto spawn_gun = [&](uint16_t net_id) {
+        Entity gun{};
+        gun.kind = EntityKind::Item;
+        gun.team = 1;
+        gun.net_id = net_id;
+        gun.yaw = 90;
+        gun.primary_weapon.assign(1, 'x');
+        Seat seat{};
+        seat.type = SeatType::Gunner;
+        gun.seats.push_back(seat);
+        return w->registry.spawn(1, gun);
+    };
+    const auto spawn_npc = [&](uint16_t net_id) {
+        Entity seed{};
+        seed.kind = EntityKind::Organic;
+        seed.team = 1;
+        seed.health = 100;
+        seed.net_id = net_id;
+        const EntityHandle handle = w->registry.spawn(0, seed);
+        configure_rifleman(*ai.at(ai.attach(handle)), net_id, 1);
+        return handle;
+    };
+    const EntityHandle first_gun = spawn_gun(0x31);   // pool-1 slot 0
+    const EntityHandle second_gun = spawn_gun(0x32);  // pool-1 slot 1
+    const EntityHandle early = spawn_npc(0x11);       // pool-0 slot 0
+    const EntityHandle late = spawn_npc(0x12);        // pool-0 slot 1
+    CHECK(w->commands.mount(0x12, 0x31));
+    CHECK(w->commands.mount(0x11, 0x32));
+    w->registry.get(first_gun)->primary_weapon_slot.next = weapon_action::kFire;
+    w->registry.get(second_gun)->primary_weapon_slot.next = weapon_action::kFire;
+    w->logic_tick = 1;
+    w->pump_weapon_actions();
+    CHECK(w->out.rounds.count == 2);
+    CHECK(w->out.rounds.records[0].shooter_handle == early.packed);
+    CHECK(w->out.rounds.records[1].shooter_handle == late.packed);
 }
 
 static void test_mounted_look_traverses_before_fire_request() {
@@ -4269,6 +4385,8 @@ int main() {
     test_water_crossing_fires_once_on_entry();
     test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
+    test_weapon_walk_visits_pool0_in_slot_order();
+    test_weapon_walk_pumps_hot_unoccupied_guns();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();

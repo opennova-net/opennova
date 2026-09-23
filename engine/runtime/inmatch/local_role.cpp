@@ -32,7 +32,12 @@ void LocalRole::run_tick(const TickInput &) {
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();
-	kernel.local.run_local_player_post_tick();
+	kernel.local.run_local_view_tick();
+	// The frame's one weapon-action walk follows the camera compose: the
+	// local player's slot pumps at its own pool-0 slot, the gunners around it.
+	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
+	//  the WeaponAction_ProcessAllEntities call @0x526786]
+	kernel.world.pump_weapon_actions();
 	kernel.resolve_new_infantry_adm_ids();
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 }

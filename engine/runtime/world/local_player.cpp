@@ -515,12 +515,15 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	}
 }
 
-void LocalPlayer::run_local_player_post_tick() {
-	World &world = world_;
+void LocalPlayer::run_local_view_tick() {
 	// Retail promotes the per-frame view before weapon actions; the sim-wrote-
 	// the-view fold runs first so the pumps read the settled look.
 	sync_local_mounted_input_heading();
 	tick_view();
+}
+
+void LocalPlayer::pump_local_weapon() {
+	World &world = world_;
 	w::LocalWeaponPumpIO io;
 	io.view = &view;
 	io.inventory = inventory_valid ? &inventory : nullptr;

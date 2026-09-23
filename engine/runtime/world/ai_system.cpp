@@ -588,53 +588,49 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     deferred_piece_brains_.clear();
 }
 
-void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
-    // The joiner's canonical borrowers are pumped by its replica pass.
-    if (world.rules.mp_session && !world.rules.projectile_authority) return;
-    mounted_weapon_handles_.clear();
-    world.registry.for_each([&](const Entity &entity) {
-        if (entity.handle.pool() == 1 && entity.primary_weapon_owner.valid())
-            mounted_weapon_handles_.push_back(entity.handle);
-    });
+// A gunner's link holds while it lives, stays seated as the gunner and still
+// names the mount that names it.
+static bool gunner_holds_mount(const Entity &owner, EntityHandle mount) {
+    return owner.health > 0 && owner.mounted && owner.mount_type == SeatType::Gunner &&
+           owner.mount_target == mount;
+}
 
-    for (const EntityHandle mount_handle : mounted_weapon_handles_) {
-        Entity *mount = world.registry.get(mount_handle);
-        if (mount == nullptr) continue;
-        Entity *owner = world.registry.get(mount->primary_weapon_owner);
-        if (owner == nullptr || owner->health <= 0 || !owner->mounted ||
-            owner->mount_type != SeatType::Gunner ||
-            owner->mount_target != mount_handle) {
-            mount->primary_weapon_owner = EntityHandle{};
-            continue;
-        }
-        // L's borrowed parent slot is pumped by Simulation with the live
-        // trigger/reload/scope inputs and first-person event sink. Advancing it
-        // here as well would run one slot twice per frame. Remote players and
-        // NPC gunners remain owned by this global world pump.
-        // [orig: one WeaponAction_ProcessAllEntities walk @0x542690]
-        if (world.rules.external_local_mounted_weapon_pump &&
-            owner->handle == world.cached.local_player)
-            continue;
-        AiEntity *gunner = for_handle(owner->handle);
-        if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) continue;
+void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
+    if (!mount.primary_weapon_owner.valid()) return;
+    const Entity *owner = world.registry.get(mount.primary_weapon_owner);
+    if (owner == nullptr || !gunner_holds_mount(*owner, mount.handle))
+        mount.primary_weapon_owner = EntityHandle{};
+}
+
+void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick) {
+    if (!owner.mounted || owner.mount_type != SeatType::Gunner) return;
+    Entity *mount = world.registry.get(owner.mount_target);
+    if (mount == nullptr || mount->primary_weapon_owner != owner.handle) return;
+    if (!gunner_holds_mount(owner, mount->handle)) {
+        mount->primary_weapon_owner = EntityHandle{};
+        return;
+    }
+    {
+        AiEntity *gunner = for_handle(owner.handle);
+        if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) return;
         const WeaponTableEntry *weapon =
                 world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
-        if (weapon == nullptr || weapon->ammo_index < 0) continue;
+        if (weapon == nullptr || weapon->ammo_index < 0) return;
 
         WeaponFsmInputs inputs;
-        inputs.is_local = owner->handle == world.cached.local_player;
+        inputs.is_local = owner.handle == world.cached.local_player;
         inputs.is_authority = is_authority;
         inputs.auto_reload = true;
         // The heat window is derived from the tick, so the pump needs it. AI gunners
         // sit on the emplaced guns that actually author heat, so this is the path
         // that overheats in practice. [orig: current_tick @ 0x24C1968]
         inputs.current_tick = static_cast<int32_t>(logic_tick);
-        weapon_fire_environment_inputs(world, *owner, inputs);
+        weapon_fire_environment_inputs(world, owner, inputs);
         WeaponFsmEvents weapon_events;
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
-        weapon_sound_publish(world, *owner, weapon->action_fsm, weapon_events);
-        if (!weapon_events.fired || !is_authority) continue;
+        weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
+        if (!weapon_events.fired || !is_authority) return;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
         // A UseGun shot leaves through the gunner branch every mounted shooter
@@ -656,7 +652,7 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
 		// The fire tail rocks the tank along the gun's point for the slot as
 		// the FSM leaves it: next = RECOIL (the mflash column) and the clip
 		// already spent. [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
-		world.vehicles.weapon_recoil(*owner,
+		world.vehicles.weapon_recoil(owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
 				mount->primary_weapon_slot.clip, 1);
 		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))

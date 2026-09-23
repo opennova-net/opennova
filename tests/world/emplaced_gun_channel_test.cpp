@@ -509,7 +509,7 @@ void test_barrel_spin_tail_and_class_gate() {
     CHECK(r.gun().emplaced_spin_phase == 57992); // holds final angle
 }
 
-// The class tail consumes kick before the global weapon pump decays it again.
+// The class tail consumes kick before the frame's weapon walk decays it again.
 // A reversed order loses this spin step; a second entity update doubles it.
 void test_barrel_spin_once_before_weapon_pump() {
     Rig r(true, true);
@@ -521,6 +521,7 @@ void test_barrel_spin_once_before_weapon_pump() {
     r.gun().primary_weapon_slot_adm = 0;
     r.gun().primary_weapon_slot.kick = 2;
     r.w.run_logic_tick(true);
+    r.w.pump_weapon_actions();
     CHECK(r.gun().primary_weapon_slot.kick == 0);
     CHECK(r.gun().emplaced_spin_ticks == 59);
     CHECK(r.gun().emplaced_spin_phase == 1888);
@@ -528,6 +529,7 @@ void test_barrel_spin_once_before_weapon_pump() {
     CHECK(emplaced_weapon_controls_for(r.w, r.gun(), controls));
     CHECK(controls.spin == 1888);
     r.w.run_logic_tick(true);
+    r.w.pump_weapon_actions();
     CHECK(r.gun().emplaced_spin_ticks == 58);
     CHECK(r.gun().emplaced_spin_phase == 3744);
 }

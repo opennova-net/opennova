@@ -608,10 +608,6 @@ struct SessionRules {
     bool destroy_buildings = false;
 	// [orig: dword_24D1E38, initially -1; AI_TickState_VehicleDead @0x467EE9]
 	bool vehicle_respawns = true;
-	// An embedder may own the local player's borrowed UseGun slot so
-	// it can supply trigger/reload/scope input and drain presentation events.
-	// Standalone World users keep the default global mounted-slot pump.
-	bool external_local_mounted_weapon_pump = false;
     // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
     // class-0 player leg skips the LOCAL player and the weapon validator
     // rejects every Player target while it is up [orig: `test
@@ -961,17 +957,31 @@ public:
     // advances shared clocks but freezes WAC/entities/projectiles. The
     // explicit phase replaces the old boolean pre-mission seam so no caller
     // can mistake a pre-round freeze for a script initialization pass.
-    // run_logic_tick is the whole frame; the host's server tick splits it along
-    // retail's frame: begin_tick, the script pass (Server_TickUpdate's WAC
-    // tick, every-32 legs and BMS quarter pass), its own maintenance and 0x0A,
-    // then the entity pass (Game_ProcessMainFrame's gated entity update, the
-    // weapon pump and the tail that advances logic_tick).
+    // run_logic_tick is the script and entity half of the frame; the host's
+    // server tick splits it along retail's frame: begin_tick, the script pass
+    // (Server_TickUpdate's WAC tick, every-32 legs and BMS quarter pass), its
+    // own maintenance and 0x0A, then the entity pass (Game_ProcessMainFrame's
+    // gated entity update and the tail that advances logic_tick). The weapon
+    // actions follow later in the frame (pump_weapon_actions).
     // [orig: Game_ProcessMainFrame @0x5263f0]
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
     TickContext begin_tick(bool is_authority, TickPhase phase);
     void run_script_pass(const TickContext &ctx);
     void run_entity_pass(const TickContext &ctx);
+    // The frame's one weapon-action walk, after the weather tick and the
+    // camera compose: every pool-0 row in slot order (the local player's slot
+    // through the installed LocalPlayer's pump, a UseGun gunner's borrowed
+    // parent slot through the AI pump), then each unoccupied EWEAP pool-1 row
+    // whose slot is still hot. Every host and the bare local role run it once
+    // per frame after their weather and view legs, whatever the phase; a
+    // joiner walks its replica slots instead. It reads the frame's own tick,
+    // one behind logic_tick once the entity pass's tail has run.
+    // [orig: Game_ProcessMainFrame -- Environment_UpdateWeatherTick @0x526774,
+    //  Camera_ComputeThirdPersonView @0x526781, then the
+    //  WeaponAction_ProcessAllEntities call @0x526786;
+    //  WeaponAction_ProcessAllEntities @0x542690..0x542724]
+    void pump_weapon_actions();
 
     // One gameplay tick's entity update, in the retail phase order: the
     // pool-1 walk (every live row once, in slot order, its ground-entity

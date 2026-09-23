@@ -359,6 +359,12 @@ void NwUdpListener::run_loop() {
 					inmatch::host_session_pump(
 							*jo_owner_, jo_socket, nullptr, nullptr,
 							&NwUdpListener::observe_jo_event, this);
+					// The frame's weapon-action walk follows the server
+					// tick's entity pass on every host; this one has no
+					// weather or view legs to wait for.
+					// [orig: Game_ProcessMainFrame -- the
+					//  WeaponAction_ProcessAllEntities call @0x526786]
+					jo_world_->pump_weapon_actions();
 				}
 				do {
 					next_pump += pump_period;

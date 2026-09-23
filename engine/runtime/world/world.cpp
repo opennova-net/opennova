@@ -15,6 +15,8 @@
 #include <runtime/world/vehicle_attach.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
+#include <runtime/world/local_player.h>
+#include <runtime/world/weapon_fire_gate.h>
 #include <base/io/bam.h>
 
 namespace opennova::world {
@@ -587,18 +589,7 @@ void World::run_entity_pass(const TickContext &ctx) {
     // [orig: Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
     //  call @0x52674B)]
     if (gameplay && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
-    // The global weapon-action pump follows the complete entity update, so a
-    // round a pump fires first moves on the next tick.
-    // [orig: Game_ProcessMainFrame — the Entity_UpdateAllEntities call
-    //  @0x52674B, then the WeaponAction_ProcessAllEntities call @0x526786]
-    // WeaponAction_ProcessAllEntities is after the timer-gated entity update
-    // and is itself ungated, so an already-queued action may advance during
-    // PreRound even though its spawned projectile cannot move until gameplay.
-    // PreMission remains outside the frame pump entirely.
-    // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
-    if (!pre_mission)
-        ai.pump_mounted_weapon_slots(*this, logic_tick);
-    lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
+    lap.restart();
     item_emitters.sync_owners(*this);
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
@@ -622,6 +613,72 @@ void World::run_entity_pass(const TickContext &ctx) {
     out.sound_emitters.prune(logic_tick);
     script.voice.refresh(*this);
     lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
+}
+
+// An unoccupied EWEAP row whose MountSlot is still hot keeps its own pump
+// until the heat window closes: the window, the kick and the action clocks
+// run on, but with no owner the fire handler returns before any round and the
+// owner-keyed cues stay silent.
+// [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716 ->
+//  WeaponAction_ProcessFrame @0x540E60 (the def test @0x540E74, the heat
+//  window @0x540FED..0x541262); WeaponAction_Fire's owner test @0x542B24]
+static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t frame_tick) {
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(row.primary_weapon_slot_adm);
+    if (weapon == nullptr) return;
+    WeaponFsmInputs inputs;
+    inputs.owner_present = false;
+    inputs.is_local = false;
+    inputs.is_authority = world.ai.is_authority;
+    inputs.auto_reload = true;
+    inputs.current_tick = static_cast<int32_t>(frame_tick);
+    weapon_fire_environment_inputs(world, row, inputs);
+    WeaponFsmEvents events;
+    weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
+    weapon_sound_publish(world, row, weapon->action_fsm, events);
+}
+
+void World::pump_weapon_actions() {
+    // A joiner's borrowers are its replica rows: it walks its own replica slots
+    // (tick_replica_weapon_slots) and leaves their links alone here.
+    if (rules.mp_session && !rules.projectile_authority) return;
+    const devtools::ProfileScope scope(profile, devtools::Slot::SIM_WORLD_WEAPONS);
+    // Every WeaponAction_ProcessFrame reads the frame's `tick`, which the
+    // entity pass's tail has already stepped past.
+    // [orig: current_tick @0x24C1968, advanced at the head of the frame @0x5265B4]
+    const uint32_t frame_tick = logic_tick - 1u;
+    // Pool 0 in slot order, each live row's weapon slot (+0x118; a UseGun
+    // gunner's is the parent's MountSlot it borrowed): the local player's
+    // through the installed LocalPlayer's pump, every other through the AI.
+    // [orig: WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9 -- the slot
+    //  read @0x5426AD, the live test @0x5426B9, the WeaponAction_ProcessFrame
+    //  call @0x5426C1]
+    const EntityHandle local = cached.local_player;
+    const size_t pool0 = registry.pool_capacity(0);
+    for (size_t slot = 0; slot < pool0; ++slot) {
+        const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
+        if (local_player_state != nullptr && handle == local) {
+            local_player_state->pump_local_weapon();
+            continue;
+        }
+        if (Entity *row = registry.get(handle)) ai.pump_gunner_slot(*this, *row, frame_tick);
+    }
+    // Then pool 1 in slot order: a row with no occupant (+0x170), an EWEAP
+    // definition and a slot whose heat window (+0x14) is still open.
+    // [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the
+    //  occupant test @0x5426E9, the live test @0x5426F2, the EWEAP bit
+    //  @0x5426FF, the slot @0x542704, the window @0x54270E, the call
+    //  @0x542716]
+    const size_t pool1 = registry.pool_capacity(1);
+    for (size_t slot = 0; slot < pool1; ++slot) {
+        Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
+        if (row == nullptr) continue;
+        ai.release_stale_gunner_link(*this, *row);
+        if (row->primary_occupant.valid() || !row->has_item_def ||
+                (row->item_attrib & kItemAttribEweap) == 0 ||
+                row->primary_weapon_slot.heat_window_end_tick == 0)
+            continue;
+        pump_unoccupied_weapon_slot(*this, *row, frame_tick);
+    }
 }
 
 // Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority
