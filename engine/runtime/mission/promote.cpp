@@ -45,13 +45,13 @@ std::string ai_profile_name_for(
     while (end > begin && is_ws(name[end - 1])) --end;
     name = name.substr(begin, end - begin);
     // The authored ai_textfile wins in every retail arm [orig: the +0x9C
-    // non-empty tests @0x461f2b / @0x4684a4 / @0x4687a3].
+    // non-empty tests @0x4684a4 / @0x4687a3].
     if (!name.empty() || !placed_item || !defaults) return name;
     const PromoteOptions::AiProfileDefaults d = defaults(e.type_id);
     if (!d.known) return name;
     // The vehicle family consults the def's own default_aip (+0x8B8) before
     // the helo1 default [orig: Entity_InitVehicleAIFromDef @0x4687b5..0x4687d1];
-    // the helicopter family goes straight to helo1 [orig: @0x461f50 / @0x4684c9].
+    // the helicopter family goes straight to helo1 [orig: @0x4684c9].
     if (!d.helicopter_init && !d.default_aip.empty()) {
         std::string def_name;
         for (char c : d.default_aip) def_name.push_back(lower(c));
@@ -89,28 +89,20 @@ static void sort_class_walk(AiProfile &profile, bool keyed) {
         profile.slot_class[i] = ents[3 - i].first;
 }
 
-// Shared DEF/profile initialization for placed and dynamically spawned AI.
-// [orig: Entity_InitVehicleAI @0x460200; Entity_InitHelicopterAI @0x461F00]
-void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, EntityKind kind) {
+// Shared profile initialization for placed and dynamically spawned AI: the
+// generic allocator's profile copies and the loaded profile's runtime fields.
+// The speed words brain[49]/[50] and the helicopter's patrol-offset draw belong
+// to the class init (initialize_class_brain).
+// [orig: Entity_InitVehicleAI @0x460200]
+void initialize_ai_profile(AiEntity &ae, const aip::Profile &data) {
     AiBrain &b = ae.brain;
-    if (data.combat_speed >= 0)
-        b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
-                (static_cast<int64_t>(data.combat_speed) << 16) / 225);
-    if (data.patrol_speed >= 0)
-        b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
-                (static_cast<int64_t>(data.patrol_speed) << 16) / 225);
-    if (data.has_ground_combat_speed)
-        b.f[AiBrain::kSpeedA] = data.ground_combat_speed;
-    if (data.has_ground_patrol_speed)
-        b.f[AiBrain::kSpeedB] = data.ground_patrol_speed;
     // The allocator's profile copies, every profile type: aim_skill (+0x1C, parsed
     // 0..4; the zeroed record's 0 when unauthored) into brain[43], drive_skill into
     // brain[44], alert into brain[47].
     // [orig: Entity_InitVehicleAI @0x460294..0x460297, @0x46029D..0x4602A0,
     //  @0x4602A6..0x4602A9]
-    const int32_t aim_skill = data.aim_skill < 0 ? 0 : data.aim_skill;
-    ae.profile.accuracy = aim_skill;
-    b.f[AiBrain::kAccuracy] = aim_skill;
+    ae.profile.accuracy = data.aim_skill;
+    b.f[AiBrain::kAccuracy] = data.aim_skill;
     b.f[AiBrain::kDriveSkill] = data.drive_skill;
     b.f[AiBrain::kPrevAlert] = data.alert;
     // The §16.2 class walk data: the four class-priority words and the
@@ -123,7 +115,7 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
     // The parsed profile is the runtime profile: retain its flight and
     // targeting fields on both families. [orig: @0x45DE70; @0x460200]
     ae.profile.flags96 = static_cast<uint8_t>(data.evade_flags);
-    ae.profile.field104 = std::max(0, data.react_ticks);
+    ae.profile.field104 = data.react_ticks;
     ae.profile.view_fov_bam = data.view_fov_bam;
     ae.profile.radar_fov_bam = data.radar_fov_bam;
     ae.profile.view_dist = data.view_dist;
@@ -135,26 +127,16 @@ void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai,
     ae.profile.min_chase = data.min_chase;
     ae.profile.max_chase = data.max_chase;
     if (data.type == 1) {
-        if (data.helo_combat_speed >= 0)
-            b.f[AiBrain::kSpeedA] = data.helo_combat_speed;
-        if (data.helo_patrol_speed >= 0)
-            b.f[AiBrain::kSpeedB] = data.helo_patrol_speed;
+        // The parsed words themselves: an authored negative stays negative.
         ae.profile.patrol_altitude = data.helo_patrol_altitude;
-        ae.profile.patrol_climb = std::max(0, data.helo_patrol_climb);
+        ae.profile.patrol_climb = data.helo_patrol_climb;
         ae.profile.field216 = data.helo_combat_altitude;
-        ae.profile.field220 = std::max(0, data.helo_combat_climb);
+        ae.profile.field220 = data.helo_combat_climb;
         ae.profile.min_agl = data.min_agl;
-        ae.profile.min_speed = std::max(0, data.min_speed);
+        ae.profile.min_speed = data.min_speed;
         ae.profile.flight_flags = data.hunt_flags;
         b.f[AiBrain::kUseWaypointZones] = data.use_waypoint_z;
-        if (kind == EntityKind::Item)
-            b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
     }
-    // The resolved speed words the class init's respawn re-run reloads
-    // [orig: Entity_InitVehicleAIFromDef @0x4688C1..0x4688D3;
-    //  Entity_InitHelicopterAIFromDef @0x468597..0x4685A9].
-    ae.profile.class_speed_a = b.f[AiBrain::kSpeedA];
-    ae.profile.class_speed_b = b.f[AiBrain::kSpeedB];
     ae.profile.class_priority[0] = data.priority_air;
     ae.profile.class_priority[1] = data.priority_ground;
     ae.profile.class_priority[2] = data.priority_organics;
@@ -221,6 +203,26 @@ void initialize_vehicle_brain(AiEntity &ae, World &world, int32_t heading) {
     // on it, kept for the structural draw [orig: @0x46035e..0x460371].
     b.f[200] = static_cast<int32_t>(world.next_prng16_c()) % 0x80000;
     b.f[201] = 0;                        // @0x460377
+}
+
+void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool helicopter_init,
+                            AiSystem &ai) {
+    AiBrain &b = ae.brain;
+    // The class init's speed words, read at its own profile offsets (the
+    // zeroed record when no .aip loaded). The respawn re-run reloads them.
+    // [orig: Entity_InitHelicopterAIFromDef @0x468597..0x4685A9;
+    //  Entity_InitVehicleAIFromDef @0x4688C1..0x4688D3]
+    const aip::ClassSpeeds speeds =
+            aip::class_speed_words(profile != nullptr ? *profile : aip::Profile{}, helicopter_init);
+    b.f[AiBrain::kSpeedA] = speeds.speed_a;
+    b.f[AiBrain::kSpeedB] = speeds.speed_b;
+    ae.profile.class_speed_a = speeds.speed_a;
+    ae.profile.class_speed_b = speeds.speed_b;
+    // The helicopter init's patrol offset: one rotate-LCG draw, (draw16 % 20)
+    // << 16, whatever the profile [orig: Entity_InitHelicopterAIFromDef
+    // @0x4685ED..0x46863F].
+    if (helicopter_init)
+        b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
 }
 
 namespace {
@@ -398,15 +400,6 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
                                     std::numeric_limits<int16_t>::min(),
                                     std::numeric_limits<int16_t>::max()));
 
-	// Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
-	// The .aip profile seeds them when the embedder supplied the entity's profile
-	// speeds; the parse scale is x65536/225 exactly like the PATROLSPEED command
-	// [orig: Entity_InitVehicleAIFromDef brain[49] = profile+0xC4 (combat_speed),
-	//  brain[50] = profile+0xC0 (patrol_speed) @0x4688C7/@0x4688D3; the .aip parse
-	//  x1000 x 1/225000 x 65536 @0x45E6E8..0x45E6FD]. Unresolved profiles keep the
-	//  default_speed for embedders that do not supply profiles.
-	b.f[AiBrain::kSpeedA] = opts.default_speed;
-    b.f[AiBrain::kSpeedB] = opts.default_speed;
     // The profile name retail's AI init would load: the ai_textfile, else (a
     // placed vehicle item) the def's default_aip or "helo1" — the same
     // resolution the boot resolver used to load the rows, so a nameless
@@ -414,23 +407,28 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0 name arms].
 	const std::string want =
             ai_profile_name_for(e, kind == EntityKind::Item, opts.ai_profile_defaults);
-    bool profiled = false;
+    const aip::Profile *profile = nullptr;
     if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile != want) continue;
-			initialize_ai_profile(ae, ps.data, ai, kind);
-			profiled = true;
+			initialize_ai_profile(ae, ps.data);
+			profile = &ps.data;
 			break;
 		}
     }
     // A vehicle brain whose .aip did not load still walks the loader's sort of
     // the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
-    if (!profiled && kind == EntityKind::Item) sort_class_walk(ae.profile, false);
-	// The speed words the class init's respawn re-run reloads (the resolved
-	// profile's, else the embedder default) [orig: Entity_InitVehicleAIFromDef
-	// @0x4688C1..0x4688D3].
-	ae.profile.class_speed_a = b.f[AiBrain::kSpeedA];
-	ae.profile.class_speed_b = b.f[AiBrain::kSpeedB];
+    if (profile == nullptr && kind == EntityKind::Item) sort_class_walk(ae.profile, false);
+	// A placed item's class init writes the per-node mover speeds brain[49]/[50]
+	// from its own profile offsets and, for the helicopter family, draws the
+	// patrol offset; the family is the item's ai_function row, not the profile
+	// type [orig: Entity_InitHelicopterAIFromDef @0x4683C0;
+	// Entity_InitVehicleAIFromDef @0x4686C0].
+	if (kind == EntityKind::Item) {
+		const bool helicopter_init =
+				opts.ai_profile_defaults && opts.ai_profile_defaults(e.type_id).helicopter_init;
+		initialize_class_brain(ae, profile, helicopter_init, ai);
+	}
 	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
 	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
 	// profile row found or not (AIProfile_LoadOrFind never returns null there). Organics

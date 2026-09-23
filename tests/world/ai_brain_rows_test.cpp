@@ -238,7 +238,7 @@ void test_class_walk_matches_the_retail_qsort() {
         p.priority_ground = v[1];
         p.priority_organics = v[2];
         p.priority_decorations = v[3];
-        opennova::mission::initialize_ai_profile(ae, p, owned->ai, EntityKind::Item);
+        opennova::mission::initialize_ai_profile(ae, p);
         for (int i = 0; i < 4; ++i) CHECK(ae.profile.slot_class[i] == v[4 + i]);
     }
     // Any other profile type sorts four zero keys, whatever it authored.
@@ -246,7 +246,7 @@ void test_class_walk_matches_the_retail_qsort() {
     opennova::aip::Profile organic;
     organic.type = 3;
     organic.priority_air = 7;
-    opennova::mission::initialize_ai_profile(other, organic, owned->ai, EntityKind::Item);
+    opennova::mission::initialize_ai_profile(other, organic);
     CHECK(other.profile.slot_class[0] == 0 && other.profile.slot_class[1] == 3 &&
           other.profile.slot_class[2] == 2 && other.profile.slot_class[3] == 1);
 }
@@ -260,23 +260,77 @@ void test_allocator_copies_aim_skill_unconditionally() {
     ground.brain.f[AiBrain::kAccuracy] = 3;
     opennova::aip::Profile p;
     p.type = 2; // no aim_skill line
-    opennova::mission::initialize_ai_profile(ground, p, owned->ai, EntityKind::Item);
+    opennova::mission::initialize_ai_profile(ground, p);
     CHECK(ground.brain.f[AiBrain::kAccuracy] == 0 && ground.profile.accuracy == 0);
     p.aim_skill = 4;
-    opennova::mission::initialize_ai_profile(ground, p, owned->ai, EntityKind::Item);
+    opennova::mission::initialize_ai_profile(ground, p);
     CHECK(ground.brain.f[AiBrain::kAccuracy] == 4 && ground.profile.accuracy == 4);
     AiEntity other;
     other.brain.f[AiBrain::kAccuracy] = 2;
     opennova::aip::Profile organic;
     organic.type = 3; // the parser stores no aim_skill for this type
-    opennova::mission::initialize_ai_profile(other, organic, owned->ai, EntityKind::Item);
+    opennova::mission::initialize_ai_profile(other, organic);
     CHECK(other.brain.f[AiBrain::kAccuracy] == 0);
+}
+
+// The class init reads brain[49]/[50] at its own profile offsets, keyed on the
+// item's ai_function family, not the profile type: the helicopter init reads
+// +0xD4/+0xC8 (a GROUND profile stores radio_delay/turn_rate there), the vehicle
+// init +0xC4/+0xC0 (a HELO profile stores hunt_limit/hunt_flags there); the
+// helicopter init always draws its patrol offset, profile or not; a missing
+// profile is the zeroed record (no stand-in speed); the parsed words are taken
+// as stored (an authored negative climb stays negative).
+// [orig: Entity_InitHelicopterAIFromDef @0x468597..0x4685A9, draw
+//  @0x4685ED..0x46863F; Entity_InitVehicleAIFromDef @0x4688C1..0x4688D3]
+void test_class_init_keys_on_the_item_class() {
+    opennova::aip::Profile ground;
+    ground.type = 2;
+    ground.ground_combat_speed = 43690;
+    ground.ground_patrol_speed = 20388;
+    ground.radio_delay = 7;
+    ground.turn_rate_bam_tick = 9;
+    opennova::aip::Profile helo;
+    helo.type = 1;
+    helo.helo_combat_speed = 5000;
+    helo.helo_patrol_speed = 3000;
+    helo.hunt_limit = 125;
+    helo.hunt_flags = 1;
+    helo.helo_patrol_climb = -100;
+
+    auto owned = std::make_unique<World>();
+    AiSystem &ai = owned->ai;
+    const auto words = [&](const opennova::aip::Profile *p, bool helicopter) {
+        AiEntity e;
+        opennova::mission::initialize_class_brain(e, p, helicopter, ai);
+        return std::make_pair(e.brain.f[AiBrain::kSpeedA], e.brain.f[AiBrain::kSpeedB]);
+    };
+    CHECK(words(&ground, false) == std::make_pair(43690, 20388));
+    CHECK(words(&ground, true) == std::make_pair(7, 9));
+    CHECK(words(&helo, true) == std::make_pair(5000, 3000));
+    CHECK(words(&helo, false) == std::make_pair(125, 1));
+    CHECK(words(nullptr, false) == std::make_pair(0, 0));
+
+    // The helicopter draw runs whatever the profile; the vehicle init never draws.
+    const uint32_t before = ai.prng_a;
+    AiEntity heli;
+    opennova::mission::initialize_class_brain(heli, &ground, true, ai);
+    CHECK(ai.prng_a != before);
+    CHECK(heli.brain.f[51] >= 0 && heli.brain.f[51] < (20 << 16));
+    const uint32_t after = ai.prng_a;
+    AiEntity truck;
+    opennova::mission::initialize_class_brain(truck, &helo, false, ai);
+    CHECK(ai.prng_a == after && truck.brain.f[51] == 0);
+
+    AiEntity climber;
+    opennova::mission::initialize_ai_profile(climber, helo);
+    CHECK(climber.profile.patrol_climb == -100);
 }
 
 } // namespace
 
 int main() {
     test_ground_rows_read_the_live_hull_words();
+    test_class_init_keys_on_the_item_class();
     test_allocator_copies_aim_skill_unconditionally();
     test_class_walk_matches_the_retail_qsort();
     test_alert_enters_raise_the_own_slot_alert();

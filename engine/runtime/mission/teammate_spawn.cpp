@@ -88,15 +88,16 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     ai.def_attrib = entity.item_attrib;
     ai.slot.f[0] = int32_t(handle.packed) + 1;
     if (profile) {
-        // CHel's definition callback is @0x4683C0 (the separate @0x461F00
-        // respawn init has different flags/slide writes). Its generic allocator
-        // starts all three state words at zero and lands the constant block
-        // (the shared initialize_vehicle_brain); the callback then writes the
-        // move step before calling the enter handler
+        // CHel's definition callback is @0x4683C0. Its generic allocator starts
+        // all three state words at zero and lands the constant block (the shared
+        // initialize_vehicle_brain); the callback then writes the helicopter
+        // speed words and patrol offset (initialize_class_brain) and the move
+        // step before calling the enter handler
         // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 — the @0x460200 call
         //  @0x4684bf/@0x4684cf, `[brain+1Ch] = 10h` @0x468645].
-        initialize_ai_profile(ai, *profile, world.ai, world::EntityKind::Item);
+        initialize_ai_profile(ai, *profile);
         initialize_vehicle_brain(ai, world, request.heading);
+        initialize_class_brain(ai, profile, /*helicopter_init=*/true, world.ai);
         ai.brain.f[AiBrain::kStep] = 16;
         std::memcpy(ai.slot.bytes() + 156, "H_BHawkN", 8);
         world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;

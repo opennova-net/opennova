@@ -943,9 +943,9 @@ int main() {
     // waypoint_id is 1-based (channel 0 = the AI "no route" sentinel); these patrol channel 1.
     m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1, /*wp_num=*/0));
     m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1, /*wp_num=*/0));
-    // Organic 1 authors an ai_textfile whose .aip speeds the embedder resolved —
-    // its brain seeds the profile speeds at the witnessed x65536/225 scale while
-    // organic 0 keeps the default_speed stand-in.
+    // Organic 1 authors an ai_textfile whose .aip the embedder resolved: its
+    // profile fields and class walk seed; an organic runs no vehicle class init,
+    // so neither organic takes brain speed words.
     std::memcpy(m.organics[1].name2, "d_zode", 7);
     m.organics[0].bmsi_attributes =
             static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
@@ -975,12 +975,8 @@ int main() {
 
     mission::PromoteOptions opts;
     opts.arrival_radius = 1000;
-    opts.default_speed = 20;
     mission::PromoteOptions::AiProfileRow zode;
     zode.profile = "d_zode";
-    // ASYMMETRIC on purpose (h_ah6b_z.aip-shaped): the witnessed seeding is
-    // CROSSED — brain[49]=kSpeedA <- +0xC4 combat, brain[50]=kSpeedB <- +0xC0
-    // patrol — and a symmetric pair cannot detect a swapped wiring.
     zode.data.patrol_speed = 70;
     zode.data.combat_speed = 150;
     // Class-walk data (D-AI-1): distinct priorities pin the +40..+52 sort —
@@ -1037,16 +1033,14 @@ int main() {
     CHECK(e0->brain.f[AiBrain::kWpType] == 1);
     CHECK(e0->brain.f[AiBrain::kWpChannel] == 1); // 1-based channel
     CHECK(e0->brain.f[AiBrain::kWpNode] == 0);
-    CHECK(e0->brain.f[AiBrain::kSpeedB] == 20);
+    CHECK(e0->brain.f[AiBrain::kSpeedB] == 0); // no class init, no stand-in speed
     CHECK(e0->team == 1);
 
-    // Organic 1's ai_textfile resolved a profile: the CROSSED seeding —
-    // kSpeedA <- combat 150 -> 150*65536/225 = 43690, kSpeedB <- patrol 70 ->
-    // 70*65536/225 = 20388 [orig: Entity_InitVehicleAIFromDef @0x4688C7/@0x4688D3].
+    // Organic 1's ai_textfile resolved a profile; the speed words stay a vehicle
+    // class init's (ai_brain_rows pins the crossed +0xC4/+0xC0 seeding).
     AiEntity *e1 = ai.at(1);
     CHECK(e1 != nullptr);
-    CHECK(e1->brain.f[AiBrain::kSpeedB] == 20388);
-    CHECK(e1->brain.f[AiBrain::kSpeedA] == 43690);
+    CHECK(e1->brain.f[AiBrain::kSpeedA] == 0 && e1->brain.f[AiBrain::kSpeedB] == 0);
     // The class-walk seed (D-AI-1): priorities copied verbatim; the +40..+52
     // order sorts priority-descending for the keyed GROUND type — 200 ground,
     // 100 organics, 10 air, 0 decorations [orig: AIProfile_LoadOrFind @0x45fd80].

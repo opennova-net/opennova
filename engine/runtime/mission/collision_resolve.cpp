@@ -508,12 +508,16 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 				}
-				// brain[11] is the CMDL floor's absolute value.
-				// [orig: Entity_InitHelicopterAIFromDef @0x4683C0]
+				// brain[11] is the CMDL floor's absolute value. The class init
+				// writes it: the helicopter family always, the vehicle family
+				// unless the loaded profile is a boat (subtype 1), whatever the
+				// profile's type. [orig: Entity_InitHelicopterAIFromDef
+				//  @0x4684E2..0x4684F7; Entity_InitVehicleAIFromDef `cmp [edi+14h],
+				//  ebx` @0x46881C, store @0x468836]
 				const world::AiEntity *vehicle_ai = world.ai.for_handle(e->handle);
 				if (vehicle_ai != nullptr &&
-						(vehicle_ai->profile.type == 1 ||
-								(vehicle_ai->profile.type == 2 &&
+						(vt->brain_class == world::VehicleBrainClass::Air ||
+								(vt->brain_class == world::VehicleBrainClass::Ground &&
 										vehicle_ai->profile.subtype != 1))) {
 					e->veh.air_probe_z_off =
 							static_cast<int32_t>(vt->box_z_lo < 0 ? 0u - uint32_t(vt->box_z_lo)
