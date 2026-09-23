@@ -297,6 +297,14 @@ void collision_matrix_to_euler(const CollisionMatrix &m, int32_t out_yaw_pitch_r
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]);
 
+// A LOS endpoint's parent slot in the pool walkers' exclusion set: the seat
+// mount (+0x16C parentEntity) wins over the carried object (+0x268
+// mountedChild); `parent_cleared` models a caller that nulls +0x16C around
+// its query, leaving only the carried object [orig:
+// Physics_RaycastTerrainAndSectors @0x5399C6..0x539A12;
+// raycast_find_collision_entity @0x539AB8..0x539B10].
+EntityHandle los_walker_parent(const Entity *e, bool parent_cleared = false);
+
 // Terrain clip of a segment: on a hit writes the refined hit point to out_hit
 // and returns true; on clear out_hit is untouched. The iris camera-ray clip's
 // terrain leg [orig: raycast_entity_collision @ 0x413760 ->
@@ -1125,16 +1133,19 @@ public:
 
     // Segment LOS query, TRUE = CLEAR of terrain + sector solids — the AI mutual-LOS
     // seam. [orig: Physics_RaycastTerrainAndSectors @ 0x539910: terrain leg via
-    // Terrain_RaycastHeightmapHiRes @ 0x60c760 (skipped when BOTH excluded entities
+    // Terrain_RaycastHeightmapHiRes @ 0x60c760 (skipped when BOTH endpoint entities
     // carry Flags & 0x800000 INDOORS — the heightmap has no interiors), then the
     // sector walk (raycast_against_entity_pool @ 0x538720) over pool 2 statics, then
-    // pool 1 dynamics, excluding both entities; LOS callers pass ray radius 0.]
-    // Tracked D-AI-7 residuals: the +0x28 owner-link exclusion, the Flags&4
-    // destroyed-husk model swap, and the itemDef type-3 person sphere-block
-    // (same-team within 3.0 u exempt) — person-kind residents of the walked pools
-    // don't exist in our world yet (organics are pool 0, unwalked, like retail).
+    // pool 1 dynamics; LOS callers pass ray radius 0.] The walk skips the endpoint
+    // entities A/B, their parent slots (los_walker_parent; the AI LOS passes both,
+    // other callers may leave them null) and any candidate standing on A or B
+    // (+0x28) [orig: @0x53882F..0x538877]. The itemDef type-3 person sphere-block
+    // (same-team within 3.0 u exempt) has no resident: organics are pool 0,
+    // unwalked, like retail.
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
-                       EntityHandle exclude_a, EntityHandle exclude_b);
+                       EntityHandle exclude_a, EntityHandle exclude_b,
+                       EntityHandle parent_a = EntityHandle{},
+                       EntityHandle parent_b = EntityHandle{});
     // Terrain plus the querying entity's building-candidate slice. A null
     // second entity permits a buried endpoint; height_offset raises/lowers the
     // terrain ray and shrinks/inflates the solid clip. Audio and blasts share
@@ -1153,7 +1164,9 @@ public:
     // then reuse retail's entity-resident matrix equivalent without observing
     // a pre-movement pose.
     bool raycast_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
-                              EntityHandle exclude_a, EntityHandle exclude_b);
+                              EntityHandle exclude_a, EntityHandle exclude_b,
+                              EntityHandle parent_a = EntityHandle{},
+                              EntityHandle parent_b = EntityHandle{});
     // Sector candidates the most recent raycast_clear / raycast_clear_cached
     // visited (the broad-phase's exactness, pinned by the collision ctest).
     uint64_t last_los_sector_candidates() const { return last_los_sector_candidates_; }
@@ -1594,6 +1607,7 @@ private:
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
     bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                             EntityHandle exclude_a, EntityHandle exclude_b,
+                            EntityHandle parent_a, EntityHandle parent_b,
                             bool cache_target_views);
     uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,

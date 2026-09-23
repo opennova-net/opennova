@@ -1593,6 +1593,14 @@ target_include_directories(ai_targeting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(ai_targeting_test PRIVATE cxx_std_17)
 add_test(NAME ai_targeting COMMAND ai_targeting_test)
 
+# The AI line of sight's exclusion set and indoors skip
+# (Physics_RaycastTerrainAndSectors @0x539910) and the script LOS split.
+add_executable(ai_los_test world/ai_los_test.cpp)
+target_link_libraries(ai_los_test PRIVATE opennova_runtime)
+target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ai_los_test PRIVATE cxx_std_17)
+add_test(NAME ai_los COMMAND ai_los_test)
+
 add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
 target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)

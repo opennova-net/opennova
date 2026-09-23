@@ -1194,6 +1194,22 @@ void los_offset_point(const Entity &e, int32_t out[3]) {
     out[2] = static_cast<int32_t>(uint32_t(to_fixed(e.position.z)) + uint32_t(to_fixed(e.bbox_center.z)));
 }
 
+// The script LOS pair's ray. An authored range of at most 20 u takes the
+// entity-aware walker over the first entity's proximity slice with every type
+// admitted (flagged items and non-buildings block); a longer one takes the
+// terrain-and-sectors query the AI LOS ports. Without a collision world the
+// AI LOS's terrain leg alone stands in. [orig: Entity_CheckLineOfSightInRange
+// `cmp ecx,140000h; jg` @0x4F1769..0x4F1773 -> `push 1` (allTypes) @0x4F1775,
+// Entity_CheckLineOfSightTerrainAndEntities @0x4F1785 /
+// Physics_RaycastTerrainAndSectors @0x4F17A7; Entity_CheckLineOfSight
+// @0x4F1919..0x4F1953]
+bool script_los_clear(World &world, const int32_t pa[3], const int32_t pb[3],
+                      EntityHandle a, EntityHandle b, int32_t distance_q16) {
+    if (distance_q16 <= 0x140000 && world.collision != nullptr)
+        return world.collision->entity_los_clear(world, a, b, pa, pb, 0, /*all_types=*/true);
+    return world.ai.line_of_sight_clear(world, pa, pb, a, b);
+}
+
 } // namespace
 
 bool EntityCommands::ssn_leads_target(EntityTarget first, EntityTarget second,
@@ -1213,8 +1229,7 @@ bool EntityCommands::ssn_los_clear_within(EntityTarget ssn, EntityTarget target_
     // [orig: Entity_CheckLineOfSightInRange @0x4f15e0 — center distance gate,
     // then a radius-0 ray between the +0x1FC bbox-center offset points;
     // <= 20 u uses the entity-aware walker @0x53b130, above it
-    // terrain/sectors @0x539910. Our port rays through the one modeled LOS
-    // seam (that walker split stays a tracked stand-in, §3b).]
+    // terrain/sectors @0x539910 (script_los_clear).]
     const Entity *a = nullptr;
     const Entity *b = nullptr;
     int32_t dist = 0;
@@ -1227,8 +1242,8 @@ bool EntityCommands::ssn_los_clear_within(EntityTarget ssn, EntityTarget target_
     los_offset_point(*b, pb);
     const CollisionWorld::RayDebugScope ray_scope(
             world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-    return world_.ai.line_of_sight_clear(world_, pa, pb,
-                                          resolve_target(ssn), resolve_target(target_ssn));
+    return script_los_clear(world_, pa, pb, resolve_target(ssn), resolve_target(target_ssn),
+                            distance_q16);
 }
 
 bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
@@ -1252,8 +1267,8 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     const double fdy = static_cast<int32_t>(uint32_t(pb[1]) - uint32_t(pa[1]));
     const CollisionWorld::RayDebugScope ray_scope(
             world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-    if (!world_.ai.line_of_sight_clear(world_, pa, pb, resolve_target(ssn),
-                                        resolve_target(target_ssn)))
+    if (!script_los_clear(world_, pa, pb, resolve_target(ssn), resolve_target(target_ssn),
+                          distance_q16))
         return false;
     // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
     // -(2^31/pi); the sign folds out under the cdq-abs below, but the
