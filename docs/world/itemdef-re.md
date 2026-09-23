@@ -202,7 +202,7 @@ WAC entity handlers, the script trigger, proximity and line-of-sight predicates
 and the teleport walks (world-wac-ai-re §32), which had tested the type id as a
 stand-in. The two differ only for an entity whose type id has no row. The boat
 and aircraft avoid brakes compare the ordinal against 1
-([vehicle record](vehicle-client-movers-re.md) section 12, step 8).
+([vehicle record](vehicle-client-movers-re.md) §1.12, step 8, and §1.13).
 
 ## Enums (witnessed in `ItemDef_ParseProperty`)
 
