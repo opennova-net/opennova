@@ -920,20 +920,21 @@ PromoteResult promote_mission(const bms::File &m, World &world,
 	// only the order (slot+148/+152 via init_ai_slot).
 	// [orig: Entity_SpawnFromBMSRecord @0x40e9f0 stores the order; the walk/attach
 	//  is Entity_UpdateInfantryAI @0x4b9910]
-	// A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
-	// userpoints = a drivable vehicle) — the stand-in for the def AIData attrib gate
-	// when no model/profile metadata is supplied by the embedder. A pure-gunner
-	// emplacement remains brainless itself; its attached organic owns and pumps the
-	// parent's embedded weapon slot. [orig: every AIData item gets the 812-byte component
-	// at spawn; Entity_SpawnFromBMSRecord @0x40e9f0; UseGun swap @0x546c42]
-	auto item_is_drivable = [&](int32_t type_id) {
-        for (const ItemSeatSpec &spec : opts.item_seat_specs) {
-            if (spec.type_id != type_id) continue;
-            for (const Seat &s : spec.seats) {
-                if (is_vehicle_control_seat(s.type)) return true;
-            }
-        }
-        return false;
+	// A placed item gets the 812-byte vehicle brain exactly when its def carries the
+	// AI-class attrib (0x100000: the spawn allocates the AI slot) AND its items.def
+	// ai_function row is one of the five brain classes, whose class init allocates
+	// the brain (CHel/cpln -> Entity_InitHelicopterAIFromDef, cveh/cbot/ctrn ->
+	// Entity_InitVehicleAIFromDef, each through Entity_InitVehicleAI @0x460200).
+	// A pure-gunner emplacement stays brainless; its attached organic owns and pumps
+	// the parent's embedded weapon slot.
+	// [orig: Entity_SpawnFromBMSRecord `test [eax+54h],100000h` @0x40ED4E ->
+	//  Entity_AllocateAISlot @0x40ED5C; Entity_InitAllFromModels pool-1 class init
+	//  @0x40E5B8..0x40E5D8; the class inits' slot gates @0x46848E / @0x46878D;
+	//  UseGun swap @0x546c42]
+	auto item_has_brain = [&](int32_t type_id) {
+        if (!opts.ai_profile_defaults || !opts.item_attributes) return false;
+        return opts.ai_profile_defaults(type_id).known &&
+               (opts.item_attributes(type_id) & kItemAttribAIData) != 0;
     };
     std::vector<EntityHandle> promoted_item_handles;
     // dword_A77638, zeroed by the mission reset every load runs [orig: the
@@ -1012,7 +1013,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             }
             const bool ai_capable =
                     ai_capable_default ||
-                    (kind == EntityKind::Item && item_is_drivable(e.type_id));
+                    (kind == EntityKind::Item && item_has_brain(e.type_id));
             // The AI branch of the spawn: a def carrying the AI-class attrib gets
             // the attribute fold's entity bits whether or not a brain follows.
             // [orig: Entity_SpawnFromBMSRecord `test [eax+54h],100000h` @0x40ED4E]

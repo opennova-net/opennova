@@ -33,6 +33,29 @@ static void stamp_fixture_carrier_defs(World &world) {
 	});
 }
 
+// The two embedder answers a placed item needs for a vehicle brain: a brain-class
+// ai_function row (CHel/cpln or cveh/cbot/ctrn) and the AI-class def attrib
+// 0x100000 [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the class inits
+// Entity_InitHelicopterAIFromDef @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0].
+static void brain_class_items(mission::PromoteOptions &options, std::vector<int32_t> types,
+                              bool helicopter = false) {
+    options.ai_profile_defaults = [types, helicopter](int32_t type) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        for (int32_t t : types) {
+            if (t == type) {
+                d.known = true;
+                d.helicopter_init = helicopter;
+            }
+        }
+        return d;
+    };
+    options.item_attributes = [types](int32_t type) {
+        for (int32_t t : types)
+            if (t == type) return kItemAttribAIData;
+        return 0u;
+    };
+}
+
 static bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id,
                            int32_t wp_num) {
     bms::Entity e{};
@@ -463,6 +486,9 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
         }
         return d;
     };
+    // Every row here is an AI-class def (attrib 0x100000); the crate row has no
+    // brain class, so it still takes no brain.
+    opts.item_attributes = [](int32_t) { return kItemAttribAIData; };
     const auto entity = [](int32_t type_id, const char *name2) {
         bms::Entity e{};
         e.type = bms::ItemType::Item;
@@ -596,10 +622,12 @@ static void test_vehicle_records_seed_the_ai_slot() {
     ctrl.type = SeatType::Controller;
     spec.seats.push_back(ctrl);
     opts.item_seat_specs.push_back(spec);
+    brain_class_items(opts, {kTruckType});
     World world;
     world.ai.is_authority = true;
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
+    if (world.ai.at(0) == nullptr) std::exit(1);
     const AiEntity &ai = *world.ai.at(0);
     CHECK(ai.slot.f[18] == 62 * 3);
     CHECK(ai.slot.f[35] == 1 && ai.slot.f[37] == 4 && ai.slot.f[38] == 2);
@@ -845,7 +873,41 @@ static void test_bms_ai_attribute_fold() {
         std::exit(1);
 }
 
+// A placed item takes a vehicle brain exactly when its def carries the AI-class
+// attrib AND its ai_function row is a brain class; authoring a control seat is
+// not the test. [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the pool-1 class init
+// Entity_InitAllFromModels @0x40E5B8..0x40E5D8]
+static void test_item_brain_follows_class_and_attrib() {
+    int failures = 0;
+    bms::File m{};
+    m.items.push_back(item(1237, 0, 0, 0));        // cveh row + attrib: a brain, no seats
+    m.items.push_back(item(1300, 20 << 16, 0, 0)); // a control seat, no brain row
+    m.items.push_back(item(1301, 40 << 16, 0, 0)); // a brain row without the attrib
+    mission::PromoteOptions opts;
+    mission::ItemSeatSpec spec;
+    spec.type_id = 1300;
+    Seat ctrl;
+    ctrl.type = SeatType::Controller;
+    spec.seats.push_back(ctrl);
+    opts.item_seat_specs.push_back(spec);
+    opts.ai_profile_defaults = [](int32_t type) {
+        mission::PromoteOptions::AiProfileDefaults d;
+        d.known = type == 1237 || type == 1301;
+        return d;
+    };
+    opts.item_attributes = [](int32_t type) { return type == 1237 ? kItemAttribAIData : 0u; };
+    World world;
+    const mission::PromoteResult r = mission::promote_mission(m, world, opts);
+    CHECK(r.brains == 1);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 0)) != nullptr);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 1)) == nullptr);
+    CHECK(world.ai.for_handle(EntityHandle::make(1, 2)) == nullptr);
+    if (failures)
+        std::exit(1);
+}
+
 int main() {
+    test_item_brain_follows_class_and_attrib();
     test_bms_ai_attribute_fold();
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
