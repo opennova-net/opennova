@@ -1,10 +1,15 @@
 // The SM target feed and its engage bookkeeping against the retail witnesses:
-// the class walk's candidate facts [orig: AI_FindBestTargetB @0x466F60] and
-// the state-16 engage [orig: AI_HandleEvent_HelicopterCombatD @0x467730].
+// the class walk's candidate facts [orig: AI_FindBestTargetB @0x466F60], the
+// state-16 engage [orig: AI_HandleEvent_HelicopterCombatD @0x467730] and the
+// fired mark every spawned round leaves on its shooter [orig:
+// RoundData_SpawnRound @0x4EC0D0].
 #include <cstdio>
 #include <memory>
 
+#include <formats/def/def.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -97,8 +102,63 @@ static void test_engage_jitter_keys_on_the_target_brain() {
     }
 }
 
+// R2-10: every non-silenced round a shooter spawns marks it with Flags
+// 0x4000, the SM scan's x6 priority weight, players included; a SILENCED
+// (ammo flag 8) round leaves no mark, and the AI fire path rides the same
+// spawn. [orig: RoundData_SpawnRound `test byte ptr [edi],8; jnz; or dword
+//  ptr [ebp+24h],4000h` @0x4EC842..0x4EC847; the shotgun fan
+//  Weapon_SpawnProjectileBurstWithSpread @0x4EBE61..0x4EBE66]
+static void test_rounds_mark_their_shooter() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    w.tables.ammo.entries.resize(4);
+    for (int i = 1; i <= 3; ++i) {
+        w.tables.ammo.entries[i].valid = true;
+        w.tables.ammo.entries[i].velocity = 620;
+        w.tables.ammo.entries[i].max_age_ticks = 100;
+    }
+    w.tables.ammo.entries[2].flags = opennova::def::DEF_AMMO_FLAG_SILENCED;
+    w.tables.ammo.entries[3].flags = kAmmoFlagShotgun;
+    w.tables.ammo.entries[3].spread_count = 4;
+    Entity player{};
+    player.alive = true;
+    player.health = 100;
+    player.engine_flags = kEntityFlagPlayer;
+    const EntityHandle h = w.registry.spawn(0, player);
+    const auto marked_after = [&](int ammo) {
+        Entity &p = *w.registry.get(h);
+        p.flags &= ~kEntityFlagPriorityTarget;
+        p.engine_flags &= ~kEntityFlagPriorityTarget;
+        RoundSpawnParams rp;
+        rp.owner = h;
+        rp.shooter_handle = h.packed;
+        rp.origin = Vec3{0.0f, 0.0f, 1.0f};
+        rp.ammo_index = ammo;
+        CHECK(w.round_sim.spawn(w, rp) >= 0);
+        return (w.registry.get(h)->engine_flags & kEntityFlagPriorityTarget) != 0;
+    };
+    CHECK(marked_after(1));  // a ballistic round
+    CHECK(!marked_after(2)); // a silenced round
+    CHECK(marked_after(3));  // the shotgun fan
+
+    // The SM fire path: a silenced block leaves its gun unmarked.
+    Entity gun{};
+    gun.alive = true;
+    gun.health = 100;
+    const EntityHandle gun_h = w.registry.spawn(1, gun);
+    AiEntity &sm = *w.ai.at(w.ai.attach(gun_h));
+    const int32_t origin[3] = {0, 0, 1 << 16};
+    CHECK(w.ai.fire_ai_round(w, sm, origin, 0, 0, 2));
+    CHECK((w.registry.get(gun_h)->engine_flags & kEntityFlagPriorityTarget) == 0);
+    CHECK(w.ai.fire_ai_round(w, sm, origin, 0, 0, 1));
+    CHECK((w.registry.get(gun_h)->engine_flags & kEntityFlagPriorityTarget) != 0);
+}
+
 int main() {
     test_engage_jitter_keys_on_the_target_brain();
+    test_rounds_mark_their_shooter();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

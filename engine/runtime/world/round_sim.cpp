@@ -5,6 +5,8 @@
 
 #include <runtime/world/fire_sound.h>
 
+#include <formats/def/def.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -747,6 +749,15 @@ RoundSourceState resolve_round_source(World &world,
     return source;
 }
 
+// A spawned round that is not SILENCED (ammo flag 8) marks its shooter with
+// Flags 0x4000, the SM scan's x6 priority weight until a perception scan
+// clears it; both Flags views carry the bit.
+void mark_round_shooter(Entity *shooter, const AmmoTableEntry &ammo) {
+    if (shooter == nullptr || (ammo.flags & def::DEF_AMMO_FLAG_SILENCED) != 0) return;
+    shooter->flags |= kEntityFlagPriorityTarget;
+    shooter->engine_flags |= kEntityFlagPriorityTarget;
+}
+
 void apply_round_recoil(const AmmoTableEntry &ammo,
                         const RoundSourceState &source) {
     if (!source.person_with_item_def || source.recoil_pitch == nullptr) return;
@@ -1158,6 +1169,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
     record_round_fire(world, *this, params);
     ++active_count;
+    // The shooter's fired mark precedes the recoil in the spawn tail [orig:
+    // RoundData_SpawnRound `test byte ptr [edi],8; jnz; or dword ptr
+    // [ebp+24h],4000h` @0x4EC842..0x4EC847].
+    mark_round_shooter(owner_ent, *ammo);
     // Same-shot ERROR used the old accumulator above. Recoil becomes visible
     // immediately but affects only later shots.
     // [orig: RoundData_SpawnRound @0x4EC8A3]
@@ -1238,6 +1253,11 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         if (first_slot < 0) first_slot = slot;
         ++active_count;
     }
+    // The shotgun fan marks its shooter after the pellets; the claymore fan
+    // does not [orig: Weapon_SpawnProjectileBurstWithSpread `test byte ptr
+    // [edi],8; jnz; or dword ptr [ebp+24h],4000h` @0x4EBE61..0x4EBE66;
+    // Weapon_SpawnProjectileBurst @0x4EB900 has no such write].
+    if (shotgun_spread) mark_round_shooter(owner_ent, ammo);
     return first_slot;
 }
 
