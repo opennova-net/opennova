@@ -290,10 +290,12 @@ static void test_wac_wave_emits_dialog_wav() {
     CHECK(carried_filename);
 }
 
-// Mission text and the on-screen debug console are separate retail channels:
-// text/text# (and their peer-broadcast ptext twin) feed the player message
-// presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
-// must remain distinguishable for embedders that deliberately do not present them.
+// Mission text and the console are separate retail rings: text/text# (and
+// their peer-broadcast ptext twin) feed the player chat ring, while
+// consol/consol# and pconsol feed Chat_AddDebugMessage's system ring. The #
+// forms carry the handler's finished "%s %i" line, not a separate number.
+// [orig: Chat_AddFormattedIntMessage @0x4EDB70 (the sprintf call @0x4EDB9E);
+//  WacCmd_ConsolNumber @0x4EDC00 (the sprintf call @0x4EDC2E)]
 static void test_wac_text_and_console_use_distinct_effect_channels() {
     BehaviorWorld w;
     WacSystem sys;
@@ -322,10 +324,10 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     for (const Effect &e : w.out.effects.entries()) {
         saw_local_text |= e.kind == "text" && e.str == "LOCAL_TEXT" && e.a == 0;
         saw_peer_text |= e.kind == "text" && e.str == "PEER_TEXT" && e.a == 0;
-        saw_numbered_text |= e.kind == "text" && e.str == "NUMBERED_TEXT" && e.a == 7;
+        saw_numbered_text |= e.kind == "text" && e.str == "NUMBERED_TEXT 7" && e.a == 0;
         saw_local_debug |= e.kind == "debug_text" && e.str == "LOCAL_DEBUG" && e.a == 0;
         saw_peer_debug |= e.kind == "debug_text" && e.str == "PEER_DEBUG" && e.a == 0;
-        saw_numbered_debug |= e.kind == "debug_text" && e.str == "NUMBERED_DEBUG" && e.a == 9;
+        saw_numbered_debug |= e.kind == "debug_text" && e.str == "NUMBERED_DEBUG 9" && e.a == 0;
     }
     CHECK(saw_local_text);
     CHECK(saw_peer_text);
@@ -333,6 +335,29 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     CHECK(saw_local_debug);
     CHECK(saw_peer_debug);
     CHECK(saw_numbered_debug);
+}
+
+// forceanim posts its notice ("force anim OFF" / "force anim_<name>") into the
+// system ring with the console lines, not the chat ring, and returns 0.
+// [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddDebugMessage call
+//  @0x4F266A), return 0 @0x4F2682]
+static void test_forceanim_notice_rides_the_system_ring() {
+    BehaviorWorld w;
+    WacSystem sys;
+    CompileEnv env;
+    Program p = compile_source("if never then set(v1,7) forceanim(0) store(v1) endif\n", env);
+    CHECK(p.ok());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.out.effects.count("text") == 0);
+    CHECK(w.out.effects.count("debug_text") == 1);
+    bool saw_notice = false;
+    for (const Effect &e : w.out.effects.entries())
+        saw_notice |= e.kind == "debug_text" && e.str == "force anim OFF";
+    CHECK(saw_notice);
 }
 
 static void test_authority_gate() {
@@ -2030,6 +2055,7 @@ int main() {
     test_flash_arms_the_weather_home();
     test_wac_wave_emits_dialog_wav();
     test_wac_text_and_console_use_distinct_effect_channels();
+    test_forceanim_notice_rides_the_system_ring();
     test_authority_gate();
     test_lose_ends_round_with_banner_key();
     test_lose_other_team_noop();

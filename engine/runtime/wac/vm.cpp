@@ -475,12 +475,14 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "ssnturn")) return cmds.set_ssn_turn(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "tele")) return cmds.teleport_local_to_ssn(H(0)) ? 1 : 0;
     if (ieq(n, "forceanim")) {
-        // [orig: Script_ForceAnimation @0x4F2610]
+        // The notice rides the system ring, not the chat ring.
+        // [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddDebugMessage
+        //  call @0x4F266A), return 0 @0x4F2682]
         w.script.forced_animation = A(0);
         const std::string key = world::infantry_anim_key(A(0));
         const std::string message = A(0) == 0 ? "force anim OFF" :
                 "force " + (key.empty() ? std::to_string(A(0)) : key);
-        w.out.effects.push({"text", 0, 0, 0, 0, message});
+        w.out.effects.push({"debug_text", 0, 0, 0, 0, message});
         return 0;
     }
     if (ieq(n, "dropflare")) {

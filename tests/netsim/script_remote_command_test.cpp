@@ -108,7 +108,9 @@ void test_host_records_reach_joiner_handlers() {
 	// The host printed only its own loop visit and the broadcast line; the
 	// targeted pwave never played here.
 	CHECK(host.text_count("HELLO") == 1);
-	CHECK(host.text_count("NUMBERED", 7) == 1);
+	// text# formats "%s %i" in the handler on every peer [orig:
+	// Chat_AddFormattedIntMessage @0x4EDB70 (the sprintf call @0x4EDB9E)].
+	CHECK(host.text_count("NUMBERED 7") == 1);
 	CHECK(host.kind_count("dialog_wav") == 0);
 	const std::vector<world::ScriptRemoteCommand> &queue = host.world.out.script_remote_commands;
 	CHECK(queue.size() == 4);
@@ -133,7 +135,7 @@ void test_host_records_reach_joiner_handlers() {
 		apply_on_joiner(joiner.world, command);
 	}
 	CHECK(joiner.text_count("HELLO") == 1);
-	CHECK(joiner.text_count("NUMBERED", 7) == 1);
+	CHECK(joiner.text_count("NUMBERED 7") == 1);
 	CHECK(joiner.kind_count("dialog_wav") == 1);
 	// The wire index is the shared handler's first row: text/wave, not
 	// ptext/pwave. [orig: @0x4f5cb5..0x4f5cce]
@@ -161,7 +163,7 @@ void test_short_body_zero_fill_and_authority_gate() {
 		CHECK(delivered[0].args.size() == 2 && delivered[0].args[0].text == "hi" &&
 				delivered[0].args[1].value == 0);
 		apply_on_joiner(joiner.world, delivered[0]);
-		CHECK(joiner.text_count("hi", 0) == 1);
+		CHECK(joiner.text_count("hi 0") == 1);
 	}
 
 	replication::ClientReplicaPipeline authority;

@@ -765,11 +765,13 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
-# {kind, a..d, str}: WAC text/ptext carries a literal in `str`, while BMS
-# OutputText carries a nonzero Triggered-Text id in `a`. consol/pconsol uses the
-# distinct `debug_text` kind and remains off the player-facing feed. Queue both
-# forms because PreMission effects can arrive before the lazy HUD and its mission
-# table exist. Public with hud_objective_line() as the ADR 0018 read seam.
+# {kind, a..d, str}: WAC text/ptext/text# carries a literal in `str`, while BMS
+# OutputText carries a nonzero Triggered-Text id in `a`. consol/pconsol/consol#
+# and forceanim use the `debug_text` kind: the engine's system ring, the one the
+# Triggered Text lines share (hud_game_text.h; D-HUD-6), without touching the
+# objective line. Queue every form because PreMission effects can arrive before
+# the lazy HUD and its mission table exist. Public with hud_objective_line() as
+# the ADR 0018 read seam.
 func apply_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
@@ -788,6 +790,10 @@ func apply_mission_effects(effects: Array) -> void:
 				var text_id := e.a
 				if text_id != 0:
 					_queue_hud_message("", text_id)
+		elif kind == "debug_text":
+			var line := e.text
+			if not line.is_empty():
+				_queue_hud_message(line, 0)
 		elif kind == "lose":
 			# The WAC Lose banner trio [orig: WacAction_Lose @0x4ed3f0 ->
 			# GameMsg_AddChatLineAndRelay @0x5ba170 (the chat-feed line; the KEY rides

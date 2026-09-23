@@ -413,17 +413,19 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 
 
 func test_console_debug_text_does_not_reach_hud_objective() -> void:
-	# consol/pconsol ride the distinct debug_text channel. The game does not yet
-	# present an on-screen debug console, so these effects remain intentionally
-	# unrouted instead of replacing player-facing mission text.
+	# consol/pconsol/consol# ride the debug_text kind into the system message
+	# ring (the Triggered Text ring) without replacing the objective line.
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		MissionEffect.make("text", 0, 0, 0, "Hold this position"),
 		MissionEffect.make("debug_text", 0, 0, 0, "trigger 17 entered"),
+		MissionEffect.make("debug_text"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Hold this position",
-		"debug_text stays off the player-facing HUD mission-text channel")
+		"debug_text stays off the objective line")
+	assert_eq(presenter.pending_hud_message_count(), 2,
+		"the text line and the non-empty debug_text line queue for the rings")
 
 
 func test_lose_effect_sets_endround_banner_and_message() -> void:
