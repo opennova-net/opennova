@@ -534,6 +534,11 @@ bool run_0a_subblock_phase_cycle() {
 	// The phase-0 writer truncates the seconds dword to its low wire byte.
 	// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
 	world.preround_delay_seconds = 0x123u;
+	// A script's breathtime above 0xFF crosses the phase-1 byte as 0xFF, and
+	// a negative fallmps crosses as its low byte (the compares are signed).
+	// [orig: NetPacket_WritePlayerState @0x4FF9DB..0x4FFA0A, @0x4FFA14..0x4FFA48]
+	world.script.wac_values.breathtime = 0x123;
+	world.script.wac_values.fallmps = -3;
 
 	// One full low-nibble cycle. Retail pre-increments, so the first flags2 is 1.
 	for (int i = 1; i <= 16; ++i) {
@@ -547,8 +552,10 @@ bool run_0a_subblock_phase_cycle() {
 		if (!expect(fu.flags2 == static_cast<uint8_t>(i), "flags2 free-runs from 1 through 16"))
 			return false;
 		if ((i & 3u) == 1) {
-			if (!expect(fu.timer.present && fu.timer.state1 == 13,
-			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
+			if (!expect(fu.timer.present && fu.timer.state1 == 0xFD,
+			            "phase 1 carries the live fallmps as its low byte")) return false;
+			if (!expect(fu.timer.state0 == 0xFF,
+			            "phase 1 carries the live breathtime, capped at 0xFF")) return false;
 			// A running pre-round countdown gates the clock to -1
 			// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca].
 			if (!expect(fu.timer.timer_seconds == -1,
@@ -557,6 +564,10 @@ bool run_0a_subblock_phase_cycle() {
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == -1,
 			            "client fold keeps the untimed -1")) return false;
+			// The joiner stores both bytes zero-extended.
+			// [orig: NapiNPClientMsg_0x00A @0x4301A1 / @0x4301BC]
+			if (!expect(fold.state().breathtime == 0xFF && fold.state().fallmps == 0xFD,
+			            "client fold mirrors the breathtime and fallmps bytes")) return false;
 		} else if ((i & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
 			if (!expect(fu.weapon.preround_timer == 0x23,

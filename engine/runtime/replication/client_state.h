@@ -788,6 +788,14 @@ struct ClientState {
 	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
 	//  @0x524A89]
 	std::int32_t round_time_remaining_ticks = -1;
+	// The authority's breath seconds and fall-damage tolerance, the two WAC
+	// named values the same sub-block-1 timer state carries, zero-extended
+	// from their wire bytes; until the first one lands they hold the
+	// WacScript_FreeAll seeds 20 / 13.
+	// [orig: NapiNPClientMsg_0x00A `mov dword_C6EAE0,edx` @0x4301A1, `mov
+	//  dword_C6EAE4,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
+	std::int32_t breathtime = 20;
+	std::int32_t fallmps = 13;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
 	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
 	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f

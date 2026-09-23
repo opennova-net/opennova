@@ -191,10 +191,11 @@ struct Connection {
 	bool medic_request_active = false;
 
 	// Number of 32-host-tick samples for which the player's eye
-	// (Position.Z + CameraOffset.Z) has remained strictly below the authored
-	// water plane. Sample 81 (4 * the fixed retail breath value 20 + 1) kills
-	// the player; GameEvent_PlayerDeath reads the still-live value to select
-	// drowned event 26. Dry/dead samples clear it.
+	// (Position.Z + CameraOffset.Z) has remained strictly below the water
+	// plane. The first sample past 4 * breathtime (the WAC named value; sample
+	// 81 at its default 20) kills the player; GameEvent_PlayerDeath reads the
+	// still-live value to select drowned event 26. A surfaced or dead-flagged
+	// sample clears it.
 	// [orig: playerSlot+460 in Server_UpdateEntityIdleTimers @0x50D770;
 	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
 	uint32_t underwater_breath_samples = 0;

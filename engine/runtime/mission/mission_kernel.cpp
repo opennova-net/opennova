@@ -321,16 +321,19 @@ void MissionKernel::register_mission_systems() {
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
 	// The mission systems register in the faithful within-tick order, then
-	// load (each system's on_load). Order: WAC -> BMS -> AI.
+	// load (each system's on_load). Order: WAC -> the every-32 idle legs ->
+	// BMS -> AI.
 	// [orig: Game_ProcessMainFrame @0x5266b6 (the Server_TickUpdate call, whose
 	//  Server_TickUpdate @0x51d8bf WacScript_AdvanceTick call runs the WAC
-	//  executor first and @0x51d8f4 the BMS event quarter pass) precedes
+	//  executor first, @0x51d8d2/@0x51d8d7 the every-32 spawn-marker and
+	//  idle-timer calls next and @0x51d8f4 the BMS event quarter pass) precedes
 	//  Game_ProcessMainFrame @0x52674b (the Entity_UpdateAllEntities call, the
 	//  AI/motor pass).] AI registers last so it consumes the
 	// entity state the scripts mutate this tick; each system carries its own
-	// cadence gate (WAC every 62nd tick, BMS quarters every 16th), so the
-	// registration order only fixes the within-tick sequence.
+	// cadence gate (WAC every 62nd tick, the idle legs every 32nd, BMS quarters
+	// every 16th), so the registration order only fixes the within-tick sequence.
 	world.add_system(&wac);
+	world.add_system(&world.server_idle_legs);
 	world.add_system(&events);
 	world.add_system(&world.ai);
 	world.load_systems();

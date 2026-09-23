@@ -200,8 +200,9 @@ struct WacNamedValues {
     // GameMode_CreateDefaultDefs @0x4f9061 / Game_TeardownMission @0x5226f0]; the
     // authority writes it into the 0x0A sub-block-1 timer state
     // (NetPacket_WritePlayerState @0x4ffa14, connection_fan.cpp state1) and a joiner
-    // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc) for its local
-    // red-flash only, since the landing damage itself is authority-gated. Damage when
+    // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc, the replica's
+    // ClientReplicaState::fallmps); retail's joiner reads it only for its local
+    // landing red flash, since the landing damage itself is authority-gated. Damage when
     // landing with vel_z <= -1057*fallmps: health -= excess>>4 [orig: @0x4bf839 /
     // @0x4b7d13]. There is no zero test: 0 damages EVERY landing by
     // (-vel_z)>>4 (a WAC can write it; no shipped script does).
@@ -211,11 +212,12 @@ struct WacNamedValues {
 	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
-	// Two more rows of the named-value table @0x82EEF0 whose consumers are not
-	// yet ported: breathtime (read by HUD_DrawBreathBar @0x59d70f,
-	// Server_UpdateEntityIdleTimers @0x50d7e6, GameEvent_PlayerDeath @0x5172f6,
-	// the 0x0A player-state wire @0x4ff9db/@0x4301a1) and autogain (read by
-	// Environment_ApplyFogAndAmbient @0x57e514). Both seeded by
+	// Two more rows of the named-value table @0x82EEF0. breathtime: the host's
+	// drown limit is four samples per second of it (Server_UpdateEntityIdleTimers
+	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
+	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
+	// @0x59d70f reads it (that bar is not ported). autogain's one consumer,
+	// Environment_ApplyFogAndAmbient @0x57e514, is not ported. Both seeded by
 	// WacScript_FreeAll [orig: @0x4f6381 = 20; @0x4f6371 = 1].
 	int32_t breathtime = 20;
 	int32_t autogain = 1;
@@ -656,6 +658,29 @@ struct WorldOutbox {
     FireSoundQueue fire_sounds;
 };
 
+// The player-slot idle timers (the underwater breath samples) live on the host
+// session's player slots, so the host session installs this seam for its tick;
+// a world without a server session has no idle timers to run.
+// [orig: Server_UpdateEntityIdleTimers @0x50D770]
+class IEntityIdleTimers {
+public:
+    virtual ~IEntityIdleTimers() = default;
+    virtual void update_entity_idle_timers(World &world) = 0;
+};
+
+// Server_TickUpdate's every-32 legs, inside the one script admission, between
+// the WAC tick and the BMS quarter pass: the vehicle spawn markers, then the
+// player idle timers. The kernel registers it between the two script systems.
+// [orig: Server_TickUpdate — WacScript_AdvanceTick call @0x51D8BF, then
+//  `test tick,1Fh` @0x51D8C4, assign_overlay_spawn_points call @0x51D8D2,
+//  Server_UpdateEntityIdleTimers call @0x51D8D7, then the quarter counter
+//  @0x51D8DC]
+class ServerIdleLegs final : public ISystem {
+public:
+    const char *name() const override { return "server_idle_legs"; }
+    void tick(World &world, const TickContext &ctx) override;
+};
+
 class World {
 public:
     World();
@@ -683,9 +708,14 @@ public:
     EntityCommands commands;
     // The AI/motor system: every brain plus the infantry and vehicle motors.
     // Owned here so the command layer, the sims, the wire and the tools reach
-    // brains without a seam; the kernel registers it as the third ISystem
-    // (WAC -> BMS -> AI) and wires its collision/terrain/root-motion links.
+    // brains without a seam; the kernel registers it after the script systems
+    // (WAC -> idle legs -> BMS -> AI) and wires its collision/terrain/root-motion
+    // links.
     AiSystem ai;
+    // The server tick's every-32 legs (ServerIdleLegs above), registered by the
+    // kernel between WAC and BMS; the host session installs the idle timers.
+    ServerIdleLegs server_idle_legs;
+    IEntityIdleTimers *entity_idle_timers = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;

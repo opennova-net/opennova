@@ -24,6 +24,7 @@
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_idle_timers.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 
@@ -289,6 +290,9 @@ bool run_death_feed_classifier_matrix() {
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
 	world.rules.mp_session = true;
+	// The breath samples ride the World's every-32 idle legs, registered the
+	// way the mission kernel does (between WAC and BMS).
+	world.add_system(&world.server_idle_legs);
 
 	w::Entity attacker_seed;
 	attacker_seed.kind = w::EntityKind::Organic;
@@ -516,6 +520,10 @@ bool run_death_feed_classifier_matrix() {
 	submerged->position.z = 0.0f;
 	submerged->eye_offset_z = 0;
 	roster[1].link.underwater_breath_samples = 80;
+	// An earlier hit's kill credit: the drowning clears it, so the death
+	// reports no killer. [orig: Server_UpdateEntityIdleTimers `mov
+	// [ecx+178h],ebx` @0x50D800]
+	submerged->last_attacker = attacker;
 	inmatch::Server_TickUpdate(ctx);
 	{
 		const Drained host_out = drain_all(host);
@@ -525,7 +533,75 @@ bool run_death_feed_classifier_matrix() {
 		                    submerged->health <= 0 && submerged->death_anim_state == 175,
 		            "the 32-tick authority breath sample produces a drowned player death"))
 			return false;
+		if (!expect(!submerged->last_attacker.valid(),
+		            "the drowning clears the attacker slot"))
+			return false;
 	}
+
+	// The timer pass holds itself while a pre-round countdown runs.
+	// [orig: Server_UpdateEntityIdleTimers `cmp g_preround_delay_timer,ebx`
+	//  @0x50D773]
+	reset();
+	world.env.water_z = 1 << 16;
+	submerged = world.registry.get(victim);
+	submerged->position.z = 0.0f;
+	submerged->eye_offset_z = 0;
+	roster[1].link.underwater_breath_samples = 5;
+	world.preround_delay_seconds = 3;
+	inmatch::Server_UpdateEntityIdleTimers(ctx, world);
+	if (!expect(roster[1].link.underwater_breath_samples == 5,
+	            "a running pre-round countdown holds the breath sample"))
+		return false;
+	world.preround_delay_seconds = 0;
+	inmatch::Server_UpdateEntityIdleTimers(ctx, world);
+	if (!expect(roster[1].link.underwater_breath_samples == 6,
+	            "the sample counts once the countdown ends"))
+		return false;
+
+	// The limit is 4 * breathtime, the live named value: a script's
+	// set(breathtime,4) drowns at the 17th sample, and the classifier's
+	// event-26 test reads the same value.
+	// [orig: Server_UpdateEntityIdleTimers @0x50D7E6..0x50D7FB;
+	//  GameEvent_PlayerDeath @0x5172F6..0x51730A]
+	reset();
+	world.logic_tick = 64;
+	world.env.water_z = 1 << 16;
+	world.script.wac_values.breathtime = 4;
+	submerged = world.registry.get(victim);
+	submerged->position.z = 0.0f;
+	submerged->eye_offset_z = 0;
+	roster[1].link.underwater_breath_samples = 16;
+	inmatch::Server_TickUpdate(ctx);
+	{
+		const Drained host_out = drain_all(host);
+		drain_all(victim_wire);
+		const auto feed = host_out.tag(0x1E);
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
+		                    submerged->health <= 0,
+		            "breathtime 4 drowns at sample 17"))
+			return false;
+	}
+	world.script.wac_values.breathtime = 20;
+
+	// The sample shares the WAC tick's admission, so the SP lose epilog holds
+	// it like the script. [orig: Server_TickUpdate — the epilog test
+	// @0x51D8B7..0x51D8BD precedes the Server_UpdateEntityIdleTimers call
+	// @0x51D8D7]
+	reset();
+	world.rules.mp_session = false;
+	if (!expect(world.match.finish(2, world), "the SP round ends lost")) return false;
+	world.round_end_tick = 0;
+	world.logic_tick = 96;
+	world.env.water_z = 1 << 16;
+	submerged = world.registry.get(victim);
+	submerged->position.z = 0.0f;
+	submerged->eye_offset_z = 0;
+	roster[1].link.underwater_breath_samples = 80;
+	if (!expect(world.epilog_screen_active(), "the lose epilog screen is up")) return false;
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(submerged->health > 0 && roster[1].link.underwater_breath_samples == 80,
+	            "the epilog screen holds the breath sample"))
+		return false;
 	return true;
 }
 

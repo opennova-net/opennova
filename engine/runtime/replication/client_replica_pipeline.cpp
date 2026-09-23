@@ -1791,6 +1791,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		return;
 	}
 	if (fu.timer.present) {
+		// The breath seconds and the fall-damage tolerance, zero-extended.
+		// [orig: NapiNPClientMsg_0x00A @0x430199..0x4301A1, @0x4301B9..0x4301BC]
+		state_.breathtime = fu.timer.state0;
+		state_.fallmps = fu.timer.state1;
 		// The round clock: 62 x the wire's whole seconds, negative = untimed
 		// -1. [orig: NapiNPClientMsg_0x00A @0x430219..0x430235 —
 		//  g_round_time_remaining]

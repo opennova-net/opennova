@@ -2639,6 +2639,70 @@ static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 	CHECK(w.destruction_rng.state == 0x20028091u);
 }
 
+// The spawn-marker pass is one of the server tick's every-32 legs: it runs
+// after the WAC tick under the same script admission, so an empty host with a
+// live WAC clock holds it, and only ticks on a 32 boundary run it.
+// [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
+//  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2]
+static void test_spawn_markers_ride_the_script_admission() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 4);
+	w.registry.configure_pool(3, 8);
+	w.add_system(&w.server_idle_legs);
+	Entity seed;
+	seed.has_item_def = true;
+	seed.item_type = 5;
+	seed.item_attrib = 0x60000;
+	seed.zone_control = 65536;
+	seed.zone_number = 1;
+	seed.team = 1;
+	seed.position = { 10, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed.zone_number = 2;
+	seed.team = 2;
+	seed.position = { 20, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 4;
+	seed.item_attrib2 = 4;
+	seed.vehicle_spawn_ids = { 100042 };
+	seed.zone_number = 1;
+	seed.position = { 10, 0, 3 };
+	(void)w.registry.spawn(3, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 1;
+	seed.item_id = 42;
+	seed.vehicle_spawn_team = 1;
+	seed.team = 1;
+	seed.bound_radius = 2;
+	seed.position = { 100, 100, 0 };
+	const auto vh = w.registry.spawn(1, seed);
+	Entity &v = *w.registry.get(vh);
+	w.vehicles.capture_spawn_pose(v);
+	w.vehicles.build_spawn_markers();
+	v.engine_flags = 6;
+	v.veh.stuck_ticks = 1;
+
+	// No human while the WAC clock is live: the leg is held.
+	w.cached.humans = 0;
+	w.cached.wac_ticks = 1;
+	w.logic_tick = 32;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 100 * 65536);
+	// A human admits it on the next 32 boundary, not in between.
+	w.cached.humans = 1;
+	w.logic_tick = 33;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 100 * 65536);
+	w.logic_tick = 64;
+	w.run_logic_tick(true, TickPhase::Gameplay);
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536 && v.veh.spawn_pose[2] == 3 * 65536);
+}
+
 // Captured AS zones select a category-compatible marker in team frontier order.
 // Occupied best markers defer instead of falling back to a lower priority marker.
 static void test_vehicle_spawn_marker_selection() {
@@ -3816,6 +3880,7 @@ int main() {
 	test_death_effect_banks_and_water_crossings();
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();
+	test_spawn_markers_ride_the_script_admission();
 	test_aircraft_death_lifecycle();
 	test_aircraft_death_spin_rates_roll_in_retail_order();
 	test_vehicle_death_kills_authored_children();

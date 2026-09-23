@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/end_round_protocol.h>
+#include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
 #include <runtime/inmatch/server_revive.h>           // the medic revive transaction
@@ -21,12 +22,10 @@
 #include <net/npwire/session_hello.h>
 #include <runtime/replication/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <runtime/audio/sound_profile.h>            // compose_entity_sound_set (the drowning composites)
 #include <runtime/world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
-#include <runtime/world/infantry.h>            // drown death animation selection
 #include <runtime/world/local_player.h>        // the listen host's live inventory (kit weight)
 #include <runtime/world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <runtime/world/spawn_select.h>         // sorted SpawnZoneList index for capture events
@@ -80,9 +79,6 @@ struct PlayerDeathFeed {
 	uint8_t aux = 0;
 };
 
-constexpr uint32_t kRetailBreathSeconds = 20;
-constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
-
 // Classify the one S2C 0x1E record before Match drops the victim's carried
 // objective. The original reads the LIVE entity+44 cause word (Entity::
 // cause_flags, latched at hit time — a second same-tick critical pellet
@@ -111,7 +107,8 @@ PlayerDeathFeed classify_player_death(
 		if (victim_entity != nullptr) victim_entity->cause_flags &= ~bit;
 	};
 	if (killer_entity == nullptr) {
-		if (underwater_breath_samples > kBreathSampleLimit) {
+		// [orig: `cmp [edi+1CCh],ecx; jle` @0x517302]
+		if (static_cast<int32_t>(underwater_breath_samples) > breath_sample_limit(world)) {
 			out.event_type = 26;
 		} else if ((cause & 0x200u) != 0u) {
 			out.event_type = 23;
@@ -180,106 +177,6 @@ PlayerDeathFeed classify_player_death(
 	out.victim = victim_index;
 	out.aux = pool0_index_byte(killer_entity->primary_occupant.packed);
 	return out;
-}
-
-// Retail samples breath every 32 authority ticks, not every frame. While an
-// active living player's eye is strictly below the authored water plane,
-// playerSlot+460 increments; sample 81 selects death_drown and runs the ordinary
-// no-killer death transaction. Dry or dead players clear the counter. The
-// breath global is initialized to 20 and has no other writer in the retail
-// image, so keep it a local invariant rather than another configuration seam.
-// [orig: Server_TickUpdate gate @0x51D8C4..0x51D8D7;
-// Server_UpdateEntityIdleTimers @0x50D770;
-// WacScript_FreeAll initializes dword_C6EAE0=20 @0x4F6381]
-// Server_SendOverlayActionToAlive with the entity's composite for `type`: the
-// S2C 0x34 sound at the entity's position to every ALIVE in-match player
-// (mask 128); the listen host's own copy rides the local slot-sound route.
-// [orig: SoundProfile_FindByEntityAndType @0x528180 ->
-//  Server_SendOverlayActionToAlive @0x50A1B0]
-void fan_entity_sound_to_alive(NapiNPServerCtx &ctx, world::World &world,
-		const world::Entity &source, int type) {
-	char set_name[24] = {};
-	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
-	if (set_name[0] == 0) return;
-	PlaySoundCommand cmd;
-	cmd.flag = 1;
-	cmd.sound_name = set_name;
-	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(source.position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(source.position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(source.position.z) >> 16);
-	const std::vector<uint8_t> body = encode_play_sound(cmd);
-	for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-		if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-				!candidate.link.owned_entity.valid())
-			continue;
-		const world::Entity *listener = world.registry.get(candidate.link.owned_entity);
-		if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
-		if (candidate.link.mode == replication::TransportMode::Loopback) {
-			world::SoundSlotEvent local;
-			local.source_handle = source.handle.packed;
-			local.pos[0] = world::to_fixed(source.position.x);
-			local.pos[1] = world::to_fixed(source.position.y);
-			local.pos[2] = world::to_fixed(source.position.z);
-			local.slot = 0;
-			std::memcpy(local.set_name, set_name, sizeof(set_name));
-			world.out.slot_sounds.push_back(local);
-			continue;
-		}
-		candidate.link.transport->host_send(s2c::PLAY_SOUND, body, /*reliable=*/false);
-	}
-}
-
-void tick_player_breath(NapiNPServerCtx &ctx, world::World &world) {
-	if ((world.logic_tick & 0x1Fu) != 0u) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
-		// A spectator slot never samples [orig: !slot+100567 @0x50D7BB].
-		if (conn.link.spectator) continue;
-		world::Entity *player = world.registry.get(conn.link.owned_entity);
-		if (player == nullptr || !player->alive || player->health <= 0 ||
-				(player->flags & world::kEntityFlagDead) != 0u) {
-			conn.link.underwater_breath_samples = 0;
-			continue;
-		}
-
-		// The one underwater-eye predicate (no authored water is never below).
-		if (!world::entity_eye_below_water(world,
-					world::to_fixed(player->position.z), player->eye_offset_z)) {
-			// Surfacing after more than four samples plays the breath (a dive
-			// no longer than 160% of the breath value) or the gasp composite.
-			// [orig: Server_UpdateEntityIdleTimers @0x50D882..0x50D8CB]
-			const uint32_t prev = conn.link.underwater_breath_samples;
-			if (prev > 4u && player->anim_slot != 0) {
-				fan_entity_sound_to_alive(ctx, world, *player,
-						prev <= 160u * kRetailBreathSeconds / 100u
-								? audio::kEntitySoundSurfaceBreath
-								: audio::kEntitySoundSurfaceGasp);
-			}
-			conn.link.underwater_breath_samples = 0;
-			continue;
-		}
-
-		if (++conn.link.underwater_breath_samples <= kBreathSampleLimit) {
-			// Three warnings ahead of the kill, 36 / 24 / 12 samples before it
-			// [orig: @0x50D861..0x50D878: the WATER_GAG composite].
-			const uint32_t samples = conn.link.underwater_breath_samples;
-			if ((samples == kBreathSampleLimit - 36u || samples == kBreathSampleLimit - 24u ||
-					samples == kBreathSampleLimit - 12u) && player->anim_slot != 0)
-				fan_entity_sound_to_alive(ctx, world, *player, audio::kEntitySoundWaterGag);
-			continue;
-		}
-		player->death_anim_state = world::compute_death_anim_state(
-				0, 0, world::death_cause::kDrown);
-		player->health = -1;
-		world::RoundDeath death;
-		death.victim = player->handle;
-		death.victim_handle = player->handle.packed;
-		// The snapshot every RoundDeath producer stamps; the host classifier
-		// itself reads the live entity word (see classify_player_death).
-		death.event_flags = player->cause_flags & 0xF00u;
-		world.round_sim.deaths.push_back(death);
-	}
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
@@ -1908,12 +1805,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		world.cached.humans = humans;
 	}
 
-	// The sampled breath state belongs to the authoritative player slot and
-	// runs at the same pre-entity-update point as retail. Its caller is skipped
-	// during pre-round just like the rest of Server_UpdateEntityIdleTimers.
-	// [orig: Server_TickUpdate @0x51D8C4..0x51D8D7;
-	// Server_UpdateEntityIdleTimers gate @0x50D773]
-	if (!preround_active) tick_player_breath(ctx, world);
 	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
 	// inline in retail's receive dispatch, ahead of the state fan.
 	Server_ProcessSpectatorRespawnRequests(ctx, world);
@@ -2009,10 +1900,18 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
 	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
 	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
+	// The breath samples belong to this session's player slots: the World's
+	// every-32 idle legs run them after the WAC tick and before the BMS
+	// quarter pass, under the same script admission (the pre-round phase and
+	// the SP epilog hold them). [orig: Server_TickUpdate — the admission
+	// @0x51D89F..0x51D8BD, the Server_UpdateEntityIdleTimers call @0x51D8D7]
+	ServerIdleTimers idle_timers(ctx);
+	world.entity_idle_timers = &idle_timers;
 	world.run_logic_tick(
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	world.entity_idle_timers = nullptr;
     // Item callbacks' state packets and authoritative removals: mask 0x90
     // includes active remote slots regardless of health, excluding the local host.
     // [orig: Server_SendEntityStatePacket @0x509D70;

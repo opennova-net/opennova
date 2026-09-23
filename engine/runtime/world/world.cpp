@@ -125,6 +125,23 @@ void World::add_system(ISystem *sys) {
     if (sys) systems_.push_back(sys);
 }
 
+// The every-32 legs ride the same admission as the WAC tick and the quarter
+// pass (the pre-round phase skips every system): no human with a live clock,
+// or the SP epilog screen, holds them too. The spawn markers run first, then
+// the host's player idle timers.
+// [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
+//  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2, the
+//  Server_UpdateEntityIdleTimers call @0x51D8D7]
+void ServerIdleLegs::tick(World &world, const TickContext &ctx) {
+    if (!ctx.is_authority || ctx.phase != TickPhase::Gameplay) return;
+    const bool admitted = ctx.script_admitted.has_value()
+            ? *ctx.script_admitted : world.script_may_advance();
+    if (!admitted || (ctx.logic_tick & 0x1Fu) != 0u) return;
+    world.vehicles.tick_spawn_markers();
+    if (world.entity_idle_timers != nullptr)
+        world.entity_idle_timers->update_entity_idle_timers(world);
+}
+
 void World::load_systems() {
     diagnostics.clear();
     for (ISystem *s : systems_) s->on_load(*this);
@@ -175,9 +192,6 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     if (phase != TickPhase::PreRound) {
         for (ISystem *s : systems_) {
-			// After WAC, before entity updates. [orig: Server_TickUpdate @0x51D8D2]
-			if (s == &ai && is_authority && gameplay && (logic_tick & 31u) == 0)
-				vehicles.tick_spawn_markers();
 			// The AI system's own phases lap onto the SIM_AI_* rows inside its
 			// tick; every other registered system is an authored script.
 			const devtools::ProfileScope system_scope(
