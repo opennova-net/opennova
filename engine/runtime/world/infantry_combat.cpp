@@ -892,9 +892,12 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
                                           uint32_t logic_tick, uint32_t key) {
     (void)logic_tick;
     InfantryState &inf = e.inf;
+    // Every mounted-live body makes the request, whatever its seat: only the
+    // EquippedSlot test below tells a UseGun rider from a passenger.
+    // [orig: Entity_UpdateInfantryAI mounted-live test @0x4BF4B3, the parent
+    //  test @0x4BF4C1..0x4BF4C9]
     Entity *occ = world.registry.get(e.handle);
-    if (occ == nullptr || !occ->mounted || occ->mount_type != SeatType::Gunner)
-        return;
+    if (occ == nullptr || !occ->mounted) return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
     // The parent's weapon slot and AdmDef byte exist from its own init in
@@ -924,9 +927,14 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
 
     // Past the cadence and the stagger the rider takes the parent's AdmDef byte
     // (retail's parent +0x2B0 is WeaponSlot_InitFromEntityDef's byte, kept here
-    // as primary_weapon_slot_adm). [orig: Entity_UpdateInfantryAI
-    //  @0x4BF4F4..0x4BF4FA; WeaponSlot_InitFromEntityDef @0x546742]
-    occ->equipped_adm_index = mount->primary_weapon_slot_adm;
+    // as primary_weapon_slot_adm). A parent whose def names no weapon never
+    // stores one and still holds its spawn clear's zero, not the port's none
+    // sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;
+    //  WeaponSlot_InitFromEntityDef @0x546742, skipped by the name test
+    //  @0x5466E1 or the def test @0x546704; the clear
+    //  Entity_SpawnFromBMSRecord @0x40EA1F]
+    occ->equipped_adm_index = mount->primary_weapon_slot_adm != kAdmSlotNone
+            ? mount->primary_weapon_slot_adm : 0;
 
     // UseGun already swapped EquippedSlot to the parent's persistent embedded
     // MountSlot at attach. This request never touches the personal magazine.

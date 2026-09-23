@@ -1553,9 +1553,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateInfantryAI @0x4b9910; pose @0x4bec23..0x4bed3f;
     //  dedicated return @0x4bf5c6]
     const bool mounted = e.health > 0 && pose_if_mounted(e, world);
-    const Entity *mounted_occ = mounted ? world.registry.get(e.handle) : nullptr;
-    const bool mounted_gunner =
-            mounted_occ != nullptr && mounted_occ->mount_type == SeatType::Gunner;
     // A live mounted org1 body takes the seat pose; any other chases heading,
     // legs and look here, ahead of its eye offset and its sound/fire passes.
     // [orig: Entity_UpdateInfantryAI mounted-live local @0x4B9960..0x4B9985,
@@ -1693,13 +1690,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     infantry_anim_sound_pass(e, world, logic_tick, frame.capsule_bottom);
     // The fire pass: consume the fresh trigger bits + the walking-fire latch into
     // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
-    // after the anim advance refreshed g_animEventTriggerBits; §17.4]
-    if (!inf.is_local_player && is_authority && e.health > 0 && !mounted_gunner)
+    // after the anim advance refreshed g_animEventTriggerBits; §17.4] Nothing
+    // between the odd-tick gate and the dedicated request tests the seat: a
+    // mounted body fires its own anim events too, and every mounted body,
+    // whatever its seat, then makes the request.
+    // [orig: Entity_UpdateInfantryAI odd-tick gate @0x4BF156, the request's
+    //  mounted-live test @0x4BF4B3]
+    if (!inf.is_local_player && is_authority && e.health > 0) {
         infantry_fire_pass(e, world, logic_tick);
-    if (!inf.is_local_player && is_authority && e.health > 0 && mounted_gunner)
-        infantry_mounted_fire_pass(e, world, logic_tick, key);
+        if (mounted) infantry_mounted_fire_pass(e, world, logic_tick, key);
+    }
 
-    // Retail exits the ordinary mover immediately after the dedicated UseGun
+    // Retail exits the ordinary mover immediately after the dedicated mounted
     // request. Seat pose already supplied the transform; animation, wire state,
     // and part channels remain live.
     // [orig: mounted fire tail @0x4bf4bb..0x4bf5c6]

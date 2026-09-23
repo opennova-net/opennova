@@ -2085,6 +2085,141 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     CHECK(w->registry.get(npc_h)->equipped_adm_index == 1);
 }
 
+// A mounted body still runs the anim-event fire block: a gunner whose seat clip
+// raises the primary fire bit fires its own primary ammo on the odd tick,
+// beside the dedicated request. [orig: Entity_UpdateInfantryAI odd-tick gate
+// @0x4BF156, the 0x4 leg @0x4BF322..0x4BF38C; no seat test before the
+// request's mounted-live test @0x4BF4B3]
+static void test_mounted_gunner_runs_the_anim_event_fire_block() {
+    struct SeatClipFires final : IRootMotionSource {
+        bool has_clip(int, int id) const override {
+            return id == anim_state::kIdle || (id >= 67 && id <= 75);
+        }
+        int32_t clip_length_ticks(int, int, int /*variant*/) const override { return -1; }
+        bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+            if (!has_clip(0, id)) return false;
+            ++phase;
+            out = RootMotionFrame{};
+            if (id >= 67 && id <= 75) out.events = 0x4;
+            return true;
+        }
+    };
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.yaw = 90;
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    w->registry.spawn(1, gun);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+
+    Entity npc_seed{};
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+    SeatClipFires clips;
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    ai.root_motion = &clips;
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    CHECK(w->commands.mount(0x11, 0x31));
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = true;
+    for (uint32_t tick = 1; tick <= 6; ++tick) {
+        ctx.logic_tick = tick;
+        w->update_all_entities(ctx);
+    }
+    CHECK(w->registry.get(npc_h)->mounted);
+    CHECK(npc.inf.body_clip_state() == anim_state::kEmplaced);
+    CHECK(w->out.rounds.count > 0);
+    if (w->out.rounds.count > 0)
+        CHECK(w->out.rounds.records[0].shooter_handle == npc_h.packed);
+}
+
+// The dedicated request runs for every mounted-live body, whatever its seat: a
+// passenger takes the parent's AdmDef byte past the cadence and the stagger (a
+// weaponless parent's is its spawn zero) and, holding no EquippedSlot of the
+// parent's, queues nothing. [orig: Entity_UpdateInfantryAI mounted-live test
+// @0x4BF4B3, the copy @0x4BF4F4..0x4BF4FA, the EquippedSlot test
+// @0x4BF564..0x4BF56C; WeaponSlot_InitFromEntityDef name test @0x5466E1]
+static void test_mounted_request_runs_for_a_passenger() {
+    for (const bool armed : {true, false}) {
+        auto w = std::make_unique<World>();
+        w->registry.configure_pool(0, 8);
+        w->registry.configure_pool(1, 8);
+        seed_test_rifle_ammo(*w);
+
+        Entity target_seed{};
+        target_seed.kind = EntityKind::Organic;
+        target_seed.team = 2;
+        target_seed.health = 100;
+        target_seed.net_id = 0x21;
+        target_seed.position = Vec3{1.0f, 0.0f, 0.0f};
+        const EntityHandle target_h = w->registry.spawn(0, target_seed);
+
+        Entity truck{};
+        truck.kind = EntityKind::Item;
+        truck.team = 1;
+        truck.net_id = 0x31;
+        truck.yaw = 90;
+        if (armed) truck.primary_weapon.assign(1, 'x');
+        Seat seat{};
+        seat.type = SeatType::Passenger;
+        truck.seats.push_back(seat);
+        const EntityHandle truck_h = w->registry.spawn(1, truck);
+        w->tables.weapons.entries.resize(2);
+        w->tables.weapons.entries[1].name.assign(1, 'x');
+        w->tables.weapons.entries[1].ammo_index = 1;
+        w->tables.weapons.entries[1].valid = true;
+        configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+
+        Entity npc_seed{};
+        npc_seed.kind = EntityKind::Organic;
+        npc_seed.team = 1;
+        npc_seed.health = 100;
+        npc_seed.net_id = 0x12;
+        const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
+
+        AiSystem &ai = w->ai;
+        ai.is_authority = true;
+        AiEntity &npc = *ai.at(ai.attach(npc_h));
+        configure_rifleman(npc, 0x12, 1);
+        npc.inf.combat_target = target_h;
+        CHECK(w->commands.mount(0x12, 0x31));
+        CHECK(w->registry.get(npc_h)->mount_type == SeatType::Passenger);
+        w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
+
+        // key = 4 + 36 * 0x12 = 652: the four-tick cadence and the stagger both
+        // pass, and the sixteen-tick think has not yet dropped the target.
+        TickContext ctx{};
+        ctx.world = w.get();
+        ctx.is_authority = true;
+        ctx.logic_tick = 4;
+        w->update_all_entities(ctx);
+        CHECK(w->registry.get(npc_h)->mounted);
+        CHECK(w->registry.get(npc_h)->equipped_adm_index == (armed ? 1 : 0));
+        CHECK(w->registry.get(truck_h)->primary_weapon_slot.next == weapon_action::kIdle);
+    }
+}
+
 static void test_mounted_look_traverses_before_fire_request() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
@@ -4444,6 +4579,8 @@ int main() {
     test_weapon_walk_visits_pool0_in_slot_order();
     test_weapon_walk_pumps_hot_unoccupied_guns();
     test_mounted_request_copies_the_parent_adm_byte();
+    test_mounted_gunner_runs_the_anim_event_fire_block();
+    test_mounted_request_runs_for_a_passenger();
     test_mounted_look_traverses_before_fire_request();
     test_mounted_gunner_dismounts_into_death_animation();
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();
