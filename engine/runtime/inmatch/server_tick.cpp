@@ -1596,12 +1596,37 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		if (age_eligible &&
 				reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
 			++reply.control_live_ticks;
-		// The same slot dword unsaturated, where WAC onptick reads it.
-		// [orig: Server_TickUpdate `add [esi+184h],1` @0x51D977]
-		if (age_eligible) {
-			if (world::MatchPlayer *slot = world.match.player(age_player->handle))
-				++slot->play_ticks;
-		}
+	}
+}
+
+// The play-tick walk after the script pass: every active slot in state 6
+// whose entity is present and not hidden (Flags bit 0) adds one to its play
+// ticks, the unsaturated slot dword WAC onptick reads in whole seconds. No
+// session, deploy or punt gate: it runs before the is_in_session test, so
+// single player counts too. The same walk then calls
+// GameEvent_ProcessScoring(g_GameType, entity, 0x16, 0, 0) for each such slot,
+// whose case 22 only stamps the slot's stats entity word and counts the
+// per-weapon and per-vehicle use sub-tables (CPlayerStats_RecordEvent 35/36,
+// the CPlayerStats_InitWeaponTracking arrays); the port models neither, so
+// that call is not ported.
+// [orig: Server_TickUpdate @0x51D94B..0x51D9A3 -- the active byte @0x51D960,
+//  state 6 @0x51D966, the entity @0x51D96B..0x51D96F, `test byte ptr
+//  [eax+24h],1` @0x51D971, `add [esi+184h],1` @0x51D977, the scorer call
+//  @0x51D98A; the is_in_session test @0x51D9A5; GameEvent_ProcessScoring
+//  case 22 @0x52F550]
+void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world) {
+	// The round end moves every state-6 slot to state 7, which the walk then
+	// skips; Match's outcome gate stands for that transition here, as it does
+	// for the rest of the slot-state-7 stop (announce_round_end).
+	// [orig: Server_ProcessRoundEnd -- the slot state 6 -> 7 store @0x51685E]
+	if (world.match.outcome().ended) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn)) continue;
+		const world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr || ((player->flags | player->engine_flags) & 1u) != 0)
+			continue;
+		if (world::MatchPlayer *slot = world.match.player(player->handle))
+			++slot->play_ticks;
 	}
 }
 
@@ -1988,6 +2013,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			break;
 		}
 	}
+	advance_play_ticks(ctx, world);
 	lap.restart();
 	world.match.advance_tick(
 			world,
