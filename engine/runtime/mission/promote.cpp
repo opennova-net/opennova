@@ -703,7 +703,8 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // slot N-1 — routed vehicles took the neighboring list, and a list whose N-1
     // slot was empty (00TRg's group-3 redirect to list 3, list 2 unauthored)
     // dropped the order entirely.
-    // [orig: XML_ParseGroupAction @0x4cc450 writes the 34-dword record per channel.]
+    // [orig: Mission_LoadBMSFile @0x40FB56 reads the 128 34-dword records as one
+    //  block (fread(Buffer, 0x88, 0x80)).]
     ai.nav.channels.clear();
     ai.nav.channels.reserve(m.waypoint_records.size());
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
@@ -714,6 +715,12 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // the mover masks bit0 @0x457c3d-adjacent; the 0x0F waypoint writer
         // tests bit1 on the same dword @0x502e53]
         ch.loopflag = static_cast<int32_t>(static_cast<uint32_t>(wr.flags));
+        // A single-node list is always one-shot: right after the block read the
+        // loader ORs bit 0 into every record whose count is exactly 1, whatever
+        // the author set [orig: Mission_LoadBMSFile @0x40FB72..0x40FBB2 — `cmp
+        //  [eax+4],ebp; jnz; or [eax],ebp` with ebp = 1 from @0x40F971; the XML
+        //  loader's twin XML_ParseGroupAction @0x4CC59C..0x4CC5A9].
+        if (wr.marker_count == 1) ch.loopflag |= 1;
         int count = std::min<int>(static_cast<int>(wr.marker_count), 32);
         count = std::min<int>(count, static_cast<int>(wr.waypoint_numbers.size()));
         ch.count = count;

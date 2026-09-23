@@ -714,36 +714,39 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 
 	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
 
-	const bool wrecked = veh.health <= 0 || !veh.alive ||
-                         (veh.flags & kEntityFlagDead) != 0;
-    const bool crewed =
-            controller != nullptr && controller->alive && controller->health > 0;
-    if (!crewed || wrecked) {
-        // Parked. [orig: the no-pilot/dead block — thrust slots zeroed, altitude
-        // pinned below ground (collective off), AI_CheckVehicleStuckState
-        // @0x491c5e, state 14, engine flag cleared; our shared parked stamp is
-        // 22 like the ground movers' player/parked leg]
-		if (!wrecked) {
-			b.f[AiBrain::kCurState] = 14;
-			b.f[AiBrain::kPendState] = 14;
-		}
+	// Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: no hull
+	// or pilot health term. A dead pilot has already left the seat through the
+	// infantry death edge's detach (the caller hands a dead controller in as
+	// null). [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25]
+	if (controller == nullptr || ((veh.flags | veh.engine_flags) & 0x10000002u) != 0) {
+		// Parked: both thrust registers and the climb zeroed, the altitude target
+		// pinned 0x4000 under the ground (collective off), the stuck escalation,
+		// then PRETTY on the CURRENT state word only; the pending word keeps any
+		// order parked on it [orig: @0x491C31..0x491C58, AI_CheckVehicleStuckState
+		//  @0x491C5E, `mov dword ptr [ebx+10h],0Eh` @0x491C66, Flags &= ~0x80
+		//  @0x491C6D].
 		m.cmd_speed = 0;
 		m.cmd_lateral_speed = 0;
-        m.steer_target_bam = m.yaw_bam;
-        m.net_alt_target = ground - 0x4000;
-        m.net_climb = 0;
-        m.net_engine_on = false;
-        check_vehicle_stuck(world, veh);
-        return;
-    }
-
-    // Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`],
-    // parked -> FOLLOWWP [orig: `if (brain[16] == 14) brain[16] = 7`].
-    m.stuck_ticks = 0;
-	if (b.f[AiBrain::kCurState] == 14) {
-		b.f[AiBrain::kCurState] = 7;
-		b.f[AiBrain::kPendState] = 7;
+		m.steer_target_bam = m.yaw_bam;
+		m.net_alt_target = ground - 0x4000;
+		m.net_climb = 0;
+		check_vehicle_stuck(world, veh);
+		b.f[AiBrain::kCurState] = 14;
+		m.net_engine_on = false;
+		return;
 	}
+
+	// Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`
+	// @0x490F30], and PRETTY hands back to FOLLOWWP on the CURRENT word only
+	// [orig: `cmp [ebx+10h],0Eh; jnz; mov [ebx+10h],7` @0x49158A..0x491590]. The
+	// pending word is left alone, so the machine commits whatever it holds after
+	// each think (the class init's 0 until an order lands) and the next mover
+	// visit promotes 0 -> 14 -> 7 again: an AI helicopter thinks on every visit,
+	// like the ground legs' 22 -> 16 hand-back [orig:
+	// EntityAI_ProcessInfantryStateMachine @0x458384..0x4583B0].
+	m.stuck_ticks = 0;
+	if (b.f[AiBrain::kCurState] == 14)
+		b.f[AiBrain::kCurState] = 7;
 	m.net_engine_on = true;
 	// The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
     // `itemDef+0x8D8 > 1`, Entity_IsBoneInProximity @0x4915c2,

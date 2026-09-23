@@ -94,9 +94,20 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     Entity *actrl = world.vehicles.resolve_controller(*veh);
                     const bool actrl_alive = actrl != nullptr && actrl->alive &&
                                              actrl->health > 0;
+                    // A player pilot whose eye sits at or below the water plane
+                    // loses the stick to the AI leg, as in the staged families.
+                    // [orig: Entity_UpdateAircraftPhysics `test [ebp+24h],100h`
+                    //  @0x490F36, the eye test @0x490F3F..0x490F4B]
                     const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
-                                         actrl->player_class != 0;
+                                         actrl->player_class != 0 &&
+                                         !watercraft_driver_submerged(world, *actrl);
                     if (aplayer) {
+                        // The player leg parks the brain at PRETTY every visit, so
+                        // an AI state left from an earlier pilot stops running.
+                        // [orig: Entity_UpdateAircraftPhysics `mov dword ptr
+                        //  [ebx+10h],0Eh` @0x490F6A]
+                        if (AiEntity *brain = world.ai.for_handle(h))
+                            brain->brain.f[AiBrain::kCurState] = 14;
                         // A PLAYER pilot still runs the shared mover: retail has
                         // ONE aircraft function, and its occupant-input block
                         // (our stage_air_vehicle_input) stages the same

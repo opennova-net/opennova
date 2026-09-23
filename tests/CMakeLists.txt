@@ -2041,6 +2041,15 @@ target_include_directories(vehicle_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_mount_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_mount COMMAND vehicle_mount_test)
 
+# AI route parity: the BMS loader's nav table (Mission_LoadBMSFile @0x40F4E0), the
+# aircraft AI leg's state words and the player pilot's PRETTY hold
+# (Entity_UpdateAircraftPhysics @0x490310).
+add_executable(route_parity_test world/route_parity_test.cpp)
+target_link_libraries(route_parity_test PRIVATE opennova_runtime)
+target_include_directories(route_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(route_parity_test PRIVATE cxx_std_17)
+add_test(NAME route_parity COMMAND route_parity_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).
