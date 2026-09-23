@@ -79,7 +79,7 @@ target. Id 4 (`AI_BeginUpdate @ 0x457B40`) has no live installer; only the saveg
 | promote `init_ai_slot` (every AI-capable record, vehicles included; 2026-09-22) + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer; the def gate is AI attrib 0x100000 (`@0x40ED4E`), for which the `ai_capable` gate (organics, plus items that author a control seat) stands in | **matching** |
 | `anim::AdmRootMotion` + `anim::ClipTimeline` (engine) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (the playhead clock is `ClipTimeline`, §4 item 16) |
 | `calc_average_ground_height` / `AiSystem::aircraft_ground_height` (the `apply_ground_clamp` stand-in is deleted) | `Entity_CalcAverageGroundHeight` | 0x457230 | 5-tap port with the brain's husk/intact floor and the east/centre ground links (§10.2); only the vehicle/aircraft brain helpers call it in retail, so the org1 motor's every-8 sample is the port's own stand-in (§3.1) | **matching** (§38.1, §38.5) |
-| WAC pipeline (`engine/formats/wac` front end + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
+| WAC pipeline (`engine/formats/wac` bytecode/program/command table + `engine/runtime/wac` compiler/VM) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
 | `VehicleSystem::player_toggle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
 | `find_nearest_free_seat` | `Entity_FindNearestSeatOrArmory` (both legs) | 0x435d50 | §23.1 — 4.0 u 3D gate and the aim cone, score `d3 + aim/512`, enemy-occupant reject, LOS before the best compare; the armory leg (searchMode 1, seatType 4) landed with the attach labels (hud-re.md) | **matching** w/ D-AI-11 a/b |
 | `find_best_vehicle_seat` | `Entity_FindBestSeatSlot` | 0x4351f0 | §23.1 exact root/ground-child walk and weights (ctrl 0x2000 < gun 0x20000 < root sitex 0x200000 < child sitex 0x2000000) | **matching** (canonical world operation; D-AI-11 g closed) |
@@ -374,7 +374,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 10. RESOLVED (§34): the class machines run from `Entity_UpdatePool1Slot @ 0x4B8DD0` (the +0x1C8
     call @ 0x4B8E3C) when the +0x2AC countdown is nonpositive (@ 0x4B8E1B), not from the vehicle
     motor.
-11. The 62-frame divider + spawn-event `f[3] = Projectile_GetHitRecord()[17]` re-checks (carried from the plan).
+11. RESOLVED: the 62-tick divider is the WAC cadence (§33.4); the event-1 `f[3]` is
+    HitRecord[17] (+0x44), the round's +0x170 owner (`Projectile_CopyEntityToHitRecord
+    @ 0x4E7010`), queued by the class machines' kill/damage notification (@ 0x45831E air /
+    @ 0x458524 ground; §38.1).
 12. **Command-path bodies decoded** (RESOLVED: ported; §23.4 carries the boarding chain,
     §33.31 the escort offsets) (dump 1545–2330, rides the command-source phase / D-INF-2):
     move-to-entity orders resolve the target by net-id across pools 0–3; vehicle boarding is a
@@ -5874,8 +5877,11 @@ Port notes (`vehicle_attach.cpp`): `VehicleSystem::player_toggle_mount` +
 `find_nearest_free_seat` + `VehicleSystem::attach_to_seat` over our seat model; the
 witnessed constants verbatim; deviations ledgered as D-AI-11. The engine owner
 is `LocalPlayer::toggle_mount` (the weapon gate reads the ported weapon
-FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`
-fact), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
+FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`,
+which every host bring-up sets, the SP listen server included, while retail's
+`is_in_session` is 0 in single player and `rules.mp_session` is that fact
+[orig: Entity_AttachToUseGunSlot, the rejection @ 0x546C07], so the port never
+takes that rejection in SP), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
 main_game.gd's USE-ITEM handler
 (armory leg first, faithful order).
 
@@ -9983,7 +9989,9 @@ parentSlot. An already-mounted actor returns before changing the cache.
 
 [orig: WacCmd_Remove @0x4EDCA0] dispatches the existing command-group removal
 walk [orig: Entity_TeleportAllByNetId @0x43D5D0]: nonzero group, pool order
-2/0/1/3, all matching rows, no item-definition gate. This differs from Gremove's
+2/0/1/3, all matching rows, no item-definition gate; on the authority only, each
+row ends in `Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12, then the destroy),
+with no recount and no proximity rebuild (§38.8). This differs from Gremove's
 named member list.
 
 Regression coverage covers zone IDs distinct from array indices, first-record
