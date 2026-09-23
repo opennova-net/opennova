@@ -56,10 +56,13 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // nothing staged plays the generic 174 death_pungi AND clears the
         // attacker slot (+0x178), so a death nothing stamped reports as
         // unattributed while one that follows a non-lethal hit keeps that hit's
-        // clip and shooter. (The Flags&0x8000 drowning override (175) rides the
-        // unmodeled swim flags.) [orig: Entity_UpdateInfantryPlayerBody
-        //  @0x4b4c72 test, @0x4b4c7f compute(0, 0, 4) into +0x2C0,
-        //  @0x4b4c8d lastAttacker = 0; consumed +0x2C0 clears @0x4b4cd5]
+        // clip and shooter. A body that dies afloat takes death_drown 175 over
+        // the selection; the edge stamps the death tick and drops Flags 0xC0.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c72 test, @0x4b4c7f
+        //  compute(0, 0, 4) into +0x2C0, @0x4b4c8d lastAttacker = 0; the
+        //  Flags&0x8000 pick @0x4B4C93..0x4B4CAB; death tick
+        //  @0x4B4CC1..0x4B4CCC, `and eax,0FFFFFF3Fh` @0x4B4CC7; consumed
+        //  +0x2C0 clears @0x4b4cd5]
         // Relationship teardown is independent of animation state. A peer can
         // already be in a death-class clip when a late/replayed state restores a
         // mount, and that must not leave the seat claim or compact carrier alive.
@@ -70,7 +73,12 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             int death = ent->death_anim_state != 0
                                 ? ent->death_anim_state
                                 : compute_death_anim_state(0, 0, death_cause::kGeneric);
+            if (((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
+                death = anim_state::kDeathDrown;
             ent->death_anim_state = 0;
+            ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
+            ent->death_tick = logic_tick;
             // Stripped embedder .adm sets may lack the selected clip; keep the
             // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
             if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {

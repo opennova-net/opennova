@@ -358,6 +358,35 @@ void test_org1_corpse_stays_dead_on_a_health_write() {
     CHECK(rig.w->round_sim.deaths.size() == 1); // the one edge transaction
 }
 
+// The player-body twins of the edge legs, local and wire-owned: a body dying
+// afloat takes death_drown 175, and the edge stamps the death tick and drops
+// Flags 0xC0; its death transaction stays the damage route's.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4C93..0x4B4CAB, @0x4B4CB5..0x4B4CDB]
+void test_player_body_death_edge_legs() {
+    Org1Rig local;
+    local.e().inf.is_local_player = true;
+    local.entity().flags |= kEntityFlagPlayer;
+    arm_death(local);
+    local.entity().death_anim_state = 184;
+    local.entity().flags |= kEntityFlagDrowning | kEntityFlagMounted;
+    local.tick(40);
+    CHECK(local.e().inf.anim_state == anim_state::kDeathDrown);
+    CHECK(local.entity().death_tick == 40);
+    CHECK((local.entity().flags & kEntityFlagMounted) == 0);
+    CHECK(local.w->round_sim.deaths.empty());
+
+    Org1Rig remote;
+    remote.e().net_is_remote_peer = true;
+    remote.entity().flags |= kEntityFlagPlayer | kEntityFlagDrowning | kEntityFlagMounted;
+    remote.source.clips.insert({175, 184});
+    remote.entity().health = 0;
+    remote.entity().death_anim_state = 184;
+    remote.tick(40);
+    CHECK(remote.e().inf.anim_state == anim_state::kDeathDrown);
+    CHECK(remote.entity().death_tick == 40);
+    CHECK((remote.entity().flags & kEntityFlagMounted) == 0);
+}
+
 // ---- the org1 phase order (R3-8) ----
 
 // R3-8: org1 chases its heading and look after the think and BEFORE its fire
@@ -463,6 +492,7 @@ int main() {
     test_org1_death_edge_legs();
     test_org1_fatal_fall_credits_itself();
     test_org1_corpse_stays_dead_on_a_health_write();
+    test_player_body_death_edge_legs();
     test_org1_round_leaves_along_this_ticks_look();
     test_org1_airborne_corpse_tumbles();
     test_org1_corpse_aims_along_the_slope();

@@ -25,7 +25,9 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
                          uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     // A mounted body detaches so the corpse falls with the world, not the seat.
-    // [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57]
+    // [orig: Entity_UpdateInfantryAI @0x4B9910 (the +0x16C test @0x4B9C57, the
+    //  Entity_DetachFromVehicleIfServer call @0x4B9C60); the player-body twin
+    //  @0x4B4C08..0x4B4C11]
     if (ent != nullptr && ent->mounted)
         world.vehicles.detach(e.handle);
     // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
@@ -91,11 +93,11 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     int death = (ent != nullptr && ent->death_anim_state != 0)
                         ? ent->death_anim_state
                         : compute_death_anim_state(0, 0, death_cause::kGeneric);
-    // An org1 body that dies afloat (the Flags 0x8000 latch the water block
-    // sets) takes death_drown over any staged selection.
-    // [orig: Entity_UpdateInfantryAI @0x4B9CF6..0x4B9D0E]
-    if (org1 && ent != nullptr &&
-            ((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
+    // A body that dies afloat (the Flags 0x8000 latch the water blocks set)
+    // takes death_drown over any staged selection.
+    // [orig: Entity_UpdateInfantryAI @0x4B9CF6..0x4B9D0E; the player-body twin
+    //  Entity_UpdateInfantryPlayerBody @0x4B4C93..0x4B4CAB]
+    if (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagDrowning) != 0)
         death = anim_state::kDeathDrown;
     if (ent != nullptr) ent->death_anim_state = 0;
     // Stripped embedder .adm sets may lack the selected clip; keep the pre-P1c
@@ -119,14 +121,15 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // split flags field take it and the spawn reset clears them.
     // [orig: Entity_UpdateInfantryAI `or eax,2` @0x4B9D18 / store @0x4B9D1B,
     //  death tick @0x4B9D24..0x4B9D2F, `and eax,0FFFFFF3Fh` @0x4B9D2A,
-    //  +0x184 = 0 @0x4B9D3E]
+    //  +0x184 = 0 @0x4B9D3E; the player-body twin
+    //  Entity_UpdateInfantryPlayerBody @0x4B4CB5..0x4B4CDB]
     ent->flags |= kEntityFlagDead;
     ent->engine_flags |= kEntityFlagDead;
     ent->attach_parent = {};
-    if (!org1) return;
     ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->death_tick = logic_tick;
+    if (!org1) return;
     // The authority raises the body's death transaction from here: the host's
     // death routing sends the 0x13 and scores it against the victim's
     // lastAttacker (+0x178). A damage-time record for this body only fed the
