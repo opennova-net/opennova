@@ -33,8 +33,8 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 // gate, wire class byte, healthMax lift, armor/damage-reduction, AS zone
 // attribs, corpse timing), fill the world's per-item death-trait and
 // vehicle-trait tables, rebuild the throwable class bindings, and build+latch
-// the AS zone-slot chain. Duplicate definition ids resolve last-wins, the
-// same load-order overwrite the binding's id-keyed item map exposed.
+// the AS zone-slot chain. A duplicate definition id resolves to its FIRST row,
+// like every retail type-id lookup [orig: ItemList_FindIndexByTypeId @0x49E100].
 // Idempotent; call after mission promotion (and again after spawning the
 // local player). A valid only handle initializes one new row without rebuilding
 // mission capture state; the default performs the original full load sweep.

@@ -10,6 +10,7 @@
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
 #include <runtime/terrain_query/height_field.h>
@@ -257,6 +258,10 @@ end
     CHECK(w.registry.get(flyable_h)->item_type_index == 1); // not the later duplicate
     CHECK(w.registry.get(truck_h)->item_type_index == 2);
     CHECK(w.registry.get(stray_h)->item_type_index == 0);
+    // The shared by-id lookup the seat specs and the model probes use resolves
+    // the same first row [orig: ItemList_FindIndexByTypeId @0x49E100].
+    CHECK(mission::find_item_def(items, 100172) == &items.entries[1]);
+    CHECK(mission::find_item_def(items, 104242) == nullptr);
     def::def_free_items(&items);
 }
 

@@ -69,18 +69,20 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
     }
 }
 
-// Last-wins by-id view over the parsed file: duplicate definition ids
-// overwrite earlier rows — the same load-order semantics the binding's
-// id-keyed item map exposed (operator[] assignment per entry). The net
-// catalog separately RETAINS duplicates so it can classify them ambiguous and
-// fail closed; that policy lives with the injected wire-class supplier, not
-// here.
+// The by-id view over the parsed file: an id resolves to its FIRST row in
+// load order. Every retail lookup of a type id is the linear scan from row 0
+// that returns the first match, and the entity's ItemDef is the row at that
+// index, so a later row repeating an id is never reached (the shipped ITEMS.DEF
+// repeats 102044: "Map Named Location" first, "Power Up Med Pack Infinite"
+// later). [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp [ecx],esi; jz`
+// @0x49E120..0x49E122 returns the first hit; Entity_SpawnFromBMSRecord
+// ItemTypeIndex @0x40EBFC, ItemDef = gItemDefs + index @0x40EBFF..0x40EC07]
 std::unordered_map<int, const DefItemDef *> index_items(
         const DefItemsFile &items) {
     std::unordered_map<int, const DefItemDef *> by_id;
     by_id.reserve(items.count);
     for (size_t i = 0; i < items.count; ++i)
-        by_id[items.entries[i].id] = &items.entries[i];
+        by_id.emplace(items.entries[i].id, &items.entries[i]);
     return by_id;
 }
 
@@ -129,15 +131,6 @@ std::string fourcc_prefix(const char *tag) {
 void resolve_item_traits(world::World &world, const DefItemsFile &items,
                          const ItemWireClassFn &wire_class, world::EntityHandle only) {
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
-    // The items.def load-order ordinal of the FIRST row per id: each `begin`
-    // appends the next slot, and the lookup returns the first match or 0.
-    // [orig: the `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the
-    //  row, ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount;
-    //  ItemList_FindIndexByTypeId @0x49E100 scans from row 0]
-    std::unordered_map<int, int32_t> first_index;
-    first_index.reserve(items.count);
-    for (size_t i = 0; i < items.count; ++i)
-        first_index.emplace(items.entries[i].id, static_cast<int32_t>(i));
     // Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
     // after this sweep) seed full health without an item-db reach-back [orig:
     // Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
@@ -174,9 +167,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
-        // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC]
-        const auto ordinal = first_index.find(def_id);
-        e->item_type_index = ordinal != first_index.end() ? ordinal->second : 0;
+        // The resolved row's load-order ordinal, 0 when no row matches (the
+        // "Null" row is ordinal 0 too): each `begin` appends the next row.
+        // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC; the
+        //  `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the row,
+        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount]
+        e->item_type_index = def != nullptr ? static_cast<int32_t>(def - items.entries) : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
         // [orig: Entity_InitOrganicAI @0x4BFE08, def+0x894]
@@ -215,8 +211,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const uint32_t attrib = def != nullptr ? def->attrib : 0u;
         world::stamp_item_attrib(*e, attrib, def != nullptr ? def->attrib2 : 0u);
         // The injected catalog supplies both the authoritative host stamp and
-        // the decoded-client record width. Missing/ambiguous definitions fail
-        // closed as Unknown (0).
+        // the decoded-client record width. A missing or unresolved definition
+        // fails closed as Unknown (0).
         e->net_class_code = wire_class ? wire_class(def_id) : 0;
         // items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
         const int hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
@@ -548,6 +544,9 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
         for (size_t i = 0; i < items.count; ++i) {
             const DefItemDef &def = items.entries[i];
             if (def.id < mission::kItemIdOffset) continue;
+            // A later row repeating an id is never the def its type resolves to
+            // [orig: ItemList_FindIndexByTypeId @0x49E100, first match].
+            if (find_item(by_id, def.id) != &def) continue;
             audio::OrganicSoundProfile op;
             if (def.sound_profile[0] != '\0')
                 op.primary = static_cast<int16_t>(

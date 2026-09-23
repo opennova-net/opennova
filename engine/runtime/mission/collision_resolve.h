@@ -23,8 +23,9 @@
 
 namespace opennova::mission {
 
-// Last-wins lookup over duplicate definition ids — the same load-order
-// overwrite the id-keyed item map exposed (see mission item_traits).
+// The items.def row an id resolves to: the FIRST row carrying it, in load
+// order; a later duplicate is never reached.
+// [orig: ItemList_FindIndexByTypeId @0x49E100]
 const opennova::def::DefItemDef *find_item_def(const opennova::def::DefItemsFile &items, int item_id);
 
 // Runtime item type -> items.def id, with the player's visual stand-in.

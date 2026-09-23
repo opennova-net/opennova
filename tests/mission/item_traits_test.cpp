@@ -3,7 +3,7 @@
 // byte, healthMax lift + retail i16 wrap, armor, AS zone attribs, corpse
 // timing), the per-item death-trait and 21-field vehicle-trait tables
 // (distinct sentinels per field so a transposition cannot pass), the
-// throwable class scan with last-wins duplicate ids, and the organic ammo
+// throwable class scan with first-wins duplicate ids, and the organic ammo
 // seed (§33.35). Parser token semantics are def's own tests; exotic fields are stamped
 // post-parse so this file pins only the FOLD's mapping.
 #include <formats/def/def.h>
@@ -228,13 +228,13 @@ const char kProfiles[] =
     "     SSLFootGND     T_DIRT_L_F\n"
     "end\n";
 
-// LAST entry with the id — the same row the fold's last-wins index resolves,
-// so post-parse stamps land on the row the fold will read.
+// FIRST entry with the id — the row the fold resolves, so post-parse stamps
+// land on the row the fold will read [orig: ItemList_FindIndexByTypeId
+// @0x49E100 returns the first match].
 DefItemDef *entry_for(DefItemsFile &f, int id) {
-    DefItemDef *found = nullptr;
     for (size_t i = 0; i < f.count; ++i)
-        if (f.entries[i].id == id) found = &f.entries[i];
-    return found;
+        if (f.entries[i].id == id) return &f.entries[i];
+    return nullptr;
 }
 
 EntityHandle spawn(World &w, int pool, uint16_t item_id, EntityKind kind) {
@@ -330,6 +330,7 @@ int main() {
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
     const EntityHandle truck_h = spawn(w, 1, 503, EntityKind::Item);
+    const EntityHandle dup_h = spawn(w, 1, 602, EntityKind::Item); // "S5 Dup A" then "S5 Dup B"
     const EntityHandle rifle_h = spawn(w, 0, 510, EntityKind::Organic);
     const EntityHandle player_h = spawn(w, 0, 5305, EntityKind::Organic);
     const EntityHandle bunker_h = spawn(w, 2, 520, EntityKind::Building);
@@ -568,13 +569,21 @@ int main() {
         CHECK(mine->think == ThrowClass::kAVMine);
         CHECK(mine->motor == ThrowClass::kSatchel);
     }
-    // Duplicate definition ids resolve last-wins (the later nade block).
+    // A duplicate definition id resolves to its FIRST row (the earlier clym
+    // block), for the class tables and for a placed entity alike: the later
+    // row is never reached. [orig: ItemList_FindIndexByTypeId @0x49E100 —
+    // `cmp [ecx],esi; jz` @0x49E120..0x49E122 returns the first hit]
     const ThrowableClassRow *dup = w.throwables.classes.get(602);
     CHECK(dup != nullptr);
     if (dup != nullptr) {
-        CHECK(dup->think == ThrowClass::kNade);
-        CHECK(dup->health_max == 12);
+        CHECK(dup->think == ThrowClass::kClaymore);
+        CHECK(dup->motor == ThrowClass::kClaymore);
+        CHECK(dup->health_max == 11);
     }
+    const Entity *dup_e = w.registry.get(dup_h);
+    CHECK(dup_e != nullptr && dup_e->health_max == 11);
+    CHECK(dup_e != nullptr &&
+          dup_e->item_type_index == static_cast<int32_t>(entry_for(file, 100602) - file.entries));
     CHECK(w.throwables.classes.get(500) == nullptr);
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.

@@ -64,12 +64,12 @@ void CollisionResolveState::clear() {
 }
 
 const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
-	// Last-wins over duplicate definition ids — the same load-order overwrite
-	// the id-keyed item map exposed (see mission item_traits).
-	const DefItemDef *found = nullptr;
+	// The first row carrying the id, scanning from row 0: a later duplicate is
+	// never reached. [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp
+	//  [ecx],esi; jz` @0x49E120..0x49E122 returns on the first hit]
 	for (size_t i = 0; i < items.count; ++i)
-		if (items.entries[i].id == item_id) found = &items.entries[i];
-	return found;
+		if (items.entries[i].id == item_id) return &items.entries[i];
+	return nullptr;
 }
 
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
