@@ -9497,7 +9497,7 @@ SSN, group, or area fan reaches the same entity/controller/brain mutations.
 | `Gsetaccuracy` | the same pair over matching pool-0 AI rows only [orig: WacCmd_GroupSetAccuracy @ 0x4F7BE0] | `set_group_accuracy` |
 | `ssnguard` | toggles entity Flags `0x40` for a resolved row, independent of whether it owns a brain [orig: WacCmd_SsnGuard @ 0x4F71C0] | `set_ssn_guard` |
 | `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
-| `Gremove` | removes every member of the WAC named group through `Server_RemoveEntityAndNotify` (S2C 0x12), with no gate, and returns 0 [orig: WacCmd_GroupRemove @ 0x4F1F80 (the Server_RemoveEntityAndNotify call @ 0x4F1FF2, the return @ 0x4F2006)] | the named-group walk in `wac/vm.cpp` calling `EntityCommands::remove_ssn` per member |
+| `Gremove` | removes every member of the WAC named group through `Server_RemoveEntityAndNotify` (S2C 0x12), with no gate, and returns 0 [orig: WacCmd_GroupRemove @ 0x4F1F80 (the Server_RemoveEntityAndNotify call @ 0x4F1FF2, the return @ 0x4F2006)] | the named-group walk in `wac/vm.cpp` calling `EntityCommands::server_remove_and_notify` per member (`script_command_parity`) |
 
 `wac_behavior` compiles and executes these names through the public VM seam; it
 pins the inclusive-distance boundary, wounded threshold, driver/gunner switch,
@@ -13158,9 +13158,22 @@ language as retail compiles it; the witnesses:
   nothing there. `WacAction_Win @ 0x4ED4A0` posts no line.
 - **Group walks and removal.** `WacCmd_GroupKill @ 0x4F1F40` and `WacCmd_GroupRemove
   @ 0x4F1F80` walk a WAC script group (the dword_C6EC40/44 rows of 0x2C) and call the
-  killSSN body or `Server_RemoveEntityAndNotify` per member. WAC `remove`
-  (`WacCmd_Remove @ 0x4EDCA0`) shares `Entity_TeleportAllByNetId` with BMS
-  VaporizeGroup (§38.8). Port: the Gkill / Gremove member walk in `vm.cpp`.
+  killSSN body or `Server_RemoveEntityAndNotify` per member (the call @ 0x4F1FF2, return 0
+  @ 0x4F2006); `WacCmd_RemoveSsn @ 0x4F1EE0` removes one SSN the same way (the call
+  @ 0x4F1F28, return 1 @ 0x4F1F30). `Server_RemoveEntityAndNotify @ 0x50A270` sends S2C
+  0x12 under mask 0x90 (@ 0x50A2AC), removes a Player row's placed devices
+  (`Entity_RemovePlacedDevicesByOwner @ 0x546E00`, the call @ 0x50A2BB: pool 1 in slot
+  order, the +0x1C gate @ 0x546E2D, the +0x170 owner @ 0x546E37, the def attrib 0x40 / 0x20
+  skips @ 0x546E46 / @ 0x546E50, the satchel, claymore and AV mine ammo @ 0x546E68 /
+  @ 0x546E8B / @ 0x546EAE, each through the same removal) and then destroys the row
+  (@ 0x50A2C4), so the joiners see the player's 0x12 and each device's before the destroy.
+  WAC `remove` (`WacCmd_Remove @ 0x4EDCA0`) shares `Entity_TeleportAllByNetId` with BMS
+  VaporizeGroup (§38.8). Port: the Gkill / Gremove member walk in `vm.cpp`; removeSSN and
+  Gremove call `EntityCommands::server_remove_and_notify`, which sweeps a removed player's
+  devices in place (`script_command_parity`: `test_wac_removals_notify_the_joiners`,
+  `test_player_removal_sweeps_placed_devices`). Carried: the player-death caller
+  (`Server_ProcessPlayerDeath`, @ 0x5178D8) keeps the port's owner-gone retirement in the
+  throwables tick.
 - **Carried:** the D-WAC-5 intern order on the S2C 0x23 wire.
 
 ### 38.8 BMS event runtime
