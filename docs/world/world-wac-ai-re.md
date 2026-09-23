@@ -101,8 +101,11 @@ Everything below was decompiled and read this session (pseudocode dumps:
 
 ### 3.1 Cadences (all gates on `current_tick + 36*net_id` stagger)
 - Motor + anim + integration: **every tick**.
-- Ground resample: every **8** ticks (`entity+676` cache; subtract `brain[11]` stand offset first).
-- Slope slide/lean: every **8** ticks. Gravity/ground resolve: every **2** ticks.
+- Ground resample: none in retail's org1 motor (`Entity_CalcAverageGroundHeight @ 0x457230` has no
+  organic caller; `+0x2A4` is read by `HUD_BuildEntityInfo @ 0x4B86F1`); the port's every-8-tick
+  `entity+676` sample is its own stand-in (the vertical-block gate, headless clearance).
+- Slope slide/lean: every **8** ticks. Gravity/ground resolve: every **2** ticks (even key ticks;
+  the odd tick re-applies the stored quarter step, §3.5 item 3).
 - AI think (nav/commands): every **16** ticks, authority only.
 - Perception scan: every **32** ticks (phase `(tick>>5)&3`); health regen + drowning: every 64.
 
@@ -190,7 +193,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
 - `AnimMap_UpdateDualChannels @ 0x40b8c0` (secondary then primary channel; entity+392/396 active
   handles, +696/700/708/712 channel state) → `AnimMap_UpdateEntity @ 0x40b5f0`:
   pending-state compare, **stance-transition interposition** (149/1/9/10→19 via 172("0xAC"); →11 via
-  169; 2→12 via 171; 8→18 via 170), **variant ring** (`table[id] = entry->next @ +36` each play),
+  169; 2→12 via 171; 8→18 via 170), **variant ring** (`table[id] = entry->next @ +36` each play; one ring-head table per loaded
+  `.adm`, shared by both channels of every body on it, and a row starts on its LAST token and
+  steps back through the file order, §38.3),
   `AnimChannel_InitFromParams(channel, clip@entry+32, blendDur 10|15, flag887, 4096)`,
   advance (blended) playback, then **root-motion keyframe eval** (PINNED 2026-06-10, disasm
   0x40b82f..0x40b8a3 + real-clip grill `tests/anim/root_motion_test.cpp`): the keyframe record IS
@@ -225,9 +230,12 @@ Everything below was decompiled and read this session (pseudocode dumps:
   through the same shared body (§14.8.7).
 
 ### 3.5 Integration (per tick, the motor core)
+The motor's full phase order is witnessed in §38.3: the NPC fire pass runs after the heading and
+look chase, and the recoil kick follows the think.
+
 1. Rotate the already blended primary-channel root delta by heading:
-   `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = π/2^31,
-   dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
+   `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = 1.4629627251502471e-09, a hair above
+   π/2^31, §38.8; dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
    State 31 (jump_loop) forces fwd = 1024.
 2. **`pos.xy += rotated_delta + vel(entity[38..39])`; `pos.z += vertical_delta`.**
    Flag 0x8000 (drowning) zeroes vertical; 0x100000 (CL ladder contact) zeroes
@@ -242,12 +250,18 @@ Everything below was decompiled and read this session (pseudocode dumps:
    idle bottom—the cross-clip delta that caused the visible position snap. The same
    ordering is used for authoritative NPC/local-player bodies and wire-owned remote
    player bodies.
-3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
-   byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
+3. Every EVEN key tick for org1 (corrected 2026-09-23, §38.3: outYaw = key & 1 `@ 0x4BF146`,
+   and an odd key tick jumps from `@ 0x4BF6A5..0x4BF6B2` to `@ 0x4BFC80`, skipping gravity, the
+   climb chase, the resolver, the landing/airborne edges and the ladder and water blocks, and
+   re-applies only the stored quarter step +0xAC; the org2 player body runs its gravity every
+   tick, §22.2): **gravity `vel_z(entity[40]) −= 416`** skipped while
    `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; the
    `Flags 0x80` org1 CLIMB mode replaces gravity with the 1/16-step chase to the
    AI move-target Z `entity[193]`/+0x304, cap 0x4000, floor −16384 — §30);
-   `pos.z += 2·vel_z`;
+   `pos.z += 2·vel_z`, then the vertical quarter-step tail `@ 0x4BFC65..0x4BFC7D` stores
+   +0xAC = (Z - saved + 2) >> 2 and Z = saved + that quarter, where saved is the post-integrate
+   Z (`@ 0x4BF6BA`) or the landing-snapped Z (`@ 0x4BF808`), so the body moves about vel_z per two
+   ticks (half the org2 player's rate for the same vel_z; `infantry_org1_parity`);
    `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
@@ -267,13 +281,19 @@ Everything below was decompiled and read this session (pseudocode dumps:
    Non-conforming bodies take the DECAY [orig: `@0x4ba133`]: `bodyPitch(+0x90)` and
    `Roll(+0x18)` ease to level 1/16-step — a live standing/crouched soldier neither
    slope-leans nor slope-slides (the slide impulse only exists inside the conform branch;
-   dead+airborne diverts to the corpse tumble `@0x4ba0b2` instead). Conforming: 4 probes
+   dead+airborne diverts to the corpse tumble instead, ported 2026-09-23: every 8th key tick
+   `@ 0x4BA08D..0x4BA10A`, a = (32 - (key & 63)) * 0xFFFFFF, b = (32 - (((key sar 6) - key) & 63))
+   * 0xFFFFFF, +0x2D0 = a + b, +0x2EC = +0x1A8, +0x90 and +0x18 chase a and b at eighth-step,
+   +0x1A8 += b >> 2, +0x360 = 0; the slope pass shifts in 32 bits before its clamp
+   `@ 0x4BA1C9..0x4BA1E8` / `@ 0x4BA225..0x4BA244`). Conforming: 4 probes
    `Entity_RaycastGroundHeight(entity, ±dir·22528>>22 …, 0x4000, 0x20000)` ahead/behind (pitch slope ×2^14)
    and left/right at quarter offset (roll slope ×2^16), clamp ±656175520; if |slope| >
    572662272: **slide** `vel ∓= dir·2^11>>22`; then `bodyPitch(+0x90)` and `Roll(+0x18)`
    chase the slopes at eighth-step [orig: `@0x4ba320`]; a dead NPC also aims along the
    slope (`+0x2D0 = pitchSlope`, `+0x2EC = targetHeading(+0x1A8)`, byte `+0x360 = 0`
-   [orig: `@0x4ba301-0x4ba319`]). The **org2 player leg** (`Entity_UpdateInfantryPlayerBody`) carries the
+   [orig: `@0x4ba301-0x4ba319`], ported 2026-09-23); the dead conform needs `!(Flags & 0x10A000)`
+   (org1 `@ 0x4BA12C`, org2 `@ 0x4B6DB6`), and `Entity_RaycastGroundHeight` returns the clipped
+   ray end (a miss returns z + 0x4000 - 0x20000), never a sentinel. The **org2 player leg** (`Entity_UpdateInfantryPlayerBody`) carries the
    SAME selector every tick [orig: `@0x4b6d95`] with the decay every tick [orig: `@0x4b6dbd`],
    but probes/chases only every 2nd tick (hold between) [orig: `test tick,1 @0x4b6de4`] and
    differs in kind: slopes are TRUE angles `ftol(atan2(dh, separation)·2^32/2π)`
@@ -517,8 +537,10 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     the parachute motor (2026-09-18, D-INF-20). Pinned by the airborne-steer case in `tests/world/infantry_test.cpp`
     (steer-before-decay ordering, the axis split off the heading high word, the no-input arm).
   - **D-INF-10** per-tick gravity, asymmetric by motor — **CLOSED for both legs 2026-07-16
-    (§22)**. Neither infantry mover gates the vertical step on tick parity. The NPC (org1)
-    falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
+    (§22)**. The player (org2) does not gate the vertical step on tick parity; the NPC
+    (org1) does (corrected 2026-09-23, §38.3): on even key ticks it falls `vel_z -= 416` then
+    `pos.z += 2·vel_z`, and its quarter-step tail keeps a quarter of the Z change and
+    re-applies it on the odd tick, so the body moves about vel_z per two ticks [orig:
     `Entity_UpdateInfantryAI @0x4bf7bf` (`add … 0xFFFFFE60`) / `@0x4bf7ec` (`add edx,edx`; `add
     [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once,
     folded into the root-dz store) [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf`
@@ -631,10 +653,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     tip). Ported as `AiSystem::infantry_slope_pass` with both legs; `AiEntity.body_pitch`
     (+0x90) added and fed to the §14 overlay body-pitch term; `AiEntity.def_attrib`
     carries the `def+84 & 0x200` selector leg (binding wiring deferred — JO infantry defs
-    leave it clear). Residuals: the dead+airborne corpse TUMBLE branch [orig: `@0x4ba0b2` /
-    `@0x4b6ccb`] unported (the pass holds instead); the dead leg's `Flags & 0x10A000`
-    swim/parachute exclusion unmodeled (rides D-INF-17's flag legs); org1 cadence uses the
-    port's entity-salted `key` (net_id-staggered) where the original uses the global tick.
+    leave it clear). Residuals: the org1 corpse tumble (`@ 0x4BA08D..0x4BA10A`), the dead slope aim and
+    the dead conform's `!(Flags & 0x10A000)` gate (org1 `@ 0x4BA12C`, org2 `@ 0x4B6DB6`) are
+    ported (2026-09-23, §38.3), and org1's cadence key is tick + 36 * netId in both engines
+    (`@ 0x4B9948..0x4B9953`); the player body's own tumble (`@ 0x4B6CCB..0x4B6D90`) stays
+    unported.
     Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
     / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
     `tests/world/infantry_test.cpp`.
@@ -1451,7 +1474,9 @@ chase yaws.
 - **Aim-state gate**: `g_animStateFlagsTable[animStateId] & 0x40` selects the bend branch. Prone
   states (0x603) and rolls/deaths lack 0x40 → no-bend branch: all body bones take the body matrix;
   arms get aim pitch + pitchKickAccum/4 + 2·pitchBlend (skipped when `Flags & 0x100000`); head keeps
-  full aim. Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
+  full aim. The org1 motor computes its own torso roll (`@ 0x4BE897..0x4BE8EA`: state 48 decays
+  t -= (t + 16) >> 5, otherwise t += (roll - t + 8) >> 4 clamped to roll +-0x0E38E380, with
+  no 41/42 ramp; §38.3). Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
   owns the whole body during combat rolls.
 - **Mounted config source and validity**: the gunner block reads the **target entity's item
   definition** dword `+0x86c` at `@0x4b1884`. Its producer is the items.def `phrase_set` branch in
@@ -2072,11 +2097,14 @@ shared advance onto AI bodies:**
    with a clip SYNTHESIZED in-test (one mask bone and one leg bone turned 90°) — the
    healthy-export trap makes a real-retail-only fixture pass for the wrong reason.
 3. **Per-entity BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks
-   per state (every quoted token on the row, file order) and `IRootMotionSource` gained
+   per state (every quoted token on the row; retail keeps one ring-head table per loaded
+   `.adm`, shared by both channels of every body on it, and serves a row LAST token first,
+   stepping back through the file order, §38.3; the body channels are served that way from
+   `AiSystem::anim_rings`) and `IRootMotionSource` gained
    `variant_count` / `advance_variant` (defaulted, so headless/test providers are
    unchanged) `[orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode
    @0x40c2d0]`. The secondary channel serves head-then-advance per play through
-   `InfantryState::wpn_ring_serve` (per-state heads, the `animState+72` cursor analog)
+   the per-.adm ring heads (the `animState+72` cursor analog)
    and latches the served entry as `wpn_variant` (the `+68` latch), which rides the
    weapon view (`body_anim_variant`), the present row (`PF_WPN_VARIANT /
    PF_WPN_SOURCE_VARIANT`), and both composition seams
@@ -2098,7 +2126,8 @@ shared advance onto AI bodies:**
    writer at 0x4B9A14..0x4B9A48 copies current and pending primary state into
    the secondary on every visible motor pass, before authority/interpolation
    and think. It has no equipped-ADM dependency. Both channels retain their
-   own phases, blends and variant rings; secondary root motion is discarded.
+   own phases and blends over the shared per-.adm ring heads; secondary root motion is
+   discarded.
    Section 33.19 records the implementation and regression replacing the
    former D-INF-24 assumption.
 
@@ -2443,7 +2472,9 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   On-disk BVOL types are ALREADY the runtime types — the remap switch cited in the
   format record is the ModSuperOed writer side, not a JO load step.
 - **Transforms.** Per-section 16-dword fixed matrices from the model callback
-  (`model+168`; collision header at `model+176`, ready gate dword`[32]`): row-major
+  (`model+168`; collision header at `model+176`, ready gate dword`[32]`, the CMDL
+  bounding-volume count: `Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0`, the +0x80 store
+  `@ 0x5B3D70`): row-major
   3x4, Q22 rotation rows with `+0x200000` rounding, world 16.16 translation at
   `[3]/[7]/[11]`, `[15]` bit 0 = section disabled. The callback contract is
   strictly ordinal: `callback_matrix[i]` transforms `COBJ[i]`. The ray walk
@@ -4571,16 +4602,21 @@ it reports — `0x100` → 32 `[orig: @ 0x517188..0x5171ca]`, `0x800` → 10 + r
 Lifetime: the plyr class callback clears bits 8..11 on every event outside
 `{1, 3, 4, 5}` — the body update's think (event 0) and the blast applier's
 notify (event 2) `[orig: @ 0x407b4d..0x407b4f]` — and re-arms `spawnPhase = 64`
-on every invocation past its dead return `[orig: @ 0x407b5e, @ 0x407c71]`.
+on every invocation past its dead return `[orig: @ 0x407b5e, @ 0x407c71]`; between the two
+re-arms it walks the body's waypoint list (`@ 0x407B64..0x407C6B`: the slot's +0x94 channel,
+team 1 or 2, each pool-3 node within its radius by the octagonal |dx|,|dy| test
+`@ 0x407BE1..0x407BF9`, then the group and single visited bits `@ 0x407C13` / `@ 0x407C35` /
+`@ 0x407C49`), ported as `player_body_waypoint_visits` and called from the player think, the
+script kills, the round hit (`@ 0x4E820E`), the blast (`@ 0x4E6B72`) and the knife kill zone
+(`@ 0x4E6752`) (§38.3).
 `Entity_UpdateInfantryPlayerBody` fires the callback as event 0 whenever
 `spawnPhase <= 0` and decrements it every tick, corpse included, immediately
 before its death edge `[orig: @ 0x4b4bc9..0x4b4be9, edge gate @ 0x4b4bf1]`. Net: a
 non-lethal head hit latches for up to 64 body ticks (each hit restarting the
 window) and the NEXT lethal hit of any kind reports critical with no revive
 window; conversely a critical kill landing on the tick the think fires reports
-standard (retail runs projectiles before that pool-0 body update; our AI tick
-precedes the round sim, so that 1-in-64 edge stays divergent — tick order, not
-a new row).
+standard (retail runs projectiles before that pool-0 body update, and since 2026-09-23 so does
+the port's one-pass entity update, §38.9).
 
 Port: `Entity::cause_flags` (the +0x2C bits 8..11), `LiveRound::player_kills`
 (+688), `player_body_class_think` (the event-0 clear + re-arm) run by
@@ -4594,9 +4630,9 @@ death producer (round, run-over, blast, scripted) reports the latched cause
 without a snapshot of its own; the suicide/AI-killer/team-kill branches return
 before the ladder and leave the bits latched, as retail does.
 `RoundDeath::event_flags` still mirrors `cause_flags & 0xF00` at the round-sim
-and drown producers but has no consumer left and is due for retirement. Not yet
-mirrored: the blast (event 2) clear/re-arm in the explosion applier, and the
-+0x2C state across a respawn (unwitnessed). Pinned by `projectile_combat_test`
+and drown producers but has no consumer left and is due for retirement. The blast
+(event 2) clear/re-arm is mirrored in the explosion applier (`destruction.cpp`); the
++0x2C state across a respawn stays unwitnessed. Pinned by `projectile_combat_test`
 (`test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence`,
 `test_same_projectile_second_player_kill_latches_0x100`), `death_state_test`,
 and `npruntime_server_tick_maintenance`
@@ -4605,39 +4641,59 @@ read, the reported-bit-only clear, the untouched suicide branch).
 
 ### 19.3 The infantry death edge — `Entity_UpdateInfantryAI @ 0x4b9c40` (health ≤ 0, once)
 
-Guards: word `entity+0x11E > 0` skips the edge (writer unwalked); `Flags & 2`
-already-dead skips. Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
+Guards: the health word `entity+0x11E > 0` skips the edge (`cmp [esi+11Eh],bp; jg` `@ 0x4B9C40`);
+`Flags & 2` already-dead skips (`@ 0x4B9C4D`; both to the corpse leg `@ 0x4B9D55`). The edge is
+the ONLY writer of the org1 dead bit (`or eax,2` `@ 0x4B9D18`, store `@ 0x4B9D1B`), so it runs
+once per life: a damage or script death only drives the health word, and the edge latches on
+the body's next motor tick (§38.3). Then, in order `[orig: @ 0x4b9c40-0x4b9d55]`:
 
 1. mounted (`entity+0x16C`) → `Entity_DetachFromVehicleIfServer @ 0x4359d0` — the
    corpse drops out of its seat; the edge tail also clears `Flags & 0xC0`.
-2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1`
-   variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
+2. corpse timer `entity+0x148` = `def+0x890` deathtime. The `byte entity+0x134 & 1` (bit 0 of the
+   section mask) variant instead: respawn tickets `+0x35E` = 0, timer = deathtime − 61, and NO
    scream (a silent-cleanup mode; the bit's writer is unwalked).
 3. the death scream: `Entity_PlaySound3D_FullVolume(Entity_GetProfileSlotSound(
    entity, slot))`, slot 8 `SSNightDead` when `Bms_AttribFlags & 0x100000`
    (EnableNVG = night) else 7 `sounddeath` — the def's resolved sound-profile
    table, not ammo sounds. PORTED 2026-07-17 (§17.4b).
-4. consume `+0x2C0`: zero → `ComputeAnimSlotIndex(0,0,4)` = 174, **`+0x178
-   lastAttacker = 0`** `[orig: @ 0x4b9ceb; the player-body edge's twin
-   @ 0x4b4c72..0x4b4c8d]` + dispatch `deathCallback(entity, 1, 0)` (org1 only) —
-   so a death nothing stamped reports unattributed (`GameEvent_PlayerDeath` treats
-   a null `+0x178` as self: revive 0, events 22/23/26 `[orig: @ 0x5172e6..0x51732a]`)
-   while one that follows a non-lethal hit keeps that hit's clip and shooter
-   (PORTED 2026-09-12, `tick_infantry`; the script deaths -- `kill_player`'s
-   unstamped killer and `raise_scripted_death` -- report `+0x178` as their
-   killer; the remote-player edge in `infantry_remote_anim.cpp` has no `+0x2C0`
-   consume yet, so its attacker-clear twin is the open half); then
-   **animState `+0x2BC` = the selection**
-   (drowning `Flags & 0x8000` overrides to 175), pending `+0x2B8` = 0, `Flags |= 2`,
-   death tick stamp `+0x1AC = current_tick`, `+0x2C0` = 0 (consumed), authority →
-   `Entity_CheckAndProcessDeath @ 0x51b550` (the §5.60 net/scoring router).
+4. consume `+0x2C0` (`@ 0x4B9CC9`): zero → `ComputeAnimSlotIndex(0,0,4)` = 174 (`@ 0x4B9CE5`),
+   **`+0x178 lastAttacker = 0`** `[orig: @ 0x4b9ceb; the player-body edge's twin
+   @ 0x4b4c72..0x4b4c8d]` and, org1 only, the class callback `deathCallback(entity, 1, 0)`
+   (`@ 0x4B9CF1`): for org0/org1 that is `Entity_HandleDamageTrigger @ 0x407310` event 1, which
+   gives a non-player the slot alert byte 2 (`@ 0x4073DB`) and `TriggerGroup_SetAlertRed`
+   (`@ 0x4073EA`), then exits when the global hit record's +0x40 is null (`@ 0x40740D`), else
+   runs the death-anim and debris legs on the last recorded round (§19.2). So a death nothing
+   stamped reports unattributed (`GameEvent_PlayerDeath` treats a null `+0x178` as self: revive
+   0, events 22/23/26 `[orig: @ 0x5172e6..0x51732a]`) while one that follows a non-lethal hit
+   keeps that hit's clip and shooter; the remote-player edge (`infantry_remote_anim.cpp`)
+   consumes `+0x2C0` the same way. Then **animState `+0x2BC` = the selection** (`@ 0x4B9D06`,
+   stored unchecked, so an unauthored selection plays the slot's registration fill; drowning
+   `Flags & 0x8000` overrides to 175 `@ 0x4B9D0E`), `Flags |= 2`, pending `+0x2B8` = 0
+   (`@ 0x4B9D1E`), death tick `+0x1AC = tick` (`@ 0x4B9D24` / `@ 0x4B9D2F`), `Flags &= ~0xC0`
+   (`@ 0x4B9D2A`), `+0x2C0` = 0 (consumed, `@ 0x4B9D38`), `+0x184` = 0 (`@ 0x4B9D3E`), and on
+   the authority (`@ 0x4B9D44`) `Entity_CheckAndProcessDeath @ 0x51b550` (the call
+   `@ 0x4B9D4D`, the §5.60 net/scoring router): a Player goes to `GameEvent_PlayerDeath`; any
+   other body sends S2C 0x13 (mask 0x90, `BuildDeathNotifyPayload @ 0x5036E0` [u16
+   handle][u16 +0x2C0], 0 for every edge death) and scores `GameEvent_ProcessScoring(gameType,
+   +0x178, 3, e, 0)` (`@ 0x51B5B3`). Its only callers are the two body edges and the console
+   KillPlayer (`@ 0x4D29EC`); `Entity_HandleDeathOnAuthority @ 0x407CC0` is the barrel
+   callback, not an organic path. The org1 edge is therefore the NPC death transaction (port:
+   `infantry_death_edge` / `org1_owns_death_transaction`, `infantry_death.cpp`): a damage-time
+   death of an org1 body only tallies, and a script death records nothing for it. A fatal
+   fall stages `+0x178 = self` and the generic clip first (org1 `@ 0x4BF86B` / `@ 0x4BF879`;
+   org2 `@ 0x4B7D7D` / `@ 0x4B7D8B`). The player-body edge mirrors these legs without the
+   class callback (`@ 0x4B4BF1..0x4B4CEA`); its transaction still comes from the host's
+   damage-time route (D-AI-9).
 
 The death clips are non-looping — the anim channel clamps at the last frame, so the
 corpse holds its pose (the port's `InfantryRootMotion` documents the same clamp).
 
 ### 19.4 Corpse persistence — the dead leg `@ 0x4b9e4d-0x4ba000`
 
-Per dead tick, after the weapon/drag block:
+The corpse leg runs while the dead bit is set (`mov eax,[esi+24h]; test al,2; jz`
+`@ 0x4B9D55..0x4B9D5A`), not on health, as do the think gate (`@ 0x4BA98B`) and the slope
+pass (`@ 0x4BA084`): a script health write on a corpse leaves it dead. Per dead tick, after
+the weapon/drag block:
 
 - **LeaveCorpse** (`attrib & 0x400000`) && `!(byte +0x134 & 1)` → skip everything:
   the corpse never expires.
@@ -4655,8 +4711,8 @@ Bonus decode: the `entity+0x350` branch above this block is the MEDIC-DRAG follo
 a linked dragger's hand-bone world delta moves the corpse each tick and forces anim
 139 `draggee` `[orig: @ 0x4b9d9c-0x4b9e41]`.
 
-The port maps despawn to `Entity::hidden` (our registry keeps the slot; the health
-store already gates every consumer) and runs the watch-check only outside a network session (the retail `!is_in_session`
+The port maps despawn to `Entity::hidden` (our registry keeps the slot; the dead bit
+already gates every consumer) and runs the watch-check only outside a network session (the retail `!is_in_session`
 gate: `AiSystem::is_in_session`, stamped from the session fact, plus `rules.mp_session`) from the
 entity origins, as retail does; the former 0.9 u endpoint lift is removed (§33.12;
 `player_watches`, `infantry_spawn.cpp`).
@@ -4740,9 +4796,12 @@ the cveh SM tick; our earlier bring-up event is removed).
 
 ### 19.7 Open follow-ups (this session's unknowns)
 
-1. `entity+0x11E` (the death-edge skip word) and `byte +0x134` bit 0 (the silent
-   cleanup) — writers unwalked.
-2. The drowning source (`Flags & 0x8000` → 175) rides the unmodeled swim flags.
+1. RESOLVED for `entity+0x11E`: it is the health word (the damage appliers, the script
+   health writers and the fatal fall write it; §38.3, §38.7). `byte +0x134` bit 0 (the silent
+   cleanup, bit 0 of the section mask) stays unwalked.
+2. RESOLVED 2026-09-23: the drowning source is the float latch `Flags & 0x8000` (§29.1);
+   the org1 edge (`@ 0x4B9D0E`) and both player-body edges (`@ 0x4B4C93..0x4B4CAB`) take 175
+   from it.
 3. The player edge (`Entity_UpdateInfantryPlayerBody @ 0x4b4c72/0x4b61c6/0x4b7d83`
    sites) shares the same consume; the player-death PRESENTATION (death camera,
    respawn flow) is the P2b slice; its death camera is ported (camera mode 4,
@@ -5391,7 +5450,7 @@ the gravity-cadence case, and the player-jump case in
 | Finding | Witness |
 |---|---|
 | org2 gravity: `vel_z −= 208` EVERY tick, skipped while Flags 0x108000 (ladder/drowning); terminal clamp −32768; `pos.z += vel_z + root_dz` in ONE store (ours splits the two adds, same net) | `[orig: gate @ 0x4b7ac8; step @ 0x4b7acf; clamp @ 0x4b7c77; pos @ 0x4b7cef]` |
-| org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z` | `[orig: @ 0x4bf7b8-0x4bf7ee]` |
+| org1 gravity re-pinned with the same gate shape: skip on 0x108000, `−416`, clamp, `pos.z += 2·vel_z`, on even key ticks only, then the quarter-step tail (§38.3) | `[orig: @ 0x4bf7b8-0x4bf7ee; odd skip @ 0x4BF6A5..0x4BF6B2; tail @ 0x4BFC65..0x4BFC86]` |
 | The horizontal integrate is 1× (rotated root delta + vel) for BOTH motors in normal play; the org2 local-player 2× branch is gated on `g_localPlayerPoofMode` — see D-INF-21 | `[orig: org1 @ 0x4bf684-0x4bf6a2; org2 1× @ 0x4b7cbf-0x4b7cd9; 2× gate @ 0x4b7c8d]` |
 | Jump cooldown lives in the REUSED +0x1A8 slot (org1's targetHeading): clamp [0,32], >1 counts down, parks at 1 while the jump key (MoveOrder bit 5) is held, key release → 0 — no auto-repeat on a held key | `[orig: @ 0x4b7de0-0x4b7e15; release edge @ 0x4b7e78-0x4b7e82]` |
 | Jump gates: cooldown 0 + key held + not prone (the cached prone local, also the freelook-pitch-halving and lean-skip selector) + `!(Flags & 0x1A002)` (in-air/dead/the water pair) + not carried (0x40) | `[orig: @ 0x4b7e8c-0x4b7ebd]` |
@@ -5422,7 +5481,13 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
   and keeps the remote seat heading separate from the local player's full-precision look.
   An unseeded carrier's angles are its placement's spawn form, ((deg << 16) / 360) << 16
   [orig: Entity_SpawnFromBMSRecord @ 0x40EB42..0x40EBA6], and the seat offset composes in BAM as for
-  a seeded carrier (`pose_mounted_occupant`, 2026-09-23).
+  a seeded carrier (`pose_mounted_occupant`, 2026-09-23). The org1 motor writes +0x28 = +0x16C at
+  its head (`@ 0x4B9A0D..0x4B9A11`), so the deck ride (`@ 0x4BA45D`) runs for riders: the look and
+  aim adoption is skipped for an ISTURRET parent or a target on another carrier
+  (`@ 0x4BA812..0x4BA840`), while body, target, legs, pitch and roll always take the delta
+  (`@ 0x4BA861..0x4BA88E`); the mounted block scrubs the flags (`@ 0x4BEC03`) and vel_z
+  (`@ 0x4BEC15`), and a seat whose bone does not resolve kills a boarding rider and detaches it
+  (§38.3).
 - Player heading/legs rewritten to the §22.1 model (was the org1 approximation);
   NPC legs corrected to the midpoint re-plant value, staggered windows, and the
   walk half-snap path (§3.3).
@@ -8732,11 +8797,14 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   same block (`@ 0x4b8304-0x4b8360`, presentation-only).
 - **org1 (NPC) — the snap form** `[orig: @ 0x4bfb16-0x4bfc86]`: float target
   `water + bob - height(+0x74)/2 - 0x4C9 + min(capsule_bottom, 0)` with the
-  bob for EVERY row (no local gate), then the tail rewrites
-  `pos.z = z_saved + (target - z_saved + 2) >> 2` where `z_saved` is the
-  POST-INTEGRATE z captured before gravity `[orig: the save @ 0x4bf6ba; the
-  quarter-step tail through `+0xAC` @ 0x4bfc65-0x4bfc86]` — gravity's and the
-  resolver's z contributions are DISCARDED while afloat. org1 never sets the
+  bob for EVERY row (no local gate), reading the eye height +0x74 restamped
+  this tick (`@ 0x4BFB66`, `@ 0x4BF14C`); the water block stores the target
+  (`@ 0x4BFB84`), and the org1 motor's GENERAL vertical tail, which runs on every
+  even key tick afloat or not, settles it: Z = saved + ((Z - saved + 2) >> 2),
+  that quarter stored in +0xAC and re-applied on the odd key tick (`@ 0x4BFC80`),
+  where saved is the post-integrate Z (`@ 0x4BF6BA`) or the landing-snapped Z
+  (`@ 0x4BF808`) `[orig: the tail @ 0x4BFC65..0x4BFC86]`. The block runs on even key
+  ticks only (the odd tick skips to `@ 0x4BFC80`). org1 never sets the
   dive bit (clears it on exit only).
 - **Motion couplings**: `0x8000` suppresses the vertical root channel and
   `0x100000` the horizontal pair — BOTH motors store true ZEROS (CORRECTED
@@ -10415,7 +10483,8 @@ The org1 secondary writer is now witnessed and implemented: [orig:
 Entity_UpdateInfantryAI @0x4b9910 (the site @0x4B9A14..0x4B9A48)] copies primary
 current +0x2BC to secondary +0x2C8 and primary pending +0x2B8 to secondary
 pending +0x2C4 at the motor head before the authority/interpolation gate and
-think. Each channel retains its own phase, blend and variant ring. The secondary
+think. Each channel retains its own phase and blend; the variant ring heads are per
+`.adm` and shared by both channels (§38.3). The secondary
 advances first and contributes no root motion. No equipped-ADM lookup
 participates in this writer; the earlier D-INF-24 dependency on finding such a
 source was incorrect. The player hold-pose/reload-window selector remains
