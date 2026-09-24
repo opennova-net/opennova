@@ -8,12 +8,16 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/build/opennova_3di.zip}"
+build="$root/build/blender-addon"
 
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release > /dev/null
-cmake --build "$root/build" --config Release --target opennova_3di
+# Keep the package's static MSVC runtime separate from development builds.
+# The installed add-on must not require a separately installed VC++ runtime.
+cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded > /dev/null
+cmake --build "$build" --config Release --target opennova_3di
 
-exe="$root/build/apps/threedi_cli/Release/opennova-3di.exe"
-[ -f "$exe" ] || exe="$root/build/apps/threedi_cli/opennova-3di.exe"
+exe="$build/apps/threedi_cli/Release/opennova-3di.exe"
+[ -f "$exe" ] || exe="$build/apps/threedi_cli/opennova-3di.exe"
 [ -f "$exe" ] || { echo "opennova-3di was not built" >&2; exit 1; }
 
 python - "$root/tools/blender/opennova_3di" "$exe" "$out" <<'EOF'

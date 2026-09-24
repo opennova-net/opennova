@@ -18,6 +18,8 @@ Select the downloaded zip without unpacking it. Windows x64 only for now.
 To build locally, `scripts/package_blender_addon.sh [out.zip]` builds the CLI
 and the installable zip (default `build/opennova_3di.zip`). PRs and releases
 use the same packaging workflow and smoke-test the CLI extracted from the zip.
+The CLI links the Visual C++ runtime statically, so no separate runtime
+installation is needed. Its dedicated build directory is `build/blender-addon`.
 
 ## Importing
 

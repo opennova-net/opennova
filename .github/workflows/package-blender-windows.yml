@@ -53,6 +53,12 @@ jobs:
           $unpacked = "build/blender-package-smoke"
           Expand-Archive -LiteralPath dist/opennova-blender-addon-windows.zip -DestinationPath $unpacked -Force
           $cli = "$unpacked/opennova_3di/bin/opennova-3di.exe"
+          $dependencies = & dumpbin /DEPENDENTS $cli | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect packaged CLI dependencies" }
+          Write-Host $dependencies
+          if ($dependencies -match '(?i)\b(?:MSVCP|VCRUNTIME)\w*\.dll\b') {
+            throw "Packaged CLI requires an unbundled Visual C++ runtime DLL"
+          }
           & $cli build tests/fixtures/threedi/o3d/spinner.o3d -o "$unpacked/spinner.3di"
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to build a model" }
           & $cli scene "$unpacked/spinner.3di" -o "$unpacked/spinner.o3d"
