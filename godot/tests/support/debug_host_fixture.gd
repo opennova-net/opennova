@@ -5,9 +5,9 @@ extends DebugShellHost
 ## an interface class faked by overriding its hooks): the owners a test lends
 ## the table (a REAL MissionRoot whose Simulation is the engine row owner, an
 ## optional world, presenter and viewport-bearing node), a settable authority
-## fact, and a counter for the shell's return-to-menu leg. Every hook answers
-## live, so a test swaps `runtime` between calls the way a mission reload
-## swaps the shell's.
+## fact, and counters for the shell's resume and return-to-menu legs. Every
+## hook answers live, so a test swaps `runtime` between calls the way a
+## mission reload swaps the shell's.
 
 var runtime: MissionRoot = null
 var world: GameWorld = null
@@ -15,6 +15,7 @@ var player: LocalPlayerPresenter = null
 ## The node whose viewport the viewport rows mutate (a test passes itself).
 var viewport_node: Node = null
 var authority := true
+var resume_calls := 0
 var return_to_menu_calls := 0
 var return_to_menu_result: Error = OK
 
@@ -44,6 +45,17 @@ func _viewport() -> Viewport:
 			or not viewport_node.is_inside_tree():
 		return null
 	return viewport_node.get_viewport()
+
+
+## The shell's resume leg plays the runtime (the game's leg also closes a
+## pause overlay, which a fixture has none of).
+func _resume() -> Error:
+	resume_calls += 1
+	var live := _runtime()
+	if live == null:
+		return ERR_UNAVAILABLE
+	live.play()
+	return OK
 
 
 func _return_to_menu() -> Error:

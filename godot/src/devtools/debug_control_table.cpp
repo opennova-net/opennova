@@ -717,7 +717,8 @@ void DebugControlTable::register_audio_actions() {
 void DebugControlTable::register_runtime_rows() {
 	// The runtime's own transport (MissionRoot): pause and step report the
 	// engine session's own refusal for multiplayer roles (the network pump
-	// must keep running).
+	// must keep running); resume is the shell's resume leg, which also closes
+	// a pause overlay (the in-game menu, the armory) left up.
 	Entry &transport = action(control_id::kRuntimeTransport, "Sim", "Runtime transport",
 			"Resume, pause, or single-step the real game runtime.",
 			DebugControlRow::TARGET_GAME_SHELL, DebugControlRow::OWNER_ENGINE,
@@ -733,8 +734,7 @@ void DebugControlTable::register_runtime_rows() {
 			return outcome_error(value->pause() ? OK : ERR_UNAVAILABLE);
 		}
 		if (verb == "resume") {
-			(void)value->play();
-			return outcome_error(OK);
+			return outcome_error(host_->resume());
 		}
 		if (verb == "step") {
 			return outcome_error(value->step_once() ? OK : ERR_UNAVAILABLE);
@@ -742,8 +742,9 @@ void DebugControlTable::register_runtime_rows() {
 		return outcome_error(ERR_INVALID_PARAMETER);
 	};
 
-	// F3's local Stop button shares the control without classifying leaving a
-	// multiplayer session as an authoritative world mutation.
+	// Leaving is the shell's gated return leg, shared with MCP's game_control,
+	// without classifying leaving a multiplayer session as an authoritative
+	// world mutation.
 	Entry &return_to_menu = action(control_id::kRuntimeReturnToMenu, "Sim", "Return to menu",
 			"Leave the current world locally and return to the game menu.",
 			DebugControlRow::TARGET_GAME_SHELL, DebugControlRow::OWNER_DEVICE);
