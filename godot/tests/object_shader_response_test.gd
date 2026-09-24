@@ -103,6 +103,8 @@ func _quad(material: ShaderMaterial, left_normal := Vector3.BACK,
 	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([
 		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
 	arrays[Mesh.ARRAY_TEX_UV2] = arrays[Mesh.ARRAY_TEX_UV]
+	arrays[Mesh.ARRAY_TANGENT] = PackedFloat32Array([
+		1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1])
 	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -305,3 +307,29 @@ func test_object_sampler_stops_at_the_textures_last_retail_mip_level() -> void:
 	var pixel: Color = await _centre(viewport)
 	assert_gt(pixel.b, 0.8, "the minified card samples its last level: %s" % pixel)
 	assert_lt(pixel.r + pixel.g, 0.4, "not a level below it: %s" % pixel)
+
+
+func test_reflection_view_draws_the_dot3_clip_technique_for_vs_effects() -> void:
+	# Dot3DiffT/PhongT/Dot3DiffO/BDiffT2 CLIP: P0 = sat(sat(DirLightColor) x
+	# N.L + hemisphere), P2 = 2 x Diffuse1 x that; no Diffuse1 alpha test.
+	# DirLightColor 3 saturates to 1 in the TFACTOR: 2 x 0.25 x sat(1 + 0.25)
+	# = 0.5, where NORMAL lights 0.25 x (0.25 + 3) x 2 to white; a cutout
+	# wrapper's faint Diffuse1.a 0.2 is not tested by CLIP (only its clip
+	# stage is).
+	if not _rd_available():
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	_flat_hemisphere(0.25)
+	_global("opennova_light_block_dir_color", Vector3.ONE * 3.0)
+	var configure := func(material: ShaderMaterial) -> void:
+		material.set_shader_parameter("u_normal_map", _solid(Color(0.5, 0.5, 1.0, 1.0)))
+		material.set_shader_parameter("u_alpha_test_threshold", 0.5)
+	var card := _solid(Color(0.25, 0.25, 0.25, 1.0))
+	var normal: Color = await _render("phong_tangent_diffuse/opaque_double_sided", card, configure)
+	assert_almost_eq(normal.r, 1.0, 0.02, "NORMAL: the bump-diffuse pass saturates: %s" % normal)
+	_arm_reflection_view()
+	var clip: Color = await _render("phong_tangent_diffuse/opaque_double_sided", card, configure)
+	assert_almost_eq(clip.r, 0.5, 0.02, "CLIP: 2 x 0.25 x sat(1 + 0.25): %s" % clip)
+	var faint := _solid(Color(0.25, 0.25, 0.25, 0.2))
+	var cutout: Color = await _render("dot3_tangent/cutout_mix_double_sided", faint, configure)
+	assert_almost_eq(cutout.r, 0.5, 0.02, "CLIP ignores the Diffuse1 alpha test: %s" % cutout)

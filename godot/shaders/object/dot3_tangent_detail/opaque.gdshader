@@ -5,6 +5,7 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
 #define OBJ_ALPHA_MOD_NONE
 #define OBJ_COVERAGE_NORMAL_ALPHA
 #define OBJ_CLIP_EXPLICIT
+#define OBJ_CLIP_DOT3
 #define OBJ_VERTEX_POINT_LIGHTS_ATTENUATION
 #define OBJ_MATCHTERRAIN_NO_PASS
 

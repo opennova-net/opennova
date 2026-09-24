@@ -37,7 +37,7 @@ void vertex() {
 	#else
 	v_pixel_point_factor = vec4(0.0);
 	#endif
-	#ifdef OBJ_VERTEX_POINT_LIGHTS_ATTENUATION
+	#if defined(OBJ_VERTEX_POINT_LIGHTS_ATTENUATION) || defined(OBJ_CLIP_DOT3)
 	v_pixel_point_attenuation = obj_pixel_point_vertex_attenuations(v_world_pos);
 	#else
 	v_pixel_point_attenuation = vec4(0.0);

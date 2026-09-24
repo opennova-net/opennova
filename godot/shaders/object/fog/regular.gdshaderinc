@@ -11,5 +11,11 @@ vec3 obj_apply_policy_fog(vec3 lit, vec3 camera_position_world) {
 				obj_scene_fog_visibility(camera_position_world));
 	}
 	#endif
+	#ifdef OBJ_CLIP_DOT3
+	// The DOT3 CLIP body fogs each of its passes itself.
+	if (obj_water_reflection_clip_view(camera_position_world)) {
+		return lit;
+	}
+	#endif
 	return obj_apply_fog(lit, camera_position_world);
 }

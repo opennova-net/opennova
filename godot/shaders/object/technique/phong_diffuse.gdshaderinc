@@ -1,5 +1,14 @@
 void obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix,
 		out vec3 output_lit, out float output_alpha) {
+	#ifdef OBJ_CLIP_DOT3
+	// The armed reflection view draws the effect's fixed-function DOT3 CLIP
+	// technique instead of NORMAL (surface.gdshaderinc).
+	if (obj_water_reflection_clip_view(camera_position_world)) {
+		obj_evaluate_dot3_clip_surface(camera_position_world, model_matrix,
+				output_lit, output_alpha);
+		return;
+	}
+	#endif
 	vec4 base; vec3 view_dir; vec3 normal; vec3 geom_normal;
 	obj_prepare_surface(camera_position_world, model_matrix,
 			base, view_dir, normal, geom_normal);
