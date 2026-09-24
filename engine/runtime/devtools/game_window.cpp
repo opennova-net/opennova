@@ -4,7 +4,132 @@
 
 #include <imgui.h>
 
+#include <cstdio>
+
 namespace opennova::devtools {
+
+const char *status_role_label(StatusRole role) {
+	switch (role) {
+		case StatusRole::SinglePlayer:
+			return "single player";
+		case StatusRole::ListenServer:
+			return "listen server";
+		case StatusRole::Joiner:
+			return "joiner";
+		case StatusRole::DedicatedServer:
+			return "dedicated server";
+	}
+	return "?";
+}
+
+const char *status_state_label(StatusState state) {
+	switch (state) {
+		case StatusState::Unloaded:
+			return "unloaded";
+		case StatusState::Connecting:
+			return "connecting";
+		case StatusState::Loading:
+			return "loading";
+		case StatusState::Running:
+			return "running";
+		case StatusState::Paused:
+			return "paused";
+		case StatusState::Stopping:
+			return "stopping";
+		case StatusState::Failed:
+			return "failed";
+	}
+	return "?";
+}
+
+void GameWindow::set_status(const GameStatusSnapshot &status) {
+	status_ = status;
+	char buf[192];
+	if (!status_.world) {
+		std::snprintf(buf, sizeof(buf), "%.0f fps  %.1f ms (peak %.1f) | no world", status_.fps,
+				status_.frame_ms, status_.frame_ms_peak);
+	} else {
+		char peers[32] = "";
+		if (status_.role == StatusRole::ListenServer || status_.role == StatusRole::DedicatedServer) {
+			std::snprintf(peers, sizeof(peers), ", %d peer%s", status_.peers,
+					status_.peers == 1 ? "" : "s");
+		}
+		std::snprintf(buf, sizeof(buf), "%.0f fps  %.1f ms (peak %.1f) | tick %llu | %s%s, %s",
+				status_.fps, status_.frame_ms, status_.frame_ms_peak,
+				static_cast<unsigned long long>(status_.logic_tick), status_role_label(status_.role),
+				peers, status_state_label(status_.state));
+	}
+	status_text_ = buf;
+}
+
+void GameWindow::request_transport(const char *verb) {
+	control_requests_.push_back({control_id::kRuntimeTransport, {ControlArg::string(verb)}});
+}
+
+void GameWindow::request_scripts_paused(bool paused) {
+	control_requests_.push_back({control_id::kRuntimeWacPaused, {ControlArg::boolean(paused)}});
+	board_.set_local_value(control_id::kRuntimeWacPaused, ControlArg::boolean(paused));
+}
+
+void GameWindow::request_return_to_menu() {
+	control_requests_.push_back({control_id::kRuntimeReturnToMenu, {}});
+}
+
+void GameWindow::wanted_controls(std::vector<const char *> &out) const {
+	out.push_back(control_id::kRuntimeTransport);
+	out.push_back(control_id::kRuntimeWacPaused);
+	out.push_back(control_id::kRuntimeReturnToMenu);
+}
+
+void GameWindow::draw_toolbar() {
+	// The transport row's writability is the table's own verdict (a network
+	// role is refused pause/step natively; the reason is the tooltip).
+	const ControlState *transport = board_.state(control_id::kRuntimeTransport);
+	const bool transport_ok = transport != nullptr && transport->writable;
+	const auto transport_button = [&](const char *label, const char *verb, bool enabled) {
+		ImGui::BeginDisabled(!transport_ok || !enabled);
+		if (ImGui::Button(label)) request_transport(verb);
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
+			if (!transport_ok && transport != nullptr && !transport->reason.empty()) {
+				ImGui::SetTooltip("%s", transport->reason.c_str());
+			} else if (status_.transport_locked && std::string(verb) != "resume") {
+				ImGui::SetTooltip("A network session keeps ticking: pause and step are refused.");
+			}
+		}
+		ImGui::SameLine();
+	};
+	transport_button(status_.playing ? "Pause" : "Paused", "pause", status_.playing);
+	transport_button("Step", "step", !status_.playing);
+	transport_button("Resume", "resume", true);
+
+	const ControlState *scripts = board_.state(control_id::kRuntimeWacPaused);
+	bool scripts_paused = scripts != nullptr && scripts->has_value && scripts->value.b;
+	ImGui::BeginDisabled(scripts == nullptr || !scripts->writable);
+	if (ImGui::Checkbox("Scripts paused", &scripts_paused)) request_scripts_paused(scripts_paused);
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
+		ImGui::SetTooltip("Pause the mission's WAC scripts while the rest of the world runs.");
+	}
+	ImGui::SameLine();
+
+	const ControlState *leave = board_.state(control_id::kRuntimeReturnToMenu);
+	ImGui::BeginDisabled(leave == nullptr || !leave->writable || !status_.world);
+	if (ImGui::Button("Leave...")) ImGui::OpenPopup("leave_world");
+	ImGui::EndDisabled();
+	if (ImGui::BeginPopup("leave_world")) {
+		ImGui::TextUnformatted("Leave this world and return to the menu?");
+		if (ImGui::Button("Leave")) {
+			request_return_to_menu();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("%s", status_text_.c_str());
+}
 
 void GameWindow::set_play_available(bool available) {
 	if (available == play_available_) {
@@ -89,6 +214,7 @@ void GameWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				? "Detach the local player and unlock the free camera. Enter Play, then hold right mouse and use WASD/Q/E to fly."
 				: "Spectator switching requires a local authority player.");
 	}
+	draw_toolbar();
 	ImGui::Separator();
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::GetIO().WantTextInput &&
 			!escape_already_handled_) {

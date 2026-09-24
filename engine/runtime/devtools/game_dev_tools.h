@@ -9,10 +9,12 @@
 // flavour compiles this out and its DevTools node is inert.
 #pragma once
 
+#include <runtime/devtools/control_board.h>
 #include <runtime/devtools/frame_stats_board.h>
 #include <runtime/devtools/imgui_pass.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace opennova::devtools {
 
@@ -30,6 +32,7 @@ enum class GameInputMode;
 enum class GameWindowRequest;
 struct ControlRequest;
 struct ControlResult;
+struct GameStatusSnapshot;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct WeaponDefinitionSnapshot;
@@ -74,6 +77,24 @@ public:
 
 	// The board the Stats window reads (owned by the embedder; may be null).
 	void set_frame_stats(FrameStatsBoard *board);
+
+	// The control board (control_board.h): the debug-control table's catalog,
+	// pushed once by the embedder when it lends the table, and the live
+	// states of the rows the visible windows want (wanted_control_ids),
+	// pushed on kControlStateSeconds while needs_control_states.
+	static constexpr double kControlStateSeconds = 0.25;
+	ControlBoard &control_board() { return control_board_; }
+	const ControlBoard &control_board() const { return control_board_; }
+	void set_control_catalog(std::vector<ControlSpec> catalog);
+	void set_control_states(const std::vector<ControlState> &states);
+	bool needs_control_states() const;
+	void wanted_control_ids(std::vector<const char *> &out) const;
+
+	// The Game window's status readout, pushed while the tools are open.
+	void set_game_status(const GameStatusSnapshot &status);
+	bool needs_game_status() const { return pass_.is_open(); }
+	const GameWindow &game_window() const { return *game_window_; }
+	GameWindow &game_window() { return *game_window_; }
 
 	// The Entities window's record channel (ADR 0042 d6). The embedder pushes
 	// the directory by value (an invalid snapshot clears; it carries the
@@ -144,6 +165,9 @@ public:
 	bool take_physics_request(PhysicsRequest &request);
 
 private:
+	// Declared before the pass: the windows hold a reference to the board and
+	// the pass's destructor still calls their on_visibility.
+	ControlBoard control_board_;
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;

@@ -164,7 +164,14 @@ private:
 	void push_rays_snapshot();
 	void apply_physics_requests();
 	void push_physics_snapshot();
+	void push_control_catalog();
+	void push_control_states();
+	void push_game_status();
 	void set_game_playing_internal(bool p_playing);
+	// The one cadence gate every record push shares: true (and the stamp
+	// moved) when p_seconds have passed since the last push, or none was made
+	// (a stamp of -1 means push on the next needy frame).
+	static bool push_due(int64_t &r_last_ms, double p_seconds);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
 	bool open_ = false; // the last state the shell was told about
@@ -192,6 +199,12 @@ private:
 	bool rays_recording_ = false;
 	int64_t last_physics_push_ms_ = -1;
 	bool contacts_recording_ = false;
+	int64_t last_control_state_push_ms_ = -1;
+	int64_t last_status_push_ms_ = -1;
+	// The display frame the status readout averages between pushes.
+	double frame_ms_sum_ = 0.0;
+	double frame_ms_peak_ = 0.0;
+	int64_t frame_ms_count_ = 0;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

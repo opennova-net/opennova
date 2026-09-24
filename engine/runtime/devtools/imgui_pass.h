@@ -86,6 +86,11 @@ public:
 	virtual bool owns_frame() const { return false; }
 	// The "Windows" menu section the window lists under.
 	virtual MenuGroup menu_group() const { return MenuGroup::Tools; }
+	// The debug-control rows this window reads through the control board
+	// (control_board.h) while it shows: the embedder pushes their live
+	// states on the board's cadence. The ids are debug_control_ids.h
+	// constants.
+	virtual void wanted_controls(std::vector<const char *> &out) const { (void)out; }
 
 	// Focus this window (and select its tab in its dock node) on the pass's
 	// next layout in which the window exists: a window sharing a dock node

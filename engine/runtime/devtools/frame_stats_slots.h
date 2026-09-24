@@ -21,7 +21,7 @@
     X(FRAME_ROUND_FLOW, "post-HUD round-cycle/session transition checks") \
     X(FRAME_MENU_SHELL, "visible MenuShell driver + portrait model frame") \
     X(FRAME_MENU_VIDEO, "native Bink decode + texture upload") \
-    X(FRAME_DEBUG_REFRESH, "the dev tools' ImGui layout pass (ImGuiPass::draw_frame) on the frames it runs") \
+    X(FRAME_DEBUG_REFRESH, "the dev tools' cost on the frames they are open: the ImGui layout pass, the request drains and the record pushes") \
     X(FRAME_PROCESS_CALLBACKS, "earliest-to-latest idle Node callback window") \
     X(FRAME_PHYSICS_CALLBACKS, "summed earliest-to-latest physics callback windows") \
     /* The engine time outside every Node callback, split at Godot's draw */ \

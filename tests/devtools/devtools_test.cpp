@@ -211,6 +211,124 @@ void test_status_line_and_close_request() {
 	CHECK(!tools.pass().is_open(), "the pass closes at the end of that layout pass");
 }
 
+// The catalog rows the toolbar reads, as the table lists them.
+std::vector<opennova::devtools::ControlSpec> transport_catalog() {
+	using opennova::devtools::ControlKind;
+	using opennova::devtools::ControlSpec;
+	std::vector<ControlSpec> catalog(4);
+	catalog[0].id = control_id::kRuntimeTransport;
+	catalog[0].label = "Runtime transport";
+	catalog[0].kind = ControlKind::Action;
+	catalog[1].id = control_id::kRuntimeWacPaused;
+	catalog[1].label = "Pause mission scripts";
+	catalog[1].kind = ControlKind::Check;
+	catalog[2].id = control_id::kRuntimeReturnToMenu;
+	catalog[2].label = "Return to menu";
+	catalog[2].kind = ControlKind::Action;
+	catalog[3].id = control_id::kViewportDebugDraw;
+	catalog[3].label = "Viewport view";
+	catalog[3].kind = ControlKind::Enum;
+	catalog[3].choices = {"Disabled", "Unshaded", "Lighting", "Overdraw", "Wireframe"};
+	return catalog;
+}
+
+// The control board: the catalog is looked up by wire id, a push replaces
+// only the states it names, a widget's optimistic write shows until the next
+// push, and the rows the visible windows want are collected once each.
+void test_control_board_catalog_states_and_wants() {
+	using opennova::devtools::ControlArg;
+	using opennova::devtools::ControlState;
+	NullBackend backend;
+	GameDevTools tools;
+	CHECK(!tools.needs_control_states(), "no catalog, no pass: no state pushes");
+	tools.set_control_catalog(transport_catalog());
+	const opennova::devtools::ControlBoard &board = tools.control_board();
+	CHECK(board.catalog_size() == 4, "the catalog lands");
+	CHECK(board.spec(control_id::kViewportDebugDraw) != nullptr &&
+					board.spec(control_id::kViewportDebugDraw)->choices.size() == 5,
+			"a row's choices come from the catalog");
+	CHECK(board.spec("no_such_row") == nullptr, "an unknown id has no spec");
+
+	std::vector<const char *> wanted;
+	tools.wanted_control_ids(wanted);
+	CHECK(wanted.empty(), "a closed pass wants nothing");
+	tools.pass().set_open(true);
+	CHECK(tools.needs_control_states(), "an open pass with a catalog wants states");
+	tools.wanted_control_ids(wanted);
+	bool transport = false;
+	bool scripts = false;
+	for (const char *id : wanted) {
+		transport = transport || std::strcmp(id, control_id::kRuntimeTransport) == 0;
+		scripts = scripts || std::strcmp(id, control_id::kRuntimeWacPaused) == 0;
+	}
+	CHECK(transport && scripts, "the Game toolbar's rows are wanted while it shows");
+
+	ControlState paused;
+	paused.id = control_id::kRuntimeWacPaused;
+	paused.available = true;
+	paused.writable = true;
+	paused.has_value = true;
+	paused.value = ControlArg::boolean(false);
+	ControlState leave;
+	leave.id = control_id::kRuntimeReturnToMenu;
+	leave.reason = "no world loaded";
+	tools.set_control_states({paused, leave});
+	CHECK(board.state(control_id::kRuntimeWacPaused) != nullptr &&
+					board.state(control_id::kRuntimeWacPaused)->writable,
+			"a pushed state lands");
+	CHECK(board.state(control_id::kRuntimeReturnToMenu)->reason == "no world loaded",
+			"a refused row carries the table's reason");
+	tools.set_control_states({leave});
+	CHECK(board.state(control_id::kRuntimeWacPaused) != nullptr,
+			"a push keeps the rows it does not name");
+
+	tools.game_window().request_scripts_paused(true);
+	CHECK(board.state(control_id::kRuntimeWacPaused)->value.b,
+			"the toolbar's click shows at once (the next push confirms it)");
+	ControlRequest request;
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeWacPaused) && request.args[0].b,
+			"the script pause leaves as the runtime_wac_paused row");
+
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	CHECK(draw_once(tools, 1), "the toolbar draws over the board");
+}
+
+// The Game toolbar's transport requests and its status readout.
+void test_game_toolbar_transport_and_status() {
+	GameDevTools tools;
+	GameWindow &game = tools.game_window();
+	game.request_transport("pause");
+	game.request_transport("step");
+	game.request_return_to_menu();
+	ControlRequest request;
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeTransport) &&
+					request.args.size() == 1 && request.args[0].text == "pause",
+			"pause is the transport row's verb");
+	CHECK(tools.take_control_request(request) && request.args[0].text == "step", "then step");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeReturnToMenu) && request.args.empty(),
+			"leaving is the return-to-menu row");
+	CHECK(!tools.take_control_request(request), "drained once");
+
+	opennova::devtools::GameStatusSnapshot status;
+	status.fps = 61.0;
+	status.frame_ms = 16.4;
+	status.frame_ms_peak = 22.1;
+	tools.set_game_status(status);
+	CHECK(game.status_text() == "61 fps  16.4 ms (peak 22.1) | no world", "the no-world readout");
+	status.world = true;
+	status.logic_tick = 3100;
+	status.role = opennova::devtools::StatusRole::ListenServer;
+	status.state = opennova::devtools::StatusState::Running;
+	status.peers = 2;
+	tools.set_game_status(status);
+	CHECK(game.status_text() ==
+					"61 fps  16.4 ms (peak 22.1) | tick 3100 | listen server, 2 peers, running",
+			"the listen server readout names its peers");
+}
+
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
 	const opennova::devtools::Window &game = tools.pass().window(0);
@@ -257,7 +375,8 @@ void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
 	NullBackend backend;
 	opennova::devtools::ImGuiPass pass;
 	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
-	GameWindow game;
+	opennova::devtools::ControlBoard board;
+	GameWindow game(board);
 	FakeGameViewport viewport;
 	game.set_viewport(&viewport);
 
@@ -288,7 +407,8 @@ void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
 }
 
 void test_game_window_orders_play_interact_and_close_requests() {
-	GameWindow game;
+	opennova::devtools::ControlBoard board;
+	GameWindow game(board);
 	GameWindowRequest request = GameWindowRequest::CloseTools;
 	CHECK(game.input_mode() == GameInputMode::Interact, "Game starts in Interact");
 	CHECK(!game.play_available(), "Play starts unavailable until the shell enables it");
@@ -1781,6 +1901,8 @@ int main() {
 	test_attach_sets_docking_and_viewport_policy();
 	test_window_registry_order_groups_and_defaults();
 	test_status_line_and_close_request();
+	test_control_board_catalog_states_and_wants();
+	test_game_toolbar_transport_and_status();
 	test_game_window_is_mandatory_and_detachable();
 	test_game_window_sends_responsive_integer_content_size_to_its_adapter();
 	test_game_window_orders_play_interact_and_close_requests();
