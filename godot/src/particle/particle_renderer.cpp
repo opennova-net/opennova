@@ -229,6 +229,32 @@ String shader_path_for_pipeline(opennova::renderer::ParticlePipeline pipeline) {
 	return "res://shaders/particle/particle_blend_blend.gdshader";
 }
 
+// The thermal frame's secondary materials (renderer::particle_thermal_material)
+// sit after the eight PTL types in the shader cache.
+constexpr std::size_t kThermalInvertedBlendShader = 8;
+constexpr std::size_t kThermalDarkeningShader = 9;
+constexpr std::size_t kParticleShaderCount = 10;
+
+String shader_path_for_index(std::size_t index) {
+	if (index == kThermalInvertedBlendShader)
+		return "res://shaders/particle/particle_blend_blend_thermal.gdshader";
+	if (index == kThermalDarkeningShader)
+		return "res://shaders/particle/particle_blend_additive_thermal.gdshader";
+	return shader_path_for_pipeline(static_cast<opennova::renderer::ParticlePipeline>(index));
+}
+
+std::size_t shader_index_for(opennova::renderer::ParticlePipeline pipeline,
+		opennova::renderer::ParticleThermalMaterial thermal) {
+	switch (thermal) {
+		case opennova::renderer::ParticleThermalMaterial::InvertedBlend:
+			return kThermalInvertedBlendShader;
+		case opennova::renderer::ParticleThermalMaterial::DarkeningModulate:
+			return kThermalDarkeningShader;
+		default:
+			return static_cast<std::size_t>(pipeline);
+	}
+}
+
 std::uint8_t unit_byte(float value) {
 	return opennova::renderer::particle_unit_byte(value);
 }
@@ -604,7 +630,7 @@ public:
 	std::vector<AtlasPage> pages;
 	std::shared_ptr<const ParticleAtlasSnapshot> atlas_snapshot;
 	std::uint64_t atlas_generation = 0;
-	std::array<Ref<Shader>, 8> shader_cache;
+	std::array<Ref<Shader>, kParticleShaderCount> shader_cache;
 	std::map<std::uint64_t, Ref<ShaderMaterial>> materials;
 	// Pass A of the main view and of the second scene view as render-list
 	// runs at kRungParticleFarSide (ParticleFarPass), with their own
@@ -1064,31 +1090,33 @@ public:
 				std::move(snapshot));
 	}
 
-	Ref<Shader> shader_for(opennova::renderer::ParticlePipeline pipeline) {
-		const std::size_t index = static_cast<std::size_t>(pipeline);
+	Ref<Shader> shader_for_index(std::size_t index) {
 		if (index >= shader_cache.size())
 			return Ref<Shader>();
 		if (shader_cache[index].is_null()) {
 			ResourceLoader *loader = ResourceLoader::get_singleton();
 			if (loader != nullptr) {
-				Ref<Resource> resource = loader->load(shader_path_for_pipeline(pipeline));
+				Ref<Resource> resource = loader->load(shader_path_for_index(index));
 				shader_cache[index] = resource;
 			}
 		}
 		return shader_cache[index];
 	}
 
-	Ref<ShaderMaterial> material_for(const opennova::renderer::ParticleDrawCommand &command) {
+	Ref<ShaderMaterial> material_for(const opennova::renderer::ParticleDrawCommand &command,
+			bool thermal) {
+		const std::size_t shader_index = shader_index_for(command.pipeline,
+				opennova::renderer::particle_thermal_material(command.pipeline, thermal));
 		const std::uint64_t key =
 				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
-				(static_cast<std::uint64_t>(command.pipeline) << 16) |
+				(static_cast<std::uint64_t>(shader_index) << 16) |
 				static_cast<std::uint64_t>(command.variant);
 		const auto found = materials.find(key);
 		if (found != materials.end())
 			return found->second;
 		Ref<ShaderMaterial> material;
 		material.instantiate();
-		material->set_shader(shader_for(command.pipeline));
+		material->set_shader(shader_for_index(shader_index));
 		if (command.atlas_page < pages.size() &&
 				pages[command.atlas_page].texture.is_valid()) {
 			material->set_shader_parameter("albedo_tex",
@@ -1438,9 +1466,11 @@ public:
 
 	void publish_world_draw_list(const Ref<ParticleCompositorEffect> &effect,
 			const opennova::renderer::ParticleDrawList &draw_list,
-			const Vector3 &camera_position, const Vector3 &camera_forward, int64_t time_ms) {
+			const Vector3 &camera_position, const Vector3 &camera_forward, int64_t time_ms,
+			bool thermal) {
 		auto submission = std::make_shared<ParticleWorldSubmission>();
 		submission->frame_id = draw_list.frame_id;
+		submission->thermal = thermal;
 		submission->time_ms = static_cast<uint32_t>(time_ms);
 		submission->commands = draw_list.commands;
 		submission->atlas = atlas_snapshot;
@@ -1502,7 +1532,7 @@ public:
 	}
 
 	void upload_first_person_draw_list(
-			const opennova::renderer::ParticleDrawList &draw_list, bool hidden) {
+			const opennova::renderer::ParticleDrawList &draw_list, bool hidden, bool thermal) {
 		if (first_person_instance == nullptr)
 			return;
 		// One retained ArrayMesh: surfaces are rebuilt per frame while the mesh
@@ -1584,7 +1614,7 @@ public:
 			// next frame's ptrw() writes in place instead of copying on write.
 			upload.arrays.fill(Variant());
 			const int surface = first_person_mesh->get_surface_count() - 1;
-			first_person_mesh->surface_set_material(surface, material_for(command));
+			first_person_mesh->surface_set_material(surface, material_for(command, thermal));
 		}
 
 		first_person_instance->set_visible(
@@ -1766,8 +1796,7 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
 	for (std::size_t i = 0; i < impl_->shader_cache.size(); ++i) {
-		Ref<Shader> shader =
-				impl_->shader_for(static_cast<opennova::renderer::ParticlePipeline>(i));
+		Ref<Shader> shader = impl_->shader_for_index(i);
 		if (shader.is_null())
 			continue;
 		Ref<ShaderMaterial> material;
@@ -1926,11 +1955,16 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
 	const bool camera_above_water = world_camera.position.y >= water_height_;
 	impl_->refresh_environment(get_environment_source());
+	// The main scene hands its particle passes the frame's thermal byte; every
+	// other scene call passes zero (renderer::particle_thermal_material).
+	const MissionEnvironment *thermal_source =
+			Object::cast_to<MissionEnvironment>(get_environment_source());
+	const bool thermal = thermal_source != nullptr && thermal_source->is_thermal_view();
 	impl_->build_render_snapshot(frame, world_camera.view_basis);
 	auto compile_world = [&](ParticleDrawSlot slot,
 			opennova::renderer::ParticleWaterSubset subset,
 			const ParticleCameraFrame &view_camera,
-			const Ref<ParticleCompositorEffect> &effect) {
+			const Ref<ParticleCompositorEffect> &effect, bool view_thermal) {
 		opennova::renderer::ParticleViewInput view;
 		view.domain = opennova::renderer::ParticleRenderDomain::World;
 		view.water_subset = subset;
@@ -1962,15 +1996,15 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			return;
 		}
 		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
-				view_camera.forward, p_time_ms);
+				view_camera.forward, p_time_ms, view_thermal);
 	};
 
 	compile_world(kWorldFarSide,
 			opennova::renderer::particle_water_subset_for_side(camera_above_water, false),
-			world_camera, impl_->world_effects[0]);
+			world_camera, impl_->world_effects[0], thermal);
 	compile_world(kWorldCameraSide,
 			opennova::renderer::particle_water_subset_for_side(camera_above_water, true),
-			world_camera, impl_->world_effects[1]);
+			world_camera, impl_->world_effects[1], thermal);
 
 	opennova::renderer::ParticleViewInput first_person_view;
 	first_person_view.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
@@ -1987,7 +2021,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
 					first_person_view);
 	impl_->slot_present[kFirstPerson] = true;
-	impl_->upload_first_person_draw_list(first_person_draw, hidden_);
+	impl_->upload_first_person_draw_list(first_person_draw, hidden_, thermal);
 
 	// A secondary view compiles the same snapshot for its own eye. LitColor/Bump
 	// channels transform through the active view basis, so only those quads are
@@ -2001,10 +2035,10 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		impl_->relight_render_snapshot(view_camera.view_basis);
 		compile_world(far_slot,
 				opennova::renderer::particle_water_subset_for_side(above_water, false),
-				view_camera, effects[0]);
+				view_camera, effects[0], false);
 		compile_world(camera_slot,
 				opennova::renderer::particle_water_subset_for_side(above_water, true),
-				view_camera, effects[1]);
+				view_camera, effects[1], false);
 	};
 
 	if (reflection_camera != nullptr) {

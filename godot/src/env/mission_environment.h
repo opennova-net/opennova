@@ -83,6 +83,9 @@ public:
 	// and selects the 0x808080 pass fog and frame clear; the terrain gate
 	// selects the flat terrain ramps.
 	void set_thermal_view(bool p_world, bool p_terrain);
+	// The world gate: the frame's latched thermal byte, which the main scene
+	// also hands the particle passes (the particle secondary materials).
+	bool is_thermal_view() const { return state_.thermal_view(); }
 	// The main scene pass selection, sampled from the render eye after local
 	// camera placement and before terrain/foliage submit. This does not mutate
 	// authored/current weather state; it selects the derived pass fog payload.

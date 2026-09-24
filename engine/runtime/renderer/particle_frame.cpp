@@ -335,6 +335,20 @@ ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 			ParticleWaterSubset::Below;
 }
 
+ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal) {
+	if (!thermal)
+		return ParticleThermalMaterial::Primary;
+	switch (pipeline) {
+		case ParticlePipeline::Blend:
+			return ParticleThermalMaterial::InvertedBlend;
+		case ParticlePipeline::Additive:
+		case ParticlePipeline::Premult:
+			return ParticleThermalMaterial::DarkeningModulate;
+		default:
+			return ParticleThermalMaterial::Primary;
+	}
+}
+
 class ParticleFrameCompiler::Impl {
 public:
 	static constexpr std::size_t kNoBoundsEntry =

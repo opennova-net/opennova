@@ -45,6 +45,9 @@ struct ParticleWorldSubmission {
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
 	std::int32_t fog_type = 1;
+	// The main scene's thermal byte: draws bind their types' secondary
+	// materials (renderer::particle_thermal_material).
+	bool thermal = false;
 	bool valid = true;
 	std::string validation_error;
 };

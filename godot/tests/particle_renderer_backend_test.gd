@@ -1118,3 +1118,63 @@ func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
 	assert_almost_eq(center.b, center.r, 0.03,
 			"the fog colour (0.2, 0.3, 0.4) must not tint an unfogged bump: %s" % center)
 	assert_engine_error_count(0)
+
+
+func _thermal_view_source(thermal: bool) -> MissionEnvironment:
+	var data := EnvFile.new()
+	data.reset_to_default()
+	data.fog_level = 0.0
+	var environment := MissionEnvironment.new()
+	environment.environment_data = data
+	environment.set_thermal_view(thermal, false)
+	return environment
+
+
+func _thermal_pixel(blend: int, thermal: bool, background: Color) -> Color:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var clear := WorldEnvironment.new()
+	clear.environment = Environment.new()
+	clear.environment.background_mode = Environment.BG_COLOR
+	clear.environment.background_color = background
+	viewport.add_child(clear)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _single_quad_scene("thermal", blend)
+	renderer.texture_provider = _overlap_texture
+	renderer.set_water_plane(-100.0, null)
+	var source := _thermal_view_source(thermal)
+	viewport.add_child(source)
+	renderer.environment_source = source
+	viewport.add_child(renderer)
+	var image := await _overlap_image(viewport, renderer)
+	return image.get_pixel(64, 64)
+
+
+# A thermal-view frame binds each texture's secondary material
+# (retail CParticleBatch_FlushAndBindMaterial @ 0x5E42BF): Blend inverts its
+# colour, MODULATE(1 - TEXTURE, 1 - DIFFUSE), and Additive darkens under
+# ZERO/INVSRCCOLOR (retail CParticleTexture_InitTextureAndChannels
+# @ 0x5E8584 / @ 0x5E8390).
+func test_thermal_frames_bind_the_secondary_particle_materials() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	# The texel is (0.5, 0.5, 1.0): its blue complement is zero.
+	var blend := await _thermal_pixel(0, false, Color.BLACK)
+	var blend_thermal := await _thermal_pixel(0, true, Color.BLACK)
+	assert_gt(blend.b, 0.3, "the primary Blend material shows the texel: %s" % blend)
+	assert_lt(blend_thermal.b, 0.05, "the thermal Blend inverts: 1 - T.b = 0: %s" % blend_thermal)
+	var grey := Color(0.5, 0.5, 0.5)
+	var additive := await _thermal_pixel(1, false, grey)
+	var additive_thermal := await _thermal_pixel(1, true, grey)
+	assert_gt(additive.b, 0.55, "the primary Additive material brightens: %s" % additive)
+	assert_lt(additive_thermal.b, 0.45,
+			"the thermal Additive material darkens the grey behind it: %s" % additive_thermal)
+	assert_engine_error_count(0)

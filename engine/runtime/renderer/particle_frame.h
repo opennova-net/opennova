@@ -57,6 +57,26 @@ enum class ParticlePipeline : std::uint8_t {
 	Distort = 7,
 };
 
+// The material a draw binds in a thermal-view frame. The batch flush binds
+// each texture's secondary material (sample+8) instead of its primary
+// (sample+4) while the effect world's thermal word is set; that word is the
+// main scene's thermal byte, zero in every other scene call
+// [orig: CParticleBatch_FlushAndBindMaterial @ 0x5E42BF..0x5E42DB; the store
+// EffectWorld_RenderParticlePass @ 0x5F7274]. Blend's secondary inverts
+// colour: MODULATE(1 - TEXTURE, 1 - DIFFUSE) under SRCALPHA/INVSRCALPHA;
+// Additive's and Premult's darken: MODULATE(TEXTURE, DIFFUSE) under
+// ZERO/INVSRCCOLOR; every other type's secondary is its primary
+// [orig: CParticleTexture_InitTextureAndChannels — case 0 @ 0x5E833D with the
+// shared tail @ 0x5E8584..0x5E85DD, cases 1/2 @ 0x5E8376..0x5E83AC, the
+// primary copies @ 0x5E8422 / @ 0x5E847C / @ 0x5E8508, Distort's one
+// channel @ 0x5E860B].
+enum class ParticleThermalMaterial : std::uint8_t {
+	Primary = 0,
+	InvertedBlend = 1,
+	DarkeningModulate = 2,
+};
+ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal);
+
 enum class ParticleRenderPass : std::uint8_t {
 	Color = 0,
 	Distortion = 1,

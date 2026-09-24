@@ -612,6 +612,30 @@ bool empty_batch_leaves_emitters_unstamped_contract() {
 			"the empty leaf registers its emitters before the fallback batch");
 }
 
+bool thermal_material_contract() {
+	// A thermal frame binds each texture's secondary material: Blend inverts,
+	// Additive/Premult darken, the rest keep the primary; outside it every
+	// type keeps its primary [orig: CParticleBatch_FlushAndBindMaterial
+	// @ 0x5E42BF; CParticleTexture_InitTextureAndChannels @ 0x5E833D /
+	// @ 0x5E8376 / @ 0x5E8422].
+	using M = r::ParticleThermalMaterial;
+	using P = r::ParticlePipeline;
+	const P all[] = {P::Blend, P::Additive, P::Premult, P::Bump, P::Mod, P::Mod2x,
+			P::Bumpadd, P::Distort};
+	for (P pipeline : all)
+		if (!check(r::particle_thermal_material(pipeline, false) == M::Primary,
+				"no thermal frame, no secondary material")) return false;
+	return check(r::particle_thermal_material(P::Blend, true) == M::InvertedBlend &&
+			r::particle_thermal_material(P::Additive, true) == M::DarkeningModulate &&
+			r::particle_thermal_material(P::Premult, true) == M::DarkeningModulate &&
+			r::particle_thermal_material(P::Bump, true) == M::Primary &&
+			r::particle_thermal_material(P::Mod, true) == M::Primary &&
+			r::particle_thermal_material(P::Mod2x, true) == M::Primary &&
+			r::particle_thermal_material(P::Bumpadd, true) == M::Primary &&
+			r::particle_thermal_material(P::Distort, true) == M::Primary,
+			"the thermal secondary materials by type");
+}
+
 } // namespace
 
 int main() {
@@ -626,5 +650,6 @@ int main() {
 	if (!flat_particle_runs_contract()) return 1;
 	if (!retained_sort_stack_contract()) return 1;
 	if (!empty_batch_leaves_emitters_unstamped_contract()) return 1;
+	if (!thermal_material_contract()) return 1;
 	return 0;
 }

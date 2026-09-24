@@ -62,6 +62,10 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::is_weather_driven);
 	ClassDB::bind_method(D_METHOD("set_nvg_view", "active", "gain"),
 			&MissionEnvironment::set_nvg_view);
+	ClassDB::bind_method(D_METHOD("set_thermal_view", "world", "terrain"),
+			&MissionEnvironment::set_thermal_view);
+	ClassDB::bind_method(D_METHOD("is_thermal_view"),
+			&MissionEnvironment::is_thermal_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
 			&MissionEnvironment::set_underwater_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_view"),

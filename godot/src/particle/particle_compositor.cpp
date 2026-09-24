@@ -117,6 +117,11 @@ layout(push_constant, std430) uniform ParticlePush {
 
 layout(location = 0) out vec4 frag_color;
 
+// The low byte is the PTL type; bit 8 selects Blend's thermal secondary.
+uint particle_mode() {
+	return pc.mode & 0xFFu;
+}
+
 float particle_fog_visibility() {
 	float fog_start = pc.camera_forward_fog_start.w;
 	float fog_end = pc.camera_position_fog_end.w;
@@ -144,17 +149,17 @@ float particle_fog_visibility() {
 // @ 0x5E8567; the word is OR'd into the pass flags by CGfxShader_ApplyPass
 // @ 0x683221, FOGENABLE @ 0x683243, SPECULARENABLE @ 0x68325F).
 bool particle_fog_enabled() {
-	return pc.mode != 3u && pc.mode != 6u && pc.mode != 7u;
+	return particle_mode() != 3u && particle_mode() != 6u && particle_mode() != 7u;
 }
 
 vec3 particle_fog_target() {
-	if (pc.mode == 1u || pc.mode == 2u) {
+	if (particle_mode() == 1u || particle_mode() == 2u) {
 		return vec3(0.0);
 	}
-	if (pc.mode == 4u) {
+	if (particle_mode() == 4u) {
 		return vec3(1.0);
 	}
-	if (pc.mode == 5u) {
+	if (particle_mode() == 5u) {
 		return vec3(127.0 / 255.0);
 	}
 	return pc.fog_color_type.xyz;
@@ -162,7 +167,13 @@ vec3 particle_fog_target() {
 
 void main() {
 	vec4 texel = texture(atlas_texture, v_uv);
-	if (pc.mode <= 2u) {
+	if ((pc.mode & 0x100u) != 0u) {
+		// Blend's thermal secondary: MODULATE(1 - TEXTURE, 1 - DIFFUSE) on
+		// colour, MODULATE(TEXTURE, DIFFUSE) on alpha (retail
+		// CParticleTexture_InitTextureAndChannels @ 0x5E8584..0x5E85DD).
+		frag_color = vec4((1.0 - texel.rgb) * (1.0 - v_primary.rgb),
+				texel.a * v_primary.a);
+	} else if (particle_mode() <= 2u) {
 		// Blend/additive/premult share one fixed-function stage program —
 		// MODULATE(TEXTURE, DIFFUSE) on color AND alpha [orig: the case 0/1/2
 		// channel descs in CParticleTexture_InitTextureAndChannels @ 0x5e8347/
@@ -171,7 +182,7 @@ void main() {
 		// [orig: BuildTextureAtlases @ 0x5e9116, see docs/particles/ptl-format-re.md], so an additive layer adds at
 		// full strength and DIFFUSE alpha (the alpha curve) never affects it.
 		frag_color = texel * v_primary;
-	} else if (pc.mode == 3u || pc.mode == 6u) {
+	} else if (particle_mode() == 3u || particle_mode() == 6u) {
 		float dot3 = clamp(dot(texel.rgb * 2.0 - 1.0,
 				v_primary.rgb * 2.0 - 1.0), 0.0, 1.0);
 		// SPECULARENABLE: the fixed-function pipe adds the SPECULAR vertex colour
@@ -180,7 +191,7 @@ void main() {
 		// texture stages; alpha is untouched.
 		frag_color = vec4(min(vec3(dot3) + v_secondary.rgb, vec3(1.0)),
 				texel.a * v_primary.a);
-	} else if (pc.mode == 4u || pc.mode == 5u) {
+	} else if (particle_mode() == 4u || particle_mode() == 5u) {
 		// Mod2x's factor-of-two comes from DESTCOLOR/SRCCOLOR blending, not
 		// from a shader approximation.
 		frag_color = texel * v_primary;
@@ -271,10 +282,12 @@ public:
 		int64_t framebuffer_format = -1;
 		std::uint8_t mode = 0;
 		std::uint16_t variant = 0;
+		std::uint8_t thermal = 0;
 
 		bool operator<(const PipelineKey &other) const {
-			return std::tie(framebuffer_format, mode, variant) <
-					std::tie(other.framebuffer_format, other.mode, other.variant);
+			return std::tie(framebuffer_format, mode, variant, thermal) <
+					std::tie(other.framebuffer_format, other.mode, other.variant,
+							other.thermal);
 		}
 	};
 
@@ -453,7 +466,9 @@ public:
 	RID scene_snapshot_pipeline_for(int64_t framebuffer_format);
 	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view);
 	RID pipeline_for(const opennova::renderer::ParticleDrawCommand &command,
-			int64_t framebuffer_format);
+			int64_t framebuffer_format,
+			opennova::renderer::ParticleThermalMaterial thermal =
+					opennova::renderer::ParticleThermalMaterial::Primary);
 	bool warm_pipelines(RenderData *render_data);
 	bool validate_submission(const ParticleWorldSubmission &submission) const;
 	bool draw(const ParticleWorldSubmission &submission,
@@ -1010,9 +1025,10 @@ bool ParticleCompositorEffect::Impl::snapshot_scene_color(
 
 RID ParticleCompositorEffect::Impl::pipeline_for(
 		const opennova::renderer::ParticleDrawCommand &command,
-		int64_t framebuffer_format) {
+		int64_t framebuffer_format, opennova::renderer::ParticleThermalMaterial thermal) {
 	const PipelineKey key{framebuffer_format,
-			static_cast<std::uint8_t>(command.pipeline), command.variant};
+			static_cast<std::uint8_t>(command.pipeline), command.variant,
+			static_cast<std::uint8_t>(thermal)};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -1068,6 +1084,15 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
 			destination_alpha = RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
 			break;
+	}
+	if (thermal == opennova::renderer::ParticleThermalMaterial::DarkeningModulate) {
+		// Additive's and Premult's thermal secondary blends ZERO/INVSRCCOLOR
+		// (retail CParticleTexture_InitTextureAndChannels @ 0x5E8390..0x5E83A5):
+		// the source darkens what is already drawn.
+		source_color = RenderingDevice::BLEND_FACTOR_ZERO;
+		destination_color = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+		source_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
+		destination_alpha = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	}
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
@@ -1140,6 +1165,14 @@ bool ParticleCompositorEffect::Impl::warm_pipelines(
 				command.pipeline =
 						static_cast<opennova::renderer::ParticlePipeline>(mode);
 				if (!pipeline_for(command, framebuffer_format).is_valid())
+					return false;
+				// The thermal frame's darkening blend is its own pipeline.
+				const opennova::renderer::ParticleThermalMaterial thermal =
+						opennova::renderer::particle_thermal_material(
+								command.pipeline, true);
+				if (thermal == opennova::renderer::ParticleThermalMaterial::
+									DarkeningModulate &&
+						!pipeline_for(command, framebuffer_format, thermal).is_valid())
 					return false;
 			}
 		}
@@ -1259,7 +1292,10 @@ bool ParticleCompositorEffect::Impl::draw(
 	for (const ViewTarget &target : targets) {
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
 		for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
-			if (!pipeline_for(command, format).is_valid())
+			if (!pipeline_for(command, format,
+						opennova::renderer::particle_thermal_material(
+								command.pipeline, submission.thermal))
+							.is_valid())
 				return false;
 		}
 	}
@@ -1341,9 +1377,15 @@ bool ParticleCompositorEffect::Impl::draw(
 			}
 			const RID scene_uniform_set = scene_color_available ?
 					target.scratch_uniform_set : fallback_scene_uniform_set;
-			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline);
+			const opennova::renderer::ParticleThermalMaterial thermal =
+					opennova::renderer::particle_thermal_material(command.pipeline,
+							submission.thermal);
+			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline) |
+					(thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend ?
+									0x100u :
+									0u);
 			write_u32(push_constants, 124, mode);
-			const RID pipeline = pipeline_for(command, format);
+			const RID pipeline = pipeline_for(command, format, thermal);
 			const GpuAtlasPage &atlas_page =
 					gpu_atlas_pages[command.atlas_page];
 			const std::uint64_t byte_offset =
