@@ -1027,6 +1027,15 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         eh.hit_zone = -1;
         return true;
     };
+    // The victim entity+0 boundRadius a surviving round parks past. An
+    // unstamped (model-less) person or decoded proxy takes the organic
+    // stand-in radius, as the damage sweeps do (Entity::bound_radius); it
+    // clears the torso fallback sphere, which retail persons never need.
+    // [orig: Projectile_UpdatePhysics @0x4EA7BE]
+    auto person_park_radius = [](int32_t bound_radius_q16) {
+        return bound_radius_q16 > 0 ? bound_radius_q16
+                                    : to_fixed(kOrganicStandInRadius);
+    };
     auto finish_person_hit = [&](ProjectileHit &eh, int32_t hit_distance) {
         eh.hit_class = ProjectileHitClass::Person;
         eh.t_q16 = t_for_distance(hit_distance);
@@ -1111,7 +1120,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (!trace_torso_fallback(proxy.position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
-            eh.victim_bound_radius_q16 = proxy.bound_radius_q16;
+            eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);
             finish_person_hit(eh, hit_distance); // geometry_entity stays invalid
             break;
         }
@@ -1225,12 +1234,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             continue;
 
         eh.geometry_entity = e->handle;
-        // An unstamped (model-less) person takes the organic stand-in radius,
-        // as the damage sweeps do (Entity::bound_radius); it clears the torso
-        // fallback sphere, which retail persons never need.
-        eh.victim_bound_radius_q16 = e->bound_radius > 0.0f
-                ? to_fixed(e->bound_radius)
-                : to_fixed(kOrganicStandInRadius);
+        eh.victim_bound_radius_q16 = person_park_radius(to_fixed(e->bound_radius));
         finish_person_hit(eh, hit_distance);
         break;
     }
