@@ -125,14 +125,23 @@ bool TerrainTileCacheDevice::rebuild(
 	}
 	auto snapshot = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>();
 
+	opennova::terrain::Rgba8Image colormap;
+	opennova::terrain::Rgba8Image heightfield_normal;
 	const Ref<Image> live_colormap = p_data->get_colormap_image();
 	const bool have_colormap = live_colormap.is_valid() && !live_colormap->is_empty()
-			? image_to_rgba8(live_colormap, snapshot->colormap)
-			: texture_to_rgba8(p_data->get_colormap(), snapshot->colormap);
+			? image_to_rgba8(live_colormap, colormap)
+			: texture_to_rgba8(p_data->get_colormap(), colormap);
 	const bool have_normal = texture_to_rgba8(
 			p_surface_inputs->get_heightfield_normal_texture(),
-			snapshot->heightfield_normal);
+			heightfield_normal);
 	if (!have_colormap || !have_normal) {
+		return false;
+	}
+	snapshot->colormap =
+			opennova::terrain::build_terrain_tile_quadrant_source(colormap);
+	snapshot->heightfield_normal =
+			opennova::terrain::build_terrain_tile_quadrant_source(heightfield_normal);
+	if (!snapshot->colormap.is_valid() || !snapshot->heightfield_normal.is_valid()) {
 		return false;
 	}
 	// Scorch decals are an OPTIONAL overlay source, not a base page source.
@@ -184,8 +193,13 @@ bool TerrainTileCacheDevice::rebuild(
 	if (p_tile_overlay_enabled && tile_info.is_valid() &&
 			tile_info->get_entry_count() > 0) {
 		tile_overlay_required_ = true;
-		if (!texture_to_rgba8(p_data->get_tilestrip_tex(),
-				snapshot->tilestrip)) {
+		opennova::terrain::Rgba8Image tilestrip;
+		if (!texture_to_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {
+			return false;
+		}
+		snapshot->tilestrip =
+				opennova::terrain::build_terrain_tile_set_mips(tilestrip);
+		if (snapshot->tilestrip.empty()) {
 			return false;
 		}
 		snapshot->tile_info = tile_info->to_native();

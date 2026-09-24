@@ -77,8 +77,10 @@ int main() {
 	CHECK(worker.pending_jobs() == 0);
 
 	auto snapshot = std::make_shared<TerrainTileCompositionWorker::SourceSnapshot>();
-	snapshot->colormap = solid_image(2, 2, { 0, 0, 0, 255 });
-	snapshot->heightfield_normal = solid_image(2, 2, { 128, 128, 255, 128 });
+	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid_image(2, 2, { 0, 0, 0, 255 }));
+	snapshot->heightfield_normal = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid_image(2, 2, { 128, 128, 255, 128 }));
 	worker.install_sources(snapshot);
 	CHECK(worker.sources() == snapshot);
 

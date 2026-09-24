@@ -51,11 +51,12 @@ public:
 	static constexpr std::size_t kMaximumQueuedJobs = TerrainTileCompositionCache::kCapacity * 2;
 	static constexpr std::size_t kUploadBudgetPerFrame = 2;
 
-	// The immutable page sources one mission's cache composes from.
+	// The immutable page sources one mission's cache composes from, already
+	// split into the retail quadrant textures and level sets.
 	struct SourceSnapshot {
-		Rgba8Image colormap;
-		Rgba8Image heightfield_normal;
-		Rgba8Image tilestrip;
+		TerrainTileQuadrantSource colormap;
+		TerrainTileQuadrantSource heightfield_normal;
+		std::vector<Rgba8Image> tilestrip;
 		TilFile tile_info;
 		bool tile_overlay_ready = false;
 		std::array<TerrainScorchTexture, kTerrainScorchTextureSlots> scorch_textures;

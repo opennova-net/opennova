@@ -96,9 +96,10 @@ private:
 };
 
 // Applies the already-page-filtered list in insertion order. RGB uses the
-// retail DESTCOLOR/SRCCOLOR multiply blend; alpha doubles the existing target
-// alpha because stage alpha selects opaque diffuse. Sampling is wrap +
-// max-quality anisotropic/trilinear over the exact box mip chain.
+// retail DESTCOLOR/SRCCOLOR multiply blend over the MODULATE2X(texture,
+// 0x808080) stage colour; the page alpha is write-masked for the whole loop.
+// Each record is an XYZRHW quad (pixel centres on integers) sampled WRAP +
+// bilinear on the box mip level nearest its footprint.
 bool compose_terrain_scorches(
 		const TerrainTileCompositionJob &job,
 		const TerrainScorchPagePlan &plan,
