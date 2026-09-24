@@ -4,11 +4,12 @@
 // document, the occlusion blink flags and the local view, snapshotted here so
 // the window never reaches into a live World. The rows are the retail
 // environment debug page's [orig: Debug_DrawEnvironmentValues @ 0x4ef000 —
-// "Script & Env Values": Env/Trn, Loc, Reverb, Blink, Fogtype, Fogdist,
-// ColorFade, SunFade, MoonLight, Fog/SkyFog/Cloud/Sun/Lightning/Sky/Ground/
-// Ceiling/Floor block currents, FOV, SkyHeight, SkySpeed, OutDoor, InDoor,
-// Gain, Iris, Rain %, Overcast %, Complexity, DCB]. An invalid snapshot clears
-// the window (the world unloaded).
+// "Script & Env Values": Env/Trn, Blink, Fogtype, Fogdist, ColorFade,
+// SunFade, MoonLight, Fog/SkyFog/Cloud/Sun/Lightning/Sky/Ground/Ceiling/Floor
+// block currents, FOV, SkyHeight, SkySpeed, OutDoor, InDoor, Gain, Iris,
+// Rain %, Overcast %, Complexity, DCB]; the page's Loc and Reverb rows (the
+// local player's sound-location and reverb slots) are not carried. An invalid
+// snapshot clears the window (the world unloaded).
 #pragma once
 
 #include <cstdint>
@@ -27,7 +28,8 @@ struct EnvironmentSnapshot {
 	int32_t fog_dist_metres = 0;    // Env_FogDistCurrent hi word
 	int32_t fog_target_metres = 0;
 	int32_t color_fade_seconds = 0; // (Env_ColorFadeTicks + 31) / 62
-	int32_t sun_fade_pct = 0;       // Env_SunDimPctCurrent hi word
+	int32_t sun_fade_pct = 0;       // Env_SunDimPctCurrent hi word (never leaves 0 in retail)
+	int32_t sun_fade_target_pct = 0; // the sun-dim channel's target hi word (what sunfade wrote)
 	bool night = false;             // Env_IsNightPhase
 	// The block CURRENT render colors, packed 0x00RRGGBB.
 	uint32_t fog_rgb = 0;
