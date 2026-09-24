@@ -366,6 +366,7 @@ private:
     float alpha_reference = 0.0f;
     float high_pass_cutoff = 0.0f;
     float wind_phase = 0.0f;
+    float wind_sector_origin_z = 0.0f;
     bool tile_cache_ready = false;
     float tile_cache_layer = 0.0f;
     Vector4 tile_cache_projection;

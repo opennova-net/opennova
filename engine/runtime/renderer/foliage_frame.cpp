@@ -42,10 +42,24 @@ bool point_in_frustum(const opennova::Frustum &frustum, float x, float y,
 // header note for the constant map and the 2-pi fold rationale]
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0) {
 	constexpr double kTwoPi = 6.283185307179586;
+	// flt_7DE9D0 = 0x35CCCCCD, the float nearest 1/655360 (@ 0x600767).
+	constexpr float kRingScale = 0x1.99999Ap-20f;
 	const double clock_term =
 			std::fmod(static_cast<double>(time_ms) * 0.003, kTwoPi);
-	return static_cast<float>(
-			clock_term + static_cast<double>(wind_osc_ring0) / 65536.0);
+	return static_cast<float>(clock_term +
+			static_cast<double>(wind_osc_ring0) * static_cast<double>(kRingScale));
+}
+
+// [orig: Terrain_CollectNearFoliagePatches @ 0x603fc1 (the patch's sector
+// origin FB20 << 9 stored for the draw); the header carries the rest]
+float foliage_detail_wind_sector_origin_z(uint32_t cell_key) {
+	int32_t z_min = static_cast<int32_t>(cell_key & 0x7FFFu);
+	if ((z_min & 0x4000) != 0) {
+		z_min -= 0x8000;
+	}
+	// Arithmetic floor to the 512-unit sector (a negative Z-min floors down).
+	const int32_t sector = z_min >= 0 ? z_min / 512 : -((-z_min + 511) / 512);
+	return static_cast<float>(sector * 512);
 }
 
 void FoliageFrameCompiler::configure_slots(
@@ -365,6 +379,8 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 			command.high_pass_cutoff =
 					first.near_secondary ? 180.0f / 255.0f : 0.0f;
 			command.wind_phase = detail_wind_phase;
+			command.wind_sector_origin_z =
+					foliage_detail_wind_sector_origin_z(first.cell_key);
 			draw_list_.commands.push_back(command);
 
 			if (high) {

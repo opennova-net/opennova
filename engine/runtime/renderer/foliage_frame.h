@@ -75,14 +75,23 @@ struct FoliageViewInput {
 };
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
-// oscillator's ring slot 0 / 65536 (`fild` the GetTickCount word, `fmul`
-// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 = 1/65536;
-// `faddp`), uploaded as c24 = (phase, 1, 0, 0.03) for Foliage_WindSwayVS'
-// sin(world.x + c24.x) * bend * c24.w
-// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d]. The clock
-// term folds modulo 2 pi so a long session keeps the sine's float precision —
-// the sine is periodic, nothing observable moves.
+// oscillator's ring slot 0 / 655360 (`fild` the GetTickCount word, `fmul`
+// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 =
+// 0x35CCCCCD = 1/655360; `faddp`), uploaded as c24 = (phase, 1, 0, -) with
+// c25 = (0.03, ...) (flt_7C9B90) for Foliage_WindSwayVS:
+// `mad r0.w, v0.x, c24.y, c24.x` (v0.x = the pre-wind vertex's render x,
+// the Godot Z relative to the patch's sector origin) -> polynomial sine ->
+// `mad r1.z, sin*bend, c25.x, v0.z` (render z = Godot X).
+// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4;
+// Foliage_WindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
+// so a long session keeps the sine's float precision — the sine is
+// periodic, nothing observable moves.
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
+
+// The Godot-Z origin of a detail patch's D3D world translation: the 512-unit
+// sector of the cell's Z-min (the collector stores FB20 << 9 per patch and
+// the draw translates by it), so the sway's v0.x is sector-local.
+float foliage_detail_wind_sector_origin_z(uint32_t cell_key);
 
 enum class FoliageTier : uint8_t {
 	Detail = 0,
@@ -140,6 +149,8 @@ struct FoliageDrawCommand {
 	float alpha_reference = 0.0f;   // 0..1
 	float high_pass_cutoff = 0.0f;  // 180/255 on the near-secondary LOW draw
 	float wind_phase = 0.0f;        // per-tier retail clock, resolved here
+	// Detail only: foliage_detail_wind_sector_origin_z of the cell.
+	float wind_sector_origin_z = 0.0f;
 };
 
 struct FoliageFrameDebugCounters {

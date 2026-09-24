@@ -104,6 +104,7 @@ struct DrawUniformNames {
   StringName alpha_reference{"u_alpha_ref"};
   StringName high_pass_cutoff{"u_high_pass_cutoff"};
   StringName wind_phase{"u_wind_phase"};
+  StringName wind_sector_origin_z{"u_wind_sector_origin_z"};
   StringName tile_cache_ready{"u_instance_tile_cache_ready"};
   StringName tile_cache_layer{"u_instance_tile_cache_layer"};
   StringName tile_cache_projection{"u_instance_tile_cache_projection"};
@@ -1355,6 +1356,7 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["alpha_reference"] = stamp.alpha_reference;
       row["high_pass_cutoff"] = stamp.high_pass_cutoff;
       row["wind_phase"] = stamp.wind_phase;
+      row["wind_sector_origin_z"] = stamp.wind_sector_origin_z;
       row["tile_cache_ready"] = stamp.tile_cache_ready;
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
@@ -1942,6 +1944,13 @@ void FoliageDispatcher::_apply_draw_list(
           draw, uniform.wind_phase, command.wind_phase);
       ++frame_stats_.backend_uniform_writes;
       stamp.wind_phase = command.wind_phase;
+    }
+    if (detail && (fresh || stamp.wind_sector_origin_z !=
+                                command.wind_sector_origin_z)) {
+      server->instance_geometry_set_shader_parameter(
+          draw, uniform.wind_sector_origin_z, command.wind_sector_origin_z);
+      ++frame_stats_.backend_uniform_writes;
+      stamp.wind_sector_origin_z = command.wind_sector_origin_z;
     }
     if (detail) {
       bool ready = false;

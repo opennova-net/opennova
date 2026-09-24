@@ -151,9 +151,28 @@ void test_thermal_view_commands_one_faint_low_pass() {
 	}
 }
 
+// Every detail command carries the sway clock (the ring term at 1/655360)
+// and its patch's sector origin (FB20 << 9 on the Godot-Z axis).
+// [orig: Foliage_SetupVertexShaderConstants @ 0x60075e..0x60076d;
+// Terrain_CollectNearFoliagePatches @ 0x603fc1]
+void test_detail_commands_carry_the_sway_inputs() {
+	r::FoliageFrameCompiler compiler = one_triangle_compiler();
+	r::FoliageViewInput view = detail_view();
+	view.detail_cells[0].key = 0x02107e30u; // Z-min -464: sector origin -512
+	view.wind_osc_ring0 = 655360;
+	const r::FoliageDrawList &list =
+			compiler.compile(view, flat_world(), r::FoliageExpansionSamplers{});
+	CHECK(!list.commands.empty());
+	for (const r::FoliageDrawCommand &command : list.commands) {
+		CHECK(near(command.wind_phase, 1.0f, 1e-6f));
+		CHECK(command.wind_sector_origin_z == -512.0f);
+	}
+}
+
 } // namespace
 
 int main() {
+	test_detail_commands_carry_the_sway_inputs();
 	test_detail_vertex_placement_matches_retail();
 	test_new_detail_cell_draws_in_its_generation_frame();
 	test_thermal_view_commands_one_faint_low_pass();

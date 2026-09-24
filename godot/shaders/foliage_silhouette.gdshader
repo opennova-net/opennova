@@ -20,7 +20,9 @@ instance uniform float u_alpha_ref = 0.0;
 
 void vertex() {
 	vec3 world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	world_pos.z -= UV2.x * sin(u_wind_phase) * 0.08;
+	// GridPlacementVS `mad r10, v0.y, c9, r10`: render x (Godot +Z) gains
+	// the halved source height times c9.x = sin(counter * 0.001) * 0.08.
+	world_pos.z += UV2.x * sin(u_wind_phase) * 0.08;
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
 
