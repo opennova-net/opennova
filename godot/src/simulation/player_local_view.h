@@ -57,6 +57,10 @@ public:
 	bool get_suppress_view_bias() const { return value_.suppress_view_bias; }
 	// A Scoped/Sighted weapon at full raise shows its SIGHTS rows instead of the viewmodel.
 	bool get_scope_card_active() const { return value_.scope_card_active; }
+	bool get_fp_local_dead() const { return value_.fp_local_dead; }
+	bool get_fp_round_winner_set() const { return value_.fp_round_winner_set; }
+	bool get_fp_def_emplaced() const { return value_.fp_def_emplaced; }
+	bool get_fp_inset_scoped() const { return value_.fp_inset_scoped; }
 	bool get_binoculars_requested() const { return value_.binoculars_requested; }
 	bool get_binoculars_raised() const { return value_.binoculars_raised; }
 	bool get_binoculars_view_active() const { return value_.binoculars_view_active; }

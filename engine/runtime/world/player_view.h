@@ -433,6 +433,10 @@ struct PlayerViewState {
     int death_screen_submode = 0;
     bool local_dead = false;
     bool round_ended = false;
+    // The client's decided round winner (g_endround_winner_team, the S2C
+    // 0x1D header's winner byte); nonzero hides the FP viewmodel [orig:
+    // Player_RenderViewModelIfAlive @0x4E014B].
+    int32_t end_round_winner_team = 0;
     bool on_foot = true;
     bool in_session = false;
     bool rules_no_death_cam = false;

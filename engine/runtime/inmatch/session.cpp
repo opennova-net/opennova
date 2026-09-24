@@ -86,6 +86,10 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
 	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
 	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;
+	// [orig: NapiNPClientMsg_0x01D @0x430840 -> g_endround_winner_team]
+	s.end_round_winner_team = runtime != nullptr && runtime->state().end_round.header_known
+			? static_cast<int32_t>(runtime->state().end_round.header.winner_team)
+			: 0;
 	s.local_dead = local_dead;
 	s.death_camera_target_known = runtime != nullptr;
 	if (runtime != nullptr) {

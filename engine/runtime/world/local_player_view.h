@@ -90,6 +90,9 @@ struct LocalViewSessionInputs {
     bool death_screen_active = false;
     int death_screen_submode = 0;
     bool end_round_known = false;
+    // The folded S2C 0x1D header's winner team (0 before any header)
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -> g_endround_winner_team].
+    int32_t end_round_winner_team = 0;
     bool local_dead = false;
     // The joiner's death-camera triple is only meaningful with a live
     // client runtime; without one the anchor stays on the player.
@@ -373,6 +376,16 @@ struct LocalPlayerViewFrame {
     float scope_fraction = 0.0f;
     bool suppress_view_bias = false;
     bool scope_card_active = false;
+    // The FP draw's own gates beyond the card switch (player_present.h
+    // fp_viewmodel_retail_submit composes them): the local dead bit, a
+    // decided round winner, the equipped def's Emplaced bit (skips the
+    // showhud test) and the scoped Inset skip [orig:
+    // Player_RenderViewModelIfAlive @0x4E0145/@0x4E014B;
+    // Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEE19].
+    bool fp_local_dead = false;
+    bool fp_round_winner_set = false;
+    bool fp_def_emplaced = false;
+    bool fp_inset_scoped = false;
     float fov_h_deg = 0.0f;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space
     bool tp_anchor_valid = false;

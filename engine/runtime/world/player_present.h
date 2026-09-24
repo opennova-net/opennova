@@ -30,14 +30,29 @@ bool presents_third_person(bool third_person, int camera_mode);
 
 // --- the first-person submit ----------------------------------------------------
 
-// The retail FP submission decision, ANDed from its four gates:
+// The facts the retail FP submission decision reads.
+struct FpViewmodelSubmitGates {
+    bool third_person = false;           // presents_third_person
+    bool scope_card_active = false;      // the SIGHTS card this frame
+    bool binoculars_view_active = false; // the binocular view
+    bool fp_weapon_view_flag = true;     // g_FpWeaponViewFlags bit 0 (showhud)
+    bool seat_hides_weapon = false;      // world::mount_hides_fp_viewmodel
+    bool local_dead = false;             // the local entity's Flags & 2
+    bool round_winner_set = false;       // g_endround_winner_team != 0
+    bool emplaced = false;               // equipped def flags1 & Emplaced
+    bool inset_scoped = false;           // CanFire && Scoped && flags2 & Inset
+};
+
+// The retail FP submission decision, ANDed from its gates:
+//   * the alive gate: a dead local entity (Flags & 2) or a decided round
+//     winner draws no viewmodel at all [orig: Player_RenderViewModelIfAlive
+//     @0x4E0145 (test [entity+24h], 2) and @0x4E014B
+//     (g_endround_winner_team)];
 //   * the card switch: while the SIGHTS card is up, the FP model does not
 //     draw -- the frame shows one or the other [orig: selectors/clear
 //     @0x5ca299..0x5ca304; the card path @0x5caaf3..0x5cab15 and the
 //     viewmodel candidate @0x5ca32c]; the binocular view takes the same
 //     branch;
-//   * the showhud bit-0 gate [orig: Player_RenderFirstPersonViewModel
-//     @0x4DEDEA -- test g_FpWeaponViewFlags, 1 before the FP pass];
 //   * the SEAT gate, evaluated inside the draw: a pilot/driver/gunner
 //     carries no first-person weapon at all, so a helicopter cockpit shows a
 //     clear screen instead of a rifle over the panel, while a PASSENGER keeps
@@ -45,10 +60,14 @@ bool presents_third_person(bool third_person, int camera_mode);
 //     guards the whole draw on `!vehicle || parentSlot not in {2,3,5} ||
 //     (attrib & EWEAP && !PLAYERCONTROL)`; the condition itself is
 //     world::mount_hides_fp_viewmodel];
+//   * the showhud bit-0 gate, which an Emplaced def skips [orig:
+//     Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1 -- def flags1
+//     & 0x80 jumps past the `test g_FpWeaponViewFlags, 1` @0x4DEDEA];
+//   * the Inset gate: a scoped Inset weapon draws the aperture instead
+//     [orig: @0x4DEDF7..0x4DEE19 -- Player_CanFireWeapon &&
+//     Player_IsEquippedWeaponScoped && def flags2 & 0x200 skips the draw];
 //   * third person presents the body instead (presents_third_person).
-bool fp_viewmodel_retail_submit(bool third_person, bool scope_card_active,
-                                bool binoculars_view_active, bool fp_gun_visible,
-                                bool seat_hides_weapon);
+bool fp_viewmodel_retail_submit(const FpViewmodelSubmitGates &gates);
 
 // --- the local player's lighting contexts ---------------------------------------
 

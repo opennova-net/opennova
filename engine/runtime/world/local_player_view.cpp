@@ -538,6 +538,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     v.death_screen_active = s.death_screen_active;
     v.death_screen_submode = s.death_screen_submode;
     v.round_ended = world->match.outcome().ended || s.end_round_known;
+    v.end_round_winner_team = s.end_round_winner_team;
     v.on_foot = !e->mounted;
     v.in_session = s.in_session;
     v.view_tick = world->logic_tick;
@@ -840,6 +841,17 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.scope_zero_default = w.def.scope_zero.default_metres;
 	out.inset_scope_active = optical_view && out.scope_details_scoped &&
 			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active;
+	// The FP draw's own gates (player_present.h fp_viewmodel_retail_submit):
+	// the alive gate reads the local dead bit and the decided winner; the draw
+	// skips the showhud test for an Emplaced def and skips the model for a
+	// scoped Inset def while CanFire holds [orig: Player_RenderViewModelIfAlive
+	// @0x4E0145/@0x4E014B; Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
+	// and @0x4DEDF7..0x4DEE19].
+	out.fp_local_dead = v.local_dead;
+	out.fp_round_winner_set = v.end_round_winner_team != 0;
+	out.fp_def_emplaced = w.active && (w.def.flags & DEF_WEAPON_FLAG_EMPLACED) != 0;
+	out.fp_inset_scoped = optical_view && out.scope_details_scoped &&
+			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0;
 	out.inset_fov_over_zoom = out.inset_scope_active
 			? float(current_fov) / 65536.0f / local_player_scope_zoom(w, *active_slot)
 			: 0;

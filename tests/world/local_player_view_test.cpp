@@ -765,6 +765,52 @@ void test_scope_fov_target_and_render_queries_share_weather_state() {
     CHECK(channels.camera_fov_target_fp == (80 << 16));
 }
 
+// The FP draw's own gates the frame publishes [orig:
+// Player_RenderViewModelIfAlive @0x4E0145 (Flags & 2) / @0x4E014B
+// (g_endround_winner_team); Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
+// (flags1 & Emplaced skips the showhud bit) / @0x4DEDF7..0x4DEE19 (CanFire &&
+// Player_IsEquippedWeaponScoped && flags2 & Inset skips the model)].
+void test_frame_publishes_the_fp_draw_gates() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+
+    LocalPlayerWeapon emplaced = scoped_weapon(DEF_WEAPON_FLAG_EMPLACED);
+    local_player_view_frame(&lw.w, emplaced, view, tracker, frame);
+    CHECK(frame.fp_def_emplaced);
+    CHECK(!frame.fp_inset_scoped && !frame.fp_local_dead && !frame.fp_round_winner_set);
+
+    // A settled scope on an Inset def skips the model; the same scope on a
+    // plain Scoped def keeps it (the card switch decides that one).
+    LocalPlayerWeapon inset = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    CHECK(local_player_scope_toggle(lw.w, inset, view, inset.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, inset, view, tracker, frame);
+    CHECK(frame.fp_inset_scoped);
+    CHECK(!frame.fp_def_emplaced);
+    LocalPlayerWeapon plain = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+    local_player_view_frame(&lw.w, plain, view, tracker, frame);
+    CHECK(!frame.fp_inset_scoped);
+
+    // The alive gate folds from the session each tick: the dead bit and the
+    // decided winner of the S2C 0x1D header.
+    PlayerViewState ticked;
+    LocalViewSessionInputs s;
+    s.local_dead = true;
+    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
+    CHECK(frame.fp_local_dead);
+    CHECK(!frame.fp_round_winner_set);
+    s.local_dead = false;
+    s.end_round_winner_team = 2;
+    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
+    CHECK(!frame.fp_local_dead);
+    CHECK(frame.fp_round_winner_set);
+}
+
 void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     LocalWorld lw;
     LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -2287,6 +2333,7 @@ int main() {
     test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
+    test_frame_publishes_the_fp_draw_gates();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
     test_default_wheel_binding_zooms_in_away_from_the_player();
