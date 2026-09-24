@@ -3,6 +3,7 @@
 #include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/overlay_camera.h>
 #include <runtime/devtools/entities_window.h>
@@ -53,6 +54,7 @@ GameDevTools::GameDevTools() {
 	auto ai = std::make_unique<AiWindow>(*entities_window_);
 	ai_window_ = ai.get();
 	pass_.register_window(std::move(ai));
+	for (int i = 0; i < AiWindow::kLayerCount; ++i) pass_.register_overlay(ai_window_->layer(i));
 	auto rays = std::make_unique<RaysWindow>();
 	rays_window_ = rays.get();
 	pass_.register_window(std::move(rays));
@@ -144,6 +146,7 @@ bool GameDevTools::needs_overlay_camera() const {
 void GameDevTools::clear_overlay_records() {
 	game_window_->set_overlay_camera(OverlayCamera{});
 	entities_window_->set_markers(EntityMarkersRecord{});
+	if (!ai_window_->open) ai_window_->set_snapshot(AiDebugSnapshot{});
 }
 
 bool GameDevTools::needs_entity_markers() const {
@@ -270,7 +273,11 @@ void GameDevTools::set_ai_debug(AiDebugSnapshot snapshot) {
 }
 
 bool GameDevTools::needs_ai_debug() const {
-	return pass_.is_open() && ai_window_->open;
+	return pass_.is_open() && (ai_window_->open || ai_window_->any_layer_enabled());
+}
+
+bool GameDevTools::needs_ai_overlay() const {
+	return pass_.is_open() && ai_window_->any_layer_enabled();
 }
 
 void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {

@@ -8,15 +8,20 @@
 // The window holds only pushed value records — it never reaches into a live
 // World or into Godot. Visibility-armed: while hidden it drops its records
 // and the embedder (gated on GameDevTools::needs_ai_debug) stops building new
-// ones. Rows are formatted once per push; a frame between pushes only
+// ones — unless one of its Game-view layers (ai_overlay.h: labels, routes,
+// targets, perception rings) is on, which keeps the record flowing every
+// logic tick. Rows are formatted once per push; a frame between pushes only
 // re-emits cached strings.
 #pragma once
 
 #include <runtime/devtools/ai_debug_snapshot.h>
+#include <runtime/devtools/ai_overlay.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/imgui_pass.h>
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -30,7 +35,7 @@ public:
 	// Stats/Entities cadence.
 	static constexpr double kRefreshSeconds = 0.5;
 
-	explicit AiWindow(EntitiesWindow &entities) : entities_(entities) {}
+	explicit AiWindow(EntitiesWindow &entities);
 
 	const char *title() const override { return "AI"; }
 	MenuGroup menu_group() const override { return MenuGroup::World; }
@@ -62,6 +67,18 @@ public:
 	// as a separator header.
 	int detail_line_count() const { return static_cast<int>(detail_lines_.size()); }
 	const char *detail_line(int row) const;
+	// Every brain of the report, one row each ("name | state | alert |
+	// target | route").
+	int brain_count() const { return static_cast<int>(brain_rows_.size()); }
+	const char *brain_text(int row) const;
+
+	// The Game-view layers (labels, routes, targets, rings), registered on
+	// the pass by the composer.
+	static constexpr int kLayerCount = 4;
+	AiOverlayLayer &layer(int index) { return *layers_[static_cast<size_t>(index)]; }
+	const AiOverlayLayer &layer(int index) const { return *layers_[static_cast<size_t>(index)]; }
+	bool any_layer_enabled() const;
+	const AiDebugSnapshot &snapshot() const { return snapshot_; }
 
 private:
 	void format_snapshot();
@@ -74,7 +91,10 @@ private:
 	EntityDetailSnapshot detail_{};
 	bool shown_ = false;
 
+	std::array<std::unique_ptr<AiOverlayLayer>, kLayerCount> layers_;
 	std::string counters_;
+	std::vector<std::string> brain_rows_;
+	std::vector<int> brain_alerts_;
 	std::vector<std::string> group_rows_;
 	std::vector<int> group_alerts_; // per group row, for the colored draw
 	std::vector<std::string> channel_rows_;
