@@ -140,12 +140,12 @@ add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
-foreach(test comment trim_value parse variants)
+foreach(test comment trim_value parse variants write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test comment trim_value variants)
+foreach(test comment trim_value variants write)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
 opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
@@ -156,6 +156,20 @@ add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_parse COMMAND bad_parse_test)
+# bad_roundtrip: the writer and the construction seam against the reader -- our
+# fixtures byte-exact, a from-scratch clip field-equal and re-write-stable, the
+# builder's derived bone table pinned, BINOC.bad as the SKIP-LEG leg.
+add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
+target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
+# bad_build: the construction seam -- the frame maps, the derived bind and
+# position, the capsule extents, the refusals, and the canonical table, with the
+# shipped BINOC.bad as the SKIP-LEG leg over both derivations.
+add_executable(bad_build_test bad/bad_build_test.cpp)
+target_link_libraries(bad_build_test PRIVATE opennova_formats)
+target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_build COMMAND bad_build_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
