@@ -27,6 +27,7 @@ public:
 	static constexpr double kRefreshSeconds = 0.25;
 
 	const char *title() const override { return "Physics"; }
+	MenuGroup menu_group() const override { return MenuGroup::Sim; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::Right;
 	}

@@ -29,6 +29,7 @@ class PhysicsWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct ControlRequest;
+struct ControlResult;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct WeaponDefinitionSnapshot;
@@ -89,6 +90,9 @@ public:
 	// to the debug-control table by wire id. A window's queue is its own; this
 	// only serialises them.
 	bool take_control_request(ControlRequest &request);
+	// The table's verdict on a drained request: posted to the menu bar's
+	// status line ("id: ok" / "id: refused (reason)").
+	void report_control_result(const ControlResult &result);
 
 	// The selection seam: the shell's world pick (a device event carrying
 	// only the engine handle) opens and focuses the Entities window on that

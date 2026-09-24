@@ -35,6 +35,7 @@ public:
 class GameWindow : public Window {
 public:
 	const char *title() const override { return "Game"; }
+	MenuGroup menu_group() const override { return MenuGroup::Workspace; }
 	bool is_closeable() const override { return false; }
 	bool is_collapsible() const override { return false; }
 	bool is_scrollable() const override { return false; }

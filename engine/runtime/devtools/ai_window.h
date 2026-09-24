@@ -33,6 +33,7 @@ public:
 	explicit AiWindow(EntitiesWindow &entities) : entities_(entities) {}
 
 	const char *title() const override { return "AI"; }
+	MenuGroup menu_group() const override { return MenuGroup::World; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::RightBottom;
 	}

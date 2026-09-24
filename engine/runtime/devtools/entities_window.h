@@ -38,6 +38,7 @@ public:
 	static constexpr double kRefreshSeconds = 0.5;
 
 	const char *title() const override { return "Entities"; }
+	MenuGroup menu_group() const override { return MenuGroup::World; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::Right;
 	}

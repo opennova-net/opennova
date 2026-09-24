@@ -508,13 +508,17 @@ Variant control_arg_to_variant(const opennova::devtools::ControlArg &p_arg) {
 // MCP's game_debug drives too (ADR 0043 d12): the row's schema validates the
 // arguments and its session-role gate refuses a joiner, once for both
 // surfaces. F3 is the local operator, so it carries the per-call
-// confirmation; requests queued with no table (or no owner behind the row)
-// drain and drop.
+// confirmation. Every verdict is reported back to the tools (the status line,
+// the Log window), so a refused or failed command is never silent.
 void DevTools::apply_control_requests() {
 	opennova::devtools::ControlRequest request;
 	bool drained = false;
 	while (tools_->take_control_request(request)) {
+		opennova::devtools::ControlResult result;
+		result.id = request.id;
 		if (control_table_.is_null()) {
+			result.message = "no debug-control table";
+			tools_->report_control_result(result);
 			continue;
 		}
 		Array args;
@@ -523,12 +527,31 @@ void DevTools::apply_control_requests() {
 		}
 		const Ref<DebugInvokeResult> outcome =
 				control_table_->invoke(StringName(request.id), args, true);
-		drained = drained || outcome->get_error() == OK;
+		const Error error = outcome->get_error();
+		result.ok = error == OK;
+		if (!result.ok) {
+			String message = UtilityFunctions::error_string(error);
+			const Ref<DebugControlState> state = outcome->get_state();
+			if (state.is_valid() && !state->get_reason().is_empty()) {
+				message += ": " + state->get_reason();
+			}
+			result.message = opennova::to_std(message);
+		} else if (outcome->get_result().get_type() != Variant::NIL) {
+			// A read's payload in full (the Log window keeps it); capped so a
+			// huge dictionary cannot flood the ring.
+			constexpr int64_t kDetailCap = 4096;
+			const String text = outcome->get_result().stringify();
+			result.detail = opennova::to_std(text.length() > kDetailCap ? text.substr(0, kDetailCap) : text);
+		}
+		tools_->report_control_result(result);
+		drained = drained || result.ok;
 	}
 	if (drained) {
 		// The records pushed this same frame show the mutation, not the
-		// reading from up to half a second ago.
+		// reading from up to a cadence ago.
 		last_entity_push_ms_ = -1;
+		last_environment_push_ms_ = -1;
+		last_ai_push_ms_ = -1;
 	}
 }
 

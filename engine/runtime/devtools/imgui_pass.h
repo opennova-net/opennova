@@ -15,7 +15,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace opennova::devtools {
@@ -27,6 +29,27 @@ enum class InitialDockPlacement {
 	Center,
 	Right,
 	RightBottom, // the lower split of the right column
+};
+
+// The section of the "Windows" menu a window lists under, in menu order.
+// Workspace is the mandatory surface (the Game view); Help windows (ImGui's
+// own demo and metrics) list in a separate "Help" menu.
+enum class MenuGroup : uint8_t {
+	Workspace,
+	World,
+	Sim,
+	Render,
+	Net,
+	Tools,
+	Help,
+};
+inline constexpr int kMenuGroupCount = 7;
+const char *menu_group_label(MenuGroup group);
+
+// The status line's severity: an Error reads in the warning color.
+enum class StatusLevel : uint8_t {
+	Info,
+	Error,
 };
 
 // A window's preferred first-open size in pixels, applied with
@@ -61,6 +84,8 @@ public:
 	// A window that issues its own ImGui::Begin/End (ImGui's demo, a
 	// full-viewport surface) is drawn without the pass's wrapping Begin/End.
 	virtual bool owns_frame() const { return false; }
+	// The "Windows" menu section the window lists under.
+	virtual MenuGroup menu_group() const { return MenuGroup::Tools; }
 
 	// Focus this window (and select its tab in its dock node) on the pass's
 	// next layout in which the window exists: a window sharing a dock node
@@ -141,14 +166,40 @@ public:
 	void request_layout_reset() { layout_reset_pending_ = true; }
 	bool is_layout_reset_pending() const { return layout_reset_pending_; }
 
+	// Close the whole surface at the end of the next layout pass (the
+	// "Close dev tools" menu item; the embedder reads is_open() afterwards,
+	// exactly as for Escape). Safe to call from inside a window's draw.
+	void request_close() { close_requested_ = true; }
+
+	// The menu bar's status line: the newest message, drawn right-aligned in
+	// the menu bar and faded out kStatusSeconds after it was first drawn;
+	// hovering it lists the last kStatusHistory messages, newest first.
+	static constexpr double kStatusSeconds = 6.0;
+	static constexpr int kStatusHistory = 16;
+	void post_status(std::string text, StatusLevel level);
+	const char *status_text() const;
+	StatusLevel status_level() const;
+	int status_history_count() const { return static_cast<int>(status_.size()); }
+	const char *status_history_text(int index) const;
+
 private:
+	struct StatusLine {
+		std::string text;
+		StatusLevel level = StatusLevel::Info;
+		double shown_at = -1.0; // ImGui time of the first draw; -1 = not drawn yet
+	};
+
 	void sync_visibility();
+	void draw_menu_bar();
+	void draw_status();
 
 	std::vector<std::unique_ptr<Window>> windows_;
+	std::deque<StatusLine> status_; // newest first
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;
+	bool close_requested_ = false;
 };
 
 }  // namespace opennova::devtools

@@ -24,6 +24,8 @@
 #include <runtime/devtools/weapon_request.h>
 #include <runtime/devtools/weapon_window.h>
 
+#include "devtools_test_support.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -32,6 +34,7 @@
 #include <utility>
 
 using namespace opennova::def;
+using namespace devtools_test;
 
 using opennova::devtools::AiDebugSnapshot;
 using opennova::devtools::AiWindow;
@@ -42,12 +45,6 @@ using opennova::devtools::EntitiesWindow;
 using opennova::devtools::EntityDetailSnapshot;
 using opennova::devtools::EnvironmentSnapshot;
 namespace control_id = opennova::devtools::control_id;
-
-// A drained control request names a row by its wire id (the constants are
-// string literals, so the check compares text, never addresses).
-static bool is_control(const ControlRequest &request, const char *id) {
-	return std::strcmp(request.id, id) == 0;
-}
 
 // The Entity Properties toggles: one set_entity_item_attrib request carrying
 // [wire handle, attrib, attrib2].
@@ -76,49 +73,30 @@ using opennova::devtools::WeaponWindow;
 
 namespace {
 
-int g_failures = 0;
+using opennova::devtools::MenuGroup;
+using opennova::devtools::StatusLevel;
 
-#define CHECK(cond, message)                                                          \
-	do {                                                                              \
-		if (!(cond)) {                                                                \
-			std::printf("FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, message, #cond); \
-			++g_failures;                                                             \
-		}                                                                             \
-	} while (0)
-
-// A headless ImGui frame: the null example's setup (a display size and a
-// built font atlas), no platform or renderer backend.
-struct NullBackend {
-	ImGuiContext *context = nullptr;
-
-	NullBackend() {
-		context = ImGui::CreateContext();
-		ImGuiIO &io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.DisplaySize = ImVec2(1280.0f, 720.0f);
-		io.DeltaTime = 1.0f / 60.0f;
-		unsigned char *pixels = nullptr;
-		int width = 0;
-		int height = 0;
-		io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-	}
-	~NullBackend() { ImGui::DestroyContext(context); }
+// Every registered window, in registration order, with its menu group: the
+// ONE registry pin (a new window joins here; the count follows from it).
+struct ExpectedWindow {
+	const char *title;
+	MenuGroup group;
+	bool open_by_default;
 };
-
-struct FakeGameViewport : GameViewport {
-	int width = 0;
-	int height = 0;
-	int draws = 0;
-
-	void draw(int requested_width, int requested_height) override {
-		width = requested_width;
-		height = requested_height;
-		++draws;
-	}
+constexpr ExpectedWindow kExpectedWindows[] = {
+		{"Game", MenuGroup::Workspace, true},
+		{"Stats", MenuGroup::Tools, true},
+		{"Entities", MenuGroup::World, false},
+		{"Entity Properties", MenuGroup::World, false},
+		{"Weapon", MenuGroup::Sim, false},
+		{"Environment", MenuGroup::World, false},
+		{"AI", MenuGroup::World, false},
+		{"Rays", MenuGroup::Sim, false},
+		{"Physics", MenuGroup::Sim, false},
+		{"ImGui demo", MenuGroup::Help, false},
 };
-
-void *test_alloc(size_t size, void *) { return std::malloc(size); }
-void test_free(void *ptr, void *) { std::free(ptr); }
+constexpr int kExpectedWindowCount =
+		static_cast<int>(sizeof(kExpectedWindows) / sizeof(kExpectedWindows[0]));
 
 int find_row(const StatsWindow &stats, const char *id) {
 	for (int i = 0; i < stats.row_count(); ++i) {
@@ -167,10 +145,74 @@ void test_attach_sets_docking_and_viewport_policy() {
 	ImGui::SetCurrentContext(backend.context);
 }
 
+void test_window_registry_order_groups_and_defaults() {
+	GameDevTools tools;
+	CHECK(tools.pass().window_count() == kExpectedWindowCount,
+			"every window in the registry pin is registered, and nothing else");
+	for (int i = 0; i < kExpectedWindowCount && i < tools.pass().window_count(); ++i) {
+		const opennova::devtools::Window &window = tools.pass().window(i);
+		const ExpectedWindow &expected = kExpectedWindows[i];
+		if (std::strcmp(window.title(), expected.title) != 0) {
+			std::printf("  window %d is '%s', expected '%s'\n", i, window.title(), expected.title);
+			CHECK(false, "the registration order matches the pin");
+			continue;
+		}
+		CHECK(window.menu_group() == expected.group, expected.title);
+		CHECK(window.open == expected.open_by_default, expected.title);
+	}
+	CHECK(std::strcmp(opennova::devtools::menu_group_label(MenuGroup::Sim), "Simulation") == 0,
+			"the groups carry their menu labels");
+}
+
+// The menu bar's status line and the Close item: a posted message is the
+// newest status with its level, the history keeps the newest first and caps,
+// and a close request lands at the end of the next layout pass.
+void test_status_line_and_close_request() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(std::strcmp(tools.pass().status_text(), "") == 0, "no status before the first message");
+
+	opennova::devtools::ControlResult ok;
+	ok.id = "hide_foliage";
+	ok.ok = true;
+	tools.report_control_result(ok);
+	CHECK(std::strcmp(tools.pass().status_text(), "hide_foliage: ok") == 0, "a success reads ok");
+	CHECK(tools.pass().status_level() == StatusLevel::Info, "and is informational");
+
+	opennova::devtools::ControlResult refused;
+	refused.id = "set_entity_health";
+	refused.message = "Unauthorized: the joiner does not own the world";
+	tools.report_control_result(refused);
+	CHECK(std::strcmp(tools.pass().status_text(),
+				  "set_entity_health: failed (Unauthorized: the joiner does not own the world)") == 0,
+			"a refusal names its reason");
+	CHECK(tools.pass().status_level() == StatusLevel::Error, "and reads as an error");
+	CHECK(tools.pass().status_history_count() == 2, "the history keeps both");
+	CHECK(std::strcmp(tools.pass().status_history_text(1), "hide_foliage: ok") == 0,
+			"newest first");
+
+	opennova::devtools::ControlResult read;
+	read.id = "environment_weather_snapshot";
+	read.ok = true;
+	read.detail = std::string(200, 'x');
+	tools.report_control_result(read);
+	CHECK(std::strlen(tools.pass().status_text()) < 150, "a long payload is cut on the status line");
+
+	for (int i = 0; i < 40; ++i) tools.pass().post_status("spam", StatusLevel::Info);
+	CHECK(tools.pass().status_history_count() == opennova::devtools::ImGuiPass::kStatusHistory,
+			"the history is capped");
+
+	CHECK(draw_once(tools, 1), "the menu bar draws with a status line");
+	tools.pass().request_close();
+	CHECK(tools.pass().is_open(), "a close request waits for the layout pass");
+	CHECK(draw_once(tools, 2), "the closing pass still draws");
+	CHECK(!tools.pass().is_open(), "the pass closes at the end of that layout pass");
+}
+
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 10,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -209,7 +251,6 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(8).title(), "Physics") == 0,
 			"Physics registers after Rays");
 	CHECK(!tools.pass().window(8).open, "the Physics window starts closed");
-	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -363,10 +404,9 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 10,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(find_window(tools, "ImGui demo")).open,
+			"the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -1739,6 +1779,8 @@ void test_ai_window_detail_pane_follows_the_selection() {
 int main() {
 	test_abi_fingerprint_is_the_pinned_one();
 	test_attach_sets_docking_and_viewport_policy();
+	test_window_registry_order_groups_and_defaults();
+	test_status_line_and_close_request();
 	test_game_window_is_mandatory_and_detachable();
 	test_game_window_sends_responsive_integer_content_size_to_its_adapter();
 	test_game_window_orders_play_interact_and_close_requests();

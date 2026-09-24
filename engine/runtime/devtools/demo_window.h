@@ -10,6 +10,7 @@ namespace opennova::devtools {
 class DemoWindow : public Window {
 public:
 	const char *title() const override { return "ImGui demo"; }
+	MenuGroup menu_group() const override { return MenuGroup::Help; }
 	bool owns_frame() const override { return true; }
 	void draw(ImGuiPass &pass, uint64_t frame_index) override;
 };

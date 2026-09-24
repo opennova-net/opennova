@@ -41,6 +41,7 @@ public:
 	enum class DelayLeg { Start, End };
 
 	const char *title() const override { return "Weapon"; }
+	MenuGroup menu_group() const override { return MenuGroup::Sim; }
 	// Deliberately undocked: the Right dock is 30% of the viewport and a
 	// timeline wants width. It floats at a size the user then owns.
 	InitialDockPlacement initial_dock_placement() const override {
