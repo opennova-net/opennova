@@ -77,8 +77,8 @@ public:
 	// The Entities window's record channel (ADR 0042 d6). The embedder pushes
 	// the directory by value (an invalid snapshot clears; it carries the
 	// authority fact the edits gate on), gated on needs_entity_directory
-	// (pass open && either entity window open) so nobody builds snapshots no
-	// window would show.
+	// (pass open && the Entities, Entity Properties or AI window open) so
+	// nobody builds snapshots no window would show.
 	void set_entity_directory(EntityDirectorySnapshot snapshot);
 	bool needs_entity_directory() const;
 

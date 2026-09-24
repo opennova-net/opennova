@@ -1672,7 +1672,10 @@ void test_ai_window_detail_pane_follows_the_selection() {
 	// The widened gate: with the Properties window closed (the pick opened
 	// it), the AI window alone keeps the detail flowing.
 	tools.entity_properties_window().open = false;
+	tools.entities_window().open = false;
 	CHECK(tools.needs_entity_detail(), "an open AI window alone wants the detail card");
+	CHECK(tools.needs_entity_directory(),
+			"an open AI window alone keeps the directory (and so the card's cadence) flowing");
 	ai.open = false;
 	tools.entity_properties_window().open = false;
 	CHECK(!tools.needs_entity_detail(), "both panes closed wants none");
