@@ -343,6 +343,7 @@ bool Simulation::native_environment_snapshot(
 	out.fog_target_metres = w.fog_target_q16() >> 16;
 	out.color_fade_seconds = (w.color_fade_ticks + 31) / 62;
 	out.sun_fade_pct = w.sun_dim_pct_q16() >> 16;
+	out.sun_fade_target_pct = core.scalar_channels.sun_dim_target_fp >> 16;
 	out.night = w.is_night_phase();
 	const auto rgb = [](uint32_t packed) { return packed & 0x00FFFFFFu; };
 	out.fog_rgb = rgb(core.fog_block.render_color);

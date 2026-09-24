@@ -37,6 +37,7 @@ public:
 	int get_fog_target_metres() const { return value_.fog_target_metres; }
 	int get_color_fade_seconds() const { return value_.color_fade_seconds; }
 	int get_sun_fade_pct() const { return value_.sun_fade_pct; }
+	int get_sun_fade_target_pct() const { return value_.sun_fade_target_pct; }
 	bool get_night() const { return value_.night; }
 	int get_fog_rgb() const { return static_cast<int>(value_.fog_rgb); }
 	int get_sky_rgb() const { return static_cast<int>(value_.sky_rgb); }

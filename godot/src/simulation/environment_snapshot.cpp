@@ -19,6 +19,7 @@ void EnvironmentSnapshot::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, fog_target_metres)
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, color_fade_seconds)
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, sun_fade_pct)
+	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, sun_fade_target_pct)
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::BOOL, night)
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, fog_rgb)
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::INT, sky_rgb)

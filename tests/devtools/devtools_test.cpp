@@ -1325,6 +1325,11 @@ void test_environment_window_formats_the_pushed_record() {
 	snapshot.quake_ticks = 42;
 	snapshot.precipitation_kind = 1;
 	snapshot.wind_scale = 256;
+	snapshot.sun_fade_target_pct = 40;
+	snapshot.sky_speed_target = 20;
+	snapshot.lightning_timer_a = 3;
+	snapshot.lightning_timer_b = 9;
+	snapshot.lightning_level = 2;
 	snapshot.authority = true;
 	tools.set_environment_snapshot(snapshot);
 
@@ -1354,7 +1359,24 @@ void test_environment_window_formats_the_pushed_record() {
 	CHECK(std::strcmp(window.row_text(25), "Overcast: 50%") == 0, "Overcast row");
 	CHECK(std::strcmp(window.row_text(26), "Complexity: 12") == 0, "Complexity row");
 	CHECK(std::strcmp(window.row_text(27), "DCB: 692") == 0, "the DCB literal");
+	CHECK(window.extra_row_count() == EnvironmentWindow::kExtraRowCount,
+			"the live weather rows format under the page");
+	CHECK(std::strcmp(window.extra_row_text(0), "Clock: 12:30 (minute 750)") == 0, "the clock row");
+	CHECK(std::strcmp(window.extra_row_text(1), "Wind: 256 (100% of 256)") == 0, "the wind row");
+	CHECK(std::strcmp(window.extra_row_text(2), "Rain target: 100% (snow)") == 0,
+			"the precipitation target names its kind");
+	CHECK(std::strcmp(window.extra_row_text(5), "SkySpeed target: 20 | SunFade target: 40%") == 0,
+			"the ramp targets");
+	CHECK(std::strcmp(window.extra_row_text(6), "Lightning: timers 3 / 9, level 2") == 0,
+			"the lightning timers");
+	CHECK(std::strcmp(window.extra_row_text(7), "Quake: 42 ticks left") == 0, "the quake remainder");
 	CHECK(window.rain_percent_edit() == 100, "the control strip seeds from the live rain target");
+	CHECK(window.sun_fade_percent_edit() == 40,
+			"sun fade seeds from its target (the current never leaves 0)");
+	CHECK(window.sky_speed_edit() == 20, "sky speed seeds from the ramp's target");
+	CHECK(window.sky_height_edit() == 175, "sky height seeds from the live metres");
+	CHECK(window.quake_edit() == 7, "a running quake seeds its remainder (42 ticks = quake(7))");
+	CHECK(window.wind_percent_edit() == 100, "the wind percent seeds from the wind scale");
 
 	tools.set_environment_snapshot(EnvironmentSnapshot{});
 	CHECK(!window.snapshot_valid() && window.row_count() == 0,
@@ -1394,6 +1416,28 @@ void test_environment_request_queue() {
 					request.args[1].i == 0x102030,
 			"the block color request carries its target and packed rgb");
 	CHECK(!tools.take_control_request(request), "the queue drains exactly once");
+
+	EnvironmentWindow &window = tools.environment_window();
+	window.request_sky_height(175);
+	window.request_clock_scrub(630);
+	window.request_wind_strength(50);
+	window.request_weather_snapshot();
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentSkyHeight) &&
+					request.args.size() == 1 && request.args[0].i == (175 << 16),
+			"the sky height leaves as the raw 16.16 target");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentTimeOfDay) &&
+					request.args.size() == 1 && request.args[0].f == 630.0,
+			"the scrub is the exact clock row, by minute");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentWindStrength) &&
+					request.args[0].f == 50.0,
+			"the wind percent is the wind-strength row");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentWeatherSnapshot) && request.args.empty(),
+			"the weather-home read leaves with no arguments");
+	CHECK(!tools.take_control_request(request), "the strip rows drain exactly once");
 }
 
 // The Rays window formats per-category count rows from the pushed record,
