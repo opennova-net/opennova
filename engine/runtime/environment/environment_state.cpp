@@ -453,17 +453,13 @@ bool EnvironmentState::has_water_height() const {
 	return config_ != nullptr && config_->water_height_set;
 }
 
-Rgb EnvironmentState::frame_clear_color_for(bool indoors,
-		bool above_water) const {
-	if (indoors) {
-		return Rgb{0.0f, 0.0f, 0.0f};
-	}
+Rgb EnvironmentState::frame_clear_color_for(bool eye_above_water) const {
 	// The thermal frame clears to unk_808080 before the water test
 	// [orig: Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca778].
 	if (thermal_view_) {
 		return kThermalGrey;
 	}
-	if (above_water) {
+	if (eye_above_water) {
 		return frame_clear_color();
 	}
 	const Rgb combined = combine_terrain_light(sun_light(), sky_ambient());

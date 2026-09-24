@@ -25,6 +25,8 @@
 #include "simulation/simulation.h"
 #include "terrain/terrain.h"
 
+#include <runtime/renderer/scene_pass_gates.h>
+
 using namespace godot;
 
 namespace {
@@ -96,29 +98,11 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	// [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
 	const int flags = s->local_player_blink_flags() |
 			(p_forces_indoors ? static_cast<int>(Simulation::BLINK_INDOORS) : 0);
-	// Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
-	// near-detail and far-foliage tiers are terrain children here, matching
-	// retail where the detail cells ride the skipped terrain traversal and the
-	// far patches carry their own bit-2 gate — and the skybox pass (dome +
-	// celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
-	// skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
-	// @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	const bool indoors = (flags & static_cast<int>(Simulation::BLINK_INDOORS)) != 0;
-	if (indoors != blink_indoors_) {
-		blink_indoors_ = indoors;
-		if (Terrain *t = terrain()) {
-			t->set_visible(!indoors);
-		}
-		if (SkyDome *dome = sky()) {
-			dome->set_visible(!indoors);
-		}
-		if (MissionEnvironment *env = environment()) {
-			env->set_sky_dome_drawn(!indoors);
-		}
-		if (Celestial *c = celestial()) {
-			c->set_visible(!indoors);
-		}
-	}
+	// The letters latch per sim tick; the pass gates combine them with the
+	// eye's waterline side every display frame (apply_scene_pass_gates).
+	blink_letters_ = static_cast<uint32_t>(flags);
+	blink_indoors_ = (flags & static_cast<int>(Simulation::BLINK_INDOORS)) != 0;
+	apply_scene_pass_gates();
 	// Accum bit 0x8 (the authored water letter): both water passes skipped.
 	// Letter bits only accumulate while inside a box, so the outdoors leg of
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
@@ -414,17 +398,57 @@ void OcclusionFrame::reset() {
 	placer_id_ = ObjectID();
 }
 
+// The blink-letter and waterline pass gates (renderer/scene_pass_gates.h
+// carries the witnesses): the indoors letter hides the terrain render — the
+// near-detail and far-foliage tiers are terrain children here, matching retail
+// where the detail cells ride the skipped terrain traversal and the far
+// patches carry their own bit-2 gate [orig: Foliage_RenderFarPatchesPass
+// skips @ 0x5c95bf/0x5c9665] — and the water mirror's sky bracket; the sky
+// letter or an eye at/below the water hides the main frame's sky bracket
+// (dome + sun/moon discs). The sun glow, the glint and the veil are never
+// gated here.
+void OcclusionFrame::apply_scene_pass_gates() {
+	MissionEnvironment *env = environment();
+	const bool eye_at_or_below_water =
+			env != nullptr && env->is_underwater_overlay_view();
+	const opennova::renderer::ScenePassGates gates =
+			opennova::renderer::scene_pass_gates(blink_letters_,
+					eye_at_or_below_water);
+	// Edge-triggered like the letters themselves, so another owner's terrain
+	// visibility write is never overridden on a steady frame.
+	if (gates.terrain != terrain_gate_) {
+		terrain_gate_ = gates.terrain;
+		if (Terrain *t = terrain()) {
+			t->set_visible(gates.terrain);
+		}
+	}
+	if (SkyDome *dome = sky()) {
+		dome->set_pass_gates(gates.sky, gates.mirror_sky);
+	}
+	if (env != nullptr) {
+		env->set_sky_dome_drawn(gates.sky);
+	}
+	if (Celestial *c = celestial()) {
+		c->set_sky_pass_gates(gates.sky, gates.mirror_sky);
+	}
+}
+
 void OcclusionFrame::reset_blink_frame_gates() {
-	if (blink_indoors_) {
+	blink_letters_ = 0;
+	if (!terrain_gate_) {
 		if (Terrain *t = terrain()) {
 			t->set_visible(true);
 		}
-		if (SkyDome *dome = sky()) {
-			dome->set_visible(true);
-		}
-		if (Celestial *c = celestial()) {
-			c->set_visible(true);
-		}
+	}
+	terrain_gate_ = true;
+	if (SkyDome *dome = sky()) {
+		dome->set_pass_gates(true, true);
+	}
+	if (MissionEnvironment *env = environment()) {
+		env->set_sky_dome_drawn(true);
+	}
+	if (Celestial *c = celestial()) {
+		c->set_sky_pass_gates(true, true);
 	}
 	if (blink_water_suppressed_) {
 		if (Water *w = water()) {

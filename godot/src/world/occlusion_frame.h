@@ -164,10 +164,14 @@ public:
 	// no extra work here.
 	void release_overrides(bool p_reset_semantics);
 
-	// The local player's applied indoors gate (accum bit 0x2): the world's
-	// frame clear-color pass reads it directly every frame (indoors clears
-	// BLACK). Read-only from script.
+	// The local player's latched indoors letter (accum bit 0x2). Read-only
+	// from script.
 	bool is_blink_indoors() const { return blink_indoors_; }
+	// Re-derive the scene pass gates from the latched letters and the eye's
+	// CURRENT waterline side: the letters change per sim tick
+	// (apply_blink_gates), the eye per display frame (GameWorld's scene
+	// environment leg calls this after classifying the render eye).
+	void apply_scene_pass_gates();
 	// Mirrors GameWorld._perf_probe_enabled, written only at the probe
 	// toggle edge (set_perf_probe_enabled): the manual A/B probe shares
 	// apply_frame's clock reads with the F3 Stats capture.
@@ -216,11 +220,14 @@ private:
 	ObjectID entities_id_;
 	ObjectID placer_id_;
 	Ref<FrameStats> frame_stats_;
-	// The local player's applied blink letter gates (render-occlusion-re.md
-	// §4): accum bit 0x2 hides the terrain render (near detail + far foliage
-	// ride the terrain node) and the sky dome + celestials; bit 0x8 hides the
-	// water passes.
+	// The local player's latched blink letters (render-occlusion-re.md §4):
+	// accum bit 0x2 hides the terrain render (near detail + far foliage ride
+	// the terrain node) and the mirror's sky bracket, bit 0x4 the main
+	// frame's sky bracket (apply_scene_pass_gates), bit 0x8 the water passes.
+	uint32_t blink_letters_ = 0;
 	bool blink_indoors_ = false;
+	// The last terrain gate written (edge-triggered).
+	bool terrain_gate_ = true;
 	bool blink_water_suppressed_ = false;
 	bool probe_timing_ = false;
 	// bms_id -> resolved ObjectModel, so steady frames skip registry lookups;

@@ -737,6 +737,11 @@ void GameWorld::apply_scene_environment_frame() {
 		}
 	}
 	env_->apply_render_eye(eye_y, water_active ? water_->get_water_height() : 0.0f, water_active);
+	// The main frame's sky bracket follows the eye's waterline side every
+	// frame (the blink letters latch per tick); OcclusionFrame owns the gates.
+	if (occlusion_.is_valid()) {
+		occlusion_->apply_scene_pass_gates();
+	}
 	// Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
 	// This frame leg runs after camera placement and before ObjectModel's
 	// retained material walk, so water crossings flip the ladder immediately.
@@ -1167,12 +1172,14 @@ void GameWorld::restore_idle_frame_clear_color() {
 }
 
 // The witnessed frame clear: the thermal view's flat grey, else the
-// horizon-blended skyfog above water, the lit water color underwater [orig:
-// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792 - clear color =
-// thermal ? 0x808080 : cam above water ? skyfog[0] : Env_WaterColorLit; the
-// selection is the engine's frame_clear_color_for, and the thermal latch
-// reaches it through MissionEnvironment::set_thermal_view, whose generation
-// bump re-runs this leg]. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
+// horizon-blended skyfog while the eye is strictly above the water, the lit
+// water color at or below it [orig: Render_ProcessMainSceneFrame
+// @ 0x5ca771..0x5ca792 - clear color = thermal ? 0x808080 : cam above water ?
+// skyfog[0] : Env_WaterColorLit, the `jle` inclusive of the waterline; no
+// blink letter reaches the beauty clear]. The selection is the engine's
+// frame_clear_color_for, and the thermal latch reaches it through
+// MissionEnvironment::set_thermal_view, whose generation bump re-runs this
+// leg. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
 // VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7):
 // above water the post-blend DOUBLED skyfog, underwater Env_WaterColorLit =
 // water x light >> 7; the halving branch [orig: @ 0x67715d] is the
@@ -1184,18 +1191,10 @@ void GameWorld::update_frame_clear_color() {
 		return;
 	}
 	Ref<Environment> environment = clear_color_->get_environment();
-	// The clear SELECTION (black indoors / skyfog above water / lit water
-	// underwater) is the engine's (environment_state.h carries the witness);
-	// this device classifies the eye and writes the color. The sentinel
-	// generation (-2) forces a recompute on indoors exit.
-	if (occlusion_->is_blink_indoors()) {
-		if (clear_env_generation_ != -2) {
-			clear_env_generation_ = -2;
-			environment->set_bg_color(env_->frame_clear_color_for(true, true).linear_to_srgb());
-		}
-		return;
-	}
-	const bool above = !env_->is_underwater_view();
+	// The clear SELECTION (thermal grey / skyfog above water / lit water at
+	// or below it) is the engine's (environment_state.h carries the witness);
+	// this device reads the eye's inclusive waterline side and writes the color.
+	const bool above = !env_->is_underwater_overlay_view();
 	Ref<EnvLightState> light_state = env_->get_light_state();
 	const int64_t gen = light_state.is_valid() ? light_state->get_generation() : 0;
 	if (gen == clear_env_generation_ && above == clear_above_water_) {
@@ -1206,7 +1205,7 @@ void GameWorld::update_frame_clear_color() {
 	// Godot decodes BG_COLOR from sRGB before writing the scene target.
 	// Pre-encode the retail gamma-domain value so the clear and spatial
 	// shader output share one numeric domain (D-RMAT-7), including underwater.
-	environment->set_bg_color(env_->frame_clear_color_for(false, above).linear_to_srgb());
+	environment->set_bg_color(env_->frame_clear_color_for(above).linear_to_srgb());
 }
 
 // Re-drive the gamemus vars from the local player each frame: the engine names

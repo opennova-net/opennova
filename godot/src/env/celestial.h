@@ -64,6 +64,13 @@ public:
 	// shader text is inspected.
 	static bool source_material_uses_additive(const Ref<Material> &p_source);
 
+	// Which scene passes draw the sun/moon discs this frame: they ride the sky
+	// bracket (OcclusionFrame owns the gates; renderer/scene_pass_gates.h
+	// carries the witnesses). The glare and glint are never gated here.
+	void set_sky_pass_gates(bool p_beauty_drawn, bool p_mirror_drawn);
+	bool is_sky_beauty_pass_drawn() const { return sky_beauty_pass_drawn_; }
+	bool is_sky_mirror_pass_drawn() const { return sky_mirror_pass_drawn_; }
+
 	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
@@ -166,6 +173,10 @@ private:
 	Ref<Shader> celestial_shader_;
 	Ref<Shader> celestial_additive_shader_;
 	uint32_t environment_capture_layer_mask_ = 0;
+	bool sky_beauty_pass_drawn_ = true;
+	bool sky_mirror_pass_drawn_ = true;
+	// Stamp the current sky pass gates onto the sun/moon materials.
+	void _apply_sky_pass_gates();
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).
 	int sun_veil_glare_ = 0;
 	int sun_veil_stopdown_ = 0;

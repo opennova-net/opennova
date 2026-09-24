@@ -29,6 +29,22 @@ uniform vec3 u_glare_direction = vec3(0.0, 1.0, 0.0);
 // The typed Q3 producer reads this occlusion-independent fog-based opacity;
 // the beauty shader itself always uses u_opacity.
 uniform float u_q3_opacity = 0.0;
+// Which scene passes draw the sun/moon this frame: they ride the sky
+// bracket, drawn by the main frame only while blink letter 0x4 is clear and
+// the eye is strictly above the water, by the water mirror while letter 0x2
+// is clear (renderer/scene_pass_gates.h carries the witnesses). The glare and
+// glint keep the defaults: they are drawn outside the bracket.
+uniform bool u_beauty_pass_drawn = true;
+uniform bool u_mirror_pass_drawn = true;
+const uint SKY_WATER_LAYER = 1024u; // visual_layers::WATER (0x00000400)
+
+bool sky_pass_drawn(uint camera_layers) {
+	if (camera_layers == SKY_WATER_LAYER) {
+		return true; // the environment-capture cameras
+	}
+	return (camera_layers & SKY_WATER_LAYER) != 0u ? u_beauty_pass_drawn
+			: u_mirror_pass_drawn;
+}
 
 varying float v_glare_view_fade;
 
@@ -73,6 +89,9 @@ void vertex() {
 		// @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77;
 		// Render_SetViewportFarDepth @ 0x58a840].
 		POSITION.z = 0.0;
+	}
+	if (!IN_SHADOW_PASS && !sky_pass_drawn(CAMERA_VISIBLE_LAYERS)) {
+		POSITION = vec4(2.0, 2.0, 2.0, 1.0);
 	}
 }
 

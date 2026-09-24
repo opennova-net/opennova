@@ -1064,18 +1064,24 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"an eye exactly on the plane stays dry: retail's side test is strict <")
 	assert_true(env.is_underwater_overlay_view(),
 			"the later retail murk scissor includes exact waterline equality")
-	assert_eq(world.get_current_frame_clear_color(), mission_clear,
-			"the frame clear shares the strict waterline equality policy")
+	var lit_water := func() -> Color:
+		var light := EnvFile.combine_terrain_light(
+				Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
+				Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
+		return EnvFile.lit_water_color(
+				Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
+				light)
+	# The clear's `jle` keeps the lit water color AT the waterline too
+	# [orig: Render_ProcessMainSceneFrame @ 0x5ca785..0x5ca790].
+	var at_line: Color = lit_water.call()
+	assert_eq(world.get_current_frame_clear_color(),
+			Color(at_line.r, at_line.g, at_line.b).linear_to_srgb(),
+			"the frame clear shares the murk's inclusive waterline side")
 	camera.v_offset = -1.0
 	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
 	world.tick(camera.global_position, camera.get_global_transform())
 	assert_true(env.is_underwater_overlay_view())
-	var combined := EnvFile.combine_terrain_light(
-			Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
-			Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
-	var lit := EnvFile.lit_water_color(
-			Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
-			combined)
+	var lit: Color = lit_water.call()
 	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b).linear_to_srgb(),
 			"v_offset below water selects the underwater clear even when the node origin is above")
 	# Environment_ApplyFogAndAmbient selects one pass payload from the same
@@ -2962,28 +2968,32 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 func test_blink_frame_gates_toggle_render_passes() -> void:
 	# The blink letter gates (docs/render/render-occlusion-re.md §4): indoors
 	# (accum bit 0x2) hides the terrain render — near detail + far foliage ride
-	# the terrain node — and the sky dome + celestials; leaving restores them
-	# [orig: render_main_scene @ 0x5c1353 (PolyTrn skip), the skybox skip
-	# @ 0x5ca84f]. Driven end-to-end through the REAL sim by the mission's
-	# force-indoors attribute [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]; the
-	# attribute is mission state the load latches, so the outdoors edge is the
-	# next load of the same pack without it. The water letter legs (accum bit
-	# 0x8) are gone with the sim doubles: letters accumulate only inside
-	# authored blink boxes, which no fixture model carries — the water gate
-	# keeps its witness in the [orig] cites of OcclusionFrame
-	# (godot/src/world/occlusion_frame.cpp).
+	# the terrain node — and the WATER MIRROR's sky bracket, while the main
+	# frame keeps its sky (gated only by the sky letter 0x4 and the eye's
+	# waterline side) [orig: Render_ProcessMainSceneFrame @ 0x5ca192..0x5ca1bd;
+	# render_main_scene @ 0x5c1342..0x5c1353]. Driven end-to-end through the
+	# REAL sim by the mission's force-indoors attribute [orig: Bms_AttribFlags
+	# & 0x10 @ 0x5ca1c8]; the attribute is mission state the load latches, so
+	# the outdoors edge is the next load of the same pack without it. The
+	# sky/water letter legs need authored blink boxes, which no fixture model
+	# carries; renderer_render_order pins the gate law itself.
 	var root_dir := WorldFixture.stage_minimal_root("blink_gates")
 	var world := WorldFixture.make_world(self)
 	var indoors := func(mission: MissionData) -> void:
 		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true))
 	assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION, indoors), OK)
-	var sky := world.get_node("SkyDome") as Node3D
+	var sky := world.get_node("SkyDome") as SkyDome
+	var celestial := world.get_node("Celestial") as Celestial
 	var water := world.get_node("Water") as Node3D
 	var terrain := world.get_node("Terrain") as Node3D
 
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(terrain.visible, "indoors hides the terrain render")
-	assert_false(sky.visible, "indoors skips the skybox pass")
+	assert_true(sky.visible, "the dome node stays; its passes are gated")
+	assert_true(sky.is_beauty_pass_drawn(), "indoors alone keeps the main frame's sky")
+	assert_false(sky.is_mirror_pass_drawn(), "indoors skips the mirror's sky bracket")
+	assert_true(celestial.is_sky_beauty_pass_drawn())
+	assert_false(celestial.is_sky_mirror_pass_drawn())
 	assert_true(water.visible, "the indoors bit alone leaves water on")
 
 	# The outdoors edge: the next mission carries no force-indoors attribute
@@ -2992,17 +3002,19 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_true(terrain.visible, "outdoors restores the terrain")
-	assert_true(sky.visible, "outdoors restores the sky")
+	assert_true(sky.is_beauty_pass_drawn() and sky.is_mirror_pass_drawn(),
+			"outdoors draws the sky in both passes")
 	assert_true(water.visible, "outdoors leaves the water on")
 
 	# An unload while indoors must not leach into the next mission.
 	world.unload()
 	assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION, indoors), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	assert_false(sky.visible, "back indoors before the unload")
+	assert_false(sky.is_mirror_pass_drawn(), "back indoors before the unload")
 	world.unload()
 	assert_true(terrain.visible, "unload restores the terrain gate")
-	assert_true(sky.visible, "unload restores the sky gate")
+	assert_true(sky.is_mirror_pass_drawn(), "unload restores the mirror sky gate")
+	assert_true(celestial.is_sky_mirror_pass_drawn(), "unload restores the disc gate")
 
 
 func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:

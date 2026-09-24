@@ -272,16 +272,17 @@ public:
 	// device Clear @ 0x677100; defaults @ 0x57c0b0 / 0x60fca3].
 	Rgb frame_clear_color() const { return skyfog_color_rt_; }
 	// The witnessed per-frame clear SELECTION [orig:
-	// Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792 + the indoors gate
-	// @ 0x5c1597]: BLACK while the blink indoors bit is set (the
-	// Env_SkyfogBlock clear runs only when it is clear), the flat 0x808080
+	// Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792]: the flat 0x808080
 	// grey while the thermal view is latched (it outranks the water test
-	// [orig: @ 0x5ca771..0x5ca778]), the horizon-blended skyfog above water,
-	// and underwater the lit water color — water x combined terrain light,
-	// the same derived chain the water surface renders with [orig:
-	// @ 0x5ca78b]. Every branch serves RENDER-SPACE (x2-gained) colors for
-	// the modulate2x-path device Clear (D-RMAT-7).
-	Rgb frame_clear_color_for(bool indoors, bool above_water) const;
+	// [orig: @ 0x5ca771..0x5ca778]), the horizon-blended skyfog while the eye
+	// is strictly above the water plane, and at or below it the lit water
+	// color — water x combined terrain light, the same derived chain the
+	// water surface renders with [orig: @ 0x5ca78b; the `jle` @ 0x5ca790
+	// keeps the water color at exact equality]. No blink letter reaches the beauty clear
+	// (the black clear @ 0x5c1597 is the water mirror's, render_main_scene).
+	// Every branch serves RENDER-SPACE (x2-gained) colors for the
+	// modulate2x-path device Clear (D-RMAT-7).
+	Rgb frame_clear_color_for(bool eye_above_water) const;
 	// The raw interior pair (the object block's NVG rewrite gives it the
 	// modulator's R term on all three channels, apply_nvg_hemi_gain_r).
 	Rgb ceiling_color() const { return ceiling_color_rt_; }

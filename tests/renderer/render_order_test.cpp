@@ -2,6 +2,7 @@
 // technique-class, and ladder rules of docs/render/render-order-re.md.
 
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/scene_pass_gates.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -120,6 +121,25 @@ int main() {
 	CHECK(!entity_uses_thermal_wave(5));
 	CHECK(scene_far_plane(1000.9f) == 1001.0f);
 	CHECK(scene_far_plane(1000.0f) == 1001.0f);
+
+	// --- the blink/waterline pass gates [orig: Render_ProcessMainSceneFrame
+	// @ 0x5ca192..0x5ca1bd; render_main_scene @ 0x5c1342..0x5c1353]: the
+	// indoors letter 0x2 skips the terrain pass and the MIRROR's sky, the sky
+	// letter 0x4 and an eye at/below the water skip the main frame's sky.
+	{
+		const ScenePassGates open = scene_pass_gates(0, false);
+		CHECK(open.terrain && open.sky && open.mirror_sky);
+		const ScenePassGates indoors = scene_pass_gates(0x2, false);
+		CHECK(!indoors.terrain);
+		CHECK(indoors.sky); // indoors alone keeps the beauty sky bracket
+		CHECK(!indoors.mirror_sky);
+		const ScenePassGates sky_off = scene_pass_gates(0x4, false);
+		CHECK(sky_off.terrain && !sky_off.sky && sky_off.mirror_sky);
+		const ScenePassGates underwater = scene_pass_gates(0, true);
+		CHECK(underwater.terrain && !underwater.sky && underwater.mirror_sky);
+		const ScenePassGates water_letter = scene_pass_gates(0x8, false);
+		CHECK(water_letter.terrain && water_letter.sky && water_letter.mirror_sky);
+	}
 
 	if (failures != 0) {
 		std::printf("renderer_render_order: %d failure(s)\n", failures);

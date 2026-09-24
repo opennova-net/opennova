@@ -342,6 +342,10 @@ struct BlinkAccum {
 };
 
 inline constexpr uint32_t kBlinkIndoorsBit = 0x2;  // accum bit -> kEntityFlagIndoors
+inline constexpr uint32_t kBlinkSkyOffBit = 0x4;   // authored sky letter — the main frame's
+                                                   // dome + sun/moon bracket skipped
+                                                   // [orig: Render_ProcessMainSceneFrame
+                                                   // @0x5ca1a3..0x5ca1ab -> @0x5ca7c4]
 inline constexpr uint32_t kBlinkWaterOffBit = 0x8; // authored water letter — both water passes
                                                    // skipped [orig: Terrain_RenderSceneWithReflection
                                                    // @0x5c93cb; docs/render/render-occlusion-re.md §4]

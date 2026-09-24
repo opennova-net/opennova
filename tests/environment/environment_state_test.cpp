@@ -266,12 +266,9 @@ int main() {
 		ok &= expect(rgb_near(env.build_scene_fog(true).color,
 					underwater_before.color),
 				"underwater lit water outranks the thermal fog");
-		ok &= expect(rgb_near(env.frame_clear_color_for(false, true), grey_fog) &&
-						rgb_near(env.frame_clear_color_for(false, false), grey_fog),
+		ok &= expect(rgb_near(env.frame_clear_color_for(true), grey_fog) &&
+						rgb_near(env.frame_clear_color_for(false), grey_fog),
 				"the thermal clear outranks the water test");
-		ok &= expect(rgb_near(env.frame_clear_color_for(true, true),
-					{0.0f, 0.0f, 0.0f}),
-				"indoors still clears black");
 		// The terrain ramps: c1 light 0x101010, c0 sky 0xF0F0F0.
 		const opennova::env::Rgb ramp_light{16.0f / 255.0f, 16.0f / 255.0f,
 				16.0f / 255.0f};
@@ -316,7 +313,7 @@ int main() {
 						rgb_near(values.dir_color, env.sun_light()),
 				"the world block needs the CanFire gate");
 		ok &= expect(rgb_near(env.build_scene_fog(false).color, env.fog_color()) &&
-						rgb_near(env.frame_clear_color_for(false, true),
+						rgb_near(env.frame_clear_color_for(true),
 								env.frame_clear_color()),
 				"the fog and clear need the CanFire gate");
 		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sun_light,
@@ -376,7 +373,7 @@ int main() {
 					dry.type == env.fog_type(),
 				"the dry scene pass preserves current weather fog");
 		ok &= expect(rgb_near(underwater.color,
-					env.frame_clear_color_for(false, false)),
+					env.frame_clear_color_for(false)),
 				"the underwater scene fog target is Env_WaterColorLit");
 		ok &= expect(near(underwater.end,
 					opennova::env::fog_end_underwater(cfg.water_murk)) &&

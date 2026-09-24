@@ -49,6 +49,12 @@ void Celestial::_bind_methods() {
 			PROPERTY_HINT_LAYERS_3D_RENDER),
 			"set_environment_capture_layer_mask",
 			"get_environment_capture_layer_mask");
+	ClassDB::bind_method(D_METHOD("set_sky_pass_gates", "beauty_drawn", "mirror_drawn"),
+			&Celestial::set_sky_pass_gates);
+	ClassDB::bind_method(D_METHOD("is_sky_beauty_pass_drawn"),
+			&Celestial::is_sky_beauty_pass_drawn);
+	ClassDB::bind_method(D_METHOD("is_sky_mirror_pass_drawn"),
+			&Celestial::is_sky_mirror_pass_drawn);
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
@@ -88,6 +94,27 @@ void Celestial::set_environment_capture_layer_mask(uint32_t p_mask) {
 		if (body != nullptr) {
 			_stamp_environment_capture_layer(body->model);
 		}
+	}
+}
+
+void Celestial::set_sky_pass_gates(bool p_beauty_drawn, bool p_mirror_drawn) {
+	if (p_beauty_drawn == sky_beauty_pass_drawn_ &&
+			p_mirror_drawn == sky_mirror_pass_drawn_) {
+		return;
+	}
+	sky_beauty_pass_drawn_ = p_beauty_drawn;
+	sky_mirror_pass_drawn_ = p_mirror_drawn;
+	_apply_sky_pass_gates();
+}
+
+void Celestial::_apply_sky_pass_gates() {
+	for (const String &key : { String("sun"), String("moon") }) {
+		const Body *body = bodies_.getptr(key);
+		if (body == nullptr) {
+			continue;
+		}
+		_set_body_parameter(*body, "u_beauty_pass_drawn", sky_beauty_pass_drawn_);
+		_set_body_parameter(*body, "u_mirror_pass_drawn", sky_mirror_pass_drawn_);
 	}
 }
 
@@ -254,6 +281,7 @@ void Celestial::_rebuild_if_needed() {
 		}
 		bodies_[spec.key] = body;
 	}
+	_apply_sky_pass_gates();
 }
 
 Ref<ObjectData> Celestial::_load_object_data(const String &p_graphic) {

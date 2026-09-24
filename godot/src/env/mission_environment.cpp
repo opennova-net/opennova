@@ -679,10 +679,8 @@ Vector3 MissionEnvironment::get_frame_clear_color() const {
 	return to_vector3(state_.frame_clear_color());
 }
 
-Color MissionEnvironment::frame_clear_color_for(bool p_indoors,
-		bool p_above_water) const {
-	const opennova::env::Rgb rgb =
-			state_.frame_clear_color_for(p_indoors, p_above_water);
+Color MissionEnvironment::frame_clear_color_for(bool p_eye_above_water) const {
+	const opennova::env::Rgb rgb = state_.frame_clear_color_for(p_eye_above_water);
 	return Color(rgb.r, rgb.g, rgb.b);
 }
 
