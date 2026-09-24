@@ -21,8 +21,11 @@
 //      light direction down to terrain [orig: RenderSlot_UpdateEntityLight
 //      @ 0x5d6a30, height probe Terrain_GetHeightAtPosition @ 0x606720];
 //   4. renders each live silhouette RT on the detail-scaled refresh cadence
-//      [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690] with the slot
-//      lighting constants [orig: RenderSlot_SetupNextLighting @ 0x5d7250];
+//      [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690] — the black
+//      PROJSHAD pass sets no slot lighting; the (c + lum) * 0.5 * -3 c21..c23
+//      constants belong to the sector-model receiver path, dead in JO behind
+//      the always-zero gate [orig: RenderSlot_SetupNextLighting @ 0x5d7250,
+//      @ 0x5d73d3..0x5d740d; sub_5D7240 @ 0x5d724a];
 //   5. drapes each bound slot over a 21x21 terrain-following patch: the
 //      silhouette projected along the slot direction and multiplied into the
 //      terrain with the per-channel ambient law and the 40..80 u distance
@@ -186,14 +189,11 @@ std::array<float, 3> drape_silhouette_factor(
 		const std::array<float, 3> &shadow_term, float fade,
 		float depth_clip);
 
-// Attached-light slots (the dominant point light won): the silhouette RT is
-// lit by D3D light 4 with NTSC-weighted negated colors
-// (c + lum) * 0.5 * -3 (lum = 0.3r + 0.6g + 0.1b) into PS c21..c23
-// [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d], and the drape
-// scales the light color by -(c + lum) * (1 - fade)
+// Attached-light slots (the dominant point light won): the drape lights its
+// patch with D3D light 4 whose diffuse is the NTSC-weighted negated color
+// -(c + lum) * (1 - fade), lum = 0.3r + 0.6g + 0.1b
 // [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0
 // folded with the 0.5].
-std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb);
 std::array<float, 3> drape_attached_light_scale(
 		const std::array<float, 3> &rgb, float fade);
 
@@ -407,11 +407,12 @@ private:
 	// lifetime, so the refresh cadence keyed on it never re-phases when
 	// another record is released [orig: RenderSlot_AllocSlot @ 0x5d5690
 	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
-	// count only resets at subsystem init @ 0x5d61cb — retail binds a slot
-	// per entity for the mission and never releases]. Device fold: a Godot
-	// caster is an instance id that a respawn recreates, so release_entity
-	// exists and the lowest free index is reused to keep the table bounded;
-	// a live record's index is as stable as retail's.
+	// count only resets at subsystem init @ 0x5d61cb; Entity_Destroy's
+	// release zeroes the 128-byte record but never hands its index back
+	// [orig: sub_5D5640 @ 0x5d5671..0x5d5679]]. Device fold: a Godot caster
+	// is an instance id that a respawn recreates, so the lowest free index is
+	// reused to keep the table bounded; a live record's index is as stable as
+	// retail's.
 	std::array<Record, kSlotRecordCount> records_{};
 	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};

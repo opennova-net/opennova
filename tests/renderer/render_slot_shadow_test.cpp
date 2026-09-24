@@ -194,13 +194,9 @@ int main() {
 				near_f(clipped[2], 1.0f));
 	}
 
-	// --- slot lighting darkening constants
-	// [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d].
+	// --- the attached-light drape diffuse
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14].
 	{
-		const auto dark = slot_light_darkening({1.0f, 1.0f, 1.0f});
-		// lum = 0.3+0.6+0.1 = 1; (1+1)*0.5*-3 = -3 per channel.
-		CHECK(near_f(dark[0], -3.0f) && near_f(dark[1], -3.0f) &&
-				near_f(dark[2], -3.0f));
 		const auto scale =
 				drape_attached_light_scale({1.0f, 1.0f, 1.0f}, 0.5f);
 		// -(c+lum)*(1-fade) = -2*0.5 = -1.

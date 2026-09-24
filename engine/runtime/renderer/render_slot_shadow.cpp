@@ -175,17 +175,6 @@ static float ntsc_luminance(const std::array<float, 3> &rgb) {
 	return 0.3f * rgb[0] + 0.6f * rgb[1] + 0.1f * rgb[2];
 }
 
-std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb) {
-	// (c + lum) * 0.5 * -3 [orig: RenderSlot_SetupNextLighting
-	// @ 0x5d73d3..0x5d740d].
-	const float lum = ntsc_luminance(rgb);
-	std::array<float, 3> out{};
-	for (int c = 0; c < 3; ++c) {
-		out[c] = (rgb[c] + lum) * 0.5f * -3.0f;
-	}
-	return out;
-}
-
 std::array<float, 3> drape_attached_light_scale(
 		const std::array<float, 3> &rgb, float fade) {
 	// (c + lum) * 0.5 * -2 * (1 - fade) = -(c + lum) * (1 - fade)
