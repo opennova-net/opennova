@@ -55,9 +55,11 @@
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/render_order.h>
 
 #include "particle/particle_compositor.h"
 #include "particle/particle_convert.h"
+#include "particle/particle_far_pass.h"
 #include "render/frame_fx.h"
 #include "render/visual_layers.h"
 #include "render/world_environment_lookup.h"
@@ -599,6 +601,14 @@ public:
 	std::uint64_t atlas_generation = 0;
 	std::array<Ref<Shader>, 8> shader_cache;
 	std::map<std::uint64_t, Ref<ShaderMaterial>> materials;
+	// Pass A of the main view and of the second scene view as render-list
+	// runs at kRungParticleFarSide (ParticleFarPass), with their own
+	// shaders/materials; the compositor far effect keeps only distortion.
+	ParticleFarPass world_far_pass;
+	ParticleFarPass second_scene_far_pass;
+	std::array<Ref<Shader>, 8> far_shader_cache;
+	std::map<std::uint64_t, Ref<ShaderMaterial>> far_materials;
+	opennova::renderer::ParticleDrawList far_distortion_scratch;
 	std::vector<std::string> unresolved_names;
 	std::size_t rejected_atlas_entries = 0;
 	ParticleEffectPair world_effects;
@@ -864,6 +874,8 @@ public:
 		for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->clear_submission();
 		});
+		world_far_pass.clear();
+		second_scene_far_pass.clear();
 		if (first_person_mesh.is_valid())
 			first_person_mesh->clear_surfaces();
 		slot_present.fill(false);
@@ -1055,6 +1067,70 @@ public:
 		return material;
 	}
 
+	// The far-pass shader for a particle type
+	// (godot/shaders/particle/world_far; Distort has none: it stays on the
+	// distortion path).
+	Ref<Shader> far_shader_for(opennova::renderer::ParticlePipeline pipeline) {
+		static const char *const kFarShaderNames[8] = {"blend", "additive",
+				"premult", "bump", "mod", "mod2x", "bumpadd", nullptr};
+		const std::size_t index = static_cast<std::size_t>(pipeline);
+		if (index >= far_shader_cache.size() || kFarShaderNames[index] == nullptr)
+			return Ref<Shader>();
+		if (far_shader_cache[index].is_null()) {
+			ResourceLoader *loader = ResourceLoader::get_singleton();
+			if (loader != nullptr) {
+				Ref<Resource> resource = loader->load(
+						String("res://shaders/particle/world_far/particle_far_") +
+						kFarShaderNames[index] + ".gdshader");
+				far_shader_cache[index] = resource;
+			}
+		}
+		return far_shader_cache[index];
+	}
+
+	Ref<ShaderMaterial> far_material_for(
+			const opennova::renderer::ParticleDrawCommand &command) {
+		const std::uint64_t key =
+				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
+				(static_cast<std::uint64_t>(command.pipeline) << 16) |
+				static_cast<std::uint64_t>(command.variant);
+		const auto found = far_materials.find(key);
+		if (found != far_materials.end())
+			return found->second;
+		const Ref<Shader> shader = far_shader_for(command.pipeline);
+		if (shader.is_null())
+			return Ref<ShaderMaterial>();
+		Ref<ShaderMaterial> material;
+		material.instantiate();
+		material->set_shader(shader);
+		material->set_render_priority(opennova::renderer::kRungParticleFarSide);
+		if (command.atlas_page < pages.size() &&
+				pages[command.atlas_page].texture.is_valid()) {
+			material->set_shader_parameter("albedo_tex",
+					pages[command.atlas_page].texture);
+			material->set_shader_parameter("has_texture", true);
+		} else {
+			material->set_shader_parameter("has_texture", false);
+		}
+		far_materials.emplace(key, material);
+		return material;
+	}
+
+	// The distortion commands of a far-side list, for the compositor far
+	// effect (the render-list runs take every other command).
+	const opennova::renderer::ParticleDrawList &far_distortion_only(
+			const opennova::renderer::ParticleDrawList &draw_list) {
+		far_distortion_scratch = draw_list;
+		auto &commands = far_distortion_scratch.commands;
+		commands.erase(std::remove_if(commands.begin(), commands.end(),
+							   [](const opennova::renderer::ParticleDrawCommand &command) {
+								   return command.pipeline !=
+										   opennova::renderer::ParticlePipeline::Distort;
+							   }),
+				commands.end());
+		return far_distortion_scratch;
+	}
+
 	static std::uint32_t lit_primary_color(const LitQuadInput &lit,
 			const Basis &view_basis) {
 		std::array<float, 9> rows;
@@ -1083,6 +1159,8 @@ public:
 			ParticleDrawSlot camera_slot) {
 		for (Ref<ParticleCompositorEffect> &effect : effects)
 			effect->clear_submission();
+		if (far_slot == kSecondSceneFarSide)
+			second_scene_far_pass.clear();
 		slot_present[far_slot] = false;
 		slot_present[camera_slot] = false;
 	}
@@ -1813,6 +1891,21 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		const opennova::renderer::ParticleDrawList &draw_list =
 				impl_->compilers[slot].compile(impl_->render_snapshot, view);
 		impl_->slot_present[slot] = true;
+		if (slot == kWorldFarSide || slot == kSecondSceneFarSide) {
+			// Pass A draws in the transparent list at kRungParticleFarSide
+			// (ParticleFarPass); only its distortion stays on the compositor.
+			ParticleFarPass &far_pass = slot == kWorldFarSide ?
+					impl_->world_far_pass : impl_->second_scene_far_pass;
+			far_pass.upload(this, draw_list,
+					slot == kWorldFarSide ? ParticleFarPass::View::Main :
+											ParticleFarPass::View::SecondScene,
+					[this](const opennova::renderer::ParticleDrawCommand &command) {
+						return impl_->far_material_for(command);
+					});
+			impl_->publish_world_draw_list(effect, impl_->far_distortion_only(draw_list),
+					view_camera.position, view_camera.forward, p_time_ms);
+			return;
+		}
 		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
 				view_camera.forward, p_time_ms);
 	};
@@ -1921,6 +2014,11 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 				Dictionary();
 	};
 	result["world_far_side"] = slot_report(kWorldFarSide);
+	// The render-list runs pass A drew this render (ParticleFarPass).
+	result["world_far_render_runs"] =
+			static_cast<int64_t>(impl_->world_far_pass.run_count());
+	result["second_scene_far_render_runs"] =
+			static_cast<int64_t>(impl_->second_scene_far_pass.run_count());
 	result["world_camera_side"] = slot_report(kWorldCameraSide);
 	result["reflection_far_side"] = slot_report(kReflectionFarSide);
 	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);

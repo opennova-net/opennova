@@ -24,10 +24,12 @@ namespace godot {
 class Camera3D;
 
 // Thin Godot adapter for the portable particle scene/frame modules. World
-// draw lists are immutable values consumed by the ordered compositor effects:
-// a water-far PRE_TRANSPARENT subset, a camera-side POST_TRANSPARENT subset,
-// two consecutive POST_TRANSPARENT mirror subsets, and, while a second scene
-// camera is handed in, that view's own far/camera-side pair. Only the
+// draw lists are immutable values: the water-far subset (pass A) draws as
+// render-list runs inside the transparent list at kRungParticleFarSide
+// (ParticleFarPass) with only its distortion on a PRE_TRANSPARENT compositor
+// effect, the camera-side subset on a POST_TRANSPARENT effect, the mirror on
+// two consecutive POST_TRANSPARENT effects, and, while a second scene camera
+// is handed in, that view gets its own far runs and camera-side effect. Only the
 // explicitly diagnosed FirstPerson tool path uses ArrayMesh. Effects,
 // emitters, and particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {

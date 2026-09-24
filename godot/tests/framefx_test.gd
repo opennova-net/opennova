@@ -1055,7 +1055,9 @@ func test_q3_viewport_resize_retires_invalidated_uniform_sets_cleanly() -> void:
 	renderer.shutdown()
 
 
-func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_order() -> void:
+# A 64x64 beauty view over an opaque red backdrop (drawn by the beauty pass
+# itself, nothing in Q3), the camera 5 u in front of it.
+func _particle_order_view() -> SubViewport:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)
 	viewport.own_world_3d = true
@@ -1077,7 +1079,6 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 
-	# An opaque red backdrop drawn by the beauty pass itself (nothing in Q3).
 	var backdrop := MeshInstance3D.new()
 	var backdrop_mesh := QuadMesh.new()
 	backdrop_mesh.size = Vector2(20.0, 20.0)
@@ -1085,7 +1086,34 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	backdrop.material_override = _canary_material(Color(1.0, 0.0, 0.0))
 	backdrop.position = Vector3(0.0, 0.0, 0.0)
 	viewport.add_child(backdrop)
+	return viewport
 
+
+# The two water-order particles (far-side blue, camera-side green) over the
+# water plane at height 0, rendered once.
+func _particle_order_renderer(viewport: SubViewport) -> ParticleRenderer:
+	var frame_renderer := FrameFx.new()
+	viewport.add_child(frame_renderer)
+	var particle_renderer := ParticleRenderer.new()
+	particle_renderer.scene = _water_order_particle_scene()
+	particle_renderer.procedural_fallback_enabled = true
+	particle_renderer.set_water_plane(0.0, null)
+	viewport.add_child(particle_renderer)
+	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
+	return particle_renderer
+
+
+func _particle_far_runs(particle_renderer: ParticleRenderer) -> Array[MeshInstance3D]:
+	var runs: Array[MeshInstance3D] = []
+	for child in particle_renderer.get_children():
+		if child is MeshInstance3D and (child as MeshInstance3D).visible \
+				and String(child.name).begins_with("ParticleFarRun"):
+			runs.append(child as MeshInstance3D)
+	return runs
+
+
+func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_order() -> void:
+	var viewport := _particle_order_view()
 	var water := MeshInstance3D.new()
 	var water_mesh := QuadMesh.new()
 	water_mesh.size = Vector2(20.0, 20.0)
@@ -1096,14 +1124,7 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	viewport.add_child(water)
 
-	var frame_renderer := FrameFx.new()
-	viewport.add_child(frame_renderer)
-	var particle_renderer := ParticleRenderer.new()
-	particle_renderer.scene = _water_order_particle_scene()
-	particle_renderer.procedural_fallback_enabled = true
-	particle_renderer.set_water_plane(0.0, null)
-	viewport.add_child(particle_renderer)
-	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
+	var particle_renderer := _particle_order_renderer(viewport)
 	for _frame in 6:
 		await get_tree().process_frame
 	RenderingServer.force_draw(true)
@@ -1116,18 +1137,24 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	assert_eq(int(camera_side.get("selected_emitters", -1)), 1)
 	assert_gt(int(far.get("rendered_quad_count", 0)), 0)
 	assert_gt(int(camera_side.get("rendered_quad_count", 0)), 0)
-	var far_backend: Dictionary = report.get("world_far_backend", {})
+	# Pass A draws inside the transparent list (retail
+	# Terrain_RenderSceneWithReflection @ 0x5c95b5, before the water pass
+	# @ 0x5c95dc): render-list runs at the particle far-side rung.
+	assert_gt(int(report.get("world_far_render_runs", 0)), 0,
+			"pass A draws as render-list runs")
+	var runs := _particle_far_runs(particle_renderer)
+	assert_gt(runs.size(), 0, "the far runs are visible instances")
+	for run in runs:
+		var material := run.mesh.surface_get_material(0) as ShaderMaterial
+		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_PARTICLE_FAR_SIDE,
+				"a far run sorts at the particle far-side rung")
+	assert_lt(ObjectShaderCache.RENDER_RUNG_PARTICLE_FAR_SIDE, ObjectShaderCache.RENDER_RUNG_WATER)
 	var camera_backend: Dictionary = report.get("world_camera_backend", {})
-	if not bool(far_backend.get("rd_available", false)):
+	if not bool(camera_backend.get("rd_available", false)):
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
-	assert_eq(String(far_backend.get("status", "")), "drawn",
-			String(far_backend.get("failure", "far particle pass failed")))
 	assert_eq(String(camera_backend.get("status", "")), "drawn",
 			String(camera_backend.get("failure", "camera particle pass failed")))
-	assert_eq(int(far_backend.get("callback_type", -1)),
-			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
-			"pass A runs before the transparent list (and therefore before water)")
 	assert_eq(int(camera_backend.get("callback_type", -1)),
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"pass B runs after the transparent list (and therefore after water)")
@@ -1145,11 +1172,10 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 			with_water, _channel_peaks(with_water_image),
 			without_water, _channel_peaks(without_water_image)]
 	# Before the terminal decode the order is red opaque backdrop -> far blue
-	# source-over (PRE_TRANSPARENT) -> water x0.5 -> near green source-over
-	# (POST_TRANSPARENT). Compare the same immutable particle packet with water
-	# hidden: red and blue must rise, while green must remain unchanged
-	# because its pass follows water. (The far-side object ALPHA strips that
-	# retail draws before pass A are the documented D-RORD-7 residual.)
+	# source-over (the particle far-side rung) -> water x0.5 (the water rung)
+	# -> near green source-over (POST_TRANSPARENT). Compare the same immutable
+	# particle packet with water hidden: red and blue must rise, while green
+	# must remain unchanged because its pass follows water.
 	assert_gt(with_water.g, 0.12,
 			"the camera-side green particle must be applied after water")
 	assert_gt(with_water.r, 0.002,
@@ -1164,6 +1190,61 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 			"water must attenuate the earlier far particle; " + diagnostic)
 	assert_almost_eq(without_water.g, with_water.g, 0.02,
 			"water must not attenuate the later camera-side particle; " + diagnostic)
+
+
+func test_far_side_alpha_objects_draw_before_particle_pass_a() -> void:
+	# Retail draws the far-side object ALPHA strips and tracers before pass A
+	# (Terrain_RenderSceneWithReflection @ 0x5c95ac..0x5c95b5), so a
+	# half-transparent far-side card lies UNDER the far blue particle. Over the
+	# red backdrop a magenta card at alpha 0.5 then a blue particle at alpha a
+	# leave blue - red = 1.5a - 0.5 (0.25 at the particle's 0.5 peak); the
+	# particle drawn first leaves blue - red = a - 0.5, never positive.
+	var viewport := _particle_order_view()
+	var card_shader := Shader.new()
+	card_shader.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, fog_disabled;
+
+void fragment() {
+	ALBEDO = vec3(1.0, 0.0, 1.0);
+	ALPHA = 0.5;
+}
+"""
+	var card_material := ShaderMaterial.new()
+	card_material.shader = card_shader
+	card_material.render_priority = ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE
+	var card := MeshInstance3D.new()
+	var card_mesh := QuadMesh.new()
+	card_mesh.size = Vector2(20.0, 20.0)
+	card.mesh = card_mesh
+	card.material_override = card_material
+	# Nearer than the particles: the rung, not the depth, orders the two.
+	card.position = Vector3(0.0, 0.0, 3.0)
+	viewport.add_child(card)
+
+	var particle_renderer := _particle_order_renderer(viewport)
+	var far_runs := int(particle_renderer.get_debug_draw_list_report().get(
+			"world_far_render_runs", 0))
+	assert_gt(far_runs, 0, "pass A drew render-list runs")
+	for _frame in 6:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	# The camera-side green particle composites on top of both and scales the
+	# difference by its own 1 - alpha; take the best row through the centre.
+	var image := viewport.get_texture().get_image()
+	var best := -1.0
+	var best_pixel := Color.BLACK
+	for y in range(24, 44):
+		var pixel := image.get_pixel(32, y)
+		if pixel.b - pixel.r > best:
+			best = pixel.b - pixel.r
+			best_pixel = pixel
+	assert_gt(best, 0.05,
+			"the far particle lands on top of the far-side alpha card: %s" % best_pixel)
 
 
 const Q3_ADDITIVE_LUM_3DI := "res://../fixtures/threedi/synth/mount.3di"

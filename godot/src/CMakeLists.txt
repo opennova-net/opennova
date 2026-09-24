@@ -88,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
     particle/effect_spawn_records.cpp
     particle/effect_world.cpp
     particle/particle_compositor.cpp
+    particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp

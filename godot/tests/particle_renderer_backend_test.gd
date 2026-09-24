@@ -716,7 +716,8 @@ func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
 	var world_backend := _slot(report, "world_camera_backend")
 	assert_gt(int(backend.get("submitted_commands", 0)), 0,
 			"the second view publishes a non-empty submission")
-	assert_gt(int(_slot(report, "second_scene_far_backend").get("submitted_commands", 0)), 0)
+	# This view's pass A draws as its own render-list runs (ParticleFarPass).
+	assert_gt(int(report.get("second_scene_far_render_runs", 0)), 0)
 	var eye: Vector3 = backend.get("submitted_camera_position", Vector3.ZERO)
 	var forward: Vector3 = backend.get("submitted_camera_forward", Vector3.ZERO)
 	assert_almost_eq(eye, second_camera.global_position, Vector3.ONE * 0.0001,
