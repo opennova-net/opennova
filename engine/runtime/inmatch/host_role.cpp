@@ -250,6 +250,9 @@ void HostRole::run_tick(const TickInput &input) {
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
+	// The frame tail after the server tick laps onto the stats board's
+	// player-tail row; the weapon walk keeps its own row.
+	devtools::ProfileLap tail(kernel.world.profile);
     if (local_round_reset_seen_ != kernel.local.round_reset_revision) {
         local_round_reset_seen_ = kernel.local.round_reset_revision;
         if (state.client_runtime) state.client_runtime->reset_local_round_state();
@@ -259,12 +262,15 @@ void HostRole::run_tick(const TickInput &input) {
 	// fan projects the advanced weather.
 	kernel.tick_weather();
 	kernel.local.run_local_view_tick();
+	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 	// The frame's one weapon-action walk follows the camera compose: the
 	// local player's slot pumps at its own pool-0 slot, the gunners around it.
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
 	kernel.world.pump_weapon_actions();
+	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();
+	tail.mark(devtools::Slot::SIM_ADM_RESOLVE);
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	// The pump's wire-facing reload outcome relays onto the loopback so the
 	// shared dispatcher broadcasts the S2C 0x49 to every client next frame
@@ -277,6 +283,7 @@ void HostRole::run_tick(const TickInput &input) {
 		state.host_loop.client_send(0x25, opennova::encode_weapon_reload(reload));
 		kernel.local.last_reload = world::LocalWeaponReloadWire{};
 	}
+	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 	// The host's measurable net leg for the stats board: the ClientState fold
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside
 	// host_session_pump, fused with the logic tick.

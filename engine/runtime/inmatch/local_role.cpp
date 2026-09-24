@@ -29,17 +29,24 @@ void LocalRole::run_tick(const TickInput &) {
 	// lines already posted locally. [orig: Server_BroadcastEntityActionPacket
 	//  @0x5080D0 — the NapiNPServer_SendFiltered call @0x508199]
 	kernel.world.out.hud_relays.clear();
+	// The frame tail laps onto the stats board's player-tail row; the weapon
+	// walk keeps its own row.
+	devtools::ProfileLap tail(kernel.world.profile);
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();
 	kernel.local.run_local_view_tick();
+	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 	// The frame's one weapon-action walk follows the camera compose: the
 	// local player's slot pumps at its own pool-0 slot, the gunners around it.
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
 	kernel.world.pump_weapon_actions();
+	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();
+	tail.mark(devtools::Slot::SIM_ADM_RESOLVE);
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
+	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 }
 
 bool LocalRole::reset_to_baseline(SessionError &error) {

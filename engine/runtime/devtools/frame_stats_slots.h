@@ -78,8 +78,7 @@
     X(OCCL_WATER_APPLY, "final blink-water visibility write") \
     /* MissionRoot legs */ \
     X(SIM_STEP, "sim.step() total, summed over the frame's logic ticks") \
-    X(SIM_NET, "native wire leg of step: joiner recv/uplink pump, or the") \
-    /* host's local ClientState decode/fold */ \
+    X(SIM_NET, "native wire leg of step: the joiner's recv/uplink pump, or the host's local ClientState decode/fold") \
     X(SIM_HOST_PREP, "viewport/input/request setup before the portable host pump") \
     X(SIM_HOST_PUMP, "complete inmatch host owner iteration") \
     X(SIM_HOST_RECEIVE, "recv drain + missing-sequence service") \
@@ -90,10 +89,9 @@
     X(SIM_SERVER_WORLD, "World::run_logic_tick total") \
     X(SIM_WORLD_SETUP, "per-tick shared state/fire-sound setup") \
     X(SIM_WORLD_SCRIPTS, "registered authored systems (WAC + BMS)") \
-    X(SIM_WORLD_AI, "AI/entity system") \
-    X(SIM_AI_REACTIONS, "damage-hit reaction queue") \
-    X(SIM_AI_COLLISION, "collision/proximity table rebuild") \
-    X(SIM_AI_ENTITIES, "brain + infantry body pass") \
+    /* World::update_all_entities, lapped in retail order (Entity_UpdateAllEntities). */ \
+    X(SIM_UPDATE_ENTITIES, "World::update_all_entities total, every lap below in retail order") \
+    X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk") \
     X(SIM_AI_INFANTRY, "infantry/player body rows") \
     X(SIM_AI_INFANTRY_REMOTE, "authority animation/collision for remote players") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
@@ -102,21 +100,16 @@
     X(SIM_AI_INFANTRY_COLLISION_CONTACTS, "candidate/model contact passes") \
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
     X(SIM_AI_INFANTRY_COLLISION_GROUND, "final terrain/model ground ray") \
-    X(SIM_AI_OTHER_ENTITIES, "non-infantry state-machine rows") \
-    X(SIM_AI_AUTH_VEHICLES, "authority vehicle motor pass") \
-    X(SIM_AI_VEHICLE_SCAN, "vehicle-trait registry scan") \
-    X(SIM_AI_VEHICLE_MOTORS, "selected family motor dispatch") \
-    X(SIM_AI_VEHICLE_RIDERS, "final carrier-relative rider refresh") \
-    X(SIM_AI_CLIENT_VEHICLES, "client vehicle prediction/presentation pass") \
-    X(SIM_AI_EVENTS, "timed AI event queue") \
-    X(SIM_WORLD_ATTACHMENTS, "emplacement attachment posing") \
+    X(SIM_UPDATE_ATTACHMENTS, "emplacement attachment posing") \
     X(SIM_ATTACHMENT_ORPHANS, "dead-parent chain cleanup") \
     X(SIM_ATTACHMENT_CHILDREN, "child userpoint/root posing") \
     X(SIM_ATTACHMENT_RIDERS, "riders refreshed from attached children") \
-    X(SIM_WORLD_THROWABLES, "") \
-    X(SIM_WORLD_WEAPONS, "mounted weapon action pump") \
-    X(SIM_WORLD_PROJECTILES, "") \
-    X(SIM_WORLD_DESTRUCTION, "explosions, dead-item physics, death pieces") \
+    X(SIM_UPDATE_HELILIFT_FACES, "HeliLift update + facial interpolation") \
+    X(SIM_UPDATE_PRECIPITATION, "precipitation fall tick") \
+    X(SIM_UPDATE_PIECES_EVENTS, "death pieces + the timed AI event queue") \
+    X(SIM_UPDATE_PROJECTILES, "rotor wash + projectile rounds") \
+    X(SIM_UPDATE_EXPLOSIONS, "explosion queue, round-hit reactions, pool-2/3 cohort walks, doors") \
+    X(SIM_UPDATE_PROXIMITY, "pool-0/1 proximity table rebuild") \
     X(SIM_WORLD_HOUSEKEEPING, "waypoint/recount/mailbox tail") \
     X(SIM_MATCH, "") \
     X(SIM_SERVER_RULES, "deaths, respawn, win/capture, maintenance events") \
@@ -142,7 +135,6 @@
     X(SIM_REPLICATION_ENCODE, "selected 0x0A body serialization") \
     X(SIM_REPLICATION_ENQUEUE, "semantic transport enqueue") \
     X(SIM_HOST_SEND, "remote transport drain/frame/send") \
-    X(SIM_HOST_PLAYER, "local view/weapon/medic device tail") \
     X(SIM_CLIENT_SETUP, "client role clock + keepalive setup") \
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
     X(SIM_CLIENT_MAINTENANCE, "decoded-state timers and movers") \
@@ -154,7 +146,10 @@
     X(SIM_CLIENT_WORLD, "joiner: local World::run_logic_tick (its phases land on the World update rows)") \
     X(SIM_CLIENT_ATTACH, "joiner: remote attachment recompose + local seat re-pose") \
     X(SIM_CLIENT_PLAYER, "joiner: input/weather/heading/view/weapon device pumps") \
-    X(SIM_ADM_RESOLVE, "late animation-registry resolution after the tick") \
+    /* The authority frame tail after the tick (the host and bare local roles). */ \
+    X(SIM_PLAYER_TAIL, "authority frame tail: weather tick, local view, medic cooldown, reload relay") \
+    X(SIM_WEAPON_WALK, "WeaponAction_ProcessAllEntities in the frame tail (outside the world tick)") \
+    X(SIM_ADM_RESOLVE, "late .adm resolution after the tick (every role)") \
     X(SIM_SINK, "typed per-tick Godot presentation/effects callback") \
     X(SIM_TICKS, "VALUE: logic ticks run this frame") \
     X(SIM_ENTITY_COUNT, "VALUE: live world entities after the frame's ticks") \
