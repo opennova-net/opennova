@@ -50,6 +50,7 @@
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
+#include "render/scene_overlay_compositor.h"
 #include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
@@ -375,6 +376,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ModelLightSpawn);
 	GDREGISTER_CLASS(EffectLightDirector);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
+	GDREGISTER_CLASS(SceneOverlayCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
 	GDREGISTER_CLASS(ItemEffectDirectorStats);

@@ -61,6 +61,7 @@
 #include "particle/particle_convert.h"
 #include "particle/particle_far_pass.h"
 #include "render/frame_fx.h"
+#include "render/scene_overlay_compositor.h"
 #include "render/visual_layers.h"
 #include "render/world_environment_lookup.h"
 #include "util/texture_path_resolver.h"
@@ -404,7 +405,7 @@ struct ParticleCameraCompositorState {
 	Ref<Compositor> installed;
 	std::vector<std::uint64_t> base_effect_ids;
 	std::vector<std::pair<std::uint64_t,
-			Ref<ParticleCompositorEffect>>> effects;
+			Ref<CompositorEffect>>> effects;
 	bool camera_inherits_world = false;
 	bool inherited_world_compositor = false;
 };
@@ -438,6 +439,14 @@ Viewport *second_scene_base_viewport(Camera3D *camera, Viewport *main_viewport) 
 			main_viewport : own_viewport;
 }
 
+// The effects a renderer composes around a camera: its particle passes and
+// the post-particle overlay pass that follows each view's pass B.
+bool is_view_pass_effect(const Ref<CompositorEffect> &effect) {
+	return effect.is_valid() &&
+			(Object::cast_to<ParticleCompositorEffect>(effect.ptr()) != nullptr ||
+					Object::cast_to<SceneOverlayCompositorEffect>(effect.ptr()) != nullptr);
+}
+
 std::vector<std::uint64_t> non_particle_effect_ids(
 		const Ref<Compositor> &compositor) {
 	std::vector<std::uint64_t> ids;
@@ -448,9 +457,7 @@ std::vector<std::uint64_t> non_particle_effect_ids(
 	ids.reserve(static_cast<std::size_t>(effects.size()));
 	for (int64_t index = 0; index < effects.size(); ++index) {
 		Ref<CompositorEffect> effect = effects[index];
-		if (effect.is_valid() &&
-				Object::cast_to<ParticleCompositorEffect>(
-						effect.ptr()) == nullptr) {
+		if (effect.is_valid() && !is_view_pass_effect(effect)) {
 			ids.push_back(effect->get_instance_id());
 		}
 	}
@@ -467,9 +474,7 @@ Ref<Compositor> without_particle_effects(
 	bool removed = false;
 	for (int64_t index = 0; index < source_effects.size(); ++index) {
 		Ref<CompositorEffect> effect = source_effects[index];
-		if (effect.is_valid() &&
-				Object::cast_to<ParticleCompositorEffect>(
-						effect.ptr()) != nullptr) {
+		if (is_view_pass_effect(effect)) {
 			removed = true;
 			continue;
 		}
@@ -614,6 +619,11 @@ public:
 	ParticleEffectPair world_effects;
 	ParticleEffectPair reflection_effects;
 	ParticleEffectPair second_scene_effects;
+	// The post-particle overlay pass of each view, composed right after the
+	// view's pair (runtime/renderer/scene_overlay.h).
+	Ref<SceneOverlayCompositorEffect> world_overlay;
+	Ref<SceneOverlayCompositorEffect> reflection_overlay;
+	Ref<SceneOverlayCompositorEffect> second_scene_overlay;
 	ObjectID attached_world_camera;
 	ObjectID attached_reflection_camera;
 	ObjectID attached_second_scene_camera;
@@ -659,6 +669,14 @@ public:
 		}
 	}
 
+	template <typename Visitor>
+	void for_each_overlay(Visitor &&visit) {
+		for (Ref<SceneOverlayCompositorEffect> *overlay :
+				{&world_overlay, &reflection_overlay, &second_scene_overlay}) {
+			visit(*overlay);
+		}
+	}
+
 	// A fresh compositor set: the constructor's, and the replacement a
 	// re-entering renderer needs. release_device_resources() retires an
 	// effect for good (its render callback never runs again), so a renderer
@@ -675,6 +693,12 @@ public:
 				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
 		second_scene_effects[0]->set_effect_callback_type(
 				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
+		for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+			overlay.instantiate();
+		});
+		// The mirror's reflected scene draws only its coronas after its
+		// particle passes.
+		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
 	}
 
 	// ParticleRenderer::shutdown() detaches while camera and server ownership
@@ -757,8 +781,16 @@ public:
 				std::numeric_limits<std::int64_t>::min();
 	}
 
+	// One view's composed passes, in their frame order: particle pass A, pass
+	// B, then the post-particle overlay tail.
+	using ViewPassGroup = std::array<Ref<CompositorEffect>, 3>;
+	static ViewPassGroup view_group(const ParticleEffectPair &effects,
+			const Ref<SceneOverlayCompositorEffect> &overlay) {
+		return ViewPassGroup{ effects[0], effects[1], overlay };
+	}
+
 	void detach_compositor_group(ObjectID &attached_camera,
-			const ParticleEffectPair &effects, bool &inherited_compositor) {
+			const ViewPassGroup &effects, bool &inherited_compositor) {
 		if (!attached_camera.is_valid())
 			return;
 		const std::uint64_t camera_id =
@@ -773,7 +805,7 @@ public:
 					state.effects.begin(), state.effects.end(),
 					[&effects](const auto &entry) {
 						return std::any_of(effects.begin(), effects.end(),
-								[&entry](const Ref<ParticleCompositorEffect> &effect) {
+								[&entry](const Ref<CompositorEffect> &effect) {
 									return effect.is_valid() && entry.first ==
 											effect->get_instance_id();
 								});
@@ -794,16 +826,18 @@ public:
 	}
 
 	void detach_compositors() {
-		detach_compositor_group(attached_world_camera, world_effects,
-				inherited_world_compositor);
-		detach_compositor_group(attached_reflection_camera, reflection_effects,
+		detach_compositor_group(attached_world_camera,
+				view_group(world_effects, world_overlay), inherited_world_compositor);
+		detach_compositor_group(attached_reflection_camera,
+				view_group(reflection_effects, reflection_overlay),
 				inherited_reflection_compositor);
-		detach_compositor_group(attached_second_scene_camera, second_scene_effects,
+		detach_compositor_group(attached_second_scene_camera,
+				view_group(second_scene_effects, second_scene_overlay),
 				inherited_second_scene_compositor);
 	}
 
 	void attach_compositor_group(Camera3D *camera, Viewport *viewport,
-			ObjectID &attached_camera, const ParticleEffectPair &effects,
+			ObjectID &attached_camera, const ViewPassGroup &effects,
 			bool &inherited_compositor) {
 		if (camera == nullptr) {
 			detach_compositor_group(attached_camera, effects,
@@ -835,7 +869,7 @@ public:
 			rebuild = true;
 		}
 
-		for (const Ref<ParticleCompositorEffect> &effect : effects) {
+		for (const Ref<CompositorEffect> &effect : effects) {
 			const std::uint64_t effect_id = effect->get_instance_id();
 			auto effect_it = std::find_if(state.effects.begin(),
 					state.effects.end(), [effect_id](const auto &entry) {
@@ -1775,6 +1809,10 @@ void ParticleRenderer::shutdown() {
 	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->set_enabled(false);
 	});
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->set_enabled(false);
+		overlay->clear_submission();
+	});
 	impl_->detach_compositors();
 
 	// Detaching affects the next render setup. Drain a callback already queued
@@ -1784,6 +1822,18 @@ void ParticleRenderer::shutdown() {
 		server->force_sync();
 	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->release_device_resources();
+	});
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->release_device_resources();
+	});
+}
+
+void ParticleRenderer::publish_scene_overlay(
+		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
+	if (shutdown_ || !impl_)
+		return;
+	impl_->for_each_overlay([&p_submission](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->publish(p_submission);
 	});
 }
 
@@ -1827,8 +1877,6 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	if (shutdown_ || !impl_)
 		return;
 	impl_->ensure_visuals(this);
-	if (hidden_)
-		return;
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	Camera3D *reflection_camera = reflection_camera_.is_valid() ?
@@ -1843,18 +1891,25 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			second_scene_camera == reflection_camera ||
 			!second_scene_camera->is_inside_tree()))
 		second_scene_camera = nullptr;
+	// Attached even while the particles are hidden: the hidden particle passes
+	// are disabled, and each view's overlay pass (not particles) still draws.
 	impl_->attach_compositor_group(camera, viewport,
-			impl_->attached_world_camera, impl_->world_effects,
+			impl_->attached_world_camera,
+			Impl::view_group(impl_->world_effects, impl_->world_overlay),
 			impl_->inherited_world_compositor);
 	impl_->attach_compositor_group(reflection_camera,
 			reflection_camera != nullptr ? reflection_camera->get_viewport() : nullptr,
-			impl_->attached_reflection_camera, impl_->reflection_effects,
+			impl_->attached_reflection_camera,
+			Impl::view_group(impl_->reflection_effects, impl_->reflection_overlay),
 			impl_->inherited_reflection_compositor);
 	impl_->attach_compositor_group(second_scene_camera,
 			second_scene_camera != nullptr ?
 					second_scene_base_viewport(second_scene_camera, viewport) : nullptr,
-			impl_->attached_second_scene_camera, impl_->second_scene_effects,
+			impl_->attached_second_scene_camera,
+			Impl::view_group(impl_->second_scene_effects, impl_->second_scene_overlay),
 			impl_->inherited_second_scene_compositor);
+	if (hidden_)
+		return;
 	if (scene_.is_null()) {
 		impl_->clear_draws();
 		return;
@@ -2037,6 +2092,15 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->second_scene_effects[0]->get_backend_report();
 	result["second_scene_camera_backend"] =
 			impl_->second_scene_effects[1]->get_backend_report();
+	Dictionary world_overlay;
+	impl_->world_overlay->write_backend_report(world_overlay);
+	result["world_overlay_backend"] = world_overlay;
+	Dictionary reflection_overlay;
+	impl_->reflection_overlay->write_backend_report(reflection_overlay);
+	result["reflection_overlay_backend"] = reflection_overlay;
+	Dictionary second_scene_overlay;
+	impl_->second_scene_overlay->write_backend_report(second_scene_overlay);
+	result["second_scene_overlay_backend"] = second_scene_overlay;
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
 	result["world_compositor_attached"] =
 			impl_->attached_world_camera.is_valid();

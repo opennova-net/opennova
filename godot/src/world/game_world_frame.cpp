@@ -7,6 +7,7 @@
 
 #include "world/game_world.h"
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/scene_overlay.h>
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -24,6 +25,7 @@
 #include "object/object_shader_cache.h"
 #include "render/object_lod_frame.h"
 #include "simulation/entity_presenter.h"
+#include "render/scene_overlay_compositor.h"
 
 using namespace godot;
 
@@ -133,6 +135,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// before the murk overlay (retail Terrain_RenderSceneWithReflection
 	// @ 0x5c96a6).
 	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
+	// The post-particle overlay tail (renderer/scene_overlay.h): every
+	// producer above has published this frame's streaks, coronas and murk
+	// state, so one immutable frame reaches each view's overlay pass.
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
 	// Plan the frame's FrameFX screen effects (retail's post-scene dispatch)
 	// once the particle and tracer producers have published this frame, so
 	// the distortion row's content gate reads it; the terminal compositor
@@ -202,6 +208,9 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 	// Re-plan the render-slot ground shadows for the moved capture camera
 	// (slot priority and the capture poses are camera-relative).
 	{ "slot_shadows", kNoSlot, &GameWorld::leg_slot_shadows, kLegNone },
+	// The overlay tail for the capture pose: the coronas the light leg just
+	// re-collected and the murk side of the moved eye.
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
 	{ "clear", kNoSlot, &GameWorld::leg_clear, kLegNone },
 };
 const int GameWorld::kFrozenPoseRefreshCount =
@@ -435,6 +444,11 @@ GameWorld::LegResult GameWorld::leg_screen_effects(FrameContext &r_ctx) {
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_scene_overlay(FrameContext &r_ctx) {
+	render_scene_overlay_frame();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_audio(FrameContext &r_ctx) {
 	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0);
 	return kLegRan;
@@ -651,6 +665,38 @@ void GameWorld::plan_screen_effects_frame() {
 	}
 	framefx_->set_view_effects(view);
 	framefx_->advance_screen_effects();
+}
+
+// The post-particle overlay tail, gathered once per frame in slot order and
+// published to every view's overlay pass (renderer/scene_overlay.h carries
+// the witnessed order: retail Terrain_RenderSceneWithReflection after
+// particle pass B @ 0x5c9690, before the frame effects). The murk quad carries
+// the water height; each view draws it only while its own render eye is at or
+// below the water, whatever the camera mode.
+void GameWorld::render_scene_overlay_frame() {
+	EffectWorld *effect_world = get_effect_world();
+	if (effect_world == nullptr) {
+		return;
+	}
+	std::shared_ptr<SceneOverlaySubmission> submission = std::make_shared<SceneOverlaySubmission>();
+	submission->frame_id = ++scene_overlay_frame_id_;
+	if (world_ready_) {
+		if (precipitation_ != nullptr) {
+			precipitation_->append_overlay(*submission);
+		}
+		if (light_director_.is_valid()) {
+			light_director_->append_overlay(*submission);
+		}
+		if (env_ != nullptr && is_water_render_active()) {
+			const Vector3 lit = env_->get_underwater_overlay_color();
+			const float rgb[3] = { static_cast<float>(lit.x), static_cast<float>(lit.y),
+				static_cast<float>(lit.z) };
+			opennova::renderer::append_underwater_murk_overlay(rgb,
+					static_cast<uint8_t>(env_->get_underwater_overlay_alpha_byte()),
+					water_->get_water_height(), submission->frame);
+		}
+	}
+	effect_world->publish_scene_overlay(submission);
 }
 
 void GameWorld::apply_blink_frame() {

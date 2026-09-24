@@ -390,6 +390,7 @@ public:
 	void render_particle_frame();
 	void render_precipitation_frame();
 	void plan_screen_effects_frame();
+	void render_scene_overlay_frame();
 	void mix_audio_frame(int p_ticks_run);
 	void update_clear_frame();
 	void render_environment_cube_frame();
@@ -549,6 +550,7 @@ private:
 	LegResult leg_particles(FrameContext &r_ctx);
 	LegResult leg_precipitation(FrameContext &r_ctx);
 	LegResult leg_screen_effects(FrameContext &r_ctx);
+	LegResult leg_scene_overlay(FrameContext &r_ctx);
 	LegResult leg_audio(FrameContext &r_ctx);
 	LegResult leg_clear(FrameContext &r_ctx);
 	LegResult leg_environment_cube(FrameContext &r_ctx);
@@ -679,6 +681,8 @@ private:
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;
+	// The post-particle overlay frames published (the submission id).
+	uint64_t scene_overlay_frame_id_ = 0;
 	bool clear_above_water_ = true;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the
 	// per-frame section-mask/portal apply, the probe A/B seam edges and the

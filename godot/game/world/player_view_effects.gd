@@ -18,15 +18,12 @@ var _binocular_numbers: Texture2D
 var _nvg_mask: Texture2D
 var _nvg_scale: Texture2D
 var _vignette: Texture2D
-var _underwater_murk: ColorRect
 var _sun_veil: ColorRect
 # The three fullscreen damage-feedback quads the retail scene frame draws last
 # (see update_damage_feedback).
 var _white_flash: ColorRect
 var _red_vignette: TextureRect
 var _revive_tint: ColorRect
-var _environment: MissionEnvironment
-var _environment_light_state: EnvLightState
 # The presenter's per-frame view facts (update_view).
 var _binoculars_view_active := false
 var _binocular_range := 1
@@ -37,17 +34,9 @@ var _range_display := 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# Retail draws this standard source-over viewport quad after the complete
-	# world + first-person weapon and before every HUD overlay. This Control is
-	# mounted on HUD CanvasLayer 1 behind its parent, so it follows ViewmodelPass
-	# layer 0 and precedes the parent's normal HUD draw list.
-	_underwater_murk = ColorRect.new()
-	_underwater_murk.name = "UnderwaterMurk"
-	_underwater_murk.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_underwater_murk.show_behind_parent = true
-	add_child(_underwater_murk, false, Node.INTERNAL_MODE_BACK)
-	_underwater_murk.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_underwater_murk.visible = false
+	# The underwater murk quad is not a view effect here: it draws in each 3D
+	# view's post-particle overlay pass, before the frame effects
+	# (SceneOverlayCompositorEffect).
 	# The sun-glare screen veil: a fullscreen white quad whose alpha is the
 	# dot^32 glare byte, drawn over the complete scene [orig:
 	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 from
@@ -68,7 +57,6 @@ func _ready() -> void:
 	# green tint composite) is the terminal FrameFx pass's; this Control draws
 	# only the NVG.tga mask and the gain scale over it (see _draw_nvg).
 	_build_damage_feedback_quads()
-	_sync_underwater_murk()
 
 
 ## The three fullscreen damage-feedback quads, in the order the retail scene
@@ -124,42 +112,6 @@ func _build_damage_feedback_quads() -> void:
 	_revive_tint.visible = false
 	add_child(_revive_tint, false, Node.INTERNAL_MODE_BACK)
 	_revive_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-
-func set_environment(environment: MissionEnvironment) -> void:
-	var callback := Callable(self, "_sync_underwater_murk")
-	if _environment != null and is_instance_valid(_environment) \
-			and _environment.underwater_overlay_changed.is_connected(callback):
-		_environment.underwater_overlay_changed.disconnect(callback)
-	if _environment_light_state != null \
-			and _environment_light_state.changed.is_connected(callback):
-		_environment_light_state.changed.disconnect(callback)
-	_environment = environment
-	_environment_light_state = _environment.get_light_state() \
-			if _environment != null else null
-	if _environment != null:
-		_environment.underwater_overlay_changed.connect(callback)
-	if _environment_light_state != null:
-		# TOD/weather can change Env_WaterColorLit without crossing the plane.
-		_environment_light_state.changed.connect(callback)
-	_sync_underwater_murk()
-
-
-func _sync_underwater_murk() -> void:
-	if _underwater_murk == null:
-		return
-	if _environment == null or not is_instance_valid(_environment):
-		_underwater_murk.visible = false
-		return
-	# Above water the murk is invisible; skip the native fog rebuild that
-	# get_underwater_overlay_color() performs on every env-generation bump.
-	if not _environment.is_underwater_overlay_view():
-		_underwater_murk.visible = false
-		return
-	var lit := _environment.get_underwater_overlay_color()
-	var alpha := float(_environment.get_underwater_overlay_alpha_byte()) / 255.0
-	_underwater_murk.color = Color(lit.x, lit.y, lit.z, alpha)
-	_underwater_murk.visible = true
 
 
 func set_resource_root(root: ResourceRoot) -> void:

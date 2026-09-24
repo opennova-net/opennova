@@ -32,7 +32,6 @@ namespace godot {
 class EffectLightReport;
 
 class EnvLightValues;
-class MultiMesh;
 class Weather;
 
 // Godot adapter for the portable EffectWorld dynamic light pool
@@ -160,33 +159,30 @@ public:
 
 	// The corona billboard walk for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads] landed as ONE
-	// MultiMesh buffer write: the collect_corona_quads rows packed as
-	// interleaved TRANSFORM_3D + color instance floats (scale-only basis =
-	// half_size, origin = the Godot-world segment center, color = the
-	// premultiplied additive fold including the segment fade and the
-	// fog-to-black fold). models/owner_entities are the SAME parallel arrays
-	// the per-model light pass walks — models carrying an occlusion
-	// section-mask verdict gate their owned coronas on the visible-section
-	// bit; fog is the environment's EnvLightValues (null = no fog; the
-	// primary device fog with the color forced black [orig:
-	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The mesh grows to
-	// the row high-water only; rows beyond this frame's count are hidden
-	// through visible_instance_count, never re-uploaded. Returns the row
-	// count; get_last_corona_buffer is the headless pin of the packing (the
-	// walk's semantics are the renderer_light_scene ctest's).
-	int fill_corona_multimesh(const Vector3 &p_camera_pos,
+	// opennova::renderer::LightScene::collect_corona_quads]: the segment
+	// quads (centre, half size, the premultiplied additive colour including
+	// the segment fade and the fog-to-black fold) the post-particle overlay
+	// stage draws (renderer/scene_overlay.h). models/owner_entities are the
+	// SAME parallel arrays the per-model light pass walks — models carrying an
+	// occlusion section-mask verdict gate their owned coronas on the
+	// visible-section bit; fog is the environment's EnvLightValues (null = no
+	// fog; the primary device fog with the color forced black [orig:
+	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). Returns the row count
+	// (the walk's semantics are the renderer_light_scene ctest's).
+	int collect_corona_rows(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
-			const Ref<EnvLightValues> &p_fog, const Ref<MultiMesh> &p_mesh);
-	// Test seam: the interleaved instance floats the last fill packed
-	// (capacity x 16; rows beyond the fill's return are zero). Readable
-	// headless, where the dummy RenderingServer stores no MultiMesh data.
-	PackedFloat32Array get_last_corona_buffer() const {
-		return corona_buffer_;
+			const Ref<EnvLightValues> &p_fog);
+	// The last collected quads, for the overlay stage (mission-space centres).
+	const std::vector<opennova::renderer::LightCoronaQuad> &last_corona_quads() const {
+		return corona_quads_scratch_;
 	}
+	// Test seam: the last collect as kCoronaRowFloats per row (the Godot-world
+	// centre xyz, the half size, the colour rgb).
+	static constexpr int kCoronaRowFloats = 7;
+	PackedFloat32Array get_last_corona_rows() const;
 
 	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
 	// whose AABB overlaps the patch and which the authored terrain flag admits,
@@ -264,8 +260,8 @@ private:
 		// skipped row's inputs are unchanged, so its count carries over).
 		size_t last_count = 0;
 	};
-	// The corona frame-input build shared by the Dictionary seam and the
-	// MultiMesh fill (owner masks live in the caller's vector for the call).
+	// The corona frame-input build behind collect_corona_rows (owner masks
+	// live in the caller's vector for the call).
 	void build_corona_inputs(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
@@ -279,7 +275,6 @@ private:
 	// Reused per-frame corona scratch (the fill path runs every frame).
 	std::vector<opennova::renderer::LightCoronaOwnerMask> corona_masks_scratch_;
 	std::vector<opennova::renderer::LightCoronaQuad> corona_quads_scratch_;
-	PackedFloat32Array corona_buffer_;
 	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
 			selected_{};
 	size_t selected_count_ = 0;

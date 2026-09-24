@@ -12,8 +12,8 @@ func test_frame_leg_table_is_the_witnessed_order() -> void:
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "materials", "framefx",
-		"slot_shadows", "particles", "precipitation", "screen_effects", "audio",
-		"clear", "environment_cube", "finish",
+		"slot_shadows", "particles", "precipitation", "scene_overlay",
+		"screen_effects", "audio", "clear", "environment_cube", "finish",
 	])
 
 
@@ -33,6 +33,9 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"the FrameFX plan reads this frame's published distortion content")
 	assert_lt(names.find("occlusion"), names.find("foliage"),
 			"foliage anchors its MODEL tier on the entities this frame's occlusion admitted")
+	for producer in ["lights", "particles", "precipitation"]:
+		assert_gt(names.find("scene_overlay"), names.find(producer),
+				"the overlay tail gathers what %s published this frame" % producer)
 
 
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:
@@ -51,6 +54,9 @@ func test_frozen_pose_replay_keeps_the_camera_producer_order() -> void:
 		"celestial_settle", "sun_veil", "iris_stamp", "weather_settle",
 		"scene_environment", "terrain", "occlusion", "foliage", "sky_settle",
 		"water_settle", "particles", "lights", "slot_shadows", "clear",
+		"scene_environment", "terrain", "foliage", "occlusion", "sky_settle",
+		"water_settle", "particles", "lights", "slot_shadows", "scene_overlay",
+		"clear",
 	])
 	var live := Array(GameWorld.frame_leg_names())
 	for time_owner in ["session", "environment_nodes", "materials", "audio", "network", "blink"]:

@@ -12,7 +12,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 
 #include "env/weather.h"
@@ -947,74 +946,36 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	}
 }
 
-int LightScene::fill_corona_multimesh(const Vector3 &p_camera_pos,
+int LightScene::collect_corona_rows(const Vector3 &p_camera_pos,
 		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
 		const TypedArray<Node3D> &p_models,
-		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
-		const Ref<MultiMesh> &p_mesh) {
-	if (p_mesh.is_null()) {
-		return 0;
-	}
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog) {
 	opennova::renderer::LightCoronaFrameInputs inputs;
 	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
 			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
 			p_fog, corona_masks_scratch_, inputs);
 	corona_quads_scratch_.clear();
 	scene_.collect_corona_quads(inputs, corona_quads_scratch_);
-	const int64_t rows = static_cast<int64_t>(corona_quads_scratch_.size());
-	// Grow to the high-water only: instance_count reallocation is the cost the
-	// per-row Dictionary path paid on every size change.
-	if (p_mesh->get_instance_count() < rows) {
-		p_mesh->set_instance_count(static_cast<int32_t>(rows));
-	}
-	const int64_t capacity = p_mesh->get_instance_count();
-	if (capacity <= 0) {
-		p_mesh->set_visible_instance_count(0);
-		return 0;
-	}
-	// The RenderingServer instance layout: three 4-float TRANSFORM_3D rows
-	// (basis row, origin component), then RGBA when the mesh carries colors,
-	// then custom data when it does. The mesh is configured by the shell, so
-	// the stride is read off it rather than assumed.
-	if (p_mesh->get_transform_format() != MultiMesh::TRANSFORM_3D) {
-		ERR_FAIL_V_MSG(0, "corona MultiMesh must use TRANSFORM_3D");
-	}
-	const int64_t kFloatsPerInstance = 12 + (p_mesh->is_using_colors() ? 4 : 0) +
-			(p_mesh->is_using_custom_data() ? 4 : 0);
-	ERR_FAIL_COND_V_MSG(!p_mesh->is_using_colors(), 0,
-			"corona MultiMesh must carry per-instance colors");
-	corona_buffer_.resize(capacity * kFloatsPerInstance);
-	float *w = corona_buffer_.ptrw();
-	std::memset(w + rows * kFloatsPerInstance, 0,
-			static_cast<size_t>((capacity - rows) * kFloatsPerInstance) *
-					sizeof(float));
-	for (int64_t i = 0; i < rows; ++i) {
-		const opennova::renderer::LightCoronaQuad &quad =
-				corona_quads_scratch_[static_cast<size_t>(i)];
+	return static_cast<int>(corona_quads_scratch_.size());
+}
+
+PackedFloat32Array LightScene::get_last_corona_rows() const {
+	PackedFloat32Array rows;
+	rows.resize(static_cast<int64_t>(corona_quads_scratch_.size()) * kCoronaRowFloats);
+	float *w = rows.ptrw();
+	for (const opennova::renderer::LightCoronaQuad &quad : corona_quads_scratch_) {
 		const Vector3 center = mission_to_godot(quad.center);
-		const float half = quad.half_size;
-		float *out = w + i * kFloatsPerInstance;
-		out[0] = half;
-		out[1] = 0.0f;
-		out[2] = 0.0f;
-		out[3] = static_cast<float>(center.x);
-		out[4] = 0.0f;
-		out[5] = half;
-		out[6] = 0.0f;
-		out[7] = static_cast<float>(center.y);
-		out[8] = 0.0f;
-		out[9] = 0.0f;
-		out[10] = half;
-		out[11] = static_cast<float>(center.z);
-		out[12] = quad.rgb[0];
-		out[13] = quad.rgb[1];
-		out[14] = quad.rgb[2];
-		out[15] = 1.0f;
+		w[0] = static_cast<float>(center.x);
+		w[1] = static_cast<float>(center.y);
+		w[2] = static_cast<float>(center.z);
+		w[3] = quad.half_size;
+		w[4] = quad.rgb[0];
+		w[5] = quad.rgb[1];
+		w[6] = quad.rgb[2];
+		w += kCoronaRowFloats;
 	}
-	p_mesh->set_buffer(corona_buffer_);
-	p_mesh->set_visible_instance_count(static_cast<int32_t>(rows));
-	return static_cast<int>(rows);
+	return rows;
 }
 
 size_t LightScene::collect_terrain_light_rows(
@@ -1216,12 +1177,12 @@ void LightScene::_bind_methods() {
 			"interior_owners", "interior_sections", "active",
 			"ambient_scale", "time_ms", "weather", "rows_revision", "entity_lights"),
 			&LightScene::render_static_frame, DEFVAL(-1), DEFVAL(PackedVector4Array()));
-	ClassDB::bind_method(D_METHOD("fill_corona_multimesh", "camera_pos",
+	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
-			"weather", "models", "owner_entities", "fog", "mesh"),
-			&LightScene::fill_corona_multimesh);
-	ClassDB::bind_method(D_METHOD("get_last_corona_buffer"),
-			&LightScene::get_last_corona_buffer);
+			"weather", "models", "owner_entities", "fog"),
+			&LightScene::collect_corona_rows);
+	ClassDB::bind_method(D_METHOD("get_last_corona_rows"),
+			&LightScene::get_last_corona_rows);
 	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_wire", "wire_handle"),
 			&LightScene::owner_id_for_wire);
 	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_static_source", "source_index"),

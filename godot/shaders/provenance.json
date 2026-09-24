@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 199,
+  "resource_count": 198,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -128,24 +128,12 @@
       "exceptions": ["D-RLIT-2"]
     },
     {
-      "id": "precipitation-streaks",
-      "patterns": ["precipitation.gdshader"],
-      "light_behavior": "prelit_or_light_derived_effect",
-      "parity_status": "matching",
-      "docs": ["docs/env/env-tod-re.md"],
-      "retail_citations": [
-        { "address": "0x5dee10", "function": "render_weather_trail_particles", "function_start": "0x5dee10" }
-      ],
-      "exceptions": []
-    },
-    {
       "id": "light-derived-effects",
-      "patterns": ["light_corona.gdshader", "scar_quad.gdshader", "scar_quad_hole.gdshader", "slot_shadow_drape.gdshader", "sun_veil_overlay.gdshader"],
+      "patterns": ["scar_quad.gdshader", "scar_quad_hole.gdshader", "slot_shadow_drape.gdshader", "sun_veil_overlay.gdshader"],
       "light_behavior": "prelit_or_light_derived_effect",
       "parity_status": "matching",
       "docs": ["docs/render/render-lighting-re.md", "docs/world/world-wac-ai-re.md", "docs/env/env-tod-re.md"],
       "retail_citations": [
-        { "address": "0x5aaf40", "function": "EffectWorld_RenderLightCoronas", "function_start": "0x5aaf40" },
         { "address": "0x5cc315", "function": "Scar_LoadTextures", "function_start": "0x5cc2e0" },
         { "address": "0x5d6e20", "function": "RenderSlot_DrawAllDrapes", "function_start": "0x5d6e20" },
         { "address": "0x5ad8b0", "function": "Environment_ApplySunVeilAndExposureStopdown", "function_start": "0x5ad8b0" }

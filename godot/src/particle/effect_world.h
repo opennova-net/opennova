@@ -15,6 +15,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
+#include <memory>
 
 #include "particle/effect_group_report.h"
 #include "particle/effect_load_report.h"
@@ -30,6 +31,7 @@ namespace godot {
 
 class Camera3D;
 class ParticleRenderer;
+struct SceneOverlaySubmission;
 class ResourceRoot;
 
 // World-facing owner for the portable effect scene and draw-list renderer
@@ -222,6 +224,9 @@ public:
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.
 	void render_frame(int64_t p_time_ms);
+	// The frame's post-particle overlay tail, handed to every view's overlay
+	// pass (ParticleRenderer::publish_scene_overlay). Not bound to Godot.
+	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	// Value-only F3 read model (particle/effect_group_report.h). Emitter ids
 	// join portable simulation values to the renderer's draw list bounds; no
 	// particle/render Nodes escape this facade. Hidden particles report

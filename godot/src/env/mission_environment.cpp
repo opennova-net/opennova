@@ -205,8 +205,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"),
 			&MissionEnvironment::get_sky_map2_tex);
 
-	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
-
 	ClassDB::bind_integer_constant(get_class_static(), "", "HOURS_PER_DAY", 24);
 	ClassDB::bind_integer_constant(get_class_static(), "", "HHMM_DAY", 2400);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MINUTES_PER_HOUR", 60);
@@ -593,7 +591,6 @@ void MissionEnvironment::set_underwater_overlay_view(bool p_underwater) {
 	// The dome draws only while the eye is strictly above water, the same
 	// side test as the murk's (the viewmodel fog colour reads it).
 	_write_viewmodel_fog_globals();
-	emit_signal("underwater_overlay_changed");
 }
 
 void MissionEnvironment::set_sky_dome_drawn(bool p_drawn) {

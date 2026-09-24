@@ -663,6 +663,11 @@ void EffectWorld::render_frame(int64_t p_time_ms) {
 	_ensure_renderer()->render_now(p_time_ms);
 }
 
+void EffectWorld::publish_scene_overlay(
+		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
+	_ensure_renderer()->publish_scene_overlay(p_submission);
+}
+
 TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include_hidden) {
 	TypedArray<EffectGroupReport> out;
 	if (particles_disabled_ && !p_include_hidden) {

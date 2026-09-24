@@ -5,8 +5,8 @@
 #include "mission/mission_root.h"
 
 #include "env/mission_environment.h"
-#include "env/water.h"
 #include "env/weather.h"
+#include "render/scene_overlay_compositor.h"
 #include "lights/light_spawn.h"
 #include "mission/mission_data.h"
 #include "object/entity_index.h"
@@ -18,22 +18,15 @@
 #include "simulation/simulation.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
-#include <godot_cpp/classes/multi_mesh.hpp>
-#include <godot_cpp/classes/quad_mesh.hpp>
-#include <godot_cpp/classes/resource_loader.hpp>
-#include <godot_cpp/classes/shader.hpp>
-#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
-#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/node_path.hpp>
-#include <godot_cpp/variant/vector2.hpp>
 
 #include <algorithm>
 
 #include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/scene_overlay.h>
 
 using namespace godot;
 
@@ -42,7 +35,6 @@ namespace {
 // The placer's container lives under the per-mission subtree (MissionRoot,
 // ADR 0043 d9); a bare-scene test builds the same two-level shape.
 constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
-constexpr const char *kCoronaShaderPath = "res://shaders/light_corona.gdshader";
 
 } // namespace
 
@@ -698,10 +690,9 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 }
 
 // The corona device leg: fetch this frame's additive quads from the portable
-// walk and rebuild the MultiMesh (instance origin = segment center, uniform
-// scale = half-size, instance color = the premultiplied additive color).
-// The models/owners arrays are the per-model pass's own walk — models with
-// an occlusion section-mask verdict gate their owned coronas on the
+// walk for the post-particle overlay stage (append_overlay). The
+// models/owners arrays are the per-model pass's own walk — models with an
+// occlusion section-mask verdict gate their owned coronas on the
 // visible-section bit [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960];
 // the env fog rides in as the fog-to-black fold
 // [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
@@ -716,74 +707,27 @@ void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_g
 			fog = state->get_values();
 		}
 	}
-	MultiMeshInstance3D *instance = _ensure_corona_instance();
-	if (instance == nullptr) {
-		return;
-	}
-	// One native buffer write instead of two RenderingServer commands per
-	// row (the witnessed jitter re-centers every corona every frame, so
-	// there is no change to gate on); rows past this frame's count stay
-	// hidden through visible_instance_count.
 	const Transform3D camera_transform = p_camera->get_camera_transform();
-	const int rows = scene()->fill_corona_multimesh(camera_transform.origin,
+	scene()->collect_corona_rows(camera_transform.origin,
 			-camera_transform.basis.get_column(2), p_gain, p_time_ms, corona_frame_, p_weather,
-			p_models, p_owners, fog, instance->get_multimesh());
-	instance->set_visible(rows > 0);
+			p_models, p_owners, fog);
+	coronas_ = scene()->last_corona_quads();
 }
 
 void EffectLightDirector::_clear_coronas() {
-	MultiMeshInstance3D *instance = _corona_instance();
-	if (instance == nullptr) {
+	coronas_.clear();
+}
+
+void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
+	if (coronas_.empty()) {
 		return;
 	}
-	const Ref<MultiMesh> mesh = instance->get_multimesh();
-	if (mesh.is_valid()) {
-		mesh->set_instance_count(0);
-	}
-	instance->set_visible(false);
-}
-
-MultiMeshInstance3D *EffectLightDirector::_corona_instance() const {
-	return Object::cast_to<MultiMeshInstance3D>(ObjectDB::get_instance(corona_instance_id_));
-}
-
-MultiMeshInstance3D *EffectLightDirector::_ensure_corona_instance() {
-	if (MultiMeshInstance3D *existing = _corona_instance()) {
-		return existing;
-	}
-	Node *world = _world();
-	if (world == nullptr) {
-		return nullptr;
-	}
-	MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
-	mmi->set_name("EffectLightCoronas");
-	Ref<MultiMesh> mesh;
-	mesh.instantiate();
-	mesh->set_transform_format(MultiMesh::TRANSFORM_3D);
-	mesh->set_use_colors(true);
-	Ref<QuadMesh> quad;
-	quad.instantiate();
-	quad->set_size(Vector2(2.0f, 2.0f)); // VERTEX.xy in [-1, 1] x half_size
-	Ref<ShaderMaterial> material;
-	material.instantiate();
-	const Ref<Shader> shader = ResourceLoader::get_singleton()->load(kCoronaShaderPath);
-	material->set_shader(shader);
-	material->set_shader_parameter("u_corona_tex", _corona_texture());
-	quad->set_material(material);
-	mesh->set_mesh(quad);
-	mmi->set_multimesh(mesh);
-	mmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-	// Coronas draw in the mirror scene too [orig: the
-	// Water_RenderReflectedWorldScene call @ 0x5c85fd].
-	mmi->set_layer_mask(Water::VISUAL_LAYER_WORLD);
-	// The quads billboard in-shader from rows anywhere in the world; the
-	// static AABB only seeds Godot's sort and the cull margin keeps the
-	// instance from being frustum-culled once the camera leaves that box.
-	mmi->set_custom_aabb(AABB(Vector3(-512, -512, -512), Vector3(1024, 1024, 1024)));
-	mmi->set_extra_cull_margin(1.0e6f);
-	world->add_child(mmi);
-	corona_instance_id_ = mmi->get_instance_id();
-	return mmi;
+	// The coronas draw after particle pass B, in the main scene and in the
+	// mirror's reflected scene alike (retail EffectWorld_RenderLightCoronas(1)
+	// from Terrain_RenderSceneWithReflection @ 0x5c96ad and from
+	// Water_RenderReflectedWorldScene @ 0x5c85fd).
+	const uint32_t texture = r_submission.texture_index(_corona_texture());
+	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);
 }
 
 Ref<ImageTexture> EffectLightDirector::_corona_texture() {

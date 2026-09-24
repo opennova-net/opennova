@@ -1,7 +1,6 @@
 #pragma once
 
 #include <godot_cpp/classes/image_texture.hpp>
-#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -38,6 +37,7 @@ class EnvLightValues;
 class MissionEnvironment;
 class MissionRoot;
 class MissionObjectPlacer;
+struct SceneOverlaySubmission;
 class Simulation;
 class Weather;
 
@@ -134,6 +134,9 @@ public:
 	// the skipped select re-runs with the last frame's camera, so an
 	// MCP/diagnostics read stays exact without the per-frame report cost.
 	void run_census_now();
+	// This frame's corona billboards into the post-particle overlay tail
+	// (renderer/scene_overlay.h). Not bound to Godot.
+	void append_overlay(SceneOverlaySubmission &r_submission);
 	// The 62 Hz lifecycle decay [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170 from the main loop] — beside EffectWorld.advance_fixed_tick.
 	void advance_fixed_tick();
@@ -225,8 +228,6 @@ private:
 			const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 			MissionEnvironment *p_env);
 	void _clear_coronas();
-	MultiMeshInstance3D *_corona_instance() const;
-	MultiMeshInstance3D *_ensure_corona_instance();
 	Ref<ImageTexture> _corona_texture();
 
 	ObjectID world_id_;
@@ -262,11 +263,10 @@ private:
 	HashMap<int64_t, int64_t> entity_effect_handles_;
 	// round presentation id -> pool light handle (the light_move follow).
 	HashMap<int64_t, int64_t> round_handles_;
-	// The corona billboard presenter: one MultiMesh of additive camera-facing
-	// quads rebuilt per frame from the portable corona walk
-	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — the witness map
-	// lives on renderer::LightScene::collect_corona_quads].
-	ObjectID corona_instance_id_;
+	// This frame's corona quads for the post-particle overlay stage, from the
+	// portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
+	// the witness map lives on renderer::LightScene::collect_corona_quads].
+	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
 	int corona_frame_ = 0;
 	// The procedural corona texture "texlightcrn": the law (the 128x128
 	// 0.4 - 0.45 d falloff, truncated, the transparent border) lives

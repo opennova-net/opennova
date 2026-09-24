@@ -22,6 +22,7 @@ struct ParticleEmitterDrawBounds;
 namespace godot {
 
 class Camera3D;
+struct SceneOverlaySubmission;
 
 // Thin Godot adapter for the portable particle scene/frame modules. World
 // draw lists are immutable values: the water-far subset (pass A) draws as
@@ -29,7 +30,8 @@ class Camera3D;
 // (ParticleFarPass) with only its distortion on a PRE_TRANSPARENT compositor
 // effect, the camera-side subset on a POST_TRANSPARENT effect, the mirror on
 // two consecutive POST_TRANSPARENT effects, and, while a second scene camera
-// is handed in, that view gets its own far runs and camera-side effect. Only the
+// is handed in, that view gets its own far runs and camera-side effect; each view's
+// camera-side pass is followed by its post-particle overlay pass. Only the
 // explicitly diagnosed FirstPerson tool path uses ArrayMesh. Effects,
 // emitters, and particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {
@@ -105,6 +107,13 @@ public:
 	// Process-driven rendering calls this automatically; tests and previews may
 	// call it explicitly after advancing a scene.
 	void render_now(int64_t p_time_ms);
+
+	// The post-particle overlay tail (runtime/renderer/scene_overlay.h): every
+	// view this renderer composes carries one overlay pass right after its
+	// particle pass B (the main view and the scope aperture draw the full
+	// tail, the mirror its coronas); one immutable frame reaches all three.
+	// Null clears them. Not bound to Godot.
+	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
 	// references escape through the F3/debug seam. They are read from each

@@ -288,8 +288,6 @@ func ensure_game_hud() -> void:
 	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
 	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_view_effects.set_environment(
-			_world.get_environment_node() if _world != null else null)
 	_inset_scope = HudInsetScope.new()
 	_inset_scope.name = "InsetScope"
 	_inset_scope.show_behind_parent = true

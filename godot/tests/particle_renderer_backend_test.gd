@@ -382,28 +382,33 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	first.render_now(GameWorld.current_frame_clock_ms())
 	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
-			"each renderer registers its far-side and camera-side effects once")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 6,
+			"each renderer registers its two particle passes and its overlay pass once")
 	var composed := camera.compositor
 	first.render_now(GameWorld.current_frame_clock_ms())
 	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_eq(camera.compositor, composed,
 			"steady-state renders do not clone the composed resource")
-	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
+	assert_eq(camera.compositor.get_compositor_effects().size(), 6,
 			"steady-state renders do not duplicate effects")
 
-	var first_effects := camera.compositor.get_compositor_effects().slice(0, 2)
+	var first_effects := camera.compositor.get_compositor_effects().slice(0, 3)
+	assert_true(first_effects[2] is SceneOverlayCompositorEffect,
+			"each renderer's overlay pass follows its own particle pair")
 	first.shutdown()
 	first.shutdown()
-	for effect in first_effects:
+	for effect in first_effects.slice(0, 2):
 		assert_true(bool(effect.get_backend_report().get("shutdown", false)),
 				"explicit shutdown retires each compositor effect exactly once")
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
-			"shutdown removes only the departing renderer's pair")
+	assert_true(bool((first.get_debug_draw_list_report().get("world_overlay_backend", {})
+			as Dictionary).get("shutdown", false)),
+			"explicit shutdown retires the overlay pass too")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
+			"shutdown removes only the departing renderer's passes")
 	viewport.remove_child(first)
 	first.free()
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
 			"EXIT_TREE remains idempotent after explicit shutdown")
 
 	second.shutdown()
@@ -434,7 +439,7 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 	var live := renderer.get_debug_draw_list_report()
 	assert_false(bool(live.get("shutdown", true)), "a fresh renderer is live")
 	assert_true(bool(live.get("world_compositor_attached", false)))
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2)
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3)
 
 	# EXIT_TREE retires the compositor effects for good and latches shutdown.
 	viewport.remove_child(renderer)
@@ -456,14 +461,16 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 		"world_far_backend", "world_camera_backend",
 		"reflection_far_backend", "reflection_camera_backend",
 		"second_scene_far_backend", "second_scene_camera_backend",
+		"world_overlay_backend", "reflection_overlay_backend",
+		"second_scene_overlay_backend",
 	]:
 		assert_false(bool((revived.get(key, {}) as Dictionary).get("shutdown", true)),
 				"%s is a fresh effect after re-entry" % key)
 	assert_true(bool(revived.get("world_compositor_attached", false)),
 			"re-entry re-attaches the world camera")
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
-			"re-entry installs exactly one fresh pair, no stale effects")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
+			"re-entry installs exactly one fresh pass set, no stale effects")
 	assert_gt(renderer.get_draw_command_count(), 0,
 			"the retained scene publishes again through the new effects")
 	RenderingServer.force_draw(true)
@@ -496,20 +503,29 @@ func test_far_particles_lead_the_camera_chain_and_terminal_stays_last() -> void:
 	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
 	var effects := camera.compositor.compositor_effects
-	assert_eq(effects.size(), 3,
-			"far particles + camera particles + terminal are the full cutover")
+	assert_eq(effects.size(), 4,
+			"far particles + camera particles + the overlay tail + terminal")
 	assert_eq(effects[0].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
 			"particle pass A draws before the transparent list (before water)")
 	assert_eq(effects[1].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"particle pass B follows water and camera-side alpha")
+	# The retail tail (precipitation, coronas, glint, murk, glare) draws after
+	# particle pass B and before the frame effects [orig:
+	# Terrain_RenderSceneWithReflection @ 0x5c9690 (pass B) -> @ 0x5c96a6 ..
+	# @ 0x5c9714; the bloom follows in Render_ProcessMainSceneFrame
+	# @ 0x5caa97].
 	assert_eq(effects[2].effect_callback_type,
+			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
+			"the overlay tail follows particle pass B")
+	assert_eq(effects[3].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"FrameFX plus the display transfer remain terminal")
 	assert_true(effects[0] is ParticleCompositorEffect)
 	assert_true(effects[1] is ParticleCompositorEffect)
-	assert_true(effects[2] is FrameFxCompositorEffect)
+	assert_true(effects[2] is SceneOverlayCompositorEffect)
+	assert_true(effects[3] is FrameFxCompositorEffect)
 
 
 func test_reflection_camera_receives_two_ordered_camera_correct_submissions() -> void:
@@ -537,9 +553,17 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	assert_not_null(reflection_camera.compositor)
-	assert_eq(reflection_camera.compositor.get_compositor_effects().size(), 2,
-			"reflection receives the consecutive far/camera-side pair")
+	assert_eq(reflection_camera.compositor.get_compositor_effects().size(), 3,
+			"reflection receives the consecutive far/camera-side pair and its overlay")
+	assert_true(reflection_camera.compositor.get_compositor_effects()[2]
+			is SceneOverlayCompositorEffect)
 	var report := renderer.get_debug_draw_list_report()
+	# The mirror's reflected scene draws only its coronas after its particle
+	# passes [orig: Water_RenderReflectedWorldScene @ 0x5c85fd].
+	assert_eq(String(_slot(report, "reflection_overlay_backend").get("view_kind", "")),
+			"mirror")
+	assert_eq(String(_slot(report, "world_overlay_backend").get("view_kind", "")),
+			"scene")
 	assert_true(bool(report.get("reflection_compositor_attached", false)))
 	var far_backend: Dictionary = report.get("reflection_far_backend", {})
 	var camera_backend: Dictionary = report.get("reflection_camera_backend", {})
@@ -625,7 +649,7 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 	assert_true(_slot(idle, "second_scene_far_side").is_empty())
 	assert_true(_slot(idle, "second_scene_camera_side").is_empty())
 	var main_chain := camera.compositor.compositor_effects.duplicate()
-	assert_eq(main_chain.size(), 3)
+	assert_eq(main_chain.size(), 4)
 
 	renderer.set_second_scene_camera(second_camera)
 	assert_eq(renderer.get_second_scene_camera(), second_camera)
@@ -634,21 +658,24 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 	if second_camera.compositor == null:
 		return
 	var effects := second_camera.compositor.compositor_effects
-	assert_eq(effects.size(), 3,
-			"far particles + camera-side particles + the scenario's terminal")
+	assert_eq(effects.size(), 4,
+			"far particles + camera-side particles + the overlay tail + the scenario's terminal")
 	assert_true(effects[0] is ParticleCompositorEffect)
 	assert_true(effects[1] is ParticleCompositorEffect)
-	assert_true(effects[2] is FrameFxCompositorEffect,
+	assert_true(effects[2] is SceneOverlayCompositorEffect,
+			"the scope view runs the scene routine's overlay tail too")
+	assert_true(effects[3] is FrameFxCompositorEffect,
 			"FrameFX and the display transfer stay terminal in the second view too")
 	assert_eq(effects[0].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
 			"this view draws the water surface, so its far side precedes the transparent list")
 	assert_eq(effects[1].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT)
-	assert_eq(effects[2], main_chain[2],
+	assert_eq(effects[3], main_chain[3],
 			"the terminal is the one the shared scenario already ran for this camera")
 	assert_false(main_chain.has(effects[0]), "the pair is this view's own, not the World pair")
 	assert_false(main_chain.has(effects[1]))
+	assert_false(main_chain.has(effects[2]))
 	assert_eq(camera.compositor.compositor_effects, main_chain,
 			"the main camera's chain is untouched by the second view")
 	var report := renderer.get_debug_draw_list_report()
@@ -901,7 +928,8 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 				"%s is a fresh effect after re-entry" % key)
 	assert_true(bool(revived.get("second_scene_compositor_attached", false)),
 			"the retained camera re-attaches on re-entry")
-	assert_eq(second_camera.compositor.get_compositor_effects().size(), 2)
+	assert_eq(second_camera.compositor.get_compositor_effects().size(), 3,
+			"the view's particle pair plus its overlay pass")
 
 	# A camera freed while attached retires the view on the next render.
 	second_camera.free()
