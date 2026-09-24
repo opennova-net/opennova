@@ -404,11 +404,11 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		}
 	}
 
-	std::sort(visible_.begin(), visible_.end(),
-			[](const VisiblePatch &a, const VisiblePatch &b) {
-				return a.distance < b.distance;
-			});
-
+	// Retail draws the visible list in emission order: the batch's bubble
+	// sort keys on entry +0x14, which no writer fills (the traversal stores
+	// +0/+4/+8/+0xC/+0x10/+0x18 only), so it never reorders.
+	// [orig: render_terrain_sector_batch sort @ 0x6093C0..0x609550;
+	// Terrain_TraverseQuadtreeNode list stores @ 0x608FDA..0x609006]
 	draw_list_.debug.visible_patches = static_cast<int>(visible_.size());
 	const int count = std::min(static_cast<int>(visible_.size()), kPatchBudget);
 	if (draw_list_.patches.capacity() < static_cast<size_t>(count)) {

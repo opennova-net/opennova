@@ -1,5 +1,5 @@
 // TerrainFrameCompiler (ADR 0033 R2) — the engine-owned terrain frame: scene
-// snapshot invariants, the sector-window walk, front-to-back order, the shared
+// snapshot invariants, the sector-window walk, emission order, the shared
 // emission budget, the LOD-family fallback, the foliage detail-cell handoff
 // (and its node-distance gate),
 // and the engine-side view-cull path (the retail clip cone and far slab).
@@ -416,9 +416,7 @@ int main() {
 				"the empty-LOD tile is dropped from the draw_list")) return 1;
 		if (!expect(pkt.debug.empty_mesh_drops == 1, "the drop is counted")) return 1;
 		if (!expect(pkt.patches[0].tile_index == 0 && pkt.patches[1].tile_index == 1,
-				"patches are ordered front-to-back")) return 1;
-		if (!expect(pkt.patches[0].distance <= pkt.patches[1].distance,
-				"distance is ascending")) return 1;
+				"patches keep the traversal's emission order")) return 1;
 		if (!expect(pkt.patches[0].lod_family == 0 && pkt.patches[1].lod_family == 0,
 				"near leaves resolve family 0")) return 1;
 		if (!expect(pkt.patches[0].sector_ox == 0.0f && pkt.patches[0].sector_oz == 0.0f,
@@ -670,10 +668,26 @@ int main() {
 		if (!expect(static_cast<int>(pkt.patches.size()) == 224 &&
 						pkt.patches.size() <= TerrainFrameCompiler::kPatchBudget,
 				"the draw_list stays within the pool budget")) return 1;
+		// Retail keeps emission order (its batch sort keys on a field nothing
+		// writes [orig: render_terrain_sector_batch @ 0x6093C0..0x609550]):
+		// the sector walk finishes one sector before the next, so each
+		// sector's patches form one contiguous run even though the camera
+		// sits on the corner all four share.
+		int sector_runs = 1;
+		bool distance_sorted = true;
 		for (size_t i = 1; i < pkt.patches.size(); ++i) {
-			if (!expect(pkt.patches[i - 1].distance <= pkt.patches[i].distance,
-					"dense draw_list stays front-to-back")) return 1;
+			if (pkt.patches[i].sector_x != pkt.patches[i - 1].sector_x ||
+					pkt.patches[i].sector_z != pkt.patches[i - 1].sector_z) {
+				++sector_runs;
+			}
+			if (pkt.patches[i - 1].distance > pkt.patches[i].distance) {
+				distance_sorted = false;
+			}
 		}
+		if (!expect(sector_runs <= 4,
+				"each walked sector's patches stay one contiguous run")) return 1;
+		if (!expect(!distance_sorted,
+				"the draw list is not re-sorted front-to-back")) return 1;
 	}
 
 	std::printf("OK: terrain_frame_compiler snapshot/order/budget/fallback/frustum\n");

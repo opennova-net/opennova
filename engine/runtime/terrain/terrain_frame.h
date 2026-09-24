@@ -6,13 +6,14 @@
 // renderer::ParticleFrameCompiler proved. The compiler owns every per-frame
 // DECISION the shell binding used to make in its self-driven walk: the
 // 512-unit sector window over the .trn sector grid, the quadtree traversal,
-// the foliage detail-cell handoff, the front-to-back order, the patch budget,
-// and the LOD-family resolve. The embedder keeps only device work: building
+// the foliage detail-cell handoff, the emission-order patch budget, and the
+// LOD-family resolve. The embedder keeps only device work: building
 // GPU meshes from the same CPT tiles at load time and writing the draw list onto
 // its instance pool.
 // [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe) — the 512-unit sector
 //  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
-//  render_terrain_sector_batch @ 0x6096f0 — the per-batch family select]
+//  sub_602850 @ 0x60288E..0x6028B1 — the per-batch family select, called from
+//  render_terrain_sector_batch @ 0x609581]
 
 #include <runtime/terrain/foliage_detail_collector.h>
 #include <runtime/terrain/quadtree.h>
@@ -109,8 +110,9 @@ struct TerrainViewInput {
 };
 
 // One patch submission: which tile, which resolved mesh family, where. The
-// draw-list order is the draw order (front-to-back by node distance) and the
-// draw-list index is the embedder's pool slot.
+// draw-list order is the traversal's emission order (retail draws and
+// composes pages in that order) and the draw-list index is the embedder's
+// pool slot.
 struct TerrainPatchDraw {
 	int32_t tile_index = -1;
 	int32_t lod_family = 0;
@@ -174,8 +176,8 @@ struct TerrainDrawList {
 };
 
 // Deep in-process module: one call windows the sector grid, traverses each
-// routed sector's quadtree, collects the foliage handoff, orders the visible
-// patches front-to-back, applies the pool budget, and resolves the mesh
+// routed sector's quadtree, collects the foliage handoff, keeps the visible
+// patches in emission order, applies the pool budget, and resolves the mesh
 // family per patch. The returned draw list remains valid until the next compile
 // call; retained vectors make no-allocation-after-warmup observable.
 class TerrainFrameCompiler {

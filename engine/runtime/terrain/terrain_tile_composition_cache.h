@@ -152,8 +152,8 @@ public:
 	// rt, -40864, 0.99994999) per slot]
 	static constexpr uint32_t kTileClearColorArgb = 0xFFFF6060u;
 
-	// [orig: span = 1024 >> lodLevel @ 0x60dbf6/0x60dd87 in
-	// PolyTrn_RenderTile.]
+	// [orig: span = 1024 >> lodLevel, PolyTrn_RenderTile
+	// @ 0x60DBA5..0x60DBAA.]
 	static constexpr int page_world_span(uint8_t page_lod_level) noexcept {
 		return page_lod_level <= 4
 				? 1024 >> page_lod_level
