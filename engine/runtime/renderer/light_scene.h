@@ -335,7 +335,9 @@ struct LightCoronaOwnerMask {
 // The corona pass inputs. The depth plane is retail's batch-sort camera
 // plane in mission space: depth(p) = dot(normal, p) + w, growing in front of
 // the camera — each segment's alpha is clamp(depth / base_half_size, 0..1)
-// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c].
+// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c], and the light
+// centre itself must clear the viewport near depth on the same axis first
+// [orig: the view-matrix depth row test @ 0x5ab0fc..0x5ab143].
 // Fog: the corona pass runs the PRIMARY device fog with the fog color forced
 // BLACK (additive fades out, never toward the fog color)
 // [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6 -> case 2
@@ -530,7 +532,9 @@ public:
 	// record rgb x blend x ambient scale x 1/16 (then the RgbGen multiply),
 	// each segment scaled by clamp(camera-plane depth / (0.5 x radius), 0..1)
 	// and skipped at <= 0. Admission: camera distance <= 100 wu (0x640000
-	// fixed), the owned-light visible-section gate (inputs.owner_masks
+	// fixed), the light centre's camera depth beyond the viewport near depth
+	// 1/32 wu [orig: @ 0x5ab0fc..0x5ab143], the owned-light visible-section
+	// gate (inputs.owner_masks
 	// [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960, gated @ 0x5ab027]),
 	// and a per-frame +-512-fixed x/y jitter phased on frame & 3. A
 	// corona_lower_half_radius instance (retail render flag 0x100) drops

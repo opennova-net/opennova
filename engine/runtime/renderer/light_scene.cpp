@@ -655,8 +655,11 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]. Constants decoded
 	// from the binary: 1/65536 @ 0x7c3310, 0.5 @ 0x7c3b94, 1/16 @ 0x7c486c,
 	// 0.1 @ 0x7c69f4, 0.66 @ 0x7d3e68, the 100-wu cull 0x640000 fixed
-	// @ 0x5ab143.
+	// @ 0x5ab0f1.
 	constexpr double kMaxDistanceFixed = 0x640000;   // 100 wu
+	// The viewport near depth the centre must clear: 0x800 fixed = 1/32 wu
+	// [orig: Viewport_BuildProjectionMatrix @ 0x411093 writes viewport+0x78].
+	constexpr float kNearDepth = static_cast<float>(0x800) / 65536.0f;
 	constexpr float kColorScale = 0.0625f;           // 1/16
 	constexpr float kStepFactor = 0.1f;
 	constexpr float kSegmentShrink = 0.66f;
@@ -719,7 +722,7 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 					static_cast<int64_t>(pos_fixed[1]) - 512); break;
 		}
 		// Camera distance cull at 100 wu, in fixed units like retail's
-		// float-of-fixed sqrt [orig: @ 0x5ab0b7..0x5ab143].
+		// float-of-fixed sqrt [orig: @ 0x5ab09d..0x5ab0f6].
 		double dist_sq = 0.0;
 		for (int axis = 0; axis < 3; ++axis) {
 			const double delta = static_cast<double>(pos_fixed[axis]) -
@@ -734,6 +737,21 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 			static_cast<float>(pos_fixed[1]) / 65536.0f,
 			static_cast<float>(pos_fixed[2]) / 65536.0f,
 		};
+		// The whole corona drops when the (jittered, re-centred) light centre
+		// does not lie beyond the viewport near depth: retail transforms it by
+		// the fixed view matrix's depth row and skips on depth <= near before
+		// any segment is built. The depth plane is that camera depth axis in
+		// world units [orig: @ 0x5ab0fc..0x5ab143 — `shrd eax, edx, 16h` of
+		// the row-0 dot, + the row translation dword_A78428, `cmp eax,
+		// dword_A783D8; jle` to the next slot].
+		const float centre_depth =
+				inputs.depth_plane_normal[0] * light_world[0] +
+				inputs.depth_plane_normal[1] * light_world[1] +
+				inputs.depth_plane_normal[2] * light_world[2] +
+				inputs.depth_plane_w;
+		if (centre_depth <= kNearDepth) {
+			continue;
+		}
 		const float radius_world =
 				static_cast<float>(slot.params.radius_fixed) / 65536.0f;
 		const float base_half = radius_world * 0.5f;

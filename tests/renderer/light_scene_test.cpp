@@ -793,18 +793,39 @@ int main() {
                        quads[0].center[0] < 0.0f,
                "odd frames jitter x by -512 fixed");
 
-        // A camera plane near the light fades the segments by
-        // depth / (radius/2) and skips non-positive depths.
+        // A light CENTRE at or behind the viewport near depth (1/32 wu)
+        // drops the whole corona before any segment is built, even where
+        // the segments' own plane depths would be positive
+        // [orig: @ 0x5ab0fc..0x5ab143, near 0x800 from
+        // Viewport_BuildProjectionMatrix @ 0x411093].
         inputs.frame_index = 0;
-        inputs.depth_plane_w = -0.6f;  // depth(z) = -z - 0.6 + 10 - 10...
+        inputs.depth_plane_w = -0.6f;
         inputs.depth_plane_normal = {0.0f, 0.0f, 1.0f};
-        // depth(center) = z - 0.6: segment 1 at 0.4 -> -0.2 skipped,
-        // segment 2 at 0.8 -> 0.2 -> fade 0.1, segment 3 at 1.2 -> 0.6 ->
-        // fade 0.3.
-        expect(scene.collect_corona_quads(inputs, quads) == 2,
+        // depth(z) = z - 0.6: the centre sits at -0.6 while segments 2/3
+        // (z 0.8 / 1.2) would read 0.2 / 0.6.
+        expect(scene.collect_corona_quads(inputs, quads) == 0,
+               "a light centre behind the near depth draws no corona");
+        inputs.depth_plane_w = 0.02f;  // centre depth 0.02 <= 1/32
+        expect(scene.collect_corona_quads(inputs, quads) == 0,
+               "a centre inside the near depth draws no corona");
+
+        // A centre in front of the near depth: segments fade by
+        // depth / (radius/2) and skip non-positive depths. The camera at
+        // z = 10 looks down -z (depth = 10 - z); the light sits 0.5 wu in
+        // front of it.
+        LightScene near_scene;
+        LightSpawnParams near_params = params;
+        near_params.position_fixed = {0, 0, 0x98000};  // z = 9.5
+        near_scene.spawn(near_params);
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        // Segment centres step 0.4 toward the camera: z 9.9 -> depth 0.1
+        // (fade 0.05); z 10.3 and 10.7 sit behind the camera and skip.
+        expect(near_scene.collect_corona_quads(inputs, quads) == 1,
                "segments behind the camera plane are skipped");
-        expect(nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f * 0.1f,
-                       1e-4f),
+        expect(!quads.empty() &&
+                       nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f * 0.05f,
+                               1e-4f),
                "the plane fade scales the corona color by depth/(radius/2)");
 
         // The authored corona disable and the 100-wu cull.

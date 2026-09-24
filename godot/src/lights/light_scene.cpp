@@ -848,8 +848,8 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
-	// the fade [orig: @0x5ab2f8..0x5ab33c]; the small near-plane offset is
-	// folded into the clamp).
+	// the fade [orig: @0x5ab2f8..0x5ab33c]; the engine also tests the light
+	// centre against the viewport near depth on this axis).
 	const Vector3 forward = p_camera_forward.normalized();
 	const std::array<float, 3> normal_mission = {
 		static_cast<float>(forward.x),
