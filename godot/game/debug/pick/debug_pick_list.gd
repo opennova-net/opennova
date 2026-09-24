@@ -1,15 +1,16 @@
 class_name DebugPickList
 extends RefCounted
 ## The debug pick list: the entities a developer picked in the live game
-## (crosshair hotkey or tools-open click), shared between the shell, the world
-## highlight view and, through the pick session, the F3 Entities window (every
-## landed pick selects its row there). SHELL-owned: a crosshair pick works
-## before F3 has ever been opened and the list survives tools toggles; the
-## shell clears it on mission start/stop so stale handles never cross sessions.
+## (crosshair hotkey or tools-open click), shared between the shell and,
+## through the pick session, the F3 Entities window (every landed pick selects
+## its row there, and the Entities window's Selection overlay marks it in the
+## Game view). SHELL-owned: a crosshair pick works before F3 has ever been
+## opened and the list survives tools toggles; the shell clears it on mission
+## start/stop so stale handles never cross sessions.
 ##
 ## Capped and deduped: re-picking a listed entity refreshes that row's pick
 ## metadata (fresh hit position/tick) instead of appending; a full list evicts
-## its oldest row so picking never wedges (the highlight shows the newest eight).
+## its oldest row so picking never wedges.
 
 ## A pick landed (appended or refreshed): the packed engine handle it names.
 signal picked(handle: int)

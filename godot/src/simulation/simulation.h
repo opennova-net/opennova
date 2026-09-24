@@ -49,6 +49,11 @@
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
+namespace opennova::world::inspect {
+struct EntityMarker;
+struct EntityMarkerQuery;
+} // namespace opennova::world::inspect
+
 namespace godot {
 
 class Weather;
@@ -2244,6 +2249,9 @@ public:
 	// round-trip. False without a kernel or on a joiner (the tooling AI pool
 	// never joins the decoded view).
 	bool native_ai_debug(opennova::world::inspect::AiDebugReport &r_out) const;
+	// The F3 overlay entity markers (world::inspect::entity_markers).
+	bool native_entity_markers(const opennova::world::inspect::EntityMarkerQuery &p_query,
+			std::vector<opennova::world::inspect::EntityMarker> &r_out) const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
 	// draw filter) behind the F3 Rays window; counts + filter state ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.

@@ -51,10 +51,15 @@ struct FakeGameViewport : opennova::devtools::GameViewport {
 	int height = 0;
 	int draws = 0;
 
-	void draw(int requested_width, int requested_height) override {
+	// Stands in for the addon's SubViewport widget: an item of exactly the
+	// requested size at the cursor.
+	bool draw(int requested_width, int requested_height) override {
 		width = requested_width;
 		height = requested_height;
 		++draws;
+		ImGui::InvisibleButton("fake_game_image",
+				ImVec2(static_cast<float>(requested_width), static_cast<float>(requested_height)));
+		return true;
 	}
 };
 

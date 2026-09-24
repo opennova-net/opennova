@@ -12,6 +12,7 @@
 #include <runtime/devtools/control_board.h>
 #include <runtime/devtools/frame_stats_board.h>
 #include <runtime/devtools/imgui_pass.h>
+#include <runtime/world/inspect_markers.h>
 
 #include <cstdint>
 #include <vector>
@@ -38,6 +39,8 @@ enum class GameWindowRequest;
 struct ControlRequest;
 struct ControlResult;
 struct GameStatusSnapshot;
+struct OverlayCamera;
+struct EntityMarkersRecord;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct WeaponDefinitionSnapshot;
@@ -98,6 +101,20 @@ public:
 	void set_control_states(const std::vector<ControlState> &states);
 	bool needs_control_states() const;
 	void wanted_control_ids(std::vector<const char *> &out) const;
+
+	// The world-space overlays (overlay_canvas.h). The embedder pushes the
+	// game camera (needs_overlay_camera: tools open and a layer on) and each
+	// layer's record ahead of the layout pass; clear_overlay_records drops
+	// them all (the tools closed, the world unloaded).
+	void set_overlay_camera(const OverlayCamera &camera);
+	bool needs_overlay_camera() const;
+	void clear_overlay_records();
+	// The Entities layers' markers: wanted while the Selection layer has a
+	// selection to mark or the Labels layer is on; the query (anchor, reach,
+	// cap, selection) is the tools' policy, the embedder runs it.
+	bool needs_entity_markers() const;
+	world::inspect::EntityMarkerQuery entity_marker_query(const world::Vec3 &eye) const;
+	void set_entity_markers(EntityMarkersRecord record);
 
 	// The Game window's status readout, pushed while the tools are open.
 	void set_game_status(const GameStatusSnapshot &status);

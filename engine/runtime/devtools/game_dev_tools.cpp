@@ -3,6 +3,8 @@
 #include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/entity_overlay.h>
+#include <runtime/devtools/overlay_camera.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_properties_window.h>
@@ -35,6 +37,8 @@ GameDevTools::GameDevTools() {
 	auto entities = std::make_unique<EntitiesWindow>();
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
+	pass_.register_overlay(entities_window_->selection_layer());
+	pass_.register_overlay(entities_window_->labels_layer());
 	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
 	entity_properties_window_ = properties.get();
 	pass_.register_window(std::move(properties));
@@ -127,6 +131,43 @@ void GameDevTools::wanted_control_ids(std::vector<const char *> &out) const {
 
 void GameDevTools::set_game_status(const GameStatusSnapshot &status) {
 	game_window_->set_status(status);
+}
+
+void GameDevTools::set_overlay_camera(const OverlayCamera &camera) {
+	game_window_->set_overlay_camera(camera);
+}
+
+bool GameDevTools::needs_overlay_camera() const {
+	return pass_.is_open() && pass_.any_overlay_enabled();
+}
+
+void GameDevTools::clear_overlay_records() {
+	game_window_->set_overlay_camera(OverlayCamera{});
+	entities_window_->set_markers(EntityMarkersRecord{});
+}
+
+bool GameDevTools::needs_entity_markers() const {
+	if (!pass_.is_open()) return false;
+	const bool selection = entities_window_->selection_layer().enabled() &&
+			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
+	return selection || entities_window_->labels_layer().enabled();
+}
+
+world::inspect::EntityMarkerQuery GameDevTools::entity_marker_query(const world::Vec3 &eye) const {
+	world::inspect::EntityMarkerQuery query;
+	query.anchor = eye;
+	query.selected = entities_window_->selection_layer().enabled()
+			? entities_window_->selected_handle()
+			: world::EntityHandle::kInvalid;
+	if (entities_window_->labels_layer().enabled()) {
+		query.range_units = EntityLabelsLayer::kRangeUnits;
+		query.cap = EntityLabelsLayer::kCap;
+	}
+	return query;
+}
+
+void GameDevTools::set_entity_markers(EntityMarkersRecord record) {
+	entities_window_->set_markers(std::move(record));
 }
 
 void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {

@@ -3198,6 +3198,10 @@ if(OPENNOVA_DEVTOOLS)
     target_link_libraries(devtools_windows_test PRIVATE opennova_runtime opennova_imgui)
     target_include_directories(devtools_windows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME devtools_windows COMMAND devtools_windows_test)
+    add_executable(devtools_overlay_test devtools/devtools_overlay_test.cpp)
+    target_link_libraries(devtools_overlay_test PRIVATE opennova_runtime opennova_imgui)
+    target_include_directories(devtools_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME devtools_overlay COMMAND devtools_overlay_test)
 endif()
 
 # Mission-authored lndm callbacks, independent of thrown AT mines.

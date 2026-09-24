@@ -215,6 +215,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/facial_animation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect.cpp   # the entity directory + debug cards (ADR 0042 d5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect_markers.cpp # the overlay entity markers (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx attach law: pool gates, identity aliases, attach plan
     ${CMAKE_CURRENT_SOURCE_DIR}/world/present_passes.cpp # the present passes' shared law: husk render pick, husk identity, settle tilt retention
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
@@ -400,6 +401,8 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_properties_window.cpp

@@ -1,6 +1,7 @@
 #include <runtime/devtools/game_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/overlay_canvas.h>
 
 #include <imgui.h>
 
@@ -229,7 +230,30 @@ void GameWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	const ImVec2 available = ImGui::GetContentRegionAvail();
 	const int width = available.x >= 1.0f ? static_cast<int>(available.x) : 1;
 	const int height = available.y >= 1.0f ? static_cast<int>(available.y) : 1;
-	viewport_->draw(width, height);
+	if (viewport_->draw(width, height)) {
+		draw_overlays(pass, width, height);
+	}
+}
+
+void GameWindow::draw_overlays(ImGuiPass &pass, int image_width, int image_height) {
+	if (!overlay_camera_.valid || !pass.any_overlay_enabled() ||
+			overlay_camera_.viewport_width != image_width ||
+			overlay_camera_.viewport_height != image_height) {
+		return;
+	}
+	const ImVec2 min = ImGui::GetItemRectMin();
+	const ImVec2 max = ImGui::GetItemRectMax();
+	ImDrawList *draw_list = ImGui::GetWindowDrawList();
+	draw_list->PushClipRect(min, max, true);
+	OverlayRect rect;
+	rect.min_x = min.x;
+	rect.min_y = min.y;
+	rect.max_x = max.x;
+	rect.max_y = max.y;
+	OverlayCanvas canvas(draw_list, overlay_camera_, rect);
+	pass.draw_overlays(canvas);
+	draw_list->PopClipRect();
+	++overlay_draws_;
 }
 
 }  // namespace opennova::devtools
