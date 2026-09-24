@@ -416,7 +416,9 @@ struct Model {
 		face.vert_index[1] = static_cast<int16_t>(b);
 		face.vert_index[2] = static_cast<int16_t>(c);
 		face.normal_index = normal_index;
-		face.plane_dist_fp16 = q16(normal.normal[0] * va.position[0] + normal.normal[1] * va.position[1] + normal.normal[2] * va.position[2]);
+		// The runtime tests n . p + plane_dist (zero on the plane), so the
+		// distance is -(n . v0), as WriteCFAC stores it.
+		face.plane_dist_fp16 = q16(-(normal.normal[0] * va.position[0] + normal.normal[1] * va.position[1] + normal.normal[2] * va.position[2]));
 		double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 		for (const opennova::threedi::ThreediCollisionVertex *v : {&va, &vb, &vc}) {
 			for (int k = 0; k < 3; ++k) {

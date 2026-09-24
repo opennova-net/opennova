@@ -22,6 +22,7 @@
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/renderer/material_descriptor.h>
 
 #include "threedi_cli.h"
 
@@ -147,6 +148,16 @@ struct PendingOcc {
 	std::vector<std::array<int, 4>> faces;
 };
 
+// A collision volume authored as triangles, being read: `cvmesh` opens it,
+// `vv`/`vf` fill it; the builder derives its planes by the OED rule.
+struct PendingVolume {
+	bool open = false;
+	int cobj = -1, type = 0, flags = 0, line = 0;
+	std::string label;
+	std::vector<ThreediBuildVec3> verts;
+	std::vector<std::array<int, 3>> tris;
+};
+
 bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	std::string raw;
 	int lod = -1, part = -1, material = -1, cobj = -1, volume_open = -1;
@@ -156,6 +167,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	ThreediBuildStrip pending;
 	bool have_pending = false;
 	PendingOcc occ;
+	PendingVolume vol;
 	std::map<std::pair<int, int>, int> trans_axis;  // (lod, panm row) -> axis
 	std::map<std::pair<int, int>, bool> raw_flags;  // (lod, panm row) -> flags given verbatim
 	const auto flush_strip = [&]() {
@@ -184,6 +196,21 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					occ.planes))
 			ps.error("occ: the record needs more than 32 planes");
 		occ = PendingOcc{};
+	};
+	const auto flush_volume = [&]() {
+		if (!vol.open) return;
+		if (vol.verts.size() < 4 || vol.tris.empty())
+			ps.error("cvmesh: a volume needs at least 4 vertices and a triangle");
+		else {
+			const double outside = model.add_volume_mesh(vol.cobj, vol.type, vol.flags, vol.verts, vol.tris);
+			// A volume is the solid all its face planes bound: past a
+			// centimetre, the author's shape is not what collides.
+			if (outside > 0.01)
+				std::fprintf(stderr, "%s:%d: note: volume %s is not convex: its vertices reach %.3f outside the solid "
+						"its faces bound, which is all that collides (split it into convex volumes)\n",
+						ps.path.c_str(), vol.line, vol.label.empty() ? "?" : vol.label.c_str(), outside);
+		}
+		vol = PendingVolume{};
 	};
 	// A generator's register field: a declared register index for styles
 	// above 112 (retail stores the CTRL index in the phase byte), else unused.
@@ -249,6 +276,30 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			continue;
 		}
 		flush_occ();
+		if (key == "vv" || key == "vf") {
+			if (!vol.open) {
+				ps.error("'" + key + "' outside a cvmesh volume");
+				continue;
+			}
+			if (key == "vv") {
+				double p[3];
+				if (!read_doubles(in, p, 3)) {
+					ps.error("vv needs x y z");
+					continue;
+				}
+				vol.verts.push_back(ThreediBuildVec3{p[0], p[1], p[2]});
+			} else {
+				int a, b, c;
+				const int count = static_cast<int>(vol.verts.size());
+				if (!(in >> a >> b >> c) || a < 0 || b < 0 || c < 0 || a >= count || b >= count || c >= count) {
+					ps.error("vf needs three vertices already declared in this cvmesh");
+					continue;
+				}
+				vol.tris.push_back({a, b, c});
+			}
+			continue;
+		}
+		flush_volume();
 		if (key == "v" || key == "t" || key == "bones") {
 			if (strip == nullptr) {
 				ps.error("'" + key + "' outside a strip");
@@ -714,16 +765,21 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			read_doubles(in, o, 3);
 			cobj = model.add_cobj(parent, ThreediBuildVec3{o[0], o[1], o[2]});
 		} else if (key == "csphere") {
-			// A bone section's hit sphere (retail persons: one per bone).
-			double c[3], r = 0;
+			// A bone section's hit sphere (retail persons: one per bone), and
+			// optionally the bounds of the vertices the bone moves.
+			double c[3], r = 0, b[6];
 			if (cobj < 0 || !read_doubles(in, c, 3) || !(in >> r) || r < 0) {
-				ps.error("csphere needs an open cobj and cx cy cz radius");
+				ps.error("csphere needs an open cobj and cx cy cz radius [minx miny minz maxx maxy maxz]");
 				continue;
 			}
 			ThreediBuildCollisionObject &o = model.collision[cobj];
 			o.sphere = true;
 			o.sphere_center = ThreediBuildVec3{c[0], c[1], c[2]};
 			o.sphere_radius = r;
+			if (read_doubles(in, b, 6)) {
+				o.sphere_bounded = true;
+				o.sphere_bounds = ThreediBuildBox{{b[0], b[1], b[2]}, {b[3], b[4], b[5]}};
+			}
 		} else if (key == "cvol") {
 			int type = 0, flags = 0;
 			double b[6];
@@ -743,12 +799,37 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 			model.add_volume_planes(cobj, type, flags, ThreediBuildBox{{b[0], b[1], b[2]}, {b[3], b[4], b[5]}}, {});
 			volume_open = cobj;
+		} else if (key == "cvmesh") {
+			// A volume given as its authored triangles: `vv` vertices and `vf`
+			// faces follow; its planes, box and seam flags are derived.
+			if (cobj < 0 || !(in >> vol.type >> vol.flags)) {
+				ps.error("cvmesh needs an open cobj and type flags [label]");
+				vol = PendingVolume{};
+				continue;
+			}
+			read_name(in, vol.label);
+			vol.open = true;
+			vol.cobj = cobj;
+			vol.line = ps.line;
 		} else {
 			ps.error("unknown record '" + key + "'");
 		}
 	}
 	flush_strip();
 	flush_occ();
+	flush_volume();
+	// The vertex layout carries tangents when any material's shader reads the
+	// TANGENT semantic (ComputeVertexFormatFlags [orig: @ 0x457a10
+	// (ModSuperOed)]; docs/threedi/3di-gp-format-re.md); the builder derives
+	// their values. Retail's object-space bump shaders (VS_PHONGO,
+	// VS_SKBUMPDIFFOBJ) carry none: Colt_1st, Boonie.
+	for (const ThreediMaterial &mat : model.materials) {
+		const opennova::renderer::MaterialDescriptorRecord *desc = opennova::renderer::find_material_descriptor(mat.shader_name);
+		if (desc != nullptr && (desc->shader_flags & opennova::renderer::MATERIAL_FLAG_TANGENT) != 0) model.tangents = true;
+		if (desc == nullptr)
+			std::fprintf(stderr, "%s: note: shader '%s' is not in the engine's shader table\n", ps.path.c_str(),
+					mat.shader_name);
+	}
 	if (!header) ps.error("empty scene");
 	return ps.errors.empty();
 }

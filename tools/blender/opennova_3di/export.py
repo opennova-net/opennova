@@ -24,12 +24,15 @@
 #   LP##[a..]     Light (on LOD0): a LGHT light owned by part ## (00 = part 0);
 #                 a spot light is a cone about its local +Z.
 #   <code>##[a..]-colonly  mesh on LOD0: a collision volume of type <code>
-#                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP) on
-#                 part ##, the convex hull of its vertices.
+#                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP) in
+#                 section ##; the builder takes its planes from its faces by
+#                 the OED rule (a ladder, CL, faces its last face's plane).
 #   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD0: an occlusion
 #                 record in section ## (OB occluder, OS open, OP a window to
 #                 the exterior or, with -MM, a portal to section MM, OH).
-#   Material_<i>_<SHADER>  material: export order i, shader tag SHADER.
+#   Material_<i>_<SHADER>  material: export order i, shader tag SHADER (any
+#                 tag in the engine's table; without one, the default for its
+#                 texture count).
 #   Armature      a skinned model: one Armature under the LOD root whose
 #                 bones are named BN## (part ##, 1-based; the bone head is the
 #                 pivot, the bone parent the part parent). Its "01 Mesh<n>"
@@ -39,7 +42,7 @@
 #                 is appended as its own part after the bones (parent 0,
 #                 pivot = its origin), as retail's exporter wrote bones then
 #                 mesh objects. Collision: each bone's section carries a hit
-#                 sphere around the vertices it dominates, the mesh part's
+#                 sphere around every vertex it moves, the mesh part's
 #                 section the bullet faces (the retail person layout).
 #   !name         ignored.
 # Blender's own `.001` duplicate suffixes are stripped before classification
@@ -60,8 +63,10 @@ class ExportError(Exception):
     pass
 
 
-ALPHA_SHADERS = {"FF_ST_AB", "FF_ST_AD", "FF_ST_AB_LUM", "FF_ST_AD_LUM", "FF_MT_AB", "FF_MT_AD", "FF_MT_AB_LUM",
-                 "FF_MT_AD_LUM"}
+# Shader capability bits (runtime/renderer/material_descriptor.h), read per
+# tag from `opennova-3di catalog`.
+FLAG_EMISSIVE, FLAG_DIFFUSE, FLAG_SECONDARY = 0x1, 0x4, 0x8
+FLAG_BLENDING, FLAG_GLASS, FLAG_SKINNED = 0x1000, 0x2000, 0x4000
 BLENDER_SUFFIX = re.compile(r"\.\d{3,}$")
 PART_RE = re.compile(r"^PN(\d{2})$")
 BONE_RE = re.compile(r"^BN(\d{2})(?: .*)?$")
@@ -86,6 +91,47 @@ CTRL_REFERENCE_THRESHOLD = 0x70
 
 def clean_name(name):
     return BLENDER_SUFFIX.sub("", name)
+
+
+def shader_table():
+    """The engine's shader tags and capability words, in table order."""
+    from . import catalog
+    return catalog()[2]
+
+
+def shader_flags(tag):
+    """A tag's capability word, matched without case as the runtime's effect
+    lookup does; a tag outside the table reads row 0's, as OED's lookup did
+    (lookup_material_info_flags)."""
+    table = shader_table()
+    for name, flags in table:
+        if name.lower() == tag.lower():
+            return flags
+    return table[0][1] if table else FLAG_DIFFUSE
+
+
+def default_shader(map_count, skinned):
+    """The shader of a material whose name carries none: the first table row
+    of the model's kind (skinned or not) drawing that many texture maps
+    (diffuse, detail), OED's find_material_index_by_flags: FF_ST_OP for one
+    map, FF_MT_OP for two, FFP_GLASS for none; VS_SKBASIC / VS_SKGLASS on a
+    skinned model."""
+    wanted = max(0, min(2, map_count))
+    table = shader_table()
+    for name, flags in table:
+        if bool(flags & FLAG_SKINNED) != skinned:
+            continue
+        if (1 if flags & FLAG_DIFFUSE else 0) + (1 if flags & FLAG_SECONDARY else 0) == wanted:
+            return name
+    return table[0][0] if table else "FF_ST_OP"
+
+
+def dup_rank(letters):
+    """A duplicate suffix's place: '' 0, 'a' 1 .. 'z' 26, 'aa' 27, ..."""
+    rank = 0
+    for c in letters:
+        rank = rank * 26 + (ord(c) - ord("a") + 1)
+    return rank
 
 
 def axis_basis(forward):
@@ -184,7 +230,7 @@ class Lod:
         self.points = []    # (type letter, part index or -1, label, object)
         self.lights = []    # (part index, object)
         self.occluders = []  # (type, section, connecting, object)
-        self.volumes = []   # (type, flags, part index, object)
+        self.volumes = []   # (type, flags, part index, object, (code, dup rank))
         self.armature = None  # skinned: the Armature; parts are its bones
         self.bone_count = 0   # skinned: parts past the bones are the meshes
 
@@ -204,7 +250,7 @@ class Exporter:
         self.frames = []
         self.skinned = False
         self.uv1 = False
-        self.bone_points = {}  # skinned LOD0: part -> rest positions it dominates
+        self.bone_points = {}  # skinned LOD0: part -> rest positions it moves
 
     # --- helpers ------------------------------------------------------------
     def register(self, name):
@@ -346,7 +392,7 @@ class Exporter:
                         flags &= ~BLINK_LETTER_BITS[letter]
                 claim(("volume", code + letters, nn, dup), ob)
                 if primary:
-                    lod.volumes.append((VOLUME_CODES[code], flags, int(nn) - 1, ob))
+                    lod.volumes.append((VOLUME_CODES[code], flags, int(nn) - 1, ob, (code + letters, dup_rank(dup))))
                 continue
         if not lod.parts:
             if lod.meshes or lod.armature is not None:
@@ -489,7 +535,10 @@ class Exporter:
                 total = sum(x for x, _ in w)
                 influences.append([(b, x / total) for x, b in w])
                 if collect_bones:
-                    self.bone_points.setdefault(w[0][1], []).append(self.mission(mw @ v.co))
+                    # Every LOD 0 vertex a bone moves bounds that bone's
+                    # section (WriteCOBJ's skinned rule).
+                    for _, b in w:
+                        self.bone_points.setdefault(b, []).append(self.mission(mw @ v.co))
             per_material = {}
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
@@ -525,7 +574,10 @@ class Exporter:
             ev.to_mesh_clear()
 
     def strip_alpha(self, mat):
-        return 1 if self.shader_of(mat) in ALPHA_SHADERS or (mat is not None and mat.o3d.alpha_strips) else 0
+        """Strips of a blending shader draw in the alpha pass (OED's
+        material_alpha: the BLENDING capability bit; FFP_GLASS is one)."""
+        blending = shader_flags(self.shader_of(mat)) & FLAG_BLENDING
+        return 1 if blending or (mat is not None and mat.o3d.alpha_strips) else 0
 
     def emit_lod(self, lod, lines):
         if lod.armature is not None:
@@ -599,12 +651,19 @@ class Exporter:
         return line
 
     # --- materials ------------------------------------------------------------
-    @staticmethod
-    def shader_of(mat):
+    def shader_of(self, mat):
+        """The name's tag (Material_<i>_<SHADER>), else the default for the
+        material's texture maps (default_shader)."""
+        m = MATERIAL_RE.match(clean_name(mat.name)) if mat is not None else None
+        if m:
+            return m.group(2)
         if mat is None:
-            return "FF_ST_OP"
-        m = MATERIAL_RE.match(clean_name(mat.name))
-        return m.group(2) if m else mat.o3d.shader
+            maps = 0
+        elif len(mat.o3d.textures) > 0:
+            maps = len({t.slot for t in mat.o3d.textures if t.slot in (1, 2)})
+        else:
+            maps = 1 if material_image(mat) is not None else 0
+        return default_shader(maps, self.skinned)
 
     def generator_register(self, style, name):
         return self.register(name) if style > CTRL_REFERENCE_THRESHOLD else -1
@@ -616,18 +675,26 @@ class Exporter:
                 continue
             p = mat.o3d
             shader = self.shader_of(mat)
+            caps = shader_flags(shader)
             lines.append(f"material {quoted(shader)}  # {mat.name}")
             flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0) | (p.other_flags & ~5 & 0xFF)
             if flags:
                 lines.append(f"matflags {flags}")
             if p.alpha_test:
                 lines.append(f"alphatest {p.alpha_test_value}")
-            if p.glass or shader == "FFP_GLASS":
+            # The OED material rule (5fc5b4f6a^ export_3di.cpp, WriteMTRL): a
+            # GLASS shader reflects 0x80 grey unless another colour is set, and
+            # is glass while it reflects; an EMISSIVE one (*_LUM) is emissive
+            # type 2. It holds for every material of the 958 JO models.
+            reflect = [round(c * 255) for c in p.reflect]
+            if caps & FLAG_GLASS and not any(reflect):
+                reflect = [128, 128, 128, 0]
+            if caps & FLAG_GLASS and any(reflect[:3]):
                 lines.append("glass 1")
-            if p.emissive:
-                lines.append(f"emissive {p.emissive}")
-            if any(c > 0 for c in p.reflect):
-                lines.append("reflect " + " ".join(str(round(c * 255)) for c in p.reflect))
+            if caps & FLAG_EMISSIVE:
+                lines.append("emissive 2")
+            if any(reflect):
+                lines.append("reflect " + " ".join(str(c) for c in reflect))
             if len(p.textures) > 0:
                 for t in p.textures:
                     name = t.name.strip()
@@ -640,7 +707,7 @@ class Exporter:
                     lines.append(f"texture {quoted(name)} {t.slot} {t.type} {t.flags} {t.frame}")
                     if t.image is not None and t.write:
                         self.textures[name] = t.image
-            elif shader != "FFP_GLASS":
+            elif caps & FLAG_DIFFUSE:
                 image = material_image(mat)
                 if image is not None:
                     name = os.path.splitext(clean_name(image.name))[0][:12] + ".tga"
@@ -723,55 +790,43 @@ class Exporter:
                 ev.to_mesh_clear()
 
     # --- collision --------------------------------------------------------------
-    def hull_planes(self, ob):
-        """The convex hull of the volume mesh as retail lays a BVOL out: its six
-        AABB planes first (+x -x +y -y +z -z), then every other hull face plane.
-        Outward normals, n . p + d == 0 on the plane."""
-        import bmesh
+    def volume_mesh(self, ob):
+        """A volume's vertices (mission axes) and triangles, wound
+        counter-clockwise about the outward normal as authored; the builder
+        derives the planes, box and seam flags by the OED rule."""
         ev = ob.evaluated_get(self.depsgraph)
         mesh = ev.to_mesh()
         try:
+            mesh.calc_loop_triangles()
             mw = ob.matrix_world
-            points = [self.mission(mw @ v.co) for v in mesh.vertices]
+            mirrored = mw.to_3x3().determinant() < 0
+            verts = [self.mission(mw @ v.co) for v in mesh.vertices]
+            tris = [tuple(reversed(t.vertices)) if mirrored else tuple(t.vertices) for t in mesh.loop_triangles]
         finally:
             ev.to_mesh_clear()
-        if len(points) < 4:
-            raise ExportError(f"collision volume {ob.name} needs at least 4 vertices")
-        bm = bmesh.new()
-        for p in points:
-            bm.verts.new(p)
-        bmesh.ops.convex_hull(bm, input=bm.verts)
-        mn = [min(p[k] for p in points) for k in range(3)]
-        mx = [max(p[k] for p in points) for k in range(3)]
-        planes = [((1, 0, 0), -mx[0]), ((-1, 0, 0), mn[0]), ((0, 1, 0), -mx[1]), ((0, -1, 0), mn[1]),
-                  ((0, 0, 1), -mx[2]), ((0, 0, -1), mn[2])]
-        # The vertex centroid is inside any convex hull (the AABB centre of a
-        # wedge need not be): the reference that orients every normal outward.
-        centre = Vector([sum(p[k] for p in points) / len(points) for k in range(3)])
-        for f in bm.faces:
-            if f.calc_area() < 1e-8:
-                continue
-            n = f.normal.normalized()
-            p0 = Vector(f.verts[0].co)
-            if n.dot(p0 - centre) < 0:
-                n = -n
-            d = -n.dot(p0)
-            # The hull triangulates every face: fold near-coplanar triangles
-            # (within ~2 degrees and 2 cm) into one plane.
-            if any(n.x * q[0][0] + n.y * q[0][1] + n.z * q[0][2] > 0.9994 and abs(d - q[1]) < 0.02 for q in planes):
-                continue
-            planes.append(((n.x, n.y, n.z), d))
-        bm.free()
-        return mn, mx, planes
+        if len(verts) < 4 or not tris:
+            raise ExportError(f"collision volume {ob.name} needs at least 4 vertices and a face")
+        return verts, tris
+
+    def face_flags(self, mat):
+        """A material's bullet-face flags: 1 (both sides) follows Two sided,
+        as OED took both from one render attribute (export_3di.cpp
+        material_flags); the others are the material's face settings."""
+        if mat is None:
+            return 0
+        p = mat.o3d
+        return ((1 if p.two_sided else 0) | (0x100 if p.face_never_hit else 0) |
+                (0x800 if p.face_double_sided else 0) | (p.face_other_flags & ~0x901))
 
     def emit_collision(self, lod0, bullet, lines):
-        count = len(lod0.parts)
+        # One section per part of the collision LOD (WriteCOBJ walks that
+        # LOD's subobjects: Dtruck2's collision LOD has 7 parts to LOD 0's 8,
+        # CNet01's none), placed at that part's pivot with its parent.
+        count = len(bullet.parts)
         sections = [{"verts": [], "index": {}, "faces": [], "volumes": []} for _ in range(count)]
         # Bullet faces: the collision LOD's part meshes, section = part,
         # counter-clockwise about their outward normal (the retail order).
         for index, meshes in bullet.meshes.items():
-            if index >= count:
-                raise ExportError(f"the collision LOD has part PN{index + 1:02d}, which LOD0 lacks")
             s = sections[index]
             for _, ob in sorted(meshes, key=lambda e: e[0]):
                 ev = ob.evaluated_get(self.depsgraph)
@@ -793,46 +848,44 @@ class Exporter:
                             continue
                         slot = tri.material_index
                         mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
-                        s["faces"].append((corners, mat.o3d.surface if mat is not None else 14))
+                        s["faces"].append((corners, mat.o3d.surface if mat is not None else 14, self.face_flags(mat)))
                 finally:
                     ev.to_mesh_clear()
-        for vtype, flags, part, ob in sorted(lod0.volumes, key=lambda e: clean_name(e[3].name)):
+        for vtype, flags, part, ob, key in lod0.volumes:
             if not 0 <= part < count:
-                raise ExportError(f"{ob.name}: part {part + 1:02d} does not exist")
-            mn, mx, planes = self.hull_planes(ob)
-            sections[part]["volumes"].append((vtype, flags, mn, mx, planes))
+                raise ExportError(f"{ob.name}: its section {part + 1:02d} is not a part of the collision LOD "
+                                  f"(LOD {self.props.poly_collision_lod} has {count})")
+            sections[part]["volumes"].append((key, vtype, flags, ob))
         for i, s in enumerate(sections):
             # Every section sits at its part's pivot (the COBJ offset / CXLT
             # translation retail carries: Dtruck2's wheels, Dblkhwk1's rotors).
-            lines.append(f"cobj {self.part_parent(lod0, i)} " + fmt(*self.part_pivot(lod0, i)))
+            lines.append(f"cobj {self.part_parent(bullet, i)} " + fmt(*self.part_pivot(bullet, i)))
             if self.skinned and not s["verts"]:
-                # The retail person layout: a bone section carries a hit sphere
-                # around the vertices the bone dominates (none: a zero sphere),
-                # the mesh part's section the bullet faces.
+                # The retail person layout: a bone's section is bounded by
+                # every LOD 0 vertex the bone moves, its radius the farthest of
+                # them from their box's middle (WriteCOBJ's skinned rule); a
+                # bone that moves none keeps an empty section.
                 pts = self.bone_points.get(i, [])
                 if pts:
-                    c = [(min(p[k] for p in pts) + max(p[k] for p in pts)) * 0.5 for k in range(3)]
+                    mn = [min(p[k] for p in pts) for k in range(3)]
+                    mx = [max(p[k] for p in pts) for k in range(3)]
+                    c = [(mn[k] + mx[k]) * 0.5 for k in range(3)]
                     r = max(sum((p[k] - c[k]) ** 2 for k in range(3)) ** 0.5 for p in pts)
-                else:
-                    c, r = [0.0, 0.0, 0.0], 0.0
-                lines.append("csphere " + fmt(*(float(x) for x in c), float(r)))
+                    lines.append("csphere " + fmt(*(float(x) for x in c), float(r), *(float(x) for x in mn + mx)))
             for v in s["verts"]:
                 lines.append("cv " + fmt(*v))
-            for (a, b, c), poly in s["faces"]:
-                lines.append(f"cf {a} {b} {c} {poly}")
-            # Seam flags (BPLN 1; the line-of-sight sweep keeps a flagged
-            # plane's radius non-negative). Retail's rule is not witnessed:
-            # neither this one ("another volume carries the plane facing the
-            # other way") nor "the face lies inside another volume" reproduces
-            # the corpus's flags (83% and 80% agreement over 132,856 planes,
-            # mostly unflagged ones).
-            for vi, (vtype, flags, mn, mx, planes) in enumerate(s["volumes"]):
-                lines.append(f"cvolume {vtype} {flags} " + fmt(*mn, *mx))
-                for n, d in planes:
-                    seam = any(oi != vi and any(abs(n[0] + m[0]) < 1e-3 and abs(n[1] + m[1]) < 1e-3
-                                                and abs(n[2] + m[2]) < 1e-3 and abs(d + e) < 1e-2 for m, e in op)
-                               for oi, (_, _, _, _, op) in enumerate(s["volumes"]))
-                    lines.append("cp " + fmt(*n, d) + (" 1" if seam else " 0"))
+            for (a, b, c), poly, face_flags in s["faces"]:
+                lines.append(f"cf {a} {b} {c} {poly} {face_flags}")
+            # Volumes in name order within the section: code, then the
+            # duplicate suffix (CB01, CB01a .. CB01z, CB01aa); OED kept its
+            # scene order, which a Blender scene does not have.
+            for key, vtype, flags, ob in sorted(s["volumes"], key=lambda e: e[0]):
+                verts, tris = self.volume_mesh(ob)
+                lines.append(f"cvmesh {vtype} {flags} {quoted(clean_name(ob.name))}")
+                for v in verts:
+                    lines.append("vv " + fmt(*v))
+                for t in tris:
+                    lines.append(f"vf {t[0]} {t[1]} {t[2]}")
 
     # --- driver -------------------------------------------------------------
     def run(self):
@@ -916,8 +969,13 @@ class Exporter:
         if result.returncode != 0:
             raise ExportError((result.stderr or result.stdout).strip()[:2000])
         tris = sum(1 for line in lod_lines if line.startswith("t "))
-        return f"{result.stdout.strip()} ({len(render)} LODs, {tris} triangles total, {len(self.textures)} textures)"
+        # The builder's notes (a non-convex volume, collinear faces, ...),
+        # without the scene-file prefix.
+        notes = [line.split("note: ", 1)[1] for line in result.stderr.splitlines() if "note: " in line]
+        message = f"{result.stdout.strip()} ({len(render)} LODs, {tris} triangles total, {len(self.textures)} textures)"
+        return message, notes
 
 
 def export_scene(context):
+    """Export the scene; returns the summary line and the builder's notes."""
     return Exporter(context).run()

@@ -63,6 +63,20 @@ inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) 
 inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * io::kFp14One)) / io::kFp14One; }
 inline float threedi_q8f(double v) { return static_cast<float>(std::lround(v * 256.0)) / 256.0f; }
 inline float threedi_byte_unit(int c) { return static_cast<float>(c) / 255.0f; }
+// The quantizers of the collision fields the retired OED writer derives: it
+// truncates toward zero where the helpers above round (CVRT 8.8, BPLN Q14,
+// and the 16.16 CFAC, BPLN, BVOL, COBJ and CMDL values) [orig: WriteCVRT @
+// 0x454450, WriteCFAC @ 0x454830, WriteBPLN @ 0x455A80, WriteBVOL @ 0x455CE0,
+// WriteCOBJ @ 0x454E70, WriteCDTA @ 0x456050; 5fc5b4f6a^:engine/formats/oed/
+// export_3di.cpp]. A value already on the grid (a scene of a retail model)
+// quantizes to itself either way.
+inline int32_t threedi_q16_trunc(double v) { return static_cast<int32_t>(v * io::kFp16OneD); }
+inline float threedi_q8f_trunc(double v) {
+	return static_cast<float>(static_cast<int16_t>(static_cast<float>(v) * 256.0f)) / 256.0f;
+}
+inline float threedi_q14f_trunc(float v) {
+	return static_cast<float>(static_cast<int16_t>(static_cast<int32_t>(v * io::kFp14One))) / io::kFp14One;
+}
 
 struct ThreediBuildStrip {
 	int material = 0;
@@ -96,6 +110,16 @@ struct ThreediBuildLod {
 	std::vector<ThreediPartAnimation> panm;
 };
 
+// What the seam pass needs of one volume (parallel to a section's volumes):
+// its unquantized box, and for a volume built from authored triangles
+// (add_volume_mesh) each triangle's box and the plane it took.
+struct ThreediBuildVolumeSource {
+	float box[6] = {}; // min x y z, max x y z
+	bool meshed = false;
+	std::vector<std::array<float, 6>> face_boxes;
+	std::vector<int> face_planes;
+};
+
 struct ThreediBuildCollisionObject {
 	int parent_part = 0;
 	ThreediBuildVec3 offset; // mission axes
@@ -104,10 +128,15 @@ struct ThreediBuildCollisionObject {
 	std::vector<ThreediCollisionNormal> normals;
 	std::vector<ThreediCollisionFace> faces;
 	std::vector<ThreediBoundingVolume> volumes;
+	std::vector<ThreediBuildVolumeSource> volume_sources; // parallel to volumes
 	std::vector<ThreediBoundingPlane> planes;
 	bool sphere = false; // sphere-only skeletal section (person bones)
 	ThreediBuildVec3 sphere_center;
 	double sphere_radius = 0.0;
+	// The bounds of the vertices the bone moves, when given: WriteCOBJ stores
+	// them (and their midpoint) rather than the sphere's cube.
+	bool sphere_bounded = false;
+	ThreediBuildBox sphere_bounds;
 };
 
 struct ThreediBuildOcclusionRecord {
@@ -396,6 +425,7 @@ struct ThreediBuildModel {
 		v.max_z_fp16 = threedi_q16(box.max.z);
 		v.plane_count = 6;
 		o.volumes.push_back(v);
+		o.volume_sources.push_back(volume_source(box));
 		const double n[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
 		const double d[6] = {-box.max.x, box.min.x, -box.max.y, box.min.y, -box.max.z, box.min.z};
 		for (int p = 0; p < 6; ++p) {
@@ -424,7 +454,110 @@ struct ThreediBuildModel {
 		v.max_z_fp16 = threedi_q16(box.max.z);
 		v.plane_count = static_cast<int32_t>(volume_planes.size());
 		o.volumes.push_back(v);
+		o.volume_sources.push_back(volume_source(box));
 		o.planes.insert(o.planes.end(), volume_planes.begin(), volume_planes.end());
+	}
+
+	// A bounding volume from an authored triangle mesh (mission axes; each
+	// triangle wound counter-clockwise about its outward normal) by the OED
+	// rule [orig: ConvertToInternal @ 0x4268B3, its -colonly branch;
+	// 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp]: the vertex box's six
+	// planes (+x -x +y -y +z -z), then each triangle's own plane unless one
+	// already matches it (normal within 0.005 per axis, distance within 0.03;
+	// the last match wins). A triangle whose edge cross product is at most
+	// 0.0001 long takes plane 0. A ladder (CL, type 4) then swaps plane 0 with
+	// the plane the last triangle took: the runtime reads plane 0 as the
+	// ladder's facing. The planes and box are stored as WriteBPLN and
+	// WriteBVOL truncate them; seam flags come from the assembly's seam pass.
+	// ModSuperOed stops at 32 planes, but the retail corpus ships volumes of
+	// up to 61, so every plane is kept. The arithmetic is float, as OED's.
+	double add_volume_mesh(int cobj, int32_t type, int32_t flags, const std::vector<ThreediBuildVec3> &verts,
+			const std::vector<std::array<int, 3>> &tris) {
+		ThreediBuildCollisionObject &o = collision[cobj];
+		ThreediBuildVolumeSource src;
+		src.meshed = true;
+		float mn[3] = {0, 0, 0}, mx[3] = {0, 0, 0};
+		std::vector<std::array<float, 3>> p;
+		for (const ThreediBuildVec3 &v : verts) p.push_back({static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)});
+		for (size_t i = 0; i < p.size(); ++i)
+			for (int k = 0; k < 3; ++k) {
+				mn[k] = i == 0 ? p[i][k] : std::min(mn[k], p[i][k]);
+				mx[k] = i == 0 ? p[i][k] : std::max(mx[k], p[i][k]);
+			}
+		struct Plane {
+			float n[3];
+			float d;
+		};
+		std::vector<Plane> planes = {{{1.f, 0.f, 0.f}, -mx[0]}, {{-1.f, 0.f, 0.f}, mn[0]}, {{0.f, 1.f, 0.f}, -mx[1]},
+				{{0.f, -1.f, 0.f}, mn[1]}, {{0.f, 0.f, 1.f}, -mx[2]}, {{0.f, 0.f, -1.f}, mn[2]}};
+		size_t last = 0;
+		for (const std::array<int, 3> &t : tris) {
+			const std::array<float, 3> &a = p[t[0]], &b = p[t[1]], &c = p[t[2]];
+			const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+			const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+			float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+			const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+			int index = 0;
+			if (len > 0.0001f) {
+				const float inv = 1.0f / len;
+				for (float &x : n) x *= inv;
+				const float d = -(n[0] * a[0] + n[1] * a[1] + n[2] * a[2]);
+				bool matched = false;
+				for (size_t k = 0; k < planes.size(); ++k)
+					if (std::fabs(planes[k].n[0] - n[0]) <= 0.005f && std::fabs(planes[k].n[1] - n[1]) <= 0.005f &&
+							std::fabs(planes[k].n[2] - n[2]) <= 0.005f && std::fabs(planes[k].d - d) <= 0.03f) {
+						index = static_cast<int>(k);
+						last = k;
+						matched = true;
+					}
+				if (!matched) {
+					index = static_cast<int>(planes.size());
+					last = planes.size();
+					planes.push_back({{n[0], n[1], n[2]}, d});
+				}
+			}
+			src.face_planes.push_back(index);
+			src.face_boxes.push_back({std::min({a[0], b[0], c[0]}), std::min({a[1], b[1], c[1]}), std::min({a[2], b[2], c[2]}),
+					std::max({a[0], b[0], c[0]}), std::max({a[1], b[1], c[1]}), std::max({a[2], b[2], c[2]})});
+		}
+		if (type == 4) std::swap(planes[0], planes[last]);
+		ThreediBoundingVolume v{};
+		v.collidable_type = type;
+		v.flags = flags;
+		v.min_x_fp16 = threedi_q16_trunc(mn[0]);
+		v.min_y_fp16 = threedi_q16_trunc(mn[1]);
+		v.min_z_fp16 = threedi_q16_trunc(mn[2]);
+		v.max_x_fp16 = threedi_q16_trunc(mx[0]);
+		v.max_y_fp16 = threedi_q16_trunc(mx[1]);
+		v.max_z_fp16 = threedi_q16_trunc(mx[2]);
+		v.plane_count = static_cast<int32_t>(planes.size());
+		o.volumes.push_back(v);
+		for (int k = 0; k < 3; ++k) {
+			src.box[k] = mn[k];
+			src.box[k + 3] = mx[k];
+		}
+		o.volume_sources.push_back(std::move(src));
+		for (const Plane &q : planes) {
+			ThreediBoundingPlane plane{};
+			for (int k = 0; k < 3; ++k) plane.normal[k] = threedi_q14f_trunc(q.n[k]);
+			plane.radius = static_cast<float>(threedi_q16_trunc(q.d)) / io::kFp16One;
+			o.planes.push_back(plane);
+		}
+		// How far the authored vertices reach outside the solid the planes
+		// bound: the volume is that solid, so a non-convex mesh loses the rest.
+		double outside = 0.0;
+		for (const std::array<float, 3> &v : p)
+			for (const Plane &q : planes)
+				outside = std::max(outside, static_cast<double>(q.n[0]) * v[0] + static_cast<double>(q.n[1]) * v[1] +
+						static_cast<double>(q.n[2]) * v[2] + q.d);
+		return outside;
+	}
+
+	static ThreediBuildVolumeSource volume_source(const ThreediBuildBox &box) {
+		ThreediBuildVolumeSource s;
+		const double b[6] = {box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z};
+		for (int k = 0; k < 6; ++k) s.box[k] = static_cast<float>(b[k]);
+		return s;
 	}
 
 	// A regular octagonal prism (eight side planes + two caps) around (cx, cy).
@@ -441,6 +574,7 @@ struct ThreediBuildModel {
 		v.max_z_fp16 = threedi_q16(z1);
 		v.plane_count = 10;
 		o.volumes.push_back(v);
+		o.volume_sources.push_back(volume_source(ThreediBuildBox{{cx - radius, cy - radius, z0}, {cx + radius, cy + radius, z1}}));
 		for (int s = 0; s < 8; ++s) {
 			const double angle = s * 3.14159265358979323846 / 4.0;
 			const double nx = threedi_q14f(std::cos(angle)), ny = threedi_q14f(std::sin(angle));
@@ -490,12 +624,16 @@ struct ThreediBuildModel {
 			ny /= len;
 			nz /= len;
 		}
+		// Q14, truncated, and the dominant axis compared on those integers (z
+		// wins only strictly, then y; a tie goes to x) [orig: WriteCNRM @ 0x454600].
 		ThreediCollisionNormal normal{};
-		normal.normal[0] = threedi_q14f(nx);
-		normal.normal[1] = threedi_q14f(ny);
-		normal.normal[2] = threedi_q14f(nz);
-		const double ax = std::fabs(nx), ay = std::fabs(ny), az = std::fabs(nz);
-		normal.dominate_axis = (az >= ax && az >= ay) ? 1 : (ay >= ax ? 2 : 4);
+		normal.normal[0] = threedi_q14f_trunc(static_cast<float>(nx));
+		normal.normal[1] = threedi_q14f_trunc(static_cast<float>(ny));
+		normal.normal[2] = threedi_q14f_trunc(static_cast<float>(nz));
+		const int ax = std::abs(static_cast<int>(normal.normal[0] * io::kFp14One));
+		const int ay = std::abs(static_cast<int>(normal.normal[1] * io::kFp14One));
+		const int az = std::abs(static_cast<int>(normal.normal[2] * io::kFp14One));
+		normal.dominate_axis = (az > ax && az > ay) ? 1 : (ay > ax && ay > az) ? 2 : 4;
 		int16_t normal_index = -1;
 		for (size_t i = 0; i < o.normals.size(); ++i) {
 			if (std::memcmp(&o.normals[i], &normal, sizeof(normal)) == 0) {
@@ -512,7 +650,15 @@ struct ThreediBuildModel {
 		face.vert_index[1] = static_cast<int16_t>(b);
 		face.vert_index[2] = static_cast<int16_t>(c);
 		face.normal_index = normal_index;
-		face.plane_dist_fp16 = threedi_q16(normal.normal[0] * va.position[0] + normal.normal[1] * va.position[1] + normal.normal[2] * va.position[2]);
+		// The face's plane as the runtime tests it (n . p + plane_dist, zero on
+		// the plane; collision_query.cpp): -(n . v0), and the corners' box,
+		// both truncated as WriteCFAC stores them [orig: WriteCFAC @ 0x454830;
+		// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp]. OED took them from the
+		// unquantized corner and normal; these come from the stored (CVRT,
+		// CNRM) ones, under 1/256 unit away, so build(scene(x)) re-mints x
+		// byte for byte.
+		face.plane_dist_fp16 = threedi_q16_trunc(-(static_cast<double>(normal.normal[0]) * va.position[0] +
+				static_cast<double>(normal.normal[1]) * va.position[1] + static_cast<double>(normal.normal[2]) * va.position[2]));
 		double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 		for (const ThreediCollisionVertex *v : {&va, &vb, &vc}) {
 			for (int k = 0; k < 3; ++k) {
@@ -520,23 +666,25 @@ struct ThreediBuildModel {
 				mx[k] = std::max<double>(mx[k], v->position[k]);
 			}
 		}
-		face.min_x_fp16 = threedi_q16(mn[0]);
-		face.min_y_fp16 = threedi_q16(mn[1]);
-		face.min_z_fp16 = threedi_q16(mn[2]);
-		face.max_x_fp16 = threedi_q16(mx[0]);
-		face.max_y_fp16 = threedi_q16(mx[1]);
-		face.max_z_fp16 = threedi_q16(mx[2]);
+		face.min_x_fp16 = threedi_q16_trunc(mn[0]);
+		face.min_y_fp16 = threedi_q16_trunc(mn[1]);
+		face.min_z_fp16 = threedi_q16_trunc(mn[2]);
+		face.max_x_fp16 = threedi_q16_trunc(mx[0]);
+		face.max_y_fp16 = threedi_q16_trunc(mx[1]);
+		face.max_z_fp16 = threedi_q16_trunc(mx[2]);
 		face.material_flags = material_flags;
 		face.poly_type = poly_type;
 		o.faces.push_back(face);
 		return true;
 	}
 
+	// A collision vertex on the 8.8 grid, truncated as WriteCVRT stores it
+	// [orig: WriteCVRT @ 0x454450].
 	uint16_t add_collision_vertex(int cobj, ThreediBuildVec3 p) {
 		ThreediCollisionVertex v{};
-		v.position[0] = threedi_q8f(p.x);
-		v.position[1] = threedi_q8f(p.y);
-		v.position[2] = threedi_q8f(p.z);
+		v.position[0] = threedi_q8f_trunc(p.x);
+		v.position[1] = threedi_q8f_trunc(p.y);
+		v.position[2] = threedi_q8f_trunc(p.z);
 		collision[cobj].vertices.push_back(v);
 		collision[cobj].exact.push_back(p);
 		return static_cast<uint16_t>(collision[cobj].vertices.size() - 1);

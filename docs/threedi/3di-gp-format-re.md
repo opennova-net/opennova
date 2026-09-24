@@ -553,8 +553,13 @@ store model axes on disk.
 | CFAC | Bullet faces wind counter-clockwise about their CNRM normal in mission axes; the rare exception stores a normal against its own winding | Dtruck2 905/906, Armry01 250/250, Dblkhwk1 1594/1597 |
 | CVRT/CFAC | Collision vertices sit on the 8.8 grid, and faces the grid collapses keep valid normals: the normals were taken before quantization | Mp5b_1st 276 such faces, Dblkhwk1 13 |
 | COBJ/CXLT | A rigid model's section offset (and translation) is its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels) |
-| COBJ | The section list ends at the last part with collision content; a model with none has no CDTA | Dtruck2 8 parts / 7 sections, APLFP1 4 / 1, CNet01 1 / 0 |
-| BPLN | The plane flag word marks a seam; its authoring rule is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: @ 0x538e29]`) | 19,695 of 132,856 planes flagged |
+| COBJ | One section per part of the collision LOD (WriteCOBJ walks that LOD's subobjects), whatever LOD 0 holds; a model with no section still carries a CDTA | Dtruck2 LOD 0 8 parts, collision LOD 7 / 7 sections; APLFP1 1 / 1; CNet01 0 / 0 with a CMDL |
+| COBJ | A section's bounds cover its vertices and volume boxes; its radius is the farthest vertex from their midpoint, so a volume-only section's is 0 | 3,224 of 3,255 sections; all 52 volume-only sections radius 0 (2026-09-24 sweep) |
+| CFAC | The plane distance is `-(n . v0)`: the runtime tests `n . p + plane_dist` (`collision_query.cpp`) | 600,378 of 600,378 unambiguous faces (2026-09-24 sweep) |
+| CMDL | The box envelops the collision LOD's faces and LOD 0's triangles; the radii and height (`radii[2]`) are the collision LOD's alone | Dblkhwk1, Dtruck2, Armry01, ArmsG boxes exact; CNet01 (no face) stores radii 0, 0, -20000 |
+| MTRL | A GLASS shader is glass with reflection 128 grey; an EMISSIVE (`*_LUM`) shader is emissive 2; no other material is either | every material of the 958 JO models |
+| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: @ 0x538e29]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
+| BPLN | A ladder (`CL`) volume's plane 0 is its facing, OED's swap of plane 0 with the last triangle's plane | 82 of 102 retail ladders lead with a non-`+x` plane |
 | LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
 | LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
 | STRP | Every strip is a triangle list | 11,264 strips, none `is_strip` |
@@ -837,11 +842,10 @@ fixture with extra_polys surfaces.
 
 - 3DI3: `WriteINFO` was never located in OED (likely nonexistent; the chunk is
   begun empty). Revisit if a fixture with a non-empty INFO surfaces.
-- 3DI3: the BPLN seam flag's authoring rule. Neither "another volume of the
-  section carries the same plane facing the other way" nor "the plane's face
-  lies inside another volume of the section" reproduces the JO corpus (83% and
-  80% agreement over 132,856 planes, mostly on unflagged ones); the builder
-  applies the first as a heuristic (ADR 0047).
+- 3DI3: the BPLN seam flag as retail's own tool set it. The builder applies
+  ModSuperOed's overlap rule (ADR 0047), which agrees on 89.2% of the corpus's
+  planes when run over faces rebuilt from the planes (the authored faces are
+  lost); whether retail's tool differed is unwitnessed.
 - 3DI3: the LGHT flag bit `0x40` (Armry01's lights carry it); the retired
   exporter set only bits 0-3.
 - 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not

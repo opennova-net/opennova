@@ -436,11 +436,14 @@ struct Section {
 	std::map<int, int> poly;
 	int faces = 0;
 	int ccw = 0;  // faces wound counter-clockwise about their stored normal
+	int on_plane = 0;  // faces whose plane distance puts their first corner on their plane
+	std::map<int, int> dominant;  // face count per stored normal's dominant axis
 	double area = 0;
 	Vec normal{0, 0, 0};
 	struct Volume {
 		int type, flags;
 		Vec mn, mx;
+		Vec facing;  // plane 0's normal: a ladder's facing
 		std::vector<Vec> corners;
 		std::vector<ThreediBoundingPlane> planes;
 		int seams;
@@ -484,6 +487,10 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 			if (nrm + fc.normal_index < c.normal_count) {
 				const float *sn = c.normals[nrm + fc.normal_index].normal;
 				if (n[0] * sn[0] + n[1] * sn[1] + n[2] * sn[2] > 0) ++s.ccw;
+				++s.dominant[c.normals[nrm + fc.normal_index].dominate_axis];
+				// The runtime tests n . p + plane_dist (collision_query.cpp).
+				const double dist = sn[0] * p[0][0] + sn[1] * p[0][1] + sn[2] * p[0][2] + fc.plane_dist_fp16 / 65536.0;
+				if (std::fabs(dist) <= 2e-2) ++s.on_plane;
 			}
 		}
 		v += static_cast<size_t>(co.num_vertices);
@@ -497,6 +504,7 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 			x.mx = {bv.max_x_fp16 / 65536.0, bv.max_y_fp16 / 65536.0, bv.max_z_fp16 / 65536.0};
 			const int count = static_cast<int>(std::min<size_t>(bv.plane_count, c.plane_count - pl));
 			x.corners = polytope(c.planes + pl, count);
+			if (count > 0) x.facing = {c.planes[pl].normal[0], c.planes[pl].normal[1], c.planes[pl].normal[2]};
 			x.planes.assign(c.planes + pl, c.planes + pl + count);
 			x.seams = 0;
 			for (int q = 0; q < count; ++q) x.seams += c.planes[pl + q].flags != 0;
@@ -509,6 +517,19 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 }
 
 void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
+	// CMDL: the box and radii the entity bound reads.
+	if (a.collision != nullptr && b.collision != nullptr) {
+		const ThreediCollisionModelData &x = a.collision->model_data, &y = b.collision->model_data;
+		bool same = true;
+		for (int k = 0; k < 6; ++k) same = same && std::fabs(x.bbox[k] - y.bbox[k]) <= 1e-2;
+		for (int k = 0; k < 3; ++k) same = same && std::fabs(x.radii[k] - y.radii[k]) <= 1e-2;
+		if (!same)
+			d.add("collision bounds (CMDL) " + vs({x.bbox[0], x.bbox[1], x.bbox[2]}) + ".." + vs({x.bbox[3], x.bbox[4], x.bbox[5]}) +
+					" r " + vs({x.radii[0], x.radii[1], x.radii[2]}) + " vs " + vs({y.bbox[0], y.bbox[1], y.bbox[2]}) + ".." +
+					vs({y.bbox[3], y.bbox[4], y.bbox[5]}) + " r " + vs({y.radii[0], y.radii[1], y.radii[2]}));
+	} else if ((a.collision == nullptr) != (b.collision == nullptr)) {
+		d.add("collision block: one model has none");
+	}
 	const std::vector<Section> sa = sections(a), sb = sections(b);
 	if (sa.size() != sb.size()) {
 		d.add("collision: " + std::to_string(sa.size()) + " vs " + std::to_string(sb.size()) + " sections");
@@ -542,6 +563,12 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 		if (x.ccw != y.ccw)
 			d.add(w + ": " + std::to_string(x.ccw) + " vs " + std::to_string(y.ccw) +
 					" bullet faces wound counter-clockwise about their normal (winding)");
+		if (x.on_plane != y.on_plane)
+			d.add(w + ": " + std::to_string(x.on_plane) + " vs " + std::to_string(y.on_plane) +
+					" bullet faces lie on the plane their distance gives");
+		if (x.dominant != y.dominant) d.add(w + ": bullet-face normals' dominant axes differ");
+		if (!x.sphere && std::fabs(x.radius - y.radius) > 1e-2)
+			d.info.push_back(w + ": radius " + num(x.radius) + " vs " + num(y.radius));
 		std::vector<bool> used(y.volumes.size(), false);
 		for (const Section::Volume &vx : x.volumes) {
 			int match = -1;
@@ -558,6 +585,8 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 				continue;
 			}
 			used[match] = true;
+			if (vx.type == 4 && !near(vx.facing, y.volumes[match].facing, 1e-2))
+				d.add(w + ": ladder facing (plane 0) " + vs(vx.facing) + " vs " + vs(y.volumes[match].facing));
 			if (vx.seams != y.volumes[match].seams)
 				d.info.push_back(w + ": volume type " + std::to_string(vx.type) + " seam planes " + std::to_string(vx.seams) +
 						" vs " + std::to_string(y.volumes[match].seams));

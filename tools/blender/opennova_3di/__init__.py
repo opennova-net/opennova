@@ -13,7 +13,9 @@
 # layout belong to the engine (formats/threedi/threedi_build.h). The
 # properties below carry only what a name cannot: LOD thresholds and types,
 # part animation tracks, material flags, textures and generators, light
-# generators, the bullet-face surface type, the collision LOD.
+# generators, the bullet-face surface and flags, the collision LOD. What the
+# engine derives (collision planes, seam flags, tangents, bounds) is never
+# stored in the scene: export recomputes it from the meshes every time.
 
 import os
 import subprocess
@@ -24,17 +26,6 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
 from bpy_extras.io_utils import ImportHelper
 
 from . import export, importer
-
-SHADERS = [
-    ("FF_ST_OP", "Opaque (FF_ST_OP)", "Fixed-function single texture, opaque"),
-    ("FF_ST_AB", "Alpha blend (FF_ST_AB)", "Fixed-function single texture, alpha blended"),
-    ("FF_ST_AD", "Additive (FF_ST_AD)", "Fixed-function single texture, additive"),
-    ("FF_ST_OP_LUM", "Luminous (FF_ST_OP_LUM)", "Opaque, unlit / emissive"),
-    ("FF_ST_AB_LUM", "Luminous blend (FF_ST_AB_LUM)", "Alpha blended, unlit / emissive"),
-    ("FF_ST_AD_LUM", "Luminous additive (FF_ST_AD_LUM)", "Additive, unlit / emissive (glows, flames)"),
-    ("FF_MT_OP", "Detail opaque (FF_MT_OP)", "Fixed-function base texture times a slot-2 detail texture on UV1"),
-    ("FFP_GLASS", "Glass (FFP_GLASS)", "Reflective glass, no texture"),
-]
 
 # The seven PANM tracks, labelled by the axis retail turns them about
 # (threedi_panm_matrices.cpp: rotation_x turns about the model's up axis,
@@ -70,11 +61,12 @@ def cli_path(context=None):
 
 
 def catalog():
-    """The CTRL register names and generator style names, read once from
+    """The CTRL register names, generator style names and shader tags (with
+    their capability words, in the engine's table order), read once from
     `opennova-3di catalog` (the engine's own tables; no Python copy)."""
     global _catalog
     if _catalog is None:
-        registers, styles = [], {}
+        registers, styles, shaders = [], {}, []
         try:
             out = subprocess.run([cli_path(), "catalog"], capture_output=True, text=True, timeout=10).stdout
         except (OSError, subprocess.SubprocessError):
@@ -85,7 +77,11 @@ def catalog():
                 registers.append(parts[1])
             elif len(parts) == 3 and parts[0] == "style":
                 styles[int(parts[1])] = parts[2]
-        _catalog = (registers, styles)
+            elif len(parts) == 3 and parts[0] == "shader":
+                shaders.append((parts[1], int(parts[2], 16)))
+        if not shaders:
+            return registers, styles, shaders  # no CLI yet: read it again next time
+        _catalog = (registers, styles, shaders)
     return _catalog
 
 
@@ -94,8 +90,38 @@ def search_registers(self, context, edit_text):
     return [r for r in catalog()[0] if text in r]
 
 
+def search_shaders(self, context, edit_text):
+    text = edit_text.upper()
+    return [tag for tag, _ in catalog()[2] if text in tag]
+
+
 def style_label(style):
     return catalog()[1].get(style, "?")
+
+
+def get_shader(self):
+    """A material's shader tag is its name's, Material_<i>_<SHADER> (the
+    ASE/OED convention); empty when the name carries none, and export then
+    takes the default for its texture count (export.default_shader)."""
+    m = export.MATERIAL_RE.match(export.clean_name(self.id_data.name))
+    return m.group(2) if m else ""
+
+
+def set_shader(self, value):
+    """Choosing a shader renames the material Material_<i>_<SHADER>, keeping
+    its export index i (or taking the next free one)."""
+    mat = self.id_data
+    value = value.strip()
+    if any(c.isspace() for c in value):
+        return
+    m = export.MATERIAL_RE.match(export.clean_name(mat.name))
+    if m:
+        index = int(m.group(1))
+    else:
+        used = [int(x.group(1)) for x in (export.MATERIAL_RE.match(export.clean_name(o.name))
+                                          for o in bpy.data.materials) if x]
+        index = max(used) + 1 if used else 0
+    mat.name = f"Material_{index}_{value}" if value else f"Material_{index}"
 
 
 def register_prop(name="Register"):
@@ -143,20 +169,32 @@ class O3DTexture(bpy.types.PropertyGroup):
 
 
 class O3DMaterialProps(bpy.types.PropertyGroup):
-    shader: EnumProperty(name="Shader", items=SHADERS, default="FF_ST_OP")
+    shader: StringProperty(name="Shader", get=get_shader, set=set_shader, search=search_shaders,
+                           search_options={"SUGGESTION", "SORT"},
+                           description="The shader tag, any in the engine's table. The material's name carries it "
+                                       "(Material_<i>_<SHADER>), so choosing one renames the material")
     # The bullet-mesh face material on COLLISION meshes: the impact effect is
     # the ammo effects-table row material + 4 (metal = 14 -> "metal").
     surface: IntProperty(name="Collision surface", default=14, min=0, max=255,
                          description="Bullet-face poly type: 14 metal, 15 glass, 18 heavy metal, 13 wood, "
                                      "12 stone, 16 cloth, 17 foliage, 1 object")
+    # The bullet faces' CFAC flags besides "both sides" (1), which follows Two
+    # sided: OED derived both from one render attribute.
+    face_never_hit: BoolProperty(name="Bullets pass", default=False,
+                                 description="Bullets never hit these faces (CFAC flag 0x100; retail rotor blades)")
+    face_double_sided: BoolProperty(name="Hit from behind", default=False,
+                                    description="Bullets hit these faces from either side (CFAC flag 0x800)")
+    face_other_flags: IntProperty(name="Other face flags", default=0, min=0,
+                                  description="CFAC flag bits besides 1, 0x100 and 0x800 (OED wrote 2 and 0x400)")
     alpha_test: BoolProperty(name="Alpha test", default=False)
     alpha_test_value: IntProperty(name="Threshold", default=128, min=0, max=255)
     two_sided: BoolProperty(name="Two sided", default=False)
     other_flags: IntProperty(name="Other flag bits", default=0, min=0, max=255,
                              description="Material flag bits besides alpha test (1) and two sided (4)")
-    glass: BoolProperty(name="Glass", default=False, description="Reflective (FFP_GLASS sets it too)")
-    emissive: IntProperty(name="Emissive", default=0, min=0, max=255, description="0 none, 2 full (*_LUM)")
-    reflect: FloatVectorProperty(name="Reflect", subtype="COLOR", size=4, default=(0, 0, 0, 0), min=0, max=1)
+    # Glass and emissive follow the shader (every retail glass shader is glass,
+    # every *_LUM one emissive 2); only the reflection colour is authored.
+    reflect: FloatVectorProperty(name="Reflect", subtype="COLOR", size=4, default=(0, 0, 0, 0), min=0, max=1,
+                                 description="Glass reflection colour (black: a glass shader's 128 grey)")
     alpha_strips: BoolProperty(name="Alpha strips", default=False,
                                description="Draw in the alpha pass even when the shader is not a blended one")
     textures: CollectionProperty(type=O3DTexture)
@@ -268,10 +306,12 @@ class O3D_OT_export(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            message = export.export_scene(context)
+            message, notes = export.export_scene(context)
         except export.ExportError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+        for note in notes:
+            self.report({"WARNING"}, note)
         self.report({"INFO"}, message)
         return {"FINISHED"}
 
@@ -427,18 +467,32 @@ class O3D_PT_material(bpy.types.Panel):
         p = context.material.o3d
         layout = self.layout
         layout.prop(p, "shader")
-        row = layout.row()
+        tag = p.shader
+        if tag:
+            caps = export.shader_flags(tag)
+            known = any(name.lower() == tag.lower() for name, _ in catalog()[2])
+            traits = [label for bit, label in ((export.FLAG_BLENDING, "alpha pass"), (export.FLAG_GLASS, "glass"),
+                                               (export.FLAG_EMISSIVE, "emissive"), (0x8000, "tangents"),
+                                               (export.FLAG_SKINNED, "skinned")) if caps & bit]
+            layout.label(text=(", ".join(traits) if traits else "opaque") if known else
+                         "Not in the engine's shader table", icon="NONE" if known else "ERROR")
+        else:
+            layout.label(text="No shader in the name: export picks one by texture count")
+        box = layout.box()
+        box.label(text="Bullet faces")
+        row = box.row()
         row.prop(p, "surface")
+        row = box.row()
+        row.prop(p, "face_never_hit")
+        row.prop(p, "face_double_sided")
+        box.prop(p, "face_other_flags")
         row = layout.row()
         row.prop(p, "alpha_test")
         if p.alpha_test:
             row.prop(p, "alpha_test_value")
         row.prop(p, "two_sided")
         row = layout.row()
-        row.prop(p, "glass")
         row.prop(p, "alpha_strips")
-        row = layout.row()
-        row.prop(p, "emissive")
         row.prop(p, "other_flags")
         layout.prop(p, "reflect")
         box = layout.box()

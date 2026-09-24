@@ -38,11 +38,15 @@ archive-compressed textures; those references stay on the material with a
 warning. Imported texture entries have Write TGA off, so an export never
 writes a `.tga` over the texture the game already uses.
 
-Import creates an editable authoring scene. Export rebuilds bullet faces from
-the selected render LOD, regenerates skinned hit spheres and normalizes skin
-weights. Retail face normals, per-face flags, zero-length vertex normals and
-seam flags can therefore change. Armry01, US01 and ArmsG import and export,
-but their rebuilt collision records can differ. Use
+Import creates an editable authoring scene, and export never relies on
+anything import set up: collision volume planes, seam flags, tangents,
+bounds, glass, emissive and the alpha pass are recomputed from the scene on
+every export, by the rules the retired OED exporter used. Export rebuilds
+bullet faces from the selected render LOD (face surfaces and flags come from
+the materials, voted on import), regenerates skinned hit spheres and
+normalizes skin weights, so retail face normals, zero-length vertex normals
+and seam flags can change. Each collision volume imports as one polygon per
+retail plane, so export reads the same planes back. Use
 `opennova-3di compare` to inspect a rebuilt model before using it in game.
 
 ## Laying out a scene
@@ -58,7 +62,7 @@ F16_LOD0              Empty, custom property _lod_index = 0
     _01 center        helper: the part pivot
     UPG01 ctrlx05     user point: type G, part 01, label ctrlx05 (+Z = facing)
     LP01              light owned by part 01 (a point or spot light)
-    CB01-colonly      collision volume on part 01 (its convex hull)
+    CB01-colonly      collision volume on part 01 (a convex mesh)
     CB01a-colonly     the next CB volume on part 01
     VC01-colonly      a vehicle-contact volume
     OB01-occonly      an occluder in section 01 (OS open, OP window, OP02-04 portal)
@@ -77,7 +81,7 @@ head is the pivot, the bone parent the part parent). The skinned mesh is
 pose). The exporter appends each skinned mesh as its own part after the bones
 (parent 0, pivot = the mesh object's origin), as the retail exporter wrote
 bones first and mesh objects after them: that part holds the mesh bounds and
-bullet faces. Each bone gets a hit sphere around the vertices it dominates.
+bullet faces. Each bone's section is bounded by every vertex it moves.
 
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones plus the mesh part
@@ -97,7 +101,13 @@ A rotated `PN##` empty is a rotation frame: its animation tracks turn about
 the empty's own axes (Dblkhwk1's tail rotor is canted this way).
 
 Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
-`Material_1_FFP_GLASS`). With no texture entries, the first image texture node
+`Material_1_FFP_GLASS`): the name carries the shader, and the material
+panel's Shader field (any tag the engine knows, searchable) renames the
+material. A material with no tag in its name gets the default for its
+textures (`FF_ST_OP` one, `FF_MT_OP` two, `FFP_GLASS` none). Glass shaders
+are glass, `*_LUM` shaders emissive, blending shaders (glass among them) draw
+in the alpha pass, and a bump shader (`VS_PHONGT`, `VS_DOT3DIFF`, ...) gets
+tangents derived from its UVs. With no texture entries, the first image texture node
 is exported as a 32-bit TGA (file names at most 16 characters). A material's
 texture list names every slot instead: slot 1 diffuse, slot 2 the detail
 texture of an `FF_MT` shader (drawn on the mesh's second UV map), 3 and 4
@@ -117,10 +127,18 @@ normal maps.
 - **Light properties** on an `LP##` light: the colour generator (style, rate,
   phase or register, end colour), attenuation and the corona / terrain /
   object light switches.
-- **Material properties**: shader, alpha test, two-sided, glass, emissive, the
-  texture list, the collision surface type of its faces (metal 14, glass 15,
-  ...), and the RGB / alpha / UV generators and texture flipbook. A
-  register-driven flipbook selects its register by name.
+- **Material properties**: shader (with what it implies), the bullet faces'
+  surface type (metal 14, glass 15, ...) and flags (bullets pass, hit from
+  behind), alpha test, two-sided, the reflection colour, the texture list,
+  and the RGB / alpha / UV generators and texture flipbook. A register-driven
+  flipbook selects its register by name.
+
+## Collision volumes
+
+A `-colonly` mesh is a convex volume: the game keeps the solid all its face
+planes bound, so a concave or twisted mesh loses whatever sticks out. Export
+warns with the volume's name and how far it reaches outside; split such a
+mesh into convex pieces. A ladder (`CL`) faces the plane of its last face.
 
 Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`;
 `opennova-3di compare <a.3di> <b.3di>` tells whether two files hold the same

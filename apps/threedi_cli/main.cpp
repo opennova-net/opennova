@@ -20,6 +20,7 @@
 
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/renderer/material_descriptor.h>
 
 #include "threedi_cli.h"
 
@@ -38,9 +39,12 @@ int usage(const char *why) {
 	return 2;
 }
 
-// The engine's CTRL register catalog and generator-style names, one per line
-// (`register NAME`, `style CODE NAME`), so a front end offers exactly what the
-// builder accepts without keeping its own copy.
+// The engine's CTRL register catalog, generator-style names and shader tags
+// with their capability words, one per line (`register NAME`, `style CODE
+// NAME`, `shader TAG 0xFLAGS`), so a front end offers exactly what the builder
+// and the renderer know without keeping its own copy. The flag bits are
+// runtime/renderer/material_descriptor.h's (BLENDING 0x1000 puts a strip in
+// the alpha pass, GLASS 0x2000, TANGENT 0x8000).
 int cmd_catalog() {
 	for (size_t i = 0; i < static_cast<size_t>(THREEDI_CTRL_REGISTER_COUNT); ++i) {
 		const char *name = threedi_ctrl_register_name(i);
@@ -50,6 +54,8 @@ int cmd_catalog() {
 		const ThreediControlFuncInfo *info = threedi_control_func_info(static_cast<uint8_t>(code));
 		if (info != nullptr && info->name != nullptr) std::printf("style %d %s\n", code, info->name);
 	}
+	for (const opennova::renderer::MaterialDescriptorRecord &d : opennova::renderer::kMaterialDescriptorTable)
+		std::printf("shader %s 0x%x\n", d.name, static_cast<unsigned>(d.shader_flags));
 	return 0;
 }
 

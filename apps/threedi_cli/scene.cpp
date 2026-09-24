@@ -300,7 +300,9 @@ void write_collision(Writer &w, const Threedi3di3 &m) {
 		// (not the empty-section sentinel, whose min lies above its max).
 		if (co.num_vertices == 0 && co.num_bounding_volumes == 0 && co.min[0] <= co.max[0])
 			w.line("csphere " + f17(co.med[0] / 65536.0) + " " + f17(co.med[1] / 65536.0) + " " + f17(co.med[2] / 65536.0) +
-					" " + f17(co.radius / 65536.0));
+					" " + f17(co.radius / 65536.0) + " " + f17(co.min[0] / 65536.0) + " " + f17(co.min[1] / 65536.0) + " " +
+					f17(co.min[2] / 65536.0) + " " + f17(co.max[0] / 65536.0) + " " + f17(co.max[1] / 65536.0) + " " +
+					f17(co.max[2] / 65536.0));
 		for (int k = 0; k < co.num_vertices && v < c.vertex_count; ++k, ++v) {
 			const float *p = c.vertices[v].position;
 			w.line("cv " + f9(p[0]) + " " + f9(p[1]) + " " + f9(p[2]));

@@ -36,12 +36,12 @@ import; any other front end may.
 | Record | Fields | Meaning |
 | --- | --- | --- |
 | `model` | name | GHDR name, at most 15 characters |
-| `tangents` | 0/1 | vertices carry tangent/bitangent (tangent-reading shaders); the values are not carried, only the layout |
+| `tangents` | 0/1 | vertices carry tangent/bitangent. Optional: a material whose shader reads the TANGENT semantic (VS_DOT3DIFF, VS_PHONGT, VS_SKBUMPDIFFT, ...) turns the layout on itself. The values are never carried: the builder derives them from the UVs by the OED rule (below) |
 | `skinned` | 0/1 | GHDR mesh type 2 (before the first `lod`): parts are bones, strips carry bone tables, vertices weights |
 | `uv1` | 0/1 | every `v` carries a second UV set (the detail stage of FF_MT shaders) after its first (before the first `lod`) |
 | `register` | NAME | a CTRL register, declared in order; a name outside `threedi_ctrl_catalog.h` is a note (the loader reads LOD_FRAC for it) |
 | `mtrx` | r00 .. r22 | a PANM rotation frame, MTRX row 1, 2, ... (row 0 is the identity build writes itself): a 3x3 rotation in mission axes, row-major, `p' = p R` |
-| `material` | SHADER | opens a material (shader tag, e.g. `FF_ST_OP`, `FF_MT_OP`, `FFP_GLASS`) |
+| `material` | SHADER | opens a material (a shader tag of the engine's table, `opennova-3di catalog`; another tag is a note) |
 | `texture` | name [slot type flags frame] | a texture on the open material (16 characters max; slot 1 diffuse, 2 detail, 3/4 normal) |
 | `texanim` | frames type time | the material's texture flipbook |
 | `reflect` | r g b a | the glass reflection colour (0..255) |
@@ -62,13 +62,16 @@ import; any other front end may.
 | `ov` | x y z | a vertex of the open `occ` (at most 128: 7-bit edge words) |
 | `op` | nx ny nz d | a plane of the open `occ`; without any, the OED rule picks them (below) |
 | `of` | a b c [plane] | a face of the open `occ`; its plane index with explicit `op` planes, none without |
-| `cobj` | parent [ox oy oz] | opens collision section i (pairs with LOD0 part i): its parent part and offset (the part pivot, as retail stores it) |
+| `cobj` | parent [ox oy oz] | opens collision section i (pairs with part i of the collision LOD: one section per part, as WriteCOBJ walks it): its parent part and offset (the part pivot, as retail stores it) |
 | `cv` | x y z | a collision vertex |
-| `cf` | a b c [poly_type flags [nx ny nz]] | a bullet face (poly_type = impact material; the effect row is material + 4). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both) |
-| `csphere` | cx cy cz r | the open section's hit sphere (a skinned model's bone sections) |
+| `cf` | a b c [poly_type flags [nx ny nz]] | a bullet face (poly_type = impact material; the effect row is material + 4; flags 1 both sides, 0x100 bullets pass, 0x800 hit from behind). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both). The plane distance is `-(n . v0)` |
+| `csphere` | cx cy cz r [minx miny minz maxx maxy maxz] | the open section's hit sphere (a skinned model's bone sections) and the bounds of the vertices the bone moves (without them, the sphere's cube) |
 | `cvol` | type flags minx miny minz maxx maxy maxz | an axis-box volume (six planes) |
 | `cvolume` | type flags minx miny minz maxx maxy maxz | a convex volume whose planes follow as `cp` lines |
 | `cp` | nx ny nz d [flags] | a plane of the open `cvolume`: outward normal, `n . p + d == 0` on it, the seam flag |
+| `cvmesh` | type flags [label] | a volume authored as triangles (the exporter's form): `vv` vertices and `vf` faces follow, and the builder derives its box, planes and seam flags by the OED rule (below). `label` names it in notes |
+| `vv` | x y z | a vertex of the open `cvmesh` |
+| `vf` | a b c | a triangle of the open `cvmesh`, counter-clockwise about its outward normal |
 | `texfile` | name path\|- | written by `scene`: the file a texture name resolves to beside the model, by the runtime's candidate order (`engine/base/resource_index/texture_candidates.h`); `build` ignores it |
 
 Volume `type` is the collidable type (1 `CB` solid, 4 `CL` ladder, 7 `VC`
@@ -80,6 +83,31 @@ own plane unless one already matches it (normal within 0.005 per axis,
 distance within 0.03; the last match wins), at most 32
 ([orig: ConvertToInternal @ 0x4268B3]; it reproduces Armry01's OCCL records).
 
+The OED volume rule, for a `cvmesh`, is the same plane rule over its triangles
+(a triangle whose edge cross product is at most 0.0001 long takes plane 0),
+with no plane limit (retail ships volumes of up to 61). The volume is the
+solid all those planes bound, so a mesh must be convex: `build` notes one
+whose vertices reach more than a centimetre outside it. A ladder (type 4)
+swaps plane 0 with the plane its last triangle took: the runtime reads plane
+0 as the ladder's facing. Seam flags: in section then volume order, each
+triangle clears its plane's flag, then sets it when the triangle's box shrunk
+by 0.01 lies inside another type-1 volume's box in any section; the last
+triangle on a plane decides ([orig: ConvertToInternal @ 0x4268B3]).
+
+The derived collision values follow OED's writer (5fc5b4f6a^
+`engine/formats/oed/export_3di.cpp`), truncated as it truncates them and taken
+from the stored positions, so `build(scene(x))` stays exact: CVRT on the 8.8
+grid; CNRM Q14 with the dominant axis chosen on those integers (z, then y,
+only when strictly largest); a section's bounds over its vertices and volume
+boxes, its radius the farthest vertex from their midpoint (a volume-only
+section's is 0); the CMDL box over every bullet face and LOD 0's triangles,
+its radii and height (`radii[2]`) over the bullet faces alone (retail CNet01,
+with none, stores 0, 0 and -20000; OED's port folded LOD 0 into the radii
+too, which the corpus does not). Tangents: each triangle's dP/du and dP/dv
+from its UVs, summed over the triangles sharing a vertex of the same part,
+position and normal, normalized (a triangle with degenerate UVs reuses the
+previous one's).
+
 ## Validation
 
 The build fails, naming the line, on an unknown record, a malformed field, an
@@ -89,7 +117,8 @@ skinned strip without a bone table or naming a missing part, a track value
 outside int16, a generator or light register that is not declared, more than 8
 `sitex` seats, a volume with fewer than 4 planes, an occlusion record over 128
 vertices or 32 planes, or a model the writer refuses. Notes (not errors): a
-register outside the catalog, more than 16 user points (the item-effect scan
+register outside the catalog, a shader outside the engine's table, a volume
+mesh that is not convex, more than 16 user points (the item-effect scan
 reads 16), weighted bone slots past their strip's table (retail FSldr03 ships
 them), collision faces whose corners are collinear. The minted bytes are read
 back before the file is written. The ctest fixtures are
@@ -103,13 +132,13 @@ bone table names that carry bounds: FSldr03 part 19, ArmsG part 37).
 ## What `scene` cannot carry
 
 `scene` comments these (`# dropped: ...`) and lists them on stderr: tangent and
-bitangent values; a non-identity MTRX row 0 or non-finite rows (skinned
+bitangent values (the builder derives them again); a non-identity MTRX row 0 or non-finite rows (skinned
 models' NaN rows, written as the identity); MTRX translations; PANM
 `matrix_offset` and `bind_matrix_index`; the second-channel material fields
 (`rgb_gen2`, `emissive_type2`, `glass_type2`, `reflect_color2`, always zero in
 the corpus) and generator alpha bytes; a strip naming a material id the model
 lacks; light pad bytes; occlusion `glow_scale`. Values build derives are not
 carried: part `rel`, bounds, CXLT, CMDL, face normal runs and plane
-distances. Over the 958 JO models, `build(scene(x))` is the same model as `x`
+distances, tangents. Over the 958 JO models, `build(scene(x))` is the same model as `x`
 (`opennova-3di compare`) for 956; the other two draw with a material id they
 lack.

@@ -59,26 +59,43 @@ language's copy of the format, drifts.
    stripped before classification; two objects with one identity inside a LOD
    are an error. What a name cannot carry (LOD thresholds and types, PANM
    tracks, material flags, textures and generators, light generators, export
-   order, the bullet-face surface type, the collision LOD) is a visible add-on
-   property; a rotated `PN##` is a PANM rotation frame (an MTRX row). Import
-   never stashes source data to make a round trip reproduce it: what the scene
-   form cannot express is reported and dropped. The add-on writes 32-bit
-   uncompressed TGA textures itself (an industry format, not a 3DI concern).
-4. **Collision follows retail.** Volumes are convex hulls laid out as the retail
-   corpus lays a BVOL out (the six AABB planes first, then the hull planes,
-   outward normals); the seam flag uses "another volume carries the plane
-   facing the other way", a heuristic, as retail's rule is not witnessed
-   (neither it nor "the face lies inside another volume" reproduces the
-   corpus: 83% and 80% agreement over 132,856 planes, mostly unflagged ones).
-   The bullet faces are a render LOD's meshes, chosen by the OED `.3dp`
-   `poly_collision_lod` setting (default 0, the most detailed), never a
-   separate LOD, wound as retail stores them, with normals taken from the
-   unquantized corners (retail keeps faces the 8.8 grid collapses). Each
-   section sits at its part's pivot, the COBJ offset and CXLT translation
-   retail carries (Dtruck2's wheels, Dblkhwk1's rotors). A skinned model
-   follows the retail person layout: one section per bone at its pivot with a
-   hit sphere around the vertices it dominates, the bullet faces on the mesh
-   part's section.
+   order, the bullet-face surface and flags, the collision LOD) is a visible
+   add-on property; a rotated `PN##` is a PANM rotation frame (an MTRX row).
+   The material name carries the shader tag, any of the engine's shader table
+   (`opennova-3di catalog`); the add-on's shader field edits the name, and a
+   name without one takes OED's default for its texture count. Export never
+   relies on anything import set up: every value the engine derives (volume
+   planes, seam flags, tangents, section and model bounds, glass and emissive,
+   the alpha pass) is recomputed from the authored scene on every export by the
+   rules below. Import never stashes source data to make a round trip
+   reproduce it: what the scene form cannot express is reported and dropped.
+   The add-on writes 32-bit uncompressed TGA textures itself (an industry
+   format, not a 3DI concern).
+4. **Collision follows the OED rules** (ModSuperOed, as the retired
+   `engine/formats/oed` port carried them, 5fc5b4f6a^). A volume is the solid
+   its authored faces bound [orig: ConvertToInternal @ 0x4268B3]: its vertex
+   box's six planes, then each triangle's plane unless one matches it (0.005
+   per normal axis, 0.03 distance, the last match wins); a ladder (`CL`) faces
+   the plane of its last triangle (plane 0 after OED's swap). A volume mesh
+   must therefore be convex; `build` names any whose vertices lie more than a
+   centimetre outside that solid. Seam flags follow OED's overlap rule: a
+   triangle whose box, shrunk by 0.01, lies inside another solid (`CB`)
+   volume's box flags its plane. The bullet faces are a render LOD's meshes,
+   chosen by the OED `.3dp` `poly_collision_lod` setting (default 0, the most
+   detailed), never a separate LOD, wound as retail stores them, with normals
+   taken from the unquantized corners (retail keeps faces the 8.8 grid
+   collapses) and plane distances `-(n . v0)`, the plane the runtime tests.
+   There is one section per part of that LOD (WriteCOBJ walks its
+   subobjects), at the part's pivot, the COBJ offset and CXLT translation
+   retail carries (Dtruck2's wheels, Dblkhwk1's rotors); its bounds cover its
+   vertices and volumes and its radius the farthest vertex (a volume-only
+   section's is 0). The CMDL box envelops the collision faces and LOD 0's
+   triangles, its radii and height (`radii[2]`) the collision faces' alone,
+   as the retail corpus stores them. A skinned model follows the retail
+   person layout: one section per bone at its pivot, bounded by every LOD 0
+   vertex the bone moves, the bullet faces on the mesh part's section. The
+   derived collision values are truncated as OED's writer truncated them,
+   from the stored (quantized) positions so `build(scene(x))` stays exact.
 5. **Skinned models follow the retail corpus.** The parts are the armature's
    bones (hierarchy and pivots, which retail animations pair with by index),
    then one part per skinned mesh (`01 Mesh<n>`; parent 0, pivot = the mesh
@@ -96,11 +113,19 @@ language's copy of the format, drifts.
    columns included). An occlusion mesh's planes
    follow the OED rule (the six bounding planes, then deduplicated face planes,
    at most 32), which reproduces Armry01's OCCL records plane for plane.
-7. **Distribution.** `scripts/package_blender_addon.sh` builds the CLI and zips
+7. **Materials and vertices follow the OED rules too.** A blending shader's
+   strips draw in the alpha pass (FFP_GLASS among them); a glass shader
+   reflects 128 grey unless another colour is set and is glass; a `*_LUM`
+   shader is emissive 2 (every material of the 958 JO models agrees); a
+   shader reading the TANGENT semantic lays out tangents, which the builder
+   derives from the UVs (OED's per-face basis, summed over the triangles
+   sharing a vertex).
+8. **Distribution.** `scripts/package_blender_addon.sh` builds the CLI and zips
    it into the add-on's `bin/`. The add-on is the repository's one Python
    product module; it links nothing native and ships no FFI, and it keeps no
-   copy of engine tables (registers and style names come from `catalog`).
-8. **Standing from ADR 0038.** No other Python product code, Qt importer, or
+   copy of engine tables (registers, style names and shader tags with their
+   capability words come from `catalog`).
+9. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
    `scripts/mcp`, `scripts/ci` and `tools/net` scripts remain); no native
    ASE/TDP/OED modules; ADM and BAD stay read-only runtime formats; Godot
@@ -114,12 +139,16 @@ language's copy of the format, drifts.
   through the same reader the runtime uses.
 - The CLI is a second front end for any DCC: another exporter writes `.o3d`,
   another importer reads what `scene` writes.
-- Known gaps, each reported rather than carried: tangent values; retail seam
-  flags and hit spheres (rules not witnessed; the add-on applies its own);
-  CTRL registers nothing references; non-`BB` volume flags; zero-length
-  vertex normals (Blender cannot hold them); volumes whose planes nearly
-  coincide can rebuild a few centimetres off (the hull folds planes within 2
-  degrees and 2 cm).
+- Known gaps, each reported rather than carried: retail's own tool is not
+  witnessed, so its seam flags and tangent values match the OED rules only
+  where that tool agreed with ModSuperOed; CTRL registers nothing references;
+  non-`BB` volume flags (Armry02's `CB` volumes with flag 1); zero-length
+  vertex normals (Blender cannot hold them); a retail volume plane that bounds
+  no face of 0.5 cm2 or more, and a stored box looser than the solid its
+  planes cut (Armry02: one), are rebuilt from the faces; volume order within
+  a section follows the names (OED kept its scene order, which a Blender
+  scene lacks); retail bullet faces whose corners collapse on the 8.8 grid
+  are dropped (a mesh cannot hold them).
 - `formats/threedi/threedi_build.cpp` and
   `base/resource_index/texture_candidates.cpp` join `citation_allowlist_engine`
   (construction code with no retail counterpart; our loose-folder resolver
@@ -146,6 +175,18 @@ language's copy of the format, drifts.
   collision and occlusion comparisons. Armry01 retains zero-normal and
   collision differences; US01 and ArmsG retain normalized-weight and collision
   differences because their bullet faces and hit spheres are rebuilt.
+- The 2026-09-24 validation ported the OED collision, material and tangent
+  rules above. `threedi_o3d_commands` pins the bullet-face plane distance,
+  a ladder's facing, box volumes' six planes, the seam rule, a volume-only
+  section's zero radius, the CMDL of a model without sections and derived
+  tangents. `compare` now also checks plane distances, dominant axes, ladder
+  facing and the CMDL; `build(scene(x))` stays the same model for 956 of 958.
+  Through Blender, Dtruck2's and Armry01's collision and every Dblkhwk1 volume
+  come back the same (the hull rule left 8 Dblkhwk1 volumes off); Armry02
+  keeps its seven flag-1 `CB` volumes and one loose box as reported gaps.
+  The F-16 tested in retail carried every bullet face wound backwards and
+  mirrored through the origin; its re-export fixes both and names five
+  non-convex volumes.
 - Review regressions in `threedi_o3d_commands` reject changed UV mappings,
   weights, bone assignments, collision and occlusion faces, undeclared track
   and flipbook registers, and overflowing PANM and collision indices. Reordered

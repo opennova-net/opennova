@@ -13,7 +13,6 @@ import os
 import subprocess
 import tempfile
 
-import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
@@ -184,7 +183,8 @@ def read_o3d(path):
             elif k == "cv":
                 cobj["verts"].append(tuple(float(x) for x in a[:3]))
             elif k == "cf":
-                cobj["faces"].append((int(a[0]), int(a[1]), int(a[2]), int(a[3]) if len(a) > 3 else 1))
+                cobj["faces"].append((int(a[0]), int(a[1]), int(a[2]), int(a[3]) if len(a) > 3 else 1,
+                                      int(a[4]) if len(a) > 4 else 0))
             elif k in ("cvolume", "cvol"):
                 box = [float(x) for x in a[2:8]]
                 volume = {"type": int(a[0]), "flags": int(a[1]), "planes": []}
@@ -265,13 +265,10 @@ class Builder:
                 return reg[index]
             return ""
 
-        from . import SHADERS
-        shader_ids = {s[0] for s in SHADERS}
         for i, m in enumerate(self.sc["materials"]):
+            # The name carries the export index and the shader tag.
             mat = bpy.data.materials.new(f"Material_{i}_{m['shader']}")
             p = mat.o3d
-            if m["shader"] in shader_ids:
-                p.shader = m["shader"]
             flags = m["matflags"]
             p.alpha_test = bool(flags & 1)
             p.two_sided = bool(flags & 4)
@@ -279,11 +276,15 @@ class Builder:
             p.alpha_test_value = m["alphatest"]
             if m["alphatest"] and not p.alpha_test:
                 self.note(f"material {i}: an alpha-test value without the alpha-test flag")
-            p.glass = bool(m["glass"])
-            p.emissive = m["emissive"]
+            # Glass and emissive follow the shader on export (OED's rule).
+            caps = export.shader_flags(m["shader"])
+            if bool(m["glass"]) != bool(caps & export.FLAG_GLASS and m["reflect"] and any(m["reflect"][:3])):
+                self.note(f"material {i}: glass {m['glass']} is not what its shader {m['shader']} gives")
+            if m["emissive"] != (2 if caps & export.FLAG_EMISSIVE else 0):
+                self.note(f"material {i}: emissive {m['emissive']} is not what its shader {m['shader']} gives")
             if m["reflect"]:
                 p.reflect = [c / 255.0 for c in m["reflect"]]
-            blended = m["shader"] in export.ALPHA_SHADERS
+            blended = bool(export.shader_flags(m["shader"]) & export.FLAG_BLENDING)
             p.alpha_strips = alpha_by_material.get(i, False) and not blended
             for name, slot, typ, tflags, frame in m["textures"]:
                 t = p.textures.add()
@@ -365,10 +366,10 @@ class Builder:
             color = scale.outputs[0]
         if color is not None:
             links.new(color, bsdf.inputs["Base Color"])
-            if m["emissive"] or m["shader"].endswith("_LUM"):
+            if m["emissive"] or export.shader_flags(m["shader"]) & export.FLAG_EMISSIVE:
                 links.new(color, bsdf.inputs["Emission Color"])
                 bsdf.inputs["Emission Strength"].default_value = 1.0
-        if m["glass"] or "GLASS" in m["shader"]:
+        if m["glass"] or export.shader_flags(m["shader"]) & export.FLAG_GLASS:
             bsdf.inputs["Base Color"].default_value = (0.6, 0.75, 0.85, 1.0)
             bsdf.inputs["Alpha"].default_value = 0.35
             if hasattr(mat, "surface_render_method"):
@@ -683,6 +684,7 @@ class Builder:
 
     def collision(self, lod_objects):
         dups = {}
+        unbuilt = 0
         for si, c in enumerate(self.sc["cobjs"]):
             for v in c["volumes"]:
                 code = VOLUME_NAMES.get(v["type"])
@@ -696,41 +698,52 @@ class Builder:
                     letters = "".join(L for L, bit in export.BLINK_LETTER_BITS.items() if not v["flags"] & bit)
                 elif v["flags"]:
                     self.note(f"collision section {si}: a {code} volume with flags {v['flags']} (only BB takes flags)")
-                corners = polytope(v["planes"])
-                if len(corners) < 4:
+                facets, missing = volume_facets(v["planes"], ladder=v["type"] == 4)
+                if len(facets) < 4:
                     self.note(f"collision section {si}: a {code} volume bounds no solid")
                     continue
+                unbuilt += missing
                 name = f"{code}{letters}{si + 1:02d}" + dup_suffix(dups, (code + letters, si)) + "-colonly"
-                bm = bmesh.new()
-                for p in corners:
-                    bm.verts.new(self.blender(p))
-                bmesh.ops.convex_hull(bm, input=bm.verts)
+                verts, index, polys = [], {}, []
+                for facet in facets:
+                    poly = []
+                    for p in facet:
+                        key = tuple(round(x, 5) for x in p)
+                        if key not in index:
+                            index[key] = len(verts)
+                            verts.append(tuple(self.blender(p)))
+                        if not poly or poly[-1] != index[key]:
+                            poly.append(index[key])
+                    if len(poly) > 1 and poly[0] == poly[-1]:
+                        poly.pop()
+                    if len(set(poly)) >= 3:
+                        polys.append(poly)
                 me = bpy.data.meshes.new(name)
-                bm.to_mesh(me)
-                bm.free()
+                me.from_pydata(verts, [], polys)
+                me.update()
                 ob = bpy.data.objects.new(name, me)
                 ob.display_type = "WIRE"
                 parent = self.owner(si, lod_objects)
                 self.link(ob, parent, Matrix.Identity(4), self.world.get(parent.name))
                 lod_objects[0].append(ob)
+        if unbuilt:
+            self.note(f"{unbuilt} collision volume planes touch their volume in no face of 1 cm2 or more (or not at "
+                      "all); export derives planes from faces, so it does not rebuild them")
 
     def bullet_lod(self, mats):
-        """The render LOD whose part triangles are the bullet faces (the OED
-        poly_collision_lod), and each material's face surface voted from them."""
+        """The render LOD whose parts are the collision sections and whose
+        part triangles are the bullet faces (the OED poly_collision_lod), and
+        each material's bullet-face surface and flags voted from them."""
         counts = [len(c["faces"]) for c in self.sc["cobjs"]]
         if not any(counts):
             return
-        self.note("bullet faces are rebuilt from the collision LOD; stored face normals and flags are not retained")
+        self.note("bullet faces are rebuilt from the collision LOD's triangles on export; their stored normals are "
+                  "not kept")
         chosen = None
         for li, lod in enumerate(self.sc["lods"]):
-            tris = [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]]
-            if self.sc["skinned"]:
-                tris = [0] * len(counts)
-                for pi, p in enumerate(lod["parts"]):
-                    if pi < len(tris):
-                        tris[pi] = sum(len(s["tris"]) for s in p["strips"])
-            tris += [0] * (len(counts) - len(tris))
-            if tris[:len(counts)] == counts:
+            if len(lod["parts"]) != len(counts):
+                continue
+            if [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]] == counts:
                 chosen = li
                 break
         if chosen is None:
@@ -741,12 +754,10 @@ class Builder:
         votes = {}
         lod = self.sc["lods"][chosen]
         for si, c in enumerate(self.sc["cobjs"]):
-            if si >= len(lod["parts"]):
-                break
             by_centre = {}
-            for a, b, cc, poly in c["faces"]:
+            for a, b, cc, poly, flags in c["faces"]:
                 p = [c["verts"][x] for x in (a, b, cc)]
-                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = poly
+                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
             for s in lod["parts"][si]["strips"]:
                 for tri in s["tris"]:
                     p = [s["verts"][x]["p"] for x in tri]
@@ -755,26 +766,108 @@ class Builder:
                         votes.setdefault(s["material"], {}).setdefault(by_centre[key], 0)
                         votes[s["material"]][by_centre[key]] += 1
         for mi, v in votes.items():
-            if 0 <= mi < len(mats):
-                mats[mi].o3d.surface = max(v.items(), key=lambda kv: kv[1])[0]
+            if not 0 <= mi < len(mats):
+                continue
+            (surface, flags), _ = max(v.items(), key=lambda kv: kv[1])
+            p = mats[mi].o3d
+            p.surface = surface
+            p.face_never_hit = bool(flags & 0x100)
+            p.face_double_sided = bool(flags & 0x800)
+            p.face_other_flags = flags & ~0x901
+            if bool(flags & 1) != p.two_sided:
+                self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
+                          "export takes it from Two sided")
 
 
-def polytope(planes):
-    """Corners of the convex solid the planes bound (n . p + d <= 0 inside)."""
-    out = []
+def solve_planes(a, b, c):
+    """The point on three planes ((n, d), n . p + d == 0), or None when they
+    do not meet in one point. Doubles: mathutils is single precision."""
+    (na, da), (nb, db), (nc, dc) = a, b, c
+    det = (na[0] * (nb[1] * nc[2] - nb[2] * nc[1]) - na[1] * (nb[0] * nc[2] - nb[2] * nc[0]) +
+           na[2] * (nb[0] * nc[1] - nb[1] * nc[0]))
+    if abs(det) < 1e-9:
+        return None
+    r = (-da, -db, -dc)
+    x = (r[0] * (nb[1] * nc[2] - nb[2] * nc[1]) - na[1] * (r[1] * nc[2] - nb[2] * r[2]) +
+         na[2] * (r[1] * nc[1] - nb[1] * r[2])) / det
+    y = (na[0] * (r[1] * nc[2] - nb[2] * r[2]) - r[0] * (nb[0] * nc[2] - nb[2] * nc[0]) +
+         na[2] * (nb[0] * r[2] - r[1] * nc[0])) / det
+    z = (na[0] * (nb[1] * r[2] - r[1] * nc[1]) - na[1] * (nb[0] * r[2] - r[1] * nc[0]) +
+         r[0] * (nb[0] * nc[1] - nb[1] * nc[0])) / det
+    return (x, y, z)
+
+
+def volume_facets(planes, ladder=False):
+    """The convex solid a volume's planes bound (n . p + d <= 0 inside), as
+    one polygon per plane it has a face on, the polygon's corners computed ON
+    that plane and wound counter-clockwise about its outward normal, in plane
+    order. The OED rule export applies (formats/threedi/threedi_build.h
+    add_volume_mesh) then reads each plane back from its polygon's triangles.
+    A ladder's facing (plane 0) goes last: the rule takes the ladder's facing
+    from its last triangle. Also returns how many planes other than the six
+    box planes got no polygon of 1 cm2 or more (the rule reads a smaller
+    triangle as degenerate)."""
     n = len(planes)
+    corners = []
+    # Retail's stored planes (Q14 normals, 16.16 distances) meet a few tenths
+    # of a millimetre off where four or more should meet, so a corner is kept
+    # within 1 mm of the solid and each polygon's sub-millimetre clusters are
+    # collapsed to the corner deepest inside: a sliver triangle's float
+    # normal would drift past the rule's 0.005.
     for i in range(n):
         for j in range(i + 1, n):
             for k in range(j + 1, n):
-                a, b, c = (Vector(planes[x][0]) for x in (i, j, k))
-                m = Matrix((a, b, c))
-                if abs(m.determinant()) < 1e-9:
+                p = solve_planes(planes[i], planes[j], planes[k])
+                if p is None:
                     continue
-                p = m.inverted() @ Vector((-planes[i][1], -planes[j][1], -planes[k][1]))
-                if all(Vector(q[0]).dot(p) + q[1] <= 1e-4 for q in planes) and \
-                        not any((p - o).length < 1e-5 for o in out):
-                    out.append(p)
-    return out
+                excess = max(q[0][0] * p[0] + q[0][1] * p[1] + q[0][2] * p[2] + q[1] for q in planes)
+                if excess <= 1e-3:
+                    corners.append((p, (i, j, k), excess))
+    facets, missing = [], 0
+    for pi, (nrm, _) in enumerate(planes):
+        on = []
+        for p, trio, excess in corners:
+            if pi in trio and not any(sum((p[x] - o[0][x]) ** 2 for x in range(3)) < 1e-12 for o in on):
+                on.append((p, excess))
+        axis = sum(1 for x in nrm if abs(x) > 1e-6) == 1
+        polygon = None
+        if len(on) >= 3:
+            c = [sum(p[x] for p, _ in on) / len(on) for x in range(3)]
+            u = max(((p[0] - c[0], p[1] - c[1], p[2] - c[2]) for p, _ in on), key=lambda e: sum(x * x for x in e))
+            ul = math.sqrt(sum(x * x for x in u))
+            if ul > 1e-9:
+                u = tuple(x / ul for x in u)
+                w = (nrm[1] * u[2] - nrm[2] * u[1], nrm[2] * u[0] - nrm[0] * u[2], nrm[0] * u[1] - nrm[1] * u[0])
+                on.sort(key=lambda e: math.atan2(sum((e[0][x] - c[x]) * w[x] for x in range(3)),
+                                                 sum((e[0][x] - c[x]) * u[x] for x in range(3))))
+                clusters = []
+                for p, excess in on:
+                    if clusters and sum((p[x] - clusters[-1][-1][0][x]) ** 2 for x in range(3)) < 1e-6:
+                        clusters[-1].append((p, excess))
+                    else:
+                        clusters.append([(p, excess)])
+                if len(clusters) > 1 and \
+                        sum((clusters[0][0][0][x] - clusters[-1][-1][0][x]) ** 2 for x in range(3)) < 1e-6:
+                    clusters[0] = clusters.pop() + clusters[0]
+                on = [min(cl, key=lambda e: e[1])[0] for cl in clusters]
+                area = 0.0
+                for a in range(1, len(on) - 1):
+                    e1 = [on[a][x] - on[0][x] for x in range(3)]
+                    e2 = [on[a + 1][x] - on[0][x] for x in range(3)]
+                    cr = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+                    area += 0.5 * math.sqrt(sum(x * x for x in cr))
+                if area > 1e-8:
+                    polygon = on
+        if polygon is None:
+            if not axis:
+                missing += 1
+            continue
+        if not axis and area < 0.5e-4:
+            missing += 1
+        facets.append((pi, polygon))
+    if ladder:
+        facets.sort(key=lambda f: f[0] == 0)
+    return [f for _, f in facets], missing
 
 
 def run_scene(context, path):

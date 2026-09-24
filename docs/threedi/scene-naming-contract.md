@@ -25,15 +25,19 @@ classify to the same identity inside one LOD are an error.
 | User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z. Its export-order property keeps the USRP order (seats and effect points are scanned in it) |
 | Light | `LP##[a..]` (a light object) | a LGHT light owned by part `##` (`01` the root, as `classify_name` parsed it); a point light is omni, a spot light a cone about its local +Z. Its colour is the start colour; the generator, attenuation and flags are properties |
 | Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the parent bone the part parent; `BN##` vertex groups carry the weights. The skinned mesh is `01 Mesh<n>` and becomes its own part after the bones (pivot = its origin) |
-| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` |
+| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` (any tag in the engine's shader table; the add-on's shader field renames the material). Without a tag, OED's default for the material's texture maps: `FF_ST_OP` for one, `FF_MT_OP` for two, `FFP_GLASS` for none (`VS_SKBASIC`, `VS_SKGLASS` on a skinned model). Glass, emissive and the alpha pass follow the shader |
 
 ## Collision volumes
 
 `<TYPE>##[<dup>]-colonly`, on the primary LOD. `##` is the **owning part**
 (`classify_name` stores it as the object index; the volume joins that part's
 collision section). `<dup>` is a lowercase suffix for the 2nd and later volumes
-of one type on one part: 2nd `a`, 3rd `b`, ... (the Blackhawk's 35 hull volumes
-are all `CB01...`). The volume is the convex hull of the mesh's vertices.
+of one type on one part: 2nd `a`, 3rd `b`, ..., `z`, then `aa` (the Blackhawk's
+35 hull volumes are all `CB01...`); a section's volumes export in that order,
+code first. The volume is the solid its faces bound, by the OED rule
+(docs/threedi/o3d-scene-format.md): each face's plane, so the mesh must be
+convex (export names one that is not). A ladder (`CL`) faces the plane of its
+last face (Blender's Sort Mesh Elements can put a chosen face last).
 
 | Code | Type | Code | Type | Code | Type |
 | --- | --- | --- | --- | --- | --- |
@@ -67,4 +71,7 @@ An export-order property keeps the record order.
 
 The collision faces bullets hit come from one render LOD's part meshes, chosen
 by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed;
-Armry01's are LOD 1's); each face's surface type comes from its material.
+Armry01's are LOD 1's), and that LOD's parts are the collision sections (one
+each). Each face's surface type and flags come from its material: "both
+sides" (1) follows Two sided; "bullets pass" (0x100, retail's rotor blades)
+and "hit from behind" (0x800) are material settings.
