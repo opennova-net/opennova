@@ -30,7 +30,7 @@ DELAYEND 1
 END
 end
 """,
-		"PoseGun.adm": "anim_reset \"idle.bad\"\nanim_wpn_idle \"idle.bad\"\n",
+		"PoseGun.adm": "anim_reset \"idle.bad\"\r\nanim_wpn_idle \"idle.bad\"\r\n",
 		"Avatars.def": """define head HEAD
 {
 graphic US01.3di

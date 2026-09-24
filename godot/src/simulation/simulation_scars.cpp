@@ -60,13 +60,13 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// Two frames, two swaps. A shared-ring (world) slot is mission space, so it
 	// takes the world fold mission (x, y, z) -> Godot (x, z, -y). An entity-ring
 	// slot is SECTION-LOCAL: the hit went through the inverse of the live
-	// collision section matrix, whose local side is the decoded model space the
-	// collision model and the render parts share (engine/runtime/world —
-	// "decoded model space is (-source y, source z, source x)"), and the
-	// section node's mesh is that same space through the model builder's
-	// godot_position = (-x, y, z). The world swap applied to a section-local
-	// slot would land the quad rotated off the struck face on every vehicle and
-	// item, so the entity-local batches take the model fold instead.
+	// collision section matrix, whose local side is the 3DI SOURCE frame (Z up,
+	// the frame the section matrix rotates into mission space), and the
+	// section's render-part node carries its mesh as Godot (source y, source z,
+	// source x). The entity-local batches therefore take that model fold,
+	// (x, y, z) -> (y, z, x). The earlier (-x, y, z) fold read the slot as the
+	// already-decoded (-source y, source z, source x) frame and dropped every
+	// vehicle/item scar below and beside its struck face.
 	std::vector<bool> entity_local_vertex(list.vertices.size(), false);
 	for (const opennova::renderer::ScarDrawBatch &b : list.batches) {
 		if (!b.entity_local) {
@@ -89,26 +89,17 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// the normal side under the drawer's CCW cull — the mark shows on the face
 	// you shot and not through the wall behind it. Godot's front face is
 	// clockwise too, but its frame is right-handed: a triangle is front-facing
-	// when its coordinate cross product points AWAY from the viewer. The world
-	// fold below, (x, y, z) -> (x, z, -y), is a ROTATION that preserves the
-	// engine-frame relation, so the witnessed order is already front on the
-	// struck side and the shared ring keeps it; the entity-local fold
-	// (-x, y, z) is a reflection that flips it, so those triangles are re-wound
-	// (vertices 1 and 2 swapped). The scorch shader's cull_back then culls
-	// exactly what retail's CCW cull culls (pinned by ctest impact_scar and
-	// godot/tests/scar_present_pass_test.gd; the in-game front/behind
-	// capture went with ADR 0041's probe retirement).
-	const auto source_index = [&](size_t i) -> size_t {
-		if (!entity_local_vertex[i]) {
-			return i;
-		}
-		const size_t k = i % 3;
-		return k == 0 ? i : i - k + (3 - k);
-	};
+	// when its coordinate cross product points AWAY from the viewer. The two
+	// folds below, world (x, y, z) -> (x, z, -y) and entity-local
+	// (x, y, z) -> (y, z, x), are both ROTATIONS that preserve the engine-frame
+	// relation, so the witnessed order is already front on the struck side and
+	// both rings keep it. The scorch shader's cull_back then culls exactly what
+	// retail's CCW cull culls (pinned by ctest impact_scar and
+	// godot/tests/scar_present_pass_test.gd).
 	for (size_t i = 0; i < list.vertices.size(); ++i) {
-		const opennova::renderer::ScarVertex &v = list.vertices[source_index(i)];
+		const opennova::renderer::ScarVertex &v = list.vertices[i];
 		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
-				? Vector3(-v.x, v.y, v.z)
+				? Vector3(v.y, v.z, v.x)
 				: mission_to_godot(v);
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
 		colors[static_cast<int64_t>(i)] = opennova::color_from_argb(v.argb);

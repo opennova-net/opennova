@@ -1,12 +1,14 @@
-// ADM animation definition file parser — pure C implementation.
-// Parses key/value pairs from .adm text files.
+// ADM animation definition file parser: anim slot rows of .bad clip variants.
 
 #include <formats/adm/adm.h>
+#include <base/io/ascii_config.h>
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <vector>
 
 namespace opennova::adm {
 
@@ -35,175 +37,45 @@ static void copy_trimmed(char *dst, size_t dst_size,
 
 // Parse a .adm from an in-memory buffer (does not take ownership of `bytes`).
 // Used by embedders that read assets from a VFS (PFF archive) rather than disk.
+// The rows arrive through the shared retail config reader (io/ascii_config.h:
+// CRLF lines, space/comma/tab tokens, '"' quoting, "//" and ';' comments).
+// Per row: token 0 names the anim slot, and every later token is a clip
+// variant on that one slot's ring until a token starting with '/' ends the
+// row; an empty token is skipped [orig: AnimMap_ParseConfigLine @0x40CB60 —
+// the slot lookup @0x40CB97, the '/' break @0x40CBD0..0x40CBD2, the empty
+// skip @0x40CBD4..0x40CBD6]. The slot table lookup is the runtime's
+// (AnimMap_FindSlotByName @0x40CFA0); this parser keeps `anim_` keys. A row
+// with no clip registers nothing and never fails the file.
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
-    char *data = NULL;
-    size_t data_size;
-    size_t cap = 0;
-    size_t line_start, pos;
-
     if (!bytes || !out) return -1;
     memset(out, 0, sizeof(AdmFile));
 
-    data_size = size;
-    // Working copy (+1 for the trailing newline sentinel); we mutate NULs -> newlines.
-    data = (char *)malloc(data_size + 1);
-    if (!data) return -1;
-    if (data_size > 0) memcpy(data, bytes, data_size);
-
-    // Replace embedded NULs with newlines
-    {
-        size_t i;
-        for (i = 0; i < data_size; ++i) {
-            if (data[i] == '\0') data[i] = '\n';
+    std::vector<AdmEntry> entries;
+    io::for_each_config_line(bytes, size, [&](const io::ConfigTokens &row) {
+        const char *key = row.token(0);
+        if (strncmp(key, "anim_", 5) != 0) return;
+        AdmEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        copy_trimmed(entry.key, sizeof(entry.key), key, key + strlen(key));
+        for (int i = 1; i < row.count; ++i) {
+            const char *clip = row.token(i);
+            if (clip[0] == '/') break;
+            if (clip[0] == '\0' || entry.variant_count >= ADM_MAX_VARIANTS) continue;
+            copy_trimmed(entry.variants[entry.variant_count],
+                         sizeof(entry.variants[entry.variant_count]),
+                         clip, clip + strlen(clip));
+            if (entry.variants[entry.variant_count][0] != '\0')
+                ++entry.variant_count;
         }
+        if (entry.variant_count != 0) entries.push_back(entry);
+    });
+
+    if (!entries.empty()) {
+        out->entries = (AdmEntry *)malloc(entries.size() * sizeof(AdmEntry));
+        if (!out->entries) return -1;
+        memcpy(out->entries, entries.data(), entries.size() * sizeof(AdmEntry));
+        out->count = entries.size();
     }
-    data[data_size] = '\n';  // sentinel
-    data_size += 1;
-
-    // Parse line by line
-    cap = 32;
-    out->entries = (AdmEntry *)malloc(cap * sizeof(AdmEntry));
-    if (!out->entries) { free(data); return -1; }
-    out->count = 0;
-
-    line_start = 0;
-    for (pos = 0; pos < data_size; ++pos) {
-        if (data[pos] == '\n' || data[pos] == '\r') {
-            const char *line = data + line_start;
-            size_t line_len = pos - line_start;
-            const char *lend = line + line_len;
-            const char *trimmed_start, *trimmed_end;
-            const char *anim_ptr;
-            const char *q1, *q2;
-
-            // Trim
-            trimmed_start = line;
-            trimmed_end = lend;
-            while (trimmed_start < trimmed_end &&
-                   isspace((unsigned char)*trimmed_start))
-                ++trimmed_start;
-            while (trimmed_end > trimmed_start &&
-                   isspace((unsigned char)*(trimmed_end - 1)))
-                --trimmed_end;
-
-            // Skip empty
-            if (trimmed_start >= trimmed_end) {
-                // Skip \r\n together
-                if (pos + 1 < data_size && data[pos] == '\r' &&
-                    data[pos + 1] == '\n')
-                    ++pos;
-                line_start = pos + 1;
-                continue;
-            }
-
-            // Skip comment lines
-            if (trimmed_end - trimmed_start >= 2 &&
-                trimmed_start[0] == '/' && trimmed_start[1] == '/') {
-                if (pos + 1 < data_size && data[pos] == '\r' &&
-                    data[pos + 1] == '\n')
-                    ++pos;
-                line_start = pos + 1;
-                continue;
-            }
-
-            // Must contain "anim_"
-            anim_ptr = NULL;
-            {
-                const char *s;
-                size_t tlen = (size_t)(trimmed_end - trimmed_start);
-                if (tlen >= 5) {
-                    for (s = trimmed_start; s + 5 <= trimmed_end; ++s) {
-                        if (memcmp(s, "anim_", 5) == 0) {
-                            anim_ptr = s;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (!anim_ptr) {
-                if (pos + 1 < data_size && data[pos] == '\r' &&
-                    data[pos + 1] == '\n')
-                    ++pos;
-                line_start = pos + 1;
-                continue;
-            }
-
-            // Find quotes
-            q1 = (const char *)memchr(trimmed_start, '"',
-                        (size_t)(trimmed_end - trimmed_start));
-            if (!q1) {
-                free(data); adm_free(out); return -1;
-            }
-            q2 = (const char *)memchr(q1 + 1, '"', (size_t)(trimmed_end - (q1 + 1)));
-            if (!q2) {
-                free(data); adm_free(out); return -1;
-            }
-
-            // Grow array if needed
-            if (out->count >= cap) {
-                size_t new_cap = cap * 2;
-                AdmEntry *new_entries = (AdmEntry *)realloc(
-                    out->entries, new_cap * sizeof(AdmEntry));
-                if (!new_entries) { free(data); adm_free(out); return -1; }
-                out->entries = new_entries;
-                cap = new_cap;
-            }
-
-            // Key = everything before first quote, trimmed
-            copy_trimmed(out->entries[out->count].key,
-                         sizeof(out->entries[out->count].key),
-                         trimmed_start, q1);
-
-            // Every additional quoted token on the row is a VARIANT of the
-            // same anim slot [orig: AnimMap_ParseConfigLine @ 0x40cb60 loops
-            // the whole line, registering each token on one slot ring].
-            {
-                AdmEntry *e = &out->entries[out->count];
-                const char *vq1 = q1;
-                const char *vq2 = q2;
-                e->variant_count = 0;
-                while (vq1 && vq2 && e->variant_count < ADM_MAX_VARIANTS) {
-                    copy_trimmed(e->variants[e->variant_count],
-                                 sizeof(e->variants[e->variant_count]),
-                                 vq1 + 1, vq2);
-                    if (e->variants[e->variant_count][0] != '\0')
-                        e->variant_count++;
-                    vq1 = (const char *)memchr(vq2 + 1, '"',
-                                (size_t)(trimmed_end - (vq2 + 1)));
-                    vq2 = vq1 ? (const char *)memchr(vq1 + 1, '"',
-                                (size_t)(trimmed_end - (vq1 + 1)))
-                              : NULL;
-                }
-                if (e->variant_count == 0)
-                    e->variants[0][0] = '\0';
-            }
-
-            // Skip entries with empty key
-            if (out->entries[out->count].key[0] != '\0') {
-                out->count++;
-            }
-
-            // Skip \r\n together
-            if (pos + 1 < data_size && data[pos] == '\r' &&
-                data[pos + 1] == '\n')
-                ++pos;
-            line_start = pos + 1;
-            continue;
-        }
-    }
-
-    free(data);
-
-    // Shrink to fit
-    if (out->count > 0 && out->count < cap) {
-        AdmEntry *shrunk = (AdmEntry *)realloc(
-            out->entries, out->count * sizeof(AdmEntry));
-        if (shrunk) out->entries = shrunk;
-    } else if (out->count == 0) {
-        free(out->entries);
-        out->entries = NULL;
-    }
-
     return 0;
 }
 

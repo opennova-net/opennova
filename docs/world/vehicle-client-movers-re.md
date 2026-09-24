@@ -5864,3 +5864,42 @@ accessor for an entity's BAM attitude (the seeded yaw, pitch and roll, else the
 spawn form). A joiner row's first yaw seed also goes through the degree mirror
 of the wire heading; seeding the yaw from the decoded BAM heading at
 prediction arming would hold the wire value itself (D-NET-196).
+
+## 42. Armed controller weapons (2026-09-23)
+
+`Entity_AttachToVehicleSlot` resets the local player's camera on every ctrlx
+attach (`Player_ResetCameraAndMovementState` call `@0x4947AE`), then, for a
+carrier whose ItemDef attrib has EWeap (`test byte [def+54h], 20h`
+`@0x49480B..0x49480F`), borrows the carrier's persistent weapon slot
+(`+0x474`) for every occupant and names it the slot owner (`+0x498`). The
+local player with an equipped slot saves it (`+0x308`) and calls
+`Player_MountWeaponSlot` (`@0x494838`), the same call UseGun makes
+(`@0x546C38`): the pending slot is set, and the outgoing personal slot queues
+SWITCHRANK or SWITCHFROM, whose completion commits the carrier slot and queues
+its SWITCHTO (`WeaponAction_SwitchFrom @0x543475`, `@0x5434A3`); the Emplaced
+flag only shortens that wait. Any other occupant is stamped directly
+(`@0x494867..0x494883`). Detach shares UseGun's restore for seats 2 and 3:
+`Player_MountWeaponSlot(saved)` for the local player, falling back to the
+current inventory slot when the saved one is null or its category is 11 or
+higher (`@0x43562A..0x43565F`), and a direct restore for anyone else
+(`@0x435671..0x435687`).
+
+`Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF` rejects driver slot 5,
+rejects an unarmed controller slot 2, and fires an armed controller's
+`vehicle->EquippedSlot`, the same carrier slot. `Player_CanFireWeapon
+@0x5CF780` is an optical-view query (scope/FOV, crosshair, the fire-packet
+zoom byte); it gates fire only for OnlyFireScoped weapons
+(`@0x4E098B..0x4E09A0`), none of which sits on an armed ctrlx. The controller
+muzzle branch (`Entity_CalcWeaponFirePosition @0x4DC803..0x4DC846`) poses the
+carrier. The reload message addresses the slot's owner only for parentSlot 3;
+a controller's addresses itself with the carrier Def's `category * 65 + rank`
+(`WeaponAction_Reload @0x5430DB..0x543103`). Every pool-0 row's slot is
+pumped whatever its seat (`WeaponAction_ProcessAllEntities
+@0x5426AD..0x5426C1`), so a remote or AI pilot's borrowed slot runs too.
+
+Regressions: native `training_gameplay` mounts the actual 03TR SSN 41 and
+checks the queued commit, the slot owner, carrier-clip shots, release, the
+queued personal draw on dismount and personal inventory restoration, on the
+base mount and revx02 when installed. `local_player_view` pins armed/unarmed
+controller, driver and gunner trigger admission; GUT `mounted_view_test`
+checks the same Little Bird through the real player presenter.

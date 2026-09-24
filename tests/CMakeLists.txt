@@ -3079,6 +3079,7 @@ foreach(port
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
         mission/native_assets_00trg mission/buggy_01tr mission/fire_hold_01tr
+        mission/training_gameplay
         mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)

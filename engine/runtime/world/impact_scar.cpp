@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include <runtime/world/collision.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -204,7 +205,12 @@ bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target
 	// world hit point through the TRANSPOSED live section matrix and the
 	// model-local normal [orig: @0x5ccc99..0x5ccca5; the normal read
 	// @0x5cc938..0x5cc960]; the shared ring keeps the world point and the
-	// normal rotated by the live matrix [orig: @0x5cc96f]. The trace already
+	// normal rotated by the live matrix [orig: @0x5cc96f]. The transposed
+	// matrix only NEGATES the translation, so the point takes the
+	// translate-then-rotate transform, local = R^T (p - t); rotating first
+	// would land every entity-ring scar hundreds of units off its owner
+	// [orig: Matrix_Transpose3x3WithNegateCol3 @0x6136d0 ->
+	// Math_TransformPointWithTranslation22 @0x412f60]. The trace already
 	// rotated the face normal, so the entity-local case un-rotates it. Without
 	// a collision instance (headless worlds) the world frame stands in.
 	int32_t pos[3] = {hit.position_q16.x, hit.position_q16.y, hit.position_q16.z};
@@ -217,7 +223,7 @@ bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target
 			section.invert_into(inverse);
 			const int32_t world_pos[3] = {pos[0], pos[1], pos[2]};
 			const int32_t world_normal[3] = {normal[0], normal[1], normal[2]};
-			inverse.transform_point(world_pos, pos);
+			detail::transform_translate_then_rotate(inverse.m, world_pos, pos);
 			inverse.rotate_point(world_normal, normal);
 		}
 	}

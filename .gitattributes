@@ -18,7 +18,7 @@ fixtures/**/*.md text eol=lf filter= diff= merge=
 # LF-tolerant and the minted files are
 # byte-guarded by their generators, so git must not normalise them in either
 # direction. Last-match precedence: these must follow fixtures/**.
-fixtures/**/*.adm -text -eol filter= diff= merge=
+fixtures/**/*.adm -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.def -text -eol filter= diff= merge=
 fixtures/**/*.env -text -eol filter= diff= merge=
 fixtures/**/*.grm -text -eol filter= diff= merge= whitespace=cr-at-eol

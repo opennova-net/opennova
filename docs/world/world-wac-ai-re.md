@@ -2984,14 +2984,32 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   (`@0x82f9a4`) that `DialogSystem_Init @ 0x527687` fills, so the leg is the
   window-smash sound plus the pane's disappearance. Nothing recomputes
   collision bounds: the item CFAC face walk's only per-section gate is
-  `(boneMatrix+60) & 3 @0x4e4f12`, so a shot-out pane still STOPS ordinary
-  rounds; the mask removes it from the draw and from the person bone-sphere
-  walks. UNPORTED residual: `test dword ptr [ebx+114h], 18000000h @0x4e968a`
-  → `*outFlag = 1 @0x4e969a` — a `lawr|fgrenade` round (the round's ammo-flag
-  copy at +0x114; `DEF_AMMO_FLAG_LAWR` 0x08000000 | `DEF_AMMO_FLAG_FGRENADE`
-  0x10000000, flag table `@0x813500`) reports "continue" and flies on through
-  the hole it just made. RoundSim has no round-continues output, so a rocket
-  stops at the glass.
+  `(boneMatrix+60) & 3 @0x4e4f12`, so a shot-out pane remains ray-visible;
+  the mask removes it from the draw and from the person bone-sphere walks.
+  **Continuation correction, ported 2026-09-23:** ordinary bullets also pass
+  glass when their energy permits. The table at `@0x82D034` charges Q16
+  energy costs `{19:10, 16:4, 15:10, 17:8, 7:4}`. The misleadingly named
+  `Entity_ClampKineticEnergy @0x4E9070` subtracts that cost from `v² * mass`
+  and scales velocity, or releases the round if exhausted. Both square roots
+  are `fild; fsqrt; fistp` under the default round-to-nearest control word
+  (`@0x4E9142..0x4E9169`), and a zero speed root releases the round
+  (`@0x4E916C`). Mass is `(grains << 16) / 250` (`@0x4EC6B7`).
+  `Projectile_ProcessDamageOnTarget` returns 0 for those materials
+  (`@0x4E8233..0x4E8266`) and for a target without an ItemDef
+  (`@0x4E7FCB..0x4E7FD9`); only a 1 zeroes the lifetime (`@0x4E98AA`), so
+  survival is the lifetime alone. `outFlag` is dead: `Projectile_UpdatePhysics`
+  zeroes it (`@0x4EA325`) and never reads it after the call, so the
+  `lawr|fgrenade` store at `@0x4E969A` has no effect. The material, section,
+  impulse and effect block runs only for a def-bearing target
+  (`@0x4E9584..0x4E95BD`): a def-less entity passes the round silently. A
+  visual client's decoded pool-1 wire projection stands for a def-bearing
+  retail entity and takes the block. The handler receives the hit at
+  `t - 0x800` along the tick-start ray, whose direction is
+  `v * (2^32 / |v|)` (`@0x4EA181..0x4EA206`, `@0x4EA603..0x4EA65C`); the
+  arm then adds 0x1000, so flight resumes next tick from `t + 0x800` along
+  that ray (`@0x4EA73F..0x4EA798`), after normal gravity/drag. This also
+  covers vehicle windows, which do not take the building-section break
+  branch.
 - **The runtime arrays** `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0 —
   ex ThreediGp_BuildCollisionModel, renamed (the chunked form is 3DI3)]`: one arena;
   8-B Q8 int16 vertex records, 8-B Q14 normal records keeping the dominate-axis
@@ -3208,6 +3226,25 @@ The fixed-point section walk is now reproduced by
   walk hits. That person replaces an existing terrain/item winner only when
   `ray[29]` is strictly closer. Its impact point uses `ray[29] - 0x800`
   without clamping.
+
+**Rounds pass through persons (ported 2026-09-23).** The material 19 stamp
+(`@0x4E49F7`) makes `Projectile_ProcessDamageOnTarget` return 0 for every
+person hit (`@0x4E823F..0x4E8266`), so the person handler
+(`Projectile_HandleTerrainImpact_0 @0x4E98F0`, an IDB misnomer) never zeroes
+the lifetime through its damage call (`@0x4E99E6..0x4E99EE`). Only its
+kill-zone push releases the round (`@0x4E9B26..0x4E9B2E`: kztype, armed,
+`!in_session || authority`, nonzero kz_damage). There is no material energy
+charge on this leg. A survivor parks past the victim: the handler receives
+`t - 0x800`, and the arm adds the victim's entity+0 boundRadius plus 0x1000,
+so the next tick starts at `t + 0x800 + boundRadius` along the tick-start ray
+(`Projectile_UpdatePhysics @0x4EA7BE..0x4EA829`), after the common
+gravity/drag tail. The damage, the reaction/death routing, the armor row and
+the flesh/player effect all still apply to the victim, so one bullet can wound
+several people in a line. `ProjectileHit::victim_bound_radius_q16` carries the
+radius for registry persons and decoded person proxies alike (a model-less
+person or proxy the torso stand-in serves has no stamped radius and takes the
+0.6u organic stand-in, which clears that sphere);
+`projectile_combat` pins the pass-through, the park and the kill-zone release.
 
 `RoundSim` carries both ordinals. The primary/reaction bone feeds `RoundHit`
 and the existing `compute_death_anim_state(bone, incoming quadrant, bullet)`
@@ -7408,7 +7445,7 @@ the FFI structs.
 |---|---|---|---|
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
-| D-ITEM-3 | Blast half FIXED 2026-09-18: flags/section-center box sweep and one-time glass sound supplement gunfire marking; lawr/fgrenade pass-through remains OPEN @ 0x4E968A..0x4E969A | @ 0x4E6C5E..0x4E6E6B; Entity_PlaySectionBreakSound @ 0x439C00 | destruction covers root translation, box corners, flag filtering and repeated blasts; projectile_combat retains glass behavior. The section table D-COL-2 named is the door table, closed (§33.14). |
+| D-ITEM-3 | FIXED 2026-09-23: blast/shot section marking plus material-energy continuation; the prior lawr/fgrenade-only interpretation was incorrect (§15.8) | @0x4E6C5E..0x4E6E6B; @0x4E9070; @0x4E9390 | destruction covers blast flags and repeated sounds; projectile_combat covers glass survival, energy exhaustion and the next obstruction. |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
@@ -7418,7 +7455,7 @@ the FFI structs.
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
 | D-ITEM-12 (**CLOSED** — `RESOLVED/SUPERSEDED` in the ledger: the ordinary-round ballistic path is ported, D-WPN-25 carries the bounded residuals; the row below is the original finding) | Round BALLISTICS were absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
-| D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
+| D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), and retail's post-hit round parking is ported for the entity and person arms 2026-09-23 (`t + 0x800`, plus the victim boundRadius for persons, `@ 0x4ea73f-0x4ea829`); the generic item/terrain effect backoff and the terrain/water arms' parking remain absent `@ 0x4ea603-0x4ea6db`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
 | D-ITEM-14 | CLOSED 2026-08-12: the four ported transition sites (`transition_to_ground_death` — routed-falling `@0x494113`, static legs `@0x4942c6`/`@0x4943da`, unitType-3 pitch equality `@0x48f0c7`) play the item's authored `particlefinale` once at the grounded pose and stamp savedLivePose; the periodic-sound clear closed as FAITHFUL-NOTHING — the pool has no producer in retail JO (allocator `@0x57b380` + reset `@0x57b360` have zero xrefs; `PeriodicSound_TickAll @0x57b450` walks an always-empty pool), so the entity-matched clear never clears anything and no pool is modeled. The old "+0x4E0 impact pair" gloss corrected: only the +0x4E2 `particlefinale` handle is read `@0x493088` | `Entity_TransitionToGroundDeath @0x493080`; intern site `resolve_item_materials_and_spawn_bone_trails @0x5231cb` (name +0x4E4 → handle +0x4E2); `PeriodicSound_ClearByEntity @0x57b3e0` over `g_periodic_sound_pool @0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | `destruction_test` pins routed and specialized finale/saved-pose transitions plus generic silence |
 | D-ITEM-15 | FIXED (PR #640): four-slot Dead/water, Fire and Other bone banks with per-slot follow, PRNG_C crackle and underwater steam/restart | Entity_InitDeathSounds @0x4939B0; Entity_UpdateDeadWreckEffects @0x493140 | destruction and destruction_present_pass regressions; vehicle-client-movers-re section 28 |
 | D-ITEM-16 | **FIXED 2026-08-16.** The intact `CollisionWorld` view now samples every section at the total-face 8.8 stride, uses retail's signed centroid arithmetic and first callback matrix, derives the witnessed blast/radial direction, and emits material-17 foliage versus wood effects at each sampled triangle | `Entity_SpawnSectionDebris @ 0x43f580` | `destruction_test::test_section_debris_samples_collision_faces` pins 150 samples plus centroid/transform/direction/material; the present-pass test pins the resolved event row |
@@ -7673,7 +7710,9 @@ per-strip batches, the fog-box cull, the owner-visibility gate), and the
 device `ScarPresenter` + `scar_presenter.cpp` (entity-ring batches parented
 under the owner model's section node, shared-ring batches as a world mesh; the
 entity-ring batches are uploaded in the section-local frame the engine stores,
-the shared ring in world space). The device state is per strip from the
+the shared ring in world space). That section-local frame is the 3DI source
+frame (Z up), so the packer folds it `(x, y, z) -> (y, z, x)` onto the
+render-part node, the frame its mesh is built in. The device state is per strip from the
 witnessed mode words (`world::scar_texture_strip_mode_word`,
 `renderer::decode_scar_strip_mode`, the draw list's `strip_mode_words`):
 `scar_quad.gdshader` carries the scorch state (blend_mix, unshaded, fog,
@@ -7681,20 +7720,30 @@ depth_draw_never, cull_back, no alpha test, `saturate(2 · tex · COLOR)` in
 gamma space) and `scar_quad_hole.gdshader` the bhole state (plus the
 GREATER/128 discard, depth_draw_always, cull_disabled); Godot's front face is
 clockwise like D3D's but in a right-handed frame, so the witnessed order is
-already front on the struck side under the packer's world ROTATION fold and
-the shared ring keeps it, while the entity-local REFLECTION fold flips it and
-those triangles are re-wound — the scorch `cull_back` then culls what retail's
-CCW cull culls (the probe's front/behind captures prove it). **Fixed
-2026-08-21**: the first cut
+already front on the struck side under both of the packer's folds (world and
+entity-local are ROTATIONS), so both rings keep it and the scorch `cull_back`
+culls what retail's CCW cull culls. **Fixed 2026-09-24**: no vehicle or item
+scar had ever shown. The slot writer applied the transposed section matrix
+rotate-first (`R^T p - t`) where retail translates first,
+`R^T (p - t)` [orig: Matrix_Transpose3x3WithNegateCol3 @0x6136d0 ->
+Math_TransformPointWithTranslation22 @0x412f60], which put every entity-ring
+slot hundreds of units off its owner. The packer also folded the slot as the
+decoded `(-x, y, z)` frame, which put it below and beside the struck face.
+Pinned by ctest `impact_scar` (a posed, translated section).
+**Fixed 2026-08-21**: the first cut
 drew both strips through one alpha-scissor-0.5 material, which in Godot means the
 opaque pass with no blend — every scorch drew as an opaque black blob
 (the "pitch black, no texture" report); the scissor was a misread of the
 inert 128 latch.
 Pinned by ctest `impact_scar`, `projectile_combat`, `renderer_scar_draw_list`,
-`destruction`. **The one residual**: the GLASS userpoint leg — the 24-row
-table is not witnessed in full, so a userpoint match cannot be detected and
-such a hit takes the ring scar (D-ITEM-6 narrowed to the blast/damage tails +
-this leg). The `scar_type` word was parsed into `DefAmmoDef` this round (no
+`destruction`. **The one residual**: the GLASS userpoint leg, unported, so a
+userpoint match cannot be detected and such a hit takes the ring scar
+(D-ITEM-6 narrowed to the blast/damage tails + this leg). The table @0x841980
+holds 35 rows, every one keyed to a BUILDING model (`eurhr1..3*`,
+`atrm1a..c`, `atrm2a..c`, `ctrblda/b`, `airtowr1`), each with the four
+`Effect_Bld{Glass,Paper,Fire,Dust}Exp` rows, a scar id 3..16, a radius of
+0x8000..0x80000, and +184 = +188 = 1. Vehicle glass (the 00TRa truck) never
+matches, so retail takes the id-18 `bhole1` ring scar there too. The `scar_type` word was parsed into `DefAmmoDef` this round (no
 Python mirror exists for ammo).
 
 ## 25. Appendix: the tracer visual system — the trail emitter pool, style tables, and the ribbon renderer (grill-ida, 2026-07-18)

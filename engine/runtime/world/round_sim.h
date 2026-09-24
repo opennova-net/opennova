@@ -269,6 +269,9 @@ struct LiveRound {
     uint64_t presentation_generation = 0;
     Vec3 pos;            // mission units
     Vec3 vel;            // mission units per TICK [orig: velocity = ammo speed / 62]
+    // round+680: (ammo weight in grains << 16) / 250. Kept on the round so
+    // copied/dud rounds retain the original mass [orig: @0x4ec6b7].
+    int32_t mass_q16 = 0;
     int32_t age_ticks = 0;
     int32_t max_age_ticks = 0;
     // Tracer presentation state [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5 decision;

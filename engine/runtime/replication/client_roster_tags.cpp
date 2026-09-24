@@ -33,9 +33,11 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 					row->state_flags & 0x01u ? world::kEntityFlagCarried : 0u,
 					has_item_def))
 			continue;
-		// The pass gates [orig: @0x5a4552..0x5a457d]: entity+0x162 team vs the
-		// local team unless the death screen is up, then `g_GameType || death
-		// screen`. A row with no team-bearing record yet (0xFF) is not team 0.
+		// The pass gates [orig: @0x5a4552..0x5a457d] and the drawer's team
+		// compare [orig: @0x5a3c6b..0x5a3c95]: entity+0x162 team vs the local
+		// team unless the death screen is up, then `g_GameType || death
+		// screen`. A row with no team-bearing record yet (0xFF) reads as team 0,
+		// so it draws only on the death screen or for a team-0 local player.
 		const uint8_t team = row->team == 0xFF ? 0 : row->team;
 		if (!world::friendly_tag_pass_gates(team, local_team, death_screen, game_type))
 			continue;

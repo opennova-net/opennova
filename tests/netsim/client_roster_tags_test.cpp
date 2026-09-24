@@ -59,12 +59,14 @@ void test_walk_and_gates() {
 	add_player(s, 0x0004, 2, 0x00, 80); // enemy
 	add_player(s, 0x0005, 1, 0x01, 80); // teammate, CARRIED (hidden)
 	add_player(s, 0x0006, 1, 0x00, 80); // no slot owns it
+	add_player(s, 0x0007, 0, 0x00, 80); // neutral is not a teammate
 	bind_slot(s, 0, "Self", 1);
 	bind_slot(s, 1, "Ace", 2);
 	bind_slot(s, 2, "Bee", 3, 87, true);
 	bind_slot(s, 3, "Foe", 4);
 	bind_slot(s, 4, "Cargo", 5);
 	bind_slot(s, 5, "Ghost", -1); // bound, no entity
+	bind_slot(s, 6, "Neutral", 7);
 
 	std::vector<world::FriendlyTagSource> tags;
 	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
@@ -97,7 +99,12 @@ void test_walk_and_gates() {
 	// [orig: @0x5a4564 / @0x5a4576]: the enemy joins, self and hidden stay out.
 	tags.clear();
 	collect_roster_tags(s, 0x0001, 1, true, 0, tags, {}, nullptr);
-	CHECK(tags.size() == 3);
+	CHECK(tags.size() == 4);
+	// A team-0 local player keeps only the team-0 row [orig: @0x5a3c6b..0x5a3c95].
+	tags.clear();
+	collect_roster_tags(s, 0x0001, 0, false, 0x30020u, tags, {}, nullptr);
+	CHECK(tags.size() == 1);
+	if (tags.size() == 1) CHECK(tags[0].name == "Neutral");
 	// No def hp -> max 1: any positive health is the full good tier
 	// [orig: `if (!max) max = 1` @0x5a3b95].
 	tags.clear();

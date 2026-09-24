@@ -57,6 +57,8 @@ struct Rig : HeapWorldFixture {
         t.item_type = 3;
         t.position = {5.0f, 0.0f, 0.0f};
         t.health = 100;
+        // entity+0: a round passing the person parks this far past the hit.
+        t.bound_radius = 1.0f;
         target = world.registry.spawn(0, t);
 
         world.tables.ammo.entries.resize(2);
@@ -93,6 +95,10 @@ struct Rig : HeapWorldFixture {
         world.round_sim.hits.clear();
         world.round_sim.deaths.clear();
     }
+
+    // A round that passed the person is still flying; a new phase that must
+    // see only its own round starts from an empty pool.
+    void next_phase() { world.round_sim.reset(); }
 };
 
 // Deterministic posed-person fixture. Only `active_section` is placed on the
@@ -122,6 +128,7 @@ struct PosedDamageRig : HeapWorldFixture {
         t.item_type = 3;
         t.position = {5.0f, 0.0f, 0.0f};
         t.health = 5000;
+        t.bound_radius = 1.0f;
         target = world.registry.spawn(0, t);
 
         AmmoTableEntry ammo;
@@ -287,7 +294,10 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.impacts[0].ammo_index == 0);
 }
 
-void test_missing_item_def_consumes_round_without_damage() {
+// A def-less person takes no damage and, like every person, passes the round:
+// the damage call returns 0 for a null ItemDef. [orig:
+// Projectile_ProcessDamageOnTarget @0x4E7FCB..0x4E7FD9]
+void test_missing_item_def_person_takes_no_damage() {
     Rig r;
     r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity *target = r.world.registry.get(r.target);
@@ -299,7 +309,7 @@ void test_missing_item_def_consumes_round_without_damage() {
     CHECK(r.world.round_sim.hits.empty());
     CHECK(r.world.round_sim.deaths.empty());
     CHECK(r.world.round_sim.impacts.size() == 1);
-    CHECK(r.world.round_sim.active_count == 0);
+    CHECK(r.world.round_sim.active_count == 1);
 }
 
 void test_damage_uses_retail_signed_wrap_and_ftol_cap() {
@@ -341,7 +351,7 @@ void test_nodie_and_nontransparent_damage_gates() {
 
     // Retail has no lower clamp around this leaf: malformed state (zero health
     // while damage_state is still zero) turns health-1 into -1 applied damage.
-    r.clear_events();
+    r.next_phase();
     target->health = 0;
     CHECK(r.fire() >= 0);
     r.world.round_sim.tick(r.world, nullptr);
@@ -349,7 +359,7 @@ void test_nodie_and_nontransparent_damage_gates() {
     CHECK(r.world.round_sim.hits.size() == 1);
     CHECK(r.world.round_sim.hits[0].damage == -1);
 
-    r.clear_events();
+    r.next_phase();
     target->item_attrib = 0;
     target->health = 10;
     target->engine_flags |= 0x4000000u; // indestructible damage gate
@@ -358,9 +368,9 @@ void test_nodie_and_nontransparent_damage_gates() {
     CHECK(target->health == 10);
     CHECK(r.world.round_sim.hits.empty());
     CHECK(r.world.round_sim.impacts.size() == 1); // still a physical impact
-    CHECK(r.world.round_sim.active_count == 0);
+    CHECK(r.world.round_sim.active_count == 1);   // persons pass the round
 
-    r.clear_events();
+    r.next_phase();
     target->engine_flags = 0;
     target->health = 0;
     target->alive = false;
@@ -372,7 +382,10 @@ void test_nodie_and_nontransparent_damage_gates() {
     const EntityHandle farther = r.world.registry.spawn(0, behind);
     CHECK(r.fire() >= 0);
     r.world.round_sim.tick(r.world, nullptr);
-    CHECK(r.world.round_sim.impacts.size() == 1); // corpse consumed the round
+    // One person per tick: the corpse passes the round, which parks past it
+    // and reaches the person behind on the next tick.
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    CHECK(r.world.round_sim.active_count == 1);
     CHECK(r.world.registry.get(farther)->health == 100);
     CHECK(r.world.round_sim.hits.empty());
 }
@@ -616,14 +629,17 @@ void test_person_hit_applies_the_surface_drag_leg() {
         CHECK(r.world.round_sim.hits.size() == 1);
         FixedVec3 expected{to_fixed(spawn_vel.x), to_fixed(spawn_vel.y), to_fixed(spawn_vel.z)};
         if (item_type == 3) projectile_apply_person_hit_drag(expected, r.ammo());
-        const Vec3 stored = r.world.round_sim.rounds[0].vel;
-        CHECK(stored.x == static_cast<float>(from_fixed(expected.x)));
-        CHECK(stored.z == static_cast<float>(from_fixed(expected.z)));
+        // The hit record copies the round after the damage leg; the round
+        // itself passes the person and takes the flight tail afterwards.
+        const FixedVec3 recorded = r.world.round_sim.hit_record.round_vel_q16;
+        CHECK(recorded.x == expected.x);
+        CHECK(recorded.z == expected.z);
         if (item_type == 3) {
             CHECK(expected.x > 0 && expected.x < to_fixed(spawn_vel.x));
         } else {
-            CHECK(stored.x == spawn_vel.x);
+            CHECK(recorded.x == to_fixed(spawn_vel.x));
         }
+        CHECK(r.world.round_sim.rounds[0].active);
     }
 }
 
@@ -684,7 +700,8 @@ void test_network_oneshot_authority_and_session_gate() {
         CHECK(r.world.round_sim.hits.empty());
         CHECK(r.world.explosions.queue.empty());
         CHECK(r.world.round_sim.impacts.size() == 1); // client prediction remains visual
-        CHECK(r.world.round_sim.active_count == 0);
+        // No authority, so no kill-zone push releases it: it passes the person.
+        CHECK(r.world.round_sim.active_count == 1);
 
         // The same world-role gate covers spawn-time instant kill zones.
         AmmoTableEntry instant;
@@ -1578,7 +1595,7 @@ void test_signed_armor_equality_and_damage_state_gates() {
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
         CHECK(r.world.round_sim.impacts.size() == 1);
-        CHECK(r.world.round_sim.active_count == 0);
+        CHECK(r.world.round_sim.active_count == 1);
         CHECK(target->armor_impact == expected_armor);
 		CHECK(r.world.registry.get(r.shooter)->hud_hit_feedback_serial == 1);
         if (expected_damage == 0) {
@@ -1832,7 +1849,7 @@ void test_vehicle_occupant_reduction_count_cap_and_depth() {
     child->has_item_def = true;
 
     const auto fire_expect = [&](int32_t expected_damage) {
-        r.clear_events();
+        r.next_phase();
         r.world.registry.get(vehicle_h)->health = 5000;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
@@ -1992,16 +2009,123 @@ void test_retail_aerodynamic_drag_vectors() {
     CHECK(bin_1219.vel.x == speed_1219);
 }
 
+// A person passes the round, which parks past the victim's boundRadius and
+// takes the ordinary gravity tail; only the kill-zone push releases it, and a
+// released round skips that tail. [orig: Projectile_HandleTerrainImpact_0
+// @0x4E99E6..0x4E99EE, @0x4E9B26..0x4E9B2E; Projectile_UpdatePhysics
+// @0x4EA7BE..0x4EA829, gravity @0x4EAA58..0x4EAA5A]
+// One round wounds two people in a line, one per tick: the first passes it
+// (material 19, no energy charge) and it parks past that victim's
+// boundRadius before the second is swept. A decoded person proxy on a visual
+// client passes it the same way, parking by the proxy's radius.
+// [orig: Projectile_HandleTerrainImpact_0 @0x4E99E6..0x4E99EE;
+//  Projectile_UpdatePhysics @0x4EA7BE..0x4EA829]
+void test_round_passes_through_people_in_a_line() {
+    {
+        Rig r;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        Entity behind;
+        behind.kind = EntityKind::Organic;
+        behind.has_item_def = true;
+        behind.item_type = 3;
+        behind.position = {8.0f, 0.0f, 0.0f};
+        behind.health = 100;
+        behind.bound_radius = 1.0f;
+        const EntityHandle second = r.world.registry.spawn(0, behind);
+        const int slot = r.fire();
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+        const Vec3 spawn_vel = round.vel;
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.registry.get(r.target)->health == 75);
+        CHECK(r.world.registry.get(second)->health == 100);
+        CHECK(round.active);
+        // No material energy charge on the person leg: only gravity changed.
+        CHECK(to_fixed(round.vel.x) == to_fixed(spawn_vel.x));
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.registry.get(r.target)->health == 75);
+        CHECK(r.world.registry.get(second)->health == 75);
+        CHECK(r.world.round_sim.hits.size() == 2);
+        CHECK(round.active);
+    }
+    {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 8);
+        world.rules.mp_session = true;
+        world.rules.projectile_authority = false;
+        Entity shooter;
+        shooter.kind = EntityKind::Organic;
+        shooter.item_type = 3;
+        const EntityHandle sh = world.registry.spawn(0, shooter);
+        world.cached.local_player = sh;
+        CollisionWorld collision;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        WirePersonCollisionProxy person;
+        person.wire_handle = 0x0003;
+        person.position_q16 = FixedVec3{5 * 65536, 0, 0};
+        person.bound_radius_q16 = 2 * 65536;
+        collision.replace_wire_collision_proxies({person}, {});
+        AmmoTableEntry ammo;
+        ammo.name = "VISUAL_PERSON";
+        ammo.valid = true;
+        ammo.flags = kAmmoFlagNoGravity;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 875;
+        world.tables.ammo.entries.push_back(ammo);
+        RoundSpawnParams params;
+        params.owner = sh;
+        params.origin = {0.0f, 0.0f, kOrganicStandInCenterZ};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params, RoundConsequenceMode::VisualOnly);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        world.round_sim.tick(world, nullptr, &collision);
+        const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+        CHECK(world.round_sim.impacts.size() == 1);
+        CHECK(round.active);
+        // Parked past the proxy's 2u radius: beyond x = 5 + 2 - the hit's lead.
+        CHECK(round.pos.x > 6.0f && round.pos.x < 7.5f);
+    }
+}
+
 void test_consumed_hit_skips_post_sweep_forces() {
-    Rig r;
-    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
-    const int slot = r.fire();
-    CHECK(slot >= 0);
-    if (slot < 0) return;
-    r.world.round_sim.tick(r.world, nullptr);
-    const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
-    CHECK(!round.active);
-    CHECK(to_fixed(round.vel.z) == 0); // no post-hit gravity or drag
+    {
+        Rig r;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        const int slot = r.fire();
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        r.world.round_sim.tick(r.world, nullptr);
+        const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+        CHECK(round.active);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        CHECK(to_fixed(round.vel.z) == -167); // one 167-Q16 gravity step
+        // start + (t + 0x800 + boundRadius) along +x: past the 1.0u radius.
+        CHECK(round.pos.x > 5.0f && round.pos.x < 6.0f);
+        // The next tick starts past the person: no second hit on it.
+        r.world.round_sim.hits.clear();
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.empty());
+    }
+    {
+        Rig r;
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
+        ammo.arm_age_ticks = 0;
+        ammo.kztype = ammo_kz::kBullets;
+        ammo.kz_damage = 50;
+        ammo.kz_maxradius = 4.0f;
+        const int slot = r.fire();
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        r.world.round_sim.tick(r.world, nullptr);
+        const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+        CHECK(!round.active);
+        CHECK(to_fixed(round.vel.z) == 0); // no post-hit gravity or drag
+    }
 }
 
 } // namespace
@@ -2264,12 +2388,137 @@ CollisionModel building_pane_face_model(uint8_t material) {
     return m;
 }
 
+// Entity glass consumes energy and the surviving bullet reaches the next
+// obstacle on the next tick. The same table covers the cloth/foliage/flesh/
+// water entity faces; metal absorbs. [orig: @0x4E9643, @0x4E8233..0x4E8266]
+void test_entity_material_penetration() {
+    for (const uint8_t material : {uint8_t(15), uint8_t(16), uint8_t(17),
+                                  uint8_t(19), uint8_t(7), uint8_t(14)}) {
+        for (const int grains : {68, 1}) {
+            HeapWorldFixture fixture;
+            World &world = fixture.world;
+            world.registry.configure_pool(2, 4);
+            Entity pane;
+            pane.kind = EntityKind::Item;
+            pane.has_item_def = true;
+            pane.item_type = 1; // a vehicle window is not a building section
+            pane.health = 1000;
+            pane.position = {4.0f, 0.0f, 0.0f};
+            const EntityHandle first = world.registry.spawn(2, pane);
+            pane.position.x = 8.0f;
+            const EntityHandle second = world.registry.spawn(2, pane);
+            CollisionWorld collision;
+            const auto place = [&](EntityHandle entity, uint8_t surface, int x) {
+                collision.assign_entity(entity, collision.add_model(knife_person_face_model(surface)));
+                const int32_t pos[3] = {x * 65536, 0, 0};
+                CHECK(collision.publish_entity_section_matrices(entity,
+                        {collision_matrix_from_heading(0, pos)}));
+            };
+            place(first, material, 4);
+            place(second, 14, 8);
+            collision.build_tick_tables(world);
+            world.collision = &collision;
+            AmmoTableEntry ammo;
+            ammo.name = "PENETRATION";
+            ammo.valid = true;
+            ammo.flags = kAmmoFlagNoGravity;
+            ammo.velocity = 620;
+            ammo.max_age_ticks = 20;
+            ammo.weight_in_grains = grains;
+            ammo.max_damage = 25;
+            world.tables.ammo.entries.push_back(ammo);
+            RoundSpawnParams params;
+            params.origin = {0.0f, 0.0f, 1.0f};
+            params.ammo_index = 0;
+            const int slot = world.round_sim.spawn(world, params);
+            CHECK(slot >= 0);
+            if (slot < 0) continue;
+            world.round_sim.tick(world, nullptr, &collision);
+            const bool survives = material != 14 && grains == 68;
+            const LiveRound &round = world.round_sim.rounds[slot];
+            CHECK(round.active == survives);
+            CHECK(world.round_sim.impacts.size() == 1);
+            CHECK(world.registry.get(first)->section_mask == 0);
+            if (survives && round.active) {
+                CHECK(round.pos.x > 4.0f && round.pos.x < 4.1f);
+                CHECK(round.vel.x > 0.0f && round.vel.x < 10.0f);
+                // 10 u/tick, mass (68 << 16) / 250, glass cost 10: both square
+                // roots round to nearest (`fistp`), so vx is exactly 521210.
+                // [orig: Entity_ClampKineticEnergy @0x4E9142..0x4E9169]
+                if (material == 15) CHECK(to_fixed(round.vel.x) == 521210);
+                world.round_sim.tick(world, nullptr, &collision);
+                CHECK(!round.active);
+                CHECK(world.round_sim.debug_trail_count == 2);
+                CHECK(world.round_sim.debug_trail[1].entity == second.packed);
+                CHECK(world.registry.get(second)->health < 1000);
+            }
+        }
+    }
+}
+
+// A decoded pool-1 wire projection stands for a def-bearing retail client
+// entity, so a visual round takes the same material decision there: an
+// absorbing face stops it, glass charges its energy and lets it on.
+// [orig: Projectile_HandleEntityImpact @0x4E9584..0x4E95BD;
+//  Projectile_ProcessDamageOnTarget @0x4E823F..0x4E8266]
+void test_visual_round_wire_proxy_material_decides_survival() {
+    for (const uint8_t material : {uint8_t(9), uint8_t(15)}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 8);
+        world.registry.configure_pool(1, 8);
+        world.rules.mp_session = true;
+        world.rules.projectile_authority = false;
+        Entity shooter;
+        shooter.kind = EntityKind::Organic;
+        shooter.item_type = 3;
+        const EntityHandle sh = world.registry.spawn(0, shooter);
+        world.cached.local_player = sh;
+
+        CollisionWorld collision;
+        const int32_t model_id = collision.add_model(proxy_face_quad_model(material));
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        // Pitch 90 deg turns the proxy-local z=1 quad into a wall across +x.
+        WireDynamicCollisionProxy proxy;
+        proxy.wire_handle = 0x1002;
+        proxy.model_id = model_id;
+        proxy.position_q16 = FixedVec3{4 * 65536, 0, 0};
+        proxy.pitch_bam = 0x40000000;
+        proxy.bound_radius_q16 = 3 * 65536;
+        collision.replace_wire_collision_proxies({}, {proxy});
+
+        AmmoTableEntry ammo;
+        ammo.name = "VISUAL_GLASS";
+        ammo.valid = true;
+        ammo.flags = kAmmoFlagNoGravity;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 68;
+        ammo.max_damage = 25;
+        world.tables.ammo.entries.push_back(ammo);
+        RoundSpawnParams params;
+        params.owner = sh;
+        params.origin = {0.0f, 0.0f, 0.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params, RoundConsequenceMode::VisualOnly);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        world.round_sim.tick(world, nullptr, &collision);
+        CHECK(world.round_sim.debug_trail_count == 1);
+        CHECK(world.round_sim.debug_trail[0].material == material);
+        const LiveRound &round = world.round_sim.rounds[slot];
+        CHECK(round.active == (material == 15));
+        if (material == 15 && round.active)
+            CHECK(round.vel.x > 0.0f && round.vel.x < 10.0f);
+    }
+}
+
 // Gunfire through a BUILDING's glass breaks the struck section: face material
 // 15 on a live item-type-5 victim sets 1 << ray[31] in the victim's section
 // mask and plays GLASS_SMASH at the hit point. Any other face material, a
 // non-building item type, or an already-husked victim leaves the mask clear.
-// The pane still stops the round either way: only the lawr/fgrenade
-// pass-through report would let it continue, and that report is unported.
+// Round survival is independently covered by the material-energy tests above.
 // [orig: Projectile_HandleEntityImpact @ 0x4E9390 — `cmp ecx, 0Fh` @0x4e964f,
 //  `test byte ptr [esi+24h], 4` @0x4e9654, `cmp dword ptr [ecx+5Ch], 5`
 //  @0x4e965d, `or [esi+134h], edx` @0x4e9684; the sound through
@@ -2588,6 +2837,7 @@ struct PlayerVictimRig : HeapWorldFixture {
         spawn.yaw = 90; // engine heading 0: the +X round arrives from behind
         victim = spawn_remote_player(world, spawn);
         CHECK(victim.valid());
+        if (Entity *v = world.registry.get(victim)) v->bound_radius = 1.0f;
         AiEntity *body = world.ai.for_handle(victim);
         CHECK(body != nullptr);
         if (body != nullptr) body->net_is_remote_peer = true;
@@ -3158,8 +3408,10 @@ void test_impact_producers_apply_their_own_gates() {
         ammo.arm_age_ticks = arm_age;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
-        CHECK(r.world.round_sim.active_count == (arm_age > 0 ? 1 : 0)); // a dud flies on
-        return r.world.explosions.queue.size();
+        // Only the push releases a round at a person; anything else passes.
+        const size_t queued = r.world.explosions.queue.size();
+        CHECK(r.world.round_sim.active_count == (queued != 0 ? 0 : 1));
+        return queued;
     };
     CHECK(person_queues(ammo_kz::kBullets, 50, 0) == 1);
     CHECK(person_queues(ammo_kz::kBullets, 0, 0) == 0); // @0x4E9B02
@@ -3268,7 +3520,7 @@ int main() {
     test_item_callbacks_receive_geometric_section_on_both_peers();
     test_projectile_stamps_burn_before_death_dispatch();
     test_arming_dud_and_armed_damage();
-    test_missing_item_def_consumes_round_without_damage();
+    test_missing_item_def_person_takes_no_damage();
     test_damage_uses_retail_signed_wrap_and_ftol_cap();
     test_nodie_and_nontransparent_damage_gates();
     test_posed_head_zone_multiplier();
@@ -3282,6 +3534,8 @@ int main() {
     test_knife_instant_kill_zone_raycast();
     test_bullet_building_material_is_plain_plus_four();
     test_material_15_breaks_the_building_glass_section();
+    test_entity_material_penetration();
+    test_visual_round_wire_proxy_material_decides_survival();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
     test_terrain_stop_records_the_round();
@@ -3298,6 +3552,7 @@ int main() {
     test_vehicle_occupant_reduction_count_cap_and_depth();
     test_retail_force_order_and_stock_gates();
     test_retail_aerodynamic_drag_vectors();
+    test_round_passes_through_people_in_a_line();
     test_consumed_hit_skips_post_sweep_forces();
     test_move_effect_water_release_reads_pre_move_z();
     test_move_effect_ballistic_leg_ignores_the_water_plane();

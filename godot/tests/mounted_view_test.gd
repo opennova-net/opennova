@@ -70,6 +70,31 @@ func test_03tr_truck_50cal_mouse_up_raises_the_camera() -> void:
 			"moving the mouse up raises the mounted view instead of lowering it")
 
 
+func test_03tr_little_bird_pilot_fires_the_carrier_weapon() -> void:
+	var world := await _load_world()
+	if world == null:
+		return
+	var sim := world.get_sim()
+	assert_eq(sim.debug_crew_local_player(41), OK)
+	_frame(world, _camera, 96)
+	var player := sim.entity_card(sim.get_local_player_wire_handle())
+	assert_true(player.is_mounted())
+	assert_eq(player.get_mount_type(), 2, "the Little Bird pilot is a controller")
+	var fired_before := sim.get_local_player_weapon_state().fired_serial
+	for tick in 96:
+		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
+		frame_input.set_weapon_input(true, tick == 0, false)
+		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_presenter.after_world_tick()
+	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
+			"pilot input reaches the installed carrier weapon through the real presenter")
+	_frame(world, _camera, 96)
+	var released := sim.get_local_player_weapon_state().fired_serial
+	_frame(world, _camera, 32)
+	assert_eq(sim.get_local_player_weapon_state().fired_serial, released,
+			"releasing the pilot trigger stops firing")
+
+
 func test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin() -> void:
 	var world := await _load_world()
 	if world == null:

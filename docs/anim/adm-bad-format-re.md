@@ -30,16 +30,36 @@ in place.
 
 ## The `.adm` format
 
-Line-oriented text; the parser normalizes NUL bytes to newlines, skips `//`
-comments, and considers only rows containing `anim_`. A row's key is the text
-before the first `"`; then EVERY quoted token on the row is a clip variant
-registered on that one anim slot [orig: `AnimMap_ParseConfigLine @ 0x40cb60`
-registers every token]. The engine serves the variants as a circular ring —
+Line-oriented text read through the engine's shared ASCII config reader
+(`io/ascii_config.h`, also the `.tsd` reader). Lines split only on a CR LF
+pair, and a tail line without one loses its final byte to the in-place
+terminator [orig: `File_ParseASCIIFile @ 0x53D8C7..0x53D8F5`]. Each line is
+tokenized on space, comma and tab; `"` toggles quoting and ends a token, so a
+token is a quoted run's contents; an unquoted `//` or `;` ends the line; at
+most 30 tokens [orig: `Terrain_TokenizeConfigLine @ 0x53CB60`, the comment
+cuts `@0x53CC16..0x53CC31`]. A line with no token or whose first token starts
+with `/` is skipped [orig: `@0x53D90D..0x53D91E`]. Token 0 names the anim
+slot (`AnimMap_FindSlotByName @ 0x40CFA0` compares from its sixth character;
+the parser keeps `anim_` keys and leaves the lookup to the runtime), and every
+later token is a clip variant registered on that one slot until a token that
+starts with `/` ends the row [orig: `AnimMap_ParseConfigLine @ 0x40cb60`, the
+break `@0x40CBD0..0x40CBD2`]. A row with no clip registers nothing; it never
+fails the file. The engine serves the variants as a circular ring —
 `AnimMap_PlayAnimBySlot @ 0x40bda0` and `Anim_GetDurationTicks @ 0x53ee10`
 both read the head and advance it — so repeated plays of one slot rotate
 through its clips. The widest shipped row is 6 variants (`anim_cover_idle`
 across the JOX/REVX corpora); the parsed model caps at 8
 (`ADM_MAX_VARIANTS`).
+
+**Inline comments (corrected 2026-09-23).** JOTAC's US01 walk rows include
+`"Dt1RunF.bad"\t//\t"D4WLK_F.bad"`: the tokenizer's unquoted `//` cut ends
+that line, so the latter is not a variant. Loading it selected a slower clip
+with no footstep bits. The `/`-led token break is a separate rule: it ends
+BIRD1.ADM's `"B_FORWA1.bad"/no target or near goal` row at the unquoted
+`/no` token, and it would end a row at a quoted `"/..."` token too. JOTAC
+DELTA01.ADM's bare `anim_emote_10` row registers nothing; the port once failed
+the whole file on it. `adm_variants` pins the grammar, and `training_gameplay`
+checks actual movement and emitted footsteps.
 
 **Ring order and ownership (witnessed 2026-09-23).** A row serves from its
 LAST token back: `AnimMap_RegisterBoneNode @0x40C2D0` inserts each token ahead
