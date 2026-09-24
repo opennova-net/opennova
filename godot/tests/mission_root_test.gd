@@ -258,11 +258,11 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	rt.play()
 	assert_true(rt.is_playing(), "play still starts the session ticking")
 	rt.pause()
-	assert_true(rt.is_playing(), "F3 Pause cannot silence a live joiner's socket")
+	assert_true(rt.is_playing(), "a transport pause cannot silence a live joiner's socket")
 	rt.step_once()
-	assert_true(rt.is_playing(), "F3 Step cannot drop a live joiner out of the tick loop")
+	assert_true(rt.is_playing(), "a transport step cannot drop a live joiner out of the tick loop")
 	rt.stop()
-	assert_true(rt.is_playing(), "F3 Stop cannot rewind the world under a live peer")
+	assert_true(rt.is_playing(), "a transport stop cannot rewind the world under a live peer")
 
 
 func test_transport_still_works_for_a_local_runtime() -> void:

@@ -71,7 +71,7 @@ static func definitions() -> Array[McpToolDef]:
 				},
 			}, ["action"]),
 		McpToolDef.make("game_debug",
-			"Use the same UI-free debug catalog as F3. op=list returns controls; get reads one live "
+			"Use the typed debug-control table the F3 windows' controls also invoke. op=list returns controls; get reads one live "
 			+ "control; set writes a value; invoke presses an action; snapshot captures the current "
 			+ "runtime catalog. Authority-changing writes require confirm_authority=true. "
 			+ "Action args: teleport_local_player {position:[x,y,z],yaw_deg?,pitch_deg?}; "
