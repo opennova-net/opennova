@@ -91,11 +91,10 @@ struct DeviceFrame {
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
 	int fog_type = 0;
-	// The beauty camera's near/far: the water copy maps its strip depth
-	// through the same scene curve the beauty water uses.
+	// The beauty camera's near/far (0/0 for an orthographic camera): the
+	// water copy takes the same clip depth the beauty water computes.
 	float camera_near = 0.0f;
 	float camera_far = 0.0f;
-	bool camera_perspective = true;
 };
 
 struct Candidate {
@@ -169,16 +168,19 @@ void main() {
 	view_depth = gl_Position.w;
 	float scene_near = pc.light_local_gain.x;
 	float scene_far = pc.light_local_gain.y;
+	float camera_near = pc.light_local_gain.z;
+	float camera_far = pc.light_local_gain.w;
 	if (uint(pc.params.x + 0.5) == 2u && gl_Position.w > 0.0 &&
-			pc.light_local_gain.z > 0.5 && scene_far > scene_near) {
+			scene_far > scene_near && camera_far > camera_near) {
 		// The water copy writes the depth the beauty water writes: its strip's
-		// replica depth (custom0.x) mapped through the scene curve
+		// replica depth (custom0.x) mapped through the retail scene curve to a
+		// view depth, then through the beauty camera's reverse-Z projection
 		// (water.gdshader), taking the copies' relative pull on top.
 		float scene_z = in_custom0.x / @WATER_VIEWPORT_MAX_Z@;
 		float inv_view_depth = (1.0 - scene_z * (scene_far - scene_near) /
 				scene_far) / (scene_near * (1.0 - 3.0e-4));
-		gl_Position.z = max(scene_near * (scene_far * inv_view_depth - 1.0) /
-				(scene_far - scene_near), 0.0) * gl_Position.w;
+		gl_Position.z = max(camera_near * (camera_far * inv_view_depth - 1.0) /
+				(camera_far - camera_near), 0.0) * gl_Position.w;
 	}
 	if (uint(pc.params.x + 0.5) >= 3u && gl_Position.w > 0.0) {
 		// Render_SetViewportFarDepth's D3DVIEWPORT9 MinZ/MaxZ band for the
@@ -1097,8 +1099,9 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				push.params[1] = draw.water.has_reflection ? 1.0f : 0.0f;
 				push.params[2] = draw.water.reflection_uv_scale.x;
 				push.params[3] = draw.water.reflection_uv_scale.y;
-				push.light_local_gain = {frame->camera_near, frame->camera_far,
-						frame->camera_perspective ? 1.0f : 0.0f, 0.0f};
+				push.light_local_gain = {draw.water.scene_depth_range.x,
+						draw.water.scene_depth_range.y, frame->camera_near,
+						frame->camera_far};
 			} else {
 				// The disc/glow SELFLUM push: the producer's bloom-pass
 				// SelfLumColor x min(gain, 1) x 2 (the NormalCopy formula),
@@ -1367,10 +1370,10 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	const Q3DrawList &draw_list = impl_->compiler.compile(snapshot);
 	auto frame = std::make_shared<DeviceFrame>();
 	frame->draw_list = draw_list;
-	frame->camera_near = p_camera->get_near();
-	frame->camera_far = p_camera->get_far();
-	frame->camera_perspective =
-			p_camera->get_projection() != Camera3D::PROJECTION_ORTHOGONAL;
+	if (p_camera->get_projection() != Camera3D::PROJECTION_ORTHOGONAL) {
+		frame->camera_near = p_camera->get_near();
+		frame->camera_far = p_camera->get_far();
+	}
 	Ref<EnvLightValues> light_values = EnvLightValues::retail_noon_defaults();
 	if (MissionEnvironment *environment = impl_->scope_environment(p_scope,
 			p_viewport)) {

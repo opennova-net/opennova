@@ -895,6 +895,38 @@ func test_water_loses_a_depth_tie_to_geometry_on_its_plane() -> void:
 	water.release_runtime_renderer_resources()
 
 
+func test_water_depth_follows_the_retail_scene_curve_under_any_camera_near() -> void:
+	# The replica depth is tested against retail's scene curve (near 0.2,
+	# far = w + 1), whatever near plane the Godot camera carries: a wall
+	# standing in the water keeps the pixels just above the waterline, where
+	# the water behind it lies only a little farther than the wall.
+	var fixture := _depth_fixture(Vector3(0.0, 9.0, 0.0), -10.0)
+	var cam: Camera3D = fixture["camera"]
+	cam.near = 0.05
+	var wall := MeshInstance3D.new()
+	var wall_mesh := QuadMesh.new()
+	wall_mesh.size = Vector2(40.0, 10.0)
+	wall.mesh = wall_mesh
+	var red := StandardMaterial3D.new()
+	red.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red.albedo_color = Color.RED
+	wall.material_override = red
+	wall.position = Vector3(0.0, 7.0, -20.0)
+	(fixture["viewport"] as SubViewport).add_child(wall)
+	var image: Image = await _render_water_frame(fixture, Vector3(0.0, 1.0, 0.0),
+			Vector3(0.0, 1.0, 0.0))
+	var water: Water = fixture["water"]
+	if image == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		water.release_runtime_renderer_resources()
+		return
+	# 0.5 above the water, 20 out: the ray behind it meets the water ~27 out.
+	var pixel := image.get_pixelv(Vector2i(cam.unproject_position(Vector3(0.0, 7.5, -20.0))))
+	assert_gt(pixel.r, 0.9, "the wall keeps its pixel above the waterline: %s" % pixel)
+	assert_lt(pixel.g, 0.1, "the water behind the wall is depth-rejected: %s" % pixel)
+	water.release_runtime_renderer_resources()
+
+
 func test_wake_rings_face_up_and_hide_from_below() -> void:
 	# The wake pass flags (0x100000, retail render_water_surface_decal
 	# @ 0x5DE245) carry no cull-none bit, so the rings keep the device's

@@ -858,9 +858,11 @@ int Water::_march_strip(Camera3D *p_cam, bool p_underwater, bool p_nightvision,
 	// the blit stretches over it).
 	water_core_->strip_set_view(p_cam->get_camera_transform(),
 			p_cam->get_camera_projection(), vp_size, pass_fog_end);
-	// The scene projection the strip depth replicates is the drawing camera's.
+	// The retail scene projection the strip depth is tested against: near 0.2,
+	// far = the same fog word + 1 (renderer::scene_far_plane).
 	water_material_->set_shader_parameter("u_scene_depth_range",
-			Vector2(p_cam->get_near(), p_cam->get_far()));
+			Vector2(opennova::env::kWaterSceneNear,
+					opennova::renderer::scene_far_plane(p_fog_end)));
 	return water_core_->strip_build(water_height_, p_murk, p_lit,
 			p_depth_curve.scale, p_depth_curve.bias, p_underwater, p_nightvision);
 }

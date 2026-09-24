@@ -75,6 +75,12 @@ struct WaterDepthCurve {
 	float bias = 0.0f;
 };
 
+// The scene projection's near plane, the 0.2 of the curve above: flt_7C3340
+// (fld @ 0x5c333e) is the constant Render_SetProjectionDepthRange stores to
+// g_ProjectionNearZ [orig: @ 0x58ac04..0x58ac0a]. The scene far plane is the
+// same fog word + 1 (Render_ProcessMainSceneFrame @ 0x5ca4ba..0x5ca4d0).
+inline constexpr float kWaterSceneNear = 0.2f;
+
 WaterDepthCurve water_depth_curve(float fog_distance_world);
 
 // ---------------------------------------------------------------------------

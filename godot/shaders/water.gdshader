@@ -95,8 +95,8 @@ const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // the ps.1.1 color chain is IDENTICAL on both materials (same 4-tex desc), so one
 // shader serves both sides. The ladder position does not change by side (REN-3).
 uniform bool u_underwater_view = false;
-// The drawing camera's near/far (Water::_march_strip): the scene projection
-// the retail strip depth replicates.
+// The retail scene projection's near/far the strip depth is tested against
+// (Water::_march_strip): near 0.2, far = the fog distance's integer word + 1.
 uniform vec2 u_scene_depth_range = vec2(0.2, 1025.0);
 // The scene viewport MaxZ, the strip depth's upper clamp (flt_7C4658 =
 // 0x3F7FFE00 = 1 - 2^-15; engine kWaterStripDepthMax).
@@ -139,12 +139,14 @@ void vertex() {
 	// 1024 @ 0x524721, viewport depth 0.99996948 = 1 - 2^-15 @ 0x58ac32], against a
 	// scene drawn at far = w + 1 (retail Render_ProcessMainSceneFrame
 	// @ 0x5CA4BA..0x5CA4D0). The depth test compares those two curves, so the
-	// water is written at the view depth whose scene-curve depth equals the
-	// replica: slightly BEHIND its true depth (w < w + 1), and at the far
+	// water is written at the view depth whose retail scene-curve depth equals
+	// the replica: slightly BEHIND its true depth (w < w + 1), and at the far
 	// plane itself beyond t = w, where the clamp holds it — pre-transformed
 	// rows are never far-clipped, so fully fogged water reaches the horizon.
-	// Perspective only; the constant-W orthographic extension keeps its plain
-	// projection. Godot's clip depth is reverse-Z: n (f / t - 1) / (f - n).
+	// That view depth then takes the drawing camera's own clip depth (view
+	// z = -t, clip w = t: z / w = -P[2][2] + P[3][2] / t), so the test holds
+	// whatever near plane the Godot camera carries. Perspective only; the
+	// constant-W orthographic extension keeps its plain projection.
 	vec3 view_pos = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	POSITION = PROJECTION_MATRIX * vec4(view_pos, 1.0);
 	float scene_near = u_scene_depth_range.x;
@@ -153,8 +155,9 @@ void vertex() {
 		float scene_z = CUSTOM0.x / WATER_VIEWPORT_MAX_Z;
 		float inv_view_depth =
 				(1.0 - scene_z * (scene_far - scene_near) / scene_far) / scene_near;
-		POSITION.z = max(scene_near * (scene_far * inv_view_depth - 1.0) /
-				(scene_far - scene_near), 0.0) * POSITION.w;
+		float clip_depth = -PROJECTION_MATRIX[2][2] +
+				PROJECTION_MATRIX[3][2] * inv_view_depth;
+		POSITION.z = max(clip_depth, 0.0) * POSITION.w;
 	}
 }
 

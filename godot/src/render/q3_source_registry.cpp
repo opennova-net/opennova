@@ -521,6 +521,9 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		const Vector2 scale = vector2_parameter(material, "u_reflection_uv_scale",
 				Vector2(1, 1));
 		water.reflection_uv_scale = {scale.x, scale.y};
+		const Vector2 depth_range = vector2_parameter(material, "u_scene_depth_range",
+				Vector2(0.2f, 1025.0f));
+		water.scene_depth_range = {depth_range.x, depth_range.y};
 		r_surface.primary_texture_resource = noise_color;
 		r_surface.secondary_texture_resource = noise_normal;
 		r_surface.tertiary_texture_resource = reflection;
