@@ -16,6 +16,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace opennova::io {
+class LogRing;
+}
+
 namespace opennova::devtools {
 
 class StatsWindow;
@@ -28,6 +32,7 @@ class EnvironmentWindow;
 class AiWindow;
 class RaysWindow;
 class PhysicsWindow;
+class LogWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct ControlRequest;
@@ -67,6 +72,8 @@ public:
 	const RaysWindow &rays_window() const { return *rays_window_; }
 	PhysicsWindow &physics_window() { return *physics_window_; }
 	const PhysicsWindow &physics_window() const { return *physics_window_; }
+	LogWindow &log_window() { return *log_window_; }
+	const LogWindow &log_window() const { return *log_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -77,6 +84,8 @@ public:
 
 	// The board the Stats window reads (owned by the embedder; may be null).
 	void set_frame_stats(FrameStatsBoard *board);
+	// The engine log ring the Log window drains (process-wide; may be null).
+	void set_log_ring(const io::LogRing *ring);
 
 	// The control board (control_board.h): the debug-control table's catalog,
 	// pushed once by the embedder when it lends the table, and the live
@@ -112,7 +121,8 @@ public:
 	// only serialises them.
 	bool take_control_request(ControlRequest &request);
 	// The table's verdict on a drained request: posted to the menu bar's
-	// status line ("id: ok" / "id: refused (reason)").
+	// status line ("id: ok" / "id: failed (reason)") and to the Log window
+	// with a read's full payload.
 	void report_control_result(const ControlResult &result);
 
 	// The selection seam: the shell's world pick (a device event carrying
@@ -178,6 +188,7 @@ private:
 	AiWindow *ai_window_ = nullptr;
 	RaysWindow *rays_window_ = nullptr;
 	PhysicsWindow *physics_window_ = nullptr;
+	LogWindow *log_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

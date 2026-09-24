@@ -8,6 +8,7 @@
 #include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/log_window.h>
 #include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
@@ -54,6 +55,9 @@ GameDevTools::GameDevTools() {
 	auto physics = std::make_unique<PhysicsWindow>();
 	physics_window_ = physics.get();
 	pass_.register_window(std::move(physics));
+	auto log = std::make_unique<LogWindow>();
+	log_window_ = log.get();
+	pass_.register_window(std::move(log));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -87,6 +91,10 @@ bool GameDevTools::take_game_request(GameWindowRequest &request) {
 
 void GameDevTools::set_frame_stats(FrameStatsBoard *board) {
 	stats_window_->set_board(board);
+}
+
+void GameDevTools::set_log_ring(const io::LogRing *ring) {
+	log_window_->set_ring(ring);
 }
 
 void GameDevTools::set_control_catalog(std::vector<ControlSpec> catalog) {
@@ -157,6 +165,7 @@ void GameDevTools::report_control_result(const ControlResult &result) {
 		text += result.detail.size() > kHead ? result.detail.substr(0, kHead) + "..." : result.detail;
 	}
 	pass_.post_status(std::move(text), result.ok ? StatusLevel::Info : StatusLevel::Error);
+	log_window_->add_command_result(result);
 }
 
 void GameDevTools::select_entity(uint16_t handle) {

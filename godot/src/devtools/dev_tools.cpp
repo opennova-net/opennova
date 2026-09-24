@@ -142,6 +142,8 @@ void DevTools::set_platform_windows_allowed(bool p_allowed) {
 
 DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {
 	tools_->set_game_viewport(this);
+	// The process ring (installed at extension init, register_types.cpp).
+	tools_->set_log_ring(&opennova::io::LogRing::instance());
 }
 
 DevTools::~DevTools() = default;

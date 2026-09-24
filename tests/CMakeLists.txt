@@ -3191,6 +3191,12 @@ if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)
     add_test(NAME devtools COMMAND devtools_test)
+    # The inspection windows added after the ADR 0039 core (Log, Script,
+    # Render, Particles, Audio, Player, Net) and the Game-view overlays.
+    add_executable(devtools_windows_test devtools/devtools_windows_test.cpp)
+    target_link_libraries(devtools_windows_test PRIVATE opennova_runtime opennova_imgui)
+    target_include_directories(devtools_windows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME devtools_windows COMMAND devtools_windows_test)
 endif()
 
 # Mission-authored lndm callbacks, independent of thrown AT mines.
