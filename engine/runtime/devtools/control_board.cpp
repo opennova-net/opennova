@@ -1,6 +1,7 @@
 #include <runtime/devtools/control_board.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <string>
 
@@ -35,15 +36,6 @@ void ControlBoard::set_local_value(const char *id, const ControlArg &value) {
 	state.id = id;
 	state.value = value;
 	state.has_value = true;
-}
-
-bool ControlBoard::slider_editing(const char *id) const {
-	const auto it = slider_editing_.find(id);
-	return it != slider_editing_.end() && it->second;
-}
-
-void ControlBoard::set_slider_editing(const char *id, bool editing) {
-	slider_editing_[id] = editing;
 }
 
 namespace {
@@ -107,7 +99,10 @@ bool draw_control(ControlBoard &board, const char *id, std::deque<ControlRequest
 		}
 		case ControlKind::Slider: {
 			float &edit = board.slider_edit(id);
-			if (!board.slider_editing(id)) {
+			// ImGui also releases the active ID when a widget disappears
+			// (F3 closes, its window hides, or its section collapses). A
+			// separate editing latch would miss that deactivation frame.
+			if (ImGui::GetActiveID() != ImGui::GetID(text.c_str())) {
 				edit = state != nullptr && state->has_value
 						? static_cast<float>(number_of(state->value))
 						: static_cast<float>(spec->minimum);
@@ -115,13 +110,11 @@ bool draw_control(ControlBoard &board, const char *id, std::deque<ControlRequest
 			const bool integral = spec->step >= 1.0;
 			ImGui::SliderFloat(text.c_str(), &edit, static_cast<float>(spec->minimum),
 					static_cast<float>(spec->maximum), integral ? "%.0f" : "%.2f");
-			if (ImGui::IsItemActivated()) board.set_slider_editing(id, true);
 			if (ImGui::IsItemDeactivatedAfterEdit()) {
 				queue.push_back({id, {ControlArg::number(edit)}});
 				board.set_local_value(id, ControlArg::number(edit));
 				queued = true;
 			}
-			if (ImGui::IsItemDeactivated()) board.set_slider_editing(id, false);
 			break;
 		}
 		case ControlKind::Enum: {

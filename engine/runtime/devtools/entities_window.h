@@ -136,8 +136,8 @@ private:
 	std::deque<ControlRequest> requests_;
 	// Declared ahead of the layers that read it.
 	EntityMarkersRecord markers_{};
-	EntitySelectionLayer selection_layer_{markers_};
-	EntityLabelsLayer labels_layer_{markers_};
+	EntitySelectionLayer selection_layer_{markers_, *this};
+	EntityLabelsLayer labels_layer_{markers_, *this};
 };
 
 }  // namespace opennova::devtools

@@ -199,6 +199,16 @@ world::inspect::EntityMarkerQuery GameDevTools::entity_marker_query(const world:
 	return query;
 }
 
+bool GameDevTools::needs_entity_marker_refresh(uint64_t logic_tick, const world::Vec3 &eye) const {
+	if (!needs_entity_markers()) return false;
+	const EntityMarkersRecord &record = entities_window_->markers();
+	if (!record.valid || record.logic_tick != logic_tick) return true;
+	const world::inspect::EntityMarkerQuery query = entity_marker_query(eye);
+	return query.selected != record.query.selected || query.range_units != record.query.range_units ||
+			(query.range_units > 0.0f && (query.anchor.x != record.query.anchor.x ||
+					query.anchor.y != record.query.anchor.y || query.anchor.z != record.query.anchor.z));
+}
+
 void GameDevTools::set_entity_markers(EntityMarkersRecord record) {
 	entities_window_->set_markers(std::move(record));
 }

@@ -120,6 +120,7 @@ void ImGuiPass::draw_overlays_menu() {
 		if (!seen) groups.push_back(layer->group());
 	}
 	for (const char *group : groups) {
+		ImGui::PushID(group);
 		ImGui::SeparatorText(group);
 		for (OverlayLayer *layer : overlays_) {
 			if (std::strcmp(layer->group(), group) != 0) continue;
@@ -131,6 +132,7 @@ void ImGuiPass::draw_overlays_menu() {
 				ImGui::SetTooltip("%s", layer->tooltip());
 			}
 		}
+		ImGui::PopID();
 	}
 	ImGui::Separator();
 	if (ImGui::MenuItem("All off")) {

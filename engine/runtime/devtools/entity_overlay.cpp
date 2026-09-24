@@ -1,4 +1,5 @@
 #include <runtime/devtools/entity_overlay.h>
+#include <runtime/devtools/entities_window.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -29,8 +30,11 @@ void marker_text(const world::inspect::EntityMarker &m, char *buf, size_t size) 
 
 void EntitySelectionLayer::draw(OverlayCanvas &canvas) {
 	if (!record_.valid) return;
+	// Selection can clear or move before another marker snapshot arrives.
+	const uint16_t selected = entities_.selected_handle();
+	if (selected == world::EntityHandle::kInvalid) return;
 	const auto it = std::find_if(record_.rows.begin(), record_.rows.end(),
-			[](const world::inspect::EntityMarker &m) { return m.selected; });
+			[selected](const world::inspect::EntityMarker &m) { return m.handle == selected; });
 	if (it == record_.rows.end()) return;
 	const world::inspect::EntityMarker &m = *it;
 	const uint32_t color = overlay_rgba(1.0f, 0.85f, 0.2f);
@@ -47,8 +51,10 @@ void EntitySelectionLayer::draw(OverlayCanvas &canvas) {
 
 void EntityLabelsLayer::draw(OverlayCanvas &canvas) {
 	if (!record_.valid) return;
+	const uint16_t selected = entities_.selection_layer().enabled()
+			? entities_.selected_handle() : world::EntityHandle::kInvalid;
 	for (const world::inspect::EntityMarker &m : record_.rows) {
-		if (m.selected) continue; // the Selection layer owns its label
+		if (m.handle == selected) continue; // the Selection layer owns its label
 		const uint32_t color = !m.alive ? overlay_rgba(0.55f, 0.55f, 0.55f)
 				: m.team >= 0          ? overlay_index_color(m.team)
 									   : overlay_rgba(0.85f, 0.85f, 0.85f);

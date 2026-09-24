@@ -137,6 +137,9 @@ public:
 	// selection to mark or the Labels layer is on; the query (anchor, reach,
 	// cap, selection) is the tools' policy, the embedder runs it.
 	bool needs_entity_markers() const;
+	// A paused world's tick stays fixed; selection, layer and camera changes
+	// still change which entities the marker query must return.
+	bool needs_entity_marker_refresh(uint64_t logic_tick, const world::Vec3 &eye) const;
 	world::inspect::EntityMarkerQuery entity_marker_query(const world::Vec3 &eye) const;
 	void set_entity_markers(EntityMarkersRecord record);
 

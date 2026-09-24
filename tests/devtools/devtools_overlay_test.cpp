@@ -20,6 +20,7 @@
 #include <runtime/devtools/overlay_canvas.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <cmath>
 #include <cstring>
@@ -144,6 +145,42 @@ private:
 };
 int CountingLayer::next_order = 0;
 
+// Use the actual menu items: the two groups both contain a "Labels" row.
+// The by-name probe seam bypasses ImGui IDs and cannot catch a collision.
+void test_overlay_menu_labels_toggle_independently() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	uint64_t frame = 1;
+	for (int i = 0; i < 3; ++i) draw_once(tools, frame++);
+	ImGuiWindow *bar = ImGui::FindWindowByName("##MainMenuBar");
+	CHECK(bar != nullptr, "the main menu bar exists");
+	if (bar == nullptr) return;
+	ImGui::ActivateItemByID(ImHashStr("Overlays", 0, bar->GetID("##menubar")));
+	for (int i = 0; i < 3; ++i) draw_once(tools, frame++);
+	CHECK(!backend.context->OpenPopupStack.empty(), "the Overlays menu opens");
+	if (backend.context->OpenPopupStack.empty()) return;
+	ImGuiWindow *menu = backend.context->OpenPopupStack.back().Window;
+	CHECK(menu != nullptr, "the overlay popup has a window");
+	if (menu == nullptr) return;
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const float row = ImGui::GetTextLineHeightWithSpacing();
+	const float heading = ImGui::GetTextLineHeight() + 2.0f * style.SeparatorTextPadding.y + style.ItemSpacing.y;
+	// Entities heading, Selection, Labels, AI heading, then AI Labels.
+	const ImVec2 point(menu->DC.CursorStartPos.x + 30.0f,
+			menu->DC.CursorStartPos.y + 2.0f * heading + 2.0f * row + row * 0.5f);
+	ImGuiIO &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	draw_once(tools, frame++);
+	const ImGuiID label_id = ImGui::GetHoveredID();
+	CHECK(label_id != 0, "the AI Labels row is hovered");
+	ImGui::ActivateItemByID(label_id);
+	draw_once(tools, frame++);
+	CHECK(tools.ai_window().layer(0).enabled(), "activating AI Labels enables AI labels");
+	CHECK(!tools.entities_window().labels_layer().enabled(), "activating AI Labels leaves Entities labels off");
+}
+
 // The layers draw over the fake image in priority order, only while on and
 // only while the camera matches the image size; budgets cap each layer and
 // the vertex guard stops a runaway list.
@@ -237,6 +274,8 @@ void test_entity_layers_follow_the_selection() {
 	tools.set_overlay_camera(north_camera(90.0f, viewport.width, viewport.height));
 	opennova::devtools::EntityMarkersRecord record;
 	record.valid = true;
+	record.logic_tick = 42;
+	record.query = tools.entity_marker_query(Vec3{});
 	opennova::world::inspect::EntityMarker selected;
 	selected.handle = 0x0003;
 	selected.name = "alpha";
@@ -255,6 +294,28 @@ void test_entity_layers_follow_the_selection() {
 					entities.selection_layer().last_stats().texts == 1,
 			"the selection draws its marker and its label");
 	CHECK(entities.labels_layer().last_stats().texts == 1, "labels skip the selected row");
+	CHECK(!tools.needs_entity_marker_refresh(42, Vec3{}), "an unchanged tick and query reuse the markers");
+	tools.pass().set_overlay_enabled(entities.labels_layer(), false);
+	CHECK(tools.needs_entity_marker_refresh(42, Vec3{}), "turning labels off refreshes a paused query");
+	record.query = tools.entity_marker_query(Vec3{});
+	tools.set_entity_markers(record);
+	tools.pass().set_overlay_enabled(entities.labels_layer(), true);
+	CHECK(tools.needs_entity_marker_refresh(42, Vec3{}), "turning labels on refreshes even with Selection already on");
+	record.query = tools.entity_marker_query(Vec3{});
+	tools.set_entity_markers(record);
+	CHECK(tools.needs_entity_marker_refresh(42, Vec3{200, 0, 0}), "moving the camera refreshes the paused label range");
+	CHECK(tools.needs_entity_marker_refresh(43, Vec3{}), "a new tick refreshes the entity positions");
+	tools.pass().set_overlay_enabled(entities.selection_layer(), false);
+	CHECK(draw_once(tools, 3), "disabling the selection layer redraws without a fresh record");
+	CHECK(entities.labels_layer().last_stats().texts == 2, "Labels takes over the selected row when Selection is off");
+	tools.pass().set_overlay_enabled(entities.selection_layer(), true);
+	tools.clear_entity_selection();
+	CHECK(tools.needs_entity_marker_refresh(42, Vec3{}), "clearing selection refreshes a paused labels query");
+	CHECK(draw_once(tools, 3), "the cleared selection redraws without a fresh record");
+	CHECK(entities.selection_layer().last_stats().lines == 0 &&
+					entities.selection_layer().last_stats().texts == 0,
+			"clearing selection immediately removes its old marker");
+	CHECK(entities.labels_layer().last_stats().texts == 2, "the old selection becomes a normal label");
 	tools.clear_overlay_records();
 	CHECK(!entities.markers().valid, "clearing drops the markers");
 	tools.set_game_viewport(nullptr);
@@ -428,6 +489,7 @@ void test_collision_layers() {
 int main() {
 	test_projection_maps_like_unproject_position();
 	test_segments_clip_at_the_near_plane_and_the_guard_band();
+	test_overlay_menu_labels_toggle_independently();
 	test_layers_draw_over_the_game_image();
 	test_entity_layers_follow_the_selection();
 	test_ai_layers();
