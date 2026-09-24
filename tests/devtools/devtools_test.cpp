@@ -93,6 +93,7 @@ constexpr ExpectedWindow kExpectedWindows[] = {
 		{"AI", MenuGroup::World, false},
 		{"Rays", MenuGroup::Sim, false},
 		{"Physics", MenuGroup::Sim, false},
+		{"Log", MenuGroup::Tools, false},
 		{"ImGui demo", MenuGroup::Help, false},
 };
 constexpr int kExpectedWindowCount =
