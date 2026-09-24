@@ -916,10 +916,10 @@ void GameWorld::render_particle_frame() {
 }
 
 // The EffectWorld point-light device leg: per visible model, select the
-// witnessed <= 4 pool lights for that draw context and write them as
+// witnessed <= 3 pool lights for that draw context and write them as
 // per-instance shader parameters (godot/src/lights/effect_light_director
 // carries the seam notes). The viewmodel parts ride along with the local
-// player as owner so first-person self-lights gate correctly.
+// player's query and interior group; they declare no owner group.
 void GameWorld::render_light_frame() {
 	if (light_director_.is_null() || !is_inside_tree()) {
 		return;
@@ -930,13 +930,8 @@ void GameWorld::render_light_frame() {
 	if (presenter != nullptr) {
 		viewmodel_parts = presenter->vm_parts();
 	}
-	int viewmodel_owner = -1;
-	Ref<Simulation> sim = get_sim();
-	if (sim.is_valid() && sim->has_local_player()) {
-		viewmodel_owner = sim->get_local_player_wire_handle();
-	}
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
-			get_frame_clock_ms(), viewmodel_parts, viewmodel_owner, frame_stats_on_);
+			get_frame_clock_ms(), viewmodel_parts, frame_stats_on_);
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
 	render_terrain_light_leg();
@@ -951,6 +946,7 @@ void GameWorld::render_light_frame() {
 			slot_shadow_->set_local_player_model(presenter->avatar());
 			slot_shadow_->set_local_player_first_person(!presenter->is_third_person());
 		}
+		const Ref<Simulation> sim = get_sim();
 		if (sim.is_valid()) {
 			slot_shadow_->set_local_player_prone(
 					sim->get_local_player_stance_latch() == Simulation::STANCE_PRONE);

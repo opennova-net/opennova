@@ -218,7 +218,8 @@ FireEffectPlan fire_effect_plan(const FirePresentationRow &row) {
     // WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
     // ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
     // both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
-    // group gate scopes it to the shooter's own draws. The adm arm anchors it
+    // group gate scopes it to the shooter's own skinned person draws
+    // (renderer::submit_owner_group). The adm arm anchors it
     // on the rendered gun's userpoint.
     plan.glow = row.mf_light != 0;
     plan.glow_at_muzzle = plan.glow && row.adm_arm;

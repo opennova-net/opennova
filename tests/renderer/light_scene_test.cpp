@@ -1205,8 +1205,11 @@ int main() {
         indoors.blink_owner_entity = 99;
         indoors.blink_section = 4;
         const auto i = static_light_row_groups(indoors);
-        expect(i.owner_group_entity == indoors.static_owner && i.owner_group_section == 0,
-               "a non-building row is owned by its static owner at section 0");
+        // Every static row is a rigid submit: the rigid collector re-scopes the
+        // owner group to (0, robjIndex) [orig: collect_render_objects_for_batch
+        // @ 0x5d8ff7], so a static's own owned light never lights its draw.
+        expect(i.owner_group_entity == 0 && i.owner_group_section == 9,
+               "a non-building row declares the rigid (0, robj) owner group");
         expect(i.interior_group_entity == 99 && i.interior_group_section == 4,
                "a non-building row carries the blink interior group");
         StaticLightRowInputs outdoors = indoors;
@@ -1214,6 +1217,45 @@ int main() {
         const auto o = static_light_row_groups(outdoors);
         expect(o.interior_group_entity == 0 && o.interior_group_section == 0,
                "outdoors the interior group stays empty");
+    }
+    // The owner group a submit declares [orig: Terrain_RenderSectorEntitiesBySide
+    // @ 0x5c7fb1 / @ 0x5c8004; collect_render_objects_for_batch @ 0x5d8ff7;
+    // Render_SubmitEntity @ 0x5daddc]: the drawn entity only for a skinned
+    // draw inside the person wave; the rigid collector re-scopes to
+    // (0, robjIndex); a skinned draw outside the person wave keeps entity 0.
+    {
+        using opennova::renderer::submit_owner_group;
+        const auto body = submit_owner_group(77, true, true, 3);
+        expect(body.entity == 77 && body.section == 0,
+               "a person's skinned draw declares its entity at section 0");
+        const auto held = submit_owner_group(77, true, false, 3);
+        expect(held.entity == 0 && held.section == 3,
+               "a person's rigid draw (the held gun) re-scopes to (0, robj)");
+        const auto vehicle = submit_owner_group(77, false, false, 5);
+        expect(vehicle.entity == 0 && vehicle.section == 5,
+               "a non-person rigid draw re-scopes to (0, robj)");
+        const auto skinned_other = submit_owner_group(77, false, true, 5);
+        expect(skinned_other.entity == 0,
+               "a skinned draw outside the person wave declares entity 0");
+        // Through the gate: a light owned by 77 passes only the body.
+        LightScene scene;
+        LightSpawnParams owned;
+        owned.position_fixed = {0, 0, 0};
+        owned.radius_fixed = 4 << 16;
+        owned.owner_entity = 77;
+        const LightHandle handle = scene.spawn(owned);
+        LightActiveGroups groups;
+        groups.owner_group_entity = body.entity;
+        groups.owner_group_section = body.section;
+        std::array<SelectedLight, LightScene::kSelectLimit> selected{};
+        expect(scene.select(&handle, 1, groups, LightSelectionOptions{}, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, false, selected) == 1,
+               "the owner's skinned person draw takes its owned light");
+        groups.owner_group_entity = held.entity;
+        groups.owner_group_section = held.section;
+        expect(scene.select(&handle, 1, groups, LightSelectionOptions{}, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, false, selected) == 0,
+               "the owner's rigid draw never takes its owned light");
     }
     // The light_move round glow lifts its spawn half a radius and follows at
     // the raw round position.

@@ -500,8 +500,7 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 }
 
 void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
-		const TypedArray<ObjectModel> &p_viewmodel_parts, int p_viewmodel_wire_handle,
-		bool p_run_census) {
+		const TypedArray<ObjectModel> &p_viewmodel_parts, bool p_run_census) {
 	if (p_camera == nullptr) {
 		scene()->clear_render_output();
 		_clear_coronas();
@@ -576,9 +575,11 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 		// before viewmodel camera offsets (native EntityLightQuery contract).
 		frame_entity_positions_.push_back(has_local_query ? local_entity_position : part->get_global_position());
 		frame_entity_bound_radii_q16_.push_back(has_local_query ? local_entity_radius_q16 : part->get_entity_bound_radius_q16());
-		frame_owners_.push_back(p_viewmodel_wire_handle >= 0
-						? LightScene::owner_id_for_wire(p_viewmodel_wire_handle)
-						: static_cast<int64_t>(part->get_instance_id()));
+		// The first-person pass declares no owner group: it only sets the
+		// interior group (retail Player_RenderFirstPersonViewModel
+		// @0x4DEEA4..0x4DEF3C), so an owned light -- the player's own muzzle
+		// glow included -- never reaches the arms or the FP gun.
+		frame_owners_.push_back(0);
 		frame_robj_scoped_.push_back(0);
 		frame_interior_owners_.push_back(viewmodel_interior.owner);
 		frame_interior_sections_.push_back(viewmodel_interior.section);
@@ -937,8 +938,8 @@ void EffectLightDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("scene"), &EffectLightDirector::scene);
 	ClassDB::bind_method(D_METHOD("light_gain"), &EffectLightDirector::light_gain);
 	ClassDB::bind_method(D_METHOD("render_frame", "camera", "time_ms", "viewmodel_parts",
-								 "viewmodel_wire_handle", "run_census"),
-			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()), DEFVAL(-1),
+								 "run_census"),
+			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()),
 			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick"), &EffectLightDirector::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("on_muzzle_fire", "shooter_handle", "world_pos"),

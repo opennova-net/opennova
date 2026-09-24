@@ -1664,6 +1664,10 @@ AABB ObjectModel::get_world_bounds() const {
 	return get_global_transform().xform(model_bounds_);
 }
 
+bool ObjectModel::is_active_level_skinned() const {
+	return object_data_.is_valid() && object_data_->is_skinned(active_lod_);
+}
+
 void ObjectModel::collect_point_light_draw_parts(
 		std::vector<PointLightDrawPart> &r_parts) const {
 	const Transform3D current = is_inside_tree() ? get_global_transform()
@@ -1880,6 +1884,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
+			&ObjectModel::set_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
+			&ObjectModel::is_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("is_active_level_skinned"),
+			&ObjectModel::is_active_level_skinned);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
 			&ObjectModel::set_slot_shadow_capture_with);
 	ClassDB::bind_method(

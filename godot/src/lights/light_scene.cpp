@@ -490,8 +490,11 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 					// [orig: Terrain_RenderSectorModels @0x5c5e07;
 					// collect_render_objects_for_batch @0x5d8ff7, see
 					// docs/render/render-lighting-re.md]
-					draw.groups.owner_group_entity = 0;
-					draw.groups.owner_group_section = part.robj_index;
+					const opennova::renderer::SubmitOwnerGroup owner =
+							opennova::renderer::submit_owner_group(owner_entity, false, false,
+									part.robj_index);
+					draw.groups.owner_group_entity = owner.entity;
+					draw.groups.owner_group_section = owner.section;
 					draw.groups.interior_group_entity = owner_entity;
 					draw.groups.interior_group_section = 0;
 					draws.push_back(draw);
@@ -501,12 +504,44 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 				continue;
 			}
 
+			// Every other entity submit: the interior group is the building this
+			// model currently stands inside plus that blink volume's section
+			// (zero = outdoors); the owner group is what the submit declares
+			// (renderer::submit_owner_group) -- the drawn entity only for a
+			// person's skinned draws, else entity 0 with the rigid collector's
+			// per-ROBJ section.
 			auto draw = entity_draw;
-			draw.groups.owner_group_entity = owner_entity;
-			// The interior group: the building this model currently stands inside
-			// plus that blink volume's section. Zero = outdoors.
 			draw.groups.interior_group_entity = interior_owner;
 			draw.groups.interior_group_section = interior_section;
+			const bool person_wave = part_model->is_slot_shadow_person();
+			const bool skinned = part_model->is_active_level_skinned();
+			// A rigid draw's owner section is read only when an owned light's
+			// owner is the interior entity AND the interior section is zero (the
+			// gate falls back to the owner section); only then do its ROBJs
+			// select apart.
+			if (!skinned && interior_owner != 0 && interior_section == 0) {
+				std::vector<ObjectModel::PointLightDrawPart> parts;
+				part_model->collect_point_light_draw_parts(parts);
+				if (!parts.empty()) {
+					for (const ObjectModel::PointLightDrawPart &part : parts) {
+						auto part_draw = draw;
+						const opennova::renderer::SubmitOwnerGroup owner =
+								opennova::renderer::submit_owner_group(owner_entity,
+										person_wave, false, part.robj_index);
+						part_draw.groups.owner_group_entity = owner.entity;
+						part_draw.groups.owner_group_section = owner.section;
+						draws.push_back(part_draw);
+						targets.push_back(DrawTarget{
+								part_model, part.robj_index, true});
+					}
+					continue;
+				}
+			}
+			const opennova::renderer::SubmitOwnerGroup owner =
+					opennova::renderer::submit_owner_group(owner_entity, person_wave,
+							skinned, 0);
+			draw.groups.owner_group_entity = owner.entity;
+			draw.groups.owner_group_section = owner.section;
 			draws.push_back(draw);
 			targets.push_back(DrawTarget{part_model, 0, false});
 		}

@@ -861,19 +861,36 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs) {
 	return owner;
 }
 
+SubmitOwnerGroup submit_owner_group(uint64_t drawn_entity, bool person_wave,
+		bool skinned_level, int32_t robj_index) {
+	SubmitOwnerGroup group;
+	if (skinned_level) {
+		// The skinned collector keeps the wave's pair: the drawn entity inside
+		// the person wave [orig: @ 0x5c7fb1 / @ 0x5c8004], else entity 0.
+		if (person_wave) {
+			group.entity = drawn_entity;
+		}
+		return group;
+	}
+	// The rigid collector's per-ROBJ re-scope [orig: @ 0x5d8ff7].
+	group.section = robj_index;
+	return group;
+}
+
 LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs) {
 	LightActiveGroups groups;
+	// Every static row is a rigid submit: owner group (0, robjIndex).
+	const SubmitOwnerGroup owner = submit_owner_group(inputs.static_owner,
+			false, false, inputs.robj_index);
+	groups.owner_group_entity = owner.entity;
+	groups.owner_group_section = owner.section;
 	if (inputs.is_building) {
-		// A building declares itself as interior section zero and re-scopes
-		// the owner section to this exact ROBJ [orig: @ 0x5d8ff7].
-		groups.owner_group_entity = 0;
-		groups.owner_group_section = inputs.robj_index;
+		// A building declares itself as interior section zero
+		// [orig: Terrain_RenderSectorModels @ 0x5c5e07].
 		groups.interior_group_entity = inputs.static_owner;
 		groups.interior_group_section = 0;
 		return groups;
 	}
-	groups.owner_group_entity = inputs.static_owner;
-	groups.owner_group_section = 0;
 	// The blink query at the placement origin names the containing building
 	// + section [orig: Lighting_SetInteriorLightGroup @ 0x5a90e0]; no hit
 	// leaves the interior group empty.

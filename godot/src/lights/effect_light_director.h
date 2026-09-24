@@ -117,14 +117,15 @@ public:
 	Vector3 light_gain() const;
 	// The per-frame device leg (the GameWorld leg table, after iris, before the
 	// material frame): one draw context per visible ObjectModel near the
-	// camera (owner group = that model's entity id) plus the first-person
-	// viewmodel parts (owner = the local player, so its own muzzle glow
-	// reaches the arms). The FLICKER phase reads the live weather wave ring;
-	// the ambient scale is the env light-state gain (the ported
+	// camera (the drawn entity id rides along; LightScene::render_model_frame
+	// applies the witnessed owner-group rule) plus the first-person viewmodel
+	// parts, which take the local player's query and interior group but
+	// declare no owner group. The FLICKER phase reads the live weather wave
+	// ring; the ambient scale is the env light-state gain (the ported
 	// EffectWorld_AmbientScale channel).
 	void render_frame(Camera3D *p_camera, int64_t p_time_ms,
 			const TypedArray<ObjectModel> &p_viewmodel_parts = TypedArray<ObjectModel>(),
-			int p_viewmodel_wire_handle = -1, bool p_run_census = true);
+			bool p_run_census = true);
 	// On-demand census refresh for report readers while the capture is off:
 	// the skipped select re-runs with the last frame's camera, so an
 	// MCP/diagnostics read stays exact without the per-frame report cost.
@@ -135,9 +136,10 @@ public:
 	// One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
 	// Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
 	// shooter, so the per-draw owner select (render_model_frame) admits the
-	// glow only on draws declaring that owner — the shooter's body, and the
-	// first-person parts the world tags with the local player's id
-	// (D-AI-8d). The cache is deliberately shared with model LGHT: if
+	// glow only on draws declaring that owner: the shooter's skinned person
+	// draws. The rigid held gun re-scopes to (0, robj) and the first-person
+	// pass declares none, so neither takes the glow (renderer::
+	// submit_owner_group). The cache is deliberately shared with model LGHT: if
 	// mission-start spawn left entity+0x1B4 nonzero, retail re-arms and moves
 	// that final authored lease instead of allocating the 1.5-unit
 	// muzzle-color light.

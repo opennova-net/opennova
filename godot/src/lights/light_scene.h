@@ -87,9 +87,13 @@ public:
 	// The per-draw gameplay pass [orig: Light_SelectAndEnableForDraw @0x5ab9d0
 	// and the collectors' group gate @0x5d91f8 per draw context, see
 	// docs/render/render-lighting-re.md]: one draw context
-	// per visible ObjectModel, owner group = that model's entity id, interior
-	// group = the building it currently stands inside + that blink volume's
-	// section. A nonzero p_robj_scoped row expands a building into one context
+	// per visible ObjectModel. The owner group is what that submit declares
+	// (renderer::submit_owner_group): p_owner_entities names the drawn entity,
+	// which only a person's skinned draws keep; every other draw declares
+	// entity 0 with its rigid ROBJ section, splitting per visible ROBJ only
+	// where that section can matter (an interior group at section zero). The
+	// interior group = the building it currently stands inside + that blink
+	// volume's section. A nonzero p_robj_scoped row expands a building into one context
 	// per visible ROBJ: the building becomes its own interior group at section
 	// zero and owner_group_section names the current ROBJ, exactly matching the
 	// retail re-scope @0x5d8ff7. All arrays are parallel. Returns the number of

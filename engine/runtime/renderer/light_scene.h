@@ -659,15 +659,35 @@ struct ModelLightOwner {
 // world [orig: Entity_SpawnGlowEffects @ 0x56c89f / @ 0x56c8bd].
 ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 
+// The OWNER light group one drawn submit declares. Only the person wave sets
+// a nonzero entity: the drawn entity at section 0, before both its head and
+// its body submits [orig: Terrain_RenderSectorEntitiesBySide
+// Lighting_SetOwnerLightGroup calls @ 0x5c7fb1 / @ 0x5c8004]. The RIGID
+// collector then re-scopes every ROBJ it collects to (0, robjIndex)
+// [orig: collect_render_objects_for_batch @ 0x5d8ff7], while the SKINNED
+// collector keeps whatever is set — Render_SubmitEntity dispatches on the
+// model's skinned flag [orig: @ 0x5daddc..0x5dae2d]. Every other context
+// leaves entity 0: the wave's reset @ 0x5c806e..0x5c808a, the terrain's
+// @ 0x609685, and neither the non-person wave nor the first-person pass sets
+// one. So an owned light (the muzzle glow, a subobject lamp) reaches only its
+// owner's skinned person draws, plus the interior-group case where its owner
+// is the containing building. A skinned non-person draw inherits a leftover
+// section (entity 0 either way); 0 here.
+struct SubmitOwnerGroup {
+	uint64_t entity = 0;
+	int32_t section = 0;
+};
+SubmitOwnerGroup submit_owner_group(uint64_t drawn_entity, bool person_wave,
+		bool skinned_level, int32_t robj_index);
+
 // The two witnessed groups one retained static atlas row declares for the
 // per-draw select — the same interior/owner pair the live-model pass stamps
-// per draw context (LightActiveGroups). A BUILDING row is its own interior
-// group at section zero and re-scopes the owner section to the exact ROBJ it
-// draws [orig: Terrain_RenderSectorModels pushes building/section 0 and
-// collect_render_objects_for_batch @ 0x5d8ff7 -> Lighting_SetOwnerLightGroup
-// (0, robjIndex) moves the owner section between the walks]; every other
-// static row is owned by its tagged static owner (section 0) and carries the
-// interior group the blink query at its placement origin resolved — the
+// per draw context (LightActiveGroups). Every static row is a rigid submit, so
+// its owner group is (0, robjIndex) (submit_owner_group). A BUILDING row is
+// also its own interior group at section zero [orig: Terrain_RenderSectorModels
+// pushes building/section 0; collect_render_objects_for_batch @ 0x5d8ff7 ->
+// Lighting_SetOwnerLightGroup (0, robjIndex)]; every other static row carries
+// the interior group the blink query at its placement origin resolved — the
 // building it stands inside plus that blink volume's section, the second
 // witnessed group [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
 // Lighting_SetInteriorLightGroup @ 0x5a90e0]; outdoors (no hit) both
@@ -675,7 +695,7 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 struct StaticLightRowInputs {
 	bool is_building = false;
 	uint64_t static_owner = 0;        // the row's tagged static owner id
-	int32_t robj_index = 0;           // the ROBJ this row draws (buildings)
+	int32_t robj_index = 0;           // the ROBJ this row draws
 	bool blink_hit = false;           // the placement-origin blink query hit
 	uint64_t blink_owner_entity = 0;  // slot 0's containing building
 	int32_t blink_section = 0;        // and that volume's section

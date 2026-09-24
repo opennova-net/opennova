@@ -68,6 +68,12 @@ func _static_light_atlas(scene: LightScene) -> Image:
 	return image
 
 
+## The owner light group a submit declares [retail
+## Terrain_RenderSectorEntitiesBySide Lighting_SetOwnerLightGroup @0x5c7fb1 /
+## @0x5c8004; collect_render_objects_for_batch re-scopes rigid ROBJs to
+## (0, robj) @0x5d8ff7; Render_SubmitEntity @0x5daddc]: an owned light reaches
+## its owner's SKINNED person draw only. A rigid model -- the held gun, a
+## vehicle, a prop -- never takes its own owned light.
 func test_owned_light_reaches_only_its_owner_model() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
@@ -86,6 +92,17 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	var owner_model := _placed_model(container, Vector3(0.0, 0.0, 0.0))
 	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 77)
 	var bystander := _placed_model(container, Vector3(4.0, 0.0, 0.0))
+	# The same entity's skinned person body (an avatar part owned by 77).
+	var person := ObjectModel.new()
+	container.add_child(person)
+	person.position = Vector3(0.0, 0.0, 1.0)
+	person.set_object_data(_fixture_object_data("person.3di"))
+	person.entity_ref = EntityRef.make(-1, -1, 0, 0, 77)
+	person.set_slot_shadow_person(true)
+	assert_true(person.is_active_level_skinned(),
+			"the person fixture submits through the skinned collector")
+	assert_false(owner_model.is_active_level_skinned(),
+			"the house fixture submits through the rigid collector")
 	assert_eq(EffectLightDirector.owner_id_for_node(owner_model),
 			LightScene.owner_id_for_wire(77),
 			"a wire-stamped model owns its tagged wire identity")
@@ -110,12 +127,17 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 
 	var owner_surface := _surface_instance(owner_model)
 	var bystander_surface := _surface_instance(bystander)
-	if owner_surface == null or bystander_surface == null:
+	var person_surface := _surface_instance(person)
+	if owner_surface == null or bystander_surface == null or person_surface == null:
 		return
 	assert_eq(
-			float(owner_surface.get_instance_shader_parameter(
+			float(person_surface.get_instance_shader_parameter(
 					"u_point_light_count")), 2.0,
-			"the owner draw receives the world light AND its muzzle glow")
+			"the owner's skinned person draw receives the world light AND its muzzle glow")
+	assert_eq(
+			float(owner_surface.get_instance_shader_parameter(
+					"u_point_light_count")), 1.0,
+			"the owner's rigid draw re-scopes to (0, robj): only the world light")
 	assert_eq(
 			float(bystander_surface.get_instance_shader_parameter(
 					"u_point_light_count")), 1.0,
@@ -180,8 +202,12 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 		container = Node3D.new()
 		container.name = "MissionObjects"
 		root.add_child(container)
-	var owner_model := _placed_model(container, Vector3.ZERO)
+	# The owner is a skinned person draw, the one submit an owned light reaches.
+	var owner_model := ObjectModel.new()
+	container.add_child(owner_model)
+	owner_model.set_object_data(_fixture_object_data("person.3di"))
 	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 0)
+	owner_model.set_slot_shadow_person(true)
 	var bystander := _placed_model(container, Vector3(3.0, 0.0, 0.0))
 	var tagged_zero := EffectLightDirector.owner_id_for_node(owner_model)
 	assert_ne(tagged_zero, 0,
@@ -452,10 +478,14 @@ func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
 			other_room.get_instance_id(), building_id])
 	var interior_owners := PackedInt64Array([building_id, building_id, 0])
 	var interior_sections := PackedInt32Array([2, 5, 0])
+	# The building here is an ordinary rigid entity draw (not the building
+	# batch): it re-scopes to (0, robj) with no interior group, so its own
+	# room light does not reach it [retail collect_render_objects_for_batch
+	# @0x5d8ff7].
 	assert_eq(scene.render_model_frame(models, owners, interior_owners,
 			interior_sections, PackedByteArray([0, 0, 0]),
-			Vector3.ONE, 0, null), 2,
-			"the room light reaches its own room and its owner building")
+			Vector3.ONE, 0, null), 1,
+			"the room light reaches only the draw standing in its own room")
 
 	var in_room_surface := _surface_instance(in_room)
 	var other_surface := _surface_instance(other_room)
@@ -473,8 +503,8 @@ func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
 	var outdoor_sections := PackedInt32Array([0, 0, 0])
 	assert_eq(scene.render_model_frame(models, owners, outdoor_owners,
 			outdoor_sections, PackedByteArray([0, 0, 0]),
-			Vector3.ONE, 0, null), 1,
-			"only the owner building's own draw keeps the light outdoors")
+			Vector3.ONE, 0, null), 0,
+			"no rigid draw keeps an owned light outdoors, its owner's included")
 
 
 ## Retail skips the blink query outright for a BUILDING, so a building's own
@@ -662,8 +692,12 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 	var director := EffectLightDirector.new()
 	director.setup(world, null)
 	var light_pos := body.global_position + Vector3(3, 0, 0)
-	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_pos, 0.1)
-			.attached(0, LightScene.owner_id_for_wire(77))), 0)
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_pos, 0.1)), 0)
+	# An owned light of the same entity inside the cube: every one of these
+	# draws is RIGID, re-scoped to (0, robj), so none takes it [retail
+	# collect_render_objects_for_batch @0x5d8ff7].
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(
+			light_pos + Vector3(0, 0.5, 0), 0.1).attached(1, LightScene.owner_id_for_wire(77))), 0)
 	# A tempting light at the posed held model's origin is outside the entity cube.
 	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(held.global_position, 0.1)), 0)
 	var camera := Camera3D.new()
@@ -675,7 +709,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0)
 		var posr: Vector4 = surface.get_instance_shader_parameter("u_point_light_posr_0")
 		assert_almost_eq(posr.x, light_pos.x, 0.001,
-				"the same entity cube and owner filter reach every model of the entity")
+				"the same entity cube reaches every model of the entity")
 	body.position.x += 100.0
 	director.render_frame(camera, GameWorld.current_frame_clock_ms())
 	for model: ObjectModel in [body, head, held]:

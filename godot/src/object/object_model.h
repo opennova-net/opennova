@@ -717,6 +717,11 @@ public:
 	// The rendered model bounds in world space (geometry diagnostics/culling).
 	// Lighting uses the entity origin and get_entity_bound_radius_q16 instead.
 	AABB get_world_bounds() const;
+	// Whether the active RLOD level submits through retail's SKINNED collector:
+	// Render_SubmitEntity dispatches on the model's skinned flag, and only the
+	// rigid collector re-scopes the owner light group per ROBJ (retail
+	// Render_SubmitEntity @0x5daddc; the rule is renderer::submit_owner_group).
+	bool is_active_level_skinned() const;
 	struct PointLightDrawPart {
 		int32_t robj_index = 0;
 		AABB world_bounds;
