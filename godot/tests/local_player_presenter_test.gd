@@ -722,6 +722,16 @@ func test_aspect_mode_draws_through_a_target_of_the_selected_ratio() -> void:
 			"the target camera mirrors the gameplay pose")
 	assert_true(camera.get_viewport().disable_3d,
 			"the surface's own 3D draw yields to the blitted target")
+	# The viewport_debug_draw row writes the surface; the world it names is
+	# the target's.
+	var surface := camera.get_viewport()
+	var previous_draw := surface.debug_draw
+	surface.debug_draw = Viewport.DEBUG_DRAW_WIREFRAME
+	_frame(world, presenter, camera, 1)
+	assert_eq(target.debug_draw, Viewport.DEBUG_DRAW_WIREFRAME,
+			"the target mirrors the surface's debug draw")
+	surface.debug_draw = previous_draw
+	_frame(world, presenter, camera, 1)
 	var projection: Projection = presenter.view_projection()
 	assert_almost_eq(projection.x.x, 1.0 / half_h, 0.001,
 			"proj[0][0] = cot(fov_h/2) across the real width")

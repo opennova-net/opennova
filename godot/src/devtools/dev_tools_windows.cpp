@@ -119,12 +119,21 @@ void DevTools::push_render_snapshot() {
 	snapshot.valid = true;
 	if (Simulation *sim = simulation()) snapshot.logic_tick = static_cast<uint64_t>(sim->get_logic_tick());
 
-	// The device side: the game viewport's camera and its render counters.
+	// The device side: the camera the Game image comes from and the render
+	// counters of the viewport that camera draws (the stretched frame's
+	// target while it is live: the surface then draws no 3D at all).
 	opennova::devtools::RenderDeviceStats &d = snapshot.device;
 	const Vector2i size = game_viewport_->get_size();
 	d.viewport_width = size.x;
 	d.viewport_height = size.y;
-	if (Camera3D *camera = game_viewport_->get_camera_3d()) {
+	Camera3D *image = image_camera();
+	Viewport *frame = image != nullptr && image->get_viewport() != nullptr ? image->get_viewport() : game_viewport_;
+	if (frame != game_viewport_) {
+		const Vector2 frame_size = frame->get_visible_rect().size;
+		d.frame_width = static_cast<int32_t>(frame_size.x);
+		d.frame_height = static_cast<int32_t>(frame_size.y);
+	}
+	if (Camera3D *camera = image) {
 		const Transform3D xform = camera->get_camera_transform();
 		const opennova::env::Vec3 eye = godot_to_mission(xform.origin);
 		const opennova::env::Vec3 forward = godot_to_mission(-xform.basis.get_column(2).normalized());
@@ -137,11 +146,12 @@ void DevTools::push_render_snapshot() {
 		d.camera_pitch_deg = static_cast<float>(std::asin(std::fmax(-1.0f, std::fmin(1.0f, forward.z))) *
 				57.29577951308232);
 		d.fov_deg = static_cast<float>(camera->get_fov());
+		d.fov_horizontal = camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH;
 		d.near_m = static_cast<float>(camera->get_near());
 		d.far_m = static_cast<float>(camera->get_far());
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const RID viewport = game_viewport_->get_viewport_rid();
+	const RID viewport = frame->get_viewport_rid();
 	const auto info = [&](RenderingServer::ViewportRenderInfoType p_type, RenderingServer::ViewportRenderInfo p_info) {
 		return rs->viewport_get_render_info(viewport, p_type, p_info);
 	};

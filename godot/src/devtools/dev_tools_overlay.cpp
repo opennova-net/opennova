@@ -6,6 +6,9 @@
 // map) and forwards the ONE engine function per fact.
 #include "devtools/dev_tools.h"
 
+#include "devtools/debug_control_table.h"
+#include "devtools/debug_shell_host.h"
+#include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
 
@@ -92,6 +95,18 @@ Vector2 DevTools::project_mission_point(Camera3D *p_camera, const Vector3 &p_mis
 
 #if OPENNOVA_DEVTOOLS
 
+// The camera the Game image's pixels come from: the presenter's stretched-
+// frame camera while its target is live (the surface's gameplay camera then
+// carries only a culling superset of the frustum, and the target's image is
+// blitted over the whole surface), else the surface's own camera.
+Camera3D *DevTools::image_camera() const {
+	Camera3D *surface_camera = game_viewport_ != nullptr ? game_viewport_->get_camera_3d() : nullptr;
+	const Ref<DebugShellHost> host = control_table_.is_valid() ? control_table_->get_host() : Ref<DebugShellHost>();
+	LocalPlayerPresenter *presenter = host.is_valid() ? host->player_presenter() : nullptr;
+	Camera3D *through = presenter != nullptr ? presenter->projection_camera() : nullptr;
+	return through != nullptr && presenter->projection_viewport() != nullptr ? through : surface_camera;
+}
+
 // The per-frame overlay feed, ahead of the layout pass. The camera always
 // (while any layer is on); each layer's record only when its source moved
 // (a new logic tick, a changed selection).
@@ -105,7 +120,7 @@ void DevTools::push_overlay_frame() {
 	}
 	overlay_live_ = true;
 	const opennova::devtools::OverlayCamera camera =
-			overlay_camera_from(game_viewport_->get_camera_3d(), game_viewport_->get_size());
+			overlay_camera_from(image_camera(), game_viewport_->get_size());
 	tools_->set_overlay_camera(camera);
 	Simulation *sim = simulation();
 	if (sim == nullptr) {

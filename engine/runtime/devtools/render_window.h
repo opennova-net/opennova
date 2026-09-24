@@ -28,10 +28,16 @@ struct RenderDeviceStats {
 	float camera_yaw_deg = 0.0f;   // mission heading of the view forward
 	float camera_pitch_deg = 0.0f;
 	float fov_deg = 0.0f;
+	bool fov_horizontal = false; // a KEEP_WIDTH camera (the stretched frame's)
 	float near_m = 0.0f;
 	float far_m = 0.0f;
 	int32_t viewport_width = 0;
 	int32_t viewport_height = 0;
+	// The stretched frame's own target while it draws the world (the surface
+	// then only shows its blit); 0 when the surface draws directly. The
+	// counters below are that frame's.
+	int32_t frame_width = 0;
+	int32_t frame_height = 0;
 	int64_t visible_objects = 0;
 	int64_t visible_primitives = 0;
 	int64_t visible_draw_calls = 0;

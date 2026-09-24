@@ -180,6 +180,9 @@ private:
 	// The overlay feed (dev_tools_overlay.cpp): the camera and the per-tick
 	// layer records, ahead of the layout pass.
 	void push_overlay_frame();
+	// The camera the Game image's pixels come from (the presenter's stretched
+	// frame camera while live, else the surface's own); null without one.
+	Camera3D *image_camera() const;
 	bool overlay_live_ = false;
 	uint64_t overlay_tick_ = static_cast<uint64_t>(-1);
 	uint16_t overlay_selection_ = 0xFFFF;

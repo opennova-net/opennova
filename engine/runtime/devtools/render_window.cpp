@@ -66,9 +66,13 @@ void RenderWindow::format() {
 	if (!snapshot_.valid) return;
 	const RenderDeviceStats &d = snapshot_.device;
 	char buf[320];
+	char frame[64] = "";
+	if (d.frame_width > 0) {
+		std::snprintf(frame, sizeof(frame), " (world frame %dx%d, stretched)", d.frame_width, d.frame_height);
+	}
 	std::snprintf(buf, sizeof(buf),
-			"%dx%d | visible %lld draws, %lld objects, %lld prims | shadows %lld draws, %lld objects",
-			d.viewport_width, d.viewport_height, static_cast<long long>(d.visible_draw_calls),
+			"%dx%d%s | visible %lld draws, %lld objects, %lld prims | shadows %lld draws, %lld objects",
+			d.viewport_width, d.viewport_height, frame, static_cast<long long>(d.visible_draw_calls),
 			static_cast<long long>(d.visible_objects), static_cast<long long>(d.visible_primitives),
 			static_cast<long long>(d.shadow_draw_calls), static_cast<long long>(d.shadow_objects));
 	device_text_ = buf;
@@ -123,10 +127,11 @@ void RenderWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		ImGui::TextUnformatted(device_text_.c_str());
 		ImGui::PopTextWrapPos();
 		if (d.camera_valid) {
-			ImGui::Text("camera (%.1f, %.1f, %.1f) yaw %.1f pitch %.1f | fov %.1f | near %.2f far %.0f",
+			ImGui::Text("camera (%.1f, %.1f, %.1f) yaw %.1f pitch %.1f | fov %.1f %s | near %.2f far %.0f",
 					static_cast<double>(d.camera_position[0]), static_cast<double>(d.camera_position[1]),
 					static_cast<double>(d.camera_position[2]), static_cast<double>(d.camera_yaw_deg),
 					static_cast<double>(d.camera_pitch_deg), static_cast<double>(d.fov_deg),
+					d.fov_horizontal ? "h" : "v",
 					static_cast<double>(d.near_m), static_cast<double>(d.far_m));
 		}
 		ImGui::Text("memory: video %s, textures %s, buffers %s | %lld nodes, %lld objects",
