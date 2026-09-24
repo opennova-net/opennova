@@ -165,6 +165,14 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
     std::printf("%s 03TR tags: labels=%zu neutral_organics=%d\n",
             expansion.c_str(), tags.size(), neutral_organics);
     CHECK(neutral_organics > 0);
+    // A round passing a person parks past its entity+0 boundRadius, so every
+    // mission person must carry one. [orig: Projectile_UpdatePhysics @0x4EA7BE]
+    int unsized_people = 0;
+    world.registry.for_each([&](const Entity &e) {
+        if (e.kind == EntityKind::Organic && e.has_item_def && e.bound_radius <= 0.0f)
+            ++unsized_people;
+    });
+    CHECK(unsized_people == 0);
 
     // 03TR SSN 41 is the authored minigun Little Bird, with a free ctrlx seat.
     Entity *heli = world.registry.by_net_id(41);

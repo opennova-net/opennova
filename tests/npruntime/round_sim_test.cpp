@@ -1139,6 +1139,8 @@ int main() {
 	const w::EntityHandle hc =
 			w::spawn_remote_player(world, player_spawn(0xFFF2, 30.0f, 0.0f, 10.0f)); // victim
 	if (!expect(ha.valid() && hb.valid() && hc.valid(), "three players spawned")) return 1;
+	// entity+0: a passing round parks this far past the victim.
+	world.registry.get(hc)->bound_radius = 1.0f;
 	if (!expect(world.registry.get(hc)->health == 150, "victim spawns at template hp 150"))
 		return 1;
 	w::AiEntity *shooter_body = ai.for_handle(hb);
@@ -1352,7 +1354,9 @@ int main() {
 	// --- 2. Three ticks reach the victim at x=30; the hit applies the kinetic number:
 	// min(62*13.77, 1219)=854 -> 854*62/875 = 60. ---
 	for (int i = 0; i < 3; ++i) inmatch::Server_TickUpdate(ctx);
-	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
+	if (!expect(world.round_sim.active_count == 1,
+	            "the round passes the person (material 19) [orig: @0x4E99EE]"))
+		return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
 	// The hit queued ONE impact for the presenting host: tag 23 'flesh'. The person
 	// leg splits on identity — the LOCAL player takes tag 2 'player', everyone else
@@ -1374,6 +1378,9 @@ int main() {
 			return 1;
 	}
 	world.round_sim.impacts.clear(); // the presenter drain, stubbed
+	// The round passed the victim and flies on toward the host down-range; the
+	// later legs each fire their own rounds.
+	world.round_sim.reset();
 
 	// --- 2b. Terrain impact: a missed shot stops ON the surface with the dirt tag.
 	// Flat synthetic heightfield (ground = 0 everywhere); the round flies down at
@@ -1451,6 +1458,7 @@ int main() {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 		for (int i = 0; i < 4; ++i) inmatch::Server_TickUpdate(ctx);
+		world.round_sim.reset(); // it passed the victim toward the host down-range
 	}
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	// The 0x0A is a PRE-motor snapshot, so the death-family animation the motor

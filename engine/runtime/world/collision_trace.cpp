@@ -1111,6 +1111,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (!trace_torso_fallback(proxy.position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
+            eh.victim_bound_radius_q16 = proxy.bound_radius_q16;
             finish_person_hit(eh, hit_distance); // geometry_entity stays invalid
             break;
         }
@@ -1224,6 +1225,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             continue;
 
         eh.geometry_entity = e->handle;
+        eh.victim_bound_radius_q16 = to_fixed(e->bound_radius);
         finish_person_hit(eh, hit_distance);
         break;
     }

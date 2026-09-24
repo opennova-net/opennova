@@ -736,6 +736,10 @@ struct ProjectileHit {
     int32_t hit_zone = -1;
     int32_t surface_type = -1;
     uint32_t material_flags = 0;
+    // A person hit's victim entity+0 boundRadius (Q16): the person arm parks
+    // a surviving round that far past the hit. [orig: Projectile_UpdatePhysics
+    // @0x4EA7BE..0x4EA7D5]
+    int32_t victim_bound_radius_q16 = 0;
 
     constexpr bool hit() const { return hit_class != ProjectileHitClass::None; }
 };
