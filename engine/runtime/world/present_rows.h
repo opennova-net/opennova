@@ -263,6 +263,26 @@ enum PresentField : int {
     // radius. This carries received/copy-propagated state; it does not invent
     // the still-unported parachute deployment physics.
     PF_PARACHUTE_DEPLOYED,
+	// The person callback's item overlays beside the held weapon
+	// (world/person_overlays.h owns the gates and the calibration). The
+	// zero-filled default draws none of them.
+	// [orig: BoneCallback_org0_World @0x4e3940]
+	// Draw 1, the parachute canopy: its CTRL PARA / PARA_O values (both zero =
+	// no canopy) and its up-axis turn as a mission yaw.
+	PF_CANOPY_PARA,
+	PF_CANOPY_PARA_O,
+	PF_CANOPY_YAW_DEG,
+	// Draw 3, the night-vision goggles, and their NVG_FLIP value.
+	PF_NVG_WORN,
+	PF_NVG_FLIP,
+	// Draw 4, the binoculars.
+	PF_BINOCULARS_RAISED,
+	// Draw 6, the carried object: its runtime type (0 = none) and the
+	// carrier's entity triple (mission euler degrees) it is oriented by.
+	PF_CARRIED_TYPE_ID,
+	PF_CARRIED_PITCH_DEG,
+	PF_CARRIED_YAW_DEG,
+	PF_CARRIED_ROLL_DEG,
 	PF_STRIDE
 };
 

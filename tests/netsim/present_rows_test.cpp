@@ -6,12 +6,14 @@
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/present_rows.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/present_rows.h>
+#include <runtime/world/player_weapon.h> // weapon_flag::kNoClipsNoDraw
 #include <runtime/world/vehicle_motor.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -704,6 +706,260 @@ bool test_rows_carry_the_primary_ring_entries() {
 	return ok;
 }
 
+// The anim state ids whose flag word does / does not carry the aim-branch bit
+// 0x40 the binocular gate shares with the bone build.
+int anim_state_with_aim_bit(bool set) {
+	for (int s = 0; s < 400; ++s)
+		if (((w::infantry_anim_flags(s) & 0x40u) != 0) == set) return s;
+	return -1;
+}
+
+// The person callback's item overlays ride both producers' rows, each gated
+// exactly as the callback gates its draw: the canopy on either canopy word
+// (PARA/PARA_O = the words doubled, the turn = body heading + pi), the goggles
+// on Flags & 4 (NVG_FLIP 0xFFFF while dead), the binoculars on the aim-branch
+// anim flag AND Flags & 8, the carried object on a mounted child with an item
+// def, oriented by the carrier's own entity triple.
+// [orig: BoneCallback_org0_World @0x4e3940 — @0x4e3988, @0x4e39d6..0x4e3a56,
+//  @0x4e3b4f..0x4e3b9d, @0x4e3bec..0x4e3c04, @0x4e3da6..0x4e3dc6]
+bool test_rows_publish_the_person_overlays() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	kernel.world.registry.configure_pool(1, 32);
+	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
+	w::Entity *flag = spawn_pool_row(kernel, 1, 0x05, 4093);
+	if (!expect(body != nullptr && flag != nullptr, "the carrier and the flag spawn")) return false;
+	body->kind = w::EntityKind::Organic;
+	flag->has_item_def = true;
+	const w::EntityHandle body_handle = body->handle;
+	const w::EntityHandle flag_handle = flag->handle;
+	w::AiEntity *ae = kernel.world.ai.at(kernel.world.ai.attach(body_handle));
+	ae->inf.active = true;
+	const int aim_state = anim_state_with_aim_bit(true);
+	const int no_aim_state = anim_state_with_aim_bit(false);
+	if (!expect(aim_state >= 0 && no_aim_state >= 0, "the anim table has both kinds")) return false;
+	ae->inf.anim_state = no_aim_state;
+
+	std::vector<float> rows;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::DoorPhaseTable doors;
+	const auto body_row = [&]() -> const float * {
+		im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
+			if (static_cast<int>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == body_handle.packed)
+				return row_at(rows, i);
+		return nullptr;
+	};
+	const float *r = body_row();
+	if (!expect(r != nullptr, "the carrier row is presented")) return false;
+	bool ok = expect(r[w::PF_CANOPY_PARA] == 0.0f && r[w::PF_CANOPY_PARA_O] == 0.0f &&
+					r[w::PF_NVG_WORN] == 0.0f && r[w::PF_BINOCULARS_RAISED] == 0.0f &&
+					r[w::PF_CARRIED_TYPE_ID] == 0.0f,
+			"an ordinary body publishes no overlay");
+
+	// Draw 1: both words doubled; the turn is the body heading plus pi.
+	ae->inf.parachute.inflation = 0x300;
+	ae->inf.parachute.flap = 0x200;
+	ae->inf.body_heading = 0x40000000; // engine heading 90 deg = mission yaw 0
+	r = body_row();
+	ok = expect(r[w::PF_CANOPY_PARA] == 1536.0f && r[w::PF_CANOPY_PARA_O] == 1024.0f,
+			"the canopy registers are the canopy words doubled") && ok;
+	ok = expect(std::fabs(r[w::PF_CANOPY_YAW_DEG] - 180.0f) < 1e-4f,
+			"the canopy turns by the body heading plus pi") && ok;
+	ae->inf.parachute.inflation = 0;
+	r = body_row();
+	ok = expect(r[w::PF_CANOPY_PARA] == 0.0f && r[w::PF_CANOPY_PARA_O] == 1024.0f,
+			"a flapping canopy still draws after its inflation word emptied") && ok;
+	ae->inf.parachute.flap = 0;
+
+	// Draw 3 and its flip.
+	body->flags |= w::kEntityFlagNVGWorn;
+	r = body_row();
+	ok = expect(r[w::PF_NVG_WORN] == 1.0f && r[w::PF_NVG_FLIP] == 0.0f,
+			"Flags & 4 draws the goggles, flip down while alive") && ok;
+	body->flags |= w::kEntityFlagDead;
+	r = body_row();
+	ok = expect(r[w::PF_NVG_FLIP] == 65535.0f, "a dead body's goggles flip") && ok;
+	body->flags &= ~(w::kEntityFlagNVGWorn | w::kEntityFlagDead);
+
+	// Draw 4 needs both halves of its gate.
+	body->flags |= w::kEntityFlagBinoculars;
+	r = body_row();
+	ok = expect(r[w::PF_BINOCULARS_RAISED] == 0.0f,
+			"Flags & 8 alone draws no binoculars outside an aim-branch state") && ok;
+	ae->inf.anim_state = aim_state;
+	r = body_row();
+	ok = expect(r[w::PF_BINOCULARS_RAISED] == 1.0f,
+			"the aim-branch state with Flags & 8 draws the binoculars") && ok;
+	body->flags &= ~w::kEntityFlagBinoculars;
+
+	// Draw 6: the mounted child, oriented by the carrier's entity triple.
+	body->mounted_child = flag_handle;
+	ae->heading = 0x40000000;           // mission yaw 0
+	ae->pitch = 0x10000000;             // 22.5 deg
+	r = body_row();
+	ok = expect(static_cast<int>(r[w::PF_CARRIED_TYPE_ID]) == 4093,
+			"the carrier publishes its carried object's type") && ok;
+	ok = expect(std::fabs(r[w::PF_CARRIED_PITCH_DEG] - 22.5f) < 1e-4f &&
+					std::fabs(r[w::PF_CARRIED_YAW_DEG]) < 1e-4f,
+			"the carried object takes the carrier's entity triple") && ok;
+	kernel.world.registry.get(flag_handle)->has_item_def = false;
+	r = body_row();
+	ok = expect(r[w::PF_CARRIED_TYPE_ID] == 0.0f,
+			"a child without an item def is not drawn") && ok;
+	return ok;
+}
+
+// Retail's collector never draws an entity whose Flags carry bit 0 — the
+// carried object is hidden on the host exactly as on a joiner.
+// [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
+//  Entity_AttachToVehicle @0x43c14a]
+bool test_world_rows_hide_the_carried_object() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 32);
+	w::Entity *flag = spawn_pool_row(kernel, 1, 0x05, 4093);
+	if (!expect(flag != nullptr, "the flag spawns")) return false;
+	std::vector<float> rows;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	bool ok = expect(row_at(rows, 0)[w::PF_HIDDEN] == 0.0f, "a free flag is drawn");
+	flag->flags |= w::kEntityFlagCarried;
+	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_HIDDEN] == 1.0f,
+			"a carried flag leaves the collector") && ok;
+	return ok;
+}
+
+// The joiner projects the same overlays from its decoded state: the wire
+// flags byte, the replica canopy words, and the S2C 0x2F carry relation.
+// [orig: NapiNPClientMsg_0x02F @0x430E10; BoneCallback_org0_World @0x4e3940]
+bool test_replica_rows_publish_the_person_overlays() {
+	opennova::mission::MissionKernel kernel;
+	im::ClientRuntime runtime("PersonOverlayRows");
+	nw::OrganicSpawnBatch batch;
+	batch.records.push_back(organic_record(0x0010u, 0x1410u));
+	batch.entity_count = 1;
+	opennova::replication::ClientReplicaPipeline pipeline;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	runtime.state() = pipeline.state();
+	if (!expect(runtime.state().entities.size() == 1, "the organic decoded")) return false;
+	opennova::replication::ClientEntityState &person = runtime.state().entities[0];
+	person.cls = nw::EntityClass::Player;
+	person.state_flags = static_cast<uint8_t>(w::kEntityFlagNVGWorn);
+	person.state_flags_known = true;
+	person.rm_parachute.flap = 0x100;
+	const uint16_t carrier = person.handle; // the pushes below reallocate the rows
+	opennova::replication::ClientEntityState flag;
+	flag.handle = 0x1005u;
+	flag.type_id = 4095;
+	flag.parent_handle = carrier;
+	runtime.state().entities.push_back(flag);
+	opennova::replication::ClientEntityState gun = flag;
+	gun.handle = 0x1006u;
+	gun.type_id = 701; // an occupied mount names its occupant too — not a carry
+	runtime.state().entities.push_back(gun);
+
+	const auto carried = im::carried_object_types_by_carrier(runtime.state());
+	bool ok = expect(carried.size() == 1 && carried.count(carrier) == 1 &&
+					carried.at(carrier) == 4095,
+			"only the flag ids form the carry relation");
+
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::build_client_replica_present_rows({kernel, &runtime, true}, lifecycle, rows, doors);
+	if (!expect(rows.size() == 3 * w::PF_STRIDE, "one row per decoded replica")) return false;
+	const float *r = row_at(rows, 0);
+	ok = expect(r[w::PF_NVG_WORN] == 1.0f, "the wire flags byte draws the goggles") && ok;
+	ok = expect(r[w::PF_CANOPY_PARA_O] == 512.0f, "the replica canopy word reaches the row") && ok;
+	ok = expect(static_cast<int>(r[w::PF_CARRIED_TYPE_ID]) == 4095,
+			"the decoded carry relation reaches the carrier's row") && ok;
+	return ok;
+}
+
+// The local avatar reads the same overlays from its own body.
+bool test_local_player_person_overlays() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	w::PersonOverlays out;
+	bool ok = expect(!im::local_player_person_overlays({kernel, nullptr, false}, out),
+			"no local body, no overlays");
+	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
+	body->kind = w::EntityKind::Organic;
+	kernel.world.cached.local_player = body->handle;
+	w::AiEntity *ae = kernel.world.ai.at(kernel.world.ai.attach(body->handle));
+	ae->inf.active = true;
+	ae->inf.parachute.inflation = 0x40;
+	body->flags |= w::kEntityFlagNVGWorn;
+	ok = expect(im::local_player_person_overlays({kernel, nullptr, false}, out),
+			"the local infantry body answers") && ok;
+	ok = expect(out.canopy() && out.canopy_para == 0x80 && out.nvg,
+			"the local body's canopy and goggles") && ok;
+	return ok;
+}
+
+// The held-weapon draw gate's remote ammo leg on the listen host: the player
+// entity's EquippedSlot (the host's record — the weapon echo does not move it)
+// naming a NoClipsNoDraw def hides whatever +0x2B0 draws once that def's pool
+// plus its one-round clip reads zero. The local player keeps its own branch.
+// [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
+bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	w::WeaponTable &table = kernel.world.tables.weapons;
+	table.entries.resize(6);
+	table.entries[5].valid = true; // the rifle the weapon echo names
+	table.entries[5].name = "WPN_TESTRIFLE";
+	w::WeaponTableEntry &grenade = table.entries[4];
+	grenade.valid = true;
+	grenade.name = "WPN_TESTNADE";
+	grenade.flags = w::weapon_flag::kNoClipsNoDraw;
+	grenade.clipsize = 1;
+	grenade.ammo_class_id = 3;
+	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
+	body->kind = w::EntityKind::Organic;
+	body->engine_flags |= w::kEntityFlagPlayer;
+	body->equipped_adm_index = 5;
+	w::AiEntity *ae = kernel.world.ai.at(kernel.world.ai.attach(body->handle));
+	ae->inf.active = true;
+	const w::EntityHandle body_handle = body->handle;
+
+	im::NapiNPServerCtx server;
+	server.np_protocol.connection_list.emplace_back();
+	im::NapiNPConnection &conn = server.np_protocol.connection_list.back();
+	conn.link.owned_entity = body_handle;
+	const uint16_t grenade_combo = 5 * 65 + 1;
+	conn.weapon_slots[grenade_combo].adm_index = 4;
+	conn.weapon_slots[grenade_combo].clip = 0;
+	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
+	conn.equipped_slot.combo = grenade_combo;
+
+	std::vector<float> rows;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::DoorPhaseTable doors;
+	const auto held = [&](const im::NapiNPServerCtx *ctx) {
+		im::build_world_present_rows({kernel, nullptr, false, ctx}, lifecycle, rows, doors);
+		return static_cast<int>(row_at(rows, 0)[w::PF_HELD_WEAPON_ADM]);
+	};
+	bool ok = expect(held(nullptr) == 5, "no host record: the remote leg draws the echo");
+	ok = expect(held(&server) == 0,
+			"an empty NoClipsNoDraw EquippedSlot hides the drawn weapon") && ok;
+	conn.reply.ammo_pools[3] = 2;
+	ok = expect(held(&server) == 5, "a stocked pool draws it") && ok;
+	conn.reply.ammo_pools[3] = 0;
+	conn.weapon_slots[grenade_combo].clip = 1;
+	ok = expect(held(&server) == 5, "the one-round clip counts toward the ammo") && ok;
+	conn.weapon_slots[grenade_combo].clip = 0;
+	conn.equipped_slot = {};
+	ok = expect(held(&server) == 5, "no EquippedSlot: nothing to test") && ok;
+	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
+	conn.equipped_slot.combo = grenade_combo;
+	kernel.world.cached.local_player = body_handle;
+	ok = expect(held(&server) == 5, "the local player takes its own branch") && ok;
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_palm_source_and_local_fragment();
@@ -719,6 +975,11 @@ int main() {
 	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
 	ok = test_joiner_hull_gun_words_follow_the_turret_child() && ok;
 	ok = test_rows_carry_the_primary_ring_entries() && ok;
+	ok = test_rows_publish_the_person_overlays() && ok;
+	ok = test_world_rows_hide_the_carried_object() && ok;
+	ok = test_replica_rows_publish_the_person_overlays() && ok;
+	ok = test_local_player_person_overlays() && ok;
+	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

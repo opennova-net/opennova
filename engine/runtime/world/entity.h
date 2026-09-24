@@ -221,8 +221,9 @@ inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-cli
                                                               // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
 inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
-inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates held-weapon draws
-                                                              // [orig: §5.10b class; draw gate @0x4e5073-family]
+inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates the upper-body
+                                                              // weapon channel [orig: §5.10b class;
+                                                              // Entity_BuildBoneTransformMatrices @0x4b14a7]
 inline constexpr uint32_t kEntityFlagQueuedMount = 0x200;     // the queued Co-op spawn-marker mount: set with
                                                               // +0x16C/+0x180 = the marker's parent by the no-pick
                                                               // team-2 marker arm, consumed (toggle, then cleared)

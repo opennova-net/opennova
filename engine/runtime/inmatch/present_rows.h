@@ -20,6 +20,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/person_overlays.h>
 
 #include <cstdint>
 #include <unordered_map>
@@ -27,15 +28,20 @@
 
 namespace opennova::inmatch {
 
+struct NapiNPServerCtx;
+
 // What both collectors read. The kernel is the world + the local player's
 // view/weapon state + the asset-derived tables (seat specs, mounted graphics,
 // the model cache); the runtime is the decoded replica view (its ClientState,
 // the joiner's self handle, the LFP camp percents) and may be null on the
-// world path of a bare host.
+// world path of a bare host. The server context is the listen host's own (null
+// elsewhere): its player slots keep the per-player state retail reads off a
+// remote player's entity there (the EquippedSlot the held-weapon gate tests).
 struct PresentRowsContext {
 	mission::MissionKernel &kernel;
 	ClientRuntime *runtime = nullptr;
 	bool joiner = false;
+	const NapiNPServerCtx *server = nullptr;
 };
 
 // The decoded fold's dead->alive respawn revision, mirrored per pool row on the
@@ -91,5 +97,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 void build_world_present_rows(const PresentRowsContext &context,
 		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out,
 		DoorPhaseTable &door_phases);
+
+// The local player's own item overlays (the canopy, the goggles, the
+// binoculars, the carried object — world/person_overlays.h) for the local
+// avatar presenter, from the same inputs a pool row publishes. False (and a
+// cleared `out`) without a local infantry body.
+bool local_player_person_overlays(const PresentRowsContext &context,
+		world::PersonOverlays &out);
 
 } // namespace opennova::inmatch
