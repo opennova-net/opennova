@@ -625,9 +625,11 @@ const std::vector<Recipe> &recipes() {
 		{"person", make_person, nullptr},
 		{"pump", make_pump, nullptr},
 		// Authored projected-sphere LOD witnesses: identical geometry and CMDL,
-		// distinct coarse thresholds, written through the same parity writer.
-		{"pump_lod20", make_pump, [](Model &m) { m.lods[1].threshold = 20 << 16; }},
-		{"pump_lod80", make_pump, [](Model &m) { m.lods[1].threshold = 80 << 16; }},
+		// distinct LOD0 thresholds in retail's RMDL form (integer pixels in the
+		// level's own slot: LOD0 draws above 20/80 px, the zero LOD1 row below),
+		// written through the same parity writer.
+		{"pump_lod20", make_pump, [](Model &m) { m.lods[0].threshold = 20; }},
+		{"pump_lod80", make_pump, [](Model &m) { m.lods[0].threshold = 80; }},
         {"pump_minefield", make_pump, [](Model &m) {
             m.add_user_point("ignored", Vec3{}, kUp, 0, kUserPointGameplay);
             const char *names[] = {"SMLMARKED", "small", "LrgMarked", "large"};
@@ -881,8 +883,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "tank_special1_slide_ewep01") expect(slide_moves_part(p, 1, 0) && !std::strcmp(p.reg(0), "VEHICLE_SPECIAL1"), name + ": slide");
 	if (name == "pump") expect(p.live(0) && !p.live(1) && p.rows(0) == 5, name + ": LOD0 live, LOD1 inert");
 	if (name == "pump_lod20" || name == "pump_lod80")
-		expect(p.model.lods[1].lod_threshold == ((name == "pump_lod20" ? 20 : 80) << 16),
-				name + ": authored coarse threshold");
+		expect(p.model.lods[0].lod_threshold == (name == "pump_lod20" ? 20 : 80) &&
+						p.model.lods[1].lod_threshold == 0,
+				name + ": authored LOD0 pixel threshold");
 	if (name == "pump_anim0_noise_translation") expect(p.row(0, 0).translation.control == 0x36 && p.row(0, 0).translation.end == 32767, name + ": noise");
 	if (name == "pump_lod0_inert_lod1_sine_rotz") expect(p.rows(0) == 1 && !p.live(0) && p.rows(1) == 1 && p.live(1), name + ": LOD liveness");
 	if (name == "shed_lght0_sub2_origin_atten100") expect(p.model.lights[0].subobj_index == 2 && p.model.lights[0].atten_end == 100.0f, name + ": light");

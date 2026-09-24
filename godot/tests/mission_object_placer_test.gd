@@ -933,8 +933,9 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 				"mesh": coarse, "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
 			}], {
-				# Fine to coarse; row 0 is unused, row 1 = 20 px in Q16.16.
-				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
+				# Fine to coarse; slot i is level i's own threshold (retail
+				# Model_SelectRlodLevel @0x5c3b3b): level 0 above 20 px, level 1 below.
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
 				"sphere_radius": 2.0,
 			}))
 	var parent := Node3D.new()
@@ -1089,7 +1090,7 @@ func _dense_lod_switches(placer: MissionObjectPlacer, camera: Transform3D) -> in
 
 
 # Three same-graphic buildings in one 512-unit bin at Godot z = 10 / 100 /
-# 200 (BMS y = -10 / -100 / -200), a two-level graphic (row 1 = 20 px). The
+# 200 (BMS y = -10 / -100 / -200), a two-level graphic (level 0 above 20 px). The
 # second one optionally carries the BMS NoShadow gate so the level
 # populations need a filtered shadow twin.
 func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
@@ -1121,7 +1122,7 @@ func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
 				"mesh": coarse, "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
 			}], {
-				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
 				"sphere_radius": 2.0,
 			}))
 	var stats := placer.place(mission, parent)

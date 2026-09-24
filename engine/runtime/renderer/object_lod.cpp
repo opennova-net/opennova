@@ -88,13 +88,6 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
     return result;
   }
   const int level_count = static_cast<int>(thresholds_q16.size());
-  // Rows beyond the authored table read as zero, like the unused slots of
-  // retail's fixed-size per-model threshold array.
-  const auto threshold_at = [&](int index) -> int32_t {
-    return index >= 0 && index < level_count
-               ? thresholds_q16[static_cast<std::size_t>(index)]
-               : 0;
-  };
 
   // scaledDist = viewDist * flt_298055C, truncated toward zero by the
   // integer compare (_ftol2_sse) [orig: @ 0x5c3b27..0x5c3b4a].
@@ -105,21 +98,29 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
       static_cast<double>(std::numeric_limits<int32_t>::max()));
   result.scaled_projected_radius_q16 = static_cast<int32_t>(bounded);
 
-  // The walk starts at row 1 and advances while the scaled radius is at or
-  // below the next row; the index is clamped to the final row
-  // [orig: @ 0x5c3b45..0x5c3b5a].
+  // The walk starts at slot 0 (model+0x40) and advances while the scaled
+  // radius is at or below the slot's own threshold; the index is clamped to
+  // the final level [orig: `xor eax,eax` @ 0x5c3b3b, `lea edx,[esi+40h]`
+  // @ 0x5c3b45, `cmp edi,[edx]; jg` @ 0x5c3b48, the clamp @ 0x5c3b56..0x5c3b5a].
   int selected = 0;
-  while (selected + 1 < level_count &&
-         result.scaled_projected_radius_q16 <= thresholds_q16[selected + 1]) {
+  while (selected < level_count &&
+         result.scaled_projected_radius_q16 <=
+             thresholds_q16[static_cast<std::size_t>(selected)]) {
     ++selected;
   }
+  if (selected >= level_count) {
+    selected = level_count - 1;
+  }
 
-  // Coarsest-slot back-off: on the final row (or a row whose next threshold
-  // is zero) the UNSCALED radius must also exceed the row's threshold, or
-  // the level one finer is drawn [orig: @ 0x5c3b88..0x5c3b9b].
+  // Coarsest-slot back-off: on the final level (or a level whose own
+  // threshold is zero) the UNSCALED radius must not exceed the next finer
+  // level's threshold, or that finer level is drawn [orig: T[level-1] =
+  // [esi+eax*4+3Ch] and T[level] = [esi+eax*4+40h] @ 0x5c3b5f..0x5c3b63,
+  // the gates @ 0x5c3b77..0x5c3b88, `sub eax,1` @ 0x5c3b8c].
   if (selected > 0 &&
-      (selected == level_count - 1 || threshold_at(selected + 1) == 0) &&
-      projected_radius_q16 > threshold_at(selected)) {
+      (selected == level_count - 1 ||
+       thresholds_q16[static_cast<std::size_t>(selected)] == 0) &&
+      projected_radius_q16 > thresholds_q16[static_cast<std::size_t>(selected - 1)]) {
     --selected;
     result.backed_off = true;
   }

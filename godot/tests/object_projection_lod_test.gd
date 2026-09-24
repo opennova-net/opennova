@@ -113,7 +113,7 @@ func _static_placer() -> MissionObjectPlacer:
 	}, {
 		"mesh": BoxMesh.new(), "material": null,
 		"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
-	}], {"thresholds_q16": PackedInt32Array([0, 20 << 16])}))
+	}], {"thresholds_q16": PackedInt32Array([20 << 16, 0])}))
 	return placer
 
 

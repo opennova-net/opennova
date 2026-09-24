@@ -92,7 +92,8 @@ void ObjectModel::rebuild_scene() {
 			lod_index < retained_lod_end;
 			++lod_index) {
 		authored_lod_thresholds_q16_.push_back(
-				native_model.lods[lod_index].lod_threshold);
+				opennova::renderer::rlod_threshold_q16_from_rmdl(
+						native_model.lods[lod_index].lod_threshold));
 	}
 	refresh_live_panm_classification();
 	// A loaded .adm drives the model: build a Skeleton3D from its .bad

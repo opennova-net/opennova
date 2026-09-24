@@ -285,7 +285,8 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 	} else if (p_data->has_document()) {
 		const Threedi3di3 &native_model = p_data->native_model();
 		for (std::size_t lod = 0; lod < native_model.lod_count; ++lod) {
-			profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
+			profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
+					native_model.lods[lod].lod_threshold));
 		}
 	}
 	if (p_lod_profile.has("sphere_radius")) {

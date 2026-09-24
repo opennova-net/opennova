@@ -62,16 +62,31 @@ ObjectProjectionSphere person_projection_sphere_q16(
     int32_t entity_bound_radius_q16, bool parachute_deployed = false,
     int32_t parachute_model_radius_q16 = 0);
 
+// The runtime RLOD threshold of one level: the RMDL chunk authors an integer
+// pixel count (the dword after the model type), and the model loader stores
+// it shifted into Q16.16 in the level's own table slot (model+0x40+4*level).
+// Corpus tables descend to zero (Armry01 200, 60, 20, 0).
+// [orig: ThreediGp_LoadFromFile @ 0x5b5bdf..0x5b5be5 — `mov ecx,[ecx+4];
+//  shl ecx,10h; mov [eax+20h],ecx` into loader+0x44+4*i; the model the
+//  wrapper hands out is loader+4 — sub_5B6160 @ 0x5b6273]
+inline constexpr int32_t rlod_threshold_q16_from_rmdl(int32_t rmdl_threshold_pixels) {
+  return static_cast<int32_t>(static_cast<uint32_t>(rmdl_threshold_pixels) << 16);
+}
+
 struct ObjectLodSelection {
   int lod_index = -1;
   int32_t scaled_projected_radius_q16 = 0;
   // The coarsest-slot back-off fired: the scaled walk landed on the final
-  // row (or a row whose next threshold is zero) while the UNSCALED radius
-  // still exceeds that row's threshold, so the level one finer is drawn.
+  // level (or a level whose own threshold is zero) while the UNSCALED radius
+  // still exceeds the next finer level's threshold, so that finer level is
+  // drawn.
   bool backed_off = false;
 };
 
 // Select an authored object LOD from the retail fine-to-coarse threshold table.
+// thresholds_q16[i] is level i's own threshold (rlod_threshold_q16_from_rmdl):
+// level i draws while the scaled radius exceeds it and the level before did
+// not claim the radius, so a first slot of zero pins the model to level 0.
 // The input is projected screen radius in Q16.16 (project_bound_sphere_radius_q16
 // below). `projection_scale` is the frame's resolution/detail normalization
 // (object_lod_frame_scale). `available`, when supplied, models the
@@ -83,7 +98,7 @@ struct ObjectLodSelection {
 // cross-fade or dual submission exists across an RLOD threshold (D-RORD-11,
 // docs/render/render-order-re.md).
 // [orig: Model_SelectRlodLevel @ 0x5c3b20 (the level in EAX; the walk
-//  @ 0x5c3b45..0x5c3b5a, the back-off @ 0x5c3b88..0x5c3b9b; the dead
+//  from slot 0 @ 0x5c3b3b..0x5c3b5a, the back-off @ 0x5c3b5d..0x5c3b8c; the dead
 //  fraction store @ 0x5c3bb3/0x5c3bc2 -> dword_29ACD9C, read only by the
 //  orphan stub @ 0x5c38c0); null fallback at render_sector_entity
 //  @ 0x5c4303]

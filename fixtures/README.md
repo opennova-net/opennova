@@ -109,7 +109,7 @@ control register 0, values 0..4, no speed):
 | `armory_special2_slide_part1` | armory | CTRL 0 renamed `VEHICLE_SPECIAL2`; delete rows; slide(1) | simulation FastRope SPECIAL2 |
 | `tank_special1_slide_ewep01` | tank | CTRL 0 renamed `VEHICLE_SPECIAL1`; delete rows; slide(the part that owns `ewep01`) | simulation listen-snapshot attachment |
 | `pump_lod0_inert_lod1_sine_rotz` | pump | LOD0: one inert row on part 0; LOD1: one rotation z sine row | simulation effective LOD0 collision |
-| `pump_lod20`, `pump_lod80` | pump | LOD1 threshold 20 or 80 pixels in Q16.16; original geometry, GHDR and CMDL retained | entity projection sphere, fallback/composed persons and primary-sphere husk LOD selection |
+| `pump_lod20`, `pump_lod80` | pump | LOD0 RMDL threshold 20 or 80 (integer pixels, retail's authored form: LOD0 draws above it, LOD1 below); original geometry, GHDR and CMDL retained | entity projection sphere, fallback/composed persons and primary-sphere husk LOD selection |
 | `panm_live_01_spinner` .. `panm_inert_10_rotrev` | shed | delete rows; one row on part 0 with flags F and every track control 0 except the live tracks (control 0x10). (F, live): 01 `1<<8` none; 02 `3<<8` none; 03 `4<<8` none; 04 `2<<8` rotation z; 05 `2<<8` scale x; 06 `1` scale y; 07 `1` scale x; 08 `2` scale y; 09 `1<<24` translation; 10 `1<<16` none | simulation PANM liveness family |
 
 Every consumer that pins a number pins the authored one: the bird's 18 faces,
