@@ -17,14 +17,22 @@
 # engine derives (collision planes, seam flags, tangents, bounds) is never
 # stored in the scene: export recomputes it from the meshes every time.
 
+import importlib
 import os
 import subprocess
+import sys
 
 import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty,
                        IntProperty, PointerProperty, StringProperty)
 from bpy_extras.io_utils import ImportHelper
 
+# Blender re-runs this file when the extension is updated or scripts are
+# reloaded, but keeps the submodules it imported before: reload them first so
+# the property groups registered here and the code that reads them agree.
+for _name in ("export", "importer"):
+    if f"{__name__}.{_name}" in sys.modules:
+        importlib.reload(sys.modules[f"{__name__}.{_name}"])
 from . import export, importer
 
 # The seven PANM tracks, labelled by the axis retail turns them about
