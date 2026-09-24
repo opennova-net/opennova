@@ -23,6 +23,8 @@
 namespace opennova::devtools {
 
 class ImGuiPass;
+class OverlayLayer;
+class OverlayCanvas;
 
 enum class InitialDockPlacement {
 	None,
@@ -176,6 +178,19 @@ public:
 	// exactly as for Escape). Safe to call from inside a window's draw.
 	void request_close() { close_requested_ = true; }
 
+	// World-space overlay layers (overlay_canvas.h): owned by their windows,
+	// registered here, toggled from the "Overlays" menu independently of
+	// their window, and drawn by the Game window over the game image while
+	// the tools are open (lower draw_priority first).
+	void register_overlay(OverlayLayer &layer);
+	int overlay_count() const { return static_cast<int>(overlays_.size()); }
+	OverlayLayer &overlay(int index) { return *overlays_[static_cast<size_t>(index)]; }
+	const OverlayLayer &overlay(int index) const { return *overlays_[static_cast<size_t>(index)]; }
+	bool any_overlay_enabled() const;
+	// Fires the layer's on_enabled edge when the value changes.
+	void set_overlay_enabled(OverlayLayer &layer, bool enabled);
+	void draw_overlays(OverlayCanvas &canvas);
+
 	// The menu bar's status line: the newest message, drawn right-aligned in
 	// the menu bar and faded out kStatusSeconds after it was first drawn;
 	// hovering it lists the last kStatusHistory messages, newest first.
@@ -196,9 +211,11 @@ private:
 
 	void sync_visibility();
 	void draw_menu_bar();
+	void draw_overlays_menu();
 	void draw_status();
 
 	std::vector<std::unique_ptr<Window>> windows_;
+	std::vector<OverlayLayer *> overlays_; // registration order (the menu's)
 	std::deque<StatusLine> status_; // newest first
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;

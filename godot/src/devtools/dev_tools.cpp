@@ -85,6 +85,8 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
 	ClassDB::bind_static_method("DevTools", D_METHOD("engine_log_after", "cursor"),
 			&DevTools::engine_log_after);
+	ClassDB::bind_static_method("DevTools", D_METHOD("project_mission_point", "camera", "mission_point"),
+			&DevTools::project_mission_point);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
 }
@@ -261,9 +263,11 @@ void DevTools::_process(double p_delta) {
 	auto &pass = tools_->pass();
 	pass.set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
-	// The F3 row times the tools' whole cost: the layout pass, the request
-	// drains and the record pushes.
+	// The F3 row times the tools' whole cost: the overlay feed, the layout
+	// pass, the request drains and the record pushes. The overlay records go
+	// in first so a layer draws the tick the image shows.
 	const int64_t start = Time::get_singleton()->get_ticks_usec();
+	push_overlay_frame();
 	const bool drew = pass.draw_frame(frame);
 	apply_game_requests();
 	sync_game_spectator_state();
@@ -412,9 +416,9 @@ void DevTools::sync_game_spectator_state() {
 			available, sim != nullptr && sim->is_local_spectator());
 }
 
-void DevTools::draw(int p_requested_width, int p_requested_height) {
+bool DevTools::draw(int p_requested_width, int p_requested_height) {
 	if (game_viewport_ == nullptr) {
-		return;
+		return false;
 	}
 	const Vector2i requested(std::max(1, p_requested_width), std::max(1, p_requested_height));
 	if (game_viewport_->get_size() != requested) {
@@ -422,9 +426,13 @@ void DevTools::draw(int p_requested_width, int p_requested_height) {
 	}
 	rendered_game_viewport_size_ = requested;
 	Engine *engine = Engine::get_singleton();
-	if (engine->has_singleton("ImGuiGD")) {
-		engine->get_singleton("ImGuiGD")->call("SubViewport", game_viewport_);
+	if (!engine->has_singleton("ImGuiGD")) {
+		return false;
 	}
+	// The addon draws the image at the cursor at the viewport's size, then an
+	// invisible button over it: the window's last item is the image rect.
+	engine->get_singleton("ImGuiGD")->call("SubViewport", game_viewport_);
+	return true;
 }
 
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
@@ -466,6 +474,12 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	rays_recording_ = false; // a fresh world starts with the capture off
 	last_physics_push_ms_ = -1;
 	contacts_recording_ = false; // likewise the contact capture
+	// A new world's first tick re-pushes every overlay record.
+	overlay_tick_ = static_cast<uint64_t>(-1);
+	overlay_selection_ = 0xFFFF;
+	if (overlay_live_) {
+		tools_->clear_overlay_records();
+	}
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();

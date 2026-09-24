@@ -1,7 +1,8 @@
 class_name DebugPickFlow
 ## The Shift+F6 pick flow: run the crosshair ray pick, file the card into the
-## shell-owned DebugPickList (the world highlights it and the F3 Entities
-## window selects it), and confirm what happened with a brief toast over the HUD.
+## shell-owned DebugPickList (the F3 Entities window selects it and its
+## Selection overlay marks it in the Game view), and confirm what happened with
+## a brief toast over the HUD.
 
 const PICK_TOAST_SECONDS := 1.6
 

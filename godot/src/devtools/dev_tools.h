@@ -25,6 +25,8 @@
 
 namespace godot {
 
+class Camera3D;
+
 class Simulation;
 class SubViewport;
 
@@ -136,6 +138,13 @@ public:
 	// composes.
 	static Dictionary engine_log_after(int64_t p_cursor);
 
+	// The overlays' projection as a test seam (both flavours; the math is the
+	// engine's header-only overlay_camera.h): a mission-frame point projected
+	// through `camera` onto its viewport, exactly as the Game-view overlays
+	// place it (NaN behind the camera). Pinned against
+	// Camera3D::unproject_position.
+	static Vector2 project_mission_point(Camera3D *p_camera, const Vector3 &p_mission_point);
+
 protected:
 	static void _bind_methods();
 
@@ -150,7 +159,7 @@ private:
 	void sync_layer_visible();
 	bool layer_visible_ = false;
 
-	void draw(int p_requested_width, int p_requested_height) override;
+	bool draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
 	void sync_game_spectator_state();
 	void apply_control_requests();
@@ -167,6 +176,12 @@ private:
 	void push_control_catalog();
 	void push_control_states();
 	void push_game_status();
+	// The overlay feed (dev_tools_overlay.cpp): the camera and the per-tick
+	// layer records, ahead of the layout pass.
+	void push_overlay_frame();
+	bool overlay_live_ = false;
+	uint64_t overlay_tick_ = static_cast<uint64_t>(-1);
+	uint16_t overlay_selection_ = 0xFFFF;
 	void set_game_playing_internal(bool p_playing);
 	// The one cadence gate every record push shares: true (and the stamp
 	// moved) when p_seconds have passed since the last push, or none was made

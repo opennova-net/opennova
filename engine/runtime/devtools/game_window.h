@@ -10,6 +10,7 @@
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/game_status_snapshot.h>
 #include <runtime/devtools/imgui_pass.h>
+#include <runtime/devtools/overlay_camera.h>
 
 #include <deque>
 #include <string>
@@ -32,11 +33,13 @@ enum class GameWindowRequest {
 
 // The only seam between the engine-owned window and a rendering device. The
 // Godot binding resizes and draws its SubViewport; engine-only runs leave the
-// binding null or install a fake.
+// binding null or install a fake. draw returns true when the game image was
+// drawn at the cursor at exactly the requested size as the window's last
+// item, which is where the overlays land.
 class GameViewport {
 public:
 	virtual ~GameViewport() = default;
-	virtual void draw(int requested_width, int requested_height) = 0;
+	virtual bool draw(int requested_width, int requested_height) = 0;
 };
 
 class GameWindow : public Window {
@@ -81,10 +84,21 @@ public:
 	void set_status(const GameStatusSnapshot &status);
 	const std::string &status_text() const { return status_text_; }
 
+	// The camera the overlays project through (an invalid record draws none).
+	void set_overlay_camera(const OverlayCamera &camera) { overlay_camera_ = camera; }
+	const OverlayCamera &overlay_camera() const { return overlay_camera_; }
+	// The overlay pass over the image just drawn (the layout pass calls it;
+	// public so a test can drive it over a fake image). Skipped while the
+	// camera was built for another size (a resize in flight).
+	void draw_overlays(ImGuiPass &pass, int image_width, int image_height);
+	int overlay_draws() const { return overlay_draws_; }
+
 private:
 	void draw_toolbar();
 
 	ControlBoard &board_;
+	OverlayCamera overlay_camera_{};
+	int overlay_draws_ = 0;
 	GameStatusSnapshot status_{};
 	std::string status_text_;
 	GameViewport *viewport_ = nullptr;

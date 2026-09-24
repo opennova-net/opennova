@@ -5,6 +5,7 @@
 // facts the deleted GDScript DebugEntities join and Dictionary getters carried.
 #include <runtime/world/ai.h>
 #include <runtime/world/inspect.h>
+#include <runtime/world/inspect_markers.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 
@@ -433,6 +434,41 @@ int main() {
                 inspect::AiDebugReport::kMaxRows);
         CHECK(report.channels.size() == 1 && report.channels[0].followers == 260);
         CHECK(report.counters.brain_count == 260);
+    }
+
+    // --- the overlay entity markers ------------------------------------------
+    {
+        World world;
+        world.registry.configure_pool(0, 8);
+        const EntityHandle near_a = spawn_entity(world, 0, 5311, 1, "near", Vec3{2, 0, 0});
+        const EntityHandle mid = spawn_entity(world, 0, 5311, 2, "mid", Vec3{20, 0, 0});
+        const EntityHandle far = spawn_entity(world, 0, 5311, 3, "far", Vec3{500, 0, 0});
+        spawn_entity(world, 0, 0, 4, "defless", Vec3{1, 0, 0});
+        world.ai.attach(mid);
+        world.registry.get(near_a)->bound_radius = 1.5f;
+
+        inspect::EntityMarkerQuery query;
+        query.range_units = 100.0f;
+        std::vector<inspect::EntityMarker> rows = inspect::entity_markers(world, query);
+        CHECK(rows.size() == 2);                         // near + mid; far out of range, defless has no def
+        CHECK(rows.size() == 2 && rows[0].name == "near"); // nearest first
+        CHECK(rows.size() == 2 && rows[0].bound_radius == 1.5f);
+        CHECK(rows.size() == 2 && rows[1].has_brain && !rows[0].has_brain);
+
+        query.cap = 1;
+        query.selected = far.packed;
+        rows = inspect::entity_markers(world, query);
+        CHECK(rows.size() == 2);                         // the cap, plus the selection past it
+        CHECK(rows.size() == 2 && rows[0].name == "near" && !rows[0].selected);
+        CHECK(rows.size() == 2 && rows[1].name == "far" && rows[1].selected);
+
+        query.range_units = 0.0f;                        // the selection alone
+        rows = inspect::entity_markers(world, query);
+        CHECK(rows.size() == 1 && rows[0].selected);
+        query.with_brains = false;
+        query.selected = mid.packed;
+        rows = inspect::entity_markers(world, query);
+        CHECK(rows.size() == 1 && !rows[0].has_brain);   // a joiner's view leaves the AI pool out
     }
 
     std::printf("inspect: %s\n", failures == 0 ? "OK" : "FAILED");

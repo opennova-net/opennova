@@ -1,11 +1,13 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/overlay_canvas.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
 // (third_party/imgui/CMakeLists.txt): a bump of one side without the other
@@ -71,6 +73,71 @@ const char *menu_group_label(MenuGroup group) {
 			return "Help";
 	}
 	return "";
+}
+
+void ImGuiPass::register_overlay(OverlayLayer &layer) {
+	overlays_.push_back(&layer);
+}
+
+bool ImGuiPass::any_overlay_enabled() const {
+	for (const OverlayLayer *layer : overlays_) {
+		if (layer->enabled()) return true;
+	}
+	return false;
+}
+
+void ImGuiPass::set_overlay_enabled(OverlayLayer &layer, bool enabled) {
+	if (layer.enabled_ == enabled) return;
+	layer.enabled_ = enabled;
+	if (!enabled) layer.stats_ = OverlayLayerStats{};
+	layer.on_enabled(enabled);
+}
+
+void ImGuiPass::draw_overlays(OverlayCanvas &canvas) {
+	std::vector<OverlayLayer *> order;
+	for (OverlayLayer *layer : overlays_) {
+		if (layer->enabled()) order.push_back(layer);
+	}
+	std::stable_sort(order.begin(), order.end(), [](const OverlayLayer *a, const OverlayLayer *b) {
+		return a->draw_priority() < b->draw_priority();
+	});
+	for (OverlayLayer *layer : order) {
+		canvas.begin_layer(layer->line_budget(), layer->text_budget());
+		layer->draw(canvas);
+		layer->stats_ = canvas.end_layer();
+	}
+}
+
+void ImGuiPass::draw_overlays_menu() {
+	if (overlays_.empty() || !ImGui::BeginMenu("Overlays")) {
+		return;
+	}
+	// One section per group, in the order the groups first registered.
+	std::vector<const char *> groups;
+	for (const OverlayLayer *layer : overlays_) {
+		const bool seen = std::any_of(groups.begin(), groups.end(),
+				[&](const char *g) { return std::strcmp(g, layer->group()) == 0; });
+		if (!seen) groups.push_back(layer->group());
+	}
+	for (const char *group : groups) {
+		ImGui::SeparatorText(group);
+		for (OverlayLayer *layer : overlays_) {
+			if (std::strcmp(layer->group(), group) != 0) continue;
+			bool on = layer->enabled();
+			const char *note = layer->enabled() && layer->last_stats().dropped > 0 ? "over budget" : nullptr;
+			if (ImGui::MenuItem(layer->label(), note, &on)) set_overlay_enabled(*layer, on);
+			if (layer->tooltip()[0] != '\0' &&
+					ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip | ImGuiHoveredFlags_DelayNormal)) {
+				ImGui::SetTooltip("%s", layer->tooltip());
+			}
+		}
+	}
+	ImGui::Separator();
+	if (ImGui::MenuItem("All off")) {
+		for (OverlayLayer *layer : overlays_) set_overlay_enabled(*layer, false);
+	}
+	ImGui::TextDisabled("Overlays draw over the Game view while F3 is open.");
+	ImGui::EndMenu();
 }
 
 void ImGuiPass::post_status(std::string text, StatusLevel level) {
@@ -313,6 +380,7 @@ void ImGuiPass::draw_menu_bar() {
 		}
 		ImGui::EndMenu();
 	}
+	draw_overlays_menu();
 	bool has_help = false;
 	for (const auto &window : windows_) {
 		has_help = has_help || window->menu_group() == MenuGroup::Help;

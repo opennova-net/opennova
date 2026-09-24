@@ -824,7 +824,7 @@ func _on_world_loaded() -> void:
 	# joiner this is only wire-header world construction completion; keep pumping the hidden runtime
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
-	# sessions); the world renders/curates the shell-owned list from here on.
+	# sessions); the pick session curates the shell-owned list from here on.
 	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
