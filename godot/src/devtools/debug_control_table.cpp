@@ -338,14 +338,17 @@ Variant DebugControlTable::normalize_value(const Ref<DebugControlRow> &p_row, co
 			return number;
 		}
 		case DebugControlRow::ENUM: {
-			if (p_value.get_type() != Variant::INT) {
+			// An integral float is an index too: JSON (MCP) carries every
+			// number as a float, as the integer action arguments accept.
+			if (p_value.get_type() != Variant::INT && p_value.get_type() != Variant::FLOAT) {
 				return Variant();
 			}
-			const int64_t index = p_value;
-			if (index < 0 || index >= p_row->choices_.size()) {
+			const double number = p_value;
+			if (!std::isfinite(number) || number != std::floor(number) || number < 0.0 ||
+					number >= p_row->choices_.size()) {
 				return Variant();
 			}
-			return index;
+			return static_cast<int64_t>(number);
 		}
 		case DebugControlRow::ACTION:
 			break;
@@ -717,7 +720,8 @@ void DebugControlTable::register_audio_actions() {
 void DebugControlTable::register_runtime_rows() {
 	// The runtime's own transport (MissionRoot): pause and step report the
 	// engine session's own refusal for multiplayer roles (the network pump
-	// must keep running).
+	// must keep running); resume is the shell's resume leg, which also closes
+	// a pause overlay (the in-game menu, the armory) left up.
 	Entry &transport = action(control_id::kRuntimeTransport, "Sim", "Runtime transport",
 			"Resume, pause, or single-step the real game runtime.",
 			DebugControlRow::TARGET_GAME_SHELL, DebugControlRow::OWNER_ENGINE,
@@ -733,8 +737,7 @@ void DebugControlTable::register_runtime_rows() {
 			return outcome_error(value->pause() ? OK : ERR_UNAVAILABLE);
 		}
 		if (verb == "resume") {
-			(void)value->play();
-			return outcome_error(OK);
+			return outcome_error(host_->resume());
 		}
 		if (verb == "step") {
 			return outcome_error(value->step_once() ? OK : ERR_UNAVAILABLE);
@@ -742,8 +745,9 @@ void DebugControlTable::register_runtime_rows() {
 		return outcome_error(ERR_INVALID_PARAMETER);
 	};
 
-	// F3's local Stop button shares the control without classifying leaving a
-	// multiplayer session as an authoritative world mutation.
+	// Leaving is the shell's gated return leg, shared with MCP's game_control,
+	// without classifying leaving a multiplayer session as an authoritative
+	// world mutation.
 	Entry &return_to_menu = action(control_id::kRuntimeReturnToMenu, "Sim", "Return to menu",
 			"Leave the current world locally and return to the game menu.",
 			DebugControlRow::TARGET_GAME_SHELL, DebugControlRow::OWNER_DEVICE);

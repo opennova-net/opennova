@@ -44,7 +44,6 @@ ImVec4 swatch(uint32_t packed) {
 }  // namespace
 
 void EnvironmentWindow::on_visibility(bool visible) {
-	shown_ = visible;
 	if (!visible) {
 		// Drop the snapshot so a closed window holds nothing; the embedder's
 		// needs_environment_snapshot gate stops the pushes on the same edge.
@@ -62,11 +61,18 @@ void EnvironmentWindow::set_snapshot(const EnvironmentSnapshot &snapshot) {
 		rain_pct_edit_ = snapshot_.rain_target_pct;
 		overcast_pct_edit_ = snapshot_.overcast_target_pct;
 		fog_metres_edit_ = snapshot_.fog_target_metres;
-		sky_speed_edit_ = snapshot_.sky_speed;
+		// The commands write targets, so the strip seeds from the ramps'
+		// goals: sunfade's current never leaves 0, skyspeed's ramps.
+		sky_speed_edit_ = snapshot_.sky_speed_target;
+		sun_fade_pct_edit_ = snapshot_.sun_fade_target_pct;
+		sky_height_edit_ = snapshot_.sky_height_metres;
 		minute_edit_ = snapshot_.minute_of_day;
 		fog_type_edit_ = snapshot_.fog_type;
 		wind_edit_ = snapshot_.wind_scale;
+		wind_pct_edit_ = (snapshot_.wind_scale * 100 + 128) / 256;
 		color_fade_seconds_edit_ = snapshot_.color_fade_seconds;
+		// quake(n) arms 6 * n ticks; a running quake seeds its remainder.
+		if (snapshot_.quake_ticks > 0) quake_seconds_edit_ = (snapshot_.quake_ticks + 5) / 6;
 		seeded_ = true;
 	}
 	if (!snapshot_.valid) {
@@ -78,6 +84,7 @@ void EnvironmentWindow::set_snapshot(const EnvironmentSnapshot &snapshot) {
 void EnvironmentWindow::format_rows() {
 	if (!snapshot_.valid) {
 		for (std::string &row : rows_) row.clear();
+		for (std::string &row : extra_rows_) row.clear();
 		return;
 	}
 	const EnvironmentSnapshot &s = snapshot_;
@@ -119,8 +126,28 @@ void EnvironmentWindow::format_rows() {
 	rows_[i++] = int_row("Complexity", s.complexity);
 	// [orig: sprintf(text_buf, "  DCB: %i", 692) — the literal]
 	rows_[i++] = int_row("DCB", 692);
-	rows_[i++] = int_row("Quake", s.quake_ticks, " ticks");
-	rows_[i++] = int_row("Precipitation", s.precipitation_kind);
+
+	// The live weather state the retail page does not print.
+	char buf[96];
+	int e = 0;
+	std::snprintf(buf, sizeof(buf), "Clock: %02d:%02d (minute %d)", s.minute_of_day / 60,
+			s.minute_of_day % 60, s.minute_of_day);
+	extra_rows_[e++] = buf;
+	std::snprintf(buf, sizeof(buf), "Wind: %d (%d%% of 256)", s.wind_scale,
+			(s.wind_scale * 100 + 128) / 256);
+	extra_rows_[e++] = buf;
+	std::snprintf(buf, sizeof(buf), "Rain target: %d%% (%s)", s.rain_target_pct,
+			s.precipitation_kind == 1 ? "snow" : "rain");
+	extra_rows_[e++] = buf;
+	extra_rows_[e++] = int_row("Overcast target", s.overcast_target_pct, "%");
+	extra_rows_[e++] = int_row("Fog target", s.fog_target_metres, "m");
+	std::snprintf(buf, sizeof(buf), "SkySpeed target: %d | SunFade target: %d%%",
+			s.sky_speed_target, s.sun_fade_target_pct);
+	extra_rows_[e++] = buf;
+	std::snprintf(buf, sizeof(buf), "Lightning: timers %d / %d, level %d", s.lightning_timer_a,
+			s.lightning_timer_b, s.lightning_level);
+	extra_rows_[e++] = buf;
+	extra_rows_[e++] = int_row("Quake", s.quake_ticks, " ticks left");
 }
 
 int EnvironmentWindow::row_count() const {
@@ -130,6 +157,34 @@ int EnvironmentWindow::row_count() const {
 const char *EnvironmentWindow::row_text(int row) const {
 	if (row < 0 || row >= row_count()) return "";
 	return rows_[static_cast<size_t>(row)].c_str();
+}
+
+int EnvironmentWindow::extra_row_count() const {
+	return snapshot_.valid ? kExtraRowCount : 0;
+}
+
+const char *EnvironmentWindow::extra_row_text(int row) const {
+	if (row < 0 || row >= extra_row_count()) return "";
+	return extra_rows_[static_cast<size_t>(row)].c_str();
+}
+
+void EnvironmentWindow::request_sky_height(int32_t metres) {
+	// skyheight's parameter IS the 16.16 target (the WAC parser's << 16 does
+	// not apply to the command), so whole metres shift here.
+	enqueue_request({control_id::kEnvironmentSkyHeight,
+			{ControlArg::integer(static_cast<int64_t>(metres) * 65536)}});
+}
+
+void EnvironmentWindow::request_clock_scrub(int32_t minute_of_day) {
+	enqueue_request({control_id::kEnvironmentTimeOfDay, {ControlArg::number(minute_of_day)}});
+}
+
+void EnvironmentWindow::request_wind_strength(int32_t percent) {
+	enqueue_request({control_id::kEnvironmentWindStrength, {ControlArg::number(percent)}});
+}
+
+void EnvironmentWindow::request_weather_snapshot() {
+	enqueue_request({control_id::kEnvironmentWeatherSnapshot, {}});
 }
 
 void EnvironmentWindow::enqueue_request(const ControlRequest &request) {
@@ -152,12 +207,12 @@ void EnvironmentWindow::draw_rows() {
 		snapshot_.sun_rgb, snapshot_.lightning_rgb, snapshot_.sky_rgb, snapshot_.ground_rgb,
 		snapshot_.ceiling_rgb, snapshot_.floor_rgb, 0, 0,
 		snapshot_.outdoor_rgb, snapshot_.indoor_rgb, snapshot_.gain_rgb, snapshot_.iris_rgb,
-		0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0,
 	};
 	const bool swatched[kRowCount] = {
 		false, false, false, false, false, false, false, false,
 		true, true, true, false, true, true, true, true, true, true, false, false,
-		true, true, true, true, false, false, false, false, false, false,
+		true, true, true, true, false, false, false, false,
 	};
 	// The color rows a WAC handler targets open a picker that drives that
 	// handler (fogcolor/skyfogcolor/cloud/sun/lightning/sky/ground/ceiling/
@@ -179,12 +234,12 @@ void EnvironmentWindow::draw_rows() {
 		static_cast<int>(world::WeatherColorTarget::Floor), kNoTarget, kNoTarget,
 		kNoTarget, kNoTarget,
 		static_cast<int>(world::WeatherColorTarget::Gain), kNoTarget,
-		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
+		kNoTarget, kNoTarget, kNoTarget, kNoTarget,
 	};
 	const bool keyframed_rows[kRowCount] = {
 		false, false, false, false, false, false, false, false,
 		true, true, false, false, true, false, true, true, false, false, false, false,
-		false, false, false, false, false, false, false, false, false, false,
+		false, false, false, false, false, false, false, false,
 	};
 	const ImVec2 swatch_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
 	if (ImGui::BeginTable("environment_rows", 2, ImGuiTableFlags_SizingStretchSame)) {
@@ -250,7 +305,10 @@ void EnvironmentWindow::draw_controls() {
 		return std::vector<ControlArg>{ControlArg::integer(a), ControlArg::integer(b)};
 	};
 	ImGui::SetNextItemWidth(w);
-	ImGui::SliderInt("##rain", &rain_pct_edit_, 0, 100, "%d%%");
+	ImGui::SliderInt("##precip", &rain_pct_edit_, 0, 100, "precip %d%%");
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Rain and Snow write the one precipitation channel; the button picks the kind.");
+	}
 	ImGui::SameLine();
 	if (ImGui::Button("Rain")) enqueue_request({control_id::kEnvironmentRain, two(rain_pct_edit_, seconds_edit_)});
 	ImGui::SameLine();
@@ -279,14 +337,31 @@ void EnvironmentWindow::draw_controls() {
 	if (ImGui::Button("Sky speed")) enqueue_request({control_id::kEnvironmentSkySpeed, one(sky_speed_edit_)});
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(w);
+	ImGui::InputInt("##skyheight", &sky_height_edit_);
+	ImGui::SameLine();
+	if (ImGui::Button("Sky height")) request_sky_height(sky_height_edit_);
+
+	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##wind", &wind_edit_);
 	ImGui::SameLine();
 	if (ImGui::Button("Wind")) enqueue_request({control_id::kEnvironmentWindScale, one(wind_edit_)});
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("wind(value): 256 is the retail default.");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(w);
+	ImGui::SliderInt("##windpct", &wind_pct_edit_, 0, 100, "%d%%");
+	ImGui::SameLine();
+	if (ImGui::Button("Wind %")) request_wind_strength(wind_pct_edit_);
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##minute", &minute_edit_, 0, 1439, "%d min");
 	ImGui::SameLine();
 	if (ImGui::Button("Time of day")) enqueue_request({control_id::kEnvironmentTimeOfDayMinutes, one(minute_edit_)});
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("tod(minute): the WAC command's clock math.");
+	ImGui::SameLine();
+	if (ImGui::Button("Scrub")) request_clock_scrub(minute_edit_);
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Set the mission clock to exactly this minute and resync the colors.");
+	}
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##quake", &quake_seconds_edit_);
@@ -309,6 +384,9 @@ void EnvironmentWindow::draw_controls() {
 	ImGui::SameLine();
 	if (ImGui::Button("Color fade")) enqueue_request({control_id::kEnvironmentColorFade, one(color_fade_seconds_edit_)});
 	ImGui::EndDisabled();
+	// A read, no authority needed: the weather home lands as the command's
+	// reported result.
+	if (ImGui::Button("Weather snapshot")) request_weather_snapshot();
 }
 
 void EnvironmentWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
@@ -321,6 +399,12 @@ void EnvironmentWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	ImGui::Text("Script & Env Values | logic tick %llu (%.2f s readings)",
 			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds);
 	draw_rows();
+	if (ImGui::CollapsingHeader("Live weather (beyond the retail page)",
+				ImGuiTreeNodeFlags_DefaultOpen)) {
+		for (int i = 0; i < extra_row_count(); ++i) {
+			ImGui::TextUnformatted(extra_rows_[static_cast<size_t>(i)].c_str());
+		}
+	}
 	draw_controls();
 }
 

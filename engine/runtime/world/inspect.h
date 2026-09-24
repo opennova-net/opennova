@@ -396,7 +396,6 @@ struct AiDebugReport {
 	std::vector<AiNavChannelRow> channels;
 	std::vector<AiGroupRow> groups;
 	AiSystemCounters counters;
-    std::vector<RuntimeGap> runtime_gaps;
 };
 
 // The AI-pool walk behind both debug surfaces. Non-const World: the muzzle

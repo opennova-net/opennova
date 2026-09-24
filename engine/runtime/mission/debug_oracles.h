@@ -40,6 +40,17 @@ inline constexpr float kDebugHitboxRangeUnits = 80.0f;
 inline constexpr int32_t kDebugHitboxEntityCap = 96;
 inline constexpr int32_t kDebugHitboxFaceCap = 24000;
 
+// A caller's budget over the same sweep: an explicit anchor (the F3 overlay
+// anchors on the camera, so a free-flying spectator sees what it looks at)
+// in place of the local player, and its own caps.
+struct DebugHitboxBudget {
+	bool has_anchor = false;
+	world::Vec3 anchor{};
+	float range_units = kDebugHitboxRangeUnits;
+	int32_t entity_cap = kDebugHitboxEntityCap;
+	int32_t face_cap = kDebugHitboxFaceCap;
+};
+
 // The transformed CFAC meshes of the nearby statics / vehicles, the posed
 // pool-0 COBJ section spheres from the exact person narrow phase (the local
 // avatar's collision instance is ensured first so F3's late-spawn demand
@@ -47,6 +58,7 @@ inline constexpr int32_t kDebugHitboxFaceCap = 24000;
 // budget), then the bounded stand-in for every remaining live pool-0 entity
 // (the same compatibility fallback RoundSim uses).
 void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out);
+void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out, const DebugHitboxBudget &budget);
 
 struct DebugPick {
 	enum class Blocked : uint8_t { None, Terrain, Water, Proxy };

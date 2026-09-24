@@ -7,32 +7,7 @@
 
 namespace opennova::devtools {
 
-namespace {
-
-// The ray-category palette (the engine's, in RayDebugCategory enum order):
-// the swatch beside each category row.
-constexpr float kCategoryColors[kRayCategoryCount][3] = {
-	{0.7f, 0.7f, 0.7f},    // Uncategorized
-	{1.0f, 0.35f, 0.15f},  // Projectile
-	{1.0f, 0.4f, 0.7f},    // Knife
-	{1.0f, 0.7f, 0.2f},    // Throwable
-	{0.95f, 0.95f, 0.25f}, // AI LOS
-	{0.7f, 0.4f, 1.0f},    // Replication LOS
-	{0.2f, 0.9f, 0.75f},   // Script LOS
-	{1.0f, 0.5f, 0.4f},    // Explosion LOS
-	{0.75f, 0.6f, 0.4f},   // Ground probe
-	{0.4f, 0.75f, 1.0f},   // Camera iris
-	{0.25f, 0.45f, 1.0f},  // Render occlusion
-	{1.0f, 0.85f, 0.3f},   // Sun visibility
-	{0.35f, 1.0f, 0.45f},  // Sound occlusion
-	{0.3f, 0.9f, 1.0f},    // Precipitation
-	{1.0f, 1.0f, 1.0f},    // Pick
-};
-
-}  // namespace
-
 void RaysWindow::on_visibility(bool visible) {
-	shown_ = visible;
 	if (!visible) {
 		// Drop the snapshot so a closed window holds nothing; the embedder's
 		// needs_rays_snapshot gate stops the pushes on the same edge.
@@ -86,8 +61,10 @@ bool RaysWindow::take_request(RaysRequest &request) {
 }
 
 void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
-	(void)pass;
 	(void)frame_index;
+	bool layer_on = overlay_layer_.enabled();
+	if (ImGui::Checkbox("Show in Game view", &layer_on)) pass.set_overlay_enabled(overlay_layer_, layer_on);
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", overlay_layer_.tooltip());
 	if (!snapshot_.valid) {
 		ImGui::TextUnformatted("No ray capture pushed (load a mission).");
 		return;
@@ -107,6 +84,9 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				"%d ticks", ImGuiSliderFlags_AlwaysClamp)) {
 		ttl_edit_ = ttl_display;
 		enqueue_request({RaysRequest::Kind::SetTtlTicks, ttl_edit_});
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+		ImGui::SetTooltip("How long a ray stays in the Game view, fading out.");
 	}
 	ImGui::SameLine();
 	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / static_cast<float>(io::kTicksPerSecondInt));
@@ -138,8 +118,8 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 			}
 			ImGui::SameLine();
 			ImGui::ColorButton("##swatch",
-					ImVec4(kCategoryColors[i][0], kCategoryColors[i][1],
-							kCategoryColors[i][2], 1.0f),
+					ImVec4(kRayCategoryColors[i][0], kRayCategoryColors[i][1],
+							kRayCategoryColors[i][2], 1.0f),
 					ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
 					swatch_size);
 			ImGui::SameLine();

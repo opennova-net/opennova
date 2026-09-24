@@ -24,6 +24,8 @@
 #include <runtime/devtools/weapon_request.h>
 #include <runtime/devtools/weapon_window.h>
 
+#include "devtools_test_support.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -32,6 +34,7 @@
 #include <utility>
 
 using namespace opennova::def;
+using namespace devtools_test;
 
 using opennova::devtools::AiDebugSnapshot;
 using opennova::devtools::AiWindow;
@@ -42,12 +45,6 @@ using opennova::devtools::EntitiesWindow;
 using opennova::devtools::EntityDetailSnapshot;
 using opennova::devtools::EnvironmentSnapshot;
 namespace control_id = opennova::devtools::control_id;
-
-// A drained control request names a row by its wire id (the constants are
-// string literals, so the check compares text, never addresses).
-static bool is_control(const ControlRequest &request, const char *id) {
-	return std::strcmp(request.id, id) == 0;
-}
 
 // The Entity Properties toggles: one set_entity_item_attrib request carrying
 // [wire handle, attrib, attrib2].
@@ -76,49 +73,37 @@ using opennova::devtools::WeaponWindow;
 
 namespace {
 
-int g_failures = 0;
+using opennova::devtools::MenuGroup;
+using opennova::devtools::StatusLevel;
 
-#define CHECK(cond, message)                                                          \
-	do {                                                                              \
-		if (!(cond)) {                                                                \
-			std::printf("FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, message, #cond); \
-			++g_failures;                                                             \
-		}                                                                             \
-	} while (0)
-
-// A headless ImGui frame: the null example's setup (a display size and a
-// built font atlas), no platform or renderer backend.
-struct NullBackend {
-	ImGuiContext *context = nullptr;
-
-	NullBackend() {
-		context = ImGui::CreateContext();
-		ImGuiIO &io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.DisplaySize = ImVec2(1280.0f, 720.0f);
-		io.DeltaTime = 1.0f / 60.0f;
-		unsigned char *pixels = nullptr;
-		int width = 0;
-		int height = 0;
-		io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-	}
-	~NullBackend() { ImGui::DestroyContext(context); }
+// Every registered window, in registration order, with its menu group: the
+// ONE registry pin (a new window joins here; the count follows from it).
+struct ExpectedWindow {
+	const char *title;
+	MenuGroup group;
+	bool open_by_default;
 };
-
-struct FakeGameViewport : GameViewport {
-	int width = 0;
-	int height = 0;
-	int draws = 0;
-
-	void draw(int requested_width, int requested_height) override {
-		width = requested_width;
-		height = requested_height;
-		++draws;
-	}
+constexpr ExpectedWindow kExpectedWindows[] = {
+		{"Game", MenuGroup::Workspace, true},
+		{"Stats", MenuGroup::Tools, true},
+		{"Entities", MenuGroup::World, false},
+		{"Entity Properties", MenuGroup::World, false},
+		{"Weapon", MenuGroup::Sim, false},
+		{"Environment", MenuGroup::World, false},
+		{"AI", MenuGroup::World, false},
+		{"Rays", MenuGroup::Sim, false},
+		{"Physics", MenuGroup::Sim, false},
+		{"Script", MenuGroup::Sim, false},
+		{"Player", MenuGroup::World, false},
+		{"Render", MenuGroup::Render, false},
+		{"Particles", MenuGroup::Render, false},
+		{"Audio", MenuGroup::Render, false},
+		{"Net", MenuGroup::Net, false},
+		{"Log", MenuGroup::Tools, false},
+		{"ImGui demo", MenuGroup::Help, false},
 };
-
-void *test_alloc(size_t size, void *) { return std::malloc(size); }
-void test_free(void *ptr, void *) { std::free(ptr); }
+constexpr int kExpectedWindowCount =
+		static_cast<int>(sizeof(kExpectedWindows) / sizeof(kExpectedWindows[0]));
 
 int find_row(const StatsWindow &stats, const char *id) {
 	for (int i = 0; i < stats.row_count(); ++i) {
@@ -167,10 +152,244 @@ void test_attach_sets_docking_and_viewport_policy() {
 	ImGui::SetCurrentContext(backend.context);
 }
 
+void test_window_registry_order_groups_and_defaults() {
+	GameDevTools tools;
+	CHECK(tools.pass().window_count() == kExpectedWindowCount,
+			"every window in the registry pin is registered, and nothing else");
+	for (int i = 0; i < kExpectedWindowCount && i < tools.pass().window_count(); ++i) {
+		const opennova::devtools::Window &window = tools.pass().window(i);
+		const ExpectedWindow &expected = kExpectedWindows[i];
+		if (std::strcmp(window.title(), expected.title) != 0) {
+			std::printf("  window %d is '%s', expected '%s'\n", i, window.title(), expected.title);
+			CHECK(false, "the registration order matches the pin");
+			continue;
+		}
+		CHECK(window.menu_group() == expected.group, expected.title);
+		CHECK(window.open == expected.open_by_default, expected.title);
+	}
+	CHECK(std::strcmp(opennova::devtools::menu_group_label(MenuGroup::Sim), "Simulation") == 0,
+			"the groups carry their menu labels");
+}
+
+// The menu bar's status line and the Close item: a posted message is the
+// newest status with its level, the history keeps the newest first and caps,
+// and a close request lands at the end of the next layout pass.
+void test_status_line_and_close_request() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(std::strcmp(tools.pass().status_text(), "") == 0, "no status before the first message");
+
+	opennova::devtools::ControlResult ok;
+	ok.id = "hide_foliage";
+	ok.ok = true;
+	tools.report_control_result(ok);
+	CHECK(std::strcmp(tools.pass().status_text(), "hide_foliage: ok") == 0, "a success reads ok");
+	CHECK(tools.pass().status_level() == StatusLevel::Info, "and is informational");
+
+	opennova::devtools::ControlResult refused;
+	refused.id = "set_entity_health";
+	refused.message = "Unauthorized: the joiner does not own the world";
+	tools.report_control_result(refused);
+	CHECK(std::strcmp(tools.pass().status_text(),
+				  "set_entity_health: failed (Unauthorized: the joiner does not own the world)") == 0,
+			"a refusal names its reason");
+	CHECK(tools.pass().status_level() == StatusLevel::Error, "and reads as an error");
+	CHECK(tools.pass().status_history_count() == 2, "the history keeps both");
+	CHECK(std::strcmp(tools.pass().status_history_text(1), "hide_foliage: ok") == 0,
+			"newest first");
+
+	opennova::devtools::ControlResult read;
+	read.id = "environment_weather_snapshot";
+	read.ok = true;
+	read.detail = std::string(200, 'x');
+	tools.report_control_result(read);
+	CHECK(std::strlen(tools.pass().status_text()) < 150, "a long payload is cut on the status line");
+
+	for (int i = 0; i < 40; ++i) tools.pass().post_status("spam", StatusLevel::Info);
+	CHECK(tools.pass().status_history_count() == opennova::devtools::ImGuiPass::kStatusHistory,
+			"the history is capped");
+
+	CHECK(draw_once(tools, 1), "the menu bar draws with a status line");
+	tools.pass().request_close();
+	CHECK(tools.pass().is_open(), "a close request waits for the layout pass");
+	CHECK(draw_once(tools, 2), "the closing pass still draws");
+	CHECK(!tools.pass().is_open(), "the pass closes at the end of that layout pass");
+}
+
+// The catalog rows the toolbar reads, as the table lists them.
+std::vector<opennova::devtools::ControlSpec> transport_catalog() {
+	using opennova::devtools::ControlKind;
+	using opennova::devtools::ControlSpec;
+	std::vector<ControlSpec> catalog(4);
+	catalog[0].id = control_id::kRuntimeTransport;
+	catalog[0].label = "Runtime transport";
+	catalog[0].kind = ControlKind::Action;
+	catalog[1].id = control_id::kRuntimeWacPaused;
+	catalog[1].label = "Pause mission scripts";
+	catalog[1].kind = ControlKind::Check;
+	catalog[2].id = control_id::kRuntimeReturnToMenu;
+	catalog[2].label = "Return to menu";
+	catalog[2].kind = ControlKind::Action;
+	catalog[3].id = control_id::kViewportDebugDraw;
+	catalog[3].label = "Viewport view";
+	catalog[3].kind = ControlKind::Enum;
+	catalog[3].choices = {"Disabled", "Unshaded", "Lighting", "Overdraw", "Wireframe"};
+	return catalog;
+}
+
+// The control board: the catalog is looked up by wire id, a push replaces
+// only the states it names, a widget's optimistic write shows until the next
+// push, and the rows the visible windows want are collected once each.
+void test_control_board_catalog_states_and_wants() {
+	using opennova::devtools::ControlArg;
+	using opennova::devtools::ControlState;
+	NullBackend backend;
+	GameDevTools tools;
+	CHECK(!tools.needs_control_states(), "no catalog, no pass: no state pushes");
+	tools.set_control_catalog(transport_catalog());
+	const opennova::devtools::ControlBoard &board = tools.control_board();
+	CHECK(board.catalog_size() == 4, "the catalog lands");
+	CHECK(board.spec(control_id::kViewportDebugDraw) != nullptr &&
+					board.spec(control_id::kViewportDebugDraw)->choices.size() == 5,
+			"a row's choices come from the catalog");
+	CHECK(board.spec("no_such_row") == nullptr, "an unknown id has no spec");
+
+	std::vector<const char *> wanted;
+	tools.wanted_control_ids(wanted);
+	CHECK(wanted.empty(), "a closed pass wants nothing");
+	tools.pass().set_open(true);
+	CHECK(tools.needs_control_states(), "an open pass with a catalog wants states");
+	tools.wanted_control_ids(wanted);
+	bool transport = false;
+	bool scripts = false;
+	for (const char *id : wanted) {
+		transport = transport || std::strcmp(id, control_id::kRuntimeTransport) == 0;
+		scripts = scripts || std::strcmp(id, control_id::kRuntimeWacPaused) == 0;
+	}
+	CHECK(transport && scripts, "the Game toolbar's rows are wanted while it shows");
+
+	ControlState paused;
+	paused.id = control_id::kRuntimeWacPaused;
+	paused.available = true;
+	paused.writable = true;
+	paused.has_value = true;
+	paused.value = ControlArg::boolean(false);
+	ControlState leave;
+	leave.id = control_id::kRuntimeReturnToMenu;
+	leave.reason = "no world loaded";
+	tools.set_control_states({paused, leave});
+	CHECK(board.state(control_id::kRuntimeWacPaused) != nullptr &&
+					board.state(control_id::kRuntimeWacPaused)->writable,
+			"a pushed state lands");
+	CHECK(board.state(control_id::kRuntimeReturnToMenu)->reason == "no world loaded",
+			"a refused row carries the table's reason");
+	tools.set_control_states({leave});
+	CHECK(board.state(control_id::kRuntimeWacPaused) != nullptr,
+			"a push keeps the rows it does not name");
+
+	tools.game_window().request_scripts_paused(true);
+	CHECK(board.state(control_id::kRuntimeWacPaused)->value.b,
+			"the toolbar's click shows at once (the next push confirms it)");
+	ControlRequest request;
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeWacPaused) && request.args[0].b,
+			"the script pause leaves as the runtime_wac_paused row");
+
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	CHECK(draw_once(tools, 1), "the toolbar draws over the board");
+}
+
+// Hiding a window during a drag skips the widget's deactivation frame.
+// Reopening must follow the owner again, without submitting the abandoned edit.
+void test_control_slider_recovers_after_hidden_drag() {
+	NullBackend backend;
+	opennova::devtools::ControlBoard board;
+	opennova::devtools::ControlSpec spec;
+	spec.id = "test_slider";
+	spec.label = "Slider";
+	spec.kind = opennova::devtools::ControlKind::Slider;
+	board.set_catalog({spec});
+	opennova::devtools::ControlState state;
+	state.id = spec.id;
+	state.available = state.writable = state.has_value = true;
+	state.value = ControlArg::number(0.25);
+	board.set_states({state});
+	std::deque<ControlRequest> requests;
+	ImVec2 point;
+	const auto frame = [&](bool visible) {
+		ImGui::NewFrame();
+		if (visible) {
+			ImGui::SetNextWindowPos(ImVec2(40, 40));
+			ImGui::SetNextWindowSize(ImVec2(400, 120));
+			ImGui::Begin("Slider test");
+			opennova::devtools::draw_control(board, spec.id.c_str(), requests);
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+			point = ImVec2(min.x + 120.0f, (min.y + max.y) * 0.5f);
+			ImGui::End();
+		}
+		ImGui::Render();
+	};
+	frame(true);
+	frame(true);
+	ImGuiIO &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	frame(true);
+	io.AddMouseButtonEvent(0, true);
+	frame(true);
+	CHECK(ImGui::GetActiveID() != 0, "the slider drag activates");
+	CHECK(board.slider_edit(spec.id.c_str()) != 0.25f, "the drag changes the edit buffer");
+	CHECK(requests.empty(), "a held drag does not submit");
+	frame(false);
+	io.AddMouseButtonEvent(0, false);
+	frame(false);
+	frame(false);
+	state.value = ControlArg::number(0.75);
+	board.set_states({state});
+	frame(true);
+	CHECK(board.slider_edit(spec.id.c_str()) == 0.75f, "the reopened slider follows the current owner value");
+	CHECK(requests.empty(), "the hidden drag was cancelled");
+}
+
+// The Game toolbar's transport requests and its status readout.
+void test_game_toolbar_transport_and_status() {
+	GameDevTools tools;
+	GameWindow &game = tools.game_window();
+	game.request_transport("pause");
+	game.request_transport("step");
+	game.request_return_to_menu();
+	ControlRequest request;
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeTransport) &&
+					request.args.size() == 1 && request.args[0].text == "pause",
+			"pause is the transport row's verb");
+	CHECK(tools.take_control_request(request) && request.args[0].text == "step", "then step");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kRuntimeReturnToMenu) && request.args.empty(),
+			"leaving is the return-to-menu row");
+	CHECK(!tools.take_control_request(request), "drained once");
+
+	opennova::devtools::GameStatusSnapshot status;
+	status.fps = 61.0;
+	status.frame_ms = 16.4;
+	status.frame_ms_peak = 22.1;
+	tools.set_game_status(status);
+	CHECK(game.status_text() == "61 fps  16.4 ms (peak 22.1) | no world", "the no-world readout");
+	status.world = true;
+	status.logic_tick = 3100;
+	status.role = opennova::devtools::StatusRole::ListenServer;
+	status.state = opennova::devtools::StatusState::Running;
+	status.peers = 2;
+	tools.set_game_status(status);
+	CHECK(game.status_text() ==
+					"61 fps  16.4 ms (peak 22.1) | tick 3100 | listen server, 2 peers, running",
+			"the listen server readout names its peers");
+}
+
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 10,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -209,14 +428,14 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(8).title(), "Physics") == 0,
 			"Physics registers after Rays");
 	CHECK(!tools.pass().window(8).open, "the Physics window starts closed");
-	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
 	NullBackend backend;
 	opennova::devtools::ImGuiPass pass;
 	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
-	GameWindow game;
+	opennova::devtools::ControlBoard board;
+	GameWindow game(board);
 	FakeGameViewport viewport;
 	game.set_viewport(&viewport);
 
@@ -247,7 +466,8 @@ void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
 }
 
 void test_game_window_orders_play_interact_and_close_requests() {
-	GameWindow game;
+	opennova::devtools::ControlBoard board;
+	GameWindow game(board);
 	GameWindowRequest request = GameWindowRequest::CloseTools;
 	CHECK(game.input_mode() == GameInputMode::Interact, "Game starts in Interact");
 	CHECK(!game.play_available(), "Play starts unavailable until the shell enables it");
@@ -363,10 +583,9 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 10,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(find_window(tools, "ImGui demo")).open,
+			"the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -1325,6 +1544,11 @@ void test_environment_window_formats_the_pushed_record() {
 	snapshot.quake_ticks = 42;
 	snapshot.precipitation_kind = 1;
 	snapshot.wind_scale = 256;
+	snapshot.sun_fade_target_pct = 40;
+	snapshot.sky_speed_target = 20;
+	snapshot.lightning_timer_a = 3;
+	snapshot.lightning_timer_b = 9;
+	snapshot.lightning_level = 2;
 	snapshot.authority = true;
 	tools.set_environment_snapshot(snapshot);
 
@@ -1354,7 +1578,24 @@ void test_environment_window_formats_the_pushed_record() {
 	CHECK(std::strcmp(window.row_text(25), "Overcast: 50%") == 0, "Overcast row");
 	CHECK(std::strcmp(window.row_text(26), "Complexity: 12") == 0, "Complexity row");
 	CHECK(std::strcmp(window.row_text(27), "DCB: 692") == 0, "the DCB literal");
+	CHECK(window.extra_row_count() == EnvironmentWindow::kExtraRowCount,
+			"the live weather rows format under the page");
+	CHECK(std::strcmp(window.extra_row_text(0), "Clock: 12:30 (minute 750)") == 0, "the clock row");
+	CHECK(std::strcmp(window.extra_row_text(1), "Wind: 256 (100% of 256)") == 0, "the wind row");
+	CHECK(std::strcmp(window.extra_row_text(2), "Rain target: 100% (snow)") == 0,
+			"the precipitation target names its kind");
+	CHECK(std::strcmp(window.extra_row_text(5), "SkySpeed target: 20 | SunFade target: 40%") == 0,
+			"the ramp targets");
+	CHECK(std::strcmp(window.extra_row_text(6), "Lightning: timers 3 / 9, level 2") == 0,
+			"the lightning timers");
+	CHECK(std::strcmp(window.extra_row_text(7), "Quake: 42 ticks left") == 0, "the quake remainder");
 	CHECK(window.rain_percent_edit() == 100, "the control strip seeds from the live rain target");
+	CHECK(window.sun_fade_percent_edit() == 40,
+			"sun fade seeds from its target (the current never leaves 0)");
+	CHECK(window.sky_speed_edit() == 20, "sky speed seeds from the ramp's target");
+	CHECK(window.sky_height_edit() == 175, "sky height seeds from the live metres");
+	CHECK(window.quake_edit() == 7, "a running quake seeds its remainder (42 ticks = quake(7))");
+	CHECK(window.wind_percent_edit() == 100, "the wind percent seeds from the wind scale");
 
 	tools.set_environment_snapshot(EnvironmentSnapshot{});
 	CHECK(!window.snapshot_valid() && window.row_count() == 0,
@@ -1394,6 +1635,28 @@ void test_environment_request_queue() {
 					request.args[1].i == 0x102030,
 			"the block color request carries its target and packed rgb");
 	CHECK(!tools.take_control_request(request), "the queue drains exactly once");
+
+	EnvironmentWindow &window = tools.environment_window();
+	window.request_sky_height(175);
+	window.request_clock_scrub(630);
+	window.request_wind_strength(50);
+	window.request_weather_snapshot();
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentSkyHeight) &&
+					request.args.size() == 1 && request.args[0].i == (175 << 16),
+			"the sky height leaves as the raw 16.16 target");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentTimeOfDay) &&
+					request.args.size() == 1 && request.args[0].f == 630.0,
+			"the scrub is the exact clock row, by minute");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentWindStrength) &&
+					request.args[0].f == 50.0,
+			"the wind percent is the wind-strength row");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentWeatherSnapshot) && request.args.empty(),
+			"the weather-home read leaves with no arguments");
+	CHECK(!tools.take_control_request(request), "the strip rows drain exactly once");
 }
 
 // The Rays window formats per-category count rows from the pushed record,
@@ -1520,23 +1783,20 @@ void test_physics_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear
-// and capture requests in order and drains exactly once.
+// The PhysicsRequest channel: enqueue/take round-trips the typed mask and
+// clear requests in order and drains exactly once (the capture arm follows the
+// window's visibility, so it has no request).
 void test_physics_request_queue() {
 	GameDevTools tools;
 	PhysicsRequest request;
 	CHECK(!tools.take_physics_request(request), "fresh tools hold no physics request");
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetKindMask, 0x0005});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::Clear, 0});
-	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, 1});
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetKindMask && request.a == 0x0005,
 			"the mask request round-trips first");
 	CHECK(tools.take_physics_request(request) && request.kind == PhysicsRequest::Kind::Clear,
 			"the clear request follows");
-	CHECK(tools.take_physics_request(request) &&
-					request.kind == PhysicsRequest::Kind::SetCaptureEnabled && request.a == 1,
-			"the capture arm carries its state");
 	CHECK(!tools.take_physics_request(request), "the queue drains exactly once");
 }
 
@@ -1672,7 +1932,10 @@ void test_ai_window_detail_pane_follows_the_selection() {
 	// The widened gate: with the Properties window closed (the pick opened
 	// it), the AI window alone keeps the detail flowing.
 	tools.entity_properties_window().open = false;
+	tools.entities_window().open = false;
 	CHECK(tools.needs_entity_detail(), "an open AI window alone wants the detail card");
+	CHECK(tools.needs_entity_directory(),
+			"an open AI window alone keeps the directory (and so the card's cadence) flowing");
 	ai.open = false;
 	tools.entity_properties_window().open = false;
 	CHECK(!tools.needs_entity_detail(), "both panes closed wants none");
@@ -1695,6 +1958,11 @@ void test_ai_window_detail_pane_follows_the_selection() {
 int main() {
 	test_abi_fingerprint_is_the_pinned_one();
 	test_attach_sets_docking_and_viewport_policy();
+	test_window_registry_order_groups_and_defaults();
+	test_status_line_and_close_request();
+	test_control_board_catalog_states_and_wants();
+	test_control_slider_recovers_after_hidden_drag();
+	test_game_toolbar_transport_and_status();
 	test_game_window_is_mandatory_and_detachable();
 	test_game_window_sends_responsive_integer_content_size_to_its_adapter();
 	test_game_window_orders_play_interact_and_close_requests();

@@ -17,13 +17,17 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/ai_window.h>
+#include <runtime/devtools/control_board.h>
 #include <runtime/devtools/control_request.h>
+#include <runtime/devtools/game_status_snapshot.h>
+#include <runtime/inmatch/session.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/overlay_canvas.h>
 #include <runtime/devtools/physics_request.h>
 #include <runtime/devtools/physics_snapshot.h>
 #include <runtime/devtools/physics_window.h>
@@ -82,6 +86,16 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
 	ClassDB::bind_static_method("DevTools", D_METHOD("engine_log_after", "cursor"),
 			&DevTools::engine_log_after);
+	ClassDB::bind_static_method("DevTools", D_METHOD("project_mission_point", "camera", "mission_point"),
+			&DevTools::project_mission_point);
+	ClassDB::bind_method(D_METHOD("window_titles"), &DevTools::window_titles);
+	ClassDB::bind_method(D_METHOD("set_window_open", "title", "open"), &DevTools::set_window_open);
+	ClassDB::bind_method(D_METHOD("overlay_names"), &DevTools::overlay_names);
+	ClassDB::bind_method(D_METHOD("set_overlay_enabled", "name", "enabled"),
+			&DevTools::set_overlay_enabled);
+	ClassDB::bind_method(D_METHOD("overlay_last_draw", "name"), &DevTools::overlay_last_draw);
+	ClassDB::bind_method(D_METHOD("status_text"), &DevTools::status_text);
+	ClassDB::bind_method(D_METHOD("game_status_text"), &DevTools::game_status_text);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
 }
@@ -108,9 +122,13 @@ Dictionary DevTools::engine_log_after(int64_t p_cursor) {
 }
 
 // Both flavours: the table serves MCP in the release DLL too; only the
-// windows that would drain into it are compiled out there.
+// windows that would drain into it are compiled out there. The debug flavour
+// hands the tools the table's catalog once (the control board's definitions).
 void DevTools::set_debug_control_table(const Ref<DebugControlTable> &p_table) {
 	control_table_ = p_table;
+#if OPENNOVA_DEVTOOLS
+	push_control_catalog();
+#endif
 }
 
 bool DevTools::is_available() const {
@@ -135,6 +153,8 @@ void DevTools::set_platform_windows_allowed(bool p_allowed) {
 
 DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {
 	tools_->set_game_viewport(this);
+	// The process ring (installed at extension init, register_types.cpp).
+	tools_->set_log_ring(&opennova::io::LogRing::instance());
 }
 
 DevTools::~DevTools() = default;
@@ -241,31 +261,42 @@ void DevTools::_exit_tree() {
 }
 
 void DevTools::_process(double p_delta) {
-	(void)p_delta;
 	if (!is_available()) {
 		return;
 	}
+	// The display frame the status readout averages (every frame, so the
+	// first push after an open reads the real interval).
+	frame_ms_sum_ += p_delta * 1000.0;
+	frame_ms_peak_ = std::max(frame_ms_peak_, p_delta * 1000.0);
+	++frame_ms_count_;
 	auto &pass = tools_->pass();
 	pass.set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	// The F3 row times the tools' whole cost: the overlay feed, the layout
+	// pass, the request drains and the record pushes. The overlay records go
+	// in first so a layer draws the tick the image shows.
 	const int64_t start = Time::get_singleton()->get_ticks_usec();
+	push_overlay_frame();
 	const bool drew = pass.draw_frame(frame);
-	const int64_t layout_us = Time::get_singleton()->get_ticks_usec() - start;
-	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
-		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, layout_us);
-	}
 	apply_game_requests();
 	sync_game_spectator_state();
 	apply_control_requests();
 	apply_weapon_requests();
 	apply_rays_requests();
 	apply_physics_requests();
+	push_control_states();
+	push_game_status();
 	push_entity_detail(push_entity_directory());
 	push_weapon_records();
 	push_environment_snapshot();
 	push_ai_debug();
 	push_rays_snapshot();
 	push_physics_snapshot();
+	push_domain_records();
+	const int64_t tools_us = Time::get_singleton()->get_ticks_usec() - start;
+	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
+		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, tools_us);
+	}
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -395,9 +426,9 @@ void DevTools::sync_game_spectator_state() {
 			available, sim != nullptr && sim->is_local_spectator());
 }
 
-void DevTools::draw(int p_requested_width, int p_requested_height) {
+bool DevTools::draw(int p_requested_width, int p_requested_height) {
 	if (game_viewport_ == nullptr) {
-		return;
+		return false;
 	}
 	const Vector2i requested(std::max(1, p_requested_width), std::max(1, p_requested_height));
 	if (game_viewport_->get_size() != requested) {
@@ -405,9 +436,13 @@ void DevTools::draw(int p_requested_width, int p_requested_height) {
 	}
 	rendered_game_viewport_size_ = requested;
 	Engine *engine = Engine::get_singleton();
-	if (engine->has_singleton("ImGuiGD")) {
-		engine->get_singleton("ImGuiGD")->call("SubViewport", game_viewport_);
+	if (!engine->has_singleton("ImGuiGD")) {
+		return false;
 	}
+	// The addon draws the image at the cursor at the viewport's size, then an
+	// invisible button over it: the window's last item is the image rect.
+	engine->get_singleton("ImGuiGD")->call("SubViewport", game_viewport_);
+	return true;
 }
 
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
@@ -448,6 +483,14 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	last_rays_push_ms_ = -1;
 	rays_recording_ = false; // a fresh world starts with the capture off
 	last_physics_push_ms_ = -1;
+	contacts_recording_ = false; // likewise the contact capture
+	// A new world's first tick re-pushes every overlay record.
+	overlay_tick_ = static_cast<uint64_t>(-1);
+	overlay_wants_ = 0;
+	last_hitbox_push_ms_ = -1;
+	if (overlay_live_) {
+		tools_->clear_overlay_records();
+	}
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
@@ -460,6 +503,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 		tools_->set_ai_debug(opennova::devtools::AiDebugSnapshot{});
 		tools_->set_rays_snapshot(opennova::devtools::RaysSnapshot{});
 		tools_->set_physics_snapshot(opennova::devtools::PhysicsSnapshot{});
+		clear_domain_records();
 	}
 	sync_game_spectator_state();
 }
@@ -478,6 +522,154 @@ void DevTools::select_entity(int p_handle) {
 int DevTools::selected_entity_handle() const {
 	const uint16_t handle = tools_->selected_entity_handle();
 	return handle == opennova::world::EntityHandle::kInvalid ? -1 : static_cast<int>(handle);
+}
+
+bool DevTools::push_due(int64_t &r_last_ms, double p_seconds) {
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	if (r_last_ms >= 0 && now_ms - r_last_ms < static_cast<int64_t>(p_seconds * 1000.0)) {
+		return false;
+	}
+	r_last_ms = now_ms;
+	return true;
+}
+
+namespace {
+
+// The table's row kinds, in the control board's order.
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Check) == DebugControlRow::CHECK,
+		"ControlKind::Check");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Slider) == DebugControlRow::SLIDER,
+		"ControlKind::Slider");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Enum) == DebugControlRow::ENUM,
+		"ControlKind::Enum");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Action) == DebugControlRow::ACTION,
+		"ControlKind::Action");
+// The status readout mirrors the session's role and state by value.
+static_assert(static_cast<int>(opennova::devtools::StatusRole::ListenServer) ==
+				static_cast<int>(opennova::inmatch::RoleKind::ListenHost),
+		"StatusRole::ListenServer");
+static_assert(static_cast<int>(opennova::devtools::StatusRole::DedicatedServer) ==
+				static_cast<int>(opennova::inmatch::RoleKind::DedicatedHost),
+		"StatusRole::DedicatedServer");
+static_assert(static_cast<int>(opennova::devtools::StatusState::Failed) ==
+				static_cast<int>(opennova::inmatch::State::Failed),
+		"StatusState::Failed");
+
+// A row value as the board's typed argument (Check = Bool, Slider = Float,
+// Enum = Int); false for a missing value.
+bool control_value_from_variant(const Variant &p_value, opennova::devtools::ControlArg &r_arg) {
+	switch (p_value.get_type()) {
+		case Variant::BOOL:
+			r_arg = opennova::devtools::ControlArg::boolean(p_value);
+			return true;
+		case Variant::INT:
+			r_arg = opennova::devtools::ControlArg::integer(p_value);
+			return true;
+		case Variant::FLOAT:
+			r_arg = opennova::devtools::ControlArg::number(p_value);
+			return true;
+		default:
+			return false;
+	}
+}
+
+} // namespace
+
+// The table's catalog as the control board's definitions: pushed once when
+// the table is lent (its rows never change after setup).
+void DevTools::push_control_catalog() {
+	std::vector<opennova::devtools::ControlSpec> catalog;
+	if (control_table_.is_valid()) {
+		const TypedArray<DebugControlRow> rows = control_table_->list_controls();
+		catalog.reserve(static_cast<size_t>(rows.size()));
+		for (int64_t i = 0; i < rows.size(); ++i) {
+			const Ref<DebugControlRow> row = rows[i];
+			if (row.is_null()) continue;
+			opennova::devtools::ControlSpec spec;
+			spec.id = opennova::to_std(String(row->get_id()));
+			spec.page = opennova::to_std(String(row->get_page()));
+			spec.label = opennova::to_std(row->get_label());
+			spec.tooltip = opennova::to_std(row->get_tooltip());
+			spec.kind = static_cast<opennova::devtools::ControlKind>(row->get_kind());
+			spec.minimum = row->get_minimum();
+			spec.maximum = row->get_maximum();
+			spec.step = row->get_step();
+			const PackedStringArray choices = row->get_choices();
+			for (int64_t c = 0; c < choices.size(); ++c) {
+				spec.choices.push_back(opennova::to_std(choices[c]));
+			}
+			spec.requires_confirm = row->get_requires_confirm();
+			spec.authoritative = row->get_authority() == DebugControlRow::HOST_ONLY;
+			catalog.push_back(std::move(spec));
+		}
+	}
+	tools_->set_control_catalog(std::move(catalog));
+	last_control_state_push_ms_ = -1;
+}
+
+// The live states of the rows the visible windows read, on the board's
+// cadence (and at once after a command, so a toggle confirms promptly).
+void DevTools::push_control_states() {
+	if (control_table_.is_null() || !tools_->needs_control_states()) {
+		last_control_state_push_ms_ = -1;
+		return;
+	}
+	std::vector<const char *> ids;
+	tools_->wanted_control_ids(ids);
+	// A window that just opened reads its rows this frame, not a cadence later.
+	const bool ids_changed = !std::equal(ids.begin(), ids.end(), control_ids_.begin(), control_ids_.end(),
+			[](const char *a, const char *b) { return std::strcmp(a, b) == 0; });
+	if (ids_changed) {
+		last_control_state_push_ms_ = -1;
+		control_ids_ = ids;
+	}
+	if (!push_due(last_control_state_push_ms_, opennova::devtools::GameDevTools::kControlStateSeconds)) {
+		return;
+	}
+	std::vector<opennova::devtools::ControlState> states;
+	states.reserve(ids.size());
+	for (const char *id : ids) {
+		const Ref<DebugControlState> state = control_table_->get_state(StringName(id), true);
+		opennova::devtools::ControlState out;
+		out.id = id;
+		if (state.is_valid()) {
+			out.available = state->is_available();
+			out.writable = state->is_writable();
+			out.has_value = control_value_from_variant(state->get_value(), out.value);
+			out.reason = opennova::to_std(state->get_reason());
+		}
+		states.push_back(std::move(out));
+	}
+	tools_->set_control_states(states);
+}
+
+// The Game window's readout: the session under the world, its logic clock
+// and the display frame, on the board's cadence while the tools are open.
+void DevTools::push_game_status() {
+	if (!tools_->needs_game_status()) {
+		last_status_push_ms_ = -1;
+		return;
+	}
+	if (!push_due(last_status_push_ms_, opennova::devtools::GameDevTools::kControlStateSeconds)) {
+		return;
+	}
+	opennova::devtools::GameStatusSnapshot status;
+	status.fps = Engine::get_singleton()->get_frames_per_second();
+	status.frame_ms = frame_ms_count_ > 0 ? frame_ms_sum_ / static_cast<double>(frame_ms_count_) : 0.0;
+	status.frame_ms_peak = frame_ms_peak_;
+	frame_ms_sum_ = 0.0;
+	frame_ms_peak_ = 0.0;
+	frame_ms_count_ = 0;
+	if (Simulation *sim = simulation(); sim != nullptr) {
+		status.world = true;
+		status.logic_tick = static_cast<uint64_t>(sim->get_logic_tick());
+		status.role = static_cast<opennova::devtools::StatusRole>(sim->session_role());
+		status.state = static_cast<opennova::devtools::StatusState>(sim->session_state());
+		status.transport_locked = sim->is_transport_locked();
+		status.peers = sim->get_host_peer_count();
+		status.playing = status.state == opennova::devtools::StatusState::Running;
+	}
+	tools_->set_game_status(status);
 }
 
 namespace {
@@ -507,13 +699,17 @@ Variant control_arg_to_variant(const opennova::devtools::ControlArg &p_arg) {
 // MCP's game_debug drives too (ADR 0043 d12): the row's schema validates the
 // arguments and its session-role gate refuses a joiner, once for both
 // surfaces. F3 is the local operator, so it carries the per-call
-// confirmation; requests queued with no table (or no owner behind the row)
-// drain and drop.
+// confirmation. Every verdict is reported back to the tools (the status line,
+// the Log window), so a refused or failed command is never silent.
 void DevTools::apply_control_requests() {
 	opennova::devtools::ControlRequest request;
 	bool drained = false;
 	while (tools_->take_control_request(request)) {
+		opennova::devtools::ControlResult result;
+		result.id = request.id;
 		if (control_table_.is_null()) {
+			result.message = "no debug-control table";
+			tools_->report_control_result(result);
 			continue;
 		}
 		Array args;
@@ -522,12 +718,32 @@ void DevTools::apply_control_requests() {
 		}
 		const Ref<DebugInvokeResult> outcome =
 				control_table_->invoke(StringName(request.id), args, true);
-		drained = drained || outcome->get_error() == OK;
+		const Error error = outcome->get_error();
+		result.ok = error == OK;
+		if (!result.ok) {
+			String message = UtilityFunctions::error_string(error);
+			const Ref<DebugControlState> state = outcome->get_state();
+			if (state.is_valid() && !state->get_reason().is_empty()) {
+				message += ": " + state->get_reason();
+			}
+			result.message = opennova::to_std(message);
+		} else if (outcome->get_result().get_type() != Variant::NIL) {
+			// A read's payload in full (the Log window keeps it); capped so a
+			// huge dictionary cannot flood the ring.
+			constexpr int64_t kDetailCap = 4096;
+			const String text = outcome->get_result().stringify();
+			result.detail = opennova::to_std(text.length() > kDetailCap ? text.substr(0, kDetailCap) : text);
+		}
+		tools_->report_control_result(result);
+		drained = drained || result.ok;
 	}
 	if (drained) {
 		// The records pushed this same frame show the mutation, not the
-		// reading from up to half a second ago.
+		// reading from up to a cadence ago.
 		last_entity_push_ms_ = -1;
+		last_environment_push_ms_ = -1;
+		last_ai_push_ms_ = -1;
+		last_control_state_push_ms_ = -1;
 	}
 }
 
@@ -541,13 +757,9 @@ bool DevTools::push_entity_directory() {
 		last_entity_push_ms_ = -1;
 		return false;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::EntitiesWindow::kRefreshSeconds * 1000.0);
-	if (last_entity_push_ms_ >= 0 && now_ms - last_entity_push_ms_ < cadence_ms) {
+	if (!push_due(last_entity_push_ms_, opennova::devtools::EntitiesWindow::kRefreshSeconds)) {
 		return false;
 	}
-	last_entity_push_ms_ = now_ms;
 	opennova::devtools::EntityDirectorySnapshot snapshot;
 	snapshot.rows = simulation_->native_entity_directory();
 	snapshot.valid = true;
@@ -803,13 +1015,9 @@ void DevTools::push_environment_snapshot() {
 		last_environment_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::EnvironmentWindow::kRefreshSeconds * 1000.0);
-	if (last_environment_push_ms_ >= 0 && now_ms - last_environment_push_ms_ < cadence_ms) {
+	if (!push_due(last_environment_push_ms_, opennova::devtools::EnvironmentWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_environment_push_ms_ = now_ms;
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	simulation_->native_environment_snapshot(snapshot);
 	tools_->set_environment_snapshot(snapshot);
@@ -824,13 +1032,9 @@ void DevTools::push_ai_debug() {
 		last_ai_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::AiWindow::kRefreshSeconds * 1000.0);
-	if (last_ai_push_ms_ >= 0 && now_ms - last_ai_push_ms_ < cadence_ms) {
+	if (!push_due(last_ai_push_ms_, opennova::devtools::AiWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_ai_push_ms_ = now_ms;
 	opennova::devtools::AiDebugSnapshot snapshot;
 	snapshot.valid = simulation_->native_ai_debug(snapshot.report);
 	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
@@ -858,6 +1062,7 @@ void DevTools::apply_rays_requests() {
 				simulation_->clear_ray_debug();
 				break;
 		}
+		overlay_filters_dirty_ = true;
 	}
 }
 
@@ -876,20 +1081,16 @@ void DevTools::push_rays_snapshot() {
 		last_rays_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::RaysWindow::kRefreshSeconds * 1000.0);
-	if (last_rays_push_ms_ >= 0 && now_ms - last_rays_push_ms_ < cadence_ms) {
+	if (!push_due(last_rays_push_ms_, opennova::devtools::RaysWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_rays_push_ms_ = now_ms;
 	opennova::devtools::RaysSnapshot snapshot;
 	simulation_->native_rays_snapshot(snapshot);
 	tools_->set_rays_snapshot(snapshot);
 }
 
-// Drain the Physics window's typed requests: the mask/clear/capture legs
-// land in the Simulation contact-debug seam.
+// Drain the Physics window's typed requests: the mask/clear legs land in the
+// Simulation contact-debug seam.
 void DevTools::apply_physics_requests() {
 	opennova::devtools::PhysicsRequest request;
 	Simulation *simulation_ = simulation();
@@ -905,29 +1106,30 @@ void DevTools::apply_physics_requests() {
 			case Kind::Clear:
 				simulation_->clear_contact_debug();
 				break;
-			case Kind::SetCaptureEnabled:
-				simulation_->set_contact_debug_capture(request.a != 0);
-				break;
 		}
+		overlay_filters_dirty_ = true;
 	}
 }
 
 // Push the contact-capture record while the Physics window shows, on its
 // 0.25 s cadence: counts + capture state through
 // Simulation::native_physics_snapshot — no Variant round-trip (ADR 0042 d6).
+// The capture follows the window (the rays rule), so it costs nothing while
+// it is hidden.
 void DevTools::push_physics_snapshot() {
 	Simulation *simulation_ = simulation();
-	if (simulation_ == nullptr || !tools_->needs_physics_snapshot()) {
+	const bool shown = simulation_ != nullptr && tools_->needs_physics_snapshot();
+	if (simulation_ != nullptr && shown != contacts_recording_) {
+		simulation_->set_contact_debug_capture(shown);
+		contacts_recording_ = shown;
+	}
+	if (!shown) {
 		last_physics_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::PhysicsWindow::kRefreshSeconds * 1000.0);
-	if (last_physics_push_ms_ >= 0 && now_ms - last_physics_push_ms_ < cadence_ms) {
+	if (!push_due(last_physics_push_ms_, opennova::devtools::PhysicsWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_physics_push_ms_ = now_ms;
 	opennova::devtools::PhysicsSnapshot snapshot;
 	simulation_->native_physics_snapshot(snapshot);
 	tools_->set_physics_snapshot(snapshot);
@@ -935,6 +1137,73 @@ void DevTools::push_physics_snapshot() {
 
 void DevTools::reset_layout() {
 	tools_->pass().request_layout_reset();
+}
+
+namespace {
+
+String overlay_name(const opennova::devtools::OverlayLayer &p_layer) {
+	return String::utf8(p_layer.group()) + "/" + String::utf8(p_layer.label());
+}
+
+} // namespace
+
+PackedStringArray DevTools::window_titles() const {
+	PackedStringArray out;
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.window_count(); ++i) {
+		out.push_back(String::utf8(pass.window(i).title()));
+	}
+	return out;
+}
+
+bool DevTools::set_window_open(const String &p_title, bool p_open) {
+	opennova::devtools::ImGuiPass &pass = tools_->pass();
+	const CharString title = p_title.utf8();
+	for (int i = 0; i < pass.window_count(); ++i) {
+		opennova::devtools::Window &window = pass.window(i);
+		if (std::strcmp(window.title(), title.get_data()) != 0) continue;
+		if (!window.is_closeable() && !p_open) return false;
+		window.open = p_open;
+		return true;
+	}
+	return false;
+}
+
+PackedStringArray DevTools::overlay_names() const {
+	PackedStringArray out;
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		out.push_back(overlay_name(pass.overlay(i)));
+	}
+	return out;
+}
+
+bool DevTools::set_overlay_enabled(const String &p_name, bool p_enabled) {
+	opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		if (overlay_name(pass.overlay(i)) != p_name) continue;
+		pass.set_overlay_enabled(pass.overlay(i), p_enabled);
+		return true;
+	}
+	return false;
+}
+
+Vector3i DevTools::overlay_last_draw(const String &p_name) const {
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		if (overlay_name(pass.overlay(i)) != p_name) continue;
+		const opennova::devtools::OverlayLayerStats &stats = pass.overlay(i).last_stats();
+		return Vector3i(stats.lines, stats.texts, stats.dropped);
+	}
+	return Vector3i(-1, -1, -1);
+}
+
+String DevTools::status_text() const {
+	return String::utf8(tools_->pass().status_text());
+}
+
+String DevTools::game_status_text() const {
+	return opennova::to_gd(tools_->game_window().status_text());
 }
 
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
@@ -1082,6 +1351,39 @@ int DevTools::selected_entity_handle() const {
 }
 
 void DevTools::reset_layout() {}
+
+PackedStringArray DevTools::window_titles() const {
+	return PackedStringArray();
+}
+
+bool DevTools::set_window_open(const String &p_title, bool p_open) {
+	(void)p_title;
+	(void)p_open;
+	return false;
+}
+
+PackedStringArray DevTools::overlay_names() const {
+	return PackedStringArray();
+}
+
+bool DevTools::set_overlay_enabled(const String &p_name, bool p_enabled) {
+	(void)p_name;
+	(void)p_enabled;
+	return false;
+}
+
+Vector3i DevTools::overlay_last_draw(const String &p_name) const {
+	(void)p_name;
+	return Vector3i(-1, -1, -1);
+}
+
+String DevTools::status_text() const {
+	return String();
+}
+
+String DevTools::game_status_text() const {
+	return String();
+}
 
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {

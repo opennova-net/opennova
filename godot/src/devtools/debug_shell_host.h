@@ -13,10 +13,10 @@ namespace godot {
 
 // The shell seam of the debug-control table (ADR 0043 d12): the live owner
 // suppliers the rows resolve on EVERY call (a world reload is picked up with
-// no retained object, and a fresh mission gets fresh debug state) and the two
-// shell verbs the table cannot own — the gated return-to-menu leg and the
-// session-role authority fact (ROLE_JOINER is the one non-authoritative
-// role). The base answers none; the game's GameDebugAdapter implements the
+// no retained object, and a fresh mission gets fresh debug state) and the
+// shell verbs the table cannot own — the resume leg, the gated
+// return-to-menu leg and the session-role authority fact (ROLE_JOINER is the
+// one non-authoritative role). The base answers none; the game's GameDebugAdapter implements the
 // hooks over the GameShell it adopted; a test fakes it by overriding the
 // hooks (ADR 0043 rule 11: an interface class faked through its public verbs).
 class DebugShellHost : public RefCounted {
@@ -32,6 +32,9 @@ protected:
 	GDVIRTUAL0R(LocalPlayerPresenter *, _player_presenter)
 	// The render viewport the viewport rows mutate (null off-tree).
 	GDVIRTUAL0R(Viewport *, _viewport)
+	// The shell's resume leg: plays the runtime and closes whichever pause
+	// overlay (the in-game menu, the armory) is up, handing play back.
+	GDVIRTUAL0R(Error, _resume)
 	// The shell's one gated return leg.
 	GDVIRTUAL0R(Error, _return_to_menu)
 	// Authority is the session-role fact: every role but the joiner owns the
@@ -43,6 +46,7 @@ public:
 	MissionRoot *runtime();
 	LocalPlayerPresenter *player_presenter();
 	Viewport *viewport();
+	Error resume();
 	Error return_to_menu();
 	bool has_debug_authority();
 };

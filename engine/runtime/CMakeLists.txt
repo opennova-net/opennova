@@ -72,6 +72,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/script_debug_report.cpp # the F3 Script window's WAC/BMS/vars read
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/static_sources.cpp
@@ -215,6 +216,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/facial_animation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect.cpp   # the entity directory + debug cards (ADR 0042 d5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect_markers.cpp # the overlay entity markers (ADR 0042 d5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_debug_rows.cpp # the ray/contact captures as drawable rows (dev tooling)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect_local_player.cpp # the local player's live facts (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx attach law: pool gates, identity aliases, attach plan
     ${CMAKE_CURRENT_SOURCE_DIR}/world/present_passes.cpp # the present passes' shared law: husk render pick, husk identity, settle tilt retention
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
@@ -342,6 +346,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
@@ -399,11 +404,24 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/collision_overlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/hitbox_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_properties_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/environment_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/log_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/script_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/player_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/render_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/particles_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/audio_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/net_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/physics_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/rays_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp

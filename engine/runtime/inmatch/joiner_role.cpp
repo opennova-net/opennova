@@ -751,7 +751,7 @@ void JoinerRole::pump() {
     world.rules.no_friendly_fire =
             (rt.view().mp_attributes() & GameConfig::kMpAttribNoFriendlyFire) != 0;
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
-	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
+	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound

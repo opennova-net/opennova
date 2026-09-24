@@ -79,9 +79,6 @@ bool action_button(const char *label, const char *block) {
 	return pressed;
 }
 
-// Case-insensitive ASCII compare. The clip-variant rings key on a LOWERCASED
-// name while an ACTION row authors whatever case it likes, so the picker's
-// resolve check has to match the way the runtime itself looks a clip up.
 // The coarsest label step that still leaves at least ~72 px between labels.
 double ruler_step(float ppt) {
 	static const double kSteps[] = {1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000};
@@ -928,7 +925,7 @@ void WeaponWindow::draw_trace(float height) {
 		float x = origin.x + 46.0f;
 		const struct { ImU32 col; const char *name; } legend[] = {
 				{IM_COL32(240, 200, 90, 255), "enter"}, {IM_COL32(90, 200, 120, 255), "active"},
-				{IM_COL32(90, 130, 210, 255), "done"}};
+				{IM_COL32(90, 130, 210, 255), "done"}, {IM_COL32(190, 120, 210, 255), "held"}};
 		for (const auto &item : legend) {
 			dl->AddRectFilled(ImVec2(x, y + 3.0f), ImVec2(x + 8.0f, y + 11.0f), item.col);
 			dl->AddText(ImVec2(x + 11.0f, y), IM_COL32(150, 150, 160, 255), item.name);

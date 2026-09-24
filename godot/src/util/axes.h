@@ -57,6 +57,13 @@ inline Vector3 mission_to_godot(const std::array<float, 3> &v) {
 	return Vector3(v[0], v[2], -v[1]);
 }
 
+// The same map as a transform (its basis columns are the images of the
+// mission x, y and z axes): what a mission-frame matrix composes with to
+// land in Godot world space (the dev tools' overlay view-projection).
+inline Transform3D mission_to_godot_transform() {
+	return Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, 1, 0)), Vector3());
+}
+
 // The inverse, into any {x, y, z} float struct: env::Vec3 by default,
 // world::Vec3 for the record constructors that author Godot-space rows.
 template <typename V = opennova::env::Vec3>

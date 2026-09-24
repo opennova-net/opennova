@@ -2,8 +2,8 @@ extends GutTest
 
 # DebugPickList: the shell-owned debug pick set. Cap with oldest-first
 # eviction, dedupe-by-handle (refresh in place), clear, and the picked signal
-# carrying the handle — the model contract the highlight view and the pick
-# session (the F3 Entities selection forward) both build on.
+# carrying the handle — the model contract the pick session (the F3 Entities
+# selection forward) builds on.
 
 
 func _pick(handle: int, name: String = "thing", tick: int = 1) -> DebugPickCard:

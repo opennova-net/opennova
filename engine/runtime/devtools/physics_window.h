@@ -1,15 +1,17 @@
 // The Physics window (ADR 0042 d6): the engine contact-debug capture's
-// control surface over the PhysicsSnapshot the embedder pushes — the capture
-// arm, per-kind counts (held in ring / lifetime total) with draw-filter
-// checkboxes, and Clear — leaving typed PhysicsRequests the embedder drains
-// into the Simulation contact-debug seam.
+// control surface over the PhysicsSnapshot the embedder pushes — per-kind
+// counts (held in ring / lifetime total) with draw-filter checkboxes, and
+// Clear — leaving typed PhysicsRequests the embedder drains into the
+// Simulation contact-debug seam.
 //
 // The window holds only the pushed value record — it never reaches into a
-// live World. Visibility-armed: while hidden it drops its snapshot and the
-// embedder (gated on GameDevTools::needs_physics_snapshot) stops building
-// new ones.
+// live World. Visibility-armed: while hidden it drops its snapshot, and the
+// embedder (gated on GameDevTools::needs_physics_snapshot) stops building new
+// ones and disarms the contact capture, which records only while shown.
 #pragma once
 
+#include <runtime/devtools/collision_overlay.h>
+#include <runtime/devtools/hitbox_overlay.h>
 #include <runtime/devtools/imgui_pass.h>
 #include <runtime/devtools/physics_request.h>
 #include <runtime/devtools/physics_snapshot.h>
@@ -27,6 +29,7 @@ public:
 	static constexpr double kRefreshSeconds = 0.25;
 
 	const char *title() const override { return "Physics"; }
+	MenuGroup menu_group() const override { return MenuGroup::Sim; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::Right;
 	}
@@ -35,9 +38,19 @@ public:
 
 	// The pushed record, by value; an invalid snapshot clears the page.
 	void set_snapshot(const PhysicsSnapshot &snapshot);
-	// (pass open && window open): the embedder skips building snapshots
-	// nobody shows.
-	bool wants_snapshot() const { return shown_; }
+
+	// The Game-view layers: the captured contacts (pushed per logic tick,
+	// filtered by the kind checkboxes) and the hit meshes (the hitbox oracle,
+	// refreshed at HitboxOverlayLayer::kRefreshHz). A layer on keeps the
+	// contact capture armed with this window closed.
+	ContactsOverlayLayer &contacts_layer() { return contacts_layer_; }
+	HitboxOverlayLayer &hitbox_layer() { return hitbox_layer_; }
+	const ContactsOverlayLayer &contacts_layer() const { return contacts_layer_; }
+	const HitboxOverlayLayer &hitbox_layer() const { return hitbox_layer_; }
+	void set_contacts_overlay(ContactsOverlayRecord record) { contacts_record_ = std::move(record); }
+	void set_hitbox_overlay(HitboxOverlayRecord record) { hitbox_record_ = std::move(record); }
+	const ContactsOverlayRecord &contacts_overlay() const { return contacts_record_; }
+	const HitboxOverlayRecord &hitbox_overlay() const { return hitbox_record_; }
 
 	// The typed request queue the embedder drains. enqueue_request is the one
 	// path the drawn controls feed — and the headless test seam.
@@ -55,12 +68,15 @@ private:
 
 	PhysicsSnapshot snapshot_{};
 	std::array<std::string, kContactKindCount> rows_{};
-	bool shown_ = false;
 	std::deque<PhysicsRequest> requests_;
-	// Edit state mirrored from every push (these controls display authoritative
+	// The mask mirrored from every push (the checkboxes display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
-	bool capture_edit_ = false;
-	uint32_t mask_edit_ = 0x3F;
+	uint32_t mask_edit_ = kContactKindMaskAll;
+	// Declared ahead of the layers that read them.
+	ContactsOverlayRecord contacts_record_{};
+	HitboxOverlayRecord hitbox_record_{};
+	ContactsOverlayLayer contacts_layer_{contacts_record_};
+	HitboxOverlayLayer hitbox_layer_{hitbox_record_};
 };
 
 }  // namespace opennova::devtools

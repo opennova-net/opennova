@@ -12,14 +12,15 @@
 // otherwise keeps the handle pending for the next push. Visibility-armed:
 // while hidden it drops its snapshot (the selection survives as a pending
 // handle so reopening re-selects the same entity), and the embedder (gated on
-// GameDevTools::needs_entity_directory, which the Properties window keeps
-// armed too) stops building new ones once no entity window shows. Rows are
+// GameDevTools::needs_entity_directory, which the Properties and AI windows
+// keep armed too) stops building new ones once none of them shows. Rows are
 // formatted once per push (the embedder pushes on the StatsWindow 0.5 s
 // cadence, kRefreshSeconds); a frame between pushes only re-emits cached
 // strings.
 #pragma once
 
 #include <runtime/devtools/control_request.h>
+#include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/imgui_pass.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
 
@@ -38,6 +39,7 @@ public:
 	static constexpr double kRefreshSeconds = 0.5;
 
 	const char *title() const override { return "Entities"; }
+	MenuGroup menu_group() const override { return MenuGroup::World; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::Right;
 	}
@@ -92,6 +94,16 @@ public:
 	void set_filter(const char *text);
 	const char *filter() const { return filter_.data(); }
 
+	// The Game-view layers (entity_overlay.h): the selection marker and the
+	// nearby labels, drawing the markers record the embedder pushes per logic
+	// tick while either layer wants it.
+	EntitySelectionLayer &selection_layer() { return selection_layer_; }
+	EntityLabelsLayer &labels_layer() { return labels_layer_; }
+	const EntitySelectionLayer &selection_layer() const { return selection_layer_; }
+	const EntityLabelsLayer &labels_layer() const { return labels_layer_; }
+	void set_markers(EntityMarkersRecord record) { markers_ = std::move(record); }
+	const EntityMarkersRecord &markers() const { return markers_; }
+
 private:
 	struct RowText {
 		std::string name;
@@ -122,6 +134,10 @@ private:
 	bool scroll_to_selected_ = false;
 	bool shown_ = false;
 	std::deque<ControlRequest> requests_;
+	// Declared ahead of the layers that read it.
+	EntityMarkersRecord markers_{};
+	EntitySelectionLayer selection_layer_{markers_, *this};
+	EntityLabelsLayer labels_layer_{markers_, *this};
 };
 
 }  // namespace opennova::devtools

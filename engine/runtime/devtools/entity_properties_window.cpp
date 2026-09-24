@@ -161,6 +161,25 @@ void EntityPropertiesWindow::draw_actions() {
 				{ControlArg::vector3(pos_edit_[0], pos_edit_[1], pos_edit_[2]),
 						ControlArg::number(yaw_edit_), ControlArg::number(pitch_edit_)}});
 	}
+	// Crewing: the selected row is the vehicle (its SSN is the wire net id);
+	// the automation rows seat an occupant by SSN or the local player.
+	if (row->net_id > 0) {
+		ImGui::BeginDisabled(!entities_.authority());
+		ImGui::SetNextItemWidth(96.0f);
+		ImGui::InputInt("##occupant_ssn", &occupant_ssn_edit_);
+		ImGui::SameLine();
+		if (ImGui::Button("Crew with SSN") && occupant_ssn_edit_ > 0) request_crew_vehicle(occupant_ssn_edit_, row->net_id);
+		ImGui::SameLine();
+		if (ImGui::Button("Board as player")) {
+			entities_.enqueue_request({control_id::kCrewLocalPlayer, {ControlArg::integer(row->net_id)}});
+		}
+		ImGui::EndDisabled();
+	}
+}
+
+void EntityPropertiesWindow::request_crew_vehicle(int32_t occupant_ssn, int32_t vehicle_ssn) {
+	entities_.enqueue_request({control_id::kCrewVehicle,
+			{ControlArg::integer(occupant_ssn), ControlArg::integer(vehicle_ssn)}});
 }
 
 void EntityPropertiesWindow::draw_attrib_grid(const char *label, bool second_word) {

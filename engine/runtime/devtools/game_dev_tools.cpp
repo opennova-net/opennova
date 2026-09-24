@@ -3,22 +3,34 @@
 #include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/ai_debug_snapshot.h>
+#include <runtime/devtools/entity_overlay.h>
+#include <runtime/devtools/overlay_camera.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/audio_window.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/log_window.h>
+#include <runtime/devtools/net_window.h>
+#include <runtime/devtools/particles_window.h>
+#include <runtime/devtools/player_window.h>
+#include <runtime/devtools/render_window.h>
+#include <runtime/devtools/script_window.h>
 #include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
 #include <runtime/devtools/weapon_window.h>
 
+#include <algorithm>
+#include <cstring>
 #include <utility>
 
 namespace opennova::devtools {
 
 GameDevTools::GameDevTools() {
-	auto game = std::make_unique<GameWindow>();
+	auto game = std::make_unique<GameWindow>(control_board_);
 	game_window_ = game.get();
 	game->open = true;
 	pass_.register_window(std::move(game));
@@ -32,6 +44,8 @@ GameDevTools::GameDevTools() {
 	auto entities = std::make_unique<EntitiesWindow>();
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
+	pass_.register_overlay(entities_window_->selection_layer());
+	pass_.register_overlay(entities_window_->labels_layer());
 	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
 	entity_properties_window_ = properties.get();
 	pass_.register_window(std::move(properties));
@@ -46,12 +60,37 @@ GameDevTools::GameDevTools() {
 	auto ai = std::make_unique<AiWindow>(*entities_window_);
 	ai_window_ = ai.get();
 	pass_.register_window(std::move(ai));
+	for (int i = 0; i < AiWindow::kLayerCount; ++i) pass_.register_overlay(ai_window_->layer(i));
 	auto rays = std::make_unique<RaysWindow>();
 	rays_window_ = rays.get();
 	pass_.register_window(std::move(rays));
+	pass_.register_overlay(rays_window_->overlay_layer());
 	auto physics = std::make_unique<PhysicsWindow>();
 	physics_window_ = physics.get();
 	pass_.register_window(std::move(physics));
+	pass_.register_overlay(physics_window_->contacts_layer());
+	pass_.register_overlay(physics_window_->hitbox_layer());
+	auto script = std::make_unique<ScriptWindow>(control_board_);
+	script_window_ = script.get();
+	pass_.register_window(std::move(script));
+	auto player = std::make_unique<PlayerWindow>(control_board_);
+	player_window_ = player.get();
+	pass_.register_window(std::move(player));
+	auto render = std::make_unique<RenderWindow>(control_board_);
+	render_window_ = render.get();
+	pass_.register_window(std::move(render));
+	auto particles = std::make_unique<ParticlesWindow>(control_board_);
+	particles_window_ = particles.get();
+	pass_.register_window(std::move(particles));
+	auto audio = std::make_unique<AudioWindow>();
+	audio_window_ = audio.get();
+	pass_.register_window(std::move(audio));
+	auto net = std::make_unique<NetWindow>(control_board_);
+	net_window_ = net.get();
+	pass_.register_window(std::move(net));
+	auto log = std::make_unique<LogWindow>();
+	log_window_ = log.get();
+	pass_.register_window(std::move(log));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -87,21 +126,184 @@ void GameDevTools::set_frame_stats(FrameStatsBoard *board) {
 	stats_window_->set_board(board);
 }
 
+void GameDevTools::set_log_ring(const io::LogRing *ring) {
+	log_window_->set_ring(ring);
+}
+
+void GameDevTools::set_control_catalog(std::vector<ControlSpec> catalog) {
+	control_board_.set_catalog(std::move(catalog));
+	control_board_.clear_states();
+}
+
+void GameDevTools::set_control_states(const std::vector<ControlState> &states) {
+	control_board_.set_states(states);
+}
+
+bool GameDevTools::needs_control_states() const {
+	return pass_.is_open() && control_board_.has_catalog();
+}
+
+void GameDevTools::wanted_control_ids(std::vector<const char *> &out) const {
+	out.clear();
+	if (!pass_.is_open()) return;
+	for (int i = 0; i < pass_.window_count(); ++i) {
+		const Window &window = pass_.window(i);
+		if (window.open) window.wanted_controls(out);
+	}
+	// One read per row per push, whichever windows share it.
+	std::sort(out.begin(), out.end(),
+			[](const char *a, const char *b) { return std::strcmp(a, b) < 0; });
+	out.erase(std::unique(out.begin(), out.end(),
+					  [](const char *a, const char *b) { return std::strcmp(a, b) == 0; }),
+			out.end());
+}
+
+void GameDevTools::set_game_status(const GameStatusSnapshot &status) {
+	game_window_->set_status(status);
+}
+
+void GameDevTools::set_overlay_camera(const OverlayCamera &camera) {
+	game_window_->set_overlay_camera(camera);
+}
+
+bool GameDevTools::needs_overlay_camera() const {
+	return pass_.is_open() && pass_.any_overlay_enabled();
+}
+
+void GameDevTools::clear_overlay_records() {
+	game_window_->set_overlay_camera(OverlayCamera{});
+	entities_window_->set_markers(EntityMarkersRecord{});
+	if (!ai_window_->open) ai_window_->set_snapshot(AiDebugSnapshot{});
+	rays_window_->set_overlay(RaysOverlayRecord{});
+	physics_window_->set_contacts_overlay(ContactsOverlayRecord{});
+	physics_window_->set_hitbox_overlay(HitboxOverlayRecord{});
+}
+
+bool GameDevTools::needs_entity_markers() const {
+	if (!pass_.is_open()) return false;
+	const bool selection = entities_window_->selection_layer().enabled() &&
+			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
+	return selection || entities_window_->labels_layer().enabled();
+}
+
+world::inspect::EntityMarkerQuery GameDevTools::entity_marker_query(const world::Vec3 &eye) const {
+	world::inspect::EntityMarkerQuery query;
+	query.anchor = eye;
+	query.selected = entities_window_->selection_layer().enabled()
+			? entities_window_->selected_handle()
+			: world::EntityHandle::kInvalid;
+	if (entities_window_->labels_layer().enabled()) {
+		query.range_units = EntityLabelsLayer::kRangeUnits;
+		query.cap = EntityLabelsLayer::kCap;
+	}
+	return query;
+}
+
+bool GameDevTools::needs_entity_marker_refresh(uint64_t logic_tick, const world::Vec3 &eye) const {
+	if (!needs_entity_markers()) return false;
+	const EntityMarkersRecord &record = entities_window_->markers();
+	if (!record.valid || record.logic_tick != logic_tick) return true;
+	const world::inspect::EntityMarkerQuery query = entity_marker_query(eye);
+	return query.selected != record.query.selected || query.range_units != record.query.range_units ||
+			(query.range_units > 0.0f && (query.anchor.x != record.query.anchor.x ||
+					query.anchor.y != record.query.anchor.y || query.anchor.z != record.query.anchor.z));
+}
+
+void GameDevTools::set_entity_markers(EntityMarkersRecord record) {
+	entities_window_->set_markers(std::move(record));
+}
+
 void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
 	entities_window_->set_directory(std::move(snapshot));
 }
 
 bool GameDevTools::needs_entity_directory() const {
-	// The Properties window reads the list's selected row, so the directory
-	// keeps flowing while either entity window shows (the list holds its
-	// selection pending across its own close and re-applies it per push).
-	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
+	// The Properties and AI windows read the list's selected row, and the
+	// detail card refreshes on the directory's cadence, so the directory keeps
+	// flowing while any selection-following window shows (the list holds its
+	// selection pending across its own close and re-applies it per push, and
+	// its "entity is gone" rule clears a dead selection for all three).
+	return pass_.is_open() &&
+			(entities_window_->open || entity_properties_window_->open || ai_window_->open);
 }
 
 bool GameDevTools::take_control_request(ControlRequest &request) {
 	return game_window_->take_control_request(request) ||
 			entities_window_->take_request(request) ||
-			environment_window_->take_request(request);
+			environment_window_->take_request(request) ||
+			script_window_->take_request(request) ||
+			player_window_->take_request(request) ||
+			render_window_->take_request(request) ||
+			particles_window_->take_request(request) ||
+			audio_window_->take_request(request) ||
+			net_window_->take_request(request);
+}
+
+void GameDevTools::set_script_snapshot(ScriptSnapshot snapshot) {
+	script_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_script_snapshot() const {
+	return pass_.is_open() && script_window_->open;
+}
+
+void GameDevTools::set_player_snapshot(PlayerSnapshot snapshot) {
+	player_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_player_snapshot() const {
+	return pass_.is_open() && player_window_->open;
+}
+
+void GameDevTools::set_render_snapshot(const RenderSnapshot &snapshot) {
+	render_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_render_snapshot() const {
+	return pass_.is_open() && render_window_->open;
+}
+
+void GameDevTools::set_particle_snapshot(ParticleSnapshot snapshot) {
+	particles_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_particle_snapshot() const {
+	return pass_.is_open() && particles_window_->open;
+}
+
+void GameDevTools::set_audio_snapshot(AudioSnapshot snapshot) {
+	audio_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_audio_snapshot() const {
+	return pass_.is_open() && audio_window_->open;
+}
+
+void GameDevTools::set_net_snapshot(NetSnapshot snapshot) {
+	net_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_net_snapshot() const {
+	return pass_.is_open() && net_window_->open;
+}
+
+void GameDevTools::report_control_result(const ControlResult &result) {
+	std::string text = result.id;
+	text += result.ok ? ": ok" : ": failed";
+	if (!result.message.empty()) {
+		text += " (";
+		text += result.message;
+		text += ")";
+	}
+	if (result.ok && !result.detail.empty()) {
+		// The status line carries a short head of a read's payload; the full
+		// text belongs to the Log window.
+		constexpr size_t kHead = 96;
+		text += " = ";
+		text += result.detail.size() > kHead ? result.detail.substr(0, kHead) + "..." : result.detail;
+	}
+	pass_.post_status(std::move(text), result.ok ? StatusLevel::Info : StatusLevel::Error);
+	log_window_->add_command_result(result);
 }
 
 void GameDevTools::select_entity(uint16_t handle) {
@@ -165,7 +367,11 @@ void GameDevTools::set_ai_debug(AiDebugSnapshot snapshot) {
 }
 
 bool GameDevTools::needs_ai_debug() const {
-	return pass_.is_open() && ai_window_->open;
+	return pass_.is_open() && (ai_window_->open || ai_window_->any_layer_enabled());
+}
+
+bool GameDevTools::needs_ai_overlay() const {
+	return pass_.is_open() && ai_window_->any_layer_enabled();
 }
 
 void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
@@ -173,7 +379,15 @@ void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
 }
 
 bool GameDevTools::needs_rays_snapshot() const {
-	return pass_.is_open() && rays_window_->open;
+	return pass_.is_open() && (rays_window_->open || rays_window_->overlay_layer().enabled());
+}
+
+bool GameDevTools::needs_rays_overlay() const {
+	return pass_.is_open() && rays_window_->overlay_layer().enabled();
+}
+
+void GameDevTools::set_rays_overlay(RaysOverlayRecord record) {
+	rays_window_->set_overlay(std::move(record));
 }
 
 bool GameDevTools::take_rays_request(RaysRequest &request) {
@@ -185,7 +399,23 @@ void GameDevTools::set_physics_snapshot(const PhysicsSnapshot &snapshot) {
 }
 
 bool GameDevTools::needs_physics_snapshot() const {
-	return pass_.is_open() && physics_window_->open;
+	return pass_.is_open() && (physics_window_->open || physics_window_->contacts_layer().enabled());
+}
+
+bool GameDevTools::needs_contacts_overlay() const {
+	return pass_.is_open() && physics_window_->contacts_layer().enabled();
+}
+
+void GameDevTools::set_contacts_overlay(ContactsOverlayRecord record) {
+	physics_window_->set_contacts_overlay(std::move(record));
+}
+
+bool GameDevTools::needs_hitbox_overlay() const {
+	return pass_.is_open() && physics_window_->hitbox_layer().enabled();
+}
+
+void GameDevTools::set_hitbox_overlay(HitboxOverlayRecord record) {
+	physics_window_->set_hitbox_overlay(std::move(record));
 }
 
 bool GameDevTools::take_physics_request(PhysicsRequest &request) {

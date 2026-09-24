@@ -22,6 +22,7 @@
 #include <base/io/bam.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/iris_march.h>
@@ -4467,6 +4468,29 @@ void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
                                    fx(10.0), nullptr);
     CHECK(ring(Cat::kGroundProbe).total == 1);
 
+    // The drawable rows (the F3 Rays overlay's feed) apply the capture's own
+    // mask and fade window: every held event by default, one category under
+    // its mask bit, nothing past the TTL.
+    {
+        std::vector<RayDebugRow> rows;
+        ray_debug_rows(collision, 77, rows);
+        int32_t held = 0;
+        for (const CollisionWorld::RayDebugRing &r : collision.ray_debug_rings()) held += r.count;
+        CHECK(static_cast<int32_t>(rows.size()) == held);
+        collision.set_ray_debug_mask(1u << static_cast<int>(Cat::kThrowable));
+        ray_debug_rows(collision, 77, rows);
+        CHECK(rows.size() == 2);
+        for (const RayDebugRow &row : rows) CHECK(row.category == static_cast<uint8_t>(Cat::kThrowable));
+        collision.set_ray_debug_ttl_ticks(5);
+        ray_debug_rows(collision, 77 + 5, rows);
+        CHECK(rows.size() == 2 && rows[0].age_ticks == 5);
+        ray_debug_rows(collision, 77 + 6, rows);
+        CHECK(rows.empty());
+        ray_debug_rows(collision, 70, rows);                 // a stamp ahead of the clock
+        CHECK(rows.empty());
+        collision.set_ray_debug_mask(CollisionWorld::kRayDebugMaskAll);
+    }
+
     // The engine-held draw filter: full mask default, clamped TTL, mask
     // clipped to the defined categories.
     CHECK(collision.ray_debug_mask() == CollisionWorld::kRayDebugMaskAll);
@@ -4544,6 +4568,21 @@ void test_contact_debug_capture_is_opt_in() {
     (void)collision.trace_knife_impact(world, trace);
     CHECK(ring.total == 2);
     CHECK(ring.kind_totals[static_cast<size_t>(Kind::kKnifeHit)] == 1);
+
+    // The drawable rows (the F3 contacts overlay's feed): the capture's kind
+    // mask and flash window, with the touched body looked up live.
+    {
+        std::vector<ContactDebugRow> rows;
+        contact_debug_rows(world, collision, 41, rows);
+        CHECK(rows.size() == 2);
+        CHECK(rows.size() == 2 && rows[0].target_live && rows[0].target_position.x == 5.0f);
+        collision.set_contact_debug_mask(1u << static_cast<int>(Kind::kKnifeHit));
+        contact_debug_rows(world, collision, 41, rows);
+        CHECK(rows.size() == 1 && rows[0].kind == static_cast<uint8_t>(Kind::kKnifeHit));
+        contact_debug_rows(world, collision, 41 + CollisionWorld::kContactDebugTtlTicks + 1, rows);
+        CHECK(rows.empty());
+        collision.set_contact_debug_mask(CollisionWorld::kContactDebugMaskAll);
+    }
 
     // The mask clamps to the defined kinds.
     CHECK(collision.contact_debug_mask() == CollisionWorld::kContactDebugMaskAll);

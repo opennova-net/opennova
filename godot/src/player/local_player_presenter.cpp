@@ -93,6 +93,11 @@ void mirror_viewport_quality(Viewport *p_surface, SubViewport *p_target) {
 					p_surface->get_positional_shadow_atlas_quadrant_subdiv(quadrant));
 		}
 	}
+	// The viewport_debug_draw row (F3 Render, MCP) writes the surface; the
+	// world it names is drawn here.
+	if (p_target->get_debug_draw() != p_surface->get_debug_draw()) {
+		p_target->set_debug_draw(p_surface->get_debug_draw());
+	}
 }
 
 // The thermal view feed, the NVG feed's sibling: the sim's two resolved gates

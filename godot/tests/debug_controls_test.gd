@@ -181,6 +181,9 @@ func test_values_validate_and_normalize_before_the_owner() -> void:
 	assert_null(DebugControlTable.normalize_value(mode, 99))
 	assert_null(DebugControlTable.normalize_value(mode, -1))
 	assert_null(DebugControlTable.normalize_value(mode, true))
+	assert_null(DebugControlTable.normalize_value(mode, 1.5))
+	assert_eq(DebugControlTable.normalize_value(mode, 4.0), 4,
+			"an integral float (a JSON number over MCP) is an enum index")
 
 	# The viewport row is a live device row in this in-tree harness.
 	var viewport := get_viewport()
@@ -409,6 +412,7 @@ func test_the_shell_verbs_reach_the_host() -> void:
 	assert_eq(int(paused.error), OK, "the transport row pauses the runtime")
 	assert_false(_runtime.is_playing())
 	assert_eq(int(_controls.invoke(&"runtime_transport", ["resume"], true).error), OK)
+	assert_eq(_host.resume_calls, 1, "resume runs the host's resume leg")
 	assert_true(_runtime.is_playing())
 
 

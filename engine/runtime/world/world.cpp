@@ -241,7 +241,7 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
-    lap.mark(devtools::Slot::SIM_AI_COLLISION);
+    lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
     // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
     const size_t pool0 = world.registry.pool_capacity(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
@@ -255,7 +255,7 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
             claim_standing_vehicle(world, *live);
     }
-    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
     // The flag and bay touches the bodies' movement resolves recorded run
     // inline in retail's resolver, whose handler returns at once off the
     // authority; the authority consumes them before the pass ends.
@@ -372,7 +372,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
 }
 
 void World::update_all_entities(const TickContext &ctx) {
-    const devtools::ProfileScope pass_scope(profile, devtools::Slot::SIM_WORLD_AI);
+    const devtools::ProfileScope pass_scope(profile, devtools::Slot::SIM_UPDATE_ENTITIES);
     devtools::ProfileLap lap(profile);
     const bool is_authority = ctx.is_authority;
     ai.is_authority = is_authority;
@@ -407,7 +407,7 @@ void World::update_all_entities(const TickContext &ctx) {
                     ((driver->flags | driver->engine_flags) & kEntityFlagPlayer) != 0)
                 update_pool1_slot(*row, ctx);
         }
-        lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+        lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
         finish_entity_update(*this, ctx, lap);
         return;
     }
@@ -447,19 +447,19 @@ void World::update_all_entities(const TickContext &ctx) {
         if ((row = registry.get(handle)) != nullptr) update_pool1_slot(*row, ctx);
     }
     throwables.compact();
-    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
     pose_emplacement_attachments(*this);
     // Static attachment poses can change after AI collision queries. The
     // projectile/out.destruction half of the tick starts a fresh matrix-view
     // epoch so it never inherits a pre-attachment target transform.
     if (collision != nullptr) collision->reset_query_view_cache();
-    lap.mark(devtools::Slot::SIM_WORLD_ATTACHMENTS);
+    lap.mark(devtools::Slot::SIM_UPDATE_ATTACHMENTS);
 
     // [orig: Entity_UpdateAllEntities @0x4C21F6 (HeliLift_UpdateAll), then the
     //  facial interpolation @0x4C21FB]
     teammates.tick(*this);
     facials.tick(*this);
-    lap.mark(devtools::Slot::SIM_AI_REACTIONS);
+    lap.mark(devtools::Slot::SIM_UPDATE_HELILIFT_FACES);
     // The precipitation fall: while it rains every drop slot lowers by the
     // kind's per-tick amount, once per ENTITY update — retail runs it inside
     // Entity_UpdateAllEntities after the pool-1 walk and before
@@ -473,7 +473,7 @@ void World::update_all_entities(const TickContext &ctx) {
     if (cached.local_player.valid())
         weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
                                         weather.precipitation_kind);
-    lap.mark(devtools::Slot::SIM_WORLD_THROWABLES);
+    lap.mark(devtools::Slot::SIM_UPDATE_PRECIPITATION);
     // Live out.rounds, their explosions and the death pieces step on the host
     // and on an explicitly configured MP non-authority client. The latter is
     // the retail tag-2 visual re-sim path; every decoded/predicted round
@@ -497,7 +497,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // reactions queue below dispatches on the next tick.
     // [orig: Entity_UpdateAllEntities @0x4C2226 (j_AIEvent_ProcessTimedEntries)]
     ai.events.process_timed(ai, *this);
-    lap.mark(devtools::Slot::SIM_AI_EVENTS);
+    lap.mark(devtools::Slot::SIM_UPDATE_PIECES_EVENTS);
     // The weather particles and emitters [orig: @0x4C222B / @0x4C2235].
     rotor_wash.tick();
     // The projectiles, then the explosion queue once per frame [orig: the
@@ -507,7 +507,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // callbacks push (the kz death chain) land next tick, exactly like the
     // original's post-reset writes.
     if (round_host) round_sim.tick(*this, tables.terrain, ai.collision);
-    lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
+    lap.mark(devtools::Slot::SIM_UPDATE_PROJECTILES);
     if (round_host)
         explosions.process(*this, ai.collision, tables.terrain, water_z, out.destruction);
     ai.apply_round_hits(*this);
@@ -517,7 +517,7 @@ void World::update_all_entities(const TickContext &ctx) {
     tick_item_event_pool(*this, 2);
     doors.tick(*this);
     tick_item_event_pool(*this, 3);
-    lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
+    lap.mark(devtools::Slot::SIM_UPDATE_EXPLOSIONS);
     finish_entity_update(*this, ctx, lap);
 }
 
@@ -540,7 +540,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
 TickContext World::begin_tick(bool is_authority, TickPhase phase) {
     // Every part of the tick lands on SIM_SERVER_WORLD for every role (the
     // server tick, the joiner's local tick and the bare no-net tick alike);
-    // the phases below lap onto the SIM_WORLD_* rows.
+    // the phases below lap onto the SIM_WORLD_* / SIM_UPDATE_* rows.
     const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
     devtools::ProfileLap lap(profile);
     // The WAC player cache refreshes at bytecode entry, not at this tick
@@ -641,7 +641,7 @@ void World::pump_weapon_actions() {
     // A joiner's borrowers are its replica rows: it walks its own replica slots
     // (tick_replica_weapon_slots) and leaves their links alone here.
     if (rules.mp_session && !rules.projectile_authority) return;
-    const devtools::ProfileScope scope(profile, devtools::Slot::SIM_WORLD_WEAPONS);
+    const devtools::ProfileScope scope(profile, devtools::Slot::SIM_WEAPON_WALK);
     // Every WeaponAction_ProcessFrame reads the frame's `tick`, which the
     // entity pass's tail has already stepped past.
     // [orig: current_tick @0x24C1968, advanced at the head of the frame @0x5265B4]

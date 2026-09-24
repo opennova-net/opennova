@@ -34,6 +34,14 @@ Viewport *DebugShellHost::viewport() {
 	return nullptr;
 }
 
+Error DebugShellHost::resume() {
+	Error out = ERR_UNAVAILABLE;
+	if (GDVIRTUAL_CALL(_resume, out)) {
+		return out;
+	}
+	return ERR_UNAVAILABLE;
+}
+
 Error DebugShellHost::return_to_menu() {
 	Error out = ERR_UNAVAILABLE;
 	if (GDVIRTUAL_CALL(_return_to_menu, out)) {
@@ -55,12 +63,14 @@ void DebugShellHost::_bind_methods() {
 	GDVIRTUAL_BIND(_runtime);
 	GDVIRTUAL_BIND(_player_presenter);
 	GDVIRTUAL_BIND(_viewport);
+	GDVIRTUAL_BIND(_resume);
 	GDVIRTUAL_BIND(_return_to_menu);
 	GDVIRTUAL_BIND(_has_debug_authority);
 	ClassDB::bind_method(D_METHOD("world"), &DebugShellHost::world);
 	ClassDB::bind_method(D_METHOD("runtime"), &DebugShellHost::runtime);
 	ClassDB::bind_method(D_METHOD("player_presenter"), &DebugShellHost::player_presenter);
 	ClassDB::bind_method(D_METHOD("viewport"), &DebugShellHost::viewport);
+	ClassDB::bind_method(D_METHOD("resume"), &DebugShellHost::resume);
 	ClassDB::bind_method(D_METHOD("return_to_menu"), &DebugShellHost::return_to_menu);
 	ClassDB::bind_method(D_METHOD("has_debug_authority"), &DebugShellHost::has_debug_authority);
 }

@@ -144,6 +144,8 @@ add_library(${TARGET_NAME} SHARED
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
+    devtools/dev_tools_overlay.cpp
+    devtools/dev_tools_windows.cpp
     devtools/debug_arg_spec.cpp
     devtools/debug_control_records.cpp
     devtools/debug_shell_host.cpp
@@ -172,7 +174,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_bind.cpp
     simulation/simulation_frame.cpp
     simulation/simulation_frame_stats.cpp
-    simulation/simulation_ai_debug.cpp
+    simulation/simulation_devtools.cpp
     simulation/simulation_net.cpp
     simulation/simulation_occlusion.cpp
     simulation/simulation_player.cpp

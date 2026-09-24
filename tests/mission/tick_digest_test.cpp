@@ -27,6 +27,7 @@
 #include "common/boot_file_source.h"
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
+#include "common/synthetic_mission.h"
 
 #include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -164,52 +165,10 @@ void hash_world(Digest &d, const w::World &world) {
 	d.value(result.team_scores[1]);
 }
 
-// --- the synthetic mission ---------------------------------------------------
-
-bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, int32_t yaw) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Organic;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	e.yaw = yaw;
-	e.team = team;
-	return e;
-}
-
-bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Item;
-	e.type_id = type_id;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	return e;
-}
+// --- the synthetic mission (tests/common/synthetic_mission.h) ------------------
 
 using test_boot::source_over;
-
-// Two opposing squads plus a few items, and a WAC layer whose writes are part
-// of the chain. The kernel's own player is the one human the bare tick
-// counts, so neither the WAC tick nor the entity update holds.
-bms::File synthetic_mission() {
-	bms::File m{};
-	int32_t next_id = 20;
-	for (int i = 0; i < 6; ++i) {
-		m.organics.push_back(organic((10 + i * 4) << 16, 10 << 16, 0, /*team=*/1, 90));
-		m.organics.back().id = next_id++;
-	}
-	for (int i = 0; i < 6; ++i) {
-		m.organics.push_back(organic((10 + i * 4) << 16, 60 << 16, 0, /*team=*/2, 270));
-		m.organics.back().id = next_id++;
-	}
-	m.items.push_back(item(/*type_id=*/164, 30 << 16, 35 << 16, 3 << 16));
-	m.items.back().id = next_id++;
-	m.items.push_back(item(/*type_id=*/164, 40 << 16, 35 << 16, 3 << 16));
-	m.items.back().id = next_id++;
-	m.events.push_back(bms::Event{});
-	return m;
-}
+using test_mission::synthetic_mission;
 
 bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	std::map<std::string, std::string> files;

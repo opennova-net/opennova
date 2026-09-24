@@ -3235,10 +3235,36 @@ add_test(NAME playersav_weapon_sav COMMAND playersav_weapon_sav_test)
 add_executable(frame_stats_board_test devtools/frame_stats_board_test.cpp)
 target_link_libraries(frame_stats_board_test PRIVATE opennova_runtime)
 add_test(NAME frame_stats_board COMMAND frame_stats_board_test)
+# The Stats window's row tree against the local role's real tick laps.
+add_executable(tick_profile_rows_test devtools/tick_profile_rows_test.cpp)
+target_link_libraries(tick_profile_rows_test PRIVATE opennova_test_rig)
+target_include_directories(tick_profile_rows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tick_profile_rows_test PRIVATE cxx_std_17)
+add_test(NAME tick_profile_rows COMMAND tick_profile_rows_test)
+# The F3 Script window's engine report over the synthetic mission.
+add_executable(script_debug_report_test mission/script_debug_report_test.cpp)
+target_link_libraries(script_debug_report_test PRIVATE opennova_test_rig)
+target_include_directories(script_debug_report_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(script_debug_report_test PRIVATE cxx_std_17)
+add_test(NAME script_debug_report COMMAND script_debug_report_test)
+# The F3 Net window's traffic counter over the datagram-socket seam.
+add_executable(counting_datagram_socket_test npwire/counting_datagram_socket_test.cpp)
+target_link_libraries(counting_datagram_socket_test PRIVATE opennova_net)
+add_test(NAME counting_datagram_socket COMMAND counting_datagram_socket_test)
 if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)
     add_test(NAME devtools COMMAND devtools_test)
+    # The inspection windows added after the ADR 0039 core (Log, Script,
+    # Render, Particles, Audio, Player, Net) and the Game-view overlays.
+    add_executable(devtools_windows_test devtools/devtools_windows_test.cpp)
+    target_link_libraries(devtools_windows_test PRIVATE opennova_runtime opennova_imgui)
+    target_include_directories(devtools_windows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME devtools_windows COMMAND devtools_windows_test)
+    add_executable(devtools_overlay_test devtools/devtools_overlay_test.cpp)
+    target_link_libraries(devtools_overlay_test PRIVATE opennova_runtime opennova_imgui)
+    target_include_directories(devtools_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME devtools_overlay COMMAND devtools_overlay_test)
 endif()
 
 # Mission-authored lndm callbacks, independent of thrown AT mines.

@@ -1,11 +1,13 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/overlay_canvas.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
 // (third_party/imgui/CMakeLists.txt): a bump of one side without the other
@@ -52,6 +54,113 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
 }
 
 }  // namespace
+
+const char *menu_group_label(MenuGroup group) {
+	switch (group) {
+		case MenuGroup::Workspace:
+			return "Workspace";
+		case MenuGroup::World:
+			return "World";
+		case MenuGroup::Sim:
+			return "Simulation";
+		case MenuGroup::Render:
+			return "Render";
+		case MenuGroup::Net:
+			return "Network";
+		case MenuGroup::Tools:
+			return "Tools";
+		case MenuGroup::Help:
+			return "Help";
+	}
+	return "";
+}
+
+void ImGuiPass::register_overlay(OverlayLayer &layer) {
+	overlays_.push_back(&layer);
+}
+
+bool ImGuiPass::any_overlay_enabled() const {
+	for (const OverlayLayer *layer : overlays_) {
+		if (layer->enabled()) return true;
+	}
+	return false;
+}
+
+void ImGuiPass::set_overlay_enabled(OverlayLayer &layer, bool enabled) {
+	if (layer.enabled_ == enabled) return;
+	layer.enabled_ = enabled;
+	if (!enabled) layer.stats_ = OverlayLayerStats{};
+	layer.on_enabled(enabled);
+}
+
+void ImGuiPass::draw_overlays(OverlayCanvas &canvas) {
+	std::vector<OverlayLayer *> order;
+	for (OverlayLayer *layer : overlays_) {
+		if (layer->enabled()) order.push_back(layer);
+	}
+	std::stable_sort(order.begin(), order.end(), [](const OverlayLayer *a, const OverlayLayer *b) {
+		return a->draw_priority() < b->draw_priority();
+	});
+	for (OverlayLayer *layer : order) {
+		canvas.begin_layer(layer->line_budget(), layer->text_budget());
+		layer->draw(canvas);
+		layer->stats_ = canvas.end_layer();
+	}
+}
+
+void ImGuiPass::draw_overlays_menu() {
+	if (overlays_.empty() || !ImGui::BeginMenu("Overlays")) {
+		return;
+	}
+	// One section per group, in the order the groups first registered.
+	std::vector<const char *> groups;
+	for (const OverlayLayer *layer : overlays_) {
+		const bool seen = std::any_of(groups.begin(), groups.end(),
+				[&](const char *g) { return std::strcmp(g, layer->group()) == 0; });
+		if (!seen) groups.push_back(layer->group());
+	}
+	for (const char *group : groups) {
+		ImGui::PushID(group);
+		ImGui::SeparatorText(group);
+		for (OverlayLayer *layer : overlays_) {
+			if (std::strcmp(layer->group(), group) != 0) continue;
+			bool on = layer->enabled();
+			const char *note = layer->enabled() && layer->last_stats().dropped > 0 ? "over budget" : nullptr;
+			if (ImGui::MenuItem(layer->label(), note, &on)) set_overlay_enabled(*layer, on);
+			if (layer->tooltip()[0] != '\0' &&
+					ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip | ImGuiHoveredFlags_DelayNormal)) {
+				ImGui::SetTooltip("%s", layer->tooltip());
+			}
+		}
+		ImGui::PopID();
+	}
+	ImGui::Separator();
+	if (ImGui::MenuItem("All off")) {
+		for (OverlayLayer *layer : overlays_) set_overlay_enabled(*layer, false);
+	}
+	ImGui::TextDisabled("Overlays draw over the Game view while F3 is open.");
+	ImGui::EndMenu();
+}
+
+void ImGuiPass::post_status(std::string text, StatusLevel level) {
+	status_.push_front(StatusLine{std::move(text), level, -1.0});
+	while (static_cast<int>(status_.size()) > kStatusHistory) {
+		status_.pop_back();
+	}
+}
+
+const char *ImGuiPass::status_text() const {
+	return status_.empty() ? "" : status_.front().text.c_str();
+}
+
+StatusLevel ImGuiPass::status_level() const {
+	return status_.empty() ? StatusLevel::Info : status_.front().level;
+}
+
+const char *ImGuiPass::status_history_text(int index) const {
+	if (index < 0 || index >= status_history_count()) return "";
+	return status_[static_cast<size_t>(index)].text.c_str();
+}
 
 ImGuiAbi imgui_abi() {
 	return ImGuiAbi{IMGUI_VERSION, static_cast<int>(sizeof(ImGuiIO)),
@@ -150,26 +259,7 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 	ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 
-	if (ImGui::BeginMainMenuBar()) {
-		if (ImGui::BeginMenu("Windows")) {
-			for (auto &window : windows_) {
-				if (window->is_closeable()) {
-					ImGui::MenuItem(window->title(), nullptr, &window->open);
-				} else {
-					bool selected = true;
-					ImGui::BeginDisabled();
-					ImGui::MenuItem(window->title(), nullptr, &selected);
-					ImGui::EndDisabled();
-				}
-			}
-			ImGui::Separator();
-			if (ImGui::MenuItem("Reset layout")) {
-				layout_reset_pending_ = true;
-			}
-			ImGui::EndMenu();
-		}
-		ImGui::EndMainMenuBar();
-	}
+	draw_menu_bar();
 	sync_visibility();
 
 	for (int i = 0; i < static_cast<int>(windows_.size()); ++i) {
@@ -246,7 +336,103 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 
 	sync_visibility();
+	if (close_requested_) {
+		close_requested_ = false;
+		set_open(false);
+	}
 	return true;
+}
+
+void ImGuiPass::draw_menu_bar() {
+	if (!ImGui::BeginMainMenuBar()) {
+		return;
+	}
+	const auto menu_item = [](Window &window) {
+		if (window.is_closeable()) {
+			ImGui::MenuItem(window.title(), nullptr, &window.open);
+		} else {
+			bool selected = true;
+			ImGui::BeginDisabled();
+			ImGui::MenuItem(window.title(), nullptr, &selected);
+			ImGui::EndDisabled();
+		}
+	};
+	if (ImGui::BeginMenu("Windows")) {
+		// One section per group, in MenuGroup order and registration order
+		// within it; Help windows have their own menu.
+		for (int g = 0; g < kMenuGroupCount; ++g) {
+			const MenuGroup group = static_cast<MenuGroup>(g);
+			if (group == MenuGroup::Help) continue;
+			bool header = false;
+			for (auto &window : windows_) {
+				if (window->menu_group() != group) continue;
+				if (!header && group != MenuGroup::Workspace) {
+					ImGui::SeparatorText(menu_group_label(group));
+				}
+				header = true;
+				menu_item(*window);
+			}
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Reset layout")) {
+			layout_reset_pending_ = true;
+		}
+		if (ImGui::MenuItem("Close dev tools", "F3")) {
+			close_requested_ = true;
+		}
+		ImGui::EndMenu();
+	}
+	draw_overlays_menu();
+	bool has_help = false;
+	for (const auto &window : windows_) {
+		has_help = has_help || window->menu_group() == MenuGroup::Help;
+	}
+	if (has_help && ImGui::BeginMenu("Help")) {
+		for (auto &window : windows_) {
+			if (window->menu_group() == MenuGroup::Help) menu_item(*window);
+		}
+		ImGui::EndMenu();
+	}
+	draw_status();
+	ImGui::EndMainMenuBar();
+}
+
+void ImGuiPass::draw_status() {
+	if (status_.empty()) {
+		return;
+	}
+	StatusLine &line = status_.front();
+	const double now = ImGui::GetTime();
+	if (line.shown_at < 0.0) {
+		line.shown_at = now;
+	}
+	const double age = now - line.shown_at;
+	// Full strength for most of its life, then a one-second fade; a faded
+	// line keeps a dim marker so the history stays one hover away.
+	float alpha = 1.0f;
+	if (age > kStatusSeconds) {
+		alpha = 0.25f;
+	} else if (age > kStatusSeconds - 1.0) {
+		alpha = std::max(0.25f, static_cast<float>(kStatusSeconds - age));
+	}
+	const ImVec4 color = line.level == StatusLevel::Error
+			? ImVec4(1.0f, 0.45f, 0.35f, alpha)
+			: ImVec4(0.65f, 0.9f, 0.65f, alpha);
+	const float width = ImGui::CalcTextSize(line.text.c_str()).x;
+	const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+	const float x = std::max(ImGui::GetCursorPosX() + 16.0f, right - width - 8.0f);
+	ImGui::SetCursorPosX(x);
+	ImGui::TextColored(color, "%s", line.text.c_str());
+	if (ImGui::IsItemHovered() && ImGui::BeginTooltip()) {
+		for (const StatusLine &entry : status_) {
+			if (entry.level == StatusLevel::Error) {
+				ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f), "%s", entry.text.c_str());
+			} else {
+				ImGui::TextUnformatted(entry.text.c_str());
+			}
+		}
+		ImGui::EndTooltip();
+	}
 }
 
 }  // namespace opennova::devtools

@@ -1,6 +1,9 @@
 #include <runtime/devtools/ai_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
+
+#include <base/io/fixed.h>
 
 #include <imgui.h>
 
@@ -49,14 +52,37 @@ void push_line(std::vector<std::string> &lines, const char *fmt, ...) {
 
 }  // namespace
 
+AiWindow::AiWindow(EntitiesWindow &entities) : entities_(entities) {
+	using Element = AiOverlayLayer::Element;
+	const Element elements[kLayerCount] = {Element::Labels, Element::Routes, Element::Targets,
+			Element::Rings};
+	for (int i = 0; i < kLayerCount; ++i) {
+		layers_[static_cast<size_t>(i)] = std::make_unique<AiOverlayLayer>(snapshot_, entities_, elements[i]);
+	}
+}
+
+void AiWindow::request_kill_group(int32_t group) {
+	entities_.enqueue_request({control_id::kKillGroup, {ControlArg::integer(group)}});
+}
+
+bool AiWindow::any_layer_enabled() const {
+	for (const auto &layer : layers_) {
+		if (layer->enabled()) return true;
+	}
+	return false;
+}
+
 void AiWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
 		// Drop the records so a closed window holds nothing; the embedder's
-		// needs_ai_debug gate stops the pushes on the same edge.
-		snapshot_ = AiDebugSnapshot{};
+		// needs_ai_debug gate stops the pushes on the same edge. A Game-view
+		// layer still on keeps the record it draws.
+		if (!any_layer_enabled()) {
+			snapshot_ = AiDebugSnapshot{};
+			format_snapshot();
+		}
 		detail_ = EntityDetailSnapshot{};
-		format_snapshot();
 		format_detail();
 	}
 }
@@ -108,6 +134,7 @@ const char *AiWindow::detail_line(int row) const {
 void AiWindow::format_snapshot() {
 	group_rows_.clear();
 	group_alerts_.clear();
+	group_ids_.clear();
 	channel_rows_.clear();
 	if (!snapshot_.valid) {
 		counters_ = "No world.";
@@ -116,7 +143,7 @@ void AiWindow::format_snapshot() {
 	const world::inspect::AiSystemCounters &c = snapshot_.report.counters;
 	char buf[192];
 	std::snprintf(buf, sizeof(buf),
-			"brains %d  events %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls",
+			"brains %d  events %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls (Script window)",
 			c.brain_count, c.event_count,
 			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
             static_cast<unsigned long long>(c.runtime_gap_calls));
@@ -127,6 +154,7 @@ void AiWindow::format_snapshot() {
 				alert_name(g.alert), g.live_count, g.initial_count);
 		group_rows_.emplace_back(buf);
 		group_alerts_.push_back(g.alert);
+		group_ids_.push_back(g.id);
 	}
 	channel_rows_.reserve(snapshot_.report.channels.size());
 	for (const world::inspect::AiNavChannelRow &ch : snapshot_.report.channels) {
@@ -235,32 +263,21 @@ void AiWindow::draw_detail_pane() {
 }
 
 void AiWindow::draw_tables() {
-    if (ImGui::CollapsingHeader("Mission runtime gaps")) {
-        for (const auto &gap : snapshot_.report.runtime_gaps) {
-            const auto &site = gap.origin;
-            const char *kind = "unknown";
-            switch (site.kind) {
-                case world::RuntimeGapKind::WacCommand: kind = "WAC command"; break;
-                case world::RuntimeGapKind::WacOpcode: kind = "WAC opcode"; break;
-                case world::RuntimeGapKind::WacInstructionLimit: kind = "WAC instruction limit"; break;
-                case world::RuntimeGapKind::BmsAction: kind = "BMS action"; break;
-            }
-            ImGui::Text("%s %d/%d, event %d, site %d: %llu calls (ticks %u..%u)",
-                    kind, site.code, site.subcode, site.event, site.site,
-                    static_cast<unsigned long long>(gap.count), gap.first_tick, gap.last_tick);
-            if (!site.source.empty()) ImGui::TextDisabled("%s:%d", site.source.c_str(), site.line);
-            ImGui::TextDisabled("arguments: %d, %d, %d, %d", gap.arguments[0],
-                    gap.arguments[1], gap.arguments[2], gap.arguments[3]);
-        }
-        if (snapshot_.report.runtime_gaps.empty()) ImGui::TextDisabled("No runtime gaps observed.");
-    }
 	ImGui::SeparatorText("Groups");
 	if (group_rows_.empty()) {
 		ImGui::TextDisabled("No groups with members.");
 	} else {
+		// Kill is the kill_group row (the one EntityCommands mutator MCP
+		// drives), queued through the Entities channel and its authority fact.
 		for (size_t i = 0; i < group_rows_.size(); ++i) {
+			ImGui::PushID(static_cast<int>(i));
+			ImGui::BeginDisabled(!entities_.authority());
+			if (ImGui::SmallButton("Kill")) request_kill_group(group_ids_[i]);
+			ImGui::EndDisabled();
+			ImGui::SameLine();
 			ImGui::TextColored(alert_color(group_alerts_[i]), "%s",
 					group_rows_[i].c_str());
+			ImGui::PopID();
 		}
 	}
 	ImGui::SeparatorText("Routes");
@@ -272,11 +289,81 @@ void AiWindow::draw_tables() {
 	}
 }
 
-void AiWindow::draw(ImGuiPass &, uint64_t) {
+void AiWindow::draw(ImGuiPass &pass, uint64_t) {
+	// The Game-view layers, toggled here or from the Overlays menu.
+	ImGui::TextUnformatted("Game view:");
+	for (auto &layer : layers_) {
+		ImGui::SameLine();
+		bool on = layer->enabled();
+		if (ImGui::Checkbox(layer->label(), &on)) pass.set_overlay_enabled(*layer, on);
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", layer->tooltip());
+	}
 	ImGui::TextUnformatted(counters_.c_str());
 	if (!snapshot_.valid) return;
 	draw_detail_pane();
+	char header[48];
+	std::snprintf(header, sizeof(header), "Brains (%d)###brains", brain_count());
+	if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
+		draw_brains();
+	}
 	draw_tables();
+}
+
+// One row per brain in the record (the report's cap), coloured by alert;
+// a click selects the brain's entity, which fills the Selected brain pane.
+void AiWindow::draw_brains() {
+	const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+			ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
+			ImGuiTableFlags_SizingFixedFit;
+	if (!ImGui::BeginTable("brains", 7, flags, ImVec2(0.0f, 220.0f))) return;
+	ImGui::TableSetupScrollFreeze(1, 1);
+	ImGui::TableSetupColumn("Brain");
+	ImGui::TableSetupColumn("Grp");
+	ImGui::TableSetupColumn("Alert");
+	ImGui::TableSetupColumn("Position");
+	ImGui::TableSetupColumn("State");
+	ImGui::TableSetupColumn("Target");
+	ImGui::TableSetupColumn("Route");
+	ImGui::TableHeadersRow();
+	const std::vector<world::inspect::AiOverlayRow> &rows = snapshot_.report.rows;
+	const uint16_t selected = entities_.selected_handle();
+	ImGuiListClipper clipper;
+	clipper.Begin(static_cast<int>(rows.size()));
+	while (clipper.Step()) {
+		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			const world::inspect::AiOverlayRow &r = rows[static_cast<size_t>(i)];
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::PushID(i);
+			const ImVec4 color = r.alive ? alert_color(r.alert) : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+			ImGui::PushStyleColor(ImGuiCol_Text, color);
+			if (ImGui::Selectable(r.name.empty() ? "(unnamed)" : r.name.c_str(), r.handle == selected,
+						ImGuiSelectableFlags_SpanAllColumns)) {
+				entities_.select_handle(r.handle);
+			}
+			ImGui::TableSetColumnIndex(1);
+			ImGui::Text("G%02d", r.group_id);
+			ImGui::TableSetColumnIndex(2);
+			ImGui::TextUnformatted(r.alive ? alert_name(r.alert) : "DEAD");
+			ImGui::TableSetColumnIndex(3);
+			ImGui::Text("%.1f %.1f %.1f", r.pos[0] / io::kFp16OneD, r.pos[1] / io::kFp16OneD,
+					r.pos[2] / io::kFp16OneD);
+			ImGui::TableSetColumnIndex(4);
+			ImGui::TextUnformatted(r.state_name.empty() ? "?" : r.state_name.c_str());
+			ImGui::TableSetColumnIndex(5);
+			ImGui::TextUnformatted(!r.target_valid ? "-" : r.target_name.empty() ? "?" : r.target_name.c_str());
+			ImGui::TableSetColumnIndex(6);
+			if (r.wp_channel > 0) {
+				ImGui::Text("ch %d node %d", r.wp_channel, r.wp_node);
+			} else {
+				ImGui::TextUnformatted("-");
+			}
+			ImGui::PopStyleColor();
+			ImGui::PopID();
+		}
+	}
+	clipper.End();
+	ImGui::EndTable();
 }
 
 }  // namespace opennova::devtools

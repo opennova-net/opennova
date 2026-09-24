@@ -8,7 +8,10 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
 
 #include "devtools/debug_control_table.h"
 #include "devtools/frame_stats.h"
@@ -24,6 +27,9 @@
 #endif
 
 namespace godot {
+
+class Camera3D;
+class GameWorld;
 
 class Simulation;
 class SubViewport;
@@ -136,6 +142,27 @@ public:
 	// composes.
 	static Dictionary engine_log_after(int64_t p_cursor);
 
+	// The workspace by name, for probes and MCP automation (empty / false in
+	// the release flavour): the windows by title and the overlay layers by
+	// "Group/Label", opened and toggled exactly as the Windows and Overlays
+	// menus do; an overlay's last draw as (lines, texts, dropped); and the two
+	// status lines the operator reads (the menu bar's last command verdict and
+	// the Game window's session readout).
+	PackedStringArray window_titles() const;
+	bool set_window_open(const String &p_title, bool p_open);
+	PackedStringArray overlay_names() const;
+	bool set_overlay_enabled(const String &p_name, bool p_enabled);
+	Vector3i overlay_last_draw(const String &p_name) const;
+	String status_text() const;
+	String game_status_text() const;
+
+	// The overlays' projection as a test seam (both flavours; the math is the
+	// engine's header-only overlay_camera.h): a mission-frame point projected
+	// through `camera` onto its viewport, exactly as the Game-view overlays
+	// place it (NaN behind the camera). Pinned against
+	// Camera3D::unproject_position.
+	static Vector2 project_mission_point(Camera3D *p_camera, const Vector3 &p_mission_point);
+
 protected:
 	static void _bind_methods();
 
@@ -150,7 +177,7 @@ private:
 	void sync_layer_visible();
 	bool layer_visible_ = false;
 
-	void draw(int p_requested_width, int p_requested_height) override;
+	bool draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
 	void sync_game_spectator_state();
 	void apply_control_requests();
@@ -164,7 +191,42 @@ private:
 	void push_rays_snapshot();
 	void apply_physics_requests();
 	void push_physics_snapshot();
+	void push_control_catalog();
+	void push_control_states();
+	void push_game_status();
+	// The overlay feed (dev_tools_overlay.cpp): the camera and the per-tick
+	// layer records, ahead of the layout pass.
+	void push_overlay_frame();
+	// The camera the Game image's pixels come from (the presenter's stretched
+	// frame camera while live, else the surface's own); null without one.
+	Camera3D *image_camera() const;
+	bool overlay_live_ = false;
+	uint32_t overlay_wants_ = 0; // which layers' records the last frame read
+	uint64_t overlay_tick_ = static_cast<uint64_t>(-1);
+	// A Rays/Physics filter changed: the next frame re-reads the rows.
+	bool overlay_filters_dirty_ = false;
+	int64_t last_hitbox_push_ms_ = -1;
+	// The per-domain windows' records (dev_tools_windows.cpp).
+	GameWorld *loaded_world() const;
+	void push_domain_records();
+	void clear_domain_records();
+	void push_script_snapshot();
+	void push_player_snapshot();
+	void push_render_snapshot();
+	void push_particle_snapshot();
+	void push_audio_snapshot();
+	void push_net_snapshot();
+	int64_t last_script_push_ms_ = -1;
+	int64_t last_player_push_ms_ = -1;
+	int64_t last_render_push_ms_ = -1;
+	int64_t last_particle_push_ms_ = -1;
+	int64_t last_audio_push_ms_ = -1;
+	int64_t last_net_push_ms_ = -1;
 	void set_game_playing_internal(bool p_playing);
+	// The one cadence gate every record push shares: true (and the stamp
+	// moved) when p_seconds have passed since the last push, or none was made
+	// (a stamp of -1 means push on the next needy frame).
+	static bool push_due(int64_t &r_last_ms, double p_seconds);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
 	bool open_ = false; // the last state the shell was told about
@@ -191,6 +253,14 @@ private:
 	int64_t last_rays_push_ms_ = -1;
 	bool rays_recording_ = false;
 	int64_t last_physics_push_ms_ = -1;
+	bool contacts_recording_ = false;
+	int64_t last_control_state_push_ms_ = -1;
+	std::vector<const char *> control_ids_; // the rows the last push read
+	int64_t last_status_push_ms_ = -1;
+	// The display frame the status readout averages between pushes.
+	double frame_ms_sum_ = 0.0;
+	double frame_ms_peak_ = 0.0;
+	int64_t frame_ms_count_ = 0;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

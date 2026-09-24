@@ -34,6 +34,7 @@ public:
 	explicit EntityPropertiesWindow(EntitiesWindow &entities) : entities_(entities) {}
 
 	const char *title() const override { return "Entity Properties"; }
+	MenuGroup menu_group() const override { return MenuGroup::World; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::RightBottom;
 	}
@@ -65,6 +66,9 @@ public:
 	// the AIData bit while a wire session is live.
 	void toggle_item_attrib(uint32_t bit);
 	void toggle_item_attrib2(uint32_t bit);
+	// Seat an occupant (by SSN) in the selected vehicle (the crew_vehicle
+	// row, through the Entities window's queue).
+	void request_crew_vehicle(int32_t occupant_ssn, int32_t vehicle_ssn);
 
 private:
 	void toggle_bit(bool second_word, uint32_t bit);
@@ -81,6 +85,7 @@ private:
 	uint16_t seeded_handle_ = 0xFFFF; // the row the action edits were seeded from
 	int32_t health_edit_ = 0;
 	float pos_edit_[3] = {0.0f, 0.0f, 0.0f};
+	int occupant_ssn_edit_ = 0;
 	float yaw_edit_ = 0.0f;
 	float pitch_edit_ = 0.0f;
 	bool shown_ = false;

@@ -6,23 +6,8 @@
 
 namespace opennova::devtools {
 
-namespace {
-
-// The contact-kind palette (the engine's, in ContactDebugKind enum order):
-// the swatch beside each kind row.
-constexpr float kKindColors[kContactKindCount][3] = {
-	{1.0f, 0.35f, 0.15f}, // Projectile hit
-	{1.0f, 0.4f, 0.7f},   // Knife hit
-	{1.0f, 0.7f, 0.2f},   // Move contact
-	{0.9f, 0.3f, 1.0f},   // Vehicle hull
-	{0.75f, 0.6f, 0.4f},  // Terrain hit
-	{0.3f, 0.9f, 1.0f},   // Water hit
-};
-
-}  // namespace
 
 void PhysicsWindow::on_visibility(bool visible) {
-	shown_ = visible;
 	if (!visible) {
 		// Drop the snapshot so a closed window holds nothing; the embedder's
 		// needs_physics_snapshot gate stops the pushes on the same edge.
@@ -33,9 +18,8 @@ void PhysicsWindow::on_visibility(bool visible) {
 
 void PhysicsWindow::set_snapshot(const PhysicsSnapshot &snapshot) {
 	snapshot_ = snapshot;
-	// Mirror the authoritative state into the edit controls: a click flips
+	// Mirror the authoritative mask into the checkboxes: a click flips
 	// locally and queues its request, the next push confirms it here.
-	capture_edit_ = snapshot_.capturing;
 	mask_edit_ = snapshot_.kind_mask;
 	format_rows();
 }
@@ -76,18 +60,36 @@ bool PhysicsWindow::take_request(PhysicsRequest &request) {
 }
 
 void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
-	(void)pass;
 	(void)frame_index;
+	bool contacts_on = contacts_layer_.enabled();
+	if (ImGui::Checkbox("Show contacts in Game view", &contacts_on)) {
+		pass.set_overlay_enabled(contacts_layer_, contacts_on);
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", contacts_layer_.tooltip());
+	ImGui::SameLine();
+	bool hitboxes_on = hitbox_layer_.enabled();
+	if (ImGui::Checkbox("Show hit meshes", &hitboxes_on)) pass.set_overlay_enabled(hitbox_layer_, hitboxes_on);
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", hitbox_layer_.tooltip());
+	if (hitbox_record_.valid) {
+		size_t faces = 0;
+		int64_t authored = 0;
+		for (const auto &e : hitbox_record_.report.entities) {
+			faces += e.faces.size();
+			authored += e.face_total;
+		}
+		ImGui::Text("hit meshes: %d bodies, %zu / %lld faces drawn, %d person sections",
+				static_cast<int>(hitbox_record_.report.entities.size()), faces,
+				static_cast<long long>(authored), static_cast<int>(hitbox_record_.report.organics.size()));
+	}
 	if (!snapshot_.valid) {
 		ImGui::TextUnformatted("No collision state pushed (load a mission).");
 		return;
 	}
 
-	if (ImGui::Checkbox("Capture hits", &capture_edit_)) {
-		enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, capture_edit_ ? 1 : 0});
+	ImGui::TextUnformatted(snapshot_.capturing ? "Capturing hits" : "Capture idle");
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("The contact capture records while this window shows.");
 	}
-	ImGui::SameLine();
-	ImGui::TextUnformatted(snapshot_.capturing ? "(capturing)" : "(idle)");
 	ImGui::SameLine();
 	if (ImGui::Button("Clear")) {
 		enqueue_request({PhysicsRequest::Kind::Clear, 0});
@@ -123,8 +125,8 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 			}
 			ImGui::SameLine();
 			ImGui::ColorButton("##swatch",
-					ImVec4(kKindColors[i][0], kKindColors[i][1],
-							kKindColors[i][2], 1.0f),
+					ImVec4(kContactKindColors[i][0], kContactKindColors[i][1],
+							kContactKindColors[i][2], 1.0f),
 					ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
 					swatch_size);
 			ImGui::SameLine();
