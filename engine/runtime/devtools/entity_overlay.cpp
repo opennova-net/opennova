@@ -10,13 +10,18 @@ namespace {
 // Label anchors sit above the entity's origin (its feet for an organic).
 constexpr float kLabelLift = 2.2f;
 
+// The BMS name, else the items.def name (an unnamed placement), else "?".
+const char *marker_name(const world::inspect::EntityMarker &m) {
+	if (!m.name.empty()) return m.name.c_str();
+	if (!m.item_name.empty()) return m.item_name.c_str();
+	return "?";
+}
+
 void marker_text(const world::inspect::EntityMarker &m, char *buf, size_t size) {
 	if (m.health_max > 0) {
-		std::snprintf(buf, size, "%s  #%d  hp %d/%d", m.name.empty() ? "?" : m.name.c_str(),
-				m.bms_id, m.health, m.health_max);
+		std::snprintf(buf, size, "%s  #%d  hp %d/%d", marker_name(m), m.bms_id, m.health, m.health_max);
 	} else {
-		std::snprintf(buf, size, "%s  #%d  hp %d", m.name.empty() ? "?" : m.name.c_str(), m.bms_id,
-				m.health);
+		std::snprintf(buf, size, "%s  #%d  hp %d", marker_name(m), m.bms_id, m.health);
 	}
 }
 

@@ -34,6 +34,7 @@ std::vector<EntityMarker> entity_markers(const World &world, const EntityMarkerQ
 		m.handle = e.handle.packed;
 		m.bms_id = e.bms_id;
 		m.name = e.name;
+		if (const std::string *item_name = world.tables.item_names.get(e.item_id)) m.item_name = *item_name;
 		m.team = static_cast<int32_t>(e.team);
 		m.health = e.health;
 		m.health_max = e.health_max;

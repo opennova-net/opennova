@@ -22,6 +22,7 @@ struct EntityMarker {
 	uint16_t handle = EntityHandle::kInvalid;
 	int32_t bms_id = 0;
 	std::string name;
+	std::string item_name; // items.def display name; empty without a def
 	int32_t team = -1;
 	int32_t health = 0;
 	int32_t health_max = 0;

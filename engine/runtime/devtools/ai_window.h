@@ -67,10 +67,9 @@ public:
 	// as a separator header.
 	int detail_line_count() const { return static_cast<int>(detail_lines_.size()); }
 	const char *detail_line(int row) const;
-	// Every brain of the report, one row each ("name | state | alert |
-	// target | route").
-	int brain_count() const { return static_cast<int>(brain_rows_.size()); }
-	const char *brain_text(int row) const;
+	// Every brain of the record, one Brains table row each (name, group,
+	// alert, state, target, route, position; a click selects it).
+	int brain_count() const { return static_cast<int>(snapshot_.report.rows.size()); }
 	// The group table's Kill button: the kill_group row, queued through the
 	// Entities window's channel (its authority fact gates the button).
 	void request_kill_group(int32_t group);
@@ -88,6 +87,7 @@ private:
 	void format_detail();
 	void draw_detail_pane();
 	void draw_tables();
+	void draw_brains();
 
 	EntitiesWindow &entities_;
 	AiDebugSnapshot snapshot_{};
@@ -96,8 +96,6 @@ private:
 
 	std::array<std::unique_ptr<AiOverlayLayer>, kLayerCount> layers_;
 	std::string counters_;
-	std::vector<std::string> brain_rows_;
-	std::vector<int> brain_alerts_;
 	std::vector<std::string> group_rows_;
 	std::vector<int> group_alerts_; // per group row, for the colored draw
 	std::vector<int32_t> group_ids_;
