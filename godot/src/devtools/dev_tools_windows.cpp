@@ -199,6 +199,7 @@ void DevTools::push_particle_snapshot() {
 		snapshot.valid = true;
 		// No per-particle bounds: the UI hot path (effect_scene.h).
 		snapshot.scene = scene->inspect(false);
+		snapshot.active_entries = effects->active_entry_count();
 		if (Simulation *sim = simulation()) snapshot.logic_tick = static_cast<uint64_t>(sim->get_logic_tick());
 	}
 	tools_->set_particle_snapshot(std::move(snapshot));
