@@ -89,9 +89,8 @@ std::vector<TerrainTileVertex> build_terrain_tile_vertices(
 
 // [orig: PolyTrn_RenderTile @ 0x60DA70, flat-key canonicalization @ 0x60DA98..0x60DAA8]
 TerrainTileCompositionRequest terrain_tile_composition_request(
-		const TerrainPatchDraw &draw, TerrainTileContentStamp content) {
+		const TerrainPatchDraw &draw) {
 	TerrainTileCompositionRequest request;
-	request.content = content;
 	if (draw.zero_height) return request; // LOD 0, zero coordinates, no mesh identity
 	request.page = {draw.sector_x * 512, draw.sector_z * 512,
 			draw.local_page_x, draw.local_page_z,

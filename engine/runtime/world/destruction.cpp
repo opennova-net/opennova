@@ -1102,6 +1102,11 @@ void process_destructible_death(World &world, Entity &target) {
                                           target.bms_id,
                                           target.spawn_origin, target.item_id,
                                           target.spawned_piece_mask, target.position});
+    // The item's footprint retires the terrain pages composed under it
+    // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
+    world.out.terrain_scorches.emit_page_invalidation(
+            int32_t(target.position.x * 65536), int32_t(target.position.y * 65536),
+            int32_t(target.bound_radius * 65536));
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).

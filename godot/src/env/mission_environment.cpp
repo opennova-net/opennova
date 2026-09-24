@@ -800,8 +800,6 @@ void MissionEnvironment::apply_terrain_uniforms(
 			to_vector3(uniforms.sky_ambient));
 	material->set_shader_parameter("u_sun_direction",
 			to_vector3(uniforms.sun_direction));
-	material->set_shader_parameter("u_tile_overlay_tint",
-			to_vector3(uniforms.tile_overlay_tint));
 	material->set_shader_parameter("u_fog_color",
 			to_vector3(uniforms.fog_color));
 	material->set_shader_parameter("u_fog_end", uniforms.fog_end);

@@ -518,9 +518,14 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
         }
         if (entity.collapse_step >= 8 && entity.death_tick == 0) {
             entity.death_tick = world.logic_tick;
-            // Retail also invalidates terrain-render cache tiles over these
-            // bounds; the current terrain renderer has no baked item cache.
-            // [orig: CVertexBuffer_RemoveFromList @0x605C10]
+            // The collapse retires the terrain pages under the item, then
+            // stamps its scorch [orig: bld2 Entity_ProcessCraneDestruction
+            // @0x43F192..0x43F1DA; cran @0x440036..0x44007E in the body at
+            // 0x43FC70 the IDB leaves undefined; both call
+            // CVertexBuffer_RemoveFromList @0x605C10].
+            world.out.terrain_scorches.emit_page_invalidation(
+                    int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
+                    int32_t(entity.bound_radius * 65536));
             // Four stack arguments: x, y, kind, GPM radius. Crane's kind 0
             // is a no-op (and consumes no CRT draw).
             // [orig: bld2 @0x43F1E3..0x43F1F1; cran @0x440087..0x440095]

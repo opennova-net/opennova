@@ -231,12 +231,15 @@ TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
 }
 
 void Simulation::drain_terrain_scorches(
-		std::vector<opennova::world::TerrainScorchEvent> &r_events) {
+		std::vector<opennova::world::TerrainScorchEvent> &r_events,
+		std::vector<opennova::world::TerrainPageInvalidationEvent> &r_invalidations) {
 	r_events.clear();
+	r_invalidations.clear();
 	if (!kernel_) return;
 	// The events carry the mission 16.16 bounds; the terrain consumer folds
 	// mission (x,y,z) -> Godot (x,z,-y) as it inserts them.
 	r_events = kernel_->world.out.terrain_scorches.pending();
+	r_invalidations = kernel_->world.out.terrain_scorches.pending_page_invalidations();
 	kernel_->world.out.terrain_scorches.clear_pending();
 }
 

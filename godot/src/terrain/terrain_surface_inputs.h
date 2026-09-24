@@ -26,7 +26,6 @@ private:
 	Ref<Texture2D> normalized_blend_texture;
 	Ref<Texture2D> paired_detail_textures[3];
 	Ref<Texture2D> paired_detail2_texture;
-	Ref<Texture2D> mipped_colormap_texture;
 	Ref<Texture2D> heightfield_normal_texture;
 	Ref<Texture2D> tile_overlay_texture;
 

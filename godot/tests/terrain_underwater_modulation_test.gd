@@ -131,16 +131,12 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_same(material.get_shader_parameter("u_tile_cache"), page_array)
 	assert_true(bool(material.get_shader_parameter("u_has_tile_cache")))
 	var requested: Dictionary = terrain.get_tile_cache_diagnostics()
-	assert_gt(int(requested["pending_jobs"]), 0)
+	assert_eq(int(requested["pending_jobs"]), 0)
 	var first: Dictionary = await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(first["ready_pages"]), 0)
 	assert_gt(int(first["compose_jobs"]), 0)
 	assert_eq(int(first["frame_compose_jobs"]), 0)
 	assert_eq(int(first["pending_jobs"]), 0)
-	# The per-frame upload budget (upload_budget, pinned below) gates REFRESH
-	# uploads only; cold layers drain unbounded so first-fill completes in a few
-	# frames (TerrainTileCacheDevice::_drain_completed). How many cold completions
-	# land in the settle frame is worker timing, so it is not asserted here.
 	assert_eq(int(first["frame_capacity_fallbacks"]), 0)
 
 	terrain.render_frame()
@@ -153,24 +149,32 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_gt(int(second["cache_hits"]), int(first["cache_hits"]))
 
 
-func test_cold_page_requests_remain_pending_until_after_the_request_frame() -> void:
+func test_visible_pages_compose_before_their_frame_draws() -> void:
 	var fixture := _make_fixture(7.0)
 	var terrain: Terrain = fixture["terrain"]
 	var cam: Camera3D = fixture["camera"]
 	cam.global_position = Vector3(64.0, 27.0, 64.0)
 
+	# Retail's first terrain frame claims no page record: every record's last
+	# use is only one frame old. (retail PolyTrn_RenderTile @ 0x60DAE4..0x60DB45)
 	terrain.render_frame()
-	var requested: Dictionary = terrain.get_tile_cache_diagnostics()
-	assert_eq(int(requested["ready_pages"]), 0,
-			"A cold render request must not compose, upload, and publish inline.")
-	assert_gt(int(requested.get("pending_jobs", 0)), 0,
-			"Cold visible pages must leave immutable work pending for the CPU queue.")
-	assert_eq(int(requested.get("frame_uploads", -1)), 0,
-			"The request frame must not drain Texture2DArray uploads.")
-	assert_eq(int(requested.get("worker_count", 0)), 2)
-	assert_eq(int(requested.get("upload_budget", 0)), 2)
-	assert_eq(int(requested.get("dimension", 0)), 256,
-			"Async publication preserves the sole highest-quality retail page path.")
+	var first_frame: Dictionary = terrain.get_tile_cache_diagnostics()
+	assert_eq(int(first_frame["ready_pages"]), 0)
+	assert_eq(int(first_frame["frame_capacity_fallbacks"]),
+			int(first_frame["frame_requests"]),
+			"Every patch of the first frame draws without a page.")
+	# The next frame composes every missing visible page inside its sweep and
+	# uploads it before the patches draw; nothing stays queued.
+	# (retail PolyTrn_RenderFrame @ 0x60F080..0x60F0E3)
+	terrain.render_frame()
+	var composed: Dictionary = terrain.get_tile_cache_diagnostics()
+	assert_gt(int(composed["frame_compose_jobs"]), 0)
+	assert_eq(int(composed["frame_uploads"]), int(composed["frame_compose_jobs"]))
+	assert_eq(int(composed.get("pending_jobs", -1)), 0)
+	assert_eq(int(composed["frame_capacity_fallbacks"]), 0)
+	assert_eq(int(composed.get("worker_count", 0)), 2)
+	assert_eq(int(composed.get("dimension", 0)), 256,
+			"The sole highest-quality retail page path.")
 
 
 func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
@@ -179,8 +183,9 @@ func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
 	var cam: Camera3D = fixture["camera"]
 	cam.global_position = Vector3(64.0, 27.0, 64.0)
 	terrain.render_frame()
+	terrain.render_frame()
 	var before_reset := terrain.get_tile_cache_diagnostics()
-	assert_gt(int(before_reset["pending_jobs"]), 0)
+	assert_gt(int(before_reset["ready_pages"]), 0)
 
 	var tile_info := TerrainTileInfo.new()
 	terrain.set_tile_info_override(tile_info)

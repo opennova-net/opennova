@@ -24,14 +24,13 @@
 // texel bytes enter the ps.1.4 math as-is. The gamma-space convention
 // (D-RMAT-7) lives in color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
-// The device-global texfilter mode applies to EVERY active stage
-// [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
-// and the reference machine runs the anisotropic mode, so every mipped
-// terrain input samples anisotropically. The colormap here is the box-mipped
-// surrogate for the per-LOD tile-cache RT (D-TERRAIN-7); the DBlendmap
-// quadrants are box-mipped in retail (created with flags 0x100001
-// [orig: PolyTrn_InitTextures @ 0x60b2c9]).
-uniform sampler2D u_colormap : filter_linear_mipmap_anisotropic, repeat_disable;
+// The device-global texfilter mode applies to every stage whose texture
+// carries the mip-filter flag bit 3 (retail CGfxDevice_ApplyRenderStates
+// per-stage loop @ 0x67e3b5..0x67e50e; apply_texture_stages @ 0x68084c..
+// 0x680870), and the reference machine runs the anisotropic mode, so every
+// detail input samples anisotropically. The DBlendmap quadrants are
+// box-mipped in retail (created with flags 0x100001, retail
+// PolyTrn_InitTextures @ 0x60b2c9).
 uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
@@ -63,15 +62,6 @@ uniform float u_detail2_density = 8.0;
 //  texcoord @ 0x609786..0x6097D6]
 uniform sampler2D u_water_noise : filter_linear, repeat_enable;
 uniform bool u_below_water = false;
-// Retail creates a mip chain but the TileBakeDot3 pass explicitly uses
-// base-level bilinear sampling with quadrant CLAMP.
-uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
-uniform bool u_has_heightfield_normal = false;
-// PolyTrn_RenderTile composes the mission .til base layer into the terrain
-// tile before the same ps.1.4 lighting chain used by runtime and ONED.
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
-uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 // Declared for the ONED authored-slot binding only; the top-tier chain does
 // not consume it (the generated coefficient map belongs to the unported
 // ps.1.1 tiers at stage 7).
@@ -191,54 +181,6 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 	vec2 minimum_uv = quadrant * 0.5 + texel * 0.5;
 	vec2 maximum_uv = (quadrant + 1.0) * 0.5 - texel * 0.5;
 	return clamp(uv, minimum_uv, maximum_uv);
-}
-
-vec3 quantize_retail_signed_vector(vec3 value) {
-	// Both Terrain_GenerateNormalMap and PolyTrn_RenderTile truncate
-	// (component+1)*127.5 to bytes before D3DTA_TEXTURE/D3DTA_DIFFUSE DOT3.
-	ivec3 encoded = ivec3(clamp((value + 1.0) * 127.5,
-		vec3(0.0), vec3(255.0)));
-	return vec3(encoded) / 255.0;
-}
-
-float retail_tile_light_alpha(vec3 heightfield_normal, vec2 terrain_uv,
-		vec2 quadrant) {
-	vec3 normal_byte = u_has_heightfield_normal
-		? texture(u_heightfield_normal, clamp_retail_quadrant_uv(
-			terrain_uv, quadrant, textureSize(u_heightfield_normal, 0))).rgb
-		: quantize_retail_signed_vector(normalize(vec3(
-			heightfield_normal.x, heightfield_normal.z, heightfield_normal.y)));
-	// Env exposes the direct retail getter tuple. PolyTrn packs that tuple into
-	// D3DCOLOR RGB as (Z, X, Y) before the heightfield-normal DOT3.
-	// [orig: Environment_GetLightDirectionFloat @ 0x57d870;
-	//  Terrain_GenerateNormalMap @ 0x603210;
-	//  PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e].
-	vec3 texture_basis_light = vec3(u_sun_direction.z, u_sun_direction.x, u_sun_direction.y);
-	vec3 light_byte = quantize_retail_signed_vector(texture_basis_light);
-	return clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0);
-}
-
-vec4 retail_bare_terrain_tile(vec3 raw_colormap_rgb, vec3 heightfield_normal,
-		vec2 terrain_uv, vec2 quadrant) {
-	// The base tile bake uses diffuse 0x00808080: RGB MODULATE2X gives
-	// raw*256/255 while its zero diffuse alpha discards authored colormap A.
-	// The following additive DOT3 pass writes the heightfield light term to A.
-	return vec4(
-		clamp(raw_colormap_rgb * (256.0 / 255.0), vec3(0.0), vec3(1.0)),
-		retail_tile_light_alpha(heightfield_normal, terrain_uv, quadrant));
-}
-
-vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
-	if (u_has_tile_overlay) {
-		vec2 tile_uv = fract(vec2(world_pos.x, -world_pos.z) * (1.0 / 1024.0));
-		vec4 tile = texture(u_tile_overlay, tile_uv);
-		// Analytic/editor fallback: the legacy full-atlas surrogate retains
-		// standard coverage but not retail's ordered render-target alpha. The
-		// canonical runtime page cache composes exact overlay RGBA before DOT3;
-		// this cold path therefore applies the overlay to RGB only.
-		colormap.rgb = mix(colormap.rgb, tile.rgb * u_tile_overlay_tint, tile.a);
-	}
-	return colormap;
 }
 
 // NovaLogic terrain surface shading — the witnessed ps.1.4 splat chain

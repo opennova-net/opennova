@@ -51,7 +51,9 @@ std::array<uint8_t, 4> pixel(const Rgba8Image &image, int x, int y) {
 opennova::TerrainTileCompositionJob job(
 		opennova::TerrainTilePageKey key) {
 	opennova::TerrainTileCompositionCache cache;
-	const auto decision = cache.request({key, 0, 0, 0, {1}});
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const auto decision = cache.request({key, 0, 0, 0});
 	return *decision->job;
 }
 
@@ -170,10 +172,6 @@ bool test_mips_registry_and_boundary_overlap() {
 			"inclusive retail overlap invalidates both pages at a shared edge")) {
 		return false;
 	}
-	if (!expect(left_plan.content_stamp == right_plan.content_stamp,
-			"the same ordered page contribution has one stable content stamp")) {
-		return false;
-	}
 	registry.clear();
 	for (std::size_t index = 0;
 			index < opennova::terrain::kTerrainScorchCapacity; ++index) {
@@ -196,10 +194,9 @@ bool same_entry(const opennova::terrain::TerrainScorchEntry &left,
 			left.maximum_z_q16 == right.maximum_z_q16;
 }
 
-// The per-frame stamp walk and the miss-path plan walk are one walk: the
-// records bucketed into the sectors the page touches, merged in insertion
-// order without duplicates, inclusive at sector edges, with the same stamp.
-bool test_registry_buckets_stamp_and_generation() {
+// The plan walk: the records bucketed into the sectors the page touches,
+// merged in insertion order without duplicates, inclusive at sector edges.
+bool test_registry_buckets_and_generation() {
 	opennova::terrain::TerrainScorchRegistry registry;
 	const uint64_t fresh = registry.generation();
 	if (!expect(!registry.append({0, 5 << 16, 5 << 16, 5 << 16, 6 << 16}) &&
@@ -231,9 +228,7 @@ bool test_registry_buckets_stamp_and_generation() {
 		return false;
 	}
 	const auto plan = registry.plan(edge_page);
-	const auto stamp = registry.stamp(edge_page);
-	if (!expect(plan.valid && stamp.valid &&
-			plan.entries.size() == 4 && stamp.entry_count == 4,
+	if (!expect(plan.valid && plan.entries.size() == 4,
 			"the page sees every inclusive overlap across both sector cells")) {
 		return false;
 	}
@@ -242,10 +237,6 @@ bool test_registry_buckets_stamp_and_generation() {
 			same_entry(plan.entries[2], on_edge) &&
 			same_entry(plan.entries[3], ends_on_edge),
 			"the merged bucket walk keeps retail insertion order, once each")) {
-		return false;
-	}
-	if (!expect(stamp.content_stamp == plan.content_stamp,
-			"the per-frame stamp equals the composed plan's content stamp")) {
 		return false;
 	}
 	// A page fully inside sector 1 sees only its own overlaps, in order.
@@ -258,37 +249,32 @@ bool test_registry_buckets_stamp_and_generation() {
 			"a neighbouring sector page walks only its bucketed records")) {
 		return false;
 	}
-	// Identity follows the record list: a later append that touches the page
-	// changes its stamp, one that does not leaves it alone.
+	// A later append that touches the page joins its plan in order; one
+	// that does not leaves it alone.
 	if (!registry.append({0, 700 << 16, 8 << 16, 710 << 16, 9 << 16})) {
 		return expect(false, "far record appends");
 	}
-	if (!expect(registry.stamp(edge_page).content_stamp ==
-			stamp.content_stamp,
-			"a record outside the page leaves its stamp unchanged")) {
+	if (!expect(registry.plan(edge_page).entries.size() == 4,
+			"a record outside the page leaves its plan unchanged")) {
 		return false;
 	}
 	if (!registry.append({0, 460 << 16, 8 << 16, 470 << 16, 9 << 16})) {
 		return expect(false, "near record appends");
 	}
-	if (!expect(registry.stamp(edge_page).content_stamp !=
-			stamp.content_stamp &&
-			registry.stamp(edge_page).entry_count == 5,
-			"a record overlapping the page changes its stamp")) {
+	if (!expect(registry.plan(edge_page).entries.size() == 5,
+			"a record overlapping the page joins its plan")) {
 		return false;
 	}
 	const uint64_t before_clear = registry.generation();
 	registry.clear();
-	const auto cleared = registry.stamp(edge_page);
+	const auto cleared = registry.plan(edge_page);
 	if (!expect(registry.generation() == before_clear + 1 &&
-			cleared.valid && cleared.entry_count == 0 &&
-			registry.plan(edge_page).entries.empty(),
+			cleared.valid && cleared.entries.empty(),
 			"clear advances the generation and empties every page walk")) {
 		return false;
 	}
 	const opennova::TerrainTilePageKey unroutable{0, 0, 0, 0, 5};
-	return expect(!registry.stamp(unroutable).valid &&
-			!registry.plan(unroutable).valid,
+	return expect(!registry.plan(unroutable).valid,
 			"a page level outside 0..4 cannot be routed");
 }
 
@@ -487,7 +473,7 @@ int main() {
 	if (!test_crt_and_router()) return 1;
 	if (!test_producer_mailbox_and_capacity()) return 1;
 	if (!test_mips_registry_and_boundary_overlap()) return 1;
-	if (!test_registry_buckets_stamp_and_generation()) return 1;
+	if (!test_registry_buckets_and_generation()) return 1;
 	if (!test_ordered_page_composition()) return 1;
 	if (!test_scorch_texture_rows_run_from_maximum_z()) return 1;
 	if (!test_scorch_samples_the_nearest_box_level()) return 1;

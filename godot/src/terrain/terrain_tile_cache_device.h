@@ -1,9 +1,10 @@
 #pragma once
 
 // Godot device adapter for the engine-owned terrain tile-composition cache.
-// Page identity, LRU, invalidation, pixel composition and the composition
-// thread pool remain portable; this class owns only source extraction,
-// Texture2DArray upload, and counters.
+// Page identity, the per-frame sweep, invalidation, pixel composition and the
+// composition thread pool remain portable; this class owns only source
+// extraction, the frame's synchronous compose-and-upload, Texture2DArray
+// upload, and counters.
 
 #include <godot_cpp/classes/texture2d_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -38,12 +39,6 @@ public:
 	virtual ~TerrainStaticShadowPageRasterizer() = default;
 	virtual std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const = 0;
-	// Main-thread only: the memoized per-page plan on the LIVE planner. The
-	// provider mutates planner state only before the device's request loop
-	// (rasterizer begin_frame), so within a frame this is state-identical to
-	// what workers compute from compilation_snapshot().
-	virtual opennova::terrain::TerrainStaticShadowPagePlanResult plan_page(
-			const opennova::TerrainTilePageKey &p_page) = 0;
 	// The frame-shared Render_ShaderTickMs the provider's begin_frame received.
 	// The device stamps it on every composition job it enqueues so a worker
 	// samples caster material animation at the requesting frame, exactly as
@@ -66,7 +61,9 @@ public:
 			const Ref<TerrainTileInfo> &p_tile_info_override,
 			bool p_tile_overlay_enabled);
 	void clear();
-	void begin_frame(uint64_t p_frame_id);
+	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
+	// claims stamp the given TOD epoch (Env_TodMinutesElapsed).
+	void begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch);
 	// Byte-level capture diagnostics (full-page FNV output hash, pre/post
 	// shadow byte diffs) copy and re-walk every composed 256 KB page — that
 	// is capture/test instrumentation, not steady-state work. Default OFF;
@@ -84,15 +81,22 @@ public:
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(
 			const opennova::terrain::TerrainScorchEntry &p_entry);
+	// Retires the pages a destroyed entity's bounds touch (the same inclusive
+	// Q16 test); they recompose the next time they are visible.
+	std::size_t invalidate_region(int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,
+			int32_t p_maximum_x_q16, int32_t p_maximum_z_q16);
 	// Mission/replay reset: remove the permanent list and make every resident
 	// page cold so no prior compiled scorch survives the lifecycle boundary.
 	void clear_terrain_scorches();
 
-	opennova::TerrainTilePageBinding request(
-			const opennova::TerrainPatchDraw &p_draw,
+	// The frame's page sweep over its draw list, composed and uploaded before
+	// the terrain draws; one binding per patch, not ready where the patch
+	// draws with no page this frame.
+	const std::vector<opennova::TerrainTilePageBinding> &compose_frame(
+			const opennova::TerrainDrawList &p_draw_list,
 			const Vector3 &p_tile_tint,
 			const Vector3 &p_light_direction);
-	std::optional<opennova::TerrainTilePageBinding> best_ready(
+	std::optional<opennova::TerrainTilePageBinding> lookup(
 			const opennova::TerrainTileResidentPoint &p_point);
 
 	Ref<Texture2DArray> get_texture() const { return texture_; }
@@ -100,19 +104,11 @@ public:
 	bool is_ready() const { return texture_.is_valid() && sources_ready_; }
 
 private:
-	void _drain_completed();
+	void _upload_completed();
 	bool _refresh_shadow_snapshot();
 	void _reset_shadow_epoch_diagnostics();
-	void _invalidate_page(const opennova::TerrainTilePageKey &p_page);
-	void _retire_ready_scorch_overlaps(
-			const opennova::terrain::TerrainScorchEntry &p_entry);
+	void _invalidate_all();
 	bool _allocate_texture();
-	void _record_frame_selected_ready(
-			const opennova::TerrainTilePageBinding &p_binding);
-	uint64_t _content_stamp(
-			const Vector3 &p_tile_tint,
-			const Vector3 &p_light_direction,
-			opennova::terrain::TerrainTilePageSourceView &r_sources) const;
 
 	opennova::TerrainTileCompositionCache cache_;
 	// The page-composition thread pool (engine): demand / completion queues,
@@ -124,12 +120,17 @@ private:
 	bool sources_ready_ = false;
 	uint64_t source_revision_ = 0;
 	uint64_t next_source_revision_ = 1;
+	// The generation each layer's uploaded pixels belong to, and their hash
+	// (diagnostics: a layer counts as resident output while the cache still
+	// holds that generation there).
 	std::array<uint64_t, opennova::TerrainTileCompositionCache::kCapacity>
 			ready_generations_{};
 	std::array<opennova::TerrainTilePageKey,
 			opennova::TerrainTileCompositionCache::kCapacity> ready_page_keys_{};
 	std::array<uint64_t, opennova::TerrainTileCompositionCache::kCapacity>
 			ready_page_output_hashes_{};
+	std::vector<opennova::TerrainTileCompositionRequest> frame_visible_;
+	std::vector<opennova::TerrainTilePageBinding> frame_bindings_;
 	uint64_t compose_jobs_ = 0;
 	uint64_t cache_hits_ = 0;
 	uint64_t cache_misses_ = 0;
@@ -160,13 +161,8 @@ private:
 	uint64_t diagnostic_frame_id_ = 0;
 	uint64_t frame_requests_ = 0;
 	uint64_t frame_ready_hits_ = 0;
-	// Requests served by a stale-marked payload while its replacement
-	// composes. Never counted as ready hits, so capture settle gates
-	// (frame_ready_hits == frame_requests) still demand exactness.
-	uint64_t frame_stale_hits_ = 0;
+	// Distinct composed pages this frame's patches bind.
 	uint64_t frame_selected_ready_pages_ = 0;
-	std::array<bool, opennova::TerrainTileCompositionCache::kCapacity>
-			frame_selected_ready_layers_{};
 	uint64_t frame_compose_jobs_ = 0;
 	uint64_t frame_compose_us_ = 0;
 	uint64_t frame_uploads_ = 0;

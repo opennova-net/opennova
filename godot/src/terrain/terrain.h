@@ -197,6 +197,11 @@ public:
 			int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,
 			int64_t p_maximum_x_q16, int64_t p_maximum_z_q16);
 	void clear_terrain_scorches();
+	// Retires the cached pages a destroyed entity's Q16 bounds touch; returns
+	// how many.
+	int64_t invalidate_tile_cache_region(int64_t p_minimum_x_q16,
+			int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
+			int64_t p_maximum_z_q16);
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);

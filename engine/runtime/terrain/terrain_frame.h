@@ -139,7 +139,7 @@ struct TerrainPatchDraw {
 // A flat draw uses retail's one shared LOD-0 page, independently of its mesh
 // tile and world-sector origin. Ordinary pages retain their routed identity.
 TerrainTileCompositionRequest terrain_tile_composition_request(
-		const TerrainPatchDraw &draw, TerrainTileContentStamp content = {});
+		const TerrainPatchDraw &draw);
 
 // Value-based diagnostics for F3 and structural tests (no Dictionary at the
 // seam). lod_distribution is over emitted patches with the fallback resolved;

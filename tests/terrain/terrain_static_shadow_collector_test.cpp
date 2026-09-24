@@ -193,31 +193,6 @@ int main() {
 			"crossing a terrain-light byte boundary invalidates the page contribution")) {
 		return 1;
 	}
-	TerrainTileCompositionCache light_epoch_cache;
-	TerrainTileCompositionRequest light_epoch_request{
-			coarse.page, 7, 0, 0, relit.content};
-	const auto initial_light_epoch = light_epoch_cache.request(light_epoch_request);
-	if (!expect(initial_light_epoch && initial_light_epoch->job &&
-			light_epoch_cache.publish(*initial_light_epoch->job),
-			"initial light epoch composes and publishes the page")) {
-		return 1;
-	}
-	light_epoch_request.content = sub_byte_relit.content;
-	const auto retained_light_epoch = light_epoch_cache.request(light_epoch_request);
-	if (!expect(retained_light_epoch && retained_light_epoch->binding.ready &&
-			!retained_light_epoch->job,
-			"sub-quantum raw light movement is a no-job ready hit")) {
-		return 1;
-	}
-	light_epoch_request.content = next_light_epoch.content;
-	const auto crossed_light_epoch = light_epoch_cache.request(light_epoch_request);
-	if (!expect(crossed_light_epoch && crossed_light_epoch->job &&
-			crossed_light_epoch->binding.ready &&
-			crossed_light_epoch->binding.stale,
-			"crossing the light-byte boundary emits a replacement compose job "
-			"while the published page keeps serving stale")) {
-		return 1;
-	}
 	coarse.surface_to_light.x = 0.5f;
 	coarse.light_epoch =
 			terrain_tile_light_epoch_from_environment_tuple(0.0f, 1.0f, 0.5f);

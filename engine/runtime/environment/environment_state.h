@@ -84,7 +84,6 @@ struct TerrainEnvUniforms {
 	Rgb sun_light;
 	Rgb sky_ambient;
 	Vec3 sun_direction{};
-	Rgb tile_overlay_tint;
 	Rgb fog_color;
 	float fog_end = 0.0f;
 	float fog_start = 0.0f;

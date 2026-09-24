@@ -1,5 +1,4 @@
 #include <runtime/terrain/terrain_scorch.h>
-#include <base/io/hash.h>
 
 #include <algorithm>
 #include <array>
@@ -25,8 +24,6 @@ uint64_t sector_cell_key(int64_t cell_x, int64_t cell_z) noexcept {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(cell_x)) << 32) |
 			static_cast<uint64_t>(static_cast<uint32_t>(cell_z));
 }
-
-uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept;
 
 int wrap(int value, int size) noexcept {
 	value %= size;
@@ -83,15 +80,6 @@ uint8_t unorm_byte(float value) noexcept {
 			static_cast<int>(std::lround(
 					std::clamp(value, 0.0f, 1.0f) * 255.0f)),
 			0, 255));
-}
-
-uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept {
-	hash = io::fnv1a64_value(hash, entry.texture_index);
-	hash = io::fnv1a64_value(hash, entry.minimum_x_q16);
-	hash = io::fnv1a64_value(hash, entry.minimum_z_q16);
-	hash = io::fnv1a64_value(hash, entry.maximum_x_q16);
-	hash = io::fnv1a64_value(hash, entry.maximum_z_q16);
-	return hash;
 }
 
 } // namespace
@@ -180,13 +168,10 @@ bool TerrainScorchRegistry::overlaps_page(const TerrainScorchEntry &entry,
 // sector cells the page's inclusive extent touches, merged ascending by
 // record index (each cell list is ascending, a record may sit in several).
 bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
-		std::vector<TerrainScorchEntry> *entries,
-		uint64_t &content_stamp, uint32_t &count) const {
+		std::vector<TerrainScorchEntry> &entries) const {
 	const int span = TerrainTileCompositionCache::page_world_span(
 			page.page_lod_level);
 	if (span == 0) return false;
-	content_stamp = io::kFnv1a64Offset;
-	count = 0;
 	const int64_t page_minimum_x =
 			(static_cast<int64_t>(page.sector_origin_x) + page.page_local_x) << 16;
 	const int64_t page_minimum_z =
@@ -221,10 +206,7 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 	}
 
 	const auto emit = [&](const TerrainScorchEntry &entry) {
-		if (!overlaps_page(entry, page)) return;
-		if (entries != nullptr) entries->push_back(entry);
-		content_stamp = mix_entry(content_stamp, entry);
-		++count;
+		if (overlaps_page(entry, page)) entries.push_back(entry);
 	};
 	if (cells_overflowed) {
 		// A page wider than one sector cell is not a routed page; keep the
@@ -253,24 +235,13 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 			emit(entries_[best_index]);
 		}
 	}
-	content_stamp = io::fnv1a64_value(content_stamp, count);
 	return true;
-}
-
-TerrainScorchPageStamp TerrainScorchRegistry::stamp(
-		const TerrainTilePageKey &page) const {
-	TerrainScorchPageStamp result;
-	result.valid = collect(page, nullptr, result.content_stamp,
-			result.entry_count);
-	if (!result.valid) result = TerrainScorchPageStamp{};
-	return result;
 }
 
 TerrainScorchPagePlan TerrainScorchRegistry::plan(
 		const TerrainTilePageKey &page) const {
 	TerrainScorchPagePlan result;
-	uint32_t count = 0;
-	result.valid = collect(page, &result.entries, result.content_stamp, count);
+	result.valid = collect(page, result.entries);
 	if (!result.valid) result = TerrainScorchPagePlan{};
 	return result;
 }

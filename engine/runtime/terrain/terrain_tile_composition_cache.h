@@ -1,10 +1,14 @@
 #pragma once
 
-// Portable request/compiler for retail's composed terrain page cache. The
-// module owns page identity and cache decisions; the Godot layer owns the
-// texture array and executes returned composition jobs.
-// [orig: PolyTrn_RenderTile @ 0x60DA70; 128-slot cache dword_319A2E4;
-// docs/tiles/til-re.md]
+// Portable port of retail's composed terrain page cache: the 128 32-byte
+// records PolyTrn_RenderTile keys pages by, the per-frame claim of the least
+// recently used record, the time-of-day refresh, the spatial invalidations,
+// and the spatial lookup. The Godot layer owns the texture array and composes
+// every job the frame's sweep returns before the terrain draws.
+// [orig: PolyTrn_RenderTile @ 0x60DA70; the record array dword_319A2E0
+// (lod +0x00, packed coordinate +0x04, sector +0x08/+0x0C, last use +0x10,
+// compose frame +0x14, TOD epoch +0x18, render target +0x1C);
+// docs/terrain/terrain-re.md]
 
 #include <array>
 #include <cstddef>
@@ -30,6 +34,8 @@ inline bool same_page(const TerrainTilePageKey &a, const TerrainTilePageKey &b) 
 			a.page_lod_level == b.page_lod_level;
 }
 
+// A content identity the static-shadow planner memoizes its per-page plans
+// under (not part of the page identity: retail keys pages spatially).
 struct TerrainTileContentStamp {
 	uint64_t value = 0;
 };
@@ -63,10 +69,6 @@ struct TerrainTilePageBinding {
 	uint16_t layer = 0;
 	uint64_t generation = 0;
 	bool ready = false;
-	// ready with a superseded payload: the layer serves its last-published
-	// pixels while the replacement generation composes. Never true when ready
-	// is false; cleared by publish and by explicit invalidation/eviction.
-	bool stale = false;
 };
 
 struct TerrainTileCompositionJob {
@@ -74,16 +76,16 @@ struct TerrainTileCompositionJob {
 	int32_t tile_index = -1;
 	int32_t source_origin_x = 0; // exact 0..1023 source-atlas origin
 	int32_t source_origin_z = 0;
-	TerrainTileContentStamp content;
 	TerrainTilePageLayout layout;
 };
 
+// One visible patch's page: the record identity (level, packed source
+// coordinate, routed sector) plus the mesh tile it draws.
 struct TerrainTileCompositionRequest {
 	TerrainTilePageKey page;
 	int32_t tile_index = -1;
 	int32_t source_origin_x = 0;
 	int32_t source_origin_z = 0;
-	TerrainTileContentStamp content;
 };
 
 struct TerrainTileCompositionDecision {
@@ -123,12 +125,9 @@ private:
 	std::vector<TerrainTileCompositionDemand> demands_;
 };
 
-// A world point plus its routed sector identity. The sector fields prevent a
-// repeated source quadrant from borrowing a cache page from another world
-// placement; world_x/world_z select among that sector's nested ready pages.
+// A world point a page consumer (MATCHTERRAIN material, detail foliage) needs
+// the resident page for.
 struct TerrainTileResidentPoint {
-	int32_t sector_origin_x = 0;
-	int32_t sector_origin_z = 0;
 	float world_x = 0.0f;
 	float world_z = 0.0f;
 };
@@ -137,9 +136,8 @@ class TerrainTileCompositionCache {
 public:
 	// The active-quality retail cache layout. Low-quality 128x128 pages are a
 	// separate future policy, not a runtime mutation of this cache instance.
-	// [orig: 128-slot scan bound @ 0x60db40 over the dword_319A2E4 slot
-	// array; the page RT dimension is the active-quality global dword_31A00D4
-	// (256).]
+	// [orig: 128-record scan bound @ 0x60db40 over dword_319A2E0; the page RT
+	// dimension is the active-quality global dword_31A00D4 (256).]
 	static constexpr int kCapacity = 128;
 	static constexpr int kDimension = 256;
 	// Creation-time clear of every page render target. Retail clears each of
@@ -168,81 +166,94 @@ public:
 	static std::optional<TerrainTilePageProjection> page_projection(
 			const TerrainTilePageKey &page, bool zero_primary_uv = false) noexcept;
 
-	// Starts the binding lifetime for one deferred render frame. Repeating the
-	// same id is idempotent; a different id releases the prior frame's pins.
-	// Successful request()/best_ready() bindings are protected from layer
-	// reuse until the next frame begins. If all 128 layers are pinned, a new
-	// miss returns null rather than invalidating an earlier draw binding.
-	void begin_frame(uint64_t frame_id) noexcept;
+	// One PolyTrn_RenderFrame: the frame counter advances, and the records the
+	// frame claims stamp `tod_epoch` (Env_TodMinutesElapsed).
+	// [orig: dword_319FC04 += 1 @ 0x60EAE8]
+	void begin_frame(uint32_t tod_epoch) noexcept;
+	uint32_t frame() const noexcept { return frame_; }
 
-	// Returns null for a page level outside 0..4 (0 is the shared flat page). A returned job reserves
-	// its layer/generation until publish(); repeated requests while that job is
-	// pending return the same not-ready binding without duplicating the job.
-	// Exact hits and successful best_ready() lookups refresh strict LRU age.
-	// A valid miss also returns null when every layer is pinned by begin_frame().
+	// PolyTrn_RenderTile's cache half. A resident record with the same
+	// identity is a hit: its last use refreshes and no job returns. A miss
+	// claims the record least recently used, but only one unused in this
+	// frame and the previous one, and returns its composition job; with no
+	// such record the page is not composed this frame (null).
 	std::optional<TerrainTileCompositionDecision> request(
 			const TerrainTileCompositionRequest &request);
+	// terrain_cache_evict_lru: retires the record composed longest ago among
+	// those stamped with an older TOD epoch and composed more than one frame
+	// ago, so the next sweep recomposes it under the current light. False when
+	// no record qualifies.
+	bool evict_one_tod_stale() noexcept;
+	// PolyTrn_RenderFrame's page sweep over the frame's visible list, in list
+	// order: every miss claims a record. A sweep that composes nothing retires
+	// one TOD-stale record and sweeps again, so a visible page baked under an
+	// older light recomposes that same frame. Returns every claimed job; the
+	// embedder composes them all before the terrain draws.
+	std::vector<TerrainTileCompositionJob> sweep(
+			const std::vector<TerrainTileCompositionRequest> &visible);
+	// PolyTrn_BindStageTextures: the exact-identity record a patch draws with
+	// (refreshing its last use), or null when the page is not composed.
+	std::optional<TerrainTilePageBinding> bind(
+			const TerrainTileCompositionRequest &request) noexcept;
+	// terrain_tile_cache_lookup (MATCHTERRAIN) / Terrain_FindSectorPatchRT
+	// (detail foliage): the first resident record, in record order, whose
+	// packed coordinate matches the point's at granularity 32, then 64 ... 512
+	// units within the point's sector. The record may be coarser or finer than
+	// the point's own page, and a coarse-granularity match can return a page
+	// that does not contain the point.
+	std::optional<TerrainTilePageBinding> lookup(
+			const TerrainTileResidentPoint &point) noexcept;
+	// The composed page a layer holds, if any (diagnostics; no last-use stamp).
+	std::optional<TerrainTilePageBinding> resident_layer(uint16_t layer) const noexcept;
+
 	// Publishes only the still-current target generation. Eviction,
-	// invalidation, or a newer request makes an older job fail closed.
+	// invalidation, or a newer claim makes an older job fail closed.
 	// Device bindings call can_publish() immediately before mutating a leased
 	// texture layer; cache ownership stays on the render thread, so a true
 	// result remains current until that binding calls publish().
 	bool can_publish(const TerrainTileCompositionJob &job) const noexcept;
 	bool publish(const TerrainTileCompositionJob &job) noexcept;
+	// Retires one page whose composition failed.
 	bool invalidate(const TerrainTilePageKey &page) noexcept;
-	// Inclusive fixed-point rectangle overlap used by the retail permanent-
-	// scorch invalidator. A record exactly on a shared page edge retires both
-	// cache records even though half-open raster coverage affects only one.
+	// The inclusive fixed-point page test the scorch append and the destroyed-
+	// entity invalidation share. A rectangle exactly on a shared page edge
+	// retires both pages even though half-open raster coverage affects one.
 	static bool page_overlaps_q16(const TerrainTilePageKey &page,
 			int32_t minimum_x_q16, int32_t minimum_z_q16,
 			int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept;
+	// Retires every resident page the rectangle overlaps.
 	std::size_t invalidate_overlapping_q16(
 			int32_t minimum_x_q16, int32_t minimum_z_q16,
 			int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept;
+	// Terrain_ResetTileCache: every record empties and becomes claimable; the
+	// frame counter keeps running (it is never reset). Per-layer generations
+	// advance so outstanding pre-reset jobs stay stale.
+	// [orig: sub_605FB0 @ 0x605FB0..0x605FD2 / sub_60C640 @ 0x60C640]
 	void invalidate_all() noexcept;
-	// Drops every resident identity and frame pin for mission/device changes.
-	// Per-layer generations advance so outstanding pre-clear jobs stay stale.
-	void clear() noexcept;
-	// Chooses the finest ready half-open containing page. During an active
-	// frame, only pages selected by request() in that same frame are eligible;
-	// retained prior-frame pages must not leak stale LOD/content into foliage.
-	// Without begin_frame(), all residents remain eligible for cold diagnostics.
-	// Same-level overlap uses newest local access, then the lowest layer, solely
-    // for deterministic cache behavior; no retail tie-break is claimed for that
-	// otherwise-degenerate case.
-	std::optional<TerrainTilePageBinding> best_ready(
-			const TerrainTileResidentPoint &point) noexcept;
 
 private:
 	struct Slot {
-		bool occupied = false;
-		bool ready = false;
-		bool pending = false;
-		// The published payload predates the current identity (see
-		// TerrainTilePageBinding::stale). Only a content/source re-target of a
-		// ready slot sets it; explicit invalidation and eviction drop the
-		// payload outright instead (fail-closed wins over stale-serving).
-		bool stale = false;
+		bool lod_valid = false;   // +0x00 != -1
+		bool resident = false;    // +0x04 != -1
+		bool ready = false;       // composed into its layer
 		TerrainTilePageKey page;
 		int32_t tile_index = -1;
 		int32_t source_origin_x = 0;
 		int32_t source_origin_z = 0;
-		TerrainTileContentStamp content;
+		uint32_t last_use = 0;       // +0x10
+		uint32_t compose_frame = 0;  // +0x14
+		uint32_t tod_epoch = 0;      // +0x18
 		uint64_t generation = 0;
-		uint64_t last_touch = 0;
-		bool pinned = false;
-		// Spatial consumers may borrow only pages selected by request() in the
-		// active deferred frame. The explicit boolean keeps frame id 0 valid and
-		// prevents a later reused id from reviving an older selection.
-		uint64_t selected_frame_id = 0;
-		bool selected_in_frame = false;
 	};
 
+	static bool same_identity(const Slot &slot,
+			const TerrainTileCompositionRequest &request) noexcept;
+	TerrainTilePageBinding binding(const Slot &slot, uint16_t layer) const noexcept;
+	void retire(Slot &slot) noexcept;
+
 	std::array<Slot, kCapacity> slots_{};
-	uint16_t used_ = 0;
-	uint64_t touch_clock_ = 0;
-	uint64_t frame_id_ = 0;
-	bool frame_active_ = false;
+	uint32_t frame_ = 0;
+	uint32_t tod_epoch_ = 0;
 };
 
 } // namespace opennova

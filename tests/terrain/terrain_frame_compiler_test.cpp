@@ -536,6 +536,9 @@ int main() {
 		int normal_count = 0;
 		int flat_count = 0;
 		opennova::TerrainTileCompositionCache pages;
+		// A page record must be unused for more than one frame to be claimed.
+		pages.begin_frame(0);
+		pages.begin_frame(0);
 		int flat_layer = -1;
 		for (const auto &patch : mixed.patches) {
 			if (!expect(patch.tile_index == 0,

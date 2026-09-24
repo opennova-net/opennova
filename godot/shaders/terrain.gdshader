@@ -1,7 +1,7 @@
 shader_type spatial;
 render_mode unshaded;
 
-// Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
+// Shared terrain surface shading + fog (uniforms u_detail*/u_blendmap/
 // u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
 // Gamma-domain scene-target contract.
@@ -11,9 +11,9 @@ render_mode unshaded;
 uniform int u_debug_mode = 0;
 
 // Runtime tile-composition cache: one shared 128-layer, single-level array.
-// Page identity/LRU/pixels come from engine/runtime/terrain; this shader only
-// selects the layer bound to the current terrain instance. The analytic path
-// below remains the fail-closed editor/cold-cache fallback.
+// Page identity/LRU/pixels come from engine/runtime/terrain, which composes
+// every visible page before the frame draws; this shader only selects the
+// layer bound to the current terrain instance.
 uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 
@@ -84,7 +84,10 @@ void fragment() {
 	// source coordinates. The independent detail/noise stream stays live.
 	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0]
 	vec2 source_uv = u_instance_zero_height ? vec2(0.0) : v_colormap_uv;
-	vec4 colormap;
+	// A patch whose page the cache could not claim this frame draws with t0
+	// unbound, which D3D9 samples as (0, 0, 0, 1) (retail
+	// PolyTrn_BindStageTextures @ 0x604356 clears the slot before the search).
+	vec4 colormap = vec4(0.0, 0.0, 0.0, 1.0);
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = (v_world_pos.xz -
 			u_instance_tile_cache_projection.xy) *
@@ -93,17 +96,6 @@ void fragment() {
 		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 		colormap = texture(u_tile_cache,
 			vec3(page_uv, u_instance_tile_cache_layer));
-	} else {
-		// The native flat-page producer samples the source corner and skips
-		// mission overlays. Keep that fallback while the page is still cold.
-		vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
-			source_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
-		colormap = retail_bare_terrain_tile(
-			texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
-			source_uv, u_instance_source_quadrant);
-		if (!u_instance_zero_height) {
-			colormap = compose_retail_tile_overlay(colormap, v_world_pos);
-		}
 	}
 	vec3 result = terrain_surface_color_from_colormap(
 		colormap, v_colormap_uv, v_detail_uv, source_uv, u_instance_source_quadrant);

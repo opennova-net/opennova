@@ -308,7 +308,6 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		texture.unref();
 	}
 	paired_detail2_texture.unref();
-	mipped_colormap_texture.unref();
 	if (terrain_data.is_null()) {
 		return false;
 	}
@@ -353,15 +352,6 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		if (paired_detail2_texture.is_null()) {
 			paired_detail2_texture = texture_from_rgba8(detail2_source, true);
 		}
-	}
-
-	// Retail's t0 is the per-patch tile-cache render target whose resolution
-	// drops with the patch LOD (1024 >> lod per 512u quadrant); a box-mipped
-	// colormap is the byte-closest ported surrogate while the RT lifecycle
-	// stays open under D-TERRAIN-7.
-	opennova::terrain::Rgba8Image colormap_source;
-	if (texture_to_rgba8(terrain_data->get_colormap(), colormap_source)) {
-		mipped_colormap_texture = texture_from_rgba8(colormap_source, true);
 	}
 	return detail_coefficient_texture.is_valid() ||
 		paired_detail_textures[0].is_valid() ||
@@ -410,7 +400,6 @@ bool TerrainSurfaceInputs::rebuild_tile_overlay() {
 void TerrainSurfaceInputs::clear_derived_textures() {
 	detail_coefficient_texture.unref();
 	paired_detail2_texture.unref();
-	mipped_colormap_texture.unref();
 	normalized_blend_texture.unref();
 	heightfield_normal_texture.unref();
 	for (auto &texture : paired_detail_textures) {
@@ -427,7 +416,6 @@ bool TerrainSurfaceInputs::apply_to_material(
 	if (p_material.is_null()) {
 		return false;
 	}
-	p_material->set_shader_parameter("u_colormap", get_colormap_texture());
 	p_material->set_shader_parameter("u_detailmap", get_detailmap_texture());
 	p_material->set_shader_parameter("u_blendmap", get_blend_texture());
 	p_material->set_shader_parameter("u_detail_c1", get_detail_c1_texture());
@@ -437,21 +425,12 @@ bool TerrainSurfaceInputs::apply_to_material(
 	p_material->set_shader_parameter("u_has_detail2", has_detail2());
 	p_material->set_shader_parameter("u_detail2_density",
 		static_cast<float>(get_detail2_density()));
-	p_material->set_shader_parameter(
-		"u_heightfield_normal", heightfield_normal_texture);
-	p_material->set_shader_parameter(
-		"u_has_heightfield_normal", has_heightfield_normal());
 	p_material->set_shader_parameter("u_detail_density",
 		static_cast<float>(get_detail_density()));
-	p_material->set_shader_parameter("u_tile_overlay", tile_overlay_texture);
-	p_material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay());
 	return true;
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_colormap_texture() const {
-	if (mipped_colormap_texture.is_valid()) {
-		return mipped_colormap_texture;
-	}
 	return terrain_data.is_valid() ? terrain_data->get_colormap() : Ref<Texture2D>();
 }
 

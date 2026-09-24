@@ -28,11 +28,8 @@ func test_full_rebuild_produces_retail_surface_inputs() -> void:
 	assert_true(inputs.apply_to_material(material))
 	assert_same(material.get_shader_parameter("u_blendmap"), inputs.get_blend_texture())
 	assert_same(material.get_shader_parameter("u_detail_c1"), inputs.get_detail_c1_texture())
-	assert_same(material.get_shader_parameter("u_colormap"), inputs.get_colormap_texture())
 	assert_same(material.get_shader_parameter("u_detail2"), inputs.get_detail2_texture())
-	assert_null(material.get_shader_parameter("u_heightfield_normal"))
 	assert_true(bool(material.get_shader_parameter("u_has_detail2")))
-	assert_false(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 73.0)
 	assert_eq(float(material.get_shader_parameter("u_detail2_density")), 9.0)
 
@@ -45,7 +42,13 @@ func test_diagnostics_report_texture_dimensions_mips_and_densities() -> void:
 	assert_eq(int(diagnostics["detail_density"]), 73)
 	assert_eq(int(diagnostics["detail2_density"]), 9)
 	var textures := diagnostics["textures"] as Dictionary
-	for name in ["colormap", "blendmap", "detail_c1", "detail_c2", "detail_c3", "detail2"]:
+	# The raw colormap feeds the page composer's own quadrant levels; it is
+	# reported unmipped.
+	var colormap := textures["colormap"] as Dictionary
+	assert_true(bool(colormap["available"]))
+	assert_eq(colormap["size"], Vector2i(4, 4))
+	assert_eq(int(colormap["mipmap_count"]), 0)
+	for name in ["blendmap", "detail_c1", "detail_c2", "detail_c3", "detail2"]:
 		var texture := textures[name] as Dictionary
 		assert_true(bool(texture["available"]), "%s is available." % name)
 		assert_eq(texture["size"], Vector2i(4, 4), "%s reports its live dimensions." % name)
@@ -85,25 +88,16 @@ func test_null_terrain_reapply_clears_every_material_input() -> void:
 	material.shader = _surface_shader()
 	assert_true(inputs.apply_to_material(material))
 
-	# Tile overlay is independently optional, so seed it explicitly to prove the
-	# detach path restores the old runtime clear contract for this sampler too.
-	var sentinel := _solid_texture(Color8(20, 40, 60, 255), 2)
-	material.set_shader_parameter("u_tile_overlay", sentinel)
-	material.set_shader_parameter("u_has_tile_overlay", true)
-
 	inputs.set_terrain_data(null)
 	assert_true(inputs.apply_to_material(material),
 		"Applying an empty input set must clear a retained material, not leave stale terrain state.")
 	for uniform_name in [
-		"u_colormap", "u_detailmap", "u_blendmap",
-		"u_detail_c1", "u_detail_c2", "u_detail_c3",
-		"u_detail2", "u_heightfield_normal", "u_tile_overlay",
+		"u_detailmap", "u_blendmap",
+		"u_detail_c1", "u_detail_c2", "u_detail_c3", "u_detail2",
 	]:
 		assert_null(material.get_shader_parameter(uniform_name),
 			"Detached terrain must clear %s." % uniform_name)
 	assert_false(bool(material.get_shader_parameter("u_has_detail2")))
-	assert_false(bool(material.get_shader_parameter("u_has_heightfield_normal")))
-	assert_false(bool(material.get_shader_parameter("u_has_tile_overlay")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 0.0)
 
 
@@ -182,7 +176,6 @@ func _surface_shader() -> Shader:
 	var shader := Shader.new()
 	shader.code = """
 shader_type spatial;
-uniform sampler2D u_colormap;
 uniform sampler2D u_detailmap;
 uniform sampler2D u_blendmap;
 uniform sampler2D u_detail_c1;
@@ -191,10 +184,6 @@ uniform sampler2D u_detail_c3;
 uniform sampler2D u_detail2;
 uniform bool u_has_detail2 = false;
 uniform float u_detail2_density = 8.0;
-uniform sampler2D u_heightfield_normal;
-uniform bool u_has_heightfield_normal = false;
-uniform sampler2D u_tile_overlay;
-uniform bool u_has_tile_overlay = false;
 uniform float u_detail_density = 0.0;
 void fragment() { ALBEDO = vec3(0.0); }
 """

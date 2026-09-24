@@ -1650,10 +1650,11 @@ public:
 	std::vector<std::string> script_effect_names() const;
 	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	TypedArray<RoundImpactRow> drain_round_impacts();
-	// Destructively drain permanent terrain-cache scorch insertions (mission
-	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
-	// NOT ClassDB-bound.
-	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events);
+	// Destructively drain permanent terrain-cache scorch insertions and the
+	// destroyed-entity page invalidations (mission 16.16 bounds; the consumer
+	// folds mission (x,y) to terrain/Godot (x,z)). NOT ClassDB-bound.
+	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events,
+			std::vector<opennova::world::TerrainPageInvalidationEvent> &r_invalidations);
 	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
 	// per line the original posts to its message feed. The fold (suppression,
 	// the own/verbose gate, the camp keys, the bonus recompose, the color) is

@@ -22,6 +22,7 @@ TerrainTileCompositionWorker::~TerrainTileCompositionWorker() {
 		current_sources_.reset();
 	}
 	wake_.notify_all();
+	idle_.notify_all();
 	for (std::thread &worker : workers_)
 		if (worker.joinable()) worker.join();
 }
@@ -38,13 +39,16 @@ TerrainTileCompositionWorker::sources() const {
 }
 
 void TerrainTileCompositionWorker::cancel(bool clear_sources) {
-	std::lock_guard<std::mutex> lock(mutex_);
-	++epoch_;
-	work_.clear();
-	demand_queue_.clear();
-	completions_.clear();
-	completion_queue_.clear();
-	if (clear_sources) current_sources_.reset();
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		++epoch_;
+		work_.clear();
+		demand_queue_.clear();
+		completions_.clear();
+		completion_queue_.clear();
+		if (clear_sources) current_sources_.reset();
+	}
+	idle_.notify_all();
 }
 
 bool TerrainTileCompositionWorker::enqueue(const TerrainTileCompositionJob &job,
@@ -84,6 +88,15 @@ bool TerrainTileCompositionWorker::enqueue(const TerrainTileCompositionJob &job,
 
 std::optional<TerrainTileCompositionWorker::Completion> TerrainTileCompositionWorker::take_completion() {
 	return take_completion_if([](const Completion &) noexcept { return true; });
+}
+
+void TerrainTileCompositionWorker::wait_idle() {
+	std::unique_lock<std::mutex> lock(mutex_);
+	idle_.wait(lock, [this]() {
+		const auto active = active_jobs_by_epoch_.find(epoch_);
+		return stopping_ || (demand_queue_.empty() &&
+				(active == active_jobs_by_epoch_.end() || active->second == 0));
+	});
 }
 
 std::size_t TerrainTileCompositionWorker::pending_jobs() const {
@@ -203,6 +216,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 				if (scheduled.accepted) completions_.push_back(std::move(completion));
 			}
 		}
+		idle_.notify_all();
 	}
 }
 

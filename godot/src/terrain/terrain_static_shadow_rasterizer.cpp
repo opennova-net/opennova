@@ -535,12 +535,6 @@ void TerrainStaticShadowRasterizer::begin_frame(
 	}
 }
 
-opennova::terrain::TerrainStaticShadowPagePlanResult
-TerrainStaticShadowRasterizer::plan_page(
-		const opennova::TerrainTilePageKey &p_page) {
-	return impl_->planner.plan(p_page);
-}
-
 std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 TerrainStaticShadowRasterizer::compilation_snapshot() const {
 	// The revision moves only on a structural change (caster set, light

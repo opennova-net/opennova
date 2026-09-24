@@ -42,16 +42,6 @@ TerrainScorchTexture build_terrain_scorch_texture(
 
 struct TerrainScorchPagePlan {
 	std::vector<TerrainScorchEntry> entries;
-	uint64_t content_stamp = 0;
-	bool valid = false;
-};
-
-// The identity half of a page plan: the same insertion-ordered overlap walk
-// reduced to its content stamp, with no entry list built. Invalid only for a
-// page level the cache cannot route.
-struct TerrainScorchPageStamp {
-	uint64_t content_stamp = 0;
-	uint32_t entry_count = 0;
 	bool valid = false;
 };
 
@@ -68,12 +58,9 @@ public:
 	// append and on clear, never on a rejected record. Starts at 1.
 	uint64_t generation() const noexcept { return generation_; }
 
-	// Per-frame page identity. Visits only the records bucketed into the
-	// 512-unit sectors the page touches, in insertion order, and allocates
-	// nothing; stamp(page).content_stamp == plan(page).content_stamp always.
-	TerrainScorchPageStamp stamp(const TerrainTilePageKey &page) const;
-	// The page's insertion-ordered overlap list for composition. Built on a
-	// cache miss only; the per-frame path uses stamp().
+	// The page's insertion-ordered overlap list for composition, built when a
+	// page composes. Visits only the records bucketed into the 512-unit
+	// sectors the page touches; invalid only for an unroutable page level.
 	TerrainScorchPagePlan plan(const TerrainTilePageKey &page) const;
 
 	static bool overlaps_page(const TerrainScorchEntry &entry,
@@ -84,8 +71,7 @@ private:
 	// overlapping entries to `entries` when it is non-null; returns false for
 	// an unroutable page level.
 	bool collect(const TerrainTilePageKey &page,
-			std::vector<TerrainScorchEntry> *entries,
-			uint64_t &content_stamp, uint32_t &count) const;
+			std::vector<TerrainScorchEntry> &entries) const;
 
 	std::vector<TerrainScorchEntry> entries_;
 	// Record indices per 512-unit sector cell (packed sector x/z), each list

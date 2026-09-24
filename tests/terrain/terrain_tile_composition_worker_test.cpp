@@ -1,8 +1,8 @@
 // The terrain tile-composition worker (runtime/terrain/terrain_tile_composition_worker.h):
 // no sources = nothing enqueues; a queued job composes one complete 256x256
-// page off the installed snapshot; a completion the frame's budget rejects
-// stays queued while an allowed one behind it drains; an epoch bump drops
-// everything queued.
+// page off the installed snapshot; wait_idle() returns once every queued job
+// has completed; a completion a predicate rejects stays queued while an
+// allowed one behind it drains; an epoch bump drops everything queued.
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
 #include <array>
@@ -40,7 +40,7 @@ opennova::TerrainTileCompositionJob job_for(opennova::TerrainTileCompositionCach
 	page.sector_origin_x = sector_x;
 	page.page_lod_level = page_lod;
 	const auto decision = cache.request(opennova::TerrainTileCompositionRequest{
-			page, 0, 0, 0, opennova::TerrainTileContentStamp{ 1 } });
+			page, 0, 0, 0 });
 	if (!decision.has_value() || !decision->job.has_value()) {
 		std::printf("FAIL the cache issued no job for sector %d\n", sector_x);
 		++failures;
@@ -68,6 +68,9 @@ bool settle(const TerrainTileCompositionWorker &worker, std::size_t expected_com
 int main() {
 	TerrainTileCompositionWorker worker;
 	opennova::TerrainTileCompositionCache cache;
+	// A record must be unused for more than one frame before it is claimed.
+	cache.begin_frame(0);
+	cache.begin_frame(0);
 	const std::array<float, 3> tint{};
 	const opennova::terrain::TerrainTileLightEpoch light{ 128, 128, 255 };
 
@@ -105,7 +108,8 @@ int main() {
 	CHECK(a.target.layer != b.target.layer);
 	CHECK(worker.enqueue(a, worker.sources(), tint, light, {}, 8, nullptr, 0, false));
 	CHECK(worker.enqueue(b, worker.sources(), tint, light, {}, 8, nullptr, 0, false));
-	CHECK(settle(worker, 2));
+	worker.wait_idle();
+	CHECK(worker.current_epoch_active_jobs() == 0 && worker.completed_jobs() == 2);
 	done = worker.take_completion_if([&](const TerrainTileCompositionWorker::Completion &c) {
 		return c.job.target.layer == b.target.layer;
 	});

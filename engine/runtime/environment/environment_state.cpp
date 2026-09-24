@@ -724,7 +724,6 @@ TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
 		uniforms.sky_ambient = sky_ambient();
 	}
 	uniforms.sun_direction = light_direction();
-	uniforms.tile_overlay_tint = tile_overlay_tint();
 	const SceneFogValues fog = build_scene_fog(underwater_view);
 	uniforms.fog_color = fog.color;
 	uniforms.fog_end = fog.end;

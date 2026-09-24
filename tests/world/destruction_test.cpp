@@ -649,6 +649,16 @@ void test_destructible_death_chain() {
     CHECK(w.out.destruction.items_destroyed == 1);
     CHECK(w.out.destruction.husk_swaps.size() == 1);
     CHECK(w.out.destruction.debris_triangles == 0);
+    // The item's footprint (position -+ 2 bound radii) retires the cached
+    // terrain pages under it [orig: Entity_ProcessDestructibleDeath
+    // @0x43fc12..0x43fc5e].
+    CHECK(w.out.terrain_scorches.pending_page_invalidations().size() == 1);
+    if (w.out.terrain_scorches.pending_page_invalidations().size() == 1) {
+        const TerrainPageInvalidationEvent &region =
+                w.out.terrain_scorches.pending_page_invalidations()[0];
+        CHECK(region.minimum_x_q16 == 8 * 65536 && region.maximum_x_q16 == 12 * 65536);
+        CHECK(region.minimum_y_q16 == -2 * 65536 && region.maximum_y_q16 == 2 * 65536);
+    }
     bool found_death_sound = false;
     for (const DestructionSoundEvent &s : w.out.destruction.sounds)
         if (s.sound == "EXPLO_BARREL") found_death_sound = true;

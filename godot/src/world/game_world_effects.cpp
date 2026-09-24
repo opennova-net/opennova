@@ -107,7 +107,16 @@ void GameWorld::route_terrain_scorches() {
 		return;
 	}
 	std::vector<opennova::world::TerrainScorchEvent> events;
-	sim->drain_terrain_scorches(events);
+	std::vector<opennova::world::TerrainPageInvalidationEvent> invalidations;
+	sim->drain_terrain_scorches(events, invalidations);
+	for (const opennova::world::TerrainPageInvalidationEvent &region : invalidations) {
+		// mission (x,y) -> Godot (x,-y), as for the scorch bounds below.
+		terrain_->invalidate_tile_cache_region(
+				static_cast<int64_t>(region.minimum_x_q16),
+				-static_cast<int64_t>(region.maximum_y_q16),
+				static_cast<int64_t>(region.maximum_x_q16),
+				-static_cast<int64_t>(region.minimum_y_q16));
+	}
 	for (const opennova::world::TerrainScorchEvent &event : events) {
 		const opennova::terrain::TerrainScorchEntry &mission = event.mission_bounds;
 		// mission (x,y,z) -> Godot (x,z,-y): negation swaps the ordered

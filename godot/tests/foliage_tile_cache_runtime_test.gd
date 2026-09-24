@@ -76,14 +76,17 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	dispatcher.foliage_sampler = Callable(self, "_sample_foliage")
 	dispatcher.set_terrain(terrain)
 
-	# A cold request queues exact page compilation without composing, rasterizing,
-	# or uploading synchronously. Foliage still submits through its analytic
-	# fallback until a later terrain frame publishes and selects the ready pages.
+	# Retail's first terrain frame claims no page record (every record was last
+	# used only one frame ago), so nothing composes and the patches draw
+	# without pages. Foliage submits through its analytic fallback until the
+	# next terrain frame composes every visible page before its draw.
 	terrain.render_frame()
 	var cold := terrain.get_tile_cache_diagnostics()
-	assert_gt(int(cold.get("pending_jobs", 0)), 0)
+	assert_eq(int(cold.get("pending_jobs", -1)), 0)
 	assert_eq(int(cold.get("frame_ready_hits", -1)), 0)
 	assert_eq(int(cold.get("frame_uploads", -1)), 0)
+	assert_eq(int(cold.get("frame_capacity_fallbacks", -1)),
+			int(cold.get("frame_requests", 0)))
 	# The first foliage pass fills retail's detail cache; the second submits its
 	# resident geometry without giving terrain a frame-start publication point.
 	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
@@ -120,7 +123,10 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		var layer := int(draw.tile_cache_layer)
 		assert_between(layer, 0, page_array.get_layers() - 1)
 		var page := draw.tile_cache_projection as Vector4
-		assert_true(page.w == 64.0 or page.w == 128.0 or page.w == 256.0 or page.w == 512.0)
+		# The lookup can answer with the flat page (span 1024) in its
+		# canonical (0,0) sector: its packed coordinate masks to zero.
+		assert_true(page.w == 64.0 or page.w == 128.0 or page.w == 256.0 \
+				or page.w == 512.0 or page.w == 1024.0)
 		if page.w == 64.0:
 			fine_ready_draws += 1
 		assert_almost_eq(page.z, 1.0 / page.w, 0.000001)
@@ -134,39 +140,23 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		"The near-camera warmup must retain a fine page for the cross-frame LOD regression.")
 
 	# On this pinned Tmap view, quality 0.3 keeps the same 25 near detail cells
-	# while selecting 128-unit pages over them. A lower 0.15 threshold stops
-	# emitting LOD >= 3 terrain nodes and therefore has no valid detail handoff.
-	# The prior frame's overlapping 64-unit residents deliberately remain in the
-	# 128-slot cache: foliage must borrow this frame's coarser selection, not the
-	# finest page retained from an older frame.
+	# while selecting 128-unit pages over them. The prior frame's overlapping
+	# 64-unit pages stay resident in the 128-record cache, and retail's lookup
+	# takes the first resident record in record order at the finest matching
+	# granularity with no LOD or same-frame preference, so the fine pages
+	# claimed first keep answering for the cells they cover.
+	# (retail Terrain_FindSectorPatchRT @ 0x6042B0..0x60430B)
 	terrain.set_lod_quality(0.3)
-	terrain.render_frame()
-	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
-	for row_value in _visible_detail_draws(dispatcher):
-		var transition_draw := row_value as Dictionary
-		if not bool(transition_draw.tile_cache_ready):
-			continue
-		var transition_page := transition_draw.tile_cache_projection as Vector4
-		assert_ne(transition_page.w, 64.0,
-			"the transition frame must not borrow a stale fine page while coarse work is pending")
 	await _settle_tile_cache_with_foliage(terrain, dispatcher, camera)
 	assert_gt(int(dispatcher.get_frame_stats().detail_cells), 0,
 		"The coarse regression frame must retain a live terrain detail handoff.")
-	var current_coarse_draws := 0
-	var stale_fine_draws := 0
+	var borrowed_fine_draws := 0
 	for row_value in _visible_detail_draws(dispatcher):
 		var draw := row_value as Dictionary
-		if not bool(draw.tile_cache_ready):
-			continue
-		var page := draw.tile_cache_projection as Vector4
-		if page.w > 64.0:
-			current_coarse_draws += 1
-		elif page.w == 64.0:
-			stale_fine_draws += 1
-	assert_gt(current_coarse_draws, 0,
-		"The low-quality frame must expose a current coarser terrain page to foliage.")
-	assert_eq(stale_fine_draws, 0,
-		"Foliage must not borrow an overlapping fine page retained from the prior frame.")
+		if bool(draw.tile_cache_ready) and (draw.tile_cache_projection as Vector4).w == 64.0:
+			borrowed_fine_draws += 1
+	assert_gt(borrowed_fine_draws, 0,
+		"Resident fine pages from the earlier frames still answer the lookup first.")
 
 	# Release native texture owners before RenderingServer teardown; keeping the
 	# resource locals alive until process exit makes Godot report false leaks.

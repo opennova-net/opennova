@@ -77,6 +77,9 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(D_METHOD("invalidate_tile_cache_region", "minimum_x_q16",
+			"minimum_z_q16", "maximum_x_q16", "maximum_z_q16"),
+			&Terrain::invalidate_tile_cache_region);
 	ClassDB::bind_method(D_METHOD("append_terrain_scorch", "texture_index",
 			"minimum_x_q16", "minimum_z_q16", "maximum_x_q16",
 			"maximum_z_q16"), &Terrain::append_terrain_scorch);
@@ -260,21 +263,30 @@ void Terrain::clear_terrain_scorches() {
 	tile_cache_device.clear_terrain_scorches();
 }
 
+int64_t Terrain::invalidate_tile_cache_region(int64_t p_minimum_x_q16,
+		int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
+		int64_t p_maximum_z_q16) {
+	if (p_minimum_x_q16 < INT32_MIN || p_minimum_x_q16 > INT32_MAX ||
+			p_minimum_z_q16 < INT32_MIN || p_minimum_z_q16 > INT32_MAX ||
+			p_maximum_x_q16 < INT32_MIN || p_maximum_x_q16 > INT32_MAX ||
+			p_maximum_z_q16 < INT32_MIN || p_maximum_z_q16 > INT32_MAX) {
+		return 0;
+	}
+	return static_cast<int64_t>(tile_cache_device.invalidate_region(
+			static_cast<int32_t>(p_minimum_x_q16),
+			static_cast<int32_t>(p_minimum_z_q16),
+			static_cast<int32_t>(p_maximum_x_q16),
+			static_cast<int32_t>(p_maximum_z_q16)));
+}
+
 std::optional<opennova::TerrainTilePageBinding>
 Terrain::get_tile_cache_binding_for_world_point_native(
 		float p_world_x, float p_world_z) {
 	if (!std::isfinite(p_world_x) || !std::isfinite(p_world_z)) {
 		return std::nullopt;
 	}
-	constexpr float SECTOR_SIZE = 512.0f;
-	opennova::TerrainTileResidentPoint point;
-	point.sector_origin_x = static_cast<int32_t>(
-			std::floor(p_world_x / SECTOR_SIZE)) * 512;
-	point.sector_origin_z = static_cast<int32_t>(
-			std::floor(p_world_z / SECTOR_SIZE)) * 512;
-	point.world_x = p_world_x;
-	point.world_z = p_world_z;
-	return tile_cache_device.best_ready(point);
+	return tile_cache_device.lookup(
+			opennova::TerrainTileResidentPoint{p_world_x, p_world_z});
 }
 
 Vector3 Terrain::get_tile_overlay_tint() const {
@@ -490,7 +502,18 @@ void Terrain::render_frame() {
 	}
 	static_shadow_rasterizer.begin_frame(page_light_direction,
 			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
-	tile_cache_device.begin_frame(draw_list.frame_id);
+	// The page claims stamp the weather clock's TOD epoch (Env_TodMinutesElapsed,
+	// one step per 311 logic ticks); a page whose stamp falls behind is
+	// refreshed on an all-hit frame.
+	const uint32_t tod_epoch = cached_env_node != nullptr &&
+					cached_env_node->state().weather() != nullptr
+			? cached_env_node->state().weather()->tod_minutes_elapsed
+			: 0u;
+	tile_cache_device.begin_frame(draw_list.frame_id, tod_epoch);
+	// Every missing visible page composes before the patches draw.
+	const std::vector<opennova::TerrainTilePageBinding> &pages =
+			tile_cache_device.compose_frame(draw_list, page_tile_tint,
+					page_light_direction);
 
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
 	RenderingServer* rs = RenderingServer::get_singleton();
@@ -550,9 +573,7 @@ void Terrain::render_frame() {
 			last_quadrant[i] = quadrant;
 		}
 
-		const opennova::TerrainTilePageBinding page =
-				tile_cache_device.request(
-					draw, page_tile_tint, page_light_direction);
+		const opennova::TerrainTilePageBinding &page = pages[i];
 		const std::optional<opennova::TerrainTilePageProjection> projection =
 				page.ready
 						? opennova::TerrainTileCompositionCache::page_projection(
@@ -649,11 +670,9 @@ void Terrain::render_frame() {
 			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-			// one multiply; the tile path consumes this uniform.
+			// one multiply; the page composer and the detail foliage read it.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
-			terrain_material->set_shader_parameter(
-				"u_tile_overlay_tint", tile_overlay_tint);
 		}
 	}
 }

@@ -36,6 +36,16 @@ bool TerrainScorchEvents::emit_sized(int32_t center_x_q16, int32_t center_y_q16,
             scorch_id, half_extent_q16, producer_roll(scorch_id)), tick);
 }
 
+void TerrainScorchEvents::emit_page_invalidation(int32_t center_x_q16,
+		int32_t center_y_q16, int32_t bound_radius_q16) {
+	// bbox = position -+ 2 * boundRadius on x and y [orig:
+	// Entity_ProcessDestructibleDeath @0x43FC12..0x43FC5E]
+	const int32_t reach = 2 * bound_radius_q16;
+	pending_page_invalidations_.push_back(TerrainPageInvalidationEvent{
+			center_x_q16 - reach, center_y_q16 - reach,
+			center_x_q16 + reach, center_y_q16 + reach});
+}
+
 bool TerrainScorchEvents::append_resolved(
 		const terrain::TerrainScorchResolved &resolved, uint32_t tick) {
 	if (!resolved.valid) return false;
@@ -51,6 +61,7 @@ bool TerrainScorchEvents::append_resolved(
 
 void TerrainScorchEvents::reset() noexcept {
 	pending_.clear();
+	pending_page_invalidations_.clear();
 	record_count_ = 0;
 	rejected_count_ = 0;
 }
