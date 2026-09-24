@@ -338,14 +338,17 @@ Variant DebugControlTable::normalize_value(const Ref<DebugControlRow> &p_row, co
 			return number;
 		}
 		case DebugControlRow::ENUM: {
-			if (p_value.get_type() != Variant::INT) {
+			// An integral float is an index too: JSON (MCP) carries every
+			// number as a float, as the integer action arguments accept.
+			if (p_value.get_type() != Variant::INT && p_value.get_type() != Variant::FLOAT) {
 				return Variant();
 			}
-			const int64_t index = p_value;
-			if (index < 0 || index >= p_row->choices_.size()) {
+			const double number = p_value;
+			if (!std::isfinite(number) || number != std::floor(number) || number < 0.0 ||
+					number >= p_row->choices_.size()) {
 				return Variant();
 			}
-			return index;
+			return static_cast<int64_t>(number);
 		}
 		case DebugControlRow::ACTION:
 			break;
