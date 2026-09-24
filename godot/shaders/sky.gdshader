@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, cull_front;
+render_mode unshaded, cull_front, depth_draw_never;
 
 // Sky-dome shader: structural port of the original two-pass dome combine
 // [orig: render_skybox @ 0x579080], folded into one Godot pass:
@@ -114,6 +114,14 @@ void vertex() {
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;
 	POSITION = clip;
+	// The dome draws with z-write OFF and ZFUNC ALWAYS (pass flags 0x300000
+	// from every beauty/mirror caller [orig: render_skybox @ 0x579883 /
+	// @ 0x579ac1 / @ 0x579c3e], the bits decoded by CGfxShader_ApplyPass
+	// @ 0x68322b..0x68324f) before any world geometry, so the whole world
+	// overdraws it. Pin the dome to the exact far plane (reverse-Z 0) and
+	// never write depth: every nearer surface wins the depth test whatever
+	// the draw order, while the cleared sky passes.
+	POSITION.z = 0.0;
 	VERTEX = scaled;
 }
 

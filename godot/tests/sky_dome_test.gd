@@ -316,3 +316,51 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	for channel in 3:
 		assert_almost_eq(samples[0][channel], samples[1][channel], 0.01,
 				"fogged sky and frame clear agree in channel %d" % channel)
+
+
+func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
+	# Retail draws the dome with z-write off and ZFUNC ALWAYS before any world
+	# geometry (pass flags 0x300000 [orig: render_skybox @ 0x579883]), so the
+	# world overdraws it wherever it is. From 300 u up the dome (anchored at
+	# half the eye height) meets a horizontal view ray ~400 u out; a surface
+	# 600 u out must still draw over it.
+	if DisplayServer.get_name() == "headless":
+		pending("dome/world depth ordering needs a windowed renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 2000.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3(0.0, 300.0, 0.0), Vector3(0.0, 300.0, -1.0), Vector3.UP)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	viewport.add_child(sky)
+	var wall := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(200.0, 200.0, 10.0)
+	wall.mesh = box
+	var red := StandardMaterial3D.new()
+	red.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red.albedo_color = Color(1.0, 0.0, 0.0)
+	wall.material_override = red
+	viewport.add_child(wall)
+	wall.global_position = Vector3(0.0, 300.0, -600.0)
+	sky.advance_frame(0.0)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	assert_gt(pixel.r, 0.9, "the far wall draws over the dome (red %s)" % pixel)
+	assert_lt(pixel.g, 0.1, "no dome colour survives over the wall (%s)" % pixel)
+	assert_lt(pixel.b, 0.1, "no dome colour survives over the wall (%s)" % pixel)
