@@ -446,6 +446,7 @@ int main() {
         spawn_entity(world, 0, 0, 4, "defless", Vec3{1, 0, 0});
         world.ai.attach(mid);
         world.registry.get(near_a)->bound_radius = 1.5f;
+        world.tables.item_names.set(5311, "Rifleman");
 
         inspect::EntityMarkerQuery query;
         query.range_units = 100.0f;
@@ -453,6 +454,7 @@ int main() {
         CHECK(rows.size() == 2);                         // near + mid; far out of range, defless has no def
         CHECK(rows.size() == 2 && rows[0].name == "near"); // nearest first
         CHECK(rows.size() == 2 && rows[0].bound_radius == 1.5f);
+        CHECK(rows.size() == 2 && rows[0].item_name == "Rifleman"); // the unnamed label's fallback
         CHECK(rows.size() == 2 && rows[1].has_brain && !rows[0].has_brain);
 
         query.cap = 1;

@@ -478,6 +478,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	// A new world's first tick re-pushes every overlay record.
 	overlay_tick_ = static_cast<uint64_t>(-1);
 	overlay_selection_ = 0xFFFF;
+	overlay_wants_ = 0;
 	last_hitbox_push_ms_ = -1;
 	if (overlay_live_) {
 		tools_->clear_overlay_records();
@@ -605,11 +606,18 @@ void DevTools::push_control_states() {
 		last_control_state_push_ms_ = -1;
 		return;
 	}
+	std::vector<const char *> ids;
+	tools_->wanted_control_ids(ids);
+	// A window that just opened reads its rows this frame, not a cadence later.
+	const bool ids_changed = !std::equal(ids.begin(), ids.end(), control_ids_.begin(), control_ids_.end(),
+			[](const char *a, const char *b) { return std::strcmp(a, b) == 0; });
+	if (ids_changed) {
+		last_control_state_push_ms_ = -1;
+		control_ids_ = ids;
+	}
 	if (!push_due(last_control_state_push_ms_, opennova::devtools::GameDevTools::kControlStateSeconds)) {
 		return;
 	}
-	std::vector<const char *> ids;
-	tools_->wanted_control_ids(ids);
 	std::vector<opennova::devtools::ControlState> states;
 	states.reserve(ids.size());
 	for (const char *id : ids) {

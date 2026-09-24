@@ -370,12 +370,15 @@ void StatsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 			ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
 	if (ImGui::BeginTable("stats_rows", 4, table_flags)) {
 		ImGui::TableSetupScrollFreeze(0, 1);
-		ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		// The tree runs ten levels deep: the name column takes most of the width.
+		ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthStretch, 5.0f);
 		ImGui::TableSetupColumn("Avg ms", ImGuiTableColumnFlags_WidthFixed, 64.0f);
 		ImGui::TableSetupColumn("Peak ms", ImGuiTableColumnFlags_WidthFixed, 64.0f);
-		ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 		ImGui::TableHeadersRow();
+		ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, ImGui::GetFontSize() * 0.75f);
 		draw_rows(0, 0);
+		ImGui::PopStyleVar();
 		ImGui::EndTable();
 	}
 }

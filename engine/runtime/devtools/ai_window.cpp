@@ -3,6 +3,8 @@
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
 
+#include <base/io/fixed.h>
+
 #include <imgui.h>
 
 #include <cstdarg>
@@ -70,11 +72,6 @@ bool AiWindow::any_layer_enabled() const {
 	return false;
 }
 
-const char *AiWindow::brain_text(int row) const {
-	if (row < 0 || row >= brain_count()) return "";
-	return brain_rows_[static_cast<size_t>(row)].c_str();
-}
-
 void AiWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
@@ -135,8 +132,6 @@ const char *AiWindow::detail_line(int row) const {
 }
 
 void AiWindow::format_snapshot() {
-	brain_rows_.clear();
-	brain_alerts_.clear();
 	group_rows_.clear();
 	group_alerts_.clear();
 	group_ids_.clear();
@@ -153,21 +148,6 @@ void AiWindow::format_snapshot() {
 			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
             static_cast<unsigned long long>(c.runtime_gap_calls));
 	counters_ = buf;
-	brain_rows_.reserve(snapshot_.report.rows.size());
-	for (const world::inspect::AiOverlayRow &r : snapshot_.report.rows) {
-		char target[64] = "-";
-		if (r.target_valid) {
-			std::snprintf(target, sizeof(target), "%s", r.target_name.empty() ? "?" : r.target_name.c_str());
-		}
-		char route[32] = "-";
-		if (r.wp_channel > 0) std::snprintf(route, sizeof(route), "ch %d node %d", r.wp_channel, r.wp_node);
-		std::snprintf(buf, sizeof(buf), "%-16s  G%02d  %-6s  %-20s  -> %-16s  %s",
-				r.name.empty() ? "(unnamed)" : r.name.c_str(), r.group_id,
-				r.alive ? alert_name(r.alert) : "DEAD",
-				r.state_name.empty() ? "?" : r.state_name.c_str(), target, route);
-		brain_rows_.emplace_back(buf);
-		brain_alerts_.push_back(r.alive ? r.alert : -1);
-	}
 	group_rows_.reserve(snapshot_.report.groups.size());
 	for (const world::inspect::AiGroupRow &g : snapshot_.report.groups) {
 		std::snprintf(buf, sizeof(buf), "G%02d  %-6s  alive %d/%d", g.id,
@@ -323,26 +303,67 @@ void AiWindow::draw(ImGuiPass &pass, uint64_t) {
 	draw_detail_pane();
 	char header[48];
 	std::snprintf(header, sizeof(header), "Brains (%d)###brains", brain_count());
-	if (ImGui::CollapsingHeader(header)) {
-		if (ImGui::BeginChild("brains", ImVec2(0.0f, 220.0f), ImGuiChildFlags_None,
-					ImGuiWindowFlags_HorizontalScrollbar)) {
-			ImGuiListClipper clipper;
-			clipper.Begin(brain_count());
-			while (clipper.Step()) {
-				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-					const int alert = brain_alerts_[static_cast<size_t>(i)];
-					if (alert < 0) {
-						ImGui::TextDisabled("%s", brain_rows_[static_cast<size_t>(i)].c_str());
-					} else {
-						ImGui::TextColored(alert_color(alert), "%s", brain_rows_[static_cast<size_t>(i)].c_str());
-					}
-				}
-			}
-			clipper.End();
-		}
-		ImGui::EndChild();
+	if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
+		draw_brains();
 	}
 	draw_tables();
+}
+
+// One row per brain in the record (the report's cap), coloured by alert;
+// a click selects the brain's entity, which fills the Selected brain pane.
+void AiWindow::draw_brains() {
+	const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+			ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
+			ImGuiTableFlags_SizingFixedFit;
+	if (!ImGui::BeginTable("brains", 7, flags, ImVec2(0.0f, 220.0f))) return;
+	ImGui::TableSetupScrollFreeze(1, 1);
+	ImGui::TableSetupColumn("Brain");
+	ImGui::TableSetupColumn("Grp");
+	ImGui::TableSetupColumn("Alert");
+	ImGui::TableSetupColumn("Position");
+	ImGui::TableSetupColumn("State");
+	ImGui::TableSetupColumn("Target");
+	ImGui::TableSetupColumn("Route");
+	ImGui::TableHeadersRow();
+	const std::vector<world::inspect::AiOverlayRow> &rows = snapshot_.report.rows;
+	const uint16_t selected = entities_.selected_handle();
+	ImGuiListClipper clipper;
+	clipper.Begin(static_cast<int>(rows.size()));
+	while (clipper.Step()) {
+		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			const world::inspect::AiOverlayRow &r = rows[static_cast<size_t>(i)];
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::PushID(i);
+			const ImVec4 color = r.alive ? alert_color(r.alert) : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+			ImGui::PushStyleColor(ImGuiCol_Text, color);
+			if (ImGui::Selectable(r.name.empty() ? "(unnamed)" : r.name.c_str(), r.handle == selected,
+						ImGuiSelectableFlags_SpanAllColumns)) {
+				entities_.select_handle(r.handle);
+			}
+			ImGui::TableSetColumnIndex(1);
+			ImGui::Text("G%02d", r.group_id);
+			ImGui::TableSetColumnIndex(2);
+			ImGui::TextUnformatted(r.alive ? alert_name(r.alert) : "DEAD");
+			ImGui::TableSetColumnIndex(3);
+			ImGui::Text("%.1f %.1f %.1f", r.pos[0] / io::kFp16OneD, r.pos[1] / io::kFp16OneD,
+					r.pos[2] / io::kFp16OneD);
+			ImGui::TableSetColumnIndex(4);
+			ImGui::TextUnformatted(r.state_name.empty() ? "?" : r.state_name.c_str());
+			ImGui::TableSetColumnIndex(5);
+			ImGui::TextUnformatted(!r.target_valid ? "-" : r.target_name.empty() ? "?" : r.target_name.c_str());
+			ImGui::TableSetColumnIndex(6);
+			if (r.wp_channel > 0) {
+				ImGui::Text("ch %d node %d", r.wp_channel, r.wp_node);
+			} else {
+				ImGui::TextUnformatted("-");
+			}
+			ImGui::PopStyleColor();
+			ImGui::PopID();
+		}
+	}
+	clipper.End();
+	ImGui::EndTable();
 }
 
 }  // namespace opennova::devtools

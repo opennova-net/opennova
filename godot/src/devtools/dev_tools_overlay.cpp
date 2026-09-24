@@ -115,6 +115,10 @@ void DevTools::push_overlay_frame() {
 		if (overlay_live_) {
 			tools_->clear_overlay_records();
 			overlay_live_ = false;
+			// A reopen (or a layer back on) re-reads every record at once,
+			// even with the clock paused.
+			overlay_tick_ = static_cast<uint64_t>(-1);
+			overlay_wants_ = 0;
 		}
 		return;
 	}
@@ -127,8 +131,16 @@ void DevTools::push_overlay_frame() {
 		tools_->clear_overlay_records();
 		return;
 	}
+	// A record re-reads on a new logic tick, and on the frame its layer comes
+	// on (a paused world's tick never moves).
+	const uint32_t wants = (tools_->needs_entity_markers() ? 1u : 0u) |
+			(tools_->needs_ai_overlay() ? 2u : 0u) | (tools_->needs_rays_overlay() ? 4u : 0u) |
+			(tools_->needs_contacts_overlay() ? 8u : 0u) | (tools_->needs_hitbox_overlay() ? 16u : 0u);
+	const bool wants_grew = (wants & ~overlay_wants_) != 0;
+	overlay_wants_ = wants;
+	if ((wants & 16u) != 0 && wants_grew) last_hitbox_push_ms_ = -1;
 	const uint64_t tick = static_cast<uint64_t>(sim->get_logic_tick());
-	const bool new_tick = tick != overlay_tick_;
+	const bool new_tick = tick != overlay_tick_ || wants_grew;
 	overlay_tick_ = tick;
 	const opennova::world::Vec3 eye{camera.eye[0], camera.eye[1], camera.eye[2]};
 
