@@ -92,10 +92,13 @@ void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
 }
 
 bool GameDevTools::needs_entity_directory() const {
-	// The Properties window reads the list's selected row, so the directory
-	// keeps flowing while either entity window shows (the list holds its
-	// selection pending across its own close and re-applies it per push).
-	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
+	// The Properties and AI windows read the list's selected row, and the
+	// detail card refreshes on the directory's cadence, so the directory keeps
+	// flowing while any selection-following window shows (the list holds its
+	// selection pending across its own close and re-applies it per push, and
+	// its "entity is gone" rule clears a dead selection for all three).
+	return pass_.is_open() &&
+			(entities_window_->open || entity_properties_window_->open || ai_window_->open);
 }
 
 bool GameDevTools::take_control_request(ControlRequest &request) {

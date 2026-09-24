@@ -12,8 +12,8 @@
 // otherwise keeps the handle pending for the next push. Visibility-armed:
 // while hidden it drops its snapshot (the selection survives as a pending
 // handle so reopening re-selects the same entity), and the embedder (gated on
-// GameDevTools::needs_entity_directory, which the Properties window keeps
-// armed too) stops building new ones once no entity window shows. Rows are
+// GameDevTools::needs_entity_directory, which the Properties and AI windows
+// keep armed too) stops building new ones once none of them shows. Rows are
 // formatted once per push (the embedder pushes on the StatsWindow 0.5 s
 // cadence, kRefreshSeconds); a frame between pushes only re-emits cached
 // strings.
