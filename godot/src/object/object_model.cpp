@@ -937,6 +937,8 @@ void ObjectModel::refresh_render_order() {
 			// (renderer/render_order).
 			const int32_t rung = viewmodel_pass_
 					? opennova::renderer::kRungViewmodel
+					: render_rung_override_ != kRenderRungFromWaterSide
+					? render_rung_override_
 					: shader_cache->alpha_rung_for_height(world_height);
 			if (rung != draw.rung) {
 				draw.rung = rung;
@@ -1276,6 +1278,25 @@ void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const 
 	p_instance->set_instance_shader_parameter(
 			StringName("u_viewmodel_pass"), viewmodel_pass_);
 	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
+}
+
+void ObjectModel::set_render_rung_override(int32_t p_rung) {
+	if (render_rung_override_ == p_rung) {
+		return;
+	}
+	render_rung_override_ = p_rung;
+	// The strips outside the blended section keep the model's retained
+	// material (material_for_index); the blended strips own duplicates the
+	// render-order refresh re-ranks.
+	const int32_t retained_rung = p_rung == kRenderRungFromWaterSide ? 0 : p_rung;
+	for (KeyValue<int64_t, Ref<ShaderMaterial>> &entry : material_cache_) {
+		if (entry.value.is_valid()) {
+			entry.value->set_render_priority(retained_rung);
+		}
+	}
+	render_order_dirty_ = true;
+	wake_runtime_frame();
+	refresh_render_order();
 }
 
 void ObjectModel::set_viewmodel_pass(bool p_enabled) {

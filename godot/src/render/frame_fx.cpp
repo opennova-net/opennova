@@ -1682,6 +1682,12 @@ void FrameFx::unregister_q3_source(GeometryInstance3D *p_source) {
 	Q3SourceRegistry::unregister_source(p_source);
 }
 
+void FrameFx::set_q3_celestial_self_lum(GeometryInstance3D *p_source,
+		const Vector3 &p_self_lum) {
+	Q3SourceRegistry::set_celestial_self_lum(p_source,
+			{p_self_lum.x, p_self_lum.y, p_self_lum.z});
+}
+
 bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
 		opennova::renderer::ObjectMaterialClassification &r_classification) {
 	return Q3SourceRegistry::object_material_classification(p_material,
@@ -1689,8 +1695,8 @@ bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
 }
 
 void FrameFx::register_q3_source(GeometryInstance3D *p_source,
-		opennova::renderer::Q3Source p_kind, uint32_t p_additive_surfaces) {
-	Q3SourceRegistry::register_source(p_source, p_kind, p_additive_surfaces);
+		opennova::renderer::Q3Source p_kind) {
+	Q3SourceRegistry::register_source(p_source, p_kind);
 }
 
 void FrameFx::publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,

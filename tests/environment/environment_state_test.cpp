@@ -6,6 +6,7 @@
 // world block, 0x808080 fog/clear, flat terrain ramps), generation
 // discipline, the reset/prewarm epoch, the network wire units, and the
 // shader-global publication policy. RE record: docs/env/env-tod-re.md.
+#include <runtime/environment/celestial_frame.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
@@ -876,6 +877,48 @@ int main() {
 						!near(sky.fog_end, device_end),
 				"the dome fog end is the unscaled smoothed fog distance, not the "
 				"overcast-scaled device end");
+	}
+
+	// --- the celestial submit values (UPL_INTENSITY) -------------------------
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		cfg.fog_level = 700.0f;
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::Vec3 cam{10.0f, 20.0f, 30.0f};
+		// Both discs flush together after the moon's write: with a moon model
+		// the sun evaluates the MOON alpha [orig: render_celestial_bodies
+		// @ 0x5acbfa sun write, @ 0x5accc1 moon write, one flush @ 0x5acce9].
+		const opennova::env::CelestialDiscsFrame with_moon =
+				opennova::env::build_celestial_discs_frame(env, cam, true);
+		const int moon_alpha = opennova::env::celestial_moon_alpha_fixed(700.0f, 0, false);
+		ok &= expect(with_moon.upl == moon_alpha && moon_alpha == 0x8000,
+				"with a moon model both discs take the moon alpha, (700-400)/600");
+		ok &= expect(with_moon.q3_upl ==
+						opennova::env::celestial_moon_alpha_fixed(700.0f, 0, true),
+				"the bloom redraw takes the fog-shader moon leg");
+		const opennova::env::CelestialDiscsFrame sun_only =
+				opennova::env::build_celestial_discs_frame(env, cam, false);
+		ok &= expect(sun_only.upl == 0x10000 && sun_only.q3_upl == 0x10000,
+				"without a moon model the sun keeps its own alpha");
+		ok &= expect(near(sun_only.sun_position.x, cam.x + env.sun_direction().x * 64.0f) &&
+						near(sun_only.moon_position.y,
+								cam.y + env.moon_direction().y * 64.0f),
+				"the discs place at camera + direction * 64");
+		// The glow folds the MAIN camera's view dot and skips its submit at a
+		// non-positive alpha [orig: render_skybox_sun_glow @ 0x5ad0ae].
+		const opennova::env::GlareFrame facing =
+				opennova::env::build_glare_frame(env, cam, 0x10000, 255);
+		ok &= expect(facing.drawn && facing.upl ==
+						opennova::env::glare_glow_alpha_fixed(0x10000, 255, 0, 0, true),
+				"facing the sun the glow draws the witnessed alpha");
+		const opennova::env::GlareFrame away =
+				opennova::env::build_glare_frame(env, cam, -0x8000, 255);
+		ok &= expect(!away.drawn && away.upl == 0 && !away.q3_drawn,
+				"looking away submits no glow in either pass");
+		ok &= expect(opennova::env::kCelestialUplRegister == 32,
+				"UPL_INTENSITY is CTRL ordinal 32 (Render_SubmitAlpha16 @ 0x83fde8)");
 	}
 
 	// --- the dome constants under NVG and the thermal view -------------------

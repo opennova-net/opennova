@@ -320,6 +320,7 @@ private:
 	Array robj_dense_;
 	bool viewmodel_pass_ = false;
 	uint32_t viewmodel_pass_stamped_serial_ = 0;
+	int32_t render_rung_override_ = kRenderRungFromWaterSide;
 	int64_t panm_applied_revision_ = 0;
 	// The part draw's two section masks: a part is hidden when its bit is set
 	// in the entity's destroyed sections OR clear in the occlusion frame's
@@ -810,6 +811,14 @@ public:
 	// must not cull gun parts the wider renderfov shows), and its alpha strips
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
 	void set_viewmodel_pass(bool p_enabled);
+	// A fixed frame-ladder rung for every strip of the model, in place of the
+	// water-side classification of the blended strips (renderer/render_order):
+	// the celestial bodies flush whole at their own frame slot (the sky
+	// bracket or the frame's glow), whichever strip section a surface sits in.
+	// kRenderRungFromWaterSide restores the classification (and rung 0 for the
+	// strips outside the blended section).
+	static constexpr int32_t kRenderRungFromWaterSide = INT32_MIN;
+	void set_render_rung_override(int32_t p_rung);
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
 	// Stamp every person draw (its linked avatar parts and the models drawn
 	// in its slot included) with its BySide wave for the foliage depth masks

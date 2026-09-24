@@ -68,6 +68,8 @@ void Celestial::_bind_methods() {
 			&Celestial::get_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_sun_veil_alpha"),
 			&Celestial::get_sun_veil_alpha);
+	ClassDB::bind_method(D_METHOD("get_overlay_body_node", "body"),
+			&Celestial::get_overlay_body_node);
 }
 
 void Celestial::set_environment_path(const NodePath &p_path) {
@@ -111,8 +113,8 @@ void Celestial::_apply_sky_pass_gates() {
 		if (body == nullptr) {
 			continue;
 		}
-		_set_body_parameter(*body, "u_beauty_pass_drawn", sky_beauty_pass_drawn_);
-		_set_body_parameter(*body, "u_mirror_pass_drawn", sky_mirror_pass_drawn_);
+		_set_body_parameter(*body, "u_sky_beauty_drawn", sky_beauty_pass_drawn_);
+		_set_body_parameter(*body, "u_sky_mirror_drawn", sky_mirror_pass_drawn_);
 	}
 }
 
@@ -155,27 +157,29 @@ void Celestial::_rebuild_if_needed() {
 	struct Spec {
 		String key;
 		String name;
-		bool additive;
-		int priority;
-		String tint;
+		int rung;
+		opennova::renderer::Q3Source q3_source;
+		bool q3_drawn;
 	};
 	// The witnessed load policy (celestial_frame.h carries the cites): the
-	// sky pass draws the bodies BEFORE all world alpha; the glare is the
+	// sky bracket draws the discs BEFORE all world alpha; the glare is the
 	// frame's final draw. Rungs are single-sourced from
-	// engine/runtime/renderer/render_order (REN-3).
+	// engine/runtime/renderer/render_order (REN-3). The bloom pass redraws
+	// the discs and the glow, never the glint (FrameFX_RenderBloomPass
+	// @ 0x582a77 / @ 0x582a80).
 	const Spec wanted[] = {
-		{ "sun", env_data->get_sun_3di(), false,
-				opennova::renderer::kRungSkyBody, "sun" },
-		{ "moon", env_data->get_moon_3di(), false,
-				opennova::renderer::kRungSkyBody, "moon" },
-		{ "glare", env_data->get_glare_3di(), true,
-				opennova::renderer::kRungSunGlow, "sun" },
+		{ "sun", env_data->get_sun_3di(), opennova::renderer::kRungSkyBody,
+				opennova::renderer::Q3Source::CelestialBody, true },
+		{ "moon", env_data->get_moon_3di(), opennova::renderer::kRungSkyBody,
+				opennova::renderer::Q3Source::CelestialBody, true },
+		{ "glare", env_data->get_glare_3di(), opennova::renderer::kRungSunGlow,
+				opennova::renderer::Q3Source::SunGlow, true },
 		// The water-reflected sun glint reuses the glare 3DI, mirrored below
 		// the eye [orig: update_sun_glare @ 0x5ad130 submits
 		// Celestial_GlareModel at camera + sun * 128 with the height term
-		// negated, additive 0x110, see docs/env/env-tod-re.md].
-		{ "glint", env_data->get_glare_3di(), true,
-				opennova::renderer::kRungSunGlow, "sun" },
+		// negated, flags 0x110, see docs/env/env-tod-re.md].
+		{ "glint", env_data->get_glare_3di(), opennova::renderer::kRungSunGlow,
+				opennova::renderer::Q3Source::SunGlow, false },
 	};
 	// Rebuild only when the set of names actually changed (undo/scrub safe).
 	HashMap<String, String> signature;
@@ -215,9 +219,11 @@ void Celestial::_rebuild_if_needed() {
 		ObjectModel *model = memnew(ObjectModel);
 		model->set_name("Celestial_" + spec.key);
 		add_child(model);
-		// Celestial bodies + the sun glow render INTO the water mirror —
-		// keep them on the mirror-visible world layer, unlike the filtered
-		// world entities (the witness rides the water mirror record).
+		// The discs render INTO the water mirror (its sky bracket re-enters
+		// render_celestial_bodies) — keep the bodies on the mirror-visible
+		// world layer, unlike the filtered world entities (the witness rides
+		// the water mirror record); the glow and glint gate the mirror pass
+		// out in their shader.
 		model->set_mirror_reflected(true);
 		model->set_object_data(data);
 		// Every celestial submit uses the IDENTITY world rotation in RENDER
@@ -234,42 +240,59 @@ void Celestial::_rebuild_if_needed() {
 		// godot-cpp Basis(axis, angle) diverges from core for negative axes.
 		model->set_basis(Basis(Vector3(0.0f, 1.0f, 0.0f),
 				static_cast<real_t>(Math_PI) * 0.5f));
-		Ref<ShaderMaterial> material =
-				_make_celestial_material(spec.additive, spec.priority);
+		// The body renders through its AUTHORED material (celestial_frame.h):
+		// the model's own surface materials take only the sky-pass placement
+		// hook (object/vertex_standard.gdshaderinc u_sky_*) and the fixed
+		// frame rung.
+		model->set_render_rung_override(spec.rung);
 		Body body;
 		body.model = model;
-		const InstalledMaterials installed =
-				_apply_material_override(model, material);
-		body.materials = installed.materials;
-		body.tint = spec.tint;
-		if (spec.key == "sun" || spec.key == "moon" || spec.key == "glare") {
-			// The registration carries the blend each surface was installed
-			// with, so the focused Q3 adapter adds or alpha-blends the disc
-			// exactly as the beauty material does.
-			const opennova::renderer::Q3Source source = spec.key == "glare" ?
-					opennova::renderer::Q3Source::SunGlow :
-					opennova::renderer::Q3Source::CelestialBody;
-			for (const InstalledMesh &mesh : installed.meshes) {
-				FrameFx::register_q3_source(mesh.mesh, source,
-						mesh.additive_surfaces);
+		body.disc = spec.key == "sun" || spec.key == "moon";
+		_collect_meshes(model, body.meshes);
+		const Array surface_materials = model->get_surface_materials();
+		const PackedInt32Array surface_indices = model->get_surface_material_indices();
+		for (MeshInstance3D *mesh_instance : body.meshes) {
+			// The vertex stage relocates the body for the active render-pass
+			// camera. Keep the source-camera AABB/occlusion result from
+			// rejecting the mirror pass before that relocation reaches the GPU.
+			mesh_instance->set_extra_cull_margin(1.0e6);
+			mesh_instance->set_ignore_occlusion_culling(true);
+			mesh_instance->set_cast_shadows_setting(
+					GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+			const Ref<ShaderMaterial> material = mesh_instance->get_material_override();
+			int material_index = -1;
+			for (int64_t i = 0; i < surface_materials.size(); ++i) {
+				if (Ref<ShaderMaterial>(surface_materials[i]) == material) {
+					material_index = surface_indices[i];
+					break;
+				}
+			}
+			body.materials.push_back(material);
+			body.material_indices.push_back(material_index);
+			// The Q3 redraw: the discs and the glow are the bloom pass's own
+			// submits, drawn only for a glow-capable (LUM) material, blended
+			// as that material is classified (the registry reads the
+			// classification); the glint is never redrawn.
+			opennova::renderer::ObjectMaterialClassification classification;
+			const bool glow = spec.q3_drawn && material.is_valid() &&
+					FrameFx::q3_object_material_classification(material,
+							classification) &&
+					classification.is_glow_capable;
+			if (glow) {
+				FrameFx::register_q3_source(mesh_instance, spec.q3_source);
+			} else {
+				FrameFx::unregister_q3_source(mesh_instance);
 			}
 		}
-		if (spec.key == "sun" || spec.key == "moon") {
+		_set_body_parameter(body, "u_sky_body", true);
+		_set_body_parameter(body, "u_sky_far_pin", body.disc);
+		if (body.disc) {
 			_stamp_environment_capture_layer(model);
-			// The disc bodies far-pin in BOTH shaders: the authored sun/moon
-			// materials are additive, so their surfaces render through
-			// celestial_additive (the shader carries the witness note).
-			for (const Ref<ShaderMaterial> &surface_material :
-					body.materials) {
-				surface_material->set_shader_parameter("u_depth_far_pin",
-						true);
-			}
-		}
-		if (spec.key == "glare") {
-			for (const Ref<ShaderMaterial> &surface_material : body.materials) {
-				surface_material->set_shader_parameter("u_glare_view_fade",
-						true);
-			}
+		} else {
+			// The glow and the glint are main-frame draws: the water mirror's
+			// scene never submits them in its base pass.
+			_set_body_parameter(body, "u_sky_mirror_drawn", false);
+			_set_body_parameter(body, "u_sky_beauty_drawn", false);
 		}
 		bodies_[spec.key] = body;
 	}
@@ -287,85 +310,6 @@ Ref<ObjectData> Celestial::_load_object_data(const String &p_graphic) {
 		return data;
 	}
 	return Ref<ObjectData>();
-}
-
-Ref<ShaderMaterial> Celestial::_make_celestial_material(bool p_additive,
-		int p_priority) {
-	if (celestial_shader_.is_null()) {
-		celestial_shader_ = ResourceLoader::get_singleton()->load(
-				"res://shaders/celestial.gdshader");
-		celestial_additive_shader_ = ResourceLoader::get_singleton()->load(
-				"res://shaders/celestial_additive.gdshader");
-	}
-	Ref<ShaderMaterial> material;
-	material.instantiate();
-	material->set_shader(p_additive ? celestial_additive_shader_
-									: celestial_shader_);
-	material->set_render_priority(p_priority);
-	return material;
-}
-
-// Walk the model's MeshInstance3D parts, reuse each surface's diffuse texture
-// in our celestial material, and return the ACTUAL installed materials with
-// the blend each surface was given. ObjectModel puts its generated material
-// in GeometryInstance3D.material_override; clear that whole-mesh override
-// AFTER harvesting its texture so these surface overrides own the draw and
-// remain the objects updated by the TOD pass.
-Celestial::InstalledMaterials Celestial::_apply_material_override(
-		Node3D *p_model, const Ref<ShaderMaterial> &p_base_material) {
-	InstalledMaterials installed;
-	const bool base_additive =
-			p_base_material->get_shader() == celestial_additive_shader_;
-	Vector<MeshInstance3D *> meshes;
-	_collect_meshes(p_model, meshes);
-	for (MeshInstance3D *mesh_instance : meshes) {
-		InstalledMesh installed_mesh;
-		installed_mesh.mesh = mesh_instance;
-		// The vertex shader relocates celestials for the active render-pass
-		// camera. Keep the source-camera AABB/occlusion result from rejecting
-		// the mirror pass before that relocation reaches the GPU.
-		mesh_instance->set_extra_cull_margin(1.0e6);
-		mesh_instance->set_ignore_occlusion_culling(true);
-		mesh_instance->set_cast_shadows_setting(
-				GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		Ref<Mesh> mesh = mesh_instance->get_mesh();
-		const int surface_count =
-				mesh.is_valid() ? mesh->get_surface_count() : 0;
-		Vector<Ref<ShaderMaterial>> surface_materials;
-		for (int surface = 0; surface < surface_count; ++surface) {
-			Ref<Material> src = mesh_instance->get_active_material(surface);
-			Ref<ShaderMaterial> material = p_base_material->duplicate();
-			// Preserve the source material's blend classification while
-			// replacing only the celestial placement/tint shader logic.
-			const bool additive = base_additive ||
-					source_material_uses_additive(src);
-			if (additive && !base_additive) {
-				material->set_shader(celestial_additive_shader_);
-			}
-			if (additive && surface < 32) {
-				installed_mesh.additive_surfaces |= 1u << surface;
-			}
-			Ref<ShaderMaterial> src_shader = src;
-			if (src_shader.is_valid()) {
-				const Variant diffuse =
-						src_shader->get_shader_parameter("u_diffuse");
-				if (diffuse.booleanize()) {
-					material->set_shader_parameter("u_diffuse", diffuse);
-				}
-			}
-			surface_materials.push_back(material);
-		}
-		// ObjectModel's whole-mesh override otherwise wins over the celestial
-		// surface materials on the render path.
-		mesh_instance->set_material_override(Ref<Material>());
-		for (int surface = 0; surface < surface_count; ++surface) {
-			const Ref<ShaderMaterial> &material = surface_materials[surface];
-			mesh_instance->set_surface_override_material(surface, material);
-			installed.materials.push_back(material);
-		}
-		installed.meshes.push_back(installed_mesh);
-	}
-	return installed;
 }
 
 bool Celestial::source_material_uses_additive(const Ref<Material> &p_source) {
@@ -450,76 +394,59 @@ void Celestial::advance_frame(double p_delta) {
 	const Vector3 forward = cam != nullptr
 			? -cam->get_global_transform().basis.get_column(2).normalized()
 			: Vector3(0.0f, 0.0f, -1.0f);
-	for (KeyValue<String, Body> &kv : bodies_) {
-		Body &body = kv.value;
-		opennova::env::CelestialBodyFrame frame;
-		// The frame builders run in the witnessed render-float axes; the
-		// camera enters and the placement leaves through the util/axes.h swap.
-		const opennova::env::Vec3 cam_rf = godot_to_render_float(cam_pos);
-		if (kv.key == "moon") {
-			frame = opennova::env::build_moon_frame(state, cam_rf);
-		} else if (kv.key == "glint") {
-			// The water-reflected sun glint runs its own leg (accumulator,
-			// mirrored placement, CPU alpha) [orig: update_sun_glare
-			// @ 0x5ad130, see docs/env/env-tod-re.md].
-			const float alpha = _advance_water_glint(state, cam_pos, sun_dir,
-					forward, body);
-			body.last_opacity = alpha;
-			continue;
-		} else if (kv.key == "glare") {
-			// env #14 (closed): ONE coarse unjittered gate ray with the
-			// witnessed start-height lift, then two jittered fine rays from
-			// the exact camera height, feed the 8-sample window + dead-band
-			// hysteresis [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f
-			// — the fine rays' entity leg keeps the documented sun-occlusion
-			// statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3), see docs/env/env-tod-re.md].
-			const float ray_length = glare_occlusion_->get_ray_length();
-			const Vector3 lift(0.0f, opennova::env::glare_coarse_start_lift(
-					glare_occlusion_->get_frame_index()), 0.0f);
-			const bool coarse_clear = _glare_ray_clear(cam_pos + lift,
-					sun_dir, ray_length, Vector3());
-			const bool visible_a = coarse_clear && _glare_ray_clear(cam_pos,
-					sun_dir, ray_length, glare_occlusion_->get_ray_jitter_a());
-			const bool visible_b = coarse_clear && _glare_ray_clear(cam_pos,
-					sun_dir, ray_length, glare_occlusion_->get_ray_jitter_b());
-			glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
-			frame = opennova::env::build_glare_frame(state, cam_rf,
-					glare_occlusion_->get_brightness());
-			// The focused Q3 (bloom source) draw uses NO
-			// occlusion test and the fog-based brightness - the glow still
-			// blooms over a ridge that blocks the occlusion rays
-			// (render_skybox_sun_glow(0, 0) from FrameFX_RenderBloomPass
-			// @ 0x582a77 - docs/env/env-tod-re.md). The typed producer publishes
-			// this pass-specific opacity to Q3FrameCompiler.
-			const float q3_opacity =
-					opennova::env::glare_q3_peak_opacity(state);
-			_set_body_parameter(body, "u_q3_opacity", q3_opacity);
-			body.model->set_visible(
-					frame.opacity > 0.0f || q3_opacity > 0.0f);
-			_set_body_parameter(body, "u_glare_direction", sun_dir);
-		} else {
-			frame = opennova::env::build_sun_frame(state, cam_rf);
-		}
+	// The frame builders run in the witnessed render-float axes; the camera
+	// enters and the placement leaves through the util/axes.h swap.
+	const opennova::env::Vec3 cam_rf = godot_to_render_float(cam_pos);
+	const opennova::env::CelestialDiscsFrame discs =
+			opennova::env::build_celestial_discs_frame(state, cam_rf,
+					bodies_.has("moon"));
+	if (Body *sun = bodies_.getptr("sun")) {
 		// camera + direction * 64, FULL camera height, identity rotation;
-		// below the horizon the terrain depth-occludes the body, like
-		// retail's draw order (celestial_frame.h).
-		body.model->set_global_position(render_float_to_godot(frame.position));
-		_set_body_parameter(body, "u_anchor_camera_world", cam_pos);
-		_set_body_parameter(body, "u_tint",
-				body.tint == "moon" ? to_vector3(state.moon_color())
-									: to_vector3(state.sun_color()));
-		_set_body_parameter(body, "u_opacity", frame.opacity);
-		body.last_opacity = frame.opacity;
-		// The typed Q3 disc read: the bloom pass redraws the discs through the
-		// fog-shader path, whose moon alpha leg differs from the direct draw
-		// while the sun has no such variant (celestial_frame.h carries the
-		// cites). The glare published its own Q3 opacity above.
-		if (kv.key == "moon") {
-			_set_body_parameter(body, "u_q3_opacity",
-					opennova::env::celestial_moon_q3_opacity(state));
-		} else if (kv.key == "sun") {
-			_set_body_parameter(body, "u_q3_opacity", frame.opacity);
-		}
+		// the far pin puts every world surface in front (celestial_frame.h).
+		sun->model->set_global_position(render_float_to_godot(discs.sun_position));
+		_set_body_parameter(*sun, "u_sky_anchor_camera", cam_pos);
+		_set_body_upl(*sun, discs.upl, discs.q3_upl);
+	}
+	if (Body *moon = bodies_.getptr("moon")) {
+		moon->model->set_global_position(render_float_to_godot(discs.moon_position));
+		_set_body_parameter(*moon, "u_sky_anchor_camera", cam_pos);
+		_set_body_upl(*moon, discs.upl, discs.q3_upl);
+	}
+	if (Body *glare = bodies_.getptr("glare")) {
+		// env #14 (closed): ONE coarse unjittered gate ray with the
+		// witnessed start-height lift, then two jittered fine rays from the
+		// exact camera height, feed the 8-sample window + dead-band
+		// hysteresis [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f
+		// — the fine rays' entity leg keeps the documented sun-occlusion
+		// statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3), see docs/env/env-tod-re.md].
+		const float ray_length = glare_occlusion_->get_ray_length();
+		const Vector3 lift(0.0f, opennova::env::glare_coarse_start_lift(
+				glare_occlusion_->get_frame_index()), 0.0f);
+		const bool coarse_clear = _glare_ray_clear(cam_pos + lift,
+				sun_dir, ray_length, Vector3());
+		const bool visible_a = coarse_clear && _glare_ray_clear(cam_pos,
+				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_a());
+		const bool visible_b = coarse_clear && _glare_ray_clear(cam_pos,
+				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_b());
+		glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
+		const int view_dot_fixed = static_cast<int>(forward.dot(sun_dir) * 65536.0f);
+		const opennova::env::GlareFrame frame = opennova::env::build_glare_frame(
+				state, cam_rf, view_dot_fixed, glare_occlusion_->get_brightness());
+		glare->model->set_global_position(render_float_to_godot(frame.position));
+		_set_body_parameter(*glare, "u_sky_anchor_camera", cam_pos);
+		_set_body_upl(*glare, frame.upl, frame.q3_upl);
+		// A non-positive beauty alpha submits nothing; the bloom pass's own
+		// alpha decides its redraw, which reads the node through the Q3
+		// registry, so the node stays in the tree while either draws.
+		glare->drawn = frame.drawn;
+		_set_body_parameter(*glare, "u_sky_beauty_drawn", frame.drawn);
+		glare->model->set_visible(frame.drawn || frame.q3_drawn);
+	}
+	if (Body *glint = bodies_.getptr("glint")) {
+		// The water-reflected sun glint runs its own leg (accumulator,
+		// mirrored placement, CPU alpha) [orig: update_sun_glare @ 0x5ad130,
+		// see docs/env/env-tod-re.md].
+		_advance_water_glint(state, cam_pos, sun_dir, forward, *glint);
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after
@@ -600,6 +527,61 @@ void Celestial::_set_body_parameter(const Body &p_body,
 	}
 }
 
+// The submit alpha lands in the model's UPL_INTENSITY register, which its
+// authored RgbGen style 113 reads into SelfLumColor (celestial_frame.h); the
+// bloom pass's redraw evaluates the same RgbGen at its own value, published
+// to the Q3 source per surface.
+void Celestial::_set_body_upl(Body &p_body, int32_t p_upl, int32_t p_q3_upl) {
+	p_body.last_upl = p_upl;
+	p_body.last_q3_upl = p_q3_upl;
+	p_body.model->set_ctrl_override_native({}, opennova::env::kCelestialUplRegister,
+			p_upl);
+	const Ref<ObjectData> data = p_body.model->get_object_data();
+	if (data.is_null()) {
+		return;
+	}
+	opennova::renderer::ControlRegisterValues q3_registers{};
+	q3_registers[static_cast<size_t>(opennova::env::kCelestialUplRegister)] = p_q3_upl;
+	for (int i = 0; i < p_body.meshes.size(); ++i) {
+		opennova::renderer::MaterialRuntime runtime;
+		if (p_body.material_indices[i] < 0 ||
+				!data->eval_material_runtime_native(p_body.material_indices[i], 0,
+						q3_registers, runtime)) {
+			continue;
+		}
+		FrameFx::set_q3_celestial_self_lum(p_body.meshes[i],
+				Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
+	}
+}
+
+Celestial::OverlayBodies Celestial::get_overlay_bodies() const {
+	const auto row = [this](const char *p_key) {
+		OverlayBody out;
+		const Body *body = bodies_.getptr(String(p_key));
+		if (body != nullptr) {
+			out.model = body->model;
+			out.upl = body->last_upl;
+			out.drawn = body->drawn;
+		}
+		return out;
+	};
+	OverlayBodies out;
+	out.glare = row("glare");
+	out.glint = row("glint");
+	return out;
+}
+
+Node3D *Celestial::get_overlay_body_node(const String &p_body) const {
+	const OverlayBodies bodies = get_overlay_bodies();
+	if (p_body == "glare") {
+		return bodies.glare.model;
+	}
+	if (p_body == "glint") {
+		return bodies.glint.model;
+	}
+	return nullptr;
+}
+
 int Celestial::settle_glare_occlusion(int p_max_frames) {
 	if (!glare_occlusion_) {
 		glare_occlusion_ = std::make_unique<GlareOcclusion>();
@@ -671,7 +653,9 @@ Dictionary Celestial::get_diagnostics() const {
 	Dictionary bodies;
 	for (const KeyValue<String, Body> &kv : bodies_) {
 		Dictionary body;
-		body["opacity"] = kv.value.last_opacity;
+		body["upl"] = kv.value.last_upl;
+		body["q3_upl"] = kv.value.last_q3_upl;
+		body["drawn"] = kv.value.drawn;
 		body["visible"] = kv.value.model != nullptr &&
 				kv.value.model->is_visible();
 		bodies[kv.key] = body;
@@ -689,18 +673,19 @@ bool Celestial::_segment_clear(const Vector3 &p_from, const Vector3 &p_to) {
 	return std::isnan(hit.x);
 }
 
-float Celestial::_advance_water_glint(
+void Celestial::_advance_water_glint(
 		const opennova::env::EnvironmentState &p_state,
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 		const Vector3 &p_forward, Body &p_body) {
 	// The glint law is the engine's advance_water_glint (celestial_frame.h);
 	// this leg owns the terrain rays and the model writes. No water = no glint.
 	if (p_body.model == nullptr) {
-		return 0.0f;
+		return;
 	}
 	if (!p_state.has_water_height() || p_state.water_height() == 0.0f) {
+		p_body.drawn = false;
 		p_body.model->set_visible(false);
-		return 0.0f;
+		return;
 	}
 	const opennova::env::WaterGlintFrame frame = opennova::env::advance_water_glint(
 			p_state, godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
@@ -710,11 +695,11 @@ float Celestial::_advance_water_glint(
 			});
 	const Vector3 mirrored = mission_to_godot(frame.mirrored_sun);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
-	_set_body_parameter(p_body, "u_anchor_camera_world", p_cam_pos);
-	_set_body_parameter(p_body, "u_tint", to_vector3(p_state.sun_color()));
-	_set_body_parameter(p_body, "u_opacity", frame.alpha);
-	p_body.model->set_visible(frame.alpha > 0.0f && water_glint_.brightness > 0);
-	return frame.alpha;
+	_set_body_parameter(p_body, "u_sky_anchor_camera", p_cam_pos);
+	_set_body_upl(p_body, frame.upl, 0);
+	p_body.drawn = frame.drawn;
+	_set_body_parameter(p_body, "u_sky_beauty_drawn", frame.drawn);
+	p_body.model->set_visible(frame.drawn);
 }
 
 // Terrain line-of-sight for the glare: the ported boolean raycast form over

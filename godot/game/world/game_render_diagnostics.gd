@@ -251,7 +251,7 @@ static func _weather_state(weather: Weather, camera: Camera3D) -> Dictionary:
 
 
 # Celestial bodies + the glare occlusion accumulator (docs/env/env-tod-re.md
-# "Celestial bodies"): per-body opacity/visibility and the glare
+# "Celestial bodies"): per-body UPL_INTENSITY submit values/visibility and the glare
 # brightness/window make "occluded", "starved", and "model absent"
 # distinguishable in a captured fixture state.
 static func _celestial_state(celestial: Celestial) -> Dictionary:
@@ -273,11 +273,17 @@ static func _sky_state(sky: SkyDome) -> Dictionary:
 		"built": sky.is_built(),
 		"visible": sky.is_visible_in_tree(),
 		"mesh_visible": mesh.is_visible_in_tree() if mesh != null else false,
+		"beauty_pass_drawn": sky.is_beauty_pass_drawn(),
+		"mirror_pass_drawn": sky.is_mirror_pass_drawn(),
 		"shader": _shader_parameters(material, [
 			"u_flat_pass", "u_flat_color", "u_sky_base", "u_sky_bright",
 			"u_sky_highlight", "u_cloud_base", "u_cloud_highlight",
 			"u_cloud_edge", "u_sun_dir", "u_light_dir", "u_fog_color",
-			"u_fog_end", "u_sky_height", "u_has_clouds",
+			"u_fog_end", "u_sky_height",
+		]),
+		# Dome pass 2 rides the gradient's next_pass while cloud layers bind.
+		"cloud_pass": material != null and material.next_pass != null,
+		"clouds": _shader_parameters(sky.get_cloud_material(), [
 			"u_scroll_offset1", "u_scroll_offset2", "u_cloud_tex1",
 			"u_cloud_tex2",
 		]),

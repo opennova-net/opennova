@@ -605,7 +605,7 @@ func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) 
 		"node": sky != null,
 		"material": sky_material != null,
 		"u_flat_pass": sky_material.get_shader_parameter("u_flat_pass") if sky_material != null else null,
-		"u_has_clouds": sky_material.get_shader_parameter("u_has_clouds") if sky_material != null else null,
+		"cloud_pass": sky_material.next_pass != null if sky_material != null else null,
 		"u_fog_color": sky_material.get_shader_parameter("u_fog_color") if sky_material != null else null,
 		"u_fog_end": sky_material.get_shader_parameter("u_fog_end") if sky_material != null else null,
 		"u_sky_base": sky_material.get_shader_parameter("u_sky_base") if sky_material != null else null,

@@ -234,16 +234,25 @@ struct Q3WaterMaterialParameters {
 	bool underwater_view = false;
 };
 
-// Shared parameter block for the body and sun-glow techniques. `opacity` is
-// already the producer's pass-specific value: body opacity for CelestialBody,
-// or glare_q3_peak_opacity for SunGlow.
+// Shared parameter block for the body and sun-glow techniques. Both redraw
+// the body's AUTHORED material in the bloom pass: the stock bodies are
+// FF_ST_AD_LUM, whose GLOW slot is a copy of the SELFLUM NORMAL block
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f], so the draw re-shades Diffuse1 x
+// sat(SelfLumColor x gain) x 2 under the wrapper's fog policy, with alpha 0.
+// `self_lum` is the producer's pass-specific SelfLumColor: the material's
+// RgbGen evaluated at the bloom pass's UPL_INTENSITY value (the disc and
+// glow submit alphas of FrameFX_RenderBloomPass @ 0x582a77 / @ 0x582a80;
+// runtime/environment/celestial_frame.h). `blend` is the blend the material
+// was classified with, mapped like NormalCopy's (_OP replace, _AB alpha,
+// _AD add): the glow's submit flags (0x100 in the bloom pass, 0x110 in the
+// beauty pass [orig: render_skybox_sun_glow @ 0x5ad0f5..0x5ad0fe]) never
+// override the material blend, so SunGlow follows it like the discs.
 struct Q3CelestialMaterialParameters {
 	Q3ResourceLease diffuse_texture{};
-	Q3Vec3 tint{1.0f, 1.0f, 1.0f};
-	float opacity = 1.0f;
-	Q3Vec3 glare_direction{0.0f, 1.0f, 0.0f};
-	bool additive = false;
-	bool glare_view_fade = false;
+	Q3Vec3 self_lum{1.0f, 1.0f, 1.0f};
+	ObjectBlendMode blend = ObjectBlendMode::Additive;
+	// Diffuse1's last retail mip level, as for the object copies.
+	float diffuse_max_lod = kQ3NoMipCeiling;
 };
 
 // One producer row. Input order is retail submission order. Ranges address

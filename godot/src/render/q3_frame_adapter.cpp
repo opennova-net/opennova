@@ -261,7 +261,11 @@ void main() {
 	uint coverage_flags = uint(pc.params.y + 0.5);
 	bool fog_enabled = (coverage_flags & 4u) != 0u;
 	uint fog_type = (coverage_flags >> 3u) & 3u;
-	if (mode <= 1u) {
+	// The celestial disc (3) and sun glow (4) redraw the body's authored
+	// FF_*_LUM material, whose GLOW slot is the SELFLUM NORMAL block: they
+	// share the mode-0 shading (their far band is the vertex stage's).
+	bool selflum = mode == 0u || mode >= 3u;
+	if (mode <= 1u || mode >= 3u) {
 		// params.w carries the stages' mip ceilings for the object copies.
 		float primary_max_lod = q3_mip_ceiling(pc.params.w, 0u);
 		// Coverage: the LUM NORMAL block is the SELFLUM specialization, whose
@@ -281,7 +285,7 @@ void main() {
 				: length(pc.camera_local.xyz - local_position) * model_uniform_scale;
 		float fog_visibility = fog_enabled ? q3_fog_visibility(fog_distance,
 				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
-		if (mode == 0u) {
+		if (selflum) {
 			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as
 			// the SELFLUM specialization (technique/self_lit.gdshaderinc): base =
 			// Diffuse1 (x Detail MODULATE2X over UV2 for _MT), x the saturated
@@ -342,16 +346,6 @@ void main() {
 		float alpha = clamp(noise.a * color.a * 2.0, 0.0, 1.0);
 		frag_color = vec4(result, alpha);
 		return;
-	}
-	// Celestial flag bit 1: the registered material blends additively
-	// (celestial_additive.gdshader's premultiplied form); clear = alpha blend.
-	vec4 tex = texture(primary_texture, uv);
-	if ((coverage_flags & 1u) != 0u) {
-		frag_color = vec4(tex.rgb * pc.draw_color.rgb * tex.a * pc.draw_color.a,
-				1.0);
-	} else {
-		frag_color = vec4(tex.rgb * pc.draw_color.rgb,
-				tex.a * pc.draw_color.a);
 	}
 }
 )GLSL";
@@ -522,14 +516,23 @@ Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 			}
 			return Q3DeviceBlend::Replace;
 		case Q3Technique::RotatedSpecularGlass:
-		case Q3Technique::SunGlow:
 			return Q3DeviceBlend::Add;
 		case Q3Technique::WaterNightVision:
 			return p_command.water.underwater_view ?
 					Q3DeviceBlend::Replace : Q3DeviceBlend::Water;
 		case Q3Technique::CelestialBody:
-			return p_command.celestial.additive ?
-					Q3DeviceBlend::Add : Q3DeviceBlend::Alpha;
+		case Q3Technique::SunGlow:
+			// The body's own material blend, mapped like NormalCopy's: the
+			// glow's submit flags never override it (runtime/renderer/q3_frame.h).
+			switch (p_command.celestial.blend) {
+				case ObjectBlendMode::Opaque:
+					return Q3DeviceBlend::Replace;
+				case ObjectBlendMode::AlphaBlend:
+					return Q3DeviceBlend::Alpha;
+				case ObjectBlendMode::Additive:
+					return Q3DeviceBlend::Add;
+			}
+			return Q3DeviceBlend::Replace;
 		case Q3Technique::Count:
 			break;
 	}
@@ -1072,25 +1075,26 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				push.params[2] = draw.water.reflection_uv_scale.x;
 				push.params[3] = draw.water.reflection_uv_scale.y;
 			} else {
-				float opacity = draw.celestial.opacity;
-				if (draw.technique == Q3Technique::SunGlow &&
-						draw.celestial.glare_view_fade) {
-					Vector3 glare_direction(draw.celestial.glare_direction.x,
-							draw.celestial.glare_direction.y,
-							draw.celestial.glare_direction.z);
-					if (glare_direction.length_squared() > 0.0f) {
-						const float view_dot = std::max(0.0f,
-								static_cast<float>(camera_forward.dot(
-										glare_direction.normalized())));
-						const float view_dot_sq = view_dot * view_dot;
-						opacity *= view_dot_sq * view_dot_sq;
-					} else {
-						opacity = 0.0f;
-					}
-				}
-				push.draw_color = {draw.celestial.tint.x, draw.celestial.tint.y,
-						draw.celestial.tint.z, opacity};
-				push.params[1] = draw.celestial.additive ? 1.0f : 0.0f;
+				// The disc/glow SELFLUM push: the producer's bloom-pass
+				// SelfLumColor x min(gain, 1) x 2 (the NormalCopy formula),
+				// the material's fog policy (additive folds toward black,
+				// otherwise the regular fog colour), no alpha test or detail.
+				push.params[1] = fog_flags;
+				if (draw.celestial.blend != ObjectBlendMode::Additive)
+					push.params[1] += 32.0f;
+				push.params[3] = q3_pack_mip_ceilings(draw.celestial.diffuse_max_lod,
+						kQ3NoMipCeiling);
+				push.light_local_gain[3] = std::max(1.0e-6f,
+						std::cbrt(std::abs(model.basis.determinant())));
+				push.draw_color = {
+					draw.celestial.self_lum.x * std::min(light_gain.x, 1.0f) * 2.0f,
+					draw.celestial.self_lum.y * std::min(light_gain.y, 1.0f) * 2.0f,
+					draw.celestial.self_lum.z * std::min(light_gain.z, 1.0f) * 2.0f,
+					fog_end};
+				push.camera_local[3] = fog_start;
+				push.light_local_gain[0] = frame->fog_color.x;
+				push.light_local_gain[1] = frame->fog_color.y;
+				push.light_local_gain[2] = frame->fog_color.z;
 			}
 			vertex_buffers[0] = device_geometry[command.stream->entry_id].buffer;
 			vertex_offsets[0] = 0;

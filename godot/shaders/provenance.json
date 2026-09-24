@@ -116,8 +116,8 @@
       "exceptions": ["D-RORD-7"]
     },
     {
-      "id": "sky-and-celestial",
-      "patterns": ["sky.gdshader", "celestial.gdshader", "celestial_additive.gdshader"],
+      "id": "sky-dome",
+      "patterns": ["sky.gdshader", "sky_clouds.gdshader", "sky.gdshaderinc"],
       "light_behavior": "active_sun_or_moon_direction_and_tod_color",
       "parity_status": "matching_with_bounded_residuals",
       "docs": ["docs/env/env-tod-re.md", "docs/render/render-order-re.md"],

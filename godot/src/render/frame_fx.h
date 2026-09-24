@@ -149,17 +149,19 @@ public:
 	static void register_q3_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
 	static void unregister_q3_source(GeometryInstance3D *p_source);
+	// A celestial source's bloom-pass SelfLumColor (runtime/renderer/q3_frame.h
+	// Q3CelestialMaterialParameters), written by the producer every frame.
+	static void set_q3_celestial_self_lum(GeometryInstance3D *p_source,
+			const Vector3 &p_self_lum);
 	// The classification an object material was registered with (false and
 	// untouched for a material outside the registry): the typed blend/family
 	// facts another producer may need about an ObjectModel surface.
 	static bool q3_object_material_classification(const Ref<Material> &p_material,
 			opennova::renderer::ObjectMaterialClassification &r_classification);
-	// Water/celestial sources; `p_additive_surfaces` (bit i = surface i)
-	// carries the blend the celestial installed per surface, which the Q3
-	// disc draw follows.
+	// Water/celestial sources. A celestial surface draws its authored
+	// material, whose registered classification sets the Q3 blend.
 	static void register_q3_source(GeometryInstance3D *p_source,
-			opennova::renderer::Q3Source p_kind,
-			uint32_t p_additive_surfaces = 0);
+			opennova::renderer::Q3Source p_kind);
 	// Producers that already hold a surface's CPU arrays publish them here
 	// (the water strip every frame), so the Q3 geometry cache re-packs from
 	// memory instead of reading the mesh back through the server. A producer

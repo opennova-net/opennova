@@ -24,6 +24,7 @@
 namespace godot {
 
 class MissionEnvironment;
+class ObjectModel;
 
 // The celestial applier — the ADR 0033 device leg over the engine's
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
@@ -54,13 +55,29 @@ public:
 	}
 
 	// Whether a source surface's material was classified additive at its
-	// ObjectModel creation seam (the FF_ST_AD* rows: the stock sun/moon
-	// models author FF_ST_AD_LUM with opaque black as the additive zero, and
-	// forcing those surfaces through blend_mix exposes a dark quad at the
-	// horizon), so the celestial replacement material must preserve it. A
+	// ObjectModel creation seam (the FF_ST_AD* rows: the stock sun/moon/glare
+	// models author FF_ST_AD_LUM with opaque black as the additive zero). A
 	// material without a registered classification is never additive; no
 	// shader text is inspected.
 	static bool source_material_uses_additive(const Ref<Material> &p_source);
+
+	// The glow and the glint for the post-particle overlay stage (the render
+	// order owner draws them): the ObjectModel rendering the authored
+	// material, the frame's UPL_INTENSITY submit value (16.16) and whether
+	// retail submits it (the last advanced frame's values).
+	struct OverlayBody {
+		ObjectModel *model = nullptr;
+		int32_t upl = 0;
+		bool drawn = false;
+	};
+	struct OverlayBodies {
+		OverlayBody glare;
+		OverlayBody glint;
+	};
+	OverlayBodies get_overlay_bodies() const;
+	// The script read of the same seam: the node for "glare" or "glint"
+	// (null when the mission names no such model).
+	Node3D *get_overlay_body_node(const String &p_body) const;
 
 	// Which scene passes draw the sun/moon discs this frame: they ride the sky
 	// bracket (OcclusionFrame owns the gates; renderer/scene_pass_gates.h
@@ -105,12 +122,19 @@ protected:
 
 private:
 	struct Body {
-		Node3D *model = nullptr;
+		ObjectModel *model = nullptr;
+		// The model's surface-slot meshes, their authored materials and the
+		// 3DI material index each renders (parallel arrays).
+		Vector<MeshInstance3D *> meshes;
 		Vector<Ref<ShaderMaterial>> materials;
-		// "sun" or "moon" — which TOD color tints this body.
-		String tint;
-		// The last advanced frame's submit opacity (diagnostics).
-		float last_opacity = 0.0f;
+		Vector<int> material_indices;
+		// The sun/moon discs ride the sky bracket (far pin + pass gates).
+		bool disc = false;
+		// The last advanced frame's UPL_INTENSITY submit value (16.16) and
+		// whether retail submitted the draw.
+		int32_t last_upl = 0;
+		int32_t last_q3_upl = 0;
+		bool drawn = true;
 	};
 
 	MissionEnvironment *_env_node();
@@ -123,35 +147,20 @@ private:
 	// overlay never holds the previous mission's alpha across a load.
 	void _publish_idle_veil();
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
-	Ref<ShaderMaterial> _make_celestial_material(bool p_additive,
-			int p_priority);
-	// One mesh of a body and the blend each installed surface material was
-	// given: bit i set = surface i renders through celestial_additive. The
-	// mask rides the Q3 registration so the adapter blends the disc the way
-	// its material was installed.
-	struct InstalledMesh {
-		MeshInstance3D *mesh = nullptr;
-		uint32_t additive_surfaces = 0;
-	};
-	struct InstalledMaterials {
-		Vector<Ref<ShaderMaterial>> materials;
-		Vector<InstalledMesh> meshes;
-	};
-	InstalledMaterials _apply_material_override(Node3D *p_model,
-			const Ref<ShaderMaterial> &p_base_material);
 	static void _collect_meshes(Node *p_node, Vector<MeshInstance3D *> &r_out);
 	void _stamp_environment_capture_layer(Node3D *p_model);
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
 			const Variant &p_value);
+	void _set_body_upl(Body &p_body, int32_t p_upl, int32_t p_q3_upl);
 	bool _glare_ray_clear(const Vector3 &p_from, const Vector3 &p_sun_dir,
 			float p_ray_length, const Vector3 &p_jitter);
 	// Terrain line-of-sight between two points (the water-glint visibility
 	// rays) — the same clear-when-miss form as _glare_ray_clear.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
 	// One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md]:
-	// tick the accumulator at this camera, place the mirrored glint body,
-	// return its submit alpha (0 hides it).
-	float _advance_water_glint(const opennova::env::EnvironmentState &p_state,
+	// tick the accumulator at this camera, place the mirrored glint body and
+	// write its submit value.
+	void _advance_water_glint(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 			const Vector3 &p_forward, Body &p_body);
 
@@ -164,8 +173,6 @@ private:
 	HashMap<String, String> loaded_names_;
 	ObjectID env_node_id_;
 	ObjectID cached_cam_id_;
-	Ref<Shader> celestial_shader_;
-	Ref<Shader> celestial_additive_shader_;
 	uint32_t environment_capture_layer_mask_ = 0;
 	bool sky_beauty_pass_drawn_ = true;
 	bool sky_mirror_pass_drawn_ = true;

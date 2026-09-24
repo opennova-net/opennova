@@ -51,6 +51,9 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 	Ref<ShaderMaterial> postmultiply;
 	const Ref<ShaderMaterial> material =
 			create_material(array_index, postmultiply);
+	if (material.is_valid() && render_rung_override_ != kRenderRungFromWaterSide) {
+		material->set_render_priority(render_rung_override_);
+	}
 	material_cache_[cache_key] = material;
 	if (postmultiply.is_valid()) {
 		postmultiply_cache_[cache_key] = postmultiply;

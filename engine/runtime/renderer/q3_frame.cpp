@@ -60,9 +60,7 @@ bool parameters_finite(const Q3SubmissionSnapshot &submission) {
 					finite(submission.water.reflection_uv_scale);
 		case Q3Source::CelestialBody:
 		case Q3Source::SunGlow:
-			return finite(submission.celestial.tint) &&
-					finite(submission.celestial.opacity) &&
-					finite(submission.celestial.glare_direction);
+			return finite(submission.celestial.self_lum);
 		case Q3Source::LightCorona:
 			return false;
 	}

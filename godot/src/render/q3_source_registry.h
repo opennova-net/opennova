@@ -80,9 +80,9 @@ struct Q3SourceRecord {
 	GeometryInstance3D *node = nullptr;
 	opennova::renderer::Q3Source source = opennova::renderer::Q3Source::Object;
 	std::uint64_t material_id = 0;
-	// Celestial sources: bit i set = surface i was installed with the
-	// additive celestial material, so its Q3 disc draw adds.
-	std::uint32_t additive_surfaces = 0;
+	// Celestial sources: the producer's bloom-pass SelfLumColor (the
+	// material's RgbGen at the bloom pass's UPL_INTENSITY value).
+	opennova::renderer::Q3Vec3 celestial_self_lum{1.0f, 1.0f, 1.0f};
 	// Bumped by invalidate_source (a rebuilt mesh): the geometry cache
 	// re-reads and re-packs the source's surfaces once when it moves.
 	std::uint64_t geometry_generation = 1;
@@ -164,8 +164,10 @@ public:
 	static void register_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
 	static void unregister_source(GeometryInstance3D *p_source);
+	static void set_celestial_self_lum(GeometryInstance3D *p_source,
+			const opennova::renderer::Q3Vec3 &p_self_lum);
 	static void register_source(GeometryInstance3D *p_source,
-			opennova::renderer::Q3Source p_kind, std::uint32_t p_additive_surfaces);
+			opennova::renderer::Q3Source p_kind);
 	static void publish_geometry(GeometryInstance3D *p_source, int p_surface,
 			const Array &p_arrays);
 	static void invalidate_source(GeometryInstance3D *p_source);

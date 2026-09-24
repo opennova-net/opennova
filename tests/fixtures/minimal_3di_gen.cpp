@@ -664,6 +664,22 @@ const std::vector<Recipe> &recipes() {
 		}},
 		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
 		// a LUM material; retail's bone path never copies it into Q3 ---
+		// --- celestial bodies (celestial_test.gd): the crate as a stock-style
+		// sky body, an FF_ST_AD_LUM surface whose RGB generator style 113 reads
+		// CTRL UPL_INTENSITY black to white (the msun/fmoon4/mglare authoring) ---
+		{"crate_mtrl0_ad_lum_upl113", make_crate, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+			m.add_control_register("UPL_INTENSITY");
+			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0.0, kBlack, kWhite);
+		}},
+		// ... and the same body authored AlphaBlend (its Q3 glow must not add)
+		{"crate_mtrl0_ab_lum_upl113", make_crate, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AB_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+			m.add_control_register("UPL_INTENSITY");
+			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0.0, kBlack, kWhite);
+		}},
 		{"person_mtrl0_ad_lum", make_person, [](Model &m) {
 			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
@@ -885,6 +901,12 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP_LUM") &&
 						p.model.materials[0].emissive_type == THREEDI_EMISSIVE_FULL,
 				name + ": material alias");
+	if (name == "crate_mtrl0_ad_lum_upl113" || name == "crate_mtrl0_ab_lum_upl113")
+		expect(!std::strcmp(p.model.materials[0].shader_name,
+						name == "crate_mtrl0_ad_lum_upl113" ? "FF_ST_AD_LUM" : "FF_ST_AB_LUM") &&
+						p.model.materials[0].rgb_gen.style == 113 &&
+						p.model.materials[0].rgb_gen.reg == 0 && !std::strcmp(p.reg(0), "UPL_INTENSITY"),
+				name + ": UPL_INTENSITY sky body");
 	if (name == "mount_heat_glow_slide_part1") expect(slide_moves_part(p, 1, 0) && !std::strcmp(p.reg(0), "HEAT_GLOW"), name + ": slide");
 	if (name == "armory") expect(!p.live(0), name + ": inert");
 	if (name == "armory_lght0_colorgen113_flicker") expect(p.model.lights[0].style == 113 && p.model.lights[0].phase == 0, name + ": light gen");
