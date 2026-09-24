@@ -175,6 +175,26 @@ inline std::array<float, 3> q3_emissive_modulate2x(const Q3Vec4 &color,
 			saturate(color.z * gain[2]) * 2.0f};
 }
 
+// The object samplers (sampLinearWrap2D under ANISO) stop at each stage
+// texture's last retail mip level; a texture whose file carried its own chain
+// has none. The object copies and slot captures receive both stage ceilings
+// in one float: each as a 4-bit level code, 15 standing for "no ceiling".
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8 (the chain)]
+inline constexpr float kQ3NoMipCeiling = 1000.0f;
+inline float q3_pack_mip_ceilings(float primary, float detail) {
+	const auto code = [](float ceiling) {
+		if (!(ceiling >= 0.0f) || ceiling >= 15.0f)
+			return 15.0f;
+		return static_cast<float>(static_cast<int>(ceiling));
+	};
+	return code(primary) + 16.0f * code(detail);
+}
+inline float q3_unpack_mip_ceiling(float packed, int stage) {
+	const int bits = static_cast<int>(packed + 0.5f);
+	const int level = stage == 0 ? (bits & 15) : ((bits >> 4) & 15);
+	return level == 15 ? kQ3NoMipCeiling : static_cast<float>(level);
+}
+
 // Only values needed by the focused object Q3 techniques live here. The LUM
 // GLOW slot is a copy of the NORMAL pass block, so NormalCopy re-shades the
 // SELFLUM specialization from the leased Diffuse1/Detail textures and
@@ -191,6 +211,9 @@ struct Q3ObjectMaterialParameters {
 	// _BaseInc.fx's ReflectColor default; routed materials overwrite it.
 	Q3Vec4 reflect_color{0.75f, 0.75f, 0.75f, 0.75f};
 	float alpha_mod = 1.0f;
+	// The stages' last retail mip levels (kQ3NoMipCeiling = unbounded).
+	float diffuse_max_lod = kQ3NoMipCeiling;
+	float detail_max_lod = kQ3NoMipCeiling;
 	std::array<float, 9> uv_transform{
 		1.0f, 0.0f, 0.0f,
 		0.0f, 1.0f, 0.0f,

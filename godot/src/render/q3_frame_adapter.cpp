@@ -218,6 +218,32 @@ float q3_fog_visibility(float dist, float fog_start, float fog_end,
 	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
 }
 
+// The object stages' sampLinearWrap2D at retail's highest filter tier: the
+// 2x anisotropic footprint of the beauty wrappers (shared.gdshaderinc
+// obj_sample_aniso2), clamped at the stage texture's last retail mip level.
+vec4 q3_sample_aniso2(sampler2D tex, vec2 tex_uv, float max_lod) {
+	vec2 size = vec2(textureSize(tex, 0));
+	vec2 du = dFdx(tex_uv);
+	vec2 dv = dFdy(tex_uv);
+	float length_x = length(du * size);
+	float length_y = length(dv * size);
+	float major = max(length_x, length_y);
+	float minor = min(length_x, length_y);
+	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
+	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);
+	vec2 offset = (length_x >= length_y ? du : dv) * (0.5 - 0.5 / ratio);
+	return 0.5 * (textureLod(tex, tex_uv - offset, lod) +
+			textureLod(tex, tex_uv + offset, lod));
+}
+
+// runtime/renderer/q3_frame.h q3_unpack_mip_ceiling: two 4-bit level codes,
+// 15 = no ceiling.
+float q3_mip_ceiling(float packed, uint stage) {
+	uint bits = uint(packed + 0.5);
+	uint level = stage == 0u ? (bits & 15u) : ((bits >> 4u) & 15u);
+	return level == 15u ? @NO_MIP_CEILING@ : float(level);
+}
+
 void main() {
 	uint mode = uint(pc.params.x + 0.5);
 	// Object-technique flag bits: 1 alpha test, 2 detail stage, 4 fog enabled,
@@ -227,12 +253,15 @@ void main() {
 	bool fog_enabled = (coverage_flags & 4u) != 0u;
 	uint fog_type = (coverage_flags >> 3u) & 3u;
 	if (mode <= 1u) {
+		// params.w carries the stages' mip ceilings for the object copies.
+		float primary_max_lod = q3_mip_ceiling(pc.params.w, 0u);
 		// Coverage: the LUM NORMAL block is the SELFLUM specialization, whose
 		// MaterialDiffuse.a = 0 makes its alpha-test source 0 (the beauty
 		// wrappers' OBJ_COVERAGE_ZERO); Glass.fx TECHNIQUE_GLOW keeps
 		// Diffuse1's alpha only for the cutout variants. Neither consumes
-		// alpha_mod (OBJ_ALPHA_MOD_NONE).
-		float coverage = mode == 1u ? texture(primary_texture, uv).a : 0.0;
+		// alpha_mod (OBJ_ALPHA_MOD_NONE), so params.w carries the ceilings.
+		float coverage = mode == 1u ?
+				q3_sample_aniso2(primary_texture, uv, primary_max_lod).a : 0.0;
 		if ((coverage_flags & 1u) != 0u) {
 			bool passes = coverage > pc.params.z;
 			if (pc.light_local_gain.w < 0.0) passes = !passes;
@@ -250,9 +279,10 @@ void main() {
 			// the wrapper's fog policy, and alpha 0 (SELFLUM MaterialDiffuse.a):
 			// an AlphaBlend LUM contributes nothing, an Additive LUM adds its
 			// colour, an opaque LUM replaces.
-			vec3 base = texture(primary_texture, uv).rgb;
+			vec3 base = q3_sample_aniso2(primary_texture, uv, primary_max_lod).rgb;
 			if ((coverage_flags & 2u) != 0u) {
-				base *= texture(secondary_texture, detail_uv).rgb * 2.0;
+				base *= q3_sample_aniso2(secondary_texture, detail_uv,
+						q3_mip_ceiling(pc.params.w, 1u)).rgb * 2.0;
 			}
 			vec3 lit = base * pc.draw_color.rgb;
 			vec3 fogged = (coverage_flags & 32u) != 0u ?
@@ -352,6 +382,7 @@ std::string q3_fragment_shader_source() {
 	splice_token(source, "@GLASS_WARM_G@", glsl_float(kQ3GlassWarmLobeColor[1]));
 	splice_token(source, "@GLASS_WARM_B@", glsl_float(kQ3GlassWarmLobeColor[2]));
 	splice_token(source, "@GLASS_WARM_POWER@", glsl_float(kQ3GlassWarmLobePower));
+	splice_token(source, "@NO_MIP_CEILING@", glsl_float(kQ3NoMipCeiling));
 	splice_token(source, "@NV_LUMA_R@", glsl_float(kQ3WaterNvLumaWeights[0]));
 	splice_token(source, "@NV_LUMA_G@", glsl_float(kQ3WaterNvLumaWeights[1]));
 	splice_token(source, "@NV_LUMA_B@", glsl_float(kQ3WaterNvLumaWeights[2]));
@@ -993,7 +1024,8 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						(draw.object.classification.has_detail ? 2.0f : 0.0f) +
 						fog_flags;
 				push.params[2] = draw.object.classification.alpha_test_value;
-				push.params[3] = draw.object.alpha_mod;
+				push.params[3] = q3_pack_mip_ceilings(draw.object.diffuse_max_lod,
+						draw.object.detail_max_lod);
 				const float model_uniform_scale = std::max(1.0e-6f,
 						std::cbrt(std::abs(model.basis.determinant())));
 				push.light_local_gain[3] =

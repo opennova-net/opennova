@@ -481,6 +481,10 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 				Vector3(1, 1, 1));
 		object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f};
 		object.alpha_mod = float_parameter(material, "u_alpha_mod", 1.0f);
+		object.diffuse_max_lod = float_parameter(material, "u_diffuse_max_lod",
+				kQ3NoMipCeiling);
+		object.detail_max_lod = float_parameter(material, "u_detail_max_lod",
+				kQ3NoMipCeiling);
 		r_surface.primary_texture_resource = base;
 		r_surface.secondary_texture_resource = detail;
 		r_surface.tertiary_texture_resource.unref();

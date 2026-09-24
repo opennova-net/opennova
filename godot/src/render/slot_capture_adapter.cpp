@@ -51,6 +51,7 @@
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>
+#include <runtime/renderer/q3_frame.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
 using namespace godot;
@@ -59,7 +60,7 @@ using namespace opennova::renderer;
 namespace {
 
 // mat4 + vec4: the per-draw block below.
-constexpr std::uint32_t kPushConstantBytes = 80u;
+constexpr std::uint32_t kPushConstantBytes = 96u;
 // Push flag bits (params.z) the shaders decode.
 constexpr std::uint32_t kFlagAlphaTest = 1u;
 constexpr std::uint32_t kFlagAlphaInvert = 2u;
@@ -94,6 +95,7 @@ layout(location = 7) in vec2 in_uv2;
 layout(push_constant, std430) uniform SlotPush {
 	mat4 mvp;
 	vec4 params;
+	vec4 max_lods;
 } pc;
 
 layout(set = 1, binding = 0, std430) readonly buffer BonePalette {
@@ -151,17 +153,37 @@ layout(set = 0, binding = 1) uniform sampler2D detail_texture;
 layout(push_constant, std430) uniform SlotPush {
 	mat4 mvp;
 	vec4 params;
+	vec4 max_lods;
 } pc;
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec2 uv2;
 layout(location = 0) out vec4 frag_color;
 
+// TBoringFFPProjShad samples with sampLinearWrap2D, at retail's highest
+// filter tier the 2x anisotropic footprint of the beauty wrappers
+// (shared.gdshaderinc obj_sample_aniso2), clamped at the stage texture's last
+// retail mip level (max_lods.x Diffuse1, max_lods.y Diffuse2).
+vec4 slot_sample_aniso2(sampler2D tex, vec2 tex_uv, float max_lod) {
+	vec2 size = vec2(textureSize(tex, 0));
+	vec2 du = dFdx(tex_uv);
+	vec2 dv = dFdy(tex_uv);
+	float length_x = length(du * size);
+	float length_y = length(dv * size);
+	float major = max(length_x, length_y);
+	float minor = min(length_x, length_y);
+	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
+	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);
+	vec2 offset = (length_x >= length_y ? du : dv) * (0.5 - 0.5 / ratio);
+	return 0.5 * (textureLod(tex, tex_uv - offset, lod) +
+			textureLod(tex, tex_uv + offset, lod));
+}
+
 void main() {
 	uint flags = uint(pc.params.z + 0.5);
-	float coverage = texture(diffuse_texture, uv).a;
+	float coverage = slot_sample_aniso2(diffuse_texture, uv, pc.max_lods.x).a;
 	if ((flags & 8u) != 0u) {
-		coverage *= texture(detail_texture, uv2).a;
+		coverage *= slot_sample_aniso2(detail_texture, uv2, pc.max_lods.y).a;
 	}
 	if ((flags & 4u) != 0u) {
 		coverage *= pc.params.y;
@@ -181,6 +203,7 @@ void main() {
 struct SlotPush {
 	std::array<float, 16> mvp{};
 	std::array<float, 4> params{};
+	std::array<float, 4> max_lods{};
 };
 
 static_assert(sizeof(SlotPush) == kPushConstantBytes);
@@ -199,6 +222,10 @@ struct DeviceCommand {
 	RID detail;
 	float alpha_test_value = 0.0f;
 	float alpha_mod = 1.0f;
+	// The stages' last retail mip levels (texture_path_resolver
+	// material_texture_max_lod; kQ3NoMipCeiling = unbounded).
+	float diffuse_max_lod = kQ3NoMipCeiling;
+	float detail_max_lod = kQ3NoMipCeiling;
 	std::uint32_t flags = 0;
 	bool two_sided = false;
 	// SRCALPHA/INVSRCALPHA over the clear (the _FFP alpha-blend variant)
@@ -838,6 +865,7 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 				push.params = {command.alpha_test_value, command.alpha_mod,
 						static_cast<float>(command.flags),
 						static_cast<float>(command.first_bone)};
+				push.max_lods = {command.diffuse_max_lod, command.detail_max_lod, 0.0f, 0.0f};
 				PackedByteArray push_bytes;
 				push_bytes.resize(kPushConstantBytes);
 				std::memcpy(push_bytes.ptrw(), &push, sizeof(push));
@@ -1049,6 +1077,10 @@ void SlotCaptureAdapter::compile_frame(
 				command.diffuse = server_rid(diffuse);
 				command.detail = server_rid(detail);
 				command.alpha_mod = float_parameter(shader_material, "u_alpha_mod", 1.0f);
+				command.diffuse_max_lod = float_parameter(shader_material,
+						"u_diffuse_max_lod", kQ3NoMipCeiling);
+				command.detail_max_lod = float_parameter(shader_material,
+						"u_detail_max_lod", kQ3NoMipCeiling);
 				command.alpha_test_value = classification.alpha_test_value;
 				if (classification.alpha_test)
 					command.flags |= kFlagAlphaTest;

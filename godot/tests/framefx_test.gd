@@ -1468,3 +1468,56 @@ func test_lum_q3_copy_is_the_selflum_block_not_the_beauty_pixel() -> void:
 			[copy, black_copy])
 	blue_renderer.shutdown()
 	black_renderer.shutdown()
+
+
+## A 1024x1024 texture whose level 0 is red and every smaller level white.
+func _red_level0_texture() -> ImageTexture:
+	var data := PackedByteArray()
+	var side := 1024
+	var colour := Color.RED
+	while side >= 1:
+		var level := Image.create(side, side, false, Image.FORMAT_RGBA8)
+		level.fill(colour)
+		data.append_array(level.get_data())
+		colour = Color.WHITE
+		side /= 2
+	return ImageTexture.create_from_image(
+			Image.create_from_data(1024, 1024, true, Image.FORMAT_RGBA8, data))
+
+
+func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> void:
+	# The Q3 copy samples Diffuse1 like the beauty wrapper: the 2x anisotropic
+	# footprint clamped at the stage's last retail mip level
+	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The bulb
+	# minifies a 1024 texture far past level 0: unbounded it reads the white
+	# small levels, with a ceiling of 0 it keeps level 0's red.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	var bulb := _first_visible_mesh(view.model)
+	assert_not_null(bulb)
+	if bulb == null:
+		return
+	var camera := (view.viewport as SubViewport).get_camera_3d()
+	var pixel := Vector2i(camera.unproject_position(
+			bulb.global_transform * bulb.get_aabb().get_center()))
+	var material := bulb.get_active_material(0) as ShaderMaterial
+	material.set_shader_parameter("u_diffuse", _red_level0_texture())
+	material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
+	FrameFx.invalidate_q3_object_material(material)
+	var unbounded: Image = await _render_q3_frame(renderer)
+	if not bool(renderer.get_backend_report().get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	material.set_shader_parameter("u_diffuse_max_lod", 0.0)
+	FrameFx.invalidate_q3_object_material(material)
+	var ceiling: Image = await _render_q3_frame(renderer)
+	assert_not_null(unbounded)
+	assert_not_null(ceiling)
+	if unbounded == null or ceiling == null:
+		return
+	var free_pixel := unbounded.get_pixelv(pixel)
+	var clamped_pixel := ceiling.get_pixelv(pixel)
+	assert_gt(free_pixel.g, 0.5, "unbounded, the minified copy reads a white level: %s" % free_pixel)
+	assert_gt(clamped_pixel.r, 0.5, "the ceiling keeps level 0's red: %s" % clamped_pixel)
+	assert_lt(clamped_pixel.g, 0.2, "and never a smaller white level: %s" % clamped_pixel)
+	renderer.shutdown()

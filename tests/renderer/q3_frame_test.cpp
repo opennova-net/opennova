@@ -327,6 +327,22 @@ void check_shading_constants_are_engine_homed() {
 
 } // namespace
 
+void check_mip_ceilings_pack_both_stages() {
+	// 256x256 pixel-built Diffuse1 ends at level 6, a DDS detail has no
+	// ceiling; both survive one push float. [orig:
+	// GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8]
+	const float packed = q3_pack_mip_ceilings(6.0f, kQ3NoMipCeiling);
+	CHECK(q3_unpack_mip_ceiling(packed, 0) == 6.0f);
+	CHECK(q3_unpack_mip_ceiling(packed, 1) == kQ3NoMipCeiling);
+	const float both = q3_pack_mip_ceilings(0.0f, 14.0f);
+	CHECK(q3_unpack_mip_ceiling(both, 0) == 0.0f);
+	CHECK(q3_unpack_mip_ceiling(both, 1) == 14.0f);
+	CHECK(q3_unpack_mip_ceiling(q3_pack_mip_ceilings(-1.0f, 15.0f), 0) == kQ3NoMipCeiling);
+	const Q3ObjectMaterialParameters defaults{};
+	CHECK(defaults.diffuse_max_lod == kQ3NoMipCeiling);
+	CHECK(defaults.detail_max_lod == kQ3NoMipCeiling);
+}
+
 void check_emissive_copies_saturate_colour_times_gain() {
 	// SELFLUM / glass emissive: sat(colour x gain) x 2, so a gain above 1
 	// lifts a sub-1 colour (0.25 x 2 -> 1.0, 0.1 x 4 -> 0.8) instead of being
@@ -353,6 +369,7 @@ int main() {
 	check_multitexture_detail_contract();
 	check_stale_geometry_leases_are_rejected();
 	check_emissive_copies_saturate_colour_times_gain();
+	check_mip_ceilings_pack_both_stages();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);

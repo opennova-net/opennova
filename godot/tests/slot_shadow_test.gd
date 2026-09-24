@@ -1096,3 +1096,79 @@ func test_local_vehicle_rides_the_local_player_priority_and_refresh() -> void:
 	near.set_shadow_caster_enabled(false)
 	vehicle.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+
+## A 1024x1024 white texture whose level 0 is opaque and every smaller level
+## fully transparent.
+func _opaque_level0_texture() -> ImageTexture:
+	var data := PackedByteArray()
+	var side := 1024
+	var colour := Color(1, 1, 1, 1)
+	while side >= 1:
+		var level := Image.create(side, side, false, Image.FORMAT_RGBA8)
+		level.fill(colour)
+		data.append_array(level.get_data())
+		colour = Color(1, 1, 1, 0)
+		side /= 2
+	return ImageTexture.create_from_image(
+			Image.create_from_data(1024, 1024, true, Image.FORMAT_RGBA8, data))
+
+
+func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -> void:
+	# TBoringFFPProjShad samples Diffuse1 through sampLinearWrap2D: the 2x
+	# anisotropic footprint clamped at the stage's last retail mip level
+	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The capture
+	# minifies the 1024 texture past level 0, whose alpha alone is opaque:
+	# unbounded the slab casts nothing, with a ceiling of 0 it casts black.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(3)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(AB_LUM_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	model.set_shadow_caster_enabled(true)
+	_keep_only_shader_surfaces(model, "/self_lit/")
+	model.advance_runtime_frame(1.0 / 62.0)
+	var slab: Array[ShaderMaterial] = []
+	var texture := _opaque_level0_texture()
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_diffuse", texture)
+			material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
+			material.set_shader_parameter("u_alpha_mod", 1.0)
+			slab.append(material)
+	assert_gt(slab.size(), 0, "the fixture carries the FF_ST_AB_LUM heat slab")
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the slab caster takes a slot")
+	var unbounded := await _capture_after_frames(shadow, order, 3)
+	for material in slab:
+		material.set_shader_parameter("u_diffuse_max_lod", 0.0)
+	shadow.advance_frame()
+	var clamped := await _capture_after_frames(shadow, order, 3)
+	var report: Dictionary = shadow.get_report()
+	assert_eq(String(report["slot_status"]), "drawn", String(report["slot_failure"]))
+	assert_not_null(unbounded)
+	assert_not_null(clamped)
+	if unbounded != null and clamped != null:
+		assert_gt(_darkest_max_channel(unbounded), 0.9,
+				"unbounded, the minified slab samples its transparent small levels")
+		assert_lt(_darkest_max_channel(clamped), 0.1,
+				"the ceiling keeps level 0's opaque alpha: a black silhouette")
+	model.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
