@@ -276,7 +276,7 @@ class Builder:
             p.alpha_test = bool(flags & 1)
             p.two_sided = bool(flags & 4)
             p.other_flags = flags & ~5 & 0xFF
-            p.alpha_test_value = m["alphatest"] or 128
+            p.alpha_test_value = m["alphatest"]
             if m["alphatest"] and not p.alpha_test:
                 self.note(f"material {i}: an alpha-test value without the alpha-test flag")
             p.glass = bool(m["glass"])
@@ -292,7 +292,12 @@ class Builder:
                 t.image = self.image(name)
                 t.write = False  # the file beside the model already serves it
             if m["texanim"]:
-                p.anim_frames, p.anim_type, p.anim_time = m["texanim"]
+                frames, typ, time_or_register = m["texanim"]
+                p.anim_frames, p.anim_type = frames, typ
+                if typ == 1:
+                    p.anim_register = reg[time_or_register] if 0 <= time_or_register < len(reg) else ""
+                else:
+                    p.anim_time = time_or_register
             if m["rgbgen"]:
                 style, r, rate, s0, s1, phase = m["rgbgen"]
                 p.rgb_style, p.rgb_register, p.rgb_rate, p.rgb_phase = style, regname(style, r), rate, phase
@@ -381,6 +386,8 @@ class Builder:
                 slots.append(mi)
             ids = []
             for v in s["verts"]:
+                if sum(x * x for x in v["n"]) < 1e-12:
+                    self.note("zero-length vertex normals are replaced by Blender's calculated normals")
                 key = (tuple(round(x, 6) for x in v["p"]), tuple(round(x, 4) for x in v["n"]))
                 infl = ()
                 if skinned:
@@ -453,6 +460,8 @@ class Builder:
         if self.op is None or self.op.import_collision:
             self.collision(lod_objects)
         self.bullet_lod(mats)
+        if sc["skinned"] and sc["cobjs"]:
+            self.note("skin weights are normalized on export and skinned hit spheres are regenerated from them")
         scene.o3d.model_name = sc["name"]
         vl = scene.view_layers[0]
         for li, objs in enumerate(lod_objects):
@@ -711,6 +720,7 @@ class Builder:
         counts = [len(c["faces"]) for c in self.sc["cobjs"]]
         if not any(counts):
             return
+        self.note("bullet faces are rebuilt from the collision LOD; stored face normals and flags are not retained")
         chosen = None
         for li, lod in enumerate(self.sc["lods"]):
             tris = [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]]

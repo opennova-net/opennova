@@ -2,9 +2,9 @@
 // ignoring what an authoring round trip legitimately changes (strip layout,
 // vertex order and sharing, material order, register order, float noise,
 // derived bounds) and reporting everything else: LOD types and thresholds,
-// part hierarchy and pivots, per-part geometry per material (triangle count,
-// area, area-weighted centroid, normal and UVs, so winding and mapping
-// count), materials, PANM tracks and frames, user points, lights, occlusion
+// part hierarchy and pivots, per-part geometry per material (oriented triangle
+// corners, normals, UVs and resolved skin weights, with aggregate diagnostics),
+// materials, PANM tracks and frames, user points, lights, occlusion
 // records and collision (sections, bullet faces, volumes as the polytopes
 // their planes bound). Seam-flag differences are reported as info only.
 // Exit 0 when the models match, 1 with a difference list.
@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -92,7 +93,8 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	const ThreediTexAnim &a = mt.animation;
 	if (a.num_frames || a.animation_type || a.cycle_frame_time)
 		k += " anim " + std::to_string(a.num_frames) + "/" + std::to_string(a.animation_type) + "/" +
-				std::to_string(a.cycle_frame_time);
+				(a.animation_type == 1 ? reg_name(m, THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD + 1, a.cycle_frame_time)
+									 : std::to_string(a.cycle_frame_time));
 	const ThreediRgbGen &g = mt.rgb_gen;
 	if (g.style) {
 		k += " rgb " + std::to_string(g.style) + " " + reg_name(m, g.style, g.reg) + " " + num(g.rate) + " " + num(g.phase);
@@ -112,9 +114,78 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	return k;
 }
 
-// A part's geometry under one material: enough to tell geometry, winding and
-// mapping apart without matching vertices one to one.
+struct Corner {
+	Vec position{}, normal{};
+	std::array<double, 4> uv{};
+	std::map<int, double> weights; // resolved part -> weight, independent of strip bone-table order
+};
+using Triangle = std::array<Corner, 3>;
+
+bool same_corner(const Corner &a, const Corner &b) {
+	if (!near(a.position, b.position, kPosTol) || !near(a.normal, b.normal, 1e-2)) return false;
+	for (int k = 0; k < 4; ++k)
+		if (!close(a.uv[k], b.uv[k], 1e-3)) return false;
+	if (a.weights.size() != b.weights.size()) return false;
+	for (const auto &weight : a.weights) {
+		const auto it = b.weights.find(weight.first);
+		if (it == b.weights.end() || !close(weight.second, it->second, 1e-4)) return false;
+	}
+	return true;
+}
+
+bool same_triangle(const Triangle &a, const Triangle &b) {
+	// Cyclic rotations keep the winding; swapping two corners does not.
+	for (int shift = 0; shift < 3; ++shift) {
+		bool same = true;
+		for (int k = 0; k < 3 && same; ++k) same = same_corner(a[k], b[(k + shift) % 3]);
+		if (same) return true;
+	}
+	return false;
+}
+
+bool same_triangles(const std::vector<Triangle> &a, const std::vector<Triangle> &b) {
+	if (a.size() != b.size()) return false;
+	const auto centre_x = [](const Triangle &t) {
+		return (t[0].position[0] + t[1].position[0] + t[2].position[0]) / 3.0;
+	};
+	// Index candidates by centroid, then match every corner's attributes.
+	// Consuming each match preserves duplicate-face multiplicity while allowing
+	// strip, triangle, vertex and bone-table reordering.
+	std::multimap<double, size_t> candidates;
+	for (size_t i = 0; i < b.size(); ++i) candidates.emplace(centre_x(b[i]), i);
+	std::vector<std::vector<size_t>> matches(a.size());
+	for (size_t i = 0; i < a.size(); ++i) {
+		const double x = centre_x(a[i]);
+		const auto end = candidates.upper_bound(x + kPosTol);
+		for (auto it = candidates.lower_bound(x - kPosTol); it != end; ++it)
+			if (same_triangle(a[i], b[it->second])) matches[i].push_back(it->second);
+		if (matches[i].empty()) return false;
+	}
+	// Nearly coincident faces can match more than one candidate. An augmenting
+	// match avoids a greedy choice stealing the only candidate for a later face
+	// (retail fx_med1 otherwise fails even when compared with itself).
+	std::vector<size_t> owner(b.size(), a.size()), visited(b.size(), a.size());
+	size_t attempt = 0;
+	std::function<bool(size_t)> assign = [&](size_t i) {
+		for (size_t j : matches[i]) {
+			if (visited[j] == attempt) continue;
+			visited[j] = attempt;
+			if (owner[j] == a.size() || assign(owner[j])) {
+				owner[j] = i;
+				return true;
+			}
+		}
+		return false;
+	};
+	for (; attempt < a.size(); ++attempt)
+		if (!assign(attempt)) return false;
+	return true;
+}
+
+// A part's geometry under one material. Aggregate measurements explain a
+// difference; the corner records establish equivalence (means alone cannot).
 struct Geometry {
+	std::vector<Triangle> faces;
 	int triangles = 0;
 	double area = 0.0;
 	Vec centroid{0, 0, 0};  // area-weighted
@@ -142,10 +213,24 @@ std::map<std::string, Geometry> lod_geometry(const Threedi3di3 &m, const Threedi
 			for (size_t t = 0; t + 2 < tris.size(); t += 3) {
 				const ThreediVertex *v[3];
 				Vec p3[3];
+				Triangle face;
 				for (int k = 0; k < 3; ++k) {
 					v[k] = &lod.vertices.items[st.start_vertex + tris[t + k]];
 					p3[k] = mission(v[k]->position);
+					Corner &c = face[k];
+					c.position = p3[k];
+					c.normal = mission(v[k]->normal);
+					c.uv = {v[k]->uv0[0], v[k]->uv0[1], v[k]->uv1[0], v[k]->uv1[1]};
+					if (m.header.mesh_type == THREEDI_MESH_SKINNED)
+						for (int w = 0; w < 3; ++w) {
+							if (v[k]->bone_weights[w] == 0.0f) continue;
+							const int slot = v[k]->bone_indices[w];
+							// Keep retail's out-of-table slots distinguishable too.
+							const int bone = slot < st.bone_table_length && slot < 16 ? st.bone_table[slot] : 256 + slot;
+							c.weights[bone] += v[k]->bone_weights[w];
+						}
 				}
+				g.faces.push_back(std::move(face));
 				Vec e{p3[1][0] - p3[0][0], p3[1][1] - p3[0][1], p3[1][2] - p3[0][2]};
 				Vec f{p3[2][0] - p3[0][0], p3[2][1] - p3[0][1], p3[2][2] - p3[0][2]};
 				// Model axes mirror mission: retail's model-axes counter-clockwise
@@ -206,6 +291,8 @@ void compare_geometry(Diff &d, const std::string &where, const std::map<std::str
 			continue;
 		}
 		const Geometry &x = kv.second, &y = it->second;
+		if (!same_triangles(x.faces, y.faces))
+			d.add(label + ": triangle corners differ (positions, winding, normals, UVs or skin weights)");
 		if (x.triangles != y.triangles)
 			d.add(label + ": " + std::to_string(x.triangles) + " vs " + std::to_string(y.triangles) + " triangles");
 		const double scale = std::max(1.0, x.area);
@@ -340,6 +427,7 @@ bool same_points(const std::vector<Vec> &a, const std::vector<Vec> &b, double to
 }
 
 struct Section {
+	std::map<std::pair<int, uint32_t>, std::vector<Triangle>> geometry;
 	int parent = 0;
 	Vec offset{0, 0, 0};
 	bool sphere = false;
@@ -379,6 +467,15 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 			++s.poly[fc.poly_type];
 			const float *p[3];
 			for (int i = 0; i < 3; ++i) p[i] = c.vertices[v + fc.vert_index[i]].position;
+			Triangle face;
+			for (int i = 0; i < 3; ++i) {
+				face[i].position = {p[i][0], p[i][1], p[i][2]};
+				if (fc.normal_index >= 0 && nrm + fc.normal_index < c.normal_count) {
+					const float *sn = c.normals[nrm + fc.normal_index].normal;
+					face[i].normal = {sn[0], sn[1], sn[2]};
+				}
+			}
+			s.geometry[{fc.poly_type, fc.material_flags}].push_back(std::move(face));
 			const Vec e{p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
 			const Vec g{p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
 			const Vec n{e[1] * g[2] - e[2] * g[1], e[2] * g[0] - e[0] * g[2], e[0] * g[1] - e[1] * g[0]};
@@ -420,6 +517,12 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 	for (size_t i = 0; i < sa.size(); ++i) {
 		const Section &x = sa[i], &y = sb[i];
 		const std::string w = "collision section " + std::to_string(i);
+		bool same_faces = x.geometry.size() == y.geometry.size();
+		for (const auto &entry : x.geometry) {
+			const auto it = y.geometry.find(entry.first);
+			if (it == y.geometry.end() || !same_triangles(entry.second, it->second)) same_faces = false;
+		}
+		if (!same_faces) d.add(w + ": bullet-face corners, normals, surfaces or flags differ");
 		if (x.parent != y.parent) d.add(w + ": parent " + std::to_string(x.parent) + " vs " + std::to_string(y.parent));
 		if (!near(x.offset, y.offset, kPosTol)) d.add(w + ": offset " + vs(x.offset) + " vs " + vs(y.offset));
 		if (x.sphere != y.sphere || (x.sphere && (!near(x.med, y.med, 1e-2) || std::fabs(x.radius - y.radius) > 1e-2)))
@@ -464,13 +567,29 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 	}
 }
 
+std::vector<Triangle> occlusion_faces(const Threedi3di3 &m, size_t vertex, size_t plane, size_t face, int count) {
+	std::vector<Triangle> out;
+	for (int i = 0; i < count && face + i < m.occlusion_face_count; ++i) {
+		const uint32_t raw = m.occlusion_faces[face + i].raw_indices;
+		Triangle tri;
+		for (int k = 0; k < 3; ++k) {
+			const size_t v = vertex + ((raw >> (k * 8)) & 0xFF);
+			if (v < m.occlusion_vertex_count) tri[k].position = mission(m.occlusion_vertices[v].position);
+			const size_t p = plane + (raw >> 24);
+			if (p < m.occlusion_plane_count) tri[k].normal = mission(m.occlusion_planes[p].normal);
+		}
+		out.push_back(std::move(tri));
+	}
+	return out;
+}
+
 void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 	if (a.occlusion_object_count != b.occlusion_object_count) {
 		d.add("occlusion: " + std::to_string(a.occlusion_object_count) + " vs " + std::to_string(b.occlusion_object_count) +
 				" records");
 		return;
 	}
-	size_t va = 0, vb = 0, pa = 0, pb = 0;
+	size_t va = 0, vb = 0, pa = 0, pb = 0, fa = 0, fb = 0;
 	for (size_t o = 0; o < a.occlusion_object_count; ++o) {
 		const ThreediOcclusionObject &x = a.occlusion_objects[o], &y = b.occlusion_objects[o];
 		const std::string w = "occlusion record " + std::to_string(o);
@@ -490,6 +609,8 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 		for (int k = 0; k < y.num_vertices && vb + k < b.occlusion_vertex_count; ++k)
 			py.push_back(mission(b.occlusion_vertices[vb + k].position));
 		if (!same_points(px, py, kPosTol)) d.add(w + ": vertices differ");
+		if (!same_triangles(occlusion_faces(a, va, pa, fa, x.face_count), occlusion_faces(b, vb, pb, fb, y.face_count)))
+			d.add(w + ": face corners, winding or plane assignments differ");
 		// Planes as a set: (normal, d) within tolerance, order-insensitive.
 		std::vector<std::array<double, 4>> nx, ny;
 		for (int k = 0; k < x.num_planes && pa + k < a.occlusion_plane_count; ++k) {
@@ -516,6 +637,8 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 		vb += static_cast<size_t>(std::max(0, y.num_vertices));
 		pa += static_cast<size_t>(std::max(0, x.num_planes));
 		pb += static_cast<size_t>(std::max(0, y.num_planes));
+		fa += static_cast<size_t>(std::max(0, x.face_count));
+		fb += static_cast<size_t>(std::max(0, y.face_count));
 	}
 }
 

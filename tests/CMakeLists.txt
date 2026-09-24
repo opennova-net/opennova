@@ -82,6 +82,12 @@ foreach(fixture spinner skinned building)
                          FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
     set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
 endforeach()
+# Command regressions, including invalid inputs and semantic differences.
+add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp
+    ../apps/threedi_cli/build.cpp ../apps/threedi_cli/compare.cpp ../apps/threedi_cli/scene.cpp)
+target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_base)
+add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+
 # Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
 add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
 target_include_directories(threedi_o3d_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

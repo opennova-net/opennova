@@ -17,10 +17,14 @@
 namespace {
 
 int run(const std::string &cmd) {
+	std::fflush(stdout);
+#ifdef _WIN32
 	// cmd.exe strips one pair of outer quotes: wrap the whole command.
 	const std::string line = "\"" + cmd + "\"";
-	std::fflush(stdout);
 	return std::system(line.c_str());
+#else
+	return std::system(cmd.c_str());
+#endif
 }
 
 std::string quoted(const std::string &s) { return "\"" + s + "\""; }

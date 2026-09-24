@@ -26,6 +26,13 @@ archive-compressed textures; those references stay on the material with a
 warning. Imported texture entries have Write TGA off, so an export never
 writes a `.tga` over the texture the game already uses.
 
+Import creates an editable authoring scene. Export rebuilds bullet faces from
+the selected render LOD, regenerates skinned hit spheres and normalizes skin
+weights. Retail face normals, per-face flags, zero-length vertex normals and
+seam flags can therefore change. Armry01, US01 and ArmsG import and export,
+but their rebuilt collision records can differ. Use
+`opennova-3di compare` to inspect a rebuilt model before using it in game.
+
 ## Laying out a scene
 
 Objects are named by the NovaLogic ASE/OED convention
@@ -100,7 +107,8 @@ normal maps.
   object light switches.
 - **Material properties**: shader, alpha test, two-sided, glass, emissive, the
   texture list, the collision surface type of its faces (metal 14, glass 15,
-  ...), and the RGB / alpha / UV generators and texture flipbook.
+  ...), and the RGB / alpha / UV generators and texture flipbook. A
+  register-driven flipbook selects its register by name.
 
 Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`;
 `opennova-3di compare <a.3di> <b.3di>` tells whether two files hold the same

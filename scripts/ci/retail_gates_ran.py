@@ -47,7 +47,7 @@ MUST_RUN = {
         "npruntime_remote_body_state", "npruntime_held_weapon_attach",
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.
-        "mission_corpus",
+        "mission_corpus", "threedi_o3d_retail_roundtrip",
         # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
         # the shipped MP5 rig map, the BINOC rig and its twist.
         "mnu_compat", "mnu_coverage", "adm_parse", "anim_skeletal_clips_weapon_channel",
@@ -65,6 +65,7 @@ MIXED = {
     ],
     "jo_assets": [
         "occlusion_armry", "particle_smoke_all_fixtures", "sound_profile",
+        "threedi_o3d_retail_roundtrip",  # Every named model must run, including partial-data cases.
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",

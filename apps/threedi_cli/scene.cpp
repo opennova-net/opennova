@@ -308,26 +308,15 @@ void write_collision(Writer &w, const Threedi3di3 &m) {
 		for (int k = 0; k < co.num_faces && f < c.face_count; ++k, ++f) {
 			const ThreediCollisionFace &fc = c.faces[f];
 			// Retail stores faces counter-clockwise about their normal (mission
-			// axes), the scene's order. A face whose stored normal build cannot
-			// re-derive keeps it explicitly: its 8.8 corners collapse (Mp5b_1st),
-			// or the normal disagrees with its own winding (Dtruck2's 1 of 906).
+			// axes), the scene's order. Always carry the decoded normal:
+			// retail derives it before quantizing vertices to 8.8, so even
+			// non-collapsed triangles cannot reproduce it from stored corners.
 			std::string line = "cf " + std::to_string(fc.vert_index[0]) + " " + std::to_string(fc.vert_index[1]) + " " +
 					std::to_string(fc.vert_index[2]) + " " + std::to_string(fc.poly_type) + " " +
 					std::to_string(fc.material_flags);
-			const size_t base = v - static_cast<size_t>(co.num_vertices);
-			const float *p0 = c.vertices[base + fc.vert_index[0]].position;
-			const float *p1 = c.vertices[base + fc.vert_index[1]].position;
-			const float *p2 = c.vertices[base + fc.vert_index[2]].position;
-			double e[3], g[3];
-			for (int i = 0; i < 3; ++i) {
-				e[i] = static_cast<double>(p1[i]) - p0[i];
-				g[i] = static_cast<double>(p2[i]) - p0[i];
-			}
-			const double cx = e[1] * g[2] - e[2] * g[1], cy = e[2] * g[0] - e[0] * g[2], cz = e[0] * g[1] - e[1] * g[0];
-			if (normals + fc.normal_index < c.normal_count) {
+			if (fc.normal_index >= 0 && normals + fc.normal_index < c.normal_count) {
 				const float *n = c.normals[normals + fc.normal_index].normal;
-				if (!(cx * n[0] + cy * n[1] + cz * n[2] > 0.0))
-					line += " " + f9(n[0]) + " " + f9(n[1]) + " " + f9(n[2]);
+				line += " " + f9(n[0]) + " " + f9(n[1]) + " " + f9(n[2]);
 			}
 			w.line(line);
 		}

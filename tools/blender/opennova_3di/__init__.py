@@ -182,7 +182,8 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
     v_end: FloatProperty(name="V end", default=1.0)
     anim_frames: IntProperty(name="Frames", default=0, min=0, max=255, description="Texture flipbook frames")
     anim_type: IntProperty(name="Anim type", default=0, min=0, max=255, description="0 time, 1 control register")
-    anim_time: IntProperty(name="Frame time", default=0, description="Per-frame time, or the register index")
+    anim_time: IntProperty(name="Frame time", default=0, description="Per-frame time")
+    anim_register: register_prop()
 
 
 class O3DLightProps(bpy.types.PropertyGroup):
@@ -451,7 +452,10 @@ class O3D_PT_material(bpy.types.Panel):
         row = layout.row()
         row.prop(p, "anim_frames")
         row.prop(p, "anim_type")
-        row.prop(p, "anim_time")
+        if p.anim_type == 1:
+            row.prop(p, "anim_register")
+        else:
+            row.prop(p, "anim_time")
         box = layout.box()
         draw_style(box, p, "rgb_style", "rgb_register")
         if p.rgb_style != 0:

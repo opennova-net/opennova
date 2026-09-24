@@ -443,6 +443,7 @@ class Exporter:
             mesh.calc_loop_triangles()
             mw = ob.matrix_world
             nmat = mw.to_3x3().inverted_safe().transposed()
+            mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
             uv0, uv1 = self.uv_layers(mesh)
             for tri in mesh.loop_triangles:
@@ -450,7 +451,7 @@ class Exporter:
                 mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
                 s = strips.setdefault(self.material_for(mat), {"verts": [], "index": {}, "tris": []})
                 corners = []
-                for li in tri.loops:
+                for li in reversed(tri.loops) if mirrored else tri.loops:
                     vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
                     key = tuple(round(x, 5) for x in vert)
                     if key not in s["index"]:
@@ -476,6 +477,7 @@ class Exporter:
             mesh.calc_loop_triangles()
             mw = ob.matrix_world
             nmat = mw.to_3x3().inverted_safe().transposed()
+            mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
             uv0, uv1 = self.uv_layers(mesh)
             influences = []
@@ -493,7 +495,7 @@ class Exporter:
                 slot = tri.material_index
                 mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
                 corners = []
-                for li in tri.loops:
+                for li in reversed(tri.loops) if mirrored else tri.loops:
                     loop = mesh.loops[li]
                     corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
                                     influences[loop.vertex_index]))
@@ -645,7 +647,8 @@ class Exporter:
                     lines.append(f"texture {quoted(name)}")
                     self.textures[name] = image
             if p.anim_frames or p.anim_type or p.anim_time:
-                lines.append(f"texanim {p.anim_frames} {p.anim_type} {p.anim_time}")
+                time_or_register = self.register(p.anim_register) if p.anim_type == 1 else p.anim_time
+                lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
             if p.rgb_style:
                 reg = self.generator_register(p.rgb_style, p.rgb_register)
                 s = [round(c * 255) for c in p.rgb_start]
@@ -705,12 +708,15 @@ class Exporter:
                     raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
                 lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
                 mw = ob.matrix_world
+                mirrored = mw.to_3x3().determinant() < 0
                 for v in mesh.vertices:
                     lines.append("ov " + fmt(*self.mission(mw @ v.co)))
                 # Counter-clockwise about the outward normal, as retail stores
                 # them; the builder picks each face's plane (the OED rule).
                 for poly in mesh.polygons:
                     vs = list(poly.vertices)
+                    if mirrored:
+                        vs.reverse()
                     for k in range(1, len(vs) - 1):
                         lines.append(f"of {vs[0]} {vs[k]} {vs[k + 1]}")
             finally:
@@ -773,9 +779,10 @@ class Exporter:
                 try:
                     mesh.calc_loop_triangles()
                     mw = ob.matrix_world
+                    mirrored = mw.to_3x3().determinant() < 0
                     for tri in mesh.loop_triangles:
                         corners = []
-                        for vi in tri.vertices:
+                        for vi in reversed(tri.vertices) if mirrored else tri.vertices:
                             p = self.mission(mw @ mesh.vertices[vi].co)
                             key = tuple(round(x, 4) for x in p)
                             if key not in s["index"]:

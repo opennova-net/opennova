@@ -342,6 +342,10 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("cv needs an open cobj and x y z");
 				continue;
 			}
+			if (model.collision[cobj].vertices.size() > SHRT_MAX) {
+				ps.error("a collision section exceeds 32768 vertices (signed int16 face indices)");
+				continue;
+			}
 			model.add_collision_vertex(cobj, ThreediBuildVec3{p[0], p[1], p[2]});
 			continue;
 		}
@@ -371,7 +375,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			long a, b, c;
 			int poly = 1;
 			unsigned long flags = 0;
-			double n[3];
+			double n[3] = {};
 			if (cobj < 0 || !(in >> a >> b >> c)) {
 				ps.error("cf needs an open cobj and three vertex indices");
 				continue;
@@ -465,6 +469,11 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("texanim needs an open material and frames type time");
 				continue;
 			}
+			if (frames < 0 || frames > 255 || type < 0 || type > 1 || !fits_s16(time)) {
+				ps.error("texanim frames is a byte, type is 0 or 1, and time/register is int16");
+				continue;
+			}
+			if (type == 1) check_register(THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD + 1, time, "texanim");
 			ThreediTexAnim &a = model.materials[material].animation;
 			a.num_frames = static_cast<uint8_t>(frames);
 			a.animation_type = static_cast<uint8_t>(type);
@@ -570,6 +579,10 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("panm needs an open lod, a part and its parent");
 				continue;
 			}
+			if (p < 0 || p > 255 || parent < -1 || parent > 255) {
+				ps.error("panm part is a byte and parent is -1 or a byte");
+				continue;
+			}
 			ThreediPartAnimation &pa = model.add_panm(lod, p, parent);
 			long long flags = 0, frame = 0;
 			if (read_word(in, flags)) {
@@ -619,6 +632,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					}
 				}
 			}
+			check_register(static_cast<int>(style), param, "track");
 			ThreediPartAnimation &pa = model.lods[lod].panm.back();
 			ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y,
 					&pa.scale_z, &pa.translation};
@@ -765,9 +779,12 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 				ps.error("panm in lod " + std::to_string(li) + " selects an mtrx frame the model lacks");
 		}
 	}
-	for (size_t o = 0; o < m.collision.size(); ++o)
+	for (size_t o = 0; o < m.collision.size(); ++o) {
+		if (m.collision[o].normals.size() > static_cast<size_t>(SHRT_MAX) + 1)
+			ps.error("cobj " + std::to_string(o) + " exceeds 32768 collision normals (signed int16 indices)");
 		for (const ThreediBoundingVolume &v : m.collision[o].volumes)
 			if (v.plane_count < 4) ps.error("cobj " + std::to_string(o) + " has a volume with fewer than 4 planes");
+	}
 	for (const ThreediLight &l : m.lights)
 		if (l.subobj_index != 0 && (m.lods.empty() || l.subobj_index >= m.lods[0].parts.size()))
 			ps.error("a light names a part LOD 0 lacks");

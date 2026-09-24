@@ -139,10 +139,17 @@ language's copy of the format, drifts.
   US01, ArmsG and Mp5b_1st through scene -> build -> compare.
 - Over the 958 JO models, `build(scene(x))` is the same model as `x`
   (`compare`) for 956; the other two draw with a material id they lack.
-- Through Blender 5.1 (the packaged extension): retail Armry01 imports and
-  exports as the same model (bldg LODs, detail textures, three lights, eight
-  occlusion records, blink boxes, the FLICKER generator, bullet faces from
-  LOD 1), as do ONSldr1 and ArmsG.
+- Through Blender 5.1: retail Armry01 imports and exports as the same model
+  under the original aggregate comparator (bldg LODs, detail textures, three
+  lights, eight occlusion records, blink boxes, the FLICKER generator, bullet
+  faces from LOD 1). The 2026-09-24 review adds per-corner render, skin,
+  collision and occlusion comparisons. Armry01 retains zero-normal and
+  collision differences; US01 and ArmsG retain normalized-weight and collision
+  differences because their bullet faces and hit spheres are rebuilt.
+- Review regressions in `threedi_o3d_commands` reject changed UV mappings,
+  weights, bone assignments, collision and occlusion faces, undeclared track
+  and flipbook registers, and overflowing PANM and collision indices. Reordered
+  bone tables, register tables and triangle corners remain equivalent.
 - A model exported by the packaged add-on loaded, rendered and flew in retail
   Joint Operations (2026-09-23, an F-16 on `cpln`); a skinned soldier on the
   retail person rig rendered and animated in retail with `anim_def US01`, and
