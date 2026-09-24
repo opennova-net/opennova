@@ -7710,7 +7710,9 @@ per-strip batches, the fog-box cull, the owner-visibility gate), and the
 device `ScarPresenter` + `scar_presenter.cpp` (entity-ring batches parented
 under the owner model's section node, shared-ring batches as a world mesh; the
 entity-ring batches are uploaded in the section-local frame the engine stores,
-the shared ring in world space). The device state is per strip from the
+the shared ring in world space). That section-local frame is the 3DI source
+frame (Z up), so the packer folds it `(x, y, z) -> (y, z, x)` onto the
+render-part node, the frame its mesh is built in. The device state is per strip from the
 witnessed mode words (`world::scar_texture_strip_mode_word`,
 `renderer::decode_scar_strip_mode`, the draw list's `strip_mode_words`):
 `scar_quad.gdshader` carries the scorch state (blend_mix, unshaded, fog,
@@ -7718,20 +7720,30 @@ depth_draw_never, cull_back, no alpha test, `saturate(2 · tex · COLOR)` in
 gamma space) and `scar_quad_hole.gdshader` the bhole state (plus the
 GREATER/128 discard, depth_draw_always, cull_disabled); Godot's front face is
 clockwise like D3D's but in a right-handed frame, so the witnessed order is
-already front on the struck side under the packer's world ROTATION fold and
-the shared ring keeps it, while the entity-local REFLECTION fold flips it and
-those triangles are re-wound — the scorch `cull_back` then culls what retail's
-CCW cull culls (the probe's front/behind captures prove it). **Fixed
-2026-08-21**: the first cut
+already front on the struck side under both of the packer's folds (world and
+entity-local are ROTATIONS), so both rings keep it and the scorch `cull_back`
+culls what retail's CCW cull culls. **Fixed 2026-09-24**: no vehicle or item
+scar had ever shown. The slot writer applied the transposed section matrix
+rotate-first (`R^T p - t`) where retail translates first,
+`R^T (p - t)` [orig: Matrix_Transpose3x3WithNegateCol3 @0x6136d0 ->
+Math_TransformPointWithTranslation22 @0x412f60], which put every entity-ring
+slot hundreds of units off its owner. The packer also folded the slot as the
+decoded `(-x, y, z)` frame, which put it below and beside the struck face.
+Pinned by ctest `impact_scar` (a posed, translated section).
+**Fixed 2026-08-21**: the first cut
 drew both strips through one alpha-scissor-0.5 material, which in Godot means the
 opaque pass with no blend — every scorch drew as an opaque black blob
 (the "pitch black, no texture" report); the scissor was a misread of the
 inert 128 latch.
 Pinned by ctest `impact_scar`, `projectile_combat`, `renderer_scar_draw_list`,
-`destruction`. **The one residual**: the GLASS userpoint leg — the 24-row
-table is not witnessed in full, so a userpoint match cannot be detected and
-such a hit takes the ring scar (D-ITEM-6 narrowed to the blast/damage tails +
-this leg). The `scar_type` word was parsed into `DefAmmoDef` this round (no
+`destruction`. **The one residual**: the GLASS userpoint leg, unported, so a
+userpoint match cannot be detected and such a hit takes the ring scar
+(D-ITEM-6 narrowed to the blast/damage tails + this leg). The table @0x841980
+holds 35 rows, every one keyed to a BUILDING model (`eurhr1..3*`,
+`atrm1a..c`, `atrm2a..c`, `ctrblda/b`, `airtowr1`), each with the four
+`Effect_Bld{Glass,Paper,Fire,Dust}Exp` rows, a scar id 3..16, a radius of
+0x8000..0x80000, and +184 = +188 = 1. Vehicle glass (the 00TRa truck) never
+matches, so retail takes the id-18 `bhole1` ring scar there too. The `scar_type` word was parsed into `DefAmmoDef` this round (no
 Python mirror exists for ammo).
 
 ## 25. Appendix: the tracer visual system — the trail emitter pool, style tables, and the ribbon renderer (grill-ida, 2026-07-18)

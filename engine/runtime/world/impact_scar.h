@@ -25,13 +25,13 @@ struct ProjectileHit;
 //  g_scarTable @0x8417A8 with its 32-byte texture-name strip @0x8413A8].
 //
 // The GLASS userpoint leg is a SEPARATE mechanism: when the struck model has
-// a GLASS userpoint of the 24-row surface-material table @0x841980 within the
+// a GLASS userpoint of the 35-row surface-material table @0x841980 within the
 // row's radius of the hit, Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90
 // takes the projected-decal path (scar_project_decal_onto_entity @0x5CE4A0)
 // plus the four effects rolled on the table's MAIN probability column, and the
-// ring scar is SKIPPED. RESIDUAL (the one open item of this port): that
-// table's rows are not witnessed in full, so the port cannot detect the
-// userpoint match and writes the ring scar on such a hit instead.
+// ring scar is SKIPPED. Every row keys a building model, so vehicle glass
+// always takes the ring scar. RESIDUAL (the one open item of this port): the
+// leg is unported, so a building-glass hit writes the ring scar instead.
 
 // The ring: 256 slots of 64 bytes behind a 4-byte owner id, with the cursor
 // dword after the slots [orig: the slot pointer `cache + 4 + (cursor << 6)`
