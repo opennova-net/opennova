@@ -1689,12 +1689,20 @@ int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
 
 namespace {
 
+// One MMX word lane of the weighted blend: the light byte zero-extended times
+// the weight (pmullw), plus the base byte unpacked WITH ITSELF (punpcklbw
+// mm1, mm1 = base * 257), added with unsigned word saturation (paddusw), then
+// >> 8 (psrlw) [orig: Environment_UpdateWeatherTick @ 0x57f0c2..0x57f0ce].
+int weighted_add_lane(float light, float base, int weight) {
+	const int sum = std::min(rgb_byte(light) * weight + rgb_byte(base) * 257, 0xFFFF);
+	return sum >> 8;
+}
+
 Rgb weighted_add(const Rgb &light, const Rgb &base, int weight) {
-	// (light * weight) >> 8 + base, saturating per byte.
 	Rgb out;
-	out.r = byte_to_float(((rgb_byte(light.r) * weight) >> 8) + rgb_byte(base.r));
-	out.g = byte_to_float(((rgb_byte(light.g) * weight) >> 8) + rgb_byte(base.g));
-	out.b = byte_to_float(((rgb_byte(light.b) * weight) >> 8) + rgb_byte(base.b));
+	out.r = byte_to_float(weighted_add_lane(light.r, base.r, weight));
+	out.g = byte_to_float(weighted_add_lane(light.g, base.g, weight));
+	out.b = byte_to_float(weighted_add_lane(light.b, base.b, weight));
 	return out;
 }
 

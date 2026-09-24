@@ -881,6 +881,61 @@ int main() {
 				"overcast-scaled device end");
 	}
 
+	// --- the dome constants under NVG and the thermal view -------------------
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		cfg.advanced_clouds = 1;
+		cfg.keyframes[0].skybase = {60.0f / 255.0f, 80.0f / 255.0f, 140.0f / 255.0f};
+		cfg.keyframes[0].skybright = {20.0f / 255.0f, 20.0f / 255.0f, 32.0f / 255.0f};
+		cfg.keyframes[0].skyhighlight = {150.0f / 255.0f, 160.0f / 255.0f, 150.0f / 255.0f};
+		cfg.keyframes[0].cloudbase = {140.0f / 255.0f, 140.0f / 255.0f, 140.0f / 255.0f};
+		cfg.keyframes[0].cloudhighlight = {20.0f / 255.0f, 24.0f / 255.0f, 10.0f / 255.0f};
+		cfg.keyframes[0].cloudedge = {150.0f / 255.0f, 160.0f / 255.0f, 170.0f / 255.0f};
+		cfg.keyframes[0].skyfog = {80.0f / 255.0f, 96.0f / 255.0f, 100.0f / 255.0f};
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		// make_config's envscale 0.5 halves the authored keyframe bytes; the
+		// dome unpacks the scaled render bytes.
+		const float base_b = env.sky_base().b * 255.0f;
+		const float edge_r = env.cloud_edge().r * 255.0f;
+		const float highlight_g = env.sky_highlight().g * 255.0f;
+		const opennova::env::SkyFrameState plain = opennova::env::build_sky_frame(env);
+		ok &= expect(!plain.flat_pass && near(base_b, 70.0f) &&
+						near(plain.sky_base.b, base_b * (2.0f / 255.0f)),
+				"the plain unpack is byte * 2/255 [orig: Color_UnpackToFloat4 @ 0x578985]");
+		// NVG level 0: f = 0.2, a = 0.05, b = 0.0003125 per channel
+		// [orig: Color_UnpackToFloat4 @ 0x578913..0x57897b].
+		env.set_nvg_view(true, 0);
+		const opennova::env::SkyFrameState nvg0 = opennova::env::build_sky_frame(env);
+		ok &= expect(near(nvg0.sky_base.b, base_b * 0.05f * (2.0f / 255.0f) + 0.0003125f) &&
+						near(nvg0.cloud_edge.r, edge_r * 0.05f * (2.0f / 255.0f) + 0.0003125f),
+				"first-person NVG dims every dome constant to byte*a*2/255 + b at level 0");
+		env.set_nvg_view(true, 4);
+		const opennova::env::SkyFrameState nvg4 = opennova::env::build_sky_frame(env);
+		ok &= expect(near(nvg4.sky_highlight.g,
+							 highlight_g * 0.25f * (2.0f / 255.0f) + 0.0015625f),
+				"NVG level 4: f = 1.0, a = 0.25, b = 0.0015625");
+		ok &= expect(rgb_near(nvg4.skyfog_color, plain.skyfog_color),
+				"the dome fog color never takes the NVG dim (FOGCOLOR is the packed block)");
+		env.set_nvg_view(false, 0);
+		// The thermal view: sky constants 1.0, cloud constants 0.9, fog 0x808080
+		// [orig: render_skybox @ 0x579377..0x579447; sub_579CB0 @ 0x579cbc].
+		env.set_thermal_view(true, false);
+		const opennova::env::SkyFrameState thermal = opennova::env::build_sky_frame(env);
+		ok &= expect(near(thermal.sky_base.r, 1.0f) && near(thermal.sky_bright.g, 1.0f) &&
+						near(thermal.sky_highlight.b, 1.0f) && near(thermal.cloud_base.r, 0.9f) &&
+						near(thermal.cloud_highlight.g, 0.9f) && near(thermal.cloud_edge.b, 0.9f),
+				"the thermal dome is white: sky 1.0, clouds 0.9");
+		ok &= expect(rgb_near(thermal.skyfog_color,
+							 {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f}),
+				"the thermal sky wrapper fogs toward 0x808080");
+		env.set_nvg_view(true, 2);
+		const opennova::env::SkyFrameState thermal_nvg = opennova::env::build_sky_frame(env);
+		ok &= expect(near(thermal_nvg.sky_base.r, 1.0f) && near(thermal_nvg.cloud_edge.r, 0.9f),
+				"the thermal overwrite runs after the NVG unpack");
+	}
+
 	// --- the 62.5 Hz autonomous accumulator clamp ----------------------------
 	{
 		EnvironmentState env;

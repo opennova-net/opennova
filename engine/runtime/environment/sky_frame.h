@@ -25,8 +25,10 @@ struct SkyFrameState {
 	Rgb flat_color;
 	// Retail unpacks these six packed ENV blocks at 2/255, without clamping
 	// the uploaded constants [orig: Color_UnpackToFloat4 @ 0x578985; six call
-	// sites @ 0x579312..0x57936f]. Fog does not use this helper:
-	// D3DRS_FOGCOLOR consumes its packed byte color.
+	// sites @ 0x579312..0x57936f], dimmed under the first-person NVG view and
+	// overwritten white in the thermal view (sky_frame.cpp carries both
+	// witnesses). Fog does not use this helper: D3DRS_FOGCOLOR consumes its
+	// packed byte color.
 	Rgb sky_base;
 	Rgb sky_bright;
 	Rgb sky_highlight;
@@ -40,8 +42,9 @@ struct SkyFrameState {
 	Vec3 sun_dir{};
 	Vec3 light_dir{};
 	// The sky pass temporarily swaps the device fog color from world fog to
-	// the post-horizon-blend, doubled skyfog block, then restores world fog
-	// [orig: sky fog wrapper @ 0x579cb0].
+	// the post-horizon-blend, doubled skyfog block (0x808080 in the thermal
+	// view), then restores world fog [orig: sky fog wrapper sub_579CB0
+	// @ 0x579cb0].
 	Rgb skyfog_color;
 	float fog_end = 1000.0f;
 	// Witnessed defaults when no environment backs the dome.

@@ -508,7 +508,8 @@ inline constexpr double kCloudUvScaleLayer2 = 1.0 / 536870912.0; // 2^-29
 // ---------------------------------------------------------------------------
 // Derived render colors [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f1b1]
 
-// Terrain directional light = light * 0xB5/256 + sky (saturating); 0xB5 = 0.707.
+// Terrain directional light = (light * 0xB5 + sky * 257) >> 8 per byte, the
+// word sum saturating at 0xFFFF (the sky byte unpacks with itself); 0xB5 = 0.707.
 Rgb combine_terrain_light(const Rgb &light, const Rgb &sky);
 // Secondary variant with 0x5A (0.352) light weight.
 Rgb combine_terrain_light_low(const Rgb &light, const Rgb &sky);

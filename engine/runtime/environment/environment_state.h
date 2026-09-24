@@ -226,6 +226,7 @@ public:
 	// true when the state actually changed (the shell then refreshes only the
 	// two affected shader channels).
 	bool set_nvg_view(bool active, int gain);
+	bool nvg_view_active() const { return nvg_view_active_; }
 	int nvg_gain() const { return nvg_gain_; }
 
 	// --- the thermal view -------------------------------------------------

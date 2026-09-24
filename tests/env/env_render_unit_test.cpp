@@ -271,6 +271,18 @@ int main() {
 		const Rgb low = combine_terrain_light_low({1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f});
 		if (!expect(byte_of(low.r) == 89, "secondary light weight is 0x5A/256")) return 1;
 
+		// The sky byte rides the word lane unpacked with itself (x 257) and the
+		// sum saturates as a word before >> 8 [orig: Environment_UpdateWeatherTick
+		// @ 0x57f0c5 punpcklbw mm1, mm1; @ 0x57f0cb paddusw].
+		const Rgb mid = combine_terrain_light({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
+		                                      {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
+		if (!expect(byte_of(mid.r) == 171, "(100*181 + 100*257) >> 8 = 171, not 170")) return 1;
+		const Rgb full = combine_terrain_light({1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
+		if (!expect(byte_of(full.r) == 255, "the word sum saturates at 0xFFFF")) return 1;
+		const Rgb low_mid = combine_terrain_light_low({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
+		                                              {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
+		if (!expect(byte_of(low_mid.r) == 135, "(100*90 + 100*257) >> 8 = 135")) return 1;
+
 		const Rgb lit = lit_water_color({128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f},
 		                                {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f});
 		if (!expect(byte_of(lit.r) == 128, "water*light>>7 is identity at mid-gray")) return 1;

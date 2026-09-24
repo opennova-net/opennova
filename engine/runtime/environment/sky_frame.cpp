@@ -8,11 +8,34 @@ namespace opennova::env {
 
 namespace {
 
-// The retail 2/255 unclamped upload scale for the six packed dome constants
-// [orig: Color_UnpackToFloat4 @ 0x578985].
-Rgb sky_constant(const Rgb &value) {
-	return Rgb{value.r * 2.0f, value.g * 2.0f, value.b * 2.0f};
+// The six packed dome constants unpack through one helper
+// [orig: Color_UnpackToFloat4 @ 0x578900]. The plain leg is byte * 2/255,
+// unclamped [orig: @ 0x578985..0x5789bb]. With NVG on in first person
+// (g_NVGActive && g_camera_mode == 0 [orig: @ 0x578901..0x578911]) every
+// channel dims to byte * a * 2/255 + b with f = (level + 1) * 0.2, a = 0.25 * f,
+// b = f * 0.0015625 [orig: @ 0x578913..0x57897b]; alpha stays 1 either way.
+Rgb sky_constant(const Rgb &value, bool nvg_view, int nvg_level) {
+	if (!nvg_view) {
+		return Rgb{value.r * 2.0f, value.g * 2.0f, value.b * 2.0f};
+	}
+	const double f = static_cast<double>(nvg_level + 1) * static_cast<double>(0.2f);
+	const double a = static_cast<double>(0.25f) * f;
+	const double b = f * static_cast<double>(0.0015625f);
+	const auto dim = [a, b](float channel) {
+		const double byte_value = static_cast<double>(channel) * 255.0;
+		return static_cast<float>(byte_value * a * static_cast<double>(2.0f / 255.0f) + b);
+	};
+	return Rgb{dim(value.r), dim(value.g), dim(value.b)};
 }
+
+// The thermal dome: after the unpack the shader path overwrites sky base,
+// bright and highlight with 1.0 and the three cloud blocks with 0.9
+// [orig: render_skybox @ 0x579377..0x579447 (flt_7C459C = 0.9)], and the sky
+// wrapper fogs toward 0x808080 instead of the skyfog block
+// [orig: sub_579CB0 @ 0x579cbc].
+constexpr float kThermalSkyWhite = 1.0f;
+constexpr float kThermalCloudWhite = 0.9f;
+constexpr Rgb kThermalSkyFog{128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f};
 
 } // namespace
 
@@ -27,16 +50,27 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 	if (frame.flat_pass) {
 		frame.flat_color = env.cloud_tint();
 	} else {
-		frame.sky_base = sky_constant(env.sky_base());
-		frame.sky_bright = sky_constant(env.sky_bright());
-		frame.sky_highlight = sky_constant(env.sky_highlight());
-		frame.cloud_base = sky_constant(env.cloud_base());
-		frame.cloud_highlight = sky_constant(env.cloud_highlight());
-		frame.cloud_edge = sky_constant(env.cloud_edge());
+		const bool nvg = env.nvg_view_active();
+		const int level = env.nvg_gain();
+		frame.sky_base = sky_constant(env.sky_base(), nvg, level);
+		frame.sky_bright = sky_constant(env.sky_bright(), nvg, level);
+		frame.sky_highlight = sky_constant(env.sky_highlight(), nvg, level);
+		frame.cloud_base = sky_constant(env.cloud_base(), nvg, level);
+		frame.cloud_highlight = sky_constant(env.cloud_highlight(), nvg, level);
+		frame.cloud_edge = sky_constant(env.cloud_edge(), nvg, level);
+		if (env.thermal_view()) {
+			frame.sky_base = frame.sky_bright = frame.sky_highlight =
+					Rgb{kThermalSkyWhite, kThermalSkyWhite, kThermalSkyWhite};
+			frame.cloud_base = frame.cloud_highlight = frame.cloud_edge =
+					Rgb{kThermalCloudWhite, kThermalCloudWhite, kThermalCloudWhite};
+		}
 	}
 	frame.sun_dir = env.sun_direction();
 	frame.light_dir = env.light_direction();
-	frame.skyfog_color = env.skyfog_color();
+	// The main frame hands the thermal latch to the sky wrapper as its first
+	// argument [orig: Render_ProcessMainSceneFrame @ 0x5ca363 (edi = the
+	// thermal byte) -> sub_579CB0 @ 0x5ca81a].
+	frame.skyfog_color = env.thermal_view() ? kThermalSkyFog : env.skyfog_color();
 	// The dome's fog constant c9.x is the RAW smoothed fog distance
 	// (Env_FogDistCurrent x 0.9 / 65536; the shader applies the 0.9), never
 	// Environment_GetFogEndDistance's overcast-scaled end that the object and
