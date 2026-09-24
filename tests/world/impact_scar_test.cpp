@@ -178,7 +178,7 @@ void test_basis() {
 	// quad's coordinate winding face the struck side once retail's Y-negated
 	// upload (a reflection into D3D's left-handed frame) is applied, and what
 	// the Godot packer's winding fold relies on (simulation_scars.cpp —
-	// the rotation fold keeps the order, the entity-local reflection re-winds).
+	// both of its folds are rotations and keep the order).
 	const auto triple = [](const int32_t n_[3], const int32_t a_[3], const int32_t b_[3]) {
 		const int64_t cx = (int64_t(a_[1]) * b_[2] - int64_t(a_[2]) * b_[1]) >> 16;
 		const int64_t cy = (int64_t(a_[2]) * b_[0] - int64_t(a_[0]) * b_[2]) >> 16;
@@ -404,6 +404,65 @@ void test_add_entry() {
 
 } // namespace
 
+// An entity-ring slot is SECTION-LOCAL: a vehicle posed far from the origin
+// and turned must store the hit at its model-local point, so the presenter's
+// section-node mount puts the quad back on the struck face.
+// [orig: Scar_AddEntry @0x5ccc99..0x5ccca5 — Matrix_Transpose3x3WithNegateCol3
+//  then Math_TransformPointWithTranslation22 (translate, then rotate)]
+void test_entity_ring_section_local() {
+	World world;
+	world.registry.configure_pool(1, 4);
+	Entity e;
+	e.kind = EntityKind::Item;
+	e.item_type = 1;
+	e.position = {245.0f, -361.0f, 27.0f};
+	const EntityHandle h = world.registry.spawn(1, e);
+	const Entity *target = world.registry.get(h);
+	CHECK(target != nullptr, "the posed vehicle spawned");
+	if (target == nullptr) return;
+	world.env.water_z = 0;
+
+	CollisionModel model;
+	CollisionSection section;
+	section.authored_bounds = true;
+	section.min_x = section.min_y = section.min_z = -0x40000;
+	section.max_x = section.max_y = section.max_z = 0x40000;
+	section.radius = 0x70000;
+	model.sections.push_back(section);
+	CollisionWorld collision;
+	collision.assign_entity(h, collision.add_model(std::move(model)));
+	const int32_t origin[3] = {245 * 0x10000, -361 * 0x10000, 27 * 0x10000};
+	const CollisionMatrix pose = collision_matrix_from_heading(0x40000000, origin); // 90 deg
+	CHECK(collision.publish_entity_section_matrices(h, {pose}),
+			"the section pose publishes");
+	collision.build_tick_tables(world);
+	world.collision = &collision;
+
+	// A model-local point, posed into the world through the section matrix.
+	const int32_t local[3] = {1 * 0x10000, 2 * 0x10000, 3 * 0x10000};
+	int32_t world_point[3];
+	pose.transform_point(local, world_point);
+	ProjectileHit hit;
+	hit.hit_class = ProjectileHitClass::DynamicEntity;
+	hit.geometry_entity = h;
+	hit.position_q16 = FixedVec3{world_point[0], world_point[1], world_point[2]};
+	hit.normal_q16 = FixedVec3{0, 0, 0x10000};
+	hit.surface_type = 15;
+	hit.section_index = 0;
+	hit.face_index = 1;
+	CHECK(scar_add_entry(world, hit, *target, 1), "the posed vehicle takes a scar");
+	const ScarRing *ring = world.out.scars.find(h);
+	CHECK(ring != nullptr && ring->slots[0].live, "into its entity ring");
+	if (ring == nullptr) return;
+	const ScarSlot &slot = ring->slots[0];
+	for (int axis = 0; axis < 3; ++axis) {
+		const int32_t delta = slot.pos[axis] - local[axis];
+		CHECK(delta >= -2 && delta <= 2,
+				"the slot holds the section-local hit point, not a rotated world point");
+	}
+	CHECK(slot.texture == kScarGlassFallbackTextureStrip, "glass takes bhole1");
+}
+
 int main() {
 	test_scar_selection();
 	test_texture_roll_discipline();
@@ -414,6 +473,7 @@ int main() {
 	test_basis();
 	test_cache();
 	test_add_entry();
+	test_entity_ring_section_local();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
