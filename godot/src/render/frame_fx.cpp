@@ -72,9 +72,11 @@ using opennova::renderer::FrameFxTaps;
 // through its shader-side renderfov projection and depth band, retail's
 // "viewmodel first" step), and the empty-sector flat terrain fallback (bit
 // 18, which the water mirror excludes: docs/terrain/terrain-re.md, "Empty-sector
-// flat fallback"). Q3 omits the plumbing bit and the viewmodel
-// (retail's Q3 copies of gun strips against the depth band are unwitnessed,
-// D-RORD-10). That gives shaders a collision-free exact-mask signature
+// flat fallback"). Q3 omits the plumbing bit and the viewmodel; leaving the
+// gun out is observably equivalent: retail flushes Q3 under the world
+// projection and the full viewport (retail Render_SetViewport @ 0x582a45)
+// against the beauty depth, where the gun's own band depth hides its copies
+// (D-RORD-10). That gives shaders a collision-free exact-mask signature
 // without admitting caster or slot-capture geometry anywhere.
 constexpr std::uint32_t kBeautyCameraMask = 0x00078C01u;
 // FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
