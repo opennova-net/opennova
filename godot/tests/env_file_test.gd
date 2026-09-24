@@ -266,6 +266,30 @@ func test_underwater_pass_transition_publishes_once_and_is_idempotent() -> void:
 	assert_gt(state.get_generation(), underwater_generation)
 
 
+func test_the_viewmodel_keeps_the_dry_pass_fog_underwater() -> void:
+	# Retail fogs the first-person gun under the DRY pass: the frame applies
+	# ApplyFogAndAmbient(0, thermal) before the sky dome and the viewmodel and
+	# re-applies the eye's own pass only after the viewmodel [orig:
+	# Render_ProcessMainSceneFrame @0x5ca3bf..0x5ca3ce, the viewmodel
+	# @0x5ca829, the re-apply @0x5ca82e..0x5ca841].
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	var dry_color: Vector3 = env_node.get_scene_fog_color()
+	var dry_end: float = env_node.get_scene_fog_end()
+	assert_eq(env_node.get_viewmodel_fog_color(), dry_color,
+			"above water the gun and the world share the pass")
+	env_node.set_underwater_view(true)
+	env_node.set_underwater_overlay_view(true)
+	assert_ne(env_node.get_scene_fog_color(), dry_color,
+			"the world's pass swaps to the lit water fog underwater")
+	assert_eq(env_node.get_viewmodel_fog_color(), dry_color,
+			"the gun keeps the dry pass colour underwater")
+	assert_almost_eq(env_node.get_viewmodel_fog_range().y, dry_end, 0.001,
+			"the gun keeps the dry pass range underwater")
+	assert_ne(env_node.get_viewmodel_fog_range().y, env_node.get_scene_fog_end())
+
+
 func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)

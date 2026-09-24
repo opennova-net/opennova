@@ -98,6 +98,15 @@ public:
 	}
 	Vector3 get_underwater_overlay_color() const;
 	int get_underwater_overlay_alpha_byte() const;
+	// Whether this frame's sky pass drew the dome (the sky-dome gate owner
+	// reports it); with the eye strictly above water it selects the fog colour
+	// the dome wrapper leaves for the viewmodel (engine build_viewmodel_fog).
+	void set_sky_dome_drawn(bool p_drawn);
+	// The first-person viewmodel's pass fog, published as the
+	// opennova_viewmodel_fog_color / opennova_viewmodel_fog_range globals
+	// (range = start, end, type): the dry pass whatever the eye's side.
+	Vector3 get_viewmodel_fog_color() const;
+	Vector3 get_viewmodel_fog_range() const;
 	Vector3 get_scene_fog_color() const;
 	float get_scene_fog_start() const;
 	float get_scene_fog_end() const;
@@ -221,6 +230,8 @@ private:
 	void _after_tod_update();
 	Ref<EnvLightValues> _build_light_values() const;
 	void _write_scene_fog_globals();
+	opennova::env::SceneFogValues _viewmodel_fog() const;
+	void _write_viewmodel_fog_globals();
 	// The object family's per-pass lighting block as global shader
 	// parameters: the world block the object shaders scale per entity at
 	// draw time (renderer/light_runtime.h carries the RenderBatchCtx
@@ -239,6 +250,7 @@ private:
 	int64_t last_published_generation_ = 0;
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
+	bool sky_dome_drawn_ = true;
 };
 
 } // namespace godot

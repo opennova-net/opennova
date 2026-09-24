@@ -330,6 +330,37 @@ int main() {
 				"thermal off restores the light/sky ramps");
 	}
 
+	// --- the viewmodel's pass fog -------------------------------------------
+	// The frame fogs the viewmodel under the DRY pass (ApplyFogAndAmbient(0,
+	// thermal) @ 0x5ca3bf..0x5ca3ce precedes the viewmodel @ 0x5ca829; the
+	// eye's pass is re-applied only after it, @ 0x5ca82e..0x5ca841), and the
+	// dome wrapper restores Env_FogBlock once it drew (@ 0x579ce6..0x579cf6).
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::SceneFogValues dry = env.build_scene_fog(false);
+		const opennova::env::SceneFogValues gun = env.build_viewmodel_fog(true);
+		ok &= expect(rgb_near(gun.color, dry.color) && near(gun.start, dry.start) &&
+						near(gun.end, dry.end) && gun.type == dry.type,
+				"the viewmodel fogs under the dry pass payload");
+		ok &= expect(!rgb_near(gun.color, env.build_scene_fog(true).color) &&
+						!near(gun.end, env.build_scene_fog(true).end),
+				"the viewmodel never takes the underwater pass");
+		ok &= expect(rgb_near(env.build_viewmodel_fog(false).color, dry.color),
+				"with no dome the dry pass colour stays");
+		env.set_thermal_view(true, true);
+		const opennova::env::Rgb grey_fog{128.0f / 255.0f, 128.0f / 255.0f,
+				128.0f / 255.0f};
+		ok &= expect(rgb_near(env.build_viewmodel_fog(false).color, grey_fog),
+				"thermal without the dome keeps the pass grey");
+		ok &= expect(rgb_near(env.build_viewmodel_fog(true).color, env.fog_color()) &&
+						near(env.build_viewmodel_fog(true).end, dry.end),
+				"thermal after the dome fogs toward the restored fog block");
+		env.set_thermal_view(false, false);
+	}
+
 	// --- per-scene-pass underwater fog --------------------------------------
 	{
 		EnvironmentState env;

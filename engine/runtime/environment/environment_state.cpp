@@ -769,6 +769,16 @@ SceneFogValues EnvironmentState::build_scene_fog(
 	return fog;
 }
 
+SceneFogValues EnvironmentState::build_viewmodel_fog(bool sky_dome_drawn) const {
+	// [orig: ApplyFogAndAmbient(0, thermal) @ 0x5ca3bf..0x5ca3ce; the dome
+	//  wrapper's Env_FogBlock restore @ 0x579ce6..0x579cf6]
+	SceneFogValues fog = build_scene_fog(false);
+	if (thermal_view_ && sky_dome_drawn) {
+		fog.color = fog_color();
+	}
+	return fog;
+}
+
 // --- color math ------------------------------------------------------------
 
 float EnvironmentState::scale_global_channel(float channel, float envscale) {

@@ -16,6 +16,14 @@
 global uniform vec4 opennova_viewmodel_projection;
 instance uniform bool u_viewmodel_pass = false;
 
+// The viewmodel's pass fog: retail fogs the gun under the DRY pass, applied
+// before the sky dome and the gun; the eye's own pass (underwater included)
+// is re-applied only after the gun (retail Render_ProcessMainSceneFrame
+// @0x5ca3bf..0x5ca3ce, the gun @0x5ca829, the re-apply @0x5ca82e..0x5ca841;
+// engine EnvironmentState::build_viewmodel_fog). range = start, end, type.
+global uniform vec3 opennova_viewmodel_fog_color;
+global uniform vec3 opennova_viewmodel_fog_range;
+
 // D3D viewport MinZ 0 / MaxZ 0.1 on a [0, 1] depth range. Godot's projection
 // is reversed-Z on [0, 1] (near -> 1), so the band is NDC [0.9, 1.0].
 const float NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1;

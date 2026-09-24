@@ -733,11 +733,14 @@ float obj_scene_fog_visibility(vec3 camera_position_world) {
 	if (!opennova_fog_enabled) {
 		return 1.0;
 	}
+	// The viewmodel fogs under the dry pass (viewmodel_pass.gdshaderinc).
+	vec3 range = u_viewmodel_pass ? opennova_viewmodel_fog_range
+			: vec3(opennova_fog_start, opennova_fog_end, float(opennova_fog_type));
 	return obj_fog_visibility(
 		distance(camera_position_world, v_world_pos),
-		opennova_fog_start,
-		opennova_fog_end,
-		opennova_fog_type
+		range.x,
+		range.y,
+		int(range.z)
 	);
 }
 
@@ -745,7 +748,9 @@ vec3 obj_apply_fog(vec3 lit, vec3 camera_position_world) {
 	if (!opennova_fog_enabled) {
 		return lit;
 	}
-	return mix(opennova_fog_color, lit,
+	vec3 fog_color = u_viewmodel_pass ? opennova_viewmodel_fog_color
+			: opennova_fog_color;
+	return mix(fog_color, lit,
 			obj_scene_fog_visibility(camera_position_world));
 }
 

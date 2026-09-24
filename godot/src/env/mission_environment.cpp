@@ -74,6 +74,12 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_underwater_overlay_color);
 	ClassDB::bind_method(D_METHOD("get_underwater_overlay_alpha_byte"),
 			&MissionEnvironment::get_underwater_overlay_alpha_byte);
+	ClassDB::bind_method(D_METHOD("set_sky_dome_drawn", "drawn"),
+			&MissionEnvironment::set_sky_dome_drawn);
+	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_color"),
+			&MissionEnvironment::get_viewmodel_fog_color);
+	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_range"),
+			&MissionEnvironment::get_viewmodel_fog_range);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_color"),
 			&MissionEnvironment::get_scene_fog_color);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_end"),
@@ -312,6 +318,7 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	const Ref<EnvLightValues> values = _build_light_values();
 	light_state_->publish(values, p_pass_changed);
 	_write_lighting_block_globals(values);
+	_write_viewmodel_fog_globals();
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
@@ -578,7 +585,45 @@ void MissionEnvironment::set_underwater_overlay_view(bool p_underwater) {
 		return;
 	}
 	underwater_overlay_view_ = p_underwater;
+	// The dome draws only while the eye is strictly above water, the same
+	// side test as the murk's (the viewmodel fog colour reads it).
+	_write_viewmodel_fog_globals();
 	emit_signal("underwater_overlay_changed");
+}
+
+void MissionEnvironment::set_sky_dome_drawn(bool p_drawn) {
+	if (sky_dome_drawn_ == p_drawn) {
+		return;
+	}
+	sky_dome_drawn_ = p_drawn;
+	_write_viewmodel_fog_globals();
+}
+
+opennova::env::SceneFogValues MissionEnvironment::_viewmodel_fog() const {
+	// The dome drew only when its gate held and the eye was strictly above
+	// the water (engine build_viewmodel_fog carries the frame witness).
+	return state_.build_viewmodel_fog(sky_dome_drawn_ && !underwater_overlay_view_);
+}
+
+void MissionEnvironment::_write_viewmodel_fog_globals() {
+	if (!state_.is_loaded()) {
+		return;
+	}
+	const opennova::env::SceneFogValues fog = _viewmodel_fog();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_viewmodel_fog_color",
+			to_vector3(fog.color));
+	rs->global_shader_parameter_set("opennova_viewmodel_fog_range",
+			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
+}
+
+Vector3 MissionEnvironment::get_viewmodel_fog_color() const {
+	return to_vector3(_viewmodel_fog().color);
+}
+
+Vector3 MissionEnvironment::get_viewmodel_fog_range() const {
+	const opennova::env::SceneFogValues fog = _viewmodel_fog();
+	return Vector3(fog.start, fog.end, static_cast<float>(fog.type));
 }
 
 Vector3 MissionEnvironment::get_underwater_overlay_color() const {

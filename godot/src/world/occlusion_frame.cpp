@@ -106,6 +106,9 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 		if (SkyDome *dome = sky()) {
 			dome->set_visible(!indoors);
 		}
+		if (MissionEnvironment *env = environment()) {
+			env->set_sky_dome_drawn(!indoors);
+		}
 		if (Celestial *c = celestial()) {
 			c->set_visible(!indoors);
 		}

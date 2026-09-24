@@ -459,6 +459,16 @@ public:
 	// 0x808080, else the weather fog block
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57e471..0x57e4ad].
 	SceneFogValues build_scene_fog(bool underwater_view) const;
+	// The first-person viewmodel's pass fog. The frame applies the DRY pass
+	// before the sky dome and the viewmodel and re-applies the eye's own pass
+	// only after the viewmodel, so the gun never takes the underwater fog; the
+	// dome wrapper restores Env_FogBlock once it drew, so under the thermal
+	// view the gun fogs toward the fog block when the dome drew and toward the
+	// thermal grey when it did not [orig: Render_ProcessMainSceneFrame
+	// @ 0x5ca3bf..0x5ca3ce (ApplyFogAndAmbient(0, thermal)), @ 0x5ca81a
+	// (sub_579CB0, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
+	// viewmodel @ 0x5ca829, the eye's pass @ 0x5ca82e..0x5ca841].
+	SceneFogValues build_viewmodel_fog(bool sky_dome_drawn) const;
 
 	// The one witnessed render-eye/waterline rule. The device fog selector is
 	// STRICT below [orig: is_underwater = view_z < waterline, the
