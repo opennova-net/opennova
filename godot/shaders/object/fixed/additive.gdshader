@@ -7,6 +7,7 @@ render_mode unshaded, blend_add, depth_draw_never, cull_back;
 #define OBJ_CLIP_EXPLICIT
 #define OBJ_VERTEX_POINT_LIGHTS_FFP_DIFFUSE
 #define OBJ_MATCHTERRAIN_NO_PASS
+#define OBJ_BLENDED_PASS
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"

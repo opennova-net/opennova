@@ -42,6 +42,25 @@ vec4 viewmodel_clip(vec4 view_pos, mat4 projection) {
 	return clip;
 }
 
+#ifdef OBJ_BLENDED_PASS
+// Retail draws the viewmodel after the sky pass and before every world draw
+// (retail Render_ProcessMainSceneFrame: the dome @0x5ca81a, the gun @0x5ca829),
+// and its blended strips write no depth (the FF blend passes force NOWRITE,
+// retail @0x5afc8d..0x5afcaa; ZWRITEENABLE follows the pass flags @0x5da318),
+// so every later world draw that passes LESSEQUAL paints over them: a blended
+// gun fragment survives only over the gun's own depth band or where nothing
+// of the world lies behind it. Godot has already drawn the world's opaques
+// when the gun's alpha draws, so the fragment is dropped wherever the opaque
+// depth of the view is a world depth (neither the cleared far plane nor the
+// gun band).
+uniform sampler2D obj_opaque_depth : hint_depth_texture, filter_nearest;
+
+bool viewmodel_world_covers(vec2 screen_uv) {
+	float depth = textureLod(obj_opaque_depth, screen_uv, 0.0).r;
+	return depth > 0.0 && depth < 1.0 - NOVA_VIEWMODEL_DEPTH_WINDOW;
+}
+#endif
+
 // The one clip-position writer every vertex stage uses. Godot enables its
 // POSITION override for the WHOLE shader as soon as POSITION is written
 // anywhere, so a path that does not write it leaves the clip position zero
