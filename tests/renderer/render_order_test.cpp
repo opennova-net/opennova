@@ -81,7 +81,6 @@ int main() {
 	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass sub_579CB0
 	// @ 0x5ca81a, then Player_RenderViewModelIfAlive @ 0x5ca829, then
 	// Terrain_RenderSceneWithReflection @ 0x5c93a0].
-	CHECK(kRungSkyStars < kRungSkyBody);
 	// Inside render_skybox the bodies precede the cloud layers
 	// [orig: render_skybox @ 0x579080, clouds @ 0x5798f1..0x579b15].
 	CHECK(kRungSkyBody < kRungSkyClouds);

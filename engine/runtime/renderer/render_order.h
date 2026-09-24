@@ -130,7 +130,6 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // Values keep the sky group
 // before all world alpha and leave the camera-side rung at Godot's default 0
 // so unclassified transparents land there naturally.
-constexpr int kRungSkyStars = -13;       // star field (sky pass, before bodies)
 // The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
 // render_celestial_bodies @ 0x5acaa0].
 constexpr int kRungSkyBody = -12;

@@ -5,8 +5,6 @@
 
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
-#include <godot_cpp/classes/multi_mesh.hpp>
-#include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
@@ -146,9 +144,6 @@ void Celestial::_ready() {
 	if (!glare_occlusion_) {
 		glare_occlusion_ = std::make_unique<GlareOcclusion>();
 	}
-	if (!star_core_) {
-		star_core_ = std::make_unique<StarField>();
-	}
 	_rebuild_if_needed();
 }
 
@@ -165,8 +160,8 @@ void Celestial::_rebuild_if_needed() {
 		String tint;
 	};
 	// The witnessed load policy (celestial_frame.h carries the cites): the
-	// sky pass draws star field then bodies BEFORE all world alpha; the
-	// glare is the frame's final draw. Rungs are single-sourced from
+	// sky pass draws the bodies BEFORE all world alpha; the glare is the
+	// frame's final draw. Rungs are single-sourced from
 	// engine/runtime/renderer/render_order (REN-3).
 	const Spec wanted[] = {
 		{ "sun", env_data->get_sun_3di(), false,
@@ -187,7 +182,6 @@ void Celestial::_rebuild_if_needed() {
 	for (const Spec &spec : wanted) {
 		signature[spec.key] = spec.name;
 	}
-	signature["star"] = env_data->get_star_3di();
 	if (signature.size() == loaded_names_.size()) {
 		bool same = true;
 		for (const KeyValue<String, String> &kv : signature) {
@@ -209,8 +203,6 @@ void Celestial::_rebuild_if_needed() {
 		child->queue_free();
 	}
 	bodies_.clear();
-	star_mmi_ = nullptr;
-	_build_star_field(env_data->get_star_3di());
 
 	for (const Spec &spec : wanted) {
 		if (spec.name.strip_edges().is_empty()) {
@@ -310,13 +302,6 @@ Ref<ShaderMaterial> Celestial::_make_celestial_material(bool p_additive,
 	material->set_shader(p_additive ? celestial_additive_shader_
 									: celestial_shader_);
 	material->set_render_priority(p_priority);
-	if (p_additive) {
-		// Star default opacity — a stand-in until the witnessed per-star
-		// twinkle lands (env #33; the 0x2000/0x10000 value stems from the
-		// dead variant). The glare overwrites its opacity per frame.
-		material->set_shader_parameter("u_opacity",
-				static_cast<float>(0x2000) / 65536.0f);
-	}
 	return material;
 }
 
@@ -456,27 +441,6 @@ void Celestial::advance_frame(double p_delta) {
 	Camera3D *cam = _resolve_camera();
 	const Vector3 cam_pos =
 			cam != nullptr ? cam->get_global_position() : Vector3();
-
-	if (star_mmi_ != nullptr) {
-		Ref<ShaderMaterial> star_material = star_mmi_->get_material_override();
-		if (star_material.is_valid()) {
-			star_material->set_shader_parameter("u_tint",
-					to_vector3(state.sky_ambient()));
-			star_material->set_shader_parameter("u_anchor_camera_world",
-					cam_pos);
-			// Keep every instance local to a camera-anchored MMI. Absolute
-			// per-star transforms leave the MultiMesh AABB at the world
-			// origin and disappear once a mission camera travels far enough.
-			star_mmi_->set_global_position(cam_pos);
-		}
-	}
-	// The active light (sun by day, moon at night) drives the near-light
-	// cull (celestial_frame.h carries the cite). Deliberately the RAW
-	// render-float tuple: the star instance directions it dots against live
-	// in the same axes engine-side, and the instance PLACEMENT crosses the
-	// util/axes.h swap where the transforms are stamped, so the culled star
-	// and the placed star agree.
-	_update_star_field(to_vector3(state.light_direction()));
 
 	// The GODOT-world sun direction and view forward (util/axes.h swap — the
 	// 2026-08-20 correction: the earlier identity mapping placed every body
@@ -633,89 +597,6 @@ void Celestial::_set_body_parameter(const Body &p_body,
 		if (material.is_valid()) {
 			material->set_shader_parameter(p_parameter, p_value);
 		}
-	}
-}
-
-// env #33: the star field owner — one MultiMesh of camera-facing quads under
-// the additive celestial shader, textured with the star 3DI's diffuse. The
-// witnessed placement, near-light cull, and twinkle accumulator run in
-// engine/formats/env behind the StarField device helper.
-void Celestial::_build_star_field(const String &p_star_name) {
-	if (p_star_name.strip_edges().is_empty() || resource_root_.is_null()) {
-		return;
-	}
-	Ref<ObjectData> data = _load_object_data(p_star_name);
-	if (data.is_null()) {
-		return;
-	}
-	Ref<Texture2D> diffuse = data->load_material_texture(0, 0);
-	Ref<ShaderMaterial> material =
-			_make_celestial_material(true, opennova::renderer::kRungSkyStars);
-	if (diffuse.is_valid()) {
-		material->set_shader_parameter("u_diffuse", diffuse);
-	}
-	material->set_shader_parameter("u_opacity", 1.0f);
-	material->set_shader_parameter("u_billboard", true);
-	Ref<MultiMesh> mm;
-	mm.instantiate();
-	mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-	mm->set_use_colors(true);
-	Ref<QuadMesh> quad;
-	quad.instantiate();
-	quad->set_size(Vector2(1.0f, 1.0f));
-	mm->set_mesh(quad);
-	mm->set_instance_count(star_core_->get_count());
-	star_mmi_ = memnew(MultiMeshInstance3D);
-	star_mmi_->set_name("StarField");
-	star_mmi_->set_multimesh(mm);
-	star_mmi_->set_material_override(material);
-	// Instances stay local to this camera-anchored node. The field spans the
-	// whole sky around that local origin; cull as one conservative unit and
-	// bypass main-view occlusion because the reflection pass reanchors it.
-	star_mmi_->set_custom_aabb(
-			AABB(Vector3(-600, -600, -600), Vector3(1200, 1200, 1200)));
-	star_mmi_->set_extra_cull_margin(1.0e6);
-	star_mmi_->set_ignore_occlusion_culling(true);
-	star_mmi_->set_cast_shadows_setting(
-			GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-	add_child(star_mmi_);
-	star_core_->regenerate(1);
-}
-
-void Celestial::_update_star_field(const Vector3 &p_light_dir) {
-	if (star_mmi_ == nullptr) {
-		return;
-	}
-	Ref<MultiMesh> mm = star_mmi_->get_multimesh();
-	const PackedFloat32Array buf = star_core_->tick_frame(p_light_dir);
-	if (buf.is_empty() || mm.is_null()) {
-		return;
-	}
-	const int count = star_core_->get_count();
-	for (int i = 0; i < count; ++i) {
-		const int o = i * 6;
-		const bool star_visible = buf[o + 5] > 0.5f;
-		if (!star_visible) {
-			mm->set_instance_transform(i,
-					Transform3D(Basis().scaled(Vector3()), Vector3()));
-			continue;
-		}
-		// The instance offsets arrive in the render-float axes
-		// (star_offset_render_float3); place them through the util/axes.h
-		// swap so the near-light cull's hidden star is the one the viewer
-		// sees beside the bright body.
-		const Vector3 offset(buf[o + 2], buf[o + 1], buf[o]);
-		const float scale = buf[o + 3];
-		const float brightness = buf[o + 4];
-		// Orientation is deliberately identity here. The additive vertex
-		// shader rebuilds the quad from the active pass camera's right/up
-		// basis, which is the only way one MultiMesh can billboard correctly
-		// in both viewports.
-		mm->set_instance_transform(i,
-				Transform3D(Basis().scaled(Vector3(scale, scale, scale)),
-						offset));
-		mm->set_instance_color(i,
-				Color(brightness, brightness, brightness));
 	}
 }
 

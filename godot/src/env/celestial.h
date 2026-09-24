@@ -2,7 +2,6 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -18,7 +17,6 @@
 
 #include "env/env_file.h"
 #include "env/glare_occlusion.h"
-#include "env/star_field.h"
 #include "object/object_data.h"
 #include "resource_index/resource_root.h"
 #include "terrain/terrain_data.h"
@@ -30,12 +28,12 @@ class MissionEnvironment;
 // The celestial applier — the ADR 0033 device leg over the engine's
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
 // fixed-point math already in engine/formats/env (env_celestial.h behind the
-// StarField/GlareOcclusion device helpers). Renders the sun/moon/glare 3DI bodies
-// and the 256-instance star field named in the mission .env, attached to the
-// sky at camera + direction * 64. This node keeps only device work: the
-// ObjectModel children with per-surface material installs, the star
-// MultiMesh, per-frame shader-parameter pushes, and the two terrain
-// line-of-sight rays the glare occlusion window consumes. The 3DI diffuse
+// GlareOcclusion device helper). Renders the sun/moon/glare 3DI bodies named
+// in the mission .env, attached to the sky at camera + direction * 64; retail
+// loads the star 3DI but never draws it (env_celestial.h carries the
+// witness). This node keeps only device work: the ObjectModel children with
+// per-surface material installs, per-frame shader-parameter pushes, and the
+// two terrain line-of-sight rays the glare occlusion window consumes. The 3DI diffuse
 // stays; bodies are tinted and dimmed by the TOD sun/moon color. Ported from
 // celestial.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md "Celestial bodies".
@@ -143,8 +141,6 @@ private:
 			const Ref<ShaderMaterial> &p_base_material);
 	static void _collect_meshes(Node *p_node, Vector<MeshInstance3D *> &r_out);
 	void _stamp_environment_capture_layer(Node3D *p_model);
-	void _build_star_field(const String &p_star_name);
-	void _update_star_field(const Vector3 &p_light_dir);
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
 			const Variant &p_value);
 	bool _glare_ray_clear(const Vector3 &p_from, const Vector3 &p_sun_dir,
@@ -163,8 +159,6 @@ private:
 	Ref<TerrainData> terrain_data_;
 	Ref<ResourceRoot> resource_root_;
 	std::unique_ptr<GlareOcclusion> glare_occlusion_;
-	std::unique_ptr<StarField> star_core_;
-	MultiMeshInstance3D *star_mmi_ = nullptr;
 	HashMap<String, Body> bodies_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;

@@ -222,7 +222,6 @@ void ObjectShaderCache::_bind_methods() {
 	// -> foliage (camera) -> camera-side alpha -> tracers (camera) -> sun glow
 	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0;
 	// docs/render/render-order-re.md].
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_STARS", opennova::renderer::kRungSkyStars);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_BODY", opennova::renderer::kRungSkyBody);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_CLOUDS", opennova::renderer::kRungSkyClouds);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_VIEWMODEL", opennova::renderer::kRungViewmodel);

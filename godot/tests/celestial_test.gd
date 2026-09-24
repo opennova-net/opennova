@@ -6,8 +6,6 @@ extends GutTest
 
 const MODEL_FIXTURE_ROOT := "res://../fixtures/threedi/synth"
 const MODEL_NAME := "crate.3di"
-const CELESTIAL_SHADER := "res://shaders/celestial.gdshader"
-const ADDITIVE_SHADER := "res://shaders/celestial_additive.gdshader"
 const TICK := 1.0 / 62.0
 const FAR_CAMERA_POSITION := Vector3(50000.0, 64.0, -40000.0)
 
@@ -115,31 +113,13 @@ func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
 			+ "whatever its shader text says")
 
 
-func test_star_instances_are_local_to_a_camera_anchored_multimesh() -> void:
+func test_no_star_field_is_drawn() -> void:
+	# Retail loads the star 3DI but its only renderer has no caller in the
+	# image [orig: render_star_field @ 0x5ad9c0]: a named star_3di draws nothing.
 	var fixture := _make_fixture()
-	var camera: Camera3D = fixture.camera
-	var field := fixture.celestial.get_node_or_null("StarField") as MultiMeshInstance3D
-	assert_not_null(field)
-	if field == null:
-		return
-
-	assert_eq(field.global_position, camera.global_position,
-			"the CPU AABB follows a far-off mission camera")
-	assert_true(field.ignore_occlusion_culling)
-	assert_true(field.extra_cull_margin >= 1.0e5)
-	assert_eq(field.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
-	var material := field.material_override as ShaderMaterial
-	assert_not_null(material)
-	if material != null:
-		assert_eq(material.get_shader_parameter("u_anchor_camera_world"),
-				camera.global_position)
-		assert_eq(material.get_shader_parameter("u_billboard"), true,
-				"stars opt into active-pass billboarding")
-
-	for i in field.multimesh.instance_count:
-		var local_origin := field.multimesh.get_instance_transform(i).origin
-		assert_true(field.custom_aabb.has_point(local_origin),
-				"every instance remains inside the camera-local MultiMesh AABB")
+	for child in fixture.celestial.get_children():
+		assert_false(child is MultiMeshInstance3D, "no star instances: %s" % child.name)
+	assert_null(fixture.celestial.get_node_or_null("StarField"))
 
 
 func test_glare_keeps_occlusion_brightness_but_fades_from_each_pass_view() -> void:
@@ -281,24 +261,6 @@ func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 			"the glint places at camera + sun * 128 with the height negated")
 	var bodies: Dictionary = diag.get("bodies", {})
 	assert_gt(float((bodies.get("glint", {}) as Dictionary).get("opacity", 0.0)), 0.0)
-
-
-func test_celestial_shaders_anchor_and_billboard_from_the_active_pass() -> void:
-	var body_code := (load(CELESTIAL_SHADER) as Shader).code
-	assert_true(body_code.contains("pass_eye - u_anchor_camera_world"),
-			"sun/moon placement follows the active main or mirror camera")
-	assert_true(body_code.contains("POSITION = PROJECTION_MATRIX * VIEW_MATRIX"),
-			"pass-relative world placement owns the final clip position")
-
-	var additive_code := (load(ADDITIVE_SHADER) as Shader).code
-	assert_true(additive_code.contains(
-			"pass_right = normalize(INV_VIEW_MATRIX[0].xyz)"),
-			"star right basis comes from the active pass camera")
-	assert_true(additive_code.contains(
-			"pass_up = normalize(INV_VIEW_MATRIX[1].xyz)"),
-			"star up basis comes from the active pass camera")
-	assert_true(additive_code.contains("view_dot_sq * view_dot_sq"),
-			"the recovered positive dot^4 glare factor runs per pass")
 
 
 func test_discs_publish_the_bloom_pass_opacity_beside_the_beauty_one() -> void:

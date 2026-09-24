@@ -799,8 +799,7 @@ MultiMeshInstance3D *EffectLightDirector::_ensure_corona_instance() {
 	mmi->set_layer_mask(Water::VISUAL_LAYER_WORLD);
 	// The quads billboard in-shader from rows anywhere in the world; the
 	// static AABB only seeds Godot's sort and the cull margin keeps the
-	// instance from being frustum-culled once the camera leaves that box
-	// (the StarField precedent in Celestial).
+	// instance from being frustum-culled once the camera leaves that box.
 	mmi->set_custom_aabb(AABB(Vector3(-512, -512, -512), Vector3(1024, 1024, 1024)));
 	mmi->set_extra_cull_margin(1.0e6f);
 	world->add_child(mmi);

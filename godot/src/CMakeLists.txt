@@ -74,7 +74,6 @@ add_library(${TARGET_NAME} SHARED
     env/weather.cpp
     env/precipitation.cpp
     env/water_core.cpp
-    env/star_field.cpp
     env/glare_occlusion.cpp
     particle/particle_effect.cpp
     particle/particle_file.cpp

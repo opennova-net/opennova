@@ -211,8 +211,8 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 		{
 			"name": "sky_ladder",
 			"layers": [
-				["stars", Color(0.95, 0.95, 0.95, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_STARS, 2.0],
-				["body", Color(0.95, 0.75, 0.1, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_BODY, 0.0],
+				["body", Color(0.95, 0.75, 0.1, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_BODY, 2.0],
+				["clouds", Color(0.95, 0.95, 0.95, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_CLOUDS, 0.0],
 				["glow", Color(0.95, 0.4, 0.7, 0.75), ObjectShaderCache.RENDER_RUNG_SUN_GLOW, -2.0],
 			],
 		},
