@@ -19,6 +19,20 @@ struct Mat3 {
     double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 };
 
+Mat3 multiply(const Mat3 &a, const Mat3 &b) {
+    Mat3 o{};
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            double s = 0.0;
+            for (int k = 0; k < 3; ++k) s += a.m[r * 3 + k] * b.m[k * 3 + c];
+            o.m[r * 3 + c] = s;
+        }
+    }
+    return o;
+}
+
+BadBuildQuat conjugate(const BadBuildQuat &q) { return BadBuildQuat{-q.x, -q.y, -q.z, q.w}; }
+
 Mat3 transpose(const Mat3 &a) {
     Mat3 t{};
     for (int r = 0; r < 3; ++r)
@@ -168,6 +182,15 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
     if (bones == 0) return;
     const bool translated = (clip.flags & BAD_FLAG_TRANSLATION) != 0;
 
+    // The pose the capsule measures is the clip's own, which is every bone's
+    // key composed against the bind: the bind is the bone's first key, so the
+    // rig stands in its authored pose at frame 0 [orig:
+    // AnimChannel_ComputeBoneMatrices @0x410da0 Transpose(bind) x channel].
+    std::vector<BadBuildQuat> bind(bones);
+    for (size_t i = 0; i < bones; ++i) {
+        const BadBuildBone &bone = clip.bones[i];
+        if (!bone.keys.empty()) bind[i] = bad_clip_from_mission(bone.keys.front());
+    }
     std::vector<BadBuildVec3> posed(bones);
     for (size_t f = 0; f < keys; ++f) {
         double low = 0.0;
@@ -182,10 +205,12 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
                 const BadBuildVec3 rel = bad_clip_from_mission(BadBuildVec3{
                         bone.pivot.x - up.pivot.x, bone.pivot.y - up.pivot.y,
                         bone.pivot.z - up.pivot.z});
-                const BadBuildQuat q = f < up.keys.size()
-                                               ? bad_clip_from_mission(up.keys[f])
-                                               : BadBuildQuat{};
-                const BadBuildVec3 turned = apply(rows_of(q), rel);
+                const size_t at = f < up.keys.size() ? f : up.keys.size() - 1;
+                const BadBuildQuat key = up.keys.empty() ? BadBuildQuat{}
+                                                         : bad_clip_from_mission(up.keys[at]);
+                const Mat3 composed = multiply(rows_of(conjugate(bind[static_cast<size_t>(parent)])),
+                        rows_of(key));
+                const BadBuildVec3 turned = apply(composed, rel);
                 posed[i] = BadBuildVec3{posed[static_cast<size_t>(parent)].x + turned.x,
                                         posed[static_cast<size_t>(parent)].y + turned.y,
                                         posed[static_cast<size_t>(parent)].z + turned.z};
@@ -201,8 +226,6 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
             if (posed[i].y < low) low = posed[i].y;
             if (posed[i].y > high) high = posed[i].y;
         }
-        // Never a negative zero: retail stores a plain 0.0 for a clip whose
-        // bones all sit at or above its root, and the two differ in bytes.
         bottom[f] = low < 0.0 ? -low : 0.0;
         top[f] = high - low;
     }

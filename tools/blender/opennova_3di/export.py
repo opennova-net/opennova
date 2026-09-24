@@ -52,7 +52,9 @@
 #                 then mesh objects (ArmsG: 37 bones, then "38 Mesh0").
 #                 Collision: each bone's section carries a hit sphere around
 #                 every vertex it moves, a meshed part's section the bullet
-#                 faces (the retail person layout).
+#                 faces (the retail person layout). A bone named `!...` is no
+#                 part: `!RM` carries a clip's root track (animation.py), and a
+#                 control bone an author rigs with is ignored the same way.
 #   !name         ignored.
 # Blender's own `.001` duplicate suffixes are stripped before classification
 # (object names are unique per .blend, so LOD1's PN01 is "PN01.001"); two
@@ -364,6 +366,11 @@ class Exporter:
                     raise ExportError(f"{root.name}: two armatures ({lod.armature.name}, {ob.name})")
                 lod.armature = ob
                 for bone in ob.data.bones:
+                    # A bone whose name starts with `!` is not a part: the
+                    # animation root track (`!RM`) and any control bone an
+                    # author rigs with live there.
+                    if clean_name(bone.name).startswith("!"):
+                        continue
                     bm = BONE_RE.match(clean_name(bone.name))
                     if not bm:
                         raise ExportError(f"{ob.name}: bone '{bone.name}' is not named BN##")

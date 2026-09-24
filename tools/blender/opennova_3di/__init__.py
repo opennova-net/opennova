@@ -30,10 +30,10 @@ from bpy_extras.io_utils import ImportHelper
 # Blender re-runs this file when the extension is updated or scripts are
 # reloaded, but keeps the submodules it imported before: reload them first so
 # the property groups registered here and the code that reads them agree.
-for _name in ("export", "importer", "assembly"):
+for _name in ("export", "importer", "assembly", "animation", "anim_import"):
     if f"{__name__}.{_name}" in sys.modules:
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
-from . import assembly, export, importer
+from . import anim_import, animation, assembly, export, importer
 
 # The seven PANM tracks, labelled by the axis retail turns them about
 # (threedi_panm_matrices.cpp: rotation_x turns about the model's up axis,
@@ -69,12 +69,13 @@ def cli_path(context=None):
 
 
 def catalog():
-    """The CTRL register names, generator style names and shader tags (with
-    their capability words, in the engine's table order), read once from
-    `opennova-3di catalog` (the engine's own tables; no Python copy)."""
+    """The CTRL register names, generator style names, shader tags (with their
+    capability words, in the engine's table order), anim slot keys and animation
+    event bits, read once from `opennova-3di catalog` (the engine's own tables;
+    no Python copy)."""
     global _catalog
     if _catalog is None:
-        registers, styles, shaders = [], {}, []
+        registers, styles, shaders, slots, triggers = [], {}, [], [], []
         try:
             out = subprocess.run([cli_path(), "catalog"], capture_output=True, text=True, timeout=10).stdout
         except (OSError, subprocess.SubprocessError):
@@ -87,15 +88,27 @@ def catalog():
                 styles[int(parts[1])] = parts[2]
             elif len(parts) == 3 and parts[0] == "shader":
                 shaders.append((parts[1], int(parts[2], 16)))
+            elif len(parts) == 2 and parts[0] == "animslot":
+                slots.append(parts[1])
+            elif len(parts) == 3 and parts[0] == "trigger":
+                triggers.append((int(parts[1], 16), parts[2]))
         if not shaders:
-            return registers, styles, shaders  # no CLI yet: read it again next time
-        _catalog = (registers, styles, shaders)
+            # no CLI yet: read it again next time
+            return registers, styles, shaders, slots, triggers
+        _catalog = (registers, styles, shaders, slots, triggers)
     return _catalog
 
 
 def search_registers(self, context, edit_text):
     text = edit_text.upper()
     return [r for r in catalog()[0] if text in r]
+
+
+def search_slots(self, context, edit_text):
+    """The anim slot keys the engine itself names. Retail's namespace is far
+    wider (the JOX corpus authors 240), so the field takes any anim_<name>."""
+    text = edit_text.lower()
+    return [k for k in catalog()[3] if text in k]
 
 
 def search_shaders(self, context, edit_text):
@@ -182,6 +195,46 @@ def active_model(context):
     return model
 
 
+class O3DAdmVariant(bpy.types.PropertyGroup):
+    action: PointerProperty(name="Clip", type=bpy.types.Action,
+                            description="The clip this variant plays (its name is the .bad file stem)")
+
+
+class O3DAdmRow(bpy.types.PropertyGroup):
+    # One .adm row: an anim slot and its clip ring, in the order the file
+    # stores. The engine serves a row from its LAST variant back
+    # [orig: AnimMap_RegisterBoneNode @0x40C2D0].
+    key: StringProperty(name="Slot", default="anim_reset", search=search_slots,
+                        description="The anim slot this row answers (anim_reset is the rig's bind "
+                                    "and rest pose); retail authors far more keys than the engine "
+                                    "names, so any anim_<name> is allowed")
+    variants: CollectionProperty(type=O3DAdmVariant)
+
+
+class O3DActionProps(bpy.types.PropertyGroup):
+    # A clip's own header, on its Action. Everything else a .bad carries is
+    # derived on export (formats/bad/bad_build.h).
+    fps: FloatProperty(name="Clip rate", default=30.0, min=1.0, max=255.0,
+                       description="The clip's own frame rate; every retail clip ships 30")
+    frames: IntProperty(name="Frames", default=0, min=0,
+                        description="The clip's length in frames; 0 takes the Action's own keyed "
+                                    "range. A longer one holds the last key, which is how retail's "
+                                    "DT1RST, stgr_RST and M60_1i are shaped")
+    capsule_keys: BoolProperty(name="Own capsule", default=False,
+                               description="The clip carries the capsule extents keyed on the rig; "
+                                           "clear it and the engine derives them from the pose, "
+                                           "which retail's own tool did by a rule nothing has "
+                                           "witnessed (a re-export lands within centimetres)")
+    loop: BoolProperty(name="Loop", default=True, description="The clip repeats (flag 1)")
+    translation: BoolProperty(name="Translations", default=False,
+                              description="Carry each bone's per-frame displacement as well as its "
+                                          "rotation (flag 2): a bolt, a magazine, a rig that slides")
+    raw_flag_8: BoolProperty(name="Flag 8", default=False,
+                             description="The clip flag bit 3, which 73 of the 477 retail clips "
+                                         "carry (viewmodel draw clips, the bikes) and nothing has "
+                                         "witnessed; carried, not read")
+
+
 class O3DObjectProps(bpy.types.PropertyGroup):
     # On a model root (the Empty above a model's LOD roots): one .3di.
     model_name: StringProperty(name="Model name", default="",
@@ -200,6 +253,25 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     mount_point: StringProperty(name="At user point", default="", search=search_mount_points, update=update_mount,
                                 description="The parent's user point (the addeweap row's name, e.g. ewep01); none or "
                                             "not found: the parent's root")
+    # On a model root: its animations (the clip set its rig carries).
+    adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="//model.adm",
+                             description="Where Export Animations writes the clip table; every clip "
+                                         "it names is written beside it as <clip>.bad")
+    rows: CollectionProperty(type=O3DAdmRow)
+    # On a skinned model's Armature: the clip's per-frame event word. Key it to
+    # place footsteps, fire and foley (opennova-3di catalog lists the bits).
+    capsule_bottom: FloatProperty(name="Capsule bottom", default=0.0,
+                                  description="How far this frame's pose reaches below the rig's "
+                                              "root, which is where a footstep sounds and where the "
+                                              "body's capsule starts; keyed with the clip when it "
+                                              "carries its own")
+    capsule_top: FloatProperty(name="Capsule top", default=0.0,
+                               description="How tall this frame's pose stands, measured from the "
+                                           "capsule bottom")
+    anim_trigger: IntProperty(name="Trigger", default=0, min=0,
+                              description="The animation event bits this frame fires: 1 and 2 the "
+                                          "left and right footstep, 4 8 and 16 the ammo rows, "
+                                          "0x20..0x400 the six foley sounds")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
@@ -473,6 +545,186 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+def export_animation_sets(op, context, models):
+    wrote = []
+    for model in models:
+        try:
+            message, notes = animation.export_animations(context, model)
+        except export.ExportError as e:
+            op.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        for note in notes:
+            op.report({"WARNING"}, f"{model.name}: {note}")
+        wrote.append(message)
+    op.report({"INFO"}, "; ".join(wrote))
+    return {"FINISHED"}
+
+
+class O3D_OT_export_anim(bpy.types.Operator):
+    bl_idname = "opennova_3di.export_anim"
+    bl_label = "Export Animations"
+    bl_description = ("Write the active model's clip set as a NovaLogic .adm table and its .bad clips "
+                      "through opennova-3di")
+
+    def execute(self, context):
+        model = active_model(context)
+        if model is None:
+            self.report({"ERROR"}, "select an object of the model whose animations to export")
+            return {"CANCELLED"}
+        return export_animation_sets(self, context, [model])
+
+
+class O3D_OT_export_all_anim(bpy.types.Operator):
+    bl_idname = "opennova_3di.export_all_anim"
+    bl_label = "Export All Animations"
+    bl_description = "Write every rigged model's clip set to its own .adm"
+
+    def execute(self, context):
+        models = animation.models_with_rigs(context.scene)
+        if not models:
+            self.report({"ERROR"}, "the scene holds no rigged model (a skinned model's LOD 0 carries "
+                                   "its BN## armature)")
+            return {"CANCELLED"}
+        return export_animation_sets(self, context, models)
+
+
+class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
+    bl_idname = "opennova_3di.import_anim"
+    bl_label = "Import Animations"
+    bl_description = ("Read a NovaLogic .adm clip table (or one .bad clip) onto the active model's rig "
+                      "through opennova-3di")
+    bl_options = {"REGISTER", "UNDO"}
+
+    filename_ext = ".adm"
+    filter_glob: StringProperty(default="*.adm;*.bad", options={"HIDDEN"})
+    align_rest: BoolProperty(name="Rest pose from the reset clip", default=True,
+                             description="Turn each rest bone onto the reset clip's bind, so a clip "
+                                         "shows the pose the game draws. Heads, lengths and weights "
+                                         "do not move, so the model still exports the same bytes")
+
+    def execute(self, context):
+        model = active_model(context)
+        if model is None:
+            self.report({"ERROR"}, "select an object of the model whose rig these clips animate")
+            return {"CANCELLED"}
+        try:
+            message, notes = anim_import.import_file(context, self.filepath, model, self)
+        except anim_import.ImportFailed as e:
+            self.report({"ERROR"}, f"{os.path.basename(self.filepath)}: {e}")
+            return {"CANCELLED"}
+        for note in notes:
+            self.report({"WARNING"}, f"{os.path.basename(self.filepath)}: {note}")
+        self.report({"INFO"}, f"imported {message}")
+        return {"FINISHED"}
+
+
+class O3D_OT_add_row(bpy.types.Operator):
+    bl_idname = "opennova_3di.add_row"
+    bl_label = "Add Row"
+    bl_description = "Add a .adm row: an anim slot and the clip ring that answers it"
+
+    def execute(self, context):
+        model = active_model(context)
+        if model is None:
+            return {"CANCELLED"}
+        row = model.o3d.rows.add()
+        row.variants.add()
+        return {"FINISHED"}
+
+
+class O3D_OT_remove_row(bpy.types.Operator):
+    bl_idname = "opennova_3di.remove_row"
+    bl_label = "Remove Row"
+    index: IntProperty()
+
+    def execute(self, context):
+        active_model(context).o3d.rows.remove(self.index)
+        return {"FINISHED"}
+
+
+class O3D_OT_add_variant(bpy.types.Operator):
+    bl_idname = "opennova_3di.add_variant"
+    bl_label = "Add Variant"
+    bl_description = "Add a clip to this row's ring (the engine serves a row from its last back)"
+    row: IntProperty()
+
+    def execute(self, context):
+        active_model(context).o3d.rows[self.row].variants.add()
+        return {"FINISHED"}
+
+
+class O3D_OT_remove_variant(bpy.types.Operator):
+    bl_idname = "opennova_3di.remove_variant"
+    bl_label = "Remove Variant"
+    row: IntProperty()
+    index: IntProperty()
+
+    def execute(self, context):
+        active_model(context).o3d.rows[self.row].variants.remove(self.index)
+        return {"FINISHED"}
+
+
+def menu_import_anim(self, context):
+    self.layout.operator(O3D_OT_import_anim.bl_idname, text="NovaLogic Animations (.adm, .bad)")
+
+
+def draw_animations(layout, model):
+    """The model's clip set: the table's rows, and what writes them."""
+    p = model.o3d
+    rig = animation.rig_of(model)
+    box = layout.box()
+    box.label(text="Animations", icon="ARMATURE_DATA")
+    if rig is None:
+        box.label(text="No rig: a skinned model's LOD 0 carries its BN## armature")
+        return
+    box.prop(p, "adm_path")
+    clips = animation.clip_actions(rig)
+    box.label(text=f"{len(clips)} clips on {rig.name} (its NLA tracks)")
+    for i, row in enumerate(p.rows):
+        line = box.box()
+        head = line.row()
+        head.prop(row, "key", text="")
+        head.operator("opennova_3di.add_variant", text="", icon="ADD").row = i
+        head.operator("opennova_3di.remove_row", text="", icon="X").index = i
+        for v, variant in enumerate(row.variants):
+            entry = line.row()
+            entry.prop(variant, "action", text="")
+            drop = entry.operator("opennova_3di.remove_variant", text="", icon="X")
+            drop.row = i
+            drop.index = v
+    box.operator("opennova_3di.add_row", icon="ADD")
+    box.operator("opennova_3di.export_anim", icon="EXPORT")
+
+
+class O3D_PT_action(bpy.types.Panel):
+    bl_label = "OpenNova 3DI"
+    bl_space_type = "DOPESHEET_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "Action"
+
+    @classmethod
+    def poll(cls, context):
+        ob = getattr(context, "object", None)
+        return (ob is not None and ob.type == "ARMATURE" and ob.animation_data is not None and
+                ob.animation_data.action is not None)
+
+    def draw(self, context):
+        action = context.object.animation_data.action
+        col = self.layout.column()
+        col.label(text=f"Clip {action.name}")
+        col.prop(action.o3d, "fps")
+        col.prop(action.o3d, "frames")
+        col.prop(action.o3d, "loop")
+        col.prop(action.o3d, "translation")
+        col.prop(action.o3d, "raw_flag_8")
+        col.prop(action.o3d, "capsule_keys")
+        col.prop(context.object.o3d, "anim_trigger")
+        if action.o3d.capsule_keys:
+            col.prop(context.object.o3d, "capsule_bottom")
+            col.prop(context.object.o3d, "capsule_top")
+        col.label(text="Key the trigger per frame: 1/2 footsteps, 4/8/16 fire, 0x20+ foley")
+
+
 def menu_import(self, context):
     self.layout.operator(O3D_OT_import.bl_idname, text="NovaLogic 3DI (.3di)")
 
@@ -488,6 +740,7 @@ class O3D_PT_scene(bpy.types.Panel):
         col = self.layout.column()
         row = col.row()
         row.operator("opennova_3di.import_3di", icon="IMPORT")
+        row.operator("opennova_3di.import_anim", icon="IMPORT")
         row.operator("opennova_3di.add_model", icon="ADD")
         col.separator()
         col.prop(p, "forward")
@@ -503,7 +756,9 @@ class O3D_PT_scene(bpy.types.Panel):
             box.label(text=f"Model {model.name}", icon="OBJECT_DATA")
             draw_model(box, model)
             box.operator("opennova_3di.export", icon="EXPORT")
+            draw_animations(box, model)
         col.operator("opennova_3di.export_all", icon="EXPORT")
+        col.operator("opennova_3di.export_all_anim", icon="EXPORT")
 
 
 def draw_model(layout, model):
@@ -546,6 +801,7 @@ class O3D_PT_object(bpy.types.Panel):
             return
         if export.is_model_root(ob):
             draw_model(layout, ob)
+            draw_animations(layout, ob)
             return
         if "_lod_index" in ob:
             layout.prop(p, "lod_threshold")
@@ -721,9 +977,12 @@ class O3D_PT_material(bpy.types.Panel):
                 row.prop(p, f"{axis}_end")
 
 
-CLASSES = (O3DTrack, O3DObjectProps, O3DBoneProps, O3DTexture, O3DMaterialProps, O3DLightProps, O3DSceneProps,
+CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DActionProps, O3DObjectProps, O3DBoneProps, O3DTexture,
+           O3DMaterialProps, O3DLightProps, O3DSceneProps,
            O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
-           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_import, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light, O3D_PT_material)
+           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_import,
+           O3D_OT_export_anim, O3D_OT_export_all_anim, O3D_OT_import_anim, O3D_OT_add_row,
+           O3D_OT_remove_row, O3D_OT_add_variant, O3D_OT_remove_variant, O3D_PT_action, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light, O3D_PT_material)
 
 
 def register():
@@ -731,17 +990,21 @@ def register():
         bpy.utils.register_class(c)
     bpy.types.Object.o3d = PointerProperty(type=O3DObjectProps)
     bpy.types.Bone.o3d = PointerProperty(type=O3DBoneProps)
+    bpy.types.Action.o3d = PointerProperty(type=O3DActionProps)
     bpy.types.Material.o3d = PointerProperty(type=O3DMaterialProps)
     bpy.types.Light.o3d = PointerProperty(type=O3DLightProps)
     bpy.types.Scene.o3d = PointerProperty(type=O3DSceneProps)
     bpy.types.TOPBAR_MT_file_import.append(menu_import)
+    bpy.types.TOPBAR_MT_file_import.append(menu_import_anim)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_import.remove(menu_import_anim)
     bpy.types.TOPBAR_MT_file_import.remove(menu_import)
     del bpy.types.Scene.o3d
     del bpy.types.Light.o3d
     del bpy.types.Material.o3d
+    del bpy.types.Action.o3d
     del bpy.types.Bone.o3d
     del bpy.types.Object.o3d
     for c in reversed(CLASSES):
