@@ -193,7 +193,7 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	assert_eq(String(backend.get("fog_distance_policy", "")),
 			"type0_eye_depth_else_radial")
 	assert_eq(String(backend.get("fog_material_targets", "")),
-			"scene,black,black,scene,white,gray127,black,scene")
+			"scene,black,black,none,white,gray127,none,none")
 	assert_eq(String(backend.get("view_projection_source", "")),
 			"render_scene_data_corrected")
 	assert_false(bool(backend.get("adds_view_projection_depth_correction", true)),
@@ -1046,4 +1046,46 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	assert_gt(image.get_pixelv(base).r, 0.8, "the dense source edge belongs at the base of the splash")
 	assert_lt(image.get_pixelv(top).r, image.get_pixelv(base).r - 0.2,
 			"the upper plume must fade instead of showing the texture's dense cut edge")
+	assert_engine_error_count(0)
+
+
+# A Bump graphic's material carries SPECULARENABLE instead of FOGENABLE
+# (retail CParticleTexture_InitTextureAndChannels @ 0x5E8424 stores 0x10000 as
+# its intrinsic pass word): the SPECULAR vertex colour (the modulated particle
+# RGB) adds after the DOT3 stages and full scene fog leaves it untinted.
+func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_lit_scene()
+	renderer.texture_provider = _overlap_texture
+	renderer.set_water_plane(-100.0, null)
+	var fog_source := _live_fog_source()
+	viewport.add_child(fog_source)
+	renderer.environment_source = fog_source
+	viewport.add_child(renderer)
+	var image := await _overlap_image(viewport, renderer)
+	var center := image.get_pixel(64, 64)
+	var backend: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_backend", {})
+	assert_eq(String(backend.get("status", "")), "drawn", String(backend.get("failure", "")))
+	assert_eq(String(backend.get("fog_material_targets", "")),
+			"scene,black,black,none,white,gray127,none,none")
+	assert_gt(center.r, 0.9, "the specular add lifts the lit bump to the white particle colour: %s" % center)
+	assert_almost_eq(center.b, center.r, 0.03,
+			"the fog colour (0.2, 0.3, 0.4) must not tint an unfogged bump: %s" % center)
 	assert_engine_error_count(0)

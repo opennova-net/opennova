@@ -137,8 +137,18 @@ float particle_fog_visibility() {
 			(fog_end - fog_start), 0.0, 1.0);
 }
 
+// Only the materials whose intrinsic pass word carries FOGENABLE fog: every
+// type starts at 0x20000, Bump and Bumpadd replace it with 0x10000
+// (SPECULARENABLE alone) and Distort with 0 (retail
+// CParticleTexture_InitTextureAndChannels @ 0x5E8324 / @ 0x5E8424 / @ 0x5E850A /
+// @ 0x5E8567; the word is OR'd into the pass flags by CGfxShader_ApplyPass
+// @ 0x683221, FOGENABLE @ 0x683243, SPECULARENABLE @ 0x68325F).
+bool particle_fog_enabled() {
+	return pc.mode != 3u && pc.mode != 6u && pc.mode != 7u;
+}
+
 vec3 particle_fog_target() {
-	if (pc.mode == 1u || pc.mode == 2u || pc.mode == 6u) {
+	if (pc.mode == 1u || pc.mode == 2u) {
 		return vec3(0.0);
 	}
 	if (pc.mode == 4u) {
@@ -164,7 +174,12 @@ void main() {
 	} else if (pc.mode == 3u || pc.mode == 6u) {
 		float dot3 = clamp(dot(texel.rgb * 2.0 - 1.0,
 				v_primary.rgb * 2.0 - 1.0), 0.0, 1.0);
-		frag_color = vec4(vec3(dot3), texel.a * v_primary.a);
+		// SPECULARENABLE: the fixed-function pipe adds the SPECULAR vertex colour
+		// (the modulated particle RGB the lit branch writes, retail
+		// CParticleEmitter_BuildBillboardQuads @ 0x5E7489..0x5E74A3) after the
+		// texture stages; alpha is untouched.
+		frag_color = vec4(min(vec3(dot3) + v_secondary.rgb, vec3(1.0)),
+				texel.a * v_primary.a);
 	} else if (pc.mode == 4u || pc.mode == 5u) {
 		// Mod2x's factor-of-two comes from DESTCOLOR/SRCCOLOR blending, not
 		// from a shader approximation.
@@ -187,10 +202,12 @@ void main() {
 				alpha * texel.a);
 	}
 	// Retail changes the fixed-function fog color per particle material:
-	// ordinary Blend/Bump/Distort use scene fog, additive families use black,
-	// Mod uses white, and Mod2x uses mid-gray. Alpha is not fogged.
-	frag_color.rgb = mix(particle_fog_target(), frag_color.rgb,
-			particle_fog_visibility());
+	// Blend uses the scene fog, Additive/Premult black, Mod white and Mod2x
+	// mid-gray; Bump, Bumpadd and Distort do not fog. Alpha is not fogged.
+	if (particle_fog_enabled()) {
+		frag_color.rgb = mix(particle_fog_target(), frag_color.rgb,
+				particle_fog_visibility());
+	}
 }
 )GLSL";
 
@@ -1392,7 +1409,7 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["fog_source"] = "immutable_opennova_environment_snapshot";
 	result["fog_distance_policy"] = "type0_eye_depth_else_radial";
 	result["fog_material_targets"] =
-			"scene,black,black,scene,white,gray127,black,scene";
+			"scene,black,black,none,white,gray127,none,none";
 	result["view_projection_source"] = "render_scene_data_corrected";
 	result["adds_view_projection_depth_correction"] = false;
 	result["scene_color_copy_policy"] = "before_each_distortion_run";
