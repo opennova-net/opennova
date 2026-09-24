@@ -12,7 +12,9 @@ int TracerTrailPool::alloc(int32_t style_id) {
         c.kill = false;
         c.style_id = style_id;
         c.cap = tracer_style_cap(style_id); // [orig: c[3] = desc+0x10 @ 0x5db228]
-        c.count = 0;
+        // A fresh channel starts at count -1, so the first append only raises
+        // it to 0 [orig: CEffectChannel_Init @ 0x5db233].
+        c.count = -1;
         c.age = 0;
         return i;
     }
@@ -30,7 +32,13 @@ void TracerTrailPool::append(int slot, const Vec3 &pos) {
             c.pts[static_cast<size_t>(i - 1)] = c.pts[static_cast<size_t>(i)];
         --c.count;
     }
-    if (c.count < 0) return;
+    if (c.count < 0) {
+        // The fresh channel's first append stores nothing and leaves the age:
+        // it only lifts count from -1 to 0 [orig: the `jl` @ 0x5db2c3 to the
+        // bare count++ @ 0x5db333].
+        ++c.count;
+        return;
+    }
     TracerTrailPoint &p = c.pts[static_cast<size_t>(c.count)];
     p.pos = pos;
     // Jitter styles stamp a per-point width multiplier [orig: desc+4 gate @ 0x5db2e2,

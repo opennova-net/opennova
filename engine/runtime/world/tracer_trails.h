@@ -63,7 +63,7 @@ struct TracerTrailChannel {
     bool kill = false;      // c[10]: drain-then-free requested (round died)
     int32_t style_id = 0;   // c[6]: the tracer_type id selected at alloc
     int32_t cap = 0;        // c[3]: ring length = the style's point cap
-    int32_t count = 0;      // c[4]: live points
+    int32_t count = 0;      // c[4]: live points; -1 from alloc until the first append
     int32_t age = 0;        // c[5]: ticks since the last append (saturates at cap)
     std::array<TracerTrailPoint, kMaxPoints> pts{}; // [0] oldest .. [count-1] newest
 };
@@ -78,11 +78,14 @@ public:
             std::vector<TracerTrailChannel>(static_cast<size_t>(kChannels));
 
     // First-free scan alloc [orig: CEffectEmitterPool_AllocSlot @ 0x5db7a0]; -1 = full.
+    // The channel starts at count -1 [orig: CEffectChannel_Init @ 0x5db233].
     int alloc(int32_t style_id);
 
     // Ring append: full -> drop the oldest first; jitter styles stamp the per-point
     // width multiplier; resets the channel age [orig: CEffectChannel_AppendPoint
-    // @ 0x5db290 — w = 1.0 + PRNG_Next16() * 1e-5 on desc+4 styles, else 1.0].
+    // @ 0x5db290 — w = 1.0 + PRNG_Next16() * 1e-5 on desc+4 styles, else 1.0]. At
+    // count -1 (a fresh channel) it stores nothing and only lifts the count to 0,
+    // so a round's first pre-move point never draws.
     void append(int slot, const Vec3 &pos);
 
     // Round death: drain one point per tick once age reaches cap, free when empty
