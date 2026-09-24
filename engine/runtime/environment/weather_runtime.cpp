@@ -502,6 +502,7 @@ WeatherShaderGlobals build_weather_shader_globals(
 	const TerrainEnvUniforms terrain = env.build_terrain_uniforms(underwater_view);
 	globals.base.sun_light = terrain.sun_light;
 	globals.base.sky_ambient = terrain.sky_ambient;
+	globals.base.light_block = env.sun_light();
 	globals.base.fog_color = terrain.fog_color;
 	// Terrain tile DOT3 and foliage follow the current environment light
 	// (sun by day, moon by night), not the always-solar sky highlight vector

@@ -31,8 +31,10 @@ global uniform vec3 opennova_water_reflection_eye;
 // the active light without baking an approximation into the resource.
 global uniform samplerCube opennova_environment_cube;
 global uniform bool opennova_environment_cube_ready;
-global uniform vec3 opennova_sun_light;
-global uniform vec3 opennova_sun_direction;
+// The raw light block the specular sphere is drawn with (never the terrain
+// ramps' thermal pair); the sphere's alignment axis is the Godot-world
+// opennova_light_block_dir below.
+global uniform vec3 opennova_env_light_block;
 
 // The PROJSHAD pass (the render-slot black silhouette whose alpha is
 // Diffuse1.a, plus _FFP's optional Diffuse2.a and AlphaGenValue) is not a
@@ -625,9 +627,13 @@ vec3 obj_environment_cube_approx(vec3 reflection_ws) {
 	}
 	vec3 dimmed_sky = texture(opennova_environment_cube, direction).rgb;
 	// Environment_GetLightDirectionFloat is the incoming-light tuple;
-	// MatRotSpecular aligns the static cube's -Z lobe to its negation.
-	float aligned = max(dot(direction,
-			normalize(-opennova_sun_direction)), 0.0);
+	// MatRotSpecular aligns the static cube's -Z lobe to its negation. The
+	// reflection is a Godot-world vector, so the axis is the light block's
+	// Godot-world -normalize(light dir), never the raw render-float tuple
+	// (whose x/z are swapped against Godot's): retail
+	// apply_shader_parameters @ 0x58e146..0x58e1cb ->
+	// build_direction_look_at_matrix(Environment_GetLightDirectionFloat).
+	float aligned = max(dot(direction, normalize(opennova_light_block_dir)), 0.0);
 	vec3 static_lobe = clamp(
 			vec3(1.4) * pow(aligned, 800.0) +
 			vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
@@ -636,7 +642,7 @@ vec3 obj_environment_cube_approx(vec3 reflection_ws) {
 	// render_sky_mesh binds Env_LightBlock and the fixed-function MODULATE2X
 	// descriptor, then submits the rotated CubeRotSpecular sphere additively.
 	// [orig: render_sky_mesh @ 0x5ac680; sub_5AC600 (the sky-mesh descriptor)].
-	return clamp(dimmed_sky + static_lobe * opennova_sun_light * 2.0,
+	return clamp(dimmed_sky + static_lobe * opennova_env_light_block * 2.0,
 			vec3(0.0), vec3(1.0));
 }
 

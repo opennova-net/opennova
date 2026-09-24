@@ -176,6 +176,8 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 			to_vector3(globals.base.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(globals.base.sky_ambient));
+	rs->global_shader_parameter_set("opennova_env_light_block",
+			to_vector3(globals.base.light_block));
 	rs->global_shader_parameter_set("opennova_fog_color",
 			to_vector3(globals.base.fog_color));
 	rs->global_shader_parameter_set("opennova_sun_direction",

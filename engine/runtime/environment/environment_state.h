@@ -52,6 +52,11 @@ struct EnvShaderGlobals {
 	Rgb fill_light;
 	Rgb sun_light;
 	Rgb sky_ambient;
+	// The RAW light block: the environment cube's rotated specular sphere is
+	// lit by Env_LightBlock whatever the terrain ramps or the thermal grey
+	// select [orig: the cube face callback pushes Env_LightBlock @ 0x5c3863
+	// into render_sky_mesh @ 0x5ac680].
+	Rgb light_block;
 	Vec3 sun_direction{};
 	Rgb fog_color;
 	float fog_end = 0.0f;

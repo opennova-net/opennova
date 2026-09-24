@@ -696,6 +696,7 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 	const TerrainEnvUniforms terrain = build_terrain_uniforms(underwater_view);
 	globals.sun_light = terrain.sun_light;
 	globals.sky_ambient = terrain.sky_ambient;
+	globals.light_block = sun_light();
 	globals.sun_direction = light_dir_;
 	const SceneFogValues fog = build_scene_fog(underwater_view);
 	globals.fog_color = fog.color;

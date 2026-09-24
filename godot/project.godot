@@ -63,6 +63,10 @@ opennova_sky_ambient={
 "type": "vec3",
 "value": Vector3(0.329412, 0.345098, 0.34902)
 }
+opennova_env_light_block={
+"type": "vec3",
+"value": Vector3(0.666667, 0.666667, 0.654902)
+}
 opennova_sun_direction={
 "type": "vec3",
 "value": Vector3(0, 0.70710677, 0.70710677)

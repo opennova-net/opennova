@@ -287,6 +287,14 @@ int main() {
 						rgb_near(env.build_shader_globals(false).sky_ambient,
 								ramp_sky),
 				"the sun/sky globals publish the terrain pair");
+		// The environment cube's specular sphere stays lit by the RAW light
+		// block under the thermal ramps [orig: the cube face callback pushes
+		// Env_LightBlock @ 0x5c3863].
+		ok &= expect(rgb_near(env.build_shader_globals(false).light_block,
+							 env.sun_light()) &&
+						!rgb_near(env.build_shader_globals(false).light_block,
+								ramp_light),
+				"the cube light block stays raw under the thermal terrain ramps");
 		// NVG precedence differs per side: NVG in first person takes the
 		// terrain's NVG blend, while the world block's grey outranks NVG.
 		env.set_nvg_view(true, 0);
@@ -761,6 +769,8 @@ int main() {
 						thermal.base.fog_type == ticked.base.fog_type &&
 						rgb_near(thermal.base.fill_light, ticked.base.fill_light),
 				"the weather publication carries the thermal fog and terrain ramps");
+		ok &= expect(rgb_near(thermal.base.light_block, weather.smooth_sun()),
+				"the weather publication keeps the cube's light block raw under thermal");
 		ok &= expect(rgb_near(opennova::env::build_weather_shader_globals(
 											env, weather, true)
 									.base.fog_color,

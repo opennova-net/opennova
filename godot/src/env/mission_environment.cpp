@@ -413,6 +413,8 @@ void MissionEnvironment::write_shader_globals() {
 			to_vector3(globals.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(globals.sky_ambient));
+	rs->global_shader_parameter_set("opennova_env_light_block",
+			to_vector3(globals.light_block));
 	rs->global_shader_parameter_set("opennova_sun_direction",
 			to_vector3(globals.sun_direction));
 	rs->global_shader_parameter_set("opennova_fog_color",
