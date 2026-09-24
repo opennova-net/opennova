@@ -27,6 +27,7 @@
 #include "object/object_shader_cache.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
+#include "util/texture_path_resolver.h"
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/renderer/render_order.h>
@@ -1543,8 +1544,11 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					frame_index < frames->size()) {
 				const Ref<Texture2D> frame = (*frames)[frame_index];
 				if (frame.is_valid()) {
-					set_material_and_auxiliary_parameter(material,
-							postmultiply_material_for_index(material_index), "u_diffuse", frame);
+					const Ref<ShaderMaterial> postmultiply =
+							postmultiply_material_for_index(material_index);
+					set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
+					set_material_and_auxiliary_parameter(material, postmultiply,
+							"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
 					stamp.anim_frame = frame_index;
 					q3_parameters_changed = true;
 				}

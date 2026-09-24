@@ -36,6 +36,11 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 		renderer::MaterialImageDecoder decoder, const godot::PackedByteArray &bytes);
 
+// The highest mip level retail's device samples for a texture bound to an
+// object stage: a DDS row keeps its file's chain (no ceiling), every texture
+// built from decoded pixels ends at renderer::pixel_texture_mip_levels.
+float material_texture_max_lod(const godot::Ref<godot::Texture> &texture);
+
 // Upload the engine's material-specific pixel transform; generated textures
 // share the resolver's epoch and shutdown lifetime.
 godot::Ref<godot::Texture> prepare_material_texture(

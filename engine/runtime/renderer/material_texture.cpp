@@ -72,6 +72,17 @@ MaterialImageSource plain_material_image_source(std::string_view name) {
 	return plain_source(name);
 }
 
+// [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]
+uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height) {
+	int32_t side = static_cast<int32_t>(std::min(width, height));
+	uint32_t levels = 0;
+	while (side > 2) {
+		side >>= 1;
+		++levels;
+	}
+	return levels;
+}
+
 // [orig: convert_material_definition @0x5B045B..0x5B04A0]
 uint8_t material_texture_runtime_type(uint8_t authored_type) {
 	if (authored_type == 3 || (authored_type >= 9 && authored_type <= 15) ||

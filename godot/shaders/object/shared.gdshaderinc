@@ -220,8 +220,10 @@ vec2 obj_transform_uv(vec2 uv) {
 // shortened by the anisotropy ratio (capped at 2), and two trilinear taps
 // cover the major axis. retail Render_InitAllSubsystems @ 0x586413..0x586427
 // (filter tier -> mode 2), HLSLEffect_LoadFromFile @ 0x5AE6C5..0x5AE6D8
-// ("ANISO" define), _BaseInc.fx sampLinearWrap2D.
-vec4 obj_sample_aniso2(sampler2D tex, vec2 uv) {
+// ("ANISO" define), _BaseInc.fx sampLinearWrap2D. max_lod is the texture's
+// last retail mip level (texture_path_resolver material_texture_max_lod):
+// pixel-built textures stop at the 4x4 level, D3D clamps there.
+vec4 obj_sample_aniso2(sampler2D tex, vec2 uv, float max_lod) {
 	vec2 size = vec2(textureSize(tex, 0));
 	vec2 du = dFdx(uv);
 	vec2 dv = dFdy(uv);
@@ -230,7 +232,7 @@ vec4 obj_sample_aniso2(sampler2D tex, vec2 uv) {
 	float major = max(length_x, length_y);
 	float minor = min(length_x, length_y);
 	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
-	float lod = log2(max(major / ratio, 1.0e-8));
+	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);
 	vec2 major_axis = length_x >= length_y ? du : dv;
 	vec2 offset = major_axis * (0.5 - 0.5 / ratio);
 	return 0.5 * (textureLod(tex, uv - offset, lod) +

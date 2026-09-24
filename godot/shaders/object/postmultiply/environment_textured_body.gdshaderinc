@@ -9,6 +9,7 @@
 
 uniform sampler2D u_post_screen : hint_screen_texture, filter_nearest, repeat_disable;
 uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;
+uniform float u_diffuse_max_lod = 1000.0;
 uniform float u_alpha_test_threshold = 0.5;
 uniform float u_alpha_test_invert = 0.0;
 
@@ -24,7 +25,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 source = obj_sample_aniso2(u_diffuse, v_raw_uv);
+	vec4 source = obj_sample_aniso2(u_diffuse, v_raw_uv, u_diffuse_max_lod);
 	#ifdef OBJ_POSTMULTIPLY_CUTOUT
 	bool accepted = u_alpha_test_invert > 0.5
 			? source.a <= u_alpha_test_threshold

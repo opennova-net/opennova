@@ -87,6 +87,14 @@ int main() {
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
 			"unsupported runtime rows and failed loads bind the checkerboard");
+	// Pixel-built textures (TGA/MDT/PCX rows, normal maps, the checkerboard)
+	// get one level per halving while the smaller side exceeds 2.
+	// [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]
+	expect(pixel_texture_mip_levels(256, 256) == 7 && pixel_texture_mip_levels(128, 128) == 6 &&
+			pixel_texture_mip_levels(256, 64) == 5 && pixel_texture_mip_levels(4, 4) == 1 &&
+			pixel_texture_mip_levels(3, 8) == 1 && pixel_texture_mip_levels(2, 2) == 0 &&
+			pixel_texture_mip_levels(48, 48) == 5,
+			"pixel-built mip chains end at the last level above min-dim 2");
 	// Texture_LoadByNameWithChannel's single-file resolution.
 	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B6E6;
 	// load_texture_and_register @0x58B80E..0x58B881]

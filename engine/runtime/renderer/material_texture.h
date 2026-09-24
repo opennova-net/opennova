@@ -46,6 +46,15 @@ MaterialImageSource material_image_source(std::string_view query,
 // [orig: load_texture_and_register @ 0x58B80E..0x58B881]
 MaterialImageSource plain_material_image_source(std::string_view name);
 
+// The mip chain of a texture built from decoded pixels (TGA/MDT/PCX rows,
+// every normal map, the missing-texture checkerboard): one level per halving
+// while the smaller side exceeds 2, so a 256x256 chain ends at 4x4; a texture
+// whose smaller side is already 2 or less gets D3DX's full chain (0 here).
+// DDS rows keep their file's chain instead.
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8 (MipLevels),
+//  @ 0x6878B9 (D3DXFilterTexture BOX); GTexture_FindOrCreateFromData @ 0x676CC0]
+uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height);
+
 // The loader copies an authored texture type into the runtime row only for
 // the dispatcher's producers (0..2, 4..8, 16..18); 3, 9..15 and anything past
 // 18 leave the runtime byte at the record memset's zero, an ordinary diffuse

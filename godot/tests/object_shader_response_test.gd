@@ -287,3 +287,21 @@ func test_object_sampler_is_a_2x_anisotropic_minifier() -> void:
 	var pixel: Color = await _centre(viewport)
 	assert_gt(pixel.r, 0.8, "the 2:1 footprint samples level 0: %s" % pixel)
 	assert_lt(pixel.g, 0.2, "and not the isotropic level 1: %s" % pixel)
+
+
+func test_object_sampler_stops_at_the_textures_last_retail_mip_level() -> void:
+	# A pixel-built retail texture has no level below its 4x4 one, and D3D
+	# clamps there: with the ceiling at level 2 (blue) a footprint that would
+	# reach level 4 (white) still samples blue.
+	if not _rd_available():
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := _view()
+	var material := _material("fixed/opaque_double_sided", _mip_level_texture())
+	material.set_shader_parameter("u_diffuse_max_lod", 2.0)
+	var quad := _quad(material)
+	quad.scale = Vector3.ONE / 16.0
+	viewport.add_child(quad)
+	var pixel: Color = await _centre(viewport)
+	assert_gt(pixel.b, 0.8, "the minified card samples its last level: %s" % pixel)
+	assert_lt(pixel.r + pixel.g, 0.4, "not a level below it: %s" % pixel)

@@ -44,7 +44,7 @@ void obj_prepare_surface(
 void obj_evaluate_ffp_clip_surface(vec3 camera_position_world,
 		out vec3 output_lit, out float output_alpha) {
 	obj_apply_water_reflection_clip(camera_position_world);
-	vec4 base = obj_sample_aniso2(u_diffuse, v_uv);
+	vec4 base = obj_sample_aniso2(u_diffuse, v_uv, u_diffuse_max_lod);
 	float alpha = base.a * u_alpha_mod;
 	if (!(alpha > 128.0 / 255.0)) {
 		discard;

@@ -217,6 +217,63 @@ func test_glass_static_colour_reaches_reflect_color_as_a_vec4_with_w_one() -> vo
 			"the routed static colour keeps its bytes and W = 1: %s" % [reflect])
 
 
+func test_stage_textures_carry_their_last_retail_mip_level() -> void:
+	# The fixture textures are absent, so Diffuse1 binds the 128x128
+	# checkerboard, which retail builds from pixels like every TGA row: six
+	# levels, the last one 4x4 (GTexture_CreateFromPixelData_0, retail).
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(_object_data(ARMRY_3DI))
+	var material := model.get_surface_materials()[0] as ShaderMaterial
+	assert_not_null(material)
+	if material == null:
+		return
+	assert_eq(material.get_shader_parameter("u_diffuse_max_lod"), 5.0,
+			"the checkerboard's chain ends at level 5 (4x4)")
+	assert_eq(material.get_shader_parameter("u_normal_max_lod"), 1000.0,
+			"a 1x1 flat normal has no ceiling")
+
+
+func test_a_dds_stage_texture_keeps_its_authored_chain() -> void:
+	# armory material 0 names armry.tga; beside a copy of the model only
+	# armry.dds exists, so the DDS sibling binds (Texture_LoadByNameWithChannel,
+	# retail) with the mip chain from its file: no retail ceiling applies.
+	var dir := OS.get_cache_dir().path_join("opennova_mip_ceiling_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(ARMRY_3DI),
+			dir.path_join("armory.3di")), OK)
+	var image := Image.create(8, 8, true, Image.FORMAT_RGBA8)
+	image.fill(Color.RED)
+	var file := FileAccess.open(dir.path_join("armry.dds"), FileAccess.WRITE)
+	file.store_buffer(image.save_dds_to_buffer())
+	file.close()
+	var data := ObjectData.new()
+	assert_eq(data.open_file(dir.path_join("armory.3di")), OK)
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	var exterior: ShaderMaterial = null
+	var indices := model.get_surface_material_indices()
+	var materials := model.get_surface_materials()
+	for index in range(indices.size()):
+		if int(indices[index]) == 0:
+			exterior = materials[index] as ShaderMaterial
+			break
+	assert_not_null(exterior, "the armory exterior material is submitted")
+	if exterior == null:
+		return
+	var diffuse := exterior.get_shader_parameter("u_diffuse") as Texture2D
+	assert_not_null(diffuse)
+	if diffuse != null:
+		assert_eq(diffuse.get_width(), 8, "the DDS sibling binds as Diffuse1")
+	assert_eq(exterior.get_shader_parameter("u_diffuse_max_lod"), 1000.0,
+			"a DDS row samples its whole file chain")
+	assert_eq(exterior.get_shader_parameter("u_detail_max_lod"), 5.0,
+			"the missing armry_o.tga detail binds the pixel-built checkerboard")
+
+
 func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
 	for child in root.get_children():

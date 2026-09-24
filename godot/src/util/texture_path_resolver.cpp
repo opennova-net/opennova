@@ -14,6 +14,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace opennova {
@@ -362,6 +363,26 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 	return godot::Ref<godot::Texture2D>();
 }
 
+namespace {
+// The textures whose mip chain came from their DDS file (the resolver's own
+// table). ObjectIDs are never reused within a session, so the table outlives
+// cache clears: a material bound before a clear keeps a correct answer.
+std::unordered_set<uint64_t> g_authored_mip_chains;
+} // namespace
+
+float material_texture_max_lod(const godot::Ref<godot::Texture> &texture) {
+	constexpr float kUnbounded = 1000.0f;
+	const godot::Ref<godot::Texture2D> texture_2d = texture;
+	if (texture_2d.is_null() ||
+			g_authored_mip_chains.count(texture_2d->get_instance_id()) != 0) {
+		return kUnbounded;
+	}
+	const uint32_t levels = renderer::pixel_texture_mip_levels(
+			static_cast<uint32_t>(texture_2d->get_width()),
+			static_cast<uint32_t>(texture_2d->get_height()));
+	return levels == 0 ? kUnbounded : static_cast<float>(levels - 1);
+}
+
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 		renderer::MaterialImageDecoder decoder, const godot::PackedByteArray &bytes) {
 	using renderer::MaterialImageDecoder;
@@ -386,7 +407,11 @@ godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 			if (!image->has_mipmaps()) {
 				image->generate_mipmaps();
 			}
-			return godot::ImageTexture::create_from_image(image);
+			godot::Ref<godot::ImageTexture> texture = godot::ImageTexture::create_from_image(image);
+			if (texture.is_valid()) {
+				g_authored_mip_chains.insert(texture->get_instance_id());
+			}
+			return texture;
 		}
 		case MaterialImageDecoder::Tga: {
 			godot::Ref<godot::Texture2D> claimed;
