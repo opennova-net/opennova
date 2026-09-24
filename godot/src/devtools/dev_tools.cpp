@@ -283,6 +283,7 @@ void DevTools::_process(double p_delta) {
 	push_ai_debug();
 	push_rays_snapshot();
 	push_physics_snapshot();
+	push_domain_records();
 	const int64_t tools_us = Time::get_singleton()->get_ticks_usec() - start;
 	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
 		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, tools_us);
@@ -493,6 +494,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 		tools_->set_ai_debug(opennova::devtools::AiDebugSnapshot{});
 		tools_->set_rays_snapshot(opennova::devtools::RaysSnapshot{});
 		tools_->set_physics_snapshot(opennova::devtools::PhysicsSnapshot{});
+		clear_domain_records();
 	}
 	sync_game_spectator_state();
 }

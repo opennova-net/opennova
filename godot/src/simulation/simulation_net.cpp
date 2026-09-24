@@ -3,6 +3,7 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
@@ -251,7 +252,8 @@ bool Simulation::enable_host_listen(int p_port) {
 	// now on (the SP/test host never installs one and stays socketless). The
 	// kind-derived world rules (the authority, the mp session) applied with the
 	// role install; a pending role takes the socket when it is installed.
-	net_.pump_socket = std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr());
+	net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+			std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
 	if (installed) host_role_->set_socket(net_.pump_socket.get());
 	// P7: the LAN host rides the inmatch runtime (ctx over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
@@ -564,7 +566,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	}
 	// The joiner role reads and writes the dialed pump through the adapter
 	// from now on.
-	net_.pump_socket = std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr());
+	net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+			std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
 	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
@@ -829,57 +832,56 @@ void Simulation::set_capture_pcap_path(const String &p_path) {
 	net_.capture_pcap_path = p_path;
 }
 
+// The MCP/GUT form of the engine's joiner diagnostics
+// (inmatch::joiner_network_diagnostics): a conversion, keys unchanged.
 Dictionary Simulation::get_joiner_network_diagnostics() const {
+	const opennova::inmatch::JoinerNetworkDiagnostics d =
+			opennova::inmatch::joiner_network_diagnostics(runtime_, joiner_role_);
 	Dictionary out;
 	out["enabled"] = is_joiner_network_diagnostics_enabled();
-	out["frontier_seq"] = static_cast<int64_t>(
-			runtime_ ? runtime_->inbound_frontier_seq() : 0u);
-	out["outbound_seq"] = static_cast<int64_t>(
-			runtime_ ? runtime_->outbound_seq() : 0u);
-	out["records_applied"] = static_cast<int64_t>(
-			runtime_ ? runtime_->state().compact_records_applied : 0u);
-	out["gap_depth"] = static_cast<int64_t>(
-			runtime_ ? runtime_->inbound_gap_depth() : 0u);
-	out["retained_outbound"] = static_cast<int64_t>(
-			runtime_ ? runtime_->retained_outbound_depth() : 0u);
-	out["flat_seconds"] = joiner_role_ != nullptr ? joiner_role_->flat_seconds() : 0;
-	out["freeze_suspected"] = joiner_role_ != nullptr && joiner_role_->freeze_suspected();
-	out["in_match"] = runtime_ && runtime_->in_match();
-	out["deployed"] = runtime_ && runtime_->is_deployed();
-	if (runtime_) {
-		out["stage"] = String(runtime_->admission_stage_name());
-		const opennova::inmatch::JoinerConnection::ChallengeDiagnostics challenges =
-				runtime_->challenge_diagnostics();
+	out["frontier_seq"] = static_cast<int64_t>(d.frontier_seq);
+	out["outbound_seq"] = static_cast<int64_t>(d.outbound_seq);
+	out["records_applied"] = static_cast<int64_t>(d.records_applied);
+	out["gap_depth"] = static_cast<int64_t>(d.gap_depth);
+	out["retained_outbound"] = static_cast<int64_t>(d.retained_outbound);
+	out["flat_seconds"] = d.flat_seconds;
+	out["freeze_suspected"] = d.freeze_suspected;
+	out["in_match"] = d.in_match;
+	out["deployed"] = d.deployed;
+	if (d.present) {
+		out["stage"] = opennova::to_gd(d.stage);
 		Dictionary crc;
-		crc["entity_checksum_seen"] = static_cast<int64_t>(challenges.entity_checksum_seen);
-		crc["entity_checksum_answered"] =
-				static_cast<int64_t>(challenges.entity_checksum_answered);
-		crc["loadout_crc_seen"] = static_cast<int64_t>(challenges.loadout_crc_seen);
-		crc["loadout_crc_answered"] = static_cast<int64_t>(challenges.loadout_crc_answered);
-		crc["charattr_seen"] = static_cast<int64_t>(challenges.charattr_seen);
-		crc["charattr_row_missing"] = static_cast<int64_t>(challenges.charattr_row_missing);
-		crc["property_clears"] = static_cast<int64_t>(challenges.property_clears);
+		crc["entity_checksum_seen"] = static_cast<int64_t>(d.entity_checksum_seen);
+		crc["entity_checksum_answered"] = static_cast<int64_t>(d.entity_checksum_answered);
+		crc["loadout_crc_seen"] = static_cast<int64_t>(d.loadout_crc_seen);
+		crc["loadout_crc_answered"] = static_cast<int64_t>(d.loadout_crc_answered);
+		crc["charattr_seen"] = static_cast<int64_t>(d.charattr_seen);
+		crc["charattr_row_missing"] = static_cast<int64_t>(d.charattr_row_missing);
+		crc["property_clears"] = static_cast<int64_t>(d.property_clears);
 		out["challenges"] = crc;
-		const opennova::inmatch::JoinerConnection::JoinRejectRecord reject =
-				runtime_->last_join_reject();
-		if (reject.set) {
+		if (d.reject_set) {
 			Dictionary r;
-			r["jfc"] = static_cast<int64_t>(reject.jfc);
-			r["jfp"] = static_cast<int64_t>(reject.jfp);
-			r["jfs"] = opennova::to_gd(reject.jfs);
+			r["jfc"] = d.reject_jfc;
+			r["jfp"] = d.reject_jfp;
+			r["jfs"] = opennova::to_gd(d.reject_jfs);
 			out["last_reject"] = r;
 		}
-		if (runtime_->has_disconnect_event()) {
-			const opennova::DisconnectEvent event = runtime_->last_disconnect_event();
-			Dictionary d;
-			d["dc"] = static_cast<int64_t>(event.dc);
-			d["dpc"] = static_cast<int64_t>(event.dpc);
-			d["ddstr"] = opennova::to_gd(event.ddstr);
-			d["dstr"] = opennova::to_gd(event.dstr);
-			out["last_disconnect"] = d;
+		if (d.disconnect_set) {
+			Dictionary dc;
+			dc["dc"] = d.disconnect_dc;
+			dc["dpc"] = d.disconnect_dpc;
+			dc["ddstr"] = opennova::to_gd(d.disconnect_ddstr);
+			dc["dstr"] = opennova::to_gd(d.disconnect_dstr);
+			out["last_disconnect"] = dc;
 		}
 	}
 	return out;
+}
+
+bool Simulation::native_net_report(opennova::inmatch::NetDebugReport &r_out) const {
+	r_out = opennova::inmatch::net_debug_report(session_, host_ctx(), runtime_, joiner_role_,
+			net_.pump_socket.get());
+	return true;
 }
 
 bool Simulation::is_join_deploy_pick_pending() const {

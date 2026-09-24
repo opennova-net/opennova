@@ -34,6 +34,18 @@ class AiWindow;
 class RaysWindow;
 class PhysicsWindow;
 class LogWindow;
+class ScriptWindow;
+class PlayerWindow;
+class RenderWindow;
+class ParticlesWindow;
+class AudioWindow;
+class NetWindow;
+struct ScriptSnapshot;
+struct PlayerSnapshot;
+struct RenderSnapshot;
+struct ParticleSnapshot;
+struct AudioSnapshot;
+struct NetSnapshot;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct ControlRequest;
@@ -80,6 +92,12 @@ public:
 	const PhysicsWindow &physics_window() const { return *physics_window_; }
 	LogWindow &log_window() { return *log_window_; }
 	const LogWindow &log_window() const { return *log_window_; }
+	ScriptWindow &script_window() { return *script_window_; }
+	PlayerWindow &player_window() { return *player_window_; }
+	RenderWindow &render_window() { return *render_window_; }
+	ParticlesWindow &particles_window() { return *particles_window_; }
+	AudioWindow &audio_window() { return *audio_window_; }
+	NetWindow &net_window() { return *net_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -118,6 +136,21 @@ public:
 	bool needs_entity_markers() const;
 	world::inspect::EntityMarkerQuery entity_marker_query(const world::Vec3 &eye) const;
 	void set_entity_markers(EntityMarkersRecord record);
+
+	// The per-domain windows' records (the same shape: pushed by value on
+	// the window's kRefreshSeconds while it shows; an invalid record clears).
+	void set_script_snapshot(ScriptSnapshot snapshot);
+	bool needs_script_snapshot() const;
+	void set_player_snapshot(PlayerSnapshot snapshot);
+	bool needs_player_snapshot() const;
+	void set_render_snapshot(const RenderSnapshot &snapshot);
+	bool needs_render_snapshot() const;
+	void set_particle_snapshot(ParticleSnapshot snapshot);
+	bool needs_particle_snapshot() const;
+	void set_audio_snapshot(AudioSnapshot snapshot);
+	bool needs_audio_snapshot() const;
+	void set_net_snapshot(NetSnapshot snapshot);
+	bool needs_net_snapshot() const;
 
 	// The Game window's status readout, pushed while the tools are open.
 	void set_game_status(const GameStatusSnapshot &status);
@@ -222,6 +255,12 @@ private:
 	RaysWindow *rays_window_ = nullptr;
 	PhysicsWindow *physics_window_ = nullptr;
 	LogWindow *log_window_ = nullptr;
+	ScriptWindow *script_window_ = nullptr;
+	PlayerWindow *player_window_ = nullptr;
+	RenderWindow *render_window_ = nullptr;
+	ParticlesWindow *particles_window_ = nullptr;
+	AudioWindow *audio_window_ = nullptr;
+	NetWindow *net_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

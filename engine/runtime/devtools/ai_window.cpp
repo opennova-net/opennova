@@ -1,5 +1,6 @@
 #include <runtime/devtools/ai_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
 
 #include <imgui.h>
@@ -56,6 +57,10 @@ AiWindow::AiWindow(EntitiesWindow &entities) : entities_(entities) {
 	for (int i = 0; i < kLayerCount; ++i) {
 		layers_[static_cast<size_t>(i)] = std::make_unique<AiOverlayLayer>(snapshot_, entities_, elements[i]);
 	}
+}
+
+void AiWindow::request_kill_group(int32_t group) {
+	entities_.enqueue_request({control_id::kKillGroup, {ControlArg::integer(group)}});
 }
 
 bool AiWindow::any_layer_enabled() const {
@@ -134,6 +139,7 @@ void AiWindow::format_snapshot() {
 	brain_alerts_.clear();
 	group_rows_.clear();
 	group_alerts_.clear();
+	group_ids_.clear();
 	channel_rows_.clear();
 	if (!snapshot_.valid) {
 		counters_ = "No world.";
@@ -142,7 +148,7 @@ void AiWindow::format_snapshot() {
 	const world::inspect::AiSystemCounters &c = snapshot_.report.counters;
 	char buf[192];
 	std::snprintf(buf, sizeof(buf),
-			"brains %d  events %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls",
+			"brains %d  events %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls (Script window)",
 			c.brain_count, c.event_count,
 			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
             static_cast<unsigned long long>(c.runtime_gap_calls));
@@ -168,6 +174,7 @@ void AiWindow::format_snapshot() {
 				alert_name(g.alert), g.live_count, g.initial_count);
 		group_rows_.emplace_back(buf);
 		group_alerts_.push_back(g.alert);
+		group_ids_.push_back(g.id);
 	}
 	channel_rows_.reserve(snapshot_.report.channels.size());
 	for (const world::inspect::AiNavChannelRow &ch : snapshot_.report.channels) {
@@ -276,32 +283,21 @@ void AiWindow::draw_detail_pane() {
 }
 
 void AiWindow::draw_tables() {
-    if (ImGui::CollapsingHeader("Mission runtime gaps")) {
-        for (const auto &gap : snapshot_.report.runtime_gaps) {
-            const auto &site = gap.origin;
-            const char *kind = "unknown";
-            switch (site.kind) {
-                case world::RuntimeGapKind::WacCommand: kind = "WAC command"; break;
-                case world::RuntimeGapKind::WacOpcode: kind = "WAC opcode"; break;
-                case world::RuntimeGapKind::WacInstructionLimit: kind = "WAC instruction limit"; break;
-                case world::RuntimeGapKind::BmsAction: kind = "BMS action"; break;
-            }
-            ImGui::Text("%s %d/%d, event %d, site %d: %llu calls (ticks %u..%u)",
-                    kind, site.code, site.subcode, site.event, site.site,
-                    static_cast<unsigned long long>(gap.count), gap.first_tick, gap.last_tick);
-            if (!site.source.empty()) ImGui::TextDisabled("%s:%d", site.source.c_str(), site.line);
-            ImGui::TextDisabled("arguments: %d, %d, %d, %d", gap.arguments[0],
-                    gap.arguments[1], gap.arguments[2], gap.arguments[3]);
-        }
-        if (snapshot_.report.runtime_gaps.empty()) ImGui::TextDisabled("No runtime gaps observed.");
-    }
 	ImGui::SeparatorText("Groups");
 	if (group_rows_.empty()) {
 		ImGui::TextDisabled("No groups with members.");
 	} else {
+		// Kill is the kill_group row (the one EntityCommands mutator MCP
+		// drives), queued through the Entities channel and its authority fact.
 		for (size_t i = 0; i < group_rows_.size(); ++i) {
+			ImGui::PushID(static_cast<int>(i));
+			ImGui::BeginDisabled(!entities_.authority());
+			if (ImGui::SmallButton("Kill")) request_kill_group(group_ids_[i]);
+			ImGui::EndDisabled();
+			ImGui::SameLine();
 			ImGui::TextColored(alert_color(group_alerts_[i]), "%s",
 					group_rows_[i].c_str());
+			ImGui::PopID();
 		}
 	}
 	ImGui::SeparatorText("Routes");

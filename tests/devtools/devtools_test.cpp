@@ -93,6 +93,12 @@ constexpr ExpectedWindow kExpectedWindows[] = {
 		{"AI", MenuGroup::World, false},
 		{"Rays", MenuGroup::Sim, false},
 		{"Physics", MenuGroup::Sim, false},
+		{"Script", MenuGroup::Sim, false},
+		{"Player", MenuGroup::World, false},
+		{"Render", MenuGroup::Render, false},
+		{"Particles", MenuGroup::Render, false},
+		{"Audio", MenuGroup::Render, false},
+		{"Net", MenuGroup::Net, false},
 		{"Log", MenuGroup::Tools, false},
 		{"ImGui demo", MenuGroup::Help, false},
 };

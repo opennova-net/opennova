@@ -145,6 +145,7 @@ add_library(${TARGET_NAME} SHARED
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp
+    devtools/dev_tools_windows.cpp
     devtools/debug_arg_spec.cpp
     devtools/debug_control_records.cpp
     devtools/debug_shell_host.cpp

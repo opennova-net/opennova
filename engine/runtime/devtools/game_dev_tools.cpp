@@ -10,8 +10,14 @@
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/audio_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/log_window.h>
+#include <runtime/devtools/net_window.h>
+#include <runtime/devtools/particles_window.h>
+#include <runtime/devtools/player_window.h>
+#include <runtime/devtools/render_window.h>
+#include <runtime/devtools/script_window.h>
 #include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
@@ -64,6 +70,24 @@ GameDevTools::GameDevTools() {
 	pass_.register_window(std::move(physics));
 	pass_.register_overlay(physics_window_->contacts_layer());
 	pass_.register_overlay(physics_window_->hitbox_layer());
+	auto script = std::make_unique<ScriptWindow>(control_board_);
+	script_window_ = script.get();
+	pass_.register_window(std::move(script));
+	auto player = std::make_unique<PlayerWindow>(control_board_);
+	player_window_ = player.get();
+	pass_.register_window(std::move(player));
+	auto render = std::make_unique<RenderWindow>(control_board_);
+	render_window_ = render.get();
+	pass_.register_window(std::move(render));
+	auto particles = std::make_unique<ParticlesWindow>(control_board_);
+	particles_window_ = particles.get();
+	pass_.register_window(std::move(particles));
+	auto audio = std::make_unique<AudioWindow>();
+	audio_window_ = audio.get();
+	pass_.register_window(std::move(audio));
+	auto net = std::make_unique<NetWindow>(control_board_);
+	net_window_ = net.get();
+	pass_.register_window(std::move(net));
 	auto log = std::make_unique<LogWindow>();
 	log_window_ = log.get();
 	pass_.register_window(std::move(log));
@@ -196,7 +220,61 @@ bool GameDevTools::needs_entity_directory() const {
 bool GameDevTools::take_control_request(ControlRequest &request) {
 	return game_window_->take_control_request(request) ||
 			entities_window_->take_request(request) ||
-			environment_window_->take_request(request);
+			environment_window_->take_request(request) ||
+			script_window_->take_request(request) ||
+			player_window_->take_request(request) ||
+			render_window_->take_request(request) ||
+			particles_window_->take_request(request) ||
+			audio_window_->take_request(request) ||
+			net_window_->take_request(request);
+}
+
+void GameDevTools::set_script_snapshot(ScriptSnapshot snapshot) {
+	script_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_script_snapshot() const {
+	return pass_.is_open() && script_window_->open;
+}
+
+void GameDevTools::set_player_snapshot(PlayerSnapshot snapshot) {
+	player_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_player_snapshot() const {
+	return pass_.is_open() && player_window_->open;
+}
+
+void GameDevTools::set_render_snapshot(const RenderSnapshot &snapshot) {
+	render_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_render_snapshot() const {
+	return pass_.is_open() && render_window_->open;
+}
+
+void GameDevTools::set_particle_snapshot(ParticleSnapshot snapshot) {
+	particles_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_particle_snapshot() const {
+	return pass_.is_open() && particles_window_->open;
+}
+
+void GameDevTools::set_audio_snapshot(AudioSnapshot snapshot) {
+	audio_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_audio_snapshot() const {
+	return pass_.is_open() && audio_window_->open;
+}
+
+void GameDevTools::set_net_snapshot(NetSnapshot snapshot) {
+	net_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_net_snapshot() const {
+	return pass_.is_open() && net_window_->open;
 }
 
 void GameDevTools::report_control_result(const ControlResult &result) {
