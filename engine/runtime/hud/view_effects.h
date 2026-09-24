@@ -6,13 +6,16 @@
 // stay visible while either effect is active). Constants are the 1024x768
 // virtual overlay space of hud_math.h kDesignWidth/kDesignHeight; the shell
 // keeps only texture loads and CanvasItem draws.
-// Witness record: docs/interface/hud-re.md. Per-constant addresses for the
-// layout rects are pending witness (transcribed from the shipped overlay
-// art layout); the rangefinder easing carries its witness below.
+// Witness record: docs/interface/hud-re.md. The NVG image under the mask is
+// the terminal FrameFX pass's (runtime/renderer/frame_fx_effects.h).
 
 namespace opennova::hud {
 
-// The binocular crosshair overlay rect (BinoCH.tga stretched into it).
+// The binocular crosshair overlay rect (BinoCH.tga stretched into it), drawn
+// after the mask over the whole overlay rect.
+// [orig: sub_5CFE60 @0x5cfe95..0x5cfee0 (the mask), @0x5cfee5..0x5cff17 (the
+//  rect: flt_7DC618 / flt_7D1D70 / flt_7DC188 / flt_7C59AC), @0x5cff48..0x5cff5b
+//  (the crosshair)]
 inline constexpr int kBinocularCrosshairX = 384;
 inline constexpr int kBinocularCrosshairY = 256;
 inline constexpr int kBinocularCrosshairW = 256;
@@ -21,13 +24,20 @@ inline constexpr int kBinocularCrosshairH = 256;
 // The rangefinder readout: four digits starting here, advancing
 // kBinocularDigitStep per digit; each digit blits one kViewDigitCell-square
 // cell from the 16px digit strip (BNumbers.tga row = digit * cell).
+// [orig: HUD_DrawSpeedometer @0x5908c0 (x), @0x5908cf (the cell),
+//  @0x5908de (y), @0x590926 (the step)]
 inline constexpr int kBinocularDigitX = 486;
 inline constexpr int kBinocularDigitY = 683;
 inline constexpr int kBinocularDigitStep = 10;
 inline constexpr int kViewDigitCell = 16;
 
 // The NVG gain scale indicator rect (Nvgscale.tga row = gain * cell), drawn
-// at half brightness (kNvgScaleModulate/255 per channel).
+// at half brightness (kNvgScaleModulate/255 per channel) after the NVG.tga
+// mask over the whole overlay rect; the composite draws both except under the
+// death screen.
+// [orig: sub_5CFF70 @0x5cffab..0x5cfff1 (the mask), @0x5d0005..0x5d001d (the
+//  rect), @0x5d003e (the gain row), @0x5d004a (modulate 0xFF7F7F7F);
+//  render_fullscreen_overlay @0x5d107e..0x5d1080]
 inline constexpr int kNvgScaleX = 960;
 inline constexpr int kNvgScaleY = 32;
 inline constexpr int kNvgScaleW = 48;
