@@ -24,7 +24,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 source = texture(u_diffuse, v_raw_uv);
+	vec4 source = obj_sample_aniso2(u_diffuse, v_raw_uv);
 	#ifdef OBJ_POSTMULTIPLY_CUTOUT
 	bool accepted = u_alpha_test_invert > 0.5
 			? source.a <= u_alpha_test_threshold

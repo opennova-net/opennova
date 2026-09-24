@@ -19,6 +19,15 @@ void vertex() {
 	#else
 	v_point_light_diffuse = vec3(0.0);
 	#endif
+	#ifdef OBJ_VERTEX_FF_DIFFUSE
+	// Fixed-function lighting is per vertex (shared.gdshaderinc
+	// obj_ff_vertex_diffuse); the CLIP sum enables no point lights.
+	v_ff_diffuse = obj_ff_vertex_diffuse(v_world_normal, v_point_light_diffuse);
+	v_ff_clip_diffuse = obj_ff_vertex_diffuse(v_world_normal, vec3(0.0));
+	#else
+	v_ff_diffuse = vec3(0.0);
+	v_ff_clip_diffuse = vec3(0.0);
+	#endif
 	// Pixel-shader NORMAL passes interpolate these oD0-equivalent factors;
 	// their normal-map N.L/N.H terms remain fragment-rate.
 	v_dir_self_shadow = obj_self_shadow(v_geom_normal, -opennova_light_block_dir);

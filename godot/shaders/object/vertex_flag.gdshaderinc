@@ -23,6 +23,10 @@ void vertex() {
 	// Flag.fx has only its hemisphere + directional pass; EffectWorld point
 	// lights do not participate in this effect.
 	v_point_light_diffuse = vec3(0.0);
+	// vsFlag's Out.Diff: hemisphere + directional at vertex rate, saturated
+	// by the colour output. Flag.fx has no CLIP technique.
+	v_ff_diffuse = obj_ff_vertex_diffuse(v_world_normal, vec3(0.0));
+	v_ff_clip_diffuse = vec3(0.0);
 	v_dir_self_shadow = 1.0;
 	v_pixel_point_factor = vec4(0.0);
 	v_pixel_point_attenuation = vec4(0.0);

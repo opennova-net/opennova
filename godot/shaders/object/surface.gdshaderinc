@@ -31,3 +31,24 @@ void obj_prepare_surface(
 	geom_normal = normalize(v_geom_normal);
 	surface_normal = obj_resolve_surface_normal(model_matrix, geom_normal);
 }
+
+// _FFP.fx TBoringFFPClip, drawn instead of NORMAL in the armed reflection
+// view: stage 0 is Diffuse1 alone (the clip texture takes stage 1, so the
+// _MT detail stage is gone) under MODULATE2X of the fixed-function diffuse
+// without point lights (the technique carries no useffplights annotation)
+// and without a SELFLUM block; alpha is Diffuse1.a x AlphaGenValue x the clip
+// stage, tested by AMODE_CLIP's GREATER 128 in place of the material's own
+// test. obj_apply_water_reflection_clip is the clip stage.
+// retail CRenderBatchQueue_FlushBatches @ 0x5DA37F..0x5DA399 (AMODE_CLIP),
+// @ 0x5DA5D4..0x5DA5DC (FF point lights only for useffplights techniques).
+void obj_evaluate_ffp_clip_surface(vec3 camera_position_world,
+		out vec3 output_lit, out float output_alpha) {
+	obj_apply_water_reflection_clip(camera_position_world);
+	vec4 base = obj_sample_aniso2(u_diffuse, v_uv);
+	float alpha = base.a * u_alpha_mod;
+	if (!(alpha > 128.0 / 255.0)) {
+		discard;
+	}
+	output_lit = base.rgb * v_ff_clip_diffuse * 2.0;
+	output_alpha = alpha;
+}

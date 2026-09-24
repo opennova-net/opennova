@@ -94,6 +94,8 @@
       ],
       "runtime_evidence": [
         {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "opennova_water_height - 0.1"]},
+        {"path": "godot/shaders/object/surface.gdshaderinc", "tokens": ["obj_evaluate_ffp_clip_surface", "v_ff_clip_diffuse", "128.0 / 255.0"]},
+        {"path": "godot/shaders/object/fog/regular.gdshaderinc", "tokens": ["OBJ_CLIP_FOG_GRAY", "127.0 / 255.0"]},
         {"path": "godot/shaders/object/pipeline_manifest.json", "tokens": ["\"clip_class\": \"normal_fallback\"", "\"clip_class\": \"skinned_submit_skip\""]},
         {"path": "godot/src/env/water.cpp", "tokens": ["opennova_water_reflection_eye", "opennova_water_reflection_clip_active"]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["object-water-reflection-clip", "reflection CLIP"]}

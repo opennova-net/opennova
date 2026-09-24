@@ -95,7 +95,7 @@ control register 0, values 0..4, no speed):
 | `mount_ctrl1_not_retail` | mount | CTRL 1 renamed `NOT_RETAIL` | ctrl_bus unknown alias |
 | `mount_yaw_style114` | mount | the first LOD0 track with control 113 on register 1 (the cradle's yaw) becomes style 114 | ctrl_bus wave style, normal |
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
-| `mount_mtrl0_rgbgen113_reg1` | mount | material 0 RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
+| `mount_mtrl0_rgbgen113_reg1` | mount | material 0 as FF_ST_OP_LUM (emissive 2), RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |
 | `pump_minefield` | pump | ignored USRP followed by sixteen mixed-case mine names across the existing five parts; only the first fourteen bind | native `minefield`; GUT `minefield_present_test` |
 | `pump_anim0_noise_translation` | pump | LOD0 row 0: translation z enabled, control 0x36, end 32767 | `object_data_panm_apply_test.gd` same-time noise |
@@ -103,7 +103,7 @@ control register 0, values 0..4, no speed):
 | `armory_lght0_sub1_offset` | armory | light 0: subobject 1, Godot position (0.25, 0.5, -0.75), atten_end 1000 | effect_light spawn-time matrix |
 | `house_lod0_sine_rotx` | house | one appended LOD0 row: rotation x sine 0..90 deg at speed 1 | `terrain_static_shadow_runtime_test.gd` resident pages |
 | `house_lod0_sine_rotx_uv1` | house | the previous edit + material 0 `uv_u_style` 1 | terrain dynamic-UV phase |
-| `house_mtrl0_uvscroll16_alphatest` | house | material 0 alpha test on, `uv_u_style` 16, `uv_u_rate` 1.0 | terrain worker snapshot |
+| `house_mtrl0_uvscroll16_alphatest` | house | material 0 as FF_ST_OP#UV, alpha test on, `uv_u_style` 16, `uv_u_rate` 1.0 | terrain worker snapshot |
 | `mount_heat_glow_slide_part1` | mount | delete rows; slide(1) on `HEAT_GLOW` | `simulation_test.gd` heat glow |
 | `armory_special1_slide_part1` | armory | CTRL 0 renamed `VEHICLE_SPECIAL1`; delete rows; slide(1) | simulation animated collision + FastRope SPECIAL1 |
 | `armory_special2_slide_part1` | armory | CTRL 0 renamed `VEHICLE_SPECIAL2`; delete rows; slide(1) | simulation FastRope SPECIAL2 |

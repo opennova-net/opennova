@@ -5,7 +5,9 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 #define OBJ_ALPHA_MOD_FFP
 #define OBJ_COVERAGE_DIFFUSE_ALPHA
 #define OBJ_CLIP_EXPLICIT
+#define OBJ_CLIP_FOG_GRAY
 #define OBJ_VERTEX_POINT_LIGHTS_FFP_DIFFUSE
+#define OBJ_VERTEX_FF_DIFFUSE
 #define OBJ_MATCHTERRAIN_NO_PASS
 #define OBJ_BLENDED_PASS
 

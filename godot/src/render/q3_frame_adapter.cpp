@@ -245,8 +245,8 @@ void main() {
 		if (mode == 0u) {
 			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as
 			// the SELFLUM specialization (technique/self_lit.gdshaderinc): base =
-			// Diffuse1 (x Detail MODULATE2X over UV2 for _MT), x u_rgb_mod x
-			// min(gain, 1) x 2 (draw_color.rgb carries u_rgb_mod x gain x 2),
+			// Diffuse1 (x Detail MODULATE2X over UV2 for _MT), x the saturated
+			// u_rgb_mod x gain x 2 (draw_color.rgb carries it),
 			// the wrapper's fog policy, and alpha 0 (SELFLUM MaterialDiffuse.a):
 			// an AlphaBlend LUM contributes nothing, an Additive LUM adds its
 			// colour, an opaque LUM replaces.
@@ -1001,15 +1001,15 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 								-model_uniform_scale : model_uniform_scale;
 			}
 			if (draw.technique == Q3Technique::NormalCopy) {
-				// The SELFLUM NORMAL block: u_rgb_mod x min(gain, 1) x 2 rides
-				// draw_color.rgb, the wrapper's fog policy follows the blend
-				// (fog/additive.gdshaderinc for _AD, fog/regular.gdshaderinc for
-				// _OP/_AB) and the regular fog colour rides light_local_gain.xyz.
-				push.draw_color = {
-					draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f,
-					draw.object.self_lum_color.y * std::min(light_gain.y, 1.0f) * 2.0f,
-					draw.object.self_lum_color.z * std::min(light_gain.z, 1.0f) * 2.0f,
-					fog_end};
+				// The SELFLUM NORMAL block: the emissive u_rgb_mod x gain,
+				// saturated by the lighting stage, x 2 rides draw_color.rgb
+				// (shared.gdshaderinc obj_self_lit), the wrapper's fog policy
+				// follows the blend (fog/additive.gdshaderinc for _AD,
+				// fog/regular.gdshaderinc for _OP/_AB) and the regular fog
+				// colour rides light_local_gain.xyz.
+				const std::array<float, 3> self_lum = q3_emissive_modulate2x(
+						draw.object.self_lum_color, {light_gain.x, light_gain.y, light_gain.z});
+				push.draw_color = {self_lum[0], self_lum[1], self_lum[2], fog_end};
 				push.camera_local[3] = fog_start;
 				push.light_local_gain[0] = frame->fog_color.x;
 				push.light_local_gain[1] = frame->fog_color.y;
@@ -1017,14 +1017,12 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				if (draw.object.classification.blend != ObjectBlendMode::Additive)
 					push.params[1] += 32.0f;
 			} else if (draw.technique == Q3Technique::RotatedSpecularGlass) {
-				push.draw_color = {draw.object.reflect_color.x,
-						draw.object.reflect_color.y, draw.object.reflect_color.z,
-						draw.object.reflect_color.w};
-				push.draw_color[0] *= light_gain.x * 2.0f;
-				push.draw_color[1] *= light_gain.y * 2.0f;
-				push.draw_color[2] *= light_gain.z * 2.0f;
+				// Glass.fx GLOW: the emissive ReflectColor x gain, saturated by
+				// the lighting stage, x 2 (technique/glass.gdshaderinc).
+				const std::array<float, 3> reflect = q3_emissive_modulate2x(
+						draw.object.reflect_color, {light_gain.x, light_gain.y, light_gain.z});
+				push.draw_color = {reflect[0], reflect[1], reflect[2], fog_end};
 				push.camera_local[3] = fog_start;
-				push.draw_color[3] = fog_end;
 			} else if (draw.technique == Q3Technique::WaterNightVision) {
 				push.draw_color = {draw.water.water_color.x, draw.water.water_color.y,
 						draw.water.water_color.z, 1.0f};

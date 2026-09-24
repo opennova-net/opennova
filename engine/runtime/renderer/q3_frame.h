@@ -159,6 +159,22 @@ struct Q3Matrix4 {
 	};
 };
 
+// The emissive the NormalCopy (SELFLUM) and RotatedSpecularGlass copies
+// modulate by: the material colour x ColorSrcGlobalGain, saturated by the
+// fixed-function lighting stage, then MODULATE2X. A gain above 1 therefore
+// brightens a colour below 1 until it saturates.
+// [orig: _FFP.fx SELFLUM MaterialEmissive = SelfLumColor*ColorSrcGlobalGain;
+//  Glass.fx MaterialEmissive = ReflectColor*ColorSrcGlobalGain;
+//  apply_shader_parameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain bind)]
+inline std::array<float, 3> q3_emissive_modulate2x(const Q3Vec4 &color,
+		const std::array<float, 3> &gain) {
+	const auto saturate = [](float value) {
+		return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+	};
+	return {saturate(color.x * gain[0]) * 2.0f, saturate(color.y * gain[1]) * 2.0f,
+			saturate(color.z * gain[2]) * 2.0f};
+}
+
 // Only values needed by the focused object Q3 techniques live here. The LUM
 // GLOW slot is a copy of the NORMAL pass block, so NormalCopy re-shades the
 // SELFLUM specialization from the leased Diffuse1/Detail textures and
@@ -172,7 +188,8 @@ struct Q3ObjectMaterialParameters {
 	Q3ResourceLease base_texture{};
 	Q3ResourceLease detail_texture{};
 	Q3Vec4 self_lum_color{1.0f, 1.0f, 1.0f, 1.0f};
-	Q3Vec4 reflect_color{0.7f, 0.8f, 0.9f, 0.35f};
+	// _BaseInc.fx's ReflectColor default; routed materials overwrite it.
+	Q3Vec4 reflect_color{0.75f, 0.75f, 0.75f, 0.75f};
 	float alpha_mod = 1.0f;
 	std::array<float, 9> uv_transform{
 		1.0f, 0.0f, 0.0f,

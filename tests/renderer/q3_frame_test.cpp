@@ -327,6 +327,23 @@ void check_shading_constants_are_engine_homed() {
 
 } // namespace
 
+void check_emissive_copies_saturate_colour_times_gain() {
+	// SELFLUM / glass emissive: sat(colour x gain) x 2, so a gain above 1
+	// lifts a sub-1 colour (0.25 x 2 -> 1.0, 0.1 x 4 -> 0.8) instead of being
+	// clipped alone. [orig: _FFP.fx SELFLUM; Glass.fx TGlassFFP;
+	// apply_shader_parameters @ 0x58E050..0x58E06A]
+	const std::array<float, 3> doubled =
+			q3_emissive_modulate2x({0.25f, 0.1f, 0.6f, 1.0f}, {2.0f, 4.0f, 2.0f});
+	CHECK(std::fabs(doubled[0] - 1.0f) < 1.0e-6f);
+	CHECK(std::fabs(doubled[1] - 0.8f) < 1.0e-6f);
+	CHECK(std::fabs(doubled[2] - 2.0f) < 1.0e-6f);
+	const std::array<float, 3> dim =
+			q3_emissive_modulate2x({0.5f, 0.5f, 0.5f, 1.0f}, {0.5f, 1.0f, 0.0f});
+	CHECK(std::fabs(dim[0] - 0.5f) < 1.0e-6f);
+	CHECK(std::fabs(dim[1] - 1.0f) < 1.0e-6f);
+	CHECK(dim[2] == 0.0f);
+}
+
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
@@ -335,6 +352,7 @@ int main() {
 	check_object_blend_and_coverage_contracts();
 	check_multitexture_detail_contract();
 	check_stale_geometry_leases_are_rejected();
+	check_emissive_copies_saturate_colour_times_gain();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);
