@@ -36,9 +36,6 @@ public:
 
 	// The pushed record, by value; an invalid snapshot clears the page.
 	void set_snapshot(const RaysSnapshot &snapshot);
-	// (pass open && window open): the embedder skips building snapshots
-	// nobody shows.
-	bool wants_snapshot() const { return shown_; }
 
 	// The typed request queue the embedder drains. enqueue_request is the one
 	// path the drawn controls feed — and the headless test seam.
@@ -56,7 +53,7 @@ private:
 
 	RaysSnapshot snapshot_{};
 	std::array<std::string, kRayCategoryCount> rows_{};
-	bool shown_ = false;
+
 	std::deque<RaysRequest> requests_;
 	// Edit state mirrored from every push (these controls display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).

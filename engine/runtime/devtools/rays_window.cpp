@@ -32,7 +32,6 @@ constexpr float kCategoryColors[kRayCategoryCount][3] = {
 }  // namespace
 
 void RaysWindow::on_visibility(bool visible) {
-	shown_ = visible;
 	if (!visible) {
 		// Drop the snapshot so a closed window holds nothing; the embedder's
 		// needs_rays_snapshot gate stops the pushes on the same edge.
