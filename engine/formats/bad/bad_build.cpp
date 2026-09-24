@@ -19,42 +19,11 @@ struct Mat3 {
     double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 };
 
-threedi::ThreediBuildVec3 basis(int j) {
-    if (j == 0) return threedi::ThreediBuildVec3{1.0, 0.0, 0.0};
-    if (j == 1) return threedi::ThreediBuildVec3{0.0, 1.0, 0.0};
-    return threedi::ThreediBuildVec3{0.0, 0.0, 1.0};
-}
-
-// The mission -> clip permutation, read out of threedi_build's own map so this
-// file adds no second owner of it: column j is the map applied to basis j.
-Mat3 clip_from_mission_rows() {
-    Mat3 p{};
-    for (int j = 0; j < 3; ++j) {
-        const threedi::ThreediBuildVec3 c = threedi::threedi_mission_to_presentation(basis(j));
-        p.m[0 * 3 + j] = c.x;
-        p.m[1 * 3 + j] = c.y;
-        p.m[2 * 3 + j] = c.z;
-    }
-    return p;
-}
-
 Mat3 transpose(const Mat3 &a) {
     Mat3 t{};
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 3; ++c) t.m[r * 3 + c] = a.m[c * 3 + r];
     return t;
-}
-
-Mat3 multiply(const Mat3 &a, const Mat3 &b) {
-    Mat3 o{};
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            double s = 0.0;
-            for (int k = 0; k < 3; ++k) s += a.m[r * 3 + k] * b.m[k * 3 + c];
-            o.m[r * 3 + c] = s;
-        }
-    }
-    return o;
 }
 
 Mat3 rows_of(const BadBuildQuat &q) {
@@ -153,14 +122,17 @@ BadBuildVec3 bad_mission_from_clip(const BadBuildVec3 &c) {
     return BadBuildVec3{m.x, m.y, m.z};
 }
 
+// Conjugating a rotation by the permutation turns its axis and keeps its angle,
+// so a quaternion takes the vector map on its vector part and keeps w. That is
+// exact in both directions, which is what keeps build(scene(x)) byte for byte.
 BadBuildQuat bad_clip_from_mission(const BadBuildQuat &m) {
-    const Mat3 p = clip_from_mission_rows();
-    return quat_of(multiply(multiply(p, rows_of(m)), transpose(p)));
+    const BadBuildVec3 axis = bad_clip_from_mission(BadBuildVec3{m.x, m.y, m.z});
+    return BadBuildQuat{axis.x, axis.y, axis.z, m.w};
 }
 
 BadBuildQuat bad_mission_from_clip(const BadBuildQuat &c) {
-    const Mat3 p = clip_from_mission_rows();
-    return quat_of(multiply(multiply(transpose(p), rows_of(c)), p));
+    const BadBuildVec3 axis = bad_mission_from_clip(BadBuildVec3{c.x, c.y, c.z});
+    return BadBuildQuat{axis.x, axis.y, axis.z, c.w};
 }
 
 void bad_quat_to_rows(const BadBuildQuat &q, float rows[9]) {
@@ -218,8 +190,9 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
                                         posed[static_cast<size_t>(parent)].y + turned.y,
                                         posed[static_cast<size_t>(parent)].z + turned.z};
             }
-            if (translated && f < bone.translations.size()) {
-                const BadBuildVec3 t = bad_clip_from_mission(bone.translations[f]);
+            if (translated && !bone.translations.empty()) {
+                const size_t row = f < bone.translations.size() ? f : bone.translations.size() - 1;
+                const BadBuildVec3 t = bad_clip_from_mission(bone.translations[row]);
                 posed[i].x += t.x;
                 posed[i].y += t.y;
                 posed[i].z += t.z;
@@ -252,11 +225,19 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
         } else if (bone.parent < 0 || static_cast<size_t>(bone.parent) >= i) {
             return fail(error, "bone " + std::to_string(i) + " parent is not a lower index");
         }
-        if (bone.keys.size() != keys)
+        // A bone keys every frame, or keys sparsely and says how long each key
+        // lasts: the channel walks its own duration table, and only the header's
+        // frame count sets the clip's length
+        // [orig: BoneAnim_FindKeyframeAtTime @0x410220]. Retail keys densely in
+        // 476 of 477 clips; DVFLEE1E.BAD is the sparse one.
+        if (bone.keys.empty())
+            return fail(error, "bone " + std::to_string(i) + " holds no key");
+        if (bone.durations.empty() && bone.keys.size() != keys)
             return fail(error, "bone " + std::to_string(i) + " holds " +
-                                       std::to_string(bone.keys.size()) + " keys, not " +
-                                       std::to_string(keys));
-        if (!bone.durations.empty() && bone.durations.size() != keys)
+                                       std::to_string(bone.keys.size()) +
+                                       " keys, not " + std::to_string(keys) +
+                                       ", and no key duration table");
+        if (!bone.durations.empty() && bone.durations.size() != bone.keys.size())
             return fail(error, "bone " + std::to_string(i) + " duration count is not its key count");
         for (const uint16_t d : bone.durations) {
             if (d == 0) return fail(error, "bone " + std::to_string(i) + " holds a zero duration");
@@ -267,10 +248,10 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
                 return fail(error, "bone " + std::to_string(i) + " holds a key that is not a unit "
                                                                  "quaternion");
         }
-        if (translated && bone.translations.size() != keys)
+        if (translated && bone.translations.size() != clip.frame_count)
             return fail(error, "bone " + std::to_string(i) + " holds " +
                                        std::to_string(bone.translations.size()) +
-                                       " translations, not " + std::to_string(keys));
+                                       " translations, not " + std::to_string(clip.frame_count));
     }
     if (!clip.events.empty() && clip.events.size() != keys)
         return fail(error, "a clip holds " + std::to_string(clip.events.size()) + " events, not " +
@@ -282,9 +263,10 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
     out.durations.resize(bones);
     for (size_t i = 0; i < bones; ++i) {
         const BadBuildBone &bone = clip.bones[i];
-        out.rotations[i].resize(keys);
-        out.durations[i].resize(keys);
-        for (size_t f = 0; f < keys; ++f) {
+        const size_t count = bone.keys.size();
+        out.rotations[i].resize(count);
+        out.durations[i].resize(count);
+        for (size_t f = 0; f < count; ++f) {
             out.rotations[i][f] = stored_key(bone.keys[f]);
             out.durations[i][f] = bone.durations.empty() ? uint16_t{1} : bone.durations[f];
         }
@@ -327,7 +309,7 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
     out.channels.resize(bones);
     for (size_t i = 0; i < bones; ++i) {
         BadChannel &ch = out.channels[i];
-        ch.frame_count = static_cast<uint32_t>(keys);
+        ch.frame_count = static_cast<uint32_t>(out.rotations[i].size());
         ch.frame_lengths_offset = 0;
         ch.rotations_offset = 0;
         ch.frame_lengths = out.durations[i].data();
@@ -365,8 +347,8 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
     }
 
     if (translated) {
-        out.translations.resize(bones * keys);
-        for (size_t f = 0; f < keys; ++f) {
+        out.translations.resize(bones * clip.frame_count);
+        for (size_t f = 0; f < clip.frame_count; ++f) {
             for (size_t i = 0; i < bones; ++i) {
                 const BadBuildVec3 t = bad_clip_from_mission(clip.bones[i].translations[f]);
                 std::array<float, 3> &row = out.translations[f * bones + i];

@@ -83,10 +83,26 @@ foreach(fixture spinner skinned building)
     set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
 endforeach()
 # Command regressions, including invalid inputs and semantic differences.
+# The anim commands over the same handlers the CLI dispatches: the clip-set
+# round trip, what compare calls the same animation, and the scenes build refuses.
+add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp
+    ../apps/threedi_cli/anim_load.cpp ../apps/threedi_cli/anim_build.cpp
+    ../apps/threedi_cli/anim_scene.cpp ../apps/threedi_cli/anim_info.cpp
+    ../apps/threedi_cli/anim_compare.cpp)
+target_link_libraries(anim_o3a_commands_test PRIVATE opennova_base)
+add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp
     ../apps/threedi_cli/build.cpp ../apps/threedi_cli/compare.cpp ../apps/threedi_cli/scene.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_base)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+
+# Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
+add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
+target_include_directories(anim_o3a_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_retail_roundtrip_test PRIVATE cxx_std_17)
+opennova_add_gated_test(anim_o3a_retail_roundtrip
+    COMMAND anim_o3a_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
 # Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
 add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)

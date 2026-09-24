@@ -52,7 +52,9 @@ BadBuildClip two_bone_clip(uint32_t flags) {
         // The root yaws about mission z (up), the tip holds its rest.
         root.keys.push_back(axis_quat(0.0, 0.0, 1.0, 30.0 * static_cast<double>(f)));
         tip.keys.push_back(BadBuildQuat{});
-        if ((flags & BAD_FLAG_TRANSLATION) != 0) {
+        // The translation block holds frame_count rows, one fewer than the
+        // keys: the loader holds its last row past the end.
+        if ((flags & BAD_FLAG_TRANSLATION) != 0 && f < clip.frame_count) {
             root.translations.push_back(BadBuildVec3{});
             tip.translations.push_back(BadBuildVec3{0.0, 0.0, 0.25 * static_cast<double>(f)});
         }
@@ -98,7 +100,7 @@ int main() {
         TEST_EXPECT(built.file.bone_count == 2 && built.file.frame_count == 3);
         // Channels, events and translations all carry the terminal duplicate.
         TEST_EXPECT(built.channels[0].frame_count == 4 && built.file.num_events == 4);
-        TEST_EXPECT(built.file.num_translations == 8);
+        TEST_EXPECT(built.file.num_translations == 6);
         TEST_EXPECT(built.durations[0][0] == 1 && built.durations[1][3] == 1);
         TEST_EXPECT(built.bones[0].parent_index == -1 && built.bones[1].parent_index == 0);
 
@@ -143,13 +145,13 @@ int main() {
         bad_clip_extents(clip, bottom, top);
         TEST_EXPECT(bottom.size() == 4 && top.size() == 4);
         TEST_EXPECT(near(bottom[0], 0.0) && near(top[0], 1.0, 1e-5));
-        TEST_EXPECT(near(top[3], 1.75, 1e-5));
+        TEST_EXPECT(near(top[3], 1.5, 1e-5));
 
         // With no author-given pair, the events take the derived one.
         BadAssembled built;
         std::string error;
         TEST_EXPECT(bad_build_assemble(clip, built, &error));
-        TEST_EXPECT(near(built.events[3].top, 1.75, 1e-5));
+        TEST_EXPECT(near(built.events[3].top, 1.5, 1e-5));
 
         // A constant pair wins over the derivation, the shape retail's
         // viewmodel clips carry.

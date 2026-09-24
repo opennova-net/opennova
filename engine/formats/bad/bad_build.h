@@ -80,11 +80,17 @@ struct BadBuildBone {
     BadBuildVec3 pivot; // absolute, mission axes: the paired model part's pivot
     double length = 0.0;
     // frame_count + 1 keys, mission axes, model space (a channel row is a
-    // world rotation, not a parent-relative one).
+    // world rotation, not a parent-relative one). A bone that carries its own
+    // duration table may key sparsely instead: the channel walks that table and
+    // the header's frame count alone sets the clip's length.
     std::vector<BadBuildQuat> keys;
-    // Empty: every key lasts one frame, as 476 of 477 retail clips do.
+    // Empty: every key lasts one frame, as 476 of 477 retail clips do; else one
+    // duration per key.
     std::vector<uint16_t> durations;
-    // frame_count + 1 entries under BAD_FLAG_TRANSLATION, mission axes.
+    // frame_count entries under BAD_FLAG_TRANSLATION, mission axes. This block
+    // alone carries no terminal duplicate: the loader reads exactly
+    // bone_count * frame_count rows and holds the last one past the end
+    // [orig: BoneFile_Load @0x40fff0, header words 16 and 19].
     std::vector<BadBuildVec3> translations;
     // The stored `position[3]`, as given, for a bone whose pivot cannot
     // re-derive it: retail's own exporter left junk in this dead field (6720 of

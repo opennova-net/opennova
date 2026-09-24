@@ -5,12 +5,15 @@
 //   opennova-3di scene   <model.3di> -o <scene.o3d>
 //   opennova-3di info    <model.3di> [--verbose | --planes | --verts]
 //   opennova-3di compare <expected.3di> <actual.3di>
+//   opennova-3di anim    build|scene|info|compare  (the .bad/.adm clip set)
 //   opennova-3di catalog
 //
 // The DCC front ends (the Blender add-on under tools/blender/opennova_3di is
 // the first one; ADR 0047) speak the .o3d scene text
-// (docs/threedi/o3d-scene-format.md); every 3DI3 byte is read and written by
-// the engine (formats/threedi), so there is one encoder and one decoder.
+// (docs/threedi/o3d-scene-format.md) for a model and the .o3a clip-set text
+// (docs/anim/o3a-scene-format.md) for its animations; every 3DI3, .bad and
+// .adm byte is read and written by the engine (formats/threedi, formats/bad,
+// formats/adm), so there is one encoder and one decoder.
 // Exit codes: 0 ok (compare: same model), 1 error (compare: differences),
 // 2 usage.
 
@@ -20,8 +23,11 @@
 
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/material_descriptor.h>
+#include <runtime/world/body_anim.h>
 
+#include "anim_cli.h"
 #include "threedi_cli.h"
 
 using namespace opennova::threedi;
@@ -82,6 +88,30 @@ int main(int argc, char **argv) {
 	if (cmd == "compare") {
 		if (argc != 4) return usage("compare needs <expected.3di> <actual.3di>");
 		return threedi_cli::cmd_compare(argv[2], argv[3]);
+	}
+	if (cmd == "anim") {
+		const std::string sub = argv[2];
+		if (sub == "info") {
+			if (argc < 4) return usage("anim info needs <in.adm|in.bad>");
+			const std::string flag = argc > 4 ? argv[4] : "";
+			const int verbose = flag == "--keys" ? 2 : flag == "--verbose" ? 1 : 0;
+			return threedi_cli::cmd_anim_info(argv[3], verbose);
+		}
+		if (sub == "build") {
+			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
+				return usage("anim build needs <set.o3a> -o <out.adm|out.bad>");
+			return threedi_cli::cmd_anim_build(argv[3], argv[5]);
+		}
+		if (sub == "scene") {
+			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
+				return usage("anim scene needs <in.adm|in.bad> -o <set.o3a>");
+			return threedi_cli::cmd_anim_scene(argv[3], argv[5]);
+		}
+		if (sub == "compare") {
+			if (argc != 5) return usage("anim compare needs <expected> <actual>");
+			return threedi_cli::cmd_anim_compare(argv[3], argv[4]);
+		}
+		return usage("anim takes build, scene, info or compare");
 	}
 	return usage("unknown command");
 }
