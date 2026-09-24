@@ -22,7 +22,6 @@ constexpr float kKindColors[kContactKindCount][3] = {
 }  // namespace
 
 void PhysicsWindow::on_visibility(bool visible) {
-	shown_ = visible;
 	if (!visible) {
 		// Drop the snapshot so a closed window holds nothing; the embedder's
 		// needs_physics_snapshot gate stops the pushes on the same edge.
@@ -33,9 +32,8 @@ void PhysicsWindow::on_visibility(bool visible) {
 
 void PhysicsWindow::set_snapshot(const PhysicsSnapshot &snapshot) {
 	snapshot_ = snapshot;
-	// Mirror the authoritative state into the edit controls: a click flips
+	// Mirror the authoritative mask into the checkboxes: a click flips
 	// locally and queues its request, the next push confirms it here.
-	capture_edit_ = snapshot_.capturing;
 	mask_edit_ = snapshot_.kind_mask;
 	format_rows();
 }
@@ -83,11 +81,10 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		return;
 	}
 
-	if (ImGui::Checkbox("Capture hits", &capture_edit_)) {
-		enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, capture_edit_ ? 1 : 0});
+	ImGui::TextUnformatted(snapshot_.capturing ? "Capturing hits" : "Capture idle");
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("The contact capture records while this window shows.");
 	}
-	ImGui::SameLine();
-	ImGui::TextUnformatted(snapshot_.capturing ? "(capturing)" : "(idle)");
 	ImGui::SameLine();
 	if (ImGui::Button("Clear")) {
 		enqueue_request({PhysicsRequest::Kind::Clear, 0});

@@ -448,6 +448,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	last_rays_push_ms_ = -1;
 	rays_recording_ = false; // a fresh world starts with the capture off
 	last_physics_push_ms_ = -1;
+	contacts_recording_ = false; // likewise the contact capture
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
@@ -888,8 +889,8 @@ void DevTools::push_rays_snapshot() {
 	tools_->set_rays_snapshot(snapshot);
 }
 
-// Drain the Physics window's typed requests: the mask/clear/capture legs
-// land in the Simulation contact-debug seam.
+// Drain the Physics window's typed requests: the mask/clear legs land in the
+// Simulation contact-debug seam.
 void DevTools::apply_physics_requests() {
 	opennova::devtools::PhysicsRequest request;
 	Simulation *simulation_ = simulation();
@@ -905,9 +906,6 @@ void DevTools::apply_physics_requests() {
 			case Kind::Clear:
 				simulation_->clear_contact_debug();
 				break;
-			case Kind::SetCaptureEnabled:
-				simulation_->set_contact_debug_capture(request.a != 0);
-				break;
 		}
 	}
 }
@@ -915,9 +913,16 @@ void DevTools::apply_physics_requests() {
 // Push the contact-capture record while the Physics window shows, on its
 // 0.25 s cadence: counts + capture state through
 // Simulation::native_physics_snapshot — no Variant round-trip (ADR 0042 d6).
+// The capture follows the window (the rays rule), so it costs nothing while
+// it is hidden.
 void DevTools::push_physics_snapshot() {
 	Simulation *simulation_ = simulation();
-	if (simulation_ == nullptr || !tools_->needs_physics_snapshot()) {
+	const bool shown = simulation_ != nullptr && tools_->needs_physics_snapshot();
+	if (simulation_ != nullptr && shown != contacts_recording_) {
+		simulation_->set_contact_debug_capture(shown);
+		contacts_recording_ = shown;
+	}
+	if (!shown) {
 		last_physics_push_ms_ = -1;
 		return;
 	}
