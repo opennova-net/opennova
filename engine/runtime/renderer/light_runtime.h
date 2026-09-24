@@ -103,6 +103,27 @@ EntityLightingUniforms compute_entity_lighting(const WorldLightingBlock &block,
                                                bool interior_lerp,
                                                float interior_daylight);
 
+// The per-entry lighting state (compute_entity_lighting's three inputs) one
+// retained STATIC row draws with. A static is a pool-2 entity with no
+// candidate slice, so its sun factor stays 1.0 [orig:
+// Entity_BuildProximityListsFromPools @ 0x4b8eb0 slices pools 0/1 only].
+// A BUILDING's rows draw through Terrain_RenderSectorModels: the stack aux
+// is its OWN ItemDef+0x218 (light_transfer / 100) and every submit carries
+// 0x40, which the rigid collector turns into the interior lerp for ROBJ 1+
+// only [orig: @ 0x5c5df2..0x5c5e00; `push 40h` @ 0x5c5f1f;
+// collect_render_objects_for_batch @ 0x5d914f..0x5d9162]. Any other static is
+// a non-person entity-wave draw: contained (a placement blink hit) takes the
+// lerp with the stack-base aux 0, which the non-person wave never overwrites
+// [orig: Terrain_RenderSectorEntities @ 0x5c7c05..0x5c7c14;
+// RenderBatchCtx_BeginFrame @ 0x5d89b6..0x5d89b8].
+struct EntityLightingState {
+	float effect_scale = 1.0f;
+	bool interior_lerp = false;
+	float interior_daylight = 0.0f;
+};
+EntityLightingState static_row_entity_lighting(bool is_building, int32_t robj_index,
+                                               float light_transfer, bool contained);
+
 // The fixed-function vertex-lighting evaluation the D3D light set produces:
 //   clamp01(ambient                                  (MaterialEmissive = AmbientColor)
 //         + dir_color * max(0, dot(N, L))            (D3D light 0, directional)

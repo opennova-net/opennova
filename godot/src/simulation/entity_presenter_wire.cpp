@@ -208,11 +208,14 @@ TypedArray<ObjectModel> EntityPresenter::wire_nodes() const {
 }
 
 void EntityPresenter::set_entity_lighting_context(int p_handle,
-		float p_effect_scale, bool p_interior_lerp, float p_light_transfer) {
+		float p_effect_scale, bool p_interior_lerp, float p_light_transfer,
+		int p_interior_bms, int p_interior_section) {
 	LightingContext context;
 	context.effect_scale = CLAMP(p_effect_scale, 0.0f, 1.0f);
 	context.interior_lerp = p_interior_lerp;
 	context.light_transfer = CLAMP(p_light_transfer, 0.0f, 1.0f);
+	context.interior_bms = p_interior_bms;
+	context.interior_section = p_interior_section;
 	lighting_contexts_[p_handle] = context;
 	apply_lighting_context(p_handle);
 }
@@ -223,12 +226,14 @@ void EntityPresenter::apply_lighting_context(int p_handle) {
 	if (ObjectModel *body = resolve_wire_handle(p_handle)) {
 		body->set_entity_lighting_context(context->effect_scale,
 				context->interior_lerp, context->light_transfer);
+		body->set_interior_light_group(context->interior_bms, context->interior_section);
 	}
 	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
 		const ObjectModel *body = resolve_wire_handle(p_handle);
 		weapon->set_thermal_entity_wave(body != nullptr && body->get_thermal_entity_wave());
 		weapon->set_entity_lighting_context(context->effect_scale,
 				context->interior_lerp, context->light_transfer);
+		weapon->set_interior_light_group(context->interior_bms, context->interior_section);
 	}
 }
 

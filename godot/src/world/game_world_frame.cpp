@@ -972,7 +972,7 @@ void GameWorld::render_light_frame() {
 	// per-slot dominant-light pick reads the shared pool) plus the local
 	// player state for the retail priority/drape gates.
 	if (slot_shadow_ != nullptr) {
-		slot_shadow_->set_light_scene(light_director_->scene());
+		slot_shadow_->set_light_director(light_director_);
 		slot_shadow_->set_light_context(light_director_->light_gain(),
 				static_cast<int>(get_frame_clock_ms()), weather_);
 		if (presenter != nullptr) {

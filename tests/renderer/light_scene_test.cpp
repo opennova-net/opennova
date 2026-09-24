@@ -1257,6 +1257,61 @@ int main() {
                        LightFlickerInputs{}, false, selected) == 0,
                "the owner's rigid draw never takes its owned light");
     }
+    // The render-slot dominant-light candidates [orig:
+    // RenderSlot_UpdateEntityLight @ 0x5d6a30]: the nearest FOUR of the
+    // entity cube (`push 4` @ 0x5d6b00), group-gated with the entity's
+    // interior group, with no objects-disable test and no three-cap.
+    {
+        LightScene scene;
+        LightSpawnParams base;
+        base.radius_fixed = 4 << 16;
+        const auto at = [&](int32_t x) {
+            LightSpawnParams p = base;
+            p.position_fixed = {x << 16, 0, 0};
+            return p;
+        };
+        // Five world lights at 1..5 wu; the fifth is the farthest.
+        LightSpawnParams objects_off = at(1);
+        objects_off.disable_objects = true;
+        const LightHandle nearest = scene.spawn(objects_off);
+        scene.spawn(at(2));
+        scene.spawn(at(3));
+        scene.spawn(at(4));
+        const LightHandle farthest = scene.spawn(at(5));
+        const std::array<int32_t, 3> qmin = {-(8 << 16), -(8 << 16), -(8 << 16)};
+        const std::array<int32_t, 3> qmax = {8 << 16, 8 << 16, 8 << 16};
+        std::array<SelectedLight, LightScene::kSlotPickLimit> picks{};
+        const size_t n = scene.slot_light_candidates(qmin, qmax, LightActiveGroups{},
+                {1.0f, 1.0f, 1.0f}, LightFlickerInputs{}, picks);
+        expect(n == 4, "the slot pick walks the nearest four, past the object 3-cap");
+        bool saw_nearest = false;
+        bool saw_farthest = false;
+        for (size_t i = 0; i < n; ++i) {
+            saw_nearest = saw_nearest || picks[i].handle == nearest;
+            saw_farthest = saw_farthest || picks[i].handle == farthest;
+        }
+        expect(saw_nearest, "an objects-disabled light still competes for the slot");
+        expect(!saw_farthest, "the fifth-nearest light is past the collector's limit");
+        // A room light owned by building 90 section 2 reaches the pick only
+        // with the entity's interior group (the owner group stays empty).
+        LightScene room;
+        LightSpawnParams lamp = at(1);
+        lamp.owner_entity = 90;
+        lamp.owner_section = 2;
+        room.spawn(lamp);
+        LightActiveGroups outdoors;
+        expect(room.slot_light_candidates(qmin, qmax, outdoors, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, picks) == 0,
+               "an owned room light never reaches an outdoor entity's pick");
+        LightActiveGroups inside;
+        inside.interior_group_entity = 90;
+        inside.interior_group_section = 2;
+        expect(room.slot_light_candidates(qmin, qmax, inside, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, picks) == 1,
+               "the contained entity's interior group admits its room light");
+        expect(nearly_equal(picks[0].color[0], 255.0f / 256.0f),
+               "the pick reads the unboosted Light_GetPointLightParams colour");
+    }
     // The light_move round glow lifts its spawn half a radius and follows at
     // the raw round position.
     expect(nearly_equal(opennova::renderer::round_glow_spawn_lift(8.0f), 4.0f),

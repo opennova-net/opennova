@@ -246,37 +246,44 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 		cull_apply_us = ticks_usec() - cull_apply_start;
 	}
 
-	// The per-drawn-entity sun-visibility factor (D-RLIT-3), also applied as
-	// changes: quality 1..4 maps to effectScale quality*0.25, dimming only the
-	// directional term (engine/runtime/renderer/light_runtime.h
-	// sun_visibility_factor owns the witness). Placed and wire identities share
-	// this triple feed; wire rays use the separately keyed 17-tick candidate
-	// arena, and the entity presenter retains the value for cold bodies/weapons.
-	// [orig: setup_terrain_effect_for_entity @ 0x5c74a0, pushed per sector
-	// entity draw @ 0x5c7bff]
+	// The per-drawn-entity lighting context (D-RLIT-3 plus the interior lerp),
+	// also applied as changes: quality 1..4 maps to effectScale quality*0.25,
+	// dimming only the directional term (engine/runtime/renderer/light_runtime.h
+	// sun_visibility_factor owns the witness); a contained entity takes the
+	// interior lerp by its daylight t and its interior light group. Placed and
+	// wire identities share this feed; wire rays use the separately keyed
+	// 17-tick candidate arena, and the entity presenter retains the context for
+	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
+	// witnesses: retail setup_terrain_effect_for_entity @0x5c74a0, the per
+	// entity stack push @0x5c7bff, the 0x80 submit flag @0x5c7c05 /
+	// @0x5c7fb6 and the person wave's daylight aux @0x5c7f93).
 	if (env != nullptr) {
 		const int64_t light_query_start = timing ? ticks_usec() : 0;
-		const PackedInt64Array sun_changes = s->get_draw_lighting_changes(env->get_light_direction());
+		const std::vector<opennova::inmatch::EntityLightingChange> &changes =
+				s->draw_lighting_changes(env->get_light_direction());
 		if (timing) {
 			light_query_us = ticks_usec() - light_query_start;
 		}
 		const int64_t light_apply_start = timing ? ticks_usec() : 0;
 		EntityPresenter *presenter = entities();
-		for (int64_t i = 0; i + 2 < sun_changes.size(); i += 3) {
-			const int wire_handle = static_cast<int>(sun_changes[i]);
-			const int64_t bms_id = sun_changes[i + 1];
+		for (const opennova::inmatch::EntityLightingChange &change : changes) {
+			const opennova::inmatch::EntityLighting &lighting = change.lighting;
 			// quality -> effectScale maps engine-side (one owner:
 			// renderer::sun_visibility_factor via sun_quality_factor).
-			const float effect_scale = s->sun_quality_factor(static_cast<int>(sun_changes[i + 2]));
-			if (wire_handle >= 0) {
+			const float effect_scale = s->sun_quality_factor(lighting.quality);
+			if (change.wire) {
 				if (presenter != nullptr) {
-					presenter->set_entity_lighting_context(wire_handle, effect_scale, false, 0.0f);
+					presenter->set_entity_lighting_context(change.handle, effect_scale,
+							lighting.interior, lighting.light_transfer, lighting.interior_bms,
+							lighting.interior_section);
 				}
 				continue;
 			}
-			ObjectModel *sun_node = occlusion_node(registry, bms_id);
-			if (sun_node != nullptr) {
-				sun_node->set_entity_lighting_context(effect_scale, false, 0.0f);
+			ObjectModel *node = occlusion_node(registry, change.bms_id);
+			if (node != nullptr) {
+				node->set_entity_lighting_context(effect_scale, lighting.interior,
+						lighting.light_transfer);
+				node->set_interior_light_group(lighting.interior_bms, lighting.interior_section);
 			}
 		}
 		if (timing) {

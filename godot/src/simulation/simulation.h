@@ -2235,17 +2235,19 @@ public:
 	// The same delta over the decoded rows the EntityPresenter wire walk
 	// draws (culled wire handles this frame against the applied baseline).
 	PackedInt32Array get_wire_render_culled_changes();
-	// Per-draw sun-visibility feed (D-RLIT-3): triples
-	// [wire_handle_or_-1, bms_id_or_0, quality 1..4] whose quality changed.
-	// Exactly one identity is live per row. This is a cutover API: no bms-only
-	// pair form remains. The shell maps quality through sun_visibility_factor;
-	// the wire presenter applies it to late-built bodies and held weapons too.
-	// The local player's quality is
+	// Per-drawn-entity lighting feed (D-RLIT-3 plus the interior lerp,
+	// inmatch/role_feeds.h EntityLightingFeed): the identities whose context
+	// (sun quality, contained flag, daylight t, interior light group) changed
+	// this frame, placed rows by BMS id and wire rows by handle. Native only;
+	// the returned vector is reused by the next call. The shell maps quality
+	// through sun_quality_factor; the wire presenter applies the context to
+	// late-built bodies and held weapons too. The local player's quality is
 	// computed but never emitted here — the presenter reads it via
 	// get_local_player_sun_quality() so the FP parts can keep their witnessed
 	// exemption while the third-person body dims.
-	PackedInt64Array get_draw_lighting_changes(const Vector3 &p_light_dir);
-	int get_local_player_sun_quality() const { return present_.sun_quality.local_quality; }
+	const std::vector<opennova::inmatch::EntityLightingChange> &draw_lighting_changes(
+			const Vector3 &p_light_dir);
+	int get_local_player_sun_quality() const { return present_.entity_lighting.local_quality; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
 	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,
@@ -2378,19 +2380,9 @@ public:
 	// query at all (engine: runtime/renderer/light_scene.cpp).
 	PackedInt64Array query_blink_owner_at(const Vector3 &p_world);
 
-	// The per-drawn-entity interior light group: every placed entity currently
-	// standing inside a blink volume, as [bms_id, containing bms_id, section]
-	// triples. Retail pushes this pair per entity draw so an interior room
-	// light reaches exactly the entities in its own section [orig:
-	// setup_terrain_effect_for_entity @0x5c74a0 -> Lighting_SetInteriorLightGroup
-	// @0x5a90e0, the gate Light_PassesActiveGroups @0x5a9120, see
-	// docs/render/render-lighting-re.md]. Entities outside every blink volume
-	// are absent (their group is (0, 0)).
-	PackedInt64Array get_entity_interior_groups() const;
-
 	// The local player's interior light group: [containing bms_id, section], or
 	// an empty array outdoors. The local player is a spawned entity with no
-	// bms_id, so it is absent from get_entity_interior_groups; its group is what
+	// bms_id, so the entity lighting feed never emits it; its group is what
 	// scopes interior lights onto the first-person arms and weapon.
 	PackedInt64Array local_player_interior_group() const;
 

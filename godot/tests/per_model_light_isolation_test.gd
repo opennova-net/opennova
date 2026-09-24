@@ -385,7 +385,8 @@ func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> voi
 			PackedInt32Array([2, 0, 2]),
 			PackedInt64Array([0, 0, 0]),
 			PackedInt32Array([0, 0, 0]),
-			PackedByteArray([1, 1, 0]), Vector3.ONE, 0, null), 2,
+			PackedByteArray([1, 1, 0]), Vector3.ONE, 0, null, -1,
+			PackedVector4Array([Vector4(1.0, 1.0, 0.6, 0.0)])), 2,
 			"both active rows receive at least the nearby world light")
 	var report := scene.get_report()
 	assert_eq(report.static_rows, 3)
@@ -399,8 +400,21 @@ func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> voi
 	if atlas == null:
 		return
 	assert_eq(atlas.get_format(), Image.FORMAT_RGBAF)
-	assert_eq(atlas.get_width(), 9)
+	assert_eq(atlas.get_width(), 10)
 	assert_eq(atlas.get_height(), 3)
+	# The last texel is the row's entity lighting lane: a MultiMesh instance
+	# carries no u_entity_light, so a contained static (or a building's ROBJ
+	# 1+) reads its interior lerp from here [retail Terrain_RenderSectorEntities
+	# @0x5c7c05..0x5c7c14; Terrain_RenderSectorModels @0x5c5df2..0x5c5e00].
+	var lane := atlas.get_pixel(9, 0)
+	assert_true(Vector4(lane.r, lane.g, lane.b, lane.a).is_equal_approx(
+			Vector4(1.0, 1.0, 0.6, 0.0)), "an active row carries its supplied lane")
+	lane = atlas.get_pixel(9, 1)
+	assert_true(Vector4(lane.r, lane.g, lane.b, lane.a).is_equal_approx(
+			Vector4(1.0, 0.0, 0.0, 0.0)), "an uncovered active row takes the outdoor lane")
+	lane = atlas.get_pixel(9, 2)
+	assert_true(Vector4(lane.r, lane.g, lane.b, lane.a).is_equal_approx(Vector4.ZERO),
+			"an inactive row stays zero")
 	assert_almost_eq(atlas.get_pixel(0, 0).r, 2.0, 0.001,
 			"the owner row receives the world and section-owned lights")
 	assert_almost_eq(atlas.get_pixel(0, 1).r, 1.0, 0.001,

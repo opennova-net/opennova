@@ -1317,6 +1317,15 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 	expected = Vector4(0.8, 0.0, 0.0, 1.0)
 	_assert_entity_light(body, expected, "a daylight update preserves the person's wave")
 	_assert_entity_light(weapon, expected, "the held model preserves that same wave")
+	# A contained wire draw also declares the containing building's interior
+	# light group on the body and its held weapon (retail
+	# setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup @0x5a90e0).
+	p.set_entity_lighting_context(0x0004, 1.0, true, 0.2, 77, 3)
+	for model: ObjectModel in [body, weapon]:
+		assert_eq(model.get_interior_light_group_bms(), 77, "the contained draw names its building")
+		assert_eq(model.get_interior_light_group_section(), 3, "and the blink volume section")
+	p.set_entity_lighting_context(0x0004, 1.0, false, 0.0)
+	assert_eq(body.get_interior_light_group_bms(), 0, "outdoors the interior group clears")
 
 
 # The composed two-part avatar is ONE retail entity submission: the head and

@@ -366,14 +366,16 @@ PackedByteArray LightScene::corona_texture_rgba8() {
 }
 
 void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
-		float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
+		float p_radius, int64_t p_interior_owner, int p_interior_section,
+		const Vector3 &p_ambient_scale, int p_time_ms,
 		Weather *p_weather, std::vector<opennova::renderer::SlotPointLight> &r_out) {
 	// The render-slot dominant-light query: the witnessed per-entity collect
-	// over entity position +- bound radius, group-gated params, no D3D-fill
-	// boost [orig: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
-	// collect_nearby_zones_by_aabb @0x5aa250 and reads
-	// Light_GetPointLightParams @0x5a9180 directly — the pick itself lives
-	// portable in opennova::renderer::pick_dominant_light, see
+	// over the ENTITY origin +- its bound radius, the nearest four, gated by
+	// the entity's interior group alone (no objects-disable gate, no three-cap,
+	// no D3D-fill boost) [retail RenderSlot_UpdateEntityLight @0x5d6a30 --
+	// the collect and the pick live portable in
+	// opennova::renderer::LightScene::slot_light_candidates and
+	// opennova::renderer::pick_dominant_light, see
 	// docs/render/render-lighting-re.md].
 	r_out.clear();
 	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
@@ -385,19 +387,16 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		qmin[axis] = clamp_int64(static_cast<int64_t>(center[axis]) - half);
 		qmax[axis] = clamp_int64(static_cast<int64_t>(center[axis]) + half);
 	}
-	std::array<opennova::renderer::LightHandle, opennova::renderer::LightScene::kQueryLimit>
-			handles{};
-	const size_t found = scene_.query(qmin, qmax, handles);
-	// The shared objects-target select inputs (object_select_inputs).
+	// The shared objects-target select inputs (object_select_inputs) for the
+	// flicker and the ambient scale; the slot path takes no target gate.
 	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
-	const opennova::renderer::LightFlickerInputs &flicker = sel.flicker;
-	const std::array<float, 3> &ambient = sel.ambient;
-	const opennova::renderer::LightSelectionOptions &options = sel.options;
-	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
+	opennova::renderer::LightActiveGroups groups;
+	groups.interior_group_entity = static_cast<uint64_t>(p_interior_owner);
+	groups.interior_group_section = p_interior_owner != 0 ? p_interior_section : 0;
+	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSlotPickLimit>
 			selected{};
-	const size_t count = scene_.select(handles.data(), found,
-			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
-			kObjectLightD3DFill, selected);
+	const size_t count = scene_.slot_light_candidates(qmin, qmax, groups, sel.ambient,
+			sel.flicker, selected);
 	r_out.reserve(count);
 	for (size_t i = 0; i < count; ++i) {
 		const opennova::renderer::SelectedLight &light = selected[i];
@@ -591,7 +590,7 @@ int LightScene::render_static_frame(
 		const PackedInt32Array &p_interior_sections,
 		const PackedByteArray &p_active,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
-		int64_t p_rows_revision) {
+		int64_t p_rows_revision, const PackedVector4Array &p_entity_lights) {
 	// Rows are immutable identities stamped into MultiMesh INSTANCE_CUSTOM.x.
 	// Their expensive AABB/light overlap and owner-group selection changes only
 	// when either the placer row revision or the pool's selection topology does.
@@ -600,6 +599,11 @@ int LightScene::render_static_frame(
 	// entity remains a zero row rather than shifting later atlas identities.
 	const int64_t row_count = p_entity_positions.size();
 	static_row_count_ = static_cast<int>(row_count);
+	// The row's entity lighting lane (the atlas' last texel).
+	const auto row_lane = [&p_entity_lights](int64_t p_row) {
+		return p_row < p_entity_lights.size() ? p_entity_lights[p_row]
+											  : Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+	};
 	opennova::renderer::LightFlickerInputs flicker;
 	fill_flicker(flicker, p_time_ms, p_weather);
 	const std::array<float, 3> ambient = {
@@ -738,6 +742,12 @@ int LightScene::render_static_frame(
 					row_texels[base + 6] = selected.color[2];
 					row_texels[base + 7] = selected.range;
 				}
+				const Vector4 lane = row_lane(cached.atlas_row);
+				const size_t lane_base = static_cast<size_t>(STATIC_LIGHT_ROW_LANE_TEXEL) * 4;
+				row_texels[lane_base + 0] = lane.x;
+				row_texels[lane_base + 1] = lane.y;
+				row_texels[lane_base + 2] = lane.z;
+				row_texels[lane_base + 3] = lane.w;
 				float *atlas = texels + static_cast<size_t>(cached.atlas_row) *
 						STATIC_LIGHT_ROW_TEXELS * 4;
 				if (std::memcmp(atlas, row_texels.data(),
@@ -806,6 +816,20 @@ int LightScene::render_static_frame(
 			color[2] = selected.color[2];
 			color[3] = selected.range;
 		}
+	}
+	// Every active row carries its entity lighting lane, lit or not.
+	for (int64_t row = 0; row < row_count; ++row) {
+		if (row >= p_active.size() || p_active[row] == 0) {
+			continue;
+		}
+		const Vector4 lane = row_lane(row);
+		float *texel = texels + (static_cast<size_t>(row) * STATIC_LIGHT_ROW_TEXELS +
+										STATIC_LIGHT_ROW_LANE_TEXEL) *
+						4;
+		texel[0] = lane.x;
+		texel[1] = lane.y;
+		texel[2] = lane.z;
+		texel[3] = lane.w;
 	}
 
 	const bool recreate = static_light_rows_image_.is_null() ||
@@ -1190,8 +1214,8 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_static_frame",
 			"entity_positions", "entity_bound_radii_q16", "owner_entities", "owner_sections",
 			"interior_owners", "interior_sections", "active",
-			"ambient_scale", "time_ms", "weather", "rows_revision"),
-			&LightScene::render_static_frame, DEFVAL(-1));
+			"ambient_scale", "time_ms", "weather", "rows_revision", "entity_lights"),
+			&LightScene::render_static_frame, DEFVAL(-1), DEFVAL(PackedVector4Array()));
 	ClassDB::bind_method(D_METHOD("fill_corona_multimesh", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
 			"weather", "models", "owner_entities", "fog", "mesh"),

@@ -115,6 +115,10 @@ public:
 	// shadow device's dominant-light pick reads the same LightScene).
 	Ref<LightScene> scene() const;
 	Vector3 light_gain() const;
+	// The owner id a containing building's BMS id resolves to -- the id its
+	// interior room lights are owned by, for a co-consumer that stamps an
+	// entity's interior light group (the render-slot pick).
+	int64_t interior_owner_for_bms(int p_bms_id);
 	// The per-frame device leg (the GameWorld leg table, after iris, before the
 	// material frame): one draw context per visible ObjectModel near the
 	// camera (the drawn entity id rides along; LightScene::render_model_frame
@@ -213,7 +217,6 @@ private:
 	int64_t _owner_id_for_bms(int p_bms_id);
 	void _render_static_light_rows(const Vector3 &p_gain, Weather *p_weather, int p_time_ms);
 	void _rebuild_static_light_rows();
-	void _refresh_interior_groups();
 	void _ensure_model_registry(Node *p_container);
 	void _rebuild_model_registry(Node *p_container);
 	BlinkOwner _local_player_interior_group();
@@ -243,6 +246,7 @@ private:
 	PackedInt64Array static_rows_interior_owners_;
 	PackedInt32Array static_rows_interior_sections_;
 	PackedByteArray static_rows_active_;
+	PackedVector4Array static_rows_entity_lights_;
 	Ref<LightScene> scene_;
 	HashMap<int, Vector<int64_t>> spawned_static_;
 	std::vector<opennova::mission::StaticEffectSource> static_sources_snapshot_;
@@ -287,7 +291,6 @@ private:
 	Vector<ObjectID> reg_models_;
 	PackedInt64Array reg_owners_;
 	PackedByteArray reg_robj_scoped_;
-	PackedInt64Array reg_bms_ids_;
 	bool reg_dirty_ = true;
 	uint64_t reg_container_id_ = 0;
 	// Reused per-frame draw-context arrays (the native call reads them
@@ -299,12 +302,6 @@ private:
 	PackedInt64Array frame_interior_owners_;
 	PackedInt32Array frame_interior_sections_;
 	PackedByteArray frame_robj_scoped_;
-	// Interior-group rows latched per logic tick (they are tick products):
-	// the flat sim rows plus a bms_id -> base-index lookup, no per-row
-	// allocations.
-	PackedInt64Array interior_rows_;
-	HashMap<int64_t, int64_t> interior_index_;
-	int64_t interior_tick_ = -1;
 };
 
 } // namespace godot

@@ -646,6 +646,9 @@ struct ResolvedCollisionShape {
     // @0x4b9127..0x4b9147 (in-use, ItemDef, Flags bit 0, attrib 0x20 unless
     // type 1); +6.0u @0x4b9152]
     bool pool1_candidate_source_eligible = false;
+    // The raw ItemDef+0x5C type (1 vehicle, 3 person): the client-side blink
+    // walk's branch key [orig: Entity_BuildProximityList @ 0x4b3e47..0x4b3e5f].
+    uint8_t item_type = 0;
 };
 
 // One decoded remote pool-0 person (player or non-player infantry) projected
@@ -1063,6 +1066,18 @@ public:
     // g_local_player_entity from Environment_ApplyFogAndAmbient @ 0x57e51d]
     void query_candidate_blink_boxes_at_point(World &world, EntityHandle source,
                                               const int32_t pos[3], BlinkAccum &accum);
+
+    // The wire-identity twin of refresh_blink for a decoded source without a
+    // registry entity: the retail client runs Entity_BuildProximityList on its
+    // own copy of the entity. A def type 1/3 source (`candidate_walk`) tests
+    // the building-kind entries of its candidate slice — the source's
+    // wire-keyed slice here, the one wire_sun_visibility_blocked_rays walks;
+    // no slice, no hit [orig: @ 0x4b3e53..0x4b3e5f -> @ 0x4b3f3e..0x4b3f93].
+    // Every other type walks the static building prefix [orig: @ 0x4b3e65..
+    // 0x4b3f39]. Clears `accum` first.
+    void query_wire_blink_boxes_at_point(World &world, uint16_t wire_handle,
+                                         const int32_t pos[3], bool candidate_walk,
+                                         BlinkAccum &accum);
 
     // Projectile face raycast against ONE entity's collision instance (the
     // husk-aware target view). kNoFaceMesh = no instance or the model carries

@@ -42,6 +42,9 @@ struct StaticLightDrawSource {
 	std::array<float, 3> bounds_position{};
 	std::array<float, 3> bounds_size{};
 	bool active = true;
+	// The item's ItemDef+0x218 daylight (items.def light_transfer / 100): a
+	// building row's interior aux (renderer::static_row_entity_lighting).
+	float light_transfer = 0.0f;
 };
 
 struct StaticTerrainShadowSource {

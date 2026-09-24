@@ -265,14 +265,16 @@ float Simulation::sun_quality_factor(int p_quality) const {
 	return opennova::renderer::sun_visibility_factor(4 - p_quality);
 }
 
-// The per-drawn-entity sun-visibility factor feed (D-RLIT-3): the walk, the
-// two identity domains and the per-identity diff are the engine's
-// (inmatch/role_feeds.h SunQualityFeed); this leg maps the light direction
-// into mission fixed, hands over the occlusion pass's culled identities and
-// packs the changes as (id-or-handle, kind, quality) triples.
-PackedInt64Array Simulation::get_draw_lighting_changes(
-		const Vector3 &p_light_dir) {
-	PackedInt64Array out;
+// The per-drawn-entity lighting feed (D-RLIT-3 plus the interior lerp): the
+// walk, the two identity domains and the per-identity diff are the engine's
+// (inmatch/role_feeds.h EntityLightingFeed); this leg maps the light
+// direction into mission fixed and hands over the occlusion pass's culled
+// identities.
+const std::vector<opennova::inmatch::EntityLightingChange> &
+Simulation::draw_lighting_changes(const Vector3 &p_light_dir) {
+	std::vector<opennova::inmatch::EntityLightingChange> &out =
+			present_.entity_lighting_changes;
+	out.clear();
 	if (!kernel_) return out;
 	// Sun step in mission fixed: light_dir * 200 u, the same tuple mapping the
 	// iris march uses.
@@ -284,14 +286,8 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			present_.occlusion_culled_bms.end());
 	const std::unordered_set<int32_t> wire_culled(present_.occlusion_culled_wire.begin(),
 			present_.occlusion_culled_wire.end());
-	std::vector<opennova::inmatch::SunQualityChange> changes;
-	present_.sun_quality.collect(role_view(), sun, culled, wire_culled,
-			static_cast<int64_t>(present_.layout_revision), changes);
-	for (const opennova::inmatch::SunQualityChange &c : changes) {
-		out.push_back(c.wire ? static_cast<int64_t>(c.handle) : -1);
-		out.push_back(c.wire ? 0 : c.bms_id);
-		out.push_back(c.quality);
-	}
+	present_.entity_lighting.collect(role_view(), sun, culled, wire_culled,
+			static_cast<int64_t>(present_.layout_revision), out);
 	return out;
 }
 
@@ -314,7 +310,7 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.occl_apply_building_last.clear();
 	present_.occl_apply_culled_last.clear();
 	present_.occl_apply_culled_wire_last.clear();
-	present_.sun_quality = opennova::inmatch::SunQualityFeed();
+	present_.entity_lighting = opennova::inmatch::EntityLightingFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
 	present_.iris_interior_group_section = 0;
 }
@@ -379,20 +375,6 @@ PackedInt64Array Simulation::query_blink_owner_at(const Vector3 &p_world) {
 	if (owner == 0) return out;
 	out.push_back(owner);
 	out.push_back(opennova::world::BlinkAccum::hit_section(blink.hits[0]));
-	return out;
-}
-
-PackedInt64Array Simulation::get_entity_interior_groups() const {
-	PackedInt64Array out;
-	if (!kernel_) return out;
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.bms_id == 0 || e.blink_hits[0] == 0) return;
-		const int owner = blink_hit_owner_bms_id(e.blink_hits[0]);
-		if (owner == 0 || owner == e.bms_id) return; // never its own interior
-		out.push_back(e.bms_id);
-		out.push_back(owner);
-		out.push_back(opennova::world::BlinkAccum::hit_section(e.blink_hits[0]));
-	});
 	return out;
 }
 

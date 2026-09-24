@@ -783,6 +783,15 @@ void LocalPlayerPresenter::update_model_lighting_context() {
 	set_model_lighting_context(avatar(), context.interior, context.light_transfer, context.body_effect_scale);
 	set_model_lighting_context(held_weapon(), context.interior, context.light_transfer,
 			context.body_effect_scale);
+	// The third-person body and gun also declare the player's interior light
+	// group for the per-draw point-light select (the FP parts take it from
+	// the director's local-player query).
+	const PackedInt64Array group = light_sim.is_valid() ? light_sim->local_player_interior_group()
+														: PackedInt64Array();
+	const int group_bms = group.size() >= 2 ? static_cast<int>(group[0]) : 0;
+	const int group_section = group.size() >= 2 ? static_cast<int>(group[1]) : 0;
+	if (avatar()) avatar()->set_interior_light_group(group_bms, group_section);
+	if (held_weapon()) held_weapon()->set_interior_light_group(group_bms, group_section);
 	const TypedArray<ObjectModel> parts = vm_parts();
 	for (int64_t i = 0; i < parts.size(); ++i) {
 		set_model_lighting_context(Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i])),

@@ -1360,4 +1360,36 @@ void CollisionWorld::query_candidate_blink_boxes_at_point(
     }
 }
 
+void CollisionWorld::query_wire_blink_boxes_at_point(
+        World &world, uint16_t wire_handle, const int32_t pos[3],
+        bool candidate_walk, BlinkAccum &accum) {
+    // [orig: Entity_BuildProximityList @ 0x4b3dc0 on the client's copy — the
+    // def type 1/3 candidate walk @ 0x4b3f3e..0x4b3f93 (ItemDef type 5
+    // entries only), the other-type static building prefix
+    // @ 0x4b3e65..0x4b3f39]
+    if (!candidate_walk) {
+        query_blink_boxes_at_point(world, pos, accum);
+        return;
+    }
+    accum.reset();
+    int32_t count = 0;
+    const EntityHandle *slice = wire_candidate_slice(wire_handle, count);
+    if (slice == nullptr) return;
+    CollisionPoint pt;
+    pt.x = pos[0];
+    pt.y = pos[1];
+    pt.z = pos[2];
+    const int32_t radius = 0x8000;
+    for (int32_t i = 0; i < count; ++i) {
+        const EntityHandle candidate = slice[i];
+        const Entity *entity = world.registry.get(candidate);
+        if (entity == nullptr || entity->kind != EntityKind::Building) continue;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        if (const CollisionTargetView *target =
+                    target_view(world, candidate, view, mats))
+            collision_test_blink(*target, &pt, &radius, 1, accum);
+    }
+}
+
 } // namespace opennova::world

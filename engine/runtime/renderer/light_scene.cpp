@@ -356,48 +356,90 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 		if (disabled_for_target) {
 			continue;
 		}
-		// Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: an
-		// owned light passes only for the active interior group (section
-		// matched against the interior section, falling back to the owner
-		// section) or the active owner group.
-		if (params.owner_entity != 0 && !options.admit_owned_unscoped) {
-			bool passes = false;
-			if (params.owner_entity == groups.interior_group_entity) {
-				const int32_t wanted = groups.interior_group_section != 0
-						? groups.interior_group_section
-						: groups.owner_group_section;
-				passes = params.owner_section == wanted;
-			} else if (params.owner_entity == groups.owner_group_entity) {
-				passes = true;
-			}
-			if (!passes) {
-				continue;
-			}
+		if (!passes_active_groups(params, groups, options.admit_owned_unscoped)) {
+			continue;
 		}
-		SelectedLight &light = out[selected];
-		for (int axis = 0; axis < 3; ++axis) {
-			light.position[axis] =
-					static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+		fill_selected(*slot, handles[i], ambient_scale, flicker, d3d_light_path,
+				out[selected]);
+		++selected;
+	}
+	return selected;
+}
+
+bool LightScene::passes_active_groups(const LightSpawnParams &params,
+		const LightActiveGroups &groups, bool admit_owned_unscoped) {
+	// Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: an
+	// owned light passes only for the active interior group (section
+	// matched against the interior section, falling back to the owner
+	// section) or the active owner group.
+	if (params.owner_entity == 0 || admit_owned_unscoped) {
+		return true;
+	}
+	if (params.owner_entity == groups.interior_group_entity) {
+		const int32_t wanted = groups.interior_group_section != 0
+				? groups.interior_group_section
+				: groups.owner_group_section;
+		return params.owner_section == wanted;
+	}
+	return params.owner_entity == groups.owner_group_entity;
+}
+
+void LightScene::fill_selected(const Slot &slot, LightHandle handle,
+		const std::array<float, 3> &ambient_scale,
+		const LightFlickerInputs &flicker, bool d3d_light_path,
+		SelectedLight &light) const {
+	const LightSpawnParams &params = slot.params;
+	for (int axis = 0; axis < 3; ++axis) {
+		light.position[axis] =
+				static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+	}
+	light.position_w = params.radius_fixed != 0
+			? 65536.0f / static_cast<float>(params.radius_fixed)
+			: 0.0f; // [orig: @ 0x5a91d4]
+	// Record bytes were stored /256 at spawn [orig: @ 0x5a8e51].
+	std::array<float, 3> rgb = {
+		static_cast<float>(params.rgb[0]) / 256.0f,
+		static_cast<float>(params.rgb[1]) / 256.0f,
+		static_cast<float>(params.rgb[2]) / 256.0f,
+	};
+	apply_rgb_gen(params, flicker, rgb);
+	// The intensity term is the LIVE blend (record f14) — spawn seeds it
+	// and the fade tick / SetBlendAmount mutate it [orig: @ 0x5a9207].
+	light.color = point_light_color(rgb, slot.blend, ambient_scale,
+			d3d_light_path);
+	light.attenuation = point_light_attenuation(params.radius_fixed);
+	light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
+	light.lights_terrain = !params.disable_terrain;
+	light.lights_objects = !params.disable_objects;
+	light.handle = handle;
+}
+
+size_t LightScene::slot_light_candidates(const std::array<int32_t, 3> &query_min_fixed,
+		const std::array<int32_t, 3> &query_max_fixed,
+		const LightActiveGroups &groups,
+		const std::array<float, 3> &ambient_scale,
+		const LightFlickerInputs &flicker,
+		std::array<SelectedLight, kSlotPickLimit> &out) const {
+	// The collector's nearest-first list, handed back as min(found, 4)
+	// [orig: `push 4` @ 0x5d6b00; collect_nearby_zones_by_aabb
+	// @ 0x5aa418..0x5aa425].
+	std::array<LightHandle, kQueryLimit> handles{};
+	const size_t found = query(query_min_fixed, query_max_fixed, handles);
+	const size_t count = std::min(found, kSlotPickLimit);
+	size_t selected = 0;
+	for (size_t i = 0; i < count; ++i) {
+		const Slot *slot = slot_for(handles[i]);
+		// Light_GetPointLightParams refuses a dead handle [orig: the jnz
+		// @ 0x5d6bb7].
+		if (slot == nullptr) {
+			continue;
 		}
-		light.position_w = params.radius_fixed != 0
-				? 65536.0f / static_cast<float>(params.radius_fixed)
-				: 0.0f; // [orig: @ 0x5a91d4]
-		// Record bytes were stored /256 at spawn [orig: @ 0x5a8e51].
-		std::array<float, 3> rgb = {
-			static_cast<float>(params.rgb[0]) / 256.0f,
-			static_cast<float>(params.rgb[1]) / 256.0f,
-			static_cast<float>(params.rgb[2]) / 256.0f,
-		};
-		apply_rgb_gen(params, flicker, rgb);
-		// The intensity term is the LIVE blend (record f14) — spawn seeds it
-		// and the fade tick / SetBlendAmount mutate it [orig: @ 0x5a9207].
-		light.color = point_light_color(rgb, slot->blend, ambient_scale,
-				d3d_light_path);
-		light.attenuation = point_light_attenuation(params.radius_fixed);
-		light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
-		light.lights_terrain = !params.disable_terrain;
-		light.lights_objects = !params.disable_objects;
-		light.handle = handles[i];
+		// Only the group gate [orig: Light_PassesActiveGroups @ 0x5d6b89];
+		// no objects-disable test on this path.
+		if (!passes_active_groups(slot->params, groups, false)) {
+			continue;
+		}
+		fill_selected(*slot, handles[i], ambient_scale, flicker, false, out[selected]);
 		++selected;
 	}
 	return selected;

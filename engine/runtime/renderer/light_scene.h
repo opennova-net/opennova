@@ -502,6 +502,23 @@ public:
 			bool d3d_light_path,
 			LightDrawSelection *out) const;
 
+	// The render-slot dominant-light candidates for one entity
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]: the collector over the
+	// entity cube (position -/+ entity+0 radius @ 0x5d6af1..0x5d6b24) with its
+	// output limit FOUR (`push 4` @ 0x5d6b00 -> collect_nearby_zones_by_aabb
+	// @ 0x5aa250: the capped slot-order scan, the nearest sort, then
+	// min(found, limit) @ 0x5aa418..0x5aa425), each candidate gated only by
+	// Light_PassesActiveGroups (@ 0x5d6b89, the entity's interior group set
+	// @ 0x5d6b40..0x5d6b77) and read through Light_GetPointLightParams
+	// (@ 0x5d6bad) — no objects-disable gate and no three-cap.
+	static constexpr size_t kSlotPickLimit = 4;
+	size_t slot_light_candidates(const std::array<int32_t, 3> &query_min_fixed,
+			const std::array<int32_t, 3> &query_max_fixed,
+			const LightActiveGroups &groups,
+			const std::array<float, 3> &ambient_scale,
+			const LightFlickerInputs &flicker,
+			std::array<SelectedLight, kSlotPickLimit> &out) const;
+
 	// Monotonic identity for changes which can alter a draw's ordered handle
 	// selection: pool membership, position/AABB, owner groups, or hidden state.
 	// Color-only changes (fade blend, RGB-gen time/weather, ambient gain) do
@@ -580,6 +597,14 @@ private:
 
 	const Slot *slot_for(LightHandle handle) const;
 	Slot *slot_for(LightHandle handle);
+	// Light_PassesActiveGroups @ 0x5a9120 over one record.
+	static bool passes_active_groups(const LightSpawnParams &params,
+			const LightActiveGroups &groups, bool admit_owned_unscoped);
+	// Light_GetPointLightParams @ 0x5a9180 into one SelectedLight.
+	void fill_selected(const Slot &slot, LightHandle handle,
+			const std::array<float, 3> &ambient_scale,
+			const LightFlickerInputs &flicker, bool d3d_light_path,
+			SelectedLight &light) const;
 	size_t query_impl(const std::array<int32_t, 3> &query_min_fixed,
 			const std::array<int32_t, 3> &query_max_fixed,
 			bool collect_all_before_cap,

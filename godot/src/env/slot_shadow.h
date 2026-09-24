@@ -24,6 +24,7 @@
 
 namespace godot {
 
+class EffectLightDirector;
 class LightScene;
 class MissionEnvironment;
 class ObjectModel;
@@ -86,7 +87,9 @@ public:
 	// stays at the entity (the march's step-0 exit on a ground-standing
 	// caster).
 	void set_terrain_data(const Ref<TerrainData> &p_terrain);
-	void set_light_scene(const Ref<LightScene> &p_scene);
+	// The EffectWorld pool the per-slot dominant-light pick reads, and the
+	// owner ids its interior room lights resolve to.
+	void set_light_director(const Ref<EffectLightDirector> &p_director);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
@@ -227,7 +230,7 @@ private:
 	std::vector<opennova::renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
 	Ref<TerrainData> terrain_data_;
-	Ref<LightScene> light_scene_;
+	Ref<EffectLightDirector> light_director_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);
 	int light_time_ms_ = 0;
 	ObjectID weather_id_;

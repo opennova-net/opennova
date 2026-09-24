@@ -114,7 +114,11 @@ public:
 	// of that entity. All arrays are parallel. Inactive/carved rows stay zero so their
 	// stable INSTANCE_CUSTOM.x identity never has to move. The RGBAF atlas is
 	// published as opennova_static_point_light_rows: count in texel 0.x, then
-	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs.
+	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs, then
+	// in the last texel the row's per-entry lighting state (effectScale,
+	// interior lerp flag, daylight t, 0 -- the u_entity_light lane a MultiMesh
+	// instance cannot carry; renderer::static_row_entity_lighting), defaulting
+	// to the outdoor (1, 0, 0, 0) for a row p_entity_lights does not cover.
 	// Returns the number of active rows that received at least one light.
 	int render_static_frame(
 			const PackedVector3Array &p_entity_positions,
@@ -125,7 +129,8 @@ public:
 			const PackedInt32Array &p_interior_sections,
 			const PackedByteArray &p_active,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
-			int64_t p_rows_revision = -1);
+			int64_t p_rows_revision = -1,
+			const PackedVector4Array &p_entity_lights = PackedVector4Array());
 
 	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
 	// corona_texture_size() square — opennova::renderer::corona_texture_argb carries
@@ -149,6 +154,7 @@ public:
 	// docs/render/render-lighting-re.md]. A C++ seam (not script-bound):
 	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
+			int64_t p_interior_owner, int p_interior_section,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
@@ -242,7 +248,9 @@ private:
 	// The camera-global select behind render_frame and census_frame.
 	int camera_global_select(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
-	static constexpr int STATIC_LIGHT_ROW_TEXELS = 9;
+	// count + three (posr, color) pairs + the entity lighting lane.
+	static constexpr int STATIC_LIGHT_ROW_TEXELS = 10;
+	static constexpr int STATIC_LIGHT_ROW_LANE_TEXEL = STATIC_LIGHT_ROW_TEXELS - 1;
 	struct StaticCachedSelection {
 		int atlas_row = 0;
 		opennova::renderer::LightActiveGroups groups{};

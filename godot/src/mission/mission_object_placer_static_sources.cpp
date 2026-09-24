@@ -99,6 +99,7 @@ int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 	source.bms_id = p_bms_id;
 	source.item_id = p_item_id;
 	source.robj_index = p_robj_index;
+	source.light_transfer = item_db_.is_valid() ? item_db_->get_light_transfer(p_item_id) : 0.0f;
 	for (int i = 0; i < 3; ++i) {
 		source.bounds_position[i] = p_world_bounds.position[i];
 		source.bounds_size[i] = p_world_bounds.size[i];

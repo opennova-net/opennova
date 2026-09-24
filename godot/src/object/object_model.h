@@ -388,6 +388,10 @@ private:
 	bool thermal_entity_wave_ = false;
 	bool interior_lerp_ = false;
 	float interior_daylight_ = 0.0f;
+	// The containing building (BMS id, 0 = none) and blink volume section this
+	// entity's draws declare as their interior light group.
+	int interior_light_group_bms_ = 0;
+	int interior_light_group_section_ = 0;
 	bool interior_section_lighting_ = false;
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
@@ -734,6 +738,13 @@ public:
 	float get_lighting_effect_scale() const { return lighting_effect_scale_; }
 	bool is_interior_lerp() const { return interior_lerp_; }
 	float get_interior_daylight() const { return interior_daylight_; }
+	// The interior light group the entity's draws declare: the building its
+	// first blink hit names plus that volume's section (retail
+	// setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup
+	// @0x5a90e0), stamped by the entity lighting feed beside the context.
+	void set_interior_light_group(int p_building_bms, int p_section);
+	int get_interior_light_group_bms() const { return interior_light_group_bms_; }
+	int get_interior_light_group_section() const { return interior_light_group_section_; }
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
 	// The rendered model bounds in world space (geometry diagnostics/culling).

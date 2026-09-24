@@ -23,6 +23,7 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 #include "render/world_environment_lookup.h"
+#include "lights/effect_light_director.h"
 #include "lights/light_scene.h"
 #include "object/object_model.h"
 #include "terrain/terrain_data.h"
@@ -208,8 +209,8 @@ void SlotShadow::set_terrain_data(const Ref<TerrainData> &p_terrain) {
 	terrain_data_ = p_terrain;
 }
 
-void SlotShadow::set_light_scene(const Ref<LightScene> &p_scene) {
-	light_scene_ = p_scene;
+void SlotShadow::set_light_director(const Ref<EffectLightDirector> &p_director) {
+	light_director_ = p_director;
 }
 
 void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
@@ -701,7 +702,12 @@ void SlotShadow::advance_frame() {
 		state.on_vehicle = false;
 		state.is_local_player_or_parent =
 				id == local_id || (local_parent_id != 0 && id == local_parent_id);
-		state.interior = false;
+		// entity+0x1D0: a contained entity zeroes the pick threshold
+		// (retail RenderSlot_UpdateEntityLight @0x5d6adc..0x5d6aed); the
+		// entity lighting feed stamps the same first-blink-hit fact as the
+		// model's interior lerp.
+		ObjectModel *entity_model = model->get_entity_light_owner();
+		state.interior = (entity_model != nullptr ? entity_model : model)->is_interior_lerp();
 		state.dynamic = true;
 	}
 
@@ -803,21 +809,30 @@ void SlotShadow::advance_frame() {
 		// The dominant-light pick (the clamped sun by default; the strongest
 		// nearby point light overrides) [orig: RenderSlot_UpdateEntityLight
 		// @0x5d6a30 <- Entity_UpdateAllEntities]. Every slot quantity keys on
-		// the entity origin (entity+4..+0xC) — the light query box, the
-		// capture's view origin, the drape projection — never on the render
-		// bounds, which move with part animation and RLOD switches (retail:
-		// the query box @0x5d6af1..0x5d6b39, the entity rendered at the view
-		// origin by Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9).
+		// the entity origin (entity+4..+0xC) — the light query box, the pick
+		// distance, the capture's view origin, the drape projection — never on
+		// the render bounds, which move with part animation and RLOD switches
+		// (retail: the query box @0x5d6af1..0x5d6b39, the pick distance origin
+		// @0x5d6bbd..0x5d6bc9, the entity rendered at the view origin by
+		// Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9).
 		const Vector3 center = model->get_global_position();
 		opennova::renderer::SlotLightPick pick;
 		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
 		pick.attached_handle = 0;
 		Vector3 attached_color;
 		float attached_atten = 0.0f;
-		if (light_scene_.is_valid()) {
+		if (light_director_.is_valid()) {
 			Weather *weather = Object::cast_to<Weather>(
 					ObjectDB::get_instance(weather_id_));
-			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
+			// The entity's interior light group from its first blink hit
+			// (retail @0x5d6b40..0x5d6b77 -> Lighting_SetInteriorLightGroup).
+			ObjectModel *entity_model = model->get_entity_light_owner();
+			if (entity_model == nullptr) entity_model = model;
+			const int interior_bms = entity_model->get_interior_light_group_bms();
+			const int64_t interior_owner = interior_bms != 0
+					? light_director_->interior_owner_for_bms(interior_bms) : 0;
+			light_director_->scene()->slot_shadow_lights(center, info.state.bound_radius,
+					interior_owner, entity_model->get_interior_light_group_section(),
 					light_gain_, light_time_ms_, weather, slot_lights_);
 			pick = opennova::renderer::pick_dominant_light(
 					{float(center.x), float(center.y), float(center.z)},

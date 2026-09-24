@@ -226,6 +226,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	if (def == nullptr) return shape;
 	shape.pool1_candidate_source_eligible =
 			(def->attrib & world::kItemAttribEweap) == 0 || def->type == 1;
+	shape.item_type = static_cast<uint8_t>(def->type);
 	if (def->graphic[0] == '\0') return shape;
 
 	const std::string key(def->graphic);

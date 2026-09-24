@@ -141,8 +141,9 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
 			&EntityPresenter::held_weapon_node);
 	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
-			"effect_scale", "interior_lerp", "light_transfer"),
-			&EntityPresenter::set_entity_lighting_context);
+			"effect_scale", "interior_lerp", "light_transfer", "interior_bms",
+			"interior_section"),
+			&EntityPresenter::set_entity_lighting_context, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("muzzle_world_for", "handle", "userpoint"),
 			&EntityPresenter::muzzle_world_for);
 	ClassDB::bind_method(D_METHOD("wire_entity_count"),

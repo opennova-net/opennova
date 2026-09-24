@@ -203,8 +203,11 @@ public:
 	// Cache and apply one wire draw's environment-lighting context to both its
 	// body and held weapon. The cache makes a quality change authoritative even
 	// when cold-spawn budgeting has not built either node yet.
+	// The interior light group (containing building BMS id + blink volume
+	// section) rides along for the per-draw point-light select.
 	void set_entity_lighting_context(int p_handle, float p_effect_scale,
-			bool p_interior_lerp, float p_light_transfer);
+			bool p_interior_lerp, float p_light_transfer, int p_interior_bms = 0,
+			int p_interior_section = 0);
 	// World position of a named userpoint on this wire body's HELD WEAPON —
 	// the anchor retail's adm-arm fire effect spawns at. Falls back to the
 	// body's own origin, never the wire fire position (witness:
@@ -509,6 +512,8 @@ private:
 		float effect_scale = 1.0f;
 		bool interior_lerp = false;
 		float light_transfer = 0.0f;
+		int interior_bms = 0;
+		int interior_section = 0;
 	};
 
 	// --- The per-row legs both walks share (entity_presenter.cpp) ---

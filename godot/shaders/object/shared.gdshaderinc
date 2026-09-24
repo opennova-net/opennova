@@ -78,8 +78,9 @@ global uniform int opennova_fog_type;
 // pass block: x = effectScale (entry[9], the sun-visibility factor),
 // y = the interior-parented flag (entry flag bit 1), z = the parent
 // interior's daylight openness t (entry[10]). Instance state stamped by the
-// presenters on change; a MultiMesh batch carries one value for all of its
-// instances (pool-2 statics have no proximity slice, so effectScale 1).
+// presenters on change; a static MultiMesh row reads the same four floats
+// from its atlas row's last texel instead (obj_entity_light below; pool-2
+// statics have no proximity slice, so effectScale 1).
 // [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 (lerp branch
 // @ 0x5d9a6a.., direct branch @ 0x5d9db5..)]
 instance uniform vec4 u_entity_light = vec4(1.0, 0.0, 1.0, 0.0);
@@ -249,25 +250,44 @@ vec4 obj_sample_aniso2(sampler2D tex, vec2 uv, float max_lod) {
 // the indoor (floor/ceiling) to the outdoor (ground/sky) block by t. This is
 // renderer::compute_entity_lighting evaluated at draw time.
 // [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+bool obj_uses_static_point_light_row() {
+	return v_static_point_light_row > 0.5;
+}
+
+int obj_static_point_light_row() {
+	return max(int(floor(v_static_point_light_row + 0.5)) - 1, 0);
+}
+
+// The per-entry lighting state: the instance lane, or a static MultiMesh
+// row's atlas lane (texel 9) -- the only per-instance channel a batch has.
+vec4 obj_entity_light() {
+	if (obj_uses_static_point_light_row()) {
+		return texelFetch(opennova_static_point_light_rows,
+				ivec2(9, obj_static_point_light_row()), 0);
+	}
+	return u_entity_light;
+}
+
 bool obj_entity_interior() {
-	return u_entity_light.y > 0.5;
+	return obj_entity_light().y > 0.5;
 }
 
 bool obj_thermal_wave() {
-	return opennova_thermal_view && u_entity_light.w > 0.5 && u_thermal_wave_draw;
+	return opennova_thermal_view && obj_entity_light().w > 0.5 && u_thermal_wave_draw;
 }
 
 vec3 obj_dir_light_color() {
 	if (obj_thermal_wave()) return vec3(0.0);
-	vec3 scaled = opennova_light_block_dir_color * u_entity_light.x;
-	return obj_entity_interior() ? scaled * u_entity_light.z : scaled;
+	vec4 entity = obj_entity_light();
+	vec3 scaled = opennova_light_block_dir_color * entity.x;
+	return obj_entity_interior() ? scaled * entity.z : scaled;
 }
 
 vec3 obj_hemi_sky_color() {
 	if (obj_thermal_wave()) return vec3(0.25);
 	return obj_entity_interior()
 			? mix(opennova_light_block_ceiling, opennova_light_block_hemi_sky,
-					u_entity_light.z)
+					obj_entity_light().z)
 			: opennova_light_block_hemi_sky;
 }
 
@@ -275,7 +295,7 @@ vec3 obj_hemi_ground_color() {
 	if (obj_thermal_wave()) return vec3(0.25);
 	return obj_entity_interior()
 			? mix(opennova_light_block_floor, opennova_light_block_hemi_ground,
-					u_entity_light.z)
+					obj_entity_light().z)
 			: opennova_light_block_hemi_ground;
 }
 
@@ -285,14 +305,6 @@ vec3 obj_hemi_ground_color() {
 vec3 obj_hemi(vec3 normal_ws) {
 	float up = clamp(normal_ws.y * 0.5 + 0.5, 0.0, 1.0);
 	return mix(obj_hemi_ground_color(), obj_hemi_sky_color(), up);
-}
-
-bool obj_uses_static_point_light_row() {
-	return v_static_point_light_row > 0.5;
-}
-
-int obj_static_point_light_row() {
-	return max(int(floor(v_static_point_light_row + 0.5)) - 1, 0);
 }
 
 float obj_point_light_count() {

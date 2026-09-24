@@ -1531,12 +1531,13 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 	if (p_model == nullptr || item_db_.is_null()) {
 		return;
 	}
-	// Retail's building collector marks ROBJ 1+ as interior-lighting entries
-	// while ROBJ 0 remains the exterior shell. Only portal buildings take
-	// this model-section path (witness: placement_traits.h ledger,
-	// per-section building visibility).
-	if (item_db_->get_item_type(p_item_id) != ItemDatabase::TYPE_BUILDING ||
-			!_has_occlusion_records(p_item_id)) {
+	// Every type-5 building draws only through the building batch, which
+	// pushes its own ItemDef+0x218 daylight and submits with 0x40; the rigid
+	// collector marks ROBJ 1+ as interior-lighting entries while ROBJ 0 stays
+	// the exterior shell -- portal or not (retail Terrain_RenderSectorModels
+	// @0x5c5df2..0x5c5e00, push 40h @0x5c5f1f; collect_render_objects_for_batch
+	// @0x5d9156..0x5d9162; the rule is renderer::static_row_entity_lighting).
+	if (item_db_->get_item_type(p_item_id) != ItemDatabase::TYPE_BUILDING) {
 		return;
 	}
 	p_model->set_interior_section_light_transfer(

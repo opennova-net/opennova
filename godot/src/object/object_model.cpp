@@ -450,6 +450,11 @@ void ObjectModel::set_entity_lighting_context(float p_effect_scale,
 	stamp_entity_lighting_instances();
 }
 
+void ObjectModel::set_interior_light_group(int p_building_bms, int p_section) {
+	interior_light_group_bms_ = p_building_bms;
+	interior_light_group_section_ = p_building_bms != 0 ? p_section : 0;
+}
+
 void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 	const float next_daylight = CLAMP(p_daylight, 0.0f, 1.0f);
 	if (interior_section_lighting_ &&
@@ -1987,6 +1992,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("is_active_level_skinned"),
 			&ObjectModel::is_active_level_skinned);
+	ClassDB::bind_method(D_METHOD("set_interior_light_group", "building_bms", "section"),
+			&ObjectModel::set_interior_light_group);
+	ClassDB::bind_method(D_METHOD("get_interior_light_group_bms"),
+			&ObjectModel::get_interior_light_group_bms);
+	ClassDB::bind_method(D_METHOD("get_interior_light_group_section"),
+			&ObjectModel::get_interior_light_group_section);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
 			&ObjectModel::set_slot_shadow_capture_with);
 	ClassDB::bind_method(
