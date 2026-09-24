@@ -879,3 +879,102 @@ func test_capture_follows_the_casters_authored_rlod_switch() -> void:
 			"LOD0's entry was retained through the crossing and needs no re-pack")
 	model.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+func _single_caster_term(shadow: SlotShadow, model: ObjectModel) -> Vector4:
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the caster owns a capture order")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	return terms[order] if order >= 0 else Vector4()
+
+
+## The drape distance fade is ONE value per slot, from the entity-to-camera 3D
+## distance (retail: RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59), folded
+## into the slot's material ambient 1 - (1 - fade) * q: a caster 60 u out
+## (fade 0.5) publishes half the darkening of the same caster 10 u out.
+func test_drape_fade_is_one_value_per_slot_from_the_entity_distance() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(10.0)
+	var near := _single_caster_term(shadow, caster)
+	assert_eq(near.w, 1.0, "a near slot drapes")
+	assert_lt(near.x, 1.0, "the near ambient darkens")
+	caster.position = Vector3(0.0, 0.0, -60.0)
+	var far := _single_caster_term(shadow, caster)
+	assert_eq(far.w, 1.0, "a 60 u slot still drapes")
+	for channel in 3:
+		assert_almost_eq(far[channel], 1.0 - 0.5 * (1.0 - near[channel]), 0.0005,
+				"channel %d: the 60 u slot carries the 0.5 fade" % channel)
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## At >= 80 u retail skips the drape outright (0x500000 @0x5d5d3b) while the
+## silhouette capture itself still runs.
+func test_drape_is_skipped_past_80_units_while_the_capture_still_arms() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(85.0)
+	var term := _single_caster_term(shadow, caster)
+	assert_eq(term.w, 0.0, "the 85 u slot publishes no drape")
+	var order := shadow.get_capture_order_of(caster)
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+			"its fresh capture order is still armed")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The sun leg reads the STORED slot vertical — the raw clamped-negated tuple
+## (retail: fabs of slot+0x6C @0x5d5f63) — so a dawn sun below the 0.25 clamp
+## darkens by sun*0.25 / (sun*0.25 + sky), not by the normalized vertical.
+func test_drape_reads_the_raw_clamped_sun_vertical() -> void:
+	var data := EnvFile.new()
+	data.reset_to_default()
+	data.set_curtime(630)
+	var environment := MissionEnvironment.new()
+	environment.environment_data = data
+	add_child_autofree(environment)
+	var tuple: Vector3 = environment.get_light_direction()
+	if tuple.y >= 0.25 or tuple.y <= 0.0:
+		pending("the 06:30 default sun is not below the 0.25 clamp")
+		return
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(10.0)
+	var term := _single_caster_term(shadow, caster)
+	var sun: Vector3 = environment.get_sun_light()
+	var sky: Vector3 = environment.get_sky_ambient()
+	for channel in 3:
+		var lit := sun[channel] * 0.25
+		var q := lit / (lit + sky[channel]) if lit + sky[channel] > 0.0 else 0.0
+		assert_almost_eq(term[channel], 1.0 - q, 0.0005,
+				"channel %d uses |y| = 0.25, the stored clamp" % channel)
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The drape fogs with the terrain's primary fog config (toward white): it
+## carries exactly the fog uniforms MissionEnvironment hands the terrain
+## (retail: RenderSlot_DrawAllDrapes @0x5d6ea1, CD3DDevice_SetFogAndBlendMode
+## mode 3; FOGENABLE in the technique's intrinsic flags @0x5d62f7).
+func test_drape_carries_the_terrain_fog_uniforms() -> void:
+	var environment := _environment()
+	_camera()
+	var shadow := _fresh_shadow(environment)
+	shadow.advance_frame()
+	var reference := ShaderMaterial.new()
+	reference.shader = SlotShadow.get_drape_material().shader
+	environment.apply_terrain_uniforms(reference)
+	var drape := SlotShadow.get_drape_material()
+	for name in ["u_fog_color", "u_fog_start", "u_fog_end", "u_fog_type"]:
+		assert_eq(drape.get_shader_parameter(name), reference.get_shader_parameter(name),
+				"%s matches the terrain's fog" % name)
+	assert_eq(drape.render_priority, Material.RENDER_PRIORITY_MIN,
+			"the drape draws first among the transparents, right after the terrain")

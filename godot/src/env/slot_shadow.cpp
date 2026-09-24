@@ -90,10 +90,12 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	drape_material_.instantiate();
 	drape_material_->set_shader(shader);
 	reset_material_slots(drape_material_);
-	// The drape distance fade thresholds — opennova::renderer::drape_fade owns them.
-	const Vector2 fade_range(opennova::renderer::kDrapeFadeStartUnits,
-			opennova::renderer::kDrapeFadeEndUnits - opennova::renderer::kDrapeFadeStartUnits);
-	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
+	// Retail draws the drapes right after the terrain batch, before the
+	// sector models, entities and every transparent pass (retail:
+	// Terrain_RenderSkyboxPass — Terrain_RenderSectorBatchLit @0x610c34, then
+	// RenderSlot_DrawAllDrapes @0x610c47), so the multiply lands on the
+	// terrain alone: first among the transparents here.
+	drape_material_->set_render_priority(Material::RENDER_PRIORITY_MIN);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
 	// CLAMP + bilinear by the shader's sampler hints [orig:
 	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
@@ -472,23 +474,25 @@ void SlotShadow::_invalidate_uniform_stamps() {
 	drape_mat_stamps_.fill(SlotParamStamp{});
 }
 
-// World -> (u, v, depth01) projector for a camera-style pose (local -Z
-// forward): the drape samples the capture along the same slot direction it
-// was rendered from [orig: the shared unscaled direction of the capture
-// and drape matrices, setup_shadow_cascade_matrices @0x58d300 /
+// World -> (u, v) projector for a camera-style pose (local -Z forward): the
+// drape samples the capture along the same slot direction it was rendered
+// from [orig: the shared unscaled direction of the capture and drape
+// matrices, setup_shadow_cascade_matrices @0x58d300 /
 // build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
-// belongs to the separate depth-clip stage — render_slot_shadow.h].
+// belongs to the separate depth-clip stage — render_slot_shadow.h]. The
+// stage-0 texgen has no depth bound: the capture's own near/far band never
+// clips the drape (the clamped sampler covers the rest of the patch).
 Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
-		float p_half_u, float p_half_v, float p_far) const {
+		float p_half_u, float p_half_v) const {
 	const Transform3D view = p_pose.affine_inverse();
 	const float inv_u = 1.0f / (2.0f * MAX(p_half_u, 0.001f));
 	const float inv_v = 1.0f / (2.0f * MAX(p_half_v, 0.001f));
 	// Columns (godot-cpp Projection(x, y, z, w) takes column vectors):
-	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down), depth01 = -z / far.
+	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down).
 	const Projection to_uv(
 			Vector4(inv_u, 0, 0, 0),
 			Vector4(0, -inv_v, 0, 0),
-			Vector4(0, 0, -1.0f / MAX(p_far, 0.001f), 0),
+			Vector4(0, 0, 0, 0),
 			Vector4(0.5f, 0.5f, 0, 1));
 	return to_uv * Projection(view);
 }
@@ -640,6 +644,13 @@ void SlotShadow::advance_frame() {
 			Vector3(sun_dir[0], sun_dir[1], sun_dir[2]).normalized();
 	const Vector3 sun_rgb = env->get_sun_light();
 	const Vector3 sky_rgb = env->get_sky_ambient();
+	// The drape fogs with the device's primary fog config — the terrain's —
+	// toward WHITE (retail: RenderSlot_DrawAllDrapes @0x5d6ea1 selects
+	// CD3DDevice_SetFogAndBlendMode mode 3 = primary fog, white fog colour;
+	// the drape technique's intrinsic pass flags 0x1520000 carry FOGENABLE,
+	// shadow_system_init_resources @0x5d62f7). The shader shares the
+	// terrain's fog law and uniforms.
+	env->apply_terrain_uniforms(drape);
 
 	// Build per-caster planner state. capture_links collects (child, parent)
 	// for models linked capture-with another caster. The stamped radii, the
@@ -886,8 +897,21 @@ void SlotShadow::advance_frame() {
 			continue;
 		}
 
-		// Per-slot drape term.
-		Vector3 q;
+		// The drape distance: the entity-to-camera 3D distance, taken once
+		// per slot. At >= 80 u retail skips the drape outright; inside it the
+		// one fade scales the whole patch's material ambient (retail:
+		// RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59; renderer::
+		// drape_culled / drape_fade). The capture above is unaffected.
+		const Vector3 entity_pos = model->get_global_position();
+		const float camera_distance = float((entity_pos - cam_pos).length());
+		if (opennova::renderer::drape_culled(camera_distance)) {
+			silhouette_terms[order] = Vector4();
+			continue;
+		}
+		const float fade = opennova::renderer::drape_fade(camera_distance);
+
+		// The slot's fixed-function material ambient, per channel.
+		std::array<float, 3> ambient{};
 		if (pick.attached_handle != 0) {
 			// The attached-light darkening folds the light's attenuation at
 			// the entity into the constant term (retail lights the patch
@@ -897,28 +921,29 @@ void SlotShadow::advance_frame() {
 					opennova::renderer::drape_attached_light_scale(
 							{float(attached_color.x), float(attached_color.y),
 									float(attached_color.z)},
-							0.0f);
-			q = Vector3(CLAMP(-scale[0] * attached_atten, 0.0f, 1.0f),
-					CLAMP(-scale[1] * attached_atten, 0.0f, 1.0f),
-					CLAMP(-scale[2] * attached_atten, 0.0f, 1.0f));
+							fade);
+			for (int c = 0; c < 3; ++c) {
+				ambient[c] = 1.0f - CLAMP(-scale[c] * attached_atten, 0.0f, 1.0f);
+			}
 		} else {
-			const std::array<float, 3> term = opennova::renderer::drape_shadow_term(
+			// The sun leg reads the STORED slot vertical — the raw
+			// clamped-negated sun, not its normalized twin (retail: fabs of
+			// slot+0x6C @0x5d5f63).
+			ambient = opennova::renderer::drape_sun_ambient(
 					{float(sun_rgb.x), float(sun_rgb.y), float(sun_rgb.z)},
 					{float(sky_rgb.x), float(sky_rgb.y), float(sky_rgb.z)},
-					dir.y);
-			q = Vector3(term[0], term[1], term[2]);
+					dir_y_raw, fade);
 		}
 		const Projection drape_mat =
-				_drape_projection(pose, half_extent, half_extent, eye_far);
+				_drape_projection(pose, half_extent, half_extent);
 		SlotParamStamp &mat_stamp = drape_mat_stamps_[order];
 		if (!mat_stamp.valid || mat_stamp.mat != drape_mat) {
 			drape->set_shader_parameter(slot_uniforms().mat[order], drape_mat);
 			mat_stamp.valid = true;
 			mat_stamp.mat = drape_mat;
 		}
-		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
+		silhouette_terms[order] = Vector4(ambient[0], ambient[1], ambient[2], 1.0f);
 		// The patch around the marched anchor, from the stored direction.
-		const Vector3 entity_pos = model->get_global_position();
 		silhouette_patches[order] =
 				slot_patch(entity_pos, dir, info.state.bound_radius, dir_y_raw);
 		// The depth-clip texgen from the stored direction, the capture half

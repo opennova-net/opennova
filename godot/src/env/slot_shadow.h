@@ -166,7 +166,7 @@ private:
 	void _clear_all_terms();
 	void _invalidate_uniform_stamps();
 	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
-			float p_half_v, float p_far) const;
+			float p_half_v) const;
 
 	opennova::renderer::RenderSlotPlan plan_;
 	Ref<SlotCaptureCompositorEffect> effect_;
