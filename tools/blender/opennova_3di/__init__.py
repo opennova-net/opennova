@@ -30,10 +30,10 @@ from bpy_extras.io_utils import ImportHelper
 # Blender re-runs this file when the extension is updated or scripts are
 # reloaded, but keeps the submodules it imported before: reload them first so
 # the property groups registered here and the code that reads them agree.
-for _name in ("export", "importer"):
+for _name in ("export", "importer", "assembly"):
     if f"{__name__}.{_name}" in sys.modules:
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
-from . import export, importer
+from . import assembly, export, importer
 
 # The seven PANM tracks, labelled by the axis retail turns them about
 # (threedi_panm_matrices.cpp: rotation_x turns about the model's up axis,
@@ -150,7 +150,56 @@ class O3DTrack(bpy.types.PropertyGroup):
                        default="3")
 
 
+def is_other_model(self, ob):
+    return export.is_model_root(ob) and ob is not self.id_data
+
+
+def is_rig_model(self, ob):
+    return is_other_model(self, ob) and not assembly.armatures(ob)
+
+
+def update_drive(self, context):
+    assembly.drive(self.id_data, self.drive_rig)
+
+
+def update_mount(self, context):
+    assembly.mount(self.id_data, context.scene)
+
+
+def search_mount_points(self, context, edit_text):
+    if self.mount_parent is None:
+        return []
+    text = edit_text.lower()
+    return [label for label, _ in assembly.user_points(self.mount_parent) if text in label.lower()]
+
+
+def active_model(context):
+    """The model the active object belongs to, else the scene's only model."""
+    model = export.model_of(context.object) if context.object is not None else None
+    if model is None:
+        roots = export.model_roots(context.scene)
+        model = roots[0] if len(roots) == 1 else None
+    return model
+
+
 class O3DObjectProps(bpy.types.PropertyGroup):
+    # On a model root (the Empty above a model's LOD roots): one .3di.
+    model_name: StringProperty(name="Model name", default="",
+                               description="GHDR name, 15 chars max; empty: the output file's name")
+    output_path: StringProperty(name="Output .3di", subtype="FILE_PATH", default="//model.3di")
+    poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
+                                    description="The render LOD whose part meshes also become the bullet faces (the OED "
+                                                ".3dp poly_collision_lod); 0 = the most detailed")
+    # Display-only assembly (assembly.py); export never reads these.
+    drive_rig: PointerProperty(name="Bones follow", type=bpy.types.Object, poll=is_rig_model, update=update_drive,
+                               description="A skinned model's bones follow this model's parts of the same index, as "
+                                           "retail draws first-person arms with the gun's part matrices (display only)")
+    mount_parent: PointerProperty(name="Mount on", type=bpy.types.Object, poll=is_other_model, update=update_mount,
+                                  description="Place this model on another model, as an ITEMS.DEF addeweap child "
+                                              "(the M1A1's turret) sits on its parent (display only)")
+    mount_point: StringProperty(name="At user point", default="", search=search_mount_points, update=update_mount,
+                                description="The parent's user point (the addeweap row's name, e.g. ewep01); none or "
+                                            "not found: the parent's root")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
@@ -163,6 +212,17 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                        description="On a user point, light or occlusion mesh: its record index in the model "
                                    "(retail scans seats and effect points in this order); -1 sorts it after the "
                                    "ordered ones by name")
+
+
+class O3DBoneProps(bpy.types.PropertyGroup):
+    # A skinned model's part animation, on its BN## bone.
+    tracks: CollectionProperty(type=O3DTrack)
+    panm_flags: IntProperty(name="PANM flags", default=-1,
+                            description="The part's raw PANM flags word; -1 derives it from the tracks")
+    frame: FloatVectorProperty(name="Track frame", subtype="EULER", size=3, default=(0.0, 0.0, 0.0),
+                               description="The axes this part's tracks turn about (its PANM MTRX row), as a "
+                                           "rotation of the model's axes; zero: the model's own (dM1A1's turret "
+                                           "ring and wheels turn 90 degrees)")
 
 
 class O3DTexture(bpy.types.PropertyGroup):
@@ -253,8 +313,6 @@ class O3DLightProps(bpy.types.PropertyGroup):
 
 
 class O3DSceneProps(bpy.types.PropertyGroup):
-    model_name: StringProperty(name="Model name", default="", description="GHDR name, 15 chars max")
-    output_path: StringProperty(name="Output .3di", subtype="FILE_PATH", default="//model.3di")
     forward: EnumProperty(name="Forward", items=[
         ("-Y", "-Y (Blender front)", "The model faces Blender's front view"),
         ("X", "+X", "The model faces +X"),
@@ -263,17 +321,19 @@ class O3DSceneProps(bpy.types.PropertyGroup):
                              description="Uses the bundled opennova-3di automatically. Choose a different executable "
                                          "to override it; clearing this field also uses the bundled executable")
     write_textures: BoolProperty(name="Write textures", default=True)
-    poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
-                                    description="The render LOD whose part meshes also become the bullet faces (the OED "
-                                                ".3dp poly_collision_lod); 0 = the most detailed")
+
+
+def part_animation(context, bone):
+    return context.bone.o3d if bone else context.object.o3d
 
 
 class O3D_OT_add_track(bpy.types.Operator):
     bl_idname = "opennova_3di.add_track"
     bl_label = "Add Part Animation Track"
+    bone: BoolProperty(options={"HIDDEN"})
 
     def execute(self, context):
-        context.object.o3d.tracks.add()
+        part_animation(context, self.bone).tracks.add()
         return {"FINISHED"}
 
 
@@ -281,9 +341,10 @@ class O3D_OT_remove_track(bpy.types.Operator):
     bl_idname = "opennova_3di.remove_track"
     bl_label = "Remove Track"
     index: IntProperty()
+    bone: BoolProperty(options={"HIDDEN"})
 
     def execute(self, context):
-        context.object.o3d.tracks.remove(self.index)
+        part_animation(context, self.bone).tracks.remove(self.index)
         return {"FINISHED"}
 
 
@@ -307,27 +368,77 @@ class O3D_OT_remove_texture(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class O3D_OT_export(bpy.types.Operator):
-    bl_idname = "opennova_3di.export"
-    bl_label = "Export .3di"
-    bl_description = "Write the scene as a NovaLogic .3di through opennova-3di"
-
-    def execute(self, context):
+def export_models(op, context, models):
+    wrote = []
+    for model in models:
         try:
-            message, notes = export.export_scene(context)
+            message, notes = export.export_model(context, model)
         except export.ExportError as e:
-            self.report({"ERROR"}, str(e))
+            op.report({"ERROR"}, str(e))
             return {"CANCELLED"}
         for note in notes:
-            self.report({"WARNING"}, note)
-        self.report({"INFO"}, message)
+            op.report({"WARNING"}, f"{model.name}: {note}")
+        wrote.append(message)
+    op.report({"INFO"}, "; ".join(wrote))
+    return {"FINISHED"}
+
+
+class O3D_OT_export(bpy.types.Operator):
+    bl_idname = "opennova_3di.export"
+    bl_label = "Export Model"
+    bl_description = "Write the active object's model as a NovaLogic .3di through opennova-3di"
+
+    def execute(self, context):
+        model = active_model(context)
+        if model is None:
+            self.report({"ERROR"}, "select an object of the model to export (a model root is the Empty above its "
+                                   "LOD roots; Add Model makes one)")
+            return {"CANCELLED"}
+        return export_models(self, context, [model])
+
+
+class O3D_OT_export_all(bpy.types.Operator):
+    bl_idname = "opennova_3di.export_all"
+    bl_label = "Export All Models"
+    bl_description = "Write every model in the scene to its own .3di"
+
+    def execute(self, context):
+        models = export.model_roots(context.scene)
+        if not models:
+            self.report({"ERROR"}, "the scene holds no model root (the Empty above a model's LOD roots)")
+            return {"CANCELLED"}
+        return export_models(self, context, models)
+
+
+class O3D_OT_add_model(bpy.types.Operator):
+    bl_idname = "opennova_3di.add_model"
+    bl_label = "Add Model"
+    bl_description = "Add a model root with its LOD 0 root, ready for PN## parts"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        model = bpy.data.objects.new("Model", None)
+        model.empty_display_type = "CUBE"
+        model.o3d.output_path = f"//{model.name}.3di"
+        lod = bpy.data.objects.new(f"{model.name}_LOD0", None)
+        lod.empty_display_type = "ARROWS"
+        lod.empty_display_size = 0.5
+        lod["_lod_index"] = 0
+        lod.parent = model
+        for ob in (model, lod):
+            context.collection.objects.link(ob)
+        for ob in context.selected_objects:
+            ob.select_set(False)
+        model.select_set(True)
+        context.view_layer.objects.active = model
         return {"FINISHED"}
 
 
 class O3D_OT_import(bpy.types.Operator, ImportHelper):
     bl_idname = "opennova_3di.import_3di"
     bl_label = "Import .3di"
-    bl_description = "Read NovaLogic .3di models (textures beside them) into new scenes through opennova-3di"
+    bl_description = ("Read NovaLogic .3di models (textures beside them) into the scene through opennova-3di, "
+                      "each under a model root of its own")
     bl_options = {"REGISTER", "UNDO"}
 
     filename_ext = ".3di"
@@ -340,17 +451,25 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] or [self.filepath]
-        imported = []
+        models = []
         for path in paths:
             try:
-                scene, notes = importer.import_file(context, path, self)
+                model, notes = importer.import_file(context, path, self)
             except importer.ImportFailed as e:
                 self.report({"ERROR"}, f"{os.path.basename(path)}: {e}")
                 return {"CANCELLED"}
             for note in notes:
                 self.report({"WARNING"}, f"{os.path.basename(path)}: {note}")
-            imported.append(scene.name)
-        self.report({"INFO"}, "imported " + ", ".join(imported))
+            models.append(model)
+        # Models imported together that the game draws together: a skinned
+        # model whose bones are another's parts (arms on a first-person gun).
+        pairs = assembly.pair_imported(context, models)
+        for ob in context.selected_objects:
+            ob.select_set(False)
+        models[-1].select_set(True)
+        context.view_layer.objects.active = models[-1]
+        self.report({"INFO"}, "imported " + ", ".join(m.name for m in models) +
+                    "".join(f"; {skin.name} follows {rig.name}" for skin, rig in pairs))
         return {"FINISHED"}
 
 
@@ -367,17 +486,36 @@ class O3D_PT_scene(bpy.types.Panel):
     def draw(self, context):
         p = context.scene.o3d
         col = self.layout.column()
-        col.operator("opennova_3di.import_3di", icon="IMPORT")
+        row = col.row()
+        row.operator("opennova_3di.import_3di", icon="IMPORT")
+        row.operator("opennova_3di.add_model", icon="ADD")
         col.separator()
-        col.prop(p, "model_name")
-        col.prop(p, "output_path")
         col.prop(p, "forward")
         col.prop(p, "write_textures")
-        col.prop(p, "poly_collision_lod")
         col.prop(p, "cli_path")
         if not p.is_property_set("cli_path") or not p.cli_path:
             col.label(text="Bundled executable (automatic)")
-        col.operator("opennova_3di.export", icon="EXPORT")
+        model = active_model(context)
+        box = col.box()
+        if model is None:
+            box.label(text="No model: select one of its objects")
+        else:
+            box.label(text=f"Model {model.name}", icon="OBJECT_DATA")
+            draw_model(box, model)
+            box.operator("opennova_3di.export", icon="EXPORT")
+        col.operator("opennova_3di.export_all", icon="EXPORT")
+
+
+def draw_model(layout, model):
+    p = model.o3d
+    layout.prop(p, "model_name")
+    layout.prop(p, "output_path")
+    layout.prop(p, "poly_collision_lod")
+    if assembly.armatures(model):
+        layout.prop(p, "drive_rig")
+    layout.prop(p, "mount_parent")
+    if p.mount_parent is not None:
+        layout.prop(p, "mount_point")
 
 
 def draw_style(layout, holder, style_attr, register_attr=None):
@@ -406,29 +544,55 @@ class O3D_PT_object(bpy.types.Panel):
             return
         if ob.type != "EMPTY":
             return
+        if export.is_model_root(ob):
+            draw_model(layout, ob)
+            return
         if "_lod_index" in ob:
             layout.prop(p, "lod_threshold")
             layout.prop(p, "lod_type")
             return
         if not export.PART_RE.match(name):
             return
-        layout.label(text="Part animation (PANM)")
-        layout.prop(p, "panm_flags")
-        for i, t in enumerate(p.tracks):
-            box = layout.box()
-            row = box.row()
-            row.prop(t, "target")
-            row.operator("opennova_3di.remove_track", text="", icon="X").index = i
-            draw_style(box, t, "style", "register")
-            if t.style <= CTRL_REFERENCE_THRESHOLD:
-                box.prop(t, "param")
-            row = box.row()
-            row.prop(t, "rate")
-            row.prop(t, "start")
-            row.prop(t, "end")
-            if t.target == "trans":
-                box.prop(t, "axis")
-        layout.operator("opennova_3di.add_track", icon="ADD")
+        draw_part_animation(layout, p, False)
+
+
+def draw_part_animation(layout, p, bone):
+    layout.label(text="Part animation (PANM)")
+    if bone:
+        layout.prop(p, "frame")
+    layout.prop(p, "panm_flags")
+    for i, t in enumerate(p.tracks):
+        box = layout.box()
+        row = box.row()
+        row.prop(t, "target")
+        op = row.operator("opennova_3di.remove_track", text="", icon="X")
+        op.index = i
+        op.bone = bone
+        draw_style(box, t, "style", "register")
+        if t.style <= CTRL_REFERENCE_THRESHOLD:
+            box.prop(t, "param")
+        row = box.row()
+        row.prop(t, "rate")
+        row.prop(t, "start")
+        row.prop(t, "end")
+        if t.target == "trans":
+            box.prop(t, "axis")
+    layout.operator("opennova_3di.add_track", icon="ADD").bone = bone
+
+
+class O3D_PT_bone(bpy.types.Panel):
+    bl_label = "OpenNova 3DI"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "bone"
+
+    @classmethod
+    def poll(cls, context):
+        return getattr(context, "bone", None) is not None and \
+            export.BONE_RE.match(export.clean_name(context.bone.name)) is not None
+
+    def draw(self, context):
+        draw_part_animation(self.layout, context.bone.o3d, True)
 
 
 class O3D_PT_light(bpy.types.Panel):
@@ -557,15 +721,16 @@ class O3D_PT_material(bpy.types.Panel):
                 row.prop(p, f"{axis}_end")
 
 
-CLASSES = (O3DTrack, O3DObjectProps, O3DTexture, O3DMaterialProps, O3DLightProps, O3DSceneProps,
+CLASSES = (O3DTrack, O3DObjectProps, O3DBoneProps, O3DTexture, O3DMaterialProps, O3DLightProps, O3DSceneProps,
            O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
-           O3D_OT_import, O3D_PT_scene, O3D_PT_object, O3D_PT_light, O3D_PT_material)
+           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_import, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light, O3D_PT_material)
 
 
 def register():
     for c in CLASSES:
         bpy.utils.register_class(c)
     bpy.types.Object.o3d = PointerProperty(type=O3DObjectProps)
+    bpy.types.Bone.o3d = PointerProperty(type=O3DBoneProps)
     bpy.types.Material.o3d = PointerProperty(type=O3DMaterialProps)
     bpy.types.Light.o3d = PointerProperty(type=O3DLightProps)
     bpy.types.Scene.o3d = PointerProperty(type=O3DSceneProps)
@@ -577,6 +742,7 @@ def unregister():
     del bpy.types.Scene.o3d
     del bpy.types.Light.o3d
     del bpy.types.Material.o3d
+    del bpy.types.Bone.o3d
     del bpy.types.Object.o3d
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)

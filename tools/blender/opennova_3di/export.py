@@ -1,16 +1,22 @@
 # Scene -> .o3d text -> opennova-3di.
 #
-# The scene is read by the NovaLogic ASE/OED object-naming convention (the
+# A model is read by the NovaLogic ASE/OED object-naming convention (the
 # retired importer/exporter's, `classify_name` in the retired
 # engine/formats/oed/convert_internal.cpp, a port of [orig: ConvertToInternal
 # @ 0x4268B3]; docs/threedi/scene-naming-contract.md keeps the table):
 #
+#   model root    Empty whose children are the model's LOD roots: one .3di.
+#                 It carries the model name, output path and the collision
+#                 LOD (`poly_collision_lod`, the .3dp setting: the render LOD
+#                 whose meshes also become the bullet faces; 0 = the most
+#                 detailed). A scene holds any number of models (a first-
+#                 person gun and its arms, a hull and its turret); each exports
+#                 in its model root's own frame, so placing or mounting a model
+#                 never changes its bytes.
 #   LOD root      Empty with an integer `_lod_index` custom property (0 = the
 #                 primary LOD) and its threshold and RMDL type (gnrc, bldg,
-#                 door, veh0). The scene's `poly_collision_lod` (the .3dp
-#                 setting) picks which render LOD's meshes also become the
-#                 bullet faces; it defaults to 0, the most detailed. A LOD root
-#                 with no parts is legal (retail ships them).
+#                 door, veh0). A LOD root with no parts is legal (retail ships
+#                 them).
 #   PN##          Empty: part (subobject) ## (1-based). Its origin is the
 #                 pivot unless a `_## center` helper gives one; a rotated PN##
 #                 is a PANM rotation frame (an MTRX row: its tracks turn about
@@ -35,15 +41,18 @@
 #                 texture count).
 #   Armature      a skinned model: one Armature under the LOD root whose
 #                 bones are named BN## (part ##, 1-based; the bone head is the
-#                 pivot, the bone parent the part parent). Its "01 Mesh<n>"
-#                 meshes (the root owns skinned strips) are weighted by BN##
-#                 vertex groups (at most three influences a vertex); strips
-#                 split so no bone table exceeds 16 parts. Each skinned mesh
-#                 is appended as its own part after the bones (parent 0,
-#                 pivot = its origin), as retail's exporter wrote bones then
-#                 mesh objects. Collision: each bone's section carries a hit
-#                 sphere around every vertex it moves, the mesh part's
-#                 section the bullet faces (the retail person layout).
+#                 pivot, the bone parent the part parent). Its "## Mesh<n>"
+#                 meshes are weighted by BN## vertex groups (at most three
+#                 influences a vertex); strips split so no bone table exceeds
+#                 16 parts. Retail keeps every skinned strip on the root ROBJ
+#                 and gives each part the bounds of the geometry authored on
+#                 it; ## names that part: a bone (dM1A1's hull is "01 Mesh0"
+#                 on BN01) or a mesh part numbered after the bones (parent 0,
+#                 pivot = the mesh origin), as retail's exporter wrote bones
+#                 then mesh objects (ArmsG: 37 bones, then "38 Mesh0").
+#                 Collision: each bone's section carries a hit sphere around
+#                 every vertex it moves, a meshed part's section the bullet
+#                 faces (the retail person layout).
 #   !name         ignored.
 # Blender's own `.001` duplicate suffixes are stripped before classification
 # (object names are unique per .blend, so LOD1's PN01 is "PN01.001"); two
@@ -56,7 +65,7 @@ import struct
 import subprocess
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Euler, Matrix, Vector
 
 
 class ExportError(Exception):
@@ -207,8 +216,32 @@ def material_image(mat):
     return None
 
 
+def is_lod_root(ob):
+    return ob.type == "EMPTY" and "_lod_index" in ob
+
+
+def is_model_root(ob):
+    """A model root: the Empty whose children are a model's LOD roots."""
+    return ob.type == "EMPTY" and any(is_lod_root(c) for c in ob.children)
+
+
+def model_roots(scene):
+    return sorted((o for o in scene.objects if is_model_root(o)), key=lambda o: o.name)
+
+
+def model_of(ob):
+    """The model an object belongs to: the nearest model root at or above it."""
+    while ob is not None:
+        if is_model_root(ob):
+            return ob
+        ob = ob.parent
+    return None
+
+
 def descendants(ob):
     for child in ob.children:
+        if is_model_root(child):
+            continue  # another model parented here is its own .3di
         yield child
         yield from descendants(child)
 
@@ -236,12 +269,15 @@ class Lod:
 
 
 class Exporter:
-    def __init__(self, context):
+    def __init__(self, context, model):
         self.context = context
         self.scene = context.scene
-        self.props = self.scene.o3d
-        self.to_mission = axis_map(self.props.forward)
-        self.basis = axis_basis(self.props.forward)
+        self.model = model
+        self.props = model.o3d  # the model's name, output path, collision LOD
+        self.settings = self.scene.o3d  # forward axis, textures, executable
+        self.to_mission = axis_map(self.settings.forward)
+        self.basis = axis_basis(self.settings.forward)
+        self.space = None  # set in run(): the inverse of a moved model root
         self.depsgraph = context.evaluated_depsgraph_get()
         self.registers = []
         self.materials = []
@@ -263,6 +299,12 @@ class Exporter:
     def mission(self, v):
         return self.to_mission(v)
 
+    def world(self, ob):
+        """An object's matrix in the model root's frame, so a model placed,
+        parented or mounted anywhere in the scene exports the same model (a
+        root at the origin reads Blender's world matrices untouched)."""
+        return ob.matrix_world if self.space is None else self.space @ ob.matrix_world
+
     def material_for(self, mat):
         key = mat.name if mat is not None else None
         if key not in self.material_index:
@@ -271,9 +313,14 @@ class Exporter:
         return self.material_index[key]
 
     def frame_index(self, ob):
-        """The MTRX row a rotated PN## selects: its world rotation as a mission
-        frame R (row-major, p' = p R); 0 for an unrotated part."""
-        q = self.basis.transposed() @ ob.matrix_world.to_3x3().normalized() @ self.basis
+        """The MTRX row a rotated PN## selects: its rotation in the model."""
+        return self.frame_of(self.world(ob).to_3x3().normalized())
+
+    def frame_of(self, rotation):
+        """The MTRX row of a part frame given as a Blender rotation in the
+        model: that rotation as a mission frame R (row-major, p' = p R); 0 for
+        the identity."""
+        q = self.basis.transposed() @ rotation @ self.basis
         if all(abs(q[i][j] - (1.0 if i == j else 0.0)) < 1e-6 for i in range(3) for j in range(3)):
             return 0
         r = tuple(round(q[j][i], 6) for i in range(3) for j in range(3))
@@ -283,18 +330,20 @@ class Exporter:
 
     # --- classification -----------------------------------------------------
     def lod_roots(self):
-        roots = [o for o in self.scene.objects if o.type == "EMPTY" and "_lod_index" in o]
+        roots = [o for o in self.model.children if is_lod_root(o)]
         by_index = {}
         for o in roots:
             i = int(o["_lod_index"])
             if i in by_index:
-                raise ExportError(f"two LOD roots carry _lod_index {i}: {by_index[i].name}, {o.name}")
+                raise ExportError(f"{self.model.name}: two LOD roots carry _lod_index {i}: {by_index[i].name}, "
+                                  f"{o.name}")
             by_index[i] = o
         if 0 not in by_index:
-            raise ExportError("no LOD root: add an Empty with the custom property _lod_index = 0 above PN01")
+            raise ExportError(f"{self.model.name}: no LOD root: add an Empty with the custom property "
+                              "_lod_index = 0 under the model root, above PN01")
         order = sorted(by_index)
         if order != list(range(len(order))):
-            raise ExportError(f"_lod_index values are not contiguous from 0: {order}")
+            raise ExportError(f"{self.model.name}: _lod_index values are not contiguous from 0: {order}")
         return [by_index[i] for i in order]
 
     def classify(self, root, primary):
@@ -405,21 +454,22 @@ class Exporter:
         if missing:
             raise ExportError(f"{root.name}: parts are not contiguous from PN01 (missing PN{missing[0]:02d})")
         if lod.armature is not None:
-            # A skinned mesh is "01 Mesh<n>" (the root owns its strips). Each
-            # one becomes its own part after the bones, as the retail
-            # exporter wrote bones first and mesh objects after them: parent
-            # 0, pivot = the mesh object's origin, holding the mesh bounds
-            # and bullet faces (ArmsG: 37 bones + part 37; FSldr03: 19 + 19).
-            if any(index != 0 for index in lod.meshes):
-                raise ExportError(f"{root.name}: a skinned mesh is named '01 Mesh<n>' (the root part)")
+            # A skinned mesh "## Mesh<n>" authors its strips on part ##. The
+            # builder moves every strip to the root ROBJ, as retail stores
+            # them, and leaves each part the bounds of what is authored on it.
+            # ## is a bone (dM1A1's hull: "01 Mesh0" on BN01, no mesh part) or
+            # a mesh part after the bones: parent 0, pivot = the first mesh's
+            # origin, as the retail exporter wrote bones first and mesh
+            # objects after them (ArmsG: 37 bones + part 37; FSldr03: 19 + 19).
             lod.bone_count = len(lod.parts)
-            skins = sorted(lod.meshes.get(0, []), key=lambda e: e[0])
-            if not skins:
-                raise ExportError(f"{root.name}: no '01 Mesh<n>' skinned mesh")
-            lod.meshes = {}
-            for k, (ordinal, ob) in enumerate(skins):
-                lod.parts[lod.bone_count + k] = ob
-                lod.meshes[lod.bone_count + k] = [(ordinal, ob)]
+            if not lod.meshes:
+                raise ExportError(f"{root.name}: no '## Mesh<n>' skinned mesh")
+            extra = sorted(i for i in lod.meshes if i >= lod.bone_count)
+            if extra != list(range(lod.bone_count, lod.bone_count + len(extra))):
+                raise ExportError(f"{root.name}: a skinned mesh names a bone (BN01..BN{lod.bone_count:02d}) or a "
+                                  f"mesh part numbered on from {lod.bone_count + 1:02d} without gaps")
+            for index in extra:
+                lod.parts[index] = min(lod.meshes[index], key=lambda e: e[0])[1]
             return lod
         for index, meshes in lod.meshes.items():
             if index not in lod.parts:
@@ -457,10 +507,10 @@ class Exporter:
     def part_pivot(self, lod, index):
         if lod.armature is not None:
             if index >= lod.bone_count:
-                return self.mission(lod.parts[index].matrix_world.translation)
-            return self.mission(lod.armature.matrix_world @ lod.parts[index].head_local)
+                return self.mission(self.world(lod.parts[index]).translation)
+            return self.mission(self.world(lod.armature) @ lod.parts[index].head_local)
         ob = lod.centers.get(index, lod.parts[index])
-        return self.mission(ob.matrix_world.translation)
+        return self.mission(self.world(ob).translation)
 
     # --- geometry -----------------------------------------------------------
     def uv_layers(self, mesh):
@@ -487,7 +537,7 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = ob.matrix_world
+            mw = self.world(ob)
             nmat = mw.to_3x3().inverted_safe().transposed()
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
@@ -521,7 +571,7 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = ob.matrix_world
+            mw = self.world(ob)
             nmat = mw.to_3x3().inverted_safe().transposed()
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
@@ -531,7 +581,14 @@ class Exporter:
                 w = sorted(((g.weight, groups[g.group]) for g in v.groups if g.group in groups and g.weight > 1e-4),
                            reverse=True)[:3]
                 if not w:
-                    raise ExportError(f"{ob.name}: vertex {v.index} has no BN## weight")
+                    member = [groups[g.group] for g in v.groups if g.group in groups]
+                    if not member:
+                        raise ExportError(f"{ob.name}: vertex {v.index} has no BN## weight")
+                    # Only weight-0 memberships: every weight stays zero, as
+                    # retail stores some (dM1A1's LOD 3); the vertex moves
+                    # with no bone of its own.
+                    influences.append([(member[0], 0.0)])
+                    continue
                 total = sum(x for x, _ in w)
                 influences.append([(b, x / total) for x, b in w])
                 if collect_bones:
@@ -600,15 +657,19 @@ class Exporter:
                     lines.append(f"t {t[0]} {t[1]} {t[2]}")
         for i in range(count):
             part = lod.parts[i]
-            tracks = [(t.target, t.style, int(t.axis) if t.target == "trans" else 0) for t in part.o3d.tracks]
-            flags = part.o3d.panm_flags if part.o3d.panm_flags >= 0 else derived_panm_flags(tracks)
-            frame = self.frame_index(part)
-            line = f"panm {i} {self.part_parent(lod, i)}"
-            if part.o3d.panm_flags >= 0 or frame:
-                line += f" 0x{flags:08x}" + (f" {frame}" if frame else "")
-            lines.append(line)
-            for t in part.o3d.tracks:
-                lines.append(self.track_line(t))
+            self.emit_panm(lod, i, part.o3d, self.frame_index(part), lines)
+
+    def emit_panm(self, lod, i, p, frame, lines):
+        """A part's PANM row: its flags (derived from the tracks unless set),
+        MTRX frame and tracks, from an empty's or a bone's part animation."""
+        tracks = [(t.target, t.style, int(t.axis) if t.target == "trans" else 0) for t in p.tracks]
+        flags = p.panm_flags if p.panm_flags >= 0 else derived_panm_flags(tracks)
+        line = f"panm {i} {self.part_parent(lod, i)}"
+        if p.panm_flags >= 0 or frame:
+            line += f" 0x{flags:08x}" + (f" {frame}" if frame else "")
+        lines.append(line)
+        for t in p.tracks:
+            lines.append(self.track_line(t))
 
     def emit_skinned_lod(self, lod, lines):
         p = lod.root.o3d
@@ -633,8 +694,16 @@ class Exporter:
                                      " " + fmt(*(float(x) for x in v[uv_end + 3:uv_end + 6])))
                     for t in s["tris"]:
                         lines.append(f"t {t[0]} {t[1]} {t[2]}")
+        # A bone's part animation lives on the bone (its tracks turn about
+        # its track frame, a rotation of the model's axes: dM1A1's turret
+        # ring and wheels); a mesh part has none.
+        arm = self.world(lod.armature).to_3x3().normalized()
         for i in range(count):
-            lines.append(f"panm {i} {self.part_parent(lod, i)}")
+            if i < lod.bone_count:
+                p = lod.parts[i].o3d
+                self.emit_panm(lod, i, p, self.frame_of(arm @ Euler(p.frame).to_matrix()), lines)
+            else:
+                lines.append(f"panm {i} {self.part_parent(lod, i)}")
 
     def track_line(self, t):
         style = t.style
@@ -738,8 +807,8 @@ class Exporter:
     def emit_points(self, lod, lines):
         # USRP order: each helper's `order` (the imported index), then name.
         for letter, part, label, ob in sorted(lod.points, key=lambda e: order_key(e[3])):
-            pos = self.mission(ob.matrix_world.translation)
-            d = self.mission((ob.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
+            pos = self.mission(self.world(ob).translation)
+            d = self.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
             lines.append(f"userpoint {quoted(label)} {fmt(*pos)} {fmt(*d)} {part} {ord(letter.upper())}")
 
     def emit_lights(self, lod, count, lines):
@@ -750,7 +819,7 @@ class Exporter:
             spot = data.type == "SPOT"
             if data.type not in ("POINT", "SPOT"):
                 raise ExportError(f"{ob.name}: a light is a point or spot light")
-            pos = self.mission(ob.matrix_world.translation)
+            pos = self.mission(self.world(ob).translation)
             phase = str(self.register(p.register)) if p.style > CTRL_REFERENCE_THRESHOLD else fmt(float(p.phase))
             s = [round(c * 255) for c in data.color]
             e = [round(c * 255) for c in p.color_end]
@@ -760,7 +829,7 @@ class Exporter:
                     f"{fmt(float(p.rate))} {phase} {s[0]} {s[1]} {s[2]} {e[0]} {e[1]} {e[2]} 0x{flags:02x}")
             # The light's local +Z is its stored axis; an omni light pointing
             # straight down is the retail default the builder writes itself.
-            d = self.mission((ob.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
+            d = self.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
             falloff = math.degrees(data.spot_size) / 2.0 if spot else 0.0
             if spot or abs(d[0]) > 1e-6 or abs(d[1]) > 1e-6 or d[2] > -1.0 + 1e-9:
                 line += " " + fmt(*d, float(falloff))
@@ -774,7 +843,7 @@ class Exporter:
                 if len(mesh.vertices) > 128:
                     raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
                 lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
-                mw = ob.matrix_world
+                mw = self.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for v in mesh.vertices:
                     lines.append("ov " + fmt(*self.mission(mw @ v.co)))
@@ -798,7 +867,7 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = ob.matrix_world
+            mw = self.world(ob)
             mirrored = mw.to_3x3().determinant() < 0
             verts = [self.mission(mw @ v.co) for v in mesh.vertices]
             tris = [tuple(reversed(t.vertices)) if mirrored else tuple(t.vertices) for t in mesh.loop_triangles]
@@ -833,7 +902,7 @@ class Exporter:
                 mesh = ev.to_mesh()
                 try:
                     mesh.calc_loop_triangles()
-                    mw = ob.matrix_world
+                    mw = self.world(ob)
                     mirrored = mw.to_3x3().determinant() < 0
                     for tri in mesh.loop_triangles:
                         corners = []
@@ -889,18 +958,22 @@ class Exporter:
 
     # --- driver -------------------------------------------------------------
     def run(self):
+        model = self.model.name
         out_path = bpy.path.abspath(self.props.output_path)
         if not out_path.lower().endswith(".3di"):
-            raise ExportError("the output path must end in .3di")
+            raise ExportError(f"{model}: the output path must end in .3di")
         if not os.path.isabs(out_path):
-            raise ExportError("save the .blend first or give an absolute output path (a '//' path is relative "
-                              "to the saved file)")
+            raise ExportError(f"{model}: save the .blend first or give an absolute output path (a '//' path is "
+                              "relative to the saved file)")
         out_dir = os.path.dirname(out_path)
         os.makedirs(out_dir, exist_ok=True)
         name = self.props.model_name.strip() or os.path.splitext(os.path.basename(out_path))[0]
         if len(name) > 15:
-            raise ExportError("the model name exceeds 15 characters")
+            raise ExportError(f"{model}: the model name exceeds 15 characters")
         self.context.view_layer.update()
+        root = self.model.matrix_world
+        if root != Matrix.Identity(4):
+            self.space = root.inverted_safe()
         roots = self.lod_roots()
         lods = [self.classify(r, i == 0) for i, r in enumerate(roots)]
         self.lod0 = lods[0]
@@ -908,7 +981,7 @@ class Exporter:
             raise ExportError(f"{roots[0].name}: LOD 0 has no parts")
         self.skinned = lods[0].armature is not None
         if any(l.parts and (l.armature is not None) != self.skinned for l in lods):
-            raise ExportError("every LOD of a skinned model needs its BN## armature")
+            raise ExportError(f"{model}: every LOD of a skinned model needs its BN## armature")
         self.uv1 = any(len(ob.data.uv_layers) > 1 for l in lods for meshes in l.meshes.values() for _, ob in meshes)
         # Skinned meshes are read in the armature's rest pose (the bind pose
         # the vertices are stored in); the scene's pose is restored after.
@@ -957,11 +1030,11 @@ class Exporter:
         with open(o3d_path, "w", newline="\n") as f:
             f.write("\n".join(text) + "\n")
 
-        if self.props.write_textures:
+        if self.settings.write_textures:
             for tex_name, image in self.textures.items():
                 write_tga(image, os.path.join(out_dir, tex_name))
 
-        cli = bpy.path.abspath(self.props.cli_path) if self.props.cli_path else os.path.join(
+        cli = bpy.path.abspath(self.settings.cli_path) if self.settings.cli_path else os.path.join(
             os.path.dirname(__file__), "bin", "opennova-3di.exe")
         if not os.path.isfile(cli):
             raise ExportError(f"opennova-3di not found at {cli}")
@@ -976,6 +1049,6 @@ class Exporter:
         return message, notes
 
 
-def export_scene(context):
-    """Export the scene; returns the summary line and the builder's notes."""
-    return Exporter(context).run()
+def export_model(context, model):
+    """Export one model root; returns the summary line and the builder's notes."""
+    return Exporter(context, model).run()

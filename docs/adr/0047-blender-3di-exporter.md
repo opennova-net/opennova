@@ -53,9 +53,11 @@ language's copy of the format, drifts.
    `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`,
    `Material_<i>_<SHADER>`, a `BN##` armature for a skinned model; the table in
    `docs/threedi/scene-naming-contract.md`) and writes `.o3d`. Import runs
-   `opennova-3di scene` and lays the `.o3d` out by the same convention, one
-   Blender scene per model, textures from the files `scene` resolved; an
-   imported model exports again. Blender's `.001` duplicate suffixes are
+   `opennova-3di scene` and lays the `.o3d` out by the same convention, each
+   model under a model root Empty in the current scene (its model name, output
+   path and collision LOD), textures from the files `scene` resolved; an
+   imported model exports again. A scene holds any number of models, and each
+   exports in its model root's own frame. Blender's `.001` duplicate suffixes are
    stripped before classification; two objects with one identity inside a LOD
    are an error. What a name cannot carry (LOD thresholds and types, PANM
    tracks, material flags, textures and generators, light generators, export
@@ -98,13 +100,20 @@ language's copy of the format, drifts.
    from the stored (quantized) positions so `build(scene(x))` stays exact.
 5. **Skinned models follow the retail corpus.** The parts are the armature's
    bones (hierarchy and pivots, which retail animations pair with by index),
-   then one part per skinned mesh (`01 Mesh<n>`; parent 0, pivot = the mesh
-   object's origin) as the retail exporter wrote bones then mesh objects
-   (FSldr03: 19 bones + part 19; ArmsG: 37 bones + part 37);
-   vertices store the bind pose with up to three weights; strips split so no
-   bone table exceeds 16 parts; and every strip is owned by the root ROBJ while
-   each part keeps the bounds of its own geometry (all 30 surveyed JO
-   mesh_type-2 models, e.g. FSldr03). The builder applies that layout.
+   then any mesh parts, as the retail exporter wrote bones then mesh objects
+   (FSldr03: 19 bones + part 19; ArmsG: 37 bones + part 37). A skinned mesh
+   `## Mesh<n>` names the part its geometry is authored on: a bone, or a mesh
+   part after the bones (parent 0, pivot = the mesh object's origin). A model
+   without a mesh part (dM1A1's hull) authors its geometry on the bones, and
+   import restores that per part for the collision LOD, whose triangles are
+   exactly the sections' bullet faces (dM1A1: LOD 1, 875 hull faces and 40 per
+   wheel). A bone carries its part's PANM tracks, flags and track frame
+   (dM1A1's turret ring and wheels). Vertices store the bind pose with up to
+   three weights; a vertex whose stored weights are all zero keeps them.
+   Strips split so no bone table exceeds 16 parts, and every strip is owned by
+   the root ROBJ while each part keeps the bounds of its own geometry (all 30
+   surveyed JO mesh_type-2 models, e.g. FSldr03). The builder applies that
+   layout.
 6. **Lights and occlusion follow the retired OED exporter.** A light is `LP##`
    (`##` the owning part); an omni light keeps retail's default axis (straight
    down, no cone) and a spot light's axis and cone come from the light object,
@@ -125,7 +134,19 @@ language's copy of the format, drifts.
    product module; it links nothing native and ships no FFI, and it keeps no
    copy of engine tables (registers, style names and shader tags with their
    capability words come from `catalog`).
-9. **Standing from ADR 0038.** No other Python product code, Qt importer, or
+9. **Assemblies are display only.** Models the game draws together share a
+   scene, and the add-on reproduces how the game combines them without
+   writing any of it. The bones of a skinned model follow another model's
+   parts of the same index, as retail draws first-person arms with the gun's
+   part matrices [orig: Player_RenderFirstPersonViewModel @ 0x4ded60;
+   Entity_BuildBoneWorldMatrices @ 0x4df028]. Importing both together pairs
+   them. A model mounts on another model's user point, as an ITEMS.DEF
+   `addeweap` child does: the name is matched whole, without case, and a
+   missing name places the child at the parent's root. The child faces the
+   point's direction [orig: build_bone_attachment_matrix @ 0x56C630;
+   build_direction_look_at_matrix @ 0x612C90]. Export reads skinned meshes
+   in their rest pose and every model in its own root's frame.
+10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
    `scripts/mcp`, `scripts/ci` and `tools/net` scripts remain); no native
    ASE/TDP/OED modules; ADM and BAD stay read-only runtime formats; Godot
@@ -191,6 +212,15 @@ language's copy of the format, drifts.
   weights, bone assignments, collision and occlusion faces, undeclared track
   and flipbook registers, and overflowing PANM and collision indices. Reordered
   bone tables, register tables and triangle corners remain equivalent.
+- Assemblies (2026-09-24, headless Blender 5.1): 357_1st, ArmsG, dM1A1 and
+  m1trret imported as one batch share a scene, and ArmsG pairs with 357_1st.
+  Posing the gun's parts keeps each arm bone on its part, and posed arms
+  still export their rest pose. m1trret mounted on dM1A1's `ewep01` sits on
+  the point, follows the moved hull and exports the same model. Every model
+  at its root exports byte for byte as before. dM1A1 exports (it had failed
+  with a missing `PN01`), with its PANM tracks, per-wheel bullet faces and
+  zero weights; like Armry01, it retains zero-normal and bullet-face normal
+  differences.
 - A model exported by the packaged add-on loaded, rendered and flew in retail
   Joint Operations (2026-09-23, an F-16 on `cpln`); a skinned soldier on the
   retail person rig rendered and animated in retail with `anim_def US01`, and

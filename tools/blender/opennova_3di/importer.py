@@ -394,6 +394,12 @@ class Builder:
                 if skinned:
                     infl = tuple(sorted((s["bones"][b], round(w, 5)) for b, w in zip(v["bi"], v["bw"])
                                         if w > 0 and b < len(s["bones"])))
+                    if not infl and v["bi"] and v["bi"][0] < len(s["bones"]):
+                        # Every weight zero (dM1A1's LOD 3; the renderer
+                        # draws such a vertex wholly on its slot 0 bone,
+                        # runtime/renderer/model_mesh_prepare.cpp): a weight 0
+                        # membership of that bone, which export writes back.
+                        infl = ((s["bones"][v["bi"][0]], 0.0),)
                     key += (infl,)
                 if key not in index:
                     index[key] = len(verts)
@@ -438,10 +444,16 @@ class Builder:
         self.collection = bpy.data.collections.new(sc["name"])
         scene.collection.children.link(self.collection)
         mats = self.materials()
+        # The model root: one .3di, its LOD roots below it. It holds the
+        # model's own settings, so several models share a scene.
+        self.model = self.empty(sc["name"], size=1.0, display="CUBE")
+        self.model.o3d.model_name = sc["name"]
+        self.model.o3d.output_path = f"//{sc['name']}.3di"
         lod_objects = []
         self.lod0_parts = {}
+        self.split = self.skinned_split() if sc["skinned"] else None
         for li, lod in enumerate(sc["lods"]):
-            root = self.empty(f"{sc['name']}_LOD{li}", size=0.5, display="ARROWS")
+            root = self.empty(f"{sc['name']}_LOD{li}", self.model, size=0.5, display="ARROWS")
             root["_lod_index"] = li
             root.o3d.lod_threshold = lod["threshold"]
             root.o3d.lod_type = lod["type"]
@@ -463,7 +475,6 @@ class Builder:
         self.bullet_lod(mats)
         if sc["skinned"] and sc["cobjs"]:
             self.note("skin weights are normalized on export and skinned hit spheres are regenerated from them")
-        scene.o3d.model_name = sc["name"]
         vl = scene.view_layers[0]
         for li, objs in enumerate(lod_objects):
             if li > 0:
@@ -504,7 +515,7 @@ class Builder:
             parts.append(ob)
             objs.append(ob)
             if row is not None:
-                self.tracks(ob, row, lod)
+                self.tracks(ob.o3d, row, lod)
             if part["strips"]:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh0", part["strips"], pivot, mats, False)
                 mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
@@ -522,8 +533,9 @@ class Builder:
             self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
         return objs
 
-    def tracks(self, ob, row, lod):
-        p = ob.o3d
+    def tracks(self, p, row, lod):
+        """A PANM row's flags and tracks onto a part's animation (an empty's
+        or a bone's o3d)."""
         axis_default = (row["flags"] or 0) >> 24 & 0xFF
         derived = export.derived_panm_flags([(t[0], t[1], (t[6] or axis_default or 3) if t[0] == "trans" else 0)
                                              for t in row["tracks"]])
@@ -549,8 +561,13 @@ class Builder:
 
     def skinned_lod(self, li, lod, root, mats):
         objs = []
-        bone_parts = [pi for pi, p in enumerate(lod["parts"]) if not p["strips"]]
-        mesh_parts = [pi for pi, p in enumerate(lod["parts"]) if p["strips"]]
+        # The mesh parts are the parts `scene` authored strips on that no
+        # bone table names (ArmsG part 37); every other part is a bone, the
+        # root among them, and strips `scene` kept on a bone stay on it
+        # (dM1A1's hull, which has no mesh part, on BN01).
+        named = {b for p in lod["parts"] for s in p["strips"] for b in s["bones"]}
+        mesh_parts = [pi for pi, p in enumerate(lod["parts"]) if pi > 0 and p["strips"] and pi not in named]
+        bone_parts = [pi for pi in range(len(lod["parts"])) if pi not in mesh_parts]
         if bone_parts != list(range(len(bone_parts))):
             self.note(f"LOD {li}: the mesh parts are not the last parts; export renumbers them after the bones")
         arm = bpy.data.armatures.new(f"{self.sc['name']}_Rig{li}")
@@ -581,11 +598,33 @@ class Builder:
                 if parent != pi and parent in bones:
                     b.parent = bones[parent]
             bpy.ops.object.mode_set(mode="OBJECT")
-        for k, pi in enumerate(mesh_parts):
+        # Each bone's part animation: its tracks, flags and track frame.
+        rows = {p["part"]: p for p in lod["panm"]}
+        for pi in bone_parts:
+            row = rows.get(pi)
+            if row is None:
+                continue
+            p = arm.bones[f"BN{pi + 1:02d}"].o3d
+            p.frame = self.frame_rotation(row["matrix"]).to_euler()
+            self.tracks(p, row, lod)
+        authored = {}
+        for pi, part in enumerate(lod["parts"]):
+            for s in part["strips"]:
+                if self.split is not None and self.split[0] == li:
+                    # The collision LOD of a model without a mesh part: each
+                    # triangle back on the part whose section holds it.
+                    by_part = {}
+                    for ti, tri in enumerate(s["tris"]):
+                        by_part.setdefault(self.split[1][(id(s), ti)], []).append(tri)
+                    for owner, tris in by_part.items():
+                        authored.setdefault(owner, []).append(sub_strip(s, tris))
+                else:
+                    authored.setdefault(pi, []).append(s)
+        for pi, strips in sorted(authored.items()):
             part = lod["parts"][pi]
             pivot = self.blender(part["pivot"])
-            me, weights = self.mesh(f"01 Mesh{k}", part["strips"], pivot, mats, True)
-            mob = bpy.data.objects.new(f"01 Mesh{k}", me)
+            me, weights = self.mesh(f"{pi + 1:02d} Mesh0", strips, pivot, mats, True)
+            mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
             self.link(mob, arm_ob, Matrix.Translation(pivot), self.world[arm_ob.name])
             groups = {}
             for vi, infl in enumerate(weights):
@@ -600,6 +639,46 @@ class Builder:
         if li == 0:
             self.lod0_parts = {pi: arm_ob for pi in range(len(lod["parts"]))}
         return objs
+
+    def skinned_split(self):
+        """A skinned model with no mesh part keeps every strip on the root
+        (dM1A1's hull), yet each part was authored with geometry of its own:
+        the collision LOD's triangles are exactly the bullet faces of the
+        sections, one section per part (dM1A1: LOD 1, 875 hull faces and 40
+        a wheel). Returns (that LOD, {(strip id, triangle): part}) matched by
+        centroid, or None when no LOD's triangles are the bullet faces."""
+        cobjs = self.sc["cobjs"]
+        total = sum(len(c["faces"]) for c in cobjs)
+        if not total or len(cobjs) < 2:
+            return None
+        buckets = {}
+        for si, c in enumerate(cobjs):
+            for a, b, cc, _, _ in c["faces"]:
+                centre = centroid([c["verts"][x] for x in (a, b, cc)])
+                buckets.setdefault(tuple(round(x, 1) for x in centre), []).append((centre, si))
+        for li, lod in enumerate(self.sc["lods"]):
+            strips = [s for p in lod["parts"] for s in p["strips"]]
+            if len(lod["parts"]) != len(cobjs) or any(p["strips"] for p in lod["parts"][1:]) or \
+                    sum(len(s["tris"]) for s in strips) != total:
+                continue
+            owners = {}
+            for s in strips:
+                for ti, tri in enumerate(s["tris"]):
+                    centre = centroid([s["verts"][x]["p"] for x in tri])
+                    key = tuple(round(x, 1) for x in centre)
+                    near = [e for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+                            for e in buckets.get((round(key[0] + dx / 10, 1), round(key[1] + dy / 10, 1),
+                                                  round(key[2] + dz / 10, 1)), [])]
+                    best = min(near, key=lambda e: sum((e[0][k] - centre[k]) ** 2 for k in range(3)), default=None)
+                    if best is None or sum((best[0][k] - centre[k]) ** 2 for k in range(3)) > 0.05 ** 2:
+                        break
+                    owners[(id(s), ti)] = best[1]
+                else:
+                    continue
+                break
+            else:
+                return li, owners
+        return None
 
     # --- points, lights, occlusion, collision ---------------------------------
     def owner(self, part, lod_objects):
@@ -739,32 +818,36 @@ class Builder:
             return
         self.note("bullet faces are rebuilt from the collision LOD's triangles on export; their stored normals are "
                   "not kept")
-        chosen = None
+        chosen = self.split[0] if self.split is not None else None
         for li, lod in enumerate(self.sc["lods"]):
-            if len(lod["parts"]) != len(counts):
+            if chosen is not None or len(lod["parts"]) != len(counts):
                 continue
             if [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]] == counts:
                 chosen = li
                 break
         if chosen is None:
             self.note("the bullet faces match no render LOD; export derives them from LOD "
-                      f"{self.scene.o3d.poly_collision_lod}")
+                      f"{self.model.o3d.poly_collision_lod}")
             return
-        self.scene.o3d.poly_collision_lod = chosen
+        self.model.o3d.poly_collision_lod = chosen
         votes = {}
         lod = self.sc["lods"][chosen]
+        section_tris = {}
+        for pi, part in enumerate(lod["parts"]):
+            for s in part["strips"]:
+                for ti, tri in enumerate(s["tris"]):
+                    si = self.split[1][(id(s), ti)] if self.split is not None else pi
+                    section_tris.setdefault(si, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
         for si, c in enumerate(self.sc["cobjs"]):
             by_centre = {}
             for a, b, cc, poly, flags in c["faces"]:
                 p = [c["verts"][x] for x in (a, b, cc)]
                 by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
-            for s in lod["parts"][si]["strips"]:
-                for tri in s["tris"]:
-                    p = [s["verts"][x]["p"] for x in tri]
-                    key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
-                    if key in by_centre:
-                        votes.setdefault(s["material"], {}).setdefault(by_centre[key], 0)
-                        votes[s["material"]][by_centre[key]] += 1
+            for material, p in section_tris.get(si, []):
+                key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
+                if key in by_centre:
+                    votes.setdefault(material, {}).setdefault(by_centre[key], 0)
+                    votes[material][by_centre[key]] += 1
         for mi, v in votes.items():
             if not 0 <= mi < len(mats):
                 continue
@@ -777,6 +860,17 @@ class Builder:
             if bool(flags & 1) != p.two_sided:
                 self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
                           "export takes it from Two sided")
+
+
+def centroid(points):
+    return tuple(sum(p[k] for p in points) / 3.0 for k in range(3))
+
+
+def sub_strip(s, tris):
+    """A strip holding only some of its triangles (and the vertices they use)."""
+    used = sorted({x for t in tris for x in t})
+    remap = {old: new for new, old in enumerate(used)}
+    return dict(s, verts=[s["verts"][i] for i in used], tris=[tuple(remap[x] for x in t) for t in tris])
 
 
 def solve_planes(a, b, c):
@@ -884,15 +978,11 @@ def run_scene(context, path):
     return o3d, notes
 
 
-def import_file(context, path, op=None, new_scene=True):
+def import_file(context, path, op=None):
+    """Import one .3di into the current scene under a model root of its own;
+    returns the model root and the notes."""
     o3d, notes = run_scene(context, path)
     sc = read_o3d(o3d)
-    if new_scene:
-        scene = bpy.data.scenes.new(sc["name"])
-        if context.window is not None:
-            context.window.scene = scene
-    else:
-        scene = context.scene
     builder = Builder(context, sc, path, op)
-    builder.build(scene)
-    return scene, ["not carried: " + n for n in notes] + builder.notes
+    builder.build(context.scene)
+    return builder.model, ["not carried: " + n for n in notes] + builder.notes
