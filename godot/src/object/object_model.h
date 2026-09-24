@@ -388,8 +388,6 @@ private:
 	bool entity_projection_zero_center_ = false;
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
-	String slot_shadow_decal_texture_;
-	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	AvatarPart avatar_part_ = AVATAR_PART_NONE;
 	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
@@ -671,9 +669,9 @@ public:
 	bool is_static_shadow_caster_enabled() const;
 	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
 	// casters are the depth-clip stage's steepened class (that stage owns the
-	// 4x, not the drape — render_slot_shadow.h); vehicles may author an
-	// items.def `shadow` blob decal fallback [orig: itemdef type 3 / the
-	// +0xA0 decal, see docs/render/render-lighting-re.md]. dims = (w, l, ox, oy).
+	// 4x, not the drape — render_slot_shadow.h) [orig: itemdef type 3, see
+	// docs/render/render-lighting-re.md]. The items.def `shadow` decal line is
+	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
@@ -707,9 +705,6 @@ public:
 	ObjectModel *get_entity_light_owner() const;
 	void set_slot_shadow_capture_with(ObjectModel *p_owner);
 	ObjectModel *get_slot_shadow_capture_with() const;
-	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
-	String get_slot_shadow_decal_texture() const;
-	Vector4 get_slot_shadow_decal_dims() const;
 	void update_slot_shadow_group();
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);

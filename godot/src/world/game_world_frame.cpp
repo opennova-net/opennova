@@ -947,9 +947,6 @@ void GameWorld::render_light_frame() {
 		slot_shadow_->set_light_scene(light_director_->scene());
 		slot_shadow_->set_light_context(light_director_->light_gain(),
 				static_cast<int>(get_frame_clock_ms()), weather_);
-		if (resource_root_.is_valid()) {
-			slot_shadow_->set_resource_root(resource_root_);
-		}
 		if (presenter != nullptr) {
 			slot_shadow_->set_local_player_model(presenter->avatar());
 			slot_shadow_->set_local_player_first_person(!presenter->is_third_person());

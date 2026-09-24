@@ -490,8 +490,7 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 	}
 	// Pass 2: bind the leading 24 and hand the first 12 their capture RTs
 	// [orig: @ 0x5d6944..0x5d69ef]; a bound slot with a live silhouette RT
-	// drapes it, a bound slot without one drapes the authored blob
-	// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4].
+	// drapes it [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4].
 	int capture_count = 0;
 	for (size_t rank = 0;
 			rank < scored.size() &&
@@ -530,8 +529,6 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 		if (!assignment.excluded) {
 			assignment.draws_silhouette =
 					scored[rank].state.dynamic && assignment.capture_order >= 0;
-			assignment.draws_blob = !assignment.draws_silhouette &&
-					scored[rank].state.has_blob_texture;
 		}
 	}
 	return out;

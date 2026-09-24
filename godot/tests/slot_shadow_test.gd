@@ -508,13 +508,37 @@ func test_cached_caster_facts_refresh_on_their_setters() -> void:
 	shadow.advance_frame()
 
 
-func test_terrain_material_chains_the_shared_drape_passes() -> void:
+## A bound slot past the 12-capture budget drapes nothing: retail's
+## authored-blob leg (RenderSlot_DrawAuthoredBlobDecal @0x5d59d0) gates on
+## ItemDef+0x114, which JO never assigns, so the drape is the silhouette pass
+## alone.
+func test_terrain_drape_is_the_silhouette_pass_alone() -> void:
 	var drape: ShaderMaterial = SlotShadow.get_drape_material()
 	assert_not_null(drape, "the shared drape material exists")
-	assert_not_null(drape.next_pass,
-			"the authored-blob pass chains behind the silhouette pass")
+	assert_null(drape.next_pass, "no authored-blob pass chains behind the silhouette pass")
 	assert_true(drape.shader.resource_path.ends_with(
 			"slot_shadow_drape.gdshader"))
+
+
+func test_slots_past_the_capture_budget_publish_no_drape() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	for i in range(20):
+		var _model := _caster_at(4.0 + 2.0 * float(i))
+	shadow.advance_frame()
+	var report: Dictionary = shadow.get_report()
+	assert_eq(int(report["bound"]), 20, "all twenty casters bind a drape patch")
+	assert_eq(int(report["captures"]), 12, "only the nearest twelve own an RT")
+	assert_false(report.has("blobs"), "no authored-blob leg is reported")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	var drawn := 0
+	for term in terms:
+		if term.w > 0.5:
+			drawn += 1
+	assert_eq(drawn, 12, "only the twelve RT slots publish a drape term")
 
 
 func _crate_caster(scope: Node3D, at: Vector3) -> ObjectModel:

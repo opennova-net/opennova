@@ -27,7 +27,6 @@ namespace godot {
 class LightScene;
 class MissionEnvironment;
 class ObjectModel;
-class ResourceRoot;
 class TerrainData;
 class Weather;
 
@@ -41,9 +40,9 @@ class Weather;
 // steers each capture along the planner's slot direction (the clamped sun,
 // or the dominant nearby point light), and publishes the drape projection
 // matrices + per-channel shadow terms the terrain drape next-pass multiplies
-// in (godot/shaders/slot_shadow_drape.gdshader). Authored items.def `shadow`
-// blob decals ride a chained second drape pass for bound slots past the
-// capture budget.
+// in (godot/shaders/slot_shadow_drape.gdshader). A bound slot past the
+// capture budget drapes nothing: retail's authored-blob leg for it is dead in
+// JO (render_slot_shadow.h).
 //
 // Device folds (documented on docs/render/render-lighting-re.md): the drape
 // projects per-pixel over the terrain surface, bounded by the retail lod x
@@ -69,8 +68,7 @@ public:
 	// Models flagged as dynamic shadow casters join this group
 	// (ObjectModel::set_shadow_caster_enabled).
 	static const StringName &caster_group();
-	// The shared terrain drape next-pass (silhouette pass chained to the
-	// authored-blob pass). Terrain installs it at build.
+	// The shared terrain drape next-pass. Terrain installs it at build.
 	static Ref<ShaderMaterial> get_drape_material();
 	// The capture texture bound to the drape's u_slot_tex_<order> (a
 	// Texture2DRD over the live device's resolve target; empty of a device
@@ -91,7 +89,6 @@ public:
 	void set_light_scene(const Ref<LightScene> &p_scene);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather);
-	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
 	void set_shadow_detail(int p_detail);
@@ -112,7 +109,7 @@ public:
 	// Membership/derived-fact revision for the caster registry: ObjectModel
 	// bumps it from every site that can change the group population or a
 	// cached per-caster fact (group add/remove incl. husk swap, capture-with,
-	// person, decal, radius stamps, reparenting). The frame rebuilds its
+	// person, radius stamps, reparenting). The frame rebuilds its
 	// records only when this moved; a freed node self-heals through its null
 	// ObjectDB resolve. Main-thread only.
 	static uint64_t caster_group_revision();
@@ -145,11 +142,6 @@ private:
 		// depth clip size from [orig: RenderSlot_RenderEntityAndChildren
 		// @0x5d7835 reads the model's +0x14, not entity+0].
 		float capture_radius = 1.0f;
-		// Cached facts carried over from the caster record (rebuilt on the
-		// group revision, not per frame). The name is copied (a refcounted
-		// String), never a pointer into the rebuildable record vector.
-		bool has_blob_texture = false;
-		String decal_texture;
 	};
 	// The registry row behind CasterInfo: identity plus the derived values a
 	// frame used to re-read from the node every frame. An unstamped model
@@ -161,9 +153,7 @@ private:
 		float slot_radius = 0.0f;
 		bool radius_fallback = false;
 		bool is_person = false;
-		bool has_blob_texture = false;
 		bool seat_parented_ancestor = false;
-		String decal_texture;
 	};
 	void _rebuild_caster_records();
 
@@ -175,7 +165,6 @@ private:
 	void _flush_deferred_frees(bool p_all);
 	void _clear_all_terms();
 	void _invalidate_uniform_stamps();
-	Ref<Texture2D> _blob_texture(const String &p_name);
 	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
 			float p_half_v, float p_far) const;
 
@@ -223,8 +212,6 @@ private:
 	PackedVector4Array last_silhouette_patches_;
 	PackedVector4Array last_clip_u_;
 	PackedVector4Array last_clip_v_;
-	PackedVector4Array last_blob_terms_;
-	PackedVector4Array last_blob_patches_;
 	struct SlotParamStamp {
 		bool valid = false;
 		Projection mat;
@@ -232,9 +219,6 @@ private:
 	};
 	std::array<SlotParamStamp, opennova::renderer::kSlotCaptureCount>
 			drape_mat_stamps_{};
-	std::array<SlotParamStamp, opennova::renderer::kSlotCaptureCount>
-			blob_stamps_{};
-	HashMap<String, Ref<Texture2D>> blob_textures_;
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<opennova::renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
@@ -243,7 +227,6 @@ private:
 	Vector3 light_gain_ = Vector3(1, 1, 1);
 	int light_time_ms_ = 0;
 	ObjectID weather_id_;
-	Ref<ResourceRoot> resource_root_;
 	ObjectID local_player_id_;
 	bool local_first_person_ = true;
 	bool local_prone_ = false;
@@ -253,14 +236,12 @@ private:
 	int shadow_detail_ = 3;
 	uint32_t frame_ = 0;
 	int report_captures_ = 0;
-	int report_blobs_ = 0;
 	int report_bound_ = 0;
 	bool shutdown_ = false;
 	// Latched so a lazily (re)instantiated effect re-applies the F3 timing flag.
 	bool gpu_timing_enabled_ = false;
 
 	static Ref<ShaderMaterial> drape_material_;
-	static Ref<ShaderMaterial> blob_material_;
 	// The depth-clip stage's 32x4 "shadowztex" (opennova::renderer::shadowztex_pixels),
 	// bound once on the shared drape material.
 	static Ref<ImageTexture> shadowztex_;

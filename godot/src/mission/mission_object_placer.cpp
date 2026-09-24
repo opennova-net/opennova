@@ -1516,11 +1516,6 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 					_item_projection_zero_center(p_item_id));
 		}
 	}
-	String decal_texture;
-	Vector4 decal_dims;
-	if (item_db_->get_shadow_decal(p_item_id, decal_texture, decal_dims)) {
-		p_model->set_slot_shadow_decal(decal_texture, decal_dims);
-	}
 	// The static tile pass must ignore the visible model's portal/section
 	// mask; eligible mission entities get independent all-section siblings
 	// after their visible model is built.

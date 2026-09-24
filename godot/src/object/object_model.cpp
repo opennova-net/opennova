@@ -322,23 +322,6 @@ ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
 			ObjectDB::get_instance(slot_shadow_capture_with_));
 }
 
-void ObjectModel::set_slot_shadow_decal(const String &p_texture,
-		const Vector4 &p_dims) {
-	if (slot_shadow_decal_texture_ != p_texture) {
-		SlotShadow::bump_caster_group_revision();
-	}
-	slot_shadow_decal_texture_ = p_texture;
-	slot_shadow_decal_dims_ = p_dims;
-}
-
-String ObjectModel::get_slot_shadow_decal_texture() const {
-	return slot_shadow_decal_texture_;
-}
-
-Vector4 ObjectModel::get_slot_shadow_decal_dims() const {
-	return slot_shadow_decal_dims_;
-}
-
 bool ObjectModel::is_shadow_caster_enabled() const {
 	return (shadow_caster_layers_ & LAYER_DYNAMIC_SHADOW_CASTER) != 0;
 }

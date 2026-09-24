@@ -385,9 +385,8 @@ int main() {
 		CHECK(slot_priority_score(cam, view, distant) != kSlotScoreExcluded);
 	}
 
-	// --- assignment: 24-patch / 12-capture partition, sticky orders,
-	// blob fallback [orig: @ 0x5d68ed..0x5d6a25; RenderSlot_DrawAllDrapes
-	// @ 0x5d6e20].
+	// --- assignment: 24-patch / 12-capture partition, sticky orders
+	// [orig: @ 0x5d68ed..0x5d6a25; RenderSlot_DrawAllDrapes @ 0x5d6e20].
 	{
 		RenderSlotPlan plan;
 		for (uint64_t id = 1; id <= 30; ++id) {
@@ -395,11 +394,10 @@ int main() {
 		}
 		const auto state_for = [](uint64_t id) {
 			SlotCandidateState state;
-			// ids 1..30 at increasing forward distance; id 20 authors a
-			// blob decal; id 29 is seat-parented.
+			// ids 1..30 at increasing forward distance; id 29 is
+			// seat-parented.
 			state.pos2d = {0.0f, static_cast<float>(id) * 2.0f};
 			state.dynamic = true;
-			state.has_blob_texture = id == 20;
 			state.seat_parented = id == 29;
 			return state;
 		};
@@ -408,20 +406,18 @@ int main() {
 		auto out = plan.assign(cam, view, state_for);
 		int bound = 0;
 		int captures = 0;
-		int blobs = 0;
 		for (const auto &a : out) {
 			bound += a.bound ? 1 : 0;
 			captures += a.draws_silhouette ? 1 : 0;
-			blobs += a.draws_blob ? 1 : 0;
 		}
 		CHECK(bound == 24);
 		CHECK(captures == 12);
 		// id 20 ranks 19th: bound to a drape patch but past the 12-capture
-		// budget -> the authored blob drapes in place of a silhouette
-		// [orig: RenderSlot_DrawAllDrapes @ 0x5d6eb6..0x5d6ec4].
-		CHECK(blobs == 1);
+		// budget, so it drapes nothing — the authored-blob leg it would call
+		// is dead in JO [orig: RenderSlot_DrawAllDrapes @ 0x5d6eb6..0x5d6ec4;
+		// RenderSlot_DrawAuthoredBlobDecal @ 0x5d59f4].
 		CHECK(out[19].id == 20 && out[19].bound &&
-				out[19].capture_order == -1 && out[19].draws_blob);
+				out[19].capture_order == -1 && !out[19].draws_silhouette);
 		// The nearest candidate captures at order 0.
 		CHECK(out[0].id == 1 && out[0].capture_order == 0 &&
 				out[0].capture_dirty);

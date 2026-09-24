@@ -5,21 +5,22 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 
 // The render-slot entity ground-shadow drape, as a multiplicative next pass
 // over the hand-lit terrain surface. Retail drapes each bound shadow slot
-// over a 21x21 terrain-following patch: the per-entity silhouette RT is
-// projected along the slot light direction and multiplied into the terrain
-// with the per-channel ambient law and the 40..80 u distance fade — or, for
-// a bound slot without a silhouette RT, the authored items.def `shadow` blob
-// decal, heading-rotated (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
-// RenderSlot_DrawSilhouetteDrape @0x5d5ca0, blob @0x5d59d0 — see
-// docs/render/render-lighting-re.md). The terrain surface itself stands in
-// for the patch mesh; the projection is evaluated per pixel.
+// that owns a silhouette RT over a lod x lod terrain-following patch: the
+// per-entity silhouette RT is projected along the slot light direction and
+// multiplied into the terrain with the per-channel ambient law and the
+// 40..80 u distance fade (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
+// RenderSlot_DrawSilhouetteDrape @0x5d5ca0 — see
+// docs/render/render-lighting-re.md). A bound slot without an RT draws
+// nothing: its authored-blob leg (@0x5d59d0) is dead in JO. The terrain
+// surface itself stands in for the patch mesh; the projection is evaluated
+// per pixel.
 //
 // Per slot i:
 //   u_slot_mat_i : world -> (u, v, depth01) projector matrix
 //   u_slot_term[i] : rgb = the per-channel shadow term
 //                    q_c = sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
 //                    (retail: RenderSlot_DrawSilhouetteDrape @0x5d5f63..0x5d6008);
-//                    a = 0 off, 1 silhouette, 2 authored blob
+//                    a = 0 off, 1 silhouette
 //   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
 //                    as world (min_x, min_z, max_x, max_z) — retail builds a
 //                    (lod+1)^2 terrain-following mesh of side lod = the
@@ -137,25 +138,17 @@ void fragment() {
 			continue;
 		}
 		vec4 s = slot_sample(i, p.xy);
-		if (mode < 1.5) {
-			// Silhouette: retail stage 0 ADDs the black-on-white slot RT RGB
-			// to the faded ambient material; stage 1 ADDs shadowztex, and both
-			// stages saturate. Keeping the resolved/filter RGB is significant:
-			// an alpha-product approximation leaves faint partial-coverage
-			// tails at grazing sun angles (RenderSlot_DrawSilhouetteDrape
-			// @0x5d5ca0).
-			vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
-					dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
-			float ztex = texture(u_shadowztex, zuv).r;
-			vec3 ambient = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb;
-			vec3 shadowed = s.rgb + ambient;
-			factor *= min(vec3(1.0), shadowed + vec3(ztex));
-		} else {
-			// Authored blob decal: retail multiplies the terrain by the
-			// decal texture directly, no distance fade on this leg
-			// (retail: @0x5d59d0 — black-ambient material, src = tex).
-			factor *= mix(vec3(1.0), s.rgb, s.a);
-		}
+		// Retail stage 0 ADDs the black-on-white slot RT RGB to the faded
+		// ambient material; stage 1 ADDs shadowztex, and both stages
+		// saturate. Keeping the resolved/filter RGB is significant: an
+		// alpha-product approximation leaves faint partial-coverage tails at
+		// grazing sun angles (RenderSlot_DrawSilhouetteDrape @0x5d5ca0).
+		vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
+				dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
+		float ztex = texture(u_shadowztex, zuv).r;
+		vec3 ambient = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb;
+		vec3 shadowed = s.rgb + ambient;
+		factor *= min(vec3(1.0), shadowed + vec3(ztex));
 	}
 	// Retail's drape multiplies gamma-space framebuffer bytes directly. Both
 	// the sampled slot textures and scene target stay in that domain here.

@@ -26,14 +26,16 @@
 //      constants belong to the sector-model receiver path, dead in JO behind
 //      the always-zero gate [orig: RenderSlot_SetupNextLighting @ 0x5d7250,
 //      @ 0x5d73d3..0x5d740d; sub_5D7240 @ 0x5d724a];
-//   5. drapes each bound slot over a 21x21 terrain-following patch: the
-//      silhouette projected along the slot direction and multiplied into the
-//      terrain with the per-channel ambient law and the 40..80 u distance
-//      fade — or, for a bound slot without a silhouette RT, the authored
-//      items.def `shadow` blob decal, heading-rotated
-//      [orig: RenderSlot_DrawAllDrapes @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape
-//      (drape) @ 0x5d5ca0 / RenderSlot_DrawAuthoredBlobDecal (authored blob)
-//      @ 0x5d59d0].
+//   5. drapes each bound slot that owns a silhouette RT over a lod x lod
+//      terrain-following patch: the silhouette projected along the slot
+//      direction and multiplied into the terrain with the per-channel ambient
+//      law and the 40..80 u distance fade [orig: RenderSlot_DrawAllDrapes
+//      @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0]. A bound slot
+//      without an RT calls the authored-blob leg, which draws nothing in JO:
+//      it gates on ItemDef+0x114, which JO never assigns (only zeroed, by
+//      Entity_InitAllFromModels) — the items.def `shadow` line is parsed and
+//      unused [orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59f4;
+//      Entity_InitAllFromModels @ 0x40e486].
 //
 // This unit carries every planning/selection/color law as a structural
 // translation; the device half (godot/src) realizes the silhouette capture
@@ -351,7 +353,6 @@ struct SlotCandidateState {
 	bool is_local_player_or_parent = false;  // halves the score [orig: @ 0x5d6864]
 	bool interior = false;
 	bool dynamic = true;           // silhouette-class (person / DynamicShadow)
-	bool has_blob_texture = false; // authored items.def `shadow` decal
 	bool is_person = false;        // itemdef type 3: the depth-clip stage's steepened class
 };
 
@@ -365,9 +366,8 @@ struct SlotAssignment {
 	bool capture_dirty = false;    // RT index changed this frame
 	// Drape classification [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..]:
 	// a bound dynamic slot with an RT drapes its silhouette; a bound slot
-	// without one drapes the authored blob (when the item authors one).
+	// without one draws nothing (the authored-blob leg is dead in JO).
 	bool draws_silhouette = false;
-	bool draws_blob = false;
 	// Excluded from its own slot this frame (seat/vehicle/dead) — the
 	// silhouette-render leg re-checks the same predicates
 	// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d774e..0x5d77b3].
