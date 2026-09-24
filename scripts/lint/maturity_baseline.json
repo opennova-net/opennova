@@ -17,7 +17,11 @@
     "net/npwire/replay/wire_capture.cpp",
     "runtime/assets/asset_store.cpp",
     "runtime/renderer/model_panm_cache.cpp",
-    "runtime/world/entity_index.cpp"
+    "runtime/world/entity_index.cpp",
+    "runtime/world/inspect_markers.cpp",
+    "runtime/world/inspect_local_player.cpp",
+    "runtime/world/collision_debug_rows.cpp",
+    "runtime/inmatch/net_debug_report.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
