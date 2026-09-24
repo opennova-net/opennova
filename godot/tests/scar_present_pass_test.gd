@@ -220,6 +220,37 @@ func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -
 	entities.teardown()
 
 
+func test_every_strip_draws_on_the_scar_rung() -> void:
+	# The scar batches draw in their own frame slot: after the camera-side
+	# opaque wave, before detail foliage pass 1 and the camera-side alpha
+	# flush [orig: Scar_DrawBatches @0x5C9658 between the BySide flush
+	# @0x5C9647 and Foliage_RenderFarPatchesPass(1) @0x5C9665]. Both drawer
+	# states ride the one batch pass.
+	var root := _texture_root(["scorch1.tga", "bhole1.tga"])
+	var entities := _make_presenter(null, root)
+	var draw := _draw_list()
+	_batch(draw, 0xFFFF, 0, 0, false, 1)
+	_batch(draw, 0xFFFF, BHOLE_STRIP, 0, false, 1)
+	entities.present_scar_draw_list(draw)
+	var world := _world_mesh(entities)
+	assert_not_null(world)
+	if world == null or world.mesh == null:
+		entities.teardown()
+		return
+	assert_eq(world.mesh.get_surface_count(), 2)
+	for surface in range(world.mesh.get_surface_count()):
+		var material := world.mesh.surface_get_material(surface) as ShaderMaterial
+		assert_not_null(material)
+		if material != null:
+			assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_SCARS,
+					"surface %d draws on the scar rung" % surface)
+	assert_lt(ObjectShaderCache.RENDER_RUNG_WATER_DECALS, ObjectShaderCache.RENDER_RUNG_SCARS,
+			"scars follow the water pass")
+	assert_lt(ObjectShaderCache.RENDER_RUNG_SCARS, ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE,
+			"scars precede the camera-side alpha")
+	entities.teardown()
+
+
 func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 	# The scorch TGAs are black RGB under an alpha falloff: the mark IS the
 	# SRCALPHA/INVSRCALPHA blend [orig: mode word 0x120651 — blend nibble 1,

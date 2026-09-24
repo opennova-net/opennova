@@ -51,7 +51,9 @@ void VehicleTrailPresenter::sync_water_wakes() {
 		water_material_->set_shader(shader);
 		water_material_->set_shader_parameter("wake_texture", wake);
 		water_material_->set_shader_parameter("gradient_texture", gradient);
-		water_material_->set_render_priority(opennova::renderer::kRungWater + 1);
+		// The wake rings draw inside the water pass, right after the surface
+		// strip (renderer::kRungWaterDecals carries the witness).
+		water_material_->set_render_priority(opennova::renderer::kRungWaterDecals);
 		node = memnew(MeshInstance3D);
 		node->set_name("VehicleWaterWakes");
 		node->set_mesh(water_mesh_);

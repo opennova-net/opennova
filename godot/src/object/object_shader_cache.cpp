@@ -217,16 +217,25 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_MULTIPLICATIVE", static_cast<int64_t>(opennova::renderer::ObjectBlendMode::Multiplicative));
 
 	// The witnessed transparent ordering ladder, single-sourced from
-	// engine/runtime/renderer/render_order (maturity REN-3): sky -> far-water-side
-	// alpha -> water -> camera-side alpha -> overlays -> sun glow
+	// engine/runtime/renderer/render_order (maturity REN-3): sky -> viewmodel ->
+	// far-water-side alpha -> tracers/foliage (far) -> water + decals -> scars
+	// -> foliage (camera) -> camera-side alpha -> tracers (camera) -> sun glow
 	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0;
 	// docs/render/render-order-re.md].
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_STARS", opennova::renderer::kRungSkyStars);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_BODY", opennova::renderer::kRungSkyBody);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_CLOUDS", opennova::renderer::kRungSkyClouds);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_VIEWMODEL", opennova::renderer::kRungViewmodel);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OBJECT_POST_MULTIPLY", opennova::renderer::kRungObjectPostMultiply);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_FAR_SIDE", opennova::renderer::kRungAlphaFarSide);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_TRACER_FAR_SIDE", opennova::renderer::kRungTracerFarSide);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_FAR_SIDE", opennova::renderer::kRungFoliageFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER", opennova::renderer::kRungWater);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER_DECALS", opennova::renderer::kRungWaterDecals);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SCARS", opennova::renderer::kRungScars);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_CAMERA_SIDE", opennova::renderer::kRungFoliageCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_CAMERA_SIDE", opennova::renderer::kRungAlphaCameraSide);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OVERLAY_FX", opennova::renderer::kRungOverlayFx);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_TRACER_CAMERA_SIDE", opennova::renderer::kRungTracerCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SUN_GLOW", opennova::renderer::kRungSunGlow);
 }
 

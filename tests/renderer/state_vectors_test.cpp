@@ -338,9 +338,14 @@ std::string generate() {
 
 	// The ladder itself.
 	std::snprintf(line, sizeof(line),
-	              "ladder stars=%d body=%d far=%d water=%d cam=%d fx=%d glow=%d\n",
-	              kRungSkyStars, kRungSkyBody, kRungAlphaFarSide, kRungWater,
-	              kRungAlphaCameraSide, kRungOverlayFx, kRungSunGlow);
+	              "ladder stars=%d body=%d clouds=%d viewmodel=%d p3=%d far=%d "
+	              "tracer_far=%d foliage_far=%d water=%d decals=%d scars=%d "
+	              "foliage_cam=%d cam=%d tracer_cam=%d glow=%d\n",
+	              kRungSkyStars, kRungSkyBody, kRungSkyClouds, kRungViewmodel,
+	              kRungObjectPostMultiply, kRungAlphaFarSide, kRungTracerFarSide,
+	              kRungFoliageFarSide, kRungWater, kRungWaterDecals, kRungScars,
+	              kRungFoliageCameraSide, kRungAlphaCameraSide,
+	              kRungTracerCameraSide, kRungSunGlow);
 	out << line;
 
 	// Section 4 (REN-4): uv-anim vectors over engine/runtime/renderer/uv_anim — the

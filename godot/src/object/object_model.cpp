@@ -887,8 +887,9 @@ void ObjectModel::refresh_render_order() {
 					? static_cast<float>(get_global_position().y)
 					: static_cast<float>(draw.instance->get_global_transform()
 							.xform(draw.local_center).y);
-			// The viewmodel flushes whole before the sky pass; its depth band
-			// keeps later world alpha off it (renderer/render_order).
+			// The viewmodel flushes whole after the sky pass and before every
+			// world draw; its depth band keeps later world alpha off it
+			// (renderer/render_order).
 			const int32_t rung = viewmodel_pass_
 					? opennova::renderer::kRungViewmodel
 					: shader_cache->alpha_rung_for_height(world_height);
