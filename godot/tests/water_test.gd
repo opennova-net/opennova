@@ -765,6 +765,36 @@ func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
 			"the nightvision redraw still marches")
 
 
+func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below() -> void:
+	# render_main_scene mirrors the camera block only while the camera is at or
+	# above the water (z' = 2wh - z, pitch/roll negated) and copies it
+	# unchanged below (retail render_main_scene @ 0x5c1361..0x5c1370 jl,
+	# @ 0x5c13f6..0x5c1414). Below the plane the collectors run unfiltered.
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	var cam: Camera3D = fixture["camera"]
+	cam.rotation_degrees = Vector3(-20.0, 30.0, 0.0)
+	water.advance_frame(TICK)
+	var mirror: Camera3D = water.get_reflection_camera()
+	assert_almost_eq(mirror.global_position.y, 2.0 * 7.0 - 27.0, 0.0001,
+			"above the plane the eye reflects about the water")
+	assert_almost_eq(mirror.global_basis.z.y, -cam.global_basis.z.y, 0.0001,
+			"the mirrored forward flips its vertical component")
+	assert_eq(mirror.cull_mask, Water.REFLECTION_CULL_MASK)
+
+	cam.global_position = Vector3(100.3, 1.0, -33.7)
+	water.advance_frame(TICK)
+	assert_true(mirror.global_position.is_equal_approx(cam.global_position),
+			"below the plane the reflected scene renders from the live eye")
+	assert_true(mirror.global_basis.is_equal_approx(cam.global_basis),
+			"below the plane the reflected scene keeps the live orientation")
+	assert_eq(mirror.cull_mask,
+			Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+			"below the plane the reflected collectors run unfiltered")
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WATER, 0,
+			"the reflected pass never draws the water layer on either side")
+
+
 func _depth_fixture(camera_position: Vector3, pitch_deg: float) -> Dictionary:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(128, 128)

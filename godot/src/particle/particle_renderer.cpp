@@ -618,6 +618,13 @@ public:
 	float fog_start = 30000.0f;
 	float fog_end = 100000.0f;
 	std::int32_t fog_type = 1;
+	// The water mirror pair's fog: the reflected scene's particle passes run
+	// under the dry weather block whatever the main pass selects
+	// (EnvironmentState::build_water_mirror_fog).
+	std::array<float, 3> mirror_fog_color{0.5f, 0.6f, 0.8f};
+	float mirror_fog_start = 30000.0f;
+	float mirror_fog_end = 100000.0f;
+	std::int32_t mirror_fog_type = 1;
 	// The manager's two per-frame particle tints (retail byte 128 = 1.0):
 	// +0x3E8 = Env_TerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
 	// the modulator block doubled+saturated for the rest
@@ -697,6 +704,10 @@ public:
 		fog_start = 30000.0f;
 		fog_end = 100000.0f;
 		fog_type = 1;
+		mirror_fog_color = fog_color;
+		mirror_fog_start = fog_start;
+		mirror_fog_end = fog_end;
+		mirror_fog_type = fog_type;
 		ambient_tint = {1.0f, 1.0f, 1.0f};
 		modulator_tint = {1.0f, 1.0f, 1.0f};
 		if (env != nullptr) {
@@ -712,6 +723,15 @@ public:
 			fog_end = finite_or(env->get_scene_fog_end(), fog_end);
 			fog_type = std::clamp<std::int32_t>(
 					env->get_scene_fog_type(), 0, 3);
+			const opennova::env::SceneFogValues mirror =
+					env->state().build_water_mirror_fog();
+			if (std::isfinite(mirror.color.r) && std::isfinite(mirror.color.g) &&
+					std::isfinite(mirror.color.b)) {
+				mirror_fog_color = {mirror.color.r, mirror.color.g, mirror.color.b};
+			}
+			mirror_fog_start = finite_or(mirror.start, mirror_fog_start);
+			mirror_fog_end = finite_or(mirror.end, mirror_fog_end);
+			mirror_fog_type = std::clamp<std::int32_t>(mirror.type, 0, 3);
 			auto finite_tint = [](const Vector3 &value, std::array<float, 3> fallback) {
 				if (std::isfinite(value.x) && std::isfinite(value.y) &&
 						std::isfinite(value.z)) {
@@ -1318,10 +1338,12 @@ public:
 			submission->camera_forward[component] =
 					camera_forward[static_cast<int>(component)];
 		}
-		submission->fog_color = fog_color;
-		submission->fog_start = fog_start;
-		submission->fog_end = fog_end;
-		submission->fog_type = fog_type;
+		const bool water_mirror = effect == reflection_effects[0] ||
+				effect == reflection_effects[1];
+		submission->fog_color = water_mirror ? mirror_fog_color : fog_color;
+		submission->fog_start = water_mirror ? mirror_fog_start : fog_start;
+		submission->fog_end = water_mirror ? mirror_fog_end : fog_end;
+		submission->fog_type = water_mirror ? mirror_fog_type : fog_type;
 		if (draw_list.domain != opennova::renderer::ParticleRenderDomain::World) {
 			submission->valid = false;
 			submission->validation_error =
@@ -1838,8 +1860,9 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	};
 
 	if (reflection_camera != nullptr) {
-		// The mirror eye sits across the plane by construction, so its water
-		// selector remains the emitter's main-camera side.
+		// The reflected pass selects its water subsets by the main camera's
+		// side (Water_RenderReflectedWorldScene passes the prerender's
+		// below-water flag), whether its eye is mirrored or not.
 		compile_secondary_pair(particle_camera_frame(reflection_camera),
 				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
 				impl_->reflection_effects);

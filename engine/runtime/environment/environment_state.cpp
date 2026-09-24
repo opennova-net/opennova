@@ -736,6 +736,18 @@ float EnvironmentState::water_murk() const {
 	return config_ != nullptr ? config_->water_murk : 0.8f;
 }
 
+SceneFogValues EnvironmentState::build_water_mirror_fog() const {
+	// Environment_ApplyFogAndAmbient(0, 0): Env_FogBlock under the dry range
+	// and type [orig: @ 0x57e49b..0x57e4db]; the reflected pass never selects
+	// the alternate (thermal) or underwater branch.
+	SceneFogValues fog;
+	fog.color = fog_color();
+	fog.start = fog_start();
+	fog.end = fog_end_distance();
+	fog.type = fog_type();
+	return fog;
+}
+
 SceneFogValues EnvironmentState::build_scene_fog(
 		bool underwater_view) const {
 	SceneFogValues fog;

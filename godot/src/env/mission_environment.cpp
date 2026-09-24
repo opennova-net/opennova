@@ -80,6 +80,10 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_viewmodel_fog_color);
 	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_range"),
 			&MissionEnvironment::get_viewmodel_fog_range);
+	ClassDB::bind_method(D_METHOD("get_water_mirror_fog_color"),
+			&MissionEnvironment::get_water_mirror_fog_color);
+	ClassDB::bind_method(D_METHOD("get_water_mirror_fog_range"),
+			&MissionEnvironment::get_water_mirror_fog_range);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_color"),
 			&MissionEnvironment::get_scene_fog_color);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_end"),
@@ -319,6 +323,7 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	light_state_->publish(values, p_pass_changed);
 	_write_lighting_block_globals(values);
 	_write_viewmodel_fog_globals();
+	_write_water_mirror_fog_globals();
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
@@ -615,6 +620,27 @@ void MissionEnvironment::_write_viewmodel_fog_globals() {
 			to_vector3(fog.color));
 	rs->global_shader_parameter_set("opennova_viewmodel_fog_range",
 			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
+}
+
+void MissionEnvironment::_write_water_mirror_fog_globals() {
+	if (!state_.is_loaded()) {
+		return;
+	}
+	const opennova::env::SceneFogValues fog = state_.build_water_mirror_fog();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_water_mirror_fog_color",
+			to_vector3(fog.color));
+	rs->global_shader_parameter_set("opennova_water_mirror_fog_range",
+			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
+}
+
+Vector3 MissionEnvironment::get_water_mirror_fog_color() const {
+	return to_vector3(state_.build_water_mirror_fog().color);
+}
+
+Vector3 MissionEnvironment::get_water_mirror_fog_range() const {
+	const opennova::env::SceneFogValues fog = state_.build_water_mirror_fog();
+	return Vector3(fog.start, fog.end, static_cast<float>(fog.type));
 }
 
 Vector3 MissionEnvironment::get_viewmodel_fog_color() const {

@@ -23,6 +23,7 @@ bool obj_sky_pass_drawn(uint camera_layers) {
 }
 
 void vertex() {
+	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
 	v_static_point_light_row = INSTANCE_CUSTOM.x;
 	v_raw_uv = UV;
 	v_uv = obj_transform_uv(UV);

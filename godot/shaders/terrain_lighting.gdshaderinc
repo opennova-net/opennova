@@ -77,6 +77,24 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 0.0;
 uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
+// The water mirror pass (the one non-shadow camera whose mask omits the water
+// layer, render/visual_layers.h): the reflected scene fogs with the dry
+// weather block (EnvironmentState::build_water_mirror_fog), keeps the
+// authored stage 3 (the mirror context's below-water word is 0 — retail
+// render_main_scene @ 0x5c153d), and cuts the terrain at wh - 0.05: the GSysClip
+// texgen u = y + 0.45 - (wh - 0.1) under AlphaRef 0x80 (retail
+// render_terrain_sector_batch @ 0x6092c6..0x60935b, plane wh - 0.1 from
+// render_main_scene @ 0x5c1561..0x5c1578, armed while wh != 0).
+global uniform bool opennova_water_active;
+global uniform float opennova_water_height;
+global uniform vec3 opennova_water_mirror_fog_color;
+// (start, end, type)
+global uniform vec3 opennova_water_mirror_fog_range;
+const float TERRAIN_WATER_MIRROR_CLIP_OFFSET = 0.05;
+
+float terrain_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
+	return (!in_shadow_pass && (camera_layers & 1024u) == 0u) ? 1.0 : 0.0;
+}
 
 // --- The terrain leg of the EffectWorld light pool --------------------------
 // Retail re-draws each terrain batch once more PER pool light (the first
@@ -188,7 +206,7 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 // layer those on top. Colormap/detail UVs come from the caller's geometry
 // (runtime: baked patch mesh; editor: sculpted heightmap mesh).
 vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
-		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant) {
+		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant, bool below_water) {
 	// Stage 2 has its own transform: flat sectors collapse only this input,
 	// while stages 1 and 3 keep their independent detail/noise coordinates.
 	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
@@ -216,7 +234,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 		// modulation then IS the underwater caustic term, neutral at mid-gray.
 		// The noise pair is a per-frame mipless dynamic texture — plain
 		// bilinear, no retail mip chain to emulate.
-		vec3 modulator = u_below_water
+		vec3 modulator = below_water
 			? texture(u_water_noise,
 				retail_detail_uv_from_atlas(colormap_uv, 8.0)).rgb
 			: sample_retail_detail_mips(
@@ -263,4 +281,18 @@ vec3 apply_terrain_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_de
 	float dist = u_fog_type == 0 ? max(eye_depth, 0.0) : radial_distance;
 	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
 	return mix(u_fog_color, color, fog_factor);
+}
+
+// The terrain batch's fog in the pass drawing it: the water mirror pass fogs
+// with its own (dry) block, every other pass with the scene block.
+vec3 apply_terrain_pass_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_depth,
+		bool water_mirror) {
+	if (!water_mirror) {
+		return apply_terrain_fog(color, world_pos, camera_pos, eye_depth);
+	}
+	int fog_type = int(opennova_water_mirror_fog_range.z);
+	float dist = fog_type == 0 ? max(eye_depth, 0.0) : length(world_pos - camera_pos);
+	float fog_factor = jointops_fog_factor(dist, opennova_water_mirror_fog_range.x,
+		opennova_water_mirror_fog_range.y, fog_type);
+	return mix(opennova_water_mirror_fog_color, color, fog_factor);
 }

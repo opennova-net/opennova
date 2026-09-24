@@ -290,6 +290,27 @@ func test_the_viewmodel_keeps_the_dry_pass_fog_underwater() -> void:
 	assert_ne(env_node.get_viewmodel_fog_range().y, env_node.get_scene_fog_end())
 
 
+func test_the_water_mirror_keeps_the_dry_weather_fog_on_either_side() -> void:
+	# The reflected scene applies ApplyFogAndAmbient(0, 0) whatever side the
+	# eye is on (retail render_main_scene @ 0x5c1648..0x5c164c,
+	# Water_RenderReflectedWorldScene @ 0x5c8515..0x5c8519): the weather fog
+	# block, never the underwater lit water.
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	var dry_color: Vector3 = env_node.get_scene_fog_color()
+	var dry_end: float = env_node.get_scene_fog_end()
+	assert_eq(env_node.get_water_mirror_fog_color(), dry_color,
+			"above water the mirror and the world share the dry block")
+	env_node.set_underwater_view(true)
+	assert_ne(env_node.get_scene_fog_color(), dry_color,
+			"the world's pass swaps to the lit water fog underwater")
+	assert_eq(env_node.get_water_mirror_fog_color(), dry_color,
+			"the mirror keeps the dry colour underwater")
+	assert_almost_eq(env_node.get_water_mirror_fog_range().y, dry_end, 0.001,
+			"the mirror keeps the dry range underwater")
+
+
 func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)

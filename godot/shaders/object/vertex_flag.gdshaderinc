@@ -1,4 +1,5 @@
 void vertex() {
+	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
 	v_static_point_light_row = INSTANCE_CUSTOM.x;
 	v_uv = obj_transform_uv(UV);
 	v_uv2 = obj_transform_uv(UV2);

@@ -107,6 +107,10 @@ public:
 	// (range = start, end, type): the dry pass whatever the eye's side.
 	Vector3 get_viewmodel_fog_color() const;
 	Vector3 get_viewmodel_fog_range() const;
+	// The water mirror pass's fog block as published: color and
+	// (start, end, type).
+	Vector3 get_water_mirror_fog_color() const;
+	Vector3 get_water_mirror_fog_range() const;
 	Vector3 get_scene_fog_color() const;
 	float get_scene_fog_start() const;
 	float get_scene_fog_end() const;
@@ -215,6 +219,7 @@ public:
 	// per-frame write while present).
 	void write_shader_globals();
 
+
 	void _ready() override;
 
 protected:
@@ -233,6 +238,11 @@ private:
 	void _write_scene_fog_globals();
 	opennova::env::SceneFogValues _viewmodel_fog() const;
 	void _write_viewmodel_fog_globals();
+	// The water mirror pass's fog block (EnvironmentState::
+	// build_water_mirror_fog) as opennova_water_mirror_fog_color / _range:
+	// the reflected pass selects it per camera in the object and terrain
+	// shaders.
+	void _write_water_mirror_fog_globals();
 	// The object family's per-pass lighting block as global shader
 	// parameters: the world block the object shaders scale per entity at
 	// draw time (renderer/light_runtime.h carries the RenderBatchCtx

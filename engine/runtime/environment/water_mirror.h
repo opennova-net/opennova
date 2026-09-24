@@ -1,19 +1,20 @@
 // The water reflection mirror view (env #30) — the witnessed offscreen
 // prerender's camera derivation as a typed record.
-// Retail prerenders the mirrored scene into
+// Retail prerenders the reflected scene into
 // Water_ReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
 // @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
 // @ 0x5c1240]; the prerender packs the live camera block {x, y, z, yaw,
-// pitch, roll} and the mirrored view builds inside render_main_scene's
-// view-matrix section. Hex-Rays elides the exact mirror transform, but the
-// witnessed texm3x2 rows PIN its form: they sample the RTT at u = screen U
-// (no horizontal flip) and v ~ 1 - screen V (env_water_render.h
-// WaterStripRows), which only holds when the offscreen camera is the
-// UP-PRESERVED proper mirror — reflect the basis about the plane, then
-// negate the reflected up column. The raw reflection alone is IMPROPER
-// (det -1: every triangle's winding flips, so faces cull backwards);
-// negating the up column restores det +1 (the conjugated rotation = yaw
-// kept, pitch/roll negated). Retail rebuilds projection for the square RTT
+// pitch, roll} and render_main_scene mirrors it ONLY while the camera is at
+// or above the plane: z' = 2wh - z, yaw kept, pitch and roll negated
+// [orig: render_main_scene @ 0x5c1361..0x5c1370 (cmp cam.z, wh; jl),
+// mirror @ 0x5c1376..0x5c139c] — the UP-PRESERVED proper mirror (reflect
+// the basis about the plane, then negate the reflected up column; det +1,
+// so no winding flips). The texm3x2 rows sample the RTT at u = screen U and
+// v ~ 1 - screen V (env_water_render.h WaterStripRows), which that mirror
+// satisfies. Below the plane the block is copied UNCHANGED [orig:
+// @ 0x5c13f6..0x5c1414]: the RTT is the scene from the live eye (clipped to
+// the part above the water, see the clip note below) and the underwater
+// rows sample it upside down. Retail rebuilds projection for the square RTT
 // while preserving the source's horizontal field
 // [orig: Viewport_BuildProjectionMatrix @ 0x410fb0; bounds @ 0x5c1476].
 // The witnessed collection filter follows the LIVE view side per frame:
@@ -24,10 +25,21 @@
 // [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0
 // — filterMask = camera_below_water ? 0 : 0x400, applied by every collector
 // including the sector-building walk @ 0x5c6c32..0x5c6c39].
-// NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips the
-// mirrored scene against the water surface at waterHeight - 0.1
-// [orig: plane block wh - 0.1, render_main_scene @ 0x5c1240]; the reimpl
-// exposes no oblique clip plane and does not clip.
+// CLIP: retail cuts the reflected scene at the water per pixel, on both
+// camera sides, through the 4x4 GSysClip alpha texture (point, clamp; alpha 0
+// in columns 0-1 and 255 in columns 2-3 [orig: Render_CreateSystemTextures
+// @ 0x58acc0..0x58acf6]) under AlphaRef 0x80, fed a texgen u = world y +
+// offset: objects keep y >= wh (g_WaterMirrorMatrix row 3 = 0.5 - wh,
+// g_WaterMirrorActive = 1 [orig: Water_RenderReflectedWorldScene
+// @ 0x5c8540..0x5c856a]) and the terrain keeps y >= wh - 0.05 (u = y + 0.45 -
+// (wh - 0.1) [orig: render_main_scene @ 0x5c1561..0x5c1578 plane wh - 0.1,
+// armed while wh != 0; render_terrain_sector_batch @ 0x6092c6..0x60935b]).
+// The shaders port it as a discard in the mirror pass (the one camera whose
+// mask omits the water layer, render/visual_layers.h). The reflected pass
+// fogs with the dry weather block whatever side the eye is on
+// (EnvironmentState::build_water_mirror_fog) and never swaps the terrain's
+// stage 3 to the water noise (the mirror context's below-water word is 0
+// [orig: render_main_scene @ 0x5c153d]).
 #pragma once
 
 #include <formats/env/env.h>
@@ -95,6 +107,8 @@ struct MirrorSourceView {
 
 // The derived mirror camera + sampling state the applier installs.
 struct WaterMirrorView {
+	// The reflected-scene camera: the mirror above/at the plane, the live
+	// camera unchanged below it.
 	Vec3 basis_x{};
 	Vec3 basis_y{};
 	Vec3 basis_z{};
@@ -116,30 +130,42 @@ struct WaterMirrorView {
 	float uv_scale_y = 1.0f;
 	// The proper mirror negates the reflected UP column; the local vertical
 	// offset negates too so the effective camera origin is the geometric
-	// reflection of the source rather than shifted oppositely.
+	// reflection of the source rather than shifted oppositely. The unmirrored
+	// below-water view keeps the source's.
 	float v_offset = 0.0f;
 };
 
 inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 		float water_height) {
 	WaterMirrorView view;
-	// position' = (x, 2*wh - y, z); each basis column reflects about the
-	// plane normal n = (0, 1, 0) as c' = c - 2*n*dot(c, n) (flip the Y
-	// component), then the reflected up column negates — see the header
-	// witness note.
-	view.basis_x = Vec3{source.basis_x.x, -source.basis_x.y, source.basis_x.z};
-	view.basis_y = Vec3{-source.basis_y.x, source.basis_y.y, -source.basis_y.z};
-	view.basis_z = Vec3{source.basis_z.x, -source.basis_z.y, source.basis_z.z};
-	view.origin = Vec3{source.origin.x, 2.0f * water_height - source.origin.y,
-			source.origin.z};
 	view.below_water = source.origin.y < water_height;
+	if (view.below_water) {
+		// Below the plane the camera block is copied unchanged
+		// [orig: render_main_scene @ 0x5c1370 jl -> @ 0x5c13f6..0x5c1414].
+		view.basis_x = source.basis_x;
+		view.basis_y = source.basis_y;
+		view.basis_z = source.basis_z;
+		view.origin = source.origin;
+		view.v_offset = source.v_offset;
+	} else {
+		// position' = (x, 2*wh - y, z) [orig: @ 0x5c1379..0x5c137b]; each
+		// basis column reflects about the plane normal n = (0, 1, 0) as
+		// c' = c - 2*n*dot(c, n) (flip the Y component), then the reflected up
+		// column negates (pitch and roll negated @ 0x5c138e/@ 0x5c1390, yaw
+		// kept) — see the header witness note.
+		view.basis_x = Vec3{source.basis_x.x, -source.basis_x.y, source.basis_x.z};
+		view.basis_y = Vec3{-source.basis_y.x, source.basis_y.y, -source.basis_y.z};
+		view.basis_z = Vec3{source.basis_z.x, -source.basis_z.y, source.basis_z.z};
+		view.origin = Vec3{source.origin.x, 2.0f * water_height - source.origin.y,
+				source.origin.z};
+		view.v_offset = -source.v_offset;
+	}
 
 	const float aspect = source.viewport_height > 0.0f
 			? source.viewport_width / source.viewport_height
 			: 1.0f;
 	view.uv_scale_x = 1.0f;
 	view.uv_scale_y = aspect != 0.0f ? 1.0f / aspect : 1.0f;
-	view.v_offset = -source.v_offset;
 
 	switch (source.projection) {
 		case MirrorProjection::kOrthogonal: {
@@ -153,10 +179,11 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 			// The shell's frustum size is always the vertical span (its
 			// projection builder does not reinterpret the axis), so the
 			// square pass always receives vertical * aspect, with the
-			// offset's Y negated for the vertical mirror.
+			// offset's Y negated for the vertical mirror (kept below water).
 			view.horizontal_size = source.frustum_size * aspect;
 			view.frustum_offset_x = source.frustum_offset_x;
-			view.frustum_offset_y = -source.frustum_offset_y;
+			view.frustum_offset_y = view.below_water ? source.frustum_offset_y
+													 : -source.frustum_offset_y;
 		} break;
 		case MirrorProjection::kPerspective:
 		default: {

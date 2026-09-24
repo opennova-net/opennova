@@ -16,6 +16,7 @@ uniform float u_alpha_test_threshold = 0.5;
 uniform float u_alpha_test_invert = 0.0;
 
 void vertex() {
+	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
 	v_raw_uv = UV;
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_fog_view_depth = -(VIEW_MATRIX * vec4(v_world_pos, 1.0)).z;
@@ -40,7 +41,7 @@ void fragment() {
 
 	vec3 source_gamma = source.rgb;
 	if (opennova_fog_enabled) {
-		source_gamma = mix(opennova_fog_color, source_gamma,
+		source_gamma = mix(obj_scene_fog_color(), source_gamma,
 				obj_scene_fog_visibility(CAMERA_POSITION_WORLD));
 	}
 	vec3 destination_gamma = scene_input(

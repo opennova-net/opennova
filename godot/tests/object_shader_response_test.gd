@@ -15,12 +15,14 @@ const GLOBALS := [
 	"opennova_fog_enabled", "opennova_fog_color", "opennova_fog_start",
 	"opennova_fog_end", "opennova_fog_type",
 	"opennova_water_active", "opennova_water_height",
-	"opennova_water_reflection_clip_active", "opennova_water_reflection_eye",
+	"opennova_water_mirror_fog_color", "opennova_water_mirror_fog_range",
 	"opennova_environment_cube_ready",
 ]
 const EYE := Vector3(0.0, 0.0, 5.0)
 
 var _saved := {}
+# The reflected pass is the camera whose mask omits the water layer.
+var _reflection_view := false
 
 
 func before_each() -> void:
@@ -33,7 +35,7 @@ func before_each() -> void:
 	_global("opennova_thermal_view", false)
 	_global("opennova_fog_enabled", false)
 	_global("opennova_water_active", false)
-	_global("opennova_water_reflection_clip_active", false)
+	_reflection_view = false
 	_global("opennova_environment_cube_ready", false)
 	_global("opennova_light_block_gain", Vector3.ONE)
 	_global("opennova_light_block_dir", Vector3(0.0, 0.0, -1.0))
@@ -79,6 +81,8 @@ func _view() -> SubViewport:
 	camera.size = 2.0
 	camera.position = EYE
 	camera.current = true
+	if _reflection_view:
+		camera.cull_mask = Water.REFLECTION_CULL_MASK
 	viewport.add_child(camera)
 	viewport.add_child(DisplayDecode.new())
 	return viewport
@@ -182,8 +186,7 @@ func test_fixed_function_diffuse_saturates_per_vertex_and_gouraud_interpolates()
 
 func _arm_reflection_view() -> void:
 	_global("opennova_water_active", true)
-	_global("opennova_water_reflection_clip_active", true)
-	_global("opennova_water_reflection_eye", EYE)
+	_reflection_view = true
 	_global("opennova_water_height", -10.0)
 
 
@@ -248,9 +251,50 @@ func test_reflection_view_fogs_alpha_blend_ffp_toward_grey() -> void:
 	_global("opennova_fog_type", 1)
 	var normal: Color = await _render("fixed/alpha_double_sided", _solid(Color.WHITE))
 	assert_lt(normal.r, 0.02, "NORMAL fogs fully to the black scene colour: %s" % normal)
+	# The mirror pass fogs over its own (dry) block range, not the scene's:
+	# push the scene range out of reach and keep the mirror's at full fog.
+	_global("opennova_fog_start", 1000.0)
+	_global("opennova_fog_end", 2000.0)
+	_global("opennova_water_mirror_fog_color", Vector3.ZERO)
+	_global("opennova_water_mirror_fog_range", Vector3(0.0, 1.0, 1.0))
 	_arm_reflection_view()
 	var clip: Color = await _render("fixed/alpha_double_sided", _solid(Color.WHITE))
 	assert_almost_eq(clip.r, 127.0 / 255.0, 0.02, "CLIP fogs to 0x7F grey: %s" % clip)
+
+
+func _frame(viewport: SubViewport) -> Image:
+	for _frame_index in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return viewport.get_texture().get_image()
+
+
+func test_reflection_view_clips_objects_below_the_water_plane() -> void:
+	# Retail's GSysClip texgen row u = y - wh + 0.5 under AlphaRef 0x80 keeps
+	# y >= wh (retail Water_RenderReflectedWorldScene @ 0x5c8540..0x5c856a,
+	# Render_CreateSystemTextures @ 0x58acc0), with no 0.1 margin. The 2x2
+	# card spans y -1..1 over 64 rows: row 31 sits at y = +0.016, rows 32/33
+	# at -0.016 / -0.047.
+	if not _rd_available():
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	_arm_reflection_view()
+	_global("opennova_water_height", 0.0)
+	var viewport := _view()
+	viewport.add_child(_quad(_material("fixed/opaque_double_sided", _solid(Color.WHITE))))
+	var image: Image = await _frame(viewport)
+	assert_almost_eq(image.get_pixel(32, 31).r, 1.0, 0.02,
+			"the reflected pass keeps the card above the plane")
+	assert_lt(image.get_pixel(32, 32).r, 0.02, "and clips it just below the plane")
+	assert_lt(image.get_pixel(32, 33).r, 0.02,
+			"0.047 below the plane is clipped too (no wh - 0.1 margin)")
+	_reflection_view = false
+	viewport = _view()
+	viewport.add_child(_quad(_material("fixed/opaque_double_sided", _solid(Color.WHITE))))
+	image = await _frame(viewport)
+	assert_almost_eq(image.get_pixel(32, 40).r, 1.0, 0.02,
+			"a camera that draws the water layer never clips")
 
 
 func _mip_level_texture() -> ImageTexture:

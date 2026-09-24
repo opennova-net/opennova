@@ -87,6 +87,14 @@ opennova_fog_type={
 "type": "int",
 "value": 1
 }
+opennova_water_mirror_fog_color={
+"type": "vec3",
+"value": Vector3(0.5, 0.6, 0.8)
+}
+opennova_water_mirror_fog_range={
+"type": "vec3",
+"value": Vector3(30000, 100000, 1)
+}
 opennova_light_block_dir={
 "type": "vec3",
 "value": Vector3(-0.4082, -0.8165, -0.4082)
@@ -146,14 +154,6 @@ opennova_water_active={
 opennova_water_height={
 "type": "float",
 "value": 0.0
-}
-opennova_water_reflection_clip_active={
-"type": "bool",
-"value": false
-}
-opennova_water_reflection_eye={
-"type": "vec3",
-"value": Vector3(0, 0, 0)
 }
 opennova_foliage_mask_depth={
 "type": "sampler2D",

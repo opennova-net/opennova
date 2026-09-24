@@ -8,22 +8,25 @@
 uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);
 uniform vec3 u_uv_transform_v = vec3(0.0, 1.0, 0.0);
 
-// Water reflection CLIP class. The reflection camera's exact above-water
-// cull mask is WORLD|TERRAIN_SHADOW_RECEIVER (0x8001); below-water mirrors
-// add WORLD_NO_MIRROR and retail does not arm the clip class. Water publishes
-// the exact mirrored eye and arms the clip only for its above-water
-// reflection view; the arming bool is frame-level state shared by every
-// camera of that frame, so the eye comparison is what keeps the main view
-// and unrelated SubViewports unclipped. The plane is waterHeight - 0.1 and
-// applies only to effects with an explicit CLIP block; missing blocks fall
-// back to NORMAL and skinned submissions are skipped.
+// Water reflection CLIP class. The reflected scene draws through the one
+// camera whose mask omits the water layer (the mirror never draws the water
+// surface, render/visual_layers.h), on both sides of the plane, and retail
+// arms the clip there whatever side the eye is on: g_WaterMirrorActive = 1
+// with the GSysClip texgen row u = y - wh + 0.5 under AlphaRef 0x80, i.e. keep
+// y >= wh (retail Water_RenderReflectedWorldScene @ 0x5c8540..0x5c856a,
+// Render_CreateSystemTextures @ 0x58acc0). It applies only to effects with an
+// explicit CLIP block; missing blocks fall back to NORMAL and skinned
+// submissions are skipped.
 // [orig: Water_RenderReflectedWorldScene @ 0x5c8510;
 // HLSLEffect CLIP fallback @ 0x5aebc8; bone skip @ 0x5d94bc;
 // _FFP.fx TBoringFFPClip / Glass.fx TGlassFFP_clip].
 global uniform bool opennova_water_active;
 global uniform float opennova_water_height;
-global uniform bool opennova_water_reflection_clip_active;
-global uniform vec3 opennova_water_reflection_eye;
+// The mirror pass's fog block (EnvironmentState::build_water_mirror_fog): the
+// reflected scene applies the dry weather fog whatever the main pass selects.
+global uniform vec3 opennova_water_mirror_fog_color;
+// (start, end, type), the viewmodel block's packing.
+global uniform vec3 opennova_water_mirror_fog_range;
 
 // Highest-quality TexCubeEnvironment host. The captured texture contains the
 // six gamma-byte sky + sun/moon faces after retail's 0x60 framebuffer multiply;
@@ -179,26 +182,29 @@ varying vec4 v_pixel_point_attenuation;
 // Identical for every vertex of a MultiMesh instance, so ordinary varying
 // interpolation remains constant across each primitive.
 varying float v_static_point_light_row;
+// 1.0 in the water mirror pass: the one non-shadow camera whose mask omits the
+// water layer (render/visual_layers.h). Every object vertex() writes it
+// through obj_water_mirror_pass_flag; built-ins stay out of helpers.
+varying flat float v_water_mirror_pass;
+
+float obj_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
+	return (!in_shadow_pass && (camera_layers & 1024u) == 0u) ? 1.0 : 0.0;
+}
 
 // The CLIP-class discard must stay in the one material Godot gives a mesh
 // (no per-camera material variant exists), so the depth prepass of every
-// explicit-CLIP wrapper keeps this discard. Order the rejection by cost: the
-// frame-level arming bool alone decides disarmed frames, and the mirrored-eye
-// match and plane test follow only when the mirror is live. Nothing samples a
-// texture before this runs.
+// explicit-CLIP wrapper keeps this discard; the mirror-pass flag keeps every
+// other camera unclipped. Nothing samples a texture before this runs.
 // Whether this draw is the armed reflection view: the view whose explicit
-// CLIP blocks replace NORMAL.
+// CLIP blocks replace NORMAL. Retail arms it for the reflected pass on both
+// sides of the plane whenever the water is live.
 bool obj_water_reflection_clip_view(vec3 camera_position_world) {
-	if (!opennova_water_reflection_clip_active) {
-		return false;
-	}
-	return opennova_water_active &&
-			distance(camera_position_world, opennova_water_reflection_eye) < 0.01;
+	return v_water_mirror_pass > 0.5 && opennova_water_active;
 }
 
 bool obj_water_reflection_clips(vec3 camera_position_world) {
 	return obj_water_reflection_clip_view(camera_position_world) &&
-			v_world_pos.y < opennova_water_height - 0.1;
+			v_world_pos.y < opennova_water_height;
 }
 
 void obj_apply_water_reflection_clip(vec3 camera_position_world) {
@@ -814,13 +820,24 @@ float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_typ
 //   are vertex RANGE fog over the radial eye distance (FOGVERTEXMODE LINEAR,
 //   RANGEFOGENABLE 1 @ 0x677a50..0x677a69), type 0 the device EXP on view depth
 //   (@ 0x6779e4..0x677a48).
+// The viewmodel fogs under the dry pass (viewmodel_pass.gdshaderinc) and the
+// water mirror pass under its own dry block (EnvironmentState::
+// build_water_mirror_fog).
+vec3 obj_scene_fog_range() {
+	if (u_viewmodel_pass) {
+		return opennova_viewmodel_fog_range;
+	}
+	if (v_water_mirror_pass > 0.5) {
+		return opennova_water_mirror_fog_range;
+	}
+	return vec3(opennova_fog_start, opennova_fog_end, float(opennova_fog_type));
+}
+
 float obj_scene_fog_visibility(vec3 camera_position_world) {
 	if (!opennova_fog_enabled) {
 		return 1.0;
 	}
-	// The viewmodel fogs under the dry pass (viewmodel_pass.gdshaderinc).
-	vec3 range = u_viewmodel_pass ? opennova_viewmodel_fog_range
-			: vec3(opennova_fog_start, opennova_fog_end, float(opennova_fog_type));
+	vec3 range = obj_scene_fog_range();
 	int fog_type = int(range.z);
 	float view_depth = max(v_fog_view_depth, 0.0);
 	#if defined(OBJ_FOG_VERTEX_SHADER)
@@ -835,13 +852,19 @@ float obj_scene_fog_visibility(vec3 camera_position_world) {
 	#endif
 }
 
+vec3 obj_scene_fog_color() {
+	if (u_viewmodel_pass) {
+		return opennova_viewmodel_fog_color;
+	}
+	return v_water_mirror_pass > 0.5 ? opennova_water_mirror_fog_color
+			: opennova_fog_color;
+}
+
 vec3 obj_apply_fog(vec3 lit, vec3 camera_position_world) {
 	if (!opennova_fog_enabled) {
 		return lit;
 	}
-	vec3 fog_color = u_viewmodel_pass ? opennova_viewmodel_fog_color
-			: opennova_fog_color;
-	return mix(fog_color, lit,
+	return mix(obj_scene_fog_color(), lit,
 			obj_scene_fog_visibility(camera_position_world));
 }
 

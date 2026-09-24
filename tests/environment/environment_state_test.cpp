@@ -10,6 +10,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
+#include <runtime/environment/water_mirror.h>
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/weather_state.h>
@@ -406,6 +407,47 @@ int main() {
 					opennova::env::underwater_murk_overlay_alpha_byte(0.8f) == 204 &&
 					opennova::env::underwater_murk_overlay_alpha_byte(0.99f) == 223,
 				"the underwater scissor uses raw 128 + trunc(96 * murk) alpha");
+		// The water mirror pass fogs with the dry weather block on either side
+		// of the plane and never takes the thermal grey [orig: render_main_scene
+		// @ 0x5c1648..0x5c164c / Water_RenderReflectedWorldScene @ 0x5c8515..
+		// 0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0); sub_579CB0
+		// @ 0x579ce7..0x579cf6 restores Env_FogBlock after the sky].
+		const opennova::env::SceneFogValues mirror = env.build_water_mirror_fog();
+		ok &= expect(rgb_near(mirror.color, dry.color) && near(mirror.end, dry.end) &&
+					near(mirror.start, dry.start) && mirror.type == dry.type,
+				"the mirror fog is the dry pass while the main eye is underwater");
+		env.set_thermal_view(true, true);
+		ok &= expect(rgb_near(env.build_water_mirror_fog().color, env.fog_color()) &&
+					!rgb_near(env.build_scene_fog(false).color, env.fog_color()),
+				"the thermal view greys the scene fog but not the mirror's");
+		env.set_thermal_view(false, false);
+
+		// The reflected-scene camera [orig: render_main_scene @ 0x5c1361..
+		// 0x5c1370]: mirrored (z' = 2wh - z, pitch/roll negated) at or above
+		// the plane, the live block unchanged below it.
+		opennova::env::MirrorSourceView source;
+		source.basis_x = {1.0f, 0.0f, 0.0f};
+		source.basis_y = {0.0f, 0.8f, -0.6f};
+		source.basis_z = {0.0f, 0.6f, 0.8f};
+		source.origin = {3.0f, 12.0f, -4.0f};
+		source.viewport_width = 1024.0f;
+		source.viewport_height = 600.0f;
+		source.v_offset = 0.5f;
+		const opennova::env::WaterMirrorView mirrored =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(!mirrored.below_water && near(mirrored.origin.y, 2.0f) &&
+					near(mirrored.basis_y.y, 0.8f) && near(mirrored.basis_y.z, 0.6f) &&
+					near(mirrored.basis_z.y, -0.6f) && near(mirrored.v_offset, -0.5f),
+				"above the plane the reflected camera is the proper mirror");
+		source.origin.y = 2.0f;
+		const opennova::env::WaterMirrorView live =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(live.below_water && near(live.origin.x, 3.0f) &&
+					near(live.origin.y, 2.0f) && near(live.origin.z, -4.0f) &&
+					near(live.basis_y.y, 0.8f) && near(live.basis_y.z, -0.6f) &&
+					near(live.basis_z.y, 0.6f) && near(live.v_offset, 0.5f),
+				"below the plane the reflected camera is the live camera unchanged");
+
 		// render_water_surface's side gate [orig: @ 0x5c32f6 jge / @ 0x5c3304
 		// jle]: strictly above draws the view-0 side (and the bloom pass's
 		// nightvision redraw), strictly below the underwater side, and an eye

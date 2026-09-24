@@ -470,6 +470,14 @@ public:
 	// (sub_579CB0, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
 	// viewmodel @ 0x5ca829, the eye's pass @ 0x5ca82e..0x5ca841].
 	SceneFogValues build_viewmodel_fog(bool sky_dome_drawn) const;
+	// The water mirror pass's fog: the reflected scene applies the DRY pass
+	// with no alternate fog whatever side the eye is on [orig:
+	// render_main_scene @ 0x5c1648..0x5c164c and Water_RenderReflectedWorldScene
+	// @ 0x5c8515..0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0)], and the sky
+	// pass puts the device fog color back to Env_FogBlock before the terrain
+	// [orig: sub_579CB0 @ 0x579ce7..0x579cf6]: the weather fog block, never the
+	// thermal grey or the underwater lit water.
+	SceneFogValues build_water_mirror_fog() const;
 
 	// The one witnessed render-eye/waterline rule. The device fog selector is
 	// STRICT below [orig: is_underwater = view_z < waterline, the

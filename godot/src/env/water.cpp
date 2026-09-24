@@ -176,8 +176,6 @@ void Water::release_runtime_renderer_resources() {
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server != nullptr) {
 		server->global_shader_parameter_set("opennova_water_active", false);
-		server->global_shader_parameter_set(
-				"opennova_water_reflection_clip_active", false);
 	}
 	has_drawable_surface_ = false;
 	if (reflection_viewport_ != nullptr) {
@@ -232,10 +230,6 @@ void Water::_push_water_split_height() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_water_active", active);
 	rs->global_shader_parameter_set("opennova_water_height", water_height_);
-	if (!active) {
-		rs->global_shader_parameter_set(
-				"opennova_water_reflection_clip_active", false);
-	}
 	if (active) {
 		Camera3D *cam = Object::cast_to<Camera3D>(
 				ObjectDB::get_instance(cached_cam_id_));
@@ -365,8 +359,6 @@ void Water::_exit_tree() {
 		ObjectShaderCache::get_singleton()->clear_water_plane();
 		RenderingServer::get_singleton()->global_shader_parameter_set(
 				"opennova_water_active", false);
-		RenderingServer::get_singleton()->global_shader_parameter_set(
-				"opennova_water_reflection_clip_active", false);
 	}
 	// Reflection teardown: stop the offscreen renders and disarm the shader's
 	// reflection branch — the u_water_color fallback takes over if the
@@ -735,9 +727,10 @@ Camera3D *Water::_view_camera(Camera3D *p_surface_cam) const {
 	return through;
 }
 
-// Mirrors the drawing camera about the water plane into the reflection
-// SubViewport. The witnessed mirror form, side-dependent collection filter,
-// and horizontal-preserving square projection live in
+// Installs the reflected-scene camera into the reflection SubViewport: the
+// drawing camera mirrored about the water plane at or above it, unchanged
+// below it. The witnessed form, side-dependent collection filter, and
+// horizontal-preserving square projection live in
 // environment/water_mirror.h; this leg extracts the source camera (its
 // viewport is the one it draws: the surface, or the live aspect-mode
 // target), installs the typed record, and pushes the UV registration scale.
@@ -800,11 +793,9 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 	const auto to_v3 = [](const opennova::env::Vec3 &v) {
 		return Vector3(v.x, v.y, v.z);
 	};
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_water_reflection_eye",
-			to_v3(view.origin));
-	rs->global_shader_parameter_set("opennova_water_reflection_clip_active",
-			!view.below_water);
+	// The reflected-scene clip needs no per-frame arming: the object and
+	// terrain shaders discard below the water in the one pass whose camera
+	// omits the water layer, on both sides of the plane (water_mirror.h).
 	reflection_camera_->set_global_transform(Transform3D(
 			Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
 			to_v3(view.origin)));

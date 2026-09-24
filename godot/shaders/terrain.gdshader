@@ -37,8 +37,11 @@ varying vec2 v_detail_uv;
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
 varying float v_eye_depth;
+varying flat float v_water_mirror_pass;
 
 void vertex() {
+	v_water_mirror_pass = terrain_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS,
+		IN_SHADOW_PASS);
 	v_colormap_uv = UV;
 	v_detail_uv = retail_detail_uv_from_atlas(UV, u_detail_density);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -80,6 +83,11 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
+	bool water_mirror = v_water_mirror_pass > 0.5;
+	if (water_mirror && opennova_water_active &&
+			v_world_pos.y < opennova_water_height - TERRAIN_WATER_MIRROR_CLIP_OFFSET) {
+		discard;
+	}
 	// The flat mode zeros stage 2's blend transform as well as the primary
 	// source coordinates. The independent detail/noise stream stays live.
 	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0]
@@ -98,7 +106,8 @@ void fragment() {
 			vec3(page_uv, u_instance_tile_cache_layer));
 	}
 	vec3 result = terrain_surface_color_from_colormap(
-		colormap, v_colormap_uv, v_detail_uv, source_uv, u_instance_source_quadrant);
+		colormap, v_colormap_uv, v_detail_uv, source_uv, u_instance_source_quadrant,
+		u_below_water && !water_mirror);
 
 	// A patch with pool lights composites the way retail's lit batch does:
 	// the unfogged light passes build the saturated pool, one unfogged
@@ -111,11 +120,12 @@ void fragment() {
 		vec3 lit_by_pool = clamp(
 			2.0 * clamp(2.0 * colormap.rgb, vec3(0.0), vec3(1.0)) * pool,
 			vec3(0.0), vec3(1.0));
-		vec3 fogged = apply_terrain_fog(clamp(result, vec3(0.0), vec3(1.0)),
-			v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
+		vec3 fogged = apply_terrain_pass_fog(clamp(result, vec3(0.0), vec3(1.0)),
+			v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth, water_mirror);
 		result = clamp(lit_by_pool + fogged, vec3(0.0), vec3(1.0));
 	} else {
-		result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
+		result = apply_terrain_pass_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth,
+			water_mirror);
 	}
 
 	// Debug overlays — replace output with diagnostic color
