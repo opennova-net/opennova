@@ -918,8 +918,11 @@ typedef struct DefItemDef {
        Score_ProcessKillEvent @0x4FD422] */
     int score;
     /* Door fields appended for ABI stability. num_doors/first_door alias the
-       low two bytes of deathtime_ticks; door_dir aliases clipsize.
-       [orig: ItemDef_ParseProperty @0x49F748..0x49F980] */
+       low two bytes of deathtime_ticks (+0x890/+0x891) and first_subobject its
+       third (+0x892); rotor_parts/aux_parts write raw bytes across both
+       deathtime_ticks and clipsize (+0x890..+0x897); door_dir aliases
+       clipsize. [orig: ItemDef_ParseProperty @0x49F748..0x49F980,
+       @0x49F992..0x49F9CC, @0x49EF32..0x49F04C] */
     uint32_t door_type;
     int32_t door_open_rate_q16;
     int32_t door_max_angle_bam;

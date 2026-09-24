@@ -430,7 +430,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
-		int64_t section_visibility_mask = -2;
+		int64_t destroyed_section_mask = -2;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
@@ -460,7 +460,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
-		int64_t section_visibility_mask = -2;
+		int64_t destroyed_section_mask = -2;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
@@ -526,12 +526,11 @@ private:
 	// application, never to a stale hold.
 	static bool aim_payload_changed(const float *p, int base,
 			std::array<float, kAimPayloadFloats> &cache, bool &cache_valid);
-	// The row owns the model's section-mask channel only while it publishes
-	// PF_SECTION_MASK_VALID. Rows that never publish must not touch the
-	// channel at all — the occlusion frame pass drives the same ObjectModel
-	// call for buildings, and an unconditional release here would stomp its
-	// applied mask after a plan rebuild. One release when a previously owned
-	// row stops publishing.
+	// The row owns the model's destroyed-section channel only while it
+	// publishes PF_SECTION_MASK_VALID; the occlusion frame owns the model's
+	// separate verdict channel, and ObjectModel ORs the two per part like
+	// retail's entity+0x138 | g_HiddenSectionMask. One release when a
+	// previously owned row stops publishing.
 	void stamp_section_mask(ObjectModel *model, const float *p, int base,
 			int64_t &last_mask);
 	// All four semantic CTRL writers over one typed model (the wire walk's

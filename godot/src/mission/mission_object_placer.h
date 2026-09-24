@@ -30,6 +30,7 @@
 #include "object/object_data.h"
 #include "object/object_model.h"
 #include "object/skeletal_anim.h"
+#include "render/object_lod_frame.h"
 #include "resource_index/resource_root.h"
 
 namespace godot {
@@ -152,6 +153,22 @@ public:
 	int update_static_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
 			float p_viewport_height);
+	// The same walk over every view drawing the world this frame (the frame's
+	// image and, while it renders, the weapon Inset pass): the instances share
+	// one row per level across the views, so each takes the finest level any
+	// view selects and drops to no level only when every view that sees it
+	// projects it below the sub-pixel floor.
+	int update_static_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// The render-occlusion frame's verdict for a batched (node-less) static:
+	// the collector gates (blink hits, the three-ray latch) and the building
+	// batch/TOC verdicts retail applies before any draw. A hidden instance
+	// carries no row at any level until released; the next static LOD walk
+	// re-selects a released one. [retail Terrain_CollectVisibleEntities_0
+	// @ 0x5c7022..0x5c708a / @ 0x5c7118..0x5c7162; collect_visible_sector_
+	// userpoints @ 0x5c6cd1..0x5c6d0d]
+	void set_static_instance_occlusion_hidden(int p_bms_id, bool p_hidden);
+	// Release every static occlusion verdict (the A/B seam, unload).
+	void clear_static_instance_occlusion();
 	// The level currently live for a placed static entity (-1 = below the
 	// sub-pixel floor or no level available, -2 = not a retained static).
 	int get_static_instance_lod(int p_bms_id) const;
@@ -338,6 +355,7 @@ private:
 		int32_t entity_scale_q16 = 0;
 		int active_lod = 0; // -1 = below the sub-pixel floor / none available
 		bool carved = false;
+		bool occlusion_hidden = false; // the occlusion frame's verdict
 		Vector<StaticLodBinding> bindings;
 	};
 	void _check_epoch();

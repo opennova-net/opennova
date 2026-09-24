@@ -869,7 +869,7 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		if (model == nullptr) {
 			continue;
 		}
-		const int64_t mask = model->get_section_visibility_mask();
+		const int64_t mask = model->get_occlusion_section_mask();
 		if (mask == -1) {
 			continue;
 		}

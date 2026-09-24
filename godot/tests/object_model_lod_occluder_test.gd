@@ -263,11 +263,11 @@ func test_closed_authored_records_create_section_owned_occluders() -> void:
 		var instance := node as OccluderInstance3D
 		assert_not_null(instance.occluder, "the retained instance owns geometry")
 
-	model.set_section_visibility_mask(0)
+	model.set_occlusion_section_mask(0, 0)
 	for node in occluders:
 		assert_false((node as OccluderInstance3D).visible,
 				"the retail section mask also gates its Godot occluder")
-	model.set_section_visibility_mask(-1)
+	model.set_occlusion_section_mask(-1, 0)
 	for node in occluders:
 		assert_true((node as OccluderInstance3D).visible,
 				"clearing the section verdict restores the occluder")

@@ -1033,6 +1033,14 @@ public:
     // indoors flag; accumulate the local player's flags word.
     // [orig: Entity_BuildProximityList @ 0x4b3dc0]
     void refresh_blink(World &world, Entity &ent);
+    // The mission-start blink stamp over the static table just built: every
+    // pool-1 row, then every pool-2 row that is not a building, takes one
+    // refresh_blink before the portal init.
+    // [orig: Entity_BuildProximityListsForPools12 @ 0x5240a0 — the pool-1 loop
+    //  @ 0x5240b8..0x5240cd, the pool-2 loop with its def-type-5 skip
+    //  @ 0x5240e4..0x524102; called from Game_StartMission @ 0x525898, after
+    //  Entity_InitAllFromModels built the static table]
+    void refresh_mission_start_blink(World &world);
 
     // Point blink query at an arbitrary position (the camera-side analog of
     // refresh_blink): walk the building prefix with per-axis + euclid broad

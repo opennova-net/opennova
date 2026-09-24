@@ -1291,6 +1291,17 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     if (is_local) local_player_blink_flags |= accum.flags;
 }
 
+void CollisionWorld::refresh_mission_start_blink(World &world) {
+    std::vector<EntityHandle> rows;
+    world.registry.for_each_in_pool(1, [&](const Entity &e) { rows.push_back(e.handle); });
+    world.registry.for_each_in_pool(2, [&](const Entity &e) {
+        if (e.kind != EntityKind::Building) rows.push_back(e.handle); // [orig: @ 0x5240f3]
+    });
+    for (const EntityHandle h : rows) {
+        if (Entity *e = world.registry.get(h)) refresh_blink(world, *e);
+    }
+}
+
 void CollisionWorld::query_blink_boxes_at_point(World &world, const int32_t pos[3],
                                                 BlinkAccum &accum) {
     // [orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350 — clears the blink globals,

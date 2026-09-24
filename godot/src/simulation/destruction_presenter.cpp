@@ -291,7 +291,8 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		model->set_name("HuskModel");
 		if (intact_model != nullptr) model->set_authored_lod_projection_owner(intact_model);
         if (intact_model != nullptr)
-            model->set_section_visibility_mask(intact_model->get_section_visibility_mask());
+            model->set_occlusion_section_mask(intact_model->get_occlusion_section_mask(),
+                    intact_model->get_forced_section_mask());
 		set_husk_static_shadow(model, individual_casts_static_shadow);
 		// The reflect flag belongs to the entity, not its current graphic. The
 		// individual branch must preserve it just like the batched carve branch

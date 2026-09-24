@@ -920,22 +920,22 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
 	model = destruction_->visual_model(model);
+	// The sim's destroyed sections (entity+0x138), the model's own hidden
+	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-		const uint32_t hidden_mask =
+		const int64_t hidden_mask = static_cast<int64_t>(
 				static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_LO)) |
 				(static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_HI))
-						<< 16);
-		const int64_t section_visibility_mask = static_cast<int64_t>(
-				hidden_mask ^ 0xffffffffu);
-		if (section_visibility_mask != last_mask) {
-			model->set_section_visibility_mask(section_visibility_mask);
-			last_mask = section_visibility_mask;
+						<< 16));
+		if (hidden_mask != last_mask) {
+			model->set_destroyed_section_mask(hidden_mask);
+			last_mask = hidden_mask;
 		}
-	} else if (last_mask != -2 && last_mask != -1) {
-		model->set_section_visibility_mask(-1);
-		last_mask = -1;
+	} else if (last_mask != -2 && last_mask != 0) {
+		model->set_destroyed_section_mask(0);
+		last_mask = 0;
 	}
 }
 
@@ -1424,7 +1424,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			profile_phase_start = now;
 		}
 		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
-			stamp_section_mask(model, p, base, row.section_visibility_mask);
+			stamp_section_mask(model, p, base, row.destroyed_section_mask);
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.

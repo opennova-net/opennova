@@ -56,7 +56,7 @@ struct OcclusionFaceRec {
 };
 
 // Portal-face record types. [orig: the 60 B record type byte]
-inline constexpr uint8_t kOccRecOccluder = 0;   // occluder + window-glow slot
+inline constexpr uint8_t kOccRecOccluder = 0;   // occluder slot
 inline constexpr uint8_t kOccRecOpen = 1;       // "open" occluder slot (doors)
 inline constexpr uint8_t kOccRecWindow = 2;     // exterior window portal
 inline constexpr uint8_t kOccRecPortal = 3;     // interior portal (room-to-room)
@@ -71,7 +71,8 @@ inline constexpr float kPortalSlotCollectRadius = 250.0f;
 // The 60 B runtime portal-face record; slice pointers become run indices into
 // the model arrays. [orig: +0 type, +1/+2 section A/B (COBJ section ordinals;
 // 0 = exterior), +4 pos f3, +0x10 radius, +0x14/+0x18 vert count/slice,
-// +0x1C/+0x20 plane count/slice, +0x24/+0x28 face count/slice, +0x2C glow.]
+// +0x1C/+0x20 plane count/slice, +0x24/+0x28 face count/slice, +0x2C the
+// slot priority weight.]
 struct OcclusionPortalFace {
     uint8_t type = 0;
     uint8_t section_a = 0;
@@ -81,7 +82,7 @@ struct OcclusionPortalFace {
     int32_t vert_start = 0, vert_count = 0;
     int32_t plane_start = 0, plane_count = 0;
     int32_t face_start = 0, face_count = 0;
-    float glow_scale = 0.0f; // [orig: disk +20 -> runtime +0x2C]
+    float slot_priority_scale = 0.0f; // [orig: disk +20 -> runtime +0x2C]
 };
 
 struct OcclusionModel {
@@ -142,6 +143,12 @@ struct OcclusionFrameCamera {
     // axis the batch cull tests), rows 1/2 = the lateral axes the three-ray
     // probe offsets along. [orig: the fixed view matrix @ 0xA7841C]
     int32_t view_rows_q22[3][3] = {};
+    // The viewport focal length in pixels the projector scales a sphere radius
+    // by (the person leg's sub-pixel floor): half the viewport width over
+    // tan(fov_h / 2), rounded. [orig: viewport+0x40, written by
+    // Viewport_BuildProjectionMatrix @ 0x4110e1; read by
+    // Viewport_TransformAndClipPoint @ 0x4117b0]
+    int32_t focal_pixels = 0;
     int32_t fog_dist = 0;         // 16.16 [orig: Env_FogDistCurrent @ 0x26C681C]
     int32_t water_z = 0;          // 16.16 [orig: Env_WaterHeightFixed @ 0x26C6454]
     uint32_t local_blink_flags = 0; // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
@@ -157,11 +164,6 @@ public:
 	struct EntityDefBits {
         bool weldable = false;        // [orig: itemDef attrib2 (+0x58) bit 6]
         bool recurse_windows = false; // [orig: itemDef attrib (+0x54) bit 27]
-        // Destruction bone-map bases; bits >= these are forced visible in the
-        // draw mask. 0 = none (the destruction system is unmodeled, D-COL-2).
-        // [orig: itemDef bytes +2193/+2194]
-        uint8_t forced_lo = 0;
-        uint8_t forced_hi = 0;
     };
 
     // --- model registry (host-fed, keyed like CollisionWorld) ---
@@ -170,6 +172,12 @@ public:
     void assign_entity(EntityHandle h, int32_t model_id, const EntityDefBits &bits);
     void remove_entity_instance(EntityHandle h);
     bool has_instance(EntityHandle h) const;
+    // The def's forced-visible section bytes, keyed per entity (every
+    // building, OOBJ or not): itemDef +0x891 (first_door - 1, or rotor_parts'
+    // second byte) and +0x892 (first_subobject - 1, or aux_parts' third byte).
+    // In the DRAW mask a nonzero byte forces every section at or above it.
+    // [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
+    void assign_forced_sections(EntityHandle h, uint8_t first_lo, uint8_t first_hi);
 
     // --- mission-start portal init ---
     // Register every building's type-2 faces, weld coincident opposite pairs of
@@ -181,15 +189,16 @@ public:
     void init_mission(World &world, CollisionWorld &collision, bool do_register_weld = true);
 
     // --- per-frame ---
-    // The collect + occluder-planes + section-mask pipeline, in the original's
-    // order (the distance sort between collect and the occluder pass orders
-    // retail draw calls only and is not ported — D-OCC-10).
+    // The collect + slot sort + occluder-planes + section-mask pipeline, in
+    // the original's order.
     // [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4]
     void build_frame(World &world, CollisionWorld &collision, const OcclusionFrameCamera &cam);
 
     // Per-entity render gate for non-building entities (the entity collectors'
-    // occlusion rules): the blink-hits gate + the outdoors-only three-ray
-    // terrain latch (mutates Entity::occlusion_latch). TRUE = render.
+    // occlusion rules): the blink-hits gate, then the person leg for organics
+    // (person_render_visible) or the model leg's full-Euler bound sphere, and
+    // the outdoors-only three-ray terrain latch (mutates
+    // Entity::occlusion_latch). TRUE = render.
     // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 (statics) /
     // collect_visible_entities_for_terrain @ 0x5c8c60 (pools 0/1) — the gates
     // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
@@ -208,6 +217,23 @@ public:
                                const OcclusionFrameCamera &cam,
                                const int32_t center_world[3], int32_t radius,
                                uint8_t &latch, uint32_t logic_tick);
+    // The person leg of the same collector: the sphere is the entity position
+    // with the person radius (person_collector_radius), and a sphere that
+    // projects to at most 0.75 px is dropped BEFORE the latch is touched.
+    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60, the sub-pixel
+    //  floor @ 0x5c8e5e]
+    bool person_render_visible(const CollisionWorld &collision,
+                               const OcclusionFrameCamera &cam,
+                               const int32_t pos[3], int32_t radius,
+                               uint8_t &latch, uint32_t logic_tick);
+    // A person's collector radius: its entity+0 bound radius, or under the
+    // deployed-parachute flag the special item-185 model's radius.
+    // [orig: collect_visible_entities_for_terrain @ 0x5c8df3..0x5c8e10]
+    int32_t person_collector_radius(int32_t bound_radius_q16, bool parachute) const;
+    // The item-185 (parachute) model's GHDR radius, 16.16, host-fed at the
+    // mission's collision resolve. [orig: the model preloaded by
+    // Entity_PreloadSpecialItems @ 0x43C220, read at model+0x14]
+    void set_parachute_radius_q16(int32_t radius_q16) { parachute_radius_q16_ = radius_q16; }
     // Bound-sphere derivation from the collision model bounds: center = the
     // per-axis midpoint, radius = min(|max - center|, 0x7FFF0000 as float)
     // truncated, then center and radius scaled Q16 with the +0x8000 rule
@@ -222,11 +248,20 @@ public:
     // Whether the building entered the visible batch this frame (distance +
     // frustum + TOC). Non-batched or TOC-culled buildings do not render.
     bool building_visible(EntityHandle h) const;
-    // The building's section mask with the def forced-visible bits applied:
-    // bit N = COBJ section (render part) N draws; bit 0 = exterior.
-    // [orig: g_BuildingSectionVisMask @ 0x297F250 + the forced-bit merge in
-    // Terrain_RenderSectorModels @ 0x5c5d7c-0x5c5da8]
+    // The building's RAW section mask: bit N = COBJ section (render part) N
+    // is visible this frame; bit 0 = exterior; bits 30/31 the slot markers.
+    // Every reader but the model draw reads this word (the render_TOC marker
+    // test, the collector gates, the scar and corona gates, the effect-group
+    // gate). [orig: g_BuildingSectionVisMask @ 0x297F250]
     uint32_t section_mask(EntityHandle h) const;
+    // The def forced-visible bits the model draw ORs over the raw mask:
+    // -1 << byte for each nonzero byte (x86 shl masks the count & 31).
+    // [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
+    uint32_t forced_section_mask(EntityHandle h) const;
+    // The mask the building's parts draw with: raw | forced.
+    uint32_t section_draw_mask(EntityHandle h) const {
+        return section_mask(h) | forced_section_mask(h);
+    }
     // The building carries an open (type-1) portal record in a live slot — the
     // two-pass draw marker. [orig: batch +16 flag consumption @ 0x5c5e17]
     bool building_open_flagged(EntityHandle h) const;
@@ -293,7 +328,7 @@ private:
     struct Slot { // [orig: the 20 B g_PortalSlots @ 0x2983E88 rows]
         EntityHandle entity;
         int32_t record_index = 0;
-        int32_t glow = 0;          // [orig: slot +8 — window-glow renderer input, unconsumed here]
+        int32_t priority = 0;       // [orig: slot +8 — the sort key, read only by the slot sort]
         int32_t viewthru_start = 0; // run into viewthru_groups_ [orig: slot +12 ref]
         int32_t viewthru_count = 0; // [orig: slot +16]
     };
@@ -342,6 +377,12 @@ private:
     // + portal-slot collection (main scene: no def/entity flag filters).
     void collect_buildings(World &world, CollisionWorld &collision,
                            const OcclusionFrameCamera &cam);
+    // Order the collected portal slots by descending priority (a stable
+    // bubble sort) and keep the first 14: only those become occluders and
+    // carry the bit-30/31 markers.
+    // [orig: Terrain_SortSectorCacheByDistance @ 0x5c4410 — the compare
+    //  @ 0x5c4440, the clamp @ 0x5c449f..0x5c44a4]
+    void sort_portal_slots();
     // [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 ->
     // build_clip_planes_from_collision @ 0x5b34e0]
     void build_occluder_planes(World &world, const OcclusionFrameCamera &cam);
@@ -374,15 +415,25 @@ private:
                           const int32_t target[3], int32_t radius,
                           uint32_t debug_tick) const;
     // Batch view cull: forward-depth + sphere-vs-frustum stand-in for the
-    // original viewport projector (D-OCC-12).
+    // original viewport projector (D-OCC-12). `depth_out` receives the view
+    // depth (16.16) the projector scales the radius by.
     bool sphere_in_view(const OcclusionFrameCamera &cam, const int32_t center_fixed[3],
-                        int32_t radius_fixed) const;
+                        int32_t radius_fixed, int32_t *depth_out = nullptr) const;
+    // The collector latch tail shared by both legs: a held latch counts down,
+    // an expired one re-probes the three rays outdoors and re-arms.
+    // [orig: @ 0x5c7125-0x5c7162 / @ 0x5c8e7b..0x5c8eab]
+    bool latch_render_visible(const CollisionWorld &collision,
+                              const OcclusionFrameCamera &cam,
+                              const int32_t center_world[3], int32_t radius,
+                              uint8_t &latch, uint32_t logic_tick);
 
     // [orig: PRNG_Next16_C @ 0x6131b0 — rol4(s + rol11(s)) ^ 1, own stream]
     uint16_t latch_rand16();
 
     std::vector<OcclusionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
+    // key: EntityHandle.packed -> (itemDef +0x891, +0x892); absent = both zero
+    std::unordered_map<uint16_t, std::array<uint8_t, 2>> forced_sections_;
 
     std::vector<RegistryEntry> registry_; // mission-init scratch
     std::vector<WeldRecord> welds_;       // [orig: g_PortalWeldRecords @ 0x2967250]
@@ -454,6 +505,7 @@ private:
     bool water_visible_ = false;
     bool camera_indoors_ = false;
 
+	int32_t parachute_radius_q16_ = 0;
 	uint32_t *shared_latch_rng_ = nullptr;
 	uint32_t latch_rng_ = 0; // [orig: dword_31BFBB4 — BSS-zero boot state]
 };

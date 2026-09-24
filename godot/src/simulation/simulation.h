@@ -2210,20 +2210,22 @@ public:
 	// attribute override (engine: formats/mission/bms.h).
 	// (engine: runtime/world/occlusion.cpp)
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-	                         double p_aspect, double p_near, double p_fog_dist_units,
-	                         double p_water_z_units, bool p_force_indoors);
+	                         double p_aspect, double p_viewport_width, double p_near,
+	                         double p_fog_dist_units, double p_water_z_units,
+	                         bool p_force_indoors);
 
-	// Frame results: [bms_id, packed] pairs for the buildings the occlusion
-	// frame touched; the packed word is world/occlusion_feed.h's
-	// pack_building_visibility (section mask low, visible flag at bit 32),
-	// read back through the two static decoders below. The frame consumes
-	// the delta form (get_building_visibility_changes).
-	// The section mask of a packed building verdict (bit N = COBJ section /
-	// render part N; bit 0 = exterior; forced-visible def bits merged).
+	// Frame results: [bms_id, packed, forced] triples for the buildings the
+	// occlusion frame touched; the packed word is world/occlusion_feed.h's
+	// pack_building_visibility (the RAW section mask low, visible flag at bit
+	// 32), read back through the two static decoders below, and `forced` the
+	// def's forced-visible sections the part draw ORs over the raw mask. The
+	// frame consumes the delta form (get_building_visibility_changes).
+	// The raw section mask of a packed building verdict (bit N = COBJ
+	// section / render part N; bit 0 = exterior).
 	static int64_t building_visibility_mask(int64_t p_packed);
 	// The batch/frustum visible flag of a packed building verdict.
 	static bool building_visibility_visible(int64_t p_packed);
-	// Only the building pairs whose packed value changed since the last
+	// Only the building triples whose packed value changed since the last
 	// call, so the shell applies changes instead of re-walking the whole
 	// building set every frame.
 	PackedInt64Array get_building_visibility_changes();

@@ -18,6 +18,7 @@ class Celestial;
 class EntityIndex;
 class EntityPresenter;
 class MissionEnvironment;
+class MissionObjectPlacer;
 class ObjectModel;
 class Simulation;
 class SkyDome;
@@ -73,12 +74,11 @@ class Water;
 //    OCCL_GLUE as the bound-call REMAINDER (native span minus the sim's
 //    build + probe split) so the pane's Occlusion group still sums to the
 //    whole frame cost; frame_stats_probe requires the occl_apply row.
-//  * the batched-statics blind spot: a building verdict whose bms_id
-//    resolves to no ObjectModel (a batched static population, never a node)
-//    is dropped at the `node == nullptr` continue below. A collision-backed
-//    building WITHOUT an OOBJ section map is exactly that hole — it enters
-//    the retail host batch (simulation_test pins the verdict) but the batch
-//    verdict never reaches its MultiMesh instance. Kept as-is.
+//  * a building or collector verdict whose bms_id resolves to no
+//    ObjectModel (a batched static population, never a node) lands on the
+//    placer's retained instance instead
+//    (MissionObjectPlacer::set_static_instance_occlusion_hidden): the next
+//    static LOD walk in the same frame drops or restores its rows.
 class OcclusionFrame : public RefCounted {
 	GDCLASS(OcclusionFrame, RefCounted)
 
@@ -94,7 +94,7 @@ public:
 	// load, and reset() forgets them at unload). Held by ObjectID and
 	// re-resolved on use, so a freed runtime reads as absent, never dangling.
 	void bind_mission(const Ref<Simulation> &p_sim, const Ref<EntityIndex> &p_index,
-			EntityPresenter *p_entities);
+			EntityPresenter *p_entities, const Ref<MissionObjectPlacer> &p_placer);
 	// The shared F3 frame-stats board (null outside the game shell), re-handed
 	// by GameWorld wherever its own board changes: this frame lands the
 	// OCCL_* split spans itself from apply_frame.
@@ -119,13 +119,15 @@ public:
 	// render gates), then drive the de-batched building nodes' per-section
 	// masks and the gated entities' visibility. Runs after the present pass
 	// (inside the session frame) so present's base visibility is re-asserted
-	// first each frame. `camera` is the world viewport's current camera (null
-	// for a headless world): fov/near come off it and the aspect off its
-	// viewport, else the 70 deg / 0.05 / 16:9 defaults. (The marched
-	// iris-exposure weather feed that renders alongside stays on
-	// GameWorld's frozen-pose iris stamp.)
-	void apply_frame(Camera3D *p_camera, const Transform3D &p_camera_xform,
-			bool p_forces_indoors);
+	// first each frame. `camera` is the camera drawing the frame's image (the
+	// stretched-frame target's camera while it is live; null for a headless
+	// world): the frustum comes off it (ObjectLodFrame::camera_tangents), else
+	// the 70 deg / 0.05 / 16:9 defaults. `viewport_width` is the surface width
+	// in pixels, the projector's focal source. (The marched iris-exposure
+	// weather feed that renders alongside stays on GameWorld's frozen-pose
+	// iris stamp.)
+	void apply_frame(Camera3D *p_camera, float p_viewport_width,
+			const Transform3D &p_camera_xform, bool p_forces_indoors);
 
 	// The probe A/B seam, entering the occlusion skip: restore the water to
 	// the authored blink state, then release every occlusion override.
@@ -180,6 +182,7 @@ private:
 	Simulation *sim() const;
 	EntityIndex *entity_index() const;
 	EntityPresenter *entities() const;
+	MissionObjectPlacer *placer() const;
 	Terrain *terrain() const;
 	SkyDome *sky() const;
 	Celestial *celestial() const;
@@ -211,6 +214,7 @@ private:
 	ObjectID sim_id_;
 	ObjectID index_id_;
 	ObjectID entities_id_;
+	ObjectID placer_id_;
 	Ref<FrameStats> frame_stats_;
 	// The local player's applied blink letter gates (render-occlusion-re.md
 	// §4): accum bit 0x2 hides the terrain render (near detail + far foliage

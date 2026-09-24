@@ -162,6 +162,17 @@ float object_lod_frame_scale(int detail_level, float viewport_width) {
                             static_cast<double>(kObjectLodReferenceWidth));
 }
 
+// [orig: Viewport_BuildProjectionMatrix @ 0x410fe1..0x410ff7 — x87 keeps the
+//  quotient wide; _ftol2_sse truncates the +0.5 sum]
+int32_t object_lod_focal_pixels(float viewport_width, double tan_half_horizontal) {
+  if (viewport_width <= 0.0f || !(tan_half_horizontal > 0.0)) {
+    return 0;
+  }
+  const double focal =
+      static_cast<double>(viewport_width) * 0.5 / tan_half_horizontal + 0.5;
+  return static_cast<int32_t>(std::min(focal, 2147418112.0));
+}
+
 // [orig: Viewport_TransformAndClipPoint @ 0x41177a..0x4117ec: the
 //  depth-versus-radius gate, 2^32 / depth, (focal << 16) * that + 0x8000
 //  >> 16, then radius * that + 0x8000 >> 16 into viewport[100]]

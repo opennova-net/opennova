@@ -868,17 +868,38 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					static_cast<float>(scaled[1]) / 65536.0f,
 					static_cast<float>(scaled[2]) / 65536.0f};
 		}
+		if (e->kind == world::EntityKind::Building) {
+			// Every batched building's parts draw with the def's forced
+			// sections ORed in: itemDef +0x891 (first_door - 1) and +0x892
+			// (first_subobject - 1), bytes 1 and 2 of the shared +0x890 dword.
+			// [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
+			const uint32_t door_dword = static_cast<uint32_t>(def->deathtime_ticks);
+			deps.occlusion.assign_forced_sections(h,
+					static_cast<uint8_t>(door_dword >> 8), static_cast<uint8_t>(door_dword >> 16));
+		}
 		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
-			// [orig: itemDef+84 >> 27 @ 0x5c7456]; the destruction bone-map
-			// bytes (+2193/+2194) stay 0 until the destruction system lands
-			// (D-COL-2 / D-OCC-9).
+			// [orig: itemDef+84 >> 27 @ 0x5c7456].
 			world::OcclusionWorld::EntityDefBits bits;
 			bits.weldable = (def->attrib2 & (1u << 6)) != 0;
 			bits.recurse_windows = (def->attrib & (1u << 27)) != 0;
 			deps.occlusion.assign_entity(h, occ_id, bits);
 		}
+	}
+	// The person collector's parachute radius: the special item-185 model's
+	// GHDR radius, unscaled. [orig: Entity_PreloadSpecialItems @ 0x43C220 loads
+	// the model; collect_visible_entities_for_terrain reads model+0x14
+	// @ 0x5c8e10]
+	if (deps.models.has_source()) {
+		const DefItemDef *chute = find_item_def(
+				items, mission::kItemIdOffset + renderer::kParachuteProjectionTypeId);
+		const Threedi3di3 *chute_model = chute != nullptr && chute->graphic[0] != '\0'
+				? deps.models.model(std::string(chute->graphic)).get()
+				: nullptr;
+		deps.occlusion.set_parachute_radius_q16(chute_model != nullptr
+				? world::model_bound_radius_q16_from_3di(*chute_model)
+				: 0);
 	}
 	return attached;
 }

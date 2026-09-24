@@ -1,12 +1,15 @@
 extends GutTest
 
-# ObjectModel.set_section_visibility_mask drives per-part (COBJ section)
+# ObjectModel.set_occlusion_section_mask drives per-part (COBJ section)
 # visibility on the Robj_<N> render nodes — the draw-side consumer of the
 # render-occlusion section masks. Bit N visible = part N draws; -1 restores
-# everything; rebuild-created parts honor the applied mask. Pinned on a real
-# multi-part fixture (pump: five ROBJ parts, shared material indexes).
-# [orig: g_HiddenSectionMask consumption in Terrain_RenderSectorModels
-#  @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
+# everything; rebuild-created parts honor the applied mask; the def's forced
+# sections OR over the raw verdict and the entity's destroyed sections hide a
+# part whatever the verdict says. Pinned on a real multi-part fixture (pump:
+# five ROBJ parts, shared material indexes). Retail hides part i when bit
+# (i & 31) of entity+0x138 | g_HiddenSectionMask is set, g_HiddenSectionMask
+# being ~(raw | forced) (retail BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2,
+# Terrain_RenderSectorModels @ 0x5c5d72..0x5c5da8).
 
 const PMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
 
@@ -47,21 +50,54 @@ func test_mask_bits_toggle_part_nodes() -> void:
 	var m := _model()
 	var parts: Dictionary = m.get_render_part_nodes()
 	assert_eq(parts.size(), 5, "the fixture carries five ROBJ parts")
-	m.set_section_visibility_mask(0b10101)
+	m.set_occlusion_section_mask(0b10101, 0)
 	assert_true((parts[0] as Node3D).visible, "bit 0 (exterior) stays visible")
 	assert_false((parts[1] as Node3D).visible, "a cleared section bit hides its part")
 	assert_true((parts[2] as Node3D).visible)
 	assert_false((parts[3] as Node3D).visible)
 	assert_true((parts[4] as Node3D).visible)
 
-	m.set_section_visibility_mask(-1)
+	m.set_occlusion_section_mask(-1, 0)
 	assert_true((parts[1] as Node3D).visible, "-1 restores everything")
 	assert_true((parts[3] as Node3D).visible)
 
 
+func test_forced_sections_or_over_the_raw_verdict() -> void:
+	# A windowless building outdoors gets raw mask 1; first_door 3 forces
+	# every section from 2 up, so the door parts still draw.
+	var m := _model()
+	var parts: Dictionary = m.get_render_part_nodes()
+	m.set_occlusion_section_mask(0b00001, ~((1 << 2) - 1))
+	assert_true((parts[0] as Node3D).visible)
+	assert_false((parts[1] as Node3D).visible, "below the forced base the raw bit decides")
+	assert_true((parts[2] as Node3D).visible, "the forced sections draw")
+	assert_true((parts[4] as Node3D).visible)
+	assert_eq(m.get_occlusion_section_mask(), 1,
+			"the corona gate still reads the raw verdict")
+
+
+func test_destroyed_sections_hide_whatever_the_verdict() -> void:
+	# The two owners (the sim's destroyed sections, the occlusion verdict)
+	# combine per part in either write order.
+	var m := _model()
+	var parts: Dictionary = m.get_render_part_nodes()
+	m.set_destroyed_section_mask(1 << 1)
+	assert_false((parts[1] as Node3D).visible, "a destroyed section hides with no verdict")
+	m.set_occlusion_section_mask(-1, 0)
+	m.set_occlusion_section_mask(0b11111, 0)
+	assert_false((parts[1] as Node3D).visible,
+			"a later occlusion change never re-shows a destroyed section")
+	assert_true((parts[2] as Node3D).visible)
+	m.set_occlusion_section_mask(0b00001, 0)
+	m.set_destroyed_section_mask(0)
+	assert_false((parts[2] as Node3D).visible,
+			"a destroyed-mask change never re-shows an occluded section")
+	assert_true((parts[0] as Node3D).visible)
+
+
 func test_rebuilt_parts_honor_the_applied_mask() -> void:
 	var m := _model()
-	m.set_section_visibility_mask(0b00001)  # only part 0 visible
+	m.set_occlusion_section_mask(0b00001, 0)  # only part 0 visible
 	# A rebuild recreates every Robj node from the document; the fresh nodes
 	# must come up under the mask that was applied before they existed.
 	m.set_object_data(_object_data())
@@ -76,10 +112,10 @@ func test_rebuilt_parts_honor_the_applied_mask() -> void:
 
 func test_same_mask_reapply_is_a_no_op() -> void:
 	var m := _model()
-	m.set_section_visibility_mask(0b00010)
+	m.set_occlusion_section_mask(0b00010, 0)
 	var part: Node3D = m.get_render_part_nodes()[0]
 	part.visible = true  # owner override; an identical mask must not stomp it
-	m.set_section_visibility_mask(0b00010)
+	m.set_occlusion_section_mask(0b00010, 0)
 	assert_true(part.visible, "re-applying the same mask changes nothing")
 
 

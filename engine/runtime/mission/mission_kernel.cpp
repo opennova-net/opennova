@@ -212,6 +212,10 @@ void MissionKernel::retire_replica_entity(const w::EntityLifetime &lifetime) {
 
 void MissionKernel::occlusion_init_mission() {
 	collision.build_initial_tables(world);
+	// The mission-start blink stamp runs ahead of the portal init.
+	// [orig: Game_StartMission — Entity_BuildProximityListsForPools12
+	//  @ 0x525898, Terrain_InitBuildingPortals @ 0x525e11]
+	collision.refresh_mission_start_blink(world);
 	occlusion.init_mission(world, collision);
 }
 

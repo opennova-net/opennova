@@ -8,6 +8,8 @@
 
 namespace godot {
 
+class Camera3D;
+
 // One display frame's camera terms shared by every authored-RLOD evaluation:
 // the individual ObjectModels (ObjectModel::update_authored_lods) and the
 // placer's retained static instances (MissionObjectPlacer::update_static_lods).
@@ -31,9 +33,27 @@ struct ObjectLodFrame {
 	float projection_scale = 0.0f;
 	bool valid = false;
 
+	// A vertical fov over a viewport of that size (the scripted seam's form):
+	// the horizontal tangent follows the aspect and the viewport is the
+	// focal's width.
 	static ObjectLodFrame make(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
 			float p_viewport_height);
+	// The frame a view draws: the frustum from its camera's own tangents
+	// (camera_tangents), the focal and frame scale from the viewport width
+	// the image reaches the surface at (retail's viewport is the whole
+	// surface, and its focal is half that width over tan(fov_h / 2)).
+	static ObjectLodFrame from_camera(const Camera3D *p_camera, float p_viewport_width);
+	static ObjectLodFrame from_tangents(const Transform3D &p_camera_transform,
+			float p_tan_half_horizontal, float p_tan_half_vertical,
+			float p_viewport_width);
+
+	// The half-angle tangents of the frustum a camera draws over its own
+	// viewport: Godot's fov is horizontal under KEEP_WIDTH and vertical
+	// otherwise, the other axis following the viewport aspect. False for a
+	// null camera or an empty viewport.
+	static bool camera_tangents(const Camera3D *p_camera, float &r_tan_half_horizontal,
+			float &r_tan_half_vertical);
 
 	// The largest axis scale of a basis: the uniform entity scale a bound
 	// sphere radius is multiplied by.

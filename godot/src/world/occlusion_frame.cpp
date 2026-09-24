@@ -5,18 +5,22 @@
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 #include "env/celestial.h"
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
 #include "env/water.h"
+#include "mission/mission_object_placer.h"
 #include "object/entity_index.h"
 #include "object/object_model.h"
+#include "render/object_lod_frame.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain.h"
@@ -44,8 +48,8 @@ void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "terrain", "sky", "celestial", "water", "env"),
 			&OcclusionFrame::setup);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &OcclusionFrame::set_frame_stats);
-	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "camera_xform", "forces_indoors"),
-			&OcclusionFrame::apply_frame);
+	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "viewport_width", "camera_xform",
+			"forces_indoors"), &OcclusionFrame::apply_frame);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
 	ClassDB::bind_method(D_METHOD("is_blink_indoors"), &OcclusionFrame::is_blink_indoors);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blink_indoors"), "", "is_blink_indoors");
@@ -61,10 +65,11 @@ void OcclusionFrame::setup(Terrain *p_terrain, SkyDome *p_sky, Celestial *p_cele
 }
 
 void OcclusionFrame::bind_mission(const Ref<Simulation> &p_sim, const Ref<EntityIndex> &p_index,
-		EntityPresenter *p_entities) {
+		EntityPresenter *p_entities, const Ref<MissionObjectPlacer> &p_placer) {
 	sim_id_ = id_of(p_sim.ptr());
 	index_id_ = id_of(p_index.ptr());
 	entities_id_ = id_of(p_entities);
+	placer_id_ = id_of(p_placer.ptr());
 }
 
 void OcclusionFrame::set_frame_stats(const Ref<FrameStats> &p_board) {
@@ -74,6 +79,7 @@ void OcclusionFrame::set_frame_stats(const Ref<FrameStats> &p_board) {
 Simulation *OcclusionFrame::sim() const { return live<Simulation>(sim_id_); }
 EntityIndex *OcclusionFrame::entity_index() const { return live<EntityIndex>(index_id_); }
 EntityPresenter *OcclusionFrame::entities() const { return live<EntityPresenter>(entities_id_); }
+MissionObjectPlacer *OcclusionFrame::placer() const { return live<MissionObjectPlacer>(placer_id_); }
 Terrain *OcclusionFrame::terrain() const { return live<Terrain>(terrain_id_); }
 SkyDome *OcclusionFrame::sky() const { return live<SkyDome>(sky_id_); }
 Celestial *OcclusionFrame::celestial() const { return live<Celestial>(celestial_id_); }
@@ -128,8 +134,8 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	}
 }
 
-void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera_xform,
-		bool p_forces_indoors) {
+void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
+		const Transform3D &p_camera_xform, bool p_forces_indoors) {
 	Simulation *s = sim();
 	if (s == nullptr) {
 		return;
@@ -142,13 +148,14 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	double near = 0.05;
 	double aspect = 16.0 / 9.0;
 	if (p_camera != nullptr) {
-		fov_y = p_camera->get_fov();
 		near = p_camera->get_near();
-		if (Viewport *viewport = p_camera->get_viewport()) {
-			const Vector2 vs = viewport->get_visible_rect().size;
-			if (vs.y > 0.0f) {
-				aspect = static_cast<double>(vs.x) / static_cast<double>(vs.y);
-			}
+		// The frustum the camera actually draws (its keep-aspect mode decides
+		// which axis its fov names), as a vertical fov plus aspect.
+		float tan_h = 0.0f;
+		float tan_v = 0.0f;
+		if (ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
+			fov_y = Math::rad_to_deg(2.0 * std::atan(static_cast<double>(tan_v)));
+			aspect = static_cast<double>(tan_h) / static_cast<double>(tan_v);
 		}
 	}
 	double fog = 1000.0;
@@ -164,7 +171,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
-	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, near, fog, water_z, p_forces_indoors);
+	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, p_viewport_width, near, fog, water_z,
+			p_forces_indoors);
 	const int64_t native_end = timing ? ticks_usec() : 0;
 	int64_t building_query_us = 0;
 	int64_t building_apply_us = 0;
@@ -174,11 +182,12 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	int64_t light_apply_us = 0;
 	int64_t water_apply_us = 0;
 
-	// Building batch visibility + per-section masks (bit N = render part N,
-	// forced-visible def bits already merged by the sim), applied as CHANGES:
-	// the sim diffs against what this shell last applied, so a steady frame
-	// walks nothing. Batch culls claim the occlusion-hidden bit; the same
-	// verdicts as the full-walk form land on the nodes.
+	// Building batch visibility + per-section masks (the raw verdict, bit N =
+	// render part N, and the def's forced sections the part draw ORs over
+	// it), applied as CHANGES: the sim diffs against what this shell last
+	// applied, so a steady frame walks nothing. Batch culls claim the
+	// occlusion-hidden bit; a batched static (no node) takes the verdict on
+	// its placer instance instead.
 	// [orig: Terrain_RenderSectorModels @ 0x5c5d30]
 	const int64_t building_query_start = timing ? ticks_usec() : 0;
 	const PackedInt64Array changes = s->get_building_visibility_changes();
@@ -186,14 +195,20 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 		building_query_us = ticks_usec() - building_query_start;
 	}
 	const int64_t building_apply_start = timing ? ticks_usec() : 0;
-	for (int64_t i = 0; i + 1 < changes.size(); i += 2) {
+	MissionObjectPlacer *statics = placer();
+	for (int64_t i = 0; i + 2 < changes.size(); i += 3) {
 		const int64_t bms_id = changes[i];
+		const int64_t packed = changes[i + 1];
 		ObjectModel *node = occlusion_node(registry, bms_id);
 		if (node == nullptr) {
-			continue; // a node-less (batched static) verdict: the blind spot named in the header
+			if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(static_cast<int>(bms_id),
+						!Simulation::building_visibility_visible(packed));
+			}
+			continue;
 		}
-		const int64_t packed = changes[i + 1];
-		node->set_section_visibility_mask(Simulation::building_visibility_mask(packed));
+		node->set_occlusion_section_mask(Simulation::building_visibility_mask(packed),
+				changes[i + 2]);
 		node->set_occlusion_hidden(!Simulation::building_visibility_visible(packed));
 	}
 	if (timing) {
@@ -214,12 +229,16 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 			ObjectModel *node = occlusion_node(registry, culled_changes[i]);
 			if (node != nullptr) {
 				node->set_occlusion_hidden(true);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(culled_changes[i], true);
 			}
 		}
 		for (int64_t i = 2 + added; i < culled_changes.size(); ++i) {
 			ObjectModel *node = occlusion_node(registry, culled_changes[i]);
 			if (node != nullptr) {
 				node->set_occlusion_hidden(false);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(culled_changes[i], false);
 			}
 		}
 	}
@@ -350,10 +369,13 @@ void OcclusionFrame::release_overrides(bool /*p_reset_semantics*/) {
 		ObjectModel *node = occlusion_hidden_release_node(entry.key);
 		if (node != nullptr) {
 			node->set_occlusion_hidden(false);
-			node->set_section_visibility_mask(-1);
+			node->set_occlusion_section_mask(-1, 0);
 		}
 	}
 	occlusion_node_cache_.clear();
+	if (MissionObjectPlacer *statics = placer()) {
+		statics->clear_static_instance_occlusion();
+	}
 	reset_apply_baseline();
 }
 
@@ -389,6 +411,7 @@ void OcclusionFrame::reset() {
 	sim_id_ = ObjectID();
 	index_id_ = ObjectID();
 	entities_id_ = ObjectID();
+	placer_id_ = ObjectID();
 }
 
 void OcclusionFrame::reset_blink_frame_gates() {

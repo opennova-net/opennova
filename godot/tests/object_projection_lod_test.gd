@@ -130,6 +130,75 @@ func test_live_object_uses_scaled_cmdl_diagonal_instead_of_ghdr_radius() -> void
 			"the collision diagonal selects the coarse level at this camera")
 
 
+func test_sub_pixel_world_models_are_not_drawn_at_any_level_count() -> void:
+	# Retail's sector-entity draw returns before the RLOD walk when the bound
+	# sphere projects to at most 0.75 px (retail render_sector_entity
+	# @0x5c42d8..0x5c42de), whatever the model's level count: the two-level
+	# pump and the one-level crate both drop, and come back when near.
+	var placer := _placer()
+	placer.register_occlusion_verdict(106401, true)
+	placer.register_occlusion_verdict(106403, true)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 106401, Vector3.ZERO, Vector3.ZERO))
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 106403, Vector3.ZERO, Vector3.ZERO))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var stats := placer.place(mission, parent)
+	assert_eq(stats.animated, 2)
+	var pump: ObjectModel = null
+	var crate: ObjectModel = null
+	for model: ObjectModel in placer.get_placed_models():
+		if model.get_object_data().get_lod_count() == 1:
+			crate = model
+		else:
+			pump = model
+	assert_not_null(pump)
+	assert_not_null(crate)
+	if pump == null or crate == null:
+		return
+	assert_eq(crate.get_object_data().get_lod_count(), 1, "the crate is a one-level model")
+	# 640x480 at 70 deg: focal 343 px. Pump radius 4.9 u -> 0.56 px at 3000 u,
+	# crate radius 1.73 u -> 0.2 px.
+	ObjectModel.update_authored_lods(_camera(3000), 70, 640, 480)
+	assert_true(pump.is_subpixel_hidden())
+	assert_false(pump.visible, "a sub-pixel world model is not drawn")
+	assert_true(crate.is_subpixel_hidden(), "one-level models take the floor too")
+	assert_false(crate.visible)
+	ObjectModel.update_authored_lods(_camera(200), 70, 640, 480)
+	assert_false(pump.is_subpixel_hidden())
+	assert_true(pump.visible, "back above the floor the model draws again")
+	assert_false(crate.is_subpixel_hidden())
+	assert_true(crate.visible)
+
+
+func test_camera_view_reads_a_keep_width_fov_as_horizontal() -> void:
+	# Retail's focal is half the viewport WIDTH over tan(fov_h / 2) (retail
+	# Viewport_BuildProjectionMatrix @0x410fe1..0x410ff7). A KEEP_WIDTH camera
+	# names the horizontal fov: 90 deg over 1600 px is an 800 px focal (frame
+	# scale 0.8), so the 4.9 u pump sphere 120 u out projects 32.7 px and
+	# scales to 26 px, above pump_lod20's 20 px row. Read as a vertical fov
+	# the focal would be 450 px and the level the coarse one.
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	var view := SubViewport.new()
+	view.size = Vector2i(1600, 900)
+	add_child_autofree(view)
+	var camera := Camera3D.new()
+	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.fov = 90.0
+	view.add_child(camera)
+	camera.global_transform = _camera(120)
+	model.set_active_lod(1)
+	ObjectModel.update_authored_lods_for_camera(camera, 1600.0)
+	assert_eq(model.get_active_lod(), 0, "the KEEP_WIDTH fov is the horizontal one")
+	camera.global_transform = _camera(200)
+	ObjectModel.update_authored_lods_for_camera(camera, 1600.0)
+	assert_eq(model.get_active_lod(), 1, "and farther out the coarse row applies")
+
+
 func test_live_object_rotates_its_already_scaled_cmdl_center_once() -> void:
 	var placer := _placer()
 	_place(placer, 106401, [Vector3(0, 90, 90), Vector3(0, 90, -90)])

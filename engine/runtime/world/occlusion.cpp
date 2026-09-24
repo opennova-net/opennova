@@ -5,9 +5,11 @@
 
 #include <runtime/world/occlusion.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
+#include <runtime/renderer/object_lod.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 #include <base/io/fixed.h>
@@ -34,17 +36,23 @@ inline int32_t ftol(double v) { return static_cast<int32_t>(v); }
 
 inline int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 
-// [orig: the sqrt+ftol idiom the prox/euclid tests use]
-inline int32_t vec_len_ftol(int32_t x, int32_t y, int32_t z) {
-    return static_cast<int32_t>(std::sqrt(static_cast<double>(x) * x +
-                                          static_cast<double>(y) * y +
-                                          static_cast<double>(z) * z));
-}
-
 inline void entity_pos_fixed(const Entity &e, int32_t out[3]) {
     out[0] = to_fixed(e.position.x);
     out[1] = to_fixed(e.position.y);
     out[2] = to_fixed(e.position.z);
+}
+
+// The collectors' fixed entity matrix: the full Euler pack at entity+4 (the
+// canonical heading plus the authored pitch/roll BAMs), which places the
+// entity+0x1FC sphere center before the view transform.
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, called from the
+//  building collector @ 0x5c6c6a, the statics collector @ 0x5c70b1 and the
+//  model leg @ 0x5c8f25]
+inline CollisionMatrix entity_euler_pose(const Entity &e, const int32_t pos[3]) {
+    return collision_matrix_from_euler(
+        bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw)),
+        bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
+        bam_from_degrees_wrapped(static_cast<double>(e.roll)), pos);
 }
 
 // Per-axis Q22-quantized trig factor: c/s = float(ftol(trig(th) * 2^22)) / 2^22,
@@ -58,6 +66,7 @@ inline void quantized_trig(int32_t bam, float &c, float &s) {
 }
 
 constexpr int32_t kSlotCap = 128;        // [orig: the 128-cap slot arrays @ 0x5c6d7f]
+constexpr int32_t kSortedSlotCap = 14;   // [orig: `cmp eax,0Eh` @ 0x5c449f]
 constexpr int32_t kLinkTrackCap = 32;    // [orig: g_PortalLinkTrackList cap @ 0x5c54fb]
 constexpr int32_t kWedgePlaneCap = 64;   // [orig: "render_VPT() : too many planes" @ 0x5c5477]
 constexpr int32_t kGroupCap = 512;       // [orig: window/viewthru group caps]
@@ -193,6 +202,17 @@ void OcclusionWorld::assign_entity(EntityHandle h, int32_t model_id, const Entit
 void OcclusionWorld::remove_entity_instance(EntityHandle h) {
     if (!h.valid()) return;
     instances_.erase(h.packed);
+    forced_sections_.erase(h.packed);
+}
+
+void OcclusionWorld::assign_forced_sections(EntityHandle h, uint8_t first_lo,
+                                            uint8_t first_hi) {
+    if (!h.valid()) return;
+    if (first_lo == 0 && first_hi == 0) {
+        forced_sections_.erase(h.packed);
+        return;
+    }
+    forced_sections_[h.packed] = {first_lo, first_hi};
 }
 
 bool OcclusionWorld::has_instance(EntityHandle h) const {
@@ -404,13 +424,14 @@ void OcclusionWorld::bound_sphere_fixed(const CollisionModel &m, int32_t center_
 // planes stand in for the viewport projector, D-OCC-12.]
 bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
                                     const int32_t center_fixed[3],
-                                    int32_t radius_fixed) const {
+                                    int32_t radius_fixed, int32_t *depth_out) const {
     const int64_t rx = center_fixed[0] - cam.pos_fixed[0];
     const int64_t ry = center_fixed[1] - cam.pos_fixed[1];
     const int64_t rz = center_fixed[2] - cam.pos_fixed[2];
     const int32_t depth = static_cast<int32_t>(
         (rx * cam.view_rows_q22[0][0] + ry * cam.view_rows_q22[0][1] +
          rz * cam.view_rows_q22[0][2] + 0x200000) >> 22);
+    if (depth_out != nullptr) *depth_out = depth;
     if (abs32(depth) >= radius_fixed + cam.fog_dist) return false;
 
     float center[3];
@@ -436,15 +457,15 @@ uint16_t OcclusionWorld::latch_rand16() {
 
 // [orig: terrain_occlusion_check_three_rays @ 0x610ed0 — TRUE = some ray clear
 // (Terrain_RaycastHeightmapHiRes nonzero = clear = our !los_terrain_blocked).
-// Rays run from the camera (z + 0x4000) to the bound-sphere top, then the two
-// lateral silhouette points (+- radius along view row 1, + radius/2 along
-// view row 2).]
+// Rays run from the camera one unit up (`add edx, 10000h` @ 0x610eef) to the
+// bound-sphere top, then the two lateral silhouette points (+- radius along
+// view row 1, + radius/2 along view row 2).]
 bool OcclusionWorld::three_rays_clear(const CollisionWorld &collision,
                                       const OcclusionFrameCamera &cam,
                                       const int32_t target[3], int32_t radius,
                                       uint32_t debug_tick) const {
     if (collision.terrain == nullptr) return true;
-    const int32_t start[3] = {cam.pos_fixed[0], cam.pos_fixed[1], cam.pos_fixed[2] + 0x4000};
+    const int32_t start[3] = {cam.pos_fixed[0], cam.pos_fixed[1], cam.pos_fixed[2] + 0x10000};
     const auto record = [&](const int32_t ray_end[3], bool blocked) {
         collision.ray_debug_record(
                 CollisionWorld::RayDebugCategory::kRenderOcclusion, debug_tick,
@@ -514,8 +535,9 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         if (cm == nullptr || !cm->valid()) continue; // [orig: the entity+48 model gate]
 
         // Bound sphere: local center from the collision bounds, placed through
-        // the static heading transform. [orig: Entity_ComputeBoundingSphere
-        // @ 0x5c6c53 + the pose transform @ 0x5c6c6a-0x5c6c94]
+        // the entity's full Euler pose. [orig: Entity_ComputeBoundingSphere
+        // @ 0x5c6c53 + Math_BuildFixedPointMatrixFromEulerAngles(entity+4)
+        // @ 0x5c6c6a, the transform @ 0x5c6c80-0x5c6c94]
         // Statics do not move, so the placed sphere memoizes behind its pose/
         // model value keys; a guard miss (husk swap, a mover) recomputes the
         // identical way.
@@ -536,9 +558,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         if (!pose_hit) {
             int32_t center_local[3];
             bound_sphere_fixed(*cm, center_local, memo.radius, e->uniform_scale_q16);
-            const CollisionMatrix pose = collision_matrix_from_heading(
-                bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw)), epos);
-            pose.transform_point(center_local, memo.center_world);
+            entity_euler_pose(*e, epos).transform_point(center_local, memo.center_world);
             memo.handle_packed = slot.h.packed;
             memo.cm = cm;
             memo.model_id = inst_model_id;
@@ -626,12 +646,27 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             Slot s;
             s.entity = slot.h;
             s.record_index = r;
-            // [orig: glow = ratio * glowScale * 2^24 @ 0x5c6ea3-0x5c6eb1]
-            s.glow = ftol(static_cast<double>(ratio * rec.glow_scale * 16777216.0f));
+            // [orig: priority = ratio * weight * 2^24 @ 0x5c6ea3-0x5c6eb1]
+            s.priority = ftol(static_cast<double>(ratio * rec.slot_priority_scale * 16777216.0f));
             slots_.push_back(s);
             if (static_cast<int32_t>(slots_.size()) >= kSlotCap) break;
         }
     }
+}
+
+// ----------------------------------------------------------------------------
+// Per-frame: the slot sort
+// ----------------------------------------------------------------------------
+
+// [orig: Terrain_SortSectorCacheByDistance @ 0x5c4410 — count passes of
+// adjacent 20-byte swaps whenever slot[j].key < slot[j+1].key (`cmp ecx,
+// [eax+1Ch]; jge` @ 0x5c4443): a stable descending order; then
+// g_PortalSlotCount = min(count, 14) @ 0x5c449f..0x5c44a4. JO's authored
+// weights are all zero, so retail keeps the first 14 in collection order.]
+void OcclusionWorld::sort_portal_slots() {
+    std::stable_sort(slots_.begin(), slots_.end(),
+                     [](const Slot &a, const Slot &b) { return a.priority > b.priority; });
+    if (static_cast<int32_t>(slots_.size()) > kSortedSlotCap) slots_.resize(kSortedSlotCap);
 }
 
 // ----------------------------------------------------------------------------
@@ -974,7 +1009,13 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
                         window_groups_.push_back(g);
                     }
                 }
-                if (rec.type == kOccRecWindow && ctx.recurse_windows) {
+                // Both legs (the weld track and the window bank) join at the
+                // recurse-windows gate, so a def with attrib bit 27 also walks
+                // a type-5 link into its far section. [orig: the type-5
+                // `jmp loc_5C560C` @ 0x5c5519 / 0x5c54ed, `cmp
+                // g_PortalCtxRecurseWindows,0` @ 0x5c560c, the recursion
+                // @ 0x5c5619]
+                if (ctx.recurse_windows) {
                     ++ctx.depth;
                     traverse(ctx, far_section, wedge, wedge_count);
                     --ctx.depth;
@@ -1112,19 +1153,12 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
     entity_pos_fixed(*cand, cand_pos_fixed);
     float pos[3];
     render_float_from_fixed(cand_pos_fixed, pos);
-    // The DEF bound radius (entity+0). Stand-in: the collision-model bound
-    // (max |AABB corner|) — the same D-COL-3 derivation the prox tables use.
-    int32_t radius_fixed = 0x10000;
-    if (cand_cm != nullptr && cand_cm->valid()) {
-        int32_t c[3], r;
-        bound_sphere_fixed(*cand_cm, c, r, cand->uniform_scale_q16);
-        const int32_t corner = vec_len_ftol(
-            abs32(cand_cm->min[0]) > abs32(cand_cm->max[0]) ? cand_cm->min[0] : cand_cm->max[0],
-            abs32(cand_cm->min[1]) > abs32(cand_cm->max[1]) ? cand_cm->min[1] : cand_cm->max[1],
-            abs32(cand_cm->min[2]) > abs32(cand_cm->max[2]) ? cand_cm->min[2] : cand_cm->max[2]);
-        radius_fixed = corner;
-    }
-    const float radius = static_cast<float>(radius_fixed) * (io::kInvFp16One);
+    // The candidate's entity+0 bound radius (the scaled model bound + 1/16,
+    // stamped at entity init), fild * 1/65536.
+    // [orig: `mov eax,[esi]; fild dword ptr [eax]` @ 0x5c463e..0x5c4640,
+    //  `fmul flt_7C3310` @ 0x5c464f]
+    const float radius =
+        static_cast<float>(to_fixed(cand->bound_radius)) * (io::kInvFp16One);
 
     // Camera-inside early rule. [orig: @ 0x5c4662-0x5c4721]
     const int32_t window_groups = static_cast<int32_t>(window_groups_.size());
@@ -1318,15 +1352,28 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
     water_visible_ = false;
 
     auto water_straddle = [&](EntityHandle h) {
-        // Building straddles the water plane: z + max_z > water AND
-        // z + min_z < water. [orig: the two algebraically-equal forms
-        // @ 0x5c8922 (collision header) / 0x5c89a9 (entity bbox fields)]
+        // A camera building straddles the water plane: z + the collision
+        // header's max z > water AND z + its min z < water.
+        // [orig: [model+0xB0]+0x2C / +0x28 @ 0x5c8900..0x5c8922]
         const Entity *e = world.registry.get(h);
         const CollisionModel *cm = collision.model_for(world, h);
         if (e == nullptr || cm == nullptr || !cm->valid()) return false;
         int32_t p[3];
         entity_pos_fixed(*e, p);
         return p[2] + cm->max[2] > cam.water_z && p[2] + cm->min[2] < cam.water_z;
+    };
+    auto link_water_straddle = [&](EntityHandle h) {
+        // A linked building straddles by its bound SPHERE instead: z + the
+        // sphere center's z +- the sphere radius (entity+0x204 / +0x208,
+        // the center z added unrotated). [orig: @ 0x5c8985..0x5c89a9]
+        const Entity *e = world.registry.get(h);
+        const CollisionModel *cm = collision.model_for(world, h);
+        if (e == nullptr || cm == nullptr || !cm->valid()) return false;
+        int32_t center_local[3];
+        int32_t radius = 0;
+        bound_sphere_fixed(*cm, center_local, radius, e->uniform_scale_q16);
+        const int32_t z = to_fixed(e->position.z) + center_local[2];
+        return z + radius > cam.water_z && z - radius < cam.water_z;
     };
 
     // The camera-inside branch tests hit slot 0's WHOLE dword; the per-slot
@@ -1358,7 +1405,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
             const WeldRecord &wr = welds_[link_track_[li]];
             const int32_t mi = wr.other_entity.slot() & (kMaskSlots - 1);
             masks_[mi] |= traverse_from_section(world, wr.other_entity, wr.other_section, cam);
-            if ((masks_[mi] & 0xFFFFFFEu) != 0 && water_straddle(wr.other_entity))
+            if ((masks_[mi] & 0xFFFFFFEu) != 0 && link_water_straddle(wr.other_entity))
                 water_visible_ = true;
         }
         // Every other visible building: TOC, then outside-in or full.
@@ -1414,12 +1461,13 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
 }
 
 // [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4 — the count resets,
-// the building collect, the occluder-plane build, the mask build. The distance
-// sort @ 0x5c4410 orders retail draw calls only (D-OCC-10); the downstream
-// entity collectors run through entity_render_visible.]
+// the building collect, the slot sort (@ 0x5c9188), the occluder-plane build,
+// the mask build; the downstream entity collectors run through
+// entity_render_visible.]
 void OcclusionWorld::build_frame(World &world, CollisionWorld &collision,
                                  const OcclusionFrameCamera &cam) {
     collect_buildings(world, collision, cam);
+    sort_portal_slots();
     build_occluder_planes(world, cam);
     build_section_masks(world, collision, cam);
 }
@@ -1450,22 +1498,31 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
         if (!active) return false;
     }
 
+    int32_t epos[3];
+    entity_pos_fixed(ent, epos);
+    if (ent.kind == EntityKind::Organic) {
+        // Persons (def type 3) project their own position with the entity+0
+        // bound radius. [orig: collect_visible_entities_for_terrain — the
+        // type-3 branch @ 0x5c8dd7..0x5c8de9, the position @ 0x5c8e18]
+        const bool parachute =
+            ((ent.flags | ent.engine_flags) & kEntityFlagParachute) != 0;
+        return person_render_visible(
+            collision, cam, epos,
+            person_collector_radius(to_fixed(ent.bound_radius), parachute),
+            ent.occlusion_latch, world.logic_tick);
+    }
+
     // Bound sphere + view cull (also paces the latch like the original — the
     // latch only ticks for view-collected entities).
     int32_t center_world[3];
     int32_t radius = 0x10000;
     const CollisionModel *cm = collision.model_for(world, ent.handle);
-    int32_t epos[3];
-    entity_pos_fixed(ent, epos);
     if (cm != nullptr && cm->valid()) {
         int32_t center_local[3];
         bound_sphere_fixed(*cm, center_local, radius, ent.uniform_scale_q16);
-        const CollisionMatrix pose = collision_matrix_from_heading(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(ent.yaw)), epos);
-        pose.transform_point(center_local, center_world);
+        entity_euler_pose(ent, epos).transform_point(center_local, center_world);
     } else {
-        // No collision instance (organics): position-centered unit sphere
-        // stand-in for the graphic bounds (D-OCC-14).
+        // No collision instance: a position-centered unit sphere.
         center_world[0] = epos[0];
         center_world[1] = epos[1];
         center_world[2] = epos[2];
@@ -1474,12 +1531,46 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
                                  ent.occlusion_latch, world.logic_tick);
 }
 
+// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — `mov esi,[edi]`
+// (entity+0) @ 0x5c8df3, and under Flags 0x20 (`test byte ptr [edi+24h],20h`
+// @ 0x5c8def) the special item-185 model's radius instead: gItemDefs[
+// dword_A892A0]+0xF0 -> model +0x14 @ 0x5c8df7..0x5c8e10]
+int32_t OcclusionWorld::person_collector_radius(int32_t bound_radius_q16,
+                                                bool parachute) const {
+    return parachute ? parachute_radius_q16_ : bound_radius_q16;
+}
+
+// [orig: collect_visible_entities_for_terrain @ 0x5c8c60, the person leg: the
+// |view depth| < fog + radius cull @ 0x5c8e26..0x5c8e3c, the viewport clip
+// @ 0x5c8e4d, the sub-pixel floor `cmp dword_A784F0,0C000h; jle` @ 0x5c8e5e
+// BEFORE the latch, then the latch @ 0x5c8e7b..0x5c8eab with the probe aimed
+// at the entity position (`push ebx` = entity+4 @ 0x5c8e91)]
+bool OcclusionWorld::person_render_visible(const CollisionWorld &collision,
+                                           const OcclusionFrameCamera &cam,
+                                           const int32_t pos[3], int32_t radius,
+                                           uint8_t &latch, uint32_t logic_tick) {
+    int32_t depth = 0;
+    if (!sphere_in_view(cam, pos, radius, &depth)) return false;
+    if (renderer::object_subpixel_culled(
+                renderer::project_bound_sphere_radius_q16(radius, depth, cam.focal_pixels)))
+        return false;
+    return latch_render_visible(collision, cam, pos, radius, latch, logic_tick);
+}
+
 bool OcclusionWorld::sphere_render_visible(const CollisionWorld &collision,
                                            const OcclusionFrameCamera &cam,
                                            const int32_t center_world[3],
                                            int32_t radius, uint8_t &latch,
                                            uint32_t logic_tick) {
     if (!sphere_in_view(cam, center_world, radius)) return false;
+    return latch_render_visible(collision, cam, center_world, radius, latch, logic_tick);
+}
+
+bool OcclusionWorld::latch_render_visible(const CollisionWorld &collision,
+                                          const OcclusionFrameCamera &cam,
+                                          const int32_t center_world[3],
+                                          int32_t radius, uint8_t &latch,
+                                          uint32_t logic_tick) {
 
     // Three-ray latch, outdoors only. [orig: @ 0x5c7125-0x5c7162]
     const bool outdoors = (~cam.local_blink_flags & 0x2u) != 0;
@@ -1504,18 +1595,21 @@ bool OcclusionWorld::building_visible(EntityHandle h) const {
     return false;
 }
 
-// [orig: the mask read + forced-bit merge in Terrain_RenderSectorModels
-// @ 0x5c5d72-0x5c5da8 — def bytes +2193/+2194 force all bits >= their value
-// visible (x86 shl masks the count & 31).]
+// [orig: the mask read `mov edi, g_BuildingSectionVisMask[eax*4]` in
+// Terrain_RenderSectorModels @ 0x5c5d72]
 uint32_t OcclusionWorld::section_mask(EntityHandle h) const {
-    uint32_t mask = masks_.empty() ? 0u : masks_[h.slot() & (kMaskSlots - 1)];
-    const Instance *inst = instance(h);
-    if (inst != nullptr) {
-        if (inst->def_bits.forced_lo != 0)
-            mask |= 0xFFFFFFFFu << (inst->def_bits.forced_lo & 31);
-        if (inst->def_bits.forced_hi != 0)
-            mask |= 0xFFFFFFFFu << (inst->def_bits.forced_hi & 31);
-    }
+    return masks_.empty() ? 0u : masks_[h.slot() & (kMaskSlots - 1)];
+}
+
+// [orig: Terrain_RenderSectorModels — `mov cl,[eax+891h]; test cl,cl; jz;
+// or edx,-1; shl edx,cl` @ 0x5c5d7c..0x5c5d8d, the +0x892 twin
+// @ 0x5c5d95..0x5c5da4 (x86 shl masks the count & 31)]
+uint32_t OcclusionWorld::forced_section_mask(EntityHandle h) const {
+    const auto it = forced_sections_.find(h.packed);
+    if (it == forced_sections_.end()) return 0u;
+    uint32_t mask = 0;
+    for (const uint8_t first : it->second)
+        if (first != 0) mask |= 0xFFFFFFFFu << (first & 31);
     return mask;
 }
 

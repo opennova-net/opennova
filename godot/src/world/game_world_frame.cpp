@@ -22,6 +22,7 @@
 
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
+#include "render/object_lod_frame.h"
 #include "simulation/entity_presenter.h"
 
 using namespace godot;
@@ -757,6 +758,19 @@ Camera3D *GameWorld::render_camera() const {
 	return nullptr;
 }
 
+Camera3D *GameWorld::image_camera() const {
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	Camera3D *through = presenter != nullptr ? presenter->projection_camera() : nullptr;
+	if (through != nullptr && presenter->projection_viewport() != nullptr) {
+		return through;
+	}
+	return render_camera();
+}
+
+float GameWorld::surface_width() const {
+	return is_inside_tree() ? get_viewport()->get_visible_rect().size.x : 0.0f;
+}
+
 // The view the imminent render uses: the live camera AFTER the local-view
 // leg placed it; the frame-entry stash only when no camera exists (headless
 // worlds/tests) (D-RORD-8).
@@ -776,7 +790,8 @@ void GameWorld::apply_occlusion_frame() {
 	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	// Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if (world_ready_ && !frame_skip_occlusion_) {
-		occlusion_->apply_frame(render_camera(), render_camera_xform(), mission_forces_indoors_);
+		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
+				mission_forces_indoors_);
 	}
 }
 
@@ -876,17 +891,29 @@ void GameWorld::render_material_frame() {
 	// at a defined ladder slot (after occlusion resolves visibility, before
 	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
 	// computes model runtime constants during the render sector walk].
-	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
-	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
-	if (camera != nullptr) {
-		const Vector2 viewport_size = viewport->get_visible_rect().size;
-		ObjectModel::update_authored_lods(camera->get_global_transform(), camera->get_fov(),
-				viewport_size.x, viewport_size.y);
+	// Every view drawing the world this frame: the frame's image (the
+	// stretched target's camera while it is live) over the surface width, the
+	// retail viewport width the focal and frame scale derive from, and the
+	// weapon Inset pass over its own target while it renders.
+	ObjectLodFrame frames[2];
+	int frame_count = 0;
+	if (Camera3D *image = image_camera()) {
+		frames[frame_count] = ObjectLodFrame::from_camera(image, surface_width());
+		frame_count += frames[frame_count].valid ? 1 : 0;
+	}
+	EffectWorld *effects = get_effect_world();
+	Camera3D *inset = effects != nullptr ? effects->get_second_scene_camera() : nullptr;
+	if (inset != nullptr && inset->is_inside_tree() && inset->get_viewport() != nullptr) {
+		frames[frame_count] = ObjectLodFrame::from_camera(
+				inset, inset->get_viewport()->get_visible_rect().size.x);
+		frame_count += frames[frame_count].valid ? 1 : 0;
+	}
+	if (frame_count > 0) {
+		ObjectModel::update_authored_lod_views(frames, frame_count);
 		// The retained static instances select their RLOD per entity from the
-		// same camera frame (the placer rewrites only the slots that crossed).
+		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {
-			placer_->update_static_lods(camera->get_global_transform(), camera->get_fov(),
-					viewport_size.x, viewport_size.y);
+			placer_->update_static_lod_views(frames, frame_count);
 		}
 	}
 	if (!frame_stats_on_) {

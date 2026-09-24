@@ -13,6 +13,15 @@ namespace opennova::renderer {
 // [orig: render_sector_entity @ 0x5c42de]
 inline constexpr int32_t kObjectLodSubPixelCullQ16 = 49152;
 
+// The sub-pixel floor as a predicate over a projected radius: TRUE = the
+// entity is not drawn. The sector-entity draw tests it before the RLOD walk,
+// the person collector before its latch.
+// [orig: render_sector_entity `cmp edi,0C000h; jle` @ 0x5c42d8..0x5c42de;
+//  collect_visible_entities_for_terrain @ 0x5c8e5e]
+inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
+  return projected_radius_q16 <= kObjectLodSubPixelCullQ16;
+}
+
 // The projected radius the point projector reports for a sphere whose view
 // depth is smaller than its radius (the eye is inside or behind it): a fixed
 // 4096 px in Q16.16, which selects the finest level.
@@ -130,6 +139,14 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
 // [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9468;
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90f1]
 float object_lod_frame_scale(int detail_level, float viewport_width);
+
+// The viewport's focal length in pixels: half the viewport WIDTH over the
+// tangent of half the HORIZONTAL field of view, rounded half up.
+// [orig: Viewport_BuildProjectionMatrix @ 0x410fb0 — (fov >> 1) * dbl_7C3620
+//  (degrees Q16 -> radians) @ 0x410fc0..0x410fdb, the width right-left+1
+//  @ 0x410fc3..0x410fd3, width * 0.5 / fptan + 0.5 -> _ftol2_sse
+//  @ 0x410fe1..0x410ff7, stored to viewport+0x40 @ 0x4110e1]
+int32_t object_lod_focal_pixels(float viewport_width, double tan_half_horizontal);
 
 // The projected bound-sphere radius in Q16.16 pixels: the sphere radius
 // (Q16.16 world units) times the focal length in pixels over the view depth

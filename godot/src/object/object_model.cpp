@@ -549,28 +549,53 @@ Dictionary ObjectModel::get_render_part_nodes() const {
 	return result;
 }
 
-void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
-	// [orig: g_HiddenSectionMask @ 0xB7965C consumption in
-	//  Terrain_RenderSectorModels @ 0x5c5d30 — per-draw hidden mask is ~mask;
-	//  the renderer-specific two-pass legs are D-OCC-13]
-	if (section_visibility_mask_ == p_mask) {
-		return;
+// Retail hides part i when bit (i & 31) of entity+0x138 | g_HiddenSectionMask
+// is set; g_HiddenSectionMask (retail @ 0xB7965C) is ~(raw | forced) for a batched building
+// (retail Terrain_RenderSectorModels @ 0x5c5d72..0x5c5e4f) and 0 for every
+// other sector entity (@ 0x5c7b6b), so a model without a verdict hides only
+// its destroyed sections (retail BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2).
+bool ObjectModel::section_part_visible(int p_section) const {
+	const uint32_t bit = 1u << (static_cast<uint32_t>(p_section) & 31u);
+	if ((destroyed_section_mask_ & bit) != 0) {
+		return false;
 	}
-	section_visibility_mask_ = p_mask;
+	if (occlusion_section_mask_ == -1) {
+		return true;
+	}
+	return ((static_cast<uint32_t>(occlusion_section_mask_) | forced_section_mask_) & bit) != 0;
+}
+
+void ObjectModel::apply_section_visibility() {
 	point_light_draw_parts_dirty_ = true;
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
 		if (kv.value != nullptr) {
-			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
+			kv.value->set_visible(section_part_visible(kv.key));
 		}
 	}
 	for (const KeyValue<int, OccluderInstance3D *> &kv : authored_occluders_) {
 		if (kv.value != nullptr) {
-			kv.value->set_visible(
-					p_mask == -1 ||
-					(kv.key < 63 &&
-							((static_cast<uint64_t>(p_mask) >> kv.key) & 1u) != 0));
+			kv.value->set_visible(section_part_visible(kv.key));
 		}
 	}
+}
+
+void ObjectModel::set_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask) {
+	const uint32_t forced = static_cast<uint32_t>(p_forced_mask);
+	if (occlusion_section_mask_ == p_raw_mask && forced_section_mask_ == forced) {
+		return;
+	}
+	occlusion_section_mask_ = p_raw_mask;
+	forced_section_mask_ = forced;
+	apply_section_visibility();
+}
+
+void ObjectModel::set_destroyed_section_mask(int64_t p_hidden_mask) {
+	const uint32_t hidden = static_cast<uint32_t>(p_hidden_mask);
+	if (destroyed_section_mask_ == hidden) {
+		return;
+	}
+	destroyed_section_mask_ = hidden;
+	apply_section_visibility();
 }
 
 Array ObjectModel::get_surface_materials() const {
@@ -913,34 +938,60 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
 		float p_viewport_width,
 		float p_viewport_height) {
-	if (authored_lod_models_.is_empty()) {
-		return 0;
-	}
 	// The frame scale, the projected radius and the selector are engine facts
 	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
 			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
-	if (!frame.valid) {
+	return update_authored_lod_views(&frame, 1);
+}
+
+int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width) {
+	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width);
+	return update_authored_lod_views(&frame, 1);
+}
+
+// [engine: renderer::select_object_lod, object_subpixel_culled and
+//  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
+//  draw returns before the RLOD walk below 0.75 px (retail render_sector_entity
+//  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per view]
+int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
+		int p_frame_count) {
+	if (authored_lod_models_.is_empty() || p_frames == nullptr) {
 		return 0;
 	}
-	// The cheap math runs over the registered set in place; a level change is
-	// applied after the walk so set_active_lod's runtime-state refresh never
-	// runs against the set being iterated. Nothing allocates while no model
-	// crosses a threshold.
+	const int view_count = std::min(p_frame_count, static_cast<int>(kMaxLodViews));
+	bool any_valid = false;
+	for (int v = 0; v < view_count; ++v) {
+		any_valid = any_valid || p_frames[v].valid;
+	}
+	if (!any_valid) {
+		return 0;
+	}
+	// The cheap math runs over the registered set in place; visibility and
+	// level changes are applied after the walk so a visibility notification or
+	// set_active_lod's runtime-state refresh never runs against the set being
+	// iterated. Nothing allocates while no model crosses a threshold.
 	struct LodSwitch {
 		ObjectModel *model = nullptr;
 		int lod_index = 0;
+	};
+	struct SubpixelChange {
+		ObjectModel *model = nullptr;
+		bool hidden = false;
 	};
 	// Frame scratch that keeps its capacity across calls (deliberately never
 	// freed: a static with a Godot allocator destructor would run after the
 	// extension's allocator hooks are gone), so a frame with attachments or
 	// crossings allocates nothing once warm.
 	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
+	static LocalVector<SubpixelChange> &subpixel_changes =
+			*memnew(LocalVector<SubpixelChange>);
 	switches.clear();
+	subpixel_changes.clear();
 	static uint64_t projection_frame = 0;
 	++projection_frame;
-	// Attachments take their owner's level after the owners' own selections
-	// have been applied (renderer::attachment_lod_index).
+	// Attachments take their owner's level (and sub-pixel verdict) after the
+	// owners' own selections have been applied (renderer::attachment_lod_index).
 	static LocalVector<ObjectModel *> &attachments =
 			*memnew(LocalVector<ObjectModel *>);
 	attachments.clear();
@@ -958,44 +1009,74 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			source->lod_projection_frame_ = projection_frame;
 			const Transform3D world = source->get_global_transform();
 			const auto &sphere = source->entity_projection_sphere_;
-			if (sphere.valid) {
-				const Vector3 center = ObjectLodFrame::projection_center(
-						world, sphere, source->entity_projection_scale_q16_);
-				source->lod_projection_visible_ = frame.project_q16(center,
-						sphere.radius_q16, source->lod_projected_radius_q16_);
-			} else {
-				// Document-less previews have no entity collision-bound producer.
-				const float radius = (source->model_sphere_radius_ > 0.0f
-						? source->model_sphere_radius_
-						: source->model_bounds_.get_longest_axis_size() * 0.5f) *
-						ObjectLodFrame::uniform_scale(world.basis);
-				source->lod_projection_visible_ = frame.project(
-						world.origin, radius, source->lod_projected_radius_q16_);
+			for (int v = 0; v < view_count; ++v) {
+				const ObjectLodFrame &frame = p_frames[v];
+				if (!frame.valid) {
+					source->lod_projection_visible_[v] = false;
+					continue;
+				}
+				if (sphere.valid) {
+					const Vector3 center = ObjectLodFrame::projection_center(
+							world, sphere, source->entity_projection_scale_q16_);
+					source->lod_projection_visible_[v] = frame.project_q16(center,
+							sphere.radius_q16, source->lod_projected_radius_q16_[v]);
+				} else {
+					// Document-less previews have no entity collision-bound producer.
+					const float radius = (source->model_sphere_radius_ > 0.0f
+							? source->model_sphere_radius_
+							: source->model_bounds_.get_longest_axis_size() * 0.5f) *
+							ObjectLodFrame::uniform_scale(world.basis);
+					source->lod_projection_visible_[v] = frame.project(
+							world.origin, radius, source->lod_projected_radius_q16_[v]);
+				}
 			}
 		}
-		// A rejected entity never reaches any part's threshold selector.
-		if (!source->lod_projection_visible_) continue;
-		const int32_t projected_q16 = source->lod_projected_radius_q16_;
-		const opennova::renderer::ObjectLodSelection selection =
-				opennova::renderer::select_object_lod(
-						model->authored_lod_thresholds_q16_, projected_q16,
-						frame.projection_scale, model->authored_lod_available_);
-		if (selection.lod_index < 0 || selection.lod_index == model->active_lod_) {
-			continue;
+		// A view that rejected the entity never reaches its selector; an
+		// entity no view sees keeps its level and its sub-pixel verdict.
+		bool seen = false;
+		bool above_floor = false;
+		int lod_index = -1;
+		for (int v = 0; v < view_count; ++v) {
+			if (!source->lod_projection_visible_[v]) {
+				continue;
+			}
+			seen = true;
+			const int32_t projected_q16 = source->lod_projected_radius_q16_[v];
+			if (opennova::renderer::object_subpixel_culled(projected_q16)) {
+				continue;
+			}
+			above_floor = true;
+			const opennova::renderer::ObjectLodSelection selection =
+					opennova::renderer::select_object_lod(
+							model->authored_lod_thresholds_q16_, projected_q16,
+							p_frames[v].projection_scale, model->authored_lod_available_);
+			if (selection.lod_index >= 0 &&
+					(lod_index < 0 || selection.lod_index < lod_index)) {
+				lod_index = selection.lod_index;
+			}
 		}
-		// The tree-visibility walk only for the models that actually cross: a
-		// hidden model re-selects on the frame it becomes visible.
-		if (!model->is_visible_in_tree()) {
-			continue;
+		if (!seen) continue;
+		if (above_floor == model->subpixel_hidden_) {
+			subpixel_changes.push_back(SubpixelChange{ model, !above_floor });
 		}
-		switches.push_back(LodSwitch{ model, selection.lod_index });
+		if (lod_index >= 0 && lod_index != model->active_lod_) {
+			switches.push_back(LodSwitch{ model, lod_index });
+		}
+	}
+	for (const SubpixelChange &change : subpixel_changes) {
+		if (authored_lod_models_.has(change.model)) {
+			change.model->set_subpixel_hidden(change.hidden);
+		}
 	}
 	int applied = 0;
 	for (const LodSwitch &change : switches) {
 		// A switch applied earlier in this loop can unregister or free another
 		// queued model (set_active_lod's runtime-state refresh reaches child
-		// nodes); only a still-registered model is dereferenced.
-		if (!authored_lod_models_.has(change.model)) {
+		// nodes); only a still-registered model is dereferenced. The
+		// tree-visibility walk only for the models that actually cross: a
+		// hidden model re-selects on the frame it becomes visible.
+		if (!authored_lod_models_.has(change.model) ||
+				!change.model->is_visible_in_tree()) {
 			continue;
 		}
 		change.model->set_active_lod(change.lod_index);
@@ -1006,6 +1087,9 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			continue;
 		}
 		const ObjectModel *owner = attachment->get_authored_lod_owner();
+		// Retail draws an attachment inside its owner's bone callback, so the
+		// owner's sub-pixel return drops it too.
+		attachment->set_subpixel_hidden(owner != nullptr && owner->subpixel_hidden_);
 		const int level = attachment->exact_owner_lod_ && owner != nullptr ? owner->active_lod_
                 : opennova::renderer::attachment_lod_index(
 				owner != nullptr ? owner->active_lod_ : 0,
@@ -1393,10 +1477,8 @@ Node3D *ObjectModel::get_or_create_robj_node(int p_robj_index) {
 	}
 	Node3D *node = memnew(Node3D);
 	node->set_name(String("Robj_") + String::num_int64(p_robj_index));
-	// Rebuilds honor the applied section mask.
-	if (section_visibility_mask_ != -1) {
-		node->set_visible(((section_visibility_mask_ >> p_robj_index) & 1) == 1);
-	}
+	// Rebuilds honor the applied section masks.
+	node->set_visible(section_part_visible(p_robj_index));
 	add_child(node);
 	robj_nodes_[p_robj_index] = node;
 	// The dense part-index -> node array apply_panm_to_nodes writes through
@@ -1634,14 +1716,26 @@ void ObjectModel::set_on_screen(bool p_value) {
 // fights the other and a sim-hidden entity never flashes. Node3D::set_visible
 // no-ops on an unchanged flag, so the visibility-changed notification (light
 // draw parts dirty + the runtime wake) fires exactly on the product's edges.
+void ObjectModel::apply_node_visibility() {
+	set_visible(present_visible_ && !occlusion_hidden_ && !subpixel_hidden_);
+}
+
 void ObjectModel::set_present_visible(bool p_visible) {
 	present_visible_ = p_visible;
-	set_visible(present_visible_ && !occlusion_hidden_);
+	apply_node_visibility();
 }
 
 void ObjectModel::set_occlusion_hidden(bool p_hidden) {
 	occlusion_hidden_ = p_hidden;
-	set_visible(present_visible_ && !occlusion_hidden_);
+	apply_node_visibility();
+}
+
+void ObjectModel::set_subpixel_hidden(bool p_hidden) {
+	if (subpixel_hidden_ == p_hidden) {
+		return;
+	}
+	subpixel_hidden_ = p_hidden;
+	apply_node_visibility();
 }
 
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
@@ -1831,6 +1925,9 @@ void ObjectModel::_bind_methods() {
 					"viewport_width", "viewport_height"),
 			&ObjectModel::update_authored_lods);
 	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width"),
+			&ObjectModel::update_authored_lods_for_camera);
+	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("get_live_geometry_instance_count"),
 			&ObjectModel::get_live_geometry_instance_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
@@ -1908,8 +2005,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_model_light_world_position);
 	ClassDB::bind_method(D_METHOD("get_render_part_nodes"),
 			&ObjectModel::get_render_part_nodes);
-	ClassDB::bind_method(D_METHOD("set_section_visibility_mask", "mask"),
-			&ObjectModel::set_section_visibility_mask);
+	ClassDB::bind_method(D_METHOD("set_occlusion_section_mask", "raw_mask", "forced_mask"),
+			&ObjectModel::set_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("get_occlusion_section_mask"),
+			&ObjectModel::get_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("set_destroyed_section_mask", "hidden_mask"),
+			&ObjectModel::set_destroyed_section_mask);
+	ClassDB::bind_method(D_METHOD("get_destroyed_section_mask"),
+			&ObjectModel::get_destroyed_section_mask);
 	ClassDB::bind_method(D_METHOD("get_surface_material_indices"),
 			&ObjectModel::get_surface_material_indices);
 	ClassDB::bind_method(D_METHOD("get_surface_materials"),
@@ -1952,6 +2055,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_subpixel_hidden"),
+			&ObjectModel::is_subpixel_hidden);
 
 	ClassDB::bind_method(D_METHOD("set_ctrl_value", "name", "value"),
 			&ObjectModel::set_ctrl_value);

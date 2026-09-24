@@ -54,6 +54,8 @@ class Terrain;
 class MeshInstance3D;
 class OccluderInstance3D;
 class VisualInstance3D;
+struct ObjectLodFrame;
+class Camera3D;
 
 // The env-derived world lighting/fog values (ADR 0017's typed record,
 // native). Computed once per env change; the object shader family reads the
@@ -319,7 +321,17 @@ private:
 	bool viewmodel_pass_ = false;
 	uint32_t viewmodel_pass_stamped_serial_ = 0;
 	int64_t panm_applied_revision_ = 0;
-	int64_t section_visibility_mask_ = -1;
+	// The part draw's two section masks: a part is hidden when its bit is set
+	// in the entity's destroyed sections OR clear in the occlusion frame's
+	// draw mask (the RAW verdict ORed with the def's forced sections; -1 =
+	// no verdict, every section). Retail tests bit (i & 31) of
+	// entity+0x138 | g_HiddenSectionMask per bone (BoneCallback_bldg_World
+	// @ 0x4e22cf..0x4e22e2).
+	int64_t occlusion_section_mask_ = -1;
+	uint32_t forced_section_mask_ = 0;
+	uint32_t destroyed_section_mask_ = 0;
+	bool section_part_visible(int p_section) const;
+	void apply_section_visibility();
 	HashMap<int, OccluderInstance3D *> authored_occluders_;
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
@@ -361,9 +373,12 @@ private:
 	bool parachute_deployed_ = false;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
+	// The frame's views a projection is kept for: the frame's image and the
+	// weapon Inset pass (update_authored_lod_views).
+	static constexpr int kMaxLodViews = 2;
 	uint64_t lod_projection_frame_ = 0;
-	int32_t lod_projected_radius_q16_ = 0;
-	bool lod_projection_visible_ = false;
+	int32_t lod_projected_radius_q16_[kMaxLodViews] = {};
+	bool lod_projection_visible_[kMaxLodViews] = {};
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -402,6 +417,13 @@ private:
 	// it, so the visibility-changed notification fires on every edge).
 	bool present_visible_ = true;
 	bool occlusion_hidden_ = false;
+	// The authored-LOD walk's sub-pixel verdict: a world model whose bound
+	// sphere projects to at most 0.75 px in every view that sees it is not
+	// drawn (retail render_sector_entity @ 0x5c42d8..0x5c42de returns before
+	// the RLOD walk); an attachment takes its owner's.
+	bool subpixel_hidden_ = false;
+	void set_subpixel_hidden(bool p_hidden);
+	void apply_node_visibility();
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
 	// The last MATCHTERRAIN page state the terrain-frame leg stamped
@@ -766,18 +788,35 @@ public:
 			float p_vertical_fov_degrees,
 			float p_viewport_width,
 			float p_viewport_height);
+	// The same walk over every view drawing the world this frame (at most
+	// kMaxLodViews: the frame's image and, while it renders, the weapon Inset
+	// pass). The views share one node per entity, so each model takes the
+	// finest level any view selects and is sub-pixel hidden only when every
+	// view that sees it projects it at or below 0.75 px.
+	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// One camera's view (ObjectLodFrame::from_camera): its own drawn frustum
+	// (the keep-aspect mode decides which axis its fov names) and the focal
+	// over `viewport_width`, the width the image reaches the surface at.
+	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width);
 	Dictionary get_render_part_nodes() const;
 	// A model-space attachment through the rendered subobject's live pose.
 	// Skeletal bones need their inverse rest pose; rigid PANM parts already
 	// map model space directly. Missing parts use the model root.
 	Transform3D subobject_model_to_world(int p_subobject) const;
 	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
-	void set_section_visibility_mask(int64_t p_mask);
-	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
-	// sections visible). Read by the corona owner-section gate.
-	int64_t get_section_visibility_mask() const {
-		return section_visibility_mask_;
-	}
+	// The occlusion frame's verdict: the RAW section mask (-1 = no verdict,
+	// every section) and the def's forced-visible sections the part draw ORs
+	// over it.
+	void set_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask);
+	// The raw verdict last applied (-1 = none yet). Read by the corona
+	// owner-section gate, which tests the raw word like retail's
+	// Terrain_IsBuildingSectionBitSet.
+	int64_t get_occlusion_section_mask() const { return occlusion_section_mask_; }
+	int64_t get_forced_section_mask() const { return forced_section_mask_; }
+	// The entity's destroyed sections (the sim's hidden-section mask, 0 =
+	// none): hidden whatever the occlusion verdict says.
+	void set_destroyed_section_mask(int64_t p_hidden_mask);
+	int64_t get_destroyed_section_mask() const { return destroyed_section_mask_; }
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
 	bool is_playing() const { return is_playing_; }
@@ -871,6 +910,7 @@ public:
 	bool is_present_visible() const { return present_visible_; }
 	void set_occlusion_hidden(bool p_hidden);
 	bool is_occlusion_hidden() const { return occlusion_hidden_; }
+	bool is_subpixel_hidden() const { return subpixel_hidden_; }
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();

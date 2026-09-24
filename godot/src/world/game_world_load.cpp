@@ -1043,7 +1043,8 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// applies, the placed-node index it resolves buildings/entities through,
 	// and the entity presenter carrying the wire render gates + lighting
 	// contexts. Re-handed per load; unload's reset() forgets them.
-	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter());
+	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter(),
+			placer_);
 	// Vehicle initialization at the mission-start boundary grounds hulls against
 	// the water plane. Seed it before that pass, including unoccupied craft:
 	// 07TR's offshore LCACs otherwise settle on the seabed before crews board.

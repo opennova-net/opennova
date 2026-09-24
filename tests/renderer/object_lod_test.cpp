@@ -208,7 +208,21 @@ int main() {
         kObjectLodBehindEyeRadiusQ16);
   CHECK(kObjectLodBehindEyeRadiusQ16 == 0x10000000);
 
+  // The viewport focal [orig: Viewport_BuildProjectionMatrix
+  // @ 0x410fe1..0x410ff7]: width * 0.5 / tan(fov_h / 2) + 0.5, truncated —
+  // 1920 px at 90 deg horizontal is 960, and the width (not the height)
+  // carries it.
+  using opennova::renderer::object_lod_focal_pixels;
+  CHECK(object_lod_focal_pixels(1920.0f, 1.0) == 960);
+  CHECK(object_lod_focal_pixels(640.0f, 2.0) == 160);
+  CHECK(object_lod_focal_pixels(641.0f, 2.0) == 160);  // 160.25 + 0.5
+  CHECK(object_lod_focal_pixels(642.0f, 2.0) == 161);  // 160.5 + 0.5
+  CHECK(object_lod_focal_pixels(0.0f, 1.0) == 0);
+
   // The sub-pixel floor [orig: render_sector_entity @ 0x5c42de]: 0.75 px.
+  using opennova::renderer::object_subpixel_culled;
+  CHECK(object_subpixel_culled(kObjectLodSubPixelCullQ16));
+  CHECK(!object_subpixel_culled(kObjectLodSubPixelCullQ16 + 1));
   CHECK(kObjectLodSubPixelCullQ16 == 49152);
   CHECK(kObjectLodSubPixelCullQ16 == (3 << 16) / 4);
   CHECK(project_bound_sphere_radius_q16(1 << 15, 1000 << 16, 342) == 11115);

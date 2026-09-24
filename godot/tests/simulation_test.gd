@@ -587,7 +587,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -605,7 +605,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -664,7 +664,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -4321,15 +4321,56 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
-	assert_eq(visibility.size(), 2, "collision-backed no-OOBJ building stays in the host batch")
-	if visibility.size() == 2:
+	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
+	if visibility.size() == 3:
 		assert_eq(int(visibility[0]), placed.bms_id)
 		var packed := int(visibility[1])
-		assert_eq(Simulation.building_visibility_mask(packed), 0xFFFFFFFF,
-			"without a section map the host preserves every de-batched render part")
+		# Outdoors a windowless batch member draws its exterior section only
+		# (retail build_sector_visibility_masks @0x5c87d7..0x5c8830: the
+		# +0x2CD flag clear -> mask 1), the same word every batched building
+		# carries; the fixture item authors no forced sections.
+		assert_eq(Simulation.building_visibility_mask(packed), 1,
+			"the raw retail mask reaches the no-OOBJ building too")
+		assert_eq(int(visibility[2]), 0, "no forced sections")
 		assert_true(Simulation.building_visibility_visible(packed), "the in-frustum building is visible")
+
+
+func test_building_feed_carries_the_def_forced_sections() -> void:
+	# The part draw ORs the def's forced sections over the raw verdict: items.def
+	# first_door N stores N - 1 at itemDef +0x891, and every section at or above
+	# it draws whatever the raw mask says (retail ItemDef_ParseProperty
+	# @0x49F7BA..0x49F7DE; Terrain_RenderSectorModels @0x5c5d7c..0x5c5da8).
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		MissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_not_null(placed)
+	var dir := _native_fixture_dir()
+	var item_db := _item_db_from_text(dir, """begin "Guard Tower door"
+  id 102001
+  type building
+  graphic GuardTwr1
+  num_doors 1
+  First_Door 3
+end
+""" + _fixture_items_text())
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/house.3di", "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
+	assert_eq(visibility.size(), 3)
+	if visibility.size() == 3:
+		assert_eq(int(visibility[0]), placed.bms_id)
+		assert_eq(Simulation.building_visibility_mask(int(visibility[1])), 1,
+				"the raw word stays the outdoor exterior bit")
+		assert_eq(int(visibility[2]), 0xFFFFFFFC,
+				"first_door 3 forces sections 2 and up (-1 << 2)")
 
 
 func test_occlusion_delta_calls_emit_changes_only() -> void:
@@ -4351,14 +4392,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
-	assert_eq(first.size(), 2, "the first delta call emits the building's state")
+	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),

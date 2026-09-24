@@ -158,7 +158,7 @@ bool occlusion_from_3di(const Threedi3di3 &model, OcclusionModel &out) {
         rec.plane_count = so.num_planes;
         rec.face_start = face_cursor;
         rec.face_count = so.face_count;
-        rec.glow_scale = so.glow_scale;
+        rec.slot_priority_scale = so.slot_priority_scale;
         if (so.num_vertices > 0) vert_cursor += so.num_vertices;
         if (so.num_planes > 0) plane_cursor += so.num_planes;
         if (so.face_count > 0) face_cursor += so.face_count;

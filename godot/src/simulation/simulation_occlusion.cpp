@@ -26,9 +26,9 @@ void Simulation::occlusion_init_mission() {
 }
 
 void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-                                         double p_aspect, double p_near,
-                                         double p_fog_dist_units, double p_water_z_units,
-                                         bool p_force_indoors) {
+                                         double p_aspect, double p_viewport_width,
+                                         double p_near, double p_fog_dist_units,
+                                         double p_water_z_units, bool p_force_indoors) {
 	if (!kernel_) return;
 	// The camera hand-over: the scene's view as presentation-frame vectors;
 	// the mission/render remaps, the frustum planes and the Q22 rows are the
@@ -50,6 +50,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	view.fov_y_deg = static_cast<float>(p_fov_y_deg);
 	view.aspect = static_cast<float>(p_aspect);
 	view.near_units = static_cast<float>(p_near);
+	view.viewport_width = static_cast<float>(p_viewport_width);
 	view.fog_dist_units = static_cast<float>(p_fog_dist_units);
 	view.water_z_units = static_cast<float>(p_water_z_units);
 	view.local_blink_flags = kernel_->collision.local_player_blink_flags;
@@ -155,11 +156,41 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 					present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
 				continue;
 			}
-			int32_t center_world[3] = {es.x, es.y, es.z};
-			int32_t radius = 0x10000;
+			// A bare row is the client-built pool entity retail's collector
+			// walks: its type's entity+0 bound radius from the shared items.def/
+			// model resolve (the replica pipeline's own source), through the
+			// person leg for Player/Infantry rows (the parachute flag swaps in
+			// the item-185 radius) or the model leg's bound sphere placed by the
+			// row's full Euler pose.
+			const opennova::world::ResolvedCollisionShape shape =
+					kernel_->wire_collision_shape_for_type(es.type_id);
+			const int32_t pos[3] = {es.x, es.y, es.z};
 			uint8_t &latch = present_.wire_occlusion_latch[handle];
-			if (!kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
-						center_world, radius, latch, kernel_->world.logic_tick))
+			bool visible = true;
+			if (es.cls == opennova::EntityClass::Player ||
+					es.cls == opennova::EntityClass::Infantry) {
+				const int32_t radius = kernel_->occlusion.person_collector_radius(
+						shape.bound_radius_q16,
+						(es.rm_entity_flags & opennova::world::kEntityFlagParachute) != 0);
+				visible = kernel_->occlusion.person_render_visible(kernel_->collision, cam,
+						pos, radius, latch, kernel_->world.logic_tick);
+			} else {
+				int32_t center_world[3] = {es.x, es.y, es.z};
+				int32_t radius = 0x10000;
+				if (const opennova::world::CollisionModel *model =
+								kernel_->collision.model(shape.model_id);
+						model != nullptr && model->valid()) {
+					int32_t center_local[3];
+					opennova::world::OcclusionWorld::bound_sphere_fixed(
+							*model, center_local, radius, shape.uniform_scale_q16);
+					opennova::world::collision_matrix_from_euler(
+							es.heading_bam, es.pitch_bam, es.roll_bam, pos)
+							.transform_point(center_local, center_world);
+				}
+				visible = kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
+						center_world, radius, latch, kernel_->world.logic_tick);
+			}
+			if (!visible)
 				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
 		}
 	}
@@ -175,34 +206,33 @@ bool Simulation::building_visibility_visible(int64_t p_packed) {
 	return opennova::world::building_visibility_visible(p_packed);
 }
 
-// The building verdict walk, emitting only pairs whose packed
+// The building verdict walk, emitting only triples whose packed
 // visible<<32|mask changed since the last call. The apply walks changes
 // instead of the whole building set, so a steady frame does no per-building
 // node work at all.
 PackedInt64Array Simulation::get_building_visibility_changes() {
 	PackedInt64Array out;
 	if (!kernel_) return out;
-	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
-	// instance, plus collision-backed de-batched buildings that still entered
-	// the retail building batch. OOBJ instances apply their section mask.
-	// Without OOBJ there is no safe reimpl part-to-section map, so those buildings
-	// keep all render parts while still receiving batch/frustum/TOC visibility.
+	// Triples [bms_id, visible<<32 | raw mask, forced mask] for every building
+	// with an OCCLUSION instance or a collision model (every retail building
+	// batch member): the raw g_BuildingSectionVisMask word the other readers
+	// share, and the def's forced sections the part draw ORs over it
+	// (OcclusionWorld::section_draw_mask).
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		const bool has_occlusion = kernel_->occlusion.has_instance(e.handle);
-		if (!has_occlusion &&
+		if (!kernel_->occlusion.has_instance(e.handle) &&
 				kernel_->collision.model_for(kernel_->world, e.handle) == nullptr)
 			return;
 		const bool visible = kernel_->occlusion.building_visible(e.handle);
-		const uint32_t mask =
-		    has_occlusion ? kernel_->occlusion.section_mask(e.handle) : 0xFFFFFFFFu;
-		const int64_t packed = opennova::world::pack_building_visibility(mask, visible);
+		const int64_t packed = opennova::world::pack_building_visibility(
+				kernel_->occlusion.section_mask(e.handle), visible);
 		const uint32_t key = e.handle.packed;
 		auto it = present_.occl_apply_building_last.find(key);
 		if (it != present_.occl_apply_building_last.end() && it->second == packed) return;
 		present_.occl_apply_building_last[key] = packed;
 		out.push_back(e.bms_id);
 		out.push_back(packed);
+		out.push_back(static_cast<int64_t>(kernel_->occlusion.forced_section_mask(e.handle)));
 	});
 	return out;
 }

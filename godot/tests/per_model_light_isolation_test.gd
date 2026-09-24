@@ -321,12 +321,12 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 			owners, null, mesh)
 	assert_eq(count, 3, "an owner without an occlusion verdict passes the gate")
 	# The occlusion pass hides section 2: the owned corona disappears.
-	owner_model.set_section_visibility_mask(~(1 << 2))
+	owner_model.set_occlusion_section_mask(~(1 << 2), 0)
 	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
 			owners, null, mesh)
 	assert_eq(count, 0, "a hidden owner section suppresses the owned corona")
-	owner_model.set_section_visibility_mask(1 << 2)
+	owner_model.set_occlusion_section_mask(1 << 2, 0)
 	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
 			owners, null, mesh)

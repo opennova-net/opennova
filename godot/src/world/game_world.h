@@ -563,6 +563,13 @@ private:
 	void sample_panm_clock();
 	void session_frame_failed(const String &p_reason);
 	Camera3D *render_camera() const;
+	// The camera whose frustum the frame's image is drawn through: the local
+	// view presenter's stretched-frame camera while its target is live (the
+	// surface camera then only carries a culling superset), else
+	// render_camera().
+	Camera3D *image_camera() const;
+	// The surface (window) width in pixels: the retail viewport width.
+	float surface_width() const;
 	Transform3D render_camera_xform() const;
 	void stamp_iris_samples(const Transform3D &p_camera_xform);
 	void render_terrain_light_leg();

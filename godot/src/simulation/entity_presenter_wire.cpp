@@ -919,7 +919,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// PF_SECTION_MASK_VALID drives the model's section mask; a VALID -> clear
 	// transition releases once, and never-publishing rows leave the channel to
 	// its other writer (the occlusion frame pass on buildings).
-	stamp_section_mask(model, p, base, row.section_visibility_mask);
+	stamp_section_mask(model, p, base, row.destroyed_section_mask);
 	update_wire_held_weapon(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	if (model->is_visible() != next_visible) {

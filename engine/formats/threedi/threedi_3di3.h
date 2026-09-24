@@ -573,9 +573,12 @@ typedef struct ThreediOcclusionObject {
     uint8_t unused0;
     float position[3];
     float radius;
-    float glow_scale; /* [orig: OOBJ disk +20 -> runtime record +0x2C - the
-                         window-glow scale the slot collector consumes
-                         @ 0x5c6ea3; zero across the JO 3DI3 corpus] */
+    float slot_priority_scale; /* [orig: OOBJ disk +20 -> runtime record +0x2C -
+                                  the portal-slot priority weight the slot
+                                  collector multiplies @ 0x5c6ea3; its only
+                                  consumer is the slot sort's compare
+                                  (Terrain_SortSectorCacheByDistance @ 0x5c4440);
+                                  zero across the JO 3DI3 corpus] */
     int32_t num_vertices;
     int32_t num_planes;
     int32_t face_count;

@@ -166,12 +166,12 @@ add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
 # weapons and ammo run their inline blocks unconditionally and pin the shipped
 # tables from the reference fixture set as SKIP-LEG legs; every hudpos leg
 # reads the shipped table, so it gates whole on OPENNOVA_JO_ASSETS.
-foreach(test items weapons ammo hudpos item_attrib item_type)
+foreach(test items weapons ammo hudpos item_attrib item_part_bytes item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_formats)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test items weapons ammo item_attrib item_type)
+foreach(test items weapons ammo item_attrib item_part_bytes item_type)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 opennova_add_gated_test(def_parse_hudpos COMMAND def_parse_hudpos_test)
