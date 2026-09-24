@@ -89,8 +89,10 @@ uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
 
 // --- The terrain leg of the EffectWorld light pool --------------------------
-// Retail re-draws each terrain batch once more PER pool light, additively,
-// through a two-stage projected-texture shader: stage 0 samples the 64x64
+// Retail re-draws each terrain batch once more PER pool light (the first
+// opaquely, later ones additively; terrain.gdshader composites the pool with
+// the page and the fogged ordinary pass) through a two-stage projected-
+// texture shader: stage 0 samples the 64x64
 // "texlight2d" disc projected on the ground plane around the light, stage 1
 // the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
 // over the pixel constants c4..c6 the pass uploads (the light colour already
@@ -114,6 +116,15 @@ uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_def
 uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
 uniform bool u_terrain_light_enabled = false;
 const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
+
+// The pool lights the patch re-draws with (0 = the batch draws only its
+// ordinary pass).
+int terrain_point_light_count(float slot) {
+	if (!u_terrain_light_enabled) {
+		return 0;
+	}
+	return int(texelFetch(u_terrain_light_rows, ivec2(1, int(slot + 0.5)), 0).a + 0.5);
+}
 
 vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
 	vec3 sum = vec3(0.0);

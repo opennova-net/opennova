@@ -196,6 +196,40 @@ uint32_t falloff_texture_spot2d_argb(int x, int y);
 uint32_t falloff_texture_spot1d_argb(int x, int row);
 
 // ---------------------------------------------------------------------------
+// THE COMPOSITE: how a batch that draws pool lights reaches the target. Such a
+// batch never draws its ordinary lit pass on its own; per channel:
+//   1. each drawn light writes its pass output unfogged, the first drawn light
+//      opaquely (blending off) and every later one ONE/ONE, so the 8-bit target
+//      holds the saturated sum `pool`;
+//   2. one pass multiplies the target by the cached page colour: stage 0 is
+//      MODULATE2X(page texel, the lit white diffuse) = saturate(2 * page),
+//      blended DESTCOLOR/SRCCOLOR = 2 * stage * target, unfogged;
+//   3. the ordinary lit terrain pass (the ps.1.4 surface, fog enabled) adds
+//      ONE/ONE on top.
+// So the pixel is saturate(saturate(2 * saturate(2 * page) * pool) + fogged
+// lit). `page` is the page RGB (t0 before the detail splat) and `fogged_lit`
+// the saturated ps.1.4 output after the fog blend.
+// [orig: render_terrain_sector_batch @0x6092A0 — the per-light loop
+//  @0x60984C..0x609953 (the first-drawn flag esi cleared @0x609951 after a
+//  light draws), the page multiply GfxShader_ApplyPassChecked(dword_319F934)
+//  + its draw @0x609960..0x609A19 (the pass PolyTrn_InitTextures builds as
+//  sub_6791A0(1, 0x1000628) @0x60C499..0x60C4AD), the lit pass
+//  terrain_setup_lighting_and_shader(2) -> dword_319F930 (mode 0x1020002)
+//  and its draw @0x609A49..0x609AB6; the first/later light passes
+//  dword_2732DC0 / dword_2732DBC (blending off / ONE-ONE,
+//  Lighting_InitTextures @0x5A9A56..0x5A9B04), dword_2732DC8 / dword_2732DC4
+//  (modes 0x600 / 0x602, @0x5A98D2..0x5A9933) on the fixed-function path]
+inline float terrain_light_pool_composite(float page, float pool,
+		float fogged_lit) {
+	const auto saturate = [](float value) {
+		return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+	};
+	const float lit_by_pool = saturate(
+			2.0f * saturate(2.0f * page) * saturate(pool));
+	return saturate(lit_by_pool + saturate(fogged_lit));
+}
+
+// ---------------------------------------------------------------------------
 // THE PER-PATCH ROWS.
 
 // One terrain patch's collect volume, mission 16.16 — the same AABB the

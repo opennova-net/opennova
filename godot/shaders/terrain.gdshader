@@ -108,12 +108,23 @@ void fragment() {
 	vec3 result = terrain_surface_color_from_colormap(
 		colormap, v_colormap_uv, v_detail_uv, source_uv, u_instance_source_quadrant);
 
-	// The pool lights' additive re-draws, summed before the fog so each pool
-	// fades with distance like the batch it re-draws (the per-light pass's own
-	// fog state is the open half of the 0x600 shader's REN-4 decode).
-	result += terrain_point_light_pool(v_world_pos, u_instance_light_slot);
-
-	result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
+	// A patch with pool lights composites the way retail's lit batch does:
+	// the unfogged light passes build the saturated pool, one unfogged
+	// DESTCOLOR/SRCCOLOR pass multiplies it by 2 * saturate(2 * page), and the
+	// fogged ordinary pass adds on top (renderer::terrain_light_pool_composite;
+	// retail render_terrain_sector_batch @0x60984C..0x609AB6).
+	if (terrain_point_light_count(u_instance_light_slot) > 0) {
+		vec3 pool = clamp(terrain_point_light_pool(v_world_pos, u_instance_light_slot),
+			vec3(0.0), vec3(1.0));
+		vec3 lit_by_pool = clamp(
+			2.0 * clamp(2.0 * colormap.rgb, vec3(0.0), vec3(1.0)) * pool,
+			vec3(0.0), vec3(1.0));
+		vec3 fogged = apply_terrain_fog(clamp(result, vec3(0.0), vec3(1.0)),
+			v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
+		result = clamp(lit_by_pool + fogged, vec3(0.0), vec3(1.0));
+	} else {
+		result = apply_terrain_fog(result, v_world_pos, CAMERA_POSITION_WORLD, v_eye_depth);
+	}
 
 	// Debug overlays — replace output with diagnostic color
 	if (u_debug_mode == 1) {

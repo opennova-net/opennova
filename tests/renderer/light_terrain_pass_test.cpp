@@ -319,9 +319,41 @@ void test_patch_rows() {
 			"per-patch rows are independent");
 }
 
+// A lit batch's pixel is the pool multiplied by twice the saturated doubled
+// page colour (the DESTCOLOR/SRCCOLOR page pass), unfogged, plus the fogged
+// ordinary pass: dark ground keeps a light dim, bright ground doubles it, and
+// the fog never reaches the light term. [orig: render_terrain_sector_batch
+// @0x60984C..0x609AB6]
+void test_pool_composite() {
+	// A mid-grey page (0.25) passes the pool unchanged: 2 * sat(0.5) = 1.
+	CHECK(near(terrain_light_pool_composite(0.25f, 0.4f, 0.1f), 0.5f),
+			"page 0.25 multiplies the pool by exactly one");
+	// A bright page doubles it (2 * sat(1.2) = 2).
+	CHECK(near(terrain_light_pool_composite(0.6f, 0.3f, 0.0f), 0.6f),
+			"a bright page doubles the pool");
+	// A dark page dims it (2 * sat(0.2) = 0.4).
+	CHECK(near(terrain_light_pool_composite(0.1f, 0.5f, 0.0f), 0.2f),
+			"a dark page dims the pool");
+	// The 8-bit target saturates the pool sum before the multiply.
+	CHECK(near(terrain_light_pool_composite(0.25f, 3.0f, 0.0f), 1.0f),
+			"the pool saturates at the target");
+	CHECK(near(terrain_light_pool_composite(0.1f, 3.0f, 0.0f), 0.4f),
+			"the saturated pool is then scaled by the page");
+	// The fogged lit pass adds on top; a fully fogged pixel still shows the
+	// unfogged light term.
+	CHECK(near(terrain_light_pool_composite(0.25f, 0.3f, 0.5f), 0.8f),
+			"the fogged lit pass adds ONE/ONE");
+	CHECK(near(terrain_light_pool_composite(0.25f, 0.9f, 0.9f), 1.0f),
+			"the final target saturates");
+	// No pool: the batch is the fogged ordinary pass alone.
+	CHECK(near(terrain_light_pool_composite(0.8f, 0.0f, 0.35f), 0.35f),
+			"an empty pool leaves the ordinary pass");
+}
+
 } // namespace
 
 int main() {
+	test_pool_composite();
 	test_the_half_is_undone_by_modulate2x();
 	test_published_scales_with_inputs();
 	test_per_channel_factor_default_is_unity();
