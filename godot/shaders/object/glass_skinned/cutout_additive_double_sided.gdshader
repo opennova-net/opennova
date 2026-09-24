@@ -8,6 +8,7 @@ render_mode unshaded, blend_add, depth_draw_never, cull_disabled;
 #define OBJ_VERTEX_POINT_LIGHTS_NONE
 #define OBJ_MATCHTERRAIN_NO_PASS
 #define OBJ_BLENDED_PASS
+#define OBJ_FOG_VERTEX_SHADER
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"

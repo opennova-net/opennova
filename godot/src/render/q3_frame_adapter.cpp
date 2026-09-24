@@ -140,6 +140,7 @@ layout(location = 4) out vec4 custom2;
 layout(location = 5) out vec3 local_normal;
 layout(location = 6) out vec3 local_position;
 layout(location = 7) out vec2 detail_uv;
+layout(location = 8) out float view_depth;
 
 void main() {
 	vec3 draw_position = in_position;
@@ -156,6 +157,9 @@ void main() {
 				(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4);
 	}
 	gl_Position = pc.mvp * vec4(draw_position, 1.0);
+	// Clip w is the pass camera's view depth (the far band below moves z
+	// only): the fixed-function EXP fog distance.
+	view_depth = gl_Position.w;
 	if (uint(pc.params.x + 0.5) >= 3u && gl_Position.w > 0.0) {
 		// Render_SetViewportFarDepth's D3DVIEWPORT9 MinZ/MaxZ band for the
 		// celestial discs and the sun glow, expressed in reverse-Z clip depth
@@ -201,6 +205,7 @@ layout(location = 4) in vec4 custom2;
 layout(location = 5) in vec3 local_normal;
 layout(location = 6) in vec3 local_position;
 layout(location = 7) in vec2 detail_uv;
+layout(location = 8) in float view_depth;
 layout(location = 0) out vec4 frag_color;
 
 // The primary device fog, mirrored from the engine's
@@ -208,6 +213,10 @@ layout(location = 0) out vec4 frag_color;
 // exponential with density ln(64)/end, every other type is linear from the
 // caller's already-resolved Render_SetFogState start. The push block carries
 // start in camera_local.w and end in draw_color.w for the object techniques.
+// Every Q3 object copy is a fixed-function pass (the _FFP LUM GLOW block,
+// Glass's GLOW technique): the linear types are vertex RANGE fog over the
+// radial eye distance, type 0 is the table/non-range EXP over view depth
+// (retail CD3DDevice_SetFogParameters @ 0x6779e4..0x677a69).
 float q3_fog_visibility(float dist, float fog_start, float fog_end,
 		uint fog_type) {
 	float safe_end = max(fog_end, 1.0);
@@ -268,8 +277,9 @@ void main() {
 			if (!passes) discard;
 		}
 		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
-		float fog_visibility = fog_enabled ? q3_fog_visibility(
-				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
+		float fog_distance = fog_type == 0u ? view_depth
+				: length(pc.camera_local.xyz - local_position) * model_uniform_scale;
+		float fog_visibility = fog_enabled ? q3_fog_visibility(fog_distance,
 				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
 		if (mode == 0u) {
 			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as

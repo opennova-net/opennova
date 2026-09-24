@@ -149,6 +149,9 @@ varying vec2 v_uv2;
 // CalcAnimatedUV even when another pass of the same material uses Diffuse1.
 varying vec2 v_raw_uv;
 varying vec3 v_world_pos;
+// The pass camera's view depth of this vertex (clip w): the planar fog
+// distance (the vertex stage writes it; obj_scene_fog_visibility reads it).
+varying float v_fog_view_depth;
 varying vec3 v_world_normal;
 varying vec3 v_geom_normal;
 varying vec3 v_world_tangent;
@@ -781,23 +784,36 @@ vec3 obj_add_local_light(vec3 lit, vec3 base_rgb, vec3 normal_ws) {
 			(u_local_light_intensity * ndotl * atten);
 }
 
-// Witnessed device fog policy shared with terrain and water.
+// Witnessed device fog policy shared with terrain and water. The pass start
+// is already Render_SetFogState's per-type start (the overcast fold rides
+// it: type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) * end * 0.25
+// [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe]).
 // [orig: Render_SetFogState @ 0x58A950; CD3DDevice_SetFogParameters @ 0x677960]
 float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {
 	float safe_end = max(fog_end, 1.0);
 	if (fog_type == 0) {
 		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
 	}
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	return clamp((safe_end - dist) / max(safe_end - start, 1.0), 0.0, 1.0);
+	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
 }
 
 // The pass fog visibility at this fragment; 1.0 while the pass has no fog.
+// The distance follows the fog path of the wrapper's retail NORMAL P0:
+// - OBJ_FOG_VERTEX_SHADER: a FOGMODE_SHADER* pass leaves the device's table
+//   and vertex fog OFF (CD3DDevice_SetFogAndBlendMode mode 8..11 @ 0x677783),
+//   so the fog factor is the VS oFog = 1 - (z - FogStart) * FogRangeRecip
+//   over clip z (_BaseInc.fx CalcFogSegmented / CalcFogSkinned) with
+//   FogStart / FogRangeRecip the start / end pushed through the projection
+//   (apply_shader_parameters @ 0x58e20d..0x58e26f): linear in view depth for
+//   EVERY fog type, from the pass start (0.5 for types 0/1, the caller's
+//   constant, Environment_ApplyFogAndAmbient @ 0x57e4d2).
+// - OBJ_FOG_VERTEX_SHADER_DEVICE: a vertex-shader pass on FOGMODE_NORMAL
+//   (SkBasic.fx): the linear types keep that VS oFog, type 0 is the device's
+//   EXP fog (table or non-range vertex: view depth).
+// - otherwise (a fixed-function pass, VertexShader = NULL): the linear types
+//   are vertex RANGE fog over the radial eye distance (FOGVERTEXMODE LINEAR,
+//   RANGEFOGENABLE 1 @ 0x677a50..0x677a69), type 0 the device EXP on view depth
+//   (@ 0x6779e4..0x677a48).
 float obj_scene_fog_visibility(vec3 camera_position_world) {
 	if (!opennova_fog_enabled) {
 		return 1.0;
@@ -805,12 +821,18 @@ float obj_scene_fog_visibility(vec3 camera_position_world) {
 	// The viewmodel fogs under the dry pass (viewmodel_pass.gdshaderinc).
 	vec3 range = u_viewmodel_pass ? opennova_viewmodel_fog_range
 			: vec3(opennova_fog_start, opennova_fog_end, float(opennova_fog_type));
-	return obj_fog_visibility(
-		distance(camera_position_world, v_world_pos),
-		range.x,
-		range.y,
-		int(range.z)
-	);
+	int fog_type = int(range.z);
+	float view_depth = max(v_fog_view_depth, 0.0);
+	#if defined(OBJ_FOG_VERTEX_SHADER)
+	float safe_end = max(range.y, 1.0);
+	return clamp((safe_end - view_depth) / max(safe_end - range.x, 1.0), 0.0, 1.0);
+	#elif defined(OBJ_FOG_VERTEX_SHADER_DEVICE)
+	return obj_fog_visibility(view_depth, range.x, range.y, fog_type);
+	#else
+	float dist = fog_type == 0 ? view_depth
+			: distance(camera_position_world, v_world_pos);
+	return obj_fog_visibility(dist, range.x, range.y, fog_type);
+	#endif
 }
 
 vec3 obj_apply_fog(vec3 lit, vec3 camera_position_world) {

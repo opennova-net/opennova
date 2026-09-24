@@ -13,7 +13,6 @@ namespace {
 // 0xB5/256 byte weight of the env blend (env_render's kTerrainLightWeightByte)
 // and NOT a sun-direction component: three different 0.707s, one per home.
 constexpr float kTerrainAmbientWeightF = 0.70700002f;
-constexpr float FOG_LN_64 = 4.1588830833596715f;
 
 inline uint8_t byte_from_channel(uint32_t argb, int shift) noexcept {
 	return static_cast<uint8_t>((argb >> shift) & 0xFFu);
@@ -48,27 +47,6 @@ uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
 	                                  byte_from_channel(diffuse_argb, 0));
 	return 0xFF000000u | (static_cast<uint32_t>(r) << 16) |
 	       (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
-}
-
-float terrain_fog_start_for_type(float fog_end, int fog_type) noexcept {
-	if (fog_type == 2) {
-		return fog_end * 0.5f;
-	}
-	if (fog_type == 3) {
-		return fog_end * 0.25f;
-	}
-	return 0.5f;
-}
-
-float terrain_fog_factor_for_distance(float distance, float fog_end, int fog_type) noexcept {
-	const float safe_end = std::max(fog_end, 1.0f);
-	if (fog_type == 0) {
-		return std::clamp(std::exp(-std::max(distance, 0.0f) * (FOG_LN_64 / safe_end)), 0.0f, 1.0f);
-	}
-
-	const float start = terrain_fog_start_for_type(safe_end, fog_type);
-	const float range = std::max(safe_end - start, 1.0f);
-	return std::clamp((safe_end - distance) / range, 0.0f, 1.0f);
 }
 
 uint32_t terrain_average_four_argb(uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3) noexcept {

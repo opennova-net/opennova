@@ -9,6 +9,7 @@ void vertex() {
 	local_pos.z += sa * min(VERTEX.x, 1.0) * 0.15;
 	VERTEX = local_pos;
 	v_world_pos = (MODEL_MATRIX * vec4(local_pos, 1.0)).xyz;
+	v_fog_view_depth = -(VIEW_MATRIX * vec4(v_world_pos, 1.0)).z;
 	vec3 animated_local_normal = normalize(vec3(ca * 0.5 + 0.5, -sa * 0.1, abs(sa)));
 	vec3 animated_world_normal = normalize(
 			(MODEL_MATRIX * vec4(animated_local_normal, 0.0)).xyz);

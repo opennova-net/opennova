@@ -66,8 +66,13 @@ FogParams compute_fog_params(int fog_type, float fog_end_distance, float overcas
 	const float inv_density = std::clamp(1.0f - overcast, 0.0f, 1.0f);
 	switch (fog_type) {
 	case 0:
+		// The device EXP ignores the start, but Render_SetFogState still
+		// stores the caller's 0.5 [orig: Render_SetFogState @ 0x58a992;
+		// Environment_ApplyFogAndAmbient @ 0x57e4d2], and the vertex-shader
+		// passes fog linearly from it (FogStart through the projection
+		// [orig: apply_shader_parameters @ 0x58e21b]).
 		params.exponential = true;
-		params.start = 0.0f;
+		params.start = 0.5f;
 		params.exp_density = fog_end_distance > 0.0f ? kLn64 / fog_end_distance : 0.0f;
 		break;
 	case 2:

@@ -8,6 +8,7 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 #define OBJ_CLIP_DOT3
 #define OBJ_VERTEX_POINT_LIGHTS_SELF_SHADOWED_ATTENUATION
 #define OBJ_MATCHTERRAIN_NO_PASS
+#define OBJ_FOG_VERTEX_SHADER
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"

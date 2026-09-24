@@ -5,6 +5,8 @@
 // DESTCOLOR/SRCCOLOR then writes 2 * source * destination in gamma space.
 // [orig: BmTxMirrT.fx P3; _vsPost.fx vsPostMultiplyT1].
 
+// P3 is a FOGMODE_SHADER pass (vscPostMultiplyT1's oFog): planar fog.
+#define OBJ_FOG_VERTEX_SHADER
 #include "res://shaders/object/shared.gdshaderinc"
 
 uniform sampler2D u_post_screen : hint_screen_texture, filter_nearest, repeat_disable;
@@ -16,6 +18,7 @@ uniform float u_alpha_test_invert = 0.0;
 void vertex() {
 	v_raw_uv = UV;
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_fog_view_depth = -(VIEW_MATRIX * vec4(v_world_pos, 1.0)).z;
 	// The P3 mirror layer rides the same first-person fold as the P0/P1 body
 	// it overdraws (vertex_standard.gdshaderinc): an un-folded layer on the
 	// viewmodel would take the beauty projection and near plane while the gun

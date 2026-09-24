@@ -37,6 +37,9 @@ int main() {
 		const FogParams exp_fog = compute_fog_params(0, 1000.0f, 0.0f);
 		if (!expect(exp_fog.exponential, "fog type 0 is exponential")) return 1;
 		if (!expect(near(exp_fog.exp_density, 4.1588831f / 1000.0f, 1e-7f), "type 0 density is ln(64)/end")) return 1;
+		// Render_SetFogState keeps the caller's 0.5 start for type 0 too
+		// [orig: @ 0x58a992]; the VS passes fog linearly from it.
+		if (!expect(near(exp_fog.start, 0.5f), "type 0 keeps the caller's 0.5 start")) return 1;
 
 		const FogParams near_start = compute_fog_params(1, 1000.0f, 0.0f);
 		if (!expect(!near_start.exponential && near(near_start.start, 0.5f), "type 1 starts at 0.5 units")) return 1;

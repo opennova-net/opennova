@@ -243,19 +243,15 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	return lit * detail * 4.0;
 }
 
+// The pass start is already Render_SetFogState's per-type start, overcast
+// fold included (type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) *
+// end * 0.25) [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe].
 float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
 	float safe_end = max(fog_end, 1.0);
 	if (fog_type == 0) {
 		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
 	}
-
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
+	float fog_range = max(safe_end - fog_start, 1.0);
 	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
 }
 
