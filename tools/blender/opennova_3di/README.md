@@ -15,6 +15,10 @@ Download `opennova-blender-addon-windows-v<version>.zip` from
 In Blender 4.2 or newer: Edit > Preferences > Get Extensions > Install from Disk.
 Select the downloaded zip without unpacking it. Windows x64 only for now.
 
+The **3DI executable** field automatically shows the bundled converter's path;
+no manual setup is needed. Choosing another executable overrides it for that
+scene. Clearing the field uses the bundled converter again.
+
 To build locally, `scripts/package_blender_addon.sh [out.zip]` builds the CLI
 and the installable zip (default `build/opennova_3di.zip`). PRs and releases
 use the same packaging workflow and smoke-test the CLI extracted from the zip.

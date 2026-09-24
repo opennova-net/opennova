@@ -57,12 +57,16 @@ CTRL_REFERENCE_THRESHOLD = 0x70
 _catalog = None
 
 
+def bundled_cli_path():
+    return os.path.join(os.path.dirname(__file__), "bin", "opennova-3di.exe")
+
+
 def cli_path(context=None):
     scene = (context or bpy.context).scene
     custom = scene.o3d.cli_path if scene is not None else ""
     if custom:
         return bpy.path.abspath(custom)
-    return os.path.join(os.path.dirname(__file__), "bin", "opennova-3di.exe")
+    return bundled_cli_path()
 
 
 def catalog():
@@ -209,8 +213,9 @@ class O3DSceneProps(bpy.types.PropertyGroup):
         ("-Y", "-Y (Blender front)", "The model faces Blender's front view"),
         ("X", "+X", "The model faces +X"),
     ], default="-Y")
-    cli_path: StringProperty(name="opennova-3di", subtype="FILE_PATH", default="",
-                             description="Override the bundled CLI")
+    cli_path: StringProperty(name="3DI executable", subtype="FILE_PATH", default=bundled_cli_path(),
+                             description="Uses the bundled opennova-3di automatically. Choose a different executable "
+                                         "to override it; clearing this field also uses the bundled executable")
     write_textures: BoolProperty(name="Write textures", default=True)
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
@@ -322,6 +327,8 @@ class O3D_PT_scene(bpy.types.Panel):
         col.prop(p, "write_textures")
         col.prop(p, "poly_collision_lod")
         col.prop(p, "cli_path")
+        if not p.is_property_set("cli_path") or not p.cli_path:
+            col.label(text="Bundled executable (automatic)")
         col.operator("opennova_3di.export", icon="EXPORT")
 
 
