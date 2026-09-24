@@ -41,6 +41,9 @@ struct ControlResult;
 struct GameStatusSnapshot;
 struct OverlayCamera;
 struct EntityMarkersRecord;
+struct RaysOverlayRecord;
+struct ContactsOverlayRecord;
+struct HitboxOverlayRecord;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct WeaponDefinitionSnapshot;
@@ -184,6 +187,10 @@ public:
 	void set_rays_snapshot(const RaysSnapshot &snapshot);
 	bool needs_rays_snapshot() const;
 	bool take_rays_request(RaysRequest &request);
+	// The Rays window's Game-view layer: the filtered ray rows, per logic
+	// tick while it is on (needs_rays_snapshot then keeps recording armed).
+	bool needs_rays_overlay() const;
+	void set_rays_overlay(RaysOverlayRecord record);
 
 	// The Physics window's record/request channel (the same shape): the
 	// contact capture's counts + capture state pushed by value on its cadence
@@ -192,6 +199,13 @@ public:
 	void set_physics_snapshot(const PhysicsSnapshot &snapshot);
 	bool needs_physics_snapshot() const;
 	bool take_physics_request(PhysicsRequest &request);
+	// The Physics window's Game-view layers: the filtered contact rows (per
+	// logic tick; needs_physics_snapshot keeps the capture armed while it is
+	// on) and the hit meshes (the hitbox oracle on its own cadence).
+	bool needs_contacts_overlay() const;
+	void set_contacts_overlay(ContactsOverlayRecord record);
+	bool needs_hitbox_overlay() const;
+	void set_hitbox_overlay(HitboxOverlayRecord record);
 
 private:
 	// Declared before the pass: the windows hold a reference to the board and

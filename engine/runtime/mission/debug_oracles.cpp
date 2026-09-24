@@ -14,24 +14,32 @@
 namespace opennova::mission {
 
 void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out) {
+	collect_debug_hitboxes(kernel, out, DebugHitboxBudget{});
+}
+
+void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out, const DebugHitboxBudget &budget) {
 	out.entities.clear();
 	out.organics.clear();
 	world::World &w = kernel.world;
+	const int32_t entity_cap = budget.entity_cap;
 
-	// Anchor on the local player; every payload shares the one debug budget.
+	// Anchor on the caller's point, else the local player; every payload
+	// shares the one debug budget.
 	int32_t anchor[3] = { 0, 0, 0 };
 	int32_t debug_range = -1;
 	const world::EntityHandle local_player = w.cached.local_player;
 	const world::Entity *lp = local_player.valid() ? w.registry.get(local_player) : nullptr;
-	if (lp != nullptr) {
-		anchor[0] = world::to_fixed(lp->position.x);
-		anchor[1] = world::to_fixed(lp->position.y);
-		anchor[2] = world::to_fixed(lp->position.z);
-		debug_range = static_cast<int32_t>(kDebugHitboxRangeUnits) << 16;
+	const bool anchored = budget.has_anchor || lp != nullptr;
+	const world::Vec3 anchor_units = budget.has_anchor ? budget.anchor
+			: (lp != nullptr ? lp->position : world::Vec3{});
+	if (anchored) {
+		anchor[0] = world::to_fixed(anchor_units.x);
+		anchor[1] = world::to_fixed(anchor_units.y);
+		anchor[2] = world::to_fixed(anchor_units.z);
+		debug_range = static_cast<int32_t>(budget.range_units) << 16;
 	}
-	out.entities = kernel.hitboxes(lp != nullptr ? lp->position : world::Vec3{},
-			lp != nullptr ? kDebugHitboxRangeUnits : -1.0f, kDebugHitboxEntityCap,
-			kDebugHitboxFaceCap);
+	out.entities = kernel.hitboxes(anchor_units, anchored ? budget.range_units : -1.0f, entity_cap,
+			budget.face_cap);
 
 	// The posed pool-0 COBJ spheres from the exact person narrow phase share
 	// the budget; the local avatar's instance is ensured for F3's late-spawn
@@ -40,11 +48,11 @@ void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out) {
 	if (local_player.valid()) kernel.ensure_collision_instance(w, local_player);
 	std::unordered_set<uint16_t> posed_handles;
 	const std::vector<world::CollisionWorld::DebugPersonSection> people =
-			kernel.collision.debug_person_sections(w, anchor, debug_range, kDebugHitboxEntityCap + 1);
+			kernel.collision.debug_person_sections(w, anchor, debug_range, entity_cap + 1);
 	for (const world::CollisionWorld::DebugPersonSection &person : people) {
 		if (person.handle == local_player) continue;
 		const bool new_handle = posed_handles.find(person.handle.packed) == posed_handles.end();
-		if (new_handle && posed_handles.size() >= static_cast<size_t>(kDebugHitboxEntityCap)) break;
+		if (new_handle && posed_handles.size() >= static_cast<size_t>(entity_cap)) break;
 		DebugHitboxOrganic o;
 		o.handle = person.handle;
 		o.section = person.section;
@@ -60,7 +68,7 @@ void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out) {
 	const size_t pool0 = w.registry.pool_capacity(0);
 	int fallback_entity_count = static_cast<int>(posed_handles.size());
 	for (size_t s = 0; s < pool0; ++s) {
-		if (fallback_entity_count >= kDebugHitboxEntityCap) break;
+		if (fallback_entity_count >= entity_cap) break;
 		const world::Entity *e = w.registry.get(world::EntityHandle{ static_cast<uint16_t>(s) });
 		if (e == nullptr || e->handle == local_player || (e->engine_flags & 0x02000001u) != 0 ||
 				posed_handles.find(static_cast<uint16_t>(s)) != posed_handles.end())

@@ -3,6 +3,8 @@
 // no Variant round-trip. C++-only; DevTools holds the Simulation natively.
 #include "simulation/simulation_internal.h"
 
+#include <runtime/mission/debug_oracles.h>
+#include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/inspect_markers.h>
 
 bool Simulation::native_ai_debug(
@@ -22,5 +24,36 @@ bool Simulation::native_entity_markers(const opennova::world::inspect::EntityMar
 	// A joiner's tooling AI pool never joins the decoded view.
 	query.with_brains = query.with_brains && !is_joiner();
 	r_out = opennova::world::inspect::entity_markers(kernel_->world, query);
+	return true;
+}
+
+bool Simulation::native_ray_debug_rows(std::vector<opennova::world::RayDebugRow> &r_rows,
+		int32_t &r_ttl) const {
+	r_rows.clear();
+	if (!kernel_) return false;
+	r_ttl = kernel_->collision.ray_debug_ttl_ticks();
+	opennova::world::ray_debug_rows(kernel_->collision, kernel_->world.logic_tick, r_rows);
+	return true;
+}
+
+bool Simulation::native_contact_debug_rows(std::vector<opennova::world::ContactDebugRow> &r_rows,
+		int32_t &r_ttl) const {
+	r_rows.clear();
+	if (!kernel_) return false;
+	r_ttl = opennova::world::CollisionWorld::kContactDebugTtlTicks;
+	opennova::world::contact_debug_rows(kernel_->world, kernel_->collision, kernel_->world.logic_tick, r_rows);
+	return true;
+}
+
+bool Simulation::native_hitbox_debug(const opennova::world::Vec3 &p_anchor,
+		opennova::mission::DebugHitboxReport &r_out) {
+	if (!kernel_) return false;
+	opennova::mission::DebugHitboxBudget budget;
+	budget.has_anchor = true;
+	budget.anchor = p_anchor;
+	// The overlay draws every face it gets; a smaller face budget keeps the
+	// 6 Hz refresh and the draw list light.
+	budget.face_cap = 4000;
+	opennova::mission::collect_debug_hitboxes(*kernel_, r_out, budget);
 	return true;
 }

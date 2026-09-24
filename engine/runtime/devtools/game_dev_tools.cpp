@@ -58,9 +58,12 @@ GameDevTools::GameDevTools() {
 	auto rays = std::make_unique<RaysWindow>();
 	rays_window_ = rays.get();
 	pass_.register_window(std::move(rays));
+	pass_.register_overlay(rays_window_->overlay_layer());
 	auto physics = std::make_unique<PhysicsWindow>();
 	physics_window_ = physics.get();
 	pass_.register_window(std::move(physics));
+	pass_.register_overlay(physics_window_->contacts_layer());
+	pass_.register_overlay(physics_window_->hitbox_layer());
 	auto log = std::make_unique<LogWindow>();
 	log_window_ = log.get();
 	pass_.register_window(std::move(log));
@@ -147,6 +150,9 @@ void GameDevTools::clear_overlay_records() {
 	game_window_->set_overlay_camera(OverlayCamera{});
 	entities_window_->set_markers(EntityMarkersRecord{});
 	if (!ai_window_->open) ai_window_->set_snapshot(AiDebugSnapshot{});
+	rays_window_->set_overlay(RaysOverlayRecord{});
+	physics_window_->set_contacts_overlay(ContactsOverlayRecord{});
+	physics_window_->set_hitbox_overlay(HitboxOverlayRecord{});
 }
 
 bool GameDevTools::needs_entity_markers() const {
@@ -285,7 +291,15 @@ void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
 }
 
 bool GameDevTools::needs_rays_snapshot() const {
-	return pass_.is_open() && rays_window_->open;
+	return pass_.is_open() && (rays_window_->open || rays_window_->overlay_layer().enabled());
+}
+
+bool GameDevTools::needs_rays_overlay() const {
+	return pass_.is_open() && rays_window_->overlay_layer().enabled();
+}
+
+void GameDevTools::set_rays_overlay(RaysOverlayRecord record) {
+	rays_window_->set_overlay(std::move(record));
 }
 
 bool GameDevTools::take_rays_request(RaysRequest &request) {
@@ -297,7 +311,23 @@ void GameDevTools::set_physics_snapshot(const PhysicsSnapshot &snapshot) {
 }
 
 bool GameDevTools::needs_physics_snapshot() const {
-	return pass_.is_open() && physics_window_->open;
+	return pass_.is_open() && (physics_window_->open || physics_window_->contacts_layer().enabled());
+}
+
+bool GameDevTools::needs_contacts_overlay() const {
+	return pass_.is_open() && physics_window_->contacts_layer().enabled();
+}
+
+void GameDevTools::set_contacts_overlay(ContactsOverlayRecord record) {
+	physics_window_->set_contacts_overlay(std::move(record));
+}
+
+bool GameDevTools::needs_hitbox_overlay() const {
+	return pass_.is_open() && physics_window_->hitbox_layer().enabled();
+}
+
+void GameDevTools::set_hitbox_overlay(HitboxOverlayRecord record) {
+	physics_window_->set_hitbox_overlay(std::move(record));
 }
 
 bool GameDevTools::take_physics_request(PhysicsRequest &request) {

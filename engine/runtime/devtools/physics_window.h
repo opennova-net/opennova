@@ -10,6 +10,8 @@
 // ones and disarms the contact capture, which records only while shown.
 #pragma once
 
+#include <runtime/devtools/collision_overlay.h>
+#include <runtime/devtools/hitbox_overlay.h>
 #include <runtime/devtools/imgui_pass.h>
 #include <runtime/devtools/physics_request.h>
 #include <runtime/devtools/physics_snapshot.h>
@@ -37,6 +39,19 @@ public:
 	// The pushed record, by value; an invalid snapshot clears the page.
 	void set_snapshot(const PhysicsSnapshot &snapshot);
 
+	// The Game-view layers: the captured contacts (pushed per logic tick,
+	// filtered by the kind checkboxes) and the hit meshes (the hitbox oracle,
+	// refreshed at HitboxOverlayLayer::kRefreshHz). A layer on keeps the
+	// contact capture armed with this window closed.
+	ContactsOverlayLayer &contacts_layer() { return contacts_layer_; }
+	HitboxOverlayLayer &hitbox_layer() { return hitbox_layer_; }
+	const ContactsOverlayLayer &contacts_layer() const { return contacts_layer_; }
+	const HitboxOverlayLayer &hitbox_layer() const { return hitbox_layer_; }
+	void set_contacts_overlay(ContactsOverlayRecord record) { contacts_record_ = std::move(record); }
+	void set_hitbox_overlay(HitboxOverlayRecord record) { hitbox_record_ = std::move(record); }
+	const ContactsOverlayRecord &contacts_overlay() const { return contacts_record_; }
+	const HitboxOverlayRecord &hitbox_overlay() const { return hitbox_record_; }
+
 	// The typed request queue the embedder drains. enqueue_request is the one
 	// path the drawn controls feed — and the headless test seam.
 	void enqueue_request(const PhysicsRequest &request);
@@ -57,6 +72,11 @@ private:
 	// The mask mirrored from every push (the checkboxes display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
 	uint32_t mask_edit_ = kContactKindMaskAll;
+	// Declared ahead of the layers that read them.
+	ContactsOverlayRecord contacts_record_{};
+	HitboxOverlayRecord hitbox_record_{};
+	ContactsOverlayLayer contacts_layer_{contacts_record_};
+	HitboxOverlayLayer hitbox_layer_{hitbox_record_};
 };
 
 }  // namespace opennova::devtools
