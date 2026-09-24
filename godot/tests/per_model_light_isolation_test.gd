@@ -120,6 +120,15 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 			float(bystander_surface.get_instance_shader_parameter(
 					"u_point_light_count")), 1.0,
 			"a bystander draw receives only the world light")
+	# The delivered colour is Light_GetPointLightParams' (record bytes/256 x
+	# the ambient gain): retail's shader passes read exactly that, and the
+	# D3D fill's 1.5 belongs to the fixed-function lights alone [retail
+	# CRenderBatchQueue_FlushBatches @0x5da8ae; Light_FillD3DPointLight @0x5aa4b2].
+	var gain: Vector3 = director.light_gain()
+	var delivered: Vector4 = bystander_surface.get_instance_shader_parameter(
+			"u_point_light_color_0")
+	assert_almost_eq(delivered.x, 255.0 / 256.0 * gain.x, 1e-4,
+			"object draws receive the unboosted point-light colour")
 	var report := director.get_report()
 	assert_eq(report.selection_mode, "per_model_objects",
 			"the gameplay pass reports per-model selection")

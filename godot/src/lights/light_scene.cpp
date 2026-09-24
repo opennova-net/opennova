@@ -130,6 +130,14 @@ opennova::renderer::LightHandle decode_handle(int64_t token) {
 	};
 }
 
+// Every object delivery path publishes the Light_GetPointLightParams colour:
+// retail's shader passes receive exactly that through PointLightColor /
+// PointLightColorArray (retail CRenderBatchQueue_FlushBatches @0x5da6a8 /
+// @0x5da8ae), and the D3D fill's 1.5 (retail Light_FillD3DPointLight
+// @0x5aa4b2) reaches only the fixed-function D3D lights, which the FF shader
+// helper applies itself. The render-slot pick reads the params directly too.
+constexpr bool kObjectLightD3DFill = false;
+
 } // namespace
 
 int64_t LightScene::spawn_model_light(const Ref<ModelLightSpawn> &p_config) {
@@ -323,7 +331,7 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 	options.admit_owned_unscoped = true;
 	selected_count_ = scene_.select(handles.data(), found,
 			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
-			/*d3d_light_path=*/true, selected_);
+			kObjectLightD3DFill, selected_);
 	return static_cast<int>(selected_count_);
 }
 
@@ -389,7 +397,7 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 			selected{};
 	const size_t count = scene_.select(handles.data(), found,
 			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
-			/*d3d_light_path=*/false, selected);
+			kObjectLightD3DFill, selected);
 	r_out.reserve(count);
 	for (size_t i = 0; i < count; ++i) {
 		const opennova::renderer::SelectedLight &light = selected[i];
@@ -505,7 +513,7 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 	}
 	std::vector<opennova::renderer::LightDrawSelection> selections(draws.size());
 	scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
-			flicker, /*d3d_light_path=*/true, selections.data());
+			flicker, kObjectLightD3DFill, selections.data());
 	std::unordered_set<ObjectModel *> lit_model_set;
 	for (size_t i = 0; i < targets.size(); ++i) {
 		const opennova::renderer::LightDrawSelection &selection = selections[i];
@@ -607,7 +615,7 @@ int LightScene::render_static_frame(
 		}
 		selections.resize(draws.size());
 		scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
-				flicker, /*d3d_light_path=*/true, selections.data());
+				flicker, kObjectLightD3DFill, selections.data());
 		last_static_draws_ = static_cast<int>(draws.size());
 		if (cacheable) {
 			static_cached_selections_.clear();
@@ -673,7 +681,7 @@ int LightScene::render_static_frame(
 				}
 				selection.count = scene_.select(cached.handles.data(),
 						cached.count, cached.groups, options, ambient, flicker,
-						/*d3d_light_path=*/true, selection.lights);
+						kObjectLightD3DFill, selection.lights);
 				cached.last_count = selection.count;
 				row_texels.fill(0.0f);
 				row_texels[0] = static_cast<float>(selection.count);
@@ -726,7 +734,7 @@ int LightScene::render_static_frame(
 			atlas_rows.push_back(cached.atlas_row);
 			selections[i].count = scene_.select(cached.handles.data(), cached.count,
 					cached.groups, options, ambient, flicker,
-					/*d3d_light_path=*/true, selections[i].lights);
+					kObjectLightD3DFill, selections[i].lights);
 			cached.last_count = selections[i].count;
 		}
 	}

@@ -288,8 +288,8 @@ int main() {
 								ramp_sky),
 				"the sun/sky globals publish the terrain pair");
 		// The environment cube's specular sphere stays lit by the RAW light
-		// block under the thermal ramps [orig: the cube face callback pushes
-		// Env_LightBlock @ 0x5c3863].
+		// block under the thermal ramps [orig: the cube face callback
+		// setup_shadow_cascade_and_render pushes Env_LightBlock @ 0x5c3863].
 		ok &= expect(rgb_near(env.build_shader_globals(false).light_block,
 							 env.sun_light()) &&
 						!rgb_near(env.build_shader_globals(false).light_block,

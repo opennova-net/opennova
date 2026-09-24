@@ -75,7 +75,7 @@ public:
 	void advance_fixed_tick();
 
 	// Report/debug leg: query the pool around a camera point and select the
-	// witnessed <= 4 into the report rows. The gameplay object pass is
+	// witnessed <= 3 into the report rows. The gameplay object pass is
 	// render_model_frame below; this camera-global path publishes nothing.
 	int render_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
@@ -84,8 +84,9 @@ public:
 	int census_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
-	// The per-draw gameplay pass [orig: update_light_slots @0x5abc50 per
-	// draw context, see docs/render/render-lighting-re.md]: one draw context
+	// The per-draw gameplay pass [orig: Light_SelectAndEnableForDraw @0x5ab9d0
+	// and the collectors' group gate @0x5d91f8 per draw context, see
+	// docs/render/render-lighting-re.md]: one draw context
 	// per visible ObjectModel, owner group = that model's entity id, interior
 	// group = the building it currently stands inside + that blink volume's
 	// section. A nonzero p_robj_scoped row expands a building into one context

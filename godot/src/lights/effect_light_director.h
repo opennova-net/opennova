@@ -49,13 +49,14 @@ class Weather;
 // start walks the placed pools spawning per-record instances
 // [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
 // Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
-// group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
-// update_light_slots @ 0x5abc50]. The object pass runs per rendered model:
-// one draw context per visible ObjectModel carrying BOTH witnessed groups —
-// its entity as the owner group, and the building it stands inside plus
-// that blink volume's section as the interior group — so owned lights
-// (muzzle glow, subobject records, interior room lights) light only what
-// retail's update_light_slots admits. Corona billboards draw per frame from
+// group-passing three [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 ->
+// collect_nearby_zones_by_aabb @ 0x5aa250; the batch collectors' group gate
+// @ 0x5d91f8 / @ 0x5d96b8 and 3-cap @ 0x5d9229]. The object pass runs per
+// rendered model: one draw context per visible ObjectModel carrying BOTH
+// witnessed groups — the owner group its submit declares, and the building
+// it stands inside plus that blink volume's section as the interior group —
+// so owned lights (muzzle glow, subobject records, interior room lights)
+// light only what retail's collectors admit. Corona billboards draw per frame from
 // the portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
 // The remaining D-RLIT-4 residual is foliage sampling. Authored LGHT
 // positions/lifetimes are spawn-fixed; powerup respawn is routed, and a
