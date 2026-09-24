@@ -47,7 +47,9 @@ window's own widgets queuing a `ControlRequest`.
    paints mission-frame primitives (lines, crosses, ground circles, boxes,
    sphere outlines, labels). The canvas projects them through the pushed
    `OverlayCamera` (`overlay_camera.h`: one mission-frame view-projection the
-   shell composes from the game camera) and clips them to the game image.
+   shell composes from the camera the game image is drawn through, the
+   presenter's stretched-frame camera while its target is live) and clips
+   them to the game image.
    There is no depth test.
 2. The window owns the layer and the record it draws (declare the record
    first; the layer holds a reference), and `GameDevTools` registers it with
