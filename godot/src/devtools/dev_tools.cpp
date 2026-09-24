@@ -27,6 +27,7 @@
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/overlay_canvas.h>
 #include <runtime/devtools/physics_request.h>
 #include <runtime/devtools/physics_snapshot.h>
 #include <runtime/devtools/physics_window.h>
@@ -87,6 +88,14 @@ void DevTools::_bind_methods() {
 			&DevTools::engine_log_after);
 	ClassDB::bind_static_method("DevTools", D_METHOD("project_mission_point", "camera", "mission_point"),
 			&DevTools::project_mission_point);
+	ClassDB::bind_method(D_METHOD("window_titles"), &DevTools::window_titles);
+	ClassDB::bind_method(D_METHOD("set_window_open", "title", "open"), &DevTools::set_window_open);
+	ClassDB::bind_method(D_METHOD("overlay_names"), &DevTools::overlay_names);
+	ClassDB::bind_method(D_METHOD("set_overlay_enabled", "name", "enabled"),
+			&DevTools::set_overlay_enabled);
+	ClassDB::bind_method(D_METHOD("overlay_last_draw", "name"), &DevTools::overlay_last_draw);
+	ClassDB::bind_method(D_METHOD("status_text"), &DevTools::status_text);
+	ClassDB::bind_method(D_METHOD("game_status_text"), &DevTools::game_status_text);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
 }
@@ -1131,6 +1140,73 @@ void DevTools::reset_layout() {
 	tools_->pass().request_layout_reset();
 }
 
+namespace {
+
+String overlay_name(const opennova::devtools::OverlayLayer &p_layer) {
+	return String::utf8(p_layer.group()) + "/" + String::utf8(p_layer.label());
+}
+
+} // namespace
+
+PackedStringArray DevTools::window_titles() const {
+	PackedStringArray out;
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.window_count(); ++i) {
+		out.push_back(String::utf8(pass.window(i).title()));
+	}
+	return out;
+}
+
+bool DevTools::set_window_open(const String &p_title, bool p_open) {
+	opennova::devtools::ImGuiPass &pass = tools_->pass();
+	const CharString title = p_title.utf8();
+	for (int i = 0; i < pass.window_count(); ++i) {
+		opennova::devtools::Window &window = pass.window(i);
+		if (std::strcmp(window.title(), title.get_data()) != 0) continue;
+		if (!window.is_closeable() && !p_open) return false;
+		window.open = p_open;
+		return true;
+	}
+	return false;
+}
+
+PackedStringArray DevTools::overlay_names() const {
+	PackedStringArray out;
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		out.push_back(overlay_name(pass.overlay(i)));
+	}
+	return out;
+}
+
+bool DevTools::set_overlay_enabled(const String &p_name, bool p_enabled) {
+	opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		if (overlay_name(pass.overlay(i)) != p_name) continue;
+		pass.set_overlay_enabled(pass.overlay(i), p_enabled);
+		return true;
+	}
+	return false;
+}
+
+Vector3i DevTools::overlay_last_draw(const String &p_name) const {
+	const opennova::devtools::ImGuiPass &pass = tools_->pass();
+	for (int i = 0; i < pass.overlay_count(); ++i) {
+		if (overlay_name(pass.overlay(i)) != p_name) continue;
+		const opennova::devtools::OverlayLayerStats &stats = pass.overlay(i).last_stats();
+		return Vector3i(stats.lines, stats.texts, stats.dropped);
+	}
+	return Vector3i(-1, -1, -1);
+}
+
+String DevTools::status_text() const {
+	return String::utf8(tools_->pass().status_text());
+}
+
+String DevTools::game_status_text() const {
+	return opennova::to_gd(tools_->game_window().status_text());
+}
+
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {
 	opennova::devtools::CaptureWindow window;
@@ -1276,6 +1352,39 @@ int DevTools::selected_entity_handle() const {
 }
 
 void DevTools::reset_layout() {}
+
+PackedStringArray DevTools::window_titles() const {
+	return PackedStringArray();
+}
+
+bool DevTools::set_window_open(const String &p_title, bool p_open) {
+	(void)p_title;
+	(void)p_open;
+	return false;
+}
+
+PackedStringArray DevTools::overlay_names() const {
+	return PackedStringArray();
+}
+
+bool DevTools::set_overlay_enabled(const String &p_name, bool p_enabled) {
+	(void)p_name;
+	(void)p_enabled;
+	return false;
+}
+
+Vector3i DevTools::overlay_last_draw(const String &p_name) const {
+	(void)p_name;
+	return Vector3i(-1, -1, -1);
+}
+
+String DevTools::status_text() const {
+	return String();
+}
+
+String DevTools::game_status_text() const {
+	return String();
+}
 
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {

@@ -8,7 +8,10 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
 
 #include "devtools/debug_control_table.h"
 #include "devtools/frame_stats.h"
@@ -138,6 +141,20 @@ public:
 	// (register_types.cpp) in every flavour; the forward converts and never
 	// composes.
 	static Dictionary engine_log_after(int64_t p_cursor);
+
+	// The workspace by name, for probes and MCP automation (empty / false in
+	// the release flavour): the windows by title and the overlay layers by
+	// "Group/Label", opened and toggled exactly as the Windows and Overlays
+	// menus do; an overlay's last draw as (lines, texts, dropped); and the two
+	// status lines the operator reads (the menu bar's last command verdict and
+	// the Game window's session readout).
+	PackedStringArray window_titles() const;
+	bool set_window_open(const String &p_title, bool p_open);
+	PackedStringArray overlay_names() const;
+	bool set_overlay_enabled(const String &p_name, bool p_enabled);
+	Vector3i overlay_last_draw(const String &p_name) const;
+	String status_text() const;
+	String game_status_text() const;
 
 	// The overlays' projection as a test seam (both flavours; the math is the
 	// engine's header-only overlay_camera.h): a mission-frame point projected
