@@ -893,3 +893,68 @@ func test_water_loses_a_depth_tie_to_geometry_on_its_plane() -> void:
 	assert_gt(pixel.r, 0.9, "the coplanar surface keeps its pixel: %s" % pixel)
 	assert_lt(pixel.g, 0.1, "the water behind it is depth-rejected: %s" % pixel)
 	water.release_runtime_renderer_resources()
+
+
+func test_wake_rings_face_up_and_hide_from_below() -> void:
+	# The wake pass flags (0x100000, retail render_water_surface_decal
+	# @ 0x5DE245) carry no cull-none bit, so the rings keep the device's
+	# back-face cull. A card wound like the compiled ring (its right-hand
+	# normal down, renderer/water_wake_frame.cpp) draws for an eye above it
+	# and not for one below.
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/water_wake.gdshader") as Shader
+	var white := ImageTexture.create_from_image(
+			Image.create_from_data(1, 1, false, Image.FORMAT_RGBA8,
+					PackedByteArray([255, 255, 255, 255])))
+	material.set_shader_parameter("wake_texture", white)
+	material.set_shader_parameter("gradient_texture", white)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3(-1.0, 0.0, -1.0), Vector3(1.0, 0.0, -1.0),
+		Vector3(1.0, 0.0, 1.0), Vector3(-1.0, 0.0, 1.0)])
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([
+		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+	arrays[Mesh.ARRAY_TEX_UV2] = arrays[Mesh.ARRAY_TEX_UV]
+	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var above: Image = await _render_wake_card(mesh, material, 5.0)
+	var below: Image = await _render_wake_card(mesh, material, -5.0)
+	if above == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(above.get_pixel(32, 32).r, 0.7, "an eye above sees the ring (0.4 x 2)")
+	assert_lt(below.get_pixel(32, 32).r, 0.02, "an eye below the water sees none")
+
+
+func _render_wake_card(mesh: ArrayMesh, material: ShaderMaterial, eye_y: float) -> Image:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+	var card := MeshInstance3D.new()
+	card.mesh = mesh
+	card.material_override = material
+	viewport.add_child(card)
+	var cam := Camera3D.new()
+	viewport.add_child(cam)
+	cam.position = Vector3(0.0, eye_y, 0.0)
+	cam.rotation_degrees = Vector3(-90.0 if eye_y > 0.0 else 90.0, 0.0, 0.0)
+	cam.make_current()
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	if RenderingServer.get_rendering_device() == null:
+		return null
+	return viewport.get_texture().get_image()

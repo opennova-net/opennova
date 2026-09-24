@@ -62,12 +62,20 @@ void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
 		const float x = float(wake.x) * io::kInvFp16One, y = float(height) * io::kInvFp16One,
 					z = -float(wake.y) * io::kInvFp16One;
 		const int32_t base = int32_t(out.vertices.size());
+		// The static ring mesh is built in the render (d3d) frame as
+		// (sin * r, 0, cos * r) [orig: create_water_surface_mesh @ 0x5de01d..
+		// 0x5de03e] and placed through Math_FixedPointToFloat3_YNegated
+		// (@ 0x5de181); the output frame here is the render frame's x/z swap
+		// (godot/src/util/axes.h), so the ring's render x offset lands on z and
+		// its render z offset on x. The swap keeps the ring's winding and
+		// angular texture sense (its front faces up, a mirrored copy would
+		// face down).
 		for (int row = 0; row < 9; ++row) {
 			for (int col = 0; col < 19; ++col) {
 				const double radius = (double(row) + double(0.1f)) * 2.5;
 				const double angle = double(col) * double(0.34906587f);
-				out.vertices.push_back({ x + float(std::sin(angle) * radius), y,
-						z + float(std::cos(angle) * radius),
+				out.vertices.push_back({ x + float(std::cos(angle) * radius), y,
+						z + float(std::sin(angle) * radius),
 						float(double(col) * double(0.22222222f)) + scroll_u,
 						float(row) * 0.25f + scroll_v, float(double(col) * double(0.055555556f)),
 						float(row) * 0.125f, wake.alpha });

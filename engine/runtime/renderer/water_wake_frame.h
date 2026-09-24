@@ -39,8 +39,9 @@ struct WaterWakeFrame {
 	}
 };
 
-// Output is the render frame (mission x,z,-y), with the witnessed radial
-// geometry, animated first UV and fixed gradient UV ready for device upload.
+// Output is the presentation frame (mission x, z, -y; the render frame's x/z
+// swap), with the witnessed radial geometry, animated first UV and fixed
+// gradient UV ready for device upload.
 // `entity_update_counter` drives the first UV's scroll: every draw reads the
 // entity-update counter (World::entity_update_counter), which advances once
 // per completed entity update, so a draw between two updates repeats the
