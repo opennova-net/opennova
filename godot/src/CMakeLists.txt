@@ -158,6 +158,7 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_setup_options.cpp
     simulation/entity_presenter.cpp
     simulation/entity_presenter_wire.cpp
+    simulation/person_overlay_models.cpp
     simulation/fire_presenter.cpp
     simulation/destruction_presenter.cpp
     simulation/throwable_presenter.cpp

@@ -33,6 +33,7 @@
 #include "simulation/destruction_events.h"
 #include "simulation/destruction_presenter.h"
 #include "simulation/fire_presenter.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "simulation/throwable_presenter.h"
@@ -200,6 +201,9 @@ public:
 	ObjectModel *resolve_wire_handle(int p_handle) const;
 	// The live held-weapon model for a wire body (null when unarmed/freed).
 	ObjectModel *held_weapon_node(int p_handle) const;
+	// A wire body's item overlays (canopy, goggles, binoculars, carried
+	// object); null until the body first publishes one.
+	Ref<PersonOverlayModels> person_overlays_for(int p_handle) const;
 	// Cache and apply one wire draw's environment-lighting context to both its
 	// body and held weapon. The cache makes a quality change authoritative even
 	// when cold-spawn budgeting has not built either node yet.
@@ -577,6 +581,8 @@ private:
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
 			PresentRowsView snap, bool body_visible);
+	void update_wire_person_overlays(const WireRow &row, ObjectModel *body,
+			PresentRowsView snap, bool body_visible);
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
 	void release_wire_handle(int handle);
 	void reset_wire_plan_state();
@@ -645,6 +651,7 @@ private:
 	HashMap<int32_t, int32_t> unresolved_;
 	HashMap<int32_t, ObjectID> weapon_nodes_;
 	HashMap<int32_t, String> weapon_graphics_;
+	HashMap<int32_t, Ref<PersonOverlayModels>> person_overlays_;
 	HashMap<int32_t, LightingContext> lighting_contexts_;
 	int pending_spawn_count_ = 0;
 	int64_t last_present_logic_tick_ = -1;

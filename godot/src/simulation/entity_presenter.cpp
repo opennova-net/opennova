@@ -140,6 +140,8 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::resolve_wire_handle);
 	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
 			&EntityPresenter::held_weapon_node);
+	ClassDB::bind_method(D_METHOD("person_overlays_for", "wire_handle"),
+			&EntityPresenter::person_overlays_for);
 	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
 			"effect_scale", "interior_lerp", "light_transfer", "interior_bms",
 			"interior_section"),

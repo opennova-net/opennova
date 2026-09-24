@@ -358,6 +358,10 @@ private:
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
     bool exact_owner_lod_ = false;
+	bool attachment_pixel_cull_ = false;
+	int32_t attachment_pixel_cull_radius_q16_ = 0;
+	bool camera_pixel_culled_ = false;
+	void set_camera_pixel_culled(bool p_culled);
     bool geometry_visible_ = true;
 	bool focal_sway_active_ = false;
 	Basis focal_sway_basis_;
@@ -462,6 +466,8 @@ private:
 	// terrain cache has processed this frame's requests.
 	static HashSet<ObjectModel *> match_terrain_models_;
 	static HashSet<ObjectModel *> authored_lod_models_;
+	// Attachments whose camera draw carries the held weapon's 2 px gate.
+	static HashSet<ObjectModel *> pixel_cull_models_;
 	// Every GeometryInstance3D the scene builds carries instance uniforms
 	// (u_entity_light, the stance and viewmodel flags), so each one holds 16
 	// vec4 slots of Godot's global shader buffer for as long as it exists,
@@ -843,6 +849,13 @@ public:
 	// the owner's level after the frame's selections; a freed owner reads as
 	// level 0.
 	void set_authored_lod_owner(ObjectModel *p_owner, bool p_exact = false);
+	// The held weapon's own projected-size gate (renderer::
+	// held_weapon_projection_culled): update_authored_lods projects this
+	// attachment's model sphere at its origin each frame, and under 2 px the
+	// camera pass skips it — the model moves to the camera-hidden layer and
+	// keeps its render-slot capture, which retail's slot pass draws untested.
+	void set_attachment_pixel_cull(bool p_enabled);
+	bool is_camera_pixel_culled() const { return camera_pixel_culled_; }
     void set_geometry_visible(bool p_visible);
     void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;

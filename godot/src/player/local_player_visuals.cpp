@@ -131,8 +131,20 @@ ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_
 			model->set_slot_shadow_capture_with(presenter->avatar());
 			model->set_entity_light_owner(presenter->avatar());
 		}
+		// The camera skips it under 2 px of its own sphere
+		// (renderer::held_weapon_projection_culled); its RLOD owner is stamped
+		// per frame beside the avatar it rides (LocalPlayerPresenter).
+		model->set_attachment_pixel_cull(true);
 	}
 	return model;
+}
+
+void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModels &p_overlays,
+		const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
+		PersonOverlayModels::Presentation p_presentation) {
+	const Ref<MissionObjectPlacer> mission_placer = placer();
+	p_overlays.present(p_state, p_avatar, true, mission_placer.ptr(), world_node3d(),
+			p_presentation);
 }
 
 ObjectModel *LocalPlayerVisuals::build_local_player_avatar() {

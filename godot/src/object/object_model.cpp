@@ -156,6 +156,7 @@ ObjectModel::~ObjectModel() {
 	}
 	match_terrain_models_.erase(this);
 	authored_lod_models_.erase(this);
+	pixel_cull_models_.erase(this);
 	retire_geometry_instances();
 }
 
@@ -374,6 +375,11 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			base = LAYER_VIEWMODEL;
 			markers = false;
 			break;
+	}
+	// A camera-culled attachment leaves every camera by layer, like the hidden
+	// first-person body, and stays in its render-slot capture.
+	if (camera_pixel_culled_ && presentation_layer_ != PRESENTATION_LAYER_VIEWMODEL) {
+		base = LAYER_FP_BODY_SHADOW_ONLY;
 	}
 	return markers ? (base | shadow_caster_layers_) : base;
 }
@@ -659,6 +665,27 @@ void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner, bool p_exact) {
 			: ObjectID();
 }
 
+void ObjectModel::set_attachment_pixel_cull(bool p_enabled) {
+	attachment_pixel_cull_ = p_enabled;
+	if (!p_enabled) {
+		pixel_cull_models_.erase(this);
+		set_camera_pixel_culled(false);
+		return;
+	}
+	// The weapon model's own header sphere (gpm[5]) — the radius the gate
+	// projects. [retail BoneCallback_org0_World @ 0x4e3d2b]
+	attachment_pixel_cull_radius_q16_ = object_data_.is_valid()
+			? opennova::world::model_bound_radius_q16_from_3di(object_data_->native_model())
+			: 0;
+	pixel_cull_models_.insert(this);
+}
+
+void ObjectModel::set_camera_pixel_culled(bool p_culled) {
+	if (camera_pixel_culled_ == p_culled) return;
+	camera_pixel_culled_ = p_culled;
+	apply_presentation_layer_below(this);
+}
+
 ObjectModel *ObjectModel::get_authored_lod_owner() const {
 	if (authored_lod_owner_.is_null()) {
 		return nullptr;
@@ -931,6 +958,7 @@ HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
+HashSet<ObjectModel *> ObjectModel::pixel_cull_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
 int64_t ObjectModel::live_geometry_instance_count_ = 0;
 
@@ -961,7 +989,8 @@ int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_vie
 //  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per view]
 int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		int p_frame_count) {
-	if (authored_lod_models_.is_empty() || p_frames == nullptr) {
+	if ((authored_lod_models_.is_empty() && pixel_cull_models_.is_empty()) ||
+			p_frames == nullptr) {
 		return 0;
 	}
 	const int view_count = std::min(p_frame_count, static_cast<int>(kMaxLodViews));
@@ -970,6 +999,32 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		any_valid = any_valid || p_frames[v].valid;
 	}
 	if (!any_valid) {
+		return 0;
+	}
+	// The held weapon's own 2 px gate: its model sphere projected at its
+	// attach point, the raw radius against 0x20000, per view; the shared node
+	// leaves the camera only when every view that sees it culls it. A sphere
+	// no view sees is not drawn by any camera either way. [retail
+	// BoneCallback_org0_World @ 0x4e3d07..0x4e3d4b]
+	for (ObjectModel *model : pixel_cull_models_) {
+		bool seen = false;
+		bool drawn = false;
+		if (model->is_inside_tree()) {
+			const Vector3 origin = model->get_global_transform().origin;
+			for (int v = 0; v < view_count; ++v) {
+				int32_t projected_q16 = 0;
+				if (!p_frames[v].valid || !p_frames[v].project_q16(origin,
+								model->attachment_pixel_cull_radius_q16_, projected_q16)) {
+					continue;
+				}
+				seen = true;
+				drawn = drawn ||
+						!opennova::renderer::held_weapon_projection_culled(projected_q16);
+			}
+		}
+		model->set_camera_pixel_culled(seen && !drawn);
+	}
+	if (authored_lod_models_.is_empty()) {
 		return 0;
 	}
 	// The cheap math runs over the registered set in place; visibility and
@@ -2039,6 +2094,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
             &ObjectModel::set_authored_lod_owner, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_attachment_pixel_cull", "enabled"),
+			&ObjectModel::set_attachment_pixel_cull);
+	ClassDB::bind_method(D_METHOD("is_camera_pixel_culled"),
+			&ObjectModel::is_camera_pixel_culled);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
 			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);

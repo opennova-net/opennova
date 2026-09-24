@@ -26,6 +26,7 @@
 #include "player/player_viewmodel_rig.h"
 #include "player/player_weapon_effects.h"
 #include "simulation/inmatch_session_values.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
@@ -163,6 +164,9 @@ public:
 	Node3D *viewmodel() const;
 	// The 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals).
 	ObjectModel *held_weapon() const;
+	// The avatar's item overlays (canopy, goggles, binoculars, carried
+	// object); siblings of the avatar like the held weapon.
+	Ref<PersonOverlayModels> person_overlays() const { return person_overlays_; }
 	Camera3D *camera() const;
 	// THE FRAME'S PROJECTION over the surface (the engine's world::view_projection
 	// for the session aspect mode): the horizontal fov is the policy fov in
@@ -267,6 +271,7 @@ private:
 	Vector2 aim_angles_deg() const;
 	Vector3 eye_position(const Vector3 &p_pos) const;
 	void update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay);
+	void update_person_overlays();
 	void update_player_camera();
 	void stamp_camera_pose();
 	void update_model_lighting_context();
@@ -290,6 +295,7 @@ private:
 	ObjectID avatar_id_;
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from
+	Ref<PersonOverlayModels> person_overlays_;
 	Ref<PlayerWeaponEffects> weapon_effects_;
 	PlayerInputRouter input_router_;
 	Ref<PlayerViewmodelRig> viewmodel_rig_;

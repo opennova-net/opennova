@@ -122,6 +122,12 @@ func _stage_root() -> String:
   hp 100
 end
 
+begin "Night Vision Goggles"
+  id 101904
+  type object
+  graphic person
+end
+
 """ + base_items)
 	items.close()
 	# The player's character registry: retail's ONLY first-person arms source is
@@ -533,6 +539,55 @@ func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	_frame(world, presenter, camera, 2)
 	assert_eq(world.local_player_view().nvg_gain, 0,
 			"'-' steps the gain down and the sim clamps at the floor")
+
+
+# The local avatar's goggles (retail draw 3) follow the body's first-person rule:
+# the camera-tracked gate returns before every draw after the canopy
+# (BoneCallback_org0_World, the gate @0x4e3ab3..0x4e3aca after the canopy submit
+# @0x4e3aa5), so in first person they leave the camera by LAYER and keep casting
+# into the render slot; in third person they draw. The held weapon draws at its
+# avatar's first (head) submit level, never through its own threshold walk
+# (@0x4e3ce1..0x4e3cf2).
+func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar)
+	var held: ObjectModel = presenter.held_weapon()
+	assert_not_null(held, "the kit's held weapon is built")
+	if held != null:
+		var owner := held.get_authored_lod_owner()
+		assert_true(owner == avatar or (owner != null and owner.get_parent() == avatar),
+				"the held weapon's RLOD owner is the avatar's first submit part")
+
+	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
+	_frame(world, presenter, camera, 2)
+	var overlays: PersonOverlayModels = presenter.person_overlays()
+	var nvg := overlays.get_node(PersonOverlayModels.KIND_NVG,
+			PersonOverlayModels.PASS_FIRST) as ObjectModel
+	assert_not_null(nvg, "worn goggles build their item model")
+	if nvg == null:
+		return
+	assert_true(nvg.visible, "the goggles stay a live shadow source in first person")
+	var fp_mask := 0
+	for vi in _visual_instances(nvg):
+		fp_mask |= (vi as VisualInstance3D).layers
+	assert_ne(fp_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+			"first person hides the goggles from the camera by layer")
+	assert_eq(fp_mask & Water.VISUAL_LAYER_WORLD, 0, "and keeps them off the world layer")
+	presenter.set_debug_third_person(true)
+	_frame(world, presenter, camera, 2)
+	var tp_mask := 0
+	for vi in _visual_instances(nvg):
+		tp_mask |= (vi as VisualInstance3D).layers
+	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD, 0, "third person draws the goggles")
+	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
+	_frame(world, presenter, camera, 2)
+	assert_false(nvg.visible, "removed goggles hide")
 
 
 # The router's digit rows over the LIVE binding table and key state, on a row

@@ -180,6 +180,15 @@ int main() {
   CHECK(attachment_lod_index(-1, 2) == 0);
   CHECK(attachment_lod_index(1, 0) == -1);
 
+  // The held weapon's own 2 px gate compares the RAW projected radius
+  // [orig: BoneCallback_org0_World @0x4e3d41 `cmp dword_A784F0, 20000h; jl`].
+  using opennova::renderer::held_weapon_projection_culled;
+  CHECK(opennova::renderer::kHeldWeaponMinProjectedRadiusQ16 == 0x20000);
+  CHECK(held_weapon_projection_culled(0x1FFFF));
+  CHECK(!held_weapon_projection_culled(0x20000));
+  CHECK(held_weapon_projection_culled(kObjectLodSubPixelCullQ16));
+  CHECK(!held_weapon_projection_culled(kObjectLodBehindEyeRadiusQ16));
+
   // The frame scale [orig: @ 0x5c940c..0x5c9468]: the highest shipped
   // profile's fixed 2.0 quality over the viewport width, times 640.
   CHECK(kObjectLodDetailLevelMax == 3);

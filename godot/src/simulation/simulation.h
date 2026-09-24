@@ -50,6 +50,7 @@
 #include <runtime/wac/wac_system.h>
 
 namespace opennova::world {
+struct PersonOverlays;
 struct RayDebugRow;
 struct ContactDebugRow;
 namespace inspect {
@@ -338,6 +339,16 @@ public:
 		PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
 		PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
 		PF_PARACHUTE_DEPLOYED = opennova::world::PF_PARACHUTE_DEPLOYED,
+		PF_CANOPY_PARA = opennova::world::PF_CANOPY_PARA,
+		PF_CANOPY_PARA_O = opennova::world::PF_CANOPY_PARA_O,
+		PF_CANOPY_YAW_DEG = opennova::world::PF_CANOPY_YAW_DEG,
+		PF_NVG_WORN = opennova::world::PF_NVG_WORN,
+		PF_NVG_FLIP = opennova::world::PF_NVG_FLIP,
+		PF_BINOCULARS_RAISED = opennova::world::PF_BINOCULARS_RAISED,
+		PF_CARRIED_TYPE_ID = opennova::world::PF_CARRIED_TYPE_ID,
+		PF_CARRIED_PITCH_DEG = opennova::world::PF_CARRIED_PITCH_DEG,
+		PF_CARRIED_YAW_DEG = opennova::world::PF_CARRIED_YAW_DEG,
+		PF_CARRIED_ROLL_DEG = opennova::world::PF_CARRIED_ROLL_DEG,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -1494,6 +1505,8 @@ public:
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds ObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Ref<PlayerAimOverlay> get_local_player_aim_overlay() const;
+	// The local avatar's item overlays (inmatch::local_player_person_overlays).
+	bool local_player_person_overlays(opennova::world::PersonOverlays &r_out) const;
 	// The third-person held-weapon model name for an ADM index (weapon.def gfx3).
 	String get_weapon_third_person_model(int p_adm_index) const;
 

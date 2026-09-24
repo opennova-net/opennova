@@ -315,3 +315,45 @@ func test_rigid_marker_parts_ignore_live_panm_and_rest_offsets() -> void:
 		ObjectModel.advance_awake_frame(0.125)
 		for part in marker.get_render_part_nodes().values():
 			assert_true((part as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))
+
+
+func test_held_weapon_pixel_gate_hides_it_from_the_camera_only() -> void:
+	# Retail skips the third-person gun, outside the render-slot pass, while its own
+	# model sphere projects under 2 px at its attach point (BoneCallback_org0_World
+	# @0x4e3d07..0x4e3d4b, the raw radius against 0x20000). The camera loses it by
+	# LAYER — its instances stay visible for the slot capture, which draws it untested.
+	var weapon := ObjectModel.new()
+	add_child_autofree(weapon)
+	weapon.set_authored_lod_enabled(true)
+	weapon.set_object_data(_data(ARMORY_3DI))
+	weapon.set_attachment_pixel_cull(true)
+	var camera := Transform3D(Basis.IDENTITY, Vector3.ZERO) # looks down -Z
+	var layers := func() -> int:
+		var mask := 0
+		for instance in _own_instances(weapon):
+			mask |= instance.layers
+		return mask
+	weapon.position = Vector3(0.0, 0.0, -5.0)
+	ObjectModel.update_authored_lods(camera, 60.0, 640.0, 480.0)
+	assert_false(weapon.is_camera_pixel_culled(), "a near weapon draws")
+	var near_layers: int = layers.call()
+	assert_eq(near_layers & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0)
+	weapon.position = Vector3(0.0, 0.0, -200000.0)
+	ObjectModel.update_authored_lods(camera, 60.0, 640.0, 480.0)
+	assert_true(weapon.is_camera_pixel_culled(), "a sub-2px weapon leaves the camera")
+	var far_layers: int = layers.call()
+	assert_ne(far_layers & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+			"the culled weapon rides the camera-excluded layer")
+	assert_eq(far_layers & (Water.VISUAL_LAYER_WORLD | Water.VISUAL_LAYER_WORLD_NO_MIRROR), 0,
+			"and no world layer")
+	for instance in _own_instances(weapon):
+		assert_true(instance.visible or instance.mesh == null,
+				"its geometry stays visible for the render-slot capture")
+	weapon.position = Vector3(0.0, 0.0, 5.0) # behind the camera: never drawn anyway
+	ObjectModel.update_authored_lods(camera, 60.0, 640.0, 480.0)
+	assert_false(weapon.is_camera_pixel_culled(), "a rejected sphere is not gated")
+	weapon.position = Vector3(0.0, 0.0, -5.0)
+	ObjectModel.update_authored_lods(camera, 60.0, 640.0, 480.0)
+	assert_eq(layers.call(), near_layers, "coming back into range restores the layers")
+	weapon.set_attachment_pixel_cull(false)
+	assert_false(weapon.is_camera_pixel_culled())

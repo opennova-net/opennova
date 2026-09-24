@@ -118,6 +118,7 @@ void feed_world_thermal_view(Node *p_world, bool p_world_gate, bool p_terrain_ga
 
 LocalPlayerPresenter::LocalPlayerPresenter() {
 	viewmodel_rig_.instantiate();
+	person_overlays_.instantiate();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -490,6 +491,7 @@ void LocalPlayerPresenter::clear_models() {
 	}
 	held_weapon_id_ = ObjectID();
 	held_weapon_graphic_ = String();
+	person_overlays_->release();
 	if (ObjectModel *body = avatar()) {
 		body->queue_free();
 	}
@@ -684,6 +686,18 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 		return;
 	}
 	ObjectModel *body = avatar();
+	// Drawn inside the avatar's HEAD submit, at that part's RLOD level clamped
+	// to the weapon's own count (the body when not composed), never through a
+	// threshold walk of its own. [retail BoneCallback_org0_World
+	// @ 0x4e3ce1..0x4e3cf2; the head submit Terrain_RenderSectorEntitiesBySide
+	// @ 0x5c7ffc]
+	if (body != nullptr) {
+		ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
+		ObjectModel *owner = head != nullptr ? head : body;
+		if (weapon->get_authored_lod_owner() != owner) {
+			weapon->set_authored_lod_owner(owner);
+		}
+	}
 	const Variant attach = body != nullptr
 			? EntityPresenter::held_weapon_attach_transform(body, p_overlay->get_weapon_attach_angles(),
 					  p_overlay->get_weapon_hand_frame())
@@ -1064,6 +1078,29 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	}
 	// Attach only after this frame's body clip and weapon layer have been posed.
 	update_held_weapon(overlay);
+	update_person_overlays();
+}
+
+// The avatar's item overlays: retail's draws 1, 3, 4 and 6 for the local body.
+// The canopy draws BEFORE the camera-tracked gate, so the local player sees his
+// own canopy in first person; the goggles, the binoculars and the carried
+// object follow the body's first-person layer rule (hidden from the camera,
+// still casting into the render slot).
+// [retail BoneCallback_org0_World @ 0x4e3940 — the canopy submit @ 0x4e3aa5,
+//  the tracked gate @ 0x4e3ab3..0x4e3aca]
+void LocalPlayerPresenter::update_person_overlays() {
+	if (visuals_.is_null()) {
+		return;
+	}
+	opennova::world::PersonOverlays state;
+	const Ref<Simulation> overlay_sim = sim();
+	if (overlay_sim.is_valid()) {
+		overlay_sim->local_player_person_overlays(state);
+	}
+	const bool draw_body = third_person_ || debug_body_in_first_person_;
+	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, avatar(),
+			draw_body ? PersonOverlayModels::PRESENT_LOCAL_THIRD_PERSON
+					  : PersonOverlayModels::PRESENT_LOCAL_FIRST_PERSON);
 }
 
 void LocalPlayerPresenter::_bind_methods() {
@@ -1097,6 +1134,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("vm_parts"), &LocalPlayerPresenter::vm_parts);
 	ClassDB::bind_method(D_METHOD("viewmodel"), &LocalPlayerPresenter::viewmodel);
 	ClassDB::bind_method(D_METHOD("held_weapon"), &LocalPlayerPresenter::held_weapon);
+	ClassDB::bind_method(D_METHOD("person_overlays"), &LocalPlayerPresenter::person_overlays);
 	ClassDB::bind_method(D_METHOD("camera"), &LocalPlayerPresenter::camera);
 	ClassDB::bind_method(D_METHOD("view_projection"), &LocalPlayerPresenter::view_projection);
 	ClassDB::bind_method(D_METHOD("presented_view"), &LocalPlayerPresenter::presented_view);

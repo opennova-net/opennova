@@ -77,6 +77,7 @@
 #include "mission/mission_info.h"
 #include "env/mission_environment_overrides.h"
 #include "simulation/fp_viewmodel_spec.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
@@ -313,6 +314,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_INTERNAL_CLASS(ThrowablePresenter);
 	GDREGISTER_INTERNAL_CLASS(VehicleTrailPresenter);
 	GDREGISTER_CLASS(EntityPresenter);
+	GDREGISTER_CLASS(PersonOverlayModels);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);
 	GDREGISTER_CLASS(EndRoundState);

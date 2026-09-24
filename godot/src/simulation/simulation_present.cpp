@@ -692,7 +692,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	frame.rows.clear();
 	frame.door_phases.clear();
 	if (runtime_ && kernel_) {
-		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
+		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
+				host_ctx()};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);
@@ -726,6 +727,13 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (runtime_profiling_enabled_)
 		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
 	return present_.snapshot;
+}
+
+bool Simulation::local_player_person_overlays(opennova::world::PersonOverlays &r_out) const {
+	r_out = opennova::world::PersonOverlays{};
+	if (!kernel_) return false;
+	const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
+	return opennova::inmatch::local_player_person_overlays(context, r_out);
 }
 
 PackedFloat32Array Simulation::get_present_snapshot() const {

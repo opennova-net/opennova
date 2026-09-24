@@ -132,6 +132,19 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
   return std::clamp(parent_lod_index, 0, lod_count - 1);
 }
 
+// The held weapon's own projected-size gate (draw 5 of the person callback):
+// outside the render-slot pass (render state bits 2/4 skip the test), the
+// weapon's model sphere (its model header radius, gpm[5]) is projected at the
+// attach point and the weapon is skipped while the RAW projected radius — not
+// the frame-scaled LOD input — is under 2 px (Q16.16 0x20000).
+// [orig: BoneCallback_org0_World @ 0x4e3cf6..0x4e3d4b — the state test
+//  @ 0x4e3cfe, Viewport_TransformAndClipPoint @ 0x4e3d39 with the radius
+//  @ 0x4e3d2b, `cmp dword_A784F0, 20000h` @ 0x4e3d41]
+inline constexpr int32_t kHeldWeaponMinProjectedRadiusQ16 = 0x20000;
+inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
+  return projected_radius_q16 < kHeldWeaponMinProjectedRadiusQ16;
+}
+
 // The per-frame multiplier applied to every projected radius before the
 // threshold walk: the detail profile's quality term (detail * 0.33 + 0.34,
 // or the fixed 2.0 on detail 3, the highest shipped profile) divided by the
