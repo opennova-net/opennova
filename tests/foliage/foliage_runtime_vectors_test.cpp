@@ -60,13 +60,17 @@ FrameRequest one_silhouette(float depth, float distance) {
 bool detail_vectors_and_gates() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
-	if (!expect(runtime.render_frame(one_detail(10.0f), world).detail.empty(),
-	            "detail cache miss warms without drawing")) return false;
+	// The terrain frame's tail generates a missing key before the scene
+	// core's detail passes draw, so a new key draws in its own frame.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 then @ 0x5ca8ec;
+	// PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f]
 	auto out = runtime.render_frame(one_detail(10.0f), world);
 	const auto near_stats = runtime.get_stats();
 	if (!expect(out.detail.size() == 72 &&
+	                near_stats.detail.misses == 1 &&
+	                near_stats.detail.regenerations == 1 &&
 	                near_stats.detail.submissions == 2,
-	            "near detail submits the resident cell twice")) return false;
+	            "a newly collected near cell generates and draws twice in one frame")) return false;
 
 	const uint64_t high_submission = out.detail[0].submission_id;
 	const uint64_t low_submission = out.detail[36].submission_id;
@@ -184,6 +188,40 @@ bool detail_vectors_and_gates() {
 	flat.detail_cells[0].key |= 0x80000000u;
 	if (!expect(runtime.render_frame(flat, world).detail.empty(),
 	            "flat-sector detail keys generate no geometry")) return false;
+	return true;
+}
+
+// The thermal view (the scene core's fourth argument, the held weapon's
+// thermal byte) forces every detail patch onto the primary LOW pass and
+// scales its c6 fade by flt_7C69F4 = 0.1: no HIGH, no strict-LESS secondary.
+// [orig: Foliage_RenderFarPatches @ 0x60a193..0x60a19c (forced LOW),
+// @ 0x60a497..0x60a4ae (x0.1); Render_ProcessMainSceneFrame
+// @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
+bool detail_thermal_view_forces_low_at_a_tenth_fade() {
+	Runtime runtime;
+	auto world = world_with_foliage_mask(0x1u);
+	auto near_request = one_detail(10.0f);
+	near_request.thermal_view = true;
+	const auto near_out = runtime.render_frame(near_request, world);
+	if (!expect(near_out.detail.size() == 36 &&
+	                runtime.get_stats().detail.submissions == 1,
+	            "a thermal near patch submits once")) return false;
+	for (const DetailInstance &instance : near_out.detail) {
+		if (!expect(instance.pass == DetailPass::LowAlphaTest &&
+		                instance.alpha_reference == 8 &&
+		                !instance.near_secondary &&
+		                near(instance.alpha, 0.1f, 1.0e-6f),
+		            "thermal near patch is the primary LOW pass at fade 0.1")) {
+			return false;
+		}
+	}
+	auto fading = one_detail(31.0f);
+	fading.thermal_view = true;
+	const auto fading_out = runtime.render_frame(fading, world);
+	if (!expect(fading_out.detail.size() == 36 &&
+	                fading_out.detail[0].pass == DetailPass::LowAlphaTest &&
+	                near(fading_out.detail[0].alpha, 0.05f, 1.0e-6f),
+	            "the thermal scale multiplies the distance fade")) return false;
 	return true;
 }
 
@@ -345,12 +383,13 @@ bool detail_cache_temporal_semantics() {
 
 	const auto first = runtime.render_frame(request, world);
 	const auto first_stats = runtime.get_stats();
-	if (!expect(first.detail.empty() &&
+	if (!expect(first.detail.size() == 144 &&
 	                first_stats.detail.misses == 2 &&
 	                first_stats.detail.regenerations == 1 &&
 	                first_stats.detail.residents == 1 &&
+	                first_stats.detail.submissions == 4 &&
 	                first.detail_generated.size() == 1,
-	            "duplicate detail misses allocate one warm resident")) return false;
+	            "duplicate detail misses allocate one resident both keys draw at once")) return false;
 	const uint64_t revision = first.detail_generated[0].revision;
 
 	const auto second = runtime.render_frame(request, world);
@@ -380,7 +419,7 @@ bool detail_cache_temporal_semantics() {
 	            "runtime reset invalidates detail state and cadence")) return false;
 	foliage_mask = 0x1u;
 	const auto rewarmed = runtime.render_frame(request, world);
-	if (!expect(rewarmed.detail.empty() &&
+	if (!expect(rewarmed.detail.size() == 144 &&
 	                rewarmed.detail_generated.size() == 1 &&
 	                rewarmed.detail_generated[0].revision != revision,
 	            "reset forces a new detail cache revision")) return false;
@@ -414,18 +453,21 @@ bool detail_capacity_and_eviction() {
 	auto second_request = first_request;
 	second_request.detail_cells[0].key = 0x00200030u;
 	const auto second = runtime.render_frame(second_request, world);
-	if (!expect(second.detail.empty() &&
+	if (!expect(second.detail.size() == 72 &&
+	                second.detail[0].cache_revision ==
+	                    second.detail_generated[0].revision &&
 	                second.detail_evicted.size() == 1 &&
 	                second.detail_generated.size() == 1 &&
 	                second.detail_evicted[0].revision ==
 	                    first.detail_generated[0].revision &&
 	                runtime.get_stats().detail.evictions == 1,
-	            "detail replacement emits old and new cache identities")) return false;
+	            "detail replacement emits old and new identities and draws the new "
+	            "geometry in its generation frame")) return false;
 	const auto third = runtime.render_frame(second_request, world);
 	if (!expect(third.detail.size() == 72 &&
 	                third.detail[0].cache_revision ==
 	                    second.detail_generated[0].revision,
-	            "replacement detail geometry appears one render later")) return false;
+	            "the replacement resident keeps its revision on the next hit")) return false;
 	return true;
 }
 
@@ -460,12 +502,12 @@ bool flat_detail_keys_retain_empty_cache_entries() {
 
 	request.detail_cells[0].key = authored_key;
 	const auto restored = runtime.render_frame(request, world);
-	if (!expect(restored.detail.empty() && restored.detail_evicted.size() == 1 &&
+	if (!expect(restored.detail.size() == 72 &&
+	                restored.detail_evicted.size() == 1 &&
 	                restored.detail_evicted[0].key == flat_key &&
 	                restored.detail_generated.size() == 1 && samples > 0,
-	            "returning to authored terrain must evict the empty flat resident and regenerate")) return false;
-	if (!expect(runtime.render_frame(request, world).detail.size() == 72,
-	            "the authored replacement draws only on the following render")) return false;
+	            "returning to authored terrain evicts the empty flat resident, "
+	            "regenerates and draws in that frame")) return false;
 	return true;
 }
 
@@ -1112,6 +1154,7 @@ bool fd_bake_vector() {
 
 int main() {
 	if (!detail_vectors_and_gates()) return 1;
+	if (!detail_thermal_view_forces_low_at_a_tenth_fade()) return 1;
 	if (!silhouette_vectors_and_tier_role()) return 1;
 	if (!tier_specific_foliage_sampler_routing()) return 1;
 	if (!detail_cache_temporal_semantics()) return 1;

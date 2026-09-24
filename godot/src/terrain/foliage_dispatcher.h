@@ -157,6 +157,10 @@ public:
   // Tests and raster probes pin the detail sway clock (the wall-clock
   // milliseconds behind the phase); a negative value restores the live clock.
   void set_wind_clock_override_ms(int64_t p_ms);
+  // The local player's thermal view, fed per frame by the GameWorld leg from
+  // the environment's world gate (the engine compiler carries the witness).
+  void set_thermal_view(bool p_thermal);
+  bool is_thermal_view() const { return thermal_view_; }
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
   // projection all come directly from this resource.
@@ -317,6 +321,7 @@ private:
   ObjectID weather_id_;
   Weather *_weather() const;
   int64_t wind_clock_override_ms_ = -1;
+  bool thermal_view_ = false;
   Ref<TerrainData> terrain_data_;
   Ref<TerrainTileInfo> tile_info_;
   Ref<TerrainData> colormap_source_;

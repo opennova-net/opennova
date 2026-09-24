@@ -113,10 +113,50 @@ void test_detail_vertex_placement_matches_retail() {
 	}
 }
 
+// The terrain frame generates a missing detail key at its tail before the
+// scene core draws the detail passes, so the first compile of a new cell
+// already builds its mesh and commands its HIGH + secondary LOW draws.
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 then @ 0x5ca8ec;
+// PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f]
+void test_new_detail_cell_draws_in_its_generation_frame() {
+	r::FoliageFrameCompiler compiler = one_triangle_compiler();
+	const r::FoliageDrawList &list =
+			compiler.compile(detail_view(), flat_world(), r::FoliageExpansionSamplers{});
+	CHECK(first_detail_build(list) != nullptr);
+	CHECK(list.commands.size() == 2);
+	if (list.commands.size() == 2) {
+		CHECK(list.commands[0].pass == f::DetailPass::HighAlphaTest);
+		CHECK(list.commands[1].pass == f::DetailPass::LowAlphaTest);
+		CHECK(list.commands[1].near_secondary);
+	}
+}
+
+// The thermal view reaches the runtime through the view input: one primary
+// LOW command per patch at one tenth of the distance fade.
+// [orig: Foliage_RenderFarPatches @ 0x60a193..0x60a19c, 0x60a497..0x60a4ae]
+void test_thermal_view_commands_one_faint_low_pass() {
+	r::FoliageFrameCompiler compiler = one_triangle_compiler();
+	r::FoliageViewInput view = detail_view();
+	view.thermal_view = true;
+	const r::FoliageDrawList &list =
+			compiler.compile(view, flat_world(), r::FoliageExpansionSamplers{});
+	CHECK(list.commands.size() == 1);
+	if (list.commands.size() == 1) {
+		const r::FoliageDrawCommand &command = list.commands[0];
+		CHECK(command.pass == f::DetailPass::LowAlphaTest);
+		CHECK(!command.near_secondary);
+		CHECK(near(command.fade, 0.1f, 1e-6f));
+		CHECK(near(command.alpha_reference, 8.0f / 255.0f, 1e-6f));
+		CHECK(command.high_pass_cutoff == 0.0f);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_detail_vertex_placement_matches_retail();
+	test_new_detail_cell_draws_in_its_generation_frame();
+	test_thermal_view_commands_one_faint_low_pass();
 	if (failures == 0) std::printf("foliage_frame_compile_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

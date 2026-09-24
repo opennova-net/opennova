@@ -31,10 +31,6 @@ constexpr float kYawScale = 0x1.921FA0p-14f;
 constexpr float kPathRange = 2.0f;
 constexpr float kDetailFadeStart = 20.0f;
 constexpr float kDetailPassSwitch = 33.0f;
-// The witnessed 0.1 c6 fade scale (flt_7C69F4 @ 0x60a4a8) belongs to the
-// water-REFLECTION scene invocation only (arg_8 = reflectionEnabled), which
-// also forces every patch to the LOW pass. The main scene never scales the
-// fade; this runtime models the main scene.
 constexpr float kDetailLimit = 42.0f;
 constexpr float kSilhouetteDepth = 38.0f;
 constexpr int32_t kFixedOne = io::kFp16OneInt;
@@ -560,68 +556,6 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		return best_index;
 	};
 
-	// Detail geometry is consumed before the cache update. A miss generated at
-	// the update tail therefore first appears on the next terrain render.
-	// [orig: PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f]
-	for (const DetailCell &cell : request.detail_cells) {
-		if (!detail_cell_is_visible(cell)) continue;
-		const float alpha = cell.camera_distance <= kDetailFadeStart
-		                      ? 1.0f
-		                      : std::clamp(
-		                            1.0f -
-		                                (cell.camera_distance - kDetailFadeStart) /
-		                                    (kDetailLimit - kDetailFadeStart),
-		                            0.0f,
-		                            1.0f);
-
-		for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
-			if (!request.slots[slot_index].enabled) continue;
-			const auto &entries = detail_cache_[slot_index];
-			const size_t index = find_detail_index(entries, cell.key);
-			if (index == entries.size() || entries[index].instances.empty()) {
-				continue;
-			}
-			const DetailCacheEntry &entry = entries[index];
-			const auto append_submission =
-			    [this, &entry, &output](DetailPass pass,
-			                           uint8_t alpha_reference,
-			                           float submission_alpha,
-			                           bool near_secondary) {
-				++stats_.detail.submissions;
-				const uint64_t submission_id = ++next_submission_id_;
-				for (const DetailInstance &cached_instance : entry.instances) {
-					DetailInstance instance = cached_instance;
-					instance.cache_revision = entry.revision;
-					instance.submission_id = submission_id;
-					instance.alpha = submission_alpha;
-					instance.alpha_reference = alpha_reference;
-					instance.pass = pass;
-					instance.near_secondary = near_secondary;
-					output.detail.push_back(instance);
-				}
-			};
-
-			// Retail submits the near resident twice in one main-scene pass:
-			// the 180-reference depth-writing HIGH draw first, then the exact
-			// same cached geometry under the 8-reference no-depth-write LOW
-			// draw at the SAME c6 fade with strict D3DCMP_LESS. At and beyond
-			// the 33-unit switch only the primary LOW pass is submitted. The
-			// 0.1 fade scale rides the whole-call reflection flag (arg_8 =
-			// reflectionEnabled, pushed at 0x5c95c1/0x5c9661), which also
-			// forces LOW for every patch; it never applies to the main scene.
-			// [orig: Foliage_RenderFarPatches @ 0x60a171..0x60a19c pass
-			// select, 0x60a497..0x60a4ae reflection fade scale,
-			// 0x60a659..0x60a694 secondary setup/draw;
-			// Terrain_RenderSceneWithReflection @ 0x5c95c5/0x5c9665]
-			if (cell.camera_distance < kDetailPassSwitch) {
-				append_submission(DetailPass::HighAlphaTest, 180u, alpha, false);
-				append_submission(DetailPass::LowAlphaTest, 8u, alpha, true);
-			} else {
-				append_submission(DetailPass::LowAlphaTest, 8u, alpha, false);
-			}
-		}
-	}
-
 	// Detail update: resident lookup stops at the first key; duplicate missing
 	// keys allocate once. Geometry persists until strict signed-age LRU reuse.
 	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30]
@@ -666,6 +600,78 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			++stats_.detail.regenerations;
 			output.detail_generated.push_back(CacheIdentity{
 			    static_cast<uint8_t>(slot_index), entry.key, entry.revision});
+		}
+	}
+
+	// The detail draw consumes the pool the update above just filled: the
+	// terrain frame (PolyTrn_RenderFrame, whose tail runs the update) renders
+	// before the scene core's two detail passes, so a newly collected key
+	// draws in the frame it was generated.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 (terrain frame) then
+	// @ 0x5ca8ec (Terrain_RenderSceneWithReflection); PolyTrn_RenderFrame
+	// @ 0x60f0ea..0x60f10f (update); Foliage_SetupFarSlotDraw
+	// @ 0x600807..0x60081c (key lookup)]
+	for (const DetailCell &cell : request.detail_cells) {
+		if (!detail_cell_is_visible(cell)) continue;
+		const float alpha = cell.camera_distance <= kDetailFadeStart
+		                      ? 1.0f
+		                      : std::clamp(
+		                            1.0f -
+		                                (cell.camera_distance - kDetailFadeStart) /
+		                                    (kDetailLimit - kDetailFadeStart),
+		                            0.0f,
+		                            1.0f);
+
+		for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
+			if (!request.slots[slot_index].enabled) continue;
+			const auto &entries = detail_cache_[slot_index];
+			const size_t index = find_detail_index(entries, cell.key);
+			if (index == entries.size() || entries[index].instances.empty()) {
+				continue;
+			}
+			const DetailCacheEntry &entry = entries[index];
+			const auto append_submission =
+			    [this, &entry, &output](DetailPass pass,
+			                           uint8_t alpha_reference,
+			                           float submission_alpha,
+			                           bool near_secondary) {
+				++stats_.detail.submissions;
+				const uint64_t submission_id = ++next_submission_id_;
+				for (const DetailInstance &cached_instance : entry.instances) {
+					DetailInstance instance = cached_instance;
+					instance.cache_revision = entry.revision;
+					instance.submission_id = submission_id;
+					instance.alpha = submission_alpha;
+					instance.alpha_reference = alpha_reference;
+					instance.pass = pass;
+					instance.near_secondary = near_secondary;
+					output.detail.push_back(instance);
+				}
+			};
+
+			// Retail submits the near resident twice in one main-scene pass:
+			// the 180-reference depth-writing HIGH draw first, then the exact
+			// same cached geometry under the 8-reference no-depth-write LOW
+			// draw at the SAME c6 fade with strict D3DCMP_LESS. At and beyond
+			// the 33-unit switch only the primary LOW pass is submitted. The
+			// thermal view (the scene core's fourth argument, the held
+			// weapon's thermal byte) forces the primary LOW pass for every
+			// patch and scales its c6 fade by flt_7C69F4 = 0.1 (the fmul
+			// @ 0x60a4a8).
+			// [orig: Foliage_RenderFarPatches @ 0x60a171..0x60a19c pass
+			// select, 0x60a497..0x60a4ae thermal fade scale,
+			// 0x60a659..0x60a694 secondary setup/draw;
+			// Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661 (arg);
+			// Render_ProcessMainSceneFrame @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
+			if (request.thermal_view) {
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha * 0.1f,
+				                  false);
+			} else if (cell.camera_distance < kDetailPassSwitch) {
+				append_submission(DetailPass::HighAlphaTest, 180u, alpha, false);
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, true);
+			} else {
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, false);
+			}
 		}
 	}
 

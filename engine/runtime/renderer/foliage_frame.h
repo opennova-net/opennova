@@ -70,6 +70,8 @@ struct FoliageViewInput {
 	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60076f].
 	uint32_t time_ms = 0;
 	int32_t wind_osc_ring0 = 0;
+	// The local player's thermal view (foliage::FrameRequest::thermal_view).
+	bool thermal_view = false;
 };
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather

@@ -61,6 +61,9 @@ struct FrameRequest {
 	std::array<RuntimeSlot, FOLIAGE_MAX_DEFS> slots{};
 	std::vector<DetailCell> detail_cells;
 	std::vector<SilhouetteAnchor> silhouette_anchors;
+	// The local player's thermal view (the scene core's fourth argument):
+	// every detail patch draws the primary LOW pass at one tenth fade.
+	bool thermal_view = false;
 };
 
 struct WorldSamplers {

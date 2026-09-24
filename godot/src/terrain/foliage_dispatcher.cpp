@@ -159,6 +159,10 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_terrain);
   ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
                        &FoliageDispatcher::set_wind_clock_override_ms);
+  ClassDB::bind_method(D_METHOD("set_thermal_view", "thermal"),
+                       &FoliageDispatcher::set_thermal_view);
+  ClassDB::bind_method(D_METHOD("is_thermal_view"),
+                       &FoliageDispatcher::is_thermal_view);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &FoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -360,6 +364,10 @@ void FoliageDispatcher::set_weather(Weather *p_weather) {
 
 void FoliageDispatcher::set_wind_clock_override_ms(int64_t p_ms) {
   wind_clock_override_ms_ = p_ms;
+}
+
+void FoliageDispatcher::set_thermal_view(bool p_thermal) {
+  thermal_view_ = p_thermal;
 }
 
 Weather *FoliageDispatcher::_weather() const {
@@ -1516,6 +1524,7 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
   if (const Weather *weather = _weather(); weather != nullptr) {
     input.wind_osc_ring0 = weather->runtime().core().oscillator.osc_ring[0];
   }
+  input.thermal_view = thermal_view_;
 
   // Column-major view matrix from the camera's inverse transform (the same
   // construction Terrain feeds TerrainFrameCompiler).

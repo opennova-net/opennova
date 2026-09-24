@@ -219,6 +219,7 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	opennova::foliage::FrameRequest request;
 	request.slots = slots_;
 	request.detail_cells = view.detail_cells;
+	request.thermal_view = view.thermal_view;
 	draw_list_.debug.detail_cells =
 			static_cast<int64_t>(request.detail_cells.size());
 	draw_list_.debug.silhouette_anchors_input =

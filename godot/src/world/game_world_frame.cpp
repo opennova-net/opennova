@@ -577,6 +577,9 @@ void GameWorld::render_foliage_frame() {
 			}
 		}
 		dispatcher_->set_silhouette_anchors(silhouette_anchors);
+		// The scene core's thermal byte is the environment's world gate
+		// (the engine foliage runtime carries the witness).
+		dispatcher_->set_thermal_view(env_ != nullptr && env_->state().thermal_view());
 		dispatcher_->render_frame(render_camera_xform(), get_frame_clock_ms());
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
