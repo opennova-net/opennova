@@ -486,7 +486,6 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	contacts_recording_ = false; // likewise the contact capture
 	// A new world's first tick re-pushes every overlay record.
 	overlay_tick_ = static_cast<uint64_t>(-1);
-	overlay_selection_ = 0xFFFF;
 	overlay_wants_ = 0;
 	last_hitbox_push_ms_ = -1;
 	if (overlay_live_) {

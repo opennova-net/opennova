@@ -78,15 +78,12 @@ public:
 	// active and queues the value on release, so a push mid-drag never
 	// yanks the handle.
 	float &slider_edit(const char *id) { return slider_edits_[id]; }
-	bool slider_editing(const char *id) const;
-	void set_slider_editing(const char *id, bool editing);
 
 private:
 	std::vector<ControlSpec> catalog_;
 	std::unordered_map<std::string, size_t> index_;
 	std::unordered_map<std::string, ControlState> states_;
 	std::unordered_map<std::string, float> slider_edits_;
-	std::unordered_map<std::string, bool> slider_editing_;
 };
 
 // Draw one row as its kind's widget (a checkbox, a slider queued on release,

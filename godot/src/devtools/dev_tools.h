@@ -203,7 +203,6 @@ private:
 	bool overlay_live_ = false;
 	uint32_t overlay_wants_ = 0; // which layers' records the last frame read
 	uint64_t overlay_tick_ = static_cast<uint64_t>(-1);
-	uint16_t overlay_selection_ = 0xFFFF;
 	// A Rays/Physics filter changed: the next frame re-reads the rows.
 	bool overlay_filters_dirty_ = false;
 	int64_t last_hitbox_push_ms_ = -1;

@@ -301,6 +301,58 @@ void test_control_board_catalog_states_and_wants() {
 	CHECK(draw_once(tools, 1), "the toolbar draws over the board");
 }
 
+// Hiding a window during a drag skips the widget's deactivation frame.
+// Reopening must follow the owner again, without submitting the abandoned edit.
+void test_control_slider_recovers_after_hidden_drag() {
+	NullBackend backend;
+	opennova::devtools::ControlBoard board;
+	opennova::devtools::ControlSpec spec;
+	spec.id = "test_slider";
+	spec.label = "Slider";
+	spec.kind = opennova::devtools::ControlKind::Slider;
+	board.set_catalog({spec});
+	opennova::devtools::ControlState state;
+	state.id = spec.id;
+	state.available = state.writable = state.has_value = true;
+	state.value = ControlArg::number(0.25);
+	board.set_states({state});
+	std::deque<ControlRequest> requests;
+	ImVec2 point;
+	const auto frame = [&](bool visible) {
+		ImGui::NewFrame();
+		if (visible) {
+			ImGui::SetNextWindowPos(ImVec2(40, 40));
+			ImGui::SetNextWindowSize(ImVec2(400, 120));
+			ImGui::Begin("Slider test");
+			opennova::devtools::draw_control(board, spec.id.c_str(), requests);
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+			point = ImVec2(min.x + 120.0f, (min.y + max.y) * 0.5f);
+			ImGui::End();
+		}
+		ImGui::Render();
+	};
+	frame(true);
+	frame(true);
+	ImGuiIO &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	frame(true);
+	io.AddMouseButtonEvent(0, true);
+	frame(true);
+	CHECK(ImGui::GetActiveID() != 0, "the slider drag activates");
+	CHECK(board.slider_edit(spec.id.c_str()) != 0.25f, "the drag changes the edit buffer");
+	CHECK(requests.empty(), "a held drag does not submit");
+	frame(false);
+	io.AddMouseButtonEvent(0, false);
+	frame(false);
+	frame(false);
+	state.value = ControlArg::number(0.75);
+	board.set_states({state});
+	frame(true);
+	CHECK(board.slider_edit(spec.id.c_str()) == 0.75f, "the reopened slider follows the current owner value");
+	CHECK(requests.empty(), "the hidden drag was cancelled");
+}
+
 // The Game toolbar's transport requests and its status readout.
 void test_game_toolbar_transport_and_status() {
 	GameDevTools tools;
@@ -1909,6 +1961,7 @@ int main() {
 	test_window_registry_order_groups_and_defaults();
 	test_status_line_and_close_request();
 	test_control_board_catalog_states_and_wants();
+	test_control_slider_recovers_after_hidden_drag();
 	test_game_toolbar_transport_and_status();
 	test_game_window_is_mandatory_and_detachable();
 	test_game_window_sends_responsive_integer_content_size_to_its_adapter();

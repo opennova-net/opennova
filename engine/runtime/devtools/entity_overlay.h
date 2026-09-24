@@ -13,16 +13,19 @@
 
 namespace opennova::devtools {
 
+class EntitiesWindow;
+
 struct EntityMarkersRecord {
 	bool valid = false;
 	uint64_t logic_tick = 0;
+	world::inspect::EntityMarkerQuery query{};
 	std::vector<world::inspect::EntityMarker> rows;
 };
 
 class EntitySelectionLayer : public OverlayLayer {
 public:
-	explicit EntitySelectionLayer(const EntityMarkersRecord &record)
-			: OverlayLayer(/*enabled_by_default=*/true), record_(record) {}
+	EntitySelectionLayer(const EntityMarkersRecord &record, const EntitiesWindow &entities)
+			: OverlayLayer(/*enabled_by_default=*/true), record_(record), entities_(entities) {}
 	const char *group() const override { return "Entities"; }
 	const char *label() const override { return "Selection"; }
 	const char *tooltip() const override {
@@ -33,6 +36,7 @@ public:
 
 private:
 	const EntityMarkersRecord &record_;
+	const EntitiesWindow &entities_;
 };
 
 class EntityLabelsLayer : public OverlayLayer {
@@ -41,7 +45,8 @@ public:
 	static constexpr float kRangeUnits = 150.0f;
 	static constexpr int32_t kCap = 64;
 
-	explicit EntityLabelsLayer(const EntityMarkersRecord &record) : record_(record) {}
+	EntityLabelsLayer(const EntityMarkersRecord &record, const EntitiesWindow &entities)
+			: record_(record), entities_(entities) {}
 	const char *group() const override { return "Entities"; }
 	const char *label() const override { return "Labels"; }
 	const char *tooltip() const override {
@@ -53,6 +58,7 @@ public:
 
 private:
 	const EntityMarkersRecord &record_;
+	const EntitiesWindow &entities_;
 };
 
 }  // namespace opennova::devtools

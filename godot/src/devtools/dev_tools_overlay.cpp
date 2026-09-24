@@ -144,15 +144,12 @@ void DevTools::push_overlay_frame() {
 	overlay_tick_ = tick;
 	const opennova::world::Vec3 eye{camera.eye[0], camera.eye[1], camera.eye[2]};
 
-	if (tools_->needs_entity_markers()) {
-		const uint16_t selected = tools_->selected_entity_handle();
-		if (new_tick || selected != overlay_selection_) {
-			overlay_selection_ = selected;
-			opennova::devtools::EntityMarkersRecord record;
-			record.logic_tick = tick;
-			record.valid = sim->native_entity_markers(tools_->entity_marker_query(eye), record.rows);
-			tools_->set_entity_markers(std::move(record));
-		}
+	if (tools_->needs_entity_marker_refresh(tick, eye)) {
+		opennova::devtools::EntityMarkersRecord record;
+		record.logic_tick = tick;
+		record.query = tools_->entity_marker_query(eye);
+		record.valid = sim->native_entity_markers(record.query, record.rows);
+		tools_->set_entity_markers(std::move(record));
 	}
 	if (tools_->needs_ai_overlay() && new_tick) {
 		// The layers draw the AI window's record, so a tick's push serves the
