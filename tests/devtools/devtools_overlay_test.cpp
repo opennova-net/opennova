@@ -6,6 +6,8 @@
 // layers over a pushed markers record.
 #include "devtools_test_support.h"
 
+#include <runtime/devtools/ai_overlay.h>
+#include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/game_dev_tools.h>
@@ -254,6 +256,97 @@ void test_entity_layers_follow_the_selection() {
 	tools.set_game_viewport(nullptr);
 }
 
+opennova::world::inspect::AiOverlayRow ai_row(const char *name, int32_t x, int32_t y, uint16_t handle) {
+	opennova::world::inspect::AiOverlayRow row;
+	row.name = name;
+	row.handle = handle;
+	row.alive = true;
+	row.infantry = true;
+	row.pos[0] = x << 16;
+	row.pos[1] = y << 16;
+	row.state_name = "GROUND_COMBAT";
+	row.move_mode = 2;
+	row.alert = 2;
+	row.sight_range_q16 = 50 << 16;
+	row.attack_range_q16 = 20 << 16;
+	return row;
+}
+
+// The AI layers: the retired view's label text, labels within range only,
+// routes only for walked channels, rings for the selection and engaged
+// brains; a layer on keeps the AI record flowing with the window closed.
+void test_ai_layers() {
+	using Element = opennova::devtools::AiOverlayLayer::Element;
+	opennova::world::inspect::AiOverlayRow labelled = ai_row("alpha", 0, 30, 0x0001);
+	labelled.wp_channel = 3;
+	labelled.wp_node = 1;
+	labelled.target_valid = true;
+	labelled.target_name = "BRAVO";
+	labelled.fire_delay = 4;
+	CHECK(opennova::devtools::AiOverlayLayer::label_text(labelled) ==
+					"alpha\nGROUND_COMBAT  m2\nch 3 node 1\n-> BRAVO  fd 4",
+			"the label reads name, state, move mode, route and target");
+	opennova::world::inspect::AiOverlayRow dead = ai_row("", 0, 30, 0x0002);
+	dead.ai_index = 7;
+	dead.alive = false;
+	CHECK(opennova::devtools::AiOverlayLayer::label_text(dead) == "ai 7\nDEAD", "a dead brain reads DEAD");
+
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	opennova::devtools::AiWindow &ai = tools.ai_window();
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_ai_debug(), "no window, no layer: no AI record");
+	tools.pass().set_overlay_enabled(ai.layer(0), true);  // labels
+	tools.pass().set_overlay_enabled(ai.layer(1), true);  // routes
+	tools.pass().set_overlay_enabled(ai.layer(3), true);  // rings
+	CHECK(tools.needs_ai_debug() && tools.needs_ai_overlay(), "a layer on wants the record");
+
+	opennova::devtools::AiDebugSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.report.rows = {labelled, ai_row("far", 0, 900, 0x0003), ai_row("idle", 5, 40, 0x0004)};
+	snapshot.report.rows[2].target_valid = false; // not engaged: no rings
+	opennova::world::inspect::AiNavChannelRow walked;
+	walked.index = 3;
+	walked.followers = 1;
+	walked.nodes.resize(3);
+	walked.nodes[1].pos[1] = 10 << 16;
+	walked.nodes[2].pos[1] = 20 << 16;
+	opennova::world::inspect::AiNavChannelRow unwalked = walked;
+	unwalked.index = 4;
+	unwalked.followers = 0;
+	snapshot.report.channels = {walked, unwalked};
+	tools.set_ai_debug(snapshot);
+
+	FakeGameViewport viewport;
+	tools.set_game_viewport(&viewport);
+	for (uint64_t frame = 1; frame <= 3; ++frame) CHECK(draw_once(tools, frame), "a settling frame draws");
+	tools.set_overlay_camera(north_camera(90.0f, viewport.width, viewport.height));
+	CHECK(draw_once(tools, 4), "the AI layers draw");
+	CHECK(ai.layer(0).last_stats().texts == 2, "labels within 150 units only (the far brain is skipped)");
+	CHECK(ai.layer(1).last_stats().lines > 0, "the walked route draws");
+	const int route_lines = ai.layer(1).last_stats().lines;
+	CHECK(ai.layer(3).last_stats().lines > 0, "the engaged brain gets its rings");
+
+	// The route of a channel nobody walks stays off the view.
+	snapshot.report.channels = {unwalked};
+	tools.set_ai_debug(snapshot);
+	CHECK(draw_once(tools, 5), "redraw");
+	CHECK(ai.layer(1).last_stats().lines < route_lines, "an unwalked channel draws no route");
+
+	// The window closed with a layer on keeps the record the layer draws.
+	ai.open = true;
+	CHECK(draw_once(tools, 6), "the window shows");
+	ai.open = false;
+	CHECK(draw_once(tools, 7), "the window hides");
+	CHECK(ai.snapshot_valid(), "a layer on keeps the AI record through the window's close");
+	for (int i = 0; i < opennova::devtools::AiWindow::kLayerCount; ++i) {
+		tools.pass().set_overlay_enabled(ai.layer(i), false);
+	}
+	CHECK(!tools.needs_ai_debug(), "every layer off, window closed: no record wanted");
+	tools.set_game_viewport(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -261,5 +354,6 @@ int main() {
 	test_segments_clip_at_the_near_plane_and_the_guard_band();
 	test_layers_draw_over_the_game_image();
 	test_entity_layers_follow_the_selection();
+	test_ai_layers();
 	return report("devtools_overlay_test");
 }

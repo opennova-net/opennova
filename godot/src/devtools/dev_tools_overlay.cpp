@@ -19,6 +19,8 @@
 #include <limits>
 
 #if OPENNOVA_DEVTOOLS
+#include <godot_cpp/classes/time.hpp>
+#include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/world/inspect_markers.h>
@@ -120,6 +122,15 @@ void DevTools::push_overlay_frame() {
 			record.valid = sim->native_entity_markers(tools_->entity_marker_query(eye), record.rows);
 			tools_->set_entity_markers(std::move(record));
 		}
+	}
+	if (tools_->needs_ai_overlay() && new_tick) {
+		// The layers draw the AI window's record, so a tick's push serves the
+		// window too (its cadence push then skips).
+		opennova::devtools::AiDebugSnapshot snapshot;
+		snapshot.valid = sim->native_ai_debug(snapshot.report);
+		snapshot.logic_tick = tick;
+		tools_->set_ai_debug(std::move(snapshot));
+		last_ai_push_ms_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
 	}
 }
 

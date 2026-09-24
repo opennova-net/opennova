@@ -403,6 +403,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_properties_window.cpp

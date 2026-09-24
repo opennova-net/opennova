@@ -171,9 +171,11 @@ public:
 	bool needs_environment_snapshot() const;
 
 	// The AI window's record channel (the same shape, records-in only): the
-	// AI debug join pushed by value on its cadence while shown.
+	// AI debug join pushed by value on its cadence while shown, and every
+	// logic tick while one of its Game-view layers is on (needs_ai_overlay).
 	void set_ai_debug(AiDebugSnapshot snapshot);
 	bool needs_ai_debug() const;
+	bool needs_ai_overlay() const;
 
 	// The Rays window's record/request channel (the same shape): the ray
 	// capture's counts + filter state pushed by value on its cadence while

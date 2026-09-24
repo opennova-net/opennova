@@ -49,14 +49,38 @@ void push_line(std::vector<std::string> &lines, const char *fmt, ...) {
 
 }  // namespace
 
+AiWindow::AiWindow(EntitiesWindow &entities) : entities_(entities) {
+	using Element = AiOverlayLayer::Element;
+	const Element elements[kLayerCount] = {Element::Labels, Element::Routes, Element::Targets,
+			Element::Rings};
+	for (int i = 0; i < kLayerCount; ++i) {
+		layers_[static_cast<size_t>(i)] = std::make_unique<AiOverlayLayer>(snapshot_, entities_, elements[i]);
+	}
+}
+
+bool AiWindow::any_layer_enabled() const {
+	for (const auto &layer : layers_) {
+		if (layer->enabled()) return true;
+	}
+	return false;
+}
+
+const char *AiWindow::brain_text(int row) const {
+	if (row < 0 || row >= brain_count()) return "";
+	return brain_rows_[static_cast<size_t>(row)].c_str();
+}
+
 void AiWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
 		// Drop the records so a closed window holds nothing; the embedder's
-		// needs_ai_debug gate stops the pushes on the same edge.
-		snapshot_ = AiDebugSnapshot{};
+		// needs_ai_debug gate stops the pushes on the same edge. A Game-view
+		// layer still on keeps the record it draws.
+		if (!any_layer_enabled()) {
+			snapshot_ = AiDebugSnapshot{};
+			format_snapshot();
+		}
 		detail_ = EntityDetailSnapshot{};
-		format_snapshot();
 		format_detail();
 	}
 }
@@ -106,6 +130,8 @@ const char *AiWindow::detail_line(int row) const {
 }
 
 void AiWindow::format_snapshot() {
+	brain_rows_.clear();
+	brain_alerts_.clear();
 	group_rows_.clear();
 	group_alerts_.clear();
 	channel_rows_.clear();
@@ -121,6 +147,21 @@ void AiWindow::format_snapshot() {
 			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
             static_cast<unsigned long long>(c.runtime_gap_calls));
 	counters_ = buf;
+	brain_rows_.reserve(snapshot_.report.rows.size());
+	for (const world::inspect::AiOverlayRow &r : snapshot_.report.rows) {
+		char target[64] = "-";
+		if (r.target_valid) {
+			std::snprintf(target, sizeof(target), "%s", r.target_name.empty() ? "?" : r.target_name.c_str());
+		}
+		char route[32] = "-";
+		if (r.wp_channel > 0) std::snprintf(route, sizeof(route), "ch %d node %d", r.wp_channel, r.wp_node);
+		std::snprintf(buf, sizeof(buf), "%-16s  G%02d  %-6s  %-20s  -> %-16s  %s",
+				r.name.empty() ? "(unnamed)" : r.name.c_str(), r.group_id,
+				r.alive ? alert_name(r.alert) : "DEAD",
+				r.state_name.empty() ? "?" : r.state_name.c_str(), target, route);
+		brain_rows_.emplace_back(buf);
+		brain_alerts_.push_back(r.alive ? r.alert : -1);
+	}
 	group_rows_.reserve(snapshot_.report.groups.size());
 	for (const world::inspect::AiGroupRow &g : snapshot_.report.groups) {
 		std::snprintf(buf, sizeof(buf), "G%02d  %-6s  alive %d/%d", g.id,
@@ -272,10 +313,39 @@ void AiWindow::draw_tables() {
 	}
 }
 
-void AiWindow::draw(ImGuiPass &, uint64_t) {
+void AiWindow::draw(ImGuiPass &pass, uint64_t) {
+	// The Game-view layers, toggled here or from the Overlays menu.
+	ImGui::TextUnformatted("Game view:");
+	for (auto &layer : layers_) {
+		ImGui::SameLine();
+		bool on = layer->enabled();
+		if (ImGui::Checkbox(layer->label(), &on)) pass.set_overlay_enabled(*layer, on);
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", layer->tooltip());
+	}
 	ImGui::TextUnformatted(counters_.c_str());
 	if (!snapshot_.valid) return;
 	draw_detail_pane();
+	char header[48];
+	std::snprintf(header, sizeof(header), "Brains (%d)###brains", brain_count());
+	if (ImGui::CollapsingHeader(header)) {
+		if (ImGui::BeginChild("brains", ImVec2(0.0f, 220.0f), ImGuiChildFlags_None,
+					ImGuiWindowFlags_HorizontalScrollbar)) {
+			ImGuiListClipper clipper;
+			clipper.Begin(brain_count());
+			while (clipper.Step()) {
+				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+					const int alert = brain_alerts_[static_cast<size_t>(i)];
+					if (alert < 0) {
+						ImGui::TextDisabled("%s", brain_rows_[static_cast<size_t>(i)].c_str());
+					} else {
+						ImGui::TextColored(alert_color(alert), "%s", brain_rows_[static_cast<size_t>(i)].c_str());
+					}
+				}
+			}
+			clipper.End();
+		}
+		ImGui::EndChild();
+	}
 	draw_tables();
 }
 
