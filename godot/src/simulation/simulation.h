@@ -1386,6 +1386,11 @@ public:
 	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
 	// wire-present pass excludes while LocalPlayerPresenter draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
+	// The packed handle of the entity the local player rides (its mount
+	// target, retail entity+0x16C), or INVALID_WIRE_HANDLE on foot — the
+	// render-slot pass gives that vehicle the local player's slot priority
+	// (EntityPresenter::resolve_present_handle finds its model).
+	int get_local_player_mount_target_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean
 	// keys (Q/E, catalog ids 6/7) + jump; stance and look are SIM-owned state

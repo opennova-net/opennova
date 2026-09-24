@@ -379,9 +379,9 @@ int main() {
 		player.is_local_player_or_parent = true;
 		CHECK(slot_priority_score(cam, view, player) == s_near / 2);
 		// Exclusions.
-		SlotCandidateState dead = near_front;
-		dead.dead = true;
-		CHECK(slot_priority_score(cam, view, dead) == kSlotScoreExcluded);
+		SlotCandidateState hidden = near_front;
+		hidden.hidden = true;
+		CHECK(slot_priority_score(cam, view, hidden) == kSlotScoreExcluded);
 		SlotCandidateState seated = near_front;
 		seated.seat_parented = true;
 		CHECK(slot_priority_score(cam, view, seated) == kSlotScoreExcluded);

@@ -168,6 +168,8 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_shadow_detail);
 	ClassDB::bind_method(D_METHOD("set_local_player_model", "model"),
 			&SlotShadow::set_local_player_model);
+	ClassDB::bind_method(D_METHOD("set_local_player_parent_model", "model"),
+			&SlotShadow::set_local_player_parent_model);
 	ClassDB::bind_method(
 			D_METHOD("set_local_player_first_person", "first_person"),
 			&SlotShadow::set_local_player_first_person);
@@ -225,6 +227,12 @@ void SlotShadow::set_shadow_detail(int p_detail) {
 void SlotShadow::set_local_player_model(ObjectModel *p_model) {
 	local_player_id_ = p_model != nullptr ? ObjectID(p_model->get_instance_id())
 										  : ObjectID();
+}
+
+void SlotShadow::set_local_player_parent_model(ObjectModel *p_model) {
+	local_player_parent_id_ = p_model != nullptr
+			? ObjectID(p_model->get_instance_id())
+			: ObjectID();
 }
 
 void SlotShadow::set_local_player_first_person(bool p_first_person) {
@@ -631,6 +639,11 @@ void SlotShadow::advance_frame() {
 	}
 
 	const uint64_t local_id = uint64_t(local_player_id_);
+	// The vehicle the local player rides (entity+0x16C) shares the local
+	// player's halved priority and every-frame refresh (retail:
+	// RenderSlot_SortAndAssign @0x5d669c..0x5d66a6; RenderSlot_RenderEntity-
+	// AndChildren @0x5d7707..0x5d7734).
+	const uint64_t local_parent_id = uint64_t(local_player_parent_id_);
 	// The frame-open slot projection direction: get_light_direction now
 	// serves the Godot-axes vector (the util/axes.h x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
@@ -667,7 +680,15 @@ void SlotShadow::advance_frame() {
 		const Vector3 pos = model->get_global_position();
 		opennova::renderer::SlotCandidateState &state = info.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
-		state.dead = !model->is_visible_in_tree();
+		// Hidden = the sim's present intent (retail Flags & 1), never the
+		// render-occlusion claim: retail's slot pass reads no render gate, so
+		// a caster hidden by the blink or outdoors latch keeps its shadow
+		// (retail: RenderSlot_SortAndAssign @0x5d657d, RenderSlot_DrawAllDrapes
+		// @0x5d6e6a).
+		const bool shown = model->is_occlusion_hidden() ? model->is_present_visible()
+													 : model->is_visible();
+		const Node3D *parent = Object::cast_to<Node3D>(model->get_parent());
+		state.hidden = !shown || (parent != nullptr && !parent->is_visible_in_tree());
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
 		// its own slot is excluded.
@@ -678,7 +699,8 @@ void SlotShadow::advance_frame() {
 					{ id, uint64_t(capture_with->get_instance_id()) });
 		}
 		state.on_vehicle = false;
-		state.is_local_player_or_parent = id == local_id;
+		state.is_local_player_or_parent =
+				id == local_id || (local_parent_id != 0 && id == local_parent_id);
 		state.interior = false;
 		state.dynamic = true;
 	}
@@ -693,7 +715,7 @@ void SlotShadow::advance_frame() {
 		const size_t *index = caster_index.getptr(id);
 		if (index == nullptr) {
 			opennova::renderer::SlotCandidateState gone;
-			gone.dead = true;
+			gone.hidden = true;
 			return gone;
 		}
 		return casters[*index].state;
@@ -866,7 +888,7 @@ void SlotShadow::advance_frame() {
 		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
 		// local-player exception).
 		const uint32_t effective_mask = opennova::renderer::slot_refresh_mask_for(
-				shadow_detail_, assignment.id == local_id);
+				shadow_detail_, info.state.is_local_player_or_parent);
 		const int want_size =
 				opennova::renderer::slot_texture_size(order, shadow_detail_);
 		const std::vector<uint64_t> children = claimed_children(assignment.id);

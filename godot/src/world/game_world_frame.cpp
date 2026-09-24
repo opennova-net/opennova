@@ -22,6 +22,7 @@
 
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
+#include "simulation/entity_presenter.h"
 
 using namespace godot;
 
@@ -947,6 +948,17 @@ void GameWorld::render_light_frame() {
 			slot_shadow_->set_local_player_first_person(!presenter->is_third_person());
 		}
 		const Ref<Simulation> sim = get_sim();
+		ObjectModel *local_vehicle = nullptr;
+		MissionRoot *slot_runtime = get_runtime();
+		EntityPresenter *entities =
+				slot_runtime != nullptr ? slot_runtime->get_entity_presenter() : nullptr;
+		if (sim.is_valid() && entities != nullptr) {
+			const int ride = sim->get_local_player_mount_target_handle();
+			if (ride != Simulation::INVALID_WIRE_HANDLE) {
+				local_vehicle = entities->resolve_present_handle(ride);
+			}
+		}
+		slot_shadow_->set_local_player_parent_model(local_vehicle);
 		if (sim.is_valid()) {
 			slot_shadow_->set_local_player_prone(
 					sim->get_local_player_stance_latch() == Simulation::STANCE_PRONE);

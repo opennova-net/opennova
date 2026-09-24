@@ -97,6 +97,10 @@ public:
 	// prone) [orig: RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90, see
 	// docs/render/render-lighting-re.md].
 	void set_local_player_model(ObjectModel *p_model);
+	// The model of the vehicle the local player rides (null on foot): it
+	// shares the local player's halved priority and every-frame refresh
+	// (retail: RenderSlot_SortAndAssign @0x5d669c, local->parent).
+	void set_local_player_parent_model(ObjectModel *p_model);
 	void set_local_player_first_person(bool p_first_person);
 	void set_local_player_prone(bool p_prone);
 
@@ -228,6 +232,7 @@ private:
 	int light_time_ms_ = 0;
 	ObjectID weather_id_;
 	ObjectID local_player_id_;
+	ObjectID local_player_parent_id_;
 	bool local_first_person_ = true;
 	bool local_prone_ = false;
 	// Retail's highest selectable SHADOWQUALITY is 3 (Settings_ClampGraphicsOptions

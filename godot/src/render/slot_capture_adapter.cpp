@@ -1,4 +1,5 @@
 #include "render/slot_capture_adapter.h"
+#include "object/object_model.h"
 #include "object/post_multiply_draw.h"
 #include "render/q3_geometry_cache.h"
 #include "render/material_params.h"
@@ -248,14 +249,28 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 // (retail's seat children render inside the parent's slot). The auxiliary
 // duplicates (the BmTxMirrT P3 postmultiply instance) re-submit the same
 // strip and carry no classified material; retail's single PROJSHAD pass per
-// effect is the registered P0/P1 instance.
+// effect is the registered P0/P1 instance. An ObjectModel counts with the
+// render-occlusion claim lifted (its present intent — the sim's hide,
+// retail's Flags & 1 — still hides it): the slot pass never consults the
+// render-occlusion gate, so a caster the blink or
+// outdoors gate hides still casts (retail: RenderSlot_RenderEntityAndChildren
+// @0x5d7690 has no visibility test; RenderSlot_SortAndAssign gates only
+// Flags & 1 @0x5d657d). Every other node keeps its own visible flag (the
+// inactive RLOD levels, hidden parts).
 void collect_visible_geometry(Node *p_node,
 		std::vector<GeometryInstance3D *> &r_instances) {
 	if (p_node == nullptr)
 		return;
+	if (const ObjectModel *model = Object::cast_to<ObjectModel>(p_node)) {
+		if (!(model->is_occlusion_hidden() ? model->is_present_visible()
+										   : model->is_visible()))
+			return;
+	} else if (const Node3D *spatial = Object::cast_to<Node3D>(p_node)) {
+		if (!spatial->is_visible())
+			return;
+	}
 	if (GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(p_node)) {
-		if (geometry->is_visible_in_tree() &&
-				Object::cast_to<PostMultiplyDraw>(geometry) == nullptr)
+		if (Object::cast_to<PostMultiplyDraw>(geometry) == nullptr)
 			r_instances.push_back(geometry);
 	}
 	for (int index = 0; index < p_node->get_child_count(); ++index)

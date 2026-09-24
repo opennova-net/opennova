@@ -1033,3 +1033,66 @@ func test_slot_view_centres_on_the_entity_origin() -> void:
 	assert_almost_eq(projected.y, 0.5, 0.0001, "the origin lands on the capture centre (v)")
 	crate.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+## Retail's slot pass reads no render gate: a caster the blink or outdoors
+## latch hides (the occlusion claim) keeps its slot, its capture and its drape,
+## and its geometry still compiles into the black pass (retail:
+## RenderSlot_SortAndAssign excludes only Flags & 1 @0x5d657d;
+## RenderSlot_RenderEntityAndChildren @0x5d7690 has no visibility test). A node
+## hidden for any other reason still leaves.
+func test_occlusion_hidden_caster_keeps_its_slot() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	shadow.set_shadow_detail(4)  # mask 0: every slot compiles every frame
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	crate.advance_runtime_frame(1.0 / 62.0)
+	crate.set_occlusion_hidden(true)
+	assert_false(crate.visible, "the occlusion claim hides the node")
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the occluded caster keeps its capture order")
+	assert_gt(int(shadow.get_report()["slot_surfaces_compiled"]), 0,
+			"the occluded caster's geometry still compiles into the black pass")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	assert_eq(terms[order].w, 1.0, "and its drape still publishes")
+	crate.set_occlusion_hidden(false)
+	crate.visible = false
+	shadow.advance_frame()
+	assert_eq(shadow.get_capture_order_of(crate), -1,
+			"a node hidden outside the occlusion claim leaves its slot")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The vehicle the local player rides shares the local player's halved
+## priority (retail: RenderSlot_SortAndAssign @0x5d669c..0x5d66a6, >> 1
+## @0x5d6864) and its every-frame refresh from detail 3 (retail:
+## RenderSlot_RenderEntityAndChildren @0x5d7707..0x5d7734).
+func test_local_vehicle_rides_the_local_player_priority_and_refresh() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	shadow.set_shadow_detail(3)
+	var near := _caster_at(6.0)
+	var vehicle := _caster_at(10.0)
+	shadow.advance_frame()
+	assert_eq(shadow.get_capture_order_of(near), 0, "the nearer caster ranks first on foot")
+	shadow.set_local_player_parent_model(vehicle)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(vehicle)
+	assert_eq(order, 0, "the ridden vehicle's halved score ranks it first")
+	for i in range(3):
+		shadow.advance_frame()
+		assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+				"the ridden vehicle re-captures every frame at detail 3")
+	shadow.set_local_player_parent_model(null)
+	near.set_shadow_caster_enabled(false)
+	vehicle.set_shadow_caster_enabled(false)
+	shadow.advance_frame()

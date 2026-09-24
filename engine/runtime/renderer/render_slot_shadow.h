@@ -363,7 +363,9 @@ inline constexpr float kSlotBindMaxDistance = 320.0f;
 struct SlotCandidateState {
 	std::array<float, 2> pos2d{};  // world planar (x, z)
 	float bound_radius = 1.0f;     // world units
-	bool dead = false;             // entity flag 1 [orig: @ 0x5d6581]
+	// Entity Flags & 1 — the hidden/carried bit (not the dead bit 2); the
+	// slot pass never reads the render-occlusion gate [orig: @ 0x5d657d].
+	bool hidden = false;
 	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
 	// [orig: @ 0x5d65a0..0x5d65eb].
 	bool seat_parented = false;
@@ -387,7 +389,7 @@ struct SlotAssignment {
 	// a bound dynamic slot with an RT drapes its silhouette; a bound slot
 	// without one draws nothing (the authored-blob leg is dead in JO).
 	bool draws_silhouette = false;
-	// Excluded from its own slot this frame (seat/vehicle/dead) — the
+	// Excluded from its own slot this frame (seat/vehicle/hidden) — the
 	// silhouette-render leg re-checks the same predicates
 	// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d774e..0x5d77b3].
 	bool excluded = false;
