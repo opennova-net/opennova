@@ -28,11 +28,10 @@ namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
 inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_REMOTE, Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_COLLISION};
-inline constexpr Slot k_ai_entities_unattributed[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_AI_OTHER_ENTITIES};
-inline constexpr Slot k_ai_vehicles_unattributed[] = {Slot::SIM_AI_VEHICLE_SCAN, Slot::SIM_AI_VEHICLE_MOTORS, Slot::SIM_AI_VEHICLE_RIDERS};
-inline constexpr Slot k_ai_unattributed[] = {Slot::SIM_AI_REACTIONS, Slot::SIM_AI_COLLISION, Slot::SIM_AI_ENTITIES, Slot::SIM_AI_AUTH_VEHICLES, Slot::SIM_AI_CLIENT_VEHICLES, Slot::SIM_AI_EVENTS};
+inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY};
+inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
-inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_WORLD_AI, Slot::SIM_WORLD_ATTACHMENTS, Slot::SIM_WORLD_THROWABLES, Slot::SIM_WORLD_WEAPONS, Slot::SIM_WORLD_PROJECTILES, Slot::SIM_WORLD_DESTRUCTION, Slot::SIM_WORLD_HOUSEKEEPING};
+inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_UPDATE_ENTITIES, Slot::SIM_WORLD_HOUSEKEEPING};
 inline constexpr Slot k_replication_query_grid_unattributed[] = {Slot::SIM_REPLICATION_QUERY_GRID_SPAN, Slot::SIM_REPLICATION_QUERY_GRID_BUCKET, Slot::SIM_REPLICATION_QUERY_GRID_WORKSPACE};
 inline constexpr Slot k_replication_query_unattributed[] = {Slot::SIM_REPLICATION_QUERY_COLLECT, Slot::SIM_REPLICATION_QUERY_GRID};
 inline constexpr Slot k_replication_entity_los_unattributed[] = {Slot::SIM_REPLICATION_ENTITY_LOS_TERRAIN, Slot::SIM_REPLICATION_ENTITY_LOS_SECTOR};
@@ -43,7 +42,7 @@ inline constexpr Slot k_replication_unattributed[] = {Slot::SIM_REPLICATION_QUER
 inline constexpr Slot k_server_unattributed[] = {Slot::SIM_SERVER_INPUT, Slot::SIM_SERVER_WORLD, Slot::SIM_MATCH, Slot::SIM_SERVER_RULES, Slot::SIM_SERVER_REPLICATION};
 inline constexpr Slot k_host_unattributed[] = {Slot::SIM_HOST_RECEIVE, Slot::SIM_HOST_CONNECTIONS, Slot::SIM_HOST_ADAPTER, Slot::SIM_SERVER_TICK, Slot::SIM_HOST_SEND};
 inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
-inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_HOST_PLAYER, Slot::SIM_NET, Slot::SIM_CLIENT_MATERIALIZE, Slot::SIM_CLIENT_MIRROR, Slot::SIM_CLIENT_PROXIES, Slot::SIM_CLIENT_WORLD, Slot::SIM_CLIENT_ATTACH, Slot::SIM_CLIENT_PLAYER, Slot::SIM_ADM_RESOLVE};
+inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_PLAYER_TAIL, Slot::SIM_WEAPON_WALK, Slot::SIM_NET, Slot::SIM_CLIENT_MATERIALIZE, Slot::SIM_CLIENT_MIRROR, Slot::SIM_CLIENT_PROXIES, Slot::SIM_CLIENT_WORLD, Slot::SIM_CLIENT_ATTACH, Slot::SIM_CLIENT_PLAYER, Slot::SIM_ADM_RESOLVE};
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_mission_rows_remainder[] = {Slot::PRESENT_MISSION_CORE, Slot::PRESENT_MISSION_AIM, Slot::PRESENT_MISSION_CONTROLS, Slot::PRESENT_MISSION_VISIBILITY, Slot::PRESENT_MISSION_BODY};
@@ -72,10 +71,8 @@ inline constexpr StatsRow kRows[] = {
 	{"server_world", "World update", 6, RowKind::SPAN, Slot::SIM_SERVER_WORLD, nullptr, 0},
 	{"world_setup", "Tick setup", 7, RowKind::SPAN, Slot::SIM_WORLD_SETUP, nullptr, 0},
 	{"world_scripts", "WAC + BMS", 7, RowKind::SPAN, Slot::SIM_WORLD_SCRIPTS, nullptr, 0},
-	{"world_ai", "AI + entities", 7, RowKind::SPAN, Slot::SIM_WORLD_AI, nullptr, 0},
-	{"ai_reactions", "Damage reactions", 8, RowKind::SPAN, Slot::SIM_AI_REACTIONS, nullptr, 0},
-	{"ai_collision", "Collision/proximity tables", 8, RowKind::SPAN, Slot::SIM_AI_COLLISION, nullptr, 0},
-	{"ai_entities", "Brain + entity body pass", 8, RowKind::SPAN, Slot::SIM_AI_ENTITIES, nullptr, 0},
+	{"update_entities", "Entity update (retail order)", 7, RowKind::SPAN, Slot::SIM_UPDATE_ENTITIES, nullptr, 0},
+	{"update_walks", "Pool-1 + pool-0 walks", 8, RowKind::SPAN, Slot::SIM_UPDATE_WALKS, nullptr, 0},
 	{"ai_infantry", "Infantry/player bodies", 9, RowKind::SPAN, Slot::SIM_AI_INFANTRY, nullptr, 0},
 	{"ai_infantry_remote", "Remote player body", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_REMOTE, nullptr, 0},
 	{"ai_infantry_combat", "NPC combat/perception", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COMBAT, nullptr, 0},
@@ -86,27 +83,21 @@ inline constexpr StatsRow kRows[] = {
 	{"ai_infantry_collision_ground", "Ground settle ray", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_GROUND, nullptr, 0},
 	{"ai_infantry_collision_unattributed", "Resolver remainder", 11, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY_COLLISION, k_ai_infantry_collision_unattributed, 3},
 	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 4},
-	{"ai_other_entities", "Other entity brains", 9, RowKind::SPAN, Slot::SIM_AI_OTHER_ENTITIES, nullptr, 0},
-	{"ai_entities_unattributed", "Entity-pass unattributed", 9, RowKind::RESIDUAL, Slot::SIM_AI_ENTITIES, k_ai_entities_unattributed, 2},
-	{"ai_auth_vehicles", "Authority vehicle motors", 8, RowKind::SPAN, Slot::SIM_AI_AUTH_VEHICLES, nullptr, 0},
-	{"ai_vehicle_scan", "Vehicle registry scan", 9, RowKind::SPAN, Slot::SIM_AI_VEHICLE_SCAN, nullptr, 0},
-	{"ai_vehicle_motors", "Family motor dispatch", 9, RowKind::SPAN, Slot::SIM_AI_VEHICLE_MOTORS, nullptr, 0},
-	{"ai_vehicle_riders", "Final rider refresh", 9, RowKind::SPAN, Slot::SIM_AI_VEHICLE_RIDERS, nullptr, 0},
-	{"ai_vehicles_unattributed", "Vehicle-pass unattributed", 9, RowKind::RESIDUAL, Slot::SIM_AI_AUTH_VEHICLES, k_ai_vehicles_unattributed, 3},
-	{"ai_client_vehicles", "Client vehicle prediction", 8, RowKind::SPAN, Slot::SIM_AI_CLIENT_VEHICLES, nullptr, 0},
-	{"ai_events", "Timed AI events", 8, RowKind::SPAN, Slot::SIM_AI_EVENTS, nullptr, 0},
-	{"ai_unattributed", "AI unattributed", 8, RowKind::RESIDUAL, Slot::SIM_WORLD_AI, k_ai_unattributed, 6},
-	{"world_attachments", "Emplacement attachments", 7, RowKind::SPAN, Slot::SIM_WORLD_ATTACHMENTS, nullptr, 0},
-	{"attachment_orphans", "Orphan-chain cleanup", 8, RowKind::SPAN, Slot::SIM_ATTACHMENT_ORPHANS, nullptr, 0},
-	{"attachment_children", "Child attachment pose", 8, RowKind::SPAN, Slot::SIM_ATTACHMENT_CHILDREN, nullptr, 0},
-	{"attachment_riders", "Mounted-rider refresh", 8, RowKind::SPAN, Slot::SIM_ATTACHMENT_RIDERS, nullptr, 0},
-	{"attachment_unattributed", "Attachment unattributed", 8, RowKind::RESIDUAL, Slot::SIM_WORLD_ATTACHMENTS, k_attachment_unattributed, 3},
-	{"world_throwables", "Throwables", 7, RowKind::SPAN, Slot::SIM_WORLD_THROWABLES, nullptr, 0},
-	{"world_weapons", "Mounted weapon actions", 7, RowKind::SPAN, Slot::SIM_WORLD_WEAPONS, nullptr, 0},
-	{"world_projectiles", "Projectiles", 7, RowKind::SPAN, Slot::SIM_WORLD_PROJECTILES, nullptr, 0},
-	{"world_destruction", "Destruction + debris", 7, RowKind::SPAN, Slot::SIM_WORLD_DESTRUCTION, nullptr, 0},
+	{"update_walks_other", "Brains, vehicle motors, items", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 1},
+	{"update_attachments", "Emplacement attachments", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
+	{"attachment_orphans", "Orphan-chain cleanup", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_ORPHANS, nullptr, 0},
+	{"attachment_children", "Child attachment pose", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_CHILDREN, nullptr, 0},
+	{"attachment_riders", "Mounted-rider refresh", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_RIDERS, nullptr, 0},
+	{"attachment_unattributed", "Attachment unattributed", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_ATTACHMENTS, k_attachment_unattributed, 3},
+	{"update_helilift_faces", "HeliLift + facial interpolation", 8, RowKind::SPAN, Slot::SIM_UPDATE_HELILIFT_FACES, nullptr, 0},
+	{"update_precipitation", "Precipitation fall", 8, RowKind::SPAN, Slot::SIM_UPDATE_PRECIPITATION, nullptr, 0},
+	{"update_pieces_events", "Death pieces + timed AI events", 8, RowKind::SPAN, Slot::SIM_UPDATE_PIECES_EVENTS, nullptr, 0},
+	{"update_projectiles", "Rotor wash + projectile rounds", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROJECTILES, nullptr, 0},
+	{"update_explosions", "Explosions, round hits, pool-2/3 walks, doors", 8, RowKind::SPAN, Slot::SIM_UPDATE_EXPLOSIONS, nullptr, 0},
+	{"update_proximity", "Pool-0/1 proximity tables", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROXIMITY, nullptr, 0},
+	{"update_entities_unattributed", "Entity-update unattributed", 8, RowKind::RESIDUAL, Slot::SIM_UPDATE_ENTITIES, k_update_entities_unattributed, 8},
 	{"world_housekeeping", "World housekeeping", 7, RowKind::SPAN, Slot::SIM_WORLD_HOUSEKEEPING, nullptr, 0},
-	{"world_unattributed", "World-update unattributed", 7, RowKind::RESIDUAL, Slot::SIM_SERVER_WORLD, k_world_unattributed, 9},
+	{"world_unattributed", "World-update unattributed", 7, RowKind::RESIDUAL, Slot::SIM_SERVER_WORLD, k_world_unattributed, 4},
 	{"match", "Match update", 6, RowKind::SPAN, Slot::SIM_MATCH, nullptr, 0},
 	{"server_rules", "Rules/events", 6, RowKind::SPAN, Slot::SIM_SERVER_RULES, nullptr, 0},
 	{"server_replication", "Snapshot replication", 6, RowKind::SPAN, Slot::SIM_SERVER_REPLICATION, nullptr, 0},
@@ -140,7 +131,8 @@ inline constexpr StatsRow kRows[] = {
 	{"server_unattributed", "Server-tick unattributed", 6, RowKind::RESIDUAL, Slot::SIM_SERVER_TICK, k_server_unattributed, 5},
 	{"host_send", "Send/flush", 5, RowKind::SPAN, Slot::SIM_HOST_SEND, nullptr, 0},
 	{"host_unattributed", "Host-pump unattributed", 5, RowKind::RESIDUAL, Slot::SIM_HOST_PUMP, k_host_unattributed, 5},
-	{"host_player", "Local view/weapon devices", 4, RowKind::SPAN, Slot::SIM_HOST_PLAYER, nullptr, 0},
+	{"player_tail", "Frame tail: weather/view/medic", 4, RowKind::SPAN, Slot::SIM_PLAYER_TAIL, nullptr, 0},
+	{"weapon_walk", "Weapon action walk", 4, RowKind::SPAN, Slot::SIM_WEAPON_WALK, nullptr, 0},
 	{"net", "Client network/decode", 4, RowKind::SPAN, Slot::SIM_NET, nullptr, 0},
 	{"client_setup", "Client clock/setup", 5, RowKind::SPAN, Slot::SIM_CLIENT_SETUP, nullptr, 0},
 	{"client_receive", "Receive + state fold", 5, RowKind::SPAN, Slot::SIM_CLIENT_RECEIVE, nullptr, 0},
@@ -154,7 +146,7 @@ inline constexpr StatsRow kRows[] = {
 	{"client_attach", "Joiner attachment recompose", 4, RowKind::SPAN, Slot::SIM_CLIENT_ATTACH, nullptr, 0},
 	{"client_player", "Joiner view/weapon devices", 4, RowKind::SPAN, Slot::SIM_CLIENT_PLAYER, nullptr, 0},
 	{"adm_resolve", "Animation registry resolve", 4, RowKind::SPAN, Slot::SIM_ADM_RESOLVE, nullptr, 0},
-	{"sim_unattributed", "Sim-step unattributed", 4, RowKind::RESIDUAL, Slot::SIM_STEP, k_sim_unattributed, 11},
+	{"sim_unattributed", "Sim-step unattributed", 4, RowKind::RESIDUAL, Slot::SIM_STEP, k_sim_unattributed, 12},
 	{"trace", "Projectile trace (attributed)", 4, RowKind::GROUP, Slot::COUNT, k_trace, 4},
 	{"trace_terrain", "Terrain", 5, RowKind::SPAN, Slot::TRACE_TERRAIN, nullptr, 0},
 	{"trace_static", "Static", 5, RowKind::SPAN, Slot::TRACE_STATIC, nullptr, 0},

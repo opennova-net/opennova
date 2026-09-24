@@ -9,14 +9,16 @@ const NATIVE_RUNTIME_TIMING_KEYS := [
 ]
 
 # The world-update rows every role's logic tick lands on the frame-stats
-# board through the kernel's one tick profile (ADR 0043 d5): the direct
-# (no-net) tick fills exactly these; the host/joiner-only rows stay unsampled.
+# board through the kernel's one tick profile (ADR 0043 d5), plus the bare
+# local role's frame tail: the direct (no-net) tick fills these; the
+# host/joiner-only rows stay unsampled.
 const WORLD_PHASE_SLOTS := [
 	FrameStats.SIM_SERVER_WORLD, FrameStats.SIM_WORLD_SETUP,
-	FrameStats.SIM_WORLD_SCRIPTS, FrameStats.SIM_WORLD_AI,
-	FrameStats.SIM_WORLD_ATTACHMENTS, FrameStats.SIM_WORLD_THROWABLES,
-	FrameStats.SIM_WORLD_WEAPONS, FrameStats.SIM_WORLD_PROJECTILES,
-	FrameStats.SIM_WORLD_DESTRUCTION, FrameStats.SIM_WORLD_HOUSEKEEPING,
+	FrameStats.SIM_WORLD_SCRIPTS, FrameStats.SIM_UPDATE_ENTITIES,
+	FrameStats.SIM_UPDATE_ATTACHMENTS, FrameStats.SIM_UPDATE_PRECIPITATION,
+	FrameStats.SIM_UPDATE_PROJECTILES, FrameStats.SIM_UPDATE_EXPLOSIONS,
+	FrameStats.SIM_WORLD_HOUSEKEEPING, FrameStats.SIM_PLAYER_TAIL,
+	FrameStats.SIM_WEAPON_WALK, FrameStats.SIM_ADM_RESOLVE,
 ]
 const HOST_ONLY_SLOTS := [
 	FrameStats.SIM_HOST_PUMP, FrameStats.SIM_SERVER_TICK,

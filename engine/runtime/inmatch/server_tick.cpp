@@ -1768,7 +1768,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	route_entity_pass_records(ctx, world);
 	// The phases lap onto the SIM_SERVER_* / SIM_MATCH / SIM_REPLICATION_*
 	// rows of the world's profile (ADR 0043 d5); the script and entity passes
-	// attribute their own SIM_WORLD_* rows.
+	// attribute their own SIM_WORLD_* / SIM_UPDATE_* rows.
 	devtools::ProfileLap lap(world.profile);
 	const bool round_was_announced = ctx.round_end_announced;
 	// Snapshot the phase at frame entry. Retail decrements the timer later on
