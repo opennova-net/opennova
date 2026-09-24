@@ -790,7 +790,7 @@ add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
-        q3_frame render_slot_shadow
+        frame_fx_effects q3_frame render_slot_shadow
         state_vectors tracer_frame precipitation_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)

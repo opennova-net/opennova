@@ -128,6 +128,11 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// before the murk overlay (retail Terrain_RenderSceneWithReflection
 	// @ 0x5c96a6).
 	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
+	// Plan the frame's FrameFX screen effects (retail's post-scene dispatch)
+	// once the particle and tracer producers have published this frame, so
+	// the distortion row's content gate reads it; the terminal compositor
+	// executes the plan after every transparent.
+	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kLegNone },
 	// The audio leg (banked at finish).
 	{ "audio", kNoSlot, &GameWorld::leg_audio, kLegNone },
 	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kLegNone },
@@ -420,6 +425,11 @@ GameWorld::LegResult GameWorld::leg_precipitation(FrameContext &r_ctx) {
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_screen_effects(FrameContext &r_ctx) {
+	plan_screen_effects_frame();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_audio(FrameContext &r_ctx) {
 	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0);
 	return kLegRan;
@@ -605,6 +615,26 @@ void GameWorld::render_precipitation_frame() {
 			precipitation_->hide_frame();
 		}
 	}
+}
+
+// The FrameFX screen-effect plan: the local player's frame facts (defaults
+// with no local player or for a spectator) through the engine planner
+// (runtime/renderer/frame_fx_effects.h, retail Render_ProcessMainSceneFrame
+// @0x5ca8f6..0x5caad5).
+void GameWorld::plan_screen_effects_frame() {
+	if (framefx_ == nullptr) {
+		return;
+	}
+	opennova::renderer::FrameFxViewInputs view;
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	if (presenter != nullptr && !presenter->is_local_spectator()) {
+		const Ref<PlayerLocalView> local = presenter->presented_view();
+		if (local.is_valid()) {
+			view = local->native_frame().frame_fx;
+		}
+	}
+	framefx_->set_view_effects(view);
+	framefx_->advance_screen_effects();
 }
 
 void GameWorld::apply_blink_frame() {

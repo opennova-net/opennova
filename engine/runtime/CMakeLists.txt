@@ -125,6 +125,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp

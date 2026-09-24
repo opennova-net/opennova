@@ -9,7 +9,6 @@ extends Control
 # The design space, overlay rects, digit metrics, and NVG modulate are the
 # engine's HudPos constants/statics — the witnesses live at the engine home,
 # engine/runtime/hud hud/view_effects.h.
-const NVG_SHADER := preload("res://shaders/nvg_view.gdshader")
 const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
 
 var _root: ResourceRoot
@@ -21,7 +20,6 @@ var _nvg_scale: Texture2D
 var _vignette: Texture2D
 var _underwater_murk: ColorRect
 var _sun_veil: ColorRect
-var _nvg_post: ColorRect
 # The three fullscreen damage-feedback quads the retail scene frame draws last
 # (see update_damage_feedback).
 var _white_flash: ColorRect
@@ -66,17 +64,9 @@ func _ready() -> void:
 	_sun_veil.material = veil_material
 	add_child(_sun_veil, false, Node.INTERNAL_MODE_BACK)
 	_sun_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_nvg_post = ColorRect.new()
-	_nvg_post.name = "NvgPost"
-	_nvg_post.color = Color.WHITE
-	_nvg_post.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_nvg_post.show_behind_parent = true
-	var shader_material := ShaderMaterial.new()
-	shader_material.shader = NVG_SHADER
-	_nvg_post.material = shader_material
-	add_child(_nvg_post, false, Node.INTERNAL_MODE_BACK)
-	_nvg_post.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_nvg_post.visible = _nvg_visible
+	# The NVG image itself (the 512-square scene, its persistent glow and the
+	# green tint composite) is the terminal FrameFx pass's; this Control draws
+	# only the NVG.tga mask and the gain scale over it (see _draw_nvg).
 	_build_damage_feedback_quads()
 	_sync_underwater_murk()
 
@@ -202,8 +192,6 @@ func update_view(binoculars_view_active: bool, binocular_range: int,
 		var eased := smooth_range_value(_range_display, _binocular_range)
 		changed = changed or eased != _range_display
 		_range_display = eased
-	if _nvg_post != null:
-		_nvg_post.visible = _nvg_visible
 	if changed:
 		queue_redraw()
 
@@ -246,6 +234,12 @@ func update_damage_feedback(white_alpha: int, red_alpha: int, revive: int,
 ## home, hud/view_effects.h [orig: the misnamed HUD_DrawSpeedometer @0x590810].
 static func smooth_range_value(current: int, target: int) -> int:
 	return HudPos.binocular_range_step(current, target)
+
+
+## Whether this frame draws the NVG mask and gain scale (the published
+## first-person NVG view).
+func is_nvg_mask_visible() -> bool:
+	return _nvg_visible
 
 
 func _notification(what: int) -> void:

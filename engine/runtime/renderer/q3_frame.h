@@ -18,15 +18,15 @@ namespace opennova::renderer {
 // These are the five witnessed draws in FrameFX's bloom-source bracket:
 // glow-capable object duplicates first, followed by the NV water redraw,
 // celestial discs, and the occlusion-independent sun glow. They draw into
-// FrameFX's altbuffer, a backbuffer-sized render-target texture in the
+// FrameFX's altbuffer, a backbuffer-sized render-target surface in the
 // display format (an X8R8G8B8 display gets an A8R8G8B8 altbuffer) with the
 // beauty depth-stencil still bound; the compiled list is that altbuffer's
 // content.
-// [orig: CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
-// render_water_surface(view, 1) @ 0x582a62;
-// render_celestial_bodies(1) / render_skybox_sun_glow(0, 0) @ 0x582a77;
+// [orig: FrameFX_RenderBloomPass @ 0x582a54 (CRenderBatchQueue_SortAndFlush(4)),
+// @ 0x582a5d (render_water_surface(0, 1)), @ 0x582a77 (render_celestial_bodies(1)),
+// @ 0x582a80 (render_skybox_sun_glow(0, 0));
 // FrameFX_CreateAltBufferTexture @ 0x582120 (format 22 -> 21 @ 0x582141,
-// CreateTexture @ 0x58217e)].
+// IDirect3DDevice9::CreateRenderTarget, vtable +0x70, @ 0x58217e)].
 enum class Q3Technique : std::uint8_t {
 	NormalCopy = 0,
 	RotatedSpecularGlass = 1,

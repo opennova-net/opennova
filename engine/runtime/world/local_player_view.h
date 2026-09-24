@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
@@ -352,6 +353,13 @@ struct LocalPlayerViewFrame {
     //  Render_TerrainScene @0x610e51..0x610e5b]
     bool thermal_view = false;
     bool thermal_terrain_view = false;
+    // The frame's FrameFX dispatch facts (runtime/renderer/frame_fx_effects.h):
+    // the raw red word, the camera mode, the dead/session bits, the ticks since
+    // the death stamp, the thermal and monitor latches (CanFire && flags2 & 4
+    // / & 8) and the NVG / death-screen state.
+    // [orig: Render_ProcessMainSceneFrame @0x5ca2da..0x5ca2f1 (the latches),
+    //  @0x5ca8f6..0x5caad5 (the dispatch)]
+    renderer::FrameFxViewInputs frame_fx;
     // The three fullscreen damage-feedback quads, already reduced to what the
     // presenting shell draws (player_view.h carries the arms/decays/colours):
     // `screen_flash_white_alpha` is the raw word, `screen_flash_red_alpha` the

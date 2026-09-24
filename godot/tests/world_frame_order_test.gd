@@ -12,8 +12,8 @@ func test_frame_leg_table_is_the_witnessed_order() -> void:
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "foliage", "network", "blink",
 		"occlusion", "iris", "sun_veil", "lights", "materials", "framefx",
-		"slot_shadows", "particles", "precipitation", "audio", "clear",
-		"environment_cube", "finish",
+		"slot_shadows", "particles", "precipitation", "screen_effects", "audio",
+		"clear", "environment_cube", "finish",
 	])
 
 
@@ -29,6 +29,8 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"terrain tracks the visible bounds the water leg's g_WaterActive test reads")
 	assert_lt(names.find("water"), names.find("foliage"),
 			"foliage consumes this frame's detail-cell handoff after terrain")
+	assert_gt(names.find("screen_effects"), names.find("particles"),
+			"the FrameFX plan reads this frame's published distortion content")
 
 
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:

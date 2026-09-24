@@ -1054,6 +1054,45 @@ void test_frame_reads_the_state_and_the_card_selector() {
     CHECK(f.fov_h_deg == kBinocularCameraFovHDeg);
 }
 
+// The FrameFX dispatch facts the frame carries for the terminal effect: the
+// RAW red word (not the capped vignette alpha), the dead/session bits, the
+// ticks since the death stamp, g_NVGActive, and the CanFire latches of the
+// equipped def's Thermal (flags2 & 4) and Monitor (flags2 & 8) bits.
+// [orig: Render_ProcessMainSceneFrame @0x5ca2da..0x5ca2f1; @0x5ca8f6..0x5caad5]
+void test_frame_carries_the_framefx_dispatch_facts() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED,
+                                        DEF_WEAPON_FLAG2_THERMAL | DEF_WEAPON_FLAG2_MONITOR);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.flash.red = 250;
+    v.nvg_active = true;
+    v.in_session = true;
+    v.local_dead = true;
+    v.view_tick = 400;
+    v.death_cam.start_tick = 150;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.red_word == 250);
+    CHECK(f.screen_flash_red_alpha == 0xC0); // the vignette's capped draw alpha
+    CHECK(f.frame_fx.nvg_active);
+    CHECK(f.frame_fx.in_session && f.frame_fx.local_dead);
+    CHECK(f.frame_fx.death_elapsed_ticks == 250);
+    CHECK(f.frame_fx.camera_mode == 0);
+    CHECK(!f.frame_fx.thermal_view && !f.frame_fx.monitor_view); // no optical view yet
+    // A raised, settled sight is the CanFire verdict: both latches follow it.
+    v.local_dead = false;
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.thermal_view && f.thermal_view);
+    CHECK(f.frame_fx.monitor_view);
+    w.def.flags2 = DEF_WEAPON_FLAG2_MONITOR;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.thermal_view && f.frame_fx.monitor_view);
+}
+
 // The camera's airborne skip is independent of the ongoing scope interp.
 // [orig: Player_UpdateFirstPersonCamera @0x4dd40d/0x4dd414 and @0x4dd49f/0x4dd4a6]
 void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
@@ -2329,6 +2368,7 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_frame_carries_the_framefx_dispatch_facts();
     test_authored_rotation_bias_continues_through_air_reload_and_rebake();
     test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();

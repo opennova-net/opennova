@@ -809,6 +809,21 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     const bool thermal_def = w.active && (w.def.flags2 & DEF_WEAPON_FLAG2_THERMAL) != 0;
     out.thermal_view = optical_view && thermal_def;
     out.thermal_terrain_view = thermal_def && v.camera_mode == 0;
+    // The FrameFX dispatch facts: the monitor latch is the thermal latch's
+    // sibling on flags2 & 8 (Player_IsVehicleSeatHasFlag8), and the dispatch
+    // reads the RAW red word, the dead bit, the session, the death stamp and
+    // g_NVGActive [orig: Render_ProcessMainSceneFrame @0x5ca2e8..0x5ca2f1;
+    // @0x5ca8f6..0x5ca92e; @0x5ca9f5..0x5caa62; @0x5ca516..0x5ca554].
+    const bool monitor_def = w.active && (w.def.flags2 & DEF_WEAPON_FLAG2_MONITOR) != 0;
+    out.frame_fx.in_session = v.in_session;
+    out.frame_fx.local_dead = v.local_dead;
+    out.frame_fx.red_word = v.flash.red;
+    out.frame_fx.camera_mode = v.camera_mode;
+    out.frame_fx.death_elapsed_ticks = static_cast<int32_t>(v.view_tick - v.death_cam.start_tick);
+    out.frame_fx.thermal_view = out.thermal_view;
+    out.frame_fx.monitor_view = optical_view && monitor_def;
+    out.frame_fx.nvg_active = v.nvg_active;
+    out.frame_fx.death_screen_active = v.death_screen_active;
     const bool sighted = out.scope_card_active &&
                          (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
                          active_slot->current != weapon_action::kSwitchFrom;

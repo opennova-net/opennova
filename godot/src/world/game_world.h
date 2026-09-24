@@ -389,6 +389,7 @@ public:
 	void render_slot_shadow_frame();
 	void render_particle_frame();
 	void render_precipitation_frame();
+	void plan_screen_effects_frame();
 	void mix_audio_frame(int p_ticks_run);
 	void update_clear_frame();
 	void render_environment_cube_frame();
@@ -547,6 +548,7 @@ private:
 	LegResult leg_slot_shadows(FrameContext &r_ctx);
 	LegResult leg_particles(FrameContext &r_ctx);
 	LegResult leg_precipitation(FrameContext &r_ctx);
+	LegResult leg_screen_effects(FrameContext &r_ctx);
 	LegResult leg_audio(FrameContext &r_ctx);
 	LegResult leg_clear(FrameContext &r_ctx);
 	LegResult leg_environment_cube(FrameContext &r_ctx);

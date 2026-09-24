@@ -579,6 +579,11 @@ bool GameWorld::load_environment(const String &p_env_path) {
 	if (precipitation_ != nullptr) {
 		precipitation_->set_resource_root(resource_root_);
 	}
+	// FrameFX's mission texture (the "ffscan" scanlines) draws from the render
+	// CRT stream here, as Render_InitMissionTextures does.
+	if (framefx_ != nullptr) {
+		framefx_->init_mission_textures();
+	}
 	if (environment_cube_ != nullptr) {
 		environment_cube_->force_capture();
 	}

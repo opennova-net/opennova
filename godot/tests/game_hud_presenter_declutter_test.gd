@@ -565,13 +565,14 @@ func test_hud_uses_the_presented_camera_frame() -> void:
 	# A consumer must not compose a second camera frame: composition also
 	# advances the native shake IIR and binocular drift. Observe this through
 	# the NVG overlay, which must agree with the camera's published context.
-	var nvg := hud_presenter.get_game_hud().get_node("PlayerViewEffects/NvgPost") as ColorRect
+	var nvg := hud_presenter.get_game_hud().get_node("PlayerViewEffects")
 	for i in 3:
 		hud_presenter.tick()
-		assert_false(nvg.visible, "HUD stays on the displayed camera frame")
+		assert_false(nvg.is_nvg_mask_visible(), "HUD stays on the displayed camera frame")
 		assert_eq(player.presented_view(), published)
 	player.after_world_tick()
 	hud_presenter.tick()
 	assert_true(player.presented_view().nvg_visible)
-	assert_true(nvg.visible, "the next presented frame updates both camera and overlay")
+	assert_true(nvg.is_nvg_mask_visible(),
+			"the next presented frame updates both camera and overlay")
 	player.teardown()

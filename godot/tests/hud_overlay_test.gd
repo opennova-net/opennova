@@ -710,28 +710,27 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(0, 0, 1024, 768),
 			"Retail masks cover the viewport while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 6,
-			"The underwater murk, sun veil, NVG post-process and the three "
-			+ "fullscreen damage-feedback quads are internal children.")
+	assert_eq(effects.get_child_count(true), 5,
+			"The underwater murk, sun veil and the three fullscreen damage-feedback "
+			+ "quads are internal children; the NVG image is the terminal FrameFx "
+			+ "pass's, not a CanvasItem post.")
+	assert_null(effects.get_node_or_null("NvgPost"))
 	var murk := effects.get_node("UnderwaterMurk") as ColorRect
 	var veil := effects.get_node("SunVeil") as ColorRect
-	var nvg := effects.get_node("NvgPost") as ColorRect
 	assert_not_null(murk)
 	assert_not_null(veil)
-	assert_not_null(nvg)
 	assert_lt(murk.get_index(true), veil.get_index(true),
 			"Retail composites underwater murk before the sun-glare veil "
 			+ "[orig: the veil draws in Render_ProcessMainSceneFrame @ 0x5cac4b, "
 			+ "after the scene composites].")
-	assert_lt(veil.get_index(true), nvg.get_index(true),
-			"Retail composites underwater murk before later first-person HUD effects.")
 	assert_not_null(veil.material as ShaderMaterial,
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
-	assert_true(nvg.visible,
-			"First-person-visible NVG enables the post-process.")
+	assert_true(effects.is_nvg_mask_visible(),
+			"First-person-visible NVG draws the NVG.tga mask and gain scale "
+			+ "[orig: sub_5CFF70 @0x5cffab..0x5d0055].")
 	effects.update_view(false, 1, false, 0)
-	assert_false(nvg.visible,
-			"Camera suppression hides the post-process without consuming simulation state.")
+	assert_false(effects.is_nvg_mask_visible(),
+			"Camera suppression hides the mask without consuming simulation state.")
 
 
 # The three fullscreen damage-feedback quads. The engine owns every word, decay

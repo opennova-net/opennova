@@ -7,11 +7,14 @@
 #include "render/world_environment_lookup.h"
 #include "util/string_convert.h"
 
+#include <base/crt/crt_rng.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -39,6 +42,7 @@
 #include <godot_cpp/classes/render_scene_buffers_rd.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -48,6 +52,16 @@
 using namespace godot;
 
 namespace {
+
+using opennova::renderer::FrameFxBuffer;
+using opennova::renderer::FrameFxDistortionSet;
+using opennova::renderer::FrameFxFramePlan;
+using opennova::renderer::FrameFxNvgPlan;
+using opennova::renderer::FrameFxPass;
+using opennova::renderer::FrameFxStage;
+using opennova::renderer::FrameFxStep;
+using opennova::renderer::FrameFxStepKind;
+using opennova::renderer::FrameFxTaps;
 
 // A normal gameplay camera keeps precisely the beauty layers left after the
 // player/fly camera removes the FP body, shadow-only, and the twelve
@@ -63,41 +77,102 @@ namespace {
 // D-RORD-10). That gives shaders a collision-free exact-mask signature
 // without admitting caster or slot-capture geometry anywhere.
 constexpr std::uint32_t kBeautyCameraMask = 0x00078C01u;
-// FrameFX's 256-square blur target size. Focused Q3 is rendered at beauty
+// FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
 // resolution into the compositor's color attachment with resolved beauty
-// depth attached; this constant applies only after the capture stretch.
-constexpr std::uint32_t kFrameFxSide = 256u;
-constexpr std::uint32_t kPushConstantBytes = 48u;
-constexpr float kPi = 3.14159265358979323846f;
+// depth attached; this size applies from the capture's downsample on.
+constexpr std::int32_t kWorkSide = opennova::renderer::kFrameFxWorkSide;
+constexpr std::uint32_t kPushConstantBytes = 64u;
 
-enum class FramePass : std::uint32_t {
+// The fragment stage a draw evaluates (pc.mode_taps.x).
+enum class FramePass : std::int32_t {
 	Stretch = 0,
-	AverageFour = 1,
-	WeightedFour = 2,
-	FinalAverage = 3,
+	LumaAverage = 1,
+	Weighted = 2,
+	Average = 3,
 	GammaDecode = 4,
 	Snapshot = 5,
+	FanAverage = 6,
+	Thermal = 7,
+	Scanline = 8,
+	NvgGlow = 9,
+	NvgTint = 10,
+	NvgGlowAdd = 11,
+};
+
+// The tap geometry a draw samples with (pc.mode_taps.y): the four DrawPass
+// builders plus the NVG glow's two fixed four-tap sets.
+enum class TapGeometry : std::int32_t {
+	None = 0,
+	Rotated = 1,
+	Weighted = 2,
+	RadialFan = 3,
+	Tiled = 4,
+	NvgDiagonal = 5,
+	NvgAxial = 6,
 };
 
 enum class BlendMode : std::uint8_t {
 	Replace = 0,
-	Add = 1,
-	SourceAlphaAdd = 2,
+	Add = 1,             // ONE / ONE
+	SourceAlphaAdd = 2,  // SRCALPHA / ONE
+	SourceAlphaBlend = 3, // SRCALPHA / INVSRCALPHA
+	DestColorSourceColor = 4, // DESTCOLOR / SRCCOLOR
+	GlowAccumulate = 5,  // ONE / INVSRCALPHA
 };
 
-const char *kFrameFragmentShader = R"GLSL(#version 450
+// How a draw list treats its target: GTexRT_Select clears a selected
+// FrameFX target to 0 before a DrawPass; the frame itself is drawn over.
+enum class TargetLoad : std::uint8_t {
+	Keep = 0,
+	Clear = 1,
+	Discard = 2,
+};
+
+// One draw's push block (the 64-byte std430 FramePush below).
+struct FramePush {
+	FramePass pass = FramePass::Stretch;
+	TapGeometry taps = TapGeometry::None;
+	// The D3D rect the quad spans, in target pixels, and the source's size.
+	float rect_w = 0.0f, rect_h = 0.0f;
+	float source_w = 0.0f, source_h = 0.0f;
+	float base = 0.0f;
+	float direction_s = 0.0f, direction_c = 0.0f;
+	float u_scale = 1.0f;
+	float alpha = 0.0f;
+	float radius = 0.0f;
+	std::int32_t tile_x = 0, tile_y = 0;
+};
+
+// The witnessed pixel stages (runtime/renderer/frame_fx_effects.h carries
+// the retail shader text and the CPU references); @TOKEN@ slots are spliced
+// from the engine constants so the GLSL never restates them.
+const char *kFrameFragmentShaderTemplate = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
 
 layout(push_constant, std430) uniform FramePush {
-	vec4 target_source_size;
+	vec4 rect_source;
 	vec4 base_direction;
-	uint mode;
-	uint padding0;
-	uint padding1;
-	uint padding2;
+	vec4 params;
+	ivec4 mode_taps;
 } pc;
 
 layout(location = 0) out vec4 frag_color;
+
+const vec3 LUMA = @LUMA@;
+const float WEIGHTS[4] = float[4](@WEIGHTS@);
+const float WEIGHT_STEPS[4] = float[4](@WEIGHT_STEPS@);
+const float FAN_STEPS[4] = float[4](@FAN_STEPS@);
+const vec3 THERMAL_LUMA = @THERMAL_LUMA@;
+const float THERMAL_GREEN_BIAS = @THERMAL_GREEN_BIAS@;
+const vec2 SCANLINE_TILE = @SCANLINE_TILE@;
+const float SCANLINE_DIFFUSE = @SCANLINE_DIFFUSE@;
+const vec3 NVG_TINT_DOT = @NVG_TINT_DOT@;
+const vec3 NVG_TINT_SCALE = @NVG_TINT_SCALE@;
+const vec3 NVG_TINT_BIAS = @NVG_TINT_BIAS@;
+const vec3 NVG_GLOW_LUMA = @NVG_GLOW_LUMA@;
+const float NVG_GLOW_THRESHOLD = @NVG_GLOW_THRESHOLD@;
+const vec3 NVG_GLOW_SCALE = @NVG_GLOW_SCALE@;
+const float NVG_GLOW_ALPHA = @NVG_GLOW_ALPHA@;
 
 vec3 gamma_to_linear(vec3 gamma_rgb) {
 	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
@@ -105,68 +180,251 @@ vec3 gamma_to_linear(vec3 gamma_rgb) {
 			c * (1.0 / 12.92), lessThan(c, vec3(0.04045)));
 }
 
-vec2 d3d_quad_uv() {
-	// D3D9's pre-transformed quad places pixel centers on integer positions.
-	// Subtract the modern half-pixel before applying the witnessed base UV.
-	return (gl_FragCoord.xy - vec2(0.5)) / pc.target_source_size.xy
-			+ pc.base_direction.xy;
+// D3D9's pre-transformed quads place pixel centers on integer positions:
+// the rect-normalised position of this pixel's center.
+vec2 rect_st() {
+	return (gl_FragCoord.xy - vec2(0.5)) / pc.rect_source.xy;
 }
 
-vec4 average_cardinal(vec2 uv, vec2 direction) {
-	vec2 perpendicular = vec2(direction.y, -direction.x);
-	return (texture(source_color, uv + direction)
-			+ texture(source_color, uv + perpendicular)
-			+ texture(source_color, uv - direction)
-			+ texture(source_color, uv - perpendicular)) * 0.25;
+// The four taps of the draw's geometry.
+void taps4(out vec2 uv[4], out float fan_alpha) {
+	int taps = pc.mode_taps.y;
+	vec2 st = rect_st();
+	vec2 reduced = vec2(pc.params.x, 1.0);
+	fan_alpha = 1.0;
+	if (taps == 3) {
+		// build_scar_decal_vertices_extended: the fan's interpolated alpha and
+		// taps (runtime/renderer/frame_fx_effects.h frame_fx_fan_*).
+		fan_alpha = 2.0 * max(abs(st.x - 0.5), abs(st.y - 0.5));
+		vec2 origin = st + pc.base_direction.xy * fan_alpha;
+		vec2 toward = vec2(2.0 * pc.params.x * (0.5 - st.x), 2.0 * (0.5 - st.y))
+				* pc.params.z;
+		for (int k = 0; k < 4; ++k)
+			uv[k] = origin + toward * FAN_STEPS[k];
+		return;
+	}
+	vec2 origin = st + pc.base_direction.xy;
+	vec2 direction = pc.base_direction.zw * reduced;
+	if (taps == 2) {
+		for (int k = 0; k < 4; ++k)
+			uv[k] = origin + direction * WEIGHT_STEPS[k];
+		return;
+	}
+	if (taps == 5) {
+		float o = pc.params.z;
+		uv[0] = origin + vec2(-o, -o);
+		uv[1] = origin + vec2(o, -o);
+		uv[2] = origin + vec2(-o, o);
+		uv[3] = origin + vec2(o, o);
+		return;
+	}
+	if (taps == 6) {
+		float o = pc.params.z;
+		uv[0] = origin + vec2(-o, 0.0);
+		uv[1] = origin + vec2(o, 0.0);
+		uv[2] = origin + vec2(0.0, -o);
+		uv[3] = origin + vec2(0.0, o);
+		return;
+	}
+	// build_scar_decal_quad_vertices: (+s,+c), (+c,-s), (-s,-c), (-c,+s).
+	vec2 perpendicular = vec2(pc.base_direction.w, -pc.base_direction.z) * reduced;
+	uv[0] = origin + direction;
+	uv[1] = origin + perpendicular;
+	uv[2] = origin - direction;
+	uv[3] = origin - perpendicular;
+}
+
+vec4 average4(vec2 uv[4]) {
+	return (texture(source_color, uv[0]) + texture(source_color, uv[1])
+			+ texture(source_color, uv[2]) + texture(source_color, uv[3])) * 0.25;
+}
+
+// The NVG composite's quad spans (0, 0)..(W - 1, H - 1): the last column and
+// row keep the black clear.
+bool nvg_covered() {
+	vec2 pixel = gl_FragCoord.xy - vec2(0.5);
+	return pixel.x < pc.rect_source.x && pixel.y < pc.rect_source.y;
 }
 
 void main() {
-	if (pc.mode == 0u) {
+	int mode = pc.mode_taps.x;
+	if (mode == 0) {
 		// IDirect3DDevice9::StretchRect(D3DTEXF_LINEAR): texel centers map
 		// directly between the full source and destination rectangles.
-		vec2 uv = gl_FragCoord.xy / pc.target_source_size.xy;
-		frag_color = texture(source_color, uv);
+		frag_color = texture(source_color, gl_FragCoord.xy / pc.rect_source.xy);
 		return;
 	}
-	if (pc.mode == 1u) {
-		vec4 averaged = average_cardinal(d3d_quad_uv(),
-				pc.base_direction.zw);
-		float luma = dot(averaged.rgb, vec3(0.20, 0.30, 0.10));
+	if (mode == 4 || mode == 5) {
+		vec4 source = texelFetch(source_color, ivec2(gl_FragCoord.xy), 0);
+		frag_color = mode == 4 ? vec4(gamma_to_linear(source.rgb), source.a) : source;
+		return;
+	}
+	if (mode == 8) {
+		// The Tiled builder over "ffscan": MODULATE2X(TEXTURE, DIFFUSE); the
+		// DESTCOLOR/SRCCOLOR blend doubles it onto the frame.
+		vec2 pixel = gl_FragCoord.xy - vec2(0.5) + vec2(pc.mode_taps.zw);
+		vec2 uv = pc.base_direction.xy + pixel / SCANLINE_TILE;
+		vec3 texel = texture(source_color, uv).rgb;
+		frag_color = vec4(clamp(2.0 * texel * SCANLINE_DIFFUSE, 0.0, 1.0), 1.0);
+		return;
+	}
+	if (mode == 10 || mode == 11) {
+		if (!nvg_covered()) {
+			frag_color = vec4(0.0);
+			return;
+		}
+		vec3 texel = texture(source_color, rect_st()).rgb;
+		if (mode == 10) {
+			float d = dot(texel, NVG_TINT_DOT);
+			frag_color = vec4(clamp(d * NVG_TINT_SCALE + NVG_TINT_BIAS, 0.0, 1.0), 0.0);
+		} else {
+			frag_color = vec4(clamp(2.0 * texel * SCANLINE_DIFFUSE, 0.0, 1.0), 1.0);
+		}
+		return;
+	}
+	vec2 uv[4];
+	float fan_alpha;
+	taps4(uv, fan_alpha);
+	if (mode == 2) {
+		vec4 sum = texture(source_color, uv[0]) * WEIGHTS[0]
+				+ texture(source_color, uv[1]) * WEIGHTS[1]
+				+ texture(source_color, uv[2]) * WEIGHTS[2]
+				+ texture(source_color, uv[3]) * WEIGHTS[3];
+		frag_color = vec4(sum.rgb, 1.0);
+		return;
+	}
+	if (mode == 9) {
+		vec3 sum = vec3(0.0);
+		for (int k = 0; k < 4; ++k) {
+			vec3 t = texture(source_color, uv[k]).rgb;
+			sum += t * t;
+		}
+		float g = clamp(dot(sum, NVG_GLOW_LUMA) - NVG_GLOW_THRESHOLD, 0.0, 1.0);
+		frag_color = vec4(g * NVG_GLOW_SCALE, NVG_GLOW_ALPHA);
+		return;
+	}
+	vec4 averaged = average4(uv);
+	if (mode == 1) {
+		float luma = dot(averaged.rgb, LUMA);
 		frag_color = vec4(averaged.rgb, luma * luma);
-		return;
-	}
-	if (pc.mode == 2u) {
-		vec2 uv = d3d_quad_uv();
-		vec2 step_uv = pc.base_direction.zw;
-		frag_color = texture(source_color, uv + step_uv * 0.5) * 0.50
-				+ texture(source_color, uv + step_uv * 2.5) * 0.46
-				+ texture(source_color, uv + step_uv * 4.5) * 0.35
-				+ texture(source_color, uv + step_uv * 6.5) * 0.19;
-		frag_color.a = 1.0;
-		return;
-	}
-	if (pc.mode == 3u) {
-		frag_color = average_cardinal(d3d_quad_uv(),
-				pc.base_direction.zw);
-		frag_color.a = 0.5;
-		return;
-	}
-	ivec2 pixel = ivec2(gl_FragCoord.xy);
-	vec4 source = texelFetch(source_color, pixel, 0);
-	if (pc.mode == 4u) {
-		frag_color = vec4(gamma_to_linear(source.rgb), source.a);
+	} else if (mode == 3) {
+		frag_color = vec4(averaged.rgb, pc.params.y);
+	} else if (mode == 6) {
+		frag_color = vec4(averaged.rgb, fan_alpha);
 	} else {
-		frag_color = source;
+		// mode 7: the thermal stage.
+		float l = dot(vec3(1.0) - clamp(averaged.rgb, 0.0, 1.0), THERMAL_LUMA);
+		float green = clamp(l + 1.0, 0.0, 1.0);
+		frag_color = vec4(clamp(vec3(l * clamp(l, 0.0, 1.0),
+				l * green + THERMAL_GREEN_BIAS, l * clamp(l, 0.0, 1.0)), 0.0, 1.0), 1.0);
 	}
 }
 )GLSL";
 
-// The kernel tap directions of the bloom passes (FrameFX_RenderBloomPass @0x582940 -
-// docs/render/render-order-re.md).
-std::array<float, 2> direction_for_degrees(float degrees, float radius) {
-	const float radians = degrees * (kPi / 180.0f);
-	// The retail builders store (sin(angle), cos(angle)) in texture space.
-	return {std::sin(radians) * radius, std::cos(radians) * radius};
+// A GLSL float literal for an engine constant: %.9g round-trips every float,
+// and a trailing ".0" keeps integral values typed as floats.
+std::string glsl_float(float p_value) {
+	char buffer[32];
+	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
+	std::string text(buffer);
+	if (text.find_first_of(".eE") == std::string::npos)
+		text += ".0";
+	return text;
+}
+
+std::string glsl_vec3(const opennova::renderer::FrameFxRgb &p_value) {
+	return "vec3(" + glsl_float(p_value[0]) + ", " + glsl_float(p_value[1]) + ", " +
+			glsl_float(p_value[2]) + ")";
+}
+
+std::string glsl_list4(const std::array<float, 4> &p_values) {
+	return glsl_float(p_values[0]) + ", " + glsl_float(p_values[1]) + ", " +
+			glsl_float(p_values[2]) + ", " + glsl_float(p_values[3]);
+}
+
+void splice_token(std::string &p_text, const char *p_token, const std::string &p_value) {
+	const std::string token(p_token);
+	for (std::size_t at = p_text.find(token); at != std::string::npos;
+			at = p_text.find(token, at + p_value.size()))
+		p_text.replace(at, token.size(), p_value);
+}
+
+std::string frame_fragment_shader_source() {
+	namespace r = opennova::renderer;
+	std::string source(kFrameFragmentShaderTemplate);
+	splice_token(source, "@LUMA@", glsl_vec3(r::kFrameFxLumaWeights));
+	splice_token(source, "@WEIGHTS@", glsl_list4(r::kFrameFxWeightedTapWeights));
+	splice_token(source, "@WEIGHT_STEPS@", glsl_list4(r::kFrameFxWeightedTapSteps));
+	splice_token(source, "@FAN_STEPS@", glsl_list4(r::kFrameFxFanTapSteps));
+	splice_token(source, "@THERMAL_LUMA@", glsl_vec3(r::kFrameFxThermalLuma));
+	splice_token(source, "@THERMAL_GREEN_BIAS@", glsl_float(r::kFrameFxThermalGreenBias));
+	splice_token(source, "@SCANLINE_TILE@",
+			"vec2(" + glsl_float(float(r::kFrameFxScanlineTileWidth)) + ", " +
+					glsl_float(float(r::kFrameFxScanlineTileHeight)) + ")");
+	// The diffuse byte (0x80 per channel) as the fixed-function stage reads it.
+	splice_token(source, "@SCANLINE_DIFFUSE@",
+			glsl_float(float(r::kFrameFxScanlineDiffuse & 0xFFu) / 255.0f));
+	splice_token(source, "@NVG_TINT_DOT@", glsl_vec3(r::kNvgTintDot));
+	splice_token(source, "@NVG_TINT_SCALE@", glsl_vec3(r::kNvgTintScale));
+	splice_token(source, "@NVG_TINT_BIAS@", glsl_vec3(r::kNvgTintBias));
+	splice_token(source, "@NVG_GLOW_LUMA@", glsl_vec3(r::kNvgGlowLuma));
+	splice_token(source, "@NVG_GLOW_THRESHOLD@", glsl_float(r::kNvgGlowThreshold));
+	splice_token(source, "@NVG_GLOW_SCALE@", glsl_vec3(r::kNvgGlowScale));
+	splice_token(source, "@NVG_GLOW_ALPHA@", glsl_float(r::kNvgGlowAlpha));
+	return source;
+}
+
+// The pixel stage and the blend its state object carries
+// (runtime/renderer/frame_fx_effects.h FrameFxStage).
+FramePass pass_for(FrameFxStage p_stage) {
+	switch (p_stage) {
+		case FrameFxStage::LumaAverage:
+			return FramePass::LumaAverage;
+		case FrameFxStage::AverageBlend:
+		case FrameFxStage::AverageAdd:
+			return FramePass::Average;
+		case FrameFxStage::WeightedAdd:
+			return FramePass::Weighted;
+		case FrameFxStage::FanAverage:
+			return FramePass::FanAverage;
+		case FrameFxStage::Thermal:
+			return FramePass::Thermal;
+		case FrameFxStage::Scanline:
+			return FramePass::Scanline;
+	}
+	return FramePass::Average;
+}
+
+BlendMode blend_for(FrameFxStage p_stage) {
+	switch (p_stage) {
+		case FrameFxStage::LumaAverage:
+		case FrameFxStage::Thermal:
+			return BlendMode::Replace;
+		case FrameFxStage::AverageBlend:
+		case FrameFxStage::FanAverage:
+			return BlendMode::SourceAlphaBlend;
+		case FrameFxStage::AverageAdd:
+			return BlendMode::SourceAlphaAdd;
+		case FrameFxStage::WeightedAdd:
+			return BlendMode::Add;
+		case FrameFxStage::Scanline:
+			return BlendMode::DestColorSourceColor;
+	}
+	return BlendMode::Replace;
+}
+
+TapGeometry taps_for(FrameFxTaps p_taps) {
+	switch (p_taps) {
+		case FrameFxTaps::Rotated:
+			return TapGeometry::Rotated;
+		case FrameFxTaps::Weighted:
+			return TapGeometry::Weighted;
+		case FrameFxTaps::RadialFan:
+			return TapGeometry::RadialFan;
+		case FrameFxTaps::Tiled:
+			return TapGeometry::Tiled;
+	}
+	return TapGeometry::Rotated;
 }
 
 WorldEnvironment *world_environment_from_id(const ObjectID &id) {
@@ -207,10 +465,11 @@ public:
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
 		BlendMode blend = BlendMode::Replace;
+		bool write_alpha = true;
 
 		bool operator<(const PipelineKey &other) const {
-			return std::tie(framebuffer_format, blend) <
-					std::tie(other.framebuffer_format, other.blend);
+			return std::tie(framebuffer_format, blend, write_alpha) <
+					std::tie(other.framebuffer_format, other.blend, other.write_alpha);
 		}
 	};
 
@@ -228,12 +487,18 @@ public:
 		RID low_a_framebuffer;
 		RID low_b;
 		RID low_b_framebuffer;
+		RID nvg_scene;
+		RID nvg_scene_framebuffer;
+		RID nvg_glow;
+		RID nvg_glow_framebuffer;
 		RID color_uniform;
 		RID scratch_uniform;
 		RID capture_uniform;
 		RID low_a_uniform;
 		RID low_b_uniform;
 		RID q3_uniform;
+		RID nvg_scene_uniform;
+		RID nvg_glow_uniform;
 		Vector2i size;
 		Vector2i capture_size;
 	};
@@ -256,18 +521,39 @@ public:
 	bool gpu_composite_valid = false;
 	std::uint64_t gpu_decode_us = 0;
 	bool gpu_decode_valid = false;
+	// The last rendered frame's screen-effect trace for the GUT pins.
+	std::uint64_t screen_frame_id = 0;
+	std::size_t screen_steps = 0;
+	std::size_t distortion_sets = 0;
+	bool nvg_scene_drawn = false;
+	bool nvg_composited = false;
+	std::uint64_t nvg_glow_clears = 0;
 	std::atomic<bool> shutdown_requested{false};
 	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
 	std::atomic<bool> gpu_timing_enabled{false};
 
+	// Main thread -> render thread: the latest screen-effect plan and the
+	// mission's scanline texels, each behind the one publication mutex.
+	std::mutex publication_mutex;
+	std::shared_ptr<const FrameFxScreenFrame> published_screen;
+	std::vector<std::uint8_t> published_scanlines;
+	std::uint64_t published_scanline_generation = 0;
+	// Render thread: the frame id whose one-shot parts already ran.
+	std::uint64_t consumed_screen_frame = 0;
+	std::uint64_t uploaded_scanline_generation = 0;
+
 	RenderingDevice *rd = nullptr;
 	RID shader;
 	RID sampler;
+	RID repeat_sampler;
+	RID scanlines;
+	RID scanline_uniform;
 	std::map<PipelineKey, RID> pipelines;
 	std::vector<ViewTarget> targets;
 	std::uint64_t target_buffers_id = 0;
 	PackedByteArray push_constants;
 	PackedColorArray clear_black;
+	PackedColorArray clear_nvg_glow;
 
 	// RenderingServer owns the RenderingDevice. FrameFx::shutdown() releases
 	// live RIDs explicitly; destruction can occur after server teardown and must
@@ -313,18 +599,24 @@ public:
 	}
 
 	void release_target(ViewTarget &target) {
+		release_uniform(target.nvg_glow_uniform);
+		release_uniform(target.nvg_scene_uniform);
 		release_uniform(target.q3_uniform);
 		release_uniform(target.low_b_uniform);
 		release_uniform(target.low_a_uniform);
 		release_uniform(target.capture_uniform);
 		release_uniform(target.scratch_uniform);
 		release_uniform(target.color_uniform);
+		release_framebuffer(target.nvg_glow_framebuffer);
+		release_framebuffer(target.nvg_scene_framebuffer);
 		release_framebuffer(target.low_b_framebuffer);
 		release_framebuffer(target.low_a_framebuffer);
 		release_framebuffer(target.capture_framebuffer);
 		release_framebuffer(target.scene_scratch_framebuffer);
 		release_framebuffer(target.q3_framebuffer);
 		release_framebuffer(target.color_framebuffer);
+		release_texture(target.nvg_glow);
+		release_texture(target.nvg_scene);
 		release_texture(target.low_b);
 		release_texture(target.low_a);
 		release_texture(target.capture);
@@ -340,14 +632,22 @@ public:
 		target_buffers_id = 0;
 	}
 
+	void release_scanlines() {
+		release_uniform(scanline_uniform);
+		release_texture(scanlines);
+		uploaded_scanline_generation = 0;
+	}
+
 	void release_all() {
 		RenderingServer *server = RenderingServer::get_singleton();
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
 		q3_adapter.release_device(rd);
 		release_targets();
+		release_scanlines();
 		for (auto &entry : pipelines)
 			release_pipeline(entry.second);
 		pipelines.clear();
+		release_rid(repeat_sampler);
 		release_rid(sampler);
 		release_rid(shader);
 	}
@@ -356,22 +656,25 @@ public:
 	RID make_texture(const Vector2i &size,
 			RenderingDevice::DataFormat format, bool readback = false);
 	RID make_framebuffer(const RID &texture);
-	RID make_uniform(const RID &texture);
+	RID make_uniform(const RID &texture, const RID &texture_sampler);
 	bool ensure_targets(RenderSceneBuffersRD *buffers,
 			std::uint32_t count, const Vector2i &size);
-	RID pipeline_for(int64_t framebuffer_format, BlendMode blend);
-	void set_push(FramePass pass, const Vector2i &target_size,
-			const Vector2i &source_size, float base_u, float base_v,
-			float direction_u, float direction_v);
-	bool draw_one(const RID &framebuffer, const RID &uniform,
-			BlendMode blend, FramePass pass, const Vector2i &target_size,
-			const Vector2i &source_size, float base_u, float base_v,
-			float direction_u, float direction_v, bool clear,
-			bool discard_previous);
-	bool draw_weighted_pair(const RID &framebuffer, const RID &uniform,
-			const Vector2i &target_size, float first_degrees);
+	bool ensure_scanlines();
+	RID pipeline_for(int64_t framebuffer_format, BlendMode blend, bool write_alpha);
+	void set_push(const FramePush &push);
+	bool draw_pushes(const RID &framebuffer, const RID &uniform, BlendMode blend,
+			const FramePush *pushes, std::size_t count, TargetLoad load,
+			const PackedColorArray &clear_colors, bool write_alpha = true);
+	bool stretch(const RID &framebuffer, const Vector2i &target_size,
+			const RID &uniform, const Vector2i &source_size, std::size_t &draws);
+	bool run_pass(ViewTarget &target, const FrameFxPass &pass, std::size_t &draws);
+	bool run_steps(ViewTarget &target, RenderData *render_data, std::uint32_t view,
+			const std::vector<FrameFxStep> &steps, const FrameFxScreenFrame *screen,
+			std::size_t &draws);
 	bool composite_q3(ViewTarget &target, RenderData *render_data,
 			std::uint32_t view, std::size_t &draws);
+	bool run_nvg(ViewTarget &target, const FrameFxNvgPlan &nvg, bool first_use,
+			std::size_t &draws);
 	bool render(RenderData *render_data);
 	Ref<Image> capture_q3_target();
 	Dictionary report() const;
@@ -411,7 +714,8 @@ Ref<Image> FrameFxCompositorEffect::Impl::capture_q3_target() {
 bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	if (shutdown_requested.load(std::memory_order_acquire))
 		return false;
-	if (rd != nullptr && shader.is_valid() && sampler.is_valid())
+	if (rd != nullptr && shader.is_valid() && sampler.is_valid() &&
+			repeat_sampler.is_valid())
 		return true;
 	release_all();
 	RenderingServer *server = RenderingServer::get_singleton();
@@ -423,7 +727,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	}
 	if (rd->limit_get(RenderingDevice::LIMIT_MAX_PUSH_CONSTANT_SIZE) <
 			kPushConstantBytes) {
-		set_failure("RenderingDevice does not support the 48-byte FrameFX "
+		set_failure("RenderingDevice does not support the 64-byte FrameFX "
 				"push constant block", "push_constants_unsupported");
 		return false;
 	}
@@ -434,7 +738,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
 			String::utf8(kRdFullscreenVertexShader));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kFrameFragmentShader));
+			String::utf8(frame_fragment_shader_source().c_str()));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
 	if (spirv.is_null()) {
 		set_failure("RenderingDevice returned no SPIR-V for FrameFX",
@@ -463,17 +767,24 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 		return false;
 	}
 
-	Ref<RDSamplerState> sampler_state;
-	sampler_state.instantiate();
-	sampler_state->set_mag_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
-	sampler_state->set_min_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
-	sampler_state->set_mip_filter(RenderingDevice::SAMPLER_FILTER_NEAREST);
-	sampler_state->set_repeat_u(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
-	sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
-	sampler_state->set_repeat_w(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
-	sampler = rd->sampler_create(sampler_state);
-	if (!sampler.is_valid()) {
-		set_failure("RenderingDevice could not create the FrameFX sampler",
+	// The FrameFX render targets sample LINEAR and CLAMP (GTexture flags 1,
+	// retail create_frame_effect_render_targets @0x583cf2, read by
+	// apply_texture_stages); the "ffscan" texture keeps the default WRAP.
+	auto make_sampler = [&](RenderingDevice::SamplerRepeatMode p_repeat) {
+		Ref<RDSamplerState> sampler_state;
+		sampler_state.instantiate();
+		sampler_state->set_mag_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
+		sampler_state->set_min_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
+		sampler_state->set_mip_filter(RenderingDevice::SAMPLER_FILTER_NEAREST);
+		sampler_state->set_repeat_u(p_repeat);
+		sampler_state->set_repeat_v(p_repeat);
+		sampler_state->set_repeat_w(p_repeat);
+		return rd->sampler_create(sampler_state);
+	};
+	sampler = make_sampler(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
+	repeat_sampler = make_sampler(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
+	if (!sampler.is_valid() || !repeat_sampler.is_valid()) {
+		set_failure("RenderingDevice could not create the FrameFX samplers",
 				"sampler_create_failed");
 		release_all();
 		return false;
@@ -481,6 +792,12 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	push_constants.resize(kPushConstantBytes);
 	if (clear_black.is_empty())
 		clear_black.push_back(Color(0, 0, 0, 0));
+	if (clear_nvg_glow.is_empty()) {
+		const std::uint32_t argb = opennova::renderer::kNvgGlowClearColor;
+		clear_nvg_glow.push_back(Color(float((argb >> 16) & 0xFFu) / 255.0f,
+				float((argb >> 8) & 0xFFu) / 255.0f, float(argb & 0xFFu) / 255.0f,
+				float((argb >> 24) & 0xFFu) / 255.0f));
+	}
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
 		rd_available = true;
@@ -520,9 +837,10 @@ RID FrameFxCompositorEffect::Impl::make_framebuffer(const RID &texture) {
 	return rd->framebuffer_create(attachments);
 }
 
-RID FrameFxCompositorEffect::Impl::make_uniform(const RID &texture) {
+RID FrameFxCompositorEffect::Impl::make_uniform(const RID &texture,
+		const RID &texture_sampler) {
 	TypedArray<Ref<RDUniform>> uniforms;
-	uniforms.push_back(sampled_texture_uniform(0, sampler, texture));
+	uniforms.push_back(sampled_texture_uniform(0, texture_sampler, texture));
 	return rd->uniform_set_create(uniforms, shader, 0);
 }
 
@@ -553,9 +871,23 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 
 	release_targets();
 	// The focused Q3 renderer draws at beauty resolution against the resolved
-	// beauty depth. Its sole consumer remains the power-of-two capture feeding
-	// the 256-square kernel.
-	const Vector2i capture_size(kFrameFxSide, kFrameFxSide);
+	// beauty depth. The frame and the Q3 source both capture into the
+	// power-of-two floor of the frame, whose downsample feeds the 256-square
+	// work targets.
+	const Vector2i capture_size(opennova::renderer::frame_fx_capture_side(size.x),
+			opennova::renderer::frame_fx_capture_side(size.y));
+	if (capture_size.x <= 0 || capture_size.y <= 0) {
+		set_failure("The frame is too small for a FrameFX capture target",
+				"render_targets_invalid");
+		return false;
+	}
+	const Vector2i work(kWorkSide, kWorkSide);
+	const Vector2i nvg_scene(opennova::renderer::kNvgSceneSide,
+			opennova::renderer::kNvgSceneSide);
+	const Vector2i nvg_glow(opennova::renderer::kNvgGlowSide,
+			opennova::renderer::kNvgGlowSide);
+	constexpr RenderingDevice::DataFormat kRgba8 =
+			RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM;
 	targets.reserve(count);
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget target;
@@ -581,21 +913,24 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		q3_attachments.push_back(target.q3_color);
 		q3_attachments.push_back(target.depth);
 		target.q3_framebuffer = rd->framebuffer_create(q3_attachments);
-		target.capture = make_texture(capture_size,
-				RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+		target.capture = make_texture(capture_size, kRgba8);
 		target.capture_framebuffer = make_framebuffer(target.capture);
-		target.low_a = make_texture(Vector2i(kFrameFxSide, kFrameFxSide),
-				RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+		target.low_a = make_texture(work, kRgba8);
 		target.low_a_framebuffer = make_framebuffer(target.low_a);
-		target.low_b = make_texture(Vector2i(kFrameFxSide, kFrameFxSide),
-				RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+		target.low_b = make_texture(work, kRgba8);
 		target.low_b_framebuffer = make_framebuffer(target.low_b);
-		target.color_uniform = make_uniform(target.color);
-		target.scratch_uniform = make_uniform(target.scene_scratch);
-		target.capture_uniform = make_uniform(target.capture);
-		target.low_a_uniform = make_uniform(target.low_a);
-		target.low_b_uniform = make_uniform(target.low_b);
-		target.q3_uniform = make_uniform(target.q3_color);
+		target.nvg_scene = make_texture(nvg_scene, kRgba8);
+		target.nvg_scene_framebuffer = make_framebuffer(target.nvg_scene);
+		target.nvg_glow = make_texture(nvg_glow, kRgba8);
+		target.nvg_glow_framebuffer = make_framebuffer(target.nvg_glow);
+		target.color_uniform = make_uniform(target.color, sampler);
+		target.scratch_uniform = make_uniform(target.scene_scratch, sampler);
+		target.capture_uniform = make_uniform(target.capture, sampler);
+		target.low_a_uniform = make_uniform(target.low_a, sampler);
+		target.low_b_uniform = make_uniform(target.low_b, sampler);
+		target.q3_uniform = make_uniform(target.q3_color, sampler);
+		target.nvg_scene_uniform = make_uniform(target.nvg_scene, sampler);
+		target.nvg_glow_uniform = make_uniform(target.nvg_glow, sampler);
 		const bool valid = target.color_framebuffer.is_valid() &&
 				target.scene_scratch.is_valid() &&
 				target.scene_scratch_framebuffer.is_valid() &&
@@ -603,9 +938,12 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 				target.capture.is_valid() && target.capture_framebuffer.is_valid() &&
 				target.low_a.is_valid() && target.low_a_framebuffer.is_valid() &&
 				target.low_b.is_valid() && target.low_b_framebuffer.is_valid() &&
+				target.nvg_scene.is_valid() && target.nvg_scene_framebuffer.is_valid() &&
+				target.nvg_glow.is_valid() && target.nvg_glow_framebuffer.is_valid() &&
 				target.color_uniform.is_valid() && target.scratch_uniform.is_valid() &&
 				target.capture_uniform.is_valid() && target.low_a_uniform.is_valid() &&
-				target.low_b_uniform.is_valid() && target.q3_uniform.is_valid();
+				target.low_b_uniform.is_valid() && target.q3_uniform.is_valid() &&
+				target.nvg_scene_uniform.is_valid() && target.nvg_glow_uniform.is_valid();
 		if (!valid) {
 			set_failure("RenderingDevice could not allocate the FrameFX "
 					"target chain for view " + std::to_string(view),
@@ -614,15 +952,71 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 			release_targets();
 			return false;
 		}
+		// The glow target starts empty; retail clears it only on a toggle frame.
+		const int64_t list = rd->draw_list_begin(target.nvg_glow_framebuffer,
+				RenderingDevice::DRAW_CLEAR_COLOR_0, clear_black);
+		if (list != RenderingDevice::INVALID_ID)
+			rd->draw_list_end();
 		targets.push_back(target);
 	}
 	target_buffers_id = buffers_id;
 	return true;
 }
 
+// The mission's "ffscan" texture: the engine's luminance texels replicated
+// into all four channels (A8R8G8B8 bytes 0x01010101 x texel).
+bool FrameFxCompositorEffect::Impl::ensure_scanlines() {
+	std::vector<std::uint8_t> texels;
+	std::uint64_t generation = 0;
+	{
+		std::lock_guard<std::mutex> lock(publication_mutex);
+		generation = published_scanline_generation;
+		if (generation != uploaded_scanline_generation)
+			texels = published_scanlines;
+	}
+	if (generation == 0)
+		return false;
+	if (generation == uploaded_scanline_generation && scanline_uniform.is_valid())
+		return true;
+	const int side = opennova::renderer::kFrameFxScanlineSide;
+	if (texels.size() != static_cast<std::size_t>(side * side))
+		return false;
+	PackedByteArray rgba;
+	rgba.resize(static_cast<int64_t>(texels.size()) * 4);
+	std::uint8_t *out = rgba.ptrw();
+	for (std::size_t i = 0; i < texels.size(); ++i) {
+		out[i * 4 + 0] = texels[i];
+		out[i * 4 + 1] = texels[i];
+		out[i * 4 + 2] = texels[i];
+		out[i * 4 + 3] = texels[i];
+	}
+	if (!scanlines.is_valid()) {
+		Ref<RDTextureFormat> format;
+		format.instantiate();
+		format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+		format->set_width(side);
+		format->set_height(side);
+		format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
+				RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+				RenderingDevice::TEXTURE_USAGE_CAN_UPDATE_BIT));
+		Ref<RDTextureView> view;
+		view.instantiate();
+		TypedArray<PackedByteArray> data;
+		data.push_back(rgba);
+		scanlines = rd->texture_create(format, view, data);
+		if (!scanlines.is_valid())
+			return false;
+		scanline_uniform = make_uniform(scanlines, repeat_sampler);
+	} else {
+		rd->texture_update(scanlines, 0, rgba);
+	}
+	uploaded_scanline_generation = generation;
+	return scanline_uniform.is_valid();
+}
+
 RID FrameFxCompositorEffect::Impl::pipeline_for(
-		int64_t framebuffer_format, BlendMode blend) {
-	const PipelineKey key{framebuffer_format, blend};
+		int64_t framebuffer_format, BlendMode blend, bool write_alpha) {
+	const PipelineKey key{framebuffer_format, blend, write_alpha};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -640,21 +1034,49 @@ RID FrameFxCompositorEffect::Impl::pipeline_for(
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
 	attachment->set_enable_blend(blend != BlendMode::Replace);
-	if (blend == BlendMode::Add) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	} else if (blend == BlendMode::SourceAlphaAdd) {
-		attachment->set_src_color_blend_factor(
-				RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_src_alpha_blend_factor(
-				RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
+	// D3D9 applies the colour factors to alpha by their alpha counterparts.
+	auto factors = [&](RenderingDevice::BlendFactor p_src_color,
+			RenderingDevice::BlendFactor p_dst_color,
+			RenderingDevice::BlendFactor p_src_alpha,
+			RenderingDevice::BlendFactor p_dst_alpha) {
+		attachment->set_src_color_blend_factor(p_src_color);
+		attachment->set_dst_color_blend_factor(p_dst_color);
+		attachment->set_src_alpha_blend_factor(p_src_alpha);
+		attachment->set_dst_alpha_blend_factor(p_dst_alpha);
+	};
+	switch (blend) {
+		case BlendMode::Replace:
+			break;
+		case BlendMode::Add:
+			factors(RenderingDevice::BLEND_FACTOR_ONE, RenderingDevice::BLEND_FACTOR_ONE,
+					RenderingDevice::BLEND_FACTOR_ONE, RenderingDevice::BLEND_FACTOR_ONE);
+			break;
+		case BlendMode::SourceAlphaAdd:
+			factors(RenderingDevice::BLEND_FACTOR_SRC_ALPHA, RenderingDevice::BLEND_FACTOR_ONE,
+					RenderingDevice::BLEND_FACTOR_SRC_ALPHA, RenderingDevice::BLEND_FACTOR_ONE);
+			break;
+		case BlendMode::SourceAlphaBlend:
+			factors(RenderingDevice::BLEND_FACTOR_SRC_ALPHA,
+					RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+					RenderingDevice::BLEND_FACTOR_SRC_ALPHA,
+					RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+			break;
+		case BlendMode::DestColorSourceColor:
+			factors(RenderingDevice::BLEND_FACTOR_DST_COLOR,
+					RenderingDevice::BLEND_FACTOR_SRC_COLOR,
+					RenderingDevice::BLEND_FACTOR_DST_ALPHA,
+					RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
+			break;
+		case BlendMode::GlowAccumulate:
+			factors(RenderingDevice::BLEND_FACTOR_ONE,
+					RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+					RenderingDevice::BLEND_FACTOR_ONE,
+					RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+			break;
 	}
 	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
 	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
+	attachment->set_write_a(write_alpha);
 	Ref<RDPipelineColorBlendState> color_blend;
 	color_blend.instantiate();
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
@@ -673,43 +1095,41 @@ RID FrameFxCompositorEffect::Impl::pipeline_for(
 	return pipeline;
 }
 
-void FrameFxCompositorEffect::Impl::set_push(FramePass pass,
-		const Vector2i &target_size, const Vector2i &source_size,
-		float base_u, float base_v, float direction_u, float direction_v) {
-	write_f32(push_constants, 0, static_cast<float>(target_size.x));
-	write_f32(push_constants, 4, static_cast<float>(target_size.y));
-	write_f32(push_constants, 8, static_cast<float>(source_size.x));
-	write_f32(push_constants, 12, static_cast<float>(source_size.y));
-	write_f32(push_constants, 16, base_u);
-	write_f32(push_constants, 20, base_v);
-	write_f32(push_constants, 24, direction_u);
-	write_f32(push_constants, 28, direction_v);
-	write_u32(push_constants, 32, static_cast<std::uint32_t>(pass));
-	write_u32(push_constants, 36, 0);
-	write_u32(push_constants, 40, 0);
-	write_u32(push_constants, 44, 0);
+void FrameFxCompositorEffect::Impl::set_push(const FramePush &push) {
+	write_f32(push_constants, 0, push.rect_w);
+	write_f32(push_constants, 4, push.rect_h);
+	write_f32(push_constants, 8, push.source_w);
+	write_f32(push_constants, 12, push.source_h);
+	write_f32(push_constants, 16, push.base);
+	write_f32(push_constants, 20, push.base);
+	write_f32(push_constants, 24, push.direction_s);
+	write_f32(push_constants, 28, push.direction_c);
+	write_f32(push_constants, 32, push.u_scale);
+	write_f32(push_constants, 36, push.alpha);
+	write_f32(push_constants, 40, push.radius);
+	write_f32(push_constants, 44, 0.0f);
+	write_u32(push_constants, 48, static_cast<std::uint32_t>(push.pass));
+	write_u32(push_constants, 52, static_cast<std::uint32_t>(push.taps));
+	write_u32(push_constants, 56, static_cast<std::uint32_t>(push.tile_x));
+	write_u32(push_constants, 60, static_cast<std::uint32_t>(push.tile_y));
 }
 
-bool FrameFxCompositorEffect::Impl::draw_one(
-		const RID &framebuffer, const RID &uniform, BlendMode blend,
-		FramePass pass, const Vector2i &target_size,
-		const Vector2i &source_size, float base_u, float base_v,
-		float direction_u, float direction_v, bool clear,
-		bool discard_previous) {
+bool FrameFxCompositorEffect::Impl::draw_pushes(const RID &framebuffer,
+		const RID &uniform, BlendMode blend, const FramePush *pushes,
+		std::size_t count, TargetLoad load, const PackedColorArray &clear_colors,
+		bool write_alpha) {
 	const int64_t format = rd->framebuffer_get_format(framebuffer);
-	const RID pipeline = pipeline_for(format, blend);
+	const RID pipeline = pipeline_for(format, blend, write_alpha);
 	if (!pipeline.is_valid() || !uniform.is_valid())
 		return false;
-	set_push(pass, target_size, source_size, base_u, base_v,
-			direction_u, direction_v);
 	BitField<RenderingDevice::DrawFlags> flags(0);
-	if (clear) {
+	if (load == TargetLoad::Clear) {
 		flags = RenderingDevice::DRAW_CLEAR_COLOR_0;
-	} else if (discard_previous) {
+	} else if (load == TargetLoad::Discard) {
 		flags = RenderingDevice::DRAW_IGNORE_COLOR_ALL;
 	}
 	const int64_t draw_list = rd->draw_list_begin(framebuffer, flags,
-			clear ? clear_black : PackedColorArray());
+			load == TargetLoad::Clear ? clear_colors : PackedColorArray());
 	if (draw_list == RenderingDevice::INVALID_ID) {
 		set_failure("RenderingDevice could not begin a FrameFX draw list",
 				"draw_list_failed");
@@ -717,34 +1137,8 @@ bool FrameFxCompositorEffect::Impl::draw_one(
 	}
 	rd->draw_list_bind_render_pipeline(draw_list, pipeline);
 	rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
-	rd->draw_list_set_push_constant(draw_list, push_constants,
-			kPushConstantBytes);
-	rd->draw_list_draw(draw_list, false, 1, 3);
-	rd->draw_list_end();
-	return true;
-}
-
-bool FrameFxCompositorEffect::Impl::draw_weighted_pair(
-		const RID &framebuffer, const RID &uniform,
-		const Vector2i &target_size, float first_degrees) {
-	const int64_t format = rd->framebuffer_get_format(framebuffer);
-	const RID pipeline = pipeline_for(format, BlendMode::Add);
-	if (!pipeline.is_valid() || !uniform.is_valid())
-		return false;
-	const int64_t draw_list = rd->draw_list_begin(framebuffer,
-			RenderingDevice::DRAW_CLEAR_COLOR_0, clear_black);
-	if (draw_list == RenderingDevice::INVALID_ID) {
-		set_failure("RenderingDevice could not begin a weighted FrameFX pass",
-				"draw_list_failed");
-		return false;
-	}
-	rd->draw_list_bind_render_pipeline(draw_list, pipeline);
-	rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
-	for (float degrees : {first_degrees, first_degrees + 180.0f}) {
-		const auto direction = direction_for_degrees(degrees, 1.0f / 256.0f);
-		set_push(FramePass::WeightedFour, target_size, target_size,
-				1.0f / 512.0f, 1.0f / 512.0f,
-				direction[0], direction[1]);
+	for (std::size_t i = 0; i < count; ++i) {
+		set_push(pushes[i]);
 		rd->draw_list_set_push_constant(draw_list, push_constants,
 				kPushConstantBytes);
 		rd->draw_list_draw(draw_list, false, 1, 3);
@@ -753,51 +1147,232 @@ bool FrameFxCompositorEffect::Impl::draw_weighted_pair(
 	return true;
 }
 
-// The focused Q3 draw plus the witnessed capture, blur, and half-strength
-// additive composite over the beauty target for one view. Every Q3 technique
-// re-shades from its own leased inputs into the black-cleared Q3 target
-// (retail's altbuffer); the beauty colour is never sampled, only its resolved
-// depth is tested.
+// IDirect3DDevice9::StretchRect(LINEAR) of a whole source into a whole target.
+bool FrameFxCompositorEffect::Impl::stretch(const RID &framebuffer,
+		const Vector2i &target_size, const RID &uniform, const Vector2i &source_size,
+		std::size_t &draws) {
+	FramePush push;
+	push.pass = FramePass::Stretch;
+	push.rect_w = static_cast<float>(target_size.x);
+	push.rect_h = static_cast<float>(target_size.y);
+	push.source_w = static_cast<float>(source_size.x);
+	push.source_h = static_cast<float>(source_size.y);
+	if (!draw_pushes(framebuffer, uniform, BlendMode::Replace, &push, 1,
+			TargetLoad::Discard, clear_black))
+		return false;
+	++draws;
+	return true;
+}
+
+// One DrawPass row (runtime/renderer/frame_fx_effects.h FrameFxPass): the
+// descriptor's source, target, stage and taps, `count` draws stepping the
+// angle (retail render_scar_decal_batch @0x582b9b..0x582d82).
+bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
+		const FrameFxPass &pass, std::size_t &draws) {
+	RID framebuffer;
+	Vector2i target_size;
+	switch (pass.target) {
+		case FrameFxBuffer::Frame:
+			framebuffer = target.color_framebuffer;
+			target_size = target.size;
+			break;
+		case FrameFxBuffer::Capture:
+			framebuffer = target.capture_framebuffer;
+			target_size = target.capture_size;
+			break;
+		case FrameFxBuffer::WorkA:
+			framebuffer = target.low_a_framebuffer;
+			target_size = Vector2i(kWorkSide, kWorkSide);
+			break;
+		case FrameFxBuffer::WorkB:
+			framebuffer = target.low_b_framebuffer;
+			target_size = Vector2i(kWorkSide, kWorkSide);
+			break;
+		case FrameFxBuffer::Scanlines:
+			set_failure("A FrameFX pass cannot target the scanline texture");
+			return false;
+	}
+	RID uniform;
+	Vector2i source_size;
+	switch (pass.source) {
+		case FrameFxBuffer::Frame:
+			uniform = target.color_uniform;
+			source_size = target.size;
+			break;
+		case FrameFxBuffer::Capture:
+			uniform = target.capture_uniform;
+			source_size = target.capture_size;
+			break;
+		case FrameFxBuffer::WorkA:
+			uniform = target.low_a_uniform;
+			source_size = Vector2i(kWorkSide, kWorkSide);
+			break;
+		case FrameFxBuffer::WorkB:
+			uniform = target.low_b_uniform;
+			source_size = Vector2i(kWorkSide, kWorkSide);
+			break;
+		case FrameFxBuffer::Scanlines:
+			if (!ensure_scanlines())
+				return true; // No mission texture yet: retail's texture is always built.
+			uniform = scanline_uniform;
+			source_size = Vector2i(opennova::renderer::kFrameFxScanlineSide,
+					opennova::renderer::kFrameFxScanlineSide);
+			break;
+	}
+	// The viewport rect (CD3DDevice_GetViewportRect), else the 256 square.
+	const Vector2i rect = pass.viewport_rect ? target_size : Vector2i(kWorkSide, kWorkSide);
+	const float base = pass.base_from_capture ?
+			0.5f / static_cast<float>(std::min(target.capture_size.x, target.capture_size.y)) :
+			pass.base;
+	std::array<FramePush, 4> pushes;
+	const std::size_t count = static_cast<std::size_t>(
+			std::clamp<std::int32_t>(pass.count, 0, static_cast<std::int32_t>(pushes.size())));
+	for (std::size_t i = 0; i < count; ++i) {
+		FramePush &push = pushes[i];
+		push.pass = pass_for(pass.stage);
+		push.taps = taps_for(pass.taps);
+		push.rect_w = static_cast<float>(rect.x);
+		push.rect_h = static_cast<float>(rect.y);
+		push.source_w = static_cast<float>(source_size.x);
+		push.source_h = static_cast<float>(source_size.y);
+		push.base = base;
+		const double radians = static_cast<double>(pass.angle_degrees +
+				static_cast<std::int32_t>(i) * pass.angle_step_degrees) *
+				static_cast<double>(opennova::renderer::kFrameFxDegreesToRadians);
+		push.direction_s = static_cast<float>(std::sin(radians)) * pass.radius;
+		push.direction_c = static_cast<float>(std::cos(radians)) * pass.radius;
+		push.u_scale = pass.reduced_u ? opennova::renderer::kFrameFxReducedU : 1.0f;
+		push.alpha = pass.constant_alpha;
+		push.radius = pass.radius;
+		push.tile_x = pass.tile_offset_x;
+		push.tile_y = pass.tile_offset_y;
+	}
+	// GTexRT_Select clears a selected FrameFX target to 0; the frame is drawn
+	// over, its alpha (an X8R8G8B8 backbuffer's padding) left untouched.
+	const bool frame = pass.target == FrameFxBuffer::Frame;
+	if (!draw_pushes(framebuffer, uniform, blend_for(pass.stage), pushes.data(), count,
+			frame ? TargetLoad::Keep : TargetLoad::Clear, clear_black, !frame))
+		return false;
+	draws += count;
+	return true;
+}
+
+bool FrameFxCompositorEffect::Impl::run_steps(ViewTarget &target,
+		RenderData *render_data, std::uint32_t view,
+		const std::vector<FrameFxStep> &steps, const FrameFxScreenFrame *screen,
+		std::size_t &draws) {
+	for (const FrameFxStep &step : steps) {
+		switch (step.kind) {
+			case FrameFxStepKind::CaptureFrame:
+				if (!stretch(target.capture_framebuffer, target.capture_size,
+						target.color_uniform, target.size, draws))
+					return false;
+				break;
+			case FrameFxStepKind::Pass:
+				if (!run_pass(target, step.pass, draws))
+					return false;
+				break;
+			case FrameFxStepKind::Distortion: {
+				if (screen == nullptr || !screen->distortion)
+					break;
+				FrameFxDistortionTarget distortion;
+				distortion.rd = rd;
+				distortion.render_data = render_data;
+				distortion.view = view;
+				distortion.color = target.color;
+				distortion.depth = target.depth;
+				distortion.screen_texture = step.screen_texture == FrameFxBuffer::WorkB ?
+						target.low_b : target.low_a;
+				distortion.screen_sampler = sampler;
+				if (!screen->distortion->draw_distortion(distortion, step.set, draws))
+					return false;
+				++distortion_sets;
+				break;
+			}
+		}
+		++screen_steps;
+	}
+	return true;
+}
+
+// The focused Q3 draw into the black-cleared Q3 target (retail's altbuffer),
+// its capture, and the bloom kernel over the frame: every Q3 technique
+// re-shades from its own leased inputs; the beauty colour is never sampled,
+// only its resolved depth is tested.
 bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
 		RenderData *render_data, std::uint32_t view, std::size_t &draws) {
 	if (!q3_adapter.draw_view(rd, render_data, view, target.q3_framebuffer,
 			draws))
 		return false;
-	if (!draw_one(target.capture_framebuffer, target.q3_uniform,
-			BlendMode::Replace, FramePass::Stretch,
-			target.capture_size, target.size, 0, 0, 0, 0,
-			false, true))
+	if (!stretch(target.capture_framebuffer, target.capture_size,
+			target.q3_uniform, target.size, draws))
 		return false;
-	++draws;
-	const auto downsample_direction =
-			direction_for_degrees(30.0f, 1.0f / 1024.0f);
-	if (!draw_one(target.low_a_framebuffer, target.capture_uniform,
-			BlendMode::Replace, FramePass::AverageFour,
-			Vector2i(kFrameFxSide, kFrameFxSide), target.capture_size,
-			1.0f / 2048.0f, 1.0f / 2048.0f,
-			downsample_direction[0], downsample_direction[1],
-			false, true))
-		return false;
-	++draws;
-	if (!draw_weighted_pair(target.low_b_framebuffer,
-			target.low_a_uniform,
-			Vector2i(kFrameFxSide, kFrameFxSide), 90.0f))
-		return false;
-	draws += 2;
-	if (!draw_weighted_pair(target.low_a_framebuffer,
-			target.low_b_uniform,
-			Vector2i(kFrameFxSide, kFrameFxSide), 0.0f))
-		return false;
-	draws += 2;
-	const auto final_direction =
-			direction_for_degrees(45.0f, 0.0027621093f);
-	if (!draw_one(target.color_framebuffer, target.low_a_uniform,
-			BlendMode::SourceAlphaAdd, FramePass::FinalAverage,
-			target.size, Vector2i(kFrameFxSide, kFrameFxSide),
-			1.0f / 512.0f, 1.0f / 512.0f,
-			final_direction[0], final_direction[1], false, false))
-		return false;
-	++draws;
+	static const std::vector<FrameFxPass> kBloomPasses =
+			opennova::renderer::frame_fx_bloom_passes();
+	for (const FrameFxPass &pass : kBloomPasses) {
+		if (!run_pass(target, pass, draws))
+			return false;
+	}
+	return true;
+}
+
+// The first-person NVG view: the scene into the 512-square target, the two
+// glow passes into the persistent 256-square target (cleared green on the
+// toggle frame), and the tint + glow composite replacing the frame (retail
+// sub_5D28D0 @0x5d296d; render_water_caustic_overlay @0x5d0290..0x5d048a;
+// render_fullscreen_overlay @0x5d0f28..0x5d1059). The scene here is the
+// finished beauty frame resampled to 512 x 512.
+bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
+		const FrameFxNvgPlan &nvg, bool first_use, std::size_t &draws) {
+	namespace r = opennova::renderer;
+	const Vector2i scene_size(r::kNvgSceneSide, r::kNvgSceneSide);
+	const Vector2i glow_size(r::kNvgGlowSide, r::kNvgGlowSide);
+	if (nvg.scene) {
+		if (!stretch(target.nvg_scene_framebuffer, scene_size, target.color_uniform,
+				target.size, draws))
+			return false;
+		std::array<FramePush, 2> glow;
+		for (std::size_t i = 0; i < glow.size(); ++i) {
+			FramePush &push = glow[i];
+			push.pass = FramePass::NvgGlow;
+			push.taps = i == 0 ? TapGeometry::NvgDiagonal : TapGeometry::NvgAxial;
+			push.rect_w = static_cast<float>(glow_size.x);
+			push.rect_h = static_cast<float>(glow_size.y);
+			push.source_w = static_cast<float>(scene_size.x);
+			push.source_h = static_cast<float>(scene_size.y);
+			push.radius = r::kNvgGlowTapStep / static_cast<float>(scene_size.x) *
+					static_cast<float>(i + 1);
+		}
+		const bool clear = nvg.clear_glow && first_use;
+		if (!draw_pushes(target.nvg_glow_framebuffer, target.nvg_scene_uniform,
+				BlendMode::GlowAccumulate, glow.data(), glow.size(),
+				clear ? TargetLoad::Clear : TargetLoad::Keep, clear_nvg_glow))
+			return false;
+		draws += glow.size();
+		if (clear)
+			++nvg_glow_clears;
+		nvg_scene_drawn = true;
+	}
+	if (nvg.composite) {
+		FramePush tint;
+		tint.pass = FramePass::NvgTint;
+		tint.rect_w = static_cast<float>(target.size.x - 1);
+		tint.rect_h = static_cast<float>(target.size.y - 1);
+		tint.source_w = static_cast<float>(scene_size.x);
+		tint.source_h = static_cast<float>(scene_size.y);
+		if (!draw_pushes(target.color_framebuffer, target.nvg_scene_uniform,
+				BlendMode::Replace, &tint, 1, TargetLoad::Keep, clear_black, false))
+			return false;
+		FramePush add = tint;
+		add.pass = FramePass::NvgGlowAdd;
+		add.source_w = static_cast<float>(glow_size.x);
+		add.source_h = static_cast<float>(glow_size.y);
+		if (!draw_pushes(target.color_framebuffer, target.nvg_glow_uniform,
+				BlendMode::Add, &add, 1, TargetLoad::Keep, clear_black, false))
+			return false;
+		draws += 2;
+		nvg_composited = true;
+	}
 	return true;
 }
 
@@ -827,9 +1402,9 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		std::uint64_t span_us = 0;
 		const bool span_valid = rd_timestamp_span_us(rd,
 				"opennova_framefx_begin", "opennova_framefx_end", span_us);
-		// The two sub-spans attribute the pass: the Q3 composite (source
-		// draw + capture + blur + additive composite) versus the terminal
-		// display decode's two full-screen draws.
+		// The two sub-spans attribute the pass: the FrameFX chain (screen
+		// effects, Q3 source draw + capture + blur + composite) versus the
+		// terminal display decode's two full-screen draws.
 		std::uint64_t composite_us = 0;
 		const bool composite_valid = rd_timestamp_span_us(rd,
 				"opennova_q3_composite_begin", "opennova_q3_composite_end",
@@ -848,9 +1423,31 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		}
 		rd->capture_timestamp("opennova_framefx_begin");
 	}
+	std::shared_ptr<const FrameFxScreenFrame> screen;
+	{
+		std::lock_guard<std::mutex> lock(publication_mutex);
+		screen = published_screen;
+	}
+	// Without a published plan (the decode-only terminal, a view before its
+	// first planned frame) the frame runs the default FBEFFECTS 3 chain: the
+	// bloom alone.
+	const FrameFxFramePlan default_plan = [] {
+		FrameFxFramePlan plan;
+		plan.bloom = true;
+		return plan;
+	}();
+	const FrameFxFramePlan &plan = screen ? screen->plan : default_plan;
+	const bool first_use = screen && screen->frame_id != consumed_screen_frame;
+	if (screen)
+		consumed_screen_frame = screen->frame_id;
+	screen_steps = 0;
+	distortion_sets = 0;
+	nvg_scene_drawn = false;
+	nvg_composited = false;
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
+	bool effects_failed = false;
 	// The published Q3 frame is consumed every render, commands or not: a
 	// frame with nothing to draw still names the cache entries evicted since
 	// the last consumed one, and their device buffers are freed here rather
@@ -858,34 +1455,48 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	q3_adapter.consume_frame(rd);
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
-		if (q3_adapter.has_commands() && !q3_failed) {
-			if (gpu_timing && view == 0)
-				rd->capture_timestamp("opennova_q3_composite_begin");
-			// A focused-Q3 device failure keeps its diagnostic and skips the
-			// capture/blur/composite for this frame, but must never skip the
-			// terminal display decode below: a frame presented without it is
-			// double-encoded and flickers as glow sources enter and leave.
-			if (composite_q3(target, render_data, view, draws))
-				sampled_q3 = true;
-			else
-				q3_failed = true;
-			if (gpu_timing && view == 0)
-				rd->capture_timestamp("opennova_q3_composite_end");
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_q3_composite_begin");
+		// A FrameFX device failure keeps its diagnostic and skips the rest of
+		// the chain for this frame, but must never skip the terminal display
+		// decode below: a frame presented without it is double-encoded and
+		// flickers as glow sources enter and leave.
+		if (plan.nvg.scene || plan.nvg.composite) {
+			if (!run_nvg(target, plan.nvg, first_use, draws))
+				effects_failed = true;
 		}
+		if (!plan.nvg.composite && !effects_failed) {
+			if (!run_steps(target, render_data, view, plan.before_bloom, screen.get(), draws))
+				effects_failed = true;
+			if (!effects_failed && plan.bloom && q3_adapter.has_commands() && !q3_failed) {
+				if (composite_q3(target, render_data, view, draws))
+					sampled_q3 = true;
+				else
+					q3_failed = true;
+			}
+			if (!effects_failed &&
+					!run_steps(target, render_data, view, plan.after_bloom, screen.get(), draws))
+				effects_failed = true;
+		}
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_q3_composite_end");
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
 		// once, then apply the display-backend transfer immediately before Godot's
 		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward.
 		if (gpu_timing && view == 0)
 			rd->capture_timestamp("opennova_decode_begin");
-		if (!draw_one(target.scene_scratch_framebuffer, target.color_uniform,
-				BlendMode::Replace, FramePass::Snapshot, target.size,
-				target.size, 0, 0, 0, 0, false, true))
+		if (!stretch(target.scene_scratch_framebuffer, target.size,
+				target.color_uniform, target.size, draws))
 			return false;
-		++draws;
-		if (!draw_one(target.color_framebuffer, target.scratch_uniform,
-				BlendMode::Replace, FramePass::GammaDecode, target.size,
-				target.size, 0, 0, 0, 0, false, true))
+		FramePush decode;
+		decode.pass = FramePass::GammaDecode;
+		decode.rect_w = static_cast<float>(target.size.x);
+		decode.rect_h = static_cast<float>(target.size.y);
+		decode.source_w = decode.rect_w;
+		decode.source_h = decode.rect_h;
+		if (!draw_pushes(target.color_framebuffer, target.scratch_uniform,
+				BlendMode::Replace, &decode, 1, TargetLoad::Discard, clear_black))
 			return false;
 		++draws;
 		if (gpu_timing && view == 0)
@@ -895,11 +1506,11 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		rd->capture_timestamp("opennova_framefx_end");
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
-		if (q3_failed)
-			status = "drawn_q3_failed";
+		if (q3_failed || effects_failed)
+			status = q3_failed ? "drawn_q3_failed" : "drawn_effects_failed";
 		else
 			status = sampled_q3 ? "drawn" : "drawn_without_q3";
-		if (!q3_failed)
+		if (!q3_failed && !effects_failed)
 			failure.clear();
 		++rendered_frames;
 		gpu_draw_calls = draws;
@@ -908,6 +1519,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		last_capture_size = targets.empty() ? Vector2i() :
 				targets.front().capture_size;
 		q3_sampled = sampled_q3;
+		screen_frame_id = screen ? screen->frame_id : 0;
 	}
 	return true;
 }
@@ -919,20 +1531,11 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["callback"] = "post_transparent_terminal";
 	result["callback_type"] = static_cast<int>(
 			CompositorEffect::EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
-	result["quality_path"] = 3;
+	result["quality_path"] = opennova::renderer::kLockedFrameEffectsLevel;
 	result["q3_isolated_target"] = true;
 	result["capture_filter"] = "linear_rgba8_highest_quality";
 	result["capture_power_of_two_floor"] = true;
-	result["blur_target_size"] = static_cast<int64_t>(kFrameFxSide);
-	result["downsample_angle_degrees"] = 30.0;
-	result["downsample_base_uv"] = 1.0 / 2048.0;
-	result["downsample_radius_uv"] = 1.0 / 1024.0;
-	result["weighted_taps"] = "0.50@0.5,0.46@2.5,0.35@4.5,0.19@6.5";
-	result["blur_angles_degrees"] = "90,270,0,180";
-	result["final_angle_degrees"] = 45.0;
-	result["final_radius_uv"] = 0.0027621093;
-	result["final_blend"] = "SRCALPHA,ONE";
-	result["final_alpha"] = 0.5;
+	result["blur_target_size"] = static_cast<int64_t>(kWorkSide);
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
 	result["callback_seen"] = callback_seen;
@@ -945,6 +1548,12 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["frame_size"] = last_size;
 	result["capture_size"] = last_capture_size;
 	result["q3_sampled"] = q3_sampled;
+	result["screen_frame_id"] = static_cast<int64_t>(screen_frame_id);
+	result["screen_steps"] = static_cast<int64_t>(screen_steps);
+	result["distortion_sets"] = static_cast<int64_t>(distortion_sets);
+	result["nvg_scene_drawn"] = nvg_scene_drawn;
+	result["nvg_composited"] = nvg_composited;
+	result["nvg_glow_clears"] = static_cast<int64_t>(nvg_glow_clears);
 	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
 	result["q3_gpu_valid"] = gpu_span_valid;
 	// The composite/decode halves of q3_gpu_us are raw-report diagnostics
@@ -985,6 +1594,23 @@ void FrameFxCompositorEffect::compile_q3_frame(Node *p_scope,
 void FrameFxCompositorEffect::clear_q3_frame() {
 	if (impl_)
 		impl_->q3_adapter.clear_frame();
+}
+
+void FrameFxCompositorEffect::publish_screen_effects(
+		const std::shared_ptr<const FrameFxScreenFrame> &p_frame) {
+	if (!impl_)
+		return;
+	std::lock_guard<std::mutex> lock(impl_->publication_mutex);
+	impl_->published_screen = p_frame;
+}
+
+void FrameFxCompositorEffect::publish_scanline_texels(
+		const std::vector<std::uint8_t> &p_texels) {
+	if (!impl_)
+		return;
+	std::lock_guard<std::mutex> lock(impl_->publication_mutex);
+	impl_->published_scanlines = p_texels;
+	++impl_->published_scanline_generation;
 }
 
 void FrameFxCompositorEffect::release_device_resources() {
@@ -1088,6 +1714,14 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
 	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
 			&FrameFx::get_q3_target_image);
+	ClassDB::bind_method(D_METHOD("set_view_effects", "red_word", "camera_mode",
+			"local_dead", "in_session", "death_elapsed_ticks", "thermal_view",
+			"monitor_view", "nvg_active", "death_screen_active"),
+			&FrameFx::set_view_effects_values);
+	ClassDB::bind_method(D_METHOD("advance_screen_effects"),
+			&FrameFx::advance_screen_effects);
+	ClassDB::bind_method(D_METHOD("init_mission_textures"),
+			&FrameFx::init_mission_textures);
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("invalidate_q3_source", "source"),
 			&FrameFx::invalidate_q3_source);
@@ -1108,6 +1742,9 @@ void FrameFx::build_compositor() {
 	if (terminal_effect_.is_null())
 		terminal_effect_.instantiate();
 	terminal_effect_->set_gpu_timing_enabled(gpu_timing_enabled_);
+	// A rebuilt terminal effect (tree re-entry) keeps the mission's texture.
+	if (!scanline_texels_.empty())
+		terminal_effect_->publish_scanline_texels(scanline_texels_);
 }
 
 void FrameFx::set_gpu_timing_enabled(bool p_enabled) {
@@ -1180,6 +1817,56 @@ void FrameFx::advance_frame() {
 	terminal_effect_->compile_q3_frame(scope, viewport, camera);
 }
 
+void FrameFx::set_view_effects(const opennova::renderer::FrameFxViewInputs &p_view) {
+	view_effects_ = p_view;
+}
+
+void FrameFx::set_view_effects_values(int p_red_word, int p_camera_mode,
+		bool p_local_dead, bool p_in_session, int p_death_elapsed_ticks,
+		bool p_thermal_view, bool p_monitor_view, bool p_nvg_active,
+		bool p_death_screen_active) {
+	opennova::renderer::FrameFxViewInputs view;
+	view.red_word = p_red_word;
+	view.camera_mode = p_camera_mode;
+	view.local_dead = p_local_dead;
+	view.in_session = p_in_session;
+	view.death_elapsed_ticks = p_death_elapsed_ticks;
+	view.thermal_view = p_thermal_view;
+	view.monitor_view = p_monitor_view;
+	view.nvg_active = p_nvg_active;
+	view.death_screen_active = p_death_screen_active;
+	set_view_effects(view);
+}
+
+void FrameFx::set_distortion_drawer(
+		const std::shared_ptr<FrameFxDistortionDrawer> &p_drawer) {
+	distortion_drawer_ = p_drawer;
+}
+
+void FrameFx::advance_screen_effects() {
+	if (shutdown_ || terminal_effect_.is_null())
+		return;
+	opennova::renderer::FrameFxFrameInputs inputs;
+	inputs.view = view_effects_;
+	inputs.distortion_present = distortion_drawer_ &&
+			distortion_drawer_->frame_has_distortion();
+	// GetTickCount's millisecond clock; only its low bits reach the angle.
+	inputs.clock_ms = static_cast<std::uint32_t>(Time::get_singleton()->get_ticks_msec());
+	auto frame = std::make_shared<FrameFxScreenFrame>();
+	frame->frame_id = ++screen_frame_id_;
+	frame->plan = opennova::renderer::plan_frame_fx(inputs, planner_state_,
+			[]() { return opennova::crt::crt_rand15(); });
+	frame->distortion = distortion_drawer_;
+	terminal_effect_->publish_screen_effects(frame);
+}
+
+void FrameFx::init_mission_textures() {
+	scanline_texels_ = opennova::renderer::frame_fx_scanline_texels(
+			[]() { return opennova::crt::crt_rand15(); });
+	if (terminal_effect_.is_valid())
+		terminal_effect_->publish_scanline_texels(scanline_texels_);
+}
+
 void FrameFx::shutdown() {
 	if (shutdown_)
 		return;
@@ -1229,7 +1916,7 @@ Dictionary FrameFx::get_backend_report() const {
 			terminal_effect_->get_backend_report() :
 			Dictionary();
 	result["beauty_camera_mask"] = static_cast<int64_t>(kBeautyCameraMask);
-	result["q3_working_height"] = static_cast<int64_t>(kFrameFxSide);
+	result["q3_working_height"] = static_cast<int64_t>(kWorkSide);
 	result["shutdown"] = shutdown_;
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);
