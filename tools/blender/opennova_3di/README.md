@@ -1,9 +1,10 @@
-# OpenNova 3DI Exporter (Blender)
+# OpenNova 3DI (Blender)
 
-Exports a Blender scene to a NovaLogic `.3di` model for Joint Operations and
-newer. The add-on writes the `.o3d` scene text and runs the bundled
-`opennova-3di`, which builds the model through OpenNova's own 3DI writer
-([ADR 0047](../../../docs/adr/0047-blender-3di-exporter.md)). Pre-1.0 and
+Imports and exports NovaLogic `.3di` models for Joint Operations and newer.
+Both directions run the bundled `opennova-3di`, which reads and writes every
+model through OpenNova's own 3DI code
+([ADR 0047](../../../docs/adr/0047-blender-3di-exporter.md)); the add-on lays
+the `.o3d` scene text out in Blender and reads it back. Pre-1.0 and
 experimental.
 
 ## Install
@@ -11,6 +12,19 @@ experimental.
 `scripts/package_blender_addon.sh [out.zip]` builds the CLI and the zip
 (default `build/opennova_3di.zip`). In Blender 4.2 or newer: Edit >
 Preferences > Get Extensions > Install from Disk. Windows only for now.
+
+## Importing
+
+File > Import > NovaLogic 3DI (.3di), or Import .3di in the OpenNova sidebar.
+Select one or more loose `.3di` files; their textures are looked up beside
+them the way the game does (the stored name first, then the same name with
+`.tga`, `.dds`, `.mdt`, `.pcx`, `.png`, `.jpg` or `.bmp`, any case, so a
+`.tga` reference finds the `.dds` retail ships). Each model opens in a scene of
+its own, laid out by the naming convention below, with LOD 1 and up hidden.
+The scene exports again as it stands. Blender cannot open PCX or
+archive-compressed textures; those references stay on the material with a
+warning. Imported texture entries have Write TGA off, so an export never
+writes a `.tga` over the texture the game already uses.
 
 ## Laying out a scene
 
@@ -24,9 +38,11 @@ F16_LOD0              Empty, custom property _lod_index = 0
     01 Mesh0          the part's render mesh
     _01 center        helper: the part pivot
     UPG01 ctrlx05     user point: type G, part 01, label ctrlx05 (+Z = facing)
+    LP01              light owned by part 01 (a point or spot light)
     CB01-colonly      collision volume on part 01 (its convex hull)
     CB01a-colonly     the next CB volume on part 01
     VC01-colonly      a vehicle-contact volume
+    OB01-occonly      an occluder in section 01 (OS open, OP window, OP02-04 portal)
     PN02              Empty: part 2, a child of part 1
       02 Mesh0
       _02 center
@@ -46,8 +62,8 @@ bullet faces. Each bone gets a hit sphere around the vertices it dominates.
 
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones plus the mesh part
-(`opennova-3di info US01.3di` prints its pivots); the first-person arms
-(`ArmsG`) are 37 arm bones plus the mesh part.
+(`opennova-3di info US01.3di` prints its pivots, or import it); the
+first-person arms (`ArmsG`) are 37 arm bones plus the mesh part.
 
 A first-person weapon (`gfx1` in weapon.def, e.g. `Mp5b_1st`) is a rigid
 model whose part table IS the view-model rig: parts 01-37 (`PN01`-`PN37`,
@@ -58,21 +74,34 @@ the separate arms model (the player's Avatars.def `arms` graphic) is skinned
 over the shared arm bones. Its points (`UPS38 MFLASH01`, `UPS38 bullet`,
 `UPS38 bcasing`) sit on the gun body.
 
+A rotated `PN##` empty is a rotation frame: its animation tracks turn about
+the empty's own axes (Dblkhwk1's tail rotor is canted this way).
+
 Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
-`Material_1_FFP_GLASS`); the first image texture node is exported as a 32-bit
-TGA (file names at most 15 characters).
+`Material_1_FFP_GLASS`). With no texture entries, the first image texture node
+is exported as a 32-bit TGA (file names at most 16 characters). A material's
+texture list names every slot instead: slot 1 diffuse, slot 2 the detail
+texture of an `FF_MT` shader (drawn on the mesh's second UV map), 3 and 4
+normal maps.
 
 ## Panels
 
-- **3D viewport sidebar > OpenNova**: model name, output `.3di`, forward axis,
-  the collision LOD (whose meshes also become the bullet faces; 0 = the most
-  detailed), and Export.
+- **3D viewport sidebar > OpenNova**: Import, then the model name, output
+  `.3di`, forward axis, the collision LOD (whose meshes also become the bullet
+  faces; 0 = the most detailed), and Export.
 - **Object properties** on a LOD root: the LOD threshold (projected radius;
-  0 = the coarsest). On a `PN##` part: part animation tracks (rotation, scale
-  or translation driven by an engine register such as `HELO_ROTOR`, or a
-  constant spin / wave).
-- **Material properties**: shader, alpha test, two-sided, texture name
-  override, the collision surface type of its faces (metal 14, glass 15, ...),
-  and the RGB / alpha / UV generators.
+  0 = the coarsest) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##`
+  part: part animation tracks (rotation about the part's up, side or forward
+  axis, scale, or translation, driven by an engine register such as
+  `HELO_ROTOR` or by a spin or wave), and an optional raw PANM flags word. On a
+  user point, light or occlusion mesh: its export order.
+- **Light properties** on an `LP##` light: the colour generator (style, rate,
+  phase or register, end colour), attenuation and the corona / terrain /
+  object light switches.
+- **Material properties**: shader, alpha test, two-sided, glass, emissive, the
+  texture list, the collision surface type of its faces (metal 14, glass 15,
+  ...), and the RGB / alpha / UV generators and texture flipbook.
 
-Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`.
+Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`;
+`opennova-3di compare <a.3di> <b.3di>` tells whether two files hold the same
+model.

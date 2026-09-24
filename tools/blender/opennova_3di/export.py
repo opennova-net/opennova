@@ -6,20 +6,29 @@
 # @ 0x4268B3]; docs/threedi/scene-naming-contract.md keeps the table):
 #
 #   LOD root      Empty with an integer `_lod_index` custom property (0 = the
-#                 primary LOD). The scene's `poly_collision_lod` (the .3dp
+#                 primary LOD) and its threshold and RMDL type (gnrc, bldg,
+#                 door, veh0). The scene's `poly_collision_lod` (the .3dp
 #                 setting) picks which render LOD's meshes also become the
-#                 bullet faces; it defaults to 0, the most detailed.
+#                 bullet faces; it defaults to 0, the most detailed. A LOD root
+#                 with no parts is legal (retail ships them).
 #   PN##          Empty: part (subobject) ## (1-based). Its origin is the
-#                 pivot unless a `_## center` helper gives one.
+#                 pivot unless a `_## center` helper gives one; a rotated PN##
+#                 is a PANM rotation frame (an MTRX row: its tracks turn about
+#                 the empty's axes, like Dblkhwk1's canted tail rotor).
 #   ## Mesh<n>    Mesh: render geometry of part ##.
 #   _## center    helper: part ##'s pivot.
 #   ~PPx attach   helper under a child part: that child's parent is part PP.
 #   UP<c>## <lbl> helper: user point, type letter c (G gameplay, S effect),
 #                 part ## (00 = no part, -1), label = the USRP name; it faces
-#                 along its local +Z.
+#                 along its local +Z. Its `order` property keeps the USRP order.
+#   LP##[a..]     Light (on LOD0): a LGHT light owned by part ## (00 = part 0);
+#                 a spot light is a cone about its local +Z.
 #   <code>##[a..]-colonly  mesh on LOD0: a collision volume of type <code>
 #                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP) on
 #                 part ##, the convex hull of its vertices.
+#   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD0: an occlusion
+#                 record in section ## (OB occluder, OS open, OP a window to
+#                 the exterior or, with -MM, a portal to section MM, OH).
 #   Material_<i>_<SHADER>  material: export order i, shader tag SHADER.
 #   Armature      a skinned model: one Armature under the LOD root whose
 #                 bones are named BN## (part ##, 1-based; the bone head is the
@@ -37,13 +46,14 @@
 # (object names are unique per .blend, so LOD1's PN01 is "PN01.001"); two
 # objects that classify to the same identity inside one LOD are an error.
 
+import math
 import os
 import re
 import struct
 import subprocess
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 
 class ExportError(Exception):
@@ -59,8 +69,11 @@ MESH_RE = re.compile(r"^(\d{2}) Mesh(\d+)$")
 CENTER_RE = re.compile(r"^_(\d{2}) center$")
 ATTACH_RE = re.compile(r"^~(\d{2})([a-z]*) attach$")
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})(?: (.*))?$")
+LIGHT_RE = re.compile(r"^LP(\d{2})([a-z]*)$")
 MATERIAL_RE = re.compile(r"^Material_(\d+)_(\S+)$")
 OCCLUSION_RE = re.compile(r"-occ?only$", re.IGNORECASE)
+OCC_RE = re.compile(r"^(OB|OS|OP|OH)(\d{2})([a-z]*)(?:-(\d{2}))?-occonly$")
+OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, type 3
 
 # The collidable-type codes (classify_name; runtime meanings in
 # docs/world/world-wac-ai-re.md §15).
@@ -68,10 +81,18 @@ VOLUME_CODES = {"CB": 1, "CS": 2, "CC": 3, "CL": 4, "CV": 5, "CA": 6, "VC": 7, "
                 "CM": 11, "VK": 12, "CF": 13, "LP": 14, "DH": 16, "DM": 17, "DL": 18, "CP": 19}
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
+CTRL_REFERENCE_THRESHOLD = 0x70
 
 
 def clean_name(name):
     return BLENDER_SUFFIX.sub("", name)
+
+
+def axis_basis(forward):
+    """Mission -> Blender as a column matrix B (b = B m); a proper rotation."""
+    if forward == "-Y":
+        return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
+    return Matrix.Identity(3)
 
 
 def axis_map(forward):
@@ -79,6 +100,17 @@ def axis_map(forward):
     if forward == "-Y":
         return lambda v: (-v.y, v.x, v.z)
     return lambda v: (v.x, v.y, v.z)
+
+
+def derived_panm_flags(tracks):
+    """The PANM flags word build derives from a part's tracks (target, style,
+    axis): rotation type 2 for any live rotation track, scale type 2 for any
+    live scale track, the translate axis for a live translation."""
+    live = [(target, axis) for target, style, axis in tracks if style != 0]
+    rot = any(t.startswith("rot") for t, _ in live)
+    scale = any(t.startswith("scale") for t, _ in live)
+    axis = next((a for t, a in live if t == "trans"), 0)
+    return (2 if scale else 0) | ((2 if rot else 0) << 8) | (axis << 24)
 
 
 def fmt(*values):
@@ -90,6 +122,15 @@ def fmt(*values):
         else:
             out.append(str(v))
     return " ".join(out)
+
+
+def quoted(name):
+    """A .o3d name field: bare when it is one plain token, else "quoted"."""
+    if name and not any(c.isspace() or c == '"' for c in name) and not name.startswith("#"):
+        return name
+    if '"' in name:
+        raise ExportError(f"the name '{name}' holds a double quote")
+    return f'"{name}"'
 
 
 def write_tga(image, path):
@@ -126,6 +167,11 @@ def descendants(ob):
         yield from descendants(child)
 
 
+def order_key(ob):
+    order = ob.o3d.order
+    return (order if order >= 0 else 1 << 30, clean_name(ob.name))
+
+
 class Lod:
     """One LOD root, classified."""
 
@@ -136,6 +182,8 @@ class Lod:
         self.centers = {}   # part index -> helper
         self.attach = {}    # child part index -> parent part index
         self.points = []    # (type letter, part index or -1, label, object)
+        self.lights = []    # (part index, object)
+        self.occluders = []  # (type, section, connecting, object)
         self.volumes = []   # (type, flags, part index, object)
         self.armature = None  # skinned: the Armature; parts are its bones
         self.bone_count = 0   # skinned: parts past the bones are the meshes
@@ -147,16 +195,21 @@ class Exporter:
         self.scene = context.scene
         self.props = self.scene.o3d
         self.to_mission = axis_map(self.props.forward)
+        self.basis = axis_basis(self.props.forward)
         self.depsgraph = context.evaluated_depsgraph_get()
         self.registers = []
         self.materials = []
         self.material_index = {}
         self.textures = {}
+        self.frames = []
         self.skinned = False
+        self.uv1 = False
         self.bone_points = {}  # skinned LOD0: part -> rest positions it dominates
 
     # --- helpers ------------------------------------------------------------
     def register(self, name):
+        if not name:
+            raise ExportError("a register-driven style (above 112) needs a register name")
         if name not in self.registers:
             self.registers.append(name)
         return self.registers.index(name)
@@ -170,6 +223,17 @@ class Exporter:
             self.material_index[key] = len(self.materials)
             self.materials.append(mat)
         return self.material_index[key]
+
+    def frame_index(self, ob):
+        """The MTRX row a rotated PN## selects: its world rotation as a mission
+        frame R (row-major, p' = p R); 0 for an unrotated part."""
+        q = self.basis.transposed() @ ob.matrix_world.to_3x3().normalized() @ self.basis
+        if all(abs(q[i][j] - (1.0 if i == j else 0.0)) < 1e-6 for i in range(3) for j in range(3)):
+            return 0
+        r = tuple(round(q[j][i], 6) for i in range(3) for j in range(3))
+        if r not in self.frames:
+            self.frames.append(r)
+        return self.frames.index(r) + 1
 
     # --- classification -----------------------------------------------------
     def lod_roots(self):
@@ -214,6 +278,14 @@ class Exporter:
                     claim(("part", index), bone)
                     lod.parts[index] = bone
                 continue
+            if ob.type == "LIGHT":
+                m = LIGHT_RE.match(raw)
+                if not m:
+                    raise ExportError(f"{ob.name}: a light is named LP## (## = its owning part, 01 the root)")
+                if primary:
+                    claim(("light", m.group(1), m.group(2)), ob)
+                    lod.lights.append((max(0, int(m.group(1)) - 1), ob))
+                continue
             m = PART_RE.match(raw)
             if m and ob.type == "EMPTY":
                 index = int(m.group(1)) - 1
@@ -244,13 +316,22 @@ class Exporter:
             m = POINT_RE.match(raw)
             if m:
                 if primary:
-                    label = m.group(3) or "Noname"
+                    label = m.group(3) if m.group(3) is not None else "Noname"
                     if len(label) > 15:
                         raise ExportError(f"{ob.name}: user point label '{label}' exceeds 15 characters")
                     lod.points.append((m.group(1), int(m.group(2)) - 1, label, ob))
                 continue
             if OCCLUSION_RE.search(raw):
-                raise ExportError(f"{ob.name}: occlusion volumes are not supported by this exporter yet")
+                m = OCC_RE.match(raw)
+                if not m or ob.type != "MESH":
+                    raise ExportError(f"{ob.name}: occlusion meshes are OB##, OS##, OP##[-MM] or OH##, then "
+                                      "-occonly")
+                prefix, nn, dup, mm = m.groups()
+                claim(("occlusion", prefix, nn, dup, mm), ob)
+                if primary:
+                    kind = 3 if prefix == "OP" and mm else OCC_TYPES[prefix]
+                    lod.occluders.append((kind, int(nn) - 1, int(mm) - 1 if mm else 0, ob))
+                continue
             m = VOLUME_RE.match(raw)
             if m and ob.type == "MESH":
                 code, letters, nn, dup = m.groups()
@@ -268,7 +349,9 @@ class Exporter:
                     lod.volumes.append((VOLUME_CODES[code], flags, int(nn) - 1, ob))
                 continue
         if not lod.parts:
-            raise ExportError(f"{root.name}: no PN## part empties (or BN## armature bones) under the LOD root")
+            if lod.meshes or lod.armature is not None:
+                raise ExportError(f"{root.name}: meshes but no PN## part empties (or BN## armature bones)")
+            return lod  # an empty LOD (retail ships them)
         if lod.armature is not None and any(getattr(p, "type", None) == "EMPTY" for p in lod.parts.values()):
             raise ExportError(f"{root.name}: a skinned LOD's parts are its BN## bones, not PN## empties")
         count = max(lod.parts) + 1
@@ -334,6 +417,25 @@ class Exporter:
         return self.mission(ob.matrix_world.translation)
 
     # --- geometry -----------------------------------------------------------
+    def uv_layers(self, mesh):
+        layers = mesh.uv_layers
+        if len(layers) == 0:
+            return None, None
+        return layers[0], (layers[1] if len(layers) > 1 else layers[0])
+
+    def corner(self, mesh, loop, mw, nmat, normals, uv0, uv1):
+        p = mw @ mesh.vertices[loop.vertex_index].co
+        n = normals[loop.index].vector if normals is not None else loop.normal
+        n = (nmat @ n).normalized()
+        a = uv0.data[loop.index].uv if uv0 is not None else (0.0, 0.0)
+        b = uv1.data[loop.index].uv if uv1 is not None else a
+        pm, nm = self.mission(p), self.mission(n)
+        # D3D texture space: v runs down.
+        vert = (pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], a[0], 1.0 - a[1])
+        if self.uv1:
+            vert += (b[0], 1.0 - b[1])
+        return vert
+
     def mesh_strips(self, ob, strips):
         ev = ob.evaluated_get(self.depsgraph)
         mesh = ev.to_mesh()
@@ -342,21 +444,14 @@ class Exporter:
             mw = ob.matrix_world
             nmat = mw.to_3x3().inverted_safe().transposed()
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
-            uv_layer = mesh.uv_layers.active
+            uv0, uv1 = self.uv_layers(mesh)
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
                 mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
                 s = strips.setdefault(self.material_for(mat), {"verts": [], "index": {}, "tris": []})
                 corners = []
                 for li in tri.loops:
-                    loop = mesh.loops[li]
-                    p = mw @ mesh.vertices[loop.vertex_index].co
-                    n = normals[li].vector if normals is not None else loop.normal
-                    n = (nmat @ n).normalized()
-                    uv = uv_layer.data[li].uv if uv_layer is not None else (0.0, 0.0)
-                    pm, nm = self.mission(p), self.mission(n)
-                    # D3D texture space: v runs down.
-                    vert = (pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], uv[0], 1.0 - uv[1])
+                    vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
                     key = tuple(round(x, 5) for x in vert)
                     if key not in s["index"]:
                         s["index"][key] = len(s["verts"])
@@ -382,7 +477,7 @@ class Exporter:
             mw = ob.matrix_world
             nmat = mw.to_3x3().inverted_safe().transposed()
             normals = mesh.corner_normals if hasattr(mesh, "corner_normals") else None
-            uv_layer = mesh.uv_layers.active
+            uv0, uv1 = self.uv_layers(mesh)
             influences = []
             for v in mesh.vertices:
                 w = sorted(((g.weight, groups[g.group]) for g in v.groups if g.group in groups and g.weight > 1e-4),
@@ -400,12 +495,7 @@ class Exporter:
                 corners = []
                 for li in tri.loops:
                     loop = mesh.loops[li]
-                    p = mw @ mesh.vertices[loop.vertex_index].co
-                    n = normals[li].vector if normals is not None else loop.normal
-                    n = (nmat @ n).normalized()
-                    uv = uv_layer.data[li].uv if uv_layer is not None else (0.0, 0.0)
-                    pm, nm = self.mission(p), self.mission(n)
-                    corners.append(((pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], uv[0], 1.0 - uv[1]),
+                    corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
                                     influences[loop.vertex_index]))
                 per_material.setdefault(self.material_for(mat), []).append(corners)
             for mi, tris in per_material.items():
@@ -432,11 +522,14 @@ class Exporter:
         finally:
             ev.to_mesh_clear()
 
+    def strip_alpha(self, mat):
+        return 1 if self.shader_of(mat) in ALPHA_SHADERS or (mat is not None and mat.o3d.alpha_strips) else 0
+
     def emit_lod(self, lod, lines):
         if lod.armature is not None:
             return self.emit_skinned_lod(lod, lines)
-        threshold = lod.root.o3d.lod_threshold
-        lines.append(f"lod {threshold} gnrc  # {lod.root.name}")
+        p = lod.root.o3d
+        lines.append(f"lod {p.lod_threshold} {quoted(p.lod_type or 'gnrc')}  # {lod.root.name}")
         count = len(lod.parts)
         for i in range(count):
             lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # PN{i + 1:02d}")
@@ -444,23 +537,28 @@ class Exporter:
             for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
                 self.mesh_strips(ob, strips)
             for mi, s in sorted(strips.items()):
-                mat = self.materials[mi]
-                alpha = 1 if self.shader_of(mat) in ALPHA_SHADERS else 0
                 if len(s["verts"]) > 65535:
                     raise ExportError(f"PN{i + 1:02d}: one material has more than 65535 vertices")
-                lines.append(f"strip {mi} {alpha}")
+                lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
                 for v in s["verts"]:
                     lines.append("v " + fmt(*v))
                 for t in s["tris"]:
                     lines.append(f"t {t[0]} {t[1]} {t[2]}")
         for i in range(count):
-            lines.append(f"panm {i} {self.part_parent(lod, i)}")
-            for t in lod.parts[i].o3d.tracks:
+            part = lod.parts[i]
+            tracks = [(t.target, t.style, int(t.axis) if t.target == "trans" else 0) for t in part.o3d.tracks]
+            flags = part.o3d.panm_flags if part.o3d.panm_flags >= 0 else derived_panm_flags(tracks)
+            frame = self.frame_index(part)
+            line = f"panm {i} {self.part_parent(lod, i)}"
+            if part.o3d.panm_flags >= 0 or frame:
+                line += f" 0x{flags:08x}" + (f" {frame}" if frame else "")
+            lines.append(line)
+            for t in part.o3d.tracks:
                 lines.append(self.track_line(t))
 
     def emit_skinned_lod(self, lod, lines):
-        threshold = lod.root.o3d.lod_threshold
-        lines.append(f"lod {threshold} gnrc  # {lod.root.name}")
+        p = lod.root.o3d
+        lines.append(f"lod {p.lod_threshold} {quoted(p.lod_type or 'gnrc')}  # {lod.root.name}")
         count = len(lod.parts)
         primary = lod is self.lod0
         for i in range(count):
@@ -470,28 +568,30 @@ class Exporter:
             for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
                 self.skinned_strips(ob, strips, primary)
             for mi in sorted(strips):
-                mat = self.materials[mi]
-                alpha = 1 if self.shader_of(mat) in ALPHA_SHADERS else 0
                 for s in strips[mi]:
                     if len(s["verts"]) > 65535:
                         raise ExportError(f"BN{i + 1:02d}: one strip has more than 65535 vertices")
-                    lines.append(f"strip {mi} {alpha}")
+                    lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
                     lines.append("bones " + " ".join(str(b) for b in s["order"]))
+                    uv_end = 10 if self.uv1 else 8
                     for v in s["verts"]:
-                        lines.append("v " + fmt(*v[:8]) + " " + " ".join(str(int(x)) for x in v[8:11]) + " " +
-                                     fmt(*(float(x) for x in v[11:14])))
+                        lines.append("v " + fmt(*v[:uv_end]) + " " + " ".join(str(int(x)) for x in v[uv_end:uv_end + 3]) +
+                                     " " + fmt(*(float(x) for x in v[uv_end + 3:uv_end + 6])))
                     for t in s["tris"]:
                         lines.append(f"t {t[0]} {t[1]} {t[2]}")
         for i in range(count):
             lines.append(f"panm {i} {self.part_parent(lod, i)}")
 
     def track_line(self, t):
-        style = int(t.style)
-        scale = 16384.0 / 360.0 if t.target.startswith("rot") else 256.0
-        reg = t.register if style == 113 else "-"
-        if style == 113:
+        style = t.style
+        rotation = t.target.startswith("rot")
+        scale = 16384.0 / 360.0 if rotation else 256.0
+        if style > CTRL_REFERENCE_THRESHOLD:
             self.register(t.register)
-        line = f"track {t.target} {style} {reg} {round(t.rate * 256)} {round(t.start * scale)} {round(t.end * scale)}"
+            field = quoted(t.register)
+        else:
+            field = str(t.param) if t.param else "-"
+        line = f"track {t.target} {style} {field} {round(t.rate * 256)} {round(t.start * scale)} {round(t.end * scale)}"
         if t.target == "trans":
             line += f" {t.axis}"
         return line
@@ -504,6 +604,9 @@ class Exporter:
         m = MATERIAL_RE.match(clean_name(mat.name))
         return m.group(2) if m else mat.o3d.shader
 
+    def generator_register(self, style, name):
+        return self.register(name) if style > CTRL_REFERENCE_THRESHOLD else -1
+
     def emit_materials(self, lines):
         for mat in self.materials:
             if mat is None:
@@ -511,45 +614,107 @@ class Exporter:
                 continue
             p = mat.o3d
             shader = self.shader_of(mat)
-            lines.append(f"material {shader}  # {mat.name}")
-            flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0)
+            lines.append(f"material {quoted(shader)}  # {mat.name}")
+            flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0) | (p.other_flags & ~5 & 0xFF)
             if flags:
                 lines.append(f"matflags {flags}")
             if p.alpha_test:
-                lines.append("alphatest 128")
-            if shader == "FFP_GLASS":
+                lines.append(f"alphatest {p.alpha_test_value}")
+            if p.glass or shader == "FFP_GLASS":
                 lines.append("glass 1")
-            else:
+            if p.emissive:
+                lines.append(f"emissive {p.emissive}")
+            if any(c > 0 for c in p.reflect):
+                lines.append("reflect " + " ".join(str(round(c * 255)) for c in p.reflect))
+            if len(p.textures) > 0:
+                for t in p.textures:
+                    name = t.name.strip()
+                    if not name and t.image is not None:
+                        name = os.path.splitext(clean_name(t.image.name))[0][:12] + ".tga"
+                    if not name:
+                        raise ExportError(f"{mat.name}: a texture entry has neither a file name nor an image")
+                    if len(name) > 16:
+                        raise ExportError(f"{mat.name}: texture name '{name}' exceeds 16 characters")
+                    lines.append(f"texture {quoted(name)} {t.slot} {t.type} {t.flags} {t.frame}")
+                    if t.image is not None and t.write:
+                        self.textures[name] = t.image
+            elif shader != "FFP_GLASS":
                 image = material_image(mat)
-                name = p.texture_name.strip()
-                if not name and image is not None:
-                    name = os.path.splitext(clean_name(image.name))[0][:11] + ".tga"
-                if name:
-                    if len(name) > 15:
-                        raise ExportError(f"{mat.name}: texture name '{name}' exceeds 15 characters")
-                    lines.append(f"texture {name}")
-                    if image is not None:
-                        self.textures[name] = image
-            if p.rgb_style != "0":
-                reg = self.register(p.rgb_register) if p.rgb_style == "113" else -1
+                if image is not None:
+                    name = os.path.splitext(clean_name(image.name))[0][:12] + ".tga"
+                    lines.append(f"texture {quoted(name)}")
+                    self.textures[name] = image
+            if p.anim_frames or p.anim_type or p.anim_time:
+                lines.append(f"texanim {p.anim_frames} {p.anim_type} {p.anim_time}")
+            if p.rgb_style:
+                reg = self.generator_register(p.rgb_style, p.rgb_register)
                 s = [round(c * 255) for c in p.rgb_start]
                 e = [round(c * 255) for c in p.rgb_end]
-                lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} {e[0]} {e[1]} {e[2]}")
-            if p.alpha_style != "0":
-                reg = self.register(p.alpha_register) if p.alpha_style == "113" else -1
-                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {p.alpha_start} {p.alpha_end}")
-            if p.u_style != "0":
-                lines.append(f"ugen {p.u_style} -1 {fmt(float(p.u_rate))} 0 1")
-            if p.v_style != "0":
-                lines.append(f"vgen {p.v_style} -1 {fmt(float(p.v_rate))} 0 1")
+                lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} "
+                             f"{e[0]} {e[1]} {e[2]} {fmt(float(p.rgb_phase))}")
+            if p.alpha_style:
+                reg = self.generator_register(p.alpha_style, p.alpha_register)
+                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {p.alpha_start} {p.alpha_end} "
+                             f"{fmt(float(p.alpha_phase))}")
+            for axis in ("u", "v"):
+                style = getattr(p, axis + "_style")
+                if style:
+                    reg = self.generator_register(style, getattr(p, axis + "_register"))
+                    lines.append(f"{axis}gen {style} {reg} {fmt(float(getattr(p, axis + '_rate')))} "
+                                 f"{fmt(float(getattr(p, axis + '_start')))} {fmt(float(getattr(p, axis + '_end')))} "
+                                 f"{fmt(float(getattr(p, axis + '_phase')))}")
 
-    # --- user points ----------------------------------------------------------
+    # --- user points, lights, occlusion -------------------------------------
     def emit_points(self, lod, lines):
-        # USRP order is the scene order of the helpers (the ASE object order).
-        for letter, part, label, ob in sorted(lod.points, key=lambda e: e[3].name):
+        # USRP order: each helper's `order` (the imported index), then name.
+        for letter, part, label, ob in sorted(lod.points, key=lambda e: order_key(e[3])):
             pos = self.mission(ob.matrix_world.translation)
             d = self.mission((ob.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
-            lines.append(f"userpoint {label} {fmt(*pos)} {fmt(*d)} {part} {ord(letter.upper())}")
+            lines.append(f"userpoint {quoted(label)} {fmt(*pos)} {fmt(*d)} {part} {ord(letter.upper())}")
+
+    def emit_lights(self, lod, count, lines):
+        for part, ob in sorted(lod.lights, key=lambda e: order_key(e[1])):
+            if part >= max(count, 1):
+                raise ExportError(f"{ob.name}: part {part + 1:02d} does not exist")
+            data, p = ob.data, ob.data.o3d
+            spot = data.type == "SPOT"
+            if data.type not in ("POINT", "SPOT"):
+                raise ExportError(f"{ob.name}: a light is a point or spot light")
+            pos = self.mission(ob.matrix_world.translation)
+            phase = str(self.register(p.register)) if p.style > CTRL_REFERENCE_THRESHOLD else fmt(float(p.phase))
+            s = [round(c * 255) for c in data.color]
+            e = [round(c * 255) for c in p.color_end]
+            flags = (1 if p.disable_corona else 0) | (2 if p.disable_terrain else 0) | \
+                (4 if p.disable_objects else 0) | (8 if spot else 0) | (p.other_flags & ~0x0F & 0xFF)
+            line = (f"light {part} {fmt(*pos)} {fmt(float(p.atten_start), float(p.atten_end))} {p.style} "
+                    f"{fmt(float(p.rate))} {phase} {s[0]} {s[1]} {s[2]} {e[0]} {e[1]} {e[2]} 0x{flags:02x}")
+            # The light's local +Z is its stored axis; an omni light pointing
+            # straight down is the retail default the builder writes itself.
+            d = self.mission((ob.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
+            falloff = math.degrees(data.spot_size) / 2.0 if spot else 0.0
+            if spot or abs(d[0]) > 1e-6 or abs(d[1]) > 1e-6 or d[2] > -1.0 + 1e-9:
+                line += " " + fmt(*d, float(falloff))
+            lines.append(line)
+
+    def emit_occlusion(self, lod, lines):
+        for kind, section, connecting, ob in sorted(lod.occluders, key=lambda e: (order_key(e[3]), e[1])):
+            ev = ob.evaluated_get(self.depsgraph)
+            mesh = ev.to_mesh()
+            try:
+                if len(mesh.vertices) > 128:
+                    raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
+                lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
+                mw = ob.matrix_world
+                for v in mesh.vertices:
+                    lines.append("ov " + fmt(*self.mission(mw @ v.co)))
+                # Counter-clockwise about the outward normal, as retail stores
+                # them; the builder picks each face's plane (the OED rule).
+                for poly in mesh.polygons:
+                    vs = list(poly.vertices)
+                    for k in range(1, len(vs) - 1):
+                        lines.append(f"of {vs[0]} {vs[k]} {vs[k + 1]}")
+            finally:
+                ev.to_mesh_clear()
 
     # --- collision --------------------------------------------------------------
     def hull_planes(self, ob):
@@ -596,7 +761,8 @@ class Exporter:
     def emit_collision(self, lod0, bullet, lines):
         count = len(lod0.parts)
         sections = [{"verts": [], "index": {}, "faces": [], "volumes": []} for _ in range(count)]
-        # Bullet faces: the collision LOD's part meshes, section = part.
+        # Bullet faces: the collision LOD's part meshes, section = part,
+        # counter-clockwise about their outward normal (the retail order).
         for index, meshes in bullet.meshes.items():
             if index >= count:
                 raise ExportError(f"the collision LOD has part PN{index + 1:02d}, which LOD0 lacks")
@@ -620,7 +786,7 @@ class Exporter:
                             continue
                         slot = tri.material_index
                         mat = ob.material_slots[slot].material if slot < len(ob.material_slots) else None
-                        s["faces"].append((corners, int(mat.o3d.surface) if mat is not None else 14))
+                        s["faces"].append((corners, mat.o3d.surface if mat is not None else 14))
                 finally:
                     ev.to_mesh_clear()
         for vtype, flags, part, ob in sorted(lod0.volumes, key=lambda e: clean_name(e[3].name)):
@@ -629,28 +795,30 @@ class Exporter:
             mn, mx, planes = self.hull_planes(ob)
             sections[part]["volumes"].append((vtype, flags, mn, mx, planes))
         for i, s in enumerate(sections):
-            if not self.skinned:
-                lines.append(f"cobj {self.part_parent(lod0, i)}")
-            else:
-                # The retail person layout: every section sits at its bone's
-                # pivot; a bone section carries a hit sphere around the
-                # vertices the bone dominates (none: a zero sphere), the mesh
-                # part's section the bullet faces.
-                lines.append(f"cobj {self.part_parent(lod0, i)} " + fmt(*self.part_pivot(lod0, i)))
-                if not s["verts"]:
-                    pts = self.bone_points.get(i, [])
-                    if pts:
-                        c = [(min(p[k] for p in pts) + max(p[k] for p in pts)) * 0.5 for k in range(3)]
-                        r = max(sum((p[k] - c[k]) ** 2 for k in range(3)) ** 0.5 for p in pts)
-                    else:
-                        c, r = [0.0, 0.0, 0.0], 0.0
-                    lines.append("csphere " + fmt(*(float(x) for x in c), float(r)))
+            # Every section sits at its part's pivot (the COBJ offset / CXLT
+            # translation retail carries: Dtruck2's wheels, Dblkhwk1's rotors).
+            lines.append(f"cobj {self.part_parent(lod0, i)} " + fmt(*self.part_pivot(lod0, i)))
+            if self.skinned and not s["verts"]:
+                # The retail person layout: a bone section carries a hit sphere
+                # around the vertices the bone dominates (none: a zero sphere),
+                # the mesh part's section the bullet faces.
+                pts = self.bone_points.get(i, [])
+                if pts:
+                    c = [(min(p[k] for p in pts) + max(p[k] for p in pts)) * 0.5 for k in range(3)]
+                    r = max(sum((p[k] - c[k]) ** 2 for k in range(3)) ** 0.5 for p in pts)
+                else:
+                    c, r = [0.0, 0.0, 0.0], 0.0
+                lines.append("csphere " + fmt(*(float(x) for x in c), float(r)))
             for v in s["verts"]:
                 lines.append("cv " + fmt(*v))
             for (a, b, c), poly in s["faces"]:
                 lines.append(f"cf {a} {b} {c} {poly}")
-            # Retail flags a plane 1 where it is a seam: another volume of the
-            # section carries the same plane facing the other way.
+            # Seam flags (BPLN 1; the line-of-sight sweep keeps a flagged
+            # plane's radius non-negative). Retail's rule is not witnessed:
+            # neither this one ("another volume carries the plane facing the
+            # other way") nor "the face lies inside another volume" reproduces
+            # the corpus's flags (83% and 80% agreement over 132,856 planes,
+            # mostly unflagged ones).
             for vi, (vtype, flags, mn, mx, planes) in enumerate(s["volumes"]):
                 lines.append(f"cvolume {vtype} {flags} " + fmt(*mn, *mx))
                 for n, d in planes:
@@ -664,6 +832,9 @@ class Exporter:
         out_path = bpy.path.abspath(self.props.output_path)
         if not out_path.lower().endswith(".3di"):
             raise ExportError("the output path must end in .3di")
+        if not os.path.isabs(out_path):
+            raise ExportError("save the .blend first or give an absolute output path (a '//' path is relative "
+                              "to the saved file)")
         out_dir = os.path.dirname(out_path)
         os.makedirs(out_dir, exist_ok=True)
         name = self.props.model_name.strip() or os.path.splitext(os.path.basename(out_path))[0]
@@ -673,9 +844,12 @@ class Exporter:
         roots = self.lod_roots()
         lods = [self.classify(r, i == 0) for i, r in enumerate(roots)]
         self.lod0 = lods[0]
+        if not self.lod0.parts:
+            raise ExportError(f"{roots[0].name}: LOD 0 has no parts")
         self.skinned = lods[0].armature is not None
-        if any((l.armature is not None) != self.skinned for l in lods):
+        if any(l.parts and (l.armature is not None) != self.skinned for l in lods):
             raise ExportError("every LOD of a skinned model needs its BN## armature")
+        self.uv1 = any(len(ob.data.uv_layers) > 1 for l in lods for meshes in l.meshes.values() for _, ob in meshes)
         # Skinned meshes are read in the armature's rest pose (the bind pose
         # the vertices are stored in); the scene's pose is restored after.
         rest = [(l.armature.data, l.armature.data.pose_position) for l in lods if l.armature is not None]
@@ -702,6 +876,8 @@ class Exporter:
         for lod in render:
             self.emit_lod(lod, lod_lines)
         self.emit_points(lods[0], tail_lines)
+        self.emit_lights(lods[0], len(lods[0].parts), tail_lines)
+        self.emit_occlusion(lods[0], tail_lines)
         self.emit_collision(lods[0], lods[bullet_index], tail_lines)
         # Material order: the Material_<i> index, then first use.
         self.materials.sort(key=lambda m: (int(MATERIAL_RE.match(clean_name(m.name)).group(1))
@@ -713,9 +889,10 @@ class Exporter:
                      for l in lod_lines]
         self.emit_materials(material_lines)
 
-        text = ["o3d 1", f"model {name}"] + (["skinned 1"] if self.skinned else []) + \
-            [f"register {r}" for r in self.registers] + material_lines + \
-            lod_lines + tail_lines
+        frame_lines = ["mtrx " + fmt(*(float(x) for x in r)) for r in self.frames]
+        text = ["o3d 1", f"model {quoted(name)}"] + (["skinned 1"] if self.skinned else []) + \
+            (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
+            material_lines + lod_lines + tail_lines
         o3d_path = os.path.splitext(out_path)[0] + ".o3d"
         with open(o3d_path, "w", newline="\n") as f:
             f.write("\n".join(text) + "\n")
