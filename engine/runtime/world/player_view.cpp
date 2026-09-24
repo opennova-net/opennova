@@ -462,7 +462,12 @@ int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta) {
 }
 
 bool player_view_nvg_visible(const PlayerViewState &v) {
-    return v.nvg_active && !v.third_person;
+    // Every NVG world/post leg gates on the resolved mode word being first
+    // person, so the death lerp camera (4) drops the treatment too.
+    // [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81c4..0x5c8205;
+    //  Render_TerrainScene @ 0x610cfc..0x610d10;
+    //  Render_ProcessMainSceneFrame @ 0x5ca6ab..0x5ca6bf]
+    return v.nvg_active && v.camera_mode == 0;
 }
 
 float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,

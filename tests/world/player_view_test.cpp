@@ -542,9 +542,22 @@ void test_nvg_toggle_gain_and_first_person_visibility() {
     CHECK(player_view_toggle_nvg(v));
     CHECK(player_view_nvg_visible(v));
     v.third_person = true;
+    v.camera_mode = 1;
     CHECK(v.nvg_active); // camera suppression does not consume the toggle
     CHECK(!player_view_nvg_visible(v));
     v.third_person = false;
+    v.camera_mode = 0;
+    CHECK(player_view_nvg_visible(v));
+    // The death lerp camera (mode 4) is not third person, yet retail's NVG
+    // world/post legs all need g_camera_mode == 0 [orig:
+    // CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81fe; Render_TerrainScene
+    // @ 0x610d09; Render_ProcessMainSceneFrame @ 0x5ca6b8].
+    v.local_dead = true;
+    player_view_resolve_mode(v);
+    CHECK(v.camera_mode == 4 && !v.third_person && v.nvg_active);
+    CHECK(!player_view_nvg_visible(v));
+    v.local_dead = false;
+    player_view_resolve_mode(v);
     CHECK(player_view_nvg_visible(v));
 
     CHECK(player_view_adjust_nvg_gain(v, 1) == 1);

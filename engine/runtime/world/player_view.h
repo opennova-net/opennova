@@ -666,8 +666,10 @@ bool player_view_toggle_nvg(PlayerViewState &v);
 // [orig: input actions 56/57]
 int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta);
 
-// The NVG state remains active in third person, but its world/post treatment
-// is first-person only. [orig: g_camera_mode gates in the NVG render path]
+// The NVG state remains active in every camera, but its world/post treatment
+// needs the resolved mode word g_camera_mode == 0: the chase (1) and the
+// death lerp camera (4) both drop it. [orig: the g_camera_mode gates in the
+// NVG render path, player_view.cpp]
 bool player_view_nvg_visible(const PlayerViewState &v);
 
 // Main-camera horizontal FOV. The weather current is independent of the ADS
