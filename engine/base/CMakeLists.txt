@@ -15,6 +15,7 @@ add_library(opennova_base STATIC
     # resource_index — the mounted resource directory index
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/boot_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/texture_candidates.cpp
     # vfs — the engine-faithful PFF+loose+expansion mount stack
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp

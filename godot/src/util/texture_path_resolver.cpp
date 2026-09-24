@@ -1,3 +1,4 @@
+#include <base/resource_index/texture_candidates.h>
 #include <runtime/renderer/material_texture.h>
 #include "util/texture_path_resolver.h"
 
@@ -19,72 +20,6 @@
 namespace opennova {
 
 namespace {
-
-// NovaLogic assets reference textures by name with inconsistent case (e.g. a
-// .trn says "trntile10.tga" while the file is "TRNTILE10.TGA") and an extension
-// that may not match what is on disk, so we try the name + extension fallbacks.
-// Case is handled by the case-insensitive directory match (build_lowercase_dir_index),
-// so the extension list needs no upper-case variants.
-static constexpr const char *tex_ext_priority[] = {
-	"tga", "dds", "dds.tga", "mdt", "pcx", "png", "jpg", "jpeg", "bmp"
-};
-
-void append_unique(std::vector<godot::String> &items, const godot::String &value) {
-	if (value.is_empty()) {
-		return;
-	}
-	for (const godot::String &item : items) {
-		if (item == value) {
-			return;
-		}
-	}
-	items.push_back(value);
-}
-
-bool is_texture_extension(const godot::String &extension) {
-	const godot::String lower = extension.to_lower();
-	if (lower.is_empty()) {
-		return false;
-	}
-	for (const char *ext : tex_ext_priority) {
-		const godot::String candidate(ext);
-		if (candidate.find(".") == -1 && candidate == lower) {
-			return true;
-		}
-	}
-	return false;
-}
-
-void append_collapsed_texture_filenames(std::vector<godot::String> &items, const godot::String &filename) {
-	godot::String collapsed = filename;
-	if (!is_texture_extension(collapsed.get_extension())) {
-		return;
-	}
-
-	while (true) {
-		collapsed = collapsed.get_basename();
-		if (!is_texture_extension(collapsed.get_extension())) {
-			return;
-		}
-		append_unique(items, collapsed);
-	}
-}
-
-std::vector<godot::String> texture_stems(const godot::String &filename) {
-	std::vector<godot::String> stems;
-	const godot::String stem = filename.get_file().get_basename();
-	if (stem.is_empty()) {
-		return stems;
-	}
-
-	append_unique(stems, stem);
-	// NovaLogic outline/overlay textures append an "_O" suffix to the base name.
-	// (Case is normalized by the directory match, so no _o/_O or stem-case dupes.)
-	if (!stem.to_lower().ends_with("_o")) {
-		append_unique(stems, stem + godot::String("_O"));
-	}
-	return stems;
-}
 
 bool is_resource_dir(const godot::String &dir) {
 	return dir.begins_with("res://") || dir.begins_with("uid://");
@@ -211,23 +146,12 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 
 } // namespace
 
-// Candidate FILENAMES (not full paths) to try, in priority order: the requested
-// name as-is first, exact inner texture filenames exposed by compound extensions,
-// then every existing stem x extension fallback.
+// Candidate FILENAMES (not full paths) in probe order: the engine's rule
+// (base/resource_index/texture_candidates.h), which opennova-3di shares.
 std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
 	std::vector<godot::String> candidates;
-	const godot::String file = filename.get_file();
-	if (file.is_empty()) {
-		return candidates;
-	}
-
-	append_unique(candidates, file);
-	append_collapsed_texture_filenames(candidates, file);
-	for (const godot::String &stem : texture_stems(filename)) {
-		for (const char *ext : tex_ext_priority) {
-			append_unique(candidates, stem + godot::String(".") + ext);
-		}
-	}
+	for (const std::string &name : opennova::texture_candidate_filenames(to_std(filename)))
+		candidates.push_back(godot::String::utf8(name.c_str()));
 	return candidates;
 }
 
