@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 195,
+  "resource_count": 199,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -149,6 +149,19 @@
         { "address": "0x5cc315", "function": "Scar_LoadTextures", "function_start": "0x5cc2e0" },
         { "address": "0x5d6e20", "function": "RenderSlot_DrawAllDrapes", "function_start": "0x5d6e20" },
         { "address": "0x5ad8b0", "function": "Environment_ApplySunVeilAndExposureStopdown", "function_start": "0x5ad8b0" }
+      ],
+      "exceptions": []
+    },
+    {
+      "id": "tracer-ribbons",
+      "patterns": ["tracer_ribbon_*.gdshader", "effect_fog.gdshaderinc"],
+      "light_behavior": "unshaded_vertex_color_or_two_layer_alpha",
+      "parity_status": "matching",
+      "docs": ["docs/world/world-wac-ai-re.md", "docs/render/render-order-re.md"],
+      "retail_citations": [
+        { "address": "0x5db8a0", "function": "CEffectChannel_RenderRibbon", "function_start": "0x5db8a0" },
+        { "address": "0x5dc8f0", "function": "create_effect_channel_render_textures", "function_start": "0x5dc8f0" },
+        { "address": "0x677740", "function": "CD3DDevice_SetFogAndBlendMode", "function_start": "0x677740" }
       ],
       "exceptions": []
     },

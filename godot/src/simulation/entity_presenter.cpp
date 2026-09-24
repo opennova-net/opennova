@@ -317,7 +317,7 @@ void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> 
 		ItemEffectDirector *p_anchors) {
 	Simulation *s = sim();
 	const Ref<ItemEffectDirector> anchors(p_anchors);
-	fire_->setup(s, p_container, p_audio, p_fx, p_lights);
+	fire_->setup(s, p_container, p_audio, p_fx, p_lights, p_resource_root, p_environment);
 	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
 			p_fx, p_lights);
 	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
@@ -408,7 +408,7 @@ void EntityPresenter::warm_fire_pipelines(const Vector3 &p_position) {
 	fire_->warm_pipelines(p_position);
 }
 
-Ref<ImmediateMesh> EntityPresenter::fire_ribbon_mesh() const {
+Ref<ArrayMesh> EntityPresenter::fire_ribbon_mesh() const {
 	return fire_->ribbon_mesh();
 }
 

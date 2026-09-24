@@ -3,7 +3,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
@@ -306,7 +306,7 @@ public:
 	Ref<ScarPresentStats> get_scar_present_stats() const;
 	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
-	Ref<ImmediateMesh> fire_ribbon_mesh() const;
+	Ref<ArrayMesh> fire_ribbon_mesh() const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
 	// The data legs (the present_snapshot precedent): production

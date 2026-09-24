@@ -1,17 +1,22 @@
 #pragma once
 
-#include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
-#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
+#include <runtime/renderer/tracer_frame.h>
+
+#include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 
@@ -21,6 +26,7 @@ class EffectLightDirector;
 class EffectWorld;
 class EntityPresenter;
 class MissionAudio;
+class MissionEnvironment;
 class Simulation;
 
 // THE viewing-client fire-presentation pass (the former fire_present_pass.gd,
@@ -62,18 +68,17 @@ class Simulation;
 // at spawn (@ 0x4ec740; shooter == local player counts friendly — our sim runs the
 // same select, world/tracer_trails.h). The sim owns the point rings (one pre-move
 // point per 62 Hz tick, drain after death); the witnessed style tables and the
-// camera-facing ribbon build [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0] live in
+// ribbon build [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0] live in
 // engine/runtime/renderer/tracer_frame.{h,cpp} (pinned by the renderer_tracer_frame
-// ctest); this pass compiles the trail rows through it and uploads the per-family
-// strips. Additive styles (std/rapid/
-// sniper/df1/NVG) draw fog-to-black additive [orig: SetFogAndBlendMode mode 2 —
-// ONE:ONE, alpha unused; our disable_fog stand-in = D-AI-12c]; smoke styles
-// (rocket/at4/grenade) draw alpha-blended with scene fog [orig: mode 0]. The 4-wide
-// wave-animated smoke/sniper cross-section and the distortion pass (style +0x828)
-// are tracked in docs/world/world-wac-ai-re.md §24.6 (D-AI-12a/b); the round's item
-// graphic (frndlyTrcrID/foeTrcrID + TRACER_SCALE/TRACER_WIDTH nodes) is
-// D-AI-12d; the light_move glow (round+0x1B4) rides the light pool now
-// (Simulation::fill_round_glows -> EffectLightDirector::sync_round_glows).
+// ctest); this pass compiles the trail rows through it against the render camera
+// and uploads one surface per run of same-material channel draws, in pool order,
+// on the ladder rung of the frame's tracer slot (tracer_rung: the far-side slot
+// while the eye is below the water). The three materials are the witnessed ones
+// (godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader), each fogged per its
+// style's +0 word. The round's item graphic (frndlyTrcrID/foeTrcrID +
+// TRACER_SCALE/TRACER_WIDTH nodes) is D-AI-12d; the light_move glow (round+0x1B4)
+// rides the light pool (Simulation::fill_round_glows ->
+// EffectLightDirector::sync_round_glows).
 // The SP host shows tracers unconditionally (the MP NoTracers rules bit,
 // dword_24D1E34 & 1, is a net seam wired via RoundSim.no_tracers_rule).
 class FirePresenter {
@@ -91,10 +96,13 @@ public:
 	// anchor for retail's adm-arm fire effect is the owner's
 	// muzzle_world_for: the entity presenter owns the per-handle held-weapon
 	// node the effect spawns at; a shooter with no wire body resolves to a
-	// non-finite anchor and the pass keeps the wire position. The ribbon
-	// camera is the owner's listener position.
+	// non-finite anchor and the pass keeps the wire position. The ribbons
+	// face the owner viewport's current camera (no camera, no ribbons);
+	// `resource_root` supplies the smoke texture and `environment` (nullable)
+	// the eye's water side.
 	void setup(Simulation *p_sim, Node3D *p_container, MissionAudio *p_audio,
-			EffectWorld *p_fx, EffectLightDirector *p_lights);
+			EffectWorld *p_fx, EffectLightDirector *p_lights,
+			const Ref<ResourceRoot> &p_resource_root, MissionEnvironment *p_environment);
 	void teardown();
 
 	// Once per present (beside the other passes), after the sim advanced. The
@@ -110,37 +118,49 @@ public:
 	void present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds);
 	void draw_tracer_rows(const PackedFloat32Array &p_rows);
 
-	// Load-time pipeline warm: emit one invisible (alpha-0) strip on each ribbon
-	// material at `position` (must be in frustum so the strips actually draw) so
-	// their pipelines compile behind the loading screen instead of as a ~40 ms
-	// draw stall on the first tracer. The next present's clear_surfaces drops the
-	// warm strips.
+	// Load-time pipeline warm: emit one zero-area surface on each ribbon
+	// material at `position` (must be in frustum so the surfaces actually draw)
+	// so their pipelines compile behind the loading screen instead of as a
+	// ~40 ms draw stall on the first tracer. The next present's clear_surfaces
+	// drops the warm surfaces.
 	void warm_pipelines(const Vector3 &p_position);
 
 	// Typed diagnostic counters (ADR 0017: cross-object contracts are typed
 	// records) — probes assert the presentation legs actually ran.
 	Ref<FirePresentStats> get_stats() const;
-	// The ribbon geometry surface — the ADR 0018 read seam for tests asserting the
-	// rebuilt tracer strips (surface count, vertex layout) without private reach-ins.
-	Ref<ImmediateMesh> ribbon_mesh() const { return mesh_; }
+	// The ribbon geometry — the ADR 0018 read seam for tests asserting the rebuilt
+	// tracer surfaces (surface count, vertex layout, material) without private
+	// reach-ins.
+	Ref<ArrayMesh> ribbon_mesh() const { return mesh_; }
 
 private:
 	Simulation *sim() const;
 	MissionAudio *audio() const;
 	EffectWorld *fx() const;
 	EffectLightDirector *lights() const;
+	MissionEnvironment *environment() const;
 	void free_mesh_instance();
-	void emit_strip(const std::vector<float> &p_run, const Ref<StandardMaterial3D> &p_material);
+	Ref<ShaderMaterial> ribbon_material(opennova::renderer::TracerShader p_shader,
+			bool p_fog_black);
+	Ref<Texture2D> smoke_texture();
+	void emit_surface(const opennova::renderer::TracerRibbonFrame &p_frame,
+			std::size_t p_first_draw, std::size_t p_end_draw, int p_rung);
 
 	EntityPresenter *owner_ = nullptr;
 	ObjectID sim_id_;    // drain + trail source (null in data-driven tests)
 	ObjectID audio_id_;  // MissionAudio (or null)
 	ObjectID fx_id_;     // EffectWorld (or null)
 	ObjectID lights_id_; // EffectLightDirector: the MF_Light muzzle glow route (or null)
-	Ref<ImmediateMesh> mesh_;
+	ObjectID environment_id_; // MissionEnvironment: the eye's water side (or null)
+	Ref<ResourceRoot> resource_root_;
+	Ref<ArrayMesh> mesh_;
 	ObjectID mesh_instance_id_;
-	Ref<StandardMaterial3D> mat_additive_; // std/rapid/sniper/df1/NVG [orig: fog-black additive]
-	Ref<StandardMaterial3D> mat_alpha_;    // rocket/at4/grenade smoke [orig: alpha + scene fog]
+	// One material per (normal-pass shader, fog-black) pair, created on first use.
+	std::array<Ref<ShaderMaterial>, 6> materials_;
+	Ref<Texture2D> smoke_texture_; // smoktest.pcx [orig: pool+0x3000]
+	bool smoke_texture_loaded_ = false;
+	opennova::renderer::TracerRibbonFrame frame_;
+	std::vector<opennova::renderer::TracerChannelInput> channels_;
 	int64_t stat_fires_ = 0;
 	int64_t stat_sounds_ = 0;
 	int64_t stat_effects_ = 0;
