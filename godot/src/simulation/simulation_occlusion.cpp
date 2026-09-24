@@ -76,6 +76,23 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
 	// collect_visible_entities_for_terrain @ 0x5c8c60]
 	present_.occlusion_culled_bms.clear();
+	// The BySide walks update the MODEL foliage tiles around the collected
+	// person entities whose MoveOrder carries a stance bit (0x100 prone /
+	// 0x200 crouch) and whose groundEntity is empty; the visible-entity walk
+	// below is that collection, so the anchors ride its verdicts (no second
+	// gate call: the latch ticks once per collected entity).
+	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+	// (flags & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7; stance writers
+	// Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd,
+	// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+	present_.foliage_mask_anchors.clear();
+	const auto anchor_entity = [&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Organic ||
+				(e.net_stance_bits & 0x3u) == 0 || e.ground_target.valid())
+			return;
+		present_.foliage_mask_anchors.push_back(
+				Vector3(e.position.x, e.position.z, -e.position.y));
+	};
 	std::vector<opennova::world::EntityHandle> &handles =
 			present_.occlusion_probe_handles;
 	handles.clear();
@@ -91,6 +108,8 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		if (e == nullptr) continue;
 		if (!kernel_->occlusion.entity_render_visible(kernel_->world, kernel_->collision, *e, cam))
 			present_.occlusion_culled_bms.push_back(e->bms_id);
+		else
+			anchor_entity(*e);
 	}
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's
@@ -150,10 +169,12 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 				// es.x/y/z never follow a moving carrier, and a sphere pinned
 				// there culled the gun the moment the driven buggy left it.
 				opennova::world::Entity *live = kernel_->world.registry.get(h);
-				if (live != nullptr &&
-						!kernel_->occlusion.entity_render_visible(
-								kernel_->world, kernel_->collision, *live, cam))
+				if (live == nullptr) continue;
+				if (!kernel_->occlusion.entity_render_visible(
+							kernel_->world, kernel_->collision, *live, cam))
 					present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
+				else
+					anchor_entity(*live);
 				continue;
 			}
 			// A bare row is the client-built pool entity retail's collector
@@ -190,10 +211,22 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 				visible = kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
 						center_world, radius, latch, kernel_->world.logic_tick);
 			}
-			if (!visible)
+			if (!visible) {
 				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
+			} else if (h.pool() == 0 && (es.net_stance_bits & 0x3u) != 0 &&
+					es.carrier_handle == 0xFFFFu) {
+				// A bare organics-pool row: the received MoveOrder stance bits,
+				// and no carrier for the standing-on-terrain test.
+				present_.foliage_mask_anchors.push_back(godot_from_fixed3(pos));
+			}
 		}
 	}
+	// The local player's body is presented outside the collected rows (the
+	// local view presenter), so it anchors on its stance alone; the MODEL
+	// walk's view-depth floor keeps it off in the player's own views.
+	if (const opennova::world::Entity *local =
+				kernel_->world.registry.get(kernel_->world.cached.local_player))
+		anchor_entity(*local);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 }

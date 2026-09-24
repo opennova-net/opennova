@@ -176,7 +176,6 @@ int test_flat_terrain_keys_reach_empty_foliage_cache_entries() {
 			"default empty sectors produce real foliage collector keys")) return 1;
 
 	opennova::renderer::FoliageViewInput foliage_view;
-	foliage_view.no_frustum = true;
 	for (const auto &cell : terrain_draws.detail_cells) {
 		if (!expect((cell.key & 0x80000000u) != 0u,
 				"all-empty terrain preserves the flat flag through frame compilation")) return 1;

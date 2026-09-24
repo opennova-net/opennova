@@ -537,29 +537,10 @@ int Simulation::get_entity_net_id(int p_index) const {
 	return e ? e->net_id : 0;
 }
 
-// The distant MODEL/depth-mask foliage tier is the hide-in-grass mechanic: the
-// sector-entity walk only calls Foliage_UpdateModelTiles around entities whose
-// MoveOrder carries a stance bit (0x100 prone / 0x200 crouch) and whose
-// groundEntity is empty — never around placed objects, which leave MoveOrder 0.
-// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (flags & 0x300),
-// groundEntity gate @ 0x5c7dd5..0x5c7df7; stance writers
-// Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd,
-// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+// The distant MODEL/depth-mask foliage tier's anchors of the last occlusion
+// frame (run_occlusion_frame carries the witness).
 PackedVector3Array Simulation::get_foliage_mask_anchor_positions() const {
-	PackedVector3Array out;
-	if (!kernel_) return out;
-	for (int i = 0; i < kernel_->world.ai.count(); ++i) {
-		AiEntity *e = kernel_->world.ai.at(i);
-		if (!e) continue;
-		const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
-		if (!ent) continue;
-		if ((ent->net_stance_bits & 0x3u) == 0) continue;
-		if (ent->ground_target.valid()) continue;
-		out.push_back(Vector3(static_cast<float>(e->pos[0] / kFixed16),
-		                      static_cast<float>(e->pos[2] / kFixed16),
-		                      static_cast<float>(-e->pos[1] / kFixed16)));
-	}
-	return out;
+	return present_.foliage_mask_anchors;
 }
 
 PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const {

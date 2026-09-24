@@ -96,15 +96,18 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// after the terrain draw.
 	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kLegNone },
 	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kLegNone },
-	// Foliage receives the same live render transform and consumes this
-	// frame's detail-cell handoff, so it follows terrain (banked at finish).
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	// Net-session edges; a failed streamed-asset leg STOPS the frame.
 	{ "network", FrameStats::WORLD_NETWORK_FRAME, &GameWorld::leg_network, kStopsFrame },
 	// Blink flags only change on sim ticks (the body gates on did_tick).
 	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kLegNone },
 	// The OCCL_* slots land inside OcclusionFrame.apply_frame itself.
 	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	// Foliage receives the same live render transform and consumes this
+	// frame's detail-cell handoff (after terrain) and the MODEL anchors the
+	// visible-entity walk just admitted (after occlusion: retail collects the
+	// visible entities before the BySide walks that update the model tiles;
+	// banked at finish).
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kLegNone },
 	// The sun-veil stop-down feed for the weather ticks banked above (the
 	// veil alpha itself rides the Celestial shader-global push).
@@ -172,12 +175,12 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 	{ "weather_settle", kNoSlot, &GameWorld::leg_weather_settle, kLegNone },
 	// Keep the same camera-producer order as the live table, omitting every
 	// time-owning leg. Terrain publishes the detail-cell handoff consumed by
-	// foliage; occlusion then resolves the world visibility for this exact
-	// view.
+	// foliage; occlusion resolves the world visibility for this exact view
+	// and the MODEL anchors foliage then consumes.
 	{ "scene_environment", kNoSlot, &GameWorld::leg_scene_environment, kLegNone },
 	{ "terrain", kNoSlot, &GameWorld::leg_terrain, kLegNone },
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	// These native devices advance as live legs (sky/celestial before
 	// terrain, water between terrain and foliage). A fixture freezes their
 	// parent before moving the capture camera, so drive their public
@@ -565,11 +568,12 @@ void GameWorld::render_foliage_frame() {
 	perf_foliage_us_ = 0;
 	if (world_ready_ && dispatcher_ != nullptr) {
 		// The silhouette tier is the hide-in-grass mechanic: retail's
-		// sector-entity walk generates model foliage only around
-		// CROUCHED/PRONE infantry standing on terrain -- never around placed
-		// objects, whose MoveOrder stays 0
+		// sector-entity walk generates model foliage only around the
+		// visible CROUCHED/PRONE infantry standing on terrain -- never around
+		// placed objects, whose MoveOrder stays 0
 		// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-		// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
+		// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]; the
+		// occlusion leg's visible-entity walk selected them this frame.
 		PackedVector3Array silhouette_anchors;
 		MissionRoot *runtime = get_runtime();
 		if (runtime != nullptr) {
@@ -582,7 +586,14 @@ void GameWorld::render_foliage_frame() {
 		// The scene core's thermal byte is the environment's world gate
 		// (the engine foliage runtime carries the witness).
 		dispatcher_->set_thermal_view(env_ != nullptr && env_->state().thermal_view());
-		dispatcher_->render_frame(render_camera_xform(), get_frame_clock_ms());
+		// Env_WaterHeightFixed (0 = no water): the detail passes, the MODEL
+		// masks and their person consumers split by it.
+		const float water_height = water_ != nullptr ? water_->get_water_height() : 0.0f;
+		dispatcher_->set_water_height(water_height);
+		const Transform3D camera_xform = render_camera_xform();
+		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
+		ObjectModel::refresh_foliage_mask_frame(
+				static_cast<float>(camera_xform.origin.y), water_height);
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }

@@ -28,6 +28,7 @@
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 #include "util/texture_path_resolver.h"
+#include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/renderer/render_order.h>
@@ -155,6 +156,7 @@ ObjectModel::~ObjectModel() {
 		awake_models_.erase(this);
 	}
 	match_terrain_models_.erase(this);
+	foliage_mask_models_.erase(this);
 	authored_lod_models_.erase(this);
 	pixel_cull_models_.erase(this);
 	retire_geometry_instances();
@@ -250,6 +252,7 @@ void ObjectModel::set_slot_shadow_person(bool p_person) {
 		SlotShadow::bump_caster_group_revision();
 	}
 	slot_shadow_person_ = p_person;
+	update_foliage_mask_membership();
 }
 
 bool ObjectModel::is_slot_shadow_person() const {
@@ -317,6 +320,7 @@ void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
 		SlotShadow::bump_caster_group_revision();
 	}
 	slot_shadow_capture_with_ = next;
+	update_foliage_mask_membership();
 }
 
 ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
@@ -957,6 +961,7 @@ void ObjectModel::mark_render_order_dirty_all() {
 HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
+HashSet<ObjectModel *> ObjectModel::foliage_mask_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 HashSet<ObjectModel *> ObjectModel::pixel_cull_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
@@ -1265,6 +1270,8 @@ void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const 
 	p_instance->set_instance_shader_parameter(
 			StringName("u_match_terrain_page_projection"),
 			match_terrain_page_projection_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_foliage_mask_side"), foliage_mask_side_);
 	// The same flag and margin set_viewmodel_pass stamps on the built set.
 	p_instance->set_instance_shader_parameter(
 			StringName("u_viewmodel_pass"), viewmodel_pass_);
@@ -1368,6 +1375,83 @@ void ObjectModel::refresh_match_terrain_frame(Terrain *p_terrain) {
 			}
 		}
 		model->stamp_match_terrain_instances(ready, layer, projection_uniform);
+	}
+}
+
+void ObjectModel::update_foliage_mask_membership() {
+	if (slot_shadow_person_ || slot_shadow_capture_with_.is_valid()) {
+		foliage_mask_models_.insert(this);
+	} else {
+		foliage_mask_models_.erase(this);
+		stamp_foliage_mask_side(0.0f);
+	}
+}
+
+void ObjectModel::stamp_foliage_mask_side(float p_side) {
+	if (foliage_mask_side_ == p_side &&
+			foliage_mask_stamped_serial_ == scene_build_serial_) {
+		return;
+	}
+	foliage_mask_side_ = p_side;
+	foliage_mask_stamped_serial_ = scene_build_serial_;
+	const StringName side_name("u_foliage_mask_side");
+	const auto apply_to = [&](Node *p_parent) {
+		if (p_parent == nullptr) {
+			return;
+		}
+		const int children = p_parent->get_child_count();
+		for (int child = 0; child < children; ++child) {
+			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
+					p_parent->get_child(child));
+			if (instance != nullptr) {
+				instance->set_instance_shader_parameter(side_name, p_side);
+			}
+		}
+	};
+	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
+		apply_to(Object::cast_to<Node>(static_cast<Object *>(robj_dense_[entry])));
+	}
+	apply_to(skeleton_);
+}
+
+// A person entity rides the BySide wave of its side of the water; the
+// models it draws with (its linked avatar parts, and the held weapon or
+// mounted child submitted through its bone callback with its flags) share
+// that wave. The first-person viewmodel is drawn before the scene and never
+// takes the masks (the engine's foliage_entity_far_side carries the wave
+// witness; retail BoneCallback_org0_World @ 0x4e3c87 submits the children).
+void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_height) {
+	if (foliage_mask_models_.is_empty()) {
+		return;
+	}
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(foliage_mask_models_.size());
+	for (ObjectModel *model : foliage_mask_models_) {
+		batch.push_back(model);
+	}
+	const auto side_of = [&](ObjectModel *p_person) {
+		if (p_person == nullptr || !p_person->slot_shadow_person_ ||
+				!p_person->is_inside_tree()) {
+			return 0.0f;
+		}
+		const float y = static_cast<float>(p_person->get_global_position().y);
+		return opennova::renderer::foliage_entity_far_side(y, p_camera_y, p_water_height)
+				? 1.0f
+				: 2.0f;
+	};
+	for (ObjectModel *model : batch) {
+		if (!foliage_mask_models_.has(model)) {
+			continue;
+		}
+		ObjectModel *person =
+				model->slot_shadow_person_ ? model : model->get_slot_shadow_capture_with();
+		const float side = model->viewmodel_pass_ ? 0.0f : side_of(person);
+		model->stamp_foliage_mask_side(side);
+		if (model->slot_shadow_person_) {
+			for (ObjectModel *linked : model->live_presentation_links()) {
+				linked->stamp_foliage_mask_side(linked->viewmodel_pass_ ? 0.0f : side);
+			}
+		}
 	}
 }
 
@@ -2055,6 +2139,11 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_interior_light_group_section);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
 			&ObjectModel::set_slot_shadow_capture_with);
+	ClassDB::bind_method(D_METHOD("get_foliage_mask_side"),
+			&ObjectModel::get_foliage_mask_side);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("refresh_foliage_mask_frame", "camera_y", "water_height"),
+			&ObjectModel::refresh_foliage_mask_frame);
 	ClassDB::bind_method(
 			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
 					"interior_daylight"),

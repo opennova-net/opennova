@@ -10,8 +10,8 @@ extends GutTest
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
 		"begin", "session", "local_view", "scene_environment",
-		"environment_nodes", "terrain", "water", "foliage", "network", "blink",
-		"occlusion", "iris", "sun_veil", "lights", "materials", "framefx",
+		"environment_nodes", "terrain", "water", "network", "blink",
+		"occlusion", "foliage", "iris", "sun_veil", "lights", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "screen_effects", "audio",
 		"clear", "environment_cube", "finish",
 	])
@@ -31,6 +31,8 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"foliage consumes this frame's detail-cell handoff after terrain")
 	assert_gt(names.find("screen_effects"), names.find("particles"),
 			"the FrameFX plan reads this frame's published distortion content")
+	assert_lt(names.find("occlusion"), names.find("foliage"),
+			"foliage anchors its MODEL tier on the entities this frame's occlusion admitted")
 
 
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:
@@ -47,7 +49,7 @@ func test_frozen_pose_replay_keeps_the_camera_producer_order() -> void:
 	var replay := Array(GameWorld.frozen_pose_leg_names())
 	assert_eq(replay, [
 		"celestial_settle", "sun_veil", "iris_stamp", "weather_settle",
-		"scene_environment", "terrain", "foliage", "occlusion", "sky_settle",
+		"scene_environment", "terrain", "occlusion", "foliage", "sky_settle",
 		"water_settle", "particles", "lights", "slot_shadows", "clear",
 	])
 	var live := Array(GameWorld.frame_leg_names())

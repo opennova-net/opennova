@@ -1,6 +1,7 @@
 // Literal vectors independently calculated from the recovered instructions.
 #include <formats/foliage/runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -549,13 +550,15 @@ bool model_cache_phase_negative_and_identity() {
 		                runtime.get_stats().model.regenerations == 0,
 		            "definition zero reuses model geometry before phase eight")) return false;
 	}
+	// On the phase every visit regenerates: both anchors' four visits.
+	// [orig: Foliage_UpdateModelTiles @ 0x602085..0x6020aa]
 	const auto phase_eight = runtime.render_frame(request, world);
 	if (!expect(phase_eight.silhouettes.empty() &&
 	                runtime.get_stats().model.hits == 8 &&
-	                runtime.get_stats().model.regenerations == 4 &&
+	                runtime.get_stats().model.regenerations == 8 &&
 	                phase_eight.model_evicted.size() == 4 &&
 	                phase_eight.model_generated.size() == 4,
-	            "each resident key refreshes once on definition zero phase")) return false;
+	            "every visit regenerates on definition zero's phase")) return false;
 
 	foliage_mask = 0x1u;
 	if (!expect(runtime.render_frame(request, world).silhouettes.empty() &&
@@ -566,51 +569,71 @@ bool model_cache_phase_negative_and_identity() {
 	}
 	const auto phase_sixteen = runtime.render_frame(request, world);
 	if (!expect(phase_sixteen.silhouettes.size() == 18 &&
-	                runtime.get_stats().model.regenerations == 4,
-	            "negative model entries recover once per key on the next phase")) return false;
+	                runtime.get_stats().model.regenerations == 8,
+	            "negative model entries recover on every visit of the next phase")) return false;
 	return true;
 }
 
-bool overlapping_model_cells_refresh_once_per_frame() {
+// Two anchors 8 units apart share two cells. On the definition's phase each
+// visit regenerates the shared resident around ITS OWN anchor and draws it at
+// once, so the second anchor's submission is placed around the second anchor;
+// off the phase both visits draw the resident as the last visit left it.
+// [orig: Foliage_UpdateModelTiles @ 0x601f50, hit touch/phase/regenerate
+// @ 0x60208b..0x6020aa, the immediate draw @ 0x6021a5;
+// Foliage_GenerateModelTileInstances @ 0x600b11..0x600b45 (+-4 box)]
+bool overlapping_model_cells_regenerate_per_visit_on_phase() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
 	auto request = one_silhouette(38.0f, 63.0f);
-	request.silhouette_anchors.push_back(
-	    {{34.0f, 48.0f}, 38.0f, 63.0f});
+	request.silhouette_anchors.push_back({{40.0f, 48.0f}, 38.0f, 63.0f});
 
-	const auto first = runtime.render_frame(request, world);
-	if (!expect(!first.silhouettes.empty() &&
-	                runtime.get_stats().model.regenerations == 4,
-	            "overlapping MODEL anchors warm four unique cell keys")) {
+	runtime.render_frame(request, world);
+	if (!expect(runtime.get_stats().model.misses == 6 &&
+	                runtime.get_stats().model.hits == 2,
+	            "the second anchor hits the two cells the first one warmed")) {
 		return false;
 	}
-	const size_t stable_count = first.silhouettes.size();
 	for (int frame = 2; frame <= 7; ++frame) {
-		if (!expect(runtime.render_frame(request, world).silhouettes.size() ==
-		                stable_count,
-		            "overlapping MODEL cells remain stable before refresh")) {
-			return false;
-		}
+		runtime.render_frame(request, world);
 	}
 
+	const auto near_anchor = [](const FrameOutput &output, uint32_t key,
+	                            float anchor_x, int visit) {
+		std::vector<uint64_t> submissions;
+		for (const SilhouetteInstance &instance : output.silhouettes) {
+			if (instance.cell_key == key &&
+			    std::find(submissions.begin(), submissions.end(),
+			              instance.submission_id) == submissions.end()) {
+				submissions.push_back(instance.submission_id);
+			}
+		}
+		if (static_cast<int>(submissions.size()) <= visit) return false;
+		int count = 0;
+		for (const SilhouetteInstance &instance : output.silhouettes) {
+			if (instance.submission_id != submissions[static_cast<size_t>(visit)]) continue;
+			if (std::fabs(instance.center.x - anchor_x) > 4.0f) return false;
+			++count;
+		}
+		return count > 0;
+	};
+	const uint32_t shared_key = 0x00207FE0u;
 	const auto phase_eight = runtime.render_frame(request, world);
-	if (!expect(phase_eight.silhouettes.size() == stable_count &&
-	                runtime.get_stats().model.hits == 8 &&
-	                runtime.get_stats().model.regenerations == 4 &&
-	                phase_eight.model_generated.empty() &&
-	                phase_eight.model_evicted.empty(),
-	            "unchanged overlapping MODEL cells keep their resident mesh revision")) {
+	if (!expect(runtime.get_stats().model.hits == 8 &&
+	                runtime.get_stats().model.regenerations == 8,
+	            "every on-phase visit regenerates, shared cells included")) {
 		return false;
 	}
-	std::map<uint32_t, std::set<uint64_t>> revisions_by_key;
-	for (const SilhouetteInstance &instance : phase_eight.silhouettes) {
-		revisions_by_key[instance.cell_key].insert(instance.cache_revision);
+	if (!expect(near_anchor(phase_eight, shared_key, 32.0f, 0) &&
+	                near_anchor(phase_eight, shared_key, 40.0f, 1),
+	            "each on-phase visit draws the shared cell around its own anchor")) {
+		return false;
 	}
-	for (const auto &item : revisions_by_key) {
-		if (!expect(item.second.size() == 1,
-		            "overlapping submissions share the first refreshed cell revision")) {
-			return false;
-		}
+	const auto after = runtime.render_frame(request, world);
+	if (!expect(runtime.get_stats().model.regenerations == 0 &&
+	                near_anchor(after, shared_key, 40.0f, 0) &&
+	                near_anchor(after, shared_key, 40.0f, 1),
+	            "off the phase both visits draw the last visit's regeneration")) {
+		return false;
 	}
 	return true;
 }
@@ -1161,7 +1184,7 @@ int main() {
 	if (!detail_capacity_and_eviction()) return 1;
 	if (!flat_detail_keys_retain_empty_cache_entries()) return 1;
 	if (!model_cache_phase_negative_and_identity()) return 1;
-	if (!overlapping_model_cells_refresh_once_per_frame()) return 1;
+	if (!overlapping_model_cells_regenerate_per_visit_on_phase()) return 1;
 	if (!model_key_lookup_work_is_bounded_by_cell_visits()) return 1;
 	if (!model_definition_stagger()) return 1;
 	if (!model_cache_lru_and_identity_events()) return 1;

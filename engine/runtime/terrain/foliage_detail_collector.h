@@ -30,6 +30,10 @@ constexpr int kFoliageDetailPatchCapacity = 128;
 struct FoliageDetailPatch {
 	uint32_t key = 0;
 	float distance = 0.0f;
+	// The collected leaf's maximum height (the node's AABB max y at
+	// node+0x28): the detail passes split patches by it against the water
+	// [orig: Foliage_RenderFarPatches @ 0x60a1a0..0x60a1a2].
+	float max_height = 0.0f;
 };
 
 // Appends the near 16u cells of one quadtree subtree of a resolved 512u

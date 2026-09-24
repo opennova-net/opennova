@@ -434,6 +434,11 @@ private:
 	void apply_node_visibility();
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
+	// The foliage depth-mask wave this model's draws take
+	// (u_foliage_mask_side: 0 none, 1 far, 2 camera side) and the scene build
+	// it was stamped on.
+	float foliage_mask_side_ = 0.0f;
+	uint32_t foliage_mask_stamped_serial_ = 0;
 	// The last MATCHTERRAIN page state the terrain-frame leg stamped
 	// (refresh_match_terrain_frame), kept for instances minted between legs.
 	bool match_terrain_page_ready_ = false;
@@ -465,6 +470,11 @@ private:
 	// leg. GameWorld refreshes their resident terrain-page binding after the
 	// terrain cache has processed this frame's requests.
 	static HashSet<ObjectModel *> match_terrain_models_;
+	// Person models and the models drawn inside a person's slot (held
+	// weapons): the foliage depth-mask consumers the foliage leg stamps.
+	static HashSet<ObjectModel *> foliage_mask_models_;
+	void update_foliage_mask_membership();
+	void stamp_foliage_mask_side(float p_side);
 	static HashSet<ObjectModel *> authored_lod_models_;
 	// Attachments whose camera draw carries the held weapon's 2 px gate.
 	static HashSet<ObjectModel *> pixel_cull_models_;
@@ -801,6 +811,12 @@ public:
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
 	void set_viewmodel_pass(bool p_enabled);
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
+	// Stamp every person draw (its linked avatar parts and the models drawn
+	// in its slot included) with its BySide wave for the foliage depth masks
+	// (runtime/renderer/foliage_frame.h carries the witness): the camera and
+	// water heights of the frame the foliage compile used.
+	static void refresh_foliage_mask_frame(float p_camera_y, float p_water_height);
+	float get_foliage_mask_side() const { return foliage_mask_side_; }
 	static int update_authored_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees,
 			float p_viewport_width,

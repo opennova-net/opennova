@@ -10,6 +10,7 @@
 #include <runtime/inmatch/role_feeds.h> // EntityLightingFeed
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/entity.h>         // EntityHandle
@@ -88,6 +89,9 @@ struct SimulationPresentState {
 	std::vector<int32_t> occlusion_culled_wire;
 	std::vector<int32_t> occl_apply_culled_wire_last;
 	std::unordered_map<uint16_t, uint8_t> wire_occlusion_latch;
+	// The MODEL foliage tier's anchors this frame: the collected (visible)
+	// person entities with a stance bit and no groundEntity, Godot space.
+	PackedVector3Array foliage_mask_anchors;
 	// Reused probe scratch (cleared per frame, capacity retained).
 	std::vector<opennova::world::EntityHandle> occlusion_probe_handles;
 	// Delta baselines for the render-occlusion apply path: what the shell last

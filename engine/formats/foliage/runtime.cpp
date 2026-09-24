@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -20,7 +19,6 @@ namespace {
 constexpr uint32_t kSeedConstant = 0xA55B1EEDu;
 constexpr int kGridWidth = 6;
 constexpr int kCandidates = 36;
-constexpr int kSilhouetteCellCap = 21;
 constexpr float kGridStep = 2.6f;
 constexpr float kGridBase = 1.0f;
 constexpr float kJitterScale = 1.8f / 65536.0f;
@@ -321,6 +319,8 @@ bool make_silhouette_instance(
 		                  corner_y[corner])) {
 			return false;
 		}
+		instance.corner_local_a[corner] = rotated_a;
+		instance.corner_local_b[corner] = rotated_b;
 		const int32_t corner_z = negate_fixed(corner_y[corner]);
 		instance.corners[corner] = {
 		    from_fixed(corner_x[corner]),
@@ -414,7 +414,7 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
 			continue;
 		}
 		result.push_back(instance);
-		if (static_cast<int>(result.size()) >= kSilhouetteCellCap) break;
+		if (static_cast<int>(result.size()) >= kModelTileInstanceCap) break;
 	}
 	return result;
 }
@@ -622,6 +622,19 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		                            0.0f,
 		                            1.0f);
 
+		// The two detail passes split patches by the collected leaf's maximum
+		// height against the water: formatType XOR cameraBelowWater selects
+		// the patches with some height above the water, so a patch lying
+		// wholly at or below it draws in the far pass (formatType 0) while
+		// the camera is above, and in the camera pass while it is below.
+		// [orig: Foliage_RenderFarPatches @ 0x609df4..0x609e1b (flag),
+		// @ 0x60a1a0..0x60a1c6 (node +0x28 vs water); Foliage_RenderFarPatchesPass
+		// calls @ 0x5c95c5 (formatType 0) / @ 0x5c9665 (formatType 1)]
+		const bool patch_below_water = request.water_height >= cell.max_height;
+		const DetailWaterPass water_pass =
+		    (patch_below_water != request.camera_below_water)
+		        ? DetailWaterPass::FarSide
+		        : DetailWaterPass::CameraSide;
 		for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
 			if (!request.slots[slot_index].enabled) continue;
 			const auto &entries = detail_cache_[slot_index];
@@ -631,7 +644,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			}
 			const DetailCacheEntry &entry = entries[index];
 			const auto append_submission =
-			    [this, &entry, &output](DetailPass pass,
+			    [this, &entry, &output, water_pass](DetailPass pass,
 			                           uint8_t alpha_reference,
 			                           float submission_alpha,
 			                           bool near_secondary) {
@@ -645,6 +658,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					instance.alpha_reference = alpha_reference;
 					instance.pass = pass;
 					instance.near_secondary = near_secondary;
+					instance.water_pass = water_pass;
 					output.detail.push_back(instance);
 				}
 			};
@@ -675,17 +689,13 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		}
 	}
 
-	// Distant model cache: one fixed 1000-entry pool per definition. Hits touch
-	// the resident entry on the definition's exact eight-scene refresh phase.
-	//
-	// Nearby anchors (clustered crouched/prone infantry) can visit one cell
-	// several times in a frame. Refresh a resident key only on its first visit
-	// this scene frame; later callers retain their distinct draw submissions
-	// while reusing that refreshed resident. Retail's visible
-	// sector-entity/occlusion walk bounds the same fanout (D-FOLIAGE-9).
-	// [orig: Foliage_UpdateModelTiles @ 0x601f50]
-	std::array<std::unordered_set<uint32_t>, FOLIAGE_MAX_DEFS>
-	    refreshed_model_keys;
+	// Distant model cache: one fixed 1000-entry pool per definition. Every hit
+	// touches its resident entry, and on the definition's eight-scene phase
+	// every visit regenerates it around THAT visit's anchor before drawing it,
+	// so clustered anchors sharing a cell each redraw it around themselves.
+	// [orig: Foliage_UpdateModelTiles @ 0x601f50, hit touch @ 0x60208b,
+	// phase test @ 0x602085..0x60209a, regeneration @ 0x6020aa, draw
+	// @ 0x6021a5]
 	for (const SilhouetteAnchor &anchor : request.silhouette_anchors) {
 		if (!std::isfinite(anchor.position.x) ||
 		    !std::isfinite(anchor.position.z) ||
@@ -728,10 +738,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 				if (entry != nullptr) {
 					++stats_.model.hits;
 					entry->last_use = terrain_scene_counter_;
-					const bool first_refresh =
-					    regenerate_hit &&
-					    refreshed_model_keys[slot_index].insert(cell.key).second;
-					if (first_refresh) {
+					if (regenerate_hit) {
 						auto refreshed_instances = generate_silhouette_cell(
 						    slot_index,
 						    slot,
@@ -785,10 +792,6 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					    entry->key,
 					    entry->revision});
 				}
-				if (regenerate_hit) {
-					refreshed_model_keys[slot_index].insert(cell.key);
-				}
-
 				if (entry->instances.empty()) continue;
 				++stats_.model.submissions;
 				const uint64_t submission_id = ++next_submission_id_;
@@ -799,6 +802,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					instance.submission_id = submission_id;
 					instance.quadrant = cell.quadrant;
 					instance.alpha_reference = alpha_reference;
+					instance.far_side = anchor.far_side;
 					output.silhouettes.push_back(instance);
 				}
 			}

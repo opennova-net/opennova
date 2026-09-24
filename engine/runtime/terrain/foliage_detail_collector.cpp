@@ -133,7 +133,7 @@ private:
 		// generate_foliage_instances_0 @ 0x5fff84..0x5fffa2]
 		const uint32_t x_min = static_cast<uint32_t>(world_x) & 0x7fffu;
 		const uint32_t z_min = static_cast<uint32_t>(world_z) & 0x7fffu;
-		patches.push_back({key_flags | (x_min << 16) | z_min, distance});
+		patches.push_back({key_flags | (x_min << 16) | z_min, distance, maximum_y});
 	}
 };
 

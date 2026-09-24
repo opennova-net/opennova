@@ -42,6 +42,12 @@ struct RuntimeSlot {
 	uint32_t source_vertex_count = 1;
 };
 
+// The MODEL tier accepts at most 21 instances per tile: the accepted count
+// at the cache entry's +0x554 against 21 ends the candidate walk; the
+// GridPlacementVS blocks c[12+4i] fill the vs_1_1 file to c95 at 21.
+// [orig: Foliage_GenerateModelTileInstances @ 0x600e75]
+inline constexpr int kModelTileInstanceCap = 21;
+
 struct DetailCell {
 	// Exact retail packed cell key. It is both the deterministic seed and the
 	// encoded 16-unit cell origin: HIGH15 = X-min, LOW15 = Z-min on the Godot
@@ -49,12 +55,19 @@ struct DetailCell {
 	// key consumes a cache slot but generates empty geometry.
 	uint32_t key = 0;
 	float camera_distance = 0.0f;
+	// The collected leaf's maximum terrain height: the detail passes split
+	// patches by it against the water height.
+	float max_height = 0.0f;
 };
 
 struct SilhouetteAnchor {
 	Point2 position{};
 	float view_depth = 0.0f;
 	float camera_distance = 0.0f;
+	// The anchor's BySide wave: true when the entity lies on the water side
+	// away from the camera (its masks precede everything the far-side wave
+	// and the later passes draw).
+	bool far_side = false;
 };
 
 struct FrameRequest {
@@ -64,6 +77,10 @@ struct FrameRequest {
 	// The local player's thermal view (the scene core's fourth argument):
 	// every detail patch draws the primary LOW pass at one tenth fade.
 	bool thermal_view = false;
+	// Env_WaterHeightFixed in world units and the camera's side of it: the
+	// two detail passes split patches by their maximum height against it.
+	float water_height = 0.0f;
+	bool camera_below_water = false;
 };
 
 struct WorldSamplers {
@@ -83,6 +100,14 @@ struct WorldSamplers {
 enum class DetailPass : uint8_t {
 	HighAlphaTest,
 	LowAlphaTest,
+};
+
+// The detail pass a patch draws in: retail's Foliage_RenderFarPatchesPass
+// formatType 0 (the water side away from the camera, before the water
+// surface) or 1 (the camera's side, after the camera-side entity wave).
+enum class DetailWaterPass : uint8_t {
+	FarSide = 0,
+	CameraSide = 1,
 };
 
 struct DetailInstance {
@@ -107,6 +132,7 @@ struct DetailInstance {
 	// [orig: Foliage_RenderFarPatches @ 0x60a659..0x60a694;
 	// Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
 	bool near_secondary = false;
+	DetailWaterPass water_pass = DetailWaterPass::CameraSide;
 };
 
 struct SilhouetteInstance {
@@ -127,7 +153,14 @@ struct SilhouetteInstance {
 	std::array<float, 4> fold{};
 	// Eight-sample fitted ground height at normalized model center.
 	float center_height = 0.0f;
+	// The rotated footprint offsets (A', B') of the four corners before the
+	// key bases are added: the instance block GridPlacementVS reads carries
+	// these locals, and the constant upload adds keyHi / -keyLo in float.
+	std::array<float, 4> corner_local_a{};
+	std::array<float, 4> corner_local_b{};
 	uint8_t alpha_reference = 0;
+	// The anchor's BySide wave (SilhouetteAnchor::far_side).
+	bool far_side = false;
 };
 
 struct CacheIdentity {

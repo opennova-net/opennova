@@ -4012,13 +4012,18 @@ end
 
 
 
+func _occlusion_frame(sim: Simulation) -> void:
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+
+
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	# The hide-in-grass selection: only infantry with a stance bit set
 	# ((net_stance_bits & 0x3) != 0) and no groundEntity anchor the distant
 	# MODEL/depth-mask foliage tier [orig: Terrain_RenderSectorEntitiesBySide
 	# @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300), groundEntity gate
 	# @ 0x5c7dd5..0x5c7df7]. The local player's SELECT latches are the stance
-	# writer [orig: Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd].
+	# writer [orig: Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd]. The
+	# occlusion frame selects the anchors.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
@@ -4027,11 +4032,15 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
 
 	sim.step()
+	_occlusion_frame(sim)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"a STANDING infantry entity never anchors the silhouette tier")
 
 	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
 	sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"the anchors are the last occlusion frame's, not the tick's")
+	_occlusion_frame(sim)
 	var crouched: PackedVector3Array = sim.get_foliage_mask_anchor_positions()
 	assert_eq(crouched.size(), 1, "the crouched local player anchors the silhouette tier")
 	if crouched.size() == 1:
@@ -4041,11 +4050,13 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 
 	assert_true(sim.request_local_player_stance(2))  # prone (SELECT 170)
 	sim.step()
+	_occlusion_frame(sim)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 1,
 		"prone anchors too - both MoveOrder stance bits gate the tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
 	sim.step()
+	_occlusion_frame(sim)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing back up empties the anchor list")
 
@@ -4059,8 +4070,10 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_eq(sim.get_entity_count(), 2, "the demo mission has AI infantry to reject")
+	sim.occlusion_init_mission()
 	for _i in range(4):
 		sim.step()
+		_occlusion_frame(sim)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing NPCs never anchor the hide-in-grass tier")
 

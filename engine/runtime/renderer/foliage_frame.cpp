@@ -4,7 +4,6 @@
 
 #include <runtime/renderer/foliage_frame.h>
 
-#include <runtime/terrain/quadtree.h>
 
 #include <algorithm>
 #include <cmath>
@@ -25,15 +24,9 @@ bool finite3(float x, float y, float z) {
 	return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
 }
 
-bool point_in_frustum(const opennova::Frustum &frustum, float x, float y,
-		float z) {
-	for (int p = 0; p < 6; ++p) {
-		const float *plane = frustum.planes[p];
-		if (plane[0] * x + plane[1] * y + plane[2] * z + plane[3] < 0.0f) {
-			return false;
-		}
-	}
-	return true;
+int32_t sign_extend_15(uint32_t value) {
+	const int32_t low = static_cast<int32_t>(value & 0x7FFFu);
+	return (low & 0x4000) != 0 ? low - 0x8000 : low;
 }
 
 } // namespace
@@ -62,6 +55,19 @@ float foliage_detail_wind_sector_origin_z(uint32_t cell_key) {
 	return static_cast<float>(sector * 512);
 }
 
+float foliage_model_wind_offset(double angle) {
+	return static_cast<float>(std::sin(angle) * 0.079999998);
+}
+
+bool foliage_camera_above_water(float camera_y, float water_height) {
+	return camera_y >= water_height;
+}
+
+bool foliage_entity_far_side(float entity_y, float camera_y, float water_height) {
+	const bool entity_below_water = entity_y - 1.0f < water_height;
+	return entity_below_water == foliage_camera_above_water(camera_y, water_height);
+}
+
 void FoliageFrameCompiler::configure_slots(
 		const std::array<opennova::foliage::RuntimeSlot,
 				opennova::FOLIAGE_MAX_DEFS> &slots,
@@ -69,6 +75,40 @@ void FoliageFrameCompiler::configure_slots(
 				&geometry) {
 	slots_ = slots;
 	geometry_ = geometry;
+	// The MODEL tier's instanced VB source: retail maps the model's x/z over
+	// its bound square ((v - centre) * 0.5 / BoundRadius + 0.5, 0.5 when the
+	// radius is zero) and halves y; the 3DI import negated source x, so the
+	// retail x is the imported x mirrored about the centre.
+	// [orig: Foliage_FillInstancedModelBuffers @ 0x5ffa2a..0x5ffac6]
+	++model_mesh_generation_;
+	for (size_t slot = 0; slot < model_meshes_.size(); ++slot) {
+		FoliageSlotModelMesh &mesh = model_meshes_[slot];
+		mesh = FoliageSlotModelMesh{};
+		const FoliageSlotGeometry &source = geometry_[slot];
+		if (!source.valid || source.vertices.empty() || source.indices.empty()) {
+			continue;
+		}
+		const float scale = source.radius != 0.0f ? 0.5f / source.radius : 0.5f;
+		mesh.vertices.reserve(source.vertices.size());
+		mesh.max_half_height = -std::numeric_limits<float>::infinity();
+		mesh.min_half_height = std::numeric_limits<float>::infinity();
+		for (const FoliageSourceVertex &vertex : source.vertices) {
+			FoliageModelVertex out;
+			out.x = (source.center_x - vertex.x) * scale + 0.5f;
+			out.y = vertex.y * kDetailHeightScale;
+			out.z = (vertex.z - source.center_z) * scale + 0.5f;
+			out.u = vertex.u;
+			out.v = vertex.v;
+			mesh.max_half_height = std::max(mesh.max_half_height, out.y);
+			mesh.min_half_height = std::min(mesh.min_half_height, out.y);
+			mesh.vertices.push_back(out);
+		}
+		mesh.indices.reserve(source.indices.size());
+		for (const int32_t index : source.indices) {
+			mesh.indices.push_back(static_cast<uint32_t>(index));
+		}
+		mesh.valid = true;
+	}
 }
 
 void FoliageFrameCompiler::reset() {
@@ -144,76 +184,6 @@ bool FoliageFrameCompiler::expand_detail_instance(
 	return true;
 }
 
-bool FoliageFrameCompiler::expand_silhouette_instance(
-		const opennova::foliage::SilhouetteInstance &instance,
-		size_t vertex_base) {
-	const int slot = instance.slot;
-	if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS ||
-			!geometry_[slot].valid) {
-		return false;
-	}
-	for (const opennova::foliage::GroundCorner &corner : instance.corners) {
-		if (!valid_height(corner.height)) {
-			return false;
-		}
-	}
-	const FoliageSlotGeometry &source = geometry_[slot];
-	if (source.radius <= 1.0e-6f) {
-		return false;
-	}
-
-	const float inverse_span = 1.0f / (2.0f * source.radius);
-
-	for (const FoliageSourceVertex &vertex : source.vertices) {
-		// The 3DI import negates source X. Convert back to retail local A
-		// while local B remains the terrain Z axis.
-		const float x_normalized =
-				0.5f - (vertex.x - source.center_x) * inverse_span;
-		const float z_normalized =
-				0.5f + (vertex.z - source.center_z) * inverse_span;
-		const float one_minus_x = 1.0f - x_normalized;
-		const float one_minus_z = 1.0f - z_normalized;
-		const float weights[4] = {
-			one_minus_x * one_minus_z,
-			x_normalized * one_minus_z,
-			one_minus_x * z_normalized,
-			x_normalized * z_normalized,
-		};
-
-		float world_x = 0.0f;
-		float world_z = 0.0f;
-		float ground = 0.0f;
-		for (int corner = 0; corner < 4; ++corner) {
-			world_x += weights[corner] * instance.corners[corner].x;
-			world_z += weights[corner] * instance.corners[corner].z;
-			ground += weights[corner] * instance.corners[corner].height;
-		}
-
-		const float u = 2.0f * x_normalized - 1.0f;
-		const float v = 2.0f * z_normalized - 1.0f;
-		ground += (1.0f - v * v) * (instance.fold[0] + u * instance.fold[1]) +
-				(1.0f - u * u) * (instance.fold[2] + v * instance.fold[3]);
-
-		const float half_height = vertex.y * kDetailHeightScale;
-		const float world_y = ground + half_height;
-		if (!finite3(world_x, world_y, world_z)) {
-			draw_list_.vertices.resize(vertex_base);
-			return false;
-		}
-
-		FoliageVertex out;
-		out.x = world_x;
-		out.y = world_y;
-		out.z = world_z;
-		out.u = vertex.u;
-		out.v = vertex.v;
-		out.u2 = half_height;
-		out.v2 = 0.0f;
-		draw_list_.vertices.push_back(out);
-	}
-	return true;
-}
-
 const FoliageDrawList &FoliageFrameCompiler::compile(
 		const FoliageViewInput &view,
 		const opennova::foliage::WorldSamplers &world,
@@ -224,8 +194,8 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	draw_list_.indices.clear();
 	draw_list_.mesh_builds.clear();
 	draw_list_.commands.clear();
+	draw_list_.model_instances.clear();
 	draw_list_.detail_evicted.clear();
-	draw_list_.model_evicted.clear();
 	draw_list_.debug = FoliageFrameDebugCounters{};
 	draw_list_.debug.compile_index = compile_index_;
 
@@ -234,24 +204,19 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	request.slots = slots_;
 	request.detail_cells = view.detail_cells;
 	request.thermal_view = view.thermal_view;
+	const bool camera_above_water =
+			foliage_camera_above_water(view.cam_y, view.water_height);
+	request.water_height = view.water_height;
+	request.camera_below_water = !camera_above_water;
 	draw_list_.debug.detail_cells =
 			static_cast<int64_t>(request.detail_cells.size());
 	draw_list_.debug.silhouette_anchors_input =
 			static_cast<int64_t>(view.silhouette_anchors.size());
 
-	// The MODEL-tier anchor gate: view depth >= the schedule floor, then
-	// frustum membership (the shell used Camera3D::is_position_in_frustum;
-	// the same six inside-positive planes come from the view/proj here).
-	float mvp[16] = {};
-	for (int row = 0; row < 4; ++row) {
-		for (int col = 0; col < 4; ++col) {
-			for (int k = 0; k < 4; ++k) {
-				mvp[col * 4 + row] += view.proj[k * 4 + row] * view.view[col * 4 + k];
-			}
-		}
-	}
-	const opennova::Frustum frustum = opennova::extract_frustum(mvp);
-
+	// The anchors arrive already admitted by the visible-entity walk; the
+	// MODEL walk adds its own view-depth floor, and each anchor rides its
+	// BySide wave (foliage_entity_far_side).
+	// [orig: Foliage_UpdateModelTiles @ 0x601f99..0x601fab (view z >= 38)]
 	request.silhouette_anchors.reserve(view.silhouette_anchors.size());
 	for (const std::array<float, 3> &anchor : view.silhouette_anchors) {
 		if (!finite3(anchor[0], anchor[1], anchor[2])) {
@@ -261,10 +226,6 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 				view.view[10] * anchor[2] + view.view[14];
 		const float view_depth = -view_z;
 		if (!std::isfinite(view_depth) || view_depth < kSilhouetteDepthGate) {
-			continue;
-		}
-		if (!view.no_frustum &&
-				!point_in_frustum(frustum, anchor[0], anchor[1], anchor[2])) {
 			continue;
 		}
 		const float dx = anchor[0] - view.cam_x;
@@ -278,6 +239,8 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 		runtime_anchor.position = {anchor[0], anchor[2]};
 		runtime_anchor.view_depth = view_depth;
 		runtime_anchor.camera_distance = camera_distance;
+		runtime_anchor.far_side =
+				foliage_entity_far_side(anchor[1], view.cam_y, view.water_height);
 		request.silhouette_anchors.push_back(runtime_anchor);
 	}
 	draw_list_.debug.silhouette_anchors_visible =
@@ -381,6 +344,12 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 			command.wind_phase = detail_wind_phase;
 			command.wind_sector_origin_z =
 					foliage_detail_wind_sector_origin_z(first.cell_key);
+			command.far_side =
+					first.water_pass == opennova::foliage::DetailWaterPass::FarSide;
+			command.render_rung =
+					command.far_side ? kRungFoliageFarSide : kRungFoliageCameraSide;
+			command.sorting_offset =
+					first.near_secondary ? kFoliageSecondaryLowSortingOffset : 0.0f;
 			draw_list_.commands.push_back(command);
 
 			if (high) {
@@ -394,7 +363,13 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 		begin = end;
 	}
 
-	// --- Silhouette submissions --------------------------------------------
+	// --- MODEL submissions: GridPlacementVS instance blocks -----------------
+	// Each submission uploads its instance blocks and draws the slot's
+	// normalized mesh once per instance; the block rows are the retail
+	// constants: render x = local B + (-keyLo) (the Godot Z), the heights,
+	// render z = local A + keyHi (Godot X), and the fold.
+	// [orig: Foliage_UploadModelTileVSConstants @ 0x6010e6..0x601209;
+	// Foliage_DrawModelTileSlot @ 0x601d90..0x601ec6]
 	for (size_t begin = 0; begin < output.silhouettes.size();) {
 		const opennova::foliage::SilhouetteInstance &first =
 				output.silhouettes[begin];
@@ -404,91 +379,103 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 			++end;
 		}
 		const int slot = first.slot;
-		if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
+		if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS ||
+				!model_meshes_[static_cast<size_t>(slot)].valid) {
 			begin = end;
 			continue;
 		}
-		const MeshKey key{static_cast<uint8_t>(FoliageTier::Silhouette),
-				first.slot, first.cell_key, first.cache_revision};
-		auto found = resident_.find(key);
-		if (found == resident_.end()) {
-			const uint32_t first_vertex =
-					static_cast<uint32_t>(draw_list_.vertices.size());
-			const uint32_t first_index =
-					static_cast<uint32_t>(draw_list_.indices.size());
-			int64_t instance_count = 0;
-			for (size_t i = begin; i < end; ++i) {
-				const size_t base = draw_list_.vertices.size();
-				if (expand_silhouette_instance(output.silhouettes[i], base)) {
-					const uint32_t local =
-							static_cast<uint32_t>(base) - first_vertex;
-					for (const int32_t idx : geometry_[slot].indices) {
-						draw_list_.indices.push_back(local +
-								static_cast<uint32_t>(idx));
-					}
-					++instance_count;
-				}
+		const FoliageSlotModelMesh &mesh = model_meshes_[static_cast<size_t>(slot)];
+		const float key_hi = static_cast<float>(sign_extend_15(first.cell_key >> 16u));
+		const float neg_key_lo = static_cast<float>(-sign_extend_15(first.cell_key));
+		const uint32_t first_instance =
+				static_cast<uint32_t>(draw_list_.model_instances.size());
+		float aabb_min[3] = {std::numeric_limits<float>::infinity(),
+				std::numeric_limits<float>::infinity(),
+				std::numeric_limits<float>::infinity()};
+		float aabb_max[3] = {-std::numeric_limits<float>::infinity(),
+				-std::numeric_limits<float>::infinity(),
+				-std::numeric_limits<float>::infinity()};
+		for (size_t i = begin; i < end; ++i) {
+			const opennova::foliage::SilhouetteInstance &instance =
+					output.silhouettes[i];
+			bool heights_valid = true;
+			for (const opennova::foliage::GroundCorner &corner : instance.corners) {
+				heights_valid = heights_valid && valid_height(corner.height);
 			}
-			FoliageMeshBuild build;
-			build.tier = FoliageTier::Silhouette;
-			build.slot = first.slot;
-			build.cell_key = first.cell_key;
-			build.revision = first.cache_revision;
-			build.first_vertex = first_vertex;
-			build.vertex_count =
-					static_cast<uint32_t>(draw_list_.vertices.size()) - first_vertex;
-			build.first_index = first_index;
-			build.index_count =
-					static_cast<uint32_t>(draw_list_.indices.size()) - first_index;
-			build.instance_count = static_cast<int32_t>(instance_count);
-			draw_list_.mesh_builds.push_back(build);
-			if (build.vertex_count > 0 && build.index_count > 0) {
-				++draw_list_.debug.model_mesh_uploads;
+			if (!heights_valid) {
+				continue;
 			}
-			ResidentMesh entry;
-			entry.empty = build.vertex_count == 0 || build.index_count == 0;
-			entry.instances = instance_count;
-			entry.vertices = static_cast<int64_t>(build.vertex_count);
-			found = resident_.emplace(key, entry).first;
-		} else {
-			++draw_list_.debug.model_mesh_hits;
+			FoliageModelInstance block;
+			float fold_extent = 0.0f;
+			for (int k = 0; k < 4; ++k) {
+				block.rows[k] = instance.corner_local_b[k] + neg_key_lo;
+				block.rows[4 + k] = instance.corners[k].height;
+				block.rows[8 + k] = instance.corner_local_a[k] + key_hi;
+				block.rows[12 + k] = instance.fold[k];
+				fold_extent += std::fabs(instance.fold[k]);
+				aabb_min[0] = std::min(aabb_min[0], block.rows[8 + k]);
+				aabb_max[0] = std::max(aabb_max[0], block.rows[8 + k]);
+				aabb_min[1] = std::min(aabb_min[1], block.rows[4 + k]);
+				aabb_max[1] = std::max(aabb_max[1], block.rows[4 + k]);
+				aabb_min[2] = std::min(aabb_min[2], block.rows[k]);
+				aabb_max[2] = std::max(aabb_max[2], block.rows[k]);
+			}
+			aabb_min[1] -= fold_extent;
+			aabb_max[1] += fold_extent;
+			draw_list_.model_instances.push_back(block);
 		}
-
-		const ResidentMesh &resident = found->second;
-		if (!resident.empty) {
-			FoliageDrawCommand command;
-			command.tier = FoliageTier::Silhouette;
-			command.slot = first.slot;
-			command.cell_key = first.cell_key;
-			command.revision = first.cache_revision;
-			command.submission_id = first.submission_id;
-			command.alpha_reference =
-					static_cast<float>(first.alpha_reference) / 255.0f;
-			// Retail pre-increments the wind counter once per actual nonempty
-			// model draw, including repeated submissions of one resident
-			// cache entry.
-			command.wind_phase =
-					static_cast<float>(++model_wind_counter_) * 0.001f;
-			draw_list_.commands.push_back(command);
-
-			draw_list_.debug.silhouette_instances += resident.instances;
-			draw_list_.debug.silhouette_vertices += resident.vertices;
-			++draw_list_.debug.render_batches;
+		const uint32_t instance_count =
+				static_cast<uint32_t>(draw_list_.model_instances.size()) - first_instance;
+		if (instance_count == 0) {
+			begin = end;
+			continue;
 		}
+		FoliageDrawCommand command;
+		command.tier = FoliageTier::Silhouette;
+		command.slot = first.slot;
+		command.cell_key = first.cell_key;
+		command.revision = first.cache_revision;
+		command.submission_id = first.submission_id;
+		command.alpha_reference =
+				static_cast<float>(first.alpha_reference) / 255.0f;
+		command.far_side = first.far_side;
+		command.render_rung = first.far_side ? kFoliageMaskFarSideRung
+		                                     : kFoliageMaskCameraSideRung;
+		command.sorting_offset = kFoliageMaskSortingOffset;
+		command.first_instance = first_instance;
+		command.instance_count = instance_count;
+		// c9 = (sin(++counter * 0.001) * 0.08, 1, 0, 0): the counter
+		// pre-increments once per actual model draw, repeated submissions of
+		// one resident entry included. [orig: Foliage_UploadModelTileVSConstants
+		// @ 0x60108e..0x6010cf]
+		command.wind_offset = foliage_model_wind_offset(
+				static_cast<double>(++model_wind_counter_) * 0.001);
+		// The half-height column (and its sway on render x) lifts the fitted
+		// ground.
+		const float sway = std::fabs(command.wind_offset) *
+				std::max(std::fabs(mesh.max_half_height),
+						std::fabs(mesh.min_half_height));
+		command.aabb_min[0] = aabb_min[0];
+		command.aabb_max[0] = aabb_max[0];
+		command.aabb_min[1] = aabb_min[1] + std::min(0.0f, mesh.min_half_height);
+		command.aabb_max[1] = aabb_max[1] + std::max(0.0f, mesh.max_half_height);
+		command.aabb_min[2] = aabb_min[2] - sway;
+		command.aabb_max[2] = aabb_max[2] + sway;
+		draw_list_.commands.push_back(command);
+
+		draw_list_.debug.silhouette_instances += instance_count;
+		draw_list_.debug.silhouette_vertices +=
+				static_cast<int64_t>(instance_count) *
+				static_cast<int64_t>(mesh.vertices.size());
+		++draw_list_.debug.render_batches;
 		begin = end;
 	}
 
 	// --- Eviction lifecycle -----------------------------------------------
 	draw_list_.detail_evicted = output.detail_evicted;
-	draw_list_.model_evicted = output.model_evicted;
 	for (const opennova::foliage::CacheIdentity &identity :
 			output.detail_evicted) {
 		resident_.erase(MeshKey{static_cast<uint8_t>(FoliageTier::Detail),
-				identity.slot, identity.key, identity.revision});
-	}
-	for (const opennova::foliage::CacheIdentity &identity :
-			output.model_evicted) {
-		resident_.erase(MeshKey{static_cast<uint8_t>(FoliageTier::Silhouette),
 				identity.slot, identity.key, identity.revision});
 	}
 
