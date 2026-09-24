@@ -399,6 +399,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_properties_window.cpp

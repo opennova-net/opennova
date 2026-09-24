@@ -17,7 +17,10 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/ai_window.h>
+#include <runtime/devtools/control_board.h>
 #include <runtime/devtools/control_request.h>
+#include <runtime/devtools/game_status_snapshot.h>
+#include <runtime/inmatch/session.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
@@ -108,9 +111,13 @@ Dictionary DevTools::engine_log_after(int64_t p_cursor) {
 }
 
 // Both flavours: the table serves MCP in the release DLL too; only the
-// windows that would drain into it are compiled out there.
+// windows that would drain into it are compiled out there. The debug flavour
+// hands the tools the table's catalog once (the control board's definitions).
 void DevTools::set_debug_control_table(const Ref<DebugControlTable> &p_table) {
 	control_table_ = p_table;
+#if OPENNOVA_DEVTOOLS
+	push_control_catalog();
+#endif
 }
 
 bool DevTools::is_available() const {
@@ -241,31 +248,39 @@ void DevTools::_exit_tree() {
 }
 
 void DevTools::_process(double p_delta) {
-	(void)p_delta;
 	if (!is_available()) {
 		return;
 	}
+	// The display frame the status readout averages (every frame, so the
+	// first push after an open reads the real interval).
+	frame_ms_sum_ += p_delta * 1000.0;
+	frame_ms_peak_ = std::max(frame_ms_peak_, p_delta * 1000.0);
+	++frame_ms_count_;
 	auto &pass = tools_->pass();
 	pass.set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	// The F3 row times the tools' whole cost: the layout pass, the request
+	// drains and the record pushes.
 	const int64_t start = Time::get_singleton()->get_ticks_usec();
 	const bool drew = pass.draw_frame(frame);
-	const int64_t layout_us = Time::get_singleton()->get_ticks_usec() - start;
-	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
-		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, layout_us);
-	}
 	apply_game_requests();
 	sync_game_spectator_state();
 	apply_control_requests();
 	apply_weapon_requests();
 	apply_rays_requests();
 	apply_physics_requests();
+	push_control_states();
+	push_game_status();
 	push_entity_detail(push_entity_directory());
 	push_weapon_records();
 	push_environment_snapshot();
 	push_ai_debug();
 	push_rays_snapshot();
 	push_physics_snapshot();
+	const int64_t tools_us = Time::get_singleton()->get_ticks_usec() - start;
+	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
+		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, tools_us);
+	}
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -481,6 +496,147 @@ int DevTools::selected_entity_handle() const {
 	return handle == opennova::world::EntityHandle::kInvalid ? -1 : static_cast<int>(handle);
 }
 
+bool DevTools::push_due(int64_t &r_last_ms, double p_seconds) {
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	if (r_last_ms >= 0 && now_ms - r_last_ms < static_cast<int64_t>(p_seconds * 1000.0)) {
+		return false;
+	}
+	r_last_ms = now_ms;
+	return true;
+}
+
+namespace {
+
+// The table's row kinds, in the control board's order.
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Check) == DebugControlRow::CHECK,
+		"ControlKind::Check");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Slider) == DebugControlRow::SLIDER,
+		"ControlKind::Slider");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Enum) == DebugControlRow::ENUM,
+		"ControlKind::Enum");
+static_assert(static_cast<int>(opennova::devtools::ControlKind::Action) == DebugControlRow::ACTION,
+		"ControlKind::Action");
+// The status readout mirrors the session's role and state by value.
+static_assert(static_cast<int>(opennova::devtools::StatusRole::ListenServer) ==
+				static_cast<int>(opennova::inmatch::RoleKind::ListenHost),
+		"StatusRole::ListenServer");
+static_assert(static_cast<int>(opennova::devtools::StatusRole::DedicatedServer) ==
+				static_cast<int>(opennova::inmatch::RoleKind::DedicatedHost),
+		"StatusRole::DedicatedServer");
+static_assert(static_cast<int>(opennova::devtools::StatusState::Failed) ==
+				static_cast<int>(opennova::inmatch::State::Failed),
+		"StatusState::Failed");
+
+// A row value as the board's typed argument (Check = Bool, Slider = Float,
+// Enum = Int); false for a missing value.
+bool control_value_from_variant(const Variant &p_value, opennova::devtools::ControlArg &r_arg) {
+	switch (p_value.get_type()) {
+		case Variant::BOOL:
+			r_arg = opennova::devtools::ControlArg::boolean(p_value);
+			return true;
+		case Variant::INT:
+			r_arg = opennova::devtools::ControlArg::integer(p_value);
+			return true;
+		case Variant::FLOAT:
+			r_arg = opennova::devtools::ControlArg::number(p_value);
+			return true;
+		default:
+			return false;
+	}
+}
+
+} // namespace
+
+// The table's catalog as the control board's definitions: pushed once when
+// the table is lent (its rows never change after setup).
+void DevTools::push_control_catalog() {
+	std::vector<opennova::devtools::ControlSpec> catalog;
+	if (control_table_.is_valid()) {
+		const TypedArray<DebugControlRow> rows = control_table_->list_controls();
+		catalog.reserve(static_cast<size_t>(rows.size()));
+		for (int64_t i = 0; i < rows.size(); ++i) {
+			const Ref<DebugControlRow> row = rows[i];
+			if (row.is_null()) continue;
+			opennova::devtools::ControlSpec spec;
+			spec.id = opennova::to_std(String(row->get_id()));
+			spec.page = opennova::to_std(String(row->get_page()));
+			spec.label = opennova::to_std(row->get_label());
+			spec.tooltip = opennova::to_std(row->get_tooltip());
+			spec.kind = static_cast<opennova::devtools::ControlKind>(row->get_kind());
+			spec.minimum = row->get_minimum();
+			spec.maximum = row->get_maximum();
+			spec.step = row->get_step();
+			const PackedStringArray choices = row->get_choices();
+			for (int64_t c = 0; c < choices.size(); ++c) {
+				spec.choices.push_back(opennova::to_std(choices[c]));
+			}
+			spec.requires_confirm = row->get_requires_confirm();
+			spec.authoritative = row->get_authority() == DebugControlRow::HOST_ONLY;
+			catalog.push_back(std::move(spec));
+		}
+	}
+	tools_->set_control_catalog(std::move(catalog));
+	last_control_state_push_ms_ = -1;
+}
+
+// The live states of the rows the visible windows read, on the board's
+// cadence (and at once after a command, so a toggle confirms promptly).
+void DevTools::push_control_states() {
+	if (control_table_.is_null() || !tools_->needs_control_states()) {
+		last_control_state_push_ms_ = -1;
+		return;
+	}
+	if (!push_due(last_control_state_push_ms_, opennova::devtools::GameDevTools::kControlStateSeconds)) {
+		return;
+	}
+	std::vector<const char *> ids;
+	tools_->wanted_control_ids(ids);
+	std::vector<opennova::devtools::ControlState> states;
+	states.reserve(ids.size());
+	for (const char *id : ids) {
+		const Ref<DebugControlState> state = control_table_->get_state(StringName(id), true);
+		opennova::devtools::ControlState out;
+		out.id = id;
+		if (state.is_valid()) {
+			out.available = state->is_available();
+			out.writable = state->is_writable();
+			out.has_value = control_value_from_variant(state->get_value(), out.value);
+			out.reason = opennova::to_std(state->get_reason());
+		}
+		states.push_back(std::move(out));
+	}
+	tools_->set_control_states(states);
+}
+
+// The Game window's readout: the session under the world, its logic clock
+// and the display frame, on the board's cadence while the tools are open.
+void DevTools::push_game_status() {
+	if (!tools_->needs_game_status()) {
+		last_status_push_ms_ = -1;
+		return;
+	}
+	if (!push_due(last_status_push_ms_, opennova::devtools::GameDevTools::kControlStateSeconds)) {
+		return;
+	}
+	opennova::devtools::GameStatusSnapshot status;
+	status.fps = Engine::get_singleton()->get_frames_per_second();
+	status.frame_ms = frame_ms_count_ > 0 ? frame_ms_sum_ / static_cast<double>(frame_ms_count_) : 0.0;
+	status.frame_ms_peak = frame_ms_peak_;
+	frame_ms_sum_ = 0.0;
+	frame_ms_peak_ = 0.0;
+	frame_ms_count_ = 0;
+	if (Simulation *sim = simulation(); sim != nullptr) {
+		status.world = true;
+		status.logic_tick = static_cast<uint64_t>(sim->get_logic_tick());
+		status.role = static_cast<opennova::devtools::StatusRole>(sim->session_role());
+		status.state = static_cast<opennova::devtools::StatusState>(sim->session_state());
+		status.transport_locked = sim->is_transport_locked();
+		status.peers = sim->get_host_peer_count();
+		status.playing = status.state == opennova::devtools::StatusState::Running;
+	}
+	tools_->set_game_status(status);
+}
+
 namespace {
 
 // One window argument as the Variant the table marshals against the row's
@@ -552,6 +708,7 @@ void DevTools::apply_control_requests() {
 		last_entity_push_ms_ = -1;
 		last_environment_push_ms_ = -1;
 		last_ai_push_ms_ = -1;
+		last_control_state_push_ms_ = -1;
 	}
 }
 
@@ -565,13 +722,9 @@ bool DevTools::push_entity_directory() {
 		last_entity_push_ms_ = -1;
 		return false;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::EntitiesWindow::kRefreshSeconds * 1000.0);
-	if (last_entity_push_ms_ >= 0 && now_ms - last_entity_push_ms_ < cadence_ms) {
+	if (!push_due(last_entity_push_ms_, opennova::devtools::EntitiesWindow::kRefreshSeconds)) {
 		return false;
 	}
-	last_entity_push_ms_ = now_ms;
 	opennova::devtools::EntityDirectorySnapshot snapshot;
 	snapshot.rows = simulation_->native_entity_directory();
 	snapshot.valid = true;
@@ -827,13 +980,9 @@ void DevTools::push_environment_snapshot() {
 		last_environment_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::EnvironmentWindow::kRefreshSeconds * 1000.0);
-	if (last_environment_push_ms_ >= 0 && now_ms - last_environment_push_ms_ < cadence_ms) {
+	if (!push_due(last_environment_push_ms_, opennova::devtools::EnvironmentWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_environment_push_ms_ = now_ms;
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	simulation_->native_environment_snapshot(snapshot);
 	tools_->set_environment_snapshot(snapshot);
@@ -848,13 +997,9 @@ void DevTools::push_ai_debug() {
 		last_ai_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::AiWindow::kRefreshSeconds * 1000.0);
-	if (last_ai_push_ms_ >= 0 && now_ms - last_ai_push_ms_ < cadence_ms) {
+	if (!push_due(last_ai_push_ms_, opennova::devtools::AiWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_ai_push_ms_ = now_ms;
 	opennova::devtools::AiDebugSnapshot snapshot;
 	snapshot.valid = simulation_->native_ai_debug(snapshot.report);
 	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
@@ -900,13 +1045,9 @@ void DevTools::push_rays_snapshot() {
 		last_rays_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::RaysWindow::kRefreshSeconds * 1000.0);
-	if (last_rays_push_ms_ >= 0 && now_ms - last_rays_push_ms_ < cadence_ms) {
+	if (!push_due(last_rays_push_ms_, opennova::devtools::RaysWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_rays_push_ms_ = now_ms;
 	opennova::devtools::RaysSnapshot snapshot;
 	simulation_->native_rays_snapshot(snapshot);
 	tools_->set_rays_snapshot(snapshot);
@@ -949,13 +1090,9 @@ void DevTools::push_physics_snapshot() {
 		last_physics_push_ms_ = -1;
 		return;
 	}
-	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-	const int64_t cadence_ms = static_cast<int64_t>(
-			opennova::devtools::PhysicsWindow::kRefreshSeconds * 1000.0);
-	if (last_physics_push_ms_ >= 0 && now_ms - last_physics_push_ms_ < cadence_ms) {
+	if (!push_due(last_physics_push_ms_, opennova::devtools::PhysicsWindow::kRefreshSeconds)) {
 		return;
 	}
-	last_physics_push_ms_ = now_ms;
 	opennova::devtools::PhysicsSnapshot snapshot;
 	simulation_->native_physics_snapshot(snapshot);
 	tools_->set_physics_snapshot(snapshot);

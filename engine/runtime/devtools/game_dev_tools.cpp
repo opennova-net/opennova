@@ -13,12 +13,14 @@
 #include <runtime/devtools/stats_window.h>
 #include <runtime/devtools/weapon_window.h>
 
+#include <algorithm>
+#include <cstring>
 #include <utility>
 
 namespace opennova::devtools {
 
 GameDevTools::GameDevTools() {
-	auto game = std::make_unique<GameWindow>();
+	auto game = std::make_unique<GameWindow>(control_board_);
 	game_window_ = game.get();
 	game->open = true;
 	pass_.register_window(std::move(game));
@@ -85,6 +87,38 @@ bool GameDevTools::take_game_request(GameWindowRequest &request) {
 
 void GameDevTools::set_frame_stats(FrameStatsBoard *board) {
 	stats_window_->set_board(board);
+}
+
+void GameDevTools::set_control_catalog(std::vector<ControlSpec> catalog) {
+	control_board_.set_catalog(std::move(catalog));
+	control_board_.clear_states();
+}
+
+void GameDevTools::set_control_states(const std::vector<ControlState> &states) {
+	control_board_.set_states(states);
+}
+
+bool GameDevTools::needs_control_states() const {
+	return pass_.is_open() && control_board_.has_catalog();
+}
+
+void GameDevTools::wanted_control_ids(std::vector<const char *> &out) const {
+	out.clear();
+	if (!pass_.is_open()) return;
+	for (int i = 0; i < pass_.window_count(); ++i) {
+		const Window &window = pass_.window(i);
+		if (window.open) window.wanted_controls(out);
+	}
+	// One read per row per push, whichever windows share it.
+	std::sort(out.begin(), out.end(),
+			[](const char *a, const char *b) { return std::strcmp(a, b) < 0; });
+	out.erase(std::unique(out.begin(), out.end(),
+					  [](const char *a, const char *b) { return std::strcmp(a, b) == 0; }),
+			out.end());
+}
+
+void GameDevTools::set_game_status(const GameStatusSnapshot &status) {
+	game_window_->set_status(status);
 }
 
 void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
