@@ -13,6 +13,14 @@
 namespace opennova::terrain {
 namespace {
 
+// The temp target is twice the page at every tier: config+0x1740 selects
+// page dword_31A00D4 = 0x100 with temp dword_31A00D0 = 0x200, otherwise
+// 0x80 with 0x100 [orig: PolyTrn_LoadTerrainConfig @0x60E41D..0x60E446]. The
+// collector sizes its viewport from the temp dimension [orig: @0x60D5E0,
+// @0x60D9E4], and the page composite samples the temp with MINFILTER LINEAR
+// over a quad spanning [-0.5, page - 0.5] [orig: PolyTrn_RenderTile
+// @0x60E0D1..0x60E0E0, @0x60E152..0x60E166]: every page pixel lands exactly
+// between two temp texels per axis, so the bilinear fetch is the 2x2 box.
 constexpr uint32_t kTemporaryScale = 2;
 constexpr float kDegenerateArea = 1.0e-12f;
 // The same 0.25 vertical clamp the collect phase applies in fixed point
@@ -53,16 +61,24 @@ bool edge_admits(float value, bool inclusive) noexcept {
 	return value > 0.0f || (value == 0.0f && inclusive);
 }
 
-int clamped_floor(float value, int limit) noexcept {
-	if (value <= 0.0f) return 0;
-	if (value >= static_cast<float>(limit)) return limit;
-	return static_cast<int>(std::floor(value));
-}
-
-int clamped_ceil(float value, int limit) noexcept {
+// The first and one-past-last pixel whose centre lies in [min, max]. D3D9
+// puts a pixel's centre on its integer screen coordinate, and the viewport
+// maps clip x = -1 onto screen 0: the untransformed-geometry draw into the
+// temp target therefore samples pixel i at page_u = i / width, half a temp
+// pixel before the texel centre the page composite later reads
+// [orig: the collector's plain ortho, no half-pixel bias,
+// setup_shadow_cascade_matrices_0 @0x58D5CF..0x58D5EE; viewport = the temp
+// dimension @0x60D5E0].
+int first_pixel_centre(float value, int limit) noexcept {
 	if (value <= 0.0f) return 0;
 	if (value >= static_cast<float>(limit)) return limit;
 	return static_cast<int>(std::ceil(value));
+}
+
+int past_last_pixel_centre(float value, int limit) noexcept {
+	if (value < 0.0f) return 0;
+	if (value >= static_cast<float>(limit - 1)) return limit;
+	return static_cast<int>(std::floor(value)) + 1;
 }
 
 bool finite(const TerrainStaticShadowRasterVertex &vertex) noexcept {
@@ -372,10 +388,10 @@ bool rasterize_terrain_static_shadow_alpha(
 				vertices[2].y});
 		const float max_y = std::max({vertices[0].y, vertices[1].y,
 				vertices[2].y});
-		const int x0 = clamped_floor(min_x, static_cast<int>(high_width));
-		const int x1 = clamped_ceil(max_x, static_cast<int>(high_width));
-		const int y0 = clamped_floor(min_y, static_cast<int>(high_height));
-		const int y1 = clamped_ceil(max_y, static_cast<int>(high_height));
+		const int x0 = first_pixel_centre(min_x, static_cast<int>(high_width));
+		const int x1 = past_last_pixel_centre(max_x, static_cast<int>(high_width));
+		const int y0 = first_pixel_centre(min_y, static_cast<int>(high_height));
+		const int y1 = past_last_pixel_centre(max_y, static_cast<int>(high_height));
 		const bool edge0_inclusive = orientation > 0.0f
 				? is_top_left(vertices[1], vertices[2])
 				: is_top_left(vertices[2], vertices[1]);
@@ -393,8 +409,8 @@ bool rasterize_terrain_static_shadow_alpha(
 		}
 		for (int y = y0; y < y1; ++y) {
 			for (int x = x0; x < x1; ++x) {
-				const float sample_x = static_cast<float>(x) + 0.5f;
-				const float sample_y = static_cast<float>(y) + 0.5f;
+				const float sample_x = static_cast<float>(x);
+				const float sample_y = static_cast<float>(y);
 				const float e0 = edge(vertices[1], vertices[2],
 						sample_x, sample_y) * orientation;
 				const float e1 = edge(vertices[2], vertices[0],
