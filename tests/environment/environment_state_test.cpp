@@ -148,9 +148,13 @@ int main() {
 		ok &= expect(env.env_generation() == gen + 2,
 				"a settled writeback stops bumping");
 		ok &= expect(env.set_nvg_view(true, 2), "NVG change reported");
-		// f = (2+1)*.2 = .6: c' = c*.15 + gain*.06.
-		ok &= expect(near(env.fill_light().r, 0.8f * 0.15f + 0.5f * 0.06f),
+		// f = (2+1)*.2 = .6: c' = c*.15 + gain*.06, in the object block only.
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						near(values.hemi_ground.r, 0.8f * 0.15f + 0.5f * 0.06f),
 				"the NVG hemisphere rewrite (modulator*f/640 as gain*f/10)");
+		ok &= expect(rgb_near(env.fill_light(), {0.8f, 0.4f, 0.2f}),
+				"the ground getter stays the raw block under NVG");
 		ok &= expect(!env.set_nvg_view(true, 2), "identical NVG is idempotent");
 	}
 
@@ -167,30 +171,59 @@ int main() {
 		// envscale .5): read it raw before NVG instead of assuming the authored
 		// value.
 		const opennova::env::Rgb sky_raw = env.sky_ambient();
+		const opennova::env::SceneFogValues underwater_raw = env.build_scene_fog(true);
+		const opennova::env::TerrainEnvUniforms terrain_raw = env.build_terrain_uniforms(false);
 		ok &= expect(env.set_nvg_view(true, 2), "NVG change reported");
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values),
+				"the block builds under NVG");
 		// f = .6: ceiling'/floor' = c*.15 + gain.r*.06 on EVERY channel (the
 		// R term reused [orig: @ 0x5c82a5..0x5c82e9]) ...
-		ok &= expect(rgb_near(env.ceiling_color(),
+		ok &= expect(rgb_near(values.ceiling,
 					{0.8f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
 							0.2f * 0.15f + 0.03f}),
 				"the NVG ceiling rewrite adds the modulator R term to all channels");
-		ok &= expect(rgb_near(env.floor_color(),
+		ok &= expect(rgb_near(values.floor_color,
 					{0.2f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
 							0.8f * 0.15f + 0.03f}),
 				"the NVG floor rewrite adds the modulator R term to all channels");
 		// ... while sky/ground keep their per-channel terms (gain.g on g, not
 		// the R term) [orig: @ 0x5c8258..0x5c82a1].
-		ok &= expect(near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.25f * 0.06f) &&
-						!near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.5f * 0.06f),
+		ok &= expect(near(values.hemi_sky.g, sky_raw.g * 0.15f + 0.25f * 0.06f) &&
+						!near(values.hemi_sky.g, sky_raw.g * 0.15f + 0.5f * 0.06f),
 				"sky/ground keep the per-channel modulator terms");
-		opennova::env::WorldLightValues values;
-		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
-						rgb_near(values.ceiling, env.ceiling_color()) &&
-						rgb_near(values.floor_color, env.floor_color()),
-				"the published block carries the rewritten interior pair");
-		env.set_nvg_view(false, 2);
-		ok &= expect(rgb_near(env.ceiling_color(), {0.8f, 0.4f, 0.2f}) &&
+		// The rewrite is the object block's alone: the colour getters, lit
+		// water / the underwater fog and the combined terrain light read the raw
+		// blocks [orig: Env_WaterColorLit @ 0x57f177 and Env_TerrainLightCombined
+		// @ 0x57f0d5 are built from the raw blocks in the weather tick].
+		ok &= expect(rgb_near(env.sky_ambient(), sky_raw) &&
+						rgb_near(env.ceiling_color(), {0.8f, 0.4f, 0.2f}) &&
 						rgb_near(env.floor_color(), {0.2f, 0.4f, 0.8f}),
+				"the colour getters stay raw under NVG");
+		ok &= expect(rgb_near(env.build_scene_fog(true).color, underwater_raw.color),
+				"the lit water colour ignores the NVG rewrite");
+		// The terrain rebuilds its NVG sky as BYTES with a chop:
+		// trunc(sky_byte * 0.15 + mod_byte * 0.6 * 0.0015625 * 255)
+		// [orig: Render_TerrainScene @ 0x610d16..0x610e22]. The modulator bytes
+		// are gain * 64 = (32, 16, 48).
+		const auto terrain_nvg_byte = [](float sky, int mod_byte) {
+			const int sky_byte = static_cast<int>(std::lround(sky * 255.0f));
+			const float sum = static_cast<float>(sky_byte) * (0.25f * 0.6f) +
+					static_cast<float>(mod_byte) * (0.6f * 0.0015625f * 255.0f);
+			return static_cast<float>(static_cast<int>(sum)) / 255.0f;
+		};
+		const opennova::env::TerrainEnvUniforms terrain_nvg = env.build_terrain_uniforms(false);
+		ok &= expect(rgb_near(terrain_nvg.sky_ambient,
+					{terrain_nvg_byte(sky_raw.r, 32), terrain_nvg_byte(sky_raw.g, 16),
+							terrain_nvg_byte(sky_raw.b, 48)}, 1.0e-6f) &&
+						rgb_near(terrain_nvg.sun_light, terrain_raw.sun_light),
+				"the terrain NVG sky is the truncated byte rebuild over the raw light");
+		ok &= expect(!near(terrain_nvg.sky_ambient.g, values.hemi_sky.g, 1.0e-6f),
+				"the terrain byte rebuild differs from the object block's float rewrite");
+		env.set_nvg_view(false, 2);
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.ceiling, {0.8f, 0.4f, 0.2f}) &&
+						rgb_near(values.floor_color, {0.2f, 0.4f, 0.8f}),
 				"NVG off serves the raw interior pair");
 	}
 
@@ -257,8 +290,8 @@ int main() {
 		// NVG precedence differs per side: NVG in first person takes the
 		// terrain's NVG blend, while the world block's grey outranks NVG.
 		env.set_nvg_view(true, 0);
-		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sky_ambient,
-							 env.sky_ambient()) &&
+		ok &= expect(!rgb_near(env.build_terrain_uniforms(false).sky_ambient,
+							 ramp_sky) &&
 						rgb_near(env.build_terrain_uniforms(false).sun_light,
 								env.sun_light()),
 				"NVG in first person outranks the thermal terrain ramps");

@@ -243,9 +243,18 @@ public:
 
 	// --- current render colors (the smoothed/current slots) ---------------
 
+	// The RAW color blocks. The NVG hemisphere rewrite is not a property of
+	// the blocks: retail applies it only to the per-pass object lighting
+	// block (build_light_values) and to a stack copy of the terrain sky
+	// argument (build_terrain_uniforms); water, the combined terrain light,
+	// particles, scars and the slot drape read the blocks raw [orig:
+	// CTerrainRenderer_BuildLightingShaderConstants @ 0x5c820b..0x5c82e9;
+	// Render_TerrainScene @ 0x610d16..0x610e36; Env_TerrainLightCombined
+	// @ 0x57f0d5 and Env_WaterColorLit @ 0x57f177 from the raw blocks;
+	// RenderSlot_DrawSilhouetteDrape @ 0x5d5f66..0x5d5f6d].
 	Rgb sun_light() const { return sun_light_; }
-	Rgb fill_light() const;  // NVG-gated
-	Rgb sky_ambient() const; // NVG-gated; the SMOOTHED sky block when driven
+	Rgb fill_light() const { return fill_light_; }
+	Rgb sky_ambient() const { return sky_ambient_rt_; } // the SMOOTHED sky block when driven
 	Rgb fog_color() const { return fog_color_rt_; }
 	Rgb skyfog_color() const { return skyfog_color_rt_; }
 	// The frame CLEAR color (divergence #21, closed): the POST-BLEND DOUBLED
@@ -267,11 +276,11 @@ public:
 	// @ 0x5ca78b]. Every branch serves RENDER-SPACE (x2-gained) colors for
 	// the modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool indoors, bool above_water) const;
-	// The interior pair, NVG-gated like sky/ground but with the modulator's
-	// R term on all three channels (apply_nvg_hemi_gain_r).
-	Rgb ceiling_color() const;
+	// The raw interior pair (the object block's NVG rewrite gives it the
+	// modulator's R term on all three channels, apply_nvg_hemi_gain_r).
+	Rgb ceiling_color() const { return ceiling_color_rt_; }
 	Rgb cloud_tint() const { return cloud_tint_rt_; }
-	Rgb floor_color() const;
+	Rgb floor_color() const { return floor_color_rt_; }
 	Rgb sky_base() const { return sky_base_rt_; }
 	Rgb sky_bright() const { return sky_bright_rt_; }
 	Rgb sky_highlight() const { return sky_highlight_rt_; }
@@ -419,7 +428,8 @@ public:
 	// The current world lighting/fog record — the witnessed block mapping:
 	// dir_color <- the light block (sun/moon), hemi_sky <- the sky block,
 	// hemi_ground <- the ground block, gain <- the modulator /64; the NVG
-	// rewrite rides the getters and the thermal grey override the tail
+	// rewrite applies to the four hemisphere blocks here (never to the raw
+	// getters) and the thermal grey override the tail
 	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090
 	//  (thermal grey @ 0x5c837c..0x5c843c); ColorSrcGlobalGain bind
 	//  @ 0x58e05d; sun/moon select Environment_GetLightDirectionFloat
@@ -434,8 +444,11 @@ public:
 	// (foliage inherits the terrain's two device constants).
 	EnvShaderGlobals build_shader_globals(bool underwater_view = false) const;
 	// The terrain c1 light / c0 sky pair plus the pass fog; the thermal
-	// terrain ramps and the NVG sky blend select here
-	// [orig: Render_TerrainScene @ 0x610d10..0x610ea1].
+	// terrain ramps and the NVG sky blend select here. The NVG sky is rebuilt
+	// as BYTES, trunc(sky * 0.25f + modulator * f * 0.0015625 * 255) under a
+	// chop rounding mode, before the ramp init divides by 255
+	// [orig: Render_TerrainScene @ 0x610d10..0x610ea1; the byte rebuild
+	//  @ 0x610d16..0x610e22].
 	TerrainEnvUniforms build_terrain_uniforms(bool underwater_view = false) const;
 	// The per-pass device fog: lit water underwater, else the thermal
 	// 0x808080, else the weather fog block
@@ -527,6 +540,8 @@ private:
 	// The ceiling/floor form: the modulator's R term on all three channels
 	// [orig: @ 0x5c82a5..0x5c82e9].
 	Rgb apply_nvg_hemi_gain_r(const Rgb &color) const;
+	// The terrain's byte form of the sky rewrite (build_terrain_uniforms).
+	Rgb nvg_terrain_sky() const;
 	// The thermal view's two shell-fed gates (see set_thermal_view).
 	bool thermal_view_ = false;
 	bool thermal_terrain_view_ = false;

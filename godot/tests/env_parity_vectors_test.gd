@@ -909,9 +909,13 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 		"the resync snap lands the currents at the new keyframe (mod the iris gain)")
 
 
-func test_nvg_view_applies_retail_hemisphere_gain() -> void:
-	var env := MissionEnvironment.new()
-	add_child_autofree(env)
+# The NVG hemisphere rewrite lives in the published object lighting block
+# alone; the env colour getters (water, particles, scars, the slot drape)
+# keep serving the raw blocks [orig: CTerrainRenderer_BuildLightingShaderConstants
+# @ 0x5c820b..0x5c82e9; Env_WaterColorLit @ 0x57f177 from the raw blocks].
+func test_nvg_view_rewrites_only_the_object_block() -> void:
+	var env := _add_env_node(_make_cfg(0), "EnvNvg")
+	env.time_of_day = 1200.0
 	var fill := Vector3(0.8, 0.4, 0.2)
 	var sky := Vector3(0.2, 0.6, 1.0)
 	var sun := Vector3(0.9, 0.7, 0.5)
@@ -920,20 +924,21 @@ func test_nvg_view_applies_retail_hemisphere_gain() -> void:
 	env.set_sky_ambient_rt(sky)
 	env.set_sun_light(sun)
 	env.set_color_src_gain(modulator_gain)
-	var generation := env.get_env_generation()
+	var generation: int = env.get_env_generation()
 
 	# Gain 2: f=(2+1)*.2=.6, c'=c*.25*f + (modulator/64)*f/10.
 	env.set_nvg_view(true, 2)
 	assert_eq(env.get_env_generation(), generation + 1,
 		"changing visible NVG state invalidates environment consumers once")
-	var nvg_fill: Vector3 = env.get_fill_light()
-	var nvg_sky: Vector3 = env.get_sky_ambient()
-	assert_almost_eq(nvg_fill.x, 0.150, FLOAT_EPSILON, "NVG fill red")
-	assert_almost_eq(nvg_fill.y, 0.075, FLOAT_EPSILON, "NVG fill green")
-	assert_almost_eq(nvg_fill.z, 0.075, FLOAT_EPSILON, "NVG fill blue")
-	assert_almost_eq(nvg_sky.x, 0.060, FLOAT_EPSILON, "NVG sky red")
-	assert_almost_eq(nvg_sky.y, 0.105, FLOAT_EPSILON, "NVG sky green")
-	assert_almost_eq(nvg_sky.z, 0.195, FLOAT_EPSILON, "NVG sky blue")
+	var values: EnvLightValues = env.get_light_state().get_values()
+	assert_almost_eq(values.get_hemi_ground().x, 0.150, FLOAT_EPSILON, "NVG ground red")
+	assert_almost_eq(values.get_hemi_ground().y, 0.075, FLOAT_EPSILON, "NVG ground green")
+	assert_almost_eq(values.get_hemi_ground().z, 0.075, FLOAT_EPSILON, "NVG ground blue")
+	assert_almost_eq(values.get_hemi_sky().x, 0.060, FLOAT_EPSILON, "NVG sky red")
+	assert_almost_eq(values.get_hemi_sky().y, 0.105, FLOAT_EPSILON, "NVG sky green")
+	assert_almost_eq(values.get_hemi_sky().z, 0.195, FLOAT_EPSILON, "NVG sky blue")
+	assert_eq(env.get_fill_light(), fill, "the ground getter stays raw under NVG")
+	assert_eq(env.get_sky_ambient(), sky, "the sky getter stays raw under NVG")
 	assert_eq(env.get_sun_light(), sun, "NVG rewrites hemispheres, not direct sun")
 
 	# Identical owner updates are common each frame and must not churn materials.
@@ -942,12 +947,16 @@ func test_nvg_view_applies_retail_hemisphere_gain() -> void:
 
 	# Gain clamps to retail's [0,4]; level 4 has f=1.
 	env.set_nvg_view(true, 99)
-	assert_almost_eq(env.get_fill_light().x, 0.250, FLOAT_EPSILON, "NVG gain clamps high")
+	values = env.get_light_state().get_values()
+	assert_almost_eq(values.get_hemi_ground().x, 0.250, FLOAT_EPSILON, "NVG gain clamps high")
 	assert_eq(env.get_env_generation(), generation + 2, "gain change invalidates consumers")
 
-	# The shell supplies first-person visibility. Suppressing it restores the
-	# untouched weather values while retaining the clamped gain for later use.
+	# The shell supplies first-person visibility. Suppressing it republishes
+	# the untouched blocks while retaining the clamped gain for later use.
 	env.set_nvg_view(false, 99)
-	assert_eq(env.get_fill_light(), fill, "hidden NVG restores unmodified fill")
-	assert_eq(env.get_sky_ambient(), sky, "hidden NVG restores unmodified sky")
+	values = env.get_light_state().get_values()
+	assert_almost_eq(values.get_hemi_ground().x, fill.x, FLOAT_EPSILON,
+		"hidden NVG publishes the unmodified ground")
+	assert_almost_eq(values.get_hemi_sky().z, sky.z, FLOAT_EPSILON,
+		"hidden NVG publishes the unmodified sky")
 	assert_eq(env.get_env_generation(), generation + 3, "visibility change invalidates consumers")

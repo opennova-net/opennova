@@ -299,29 +299,30 @@ Rgb EnvironmentState::apply_nvg_hemi_gain_r(const Rgb &color) const {
 	return Rgb{scaled.r + gain_r, scaled.g + gain_r, scaled.b + gain_r};
 }
 
-Rgb EnvironmentState::fill_light() const {
-	return nvg_view_active_ ? apply_nvg_hemi_gain(fill_light_) : fill_light_;
-}
-
-Rgb EnvironmentState::ceiling_color() const {
-	return nvg_view_active_ ? apply_nvg_hemi_gain_r(ceiling_color_rt_)
-							: ceiling_color_rt_;
-}
-
-Rgb EnvironmentState::floor_color() const {
-	return nvg_view_active_ ? apply_nvg_hemi_gain_r(floor_color_rt_)
-							: floor_color_rt_;
-}
-
-// The SMOOTHED sky block when the weather tick drives it — written back per
-// tick like fill/sun/fog, so object hemi_sky serves the post-modulator block
-// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 reads
-// Env_SkyBlock[0]; the blocks smooth + modulate in the weather tick
-// @ 0x57ef97..0x57f03c]. Discrete TOD recomputes re-seed it from the keyframe
-// (like fill); the chase target stays sky_ambient_target().
-Rgb EnvironmentState::sky_ambient() const {
-	return nvg_view_active_ ? apply_nvg_hemi_gain(sky_ambient_rt_)
-							: sky_ambient_rt_;
+// The terrain rebuilds the NVG sky as a packed colour: per channel
+// trunc(sky_byte * (0.25 * f) + modulator_byte * (f * 0.0015625 * 255)) with
+// f = (level + 1) * 0.2, the x87 control word forced to chop for each fistp,
+// and only the stored low byte kept. The alpha byte stays the sky block's.
+// sky_ambient_rt_ carries the block bytes / 255 and color_src_gain_ the
+// modulator bytes / 64, so both round back to their exact bytes.
+// [orig: Render_TerrainScene @ 0x610d16..0x610e22: flt_7C3340 = 0.2,
+//  flt_7C333C = 0.25, flt_7D00A8 = 0.0015625, flt_7CA29C = 255, the
+//  `or eax, 0C00h; fldcw; fistp` sequences]
+Rgb EnvironmentState::nvg_terrain_sky() const {
+	const float f = static_cast<float>(nvg_gain_ + 1) * 0.2f;
+	const float quarter = 0.25f * f;
+	const float k = f * 0.0015625f * 255.0f;
+	const auto channel = [&](float sky, float gain) {
+		const int sky_byte = std::clamp(static_cast<int>(std::lround(sky * 255.0f)), 0, 255);
+		const int mod_byte = std::clamp(static_cast<int>(std::lround(gain * 64.0f)), 0, 255);
+		const float sum = static_cast<float>(sky_byte) * quarter +
+				static_cast<float>(mod_byte) * k;
+		const int byte = static_cast<int>(std::trunc(sum)) & 0xFF;
+		return static_cast<float>(byte) / 255.0f;
+	};
+	return Rgb{channel(sky_ambient_rt_.r, color_src_gain_.r),
+			channel(sky_ambient_rt_.g, color_src_gain_.g),
+			channel(sky_ambient_rt_.b, color_src_gain_.b)};
 }
 
 // --- the thermal view --------------------------------------------------------
@@ -636,7 +637,17 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 	out.hemi_ground = fill_light();
 	out.ceiling = ceiling_color();
 	out.floor_color = floor_color();
-	// The thermal grey override, after the NVG rewrite the getters carry:
+	// The first-person NVG rewrite of the block's four hemisphere colours:
+	// sky/ground per channel, ceiling/floor on the modulator's R term. It lives
+	// in this block alone; the colour getters stay raw
+	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c820b..0x5c82e9].
+	if (nvg_view_active_) {
+		out.hemi_sky = apply_nvg_hemi_gain(out.hemi_sky);
+		out.hemi_ground = apply_nvg_hemi_gain(out.hemi_ground);
+		out.ceiling = apply_nvg_hemi_gain_r(out.ceiling);
+		out.floor_color = apply_nvg_hemi_gain_r(out.floor_color);
+	}
+	// The thermal grey override, after the NVG rewrite:
 	// constant [0] (the dir-enable flag) clears — the ctx store then zeroes
 	// the dir colour, so the 0.1 written into [1..4] never reaches a draw —
 	// and every sky/ground/ceiling/floor channel becomes 0.5; the gain is
@@ -697,14 +708,18 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
 		bool underwater_view) const {
 	TerrainEnvUniforms uniforms;
-	// c1 <- the light block, c0 <- the sky block (the NVG sky blend rides
-	// sky_ambient()); the thermal view in first person swaps in the flat
-	// 0x101010 / 0xF0F0F0 pair, unless NVG in first person took its branch
-	// first [orig: Render_TerrainScene @ 0x610d10 (NVG gate) / @ 0x610e51
-	//  (flags2 & Thermal && camera mode 0) -> init_terrain_lighting_color_ramps
-	//  (0x101010, 0xF0F0F0) @ 0x610e65; else (Env_LightBlock, Env_SkyBlock)
-	//  @ 0x610ea1].
-	if (thermal_terrain_view_ && !nvg_view_active_) {
+	// c1 <- the light block, c0 <- the sky block. NVG in first person takes
+	// its branch first with the byte-rebuilt sky (nvg_terrain_sky); else the
+	// thermal view in first person swaps in the flat 0x101010 / 0xF0F0F0 pair
+	// [orig: Render_TerrainScene @ 0x610d10 (NVG gate) ->
+	//  init_terrain_lighting_color_ramps(Env_LightBlock, NVG sky) @ 0x610e36;
+	//  @ 0x610e51 (flags2 & Thermal && camera mode 0) ->
+	//  init_terrain_lighting_color_ramps (0x101010, 0xF0F0F0) @ 0x610e65;
+	//  else (Env_LightBlock, Env_SkyBlock) @ 0x610ea1].
+	if (nvg_view_active_) {
+		uniforms.sun_light = sun_light();
+		uniforms.sky_ambient = nvg_terrain_sky();
+	} else if (thermal_terrain_view_) {
 		uniforms.sun_light = kThermalTerrainLight;
 		uniforms.sky_ambient = kThermalTerrainSky;
 	} else {
