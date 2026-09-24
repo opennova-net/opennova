@@ -60,49 +60,60 @@ int main() {
 	CHECK(near_f(silhouette_half_extent(1.0f), 1.25f));   // r*1.25
 	CHECK(near_f(silhouette_half_extent(8.0f), 8.75f));   // clamp r+0.75
 
-	// --- capture view basis [orig: build_direction_look_at_matrix @ 0x612c90]:
-	// forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
-	// up = fwd x right; a vertical direction degenerates (retail zeroes the
-	// right/up rows, the port substitutes x and reports it).
+	// --- capture view axes [orig: build_direction_look_at_matrix @ 0x612c90
+	// via setup_shadow_cascade_matrices @ 0x58d31e]: the retail look-at
+	// (forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
+	// up = fwd x right) in render axes, mapped to presentation axes through
+	// the x/z swap: camera x = -right, y = up, z = -forward, a proper
+	// rotation (det +1) whose back-face cull keeps the light-facing faces.
 	{
-		const SlotCaptureBasis b = silhouette_capture_basis({0.6f, -0.8f, 0.0f});
-		CHECK(!b.degenerate);
-		CHECK(near_f(b.forward[0], 0.6f) && near_f(b.forward[1], -0.8f) &&
-				near_f(b.forward[2], 0.0f));
-		CHECK(near_f(b.right[0], 0.0f) && near_f(b.right[1], 0.0f) &&
-				near_f(b.right[2], -1.0f));
-		CHECK(near_f(b.up[0], 0.8f) && near_f(b.up[1], 0.6f) && near_f(b.up[2], 0.0f));
-		// Unnormalized input: the basis normalizes first.
-		const SlotCaptureBasis scaled = silhouette_capture_basis({1.2f, -1.6f, 0.0f});
-		CHECK(near_f(scaled.forward[0], 0.6f) && near_f(scaled.up[1], 0.6f));
-		// Orthonormal for a general direction.
-		const SlotCaptureBasis g = silhouette_capture_basis({0.3f, -0.5f, 0.7f});
 		const auto dot = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 		};
-		CHECK(near_f(dot(g.right, g.forward), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.forward), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.right), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.up), 1.0f, 1.0e-4f));
-		CHECK(near_f(g.right[1], 0.0f));  // the right row stays horizontal
-		// The zenith sun (the clamped-negated (0, -1, 0)): degenerate.
-		const SlotCaptureBasis zenith = silhouette_capture_basis({0.0f, -1.0f, 0.0f});
+		const auto cross = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+			return std::array<float, 3>{a[1] * b[2] - a[2] * b[1],
+					a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+		};
+		const SlotCaptureViewAxes b = slot_capture_view_axes({0.6f, -0.8f, 0.0f});
+		CHECK(!b.degenerate);
+		// The camera looks down -z: z is the negated slot direction.
+		CHECK(near_f(b.z[0], -0.6f) && near_f(b.z[1], 0.8f) && near_f(b.z[2], 0.0f));
+		// The look-at right on the presentation direction is (0, 0, -1); the
+		// retail right row mapped back is its negation.
+		CHECK(near_f(b.x[0], 0.0f) && near_f(b.x[1], 0.0f) && near_f(b.x[2], 1.0f));
+		CHECK(near_f(b.y[0], 0.8f) && near_f(b.y[1], 0.6f) && near_f(b.y[2], 0.0f));
+		// Right-handed: x cross y = z (det +1), not the mirrored -z.
+		const auto xy = cross(b.x, b.y);
+		CHECK(near_f(xy[0], b.z[0], 1.0e-4f) && near_f(xy[1], b.z[1], 1.0e-4f) &&
+				near_f(xy[2], b.z[2], 1.0e-4f));
+		// Unnormalized input: the look-at normalizes first.
+		const SlotCaptureViewAxes scaled = slot_capture_view_axes({1.2f, -1.6f, 0.0f});
+		CHECK(near_f(scaled.z[0], -0.6f) && near_f(scaled.y[1], 0.6f));
+		// Orthonormal and right-handed for a general direction.
+		const SlotCaptureViewAxes g = slot_capture_view_axes({0.3f, -0.5f, 0.7f});
+		CHECK(near_f(dot(g.x, g.z), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.z), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.x), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.y), 1.0f, 1.0e-4f));
+		CHECK(near_f(g.x[1], 0.0f));  // the right row stays horizontal
+		CHECK(near_f(dot(cross(g.x, g.y), g.z), 1.0f, 1.0e-4f));
+		// The shared retail look-at frame (mounted_pose consumes the same
+		// one): up and forward carry over, right is its mapped negation.
+		const DirectionLookAt<float> shared = direction_look_at(
+				std::array<float, 3>{0.3f, -0.5f, 0.7f});
+		CHECK(near_f(shared.right[0], -g.x[0]) && near_f(shared.up[1], g.y[1]) &&
+				near_f(shared.forward[2], -g.z[2]) && !shared.degenerate);
+		// The zenith sun (the clamped-negated (0, -1, 0)): degenerate, still
+		// a right-handed frame.
+		const SlotCaptureViewAxes zenith = slot_capture_view_axes({0.0f, -1.0f, 0.0f});
 		CHECK(zenith.degenerate);
-		CHECK(near_f(zenith.forward[1], -1.0f));
-		CHECK(near_f(zenith.right[0], 1.0f));
-		CHECK(near_f(dot(zenith.up, zenith.up), 1.0f, 1.0e-4f));
-		CHECK(near_f(dot(zenith.up, zenith.forward), 0.0f, 1.0e-4f));
-		const SlotCaptureBasis none = silhouette_capture_basis({0.0f, 0.0f, 0.0f});
+		CHECK(near_f(zenith.z[1], 1.0f));
+		CHECK(near_f(dot(cross(zenith.x, zenith.y), zenith.z), 1.0f, 1.0e-4f));
+		const SlotCaptureViewAxes none = slot_capture_view_axes({0.0f, 0.0f, 0.0f});
 		CHECK(none.degenerate);
 		CHECK(kSlotCaptureClearArgb == 0x00FFFFFFu);  // white RGB, alpha 0
 		CHECK(near_f(kSilhouetteCaptureNear, 0.2f));
 		CHECK(near_f(kSilhouetteCaptureFar, 5000.2f));
-		// The slot basis is the shared retail look-at frame (mounted_pose
-		// consumes the same one): identical outputs for the same direction.
-		const DirectionLookAt<float> shared = direction_look_at(
-				std::array<float, 3>{0.3f, -0.5f, 0.7f});
-		CHECK(near_f(shared.right[0], g.right[0]) && near_f(shared.up[1], g.up[1]) &&
-				near_f(shared.forward[2], g.forward[2]) && !shared.degenerate);
 	}
 
 	// --- RT chain [orig: RenderSlot_InitTextureChain @ 0x5d5320].

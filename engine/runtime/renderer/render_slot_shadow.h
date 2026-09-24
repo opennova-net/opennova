@@ -109,8 +109,27 @@ float silhouette_half_extent(float bound_radius_units);
 // and band around the model sphere (docs/render/render-lighting-re.md,
 // D-RLIT-10) — an orthographic silhouette is invariant under that
 // translation.
-using SlotCaptureBasis = DirectionLookAt<float>;
-SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction);
+//
+// The view is the look-at matrix itself [orig: @ 0x58d31e -> SetTransform
+// VIEW @ 0x58d368]: camera x = right, y = up, depth = forward, a proper
+// (det +1) rotation in retail's render axes. Presentation axes are the
+// render axes with x and z swapped (util/axes.h), a reflection, so the
+// retail right row mapped to presentation is the NEGATION of the look-at
+// right computed on the presentation direction, while up and forward map
+// unchanged. The capture camera's columns in presentation axes are
+// therefore x = -right, y = up, z = -forward (a Godot camera looks down its
+// local -Z): a right-handed frame whose back-face cull keeps the
+// light-facing faces, exactly retail's CULLMODE CCW over its view [orig:
+// CRenderBatchQueue_FlushBatches @ 0x5da3e4..0x5da401]. Taking the look-at
+// columns unmapped mirrors the view (det -1) and culls the light-facing
+// faces instead.
+struct SlotCaptureViewAxes {
+	std::array<float, 3> x{};  // camera right
+	std::array<float, 3> y{};  // camera up
+	std::array<float, 3> z{};  // camera back (-forward)
+	bool degenerate = false;   // the zenith substitution (direction_look_at)
+};
+SlotCaptureViewAxes slot_capture_view_axes(const std::array<float, 3> &direction);
 inline constexpr float kSilhouetteCaptureNear = 0.2f;     // @ 0x58d3a3
 inline constexpr float kSilhouetteCaptureFar = 5000.2f;   // @ 0x58d399
 

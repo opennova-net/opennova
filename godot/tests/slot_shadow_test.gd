@@ -978,3 +978,58 @@ func test_drape_carries_the_terrain_fog_uniforms() -> void:
 				"%s matches the terrain's fog" % name)
 	assert_eq(drape.render_priority, Material.RENDER_PRIORITY_MIN,
 			"the drape draws first among the transparents, right after the terrain")
+
+
+func _crate_slot_matrix(shadow: SlotShadow, crate: ObjectModel) -> Projection:
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the crate owns a capture order")
+	return SlotShadow.get_drape_material().get_shader_parameter("u_slot_mat_%d" % maxi(order, 0))
+
+
+## The capture camera is retail's look-at mapped into presentation axes
+## (renderer::slot_capture_view_axes): a right-handed frame, so the device's
+## back-face cull keeps the light-facing faces like retail's CULLMODE CCW over
+## its view (setup_shadow_cascade_matrices @0x58d31e). The drape samples through
+## the same pose: its u row is the camera x axis and its v row the negated y, so
+## u x v points along the camera forward, the downward slot direction. The
+## mirrored (det -1) frame points it up.
+func test_capture_view_is_right_handed_along_the_slot_direction() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	var slot := _crate_slot_matrix(shadow, crate)
+	var u_row := Vector3(slot.x.x, slot.y.x, slot.z.x)
+	var v_row := Vector3(slot.x.y, slot.y.y, slot.z.y)
+	assert_lt(u_row.cross(v_row).y, 0.0,
+			"u x v looks down the slot direction (a right-handed capture view)")
+	assert_almost_eq(u_row.y, 0.0, 0.0001, "the camera right row stays horizontal")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## Every slot quantity keys on the entity origin, never the render bounds
+## (retail: Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9 renders the entity at
+## the view origin; the light query box @0x5d6af1..0x5d6b39): the crate's box
+## rises 1 u above its origin, yet the origin projects to the capture centre.
+func test_slot_view_centres_on_the_entity_origin() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3(3.0, 0.0, -2.0))
+	crate.advance_runtime_frame(1.0 / 62.0)
+	assert_gt(crate.get_model_bounds().get_center().y, 0.25,
+			"the crate's render bounds sit above its origin")
+	var slot := _crate_slot_matrix(shadow, crate)
+	var projected: Vector4 = slot * Vector4(3.0, 0.0, -2.0, 1.0)
+	assert_almost_eq(projected.x, 0.5, 0.0001, "the origin lands on the capture centre (u)")
+	assert_almost_eq(projected.y, 0.5, 0.0001, "the origin lands on the capture centre (v)")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()

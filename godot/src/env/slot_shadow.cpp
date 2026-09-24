@@ -780,8 +780,13 @@ void SlotShadow::advance_frame() {
 		}
 		// The dominant-light pick (the clamped sun by default; the strongest
 		// nearby point light overrides) [orig: RenderSlot_UpdateEntityLight
-		// @0x5d6a30 <- Entity_UpdateAllEntities].
-		const Vector3 center = model->get_world_bounds().get_center();
+		// @0x5d6a30 <- Entity_UpdateAllEntities]. Every slot quantity keys on
+		// the entity origin (entity+4..+0xC) — the light query box, the
+		// capture's view origin, the drape projection — never on the render
+		// bounds, which move with part animation and RLOD switches (retail:
+		// the query box @0x5d6af1..0x5d6b39, the entity rendered at the view
+		// origin by Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9).
+		const Vector3 center = model->get_global_position();
 		opennova::renderer::SlotLightPick pick;
 		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
 		pick.attached_handle = 0;
@@ -830,15 +835,16 @@ void SlotShadow::advance_frame() {
 		// The capture view along the slot direction, sized from the MODEL
 		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
 		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)]: the witnessed
-		// rotation-only basis (renderer::silhouette_capture_basis, its
-		// zenith degeneracy substituted).
+		// rotation-only look-at mapped into presentation axes
+		// (renderer::slot_capture_view_axes: right-handed, so the back-face
+		// cull keeps the light-facing faces like retail's CULLMODE CCW).
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
 		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
-		const opennova::renderer::SlotCaptureBasis basis =
-				opennova::renderer::silhouette_capture_basis(
+		const opennova::renderer::SlotCaptureViewAxes axes =
+				opennova::renderer::slot_capture_view_axes(
 						{float(dir.x), float(dir.y), float(dir.z)});
-		const Vector3 forward(basis.forward[0], basis.forward[1], basis.forward[2]);
+		const Vector3 forward(-axes.z[0], -axes.z[1], -axes.z[2]);
 		// The RenderingDevice depth band (the device fold D-RLIT-10 in
 		// docs/render/render-lighting-re.md): retail renders the entity at the
 		// origin of that rotation-only view under its 0.2..5000.2 band
@@ -852,10 +858,9 @@ void SlotShadow::advance_frame() {
 		const float eye_near = opennova::renderer::kSilhouetteCaptureNear * 0.25f;
 		const float eye_far = eye_distance * 2.0f + radius;
 		Transform3D pose;
-		// A Godot camera looks down its local -Z: columns x = right, y = up,
-		// z = -forward.
-		pose.basis = Basis(Vector3(basis.right[0], basis.right[1], basis.right[2]),
-				Vector3(basis.up[0], basis.up[1], basis.up[2]), -forward);
+		pose.basis = Basis(Vector3(axes.x[0], axes.x[1], axes.x[2]),
+				Vector3(axes.y[0], axes.y[1], axes.y[2]),
+				Vector3(axes.z[0], axes.z[1], axes.z[2]));
 		pose.origin = center - forward * eye_distance;
 
 		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
