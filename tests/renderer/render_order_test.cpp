@@ -88,10 +88,12 @@ int main() {
 	CHECK(kRungSkyClouds < kRungViewmodel);
 	CHECK(kRungViewmodel < kRungObjectPostMultiply);
 	CHECK(kRungObjectPostMultiply < kRungAlphaFarSide);
-	// Far-side alpha flush @ 0x5c9596 -> tracer pass 0 @ 0x5c95ac -> foliage
-	// pass 0 @ 0x5c95c5 -> the water pass @ 0x5c95dc.
+	// Far-side alpha flush @ 0x5c9596 -> tracer pass 0 @ 0x5c95ac -> particle
+	// pass A @ 0x5c95b5 -> foliage pass 0 @ 0x5c95c5 -> the water pass
+	// @ 0x5c95dc.
 	CHECK(kRungAlphaFarSide < kRungTracerFarSide);
-	CHECK(kRungTracerFarSide < kRungFoliageFarSide);
+	CHECK(kRungTracerFarSide < kRungParticleFarSide);
+	CHECK(kRungParticleFarSide < kRungFoliageFarSide);
 	CHECK(kRungFoliageFarSide < kRungWater);
 	// The wake decals inside the water pass, after the surface strip
 	// [orig: render_water_surface @ 0x5c3426 then sub_5DE340 @ 0x5c3432].

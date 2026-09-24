@@ -218,7 +218,7 @@ void ObjectShaderCache::_bind_methods() {
 
 	// The witnessed transparent ordering ladder, single-sourced from
 	// engine/runtime/renderer/render_order (maturity REN-3): sky -> viewmodel ->
-	// far-water-side alpha -> tracers/foliage (far) -> water + decals -> scars
+	// far-water-side alpha -> tracers/particles/foliage (far) -> water + decals -> scars
 	// -> foliage (camera) -> camera-side alpha -> tracers (camera) -> sun glow
 	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0;
 	// docs/render/render-order-re.md].
@@ -229,6 +229,7 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OBJECT_POST_MULTIPLY", opennova::renderer::kRungObjectPostMultiply);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_FAR_SIDE", opennova::renderer::kRungAlphaFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_TRACER_FAR_SIDE", opennova::renderer::kRungTracerFarSide);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_PARTICLE_FAR_SIDE", opennova::renderer::kRungParticleFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_FAR_SIDE", opennova::renderer::kRungFoliageFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER", opennova::renderer::kRungWater);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER_DECALS", opennova::renderer::kRungWaterDecals);

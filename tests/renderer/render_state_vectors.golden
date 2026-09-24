@@ -3123,12 +3123,12 @@ tkey d=10.25 key=bedbffff
 tkey d=100.00 key=bd37ffff
 tkey d=500.00 key=bc05ffff
 tkey d=8192.00 key=b9ffffff
-side h=-4.00 w=5.00 q=below rungAbove=-7 rungBelow=0
-side h=4.99 w=5.00 q=below rungAbove=-7 rungBelow=0
-side h=5.00 w=5.00 q=above rungAbove=0 rungBelow=-7
-side h=5.01 w=5.00 q=above rungAbove=0 rungBelow=-7
-side h=64.00 w=5.00 q=above rungAbove=0 rungBelow=-7
-ladder stars=-12 body=-11 clouds=-10 viewmodel=-9 p3=-8 far=-7 tracer_far=-6 foliage_far=-5 water=-4 decals=-3 scars=-2 foliage_cam=-1 cam=0 tracer_cam=1 glow=2
+side h=-4.00 w=5.00 q=below rungAbove=-8 rungBelow=0
+side h=4.99 w=5.00 q=below rungAbove=-8 rungBelow=0
+side h=5.00 w=5.00 q=above rungAbove=0 rungBelow=-8
+side h=5.01 w=5.00 q=above rungAbove=0 rungBelow=-8
+side h=64.00 w=5.00 q=above rungAbove=0 rungBelow=-8
+ladder stars=-13 body=-12 clouds=-11 viewmodel=-10 p3=-9 far=-8 tracer_far=-7 particle_far=-6 foliage_far=-5 water=-4 decals=-3 scars=-2 foliage_cam=-1 cam=0 tracer_cam=1 glow=2
 # uv-anim v1 (REN-4: scroll/rotate/waveform/controlled channels)
 wave t=01 ph=0000 v=65280
 wave t=01 ph=0180 v=65280

@@ -339,11 +339,11 @@ std::string generate() {
 	// The ladder itself.
 	std::snprintf(line, sizeof(line),
 	              "ladder stars=%d body=%d clouds=%d viewmodel=%d p3=%d far=%d "
-	              "tracer_far=%d foliage_far=%d water=%d decals=%d scars=%d "
+	              "tracer_far=%d particle_far=%d foliage_far=%d water=%d decals=%d scars=%d "
 	              "foliage_cam=%d cam=%d tracer_cam=%d glow=%d\n",
 	              kRungSkyStars, kRungSkyBody, kRungSkyClouds, kRungViewmodel,
 	              kRungObjectPostMultiply, kRungAlphaFarSide, kRungTracerFarSide,
-	              kRungFoliageFarSide, kRungWater, kRungWaterDecals, kRungScars,
+	              kRungParticleFarSide, kRungFoliageFarSide, kRungWater, kRungWaterDecals, kRungScars,
 	              kRungFoliageCameraSide, kRungAlphaCameraSide,
 	              kRungTracerCameraSide, kRungSunGlow);
 	out << line;
