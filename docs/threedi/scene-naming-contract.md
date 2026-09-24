@@ -100,3 +100,36 @@ mesh part carries its bullet faces on that part's section (the retail person
 layout). One without a mesh part carries them on each part's section, from the
 geometry authored on each bone (dM1A1: LOD 1, 875 hull faces and 40 per
 wheel).
+
+## Animations
+
+A rig's clips are a set of their own (`docs/anim/o3a-scene-format.md`), laid out
+on the model the rig belongs to:
+
+- **A clip is an Action** on the rig armature's NLA tracks, one strip per track,
+  in track order. Its name is the `.bad` file stem. Its own properties carry the
+  clip's rate, its loop and translation flags, the unwitnessed flag bit 3, and a
+  frame count longer than its keys (retail's `DT1RST` holds its last key for an
+  extra frame).
+- **The table** is the rows on the model root: an `anim_<name>` slot and its clip
+  ring, in the order the `.adm` stores. The engine serves a row from its LAST
+  variant back [orig: AnimMap_RegisterBoneNode @ 0x40C2D0], and the reset row
+  names the clip whose bind the rest pose is.
+- **`!RM`** is a bone of the rig outside its `BN##` parts, keyed per frame: its
+  step between two frames is that frame's event velocity (the body animates in
+  place and the engine moves the entity by these). Any bone named `!...` is no
+  part, so a rig may also hold the control bones an author rigs with.
+- **The event bits** are the rig's keyed `Trigger` word: 1 and 2 the left and
+  right footstep, 4, 8 and 16 the ammo rows, 0x20 to 0x400 the six foley sounds
+  (`opennova-3di catalog` prints them). A clip that carries its own capsule
+  extents keys them beside it.
+- **The rest pose is the bind.** A channel is the bone's rotation measured
+  against the reset clip's first key, so the rest pose a clip departs from is
+  what the game draws at that clip's start. Import turns each rest bone onto
+  that key; heads, lengths and weights stay put, so the model is unchanged.
+- **Bone names live in the clip.** A model's part table carries none, so a rig
+  imported from a `.3di` alone names its bones `BN##`; a clip labels them
+  (`BN16 L Hand`), and their vertex groups follow.
+
+A rigid model's parts (a first-person weapon's own clips, which pair with its
+`PN##` parts by the same index rule) are not authorable in Blender yet.

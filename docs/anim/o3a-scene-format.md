@@ -1,0 +1,98 @@
+# The `.o3a` clip-set text
+
+`opennova-3di anim build <set.o3a> -o <out.adm>` mints a `.adm` table and every
+`.bad` clip it names from this text, through the engine's clip construction
+seam (`engine/formats/bad/bad_build.h`) and the writers
+([ADR 0047](../adr/0047-blender-3di-exporter.md)).
+`opennova-3di anim scene <in.adm> -o <set.o3a>` writes a clip set, retail ones
+included, back out as this text: it is build's exact inverse, so
+`build(scene(x))` re-mints a builder-made set byte for byte. A lone clip works
+the same way (`anim scene x.bad`, `anim build set.o3a -o x.bad`). The Blender
+add-on (`tools/blender/opennova_3di`) writes it to export and reads it to
+import; any other front end may.
+
+One file is one clip SET: a rig's table and every clip it names. A clip's
+channels pair with the MODEL's parts by index
+([orig: `BoneAnim_BuildWorldMatrices @ 0x40c400`]), so a set belongs to the rig
+it was authored on and to any rig that matches it.
+
+## Conventions
+
+- One record per line, whitespace-separated. `#` starts a comment at the start
+  of a line or after whitespace. The first record is `o3a 1`.
+- A name field (the table, a slot key, a clip, a bone) is a bare token, or
+  `"quoted"` when it holds spaces (a bone is named `BN01 Pelvis`).
+- Pivots, translations and event velocities are **mission axes**: x forward,
+  y left, z up, metres. A rotation is a quaternion `x y z w` in the same axes.
+  The seam converts to the clip's own frame (x side, y up, z forward), which is
+  the model frame mirrored on x — the frame the runtime's skeleton is built in.
+- A clip's `frames` is its INTERVAL count: every key list holds one more, and
+  the event list likewise. The translation block alone holds exactly `frames`
+  rows, because that is what the loader reads; its last row holds past the end.
+- A key is the bone's rotation composed against the bind, and the bind is the
+  bone's own FIRST key: the runtime reads `bind^-1 * key`
+  [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`], so a clip's first key is
+  the pose the rig rests in and every later key turns from there.
+
+## Records
+
+| Record | Fields | Meaning |
+| --- | --- | --- |
+| `adm` | name | the table this set writes (the file name alone; the path comes from `-o`) |
+| `row` | key variant [variant ...] | a table row: the `anim_<name>` slot and its clip ring, in the order the file stores. A variant names a clip with or without the `.bad` extension (440 of 5146 retail variants omit it). The engine serves a row from its LAST variant back [orig: `AnimMap_RegisterBoneNode @ 0x40C2D0`] |
+| `clip` | name | opens a clip: the `.bad` file stem `build` writes beside the table |
+| `fps` | n | the clip's own rate; every retail clip ships 30 |
+| `flags` | word | 1 loop, 2 translations, 8 unwitnessed (73 retail clips carry it) |
+| `frames` | n | the clip's length in intervals |
+| `version` | n | the record version; 1 (a 24-byte event) unless stated, and 3 retail clips ship 0 (20 bytes, no trigger) |
+| `capsule` | bottom top | one capsule pair for every event, the shape retail's viewmodel clips carry (0.0/0.6 or 1.07/1.07 across the JO `_1st` sets) |
+| `bone` | parent x y z length name | opens a bone: its parent (a lower index, -1 for the root), its pivot (the paired model part's, absolute), its length and its name. The name is the clip's own: a model's part table carries none |
+| `k` | qx qy qz qw [duration] | a key of the open bone, `frames + 1` of them. A `duration` (in frames) states how long the key holds; a bone that gives durations may key any number of times, which is how `DT1RST`, `stgr_RST`, `M60_1i` and the sparsely keyed `DVFLEE1E` are shaped |
+| `tr` | x y z | a frame's displacement of the open bone, `frames` of them, under `flags & 2` |
+| `bonepos` | x y z | the open bone's stored `position[3]`, verbatim and in the clip's own frame. `build` derives that field from the pivots, and the field is dead at runtime; `scene` writes this only where the derivation cannot reproduce the bytes (retail's exporter left junk in 6720 of 13517 bones) |
+| `event` | vx vy vz trigger [bottom top] | a frame's event, `frames + 1` of them: the root's step for that frame (the body animates in place and the engine moves the entity by these), the event bit word (`opennova-3di catalog` prints the bits), and the capsule pair when the clip carries its own |
+
+## What `build` derives
+
+Nothing below is authored; the seam recomputes all of it on every build, from
+the values the text carries, so `build(scene(x))` stays exact:
+
+- the bone table's `rotation[9]`, the transpose of the bone's first key as a
+  matrix (13,517 of 13,517 retail bones);
+- `position[3]` from the pivots:
+  `position[i] = rotation[parent(i)] . clip(pivot[i] - pivot[parent(i)])`,
+  unless a `bonepos` overrides it;
+- `num_children`, the child and parent addresses, and the bone's own index byte;
+- the header words no field names (0, 0, 8, 1, 1, 0, 0 in every retail clip);
+- an event's capsule pair, when neither the event nor a `capsule` record gives
+  one: the lowest and highest bone origin about bone 0 over the clip's composed
+  pose. Retail measured these by a rule nothing has witnessed, and this one
+  lands within a few centimetres of the shipped numbers rather than on them
+  (`docs/anim/adm-bad-format-re.md`), so a clip that must keep retail's values
+  states them.
+
+The keys themselves are kept verbatim: retail stores neighbouring keys in
+opposite hemispheres (4,573 of 657,788 pairs) and unit only to 2.5e-7, and the
+runtime's slerp short-arcs either way, so nothing re-signs or renormalizes a
+channel.
+
+## Validation
+
+The build fails, naming the line, on an unknown record, a malformed field, a
+set with no clip, a row outside the `anim_` namespace or naming a clip the set
+lacks, two clips under one name, a bone whose parent is not a lower index, a
+key list that is neither `frames + 1` long nor accompanied by durations, a key
+that is not a unit quaternion, a zero duration, a translation block a flag
+promises and the clip lacks, an event list that is not `frames + 1` long, a
+frame count of zero, or a bone name over 31 characters. Every minted clip is
+read back through the loader's own reader before it is written.
+
+## What `scene` cannot carry
+
+`scene` comments these (`# dropped: ...`) and lists them on stderr: a row whose
+clips are not beside the table, and a clip with no event record. Values build
+derives are not carried, except where it cannot reproduce them (`bonepos`).
+Over the corpus under `OPENNOVA_JO_ASSETS`, `build(scene(x))` is the same
+animation as `x` (`opennova-3di anim compare`) for all 477 clips and 81 of the
+82 tables; the one exception, `ESTAND02.ADM`, names a clip the corpus does not
+ship.

@@ -1,7 +1,8 @@
 # ADR 0047: A Blender .3di add-on over the engine's reader and writer
 
-- **Status**: accepted (2026-09-23)
-- **Owners**: the 3DI format library (`engine/formats/threedi`), `apps/threedi_cli`,
+- **Status**: accepted (2026-09-23; extended to animations 2026-09-24)
+- **Owners**: the 3DI format library (`engine/formats/threedi`), the animation
+  formats (`engine/formats/bad`, `engine/formats/adm`), `apps/threedi_cli`,
   `tools/blender/opennova_3di`
 - **Supersedes/updates**: replaces ADR 0038 (deleted with this record). Its standing
   decisions are restated below; its ban on a Blender add-on, on Blender custom
@@ -19,6 +20,11 @@ content work need to author a model (a vehicle, a prop, a building) in a DCC
 and ship it to retail, and to open a retail model to learn its layout or build
 on it; the retired pipeline's lesson stands: a second encoder, or a second
 language's copy of the format, drifts.
+
+A rig is inert without clips. The animation pair `.bad` (one skeletal clip) and
+`.adm` (the table binding anim slots to clip rings) was read-only under decision
+10 below, which this record now lifts for the same route: the same one encoder,
+the same text transport, the same add-on.
 
 ## Decision
 
@@ -149,18 +155,63 @@ language's copy of the format, drifts.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
    `scripts/mcp`, `scripts/ci` and `tools/net` scripts remain); no native
-   ASE/TDP/OED modules; ADM and BAD stay read-only runtime formats; Godot
-   `ObjectData` loads immutable 3DI documents. A GLB/GLTF <-> 3DI editor seam
-   remains future work and uses the same naming contract.
+   ASE/TDP/OED modules; Godot `ObjectData` loads immutable 3DI documents. A
+   GLB/GLTF <-> 3DI editor seam remains future work and uses the same naming
+   contract. ADM and BAD are no longer read-only: decisions 11 to 13 give them
+   the same authoring route models have, under the same rules (one encoder,
+   from scratch per ADR 0003, nothing stashed on import).
+
+11. **One clip encoder.** `engine/formats/bad/bad_build.{h,cpp}` is the only
+   code that builds a clip: it assembles a `BadBuildClip` into the `BadFile`
+   `bad_write.cpp` serializes, and `adm_write.cpp` emits the table's canonical
+   row shape (parse-equality, the ADR 0021 writer-policy shape). Every frame
+   conversion and every derivation lives there, and the mission <-> clip frame
+   map reads `threedi_build`'s own permutation rather than minting a second
+   owner of it. What the seam derives -- the bind, the bone positions, the
+   child and parent addresses, the terminal duplicate key and event, the
+   capsule extents -- is never asked of an author.
+
+12. **`opennova-3di anim`** (`apps/threedi_cli`, one translation unit per
+   command as the model commands are) speaks the `.o3a` clip-set text
+   (`docs/anim/o3a-scene-format.md`): one file is one rig's table and every
+   clip it names. `anim build` mints the `.adm` and each `.bad` beside it and
+   reads the bytes back before writing them; `anim scene` is build's exact
+   inverse (`build(scene(x))` re-mints a builder-made set byte for byte);
+   `anim info` prints a set; `anim compare` says whether two sets are the same
+   animation, reading a key as a rotation and ignoring the dead bone fields.
+   `catalog` also prints the engine's anim slot keys and event trigger bits.
+
+13. **A rig's rest pose is its bind.** A channel key is the bone's rotation in
+   the model's frame composed against the bind, and the bind is the reset
+   clip's first key [orig: AnimChannel_ComputeBoneMatrices @0x410da0], so the
+   add-on reads a key as `rest * pose * rest^-1` and the import turns each rest
+   bone onto the reset clip's key. Heads, lengths and weights do not move, so
+   the model still exports the same model, and a clip shows the pose the game
+   draws. A clip is an Action on the rig's NLA tracks; the table is the rows on
+   the model root; the root track is the bone `!RM`, outside the BN## parts,
+   whose per-frame step is the event velocity; the event bits and, for a clip
+   that carries its own, the capsule extents are keyed on the rig. A bone named
+   `!...` is no part, which also lets a rig hold control bones.
 
 ## Consequences
 
 - A modder installs one zip; a model reaches retail through the same writer
   every fixture is minted by (ADR 0003), and a retail model opens in Blender
   through the same reader the runtime uses.
-- The CLI is a second front end for any DCC: another exporter writes `.o3d`,
-  another importer reads what `scene` writes.
-- Known gaps, each reported rather than carried: retail's own tool is not
+- The CLI is a second front end for any DCC: another exporter writes `.o3d` or
+  `.o3a`, another importer reads what `scene` and `anim scene` write.
+- The animation formats' record (`docs/anim/adm-bad-format-re.md`) carries the
+  corpus witnesses the seam derives from, and the `.o3a` grammar is
+  `docs/anim/o3a-scene-format.md`.
+- Known animation gaps, each reported rather than carried: the capsule extents
+  retail's own exporter measured follow a rule nothing has witnessed, so the
+  derivation lands within a few centimetres of the shipped numbers and a clip
+  that must keep them carries them; `flags` bit 3 (73 retail clips) is carried
+  and unread; a bone that keys sparsely imports as a dense Blender channel, so
+  a re-export densifies it (`DVFLEE1E.BAD` alone); and a RIGID model's parts --
+  a first-person weapon's own clips -- are not authorable in Blender yet,
+  though the CLI reads and writes those sets.
+- Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
   non-`BB` volume flags (Armry02's `CB` volumes with flag 1); zero-length
@@ -187,6 +238,19 @@ language's copy of the format, drifts.
   build -> scene -> build to re-mint each fixture byte for byte.
   `threedi_o3d_retail_roundtrip` (OPENNOVA_JO_ASSETS) runs Armry01, Dblkhwk1,
   US01, ArmsG and Mp5b_1st through scene -> build -> compare.
+- For animations: ctests `bad_roundtrip` (our fixtures byte-exact, a
+  from-scratch clip field-equal and re-write-stable, the shipped BINOC.bad as
+  the gated leg), `bad_build` (the frame maps, the derived bind and position,
+  the capsule extents, the refusals and the canonical table, with BINOC.bad
+  through both derivations), `adm_write`, `anim_o3a_commands` (the clip-set
+  round trip byte-identical, what compare calls the same animation, and the
+  scenes build refuses) and the gated `anim_o3a_retail_roundtrip` (US01.ADM,
+  mp5_1st.adm, 357_1st.adm, DT1RST.bad, DVFLEE1E.BAD).
+- Over the corpus, `build(scene(x))` is the same animation as `x` for all 477
+  `.bad` clips and 81 of the 82 `.adm` tables (the exception names a clip the
+  corpus does not ship). Through Blender, US01 with US01.ADM (185 rows, 128
+  clips) and CIndo01 with Cindo01.adm (134 rows, 80 clips) import, export and
+  compare the same, worst rotation 0.00013 degrees.
 - Over the 958 JO models, `build(scene(x))` is the same model as `x`
   (`compare`) for 956; the other two draw with a material id they lack.
 - Through Blender 5.1: retail Armry01 imports and exports as the same model

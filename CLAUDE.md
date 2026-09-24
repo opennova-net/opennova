@@ -39,10 +39,11 @@ easier to relay than to rediscover.
   (`opennova-extract`: writes named entries out of a mounted game root through
   the engine's own resource index; replaced the dump probes, ADR 0041), `threedi_cli/`
   (`opennova-3di`: mints a `.3di` from `.o3d` scene text and writes one back as it, prints and
-  compares models; ADR 0047), `common/`
+  compares models; `anim build|scene|info|compare` does the same for a rig's `.bad` clips and
+  its `.adm` table through the `.o3a` clip-set text; ADR 0047), `common/`
   (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
-- `tools/blender/opennova_3di/` — the Blender `.3di` import/export add-on (ADR 0047;
+- `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
   stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and

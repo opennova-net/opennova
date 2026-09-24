@@ -2,9 +2,11 @@
 
 The on-disk animation pair: `.adm` (the text animation-definition map binding
 anim slots to `.bad` clip names) and `.bad` (the binary skeletal clip
-container). Implementing code: `engine/formats/adm` (parser), `engine/formats/bad`
-(parser); the `adm_write`/`bad_write.cpp` writers and their flat C ABI were
-retired 2026-08-26 (ADR 0038); runtime consumers
+container). Implementing code: `engine/formats/adm` (parser and the
+canonical-form writer `adm_write.cpp`), `engine/formats/bad` (parser, the
+writer `bad_write.cpp`, and the clip construction seam `bad_build.{h,cpp}` an
+authoring front end builds through — ADR 0047, which returns the writers ADR
+0038 retired); runtime consumers
 `engine/runtime/anim` (clip sampling, the clip index, root motion and the
 shared skeletal rig), `engine/runtime/assets` (the shared asset store), and
 `godot/src/object/skeletal_anim.cpp`.
@@ -22,8 +24,9 @@ in place.
 | Component | Verdict | Evidence |
 |---|---|---|
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
-| `.adm` writer | RETIRED (ADR 0038, 2026-08-26): the canonical-form writer and ctest `adm_write` are gone; grammar parity is read-side | ctests `adm_parse`, `adm_variants` |
-| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`); the byte-exact write round-trip (`bad_roundtrip`; the FFI twin `test_bad_write_ffi.py` retired with ADR 0038) retired with the writer, ADR 0038 |
+| `.adm` writer | MATCHING (canonical form, not byte identity with hand-edited files) | ctests `adm_write`, `adm_parse`, `adm_variants`; the 82-table corpus sweep below |
+| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`) |
+| `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files) | ctests `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal), `bad_build` (the derivations, with BINOC.bad as the retail leg), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip`; the corpus sweep below |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
@@ -98,7 +101,7 @@ first to last; the viewmodel `.adm` registers through the same
 `AnimMap_RegisterBoneNode`, so retail most likely serves them last to first
 too.
 
-The retired writer emitted the canonical stock shape — `<key>\t\t\t\t"<clip>" "<clip2>"`
+The writer emits the canonical stock shape — `<key>\t\t\t\t"<clip>" "<clip2>"`
 rows, CRLF line ends, one leading blank line, and a `CRLF×3 + NUL` trailer —
 so `.adm` parity is parse-equality over the canonical form, not byte identity
 with arbitrary hand-edited retail files (the same writer-policy shape as the
@@ -106,15 +109,16 @@ ADR 0021 Avatars writer). Callers order entries; `anim_reset` first by
 convention (the reset row doubles as the rig's skeleton source — see the bind
 rule below).
 
-Surface: `adm_parse`, `adm_parse_buffer` (VFS byte path), `adm_free`; C-linked
-POD records (`AdmEntry{key[64], variant_count, variants[8][64]}`). `adm_write`
-and the `ADM_EXPORT` flat C ABI retired with the FFI (ADR 0038).
+Surface: `adm_parse`, `adm_parse_buffer` (VFS byte path), `adm_free`,
+`adm_write_buffer`, `adm_write`; POD records
+(`AdmEntry{key[64], variant_count, variants[8][64]}`). The `ADM_EXPORT` flat C
+ABI is gone for good with the FFI (ADR 0038); the writer returned with
+ADR 0047.
 
 ## The `.bad` format
 
-Binary little-endian container (layout mirrored by the reader `bad.cpp`; the
-from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003, retired
-2026-08-26 with the FFI, ADR 0038):
+Binary little-endian container (layout mirrored by the reader `bad.cpp` and
+the from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003):
 
 | Offset | Block | Shape |
 |---|---|---|
@@ -125,8 +129,8 @@ from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003, retired
 | bone | bone table | bone_count × stride: `name[32]`, 3 pad + index byte, `num_children`, `child_addr`, `parent_addr`, `length`, `position[3]`, `rotation[9]` (row-major 3×3) |
 | trn | translations | when `flags & 2`: `num_translations` × `f32 x,y,z`, frame-major |
 
-Conventions preserved from stock assets and the historical exporter (recorded
-at the retired writer's head, 5820432c1): channels and events carry `frame_count + 1` entries (the
+Conventions preserved from stock assets and the historical exporter (the
+writer's head carries them, with the corpus counts in the section below): channels and events carry `frame_count + 1` entries (the
 terminal duplicate); child/parent are absolute byte addresses recomputed from
 `parent_index`; root bones write `parent_offset 0` — a deliberate correction
 over the historical exporter's `-1`, which only ever parsed correctly for
@@ -176,6 +180,79 @@ actually mean:
   the sub-unit linear-path length (|q|² ≥ 0.995) never becomes a bone scale —
   a presentation residual below visibility, not a motion-timing one.
 
+## The writers and the construction seam (2026-09-24)
+
+ADR 0038 retired the `.bad` and `.adm` writers; ADR 0047 brings them back for
+the authoring route, from scratch against the readers (ADR 0003). The pair is
+`engine/formats/bad/bad_write.{h,cpp}` and `engine/formats/adm/adm_write.cpp`,
+under one construction seam, `engine/formats/bad/bad_build.h`, which every
+front end builds a clip through (`opennova-3di anim build` reads the `.o3a`
+clip-set text into it; `docs/anim/o3a-scene-format.md`).
+
+Retail ships no `.bad` writer, so the on-disk shape is the loader's
+[orig: `BoneFile_Load @0x40fff0`] plus what the shipped corpus carries. A sweep
+of all 477 `.bad` clips and 82 `.adm` tables under `OPENNOVA_JO_ASSETS`
+(2026-09-24) pins these, and the seam derives every one of them rather than
+asking an author for it:
+
+- **The bone table's `rotation[9]` is the TRANSPOSE of the bone's first
+  channel key as a matrix**, in 13,517 of 13,517 bones (worst deviation
+  5.0e-7). This is the same relation the runtime reads from the other side —
+  `mat3(stored) x channel-at-reset == identity` — so the bind a clip is
+  measured against is its own first key [orig: `AnimChannel_ComputeBoneMatrices
+  @ 0x410da0`]. Nothing authors a bind.
+- **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
+  event record with no trigger word).
+- **The header words the reader never names are constant**: word 8 = 0,
+  9 = 0, 10 = 8, 14 = 1, 17 = 1, 18 = 0, 19 = 0 across all 477.
+- **`event_count == frame_count + 1`** wherever a clip carries events, as the
+  channel key lists do: the header counts intervals.
+- **The translation block holds `bone_count * frame_count` rows**, frame-major
+  — no terminal duplicate. That is what the loader reads and the last row holds
+  past the end; retail files carry rows beyond it that no reader reaches
+  (357_RST: 120 rows for a 40-bone, one-frame clip, of which 40 are read).
+- **A bone may key fewer times than the frame count.** 476 of 477 clips key
+  every bone once per frame, but the count is the duration table's business,
+  not the header's [orig: `BoneAnim_FindKeyframeAtTime @ 0x410220`]: `DT1RST`
+  and `stgr_RST` key twice over two frames, `M60_1i` 181 times over 150, and
+  `DVFLEE1E.BAD` alone keys its bones sparsely and unevenly (36 to 54 keys over
+  71 frames, the only file with a duration other than one).
+- **Neighbouring keys may sit in opposite hemispheres** — 4,573 of 657,788 key
+  pairs, over 218 files — so nothing re-signs a channel; the slerp short-arcs
+  either way [orig: `Math_QuaternionSlerp @ 0x615e20`]. Keys are unit only to
+  2.5e-7, which is a twentieth of a degree of spurious angle if a comparison
+  forgets to normalize.
+- **`flags` bit 3 (0x8) rides 73 clips** — the viewmodel `_1d`/`_1e` draw
+  clips, the `CycDr*` bike set, `avenger_025` — and is unwitnessed. It is
+  carried, never read.
+- **The bone table's bookkeeping is dead data.** `num_children` agrees with the
+  parent links in all 13,517 rows, but `child_offset` is inconsistent: 8,830
+  rows point at the first child and 8,626 at the last (bone 0 in 209 files, the
+  third bone in 268), and 1,047 leaves carry a stale address instead of zero.
+  Bone 0's `parent_offset` is 0 in only 368 of 477 files; the reader forces it
+  to -1 regardless. The writer emits the first child, zero for a leaf and zero
+  for the root's parent, and `anim compare` reads none of these fields.
+
+Round-trip results (`opennova-3di anim scene` -> `anim build` -> `anim
+compare`): **477 of 477 clips and 81 of 82 tables are the same animation.**
+The one table, `ESTAND02.ADM`, names `AttckAct1.bad`, which the corpus does not
+ship; the row is dropped and reported. Our own files write back byte for byte;
+retail's differ only where nothing can reproduce them — the uninitialized bytes
+its exporter left after each name's NUL, the stale child addresses, and the
+bind's low mantissa bits (the stored 3x3 carries more than the float key it is
+derived from).
+
+**Unwitnessed: the capsule extents.** An event's `bottom` and `top` are the
+drop below the rig's root and the height above it, which the runtime reads as
+the capsule and the footstep dip (`engine/runtime/anim/adm_root_motion`). What
+measured them is retail's own exporter, not the engine, and no tool is
+witnessed. The seam derives them from the clip's composed pose (the lowest and
+highest bone origin about bone 0), which lands within a few centimetres of the
+shipped numbers but does not reproduce them: `EMOTE01` ships a constant bottom
+of 0.8688 where the pose gives 0.8914 to 0.8926, and its top differs by up to
+0.08. A clip may therefore carry its own pair, which is how a retail clip
+survives an authoring round trip.
+
 ## Divergences
 
 All existing ledger IDs — this record mints none:
@@ -193,6 +270,9 @@ All existing ledger IDs — this record mints none:
 - `.adm` write parity is canonical-form by design; if a byte-exact need ever
   appears (none known — no tool round-trips hand-edited `.adm`s), it becomes
   a writer-policy ADR, not a parser change.
+- `flags` bit 3 and the capsule-extent rule are the two unwitnessed corners
+  above: both want a look at what writes them, the first in the loader, the
+  second in whatever retail's exporter was.
 
 ## Playback clock follow-up (2026-09-11)
 

@@ -165,6 +165,46 @@ normal maps.
   and the RGB / alpha / UV generators and texture flipbook. A register-driven
   flipbook selects its register by name.
 
+## Animations
+
+A skinned model's clips live on its rig, and the whole set writes at once:
+**Export Animations** makes the `.adm` table the model root names and one
+`<clip>.bad` beside it for every clip. **File > Import > NovaLogic Animations**
+reads a `.adm` (or a single `.bad`) back onto the active model's rig.
+
+- **A clip is an Action.** Push each one onto its own NLA track; the track order
+  is the set's order and the Action's name is the `.bad` file name. The clip's
+  own settings live in the Dope Sheet sidebar's OpenNova panel: its rate (retail
+  ships 30 everywhere), whether it loops, whether it carries per-bone
+  translations (a bolt, a magazine, a rig that slides), the unwitnessed flag bit
+  3, and a frame count longer than the keys, which holds the last pose.
+- **The table** is the row list on the model root: a slot (`anim_reset`,
+  `anim_walk_forward`, ...) and the clips that answer it. Several clips on one
+  row are a ring the game rotates through, and it serves a row from its LAST
+  entry back. `anim_reset` is the rig's own pose and the bind every other clip
+  is measured against.
+- **Root motion** is the bone `!RM`: key it along the path the body travels and
+  the clip carries the step between each pair of frames. The body itself
+  animates in place; the game moves the entity by those steps. Any bone named
+  `!something` is not a part, so control bones live there too.
+- **Events** are the rig's keyed **Trigger** word: 1 and 2 place the left and
+  right footstep, 4, 8 and 16 fire the ammo rows, and 0x20 upwards play the six
+  foley sounds of the body's sound profile. `opennova-3di catalog` lists them.
+- **The rest pose is the bind.** Import turns each rest bone onto the reset
+  clip's first key, so a clip poses the rig exactly as the game draws it. The
+  bone heads, lengths and weights do not move, so the model still exports the
+  same model. Bone names come from the clips (a `.3di` carries none), and their
+  vertex groups are renamed with them.
+
+To reuse retail's own clips, match the retail rig: JO's people are 19 bones plus
+a mesh part, and a clip's channels pair with the model's parts by index. A rigid
+model's parts -- a first-person weapon's own clips -- cannot be animated here
+yet; `opennova-3di anim` reads and writes those sets from the command line.
+
+`opennova-3di anim info <file> --verbose` prints a table or a clip, and
+`opennova-3di anim compare <a> <b>` tells whether two sets hold the same
+animation.
+
 ## Collision volumes
 
 A `-colonly` mesh is a convex volume: the game keeps the solid all its face
