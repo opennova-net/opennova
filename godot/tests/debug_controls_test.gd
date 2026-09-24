@@ -181,6 +181,9 @@ func test_values_validate_and_normalize_before_the_owner() -> void:
 	assert_null(DebugControlTable.normalize_value(mode, 99))
 	assert_null(DebugControlTable.normalize_value(mode, -1))
 	assert_null(DebugControlTable.normalize_value(mode, true))
+	assert_null(DebugControlTable.normalize_value(mode, 1.5))
+	assert_eq(DebugControlTable.normalize_value(mode, 4.0), 4,
+			"an integral float (a JSON number over MCP) is an enum index")
 
 	# The viewport row is a live device row in this in-tree harness.
 	var viewport := get_viewport()
