@@ -1225,7 +1225,12 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             continue;
 
         eh.geometry_entity = e->handle;
-        eh.victim_bound_radius_q16 = to_fixed(e->bound_radius);
+        // An unstamped (model-less) person takes the organic stand-in radius,
+        // as the damage sweeps do (Entity::bound_radius); it clears the torso
+        // fallback sphere, which retail persons never need.
+        eh.victim_bound_radius_q16 = e->bound_radius > 0.0f
+                ? to_fixed(e->bound_radius)
+                : to_fixed(kOrganicStandInRadius);
         finish_person_hit(eh, hit_distance);
         break;
     }

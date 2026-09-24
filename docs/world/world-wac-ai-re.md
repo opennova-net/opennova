@@ -3241,7 +3241,9 @@ so the next tick starts at `t + 0x800 + boundRadius` along the tick-start ray
 gravity/drag tail. The damage, the reaction/death routing, the armor row and
 the flesh/player effect all still apply to the victim, so one bullet can wound
 several people in a line. `ProjectileHit::victim_bound_radius_q16` carries the
-radius for registry persons and decoded person proxies alike;
+radius for registry persons and decoded person proxies alike (a model-less
+person the torso stand-in serves has no stamped radius and takes the 0.6u
+organic stand-in, which clears that sphere);
 `projectile_combat` pins the pass-through, the park and the kill-zone release.
 
 `RoundSim` carries both ordinals. The primary/reaction bone feeds `RoundHit`
