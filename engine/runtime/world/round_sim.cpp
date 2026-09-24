@@ -2236,6 +2236,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //    passes the compiled `!prearm & kztype` bit test, and the halved
         //    age must strictly pass the arm age [orig:
         //    Projectile_SpawnImpactEffect @0x4E9C40..0x4E9C62, push @0x4E9C81].
+        bool kill_zone_pushed = false;
         if (authoritative && ammo != nullptr) {
             const bool armed = r.age_ticks >= ammo->arm_age_ticks;
             bool produce = false;
@@ -2262,6 +2263,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     break;
             }
             if (produce) detonate_round(world, r, impact_position, *ammo);
+            kill_zone_pushed = produce;
         }
 
         RoundDebugEvent event;
@@ -2311,6 +2313,42 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const int32_t inverse =
                     int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = collision.distance_q16 + 0x800;
+            const auto beyond = [&](int32_t start, int32_t component) {
+                return start + retail_q16_mul_rhu(along,
+                        retail_q16_mul_rhu(component, inverse));
+            };
+            const FixedVec3 next_position{
+                beyond(position_q16.x, incoming_velocity_q16.x),
+                beyond(position_q16.y, incoming_velocity_q16.y),
+                beyond(position_q16.z, incoming_velocity_q16.z)};
+            r.pos = vec_from_fixed(next_position);
+            if (r.guided_family == GuidedFamily::None) {
+                if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+                if (ammo != nullptr)
+                    apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
+                            world.env.water_z, /*surface_normal=*/0);
+            }
+            r.vel = vec_from_fixed(velocity_q16);
+            continue;
+        }
+
+        // A person hit leaves the lifetime alone: the bone-section ray stamps
+        // face material 19 and the damage call returns 0 for it, so only the
+        // kill-zone push releases the round. The survivor parks past the
+        // victim's boundRadius along the tick-start ray, t + 0x800 + radius
+        // (the handler got t - 0x800), with no energy charge; the common
+        // gravity/drag tail then applies. [orig: Physics_RaycastAgainstBoneSections
+        // material 19 @0x4E49F7; Projectile_HandleTerrainImpact_0 @0x4E98F0 —
+        // the damage call @0x4E99E6 zeroes lifetime only on a 1 @0x4E99EE, the
+        // kill-zone push @0x4E9B26..0x4E9B2E; Projectile_ProcessDamageOnTarget
+        // returns 0 for 19 @0x4E823F..0x4E8266; the park
+        // Projectile_UpdatePhysics @0x4EA7BE..0x4EA829]
+        if (person_collision && !kill_zone_pushed && !submerged_stall &&
+                !has_dud_replacement) {
+            const int32_t inverse =
+                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
+            const int32_t along = signed_from_u32(uint32_t(collision.distance_q16) +
+                    0x800u + uint32_t(collision.victim_bound_radius_q16));
             const auto beyond = [&](int32_t start, int32_t component) {
                 return start + retail_q16_mul_rhu(along,
                         retail_q16_mul_rhu(component, inverse));

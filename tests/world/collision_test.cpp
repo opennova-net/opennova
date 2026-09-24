@@ -4852,7 +4852,8 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     round.max_age_ticks = 100;
     world.round_sim.tick(world, nullptr, &collision);
 
-    CHECK(!round.active);
+    // A person never absorbs the round (material 19); it flies on.
+    CHECK(round.active);
     CHECK(world.registry.get(victim)->health == 0);
     CHECK(world.round_sim.hits.size() == 1);
     if (!world.round_sim.hits.empty()) {
