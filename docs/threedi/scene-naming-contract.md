@@ -3,9 +3,10 @@
 The NovaLogic ASE/OED object-naming convention: the scene-object names that
 carry a model's 3DI roles. OED classified them by `classify_name`
 ([orig: ConvertToInternal @ 0x4268B3], ported in the retired
-`engine/formats/oed/convert_internal.cpp`); the Blender exporter
+`engine/formats/oed/convert_internal.cpp`); the Blender add-on
 (`tools/blender/opennova_3di`, [ADR 0047](../adr/0047-blender-3di-exporter.md))
-reads them today, and a future GLB/GLTF <-> 3DI seam keeps them.
+reads them to export and lays a model out by them to import, and a future
+GLB/GLTF <-> 3DI seam keeps them.
 
 Names are ASCII. Numeric identities are two digits and 1-based in the name
 (`01` is the first), 0-based inside; `00` parses to -1 (a user point with no
@@ -16,13 +17,13 @@ classify to the same identity inside one LOD are an error.
 
 | Scene element | Name form | Meaning |
 | --- | --- | --- |
-| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary) |
-| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot |
-| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`) |
+| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary); its threshold and RMDL type (`gnrc`, `bldg`, `door`, `veh0`) are properties. A root with no parts is an empty LOD (retail ships them) |
+| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot. A rotated `PN##` is a PANM rotation frame (an MTRX row): its tracks turn about the empty's axes (Dblkhwk1's canted tail rotor) |
+| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`); a second UV map is the detail stage's UV1 |
 | Part center | `_## center` | part `##`'s transform center (pivot) |
 | Attachment | `~PPx attach` | sits under a child part: its parent is part `PP`; `x` (a, b, ...) tells siblings apart |
-| User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z |
-| Light | `LP##` | light `##` (a light object; not a `-colonly` mesh) |
+| User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z. Its export-order property keeps the USRP order (seats and effect points are scanned in it) |
+| Light | `LP##[a..]` (a light object) | a LGHT light owned by part `##` (`01` the root, as `classify_name` parsed it); a point light is omni, a spot light a cone about its local +Z. Its colour is the start colour; the generator, attenuation and flags are properties |
 | Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the parent bone the part parent; `BN##` vertex groups carry the weights. The skinned mesh is `01 Mesh<n>` and becomes its own part after the bones (pivot = its origin) |
 | Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` |
 
@@ -45,18 +46,25 @@ are all `CB01...`). The volume is the convex hull of the mesh's vertices.
 | `VC` | 7 | | | | |
 
 `BB` takes flag letters before `##`; each clears a bit of `0x3E`: `V` 0x2,
-`S` 0x4, `W` 0x8, `L` 0x10, `O` 0x20 (for example `BBVSO03`). Type 14 shares the
-`LP` prefix with lights; the `-colonly` suffix tells them apart. Runtime
-meanings: docs/world/world-wac-ai-re.md §15.
+`S` 0x4, `W` 0x8, `L` 0x10, `O` 0x20 (for example `BBVSO03`; Armry01's light
+fixtures carry `BBL02`, `BBVSL03`). Type 14 shares the `LP` prefix with
+lights; the `-colonly` suffix tells them apart. Runtime meanings:
+docs/world/world-wac-ai-re.md §15. No name carries the flags of a non-`BB`
+volume (Armry02 ships `CB` volumes with flags 1).
 
-## Occlusion volumes
+## Occlusion
 
-`<PFX>##[-<MM>]-occonly`: `OB` 20, `OS` 21, `OP` 22 (reads a connecting
-subobject after `-`: `OP01-02-occonly`), `OH` 23. The Blender exporter refuses
-them by name until they have a scene form.
+`<PFX>##[<dup>][-<MM>]-occonly` meshes on the primary LOD, `##` the record's
+parent section (1-based); the OCCL record type follows the prefix as the
+retired exporter mapped it: `OB` 0 (occluder), `OS` 1 (open), `OP##` 2 (a
+window to the exterior), `OP##-MM` 3 (a portal to section `MM`), `OH` 4 (no
+witnessed runtime meaning). Faces wind counter-clockwise about the outward
+normal; the planes follow the OED rule (docs/threedi/o3d-scene-format.md).
+Armry01 lays out as `OS01`, `OB01`..`OB01c`, `OP02`, `OP02-04`, `OP04-03`.
+An export-order property keeps the record order.
 
 ## Bullet faces
 
 The collision faces bullets hit come from one render LOD's part meshes, chosen
-by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed);
-each face's surface type comes from its material.
+by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed;
+Armry01's are LOD 1's); each face's surface type comes from its material.

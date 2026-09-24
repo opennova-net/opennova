@@ -537,6 +537,38 @@ with the resolver/store sites, destruction interpretation and reimplementation
 cross-links. No curated names or types were changed; the IDB was saved.
 [03TR frame costs](../perf/03tr-frame-costs.md) owns the measured effect.
 
+### Retail JO corpus layout (2026-09-23)
+
+Measured on the shipped JO models (an extracted tree of 958 `.3di`) while
+validating the `opennova-3di` builder and its `scene` inverse (ADR 0047); data
+witnesses, no IDA session. Frames: collision and occlusion values are given in
+mission axes (x forward, y left, z up), the frame the CLI prints; OCCL and LGHT
+store model axes on disk.
+
+| Chunk | Fact | Witness |
+|---|---|---|
+| OCCL | A record's plane table is its six bounding-box planes (+x -x +y -y +z -z), then each face's own plane unless one already matches it (normal within 0.005 per axis, distance within 0.03; the last match wins), at most 32 `[orig: ConvertToInternal @ 0x4268B3]` | Armry01, all 8 records (types 1, 0 x4, 2, 3 x2); `threedi_build` `add_occ_record` reproduces them plane for plane, ctest `threedi_o3d_building` pins the layout |
+| OCCL | Faces wind counter-clockwise about their outward normal in mission axes; edge words are `lo \| hi << 8`, plus `0x8000` when the edge runs from the higher vertex to the lower | Armry01; `occ_edge` reproduces every edge word |
+| OCCL | Occluder (0) and open (1) records carry a connecting byte the runtime never reads (Armry01's occluders say 2), the leftover the retired exporter's `classify_name` carried across objects | Armry01 |
+| CFAC | Bullet faces wind counter-clockwise about their CNRM normal in mission axes; the rare exception stores a normal against its own winding | Dtruck2 905/906, Armry01 250/250, Dblkhwk1 1594/1597 |
+| CVRT/CFAC | Collision vertices sit on the 8.8 grid, and faces the grid collapses keep valid normals: the normals were taken before quantization | Mp5b_1st 276 such faces, Dblkhwk1 13 |
+| COBJ/CXLT | A rigid model's section offset (and translation) is its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels) |
+| COBJ | The section list ends at the last part with collision content; a model with none has no CDTA | Dtruck2 8 parts / 7 sections, APLFP1 4 / 1, CNet01 1 / 0 |
+| BPLN | The plane flag word marks a seam; its authoring rule is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: @ 0x538e29]`) | 19,695 of 132,856 planes flagged |
+| LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
+| LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
+| STRP | Every strip is a triangle list | 11,264 strips, none `is_strip` |
+| RMDL | Model types `gnrc` 2917, `bldg` 310, `door` 12, `veh0` 1 | all LODs |
+| CTRL | Tables name registers outside the 96-entry catalog (`VEHICLE_TIRE14`, `VEHICLE_WHEELS04`, an empty name); the loader aliases them to LOD_FRAC `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` | DT801, Dbtr801, IBlock02 |
+| MTRL/USRP/VERT | Shader tags hold `#` (`VS_PHONGT#UV`, `VS_SKBASIC#UV`); user point names hold spaces (`FLARE 01`, `ground `); some vertex normals are zero-length | CSlide01, dM1A1; DCHNK1, JoLFP1; Dblkhwk1's rotor |
+| PANM/MTRX | Skinned models carry non-finite MTRX rows that no PANM row selects (selectors 0 or 255); 258 models carry a non-identity row 0, which a zero selector bypasses | US01, ArmsG; corpus |
+
+`opennova-3di scene` then `build` gives back the same model (`opennova-3di
+compare`: geometry per part and material, materials, tracks and frames, user
+points, lights, occlusion, collision) for 956 of the 958 models; the other two
+draw with a material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
+Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st.
+
 ## 2. GP runtime format — corpus probe findings
 
 Corpus: 639 `.3di` files (GPM/GPS/GPP) from the `AS_ASSETS` BHD affiliate build
@@ -805,8 +837,13 @@ fixture with extra_polys surfaces.
 
 - 3DI3: `WriteINFO` was never located in OED (likely nonexistent; the chunk is
   begun empty). Revisit if a fixture with a non-empty INFO surfaces.
-- 3DI3: all OCCL leaves in Wcrate5 are count-zero; per-record encodings are
-  unvalidated against a fixture with real occlusion geometry.
+- 3DI3: the BPLN seam flag's authoring rule. Neither "another volume of the
+  section carries the same plane facing the other way" nor "the plane's face
+  lies inside another volume of the section" reproduces the JO corpus (83% and
+  80% agreement over 132,856 planes, mostly on unflagged ones); the builder
+  applies the first as a heuristic (ADR 0047).
+- 3DI3: the LGHT flag bit `0x40` (Armry01's lights carry it); the retired
+  exporter set only bits 0-3.
 - 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
   decompiled; the loader side of the VERT stride/flag mapping is unverified.
   The WRITER-variant selection is witnessed (2026-08-19): one flag word drives
