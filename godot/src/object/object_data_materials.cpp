@@ -142,6 +142,22 @@ PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) 
 	return out;
 }
 
+Ref<Texture2D> ObjectData::load_material_anim_frame(int p_index, int p_slot, int p_frame) const {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
+		return Ref<Texture2D>();
+	}
+	const ThreediMaterial &mat = native_model().materials[p_index];
+	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
+		const ThreediMaterialTexture &tex = mat.textures[i];
+		if (tex.slot == static_cast<uint8_t>(p_slot) &&
+				(tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0 &&
+				static_cast<int>(tex.frame) == p_frame) {
+			return load_material_texture(p_index, static_cast<int>(i));
+		}
+	}
+	return Ref<Texture2D>();
+}
+
 namespace {
 // The register-name memo. Bounded: only names that resolve to a CTRL
 // register are inserted (the register table is finite; a miss is looked up

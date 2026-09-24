@@ -87,6 +87,38 @@ int main() {
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
 			"unsupported runtime rows and failed loads bind the checkerboard");
+	// Texture_LoadByNameWithChannel's single-file resolution.
+	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B6E6;
+	// load_texture_and_register @0x58B80E..0x58B881]
+	expect(material_texture_query("Jbark_2.dds.tga") == "Jbark_2.dds" &&
+			material_texture_query("wall.tga") == "wall.tga" &&
+			material_texture_query("noext") == "noext",
+			"the query keeps three characters after the first dot");
+	expect(material_dds_sibling("wall.tga") == "wall.dds" &&
+			material_dds_sibling("Jbark_2.dds") == "Jbark_2.dds" &&
+			material_dds_sibling("noext") == "noext.dds",
+			"the DDS sibling replaces the last extension");
+	{
+		const MaterialImageSource dds = material_image_source("wall.tga", false, true);
+		expect(dds.file == "wall.dds" && dds.decoder == MaterialImageDecoder::Dds,
+				"an existing DDS sibling wins");
+		const MaterialImageSource loose = material_image_source("wall.tga", true, true);
+		expect(loose.file == "wall.tga" && loose.decoder == MaterialImageDecoder::Tga,
+				"a loose-first hit takes the plain path");
+		const MaterialImageSource mdt = material_image_source("Body.MDT", false, true);
+		expect(mdt.file == "Body.MDT" && mdt.decoder == MaterialImageDecoder::Tga,
+				"an upper-case .MDT query skips the DDS probe");
+		const MaterialImageSource lower_mdt = material_image_source("body.mdt", false, true);
+		expect(lower_mdt.decoder == MaterialImageDecoder::Dds,
+				"the .MDT probe is case-sensitive");
+		expect(material_image_source("flag.pcx", false, false).decoder == MaterialImageDecoder::Pcx,
+				"PCX takes the PCX reader");
+		expect(material_image_source("photo.png", false, false).decoder == MaterialImageDecoder::None,
+				"any other extension fails");
+		const MaterialImageSource plain = plain_material_image_source("wall.tga");
+		expect(plain.file == "wall.tga" && plain.decoder == MaterialImageDecoder::Tga,
+				"type 1 never probes a DDS sibling");
+	}
 	// The loader never stores those runtime values: authored 3, 9..15 and
 	// > 18 keep the memset zero and load as ordinary diffuse rows.
 	// [orig: convert_material_definition @0x5B045B..0x5B04A0]

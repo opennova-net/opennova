@@ -106,10 +106,6 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 			normal = object_data_->load_material_slot_texture(p_array_index, 4);
 		}
 	}
-	if (diffuse.is_null() && detail.is_valid()) {
-		diffuse = detail;
-		detail.unref();
-	}
 
 	int32_t key = shader_cache->classify(shader_tag, material_flags, emissive_type,
 			is_glass_flag, alpha_test_byte);
@@ -224,18 +220,13 @@ void ObjectModel::collect_anim_frames(int p_material_index) {
 	if (frame_names.size() <= 1) {
 		return;
 	}
+	// Each frame is its own texture row, dispatched by that row's type like
+	// any other stage texture.
 	Array frames;
-	for (const String &frame_name : frame_names) {
-		frames.append(load_texture_name(frame_name));
+	for (int frame = 0; frame < frame_names.size(); ++frame) {
+		frames.append(object_data_->load_material_anim_frame(p_material_index, 1, frame));
 	}
 	anim_frames_by_mat_[p_material_index] = frames;
-}
-
-Ref<Texture2D> ObjectModel::load_texture_name(const String &p_texture_name) {
-	if (object_data_.is_null() || p_texture_name.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	return object_data_->load_texture_name(p_texture_name);
 }
 
 Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {

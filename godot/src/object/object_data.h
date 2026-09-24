@@ -171,6 +171,9 @@ public:
 	// loose source dir; null when none does.
 	Ref<Texture2D> load_material_slot_texture(int p_array_index, int p_slot) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
+	// The texture of one flipbook frame row (slot, frame), dispatched by the
+	// row's runtime type; null when the material has no row for that frame.
+	Ref<Texture2D> load_material_anim_frame(int p_index, int p_slot, int p_frame) const;
 	static String canonical_control_register_name(const String &p_name);
 	// Drops the register-name memo; the module terminator calls it so no
 	// godot::String outlives the extension.

@@ -147,6 +147,9 @@ public:
 	PackedByteArray read_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
+	// A diffuse-family material row (runtime types 0, 1, 2, 8) decoded from the
+	// one file retail's loader selects for it; null when that file is absent.
+	Ref<Texture2D> load_material_image(const String &name, uint8_t type) const;
 	Ref<Resource> load_font(const String &name) const;
 
 	// The witnessed boot-required manifest (ENG-6, engine/base/gameprofile

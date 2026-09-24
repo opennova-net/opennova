@@ -510,10 +510,47 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy polic
 	return result;
 }
 
+Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t type) const {
+	if (root_dir_.is_empty() || name.is_empty()) {
+		return Ref<Texture2D>();
+	}
+	// The diffuse loaders resolve exactly one file: the DDS sibling or the
+	// row's own name, never an alternate extension or suffix
+	// (renderer::material_image_source).
+	const std::string native = opennova::to_std(name);
+	opennova::renderer::MaterialImageSource source;
+	if (type == 1) {
+		source = opennova::renderer::plain_material_image_source(native);
+	} else {
+		const std::string query = opennova::renderer::material_texture_query(native);
+		source = opennova::renderer::material_image_source(query,
+				index_.prefers_loose_file(query),
+				has_file(opennova::to_gd(opennova::renderer::material_dds_sibling(query))));
+	}
+	if (source.decoder == opennova::renderer::MaterialImageDecoder::None) {
+		return Ref<Texture2D>();
+	}
+	const uint64_t epoch = opennova::cache_epoch();
+	if (texture_cache_epoch_ != epoch) {
+		texture_cache_.clear();
+		texture_cache_epoch_ = epoch;
+	}
+	const std::string key = std::string("material-image:") +
+			opennova::to_std(opennova::to_gd(source.file).to_lower());
+	const auto cached = texture_cache_.find(key);
+	if (cached != texture_cache_.end()) {
+		return cached->second;
+	}
+	const Ref<Texture2D> texture = opennova::load_material_image_from_bytes(
+			source.decoder, read_file(opennova::to_gd(source.file)));
+	texture_cache_.emplace(key, texture);
+	return texture;
+}
+
 Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
     if (type >= 16 && type <= 18) return opennova::prepare_material_chunk(read_file(name), type);
     if (type < 4 || type > 7)
-        return opennova::prepare_material_texture(load_texture(name), name, type);
+        return opennova::prepare_material_texture(load_material_image(name, type), name, type);
     const String dds = name.get_basename() + ".dds";
     const std::string native_name = opennova::to_std(name);
     const std::string selected = opennova::renderer::normal_material_filename(native_name,

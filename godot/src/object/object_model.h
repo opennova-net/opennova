@@ -593,7 +593,6 @@ private:
 	Ref<ShaderMaterial> create_material(int p_array_index,
 			Ref<ShaderMaterial> &r_postmultiply);
 	void collect_anim_frames(int p_material_index);
-	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
 	// carries the postmultiply pass, to its proxy as well.

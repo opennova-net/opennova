@@ -18,6 +18,34 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Hori
 std::string normal_material_filename(std::string_view name,
         bool loose_tga_preferred, bool dds_exists);
 
+// How a diffuse-family material row reaches its pixels: which file, and which
+// retail decoder reads it. None is a failed load (the dispatcher's
+// checkerboard).
+enum class MaterialImageDecoder : uint8_t { None, Dds, Tga, Pcx };
+struct MaterialImageSource {
+	std::string file;
+	MaterialImageDecoder decoder = MaterialImageDecoder::None;
+};
+
+// The file query Texture_LoadByNameWithChannel works on: the name cut three
+// characters after its first '.' ("x.dds.tga" -> "x.dds").
+// [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA]
+std::string material_texture_query(std::string_view name);
+// The DDS sibling it probes: the query up to its last '.' plus ".dds".
+// [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B598]
+std::string material_dds_sibling(std::string_view query);
+// Runtime types 0, 2 and 8: an existing loose file under loose-first, or a
+// query containing ".MDT" (case-sensitive), takes the plain path; otherwise
+// an existing DDS sibling wins and is decoded as DDS (a broken one fails, no
+// fallback). The plain path decodes by the upper-cased extension: .TGA and
+// .MDT through the TGA reader, .PCX through the PCX reader, anything else
+// fails. [orig: Texture_LoadByNameWithChannel @ 0x58B4FE..0x58B6E6]
+MaterialImageSource material_image_source(std::string_view query,
+		bool loose_first_hit, bool dds_exists);
+// Runtime type 1: the plain path on the full name, no DDS probe.
+// [orig: load_texture_and_register @ 0x58B80E..0x58B881]
+MaterialImageSource plain_material_image_source(std::string_view name);
+
 // The loader copies an authored texture type into the runtime row only for
 // the dispatcher's producers (0..2, 4..8, 16..18); 3, 9..15 and anything past
 // 18 leave the runtime byte at the record memset's zero, an ordinary diffuse

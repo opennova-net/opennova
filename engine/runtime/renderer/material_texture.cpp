@@ -21,6 +21,57 @@ std::string normal_material_filename(std::string_view name,
     return result;
 }
 
+// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B4FA — strstr(".")
+// then byte 4 past it = 0]
+std::string material_texture_query(std::string_view name) {
+	std::string query(name);
+	const size_t dot = query.find('.');
+	if (dot != std::string::npos && dot + 4 < query.size())
+		query.resize(dot + 4);
+	return query;
+}
+
+// [orig: Texture_LoadByNameWithChannel @0x58B53C..0x58B598 — strrchr('.')
+// cut, then ".dds" @0x7D8AD0]
+std::string material_dds_sibling(std::string_view query) {
+	std::string result(query);
+	const size_t dot = result.rfind('.');
+	if (dot != std::string::npos)
+		result.resize(dot);
+	return result + ".dds";
+}
+
+namespace {
+
+// The plain loaders dispatch on the upper-cased path in this order.
+// [orig: Texture_LoadByNameWithChannel @0x58B66F..0x58B6E6;
+// load_texture_and_register @0x58B80E..0x58B881]
+MaterialImageSource plain_source(std::string_view file) {
+	const std::string upper = strutil::to_upper(file);
+	MaterialImageSource source{std::string(file), MaterialImageDecoder::None};
+	if (upper.find(".TGA") != std::string::npos || upper.find(".MDT") != std::string::npos)
+		source.decoder = MaterialImageDecoder::Tga;
+	else if (upper.find(".PCX") != std::string::npos)
+		source.decoder = MaterialImageDecoder::Pcx;
+	return source;
+}
+
+} // namespace
+
+// [orig: Texture_LoadByNameWithChannel @0x58B4FE..0x58B5AD]
+MaterialImageSource material_image_source(std::string_view query,
+		bool loose_first_hit, bool dds_exists) {
+	if (loose_first_hit || query.find(".MDT") != std::string_view::npos)
+		return plain_source(query);
+	if (dds_exists)
+		return {material_dds_sibling(query), MaterialImageDecoder::Dds};
+	return plain_source(query);
+}
+
+MaterialImageSource plain_material_image_source(std::string_view name) {
+	return plain_source(name);
+}
+
 // [orig: convert_material_definition @0x5B045B..0x5B04A0]
 uint8_t material_texture_runtime_type(uint8_t authored_type) {
 	if (authored_type == 3 || (authored_type >= 9 && authored_type <= 15) ||

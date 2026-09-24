@@ -4,6 +4,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <runtime/renderer/material_texture.h>
+
 #include <vector>
 
 namespace opennova {
@@ -26,6 +28,13 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 // JPEG, BMP, and DDS (DXT/BC, detected by magic) so archive and loose VFS winners
 // follow one decode path without losing the editor-friendly image formats.
 godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filename, const godot::PackedByteArray &bytes);
+
+// Decode one material row's selected file with the loader retail picked for
+// it (renderer::material_image_source): a DDS keeps its authored mip chain,
+// the TGA/MDT and PCX readers build theirs. None or undecodable bytes give
+// null.
+godot::Ref<godot::Texture2D> load_material_image_from_bytes(
+		renderer::MaterialImageDecoder decoder, const godot::PackedByteArray &bytes);
 
 // Upload the engine's material-specific pixel transform; generated textures
 // share the resolver's epoch and shutdown lifetime.
