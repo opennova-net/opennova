@@ -17,7 +17,6 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
-#include <runtime/terrain_query/terrain_field_store.h>
 
 #include <algorithm>
 #include <array>
@@ -35,13 +34,11 @@
 namespace opennova::terrain {
 
 // Main-thread-owned provider state published once per semantic shadow epoch
-// (caster set, light quantum, receiver terrain, config — never material time,
-// which rides each work item). Worker threads clone only the planner, whose
-// immutable caster set is shared by pointer, and keep the receiver terrain
-// store (the engine's one cpt/trn field builder, ADR 0042 d4) alive.
+// (caster set, light quantum, config — never material time, which rides each
+// work item). Worker threads clone only the planner, whose immutable caster
+// set is shared by pointer.
 struct TerrainStaticShadowCompilationSnapshot {
 	uint64_t revision = 0;
-	std::shared_ptr<const TerrainFieldStore> receiver_storage;
 	TerrainStaticShadowPlanner planner;
 };
 

@@ -233,8 +233,6 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 			"cache-hit coverage must identify currently selected ready pages")
 		assert_eq(int(stable["shadow_provider_frame_plan_compiles"]), 0,
 			"sub-quantum light movement must reuse cached page plans outright")
-		assert_eq(int(stable["shadow_provider_frame_receiver_cache_misses"]), 0,
-			"unchanged terrain must not rescan page receiver samples")
 		previous_raw_light = current_raw_light
 	assert_eq(environment.debug_set_mission_minute_of_day(9.0 * 60.0), OK)
 	assert_eq(environment.get_light_direction_render_tuple(), initial_raw_light,

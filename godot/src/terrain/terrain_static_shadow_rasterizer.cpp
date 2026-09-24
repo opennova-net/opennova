@@ -17,9 +17,6 @@
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 
-#include <runtime/terrain_query/height_field.h>
-#include <runtime/terrain_query/terrain_field_build.h>
-
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -101,8 +98,6 @@ void merge_planner_diagnostics(
 					source.frame_max_v);
 		}
 	}
-	target.frame_receiver_cache_hits += source.frame_receiver_cache_hits;
-	target.frame_receiver_cache_misses += source.frame_receiver_cache_misses;
 	target.snapshot_exact = target.snapshot_exact && source.snapshot_exact;
 	target.caster_count = std::max(target.caster_count, source.caster_count);
 }
@@ -189,7 +184,6 @@ public:
 	bool enabled = true;
 	PackedInt32Array suppressed_bms_ids;
 	mutable opennova::terrain::TerrainStaticShadowPlanner planner;
-	std::shared_ptr<const opennova::terrain::TerrainFieldStore> receiver_storage;
 	mutable std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 			compilation_snapshot;
 	mutable opennova::terrain::TerrainStaticShadowPlannerDiagnostics
@@ -202,12 +196,6 @@ public:
 	uint64_t observed_source_revision = 0;
 	uint64_t observed_terrain_revision = 0;
 	uint64_t observed_object_global_counter = 0;
-	bool have_receiver = false;
-	// Identity of the last refresh_receiver_terrain attempt. The outcome is a
-	// pure function of (document, revision), so a repeat attempt is skipped —
-	// success or failure — until the terrain document actually changes.
-	uint64_t receiver_attempt_id = ~UINT64_C(0);
-	uint64_t receiver_attempt_revision = ~UINT64_C(0);
 
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowResolvedGeometry>
 	geometry_for(const String &p_graphic, const Ref<ObjectData> &p_data) {
@@ -310,54 +298,6 @@ public:
 		planner.replace_casters(std::move(records),
 				admitted_geometry_missing);
 	}
-
-	void refresh_receiver_terrain() {
-		const uint64_t source_id = terrain_data.is_valid()
-				? static_cast<uint64_t>(terrain_data->get_instance_id())
-				: 0;
-		const uint64_t source_revision = terrain_data.is_valid()
-				? terrain_data->get_change_revision()
-				: 0;
-		if (receiver_attempt_id == source_id &&
-				receiver_attempt_revision == source_revision) {
-			return;
-		}
-		receiver_attempt_id = source_id;
-		receiver_attempt_revision = source_revision;
-		if (terrain_data.is_null()) {
-			planner.clear_receiver_terrain();
-			receiver_storage.reset();
-			have_receiver = false;
-			return;
-		}
-		const opennova::CptFile &cpt = terrain_data->get_cpt();
-		const int dimension = static_cast<int>(std::sqrt(
-				static_cast<double>(cpt.depth_buffer.size())));
-		if (dimension <= 0 ||
-				static_cast<std::size_t>(dimension) * dimension !=
-						cpt.depth_buffer.size()) {
-			planner.clear_receiver_terrain();
-			receiver_storage.reset();
-			have_receiver = false;
-			return;
-		}
-		// The engine's one owning cpt/trn field builder (ADR 0042 d4); the
-		// store keeps the receiver buffers alive for the worker snapshots.
-		auto mutable_receiver =
-				std::make_shared<opennova::terrain::TerrainFieldStore>();
-		opennova::terrain::terrain_field_store_build(*mutable_receiver, cpt,
-				terrain_data->get_trn());
-		receiver_storage = std::move(mutable_receiver);
-		if (!receiver_storage->valid()) {
-			planner.clear_receiver_terrain();
-			receiver_storage.reset();
-			have_receiver = false;
-			return;
-		}
-		planner.set_receiver_terrain(receiver_storage->height_field(),
-				observed_terrain_revision);
-		have_receiver = true;
-	}
 };
 
 TerrainStaticShadowRasterizer::TerrainStaticShadowRasterizer() :
@@ -371,7 +311,6 @@ void TerrainStaticShadowRasterizer::set_terrain_data(
 	impl_->observed_terrain_revision = p_data.is_valid()
 			? p_data->get_change_revision()
 			: 0;
-	impl_->refresh_receiver_terrain();
 	impl_->rebuild_snapshot();
 }
 
@@ -505,10 +444,6 @@ Dictionary TerrainStaticShadowRasterizer::get_diagnostics() const {
 		diagnostics["frame_projected_uv_max"] =
 				Vector2(frame.frame_max_u, frame.frame_max_v);
 	}
-	diagnostics["frame_receiver_cache_hits"] =
-			static_cast<int64_t>(frame.frame_receiver_cache_hits);
-	diagnostics["frame_receiver_cache_misses"] =
-			static_cast<int64_t>(frame.frame_receiver_cache_misses);
 	const auto &epoch = impl_->async_epoch_diagnostics;
 	diagnostics["epoch_plan_count"] =
 			static_cast<int64_t>(epoch.frame_plan_count);
@@ -564,10 +499,6 @@ Dictionary TerrainStaticShadowRasterizer::get_diagnostics() const {
 		diagnostics["epoch_projected_uv_max"] =
 				Vector2(epoch.frame_max_u, epoch.frame_max_v);
 	}
-	diagnostics["epoch_receiver_cache_hits"] =
-			static_cast<int64_t>(epoch.frame_receiver_cache_hits);
-	diagnostics["epoch_receiver_cache_misses"] =
-			static_cast<int64_t>(epoch.frame_receiver_cache_misses);
 	return diagnostics;
 }
 
@@ -600,11 +531,6 @@ void TerrainStaticShadowRasterizer::begin_frame(
 	if (terrain_changed || source_revision != impl_->observed_source_revision ||
 			objects_changed) {
 		impl_->observed_terrain_revision = terrain_revision;
-		if (terrain_changed || !impl_->have_receiver) {
-			// The attempt-identity gate inside makes a receiver-less retry
-			// free until the terrain document actually changes.
-			impl_->refresh_receiver_terrain();
-		}
 		impl_->rebuild_snapshot();
 	}
 }
@@ -618,7 +544,7 @@ TerrainStaticShadowRasterizer::plan_page(
 std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 TerrainStaticShadowRasterizer::compilation_snapshot() const {
 	// The revision moves only on a structural change (caster set, light
-	// quantum, receiver terrain, config); material time is per job, so a
+	// quantum, config); material time is per job, so a
 	// steady world shares one snapshot across frames. The planner copy below
 	// shares the immutable caster set by pointer and duplicates only the
 	// per-page memo caches.
@@ -628,7 +554,6 @@ TerrainStaticShadowRasterizer::compilation_snapshot() const {
 		auto snapshot =
 				std::make_shared<opennova::terrain::TerrainStaticShadowCompilationSnapshot>();
 		snapshot->revision = revision;
-		snapshot->receiver_storage = impl_->receiver_storage;
 		snapshot->planner = impl_->planner;
 		impl_->compilation_snapshot = std::move(snapshot);
 		impl_->async_epoch_diagnostics = {};

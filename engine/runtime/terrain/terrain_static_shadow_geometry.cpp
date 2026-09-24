@@ -5,6 +5,7 @@
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/material_eval.h>
 #include <runtime/renderer/object_shader_template.h>
+#include <runtime/world/model_geometry.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_strip_decode.h>
 
@@ -98,72 +99,6 @@ std::vector<std::string> material_anim_frames(const ThreediMaterial &mat,
 	return out;
 }
 
-void expand_bounds(TerrainStaticShadowResolvedGeometry &geometry,
-		const std::array<float, 3> &point) {
-	if (!geometry.has_bounds) {
-		geometry.local_min = point;
-		geometry.local_max = point;
-		geometry.has_bounds = true;
-		return;
-	}
-	for (int axis = 0; axis < 3; ++axis) {
-		geometry.local_min[axis] = std::min(geometry.local_min[axis],
-				point[axis]);
-		geometry.local_max[axis] = std::max(geometry.local_max[axis],
-				point[axis]);
-	}
-}
-
-bool raw_strip_ranges_are_valid(const ThreediLod &lod,
-		const ThreediTriangleStrip &strip) {
-	if (lod.indices.indices == nullptr || lod.vertices.items == nullptr ||
-			strip.num_indices == 0 || strip.num_vertices <= 0 ||
-			strip.index_offset < 0 || strip.start_vertex < 0) {
-		return false;
-	}
-	const uint64_t index_end = static_cast<uint64_t>(strip.index_offset) +
-			strip.num_indices;
-	const uint64_t vertex_end = static_cast<uint64_t>(strip.start_vertex) +
-			static_cast<uint32_t>(strip.num_vertices);
-	return index_end <= lod.indices.count && vertex_end <= lod.vertices.count;
-}
-
-bool all_finite(const std::array<float, 3> &value) {
-	return std::isfinite(value[0]) && std::isfinite(value[1]) &&
-			std::isfinite(value[2]);
-}
-
-// Raw vertex ranges give conservative bounds even for a strip whose indices
-// are bad; presentation-world (-x, y, z) throughout.
-void expand_authored_strip_bounds(
-		TerrainStaticShadowResolvedGeometry &geometry, const ThreediLod &lod,
-		const ThreediTriangleStrip &strip,
-		const ThreediRenderObject &render_object) {
-	if (!raw_strip_ranges_are_valid(lod, strip)) {
-		geometry.bounds_exact = false;
-		return;
-	}
-	const std::array<float, 3> offset{-render_object.abs[0],
-			render_object.abs[1], render_object.abs[2]};
-	if (!all_finite(offset)) {
-		geometry.bounds_exact = false;
-		return;
-	}
-	const uint32_t first = static_cast<uint32_t>(strip.start_vertex);
-	const uint32_t count = static_cast<uint32_t>(strip.num_vertices);
-	for (uint32_t index = 0; index < count; ++index) {
-		const ThreediVertex &vertex = lod.vertices.items[first + index];
-		const std::array<float, 3> point{-vertex.position[0],
-				vertex.position[1], vertex.position[2]};
-		if (!all_finite(point)) {
-			geometry.bounds_exact = false;
-			continue;
-		}
-		expand_bounds(geometry, {point[0] + offset[0], point[1] + offset[1],
-										point[2] + offset[2]});
-	}
-}
-
 } // namespace
 
 std::vector<const char *> terrain_static_shadow_unsupported_reason_names(
@@ -239,6 +174,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		std::string_view graphic,
 		TerrainStaticShadowTextureProvider &textures) {
 	auto geometry = std::make_shared<TerrainStaticShadowResolvedGeometry>();
+	geometry->model_radius_fixed = world::model_bound_radius_q16_from_3di(model);
 	uint64_t hash = hash_lowered_string(io::kFnv1a64Offset, graphic);
 	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr) {
 		return {};
@@ -436,7 +372,6 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 				state.authored_surface_count = 1;
 				state.malformed_indices = true;
 			}
-			geometry->bounds_exact = false;
 		} else {
 			std::size_t strip_cursor = 0;
 			for (int render_object = 0; render_object < render_objects;
@@ -448,7 +383,6 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 								native_lod->render_object_count) {
 					state.authored_surface_count = 1;
 					state.malformed_indices = true;
-					geometry->bounds_exact = false;
 					continue;
 				}
 				const ThreediRenderObject &robj =
@@ -461,7 +395,6 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 								std::numeric_limits<uint32_t>::max())) {
 					state.authored_surface_count = 1;
 					state.malformed_indices = true;
-					geometry->bounds_exact = false;
 					continue;
 				}
 				state.authored_surface_count =
@@ -471,7 +404,6 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 					if (native_lod->strips == nullptr ||
 							strip_cursor >= native_lod->strip_count) {
 						state.malformed_indices = true;
-						geometry->bounds_exact = false;
 						continue;
 					}
 					const ThreediTriangleStrip &strip =
@@ -483,15 +415,12 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 							strip.start_vertex, strip.num_vertices)) {
 						state.malformed_indices = true;
 					}
-					expand_authored_strip_bounds(*geometry, *native_lod,
-							strip, robj);
 				}
 			}
 			if (strip_cursor != native_lod->strip_count) {
 				for (auto &state : coverage) {
 					state.malformed_indices = true;
 				}
-				geometry->bounds_exact = false;
 			}
 		}
 
