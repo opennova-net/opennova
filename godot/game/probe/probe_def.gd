@@ -524,6 +524,13 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "through the seam the window's checkbox and game_debug share; captures the "
 				+ "workspace.",
 				RUNTIME + "entity_pick_probe.gd", {}, [], true, true, 120_000),
+		ProbeDef.make("dev_tools_tour",
+				"The F3 workspace on the live process: every inspection window opened in "
+				+ "turn and captured, the Game window's session readout, every Game-view "
+				+ "overlay layer on over the nearest on-screen entity (the selection marker, "
+				+ "the ray capture, and the AI labels when a brain is in view must draw), and "
+				+ "the Wireframe viewport view; captures each.",
+				RUNTIME + "dev_tools_tour_probe.gd", {}, [], true, true, 180_000),
 		ProbeDef.make("window_fullscreen",
 				"The F11 policy (WindowState) on the live process: windowed -> fullscreen -> "
 				+ "windowed through the key handler's static, proving each state presents a "
