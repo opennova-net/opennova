@@ -242,7 +242,7 @@ void test_render_particles_audio_net_windows() {
 	opennova::devtools::ParticlesWindow particles(board);
 	opennova::devtools::ParticleSnapshot ps;
 	ps.valid = true;
-	ps.scene.live_particle_count = 40;
+	ps.active_entries = 40;
 	opennova::particle::EffectGroupDebugSnapshot group;
 	group.effect_name = "smoke";
 	opennova::particle::EffectEmitterDebugSnapshot e1;
@@ -258,10 +258,10 @@ void test_render_particles_audio_net_windows() {
 	CHECK(particles.emitter_row_count() == 2 && std::strncmp(particles.emitter_row(0), "00   smoke", 10) == 0 &&
 					std::strncmp(particles.emitter_row(1), "      embers", 12) == 0,
 			"the emitter list: the group's first emitter numbered, the rest indented");
-	ps.scene.live_particle_count = 12;
+	ps.active_entries = 12;
 	particles.set_snapshot(ps);
 	CHECK(particles.peak() == 40, "the peak latches");
-	ps.scene.live_particle_count = 0;
+	ps.active_entries = 0;
 	particles.set_snapshot(ps);
 	CHECK(particles.peak() == 0, "and resets at zero");
 

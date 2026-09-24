@@ -25,7 +25,8 @@ void ParticlesWindow::set_snapshot(ParticleSnapshot snapshot) {
 	// The peak latches until the count returns to zero [orig:
 	// Debug_DrawParticleStats @0x44c840 — the peak word resets on a zero
 	// current count].
-	const std::size_t current = snapshot_.valid ? snapshot_.scene.live_particle_count : 0;
+	const std::size_t current =
+			snapshot_.valid && snapshot_.active_entries > 0 ? static_cast<std::size_t>(snapshot_.active_entries) : 0;
 	if (current == 0) {
 		peak_ = 0;
 	} else if (current > peak_) {
@@ -53,8 +54,7 @@ void ParticlesWindow::format() {
 	char buf[192];
 	// [orig: Debug_DrawParticleStats @0x44c840 — "Current Particle Count:
 	//  %ld / %ld"]
-	std::snprintf(buf, sizeof(buf), "Current Particle Count:  %zu / %zu",
-			snapshot_.scene.live_particle_count, peak_);
+	std::snprintf(buf, sizeof(buf), "Current Particle Count:  %d / %zu", snapshot_.active_entries, peak_);
 	count_text_ = buf;
 	long index = 0;
 	for (const particle::EffectGroupDebugSnapshot &group : snapshot_.scene.groups) {
@@ -84,8 +84,9 @@ void ParticlesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	}
 	const particle::EffectDebugSnapshot &s = snapshot_.scene;
 	ImGui::TextUnformatted(count_text_.c_str());
-	ImGui::Text("groups %zu | emitters %zu | pools: groups %zu, emitters %zu high water",
-			s.live_group_count, s.live_emitter_count, s.group_pool_high_water, s.emitter_pool_high_water);
+	ImGui::Text("particles %zu | groups %zu | emitters %zu | pools: groups %zu, emitters %zu high water",
+			s.live_particle_count, s.live_group_count, s.live_emitter_count, s.group_pool_high_water,
+			s.emitter_pool_high_water);
 	ImGui::Text("spawns suppressed %zu, rejected %zu, over capacity %zu | %zu effects interned",
 			s.suppressed_spawn_count, s.rejected_spawn_count, s.capacity_rejection_count,
 			s.interned_effect_count);
