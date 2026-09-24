@@ -892,16 +892,15 @@ int main() {
 		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) nsum += normal0[i];
 		if (!expect(nsum == 0x203FC000u, "normal checksum")) return 1;
 
-		// UV state: scale/bias from the fog-distance INT part, offsets from
-		// the layer-1 cloud accumulators + 32x camera (positive on both).
-		CloudScrollState scroll;
-		scroll.acc_l1_v = 61440;
-		scroll.acc_l1_u = 61440;
-		const WaterUvState uv = water_uv_state(scroll, 100.0f, 200.0f, 1024.0f);
-		if (!expect(near(uv.scale, 1.0001649f, 1e-6f), "uv scale = 0.99996948*w/(w-0.2)")) return 1;
-		if (!expect(near(uv.bias, 0.2000330f, 1e-6f), "uv bias = 0.2*scale")) return 1;
-		if (!expect(near(uv.offset_u, 1.5627289f, 1e-6f), "uv offset u = cam_z/128 + acc*2^-28")) return 1;
-		if (!expect(near(uv.offset_v, 0.7814789f, 1e-6f), "uv offset v = cam_x/128 + acc*2^-28")) return 1;
+		// Depth curve: scale/bias from the fog-distance INT part
+		// [orig: render_water_surface @ 0x5c332d..0x5c3362]; the fraction is
+		// dropped (the movsx of the 16.16 word's high half).
+		const WaterDepthCurve curve = water_depth_curve(1024.0f);
+		if (!expect(near(curve.scale, 1.0001649f, 1e-6f), "depth scale = 0.99996948*w/(w-0.2)")) return 1;
+		if (!expect(near(curve.bias, 0.2000330f, 1e-6f), "depth bias = 0.2*scale")) return 1;
+		const WaterDepthCurve fractional = water_depth_curve(1024.75f);
+		if (!expect(fractional.scale == curve.scale && fractional.bias == curve.bias,
+		            "the depth curve reads only the fog distance's integer word")) return 1;
 	}
 
 	// --- Celestial bodies + glare occlusion [orig: render_celestial_bodies
@@ -1155,8 +1154,8 @@ int main() {
 		sp.plane_height_fp = 0;
 		sp.water_murk = 0.5f;
 		sp.water_color_lit = 0x00804020u;
-		sp.uv_scale = 1.0f;
-		sp.uv_bias = 0.2f;
+		sp.depth_scale = 1.0f;
+		sp.depth_bias = 0.2f;
 		WaterStripRows rows;
 		const int count = water_build_strip_rows(v, sp, rows);
 		if (!expect(count >= 2, "level view emits rows")) return 1;
@@ -1641,18 +1640,6 @@ int main() {
 		if (!expect(block_units(core.sky_color_blocks.cloudbase.render_color, 8, 12, 16), "cloudbase block ticks")) return 1;
 		if (!expect(block_units(core.sky_color_blocks.cloudhighlight.render_color, 9, 13, 17), "cloudhighlight block ticks")) return 1;
 		if (!expect(block_units(core.sky_color_blocks.cloudedge.render_color, 10, 14, 18), "cloudedge block ticks")) return 1;
-	}
-	{
-		// water/uv_state: the witnessed UV transform (scale, bias, offset_u,
-		// offset_v) after 8 ticks at sky_speed 15 via the weather core's shared
-		// accumulators, camera (100, 200), fog 1024 [orig: render_water_surface
-		// @ 0x5c3348..0x5c33db].
-		WeatherCore scroll;
-		for (int i = 0; i < 8; ++i) scroll.tick_cloud_scroll(15.0f);
-		const WaterUvState uv = water_uv_state(scroll.cloud_scroll, 100.0f, 200.0f, 1024.0f);
-		if (!expect(near(uv.scale, 1.000164866f, 1e-4f) && near(uv.bias, 0.200032964f, 1e-4f) &&
-		            near(uv.offset_u, 1.562694907f, 1e-4f) && near(uv.offset_v, 0.781444907f, 1e-4f),
-		            "water/uv_state after 8 ticks at sky speed 15")) return 1;
 	}
 	{
 		// water/noise: the RGBA8 heads of the noise color texture at counters 0

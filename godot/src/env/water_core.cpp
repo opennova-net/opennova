@@ -1,4 +1,5 @@
 #include "env/water_core.h"
+#include "util/axes.h"
 #include "util/color_convert.h"
 
 #include <cmath>
@@ -52,19 +53,22 @@ int WaterCore::get_texture_size() const {
 void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 		const Projection &p_cam_projection, const Vector2i &p_viewport_px,
 		float p_fog_end_world) {
-	// Godot world axes coincide COMPONENTWISE with the render (d3d) basis, so
-	// positions and directions carry over unchanged; the matrix conventions
-	// (and the -basis.z forward of a Godot camera) are the engine builder's
-	// business (env_water_render.h water_strip_view_from_camera).
+	// The march runs in the retail render (d3d) basis: the Godot camera
+	// crosses through the util/axes.h x/z swap (render = (z, y, x) of Godot,
+	// the handedness flip between the two worlds), so the rows' texcoords and
+	// texm3x2 bases carry retail's components while every view-space dot
+	// product (and so the screen march itself) is unchanged. The -basis.z
+	// forward of a Godot camera and the matrix conventions are the engine
+	// builder's business (env_water_render.h water_strip_view_from_camera).
 	const Basis &basis = p_cam_transform.basis;
-	const Vector3 right_v = basis.get_column(0);
-	const Vector3 up_v = basis.get_column(1);
-	const Vector3 forward_v = -basis.get_column(2);
-	const Vector3 eye_v = p_cam_transform.origin;
-	const float right[3] = {static_cast<float>(right_v.x), static_cast<float>(right_v.y), static_cast<float>(right_v.z)};
-	const float up[3] = {static_cast<float>(up_v.x), static_cast<float>(up_v.y), static_cast<float>(up_v.z)};
-	const float forward[3] = {static_cast<float>(forward_v.x), static_cast<float>(forward_v.y), static_cast<float>(forward_v.z)};
-	const float eye[3] = {static_cast<float>(eye_v.x), static_cast<float>(eye_v.y), static_cast<float>(eye_v.z)};
+	const opennova::env::Vec3 right_v = godot_to_render_float(basis.get_column(0));
+	const opennova::env::Vec3 up_v = godot_to_render_float(basis.get_column(1));
+	const opennova::env::Vec3 forward_v = godot_to_render_float(-basis.get_column(2));
+	const opennova::env::Vec3 eye_v = godot_to_render_float(p_cam_transform.origin);
+	const float right[3] = {right_v.x, right_v.y, right_v.z};
+	const float up[3] = {up_v.x, up_v.y, up_v.z};
+	const float forward[3] = {forward_v.x, forward_v.y, forward_v.z};
+	const float eye[3] = {eye_v.x, eye_v.y, eye_v.z};
 	float proj_columns[16];
 	for (int input = 0; input < 4; ++input) {
 		const Vector4 &column = p_cam_projection.columns[input];
@@ -79,7 +83,7 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 }
 
 int WaterCore::strip_build(float p_plane_height_world, float p_murk,
-		const Color &p_water_color_lit, float p_uv_scale, float p_uv_bias,
+		const Color &p_water_color_lit, float p_depth_scale, float p_depth_bias,
 		bool p_underwater, bool p_nightvision) {
 	if (!strip_view_set) {
 		strip_row_count = 0;
@@ -94,8 +98,8 @@ int WaterCore::strip_build(float p_plane_height_world, float p_murk,
 	params.water_murk = p_murk;
 	// Env_WaterColorLit @ 0x26c6804 is packed 0x00RRGGBB bytes.
 	params.water_color_lit = p_water_color_lit.to_argb32() & 0x00FFFFFFu;
-	params.uv_scale = p_uv_scale;
-	params.uv_bias = p_uv_bias;
+	params.depth_scale = p_depth_scale;
+	params.depth_bias = p_depth_bias;
 	// Quantize through the fixed plane so reconstructed positions sit on the
 	// exact plane_y the march ran at (2^-16 is float-exact).
 	strip_plane_height = static_cast<float>(params.plane_height_fp) * (1.0f / 65536.0f);
@@ -124,14 +128,15 @@ PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {
 PackedVector3Array WaterCore::strip_positions() const {
 	// World positions recovered as (uv0 * 32, plane height): uv0 is the
 	// unprojected world x/z * 0.03125 [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md] in the
-	// render basis, which maps to godot axes unchanged (see strip_set_view).
+	// render basis, swapped back into Godot axes (see strip_set_view).
 	PackedVector3Array out;
 	const int count = strip_row_count * 3;
 	out.resize(count);
 	Vector3 *write = out.ptrw();
 	for (int i = 0; i < count; ++i) {
-		write[i] = Vector3(strip_rows.uv0[i * 2] * 32.0f, strip_plane_height,
-				strip_rows.uv0[i * 2 + 1] * 32.0f);
+		write[i] = render_float_to_godot(opennova::env::Vec3{
+				strip_rows.uv0[i * 2] * 32.0f, strip_plane_height,
+				strip_rows.uv0[i * 2 + 1] * 32.0f});
 	}
 	return out;
 }

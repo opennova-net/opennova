@@ -759,30 +759,17 @@ void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixel
 	}
 }
 
-WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
-                            float fog_distance_world) {
-	// [orig: render_water_surface @ 0x5c3348..0x5c33db].
-	WaterUvState state;
+WaterDepthCurve water_depth_curve(float fog_distance_world) {
+	// [orig: render_water_surface @ 0x5c332d..0x5c3362; the w / (w - 0.2)
+	// divide @ 0x5c3348].
+	WaterDepthCurve curve;
 	// w = the INTEGER part of the (smoothed) fog distance — the original
 	// reads the 16-bit word above the 16.16 fraction.
 	const double w = static_cast<double>(static_cast<int16_t>(fog_distance_world));
 	const double v = w / (w - 0.2);
-	state.scale = static_cast<float>(v * static_cast<double>(0.99996948f));
-	state.bias = static_cast<float>(0.2 * v * static_cast<double>(0.99996948f));
-	// Layer-1 cloud accumulators + the 32x camera term; engine axes
-	// (camX_eng = render z, camY_eng = -render x), sums wrap as uint32 like
-	// the original.
-	const uint32_t cam_x_eng = static_cast<uint32_t>(static_cast<int64_t>(
-			static_cast<double>(cam_z) * 65536.0));
-	const uint32_t cam_y_eng = static_cast<uint32_t>(-static_cast<int64_t>(
-			static_cast<double>(cam_x) * 65536.0));
-	state.offset_u = static_cast<float>(
-			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_v + 32u * cam_x_eng)) *
-			kCloudUvScaleLayer1);
-	state.offset_v = static_cast<float>(
-			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_u - 32u * cam_y_eng)) *
-			kCloudUvScaleLayer1);
-	return state;
+	curve.scale = static_cast<float>(v * static_cast<double>(0.99996948f));
+	curve.bias = static_cast<float>(0.2 * v * static_cast<double>(0.99996948f));
+	return curve;
 }
 
 // ---------------------------------------------------------------------------
@@ -1068,11 +1055,11 @@ int water_strip_stride(float row_rhw) {
 	return steps;
 }
 
-float water_strip_depth(float view_depth, float uv_scale, float uv_bias) {
+float water_strip_depth(float view_depth, float depth_scale, float depth_bias) {
 	// [orig: @ 0x5c2bfd..0x5c2c4a] — rhw first, then z = (t*scale - bias)*rhw
 	// against the witnessed clamp pair (flt_7C4658 upper / flt_7DBF7C lower).
 	const float rhw = 1.0f / view_depth;
-	float z = (view_depth * uv_scale - uv_bias) * rhw;
+	float z = (view_depth * depth_scale - depth_bias) * rhw;
 	if (z > kWaterStripDepthMax) {
 		z = kWaterStripDepthMax;
 	}
@@ -1335,7 +1322,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 			out.screen_pos.push_back(screen_x[i]);
 			out.screen_pos.push_back(screen_y[i]);
 			out.depth.push_back(water_strip_depth(static_cast<float>(depth_t[i]),
-			                                      params.uv_scale, params.uv_bias));
+			                                      params.depth_scale, params.depth_bias));
 			out.rhw.push_back(reciprocal_clip_w(depth_t[i]));
 			out.diffuse.push_back(colors.diffuse);
 			out.specular.push_back(colors.specular);

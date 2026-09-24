@@ -406,6 +406,19 @@ int main() {
 					opennova::env::underwater_murk_overlay_alpha_byte(0.8f) == 204 &&
 					opennova::env::underwater_murk_overlay_alpha_byte(0.99f) == 223,
 				"the underwater scissor uses raw 128 + trunc(96 * murk) alpha");
+		// render_water_surface's side gate [orig: @ 0x5c32f6 jge / @ 0x5c3304
+		// jle]: strictly above draws the view-0 side (and the bloom pass's
+		// nightvision redraw), strictly below the underwater side, and an eye
+		// exactly on the plane draws neither.
+		const opennova::env::WaterSurfaceSides above =
+				opennova::env::water_surface_sides(7.5f, 7.0f);
+		const opennova::env::WaterSurfaceSides below =
+				opennova::env::water_surface_sides(6.5f, 7.0f);
+		const opennova::env::WaterSurfaceSides level =
+				opennova::env::water_surface_sides(7.0f, 7.0f);
+		ok &= expect(above.above && !above.underwater && below.underwater &&
+					!below.above && !level.above && !level.underwater,
+				"the water surface draws strictly above or strictly below the plane");
 	}
 
 	// --- WeatherRuntime reset epoch + prewarm + snapshot units --------------

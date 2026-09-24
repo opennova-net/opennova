@@ -76,7 +76,11 @@ extends GutTest
 #   env_render_unit ctest with the ADR 0043 d10 env-core sweep (the WaterCore
 #   / WeatherCore bindings that served them are C++-only now);
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
-#   the invented waves - the pinned tail is now the u_water_uv Vector4. Every
+#   the invented waves; the u_water_uv tail that replaced it died too
+#   (2026-09-24, R10-1): the noise texcoords are the strip's absolute world/32
+#   pair [retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00], the
+#   scale/bias pair only feeds the strip depth (env_render_unit pins it) and
+#   the cloud-scroll offsets are never read back. Every
 #   other water key (mesh, mission-height ladder, snap, per-cell lit colors) stayed
 #   byte-identical; the ladder REORDER (#28, terrain-over-env) has no asset-
 #   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
@@ -264,7 +268,7 @@ const EXPECTED_FLOATS := {
 	"c0/t1845": [0.849372387, 0.168950617, -0.500000000, 0.000549451, 500.000000000, 1000.000000000],
 	"c0/t1900": [0.836503923, 0.224140391, -0.500000000, 0.750732601, 500.000000000, 1000.000000000],
 	"c0/t2200": [0.433006197, 0.749988914, -0.500000000, 1.000000000, 500.000000000, 1000.000000000],
-	"c0/water_params": [0.000000000, 1.000169516, 0.200033903, 0.000234902, 0.000234902],
+	"c0/water_params": [0.000000000],
 	"c1/consts": [400.000000000, 3.000000000, 30.000000000, 250.000000000, 0.500000000, 0.500000000, 1830.000000000, 3.000000000, 15.000000000, 1.000000000, 76.000000000, 0.000000000],
 	"c1/t0000": [-0.000000076, 0.866012573, -0.500000000, 1.000000000, 100.000000000, 400.000000000],
 	"c1/t0550": [-0.865188301, 0.037775949, -0.500000000, 0.500137389, 100.000000000, 400.000000000],
@@ -275,7 +279,7 @@ const EXPECTED_FLOATS := {
 	"c1/t1845": [0.849372387, 0.168950617, -0.500000000, 0.000549451, 100.000000000, 400.000000000],
 	"c1/t1900": [0.836503923, 0.224140391, -0.500000000, 0.750732601, 100.000000000, 400.000000000],
 	"c1/t2200": [0.433006197, 0.749988914, -0.500000000, 1.000000000, 100.000000000, 400.000000000],
-	"c1/water_params": [1.500000000, 1.000469685, 0.200093940, 0.000469763, 0.000469763],
+	"c1/water_params": [1.500000000],
 	"c2/consts": [300.000000000, 1.000000000, 15.000000000, 175.000000000, 0.349999994, 1.000000000, 630.000000000, 2.000000000, 15.000000000, 1.000000000, 107.992004395, 0.000000000],
 	"c2/t0000": [-0.000000076, 0.866012573, -0.500000000, 1.000000000, 0.500000000, 300.000000000],
 	"c2/t0550": [-0.865188301, 0.037775949, -0.500000000, 0.500137389, 0.500000000, 300.000000000],
@@ -286,7 +290,7 @@ const EXPECTED_FLOATS := {
 	"c2/t1845": [0.849372387, 0.168950617, -0.500000000, 0.000549451, 0.500000000, 300.000000000],
 	"c2/t1900": [0.836503923, 0.224140391, -0.500000000, 0.750732601, 0.500000000, 300.000000000],
 	"c2/t2200": [0.433006197, 0.749988914, -0.500000000, 1.000000000, 0.500000000, 300.000000000],
-	"c2/water_params": [1.000000000, 1.000636578, 0.200127319, 0.000234902, 0.000234902],
+	"c2/water_params": [1.000000000],
 	"celestial/body_alpha": [1.000000000, 0.500000000, 0.500000000, 1.000000000, 0.500000000, 0.000000000, 0.000000000],
 	"celestial/body_distance": [64.000000000],
 	"celestial/glow": [0.500000000, 0.031250000, 0.250000000, 0.250000000, 0.000000000],
@@ -515,17 +519,10 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			var alpha: float = water.get_water_material().get_shader_parameter("u_water_murk")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
-		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
-		# render_water_surface @ 0x5c3348..0x5c33db] — the standalone node's
-		# fallback core after the cell loop's fixed tick count.
-		var water_uv: Vector4 = water.get_water_material().get_shader_parameter("u_water_uv")
 		# Restore the environment-resolved height before recording that
 		# separate precedence vector (cfg0 returns to the zero sentinel).
 		water.set_mission_water_height_override(NAN)
-		floats["c%d/water_params" % cfg_index] = [
-			water.water_height,
-			water_uv.x, water_uv.y, water_uv.z, water_uv.w,
-		]
+		floats["c%d/water_params" % cfg_index] = [water.water_height]
 
 
 func _collect_directions(floats: Dictionary) -> void:

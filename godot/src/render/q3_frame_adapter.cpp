@@ -45,6 +45,8 @@
 #include "env/mission_environment.h"
 #include "util/string_convert.h"
 
+#include <formats/env/env_water_render.h>
+
 using namespace godot;
 using namespace opennova::renderer;
 
@@ -89,6 +91,11 @@ struct DeviceFrame {
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
 	int fog_type = 0;
+	// The beauty camera's near/far: the water copy maps its strip depth
+	// through the same scene curve the beauty water uses.
+	float camera_near = 0.0f;
+	float camera_far = 0.0f;
+	bool camera_perspective = true;
 };
 
 struct Candidate {
@@ -160,6 +167,19 @@ void main() {
 	// Clip w is the pass camera's view depth (the far band below moves z
 	// only): the fixed-function EXP fog distance.
 	view_depth = gl_Position.w;
+	float scene_near = pc.light_local_gain.x;
+	float scene_far = pc.light_local_gain.y;
+	if (uint(pc.params.x + 0.5) == 2u && gl_Position.w > 0.0 &&
+			pc.light_local_gain.z > 0.5 && scene_far > scene_near) {
+		// The water copy writes the depth the beauty water writes: its strip's
+		// replica depth (custom0.x) mapped through the scene curve
+		// (water.gdshader), taking the copies' relative pull on top.
+		float scene_z = in_custom0.x / @WATER_VIEWPORT_MAX_Z@;
+		float inv_view_depth = (1.0 - scene_z * (scene_far - scene_near) /
+				scene_far) / (scene_near * (1.0 - 3.0e-4));
+		gl_Position.z = max(scene_near * (scene_far * inv_view_depth - 1.0) /
+				(scene_far - scene_near), 0.0) * gl_Position.w;
+	}
 	if (uint(pc.params.x + 0.5) >= 3u && gl_Position.w > 0.0) {
 		// Render_SetViewportFarDepth's D3DVIEWPORT9 MinZ/MaxZ band for the
 		// celestial discs and the sun glow, expressed in reverse-Z clip depth
@@ -342,7 +362,6 @@ void main() {
 		// The NV blend pipeline is src ONE / dst SRC_ALPHA, so the written
 		// alpha IS the retained destination weight: dst * (noiseA x diffuseA
 		// x 2), exactly the premultiplied blend water.gdshader runs in beauty.
-		// (The underwater opaque variant replaces and ignores it.)
 		float alpha = clamp(noise.a * color.a * 2.0, 0.0, 1.0);
 		frag_color = vec4(result, alpha);
 		return;
@@ -374,6 +393,8 @@ std::string q3_vertex_shader_source() {
 	splice_token(source, "@FAR_BAND_REV_MIN@", glsl_float(1.0f - kQ3FarBandMaxZ));
 	splice_token(source, "@FAR_BAND_REV_SPAN@",
 			glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ));
+	splice_token(source, "@WATER_VIEWPORT_MAX_Z@",
+			glsl_float(opennova::env::kWaterStripDepthMax));
 	return source;
 }
 
@@ -518,8 +539,10 @@ Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 		case Q3Technique::RotatedSpecularGlass:
 			return Q3DeviceBlend::Add;
 		case Q3Technique::WaterNightVision:
-			return p_command.water.underwater_view ?
-					Q3DeviceBlend::Replace : Q3DeviceBlend::Water;
+			// The bloom pass's redraw is the above-water call only
+			// (Water_ShaderBlendNV, ONE + dst*SRCALPHA); the Water producer
+			// never publishes it underwater.
+			return Q3DeviceBlend::Water;
 		case Q3Technique::CelestialBody:
 		case Q3Technique::SunGlow:
 			// The body's own material blend, mapped like NormalCopy's: the
@@ -1074,6 +1097,8 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				push.params[1] = draw.water.has_reflection ? 1.0f : 0.0f;
 				push.params[2] = draw.water.reflection_uv_scale.x;
 				push.params[3] = draw.water.reflection_uv_scale.y;
+				push.light_local_gain = {frame->camera_near, frame->camera_far,
+						frame->camera_perspective ? 1.0f : 0.0f, 0.0f};
 			} else {
 				// The disc/glow SELFLUM push: the producer's bloom-pass
 				// SelfLumColor x min(gain, 1) x 2 (the NormalCopy formula),
@@ -1303,8 +1328,6 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 				request.published_generation = publication->second.generation;
 			}
 			request.pack = surface.pack;
-			if (record.source == Q3Source::Water)
-				request.pack.camera_position = camera_position;
 			const int surface_index = surface.surface;
 			candidate.stream = cache.acquire(request, [&record, surface_index]() {
 				return record.mesh->surface_get_arrays(surface_index);
@@ -1344,6 +1367,10 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	const Q3DrawList &draw_list = impl_->compiler.compile(snapshot);
 	auto frame = std::make_shared<DeviceFrame>();
 	frame->draw_list = draw_list;
+	frame->camera_near = p_camera->get_near();
+	frame->camera_far = p_camera->get_far();
+	frame->camera_perspective =
+			p_camera->get_projection() != Camera3D::PROJECTION_ORTHOGONAL;
 	Ref<EnvLightValues> light_values = EnvLightValues::retail_noon_defaults();
 	if (MissionEnvironment *environment = impl_->scope_environment(p_scope,
 			p_viewport)) {

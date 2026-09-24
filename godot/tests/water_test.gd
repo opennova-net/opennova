@@ -590,3 +590,276 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	assert_almost_eq(uv_scale.y, surface_ratio, 0.0001,
 			"a native mode registers the reflection to the surface's own ratio again")
 	presenter.teardown()
+
+
+func test_strip_texcoords_are_the_render_basis_world_over_32() -> void:
+	# Retail's texcoord 0 (duplicated into texcoord 3) is the unprojected
+	# ABSOLUTE render-basis world x/32, z/32 of each strip vertex (retail
+	# render_water_strip_detailed @ 0x5c2aec..0x5c2b00, flt_7DBFAC = 1/32). The
+	# render basis is the util/axes.h x/z swap of the Godot world, so every
+	# vertex carries TEX_UV = (godot z, godot x) / 32, and no scale, bias,
+	# offset or cloud scroll reaches the texcoords (the scroll "offsets"
+	# render_water_surface stores @ 0x5c33b9 / @ 0x5c33db are never read).
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	water.advance_frame(TICK)
+	var mesh := water.get_mesh_instance().mesh as ArrayMesh
+	assert_gt(mesh.get_surface_count(), 0, "the fixture view must march strip rows")
+	if mesh.get_surface_count() == 0:
+		return
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	for index in [0, positions.size() >> 1, positions.size() - 1]:
+		var expected := Vector2(positions[index].z, positions[index].x) / 32.0
+		assert_almost_eq(uvs[index].x, expected.x, 0.001,
+				"texcoord u is the render-basis world x (Godot z) / 32")
+		assert_almost_eq(uvs[index].y, expected.y, 0.001,
+				"texcoord v is the render-basis world z (Godot x) / 32")
+	assert_null(water.get_water_material().get_shader_parameter("u_water_uv"),
+			"no texcoord transform uniform: the shader samples the rows' texcoords")
+
+
+func test_noise_pattern_is_fixed_in_the_world_at_one_texture_per_32_units() -> void:
+	# The strip samples its noise pair at the world-fixed texcoords above: a
+	# texture whose u half [0, 0.5) is black and [0.5, 1) white paints bands
+	# 16 units wide along Godot z, repeating every 32 units.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+	var water := Water.new()
+	viewport.add_child(water)
+	water.water_height = 7.0
+	var cam := Camera3D.new()
+	viewport.add_child(cam)
+	cam.global_position = Vector3(3.0, 27.0, 16.0)
+	cam.rotation_degrees = Vector3(-60.0, 0.0, 0.0)
+	cam.make_current()
+	water.advance_frame(TICK)
+	var mesh := water.get_mesh_instance().mesh as ArrayMesh
+	assert_gt(mesh.get_surface_count(), 0, "the fixture view must march strip rows")
+
+	var bands := Image.create(64, 4, false, Image.FORMAT_RGBA8)
+	for x in 64:
+		for y in 4:
+			bands.set_pixel(x, y, Color.BLACK if x < 32 else Color.WHITE)
+	var material := water.get_water_material()
+	material.set_shader_parameter("u_noise_color", ImageTexture.create_from_image(bands))
+	var neutral := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	neutral.fill(Color(0.5, 0.5, 1.0, 1.0))
+	material.set_shader_parameter("u_noise_normal", ImageTexture.create_from_image(neutral))
+	material.set_shader_parameter("u_has_reflection", false)
+	material.set_shader_parameter("u_water_color", Vector3.ONE)
+	material.set_shader_parameter("u_fog_color", Vector3.ZERO)
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		water.release_runtime_renderer_resources()
+		return
+	var image := viewport.get_texture().get_image()
+	# z = 8 -> u = 0.25 (black band); z = -8 -> u = -0.25, wrapping to 0.75
+	# (white band).
+	var black_px := cam.unproject_position(Vector3(3.0, 7.0, 8.0))
+	var white_px := cam.unproject_position(Vector3(3.0, 7.0, -8.0))
+	var black := image.get_pixelv(Vector2i(black_px))
+	var white := image.get_pixelv(Vector2i(white_px))
+	assert_gt(white.r, black.r + 0.2,
+			"the band at world z = -8 samples u = 0.75 and the one at z = 8 u = 0.25 "
+			+ "(black %s, white %s)" % [black, white])
+	water.release_runtime_renderer_resources()
+
+
+func _strip_arrays(instance: MeshInstance3D) -> Array:
+	var mesh := instance.mesh as ArrayMesh
+	if mesh == null or mesh.get_surface_count() == 0:
+		return []
+	return mesh.surface_get_arrays(0)
+
+
+func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() -> void:
+	# The FrameFX bloom pass redraws the strip as render_water_surface(0, 1)
+	# (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d): the above-water
+	# march with the nightvision row colors — the flat 0.1 base and no
+	# specular RGB (retail render_water_strip_detailed @ 0x5c2d5a / @ 0x5c2ef8)
+	# — on the same geometry as the beauty strip.
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	var cam: Camera3D = fixture["camera"]
+	water.advance_frame(TICK)
+	var night_vision: MeshInstance3D = water.get_night_vision_mesh_instance()
+	assert_not_null(night_vision)
+	assert_eq(night_vision.layers, 0, "no camera draws the redraw; only the Q3 pass")
+	var beauty := _strip_arrays(water.get_mesh_instance())
+	var redraw := _strip_arrays(night_vision)
+	assert_false(beauty.is_empty(), "the beauty strip marches above water")
+	assert_false(redraw.is_empty(), "the nightvision redraw marches above water")
+	if beauty.is_empty() or redraw.is_empty():
+		return
+	assert_eq(PackedVector3Array(redraw[Mesh.ARRAY_VERTEX]),
+			PackedVector3Array(beauty[Mesh.ARRAY_VERTEX]),
+			"one march: the redraw shares the beauty geometry")
+	var beauty_colors: PackedColorArray = beauty[Mesh.ARRAY_COLOR]
+	var redraw_colors: PackedColorArray = redraw[Mesh.ARRAY_COLOR]
+	var redraw_specular: PackedFloat32Array = redraw[Mesh.ARRAY_CUSTOM1]
+	var beauty_specular: PackedFloat32Array = beauty[Mesh.ARRAY_CUSTOM1]
+	var any_beauty_specular := false
+	for index in redraw_colors.size():
+		assert_lt(redraw_colors[index].r, beauty_colors[index].r + 0.0001,
+				"the 0.1 base dims the nightvision brightness")
+		assert_eq(redraw_specular[index * 4], 0.0, "the redraw drops the specular RGB")
+		assert_eq(redraw_specular[index * 4 + 1], 0.0)
+		assert_eq(redraw_specular[index * 4 + 2], 0.0)
+		assert_eq(redraw_specular[index * 4 + 3], beauty_specular[index * 4 + 3],
+				"the distance fog alpha is shared")
+		any_beauty_specular = any_beauty_specular or beauty_specular[index * 4] > 0.0
+	assert_true(any_beauty_specular, "the beauty rows do carry specular RGB")
+
+	# Underwater the bloom pass's view-0 call has no side (retail
+	# render_water_surface @ 0x5c3304): no redraw, while the beauty strip
+	# swaps to the underwater side.
+	cam.global_position = Vector3(100.3, 1.0, -33.7)
+	water.advance_frame(TICK)
+	assert_true(_strip_arrays(night_vision).is_empty(), "no nightvision redraw underwater")
+	assert_false(_strip_arrays(water.get_mesh_instance()).is_empty(),
+			"the underwater beauty side still marches")
+
+
+func test_eye_exactly_on_the_plane_draws_neither_water_side() -> void:
+	# render_water_surface's gates are strict on both sides: the view-0 call
+	# skips cam.z <= wh (jle @ 0x5c330a) and the underwater call cam.z >= wh
+	# (jge @ 0x5c32fc), so an eye exactly on the plane draws no surface.
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	var cam: Camera3D = fixture["camera"]
+	cam.global_position = Vector3(100.3, 7.0, -33.7)
+	water.advance_frame(TICK)
+	assert_true(_strip_arrays(water.get_mesh_instance()).is_empty(),
+			"no beauty strip at exact equality")
+	assert_true(_strip_arrays(water.get_night_vision_mesh_instance()).is_empty(),
+			"no nightvision redraw at exact equality")
+
+
+func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
+	# The beauty pass follows g_WaterActive, the bloom pass's redraw does not
+	# (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d).
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	water.set_visible_terrain_bounds(true, 100.0, 200.0)
+	water.advance_frame(TICK)
+	assert_true(_strip_arrays(water.get_mesh_instance()).is_empty(),
+			"the inactive water pass clears the beauty strip")
+	assert_false(_strip_arrays(water.get_night_vision_mesh_instance()).is_empty(),
+			"the nightvision redraw still marches")
+
+
+func _depth_fixture(camera_position: Vector3, pitch_deg: float) -> Dictionary:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+	var water := Water.new()
+	viewport.add_child(water)
+	water.water_height = 7.0
+	var cam := Camera3D.new()
+	viewport.add_child(cam)
+	cam.global_position = camera_position
+	cam.rotation_degrees = Vector3(pitch_deg, 0.0, 0.0)
+	# The retail scene far is the fog distance's integer word + 1 over the
+	# envless water's 1000-unit fog (Render_ProcessMainSceneFrame
+	# @ 0x5CA4BA..0x5CA4D0), near 0.2.
+	cam.near = 0.2
+	cam.far = 1001.0
+	cam.make_current()
+	return {"viewport": viewport, "water": water, "camera": cam}
+
+
+func _render_water_frame(fixture: Dictionary, fog_color: Vector3,
+		water_color := Vector3(0.408, 0.314, 0.224)) -> Image:
+	var water: Water = fixture["water"]
+	water.advance_frame(TICK)
+	var material := water.get_water_material()
+	material.set_shader_parameter("u_has_reflection", false)
+	material.set_shader_parameter("u_fog_color", fog_color)
+	material.set_shader_parameter("u_water_color", water_color)
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	if RenderingServer.get_rendering_device() == null:
+		return null
+	return (fixture["viewport"] as SubViewport).get_texture().get_image()
+
+
+func test_water_beyond_the_far_plane_reaches_the_horizon() -> void:
+	# The pre-transformed strip is never far-clipped: rows past the scene far
+	# plane clamp to the viewport MaxZ (retail render_water_strip_detailed
+	# @ 0x5c2c1f..0x5c2c4a) and draw fully fogged water up to the horizon.
+	var fixture := _depth_fixture(Vector3(0.0, 107.0, 0.0), -5.0)
+	var image: Image = await _render_water_frame(fixture, Vector3(0.0, 1.0, 0.0))
+	var water: Water = fixture["water"]
+	if image == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		water.release_runtime_renderer_resources()
+		return
+	var cam: Camera3D = fixture["camera"]
+	# The strip's first row is the plane point 2000 units ahead
+	# (terrain_project_sector_to_screen @ 0x5c0c7c..0x5c0d25); 1500 units out
+	# lies between the 1001 far plane and that row.
+	var far_px := cam.unproject_position(Vector3(0.0, 7.0, -1500.0))
+	var far_pixel := image.get_pixelv(Vector2i(far_px))
+	assert_gt(far_pixel.g, 0.5,
+			"water 1500 units out (past the 1001 far plane) draws fogged: %s" % far_pixel)
+	water.release_runtime_renderer_resources()
+
+
+func test_water_loses_a_depth_tie_to_geometry_on_its_plane() -> void:
+	# The strip depth replicates the scene curve with far = w while the scene
+	# draws at far = w + 1, so the water sits just behind its true depth and a
+	# surface exactly on the plane wins the LESSEQUAL test (retail depth chain
+	# @ 0x5c2c0c..0x5c2c4a against Render_ProcessMainSceneFrame
+	# @ 0x5CA4BA..0x5CA4D0).
+	var fixture := _depth_fixture(Vector3(0.0, 27.0, 20.0), -45.0)
+	var quad := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(40.0, 40.0)
+	quad.mesh = plane
+	var red := StandardMaterial3D.new()
+	red.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red.albedo_color = Color.RED
+	quad.material_override = red
+	quad.position = Vector3(0.0, 7.0, 0.0)
+	(fixture["viewport"] as SubViewport).add_child(quad)
+	var image: Image = await _render_water_frame(fixture, Vector3(0.0, 1.0, 0.0),
+			Vector3(0.0, 1.0, 0.0))
+	var water: Water = fixture["water"]
+	if image == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		water.release_runtime_renderer_resources()
+		return
+	var cam: Camera3D = fixture["camera"]
+	var pixel := image.get_pixelv(Vector2i(cam.unproject_position(Vector3(0.0, 7.0, 0.0))))
+	assert_gt(pixel.r, 0.9, "the coplanar surface keeps its pixel: %s" % pixel)
+	assert_lt(pixel.g, 0.1, "the water behind it is depth-rejected: %s" % pixel)
+	water.release_runtime_renderer_resources()

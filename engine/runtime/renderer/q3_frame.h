@@ -228,10 +228,8 @@ struct Q3WaterMaterialParameters {
 	Q3ResourceLease noise_color_texture{};
 	Q3ResourceLease noise_normal_texture{};
 	Q3Vec3 water_color{0.408f, 0.314f, 0.224f};
-	Q3Vec4 water_uv{1.0f, 0.2f, 0.0f, 0.0f};
 	Q3Vec2 reflection_uv_scale{1.0f, 1.0f};
 	bool has_reflection = false;
-	bool underwater_view = false;
 };
 
 // Shared parameter block for the body and sun-glow techniques. Both redraw

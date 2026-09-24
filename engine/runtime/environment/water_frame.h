@@ -55,4 +55,19 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 // Terrain_DrawScissorRect @ 0x5c38e0]
 uint8_t underwater_murk_overlay_alpha_byte(float murk);
 
+// The camera-side gate of render_water_surface's two calls
+// [orig: render_water_surface @ 0x5c32ed..0x5c330a]: the view-0 (above)
+// call draws only while the camera is strictly above the plane
+// (jle skip @ 0x5c330a) and the underwater view only while it is strictly
+// below (jge skip @ 0x5c32fc); at exact equality neither side draws. The
+// FrameFX bloom pass's nightvision redraw is the view-0 call
+// [orig: FrameFX_RenderBloomPass @ 0x582a59..0x582a5d], so it shares the
+// above gate and never runs underwater; it is not gated on g_WaterActive.
+struct WaterSurfaceSides {
+	bool above = false;
+	bool underwater = false;
+};
+
+WaterSurfaceSides water_surface_sides(float eye_y, float water_height);
+
 } // namespace opennova::env

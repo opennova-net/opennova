@@ -61,21 +61,23 @@ public:
 	// Fills the WaterStripView from the active Godot camera: the D3D
 	// row-vector view matrix + its inverse, the projection scales, the
 	// camera basis rows, the 16.16 camera position, and the viewport rect
-	// (min 0,0 / max = px - 1 / center = px / 2). Godot world axes coincide
-	// componentwise with the render (d3d) basis — see the .cpp.
+	// (min 0,0 / max = px - 1 / center = px / 2). The camera crosses into the
+	// render (d3d) basis through the util/axes.h x/z swap, so every row
+	// output (uv0, the texm3x2 bases) carries retail's components.
 	void strip_set_view(const Transform3D &p_cam_transform, const Projection &p_cam_projection,
 			const Vector2i &p_viewport_px, float p_fog_end_world);
 
 	// Runs the witnessed row march [orig: render_water_strip_detailed
 	// @ 0x5c27d0] against the last strip_set_view; returns the row count
 	// (3 vertices per row). p_water_color_lit is Env_WaterColorLit as a
-	// Color (bytes / 255); p_uv_scale/p_uv_bias the WaterUvState pair.
+	// Color (bytes / 255); p_depth_scale/p_depth_bias the WaterDepthCurve pair.
 	int strip_build(float p_plane_height_world, float p_murk, const Color &p_water_color_lit,
-			float p_uv_scale, float p_uv_bias, bool p_underwater, bool p_nightvision);
+			float p_depth_scale, float p_depth_bias, bool p_underwater, bool p_nightvision);
 
 	// Godot-space world positions reconstructed per vertex from the
-	// witnessed uv0 = world x/32, z/32 pair + the plane height
-	// [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md].
+	// witnessed render-basis uv0 = world x/32, z/32 pair + the plane height
+	// [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md], swapped back
+	// into Godot axes.
 	PackedVector3Array strip_positions() const;
 	// Row diffuse / specular ARGB per vertex as raw bytes / 255 (no
 	// color-space conversion) [orig: written @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md].
@@ -86,7 +88,11 @@ public:
 	// v1 register [orig: add r0.rgb, r0, v1 — the detail>=2 pixel shader
 	// assembled in Water_InitSurfaceShaders @ 0x5c19b0].
 	PackedFloat32Array strip_custom1() const;
-	// The witnessed world/32 texcoord 0 pair, carried for parity/debug.
+	// The witnessed texcoord 0 pair = render-basis world x/32, z/32 (Godot
+	// world z/32, x/32). Retail duplicates it into texcoord 3, so the color
+	// noise and the DuDv map both sample it verbatim
+	// (retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00, the t3 copy
+	// @ 0x5c3095..0x5c30bf).
 	PackedVector2Array strip_uv0() const;
 	// 4 floats per vertex: [depth (the clamped fog W, vertex +0x08), rhw
 	// (+0x0C), screen U (t1 3rd comp), screen V (t2 3rd comp)] — the

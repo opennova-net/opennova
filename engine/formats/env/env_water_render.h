@@ -1,7 +1,5 @@
 #pragma once
 
-#include <formats/env/env_weather.h> // CloudScrollState: the water UV offsets ride the layer-1 cloud accumulators
-
 #include <cstdint>
 #include <vector>
 
@@ -15,13 +13,17 @@ namespace opennova::env {
 // (the frame pass: FrameFX_RenderBloomPass @ 0x582a5d / @ 0x610650 call it per
 // side; camera-side gate against Env_WaterHeightFixed). Per frame it
 // regenerates the animated noise texture pair [orig: Water_GenerateNoiseTextures
-// @ 0x5c0360], derives the UV scale/bias from the SMOOTHED fog distance and
-// the UV offsets from the CLOUD-SCROLL accumulators [orig: @ 0x5c3348..0x5c33db],
-// then draws the screen-marched water strips (render_water_strip @ 0x5c1d60
-// low detail with sin-table Y displacement; render_water_strip_detailed
-// @ 0x5c27d0 high detail, FLAT strips — the animated textures carry the look).
-// The strip tessellation itself is a tracked divergence (env #29); this
-// section owns the texture + UV math both paths share.
+// @ 0x5c0360], derives the strip depth curve from the SMOOTHED fog distance
+// [orig: @ 0x5c332d..0x5c3362], then draws the screen-marched water strips
+// (render_water_strip @ 0x5c1d60 low detail with sin-table Y displacement;
+// render_water_strip_detailed @ 0x5c27d0 high detail, FLAT strips — the
+// animated textures carry the look). Both tiers texture the noise pair at the
+// ABSOLUTE render-basis world x/32, z/32 (texcoords 0 and 3, see
+// WaterStripRows::uv0): no scale, bias, offset or scroll reaches a texcoord.
+// render_water_surface also stores two cloud-scroll "offsets" and a zero pair
+// [orig: Water_UvOffsetU/V @ 0x5c33b9/@ 0x5c33db, flt_29169E8/EC @ 0x5c3379/
+// @ 0x5c3385] that nothing in the binary reads back; they are not ported.
+// This section owns the texture + depth math both paths share.
 
 inline constexpr int kWaterNoiseSize = 128; // 128x128 field and textures
 
@@ -60,24 +62,20 @@ void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tabl
 // B = 0xFF, A = 0; rows and columns wrap toroidally.
 void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixels);
 
-// The shared UV transform state [orig: render_water_surface @ 0x5c3348..0x5c33db]:
+// The strip depth curve [orig: render_water_surface @ 0x5c332d..0x5c3362]:
 // scale = 0.99996948 * w / (w - 0.2) with w = the INTEGER part of the smoothed
-// fog distance (the word read at Env_FogDistCurrent+2); bias = 0.2 * scale.
-// Offsets ride the LAYER-1 CLOUD accumulators with a 32x camera term:
-// u = (uint32)(acc_26C680C + 32 * camX_eng_fixed) * 2^-28,
-// v = (uint32)(acc_26C6810 - 32 * camY_eng_fixed) * 2^-28. In the render basis
-// (d3d = (-engY, engZ, engX)) that is u = cam_z/128 + acc_l1_v * 2^-28 and
-// v = cam_x/128 + acc_l1_u * 2^-28 — both accumulator terms POSITIVE here
-// (the water pass's own sign structure, unlike the sky layers).
-struct WaterUvState {
+// fog distance (movsx of the word at Env_FogDistCurrent+2 @ 0x5c332d);
+// bias = 0.2 * scale; stored to flt_8412B0 @ 0x5c3356 / flt_8412B4 @ 0x5c3362.
+// Their only readers are the per-vertex depth chains of both strip tiers
+// (water_strip_depth; detailed @ 0x5c2c0e/@ 0x5c2c8b/@ 0x5c2cf7, low tier
+// @ 0x5c2201/@ 0x5c22a6/@ 0x5c230a): z = scale - bias/t is an arithmetic
+// replica of the scene projection with near 0.2 and far = w.
+struct WaterDepthCurve {
 	float scale = 1.0f;
 	float bias = 0.0f;
-	float offset_u = 0.0f;
-	float offset_v = 0.0f;
 };
 
-WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
-                            float fog_distance_world);
+WaterDepthCurve water_depth_curve(float fog_distance_world);
 
 // ---------------------------------------------------------------------------
 // Water strip tessellation (env #29) — the screen-space row march of the
@@ -216,14 +214,13 @@ void water_clip_row_to_viewport(const WaterStripView &view, float x0, float y0,
 // stride 4 [orig: var init @ 0x5c286d, the outWidth gate @ 0x5c30c5].
 int water_strip_stride(float row_rhw);
 
-// The per-vertex depth ("fog W") chain: rhw = 1/t, z = (t * uv_scale -
-// uv_bias) * rhw, clamped to [4.0e-5 (0x3827C5AC), 0.99996948
+// The per-vertex depth ("fog W") chain: rhw = 1/t, z = (t * depth_scale -
+// depth_bias) * rhw, clamped to [4.0e-5 (0x3827C5AC), 0.99996948
 // (0x3F7FFE00 = 1 - 2^-15)] [orig: @ 0x5c2c0c..0x5c2c4a; clamp constants
-// flt_7DBF7C / flt_7C4658]. uv_scale/uv_bias are the WaterUvState pair
-// (flt_8412B0/B4) — the same globals serve the UV transform and this
-// projective depth curve (z hits uv_scale's 0.99996948 * w/(w-0.2) shape,
-// = 0.99996948 exactly at t = fog-int w).
-float water_strip_depth(float view_depth, float uv_scale, float uv_bias);
+// flt_7DBF7C / flt_7C4658]. depth_scale/depth_bias are the WaterDepthCurve
+// pair (flt_8412B0/B4): z hits the 0.99996948 * w/(w-0.2) shape, =
+// 0.99996948 exactly at t = fog-int w.
+float water_strip_depth(float view_depth, float depth_scale, float depth_bias);
 
 // Depth clamp bounds, the same pair in both tiers [orig: flt_7DBF7C
 // @ 0x5c2c35 and flt_7C4658 @ 0x5c2c1f; low tier @ 0x5c2212/@ 0x5c2226].
@@ -270,8 +267,8 @@ struct WaterStripParams {
 	bool nightvision = false;        // caller arg 3 [orig: @ 0x5c348e/@ 0x5c353f]
 	float water_murk = 0.8f;         // Env_WaterMurk @ 0x26c6458
 	uint32_t water_color_lit = 0;    // Env_WaterColorLit @ 0x26c6804 (0x00RRGGBB)
-	float uv_scale = 1.0f;           // flt_8412B0 (WaterUvState::scale)
-	float uv_bias = 0.0f;            // flt_8412B4 (WaterUvState::bias)
+	float depth_scale = 1.0f;        // flt_8412B0 (WaterDepthCurve::scale)
+	float depth_bias = 0.0f;         // flt_8412B4 (WaterDepthCurve::bias)
 };
 
 // The emitted rows, 3 vertices each (left / mid / right), field-for-field the

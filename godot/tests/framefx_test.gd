@@ -166,6 +166,9 @@ func _controlled_water_material() -> ShaderMaterial:
 			_solid_texture(Color(1.0, 1.0, 1.0, 0.25)))
 	material.set_shader_parameter("u_noise_normal",
 			_solid_texture(Color(0.5, 0.5, 1.0, 1.0)))
+	# The QuadMesh stand-in carries no strip depth replica (CUSTOM0.x), so it
+	# keeps its projected depth.
+	material.set_shader_parameter("u_scene_depth_range", Vector2.ZERO)
 	return material
 
 
@@ -930,21 +933,35 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 	assert_gt(int(drawn.get("q3_submitted_commands", 0)), 0,
 			"the strip compiles into Q3: %s" % drawn)
 
-	# The witnessed g_WaterActive gate: every tracked visible terrain sector
-	# above the water height turns the pass off, and the strip clears while
-	# the source node itself stays visible.
+	# The g_WaterActive gate (every tracked visible terrain sector above the
+	# water height) clears the beauty strip, but the bloom pass's nightvision
+	# redraw is not gated on it (retail FrameFX_RenderBloomPass @ 0x582a59..
+	# 0x582a5d calls render_water_surface(0, 1) unconditionally): its strip
+	# stays in the Q3 draw list.
 	water.set_visible_terrain_bounds(true, 100.0, 200.0)
 	water.advance_frame(1.0 / 62.0)
 	assert_eq((water.get_mesh_instance().mesh as ArrayMesh).get_surface_count(), 0,
-			"the inactive water pass clears the strip")
+			"the inactive water pass clears the beauty strip")
+	renderer.advance_frame()
+	var ungated := renderer.get_backend_report()
+	assert_gt(int(ungated.get("q3_submitted_commands", 0)), 0,
+			"the nightvision redraw ignores g_WaterActive: %s" % ungated)
+
+	# Below the plane the redraw has no side: the view-0 call requires the
+	# camera strictly above the water (retail render_water_surface @ 0x5c3304).
+	# Its strip clears and names the source, so the last publication is never
+	# drawn again.
+	camera.position = Vector3(100.3, 5.0, -33.7)
+	water.advance_frame(1.0 / 62.0)
 	renderer.advance_frame()
 	var cleared := renderer.get_backend_report()
 	assert_eq(int(cleared.get("q3_submitted_commands", -1)), 0,
 			"the cleared strip is not drawn from its last publication: %s" % cleared)
 	assert_eq(int(cleared.get("q3_readbacks_this_frame", -1)), 0)
 
-	# The pass comes back: the rebuilt strip is published and drawn again,
-	# from memory.
+	# The camera comes back above: the rebuilt strip is published and drawn
+	# again, from memory.
+	camera.position = Vector3(100.3, 27.0, -33.7)
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(1.0 / 62.0)
 	renderer.advance_frame()
@@ -1293,8 +1310,14 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	assert_gt(full_peak, quarter_peak + 0.02,
 			"a larger NV alpha retains MORE of the copy (dst x a, not dst x (1 - a)); "
 			+ diagnostic)
-	assert_gt(full_peak, 0.1 * alone_peak,
+	assert_gt(full_peak, 0.02 * alone_peak,
 			"the redraw weights the copy instead of erasing it; " + diagnostic)
+	# The redraw marches the nightvision rows (retail render_water_surface(0, 1)
+	# @ 0x582a59): the flat 0.1 base caps the row alpha at 0.1 x 229.5 / 255,
+	# so even a full noise alpha keeps under a fifth of the copy (the beauty
+	# rows' 1 - murk base would keep most of it).
+	assert_lt(full_peak, 0.2 * alone_peak,
+			"the nightvision rows' 0.1 base bounds the retained copy; " + diagnostic)
 	renderer.shutdown()
 	water.release_runtime_renderer_resources()
 

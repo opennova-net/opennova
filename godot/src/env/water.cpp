@@ -15,7 +15,6 @@
 
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
-#include "env/weather.h"
 #include "object/object_shader_cache.h"
 #include "player/local_player_presenter.h"
 #include "world/game_world.h"
@@ -34,11 +33,6 @@ void Water::_bind_methods() {
 			&Water::get_environment_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "environment_path"),
 			"set_environment_path", "get_environment_path");
-	ClassDB::bind_method(D_METHOD("set_weather_path", "path"),
-			&Water::set_weather_path);
-	ClassDB::bind_method(D_METHOD("get_weather_path"), &Water::get_weather_path);
-	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
-			"set_weather_path", "get_weather_path");
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
 			&Water::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Water::get_terrain_data);
@@ -73,6 +67,8 @@ void Water::_bind_methods() {
 			&Water::get_noise_color_texture);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&Water::get_mesh_instance);
+	ClassDB::bind_method(D_METHOD("get_night_vision_mesh_instance"),
+			&Water::get_night_vision_mesh_instance);
 	ClassDB::bind_method(D_METHOD("get_reflection_viewport"),
 			&Water::get_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_reflection_camera"),
@@ -129,11 +125,6 @@ void Water::set_environment_path(const NodePath &p_path) {
 	env_node_id_ = ObjectID();
 }
 
-void Water::set_weather_path(const NodePath &p_path) {
-	weather_path_ = p_path;
-	weather_node_id_ = ObjectID();
-}
-
 MissionEnvironment *Water::_env_node() {
 	if (env_node_id_.is_valid()) {
 		MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
@@ -151,25 +142,6 @@ MissionEnvironment *Water::_env_node() {
 	env_node_id_ = env != nullptr ? ObjectID(env->get_instance_id())
 								  : ObjectID();
 	return env;
-}
-
-Weather *Water::_weather_node() {
-	if (weather_node_id_.is_valid()) {
-		Weather *weather = Object::cast_to<Weather>(
-				ObjectDB::get_instance(weather_node_id_));
-		if (weather != nullptr && weather->is_inside_tree()) {
-			return weather;
-		}
-	}
-	if (weather_path_.is_empty() ||
-			(!is_inside_tree() && weather_path_.is_absolute())) {
-		return nullptr;
-	}
-	Weather *weather =
-			Object::cast_to<Weather>(get_node_or_null(weather_path_));
-	weather_node_id_ = weather != nullptr ? ObjectID(weather->get_instance_id())
-										  : ObjectID();
-	return weather;
 }
 
 void Water::set_terrain_data(const Ref<TerrainData> &p_data) {
@@ -221,14 +193,17 @@ void Water::release_runtime_renderer_resources() {
 		water_material_->set_shader_parameter("u_noise_color", Variant());
 		water_material_->set_shader_parameter("u_noise_normal", Variant());
 	}
-	if (mesh_instance_ != nullptr) {
-		Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	for (MeshInstance3D **strip : {&mesh_instance_, &night_vision_mesh_instance_}) {
+		if (*strip == nullptr) {
+			continue;
+		}
+		Ref<ArrayMesh> mesh = (*strip)->get_mesh();
 		if (mesh.is_valid()) {
 			mesh->clear_surfaces();
 		}
-		mesh_instance_->set_mesh(Ref<Mesh>());
-		memdelete(mesh_instance_);
-		mesh_instance_ = nullptr;
+		(*strip)->set_mesh(Ref<Mesh>());
+		memdelete(*strip);
+		*strip = nullptr;
 	}
 	if (reflection_viewport_ != nullptr) {
 		memdelete(reflection_viewport_);
@@ -321,6 +296,9 @@ void Water::_sync_render_activity() {
 	_push_water_split_height();
 	if (!world_active) {
 		_clear_strip_surfaces();
+	}
+	if (!is_water_render_active() || !is_inside_tree() || !is_visible_in_tree()) {
+		_clear_night_vision_surfaces();
 	}
 }
 
@@ -444,9 +422,11 @@ void Water::_apply_environment_water_height() {
 }
 
 void Water::build() {
-	if (mesh_instance_ != nullptr) {
-		mesh_instance_->queue_free();
-		mesh_instance_ = nullptr;
+	for (MeshInstance3D **strip : {&mesh_instance_, &night_vision_mesh_instance_}) {
+		if (*strip != nullptr) {
+			(*strip)->queue_free();
+			*strip = nullptr;
+		}
 	}
 	built_ = false;
 	if (!water_core_) {
@@ -463,8 +443,9 @@ void Water::build() {
 
 	// The witnessed screen-marched strip mesh is LIVE (env #29): every frame
 	// rebuilds the surface from WaterCore::strip_build, so the mesh starts
-	// empty. Remaining variants: the LOW tier (water detail <= 1 sin-table Y
-	// displacement) and the nightvision redraw.
+	// empty. The LOW tier (water detail <= 1 sin-table Y displacement) is
+	// unreachable at the shipped detail (waterQuality clamps to [1, 3] and 3
+	// runs the detailed tier).
 	Ref<ArrayMesh> mesh;
 	mesh.instantiate();
 	mesh_instance_ = memnew(MeshInstance3D);
@@ -483,7 +464,23 @@ void Water::build() {
 	// prerender never draws the water surface itself (water_mirror.h).
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
-	FrameFx::register_q3_source(mesh_instance_,
+	// The FrameFX bloom pass redraws the strip with the nightvision row
+	// colors into the Q3 target (retail FrameFX_RenderBloomPass @ 0x582a59..
+	// 0x582a5d -> render_water_surface(0, 1)): its own surface, drawn by no
+	// camera (layer mask 0), only by the typed Q3 WaterNightVision pass.
+	Ref<ArrayMesh> night_vision_mesh;
+	night_vision_mesh.instantiate();
+	night_vision_mesh_instance_ = memnew(MeshInstance3D);
+	night_vision_mesh_instance_->set_name("WaterNightVisionStrip");
+	night_vision_mesh_instance_->set_mesh(night_vision_mesh);
+	night_vision_mesh_instance_->set_as_top_level(true);
+	night_vision_mesh_instance_->set_position(Vector3());
+	night_vision_mesh_instance_->set_cast_shadows_setting(
+			GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+	night_vision_mesh_instance_->set_gi_mode(GeometryInstance3D::GI_MODE_DISABLED);
+	night_vision_mesh_instance_->set_layer_mask(0);
+	add_child(night_vision_mesh_instance_);
+	FrameFx::register_q3_source(night_vision_mesh_instance_,
 			opennova::renderer::Q3Source::Water);
 	built_ = true;
 
@@ -577,7 +574,7 @@ void Water::build() {
 	_sync_render_activity();
 }
 
-void Water::advance_frame(double p_delta) {
+void Water::advance_frame(double) {
 	if (!built_ || water_material_.is_null()) {
 		return;
 	}
@@ -598,11 +595,9 @@ void Water::advance_frame(double p_delta) {
 		cached_cam_id_ = cam != nullptr ? ObjectID(cam->get_instance_id())
 										: ObjectID();
 	}
-	// The witnessed per-frame gate: no visible terrain at or below the water
-	// and no Blink-visible water last frame means no prerender, no noise
-	// regeneration and no strip this frame.
-	if (!is_water_pass_active() || !is_visible_in_tree() || cam == nullptr) {
+	if (!is_water_render_active() || !is_visible_in_tree() || cam == nullptr) {
 		_clear_strip_surfaces();
+		_clear_night_vision_surfaces();
 		_sync_render_activity();
 		return;
 	}
@@ -616,15 +611,40 @@ void Water::advance_frame(double p_delta) {
 	// global_position does not. Classify and march from the same effective
 	// eye the drawing viewport actually renders.
 	const Vector3 cam_pos = view_cam->get_camera_transform().get_origin();
+	// The two callers of render_water_surface: the beauty pass per side, gated
+	// on g_WaterActive (no visible terrain at or below the water and no
+	// Blink-visible water last frame means no prerender and no strip), and the
+	// FrameFX bloom pass's nightvision redraw, which is the above-water call
+	// alone and not gated on g_WaterActive. Both skip an eye exactly on the
+	// plane (environment/water_frame.h water_surface_sides).
+	const opennova::env::WaterSurfaceSides sides =
+			opennova::env::water_surface_sides(static_cast<float>(cam_pos.y),
+					water_height_);
+	const bool beauty_active =
+			is_water_pass_active() && (sides.above || sides.underwater);
+	const bool night_vision_active = sides.above;
+	if (!beauty_active) {
+		_clear_strip_surfaces();
+	}
+	if (!night_vision_active) {
+		_clear_night_vision_surfaces();
+	}
+	if (!beauty_active && !night_vision_active) {
+		_sync_render_activity();
+		return;
+	}
 
 	// env #30: refresh the mirror camera before this frame's strip rebuild —
 	// the SubViewport renders ahead of the main view, like the witnessed
-	// prerender.
-	_update_reflection_camera(view_cam);
+	// prerender (itself gated on g_WaterActive).
+	if (beauty_active) {
+		_update_reflection_camera(view_cam);
+	}
 
 	// Regenerate the animated noise pair once per rendered water frame, at
 	// the world's entity-update count when one is fed (set_noise_frame_counter),
-	// else at this Water's own render-frame count.
+	// else at this Water's own render-frame count. Both render_water_surface
+	// calls regenerate it at the same counter, so one update serves the frame.
 	// [orig: render_water_surface @0x5c3326 -> Water_GenerateNoiseTextures
 	//  @0x5C0360, its counter @0x5C0366]
 	if (!frame_counter_fed_) frame_counter_ += 1;
@@ -644,38 +664,57 @@ void Water::advance_frame(double p_delta) {
 					env != nullptr ? &env->state() : nullptr, water_alpha_);
 	float murk = inputs.murk;
 	float fog_end = inputs.fog_end;
-	Vector4 uv_state(1.0f, 0.2f, 0.0f, 0.0f);
+	// The strip's per-vertex depth curve from the smoothed fog distance's
+	// integer word (environment/env_water_render.h carries the witness). No
+	// texcoord transform exists: the noise pair samples the rows' absolute
+	// world/32 texcoords.
+	const opennova::env::WaterDepthCurve depth_curve =
+			opennova::env::water_depth_curve(fog_end);
 	const Color lit(inputs.lit.r, inputs.lit.g, inputs.lit.b);
 	Ref<EnvFile> env_data;
 	if (inputs.env_loaded && env != nullptr) {
 		env_data = env->get_environment_data();
 		water_material_->set_shader_parameter("u_water_color",
 				Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
-		// The witnessed UV transform (scale/bias from the fog-distance INT
-		// part, offsets from the layer-1 cloud accumulators + 32x camera).
-		// The weather node owns the shared accumulators; standalone owners
-		// tick the engine fallback core.
-		Weather *weather = _weather_node();
-		if (weather != nullptr) {
-			uv_state = weather->get_water_uv_state(cam_pos.x, cam_pos.z,
-					fog_end);
-		} else {
-			fallback_scroll_.advance(p_delta, env->state().sky_speed());
-			const opennova::env::WaterUvState state =
-					opennova::env::water_uv_state(
-							fallback_scroll_.core.cloud_scroll,
-							static_cast<float>(cam_pos.x),
-							static_cast<float>(cam_pos.z), fog_end);
-			uv_state = Vector4(state.scale, state.bias, state.offset_u,
-					state.offset_v);
-		}
-		water_material_->set_shader_parameter("u_water_uv", uv_state);
 		water_material_->set_shader_parameter("u_fog_color",
 				env->get_scene_fog_color());
 		water_material_->set_shader_parameter("u_water_murk", murk);
 	}
 
-	_rebuild_strip_mesh(view_cam, cam_pos, murk, fog_end, uv_state, lit, env_data);
+	if (beauty_active) {
+		const int rows = _march_strip(view_cam, sides.underwater, false, murk, fog_end,
+				depth_curve, lit, env_data);
+		if (rows < 2) {
+			// Plane off-screen or a sub-2-row march — nothing submits.
+			_clear_strip_surfaces();
+		} else {
+			has_drawable_surface_ = true;
+			_upload_strip(mesh_instance_, _strip_arrays(), water_material_);
+			// The witnessed per-side material swap: camera-above -> the blend
+			// material, underwater -> the opaque one — ported as the shader's
+			// u_underwater_view branch.
+			water_material_->set_shader_parameter("u_underwater_view",
+					sides.underwater);
+		}
+	}
+	if (night_vision_active) {
+		// The bloom pass's call is render_water_surface(0, 1): the above-water
+		// march with the nightvision row colors (flat 0.1 base, no specular
+		// RGB) (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d;
+		// render_water_surface @ 0x5c3489..0x5c3492).
+		const int rows = _march_strip(view_cam, false, true, murk, fog_end, depth_curve,
+				lit, env_data);
+		if (rows < 2) {
+			_clear_night_vision_surfaces();
+		} else {
+			const Array arrays = _strip_arrays();
+			_upload_strip(night_vision_mesh_instance_, arrays, water_material_);
+			// Hand the arrays over so the focused Q3 cache re-packs them from
+			// memory instead of reading the freshly uploaded surface back through
+			// the server in the same frame.
+			FrameFx::publish_q3_geometry(night_vision_mesh_instance_, 0, arrays);
+		}
+	}
 	_sync_render_activity();
 }
 
@@ -797,44 +836,29 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 			Vector2(view.uv_scale_x, view.uv_scale_y));
 }
 
-// Rebuilds the surface from the witnessed screen march (env #29; row layout
-// notes ride env_water_render.h). Vertices are absolute world positions;
-// COLOR carries the row diffuse, CUSTOM1 the row specular, CUSTOM0 =
-// (depth, rhw, screen U, screen V), CUSTOM2 the texm3x2 perturbation basis,
-// TEX_UV the witnessed world/32 pair (carried for parity/debug).
-void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
-		float p_murk, float p_fog_end, const Vector4 &p_uv_state,
+// One screen march (env #29; row layout notes ride env_water_render.h) for the
+// side's pass fog end: above water the smoothed fog distance attenuated by the
+// overcast blend (the native env curve); below the surface the murk
+// visibility curve replaces the weather fog distance.
+int Water::_march_strip(Camera3D *p_cam, bool p_underwater, bool p_nightvision,
+		float p_murk, float p_fog_end,
+		const opennova::env::WaterDepthCurve &p_depth_curve,
 		const Color &p_lit, const Ref<EnvFile> &p_env_data) {
-	if (mesh_instance_ == nullptr) {
-		return;
-	}
-	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
-	if (mesh.is_null()) {
-		return;
-	}
 	if (p_cam == nullptr || !p_cam->is_inside_tree()) {
-		_clear_strip_surfaces();
-		return;
+		return 0;
 	}
 	Viewport *viewport = p_cam->get_viewport();
 	if (viewport == nullptr) {
-		_clear_strip_surfaces();
-		return;
+		return 0;
 	}
 	const Vector2i vp_size = Vector2i(viewport->get_visible_rect().size);
 	if (vp_size.x <= 1 || vp_size.y <= 1) {
-		_clear_strip_surfaces();
-		return;
+		return 0;
 	}
-	// The camera-side gate and the pass fog end both ride the underwater
-	// flag: above water the pass fog end is the smoothed fog distance
-	// attenuated by the overcast blend (the native env curve); below the
-	// surface the murk visibility curve replaces the weather fog distance.
-	const bool underwater = p_cam_pos.y < water_height_;
 	MissionEnvironment *env = _env_node();
 	float pass_fog_end = EnvFile::fog_end_above_water(p_fog_end,
 			env != nullptr ? env->get_overcast_blend() : 0.0f);
-	if (underwater && p_env_data.is_valid()) {
+	if (p_underwater && p_env_data.is_valid()) {
 		pass_fog_end = p_env_data->get_fog_end_underwater();
 	}
 	// The adjusted camera transform includes Camera3D h/v offsets, keeping
@@ -843,16 +867,19 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 	// the blit stretches over it).
 	water_core_->strip_set_view(p_cam->get_camera_transform(),
 			p_cam->get_camera_projection(), vp_size, pass_fog_end);
-	// The typed focused-Q3 WaterNightVision producer reuses this live strip;
-	// beauty and Q3 therefore share the same authored wave geometry.
-	const int rows = water_core_->strip_build(water_height_, p_murk, p_lit,
-			p_uv_state.x, p_uv_state.y, underwater, false);
-	if (rows < 2) {
-		// Plane off-screen or a sub-2-row march — nothing submits.
-		_clear_strip_surfaces();
-		return;
-	}
-	has_drawable_surface_ = true;
+	// The scene projection the strip depth replicates is the drawing camera's.
+	water_material_->set_shader_parameter("u_scene_depth_range",
+			Vector2(p_cam->get_near(), p_cam->get_far()));
+	return water_core_->strip_build(water_height_, p_murk, p_lit,
+			p_depth_curve.scale, p_depth_curve.bias, p_underwater, p_nightvision);
+}
+
+// The last march as surface arrays. Vertices are absolute world positions;
+// COLOR carries the row diffuse, CUSTOM1 the row specular, CUSTOM0 =
+// (depth, rhw, screen U, screen V), CUSTOM2 the texm3x2 perturbation basis,
+// TEX_UV the witnessed render-basis world x/32, z/32 pair both noise
+// textures sample.
+Array Water::_strip_arrays() const {
 	Array arrays;
 	arrays.resize(Mesh::ARRAY_MAX);
 	arrays[Mesh::ARRAY_VERTEX] = water_core_->strip_positions();
@@ -862,23 +889,27 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 	arrays[Mesh::ARRAY_CUSTOM1] = water_core_->strip_custom1();
 	arrays[Mesh::ARRAY_CUSTOM2] = water_core_->strip_custom2();
 	arrays[Mesh::ARRAY_INDEX] = water_core_->strip_indices();
+	return arrays;
+}
+
+void Water::_upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays,
+		const Ref<ShaderMaterial> &p_material) {
+	if (p_mesh_instance == nullptr) {
+		return;
+	}
+	Ref<ArrayMesh> mesh = p_mesh_instance->get_mesh();
+	if (mesh.is_null()) {
+		return;
+	}
 	mesh->clear_surfaces();
-	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays, Array(),
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_arrays, Array(),
 			Dictionary(),
 			(Mesh::ARRAY_CUSTOM_RGBA_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT) |
 					(Mesh::ARRAY_CUSTOM_RGBA_FLOAT
 							<< Mesh::ARRAY_FORMAT_CUSTOM1_SHIFT) |
 					(Mesh::ARRAY_CUSTOM_RGBA_FLOAT
 							<< Mesh::ARRAY_FORMAT_CUSTOM2_SHIFT));
-	mesh->surface_set_material(0, water_material_);
-	// The NV Q3 redraw shares this strip: hand the arrays over so the focused
-	// Q3 cache re-packs them from memory instead of reading the freshly
-	// uploaded surface back through the server in the same frame.
-	FrameFx::publish_q3_geometry(mesh_instance_, 0, arrays);
-	// The witnessed per-side material swap: camera-above -> the blend
-	// material, underwater -> the opaque one — ported as the shader's
-	// u_underwater_view branch.
-	water_material_->set_shader_parameter("u_underwater_view", underwater);
+	mesh->surface_set_material(0, p_material);
 }
 
 void Water::_clear_strip_surfaces() {
@@ -889,10 +920,20 @@ void Water::_clear_strip_surfaces() {
 	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
 	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
 		mesh->clear_surfaces();
+	}
+}
+
+void Water::_clear_night_vision_surfaces() {
+	if (night_vision_mesh_instance_ == nullptr) {
+		return;
+	}
+	Ref<ArrayMesh> mesh = night_vision_mesh_instance_->get_mesh();
+	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
+		mesh->clear_surfaces();
 		// The focused Q3 record lists this strip's surface: the clear is a
 		// rebuild too, so its surface list is re-read (to none) before the
 		// next compile instead of drawing the last published strip.
-		FrameFx::invalidate_q3_source(mesh_instance_);
+		FrameFx::invalidate_q3_source(night_vision_mesh_instance_);
 	}
 }
 
