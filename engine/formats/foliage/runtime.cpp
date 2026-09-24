@@ -24,7 +24,10 @@ constexpr int kSilhouetteCellCap = 21;
 constexpr float kGridStep = 2.6f;
 constexpr float kGridBase = 1.0f;
 constexpr float kJitterScale = 1.8f / 65536.0f;
-constexpr float kYawScale = 6.28318530717958647692f / 65536.0f;
+// flt_7CD4DC = 0x38C90FD0, retail's yaw step: slightly below the float
+// nearest 2*pi/65536 (0x38C90FDB). [orig: generate_foliage_instances_0
+// @ 0x5fff7a; Foliage_GenerateModelTileInstances @ 0x600aeb]
+constexpr float kYawScale = 0x1.921FA0p-14f;
 constexpr float kPathRange = 2.0f;
 constexpr float kDetailFadeStart = 20.0f;
 constexpr float kDetailPassSwitch = 33.0f;
@@ -90,6 +93,9 @@ int32_t midpoint_fixed(int32_t a, int32_t b) {
 	return static_cast<int32_t>(-((-sum + 1) / 2));
 }
 
+// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the Godot
+// plane (z = -mission y); the MODEL tier additionally keeps its mission-y
+// value, the frame its key and corner arithmetic run in.
 struct Candidate {
 	uint8_t index = 0;
 	float local_a = 0.0f;
@@ -99,38 +105,74 @@ struct Candidate {
 	int32_t z_fixed = 0;
 };
 
-Candidate next_candidate(uint32_t key, int index, uint32_t &state) {
-	// Both retail generators decode HIGH15 as X and LOW15 as the Z-top base;
-	// the local B axis runs toward decreasing world/Godot Z.
-	// [orig: generate_foliage_instances_0 @ 0x5ffdd0, 0x5fff84..0x600029;
-	// Foliage_GenerateModelTileInstances @ 0x600980]
+// Negating a mission-y fixed value into the Godot plane; the one
+// unrepresentable input (INT32_MIN) saturates instead of overflowing.
+int32_t negate_fixed(int32_t value) {
+	return value == std::numeric_limits<int32_t>::min()
+	         ? std::numeric_limits<int32_t>::max()
+	         : -value;
+}
+
+Candidate next_candidate(int index, uint32_t &state) {
+	// Both retail generators draw local A (grid column) then local B (grid
+	// row) then the yaw from the one stream. The tiers place them on
+	// different key frames (detail_candidate / model_candidate).
+	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fff80;
+	// Foliage_GenerateModelTileInstances @ 0x600a17..0x600af1]
 	const uint16_t draw_a = next_draw(state);
 	const uint16_t draw_b = next_draw(state);
 	const uint16_t draw_yaw = next_draw(state);
-	const float local_a = kGridBase +
-	                      static_cast<float>(index % kGridWidth) * kGridStep +
-	                      static_cast<float>(draw_a) * kJitterScale;
-	const float local_b = kGridBase +
-	                      static_cast<float>(index / kGridWidth) * kGridStep +
-	                      static_cast<float>(draw_b) * kJitterScale;
-	const int32_t base_x = sign_extend_15(key >> 16u);
-	const int32_t base_z = sign_extend_15(key);
 	Candidate candidate;
 	candidate.index = static_cast<uint8_t>(index);
-	candidate.local_a = local_a;
-	candidate.local_b = local_b;
+	candidate.local_a = kGridBase +
+	                    static_cast<float>(index % kGridWidth) * kGridStep +
+	                    static_cast<float>(draw_a) * kJitterScale;
+	candidate.local_b = kGridBase +
+	                    static_cast<float>(index / kGridWidth) * kGridStep +
+	                    static_cast<float>(draw_b) * kJitterScale;
 	candidate.yaw = static_cast<float>(draw_yaw) * kYawScale;
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + local_a);
-	candidate.z_fixed = to_fixed(static_cast<float>(base_z) - local_b);
 	return candidate;
 }
 
-uint32_t pack_silhouette_key(int32_t snap_x, int32_t snap_z) {
+Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
+	// The detail key's HIGH15 is the cell's X-min and LOW15 its Z-min on the
+	// Godot plane (the collector packs PolyTrn's -camera_y sector, FB20, into
+	// the low half); local A and local B both ADD. Retail's blocker, map and
+	// height samples all take (keyHi + A, keyLo + B).
+	// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fffa2 (placement),
+	// 0x5fffb8..0x60000e (blocker), 0x600021..0x600065 (samples);
+	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key)]
+	Candidate candidate = next_candidate(index, state);
+	const int32_t base_x = sign_extend_15(key >> 16u);
+	const int32_t base_z = sign_extend_15(key);
+	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	candidate.z_fixed = to_fixed(static_cast<float>(base_z) + candidate.local_b);
+	return candidate;
+}
+
+Candidate model_candidate(uint32_t key, int index, uint32_t &state,
+                          int32_t &r_mission_y_fixed) {
+	// The MODEL key's HIGH15 is the cell's X-min and LOW15 its MISSION-y top
+	// (y_snap + 16); the candidate is (keyHi + A, keyLo - B) in mission x/y,
+	// so on the Godot plane z = B - keyLo.
+	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c;
+	// Foliage_UpdateModelTiles @ 0x601fd0..0x60205b (key)]
+	Candidate candidate = next_candidate(index, state);
+	const int32_t base_x = sign_extend_15(key >> 16u);
+	const int32_t base_y = sign_extend_15(key);
+	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	r_mission_y_fixed =
+	    to_fixed(static_cast<float>(base_y) - candidate.local_b);
+	candidate.z_fixed = negate_fixed(r_mission_y_fixed);
+	return candidate;
+}
+
+uint32_t pack_silhouette_key(int32_t snap_x, int32_t snap_y) {
 	const uint32_t x_part = static_cast<uint32_t>(snap_x) & 0x7FFF0000u;
-	const uint32_t z_part =
-	    ((static_cast<uint32_t>(snap_z) + static_cast<uint32_t>(kTileSizeFixed)) >> 16u) &
+	const uint32_t y_part =
+	    ((static_cast<uint32_t>(snap_y) + static_cast<uint32_t>(kTileSizeFixed)) >> 16u) &
 	    0x7FFFu;
-	return x_part | z_part;
+	return x_part | y_part;
 }
 
 struct SilhouetteCell {
@@ -138,13 +180,17 @@ struct SilhouetteCell {
 	uint8_t quadrant = 0;
 };
 
+// The four cells around one anchor, keyed in the MISSION frame: quadrant bit
+// 0 steps x by -8 (else +8), bit 1 steps mission y by -8 (else +8), each
+// snapped to the 16-unit grid; the low half keys the mission-y cell top.
+// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b]
 std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
-                                               int32_t anchor_z) {
+                                               int32_t anchor_mission_y) {
 	std::array<SilhouetteCell, 4> result{};
 	for (int quadrant = 0; quadrant < 4; ++quadrant) {
 		const int32_t x_offset =
 		    (quadrant & 1) != 0 ? -kQuadrantOffsetFixed : kQuadrantOffsetFixed;
-		const int32_t z_offset =
+		const int32_t y_offset =
 		    (quadrant & 2) != 0 ? -kQuadrantOffsetFixed : kQuadrantOffsetFixed;
 		// Retail integer addition wraps in 32 bits. Perform it unsigned so
 		// public coordinates near the fixed-point limits cannot trigger C++
@@ -153,11 +199,11 @@ std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
 		    (static_cast<uint32_t>(anchor_x) +
 		     static_cast<uint32_t>(x_offset)) &
 		    kTileSnapMask);
-		const int32_t snap_z = static_cast<int32_t>(
-		    (static_cast<uint32_t>(anchor_z) +
-		     static_cast<uint32_t>(z_offset)) &
+		const int32_t snap_y = static_cast<int32_t>(
+		    (static_cast<uint32_t>(anchor_mission_y) +
+		     static_cast<uint32_t>(y_offset)) &
 		    kTileSnapMask);
-		result[quadrant].key = pack_silhouette_key(snap_x, snap_z);
+		result[quadrant].key = pack_silhouette_key(snap_x, snap_y);
 		result[quadrant].quadrant = static_cast<uint8_t>(quadrant);
 	}
 	return result;
@@ -206,7 +252,7 @@ std::vector<DetailInstance> generate_detail_cell(
 	if ((cell_key & 0x80000000u) != 0u) return result;
 	uint32_t state = seed_for_key(cell_key);
 	for (int index = 0; index < kCandidates; ++index) {
-		const Candidate candidate = next_candidate(cell_key, index, state);
+		const Candidate candidate = detail_candidate(cell_key, index, state);
 		if (candidate_is_blocked(slot, world, candidate)) continue;
 		const uint32_t mask = world.detail_foliage_mask_at
 		                        ? world.detail_foliage_mask_at(
@@ -253,12 +299,18 @@ bool make_silhouette_instance(
 	instance.yaw_radians = candidate.yaw;
 	instance.alpha_reference = alpha_reference;
 
+	// The corner arithmetic runs in the MODEL key's mission frame: corner
+	// (keyHi + A', keyLo - B') with (A', B') the rotated footprint offsets,
+	// the edge midpoints are the arithmetic-shift halves of those fixed
+	// coordinates, and every height sample takes mission (x, y), i.e. the
+	// Godot plane (x, -y). [orig: Foliage_GenerateModelTileInstances
+	// @ 0x600bd0..0x600c6a (corners), 0x600c70..0x600d32 (midpoints)]
 	const float cosine = std::cos(candidate.yaw);
 	const float sine = std::sin(candidate.yaw);
 	const int32_t base_x = sign_extend_15(cell_key >> 16u);
-	const int32_t base_z = sign_extend_15(cell_key);
+	const int32_t base_y = sign_extend_15(cell_key);
 	std::array<int32_t, 4> corner_x{};
-	std::array<int32_t, 4> corner_z{};
+	std::array<int32_t, 4> corner_y{};
 
 	for (int corner = 0; corner < 4; ++corner) {
 		const float local_a = (corner & 1) != 0 ? footprint : -footprint;
@@ -269,14 +321,15 @@ bool make_silhouette_instance(
 		                        local_a * sine + local_b * cosine;
 		if (!try_to_fixed(static_cast<float>(base_x) + rotated_a,
 		                  corner_x[corner]) ||
-		    !try_to_fixed(static_cast<float>(base_z) - rotated_b,
-		                  corner_z[corner])) {
+		    !try_to_fixed(static_cast<float>(base_y) - rotated_b,
+		                  corner_y[corner])) {
 			return false;
 		}
+		const int32_t corner_z = negate_fixed(corner_y[corner]);
 		instance.corners[corner] = {
 		    from_fixed(corner_x[corner]),
-		    from_fixed(corner_z[corner]),
-		    sampled_height(world, corner_x[corner], corner_z[corner]),
+		    from_fixed(corner_z),
+		    sampled_height(world, corner_x[corner], corner_z),
 		};
 	}
 
@@ -290,7 +343,7 @@ bool make_silhouette_instance(
 		midpoint_height[edge] = sampled_height(
 		    world,
 		    midpoint_fixed(corner_x[first], corner_x[second]),
-		    midpoint_fixed(corner_z[first], corner_z[second]));
+		    negate_fixed(midpoint_fixed(corner_y[first], corner_y[second])));
 	}
 
 	const float d_minus_a =
@@ -323,7 +376,7 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
     const RuntimeSlot &slot,
     const SilhouetteCell &cell,
     int32_t anchor_x,
-    int32_t anchor_z,
+    int32_t anchor_mission_y,
 	const WorldSamplers &world) {
 	std::vector<SilhouetteInstance> result;
 	if (!std::isfinite(slot.model_radius) || slot.model_radius < 0.0f) {
@@ -332,13 +385,17 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
 	const float footprint = slot.model_radius * 0.75f;
 	uint32_t state = seed_for_key(cell.key);
 	for (int index = 0; index < kCandidates; ++index) {
-		const Candidate candidate = next_candidate(cell.key, index, state);
+		int32_t mission_y = 0;
+		const Candidate candidate =
+		    model_candidate(cell.key, index, state, mission_y);
+		// The +-4u box around the anchor, in the mission frame.
+		// [orig: Foliage_GenerateModelTileInstances @ 0x600b11..0x600b45]
 		const int64_t dx =
 		    static_cast<int64_t>(candidate.x_fixed) - anchor_x;
-		const int64_t dz =
-		    static_cast<int64_t>(candidate.z_fixed) - anchor_z;
+		const int64_t dy =
+		    static_cast<int64_t>(mission_y) - anchor_mission_y;
 		if (std::llabs(dx) > kAnchorRadiusFixed ||
-		    std::llabs(dz) > kAnchorRadiusFixed) {
+		    std::llabs(dy) > kAnchorRadiusFixed) {
 			continue;
 		}
 		if (candidate_is_blocked(slot, world, candidate)) continue;
@@ -631,13 +688,16 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			continue;
 		}
 		if (anchor.view_depth < kSilhouetteDepth) continue;
+		// The anchor enters the MODEL walk as its mission (x, y) position;
+		// the Godot plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
+		// @ 0x5c7e1e..0x5c7e24 (tile_coords = entity +4/+8)]
 		int32_t anchor_x = 0;
-		int32_t anchor_z = 0;
+		int32_t anchor_mission_y = 0;
 		if (!try_to_fixed(anchor.position.x, anchor_x) ||
-		    !try_to_fixed(anchor.position.z, anchor_z)) {
+		    !try_to_fixed(-anchor.position.z, anchor_mission_y)) {
 			continue;
 		}
-		const auto cells = silhouette_cells(anchor_x, anchor_z);
+		const auto cells = silhouette_cells(anchor_x, anchor_mission_y);
 		const uint8_t alpha_reference =
 		    silhouette_alpha_reference(anchor.camera_distance);
 
@@ -671,7 +731,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 						    slot,
 						    cell,
 						    anchor_x,
-						    anchor_z,
+						    anchor_mission_y,
 						    world);
 						++stats_.model.regenerations;
 						if (!same_silhouette_geometry(
@@ -711,7 +771,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					    slot,
 					    cell,
 					    anchor_x,
-					    anchor_z,
+					    anchor_mission_y,
 					    world);
 					++stats_.model.regenerations;
 					output.model_generated.push_back(CacheIdentity{

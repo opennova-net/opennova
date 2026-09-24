@@ -126,10 +126,14 @@ private:
 			return;
 		}
 
-		const uint32_t x_left = static_cast<uint32_t>(world_x) & 0x7fffu;
-		const uint32_t z_top =
-				static_cast<uint32_t>(world_z + kDetailCellSize) & 0x7fffu;
-		patches.push_back({key_flags | (x_left << 16) | z_top, distance});
+		// HIGH15 = the cell's X-min, LOW15 = its Z-min: retail packs the
+		// PolyTrn sector of -camera_y (FB20, the Godot-Z axis) plus the
+		// node's minimum into the low half, and the generator adds local B
+		// to it. [orig: Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a;
+		// generate_foliage_instances_0 @ 0x5fff84..0x5fffa2]
+		const uint32_t x_min = static_cast<uint32_t>(world_x) & 0x7fffu;
+		const uint32_t z_min = static_cast<uint32_t>(world_z) & 0x7fffu;
+		patches.push_back({key_flags | (x_min << 16) | z_min, distance});
 	}
 };
 

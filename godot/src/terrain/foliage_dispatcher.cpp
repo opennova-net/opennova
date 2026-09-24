@@ -71,14 +71,12 @@ bool finite_vector(const Vector3 &p_value) {
 }
 
 uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
-  // The generator decodes HIGH15 as the X cell origin and LOW15 as the
-  // positive-Z edge. Candidates run lowBase - localB, so a preview cell
-  // [z, z+cell] stores z+cell in the low half.
+  // The same packing as the runtime collector: HIGH15 = the cell's X-min,
+  // LOW15 = its Z-min (engine/runtime/terrain/foliage_detail_collector.cpp
+  // carries the witness).
   const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
-  const uint32_t z_top = static_cast<uint32_t>(
-                             p_cell_min_z + opennova::kFoliageDetailCellSize) &
-                         0x7FFFu;
-  return (x << 16u) | z_top;
+  const uint32_t z = static_cast<uint32_t>(p_cell_min_z) & 0x7FFFu;
+  return (x << 16u) | z;
 }
 
 // The pass names and per-draw uniform names the applier writes every frame.
@@ -123,9 +121,9 @@ int32_t decode_foliage_cell_axis(uint32_t p_packed) {
 
 Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
   const int32_t minimum_x = decode_foliage_cell_axis(p_cell_key >> 16u);
-  const int32_t maximum_z = decode_foliage_cell_axis(p_cell_key);
+  const int32_t minimum_z = decode_foliage_cell_axis(p_cell_key);
   return Vector2(static_cast<float>(minimum_x) + 8.0f,
-                 static_cast<float>(maximum_z) - 8.0f);
+                 static_cast<float>(minimum_z) + 8.0f);
 }
 
 } // namespace

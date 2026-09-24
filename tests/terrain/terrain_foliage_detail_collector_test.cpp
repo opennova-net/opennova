@@ -74,8 +74,8 @@ int main() {
 	ok &= expect(patches.size() == 1,
 			"Y-center distance 42 must select exactly the containing 16u cell");
 	if (patches.size() == 1) {
-		ok &= expect_patch(patches[0], 0x00100030u, 42.0f,
-				"detail key must pack high15=X-left and low15=Z-top");
+		ok &= expect_patch(patches[0], 0x00100020u, 42.0f,
+				"detail key must pack high15=X-min and low15=Z-min");
 	}
 
 	patches.clear();
@@ -92,7 +92,7 @@ int main() {
 			ranged, 0, 0, 0, 0, 0, 512, 24.0f, 52.0f, 40.0f, patches);
 	ok &= expect(patches.size() == 1, "flat fallback uses the raw quadrant-one height center");
 	if (patches.size() == 1) {
-		ok &= expect_patch(patches[0], 0x80100030u, 42.0f,
+		ok &= expect_patch(patches[0], 0x80100020u, 42.0f,
 				"flat fallback retains its high flag in the accepted world key");
 	}
 	patches.clear();
@@ -106,7 +106,7 @@ int main() {
 	ok &= expect(patches.size() == 1,
 			"X-to-AABB distance 42 must be included");
 	if (patches.size() == 1) {
-		ok &= expect_patch(patches[0], 0x00000010u, 42.0f,
+		ok &= expect_patch(patches[0], 0x00000000u, 42.0f,
 				"horizontal clamp must retain the first 16u cell at the threshold");
 	}
 
@@ -135,7 +135,7 @@ int main() {
 			ok &= expect(patches.size() == 1,
 					"a mixed-height ancestor must not hide its in-range low leaf");
 			if (patches.size() == 1) {
-				const uint32_t key = sector_id == 0 ? 0x80000010u : 0x00000010u;
+				const uint32_t key = sector_id == 0 ? 0x80000000u : 0x00000000u;
 				ok &= expect_patch(patches[0], key, 0.0f,
 						"leaf-only distance selection retains authored and flat keys");
 			}
@@ -164,7 +164,7 @@ int main() {
 		ok &= expect(patches.size() == 1,
 				"sector ID must select its recovered atlas quadrant");
 		if (patches.size() == 1) {
-			ok &= expect_patch(patches[0], 0x00100030u, 42.0f,
+			ok &= expect_patch(patches[0], 0x00100020u, 42.0f,
 					"quadrant lookup must not change the world-space detail key");
 		}
 	}
@@ -175,7 +175,7 @@ int main() {
 	ok &= expect(patches.size() == 1,
 			"translated sector must retain the same local 16u selection");
 	if (patches.size() == 1) {
-		ok &= expect_patch(patches[0], 0x02107e30u, 42.0f,
+		ok &= expect_patch(patches[0], 0x02107e20u, 42.0f,
 				"signed world coordinates must wrap into the two 15-bit key fields");
 	}
 
@@ -187,7 +187,7 @@ int main() {
 	ok &= expect(patches.size() == 128,
 			"detail collection must stop at the global 128-patch capacity");
 	if (patches.size() == 128) {
-		ok &= expect_patch(patches.back(), 0x00000010u, 0.0f,
+		ok &= expect_patch(patches.back(), 0x00000000u, 0.0f,
 				"NW/NE/SW/SE recursion must visit the northwest leaf first");
 	}
 
@@ -212,12 +212,12 @@ int main() {
 			ranged, 0, 0, 0, 16, 32, 16, 24.0f, 10.0f, 40.0f, patches);
 	ok &= expect(patches.size() == 128, "flat keys consume the final foliage-list slot");
 	if (patches.size() == 128) {
-		ok &= expect_patch(patches.back(), 0x80100030u, 0.0f,
+		ok &= expect_patch(patches.back(), 0x80100020u, 0.0f,
 				"the 128th flat key keeps its flag and distance");
 	}
 	opennova::collect_foliage_detail_patches(
 			ranged, 1, 0, 0, 32, 32, 16, 40.0f, 10.0f, 40.0f, patches);
-	ok &= expect(patches.size() == 128 && patches.back().key == 0x80100030u,
+	ok &= expect(patches.size() == 128 && patches.back().key == 0x80100020u,
 			"a flat entry at capacity prevents later authored cells from entering");
 
 	// Subtree handoff [orig: Terrain_TraverseQuadtreeNode @ 0x60905c..0x60907c]:
@@ -229,7 +229,7 @@ int main() {
 	ok &= expect(patches.size() == 1,
 			"a 16u subtree handoff must collect exactly its own cell");
 	if (patches.size() == 1) {
-		ok &= expect_patch(patches[0], 0x00100030u, 0.0f,
+		ok &= expect_patch(patches[0], 0x00100020u, 0.0f,
 				"the subtree cell key must match the whole-sector walk's key");
 	}
 

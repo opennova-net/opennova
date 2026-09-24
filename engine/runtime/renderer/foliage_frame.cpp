@@ -16,7 +16,6 @@ namespace {
 
 constexpr float kInvalidHeightThreshold = -1.0e6f;
 constexpr float kDetailHeightScale = 0.5f;
-constexpr float kPiF = 3.14159265358979323846f;
 
 bool valid_height(float height) {
 	return std::isfinite(height) && height > kInvalidHeightThreshold;
@@ -75,14 +74,15 @@ bool FoliageFrameCompiler::expand_detail_instance(
 	}
 	const FoliageSlotGeometry &source = geometry_[slot];
 
-	// Rotation of the source's planar footprint by yaw + pi around +Y (the
-	// shell's Basis(Vector3(0,1,0), yaw + pi) convention).
-	const float angle = instance.yaw_radians + kPiF;
-	const float cos_a = std::cos(angle);
-	const float sin_a = std::sin(angle);
+	// Retail writes render x = keyLo + B + sx*sin + sz*cos (the Godot-Z
+	// axis) and render z = keyHi + A + sx*cos - sz*sin (Godot X) for source
+	// (sx, sz); the 3DI import negates source X (vertex.x = -sx).
+	// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d]
+	const float cos_a = std::cos(instance.yaw_radians);
+	const float sin_a = std::sin(instance.yaw_radians);
 
 	for (const FoliageSourceVertex &vertex : source.vertices) {
-		const float planar_x = vertex.x * cos_a + vertex.z * sin_a;
+		const float planar_x = -(vertex.x * cos_a + vertex.z * sin_a);
 		const float planar_z = -vertex.x * sin_a + vertex.z * cos_a;
 		const float world_x = instance.center.x + planar_x;
 		const float world_z = instance.center.z + planar_z;

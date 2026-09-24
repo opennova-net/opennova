@@ -252,7 +252,7 @@ int test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() {
 			"budget-independent foliage keeps the same frustum wedge and traversal order")) return 1;
 	for (const auto &cell : limited.detail_cells) {
 		if (!expect(cell.distance <= opennova::kFoliageDetailDistanceLimit &&
-				(cell.key & 0x7fffu) <= 896u,
+				(cell.key & 0x7fffu) < 896u, // low15 = the cell's Z-min
 				"the independent handoff adds no far or wholly behind-camera cells")) return 1;
 	}
 	return 0;

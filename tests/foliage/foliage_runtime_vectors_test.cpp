@@ -115,10 +115,15 @@ bool detail_vectors_and_gates() {
 	            "near detail expands 36 accepted candidates into two passes")) return false;
 	if (!expect(out.silhouettes.empty(), "detail cells never emit silhouettes")) return false;
 
+	// Key 0x00100030 is the cell X [16,32), Z [48,64): the low half is the
+	// Z-MIN and local B ADDS to it; the yaw step is retail's flt_7CD4DC
+	// (0x38C90FD0), a hair below 2*pi/65536. Vectors from an independent
+	// emulation of the instruction sequence.
+	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fffa2]
 	const struct Expected { float x, z, yaw; } expected[3] = {
-	    {18.63215637f, 46.30134583f, 4.83127260f},
-	    {20.66067505f, 45.73469543f, 1.83435345f},
-	    {23.21640015f, 46.72764587f, 4.25919342f},
+	    {18.63215637f, 49.69863892f, 4.83126879f},
+	    {20.66067505f, 50.26528931f, 1.83435190f},
+	    {23.21640015f, 49.27233887f, 4.25919008f},
 	};
 	for (int i = 0; i < 3; ++i) {
 		const auto &got = out.detail[static_cast<size_t>(i)];
@@ -126,7 +131,7 @@ bool detail_vectors_and_gates() {
 		            "detail preserves key and candidate index")) return false;
 		if (!expect(near(got.center.x, expected[i].x) &&
 		                near(got.center.z, expected[i].z) &&
-		                near(got.yaw_radians, expected[i].yaw),
+		                near(got.yaw_radians, expected[i].yaw, 1.0e-6f),
 		            "detail position/yaw matches the recovered literal vector")) return false;
 		if (!expect(near(got.alpha, 1.0f) &&
 		                got.pass == DetailPass::HighAlphaTest &&
@@ -194,10 +199,13 @@ bool silhouette_vectors_and_tier_role() {
 	if (!expect(out.silhouettes.size() == 9,
 	            "four quadrants plus +/-4 anchor gate match the golden count")) return false;
 
+	// The anchor at Godot (32, 48) is mission (x, y) = (32, -48): quadrant
+	// bit 1 steps mission y, and the low half keys the mission-y cell TOP.
+	// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b]
 	const uint32_t quadrant_keys[4] = {
-	    0x00200040u, 0x00100040u, 0x00200030u, 0x00100030u,
+	    0x00207FE0u, 0x00107FE0u, 0x00207FD0u, 0x00107FD0u,
 	};
-	const int quadrant_counts[4] = {3, 3, 1, 2};
+	const int quadrant_counts[4] = {1, 3, 2, 3};
 	std::map<uint32_t, int> counts;
 	for (const auto &inst : out.silhouettes) {
 		++counts[inst.cell_key];
@@ -214,20 +222,25 @@ bool silhouette_vectors_and_tier_role() {
 		            "each silhouette cell respects the retail cap")) return false;
 	}
 
+	// Mission candidate (keyHi + A, keyLo - B), Godot z = B - keyLo.
+	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c]
 	const auto &first = out.silhouettes[0];
-	if (!expect(first.cell_key == 0x00200040u &&
-	                first.quadrant == 0 && first.candidate == 24,
+	if (!expect(first.cell_key == 0x00207FE0u &&
+	                first.quadrant == 0 && first.candidate == 30,
 	            "silhouette retains quadrant/key/candidate identity")) return false;
-	if (!expect(near(first.center.x, 33.30752563f) &&
-	                near(first.center.z, 51.89562988f) &&
-	                near(first.yaw_radians, 0.47121975f),
+	if (!expect(near(first.center.x, 34.00364685f) &&
+	                near(first.center.z, 46.20242310f) &&
+	                near(first.yaw_radians, 1.53810215f, 1.0e-6f),
 	            "silhouette placement matches the PRNG literal")) return false;
 
+	// Corners (keyHi + A', keyLo - B') in the mission frame, sampled on the
+	// Godot plane. [orig: Foliage_GenerateModelTileInstances
+	// @ 0x600bd0..0x600c6a]
 	const GroundCorner expected_corners[4] = {
-	    {32.65196228f, 53.91311646f, 93.90994263f},
-	    {35.32501221f, 52.55119324f, 98.91120148f},
-	    {31.29003906f, 51.24006653f, 85.56327820f},
-	    {33.96308899f, 49.87815857f, 90.40946960f},
+	    {35.45381165f, 44.65419006f, 86.08673096f},
+	    {35.55187988f, 47.65258789f, 91.14562988f},
+	    {32.45541382f, 44.75225830f, 78.07762146f},
+	    {32.55348206f, 47.75065613f, 83.05718231f},
 	};
 	for (int i = 0; i < 4; ++i) {
 		if (!expect(near(first.corners[i].x, expected_corners[i].x) &&
@@ -237,13 +250,13 @@ bool silhouette_vectors_and_tier_role() {
 		            "silhouette corner vector matches four ground samples")) return false;
 	}
 	const float expected_fold[4] = {
-	    -0.04954147f, 0.00000381f, -0.05598831f, 0.00000381f,
+	    -0.06971931f, 0.00000572f, -0.03578377f, -0.00000191f,
 	};
 	for (int i = 0; i < 4; ++i) {
 		if (!expect(near(first.fold[i], expected_fold[i], 2.0e-4f),
 		            "silhouette fold matches four midpoint controls")) return false;
 	}
-	if (!expect(near(first.center_height, 92.09294128f, 2.0e-4f),
+	if (!expect(near(first.center_height, 84.48628807f, 2.0e-4f),
 	            "silhouette center height uses the eight-sample fit")) return false;
 
 	world.model_foliage_mask_at = [](int32_t, int32_t) { return 0u; };
@@ -774,10 +787,12 @@ bool per_slot_mask_bit_selection_in_both_tiers() {
 
 bool negative_anchor_cell_keys_sign_extend() {
 	// Negative-coordinate cells: the quadrant snap wraps in 32 bits and the
-	// packed key's 15-bit halves sign-extend back to the negative bases, with
-	// X = high15 + localA and Z = low15 - localB (local B runs toward -Z).
-	// [orig: Foliage_UpdateModelTiles @ 0x601f50 — quadrant snap / key form;
-	// Foliage_GenerateModelTileInstances @ 0x600980 — 15-bit decode]
+	// packed key's 15-bit halves sign-extend back to their bases, with
+	// X = high15 + localA and MISSION y = low15 - localB (Godot z = -y). The
+	// anchor at Godot z = -48 is mission y = +48, so its y keys are positive.
+	// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b — quadrant snap /
+	// key form; Foliage_GenerateModelTileInstances @ 0x600986..0x6009aa —
+	// 15-bit decode]
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
 	FrameRequest request;
@@ -791,12 +806,12 @@ bool negative_anchor_cell_keys_sign_extend() {
 		return false;
 	}
 
-	// Hand-derived quadrant keys for anchor (-32, -48): snap(anchor +- 8u)
-	// masked to 16u tiles gives x in {-32, -48}, z-top in {-32, -48}.
+	// Hand-derived quadrant keys for mission anchor (-32, +48): snap(anchor
+	// +- 8u) masked to 16u tiles gives x in {-32, -48}, y-top in {64, 48}.
 	const uint32_t quadrant_keys[4] = {
-	    0x7FE07FE0u, 0x7FD07FE0u, 0x7FE07FD0u, 0x7FD07FD0u,
+	    0x7FE00040u, 0x7FD00040u, 0x7FE00030u, 0x7FD00030u,
 	};
-	const int quadrant_counts[4] = {2, 2, 2, 2};
+	const int quadrant_counts[4] = {3, 2, 1, 2};
 
 	// Independent 15-bit sign extension (subtraction form, distinct from the
 	// runtime's OR-mask form).
@@ -808,19 +823,20 @@ bool negative_anchor_cell_keys_sign_extend() {
 	for (const SilhouetteInstance &instance : out.silhouettes) {
 		++counts[instance.cell_key];
 		const int32_t base_x = sext15(instance.cell_key >> 16u);
-		const int32_t base_z = sext15(instance.cell_key);
-		if (!expect(base_x < 0 && base_z < 0,
-		            "negative-anchor keys decode to negative 16u bases")) {
+		const int32_t base_y = sext15(instance.cell_key);
+		if (!expect(base_x < 0 && base_y > 0,
+		            "the anchor keys decode to a negative x and positive y top")) {
 			return false;
 		}
 		const float local_a = instance.center.x - static_cast<float>(base_x);
-		const float local_b = static_cast<float>(base_z) - instance.center.z;
+		const float mission_y = -instance.center.z;
+		const float local_b = static_cast<float>(base_y) - mission_y;
 		if (!expect(local_a >= 1.0f - 1.0e-4f && local_a <= 15.8f + 1.0e-4f,
 		            "X decodes as high15 + localA for negative keys")) {
 			return false;
 		}
 		if (!expect(local_b >= 1.0f - 1.0e-4f && local_b <= 15.8f + 1.0e-4f,
-		            "Z decodes as low15 - localB for negative keys")) {
+		            "mission y decodes as low15 - localB")) {
 			return false;
 		}
 		if (!expect(std::fabs(instance.center.x + 32.0f) <= 4.0f &&
