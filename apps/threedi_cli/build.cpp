@@ -343,7 +343,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				continue;
 			}
 			if (model.collision[cobj].vertices.size() > SHRT_MAX) {
-				ps.error("a collision section exceeds 32768 vertices (signed int16 face indices)");
+				ps.error("a collision section exceeds " + std::to_string(SHRT_MAX + 1) + " vertices (signed int16 face indices)");
 				continue;
 			}
 			model.add_collision_vertex(cobj, ThreediBuildVec3{p[0], p[1], p[2]});
@@ -781,7 +781,7 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 	}
 	for (size_t o = 0; o < m.collision.size(); ++o) {
 		if (m.collision[o].normals.size() > static_cast<size_t>(SHRT_MAX) + 1)
-			ps.error("cobj " + std::to_string(o) + " exceeds 32768 collision normals (signed int16 indices)");
+			ps.error("cobj " + std::to_string(o) + " exceeds " + std::to_string(SHRT_MAX + 1) + " collision normals (signed int16 indices)");
 		for (const ThreediBoundingVolume &v : m.collision[o].volumes)
 			if (v.plane_count < 4) ps.error("cobj " + std::to_string(o) + " has a volume with fewer than 4 planes");
 	}

@@ -11,4 +11,4 @@ blender_version_min = "4.2.0"
 platforms = ["windows-x64"]
 
 [permissions]
-files = "Reads a .3di and the textures beside it; writes the .3di, its textures and the intermediate .o3d scene next to the chosen output"
+files = "Read and write models, scene files and their textures"
