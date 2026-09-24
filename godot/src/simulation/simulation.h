@@ -59,7 +59,14 @@ struct EntityMarkerQuery;
 } // namespace opennova::world
 namespace opennova::mission {
 struct DebugHitboxReport;
+struct ScriptDebugReport;
 } // namespace opennova::mission
+namespace opennova::inmatch {
+struct NetDebugReport;
+} // namespace opennova::inmatch
+namespace opennova::world::inspect {
+struct LocalPlayerReport;
+} // namespace opennova::world::inspect
 
 namespace godot {
 
@@ -2265,6 +2272,10 @@ public:
 	bool native_ray_debug_rows(std::vector<opennova::world::RayDebugRow> &r_rows, int32_t &r_ttl) const;
 	bool native_contact_debug_rows(std::vector<opennova::world::ContactDebugRow> &r_rows, int32_t &r_ttl) const;
 	bool native_hitbox_debug(const opennova::world::Vec3 &p_anchor, opennova::mission::DebugHitboxReport &r_out);
+	// The F3 Script / Player / Net windows' records (the engine reports).
+	bool native_script_report(opennova::mission::ScriptDebugReport &r_out) const;
+	bool native_local_player_report(opennova::world::inspect::LocalPlayerReport &r_out) const;
+	bool native_net_report(opennova::inmatch::NetDebugReport &r_out) const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
 	// draw filter) behind the F3 Rays window; counts + filter state ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.

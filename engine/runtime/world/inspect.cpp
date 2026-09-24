@@ -626,7 +626,7 @@ AiDebugReport ai_debug_report(World &world) {
 	report.counters.event_count = ai.events.count();
     report.counters.runtime_gap_calls = world.diagnostics.total_calls();
     report.counters.runtime_gap_sites = static_cast<uint32_t>(world.diagnostics.gaps().size());
-    report.runtime_gaps = world.diagnostics.gaps();
+
 	report.counters.rel_ops = static_cast<int32_t>(ai.rel_ops.size());
 	report.counters.find_target_calls = ai.find_target_calls;
 	return report;

@@ -71,6 +71,7 @@ public:
 
     const Program &program() const { return prog_; }
     WacVm &vm() { return vm_; }
+    const WacVm &vm() const { return vm_; }
 
 private:
     Program prog_;

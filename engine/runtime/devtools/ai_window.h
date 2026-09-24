@@ -71,6 +71,9 @@ public:
 	// target | route").
 	int brain_count() const { return static_cast<int>(brain_rows_.size()); }
 	const char *brain_text(int row) const;
+	// The group table's Kill button: the kill_group row, queued through the
+	// Entities window's channel (its authority fact gates the button).
+	void request_kill_group(int32_t group);
 
 	// The Game-view layers (labels, routes, targets, rings), registered on
 	// the pass by the composer.
@@ -97,6 +100,7 @@ private:
 	std::vector<int> brain_alerts_;
 	std::vector<std::string> group_rows_;
 	std::vector<int> group_alerts_; // per group row, for the colored draw
+	std::vector<int32_t> group_ids_;
 	std::vector<std::string> channel_rows_;
 	std::vector<std::string> detail_lines_;
 };

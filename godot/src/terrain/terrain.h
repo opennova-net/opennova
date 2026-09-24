@@ -253,6 +253,12 @@ public:
 	float get_visible_terrain_max_height() const;
 
 	// Debug API
+	// The last compile's counters (native; the F3 Render window) and whether
+	// this frame compiled at all.
+	const opennova::TerrainFrameDebugCounters &get_frame_debug_counters_native() const {
+		return frame_compiler.last_draw_list().debug;
+	}
+	bool has_frame_draw_list() const { return frame_draw_list_live; }
 	int get_patches_active() const;
 	int get_visible_patch_count() const;
 	const std::vector<FoliageDetailPatch> &get_foliage_detail_patches_native() const;

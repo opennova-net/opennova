@@ -26,6 +26,7 @@
 namespace godot {
 
 class Camera3D;
+class GameWorld;
 
 class Simulation;
 class SubViewport;
@@ -185,6 +186,22 @@ private:
 	// A Rays/Physics filter changed: the next frame re-reads the rows.
 	bool overlay_filters_dirty_ = false;
 	int64_t last_hitbox_push_ms_ = -1;
+	// The per-domain windows' records (dev_tools_windows.cpp).
+	GameWorld *loaded_world() const;
+	void push_domain_records();
+	void clear_domain_records();
+	void push_script_snapshot();
+	void push_player_snapshot();
+	void push_render_snapshot();
+	void push_particle_snapshot();
+	void push_audio_snapshot();
+	void push_net_snapshot();
+	int64_t last_script_push_ms_ = -1;
+	int64_t last_player_push_ms_ = -1;
+	int64_t last_render_push_ms_ = -1;
+	int64_t last_particle_push_ms_ = -1;
+	int64_t last_audio_push_ms_ = -1;
+	int64_t last_net_push_ms_ = -1;
 	void set_game_playing_internal(bool p_playing);
 	// The one cadence gate every record push shares: true (and the stamp
 	// moved) when p_seconds have passed since the last push, or none was made

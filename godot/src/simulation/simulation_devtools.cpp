@@ -4,6 +4,8 @@
 #include "simulation/simulation_internal.h"
 
 #include <runtime/mission/debug_oracles.h>
+#include <runtime/mission/script_debug_report.h>
+#include <runtime/world/inspect_local_player.h>
 #include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/inspect_markers.h>
 
@@ -43,6 +45,21 @@ bool Simulation::native_contact_debug_rows(std::vector<opennova::world::ContactD
 	r_ttl = opennova::world::CollisionWorld::kContactDebugTtlTicks;
 	opennova::world::contact_debug_rows(kernel_->world, kernel_->collision, kernel_->world.logic_tick, r_rows);
 	return true;
+}
+
+bool Simulation::native_script_report(opennova::mission::ScriptDebugReport &r_out) const {
+	if (!kernel_) return false;
+	r_out = opennova::mission::script_debug_report(*kernel_);
+	return true;
+}
+
+bool Simulation::native_local_player_report(opennova::world::inspect::LocalPlayerReport &r_out) const {
+	if (!kernel_) {
+		r_out = opennova::world::inspect::LocalPlayerReport{};
+		return false;
+	}
+	return opennova::world::inspect::local_player_report(kernel_->world, kernel_->local, &kernel_->collision,
+			r_out);
 }
 
 bool Simulation::native_hitbox_debug(const opennova::world::Vec3 &p_anchor,

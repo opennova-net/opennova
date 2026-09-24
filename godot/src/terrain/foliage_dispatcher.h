@@ -202,6 +202,10 @@ public:
   int get_total_instances() const;
   // One snapshot of this frame's counters (terrain/foliage_frame_stats.h).
   Ref<FoliageFrameStats> get_frame_stats() const;
+  // The same counters natively (the F3 Render window).
+  const opennova::renderer::FoliageFrameDebugCounters &get_frame_debug_counters_native() const {
+    return compiler_.last_draw_list().debug;
+  }
   // Device-only diagnostics for tests and live inspection. `draws` is the
   // active draw-list order; the retained RenderingServer RIDs stay opaque.
   Dictionary get_backend_report() const;

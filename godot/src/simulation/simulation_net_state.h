@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <net/npwire/counting_datagram_socket.h>
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
@@ -36,8 +37,9 @@ struct SimulationNetState {
 	Ref<UdpPump> pump;
 	// The pump as the active role's opennova::IDatagramSocket (installed by
 	// enable_host_listen / enable_join, so the SP/test host stays socketless:
-	// every datagram dropped, the role's socket legs inert).
-	std::unique_ptr<opennova::IDatagramSocket> pump_socket;
+	// every datagram dropped, the role's socket legs inert), wrapped in the
+	// counter the F3 Net window reads (the datagrams pass through unchanged).
+	std::unique_ptr<opennova::CountingDatagramSocket> pump_socket;
 	// The pcap this session's datagrams are recorded to (`--capture-pcap`).
 	String capture_pcap_path;
 
