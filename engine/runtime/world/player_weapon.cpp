@@ -1149,19 +1149,19 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 						std::max(0, ev.fired_clip_before_consume));
 				round_event.mode_flags = static_cast<uint8_t>(
 						((clip_before_consume & 0x3u) << 4u) | 0x02u);
-				const bool vehicle_attack_context =
-						mount_blocks_weapon_channel(*shooter);
-				const bool scope_settled = player_view_scope_settled(view);
-				// The ordinary on-foot hip-fire leg is exact: retail passes
-				// Weapon_GetScopeZoomLevel(false, 12), which returns 12, and the
-				// server's bit-6-clearing composite preserves it. The predicate
-				// reads the PROMOTED scope bit, so ADS raise and third-person use
-				// the same 12. Settled-FP/mounted zoom levels remain D-WPN-8.
-				if (view.third_person ||
-						(!scope_settled && !vehicle_attack_context &&
-								(w.def.flags & weapon_flag::kForceScoped) == 0)) {
-					round_event.subtype = 12;
-				}
+				// The local shooter's fire-context composite: 0x80 while the
+				// optic view can fire, plus the zero step (the default 12
+				// otherwise). Bit 7 selects the round's aimed ERROR row and
+				// the low six bits its zero elevation (RoundSim::spawn); the
+				// server's bit-6-clearing composite preserves both.
+				// [orig: Entity_FireWeaponAndSendPacket @0x42bdcb..0x42bdfb --
+				//  Player_CanFireWeapon @0x42bdd8, Weapon_GetScopeZoomLevel(can,
+				//  12) @0x42bde2, `neg; sbb; and 80h; add` @0x42bdee..0x42bdfb]
+				const bool can_fire = local_player_scope_view_visible(world, w, view);
+				const WeaponSlotState *fire_zero_slot = active_local_weapon_slot(world, w);
+				round_event.subtype = static_cast<uint8_t>((can_fire ? 0x80 : 0) +
+						weapon_scope_zoom_step(w.def.scope_zero, w.def.flags,
+								fire_zero_slot->scope_zero, w.aim_range_q16, can_fire, 12));
 				round_event.adm_index = adm_index;
 				// The PowerThrow charge rides the ring/wire slot_byte (ring+32,
 				// wire flags|0x80 leg) and scales the spawned round's launch

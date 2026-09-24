@@ -163,6 +163,7 @@ struct RoundSourceState {
     bool underwater = false;
     int32_t *recoil_pitch = nullptr;              // entity+0x380
     const int32_t *weapon_weight_spread = nullptr; // entity+0x384
+    uint8_t equipped_adm_index = 0; // entity+0x2B0, the zero-elevation row's AdmDef
     // Direct ADM action replay borrows the carrier's live slot. An on-foot
     // peer without EquippedSlot uses the receive handler's temporary slot.
     WeaponSlotState *action_slot = nullptr;

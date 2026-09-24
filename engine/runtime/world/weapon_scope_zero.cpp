@@ -95,6 +95,17 @@ int32_t weapon_scope_zero_pitch(const WeaponScopeZero &zero, int16_t step) {
     return step >= 0 && step < int(zero.elevation.size()) ? zero.elevation[step] : 0;
 }
 
+int32_t weapon_scope_zoom_step(const WeaponScopeZero &zero, int32_t def_flags, int16_t zero_step,
+    int32_t rangefinder_q16, bool weapon_active, int32_t fallback) {
+    if (!weapon_active || (def_flags & 3) == 0) return fallback;
+    if (zero_step != -1) return 0;
+    int32_t range = static_cast<int32_t>(uint32_t(zero.step_metres) << 16);
+    if (range == 0) range = 0x190000;
+    const int32_t level = io::bam_add(range / 2, rangefinder_q16) / range;
+    if (level < 0) return 0;
+    return level > 39 ? 39 : level;
+}
+
 // [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b; Player_AdjustWeaponZoomLevel
 //  @0x4dbd91..0x4dbdd5 -- fpatan(+0x8C, distance) * dbl_7C19D8 (BAM per
 //  radian), ftol; the 100 m floor @0x4dbdb6..0x4dbdb8]

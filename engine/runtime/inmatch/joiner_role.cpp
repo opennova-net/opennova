@@ -2249,6 +2249,10 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 				(shooter_row->state_flags &
 				 world::kEntityFlagScopeRaised) != 0;
 		source.recoil_pitch = &shooter_row->recoil_pitch;
+		// The zero-elevation row keys on the shooter's equipped AdmDef, the
+		// replica's 0x0A off-16 echo [orig: RoundData_SpawnRound entity+0x2B0
+		// @0x4ec16f].
+		source.equipped_adm_index = shooter_row->equipped_adm_index;
 		replica_weapon_action_source(*shooter_row, world, ev.flags, source);
 		round.source_state = &source;
 		// The adm-arm action sounds play at the SHOOTER's position, and a
