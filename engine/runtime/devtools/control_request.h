@@ -70,4 +70,15 @@ struct ControlRequest {
 	std::vector<ControlArg> args;
 };
 
+// The table's verdict on one drained request, reported back by the embedder
+// so a refused or failed command is never silent: `message` is the short
+// verdict (the error's name and the row's own reason), `detail` the
+// command's result as text (a read's payload), both possibly empty.
+struct ControlResult {
+	std::string id;
+	bool ok = false;
+	std::string message;
+	std::string detail;
+};
+
 }  // namespace opennova::devtools

@@ -29,6 +29,7 @@ public:
 	StatsWindow();
 
 	const char *title() const override { return "Stats"; }
+	MenuGroup menu_group() const override { return MenuGroup::Tools; }
 	InitialDockPlacement initial_dock_placement() const override {
 		return InitialDockPlacement::Right;
 	}

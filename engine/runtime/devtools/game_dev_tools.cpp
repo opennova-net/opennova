@@ -107,6 +107,24 @@ bool GameDevTools::take_control_request(ControlRequest &request) {
 			environment_window_->take_request(request);
 }
 
+void GameDevTools::report_control_result(const ControlResult &result) {
+	std::string text = result.id;
+	text += result.ok ? ": ok" : ": failed";
+	if (!result.message.empty()) {
+		text += " (";
+		text += result.message;
+		text += ")";
+	}
+	if (result.ok && !result.detail.empty()) {
+		// The status line carries a short head of a read's payload; the full
+		// text belongs to the Log window.
+		constexpr size_t kHead = 96;
+		text += " = ";
+		text += result.detail.size() > kHead ? result.detail.substr(0, kHead) + "..." : result.detail;
+	}
+	pass_.post_status(std::move(text), result.ok ? StatusLevel::Info : StatusLevel::Error);
+}
+
 void GameDevTools::select_entity(uint16_t handle) {
 	entities_window_->select_handle(handle);
 	if (handle != world::EntityHandle::kInvalid) {
