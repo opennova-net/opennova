@@ -9,9 +9,15 @@ experimental.
 
 ## Install
 
-`scripts/package_blender_addon.sh [out.zip]` builds the CLI and the zip
-(default `build/opennova_3di.zip`). In Blender 4.2 or newer: Edit >
-Preferences > Get Extensions > Install from Disk. Windows only for now.
+Download `opennova-blender-addon-windows-v<version>.zip` from
+[releases](https://github.com/opennova-net/opennova/releases), or
+`opennova-blender-addon-windows.zip` from a PR's **OpenNova CI builds** comment.
+In Blender 4.2 or newer: Edit > Preferences > Get Extensions > Install from Disk.
+Select the downloaded zip without unpacking it. Windows x64 only for now.
+
+To build locally, `scripts/package_blender_addon.sh [out.zip]` builds the CLI
+and the installable zip (default `build/opennova_3di.zip`). PRs and releases
+use the same packaging workflow and smoke-test the CLI extracted from the zip.
 
 ## Importing
 
