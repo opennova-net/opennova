@@ -31,7 +31,7 @@ t 0 1 2
 t 0 2 3
 panm 0 0
 panm 1 0
-track rotz 113 HELO_ROTOR 0 0 16338
+track rotx 113 HELO_ROTOR 0 0 16338
 lod 0 gnrc
 part 0 0 0 0
 strip 0 0

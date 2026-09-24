@@ -844,13 +844,13 @@ void threedi_3di3_free(Threedi3di3 *model);
 // (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
 
-// The attach scan reads only a model's FIRST 16 userpoints — the result is a
-// 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 // User point kinds as the retail corpus spells them: 71 ('G') for gameplay
 // points (seats, ground, cameras), 83 ('S') for effect/particle points.
 inline constexpr int32_t THREEDI_USER_POINT_GAMEPLAY = 71;
 inline constexpr int32_t THREEDI_USER_POINT_EFFECT = 83;
 
+// The attach scan reads only a model's FIRST 16 userpoints — the result is a
+// 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 inline constexpr int THREEDI_USER_POINT_SCAN_LIMIT = 16;
 
 // A userpoint name -> the 16-bit mask over the model's FIRST 16 userpoints:

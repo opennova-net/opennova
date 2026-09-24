@@ -26,10 +26,12 @@
 // float, so int -> float -> int is the identity on every platform.
 #pragma once
 
+#include <base/io/fixed.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -56,9 +58,9 @@ inline ThreediBuildVec3 threedi_presentation_to_model(const ThreediBuildVec3 &p)
 // mission <-> presentation
 inline ThreediBuildVec3 threedi_mission_to_presentation(const ThreediBuildVec3 &m) { return ThreediBuildVec3{m.y, m.z, m.x}; }
 inline ThreediBuildVec3 threedi_presentation_to_mission(const ThreediBuildVec3 &p) { return ThreediBuildVec3{p.z, p.x, p.y}; }
-inline int32_t threedi_q16(double v) { return static_cast<int32_t>(std::lround(v * 65536.0)); }
-inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) / 65536.0f; }
-inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * 16384.0)) / 16384.0f; }
+inline int32_t threedi_q16(double v) { return static_cast<int32_t>(std::lround(v * io::kFp16OneD)); }
+inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) / io::kFp16One; }
+inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * io::kFp14One)) / io::kFp14One; }
 inline float threedi_q8f(double v) { return static_cast<float>(std::lround(v * 256.0)) / 256.0f; }
 inline float threedi_byte_unit(int c) { return static_cast<float>(c) / 255.0f; }
 
@@ -98,6 +100,7 @@ struct ThreediBuildCollisionObject {
 	int parent_part = 0;
 	ThreediBuildVec3 offset; // mission axes
 	std::vector<ThreediCollisionVertex> vertices;
+	std::vector<ThreediBuildVec3> exact; // the unquantized positions face normals are taken from
 	std::vector<ThreediCollisionNormal> normals;
 	std::vector<ThreediCollisionFace> faces;
 	std::vector<ThreediBoundingVolume> volumes;
@@ -121,6 +124,13 @@ inline ThreediPartAnimation threedi_build_inert_panm(int part, int parent) {
 	return row;
 }
 
+// A LGHT record's view_proj from its offset, rotation (the light's Z axis in
+// model axes), atten_end and the cone half-angle `falloff` in degrees: a view
+// looking along the axis times a perspective of fov 2 * falloff, near 0.1, far
+// atten_end. An omni light (falloff 0) yields the NaN columns retail ships
+// (Armry01's LGHT); the JO runtime never reads it.
+void threedi_build_light_view_proj(ThreediLight &light, float falloff);
+
 inline ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end) {
 	ThreediTransform t{};
 	t.control = control;
@@ -142,7 +152,10 @@ struct ThreediBuildModel {
 	std::vector<std::string> control_registers;
 	std::vector<ThreediBuildCollisionObject> collision;
 	std::vector<ThreediBuildOcclusionRecord> occlusion;
-	int matrix_count = 1;
+	// MTRX rows after the identity row 0: the rotation frames a PANM row
+	// selects with matrix_index > 0 (model axes, row-major, p' = p * M; a
+	// tilted tail rotor spins about its frame's axes).
+	std::vector<ThreediMatrix4x4> frames;
 
 	// --- render ------------------------------------------------------------
 	int add_lod(int32_t threshold = 0, const char *type = "gnrc") {
@@ -309,9 +322,12 @@ struct ThreediBuildModel {
 		return static_cast<int>(user_points.size()) - 1;
 	}
 
+	// A LGHT record. `dir` is the light's local Z axis in mission axes (an
+	// omni light keeps the retail default, straight down: Armry01's lights)
+	// and `falloff` the cone half-angle in degrees (0 for an omni light).
 	int add_light(ThreediBuildVec3 pos, double atten_start, double atten_end, uint8_t style, int subobject,
 			const int rgb_start[3], const int rgb_end[3], uint8_t flags = 0, uint8_t phase = 0,
-			uint16_t rate = 0) {
+			uint16_t rate = 0, ThreediBuildVec3 dir = ThreediBuildVec3{0.0, 0.0, -1.0}, double falloff = 0.0) {
 		ThreediLight l{};
 		const ThreediBuildVec3 m = threedi_build_to_model(pos);
 		l.offset[0] = static_cast<float>(m.x);
@@ -330,10 +346,14 @@ struct ThreediBuildModel {
 		l.color_end[2] = static_cast<uint8_t>(rgb_end[0]);
 		l.subobj_index = static_cast<uint8_t>(subobject);
 		l.flags = flags;
-		l.rotation[0] = 0.0f;
-		l.rotation[1] = -1.0f;
-		l.rotation[2] = 0.0f;
-		l.rotation[3] = 1.0f;
+		l.falloff_byte = static_cast<uint8_t>(static_cast<int32_t>(falloff) & 0xFF);
+		const ThreediBuildVec3 d = threedi_build_to_model(dir);
+		// + 0.0f folds the axis map's negative zeros: retail stores +0.0.
+		l.rotation[0] = static_cast<float>(d.x) + 0.0f;
+		l.rotation[1] = static_cast<float>(d.y) + 0.0f;
+		l.rotation[2] = static_cast<float>(d.z) + 0.0f;
+		l.rotation[3] = std::cos(static_cast<float>(falloff) * 0.017453292f);
+		threedi_build_light_view_proj(l, static_cast<float>(falloff));
 		lights.push_back(l);
 		return static_cast<int>(lights.size()) - 1;
 	}
@@ -441,21 +461,35 @@ struct ThreediBuildModel {
 		o.planes.push_back(bottom);
 	}
 
-	// One collision face over three of the object's local vertices.
-	void add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, uint8_t poly_type = 1, uint32_t material_flags = 0) {
+	// One collision face over three of the object's local vertices, wound
+	// counter-clockwise about its normal in mission axes: the retail corpus
+	// order (Dtruck2 905 of 906 faces, Armry01 250 of 250). The normal is
+	// taken from the unquantized positions, so a face the 8.8 grid collapses
+	// keeps the normal it was authored with, as retail's do (Mp5b_1st carries
+	// 276 such faces); `given` (mission axes) overrides it. False (and no
+	// face) only when the authored corners are collinear too.
+	bool add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, uint8_t poly_type = 1, uint32_t material_flags = 0,
+			const ThreediBuildVec3 *given = nullptr) {
 		ThreediBuildCollisionObject &o = collision[cobj];
 		const ThreediCollisionVertex &va = o.vertices[a];
 		const ThreediCollisionVertex &vb = o.vertices[b];
 		const ThreediCollisionVertex &vc = o.vertices[c];
-		const double ex = vb.position[0] - va.position[0], ey = vb.position[1] - va.position[1], ez = vb.position[2] - va.position[2];
-		const double fx = vc.position[0] - va.position[0], fy = vc.position[1] - va.position[1], fz = vc.position[2] - va.position[2];
-		// The retail corpus winds collision faces clockwise about their normal
-		// (mission axes); the face normal is the reversed cross product.
-		double nx = -(ey * fz - ez * fy), ny = -(ez * fx - ex * fz), nz = -(ex * fy - ey * fx);
-		const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
-		nx /= len;
-		ny /= len;
-		nz /= len;
+		const ThreediBuildVec3 &pa = o.exact[a], &pb = o.exact[b], &pc = o.exact[c];
+		const double ex = pb.x - pa.x, ey = pb.y - pa.y, ez = pb.z - pa.z;
+		const double fx = pc.x - pa.x, fy = pc.y - pa.y, fz = pc.z - pa.z;
+		double nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+		if (given != nullptr) {
+			// Stored as given: retail's Q14 normals are not all unit length.
+			nx = given->x;
+			ny = given->y;
+			nz = given->z;
+		} else {
+			const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+			if (!(len > 0.0)) return false;
+			nx /= len;
+			ny /= len;
+			nz /= len;
+		}
 		ThreediCollisionNormal normal{};
 		normal.normal[0] = threedi_q14f(nx);
 		normal.normal[1] = threedi_q14f(ny);
@@ -495,6 +529,7 @@ struct ThreediBuildModel {
 		face.material_flags = material_flags;
 		face.poly_type = poly_type;
 		o.faces.push_back(face);
+		return true;
 	}
 
 	uint16_t add_collision_vertex(int cobj, ThreediBuildVec3 p) {
@@ -503,6 +538,7 @@ struct ThreediBuildModel {
 		v.position[1] = threedi_q8f(p.y);
 		v.position[2] = threedi_q8f(p.z);
 		collision[cobj].vertices.push_back(v);
+		collision[cobj].exact.push_back(p);
 		return static_cast<uint16_t>(collision[cobj].vertices.size() - 1);
 	}
 
@@ -513,12 +549,12 @@ struct ThreediBuildModel {
 			c[i] = add_collision_vertex(cobj, ThreediBuildVec3{(i & 1) ? box.max.x : box.min.x,
 					(i & 2) ? box.max.y : box.min.y, (i & 4) ? box.max.z : box.min.z});
 		}
-		// Each side listed counter-clockwise from outside (mission axes); the
-		// face helper reverses that into the retail clockwise winding.
+		// Each side listed counter-clockwise from outside (mission axes), the
+		// winding retail stores.
 		static const int kSides[6][4] = {{0, 4, 6, 2}, {1, 3, 7, 5}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 2, 3, 1}, {4, 5, 7, 6}};
 		for (const int *q : kSides) {
-			add_face(cobj, c[q[0]], c[q[2]], c[q[1]], poly_type, material_flags);
-			add_face(cobj, c[q[0]], c[q[3]], c[q[2]], poly_type, material_flags);
+			add_face(cobj, c[q[0]], c[q[1]], c[q[2]], poly_type, material_flags);
+			add_face(cobj, c[q[0]], c[q[2]], c[q[3]], poly_type, material_flags);
 		}
 	}
 
@@ -526,8 +562,8 @@ struct ThreediBuildModel {
 	void add_face_quad(int cobj, const ThreediBuildVec3 corners[4], uint8_t poly_type = 1, uint32_t material_flags = 0) {
 		uint16_t c[4];
 		for (int i = 0; i < 4; ++i) c[i] = add_collision_vertex(cobj, corners[i]);
-		add_face(cobj, c[0], c[2], c[1], poly_type, material_flags);
-		add_face(cobj, c[0], c[3], c[2], poly_type, material_flags);
+		add_face(cobj, c[0], c[1], c[2], poly_type, material_flags);
+		add_face(cobj, c[0], c[2], c[3], poly_type, material_flags);
 	}
 
 	// --- occlusion (authored in mission axes, stored in model axes) ---------
@@ -585,6 +621,77 @@ struct ThreediBuildModel {
 		rec.object.num_planes = static_cast<int32_t>(rec.planes.size());
 		rec.object.face_count = static_cast<int32_t>(rec.faces.size());
 		occlusion.push_back(rec);
+	}
+
+	// An occlusion record over an authored mesh (mission axes): `type` is the
+	// OCCL record type (0 occluder, 1 open, 2 window, 3 portal, 4 OH),
+	// `section_a` the parent section, `section_b` the connecting one. Faces
+	// keep their corner order (counter-clockwise about the outward normal in
+	// mission axes, as retail stores them) and name a plane, or -1 to let the
+	// OED rule pick one: the six bounding-box planes first (+x -x +y -y +z -z),
+	// then each face's own plane unless one already matches it (normal within
+	// 0.005 per axis and distance within 0.03; the LAST match wins), at most 32
+	// planes [orig: ConvertToInternal @ 0x4268B3, the collision/occlusion plane
+	// table; witnessed on Armry01's OCCL]. `planes` given explicitly (mission
+	// axes, n . p + d == 0) replace the rule. False when the rule overflows 32.
+	bool add_occ_record(uint8_t type, int section_a, int section_b, const std::vector<ThreediBuildVec3> &verts,
+			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {}) {
+		ThreediBuildOcclusionRecord rec;
+		for (const ThreediBuildVec3 &v : verts) rec.vertices.push_back(occ_vertex(v));
+		std::vector<std::array<double, 4>> planes = explicit_planes;
+		std::vector<int> face_plane(faces.size(), 0);
+		for (size_t f = 0; f < faces.size(); ++f) face_plane[f] = faces[f][3];
+		if (explicit_planes.empty() && !verts.empty()) {
+			double mn[3] = {verts[0].x, verts[0].y, verts[0].z}, mx[3] = {verts[0].x, verts[0].y, verts[0].z};
+			for (const ThreediBuildVec3 &v : verts) {
+				const double p[3] = {v.x, v.y, v.z};
+				for (int k = 0; k < 3; ++k) {
+					mn[k] = std::min(mn[k], p[k]);
+					mx[k] = std::max(mx[k], p[k]);
+				}
+			}
+			planes = {{1, 0, 0, -mx[0]}, {-1, 0, 0, mn[0]}, {0, 1, 0, -mx[1]}, {0, -1, 0, mn[1]}, {0, 0, 1, -mx[2]},
+					{0, 0, -1, mn[2]}};
+			for (size_t f = 0; f < faces.size(); ++f) {
+				if (face_plane[f] >= 0) continue;
+				const ThreediBuildVec3 &p0 = verts[faces[f][0]], &p1 = verts[faces[f][1]], &p2 = verts[faces[f][2]];
+				const float e1[3] = {static_cast<float>(p1.x - p0.x), static_cast<float>(p1.y - p0.y),
+						static_cast<float>(p1.z - p0.z)};
+				const float e2[3] = {static_cast<float>(p2.x - p0.x), static_cast<float>(p2.y - p0.y),
+						static_cast<float>(p2.z - p0.z)};
+				float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+				const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+				int index = 0;
+				if (len > 0.0001f) {
+					for (float &c : n) c /= len;
+					const double d = -(n[0] * p0.x + n[1] * p0.y + n[2] * p0.z);
+					index = -1;
+					for (size_t k = 0; k < planes.size(); ++k)
+						if (std::fabs(planes[k][0] - n[0]) <= 0.005 && std::fabs(planes[k][1] - n[1]) <= 0.005 &&
+								std::fabs(planes[k][2] - n[2]) <= 0.005 && std::fabs(planes[k][3] - d) <= 0.03)
+							index = static_cast<int>(k);
+					if (index < 0) {
+						if (planes.size() >= 32) return false;
+						index = static_cast<int>(planes.size());
+						planes.push_back({n[0], n[1], n[2], d});
+					}
+				}
+				face_plane[f] = index;
+			}
+		}
+		for (const std::array<double, 4> &p : planes) {
+			const ThreediBuildVec3 n = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
+			ThreediOcclusionPlane plane{};
+			plane.normal[0] = static_cast<float>(n.x);
+			plane.normal[1] = static_cast<float>(n.y);
+			plane.normal[2] = static_cast<float>(n.z);
+			plane.radius = static_cast<float>(p[3]);
+			rec.planes.push_back(plane);
+		}
+		for (size_t f = 0; f < faces.size(); ++f)
+			rec.faces.push_back(occ_face(faces[f][0], faces[f][1], faces[f][2], face_plane[f]));
+		finish_occlusion_record(rec, type, section_a, section_b);
+		return true;
 	}
 
 	// A quad portal/window record: four corners wound consistently, one plane

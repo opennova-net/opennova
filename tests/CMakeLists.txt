@@ -42,8 +42,8 @@ target_link_libraries(threedi_ctrl_catalog_test PRIVATE opennova_formats)
 target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
-# opennova-3di (the Blender exporter's CLI): build the spinner scene, then read
-# the minted model back and check the conversions the CLI owns.
+# opennova-3di (the Blender add-on's CLI): build the fixture scenes, read the
+# minted models back and check the conversions the CLI owns.
 add_test(NAME threedi_cli_build
          COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
@@ -58,6 +58,36 @@ add_test(NAME threedi_cli_build_skinned
 set_tests_properties(threedi_cli_build_skinned PROPERTIES FIXTURES_SETUP threedi_cli_skinned)
 add_test(NAME threedi_o3d_skinned COMMAND threedi_o3d_cli_test --skinned ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
 set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED threedi_cli_skinned)
+add_test(NAME threedi_cli_build_building
+         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/building.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
+set_tests_properties(threedi_cli_build_building PROPERTIES FIXTURES_SETUP threedi_cli_building)
+add_test(NAME threedi_o3d_building COMMAND threedi_o3d_cli_test --building ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
+set_tests_properties(threedi_o3d_building PROPERTIES FIXTURES_REQUIRED threedi_cli_building)
+# `scene` is build's inverse: build -> scene -> build re-mints each fixture
+# byte for byte.
+foreach(fixture spinner skinned building)
+    add_test(NAME threedi_cli_scene_${fixture}
+             COMMAND opennova_3di scene ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
+                     -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d)
+    add_test(NAME threedi_cli_rebuild_${fixture}
+             COMMAND opennova_3di build ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d
+                     -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
+    add_test(NAME threedi_cli_roundtrip_${fixture}
+             COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
+                     ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
+    set_tests_properties(threedi_cli_scene_${fixture} PROPERTIES
+                         FIXTURES_REQUIRED threedi_cli_${fixture} FIXTURES_SETUP threedi_scene_${fixture})
+    set_tests_properties(threedi_cli_rebuild_${fixture} PROPERTIES
+                         FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
+    set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
+endforeach()
+# Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
+add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
+target_include_directories(threedi_o3d_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_o3d_retail_roundtrip_test PRIVATE cxx_std_17)
+opennova_add_gated_test(threedi_o3d_retail_roundtrip
+    COMMAND threedi_o3d_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
 # PANM unit tests
 foreach(test ctrl decode pose runtime wave)

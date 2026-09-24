@@ -1,19 +1,14 @@
-// opennova-3di — build a .3di from an authored scene, or inspect one.
-//
-//   opennova-3di build <scene.o3d> -o <out.3di>
-//   opennova-3di info  <model.3di> [--verbose]
-//
-// `build` reads the .o3d scene text a DCC exporter writes (the Blender add-on
-// under tools/blender/opennova_3di is the first one; the grammar is in
-// docs/threedi/o3d-scene-format.md) into the engine's construction API
-// (formats/threedi/threedi_build.h) and serializes it through the parity
+// opennova-3di build: read the .o3d scene text a DCC exporter writes (the
+// Blender add-on under tools/blender/opennova_3di is the first one; the
+// grammar is docs/threedi/o3d-scene-format.md) into the engine's construction
+// API (formats/threedi/threedi_build.h) and serialize it through the parity
 // writer, so a shipped model is produced by the same writer every fixture is
 // (ADR 0003). The .o3d carries geometry in MISSION axes (x forward, y left,
 // z up); the model-axis conversion is threedi_build's, never the exporter's.
-// `info` prints what a .3di holds: the facts an author needs to match a
-// retail model (LODs, parts, shaders, textures, user points, registers,
-// part animations, collision). Exit codes: 0 ok, 1 build/parse error, 2 usage.
 
+#include <array>
+#include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,229 +23,76 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
 
+#include "threedi_cli.h"
+
 using namespace opennova::threedi;
 
+namespace threedi_cli {
+
 namespace {
-
-int usage(const char *why) {
-	if (why != nullptr) std::fprintf(stderr, "opennova-3di: %s\n", why);
-	std::fprintf(stderr,
-			"usage: opennova-3di build <scene.o3d> -o <out.3di>\n"
-			"       opennova-3di info  <model.3di> [--verbose]\n");
-	return 2;
-}
-
-// --- info ------------------------------------------------------------------
-
-const char *track_label(int t) {
-	static const char *const kNames[] = {"rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans"};
-	return kNames[t];
-}
-
-void print_track(const Threedi3di3 &m, int t, const ThreediTransform &tr) {
-	if (tr.control == 0 && tr.rate == 0 && tr.start == 0 && tr.end == 0) return;
-	const char *style = threedi_panm_control_name(tr.control);
-	std::string reg;
-	if (threedi_panm_control_uses_register(tr.control) && tr.control_param < m.ctrl.count)
-		reg = m.ctrl.registers[tr.control_param].name;
-	std::printf("        %-6s style %3u (%s) param %u%s%s rate %d start %d end %d\n", track_label(t),
-			tr.control, style != nullptr ? style : "?", tr.control_param, reg.empty() ? "" : " reg ",
-			reg.c_str(), tr.rate, tr.start, tr.end);
-}
-
-int cmd_info(const char *path, int verbose) {
-	Threedi3di3 m{};
-	if (threedi_3di3_read(path, &m) != 0) {
-		std::fprintf(stderr, "opennova-3di: cannot read %s\n", path);
-		return 1;
-	}
-	std::printf("model %s  mesh_type %d  lods %zu  max_radius %.3f\n", m.header.name, m.header.mesh_type,
-			m.lod_count, m.header.max_radius_fp16 / 65536.0);
-	for (size_t li = 0; li < m.lod_count; ++li) {
-		const ThreediLod &lod = m.lods[li];
-		size_t tris = 0;
-		for (size_t s = 0; s < lod.strip_count; ++s) tris += lod.strips[s].num_triangles;
-		// Winding: the share of list triangles whose model-axis cross(e1, e2)
-		// agrees with the authored vertex normals (retail models sit near 100%).
-		size_t agree = 0, sampled = 0;
-		for (size_t s = 0; s < lod.strip_count; ++s) {
-			const ThreediTriangleStrip &st = lod.strips[s];
-			if (st.is_strip) continue;
-			for (int t = 0; t + 2 < st.num_indices; t += 3) {
-				const ThreediVertex *v[3];
-				bool ok = true;
-				for (int k = 0; k < 3; ++k) {
-					const size_t ii = static_cast<size_t>(st.index_offset) + t + k;
-					const size_t vi = static_cast<size_t>(st.start_vertex) + (ii < lod.indices.count ? lod.indices.indices[ii] : 0);
-					ok = ok && ii < lod.indices.count && vi < lod.vertices.count;
-					v[k] = ok ? &lod.vertices.items[vi] : nullptr;
-				}
-				if (!ok) continue;
-				float e1[3], e2[3], n[3] = {0, 0, 0};
-				for (int k = 0; k < 3; ++k) {
-					e1[k] = v[1]->position[k] - v[0]->position[k];
-					e2[k] = v[2]->position[k] - v[0]->position[k];
-					n[k] = v[0]->normal[k] + v[1]->normal[k] + v[2]->normal[k];
-				}
-				const float c[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
-				const float d = c[0] * n[0] + c[1] * n[1] + c[2] * n[2];
-				if (d == 0.0f) continue;
-				++sampled;
-				if (d > 0.0f) ++agree;
-			}
-		}
-		std::printf("lod %zu  type %s  threshold %d  parts %zu  strips %zu  verts %u  tris %zu  vflags 0x%x  panm %zu"
-				"  ccw-vs-normal %.1f%%\n",
-				li, lod.model_type, lod.lod_threshold, lod.render_object_count, lod.strip_count, lod.vertices.count,
-				tris, lod.vertices.flags, lod.part_animation_count, sampled ? 100.0 * agree / sampled : 0.0);
-		if (!verbose && li > 0) continue;
-		for (size_t p = 0; p < lod.render_object_count; ++p) {
-			const ThreediRenderObject &ro = lod.render_objects[p];
-			std::printf("    part %2zu parent %2d  strips %d+%d  abs(model) %.5f %.5f %.5f  radius %.3f\n", p,
-					ro.parent_index, ro.num_strips, ro.num_alpha_strips, ro.abs[0], ro.abs[1], ro.abs[2],
-					ro.bounding_radius);
-		}
-		if (verbose > 2) {
-			// Every vertex in mission axes with its owning ROBJ (the ROBJ walk
-			// assigns strips in order) and, when skinned, its first bone.
-			size_t cursor = 0;
-			for (size_t p = 0; p < lod.render_object_count; ++p) {
-				const ThreediRenderObject &ro = lod.render_objects[p];
-				const size_t count = static_cast<size_t>(ro.num_strips + ro.num_alpha_strips);
-				for (size_t s = 0; s < count && cursor < lod.strip_count; ++s, ++cursor) {
-					const ThreediTriangleStrip &st = lod.strips[cursor];
-					for (int i = 0; i < st.num_vertices; ++i) {
-						const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
-						const int bone = st.bone_table_length > 0 && v.bone_indices[0] < st.bone_table_length
-								? st.bone_table[v.bone_indices[0]] : static_cast<int>(p);
-						std::printf("vert lod %zu part %zu strip %zu bone %d  %.5f %.5f %.5f\n", li, p, cursor, bone,
-								v.position[2], -v.position[0], v.position[1]);
-					}
-				}
-			}
-		}
-		if (verbose > 1) {
-			for (size_t s = 0; s < lod.strip_count; ++s) {
-				const ThreediTriangleStrip &st = lod.strips[s];
-				std::printf("    strip %zu mat %d strip %d idx %d+%u verts %d+%d bones[%d]", s, st.material_index,
-						st.is_strip, st.index_offset, st.num_indices, st.start_vertex, st.num_vertices,
-						st.bone_table_length);
-				for (int b = 0; b < st.bone_table_length && b < 16; ++b) std::printf(" %u", st.bone_table[b]);
-				std::printf("\n");
-			}
-			for (size_t p = 0; p < lod.render_object_count; ++p) {
-				const ThreediRenderObject &ro = lod.render_objects[p];
-				std::printf("    robj %zu center %.3f %.3f %.3f rel %.3f %.3f %.3f\n", p, ro.bounding_center[0],
-						ro.bounding_center[1], ro.bounding_center[2], ro.rel[0], ro.rel[1], ro.rel[2]);
-			}
-		}
-		for (size_t a = 0; a < lod.part_animation_count; ++a) {
-			const ThreediPartAnimation &pa = lod.part_animations[a];
-			std::printf("    panm part %u parent %u flags 0x%08x  matrix %u offset %u bind %d\n", pa.subobject_index,
-					pa.parent_subobject, pa.flags, pa.matrix_index, pa.matrix_offset, pa.bind_matrix_index);
-			const ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x,
-					&pa.scale_y, &pa.scale_z, &pa.translation};
-			for (int t = 0; t < 7; ++t) print_track(m, t, *tracks[t]);
-		}
-	}
-	for (uint32_t i = 0; i < m.material_count; ++i) {
-		const ThreediMaterial &mt = m.materials[i];
-		std::printf("material %u  shader %s  flags 0x%02x  alpha_test %u  glass %u  emissive %u", i, mt.shader_name,
-				mt.material_flags, mt.alpha_test_value_byte, mt.is_glass, mt.emissive_type);
-		for (uint32_t t = 0; t < mt.texture_count && t < 24; ++t)
-			std::printf("  [%s slot %u type %u flags %u]", mt.textures[t].name, mt.textures[t].slot,
-					mt.textures[t].type, mt.textures[t].flags);
-		std::printf("\n");
-		if (mt.rgb_gen.style != 0)
-			std::printf("    rgbgen style %u reg %d rate %.3f\n", mt.rgb_gen.style, mt.rgb_gen.reg, mt.rgb_gen.rate);
-		if (mt.alpha_gen.style != 0)
-			std::printf("    alphagen style %u reg %d rate %.3f start %d end %d\n", mt.alpha_gen.style,
-					mt.alpha_gen.reg, mt.alpha_gen.rate, mt.alpha_gen.start, mt.alpha_gen.end);
-		if (mt.u_params.style != 0 || mt.v_params.style != 0)
-			std::printf("    uvgen u %u v %u\n", mt.u_params.style, mt.v_params.style);
-	}
-	for (uint32_t i = 0; i < m.ctrl.count; ++i) std::printf("register %u  %s\n", i, m.ctrl.registers[i].name);
-	std::printf("mtrx %u  occl objects %zu  lights %zu\n", m.mtrx.count, m.occlusion_object_count, m.light_count);
-	if (verbose > 1)
-		for (uint32_t i = 0; i < m.mtrx.count; ++i) {
-			const float *r = m.mtrx.matrices[i].m;
-			std::printf("    mtrx %u  %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f\n", i,
-					r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]);
-		}
-	for (size_t i = 0; i < m.user_point_count; ++i) {
-		const ThreediUserPoint &u = m.user_points[i];
-		std::printf("userpoint %-15s  type %d  part %d  pos(mission) %.3f %.3f %.3f  dir %.3f %.3f %.3f\n", u.name,
-				u.userpoint_type, u.subobject_index, u.x / 65536.0, u.y / 65536.0, u.z / 65536.0, u.rot_x / 65536.0,
-				u.rot_y / 65536.0, u.rot_z / 65536.0);
-	}
-	for (size_t i = 0; i < m.light_count; ++i) {
-		const ThreediLight &l = m.lights[i];
-		std::printf("light %zu  style %u  part %u  atten %.2f..%.2f\n", i, l.style, l.subobj_index, l.atten_start,
-				l.atten_end);
-	}
-	if (m.collision != nullptr) {
-		const ThreediCollisionModel &c = *m.collision;
-		const float *b = c.model_data.bbox;
-		std::printf("collision  objects %zu  verts %zu  faces %zu  volumes %zu  bbox(mission) %.2f %.2f %.2f .. %.2f %.2f %.2f\n",
-				c.object_count, c.vertex_count, c.face_count, c.volume_count, b[0], b[1], b[2], b[3], b[4], b[5]);
-		for (size_t o = 0; o < c.object_count; ++o) {
-			const ThreediCollisionObject &co = c.objects[o];
-			std::printf("    cobj %zu parent %d  verts %d faces %d volumes %d", o, co.parent_subobject_index,
-					co.num_vertices, co.num_faces, co.num_bounding_volumes);
-			if (verbose)
-				std::printf("  offset %.3f %.3f %.3f  sphere %.3f %.3f %.3f r %.3f", co.offset[0] / 65536.0,
-						co.offset[1] / 65536.0, co.offset[2] / 65536.0, co.med[0] / 65536.0, co.med[1] / 65536.0,
-						co.med[2] / 65536.0, co.radius / 65536.0);
-			std::printf("\n");
-		}
-		if (verbose) {
-			size_t v = 0, f = 0, p = 0;
-			for (size_t o = 0; o < c.object_count; ++o) {
-				const ThreediCollisionObject &co = c.objects[o];
-				for (int k = 0; k < co.num_bounding_volumes && v < c.volume_count; ++k, ++v) {
-					const ThreediBoundingVolume &bv = c.volumes[v];
-					std::printf("    cobj %zu volume %zu type %d flags 0x%x planes %2d  box %.2f %.2f %.2f .. %.2f %.2f %.2f\n", o, v,
-							bv.collidable_type, bv.flags, bv.plane_count, bv.min_x_fp16 / 65536.0, bv.min_y_fp16 / 65536.0,
-							bv.min_z_fp16 / 65536.0, bv.max_x_fp16 / 65536.0, bv.max_y_fp16 / 65536.0, bv.max_z_fp16 / 65536.0);
-					for (int q = 0; q < bv.plane_count && p < c.plane_count; ++q, ++p)
-						if (verbose > 1)
-							std::printf("        plane flags %d  n %.3f %.3f %.3f  d %.3f\n", c.planes[p].flags,
-									c.planes[p].normal[0], c.planes[p].normal[1], c.planes[p].normal[2], c.planes[p].radius);
-				}
-				std::map<int, int> poly;
-				for (int k = 0; k < co.num_faces && f < c.face_count; ++k, ++f) ++poly[c.faces[f].poly_type];
-				for (const auto &kv : poly) std::printf("    cobj %zu faces poly_type %d x%d\n", o, kv.first, kv.second);
-			}
-		}
-	}
-	threedi_3di3_free(&m);
-	return 0;
-}
-
-// --- build -----------------------------------------------------------------
 
 struct Parser {
 	std::string path;
 	int line = 0;
 	std::vector<std::string> errors;
+	int degenerate_faces = 0;
+	int stray_bones = 0;
 
 	void error(const std::string &what) {
 		errors.push_back(path + ":" + std::to_string(line) + ": " + what);
 	}
 };
 
+// Numbers read through strtod so the nan/inf that retail files carry
+// (occlusion planes, light matrices) survive a scene round trip.
+bool read_double(std::istringstream &in, double &out) {
+	std::string token;
+	if (!(in >> token)) return false;
+	char *end = nullptr;
+	out = std::strtod(token.c_str(), &end);
+	return end != nullptr && *end == '\0' && end != token.c_str();
+}
+
 bool read_doubles(std::istringstream &in, double *out, int n) {
 	for (int i = 0; i < n; ++i)
-		if (!(in >> out[i])) return false;
+		if (!read_double(in, out[i])) return false;
 	return true;
 }
 
-int track_index(const std::string &name) {
-	static const char *const kNames[] = {"rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans"};
-	for (int i = 0; i < 7; ++i)
-		if (name == kNames[i]) return i;
-	return -1;
+// A name field: a bare token, or "a quoted one" that may hold spaces or be
+// empty (retail user points such as `FLARE 01`, `ground `; empty CTRL names).
+bool read_name(std::istringstream &in, std::string &out) {
+	out.clear();
+	in >> std::ws;
+	if (in.peek() != '"') return static_cast<bool>(in >> out);
+	in.get();
+	std::getline(in, out, '"');
+	return !in.bad();
 }
+
+// Strip a comment: `#` at the start of a line or after whitespace (retail
+// shader tags such as `VS_PHONGT#UV` hold a '#'), never inside quotes.
+void strip_comment(std::string &line) {
+	bool quoted = false;
+	for (size_t i = 0; i < line.size(); ++i) {
+		if (line[i] == '"') quoted = !quoted;
+		if (!quoted && line[i] == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+			line.erase(i);
+			return;
+		}
+	}
+}
+
+// An integer field in decimal or 0x hex (PANM and light flag words).
+bool read_word(std::istringstream &in, long long &out) {
+	std::string token;
+	if (!(in >> token)) return false;
+	char *end = nullptr;
+	out = std::strtoll(token.c_str(), &end, 0);
+	return end != nullptr && *end == '\0';
+}
+
+bool fits_s16(long long v) { return v >= SHRT_MIN && v <= SHRT_MAX; }
 
 // The PANM flags word the tracks imply: a rotation type 2 when any rotation
 // track animates, scale type 2 for any scale track, and the translate axis.
@@ -262,7 +104,7 @@ uint32_t panm_flags_for(const ThreediPartAnimation &pa, int trans_axis) {
 			live(pa.translation) ? static_cast<uint8_t>(trans_axis) : 0);
 }
 
-ThreediVertex render_vertex(const double *p, const double *n, const double *uv) {
+ThreediVertex render_vertex(const double *p, const double *n, const double *uv, const double *uv1) {
 	const ThreediBuildVec3 pm = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
 	const ThreediBuildVec3 nm = threedi_build_to_model(ThreediBuildVec3{n[0], n[1], n[2]});
 	ThreediVertex v{};
@@ -274,19 +116,48 @@ ThreediVertex render_vertex(const double *p, const double *n, const double *uv) 
 	v.normal[2] = static_cast<float>(nm.z);
 	v.uv0[0] = static_cast<float>(uv[0]);
 	v.uv0[1] = static_cast<float>(uv[1]);
-	v.uv1[0] = static_cast<float>(uv[0]);
-	v.uv1[1] = static_cast<float>(uv[1]);
+	v.uv1[0] = static_cast<float>(uv1[0]);
+	v.uv1[1] = static_cast<float>(uv1[1]);
 	return v;
 }
+
+// A rotation frame given in mission axes (row-major, p' = p * R) as the model
+// axes frame the MTRX table stores: M = C^T R C, C the mission -> model map.
+ThreediMatrix4x4 frame_to_model(const double r[9]) {
+	// Rows of C: mission x -> model z, mission y -> -model x, mission z -> model y.
+	static const double kC[3][3] = {{0, 0, 1}, {-1, 0, 0}, {0, 1, 0}};
+	ThreediMatrix4x4 m;
+	threedi_mat4_identity(&m);
+	for (int a = 0; a < 3; ++a)
+		for (int b = 0; b < 3; ++b) {
+			double sum = 0.0;
+			for (int i = 0; i < 3; ++i)
+				for (int j = 0; j < 3; ++j) sum += kC[i][a] * r[i * 3 + j] * kC[j][b];
+			m.m[a * 4 + b] = static_cast<float>(sum);
+		}
+	return m;
+}
+
+// An occlusion record being read: `occ` opens it, `ov`/`op`/`of` fill it.
+struct PendingOcc {
+	bool open = false;
+	int type = 0, section_a = 0, section_b = 0;
+	std::vector<ThreediBuildVec3> verts;
+	std::vector<std::array<double, 4>> planes;
+	std::vector<std::array<int, 4>> faces;
+};
 
 bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	std::string raw;
 	int lod = -1, part = -1, material = -1, cobj = -1, volume_open = -1;
+	bool uv1 = false;
 	ThreediBuildStrip *strip = nullptr;
 	int strip_lod = -1, strip_part = -1;
 	ThreediBuildStrip pending;
 	bool have_pending = false;
-	std::map<std::pair<int, int>, int> trans_axis; // (lod, panm row) -> axis
+	PendingOcc occ;
+	std::map<std::pair<int, int>, int> trans_axis;  // (lod, panm row) -> axis
+	std::map<std::pair<int, int>, bool> raw_flags;  // (lod, panm row) -> flags given verbatim
 	const auto flush_strip = [&]() {
 		if (have_pending) {
 			model.lods[strip_lod].parts[strip_part].strips.push_back(std::move(pending));
@@ -295,11 +166,36 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 		}
 		strip = nullptr;
 	};
+	const auto flush_occ = [&]() {
+		if (!occ.open) return;
+		occ.open = false;
+		const bool given = !occ.planes.empty();
+		for (const std::array<int, 4> &f : occ.faces) {
+			if (given != (f[3] >= 0)) {
+				ps.error("occ: give every face a plane index with explicit 'op' planes, or none without");
+				return;
+			}
+			if (given && f[3] >= static_cast<int>(occ.planes.size())) {
+				ps.error("occ: a face names a plane the record lacks");
+				return;
+			}
+		}
+		if (!model.add_occ_record(static_cast<uint8_t>(occ.type), occ.section_a, occ.section_b, occ.verts, occ.faces,
+					occ.planes))
+			ps.error("occ: the record needs more than 32 planes");
+		occ = PendingOcc{};
+	};
+	// A generator's register field: a declared register index for styles
+	// above 112 (retail stores the CTRL index in the phase byte), else unused.
+	const auto check_register = [&](int style, int reg, const char *what) {
+		if (style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD &&
+				(reg < 0 || reg >= static_cast<int>(model.control_registers.size())))
+			ps.error(std::string(what) + " register " + std::to_string(reg) + " is not a declared 'register'");
+	};
 	bool header = false;
 	while (std::getline(file, raw)) {
 		++ps.line;
-		const size_t hash = raw.find('#');
-		if (hash != std::string::npos) raw.erase(hash);
+		strip_comment(raw);
 		std::istringstream in(raw);
 		std::string key;
 		if (!(in >> key)) continue;
@@ -312,6 +208,47 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			header = true;
 			continue;
 		}
+		if (key == "texfile") continue;  // import metadata (`scene` writes it); nothing to build
+		if (key == "ov" || key == "op" || key == "of") {
+			if (!occ.open) {
+				ps.error("'" + key + "' outside an occ record");
+				continue;
+			}
+			if (key == "ov") {
+				double p[3];
+				if (!read_doubles(in, p, 3)) {
+					ps.error("ov needs x y z");
+					continue;
+				}
+				if (occ.verts.size() >= 128) {
+					ps.error("an occlusion record holds at most 128 vertices (7-bit edge words)");
+					continue;
+				}
+				occ.verts.push_back(ThreediBuildVec3{p[0], p[1], p[2]});
+			} else if (key == "op") {
+				double p[4];
+				if (!read_doubles(in, p, 4)) {
+					ps.error("op needs nx ny nz d");
+					continue;
+				}
+				occ.planes.push_back({p[0], p[1], p[2], p[3]});
+			} else {
+				int a, b, c, plane = -1;
+				if (!(in >> a >> b >> c)) {
+					ps.error("of needs three vertex indices");
+					continue;
+				}
+				in >> plane;
+				const int count = static_cast<int>(occ.verts.size());
+				if (a < 0 || b < 0 || c < 0 || a >= count || b >= count || c >= count) {
+					ps.error("of references a vertex not yet declared in this occ record");
+					continue;
+				}
+				occ.faces.push_back({a, b, c, plane});
+			}
+			continue;
+		}
+		flush_occ();
 		if (key == "v" || key == "t" || key == "bones") {
 			if (strip == nullptr) {
 				ps.error("'" + key + "' outside a strip");
@@ -335,16 +272,25 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				continue;
 			}
 			if (key == "v") {
-				double p[3], n[3], uv[2];
+				double p[3], n[3], uv[2], second[2];
 				if (!read_doubles(in, p, 3) || !read_doubles(in, n, 3) || !read_doubles(in, uv, 2)) {
 					ps.error("v needs px py pz nx ny nz u v");
 					continue;
+				}
+				if (uv1) {
+					if (!read_doubles(in, second, 2)) {
+						ps.error("with 'uv1 1' a v carries u1 v1 after its u v");
+						continue;
+					}
+				} else {
+					second[0] = uv[0];
+					second[1] = uv[1];
 				}
 				if (strip->vertices.size() >= 65535) {
 					ps.error("strip exceeds 65535 vertices (u16 indices)");
 					continue;
 				}
-				ThreediVertex vert = render_vertex(p, n, uv);
+				ThreediVertex vert = render_vertex(p, n, uv, second);
 				if (model.skinned) {
 					// Three influences: local indices into the strip's bone
 					// table and their weights (the fourth index stays 0).
@@ -355,10 +301,14 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 						continue;
 					}
 					for (int k = 0; k < 3; ++k) {
-						if (bi[k] < 0 || bi[k] >= static_cast<int>(strip->bone_table.size())) {
-							ps.error("v bone index outside the strip's bone table");
+						// Bone slots are bytes. Retail ships weighted slots past the
+						// strip's table (FSldr03: slot 255 at weight 0.21), so only a
+						// scene that authors one is told.
+						if (bi[k] < 0 || bi[k] > 255) {
+							ps.error("v bone index is a byte");
 							break;
 						}
+						if (w[k] != 0.0 && bi[k] >= static_cast<int>(strip->bone_table.size())) ++ps.stray_bones;
 						vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
 						vert.bone_weights[k] = static_cast<float>(w[k]);
 					}
@@ -416,65 +366,87 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 		}
 		volume_open = -1;
 		if (key == "cf") {
+			// cf a b c [poly flags [nx ny nz]]: an explicit normal is for a face
+			// whose corners collapse on the 8.8 grid (`scene` writes retail's).
 			long a, b, c;
 			int poly = 1;
 			unsigned long flags = 0;
+			double n[3];
 			if (cobj < 0 || !(in >> a >> b >> c)) {
 				ps.error("cf needs an open cobj and three vertex indices");
 				continue;
 			}
 			in >> poly >> flags;
+			const bool given = read_doubles(in, n, 3);
 			const long count = static_cast<long>(model.collision[cobj].vertices.size());
 			if (a < 0 || b < 0 || c < 0 || a >= count || b >= count || c >= count) {
 				ps.error("cf references a collision vertex not yet declared in this cobj");
 				continue;
 			}
-			// Counter-clockwise from outside in the scene; add_face takes the
-			// retail clockwise order (threedi_build add_face_box).
-			model.add_face(cobj, static_cast<uint16_t>(a), static_cast<uint16_t>(c), static_cast<uint16_t>(b),
-					static_cast<uint8_t>(poly), static_cast<uint32_t>(flags));
+			// Counter-clockwise about the outward normal in mission axes, the
+			// order retail stores collision faces in.
+			const ThreediBuildVec3 normal{n[0], n[1], n[2]};
+			if (!model.add_face(cobj, static_cast<uint16_t>(a), static_cast<uint16_t>(b), static_cast<uint16_t>(c),
+						static_cast<uint8_t>(poly), static_cast<uint32_t>(flags), given ? &normal : nullptr))
+				++ps.degenerate_faces;
 			continue;
 		}
 		flush_strip();
 		if (key == "model") {
 			std::string name;
-			if (!(in >> name) || name.size() > 15) ps.error("model needs a name of at most 15 characters");
+			if (!read_name(in, name) || name.size() > 15) ps.error("model needs a name of at most 15 characters");
 			model.name = name;
 		} else if (key == "tangents") {
 			int on = 0;
 			in >> on;
 			model.tangents = on != 0;
-		} else if (key == "skinned") {
-			// GHDR mesh type 2: the parts are the skeleton's bones, strips
-			// carry bone tables and vertices carry weights.
+		} else if (key == "skinned" || key == "uv1") {
+			// skinned: GHDR mesh type 2 (parts are the skeleton's bones, strips
+			// carry bone tables and vertices weights). uv1: every vertex
+			// carries its second UV set (the detail stage of FF_MT shaders).
 			int on = 0;
 			in >> on;
-			if (!model.lods.empty()) ps.error("skinned must precede the first lod");
-			model.skinned = on != 0;
+			if (!model.lods.empty()) ps.error(key + " must precede the first lod");
+			if (key == "skinned") model.skinned = on != 0;
+			else uv1 = on != 0;
 		} else if (key == "register") {
 			std::string name;
-			if (!(in >> name) || name.size() > 23) {
-				ps.error("register needs a name of at most 23 characters");
+			if (!read_name(in, name) || name.size() > 24) {
+				ps.error("register needs a name of at most 24 characters");
 				continue;
 			}
+			// Retail ships names outside the catalog (VEHICLE_TIRE14, an empty
+			// one); the loader aliases them to LOD_FRAC, so they only warn.
+			// [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640, via
+			// threedi_ctrl_register_loader_ordinal]
 			if (threedi_ctrl_register_ordinal(name.c_str()) == THREEDI_CTRL_REGISTER_NOT_FOUND)
-				ps.error("unknown CTRL register '" + name + "' (see threedi_ctrl_catalog.h)");
+				std::fprintf(stderr, "%s:%d: note: CTRL register '%s' is not in the catalog; the loader reads LOD_FRAC\n",
+						ps.path.c_str(), ps.line, name.c_str());
 			model.add_control_register(name.c_str());
+		} else if (key == "mtrx") {
+			// A rotation frame (MTRX row 1, 2, ...; row 0 is the identity) in
+			// mission axes, row-major; a PANM row selects it by index.
+			double r[9];
+			if (!read_doubles(in, r, 9)) {
+				ps.error("mtrx needs nine values (a 3x3 rotation, row-major)");
+				continue;
+			}
+			model.frames.push_back(frame_to_model(r));
 		} else if (key == "material") {
 			std::string shader;
-			if (!(in >> shader) || shader.size() > 32) {
+			if (!read_name(in, shader) || shader.size() > 32) {
 				ps.error("material needs a shader tag");
 				continue;
 			}
 			material = model.add_material(shader.c_str(), nullptr);
 		} else if (key == "texture") {
 			std::string name;
-			int slot = THREEDI_TEX_SLOT_DIFFUSE, type = THREEDI_TEX_TYPE_DIFFUSE, flags = 0;
-			if (material < 0 || !(in >> name)) {
+			int slot = THREEDI_TEX_SLOT_DIFFUSE, type = THREEDI_TEX_TYPE_DIFFUSE, flags = 0, frame = 0;
+			if (material < 0 || !read_name(in, name)) {
 				ps.error("texture needs an open material and a file name");
 				continue;
 			}
-			in >> slot >> type >> flags;
+			in >> slot >> type >> flags >> frame;
 			if (name.size() > 16) ps.error("texture name '" + name + "' exceeds 16 characters");
 			ThreediMaterial &m = model.materials[material];
 			if (m.texture_count >= 24) {
@@ -486,6 +458,24 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			t.slot = static_cast<uint8_t>(slot);
 			t.type = static_cast<uint8_t>(type);
 			t.flags = static_cast<uint8_t>(flags);
+			t.frame = static_cast<uint8_t>(frame);
+		} else if (key == "texanim") {
+			int frames = 0, type = 0, time = 0;
+			if (material < 0 || !(in >> frames >> type >> time)) {
+				ps.error("texanim needs an open material and frames type time");
+				continue;
+			}
+			ThreediTexAnim &a = model.materials[material].animation;
+			a.num_frames = static_cast<uint8_t>(frames);
+			a.animation_type = static_cast<uint8_t>(type);
+			a.cycle_frame_time = static_cast<int16_t>(time);
+		} else if (key == "reflect") {
+			int c[4];
+			if (material < 0 || !(in >> c[0] >> c[1] >> c[2] >> c[3])) {
+				ps.error("reflect needs an open material and r g b a (0..255)");
+				continue;
+			}
+			for (int k = 0; k < 4; ++k) model.materials[material].reflect_color[k] = threedi_byte_unit(c[k]);
 		} else if (key == "matflags" || key == "alphatest" || key == "glass" || key == "emissive") {
 			int value = 0;
 			if (material < 0 || !(in >> value)) {
@@ -499,12 +489,16 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			else m.emissive_type = static_cast<uint8_t>(value);
 		} else if (key == "rgbgen") {
 			int style = 0, reg = -1, s[3], e[3];
-			double rate = 0;
+			double rate = 0, phase = 0;
 			if (material < 0 || !(in >> style >> reg >> rate >> s[0] >> s[1] >> s[2] >> e[0] >> e[1] >> e[2])) {
-				ps.error("rgbgen needs style reg rate r g b r g b");
+				ps.error("rgbgen needs style reg rate r g b r g b [phase]");
 				continue;
 			}
+			in >> phase;
+			check_register(style, reg, "rgbgen");
 			model.set_rgb_gen(material, static_cast<uint8_t>(style), reg, rate, s, e);
+			if (style <= THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD)
+				model.materials[material].rgb_gen.phase = threedi_q8f(phase);
 		} else if (key == "alphagen" || key == "ugen" || key == "vgen") {
 			int style = 0, reg = -1;
 			double rate = 0, start = 0, end = 0, phase = 0;
@@ -513,6 +507,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				continue;
 			}
 			in >> phase;
+			check_register(style, reg, key.c_str());
 			ThreediMaterial &m = model.materials[material];
 			if (key == "alphagen") {
 				m.alpha_gen.style = static_cast<uint8_t>(style);
@@ -544,9 +539,8 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("part needs an open lod, a parent index and a pivot x y z");
 				continue;
 			}
-			const int index = static_cast<int>(model.lods[lod].parts.size());
-			if (parent < 0 || parent > index) {
-				ps.error("part parent must be an earlier part (or itself for the root)");
+			if (parent < -1 || parent > 255) {
+				ps.error("part parent is -1 or a part index");
 				continue;
 			}
 			part = model.add_part(lod, parent, ThreediBuildVec3{p[0], p[1], p[2]});
@@ -569,17 +563,31 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			strip_lod = lod;
 			strip_part = part;
 		} else if (key == "panm") {
+			// panm part parent [flags [matrix]]: flags given verbatim override
+			// the ones the tracks imply; matrix selects an MTRX frame.
 			int p = 0, parent = 0;
 			if (lod < 0 || !(in >> p >> parent)) {
 				ps.error("panm needs an open lod, a part and its parent");
 				continue;
 			}
-			model.add_panm(lod, p, parent);
+			ThreediPartAnimation &pa = model.add_panm(lod, p, parent);
+			long long flags = 0, frame = 0;
+			if (read_word(in, flags)) {
+				pa.flags = static_cast<uint32_t>(flags);
+				raw_flags[{lod, static_cast<int>(model.lods[lod].panm.size()) - 1}] = true;
+				if (read_word(in, frame)) {
+					if (frame < 0 || frame > 255) ps.error("panm matrix index is a byte");
+					pa.matrix_index = static_cast<uint8_t>(frame);
+				}
+			}
 		} else if (key == "track") {
+			// track target style REG|-|param rate start end [axis]: styles above
+			// 0x70 name a declared register; the others may carry a phase byte.
 			std::string target, reg;
-			int style = 0, rate = 0, start = 0, end = 0;
-			if (lod < 0 || model.lods[lod].panm.empty() || !(in >> target >> style >> reg >> rate >> start >> end)) {
-				ps.error("track needs an open panm and target style register|- rate start end [axis]");
+			long long style = 0, rate = 0, start = 0, end = 0;
+			if (lod < 0 || model.lods[lod].panm.empty() || !(in >> target >> style) || !read_name(in, reg) ||
+					!(in >> rate >> start >> end)) {
+				ps.error("track needs an open panm and target style register|-|param rate start end [axis]");
 				continue;
 			}
 			const int t = track_index(target);
@@ -587,14 +595,28 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("unknown track target '" + target + "'");
 				continue;
 			}
+			if (style < 0 || style > 255 || !fits_s16(rate) || !fits_s16(start) || !fits_s16(end)) {
+				ps.error("track style is a byte and rate/start/end are int16 (rotations 1/16384 turn, others 8.8)");
+				continue;
+			}
 			int param = 0;
 			if (reg != "-") {
-				param = -1;
-				for (size_t r = 0; r < model.control_registers.size(); ++r)
-					if (model.control_registers[r] == reg) param = static_cast<int>(r);
-				if (param < 0) {
-					ps.error("track register '" + reg + "' is not declared with 'register'");
-					continue;
+				char *stop = nullptr;
+				const long value = std::strtol(reg.c_str(), &stop, 10);
+				if (!reg.empty() && stop != nullptr && *stop == '\0') {
+					if (value < 0 || value > 255) {
+						ps.error("track param is a byte");
+						continue;
+					}
+					param = static_cast<int>(value);
+				} else {
+					param = -1;
+					for (size_t r = 0; r < model.control_registers.size(); ++r)
+						if (model.control_registers[r] == reg) param = static_cast<int>(r);
+					if (param < 0) {
+						ps.error("track register '" + reg + "' is not declared with 'register'");
+						continue;
+					}
 				}
 			}
 			ThreediPartAnimation &pa = model.lods[lod].panm.back();
@@ -608,12 +630,13 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				in >> axis;
 				trans_axis[{lod, row}] = axis;
 			}
-			pa.flags = panm_flags_for(pa, trans_axis.count({lod, row}) ? trans_axis[{lod, row}] : 0);
+			if (!raw_flags.count({lod, row}))
+				pa.flags = panm_flags_for(pa, trans_axis.count({lod, row}) ? trans_axis[{lod, row}] : 0);
 		} else if (key == "userpoint") {
 			std::string name;
 			double p[3], d[3];
 			int sub = 0, type = THREEDI_USER_POINT_GAMEPLAY;
-			if (!(in >> name) || !read_doubles(in, p, 3) || !read_doubles(in, d, 3) || !(in >> sub)) {
+			if (!read_name(in, name) || !read_doubles(in, p, 3) || !read_doubles(in, d, 3) || !(in >> sub)) {
 				ps.error("userpoint needs name x y z dx dy dz part [type]");
 				continue;
 			}
@@ -621,6 +644,52 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			if (name.size() > 15) ps.error("user point name '" + name + "' exceeds 15 characters");
 			model.add_user_point(name.c_str(), ThreediBuildVec3{p[0], p[1], p[2]}, ThreediBuildVec3{d[0], d[1], d[2]},
 					sub, type);
+		} else if (key == "light") {
+			// light part x y z atten_start atten_end style rate phase|reg r g b r g b
+			//       flags [dx dy dz falloff]
+			int sub = 0, style = 0, s[3], e[3];
+			double p[3], atten[2], rate = 0, phase = 0, dir[3] = {0.0, 0.0, -1.0}, falloff = 0.0;
+			long long flags = 0;
+			if (!(in >> sub) || !read_doubles(in, p, 3) || !read_doubles(in, atten, 2) || !(in >> style >> rate >> phase) ||
+					!(in >> s[0] >> s[1] >> s[2] >> e[0] >> e[1] >> e[2]) || !read_word(in, flags)) {
+				ps.error("light needs part x y z atten_start atten_end style rate phase|reg r g b r g b flags");
+				continue;
+			}
+			double spot[4];
+			if (read_doubles(in, spot, 3)) {
+				if (!(in >> spot[3])) {
+					ps.error("a spot light needs dx dy dz falloff");
+					continue;
+				}
+				dir[0] = spot[0];
+				dir[1] = spot[1];
+				dir[2] = spot[2];
+				falloff = spot[3];
+			}
+			if (sub < 0 || sub > 255 || style < 0 || style > 255 || flags < 0 || flags > 255) {
+				ps.error("light part, style and flags are bytes");
+				continue;
+			}
+			// Retail stores phase * 256 for styles up to 0x70, else the CTRL
+			// index (the retired OED writer's packing).
+			uint8_t phase_byte;
+			if (style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD) {
+				check_register(style, static_cast<int>(phase), "light");
+				phase_byte = static_cast<uint8_t>(static_cast<int>(phase));
+			} else {
+				phase_byte = static_cast<uint8_t>(std::lround(phase * 256.0) & 0xFF);
+			}
+			model.add_light(ThreediBuildVec3{p[0], p[1], p[2]}, atten[0], atten[1], static_cast<uint8_t>(style), sub, s, e,
+					static_cast<uint8_t>(flags), phase_byte, static_cast<uint16_t>(std::lround(rate * 256.0)),
+					ThreediBuildVec3{dir[0], dir[1], dir[2]}, falloff);
+		} else if (key == "occ") {
+			if (!(in >> occ.type >> occ.section_a >> occ.section_b) || occ.type < 0 || occ.type > 255 ||
+					occ.section_a < 0 || occ.section_a > 255 || occ.section_b < 0 || occ.section_b > 255) {
+				ps.error("occ needs type section connecting (bytes)");
+				occ = PendingOcc{};
+				continue;
+			}
+			occ.open = true;
 		} else if (key == "cobj") {
 			int parent = 0;
 			double o[3] = {0, 0, 0};
@@ -665,6 +734,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 		}
 	}
 	flush_strip();
+	flush_occ();
 	if (!header) ps.error("empty scene");
 	return ps.errors.empty();
 }
@@ -675,26 +745,32 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 	if (m.name.empty()) ps.error("no 'model' record");
 	if (m.lods.empty()) ps.error("no 'lod' record");
 	for (size_t li = 0; li < m.lods.size(); ++li) {
+		// A LOD with no parts is legal: retail ships them (Dblkhwk1's LOD 4).
 		const ThreediBuildLod &lod = m.lods[li];
-		if (lod.parts.empty()) ps.error("lod " + std::to_string(li) + " has no parts");
 		if (lod.parts.size() > 255) ps.error("lod " + std::to_string(li) + " has more than 255 parts");
-		size_t verts = 0, indices = 0;
 		for (const ThreediBuildPart &p : lod.parts)
 			for (const ThreediBuildStrip &s : p.strips) {
-				verts += s.vertices.size();
-				indices += s.indices.size();
 				if (s.indices.size() > 65535) ps.error("a strip exceeds 65535 indices (u16 STRP count)");
 				if (m.skinned && s.bone_table.empty()) ps.error("a skinned strip has no 'bones' table");
 				for (uint8_t b : s.bone_table)
 					if (b >= lod.parts.size()) ps.error("a strip's bone table names a part the LOD lacks");
 			}
-		for (const ThreediPartAnimation &pa : lod.panm)
+		for (const ThreediBuildPart &p : lod.parts)
+			if (p.parent >= static_cast<int>(lod.parts.size()))
+				ps.error("lod " + std::to_string(li) + " has a part whose parent it lacks");
+		for (const ThreediPartAnimation &pa : lod.panm) {
 			if (pa.subobject_index >= lod.parts.size())
 				ps.error("panm in lod " + std::to_string(li) + " names a missing part");
+			if (static_cast<int8_t>(pa.matrix_index) > static_cast<int>(m.frames.size()))
+				ps.error("panm in lod " + std::to_string(li) + " selects an mtrx frame the model lacks");
+		}
 	}
 	for (size_t o = 0; o < m.collision.size(); ++o)
 		for (const ThreediBoundingVolume &v : m.collision[o].volumes)
 			if (v.plane_count < 4) ps.error("cobj " + std::to_string(o) + " has a volume with fewer than 4 planes");
+	for (const ThreediLight &l : m.lights)
+		if (l.subobj_index != 0 && (m.lods.empty() || l.subobj_index >= m.lods[0].parts.size()))
+			ps.error("a light names a part LOD 0 lacks");
 	int seats = 0;
 	for (const ThreediUserPoint &u : m.user_points)
 		if (strncmp(u.name, "sitex", 5) == 0 || strncmp(u.name, "SITEX", 5) == 0) ++seats;
@@ -702,7 +778,14 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 	if (m.user_points.size() > 16)
 		std::fprintf(stderr, "opennova-3di: note: %zu user points; the item-effect attach scan only reads the first 16\n",
 				m.user_points.size());
+	if (ps.stray_bones > 0)
+		std::fprintf(stderr, "opennova-3di: note: %d weighted bone slots lie outside their strip's bone table\n",
+				ps.stray_bones);
+	if (ps.degenerate_faces > 0)
+		std::fprintf(stderr, "opennova-3di: note: skipped %d collinear collision faces\n", ps.degenerate_faces);
 }
+
+} // namespace
 
 int cmd_build(const char *scene_path, const char *out_path) {
 	std::ifstream file(scene_path);
@@ -742,19 +825,4 @@ int cmd_build(const char *scene_path, const char *out_path) {
 	return 0;
 }
 
-} // namespace
-
-int main(int argc, char **argv) {
-	if (argc < 3) return usage(nullptr);
-	const std::string cmd = argv[1];
-	if (cmd == "info") {
-		const std::string flag = argc > 3 ? argv[3] : "";
-		const int verbose = flag == "--verts" ? 3 : flag == "--planes" ? 2 : flag == "--verbose" ? 1 : 0;
-		return cmd_info(argv[2], verbose);
-	}
-	if (cmd == "build") {
-		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("build needs <scene.o3d> -o <out.3di>");
-		return cmd_build(argv[2], argv[4]);
-	}
-	return usage("unknown command");
-}
+} // namespace threedi_cli

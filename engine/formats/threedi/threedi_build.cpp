@@ -8,6 +8,55 @@
 
 namespace opennova::threedi {
 
+void threedi_build_light_view_proj(ThreediLight &light, float falloff) {
+	// The retired OED exporter's build_light_view_proj
+	// (5fc5b4f6a^:engine/formats/oed/export_3di.cpp): it reproduces
+	// Armry01's LGHT records to within one ulp in two entries.
+	const auto normalize = [](float v[3]) {
+		const float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+		if (len > 0.0f)
+			for (int k = 0; k < 3; ++k) v[k] /= len;
+	};
+	float dir[3] = {light.rotation[0], light.rotation[1], light.rotation[2]};
+	normalize(dir);
+	float right[3] = {dir[2], 0.0f, -dir[0]};
+	normalize(right);
+	float up[3] = {dir[1] * right[2] - dir[2] * right[1], dir[2] * right[0] - dir[0] * right[2],
+			dir[0] * right[1] - dir[1] * right[0]};
+	normalize(up);
+	float view[16] = {};
+	view[0] = right[0];
+	view[1] = up[0];
+	view[2] = dir[0];
+	view[4] = right[1];
+	view[5] = up[1];
+	view[6] = dir[1];
+	view[8] = right[2];
+	view[9] = up[2];
+	view[10] = dir[2];
+	view[15] = 1.0f;
+	const float *pos = light.offset;
+	view[12] = -(pos[0] * view[0] + pos[1] * view[4] + pos[2] * view[8]);
+	view[13] = -(pos[0] * view[1] + pos[1] * view[5] + pos[2] * view[9]);
+	view[14] = -(pos[0] * view[2] + pos[1] * view[6] + pos[2] * view[10]);
+	const float fov = (falloff + falloff) * 0.017453289f;
+	const float zn = 0.1f;
+	const float zf = light.atten_end;
+	const float y_scale = 1.0f / std::tan(fov * 0.5f);
+	float proj[16] = {};
+	proj[0] = y_scale;
+	proj[5] = y_scale;
+	proj[10] = zf / (zf - zn);
+	proj[11] = 1.0f;
+	proj[14] = (-zn * zf) / (zf - zn);
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j) {
+			float sum = 0.0f;
+			for (int k = 0; k < 4; ++k) sum += view[i * 4 + k] * proj[k * 4 + j];
+			light.view_proj[i * 4 + j] = sum;
+		}
+}
+
 void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	out = ThreediAssembled{};
 	Threedi3di3 &model = out.model;
@@ -42,7 +91,10 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			ThreediRenderObject ro{};
 			ro.parent_index = static_cast<int32_t>(part.parent);
 			const ThreediBuildVec3 abs = threedi_build_to_model(part.pivot);
-			const ThreediBuildVec3 parent_pivot = part.parent == static_cast<int>(pi) ? ThreediBuildVec3{} : threedi_build_to_model(src.parts[part.parent].pivot);
+			// The root names itself; retail also ships parts whose parent is -1.
+			const bool rooted = part.parent == static_cast<int>(pi) || part.parent < 0 ||
+					part.parent >= static_cast<int>(src.parts.size());
+			const ThreediBuildVec3 parent_pivot = rooted ? ThreediBuildVec3{} : threedi_build_to_model(src.parts[part.parent].pivot);
 			ro.abs[0] = static_cast<float>(abs.x);
 			ro.abs[1] = static_cast<float>(abs.y);
 			ro.abs[2] = static_cast<float>(abs.z);
@@ -211,11 +263,10 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	model.ctrl.count = static_cast<uint32_t>(out.registers.size());
 	model.ctrl.record_size = 24u;
 	model.ctrl.registers = out.registers.data();
-	for (int i = 0; i < m.matrix_count; ++i) {
-		ThreediMatrix4x4 identity;
-		threedi_mat4_identity(&identity);
-		out.matrices.push_back(identity);
-	}
+	ThreediMatrix4x4 identity;
+	threedi_mat4_identity(&identity);
+	out.matrices.push_back(identity);
+	out.matrices.insert(out.matrices.end(), m.frames.begin(), m.frames.end());
 	model.mtrx.count = static_cast<uint32_t>(out.matrices.size());
 	model.mtrx.record_size = 64u;
 	model.mtrx.matrices = out.matrices.data();
@@ -255,8 +306,8 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				any = true;
 			}
 			for (const ThreediBoundingVolume &v : src.volumes) {
-				const double vmn[3] = {v.min_x_fp16 / 65536.0, v.min_y_fp16 / 65536.0, v.min_z_fp16 / 65536.0};
-				const double vmx[3] = {v.max_x_fp16 / 65536.0, v.max_y_fp16 / 65536.0, v.max_z_fp16 / 65536.0};
+				const double vmn[3] = {v.min_x_fp16 / io::kFp16OneD, v.min_y_fp16 / io::kFp16OneD, v.min_z_fp16 / io::kFp16OneD};
+				const double vmx[3] = {v.max_x_fp16 / io::kFp16OneD, v.max_y_fp16 / io::kFp16OneD, v.max_z_fp16 / io::kFp16OneD};
 				for (int k = 0; k < 3; ++k) {
 					mn[k] = std::min(mn[k], vmn[k]);
 					mx[k] = std::max(mx[k], vmx[k]);

@@ -1,8 +1,10 @@
 // Reads back the .3di opennova-3di minted from tests/fixtures/threedi/o3d/
-// spinner.o3d (the threedi_cli_build ctest runs first) and checks the
-// scene -> model conversions the CLI owns: mission -> model axes, the
-// counter-clockwise-in-model winding retail uses, the register-driven PANM
-// row, the material generator, user points and the collision face order.
+// spinner.o3d, skinned.o3d or building.o3d (the threedi_cli_build* ctests run
+// first) and checks the scene -> model conversions the CLI owns: mission ->
+// model axes, the counter-clockwise-in-model render winding and the
+// counter-clockwise-about-the-normal collision winding retail uses, the
+// register-driven PANM row and its MTRX frame, materials, user points,
+// lights, occlusion planes and the skinned layout.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -69,10 +71,83 @@ static int check_skinned(const char *path) {
 	return failures == 0 ? 0 : 1;
 }
 
+// cross(v1 - v0, v2 - v0) . n for one collision face, in mission axes: retail
+// stores collision faces counter-clockwise about their normal.
+static double collision_facing(const ThreediCollisionModel &c, size_t vbase, size_t nbase, const ThreediCollisionFace &f) {
+	const float *p[3];
+	for (int k = 0; k < 3; ++k) p[k] = c.vertices[vbase + f.vert_index[k]].position;
+	const double e[3] = {p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
+	const double g[3] = {p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
+	const double x[3] = {e[1] * g[2] - e[2] * g[1], e[2] * g[0] - e[0] * g[2], e[0] * g[1] - e[1] * g[0]};
+	const float *n = c.normals[nbase + f.normal_index].normal;
+	return x[0] * n[0] + x[1] * n[1] + x[2] * n[2];
+}
+
+// The building fixture (building.o3d): LOD types, the empty LOD, the UV1 detail
+// stage, an MTRX frame, lights, occlusion planes by the OED rule, a quoted user
+// point name, a blink box and the retail collision winding.
+static int check_building(const char *path) {
+	Threedi3di3 m{};
+	if (threedi_3di3_read(path, &m) != 0) {
+		std::fprintf(stderr, "cannot read %s\n", path);
+		return 1;
+	}
+	CHECK(m.lod_count == 2 && std::strcmp(m.lods[0].model_type, "bldg") == 0 &&
+			std::strcmp(m.lods[1].model_type, "bldg") == 0 && m.lods[1].render_object_count == 0);
+	const ThreediLod &lod = m.lods[0];
+	// The wall's second vertex tiles the detail texture on UV1.
+	CHECK(lod.vertices.count == 8 && near(lod.vertices.items[1].uv0[0], 1.0f) && near(lod.vertices.items[1].uv1[0], 4.0f));
+	CHECK(m.material_count == 2 && m.materials[0].texture_count == 2 && m.materials[0].textures[1].slot == 2 &&
+			std::strcmp(m.materials[0].textures[1].name, "wall_O.tga") == 0);
+	CHECK(m.materials[1].emissive_type == 2 && m.materials[1].rgb_gen.style == 113 && m.materials[1].rgb_gen.reg == 0);
+	CHECK(m.ctrl.count == 2 && std::strcmp(m.ctrl.registers[1].name, "DOOR_00") == 0);
+	// Part 1 turns in MTRX row 1: the mission quarter turn about up in model axes.
+	CHECK(lod.part_animation_count == 2 && lod.part_animations[1].matrix_index == 1 &&
+			lod.part_animations[1].rotation_x.control_param == 1);
+	CHECK(m.mtrx.count == 2 && near(m.mtrx.matrices[1].m[2], 1.0f) && near(m.mtrx.matrices[1].m[5], 1.0f) &&
+			near(m.mtrx.matrices[1].m[8], -1.0f));
+	CHECK(m.user_point_count == 1 && std::strcmp(m.user_points[0].name, "ground A") == 0);
+	// The omni light keeps the retail default axis and its NaN view_proj; the
+	// spot light carries its cone.
+	CHECK(m.light_count == 2);
+	if (m.light_count == 2) {
+		const ThreediLight &omni = m.lights[0], &spot = m.lights[1];
+		CHECK(omni.style == 55 && omni.phase == 128 && omni.rate == 76 && omni.subobj_index == 1 && omni.flags == 0x40);
+		CHECK(omni.color_start[2] == 255 && omni.color_start[0] == 34 && omni.color_end[2] == 240);
+		CHECK(omni.rotation[1] == -1.0f && omni.rotation[3] == 1.0f && std::isnan(omni.view_proj[0]));
+		CHECK(spot.flags == 0x48 && spot.falloff_byte == 30 && near(spot.rotation[3], 0.8660254f) &&
+				std::isfinite(spot.view_proj[0]));
+	}
+	// The occluder box's planes are its six bounding planes and each face names
+	// its own (Armry01's layout); the window's faces take the +x plane.
+	CHECK(m.occlusion_object_count == 2 && m.occlusion_face_count == 14);
+	if (m.occlusion_object_count == 2 && m.occlusion_face_count == 14) {
+		CHECK(m.occlusion_objects[0].type == 0 && m.occlusion_objects[0].num_planes == 6);
+		CHECK((m.occlusion_faces[0].raw_indices >> 24) == 5 && (m.occlusion_faces[2].raw_indices >> 24) == 4 &&
+				(m.occlusion_faces[4].raw_indices >> 24) == 0 && (m.occlusion_faces[10].raw_indices >> 24) == 3);
+		CHECK(m.occlusion_faces[0].edge_data == 0x03020200u && m.occlusion_faces[0].other_edge_data == 0x8300u);
+		CHECK(m.occlusion_objects[1].type == 2 && m.occlusion_objects[1].parent_subobject_index == 1 &&
+				(m.occlusion_faces[12].raw_indices >> 24) == 0);
+	}
+	CHECK(m.collision != nullptr);
+	if (m.collision != nullptr) {
+		const ThreediCollisionModel &c = *m.collision;
+		CHECK(c.object_count == 2 && c.face_count == 2 && c.volume_count == 2);
+		for (size_t f = 0; f < c.face_count && c.object_count > 0; ++f) CHECK(collision_facing(c, 0, 0, c.faces[f]) > 0.0);
+		// Sections sit at their part's pivot; part 1 carries the blink box.
+		CHECK(c.objects[1].offset[0] == 0x10000 && c.objects[1].offset[2] == 0x18000);
+		CHECK(c.volume_count == 2 && c.volumes[1].collidable_type == 8 && c.volumes[1].flags == 0x2e);
+	}
+	threedi_3di3_free(&m);
+	if (failures == 0) std::printf("o3d_cli_test --building: ok\n");
+	return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
 	if (argc == 3 && std::strcmp(argv[1], "--skinned") == 0) return check_skinned(argv[2]);
+	if (argc == 3 && std::strcmp(argv[1], "--building") == 0) return check_building(argv[2]);
 	if (argc != 2) {
-		std::fprintf(stderr, "usage: o3d_cli_test <spinner.3di> | --skinned <skinned.3di>\n");
+		std::fprintf(stderr, "usage: o3d_cli_test <spinner.3di> | --skinned <skinned.3di> | --building <building.3di>\n");
 		return 2;
 	}
 	Threedi3di3 m{};
@@ -102,8 +177,9 @@ int main(int argc, char **argv) {
 	const ThreediPartAnimation &spin = lod.part_animations[1];
 	CHECK(spin.subobject_index == 1 && spin.parent_subobject == 0);
 	CHECK(threedi_panm_rotation_type(spin.flags) == 2);
-	CHECK(spin.rotation_z.control == THREEDI_PANM_STYLE_CONTROL_REGISTER && spin.rotation_z.control_param == 0);
-	CHECK(spin.rotation_z.end == 16338);
+	// A rotor spins about up: the rotation_x track (Dblkhwk1's HELO_ROTOR).
+	CHECK(spin.rotation_x.control == THREEDI_PANM_STYLE_CONTROL_REGISTER && spin.rotation_x.control_param == 0);
+	CHECK(spin.rotation_x.end == 16338);
 	CHECK(lod.part_animations[0].flags == 0);
 
 	CHECK(m.material_count == 2);
@@ -129,6 +205,7 @@ int main(int argc, char **argv) {
 		// order, so the stored face normal still points out of the top (+z).
 		CHECK(c.face_count == 1 && near(c.normals[c.faces[0].normal_index].normal[2], 1.0f));
 		CHECK(c.faces[0].poly_type == 14);
+		CHECK(collision_facing(c, 0, 0, c.faces[0]) > 0.0);
 	}
 	threedi_3di3_free(&m);
 	if (failures == 0) std::printf("o3d_cli_test: ok\n");
