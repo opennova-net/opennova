@@ -21,8 +21,12 @@
 #if OPENNOVA_DEVTOOLS
 #include <godot_cpp/classes/time.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
+#include <runtime/devtools/collision_overlay.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/game_dev_tools.h>
+#include <runtime/devtools/hitbox_overlay.h>
+#include <runtime/mission/debug_oracles.h>
+#include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/inspect_markers.h>
 #endif
 
@@ -131,6 +135,28 @@ void DevTools::push_overlay_frame() {
 		snapshot.logic_tick = tick;
 		tools_->set_ai_debug(std::move(snapshot));
 		last_ai_push_ms_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	}
+	// The capture rows move with the tick and with the windows' filters.
+	if (tools_->needs_rays_overlay() && (new_tick || overlay_filters_dirty_)) {
+		opennova::devtools::RaysOverlayRecord record;
+		record.logic_tick = tick;
+		record.valid = sim->native_ray_debug_rows(record.rows, record.ttl_ticks);
+		tools_->set_rays_overlay(std::move(record));
+	}
+	if (tools_->needs_contacts_overlay() && (new_tick || overlay_filters_dirty_)) {
+		opennova::devtools::ContactsOverlayRecord record;
+		record.logic_tick = tick;
+		record.valid = sim->native_contact_debug_rows(record.rows, record.ttl_ticks);
+		tools_->set_contacts_overlay(std::move(record));
+	}
+	overlay_filters_dirty_ = false;
+	// The hitbox oracle transforms whole bullet meshes: its own cadence.
+	if (tools_->needs_hitbox_overlay() &&
+			push_due(last_hitbox_push_ms_, 1.0 / opennova::devtools::HitboxOverlayLayer::kRefreshHz)) {
+		opennova::devtools::HitboxOverlayRecord record;
+		record.logic_tick = tick;
+		record.valid = sim->native_hitbox_debug(eye, record.report);
+		tools_->set_hitbox_overlay(std::move(record));
 	}
 }
 

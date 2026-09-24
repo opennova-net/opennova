@@ -8,6 +8,10 @@
 
 #include <runtime/devtools/ai_overlay.h>
 #include <runtime/devtools/ai_window.h>
+#include <runtime/devtools/collision_overlay.h>
+#include <runtime/devtools/hitbox_overlay.h>
+#include <runtime/devtools/physics_window.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_overlay.h>
 #include <runtime/devtools/game_dev_tools.h>
@@ -347,6 +351,78 @@ void test_ai_layers() {
 	tools.set_game_viewport(nullptr);
 }
 
+// The collision layers: a layer on keeps its capture armed with its window
+// closed, and each draws its pushed rows (a hit ray ends in a cross, a
+// contact rings its live body, a meshed body draws its faces).
+void test_collision_layers() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	opennova::devtools::RaysWindow &rays = tools.rays_window();
+	opennova::devtools::PhysicsWindow &physics = tools.physics_window();
+	CHECK(!tools.needs_rays_snapshot() && !tools.needs_physics_snapshot(), "closed windows arm nothing");
+	tools.pass().set_overlay_enabled(rays.overlay_layer(), true);
+	tools.pass().set_overlay_enabled(physics.contacts_layer(), true);
+	tools.pass().set_overlay_enabled(physics.hitbox_layer(), true);
+	CHECK(tools.needs_rays_snapshot() && tools.needs_rays_overlay(), "the rays layer arms the recording");
+	CHECK(tools.needs_physics_snapshot() && tools.needs_contacts_overlay(), "the contacts layer arms the capture");
+	CHECK(tools.needs_hitbox_overlay(), "the hit meshes want the oracle");
+
+	const auto fixed = [](float v) { return static_cast<int32_t>(v * 65536.0f); };
+	opennova::devtools::RaysOverlayRecord ray_record;
+	ray_record.valid = true;
+	ray_record.ttl_ticks = 60;
+	opennova::world::RayDebugRow hit;
+	hit.category = 1;
+	hit.result = 1; // kRayDebugHit
+	hit.start = {0, fixed(5.0f), 0};
+	hit.hit = {0, fixed(15.0f), 0};
+	hit.end = {0, fixed(25.0f), 0};
+	ray_record.rows = {hit};
+	tools.set_rays_overlay(ray_record);
+
+	opennova::devtools::ContactsOverlayRecord contact_record;
+	contact_record.valid = true;
+	contact_record.ttl_ticks = 62;
+	opennova::world::ContactDebugRow contact;
+	contact.pos = {0, fixed(12.0f), 0};
+	contact.target_live = true;
+	contact.target_position = Vec3{0.0f, 12.0f, 0.0f};
+	contact.target_bound_radius = 1.0f;
+	contact_record.rows = {contact};
+	tools.set_contacts_overlay(contact_record);
+
+	opennova::devtools::HitboxOverlayRecord hitbox_record;
+	hitbox_record.valid = true;
+	opennova::world::CollisionWorld::DebugHitboxEntity body;
+	body.pos[1] = fixed(20.0f);
+	body.bound_radius = fixed(2.0f);
+	body.has_faces = true;
+	body.face_total = 1;
+	opennova::world::CollisionWorld::DebugHitboxFace face;
+	face.v[0][1] = face.v[1][1] = face.v[2][1] = fixed(20.0f);
+	face.v[1][0] = fixed(1.0f);
+	face.v[2][2] = fixed(1.0f);
+	body.faces = {face};
+	hitbox_record.report.entities = {body};
+	tools.set_hitbox_overlay(hitbox_record);
+
+	FakeGameViewport viewport;
+	tools.set_game_viewport(&viewport);
+	for (uint64_t frame = 1; frame <= 3; ++frame) CHECK(draw_once(tools, frame), "a settling frame draws");
+	tools.set_overlay_camera(north_camera(90.0f, viewport.width, viewport.height));
+	CHECK(draw_once(tools, 4), "the collision layers draw");
+	CHECK(rays.overlay_layer().last_stats().lines >= 5, "the hit ray: its leg, its faint tail and a cross");
+	CHECK(physics.contacts_layer().last_stats().lines > 3, "the contact cross and its body's ring");
+	CHECK(physics.hitbox_layer().last_stats().lines >= 3, "the body's face and its bound sphere");
+	CHECK(physics.hitbox_layer().last_stats().texts == 1, "the nearest meshed body is labelled");
+	tools.clear_overlay_records();
+	CHECK(!rays.overlay().valid && !physics.contacts_overlay().valid && !physics.hitbox_overlay().valid,
+			"clearing drops every collision record");
+	tools.set_game_viewport(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -355,5 +431,6 @@ int main() {
 	test_layers_draw_over_the_game_image();
 	test_entity_layers_follow_the_selection();
 	test_ai_layers();
+	test_collision_layers();
 	return report("devtools_overlay_test");
 }

@@ -10,6 +10,7 @@
 // ones.
 #pragma once
 
+#include <runtime/devtools/collision_overlay.h>
 #include <runtime/devtools/imgui_pass.h>
 #include <runtime/devtools/rays_request.h>
 #include <runtime/devtools/rays_snapshot.h>
@@ -38,6 +39,14 @@ public:
 	// The pushed record, by value; an invalid snapshot clears the page.
 	void set_snapshot(const RaysSnapshot &snapshot);
 
+	// The Game-view layer (collision_overlay.h) and the ray rows it draws,
+	// pushed per logic tick while it is on. The mask and "Fade ticks" above
+	// filter it (the engine applies them to the rows).
+	RaysOverlayLayer &overlay_layer() { return overlay_layer_; }
+	const RaysOverlayLayer &overlay_layer() const { return overlay_layer_; }
+	void set_overlay(RaysOverlayRecord record) { overlay_record_ = std::move(record); }
+	const RaysOverlayRecord &overlay() const { return overlay_record_; }
+
 	// The typed request queue the embedder drains. enqueue_request is the one
 	// path the drawn controls feed — and the headless test seam.
 	void enqueue_request(const RaysRequest &request);
@@ -60,6 +69,9 @@ private:
 	// state; a click flips locally + queues the request, the next push confirms).
 	uint32_t mask_edit_ = 0x7FFF;
 	int32_t ttl_edit_ = 93;
+	// Declared ahead of the layer that reads it.
+	RaysOverlayRecord overlay_record_{};
+	RaysOverlayLayer overlay_layer_{overlay_record_};
 };
 
 }  // namespace opennova::devtools

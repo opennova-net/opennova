@@ -477,6 +477,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	// A new world's first tick re-pushes every overlay record.
 	overlay_tick_ = static_cast<uint64_t>(-1);
 	overlay_selection_ = 0xFFFF;
+	last_hitbox_push_ms_ = -1;
 	if (overlay_live_) {
 		tools_->clear_overlay_records();
 	}
@@ -1043,6 +1044,7 @@ void DevTools::apply_rays_requests() {
 				simulation_->clear_ray_debug();
 				break;
 		}
+		overlay_filters_dirty_ = true;
 	}
 }
 
@@ -1087,6 +1089,7 @@ void DevTools::apply_physics_requests() {
 				simulation_->clear_contact_debug();
 				break;
 		}
+		overlay_filters_dirty_ = true;
 	}
 }
 

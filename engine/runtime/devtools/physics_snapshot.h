@@ -18,6 +18,17 @@ inline constexpr int kContactKindCount = 6;
 inline constexpr uint32_t kContactKindMaskAll =
 		(1u << kContactKindCount) - 1;
 
+// The contact-kind palette (ContactDebugKind order): the window's swatches
+// and the Game-view layer's crosses.
+inline constexpr float kContactKindColors[kContactKindCount][3] = {
+	{1.0f, 0.35f, 0.15f}, // Projectile hit
+	{1.0f, 0.4f, 0.7f},   // Knife hit
+	{1.0f, 0.7f, 0.2f},   // Move contact
+	{0.9f, 0.3f, 1.0f},   // Vehicle hull
+	{0.75f, 0.6f, 0.4f},  // Terrain hit
+	{0.3f, 0.9f, 1.0f},   // Water hit
+};
+
 struct PhysicsKindCount {
 	const char *name = "";
 	int32_t held = 0;    // events currently in the ring (<= the ring cap)

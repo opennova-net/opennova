@@ -182,6 +182,9 @@ private:
 	bool overlay_live_ = false;
 	uint64_t overlay_tick_ = static_cast<uint64_t>(-1);
 	uint16_t overlay_selection_ = 0xFFFF;
+	// A Rays/Physics filter changed: the next frame re-reads the rows.
+	bool overlay_filters_dirty_ = false;
+	int64_t last_hitbox_push_ms_ = -1;
 	void set_game_playing_internal(bool p_playing);
 	// The one cadence gate every record push shares: true (and the stamp
 	// moved) when p_seconds have passed since the last push, or none was made

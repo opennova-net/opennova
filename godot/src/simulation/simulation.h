@@ -49,10 +49,17 @@
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
-namespace opennova::world::inspect {
+namespace opennova::world {
+struct RayDebugRow;
+struct ContactDebugRow;
+namespace inspect {
 struct EntityMarker;
 struct EntityMarkerQuery;
-} // namespace opennova::world::inspect
+} // namespace inspect
+} // namespace opennova::world
+namespace opennova::mission {
+struct DebugHitboxReport;
+} // namespace opennova::mission
 
 namespace godot {
 
@@ -2252,6 +2259,12 @@ public:
 	// The F3 overlay entity markers (world::inspect::entity_markers).
 	bool native_entity_markers(const opennova::world::inspect::EntityMarkerQuery &p_query,
 			std::vector<opennova::world::inspect::EntityMarker> &r_out) const;
+	// The F3 collision overlays: the filtered ray / contact capture rows
+	// (world/collision_debug_rows.h) with the fade window, and the hitbox
+	// oracle anchored on a mission point (the camera).
+	bool native_ray_debug_rows(std::vector<opennova::world::RayDebugRow> &r_rows, int32_t &r_ttl) const;
+	bool native_contact_debug_rows(std::vector<opennova::world::ContactDebugRow> &r_rows, int32_t &r_ttl) const;
+	bool native_hitbox_debug(const opennova::world::Vec3 &p_anchor, opennova::mission::DebugHitboxReport &r_out);
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
 	// draw filter) behind the F3 Rays window; counts + filter state ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
