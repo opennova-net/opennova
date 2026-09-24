@@ -143,6 +143,8 @@ public:
 	// Header references (basenames, no extension): e.g. "dvxi5", "full_00".
 	String get_terrain_ref() const;
 	String get_environment_ref() const;
+	// The header's tile-set name as authored (empty = the .trn tilestrip).
+	String get_tile_set_ref() const;
 	// The header as a record (mission/mission_info.h).
 	Ref<MissionInfo> get_info() const;
 	// EnvFile.apply_mission_overrides() payload from the attrib-gated header

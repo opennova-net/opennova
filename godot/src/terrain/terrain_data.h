@@ -38,6 +38,9 @@ class TerrainData : public Resource {
 
 private:
 	String trn_path;
+	// The loading mission's tile-set name (BMS header), applied over the .trn
+	// tilestrip at load (formats/trn trn_mission_tilestrip). Empty = the .trn's.
+	std::string mission_tile_set;
 
 	// Identity
 	String terrain_name;
@@ -126,6 +129,9 @@ public:
 	~TerrainData();
 
 	void set_trn_path(const String &p_path);
+	// Set before load(): the mission's tile-set name overriding the .trn
+	// tilestrip atlas (and so the .TSD the surface table pairs with it).
+	void set_mission_tile_set(const String &p_tile_set);
 
 	void set_terrain_name(const String &p_name);
 	String get_terrain_name() const;

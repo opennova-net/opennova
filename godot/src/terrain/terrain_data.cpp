@@ -446,6 +446,9 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 // ---------------------------------------------------------------------------
 
 void TerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
+void TerrainData::set_mission_tile_set(const String &p_tile_set) {
+	mission_tile_set = p_tile_set.utf8().get_data();
+}
 
 void TerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
 String TerrainData::get_terrain_name() const { return terrain_name; }
@@ -694,7 +697,8 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	};
 	const String charmap_filename = String(trn.charmap.c_str());
 	const String foliagemap_filename = String(trn.foliagemap.c_str());
-	const String tilestrip_filename = String(trn.tilestrip.c_str());
+	const String tilestrip_filename = String(
+			opennova::trn_mission_tilestrip(trn, mission_tile_set).c_str());
 	colormap = load_tex("colormap", String(trn.colormap.c_str()));
 	detailmap = load_tex("detailmap", String(trn.detailmap.c_str()));
 	detailmap_c1 = load_tex("detailmap_c1", String(trn.detailmap_c1.c_str()));
