@@ -191,6 +191,7 @@ private:
 	int64_t last_rays_push_ms_ = -1;
 	bool rays_recording_ = false;
 	int64_t last_physics_push_ms_ = -1;
+	bool contacts_recording_ = false;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

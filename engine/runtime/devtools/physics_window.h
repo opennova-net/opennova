@@ -1,13 +1,13 @@
 // The Physics window (ADR 0042 d6): the engine contact-debug capture's
-// control surface over the PhysicsSnapshot the embedder pushes — the capture
-// arm, per-kind counts (held in ring / lifetime total) with draw-filter
-// checkboxes, and Clear — leaving typed PhysicsRequests the embedder drains
-// into the Simulation contact-debug seam.
+// control surface over the PhysicsSnapshot the embedder pushes — per-kind
+// counts (held in ring / lifetime total) with draw-filter checkboxes, and
+// Clear — leaving typed PhysicsRequests the embedder drains into the
+// Simulation contact-debug seam.
 //
 // The window holds only the pushed value record — it never reaches into a
-// live World. Visibility-armed: while hidden it drops its snapshot and the
-// embedder (gated on GameDevTools::needs_physics_snapshot) stops building
-// new ones.
+// live World. Visibility-armed: while hidden it drops its snapshot, and the
+// embedder (gated on GameDevTools::needs_physics_snapshot) stops building new
+// ones and disarms the contact capture, which records only while shown.
 #pragma once
 
 #include <runtime/devtools/imgui_pass.h>
@@ -35,9 +35,6 @@ public:
 
 	// The pushed record, by value; an invalid snapshot clears the page.
 	void set_snapshot(const PhysicsSnapshot &snapshot);
-	// (pass open && window open): the embedder skips building snapshots
-	// nobody shows.
-	bool wants_snapshot() const { return shown_; }
 
 	// The typed request queue the embedder drains. enqueue_request is the one
 	// path the drawn controls feed — and the headless test seam.
@@ -55,12 +52,10 @@ private:
 
 	PhysicsSnapshot snapshot_{};
 	std::array<std::string, kContactKindCount> rows_{};
-	bool shown_ = false;
 	std::deque<PhysicsRequest> requests_;
-	// Edit state mirrored from every push (these controls display authoritative
+	// The mask mirrored from every push (the checkboxes display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
-	bool capture_edit_ = false;
-	uint32_t mask_edit_ = 0x3F;
+	uint32_t mask_edit_ = kContactKindMaskAll;
 };
 
 }  // namespace opennova::devtools

@@ -1520,23 +1520,20 @@ void test_physics_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear
-// and capture requests in order and drains exactly once.
+// The PhysicsRequest channel: enqueue/take round-trips the typed mask and
+// clear requests in order and drains exactly once (the capture arm follows the
+// window's visibility, so it has no request).
 void test_physics_request_queue() {
 	GameDevTools tools;
 	PhysicsRequest request;
 	CHECK(!tools.take_physics_request(request), "fresh tools hold no physics request");
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetKindMask, 0x0005});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::Clear, 0});
-	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, 1});
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetKindMask && request.a == 0x0005,
 			"the mask request round-trips first");
 	CHECK(tools.take_physics_request(request) && request.kind == PhysicsRequest::Kind::Clear,
 			"the clear request follows");
-	CHECK(tools.take_physics_request(request) &&
-					request.kind == PhysicsRequest::Kind::SetCaptureEnabled && request.a == 1,
-			"the capture arm carries its state");
 	CHECK(!tools.take_physics_request(request), "the queue drains exactly once");
 }
 
