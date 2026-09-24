@@ -1463,6 +1463,43 @@ void test_local_player_uplink_carries_the_jump_bit() {
     CHECK((ent->net_move_input & Entity::kMoveOrderJump) == 0);
 }
 
+// The local player's recoil kick persists in its input-staged look: retail adds
+// the yaw half-step to g_LocalPlayerLookYaw and the pitch step to entity Pitch,
+// which the mouse accumulates into by relative adds, so the post-tick look fold
+// must inherit both rather than the next frame's input copy erasing them.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b583c..0x4b5848, @0x4b5815..0x4b5818;
+//  Input_HandleActionBinding_0 @0x4e0d39]
+void test_local_recoil_kick_persists_in_the_look() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.health = 100;
+    seed.flags |= kEntityFlagPlayer;
+    CHECK(w.registry.get(w.registry.spawn(0, seed)) != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    PlayerBodyInput body;
+    body.look_heading = 0x10000000;
+    body.look_pitch = 0;
+    apply_player_body_input(*e, body);
+    e->heading = body.look_heading;
+    e->pitch = body.look_pitch;
+    e->inf.recoil_pitch = 1 << 18; // t = 32768: half 16384, pitch step 4096
+    run_ticks(ai, w, 0, 1);
+    const int32_t yaw_step = opennova::io::bam_sub(e->inf.target_heading, body.look_heading);
+    CHECK(yaw_step == 16384 || yaw_step == -16384);
+    CHECK(e->inf.look_pitch == 4096);
+    CHECK(e->pitch == e->inf.look_pitch);
+}
+
 // Local-player leg chase + body midpoint — the witnessed org2 model (D-INF-12
 // closure): the LEGS chase the mouse yaw (quarter-step, rate clamp ±0x3000000,
 // twist ±0x30000000 vs the yaw, per-leg staggered re-plant windows) and the body
@@ -6173,6 +6210,7 @@ int main() {
     test_local_player_stale_airborne_word_lands_first();
     test_ledge_edge_carried_bit_by_motor();
     test_local_player_uplink_carries_the_jump_bit();
+    test_local_recoil_kick_persists_in_the_look();
     test_motor_samples_existing_clip_before_selection();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();

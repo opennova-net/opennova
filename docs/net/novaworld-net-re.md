@@ -3335,10 +3335,11 @@ packet ships only when the pilot is the local player (`@ 0x53f6f4`). Reimpl:
 ammo index (off32) and subtype 12 (off33); pin
 `inmatch_joiner_role::run_flare_descriptor_carries_the_pilot_handheld`. Still
 0xFFFF on our side: off28 (ledger D-NET-161 (c)).
-Generic-producer gaps recorded under D-WPN-8 (pre-existing, not this PR): off33 —
-the reimpl sends `round.subtype` (12 on the on-foot hip-fire leg, 0 on
-settled-FP/mounted legs, never bit 0x80) where retail sends the
-`Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)` composition
+Generic-producer gaps recorded under D-WPN-8: off33 — CLOSED 2026-09-24: the
+local fire pump now composes retail's `(can_fire ? 0x80 : 0) +
+Weapon_GetScopeZoomLevel(can_fire, 12)` byte (`local_weapon_pump_tick` over
+`local_player_scope_view_visible` and `weapon_scope_zoom_step`; before, it sent 12
+on the hip-fire leg, 0 on settled-FP/mounted legs and never bit 0x80)
 (`Player_CanFireWeapon @ 0x5cf780` gates: EquippedSlot null → 0, parentSlot 2/5 → 0,
 Flags & 0x2002 → 0, `g_camera_mode` → 0, MoveOrder & 8 without gunner scope → 0, not
 scoped and not gunner-scoped → 0, submerged → 0; `Weapon_GetScopeZoomLevel
@@ -8101,6 +8102,29 @@ weapon ERROR row is `verticalSpread ? 3 : category`. This selector is **not**
 the HUD selector (`stance + 3*Player_CanFireWeapon()`, hud-re D-HUD-7).
 `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
 
+The local shooter's subtype is `(Player_CanFireWeapon ? 0x80 : 0) +
+Weapon_GetScopeZoomLevel(can_fire, 12)`; any other shooter sends 0. Bit 7 is
+therefore "fired through the raised optic": aimed fire takes ERROR row 3 at
+every stance (WPN_MAG58 `error 0.063 0.35 0.9 0.063 0.12 0.17`: 0.063 degrees
+aimed where standing hip fire is 0.9).
+`[orig: Entity_FireWeaponAndSendPacket @ 0x42bdcb..0x42bdfb]`
+
+The low six bits are the **zero step**. Ahead of every dispatch leg,
+`sourceEntity && step` adds the shooter's equipped AdmDef (`entity+0x2B0`)
+elevation row `+0x3B0[min(step, 39)]` (AdmDef 0 adds nothing) to the descriptor
+pitch, so the knife ray, the claymore and shotgun fans and the ordinary round
+all fly elevated while the ring, copied first, stays pre-elevation. The IDB's
+`Score_GetMultiplierValue @ 0x4fc440` is this lookup (a misname; its
+`byte_24D217C` gate has no writer). The row is `WeaponSlot_CalcElevationTable
+@ 0x545100`'s output. Hip fire's step is the default 12, but every stock JO
+table ends at `scope_max_zero` step 10 or below, so hip fire adds zero; the
+elevation lands for an optic weapon on the automatic (-1) zero, whose step is
+the rangefinder distance rounded to `+0x9C` (`Weapon_GetScopeZoomLevel
+@ 0x422fc0`). Reimpl: `RoundSim::spawn` (`round_zero_elevation`), the replica
+source's `RoundSourceState::equipped_adm_index`; ctest `npruntime_round_sim`.
+`[orig: RoundData_SpawnRound @ 0x4ec155..0x4ec181]`
+`[orig: RoundData_AddRound @ 0x4fdbce..0x4fdc6a]`
+
 For an ordinary weapon round, the spread magnitude in 16.16 degrees is
 
 `S = weapon.ERROR[row] + (entity+0x380 >> 8) + (entity+0x384 >> 7)`.
@@ -8193,7 +8217,15 @@ Before camera construction and the later weapon-action/spawn pass,
 - For recoil `R=entity+0x380`, compute `t=(R+4)>>3`, `half=t>>1`, subtract
   `half`, and snap to zero at signed `R<=0x300`. Add `t>>3` to entity pitch;
   always consume one `PRNG_Next16`, even at zero, and add `half` to yaw for an
-  even result or subtract it for an odd result. There is no upper clamp.
+  even result or subtract it for an odd result. There is no upper clamp. For
+  the local player the same signed `half` also lands on
+  `g_LocalPlayerLookYaw` (`@ 0x4b583c..0x4b5848`), and entity pitch is the
+  mouse's own accumulator (`Input_HandleActionBinding_0` relative
+  `add [eax+14h]` `@ 0x4e0d39`), so sustained fire walks the look sideways and
+  climbs it persistently. The port adds both steps to the local body's staged
+  look (`target_heading`/`look_pitch`), which the post-tick look fold carries
+  into the input-owned look (fixed 2026-09-24; before, the frame's input copy
+  overwrote them every tick).
 - The local-player-only movement producer runs while moving (`MoveOrder&8`),
   on foot, with an equipped definition. It wrap-adds a stance/aim-scaled
   `clipweight+weaponweight` contribution to `M=entity+0x384`: one third when

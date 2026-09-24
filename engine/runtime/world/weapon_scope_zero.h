@@ -50,4 +50,14 @@ int32_t weapon_scope_zero_pitch(const WeaponScopeZero &zero, int16_t step);
 //  @0x4dbd91..0x4dbde3; Render_ProcessMainSceneFrame @0x5ca452..0x5ca4a0;
 //  the unused predecessor sub_5D27F0 @0x5d2859..0x5d285c]
 int32_t weapon_scope_zero_yaw(const WeaponScopeZero &zero, int16_t step);
+// The fire descriptor's zero step: `fallback` unless the weapon can fire
+// through its optic. An optic weapon (Flags & 3) then reports 0 on a manual
+// zero, and on the automatic (-1) zero the rangefinder distance rounded to
+// the +0x9C step (25 m when unset), clamped to 0..39.
+// [orig: Weapon_GetScopeZoomLevel @0x422fc0 -- weaponActive @0x422fd5, Flags
+//  & 3 @0x422fe4..0x422fea, `cmp word [slot+60h],0FFFFh` -> 0 @0x422fec..0x422ff1,
+//  +0x9C << 16 else 190000h @0x422ff3..0x422ffe, the rounded idiv of
+//  dword_B76808 @0x423003..0x423011, the 0..39 clamp @0x423013..0x42301c]
+int32_t weapon_scope_zoom_step(const WeaponScopeZero &zero, int32_t def_flags, int16_t zero_step,
+    int32_t rangefinder_q16, bool weapon_active, int32_t fallback);
 }

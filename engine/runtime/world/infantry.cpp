@@ -1308,7 +1308,24 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // The player bodies decay recoil and spread at their head; org1 runs the
     // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
     //  @0x4BE7FD..0x4BE86F]
-    if (!npc_body) infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
+    if (!npc_body) {
+        const int32_t heading_before = e.heading;
+        const int32_t pitch_before = e.pitch;
+        infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
+        // The local look keeps the kick: the yaw half-step also lands on
+        // g_LocalPlayerLookYaw, and the pitch step on entity Pitch, which the
+        // mouse accumulates into by relative adds. The staged input copies take
+        // both so the post-tick look fold carries them, as the scoped drift's do.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b583c..0x4b5848 (local
+        //  test, `add g_LocalPlayerLookYaw`), pitch @0x4b5815..0x4b5818;
+        //  Input_HandleActionBinding_0 `add [eax+14h]` @0x4e0d39]
+        if (e.inf.is_local_player) {
+            e.inf.target_heading = io::bam_add(e.inf.target_heading,
+                                               io::bam_sub(e.heading, heading_before));
+            e.inf.look_pitch = io::bam_add(e.inf.look_pitch,
+                                           io::bam_sub(e.pitch, pitch_before));
+        }
+    }
     InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
