@@ -17,7 +17,7 @@ func _expected_emission(environment: MissionEnvironment) -> Vector3:
 	# (the util/axes.h x/z swap of the raw getter tuple IS the (g2, g1, g0)
 	# reduction); the entity shadow projection then clamps the vertical
 	# component to 0.25 and negates — renderer::slot_projection_direction,
-	# which SunShadow applies in every projection mode
+	# which SunShadow applies
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870;
 	#  render_shadow_pass @ 0x5d7b70].
 	var g := environment.get_light_direction()
@@ -82,7 +82,6 @@ func test_game_world_composes_only_the_live_shadow_map_during_ready() -> void:
 
 func test_dynamic_projection_separates_live_casters_from_world_receivers() -> void:
 	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child_autofree(light)
 
 	assert_eq(light.light_cull_mask,
@@ -127,16 +126,3 @@ func test_high_sun_projection_uses_the_unclamped_tuple() -> void:
 	var emission := -light.global_basis.z.normalized()
 	assert_true(emission.is_equal_approx(-Vector3(g.x, g.y, g.z).normalized()),
 			"above the clamp the presentation reduction (g2,g1,g0) passes through")
-
-
-func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
-	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
-	add_child_autofree(light)
-
-	assert_eq(light.light_cull_mask,
-			Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER)
-	assert_eq(light.shadow_caster_mask,
-			Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
-	assert_true(light.shadow_enabled,
-			"the static-terrain bake device still renders a shadow map")
