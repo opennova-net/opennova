@@ -191,6 +191,32 @@ func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:
 				expected.get("alpha_mod"))
 
 
+func test_glass_static_colour_reaches_reflect_color_as_a_vec4_with_w_one() -> void:
+	# armory material 4 is FFP_GLASS with is_glass 1 and the stock 0x80808000
+	# colour. The routed static colour is ReflectColor (R, G, B) / 255 with W
+	# forced to 1 (apply_shader_parameters, retail), and it must be the vec4
+	# the Q3 glass copy reads, not a Color with the authored zero alpha.
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(_object_data(ARMRY_3DI))
+	var glass: ShaderMaterial = null
+	var indices := model.get_surface_material_indices()
+	var materials := model.get_surface_materials()
+	for index in range(indices.size()):
+		if int(indices[index]) == 4:
+			glass = materials[index] as ShaderMaterial
+			break
+	assert_not_null(glass, "the armory fixture submits its glass material")
+	if glass == null:
+		return
+	var reflect = glass.get_shader_parameter("u_reflect_color")
+	assert_eq(typeof(reflect), TYPE_VECTOR4, "ReflectColor is written as the vec4 it is")
+	assert_true((reflect as Vector4).is_equal_approx(
+			Vector4(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0)),
+			"the routed static colour keeps its bytes and W = 1: %s" % [reflect])
+
+
 func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
 	for child in root.get_children():

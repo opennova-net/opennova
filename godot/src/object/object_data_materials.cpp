@@ -5,6 +5,7 @@
 #include "object/material_info.h"
 
 #include <formats/threedi/threedi_ctrl_catalog.h>
+#include <runtime/renderer/material_texture.h>
 
 #include "util/texture_path_resolver.h"
 
@@ -219,9 +220,11 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 
 	const auto &row = material.textures[p_texture_index];
 	const String texture_name = from_native(row.name);
+	// The dispatcher reads the loader's runtime type, not the authored byte.
+	const uint8_t type = opennova::renderer::material_texture_runtime_type(row.type);
 	return resource_root.is_valid()
-			? resource_root->load_material_texture(texture_name, row.type)
-			: opennova::load_material_texture_from_dir(source_dir, texture_name, row.type);
+			? resource_root->load_material_texture(texture_name, type)
+			: opennova::load_material_texture_from_dir(source_dir, texture_name, type);
 }
 
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {

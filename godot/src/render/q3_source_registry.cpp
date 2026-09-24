@@ -475,7 +475,7 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		object.base_texture = lease_for(base);
 		object.detail_texture = lease_for(detail);
 		const Vector4 reflect = vector4_parameter(material, "u_reflect_color",
-				Vector4(0.7f, 0.8f, 0.9f, 0.35f));
+				Vector4(0.75f, 0.75f, 0.75f, 0.75f));
 		object.reflect_color = {reflect.x, reflect.y, reflect.z, reflect.w};
 		const Vector3 self_lum = vector3_parameter(material, "u_rgb_mod",
 				Vector3(1, 1, 1));

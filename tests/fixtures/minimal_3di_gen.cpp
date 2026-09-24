@@ -649,7 +649,12 @@ const std::vector<Recipe> &recipes() {
 			rename_register(m, 1, "LOD_FRAC");
 			controlled_track(m, 1)->control = 114;
 		}},
+		// The RgbGen writes SelfLumColor, so the row wears the SELFLUM effect
+		// with emissive_type 2 (apply_shader_parameters skips an RgbGen whose
+		// routed colour the effect never reads).
 		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_OP_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
 		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
@@ -699,7 +704,9 @@ const std::vector<Recipe> &recipes() {
 			m.lods[0].panm.push_back(sine_rotation_row(0, 0));
 			m.materials[0].u_params.style = 1;
 		}},
+		// Only the #UV twin evaluates MatTexCoord1, so the scrolling row wears it.
 		{"house_mtrl0_uvscroll16_alphatest", make_house, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_OP#UV");
 			m.materials[0].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 			m.materials[0].u_params.style = 16;
 			m.materials[0].u_params.gen_rate = 1.0f;
@@ -873,7 +880,11 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "mount_yaw_style114" || name == "mount_ctrl1_lod_frac_yaw_style114")
 		expect(p.row(0, 1).rotation_x.control == 114, name + ": yaw style 114");
 	if (name == "mount_ctrl1_lod_frac_yaw_style114") expect(!std::strcmp(p.reg(1), "LOD_FRAC"), name + ": ctrl1");
-	if (name == "mount_mtrl0_rgbgen113_reg1") expect(p.model.materials[0].rgb_gen.style == 113 && p.model.materials[0].rgb_gen.reg == 1, name + ": material alias");
+	if (name == "mount_mtrl0_rgbgen113_reg1")
+		expect(p.model.materials[0].rgb_gen.style == 113 && p.model.materials[0].rgb_gen.reg == 1 &&
+						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP_LUM") &&
+						p.model.materials[0].emissive_type == THREEDI_EMISSIVE_FULL,
+				name + ": material alias");
 	if (name == "mount_heat_glow_slide_part1") expect(slide_moves_part(p, 1, 0) && !std::strcmp(p.reg(0), "HEAT_GLOW"), name + ": slide");
 	if (name == "armory") expect(!p.live(0), name + ": inert");
 	if (name == "armory_lght0_colorgen113_flicker") expect(p.model.lights[0].style == 113 && p.model.lights[0].phase == 0, name + ": light gen");
@@ -893,7 +904,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "house_lod0_sine_rotx") expect(p.live(0) && p.model.materials[0].u_params.style == 0, name + ": live, uv 0");
 	if (name == "house_lod0_sine_rotx_uv1") expect(p.live(0) && p.model.materials[0].u_params.style == 1, name + ": live, uv 1");
 	if (name == "house_mtrl0_uvscroll16_alphatest")
-		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f, name + ": material");
+		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f &&
+						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP#UV"),
+				name + ": material");
 	if (base == "panm") {
 		const bool expected_live = name.rfind("panm_live", 0) == 0;
 		expect(p.rows(0) == 1 && p.live(0) == expected_live, name + ": liveness");

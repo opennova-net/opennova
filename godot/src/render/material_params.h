@@ -68,12 +68,20 @@ inline Vector3 vector3_parameter(const Ref<ShaderMaterial> &p_material,
 	return value.get_type() == Variant::VECTOR3 ? static_cast<Vector3>(value) : p_default;
 }
 
+// A vec4 uniform may be written as a Vector4 or as a Color; both are the
+// same four floats in the shader.
 inline Vector4 vector4_parameter(const Ref<ShaderMaterial> &p_material,
 		const StringName &p_name, const Vector4 &p_default) {
 	if (p_material.is_null())
 		return p_default;
 	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR4 ? static_cast<Vector4>(value) : p_default;
+	if (value.get_type() == Variant::VECTOR4)
+		return static_cast<Vector4>(value);
+	if (value.get_type() == Variant::COLOR) {
+		const Color color = value;
+		return Vector4(color.r, color.g, color.b, color.a);
+	}
+	return p_default;
 }
 
 // The material a surface actually draws with: a MeshInstance3D's active

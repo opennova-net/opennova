@@ -49,6 +49,10 @@ int main() {
 	material.samples_diffuse_alpha = true;
 	material.uses_material_alpha = true;
 	material.diffuse_alpha_frames.push_back(alpha_identity());
+	// The #UV twin: only it reads MatTexCoord1 [orig: apply_shader_parameters
+	// @ 0x58DE4F..0x58DE56].
+	std::snprintf(material.runtime_material.shader_name,
+			sizeof(material.runtime_material.shader_name), "%s", "FF_ST_OP#UV");
 	material.runtime_material.alpha_gen.style = 113;
 	material.runtime_material.alpha_gen.reg = 0;
 	material.runtime_material.alpha_gen.start = 10;
@@ -63,9 +67,9 @@ int main() {
 					geometry, material, 9999, controls);
 	if (!expect(controlled.issues == kTerrainStaticShadowUnsupportedNone,
 			"controlled AlphaGen/UV must be an exact supported state") ||
-			!expect(near(controlled.alpha_scale, 10.0f / 255.0f),
-					"projected _FFP AlphaGen 113 holds the authored start (a constant style, "
-					"not register-driven) [orig: AlphaGen_EvaluateValue @0x5B2320]") ||
+			!expect(near(controlled.alpha_scale, 110.0f / 255.0f),
+					"projected _FFP AlphaGen 113 interpolates by its CTRL register "
+					"[orig: AlphaGen_EvaluateValue @ 0x5B2343..0x5B2359]") ||
 			!expect(near(controlled.uv.m00, 1.0f) &&
 						near(controlled.uv.m20, 1.0f),
 					"projected alpha UVs must retain the complete controlled transform")) {

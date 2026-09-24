@@ -181,13 +181,24 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
 	}
-	const Color reflect = has_info ? info.reflect_color : Color(0.7f, 0.8f, 0.9f, 0.35f);
-	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color", reflect);
+	// The draw-invariant effect parameters: routed static colours (ReflectColor
+	// W = 1) and constant generators over the effect defaults. Dynamic
+	// generators overwrite theirs every runtime frame.
+	opennova::renderer::MaterialRuntime initial;
+	if (object_data_.is_valid()) {
+		object_data_->material_static_runtime_native(p_array_index, initial);
+	}
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color",
+			Vector4(initial.reflect[0], initial.reflect[1], initial.reflect[2],
+					initial.reflect[3]));
 	// The PANM evaluator supplies the complete two-row affine transform.
-	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
-	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
-	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
-	material->set_shader_parameter("u_alpha_mod", 1.0f);
+	material->set_shader_parameter("u_uv_transform_u",
+			Vector3(initial.uv.m00, initial.uv.m10, initial.uv.m20));
+	material->set_shader_parameter("u_uv_transform_v",
+			Vector3(initial.uv.m01, initial.uv.m11, initial.uv.m21));
+	material->set_shader_parameter("u_rgb_mod",
+			Vector3(initial.rgb_r, initial.rgb_g, initial.rgb_b));
+	material->set_shader_parameter("u_alpha_mod", initial.alpha);
 	material->set_shader_parameter("u_local_light_count", 0);
 	material->set_shader_parameter("u_local_light_position", Vector3());
 	material->set_shader_parameter("u_local_light_color", Vector3(1, 1, 1));
@@ -233,18 +244,13 @@ Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {
 	return ImageTexture::create_from_image(image);
 }
 
-// A surface material needs per-frame UV/RGB/alpha evaluation only if one of
-// its generators animates. Conservative: any non-zero generator style counts.
+// A surface material needs per-frame evaluation only if a parameter its
+// effect reads can change per draw (renderer::material_runtime_is_dynamic).
 bool ObjectModel::material_runtime_is_dynamic(int p_material_index) const {
 	if (object_data_.is_null()) {
-		return true;
+		return false;
 	}
-	MaterialInfo info;
-	if (!object_data_->get_material_info(p_material_index, info)) {
-		return true;
-	}
-	return info.uv_u_style != 0 || info.uv_v_style != 0 ||
-			info.rgb_gen_style != 0 || info.alpha_gen_style != 0;
+	return object_data_->material_runtime_dynamic_native(p_material_index);
 }
 
 // Partition surface materials into runtime-dynamic slots and the static

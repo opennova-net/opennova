@@ -96,6 +96,9 @@ scrolling_cutout_geometry() {
 	material.alpha_test_enabled = true;
 	material.alpha_ref = 127;
 	material.samples_diffuse_alpha = true;
+	// Only the #UV twins evaluate MatTexCoord1.
+	std::snprintf(material.runtime_material.shader_name,
+			sizeof(material.runtime_material.shader_name), "%s", "FF_ST_OP#UV");
 	material.runtime_material.u_params.style = 16;
 	material.runtime_material.u_params.gen_rate = 1.0f;
 	material.diffuse_alpha_frames = {half_cutout_alpha()};

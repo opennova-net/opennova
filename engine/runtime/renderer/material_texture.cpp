@@ -21,6 +21,14 @@ std::string normal_material_filename(std::string_view name,
     return result;
 }
 
+// [orig: convert_material_definition @0x5B045B..0x5B04A0]
+uint8_t material_texture_runtime_type(uint8_t authored_type) {
+	if (authored_type == 3 || (authored_type >= 9 && authored_type <= 15) ||
+			authored_type > 18)
+		return 0;
+	return authored_type;
+}
+
 // [orig: sub_5B16F0 @0x5B16F0; dedicated cases @0x5B179A (6),
 // @0x5B17B7 (7), @0x5B17D4 (16), @0x5B17DD (17), @0x5B17E6 (18)]
 MaterialTextureTransform material_texture_transform(

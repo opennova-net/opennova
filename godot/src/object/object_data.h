@@ -98,7 +98,7 @@ public:
 		MATERIAL_FLAG_ALPHA_INVERT = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
 		MATERIAL_FLAG_TWO_SIDED = opennova::threedi::THREEDI_MATERIAL_FLAG_TWO_SIDED,
 		TEX_FLAG_ANIMATED = opennova::threedi::THREEDI_TEX_FLAG_ANIMATED,
-		TEX_FLAG_CLAMPED = opennova::threedi::THREEDI_TEX_FLAG_CLAMPED,
+		TEX_FLAG_STATE_OVERRIDE = opennova::threedi::THREEDI_TEX_FLAG_STATE_OVERRIDE,
 		TEX_SLOT_DIFFUSE = opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE,
 		TEX_SLOT_DETAIL = opennova::threedi::THREEDI_TEX_SLOT_DETAIL,
 		TEX_SLOT_NORMAL = opennova::threedi::THREEDI_TEX_SLOT_NORMAL,
@@ -247,6 +247,11 @@ public:
 	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values,
 			opennova::renderer::MaterialRuntime &r_runtime) const;
+	// The draw-invariant parameters (routed static colours, constant
+	// generators) and whether any read parameter changes per draw.
+	bool material_static_runtime_native(int p_index,
+			opennova::renderer::MaterialRuntime &r_runtime) const;
+	bool material_runtime_dynamic_native(int p_index) const;
 	int compute_anim_frame_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;

@@ -18,6 +18,14 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Hori
 std::string normal_material_filename(std::string_view name,
         bool loose_tga_preferred, bool dds_exists);
 
+// The loader copies an authored texture type into the runtime row only for
+// the dispatcher's producers (0..2, 4..8, 16..18); 3, 9..15 and anything past
+// 18 leave the runtime byte at the record memset's zero, an ordinary diffuse
+// load. material_texture_transform takes this runtime type.
+// [orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; convert_material_definition
+// switch @ 0x5B045B..0x5B04A0 over byte_5B0778]
+uint8_t material_texture_runtime_type(uint8_t authored_type);
+
 // Specialized producer types preserve their dimensionality: 6 and 17 are
 // volumes, 7 is the retail white AO producer, 16/18 load NQ8B/AOC8 chunks.
 // [orig: jpt_5B1737 switch @0x5B1737; the single result test @0x5B17F0 and

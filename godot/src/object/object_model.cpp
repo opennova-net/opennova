@@ -1540,6 +1540,14 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					material->set_shader_parameter("u_alpha_mod", runtime.alpha);
 					q3_parameters_changed = true;
 				}
+				if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
+					set_material_and_auxiliary_parameter(material,
+							postmultiply_material_for_index(material_index),
+							"u_reflect_color",
+							Vector4(runtime.reflect[0], runtime.reflect[1],
+									runtime.reflect[2], runtime.reflect[3]));
+					q3_parameters_changed = true;
+				}
 				stamp.runtime = runtime;
 				stamp.runtime_valid = true;
 			}

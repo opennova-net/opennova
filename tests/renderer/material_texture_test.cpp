@@ -86,7 +86,20 @@ int main() {
 			"diffuse TGA retains authored pixels");
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
-			"unsupported rows and failed loads bind the checkerboard");
+			"unsupported runtime rows and failed loads bind the checkerboard");
+	// The loader never stores those runtime values: authored 3, 9..15 and
+	// > 18 keep the memset zero and load as ordinary diffuse rows.
+	// [orig: convert_material_definition @0x5B045B..0x5B04A0]
+	for (unsigned authored = 0; authored < 256; ++authored) {
+		const bool dropped = authored == 3 || (authored >= 9 && authored <= 15) || authored > 18;
+		const uint8_t runtime = material_texture_runtime_type(static_cast<uint8_t>(authored));
+		expect(runtime == (dropped ? 0 : authored), "loader texture-type remap");
+	}
+	expect(material_texture_transform(material_texture_runtime_type(3), "Body.tga", true) ==
+					MaterialTextureTransform::Unchanged &&
+			material_texture_transform(material_texture_runtime_type(12), "Body.tga", true) ==
+					MaterialTextureTransform::Unchanged,
+			"authored types the loader drops load as plain diffuse, not the checkerboard");
 	// One result test for every row (test eax,eax @0x5B17F0 -> checkerboard
 	// @0x5B17F4): a normal row whose source yields no readable image is a
 	// failed load, never a null the material would replace with the flat normal.
