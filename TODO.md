@@ -62,35 +62,23 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Converge `engine/formats/cpt`'s bit codec on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private copy; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` § migration exceptions).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
-      recipe): the retired F3 pages return as engine ImGui windows as they are
-      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587;
-      the Environment window with the weather command layer, PR #597; the
-      Weapon window landed as the dope-sheet ACTION editor over the equipped
-      weapon's FSM, which also covers the FP-weapon half of "animation");
-      still open: sim transport
-      (play/pause/step; the MCP
-      `game_debug` control plane still drives these), script vars, net, particles,
-      occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
-      typed API), audio, animation, player (with the pose dump the
-      retired `DebugSnapshotWriter` produced for `pose_replay_probe` /
-      `terrain_seam_probe`), and the `PerfTimeline` ring. Data the shell alone
-      has crosses as VALUE slots or typed records, never Godot objects.
-- [ ] World-space debug overlays with no ImGui home (the GDScript F3 views and
-      their `DebugViewSet` owner were retired 2026-09-02, ADR 0039 §6
-      amendment; the AI / Rays / Physics windows keep their data panes and
-      capture controls but draw nothing in-world): AI routes/labels/targets/
-      rings, collision boxes + hit flashes, hitbox meshes, portal faces, ray
-      lines, round trails, skeleton bones, user-point markers, particle effect
-      boxes. Each returns as an engine window (or a draw layer of its window)
-      when wanted; the native feeds that survive are
-      `Simulation.get_hitbox_debug()` (the round ring's mirror died with ADR 0043 slice G9; `tests/world/round_debug_trail_test.cpp` reads `RoundSim` directly) and the ray /
-      contact capture rings behind `native_rays_snapshot` /
-      `native_physics_snapshot`.
+      recipe) still open: the occlusion decision inspector (portal walk,
+      culled entities), rounds, animation (the FP-weapon half is the Weapon
+      window), the pose dump the retired `DebugSnapshotWriter` produced for
+      `pose_replay_probe` / `terrain_seam_probe`, and the `PerfTimeline`
+      ring. Data the shell alone has crosses as VALUE slots or typed records,
+      never Godot objects.
+- [ ] World-space overlays not yet returned as window layers (the Game-view
+      layer framework is `overlay_canvas.h`; entity selection/labels, AI, rays,
+      contacts and hit meshes landed): collision boxes and the player
+      capsule, portal faces, round trails, skeleton bones, user-point
+      markers, particle effect boxes.
 - [ ] Stats window info cells not carried over from the retired page (they read
-      Godot objects at refresh): Performance draws/objs/prims/nodes on the Render
-      row, the a11y flag on Flush tail, effects live count,
+      Godot objects at refresh): the a11y flag on Flush tail,
       fire/destruction/throwable/wire present stats, occlusion counts (`occl`).
-      Each returns as a VALUE slot fed by the shell sampler that owns the source.
+      Each returns as a VALUE slot fed by the shell sampler that owns the
+      source (the draws/objects/primitives/nodes and the live effect counts
+      are the Render and Particles windows' now).
 ## Project health follow-ups
 
 - [ ] NovaWorld production deploy + cutover (operator-executed, one-time): the

@@ -145,6 +145,18 @@ shared-product and always-built ImGui portions of decisions 1, 3 and 4 below.
    with the views). The windows have no world-space overlay yet; under this
    item's rule an overlay returns as an engine window when wanted, and
    `TODO.md` lists the overlays with no ImGui home.
+   *Amended 2026-09-23:* overlays return as **draw layers of their windows**,
+   drawn by the engine on the Game window's ImGui draw list over the game
+   image while the tools are open (`engine/runtime/devtools/overlay_canvas.h`).
+   The shell pushes the game camera as one mission-frame view-projection
+   record (`overlay_camera.h`; it composes projection x view x the
+   presentation map once, the one conversion a binding may do), so every
+   layer works in the mission frame the engine's records carry; there is no
+   depth test, and a layer is toggled from the "Overlays" menu independently
+   of its window. The Entities (selection, labels), AI (labels, routes,
+   targets, rings), Rays, Physics (contacts, hit meshes) layers landed with
+   it; the pick nodes live in `godot/game/debug/pick/` and two samplers
+   remain (`root_frame_phase_sampler.gd`, `root_render_stats_sampler.gd`).
 7. **Not an editor.** The tools inspect and, later, control a running game.
    ADR 0037 stands: no authoring, no project state, no asset database.
 

@@ -1,12 +1,15 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
-// Game surface, the Stats window (both open by default), the Entities and
-// Entity Properties windows (closed by default, opened by a world pick; the
-// pushed-record / control-request channel, ADR 0042 d6 + ADR 0043 d12), the
-// Weapon window (the DCC-style ACTION editor over the equipped weapon's FSM),
-// the Environment, AI, Rays and Physics windows (all closed by default, opened
-// from the "Windows" menu), and ImGui's demo window (the docking/multi-viewport
-// smoke test). Debug builds only (OPENNOVA_DEVTOOLS); the release GDExtension
-// flavour compiles this out and its DevTools node is inert.
+// Game surface (the game image, the transport toolbar, the Game-view overlay
+// layers), the Stats window (both open by default), the Entities and Entity
+// Properties windows (opened by a world pick; the pushed-record /
+// control-request channel, ADR 0042 d6 + ADR 0043 d12), the Weapon window
+// (the DCC-style ACTION editor over the equipped weapon's FSM), the
+// Environment, AI, Rays, Physics, Script, Player, Render, Particles, Audio,
+// Net and Log windows (closed by default, opened from the "Windows" menu),
+// the control board every window reads the debug-control rows through, and
+// ImGui's demo window (the docking/multi-viewport smoke test, under Help).
+// Debug builds only (OPENNOVA_DEVTOOLS); the release GDExtension flavour
+// compiles this out and its DevTools node is inert.
 #pragma once
 
 #include <runtime/devtools/control_board.h>
