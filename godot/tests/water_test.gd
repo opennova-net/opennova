@@ -438,7 +438,8 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 
 	# Exercise the exact strip payload consumed by the shader too. Sample each
 	# row's LEFT vertex because vbase is built from that vertex's rhw and then
-	# copied across the row.
+	# copied across the row. vbase = 1 - min(300 * rhw + 0.15, 2) / 256
+	# (flt_7DBF68 = 300.0, retail render_water_strip_detailed @ 0x5c2f04).
 	var mesh := water.get_mesh_instance().mesh as ArrayMesh
 	assert_gt(mesh.get_surface_count(), 0,
 			"the reflected projection fixture must produce water strip rows")
@@ -455,7 +456,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 	])
 	for vertex_index in left_vertices:
 		var base := vertex_index * 4
-		var q := minf(297.0 * custom0[base + 1] + 0.15, 2.0)
+		var q := minf(300.0 * custom0[base + 1] + 0.15, 2.0)
 		var vbase_bias := q / 256.0
 		var raw_strip_uv := Vector2(custom0[base + 2], custom0[base + 3])
 		var sampled_strip_uv := Vector2(0.5, 0.5) + (

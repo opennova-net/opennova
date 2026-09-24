@@ -217,19 +217,20 @@ void water_clip_row_to_viewport(const WaterStripView &view, float x0, float y0,
 int water_strip_stride(float row_rhw);
 
 // The per-vertex depth ("fog W") chain: rhw = 1/t, z = (t * uv_scale -
-// uv_bias) * rhw, clamped to [8.0422355e-05 (0x38A8A8AC), 0.99993896
-// (0x3F7FFC00 = 1 - 2^-14)] [orig: @ 0x5c2c0c..0x5c2c4a; clamp constants
+// uv_bias) * rhw, clamped to [4.0e-5 (0x3827C5AC), 0.99996948
+// (0x3F7FFE00 = 1 - 2^-15)] [orig: @ 0x5c2c0c..0x5c2c4a; clamp constants
 // flt_7DBF7C / flt_7C4658]. uv_scale/uv_bias are the WaterUvState pair
 // (flt_8412B0/B4) — the same globals serve the UV transform and this
 // projective depth curve (z hits uv_scale's 0.99996948 * w/(w-0.2) shape,
 // = 0.99996948 exactly at t = fog-int w).
 float water_strip_depth(float view_depth, float uv_scale, float uv_bias);
 
-// Depth clamp bounds [orig: flt_7DBF7C @ 0x5c2c35; flt_7C4658 @ 0x5c2c1f].
-// env-tod-re.md's "[4e-5, 1 - 2^-15]" was the low-tier approximation; the
-// detailed tier's witnessed bits are these.
-inline constexpr float kWaterStripDepthMin = 8.0422355e-05f; // 0x38A8A8AC
-inline constexpr float kWaterStripDepthMax = 0.99993896f;    // 0x3F7FFC00 = 1 - 2^-14
+// Depth clamp bounds, the same pair in both tiers [orig: flt_7DBF7C
+// @ 0x5c2c35 and flt_7C4658 @ 0x5c2c1f; low tier @ 0x5c2212/@ 0x5c2226].
+// The upper bound is the scene viewport MaxZ (the render_main_scene clear
+// depth reads the same constant @ 0x5c15af).
+inline constexpr float kWaterStripDepthMin = 4.0e-5f;     // 0x3827C5AC
+inline constexpr float kWaterStripDepthMax = 0.99996948f; // 0x3F7FFE00 = 1 - 2^-15
 
 // The per-row color pipeline [orig: @ 0x5c2d3f..0x5c2ef6] — diffuse and
 // specular are ROW-CONSTANT (written to all 3 vertices @ 0x5c2f0a..0x5c2f2b).
@@ -240,13 +241,13 @@ inline constexpr float kWaterStripDepthMax = 0.99993896f;    // 0x3F7FFC00 = 1 -
 // Normal path [orig: @ 0x5c2e22..0x5c2e9d]:
 //   brightness = int(lerp(192*k, 38.4*k, sin))        [flt_7DBFA4/flt_7DBFA8]
 //   alpha_term = int(lerp(0.0, 229.5*base, sin))      [flt_7C3284/flt_7DBFA0]
-//   a = clamp(int(t * 2^24 / fog_end_fp), 0, 255)     [dbl_7DBF98 = 2^24]
+//   a = clamp(int(t * 255 * 2^16 / fog_end_fp), 0, 255) [dbl_7DBF98 = 16711680.0]
 //   dist_alpha = 255 - a*a/255
 //   diffuse = (alpha_term * dist_alpha / 255) << 24 | 0x10101 * brightness
 // Underwater view [orig: @ 0x5c2df3..0x5c2e20]: diffuse = 0xFFFFFFFF and
-// dist_alpha = clamp(255 - int(t * 2^24 / fog_end_fp), 0, 255) — LINEAR, no
+// dist_alpha = clamp(255 - int(t * 255 * 2^16 / fog_end_fp), 0, 255) — LINEAR, no
 // square. (The doc's "x255 <-> x229.5 doubles" swap is the LOW tier's
-// dbl_7DBF70 @ 0x5c244b; the detailed tier multiplies 2^24 on both paths and
+// dbl_7DBF70 @ 0x5c244b; the detailed tier multiplies 255 x 2^16 on both paths and
 // its 229.5 is the float alpha_term scale.)
 // Specular [orig: @ 0x5c2eb5..0x5c2ef4]: (dist_alpha << 24) |
 // WaterColorLit RGB * int(lerp(255*(1-base), 128*(1-base), sin)) >> 8
@@ -291,8 +292,8 @@ struct WaterStripRows {
 	// The texm3x2 reflection-bump rows [orig: @ 0x5c2f83..0x5c3067]:
 	// t1 = (right.x, right.z) * (-min(rhw, 0.05)/2), screen U = (sx-minX)/W;
 	// t2 = (fwd.x, fwd.z) * (-5*min(rhw, 0.05)), screen V = vbase -
-	// (sy-minY)/H with vbase = 1 - min(297*rhw + 0.15, 2)/256
-	// [flt_7C59B0=-0.5, flt_7DBF94=-5, flt_7C68E8=0.05, flt_7DBF68=297,
+	// (sy-minY)/H with vbase = 1 - min(300*rhw + 0.15, 2)/256
+	// [flt_7C59B0=-0.5, flt_7DBF94=-5, flt_7C68E8=0.05, flt_7DBF68=300,
 	//  flt_7C6FA4=0.15, flt_7C3B90=2, flt_7C3DD4=1/128]. The underwater view
 	// flips t2's V to 1 - V on all three vertices [orig: @ 0x5c306f..0x5c3085].
 	std::vector<float> t1; // 3 per vertex                     (+0x20)

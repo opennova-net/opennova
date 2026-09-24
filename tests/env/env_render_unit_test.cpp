@@ -813,10 +813,16 @@ int main() {
 		if (!expect(s == 0x4190B11Du, "prng step 4")) return 1;
 
 		const WaterNoiseTables tables = water_init_noise_tables();
-		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol.
+		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol,
+		// under the 24-bit x87 precision control CreateDevice leaves (no
+		// D3DCREATE_FPU_PRESERVE [orig: CGfxDevice_CreateDevice @ 0x67e9fd]):
+		// sin * -64 rounds to exactly -64 / +64 at i = 64 / 192, so those bytes
+		// are 0xC0 / 0x40 [orig: Water_InitNoiseFieldAndSineLut @ 0x5c0316].
 		if (!expect(tables.sine_lut[0] == 128 && tables.sine_lut[32] == 173 &&
-		            tables.sine_lut[64] == 191 && tables.sine_lut[128] == 128 &&
-		            tables.sine_lut[192] == 65, "sine LUT landmarks")) return 1;
+		            tables.sine_lut[64] == 192 && tables.sine_lut[128] == 128 &&
+		            tables.sine_lut[192] == 64 && tables.sine_lut[63] == 191 &&
+		            tables.sine_lut[65] == 191 && tables.sine_lut[191] == 65 &&
+		            tables.sine_lut[193] == 65, "sine LUT landmarks")) return 1;
 		uint32_t lut_sum = 0;
 		for (int i = 0; i < 256; ++i) lut_sum += tables.sine_lut[i];
 		if (!expect(lut_sum == 32768u, "sine LUT sum (symmetry)")) return 1;
@@ -907,7 +913,8 @@ int main() {
 		if (!expect(color7[0] == 0xE17C7C7Cu, "color pixel [0] (t=7)")) return 1;
 		uint32_t sum0 = 0, sum7 = 0;
 		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) { sum0 += color0[i]; sum7 += color7[i]; }
-		if (!expect(sum0 == 0x45E0C3DCu, "color checksum (t=0)")) return 1;
+		// The t=0 pass reads the single-precision LUT bytes 64/192 (0xC0/0x40).
+		if (!expect(sum0 == 0x5CA88BA4u, "color checksum (t=0)")) return 1;
 		if (!expect(sum7 == 0x14D0B3D2u, "color checksum (t=7)")) return 1;
 
 		// Normal/DuDv pass: B=0xFF, G/R = 2x saturated derivative + 0x80.
@@ -1030,11 +1037,17 @@ int main() {
 		if (!expect(water_strip_stride(0.0181f) == 9, "stride lands the high edge (int(9.05) = 9)")) return 1;
 		if (!expect(water_strip_stride(0.1f) == 9, "stride clamps down to 9")) return 1;
 
-		// Depth ("fog W") clamps [orig: flt_7DBF7C / flt_7C4658 @ 0x5c2c1f..0x5c2c4a].
-		if (!expect(water_strip_depth(0.1f, 1.0f, 0.2f) == kWaterStripDepthMin,
-		            "depth clamps at the 8.042e-5 lower bound")) return 1;
-		if (!expect(water_strip_depth(1.0e9f, 1.0001649f, 0.2f) == kWaterStripDepthMax,
-		            "depth clamps at the 1 - 2^-14 upper bound")) return 1;
+		// Depth ("fog W") clamps [orig: flt_7DBF7C / flt_7C4658 @ 0x5c2c1f..0x5c2c4a]:
+		// the witnessed bits 0x3827C5AC (4.0e-5) and 0x3F7FFE00 (1 - 2^-15).
+		const auto float_bits = [](float value) {
+			uint32_t bits = 0;
+			std::memcpy(&bits, &value, sizeof(bits));
+			return bits;
+		};
+		if (!expect(float_bits(water_strip_depth(0.1f, 1.0f, 0.2f)) == 0x3827C5ACu,
+		            "depth clamps at the 4.0e-5 lower bound")) return 1;
+		if (!expect(float_bits(water_strip_depth(1.0e9f, 1.0001649f, 0.2f)) == 0x3F7FFE00u,
+		            "depth clamps at the 1 - 2^-15 upper bound")) return 1;
 		if (!expect(near(water_strip_depth(100.0f, 1.0f, 0.2f), 0.998f, 1e-5f),
 		            "interior depth follows (t*scale - bias)/t")) return 1;
 
@@ -1043,15 +1056,16 @@ int main() {
 		// constants: base 0.5, k = 0.2 + 0.8*0.5 = 0.6;
 		// brightness = int(38.4k + (192k - 38.4k)*(1 - 0.6)) = int(59.904) = 59;
 		// alpha_term = int(229.5*0.5*0.6) = int(68.85) = 68;
-		// a = int(512 * 2^24 / (1024<<16)) = 128; dist = 255 - 128*128/255 = 191;
-		// alpha = 68*191/255 = 50 -> diffuse 0x32 | 0x10101*0x3B.
+		// a = int(512 * 16711680 / (1024<<16)) = int(127.5) = 127 (dbl_7DBF98 =
+		// 255 x 2^16 [orig: fmul @ 0x5c2e4e]); dist = 255 - 127*127/255 = 192;
+		// alpha = 68*192/255 = 51 -> diffuse 0x33 | 0x10101*0x3B.
 		const float ray345[3] = {0.0f, -3.0f, 4.0f};
 		const WaterRowColors murky = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, false);
-		if (!expect(murky.diffuse == 0x323B3B3Bu, "murk-chain diffuse bytes")) return 1;
+		if (!expect(murky.diffuse == 0x333B3B3Bu, "murk-chain diffuse bytes")) return 1;
 		// spec term = int(128*0.5 + 127*0.5*(1 - 0.6)) = int(89.4) = 89:
-		// R 128*89>>8 = 44, G 64*89>>8 = 22, B 32*89>>8 = 11, alpha = 191.
-		if (!expect(murky.specular == 0xBF2C160Bu,
+		// R 128*89>>8 = 44, G 64*89>>8 = 22, B 32*89>>8 = 11, alpha = 192.
+		if (!expect(murky.specular == 0xC02C160Bu,
 		            "specular = WaterColorLit x angle term >> 8 under the dist alpha")) return 1;
 
 		// Underwater view: murk skipped (solid white diffuse) and the LINEAR
@@ -1060,17 +1074,19 @@ int main() {
 		const WaterRowColors under = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, true, false);
 		if (!expect(under.diffuse == 0xFFFFFFFFu, "underwater diffuse is solid white")) return 1;
-		if (!expect(under.specular == 0x7F000000u,
+		// 255 - int(512 * 16711680 / (1024<<16)) = 255 - 127 = 128
+		// [orig: fmul dbl_7DBF98 @ 0x5c2dfd].
+		if (!expect(under.specular == 0x80000000u,
 		            "underwater specular carries only the linear 255 - a")) return 1;
 
 		// Nightvision redraw: the flat 0.1 base [orig: flt_7C69F4 @ 0x5c2d5a]
 		// and no specular RGB [orig: @ 0x5c2ef8]: k = 0.28,
 		// brightness = int(0.28*(38.4 + 153.6*0.4)) = 27;
-		// alpha = int(229.5*0.1*0.6) = 13 -> 13*191/255 = 9.
+		// alpha = int(229.5*0.1*0.6) = 13 -> 13*192/255 = 9.
 		const WaterRowColors nv = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, true);
 		if (!expect(nv.diffuse == 0x091B1B1Bu, "nightvision diffuse (0.1 base chain)")) return 1;
-		if (!expect(nv.specular == 0xBF000000u, "nightvision drops the specular RGB")) return 1;
+		if (!expect(nv.specular == 0xC0000000u, "nightvision drops the specular RGB")) return 1;
 
 		// Screen block: identity-rotation view 100 units above the plane,
 		// 640x480 viewport, proj m00 = m11 = 1 with w = view z.
@@ -1205,7 +1221,8 @@ int main() {
 
 		// The texm3x2 row-register constants [orig: @ 0x5c2efd..0x5c3067]:
 		// t1 = right.xz * (-min(rhw, 0.05)/2), t2 = fwd.xz * (-5*min(rhw, 0.05)),
-		// vbase = 1 - min(297*rhw + 0.15, 2)/256, screen V = vbase - sy/H.
+		// vbase = 1 - min(300*rhw + 0.15, 2)/256, screen V = vbase - sy/H
+		// (flt_7DBF68 = 0x43960000 = 300.0 [orig: fmul @ 0x5c2f04]).
 		// These were previously unpinned (env #37's investigation found the gap).
 		{
 			WaterStripView vb = v;
@@ -1226,13 +1243,29 @@ int main() {
 			if (!expect(near(rb.t2[0], -5.0f * bump0 * 0.6f, 1e-8f) &&
 			            near(rb.t2[1], -5.0f * bump0 * 0.8f, 1e-8f),
 			            "t2.xy = forward.xz * (-5 * min(rhw, 0.05))")) return 1;
-			float q0 = 297.0f * rhw0 + 0.15f;
+			float q0 = 300.0f * rhw0 + 0.15f;
 			if (q0 > 2.0f) q0 = 2.0f;
 			const float vbase0 = 1.0f - (q0 * 0.5f) * 0.0078125f;
 			if (!expect(near(rb.t1[2], rb.screen_pos[0] / 640.0f, 1e-6f),
 			            "screen U normalizes against the viewport width")) return 1;
 			if (!expect(near(rb.t2[2], vbase0 - rb.screen_pos[1] / 480.0f, 1e-5f),
-			            "screen V = vbase - sy/H (the 297/0.15/2/(1/128) chain)")) return 1;
+			            "screen V = vbase - sy/H (the 300/0.15/2/(1/128) chain)")) return 1;
+			// The nearest row whose 300*rhw + 0.15 stays under the clamp makes
+			// the multiplier itself observable (297 would move V by 3*rhw/256).
+			std::size_t pin_vertex = 0;
+			float pin_rhw = -1.0f;
+			for (int row = 0; row < nb; ++row) {
+				const std::size_t vertex = static_cast<std::size_t>(row) * 3;
+				if (300.0f * rb.rhw[vertex] + 0.15f < 2.0f && rb.rhw[vertex] > pin_rhw) {
+					pin_rhw = rb.rhw[vertex];
+					pin_vertex = vertex;
+				}
+			}
+			const float q_pin = 300.0f * pin_rhw + 0.15f;
+			if (!expect(pin_rhw > 1.0e-3f && near(rb.t2[pin_vertex * 3 + 2],
+			            1.0f - (q_pin * 0.5f) * 0.0078125f -
+			                    rb.screen_pos[pin_vertex * 2 + 1] / 480.0f, 1e-6f),
+			            "unclamped-row screen V pins the flt_7DBF68 = 300 multiplier")) return 1;
 
 			// A low camera reaches near rows whose rhw exceeds the clamp: the
 			// bump saturates at 0.05 [orig: flt_7C68E8 @ 0x5c2f0d].
