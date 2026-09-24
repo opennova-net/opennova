@@ -409,6 +409,7 @@ func test_the_shell_verbs_reach_the_host() -> void:
 	assert_eq(int(paused.error), OK, "the transport row pauses the runtime")
 	assert_false(_runtime.is_playing())
 	assert_eq(int(_controls.invoke(&"runtime_transport", ["resume"], true).error), OK)
+	assert_eq(_host.resume_calls, 1, "resume runs the host's resume leg")
 	assert_true(_runtime.is_playing())
 
 

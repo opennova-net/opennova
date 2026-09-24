@@ -50,9 +50,17 @@ class ShellHost:
 			return null
 		return _adapter.get_viewport()
 
-	## F3's local Stop button and the runtime_return_to_menu row share the
-	## shell's one gated return leg without classifying leaving a multiplayer
-	## session as an authoritative world mutation.
+	## The runtime_transport row's resume verb is game_control's resume leg:
+	## it plays the runtime and closes a pause overlay (the in-game menu, the
+	## armory) left up.
+	func _resume() -> Error:
+		if not is_instance_valid(_adapter):
+			return ERR_UNAVAILABLE
+		return _adapter.mcp_game_control("resume")
+
+	## The runtime_return_to_menu row and game_control share the shell's one
+	## gated return leg without classifying leaving a multiplayer session as
+	## an authoritative world mutation.
 	func _return_to_menu() -> Error:
 		if not is_instance_valid(_adapter):
 			return ERR_UNAVAILABLE

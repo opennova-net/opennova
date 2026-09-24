@@ -464,6 +464,16 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	assert_eq(String(state["shell"]["state"]), "world",
 			"resume closes the armory and hands play back")
 
+	# F3's Resume is the debug-control table's runtime_transport row: it takes
+	# the same shell resume leg, so a pause overlay left up closes too.
+	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK)
+	var resumed := adapter.get_debug_controls().invoke(&"runtime_transport", ["resume"], true)
+	assert_eq(int(resumed.error), OK, "the transport row resumes over the pause overlay")
+	state = adapter.get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "world",
+			"the transport row's resume hands play back through the shell")
+	assert_false(menu_shell.visible, "the transport row's resume hides the overlay")
+
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
