@@ -505,6 +505,11 @@ public:
 	// RenderingServer frame_post_draw: stamps when the frame finished
 	// rendering, the clock a mission-start frame re-bases to.
 	void on_frame_post_draw();
+	// Seconds since the last frame finished rendering (negative before the
+	// first). The shell's frame loop hands it to the session on each frame
+	// (MissionFrameInput.since_render_seconds); a synthetic driver stepping
+	// tick() leaves it unsampled and banks its own delta.
+	double get_seconds_since_render() const;
 	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);

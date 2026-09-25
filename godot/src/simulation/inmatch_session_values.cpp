@@ -10,6 +10,10 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_delta_seconds);
 	ClassDB::bind_method(D_METHOD("get_delta_seconds"),
 			&MissionFrameInput::get_delta_seconds);
+	ClassDB::bind_method(D_METHOD("set_since_render_seconds", "seconds"),
+			&MissionFrameInput::set_since_render_seconds);
+	ClassDB::bind_method(D_METHOD("get_since_render_seconds"),
+			&MissionFrameInput::get_since_render_seconds);
 	ClassDB::bind_method(D_METHOD("get_camera_position"),
 			&MissionFrameInput::get_camera_position);
 	ClassDB::bind_method(D_METHOD("is_listener_valid"),
@@ -27,6 +31,8 @@ void MissionFrameInput::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "delta_seconds"),
 			"set_delta_seconds", "get_delta_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "since_render_seconds"),
+			"set_since_render_seconds", "get_since_render_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
 }
@@ -41,6 +47,10 @@ double MissionFrameInput::get_delta_seconds() const {
 
 void MissionFrameInput::set_since_render_seconds(double p_seconds) {
 	value_.since_render_seconds = p_seconds;
+}
+
+double MissionFrameInput::get_since_render_seconds() const {
+	return value_.since_render_seconds;
 }
 
 void MissionFrameInput::set_camera_sample(const Vector3 &p_position,
