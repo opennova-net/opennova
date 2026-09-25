@@ -181,11 +181,13 @@ the same text transport, the same add-on.
    animation, reading a key as a rotation and ignoring the dead bone fields.
    `catalog` also prints the engine's anim slot keys and event trigger bits.
 
-13. **A rig's rest pose is its bind.** A channel key is the bone's rotation in
-   the model's frame composed against the bind, and the bind is the reset
-   clip's first key [orig: AnimChannel_ComputeBoneMatrices @0x410da0], so the
-   add-on reads a key as `rest * pose * rest^-1` and the import turns each rest
-   bone onto the reset clip's key. Heads, lengths and weights do not move, so
+13. **A rig's rest pose is its bind.** A channel key IS the bone's rotation in
+   the model's frame, and the bind it is measured against is the reset clip's
+   first key, which the runtime carries as the SKELETON's rest and poses with
+   the key, so what a bone deforms by is `key * bind^-1`
+   [orig: AnimMap_RegisterEntity @0x40bb60 pins the bind; the loaders build the
+   rest from it]. The add-on therefore poses a bone with the key itself and the
+   import turns each rest bone onto the reset clip's key. Heads, lengths and weights do not move, so
    the model still exports the same model, and a clip shows the pose the game
    draws. A clip is an Action on the rig's NLA tracks; the table is the rows on
    the model root; the root track is the bone `!RM`, outside the BN## parts,

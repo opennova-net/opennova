@@ -123,9 +123,10 @@ on the model the rig belongs to:
   right footstep, 4, 8 and 16 the ammo rows, 0x20 to 0x400 the six foley sounds
   (`opennova-3di catalog` prints them). A clip that carries its own capsule
   extents keys them beside it.
-- **The rest pose is the bind.** A channel is the bone's rotation measured
-  against the reset clip's first key, so the rest pose a clip departs from is
-  what the game draws at that clip's start. Import turns each rest bone onto
+- **The rest pose is the bind.** A channel is the bone's own rotation in the
+  model's frame, and the runtime carries the reset clip's first key as the
+  skeleton's rest, so a bone deforms by `key * bind^-1`: with the rest pose set
+  to that key, a clip poses the rig exactly as the game draws it. Import turns each rest bone onto
   that key; heads, lengths and weights stay put, so the model is unchanged.
 - **Bone names live in the clip.** A model's part table carries none, so a rig
   imported from a `.3di` alone names its bones `BN##`; a clip labels them

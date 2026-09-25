@@ -254,12 +254,10 @@ class Loader:
                       "Blender keys every frame, so a re-export densifies them")
         arm_rot = arm.matrix_world.to_3x3().normalized()
         order = {pb.name: i for i, pb in enumerate(bones)}
-        # The bind every key is measured against is the RIG's rest pose, one
-        # bind for the whole set, as the runtime pins the reset clip's records
-        # once per entity [orig: AnimMap_RegisterEntity @0x40bb60].
-        bind = [self.mission_rot(arm_rot @ m.to_3x3().normalized()) for m in rest]
-        # The pose that shows what the game draws: the key measured against the
-        # bind, then the rest kinematics for the head.
+        # The pose that shows what the game draws: a key IS the bone's rotation
+        # in the model's frame, and the rig's rest pose is the bind the runtime
+        # measures it against, so the key poses the bone directly. The head
+        # follows the rest kinematics.
         for f in range(samples):
             world = []
             for i, pb in enumerate(bones):
@@ -268,7 +266,7 @@ class Loader:
                     continue
                 keys = rows[i]["keys"]
                 key = keys[min(f, len(keys) - 1)]
-                pose = bind[i].inverted() @ Quaternion((key[3], key[0], key[1], key[2])) @ bind[i]
+                pose = Quaternion((key[3], key[0], key[1], key[2]))
                 rot = arm_rot.inverted() @ (self.basis @ pose.to_matrix() @ self.basis.transposed())
                 parent = pb.parent
                 if parent is None:
@@ -416,11 +414,15 @@ class Loader:
         the bone."""
         arm, rows, parts, count, held, above = self.pending
         self.pending = None
+        # By NAME through the part order: Blender keeps its bones sorted by name,
+        # so the collection's order is not the part order once the clip has
+        # labelled them.
+        by_part = bone_rows(arm)
         for i in range(count):
             ob = parts[i]
             ob.parent = arm
             ob.parent_type = "BONE"
-            ob.parent_bone = arm.pose.bones[i].name
+            ob.parent_bone = by_part[i].name
             ob.matrix_parent_inverse = Matrix.Identity(4)
             ob.matrix_world = held[i]
             if i > 0:

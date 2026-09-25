@@ -200,7 +200,10 @@ asking an author for it:
   5.0e-7). This is the same relation the runtime reads from the other side —
   `mat3(stored) x channel-at-reset == identity` — so the bind a clip is
   measured against is its own first key [orig: `AnimChannel_ComputeBoneMatrices
-  @ 0x410da0`]. Nothing authors a bind.
+  @ 0x410da0`]. Nothing authors a bind. The production loaders carry that bind
+  as the SKELETON's rest and pose it with the channel, so what a bone deforms
+  by is `key * bind^-1`; an authoring front end that poses a rig with the key
+  over a rest set to the bind shows exactly what the game draws.
 - **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
   event record with no trigger word).
 - **The header words the reader never names are constant**: word 8 = 0,

@@ -190,8 +190,10 @@ reads a `.adm` (or a single `.bad`) back onto the active model's rig.
 - **Events** are the rig's keyed **Trigger** word: 1 and 2 place the left and
   right footstep, 4, 8 and 16 fire the ammo rows, and 0x20 upwards play the six
   foley sounds of the body's sound profile. `opennova-3di catalog` lists them.
-- **The rest pose is the bind.** Import turns each rest bone onto the reset
-  clip's first key, so a clip poses the rig exactly as the game draws it. The
+- **The rest pose is the bind.** A clip's channel is the bone's own rotation,
+  measured in the game against the reset clip's first key, so import turns each
+  rest bone onto that key and a clip then poses the rig exactly as the game
+  draws it. The
   bone heads, lengths and weights do not move, so the model still exports the
   same model. Bone names come from the clips (a `.3di` carries none), and their
   vertex groups are renamed with them.

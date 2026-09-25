@@ -20,11 +20,11 @@
 #              `o3d.capsule_bottom` and `o3d.capsule_top` beside it; otherwise
 #              the engine derives them from the pose.
 #
-# The key a channel stores is `rest * pose * rest^-1` of the bone's rotation in
-# the model's own frame: the engine composes a channel against the bind as
-# `bind^-1 * key` [orig: AnimChannel_ComputeBoneMatrices @0x410da0], the bind is
-# the reset clip's first key, and a rig's rest pose IS its bind, so the pose a
-# clip shows here is the pose the game draws. Nothing else is stored: the bind,
+# A channel key is the bone's rotation in the model's own frame, and the bind
+# every clip is measured against is the reset clip's first key, which the
+# runtime carries as the skeleton's REST [orig: AnimMap_RegisterEntity @0x40bb60
+# pins it; the loader poses that rest with the key]. A rig's rest pose IS that
+# bind, so the pose a clip shows here is the pose the game draws. Nothing else is stored: the bind,
 # the bone positions, the capsule extents and the terminal duplicate key are the
 # engine's own derivations (formats/bad/bad_build.h), recomputed on every export.
 
@@ -197,7 +197,6 @@ class AnimExporter:
         held = (data.action, data.use_nla)
         data.use_nla = False
         data.action = action
-        rest_rot = [m.to_3x3().normalized() for m in rest]
         order = {pb.name: i for i, pb in enumerate(bones)}
         try:
             for frame in frames:
@@ -206,9 +205,12 @@ class AnimExporter:
                 arm_rot = arm_world.to_3x3().normalized()
                 posed = [arm_world @ pb.matrix for pb in bones]
                 for i, pb in enumerate(bones):
-                    pose_rot = self.mission_rot(arm_rot @ pb.matrix.to_3x3().normalized())
-                    bind = self.mission_rot(arm_rot @ rest_rot[i])
-                    keys[i].append(bind @ pose_rot @ bind.inverted())
+                    # A channel key IS the bone's rotation in the model's frame:
+                    # the runtime carries the bind as the skeleton's REST and
+                    # poses it with the key, so the deform is `key * bind^-1`
+                    # [orig: BoneAnim_BuildWorldMatrices @0x40c400 over the bind
+                    # the reset clip pins, AnimMap_RegisterEntity @0x40bb60].
+                    keys[i].append(self.mission_rot(arm_rot @ pb.matrix.to_3x3().normalized()))
                     # The bone's own displacement: where its head sits, less
                     # where the rest offset alone would put it.
                     parent = pb.parent
