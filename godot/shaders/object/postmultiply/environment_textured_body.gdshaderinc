@@ -8,6 +8,7 @@
 // P3 is a FOGMODE_SHADER pass (vscPostMultiplyT1's oFog): planar fog.
 #define OBJ_FOG_VERTEX_SHADER
 #include "res://shaders/object/shared.gdshaderinc"
+#include "res://shaders/object/foliage_mask.gdshaderinc"
 
 uniform sampler2D u_post_screen : hint_screen_texture, filter_nearest, repeat_disable;
 uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;
@@ -29,6 +30,12 @@ void vertex() {
 }
 
 void fragment() {
+	// A person's P3 layer draws in its wave's flush after the foliage depth
+	// masks: behind any mask the wave tests against it leaves the
+	// destination untouched (obj_foliage_mask_outcome).
+	if (obj_foliage_mask_outcome(FRAGCOORD, CAMERA_POSITION_WORLD) != 0) {
+		discard;
+	}
 	vec4 source = obj_sample_aniso2(u_diffuse, v_raw_uv, u_diffuse_max_lod);
 	#ifdef OBJ_POSTMULTIPLY_CUTOUT
 	bool accepted = u_alpha_test_invert > 0.5

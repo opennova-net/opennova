@@ -325,19 +325,28 @@ bool tier_specific_foliage_sampler_routing() {
 		++model_calls;
 		return 0u;
 	};
+	// The detail map gate samples the key's ATLAS halves plus the local
+	// offsets (keyHi & 0x3FF + A, keyLo & 0x3FF + B), not the world position:
+	// a cell whose world minimum is (16, 48) routed to atlas (528, 560) takes
+	// its first candidate (world 18.63215637, 49.69863892) at atlas
+	// (530.63215637, 561.69863892).
+	// [orig: generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF),
+	// @ 0x5fff84..0x5fff9d (sample coordinates), @ 0x600065 (the gate)]
+	FrameRequest routed = one_detail(10.0f);
+	routed.detail_cells[0].atlas_x = 528;
+	routed.detail_cells[0].atlas_z = 560;
 	Runtime detail_runtime;
-	detail_runtime.render_frame(one_detail(10.0f), world);
-	const auto detail_output =
-	    detail_runtime.render_frame(one_detail(10.0f), world);
+	const auto detail_output = detail_runtime.render_frame(routed, world);
+	const auto atlas_near = [](int32_t fixed, double expected) {
+		return std::fabs(static_cast<double>(fixed) - expected * 65536.0) <= 2.0;
+	};
 	if (!expect(detail_calls > 0 && model_calls == 0 &&
 	                detail_output.detail.size() == 72 &&
-	                sampled_detail_x ==
-	                    static_cast<int32_t>(
-	                        detail_output.detail[0].center.x * 65536.0f) &&
-	                sampled_detail_z ==
-	                    static_cast<int32_t>(
-	                        detail_output.detail[0].center.z * 65536.0f),
-	            "detail generation uses only the flat-map sampler")) {
+	                atlas_near(sampled_detail_x, 530.63215637) &&
+	                atlas_near(sampled_detail_z, 561.69863892) &&
+	                near(detail_output.detail[0].center.x, 18.63215637f) &&
+	                near(detail_output.detail[0].center.z, 49.69863892f),
+	            "detail generation samples only the flat map, at atlas coordinates")) {
 		return false;
 	}
 

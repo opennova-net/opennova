@@ -1610,6 +1610,8 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t 
           patch.key,
           patch.distance,
           patch.max_height,
+          patch.atlas_x,
+          patch.atlas_z,
       });
     }
   }
@@ -1711,12 +1713,16 @@ FoliageDispatcher::_preview_cells(const Vector3 &p_camera_position) const {
         continue;
       }
 
-      // The preview's one sampled height stands in for the leaf's maximum.
+      // The preview's one sampled height stands in for the leaf's maximum,
+      // and without a sector routing its world minimum stands in for the
+      // atlas minimum.
       cells.push_back(opennova::foliage::DetailCell{
           pack_preview_detail_key(static_cast<int>(min_x),
                                   static_cast<int>(min_z)),
           distance,
           center_y,
+          static_cast<int32_t>(min_x),
+          static_cast<int32_t>(min_z),
       });
     }
   }
@@ -1740,10 +1746,10 @@ opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
   world.height_at = [this](float p_world_x, float p_world_z) {
     return _sample_height(p_world_x, p_world_z);
   };
-  world.detail_foliage_mask_at = [this](int32_t p_world_x_fixed,
-                                        int32_t p_world_z_fixed) {
+  world.detail_foliage_mask_at = [this](int32_t p_atlas_x_fixed,
+                                        int32_t p_atlas_z_fixed) {
     return _mask_for_palette_index(
-        _sample_detail_foliage_index(p_world_x_fixed, p_world_z_fixed));
+        _sample_detail_foliage_index(p_atlas_x_fixed, p_atlas_z_fixed));
   };
   world.model_foliage_mask_at = [this](int32_t p_world_x_fixed,
                                        int32_t p_world_z_fixed) {
@@ -1782,26 +1788,26 @@ float FoliageDispatcher::_sample_height(float p_world_x,
 }
 
 int FoliageDispatcher::_sample_detail_foliage_index(
-    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
+    int32_t p_atlas_x_fixed, int32_t p_atlas_z_fixed) const {
   if (terrain_data_.is_valid()) {
     return terrain_data_->get_detail_foliage_index_fixed(
-        p_world_x_fixed, p_world_z_fixed);
+        p_atlas_x_fixed, p_atlas_z_fixed);
   }
   if (detail_foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
     return static_cast<int>(detail_foliage_sampler_.callv(arguments));
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
     return colormap_source_->get_detail_foliage_index_fixed(
-        p_world_x_fixed, p_world_z_fixed);
+        p_atlas_x_fixed, p_atlas_z_fixed);
   }
   return 0;
 }

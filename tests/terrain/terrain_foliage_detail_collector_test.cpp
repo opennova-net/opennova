@@ -152,14 +152,20 @@ int main() {
 	const uint8_t quadrant_height[4] = {20, 40, 60, 80};
 	opennova::Mipchain quadrants;
 	make_quadrant_mipchain(quadrants, quadrant_height, quadrant_height);
+	// The leaf also carries its source-atlas minimum, the quadrant origin
+	// plus the local offset, which the retail key's low ten bits hold.
+	// [orig: quadtree_node_init_recursive @ 0x6082fc..0x608302;
+	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a]
 	const struct {
 		int sector_id;
 		float camera_y;
+		int32_t atlas_x;
+		int32_t atlas_z;
 	} quadrant_vectors[] = {
-		{1, 52.0f},
-		{3, 62.0f},
-		{2, 72.0f},
-		{4, 82.0f},
+		{1, 52.0f, 16, 32},
+		{3, 62.0f, 528, 32},
+		{2, 72.0f, 16, 544},
+		{4, 82.0f, 528, 544},
 	};
 	for (const auto &vector : quadrant_vectors) {
 		patches.clear();
@@ -171,6 +177,9 @@ int main() {
 		if (patches.size() == 1) {
 			ok &= expect_patch(patches[0], 0x00100020u, 42.0f,
 					"quadrant lookup must not change the world-space detail key");
+			ok &= expect(patches[0].atlas_x == vector.atlas_x &&
+							patches[0].atlas_z == vector.atlas_z,
+					"the patch carries its quadrant's source-atlas minimum");
 		}
 	}
 
@@ -182,6 +191,8 @@ int main() {
 	if (patches.size() == 1) {
 		ok &= expect_patch(patches[0], 0x02107e20u, 42.0f,
 				"signed world coordinates must wrap into the two 15-bit key fields");
+		ok &= expect(patches[0].atlas_x == 16 && patches[0].atlas_z == 32,
+				"a translated sector keeps its atlas minimum sector-local");
 	}
 
 	// Starting one slot below the recovered global capacity makes the first

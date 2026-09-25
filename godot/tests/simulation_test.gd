@@ -4012,8 +4012,13 @@ end
 
 
 
-func _occlusion_frame(sim: Simulation) -> void:
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+# A camera 12 units south of the fixture spawn (24, 0, -12), looking at it
+# down -Z; the default IDENTITY camera stands off to its side.
+const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
+
+
+func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
+	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 
 
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
@@ -4030,9 +4035,19 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	var spawn := Vector3(24.0, 0.0, -12.0)
 	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
+	# The player's visual item (105310, graphic US01) over the synthetic
+	# person model gives the body its entity+0 bound radius, which the
+	# collector's person leg projects.
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/person.3di", "US01.3di")
+	_native_asset_root(sim, dir)
+	assert_gt(sim.resolve_collision_instances(item_db), 0)
+	sim.occlusion_init_mission()
 
 	sim.step()
-	_occlusion_frame(sim)
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"a STANDING infantry entity never anchors the silhouette tier")
 
@@ -4040,7 +4055,14 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	sim.step()
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"the anchors are the last occlusion frame's, not the tick's")
-	_occlusion_frame(sim)
+	# The collector gates the local player like any other person: turned
+	# away, the crouched body is not collected and anchors nothing
+	# [orig: collect_visible_entities_for_terrain @ 0x5c8c60, no
+	# local-player exception].
+	_occlusion_frame(sim, Transform3D(Basis(Vector3.UP, PI), _ANCHOR_CAMERA.origin))
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"a crouched local player outside the view is not collected")
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	var crouched: PackedVector3Array = sim.get_foliage_mask_anchor_positions()
 	assert_eq(crouched.size(), 1, "the crouched local player anchors the silhouette tier")
 	if crouched.size() == 1:
@@ -4050,13 +4072,13 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 
 	assert_true(sim.request_local_player_stance(2))  # prone (SELECT 170)
 	sim.step()
-	_occlusion_frame(sim)
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 1,
 		"prone anchors too - both MoveOrder stance bits gate the tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
 	sim.step()
-	_occlusion_frame(sim)
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing back up empties the anchor list")
 

@@ -250,11 +250,18 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 			}
 		}
 	}
-	// The local player's body is presented outside the collected rows (the
-	// local view presenter), so it anchors on its stance alone; the MODEL
-	// walk's view-depth floor keeps it off in the player's own views.
-	if (const opennova::world::Entity *local =
-				kernel_->world.registry.get(kernel_->world.cached.local_player))
+	// The local player's body is presented outside the walks above (the local
+	// view presenter), but retail's pool walk collects it like any other
+	// person: the collector has no local-player exception (first person only
+	// skips the body's draw later), so it takes the same gate before its
+	// stance can anchor the MODEL tier.
+	// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 (pool walk
+	// @ 0x5c8caa..0x5c8cd9, the gates @ 0x5c8cef..0x5c8eab)]
+	if (opennova::world::Entity *local =
+				kernel_->world.registry.get(kernel_->world.cached.local_player);
+			local != nullptr && local->bms_id == 0 &&
+			kernel_->occlusion.entity_render_visible(
+					kernel_->world, kernel_->collision, *local, cam))
 		anchor_entity(*local);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;

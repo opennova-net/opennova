@@ -78,12 +78,13 @@ FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index = 
 bool foliage_has_size(const FoliageMap &map);
 uint8_t foliage_get_index(const FoliageMap &map, int x, int y);
 
-// Detail foliage uses retail's flat, repeating world lookup rather than the
-// sector-routed terrain lookup used by the MODEL tier. Coordinates are in the
-// reimpl plane, where world Z is already the negation of retail Z.
+// Detail foliage uses retail's flat, repeating 1024 lookup at the candidate's
+// source-atlas position rather than the sector-routed terrain lookup used by
+// the MODEL tier. Coordinates are in the reimpl plane, where Z is already the
+// negation of retail Z.
 uint8_t foliage_sample_detail_flat_wrap(const FoliageMap &map,
-                                         int32_t world_x_fixed,
-                                         int32_t world_z_fixed);
+                                         int32_t atlas_x_fixed,
+                                         int32_t atlas_z_fixed);
 
 int foliage_map_x_from_heightmap_x(float hm_x, int map_width, int hm_size = FOLIAGE_HEIGHTMAP_SIZE);
 int foliage_map_y_from_heightmap_y(float hm_y, int map_height, int hm_size = FOLIAGE_HEIGHTMAP_SIZE);

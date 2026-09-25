@@ -285,8 +285,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
 	ClassDB::bind_method(D_METHOD("build_minimap_water_mask", "water_height_wu"),
 			&TerrainData::build_minimap_water_mask, DEFVAL(NAN));
-	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
-	                     &TerrainData::get_detail_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &TerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_runtime_source_coords", "world_x", "world_z"),
 	                     &TerrainData::world_to_runtime_source_coords);
@@ -1084,21 +1082,14 @@ int TerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
 }
 
-int TerrainData::get_detail_foliage_index_fixed(int32_t world_x_fixed,
-                                                    int32_t world_z_fixed) const {
+int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
+                                                    int32_t atlas_z_fixed) const {
 	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0, see docs/terrain/terrain-re.md]
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}
 	return static_cast<int>(foliage_map_resource->sample_detail_flat_wrap(
-			world_x_fixed, world_z_fixed));
-}
-
-int TerrainData::get_detail_foliage_index_world(double world_x, double world_z) const {
-	if (!loaded || foliage_map_resource.is_null()) {
-		return 0;
-	}
-	return foliage_map_resource->sample_detail_index_world(world_x, world_z);
+			atlas_x_fixed, atlas_z_fixed));
 }
 
 int TerrainData::get_foliage_index_world(float world_x, float world_z) const {

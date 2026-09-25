@@ -186,8 +186,10 @@ public:
   void set_colormap_source(const Ref<TerrainData> &p_data);
   Ref<TerrainData> get_colormap_source() const;
 
-  // Optional samplers: (world_x, world_z) -> height / foliage palette index.
-  // Detail uses retail's flat wrapped map lookup; foliage_sampler retains the
+  // Optional samplers: (x, z) -> height / foliage palette index. Detail uses
+  // retail's flat wrapped map lookup at the candidate's source-atlas
+  // position (world in the preview, which has no sector routing);
+  // foliage_sampler retains the
   // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
   Callable get_height_sampler() const;
@@ -451,8 +453,9 @@ private:
 
   opennova::foliage::WorldSamplers _world_samplers();
   float _sample_height(float p_world_x, float p_world_z) const;
-  int _sample_detail_foliage_index(int32_t p_world_x_fixed,
-                                   int32_t p_world_z_fixed) const;
+  // At the candidate's source-atlas position (foliage::WorldSamplers).
+  int _sample_detail_foliage_index(int32_t p_atlas_x_fixed,
+                                   int32_t p_atlas_z_fixed) const;
   int _sample_model_foliage_index(int32_t p_world_x_fixed,
                                   int32_t p_world_z_fixed) const;
   uint32_t _mask_for_palette_index(int p_index) const;

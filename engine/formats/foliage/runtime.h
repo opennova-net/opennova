@@ -58,6 +58,15 @@ struct DetailCell {
 	// The collected leaf's maximum terrain height: the detail passes split
 	// patches by it against the water height.
 	float max_height = 0.0f;
+	// The cell's minimum in the 1024 terrain source atlas (the leaf node's
+	// integer x/z: the routed quadrant origin plus the sector-local offset).
+	// Retail's key halves carry it in their low ten bits and the generator
+	// samples the detail foliage map there, not at the world position.
+	// [orig: quadtree_node_init_recursive @ 0x6082fc..0x608302 (node x/z);
+	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key);
+	// generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF)]
+	int32_t atlas_x = 0;
+	int32_t atlas_z = 0;
 };
 
 struct SilhouetteAnchor {
@@ -84,10 +93,12 @@ struct FrameRequest {
 };
 
 struct WorldSamplers {
-	// Detail grass samples the flat, 1024-unit-wrapped foliage map. The
-	// recovered Terrain_GetSurfaceTypeAtFixedPoint name is a misnomer; its
-	// backing buffer is the authored foliage map remapped to definition slots.
-	std::function<uint32_t(int32_t world_x_fixed, int32_t world_z_fixed)>
+	// Detail grass samples the flat, 1024-wrapped foliage map at the
+	// candidate's ATLAS position (DetailCell::atlas_x/atlas_z plus the local
+	// offsets; z on the Godot plane). The recovered
+	// Terrain_GetSurfaceTypeAtFixedPoint name is a misnomer; its backing
+	// buffer is the authored foliage map remapped to definition slots.
+	std::function<uint32_t(int32_t atlas_x_fixed, int32_t atlas_z_fixed)>
 	    detail_foliage_mask_at;
 	// MODEL silhouettes use the sector-routed foliage-map sampler before the
 	// same definition-slot bit gate.

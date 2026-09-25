@@ -2429,13 +2429,12 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	# the world loop needs two frames where the bare sim.step() needed one.
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	assert_eq(disp.silhouette_anchors.size(), 1,
-		"tick feeds the sim's anchor positions into the dispatcher's silhouette tier")
-	if disp.silhouette_anchors.size() == 1:
-		var player := sim.get_local_player_position()
-		assert_lt(Vector2(disp.silhouette_anchors[0].x, disp.silhouette_anchors[0].z)
-				.distance_to(Vector2(player.x, player.z)), 0.1,
-			"the anchor is the crouched player's own Godot-space ground position")
+	# Whether the crouched body anchors is the occlusion frame's collector
+	# verdict (simulation_test pins it with a staged person model; this
+	# fixture's US01 graphic has no model, so no bound radius): the leg feeds
+	# exactly this frame's anchors.
+	assert_eq(disp.silhouette_anchors, sim.get_foliage_mask_anchor_positions(),
+		"tick feeds the occlusion frame's anchors into the dispatcher's silhouette tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)

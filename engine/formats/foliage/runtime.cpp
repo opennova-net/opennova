@@ -231,8 +231,9 @@ uint8_t silhouette_alpha_reference(float camera_distance) {
 std::vector<DetailInstance> generate_detail_cell(
     int slot_index,
     const RuntimeSlot &slot,
-    uint32_t cell_key,
+    const DetailCell &cell,
     const WorldSamplers &world) {
+	const uint32_t cell_key = cell.key;
 	// The detail tier expands the def model's full source geometry for every
 	// accepted transform. This module returns the transforms; the render
 	// binding samples terrain height per transformed source vertex.
@@ -248,11 +249,17 @@ std::vector<DetailInstance> generate_detail_cell(
 	for (int index = 0; index < kCandidates; ++index) {
 		const Candidate candidate = detail_candidate(cell_key, index, state);
 		if (candidate_is_blocked(slot, world, candidate)) continue;
-		const uint32_t mask = world.detail_foliage_mask_at
-		                        ? world.detail_foliage_mask_at(
-		                              candidate.x_fixed,
-		                              candidate.z_fixed)
-		                        : 0u;
+		// The map gate takes the key's atlas halves (& 0x3FF) plus the same
+		// local offsets, while the blocker takes the world position.
+		// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fff9d (atlas
+		// sample coordinates), 0x5fffb8..0x60000e (world blocker),
+		// @ 0x600065 (Terrain_GetSurfaceTypeAtFixedPoint)]
+		const uint32_t mask =
+		    world.detail_foliage_mask_at
+		        ? world.detail_foliage_mask_at(
+		              to_fixed(static_cast<float>(cell.atlas_x) + candidate.local_a),
+		              to_fixed(static_cast<float>(cell.atlas_z) + candidate.local_b))
+		        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 
 		DetailInstance instance;
@@ -564,8 +571,8 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		auto &entries = detail_cache_[slot_index];
 		if (!slot.enabled || entries.empty()) continue;
 
-		std::vector<uint32_t> pending_keys;
-		pending_keys.reserve(request.detail_cells.size());
+		std::vector<const DetailCell *> pending_cells;
+		pending_cells.reserve(request.detail_cells.size());
 		for (const DetailCell &cell : request.detail_cells) {
 			if (!detail_cell_is_visible(cell)) continue;
 			const size_t resident_index = find_detail_index(entries, cell.key);
@@ -576,13 +583,16 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			}
 
 			++stats_.detail.misses;
-			if (std::find(pending_keys.begin(), pending_keys.end(), cell.key) ==
-			    pending_keys.end()) {
-				pending_keys.push_back(cell.key);
+			if (std::find_if(pending_cells.begin(), pending_cells.end(),
+			                 [&cell](const DetailCell *pending) {
+				                 return pending->key == cell.key;
+			                 }) == pending_cells.end()) {
+				pending_cells.push_back(&cell);
 			}
 		}
 
-		for (uint32_t key : pending_keys) {
+		for (const DetailCell *pending : pending_cells) {
+			const uint32_t key = pending->key;
 			const size_t index = lru_index(entries);
 			if (index == entries.size()) continue;
 			DetailCacheEntry &entry = entries[index];
@@ -596,7 +606,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			entry.last_use = terrain_scene_counter_;
 			entry.revision = ++next_cache_revision_;
 			entry.instances =
-			    generate_detail_cell(slot_index, slot, key, world);
+			    generate_detail_cell(slot_index, slot, *pending, world);
 			++stats_.detail.regenerations;
 			output.detail_generated.push_back(CacheIdentity{
 			    static_cast<uint8_t>(slot_index), entry.key, entry.revision});
