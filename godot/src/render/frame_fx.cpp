@@ -656,6 +656,7 @@ public:
 	bool run_steps(ViewTarget &target, RenderData *render_data, std::uint32_t view,
 			const std::vector<FrameFxStep> &steps, const FrameFxScreenFrame *screen,
 			std::size_t &draws);
+	bool ensure_q3_framebuffer(ViewTarget &target);
 	bool composite_q3(ViewTarget &target, RenderData *render_data,
 			std::uint32_t view, std::size_t &draws);
 	bool run_nvg(ViewTarget &target, const FrameFxNvgPlan &nvg, bool first_use,
@@ -893,11 +894,9 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.color_framebuffer = make_framebuffer(target.color);
 		target.scene_scratch = make_texture(size, color_format->get_format());
 		target.scene_scratch_framebuffer = make_framebuffer(target.scene_scratch);
+		// The Q3 framebuffer binds the resolved depth; ensure_q3_framebuffer
+		// builds it on the first Q3 draw, never with the decode chain.
 		target.q3_color = make_texture(size, color_format->get_format(), true);
-		TypedArray<RID> q3_attachments;
-		q3_attachments.push_back(target.q3_color);
-		q3_attachments.push_back(target.depth);
-		target.q3_framebuffer = rd->framebuffer_create(q3_attachments);
 		target.capture = make_texture(capture_size, kRgba8);
 		target.capture_framebuffer = make_framebuffer(target.capture);
 		target.low_a = make_texture(work, kRgba8);
@@ -919,7 +918,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		const bool valid = target.color_framebuffer.is_valid() &&
 				target.scene_scratch.is_valid() &&
 				target.scene_scratch_framebuffer.is_valid() &&
-				target.q3_color.is_valid() && target.q3_framebuffer.is_valid() &&
+				target.q3_color.is_valid() &&
 				target.capture.is_valid() && target.capture_framebuffer.is_valid() &&
 				target.low_a.is_valid() && target.low_a_framebuffer.is_valid() &&
 				target.low_b.is_valid() && target.low_b_framebuffer.is_valid() &&
@@ -1280,12 +1279,47 @@ bool FrameFxCompositorEffect::Impl::run_steps(ViewTarget &target,
 	return true;
 }
 
+// The Q3 target's framebuffer: its colour plus the resolved beauty depth the
+// Q3 draw tests against. Only a frame with Q3 commands (the world frame's
+// FrameFx) builds it. The decode-only terminal of a 3D preview never draws Q3,
+// and such a preview may render multisampled (the menu avatar preview runs 4x
+// MSAA): there the renderer's resolved depth is a sampled single-sample copy
+// with no depth-attachment usage, which no framebuffer may bind. A view whose
+// resolved depth cannot be attached fails its Q3 composite here, before the
+// device is asked for that render pass.
+bool FrameFxCompositorEffect::Impl::ensure_q3_framebuffer(ViewTarget &target) {
+	if (target.q3_framebuffer.is_valid() &&
+			rd->framebuffer_is_valid(target.q3_framebuffer))
+		return true;
+	const Ref<RDTextureFormat> depth_format = rd->texture_get_format(target.depth);
+	if (depth_format.is_null() ||
+			!depth_format->get_usage_bits().has_flag(
+					RenderingDevice::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+		set_failure("The resolved scene depth is not depth-attachable (a "
+				"multisampled view); the Q3 composite needs a single-sample view",
+				"q3_depth_not_attachable");
+		return false;
+	}
+	TypedArray<RID> attachments;
+	attachments.push_back(target.q3_color);
+	attachments.push_back(target.depth);
+	target.q3_framebuffer = rd->framebuffer_create(attachments);
+	if (!target.q3_framebuffer.is_valid()) {
+		set_failure("RenderingDevice could not create the Q3 framebuffer",
+				"q3_target_failed");
+		return false;
+	}
+	return true;
+}
+
 // The focused Q3 draw into the black-cleared Q3 target (retail's altbuffer),
 // its capture, and the bloom kernel over the frame: every Q3 technique
 // re-shades from its own leased inputs; the beauty colour is never sampled,
 // only its resolved depth is tested.
 bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
 		RenderData *render_data, std::uint32_t view, std::size_t &draws) {
+	if (!ensure_q3_framebuffer(target))
+		return false;
 	if (!q3_adapter.draw_view(rd, render_data, view, target.q3_framebuffer,
 			draws))
 		return false;

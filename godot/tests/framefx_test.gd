@@ -371,6 +371,78 @@ func test_display_decode_reentry_recreates_released_terminal_effect() -> void:
 	decoder.free()
 
 
+# A flat gamma-domain grey behind a DisplayDecode, at the given 3D MSAA.
+func _decoded_grey_view(msaa: Viewport.MSAA) -> Dictionary:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(32, 32)
+	viewport.own_world_3d = true
+	viewport.msaa_3d = msaa
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+
+	var quad := MeshInstance3D.new()
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(8.0, 8.0)
+	quad.mesh = mesh
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+void fragment() {
+	ALBEDO = vec3(0.5);
+}
+"""
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	quad.material_override = material
+	quad.position = Vector3(0.0, 0.0, -2.0)
+	viewport.add_child(quad)
+
+	viewport.add_child(DisplayDecode.new())
+	var effect := environment.compositor.compositor_effects[0] \
+			as FrameFxCompositorEffect
+	return {"viewport": viewport, "effect": effect}
+
+
+# The menu avatar preview renders its SubViewport at 4x MSAA. There the
+# renderer's resolved scene depth is a sampled copy with no depth-attachment
+# usage, so the decode-only terminal (no Q3 source) must never bind it as a
+# framebuffer attachment: binding it failed the whole target chain every frame
+# with a RenderingDevice error and skipped the decode, double-encoding the
+# preview. The MSAA view decodes exactly like a single-sample one.
+func test_display_decode_decodes_a_multisampled_view() -> void:
+	var single := _decoded_grey_view(Viewport.MSAA_DISABLED)
+	var multi := _decoded_grey_view(Viewport.MSAA_4X)
+	for _frame in 4:
+		await get_tree().process_frame
+	var multi_effect := multi["effect"] as FrameFxCompositorEffect
+	var report := multi_effect.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_eq(String(report.get("status", "")), "drawn_without_q3",
+			String(report.get("failure", "the MSAA terminal failed")))
+	assert_gt(int(report.get("rendered_frames", 0)), 0)
+	var single_center := (single["viewport"] as SubViewport).get_texture() \
+			.get_image().get_pixel(16, 16)
+	var multi_center := (multi["viewport"] as SubViewport).get_texture() \
+			.get_image().get_pixel(16, 16)
+	assert_almost_eq(multi_center.g, single_center.g, 0.02,
+			"the MSAA preview gets the same one terminal decode")
+
+
 func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(32, 32)
