@@ -19,7 +19,11 @@
 // black for Additive/Premult/Bumpadd, white for Mod, mid-grey for Mod2x,
 // the scene colour otherwise). Distort stays on the effects' distortion
 // path. Each wrapper selects its type with one PARTICLE_FAR_* define and its
-// framebuffer blend with render_mode.
+// framebuffer blend with render_mode. PARTICLE_FAR_THERMAL selects the
+// texture's secondary material, bound while the main scene's thermal byte is
+// set (CParticleBatch_FlushAndBindMaterial @ 0x5e42bf): Blend's
+// MODULATE(1 - TEXTURE, 1 - DIFFUSE) colour (@ 0x5e8584..0x5e85dd) and
+// Additive/Premult's ZERO/INVSRCCOLOR darkening (@ 0x5e8390..0x5e83a5).
 
 #include "res://shaders/color.gdshaderinc"
 
@@ -90,6 +94,9 @@ void fragment() {
 	float dot3 = clamp(dot(texel.rgb * 2.0 - 1.0, COLOR.rgb * 2.0 - 1.0), 0.0, 1.0);
 	color = vec4(min(vec3(dot3) + v_secondary.rgb, vec3(1.0)), texel.a * COLOR.a);
 #elif defined(PARTICLE_FAR_BLEND)
+#if defined(PARTICLE_FAR_THERMAL)
+	color.rgb = (vec3(1.0) - texel.rgb) * (vec3(1.0) - COLOR.rgb);
+#endif
 	color.rgb = mix(opennova_fog_color, color.rgb, visibility);
 #elif defined(PARTICLE_FAR_ADDITIVE)
 	color.rgb = mix(vec3(0.0), color.rgb, visibility);
@@ -105,6 +112,9 @@ void fragment() {
 	ALPHA = 1.0;
 #elif defined(PARTICLE_FAR_MOD)
 	ALBEDO = clamp(color.rgb, vec3(0.0), vec3(1.0));
+	ALPHA = 1.0;
+#elif defined(PARTICLE_FAR_ADDITIVE) && defined(PARTICLE_FAR_THERMAL)
+	ALBEDO = vec3(1.0) - scene_output(color.rgb);
 	ALPHA = 1.0;
 #else
 	ALBEDO = scene_output(color.rgb);

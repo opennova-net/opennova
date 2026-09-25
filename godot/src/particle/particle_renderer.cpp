@@ -643,6 +643,9 @@ public:
 	ParticleFarPass world_far_pass;
 	ParticleFarPass second_scene_far_pass;
 	std::array<Ref<Shader>, 8> far_shader_cache;
+	// The thermal secondary materials' pass-A shaders: Blend's inversion and
+	// Additive/Premult's darkening (renderer::particle_thermal_material).
+	std::array<Ref<Shader>, 2> far_thermal_shader_cache;
 	std::map<std::uint64_t, Ref<ShaderMaterial>> far_materials;
 	opennova::renderer::ParticleDrawList far_distortion_scratch;
 	std::vector<std::string> unresolved_names;
@@ -1147,7 +1150,21 @@ public:
 	// The far-pass shader for a particle type
 	// (godot/shaders/particle/world_far; Distort has none: it stays on the
 	// distortion path).
-	Ref<Shader> far_shader_for(opennova::renderer::ParticlePipeline pipeline) {
+	Ref<Shader> far_shader_for(opennova::renderer::ParticlePipeline pipeline,
+			opennova::renderer::ParticleThermalMaterial thermal) {
+		if (thermal != opennova::renderer::ParticleThermalMaterial::Primary) {
+			const bool inverted =
+					thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend;
+			Ref<Shader> &cached = far_thermal_shader_cache[inverted ? 0 : 1];
+			if (cached.is_null()) {
+				if (ResourceLoader *loader = ResourceLoader::get_singleton()) {
+					cached = loader->load(inverted ?
+									"res://shaders/particle/world_far/particle_far_blend_thermal.gdshader" :
+									"res://shaders/particle/world_far/particle_far_additive_thermal.gdshader");
+				}
+			}
+			return cached;
+		}
 		static const char *const kFarShaderNames[8] = {"blend", "additive",
 				"premult", "bump", "mod", "mod2x", "bumpadd", nullptr};
 		const std::size_t index = static_cast<std::size_t>(pipeline);
@@ -1166,15 +1183,17 @@ public:
 	}
 
 	Ref<ShaderMaterial> far_material_for(
-			const opennova::renderer::ParticleDrawCommand &command) {
+			const opennova::renderer::ParticleDrawCommand &command,
+			opennova::renderer::ParticleThermalMaterial thermal) {
 		const std::uint64_t key =
+				(static_cast<std::uint64_t>(thermal) << 40) |
 				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
 				(static_cast<std::uint64_t>(command.pipeline) << 16) |
 				static_cast<std::uint64_t>(command.variant);
 		const auto found = far_materials.find(key);
 		if (found != far_materials.end())
 			return found->second;
-		const Ref<Shader> shader = far_shader_for(command.pipeline);
+		const Ref<Shader> shader = far_shader_for(command.pipeline, thermal);
 		if (shader.is_null())
 			return Ref<ShaderMaterial>();
 		Ref<ShaderMaterial> material;
@@ -2019,8 +2038,12 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			far_pass.upload(this, draw_list,
 					slot == kWorldFarSide ? ParticleFarPass::View::Main :
 											ParticleFarPass::View::SecondScene,
-					[this](const opennova::renderer::ParticleDrawCommand &command) {
-						return impl_->far_material_for(command);
+					[this, view_thermal](const opennova::renderer::ParticleDrawCommand &command) {
+						// Pass A binds the secondary materials too while the
+						// main scene's thermal byte is set.
+						return impl_->far_material_for(command,
+								opennova::renderer::particle_thermal_material(
+										command.pipeline, view_thermal));
 					});
 			impl_->publish_world_draw_list(effect, impl_->far_distortion_only(draw_list),
 					view_camera.position, view_camera.forward, p_time_ms, view_thermal);

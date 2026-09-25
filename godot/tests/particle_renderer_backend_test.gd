@@ -1198,16 +1198,23 @@ func _thermal_view_source(thermal: bool) -> MissionEnvironment:
 	return environment
 
 
-func _thermal_pixel(blend: int, thermal: bool, background: Color) -> Color:
+# `far_side`: the eye above a water plane the particle sits below, so the
+# particle draws in pass A (the far-side transparent list) instead of the
+# camera-side compositor pass.
+func _thermal_pixel(blend: int, thermal: bool, background: Color,
+		far_side: bool = false) -> Color:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(128, 128)
 	viewport.own_world_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child_autofree(viewport)
 	var camera := Camera3D.new()
-	camera.position = Vector3(0.0, 1.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	if far_side:
+		camera.look_at_from_position(Vector3(0.0, 2.0, 5.0), Vector3(0.0, 1.0, 0.0))
+	else:
+		camera.position = Vector3(0.0, 1.0, 5.0)
 	var clear := WorldEnvironment.new()
 	clear.environment = Environment.new()
 	clear.environment.background_mode = Environment.BG_COLOR
@@ -1216,7 +1223,7 @@ func _thermal_pixel(blend: int, thermal: bool, background: Color) -> Color:
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("thermal", blend)
 	renderer.texture_provider = _overlap_texture
-	renderer.set_water_plane(-100.0, null)
+	renderer.set_water_plane(1.5 if far_side else -100.0, null)
 	var source := _thermal_view_source(thermal)
 	viewport.add_child(source)
 	renderer.environment_source = source
@@ -1245,4 +1252,15 @@ func test_thermal_frames_bind_the_secondary_particle_materials() -> void:
 	assert_gt(additive.b, 0.55, "the primary Additive material brightens: %s" % additive)
 	assert_lt(additive_thermal.b, 0.45,
 			"the thermal Additive material darkens the grey behind it: %s" % additive_thermal)
+	# Pass A (the water's far side) binds the same secondary materials.
+	var far_blend := await _thermal_pixel(0, false, Color.BLACK, true)
+	var far_blend_thermal := await _thermal_pixel(0, true, Color.BLACK, true)
+	assert_gt(far_blend.b, 0.3, "pass A's primary Blend shows the texel: %s" % far_blend)
+	assert_lt(far_blend_thermal.b, 0.05,
+			"pass A's thermal Blend inverts: %s" % far_blend_thermal)
+	var far_additive := await _thermal_pixel(1, false, grey, true)
+	var far_additive_thermal := await _thermal_pixel(1, true, grey, true)
+	assert_gt(far_additive.b, 0.55, "pass A's primary Additive brightens: %s" % far_additive)
+	assert_lt(far_additive_thermal.b, 0.45,
+			"pass A's thermal Additive darkens the grey behind it: %s" % far_additive_thermal)
 	assert_engine_error_count(0)
