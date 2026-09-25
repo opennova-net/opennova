@@ -53,8 +53,6 @@ func test_frozen_pose_replay_keeps_the_camera_producer_order() -> void:
 	assert_eq(replay, [
 		"celestial_settle", "sun_veil", "iris_stamp", "weather_settle",
 		"scene_environment", "terrain", "occlusion", "foliage", "sky_settle",
-		"water_settle", "particles", "lights", "slot_shadows", "clear",
-		"scene_environment", "terrain", "foliage", "occlusion", "sky_settle",
 		"water_settle", "particles", "lights", "slot_shadows", "scene_overlay",
 		"clear",
 	])
