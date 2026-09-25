@@ -195,15 +195,42 @@ public:
     void build_frame(World &world, CollisionWorld &collision, const OcclusionFrameCamera &cam);
 
     // Per-entity render gate for non-building entities (the entity collectors'
-    // occlusion rules): the blink-hits gate, then the person leg for organics
-    // (person_render_visible) or the model leg's full-Euler bound sphere, and
-    // the outdoors-only three-ray terrain latch (mutates
-    // Entity::occlusion_latch). TRUE = render.
+    // occlusion rules, then the render waves' render_TOC): the blink-hits
+    // gate, then the person leg for organics (person_render_visible) or the
+    // model leg's full-Euler bound sphere, and the outdoors-only three-ray
+    // terrain latch (mutates Entity::occlusion_latch); an entity in no blink
+    // box then takes render_TOC (render_wave_toc_occluded). TRUE = render.
     // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 (statics) /
     // collect_visible_entities_for_terrain @ 0x5c8c60 (pools 0/1) — the gates
     // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
     bool entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                const OcclusionFrameCamera &cam);
+    // The collector's blink-hits gate: an entity inside blink boxes (first
+    // hit nonzero) is collected only while one of its packed (building,
+    // section) hits is set in the frame's raw section mask. TRUE = pass.
+    // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c7022-0x5c708a /
+    //  collect_visible_entities_for_terrain @ 0x5c8d70-0x5c8dd1]
+    bool blink_hits_render_active(const uint32_t hits[4]) const;
+    // One render_TOC candidate: the fields test_sector_entity_occlusion reads
+    // through the list row's entity pointer.
+    struct TocCandidate {
+        EntityHandle self;                     // the slot self-skip key
+        int32_t pos_fixed[3] = {};             // entity+4
+        int32_t radius_q16 = 0;                // entity+0
+        const CollisionModel *model = nullptr; // entity+0x30 -> +0xB0 bounds
+        int32_t heading_bam = 0;               // the entity+4 pose the
+        int32_t pitch_bam = 0;                 // 8-corner refinement builds
+        int32_t roll_bam = 0;
+    };
+    // The render waves' render_TOC over one collected entity, `hits` its
+    // blink quad (entity+0x1D0..+0x1DC). Both waves test only an entity in
+    // no blink box (first hit zero); a contained entity skips render_TOC and
+    // draws on the collector's blink-hits gate alone. TRUE = occluded.
+    // [orig: Terrain_RenderSectorEntities `cmp dword ptr [eax+1D0h],0; jnz`
+    //  @ 0x5c7b92..0x5c7ba6 and Terrain_RenderSectorEntitiesBySide
+    //  @ 0x5c7d8b..0x5c7da0, each calling test_sector_entity_occlusion
+    //  @ 0x5c4610]
+    bool render_wave_toc_occluded(const uint32_t hits[4], const TocCandidate &cand) const;
     // The same collector gate's view-cull + outdoors three-ray latch over a
     // bound sphere the caller derived (a decoded wire row: the client-built
     // pool entities retail's collector walks exactly like the host's own).
@@ -404,8 +431,12 @@ private:
     // batch walks share it).
     void bank_open_building(World &world, EntityHandle entity, int32_t mask_index,
                             const OcclusionFrameCamera &cam);
-    // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
+    // The building batch's render_TOC: toc_occludes over the row's entity,
+    // zeroing the row when it culls. [orig: test_sector_entity_occlusion
+    // @ 0x5c4610 from build_sector_visibility_masks @ 0x5c87f1 / 0x5c8a2f]
     bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry);
+    // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
+    bool toc_occludes(const TocCandidate &cand) const;
     // [orig: Terrain_TestSphereInPlaneGroups @ 0x5c4580]
     bool sphere_in_plane_groups(const float pos[3], float radius,
                                 const std::vector<float> &plane_bank,

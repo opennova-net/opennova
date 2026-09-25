@@ -1141,6 +1141,91 @@ void test_toc_candidate_uses_entity_bound_radius() {
     CHECK(!rig.ow.building_visible(candidate));
 }
 
+// Both render waves run render_TOC on every collected entity in no blink box
+// and skip it for a contained one (entity+0x1D0, the first blink hit,
+// nonzero), which draws on the collector's section gate alone. [orig:
+// Terrain_RenderSectorEntities @ 0x5c7b92..0x5c7ba6,
+// Terrain_RenderSectorEntitiesBySide @ 0x5c7d8b..0x5c7da0]
+void test_render_wave_toc_skips_contained_entities() {
+    auto spawn_person = [](Rig &rig, double x, uint16_t net_id) {
+        Entity p;
+        p.kind = EntityKind::Organic;
+        p.net_id = net_id;
+        p.position = {static_cast<float>(x), 10.0f, 0.0f};
+        p.bound_radius = 1.0f;
+        p.alive = true;
+        return rig.world.registry.spawn(0, p);
+    };
+
+    // Indoors: a blink room with no occlusion records. The camera inside it
+    // latches camera-inside mode with no exterior plane, where render_TOC
+    // culls every candidate outright. [orig: test_sector_entity_occlusion
+    // @ 0x5c4693..0x5c46b0]
+    {
+        Rig rig;
+        const EntityHandle room =
+            rig.add_building(20.0, 10.0, building_collision(2, 2, 3), OcclusionModel{});
+        const EntityHandle inside = spawn_person(rig, 21.0, 5);
+        const EntityHandle outside = spawn_person(rig, 60.0, 6);
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        Entity *in = rig.world.registry.get(inside);
+        Entity *out = rig.world.registry.get(outside);
+        CHECK(in != nullptr && out != nullptr);
+        if (in == nullptr || out == nullptr) return;
+        rig.cw.refresh_blink(rig.world, *in);
+        rig.cw.refresh_blink(rig.world, *out);
+        CHECK(in->blink_hits[0] != 0);
+        CHECK(out->blink_hits[0] == 0);
+
+        const OcclusionFrameCamera cam = rig.camera(20.0, 10.0, 1.0, 0x2);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        CHECK(rig.ow.camera_indoors());
+        CHECK((rig.ow.section_mask(room) & 0x2u) != 0);
+        // Contained: the section gate passes and render_TOC never runs.
+        CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *in, cam));
+        // Outside every blink box: collected (in view, indoors = no rays),
+        // then culled by render_TOC.
+        CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *out, cam));
+
+        // The same rule over a caller-built candidate (a decoded wire row).
+        OcclusionWorld::TocCandidate row;
+        row.pos_fixed[0] = fx(60.0);
+        row.pos_fixed[1] = fx(10.0);
+        row.radius_q16 = fx(1.0);
+        const uint32_t no_hits[4] = {0, 0, 0, 0};
+        CHECK(rig.ow.render_wave_toc_occluded(no_hits, row));
+        CHECK(!rig.ow.render_wave_toc_occluded(in->blink_hits, row));
+    }
+
+    // Outdoors: a person inside the slab's shadow wedge passes the collector
+    // (flat terrain clears the rays) and render_TOC culls it; one beside the
+    // wedge draws.
+    {
+        Rig rig;
+        add_slab(rig, 20.0, 10.0);
+        const EntityHandle behind = spawn_person(rig, 40.0, 7);
+        Entity beside_def;
+        beside_def.kind = EntityKind::Organic;
+        beside_def.net_id = 8;
+        beside_def.position = {40.0f, 60.0f, 0.0f};
+        beside_def.bound_radius = 1.0f;
+        beside_def.alive = true;
+        const EntityHandle beside = rig.world.registry.spawn(0, beside_def);
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        Entity *b = rig.world.registry.get(behind);
+        Entity *s = rig.world.registry.get(beside);
+        CHECK(b != nullptr && s != nullptr);
+        if (b == nullptr || s == nullptr) return;
+        CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *b, cam));
+        CHECK(b->occlusion_latch != 0); // the collector took it before the TOC
+        CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *s, cam));
+    }
+}
+
 // A weld-linked building straddles the water plane by its bound SPHERE (z +
 // center z +- radius), not its collision header. [orig:
 // build_sector_visibility_masks @ 0x5c8985..0x5c89a9] The linked box spans z
@@ -1278,6 +1363,7 @@ int main() {
     test_person_collector_leg();
     test_portal_slot_sort_and_clamp();
     test_toc_candidate_uses_entity_bound_radius();
+    test_render_wave_toc_skips_contained_entities();
     test_link_water_straddle_uses_bound_sphere();
     test_collector_center_uses_full_euler_pose();
     test_mission_start_blink_stamp();

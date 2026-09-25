@@ -186,6 +186,20 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 			const opennova::world::ResolvedCollisionShape shape =
 					kernel_->wire_collision_shape_for_type(es.type_id);
 			const int32_t pos[3] = {es.x, es.y, es.z};
+			// The row's blink quad from the client's own blink walk (the one
+			// the lighting feed runs for a twin-less row): the collector's
+			// blink-hits gate reads it before the legs, and the render waves'
+			// contained test after them.
+			opennova::world::BlinkAccum blink;
+			const bool person_source = h.pool() == 0 &&
+					(es.cls == opennova::EntityClass::Player ||
+							es.cls == opennova::EntityClass::Infantry);
+			kernel_->collision.query_wire_blink_boxes_at_point(kernel_->world, handle, pos,
+					person_source || shape.item_type == 1 || shape.item_type == 3, blink);
+			if (!kernel_->occlusion.blink_hits_render_active(blink.hits)) {
+				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
+				continue;
+			}
 			uint8_t &latch = present_.wire_occlusion_latch[handle];
 			bool visible = true;
 			if (es.cls == opennova::EntityClass::Player ||
@@ -210,6 +224,21 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 				}
 				visible = kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
 						center_world, radius, latch, kernel_->world.logic_tick);
+			}
+			if (visible) {
+				// render_TOC over the row's entity+4 position, entity+0 radius,
+				// model bounds and pose (skipped when contained).
+				opennova::world::OcclusionWorld::TocCandidate toc;
+				toc.self = h;
+				toc.pos_fixed[0] = es.x;
+				toc.pos_fixed[1] = es.y;
+				toc.pos_fixed[2] = es.z;
+				toc.radius_q16 = shape.bound_radius_q16;
+				toc.model = kernel_->collision.model(shape.model_id);
+				toc.heading_bam = es.heading_bam;
+				toc.pitch_bam = es.pitch_bam;
+				toc.roll_bam = es.roll_bam;
+				visible = !kernel_->occlusion.render_wave_toc_occluded(blink.hits, toc);
 			}
 			if (!visible) {
 				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
