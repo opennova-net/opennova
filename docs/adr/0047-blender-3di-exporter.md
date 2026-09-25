@@ -229,7 +229,7 @@ the same text transport, the same add-on.
   are dropped (a mesh cannot hold them).
 - `base/resource_index/texture_candidates.cpp` joins `citation_allowlist_engine`
   (our loose-folder resolver policy, moved down from the Godot resolver so the
-  CLI shares it). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`
+  CLI shares it; the `texture_candidates` ctest pins its order). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`
   cites of the rules they port, so they need no entry.
 
 ## Verification
