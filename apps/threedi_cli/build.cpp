@@ -379,8 +379,9 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				}
 				// The scene winds counter-clockwise about the outward normal in
 				// mission axes; model axes mirror mission, and retail winds
-				// counter-clockwise in MODEL axes (threedi_build add_box), so
-				// the mirror swaps the second and third corners.
+				// counter-clockwise in MODEL axes (`opennova-3di info` prints the
+				// share, near 100% for the corpus), so the mirror swaps the
+				// second and third corners.
 				strip->indices.push_back(static_cast<uint16_t>(a));
 				strip->indices.push_back(static_cast<uint16_t>(c));
 				strip->indices.push_back(static_cast<uint16_t>(b));
